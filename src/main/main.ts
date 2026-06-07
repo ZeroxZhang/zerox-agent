@@ -934,6 +934,7 @@ function getAgentRunnerService(): AgentRunnerService {
       toolExecutor,
       executionStore: getAgentExecutionStore(),
       trajectoryStore: getAgentTrajectoryStore(),
+      learningStore: getAgentLearningStore(),
       memoryStore: getMemoryStore(),
     });
   }

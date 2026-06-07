@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { AgentExecutionStore } from "./agentExecutionStore";
 import { classifyAgentFailure } from "./agentFailureClassifier";
+import { extractLearningCandidatesFromTrajectory } from "./agentLearningExtractor";
+import type { AgentLearningStore } from "./agentLearningStore";
 import type { AgentRunStore } from "./agentRunStore";
 import type { AgentToolExecutor } from "./agentToolExecutor";
 import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
@@ -65,6 +67,7 @@ export function createAgentRuntimeEngine(options: {
   toolAuthorizationService: ToolAuthorizationService;
   toolExecutor: AgentToolExecutor;
   trajectoryStore?: AgentTrajectoryStore;
+  learningStore?: Pick<AgentLearningStore, "create">;
   memoryStore?: Pick<MemoryStore, "create">;
   createId?: () => string;
   now?: () => Date;
@@ -155,6 +158,12 @@ export function createAgentRuntimeEngine(options: {
     const failureMessage = input.failure
       ? formatFailureMessage(input.failure)
       : undefined;
+    if (failureClass) {
+      await appendTrajectory(input.checkpoint.runId, "failure_classified", {
+        failureClass,
+        ...(failureMessage ? { failureMessage } : {}),
+      });
+    }
     const checkpoint = await saveCheckpoint(
       input.checkpoint,
       input.status,
@@ -206,8 +215,22 @@ export function createAgentRuntimeEngine(options: {
 
     await options.runStore.append(run);
     await options.taskStore.recordRun(input.taskId, new Date(finishedAt));
+    await createLearningCandidates(run);
 
     return { ok: true, run };
+  }
+
+  async function createLearningCandidates(run: AgentRunRecord) {
+    if (!options.learningStore || !options.trajectoryStore) {
+      return;
+    }
+
+    const trajectory = await options.trajectoryStore.list(run.id);
+    const candidates = extractLearningCandidatesFromTrajectory(run, trajectory);
+
+    for (const candidate of candidates) {
+      await options.learningStore.create(candidate);
+    }
   }
 
   async function runFromCheckpoint(

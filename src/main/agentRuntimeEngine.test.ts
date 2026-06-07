@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createAgentRuntimeEngine } from "./agentRuntimeEngine";
 import type { AgentExecutionStore } from "./agentExecutionStore";
+import type { AgentLearningStore } from "./agentLearningStore";
 import type { AgentRunStore } from "./agentRunStore";
 import type { AgentToolExecutor } from "./agentToolExecutor";
 import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
@@ -8,6 +9,10 @@ import type { ChatClient, ChatCompletionResponse } from "./openAiCompatibleClien
 import type { ScheduledTaskStore } from "./taskStore";
 import type { ToolAuthorizationService } from "./toolAuthorizationService";
 import type { AgentExecutionCheckpoint } from "../shared/agentExecution";
+import type {
+  AgentLearningCandidate,
+  AgentLearningCandidateInput,
+} from "../shared/agentLearning";
 import type { AgentRunRecord } from "../shared/agentRuns";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
 import type { ScheduledTask } from "../shared/scheduledTasks";
@@ -143,6 +148,40 @@ describe("agent runtime engine", () => {
       true,
     );
   });
+
+  it("extracts learning candidates from completed trajectories", async () => {
+    const trajectoryEvents: AgentTrajectoryEvent[] = [];
+    const learningInputs: AgentLearningCandidateInput[] = [];
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore([]),
+      trajectoryStore: createMemoryTrajectoryStore(trajectoryEvents),
+      learningStore: createMemoryLearningStore(learningInputs),
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: createChatClient([
+        toolCallResponse("file_list", { path: "~/Downloads" }),
+        toolCallResponse("file_read", { path: "~/Downloads/notes.md" }),
+        finalResponse("Report complete"),
+      ]),
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor([]),
+      createId: createSequentialId("learning"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+
+    await engine.startTask("task_123");
+
+    expect(learningInputs).toEqual([
+      expect.objectContaining({
+        type: "procedural_memory",
+        sourceRunId: "learning_1",
+        claim:
+          "Successful run used tool sequence: file_list -> file_read.",
+      }),
+    ]);
+  });
 });
 
 function finalResponse(content: string): ChatCompletionResponse {
@@ -273,6 +312,29 @@ function createMemoryTrajectoryStore(
     },
     async list() {
       return events;
+    },
+  };
+}
+
+function createMemoryLearningStore(
+  inputs: AgentLearningCandidateInput[],
+): AgentLearningStore {
+  return {
+    async create(input) {
+      inputs.push(structuredClone(input));
+      return {
+        id: `learning_${inputs.length}`,
+        status: "pending_review",
+        ...input,
+        createdAt: "2026-06-07T00:00:00.000Z",
+        updatedAt: "2026-06-07T00:00:00.000Z",
+      } as AgentLearningCandidate;
+    },
+    async list() {
+      return [];
+    },
+    async setStatus() {
+      return null;
     },
   };
 }
