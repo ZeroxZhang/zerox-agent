@@ -3,6 +3,10 @@ import type { AgentExecutionStore } from "./agentExecutionStore";
 import { classifyAgentFailure } from "./agentFailureClassifier";
 import { extractLearningCandidatesFromTrajectory } from "./agentLearningExtractor";
 import type { AgentLearningStore } from "./agentLearningStore";
+import {
+  appendProceduralMemoryContext,
+  buildProceduralMemoryPromptContext,
+} from "./agentProceduralMemory";
 import type { AgentRunStore } from "./agentRunStore";
 import type { AgentToolExecutor } from "./agentToolExecutor";
 import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
@@ -68,7 +72,7 @@ export function createAgentRuntimeEngine(options: {
   toolExecutor: AgentToolExecutor;
   trajectoryStore?: AgentTrajectoryStore;
   learningStore?: Pick<AgentLearningStore, "create">;
-  memoryStore?: Pick<MemoryStore, "create">;
+  memoryStore?: Partial<Pick<MemoryStore, "create" | "search">>;
   createId?: () => string;
   now?: () => Date;
 }): AgentRuntimeEngine {
@@ -186,7 +190,7 @@ export function createAgentRuntimeEngine(options: {
       finishedAt,
     };
 
-    if (run.status === "succeeded" && options.memoryStore) {
+    if (run.status === "succeeded" && options.memoryStore?.create) {
       try {
         await options.memoryStore.create({
           kind: "episodic",
@@ -386,6 +390,13 @@ export function createAgentRuntimeEngine(options: {
       const startedAt = now().toISOString();
       const runId = createId();
       const events = [createEvent("info", "Agent runtime started.")];
+      const proceduralMemoryContext =
+        await buildProceduralMemoryPromptContext({
+          memoryStore: options.memoryStore,
+          taskName: task.name,
+          skillName: task.skillName,
+          skillDescription: skill.manifest.description,
+        });
       const step: AgentExecutionStep = {
         id: createId(),
         description: task.name,
@@ -402,7 +413,13 @@ export function createAgentRuntimeEngine(options: {
         steps: [step],
         messages: [
           { role: "system", content: buildAgentSystemPrompt() },
-          { role: "user", content: buildTaskPrompt(task, skill) },
+          {
+            role: "user",
+            content: appendProceduralMemoryContext(
+              buildTaskPrompt(task, skill),
+              proceduralMemoryContext,
+            ),
+          },
         ],
         toolCallCount: 0,
         createdAt: startedAt,

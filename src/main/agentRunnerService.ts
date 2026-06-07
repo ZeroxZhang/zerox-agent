@@ -7,6 +7,10 @@ import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
 import { createAgentRuntimeEngine } from "./agentRuntimeEngine";
 import { createContextManager, type ContextManager } from "./contextManager";
 import type { MemoryStore } from "./memoryStore";
+import {
+  appendProceduralMemoryContext,
+  buildProceduralMemoryPromptContext,
+} from "./agentProceduralMemory";
 import type {
   ChatClient,
   ChatMessage,
@@ -68,7 +72,7 @@ export function createAgentRunnerService(options: {
   executionStore?: AgentExecutionStore;
   trajectoryStore?: AgentTrajectoryStore;
   learningStore?: Pick<AgentLearningStore, "create">;
-  memoryStore?: Pick<MemoryStore, "create">;
+  memoryStore?: Partial<Pick<MemoryStore, "create" | "search">>;
   contextManager?: ContextManager;
   createId?: () => string;
   now?: () => Date;
@@ -267,12 +271,22 @@ export function createAgentRunnerService(options: {
         : buildToolDefinitions();
     const toolNames = toolDefinitions.map((td) => td.function.name);
     const systemPrompt = buildAgentSystemPrompt();
+    const proceduralMemoryContext =
+      await buildProceduralMemoryPromptContext({
+        memoryStore: options.memoryStore,
+        taskName: task.name,
+        skillName: task.skillName,
+        skillDescription: skill.manifest.description,
+      });
 
     let messages: ChatMessage[] = [
       { role: "system", content: systemPrompt },
       {
         role: "user",
-        content: buildTaskPrompt(task, skill),
+        content: appendProceduralMemoryContext(
+          buildTaskPrompt(task, skill),
+          proceduralMemoryContext,
+        ),
       },
     ];
 
@@ -341,11 +355,14 @@ export function createAgentRunnerService(options: {
         const planMessages: ChatMessage[] = [
           {
             role: "user",
-            content: buildPlanningPrompt(
-              task.name,
-              skill.manifest.description,
-              skill.body,
-              toolNames,
+            content: appendProceduralMemoryContext(
+              buildPlanningPrompt(
+                task.name,
+                skill.manifest.description,
+                skill.body,
+                toolNames,
+              ),
+              proceduralMemoryContext,
             ),
           },
         ];
@@ -671,7 +688,7 @@ export function createAgentRunnerService(options: {
       finishedAt: now().toISOString(),
     };
 
-    if (run.status === "succeeded" && options.memoryStore) {
+    if (run.status === "succeeded" && options.memoryStore?.create) {
       try {
         await options.memoryStore.create({
           kind: "episodic",

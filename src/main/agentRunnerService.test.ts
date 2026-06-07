@@ -8,7 +8,7 @@ import type { ScheduledTaskStore } from "./taskStore";
 import type { ToolAuthorizationService } from "./toolAuthorizationService";
 import type { AgentExecutionCheckpoint } from "../shared/agentExecution";
 import type { AgentRunRecord } from "../shared/agentRuns";
-import type { MemoryInput, MemoryRecord } from "../shared/memory";
+import type { MemoryInput, MemoryRecord, MemorySearchResult } from "../shared/memory";
 import type { ScheduledTask } from "../shared/scheduledTasks";
 import type { SkillRecord } from "../shared/skills";
 import { getDefaultTaskPermissionPolicy } from "../shared/toolPermissions";
@@ -113,6 +113,52 @@ describe("agent runner service", () => {
         importance: 3,
       },
     ]);
+  });
+
+  it("includes procedural memory in the planning prompt", async () => {
+    const capturedMessages: ChatMessage[][] = [];
+    const service = createAgentRunnerService({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      resolveSkill: async () => createSkillRecord(4),
+      chatClient: {
+        async complete(request) {
+          capturedMessages.push(request.messages);
+          return capturedMessages.length === 1
+            ? {
+                content: JSON.stringify({
+                  steps: [
+                    {
+                      description: "Inspect downloads first",
+                      expectedTool: "file_list",
+                      expectedOutcome: "Directory structure is known",
+                    },
+                  ],
+                  reasoning: "Use reviewed procedural memory.",
+                }),
+                toolCalls: [],
+                finishReason: "stop",
+              }
+            : finalResponse("Step complete");
+        },
+      },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      memoryStore: createSearchOnlyMemoryStore([
+        createProceduralMemorySearchResult(
+          "先使用 file_list 了解目录，再读取候选文件。",
+        ),
+      ]),
+      createId: () => "run_planned_memory",
+      now: () => new Date("2026-06-05T08:00:00.000Z"),
+    });
+
+    await service.runTask("task_123");
+
+    const planningPrompt = capturedMessages[0][0].content;
+    expect(planningPrompt).toContain("相关流程记忆");
+    expect(planningPrompt).toContain("先使用 file_list 了解目录，再读取候选文件。");
   });
 
   it("records task run metadata after storing a run", async () => {
@@ -455,6 +501,32 @@ function createMemoryRunStore(): AgentRunStore & { runs: AgentRunRecord[] } {
     async list() {
       return runs;
     },
+  };
+}
+
+function createSearchOnlyMemoryStore(results: MemorySearchResult[]) {
+  return {
+    async search() {
+      return results;
+    },
+  };
+}
+
+function createProceduralMemorySearchResult(content: string): MemorySearchResult {
+  return {
+    record: {
+      id: "memory_procedure",
+      kind: "procedural",
+      title: "Downloads workflow",
+      content,
+      tags: ["local-file-organizer"],
+      source: { type: "agent_run", refId: "run_previous" },
+      importance: 4,
+      createdAt: "2026-06-06T00:00:00.000Z",
+      updatedAt: "2026-06-06T00:00:00.000Z",
+    },
+    score: 7,
+    matchedTerms: ["downloads"],
   };
 }
 

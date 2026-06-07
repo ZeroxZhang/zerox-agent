@@ -15,6 +15,7 @@ import type {
 } from "../shared/agentLearning";
 import type { AgentRunRecord } from "../shared/agentRuns";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
+import type { MemoryInput, MemoryRecord, MemorySearchResult } from "../shared/memory";
 import type { ScheduledTask } from "../shared/scheduledTasks";
 import type { SkillRecord } from "../shared/skills";
 import { getDefaultTaskPermissionPolicy } from "../shared/toolPermissions";
@@ -182,6 +183,37 @@ describe("agent runtime engine", () => {
       }),
     ]);
   });
+
+  it("injects relevant procedural memories into the next run", async () => {
+    const capturedMessages: string[] = [];
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore([]),
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: {
+        async complete(request) {
+          capturedMessages.push(request.messages.map((message) => message.content).join("\n"));
+          return finalResponse("Report complete");
+        },
+      },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor([]),
+      memoryStore: createMemoryStoreWithSearch([
+        createProceduralMemorySearchResult(
+          "先使用 file_list 了解目录，再读取候选文件。",
+        ),
+      ]),
+      createId: createSequentialId("memory"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+
+    await engine.startTask("task_123");
+
+    expect(capturedMessages[0]).toContain("相关流程记忆");
+    expect(capturedMessages[0]).toContain("先使用 file_list 了解目录，再读取候选文件。");
+  });
 });
 
 function finalResponse(content: string): ChatCompletionResponse {
@@ -336,6 +368,43 @@ function createMemoryLearningStore(
     async setStatus() {
       return null;
     },
+  };
+}
+
+function createMemoryStoreWithSearch(results: MemorySearchResult[]) {
+  return {
+    async create(input: MemoryInput) {
+      return {
+        id: "memory_written",
+        ...input,
+        tags: input.tags ?? [],
+        source: input.source ?? { type: "manual" },
+        importance: input.importance ?? 3,
+        createdAt: "2026-06-07T00:00:00.000Z",
+        updatedAt: "2026-06-07T00:00:00.000Z",
+      } as MemoryRecord;
+    },
+    async search() {
+      return results;
+    },
+  };
+}
+
+function createProceduralMemorySearchResult(content: string): MemorySearchResult {
+  return {
+    record: {
+      id: "memory_procedure",
+      kind: "procedural",
+      title: "Downloads workflow",
+      content,
+      tags: ["local-file-organizer"],
+      source: { type: "agent_run", refId: "run_previous" },
+      importance: 4,
+      createdAt: "2026-06-06T00:00:00.000Z",
+      updatedAt: "2026-06-06T00:00:00.000Z",
+    },
+    score: 7,
+    matchedTerms: ["downloads"],
   };
 }
 
