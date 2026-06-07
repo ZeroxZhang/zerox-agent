@@ -17,6 +17,8 @@ describe("first-run guide", () => {
 
     expect(guide).toMatchObject({
       title: "首次启动：先连接你的大模型",
+      message:
+        "先保存模型配置。Zerox 需要可用模型，才能安全地规划本地工作流并调用受控工具。",
       progressLabel: "0/3",
       modeLabel: "正式本地数据",
       primaryAction: {
@@ -45,7 +47,9 @@ describe("first-run guide", () => {
     );
 
     expect(guide).toMatchObject({
-      title: "首次启动：准备默认能力",
+      title: "首次启动：选择本地工作流",
+      message:
+        "选择一个真实的本地文件整理工作流，并在运行前确认它只访问授权目录。",
       progressLabel: "1/3",
       primaryAction: {
         id: "prepare_agent",
@@ -74,7 +78,9 @@ describe("first-run guide", () => {
     );
 
     expect(guide).toMatchObject({
-      title: "首次启动：做一次验收运行",
+      title: "首次启动：验收可恢复运行",
+      message:
+        "测试模型连接并运行默认任务，确认工具权限、运行日志和恢复路径都可检查。",
       progressLabel: "2/3",
       primaryAction: {
         id: "validate_agent",
@@ -103,7 +109,9 @@ describe("first-run guide", () => {
     );
 
     expect(guide).toMatchObject({
-      title: "本地智能体已正式可用",
+      title: "本地控制台已可接管任务",
+      message:
+        "首次启动检查已通过。现在可以在会话里交给 Zerox 一个可观察、可取消、可复盘的本地任务。",
       progressLabel: "3/3",
       modeLabel: "演示数据预览",
       primaryAction: {
@@ -117,6 +125,31 @@ describe("first-run guide", () => {
       "done",
       "done",
     ]);
+  });
+
+  it("frames first-run steps around workflow, permission review, and recoverable validation", () => {
+    const guide = buildFirstRunGuide(
+      createChecklist([
+        ["model", "ready"],
+        ["skill", "ready"],
+        ["task", "ready"],
+        ["connection", "pending"],
+        ["run", "pending"],
+      ]),
+      "desktop",
+    );
+
+    expect(guide.steps.map((step) => step.label)).toEqual([
+      "连接模型",
+      "选择工作流并审核权限",
+      "验收可恢复运行",
+    ]);
+    expect(guide.steps.map((step) => step.message).join("\n")).toContain(
+      "选择一个真实本地任务，检查技能、目标目录和工具权限。",
+    );
+    expect(guide.steps.map((step) => step.message).join("\n")).toContain(
+      "确认模型连接、工具调用、运行日志和恢复路径。",
+    );
   });
 });
 

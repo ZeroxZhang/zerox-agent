@@ -22,4 +22,20 @@ describe("README", () => {
     expect(readme).toContain("浏览器演示数据模式");
     expect(readme).toContain("agent-validation.json");
   });
+
+  it("states the desktop control-plane positioning and links the decision matrix", () => {
+    const readme = readFileSync(path.join(process.cwd(), "README.md"), "utf8");
+    const positioning = readFileSync(
+      path.join(process.cwd(), "docs/product/zerox-positioning.md"),
+      "utf8",
+    );
+
+    expect(readme).toContain("local-first desktop control plane");
+    expect(readme).toContain("recoverable agent runs");
+    expect(readme).toContain("user-reviewed learning");
+    expect(readme).toContain("docs/product/zerox-positioning.md");
+    expect(positioning).toContain("Decision Matrix");
+    expect(positioning).toContain("Zerox is not a generic chat companion.");
+    expect(positioning).toContain("The durable advantage is trust");
+  });
 });

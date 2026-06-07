@@ -41,7 +41,8 @@ export function buildFirstRunGuide(
   if (!modelDone) {
     return buildGuide({
       title: "首次启动：先连接你的大模型",
-      message: "保存模型配置后，本地智能体才能进行真实推理和工具调用。",
+      message:
+        "先保存模型配置。Zerox 需要可用模型，才能安全地规划本地工作流并调用受控工具。",
       mode,
       progress,
       primaryAction: {
@@ -55,8 +56,9 @@ export function buildFirstRunGuide(
 
   if (!prepareDone) {
     return buildGuide({
-      title: "首次启动：准备默认能力",
-      message: "创建内置文件整理任务，给本地智能体一条可验证的执行路径。",
+      title: "首次启动：选择本地工作流",
+      message:
+        "选择一个真实的本地文件整理工作流，并在运行前确认它只访问授权目录。",
       mode,
       progress,
       primaryAction: {
@@ -71,8 +73,9 @@ export function buildFirstRunGuide(
 
   if (!validateDone) {
     return buildGuide({
-      title: "首次启动：做一次验收运行",
-      message: "测试模型连接，并运行默认任务，确认桌面端真的能完成工作。",
+      title: "首次启动：验收可恢复运行",
+      message:
+        "测试模型连接并运行默认任务，确认工具权限、运行日志和恢复路径都可检查。",
       mode,
       progress,
       primaryAction: {
@@ -86,8 +89,9 @@ export function buildFirstRunGuide(
   }
 
   return buildGuide({
-    title: "本地智能体已正式可用",
-    message: "首次启动检查已通过。现在可以直接在会话里发任务。",
+    title: "本地控制台已可接管任务",
+    message:
+      "首次启动检查已通过。现在可以在会话里交给 Zerox 一个可观察、可取消、可复盘的本地任务。",
     mode,
     progress,
     primaryAction: {
@@ -122,14 +126,14 @@ function buildGuide(options: {
       },
       {
         id: "prepare",
-        label: "准备默认能力",
-        message: "扫描内置技能并创建默认文件整理任务。",
+        label: "选择工作流并审核权限",
+        message: "选择一个真实本地任务，检查技能、目标目录和工具权限。",
         status: options.statuses[1],
       },
       {
         id: "validate",
-        label: "验收运行",
-        message: "测试模型连接并完成一次默认任务运行。",
+        label: "验收可恢复运行",
+        message: "确认模型连接、工具调用、运行日志和恢复路径。",
         status: options.statuses[2],
       },
     ],

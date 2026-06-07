@@ -50,9 +50,11 @@
 
 <h2 id="overview-en">Overview</h2>
 
-**Zerox Agent** is a local-first desktop AI Agent built from scratch. The name derives from **Zero + X**: starting from a blank slate and turning unknown tasks into executable actions.
+**Zerox Agent** is a local-first desktop control plane for personal AI agents. The name derives from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, recoverable agent runs.
 
-It is not a chat wrapper — it is a general-purpose desktop agent that runs locally, configures OpenAI-compatible models, scans local `SKILL.md` skill files, executes a Plan‑Execute‑Reflect loop, invokes permission-controlled tools, persists experiential knowledge into local long-term memory, and stays resident via the macOS system tray.
+It is not a chat wrapper or a generic hosted agent surface. It runs locally, configures OpenAI-compatible models, scans local `SKILL.md` skill files, executes recoverable agent runs, invokes permission-controlled tools, persists experiential knowledge into local long-term memory, and keeps learning user-reviewed before it changes future behavior.
+
+The product boundary is documented in [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md): Zerox optimizes for trusted local control, recoverable agent runs, explicit permissions, observable trajectories, and user-reviewed learning.
 
 <p align="center">
   <img src="zerox-agent-onepage.png" alt="Zerox Agent one-page product overview" width="720" />
@@ -66,6 +68,7 @@ It is not a chat wrapper — it is a general-purpose desktop agent that runs loc
 | **Privacy-Safe** | API keys are encrypted with Electron `safeStorage`. Every tool call is authorized per-task and audit-logged. |
 | **Skill-Driven** | Behavior is defined by composable `SKILL.md` files supporting agent mode (LLM-driven) and script mode, with optional MCP tool extensions. |
 | **Observable** | Every run produces a structured event timeline across planning, execution, and reflection phases, with streaming output support. |
+| **Recoverable** | Agent work should be inspectable, cancelable, and resumable instead of disappearing into one-shot chat turns. |
 | **Modular** | The application is split into 8 independent panels: Chat, Overview, Runs, Tasks, Skills, Tools, Memory, and Settings. |
 
 ---
@@ -264,8 +267,8 @@ Starts three processes concurrently:
 ### First-Time Setup
 
 1. **Configure Model**: Open app → Settings → fill in Base URL, Chat Model, API Key
-2. **Prepare Agent**: Return to Overview, click "Prepare Local Agent" to check model, skills, and default tasks
-3. **Validate**: Click "One-Click Validate" to test the connection and run a default task
+2. **Choose Local Workflow**: Return to Overview, click "Prepare Local Agent", then review the default file workflow and its allowed directories
+3. **Validate Recoverable Run**: Click "One-Click Validate" to test the connection, tool permissions, run log, and default task path
 
 > Embedding Model is optional; without it, memory uses keyword search only. With it, vector semantic search is enabled.
 
@@ -551,9 +554,11 @@ Current version: MVP v1.0.0. Planned:
 
 ## 项目概述
 
-**Zerox Agent** 是一个从零搭建的本地桌面 AI Agent，名字取自 **Zero + X**——从留白开始，把未知任务转成可执行动作。
+**Zerox Agent** 是一个本地优先的桌面智能体控制台，名字取自 **Zero + X**——从留白开始，把未知的本地工作流转成可观察、受权限管控、可恢复的 Agent 运行。
 
-它不是聊天壳。它是一个运行在本机的通用桌面智能体：配置 OpenAI‑compatible 模型、扫描本地 `SKILL.md` 技能文件、执行计划-执行-反思 (Plan‑Execute‑Reflect) 循环、调用受权限管控的工具、把经验和知识写入本地长期记忆，并通过 macOS 系统托盘常驻后台。
+它不是聊天壳，也不是泛用云端 Agent 入口。它运行在本机：配置 OpenAI‑compatible 模型、扫描本地 `SKILL.md` 技能文件、执行可恢复的 Agent 运行、调用受权限管控的工具、把经验和知识写入本地长期记忆，并且在改变未来行为前保留用户审核。
+
+产品边界写在 [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md)：Zerox 优先建设可信的本地控制、可恢复运行、显式权限、可观察轨迹和用户审核后的学习。
 
 ### 设计原则
 
@@ -563,6 +568,7 @@ Current version: MVP v1.0.0. Planned:
 | **隐私安全 (Privacy-Safe)** | API Key 使用 Electron `safeStorage` 加密存储，工具调用按任务授权并记录审计日志。 |
 | **技能驱动 (Skill-Driven)** | 行为由可组合的 `SKILL.md` 文件定义，支持智能体模式 (agent) 和脚本模式 (script)，可扩展 MCP 工具。 |
 | **可观测 (Observable)** | 每次运行产生结构化事件时间线，包括规划、执行、反思三个阶段，支持流式输出。 |
+| **可恢复 (Recoverable)** | Agent 工作应该可检查、可取消、可恢复，而不是消失在一次性聊天回合里。 |
 | **模块化 (Modular)** | 按功能拆分为独立模块：会话、总览、运行、任务、技能、工具、记忆、设置八大面板。 |
 
 ---
