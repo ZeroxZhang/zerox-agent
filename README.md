@@ -20,9 +20,512 @@
 
 ---
 
-> **语言 / Language**：简体中文 ｜ [English](#english) starts after the Chinese section.
+> **Language**：English first &nbsp;|&nbsp; <a href="#chinese">简体中文</a> follows after the English section.
 
 ---
+
+<h1 id="english">Zerox Agent</h1>
+
+> A local-first desktop AI Agent built module by module. macOS-first. Electron + React + TypeScript + Vite.
+
+---
+
+## Table of Contents (English)
+
+- [Overview](#overview-en)
+- [Architecture](#architecture)
+- [Core Capabilities](#core-capabilities)
+- [Quick Start](#quick-start-en)
+- [Development Guide](#development-guide)
+- [Project Structure](#project-structure-en)
+- [Skill System](#skill-system)
+- [Agent Run Lifecycle](#agent-run-lifecycle)
+- [Memory System](#memory-system-en)
+- [Tools & Permissions](#tools--permissions)
+- [Packaging & Distribution](#packaging--distribution)
+- [Testing](#testing-en)
+- [Roadmap](#roadmap)
+
+---
+
+<h2 id="overview-en">Overview</h2>
+
+**Zerox Agent** is a local-first desktop AI Agent built from scratch. The name derives from **Zero + X**: starting from a blank slate and turning unknown tasks into executable actions.
+
+It is not a chat wrapper — it is a general-purpose desktop agent that runs locally, configures OpenAI-compatible models, scans local `SKILL.md` skill files, executes a Plan‑Execute‑Reflect loop, invokes permission-controlled tools, persists experiential knowledge into local long-term memory, and stays resident via the macOS system tray.
+
+### Design Principles
+
+| Principle | Description |
+|-----------|-------------|
+| **Local-First** | All data (tasks, runs, permissions, memory, sessions) is stored in the local `userData` directory. Nothing is uploaded to the cloud. |
+| **Privacy-Safe** | API keys are encrypted with Electron `safeStorage`. Every tool call is authorized per-task and audit-logged. |
+| **Skill-Driven** | Behavior is defined by composable `SKILL.md` files supporting agent mode (LLM-driven) and script mode, with optional MCP tool extensions. |
+| **Observable** | Every run produces a structured event timeline across planning, execution, and reflection phases, with streaming output support. |
+| **Modular** | The application is split into 8 independent panels: Chat, Overview, Runs, Tasks, Skills, Tools, Memory, and Settings. |
+
+---
+
+<h2 id="architecture">Architecture</h2>
+
+```
+┌─────────────────────────────────────────────────────┐
+│                  Electron Shell                      │
+│  ┌──────────┐  ┌──────────┐  ┌───────────────────┐  │
+│  │  Tray    │  │  Window  │  │  safeStorage       │  │
+│  └──────────┘  └──────────┘  └───────────────────┘  │
+├─────────────────────────────────────────────────────┤
+│                  Main Process                        │
+│  ┌─────────────┐  ┌────────────┐  ┌──────────────┐  │
+│  │ AgentRunner  │  │ TaskSched  │  │ MemoryStore  │  │
+│  └─────────────┘  └────────────┘  └──────────────┘  │
+│  ┌─────────────┐  ┌────────────┐  ┌──────────────┐  │
+│  │ ToolExecutor │  │ SkillRegistry│ │ ChatService  │  │
+│  └─────────────┘  └────────────┘  └──────────────┘  │
+│  ┌─────────────┐  ┌────────────┐  ┌──────────────┐  │
+│  │ ToolAuth    │  │ MCPClient  │  │ ModelConn    │  │
+│  └─────────────┘  └────────────┘  └──────────────┘  │
+├────────────────────── IPC ──────────────────────────┤
+│                 Preload (Bridge)                      │
+├─────────────────────────────────────────────────────┤
+│               Renderer Process                       │
+│  ┌────────┐ ┌────────┐ ┌────────┐ ┌───────────────┐ │
+│  │ Chat   │ │Overview│ │ Runs   │ │ Tasks ·Skills │ │
+│  └────────┘ └────────┘ └────────┘ └───────────────┘ │
+│  ┌────────┐ ┌────────┐ ┌────────┐ ┌───────────────┐ │
+│  │ Tools  │ │Memory  │ │Settings│ │ React 19 +    │ │
+│  │        │ │        │ │        │ │ Material UI   │ │
+│  └────────┘ └────────┘ └────────┘ └───────────────┘ │
+└─────────────────────────────────────────────────────┘
+```
+
+### Tech Stack
+
+| Layer | Technology | Purpose |
+|-------|-----------|---------|
+| Desktop Shell | Electron 42 | Window management, tray, secure storage, OS integration |
+| Bundler | Vite 8 | HMR dev server for renderer |
+| Language | TypeScript 6 | Full-stack type safety, 3 tsconfig targets |
+| UI | React 19 | Function components + Hooks, Material Design |
+| Testing | Vitest 4 | 51 unit tests across shared, main, and renderer |
+| Packaging | electron-builder 26 | macOS `.app` / `.dmg` / `.zip` distribution |
+| Parsing | yaml, cron-parser | SKILL.md frontmatter, cron expressions |
+
+### Data Modes
+
+The app explicitly indicates the current data mode:
+
+- **Desktop Mode**: Electron is connected. Data is written to the `userData/config` directory.
+- **Preview Mode**: Only the frontend is loaded in a browser. Static demo data is used; no persistent writes occur.
+
+### Local Data Files
+
+All data is stored under Electron `userData/config/`:
+
+| File | Content |
+|------|---------|
+| `model-settings.json` | Model configuration (no plaintext API key) |
+| `scheduled-tasks.json` | Scheduled task definitions |
+| `agent-runs.jsonl` | Task run logs (JSON Lines) |
+| `tool-audit.jsonl` | Tool authorization audit log |
+| `memory-records.json` | Local long-term memory |
+| `chat-sessions.json` | Chat session records |
+| `agent-validation.json` | Latest one-click validation snapshot |
+
+API keys are encrypted with Electron `safeStorage` and are never written to plaintext files or git.
+
+---
+
+<h2 id="core-capabilities">Core Capabilities</h2>
+
+### 1. Agent Chat
+
+The chat window is the primary entry point. Users describe needs in natural language; the Agent selects the appropriate skill, decomposes the task, invokes tools, and returns results. The session displays model, skill, task, memory, and tool status.
+
+### 2. Model Settings
+
+- Supports any OpenAI-compatible API (OpenAI, Anthropic-compatible gateways, local models)
+- Separate configuration for chat model and embedding model
+- Adjustable temperature (recommended: 0.2–0.5) and max tokens (recommended: 4000–8000)
+- One-click connection test with latency and connectivity reporting
+
+### 3. Skill System
+
+Skills are auto-discovered from the local `skills/` directory. Each skill is a Markdown file (`SKILL.md`) with YAML frontmatter defining execution mode, inputs, permissions, and optional custom tools or MCP servers.
+
+Built-in skill: `local-file-organizer`
+
+### 4. Scheduled Tasks
+
+Five scheduling modes are supported:
+
+| Mode | Description |
+|------|-------------|
+| Manual | User-triggered from the UI |
+| Daily | Runs daily at a specified time |
+| Interval | Runs at fixed minute intervals |
+| Cron | Standard cron expressions |
+| Draft | Unscheduled task sketch |
+
+Each task is bound to a skill and runs with user-provided input parameters.
+
+### 5. Agent Runner
+
+The execution core uses a **Plan → Execute → Reflect** three-phase cycle:
+
+```
+┌──────────┐      ┌──────────────┐      ┌───────────┐
+│  PLAN    │ ───→ │   EXECUTE    │ ───→ │ REFLECT   │
+└──────────┘      └──────────────┘      └───────────┘
+                        │                      │
+                        │ step OK              │ step FAIL
+                        ↓                      ↓
+                   next step            retry / skip / abort
+```
+
+- **Plan**: LLM analyzes task + skill description, produces a step-by-step execution plan
+- **Execute**: Steps are executed sequentially; each step may involve multiple tool call turns
+- **Reflect**: On step failure, LLM analyzes the cause and suggests retry, skip, or abort
+- Automatic context window management and compression
+- Exponential backoff retry for LLM API failures (up to 2 retries)
+- Successful runs automatically write episodic memory
+- Streaming event output via IPC
+
+### 6. Agent Orchestrator
+
+For complex tasks, the Orchestrator decomposes work into multiple sub-tasks using LLM planning, then executes them in parallel or sequentially, synthesizing a unified summary.
+
+### 7. Tool System
+
+Six built-in tools cover core agent capabilities:
+
+| Tool | Function | Authorization |
+|------|----------|---------------|
+| `file_list` | List directory contents | Path whitelist for readable dirs |
+| `file_read` | Read file contents | Path whitelist for readable dirs |
+| `file_write` | Write file (auto-creates dirs) | Path whitelist for writable dirs |
+| `web_search` | DuckDuckGo search | Explicit search permission |
+| `web_fetch` | Fetch webpage content | Domain whitelist |
+| `shell_exec` | Execute shell command | Command template whitelist |
+
+Tools come from three sources: built-in (6), skill-defined (from `SKILL.md`), and MCP servers.
+
+### 8. Permissions & Security
+
+- **File**: Absolute path whitelists with `{{placeholder}}` support
+- **Shell**: Command template matching with control operator blocking and destructive command prevention
+- **Web**: Explicit search toggle, domain-based fetch whitelist
+- **Authorization**: Every tool call is checked against the task's permission policy
+- **Audit**: All authorization decisions are persisted as JSON Lines
+
+Critical tool calls can also be escalated to system dialog for manual user approval.
+
+---
+
+<h2 id="quick-start-en">Quick Start</h2>
+
+### Prerequisites
+
+- **macOS** (currently macOS-only)
+- **Node.js** ≥ 18
+- **npm** ≥ 9
+
+### Install & Run
+
+```bash
+# 1. Clone
+git clone <repo-url> && cd "building agent"
+
+# 2. Install dependencies
+npm install
+
+# 3. Run full self-check (tests + build)
+npm run doctor
+
+# 4. Launch the desktop app (production mode)
+npm run start:prod
+```
+
+### Development Mode
+
+```bash
+npm run dev
+```
+
+Starts three processes concurrently:
+- Vite dev server (renderer HMR → `http://127.0.0.1:5173`)
+- TypeScript main-process compilation (watch mode)
+- Electron window (waits for compilation to complete)
+
+### First-Time Setup
+
+1. **Configure Model**: Open app → Settings → fill in Base URL, Chat Model, API Key
+2. **Prepare Agent**: Return to Overview, click "Prepare Local Agent" to check model, skills, and default tasks
+3. **Validate**: Click "One-Click Validate" to test the connection and run a default task
+
+> Embedding Model is optional; without it, memory uses keyword search only. With it, vector semantic search is enabled.
+
+### LLM Smoke Test
+
+If `.api_info.md` is present in the working directory:
+
+```bash
+npm run smoke:llm
+```
+
+Parses `.api_info.md`, sends a minimal `/chat/completions` request per provider, and reports results with API keys redacted.
+
+### Desktop Validation
+
+```bash
+npm run validate:agent
+```
+
+Runs full validation inside the Electron main process: reads config → saves model → prepares task → tests connection → runs task → writes memory and validation snapshot.
+
+---
+
+<h2 id="development-guide">Development Guide</h2>
+
+### Common Commands
+
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Development mode (Vite + tsc watch + Electron) |
+| `npm run doctor` | Full self-check: `npm test && npm run build` |
+| `npm run build` | Production build |
+| `npm run start:prod` | Production build & launch |
+| `npm run test` | Run all unit tests |
+| `npm run test:watch` | Test watch mode |
+| `npm run smoke:llm` | Real-model connectivity smoke |
+| `npm run smoke:prod` | Production smoke (start → verify render → exit) |
+| `npm run validate:agent` | Full desktop agent validation |
+| `npm run pack:mac` | Package macOS `.app` (unsigned, local trial) |
+| `npm run dist:mac` | Package macOS `.dmg` + `.zip` (distribution) |
+
+### TypeScript Configuration
+
+Three compilation targets via project references:
+
+| Config | Target | Output | Purpose |
+|--------|--------|--------|---------|
+| `tsconfig.electron.json` | `main` + `preload` + `shared` | `dist-electron/` | Electron main process (Node16 ESM) |
+| `tsconfig.renderer.json` | `renderer` + `shared` | (noEmit) | Vite-bundled renderer (ESNext) |
+| `tsconfig.json` | Root reference | — | Combines the two above |
+
+---
+
+<h2 id="project-structure-en">Project Structure</h2>
+
+```
+src/
+├── main/           # Electron main process (Node.js)
+│   ├── main.ts                 # Entry: window/tray/IPC/startup
+│   ├── agentRunnerService.ts   # Agent Runner core loop
+│   ├── agentOrchestrator.ts    # Multi-subtask orchestration
+│   ├── agentLoop.ts            # Base Agent Loop (fallback)
+│   ├── agentToolExecutor.ts    # Tool registration & execution
+│   ├── agentBootstrapService.ts# First-run guidance & validation
+│   ├── chatService.ts          # Chat service
+│   ├── memoryStore.ts          # Local memory store
+│   ├── modelSettingsStore.ts   # Model config store
+│   ├── openAiCompatibleClient.ts# OpenAI API client
+│   ├── taskStore.ts / taskSchedulerService.ts  # Task storage & scheduling
+│   ├── skillRegistry.ts / skillExecutor.ts     # Skill discovery & execution
+│   ├── mcpClient.ts            # MCP client
+│   ├── webTools.ts             # Web search & fetch
+│   ├── toolAuditLog.ts / toolAuthorizationService.ts  # Tool audit & auth
+│   ├── desktopLifecycle.ts     # Desktop lifecycle
+│   └── ...
+│
+├── renderer/       # Electron renderer (Browser)
+│   ├── App.tsx                 # Root: navigation + panel switching
+│   └── components/             # UI components
+│
+├── preload/        # Context bridge (contextIsolation: true)
+├── shared/         # Shared types & utilities
+│   ├── agentProtocol.ts        # Agent protocol (system prompt / plan / reflect)
+│   ├── skills.ts               # Skill manifest parsing
+│   ├── memory.ts               # Memory types & search
+│   ├── toolPermissions.ts      # Permission policy & authorization
+│   └── ...
+│
+├── skills/         # Local skill directory
+│   ├── local-file-organizer/SKILL.md   # Built-in: file organizer
+│   └── example-mcp-skill/SKILL.md      # Example: MCP skill
+│
+└── package.json
+```
+
+---
+
+<h2 id="skill-system">Skill System</h2>
+
+Skills are the core extension mechanism. Each skill is defined as `skills/<skill-name>/SKILL.md` with YAML frontmatter and a Markdown body. Skills support:
+
+- **execution mode**: `agent` (LLM-driven) or `script`
+- **inputs**: typed parameters with labels
+- **permissions**: file paths, shell commands, web domains, memory access
+- **custom tools**: tool definitions with entrypoints
+- **MCP servers**: external tool servers via Model Context Protocol
+- **planning config**: whether explicit planning is required, max steps
+
+Built-in skill: `local-file-organizer` — scans a directory, identifies recently changed or new files, and writes a Markdown organization report.
+
+---
+
+<h2 id="agent-run-lifecycle">Agent Run Lifecycle</h2>
+
+```
+startedAt
+  │
+  ├── [planning]   Plan creation
+  │    ├── LLM analyzes task + skill
+  │    ├── Produces ExecutionPlan (steps + reasoning)
+  │    └── Skippable for simple tasks
+  │
+  ├── [executing]  Step-by-step execution
+  │    ├── Per step: context → LLM tool calls → auth check → execute → observe
+  │    ├── Parallel authorization + parallel tool execution
+  │    ├── Automatic context window management
+  │    └── Automatic LLM retry (exponential backoff, up to 2x)
+  │
+  ├── [reflecting] Error recovery
+  │    ├── Triggered on step failure
+  │    ├── LLM diagnoses → suggests retry / skip / abort
+  │    ├── Up to 3 reflection rounds
+  │    └── retry → back to executing; abort → end
+  │
+  └── [done]       Completion
+       ├── Writes AgentRunRecord → agent-runs.jsonl
+       ├── Success → auto-writes episodic memory
+       └── Updates task lastRunAt
+finishedAt
+```
+
+---
+
+<h2 id="memory-system-en">Memory System</h2>
+
+Local long-term memory with five types inspired by cognitive science:
+
+| Type | Purpose | Example |
+|------|---------|---------|
+| `core` | Persistent facts about the user | Name, preferences, identity |
+| `session` | Transient per-session context | Temporary info in current conversation |
+| `semantic` | General knowledge, concepts | Markdown syntax rules, API docs |
+| `episodic` | Task execution experiences | Run summaries and outcomes |
+| `procedural` | Workflows, procedures | Recommended file organization steps |
+
+### Features
+
+- **Keyword search**: title weight 3×, tags 2×, body 1×, with multi-word phrase matching
+- **Vector search** (optional): cosine similarity semantic search via embedding model
+- **Reranking**: search results are reranked for relevance
+- **Auto-maintenance**: runs every 30 minutes, consolidates duplicate titles and rolls up topics
+- **Memory consolidation**: creates summary memories, archives source records (preserving links)
+- **Export**: full JSON export
+- **Archiving**: consolidated records are marked `archived`, excluded from search by default
+
+---
+
+<h2 id="tools--permissions">Tools & Permissions</h2>
+
+### Permission Policy Generation
+
+At task creation time, a permission policy is generated from the skill's `permissions` config:
+
+```
+Skill permissions.files.read: ["{{targetDir}}"]
+  User input targetDir = "~/Downloads"
+    → Policy files.read: ["~/Downloads"]
+
+Skill permissions.shell.commands: ["ls {{targetDir}}"]
+  User input targetDir = "~/Documents"
+    → Policy shell.commands: ["ls ~/Documents"]
+```
+
+### Authorization Flow
+
+Before every tool call:
+
+```
+ToolCall Request
+  │
+  ├── 1. Parse args JSON
+  ├── 2. Check task permission policy
+  │    ├── file_read/write → path whitelist match
+  │    ├── web_search → boolean toggle
+  │    ├── web_fetch → domain whitelist (incl. subdomains)
+  │    └── shell_exec → regex template match + operator block + destructive cmd block
+  ├── 3. Write audit log entry
+  └── 4. Execute or deny
+```
+
+### Security Boundaries
+
+- **Shell safety**: blocks control operators (`;`, `&&`, `||`, `` ` ``, `$(`), pipes, and destructive commands (`rm -rf`, `git push -f`, `DROP TABLE`, `kubectl delete`, etc.)
+- **Path safety**: whitelists support `~` expansion and placeholders; unauthorized paths are denied
+- **Domain safety**: `web_fetch` supports subdomain matching and exact domain validation
+
+---
+
+<h2 id="packaging--distribution">Packaging & Distribution</h2>
+
+### Local macOS Trial
+
+```bash
+npm run doctor        # Self-check first
+npm run smoke:prod    # Production smoke
+npm run pack:mac      # Generate .app → release/mac/
+```
+
+`pack:mac` produces an unsigned `.app` for local trial without Apple Developer ID signing or notarization.
+
+### Distribution Build
+
+```bash
+npm run dist:mac      # Generate .dmg + .zip → release/
+```
+
+For public distribution, Apple signing, notarization, auto-update, and crash reporting need to be added.
+
+---
+
+<h2 id="testing-en">Testing</h2>
+
+The project includes **51** Vitest unit tests across the shared layer, main process, and renderer:
+
+```bash
+npm test              # Run all tests
+npm run test:watch    # Watch mode
+```
+
+### Test Coverage
+
+- **Shared layer**: skill parsing, task permissions, memory search, bootstrap flow, navigation, data boundary, agent protocol, etc.
+- **Main process**: tool execution, permission authorization, model config store, task scheduling, memory store, chat service, smoke mode, etc.
+- **Renderer**: agent work status, validation preview, demo data, etc.
+
+---
+
+<h2 id="roadmap">Roadmap</h2>
+
+Current version: MVP v1.0.0. Planned:
+
+- [ ] Windows & Linux desktop support
+- [ ] Skill marketplace and remote skill installation
+- [ ] Multi-agent collaboration orchestration
+- [ ] Event-triggered tasks (file changes, system events, etc.)
+- [ ] Apple signing, notarization, and auto-update
+- [ ] Crash reporting and telemetry
+- [ ] Skill editor and visual workflow builder
+
+---
+
+---
+
+<h1 id="chinese">Zerox Agent（中文）</h1>
 
 ## 目录（中文）
 
@@ -640,513 +1143,6 @@ npm run test:watch    # watch 模式
 - [ ] Apple 签名、公证和自动更新
 - [ ] 崩溃日志和遥测
 - [ ] 技能编辑器和可视化工作流构建器
-
----
-
-## License
-
-ISC
-
----
-
----
-
-<h1 id="english">Zerox Agent</h1>
-
-> A local-first desktop AI Agent built module by module. macOS-first. Electron + React + TypeScript + Vite.
-
----
-
-## Table of Contents (English)
-
-- [Overview](#overview-en)
-- [Architecture](#architecture)
-- [Core Capabilities](#core-capabilities)
-- [Quick Start](#quick-start-en)
-- [Development Guide](#development-guide)
-- [Project Structure](#project-structure-en)
-- [Skill System](#skill-system)
-- [Agent Run Lifecycle](#agent-run-lifecycle)
-- [Memory System](#memory-system-en)
-- [Tools & Permissions](#tools--permissions)
-- [Packaging & Distribution](#packaging--distribution)
-- [Testing](#testing-en)
-- [Roadmap](#roadmap)
-
----
-
-<h2 id="overview-en">Overview</h2>
-
-**Zerox Agent** is a local-first desktop AI Agent built from scratch. The name derives from **Zero + X**: starting from a blank slate and turning unknown tasks into executable actions.
-
-It is not a chat wrapper — it is a general-purpose desktop agent that runs locally, configures OpenAI-compatible models, scans local `SKILL.md` skill files, executes a Plan‑Execute‑Reflect loop, invokes permission-controlled tools, persists experiential knowledge into local long-term memory, and stays resident via the macOS system tray.
-
-### Design Principles
-
-| Principle | Description |
-|-----------|-------------|
-| **Local-First** | All data (tasks, runs, permissions, memory, sessions) is stored in the local `userData` directory. Nothing is uploaded to the cloud. |
-| **Privacy-Safe** | API keys are encrypted with Electron `safeStorage`. Every tool call is authorized per-task and audit-logged. |
-| **Skill-Driven** | Behavior is defined by composable `SKILL.md` files supporting agent mode (LLM-driven) and script mode, with optional MCP tool extensions. |
-| **Observable** | Every run produces a structured event timeline across planning, execution, and reflection phases, with streaming output support. |
-| **Modular** | The application is split into 8 independent panels: Chat, Overview, Runs, Tasks, Skills, Tools, Memory, and Settings. |
-
----
-
-<h2 id="architecture">Architecture</h2>
-
-```
-┌─────────────────────────────────────────────────────┐
-│                  Electron Shell                      │
-│  ┌──────────┐  ┌──────────┐  ┌───────────────────┐  │
-│  │  Tray    │  │  Window  │  │  safeStorage       │  │
-│  └──────────┘  └──────────┘  └───────────────────┘  │
-├─────────────────────────────────────────────────────┤
-│                  Main Process                        │
-│  ┌─────────────┐  ┌────────────┐  ┌──────────────┐  │
-│  │ AgentRunner  │  │ TaskSched  │  │ MemoryStore  │  │
-│  └─────────────┘  └────────────┘  └──────────────┘  │
-│  ┌─────────────┐  ┌────────────┐  ┌──────────────┐  │
-│  │ ToolExecutor │  │ SkillRegistry│ │ ChatService  │  │
-│  └─────────────┘  └────────────┘  └──────────────┘  │
-│  ┌─────────────┐  ┌────────────┐  ┌──────────────┐  │
-│  │ ToolAuth    │  │ MCPClient  │  │ ModelConn    │  │
-│  └─────────────┘  └────────────┘  └──────────────┘  │
-├────────────────────── IPC ──────────────────────────┤
-│                 Preload (Bridge)                      │
-├─────────────────────────────────────────────────────┤
-│               Renderer Process                       │
-│  ┌────────┐ ┌────────┐ ┌────────┐ ┌───────────────┐ │
-│  │ Chat   │ │Overview│ │ Runs   │ │ Tasks ·Skills │ │
-│  └────────┘ └────────┘ └────────┘ └───────────────┘ │
-│  ┌────────┐ ┌────────┐ ┌────────┐ ┌───────────────┐ │
-│  │ Tools  │ │Memory  │ │Settings│ │ React 19 +    │ │
-│  │        │ │        │ │        │ │ Material UI   │ │
-│  └────────┘ └────────┘ └────────┘ └───────────────┘ │
-└─────────────────────────────────────────────────────┘
-```
-
-### Tech Stack
-
-| Layer | Technology | Purpose |
-|-------|-----------|---------|
-| Desktop Shell | Electron 42 | Window management, tray, secure storage, OS integration |
-| Bundler | Vite 8 | HMR dev server for renderer |
-| Language | TypeScript 6 | Full-stack type safety, 3 tsconfig targets |
-| UI | React 19 | Function components + Hooks, Material Design |
-| Testing | Vitest 4 | 51 unit tests across shared, main, and renderer |
-| Packaging | electron-builder 26 | macOS `.app` / `.dmg` / `.zip` distribution |
-| Parsing | yaml, cron-parser | SKILL.md frontmatter, cron expressions |
-
-### Data Modes
-
-The app explicitly indicates the current data mode:
-
-- **Desktop Mode**: Electron is connected. Data is written to the `userData/config` directory.
-- **Preview Mode**: Only the frontend is loaded in a browser. Static demo data is used; no persistent writes occur.
-
-### Local Data Files
-
-All data is stored under Electron `userData/config/`:
-
-| File | Content |
-|------|---------|
-| `model-settings.json` | Model configuration (no plaintext API key) |
-| `scheduled-tasks.json` | Scheduled task definitions |
-| `agent-runs.jsonl` | Task run logs (JSON Lines) |
-| `tool-audit.jsonl` | Tool authorization audit log |
-| `memory-records.json` | Local long-term memory |
-| `chat-sessions.json` | Chat session records |
-| `agent-validation.json` | Latest one-click validation snapshot |
-
-API keys are encrypted with Electron `safeStorage` and are never written to plaintext files or git.
-
----
-
-<h2 id="core-capabilities">Core Capabilities</h2>
-
-### 1. Agent Chat
-
-The chat window is the primary entry point. Users describe needs in natural language; the Agent selects the appropriate skill, decomposes the task, invokes tools, and returns results. The session displays model, skill, task, memory, and tool status.
-
-### 2. Model Settings
-
-- Supports any OpenAI-compatible API (OpenAI, Anthropic-compatible gateways, local models)
-- Separate configuration for chat model and embedding model
-- Adjustable temperature (recommended: 0.2–0.5) and max tokens (recommended: 4000–8000)
-- One-click connection test with latency and connectivity reporting
-
-### 3. Skill System
-
-Skills are auto-discovered from the local `skills/` directory. Each skill is a Markdown file (`SKILL.md`) with YAML frontmatter defining execution mode, inputs, permissions, and optional custom tools or MCP servers.
-
-Built-in skill: `local-file-organizer`
-
-### 4. Scheduled Tasks
-
-Five scheduling modes are supported:
-
-| Mode | Description |
-|------|-------------|
-| Manual | User-triggered from the UI |
-| Daily | Runs daily at a specified time |
-| Interval | Runs at fixed minute intervals |
-| Cron | Standard cron expressions |
-| Draft | Unscheduled task sketch |
-
-Each task is bound to a skill and runs with user-provided input parameters.
-
-### 5. Agent Runner
-
-The execution core uses a **Plan → Execute → Reflect** three-phase cycle:
-
-```
-┌──────────┐      ┌──────────────┐      ┌───────────┐
-│  PLAN    │ ───→ │   EXECUTE    │ ───→ │ REFLECT   │
-└──────────┘      └──────────────┘      └───────────┘
-                        │                      │
-                        │ step OK              │ step FAIL
-                        ↓                      ↓
-                   next step            retry / skip / abort
-```
-
-- **Plan**: LLM analyzes task + skill description, produces a step-by-step execution plan
-- **Execute**: Steps are executed sequentially; each step may involve multiple tool call turns
-- **Reflect**: On step failure, LLM analyzes the cause and suggests retry, skip, or abort
-- Automatic context window management and compression
-- Exponential backoff retry for LLM API failures (up to 2 retries)
-- Successful runs automatically write episodic memory
-- Streaming event output via IPC
-
-### 6. Agent Orchestrator
-
-For complex tasks, the Orchestrator decomposes work into multiple sub-tasks using LLM planning, then executes them in parallel or sequentially, synthesizing a unified summary.
-
-### 7. Tool System
-
-Six built-in tools cover core agent capabilities:
-
-| Tool | Function | Authorization |
-|------|----------|---------------|
-| `file_list` | List directory contents | Path whitelist for readable dirs |
-| `file_read` | Read file contents | Path whitelist for readable dirs |
-| `file_write` | Write file (auto-creates dirs) | Path whitelist for writable dirs |
-| `web_search` | DuckDuckGo search | Explicit search permission |
-| `web_fetch` | Fetch webpage content | Domain whitelist |
-| `shell_exec` | Execute shell command | Command template whitelist |
-
-Tools come from three sources: built-in (6), skill-defined (from `SKILL.md`), and MCP servers.
-
-### 8. Permissions & Security
-
-- **File**: Absolute path whitelists with `{{placeholder}}` support
-- **Shell**: Command template matching with control operator blocking and destructive command prevention
-- **Web**: Explicit search toggle, domain-based fetch whitelist
-- **Authorization**: Every tool call is checked against the task's permission policy
-- **Audit**: All authorization decisions are persisted as JSON Lines
-
-Critical tool calls can also be escalated to system dialog for manual user approval.
-
----
-
-<h2 id="quick-start-en">Quick Start</h2>
-
-### Prerequisites
-
-- **macOS** (currently macOS-only)
-- **Node.js** ≥ 18
-- **npm** ≥ 9
-
-### Install & Run
-
-```bash
-# 1. Clone
-git clone <repo-url> && cd "building agent"
-
-# 2. Install dependencies
-npm install
-
-# 3. Run full self-check (tests + build)
-npm run doctor
-
-# 4. Launch the desktop app (production mode)
-npm run start:prod
-```
-
-### Development Mode
-
-```bash
-npm run dev
-```
-
-Starts three processes concurrently:
-- Vite dev server (renderer HMR → `http://127.0.0.1:5173`)
-- TypeScript main-process compilation (watch mode)
-- Electron window (waits for compilation to complete)
-
-### First-Time Setup
-
-1. **Configure Model**: Open app → Settings → fill in Base URL, Chat Model, API Key
-2. **Prepare Agent**: Return to Overview, click "Prepare Local Agent" to check model, skills, and default tasks
-3. **Validate**: Click "One-Click Validate" to test the connection and run a default task
-
-> Embedding Model is optional; without it, memory uses keyword search only. With it, vector semantic search is enabled.
-
-### LLM Smoke Test
-
-If `.api_info.md` is present in the working directory:
-
-```bash
-npm run smoke:llm
-```
-
-Parses `.api_info.md`, sends a minimal `/chat/completions` request per provider, and reports results with API keys redacted.
-
-### Desktop Validation
-
-```bash
-npm run validate:agent
-```
-
-Runs full validation inside the Electron main process: reads config → saves model → prepares task → tests connection → runs task → writes memory and validation snapshot.
-
----
-
-<h2 id="development-guide">Development Guide</h2>
-
-### Common Commands
-
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Development mode (Vite + tsc watch + Electron) |
-| `npm run doctor` | Full self-check: `npm test && npm run build` |
-| `npm run build` | Production build |
-| `npm run start:prod` | Production build & launch |
-| `npm run test` | Run all unit tests |
-| `npm run test:watch` | Test watch mode |
-| `npm run smoke:llm` | Real-model connectivity smoke |
-| `npm run smoke:prod` | Production smoke (start → verify render → exit) |
-| `npm run validate:agent` | Full desktop agent validation |
-| `npm run pack:mac` | Package macOS `.app` (unsigned, local trial) |
-| `npm run dist:mac` | Package macOS `.dmg` + `.zip` (distribution) |
-
-### TypeScript Configuration
-
-Three compilation targets via project references:
-
-| Config | Target | Output | Purpose |
-|--------|--------|--------|---------|
-| `tsconfig.electron.json` | `main` + `preload` + `shared` | `dist-electron/` | Electron main process (Node16 ESM) |
-| `tsconfig.renderer.json` | `renderer` + `shared` | (noEmit) | Vite-bundled renderer (ESNext) |
-| `tsconfig.json` | Root reference | — | Combines the two above |
-
----
-
-<h2 id="project-structure-en">Project Structure</h2>
-
-```
-src/
-├── main/           # Electron main process (Node.js)
-│   ├── main.ts                 # Entry: window/tray/IPC/startup
-│   ├── agentRunnerService.ts   # Agent Runner core loop
-│   ├── agentOrchestrator.ts    # Multi-subtask orchestration
-│   ├── agentLoop.ts            # Base Agent Loop (fallback)
-│   ├── agentToolExecutor.ts    # Tool registration & execution
-│   ├── agentBootstrapService.ts# First-run guidance & validation
-│   ├── chatService.ts          # Chat service
-│   ├── memoryStore.ts          # Local memory store
-│   ├── modelSettingsStore.ts   # Model config store
-│   ├── openAiCompatibleClient.ts# OpenAI API client
-│   ├── taskStore.ts / taskSchedulerService.ts  # Task storage & scheduling
-│   ├── skillRegistry.ts / skillExecutor.ts     # Skill discovery & execution
-│   ├── mcpClient.ts            # MCP client
-│   ├── webTools.ts             # Web search & fetch
-│   ├── toolAuditLog.ts / toolAuthorizationService.ts  # Tool audit & auth
-│   ├── desktopLifecycle.ts     # Desktop lifecycle
-│   └── ...
-│
-├── renderer/       # Electron renderer (Browser)
-│   ├── App.tsx                 # Root: navigation + panel switching
-│   └── components/             # UI components
-│
-├── preload/        # Context bridge (contextIsolation: true)
-├── shared/         # Shared types & utilities
-│   ├── agentProtocol.ts        # Agent protocol (system prompt / plan / reflect)
-│   ├── skills.ts               # Skill manifest parsing
-│   ├── memory.ts               # Memory types & search
-│   ├── toolPermissions.ts      # Permission policy & authorization
-│   └── ...
-│
-├── skills/         # Local skill directory
-│   ├── local-file-organizer/SKILL.md   # Built-in: file organizer
-│   └── example-mcp-skill/SKILL.md      # Example: MCP skill
-│
-└── package.json
-```
-
----
-
-<h2 id="skill-system">Skill System</h2>
-
-Skills are the core extension mechanism. Each skill is defined as `skills/<skill-name>/SKILL.md` with YAML frontmatter and a Markdown body. Skills support:
-
-- **execution mode**: `agent` (LLM-driven) or `script`
-- **inputs**: typed parameters with labels
-- **permissions**: file paths, shell commands, web domains, memory access
-- **custom tools**: tool definitions with entrypoints
-- **MCP servers**: external tool servers via Model Context Protocol
-- **planning config**: whether explicit planning is required, max steps
-
-Built-in skill: `local-file-organizer` — scans a directory, identifies recently changed or new files, and writes a Markdown organization report.
-
----
-
-<h2 id="agent-run-lifecycle">Agent Run Lifecycle</h2>
-
-```
-startedAt
-  │
-  ├── [planning]   Plan creation
-  │    ├── LLM analyzes task + skill
-  │    ├── Produces ExecutionPlan (steps + reasoning)
-  │    └── Skippable for simple tasks
-  │
-  ├── [executing]  Step-by-step execution
-  │    ├── Per step: context → LLM tool calls → auth check → execute → observe
-  │    ├── Parallel authorization + parallel tool execution
-  │    ├── Automatic context window management
-  │    └── Automatic LLM retry (exponential backoff, up to 2x)
-  │
-  ├── [reflecting] Error recovery
-  │    ├── Triggered on step failure
-  │    ├── LLM diagnoses → suggests retry / skip / abort
-  │    ├── Up to 3 reflection rounds
-  │    └── retry → back to executing; abort → end
-  │
-  └── [done]       Completion
-       ├── Writes AgentRunRecord → agent-runs.jsonl
-       ├── Success → auto-writes episodic memory
-       └── Updates task lastRunAt
-finishedAt
-```
-
----
-
-<h2 id="memory-system-en">Memory System</h2>
-
-Local long-term memory with five types inspired by cognitive science:
-
-| Type | Purpose | Example |
-|------|---------|---------|
-| `core` | Persistent facts about the user | Name, preferences, identity |
-| `session` | Transient per-session context | Temporary info in current conversation |
-| `semantic` | General knowledge, concepts | Markdown syntax rules, API docs |
-| `episodic` | Task execution experiences | Run summaries and outcomes |
-| `procedural` | Workflows, procedures | Recommended file organization steps |
-
-### Features
-
-- **Keyword search**: title weight 3×, tags 2×, body 1×, with multi-word phrase matching
-- **Vector search** (optional): cosine similarity semantic search via embedding model
-- **Reranking**: search results are reranked for relevance
-- **Auto-maintenance**: runs every 30 minutes, consolidates duplicate titles and rolls up topics
-- **Memory consolidation**: creates summary memories, archives source records (preserving links)
-- **Export**: full JSON export
-- **Archiving**: consolidated records are marked `archived`, excluded from search by default
-
----
-
-<h2 id="tools--permissions">Tools & Permissions</h2>
-
-### Permission Policy Generation
-
-At task creation time, a permission policy is generated from the skill's `permissions` config:
-
-```
-Skill permissions.files.read: ["{{targetDir}}"]
-  User input targetDir = "~/Downloads"
-    → Policy files.read: ["~/Downloads"]
-
-Skill permissions.shell.commands: ["ls {{targetDir}}"]
-  User input targetDir = "~/Documents"
-    → Policy shell.commands: ["ls ~/Documents"]
-```
-
-### Authorization Flow
-
-Before every tool call:
-
-```
-ToolCall Request
-  │
-  ├── 1. Parse args JSON
-  ├── 2. Check task permission policy
-  │    ├── file_read/write → path whitelist match
-  │    ├── web_search → boolean toggle
-  │    ├── web_fetch → domain whitelist (incl. subdomains)
-  │    └── shell_exec → regex template match + operator block + destructive cmd block
-  ├── 3. Write audit log entry
-  └── 4. Execute or deny
-```
-
-### Security Boundaries
-
-- **Shell safety**: blocks control operators (`;`, `&&`, `||`, `` ` ``, `$(`), pipes, and destructive commands (`rm -rf`, `git push -f`, `DROP TABLE`, `kubectl delete`, etc.)
-- **Path safety**: whitelists support `~` expansion and placeholders; unauthorized paths are denied
-- **Domain safety**: `web_fetch` supports subdomain matching and exact domain validation
-
----
-
-<h2 id="packaging--distribution">Packaging & Distribution</h2>
-
-### Local macOS Trial
-
-```bash
-npm run doctor        # Self-check first
-npm run smoke:prod    # Production smoke
-npm run pack:mac      # Generate .app → release/mac/
-```
-
-`pack:mac` produces an unsigned `.app` for local trial without Apple Developer ID signing or notarization.
-
-### Distribution Build
-
-```bash
-npm run dist:mac      # Generate .dmg + .zip → release/
-```
-
-For public distribution, Apple signing, notarization, auto-update, and crash reporting need to be added.
-
----
-
-<h2 id="testing-en">Testing</h2>
-
-The project includes **51** Vitest unit tests across the shared layer, main process, and renderer:
-
-```bash
-npm test              # Run all tests
-npm run test:watch    # Watch mode
-```
-
-### Test Coverage
-
-- **Shared layer**: skill parsing, task permissions, memory search, bootstrap flow, navigation, data boundary, agent protocol, etc.
-- **Main process**: tool execution, permission authorization, model config store, task scheduling, memory store, chat service, smoke mode, etc.
-- **Renderer**: agent work status, validation preview, demo data, etc.
-
----
-
-<h2 id="roadmap">Roadmap</h2>
-
-Current version: MVP v1.0.0. Planned:
-
-- [ ] Windows & Linux desktop support
-- [ ] Skill marketplace and remote skill installation
-- [ ] Multi-agent collaboration orchestration
-- [ ] Event-triggered tasks (file changes, system events, etc.)
-- [ ] Apple signing, notarization, and auto-update
-- [ ] Crash reporting and telemetry
-- [ ] Skill editor and visual workflow builder
 
 ---
 
