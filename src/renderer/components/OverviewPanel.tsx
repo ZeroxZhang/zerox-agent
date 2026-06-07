@@ -10,6 +10,8 @@ import {
   type AgentOnboardingAction,
 } from "../../shared/agentOnboarding";
 import type { AgentRunRecord } from "../../shared/agentRuns";
+import type { AgentEvalReport } from "../../shared/agentEval";
+import type { AgentLearningCandidate } from "../../shared/agentLearning";
 import type {
   AgentBootstrapReport,
   AgentBootstrapStep,
@@ -26,6 +28,8 @@ import {
 } from "../../shared/desktopRuntime";
 import {
   createDemoValidationSnapshot,
+  demoAgentEvalReport,
+  demoLearningCandidates,
   demoMemories,
   demoModelSettings,
   demoRuns,
@@ -38,6 +42,8 @@ import {
 } from "../agentValidationPreviewStore";
 
 type OverviewData = {
+  evalReport: AgentEvalReport;
+  learningCandidates: AgentLearningCandidate[];
   memories: MemoryRecord[];
   modelSettings: PublicModelSettings;
   runs: AgentRunRecord[];
@@ -84,6 +90,8 @@ export function OverviewPanel(props: {
         }),
       );
       setData({
+        evalReport: demoAgentEvalReport,
+        learningCandidates: demoLearningCandidates,
         memories: demoMemories,
         modelSettings: demoModelSettings,
         runs: demoRuns,
@@ -110,18 +118,25 @@ export function OverviewPanel(props: {
       window.buildingAgent.listSkills(),
       window.buildingAgent.loadAgentValidation(),
       window.buildingAgent.getRuntimeInfo(),
+      window.buildingAgent.listLearningCandidates({
+        status: "pending_review",
+      }),
+      window.buildingAgent.getAgentEvalReport(),
     ])
-      .then(
-        ([
-          modelSettings,
-          tasks,
-          runs,
-          memories,
-          skills,
-          validation,
-          runtime,
-        ]) => {
+      .then(([
+        modelSettings,
+        tasks,
+        runs,
+        memories,
+        skills,
+        validation,
+        runtime,
+        learningCandidates,
+        evalReport,
+      ]) => {
         setData({
+          evalReport,
+          learningCandidates,
           memories,
           modelSettings,
           runs,
@@ -300,10 +315,22 @@ export function OverviewPanel(props: {
           value={latestRun ? latestRun.taskName : "还没有运行"}
         />
         <HealthCard
+          label="评测"
+          status={`${Math.round((data?.evalReport.passRate ?? 0) * 100)}%`}
+          tone={getEvalTone(data?.evalReport)}
+          value={data ? `${data.evalReport.passed}/${data.evalReport.total}` : "待加载"}
+        />
+        <HealthCard
           label="记忆"
           status={`${data?.memories.length ?? 0} 条`}
           tone={data?.memories.length ? "good" : "warn"}
           value="本地优先"
+        />
+        <HealthCard
+          label="学习"
+          status={`${data?.learningCandidates.length ?? 0} 个待审`}
+          tone={data?.learningCandidates.length ? "warn" : "good"}
+          value="用户审核"
         />
       </div>
 
@@ -531,14 +558,28 @@ export function OverviewPanel(props: {
     }
 
     setBootstrapReport(result.report);
-    const [modelSettings, tasks, runs, memories, skills] = await Promise.all([
+    const [
+      modelSettings,
+      tasks,
+      runs,
+      memories,
+      skills,
+      learningCandidates,
+      evalReport,
+    ] = await Promise.all([
       window.buildingAgent.loadModelSettings(),
       window.buildingAgent.listScheduledTasks(),
       window.buildingAgent.listAgentRuns(),
       window.buildingAgent.listMemories({ limit: 100 }),
       window.buildingAgent.listSkills(),
+      window.buildingAgent.listLearningCandidates({
+        status: "pending_review",
+      }),
+      window.buildingAgent.getAgentEvalReport(),
     ]);
     setData({
+      evalReport,
+      learningCandidates,
       modelSettings,
       tasks,
       runs,
@@ -575,14 +616,28 @@ export function OverviewPanel(props: {
 
     setBootstrapReport(result.report);
     setLastValidationSnapshot(result.snapshot);
-    const [modelSettings, tasks, runs, memories, skills] = await Promise.all([
+    const [
+      modelSettings,
+      tasks,
+      runs,
+      memories,
+      skills,
+      learningCandidates,
+      evalReport,
+    ] = await Promise.all([
       window.buildingAgent.loadModelSettings(),
       window.buildingAgent.listScheduledTasks(),
       window.buildingAgent.listAgentRuns(),
       window.buildingAgent.listMemories({ limit: 100 }),
       window.buildingAgent.listSkills(),
+      window.buildingAgent.listLearningCandidates({
+        status: "pending_review",
+      }),
+      window.buildingAgent.getAgentEvalReport(),
     ]);
     setData({
+      evalReport,
+      learningCandidates,
       modelSettings,
       tasks,
       runs,
@@ -658,11 +713,25 @@ function HealthCard(props: {
   );
 }
 
+function getEvalTone(
+  report: AgentEvalReport | undefined,
+): "bad" | "good" | "warn" {
+  if (!report) {
+    return "warn";
+  }
+
+  if (report.passRate >= 0.8) {
+    return "good";
+  }
+
+  return report.passRate >= 0.6 ? "warn" : "bad";
+}
+
 function buildAttentionItems(data: OverviewData): AttentionItem[] {
   const items: AttentionItem[] = [];
 
   if (!data.modelSettings.chatModel || !data.modelSettings.hasApiKey) {
-      items.push({
+    items.push({
       tone: "error",
       title: "模型配置不完整",
       action: "打开“设置”，保存对话模型和 API Key。",
@@ -687,6 +756,15 @@ function buildAttentionItems(data: OverviewData): AttentionItem[] {
       title: guidance.title,
       action: guidance.action,
       target: "runs",
+    });
+  }
+
+  if (data.learningCandidates.length) {
+    items.push({
+      tone: "warn",
+      title: `${data.learningCandidates.length} 个学习候选待审核`,
+      action: "打开“学习”，决定哪些经验可以写入长期流程记忆。",
+      target: "learning",
     });
   }
 

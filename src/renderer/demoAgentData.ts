@@ -1,4 +1,6 @@
 import type { AgentBootstrapValidationSnapshot } from "../shared/agentBootstrap";
+import type { AgentEvalReport } from "../shared/agentEval";
+import type { AgentLearningCandidate } from "../shared/agentLearning";
 import type { AgentRunRecord } from "../shared/agentRuns";
 import type { MemoryRecord } from "../shared/memory";
 import type { PublicModelSettings } from "../shared/modelSettings";
@@ -115,6 +117,31 @@ export const demoMemories: MemoryRecord[] = [
     updatedAt: "2026-06-05T08:00:06.000Z",
   },
 ];
+
+export const demoLearningCandidates: AgentLearningCandidate[] = [
+  {
+    id: "demo_learning_1",
+    type: "procedural_memory",
+    status: "pending_review",
+    sourceRunId: "demo_run_1",
+    sourceTrajectoryEventIds: ["demo_event_tool_list", "demo_event_tool_read"],
+    claim: "整理下载目录时，先列出目录再读取候选文件。",
+    recommendedAction: "审核后写入流程记忆，用于后续本地文件整理任务。",
+    risk: "低风险；只影响计划提示，不会自动执行未授权工具。",
+    createdAt: "2026-06-05T08:00:07.000Z",
+    updatedAt: "2026-06-05T08:00:07.000Z",
+  },
+];
+
+export const demoAgentEvalReport: AgentEvalReport = {
+  total: 5,
+  passed: 5,
+  failed: 0,
+  passRate: 1,
+  toolSuccessRate: 0.8,
+  recoverabilityRate: 1,
+  failures: [],
+};
 
 export const demoModelSettings: PublicModelSettings = {
   baseUrl: "https://api.example.com/v1",

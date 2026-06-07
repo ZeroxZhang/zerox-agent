@@ -1,4 +1,10 @@
-export type AgentRunStatus = "succeeded" | "failed" | "canceled";
+import type {
+  AgentExecutionArtifact,
+  AgentExecutionStatus,
+  AgentFailureClass,
+} from "./agentExecution";
+
+export type AgentRunStatus = AgentExecutionStatus;
 
 export type AgentPhase = "planning" | "executing" | "reflecting" | "done";
 
@@ -31,6 +37,11 @@ export type AgentRunRecord = {
   status: AgentRunStatus;
   summary: string;
   events: AgentRunEvent[];
+  checkpointId?: string;
+  checkpointPath?: string;
+  artifacts?: AgentExecutionArtifact[];
+  failureClass?: AgentFailureClass;
+  failureMessage?: string;
   startedAt: string;
   finishedAt: string;
 };
@@ -54,3 +65,5 @@ export type CancelScheduledTaskRunResult =
       ok: false;
       message: string;
     };
+
+export type PauseAgentRunResult = CancelScheduledTaskRunResult;

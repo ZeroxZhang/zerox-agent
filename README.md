@@ -50,9 +50,11 @@
 
 <h2 id="overview-en">Overview</h2>
 
-**Zerox Agent** is a local-first desktop AI Agent built from scratch. The name derives from **Zero + X**: starting from a blank slate and turning unknown tasks into executable actions.
+**Zerox Agent** is a local-first desktop control plane for personal AI agents. The name derives from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, recoverable agent runs.
 
-It is not a chat wrapper — it is a general-purpose desktop agent that runs locally, configures OpenAI-compatible models, scans local `SKILL.md` skill files, executes a Plan‑Execute‑Reflect loop, invokes permission-controlled tools, persists experiential knowledge into local long-term memory, and stays resident via the macOS system tray.
+It is not a chat wrapper or a generic hosted agent surface. It runs locally, configures OpenAI-compatible models, scans local `SKILL.md` skill files, executes recoverable agent runs, invokes permission-controlled tools, persists experiential knowledge into local long-term memory, and keeps learning user-reviewed before it changes future behavior.
+
+The product boundary is documented in [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md): Zerox optimizes for trusted local control, recoverable agent runs, explicit permissions, observable trajectories, and user-reviewed learning. Runtime and learning details live in [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md) and [`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md).
 
 <p align="center">
   <img src="zerox-agent-onepage.png" alt="Zerox Agent one-page product overview" width="720" />
@@ -66,6 +68,7 @@ It is not a chat wrapper — it is a general-purpose desktop agent that runs loc
 | **Privacy-Safe** | API keys are encrypted with Electron `safeStorage`. Every tool call is authorized per-task and audit-logged. |
 | **Skill-Driven** | Behavior is defined by composable `SKILL.md` files supporting agent mode (LLM-driven) and script mode, with optional MCP tool extensions. |
 | **Observable** | Every run produces a structured event timeline across planning, execution, and reflection phases, with streaming output support. |
+| **Recoverable** | Agent work should be inspectable, cancelable, and resumable instead of disappearing into one-shot chat turns. |
 | **Modular** | The application is split into 8 independent panels: Chat, Overview, Runs, Tasks, Skills, Tools, Memory, and Settings. |
 
 ---
@@ -111,7 +114,7 @@ It is not a chat wrapper — it is a general-purpose desktop agent that runs loc
 | Bundler | Vite 8 | HMR dev server for renderer |
 | Language | TypeScript 6 | Full-stack type safety, 3 tsconfig targets |
 | UI | React 19 | Function components + Hooks, Material Design |
-| Testing | Vitest 4 | 51 unit tests across shared, main, and renderer |
+| Testing | Vitest 4 | Unit tests, production build, and deterministic agent evals |
 | Packaging | electron-builder 26 | macOS `.app` / `.dmg` / `.zip` distribution |
 | Parsing | yaml, cron-parser | SKILL.md frontmatter, cron expressions |
 
@@ -131,6 +134,9 @@ All data is stored under Electron `userData/config/`:
 | `model-settings.json` | Model configuration (no plaintext API key) |
 | `scheduled-tasks.json` | Scheduled task definitions |
 | `agent-runs.jsonl` | Task run logs (JSON Lines) |
+| `agent-executions/<runId>.json` | Recoverable runtime checkpoints |
+| `agent-trajectories/<runId>.jsonl` | Replayable model/tool/transition trajectory events |
+| `agent-learning-candidates.json` | User-reviewed learning candidates |
 | `tool-audit.jsonl` | Tool authorization audit log |
 | `memory-records.json` | Local long-term memory |
 | `chat-sessions.json` | Chat session records |
@@ -243,7 +249,7 @@ git clone <repo-url> && cd "building agent"
 # 2. Install dependencies
 npm install
 
-# 3. Run full self-check (tests + build)
+# 3. Run full self-check (tests + build + deterministic eval)
 npm run doctor
 
 # 4. Launch the desktop app (production mode)
@@ -264,8 +270,8 @@ Starts three processes concurrently:
 ### First-Time Setup
 
 1. **Configure Model**: Open app → Settings → fill in Base URL, Chat Model, API Key
-2. **Prepare Agent**: Return to Overview, click "Prepare Local Agent" to check model, skills, and default tasks
-3. **Validate**: Click "One-Click Validate" to test the connection and run a default task
+2. **Choose Local Workflow**: Return to Overview, click "Prepare Local Agent", then review the default file workflow and its allowed directories
+3. **Validate Recoverable Run**: Click "One-Click Validate" to test the connection, tool permissions, run log, and default task path
 
 > Embedding Model is optional; without it, memory uses keyword search only. With it, vector semantic search is enabled.
 
@@ -296,7 +302,7 @@ Runs full validation inside the Electron main process: reads config → saves mo
 | Command | Description |
 |---------|-------------|
 | `npm run dev` | Development mode (Vite + tsc watch + Electron) |
-| `npm run doctor` | Full self-check: `npm test && npm run build` |
+| `npm run doctor` | Full self-check: tests, build, and deterministic agent eval |
 | `npm run build` | Production build |
 | `npm run start:prod` | Production build & launch |
 | `npm run test` | Run all unit tests |
@@ -304,6 +310,7 @@ Runs full validation inside the Electron main process: reads config → saves mo
 | `npm run smoke:llm` | Real-model connectivity smoke |
 | `npm run smoke:prod` | Production smoke (start → verify render → exit) |
 | `npm run validate:agent` | Full desktop agent validation |
+| `npm run eval:agent` | Deterministic local agent eval suite |
 | `npm run pack:mac` | Package macOS `.app` (unsigned, local trial) |
 | `npm run dist:mac` | Package macOS `.dmg` + `.zip` (distribution) |
 
@@ -325,7 +332,11 @@ Three compilation targets via project references:
 src/
 ├── main/           # Electron main process (Node.js)
 │   ├── main.ts                 # Entry: window/tray/IPC/startup
-│   ├── agentRunnerService.ts   # Agent Runner core loop
+│   ├── agentRunnerService.ts   # Agent Runner facade
+│   ├── agentRuntimeEngine.ts   # Recoverable runtime state machine
+│   ├── agentExecutionStore.ts  # Durable checkpoints
+│   ├── agentTrajectoryStore.ts # Append-only trajectory records
+│   ├── agentLearningService.ts # Reviewed learning application
 │   ├── agentOrchestrator.ts    # Multi-subtask orchestration
 │   ├── agentLoop.ts            # Base Agent Loop (fallback)
 │   ├── agentToolExecutor.ts    # Tool registration & execution
@@ -380,6 +391,8 @@ Built-in skill: `local-file-organizer` — scans a directory, identifies recentl
 
 <h2 id="agent-run-lifecycle">Agent Run Lifecycle</h2>
 
+The desktop app wires scheduled and manual task runs through the recoverable runtime by default. Each run writes checkpoints, appends trajectory events, stores a terminal run record, and can generate learning candidates from the completed trajectory.
+
 ```
 startedAt
   │
@@ -407,6 +420,8 @@ startedAt
 finishedAt
 ```
 
+Runtime checkpoints are saved under `agent-executions/`, while trajectories are saved under `agent-trajectories/`. Active checkpoints appear in the Runs panel and can be paused or resumed after interruption or app restart. The Runs panel can also inspect raw trajectory events, payloads, and redaction flags.
+
 ---
 
 <h2 id="memory-system-en">Memory System</h2>
@@ -430,6 +445,7 @@ Local long-term memory with five types inspired by cognitive science:
 - **Memory consolidation**: creates summary memories, archives source records (preserving links)
 - **Export**: full JSON export
 - **Archiving**: consolidated records are marked `archived`, excluded from search by default
+- **Reviewed learning**: accepted procedural candidates become local `procedural` memories and are injected into future task/planning prompts
 
 ---
 
@@ -498,12 +514,16 @@ For public distribution, Apple signing, notarization, auto-update, and crash rep
 
 <h2 id="testing-en">Testing</h2>
 
-The project includes **51** Vitest unit tests across the shared layer, main process, and renderer:
+The project includes Vitest unit tests across the shared layer, main process, and renderer:
 
 ```bash
 npm test              # Run all tests
 npm run test:watch    # Watch mode
+npm run eval:agent    # Deterministic agent eval suite
+npm run verify        # Tests + build + deterministic eval
 ```
+
+The Overview panel surfaces the deterministic eval pass rate as a local quality signal.
 
 ### Test Coverage
 
@@ -551,9 +571,11 @@ Current version: MVP v1.0.0. Planned:
 
 ## 项目概述
 
-**Zerox Agent** 是一个从零搭建的本地桌面 AI Agent，名字取自 **Zero + X**——从留白开始，把未知任务转成可执行动作。
+**Zerox Agent** 是一个本地优先的桌面智能体控制台，名字取自 **Zero + X**——从留白开始，把未知的本地工作流转成可观察、受权限管控、可恢复的 Agent 运行。
 
-它不是聊天壳。它是一个运行在本机的通用桌面智能体：配置 OpenAI‑compatible 模型、扫描本地 `SKILL.md` 技能文件、执行计划-执行-反思 (Plan‑Execute‑Reflect) 循环、调用受权限管控的工具、把经验和知识写入本地长期记忆，并通过 macOS 系统托盘常驻后台。
+它不是聊天壳，也不是泛用云端 Agent 入口。它运行在本机：配置 OpenAI‑compatible 模型、扫描本地 `SKILL.md` 技能文件、执行可恢复的 Agent 运行、调用受权限管控的工具、把经验和知识写入本地长期记忆，并且在改变未来行为前保留用户审核。
+
+产品边界写在 [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md)：Zerox 优先建设可信的本地控制、可恢复运行、显式权限、可观察轨迹和用户审核后的学习。
 
 ### 设计原则
 
@@ -563,6 +585,7 @@ Current version: MVP v1.0.0. Planned:
 | **隐私安全 (Privacy-Safe)** | API Key 使用 Electron `safeStorage` 加密存储，工具调用按任务授权并记录审计日志。 |
 | **技能驱动 (Skill-Driven)** | 行为由可组合的 `SKILL.md` 文件定义，支持智能体模式 (agent) 和脚本模式 (script)，可扩展 MCP 工具。 |
 | **可观测 (Observable)** | 每次运行产生结构化事件时间线，包括规划、执行、反思三个阶段，支持流式输出。 |
+| **可恢复 (Recoverable)** | Agent 工作应该可检查、可取消、可恢复，而不是消失在一次性聊天回合里。 |
 | **模块化 (Modular)** | 按功能拆分为独立模块：会话、总览、运行、任务、技能、工具、记忆、设置八大面板。 |
 
 ---

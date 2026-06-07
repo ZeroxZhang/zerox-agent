@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { createAgentRunnerService } from "./agentRunnerService";
+import type { AgentExecutionStore } from "./agentExecutionStore";
 import type { AgentRunStore } from "./agentRunStore";
 import type { AgentToolExecutor } from "./agentToolExecutor";
 import type { ChatClient, ChatMessage, ChatCompletionResponse } from "./openAiCompatibleClient";
 import type { ScheduledTaskStore } from "./taskStore";
 import type { ToolAuthorizationService } from "./toolAuthorizationService";
+import type { AgentExecutionCheckpoint } from "../shared/agentExecution";
 import type { AgentRunRecord } from "../shared/agentRuns";
-import type { MemoryInput, MemoryRecord } from "../shared/memory";
+import type { MemoryInput, MemoryRecord, MemorySearchResult } from "../shared/memory";
 import type { ScheduledTask } from "../shared/scheduledTasks";
 import type { SkillRecord } from "../shared/skills";
 import { getDefaultTaskPermissionPolicy } from "../shared/toolPermissions";
@@ -111,6 +113,52 @@ describe("agent runner service", () => {
         importance: 3,
       },
     ]);
+  });
+
+  it("includes procedural memory in the planning prompt", async () => {
+    const capturedMessages: ChatMessage[][] = [];
+    const service = createAgentRunnerService({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      resolveSkill: async () => createSkillRecord(4),
+      chatClient: {
+        async complete(request) {
+          capturedMessages.push(request.messages);
+          return capturedMessages.length === 1
+            ? {
+                content: JSON.stringify({
+                  steps: [
+                    {
+                      description: "Inspect downloads first",
+                      expectedTool: "file_list",
+                      expectedOutcome: "Directory structure is known",
+                    },
+                  ],
+                  reasoning: "Use reviewed procedural memory.",
+                }),
+                toolCalls: [],
+                finishReason: "stop",
+              }
+            : finalResponse("Step complete");
+        },
+      },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      memoryStore: createSearchOnlyMemoryStore([
+        createProceduralMemorySearchResult(
+          "先使用 file_list 了解目录，再读取候选文件。",
+        ),
+      ]),
+      createId: () => "run_planned_memory",
+      now: () => new Date("2026-06-05T08:00:00.000Z"),
+    });
+
+    await service.runTask("task_123");
+
+    const planningPrompt = capturedMessages[0][0].content;
+    expect(planningPrompt).toContain("相关流程记忆");
+    expect(planningPrompt).toContain("先使用 file_list 了解目录，再读取候选文件。");
   });
 
   it("records task run metadata after storing a run", async () => {
@@ -306,6 +354,80 @@ describe("agent runner service", () => {
       message: "Scheduled task was not found.",
     });
   });
+
+  it("delegates to the recoverable runtime when an execution store is configured", async () => {
+    const savedCheckpoints: AgentExecutionCheckpoint[] = [];
+    const runStore = createMemoryRunStore();
+    const service = createAgentRunnerService({
+      taskStore: createTaskStore(createTask()),
+      runStore,
+      executionStore: createMemoryExecutionStore(savedCheckpoints),
+      resolveSkill: async () => createSkillRecord(4),
+      chatClient: createChatClient([
+        toolCallResponse("file_read", { path: "~/Downloads/notes.md" }),
+        finalResponse("Report complete"),
+      ]),
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      createId: createSequentialId("runner_runtime"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+
+    const result = await service.runTask("task_123");
+
+    expect(result).toMatchObject({
+      ok: true,
+      run: {
+        id: "runner_runtime_1",
+        status: "succeeded",
+        checkpointId: expect.any(String),
+      },
+    });
+    expect(savedCheckpoints.map((checkpoint) => checkpoint.status)).toEqual([
+      "queued",
+      "running",
+      "running",
+      "succeeded",
+    ]);
+    expect(runStore.runs[0]).toMatchObject({
+      id: "runner_runtime_1",
+      checkpointId: savedCheckpoints.at(-1)?.id,
+    });
+  });
+
+  it("resumes a checkpoint through the recoverable runtime", async () => {
+    const savedCheckpoints: AgentExecutionCheckpoint[] = [];
+    const executionStore = createMemoryExecutionStore(savedCheckpoints);
+    await executionStore.save(createCheckpoint("run_resume", "task_123"));
+    const service = createAgentRunnerService({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore,
+      resolveSkill: async () => createSkillRecord(4),
+      chatClient: createChatClient([finalResponse("Resumed report complete")]),
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      createId: createSequentialId("runner_resume"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+
+    const result = await service.resumeRun("run_resume");
+
+    expect(result).toMatchObject({
+      ok: true,
+      run: {
+        id: "run_resume",
+        status: "succeeded",
+        summary: "Resumed report complete",
+      },
+    });
+    expect(savedCheckpoints.at(-1)).toMatchObject({
+      runId: "run_resume",
+      status: "succeeded",
+    });
+  });
 });
 
 function createTask(): ScheduledTask {
@@ -379,6 +501,104 @@ function createMemoryRunStore(): AgentRunStore & { runs: AgentRunRecord[] } {
     async list() {
       return runs;
     },
+  };
+}
+
+function createSearchOnlyMemoryStore(results: MemorySearchResult[]) {
+  return {
+    async search() {
+      return results;
+    },
+  };
+}
+
+function createProceduralMemorySearchResult(content: string): MemorySearchResult {
+  return {
+    record: {
+      id: "memory_procedure",
+      kind: "procedural",
+      title: "Downloads workflow",
+      content,
+      tags: ["local-file-organizer"],
+      source: { type: "agent_run", refId: "run_previous" },
+      importance: 4,
+      createdAt: "2026-06-06T00:00:00.000Z",
+      updatedAt: "2026-06-06T00:00:00.000Z",
+    },
+    score: 7,
+    matchedTerms: ["downloads"],
+  };
+}
+
+function createMemoryExecutionStore(
+  saved: AgentExecutionCheckpoint[],
+): AgentExecutionStore {
+  const byRunId = new Map<string, AgentExecutionCheckpoint>();
+  return {
+    async save(checkpoint) {
+      const snapshot = structuredClone(checkpoint);
+      saved.push(snapshot);
+      byRunId.set(checkpoint.runId, snapshot);
+      return snapshot;
+    },
+    async get(runId) {
+      return byRunId.get(runId) ?? null;
+    },
+    async listActive() {
+      return [...byRunId.values()].filter(
+        (checkpoint) =>
+          checkpoint.status !== "succeeded" &&
+          checkpoint.status !== "failed" &&
+          checkpoint.status !== "canceled",
+      );
+    },
+    async delete(runId) {
+      return byRunId.delete(runId);
+    },
+  };
+}
+
+function createCheckpoint(
+  runId: string,
+  taskId: string,
+): AgentExecutionCheckpoint {
+  return {
+    id: `${runId}_checkpoint`,
+    runId,
+    taskId,
+    status: "paused",
+    currentStepId: "step_1",
+    steps: [
+      {
+        id: "step_1",
+        description: "Resume task",
+        expectedOutcome: "Task finishes",
+        state: "running",
+        attempts: 1,
+      },
+    ],
+    messages: [
+      { role: "system", content: "system" },
+      { role: "user", content: "resume this task" },
+    ],
+    toolCallCount: 0,
+    createdAt: "2026-06-07T00:00:00.000Z",
+    updatedAt: "2026-06-07T00:00:00.000Z",
+  };
+}
+
+function createSequentialId(prefix: string): () => string {
+  let next = 1;
+  return () => `${prefix}_${next++}`;
+}
+
+function createSteppedClock(start: string): () => Date {
+  let offset = 0;
+  const startMs = new Date(start).getTime();
+  return () => {
+    const value = new Date(startMs + offset * 60_000);
+    offset += 1;
+    return value;
   };
 }
 

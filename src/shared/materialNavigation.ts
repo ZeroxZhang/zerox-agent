@@ -16,6 +16,7 @@ const materialNavigationIcons: Record<
   skills: { label: "技能", glyph: "✦" },
   tools: { label: "工具", glyph: "⌘" },
   memory: { label: "记忆", glyph: "◎" },
+  learning: { label: "学习", glyph: "✓" },
   settings: { label: "设置", glyph: "⚙" },
 };
 

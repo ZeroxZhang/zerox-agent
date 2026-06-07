@@ -24,6 +24,7 @@ describe("navigation", () => {
       "skills",
       "tools",
       "memory",
+      "learning",
       "settings",
     ]);
   });

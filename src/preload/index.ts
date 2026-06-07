@@ -12,6 +12,7 @@ import type {
   SendChatMessageResult,
 } from "../shared/chat";
 import type { DesktopRuntimeInfo } from "../shared/desktopRuntime";
+import type { AgentEvalReport } from "../shared/agentEval";
 import type {
   CreateMemoryResult,
   DeleteMemoryResult,
@@ -23,6 +24,11 @@ import type {
   RunMemoryMaintenanceResult,
 } from "../shared/memory";
 import type {
+  AgentLearningCandidate,
+  AgentLearningListOptions,
+  ApplyAcceptedLearningReport,
+} from "../shared/agentLearning";
+import type {
   ModelSettingsInput,
   PublicModelSettings,
   SaveModelSettingsResult,
@@ -33,8 +39,11 @@ import type {
   AgentRunEvent,
   AgentRunRecord,
   CancelScheduledTaskRunResult,
+  PauseAgentRunResult,
   RunScheduledTaskResult,
 } from "../shared/agentRuns";
+import type { AgentExecutionCheckpoint } from "../shared/agentExecution";
+import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
 import type {
   CreateScheduledTaskResult,
   DeleteScheduledTaskResult,
@@ -93,6 +102,12 @@ const buildingAgent = {
     ipcRenderer.invoke("toolAudit:list"),
   listAgentRuns: (): Promise<AgentRunRecord[]> =>
     ipcRenderer.invoke("agentRuns:list"),
+  listActiveAgentExecutions: (): Promise<AgentExecutionCheckpoint[]> =>
+    ipcRenderer.invoke("agentRuns:listActiveExecutions"),
+  listAgentRunTrajectory: (runId: string): Promise<AgentTrajectoryEvent[]> =>
+    ipcRenderer.invoke("agentRuns:listTrajectory", runId),
+  getAgentEvalReport: (): Promise<AgentEvalReport> =>
+    ipcRenderer.invoke("agentQuality:getEvalReport"),
   runScheduledTask: (taskId: string): Promise<RunScheduledTaskResult> =>
     ipcRenderer.invoke("agentRuns:runTask", taskId),
   runScheduledTaskStreaming: (taskId: string): Promise<void> =>
@@ -111,6 +126,10 @@ const buildingAgent = {
     ipcRenderer.invoke("agentRuns:cancelTask", taskId),
   retryAgentRun: (runId: string): Promise<RunScheduledTaskResult> =>
     ipcRenderer.invoke("agentRuns:retry", runId),
+  resumeAgentRun: (runId: string): Promise<RunScheduledTaskResult> =>
+    ipcRenderer.invoke("agentRuns:resume", runId),
+  pauseAgentRun: (runId: string): Promise<PauseAgentRunResult> =>
+    ipcRenderer.invoke("agentRuns:pause", runId),
   sendChatMessage: (
     input: SendChatMessageInput,
   ): Promise<SendChatMessageResult> =>
@@ -131,6 +150,20 @@ const buildingAgent = {
   exportMemories: (): Promise<string> => ipcRenderer.invoke("memory:export"),
   runMemoryMaintenance: (): Promise<RunMemoryMaintenanceResult> =>
     ipcRenderer.invoke("memory:maintain"),
+  listLearningCandidates: (
+    options?: AgentLearningListOptions,
+  ): Promise<AgentLearningCandidate[]> =>
+    ipcRenderer.invoke("learning:listCandidates", options),
+  acceptLearningCandidate: (
+    candidateId: string,
+  ): Promise<AgentLearningCandidate | null> =>
+    ipcRenderer.invoke("learning:acceptCandidate", candidateId),
+  rejectLearningCandidate: (
+    candidateId: string,
+  ): Promise<AgentLearningCandidate | null> =>
+    ipcRenderer.invoke("learning:rejectCandidate", candidateId),
+  applyAcceptedLearning: (): Promise<ApplyAcceptedLearningReport> =>
+    ipcRenderer.invoke("learning:applyAccepted"),
 };
 
 contextBridge.exposeInMainWorld("buildingAgent", buildingAgent);

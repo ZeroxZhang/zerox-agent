@@ -6,7 +6,10 @@ import {
   type RunTimelineItem,
 } from "../../shared/agentRunInsights";
 import type { AgentRunRecord } from "../../shared/agentRuns";
+import type { AgentExecutionCheckpoint } from "../../shared/agentExecution";
+import type { AgentTrajectoryEvent } from "../../shared/agentTrajectory";
 import { demoRuns } from "../demoAgentData";
+import { RunTrajectoryPanel } from "./RunTrajectoryPanel";
 
 type RunsStatus =
   | { kind: "idle"; message: string }
@@ -15,8 +18,12 @@ type RunsStatus =
 
 export function RunsPanel() {
   const [runs, setRuns] = useState<AgentRunRecord[]>([]);
+  const [activeExecutions, setActiveExecutions] = useState<
+    AgentExecutionCheckpoint[]
+  >([]);
   const [selectedRunId, setSelectedRunId] = useState("");
   const [selectedEventId, setSelectedEventId] = useState("");
+  const [trajectoryEvents, setTrajectoryEvents] = useState<AgentTrajectoryEvent[]>([]);
   const [status, setStatus] = useState<RunsStatus>({
     kind: "loading",
     message: "正在加载运行记录...",
@@ -33,14 +40,20 @@ export function RunsPanel() {
       return;
     }
 
-    window.buildingAgent
-      .listAgentRuns()
-      .then((loadedRuns) => {
+    Promise.all([
+      window.buildingAgent.listAgentRuns(),
+      window.buildingAgent.listActiveAgentExecutions(),
+    ])
+      .then(([loadedRuns, loadedExecutions]) => {
         setRuns(loadedRuns);
+        setActiveExecutions(loadedExecutions);
         setSelectedRunId(loadedRuns[0]?.id ?? "");
         setStatus({
           kind: "idle",
-          message: loadedRuns.length ? "运行记录已加载。" : "还没有运行记录。",
+          message:
+            loadedRuns.length || loadedExecutions.length
+              ? "运行记录已加载。"
+              : "还没有运行记录。",
         });
       })
       .catch((error) => {
@@ -68,6 +81,23 @@ export function RunsPanel() {
   useEffect(() => {
     setSelectedEventId("");
   }, [selectedRunId]);
+
+  useEffect(() => {
+    if (!selectedRun) {
+      setTrajectoryEvents([]);
+      return;
+    }
+
+    if (!window.buildingAgent) {
+      setTrajectoryEvents([]);
+      return;
+    }
+
+    window.buildingAgent
+      .listAgentRunTrajectory(selectedRun.id)
+      .then(setTrajectoryEvents)
+      .catch(() => setTrajectoryEvents([]));
+  }, [selectedRun]);
 
   async function handleRetrySelectedRun() {
     if (!selectedRun) {
@@ -104,6 +134,80 @@ export function RunsPanel() {
     });
   }
 
+  async function handleResumeExecution(execution: AgentExecutionCheckpoint) {
+    if (!window.buildingAgent) {
+      setStatus({
+        kind: "idle",
+        message: "浏览器预览模式无法恢复真实运行。",
+      });
+      return;
+    }
+
+    setStatus({
+      kind: "loading",
+      message: `正在恢复运行：${execution.runId}`,
+    });
+    const result = await window.buildingAgent.resumeAgentRun(execution.runId);
+
+    if (!result.ok) {
+      setStatus({
+        kind: "error",
+        message: result.message,
+      });
+      return;
+    }
+
+    setRuns((currentRuns) => [result.run, ...currentRuns]);
+    setActiveExecutions((currentExecutions) =>
+      currentExecutions.filter((item) => item.runId !== execution.runId),
+    );
+    setSelectedRunId(result.run.id);
+    setStatus({
+      kind: result.run.status === "succeeded" ? "idle" : "error",
+      message: `恢复完成：${translateRunStatus(result.run.status)}。`,
+    });
+  }
+
+  async function handlePauseExecution(execution: AgentExecutionCheckpoint) {
+    if (!window.buildingAgent) {
+      setStatus({
+        kind: "idle",
+        message: "浏览器预览模式无法暂停真实运行。",
+      });
+      return;
+    }
+
+    setStatus({
+      kind: "loading",
+      message: `正在暂停运行：${execution.runId}`,
+    });
+    const result = await window.buildingAgent.pauseAgentRun(execution.runId);
+
+    if (!result.ok) {
+      setStatus({
+        kind: "error",
+        message: result.message,
+      });
+      return;
+    }
+
+    setActiveExecutions((currentExecutions) =>
+      currentExecutions.map((item) =>
+        item.runId === execution.runId
+          ? {
+              ...item,
+              status: "paused",
+              updatedAt: new Date().toISOString(),
+            }
+          : item,
+      ),
+    );
+    setStatus({
+      kind: "idle",
+      message: result.message,
+    });
+  }
+
   return (
     <section className="runs-panel">
       <div className="panel-heading">
@@ -118,6 +222,46 @@ export function RunsPanel() {
 
       <div className="runs-layout">
         <section className="run-list-panel" aria-label="运行历史">
+          {activeExecutions.length ? (
+            <div className="active-run-list" aria-label="可恢复运行">
+              {activeExecutions.map((execution) => (
+                <article
+                  className={`run-list-item is-${execution.status}`}
+                  key={execution.runId}
+                >
+                  <span>{translateRunStatus(execution.status)}</span>
+                  <strong>{execution.runId}</strong>
+                  <small>
+                    {execution.currentStepId
+                      ? `步骤 ${execution.currentStepId}`
+                      : "等待恢复"}
+                  </small>
+                  <div className="run-list-actions">
+                    {execution.status === "paused" ? (
+                      <button
+                        className="secondary-action"
+                        disabled={status.kind === "loading"}
+                        onClick={() => void handleResumeExecution(execution)}
+                        type="button"
+                      >
+                        恢复
+                      </button>
+                    ) : (
+                      <button
+                        className="secondary-action"
+                        disabled={status.kind === "loading"}
+                        onClick={() => void handlePauseExecution(execution)}
+                        type="button"
+                      >
+                        暂停
+                      </button>
+                    )}
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : null}
+
           {runs.length ? (
             runs.map((run) => (
               <button
@@ -215,6 +359,7 @@ export function RunsPanel() {
           event={selectedEvent}
           guidance={guidance}
           run={selectedRun}
+          trajectoryEvents={trajectoryEvents}
         />
       </div>
 
@@ -227,6 +372,7 @@ function RunInspector(props: {
   event: RunTimelineItem | null;
   guidance: ReturnType<typeof getRunGuidance> | null;
   run: AgentRunRecord | null;
+  trajectoryEvents: AgentTrajectoryEvent[];
 }) {
   return (
     <aside className="run-inspector" aria-label="运行检查器">
@@ -289,6 +435,8 @@ function RunInspector(props: {
           </dl>
         </div>
       ) : null}
+
+      <RunTrajectoryPanel events={props.trajectoryEvents} />
     </aside>
   );
 }
@@ -309,6 +457,22 @@ function formatTime(value: string): string {
 }
 
 function translateRunStatus(status: AgentRunRecord["status"]): string {
+  if (status === "queued") {
+    return "排队中";
+  }
+
+  if (status === "running") {
+    return "运行中";
+  }
+
+  if (status === "waiting_for_approval") {
+    return "等待授权";
+  }
+
+  if (status === "paused") {
+    return "可恢复";
+  }
+
   if (status === "succeeded") {
     return "成功";
   }

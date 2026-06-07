@@ -12,6 +12,24 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { getAgentValidationModeOptions } from "./agentValidationMode";
 import {
+  createAgentExecutionStore,
+  type AgentExecutionStore,
+} from "./agentExecutionStore";
+import {
+  createAgentTrajectoryStore,
+  type AgentTrajectoryStore,
+} from "./agentTrajectoryStore";
+import {
+  createAgentLearningStore,
+  type AgentLearningStore,
+} from "./agentLearningStore";
+import {
+  createAgentLearningService,
+  type AgentLearningService,
+} from "./agentLearningService";
+import { createAgentEvalFixtures } from "./eval/agentEvalFixtures";
+import { runAgentEvals } from "./eval/agentEvalRunner";
+import {
   getDefaultLoginItemSettings,
   getMainWindowOptions,
   getTrayTooltip,
@@ -97,8 +115,10 @@ import type {
 } from "../shared/scheduledTasks";
 import type {
   CancelScheduledTaskRunResult,
+  PauseAgentRunResult,
   RunScheduledTaskResult,
 } from "../shared/agentRuns";
+import { isTerminalExecutionStatus } from "../shared/agentExecution";
 import type {
   CreateMemoryResult,
   DeleteMemoryResult,
@@ -107,7 +127,10 @@ import type {
   MemorySearchOptions,
   RunMemoryMaintenanceResult,
 } from "../shared/memory";
+import type { AgentLearningListOptions } from "../shared/agentLearning";
 import type { ToolCallRequest } from "../shared/toolPermissions";
+import type { AgentEvalReport } from "../shared/agentEval";
+import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
 import type {
   ChatSessionListItem,
   ChatSessionRecord,
@@ -145,7 +168,11 @@ let modelSettingsStore: ModelSettingsStore | null = null;
 let scheduledTaskStore: ScheduledTaskStore | null = null;
 let toolAuditLog: ToolAuditLog | null = null;
 let toolAuthorizationService: ToolAuthorizationService | null = null;
+let agentExecutionStore: AgentExecutionStore | null = null;
+let agentTrajectoryStore: AgentTrajectoryStore | null = null;
 let agentRunStore: AgentRunStore | null = null;
+let agentLearningStore: AgentLearningStore | null = null;
+let agentLearningService: AgentLearningService | null = null;
 let agentRunnerService: AgentRunnerService | null = null;
 let chatService: ChatService | null = null;
 let chatSessionStore: ChatSessionStore | null = null;
@@ -477,6 +504,17 @@ ipcMain.handle(
 );
 ipcMain.handle("toolAudit:list", () => getToolAuditLog().list({ limit: 50 }));
 ipcMain.handle("agentRuns:list", () => getAgentRunStore().list({ limit: 50 }));
+ipcMain.handle("agentRuns:listActiveExecutions", () =>
+  getAgentExecutionStore().listActive(),
+);
+ipcMain.handle(
+  "agentRuns:listTrajectory",
+  (_event, runId: string): Promise<AgentTrajectoryEvent[]> =>
+    getAgentTrajectoryStore().list(runId),
+);
+ipcMain.handle("agentQuality:getEvalReport", (): Promise<AgentEvalReport> =>
+  runAgentEvals(createAgentEvalFixtures()),
+);
 ipcMain.handle(
   "agentRuns:runTask",
   async (_event, taskId: string): Promise<RunScheduledTaskResult> =>
@@ -537,6 +575,16 @@ ipcMain.handle(
 
     return runAgentTask(run.taskId);
   },
+);
+ipcMain.handle(
+  "agentRuns:resume",
+  async (_event, runId: string): Promise<RunScheduledTaskResult> =>
+    resumeAgentRun(runId),
+);
+ipcMain.handle(
+  "agentRuns:pause",
+  async (_event, runId: string): Promise<PauseAgentRunResult> =>
+    pauseAgentRun(runId),
 );
 ipcMain.handle(
   "chat:sendMessage",
@@ -622,6 +670,18 @@ ipcMain.handle(
       };
     }
   },
+);
+ipcMain.handle("learning:listCandidates", (_event, options?: AgentLearningListOptions) =>
+  getAgentLearningStore().list(options),
+);
+ipcMain.handle("learning:acceptCandidate", (_event, candidateId: string) =>
+  getAgentLearningStore().setStatus(candidateId, "accepted"),
+);
+ipcMain.handle("learning:rejectCandidate", (_event, candidateId: string) =>
+  getAgentLearningStore().setStatus(candidateId, "rejected"),
+);
+ipcMain.handle("learning:applyAccepted", () =>
+  getAgentLearningService().applyAcceptedLearning(),
 );
 ipcMain.handle("modelSettings:load", () => getModelSettingsStore().load());
 ipcMain.handle(
@@ -780,6 +840,26 @@ function getAgentRunStore(): AgentRunStore {
   return agentRunStore;
 }
 
+function getAgentExecutionStore(): AgentExecutionStore {
+  if (!agentExecutionStore) {
+    agentExecutionStore = createAgentExecutionStore({
+      configDir: path.join(app.getPath("userData"), "config"),
+    });
+  }
+
+  return agentExecutionStore;
+}
+
+function getAgentTrajectoryStore(): AgentTrajectoryStore {
+  if (!agentTrajectoryStore) {
+    agentTrajectoryStore = createAgentTrajectoryStore({
+      configDir: path.join(app.getPath("userData"), "config"),
+    });
+  }
+
+  return agentTrajectoryStore;
+}
+
 function getMemoryStore(): MemoryStore {
   if (!memoryStore) {
     memoryStore = createMemoryStore({
@@ -810,6 +890,27 @@ function getMemoryStore(): MemoryStore {
   }
 
   return memoryStore;
+}
+
+function getAgentLearningStore(): AgentLearningStore {
+  if (!agentLearningStore) {
+    agentLearningStore = createAgentLearningStore({
+      configDir: path.join(app.getPath("userData"), "config"),
+    });
+  }
+
+  return agentLearningStore;
+}
+
+function getAgentLearningService(): AgentLearningService {
+  if (!agentLearningService) {
+    agentLearningService = createAgentLearningService({
+      learningStore: getAgentLearningStore(),
+      memoryStore: getMemoryStore(),
+    });
+  }
+
+  return agentLearningService;
 }
 
 function getAgentRunnerService(): AgentRunnerService {
@@ -850,6 +951,9 @@ function getAgentRunnerService(): AgentRunnerService {
       },
       toolAuthorizationService: getToolAuthorizationService(),
       toolExecutor,
+      executionStore: getAgentExecutionStore(),
+      trajectoryStore: getAgentTrajectoryStore(),
+      learningStore: getAgentLearningStore(),
       memoryStore: getMemoryStore(),
     });
   }
@@ -1029,6 +1133,75 @@ async function runAgentTask(taskId: string): Promise<RunScheduledTaskResult> {
       activeTaskRunControllers.delete(taskId);
     }
   }
+}
+
+async function resumeAgentRun(runId: string): Promise<RunScheduledTaskResult> {
+  const checkpoint = await getAgentExecutionStore().get(runId);
+
+  if (!checkpoint) {
+    return {
+      ok: false,
+      message: "运行检查点不存在，无法恢复。",
+    };
+  }
+
+  if (activeTaskRunControllers.has(checkpoint.taskId)) {
+    return {
+      ok: false,
+      message: "这个任务已经在运行中。",
+    };
+  }
+
+  const controller = new AbortController();
+  activeTaskRunControllers.set(checkpoint.taskId, controller);
+
+  try {
+    return await getAgentRunnerService().resumeRun(runId, {
+      signal: controller.signal,
+    });
+  } finally {
+    if (activeTaskRunControllers.get(checkpoint.taskId) === controller) {
+      activeTaskRunControllers.delete(checkpoint.taskId);
+    }
+  }
+}
+
+async function pauseAgentRun(runId: string): Promise<PauseAgentRunResult> {
+  const checkpoint = await getAgentExecutionStore().get(runId);
+
+  if (!checkpoint) {
+    return {
+      ok: false,
+      message: "运行检查点不存在，无法暂停。",
+    };
+  }
+
+  if (isTerminalExecutionStatus(checkpoint.status)) {
+    return {
+      ok: false,
+      message: "运行已结束，无法暂停。",
+    };
+  }
+
+  const controller = activeTaskRunControllers.get(checkpoint.taskId);
+  if (controller) {
+    controller.abort("pause");
+    return {
+      ok: true,
+      message: "已请求暂停运行。",
+    };
+  }
+
+  await getAgentExecutionStore().save({
+    ...checkpoint,
+    status: "paused",
+    updatedAt: new Date().toISOString(),
+  });
+
+  return {
+    ok: true,
+    message: "运行已标记为可恢复。",
+  };
 }
 
 function startTaskScheduler() {
