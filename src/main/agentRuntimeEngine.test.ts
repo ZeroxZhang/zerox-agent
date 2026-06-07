@@ -3,11 +3,13 @@ import { createAgentRuntimeEngine } from "./agentRuntimeEngine";
 import type { AgentExecutionStore } from "./agentExecutionStore";
 import type { AgentRunStore } from "./agentRunStore";
 import type { AgentToolExecutor } from "./agentToolExecutor";
+import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
 import type { ChatClient, ChatCompletionResponse } from "./openAiCompatibleClient";
 import type { ScheduledTaskStore } from "./taskStore";
 import type { ToolAuthorizationService } from "./toolAuthorizationService";
 import type { AgentExecutionCheckpoint } from "../shared/agentExecution";
 import type { AgentRunRecord } from "../shared/agentRuns";
+import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
 import type { ScheduledTask } from "../shared/scheduledTasks";
 import type { SkillRecord } from "../shared/skills";
 import { getDefaultTaskPermissionPolicy } from "../shared/toolPermissions";
@@ -95,6 +97,51 @@ describe("agent runtime engine", () => {
     expect(savedCheckpoints.at(-1)).toMatchObject({
       status: "failed",
     });
+  });
+
+  it("records trajectory events for model, tool, checkpoint, and final summary boundaries", async () => {
+    const trajectoryEvents: AgentTrajectoryEvent[] = [];
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore([]),
+      trajectoryStore: createMemoryTrajectoryStore(trajectoryEvents),
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: createChatClient([
+        toolCallResponse("file_read", { path: "~/Downloads/notes.md" }),
+        finalResponse("Report complete"),
+      ]),
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor([]),
+      createId: createSequentialId("trajectory"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+
+    await engine.startTask("task_123");
+
+    expect(trajectoryEvents.map((event) => event.type)).toEqual([
+      "state_transition",
+      "checkpoint_written",
+      "state_transition",
+      "checkpoint_written",
+      "model_request",
+      "model_response",
+      "tool_call",
+      "tool_result",
+      "checkpoint_written",
+      "model_request",
+      "model_response",
+      "final_summary",
+      "state_transition",
+      "checkpoint_written",
+    ]);
+    expect(trajectoryEvents.every((event) => event.runId === "trajectory_1")).toBe(
+      true,
+    );
+    expect(trajectoryEvents.every((event) => event.redaction.containsApiKey === false)).toBe(
+      true,
+    );
   });
 });
 
@@ -212,6 +259,20 @@ function createMemoryExecutionStore(
     },
     async delete(runId) {
       return byRunId.delete(runId);
+    },
+  };
+}
+
+function createMemoryTrajectoryStore(
+  events: AgentTrajectoryEvent[],
+): AgentTrajectoryStore {
+  return {
+    async append(_runId, event) {
+      events.push(structuredClone(event));
+      return event;
+    },
+    async list() {
+      return events;
     },
   };
 }

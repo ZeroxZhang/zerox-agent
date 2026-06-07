@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { AgentExecutionStore } from "./agentExecutionStore";
 import type { AgentRunStore } from "./agentRunStore";
 import type { AgentToolExecutor } from "./agentToolExecutor";
+import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
 import { createAgentRuntimeEngine } from "./agentRuntimeEngine";
 import { createContextManager, type ContextManager } from "./contextManager";
 import type { MemoryStore } from "./memoryStore";
@@ -64,6 +65,7 @@ export function createAgentRunnerService(options: {
   toolAuthorizationService: ToolAuthorizationService;
   toolExecutor: AgentToolExecutor;
   executionStore?: AgentExecutionStore;
+  trajectoryStore?: AgentTrajectoryStore;
   memoryStore?: Pick<MemoryStore, "create">;
   contextManager?: ContextManager;
   createId?: () => string;
@@ -84,6 +86,7 @@ export function createAgentRunnerService(options: {
         getModelProfile: options.getModelProfile,
         toolAuthorizationService: options.toolAuthorizationService,
         toolExecutor: options.toolExecutor,
+        ...(options.trajectoryStore ? { trajectoryStore: options.trajectoryStore } : {}),
         ...(options.memoryStore ? { memoryStore: options.memoryStore } : {}),
         createId,
         now,

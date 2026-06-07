@@ -16,6 +16,10 @@ import {
   type AgentExecutionStore,
 } from "./agentExecutionStore";
 import {
+  createAgentTrajectoryStore,
+  type AgentTrajectoryStore,
+} from "./agentTrajectoryStore";
+import {
   getDefaultLoginItemSettings,
   getMainWindowOptions,
   getTrayTooltip,
@@ -150,6 +154,7 @@ let scheduledTaskStore: ScheduledTaskStore | null = null;
 let toolAuditLog: ToolAuditLog | null = null;
 let toolAuthorizationService: ToolAuthorizationService | null = null;
 let agentExecutionStore: AgentExecutionStore | null = null;
+let agentTrajectoryStore: AgentTrajectoryStore | null = null;
 let agentRunStore: AgentRunStore | null = null;
 let agentRunnerService: AgentRunnerService | null = null;
 let chatService: ChatService | null = null;
@@ -803,6 +808,16 @@ function getAgentExecutionStore(): AgentExecutionStore {
   return agentExecutionStore;
 }
 
+function getAgentTrajectoryStore(): AgentTrajectoryStore {
+  if (!agentTrajectoryStore) {
+    agentTrajectoryStore = createAgentTrajectoryStore({
+      configDir: path.join(app.getPath("userData"), "config"),
+    });
+  }
+
+  return agentTrajectoryStore;
+}
+
 function getMemoryStore(): MemoryStore {
   if (!memoryStore) {
     memoryStore = createMemoryStore({
@@ -874,6 +889,7 @@ function getAgentRunnerService(): AgentRunnerService {
       toolAuthorizationService: getToolAuthorizationService(),
       toolExecutor,
       executionStore: getAgentExecutionStore(),
+      trajectoryStore: getAgentTrajectoryStore(),
       memoryStore: getMemoryStore(),
     });
   }

@@ -3,6 +3,7 @@ import type { AgentExecutionStore } from "./agentExecutionStore";
 import { classifyAgentFailure } from "./agentFailureClassifier";
 import type { AgentRunStore } from "./agentRunStore";
 import type { AgentToolExecutor } from "./agentToolExecutor";
+import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
 import type { MemoryStore } from "./memoryStore";
 import type {
   ChatClient,
@@ -23,6 +24,10 @@ import type {
   AgentExecutionStatus,
   AgentExecutionStep,
 } from "../shared/agentExecution";
+import type {
+  AgentTrajectoryEvent,
+  AgentTrajectoryEventType,
+} from "../shared/agentTrajectory";
 import type {
   AgentRunEvent,
   AgentRunRecord,
@@ -59,12 +64,14 @@ export function createAgentRuntimeEngine(options: {
   getModelProfile: () => Promise<AgentRuntimeModelProfile>;
   toolAuthorizationService: ToolAuthorizationService;
   toolExecutor: AgentToolExecutor;
+  trajectoryStore?: AgentTrajectoryStore;
   memoryStore?: Pick<MemoryStore, "create">;
   createId?: () => string;
   now?: () => Date;
 }): AgentRuntimeEngine {
   const createId = options.createId ?? randomUUID;
   const now = options.now ?? (() => new Date());
+  let trajectorySequence = 0;
 
   function createEvent(
     level: AgentRunEvent["level"],
@@ -91,8 +98,43 @@ export function createAgentRuntimeEngine(options: {
       id: createId(),
       updatedAt: now().toISOString(),
     };
+    if (checkpoint.status !== status) {
+      await appendTrajectory(updated.runId, "state_transition", {
+        from: checkpoint.status,
+        to: status,
+      });
+    }
     await options.executionStore.save(updated);
+    await appendTrajectory(updated.runId, "checkpoint_written", {
+      checkpointId: updated.id,
+      status: updated.status,
+      currentStepId: updated.currentStepId,
+    });
     return updated;
+  }
+
+  async function appendTrajectory(
+    runId: string,
+    type: AgentTrajectoryEventType,
+    payload: Record<string, unknown>,
+    redaction: AgentTrajectoryEvent["redaction"] = {
+      containsApiKey: false,
+      containsFileContent: false,
+      containsUserText: false,
+    },
+  ) {
+    if (!options.trajectoryStore) return;
+
+    trajectorySequence += 1;
+    await options.trajectoryStore.append(runId, {
+      id: createId(),
+      runId,
+      type,
+      sequence: trajectorySequence,
+      payload,
+      redaction,
+      createdAt: now().toISOString(),
+    });
   }
 
   async function finishRun(input: {
@@ -185,12 +227,30 @@ export function createAgentRuntimeEngine(options: {
 
     for (let turn = 0; turn < maxTurns; turn += 1) {
       throwIfCanceled(signal);
+      await appendTrajectory(current.runId, "model_request", {
+        turn,
+        messageCount: messages.length,
+      }, {
+        containsApiKey: false,
+        containsFileContent: false,
+        containsUserText: true,
+      });
       const response = await options.chatClient.complete({
         ...profile,
         messages,
         tools: toolDefinitions,
         tool_choice: "auto",
         ...(signal ? { signal } : {}),
+      });
+      await appendTrajectory(current.runId, "model_response", {
+        turn,
+        hasContent: Boolean(response.content),
+        toolCallCount: response.toolCalls.length,
+        finishReason: response.finishReason,
+      }, {
+        containsApiKey: false,
+        containsFileContent: false,
+        containsUserText: Boolean(response.content),
       });
 
       if (!response.toolCalls.length && response.content) {
@@ -199,6 +259,14 @@ export function createAgentRuntimeEngine(options: {
           messages: messages.map(toExecutionMessage),
           toolCallCount,
         };
+        await appendTrajectory(current.runId, "final_summary", {
+          status: "succeeded",
+          summaryLength: response.content.length,
+        }, {
+          containsApiKey: false,
+          containsFileContent: false,
+          containsUserText: true,
+        });
         return finishRun({
           checkpoint: current,
           taskId: task.id,
@@ -224,6 +292,15 @@ export function createAgentRuntimeEngine(options: {
       for (const toolCall of response.toolCalls) {
         const toolName = toolCall.function.name as AgentToolName;
         const args = parseToolArguments(toolCall.function.arguments);
+        await appendTrajectory(current.runId, "tool_call", {
+          toolCallId: toolCall.id,
+          toolName,
+          args,
+        }, {
+          containsApiKey: false,
+          containsFileContent: false,
+          containsUserText: true,
+        });
         const auth = await options.toolAuthorizationService.authorize(task.id, {
           toolName,
           args,
@@ -235,6 +312,15 @@ export function createAgentRuntimeEngine(options: {
 
         const result = await options.toolExecutor.execute({ toolName, args });
         toolCallCount += 1;
+        await appendTrajectory(current.runId, "tool_result", {
+          toolCallId: toolCall.id,
+          toolName,
+          ok: result.ok,
+        }, {
+          containsApiKey: false,
+          containsFileContent: result.ok,
+          containsUserText: false,
+        });
         messages.push({
           role: "tool",
           tool_call_id: toolCall.id,
@@ -301,6 +387,15 @@ export function createAgentRuntimeEngine(options: {
       };
 
       await options.executionStore.save(checkpoint);
+      await appendTrajectory(runId, "state_transition", {
+        from: null,
+        to: "queued",
+      });
+      await appendTrajectory(runId, "checkpoint_written", {
+        checkpointId: checkpoint.id,
+        status: checkpoint.status,
+        currentStepId: checkpoint.currentStepId,
+      });
 
       try {
         return await runFromCheckpoint(
