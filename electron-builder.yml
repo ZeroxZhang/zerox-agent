@@ -1,0 +1,20 @@
+appId: local.zerox.agent.desktop
+productName: Zerox Agent
+asar: true
+npmRebuild: false
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - skills/**/*
+  - package.json
+extraMetadata:
+  main: dist-electron/main/main.js
+mac:
+  category: public.app-category.productivity
+  icon: build/icon.icns
+  target:
+    - dmg
+    - zip

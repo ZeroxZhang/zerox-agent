@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="480" viewBox="0 0 1440 480" role="img" aria-labelledby="title desc">
+  <title id="title">Zerox logo</title>
+  <desc id="desc">Minimal Zerox wordmark with an open zero and crossed X symbol.</desc>
+  <rect width="1440" height="480" rx="48" fill="#fbfaf5"/>
+  <g transform="translate(124 92)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path
+      d="M206 68A148 148 0 1 0 206 228"
+      stroke="#15171d"
+      stroke-width="30"
+    />
+    <path
+      d="M92 236L236 92"
+      stroke="#15171d"
+      stroke-width="30"
+    />
+    <path
+      d="M226 236L92 102"
+      stroke="#69e2d6"
+      stroke-width="18"
+    />
+  </g>
+  <text
+    x="440"
+    y="284"
+    fill="#15171d"
+    font-family="Inter, SF Pro Display, Segoe UI, sans-serif"
+    font-size="168"
+    font-weight="650"
+    letter-spacing="-2"
+  >Zerox</text>
+  <text
+    x="448"
+    y="342"
+    fill="#646972"
+    font-family="Inter, SF Pro Text, Segoe UI, sans-serif"
+    font-size="32"
+    font-weight="500"
+    letter-spacing="8"
+  >LOCAL AGENT</text>
+</svg>

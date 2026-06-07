@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Building Agent - OnePager</title>
+    <style>
+        :root {
+            --bg-color: #121212;
+            --card-bg: #1e1e1e;
+            --text-main: #e5e5e5;
+            --text-muted: #a3a3a3;
+            --accent: #f59e0b; /* Amber */
+            --accent-dim: #b45309;
+            --border: #333333;
+        }
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        header {
+            border-bottom: 2px solid var(--accent);
+            padding-bottom: 20px;
+            margin-bottom: 40px;
+        }
+        h1 {
+            font-size: 3rem;
+            margin: 0;
+            letter-spacing: -1px;
+            color: var(--text-main);
+        }
+        .tagline {
+            font-size: 1.25rem;
+            color: var(--accent);
+            margin-top: 10px;
+            font-weight: 500;
+        }
+        .section {
+            margin-bottom: 40px;
+        }
+        h2 {
+            font-size: 1.5rem;
+            border-left: 4px solid var(--accent);
+            padding-left: 12px;
+            margin-bottom: 20px;
+            color: var(--text-main);
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+        }
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            padding: 20px;
+            border-radius: 8px;
+        }
+        .card h3 {
+            margin-top: 0;
+            color: var(--accent);
+            font-size: 1.1rem;
+        }
+        .card p {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+            margin-bottom: 0;
+        }
+        .tech-stack {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .tech-tag {
+            background: #2a2a2a;
+            color: var(--accent);
+            padding: 5px 12px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 0.9rem;
+            border: 1px solid var(--border);
+        }
+        .cta {
+            text-align: center;
+            margin-top: 60px;
+            padding: 40px;
+            background: var(--card-bg);
+            border-radius: 8px;
+            border: 1px solid var(--accent);
+        }
+        .cta h2 {
+            border: none;
+            padding: 0;
+            text-align: center;
+        }
+        .btn {
+            display: inline-block;
+            background: var(--accent);
+            color: #000;
+            padding: 12px 24px;
+            text-decoration: none;
+            font-weight: bold;
+            border-radius: 4px;
+            margin-top: 20px;
+        }
+        footer {
+            margin-top: 60px;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            border-top: 1px solid var(--border);
+            padding-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Building Agent</h1>
+            <div class="tagline">Local-First Desktop AI Agent MVP</div>
+        </header>
+
+        <div class="section">
+            <h2>核心价值</h2>
+            <p style="font-size: 1.1rem; color: var(--text-muted);">
+                从零构建的 macOS 桌面 AI Agent。主打<strong>本地优先</strong>、<strong>隐私安全</strong>与<strong>高度可扩展</strong>的技能生态。让 AI 真正成为你的本地工作流助手。
+            </p>
+        </div>
+
+        <div class="section">
+            <h2>核心功能</h2>
+            <div class="grid">
+                <div class="card">
+                    <h3>🧠 智能调度</h3>
+                    <p>多模式任务调度与 Agent Runner，支持复杂工作流的自动执行与状态管理。</p>
+                </div>
+                <div class="card">
+                    <h3>🔌 技能生态</h3>
+                    <p>自动扫描本地 Skills 目录，动态加载能力。支持自定义技能扩展。</p>
+                </div>
+                <div class="card">
+                    <h3>🔒 权限管控</h3>
+                    <p>细粒度的工具权限管理，确保 Agent 操作安全可控，防止越权执行。</p>
+                </div>
+                <div class="card">
+                    <h3>💾 本地记忆</h3>
+                    <p>内置 Local Memory 系统，持久化上下文与历史交互，越用越懂你。</p>
+                </div>
+                <div class="card">
+                    <h3>⚙️ 模型配置</h3>
+                    <p>灵活的模型配置与连通性测试，支持多种 LLM 后端接入。</p>
+                </div>
+                <div class="card">
+                    <h3>🖥️ 桌面体验</h3>
+                    <p>基于 Electron 构建的原生级桌面体验，无缝集成 macOS 系统能力。</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>技术栈</h2>
+            <div class="tech-stack">
+                <span class="tech-tag">Electron</span>
+                <span class="tech-tag">React</span>
+                <span class="tech-tag">TypeScript</span>
+                <span class="tech-tag">Vite</span>
+                <span class="tech-tag">macOS Native</span>
+            </div>
+        </div>
+
+        <div class="cta">
+            <h2>Ready to Build?</h2>
+            <p style="color: var(--text-muted);">加入开发，体验下一代本地 AI Agent。</p>
+            <a href="#" class="btn">Get Started</a>
+        </div>
+
+        <footer>
+            Generated by OnePager Skill • Building Agent Project
+        </footer>
+    </div>
+</body>
+</html>

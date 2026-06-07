@@ -1,0 +1,10 @@
+.DS_Store
+.superpowers/
+dist/
+dist-electron/
+release/
+node_modules/
+session_recording/
+npm-debug.log*
+*.local
+.api_info.md

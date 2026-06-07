@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Zerox app icon</title>
+  <desc id="desc">A quiet open zero crossed by a precise diagonal X gesture.</desc>
+  <rect width="1024" height="1024" rx="236" fill="#fbfaf5"/>
+  <g id="zerox-mark" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path
+      d="M708 316A276 276 0 1 0 708 708"
+      stroke="#15171d"
+      stroke-width="56"
+    />
+    <path
+      d="M356 668L668 356"
+      stroke="#15171d"
+      stroke-width="56"
+    />
+    <path
+      d="M644 668L356 380"
+      stroke="#69e2d6"
+      stroke-width="34"
+    />
+  </g>
+</svg>
