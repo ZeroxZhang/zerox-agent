@@ -70,11 +70,7 @@ export function createAgentExecutionStore(options: {
       );
 
       return checkpoints
-        .filter(
-          (checkpoint): checkpoint is AgentExecutionCheckpoint =>
-            Boolean(checkpoint) &&
-            !isTerminalExecutionStatus(checkpoint.status),
-        )
+        .filter(isActiveCheckpoint)
         .sort(
           (left, right) =>
             new Date(right.updatedAt).getTime() -
@@ -96,4 +92,10 @@ export function createAgentExecutionStore(options: {
       }
     },
   };
+}
+
+function isActiveCheckpoint(
+  checkpoint: AgentExecutionCheckpoint | null,
+): checkpoint is AgentExecutionCheckpoint {
+  return checkpoint !== null && !isTerminalExecutionStatus(checkpoint.status);
 }
