@@ -54,6 +54,10 @@
 
 It is not a chat wrapper — it is a general-purpose desktop agent that runs locally, configures OpenAI-compatible models, scans local `SKILL.md` skill files, executes a Plan‑Execute‑Reflect loop, invokes permission-controlled tools, persists experiential knowledge into local long-term memory, and stays resident via the macOS system tray.
 
+<p align="center">
+  <img src="zerox-agent-onepage.png" alt="Zerox Agent one-page product overview" width="720" />
+</p>
+
 ### Design Principles
 
 | Principle | Description |
@@ -613,7 +617,7 @@ Current version: MVP v1.0.0. Planned:
 | 打包 | electron-builder 26 | macOS `.app` / `.dmg` / `.zip` 分发 |
 | 解析 | yaml (cron-parser) | SKILL.md 前端元数据解析、cron 表达式 |
 
-### 数据模式
+### 本地数据与启动
 
 应用明确指出当前所处的数据模式：
 
@@ -777,7 +781,7 @@ npm run dev
 - TypeScript 主进程编译 (watch 模式)
 - Electron 窗口 (自动等待编译完成)
 
-### 第一次使用
+### 首次启动引导（第一次使用）
 
 1. **配置模型**：打开应用 → 设置 → 填写 Base URL、Chat Model、API Key
 2. **准备能力**：回到首页，点击「准备本地智能体」检查模型、技能和默认任务
