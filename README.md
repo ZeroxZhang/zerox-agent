@@ -54,7 +54,7 @@
 
 It is not a chat wrapper or a generic hosted agent surface. It runs locally, configures OpenAI-compatible models, scans local `SKILL.md` skill files, executes recoverable agent runs, invokes permission-controlled tools, persists experiential knowledge into local long-term memory, and keeps learning user-reviewed before it changes future behavior.
 
-The product boundary is documented in [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md): Zerox optimizes for trusted local control, recoverable agent runs, explicit permissions, observable trajectories, and user-reviewed learning.
+The product boundary is documented in [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md): Zerox optimizes for trusted local control, recoverable agent runs, explicit permissions, observable trajectories, and user-reviewed learning. Runtime and learning details live in [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md) and [`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md).
 
 <p align="center">
   <img src="zerox-agent-onepage.png" alt="Zerox Agent one-page product overview" width="720" />
@@ -114,7 +114,7 @@ The product boundary is documented in [`docs/product/zerox-positioning.md`](docs
 | Bundler | Vite 8 | HMR dev server for renderer |
 | Language | TypeScript 6 | Full-stack type safety, 3 tsconfig targets |
 | UI | React 19 | Function components + Hooks, Material Design |
-| Testing | Vitest 4 | 51 unit tests across shared, main, and renderer |
+| Testing | Vitest 4 | Unit tests, production build, and deterministic agent evals |
 | Packaging | electron-builder 26 | macOS `.app` / `.dmg` / `.zip` distribution |
 | Parsing | yaml, cron-parser | SKILL.md frontmatter, cron expressions |
 
@@ -134,6 +134,9 @@ All data is stored under Electron `userData/config/`:
 | `model-settings.json` | Model configuration (no plaintext API key) |
 | `scheduled-tasks.json` | Scheduled task definitions |
 | `agent-runs.jsonl` | Task run logs (JSON Lines) |
+| `agent-executions/<runId>.json` | Recoverable runtime checkpoints |
+| `agent-trajectories/<runId>.jsonl` | Replayable model/tool/transition trajectory events |
+| `agent-learning-candidates.json` | User-reviewed learning candidates |
 | `tool-audit.jsonl` | Tool authorization audit log |
 | `memory-records.json` | Local long-term memory |
 | `chat-sessions.json` | Chat session records |
@@ -246,7 +249,7 @@ git clone <repo-url> && cd "building agent"
 # 2. Install dependencies
 npm install
 
-# 3. Run full self-check (tests + build)
+# 3. Run full self-check (tests + build + deterministic eval)
 npm run doctor
 
 # 4. Launch the desktop app (production mode)
@@ -299,7 +302,7 @@ Runs full validation inside the Electron main process: reads config → saves mo
 | Command | Description |
 |---------|-------------|
 | `npm run dev` | Development mode (Vite + tsc watch + Electron) |
-| `npm run doctor` | Full self-check: `npm test && npm run build` |
+| `npm run doctor` | Full self-check: tests, build, and deterministic agent eval |
 | `npm run build` | Production build |
 | `npm run start:prod` | Production build & launch |
 | `npm run test` | Run all unit tests |
@@ -307,6 +310,7 @@ Runs full validation inside the Electron main process: reads config → saves mo
 | `npm run smoke:llm` | Real-model connectivity smoke |
 | `npm run smoke:prod` | Production smoke (start → verify render → exit) |
 | `npm run validate:agent` | Full desktop agent validation |
+| `npm run eval:agent` | Deterministic local agent eval suite |
 | `npm run pack:mac` | Package macOS `.app` (unsigned, local trial) |
 | `npm run dist:mac` | Package macOS `.dmg` + `.zip` (distribution) |
 
@@ -328,7 +332,11 @@ Three compilation targets via project references:
 src/
 ├── main/           # Electron main process (Node.js)
 │   ├── main.ts                 # Entry: window/tray/IPC/startup
-│   ├── agentRunnerService.ts   # Agent Runner core loop
+│   ├── agentRunnerService.ts   # Agent Runner facade
+│   ├── agentRuntimeEngine.ts   # Recoverable runtime state machine
+│   ├── agentExecutionStore.ts  # Durable checkpoints
+│   ├── agentTrajectoryStore.ts # Append-only trajectory records
+│   ├── agentLearningService.ts # Reviewed learning application
 │   ├── agentOrchestrator.ts    # Multi-subtask orchestration
 │   ├── agentLoop.ts            # Base Agent Loop (fallback)
 │   ├── agentToolExecutor.ts    # Tool registration & execution
@@ -383,6 +391,8 @@ Built-in skill: `local-file-organizer` — scans a directory, identifies recentl
 
 <h2 id="agent-run-lifecycle">Agent Run Lifecycle</h2>
 
+The desktop app wires scheduled and manual task runs through the recoverable runtime by default. Each run writes checkpoints, appends trajectory events, stores a terminal run record, and can generate learning candidates from the completed trajectory.
+
 ```
 startedAt
   │
@@ -410,6 +420,8 @@ startedAt
 finishedAt
 ```
 
+Runtime checkpoints are saved under `agent-executions/`, while trajectories are saved under `agent-trajectories/`. Active checkpoints appear in the Runs panel and can be resumed after interruption or app restart.
+
 ---
 
 <h2 id="memory-system-en">Memory System</h2>
@@ -433,6 +445,7 @@ Local long-term memory with five types inspired by cognitive science:
 - **Memory consolidation**: creates summary memories, archives source records (preserving links)
 - **Export**: full JSON export
 - **Archiving**: consolidated records are marked `archived`, excluded from search by default
+- **Reviewed learning**: accepted procedural candidates become local `procedural` memories and are injected into future task/planning prompts
 
 ---
 
@@ -501,11 +514,13 @@ For public distribution, Apple signing, notarization, auto-update, and crash rep
 
 <h2 id="testing-en">Testing</h2>
 
-The project includes **51** Vitest unit tests across the shared layer, main process, and renderer:
+The project includes Vitest unit tests across the shared layer, main process, and renderer:
 
 ```bash
 npm test              # Run all tests
 npm run test:watch    # Watch mode
+npm run eval:agent    # Deterministic agent eval suite
+npm run verify        # Tests + build + deterministic eval
 ```
 
 ### Test Coverage

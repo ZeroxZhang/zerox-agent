@@ -24,7 +24,7 @@ describe("package scripts", () => {
     ) as PackageJson;
 
     expect(packageJson.scripts).toMatchObject({
-      verify: "npm test && npm run build",
+      verify: "npm test && npm run build && node scripts/run-agent-evals.mjs",
       doctor: "npm run verify",
       "smoke:llm": "npm run build && node scripts/check-api-info.mjs",
       "smoke:prod": "npm run build && BUILDING_AGENT_SMOKE=1 electron .",

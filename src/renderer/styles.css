@@ -832,7 +832,7 @@ nav {
 /* ═══════════════════════════════════════════════════════════════════════════
    HEALTH CARDS & OVERVIEW
    ═══════════════════════════════════════════════════════════════════════════ */
-.health-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-3); max-width: 1120px; }
+.health-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--space-3); max-width: 1120px; }
 .health-card {
   display: grid; gap: var(--space-2); min-height: 118px;
   padding: var(--space-4); border: 1px solid var(--border-default);
