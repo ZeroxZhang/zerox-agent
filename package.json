@@ -16,6 +16,7 @@
     "smoke:llm": "npm run build && node scripts/check-api-info.mjs",
     "smoke:prod": "npm run build && BUILDING_AGENT_SMOKE=1 electron .",
     "validate:agent": "npm run build && BUILDING_AGENT_VALIDATE=1 electron .",
+    "eval:agent": "npm run build && node scripts/run-agent-evals.mjs",
     "pack:mac": "npm run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --dir",
     "dist:mac": "npm run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg zip",
     "clean": "rm -rf dist dist-electron",
