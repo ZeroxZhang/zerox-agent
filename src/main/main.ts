@@ -482,6 +482,9 @@ ipcMain.handle(
 );
 ipcMain.handle("toolAudit:list", () => getToolAuditLog().list({ limit: 50 }));
 ipcMain.handle("agentRuns:list", () => getAgentRunStore().list({ limit: 50 }));
+ipcMain.handle("agentRuns:listActiveExecutions", () =>
+  getAgentExecutionStore().listActive(),
+);
 ipcMain.handle(
   "agentRuns:runTask",
   async (_event, taskId: string): Promise<RunScheduledTaskResult> =>
@@ -542,6 +545,11 @@ ipcMain.handle(
 
     return runAgentTask(run.taskId);
   },
+);
+ipcMain.handle(
+  "agentRuns:resume",
+  async (_event, runId: string): Promise<RunScheduledTaskResult> =>
+    resumeAgentRun(runId),
 );
 ipcMain.handle(
   "chat:sendMessage",
@@ -1043,6 +1051,37 @@ async function runAgentTask(taskId: string): Promise<RunScheduledTaskResult> {
   } finally {
     if (activeTaskRunControllers.get(taskId) === controller) {
       activeTaskRunControllers.delete(taskId);
+    }
+  }
+}
+
+async function resumeAgentRun(runId: string): Promise<RunScheduledTaskResult> {
+  const checkpoint = await getAgentExecutionStore().get(runId);
+
+  if (!checkpoint) {
+    return {
+      ok: false,
+      message: "运行检查点不存在，无法恢复。",
+    };
+  }
+
+  if (activeTaskRunControllers.has(checkpoint.taskId)) {
+    return {
+      ok: false,
+      message: "这个任务已经在运行中。",
+    };
+  }
+
+  const controller = new AbortController();
+  activeTaskRunControllers.set(checkpoint.taskId, controller);
+
+  try {
+    return await getAgentRunnerService().resumeRun(runId, {
+      signal: controller.signal,
+    });
+  } finally {
+    if (activeTaskRunControllers.get(checkpoint.taskId) === controller) {
+      activeTaskRunControllers.delete(checkpoint.taskId);
     }
   }
 }

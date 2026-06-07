@@ -45,6 +45,10 @@ export type AgentRunnerService = {
     taskId: string,
     options?: { signal?: AbortSignal },
   ): Promise<RunScheduledTaskResult>;
+  resumeRun(
+    runId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<RunScheduledTaskResult>;
   runTaskStreaming(
     taskId: string,
     options?: { signal?: AbortSignal },
@@ -701,6 +705,17 @@ export function createAgentRunnerService(options: {
       }
 
       return runInternal(taskId, runOptions?.signal);
+    },
+
+    async resumeRun(runId, runOptions) {
+      if (!runtimeEngine) {
+        return {
+          ok: false,
+          message: "Recoverable runtime is not configured.",
+        };
+      }
+
+      return runtimeEngine.resumeRun(runId, runOptions);
     },
 
     async *runTaskStreaming(taskId, runOptions) {

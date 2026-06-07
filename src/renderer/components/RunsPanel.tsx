@@ -6,6 +6,7 @@ import {
   type RunTimelineItem,
 } from "../../shared/agentRunInsights";
 import type { AgentRunRecord } from "../../shared/agentRuns";
+import type { AgentExecutionCheckpoint } from "../../shared/agentExecution";
 import { demoRuns } from "../demoAgentData";
 
 type RunsStatus =
@@ -15,6 +16,9 @@ type RunsStatus =
 
 export function RunsPanel() {
   const [runs, setRuns] = useState<AgentRunRecord[]>([]);
+  const [activeExecutions, setActiveExecutions] = useState<
+    AgentExecutionCheckpoint[]
+  >([]);
   const [selectedRunId, setSelectedRunId] = useState("");
   const [selectedEventId, setSelectedEventId] = useState("");
   const [status, setStatus] = useState<RunsStatus>({
@@ -33,14 +37,20 @@ export function RunsPanel() {
       return;
     }
 
-    window.buildingAgent
-      .listAgentRuns()
-      .then((loadedRuns) => {
+    Promise.all([
+      window.buildingAgent.listAgentRuns(),
+      window.buildingAgent.listActiveAgentExecutions(),
+    ])
+      .then(([loadedRuns, loadedExecutions]) => {
         setRuns(loadedRuns);
+        setActiveExecutions(loadedExecutions);
         setSelectedRunId(loadedRuns[0]?.id ?? "");
         setStatus({
           kind: "idle",
-          message: loadedRuns.length ? "运行记录已加载。" : "还没有运行记录。",
+          message:
+            loadedRuns.length || loadedExecutions.length
+              ? "运行记录已加载。"
+              : "还没有运行记录。",
         });
       })
       .catch((error) => {
@@ -104,6 +114,40 @@ export function RunsPanel() {
     });
   }
 
+  async function handleResumeExecution(execution: AgentExecutionCheckpoint) {
+    if (!window.buildingAgent) {
+      setStatus({
+        kind: "idle",
+        message: "浏览器预览模式无法恢复真实运行。",
+      });
+      return;
+    }
+
+    setStatus({
+      kind: "loading",
+      message: `正在恢复运行：${execution.runId}`,
+    });
+    const result = await window.buildingAgent.resumeAgentRun(execution.runId);
+
+    if (!result.ok) {
+      setStatus({
+        kind: "error",
+        message: result.message,
+      });
+      return;
+    }
+
+    setRuns((currentRuns) => [result.run, ...currentRuns]);
+    setActiveExecutions((currentExecutions) =>
+      currentExecutions.filter((item) => item.runId !== execution.runId),
+    );
+    setSelectedRunId(result.run.id);
+    setStatus({
+      kind: result.run.status === "succeeded" ? "idle" : "error",
+      message: `恢复完成：${translateRunStatus(result.run.status)}。`,
+    });
+  }
+
   return (
     <section className="runs-panel">
       <div className="panel-heading">
@@ -118,6 +162,28 @@ export function RunsPanel() {
 
       <div className="runs-layout">
         <section className="run-list-panel" aria-label="运行历史">
+          {activeExecutions.length ? (
+            <div className="active-run-list" aria-label="可恢复运行">
+              {activeExecutions.map((execution) => (
+                <button
+                  className={`run-list-item is-${execution.status}`}
+                  disabled={status.kind === "loading"}
+                  key={execution.runId}
+                  onClick={() => void handleResumeExecution(execution)}
+                  type="button"
+                >
+                  <span>{translateRunStatus(execution.status)}</span>
+                  <strong>{execution.runId}</strong>
+                  <small>
+                    {execution.currentStepId
+                      ? `步骤 ${execution.currentStepId}`
+                      : "等待恢复"}
+                  </small>
+                </button>
+              ))}
+            </div>
+          ) : null}
+
           {runs.length ? (
             runs.map((run) => (
               <button
@@ -309,6 +375,22 @@ function formatTime(value: string): string {
 }
 
 function translateRunStatus(status: AgentRunRecord["status"]): string {
+  if (status === "queued") {
+    return "排队中";
+  }
+
+  if (status === "running") {
+    return "运行中";
+  }
+
+  if (status === "waiting_for_approval") {
+    return "等待授权";
+  }
+
+  if (status === "paused") {
+    return "可恢复";
+  }
+
   if (status === "succeeded") {
     return "成功";
   }

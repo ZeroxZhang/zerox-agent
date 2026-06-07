@@ -35,6 +35,7 @@ import type {
   CancelScheduledTaskRunResult,
   RunScheduledTaskResult,
 } from "../shared/agentRuns";
+import type { AgentExecutionCheckpoint } from "../shared/agentExecution";
 import type {
   CreateScheduledTaskResult,
   DeleteScheduledTaskResult,
@@ -93,6 +94,8 @@ const buildingAgent = {
     ipcRenderer.invoke("toolAudit:list"),
   listAgentRuns: (): Promise<AgentRunRecord[]> =>
     ipcRenderer.invoke("agentRuns:list"),
+  listActiveAgentExecutions: (): Promise<AgentExecutionCheckpoint[]> =>
+    ipcRenderer.invoke("agentRuns:listActiveExecutions"),
   runScheduledTask: (taskId: string): Promise<RunScheduledTaskResult> =>
     ipcRenderer.invoke("agentRuns:runTask", taskId),
   runScheduledTaskStreaming: (taskId: string): Promise<void> =>
@@ -111,6 +114,8 @@ const buildingAgent = {
     ipcRenderer.invoke("agentRuns:cancelTask", taskId),
   retryAgentRun: (runId: string): Promise<RunScheduledTaskResult> =>
     ipcRenderer.invoke("agentRuns:retry", runId),
+  resumeAgentRun: (runId: string): Promise<RunScheduledTaskResult> =>
+    ipcRenderer.invoke("agentRuns:resume", runId),
   sendChatMessage: (
     input: SendChatMessageInput,
   ): Promise<SendChatMessageResult> =>

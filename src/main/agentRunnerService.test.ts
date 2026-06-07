@@ -349,6 +349,39 @@ describe("agent runner service", () => {
       checkpointId: savedCheckpoints.at(-1)?.id,
     });
   });
+
+  it("resumes a checkpoint through the recoverable runtime", async () => {
+    const savedCheckpoints: AgentExecutionCheckpoint[] = [];
+    const executionStore = createMemoryExecutionStore(savedCheckpoints);
+    await executionStore.save(createCheckpoint("run_resume", "task_123"));
+    const service = createAgentRunnerService({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore,
+      resolveSkill: async () => createSkillRecord(4),
+      chatClient: createChatClient([finalResponse("Resumed report complete")]),
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      createId: createSequentialId("runner_resume"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+
+    const result = await service.resumeRun("run_resume");
+
+    expect(result).toMatchObject({
+      ok: true,
+      run: {
+        id: "run_resume",
+        status: "succeeded",
+        summary: "Resumed report complete",
+      },
+    });
+    expect(savedCheckpoints.at(-1)).toMatchObject({
+      runId: "run_resume",
+      status: "succeeded",
+    });
+  });
 });
 
 function createTask(): ScheduledTask {
@@ -450,6 +483,35 @@ function createMemoryExecutionStore(
     async delete(runId) {
       return byRunId.delete(runId);
     },
+  };
+}
+
+function createCheckpoint(
+  runId: string,
+  taskId: string,
+): AgentExecutionCheckpoint {
+  return {
+    id: `${runId}_checkpoint`,
+    runId,
+    taskId,
+    status: "paused",
+    currentStepId: "step_1",
+    steps: [
+      {
+        id: "step_1",
+        description: "Resume task",
+        expectedOutcome: "Task finishes",
+        state: "running",
+        attempts: 1,
+      },
+    ],
+    messages: [
+      { role: "system", content: "system" },
+      { role: "user", content: "resume this task" },
+    ],
+    toolCallCount: 0,
+    createdAt: "2026-06-07T00:00:00.000Z",
+    updatedAt: "2026-06-07T00:00:00.000Z",
   };
 }
 
