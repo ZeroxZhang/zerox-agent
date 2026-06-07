@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
+import type { AgentExecutionStore } from "./agentExecutionStore";
 import type { AgentRunStore } from "./agentRunStore";
 import type { AgentToolExecutor } from "./agentToolExecutor";
+import { createAgentRuntimeEngine } from "./agentRuntimeEngine";
 import { createContextManager, type ContextManager } from "./contextManager";
 import type { MemoryStore } from "./memoryStore";
 import type {
@@ -57,6 +59,7 @@ export function createAgentRunnerService(options: {
   getModelProfile: () => Promise<AgentModelProfile>;
   toolAuthorizationService: ToolAuthorizationService;
   toolExecutor: AgentToolExecutor;
+  executionStore?: AgentExecutionStore;
   memoryStore?: Pick<MemoryStore, "create">;
   contextManager?: ContextManager;
   createId?: () => string;
@@ -67,6 +70,21 @@ export function createAgentRunnerService(options: {
   const now = options.now ?? (() => new Date());
   const maxReflectionRounds = options.maxReflectionRounds ?? 3;
   const contextManager = options.contextManager ?? createContextManager();
+  const runtimeEngine = options.executionStore
+    ? createAgentRuntimeEngine({
+        taskStore: options.taskStore,
+        runStore: options.runStore,
+        executionStore: options.executionStore,
+        resolveSkill: options.resolveSkill,
+        chatClient: options.chatClient,
+        getModelProfile: options.getModelProfile,
+        toolAuthorizationService: options.toolAuthorizationService,
+        toolExecutor: options.toolExecutor,
+        ...(options.memoryStore ? { memoryStore: options.memoryStore } : {}),
+        createId,
+        now,
+      })
+    : null;
 
   const isStreamingClient = (
     client: ChatClient,
@@ -678,10 +696,36 @@ export function createAgentRunnerService(options: {
 
   return {
     async runTask(taskId, runOptions) {
+      if (runtimeEngine) {
+        return runtimeEngine.startTask(taskId, runOptions);
+      }
+
       return runInternal(taskId, runOptions?.signal);
     },
 
     async *runTaskStreaming(taskId, runOptions) {
+      if (runtimeEngine) {
+        const result = await runtimeEngine.startTask(taskId, runOptions);
+
+        if (result.ok) {
+          for (const event of result.run.events) {
+            yield event;
+          }
+          yield {
+            level: "info",
+            message: JSON.stringify(result.run),
+            createdAt: now().toISOString(),
+          };
+        } else {
+          yield {
+            level: "error",
+            message: result.message,
+            createdAt: now().toISOString(),
+          };
+        }
+        return;
+      }
+
       const emittedEvents: AgentRunEvent[] = [];
 
       const result = await runInternal(

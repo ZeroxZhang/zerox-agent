@@ -12,6 +12,10 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { getAgentValidationModeOptions } from "./agentValidationMode";
 import {
+  createAgentExecutionStore,
+  type AgentExecutionStore,
+} from "./agentExecutionStore";
+import {
   getDefaultLoginItemSettings,
   getMainWindowOptions,
   getTrayTooltip,
@@ -145,6 +149,7 @@ let modelSettingsStore: ModelSettingsStore | null = null;
 let scheduledTaskStore: ScheduledTaskStore | null = null;
 let toolAuditLog: ToolAuditLog | null = null;
 let toolAuthorizationService: ToolAuthorizationService | null = null;
+let agentExecutionStore: AgentExecutionStore | null = null;
 let agentRunStore: AgentRunStore | null = null;
 let agentRunnerService: AgentRunnerService | null = null;
 let chatService: ChatService | null = null;
@@ -780,6 +785,16 @@ function getAgentRunStore(): AgentRunStore {
   return agentRunStore;
 }
 
+function getAgentExecutionStore(): AgentExecutionStore {
+  if (!agentExecutionStore) {
+    agentExecutionStore = createAgentExecutionStore({
+      configDir: path.join(app.getPath("userData"), "config"),
+    });
+  }
+
+  return agentExecutionStore;
+}
+
 function getMemoryStore(): MemoryStore {
   if (!memoryStore) {
     memoryStore = createMemoryStore({
@@ -850,6 +865,7 @@ function getAgentRunnerService(): AgentRunnerService {
       },
       toolAuthorizationService: getToolAuthorizationService(),
       toolExecutor,
+      executionStore: getAgentExecutionStore(),
       memoryStore: getMemoryStore(),
     });
   }

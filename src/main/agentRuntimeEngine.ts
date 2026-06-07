@@ -3,6 +3,7 @@ import type { AgentExecutionStore } from "./agentExecutionStore";
 import { classifyAgentFailure } from "./agentFailureClassifier";
 import type { AgentRunStore } from "./agentRunStore";
 import type { AgentToolExecutor } from "./agentToolExecutor";
+import type { MemoryStore } from "./memoryStore";
 import type {
   ChatClient,
   ChatMessage,
@@ -58,6 +59,7 @@ export function createAgentRuntimeEngine(options: {
   getModelProfile: () => Promise<AgentRuntimeModelProfile>;
   toolAuthorizationService: ToolAuthorizationService;
   toolExecutor: AgentToolExecutor;
+  memoryStore?: Pick<MemoryStore, "create">;
   createId?: () => string;
   now?: () => Date;
 }): AgentRuntimeEngine {
@@ -132,6 +134,33 @@ export function createAgentRuntimeEngine(options: {
       startedAt: input.startedAt,
       finishedAt,
     };
+
+    if (run.status === "succeeded" && options.memoryStore) {
+      try {
+        await options.memoryStore.create({
+          kind: "episodic",
+          title: `Run: ${input.taskName}`,
+          content: run.summary,
+          tags: ["agent-run", input.skillName],
+          source: { type: "agent_run", refId: run.id },
+          importance: 3,
+        });
+        run.events.push(
+          createEvent("info", "Episodic memory written.", {
+            memoryKind: "episodic",
+          }),
+        );
+      } catch (error) {
+        run.events.push(
+          createEvent("warn", "Unable to write episodic memory.", {
+            error:
+              error instanceof Error
+                ? error.message
+                : "Unknown memory error.",
+          }),
+        );
+      }
+    }
 
     await options.runStore.append(run);
     await options.taskStore.recordRun(input.taskId, new Date(finishedAt));
