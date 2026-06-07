@@ -27,6 +27,8 @@ import {
   createAgentLearningService,
   type AgentLearningService,
 } from "./agentLearningService";
+import { createAgentEvalFixtures } from "./eval/agentEvalFixtures";
+import { runAgentEvals } from "./eval/agentEvalRunner";
 import {
   getDefaultLoginItemSettings,
   getMainWindowOptions,
@@ -113,8 +115,10 @@ import type {
 } from "../shared/scheduledTasks";
 import type {
   CancelScheduledTaskRunResult,
+  PauseAgentRunResult,
   RunScheduledTaskResult,
 } from "../shared/agentRuns";
+import { isTerminalExecutionStatus } from "../shared/agentExecution";
 import type {
   CreateMemoryResult,
   DeleteMemoryResult,
@@ -125,6 +129,8 @@ import type {
 } from "../shared/memory";
 import type { AgentLearningListOptions } from "../shared/agentLearning";
 import type { ToolCallRequest } from "../shared/toolPermissions";
+import type { AgentEvalReport } from "../shared/agentEval";
+import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
 import type {
   ChatSessionListItem,
   ChatSessionRecord,
@@ -502,6 +508,14 @@ ipcMain.handle("agentRuns:listActiveExecutions", () =>
   getAgentExecutionStore().listActive(),
 );
 ipcMain.handle(
+  "agentRuns:listTrajectory",
+  (_event, runId: string): Promise<AgentTrajectoryEvent[]> =>
+    getAgentTrajectoryStore().list(runId),
+);
+ipcMain.handle("agentQuality:getEvalReport", (): Promise<AgentEvalReport> =>
+  runAgentEvals(createAgentEvalFixtures()),
+);
+ipcMain.handle(
   "agentRuns:runTask",
   async (_event, taskId: string): Promise<RunScheduledTaskResult> =>
     runAgentTask(taskId),
@@ -566,6 +580,11 @@ ipcMain.handle(
   "agentRuns:resume",
   async (_event, runId: string): Promise<RunScheduledTaskResult> =>
     resumeAgentRun(runId),
+);
+ipcMain.handle(
+  "agentRuns:pause",
+  async (_event, runId: string): Promise<PauseAgentRunResult> =>
+    pauseAgentRun(runId),
 );
 ipcMain.handle(
   "chat:sendMessage",
@@ -1145,6 +1164,44 @@ async function resumeAgentRun(runId: string): Promise<RunScheduledTaskResult> {
       activeTaskRunControllers.delete(checkpoint.taskId);
     }
   }
+}
+
+async function pauseAgentRun(runId: string): Promise<PauseAgentRunResult> {
+  const checkpoint = await getAgentExecutionStore().get(runId);
+
+  if (!checkpoint) {
+    return {
+      ok: false,
+      message: "运行检查点不存在，无法暂停。",
+    };
+  }
+
+  if (isTerminalExecutionStatus(checkpoint.status)) {
+    return {
+      ok: false,
+      message: "运行已结束，无法暂停。",
+    };
+  }
+
+  const controller = activeTaskRunControllers.get(checkpoint.taskId);
+  if (controller) {
+    controller.abort("pause");
+    return {
+      ok: true,
+      message: "已请求暂停运行。",
+    };
+  }
+
+  await getAgentExecutionStore().save({
+    ...checkpoint,
+    status: "paused",
+    updatedAt: new Date().toISOString(),
+  });
+
+  return {
+    ok: true,
+    message: "运行已标记为可恢复。",
+  };
 }
 
 function startTaskScheduler() {

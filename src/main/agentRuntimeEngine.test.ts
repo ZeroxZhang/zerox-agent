@@ -105,6 +105,48 @@ describe("agent runtime engine", () => {
     });
   });
 
+  it("pauses an interrupted run and keeps the checkpoint active", async () => {
+    const savedCheckpoints: AgentExecutionCheckpoint[] = [];
+    const controller = new AbortController();
+    controller.abort("pause");
+    const executionStore = createMemoryExecutionStore(savedCheckpoints);
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore,
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: createChatClient([finalResponse("unused")]),
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor([]),
+      createId: createSequentialId("pause"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+
+    const result = await engine.startTask("task_123", {
+      signal: controller.signal,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      run: {
+        id: "pause_1",
+        status: "paused",
+        summary: "运行已暂停。",
+      },
+    });
+    expect(savedCheckpoints.at(-1)).toMatchObject({
+      runId: "pause_1",
+      status: "paused",
+    });
+    await expect(executionStore.listActive()).resolves.toEqual([
+      expect.objectContaining({
+        runId: "pause_1",
+        status: "paused",
+      }),
+    ]);
+  });
+
   it("records trajectory events for model, tool, checkpoint, and final summary boundaries", async () => {
     const trajectoryEvents: AgentTrajectoryEvent[] = [];
     const engine = createAgentRuntimeEngine({

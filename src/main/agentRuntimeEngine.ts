@@ -218,7 +218,9 @@ export function createAgentRuntimeEngine(options: {
     }
 
     await options.runStore.append(run);
-    await options.taskStore.recordRun(input.taskId, new Date(finishedAt));
+    if (input.status !== "paused") {
+      await options.taskStore.recordRun(input.taskId, new Date(finishedAt));
+    }
     await createLearningCandidates(run);
 
     return { ok: true, run };
@@ -447,9 +449,26 @@ export function createAgentRuntimeEngine(options: {
           startedAt,
         );
       } catch (error) {
-        if (isCancellationError(error, runOptions?.signal)) {
+        if (isPauseError(error, runOptions?.signal)) {
+          const latestCheckpoint =
+            (await options.executionStore.get(runId)) ?? checkpoint;
           return finishRun({
-            checkpoint,
+            checkpoint: latestCheckpoint,
+            taskId: task.id,
+            taskName: task.name,
+            skillName: task.skillName,
+            status: "paused",
+            summary: "运行已暂停。",
+            events: [...events, createEvent("warn", "Agent run paused.")],
+            startedAt,
+          });
+        }
+
+        if (isCancellationError(error, runOptions?.signal)) {
+          const latestCheckpoint =
+            (await options.executionStore.get(runId)) ?? checkpoint;
+          return finishRun({
+            checkpoint: latestCheckpoint,
             taskId: task.id,
             taskName: task.name,
             skillName: task.skillName,
@@ -501,8 +520,25 @@ export function createAgentRuntimeEngine(options: {
           checkpoint.createdAt,
         );
       } catch (error) {
+        if (isPauseError(error, runOptions?.signal)) {
+          const latestCheckpoint =
+            (await options.executionStore.get(runId)) ?? checkpoint;
+          return finishRun({
+            checkpoint: latestCheckpoint,
+            taskId: task.id,
+            taskName: task.name,
+            skillName: task.skillName,
+            status: "paused",
+            summary: "运行已暂停。",
+            events: [createEvent("warn", "Agent run paused.")],
+            startedAt: checkpoint.createdAt,
+          });
+        }
+
+        const latestCheckpoint =
+          (await options.executionStore.get(runId)) ?? checkpoint;
         return finishRun({
-          checkpoint,
+          checkpoint: latestCheckpoint,
           taskId: task.id,
           taskName: task.name,
           skillName: task.skillName,
@@ -544,8 +580,22 @@ function parseToolArguments(raw: string): Record<string, unknown> {
 
 function throwIfCanceled(signal: AbortSignal | undefined) {
   if (signal?.aborted) {
-    throw new Error("Agent run canceled.");
+    throw new Error(isPauseSignal(signal) ? "Agent run paused." : "Agent run canceled.");
   }
+}
+
+function isPauseSignal(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true && (signal as AbortSignal & { reason?: unknown }).reason === "pause";
+}
+
+function isPauseError(
+  error: unknown,
+  signal: AbortSignal | undefined,
+): boolean {
+  return (
+    isPauseSignal(signal) ||
+    (error instanceof Error && /paused/i.test(error.message))
+  );
 }
 
 function isCancellationError(

@@ -65,3 +65,5 @@ export type CancelScheduledTaskRunResult =
       ok: false;
       message: string;
     };
+
+export type PauseAgentRunResult = CancelScheduledTaskRunResult;

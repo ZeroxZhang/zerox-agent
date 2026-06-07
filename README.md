@@ -420,7 +420,7 @@ startedAt
 finishedAt
 ```
 
-Runtime checkpoints are saved under `agent-executions/`, while trajectories are saved under `agent-trajectories/`. Active checkpoints appear in the Runs panel and can be resumed after interruption or app restart.
+Runtime checkpoints are saved under `agent-executions/`, while trajectories are saved under `agent-trajectories/`. Active checkpoints appear in the Runs panel and can be paused or resumed after interruption or app restart. The Runs panel can also inspect raw trajectory events, payloads, and redaction flags.
 
 ---
 
@@ -522,6 +522,8 @@ npm run test:watch    # Watch mode
 npm run eval:agent    # Deterministic agent eval suite
 npm run verify        # Tests + build + deterministic eval
 ```
+
+The Overview panel surfaces the deterministic eval pass rate as a local quality signal.
 
 ### Test Coverage
 

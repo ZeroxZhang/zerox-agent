@@ -10,6 +10,7 @@ import {
   type AgentOnboardingAction,
 } from "../../shared/agentOnboarding";
 import type { AgentRunRecord } from "../../shared/agentRuns";
+import type { AgentEvalReport } from "../../shared/agentEval";
 import type { AgentLearningCandidate } from "../../shared/agentLearning";
 import type {
   AgentBootstrapReport,
@@ -27,6 +28,7 @@ import {
 } from "../../shared/desktopRuntime";
 import {
   createDemoValidationSnapshot,
+  demoAgentEvalReport,
   demoLearningCandidates,
   demoMemories,
   demoModelSettings,
@@ -40,6 +42,7 @@ import {
 } from "../agentValidationPreviewStore";
 
 type OverviewData = {
+  evalReport: AgentEvalReport;
   learningCandidates: AgentLearningCandidate[];
   memories: MemoryRecord[];
   modelSettings: PublicModelSettings;
@@ -87,6 +90,7 @@ export function OverviewPanel(props: {
         }),
       );
       setData({
+        evalReport: demoAgentEvalReport,
         learningCandidates: demoLearningCandidates,
         memories: demoMemories,
         modelSettings: demoModelSettings,
@@ -117,6 +121,7 @@ export function OverviewPanel(props: {
       window.buildingAgent.listLearningCandidates({
         status: "pending_review",
       }),
+      window.buildingAgent.getAgentEvalReport(),
     ])
       .then(([
         modelSettings,
@@ -127,8 +132,10 @@ export function OverviewPanel(props: {
         validation,
         runtime,
         learningCandidates,
+        evalReport,
       ]) => {
         setData({
+          evalReport,
           learningCandidates,
           memories,
           modelSettings,
@@ -306,6 +313,12 @@ export function OverviewPanel(props: {
           status={latestRun ? translateRunStatus(latestRun.status) : "空闲"}
           tone={latestRun?.status === "failed" ? "bad" : "good"}
           value={latestRun ? latestRun.taskName : "还没有运行"}
+        />
+        <HealthCard
+          label="评测"
+          status={`${Math.round((data?.evalReport.passRate ?? 0) * 100)}%`}
+          tone={getEvalTone(data?.evalReport)}
+          value={data ? `${data.evalReport.passed}/${data.evalReport.total}` : "待加载"}
         />
         <HealthCard
           label="记忆"
@@ -552,6 +565,7 @@ export function OverviewPanel(props: {
       memories,
       skills,
       learningCandidates,
+      evalReport,
     ] = await Promise.all([
       window.buildingAgent.loadModelSettings(),
       window.buildingAgent.listScheduledTasks(),
@@ -561,8 +575,10 @@ export function OverviewPanel(props: {
       window.buildingAgent.listLearningCandidates({
         status: "pending_review",
       }),
+      window.buildingAgent.getAgentEvalReport(),
     ]);
     setData({
+      evalReport,
       learningCandidates,
       modelSettings,
       tasks,
@@ -607,6 +623,7 @@ export function OverviewPanel(props: {
       memories,
       skills,
       learningCandidates,
+      evalReport,
     ] = await Promise.all([
       window.buildingAgent.loadModelSettings(),
       window.buildingAgent.listScheduledTasks(),
@@ -616,8 +633,10 @@ export function OverviewPanel(props: {
       window.buildingAgent.listLearningCandidates({
         status: "pending_review",
       }),
+      window.buildingAgent.getAgentEvalReport(),
     ]);
     setData({
+      evalReport,
       learningCandidates,
       modelSettings,
       tasks,
@@ -692,6 +711,20 @@ function HealthCard(props: {
       <small>{props.value}</small>
     </article>
   );
+}
+
+function getEvalTone(
+  report: AgentEvalReport | undefined,
+): "bad" | "good" | "warn" {
+  if (!report) {
+    return "warn";
+  }
+
+  if (report.passRate >= 0.8) {
+    return "good";
+  }
+
+  return report.passRate >= 0.6 ? "warn" : "bad";
 }
 
 function buildAttentionItems(data: OverviewData): AttentionItem[] {

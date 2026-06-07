@@ -937,6 +937,8 @@ nav {
 .run-list-item.is-selected { border-color: var(--border-accent); background: var(--bg-accent-muted); }
 .run-list-item strong { color: var(--text-primary); }
 .run-list-item small { color: var(--text-tertiary); }
+.run-list-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-1); }
+.run-list-actions .secondary-action { min-height: 32px; padding: var(--space-1) var(--space-3); }
 
 .run-summary-card {
   display: flex; align-items: flex-start; gap: var(--space-3);
@@ -980,6 +982,20 @@ nav {
   color: var(--text-primary); background: var(--bg-surface);
   font-family: var(--font-mono); font-size: var(--text-xs); line-height: var(--leading-normal);
 }
+.trajectory-panel { display: grid; gap: var(--space-2); }
+.trajectory-panel p { margin: 0; color: var(--text-secondary); line-height: var(--leading-normal); }
+.trajectory-event-list {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  gap: var(--space-2);
+}
+.trajectory-event {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
+  min-width: 0; padding: var(--space-2); border: 1px solid var(--border-default);
+  border-radius: var(--radius-md); background: var(--bg-surface);
+  color: var(--text-primary); text-align: left;
+}
+.trajectory-event.is-selected { border-color: var(--border-accent); background: var(--bg-accent-muted); }
+.trajectory-event strong, .trajectory-event small { overflow-wrap: anywhere; }
 
 /* ── Guidance cards ────────────────────────────────────────────────────── */
 .guidance-card.is-success { border-color: var(--status-success-border); background: var(--status-success-bg); }

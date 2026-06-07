@@ -58,7 +58,7 @@ The checkpoint is saved before execution starts, after state changes, after tool
 - resumed runs reuse the original `runId`
 - final run records reference the terminal checkpoint id
 
-The renderer exposes active checkpoints through `agentRuns:listActiveExecutions` and resumes them through `agentRuns:resume`.
+The renderer exposes active checkpoints through `agentRuns:listActiveExecutions`, pauses them through `agentRuns:pause`, and resumes them through `agentRuns:resume`.
 
 ## Failure Classification
 
@@ -85,6 +85,8 @@ userData/config/agent-trajectories/<runId>.jsonl
 
 Events carry redaction flags so future replay and inspection tools can avoid exposing API keys, file content, or user text accidentally.
 
+The Runs panel reads trajectory files through `agentRuns:listTrajectory` and shows event payloads plus redaction flags for the selected run.
+
 ## Verification
 
 Fast local verification paths:
@@ -95,3 +97,5 @@ npm run verify
 ```
 
 `npm run verify` runs unit tests, builds the app, and executes the deterministic agent eval suite.
+
+The Overview panel can request `agentQuality:getEvalReport` to display the deterministic eval pass rate as a local quality signal.

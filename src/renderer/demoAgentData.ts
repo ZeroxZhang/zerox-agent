@@ -1,4 +1,5 @@
 import type { AgentBootstrapValidationSnapshot } from "../shared/agentBootstrap";
+import type { AgentEvalReport } from "../shared/agentEval";
 import type { AgentLearningCandidate } from "../shared/agentLearning";
 import type { AgentRunRecord } from "../shared/agentRuns";
 import type { MemoryRecord } from "../shared/memory";
@@ -131,6 +132,16 @@ export const demoLearningCandidates: AgentLearningCandidate[] = [
     updatedAt: "2026-06-05T08:00:07.000Z",
   },
 ];
+
+export const demoAgentEvalReport: AgentEvalReport = {
+  total: 5,
+  passed: 5,
+  failed: 0,
+  passRate: 1,
+  toolSuccessRate: 0.8,
+  recoverabilityRate: 1,
+  failures: [],
+};
 
 export const demoModelSettings: PublicModelSettings = {
   baseUrl: "https://api.example.com/v1",

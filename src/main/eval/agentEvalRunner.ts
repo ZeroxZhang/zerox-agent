@@ -1,15 +1,6 @@
 import type { AgentTrajectoryEventType } from "../../shared/agentTrajectory";
+import type { AgentEvalReport } from "../../shared/agentEval";
 import type { AgentEvalFixture } from "./agentEvalFixtures";
-
-export type AgentEvalReport = {
-  total: number;
-  passed: number;
-  failed: number;
-  passRate: number;
-  toolSuccessRate: number;
-  recoverabilityRate: number;
-  failures: Array<{ fixtureId: string; reason: string }>;
-};
 
 export async function runAgentEvals(
   fixtures: AgentEvalFixture[],
