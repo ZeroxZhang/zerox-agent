@@ -6,6 +6,7 @@ export type NavigationSectionId =
   | "scheduled-tasks"
   | "tools"
   | "memory"
+  | "learning"
   | "settings";
 
 export type NavigationSection = {
@@ -92,6 +93,17 @@ const navigationSections: NavigationSection[] = [
       "区分 session、core、semantic、episodic 和 procedural memory。",
       "使用 embedding 做语义检索。",
       "让记忆可查看、可编辑、可删除、可导出。",
+    ],
+  },
+  {
+    id: "learning",
+    label: "学习",
+    module: "审核",
+    summary: "从运行轨迹提取候选经验，并由用户审核后写入记忆。",
+    details: [
+      "查看待审核的流程记忆、失败教训和技能改进建议。",
+      "接受或拒绝每条候选经验，避免静默改变 Agent 行为。",
+      "把已接受的流程经验应用为可检索的 procedural memory。",
     ],
   },
   {

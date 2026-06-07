@@ -29,3 +29,10 @@ export type AgentLearningListOptions = {
   status?: AgentLearningCandidateStatus;
   type?: AgentLearningCandidateType;
 };
+
+export type ApplyAcceptedLearningReport = {
+  scanned: number;
+  applied: number;
+  skipped: number;
+  memoryIds: string[];
+};

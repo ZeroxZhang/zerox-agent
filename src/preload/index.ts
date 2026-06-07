@@ -23,6 +23,11 @@ import type {
   RunMemoryMaintenanceResult,
 } from "../shared/memory";
 import type {
+  AgentLearningCandidate,
+  AgentLearningListOptions,
+  ApplyAcceptedLearningReport,
+} from "../shared/agentLearning";
+import type {
   ModelSettingsInput,
   PublicModelSettings,
   SaveModelSettingsResult,
@@ -136,6 +141,20 @@ const buildingAgent = {
   exportMemories: (): Promise<string> => ipcRenderer.invoke("memory:export"),
   runMemoryMaintenance: (): Promise<RunMemoryMaintenanceResult> =>
     ipcRenderer.invoke("memory:maintain"),
+  listLearningCandidates: (
+    options?: AgentLearningListOptions,
+  ): Promise<AgentLearningCandidate[]> =>
+    ipcRenderer.invoke("learning:listCandidates", options),
+  acceptLearningCandidate: (
+    candidateId: string,
+  ): Promise<AgentLearningCandidate | null> =>
+    ipcRenderer.invoke("learning:acceptCandidate", candidateId),
+  rejectLearningCandidate: (
+    candidateId: string,
+  ): Promise<AgentLearningCandidate | null> =>
+    ipcRenderer.invoke("learning:rejectCandidate", candidateId),
+  applyAcceptedLearning: (): Promise<ApplyAcceptedLearningReport> =>
+    ipcRenderer.invoke("learning:applyAccepted"),
 };
 
 contextBridge.exposeInMainWorld("buildingAgent", buildingAgent);

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { AgentChatPanel } from "./components/AgentChatPanel";
+import { LearningReviewPanel } from "./components/LearningReviewPanel";
 import { MemoryPanel } from "./components/MemoryPanel";
 import { ModelSettingsPanel } from "./components/ModelSettingsPanel";
 import { OverviewPanel } from "./components/OverviewPanel";
@@ -161,6 +162,7 @@ export function App() {
         ) : null}
         {activeSection.id === "tools" ? <ToolsPanel /> : null}
         {activeSection.id === "memory" ? <MemoryPanel /> : null}
+        {activeSection.id === "learning" ? <LearningReviewPanel /> : null}
       </section>
     </main>
   );

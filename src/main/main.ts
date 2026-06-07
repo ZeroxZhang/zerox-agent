@@ -20,6 +20,14 @@ import {
   type AgentTrajectoryStore,
 } from "./agentTrajectoryStore";
 import {
+  createAgentLearningStore,
+  type AgentLearningStore,
+} from "./agentLearningStore";
+import {
+  createAgentLearningService,
+  type AgentLearningService,
+} from "./agentLearningService";
+import {
   getDefaultLoginItemSettings,
   getMainWindowOptions,
   getTrayTooltip,
@@ -115,6 +123,7 @@ import type {
   MemorySearchOptions,
   RunMemoryMaintenanceResult,
 } from "../shared/memory";
+import type { AgentLearningListOptions } from "../shared/agentLearning";
 import type { ToolCallRequest } from "../shared/toolPermissions";
 import type {
   ChatSessionListItem,
@@ -156,6 +165,8 @@ let toolAuthorizationService: ToolAuthorizationService | null = null;
 let agentExecutionStore: AgentExecutionStore | null = null;
 let agentTrajectoryStore: AgentTrajectoryStore | null = null;
 let agentRunStore: AgentRunStore | null = null;
+let agentLearningStore: AgentLearningStore | null = null;
+let agentLearningService: AgentLearningService | null = null;
 let agentRunnerService: AgentRunnerService | null = null;
 let chatService: ChatService | null = null;
 let chatSessionStore: ChatSessionStore | null = null;
@@ -641,6 +652,18 @@ ipcMain.handle(
     }
   },
 );
+ipcMain.handle("learning:listCandidates", (_event, options?: AgentLearningListOptions) =>
+  getAgentLearningStore().list(options),
+);
+ipcMain.handle("learning:acceptCandidate", (_event, candidateId: string) =>
+  getAgentLearningStore().setStatus(candidateId, "accepted"),
+);
+ipcMain.handle("learning:rejectCandidate", (_event, candidateId: string) =>
+  getAgentLearningStore().setStatus(candidateId, "rejected"),
+);
+ipcMain.handle("learning:applyAccepted", () =>
+  getAgentLearningService().applyAcceptedLearning(),
+);
 ipcMain.handle("modelSettings:load", () => getModelSettingsStore().load());
 ipcMain.handle(
   "modelSettings:testConnection",
@@ -848,6 +871,27 @@ function getMemoryStore(): MemoryStore {
   }
 
   return memoryStore;
+}
+
+function getAgentLearningStore(): AgentLearningStore {
+  if (!agentLearningStore) {
+    agentLearningStore = createAgentLearningStore({
+      configDir: path.join(app.getPath("userData"), "config"),
+    });
+  }
+
+  return agentLearningStore;
+}
+
+function getAgentLearningService(): AgentLearningService {
+  if (!agentLearningService) {
+    agentLearningService = createAgentLearningService({
+      learningStore: getAgentLearningStore(),
+      memoryStore: getMemoryStore(),
+    });
+  }
+
+  return agentLearningService;
 }
 
 function getAgentRunnerService(): AgentRunnerService {

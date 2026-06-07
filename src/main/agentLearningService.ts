@@ -1,13 +1,9 @@
 import type { AgentLearningStore } from "./agentLearningStore";
 import type { MemoryStore } from "./memoryStore";
-import type { AgentLearningCandidate } from "../shared/agentLearning";
-
-export type ApplyAcceptedLearningReport = {
-  scanned: number;
-  applied: number;
-  skipped: number;
-  memoryIds: string[];
-};
+import type {
+  AgentLearningCandidate,
+  ApplyAcceptedLearningReport,
+} from "../shared/agentLearning";
 
 export type AgentLearningService = {
   applyAcceptedLearning(): Promise<ApplyAcceptedLearningReport>;
