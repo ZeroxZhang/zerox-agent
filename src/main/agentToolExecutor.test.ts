@@ -229,7 +229,7 @@ describe("agent tool executor", () => {
       },
     });
     expect(searchOptions).toEqual([
-      { query: "downloads", kind: "all", limit: 2 },
+      { query: "downloads", kind: "all", limit: 2, strategy: "hybrid" },
     ]);
   });
 

@@ -136,6 +136,65 @@ describe("chat service", () => {
     ]);
   });
 
+  it("extracts preference-like chat turns into L1 memory and updates the persona profile", async () => {
+    const memoryWrites: MemoryInput[] = [];
+    const profileUpdates: MemoryRecord[][] = [];
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("好的，我会按这个偏好处理。");
+        },
+      },
+      getModelProfile: async () => ({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret",
+        model: "agent-model",
+        temperature: 0.2,
+        maxTokens: 8192,
+      }),
+      memoryStore: createMemoryStore({ memoryWrites }),
+      chatSessionStore: createChatSessionStore([]),
+      memoryProfileStore: {
+        async updateFromMemories(memories) {
+          profileUpdates.push(memories);
+        },
+      },
+      createId: () => "chat_preference",
+      now: () => new Date("2026-06-06T08:00:00.000Z"),
+    });
+
+    await service.sendMessage({
+      message: "以后默认把报告保存成 Markdown",
+    });
+
+    expect(memoryWrites).toEqual([
+      expect.objectContaining({
+        kind: "session",
+        title: "会话：以后默认把报告保存成 Markdown",
+      }),
+      {
+        kind: "semantic",
+        title: "用户偏好：以后默认把报告保存成 Markdown",
+        content: "以后默认把报告保存成 Markdown",
+        tags: ["l1", "chat", "preference"],
+        source: {
+          type: "chat_session",
+          sessionId: "persisted_session",
+          messageIds: ["message_1", "message_2"],
+        },
+        importance: 4,
+      },
+    ]);
+    expect(profileUpdates).toHaveLength(1);
+    expect(profileUpdates[0]).toMatchObject([
+      {
+        id: "created_memory_2",
+        kind: "semantic",
+        title: "用户偏好：以后默认把报告保存成 Markdown",
+      },
+    ]);
+  });
+
   it("runs a matching local task directly from a chat command", async () => {
     let completeCalled = false;
     const executedTaskIds: string[] = [];
@@ -311,18 +370,21 @@ function createMemoryStore(options: {
   searchResults?: MemorySearchResult[];
   memoryWrites?: MemoryInput[];
 } = {}) {
+  let createCount = 0;
   return {
     async search() {
       return options.searchResults ?? [];
     },
     async create(input: MemoryInput) {
+      createCount += 1;
       options.memoryWrites?.push(input);
       return createMemoryRecord({
-        id: "created_memory",
+        id: `created_memory_${createCount}`,
         title: input.title,
         content: input.content,
         tags: input.tags ?? [],
         kind: input.kind === "session" ? "session" : "semantic",
+        source: input.source,
       });
     },
   };
@@ -397,7 +459,7 @@ function createMemoryRecord(
   return {
     kind: "semantic",
     tags: [],
-    source: { type: "manual" },
+    source: partial.source ?? { type: "manual" },
     importance: 3,
     createdAt: "2026-06-06T08:00:00.000Z",
     updatedAt: "2026-06-06T08:00:00.000Z",

@@ -74,6 +74,7 @@ export type MemorySearchOptions = {
   minScore?: number;
   queryEmbedding?: number[];
   includeArchived?: boolean;
+  strategy?: "blended" | "hybrid";
 };
 
 export type MemorySearchResult = {
@@ -213,11 +214,84 @@ export function searchMemoryRecords(
 
   const minScore = options.minScore ?? 1;
 
+  if (options.strategy === "hybrid" && terms.length && queryEmbedding.length) {
+    return searchMemoryRecordsWithHybridRrf(
+      visibleRecords,
+      terms,
+      queryEmbedding,
+      minScore,
+      options.limit ?? 20,
+    );
+  }
+
   return visibleRecords
     .map((record) => scoreRecord(record, terms, queryEmbedding))
     .filter((result) => result.score >= minScore)
     .sort((a, b) => b.score - a.score || sortRecordsByImportanceAndDate(a.record, b.record))
     .slice(0, options.limit ?? 20);
+}
+
+function searchMemoryRecordsWithHybridRrf(
+  records: MemoryRecord[],
+  terms: string[],
+  queryEmbedding: number[],
+  minScore: number,
+  limit: number,
+): MemorySearchResult[] {
+  const lexicalResults = records
+    .map((record) => scoreRecord(record, terms, []))
+    .filter((result) => result.score >= minScore)
+    .sort((a, b) => b.score - a.score || sortRecordsByImportanceAndDate(a.record, b.record));
+  const vectorResults = records
+    .map((record) => scoreRecord(record, [], queryEmbedding))
+    .filter((result) => result.score >= minScore)
+    .sort((a, b) => b.score - a.score || sortRecordsByImportanceAndDate(a.record, b.record));
+  const byId = new Map<
+    string,
+    {
+      record: MemoryRecord;
+      score: number;
+      matchedTerms: Set<string>;
+    }
+  >();
+
+  applyRrfScores(byId, lexicalResults);
+  applyRrfScores(byId, vectorResults);
+
+  return [...byId.values()]
+    .map((result) => ({
+      record: result.record,
+      score: Number(result.score.toFixed(6)),
+      matchedTerms: [...result.matchedTerms],
+    }))
+    .sort((a, b) => b.score - a.score || sortRecordsByImportanceAndDate(a.record, b.record))
+    .slice(0, limit);
+}
+
+function applyRrfScores(
+  target: Map<
+    string,
+    {
+      record: MemoryRecord;
+      score: number;
+      matchedTerms: Set<string>;
+    }
+  >,
+  results: MemorySearchResult[],
+) {
+  results.forEach((result, index) => {
+    const current = target.get(result.record.id) ?? {
+      record: result.record,
+      score: 0,
+      matchedTerms: new Set<string>(),
+    };
+
+    current.score += 1 / (60 + index + 1);
+    for (const term of result.matchedTerms) {
+      current.matchedTerms.add(term);
+    }
+    target.set(result.record.id, current);
+  });
 }
 
 export function exportMemoryRecords(

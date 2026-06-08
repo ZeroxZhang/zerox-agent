@@ -92,6 +92,10 @@ import {
   type MemoryStore,
 } from "./memoryStore";
 import {
+  createMemoryProfileStore,
+  type MemoryProfileStore,
+} from "./memoryProfileStore";
+import {
   createOpenAiCompatibleClient,
   createOpenAiCompatibleEmbeddingClient,
 } from "./openAiCompatibleClient";
@@ -200,6 +204,7 @@ let agentRunnerService: AgentRunnerService | null = null;
 let chatService: ChatService | null = null;
 let chatSessionStore: ChatSessionStore | null = null;
 let memoryStore: MemoryStore | null = null;
+let memoryProfileStore: MemoryProfileStore | null = null;
 let taskSchedulerService: TaskSchedulerService | null = null;
 let modelConnectionService: ModelConnectionService | null = null;
 let agentBootstrapService: AgentBootstrapService | null = null;
@@ -973,6 +978,16 @@ function getMemoryStore(): MemoryStore {
   return memoryStore;
 }
 
+function getMemoryProfileStore(): MemoryProfileStore {
+  if (!memoryProfileStore) {
+    memoryProfileStore = createMemoryProfileStore({
+      configDir: path.join(app.getPath("userData"), "config"),
+    });
+  }
+
+  return memoryProfileStore;
+}
+
 function getAgentLearningStore(): AgentLearningStore {
   if (!agentLearningStore) {
     agentLearningStore = createAgentLearningStore({
@@ -1179,6 +1194,7 @@ function getChatService(): ChatService {
         };
       },
       memoryStore: getMemoryStore(),
+      memoryProfileStore: getMemoryProfileStore(),
       chatSessionStore: getChatSessionStore(),
       taskStore: getScheduledTaskStore(),
       runScheduledTask: (taskId) => getAgentRunnerService().runTask(taskId),

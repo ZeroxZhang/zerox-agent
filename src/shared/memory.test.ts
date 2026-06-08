@@ -171,6 +171,61 @@ describe("memory retrieval and export", () => {
     ]);
   });
 
+  it("can merge lexical and vector candidates with reciprocal rank fusion", () => {
+    const hybridRecords: MemoryRecord[] = [
+      createRecord({
+        id: "mem_lexical",
+        kind: "semantic",
+        title: "Markdown report preference",
+        content: "Reports should be saved as Markdown files.",
+        tags: ["reports"],
+        importance: 3,
+        embedding: {
+          model: "text-embedding-example",
+          dimensions: 2,
+          vector: [0, 1],
+          embeddedAt: "2026-06-05T08:00:00.000Z",
+        },
+      }),
+      createRecord({
+        id: "mem_vector",
+        kind: "semantic",
+        title: "Export format",
+        content: "Use document exports for work summaries.",
+        tags: ["reports"],
+        importance: 3,
+        embedding: {
+          model: "text-embedding-example",
+          dimensions: 2,
+          vector: [1, 0],
+          embeddedAt: "2026-06-05T08:00:00.000Z",
+        },
+      }),
+      createRecord({
+        id: "mem_both",
+        kind: "semantic",
+        title: "Markdown export",
+        content: "Markdown is the preferred report format.",
+        tags: ["reports"],
+        importance: 3,
+        embedding: {
+          model: "text-embedding-example",
+          dimensions: 2,
+          vector: [1, 0],
+          embeddedAt: "2026-06-05T08:00:00.000Z",
+        },
+      }),
+    ];
+
+    expect(
+      searchMemoryRecords(hybridRecords, {
+        query: "markdown report",
+        queryEmbedding: [1, 0],
+        strategy: "hybrid",
+      }).map((result) => result.record.id),
+    ).toEqual(["mem_both", "mem_lexical", "mem_vector"]);
+  });
+
   it("hides archived records from retrieval unless explicitly requested", () => {
     const active = createRecord({
       id: "mem_active",

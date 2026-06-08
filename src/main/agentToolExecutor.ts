@@ -380,6 +380,7 @@ async function searchMemory(
     query,
     kind,
     limit,
+    strategy: "hybrid",
   });
 
   return {

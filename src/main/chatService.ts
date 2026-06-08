@@ -3,6 +3,8 @@ import type { AgentModelProfile } from "./agentRunnerService";
 import type { AgentToolExecutor } from "./agentToolExecutor";
 import { runAgentLoop } from "./agentLoop";
 import type { AppendChatMessageResult, ChatSessionStore } from "./chatSessionStore";
+import { extractAtomicMemoriesFromChatTurn } from "./memoryL1Extractor";
+import type { MemoryProfileStore } from "./memoryProfileStore";
 import type { MemoryStore } from "./memoryStore";
 import {
   formatMemoryRecallContext,
@@ -34,6 +36,7 @@ export function createChatService(options: {
   chatClient: ChatClient;
   getModelProfile: () => Promise<AgentModelProfile>;
   memoryStore: Pick<MemoryStore, "create" | "search">;
+  memoryProfileStore?: MemoryProfileStore;
   chatSessionStore?: Pick<ChatSessionStore, "appendMessage">;
   taskStore?: Pick<ScheduledTaskStore, "create" | "list">;
   runScheduledTask?: (taskId: string) => Promise<RunScheduledTaskResult>;
@@ -89,6 +92,15 @@ export function createChatService(options: {
           reply: taskCreationResult.result.reply,
           messageIds: compactMessageIds(userMessageId, assistantMessageId),
         });
+        await writeAtomicMemories({
+          memoryStore: options.memoryStore,
+          memoryProfileStore: options.memoryProfileStore,
+          sessionId,
+          userMessageId,
+          assistantMessageId,
+          userMessage,
+          assistantReply: taskCreationResult.result.reply,
+        });
 
         return {
           ...taskCreationResult.result,
@@ -121,6 +133,15 @@ export function createChatService(options: {
           userMessage,
           reply: taskRunResult.result.reply,
           messageIds: compactMessageIds(userMessageId, assistantMessageId),
+        });
+        await writeAtomicMemories({
+          memoryStore: options.memoryStore,
+          memoryProfileStore: options.memoryProfileStore,
+          sessionId,
+          userMessageId,
+          assistantMessageId,
+          userMessage,
+          assistantReply: taskRunResult.result.reply,
         });
 
         return {
@@ -230,6 +251,15 @@ export function createChatService(options: {
         userMessage,
         reply,
         messageIds: compactMessageIds(userMessageId, assistantMessageId),
+      });
+      await writeAtomicMemories({
+        memoryStore: options.memoryStore,
+        memoryProfileStore: options.memoryProfileStore,
+        sessionId,
+        userMessageId,
+        assistantMessageId,
+        userMessage,
+        assistantReply: reply,
       });
 
       return {
@@ -490,6 +520,41 @@ async function writeSessionMemory(options: {
     return memory.id;
   } catch {
     return null;
+  }
+}
+
+async function writeAtomicMemories(options: {
+  memoryStore: Pick<MemoryStore, "create">;
+  memoryProfileStore: MemoryProfileStore | undefined;
+  sessionId: string;
+  userMessageId: string | null;
+  assistantMessageId: string | null;
+  userMessage: string;
+  assistantReply: string;
+}) {
+  const atomInputs = extractAtomicMemoriesFromChatTurn({
+    sessionId: options.sessionId,
+    userMessageId: options.userMessageId,
+    assistantMessageId: options.assistantMessageId,
+    userMessage: options.userMessage,
+    assistantReply: options.assistantReply,
+  });
+
+  if (!atomInputs.length) {
+    return;
+  }
+
+  try {
+    const createdMemories = [];
+    for (const atomInput of atomInputs) {
+      createdMemories.push(await options.memoryStore.create(atomInput));
+    }
+
+    if (createdMemories.length) {
+      await options.memoryProfileStore?.updateFromMemories(createdMemories);
+    }
+  } catch {
+    // Atomic memory extraction must not block the visible chat response.
   }
 }
 
