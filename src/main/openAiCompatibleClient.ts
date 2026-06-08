@@ -40,6 +40,7 @@ export type ChatCompletionResponse = {
   content: string | null;
   toolCalls: ToolCall[];
   finishReason: string;
+  reasoningContent?: string;
 };
 
 export type ChatClient = {
@@ -100,6 +101,9 @@ export function createOpenAiCompatibleClient(options?: {
         choices?: Array<{
           message?: {
             content?: string | null;
+            reasoning_content?: unknown;
+            reasoning?: unknown;
+            thinking?: unknown;
             tool_calls?: Array<{
               id: string;
               type: "function";
@@ -123,6 +127,7 @@ export function createOpenAiCompatibleClient(options?: {
       const message = choice?.message;
       const toolCalls = normalizeToolCalls(message?.tool_calls ?? []);
       const content = message?.content?.trim() || null;
+      const reasoningContent = normalizeReasoningContent(message);
 
       if (!content && !toolCalls.length) {
         throw new Error("LLM response did not include message content or tool calls.");
@@ -132,6 +137,7 @@ export function createOpenAiCompatibleClient(options?: {
         content,
         toolCalls,
         finishReason: choice?.finish_reason ?? "stop",
+        ...(reasoningContent ? { reasoningContent } : {}),
       };
     },
 
@@ -237,6 +243,37 @@ export function createOpenAiCompatibleClient(options?: {
       }
     },
   };
+}
+
+function normalizeReasoningContent(message: {
+  reasoning_content?: unknown;
+  reasoning?: unknown;
+  thinking?: unknown;
+} | undefined): string | undefined {
+  const value =
+    readReasoningValue(message?.reasoning_content) ??
+    readReasoningValue(message?.reasoning) ??
+    readReasoningValue(message?.thinking);
+
+  return value?.trim() || undefined;
+}
+
+function readReasoningValue(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    if (typeof record.content === "string") {
+      return record.content;
+    }
+    if (typeof record.text === "string") {
+      return record.text;
+    }
+  }
+
+  return undefined;
 }
 
 export function createOpenAiCompatibleEmbeddingClient(options?: {

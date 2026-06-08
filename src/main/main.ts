@@ -8,6 +8,7 @@ import {
   safeStorage,
   Tray,
 } from "electron";
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { getAgentValidationModeOptions } from "./agentValidationMode";
@@ -92,6 +93,14 @@ import {
   type MemoryStore,
 } from "./memoryStore";
 import {
+  createMemoryProfileStore,
+  type MemoryProfileStore,
+} from "./memoryProfileStore";
+import {
+  createToolResultOffloadStore,
+  type ToolResultOffloadStore,
+} from "./toolResultOffloadStore";
+import {
   createOpenAiCompatibleClient,
   createOpenAiCompatibleEmbeddingClient,
 } from "./openAiCompatibleClient";
@@ -145,6 +154,16 @@ import type {
   MemorySearchOptions,
   RunMemoryMaintenanceResult,
 } from "../shared/memory";
+import {
+  createDefaultMemoryEvalCases,
+  runMemoryEvals,
+  type RunMemoryEvalResult,
+} from "../shared/memoryEval";
+import type { RunMemoryGovernanceResult } from "../shared/memoryGovernance";
+import type {
+  ReadMemoryProfileResult,
+  SaveMemoryProfileResult,
+} from "../shared/memoryProfile";
 import type { AgentLearningListOptions } from "../shared/agentLearning";
 import type { ToolCallRequest } from "../shared/toolPermissions";
 import type { AgentEvalReport } from "../shared/agentEval";
@@ -153,6 +172,8 @@ import type { AgentWorkspace, MultiAgentSession } from "../shared/agentWorkspace
 import type {
   ChatSessionListItem,
   ChatSessionRecord,
+  ChatTaskStatusEvent,
+  CancelChatMessageResult,
   SendChatMessageInput,
   SendChatMessageResult,
 } from "../shared/chat";
@@ -165,6 +186,11 @@ import {
   buildDesktopRuntimeInfo,
   type DesktopRuntimeInfo,
 } from "../shared/desktopRuntime";
+import {
+  isSafeToolResultRef,
+  summarizeToolResultContent,
+  type ReadToolResultRefResult,
+} from "../shared/toolResultRefs";
 import {
   getSmokeModeOptions,
   getSmokeRendererCheckScript,
@@ -200,6 +226,8 @@ let agentRunnerService: AgentRunnerService | null = null;
 let chatService: ChatService | null = null;
 let chatSessionStore: ChatSessionStore | null = null;
 let memoryStore: MemoryStore | null = null;
+let memoryProfileStore: MemoryProfileStore | null = null;
+let toolResultOffloadStore: ToolResultOffloadStore | null = null;
 let taskSchedulerService: TaskSchedulerService | null = null;
 let modelConnectionService: ModelConnectionService | null = null;
 let agentBootstrapService: AgentBootstrapService | null = null;
@@ -207,6 +235,7 @@ let agentValidationStore: AgentValidationStore | null = null;
 let taskSchedulerTimer: NodeJS.Timeout | null = null;
 let memoryMaintenanceTimer: NodeJS.Timeout | null = null;
 const activeTaskRunControllers = new Map<string, AbortController>();
+const activeChatMessageControllers = new Map<string, AbortController>();
 const activeMcpClients: McpClient[] = [];
 let mcpInitialized = false;
 
@@ -551,6 +580,32 @@ ipcMain.handle(
   (_event, runId: string): Promise<AgentTrajectoryEvent[]> =>
     getAgentTrajectoryStore().list(runId),
 );
+ipcMain.handle(
+  "toolResults:readRef",
+  async (_event, ref: string): Promise<ReadToolResultRefResult> => {
+    if (!isSafeToolResultRef(ref)) {
+      return {
+        ok: false,
+        message: "工具结果引用无效。",
+      };
+    }
+
+    const content = await getToolResultOffloadStore().read(ref);
+    if (!content) {
+      return {
+        ok: false,
+        message: "没有找到这个工具结果引用。",
+      };
+    }
+
+    return {
+      ok: true,
+      ref,
+      content,
+      summary: summarizeToolResultContent(content),
+    };
+  },
+);
 ipcMain.handle("agentQuality:getEvalReport", (): Promise<AgentEvalReport> =>
   runAgentEvals(createAgentEvalFixtures()),
 );
@@ -628,9 +683,62 @@ ipcMain.handle(
 ipcMain.handle(
   "chat:sendMessage",
   async (
-    _event,
+    event,
     input: SendChatMessageInput,
-  ): Promise<SendChatMessageResult> => getChatService().sendMessage(input),
+  ): Promise<SendChatMessageResult> => {
+    const sender = event.sender;
+    const requestId = input.requestId ?? randomUUID();
+    const controller = new AbortController();
+    activeChatMessageControllers.set(requestId, controller);
+
+    try {
+      return await getChatService().sendMessage(input, {
+        signal: controller.signal,
+        onStatusEvent(statusEvent: ChatTaskStatusEvent) {
+          if (!sender.isDestroyed()) {
+            sender.send("chat:statusEvent", statusEvent);
+          }
+        },
+      });
+    } finally {
+      activeChatMessageControllers.delete(requestId);
+    }
+  },
+);
+ipcMain.handle(
+  "chat:cancelMessage",
+  (_event, requestId?: string): CancelChatMessageResult => {
+    if (requestId) {
+      const controller = activeChatMessageControllers.get(requestId);
+      if (controller) {
+        controller.abort();
+        return {
+          ok: true,
+          message: "已请求中断任务。",
+        };
+      }
+    }
+
+    let canceledCount = 0;
+    for (const controller of activeChatMessageControllers.values()) {
+      if (!controller.signal.aborted) {
+        controller.abort();
+        canceledCount += 1;
+      }
+    }
+
+    if (canceledCount === 0) {
+      return {
+        ok: false,
+        message: "没有正在运行的会话任务。",
+      };
+    }
+
+    return {
+      ok: true,
+      message: `已请求中断 ${canceledCount} 个任务。`,
+    };
+  },
 );
 ipcMain.handle(
   "chatSessions:list",
@@ -691,6 +799,79 @@ ipcMain.handle(
   },
 );
 ipcMain.handle("memory:export", () => getMemoryStore().export());
+ipcMain.handle(
+  "memory:evaluate",
+  async (): Promise<RunMemoryEvalResult> => {
+    try {
+      const records = await getMemoryStore().list({
+        kind: "all",
+        includeArchived: false,
+        limit: 500,
+      });
+      return {
+        ok: true,
+        report: runMemoryEvals(records, createDefaultMemoryEvalCases(records)),
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        message:
+          error instanceof Error ? error.message : "无法评估记忆检索质量。",
+      };
+    }
+  },
+);
+ipcMain.handle(
+  "memory:governance",
+  async (): Promise<RunMemoryGovernanceResult> => {
+    try {
+      return {
+        ok: true,
+        report: await getMemoryStore().reviewGovernance(),
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        message:
+          error instanceof Error ? error.message : "无法生成记忆治理报告。",
+      };
+    }
+  },
+);
+ipcMain.handle(
+  "memoryProfile:read",
+  async (): Promise<ReadMemoryProfileResult> => {
+    try {
+      return {
+        ok: true,
+        profile: await getMemoryProfileStore().read(),
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        message:
+          error instanceof Error ? error.message : "无法读取记忆画像。",
+      };
+    }
+  },
+);
+ipcMain.handle(
+  "memoryProfile:save",
+  async (_event, content: string): Promise<SaveMemoryProfileResult> => {
+    try {
+      return {
+        ok: true,
+        profile: await getMemoryProfileStore().save(content),
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        message:
+          error instanceof Error ? error.message : "无法保存记忆画像。",
+      };
+    }
+  },
+);
 ipcMain.handle(
   "memory:maintain",
   async (): Promise<RunMemoryMaintenanceResult> => {
@@ -973,6 +1154,26 @@ function getMemoryStore(): MemoryStore {
   return memoryStore;
 }
 
+function getMemoryProfileStore(): MemoryProfileStore {
+  if (!memoryProfileStore) {
+    memoryProfileStore = createMemoryProfileStore({
+      configDir: path.join(app.getPath("userData"), "config"),
+    });
+  }
+
+  return memoryProfileStore;
+}
+
+function getToolResultOffloadStore(): ToolResultOffloadStore {
+  if (!toolResultOffloadStore) {
+    toolResultOffloadStore = createToolResultOffloadStore({
+      configDir: path.join(app.getPath("userData"), "config"),
+    });
+  }
+
+  return toolResultOffloadStore;
+}
+
 function getAgentLearningStore(): AgentLearningStore {
   if (!agentLearningStore) {
     agentLearningStore = createAgentLearningStore({
@@ -996,7 +1197,10 @@ function getAgentLearningService(): AgentLearningService {
 
 function getAgentRunnerService(): AgentRunnerService {
   if (!agentRunnerService) {
-    const toolExecutor = createAgentToolExecutor();
+    const toolExecutor = createAgentToolExecutor({
+      memoryStore: getMemoryStore(),
+      chatSessionStore: getChatSessionStore(),
+    });
 
     // Register skill-defined tools and MCP tools
     void initializeMcpTools(toolExecutor);
@@ -1037,6 +1241,7 @@ function getAgentRunnerService(): AgentRunnerService {
       trajectoryStore: getAgentTrajectoryStore(),
       learningStore: getAgentLearningStore(),
       memoryStore: getMemoryStore(),
+      toolResultOffloadStore: getToolResultOffloadStore(),
     });
   }
 
@@ -1151,7 +1356,10 @@ function getChatSessionStore(): ChatSessionStore {
 
 function getChatService(): ChatService {
   if (!chatService) {
-    const toolExecutor = createAgentToolExecutor();
+    const toolExecutor = createAgentToolExecutor({
+      memoryStore: getMemoryStore(),
+      chatSessionStore: getChatSessionStore(),
+    });
     void initializeMcpTools(toolExecutor);
 
     chatService = createChatService({
@@ -1173,11 +1381,13 @@ function getChatService(): ChatService {
         };
       },
       memoryStore: getMemoryStore(),
+      memoryProfileStore: getMemoryProfileStore(),
       chatSessionStore: getChatSessionStore(),
       taskStore: getScheduledTaskStore(),
       runScheduledTask: (taskId) => getAgentRunnerService().runTask(taskId),
       toolExecutor,
       toolAuthorizationService: getToolAuthorizationService(),
+      toolResultOffloadStore: getToolResultOffloadStore(),
     });
   }
 

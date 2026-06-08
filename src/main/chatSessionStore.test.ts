@@ -79,6 +79,43 @@ describe("chat session store", () => {
     const reloaded = createChatSessionStore({ configDir });
     await expect(reloaded.get("chat_1")).resolves.toEqual(assistantAppend.session);
   });
+
+  it("searches raw chat messages as conversation evidence", async () => {
+    const store = createChatSessionStore({
+      configDir,
+      createId: createSequentialId("chat"),
+      now: createSteppedClock("2026-06-06T08:00:00.000Z"),
+    });
+
+    const first = await store.appendMessage({
+      role: "user",
+      content: "帮我整理下载文件夹",
+    });
+    await store.appendMessage({
+      sessionId: first.session.id,
+      role: "assistant",
+      content: "报告已保存为 Markdown。",
+    });
+    await store.appendMessage({
+      role: "user",
+      content: "明天提醒我检查发票",
+    });
+
+    await expect(
+      store.searchMessages({ query: "报告 markdown", limit: 5 }),
+    ).resolves.toEqual([
+      {
+        sessionId: "chat_1",
+        sessionTitle: "帮我整理下载文件夹",
+        messageId: "chat_3",
+        role: "assistant",
+        content: "报告已保存为 Markdown。",
+        createdAt: "2026-06-06T08:01:00.000Z",
+        score: 4,
+        matchedTerms: ["报告", "markdown"],
+      },
+    ]);
+  });
 });
 
 function createSequentialId(prefix: string): () => string {

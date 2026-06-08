@@ -4,8 +4,12 @@ import type { SkillManifest } from "./skills";
 
 export type AgentToolName =
   | "file_list"
+  | "file_stat"
+  | "file_search"
   | "file_read"
   | "file_write"
+  | "memory_search"
+  | "conversation_search"
   | "web_search"
   | "web_fetch"
   | "shell_exec";
@@ -21,6 +25,10 @@ export type TaskPermissionPolicy = {
   };
   shell: {
     commands: string[];
+  };
+  memory?: {
+    read: boolean;
+    write: boolean;
   };
 };
 
@@ -75,6 +83,7 @@ export function getDefaultTaskPermissionPolicy(): TaskPermissionPolicy {
     files: { read: [], write: [] },
     web: { search: false, fetchDomains: [] },
     shell: { commands: [] },
+    memory: { read: false, write: false },
   };
 }
 
@@ -92,6 +101,10 @@ export function createPermissionPolicyFromSkillManifest(
     },
     shell: {
       commands: manifest.permissions.shell.commands,
+    },
+    memory: {
+      read: manifest.permissions.memory.read,
+      write: manifest.permissions.memory.write,
     },
   });
 }
@@ -112,6 +125,10 @@ export function normalizeTaskPermissionPolicy(
     },
     shell: {
       commands: unique(policy.shell.commands.map((command) => command.trim()).filter(Boolean)),
+    },
+    memory: {
+      read: Boolean(policy.memory?.read),
+      write: Boolean(policy.memory?.write),
     },
   };
 }
@@ -161,6 +178,18 @@ export function authorizeToolCall(
         normalized.files.read,
         "file_list 路径不在已授权可读目录内。",
       );
+    case "file_stat":
+      return authorizeFilePath(
+        String(request.args.path ?? ""),
+        normalized.files.read,
+        "file_stat 路径不在已授权可读目录内。",
+      );
+    case "file_search":
+      return authorizeFilePath(
+        String(request.args.root ?? ""),
+        normalized.files.read,
+        "file_search 根目录不在已授权可读目录内。",
+      );
     case "file_read":
       return authorizeFilePath(
         String(request.args.path ?? ""),
@@ -173,6 +202,11 @@ export function authorizeToolCall(
         normalized.files.write,
         "file_write 路径不在已授权可写目录内。",
       );
+    case "memory_search":
+    case "conversation_search":
+      return normalized.memory?.read
+        ? allow(`这个任务已允许 ${request.toolName}。`)
+        : deny("这个任务未允许读取本地记忆。");
     case "web_search":
       return normalized.web.search
         ? allow("这个任务已允许 web_search。")
@@ -240,12 +274,22 @@ function authorizeWorkspaceFileRequest(
   request: ToolCallRequest,
   runContext: AgentRunContext,
 ): ToolAuthorizationDecision | null {
-  if (request.toolName !== "file_list" && request.toolName !== "file_read" && request.toolName !== "file_write") {
+  if (
+    request.toolName !== "file_list" &&
+    request.toolName !== "file_stat" &&
+    request.toolName !== "file_search" &&
+    request.toolName !== "file_read" &&
+    request.toolName !== "file_write"
+  ) {
     return null;
   }
 
   const access = request.toolName === "file_write" ? "write" : "read";
-  const requestedPath = String(request.args.path ?? "");
+  const requestedPath = String(
+    request.toolName === "file_search"
+      ? request.args.root ?? ""
+      : request.args.path ?? "",
+  );
   if (!requestedPath) {
     return null;
   }

@@ -17,6 +17,7 @@ describe("task permission policy", () => {
       files: { read: [], write: [] },
       web: { search: false, fetchDomains: [] },
       shell: { commands: [] },
+      memory: { read: false, write: false },
     });
   });
 
@@ -34,6 +35,10 @@ describe("task permission policy", () => {
         shell: {
           commands: [" ls {{targetDir}} ", ""],
         },
+        memory: {
+          read: true,
+          write: false,
+        },
       }),
     ).toEqual({
       files: { read: ["~/Downloads"], write: ["/tmp/reports"] },
@@ -42,6 +47,7 @@ describe("task permission policy", () => {
         fetchDomains: ["example.com", "docs.example.com"],
       },
       shell: { commands: ["ls {{targetDir}}"] },
+      memory: { read: true, write: false },
     });
   });
 
@@ -82,6 +88,7 @@ describe("task permission policy", () => {
       files: { read: ["{{targetDir}}"], write: ["{{targetDir}}"] },
       web: { search: false, fetchDomains: [] },
       shell: { commands: [] },
+      memory: { read: true, write: true },
     });
   });
 });
@@ -98,6 +105,10 @@ describe("tool authorization", () => {
     },
     shell: {
       commands: ["find {{targetDir}} -maxdepth 1 -type f"],
+    },
+    memory: {
+      read: true,
+      write: false,
     },
   };
 
@@ -238,6 +249,32 @@ describe("tool authorization", () => {
     });
   });
 
+  it("allows memory search tools only when memory read is enabled", () => {
+    expect(
+      authorizeToolCall(policy, {
+        toolName: "memory_search",
+        args: { query: "agent memory design" },
+      }),
+    ).toMatchObject({ allowed: true });
+
+    expect(
+      authorizeToolCall(policy, {
+        toolName: "conversation_search",
+        args: { query: "downloads" },
+      }),
+    ).toMatchObject({ allowed: true });
+
+    expect(
+      authorizeToolCall(
+        { ...policy, memory: { read: false, write: false } },
+        { toolName: "memory_search", args: { query: "agent memory design" } },
+      ),
+    ).toMatchObject({
+      allowed: false,
+      reason: "这个任务未允许读取本地记忆。",
+    });
+  });
+
   it("narrows broad file permissions to the active run workspace", () => {
     const broadPolicy: TaskPermissionPolicy = {
       files: {
@@ -246,6 +283,7 @@ describe("tool authorization", () => {
       },
       web: { search: true, fetchDomains: ["example.com"] },
       shell: { commands: ["find {{targetDir}} -maxdepth 1 -type f"] },
+      memory: { read: true, write: false },
     };
     const runContext = buildPrimaryRunContext({
       workspaceId: "workspace_1",

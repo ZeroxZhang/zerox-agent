@@ -1,4 +1,13 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from "react";
 import type {
   AgentBootstrapValidationReport,
   AgentBootstrapValidationSnapshot,
@@ -15,9 +24,11 @@ import {
 import { buildAgentReadinessChecklist } from "../../shared/agentReadiness";
 import type { AgentRunRecord } from "../../shared/agentRuns";
 import type {
+  ChatAgentStatus,
   ChatHistoryMessage,
   ChatSessionListItem,
   ChatSessionRecord,
+  ChatTaskStatusEvent,
 } from "../../shared/chat";
 import type { MemoryRecord } from "../../shared/memory";
 import type { PublicModelSettings } from "../../shared/modelSettings";
@@ -44,6 +55,13 @@ import {
   parseMarkdownBlocks,
   type MarkdownBlock,
 } from "../chatMarkdown";
+import {
+  buildTaskProcessItems,
+  buildTaskActivityDetail,
+  createTaskActivity,
+  idleTaskActivity,
+  type TaskActivityState,
+} from "../chatTaskActivity";
 
 type AgentChatPanelProps = {
   onNavigate: (sectionId: NavigationSectionId) => void;
@@ -57,7 +75,7 @@ type ChatMessage = {
 };
 
 type ChatStatus = {
-  kind: "ready" | "working" | "error";
+  kind: "ready" | "working" | "paused" | "error";
   message: string;
 };
 
@@ -85,6 +103,10 @@ const fallbackSessions: ChatSession[] = [
     summary: "搜索、抓取、总结网页",
   },
 ];
+const minSessionRailWidth = 180;
+const maxSessionRailWidth = 360;
+const minChatWorkspaceWidth = 520;
+const chatResizeStep = 12;
 
 const initialMessages: ChatMessage[] = [
   {
@@ -124,7 +146,21 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
     kind: "ready",
     message: "会话已就绪",
   });
+  const [taskActivity, setTaskActivity] =
+    useState<TaskActivityState>(idleTaskActivity);
+  const [taskProcessEvents, setTaskProcessEvents] = useState<ChatTaskStatusEvent[]>(
+    [],
+  );
+  const [sessionRailWidth, setSessionRailWidth] = useState(220);
+  const [activeChatRequestId, setActiveChatRequestId] = useState<string | null>(
+    null,
+  );
+  const [activityTick, setActivityTick] = useState(Date.now());
+  const chatPanelRef = useRef<HTMLElement>(null);
   const messageListRef = useRef<HTMLDivElement>(null);
+  const sessionIdRef = useRef<string | null>(sessionId);
+  const activeStatusSessionIdRef = useRef<string | null>(null);
+  const activeChatRequestIdRef = useRef<string | null>(null);
 
   // Auto-scroll to latest message
   useEffect(() => {
@@ -132,6 +168,60 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
       messageListRef.current.scrollTop = messageListRef.current.scrollHeight;
     }
   }, [messages]);
+
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!window.buildingAgent) {
+      return;
+    }
+
+    return window.buildingAgent.onChatTaskStatusEvent((event) => {
+      const activeSessionId = activeStatusSessionIdRef.current;
+      const currentSessionId = sessionIdRef.current;
+      if (activeSessionId && event.sessionId !== activeSessionId) {
+        return;
+      }
+      if (!activeSessionId && currentSessionId && event.sessionId !== currentSessionId) {
+        return;
+      }
+
+      activeStatusSessionIdRef.current = event.sessionId;
+      setSessionId((current) => current ?? event.sessionId);
+      setTaskProcessEvents((current) => [...current, event]);
+      setTaskActivity(buildTaskActivityFromStatusEvent(event));
+      setStatus({
+        kind: getChatStatusKindFromEvent(event),
+        message: event.message,
+      });
+      setWorkPhase(getWorkPhaseFromStatusEvent(event));
+      if (
+        event.state === "paused" ||
+        event.state === "canceled" ||
+        event.state === "completed" ||
+        event.state === "failed"
+      ) {
+        setActiveChatRequest(null);
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (taskActivity.kind !== "working") {
+      return;
+    }
+
+    setActivityTick(Date.now());
+    const intervalId = window.setInterval(() => {
+      setActivityTick(Date.now());
+    }, 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [taskActivity.kind, taskActivity.startedAt]);
 
   useEffect(() => {
     if (!window.buildingAgent) {
@@ -203,6 +293,9 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
 
     setSessionId(loadedSession.id);
     setMessages(loadedSession.messages.map(toChatMessage));
+    setWorkPhase("idle");
+    setTaskActivity(idleTaskActivity);
+    setTaskProcessEvents([]);
   }
 
   async function refreshSessions(nextActiveSessionId?: string) {
@@ -222,6 +315,19 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
   const latestRun = runs[0];
   const activeTasks = tasks.filter((task) => task.enabled);
   const workSteps = useMemo(() => buildAgentWorkSteps(workPhase), [workPhase]);
+  const taskActivityDetail = useMemo(
+    () => buildTaskActivityDetail(taskActivity, activityTick),
+    [activityTick, taskActivity],
+  );
+  const taskProcessItems = useMemo(
+    () => buildTaskProcessItems(taskProcessEvents),
+    [taskProcessEvents],
+  );
+  const canCancelChatTask =
+    Boolean(window.buildingAgent) &&
+    (status.kind === "working" ||
+      taskActivity.kind === "working" ||
+      activeChatRequestId !== null);
 
   const contextCards = useMemo(
     () => [
@@ -288,11 +394,17 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
     setMessages((current) => [...current, createMessage(message, current.length)]);
   }
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const content = draft.trim();
+  function setActiveChatRequest(requestId: string | null) {
+    activeChatRequestIdRef.current = requestId;
+    setActiveChatRequestId(requestId);
+  }
 
+  async function submitUserMessage(rawContent: string) {
+    const content = rawContent.trim();
     if (!content) {
+      return;
+    }
+    if (status.kind === "working") {
       return;
     }
 
@@ -305,10 +417,26 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
     setMessages((current) => [...current, userMessage]);
     setDraft("");
     setWorkPhase("planning");
+    activeStatusSessionIdRef.current = sessionId;
+    setTaskProcessEvents([]);
+    setTaskActivity(
+      createTaskActivity({
+        kind: "working",
+        title: "正在执行任务",
+        detail: "请求已发送，等待后端状态",
+      }),
+    );
 
     if (!window.buildingAgent) {
       setStatus({ kind: "working", message: "正在整理演示回复..." });
       setWorkPhase("model");
+      setTaskActivity(
+        createTaskActivity({
+          kind: "working",
+          title: "正在生成演示回复",
+          detail: "正在整理本地预览上下文",
+        }),
+      );
       appendMessage({
         role: "assistant",
         content: buildLocalAgentReply({
@@ -321,14 +449,25 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
       });
       setStatus({ kind: "ready", message: "演示回复已生成" });
       setWorkPhase("done");
+      setTaskActivity(
+        createTaskActivity({
+          kind: "done",
+          title: "本轮已完成",
+          detail: "演示回复已生成",
+        }),
+      );
+      activeStatusSessionIdRef.current = null;
       return;
     }
 
     setStatus({ kind: "working", message: "正在检索记忆并调用模型..." });
     setWorkPhase("model");
+    const requestId = createClientRequestId();
+    setActiveChatRequest(requestId);
     const result = await window.buildingAgent
       .sendChatMessage({
         ...(sessionId ? { sessionId } : {}),
+        requestId,
         message: content,
         history,
       })
@@ -337,14 +476,31 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
         message:
           error instanceof Error ? error.message : "会话请求失败，请稍后重试。",
       }));
+    if (activeChatRequestIdRef.current === requestId) {
+      setActiveChatRequest(null);
+    }
 
     if (!result.ok) {
-      setStatus({ kind: "error", message: result.message });
-      setWorkPhase("error");
-      appendMessage({
-        role: "assistant",
-        content: result.message,
+      activeStatusSessionIdRef.current = null;
+      const wasCanceled = isCanceledMessage(result.message);
+      setStatus({
+        kind: wasCanceled ? "ready" : "error",
+        message: result.message,
       });
+      setWorkPhase(wasCanceled ? "done" : "error");
+      setTaskActivity(
+        createTaskActivity({
+          kind: wasCanceled ? "done" : "error",
+          title: wasCanceled ? "任务已中断" : "执行遇到问题",
+          detail: result.message,
+        }),
+      );
+      if (!wasCanceled) {
+        appendMessage({
+          role: "assistant",
+          content: result.message,
+        });
+      }
       return;
     }
 
@@ -355,22 +511,74 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
     if (result.createdTask) {
       setTasks((currentTasks) => [result.createdTask!, ...currentTasks]);
     }
+    const isPaused = result.agentStatus?.state === "paused";
     setStatus({
-      kind: "ready",
-      message: result.createdTask
-        ? "任务已创建"
-        : result.executedRun
-        ? `任务已运行：${translateRunStatus(result.executedRun.status)}`
-        : result.relatedMemories.length
-        ? `已参考 ${result.relatedMemories.length} 条记忆`
-        : "模型已回复",
+      kind: isPaused ? "paused" : "ready",
+      message: isPaused
+        ? "等待你确认是否继续"
+        : result.createdTask
+          ? "任务已创建"
+          : result.executedRun
+            ? `任务已运行：${translateRunStatus(result.executedRun.status)}`
+            : result.relatedMemories.length
+              ? `已参考 ${result.relatedMemories.length} 条记忆`
+              : "模型已回复",
     });
-    setWorkPhase("done");
+    setWorkPhase(isPaused ? "paused" : "done");
+    setTaskActivity(
+      buildTaskActivityFromAgentStatus({
+        agentStatus: result.agentStatus,
+        relatedMemoryCount: result.relatedMemories.length,
+        fallbackDetail: isPaused ? "等待确认" : "回复已写入会话",
+      }),
+    );
+    activeStatusSessionIdRef.current = isPaused ? result.sessionId : null;
     appendMessage({
       role: "assistant",
       content: result.reply,
     });
     void refreshSessions(result.sessionId);
+  }
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await submitUserMessage(draft);
+  }
+
+  async function handleCancelChatMessage() {
+    if (!window.buildingAgent || !canCancelChatTask) {
+      return;
+    }
+
+    setStatus({ kind: "working", message: "正在中断任务..." });
+    setTaskActivity(
+      createTaskActivity({
+        kind: "working",
+        title: "正在中断任务",
+        detail: "已请求中断，等待当前调用返回",
+        startedAt: taskActivity.startedAt,
+      }),
+    );
+
+    const result = await window.buildingAgent
+      .cancelChatMessage(activeChatRequestIdRef.current ?? undefined)
+      .catch((error) => ({
+        ok: false as const,
+        message:
+          error instanceof Error ? error.message : "中断请求失败，请稍后重试。",
+      }));
+
+    if (!result.ok) {
+      setActiveChatRequest(null);
+      setStatus({ kind: "ready", message: result.message });
+      setTaskActivity(
+        createTaskActivity({
+          kind: "done",
+          title: "没有可中断任务",
+          detail: result.message,
+        }),
+      );
+    }
   }
 
   async function handleRunFirstTask() {
@@ -590,11 +798,79 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
     onNavigate(action.target);
   }
 
+  function getMaxSessionRailWidth(): number {
+    const panelWidth = chatPanelRef.current?.getBoundingClientRect().width ?? 0;
+    if (!panelWidth) {
+      return maxSessionRailWidth;
+    }
+
+    return Math.max(
+      minSessionRailWidth,
+      Math.min(maxSessionRailWidth, panelWidth - minChatWorkspaceWidth - 8),
+    );
+  }
+
+  function updateSessionRailWidth(nextWidth: number) {
+    setSessionRailWidth(
+      clampNumber(
+        nextWidth,
+        minSessionRailWidth,
+        getMaxSessionRailWidth(),
+      ),
+    );
+  }
+
+  function handleSessionRailResizePointerDown(
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ) {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = sessionRailWidth;
+
+    function handlePointerMove(moveEvent: PointerEvent) {
+      updateSessionRailWidth(startWidth - (moveEvent.clientX - startX));
+    }
+
+    function cleanup() {
+      document.removeEventListener("pointermove", handlePointerMove);
+    }
+
+    document.addEventListener("pointermove", handlePointerMove);
+    document.addEventListener("pointerup", cleanup, { once: true });
+  }
+
+  function handleSessionRailResizeKeyDown(
+    event: KeyboardEvent<HTMLButtonElement>,
+  ) {
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      updateSessionRailWidth(sessionRailWidth + chatResizeStep);
+    }
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      updateSessionRailWidth(sessionRailWidth - chatResizeStep);
+    }
+    if (event.key === "Home") {
+      event.preventDefault();
+      updateSessionRailWidth(minSessionRailWidth);
+    }
+    if (event.key === "End") {
+      event.preventDefault();
+      updateSessionRailWidth(getMaxSessionRailWidth());
+    }
+  }
+
   return (
     <section
       className="agent-chat-panel"
       aria-label="智能体会话工作台"
       data-testid="agent-chat-panel"
+      ref={chatPanelRef}
+      style={
+        {
+          "--session-rail-width": `${sessionRailWidth}px`,
+        } as CSSProperties
+      }
     >
       <aside className="session-rail" aria-label="会话列表">
         <div className="session-rail-header">
@@ -605,6 +881,10 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
             onClick={() => {
               setSessionId(null);
               setMessages(initialMessages);
+              setStatus({ kind: "ready", message: "会话已就绪" });
+              setWorkPhase("idle");
+              setTaskActivity(idleTaskActivity);
+              setTaskProcessEvents([]);
             }}
           >
             ＋
@@ -634,6 +914,22 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
           ))}
         </div>
       </aside>
+
+      <button
+        aria-label="调整会话历史栏宽度"
+        aria-orientation="vertical"
+        aria-valuemax={getMaxSessionRailWidth()}
+        aria-valuemin={minSessionRailWidth}
+        aria-valuenow={sessionRailWidth}
+        className="session-rail-resize-handle"
+        onKeyDown={handleSessionRailResizeKeyDown}
+        onPointerDown={handleSessionRailResizePointerDown}
+        role="separator"
+        title="拖动调整会话历史栏宽度"
+        type="button"
+      >
+        <span aria-hidden="true" />
+      </button>
 
       <section className="chat-workspace" aria-label="会话窗口">
         <div className="chat-hero">
@@ -691,25 +987,73 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
         </div>
 
         <form className="composer" onSubmit={handleSubmit}>
+          <TaskActivityStrip
+            activity={taskActivity}
+            detail={taskActivityDetail}
+            processItems={taskProcessItems}
+            onContinue={
+              taskActivity.kind === "paused"
+                ? () => {
+                    void submitUserMessage("继续");
+                  }
+                : undefined
+            }
+          />
           <div className="composer-inner">
-            <textarea
-              data-testid="agent-message-input"
-              id="agent-message"
-              value={draft}
-              onChange={(event) => setDraft(event.currentTarget.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  const form = event.currentTarget.closest("form");
-                  form?.requestSubmit();
-                }
-              }}
-              placeholder="输入消息，Enter 发送，Shift+Enter 换行"
-              rows={2}
-            />
-            <button data-testid="agent-send-button" type="submit">
-              发送
-            </button>
+            <div className="composer-input-shell">
+              <textarea
+                data-testid="agent-message-input"
+                id="agent-message"
+                value={draft}
+                onChange={(event) => setDraft(event.currentTarget.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    const form = event.currentTarget.closest("form");
+                    form?.requestSubmit();
+                  }
+                }}
+                placeholder="输入消息，Enter 发送，Shift+Enter 换行"
+                rows={2}
+              />
+              <div className="composer-floating-actions" aria-label="对话操作">
+                <button
+                  aria-label="工具权限"
+                  className="composer-icon-button composer-permission-button"
+                  onClick={() => onNavigate("tools")}
+                  title="工具权限"
+                  type="button"
+                >
+                  <span className="composer-icon composer-icon-permission" aria-hidden="true" />
+                  <span className="sr-only">工具权限</span>
+                </button>
+                <button
+                  aria-label="中断当前任务"
+                  className="composer-icon-button composer-stop-button"
+                  data-testid="agent-stop-button"
+                  disabled={!canCancelChatTask}
+                  onClick={() => {
+                    void handleCancelChatMessage();
+                  }}
+                  title="中断当前任务"
+                  type="button"
+                >
+                  <span className="composer-icon composer-icon-stop" aria-hidden="true" />
+                  <span className="sr-only">中断当前任务</span>
+                </button>
+                <button
+                  aria-label="发送消息"
+                  className="composer-icon-button composer-send-button"
+                  data-testid="agent-send-button"
+                  disabled={status.kind === "working" || !draft.trim()}
+                  title="发送消息"
+                  type="submit"
+                >
+                  <span className="composer-icon composer-icon-send" aria-hidden="true" />
+                  <span className="sr-only">发送消息</span>
+                </button>
+              </div>
+            </div>
           </div>
         </form>
       </section>
@@ -790,6 +1134,8 @@ function AgentWorkTimeline({
   const title =
     status.kind === "working"
       ? "智能体正在工作"
+      : status.kind === "paused"
+        ? "等待你确认"
       : status.kind === "error"
       ? "执行遇到问题"
       : "智能体待命中";
@@ -813,6 +1159,178 @@ function AgentWorkTimeline({
       </div>
     </section>
   );
+}
+
+function TaskActivityStrip({
+  activity,
+  detail,
+  processItems,
+  onContinue,
+}: {
+  activity: TaskActivityState;
+  detail: string;
+  processItems: ReturnType<typeof buildTaskProcessItems>;
+  onContinue?: () => void;
+}) {
+  return (
+    <details className={`task-activity-strip is-${activity.kind}`}>
+      <summary>
+        <span className="task-activity-dot" aria-hidden="true" />
+        <em>
+          {activity.title} · {detail}
+        </em>
+        {typeof activity.toolCallsExecuted === "number" && (
+          <span className="task-activity-meter">
+            工具 {activity.toolCallsExecuted}
+          </span>
+        )}
+        {onContinue && (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onContinue();
+            }}
+          >
+            继续执行
+          </button>
+        )}
+      </summary>
+      {processItems.length > 0 && (
+        <ol className="task-process-list" aria-label="思考与执行过程">
+          {processItems.map((item) => (
+            <li key={item.id}>
+              <time>{item.time}</time>
+              <strong>{item.label}</strong>
+              <span>{item.message}</span>
+              {item.meta && <small>{item.meta}</small>}
+            </li>
+          ))}
+        </ol>
+      )}
+    </details>
+  );
+}
+
+function buildTaskActivityFromAgentStatus(options: {
+  agentStatus: ChatAgentStatus | undefined;
+  relatedMemoryCount: number;
+  fallbackDetail: string;
+}): TaskActivityState {
+  if (options.agentStatus?.state === "paused") {
+    const isFailureLoop = options.agentStatus.reason === "tool_failure_loop";
+    return createTaskActivity({
+      kind: "paused",
+      title: isFailureLoop ? "连续工具失败，等待确认" : "长任务等待确认",
+      detail: isFailureLoop
+        ? `已执行 ${options.agentStatus.toolCallsExecuted} 个工具，检测到同类失败循环`
+        : `已执行 ${options.agentStatus.toolCallsExecuted} 个工具，停在第 ${options.agentStatus.maxTurns} 轮检查点`,
+      toolCallsExecuted: options.agentStatus.toolCallsExecuted,
+      maxTurns: options.agentStatus.maxTurns,
+    });
+  }
+
+  if (options.agentStatus?.state === "completed") {
+    return createTaskActivity({
+      kind: "done",
+      title: "本轮已完成",
+      detail:
+        options.agentStatus.toolCallsExecuted > 0
+          ? `累计执行 ${options.agentStatus.toolCallsExecuted} 个工具`
+          : options.fallbackDetail,
+      toolCallsExecuted:
+        options.agentStatus.toolCallsExecuted > 0
+          ? options.agentStatus.toolCallsExecuted
+          : undefined,
+    });
+  }
+
+  return createTaskActivity({
+    kind: "done",
+    title: "本轮已完成",
+    detail:
+      options.relatedMemoryCount > 0
+        ? `已参考 ${options.relatedMemoryCount} 条记忆`
+      : options.fallbackDetail,
+  });
+}
+
+function buildTaskActivityFromStatusEvent(
+  event: ChatTaskStatusEvent,
+): TaskActivityState {
+  const eventTime = parseEventTime(event.createdAt);
+  const startedAt = eventTime - event.elapsedMs;
+  const kind =
+    event.state === "paused"
+      ? "paused"
+      : event.state === "completed" || event.state === "canceled"
+        ? "done"
+        : event.state === "failed"
+          ? "error"
+          : "working";
+
+  return createTaskActivity({
+    kind,
+    title: getTaskActivityTitleFromStatusEvent(event),
+    detail: event.message,
+    now: eventTime,
+    startedAt,
+    lastEventAt: eventTime,
+    toolCallsExecuted: event.toolCallsExecuted,
+    maxTurns: event.maxTurns,
+  });
+}
+
+function getTaskActivityTitleFromStatusEvent(event: ChatTaskStatusEvent): string {
+  if (event.state === "started") return "正在启动任务";
+  if (event.state === "memory") return "正在检索记忆";
+  if (event.state === "model") return "正在调用模型";
+  if (event.state === "reasoning") return "模型思考";
+  if (event.state === "tool_call") return "正在执行工具";
+  if (event.state === "tool_result") return "工具结果已返回";
+  if (event.state === "paused") return "长任务等待确认";
+  if (event.state === "canceled") return "任务已中断";
+  if (event.state === "completed") return "本轮已完成";
+  return "执行遇到问题";
+}
+
+function getChatStatusKindFromEvent(event: ChatTaskStatusEvent): ChatStatus["kind"] {
+  if (event.state === "paused") return "paused";
+  if (event.state === "failed") return "error";
+  if (event.state === "canceled") return "ready";
+  if (event.state === "completed") return "ready";
+  return "working";
+}
+
+function getWorkPhaseFromStatusEvent(event: ChatTaskStatusEvent): AgentWorkPhase {
+  if (event.state === "started") return "planning";
+  if (event.state === "memory") return "memory";
+  if (event.state === "model" || event.state === "reasoning") return "model";
+  if (event.state === "tool_call" || event.state === "tool_result") return "tool";
+  if (event.state === "paused") return "paused";
+  if (event.state === "failed") return "error";
+  return "done";
+}
+
+function parseEventTime(value: string): number {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : Date.now();
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+function createClientRequestId(): string {
+  return (
+    globalThis.crypto?.randomUUID?.() ??
+    `chat-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  );
+}
+
+function isCanceledMessage(message: string): boolean {
+  return /中断|取消|cancel|canceled|cancelled|abort|aborted/i.test(message);
 }
 
 function MarkdownMessage({ content }: { content: string }) {

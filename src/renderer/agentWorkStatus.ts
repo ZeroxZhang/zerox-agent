@@ -4,6 +4,7 @@ export type AgentWorkPhase =
   | "memory"
   | "model"
   | "tool"
+  | "paused"
   | "done"
   | "error";
 
@@ -45,6 +46,7 @@ const activeStepByPhase: Record<AgentWorkPhase, number> = {
   memory: 1,
   model: 2,
   tool: 2,
+  paused: 3,
   done: 4,
   error: 4,
 };

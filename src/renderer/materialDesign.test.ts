@@ -11,6 +11,10 @@ describe("Design System — Notion-inspired app shell", () => {
     path.join(process.cwd(), "src/renderer/App.tsx"),
     "utf8",
   );
+  const chatPanelSource = readFileSync(
+    path.join(process.cwd(), "src/renderer/components/AgentChatPanel.tsx"),
+    "utf8",
+  );
 
   it("defines comprehensive CSS custom property design tokens", () => {
     // Color tokens
@@ -50,6 +54,8 @@ describe("Design System — Notion-inspired app shell", () => {
   it("uses app shell and navigation classes in the app frame", () => {
     expect(appSource).toContain("app-shell");
     expect(appSource).toContain("sidebar");
+    expect(appSource).toContain("nav-resize-handle");
+    expect(appSource).toContain("aria-label=\"调整功能导航栏宽度\"");
     expect(appSource).toContain("material-brand"); // brand component class
     expect(appSource).toContain("material-nav-icon"); // icon wrapper class
     expect(appSource).toContain("workspace");
@@ -79,10 +85,38 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".memory-tags");
     // Chat
     expect(styles).toContain(".agent-chat-panel");
+    expect(styles).toContain("--session-rail-width");
+    expect(styles).toContain(".nav-resize-handle");
+    expect(styles).toContain(".session-rail-resize-handle");
+    expect(styles).toContain("grid-template-columns: minmax(520px, 1fr) var(--resize-handle-width) var(--session-rail-width)");
     expect(styles).toContain(".chat-message");
     expect(styles).toContain(".composer");
+    expect(styles).toContain(".composer-input-shell");
+    expect(styles).toContain(".composer-floating-actions");
+    expect(styles).toContain(".composer-icon-button");
+    expect(styles).toContain(".composer-icon-stop");
+    expect(styles).toContain(".chat-hero {");
+    expect(styles).toContain(".message-list {");
+    expect(styles).toContain("border: none; background: transparent");
+    expect(styles).toContain("max-height: min(220px, 34vh)");
+    expect(styles).toContain("overflow-y: auto");
     expect(styles).toContain(".markdown-message");
     // Responsive
     expect(styles).toContain("@media");
+  });
+
+  it("keeps chatbox actions icon-only and stop available while work is running", () => {
+    expect(chatPanelSource).toContain("aria-label=\"工具权限\"");
+    expect(chatPanelSource).toContain("aria-label=\"调整会话历史栏宽度\"");
+    expect(chatPanelSource).toContain("aria-label=\"中断当前任务\"");
+    expect(chatPanelSource).toContain("aria-label=\"发送消息\"");
+    expect(chatPanelSource).toContain("className=\"composer-floating-actions\"");
+    expect(chatPanelSource).toContain("disabled={!canCancelChatTask}");
+    expect(chatPanelSource).toContain(
+      "cancelChatMessage(activeChatRequestIdRef.current ?? undefined)",
+    );
+    expect(chatPanelSource).not.toContain(
+      "disabled={status.kind !== \"working\" || !activeChatRequestId}",
+    );
   });
 });

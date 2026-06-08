@@ -1,14 +1,53 @@
 import { describe, expect, it } from "vitest";
 import { createChatService } from "./chatService";
+import type { AgentToolExecutor } from "./agentToolExecutor";
 import type { AppendChatMessageInput } from "./chatSessionStore";
 import type { ChatClient, ChatMessage, ChatCompletionResponse } from "./openAiCompatibleClient";
 import type { RunScheduledTaskResult } from "../shared/agentRuns";
 import type { MemoryInput, MemoryRecord, MemorySearchResult } from "../shared/memory";
 import type { ScheduledTask, ScheduledTaskInput } from "../shared/scheduledTasks";
 import { getDefaultTaskPermissionPolicy } from "../shared/toolPermissions";
+import type { ChatTaskStatusEvent } from "../shared/chat";
 
 function chatReply(content: string): ChatCompletionResponse {
   return { content, toolCalls: [], finishReason: "stop" };
+}
+
+function toolCallResponse(id: string, path: string): ChatCompletionResponse {
+  return {
+    content: null,
+    finishReason: "tool_calls",
+    toolCalls: [
+      {
+        id,
+        type: "function",
+        function: {
+          name: "file_list",
+          arguments: JSON.stringify({ path }),
+        },
+      },
+    ],
+  };
+}
+
+function shellToolCallResponse(
+  id: string,
+  command = "python script.py",
+): ChatCompletionResponse {
+  return {
+    content: null,
+    finishReason: "tool_calls",
+    toolCalls: [
+      {
+        id,
+        type: "function",
+        function: {
+          name: "shell_exec",
+          arguments: JSON.stringify({ command }),
+        },
+      },
+    ],
+  };
 }
 
 describe("chat service", () => {
@@ -114,7 +153,11 @@ describe("chat service", () => {
         content:
           "用户：帮我整理下载文件夹\nAgent：我可以先检查任务和工具权限，然后运行文件整理 skill。",
         tags: ["chat", "session"],
-        source: { type: "system" },
+        source: {
+          type: "chat_session",
+          sessionId: "persisted_session",
+          messageIds: ["message_1", "message_2"],
+        },
         importance: 2,
       },
     ]);
@@ -130,6 +173,401 @@ describe("chat service", () => {
         relatedMemoryIds: ["mem_downloads"],
       },
     ]);
+  });
+
+  it("extracts preference-like chat turns into L1 memory and updates the persona profile", async () => {
+    const memoryWrites: MemoryInput[] = [];
+    const profileUpdates: MemoryRecord[][] = [];
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("好的，我会按这个偏好处理。");
+        },
+      },
+      getModelProfile: async () => ({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret",
+        model: "agent-model",
+        temperature: 0.2,
+        maxTokens: 8192,
+      }),
+      memoryStore: createMemoryStore({ memoryWrites }),
+      chatSessionStore: createChatSessionStore([]),
+      memoryProfileStore: {
+        async updateFromMemories(memories) {
+          profileUpdates.push(memories);
+        },
+      },
+      createId: () => "chat_preference",
+      now: () => new Date("2026-06-06T08:00:00.000Z"),
+    });
+
+    await service.sendMessage({
+      message: "以后默认把报告保存成 Markdown",
+    });
+
+    expect(memoryWrites).toEqual([
+      expect.objectContaining({
+        kind: "session",
+        title: "会话：以后默认把报告保存成 Markdown",
+      }),
+      {
+        kind: "semantic",
+        title: "用户偏好：以后默认把报告保存成 Markdown",
+        content: "以后默认把报告保存成 Markdown",
+        tags: ["l1", "chat", "preference"],
+        source: {
+          type: "chat_session",
+          sessionId: "persisted_session",
+          messageIds: ["message_1", "message_2"],
+        },
+        importance: 4,
+      },
+    ]);
+    expect(profileUpdates).toHaveLength(1);
+    expect(profileUpdates[0]).toMatchObject([
+      {
+        id: "created_memory_2",
+        kind: "semantic",
+        title: "用户偏好：以后默认把报告保存成 Markdown",
+      },
+    ]);
+  });
+
+  it("lets long tool-using chat tasks run beyond six model turns", async () => {
+    let toolModelTurns = 0;
+    const service = createChatService({
+      chatClient: {
+        async complete(request) {
+          if (request.tools) {
+            toolModelTurns += 1;
+            if (toolModelTurns <= 7) {
+              return toolCallResponse(
+                `call_${toolModelTurns}`,
+                `/tmp/long-task-${toolModelTurns}`,
+              );
+            }
+          }
+
+          return chatReply("长任务完成。");
+        },
+      },
+      getModelProfile: async () => ({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret",
+        model: "agent-model",
+        temperature: 0.2,
+        maxTokens: 8192,
+      }),
+      memoryStore: createMemoryStore(),
+      toolExecutor: createToolExecutor(),
+      createId: () => "chat_long_task",
+      now: () => new Date("2026-06-06T08:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage({
+      message: "请执行一个需要多轮工具调用的长任务",
+    });
+
+    expect(toolModelTurns).toBe(8);
+    expect(result).toMatchObject({
+      ok: true,
+      reply: expect.stringContaining("长任务完成。"),
+    });
+    expect(result.ok ? result.reply : "").not.toContain("已达到工具调用轮次上限");
+  });
+
+  it("pauses long chat tasks at a checkpoint and resumes after user confirmation", async () => {
+    let toolModelTurns = 0;
+    const requestMessageCounts: number[] = [];
+    const service = createChatService({
+      chatClient: {
+        async complete(request) {
+          if (request.tools) {
+            toolModelTurns += 1;
+            requestMessageCounts.push(request.messages.length);
+            if (toolModelTurns <= 2) {
+              return toolCallResponse(
+                `call_${toolModelTurns}`,
+                `/tmp/checkpoint-${toolModelTurns}`,
+              );
+            }
+          }
+
+          return chatReply("长任务完成。");
+        },
+      },
+      getModelProfile: async () => ({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret",
+        model: "agent-model",
+        temperature: 0.2,
+        maxTokens: 8192,
+      }),
+      memoryStore: createMemoryStore(),
+      toolExecutor: createToolExecutor(),
+      createId: () => "chat_checkpoint",
+      now: () => new Date("2026-06-06T08:00:00.000Z"),
+      agentLoopMaxTurns: 2,
+    });
+
+    const paused = await service.sendMessage({
+      message: "请执行一个需要检查点确认的长任务",
+    });
+
+    expect(paused).toMatchObject({
+      ok: true,
+      sessionId: "chat_checkpoint",
+      agentStatus: {
+        state: "paused",
+        reason: "turn_limit",
+        maxTurns: 2,
+        toolCallsExecuted: 2,
+      },
+    });
+    expect(paused.ok ? paused.reply : "").toContain("等待你确认");
+    expect(paused.ok ? paused.reply : "").not.toContain("请把任务拆小一点");
+
+    const resumed = await service.sendMessage({
+      sessionId: "chat_checkpoint",
+      message: "继续",
+    });
+
+    expect(resumed).toMatchObject({
+      ok: true,
+      sessionId: "chat_checkpoint",
+      reply: expect.stringContaining("长任务完成。"),
+      agentStatus: {
+        state: "completed",
+        toolCallsExecuted: 2,
+      },
+    });
+    expect(toolModelTurns).toBe(3);
+    expect(requestMessageCounts[2]).toBeGreaterThan(requestMessageCounts[0]);
+  });
+
+  it("emits real chat task status events from model turns and tool calls", async () => {
+    const statusEvents: ChatTaskStatusEvent[] = [];
+    const service = createChatService({
+      chatClient: {
+        async complete(request) {
+          if (request.tools) {
+            return toolCallResponse("call_1", "/tmp/status-events");
+          }
+
+          return chatReply("状态事件已完成。");
+        },
+      },
+      getModelProfile: async () => ({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret",
+        model: "agent-model",
+        temperature: 0.2,
+        maxTokens: 8192,
+      }),
+      memoryStore: createMemoryStore(),
+      toolExecutor: createToolExecutor(),
+      createId: () => "chat_status_events",
+      now: () => new Date("2026-06-06T08:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage(
+      {
+        message: "检查目录并汇报真实执行状态",
+      },
+      {
+        onStatusEvent(event) {
+          statusEvents.push(event);
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      reply: expect.stringContaining("状态事件已完成。"),
+    });
+    expect(statusEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sessionId: "chat_status_events",
+          state: "started",
+          message: "正在读取模型配置",
+        }),
+        expect.objectContaining({
+          state: "memory",
+          message: "正在检索相关记忆",
+        }),
+        expect.objectContaining({
+          state: "model",
+          turn: 1,
+          message: "正在调用模型（第 1 轮）",
+        }),
+        expect.objectContaining({
+          state: "tool_call",
+          toolName: "file_list",
+          message: "正在调用工具：file_list",
+        }),
+        expect.objectContaining({
+          state: "tool_result",
+          toolName: "file_list",
+          ok: true,
+          toolCallsExecuted: 1,
+          message: "工具完成：file_list",
+        }),
+        expect.objectContaining({
+          state: "completed",
+          toolCallsExecuted: 1,
+          message: "任务已完成",
+        }),
+      ]),
+    );
+  });
+
+  it("emits provider-supplied model reasoning as a real status event", async () => {
+    const statusEvents: ChatTaskStatusEvent[] = [];
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return {
+            content: "推理后完成。",
+            reasoningContent: "我正在比较用户目标与可用工具。",
+            toolCalls: [],
+            finishReason: "stop",
+          };
+        },
+      },
+      getModelProfile: async () => ({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret",
+        model: "agent-model",
+        temperature: 0.2,
+        maxTokens: 8192,
+      }),
+      memoryStore: createMemoryStore(),
+      toolExecutor: createToolExecutor(),
+      createId: () => "chat_reasoning",
+      now: () => new Date("2026-06-06T08:00:00.000Z"),
+    });
+
+    await service.sendMessage(
+      { message: "需要披露模型思考摘要" },
+      { onStatusEvent: (event) => statusEvents.push(event) },
+    );
+
+    expect(statusEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sessionId: "chat_reasoning",
+          state: "reasoning",
+          message: "我正在比较用户目标与可用工具。",
+        }),
+      ]),
+    );
+  });
+
+  it("surfaces structured shell failure diagnostics in task status", async () => {
+    const statusEvents: ChatTaskStatusEvent[] = [];
+    const service = createChatService({
+      chatClient: {
+        async complete(request) {
+          if (!request.messages.some((message) => message.role === "tool")) {
+            return shellToolCallResponse("shell_call_1");
+          }
+
+          return chatReply("脚本失败，建议先检查入口参数。");
+        },
+      },
+      getModelProfile: async () => ({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret",
+        model: "agent-model",
+        temperature: 0.2,
+        maxTokens: 8192,
+      }),
+      memoryStore: createMemoryStore(),
+      toolExecutor: createToolExecutor({
+        ok: false,
+        error: "shell_exec 失败：退出码 1，未产生 stdout/stderr。",
+        errorDetails: {
+          kind: "empty_exit",
+          command: "python script.py",
+          exitCode: 1,
+          stdout: "",
+          stderr: "",
+        },
+      }),
+      createId: () => "chat_shell_failure",
+      now: () => new Date("2026-06-06T08:00:00.000Z"),
+    });
+
+    await service.sendMessage(
+      { message: "运行脚本" },
+      { onStatusEvent: (event) => statusEvents.push(event) },
+    );
+
+    expect(statusEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sessionId: "chat_shell_failure",
+          state: "tool_result",
+          toolName: "shell_exec",
+          ok: false,
+          message: "工具失败：shell_exec（退出码 1，无 stdout/stderr）",
+        }),
+      ]),
+    );
+  });
+
+  it("cancels an active chat request through the runtime abort signal", async () => {
+    const controller = new AbortController();
+    const statusEvents: ChatTaskStatusEvent[] = [];
+    let observedAbort = false;
+    const service = createChatService({
+      chatClient: {
+        async complete(request) {
+          return new Promise<ChatCompletionResponse>((_resolve, reject) => {
+            request.signal?.addEventListener("abort", () => {
+              observedAbort = true;
+              reject(new Error("aborted by test"));
+            });
+            controller.abort();
+          });
+        },
+      },
+      getModelProfile: async () => ({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret",
+        model: "agent-model",
+        temperature: 0.2,
+        maxTokens: 8192,
+      }),
+      memoryStore: createMemoryStore(),
+      createId: () => "chat_cancel",
+      now: () => new Date("2026-06-06T08:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage(
+      { message: "执行一个我会中断的任务" },
+      {
+        signal: controller.signal,
+        onStatusEvent: (event) => statusEvents.push(event),
+      },
+    );
+
+    expect(observedAbort).toBe(true);
+    expect(result).toEqual({
+      ok: false,
+      message: "已中断任务。",
+    });
+    expect(statusEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sessionId: "chat_cancel",
+          state: "canceled",
+          message: "任务已中断",
+        }),
+      ]),
+    );
   });
 
   it("runs a matching local task directly from a chat command", async () => {
@@ -244,6 +682,7 @@ describe("chat service", () => {
           files: { read: ["~/Downloads"], write: ["~/Downloads"] },
           web: { search: false, fetchDomains: [] },
           shell: { commands: [] },
+          memory: { read: false, write: false },
         },
       },
     ]);
@@ -306,18 +745,21 @@ function createMemoryStore(options: {
   searchResults?: MemorySearchResult[];
   memoryWrites?: MemoryInput[];
 } = {}) {
+  let createCount = 0;
   return {
     async search() {
       return options.searchResults ?? [];
     },
     async create(input: MemoryInput) {
+      createCount += 1;
       options.memoryWrites?.push(input);
       return createMemoryRecord({
-        id: "created_memory",
+        id: `created_memory_${createCount}`,
         title: input.title,
         content: input.content,
         tags: input.tags ?? [],
         kind: input.kind === "session" ? "session" : "semantic",
+        source: input.source,
       });
     },
   };
@@ -386,13 +828,52 @@ function createTask(partial: Partial<ScheduledTask> = {}): ScheduledTask {
   };
 }
 
+function createToolExecutor(
+  forcedResult?: Awaited<ReturnType<AgentToolExecutor["execute"]>>,
+): AgentToolExecutor {
+  return {
+    async execute() {
+      if (forcedResult) {
+        return forcedResult;
+      }
+      return {
+        ok: true as const,
+        result: { files: ["a.txt", "b.txt"] },
+      };
+    },
+    getRegistry() {
+      return {
+        getDefinitions() {
+          return [
+            {
+              type: "function" as const,
+              function: {
+                name: "file_list",
+                description: "List files",
+                parameters: {
+                  type: "object",
+                  properties: { path: { type: "string" } },
+                  required: ["path"],
+                },
+              },
+            },
+          ];
+        },
+      };
+    },
+    hasTool() {
+      return true;
+    },
+  } as AgentToolExecutor;
+}
+
 function createMemoryRecord(
   partial: Partial<MemoryRecord> & Pick<MemoryRecord, "id" | "title" | "content">,
 ): MemoryRecord {
   return {
     kind: "semantic",
     tags: [],
-    source: { type: "manual" },
+    source: partial.source ?? { type: "manual" },
     importance: 3,
     createdAt: "2026-06-06T08:00:00.000Z",
     updatedAt: "2026-06-06T08:00:00.000Z",

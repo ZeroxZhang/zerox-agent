@@ -7,6 +7,10 @@ import type {
   ChatCompletionResponse,
   ToolDefinition,
 } from "./openAiCompatibleClient";
+import type {
+  ToolResultOffloadStore,
+  ToolResultOffloadWriteInput,
+} from "./toolResultOffloadStore";
 
 const modelProfile = {
   baseUrl: "https://api.example.com/v1",
@@ -32,6 +36,63 @@ const testTools: ToolDefinition[] = [
 ];
 
 describe("agent loop", () => {
+  it("offloads oversized tool results before the next model turn", async () => {
+    const largeContent = "x".repeat(1000);
+    const requests: ChatCompletionRequest[] = [];
+    const store = createRecordingOffloadStore();
+    const chatClient: ChatClient = {
+      async complete(request) {
+        requests.push(request);
+        if (requests.length === 1) {
+          return toolCallResponse("tool_call_1");
+        }
+
+        const toolMessage = request.messages.find(
+          (message) => message.role === "tool",
+        );
+        expect(toolMessage).toBeDefined();
+        expect(toolMessage?.content).not.toContain(largeContent);
+        expect(JSON.parse(toolMessage?.content ?? "{}")).toEqual(
+          expect.objectContaining({
+            type: "tool_result",
+            tool: "file_list",
+            ok: true,
+            offloaded: true,
+            result_ref: "tool-result-refs/ref_1.json",
+          }),
+        );
+
+        return {
+          content: "我已经基于引用化工具结果完成总结。",
+          toolCalls: [],
+          finishReason: "stop",
+        };
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "检查这个目录并告诉我结果" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(() => undefined, {
+          content: largeContent,
+        }),
+        maxTurns: 4,
+        tools: testTools,
+        toolResultOffloadStore: store,
+        toolResultOffloadThreshold: 120,
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: "succeeded",
+      toolCallsExecuted: 1,
+    });
+    expect(store.writes).toHaveLength(1);
+    expect(store.writes[0].content).toContain(largeContent);
+  });
+
   it("finalizes instead of executing a repeated identical tool call", async () => {
     const requests: ChatCompletionRequest[] = [];
     const chatClient: ChatClient = {
@@ -124,6 +185,92 @@ describe("agent loop", () => {
       toolCallsExecuted: 2,
     });
   });
+
+  it("can pause at a turn checkpoint instead of ending the task", async () => {
+    const requests: ChatCompletionRequest[] = [];
+    const chatClient: ChatClient = {
+      async complete(request) {
+        requests.push(request);
+        return toolCallResponse(
+          `tool_call_${requests.length}`,
+          `/tmp/path_${requests.length}`,
+        );
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "检查这个目录并告诉我结果" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(),
+        maxTurns: 2,
+        pauseOnTurnLimit: true,
+        tools: testTools,
+      },
+    );
+
+    expect(requests).toHaveLength(2);
+    expect(result).toMatchObject({
+      status: "paused",
+      turns: 2,
+      toolCallsExecuted: 2,
+      continuation: {
+        reason: "turn_limit",
+        maxTurns: 2,
+        toolCallsExecuted: 2,
+      },
+    });
+    expect(result.summary).toContain("已到达长任务检查点");
+    expect(result.summary).toContain("等待你确认");
+    expect(result.summary).not.toContain("请把任务拆小一点");
+  });
+
+  it("pauses when the model keeps hitting the same class of tool failure", async () => {
+    const requests: ChatCompletionRequest[] = [];
+    const chatClient: ChatClient = {
+      async complete(request) {
+        requests.push(request);
+        return toolCallResponse(
+          `tool_call_${requests.length}`,
+          `/tmp/path_${requests.length}`,
+        );
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "运行一个会静默失败的脚本" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(undefined, undefined, {
+          ok: false,
+          error: "shell_exec 失败：退出码 1，未产生 stdout/stderr。",
+          errorDetails: {
+            kind: "empty_exit",
+            tool: "shell_exec",
+            exitCode: 1,
+          },
+        }),
+        maxTurns: 6,
+        pauseOnFailureLoop: true,
+        tools: testTools,
+      },
+    );
+
+    expect(requests).toHaveLength(3);
+    expect(result).toMatchObject({
+      status: "paused",
+      turns: 2,
+      toolCallsExecuted: 3,
+      continuation: {
+        reason: "tool_failure_loop",
+        toolCallsExecuted: 3,
+      },
+    });
+    expect(result.summary).toContain("连续 3 次工具失败");
+    expect(result.summary).toContain("file_list");
+  });
 });
 
 function toolCallResponse(id: string, path = "/tmp"): ChatCompletionResponse {
@@ -143,13 +290,20 @@ function toolCallResponse(id: string, path = "/tmp"): ChatCompletionResponse {
   };
 }
 
-function createToolExecutor(onExecute?: () => void): AgentToolExecutor {
+function createToolExecutor(
+  onExecute?: () => void,
+  result: Record<string, unknown> | undefined = { files: ["a.txt", "b.txt"] },
+  forcedResult?: Awaited<ReturnType<AgentToolExecutor["execute"]>>,
+): AgentToolExecutor {
   return {
     async execute() {
       onExecute?.();
+      if (forcedResult) {
+        return forcedResult;
+      }
       return {
         ok: true,
-        result: { files: ["a.txt", "b.txt"] },
+        result: result ?? {},
       };
     },
     getRegistry() {
@@ -157,6 +311,28 @@ function createToolExecutor(onExecute?: () => void): AgentToolExecutor {
     },
     hasTool() {
       return true;
+    },
+  };
+}
+
+function createRecordingOffloadStore(): ToolResultOffloadStore & {
+  writes: ToolResultOffloadWriteInput[];
+} {
+  const writes: ToolResultOffloadWriteInput[] = [];
+
+  return {
+    writes,
+    async write(input) {
+      writes.push(input);
+      return {
+        refId: "ref_1",
+        relativePath: "tool-result-refs/ref_1.json",
+        absolutePath: "/tmp/tool-result-refs/ref_1.json",
+        bytesWritten: Buffer.byteLength(input.content, "utf8"),
+      };
+    },
+    async read() {
+      return null;
     },
   };
 }

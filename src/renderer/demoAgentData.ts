@@ -151,6 +151,7 @@ export const demoTasks: ScheduledTask[] = [
       files: { read: ["~/Downloads"], write: ["~/Downloads"] },
       web: { search: false, fetchDomains: [] },
       shell: { commands: [] },
+      memory: { read: false, write: false },
     },
     createdAt: "2026-06-05T08:00:00.000Z",
     updatedAt: "2026-06-05T08:00:00.000Z",

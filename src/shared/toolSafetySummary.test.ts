@@ -8,17 +8,19 @@ describe("tool safety summary", () => {
       files: { read: [], write: [] },
       web: { search: false, fetchDomains: [] },
       shell: { commands: [] },
+      memory: { read: false, write: false },
     });
 
     expect(summary).toEqual({
       tone: "safe",
       title: "低风险：没有外部工具权限",
-      message: "这个任务当前不能读取文件、写入文件、抓网页或执行命令。",
+      message: "这个任务当前不能读取文件、写入文件、读取记忆、抓网页或执行命令。",
       auditMessage:
         "越权但参数合法时会主动弹窗请求你一次性授权；无论允许或拒绝都会写入审计日志。",
       sections: [
         { id: "read", label: "可读目录", value: "未授权" },
         { id: "write", label: "可写目录", value: "未授权" },
+        { id: "memory", label: "本地记忆", value: "未授权" },
         { id: "web", label: "网页权限", value: "未授权" },
         { id: "shell", label: "命令模板", value: "未授权" },
       ],
@@ -34,13 +36,32 @@ describe("tool safety summary", () => {
     );
 
     expect(summary.tone).toBe("confirm");
-    expect(summary.title).toBe("需要确认：任务可访问文件或网页");
+    expect(summary.title).toBe("需要确认：任务可访问文件、网页或记忆");
     expect(summary.sections).toEqual([
       { id: "read", label: "可读目录", value: "~/Downloads" },
       { id: "write", label: "可写目录", value: "~/Downloads/reports" },
+      { id: "memory", label: "本地记忆", value: "未授权" },
       { id: "web", label: "网页权限", value: "允许搜索 / example.com" },
       { id: "shell", label: "命令模板", value: "未授权" },
     ]);
+  });
+
+  it("summarizes memory permissions as confirmation-required", () => {
+    const summary = buildToolSafetySummary(
+      createPolicy({
+        memory: { read: true, write: true },
+      }),
+    );
+
+    expect(summary).toMatchObject({
+      tone: "confirm",
+      title: "需要确认：任务可访问文件、网页或记忆",
+    });
+    expect(summary.sections).toContainEqual({
+      id: "memory",
+      label: "本地记忆",
+      value: "允许读取 / 允许写入",
+    });
   });
 
   it("marks shell permissions as high risk and shows templates", () => {
@@ -67,10 +88,11 @@ describe("tool safety summary", () => {
 function createPolicy(
   partial: Partial<TaskPermissionPolicy>,
 ): TaskPermissionPolicy {
-  return {
-    files: { read: [], write: [] },
-    web: { search: false, fetchDomains: [] },
-    shell: { commands: [] },
-    ...partial,
-  };
-}
+    return {
+      files: { read: [], write: [] },
+      web: { search: false, fetchDomains: [] },
+      shell: { commands: [] },
+      memory: { read: false, write: false },
+      ...partial,
+    };
+  }

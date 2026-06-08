@@ -11,6 +11,10 @@ import type { AgentRunRecord } from "../shared/agentRuns";
 import type { MemoryInput, MemoryRecord, MemorySearchResult } from "../shared/memory";
 import type { ScheduledTask } from "../shared/scheduledTasks";
 import type { SkillRecord } from "../shared/skills";
+import type {
+  ToolResultOffloadStore,
+  ToolResultOffloadWriteInput,
+} from "./toolResultOffloadStore";
 import { getDefaultTaskPermissionPolicy } from "../shared/toolPermissions";
 
 function finalResponse(content: string): ChatCompletionResponse {
@@ -220,6 +224,56 @@ describe("agent runner service", () => {
     expect(sequence.filter(s => s === "model")).toHaveLength(2);
     expect(sequence).toContain("authorize");
     expect(sequence).toContain("execute");
+  });
+
+  it("offloads oversized tool results in the legacy runner fallback", async () => {
+    const largeContent = "x".repeat(1000);
+    const capturedMessages: ChatMessage[][] = [];
+    const store = createRecordingOffloadStore();
+    const service = createAgentRunnerService({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      resolveSkill: async () => createSkillRecord(2),
+      chatClient: {
+        async complete(request) {
+          capturedMessages.push(request.messages);
+          return capturedMessages.length === 1
+            ? toolCallResponse("file_read", { path: "~/Downloads/notes.md" })
+            : finalResponse("Read notes");
+        },
+      },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: {
+        async execute() {
+          return {
+            ok: true,
+            result: { content: largeContent },
+          };
+        },
+      } as AgentToolExecutor,
+      toolResultOffloadStore: store,
+      toolResultOffloadThreshold: 120,
+      createId: () => "run_offload_fallback",
+      now: () => new Date("2026-06-05T08:00:00.000Z"),
+    });
+
+    await service.runTask("task_123");
+
+    const toolMessage = capturedMessages[1].find(
+      (message) => message.role === "tool",
+    );
+    expect(toolMessage?.content).not.toContain(largeContent);
+    expect(JSON.parse(toolMessage?.content ?? "{}")).toEqual(
+      expect.objectContaining({
+        type: "tool_result",
+        tool: "file_read",
+        ok: true,
+        offloaded: true,
+        result_ref: "tool-result-refs/ref_1.json",
+      }),
+    );
+    expect(store.writes[0].content).toContain(largeContent);
   });
 
   it("fails the run and skips execution when a tool call is denied", async () => {
@@ -649,6 +703,28 @@ function createToolExecutor(sequence: string[] = []): AgentToolExecutor {
         ok: true,
         result: { content: "notes" },
       };
+    },
+  };
+}
+
+function createRecordingOffloadStore(): ToolResultOffloadStore & {
+  writes: ToolResultOffloadWriteInput[];
+} {
+  const writes: ToolResultOffloadWriteInput[] = [];
+
+  return {
+    writes,
+    async write(input) {
+      writes.push(input);
+      return {
+        refId: "ref_1",
+        relativePath: "tool-result-refs/ref_1.json",
+        absolutePath: "/tmp/tool-result-refs/ref_1.json",
+        bytesWritten: Buffer.byteLength(input.content, "utf8"),
+      };
+    },
+    async read() {
+      return null;
     },
   };
 }

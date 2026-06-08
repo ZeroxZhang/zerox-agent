@@ -5,7 +5,7 @@ description: 扫描本地文件夹，整理最近变化，并写出一份 Markdo
 version: 0.1.0
 execution:
   mode: agent
-  maxTurns: 15
+  maxTurns: 48
 inputs:
   - name: targetDir
     label: 目标文件夹

@@ -6,13 +6,16 @@ import type {
   ValidateAgentResult,
 } from "../shared/agentBootstrap";
 import type {
+  CancelChatMessageResult,
   ChatSessionListItem,
   ChatSessionRecord,
+  ChatTaskStatusEvent,
   SendChatMessageInput,
   SendChatMessageResult,
 } from "../shared/chat";
 import type { DesktopRuntimeInfo } from "../shared/desktopRuntime";
 import type { AgentEvalReport } from "../shared/agentEval";
+import type { ReadToolResultRefResult } from "../shared/toolResultRefs";
 import type {
   CreateMemoryResult,
   DeleteMemoryResult,
@@ -23,6 +26,12 @@ import type {
   MemorySearchResult,
   RunMemoryMaintenanceResult,
 } from "../shared/memory";
+import type { RunMemoryEvalResult } from "../shared/memoryEval";
+import type { RunMemoryGovernanceResult } from "../shared/memoryGovernance";
+import type {
+  ReadMemoryProfileResult,
+  SaveMemoryProfileResult,
+} from "../shared/memoryProfile";
 import type {
   AgentLearningCandidate,
   AgentLearningListOptions,
@@ -126,6 +135,8 @@ const buildingAgent = {
     ipcRenderer.invoke("multiAgentSessions:list"),
   listAgentRunTrajectory: (runId: string): Promise<AgentTrajectoryEvent[]> =>
     ipcRenderer.invoke("agentRuns:listTrajectory", runId),
+  readToolResultRef: (ref: string): Promise<ReadToolResultRefResult> =>
+    ipcRenderer.invoke("toolResults:readRef", ref),
   getAgentEvalReport: (): Promise<AgentEvalReport> =>
     ipcRenderer.invoke("agentQuality:getEvalReport"),
   runScheduledTask: (taskId: string): Promise<RunScheduledTaskResult> =>
@@ -154,6 +165,20 @@ const buildingAgent = {
     input: SendChatMessageInput,
   ): Promise<SendChatMessageResult> =>
     ipcRenderer.invoke("chat:sendMessage", input),
+  cancelChatMessage: (
+    requestId?: string,
+  ): Promise<CancelChatMessageResult> =>
+    ipcRenderer.invoke("chat:cancelMessage", requestId),
+  onChatTaskStatusEvent: (callback: (event: ChatTaskStatusEvent) => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      data: ChatTaskStatusEvent,
+    ) => callback(data);
+    ipcRenderer.on("chat:statusEvent", handler);
+    return () => {
+      ipcRenderer.removeListener("chat:statusEvent", handler);
+    };
+  },
   listChatSessions: (): Promise<ChatSessionListItem[]> =>
     ipcRenderer.invoke("chatSessions:list"),
   getChatSession: (sessionId: string): Promise<ChatSessionRecord | null> =>
@@ -168,6 +193,14 @@ const buildingAgent = {
   deleteMemory: (memoryId: string): Promise<DeleteMemoryResult> =>
     ipcRenderer.invoke("memory:delete", memoryId),
   exportMemories: (): Promise<string> => ipcRenderer.invoke("memory:export"),
+  runMemoryEval: (): Promise<RunMemoryEvalResult> =>
+    ipcRenderer.invoke("memory:evaluate"),
+  reviewMemoryGovernance: (): Promise<RunMemoryGovernanceResult> =>
+    ipcRenderer.invoke("memory:governance"),
+  readMemoryProfile: (): Promise<ReadMemoryProfileResult> =>
+    ipcRenderer.invoke("memoryProfile:read"),
+  saveMemoryProfile: (content: string): Promise<SaveMemoryProfileResult> =>
+    ipcRenderer.invoke("memoryProfile:save", content),
   runMemoryMaintenance: (): Promise<RunMemoryMaintenanceResult> =>
     ipcRenderer.invoke("memory:maintain"),
   listLearningCandidates: (

@@ -50,7 +50,7 @@
 
 <h2 id="overview-en">Overview</h2>
 
-**Zerox Agent** is a local-first desktop control plane for personal AI agents. The name derives from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
+**Zerox Agent** is a local-first desktop control plane for personal AI agents. The current release is **v1.2.3**. The name derives from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
 
 It is not a chat wrapper or a generic hosted agent surface. It runs locally, configures OpenAI-compatible models, scans local `SKILL.md` skill files, executes recoverable agent runs, invokes permission-controlled tools, tracks parent/child multi-agent sessions, persists experiential knowledge into local long-term memory, and keeps learning user-reviewed before it changes future behavior.
 
@@ -67,8 +67,8 @@ The product boundary is documented in [`docs/product/zerox-positioning.md`](docs
 | **Local-First** | All data (tasks, runs, permissions, memory, sessions) is stored in the local `userData` directory. Nothing is uploaded to the cloud. |
 | **Privacy-Safe** | API keys are encrypted with Electron `safeStorage`. Every tool call is authorized per-task and audit-logged. |
 | **Skill-Driven** | Behavior is defined by composable `SKILL.md` files supporting agent mode (LLM-driven) and script mode, with optional MCP tool extensions. |
-| **Observable** | Every run produces a structured event timeline across planning, execution, and reflection phases, with streaming output support. |
-| **Recoverable** | Agent work should be inspectable, cancelable, and resumable instead of disappearing into one-shot chat turns. |
+| **Observable** | Every run produces a structured event timeline across memory lookup, model calls, public reasoning fields, tool calls, pauses, cancellation, and completion. |
+| **Recoverable** | Agent work should be inspectable, cancelable, and resumable instead of disappearing into one-shot chat turns or hard-stopping at a fixed loop limit. |
 | **Modular** | The application is split into 8 independent panels: Chat, Overview, Runs, Tasks, Skills, Tools, Memory, and Settings. |
 
 ---
@@ -114,7 +114,7 @@ The product boundary is documented in [`docs/product/zerox-positioning.md`](docs
 | Bundler | Vite 8 | HMR dev server for renderer |
 | Language | TypeScript 6 | Full-stack type safety, 3 tsconfig targets |
 | UI | React 19 | Function components + Hooks, Material Design |
-| Testing | Vitest 4 | Unit tests, production build, and deterministic agent evals |
+| Testing | Vitest 4 | Unit tests, production build, and deterministic agent/memory evals |
 | Packaging | electron-builder 26 | macOS `.app` / `.dmg` / `.zip` distribution |
 | Parsing | yaml, cron-parser | SKILL.md frontmatter, cron expressions |
 
@@ -140,7 +140,9 @@ All data is stored under Electron `userData/config/`:
 | `multi-agent-sessions.json` | Parent/child multi-agent session lineage |
 | `agent-learning-candidates.json` | User-reviewed learning candidates |
 | `tool-audit.jsonl` | Tool authorization audit log |
+| `tool-result-refs/*.json` | Offloaded large tool observations referenced from trajectories |
 | `memory-records.json` | Local long-term memory |
+| `memory-persona.md` | Editable local persona/preference profile generated from reviewed memories |
 | `chat-sessions.json` | Chat session records |
 | `agent-validation.json` | Latest one-click validation snapshot |
 
@@ -154,6 +156,14 @@ API keys are encrypted with Electron `safeStorage` and are never written to plai
 
 The chat window is the primary entry point. Users describe needs in natural language; the Agent selects the appropriate skill, decomposes the task, invokes tools, and returns results. The session displays model, skill, task, memory, and tool status.
 
+Current chat UX includes:
+
+- A compact real-time activity strip above the composer showing the latest true runtime event
+- Expandable, scrollable task activity with newest events first
+- Provider-returned public reasoning fields when the configured model/API exposes them
+- User-controlled long-task continuation when the loop reaches a checkpoint or repeated tool failures are detected
+- An always-available interrupt control that cancels the active chat request and passes cancellation into running tools where possible
+
 ### 2. Model Settings
 
 - Supports any OpenAI-compatible API (OpenAI, Anthropic-compatible gateways, local models)
@@ -163,7 +173,7 @@ The chat window is the primary entry point. Users describe needs in natural lang
 
 ### 3. Skill System
 
-Skills are auto-discovered from the local `skills/` directory. Each skill is a Markdown file (`SKILL.md`) with YAML frontmatter defining execution mode, inputs, permissions, and optional custom tools or MCP servers.
+Skills are auto-discovered from the app `skills/` directory plus user skill roots such as `~/.claude/skills` and `~/.agents/skills`. Each skill is a Markdown file (`SKILL.md`) with YAML frontmatter defining execution mode, inputs, permissions, dependencies, and optional custom tools or MCP servers.
 
 Built-in skill: `local-file-organizer`
 
@@ -212,24 +222,29 @@ Parent/child multi-agent sessions are recorded as lineage metadata on top of the
 
 ### 7. Tool System
 
-Six built-in tools cover core agent capabilities:
+Ten built-in tools cover core agent capabilities:
 
 | Tool | Function | Authorization |
 |------|----------|---------------|
 | `file_list` | List directory contents | Path whitelist for readable dirs |
+| `file_stat` | Inspect file or directory metadata without reading full contents | Path whitelist for readable dirs |
+| `file_search` | Search names and file contents under an authorized root | Path whitelist for readable dirs |
 | `file_read` | Read file contents | Path whitelist for readable dirs |
 | `file_write` | Write file (auto-creates dirs) | Path whitelist for writable dirs |
+| `memory_search` | Search bounded long-term memory context | Task memory-read permission |
+| `conversation_search` | Search bounded chat-session evidence | Task memory-read permission |
 | `web_search` | DuckDuckGo search | Explicit search permission |
 | `web_fetch` | Fetch webpage content | Domain whitelist |
-| `shell_exec` | Execute shell command | Command template whitelist |
+| `shell_exec` | Execute shell command with timeout, cancellation, and structured failure details | Command template whitelist |
 
-Tools come from three sources: built-in (6), skill-defined (from `SKILL.md`), and MCP servers.
+Tools come from three sources: built-in (10), skill-defined (from `SKILL.md`), and MCP servers.
 
 ### 8. Permissions & Security
 
 - **File**: Absolute path whitelists with `{{placeholder}}` support
 - **Shell**: Command template matching with control operator blocking and destructive command prevention
 - **Web**: Explicit search toggle, domain-based fetch whitelist
+- **Memory**: Read/write toggles on task policies; memory tools are read-only recall helpers unless explicit write permissions are granted elsewhere
 - **Authorization**: Every tool call is checked against the task's permission policy
 - **Audit**: All authorization decisions are persisted as JSON Lines
 
@@ -254,7 +269,7 @@ git clone <repo-url> && cd "building agent"
 # 2. Install dependencies
 npm install
 
-# 3. Run full self-check (tests + build + deterministic eval)
+# 3. Run full self-check (tests + build + deterministic agent/memory evals)
 npm run doctor
 
 # 4. Launch the desktop app (production mode)
@@ -307,7 +322,7 @@ Runs full validation inside the Electron main process: reads config → saves mo
 | Command | Description |
 |---------|-------------|
 | `npm run dev` | Development mode (Vite + tsc watch + Electron) |
-| `npm run doctor` | Full self-check: tests, build, and deterministic agent eval |
+| `npm run doctor` | Full self-check: tests, build, and deterministic agent/memory evals |
 | `npm run build` | Production build |
 | `npm run start:prod` | Production build & launch |
 | `npm run test` | Run all unit tests |
@@ -316,6 +331,7 @@ Runs full validation inside the Electron main process: reads config → saves mo
 | `npm run smoke:prod` | Production smoke (start → verify render → exit) |
 | `npm run validate:agent` | Full desktop agent validation |
 | `npm run eval:agent` | Deterministic local agent eval suite |
+| `npm run eval:memory` | Deterministic memory retrieval eval suite |
 | `npm run pack:mac` | Package macOS `.app` (unsigned, local trial) |
 | `npm run dist:mac` | Package macOS `.dmg` + `.zip` (distribution) |
 
@@ -348,6 +364,10 @@ src/
 │   ├── agentBootstrapService.ts# First-run guidance & validation
 │   ├── chatService.ts          # Chat service
 │   ├── memoryStore.ts          # Local memory store
+│   ├── memoryRecall.ts         # Budgeted runtime memory recall
+│   ├── memoryL1Extractor.ts    # Lightweight atomic memory extraction
+│   ├── memoryProfileStore.ts   # Editable local persona/profile markdown
+│   ├── toolResultOffloadStore.ts # Large tool observation refs
 │   ├── modelSettingsStore.ts   # Model config store
 │   ├── openAiCompatibleClient.ts# OpenAI API client
 │   ├── taskStore.ts / taskSchedulerService.ts  # Task storage & scheduling
@@ -381,7 +401,7 @@ src/
 
 <h2 id="skill-system">Skill System</h2>
 
-Skills are the core extension mechanism. Each skill is defined as `skills/<skill-name>/SKILL.md` with YAML frontmatter and a Markdown body. Skills support:
+Skills are the core extension mechanism. Each skill is defined as a `SKILL.md` file with YAML frontmatter and a Markdown body. The registry scans app-local `skills/` first, then user roots such as `~/.claude/skills` and `~/.agents/skills`; first match wins, so app-local skills can intentionally override user/system skills with the same name. Skills support:
 
 - **execution mode**: `agent` (LLM-driven) or `script`
 - **inputs**: typed parameters with labels
@@ -410,7 +430,9 @@ startedAt
   │    ├── Per step: context → LLM tool calls → auth check → execute → observe
   │    ├── Parallel authorization + parallel tool execution
   │    ├── Automatic context window management
-  │    └── Automatic LLM retry (exponential backoff, up to 2x)
+  │    ├── Automatic LLM retry (exponential backoff, up to 2x)
+  │    ├── Turn-limit checkpoints can pause and ask the user whether to continue
+  │    └── Repeated same-kind tool failures pause with diagnostics instead of looping silently
   │
   ├── [reflecting] Error recovery
   │    ├── Triggered on step failure
@@ -451,6 +473,10 @@ Local long-term memory with five types inspired by cognitive science:
 - **Export**: full JSON export
 - **Archiving**: consolidated records are marked `archived`, excluded from search by default
 - **Reviewed learning**: accepted procedural candidates become local `procedural` memories and are injected into future task/planning prompts
+- **Bounded runtime recall**: chat and agent prompts receive truncated, budgeted memory context instead of unbounded dumps
+- **Conversation evidence**: successful chat turns can create source-linked session memories backed by local chat messages
+- **Atomic L1 extraction**: preference-like chat turns can create lightweight semantic memories and update `memory-persona.md`
+- **Governance & evals**: the Memory panel can run local retrieval evals plus duplicate/conflict/stale-record governance reports
 
 ---
 
@@ -479,7 +505,8 @@ ToolCall Request
   │
   ├── 1. Parse args JSON
   ├── 2. Check task permission policy
-  │    ├── file_read/write → path whitelist match
+  │    ├── file_list/stat/search/read/write → path whitelist match
+  │    ├── memory_search / conversation_search → memory-read permission
   │    ├── web_search → boolean toggle
   │    ├── web_fetch → domain whitelist (incl. subdomains)
   │    └── shell_exec → regex template match + operator block + destructive cmd block
@@ -492,6 +519,7 @@ ToolCall Request
 - **Shell safety**: blocks control operators (`;`, `&&`, `||`, `` ` ``, `$(`), pipes, and destructive commands (`rm -rf`, `git push -f`, `DROP TABLE`, `kubectl delete`, etc.)
 - **Path safety**: whitelists support `~` expansion and placeholders; unauthorized paths are denied
 - **Domain safety**: `web_fetch` supports subdomain matching and exact domain validation
+- **Tool robustness**: `shell_exec` defaults to a 120s timeout, supports explicit `timeoutMs`, and returns structured `timeout`, `empty_exit`, `canceled`, and `exit` diagnostics
 
 ---
 
@@ -519,7 +547,7 @@ can't be opened." The image is usually valid; remove the quarantine attribute
 before opening:
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/Zerox\ Agent-1.2.2-arm64.dmg
+xattr -dr com.apple.quarantine ~/Downloads/Zerox\ Agent-1.2.3-arm64.dmg
 ```
 
 If you already dragged the app into Applications, run:
@@ -540,10 +568,11 @@ The project includes Vitest unit tests across the shared layer, main process, an
 npm test              # Run all tests
 npm run test:watch    # Watch mode
 npm run eval:agent    # Deterministic agent eval suite
+npm run eval:memory   # Deterministic memory retrieval eval suite
 npm run verify        # Tests + build + deterministic eval
 ```
 
-The Overview panel surfaces the deterministic eval pass rate as a local quality signal.
+As of v1.2.3, `npm run verify` covers 76 Vitest files / 333 tests, the production build, agent evals, and memory evals. The Overview and Memory panels surface deterministic eval pass rates as local quality signals.
 
 ### Test Coverage
 
@@ -555,15 +584,24 @@ The Overview panel surfaces the deterministic eval pass rate as a local quality 
 
 <h2 id="roadmap">Roadmap</h2>
 
-Current version: MVP v1.0.0. Planned:
+Current version: v1.2.3.
 
-- [ ] Windows & Linux desktop support
-- [ ] Skill marketplace and remote skill installation
-- [ ] Multi-agent collaboration orchestration
+Recently shipped:
+
+- [x] Local-first desktop runtime with permissioned tools and `SKILL.md` discovery
+- [x] Recoverable run checkpoints, replayable trajectories, and large tool-result offload refs
+- [x] Long-task pause/continue UX, visible activity state, and user-triggered interruption
+- [x] Runtime memory P0-P4: bounded recall, conversation evidence, persona profile, evals, and governance reports
+- [x] Workspace-scoped runs, parent/child multi-agent lineage, and user-reviewed procedural learning
+
+Planned:
+
+- [ ] Apple signing, notarization, auto-update, and clearer release distribution
+- [ ] More native first-party tools so agents depend less on shell fallbacks
+- [ ] Skill marketplace, remote skill installation, and visual skill/workflow editing
 - [ ] Event-triggered tasks (file changes, system events, etc.)
-- [ ] Apple signing, notarization, and auto-update
-- [ ] Crash reporting and telemetry
-- [ ] Skill editor and visual workflow builder
+- [ ] Windows & Linux desktop support
+- [ ] Opt-in crash reporting and diagnostics
 
 ---
 
@@ -591,11 +629,11 @@ Current version: MVP v1.0.0. Planned:
 
 ## 项目概述
 
-**Zerox Agent** 是一个本地优先的桌面智能体控制台，名字取自 **Zero + X**——从留白开始，把未知的本地工作流转成可观察、受权限管控、可恢复的 Agent 运行。
+**Zerox Agent** 是一个本地优先的桌面智能体控制台，当前版本是 **v1.2.3**。名字取自 **Zero + X**——从留白开始，把未知的本地工作流转成可观察、受权限管控、可恢复的 Agent 运行。
 
-它不是聊天壳，也不是泛用云端 Agent 入口。它运行在本机：配置 OpenAI‑compatible 模型、扫描本地 `SKILL.md` 技能文件、执行可恢复的 Agent 运行、调用受权限管控的工具、把经验和知识写入本地长期记忆，并且在改变未来行为前保留用户审核。
+它不是聊天壳，也不是泛用云端 Agent 入口。它运行在本机：配置 OpenAI‑compatible 模型、扫描本地 `SKILL.md` 技能文件、执行可恢复的 Agent 运行、调用受权限管控的工具、跟踪父子多 Agent 会话、把经验和知识写入本地长期记忆，并且在改变未来行为前保留用户审核。
 
-产品边界写在 [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md)：Zerox 优先建设可信的本地控制、可恢复运行、显式权限、可观察轨迹和用户审核后的学习。
+产品边界写在 [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md)：Zerox 优先建设可信的本地控制、可恢复运行、显式权限、workspace 作用域、可观察轨迹、父子多 Agent 会话和用户审核后的学习。运行时、workspace 与学习机制分别见 [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md)、[`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md)、[`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md)。
 
 ### 设计原则
 
@@ -604,8 +642,8 @@ Current version: MVP v1.0.0. Planned:
 | **本地优先 (Local-First)** | 所有数据（任务、运行日志、权限、记忆、会话）存储在本地 `userData` 目录，不上传云端。 |
 | **隐私安全 (Privacy-Safe)** | API Key 使用 Electron `safeStorage` 加密存储，工具调用按任务授权并记录审计日志。 |
 | **技能驱动 (Skill-Driven)** | 行为由可组合的 `SKILL.md` 文件定义，支持智能体模式 (agent) 和脚本模式 (script)，可扩展 MCP 工具。 |
-| **可观测 (Observable)** | 每次运行产生结构化事件时间线，包括规划、执行、反思三个阶段，支持流式输出。 |
-| **可恢复 (Recoverable)** | Agent 工作应该可检查、可取消、可恢复，而不是消失在一次性聊天回合里。 |
+| **可观测 (Observable)** | 每次运行产生结构化事件时间线，覆盖记忆检索、模型调用、公开 reasoning 字段、工具调用、暂停、中断和完成状态。 |
+| **可恢复 (Recoverable)** | Agent 工作应该可检查、可取消、可恢复，而不是消失在一次性聊天回合里，也不应该因为固定轮次上限直接硬停止。 |
 | **模块化 (Modular)** | 按功能拆分为独立模块：会话、总览、运行、任务、技能、工具、记忆、设置八大面板。 |
 
 ---
@@ -656,7 +694,7 @@ Current version: MVP v1.0.0. Planned:
 | 构建 | Vite 8 | 渲染进程热更新打包 |
 | 类型 | TypeScript 6 | 全栈类型安全，三套 tsconfig（主进程 / 渲染进程 / 共享） |
 | UI | React 19 | 函数组件 + Hooks 的 Material Design 桌面 UI |
-| 测试 | Vitest 4 | 51 个单元测试覆盖共享层、主进程和渲染进程 |
+| 测试 | Vitest 4 | 76 个测试文件 / 333 个测试，覆盖共享层、主进程和渲染进程 |
 | 打包 | electron-builder 26 | macOS `.app` / `.dmg` / `.zip` 分发 |
 | 解析 | yaml (cron-parser) | SKILL.md 前端元数据解析、cron 表达式 |
 
@@ -676,8 +714,15 @@ Current version: MVP v1.0.0. Planned:
 | `model-settings.json` | 模型配置（不包含明文 API Key） |
 | `scheduled-tasks.json` | 定时任务定义 |
 | `agent-runs.jsonl` | 任务运行日志 (JSON Lines) |
+| `agent-executions/<runId>.json` | 可恢复运行 checkpoint |
+| `agent-trajectories/<runId>.jsonl` | 可回放的模型/工具/状态迁移轨迹 |
+| `agent-workspaces.json` | 默认、项目、临时、git worktree 等 workspace 注册表 |
+| `multi-agent-sessions.json` | 父子多 Agent 会话关系 |
+| `agent-learning-candidates.json` | 等待用户审核的学习候选 |
 | `tool-audit.jsonl` | 工具授权与审计日志 |
+| `tool-result-refs/*.json` | 过大的工具结果本地引用文件 |
 | `memory-records.json` | 本地长期记忆 |
+| `memory-persona.md` | 由偏好记忆生成、可编辑的本地画像/偏好文档 |
 | `chat-sessions.json` | 会话记录 |
 | `agent-validation.json` | 最近一次一键验收快照 |
 
@@ -691,6 +736,14 @@ API Key 通过 Electron `safeStorage` 加密保存，永不写入明文文件或
 
 对话窗口是第一入口。用户可以从自然语言出发描述需求，Agent 将选择合适的技能、分解任务、调用工具、返回结果。会话过程中展示模型、技能、任务、记忆和工具状态。
 
+当前对话体验包括：
+
+- 输入框上方的紧凑实时状态栏，展示最新真实运行事件
+- 可展开、可滚动的任务过程列表，默认最新事件在前
+- 当模型/API 返回公开 `reasoning_content`、`reasoning` 或 `thinking` 字段时展示对应思考摘要
+- 长任务达到检查点或连续同类工具失败时暂停，让用户决定是否继续
+- 输入框内始终可用的中断图标，可取消当前会话请求，并尽可能把取消信号传递给正在运行的工具
+
 ### 2. 模型配置 (Model Settings)
 
 - 支持任何 OpenAI‑compatible API（OpenAI、Anthropic 兼容网关、本地模型等）
@@ -700,7 +753,7 @@ API Key 通过 Electron `safeStorage` 加密保存，永不写入明文文件或
 
 ### 3. 技能系统 (Skills)
 
-从本地 `skills/` 目录自动发现和加载技能。每个技能是一个包含 YAML frontmatter 的 Markdown 文件 (`SKILL.md`)，定义：
+从应用内 `skills/` 目录，以及 `~/.claude/skills`、`~/.agents/skills` 等用户技能目录自动发现和加载技能。每个技能是一个包含 YAML frontmatter 的 Markdown 文件 (`SKILL.md`)，定义：
 
 - `name` / `displayName` / `description`：技能标识
 - `execution.mode`：`agent`（LLM 驱动执行）或 `script`（脚本执行）
@@ -748,6 +801,8 @@ Agent Runner 是执行核心，采用 **Plan → Execute → Reflect** 三阶段
 - LLM 调用内置指数退避重试机制
 - 成功运行自动写入情景记忆 (episodic memory)
 - 支持流式事件输出 (通过 IPC 推送到渲染进程)
+- 轮次达到检查点时可暂停并等待用户确认继续，而不是直接终止长任务
+- 连续同类工具失败会带诊断信息暂停，避免模型在同一个失败上反复消耗轮次
 
 ### 6. Agent Orchestrator（任务编排器）
 
@@ -759,19 +814,23 @@ Agent Runner 是执行核心，采用 **Plan → Execute → Reflect** 三阶段
 
 ### 7. 工具系统 (Tools)
 
-六种内置工具，覆盖核心 Agent 能力：
+十种内置工具，覆盖核心 Agent 能力：
 
 | 工具 | 功能 | 权限控制 |
 |------|------|----------|
 | `file_list` | 列出目录内容 | 限制可读目录路径 |
+| `file_stat` | 查看文件或目录元数据，不读取完整内容 | 限制可读目录路径 |
+| `file_search` | 在授权根目录内搜索文件名和文件内容 | 限制可读目录路径 |
 | `file_read` | 读取文件内容 | 限制可读目录路径 |
 | `file_write` | 写入文件（自动创建目录） | 限制可写目录路径 |
+| `memory_search` | 检索有预算限制的长期记忆上下文 | 需要任务 memory.read 权限 |
+| `conversation_search` | 检索有预算限制的会话证据 | 需要任务 memory.read 权限 |
 | `web_search` | DuckDuckGo 网页搜索 | 需显式授权 search 权限 |
 | `web_fetch` | 抓取网页内容 | 需授权目标域名 |
-| `shell_exec` | 执行 shell 命令 | 需匹配已授权命令模板 |
+| `shell_exec` | 执行 shell 命令，支持超时、中断和结构化失败诊断 | 需匹配已授权命令模板 |
 
 工具注册表采用动态注册机制 (`DynamicToolRegistry`)，支持三类工具来源：
-- **内置工具**：6 种核心工具开箱即用
+- **内置工具**：10 种核心工具开箱即用
 - **技能工具**：技能 SKILL.md 中定义的 `tools` 自动注册
 - **MCP 工具**：通过 MCP 协议接入的外部工具服务器
 
@@ -782,6 +841,7 @@ Agent Runner 是执行核心，采用 **Plan → Execute → Reflect** 三阶段
 - **文件权限**：按绝对路径白名单限制读写范围，支持 `{{placeholder}}` 占位符
 - **Shell 权限**：按命令行模板白名单匹配，阻止包含控制操作符 (`;`、`&&`、`|`、`` ` ``、`$(`) 和破坏性命令 (`rm -rf`、`git push -f`、`DROP TABLE` 等) 的调用
 - **Web 权限**：搜索需显式启用，抓取按域名白名单匹配
+- **记忆权限**：任务策略中包含 memory.read / memory.write 开关，记忆检索工具只读
 - **工具授权**：每次工具调用前检查任务权限清单
 - **审计日志**：所有工具调用决策以 JSON Lines 格式持久化
 
@@ -806,7 +866,7 @@ git clone <repo-url> && cd "building agent"
 # 2. 安装依赖
 npm install
 
-# 3. 运行完整自检（测试 + 构建）
+# 3. 运行完整自检（测试 + 构建 + Agent/记忆评测）
 npm run doctor
 
 # 4. 启动桌面应用（生产模式）
@@ -863,7 +923,7 @@ npm run validate:agent
 | 命令 | 说明 |
 |------|------|
 | `npm run dev` | 开发模式（Vite + tsc watch + Electron） |
-| `npm run doctor` | 完整自检：`npm test && npm run build` |
+| `npm run doctor` | 完整自检：测试、构建、Agent 评测和记忆评测 |
 | `npm run build` | 生产构建 |
 | `npm run start:prod` | 生产构建并启动 |
 | `npm run test` | 运行全部单元测试 |
@@ -871,6 +931,8 @@ npm run validate:agent
 | `npm run smoke:llm` | 真实模型连通性冒烟 |
 | `npm run smoke:prod` | 生产包冒烟（启动 → 验证渲染 → 退出） |
 | `npm run validate:agent` | 桌面端完整验收 |
+| `npm run eval:agent` | 确定性 Agent 运行评测 |
+| `npm run eval:memory` | 确定性记忆检索评测 |
 | `npm run pack:mac` | 打包 macOS `.app`（未签名，本地试用） |
 | `npm run dist:mac` | 打包 macOS `.dmg` + `.zip`（分发用） |
 
@@ -890,7 +952,11 @@ npm run validate:agent
 src/
 ├── main/           # Electron 主进程 (Node.js 环境)
 │   ├── main.ts                 # 入口：窗口/Tray/IPC/启动
-│   ├── agentRunnerService.ts   # Agent Runner 核心循环
+│   ├── agentRunnerService.ts   # Agent Runner facade
+│   ├── agentRuntimeEngine.ts   # 可恢复运行状态机
+│   ├── agentExecutionStore.ts  # 持久化 checkpoint
+│   ├── agentTrajectoryStore.ts # 追加式运行轨迹
+│   ├── agentLearningService.ts # 审核后学习应用
 │   ├── agentOrchestrator.ts    # 多子任务编排
 │   ├── agentLoop.ts            # 基础 Agent Loop (备用)
 │   ├── agentToolExecutor.ts    # 工具注册与执行
@@ -900,6 +966,10 @@ src/
 │   ├── chatService.ts          # 会话服务
 │   ├── chatSessionStore.ts     # 会话存储
 │   ├── memoryStore.ts          # 本地记忆存储
+│   ├── memoryRecall.ts         # 运行时有预算记忆召回
+│   ├── memoryL1Extractor.ts    # 轻量原子记忆抽取
+│   ├── memoryProfileStore.ts   # 本地画像/偏好 Markdown
+│   ├── toolResultOffloadStore.ts# 大型工具结果引用
 │   ├── modelSettingsStore.ts   # 模型配置存储
 │   ├── modelConnectionService.ts# 模型连接测试
 │   ├── openAiCompatibleClient.ts# OpenAI API 客户端
@@ -964,7 +1034,7 @@ src/
 
 ## 技能系统
 
-技能是 Zerox Agent 的核心扩展机制。每个技能定义为 `skills/<skill-name>/SKILL.md` 文件。
+技能是 Zerox Agent 的核心扩展机制。每个技能定义为一个 `SKILL.md` 文件，可放在应用内 `skills/`，也可放在 `~/.claude/skills`、`~/.agents/skills` 等用户技能目录。
 
 ### SKILL.md 格式
 
@@ -1020,7 +1090,7 @@ mcpServers:               # 可选，MCP 服务器配置
 
 ### 技能发现与注册
 
-启动时，系统扫描 `skills/` 目录：
+启动时，系统按顺序扫描应用内 `skills/` 目录和用户技能目录：
 
 1. 发现每个包含 `SKILL.md` 的子目录
 2. 解析 YAML frontmatter → 验证 manifest
@@ -1046,7 +1116,9 @@ startedAt
   │    ├── 每步：发送上下文 → LLM 决定工具调用 → 授权检查 → 执行 → 观察结果
   │    ├── 工具调用并行授权 + 并行执行
   │    ├── 上下文窗口自动管理（接近上限时压缩）
-  │    └── LLM 调用失败自动重试（指数退避，最多 2 次）
+  │    ├── LLM 调用失败自动重试（指数退避，最多 2 次）
+  │    ├── 轮次检查点可暂停，并询问用户是否继续
+  │    └── 连续同类工具失败会带诊断暂停，避免静默循环
   │
   ├── [reflecting] 反思纠错
   │    ├── 步骤失败时触发
@@ -1084,6 +1156,11 @@ finishedAt
 - **记忆合并**：整理时创建汇总记忆，归档源记忆（保留关联）
 - **导出**：支持完整 JSON 导出
 - **归档**：被合并的记忆标记为 `archived`，搜索结果中默认排除
+- **有预算的运行时召回**：对话和 Agent prompt 注入截断后的相关记忆，避免无限上下文堆叠
+- **会话证据**：成功对话可写入带来源引用的 session memory，并保留本地会话证据
+- **L1 原子记忆**：从偏好类对话中抽取轻量 semantic memory，并更新 `memory-persona.md`
+- **审核后学习**：用户接受的流程学习候选会转成 `procedural` 记忆，影响后续规划
+- **治理与评测**：Memory 面板可运行本地检索评测，以及重复、冲突、陈旧低信号记录的治理报告
 
 ---
 
@@ -1112,7 +1189,8 @@ ToolCall 请求
   │
   ├── 1. 解析参数 JSON
   ├── 2. 检查任务权限清单
-  │    ├── file_read/write → 路径白名单匹配
+  │    ├── file_list/stat/search/read/write → 路径白名单匹配
+  │    ├── memory_search / conversation_search → memory.read 权限
   │    ├── web_search → 布尔开关
   │    ├── web_fetch → 域名白名单匹配（含子域名）
   │    └── shell_exec → 正则模板匹配 + 控制符拦截 + 破坏性命令拦截
@@ -1125,6 +1203,7 @@ ToolCall 请求
 - **Shell 安全**：禁止控制操作符 (`;`, `&&`, `||`, `` ` ``, `$(`)、管道和破坏性命令 (`rm -rf`, `git push -f`, `DROP TABLE`, `kubectl delete` 等)
 - **路径安全**：路径白名单支持 `~` 展开和占位符，拒绝未授权的目录访问
 - **域名安全**：`web_fetch` 支持子域名匹配和精确域名校验
+- **工具鲁棒性**：`shell_exec` 默认 120 秒超时，支持显式 `timeoutMs`，失败时返回 `timeout`、`empty_exit`、`canceled`、`exit` 等结构化诊断
 
 ---
 
@@ -1151,7 +1230,7 @@ Gatekeeper 可能提示「Zerox Agent 已损坏，无法打开」。这通常不
 而是下载隔离属性导致的拦截。打开前在终端执行：
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/Zerox\ Agent-1.2.2-arm64.dmg
+xattr -dr com.apple.quarantine ~/Downloads/Zerox\ Agent-1.2.3-arm64.dmg
 ```
 
 如果已经把应用拖进 Applications，则执行：
@@ -1178,11 +1257,14 @@ mac:
 
 ## 测试
 
-项目包含 **51 个** Vitest 单元测试，分布在共享层、主进程和渲染进程：
+截至 v1.2.3，`npm run verify` 覆盖 76 个 Vitest 测试文件 / 333 个测试、生产构建、Agent 评测和记忆检索评测：
 
 ```bash
 npm test              # 运行全部测试
 npm run test:watch    # watch 模式
+npm run eval:agent    # 确定性 Agent 评测
+npm run eval:memory   # 确定性记忆检索评测
+npm run verify        # 测试 + 构建 + 确定性评测
 ```
 
 ### 测试覆盖
@@ -1195,15 +1277,24 @@ npm run test:watch    # watch 模式
 
 ## 路线图
 
-当前为 MVP 版本 v1.0.0，后续计划：
+当前版本：v1.2.3。
 
-- [ ] Windows 和 Linux 桌面支持
-- [ ] 技能市场和远程技能安装
-- [ ] 多 Agent 协作编排
+近期已完成：
+
+- [x] 本地优先桌面运行时、权限工具和 `SKILL.md` 技能发现
+- [x] 可恢复 checkpoint、可回放轨迹和大型工具结果引用
+- [x] 长任务暂停/继续、真实状态展示和用户主动中断
+- [x] Memory P0-P4：有预算召回、会话证据、画像文档、评测和治理报告
+- [x] Workspace 作用域运行、父子多 Agent 关系和用户审核后的流程学习
+
+后续计划：
+
+- [ ] Apple 签名、公证、自动更新和更清晰的分发流程
+- [ ] 增加更多一方原生工具，减少 Agent 对 shell fallback 的依赖
+- [ ] 技能市场、远程技能安装和可视化技能/工作流编辑
 - [ ] 条件触发任务（文件变化、系统事件等）
-- [ ] Apple 签名、公证和自动更新
-- [ ] 崩溃日志和遥测
-- [ ] 技能编辑器和可视化工作流构建器
+- [ ] Windows 和 Linux 桌面支持
+- [ ] 可选开启的崩溃报告和诊断
 
 ---
 

@@ -29,8 +29,9 @@ import {
   buildToolDefinitions,
   parsePlanFromResponse,
   parseReflectionFromResponse,
-  serializeToolObservation,
 } from "../shared/agentProtocol";
+import { serializeToolObservationWithOffload } from "./toolObservationOffload";
+import type { ToolResultOffloadStore } from "./toolResultOffloadStore";
 import type {
   AgentPhase,
   AgentRunEvent,
@@ -76,6 +77,8 @@ export function createAgentRunnerService(options: {
   learningStore?: Pick<AgentLearningStore, "create">;
   memoryStore?: Partial<Pick<MemoryStore, "create" | "search">>;
   contextManager?: ContextManager;
+  toolResultOffloadStore?: ToolResultOffloadStore;
+  toolResultOffloadThreshold?: number;
   createId?: () => string;
   now?: () => Date;
   maxReflectionRounds?: number;
@@ -98,6 +101,12 @@ export function createAgentRunnerService(options: {
         ...(options.trajectoryStore ? { trajectoryStore: options.trajectoryStore } : {}),
         ...(options.learningStore ? { learningStore: options.learningStore } : {}),
         ...(options.memoryStore ? { memoryStore: options.memoryStore } : {}),
+        ...(options.toolResultOffloadStore
+          ? { toolResultOffloadStore: options.toolResultOffloadStore }
+          : {}),
+        ...(options.toolResultOffloadThreshold !== undefined
+          ? { toolResultOffloadThreshold: options.toolResultOffloadThreshold }
+          : {}),
         createId,
         now,
       })
@@ -140,7 +149,6 @@ export function createAgentRunnerService(options: {
   async function executeToolCalls(
     toolCalls: ToolCall[],
     taskId: string,
-    taskName: string,
     events: AgentRunEvent[],
     signal: AbortSignal | undefined,
   ): Promise<ChatMessage[]> {
@@ -234,10 +242,17 @@ export function createAgentRunnerService(options: {
         toolCallId: execResult.toolCallId,
       };
 
+      const serializedObservation =
+        await serializeToolObservationWithOffload(observation, {
+          store: options.toolResultOffloadStore,
+          thresholdChars: options.toolResultOffloadThreshold,
+          runId: taskId,
+        });
+
       toolMessages.push({
         role: "tool",
         tool_call_id: execResult.toolCallId,
-        content: serializeToolObservation(observation),
+        content: serializedObservation.content,
       });
     }
 
@@ -491,7 +506,6 @@ export function createAgentRunnerService(options: {
             const toolMessages = await executeToolCalls(
               response.toolCalls,
               taskId,
-              task.name,
               events,
               signal,
             );
@@ -641,7 +655,6 @@ export function createAgentRunnerService(options: {
             const toolMessages = await executeToolCalls(
               response.toolCalls,
               taskId,
-              task.name,
               events,
               signal,
             );

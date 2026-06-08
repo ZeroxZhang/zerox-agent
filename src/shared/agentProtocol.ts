@@ -24,13 +24,18 @@ export type ToolObservation = {
   ok: boolean;
   result?: Record<string, unknown>;
   error?: string;
+  errorDetails?: Record<string, unknown>;
   toolCallId?: string;
 };
 
 const supportedTools = new Set<AgentToolName>([
   "file_list",
+  "file_stat",
+  "file_search",
   "file_read",
   "file_write",
+  "memory_search",
+  "conversation_search",
   "web_search",
   "web_fetch",
   "shell_exec",
@@ -53,6 +58,55 @@ export function buildToolDefinitions(): ToolDefinition[] {
             },
           },
           required: ["path"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "file_stat",
+        description:
+          "读取文件或目录的元信息（类型、大小、修改时间），不读取文件内容。适合先判断路径是否存在、文件大小和类型。",
+        parameters: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "要检查的文件或目录绝对路径",
+            },
+          },
+          required: ["path"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "file_search",
+        description:
+          "在目录内搜索文件名或小文本文件内容，避免为 find/grep 这类简单检索调用 shell。默认跳过大型文件和常见依赖目录。",
+        parameters: {
+          type: "object",
+          properties: {
+            root: {
+              type: "string",
+              description: "要搜索的目录绝对路径",
+            },
+            query: {
+              type: "string",
+              description: "要匹配的关键词",
+            },
+            mode: {
+              type: "string",
+              enum: ["name", "content", "both"],
+              description: "搜索模式，默认 both",
+            },
+            maxResults: {
+              type: "number",
+              description: "最多返回结果数，默认 20，最大 100",
+            },
+          },
+          required: ["root", "query"],
         },
       },
     },
@@ -99,6 +153,59 @@ export function buildToolDefinitions(): ToolDefinition[] {
     {
       type: "function",
       function: {
+        name: "memory_search",
+        description:
+          "检索长期记忆（core/session/semantic/episodic/procedural）。只返回裁剪后的摘要，用于补充上下文。",
+        parameters: {
+          type: "object",
+          properties: {
+            query: {
+              type: "string",
+              description: "要检索的关键词或问题",
+            },
+            kind: {
+              type: "string",
+              description:
+                "可选记忆类型：all/core/session/semantic/episodic/procedural",
+            },
+            limit: {
+              type: "number",
+              description: "最多返回几条，默认 5，最大 10",
+            },
+          },
+          required: ["query"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "conversation_search",
+        description:
+          "检索原始聊天消息证据。适合查找用户曾经说过的话或某次会话中的原始上下文。",
+        parameters: {
+          type: "object",
+          properties: {
+            query: {
+              type: "string",
+              description: "要检索的关键词或问题",
+            },
+            sessionId: {
+              type: "string",
+              description: "可选：限制在某个会话内搜索",
+            },
+            limit: {
+              type: "number",
+              description: "最多返回几条，默认 5，最大 10",
+            },
+          },
+          required: ["query"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
         name: "web_search",
         description:
           "使用 DuckDuckGo 搜索网页并返回结果列表（标题、URL、摘要）。需要任务授权 web.search 权限。",
@@ -137,13 +244,17 @@ export function buildToolDefinitions(): ToolDefinition[] {
       function: {
         name: "shell_exec",
         description:
-          "执行 shell 命令。默认超时 30 秒。仅允许执行已授权模板匹配的命令。",
+          "执行 shell 命令。默认超时 120 秒，可用 timeoutMs 为明确的长命令申请 25-600000 ms。仅允许执行已授权模板匹配的命令。优先使用 file_stat/file_search/file_read 等原生工具完成文件诊断。",
         parameters: {
           type: "object",
           properties: {
             command: {
               type: "string",
               description: "要执行的完整 shell 命令",
+            },
+            timeoutMs: {
+              type: "number",
+              description: "可选超时时间，范围 25-600000 ms，默认 120000 ms",
             },
           },
           required: ["command"],
@@ -156,13 +267,14 @@ export function buildToolDefinitions(): ToolDefinition[] {
 export function buildAgentSystemPrompt(): string {
   return [
     "你是一个本地桌面 AI agent 的运行时核心。",
-    "你可以调用工具来完成任务：列出目录、读写文件、搜索网页、抓取网页内容、执行受权 shell 命令。",
+    "你可以调用工具来完成任务：列出目录、读取元信息、搜索文件、读写文件、检索本地记忆、搜索网页、抓取网页内容、执行受权 shell 命令。",
     "",
     "工作原则：",
-    "- 先用 file_list 了解目录结构，再决定读取或写入哪些文件。",
+    "- 文件诊断优先使用 file_list、file_stat、file_search、file_read；只有原生工具无法完成时再使用 shell_exec。",
     "- 将复杂任务分解为清晰的步骤序列。",
     "- 每个工具调用返回结果后，分析结果再决定下一步。",
     "- 如果工具返回错误，先分析原因，尝试调整参数或方法。",
+    "- memory_search 和 conversation_search 只用于按需回忆；每轮最多调用 3 次，避免把记忆检索当成循环动作。",
     "- 任务完成后给出结构清晰的中文摘要。",
     "",
     "输出语言：默认使用中文输出最终消息、报告正文和用户可见摘要。",
@@ -374,6 +486,9 @@ export function serializeToolObservation(
     ok: observation.ok,
     ...(observation.result ? { result: observation.result } : {}),
     ...(observation.error ? { error: observation.error } : {}),
+    ...(observation.errorDetails
+      ? { error_details: observation.errorDetails }
+      : {}),
     ...(observation.toolCallId ? { tool_call_id: observation.toolCallId } : {}),
   });
 }

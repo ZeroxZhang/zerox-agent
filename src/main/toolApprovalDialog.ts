@@ -33,9 +33,16 @@ export function buildToolApprovalDialogOptions(
 function summarizeToolArgs(request: ToolCallRequest): Record<string, unknown> {
   switch (request.toolName) {
     case "file_list":
+    case "file_stat":
     case "file_read":
       return {
         path: String(request.args.path ?? ""),
+      };
+    case "file_search":
+      return {
+        root: String(request.args.root ?? ""),
+        query: String(request.args.query ?? ""),
+        mode: String(request.args.mode ?? "both"),
       };
     case "file_write":
       return {
@@ -53,6 +60,18 @@ function summarizeToolArgs(request: ToolCallRequest): Record<string, unknown> {
     case "web_search":
       return {
         query: String(request.args.query ?? ""),
+      };
+    case "memory_search":
+      return {
+        query: String(request.args.query ?? ""),
+        kind: String(request.args.kind ?? "all"),
+        limit: Number(request.args.limit ?? 5),
+      };
+    case "conversation_search":
+      return {
+        query: String(request.args.query ?? ""),
+        sessionId: String(request.args.sessionId ?? ""),
+        limit: Number(request.args.limit ?? 5),
       };
   }
 }

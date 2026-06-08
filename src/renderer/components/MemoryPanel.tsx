@@ -9,6 +9,8 @@ import {
   type MemorySearchResult,
   type MemoryValidationErrors,
 } from "../../shared/memory";
+import type { MemoryEvalReport } from "../../shared/memoryEval";
+import type { MemoryGovernanceReport } from "../../shared/memoryGovernance";
 
 type MemoryStatus =
   | { kind: "idle"; message: string }
@@ -33,6 +35,11 @@ export function MemoryPanel() {
   const [tagText, setTagText] = useState("");
   const [errors, setErrors] = useState<MemoryValidationErrors>({});
   const [exportedJson, setExportedJson] = useState("");
+  const [profileContent, setProfileContent] = useState("");
+  const [profileUpdatedAt, setProfileUpdatedAt] = useState("");
+  const [evalReport, setEvalReport] = useState<MemoryEvalReport | null>(null);
+  const [governanceReport, setGovernanceReport] =
+    useState<MemoryGovernanceReport | null>(null);
   const [maintenanceReport, setMaintenanceReport] =
     useState<MemoryMaintenanceReport | null>(null);
   const [status, setStatus] = useState<MemoryStatus>({
@@ -42,6 +49,7 @@ export function MemoryPanel() {
 
   useEffect(() => {
     void loadMemories();
+    void loadMemoryProfile();
   }, []);
 
   const displayedMemories = useMemo(() => {
@@ -77,6 +85,18 @@ export function MemoryPanel() {
         message:
           error instanceof Error ? error.message : "无法加载记忆。",
       });
+    }
+  }
+
+  async function loadMemoryProfile() {
+    if (!window.buildingAgent) {
+      return;
+    }
+
+    const result = await window.buildingAgent.readMemoryProfile();
+    if (result.ok) {
+      setProfileContent(result.profile.content);
+      setProfileUpdatedAt(result.profile.updatedAt);
     }
   }
 
@@ -218,6 +238,76 @@ export function MemoryPanel() {
     await handleSearch(query, kindFilter);
   }
 
+  async function handleRunMemoryEval() {
+    setStatus({ kind: "saving", message: "正在评估记忆检索..." });
+
+    if (!window.buildingAgent) {
+      setStatus({
+        kind: "error",
+        message: "浏览器预览模式无法评估桌面记忆。",
+      });
+      return;
+    }
+
+    const result = await window.buildingAgent.runMemoryEval();
+    if (!result.ok) {
+      setStatus({ kind: "error", message: result.message });
+      return;
+    }
+
+    setEvalReport(result.report);
+    setStatus({
+      kind: result.report.failed ? "error" : "saved",
+      message: `记忆评估完成：${result.report.passed}/${result.report.total} 通过。`,
+    });
+  }
+
+  async function handleReviewGovernance() {
+    setStatus({ kind: "saving", message: "正在生成记忆治理报告..." });
+
+    if (!window.buildingAgent) {
+      setStatus({
+        kind: "error",
+        message: "浏览器预览模式无法生成治理报告。",
+      });
+      return;
+    }
+
+    const result = await window.buildingAgent.reviewMemoryGovernance();
+    if (!result.ok) {
+      setStatus({ kind: "error", message: result.message });
+      return;
+    }
+
+    setGovernanceReport(result.report);
+    setStatus({
+      kind: "saved",
+      message: "记忆治理报告已生成。",
+    });
+  }
+
+  async function handleSaveProfile() {
+    setStatus({ kind: "saving", message: "正在保存记忆画像..." });
+
+    if (!window.buildingAgent) {
+      setStatus({
+        kind: "error",
+        message: "浏览器预览模式无法保存记忆画像。",
+      });
+      return;
+    }
+
+    const result = await window.buildingAgent.saveMemoryProfile(profileContent);
+    if (!result.ok) {
+      setStatus({ kind: "error", message: result.message });
+      return;
+    }
+
+    setProfileContent(result.profile.content);
+    setProfileUpdatedAt(result.profile.updatedAt);
+    setStatus({ kind: "saved", message: "记忆画像已保存。" });
+  }
+
   return (
     <section className="memory-panel">
       <div className="settings-header">
@@ -268,6 +358,22 @@ export function MemoryPanel() {
         >
           整理
         </button>
+        <button
+          className="secondary-action"
+          disabled={status.kind === "saving"}
+          onClick={handleReviewGovernance}
+          type="button"
+        >
+          治理
+        </button>
+        <button
+          className="secondary-action"
+          disabled={status.kind === "saving"}
+          onClick={handleRunMemoryEval}
+          type="button"
+        >
+          评估
+        </button>
       </div>
 
       {maintenanceReport ? (
@@ -292,6 +398,100 @@ export function MemoryPanel() {
           </dl>
         </section>
       ) : null}
+
+      {governanceReport ? (
+        <section className="maintenance-report" aria-label="记忆治理报告">
+          <dl>
+            <div>
+              <dt>已扫描</dt>
+              <dd>{governanceReport.scanned}</dd>
+            </div>
+            <div>
+              <dt>重复</dt>
+              <dd>{governanceReport.duplicateGroups.length}</dd>
+            </div>
+            <div>
+              <dt>冲突</dt>
+              <dd>{governanceReport.conflictGroups.length}</dd>
+            </div>
+            <div>
+              <dt>陈旧</dt>
+              <dd>{governanceReport.staleLowSignalRecords.length}</dd>
+            </div>
+          </dl>
+          <ul className="memory-report-list">
+            {governanceReport.recommendations.map((recommendation) => (
+              <li key={recommendation}>{recommendation}</li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {evalReport ? (
+        <section className="maintenance-report" aria-label="记忆评估报告">
+          <dl>
+            <div>
+              <dt>用例</dt>
+              <dd>{evalReport.total}</dd>
+            </div>
+            <div>
+              <dt>通过</dt>
+              <dd>{evalReport.passed}</dd>
+            </div>
+            <div>
+              <dt>失败</dt>
+              <dd>{evalReport.failed}</dd>
+            </div>
+            <div>
+              <dt>通过率</dt>
+              <dd>{Math.round(evalReport.passRate * 100)}%</dd>
+            </div>
+          </dl>
+          {evalReport.failures.length ? (
+            <ul className="memory-report-list">
+              {evalReport.failures.map((failure) => (
+                <li key={failure.caseId}>
+                  {failure.caseId}: {failure.reason}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
+      ) : null}
+
+      <section className="memory-profile-editor" aria-label="记忆画像">
+        <div className="section-heading">
+          <span>记忆画像</span>
+          <small>
+            {profileUpdatedAt
+              ? `更新时间 ${new Date(profileUpdatedAt).toLocaleString()}`
+              : "未加载"}
+          </small>
+        </div>
+        <textarea
+          onChange={(event) => setProfileContent(event.currentTarget.value)}
+          rows={8}
+          value={profileContent}
+        />
+        <div className="settings-actions">
+          <button
+            className="secondary-action"
+            disabled={status.kind === "saving"}
+            onClick={() => void loadMemoryProfile()}
+            type="button"
+          >
+            重新加载
+          </button>
+          <button
+            className="primary-action"
+            disabled={status.kind === "saving"}
+            onClick={() => void handleSaveProfile()}
+            type="button"
+          >
+            保存画像
+          </button>
+        </div>
+      </section>
 
       <div className="memory-layout">
         <form className="memory-form" onSubmit={handleSubmit}>
