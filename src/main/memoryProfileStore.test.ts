@@ -83,6 +83,51 @@ describe("memory profile store", () => {
       readFile(path.join(configDir, "memory-persona.md"), "utf8"),
     ).resolves.toContain("## Preferences\n");
   });
+
+  it("reads a default profile when the persona file is missing", async () => {
+    const store = createMemoryProfileStore({
+      configDir,
+      now: () => new Date("2026-06-08T09:00:00.000Z"),
+    });
+
+    await expect(store.read()).resolves.toEqual({
+      content: [
+        "# Memory Persona",
+        "",
+        "Updated: 2026-06-08T09:00:00.000Z",
+        "",
+        "## Preferences",
+        "",
+      ].join("\n"),
+      updatedAt: "2026-06-08T09:00:00.000Z",
+    });
+  });
+
+  it("saves user-edited profile content", async () => {
+    const store = createMemoryProfileStore({
+      configDir,
+      now: () => new Date("2026-06-08T09:00:00.000Z"),
+    });
+    const content = [
+      "# Memory Persona",
+      "",
+      "Updated: manual",
+      "",
+      "## Preferences",
+      "- Always keep answers concise.",
+      "",
+    ].join("\n");
+
+    await store.save(content);
+
+    await expect(store.read()).resolves.toEqual({
+      content,
+      updatedAt: "2026-06-08T09:00:00.000Z",
+    });
+    await expect(
+      readFile(path.join(configDir, "memory-persona.md"), "utf8"),
+    ).resolves.toBe(content);
+  });
 });
 
 function createMemory(

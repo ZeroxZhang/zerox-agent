@@ -262,6 +262,55 @@ describe("memory store", () => {
     await expect(store.list()).resolves.toEqual([second]);
   });
 
+  it("reviews memory governance without mutating records", async () => {
+    const store = createMemoryStore({
+      configDir,
+      createId: createSequentialId("mem"),
+      now: () => new Date("2025-01-01T00:00:00.000Z"),
+    });
+    await store.create({
+      kind: "semantic",
+      title: "Agent memory design",
+      content: "Memory must be visible.",
+      importance: 4,
+    });
+    await store.create({
+      kind: "semantic",
+      title: "Agent memory design",
+      content: "Memory must be deletable.",
+      importance: 4,
+    });
+    await store.create({
+      kind: "session",
+      title: "Old scratch note",
+      content: "Temporary context.",
+      importance: 1,
+    });
+
+    const report = await store.reviewGovernance({
+      now: "2026-06-08T00:00:00.000Z",
+      staleAfterDays: 90,
+    });
+
+    expect(report).toMatchObject({
+      scanned: 3,
+      duplicateGroups: [
+        {
+          title: "Agent memory design",
+          memoryIds: ["mem_1", "mem_2"],
+        },
+      ],
+      staleLowSignalRecords: [
+        {
+          memoryId: "mem_3",
+          title: "Old scratch note",
+          importance: 1,
+        },
+      ],
+    });
+    await expect(store.list()).resolves.toHaveLength(3);
+  });
+
   it("exports all memory as formatted JSON", async () => {
     const store = createMemoryStore({
       configDir,

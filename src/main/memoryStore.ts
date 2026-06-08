@@ -2,6 +2,10 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createMemoryMaintenancePlan, type MemoryMaintenanceOptions } from "../shared/memoryMaintenance";
+import {
+  createMemoryGovernanceReport,
+  type MemoryGovernanceReport,
+} from "../shared/memoryGovernance";
 import { createChunkingService, type ChunkingService } from "./chunking";
 import { createReranker, type Reranker } from "./reranker";
 import {
@@ -35,6 +39,10 @@ export type MemoryStore = {
   delete(memoryId: string): Promise<boolean>;
   export(): Promise<string>;
   runMaintenance(options?: MemoryMaintenanceOptions): Promise<MemoryMaintenanceReport>;
+  reviewGovernance(options?: {
+    now?: string;
+    staleAfterDays?: number;
+  }): Promise<MemoryGovernanceReport>;
 };
 
 export class MemoryValidationError extends Error {
@@ -244,6 +252,11 @@ export function createMemoryStore(options: {
         createdAt,
         createdMemories,
       };
+    },
+
+    async reviewGovernance(governanceOptions) {
+      const stored = await readStoredRecords();
+      return createMemoryGovernanceReport(stored.records, governanceOptions);
     },
   };
 }

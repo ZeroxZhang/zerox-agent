@@ -153,6 +153,16 @@ import type {
   MemorySearchOptions,
   RunMemoryMaintenanceResult,
 } from "../shared/memory";
+import {
+  createDefaultMemoryEvalCases,
+  runMemoryEvals,
+  type RunMemoryEvalResult,
+} from "../shared/memoryEval";
+import type { RunMemoryGovernanceResult } from "../shared/memoryGovernance";
+import type {
+  ReadMemoryProfileResult,
+  SaveMemoryProfileResult,
+} from "../shared/memoryProfile";
 import type { AgentLearningListOptions } from "../shared/agentLearning";
 import type { ToolCallRequest } from "../shared/toolPermissions";
 import type { AgentEvalReport } from "../shared/agentEval";
@@ -173,6 +183,11 @@ import {
   buildDesktopRuntimeInfo,
   type DesktopRuntimeInfo,
 } from "../shared/desktopRuntime";
+import {
+  isSafeToolResultRef,
+  summarizeToolResultContent,
+  type ReadToolResultRefResult,
+} from "../shared/toolResultRefs";
 import {
   getSmokeModeOptions,
   getSmokeRendererCheckScript,
@@ -561,6 +576,32 @@ ipcMain.handle(
   (_event, runId: string): Promise<AgentTrajectoryEvent[]> =>
     getAgentTrajectoryStore().list(runId),
 );
+ipcMain.handle(
+  "toolResults:readRef",
+  async (_event, ref: string): Promise<ReadToolResultRefResult> => {
+    if (!isSafeToolResultRef(ref)) {
+      return {
+        ok: false,
+        message: "工具结果引用无效。",
+      };
+    }
+
+    const content = await getToolResultOffloadStore().read(ref);
+    if (!content) {
+      return {
+        ok: false,
+        message: "没有找到这个工具结果引用。",
+      };
+    }
+
+    return {
+      ok: true,
+      ref,
+      content,
+      summary: summarizeToolResultContent(content),
+    };
+  },
+);
 ipcMain.handle("agentQuality:getEvalReport", (): Promise<AgentEvalReport> =>
   runAgentEvals(createAgentEvalFixtures()),
 );
@@ -701,6 +742,79 @@ ipcMain.handle(
   },
 );
 ipcMain.handle("memory:export", () => getMemoryStore().export());
+ipcMain.handle(
+  "memory:evaluate",
+  async (): Promise<RunMemoryEvalResult> => {
+    try {
+      const records = await getMemoryStore().list({
+        kind: "all",
+        includeArchived: false,
+        limit: 500,
+      });
+      return {
+        ok: true,
+        report: runMemoryEvals(records, createDefaultMemoryEvalCases(records)),
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        message:
+          error instanceof Error ? error.message : "无法评估记忆检索质量。",
+      };
+    }
+  },
+);
+ipcMain.handle(
+  "memory:governance",
+  async (): Promise<RunMemoryGovernanceResult> => {
+    try {
+      return {
+        ok: true,
+        report: await getMemoryStore().reviewGovernance(),
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        message:
+          error instanceof Error ? error.message : "无法生成记忆治理报告。",
+      };
+    }
+  },
+);
+ipcMain.handle(
+  "memoryProfile:read",
+  async (): Promise<ReadMemoryProfileResult> => {
+    try {
+      return {
+        ok: true,
+        profile: await getMemoryProfileStore().read(),
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        message:
+          error instanceof Error ? error.message : "无法读取记忆画像。",
+      };
+    }
+  },
+);
+ipcMain.handle(
+  "memoryProfile:save",
+  async (_event, content: string): Promise<SaveMemoryProfileResult> => {
+    try {
+      return {
+        ok: true,
+        profile: await getMemoryProfileStore().save(content),
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        message:
+          error instanceof Error ? error.message : "无法保存记忆画像。",
+      };
+    }
+  },
+);
 ipcMain.handle(
   "memory:maintain",
   async (): Promise<RunMemoryMaintenanceResult> => {

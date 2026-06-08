@@ -1,8 +1,11 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { MemoryRecord } from "../shared/memory";
+import type { MemoryProfileDocument } from "../shared/memoryProfile";
 
 export type MemoryProfileStore = {
+  read(): Promise<MemoryProfileDocument>;
+  save(content: string): Promise<MemoryProfileDocument>;
   updateFromMemories(memories: MemoryRecord[]): Promise<void>;
 };
 
@@ -14,6 +17,29 @@ export function createMemoryProfileStore(options: {
   const now = options.now ?? (() => new Date());
 
   return {
+    async read() {
+      const updatedAt = now().toISOString();
+      const content =
+        (await readExistingProfile(profilePath)) ||
+        formatProfile(updatedAt, []);
+
+      return {
+        content,
+        updatedAt,
+      };
+    },
+
+    async save(content) {
+      const updatedAt = now().toISOString();
+      await mkdir(options.configDir, { recursive: true });
+      await writeFile(profilePath, content, "utf8");
+
+      return {
+        content,
+        updatedAt,
+      };
+    },
+
     async updateFromMemories(memories) {
       const preferenceMemories = memories.filter(isPreferenceMemory);
       const existing = await readExistingProfile(profilePath);

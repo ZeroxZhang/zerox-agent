@@ -24,12 +24,23 @@ describe("package scripts", () => {
     ) as PackageJson;
 
     expect(packageJson.scripts).toMatchObject({
-      verify: "npm test && npm run build && node scripts/run-agent-evals.mjs",
+      verify:
+        "npm test && npm run build && node scripts/run-agent-evals.mjs && node scripts/run-memory-evals.mjs",
       doctor: "npm run verify",
       "smoke:llm": "npm run build && node scripts/check-api-info.mjs",
       "smoke:prod": "npm run build && BUILDING_AGENT_SMOKE=1 electron .",
       "validate:agent":
         "npm run build && BUILDING_AGENT_VALIDATE=1 electron .",
+    });
+  });
+
+  it("exposes deterministic memory evals", () => {
+    const packageJson = JSON.parse(
+      readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
+    ) as PackageJson;
+
+    expect(packageJson.scripts).toMatchObject({
+      "eval:memory": "npm run build && node scripts/run-memory-evals.mjs",
     });
   });
 
