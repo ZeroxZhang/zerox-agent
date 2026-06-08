@@ -5,7 +5,7 @@ description: 演示如何使用 MCP 服务器和自定义工具扩展智能体�
 version: 0.1.0
 execution:
   mode: agent
-  maxTurns: 10
+  maxTurns: 48
 inputs:
   - name: query
     label: 查询内容

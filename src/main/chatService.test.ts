@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createChatService } from "./chatService";
+import type { AgentToolExecutor } from "./agentToolExecutor";
 import type { AppendChatMessageInput } from "./chatSessionStore";
 import type { ChatClient, ChatMessage, ChatCompletionResponse } from "./openAiCompatibleClient";
 import type { RunScheduledTaskResult } from "../shared/agentRuns";
@@ -9,6 +10,23 @@ import { getDefaultTaskPermissionPolicy } from "../shared/toolPermissions";
 
 function chatReply(content: string): ChatCompletionResponse {
   return { content, toolCalls: [], finishReason: "stop" };
+}
+
+function toolCallResponse(id: string, path: string): ChatCompletionResponse {
+  return {
+    content: null,
+    finishReason: "tool_calls",
+    toolCalls: [
+      {
+        id,
+        type: "function",
+        function: {
+          name: "file_list",
+          arguments: JSON.stringify({ path }),
+        },
+      },
+    ],
+  };
 }
 
 describe("chat service", () => {
@@ -193,6 +211,49 @@ describe("chat service", () => {
         title: "用户偏好：以后默认把报告保存成 Markdown",
       },
     ]);
+  });
+
+  it("lets long tool-using chat tasks run beyond six model turns", async () => {
+    let toolModelTurns = 0;
+    const service = createChatService({
+      chatClient: {
+        async complete(request) {
+          if (request.tools) {
+            toolModelTurns += 1;
+            if (toolModelTurns <= 7) {
+              return toolCallResponse(
+                `call_${toolModelTurns}`,
+                `/tmp/long-task-${toolModelTurns}`,
+              );
+            }
+          }
+
+          return chatReply("长任务完成。");
+        },
+      },
+      getModelProfile: async () => ({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret",
+        model: "agent-model",
+        temperature: 0.2,
+        maxTokens: 8192,
+      }),
+      memoryStore: createMemoryStore(),
+      toolExecutor: createToolExecutor(),
+      createId: () => "chat_long_task",
+      now: () => new Date("2026-06-06T08:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage({
+      message: "请执行一个需要多轮工具调用的长任务",
+    });
+
+    expect(toolModelTurns).toBe(8);
+    expect(result).toMatchObject({
+      ok: true,
+      reply: expect.stringContaining("长任务完成。"),
+    });
+    expect(result.ok ? result.reply : "").not.toContain("已达到工具调用轮次上限");
   });
 
   it("runs a matching local task directly from a chat command", async () => {
@@ -451,6 +512,40 @@ function createTask(partial: Partial<ScheduledTask> = {}): ScheduledTask {
     nextRunAt: null,
     ...partial,
   };
+}
+
+function createToolExecutor(): AgentToolExecutor {
+  return {
+    async execute() {
+      return {
+        ok: true as const,
+        result: { files: ["a.txt", "b.txt"] },
+      };
+    },
+    getRegistry() {
+      return {
+        getDefinitions() {
+          return [
+            {
+              type: "function" as const,
+              function: {
+                name: "file_list",
+                description: "List files",
+                parameters: {
+                  type: "object",
+                  properties: { path: { type: "string" } },
+                  required: ["path"],
+                },
+              },
+            },
+          ];
+        },
+      };
+    },
+    hasTool() {
+      return true;
+    },
+  } as AgentToolExecutor;
 }
 
 function createMemoryRecord(

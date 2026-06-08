@@ -47,12 +47,14 @@ export function createChatService(options: {
   now?: () => Date;
   memoryLimit?: number;
   historyLimit?: number;
+  agentLoopMaxTurns?: number;
   toolResultOffloadStore?: ToolResultOffloadStore;
   toolResultOffloadThreshold?: number;
 }): ChatService {
   const createId = options.createId ?? randomUUID;
   const memoryLimit = options.memoryLimit ?? 4;
   const historyLimit = options.historyLimit ?? 12;
+  const agentLoopMaxTurns = normalizeAgentLoopMaxTurns(options.agentLoopMaxTurns);
 
   return {
     async sendMessage(input) {
@@ -203,7 +205,7 @@ export function createChatService(options: {
               toolExecutor: options.toolExecutor,
               toolAuthorizationService: options.toolAuthorizationService,
               systemPrompt: buildChatSystemPrompt(),
-              maxTurns: 6,
+              maxTurns: agentLoopMaxTurns,
               signal: undefined,
               tools: options.toolExecutor.getRegistry().getDefinitions(),
               toolResultOffloadStore: options.toolResultOffloadStore,
@@ -276,6 +278,16 @@ export function createChatService(options: {
       };
     },
   };
+}
+
+const defaultChatAgentLoopMaxTurns = 48;
+
+function normalizeAgentLoopMaxTurns(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return defaultChatAgentLoopMaxTurns;
+  }
+
+  return Math.max(1, Math.floor(value));
 }
 
 async function appendAssistantMessage(options: {
