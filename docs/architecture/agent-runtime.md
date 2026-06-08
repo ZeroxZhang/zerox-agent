@@ -8,10 +8,11 @@ The production task path is:
 
 1. `AgentRunnerService.runTask(taskId)`
 2. `AgentRuntimeEngine.startTask(taskId)`
-3. `AgentExecutionStore.save(checkpoint)`
-4. model turn, tool authorization, tool execution
-5. checkpoint update and trajectory append
-6. final `AgentRunRecord` append
+3. workspace context resolution
+4. `AgentExecutionStore.save(checkpoint)`
+5. model turn, tool authorization, tool execution
+6. checkpoint update and trajectory append
+7. final `AgentRunRecord` append
 
 `AgentRunnerService` still contains the older plan/execute/reflect loop for compatibility when no execution store is configured, but the desktop app wires the recoverable runtime by default.
 
@@ -42,6 +43,7 @@ userData/config/agent-executions/<runId>.json
 Each checkpoint keeps:
 
 - `runId`, `taskId`, `status`, and current step id
+- optional `runContext` with workspace id, workspace root, sandbox policy, role, parent run, and session id
 - execution steps with attempt count, failure class, and failure message
 - model/tool messages needed to continue the run
 - `toolCallCount`
@@ -70,10 +72,13 @@ Failure classifications are also emitted into the trajectory as `failure_classif
 
 The runtime emits append-only trajectory events for:
 
+- run context creation
 - state transitions
 - checkpoint writes
 - model requests and responses
 - tool calls and tool results
+- workspace escape denials
+- child run scheduling
 - failure classification
 - final summaries
 
@@ -86,6 +91,12 @@ userData/config/agent-trajectories/<runId>.jsonl
 Events carry redaction flags so future replay and inspection tools can avoid exposing API keys, file content, or user text accidentally.
 
 The Runs panel reads trajectory files through `agentRuns:listTrajectory` and shows event payloads plus redaction flags for the selected run.
+
+## Workspace And Multi-Agent Context
+
+The desktop app wires `AgentWorkspaceService` into `AgentRunnerService`, so new recoverable runs receive an `AgentRunContext` before the first model request. That context is written to checkpoints, final run records, and trajectory events.
+
+Tool authorization receives the same context and narrows task permissions to the active workspace unless the sandbox explicitly allows workspace escape. Shell commands execute with `cwd` set to the workspace root. Parent/child multi-agent sessions reuse this context, adding `parentRunId`, `sessionId`, role, and depth metadata.
 
 ## Verification
 

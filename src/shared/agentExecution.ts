@@ -1,3 +1,5 @@
+import type { AgentRunContext } from "./agentWorkspace";
+
 export type AgentExecutionStatus =
   | "queued"
   | "running"
@@ -50,6 +52,7 @@ export type AgentExecutionCheckpoint = {
   runId: string;
   taskId: string;
   status: AgentExecutionStatus;
+  runContext?: AgentRunContext;
   currentStepId?: string;
   steps: AgentExecutionStep[];
   messages: AgentExecutionMessage[];

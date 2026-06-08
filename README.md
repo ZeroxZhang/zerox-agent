@@ -50,11 +50,11 @@
 
 <h2 id="overview-en">Overview</h2>
 
-**Zerox Agent** is a local-first desktop control plane for personal AI agents. The name derives from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, recoverable agent runs.
+**Zerox Agent** is a local-first desktop control plane for personal AI agents. The name derives from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
 
-It is not a chat wrapper or a generic hosted agent surface. It runs locally, configures OpenAI-compatible models, scans local `SKILL.md` skill files, executes recoverable agent runs, invokes permission-controlled tools, persists experiential knowledge into local long-term memory, and keeps learning user-reviewed before it changes future behavior.
+It is not a chat wrapper or a generic hosted agent surface. It runs locally, configures OpenAI-compatible models, scans local `SKILL.md` skill files, executes recoverable agent runs, invokes permission-controlled tools, tracks parent/child multi-agent sessions, persists experiential knowledge into local long-term memory, and keeps learning user-reviewed before it changes future behavior.
 
-The product boundary is documented in [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md): Zerox optimizes for trusted local control, recoverable agent runs, explicit permissions, observable trajectories, and user-reviewed learning. Runtime and learning details live in [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md) and [`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md).
+The product boundary is documented in [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md): Zerox optimizes for trusted local control, recoverable agent runs, explicit permissions, workspace-scoped runs, observable trajectories, parent/child multi-agent sessions, and user-reviewed learning. Runtime, workspace, and learning details live in [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md), [`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md), and [`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md).
 
 <p align="center">
   <img src="zerox-agent-onepage.png" alt="Zerox Agent one-page product overview" width="720" />
@@ -136,6 +136,8 @@ All data is stored under Electron `userData/config/`:
 | `agent-runs.jsonl` | Task run logs (JSON Lines) |
 | `agent-executions/<runId>.json` | Recoverable runtime checkpoints |
 | `agent-trajectories/<runId>.jsonl` | Replayable model/tool/transition trajectory events |
+| `agent-workspaces.json` | Workspace registry for default, project, temporary, and git worktree runs |
+| `multi-agent-sessions.json` | Parent/child multi-agent session lineage |
 | `agent-learning-candidates.json` | User-reviewed learning candidates |
 | `tool-audit.jsonl` | Tool authorization audit log |
 | `memory-records.json` | Local long-term memory |
@@ -200,10 +202,13 @@ The execution core uses a **Plan → Execute → Reflect** three-phase cycle:
 - Exponential backoff retry for LLM API failures (up to 2 retries)
 - Successful runs automatically write episodic memory
 - Streaming event output via IPC
+- Each recoverable run can carry a workspace and sandbox context, so file, shell, trajectory, and resume behavior stay scoped to the same local boundary.
 
 ### 6. Agent Orchestrator
 
 For complex tasks, the Orchestrator decomposes work into multiple sub-tasks using LLM planning, then executes them in parallel or sequentially, synthesizing a unified summary.
+
+Parent/child multi-agent sessions are recorded as lineage metadata on top of the recoverable runtime. Child runs inherit workspace and sandbox context, making multi-agent activity inspectable in the Runs panel instead of becoming a separate opaque execution path.
 
 ### 7. Tool System
 

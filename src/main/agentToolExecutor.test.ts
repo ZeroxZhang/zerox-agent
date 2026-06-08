@@ -1,8 +1,16 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createAgentToolExecutor } from "./agentToolExecutor";
+import { buildPrimaryRunContext } from "../shared/agentWorkspace";
 
 describe("agent tool executor", () => {
   let tempDir: string;
@@ -97,6 +105,31 @@ describe("agent tool executor", () => {
         stdout: "runner",
         stderr: "",
         exitCode: 0,
+      },
+    });
+  });
+
+  it("executes shell commands from the run workspace", async () => {
+    const executor = createAgentToolExecutor();
+    const resolvedTempDir = await realpath(tempDir);
+
+    await expect(
+      executor.execute(
+        {
+          toolName: "shell_exec",
+          args: { command: "pwd" },
+        },
+        {
+          runContext: buildPrimaryRunContext({
+            workspaceId: "workspace_1",
+            workspaceRoot: tempDir,
+          }),
+        },
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      result: {
+        stdout: `${resolvedTempDir}\n`,
       },
     });
   });

@@ -13,6 +13,22 @@ export const demoRuns: AgentRunRecord[] = [
     taskName: "整理下载文件夹",
     skillName: "local-file-organizer",
     status: "succeeded",
+    runContext: {
+      workspaceId: "workspace_demo",
+      workspaceRoot: "/Users/demo/Zerox/workspaces/default",
+      sandbox: {
+        mode: "workspace_write",
+        network: "task_policy",
+        shell: "approved_commands",
+        allowWorkspaceEscape: false,
+        extraReadRoots: [],
+        extraWriteRoots: [],
+      },
+      sessionId: "session_demo",
+      agentRole: "primary",
+      depth: 0,
+    },
+    childRunIds: ["demo_run_3"],
     summary: "已生成 Markdown 报告，并写入一条情景记忆。",
     events: [
       {
@@ -82,6 +98,45 @@ export const demoRuns: AgentRunRecord[] = [
     startedAt: "2026-06-05T07:30:00.000Z",
     finishedAt: "2026-06-05T07:30:03.000Z",
   },
+  {
+    id: "demo_run_3",
+    taskId: "demo_task_1",
+    taskName: "整理下载文件夹 / executor",
+    skillName: "local-file-organizer",
+    status: "succeeded",
+    runContext: {
+      workspaceId: "workspace_demo",
+      workspaceRoot: "/Users/demo/Zerox/workspaces/default",
+      sandbox: {
+        mode: "workspace_write",
+        network: "task_policy",
+        shell: "approved_commands",
+        allowWorkspaceEscape: false,
+        extraReadRoots: [],
+        extraWriteRoots: [],
+      },
+      parentRunId: "demo_run_1",
+      sessionId: "session_demo",
+      agentRole: "executor",
+      depth: 1,
+    },
+    summary: "子运行完成文件读取，并把结果交还给主运行。",
+    events: [
+      {
+        level: "info",
+        message: "子智能体运行开始",
+        createdAt: "2026-06-05T08:00:01.000Z",
+      },
+      {
+        level: "info",
+        message: "子智能体完成工具执行",
+        data: { toolName: "file_read" },
+        createdAt: "2026-06-05T08:00:04.000Z",
+      },
+    ],
+    startedAt: "2026-06-05T08:00:01.000Z",
+    finishedAt: "2026-06-05T08:00:04.000Z",
+  },
 ];
 
 export const demoTasks: ScheduledTask[] = [
@@ -134,8 +189,8 @@ export const demoLearningCandidates: AgentLearningCandidate[] = [
 ];
 
 export const demoAgentEvalReport: AgentEvalReport = {
-  total: 5,
-  passed: 5,
+  total: 7,
+  passed: 7,
   failed: 0,
   passRate: 1,
   toolSuccessRate: 0.8,

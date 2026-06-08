@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  authorizeToolCallWithinRunContext,
   authorizeToolCall,
   createPermissionPolicyFromSkillManifest,
   getDefaultTaskPermissionPolicy,
@@ -7,6 +8,7 @@ import {
   validateTaskPermissionPolicy,
   type TaskPermissionPolicy,
 } from "./toolPermissions";
+import { buildPrimaryRunContext } from "./agentWorkspace";
 import type { SkillManifest } from "./skills";
 
 describe("task permission policy", () => {
@@ -233,6 +235,38 @@ describe("tool authorization", () => {
     ).toMatchObject({
       allowed: false,
       reason: "shell_exec command 包含被阻止的 shell 控制符。",
+    });
+  });
+
+  it("narrows broad file permissions to the active run workspace", () => {
+    const broadPolicy: TaskPermissionPolicy = {
+      files: {
+        read: ["/Users/demo"],
+        write: ["/Users/demo"],
+      },
+      web: { search: true, fetchDomains: ["example.com"] },
+      shell: { commands: ["find {{targetDir}} -maxdepth 1 -type f"] },
+    };
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: "/Users/demo/project",
+    });
+
+    expect(
+      authorizeToolCallWithinRunContext(broadPolicy, {
+        toolName: "file_write",
+        args: { path: "/Users/demo/project/report.md", content: "done" },
+      }, runContext),
+    ).toMatchObject({ allowed: true });
+
+    expect(
+      authorizeToolCallWithinRunContext(broadPolicy, {
+        toolName: "file_write",
+        args: { path: "/Users/demo/Desktop/report.md", content: "done" },
+      }, runContext),
+    ).toEqual({
+      allowed: false,
+      reason: "file_write 被运行沙箱阻止：路径不在工作区或额外可写目录内。",
     });
   });
 });

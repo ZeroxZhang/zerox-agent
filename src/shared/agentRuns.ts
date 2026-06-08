@@ -3,6 +3,7 @@ import type {
   AgentExecutionStatus,
   AgentFailureClass,
 } from "./agentExecution";
+import type { AgentRunContext } from "./agentWorkspace";
 
 export type AgentRunStatus = AgentExecutionStatus;
 
@@ -35,11 +36,13 @@ export type AgentRunRecord = {
   taskName: string;
   skillName: string;
   status: AgentRunStatus;
+  runContext?: AgentRunContext;
   summary: string;
   events: AgentRunEvent[];
   checkpointId?: string;
   checkpointPath?: string;
   artifacts?: AgentExecutionArtifact[];
+  childRunIds?: string[];
   failureClass?: AgentFailureClass;
   failureMessage?: string;
   startedAt: string;

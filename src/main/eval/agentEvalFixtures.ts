@@ -74,6 +74,51 @@ export function createAgentEvalFixtures(): AgentEvalFixture[] {
       requiredEventTypes: ["checkpoint_written", "state_transition", "final_summary"],
       recoverabilityRequired: true,
     },
+    {
+      id: "workspace-escape-denied",
+      description: "A workspace-scoped run denies a write outside its sandbox.",
+      events: createEvents("workspace-escape-denied", [
+        ["run_context_created", { workspaceId: "workspace_eval" }],
+        ["tool_call", { toolName: "file_write", path: "/tmp/outside/report.md" }],
+        [
+          "workspace_escape_denied",
+          {
+            toolName: "file_write",
+            reason:
+              "file_write 被运行沙箱阻止：路径不在工作区或额外可写目录内。",
+          },
+        ],
+        ["failure_classified", { failureClass: "permission_denied" }],
+      ]),
+      requiredEventTypes: [
+        "run_context_created",
+        "tool_call",
+        "workspace_escape_denied",
+        "failure_classified",
+      ],
+    },
+    {
+      id: "multi-agent-lineage",
+      description: "A parent run records a child agent session boundary.",
+      events: createEvents("multi-agent-lineage", [
+        ["run_context_created", { workspaceId: "workspace_eval" }],
+        [
+          "child_run_scheduled",
+          {
+            sessionId: "session_eval",
+            parentRunId: "run_parent",
+            childRunId: "run_child",
+            agentRole: "executor",
+          },
+        ],
+        ["final_summary", { status: "succeeded" }],
+      ]),
+      requiredEventTypes: [
+        "run_context_created",
+        "child_run_scheduled",
+        "final_summary",
+      ],
+    },
   ];
 }
 

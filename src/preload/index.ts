@@ -45,6 +45,11 @@ import type {
 import type { AgentExecutionCheckpoint } from "../shared/agentExecution";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
 import type {
+  AgentWorkspace,
+  AgentWorkspaceCleanup,
+  MultiAgentSession,
+} from "../shared/agentWorkspace";
+import type {
   CreateScheduledTaskResult,
   DeleteScheduledTaskResult,
   ScheduledTask,
@@ -104,6 +109,21 @@ const buildingAgent = {
     ipcRenderer.invoke("agentRuns:list"),
   listActiveAgentExecutions: (): Promise<AgentExecutionCheckpoint[]> =>
     ipcRenderer.invoke("agentRuns:listActiveExecutions"),
+  listAgentWorkspaces: (): Promise<AgentWorkspace[]> =>
+    ipcRenderer.invoke("agentWorkspaces:list"),
+  createTemporaryAgentWorkspace: (input?: {
+    name?: string;
+    cleanup?: AgentWorkspaceCleanup;
+  }): Promise<AgentWorkspace> =>
+    ipcRenderer.invoke("agentWorkspaces:createTemporary", input),
+  createGitWorktreeAgentWorkspace: (input: {
+    name: string;
+    repositoryRoot: string;
+    branch: string;
+  }): Promise<AgentWorkspace> =>
+    ipcRenderer.invoke("agentWorkspaces:createGitWorktree", input),
+  listMultiAgentSessions: (): Promise<MultiAgentSession[]> =>
+    ipcRenderer.invoke("multiAgentSessions:list"),
   listAgentRunTrajectory: (runId: string): Promise<AgentTrajectoryEvent[]> =>
     ipcRenderer.invoke("agentRuns:listTrajectory", runId),
   getAgentEvalReport: (): Promise<AgentEvalReport> =>

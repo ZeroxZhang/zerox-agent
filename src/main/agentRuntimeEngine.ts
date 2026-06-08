@@ -10,6 +10,7 @@ import {
 import type { AgentRunStore } from "./agentRunStore";
 import type { AgentToolExecutor } from "./agentToolExecutor";
 import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
+import type { AgentWorkspaceService } from "./agentWorkspaceService";
 import type { MemoryStore } from "./memoryStore";
 import type {
   ChatClient,
@@ -70,6 +71,7 @@ export function createAgentRuntimeEngine(options: {
   getModelProfile: () => Promise<AgentRuntimeModelProfile>;
   toolAuthorizationService: ToolAuthorizationService;
   toolExecutor: AgentToolExecutor;
+  workspaceService?: Pick<AgentWorkspaceService, "resolveRunContext">;
   trajectoryStore?: AgentTrajectoryStore;
   learningStore?: Pick<AgentLearningStore, "create">;
   memoryStore?: Partial<Pick<MemoryStore, "create" | "search">>;
@@ -109,14 +111,14 @@ export function createAgentRuntimeEngine(options: {
       await appendTrajectory(updated.runId, "state_transition", {
         from: checkpoint.status,
         to: status,
-      });
+      }, undefined, updated.runContext);
     }
     await options.executionStore.save(updated);
     await appendTrajectory(updated.runId, "checkpoint_written", {
       checkpointId: updated.id,
       status: updated.status,
       currentStepId: updated.currentStepId,
-    });
+    }, undefined, updated.runContext);
     return updated;
   }
 
@@ -124,11 +126,12 @@ export function createAgentRuntimeEngine(options: {
     runId: string,
     type: AgentTrajectoryEventType,
     payload: Record<string, unknown>,
-    redaction: AgentTrajectoryEvent["redaction"] = {
+    redaction: AgentTrajectoryEvent["redaction"] | undefined = {
       containsApiKey: false,
       containsFileContent: false,
       containsUserText: false,
     },
+    runContext?: AgentTrajectoryEvent["runContext"],
   ) {
     if (!options.trajectoryStore) return;
 
@@ -138,8 +141,13 @@ export function createAgentRuntimeEngine(options: {
       runId,
       type,
       sequence: trajectorySequence,
+      ...(runContext ? { runContext } : {}),
       payload,
-      redaction,
+      redaction: redaction ?? {
+        containsApiKey: false,
+        containsFileContent: false,
+        containsUserText: false,
+      },
       createdAt: now().toISOString(),
     });
   }
@@ -181,6 +189,7 @@ export function createAgentRuntimeEngine(options: {
       taskName: input.taskName,
       skillName: input.skillName,
       status: input.status,
+      ...(checkpoint.runContext ? { runContext: checkpoint.runContext } : {}),
       summary: input.summary,
       events: input.events,
       checkpointId: checkpoint.id,
@@ -263,7 +272,7 @@ export function createAgentRuntimeEngine(options: {
         containsApiKey: false,
         containsFileContent: false,
         containsUserText: true,
-      });
+      }, current.runContext);
       const response = await options.chatClient.complete({
         ...profile,
         messages,
@@ -280,7 +289,7 @@ export function createAgentRuntimeEngine(options: {
         containsApiKey: false,
         containsFileContent: false,
         containsUserText: Boolean(response.content),
-      });
+      }, current.runContext);
 
       if (!response.toolCalls.length && response.content) {
         current = {
@@ -295,7 +304,7 @@ export function createAgentRuntimeEngine(options: {
           containsApiKey: false,
           containsFileContent: false,
           containsUserText: true,
-        });
+        }, current.runContext);
         return finishRun({
           checkpoint: current,
           taskId: task.id,
@@ -329,17 +338,34 @@ export function createAgentRuntimeEngine(options: {
           containsApiKey: false,
           containsFileContent: false,
           containsUserText: true,
-        });
+        }, current.runContext);
         const auth = await options.toolAuthorizationService.authorize(task.id, {
           toolName,
           args,
+        }, {
+          runContext: current.runContext,
         });
         if (!auth.ok || !auth.decision.allowed) {
           const reason = auth.ok ? auth.decision.reason : auth.message;
+          if (/运行沙箱阻止|workspace/i.test(reason)) {
+            await appendTrajectory(current.runId, "workspace_escape_denied", {
+              toolCallId: toolCall.id,
+              toolName,
+              reason,
+              ...(typeof args.path === "string" ? { path: args.path } : {}),
+            }, {
+              containsApiKey: false,
+              containsFileContent: false,
+              containsUserText: false,
+            }, current.runContext);
+          }
           throw new Error(`工具调用被拒绝：${reason}`);
         }
 
-        const result = await options.toolExecutor.execute({ toolName, args });
+        const result = await options.toolExecutor.execute(
+          { toolName, args },
+          { runContext: current.runContext },
+        );
         toolCallCount += 1;
         await appendTrajectory(current.runId, "tool_result", {
           toolCallId: toolCall.id,
@@ -349,7 +375,7 @@ export function createAgentRuntimeEngine(options: {
           containsApiKey: false,
           containsFileContent: result.ok,
           containsUserText: false,
-        });
+        }, current.runContext);
         messages.push({
           role: "tool",
           tool_call_id: toolCall.id,
@@ -392,6 +418,7 @@ export function createAgentRuntimeEngine(options: {
       const startedAt = now().toISOString();
       const runId = createId();
       const events = [createEvent("info", "Agent runtime started.")];
+      const runContext = await options.workspaceService?.resolveRunContext();
       const proceduralMemoryContext =
         await buildProceduralMemoryPromptContext({
           memoryStore: options.memoryStore,
@@ -411,6 +438,7 @@ export function createAgentRuntimeEngine(options: {
         runId,
         taskId: task.id,
         status: "queued",
+        ...(runContext ? { runContext } : {}),
         currentStepId: step.id,
         steps: [step],
         messages: [
@@ -429,15 +457,25 @@ export function createAgentRuntimeEngine(options: {
       };
 
       await options.executionStore.save(checkpoint);
+      if (runContext) {
+        await appendTrajectory(runId, "run_context_created", {
+          workspaceId: runContext.workspaceId,
+          workspaceRoot: runContext.workspaceRoot,
+          agentRole: runContext.agentRole,
+          depth: runContext.depth,
+          ...(runContext.parentRunId ? { parentRunId: runContext.parentRunId } : {}),
+          ...(runContext.sessionId ? { sessionId: runContext.sessionId } : {}),
+        }, undefined, runContext);
+      }
       await appendTrajectory(runId, "state_transition", {
         from: null,
         to: "queued",
-      });
+      }, undefined, runContext);
       await appendTrajectory(runId, "checkpoint_written", {
         checkpointId: checkpoint.id,
         status: checkpoint.status,
         currentStepId: checkpoint.currentStepId,
-      });
+      }, undefined, runContext);
 
       try {
         return await runFromCheckpoint(

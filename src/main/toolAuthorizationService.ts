@@ -3,17 +3,23 @@ import os from "node:os";
 import type { ScheduledTaskStore } from "./taskStore";
 import type { ToolAuditLog } from "./toolAuditLog";
 import {
-  authorizeToolCall,
+  authorizeToolCallWithinRunContext,
   type AuthorizeTaskToolCallResult,
   type TaskPermissionPolicy,
   type ToolCallRequest,
 } from "../shared/toolPermissions";
+import type { AgentRunContext } from "../shared/agentWorkspace";
 
 export type ToolAuthorizationService = {
   authorize(
     taskId: string,
     request: ToolCallRequest,
+    options?: ToolAuthorizationOptions,
   ): Promise<AuthorizeTaskToolCallResult>;
+};
+
+export type ToolAuthorizationOptions = {
+  runContext?: AgentRunContext;
 };
 
 export type ToolUserApprovalRequest = {
@@ -39,7 +45,7 @@ export function createToolAuthorizationService(options: {
   const homeDir = options.homeDir ?? os.homedir();
 
   return {
-    async authorize(taskId, request) {
+    async authorize(taskId, request, authorizeOptions) {
       const task = await options.taskStore.get(taskId);
 
       if (!task) {
@@ -49,9 +55,10 @@ export function createToolAuthorizationService(options: {
         };
       }
 
-      let decision = authorizeToolCall(
+      let decision = authorizeToolCallWithinRunContext(
         expandHomePermissionPolicy(task.permissions, homeDir),
         request,
+        authorizeOptions?.runContext,
       );
       if (
         !decision.allowed &&
@@ -95,6 +102,10 @@ export function createToolAuthorizationService(options: {
 }
 
 function shouldRequestUserApproval(reason: string): boolean {
+  if (/运行沙箱阻止/.test(reason)) {
+    return false;
+  }
+
   return !/缺少|必填|必须是有效/i.test(reason);
 }
 
