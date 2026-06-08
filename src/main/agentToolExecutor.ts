@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { createWebTools, type WebTools } from "./webTools";
 import { createDynamicToolRegistry, type DynamicToolRegistry } from "./dynamicToolRegistry";
+import type { AgentRunContext } from "../shared/agentWorkspace";
 import type { ToolCallRequest } from "../shared/toolPermissions";
 
 const execAsync = promisify(exec);
@@ -13,8 +14,15 @@ export type AgentToolExecutionResult =
   | { ok: true; result: Record<string, unknown> }
   | { ok: false; error: string };
 
+export type AgentToolExecutionOptions = {
+  runContext?: AgentRunContext;
+};
+
 export type AgentToolExecutor = {
-  execute(request: ToolCallRequest): Promise<AgentToolExecutionResult>;
+  execute(
+    request: ToolCallRequest,
+    options?: AgentToolExecutionOptions,
+  ): Promise<AgentToolExecutionResult>;
   getRegistry(): DynamicToolRegistry;
   hasTool(toolName: string): boolean;
 };
@@ -30,7 +38,14 @@ export function createAgentToolExecutor(options?: {
   registerBuiltinTools(registry, webTools);
 
   return {
-    async execute(request) {
+    async execute(request, executionOptions) {
+      if (request.toolName === "shell_exec") {
+        return executeShellCommand(
+          String(request.args.command ?? ""),
+          executionOptions?.runContext,
+        );
+      }
+
       return registry.execute(request.toolName, request.args);
     },
 
@@ -235,6 +250,7 @@ async function writeLocalFile(
 
 async function executeShellCommand(
   command: string,
+  runContext?: AgentRunContext,
 ): Promise<AgentToolExecutionResult> {
   if (!command) {
     return { ok: false, error: "shell_exec requires a command." };
@@ -245,6 +261,7 @@ async function executeShellCommand(
       timeout: 30_000,
       maxBuffer: 1024 * 1024,
       shell: "/bin/zsh",
+      ...(runContext ? { cwd: runContext.workspaceRoot } : {}),
     });
 
     return {

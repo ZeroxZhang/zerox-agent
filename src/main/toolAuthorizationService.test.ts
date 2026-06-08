@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createScheduledTaskStore } from "./taskStore";
 import { createToolAuditLog } from "./toolAuditLog";
 import { createToolAuthorizationService } from "./toolAuthorizationService";
+import { buildPrimaryRunContext } from "../shared/agentWorkspace";
 
 describe("tool authorization service", () => {
   let configDir: string;
@@ -223,6 +224,59 @@ describe("tool authorization service", () => {
       decision: {
         allowed: false,
         reason: "文件工具调用缺少 path。",
+      },
+    });
+    expect(approvalCount).toBe(0);
+  });
+
+  it("does not ask for approval when the run sandbox blocks workspace escape", async () => {
+    let approvalCount = 0;
+    const taskStore = createScheduledTaskStore({
+      configDir,
+      createId: () => "task_workspace",
+    });
+    const auditLog = createToolAuditLog({ configDir });
+    const service = createToolAuthorizationService({
+      taskStore,
+      auditLog,
+      requestUserApproval: async () => {
+        approvalCount += 1;
+        return { approved: true };
+      },
+    });
+    await taskStore.create({
+      name: "Broad write",
+      skillName: "local-file-organizer",
+      enabled: true,
+      schedule: { kind: "manual" },
+      input: {},
+      permissions: {
+        files: { read: ["/Users/demo"], write: ["/Users/demo"] },
+        web: { search: false, fetchDomains: [] },
+        shell: { commands: [] },
+      },
+    });
+
+    await expect(
+      service.authorize(
+        "task_workspace",
+        {
+          toolName: "file_write",
+          args: { path: "/Users/demo/Desktop/report.md", content: "done" },
+        },
+        {
+          runContext: buildPrimaryRunContext({
+            workspaceId: "workspace_1",
+            workspaceRoot: "/Users/demo/project",
+          }),
+        },
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      decision: {
+        allowed: false,
+        reason:
+          "file_write 被运行沙箱阻止：路径不在工作区或额外可写目录内。",
       },
     });
     expect(approvalCount).toBe(0);

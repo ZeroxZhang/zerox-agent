@@ -1,3 +1,5 @@
+import type { AgentRunContext } from "./agentWorkspace";
+import { isPathInsideRunContext } from "./agentWorkspace";
 import type { SkillManifest } from "./skills";
 
 export type AgentToolName =
@@ -185,6 +187,38 @@ export function authorizeToolCall(
   }
 }
 
+export function authorizeToolCallWithinRunContext(
+  policy: TaskPermissionPolicy,
+  request: ToolCallRequest,
+  runContext?: AgentRunContext,
+): ToolAuthorizationDecision {
+  const taskDecision = authorizeToolCall(policy, request);
+  if (!taskDecision.allowed || !runContext) {
+    return taskDecision;
+  }
+
+  if (runContext.sandbox.network === "none" && request.toolName.startsWith("web_")) {
+    return deny(`${request.toolName} 被运行沙箱阻止：网络访问已禁用。`);
+  }
+
+  if (request.toolName === "file_write" && runContext.sandbox.mode === "read_only") {
+    return deny("file_write 被运行沙箱阻止：当前运行是只读沙箱。");
+  }
+
+  if (!runContext.sandbox.allowWorkspaceEscape) {
+    const fileDecision = authorizeWorkspaceFileRequest(request, runContext);
+    if (fileDecision) {
+      return fileDecision;
+    }
+  }
+
+  if (request.toolName === "shell_exec" && runContext.sandbox.shell === "disabled") {
+    return deny("shell_exec 被运行沙箱阻止：命令执行已禁用。");
+  }
+
+  return taskDecision;
+}
+
 function authorizeFilePath(
   requestedPath: string,
   approvedDirectories: string[],
@@ -200,6 +234,29 @@ function authorizeFilePath(
   );
 
   return allowed ? allow("文件路径位于已授权目录内。") : deny(deniedReason);
+}
+
+function authorizeWorkspaceFileRequest(
+  request: ToolCallRequest,
+  runContext: AgentRunContext,
+): ToolAuthorizationDecision | null {
+  if (request.toolName !== "file_list" && request.toolName !== "file_read" && request.toolName !== "file_write") {
+    return null;
+  }
+
+  const access = request.toolName === "file_write" ? "write" : "read";
+  const requestedPath = String(request.args.path ?? "");
+  if (!requestedPath) {
+    return null;
+  }
+
+  if (isPathInsideRunContext(requestedPath, runContext, access)) {
+    return null;
+  }
+
+  return deny(
+    `${request.toolName} 被运行沙箱阻止：路径不在工作区或额外可${access === "read" ? "读" : "写"}目录内。`,
+  );
 }
 
 function authorizeWebFetch(
