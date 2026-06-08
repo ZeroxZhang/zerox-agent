@@ -513,6 +513,21 @@ npm run pack:mac      # Generate .app → release/mac/
 npm run dist:mac      # Generate .dmg + .zip → release/
 ```
 
+Current local builds are unsigned and not notarized. After downloading a `.dmg`
+from GitHub Releases, macOS Gatekeeper may show "Zerox Agent is damaged and
+can't be opened." The image is usually valid; remove the quarantine attribute
+before opening:
+
+```bash
+xattr -dr com.apple.quarantine ~/Downloads/Zerox\ Agent-1.2.2-arm64.dmg
+```
+
+If you already dragged the app into Applications, run:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Zerox Agent.app"
+```
+
 For public distribution, Apple signing, notarization, auto-update, and crash reporting need to be added.
 
 ---
@@ -1129,6 +1144,20 @@ npm run pack:mac      # 生成 .app 到 release/mac/
 
 ```bash
 npm run dist:mac      # 生成 .dmg + .zip 到 release/
+```
+
+当前本地构建产物未签名、未公证。从 GitHub Releases 下载 `.dmg` 后，macOS
+Gatekeeper 可能提示「Zerox Agent 已损坏，无法打开」。这通常不是文件损坏，
+而是下载隔离属性导致的拦截。打开前在终端执行：
+
+```bash
+xattr -dr com.apple.quarantine ~/Downloads/Zerox\ Agent-1.2.2-arm64.dmg
+```
+
+如果已经把应用拖进 Applications，则执行：
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Zerox Agent.app"
 ```
 
 如需公开分发，后续需要补充 Apple 签名、公证、自动更新和崩溃报告。
