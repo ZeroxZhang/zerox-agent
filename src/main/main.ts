@@ -27,6 +27,24 @@ import {
   createAgentLearningService,
   type AgentLearningService,
 } from "./agentLearningService";
+import {
+  createAgentWorkspaceStore,
+  type AgentWorkspaceStore,
+} from "./agentWorkspaceStore";
+import {
+  createAgentWorkspaceService,
+  type AgentWorkspaceService,
+  type CreateGitWorktreeWorkspaceInput,
+  type CreateTemporaryWorkspaceInput,
+} from "./agentWorkspaceService";
+import {
+  createMultiAgentSessionStore,
+  type MultiAgentSessionStore,
+} from "./multiAgentSessionStore";
+import {
+  createMultiAgentCoordinator,
+  type MultiAgentCoordinator,
+} from "./multiAgentCoordinator";
 import { createAgentEvalFixtures } from "./eval/agentEvalFixtures";
 import { runAgentEvals } from "./eval/agentEvalRunner";
 import {
@@ -131,6 +149,7 @@ import type { AgentLearningListOptions } from "../shared/agentLearning";
 import type { ToolCallRequest } from "../shared/toolPermissions";
 import type { AgentEvalReport } from "../shared/agentEval";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
+import type { AgentWorkspace, MultiAgentSession } from "../shared/agentWorkspace";
 import type {
   ChatSessionListItem,
   ChatSessionRecord,
@@ -173,6 +192,10 @@ let agentTrajectoryStore: AgentTrajectoryStore | null = null;
 let agentRunStore: AgentRunStore | null = null;
 let agentLearningStore: AgentLearningStore | null = null;
 let agentLearningService: AgentLearningService | null = null;
+let agentWorkspaceStore: AgentWorkspaceStore | null = null;
+let agentWorkspaceService: AgentWorkspaceService | null = null;
+let multiAgentSessionStore: MultiAgentSessionStore | null = null;
+let multiAgentCoordinator: MultiAgentCoordinator | null = null;
 let agentRunnerService: AgentRunnerService | null = null;
 let chatService: ChatService | null = null;
 let chatSessionStore: ChatSessionStore | null = null;
@@ -506,6 +529,22 @@ ipcMain.handle("toolAudit:list", () => getToolAuditLog().list({ limit: 50 }));
 ipcMain.handle("agentRuns:list", () => getAgentRunStore().list({ limit: 50 }));
 ipcMain.handle("agentRuns:listActiveExecutions", () =>
   getAgentExecutionStore().listActive(),
+);
+ipcMain.handle("agentWorkspaces:list", (): Promise<AgentWorkspace[]> =>
+  getAgentWorkspaceService().listWorkspaces(),
+);
+ipcMain.handle(
+  "agentWorkspaces:createTemporary",
+  (_event, input?: CreateTemporaryWorkspaceInput): Promise<AgentWorkspace> =>
+    getAgentWorkspaceService().createTemporaryWorkspace(input),
+);
+ipcMain.handle(
+  "agentWorkspaces:createGitWorktree",
+  (_event, input: CreateGitWorktreeWorkspaceInput): Promise<AgentWorkspace> =>
+    getAgentWorkspaceService().createGitWorktreeWorkspace(input),
+);
+ipcMain.handle("multiAgentSessions:list", (): Promise<MultiAgentSession[]> =>
+  getMultiAgentSessionStore().list(),
 );
 ipcMain.handle(
   "agentRuns:listTrajectory",
@@ -860,6 +899,48 @@ function getAgentTrajectoryStore(): AgentTrajectoryStore {
   return agentTrajectoryStore;
 }
 
+function getAgentWorkspaceStore(): AgentWorkspaceStore {
+  if (!agentWorkspaceStore) {
+    agentWorkspaceStore = createAgentWorkspaceStore({
+      configDir: path.join(app.getPath("userData"), "config"),
+    });
+  }
+
+  return agentWorkspaceStore;
+}
+
+function getAgentWorkspaceService(): AgentWorkspaceService {
+  if (!agentWorkspaceService) {
+    agentWorkspaceService = createAgentWorkspaceService({
+      workspaceStore: getAgentWorkspaceStore(),
+      workspaceRoot: path.join(app.getPath("userData"), "workspaces"),
+    });
+  }
+
+  return agentWorkspaceService;
+}
+
+function getMultiAgentSessionStore(): MultiAgentSessionStore {
+  if (!multiAgentSessionStore) {
+    multiAgentSessionStore = createMultiAgentSessionStore({
+      configDir: path.join(app.getPath("userData"), "config"),
+    });
+  }
+
+  return multiAgentSessionStore;
+}
+
+function getMultiAgentCoordinator(): MultiAgentCoordinator {
+  if (!multiAgentCoordinator) {
+    multiAgentCoordinator = createMultiAgentCoordinator({
+      sessionStore: getMultiAgentSessionStore(),
+      trajectoryStore: getAgentTrajectoryStore(),
+    });
+  }
+
+  return multiAgentCoordinator;
+}
+
 function getMemoryStore(): MemoryStore {
   if (!memoryStore) {
     memoryStore = createMemoryStore({
@@ -952,6 +1033,7 @@ function getAgentRunnerService(): AgentRunnerService {
       toolAuthorizationService: getToolAuthorizationService(),
       toolExecutor,
       executionStore: getAgentExecutionStore(),
+      workspaceService: getAgentWorkspaceService(),
       trajectoryStore: getAgentTrajectoryStore(),
       learningStore: getAgentLearningStore(),
       memoryStore: getMemoryStore(),

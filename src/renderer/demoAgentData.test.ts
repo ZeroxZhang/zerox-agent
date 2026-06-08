@@ -38,4 +38,24 @@ describe("demo agent data", () => {
       },
     });
   });
+
+  it("includes workspace context and child lineage in demo runs", () => {
+    expect(demoRuns[0]).toMatchObject({
+      runContext: {
+        workspaceId: "workspace_demo",
+        workspaceRoot: "/Users/demo/Zerox/workspaces/default",
+        agentRole: "primary",
+        depth: 0,
+      },
+      childRunIds: ["demo_run_3"],
+    });
+    expect(demoRuns.find((run) => run.id === "demo_run_3")).toMatchObject({
+      runContext: {
+        parentRunId: "demo_run_1",
+        sessionId: "session_demo",
+        agentRole: "executor",
+        depth: 1,
+      },
+    });
+  });
 });

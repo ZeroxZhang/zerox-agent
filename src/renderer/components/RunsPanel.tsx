@@ -236,6 +236,12 @@ export function RunsPanel() {
                       ? `步骤 ${execution.currentStepId}`
                       : "等待恢复"}
                   </small>
+                  {execution.runContext ? (
+                    <small>
+                      {formatAgentRole(execution.runContext.agentRole)} /{" "}
+                      {formatWorkspaceLabel(execution.runContext.workspaceRoot)}
+                    </small>
+                  ) : null}
                   <div className="run-list-actions">
                     {execution.status === "paused" ? (
                       <button
@@ -274,7 +280,13 @@ export function RunsPanel() {
               >
                 <span>{translateRunStatus(run.status)}</span>
                 <strong>{run.taskName}</strong>
-                <small>{formatDate(run.finishedAt)}</small>
+                <small>
+                  {run.runContext
+                    ? `${formatAgentRole(run.runContext.agentRole)} / ${formatWorkspaceLabel(
+                        run.runContext.workspaceRoot,
+                      )}`
+                    : formatDate(run.finishedAt)}
+                </small>
               </button>
             ))
           ) : (
@@ -432,6 +444,40 @@ function RunInspector(props: {
               <dt>完成时间</dt>
               <dd>{formatDate(props.run.finishedAt)}</dd>
             </div>
+            {props.run.runContext ? (
+              <>
+                <div>
+                  <dt>角色</dt>
+                  <dd>{formatAgentRole(props.run.runContext.agentRole)}</dd>
+                </div>
+                <div>
+                  <dt>工作区</dt>
+                  <dd>{props.run.runContext.workspaceRoot}</dd>
+                </div>
+                <div>
+                  <dt>沙箱</dt>
+                  <dd>{formatSandboxSummary(props.run.runContext.sandbox)}</dd>
+                </div>
+                {props.run.runContext.sessionId ? (
+                  <div>
+                    <dt>会话</dt>
+                    <dd>{props.run.runContext.sessionId}</dd>
+                  </div>
+                ) : null}
+                {props.run.runContext.parentRunId ? (
+                  <div>
+                    <dt>父运行</dt>
+                    <dd>{props.run.runContext.parentRunId}</dd>
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+            {props.run.childRunIds?.length ? (
+              <div>
+                <dt>子运行</dt>
+                <dd>{props.run.childRunIds.join(", ")}</dd>
+              </div>
+            ) : null}
           </dl>
         </div>
       ) : null}
@@ -454,6 +500,45 @@ function formatTime(value: string): string {
     minute: "2-digit",
     second: "2-digit",
   }).format(new Date(value));
+}
+
+function formatWorkspaceLabel(workspaceRoot: string): string {
+  return workspaceRoot.split(/[\\/]/).filter(Boolean).at(-1) ?? workspaceRoot;
+}
+
+function formatAgentRole(role: NonNullable<AgentRunRecord["runContext"]>["agentRole"]): string {
+  const labels: Record<
+    NonNullable<AgentRunRecord["runContext"]>["agentRole"],
+    string
+  > = {
+    primary: "主运行",
+    planner: "规划",
+    executor: "执行",
+    reviewer: "审查",
+    critic: "批评",
+  };
+
+  return labels[role];
+}
+
+function formatSandboxSummary(
+  sandbox: NonNullable<AgentRunRecord["runContext"]>["sandbox"],
+): string {
+  const mode = sandbox.mode === "read_only" ? "只读" : "工作区写入";
+  const network =
+    sandbox.network === "none"
+      ? "无网络"
+      : sandbox.network === "approved_domains"
+        ? "限定域名"
+        : "任务策略";
+  const shell =
+    sandbox.shell === "disabled"
+      ? "无命令"
+      : sandbox.shell === "workspace_only"
+        ? "工作区命令"
+        : "授权命令";
+
+  return `${mode} / ${network} / ${shell}`;
 }
 
 function translateRunStatus(status: AgentRunRecord["status"]): string {
