@@ -56,6 +56,12 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(appSource).toContain("topbar");
   });
 
+  it("renders the sidebar version from runtime metadata instead of a hardcoded value", () => {
+    expect(appSource).not.toContain("v1.0.0");
+    expect(appSource).toContain("getRuntimeInfo");
+    expect(appSource).toContain("appVersion");
+  });
+
   it("provides reusable component classes for all screens", () => {
     // Buttons
     expect(styles).toContain(".primary-action");

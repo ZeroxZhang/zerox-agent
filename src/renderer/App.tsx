@@ -22,6 +22,7 @@ import {
 
 const fallbackMeta = getAppMeta();
 const fallbackSections = getNavigationSections();
+const fallbackAppVersion = "preview";
 
 function getSectionFromHash(): NavigationSectionId {
   return getNavigationSection(window.location.hash.replace(/^#/, "")).id;
@@ -36,6 +37,7 @@ export function App() {
     window.buildingAgent ? "desktop" : "preview",
   );
   const [meta, setMeta] = useState<AppMeta>(fallbackMeta);
+  const [appVersion, setAppVersion] = useState(fallbackAppVersion);
   const [sections, setSections] = useState<NavigationSection[]>(fallbackSections);
   const [activeSectionId, setActiveSectionId] = useState<NavigationSectionId>(
     () => getStartupSectionId(),
@@ -52,6 +54,11 @@ export function App() {
   useEffect(() => {
     window.buildingAgent?.getAppMeta().then(setMeta).catch(() => {
       setMeta(fallbackMeta);
+    });
+    window.buildingAgent?.getRuntimeInfo().then((runtimeInfo) => {
+      setAppVersion(runtimeInfo.version);
+    }).catch(() => {
+      setAppVersion(fallbackAppVersion);
     });
     window.buildingAgent
       ?.listNavigationSections()
@@ -121,7 +128,7 @@ export function App() {
           })}
         </nav>
         <div className="nav-footer">
-          <span>v1.0.0</span>
+          <span>v{appVersion}</span>
           <small>by Zerox</small>
         </div>
       </aside>

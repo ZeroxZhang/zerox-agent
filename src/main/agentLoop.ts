@@ -78,6 +78,44 @@ export async function runAgentLoop(
   let status: AgentLoopResult["status"] = "failed";
   let turns = 0;
   let toolCallsExecuted = 0;
+  let lastExecutedToolSignature: string | null = null;
+
+  async function finalizeWithoutTools(options: {
+    prompt: string;
+    summaryPrefix: string;
+    fallbackSummary: string;
+  }) {
+    onTurn?.(turns, "finalizing");
+    messages.push({
+      role: "system",
+      content: options.prompt,
+    });
+
+    try {
+      const response = await chatClient.complete({
+        ...modelProfile,
+        messages,
+        ...(signal ? { signal } : {}),
+      });
+
+      if (response.content) {
+        summary = `${options.summaryPrefix}\n\n${response.content}`;
+        status = "succeeded";
+        messages.push({
+          role: "assistant",
+          content: response.content,
+        });
+      } else {
+        summary = options.fallbackSummary;
+        status = "failed";
+      }
+    } catch (error) {
+      summary = `${options.fallbackSummary}${
+        error instanceof Error ? ` 总结生成失败：${error.message}` : ""
+      }`;
+      status = "failed";
+    }
+  }
 
   try {
     for (; turns < maxTurns; turns += 1) {
@@ -106,6 +144,48 @@ export async function runAgentLoop(
 
       // Tool calls present
       if (response.toolCalls.length > 0) {
+        const preparedToolCalls = response.toolCalls.map((toolCall) => {
+          let args: Record<string, unknown> | null = null;
+          try {
+            args = JSON.parse(
+              toolCall.function.arguments,
+            ) as Record<string, unknown>;
+          } catch {
+            // Keep the existing parse-error path below.
+          }
+
+          return {
+            toolCall,
+            toolName: toolCall.function.name,
+            args,
+            signature: args
+              ? createToolCallSignature(toolCall.function.name, args)
+              : null,
+          };
+        });
+        const repeatedToolCall =
+          preparedToolCalls.length === 1 &&
+          preparedToolCalls[0]?.signature &&
+          preparedToolCalls[0].signature === lastExecutedToolSignature
+            ? preparedToolCalls[0]
+            : null;
+
+        if (repeatedToolCall?.args) {
+          await finalizeWithoutTools({
+            prompt: buildRepeatedToolCallFinalizationPrompt(
+              repeatedToolCall.toolName,
+              repeatedToolCall.args,
+              toolCallsExecuted,
+            ),
+            summaryPrefix: "检测到模型重复请求相同工具，我先基于已有结果给出阶段性总结：",
+            fallbackSummary: buildRepeatedToolCallFallbackSummary(
+              repeatedToolCall.toolName,
+              toolCallsExecuted,
+            ),
+          });
+          break;
+        }
+
         // Add assistant message with tool calls
         messages.push({
           role: "assistant",
@@ -114,13 +194,9 @@ export async function runAgentLoop(
         });
 
         // Process each tool call
-        for (const toolCall of response.toolCalls) {
-          let args: Record<string, unknown> = {};
-          try {
-            args = JSON.parse(
-              toolCall.function.arguments,
-            ) as Record<string, unknown>;
-          } catch {
+        for (const preparedToolCall of preparedToolCalls) {
+          const { toolCall, toolName, signature } = preparedToolCall;
+          if (!preparedToolCall.args) {
             messages.push({
               role: "tool",
               tool_call_id: toolCall.id,
@@ -134,7 +210,7 @@ export async function runAgentLoop(
             continue;
           }
 
-          const toolName = toolCall.function.name;
+          const args = preparedToolCall.args;
 
           // Authorization check (if authorizer is available)
           if (toolAuthorizationService && taskId) {
@@ -170,6 +246,7 @@ export async function runAgentLoop(
           });
 
           toolCallsExecuted += 1;
+          lastExecutedToolSignature = signature;
           onToolResult?.(toolName, result.ok);
 
           messages.push({
@@ -195,36 +272,11 @@ export async function runAgentLoop(
     }
 
     if (!summary && turns >= maxTurns) {
-      onTurn?.(turns, "finalizing");
-      messages.push({
-        role: "system",
-        content: buildTurnLimitFinalizationPrompt(maxTurns, toolCallsExecuted),
+      await finalizeWithoutTools({
+        prompt: buildTurnLimitFinalizationPrompt(maxTurns, toolCallsExecuted),
+        summaryPrefix: "已达到工具调用轮次上限，我先基于已有结果给出阶段性总结：",
+        fallbackSummary: buildTurnLimitFallbackSummary(maxTurns, toolCallsExecuted),
       });
-
-      try {
-        const response = await chatClient.complete({
-          ...modelProfile,
-          messages,
-          ...(signal ? { signal } : {}),
-        });
-
-        if (response.content) {
-          summary = `已达到工具调用轮次上限，我先基于已有结果给出阶段性总结：\n\n${response.content}`;
-          status = "succeeded";
-          messages.push({
-            role: "assistant",
-            content: response.content,
-          });
-        } else {
-          summary = buildTurnLimitFallbackSummary(maxTurns, toolCallsExecuted);
-          status = "failed";
-        }
-      } catch (error) {
-        summary = `${buildTurnLimitFallbackSummary(maxTurns, toolCallsExecuted)}${
-          error instanceof Error ? ` 总结生成失败：${error.message}` : ""
-        }`;
-        status = "failed";
-      }
     }
   } catch (error) {
     if (signal?.aborted) {
@@ -262,4 +314,47 @@ function buildTurnLimitFallbackSummary(
   toolCallsExecuted: number,
 ): string {
   return `已达到工具调用轮次上限（${maxTurns} 轮，已执行 ${toolCallsExecuted} 个工具）。请把任务拆小一点，或补充更明确的目标后重试。`;
+}
+
+function buildRepeatedToolCallFinalizationPrompt(
+  toolName: string,
+  args: Record<string, unknown>,
+  toolCallsExecuted: number,
+): string {
+  return [
+    `检测到模型重复请求相同工具（${toolName}，参数：${stableStringify(args)}）。`,
+    `此前已执行 ${toolCallsExecuted} 个工具。`,
+    "现在不要再调用工具。",
+    "请只基于当前对话和已有工具结果，用中文给用户一个简洁的阶段性总结。",
+    "如果需要继续，请说明应该换什么目标、路径或查询条件。",
+  ].join("\n");
+}
+
+function buildRepeatedToolCallFallbackSummary(
+  toolName: string,
+  toolCallsExecuted: number,
+): string {
+  return `检测到模型重复请求相同工具（${toolName}），已停止继续执行以避免循环。已执行 ${toolCallsExecuted} 个工具，请缩小任务范围或换一个明确目标后重试。`;
+}
+
+function createToolCallSignature(
+  toolName: string,
+  args: Record<string, unknown>,
+): string {
+  return `${toolName}:${stableStringify(args)}`;
+}
+
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(",")}]`;
+  }
+
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${stableStringify(entry)}`)
+      .join(",")}}`;
+  }
+
+  return JSON.stringify(value) ?? "undefined";
 }

@@ -32,13 +32,63 @@ const testTools: ToolDefinition[] = [
 ];
 
 describe("agent loop", () => {
-  it("asks the model for a final no-tool summary when tool turns reach the limit", async () => {
+  it("finalizes instead of executing a repeated identical tool call", async () => {
     const requests: ChatCompletionRequest[] = [];
     const chatClient: ChatClient = {
       async complete(request) {
         requests.push(request);
         if (requests.length <= 2) {
           return toolCallResponse(`tool_call_${requests.length}`);
+        }
+
+        expect(request.tools).toBeUndefined();
+        expect(request.messages.at(-1)).toMatchObject({
+          role: "system",
+          content: expect.stringContaining("检测到模型重复请求相同工具"),
+        });
+        return {
+          content: "我已经基于第一次目录结果完成总结。",
+          toolCalls: [],
+          finishReason: "stop",
+        };
+      },
+    };
+    let executions = 0;
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "检查这个目录并告诉我结果" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(() => {
+          executions += 1;
+        }),
+        maxTurns: 6,
+        tools: testTools,
+      },
+    );
+
+    expect(requests).toHaveLength(3);
+    expect(executions).toBe(1);
+    expect(result).toMatchObject({
+      status: "succeeded",
+      summary:
+        "检测到模型重复请求相同工具，我先基于已有结果给出阶段性总结：\n\n我已经基于第一次目录结果完成总结。",
+      turns: 1,
+      toolCallsExecuted: 1,
+    });
+  });
+
+  it("asks the model for a final no-tool summary when tool turns reach the limit", async () => {
+    const requests: ChatCompletionRequest[] = [];
+    const chatClient: ChatClient = {
+      async complete(request) {
+        requests.push(request);
+        if (requests.length <= 2) {
+          return toolCallResponse(
+            `tool_call_${requests.length}`,
+            `/tmp/path_${requests.length}`,
+          );
         }
 
         expect(request.tools).toBeUndefined();
@@ -76,7 +126,7 @@ describe("agent loop", () => {
   });
 });
 
-function toolCallResponse(id: string): ChatCompletionResponse {
+function toolCallResponse(id: string, path = "/tmp"): ChatCompletionResponse {
   return {
     content: null,
     finishReason: "tool_calls",
@@ -86,16 +136,17 @@ function toolCallResponse(id: string): ChatCompletionResponse {
         type: "function",
         function: {
           name: "file_list",
-          arguments: JSON.stringify({ path: "/tmp" }),
+          arguments: JSON.stringify({ path }),
         },
       },
     ],
   };
 }
 
-function createToolExecutor(): AgentToolExecutor {
+function createToolExecutor(onExecute?: () => void): AgentToolExecutor {
   return {
     async execute() {
+      onExecute?.();
       return {
         ok: true,
         result: { files: ["a.txt", "b.txt"] },
