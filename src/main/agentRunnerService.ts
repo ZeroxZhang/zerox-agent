@@ -4,6 +4,7 @@ import type { AgentLearningStore } from "./agentLearningStore";
 import type { AgentRunStore } from "./agentRunStore";
 import type { AgentToolExecutor } from "./agentToolExecutor";
 import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
+import type { AgentWorkspaceService } from "./agentWorkspaceService";
 import { createAgentRuntimeEngine } from "./agentRuntimeEngine";
 import { createContextManager, type ContextManager } from "./contextManager";
 import type { MemoryStore } from "./memoryStore";
@@ -70,6 +71,7 @@ export function createAgentRunnerService(options: {
   toolAuthorizationService: ToolAuthorizationService;
   toolExecutor: AgentToolExecutor;
   executionStore?: AgentExecutionStore;
+  workspaceService?: Pick<AgentWorkspaceService, "resolveRunContext">;
   trajectoryStore?: AgentTrajectoryStore;
   learningStore?: Pick<AgentLearningStore, "create">;
   memoryStore?: Partial<Pick<MemoryStore, "create" | "search">>;
@@ -92,6 +94,7 @@ export function createAgentRunnerService(options: {
         getModelProfile: options.getModelProfile,
         toolAuthorizationService: options.toolAuthorizationService,
         toolExecutor: options.toolExecutor,
+        ...(options.workspaceService ? { workspaceService: options.workspaceService } : {}),
         ...(options.trajectoryStore ? { trajectoryStore: options.trajectoryStore } : {}),
         ...(options.learningStore ? { learningStore: options.learningStore } : {}),
         ...(options.memoryStore ? { memoryStore: options.memoryStore } : {}),

@@ -9,6 +9,10 @@ import type { ChatClient, ChatCompletionResponse } from "./openAiCompatibleClien
 import type { ScheduledTaskStore } from "./taskStore";
 import type { ToolAuthorizationService } from "./toolAuthorizationService";
 import type { AgentExecutionCheckpoint } from "../shared/agentExecution";
+import {
+  buildPrimaryRunContext,
+  type AgentRunContext,
+} from "../shared/agentWorkspace";
 import type {
   AgentLearningCandidate,
   AgentLearningCandidateInput,
@@ -256,6 +260,166 @@ describe("agent runtime engine", () => {
     expect(capturedMessages[0]).toContain("相关流程记忆");
     expect(capturedMessages[0]).toContain("先使用 file_list 了解目录，再读取候选文件。");
   });
+
+  it("stores run context in checkpoints, run records, and trajectory events", async () => {
+    const savedCheckpoints: AgentExecutionCheckpoint[] = [];
+    const trajectoryEvents: AgentTrajectoryEvent[] = [];
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: "/tmp/zerox/workspace",
+    });
+    const runStore = createMemoryRunStore();
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore,
+      executionStore: createMemoryExecutionStore(savedCheckpoints),
+      trajectoryStore: createMemoryTrajectoryStore(trajectoryEvents),
+      workspaceService: createWorkspaceService(runContext),
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: createChatClient([finalResponse("Report complete")]),
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor([]),
+      createId: createSequentialId("context"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+
+    const result = await engine.startTask("task_123");
+
+    expect(result).toMatchObject({
+      ok: true,
+      run: {
+        runContext,
+      },
+    });
+    expect(savedCheckpoints.every((checkpoint) => checkpoint.runContext)).toBe(
+      true,
+    );
+    expect(trajectoryEvents[0]).toMatchObject({
+      type: "run_context_created",
+      runContext,
+      payload: {
+        workspaceId: "workspace_1",
+        workspaceRoot: "/tmp/zerox/workspace",
+        agentRole: "primary",
+      },
+    });
+  });
+
+  it("passes run context to authorization and tool execution", async () => {
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: "/tmp/zerox/workspace",
+    });
+    const authorizationContexts: Array<AgentRunContext | undefined> = [];
+    const toolContexts: Array<AgentRunContext | undefined> = [];
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore([]),
+      workspaceService: createWorkspaceService(runContext),
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: createChatClient([
+        toolCallResponse("file_read", { path: "/tmp/zerox/workspace/notes.md" }),
+        finalResponse("Report complete"),
+      ]),
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: {
+        async authorize(_taskId, _request, options) {
+          authorizationContexts.push(options?.runContext);
+          return createAuthorizationService(true).authorize(_taskId, _request);
+        },
+      },
+      toolExecutor: {
+        async execute(request, options) {
+          toolContexts.push(options?.runContext);
+          return createToolExecutor([]).execute(request);
+        },
+      },
+      createId: createSequentialId("context_tool"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+
+    await engine.startTask("task_123");
+
+    expect(authorizationContexts).toEqual([runContext]);
+    expect(toolContexts).toEqual([runContext]);
+  });
+
+  it("records workspace escape denials before failing the run", async () => {
+    const trajectoryEvents: AgentTrajectoryEvent[] = [];
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: "/tmp/zerox/workspace",
+    });
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore([]),
+      trajectoryStore: createMemoryTrajectoryStore(trajectoryEvents),
+      workspaceService: createWorkspaceService(runContext),
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: createChatClient([
+        toolCallResponse("file_write", {
+          path: "/tmp/outside/report.md",
+          content: "done",
+        }),
+      ]),
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: {
+        async authorize() {
+          return {
+            ok: true,
+            decision: {
+              allowed: false,
+              reason:
+                "file_write 被运行沙箱阻止：路径不在工作区或额外可写目录内。",
+            },
+            auditEvent: {
+              id: "audit_1",
+              taskId: "task_123",
+              request: {
+                toolName: "file_write",
+                args: {},
+              },
+              decision: {
+                allowed: false,
+                reason:
+                  "file_write 被运行沙箱阻止：路径不在工作区或额外可写目录内。",
+              },
+              createdAt: "2026-06-07T00:00:00.000Z",
+            },
+          };
+        },
+      },
+      toolExecutor: createToolExecutor([]),
+      createId: createSequentialId("escape"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+
+    const result = await engine.startTask("task_123");
+
+    expect(result).toMatchObject({
+      ok: true,
+      run: {
+        status: "failed",
+        failureClass: "permission_denied",
+      },
+    });
+    expect(trajectoryEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "workspace_escape_denied",
+          runContext,
+          payload: expect.objectContaining({
+            toolName: "file_write",
+            reason:
+              "file_write 被运行沙箱阻止：路径不在工作区或额外可写目录内。",
+          }),
+        }),
+      ]),
+    );
+  });
 });
 
 function finalResponse(content: string): ChatCompletionResponse {
@@ -481,6 +645,23 @@ function createAuthorizationService(allowed: boolean): ToolAuthorizationService 
           createdAt: "2026-06-07T00:00:00.000Z",
         },
       };
+    },
+  };
+}
+
+function createWorkspaceService(runContext: AgentRunContext) {
+  return {
+    async resolveRunContext() {
+      return runContext;
+    },
+    async createTemporaryWorkspace() {
+      throw new Error("Not needed in this test.");
+    },
+    async createGitWorktreeWorkspace() {
+      throw new Error("Not needed in this test.");
+    },
+    async listWorkspaces() {
+      return [];
     },
   };
 }
