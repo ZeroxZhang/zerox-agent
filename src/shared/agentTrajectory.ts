@@ -1,4 +1,7 @@
+import type { AgentRunContext } from "./agentWorkspace";
+
 export type AgentTrajectoryEventType =
+  | "run_context_created"
   | "state_transition"
   | "model_request"
   | "model_response"
@@ -6,6 +9,8 @@ export type AgentTrajectoryEventType =
   | "tool_result"
   | "checkpoint_written"
   | "artifact_created"
+  | "workspace_escape_denied"
+  | "child_run_scheduled"
   | "failure_classified"
   | "final_summary";
 
@@ -20,6 +25,7 @@ export type AgentTrajectoryEvent = {
   runId: string;
   type: AgentTrajectoryEventType;
   sequence: number;
+  runContext?: AgentRunContext;
   payload: Record<string, unknown>;
   redaction: AgentTrajectoryRedaction;
   createdAt: string;
