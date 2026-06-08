@@ -10,6 +10,8 @@ import {
   buildToolDefinitions,
   serializeToolObservation,
 } from "../shared/agentProtocol";
+import { serializeToolObservationWithOffload } from "./toolObservationOffload";
+import type { ToolResultOffloadStore } from "./toolResultOffloadStore";
 
 export type AgentLoopOptions = {
   chatClient: ChatClient;
@@ -20,6 +22,8 @@ export type AgentLoopOptions = {
   maxTurns?: number;
   signal?: AbortSignal;
   tools?: ReturnType<typeof buildToolDefinitions>;
+  toolResultOffloadStore?: ToolResultOffloadStore;
+  toolResultOffloadThreshold?: number;
   onToolCall?: (toolName: string, args: Record<string, unknown>) => void;
   onToolResult?: (toolName: string, ok: boolean) => void;
   onTurn?: (turn: number, phase: string) => void;
@@ -53,6 +57,8 @@ export async function runAgentLoop(
     maxTurns = 4,
     signal,
     tools: customTools,
+    toolResultOffloadStore,
+    toolResultOffloadThreshold,
     onToolCall,
     onToolResult,
     onTurn,
@@ -249,17 +255,24 @@ export async function runAgentLoop(
           lastExecutedToolSignature = signature;
           onToolResult?.(toolName, result.ok);
 
-          messages.push({
-            role: "tool",
-            tool_call_id: toolCall.id,
-            content: serializeToolObservation({
+          const serializedObservation =
+            await serializeToolObservationWithOffload({
               tool: toolName as never,
               ok: result.ok,
               ...(result.ok
                 ? { result: (result as { result: Record<string, unknown> }).result }
                 : { error: (result as { error: string }).error }),
               toolCallId: toolCall.id,
-            }),
+            }, {
+              store: toolResultOffloadStore,
+              thresholdChars: toolResultOffloadThreshold,
+              runId: taskId,
+            });
+
+          messages.push({
+            role: "tool",
+            tool_call_id: toolCall.id,
+            content: serializedObservation.content,
           });
         }
 

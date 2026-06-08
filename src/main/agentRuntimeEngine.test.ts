@@ -5,8 +5,16 @@ import type { AgentLearningStore } from "./agentLearningStore";
 import type { AgentRunStore } from "./agentRunStore";
 import type { AgentToolExecutor } from "./agentToolExecutor";
 import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
-import type { ChatClient, ChatCompletionResponse } from "./openAiCompatibleClient";
+import type {
+  ChatClient,
+  ChatCompletionResponse,
+  ChatMessage,
+} from "./openAiCompatibleClient";
 import type { ScheduledTaskStore } from "./taskStore";
+import type {
+  ToolResultOffloadStore,
+  ToolResultOffloadWriteInput,
+} from "./toolResultOffloadStore";
 import type { ToolAuthorizationService } from "./toolAuthorizationService";
 import type { AgentExecutionCheckpoint } from "../shared/agentExecution";
 import {
@@ -25,6 +33,79 @@ import type { SkillRecord } from "../shared/skills";
 import { getDefaultTaskPermissionPolicy } from "../shared/toolPermissions";
 
 describe("agent runtime engine", () => {
+  it("offloads oversized tool results in checkpoints and trajectory metadata", async () => {
+    const largeContent = "x".repeat(1000);
+    const capturedMessages: ChatMessage[][] = [];
+    const savedCheckpoints: AgentExecutionCheckpoint[] = [];
+    const trajectoryEvents: AgentTrajectoryEvent[] = [];
+    const store = createRecordingOffloadStore();
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore(savedCheckpoints),
+      trajectoryStore: createMemoryTrajectoryStore(trajectoryEvents),
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: {
+        async complete(request) {
+          capturedMessages.push(request.messages);
+          if (capturedMessages.length === 1) {
+            return toolCallResponse("file_read", { path: "~/Downloads/notes.md" });
+          }
+          return finalResponse("Report complete");
+        },
+      },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: {
+        async execute() {
+          return {
+            ok: true,
+            result: { content: largeContent },
+          };
+        },
+      },
+      toolResultOffloadStore: store,
+      toolResultOffloadThreshold: 120,
+      createId: createSequentialId("runtime_offload"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+
+    await engine.startTask("task_123");
+
+    const toolMessage = capturedMessages[1].find(
+      (message) => message.role === "tool",
+    );
+    expect(toolMessage?.content).not.toContain(largeContent);
+    expect(JSON.parse(toolMessage?.content ?? "{}")).toEqual(
+      expect.objectContaining({
+        type: "tool_result",
+        tool: "file_read",
+        ok: true,
+        offloaded: true,
+        result_ref: "tool-result-refs/ref_1.json",
+      }),
+    );
+    expect(savedCheckpoints[2].messages).toContainEqual(
+      expect.objectContaining({
+        role: "tool",
+        content: expect.stringContaining('"offloaded":true'),
+      }),
+    );
+    expect(trajectoryEvents).toContainEqual(
+      expect.objectContaining({
+        type: "tool_result",
+        payload: expect.objectContaining({
+          offloaded: true,
+          resultRef: "tool-result-refs/ref_1.json",
+        }),
+        redaction: expect.objectContaining({
+          containsFileContent: false,
+        }),
+      }),
+    );
+    expect(store.writes[0].content).toContain(largeContent);
+  });
+
   it("runs a task, executes an authorized tool, and writes durable checkpoints", async () => {
     const savedCheckpoints: AgentExecutionCheckpoint[] = [];
     const executedTools: string[] = [];
@@ -674,6 +755,28 @@ function createToolExecutor(executedTools: string[]): AgentToolExecutor {
         ok: true,
         result: { content: "notes" },
       };
+    },
+  };
+}
+
+function createRecordingOffloadStore(): ToolResultOffloadStore & {
+  writes: ToolResultOffloadWriteInput[];
+} {
+  const writes: ToolResultOffloadWriteInput[] = [];
+
+  return {
+    writes,
+    async write(input) {
+      writes.push(input);
+      return {
+        refId: "ref_1",
+        relativePath: "tool-result-refs/ref_1.json",
+        absolutePath: "/tmp/tool-result-refs/ref_1.json",
+        bytesWritten: Buffer.byteLength(input.content, "utf8"),
+      };
+    },
+    async read() {
+      return null;
     },
   };
 }

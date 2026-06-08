@@ -23,8 +23,9 @@ import {
   buildAgentSystemPrompt,
   buildTaskPrompt,
   buildToolDefinitions,
-  serializeToolObservation,
 } from "../shared/agentProtocol";
+import { serializeToolObservationWithOffload } from "./toolObservationOffload";
+import type { ToolResultOffloadStore } from "./toolResultOffloadStore";
 import type {
   AgentExecutionCheckpoint,
   AgentExecutionMessage,
@@ -75,6 +76,8 @@ export function createAgentRuntimeEngine(options: {
   trajectoryStore?: AgentTrajectoryStore;
   learningStore?: Pick<AgentLearningStore, "create">;
   memoryStore?: Partial<Pick<MemoryStore, "create" | "search">>;
+  toolResultOffloadStore?: ToolResultOffloadStore;
+  toolResultOffloadThreshold?: number;
   createId?: () => string;
   now?: () => Date;
 }): AgentRuntimeEngine {
@@ -367,26 +370,39 @@ export function createAgentRuntimeEngine(options: {
           { runContext: current.runContext },
         );
         toolCallCount += 1;
-        await appendTrajectory(current.runId, "tool_result", {
-          toolCallId: toolCall.id,
-          toolName,
-          ok: result.ok,
-        }, {
-          containsApiKey: false,
-          containsFileContent: result.ok,
-          containsUserText: false,
-        }, current.runContext);
-        messages.push({
-          role: "tool",
-          tool_call_id: toolCall.id,
-          content: serializeToolObservation({
+        const serializedObservation =
+          await serializeToolObservationWithOffload({
             tool: toolName,
             ok: result.ok,
             ...(result.ok
               ? { result: result.result }
               : { error: result.error }),
             toolCallId: toolCall.id,
-          }),
+          }, {
+            store: options.toolResultOffloadStore,
+            thresholdChars: options.toolResultOffloadThreshold,
+            runId: current.runId,
+          });
+        await appendTrajectory(current.runId, "tool_result", {
+          toolCallId: toolCall.id,
+          toolName,
+          ok: result.ok,
+          ...(serializedObservation.offloaded
+            ? {
+                offloaded: true,
+                resultRef: serializedObservation.resultRef,
+                originalChars: serializedObservation.originalChars,
+              }
+            : {}),
+        }, {
+          containsApiKey: false,
+          containsFileContent: result.ok && !serializedObservation.offloaded,
+          containsUserText: false,
+        }, current.runContext);
+        messages.push({
+          role: "tool",
+          tool_call_id: toolCall.id,
+          content: serializedObservation.content,
         });
 
         if (!result.ok) {

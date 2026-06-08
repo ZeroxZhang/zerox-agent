@@ -6,6 +6,7 @@ import type { AppendChatMessageResult, ChatSessionStore } from "./chatSessionSto
 import { extractAtomicMemoriesFromChatTurn } from "./memoryL1Extractor";
 import type { MemoryProfileStore } from "./memoryProfileStore";
 import type { MemoryStore } from "./memoryStore";
+import type { ToolResultOffloadStore } from "./toolResultOffloadStore";
 import {
   formatMemoryRecallContext,
   recallMemoriesWithBudget,
@@ -46,6 +47,8 @@ export function createChatService(options: {
   now?: () => Date;
   memoryLimit?: number;
   historyLimit?: number;
+  toolResultOffloadStore?: ToolResultOffloadStore;
+  toolResultOffloadThreshold?: number;
 }): ChatService {
   const createId = options.createId ?? randomUUID;
   const memoryLimit = options.memoryLimit ?? 4;
@@ -203,6 +206,8 @@ export function createChatService(options: {
               maxTurns: 6,
               signal: undefined,
               tools: options.toolExecutor.getRegistry().getDefinitions(),
+              toolResultOffloadStore: options.toolResultOffloadStore,
+              toolResultOffloadThreshold: options.toolResultOffloadThreshold,
             },
           );
           reply = loopResult.summary;

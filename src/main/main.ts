@@ -96,6 +96,10 @@ import {
   type MemoryProfileStore,
 } from "./memoryProfileStore";
 import {
+  createToolResultOffloadStore,
+  type ToolResultOffloadStore,
+} from "./toolResultOffloadStore";
+import {
   createOpenAiCompatibleClient,
   createOpenAiCompatibleEmbeddingClient,
 } from "./openAiCompatibleClient";
@@ -205,6 +209,7 @@ let chatService: ChatService | null = null;
 let chatSessionStore: ChatSessionStore | null = null;
 let memoryStore: MemoryStore | null = null;
 let memoryProfileStore: MemoryProfileStore | null = null;
+let toolResultOffloadStore: ToolResultOffloadStore | null = null;
 let taskSchedulerService: TaskSchedulerService | null = null;
 let modelConnectionService: ModelConnectionService | null = null;
 let agentBootstrapService: AgentBootstrapService | null = null;
@@ -988,6 +993,16 @@ function getMemoryProfileStore(): MemoryProfileStore {
   return memoryProfileStore;
 }
 
+function getToolResultOffloadStore(): ToolResultOffloadStore {
+  if (!toolResultOffloadStore) {
+    toolResultOffloadStore = createToolResultOffloadStore({
+      configDir: path.join(app.getPath("userData"), "config"),
+    });
+  }
+
+  return toolResultOffloadStore;
+}
+
 function getAgentLearningStore(): AgentLearningStore {
   if (!agentLearningStore) {
     agentLearningStore = createAgentLearningStore({
@@ -1055,6 +1070,7 @@ function getAgentRunnerService(): AgentRunnerService {
       trajectoryStore: getAgentTrajectoryStore(),
       learningStore: getAgentLearningStore(),
       memoryStore: getMemoryStore(),
+      toolResultOffloadStore: getToolResultOffloadStore(),
     });
   }
 
@@ -1200,6 +1216,7 @@ function getChatService(): ChatService {
       runScheduledTask: (taskId) => getAgentRunnerService().runTask(taskId),
       toolExecutor,
       toolAuthorizationService: getToolAuthorizationService(),
+      toolResultOffloadStore: getToolResultOffloadStore(),
     });
   }
 

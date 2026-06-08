@@ -7,6 +7,10 @@ import type {
   ChatCompletionResponse,
   ToolDefinition,
 } from "./openAiCompatibleClient";
+import type {
+  ToolResultOffloadStore,
+  ToolResultOffloadWriteInput,
+} from "./toolResultOffloadStore";
 
 const modelProfile = {
   baseUrl: "https://api.example.com/v1",
@@ -32,6 +36,63 @@ const testTools: ToolDefinition[] = [
 ];
 
 describe("agent loop", () => {
+  it("offloads oversized tool results before the next model turn", async () => {
+    const largeContent = "x".repeat(1000);
+    const requests: ChatCompletionRequest[] = [];
+    const store = createRecordingOffloadStore();
+    const chatClient: ChatClient = {
+      async complete(request) {
+        requests.push(request);
+        if (requests.length === 1) {
+          return toolCallResponse("tool_call_1");
+        }
+
+        const toolMessage = request.messages.find(
+          (message) => message.role === "tool",
+        );
+        expect(toolMessage).toBeDefined();
+        expect(toolMessage?.content).not.toContain(largeContent);
+        expect(JSON.parse(toolMessage?.content ?? "{}")).toEqual(
+          expect.objectContaining({
+            type: "tool_result",
+            tool: "file_list",
+            ok: true,
+            offloaded: true,
+            result_ref: "tool-result-refs/ref_1.json",
+          }),
+        );
+
+        return {
+          content: "我已经基于引用化工具结果完成总结。",
+          toolCalls: [],
+          finishReason: "stop",
+        };
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "检查这个目录并告诉我结果" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(() => undefined, {
+          content: largeContent,
+        }),
+        maxTurns: 4,
+        tools: testTools,
+        toolResultOffloadStore: store,
+        toolResultOffloadThreshold: 120,
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: "succeeded",
+      toolCallsExecuted: 1,
+    });
+    expect(store.writes).toHaveLength(1);
+    expect(store.writes[0].content).toContain(largeContent);
+  });
+
   it("finalizes instead of executing a repeated identical tool call", async () => {
     const requests: ChatCompletionRequest[] = [];
     const chatClient: ChatClient = {
@@ -143,13 +204,16 @@ function toolCallResponse(id: string, path = "/tmp"): ChatCompletionResponse {
   };
 }
 
-function createToolExecutor(onExecute?: () => void): AgentToolExecutor {
+function createToolExecutor(
+  onExecute?: () => void,
+  result: Record<string, unknown> = { files: ["a.txt", "b.txt"] },
+): AgentToolExecutor {
   return {
     async execute() {
       onExecute?.();
       return {
         ok: true,
-        result: { files: ["a.txt", "b.txt"] },
+        result,
       };
     },
     getRegistry() {
@@ -157,6 +221,28 @@ function createToolExecutor(onExecute?: () => void): AgentToolExecutor {
     },
     hasTool() {
       return true;
+    },
+  };
+}
+
+function createRecordingOffloadStore(): ToolResultOffloadStore & {
+  writes: ToolResultOffloadWriteInput[];
+} {
+  const writes: ToolResultOffloadWriteInput[] = [];
+
+  return {
+    writes,
+    async write(input) {
+      writes.push(input);
+      return {
+        refId: "ref_1",
+        relativePath: "tool-result-refs/ref_1.json",
+        absolutePath: "/tmp/tool-result-refs/ref_1.json",
+        bytesWritten: Buffer.byteLength(input.content, "utf8"),
+      };
+    },
+    async read() {
+      return null;
     },
   };
 }
