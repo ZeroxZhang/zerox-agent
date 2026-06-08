@@ -15,13 +15,12 @@ import type {
 import type { AgentRunRecord, RunScheduledTaskResult } from "../shared/agentRuns";
 import type { MemoryRecord, MemorySearchResult } from "../shared/memory";
 import {
-  describeSchedule,
-  draftScheduleFromText,
-  type ScheduledTask,
-  type ScheduledTaskInput,
-} from "../shared/scheduledTasks";
-import { getDefaultTaskPermissionPolicy } from "../shared/toolPermissions";
-import type { TaskPermissionPolicy } from "../shared/toolPermissions";
+  buildScheduledTaskInputFromIntent,
+  classifyAgentIntent,
+  matchTaskFromMessage,
+  type AgentIntentRoute,
+} from "../shared/agentIntent";
+import { describeSchedule } from "../shared/scheduledTasks";
 
 export type ChatService = {
   sendMessage(input: SendChatMessageInput): Promise<SendChatMessageResult>;
@@ -61,8 +60,9 @@ export function createChatService(options: {
         });
         sessionId = appendResult.session.id;
       }
-      const taskCreationResult = await tryCreateTaskFromMessage({
-        message: userMessage,
+      const intentRoute = classifyAgentIntent(userMessage);
+      const taskCreationResult = await tryCreateTaskFromIntent({
+        route: intentRoute,
         taskStore: options.taskStore,
       });
 
@@ -90,7 +90,8 @@ export function createChatService(options: {
           memoryId,
         };
       }
-      const taskRunResult = await tryRunTaskFromMessage({
+      const taskRunResult = await tryRunTaskFromIntent({
+        route: intentRoute,
         message: userMessage,
         taskStore: options.taskStore,
         runScheduledTask: options.runScheduledTask,
@@ -274,15 +275,32 @@ type TaskCreationDetection =
       result: Extract<SendChatMessageResult, { ok: false }>;
     };
 
-async function tryCreateTaskFromMessage(options: {
-  message: string;
+async function tryCreateTaskFromIntent(options: {
+  route: AgentIntentRoute;
   taskStore: Pick<ScheduledTaskStore, "create"> | undefined;
 }): Promise<TaskCreationDetection | null> {
+  if (options.route.kind !== "create_task") {
+    return null;
+  }
+
   if (!options.taskStore) {
     return null;
   }
 
-  const draft = createTaskInputFromMessage(options.message);
+  if (options.route.missingSlots.length > 0 && options.route.clarification) {
+    return {
+      ok: true,
+      result: {
+        ok: true,
+        reply: options.route.clarification,
+        sessionId: "",
+        relatedMemories: [],
+        memoryId: null,
+      },
+    };
+  }
+
+  const draft = buildScheduledTaskInputFromIntent(options.route);
   if (!draft) {
     return null;
   }
@@ -312,71 +330,13 @@ async function tryCreateTaskFromMessage(options: {
   }
 }
 
-function createTaskInputFromMessage(message: string): ScheduledTaskInput | null {
-  const schedule = draftScheduleFromText(message);
-  if (!schedule) {
-    return null;
-  }
-
-  // Detect target directory and task type from message
-  const targetDir = detectTargetDirectory(message);
-  const taskName = detectTaskName(message, targetDir);
-
-  return {
-    name: taskName,
-    skillName: "local-file-organizer",
-    enabled: true,
-    schedule,
-    input: { targetDir: targetDir ?? "~/Downloads", reportName: "agent-report.md" },
-    permissions: {
-      ...getDefaultTaskPermissionPolicy(),
-      files: {
-        read: [targetDir ?? "~/Downloads"],
-        write: [targetDir ?? "~/Downloads"],
-      },
-    },
-  };
-}
-
-function detectTargetDirectory(message: string): string | null {
-  const normalized = normalizeMatchText(message);
-
-  if (normalized.includes("下载") || normalized.includes("downloads")) {
-    return "~/Downloads";
-  }
-  if (normalized.includes("桌面") || normalized.includes("desktop")) {
-    return "~/Desktop";
-  }
-  if (normalized.includes("文档") || normalized.includes("documents")) {
-    return "~/Documents";
-  }
-  if (normalized.includes("项目") || normalized.includes("projects")) {
-    return "~/Projects";
-  }
-
-  return null;
-}
-
-function detectTaskName(message: string, targetDir: string | null): string {
-  const normalized = normalizeMatchText(message);
-
-  if (targetDir === "~/Desktop") return "整理桌面文件夹";
-  if (targetDir === "~/Documents") return "整理文档文件夹";
-  if (targetDir === "~/Projects") return "整理项目文件夹";
-
-  if (normalized.includes("桌面")) return "整理桌面文件夹";
-  if (normalized.includes("文档")) return "整理文档文件夹";
-  if (normalized.includes("项目")) return "整理项目文件夹";
-
-  return "整理下载文件夹";
-}
-
-async function tryRunTaskFromMessage(options: {
+async function tryRunTaskFromIntent(options: {
+  route: AgentIntentRoute;
   message: string;
   taskStore: Pick<ScheduledTaskStore, "list"> | undefined;
   runScheduledTask: ((taskId: string) => Promise<RunScheduledTaskResult>) | undefined;
 }): Promise<TaskRunDetection | null> {
-  if (!isTaskRunRequest(options.message)) {
+  if (options.route.kind !== "run_task") {
     return null;
   }
 
@@ -421,36 +381,6 @@ async function tryRunTaskFromMessage(options: {
   };
 }
 
-function isTaskRunRequest(message: string): boolean {
-  // Only match explicit task execution commands, not general conversation.
-  // Must mention both an action verb AND a task/skill keyword in proximity.
-  return /(运行|执行|跑一下|跑一次|启动).{0,10}(任务|skill|技能|整理|抓取|调度)/i.test(message);
-}
-
-function matchTaskFromMessage(
-  message: string,
-  tasks: ScheduledTask[],
-): ScheduledTask | null {
-  if (!tasks.length) {
-    return null;
-  }
-
-  const normalizedMessage = normalizeMatchText(message);
-  const exactMatch = tasks.find((task) =>
-    normalizedMessage.includes(normalizeMatchText(task.name)),
-  );
-
-  if (exactMatch) {
-    return exactMatch;
-  }
-
-  if (tasks.length === 1) {
-    return tasks[0];
-  }
-
-  return null;
-}
-
 function formatTaskRunReply(run: AgentRunRecord): string {
   return `已运行任务“${run.taskName}”，结果：${translateRunStatus(run.status)}。摘要：${run.summary}`;
 }
@@ -465,10 +395,6 @@ function translateRunStatus(status: AgentRunRecord["status"]): string {
   }
 
   return "失败";
-}
-
-function normalizeMatchText(value: string): string {
-  return value.toLowerCase().replace(/\s+/g, "");
 }
 
 function buildChatSystemPrompt(): string {

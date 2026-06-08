@@ -249,6 +249,57 @@ describe("chat service", () => {
     ]);
     expect(completeCalled).toBe(false);
   });
+
+  it("asks for a target directory before creating a scheduled file task", async () => {
+    let completeCalled = false;
+    const createdInputs: ScheduledTaskInput[] = [];
+    const chatMessages: AppendChatMessageInput[] = [];
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          completeCalled = true;
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: async () => ({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret",
+        model: "agent-model",
+        temperature: 0.2,
+        maxTokens: 8192,
+      }),
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore(chatMessages),
+      taskStore: createTaskStore([], createdInputs),
+      createId: () => "chat_create_task_missing_target",
+      now: () => new Date("2026-06-06T08:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage({
+      message: "每天 9 点整理文件",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      reply:
+        "我可以创建这个定时任务。你想让我整理哪个文件夹？例如：下载、桌面、文档或项目。",
+      sessionId: "persisted_session",
+    });
+    expect(createdInputs).toEqual([]);
+    expect(completeCalled).toBe(false);
+    expect(chatMessages).toEqual([
+      {
+        role: "user",
+        content: "每天 9 点整理文件",
+      },
+      {
+        sessionId: "persisted_session",
+        role: "assistant",
+        content:
+          "我可以创建这个定时任务。你想让我整理哪个文件夹？例如：下载、桌面、文档或项目。",
+      },
+    ]);
+  });
 });
 
 function createMemoryStore(options: {
