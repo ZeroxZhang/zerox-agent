@@ -189,8 +189,8 @@ export const demoLearningCandidates: AgentLearningCandidate[] = [
 ];
 
 export const demoAgentEvalReport: AgentEvalReport = {
-  total: 5,
-  passed: 5,
+  total: 7,
+  passed: 7,
   failed: 0,
   passRate: 1,
   toolSuccessRate: 0.8,

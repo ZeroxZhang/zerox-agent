@@ -32,6 +32,8 @@ describe("README", () => {
 
     expect(readme).toContain("local-first desktop control plane");
     expect(readme).toContain("recoverable agent runs");
+    expect(readme).toContain("workspace-scoped runs");
+    expect(readme).toContain("parent/child multi-agent sessions");
     expect(readme).toContain("user-reviewed learning");
     expect(readme).toContain("docs/product/zerox-positioning.md");
     expect(positioning).toContain("Decision Matrix");
