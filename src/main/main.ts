@@ -996,7 +996,10 @@ function getAgentLearningService(): AgentLearningService {
 
 function getAgentRunnerService(): AgentRunnerService {
   if (!agentRunnerService) {
-    const toolExecutor = createAgentToolExecutor();
+    const toolExecutor = createAgentToolExecutor({
+      memoryStore: getMemoryStore(),
+      chatSessionStore: getChatSessionStore(),
+    });
 
     // Register skill-defined tools and MCP tools
     void initializeMcpTools(toolExecutor);
@@ -1151,7 +1154,10 @@ function getChatSessionStore(): ChatSessionStore {
 
 function getChatService(): ChatService {
   if (!chatService) {
-    const toolExecutor = createAgentToolExecutor();
+    const toolExecutor = createAgentToolExecutor({
+      memoryStore: getMemoryStore(),
+      chatSessionStore: getChatSessionStore(),
+    });
     void initializeMcpTools(toolExecutor);
 
     chatService = createChatService({

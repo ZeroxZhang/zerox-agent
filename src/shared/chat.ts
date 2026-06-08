@@ -14,6 +14,23 @@ export type ChatMessageRecord = ChatHistoryMessage & {
   executedRunId?: string;
 };
 
+export type ChatMessageSearchOptions = {
+  query: string;
+  sessionId?: string;
+  limit?: number;
+};
+
+export type ChatMessageSearchResult = {
+  sessionId: string;
+  sessionTitle: string;
+  messageId: string;
+  role: ChatMessageRecord["role"];
+  content: string;
+  createdAt: string;
+  score: number;
+  matchedTerms: string[];
+};
+
 export type ChatSessionRecord = {
   id: string;
   title: string;

@@ -2,8 +2,12 @@ import { randomUUID } from "node:crypto";
 import type { AgentModelProfile } from "./agentRunnerService";
 import type { AgentToolExecutor } from "./agentToolExecutor";
 import { runAgentLoop } from "./agentLoop";
-import type { ChatSessionStore } from "./chatSessionStore";
+import type { AppendChatMessageResult, ChatSessionStore } from "./chatSessionStore";
 import type { MemoryStore } from "./memoryStore";
+import {
+  formatMemoryRecallContext,
+  recallMemoriesWithBudget,
+} from "./memoryRecall";
 import type { ChatClient, ChatMessage } from "./openAiCompatibleClient";
 import type { ScheduledTaskStore } from "./taskStore";
 import type { ToolAuthorizationService } from "./toolAuthorizationService";
@@ -52,6 +56,7 @@ export function createChatService(options: {
       }
 
       let sessionId = input.sessionId ?? createId();
+      let userMessageId: string | null = null;
       if (options.chatSessionStore) {
         const appendResult = await options.chatSessionStore.appendMessage({
           ...(input.sessionId ? { sessionId: input.sessionId } : {}),
@@ -59,6 +64,7 @@ export function createChatService(options: {
           content: userMessage,
         });
         sessionId = appendResult.session.id;
+        userMessageId = appendResult.message.id;
       }
       const intentRoute = classifyAgentIntent(userMessage);
       const taskCreationResult = await tryCreateTaskFromIntent({
@@ -71,16 +77,17 @@ export function createChatService(options: {
           return taskCreationResult.result;
         }
 
+        const assistantMessageId = await appendAssistantMessage({
+          chatSessionStore: options.chatSessionStore,
+          sessionId,
+          content: taskCreationResult.result.reply,
+        });
         const memoryId = await writeSessionMemory({
           memoryStore: options.memoryStore,
           sessionId,
           userMessage,
           reply: taskCreationResult.result.reply,
-        });
-        await appendAssistantMessage({
-          chatSessionStore: options.chatSessionStore,
-          sessionId,
-          content: taskCreationResult.result.reply,
+          messageIds: compactMessageIds(userMessageId, assistantMessageId),
         });
 
         return {
@@ -102,17 +109,18 @@ export function createChatService(options: {
           return taskRunResult.result;
         }
 
+        const assistantMessageId = await appendAssistantMessage({
+          chatSessionStore: options.chatSessionStore,
+          sessionId,
+          content: taskRunResult.result.reply,
+          executedRunId: taskRunResult.result.executedRun?.id,
+        });
         const memoryId = await writeSessionMemory({
           memoryStore: options.memoryStore,
           sessionId,
           userMessage,
           reply: taskRunResult.result.reply,
-        });
-        await appendAssistantMessage({
-          chatSessionStore: options.chatSessionStore,
-          sessionId,
-          content: taskRunResult.result.reply,
-          executedRunId: taskRunResult.result.executedRun?.id,
+          messageIds: compactMessageIds(userMessageId, assistantMessageId),
         });
 
         return {
@@ -173,6 +181,7 @@ export function createChatService(options: {
               systemPrompt: buildChatSystemPrompt(),
               maxTurns: 6,
               signal: undefined,
+              tools: options.toolExecutor.getRegistry().getDefinitions(),
             },
           );
           reply = loopResult.summary;
@@ -209,17 +218,18 @@ export function createChatService(options: {
         }
       }
 
+      const assistantMessageId = await appendAssistantMessage({
+        chatSessionStore: options.chatSessionStore,
+        sessionId,
+        content: reply,
+        relatedMemoryIds: relatedMemoryResults.map((result) => result.record.id),
+      });
       const memoryId = await writeSessionMemory({
         memoryStore: options.memoryStore,
         sessionId,
         userMessage,
         reply,
-      });
-      await appendAssistantMessage({
-        chatSessionStore: options.chatSessionStore,
-        sessionId,
-        content: reply,
-        relatedMemoryIds: relatedMemoryResults.map((result) => result.record.id),
+        messageIds: compactMessageIds(userMessageId, assistantMessageId),
       });
 
       return {
@@ -239,20 +249,22 @@ async function appendAssistantMessage(options: {
   content: string;
   relatedMemoryIds?: string[];
   executedRunId?: string;
-}) {
+}): Promise<string | null> {
   if (!options.chatSessionStore) {
-    return;
+    return null;
   }
 
-  await options.chatSessionStore.appendMessage({
-    sessionId: options.sessionId,
-    role: "assistant",
-    content: options.content,
-    ...(options.relatedMemoryIds?.length
-      ? { relatedMemoryIds: options.relatedMemoryIds }
-      : {}),
-    ...(options.executedRunId ? { executedRunId: options.executedRunId } : {}),
-  });
+  const appendResult: AppendChatMessageResult =
+    await options.chatSessionStore.appendMessage({
+      sessionId: options.sessionId,
+      role: "assistant",
+      content: options.content,
+      ...(options.relatedMemoryIds?.length
+        ? { relatedMemoryIds: options.relatedMemoryIds }
+        : {}),
+      ...(options.executedRunId ? { executedRunId: options.executedRunId } : {}),
+    });
+  return appendResult.message.id;
 }
 
 type TaskRunDetection =
@@ -433,17 +445,11 @@ function buildChatMessages(options: {
 }
 
 function formatMemoryContext(results: MemorySearchResult[]): string | null {
-  if (!results.length) {
-    return null;
-  }
-
-  return [
-    "相关记忆：",
-    ...results.map(
-      (result) =>
-        `- ${result.record.title}：${truncateText(result.record.content, 240)}`,
-    ),
-  ].join("\n");
+  return formatMemoryRecallContext(results, {
+    heading: "相关记忆：",
+    maxCharsPerMemory: 240,
+    maxTotalRecallChars: 1_200,
+  });
 }
 
 async function searchRelatedMemories(options: {
@@ -451,15 +457,12 @@ async function searchRelatedMemories(options: {
   query: string;
   limit: number;
 }): Promise<MemorySearchResult[]> {
-  try {
-    return await options.memoryStore.search({
-      query: options.query,
-      kind: "all",
-      limit: options.limit,
-    });
-  } catch {
-    return [];
-  }
+  return recallMemoriesWithBudget({
+    memoryStore: options.memoryStore,
+    query: options.query,
+    kind: "all",
+    limit: options.limit,
+  });
 }
 
 async function writeSessionMemory(options: {
@@ -467,6 +470,7 @@ async function writeSessionMemory(options: {
   sessionId: string;
   userMessage: string;
   reply: string;
+  messageIds: string[];
 }): Promise<string | null> {
   try {
     const memory = await options.memoryStore.create({
@@ -474,13 +478,23 @@ async function writeSessionMemory(options: {
       title: `会话：${truncateText(options.userMessage, 28)}`,
       content: `用户：${options.userMessage}\nAgent：${options.reply}`,
       tags: ["chat", "session"],
-      source: { type: "system" },
+      source: options.messageIds.length
+        ? {
+            type: "chat_session",
+            sessionId: options.sessionId,
+            messageIds: options.messageIds,
+          }
+        : { type: "system" },
       importance: 2,
     });
     return memory.id;
   } catch {
     return null;
   }
+}
+
+function compactMessageIds(...ids: Array<string | null>): string[] {
+  return ids.filter((id): id is string => Boolean(id));
 }
 
 function toRelatedMemory(result: MemorySearchResult): ChatRelatedMemory {

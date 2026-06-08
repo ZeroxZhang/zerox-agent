@@ -114,7 +114,11 @@ describe("chat service", () => {
         content:
           "用户：帮我整理下载文件夹\nAgent：我可以先检查任务和工具权限，然后运行文件整理 skill。",
         tags: ["chat", "session"],
-        source: { type: "system" },
+        source: {
+          type: "chat_session",
+          sessionId: "persisted_session",
+          messageIds: ["message_1", "message_2"],
+        },
         importance: 2,
       },
     ]);
@@ -244,6 +248,7 @@ describe("chat service", () => {
           files: { read: ["~/Downloads"], write: ["~/Downloads"] },
           web: { search: false, fetchDomains: [] },
           shell: { commands: [] },
+          memory: { read: false, write: false },
         },
       },
     ]);

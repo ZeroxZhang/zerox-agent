@@ -6,6 +6,8 @@ export type AgentToolName =
   | "file_list"
   | "file_read"
   | "file_write"
+  | "memory_search"
+  | "conversation_search"
   | "web_search"
   | "web_fetch"
   | "shell_exec";
@@ -21,6 +23,10 @@ export type TaskPermissionPolicy = {
   };
   shell: {
     commands: string[];
+  };
+  memory?: {
+    read: boolean;
+    write: boolean;
   };
 };
 
@@ -75,6 +81,7 @@ export function getDefaultTaskPermissionPolicy(): TaskPermissionPolicy {
     files: { read: [], write: [] },
     web: { search: false, fetchDomains: [] },
     shell: { commands: [] },
+    memory: { read: false, write: false },
   };
 }
 
@@ -92,6 +99,10 @@ export function createPermissionPolicyFromSkillManifest(
     },
     shell: {
       commands: manifest.permissions.shell.commands,
+    },
+    memory: {
+      read: manifest.permissions.memory.read,
+      write: manifest.permissions.memory.write,
     },
   });
 }
@@ -112,6 +123,10 @@ export function normalizeTaskPermissionPolicy(
     },
     shell: {
       commands: unique(policy.shell.commands.map((command) => command.trim()).filter(Boolean)),
+    },
+    memory: {
+      read: Boolean(policy.memory?.read),
+      write: Boolean(policy.memory?.write),
     },
   };
 }
@@ -173,6 +188,11 @@ export function authorizeToolCall(
         normalized.files.write,
         "file_write 路径不在已授权可写目录内。",
       );
+    case "memory_search":
+    case "conversation_search":
+      return normalized.memory?.read
+        ? allow(`这个任务已允许 ${request.toolName}。`)
+        : deny("这个任务未允许读取本地记忆。");
     case "web_search":
       return normalized.web.search
         ? allow("这个任务已允许 web_search。")

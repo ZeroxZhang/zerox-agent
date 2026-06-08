@@ -3,9 +3,12 @@ import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import type { ChatSessionStore } from "./chatSessionStore";
 import { createWebTools, type WebTools } from "./webTools";
 import { createDynamicToolRegistry, type DynamicToolRegistry } from "./dynamicToolRegistry";
+import type { MemoryStore } from "./memoryStore";
 import type { AgentRunContext } from "../shared/agentWorkspace";
+import { getMemoryKinds, type MemoryKind } from "../shared/memory";
 import type { ToolCallRequest } from "../shared/toolPermissions";
 
 const execAsync = promisify(exec);
@@ -30,12 +33,18 @@ export type AgentToolExecutor = {
 export function createAgentToolExecutor(options?: {
   webTools?: WebTools;
   registry?: DynamicToolRegistry;
+  memoryStore?: Pick<MemoryStore, "search">;
+  chatSessionStore?: Pick<ChatSessionStore, "searchMessages">;
 }): AgentToolExecutor {
   const webTools = options?.webTools ?? createWebTools();
   const registry = options?.registry ?? createDynamicToolRegistry();
 
   // Register built-in tools
-  registerBuiltinTools(registry, webTools);
+  registerBuiltinTools(registry, {
+    webTools,
+    memoryStore: options?.memoryStore,
+    chatSessionStore: options?.chatSessionStore,
+  });
 
   return {
     async execute(request, executionOptions) {
@@ -61,7 +70,11 @@ export function createAgentToolExecutor(options?: {
 
 function registerBuiltinTools(
   registry: DynamicToolRegistry,
-  webTools: WebTools,
+  options: {
+    webTools: WebTools;
+    memoryStore?: Pick<MemoryStore, "search">;
+    chatSessionStore?: Pick<ChatSessionStore, "searchMessages">;
+  },
 ) {
   registry.register(
     {
@@ -159,7 +172,7 @@ function registerBuiltinTools(
         },
       },
     },
-    async (args) => webTools.search(String(args.query ?? "")),
+    async (args) => options.webTools.search(String(args.query ?? "")),
     "built-in",
   );
 
@@ -178,7 +191,55 @@ function registerBuiltinTools(
         },
       },
     },
-    async (args) => webTools.fetchPage(String(args.url ?? "")),
+    async (args) => options.webTools.fetchPage(String(args.url ?? "")),
+    "built-in",
+  );
+
+  registry.register(
+    {
+      type: "function",
+      function: {
+        name: "memory_search",
+        description:
+          "检索长期记忆（core/session/semantic/episodic/procedural）。只返回裁剪后的摘要，用于补充上下文。",
+        parameters: {
+          type: "object",
+          properties: {
+            query: { type: "string", description: "要检索的关键词或问题" },
+            kind: {
+              type: "string",
+              description:
+                "可选记忆类型：all/core/session/semantic/episodic/procedural",
+            },
+            limit: { type: "number", description: "最多返回几条，默认 5，最大 10" },
+          },
+          required: ["query"],
+        },
+      },
+    },
+    async (args) => searchMemory(args, options.memoryStore),
+    "built-in",
+  );
+
+  registry.register(
+    {
+      type: "function",
+      function: {
+        name: "conversation_search",
+        description:
+          "检索原始聊天消息证据。适合查找用户曾经说过的话或某次会话中的原始上下文。",
+        parameters: {
+          type: "object",
+          properties: {
+            query: { type: "string", description: "要检索的关键词或问题" },
+            sessionId: { type: "string", description: "可选：限制在某个会话内搜索" },
+            limit: { type: "number", description: "最多返回几条，默认 5，最大 10" },
+          },
+          required: ["query"],
+        },
+      },
+    },
+    async (args) => searchConversations(args, options.chatSessionStore),
     "built-in",
   );
 }
@@ -298,4 +359,108 @@ function resolveUserPath(value: string): string {
     return path.join(os.homedir(), value.slice(2));
   }
   return path.resolve(value);
+}
+
+async function searchMemory(
+  args: Record<string, unknown>,
+  memoryStore: Pick<MemoryStore, "search"> | undefined,
+): Promise<AgentToolExecutionResult> {
+  if (!memoryStore) {
+    return { ok: false, error: "memory_search is not configured." };
+  }
+
+  const query = String(args.query ?? "").trim();
+  if (!query) {
+    return { ok: false, error: "memory_search requires a query." };
+  }
+
+  const kind = normalizeMemoryKind(args.kind);
+  const limit = clampLimit(args.limit);
+  const results = await memoryStore.search({
+    query,
+    kind,
+    limit,
+  });
+
+  return {
+    ok: true,
+    result: {
+      query,
+      kind,
+      results: results.map((result) => ({
+        id: result.record.id,
+        kind: result.record.kind,
+        title: result.record.title,
+        content: truncateForTool(result.record.content, 800),
+        score: result.score,
+        source: result.record.source,
+      })),
+    },
+  };
+}
+
+async function searchConversations(
+  args: Record<string, unknown>,
+  chatSessionStore: Pick<ChatSessionStore, "searchMessages"> | undefined,
+): Promise<AgentToolExecutionResult> {
+  if (!chatSessionStore) {
+    return { ok: false, error: "conversation_search is not configured." };
+  }
+
+  const query = String(args.query ?? "").trim();
+  if (!query) {
+    return { ok: false, error: "conversation_search requires a query." };
+  }
+
+  const limit = clampLimit(args.limit);
+  const sessionId = String(args.sessionId ?? "").trim();
+  const results = await chatSessionStore.searchMessages({
+    query,
+    limit,
+    ...(sessionId ? { sessionId } : {}),
+  });
+
+  return {
+    ok: true,
+    result: {
+      query,
+      results: results.map((result) => ({
+        sessionId: result.sessionId,
+        sessionTitle: result.sessionTitle,
+        messageId: result.messageId,
+        role: result.role,
+        content: truncateForTool(result.content, 800),
+        createdAt: result.createdAt,
+        score: result.score,
+      })),
+    },
+  };
+}
+
+function normalizeMemoryKind(value: unknown): MemoryKind | "all" {
+  if (value === "all") {
+    return "all";
+  }
+
+  return getMemoryKinds().includes(value as MemoryKind)
+    ? (value as MemoryKind)
+    : "all";
+}
+
+function clampLimit(value: unknown): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return 5;
+  }
+
+  return Math.min(10, Math.max(1, Math.floor(numeric)));
+}
+
+function truncateForTool(value: string, maxLength: number): string {
+  const normalized = value.trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, maxLength - 1)}…`;
 }

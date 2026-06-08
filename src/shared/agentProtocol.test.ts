@@ -84,14 +84,16 @@ describe("agent JSON protocol", () => {
     expect(prompt).toContain("默认使用中文");
   });
 
-  it("builds tool definitions with JSON Schema for all 6 tools", () => {
+  it("builds tool definitions with JSON Schema for built-in tools", () => {
     const definitions = buildToolDefinitions();
 
-    expect(definitions).toHaveLength(6);
+    expect(definitions).toHaveLength(8);
     const names = definitions.map((d) => d.function.name);
     expect(names).toContain("file_list");
     expect(names).toContain("file_read");
     expect(names).toContain("file_write");
+    expect(names).toContain("memory_search");
+    expect(names).toContain("conversation_search");
     expect(names).toContain("web_search");
     expect(names).toContain("web_fetch");
     expect(names).toContain("shell_exec");

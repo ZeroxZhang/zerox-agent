@@ -13,11 +13,12 @@ describe("demo agent data", () => {
         files: { read: ["~/Downloads"], write: ["~/Downloads"] },
         web: { search: false, fetchDomains: [] },
         shell: { commands: [] },
+        memory: { read: false, write: false },
       },
     });
     expect(buildToolSafetySummary(demoTasks[0].permissions)).toMatchObject({
       tone: "confirm",
-      title: "需要确认：任务可访问文件或网页",
+      title: "需要确认：任务可访问文件、网页或记忆",
     });
   });
 

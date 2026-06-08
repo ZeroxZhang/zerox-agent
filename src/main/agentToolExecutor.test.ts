@@ -11,6 +11,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createAgentToolExecutor } from "./agentToolExecutor";
 import { buildPrimaryRunContext } from "../shared/agentWorkspace";
+import type { MemoryRecord } from "../shared/memory";
 
 describe("agent tool executor", () => {
   let tempDir: string;
@@ -182,4 +183,113 @@ describe("agent tool executor", () => {
       "search:agent memory",
     ]);
   });
+
+  it("searches long-term memory through a bounded memory_search tool", async () => {
+    const searchOptions: unknown[] = [];
+    const executor = createAgentToolExecutor({
+      memoryStore: {
+        async search(options) {
+          searchOptions.push(options);
+          return [
+            {
+              record: createMemoryRecord({
+                id: "mem_downloads",
+                kind: "semantic",
+                title: "Downloads preference",
+                content: "Reports should be saved as Markdown.",
+              }),
+              score: 7,
+              matchedTerms: ["downloads"],
+            },
+          ];
+        },
+      },
+    });
+
+    await expect(
+      executor.execute({
+        toolName: "memory_search",
+        args: { query: "downloads", kind: "all", limit: 2 },
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      result: {
+        query: "downloads",
+        kind: "all",
+        results: [
+          {
+            id: "mem_downloads",
+            kind: "semantic",
+            title: "Downloads preference",
+            content: "Reports should be saved as Markdown.",
+            score: 7,
+            source: { type: "manual" },
+          },
+        ],
+      },
+    });
+    expect(searchOptions).toEqual([
+      { query: "downloads", kind: "all", limit: 2 },
+    ]);
+  });
+
+  it("searches raw chat evidence through conversation_search", async () => {
+    const searchOptions: unknown[] = [];
+    const executor = createAgentToolExecutor({
+      chatSessionStore: {
+        async searchMessages(options) {
+          searchOptions.push(options);
+          return [
+            {
+              sessionId: "chat_1",
+              sessionTitle: "Downloads cleanup",
+              messageId: "msg_1",
+              role: "assistant",
+              content: "报告已保存为 Markdown。",
+              createdAt: "2026-06-06T08:01:00.000Z",
+              score: 4,
+              matchedTerms: ["报告"],
+            },
+          ];
+        },
+      },
+    });
+
+    await expect(
+      executor.execute({
+        toolName: "conversation_search",
+        args: { query: "报告", limit: 1 },
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      result: {
+        query: "报告",
+        results: [
+          {
+            sessionId: "chat_1",
+            sessionTitle: "Downloads cleanup",
+            messageId: "msg_1",
+            role: "assistant",
+            content: "报告已保存为 Markdown。",
+            createdAt: "2026-06-06T08:01:00.000Z",
+            score: 4,
+          },
+        ],
+      },
+    });
+    expect(searchOptions).toEqual([{ query: "报告", limit: 1 }]);
+  });
 });
+
+function createMemoryRecord(
+  partial: Pick<MemoryRecord, "id" | "kind" | "title" | "content">,
+): MemoryRecord {
+  return {
+    ...partial,
+    tags: [],
+    source: { type: "manual" },
+    importance: 3,
+    createdAt: "2026-06-08T00:00:00.000Z",
+    updatedAt: "2026-06-08T00:00:00.000Z",
+  };
+}

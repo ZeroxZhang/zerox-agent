@@ -8,6 +8,7 @@ export type MemoryKind =
 export type MemorySource =
   | { type: "manual" }
   | { type: "agent_run"; refId: string }
+  | { type: "chat_session"; sessionId: string; messageIds: string[] }
   | { type: "skill"; refId: string }
   | { type: "system" };
 

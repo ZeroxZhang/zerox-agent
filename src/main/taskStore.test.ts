@@ -197,6 +197,7 @@ describe("scheduled task store", () => {
       },
       web: { search: false, fetchDomains: ["example.com"] },
       shell: { commands: ["find {{targetDir}} -maxdepth 1 -type f"] },
+      memory: { read: false, write: false },
     });
     await expect(store.list()).resolves.toEqual([task]);
     await expect(store.get("task_permissions")).resolves.toEqual(task);

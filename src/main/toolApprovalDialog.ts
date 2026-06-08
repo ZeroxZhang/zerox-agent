@@ -54,5 +54,17 @@ function summarizeToolArgs(request: ToolCallRequest): Record<string, unknown> {
       return {
         query: String(request.args.query ?? ""),
       };
+    case "memory_search":
+      return {
+        query: String(request.args.query ?? ""),
+        kind: String(request.args.kind ?? "all"),
+        limit: Number(request.args.limit ?? 5),
+      };
+    case "conversation_search":
+      return {
+        query: String(request.args.query ?? ""),
+        sessionId: String(request.args.sessionId ?? ""),
+        limit: Number(request.args.limit ?? 5),
+      };
   }
 }

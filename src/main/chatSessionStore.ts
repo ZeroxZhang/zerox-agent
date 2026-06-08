@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type {
+  ChatMessageSearchOptions,
+  ChatMessageSearchResult,
   ChatMessageRecord,
   ChatSessionListItem,
   ChatSessionRecord,
@@ -29,6 +31,9 @@ export type ChatSessionStore = {
   list(): Promise<ChatSessionListItem[]>;
   get(sessionId: string): Promise<ChatSessionRecord | null>;
   appendMessage(input: AppendChatMessageInput): Promise<AppendChatMessageResult>;
+  searchMessages(
+    options: ChatMessageSearchOptions,
+  ): Promise<ChatMessageSearchResult[]>;
 };
 
 export function createChatSessionStore(options: {
@@ -124,6 +129,32 @@ export function createChatSessionStore(options: {
 
       return { session, message };
     },
+
+    async searchMessages(options) {
+      const terms = tokenize(options.query);
+      if (!terms.length) {
+        return [];
+      }
+
+      const stored = await readStoredSessions();
+      const sessions = options.sessionId
+        ? stored.sessions.filter((session) => session.id === options.sessionId)
+        : stored.sessions;
+
+      return sessions
+        .flatMap((session) =>
+          session.messages.map((message) =>
+            scoreMessage(session, message, terms),
+          ),
+        )
+        .filter((result) => result.score > 0)
+        .sort(
+          (left, right) =>
+            right.score - left.score ||
+            right.createdAt.localeCompare(left.createdAt),
+        )
+        .slice(0, options.limit ?? 20);
+    },
   };
 }
 
@@ -188,4 +219,48 @@ function createSessionTitle(content: string): string {
   }
 
   return normalized.length > 32 ? `${normalized.slice(0, 31)}…` : normalized;
+}
+
+function scoreMessage(
+  session: ChatSessionRecord,
+  message: ChatMessageRecord,
+  terms: string[],
+): ChatMessageSearchResult {
+  const content = message.content.toLowerCase();
+  const title = session.title.toLowerCase();
+  const matchedTerms: string[] = [];
+  let score = 0;
+
+  for (const term of terms) {
+    const normalizedTerm = term.toLowerCase();
+    const contentMatch = content.includes(normalizedTerm);
+    const titleMatch = title.includes(normalizedTerm);
+
+    if (!contentMatch && !titleMatch) {
+      continue;
+    }
+
+    matchedTerms.push(term);
+    score += contentMatch ? 2 : 0;
+    score += titleMatch ? 1 : 0;
+  }
+
+  return {
+    sessionId: session.id,
+    sessionTitle: session.title,
+    messageId: message.id,
+    role: message.role,
+    content: message.content,
+    createdAt: message.createdAt,
+    score,
+    matchedTerms,
+  };
+}
+
+function tokenize(value: string): string[] {
+  return value
+    .toLowerCase()
+    .split(/[^a-z0-9\u4e00-\u9fa5]+/i)
+    .map((token) => token.trim())
+    .filter(Boolean);
 }

@@ -31,6 +31,8 @@ const supportedTools = new Set<AgentToolName>([
   "file_list",
   "file_read",
   "file_write",
+  "memory_search",
+  "conversation_search",
   "web_search",
   "web_fetch",
   "shell_exec",
@@ -99,6 +101,59 @@ export function buildToolDefinitions(): ToolDefinition[] {
     {
       type: "function",
       function: {
+        name: "memory_search",
+        description:
+          "检索长期记忆（core/session/semantic/episodic/procedural）。只返回裁剪后的摘要，用于补充上下文。",
+        parameters: {
+          type: "object",
+          properties: {
+            query: {
+              type: "string",
+              description: "要检索的关键词或问题",
+            },
+            kind: {
+              type: "string",
+              description:
+                "可选记忆类型：all/core/session/semantic/episodic/procedural",
+            },
+            limit: {
+              type: "number",
+              description: "最多返回几条，默认 5，最大 10",
+            },
+          },
+          required: ["query"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "conversation_search",
+        description:
+          "检索原始聊天消息证据。适合查找用户曾经说过的话或某次会话中的原始上下文。",
+        parameters: {
+          type: "object",
+          properties: {
+            query: {
+              type: "string",
+              description: "要检索的关键词或问题",
+            },
+            sessionId: {
+              type: "string",
+              description: "可选：限制在某个会话内搜索",
+            },
+            limit: {
+              type: "number",
+              description: "最多返回几条，默认 5，最大 10",
+            },
+          },
+          required: ["query"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
         name: "web_search",
         description:
           "使用 DuckDuckGo 搜索网页并返回结果列表（标题、URL、摘要）。需要任务授权 web.search 权限。",
@@ -156,13 +211,14 @@ export function buildToolDefinitions(): ToolDefinition[] {
 export function buildAgentSystemPrompt(): string {
   return [
     "你是一个本地桌面 AI agent 的运行时核心。",
-    "你可以调用工具来完成任务：列出目录、读写文件、搜索网页、抓取网页内容、执行受权 shell 命令。",
+    "你可以调用工具来完成任务：列出目录、读写文件、检索本地记忆、搜索网页、抓取网页内容、执行受权 shell 命令。",
     "",
     "工作原则：",
     "- 先用 file_list 了解目录结构，再决定读取或写入哪些文件。",
     "- 将复杂任务分解为清晰的步骤序列。",
     "- 每个工具调用返回结果后，分析结果再决定下一步。",
     "- 如果工具返回错误，先分析原因，尝试调整参数或方法。",
+    "- memory_search 和 conversation_search 只用于按需回忆；每轮最多调用 3 次，避免把记忆检索当成循环动作。",
     "- 任务完成后给出结构清晰的中文摘要。",
     "",
     "输出语言：默认使用中文输出最终消息、报告正文和用户可见摘要。",

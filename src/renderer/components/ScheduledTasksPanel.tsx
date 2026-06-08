@@ -41,6 +41,10 @@ const defaultPermissionPolicy: TaskPermissionPolicy = {
   shell: {
     commands: [],
   },
+  memory: {
+    read: false,
+    write: false,
+  },
 };
 
 export function ScheduledTasksPanel() {
@@ -476,6 +480,40 @@ export function ScheduledTasksPanel() {
                 />
               </label>
             </div>
+            <div className="field-grid">
+              <label className="field checkbox-field">
+                <input
+                  checked={Boolean(permissionPolicy.memory?.read)}
+                  onChange={(event) =>
+                    setPermissionPolicy({
+                      ...permissionPolicy,
+                      memory: {
+                        read: event.currentTarget.checked,
+                        write: Boolean(permissionPolicy.memory?.write),
+                      },
+                    })
+                  }
+                  type="checkbox"
+                />
+                <span>允许读取本地记忆</span>
+              </label>
+              <label className="field checkbox-field">
+                <input
+                  checked={Boolean(permissionPolicy.memory?.write)}
+                  onChange={(event) =>
+                    setPermissionPolicy({
+                      ...permissionPolicy,
+                      memory: {
+                        read: Boolean(permissionPolicy.memory?.read),
+                        write: event.currentTarget.checked,
+                      },
+                    })
+                  }
+                  type="checkbox"
+                />
+                <span>允许写入本地记忆</span>
+              </label>
+            </div>
             <label className="field checkbox-field">
               <input
                 checked={permissionPolicy.web.search}
@@ -783,8 +821,10 @@ function summarizePermissions(policy: TaskPermissionPolicy): string {
   const fileCount = policy.files.read.length + policy.files.write.length;
   const webCount = policy.web.fetchDomains.length + (policy.web.search ? 1 : 0);
   const shellCount = policy.shell.commands.length;
+  const memoryCount =
+    (policy.memory?.read ? 1 : 0) + (policy.memory?.write ? 1 : 0);
 
-  return `${fileCount} 个文件权限 / ${webCount} 个网页权限 / ${shellCount} 个命令权限`;
+  return `${fileCount} 个文件权限 / ${memoryCount} 个记忆权限 / ${webCount} 个网页权限 / ${shellCount} 个命令权限`;
 }
 
 function translateRunStatus(status: AgentRunRecord["status"]): string {

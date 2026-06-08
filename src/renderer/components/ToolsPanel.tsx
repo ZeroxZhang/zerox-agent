@@ -256,6 +256,8 @@ function defaultArgsJson(toolName: AgentToolName): string {
     file_list: { path: "~/Downloads" },
     file_read: { path: "~/Downloads/notes.md" },
     file_write: { path: "~/Downloads/reports/today.md" },
+    memory_search: { query: "下载目录偏好", kind: "all", limit: "5" },
+    conversation_search: { query: "报告 保存", limit: "5" },
     web_search: { query: "智能体记忆设计" },
     web_fetch: { url: "https://example.com" },
     shell_exec: { command: "find ~/Downloads -maxdepth 1 -type f" },
