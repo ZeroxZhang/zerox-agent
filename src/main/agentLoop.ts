@@ -195,7 +195,36 @@ export async function runAgentLoop(
     }
 
     if (!summary && turns >= maxTurns) {
-      summary = "Agent loop reached maximum turns.";
+      onTurn?.(turns, "finalizing");
+      messages.push({
+        role: "system",
+        content: buildTurnLimitFinalizationPrompt(maxTurns, toolCallsExecuted),
+      });
+
+      try {
+        const response = await chatClient.complete({
+          ...modelProfile,
+          messages,
+          ...(signal ? { signal } : {}),
+        });
+
+        if (response.content) {
+          summary = `已达到工具调用轮次上限，我先基于已有结果给出阶段性总结：\n\n${response.content}`;
+          status = "succeeded";
+          messages.push({
+            role: "assistant",
+            content: response.content,
+          });
+        } else {
+          summary = buildTurnLimitFallbackSummary(maxTurns, toolCallsExecuted);
+          status = "failed";
+        }
+      } catch (error) {
+        summary = `${buildTurnLimitFallbackSummary(maxTurns, toolCallsExecuted)}${
+          error instanceof Error ? ` 总结生成失败：${error.message}` : ""
+        }`;
+        status = "failed";
+      }
     }
   } catch (error) {
     if (signal?.aborted) {
@@ -214,4 +243,23 @@ export async function runAgentLoop(
     messages,
     toolCallsExecuted,
   };
+}
+
+function buildTurnLimitFinalizationPrompt(
+  maxTurns: number,
+  toolCallsExecuted: number,
+): string {
+  return [
+    `工具调用轮次已达到上限（${maxTurns} 轮，已执行 ${toolCallsExecuted} 个工具）。`,
+    "现在不要再调用工具。",
+    "请只基于当前对话和已有工具结果，用中文给用户一个简洁的阶段性总结。",
+    "如果任务还没完成，请说明已完成什么、卡在哪里、建议用户如何缩小范围或继续下一步。",
+  ].join("\n");
+}
+
+function buildTurnLimitFallbackSummary(
+  maxTurns: number,
+  toolCallsExecuted: number,
+): string {
+  return `已达到工具调用轮次上限（${maxTurns} 轮，已执行 ${toolCallsExecuted} 个工具）。请把任务拆小一点，或补充更明确的目标后重试。`;
 }
