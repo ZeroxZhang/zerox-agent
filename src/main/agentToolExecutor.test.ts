@@ -72,6 +72,58 @@ describe("agent tool executor", () => {
     });
   });
 
+  it("returns file metadata without using shell commands", async () => {
+    const filePath = path.join(tempDir, "notes.md");
+    await writeFile(filePath, "hello runner", "utf8");
+    const executor = createAgentToolExecutor();
+
+    await expect(
+      executor.execute({
+        toolName: "file_stat",
+        args: { path: filePath },
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      result: {
+        path: filePath,
+        type: "file",
+        size: 12,
+      },
+    });
+  });
+
+  it("searches filenames and small text files without falling back to shell", async () => {
+    await mkdir(path.join(tempDir, "reports"));
+    await writeFile(
+      path.join(tempDir, "reports", "today.md"),
+      "尾盘筛选报告\n候选：测试股份",
+      "utf8",
+    );
+    await writeFile(path.join(tempDir, "notes.txt"), "普通笔记", "utf8");
+    const executor = createAgentToolExecutor();
+
+    await expect(
+      executor.execute({
+        toolName: "file_search",
+        args: { root: tempDir, query: "候选", mode: "content", maxResults: 5 },
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      result: {
+        root: tempDir,
+        query: "候选",
+        results: [
+          {
+            path: path.join(tempDir, "reports", "today.md"),
+            type: "content",
+            line: 2,
+            preview: "候选：测试股份",
+          },
+        ],
+      },
+    });
+  });
+
   it("writes a local text file and creates parent directories", async () => {
     const filePath = path.join(tempDir, "reports", "today.md");
     const executor = createAgentToolExecutor();
@@ -99,7 +151,7 @@ describe("agent tool executor", () => {
         toolName: "shell_exec",
         args: { command: "printf runner" },
       }),
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       ok: true,
       result: {
         command: "printf runner",
@@ -131,6 +183,74 @@ describe("agent tool executor", () => {
       ok: true,
       result: {
         stdout: `${resolvedTempDir}\n`,
+      },
+    });
+  });
+
+  it("returns structured diagnostics when a shell command fails without output", async () => {
+    const executor = createAgentToolExecutor();
+    const command = `${JSON.stringify(process.execPath)} -e "process.exit(1)"`;
+
+    const result = await executor.execute({
+      toolName: "shell_exec",
+      args: { command },
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("退出码 1"),
+      errorDetails: {
+        kind: "empty_exit",
+        command,
+        exitCode: 1,
+        stdout: "",
+        stderr: "",
+      },
+    });
+  });
+
+  it("supports bounded custom shell timeouts with actionable diagnostics", async () => {
+    const executor = createAgentToolExecutor();
+    const command = `${JSON.stringify(process.execPath)} -e "setTimeout(() => {}, 500)"`;
+
+    const result = await executor.execute({
+      toolName: "shell_exec",
+      args: { command, timeoutMs: 25 },
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("超时"),
+      errorDetails: {
+        kind: "timeout",
+        command,
+        timeoutMs: 25,
+      },
+    });
+  });
+
+  it("aborts running shell commands through the execution signal", async () => {
+    const executor = createAgentToolExecutor();
+    const controller = new AbortController();
+    const command = `${JSON.stringify(process.execPath)} -e "setTimeout(() => {}, 1000)"`;
+    setTimeout(() => controller.abort(), 25);
+
+    const result = await executor.execute(
+      {
+        toolName: "shell_exec",
+        args: { command, timeoutMs: 1000 },
+      },
+      {
+        signal: controller.signal,
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("已中断"),
+      errorDetails: {
+        kind: "canceled",
+        command,
       },
     });
   });

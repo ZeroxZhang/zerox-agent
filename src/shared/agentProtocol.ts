@@ -24,11 +24,14 @@ export type ToolObservation = {
   ok: boolean;
   result?: Record<string, unknown>;
   error?: string;
+  errorDetails?: Record<string, unknown>;
   toolCallId?: string;
 };
 
 const supportedTools = new Set<AgentToolName>([
   "file_list",
+  "file_stat",
+  "file_search",
   "file_read",
   "file_write",
   "memory_search",
@@ -55,6 +58,55 @@ export function buildToolDefinitions(): ToolDefinition[] {
             },
           },
           required: ["path"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "file_stat",
+        description:
+          "读取文件或目录的元信息（类型、大小、修改时间），不读取文件内容。适合先判断路径是否存在、文件大小和类型。",
+        parameters: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "要检查的文件或目录绝对路径",
+            },
+          },
+          required: ["path"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "file_search",
+        description:
+          "在目录内搜索文件名或小文本文件内容，避免为 find/grep 这类简单检索调用 shell。默认跳过大型文件和常见依赖目录。",
+        parameters: {
+          type: "object",
+          properties: {
+            root: {
+              type: "string",
+              description: "要搜索的目录绝对路径",
+            },
+            query: {
+              type: "string",
+              description: "要匹配的关键词",
+            },
+            mode: {
+              type: "string",
+              enum: ["name", "content", "both"],
+              description: "搜索模式，默认 both",
+            },
+            maxResults: {
+              type: "number",
+              description: "最多返回结果数，默认 20，最大 100",
+            },
+          },
+          required: ["root", "query"],
         },
       },
     },
@@ -192,13 +244,17 @@ export function buildToolDefinitions(): ToolDefinition[] {
       function: {
         name: "shell_exec",
         description:
-          "执行 shell 命令。默认超时 30 秒。仅允许执行已授权模板匹配的命令。",
+          "执行 shell 命令。默认超时 120 秒，可用 timeoutMs 为明确的长命令申请 25-600000 ms。仅允许执行已授权模板匹配的命令。优先使用 file_stat/file_search/file_read 等原生工具完成文件诊断。",
         parameters: {
           type: "object",
           properties: {
             command: {
               type: "string",
               description: "要执行的完整 shell 命令",
+            },
+            timeoutMs: {
+              type: "number",
+              description: "可选超时时间，范围 25-600000 ms，默认 120000 ms",
             },
           },
           required: ["command"],
@@ -211,10 +267,10 @@ export function buildToolDefinitions(): ToolDefinition[] {
 export function buildAgentSystemPrompt(): string {
   return [
     "你是一个本地桌面 AI agent 的运行时核心。",
-    "你可以调用工具来完成任务：列出目录、读写文件、检索本地记忆、搜索网页、抓取网页内容、执行受权 shell 命令。",
+    "你可以调用工具来完成任务：列出目录、读取元信息、搜索文件、读写文件、检索本地记忆、搜索网页、抓取网页内容、执行受权 shell 命令。",
     "",
     "工作原则：",
-    "- 先用 file_list 了解目录结构，再决定读取或写入哪些文件。",
+    "- 文件诊断优先使用 file_list、file_stat、file_search、file_read；只有原生工具无法完成时再使用 shell_exec。",
     "- 将复杂任务分解为清晰的步骤序列。",
     "- 每个工具调用返回结果后，分析结果再决定下一步。",
     "- 如果工具返回错误，先分析原因，尝试调整参数或方法。",
@@ -430,6 +486,9 @@ export function serializeToolObservation(
     ok: observation.ok,
     ...(observation.result ? { result: observation.result } : {}),
     ...(observation.error ? { error: observation.error } : {}),
+    ...(observation.errorDetails
+      ? { error_details: observation.errorDetails }
+      : {}),
     ...(observation.toolCallId ? { tool_call_id: observation.toolCallId } : {}),
   });
 }

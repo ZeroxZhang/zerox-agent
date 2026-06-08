@@ -3,7 +3,7 @@ import type { AgentToolName } from "../shared/toolPermissions";
 
 export type AgentToolExecutionResult =
   | { ok: true; result: Record<string, unknown> }
-  | { ok: false; error: string };
+  | { ok: false; error: string; errorDetails?: Record<string, unknown> };
 
 export type ToolHandler = (
   args: Record<string, unknown>,

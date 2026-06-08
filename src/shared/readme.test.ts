@@ -14,7 +14,7 @@ describe("README", () => {
     expect(readme).toContain("npm run pack:mac");
     expect(readme).toContain("npm run dist:mac");
     expect(readme).toContain("xattr -dr com.apple.quarantine");
-    expect(readme).toContain("Zerox\\ Agent-1.2.2-arm64.dmg");
+    expect(readme).toContain("Zerox\\ Agent-1.2.3-arm64.dmg");
     expect(readme).toContain("首次启动引导");
     expect(readme).toContain("一键验收运行");
     expect(readme).toContain("桌面端完整验收");

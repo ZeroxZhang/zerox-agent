@@ -87,9 +87,11 @@ describe("agent JSON protocol", () => {
   it("builds tool definitions with JSON Schema for built-in tools", () => {
     const definitions = buildToolDefinitions();
 
-    expect(definitions).toHaveLength(8);
+    expect(definitions).toHaveLength(10);
     const names = definitions.map((d) => d.function.name);
     expect(names).toContain("file_list");
+    expect(names).toContain("file_stat");
+    expect(names).toContain("file_search");
     expect(names).toContain("file_read");
     expect(names).toContain("file_write");
     expect(names).toContain("memory_search");

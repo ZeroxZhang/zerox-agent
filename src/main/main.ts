@@ -8,6 +8,7 @@ import {
   safeStorage,
   Tray,
 } from "electron";
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { getAgentValidationModeOptions } from "./agentValidationMode";
@@ -171,6 +172,8 @@ import type { AgentWorkspace, MultiAgentSession } from "../shared/agentWorkspace
 import type {
   ChatSessionListItem,
   ChatSessionRecord,
+  ChatTaskStatusEvent,
+  CancelChatMessageResult,
   SendChatMessageInput,
   SendChatMessageResult,
 } from "../shared/chat";
@@ -232,6 +235,7 @@ let agentValidationStore: AgentValidationStore | null = null;
 let taskSchedulerTimer: NodeJS.Timeout | null = null;
 let memoryMaintenanceTimer: NodeJS.Timeout | null = null;
 const activeTaskRunControllers = new Map<string, AbortController>();
+const activeChatMessageControllers = new Map<string, AbortController>();
 const activeMcpClients: McpClient[] = [];
 let mcpInitialized = false;
 
@@ -679,9 +683,62 @@ ipcMain.handle(
 ipcMain.handle(
   "chat:sendMessage",
   async (
-    _event,
+    event,
     input: SendChatMessageInput,
-  ): Promise<SendChatMessageResult> => getChatService().sendMessage(input),
+  ): Promise<SendChatMessageResult> => {
+    const sender = event.sender;
+    const requestId = input.requestId ?? randomUUID();
+    const controller = new AbortController();
+    activeChatMessageControllers.set(requestId, controller);
+
+    try {
+      return await getChatService().sendMessage(input, {
+        signal: controller.signal,
+        onStatusEvent(statusEvent: ChatTaskStatusEvent) {
+          if (!sender.isDestroyed()) {
+            sender.send("chat:statusEvent", statusEvent);
+          }
+        },
+      });
+    } finally {
+      activeChatMessageControllers.delete(requestId);
+    }
+  },
+);
+ipcMain.handle(
+  "chat:cancelMessage",
+  (_event, requestId?: string): CancelChatMessageResult => {
+    if (requestId) {
+      const controller = activeChatMessageControllers.get(requestId);
+      if (controller) {
+        controller.abort();
+        return {
+          ok: true,
+          message: "已请求中断任务。",
+        };
+      }
+    }
+
+    let canceledCount = 0;
+    for (const controller of activeChatMessageControllers.values()) {
+      if (!controller.signal.aborted) {
+        controller.abort();
+        canceledCount += 1;
+      }
+    }
+
+    if (canceledCount === 0) {
+      return {
+        ok: false,
+        message: "没有正在运行的会话任务。",
+      };
+    }
+
+    return {
+      ok: true,
+      message: `已请求中断 ${canceledCount} 个任务。`,
+    };
+  },
 );
 ipcMain.handle(
   "chatSessions:list",

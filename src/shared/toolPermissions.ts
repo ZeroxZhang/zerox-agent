@@ -4,6 +4,8 @@ import type { SkillManifest } from "./skills";
 
 export type AgentToolName =
   | "file_list"
+  | "file_stat"
+  | "file_search"
   | "file_read"
   | "file_write"
   | "memory_search"
@@ -176,6 +178,18 @@ export function authorizeToolCall(
         normalized.files.read,
         "file_list 路径不在已授权可读目录内。",
       );
+    case "file_stat":
+      return authorizeFilePath(
+        String(request.args.path ?? ""),
+        normalized.files.read,
+        "file_stat 路径不在已授权可读目录内。",
+      );
+    case "file_search":
+      return authorizeFilePath(
+        String(request.args.root ?? ""),
+        normalized.files.read,
+        "file_search 根目录不在已授权可读目录内。",
+      );
     case "file_read":
       return authorizeFilePath(
         String(request.args.path ?? ""),
@@ -260,12 +274,22 @@ function authorizeWorkspaceFileRequest(
   request: ToolCallRequest,
   runContext: AgentRunContext,
 ): ToolAuthorizationDecision | null {
-  if (request.toolName !== "file_list" && request.toolName !== "file_read" && request.toolName !== "file_write") {
+  if (
+    request.toolName !== "file_list" &&
+    request.toolName !== "file_stat" &&
+    request.toolName !== "file_search" &&
+    request.toolName !== "file_read" &&
+    request.toolName !== "file_write"
+  ) {
     return null;
   }
 
   const access = request.toolName === "file_write" ? "write" : "read";
-  const requestedPath = String(request.args.path ?? "");
+  const requestedPath = String(
+    request.toolName === "file_search"
+      ? request.args.root ?? ""
+      : request.args.path ?? "",
+  );
   if (!requestedPath) {
     return null;
   }

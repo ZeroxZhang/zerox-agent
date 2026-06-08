@@ -25,4 +25,13 @@ describe("agent work status", () => {
       true,
     );
   });
+
+  it("keeps the final step active while a long task is paused", () => {
+    expect(buildAgentWorkSteps("paused")).toMatchObject([
+      { label: "理解请求", status: "done" },
+      { label: "检索记忆", status: "done" },
+      { label: "调用模型", status: "done" },
+      { label: "整理回复", status: "active" },
+    ]);
+  });
 });

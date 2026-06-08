@@ -185,6 +185,92 @@ describe("agent loop", () => {
       toolCallsExecuted: 2,
     });
   });
+
+  it("can pause at a turn checkpoint instead of ending the task", async () => {
+    const requests: ChatCompletionRequest[] = [];
+    const chatClient: ChatClient = {
+      async complete(request) {
+        requests.push(request);
+        return toolCallResponse(
+          `tool_call_${requests.length}`,
+          `/tmp/path_${requests.length}`,
+        );
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "检查这个目录并告诉我结果" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(),
+        maxTurns: 2,
+        pauseOnTurnLimit: true,
+        tools: testTools,
+      },
+    );
+
+    expect(requests).toHaveLength(2);
+    expect(result).toMatchObject({
+      status: "paused",
+      turns: 2,
+      toolCallsExecuted: 2,
+      continuation: {
+        reason: "turn_limit",
+        maxTurns: 2,
+        toolCallsExecuted: 2,
+      },
+    });
+    expect(result.summary).toContain("已到达长任务检查点");
+    expect(result.summary).toContain("等待你确认");
+    expect(result.summary).not.toContain("请把任务拆小一点");
+  });
+
+  it("pauses when the model keeps hitting the same class of tool failure", async () => {
+    const requests: ChatCompletionRequest[] = [];
+    const chatClient: ChatClient = {
+      async complete(request) {
+        requests.push(request);
+        return toolCallResponse(
+          `tool_call_${requests.length}`,
+          `/tmp/path_${requests.length}`,
+        );
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "运行一个会静默失败的脚本" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(undefined, undefined, {
+          ok: false,
+          error: "shell_exec 失败：退出码 1，未产生 stdout/stderr。",
+          errorDetails: {
+            kind: "empty_exit",
+            tool: "shell_exec",
+            exitCode: 1,
+          },
+        }),
+        maxTurns: 6,
+        pauseOnFailureLoop: true,
+        tools: testTools,
+      },
+    );
+
+    expect(requests).toHaveLength(3);
+    expect(result).toMatchObject({
+      status: "paused",
+      turns: 2,
+      toolCallsExecuted: 3,
+      continuation: {
+        reason: "tool_failure_loop",
+        toolCallsExecuted: 3,
+      },
+    });
+    expect(result.summary).toContain("连续 3 次工具失败");
+    expect(result.summary).toContain("file_list");
+  });
 });
 
 function toolCallResponse(id: string, path = "/tmp"): ChatCompletionResponse {
@@ -206,14 +292,18 @@ function toolCallResponse(id: string, path = "/tmp"): ChatCompletionResponse {
 
 function createToolExecutor(
   onExecute?: () => void,
-  result: Record<string, unknown> = { files: ["a.txt", "b.txt"] },
+  result: Record<string, unknown> | undefined = { files: ["a.txt", "b.txt"] },
+  forcedResult?: Awaited<ReturnType<AgentToolExecutor["execute"]>>,
 ): AgentToolExecutor {
   return {
     async execute() {
       onExecute?.();
+      if (forcedResult) {
+        return forcedResult;
+      }
       return {
         ok: true,
-        result,
+        result: result ?? {},
       };
     },
     getRegistry() {

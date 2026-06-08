@@ -6,8 +6,10 @@ import type {
   ValidateAgentResult,
 } from "../shared/agentBootstrap";
 import type {
+  CancelChatMessageResult,
   ChatSessionListItem,
   ChatSessionRecord,
+  ChatTaskStatusEvent,
   SendChatMessageInput,
   SendChatMessageResult,
 } from "../shared/chat";
@@ -163,6 +165,20 @@ const buildingAgent = {
     input: SendChatMessageInput,
   ): Promise<SendChatMessageResult> =>
     ipcRenderer.invoke("chat:sendMessage", input),
+  cancelChatMessage: (
+    requestId?: string,
+  ): Promise<CancelChatMessageResult> =>
+    ipcRenderer.invoke("chat:cancelMessage", requestId),
+  onChatTaskStatusEvent: (callback: (event: ChatTaskStatusEvent) => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      data: ChatTaskStatusEvent,
+    ) => callback(data);
+    ipcRenderer.on("chat:statusEvent", handler);
+    return () => {
+      ipcRenderer.removeListener("chat:statusEvent", handler);
+    };
+  },
   listChatSessions: (): Promise<ChatSessionListItem[]> =>
     ipcRenderer.invoke("chatSessions:list"),
   getChatSession: (sessionId: string): Promise<ChatSessionRecord | null> =>

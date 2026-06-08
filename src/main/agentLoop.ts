@@ -24,17 +24,35 @@ export type AgentLoopOptions = {
   tools?: ReturnType<typeof buildToolDefinitions>;
   toolResultOffloadStore?: ToolResultOffloadStore;
   toolResultOffloadThreshold?: number;
+  pauseOnTurnLimit?: boolean;
+  resumeMessages?: ChatMessage[];
+  initialToolCallsExecuted?: number;
+  pauseOnFailureLoop?: boolean;
   onToolCall?: (toolName: string, args: Record<string, unknown>) => void;
-  onToolResult?: (toolName: string, ok: boolean) => void;
+  onToolResult?: (
+    toolName: string,
+    ok: boolean,
+    result: Awaited<ReturnType<AgentToolExecutor["execute"]>>,
+  ) => void;
   onTurn?: (turn: number, phase: string) => void;
+  onReasoning?: (reasoningContent: string, turn: number) => void;
+};
+
+export type AgentLoopContinuation = {
+  reason: "turn_limit" | "tool_failure_loop";
+  maxTurns: number;
+  toolCallsExecuted: number;
+  toolName?: string;
+  failureKind?: string;
 };
 
 export type AgentLoopResult = {
   summary: string;
-  status: "succeeded" | "failed" | "canceled";
+  status: "succeeded" | "failed" | "canceled" | "paused";
   turns: number;
   messages: ChatMessage[];
   toolCallsExecuted: number;
+  continuation?: AgentLoopContinuation;
 };
 
 export async function runAgentLoop(
@@ -59,32 +77,44 @@ export async function runAgentLoop(
     tools: customTools,
     toolResultOffloadStore,
     toolResultOffloadThreshold,
+    pauseOnTurnLimit = false,
+    resumeMessages,
+    initialToolCallsExecuted = 0,
+    pauseOnFailureLoop = false,
     onToolCall,
     onToolResult,
     onTurn,
+    onReasoning,
   } = options;
 
   const toolDefinitions = customTools ?? buildToolDefinitions();
-  const messages: ChatMessage[] = [];
+  const messages: ChatMessage[] = resumeMessages ? [...resumeMessages] : [];
 
-  // Add system prompt
-  if (systemPrompt) {
-    messages.push({ role: "system", content: systemPrompt });
-  } else {
-    messages.push({
-      role: "system",
-      content: buildAgentSystemPrompt(),
-    });
+  if (!resumeMessages) {
+    if (systemPrompt) {
+      messages.push({ role: "system", content: systemPrompt });
+    } else {
+      messages.push({
+        role: "system",
+        content: buildAgentSystemPrompt(),
+      });
+    }
+
+    messages.push(...initialMessages);
   }
-
-  // Add initial messages
-  messages.push(...initialMessages);
 
   let summary = "";
   let status: AgentLoopResult["status"] = "failed";
   let turns = 0;
-  let toolCallsExecuted = 0;
-  let lastExecutedToolSignature: string | null = null;
+  let toolCallsExecuted = Math.max(0, Math.floor(initialToolCallsExecuted));
+  let continuation: AgentLoopContinuation | undefined;
+  let lastExecutedToolSignature: string | null =
+    findLastExecutedToolSignature(messages);
+  let toolFailureStreak: {
+    toolName: string;
+    kind: string;
+    count: number;
+  } | null = null;
 
   async function finalizeWithoutTools(options: {
     prompt: string;
@@ -140,6 +170,9 @@ export async function runAgentLoop(
         tool_choice: "auto",
         ...(signal ? { signal } : {}),
       });
+      if (response.reasoningContent) {
+        onReasoning?.(response.reasoningContent, turns + 1);
+      }
 
       // No tool calls + content → final
       if (!response.toolCalls.length && response.content) {
@@ -238,7 +271,10 @@ export async function runAgentLoop(
                   toolCallId: toolCall.id,
                 }),
               });
-              onToolResult?.(toolName, false);
+              onToolResult?.(toolName, false, {
+                ok: false,
+                error: auth.ok ? auth.decision.reason : auth.message,
+              });
               continue;
             }
           }
@@ -249,11 +285,19 @@ export async function runAgentLoop(
           const result = await toolExecutor.execute({
             toolName: toolName as never,
             args,
+          }, {
+            ...(signal ? { signal } : {}),
           });
 
           toolCallsExecuted += 1;
           lastExecutedToolSignature = signature;
-          onToolResult?.(toolName, result.ok);
+          onToolResult?.(toolName, result.ok, result);
+          const failureLoop = updateToolFailureStreak(
+            toolFailureStreak,
+            toolName,
+            result,
+          );
+          toolFailureStreak = failureLoop.streak;
 
           const serializedObservation =
             await serializeToolObservationWithOffload({
@@ -261,7 +305,19 @@ export async function runAgentLoop(
               ok: result.ok,
               ...(result.ok
                 ? { result: (result as { result: Record<string, unknown> }).result }
-                : { error: (result as { error: string }).error }),
+                : {
+                    error: (result as { error: string }).error,
+                    ...((result as { errorDetails?: Record<string, unknown> })
+                      .errorDetails
+                      ? {
+                          errorDetails: (
+                            result as {
+                              errorDetails: Record<string, unknown>;
+                            }
+                          ).errorDetails,
+                        }
+                      : {}),
+                  }),
               toolCallId: toolCall.id,
             }, {
               store: toolResultOffloadStore,
@@ -274,6 +330,33 @@ export async function runAgentLoop(
             tool_call_id: toolCall.id,
             content: serializedObservation.content,
           });
+
+          if (
+            pauseOnFailureLoop &&
+            failureLoop.shouldPause &&
+            !result.ok
+          ) {
+            const failureKind = failureLoop.streak?.kind ?? "unknown";
+            status = "paused";
+            continuation = {
+              reason: "tool_failure_loop",
+              maxTurns,
+              toolCallsExecuted,
+              toolName,
+              failureKind,
+            };
+            summary = buildToolFailureLoopPauseSummary({
+              toolName,
+              failureKind,
+              toolCallsExecuted,
+              count: failureLoop.streak?.count ?? 3,
+            });
+            break;
+          }
+        }
+
+        if (status === "paused") {
+          break;
         }
 
         continue;
@@ -285,11 +368,22 @@ export async function runAgentLoop(
     }
 
     if (!summary && turns >= maxTurns) {
-      await finalizeWithoutTools({
-        prompt: buildTurnLimitFinalizationPrompt(maxTurns, toolCallsExecuted),
-        summaryPrefix: "已达到工具调用轮次上限，我先基于已有结果给出阶段性总结：",
-        fallbackSummary: buildTurnLimitFallbackSummary(maxTurns, toolCallsExecuted),
-      });
+      if (pauseOnTurnLimit) {
+        status = "paused";
+        continuation = {
+          reason: "turn_limit",
+          maxTurns,
+          toolCallsExecuted,
+        };
+        summary = buildTurnLimitPauseSummary(maxTurns, toolCallsExecuted);
+        onTurn?.(turns, "paused");
+      } else {
+        await finalizeWithoutTools({
+          prompt: buildTurnLimitFinalizationPrompt(maxTurns, toolCallsExecuted),
+          summaryPrefix: "已达到工具调用轮次上限，我先基于已有结果给出阶段性总结：",
+          fallbackSummary: buildTurnLimitFallbackSummary(maxTurns, toolCallsExecuted),
+        });
+      }
     }
   } catch (error) {
     if (signal?.aborted) {
@@ -307,7 +401,83 @@ export async function runAgentLoop(
     turns,
     messages,
     toolCallsExecuted,
+    ...(continuation ? { continuation } : {}),
   };
+}
+
+function buildToolFailureLoopPauseSummary(options: {
+  toolName: string;
+  failureKind: string;
+  toolCallsExecuted: number;
+  count: number;
+}): string {
+  return [
+    `连续 ${options.count} 次工具失败（${options.toolName}，${options.failureKind}）。`,
+    `我已经暂停，避免继续在同一个失败模式里空转。累计执行 ${options.toolCallsExecuted} 个工具。`,
+    "你可以回复“继续”让我带着已有诊断接着试，也可以调整目标、提供脚本参数或要求我换一种工具路径。",
+  ].join("\n");
+}
+
+function updateToolFailureStreak(
+  current: {
+    toolName: string;
+    kind: string;
+    count: number;
+  } | null,
+  toolName: string,
+  result: Awaited<ReturnType<AgentToolExecutor["execute"]>>,
+): {
+  streak: {
+    toolName: string;
+    kind: string;
+    count: number;
+  } | null;
+  shouldPause: boolean;
+} {
+  if (result.ok) {
+    return { streak: null, shouldPause: false };
+  }
+
+  const kind = normalizeToolFailureKind(result);
+  const count =
+    current && current.toolName === toolName && current.kind === kind
+      ? current.count + 1
+      : 1;
+  const streak = { toolName, kind, count };
+
+  return {
+    streak,
+    shouldPause: count >= 3,
+  };
+}
+
+function normalizeToolFailureKind(
+  result: Extract<
+    Awaited<ReturnType<AgentToolExecutor["execute"]>>,
+    { ok: false }
+  >,
+): string {
+  const detailKind = result.errorDetails?.kind;
+  if (typeof detailKind === "string" && detailKind.trim()) {
+    return detailKind.trim();
+  }
+  if (/timeout|超时/i.test(result.error)) return "timeout";
+  if (/中断|cancel|abort/i.test(result.error)) return "canceled";
+  if (/stdout\/stderr|no stdout|no stderr|无 stdout/i.test(result.error)) {
+    return "empty_exit";
+  }
+  return "tool_error";
+}
+
+function buildTurnLimitPauseSummary(
+  maxTurns: number,
+  toolCallsExecuted: number,
+): string {
+  return [
+    `已到达长任务检查点（本轮 ${maxTurns} 轮，累计执行 ${toolCallsExecuted} 个工具）。`,
+    "我已经暂停在当前上下文里，等待你确认下一步。",
+    "回复“继续”会从已有工具结果接着执行；也可以告诉我调整方向或停止。",
+  ].join("\n");
 }
 
 function buildTurnLimitFinalizationPrompt(
@@ -355,6 +525,29 @@ function createToolCallSignature(
   args: Record<string, unknown>,
 ): string {
   return `${toolName}:${stableStringify(args)}`;
+}
+
+function findLastExecutedToolSignature(messages: ChatMessage[]): string | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role !== "assistant" || message.tool_calls?.length !== 1) {
+      continue;
+    }
+
+    const toolCall = message.tool_calls[0];
+    if (!toolCall) {
+      continue;
+    }
+
+    try {
+      const args = JSON.parse(toolCall.function.arguments) as Record<string, unknown>;
+      return createToolCallSignature(toolCall.function.name, args);
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
 }
 
 function stableStringify(value: unknown): string {

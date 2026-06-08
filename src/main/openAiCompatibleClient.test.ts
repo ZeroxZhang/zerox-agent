@@ -134,6 +134,42 @@ describe("OpenAI-compatible chat client", () => {
     expect(body.tool_choice).toBe("auto");
   });
 
+  it("returns provider-supplied reasoning content when present", async () => {
+    const client = createOpenAiCompatibleClient({
+      fetch: async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  reasoning_content: "我正在比较用户目标与可用工具。",
+                  content: "OK",
+                },
+                finish_reason: "stop",
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    });
+
+    await expect(
+      client.complete({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret-key",
+        model: "agent-model",
+        temperature: 0.2,
+        maxTokens: 8192,
+        messages: [{ role: "user", content: "Run" }],
+      }),
+    ).resolves.toEqual({
+      content: "OK",
+      toolCalls: [],
+      finishReason: "stop",
+      reasoningContent: "我正在比较用户目标与可用工具。",
+    });
+  });
+
   it("throws a compact error when the provider returns a non-2xx response", async () => {
     const client = createOpenAiCompatibleClient({
       fetch: async () =>

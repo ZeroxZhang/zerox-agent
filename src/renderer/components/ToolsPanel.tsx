@@ -17,6 +17,8 @@ type ToolsStatus =
 
 const toolOptions: Array<{ name: AgentToolName; label: string }> = [
   { name: "file_list", label: "列出目录 (file_list)" },
+  { name: "file_stat", label: "文件元信息 (file_stat)" },
+  { name: "file_search", label: "搜索文件 (file_search)" },
   { name: "file_read", label: "读取文件 (file_read)" },
   { name: "file_write", label: "写入文件 (file_write)" },
   { name: "web_search", label: "网页搜索 (web_search)" },
@@ -254,6 +256,8 @@ export function ToolsPanel() {
 function defaultArgsJson(toolName: AgentToolName): string {
   const defaults: Record<AgentToolName, Record<string, string>> = {
     file_list: { path: "~/Downloads" },
+    file_stat: { path: "~/Downloads/notes.md" },
+    file_search: { root: "~/Downloads", query: "report", mode: "both" },
     file_read: { path: "~/Downloads/notes.md" },
     file_write: { path: "~/Downloads/reports/today.md" },
     memory_search: { query: "下载目录偏好", kind: "all", limit: "5" },

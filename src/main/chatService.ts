@@ -15,7 +15,9 @@ import type { ChatClient, ChatMessage } from "./openAiCompatibleClient";
 import type { ScheduledTaskStore } from "./taskStore";
 import type { ToolAuthorizationService } from "./toolAuthorizationService";
 import type {
+  ChatAgentStatus,
   ChatRelatedMemory,
+  ChatTaskStatusEvent,
   SendChatMessageInput,
   SendChatMessageResult,
 } from "../shared/chat";
@@ -30,7 +32,21 @@ import {
 import { describeSchedule } from "../shared/scheduledTasks";
 
 export type ChatService = {
-  sendMessage(input: SendChatMessageInput): Promise<SendChatMessageResult>;
+  sendMessage(
+    input: SendChatMessageInput,
+    options?: SendChatMessageRuntimeOptions,
+  ): Promise<SendChatMessageResult>;
+};
+
+export type SendChatMessageRuntimeOptions = {
+  signal?: AbortSignal;
+  onStatusEvent?: (event: ChatTaskStatusEvent) => void;
+};
+
+type ChatContinuationState = {
+  messages: ChatMessage[];
+  maxTurns: number;
+  toolCallsExecuted: number;
 };
 
 export function createChatService(options: {
@@ -55,15 +71,23 @@ export function createChatService(options: {
   const memoryLimit = options.memoryLimit ?? 4;
   const historyLimit = options.historyLimit ?? 12;
   const agentLoopMaxTurns = normalizeAgentLoopMaxTurns(options.agentLoopMaxTurns);
+  const pendingContinuations = new Map<string, ChatContinuationState>();
 
   return {
-    async sendMessage(input) {
+    async sendMessage(input, runtimeOptions = {}) {
       const userMessage = input.message.trim();
       if (!userMessage) {
         return { ok: false, message: "消息不能为空。" };
       }
 
       let sessionId = input.sessionId ?? createId();
+      const startedAtMs = getNowMs(options.now);
+      const emitStatus = createChatStatusEmitter({
+        sessionId,
+        startedAtMs,
+        now: options.now,
+        onStatusEvent: runtimeOptions.onStatusEvent,
+      });
       let userMessageId: string | null = null;
       if (options.chatSessionStore) {
         const appendResult = await options.chatSessionStore.appendMessage({
@@ -72,95 +96,118 @@ export function createChatService(options: {
           content: userMessage,
         });
         sessionId = appendResult.session.id;
+        emitStatus.setSessionId(sessionId);
         userMessageId = appendResult.message.id;
       }
-      const intentRoute = classifyAgentIntent(userMessage);
-      const taskCreationResult = await tryCreateTaskFromIntent({
-        route: intentRoute,
-        taskStore: options.taskStore,
-      });
 
-      if (taskCreationResult) {
-        if (!taskCreationResult.ok) {
-          return taskCreationResult.result;
-        }
+      const pendingContinuation = pendingContinuations.get(sessionId);
+      const continuationToResume =
+        pendingContinuation && isContinuationRequest(userMessage)
+          ? pendingContinuation
+          : null;
 
-        const assistantMessageId = await appendAssistantMessage({
-          chatSessionStore: options.chatSessionStore,
-          sessionId,
-          content: taskCreationResult.result.reply,
-        });
-        const memoryId = await writeSessionMemory({
-          memoryStore: options.memoryStore,
-          sessionId,
-          userMessage,
-          reply: taskCreationResult.result.reply,
-          messageIds: compactMessageIds(userMessageId, assistantMessageId),
-        });
-        await writeAtomicMemories({
-          memoryStore: options.memoryStore,
-          memoryProfileStore: options.memoryProfileStore,
-          sessionId,
-          userMessageId,
-          assistantMessageId,
-          userMessage,
-          assistantReply: taskCreationResult.result.reply,
-        });
-
-        return {
-          ...taskCreationResult.result,
-          sessionId,
-          relatedMemories: [],
-          memoryId,
-        };
+      if (!continuationToResume && pendingContinuation) {
+        pendingContinuations.delete(sessionId);
       }
-      const taskRunResult = await tryRunTaskFromIntent({
-        route: intentRoute,
-        message: userMessage,
-        taskStore: options.taskStore,
-        runScheduledTask: options.runScheduledTask,
-      });
 
-      if (taskRunResult) {
-        if (!taskRunResult.ok) {
-          return taskRunResult.result;
+      if (!continuationToResume) {
+        const intentRoute = classifyAgentIntent(userMessage);
+        const taskCreationResult = await tryCreateTaskFromIntent({
+          route: intentRoute,
+          taskStore: options.taskStore,
+        });
+
+        if (taskCreationResult) {
+          if (!taskCreationResult.ok) {
+            return taskCreationResult.result;
+          }
+
+          const assistantMessageId = await appendAssistantMessage({
+            chatSessionStore: options.chatSessionStore,
+            sessionId,
+            content: taskCreationResult.result.reply,
+          });
+          const memoryId = await writeSessionMemory({
+            memoryStore: options.memoryStore,
+            sessionId,
+            userMessage,
+            reply: taskCreationResult.result.reply,
+            messageIds: compactMessageIds(userMessageId, assistantMessageId),
+          });
+          await writeAtomicMemories({
+            memoryStore: options.memoryStore,
+            memoryProfileStore: options.memoryProfileStore,
+            sessionId,
+            userMessageId,
+            assistantMessageId,
+            userMessage,
+            assistantReply: taskCreationResult.result.reply,
+          });
+
+          return {
+            ...taskCreationResult.result,
+            sessionId,
+            relatedMemories: [],
+            memoryId,
+          };
         }
-
-        const assistantMessageId = await appendAssistantMessage({
-          chatSessionStore: options.chatSessionStore,
-          sessionId,
-          content: taskRunResult.result.reply,
-          executedRunId: taskRunResult.result.executedRun?.id,
-        });
-        const memoryId = await writeSessionMemory({
-          memoryStore: options.memoryStore,
-          sessionId,
-          userMessage,
-          reply: taskRunResult.result.reply,
-          messageIds: compactMessageIds(userMessageId, assistantMessageId),
-        });
-        await writeAtomicMemories({
-          memoryStore: options.memoryStore,
-          memoryProfileStore: options.memoryProfileStore,
-          sessionId,
-          userMessageId,
-          assistantMessageId,
-          userMessage,
-          assistantReply: taskRunResult.result.reply,
+        const taskRunResult = await tryRunTaskFromIntent({
+          route: intentRoute,
+          message: userMessage,
+          taskStore: options.taskStore,
+          runScheduledTask: options.runScheduledTask,
         });
 
-        return {
-          ...taskRunResult.result,
-          sessionId,
-          relatedMemories: [],
-          memoryId,
-        };
+        if (taskRunResult) {
+          if (!taskRunResult.ok) {
+            return taskRunResult.result;
+          }
+
+          const assistantMessageId = await appendAssistantMessage({
+            chatSessionStore: options.chatSessionStore,
+            sessionId,
+            content: taskRunResult.result.reply,
+            executedRunId: taskRunResult.result.executedRun?.id,
+          });
+          const memoryId = await writeSessionMemory({
+            memoryStore: options.memoryStore,
+            sessionId,
+            userMessage,
+            reply: taskRunResult.result.reply,
+            messageIds: compactMessageIds(userMessageId, assistantMessageId),
+          });
+          await writeAtomicMemories({
+            memoryStore: options.memoryStore,
+            memoryProfileStore: options.memoryProfileStore,
+            sessionId,
+            userMessageId,
+            assistantMessageId,
+            userMessage,
+            assistantReply: taskRunResult.result.reply,
+          });
+
+          return {
+            ...taskRunResult.result,
+            sessionId,
+            relatedMemories: [],
+            memoryId,
+          };
+        }
       }
 
       let profile: AgentModelProfile;
       try {
+        emitStatus.send({
+          state: "started",
+          message: "正在读取模型配置",
+        });
         profile = await options.getModelProfile();
       } catch (error) {
+        emitStatus.send({
+          state: "failed",
+          message:
+            error instanceof Error ? error.message : "无法读取模型配置。",
+        });
         if (
           error instanceof Error &&
           error.message.includes("Model profile is incomplete")
@@ -179,24 +226,40 @@ export function createChatService(options: {
         };
       }
 
-      const relatedMemoryResults = await searchRelatedMemories({
-        memoryStore: options.memoryStore,
-        query: userMessage,
-        limit: memoryLimit,
-      });
-      const chatMessages = buildChatMessages({
-        userMessage,
-        history: input.history ?? [],
-        relatedMemoryResults,
-        historyLimit,
-      });
+      let relatedMemoryResults: MemorySearchResult[] = [];
+      let chatMessages: ChatMessage[] = [];
+      if (continuationToResume) {
+        chatMessages = buildContinuationMessages({
+          continuation: continuationToResume,
+          userMessage,
+        });
+      } else {
+        emitStatus.send({
+          state: "memory",
+          message: "正在检索相关记忆",
+        });
+        relatedMemoryResults = await searchRelatedMemories({
+          memoryStore: options.memoryStore,
+          query: userMessage,
+          limit: memoryLimit,
+        });
+        chatMessages = buildChatMessages({
+          userMessage,
+          history: input.history ?? [],
+          relatedMemoryResults,
+          historyLimit,
+        });
+      }
 
       let reply: string;
       let toolCallsUsed = 0;
+      let agentStatus: ChatAgentStatus | undefined;
 
       if (options.toolExecutor) {
         // Unified agent mode: chat goes through agent loop with tool access
         try {
+          let observedToolCallsExecuted =
+            continuationToResume?.toolCallsExecuted ?? 0;
           const loopResult = await runAgentLoop(
             chatMessages,
             profile,
@@ -206,19 +269,125 @@ export function createChatService(options: {
               toolAuthorizationService: options.toolAuthorizationService,
               systemPrompt: buildChatSystemPrompt(),
               maxTurns: agentLoopMaxTurns,
-              signal: undefined,
+              signal: runtimeOptions.signal,
               tools: options.toolExecutor.getRegistry().getDefinitions(),
               toolResultOffloadStore: options.toolResultOffloadStore,
               toolResultOffloadThreshold: options.toolResultOffloadThreshold,
+              pauseOnTurnLimit: true,
+              pauseOnFailureLoop: true,
+              ...(continuationToResume
+                ? {
+                    resumeMessages: chatMessages,
+                    initialToolCallsExecuted:
+                      continuationToResume.toolCallsExecuted,
+                  }
+                : {}),
+              onTurn(turn, phase) {
+                if (phase === "executing") {
+                  emitStatus.send({
+                    state: "model",
+                    message: `正在调用模型（第 ${turn + 1} 轮）`,
+                    turn: turn + 1,
+                    toolCallsExecuted: observedToolCallsExecuted,
+                  });
+                }
+              },
+              onReasoning(reasoningContent) {
+                emitStatus.send({
+                  state: "reasoning",
+                  message: normalizeReasoningForStatus(reasoningContent),
+                  toolCallsExecuted: observedToolCallsExecuted,
+                });
+              },
+              onToolCall(toolName) {
+                emitStatus.send({
+                  state: "tool_call",
+                  message: `正在调用工具：${toolName}`,
+                  toolName,
+                  toolCallsExecuted: observedToolCallsExecuted,
+                });
+              },
+              onToolResult(toolName, ok, result) {
+                observedToolCallsExecuted += 1;
+                emitStatus.send({
+                  state: "tool_result",
+                  message: buildToolResultStatusMessage(toolName, result),
+                  toolName,
+                  ok,
+                  toolCallsExecuted: observedToolCallsExecuted,
+                });
+              },
             },
           );
           reply = loopResult.summary;
           toolCallsUsed = loopResult.toolCallsExecuted;
 
+          if (loopResult.status === "canceled") {
+            emitStatus.send({
+              state: "canceled",
+              message: "任务已中断",
+              toolCallsExecuted: loopResult.toolCallsExecuted,
+            });
+            return {
+              ok: false,
+              message: "已中断任务。",
+            };
+          }
+
+          if (loopResult.status === "paused" && loopResult.continuation) {
+            pendingContinuations.set(sessionId, {
+              messages: loopResult.messages,
+              maxTurns: loopResult.continuation.maxTurns,
+              toolCallsExecuted: loopResult.continuation.toolCallsExecuted,
+            });
+            agentStatus = {
+              state: "paused",
+              reason: loopResult.continuation.reason,
+              maxTurns: loopResult.continuation.maxTurns,
+              toolCallsExecuted: loopResult.continuation.toolCallsExecuted,
+              message: loopResult.summary,
+            };
+            emitStatus.send({
+              state: "paused",
+              message:
+                loopResult.continuation.reason === "tool_failure_loop"
+                  ? "连续工具失败，等待确认"
+                  : "已到达检查点，等待确认",
+              maxTurns: loopResult.continuation.maxTurns,
+              toolCallsExecuted: loopResult.continuation.toolCallsExecuted,
+            });
+          } else {
+            pendingContinuations.delete(sessionId);
+            agentStatus = {
+              state: "completed",
+              toolCallsExecuted: loopResult.toolCallsExecuted,
+            };
+            emitStatus.send({
+              state: "completed",
+              message: "任务已完成",
+              toolCallsExecuted: loopResult.toolCallsExecuted,
+            });
+          }
+
           if (toolCallsUsed > 0) {
             reply = `🔧 使用了 ${toolCallsUsed} 个工具\n\n${reply}`;
           }
         } catch (error) {
+          if (isAbortError(error, runtimeOptions.signal)) {
+            emitStatus.send({
+              state: "canceled",
+              message: "任务已中断",
+            });
+            return {
+              ok: false,
+              message: "已中断任务。",
+            };
+          }
+          emitStatus.send({
+            state: "failed",
+            message:
+              error instanceof Error ? `Agent 执行失败：${error.message}` : "Agent 执行失败。",
+          });
           return {
             ok: false,
             message:
@@ -235,9 +404,37 @@ export function createChatService(options: {
           const response = await options.chatClient.complete({
             ...profile,
             messages,
+            ...(runtimeOptions.signal ? { signal: runtimeOptions.signal } : {}),
           });
+          if (response.reasoningContent) {
+            emitStatus.send({
+              state: "reasoning",
+              message: normalizeReasoningForStatus(response.reasoningContent),
+              toolCallsExecuted: 0,
+            });
+          }
           reply = response.content ?? "";
+          emitStatus.send({
+            state: "completed",
+            message: "任务已完成",
+            toolCallsExecuted: 0,
+          });
         } catch (error) {
+          if (isAbortError(error, runtimeOptions.signal)) {
+            emitStatus.send({
+              state: "canceled",
+              message: "任务已中断",
+            });
+            return {
+              ok: false,
+              message: "已中断任务。",
+            };
+          }
+          emitStatus.send({
+            state: "failed",
+            message:
+              error instanceof Error ? `模型调用失败：${error.message}` : "模型调用失败。",
+          });
           return {
             ok: false,
             message:
@@ -275,6 +472,7 @@ export function createChatService(options: {
         sessionId,
         relatedMemories: relatedMemoryResults.map(toRelatedMemory),
         memoryId,
+        ...(agentStatus ? { agentStatus } : {}),
       };
     },
   };
@@ -288,6 +486,112 @@ function normalizeAgentLoopMaxTurns(value: number | undefined): number {
   }
 
   return Math.max(1, Math.floor(value));
+}
+
+function createChatStatusEmitter(options: {
+  sessionId: string;
+  startedAtMs: number;
+  now?: () => Date;
+  onStatusEvent?: (event: ChatTaskStatusEvent) => void;
+}) {
+  let sessionId = options.sessionId;
+
+  return {
+    setSessionId(nextSessionId: string) {
+      sessionId = nextSessionId;
+    },
+    send(event: Omit<ChatTaskStatusEvent, "sessionId" | "createdAt" | "elapsedMs">) {
+      if (!options.onStatusEvent) {
+        return;
+      }
+
+      const nowMs = getNowMs(options.now);
+      options.onStatusEvent({
+        ...event,
+        sessionId,
+        createdAt: new Date(nowMs).toISOString(),
+        elapsedMs: Math.max(0, nowMs - options.startedAtMs),
+      });
+    },
+  };
+}
+
+function getNowMs(now: (() => Date) | undefined): number {
+  return now ? now().getTime() : Date.now();
+}
+
+function normalizeReasoningForStatus(reasoningContent: string): string {
+  const cleaned = reasoningContent
+    .replace(/<\/?think>/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (cleaned.length <= 240) {
+    return cleaned;
+  }
+
+  return `${cleaned.slice(0, 237)}...`;
+}
+
+function buildToolResultStatusMessage(
+  toolName: string,
+  result: Awaited<ReturnType<AgentToolExecutor["execute"]>>,
+): string {
+  if (result.ok) {
+    return `工具完成：${toolName}`;
+  }
+
+  const details = result.errorDetails;
+  if (details?.kind === "timeout") {
+    return `工具失败：${toolName}（超时 ${details.timeoutMs} ms）`;
+  }
+  if (details?.kind === "canceled") {
+    return `工具中断：${toolName}`;
+  }
+  if (details?.kind === "empty_exit") {
+    return `工具失败：${toolName}（退出码 ${details.exitCode ?? 1}，无 stdout/stderr）`;
+  }
+  if (typeof details?.exitCode === "number") {
+    return `工具失败：${toolName}（退出码 ${details.exitCode}）`;
+  }
+
+  return `工具失败：${toolName}`;
+}
+
+function isAbortError(error: unknown, signal: AbortSignal | undefined): boolean {
+  if (signal?.aborted) {
+    return true;
+  }
+
+  return error instanceof Error && /abort|aborted|cancel|canceled|cancelled|中断|取消/i.test(error.message);
+}
+
+function isContinuationRequest(message: string): boolean {
+  const normalized = message.trim().toLowerCase();
+  const compact = normalized.replace(/\s+/g, "");
+
+  return (
+    /^(继续|接着|续跑|继续执行|接着执行|继续吧|接着跑)/.test(compact) ||
+    /^(continue|resume|go on)\b/.test(normalized)
+  );
+}
+
+function buildContinuationMessages(options: {
+  continuation: ChatContinuationState;
+  userMessage: string;
+}): ChatMessage[] {
+  return [
+    ...options.continuation.messages,
+    {
+      role: "user",
+      content: [
+        "用户已确认继续执行上一个已暂停的长任务。",
+        `上次检查点：${options.continuation.maxTurns} 轮，已执行 ${options.continuation.toolCallsExecuted} 个工具。`,
+        `确认内容：${options.userMessage}`,
+        "请从已有工具结果和上下文接着推进；如果确认内容包含调整方向，请按新的方向继续。",
+      ].join("\n"),
+    },
+  ];
 }
 
 async function appendAssistantMessage(options: {
@@ -460,7 +764,8 @@ function buildChatSystemPrompt(): string {
   return [
     "你是一个本地优先的桌面 Agent，运行在用户的电脑上。",
     "默认使用中文回答。",
-    "你可以使用工具来帮助用户：查看文件、搜索网页、执行受权的 shell 命令。",
+    "你可以使用工具来帮助用户：查看文件、读取文件元信息、搜索文件、搜索网页、执行受权的 shell 命令。",
+    "文件诊断优先使用 file_list、file_stat、file_search、file_read；只有原生工具无法完成时再使用 shell_exec。",
     "涉及文件、网页或命令行的操作，直接调用工具执行，并在回复中说明你做了什么。",
     "回答要直接、可执行，避免空泛寒暄。",
     "如果有相关记忆，优先参考记忆中的信息。",

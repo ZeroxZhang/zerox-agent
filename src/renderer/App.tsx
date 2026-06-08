@@ -1,4 +1,10 @@
-import { useEffect, useState } from "react";
+import {
+  useEffect,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { AgentChatPanel } from "./components/AgentChatPanel";
 import { LearningReviewPanel } from "./components/LearningReviewPanel";
 import { MemoryPanel } from "./components/MemoryPanel";
@@ -23,6 +29,9 @@ import {
 const fallbackMeta = getAppMeta();
 const fallbackSections = getNavigationSections();
 const fallbackAppVersion = "preview";
+const minNavRailWidth = 80;
+const maxNavRailWidth = 156;
+const resizeStep = 8;
 
 function getSectionFromHash(): NavigationSectionId {
   return getNavigationSection(window.location.hash.replace(/^#/, "")).id;
@@ -42,6 +51,7 @@ export function App() {
   const [activeSectionId, setActiveSectionId] = useState<NavigationSectionId>(
     () => getStartupSectionId(),
   );
+  const [navRailWidth, setNavRailWidth] = useState(96);
 
   function navigateTo(sectionId: NavigationSectionId) {
     setActiveSectionId(sectionId);
@@ -87,11 +97,58 @@ export function App() {
     sections.find((section) => section.id === activeSectionId) ??
     getNavigationSection(getDefaultNavigationSection().id);
 
+  function updateNavRailWidth(nextWidth: number) {
+    setNavRailWidth(clampNumber(nextWidth, minNavRailWidth, maxNavRailWidth));
+  }
+
+  function handleNavResizePointerDown(
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ) {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = navRailWidth;
+
+    function handlePointerMove(moveEvent: PointerEvent) {
+      updateNavRailWidth(startWidth + moveEvent.clientX - startX);
+    }
+
+    function cleanup() {
+      document.removeEventListener("pointermove", handlePointerMove);
+    }
+
+    document.addEventListener("pointermove", handlePointerMove);
+    document.addEventListener("pointerup", cleanup, { once: true });
+  }
+
+  function handleNavResizeKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      updateNavRailWidth(navRailWidth - resizeStep);
+    }
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      updateNavRailWidth(navRailWidth + resizeStep);
+    }
+    if (event.key === "Home") {
+      event.preventDefault();
+      updateNavRailWidth(minNavRailWidth);
+    }
+    if (event.key === "End") {
+      event.preventDefault();
+      updateNavRailWidth(maxNavRailWidth);
+    }
+  }
+
   return (
     <main
       className={`app-shell material-shell ${
         activeSection.id === "chat" ? "is-agent-chat" : ""
       }`}
+      style={
+        {
+          "--nav-rail-width": `${navRailWidth}px`,
+        } as CSSProperties
+      }
     >
       <aside className="sidebar material-navigation-rail" aria-label="主导航">
         <div className="brand material-brand">
@@ -133,6 +190,22 @@ export function App() {
         </div>
       </aside>
 
+      <button
+        aria-label="调整功能导航栏宽度"
+        aria-orientation="vertical"
+        aria-valuemax={maxNavRailWidth}
+        aria-valuemin={minNavRailWidth}
+        aria-valuenow={navRailWidth}
+        className="nav-resize-handle"
+        onKeyDown={handleNavResizeKeyDown}
+        onPointerDown={handleNavResizePointerDown}
+        role="separator"
+        title="拖动调整功能导航栏宽度"
+        type="button"
+      >
+        <span aria-hidden="true" />
+      </button>
+
       <section className="workspace">
         <header className="topbar material-top-app-bar">
           <div>
@@ -173,4 +246,8 @@ export function App() {
       </section>
     </main>
   );
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, Math.round(value)));
 }

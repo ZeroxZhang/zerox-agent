@@ -15,10 +15,11 @@ const execAsync = promisify(exec);
 
 export type AgentToolExecutionResult =
   | { ok: true; result: Record<string, unknown> }
-  | { ok: false; error: string };
+  | { ok: false; error: string; errorDetails?: Record<string, unknown> };
 
 export type AgentToolExecutionOptions = {
   runContext?: AgentRunContext;
+  signal?: AbortSignal;
 };
 
 export type AgentToolExecutor = {
@@ -50,8 +51,9 @@ export function createAgentToolExecutor(options?: {
     async execute(request, executionOptions) {
       if (request.toolName === "shell_exec") {
         return executeShellCommand(
-          String(request.args.command ?? ""),
+          request.args,
           executionOptions?.runContext,
+          executionOptions?.signal,
         );
       }
 
@@ -76,6 +78,56 @@ function registerBuiltinTools(
     chatSessionStore?: Pick<ChatSessionStore, "searchMessages">;
   },
 ) {
+  registry.register(
+    {
+      type: "function",
+      function: {
+        name: "file_stat",
+        description:
+          "读取文件或目录的元信息（类型、大小、修改时间），不读取文件内容。",
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "要检查的文件或目录绝对路径" },
+          },
+          required: ["path"],
+        },
+      },
+    },
+    async (args) => statLocalPath(String(args.path ?? "")),
+    "built-in",
+  );
+
+  registry.register(
+    {
+      type: "function",
+      function: {
+        name: "file_search",
+        description:
+          "在目录内搜索文件名或小文本文件内容，避免为 find/grep 这类简单检索调用 shell。",
+        parameters: {
+          type: "object",
+          properties: {
+            root: { type: "string", description: "要搜索的目录绝对路径" },
+            query: { type: "string", description: "要匹配的关键词" },
+            mode: {
+              type: "string",
+              enum: ["name", "content", "both"],
+              description: "搜索模式，默认 both",
+            },
+            maxResults: {
+              type: "number",
+              description: "最多返回结果数，默认 20，最大 100",
+            },
+          },
+          required: ["root", "query"],
+        },
+      },
+    },
+    async (args) => searchLocalFiles(args),
+    "built-in",
+  );
+
   registry.register(
     {
       type: "function",
@@ -143,17 +195,22 @@ function registerBuiltinTools(
       type: "function",
       function: {
         name: "shell_exec",
-        description: "执行 shell 命令。默认超时 30 秒。",
+        description:
+          "执行 shell 命令。默认超时 120 秒，可用 timeoutMs 明确设置 25-600000 ms。优先使用 file_stat/file_search/file_read 等原生工具完成文件诊断。",
         parameters: {
           type: "object",
           properties: {
             command: { type: "string", description: "要执行的完整 shell 命令" },
+            timeoutMs: {
+              type: "number",
+              description: "可选超时时间，范围 25-600000 ms，默认 120000 ms",
+            },
           },
           required: ["command"],
         },
       },
     },
-    async (args) => executeShellCommand(String(args.command ?? "")),
+    async (args) => executeShellCommand(args),
     "built-in",
   );
 
@@ -291,6 +348,114 @@ async function readLocalFile(filePath: string): Promise<AgentToolExecutionResult
   return { ok: true, result: { path: resolvedPath, content } };
 }
 
+async function statLocalPath(
+  targetPath: string,
+): Promise<AgentToolExecutionResult> {
+  if (!targetPath) {
+    return { ok: false, error: "file_stat requires a path." };
+  }
+
+  const resolvedPath = resolveUserPath(targetPath);
+  const entryStat = await stat(resolvedPath);
+
+  return {
+    ok: true,
+    result: {
+      path: resolvedPath,
+      type: entryStat.isDirectory()
+        ? "directory"
+        : entryStat.isFile()
+          ? "file"
+          : "other",
+      size: entryStat.size,
+      modifiedAt: entryStat.mtime.toISOString(),
+      createdAt: entryStat.birthtime.toISOString(),
+    },
+  };
+}
+
+async function searchLocalFiles(
+  args: Record<string, unknown>,
+): Promise<AgentToolExecutionResult> {
+  const root = String(args.root ?? "");
+  const query = String(args.query ?? "").trim();
+  const mode = normalizeSearchMode(args.mode);
+  const maxResults = clampNumber(args.maxResults, 20, 1, 100);
+
+  if (!root) {
+    return { ok: false, error: "file_search requires a root." };
+  }
+  if (!query) {
+    return { ok: false, error: "file_search requires a query." };
+  }
+
+  const resolvedRoot = resolveUserPath(root);
+  const queryLower = query.toLowerCase();
+  const results: Record<string, unknown>[] = [];
+  let visitedFiles = 0;
+  let truncated = false;
+
+  async function walk(directory: string, depth: number): Promise<void> {
+    if (results.length >= maxResults || depth > 8 || visitedFiles >= 2_000) {
+      truncated = true;
+      return;
+    }
+
+    const entries = await readdir(directory, { withFileTypes: true });
+    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+      if (results.length >= maxResults || visitedFiles >= 2_000) {
+        truncated = true;
+        return;
+      }
+
+      if (entry.isDirectory() && shouldSkipSearchDirectory(entry.name)) {
+        continue;
+      }
+
+      const entryPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        await walk(entryPath, depth + 1);
+        continue;
+      }
+
+      if (!entry.isFile()) {
+        continue;
+      }
+
+      visitedFiles += 1;
+      if ((mode === "name" || mode === "both") && entry.name.toLowerCase().includes(queryLower)) {
+        results.push({
+          path: entryPath,
+          type: "name",
+          preview: entry.name,
+        });
+        if (results.length >= maxResults) return;
+      }
+
+      if (mode === "content" || mode === "both") {
+        const contentMatch = await searchTextFile(entryPath, queryLower);
+        if (contentMatch) {
+          results.push(contentMatch);
+        }
+      }
+    }
+  }
+
+  await walk(resolvedRoot, 0);
+
+  return {
+    ok: true,
+    result: {
+      root: resolvedRoot,
+      query,
+      mode,
+      results,
+      visitedFiles,
+      truncated,
+    },
+  };
+}
+
 async function writeLocalFile(
   filePath: string,
   content: string,
@@ -310,20 +475,27 @@ async function writeLocalFile(
 }
 
 async function executeShellCommand(
-  command: string,
+  args: Record<string, unknown>,
   runContext?: AgentRunContext,
+  signal?: AbortSignal,
 ): Promise<AgentToolExecutionResult> {
+  const command = String(args.command ?? "");
   if (!command) {
     return { ok: false, error: "shell_exec requires a command." };
   }
 
+  const timeoutMs = clampNumber(args.timeoutMs, 120_000, 25, 600_000);
+  const startedAt = Date.now();
+
   try {
     const result = await execAsync(command, {
-      timeout: 30_000,
+      timeout: timeoutMs,
       maxBuffer: 1024 * 1024,
       shell: "/bin/zsh",
+      ...(signal ? { signal } : {}),
       ...(runContext ? { cwd: runContext.workspaceRoot } : {}),
     });
+    const durationMs = Date.now() - startedAt;
 
     return {
       ok: true,
@@ -332,25 +504,175 @@ async function executeShellCommand(
         stdout: result.stdout,
         stderr: result.stderr,
         exitCode: 0,
+        durationMs,
+        timeoutMs,
       },
     };
   } catch (error) {
+    const durationMs = Date.now() - startedAt;
     const execError = error as Error & {
       stdout?: string;
       stderr?: string;
       code?: number;
+      signal?: NodeJS.Signals;
+      killed?: boolean;
     };
+    const details = buildShellErrorDetails({
+      command,
+      timeoutMs,
+      durationMs,
+      signal,
+      error: execError,
+    });
 
     return {
       ok: false,
-      error: JSON.stringify({
-        command,
-        stdout: execError.stdout ?? "",
-        stderr: execError.stderr ?? execError.message,
-        exitCode: execError.code ?? 1,
-      }),
+      error: summarizeShellError(details),
+      errorDetails: details,
     };
   }
+}
+
+function normalizeSearchMode(value: unknown): "name" | "content" | "both" {
+  return value === "name" || value === "content" || value === "both"
+    ? value
+    : "both";
+}
+
+function shouldSkipSearchDirectory(name: string): boolean {
+  return new Set([
+    ".git",
+    "node_modules",
+    "dist",
+    "dist-electron",
+    ".next",
+    "coverage",
+    ".cache",
+  ]).has(name);
+}
+
+async function searchTextFile(
+  filePath: string,
+  queryLower: string,
+): Promise<Record<string, unknown> | null> {
+  const fileStat = await stat(filePath);
+  if (fileStat.size > 256 * 1024) {
+    return null;
+  }
+
+  let content: string;
+  try {
+    content = await readFile(filePath, "utf8");
+  } catch {
+    return null;
+  }
+
+  if (content.includes("\u0000")) {
+    return null;
+  }
+
+  const lines = content.split(/\r?\n/);
+  const lineIndex = lines.findIndex((line) =>
+    line.toLowerCase().includes(queryLower),
+  );
+
+  if (lineIndex < 0) {
+    return null;
+  }
+
+  return {
+    path: filePath,
+    type: "content",
+    line: lineIndex + 1,
+    preview: lines[lineIndex].trim().slice(0, 240),
+  };
+}
+
+function clampNumber(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+  return Math.min(max, Math.max(min, Math.floor(numeric)));
+}
+
+function buildShellErrorDetails(options: {
+  command: string;
+  timeoutMs: number;
+  durationMs: number;
+  signal?: AbortSignal;
+  error: Error & {
+    stdout?: string;
+    stderr?: string;
+    code?: number;
+    signal?: NodeJS.Signals;
+    killed?: boolean;
+  };
+}): Record<string, unknown> {
+  const stdout = options.error.stdout ?? "";
+  const stderr = options.error.stderr ?? "";
+  const exitCode = typeof options.error.code === "number" ? options.error.code : 1;
+  const kind = options.signal?.aborted
+    ? "canceled"
+    : options.durationMs >= options.timeoutMs - 5
+      ? "timeout"
+      : !stdout.trim() && !stderr.trim()
+        ? "empty_exit"
+        : "exit";
+
+  return {
+    kind,
+    command: options.command,
+    stdout,
+    stderr,
+    stdoutTail: tailText(stdout),
+    stderrTail: tailText(stderr),
+    exitCode,
+    signal: options.error.signal ?? null,
+    killed: Boolean(options.error.killed),
+    durationMs: options.durationMs,
+    timeoutMs: options.timeoutMs,
+  };
+}
+
+function summarizeShellError(details: Record<string, unknown>): string {
+  const kind = String(details.kind ?? "exit");
+  if (kind === "canceled") {
+    return "shell_exec 已中断：用户或运行时取消了当前命令。";
+  }
+  if (kind === "timeout") {
+    return `shell_exec 超时：命令超过 ${details.timeoutMs} ms 仍未结束。`;
+  }
+
+  const exitCode = Number(details.exitCode ?? 1);
+  const stdout = String(details.stdout ?? "");
+  const stderr = String(details.stderr ?? "");
+  if (!stdout.trim() && !stderr.trim()) {
+    return `shell_exec 失败：退出码 ${exitCode}，无 stdout/stderr。`;
+  }
+
+  const stderrTail = String(details.stderrTail ?? "").trim();
+  const stdoutTail = String(details.stdoutTail ?? "").trim();
+  return [
+    `shell_exec 失败：退出码 ${exitCode}。`,
+    stderrTail ? `stderr: ${stderrTail}` : "",
+    !stderrTail && stdoutTail ? `stdout: ${stdoutTail}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function tailText(value: string): string {
+  const normalized = value.replace(/\s+$/g, "");
+  if (normalized.length <= 1200) {
+    return normalized;
+  }
+  return normalized.slice(-1200);
 }
 
 function resolveUserPath(value: string): string {
