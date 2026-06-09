@@ -24,6 +24,10 @@ import {
   buildTaskPrompt,
   buildToolDefinitions,
 } from "../shared/agentProtocol";
+import {
+  createToolFailureReflection,
+  type AgentReflectionDecision,
+} from "../shared/agentReflection";
 import { serializeToolObservationWithOffload } from "./toolObservationOffload";
 import type { ToolResultOffloadStore } from "./toolResultOffloadStore";
 import type {
@@ -269,6 +273,7 @@ export function createAgentRuntimeEngine(options: {
     });
     let messages: ChatMessage[] = current.messages.map(toChatMessage);
     let toolCallCount = current.toolCallCount;
+    const reflectionDecisions: AgentReflectionDecision[] = [];
     const profile = await options.getModelProfile();
     const maxTurns = skill.manifest.execution.maxTurns ?? 10;
     const toolDefinitions = getToolDefinitions(options.toolExecutor);
@@ -463,6 +468,24 @@ export function createAgentRuntimeEngine(options: {
         });
 
         if (!result.ok) {
+          const reflection = createToolFailureReflection({
+            toolName,
+            args,
+            error: result.error,
+            errorDetails: result.errorDetails,
+            previousReflections: reflectionDecisions,
+            budget: { retryBudget: 1 },
+          });
+          reflectionDecisions.push(reflection);
+          await appendTrajectory(current.runId, "reflection_added", {
+            toolCallId: toolCall.id,
+            toolName,
+            ...reflection,
+          }, {
+            containsApiKey: false,
+            containsFileContent: false,
+            containsUserText: false,
+          }, current.runContext);
           throw new Error(`工具 ${toolName} 执行失败：${result.error}`);
         }
       }

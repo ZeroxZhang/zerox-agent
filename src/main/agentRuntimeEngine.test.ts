@@ -419,6 +419,59 @@ describe("agent runtime engine", () => {
     );
   });
 
+  it("records reflection evidence before failing a test_run tool failure", async () => {
+    const trajectoryEvents: AgentTrajectoryEvent[] = [];
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore([]),
+      trajectoryStore: createMemoryTrajectoryStore(trajectoryEvents),
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: createChatClient([
+        toolCallResponse("test_run", {
+          workspaceRoot: "/repo",
+          command: "npm test -- src/failing.test.ts",
+        }),
+      ]),
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: {
+        async execute() {
+          return {
+            ok: false,
+            error: "test_run failed with exit code 1.",
+            errorDetails: { kind: "exit", stderr: "expected true to be false" },
+          };
+        },
+      },
+      createId: createSequentialId("reflection"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+
+    await engine.startTask("task_123");
+
+    expect(trajectoryEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "reflection_added",
+          payload: expect.objectContaining({
+            toolName: "test_run",
+            failureClass: "verification_failed",
+            suggestion: "retry",
+            retryAllowed: true,
+          }),
+        }),
+      ]),
+    );
+    expect(trajectoryEvents.map((event) => event.type)).toEqual(
+      expect.arrayContaining([
+        "tool_result",
+        "reflection_added",
+        "failure_classified",
+      ]),
+    );
+  });
+
   it("extracts learning candidates from completed trajectories", async () => {
     const trajectoryEvents: AgentTrajectoryEvent[] = [];
     const learningInputs: AgentLearningCandidateInput[] = [];
