@@ -112,6 +112,90 @@ export function createAgentEvalFixtures(): AgentEvalFixture[] {
       ],
     },
     {
+      id: "code-engineering-native-tools",
+      description:
+        "Code engineering runs use native code, git, and test tools before finalizing.",
+      events: createEvents("code-engineering-native-tools", [
+        ["model_request", {}],
+        ["model_response", {}],
+        ["tool_call", { toolName: "code_search" }],
+        [
+          "native_tool_invocation",
+          { toolName: "code_search", nativeKind: "code", riskLevel: "low" },
+        ],
+        [
+          "native_tool_observation",
+          { toolName: "code_search", nativeKind: "code", ok: true },
+        ],
+        ["tool_result", { toolName: "code_search", ok: true }],
+        ["tool_call", { toolName: "git_status" }],
+        [
+          "native_tool_invocation",
+          { toolName: "git_status", nativeKind: "git", riskLevel: "low" },
+        ],
+        [
+          "native_tool_observation",
+          { toolName: "git_status", nativeKind: "git", ok: true },
+        ],
+        ["tool_result", { toolName: "git_status", ok: true }],
+        ["tool_call", { toolName: "git_diff" }],
+        [
+          "native_tool_invocation",
+          { toolName: "git_diff", nativeKind: "git", riskLevel: "medium" },
+        ],
+        [
+          "native_tool_observation",
+          { toolName: "git_diff", nativeKind: "git", ok: true },
+        ],
+        ["tool_result", { toolName: "git_diff", ok: true }],
+        ["tool_call", { toolName: "test_run" }],
+        [
+          "native_tool_invocation",
+          { toolName: "test_run", nativeKind: "test", riskLevel: "medium" },
+        ],
+        [
+          "native_tool_observation",
+          { toolName: "test_run", nativeKind: "test", ok: true },
+        ],
+        ["tool_result", { toolName: "test_run", ok: true }],
+        ["final_summary", { status: "succeeded" }],
+      ]),
+      requiredEventTypes: [
+        "tool_call",
+        "native_tool_invocation",
+        "native_tool_observation",
+        "tool_result",
+        "final_summary",
+      ],
+      assertions: [
+        {
+          type: "native_tool_invocation",
+          payload: { toolName: "code_search", nativeKind: "code" },
+          after: "tool_call",
+        },
+        {
+          type: "native_tool_invocation",
+          payload: { toolName: "git_status", nativeKind: "git" },
+          after: "tool_call",
+        },
+        {
+          type: "native_tool_invocation",
+          payload: { toolName: "git_diff", nativeKind: "git" },
+          after: "tool_call",
+        },
+        {
+          type: "native_tool_invocation",
+          payload: { toolName: "test_run", nativeKind: "test" },
+          after: "tool_call",
+        },
+        {
+          type: "native_tool_observation",
+          payload: { toolName: "test_run", ok: true },
+          after: "native_tool_invocation",
+        },
+      ],
+    },
+    {
       id: "multi-agent-lineage",
       description: "A parent run records a child agent session boundary.",
       events: createEvents("multi-agent-lineage", [

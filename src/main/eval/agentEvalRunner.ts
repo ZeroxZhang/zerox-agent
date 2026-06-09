@@ -56,25 +56,30 @@ export async function runAgentEvals(
 
 function findContractFailure(fixture: AgentEvalFixture): string | null {
   for (const assertion of fixture.assertions ?? []) {
-    const eventIndex = fixture.events.findIndex(
-      (event) => event.type === assertion.type,
-    );
-    if (eventIndex < 0) {
+    const eventIndexes = fixture.events
+      .map((event, index) => ({ event, index }))
+      .filter(({ event }) => event.type === assertion.type);
+    if (!eventIndexes.length) {
       return `Missing asserted event "${assertion.type}".`;
     }
 
-    if (assertion.after) {
-      const previousIndex = fixture.events.findIndex(
-        (event) => event.type === assertion.after,
-      );
-      if (previousIndex < 0 || previousIndex >= eventIndex) {
-        return `"${assertion.type}" must occur after "${assertion.after}".`;
-      }
+    const payloadEntries = Object.entries(assertion.payload ?? {});
+    const payloadMatches = eventIndexes.filter(({ event }) =>
+      payloadEntries.every(([key, value]) => event.payload[key] === value),
+    );
+    if (!payloadMatches.length && payloadEntries.length) {
+      const [key, value] = payloadEntries[0];
+      return `"${assertion.type}" payload.${key} expected ${String(value)}.`;
     }
 
-    for (const [key, value] of Object.entries(assertion.payload ?? {})) {
-      if (fixture.events[eventIndex]?.payload[key] !== value) {
-        return `"${assertion.type}" payload.${key} expected ${String(value)}.`;
+    if (assertion.after) {
+      const orderedMatch = payloadMatches.find(({ index: eventIndex }) =>
+        fixture.events.some(
+          (event, index) => index < eventIndex && event.type === assertion.after,
+        ),
+      );
+      if (!orderedMatch) {
+        return `"${assertion.type}" must occur after "${assertion.after}".`;
       }
     }
   }
