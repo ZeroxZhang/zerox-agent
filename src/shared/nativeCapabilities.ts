@@ -74,7 +74,7 @@ export function defineNativeToolDescriptor(
 export function computeAgentCapabilityScore(
   input: AgentCapabilityScoreInput,
 ): AgentCapabilityScore {
-  const categories: AgentCapabilityScoreCategory[] = [
+  const unroundedCategories: AgentCapabilityScoreCategory[] = [
     {
       id: "native_tool_coverage",
       label: "Native tool coverage",
@@ -102,7 +102,8 @@ export function computeAgentCapabilityScore(
         input.pendingEvalCandidates + input.pendingLearningCandidates,
       ),
     },
-  ].map((category) => ({
+  ];
+  const categories = unroundedCategories.map((category) => ({
     ...category,
     score: roundScore(category.score),
   }));

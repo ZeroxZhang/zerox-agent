@@ -74,4 +74,6 @@ function summarizeToolArgs(request: ToolCallRequest): Record<string, unknown> {
         limit: Number(request.args.limit ?? 5),
       };
   }
+
+  return request.args;
 }

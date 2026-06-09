@@ -260,6 +260,13 @@ function defaultArgsJson(toolName: AgentToolName): string {
     file_search: { root: "~/Downloads", query: "report", mode: "both" },
     file_read: { path: "~/Downloads/notes.md" },
     file_write: { path: "~/Downloads/reports/today.md" },
+    code_search: { workspaceRoot: "~/Projects/demo", query: "Agent" },
+    git_status: { workspaceRoot: "~/Projects/demo" },
+    git_diff: { workspaceRoot: "~/Projects/demo" },
+    test_run: {
+      workspaceRoot: "~/Projects/demo",
+      command: "npm test -- src/shared/nativeCapabilities.test.ts",
+    },
     memory_search: { query: "下载目录偏好", kind: "all", limit: "5" },
     conversation_search: { query: "报告 保存", limit: "5" },
     web_search: { query: "智能体记忆设计" },

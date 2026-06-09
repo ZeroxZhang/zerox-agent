@@ -1,5 +1,5 @@
 import type { ToolDefinition } from "./openAiCompatibleClient";
-import type { AgentToolName } from "../shared/toolPermissions";
+import type { NativeToolDescriptor } from "../shared/nativeCapabilities";
 
 export type AgentToolExecutionResult =
   | { ok: true; result: Record<string, unknown> }
@@ -14,9 +14,12 @@ export type DynamicToolRegistry = {
     definition: ToolDefinition,
     handler: ToolHandler,
     source: string,
+    descriptor?: NativeToolDescriptor,
   ): void;
   unregister(toolName: string): boolean;
   getDefinitions(): ToolDefinition[];
+  getNativeDescriptors(): NativeToolDescriptor[];
+  getNativeDescriptor(toolName: string): NativeToolDescriptor | null;
   execute(
     toolName: string,
     args: Record<string, unknown>,
@@ -29,9 +32,10 @@ export function createDynamicToolRegistry(): DynamicToolRegistry {
   const handlers = new Map<string, ToolHandler>();
   const definitions = new Map<string, ToolDefinition>();
   const sources = new Map<string, string>();
+  const nativeDescriptors = new Map<string, NativeToolDescriptor>();
 
   return {
-    register(definition, handler, source) {
+    register(definition, handler, source, descriptor) {
       const name = definition.function.name;
 
       if (handlers.has(name)) {
@@ -41,6 +45,9 @@ export function createDynamicToolRegistry(): DynamicToolRegistry {
       definitions.set(name, definition);
       handlers.set(name, handler);
       sources.set(name, source);
+      if (descriptor) {
+        nativeDescriptors.set(name, descriptor);
+      }
     },
 
     unregister(toolName) {
@@ -51,11 +58,20 @@ export function createDynamicToolRegistry(): DynamicToolRegistry {
       handlers.delete(toolName);
       definitions.delete(toolName);
       sources.delete(toolName);
+      nativeDescriptors.delete(toolName);
       return true;
     },
 
     getDefinitions() {
       return [...definitions.values()];
+    },
+
+    getNativeDescriptors() {
+      return [...nativeDescriptors.values()];
+    },
+
+    getNativeDescriptor(toolName) {
+      return nativeDescriptors.get(toolName) ?? null;
     },
 
     async execute(toolName, args) {

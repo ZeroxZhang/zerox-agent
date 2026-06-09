@@ -223,6 +223,8 @@ export function authorizeToolCall(
         normalized.shell.commands,
       );
   }
+
+  return deny(`工具 ${request.toolName} 尚未配置授权规则。`);
 }
 
 export function authorizeToolCallWithinRunContext(
