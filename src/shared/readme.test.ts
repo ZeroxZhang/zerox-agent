@@ -14,7 +14,10 @@ describe("README", () => {
     expect(readme).toContain("npm run pack:mac");
     expect(readme).toContain("npm run dist:mac");
     expect(readme).toContain("xattr -dr com.apple.quarantine");
-    expect(readme).toContain("Zerox\\ Agent-1.2.3-arm64.dmg");
+    expect(readme).toContain("Zerox\\ Agent-1.3.0-arm64.dmg");
+    expect(readme).toContain("npm run harness:check");
+    expect(readme).toContain("npm run harness:score");
+    expect(readme).toContain("npm run episode:export");
     expect(readme).toContain("首次启动引导");
     expect(readme).toContain("一键验收运行");
     expect(readme).toContain("桌面端完整验收");
@@ -23,6 +26,8 @@ describe("README", () => {
     expect(readme).toContain("正式本地数据模式");
     expect(readme).toContain("浏览器演示数据模式");
     expect(readme).toContain("agent-validation.json");
+    expect(readme).toContain("AGENTS.md");
+    expect(readme).toContain("init.sh");
   });
 
   it("states the desktop control-plane positioning and links the decision matrix", () => {

@@ -15,6 +15,10 @@ describe("Design System — Notion-inspired app shell", () => {
     path.join(process.cwd(), "src/renderer/components/AgentChatPanel.tsx"),
     "utf8",
   );
+  const overviewPanelSource = readFileSync(
+    path.join(process.cwd(), "src/renderer/components/OverviewPanel.tsx"),
+    "utf8",
+  );
 
   it("defines comprehensive CSS custom property design tokens", () => {
     // Color tokens
@@ -66,6 +70,12 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(appSource).not.toContain("v1.0.0");
     expect(appSource).toContain("getRuntimeInfo");
     expect(appSource).toContain("appVersion");
+  });
+
+  it("surfaces the local harness score in Overview", () => {
+    expect(overviewPanelSource).toContain("computeHarnessScore");
+    expect(overviewPanelSource).toContain("Harness");
+    expect(overviewPanelSource).toContain("ETCLOVG 七类");
   });
 
   it("provides reusable component classes for all screens", () => {

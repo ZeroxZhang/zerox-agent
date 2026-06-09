@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createChatService } from "./chatService";
 import type { AgentToolExecutor } from "./agentToolExecutor";
+import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
 import type { AppendChatMessageInput } from "./chatSessionStore";
 import type { ChatClient, ChatMessage, ChatCompletionResponse } from "./openAiCompatibleClient";
 import type { RunScheduledTaskResult } from "../shared/agentRuns";
@@ -8,6 +9,7 @@ import type { MemoryInput, MemoryRecord, MemorySearchResult } from "../shared/me
 import type { ScheduledTask, ScheduledTaskInput } from "../shared/scheduledTasks";
 import { getDefaultTaskPermissionPolicy } from "../shared/toolPermissions";
 import type { ChatTaskStatusEvent } from "../shared/chat";
+import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
 
 function chatReply(content: string): ChatCompletionResponse {
   return { content, toolCalls: [], finishReason: "stop" };
@@ -420,6 +422,57 @@ describe("chat service", () => {
           message: "任务已完成",
         }),
       ]),
+    );
+  });
+
+  it("emits trajectory evidence for chat tool runs", async () => {
+    const trajectoryEvents: AgentTrajectoryEvent[] = [];
+    const service = createChatService({
+      chatClient: {
+        async complete(request) {
+          if (request.tools && !request.messages.some((message) => message.role === "tool")) {
+            return toolCallResponse("call_1", "/tmp/evidence");
+          }
+
+          return chatReply("证据已记录。");
+        },
+      },
+      getModelProfile: async () => ({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret",
+        model: "agent-model",
+        temperature: 0.2,
+        maxTokens: 8192,
+      }),
+      memoryStore: createMemoryStore(),
+      toolExecutor: createToolExecutor(),
+      trajectoryStore: createMemoryTrajectoryStore(trajectoryEvents),
+      createId: createSequentialId("chat_evidence"),
+      now: createSteppedClock("2026-06-06T08:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage({
+      message: "检查目录并保留运行证据",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      agentStatus: {
+        state: "completed",
+        runId: "chat_evidence_2",
+      },
+    });
+    expect(trajectoryEvents.map((event) => event.type)).toEqual([
+      "model_request",
+      "model_response",
+      "tool_call",
+      "tool_result",
+      "model_request",
+      "model_response",
+      "final_summary",
+    ]);
+    expect(trajectoryEvents.every((event) => event.runId === "chat_evidence_2")).toBe(
+      true,
     );
   });
 
@@ -865,6 +918,35 @@ function createToolExecutor(
       return true;
     },
   } as AgentToolExecutor;
+}
+
+function createMemoryTrajectoryStore(
+  events: AgentTrajectoryEvent[],
+): AgentTrajectoryStore {
+  return {
+    async append(_runId, event) {
+      events.push(structuredClone(event));
+      return event;
+    },
+    async list() {
+      return events;
+    },
+  };
+}
+
+function createSequentialId(prefix: string): () => string {
+  let next = 1;
+  return () => `${prefix}_${next++}`;
+}
+
+function createSteppedClock(start: string): () => Date {
+  let offset = 0;
+  const startMs = new Date(start).getTime();
+  return () => {
+    const value = new Date(startMs + offset * 1000);
+    offset += 1;
+    return value;
+  };
 }
 
 function createMemoryRecord(

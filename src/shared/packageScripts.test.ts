@@ -56,4 +56,16 @@ describe("package scripts", () => {
         "npm run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg zip",
     });
   });
+
+  it("exposes harness engineering commands", () => {
+    const packageJson = JSON.parse(
+      readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
+    ) as PackageJson;
+
+    expect(packageJson.scripts).toMatchObject({
+      "harness:check": "node scripts/check-harness-state.mjs",
+      "harness:score": "npm run build && node scripts/run-harness-score.mjs",
+      "episode:export": "node scripts/export-agent-episode.mjs",
+    });
+  });
 });

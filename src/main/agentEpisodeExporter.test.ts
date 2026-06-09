@@ -1,0 +1,40 @@
+import { describe, expect, it } from "vitest";
+import { createAgentEpisodePackage } from "./agentEpisodeExporter";
+
+describe("createAgentEpisodePackage", () => {
+  it("packages run, checkpoint, trajectory, learning, and verification evidence", () => {
+    const episode = createAgentEpisodePackage({
+      run: { id: "run_1", status: "succeeded", summary: "done" } as never,
+      checkpoint: { runId: "run_1", status: "succeeded" } as never,
+      trajectory: [
+        {
+          id: "event_1",
+          runId: "run_1",
+          type: "final_summary",
+          sequence: 1,
+          payload: { status: "succeeded" },
+          redaction: {
+            containsApiKey: false,
+            containsFileContent: false,
+            containsUserText: false,
+          },
+          createdAt: "2026-06-09T00:00:00.000Z",
+        },
+      ],
+      learningCandidates: [],
+      verification: { passed: true, checks: ["final_summary"] },
+      exportedAt: "2026-06-09T00:00:00.000Z",
+    });
+
+    expect(Object.keys(episode.files).sort()).toEqual([
+      "checkpoint.json",
+      "learning-candidates.json",
+      "metadata.json",
+      "run.json",
+      "trajectory.jsonl",
+      "verification.json",
+    ]);
+    expect(episode.files["trajectory.jsonl"]).toContain("\"final_summary\"");
+    expect(episode.files["metadata.json"]).toContain("\"fileCount\": 6");
+  });
+});

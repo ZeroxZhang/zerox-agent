@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { createAgentEvalFixtures } from "./agentEvalFixtures";
 import { runAgentEvals } from "./agentEvalRunner";
+import type {
+  AgentTrajectoryEvent,
+  AgentTrajectoryEventType,
+} from "../../shared/agentTrajectory";
 
 describe("agent eval runner", () => {
   it("scores the deterministic golden fixture set", async () => {
@@ -70,4 +74,53 @@ describe("agent eval runner", () => {
       ],
     });
   });
+
+  it("fails when asserted event order is wrong", async () => {
+    const report = await runAgentEvals([
+      {
+        id: "bad-order",
+        description: "Bad event order",
+        events: createEvents("bad-order", [
+          ["workspace_escape_denied", {}],
+          ["tool_call", {}],
+        ]),
+        requiredEventTypes: ["tool_call", "workspace_escape_denied"],
+        assertions: [
+          { type: "workspace_escape_denied", after: "tool_call" },
+        ],
+      },
+    ]);
+
+    expect(report).toMatchObject({
+      total: 1,
+      passed: 0,
+      failed: 1,
+      failures: [
+        {
+          fixtureId: "bad-order",
+          reason:
+            '"workspace_escape_denied" must occur after "tool_call".',
+        },
+      ],
+    });
+  });
 });
+
+function createEvents(
+  runId: string,
+  entries: Array<[AgentTrajectoryEventType, Record<string, unknown>]>,
+): AgentTrajectoryEvent[] {
+  return entries.map(([type, payload], index) => ({
+    id: `${runId}_${index + 1}`,
+    runId,
+    type,
+    sequence: index + 1,
+    payload,
+    redaction: {
+      containsApiKey: false,
+      containsFileContent: false,
+      containsUserText: false,
+    },
+    createdAt: "2026-06-07T00:00:00.000Z",
+  }));
+}

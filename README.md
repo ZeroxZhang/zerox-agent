@@ -50,11 +50,13 @@
 
 <h2 id="overview-en">Overview</h2>
 
-**Zerox Agent** is a local-first desktop control plane for personal AI agents. The current release is **v1.2.3**. The name derives from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
+**Zerox Agent** is a local-first desktop control plane for personal AI agents. The current release is **v1.3.0**. The name derives from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
 
 It is not a chat wrapper or a generic hosted agent surface. It runs locally, configures OpenAI-compatible models, scans local `SKILL.md` skill files, executes recoverable agent runs, invokes permission-controlled tools, tracks parent/child multi-agent sessions, persists experiential knowledge into local long-term memory, and keeps learning user-reviewed before it changes future behavior.
 
 The product boundary is documented in [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md): Zerox optimizes for trusted local control, recoverable agent runs, explicit permissions, workspace-scoped runs, observable trajectories, parent/child multi-agent sessions, and user-reviewed learning. Runtime, workspace, and learning details live in [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md), [`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md), and [`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md).
+
+v1.3.0 adds a repo-local operating harness for future agent sessions: [`AGENTS.md`](AGENTS.md), [`init.sh`](init.sh), `.zerox` progress files, deterministic `harness:check` / `harness:score` scripts, chat trajectory evidence, episode export, and ordered/payload-aware contract evals. The implementation plan is preserved in [`docs/superpowers/plans/2026-06-09-harness-engineering-iteration.md`](docs/superpowers/plans/2026-06-09-harness-engineering-iteration.md).
 
 <p align="center">
   <img src="zerox-agent-onepage.png" alt="Zerox Agent one-page product overview" width="720" />
@@ -547,7 +549,7 @@ can't be opened." The image is usually valid; remove the quarantine attribute
 before opening:
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/Zerox\ Agent-1.2.3-arm64.dmg
+xattr -dr com.apple.quarantine ~/Downloads/Zerox\ Agent-1.3.0-arm64.dmg
 ```
 
 If you already dragged the app into Applications, run:
@@ -569,10 +571,13 @@ npm test              # Run all tests
 npm run test:watch    # Watch mode
 npm run eval:agent    # Deterministic agent eval suite
 npm run eval:memory   # Deterministic memory retrieval eval suite
+npm run harness:check # Check repo-local operating harness files
+npm run harness:score # Build, run contract evals, and emit ETCLOVG score
+npm run episode:export -- --config-dir <userData/config> --run-id <runId>
 npm run verify        # Tests + build + deterministic eval
 ```
 
-As of v1.2.3, `npm run verify` covers 76 Vitest files / 333 tests, the production build, agent evals, and memory evals. The Overview and Memory panels surface deterministic eval pass rates as local quality signals.
+As of v1.3.0, `npm run verify` covers 78 Vitest files / 346 tests, the production build, agent evals, and memory evals. `npm run harness:score` emits the seven-category ETCLOVG score used by Overview as a local quality signal.
 
 ### Test Coverage
 
@@ -584,7 +589,7 @@ As of v1.2.3, `npm run verify` covers 76 Vitest files / 333 tests, the productio
 
 <h2 id="roadmap">Roadmap</h2>
 
-Current version: v1.2.3.
+Current version: v1.3.0.
 
 Recently shipped:
 
@@ -593,6 +598,7 @@ Recently shipped:
 - [x] Long-task pause/continue UX, visible activity state, and user-triggered interruption
 - [x] Runtime memory P0-P4: bounded recall, conversation evidence, persona profile, evals, and governance reports
 - [x] Workspace-scoped runs, parent/child multi-agent lineage, and user-reviewed procedural learning
+- [x] Repo-local harness, chat evidence, episode export, contract evals, and Overview harness score
 
 Planned:
 
@@ -629,11 +635,13 @@ Planned:
 
 ## 项目概述
 
-**Zerox Agent** 是一个本地优先的桌面智能体控制台，当前版本是 **v1.2.3**。名字取自 **Zero + X**——从留白开始，把未知的本地工作流转成可观察、受权限管控、可恢复的 Agent 运行。
+**Zerox Agent** 是一个本地优先的桌面智能体控制台，当前版本是 **v1.3.0**。名字取自 **Zero + X**——从留白开始，把未知的本地工作流转成可观察、受权限管控、可恢复的 Agent 运行。
 
 它不是聊天壳，也不是泛用云端 Agent 入口。它运行在本机：配置 OpenAI‑compatible 模型、扫描本地 `SKILL.md` 技能文件、执行可恢复的 Agent 运行、调用受权限管控的工具、跟踪父子多 Agent 会话、把经验和知识写入本地长期记忆，并且在改变未来行为前保留用户审核。
 
 产品边界写在 [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md)：Zerox 优先建设可信的本地控制、可恢复运行、显式权限、workspace 作用域、可观察轨迹、父子多 Agent 会话和用户审核后的学习。运行时、workspace 与学习机制分别见 [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md)、[`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md)、[`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md)。
+
+v1.3.0 新增面向后续 Agent 接手的 repo-local harness：[`AGENTS.md`](AGENTS.md)、[`init.sh`](init.sh)、`.zerox` 进度文件、确定性的 `harness:check` / `harness:score`、会话轨迹证据、episode 导出，以及带顺序和 payload 断言的 contract eval。完整实现计划保存在 [`docs/superpowers/plans/2026-06-09-harness-engineering-iteration.md`](docs/superpowers/plans/2026-06-09-harness-engineering-iteration.md)。
 
 ### 设计原则
 
@@ -1230,7 +1238,7 @@ Gatekeeper 可能提示「Zerox Agent 已损坏，无法打开」。这通常不
 而是下载隔离属性导致的拦截。打开前在终端执行：
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/Zerox\ Agent-1.2.3-arm64.dmg
+xattr -dr com.apple.quarantine ~/Downloads/Zerox\ Agent-1.3.0-arm64.dmg
 ```
 
 如果已经把应用拖进 Applications，则执行：
@@ -1257,15 +1265,20 @@ mac:
 
 ## 测试
 
-截至 v1.2.3，`npm run verify` 覆盖 76 个 Vitest 测试文件 / 333 个测试、生产构建、Agent 评测和记忆检索评测：
+截至 v1.3.0，`npm run verify` 覆盖 78 个 Vitest 测试文件 / 346 个测试、生产构建、Agent 评测和记忆检索评测：
 
 ```bash
 npm test              # 运行全部测试
 npm run test:watch    # watch 模式
 npm run eval:agent    # 确定性 Agent 评测
 npm run eval:memory   # 确定性记忆检索评测
+npm run harness:check # 检查 repo-local operating harness
+npm run harness:score # 构建、运行 contract eval，并输出 ETCLOVG 分数
+npm run episode:export -- --config-dir <userData/config> --run-id <runId>
 npm run verify        # 测试 + 构建 + 确定性评测
 ```
+
+`npm run harness:score` 输出与 Overview 面板一致的七类 ETCLOVG harness score，便于发布前判断执行环境、工具接口、上下文、生命周期、可观测、验证和治理是否仍然健康。
 
 ### 测试覆盖
 
@@ -1277,7 +1290,7 @@ npm run verify        # 测试 + 构建 + 确定性评测
 
 ## 路线图
 
-当前版本：v1.2.3。
+当前版本：v1.3.0。
 
 近期已完成：
 
@@ -1286,6 +1299,7 @@ npm run verify        # 测试 + 构建 + 确定性评测
 - [x] 长任务暂停/继续、真实状态展示和用户主动中断
 - [x] Memory P0-P4：有预算召回、会话证据、画像文档、评测和治理报告
 - [x] Workspace 作用域运行、父子多 Agent 关系和用户审核后的流程学习
+- [x] Repo-local harness、会话证据、episode 导出、contract eval 和 Overview harness score
 
 后续计划：
 

@@ -26,6 +26,7 @@ import {
   buildDesktopRuntimeInfo,
   type DesktopRuntimeInfo,
 } from "../../shared/desktopRuntime";
+import { computeHarnessScore } from "../../shared/harnessScore";
 import {
   createDemoValidationSnapshot,
   demoAgentEvalReport,
@@ -162,6 +163,22 @@ export function OverviewPanel(props: {
   }, []);
 
   const latestRun = data?.runs[0] ?? null;
+  const harnessScore = useMemo(
+    () =>
+      data
+        ? computeHarnessScore({
+            hasAgentGuide: true,
+            hasExecutionStore: true,
+            hasInitScript: true,
+            hasTrajectoryStore: true,
+            evalPassRate: data.evalReport.passRate,
+            recoverabilityRate: data.evalReport.recoverabilityRate,
+            toolSuccessRate: data.evalReport.toolSuccessRate,
+            pendingLearningCandidates: data.learningCandidates.length,
+          })
+        : null,
+    [data],
+  );
   const attentionItems = useMemo(
     () => (data ? buildAttentionItems(data) : []),
     [data],
@@ -319,6 +336,12 @@ export function OverviewPanel(props: {
           status={`${Math.round((data?.evalReport.passRate ?? 0) * 100)}%`}
           tone={getEvalTone(data?.evalReport)}
           value={data ? `${data.evalReport.passed}/${data.evalReport.total}` : "待加载"}
+        />
+        <HealthCard
+          label="Harness"
+          status={harnessScore ? `${harnessScore.overall}/10` : "待加载"}
+          tone={harnessScore?.tone ?? "warn"}
+          value={harnessScore?.summary ?? "ETCLOVG 七类"}
         />
         <HealthCard
           label="记忆"

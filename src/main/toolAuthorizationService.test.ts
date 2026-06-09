@@ -186,6 +186,58 @@ describe("tool authorization service", () => {
     ]);
   });
 
+  it("notifies callers when user approval is requested and resolved", async () => {
+    const lifecycleEvents: string[] = [];
+    const taskStore = createScheduledTaskStore({
+      configDir,
+      createId: () => "task_lifecycle",
+      now: () => new Date("2026-06-05T08:00:00.000Z"),
+    });
+    const auditLog = createToolAuditLog({
+      configDir,
+      createId: () => "audit_lifecycle",
+      now: () => new Date("2026-06-05T08:01:00.000Z"),
+    });
+    const service = createToolAuthorizationService({
+      taskStore,
+      auditLog,
+      requestUserApproval: async () => ({
+        approved: true,
+        reason: "approved",
+      }),
+    });
+    await taskStore.create({
+      name: "Approval lifecycle",
+      skillName: "local-file-organizer",
+      enabled: true,
+      schedule: { kind: "manual" },
+      input: {},
+      permissions: {
+        files: { read: [], write: ["/Users/demo/Downloads"] },
+        web: { search: false, fetchDomains: [] },
+        shell: { commands: [] },
+      },
+    });
+
+    await service.authorize(
+      "task_lifecycle",
+      {
+        toolName: "file_write",
+        args: { path: "/Users/demo/Desktop/report.md", content: "done" },
+      },
+      {
+        onApprovalRequested: async (request) => {
+          lifecycleEvents.push(`requested:${request.taskId}`);
+        },
+        onApprovalResolved: async (approval) => {
+          lifecycleEvents.push(approval.approved ? "approved" : "rejected");
+        },
+      },
+    );
+
+    expect(lifecycleEvents).toEqual(["requested:task_lifecycle", "approved"]);
+  });
+
   it("does not ask for approval when the tool request is malformed", async () => {
     let approvalCount = 0;
     const taskStore = createScheduledTaskStore({

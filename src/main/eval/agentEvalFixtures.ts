@@ -8,7 +8,14 @@ export type AgentEvalFixture = {
   description: string;
   events: AgentTrajectoryEvent[];
   requiredEventTypes: AgentTrajectoryEventType[];
+  assertions?: AgentEvalEventAssertion[];
   recoverabilityRequired?: boolean;
+};
+
+export type AgentEvalEventAssertion = {
+  type: AgentTrajectoryEventType;
+  payload?: Record<string, unknown>;
+  after?: AgentTrajectoryEventType;
 };
 
 export function createAgentEvalFixtures(): AgentEvalFixture[] {
@@ -95,6 +102,13 @@ export function createAgentEvalFixtures(): AgentEvalFixture[] {
         "tool_call",
         "workspace_escape_denied",
         "failure_classified",
+      ],
+      assertions: [
+        { type: "workspace_escape_denied", after: "tool_call" },
+        {
+          type: "failure_classified",
+          payload: { failureClass: "permission_denied" },
+        },
       ],
     },
     {

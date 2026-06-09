@@ -250,6 +250,24 @@ export function authorizeToolCallWithinRunContext(
     return deny("shell_exec 被运行沙箱阻止：命令执行已禁用。");
   }
 
+  if (
+    request.toolName === "shell_exec" &&
+    runContext.sandbox.shell === "workspace_only"
+  ) {
+    const command = String(request.args.command ?? "");
+    const outsidePath = extractPathLikeShellTokens(command).find(
+      (token) =>
+        !isPathInsideRunContext(token, runContext, "read") &&
+        !isPathInsideRunContext(token, runContext, "write"),
+    );
+
+    if (outsidePath) {
+      return deny(
+        `shell_exec 被 workspace_only 沙箱阻止：路径 ${outsidePath} 不在工作区或额外可读目录内。`,
+      );
+    }
+  }
+
   return taskDecision;
 }
 
@@ -343,6 +361,17 @@ function authorizeShellCommand(
   return allowed
     ? allow("shell_exec command 匹配已授权模板。")
     : deny("shell_exec command 不匹配已授权模板。");
+}
+
+function extractPathLikeShellTokens(command: string): string[] {
+  const tokens = command.match(/(?:"[^"]+"|'[^']+'|[^\s]+)/g) ?? [];
+  return tokens
+    .map((token) => token.replace(/^["']|["']$/g, ""))
+    .map((token) => {
+      const equalsIndex = token.indexOf("=");
+      return equalsIndex >= 0 ? token.slice(equalsIndex + 1) : token;
+    })
+    .filter((token) => token.startsWith("/") || token.startsWith("~/"));
 }
 
 function compileShellTemplate(template: string): RegExp {

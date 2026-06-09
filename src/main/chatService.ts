@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { AgentModelProfile } from "./agentRunnerService";
 import type { AgentToolExecutor } from "./agentToolExecutor";
+import { createChatAgentEvidenceRecorder } from "./chatAgentEvidence";
+import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
 import { runAgentLoop } from "./agentLoop";
 import type { AppendChatMessageResult, ChatSessionStore } from "./chatSessionStore";
 import { extractAtomicMemoriesFromChatTurn } from "./memoryL1Extractor";
@@ -47,6 +49,7 @@ type ChatContinuationState = {
   messages: ChatMessage[];
   maxTurns: number;
   toolCallsExecuted: number;
+  evidenceRunId?: string;
 };
 
 export function createChatService(options: {
@@ -66,6 +69,7 @@ export function createChatService(options: {
   agentLoopMaxTurns?: number;
   toolResultOffloadStore?: ToolResultOffloadStore;
   toolResultOffloadThreshold?: number;
+  trajectoryStore?: AgentTrajectoryStore;
 }): ChatService {
   const createId = options.createId ?? randomUUID;
   const memoryLimit = options.memoryLimit ?? 4;
@@ -260,6 +264,12 @@ export function createChatService(options: {
         try {
           let observedToolCallsExecuted =
             continuationToResume?.toolCallsExecuted ?? 0;
+          const evidence = createChatAgentEvidenceRecorder({
+            trajectoryStore: options.trajectoryStore,
+            runId: continuationToResume?.evidenceRunId,
+            createId,
+            now: options.now,
+          });
           const loopResult = await runAgentLoop(
             chatMessages,
             profile,
@@ -283,6 +293,10 @@ export function createChatService(options: {
                   }
                 : {}),
               onTurn(turn, phase) {
+                void evidence.append("model_request", {
+                  turn: turn + 1,
+                  phase,
+                });
                 if (phase === "executing") {
                   emitStatus.send({
                     state: "model",
@@ -292,6 +306,14 @@ export function createChatService(options: {
                   });
                 }
               },
+              onModelResponse(response, turn) {
+                void evidence.append("model_response", {
+                  turn,
+                  hasContent: Boolean(response.content),
+                  toolCallCount: response.toolCalls.length,
+                  finishReason: response.finishReason,
+                });
+              },
               onReasoning(reasoningContent) {
                 emitStatus.send({
                   state: "reasoning",
@@ -299,7 +321,8 @@ export function createChatService(options: {
                   toolCallsExecuted: observedToolCallsExecuted,
                 });
               },
-              onToolCall(toolName) {
+              onToolCall(toolName, args) {
+                void evidence.append("tool_call", { toolName, args });
                 emitStatus.send({
                   state: "tool_call",
                   message: `正在调用工具：${toolName}`,
@@ -309,6 +332,7 @@ export function createChatService(options: {
               },
               onToolResult(toolName, ok, result) {
                 observedToolCallsExecuted += 1;
+                void evidence.append("tool_result", { toolName, ok });
                 emitStatus.send({
                   state: "tool_result",
                   message: buildToolResultStatusMessage(toolName, result),
@@ -321,6 +345,10 @@ export function createChatService(options: {
           );
           reply = loopResult.summary;
           toolCallsUsed = loopResult.toolCallsExecuted;
+          await evidence.append("final_summary", {
+            status: loopResult.status,
+            toolCallsExecuted: loopResult.toolCallsExecuted,
+          });
 
           if (loopResult.status === "canceled") {
             emitStatus.send({
@@ -339,9 +367,11 @@ export function createChatService(options: {
               messages: loopResult.messages,
               maxTurns: loopResult.continuation.maxTurns,
               toolCallsExecuted: loopResult.continuation.toolCallsExecuted,
+              evidenceRunId: evidence.runId,
             });
             agentStatus = {
               state: "paused",
+              runId: evidence.runId,
               reason: loopResult.continuation.reason,
               maxTurns: loopResult.continuation.maxTurns,
               toolCallsExecuted: loopResult.continuation.toolCallsExecuted,
@@ -360,6 +390,7 @@ export function createChatService(options: {
             pendingContinuations.delete(sessionId);
             agentStatus = {
               state: "completed",
+              runId: evidence.runId,
               toolCallsExecuted: loopResult.toolCallsExecuted,
             };
             emitStatus.send({

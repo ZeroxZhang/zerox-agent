@@ -20,6 +20,8 @@ export type ToolAuthorizationService = {
 
 export type ToolAuthorizationOptions = {
   runContext?: AgentRunContext;
+  onApprovalRequested?: (request: ToolUserApprovalRequest) => Promise<void>;
+  onApprovalResolved?: (result: ToolUserApprovalResult) => Promise<void>;
 };
 
 export type ToolUserApprovalRequest = {
@@ -65,12 +67,15 @@ export function createToolAuthorizationService(options: {
         options.requestUserApproval &&
         shouldRequestUserApproval(decision.reason)
       ) {
-        const approval = await options.requestUserApproval({
+        const approvalRequest = {
           taskId: task.id,
           taskName: task.name,
           request,
           deniedReason: decision.reason,
-        });
+        };
+        await authorizeOptions?.onApprovalRequested?.(approvalRequest);
+        const approval = await options.requestUserApproval(approvalRequest);
+        await authorizeOptions?.onApprovalResolved?.(approval);
 
         decision = approval.approved
           ? {
@@ -102,7 +107,7 @@ export function createToolAuthorizationService(options: {
 }
 
 function shouldRequestUserApproval(reason: string): boolean {
-  if (/运行沙箱阻止/.test(reason)) {
+  if (/运行沙箱阻止|workspace_only/.test(reason)) {
     return false;
   }
 

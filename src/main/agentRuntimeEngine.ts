@@ -259,7 +259,13 @@ export function createAgentRuntimeEngine(options: {
     events: AgentRunEvent[],
     startedAt: string,
   ): Promise<RunScheduledTaskResult> {
-    let current = await saveCheckpoint(checkpoint, "running");
+    let current = await saveCheckpoint(checkpoint, "running", {
+      steps: markCurrentStepRunning(
+        checkpoint.steps,
+        checkpoint.currentStepId,
+        now().toISOString(),
+      ),
+    });
     let messages: ChatMessage[] = current.messages.map(toChatMessage);
     let toolCallCount = current.toolCallCount;
     const profile = await options.getModelProfile();
@@ -299,6 +305,11 @@ export function createAgentRuntimeEngine(options: {
           ...current,
           messages: messages.map(toExecutionMessage),
           toolCallCount,
+          steps: markCurrentStepCompleted(
+            current.steps,
+            current.currentStepId,
+            now().toISOString(),
+          ),
         };
         await appendTrajectory(current.runId, "final_summary", {
           status: "succeeded",
@@ -342,20 +353,33 @@ export function createAgentRuntimeEngine(options: {
           containsFileContent: false,
           containsUserText: true,
         }, current.runContext);
-        const auth = await options.toolAuthorizationService.authorize(task.id, {
-          toolName,
-          args,
-        }, {
-          runContext: current.runContext,
-        });
+        const auth = await options.toolAuthorizationService.authorize(
+          task.id,
+          {
+            toolName,
+            args,
+          },
+          {
+            runContext: current.runContext,
+            onApprovalRequested: async () => {
+              current = await saveCheckpoint(current, "waiting_for_approval");
+            },
+            onApprovalResolved: async () => {
+              current = await saveCheckpoint(current, "running");
+            },
+          },
+        );
         if (!auth.ok || !auth.decision.allowed) {
           const reason = auth.ok ? auth.decision.reason : auth.message;
-          if (/运行沙箱阻止|workspace/i.test(reason)) {
+          if (/运行沙箱阻止|workspace|workspace_only/i.test(reason)) {
             await appendTrajectory(current.runId, "workspace_escape_denied", {
               toolCallId: toolCall.id,
               toolName,
               reason,
               ...(typeof args.path === "string" ? { path: args.path } : {}),
+              ...(typeof args.command === "string"
+                ? { command: args.command }
+                : {}),
             }, {
               containsApiKey: false,
               containsFileContent: false,
@@ -367,7 +391,10 @@ export function createAgentRuntimeEngine(options: {
 
         const result = await options.toolExecutor.execute(
           { toolName, args },
-          { runContext: current.runContext },
+          {
+            runContext: current.runContext,
+            ...(signal ? { signal } : {}),
+          },
         );
         toolCallCount += 1;
         const serializedObservation =
@@ -682,6 +709,39 @@ function toChatMessage(message: AgentExecutionMessage): ChatMessage {
     ...(message.tool_call_id ? { tool_call_id: message.tool_call_id } : {}),
     ...(message.tool_calls ? { tool_calls: message.tool_calls as ChatMessage["tool_calls"] } : {}),
   };
+}
+
+function markCurrentStepRunning(
+  steps: AgentExecutionStep[],
+  currentStepId: string | undefined,
+  startedAt: string,
+): AgentExecutionStep[] {
+  return steps.map((step) =>
+    step.id === currentStepId
+      ? {
+          ...step,
+          state: step.state === "pending" ? "running" : step.state,
+          attempts: step.attempts === 0 ? 1 : step.attempts,
+          startedAt: step.startedAt ?? startedAt,
+        }
+      : step,
+  );
+}
+
+function markCurrentStepCompleted(
+  steps: AgentExecutionStep[],
+  currentStepId: string | undefined,
+  finishedAt: string,
+): AgentExecutionStep[] {
+  return steps.map((step) =>
+    step.id === currentStepId
+      ? {
+          ...step,
+          state: "completed",
+          finishedAt,
+        }
+      : step,
+  );
 }
 
 function markCurrentStepFailed(

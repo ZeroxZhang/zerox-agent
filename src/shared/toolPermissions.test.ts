@@ -307,4 +307,43 @@ describe("tool authorization", () => {
       reason: "file_write 被运行沙箱阻止：路径不在工作区或额外可写目录内。",
     });
   });
+
+  it("denies workspace_only shell commands that mention outside absolute paths", () => {
+    const broadPolicy: TaskPermissionPolicy = {
+      files: {
+        read: ["/Users/demo"],
+        write: ["/Users/demo"],
+      },
+      web: { search: false, fetchDomains: [] },
+      shell: { commands: ["cat {{target}}"] },
+      memory: { read: false, write: false },
+    };
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: "/Users/demo/project",
+      sandbox: {
+        mode: "workspace_write",
+        network: "task_policy",
+        shell: "workspace_only",
+        allowWorkspaceEscape: false,
+        extraReadRoots: [],
+        extraWriteRoots: [],
+      },
+    });
+
+    expect(
+      authorizeToolCallWithinRunContext(
+        broadPolicy,
+        {
+          toolName: "shell_exec",
+          args: { command: "cat /etc/passwd" },
+        },
+        runContext,
+      ),
+    ).toEqual({
+      allowed: false,
+      reason:
+        "shell_exec 被 workspace_only 沙箱阻止：路径 /etc/passwd 不在工作区或额外可读目录内。",
+    });
+  });
 });

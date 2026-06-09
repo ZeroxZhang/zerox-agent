@@ -209,7 +209,7 @@ export function createAgentRunnerService(options: {
         const result = await options.toolExecutor.execute({
           toolName: authResult.toolName as never,
           args: authResult.args,
-        });
+        }, signal ? { signal } : undefined);
 
         events.push(
           createEvent(

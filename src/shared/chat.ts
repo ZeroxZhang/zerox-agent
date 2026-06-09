@@ -65,10 +65,12 @@ export type ChatRelatedMemory = {
 export type ChatAgentStatus =
   | {
       state: "completed";
+      runId?: string;
       toolCallsExecuted: number;
     }
   | {
       state: "paused";
+      runId?: string;
       reason: "turn_limit" | "tool_failure_loop";
       maxTurns: number;
       toolCallsExecuted: number;

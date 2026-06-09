@@ -153,6 +153,37 @@ describe("agent runtime engine", () => {
     });
   });
 
+  it("marks the current runtime step completed when the run succeeds", async () => {
+    const savedCheckpoints: AgentExecutionCheckpoint[] = [];
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore(savedCheckpoints),
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: createChatClient([finalResponse("Report complete")]),
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor([]),
+      createId: createSequentialId("step_state"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+
+    const result = await engine.startTask("task_123");
+
+    expect(result).toMatchObject({
+      ok: true,
+      run: {
+        status: "succeeded",
+      },
+    });
+    expect(savedCheckpoints.at(-1)?.steps[0]).toMatchObject({
+      state: "completed",
+      attempts: 1,
+      startedAt: "2026-06-07T00:02:00.000Z",
+      finishedAt: "2026-06-07T00:04:00.000Z",
+    });
+  });
+
   it("classifies denied tool calls and stores the failed run", async () => {
     const savedCheckpoints: AgentExecutionCheckpoint[] = [];
     const runStore = createMemoryRunStore();
@@ -425,6 +456,92 @@ describe("agent runtime engine", () => {
 
     expect(authorizationContexts).toEqual([runContext]);
     expect(toolContexts).toEqual([runContext]);
+  });
+
+  it("passes the abort signal to runtime tool execution", async () => {
+    const controller = new AbortController();
+    let receivedSignal: AbortSignal | undefined;
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore([]),
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: createChatClient([
+        toolCallResponse("file_read", { path: "~/Downloads/notes.md" }),
+        finalResponse("Report complete"),
+      ]),
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: {
+        async execute(_request, options) {
+          receivedSignal = options?.signal;
+          return {
+            ok: true,
+            result: { content: "notes" },
+          };
+        },
+      },
+      createId: createSequentialId("signal"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+
+    await engine.startTask("task_123", { signal: controller.signal });
+
+    expect(receivedSignal).toBe(controller.signal);
+  });
+
+  it("checkpoints waiting_for_approval while tool authorization is pending", async () => {
+    const savedCheckpoints: AgentExecutionCheckpoint[] = [];
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore(savedCheckpoints),
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: createChatClient([
+        toolCallResponse("file_read", { path: "~/Downloads/notes.md" }),
+        finalResponse("Report complete"),
+      ]),
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: {
+        async authorize(_taskId, request, options) {
+          const lifecycle = options as {
+            onApprovalRequested?: () => Promise<void>;
+            onApprovalResolved?: () => Promise<void>;
+          } | undefined;
+          await lifecycle?.onApprovalRequested?.();
+          await lifecycle?.onApprovalResolved?.();
+          return {
+            ok: true,
+            decision: {
+              allowed: true,
+              reason: "approved after prompt",
+            },
+            auditEvent: {
+              id: "audit_approval",
+              taskId: "task_123",
+              request,
+              decision: {
+                allowed: true,
+                reason: "approved after prompt",
+              },
+              createdAt: "2026-06-07T00:00:00.000Z",
+            },
+          };
+        },
+      },
+      toolExecutor: createToolExecutor([]),
+      createId: createSequentialId("approval"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+
+    await engine.startTask("task_123");
+
+    expect(savedCheckpoints.map((checkpoint) => checkpoint.status)).toContain(
+      "waiting_for_approval",
+    );
+    expect(savedCheckpoints.map((checkpoint) => checkpoint.status)).toEqual(
+      expect.arrayContaining(["running", "waiting_for_approval", "succeeded"]),
+    );
   });
 
   it("records workspace escape denials before failing the run", async () => {

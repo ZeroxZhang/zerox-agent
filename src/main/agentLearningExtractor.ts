@@ -49,6 +49,20 @@ export function extractLearningCandidatesFromTrajectory(
     });
   }
 
+  const repeatedFailure = findRepeatedToolFailure(events);
+  if (repeatedFailure) {
+    candidates.push({
+      type: "failure_lesson",
+      sourceRunId: run.id,
+      sourceTrajectoryEventIds: repeatedFailure.eventIds,
+      claim: `Run repeated failing tool ${repeatedFailure.toolName} ${repeatedFailure.count} times.`,
+      recommendedAction:
+        "Before retrying the same tool call, inspect arguments, permissions, and the latest observation tail.",
+      risk:
+        "Low: this advice reduces repeated calls and encourages evidence-driven recovery.",
+    });
+  }
+
   return candidates;
 }
 
@@ -75,4 +89,33 @@ function extractProceduralMemory(
     risk:
       "Low: the memory is advisory and should be retrieved only for similar skills or task names.",
   };
+}
+
+function findRepeatedToolFailure(events: AgentTrajectoryEvent[]): {
+  count: number;
+  eventIds: string[];
+  toolName: string;
+} | null {
+  const failedByTool = new Map<string, AgentTrajectoryEvent[]>();
+
+  for (const event of events) {
+    if (event.type !== "tool_result" || event.payload.ok !== false) {
+      continue;
+    }
+
+    const toolName = String(event.payload.toolName ?? "unknown");
+    failedByTool.set(toolName, [...(failedByTool.get(toolName) ?? []), event]);
+  }
+
+  for (const [toolName, failures] of failedByTool) {
+    if (failures.length >= 2) {
+      return {
+        count: failures.length,
+        eventIds: failures.map((event) => event.id),
+        toolName,
+      };
+    }
+  }
+
+  return null;
 }
