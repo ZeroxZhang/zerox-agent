@@ -7,6 +7,8 @@ export type AgentTrajectoryEventType =
   | "model_response"
   | "tool_call"
   | "tool_result"
+  | "native_tool_invocation"
+  | "native_tool_observation"
   | "checkpoint_written"
   | "artifact_created"
   | "workspace_escape_denied"
