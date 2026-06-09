@@ -248,6 +248,144 @@ export function createAgentEvalFixtures(): AgentEvalFixture[] {
       ],
     },
     {
+      id: "research-writing-native-tools",
+      description:
+        "Research writing runs fetch sources, record citations, check coverage, and write a sourced Markdown report.",
+      events: createEvents("research-writing-native-tools", [
+        ["model_request", {}],
+        ["model_response", {}],
+        ["tool_call", { toolName: "web_fetch_document" }],
+        [
+          "native_tool_invocation",
+          {
+            toolName: "web_fetch_document",
+            nativeKind: "web",
+            riskLevel: "medium",
+          },
+        ],
+        [
+          "native_tool_observation",
+          { toolName: "web_fetch_document", nativeKind: "web", ok: true },
+        ],
+        ["tool_result", { toolName: "web_fetch_document", ok: true }],
+        ["tool_call", { toolName: "citation_record" }],
+        [
+          "native_tool_invocation",
+          {
+            toolName: "citation_record",
+            nativeKind: "citation",
+            riskLevel: "low",
+          },
+        ],
+        [
+          "native_tool_observation",
+          { toolName: "citation_record", nativeKind: "citation", ok: true },
+        ],
+        ["tool_result", { toolName: "citation_record", ok: true }],
+        ["tool_call", { toolName: "citation_coverage_check" }],
+        [
+          "native_tool_invocation",
+          {
+            toolName: "citation_coverage_check",
+            nativeKind: "citation",
+            riskLevel: "low",
+          },
+        ],
+        [
+          "native_tool_observation",
+          {
+            toolName: "citation_coverage_check",
+            nativeKind: "citation",
+            ok: true,
+          },
+        ],
+        [
+          "tool_result",
+          {
+            toolName: "citation_coverage_check",
+            ok: true,
+            coverageOk: true,
+          },
+        ],
+        ["tool_call", { toolName: "markdown_report_write" }],
+        [
+          "native_tool_invocation",
+          {
+            toolName: "markdown_report_write",
+            nativeKind: "report",
+            riskLevel: "medium",
+          },
+        ],
+        [
+          "native_tool_observation",
+          {
+            toolName: "markdown_report_write",
+            nativeKind: "report",
+            ok: true,
+          },
+        ],
+        [
+          "tool_result",
+          {
+            toolName: "markdown_report_write",
+            ok: true,
+            artifactType: "markdown_report",
+            citationsSidecar: true,
+          },
+        ],
+        [
+          "final_summary",
+          {
+            status: "succeeded",
+            sourcedFacts: 1,
+            modelInferences: 1,
+          },
+        ],
+      ]),
+      requiredEventTypes: [
+        "tool_call",
+        "native_tool_invocation",
+        "native_tool_observation",
+        "tool_result",
+        "final_summary",
+      ],
+      assertions: [
+        {
+          type: "native_tool_invocation",
+          payload: { toolName: "web_fetch_document", nativeKind: "web" },
+          after: "tool_call",
+        },
+        {
+          type: "native_tool_invocation",
+          payload: { toolName: "citation_record", nativeKind: "citation" },
+          after: "tool_call",
+        },
+        {
+          type: "native_tool_invocation",
+          payload: {
+            toolName: "citation_coverage_check",
+            nativeKind: "citation",
+          },
+          after: "tool_call",
+        },
+        {
+          type: "tool_result",
+          payload: { toolName: "citation_coverage_check", coverageOk: true },
+          after: "native_tool_observation",
+        },
+        {
+          type: "tool_result",
+          payload: { toolName: "markdown_report_write", citationsSidecar: true },
+          after: "native_tool_observation",
+        },
+        {
+          type: "final_summary",
+          payload: { sourcedFacts: 1, modelInferences: 1 },
+          after: "tool_result",
+        },
+      ],
+    },
+    {
       id: "multi-agent-lineage",
       description: "A parent run records a child agent session boundary.",
       events: createEvents("multi-agent-lineage", [

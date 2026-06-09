@@ -56,7 +56,7 @@ It is not a chat wrapper or a generic hosted agent surface. It runs locally, con
 
 The product boundary is documented in [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md): Zerox optimizes for trusted local control, recoverable agent runs, explicit permissions, workspace-scoped runs, observable trajectories, parent/child multi-agent sessions, and user-reviewed learning. Runtime, workspace, and learning details live in [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md), [`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md), and [`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md).
 
-v1.3.0 adds a repo-local operating harness for future agent sessions: [`AGENTS.md`](AGENTS.md), [`init.sh`](init.sh), `.zerox` progress files, deterministic `harness:check` / `harness:score` scripts, chat trajectory evidence, episode export, and ordered/payload-aware contract evals. The current P2 work extends that harness with native code engineering tools, native trajectory evidence, reflection evidence, reviewable episode eval candidates, an Overview Agent Capability score, and a 10-case deterministic agent eval suite. The implementation plan is preserved in [`docs/superpowers/plans/2026-06-09-harness-engineering-iteration.md`](docs/superpowers/plans/2026-06-09-harness-engineering-iteration.md).
+v1.3.0 adds a repo-local operating harness for future agent sessions: [`AGENTS.md`](AGENTS.md), [`init.sh`](init.sh), `.zerox` progress files, deterministic `harness:check` / `harness:score` scripts, chat trajectory evidence, episode export, and ordered/payload-aware contract evals. The current P2 work extends that harness with native code engineering tools, research writing tools, native trajectory evidence, reflection evidence, reviewable episode eval candidates, an Overview Agent Capability score, citation sidecars, and an 11-case deterministic agent eval suite. The implementation plan is preserved in [`docs/superpowers/plans/2026-06-09-harness-engineering-iteration.md`](docs/superpowers/plans/2026-06-09-harness-engineering-iteration.md).
 
 <p align="center">
   <img src="zerox-agent-onepage.png" alt="Zerox Agent one-page product overview" width="720" />
@@ -583,7 +583,7 @@ npm run episode:export -- --config-dir <userData/config> --run-id <runId>
 npm run verify        # Tests + build + deterministic eval
 ```
 
-As of v1.3.0, `npm run verify` covers the Vitest suite, the production build, agent evals, and memory evals. The agent eval suite currently contains 10 deterministic fixtures, including native code engineering, reflection-after-test-failure, and episode eval-candidate golden paths. `npm run harness:score` emits the seven-category ETCLOVG score used by Overview as a local quality signal, and Overview also displays the native Agent Capability score.
+As of v1.3.0, `npm run verify` covers the Vitest suite, the production build, agent evals, and memory evals. The agent eval suite currently contains 11 deterministic fixtures, including native code engineering, research writing, reflection-after-test-failure, and episode eval-candidate golden paths. `npm run harness:score` emits the seven-category ETCLOVG score used by Overview as a local quality signal, and Overview also displays the native Agent Capability score.
 
 ### Test Coverage
 
@@ -607,6 +607,7 @@ Recently shipped:
 - [x] Repo-local harness, chat evidence, episode export, contract evals, and Overview harness score
 - [x] Native code engineering tools (`code_search`, `git_status`, `git_diff`, `test_run`) with native trajectory evidence and Agent Capability score
 - [x] Reflection evidence (`reflection_added`) and reviewable episode eval-candidate export
+- [x] Research writing tools (`web_fetch_document`, `citation_record`, `citation_coverage_check`, `markdown_report_write`) with citation sidecars and a sourced Markdown eval
 
 Planned:
 
@@ -649,7 +650,7 @@ Planned:
 
 产品边界写在 [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md)：Zerox 优先建设可信的本地控制、可恢复运行、显式权限、workspace 作用域、可观察轨迹、父子多 Agent 会话和用户审核后的学习。运行时、workspace 与学习机制分别见 [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md)、[`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md)、[`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md)。
 
-v1.3.0 新增面向后续 Agent 接手的 repo-local harness：[`AGENTS.md`](AGENTS.md)、[`init.sh`](init.sh)、`.zerox` 进度文件、确定性的 `harness:check` / `harness:score`、会话轨迹证据、episode 导出，以及带顺序和 payload 断言的 contract eval。当前 P2 工作在此基础上补齐原生代码工程工具、native 轨迹证据、reflection 证据、可审核的 episode eval candidate、Overview Agent Capability 分数，以及 10 个确定性 Agent eval fixture。完整实现计划保存在 [`docs/superpowers/plans/2026-06-09-harness-engineering-iteration.md`](docs/superpowers/plans/2026-06-09-harness-engineering-iteration.md)。
+v1.3.0 新增面向后续 Agent 接手的 repo-local harness：[`AGENTS.md`](AGENTS.md)、[`init.sh`](init.sh)、`.zerox` 进度文件、确定性的 `harness:check` / `harness:score`、会话轨迹证据、episode 导出，以及带顺序和 payload 断言的 contract eval。当前 P2 工作在此基础上补齐原生代码工程工具、研究写作工具、native 轨迹证据、reflection 证据、可审核的 episode eval candidate、Overview Agent Capability 分数、引用 sidecar，以及 11 个确定性 Agent eval fixture。完整实现计划保存在 [`docs/superpowers/plans/2026-06-09-harness-engineering-iteration.md`](docs/superpowers/plans/2026-06-09-harness-engineering-iteration.md)。
 
 ### 设计原则
 
@@ -1317,6 +1318,7 @@ npm run verify        # 测试 + 构建 + 确定性评测
 - [x] Repo-local harness、会话证据、episode 导出、contract eval 和 Overview harness score
 - [x] 原生代码工程工具（`code_search`、`git_status`、`git_diff`、`test_run`）、native 轨迹证据和 Agent Capability score
 - [x] Reflection 证据（`reflection_added`）和可审核的 episode eval candidate 导出
+- [x] 研究写作工具（`web_fetch_document`、`citation_record`、`citation_coverage_check`、`markdown_report_write`）、引用 sidecar 和有来源 Markdown eval
 
 后续计划：
 

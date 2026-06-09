@@ -184,7 +184,7 @@ export function OverviewPanel(props: {
     () =>
       data
         ? computeAgentCapabilityScore({
-            nativeToolCount: 4,
+            nativeToolCount: 8,
             expectedNativeToolCount: 8,
             evalPassRate: data.evalReport.passRate,
             retrySuccessRate: data.evalReport.toolSuccessRate,

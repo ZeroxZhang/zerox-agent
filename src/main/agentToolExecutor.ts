@@ -8,6 +8,7 @@ import { createWebTools, type WebTools } from "./webTools";
 import { createDynamicToolRegistry, type DynamicToolRegistry } from "./dynamicToolRegistry";
 import { searchCode } from "./nativeCodeTools";
 import { readGitDiff, readGitStatus } from "./nativeGitTools";
+import { createNativeResearchTools } from "./nativeResearchTools";
 import { runNativeTestCommand } from "./nativeTestRunTool";
 import type { MemoryStore } from "./memoryStore";
 import type { AgentRunContext } from "../shared/agentWorkspace";
@@ -82,6 +83,10 @@ function registerBuiltinTools(
     chatSessionStore?: Pick<ChatSessionStore, "searchMessages">;
   },
 ) {
+  const researchTools = createNativeResearchTools({
+    webTools: options.webTools,
+  });
+
   registry.register(
     {
       type: "function",
@@ -414,6 +419,133 @@ function registerBuiltinTools(
     },
     async (args) => options.webTools.fetchPage(String(args.url ?? "")),
     "built-in",
+  );
+
+  registry.register(
+    {
+      type: "function",
+      function: {
+        name: "web_fetch_document",
+        description:
+          "抓取指定 URL 并返回规范化研究文档和引用种子。",
+        parameters: {
+          type: "object",
+          properties: {
+            url: { type: "string", description: "要抓取的完整 URL" },
+          },
+          required: ["url"],
+        },
+      },
+    },
+    async (args) => researchTools.webFetchDocument(args),
+    "built-in",
+    defineNativeToolDescriptor({
+      id: "web_fetch_document",
+      kind: "web",
+      label: "Web Fetch Document",
+      description: "Fetch and normalize a source document for research writing.",
+      riskLevel: "medium",
+      permissionScope: { files: "none", shell: "none", web: "fetch" },
+      observableEvents: ["native_tool_invocation", "native_tool_observation"],
+    }),
+  );
+
+  registry.register(
+    {
+      type: "function",
+      function: {
+        name: "citation_record",
+        description:
+          "记录结构化引用证据，供 Markdown 报告和 sidecar 审计使用。",
+        parameters: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "可选引用 id" },
+            url: { type: "string", description: "来源 URL" },
+            title: { type: "string", description: "来源标题" },
+            quote: { type: "string", description: "短摘录" },
+            note: { type: "string", description: "审计备注" },
+            accessedAt: { type: "string", description: "访问时间" },
+          },
+          required: ["url"],
+        },
+      },
+    },
+    async (args) => researchTools.citationRecord(args),
+    "built-in",
+    defineNativeToolDescriptor({
+      id: "citation_record",
+      kind: "citation",
+      label: "Citation Record",
+      description: "Record structured citation evidence separately from prose.",
+      riskLevel: "low",
+      permissionScope: { files: "none", shell: "none", web: "fetch" },
+      observableEvents: ["native_tool_invocation", "native_tool_observation"],
+    }),
+  );
+
+  registry.register(
+    {
+      type: "function",
+      function: {
+        name: "citation_coverage_check",
+        description:
+          "检查 sourced_fact 是否全部引用已知 citation，并单列 model_inference。",
+        parameters: {
+          type: "object",
+          properties: {
+            citations: { type: "array", description: "citation 数组" },
+            claims: { type: "array", description: "claim 数组" },
+          },
+          required: ["citations", "claims"],
+        },
+      },
+    },
+    async (args) => researchTools.citationCoverageCheck(args),
+    "built-in",
+    defineNativeToolDescriptor({
+      id: "citation_coverage_check",
+      kind: "citation",
+      label: "Citation Coverage Check",
+      description: "Verify sourced claims before report writing.",
+      riskLevel: "low",
+      permissionScope: { files: "none", shell: "none", web: "none" },
+      observableEvents: ["native_tool_invocation", "native_tool_observation"],
+    }),
+  );
+
+  registry.register(
+    {
+      type: "function",
+      function: {
+        name: "markdown_report_write",
+        description:
+          "写入 citation-backed Markdown 报告和相邻 .citations.json sidecar。",
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "报告绝对路径" },
+            title: { type: "string", description: "报告标题" },
+            generatedAt: { type: "string", description: "生成时间" },
+            citations: { type: "array", description: "citation 数组" },
+            claims: { type: "array", description: "claim 数组" },
+            sections: { type: "array", description: "section 数组" },
+          },
+          required: ["path", "title", "citations", "claims", "sections"],
+        },
+      },
+    },
+    async (args) => researchTools.markdownReportWrite(args),
+    "built-in",
+    defineNativeToolDescriptor({
+      id: "markdown_report_write",
+      kind: "report",
+      label: "Markdown Report Write",
+      description: "Write Markdown reports with citation sidecars.",
+      riskLevel: "medium",
+      permissionScope: { files: "write", shell: "none", web: "none" },
+      observableEvents: ["native_tool_invocation", "native_tool_observation"],
+    }),
   );
 
   registry.register(

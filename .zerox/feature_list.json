@@ -108,6 +108,24 @@
         "npm run verify",
         "npm run harness:score"
       ]
+    },
+    {
+      "id": "P2.3-research-writing-tools",
+      "priority": 7,
+      "status": "done",
+      "title": "Citation-backed research writing tools",
+      "definitionOfDone": [
+        "web_fetch_document, citation_record, citation_coverage_check, and markdown_report_write are registered as native tools",
+        "Sourced facts require known citations before Markdown report writes",
+        "Markdown reports write a separate .citations.json evidence sidecar",
+        "Final summaries distinguish sourced facts from model inference",
+        "Agent evals include a research-writing golden path"
+      ],
+      "verification": [
+        "npm test -- src/shared/researchWriting.test.ts src/main/nativeResearchTools.test.ts src/shared/toolPermissions.test.ts src/shared/agentProtocol.test.ts src/main/agentToolExecutor.test.ts src/main/eval/agentEvalRunner.test.ts",
+        "npm run verify",
+        "npm run harness:score"
+      ]
     }
   ]
 }

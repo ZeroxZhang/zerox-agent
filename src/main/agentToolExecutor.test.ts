@@ -139,6 +139,10 @@ describe("agent tool executor", () => {
         { id: "git_status", kind: "git", enabled: true },
         { id: "git_diff", kind: "git", enabled: true },
         { id: "test_run", kind: "test", enabled: true },
+        { id: "web_fetch_document", kind: "web", enabled: true },
+        { id: "citation_record", kind: "citation", enabled: true },
+        { id: "citation_coverage_check", kind: "citation", enabled: true },
+        { id: "markdown_report_write", kind: "report", enabled: true },
       ]),
     );
   });
@@ -381,6 +385,102 @@ describe("agent tool executor", () => {
       "fetch:https://example.com",
       "search:agent memory",
     ]);
+  });
+
+  it("executes native research writing tools through the registry", async () => {
+    const reportPath = path.join(tempDir, "research.md");
+    const executor = createAgentToolExecutor({
+      webTools: {
+        async fetchPage(url) {
+          return {
+            ok: true,
+            result: {
+              url,
+              title: "Harness Guide",
+              text: "Harness tracks deterministic eval results.",
+            },
+          };
+        },
+        async search(query) {
+          return { ok: true, result: { query, results: [] } };
+        },
+      },
+    });
+
+    await expect(
+      executor.execute({
+        toolName: "web_fetch_document",
+        args: { url: "https://docs.example.com/guide" },
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      result: {
+        document: {
+          url: "https://docs.example.com/guide",
+          title: "Harness Guide",
+        },
+      },
+    });
+
+    await expect(
+      executor.execute({
+        toolName: "citation_coverage_check",
+        args: {
+          citations: [
+            {
+              id: "src_docs",
+              url: "https://docs.example.com/guide",
+              title: "Harness Guide",
+            },
+          ],
+          claims: [
+            {
+              id: "fact_1",
+              kind: "sourced_fact",
+              text: "Harness tracks deterministic eval results.",
+              citationIds: ["src_docs"],
+            },
+          ],
+        },
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      result: {
+        coverage: { ok: true },
+      },
+    });
+
+    await expect(
+      executor.execute({
+        toolName: "markdown_report_write",
+        args: {
+          path: reportPath,
+          title: "Agent Capability Research",
+          citations: [
+            {
+              id: "src_docs",
+              url: "https://docs.example.com/guide",
+              title: "Harness Guide",
+            },
+          ],
+          claims: [
+            {
+              id: "fact_1",
+              kind: "sourced_fact",
+              text: "Harness tracks deterministic eval results.",
+              citationIds: ["src_docs"],
+            },
+          ],
+          sections: [{ heading: "Findings", claimIds: ["fact_1"] }],
+        },
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      result: {
+        path: reportPath,
+        citationsPath: path.join(tempDir, "research.citations.json"),
+      },
+    });
   });
 
   it("searches long-term memory through a bounded memory_search tool", async () => {

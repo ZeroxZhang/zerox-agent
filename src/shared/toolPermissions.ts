@@ -16,6 +16,10 @@ export type AgentToolName =
   | "conversation_search"
   | "web_search"
   | "web_fetch"
+  | "web_fetch_document"
+  | "citation_record"
+  | "citation_coverage_check"
+  | "markdown_report_write"
   | "shell_exec";
 
 export type TaskPermissionPolicy = {
@@ -250,6 +254,18 @@ export function authorizeToolCall(
         : deny("这个任务未允许 web_search。");
     case "web_fetch":
       return authorizeWebFetch(String(request.args.url ?? ""), normalized);
+    case "web_fetch_document":
+      return authorizeWebFetch(String(request.args.url ?? ""), normalized);
+    case "citation_record":
+      return authorizeWebFetch(String(request.args.url ?? ""), normalized);
+    case "citation_coverage_check":
+      return allow("citation_coverage_check 仅检查已提供的引用结构。");
+    case "markdown_report_write":
+      return authorizeFilePath(
+        String(request.args.path ?? ""),
+        normalized.files.write,
+        "markdown_report_write 路径不在已授权可写目录内。",
+      );
     case "shell_exec":
       return authorizeShellCommand(
         String(request.args.command ?? ""),
@@ -274,8 +290,12 @@ export function authorizeToolCallWithinRunContext(
     return deny(`${request.toolName} 被运行沙箱阻止：网络访问已禁用。`);
   }
 
-  if (request.toolName === "file_write" && runContext.sandbox.mode === "read_only") {
-    return deny("file_write 被运行沙箱阻止：当前运行是只读沙箱。");
+  if (
+    (request.toolName === "file_write" ||
+      request.toolName === "markdown_report_write") &&
+    runContext.sandbox.mode === "read_only"
+  ) {
+    return deny(`${request.toolName} 被运行沙箱阻止：当前运行是只读沙箱。`);
   }
 
   if (!runContext.sandbox.allowWorkspaceEscape) {
@@ -360,12 +380,17 @@ function authorizeWorkspaceFileRequest(
     request.toolName !== "code_search" &&
     request.toolName !== "git_status" &&
     request.toolName !== "git_diff" &&
-    request.toolName !== "test_run"
+    request.toolName !== "test_run" &&
+    request.toolName !== "markdown_report_write"
   ) {
     return null;
   }
 
-  const access = request.toolName === "file_write" ? "write" : "read";
+  const access =
+    request.toolName === "file_write" ||
+    request.toolName === "markdown_report_write"
+      ? "write"
+      : "read";
   const isNativeWorkspaceRootTool =
     request.toolName === "code_search" ||
     request.toolName === "git_status" ||

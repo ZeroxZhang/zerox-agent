@@ -11,11 +11,11 @@ describe("agent eval runner", () => {
     const report = await runAgentEvals(createAgentEvalFixtures());
 
     expect(report).toEqual({
-      total: 10,
-      passed: 10,
+      total: 11,
+      passed: 11,
       failed: 0,
       passRate: 1,
-      toolSuccessRate: 0.8182,
+      toolSuccessRate: 0.8667,
       recoverabilityRate: 1,
       failures: [],
     });
@@ -30,6 +30,7 @@ describe("agent eval runner", () => {
         "code-engineering-native-tools",
         "reflection-after-test-failure",
         "episode-eval-candidate",
+        "research-writing-native-tools",
         "multi-agent-lineage",
       ]),
     );
@@ -45,6 +46,17 @@ describe("agent eval runner", () => {
     });
     expect(
       fixtures.find((fixture) => fixture.id === "code-engineering-native-tools"),
+    ).toMatchObject({
+      requiredEventTypes: [
+        "tool_call",
+        "native_tool_invocation",
+        "native_tool_observation",
+        "tool_result",
+        "final_summary",
+      ],
+    });
+    expect(
+      fixtures.find((fixture) => fixture.id === "research-writing-native-tools"),
     ).toMatchObject({
       requiredEventTypes: [
         "tool_call",

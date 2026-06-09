@@ -65,6 +65,27 @@ describe("agent JSON protocol", () => {
     });
   });
 
+  it("accepts native research writing tool calls in the fallback protocol", () => {
+    expect(
+      parseAgentModelResponse(
+        `{"type":"tool_call","tool":"markdown_report_write","args":{"path":"/repo/report.md","title":"Research","claims":[],"citations":[],"sections":[]}}`,
+      ),
+    ).toEqual({
+      ok: true,
+      message: {
+        type: "tool_call",
+        tool: "markdown_report_write",
+        args: {
+          path: "/repo/report.md",
+          title: "Research",
+          claims: [],
+          citations: [],
+          sections: [],
+        },
+      },
+    });
+  });
+
   it("serializes tool observations as JSON for the next model turn", () => {
     expect(
       serializeToolObservation({
@@ -99,8 +120,14 @@ describe("agent JSON protocol", () => {
     expect(prompt).toContain("git_status");
     expect(prompt).toContain("git_diff");
     expect(prompt).toContain("test_run");
+    expect(prompt).toContain("web_fetch_document");
+    expect(prompt).toContain("citation_record");
+    expect(prompt).toContain("markdown_report_write");
     expect(prompt).toContain(
       "代码工程优先使用 code_search、git_status、git_diff、test_run",
+    );
+    expect(prompt).toContain(
+      "研究写作优先使用 web_fetch_document、citation_record、citation_coverage_check、markdown_report_write",
     );
     expect(prompt).toContain("工具");
     expect(prompt).toContain("默认使用中文");
@@ -109,7 +136,7 @@ describe("agent JSON protocol", () => {
   it("builds tool definitions with JSON Schema for built-in tools", () => {
     const definitions = buildToolDefinitions();
 
-    expect(definitions).toHaveLength(14);
+    expect(definitions).toHaveLength(18);
     const names = definitions.map((d) => d.function.name);
     expect(names).toContain("file_list");
     expect(names).toContain("file_stat");
@@ -124,6 +151,10 @@ describe("agent JSON protocol", () => {
     expect(names).toContain("conversation_search");
     expect(names).toContain("web_search");
     expect(names).toContain("web_fetch");
+    expect(names).toContain("web_fetch_document");
+    expect(names).toContain("citation_record");
+    expect(names).toContain("citation_coverage_check");
+    expect(names).toContain("markdown_report_write");
     expect(names).toContain("shell_exec");
 
     for (const def of definitions) {

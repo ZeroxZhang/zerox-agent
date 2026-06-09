@@ -216,6 +216,49 @@ describe("tool authorization", () => {
     });
   });
 
+  it("authorizes research writing tools by source domain and report path", () => {
+    expect(
+      authorizeToolCall(policy, {
+        toolName: "web_fetch_document",
+        args: { url: "https://docs.example.com/guide" },
+      }),
+    ).toMatchObject({ allowed: true });
+
+    expect(
+      authorizeToolCall(policy, {
+        toolName: "citation_record",
+        args: { url: "https://docs.example.com/guide" },
+      }),
+    ).toMatchObject({ allowed: true });
+
+    expect(
+      authorizeToolCall(policy, {
+        toolName: "markdown_report_write",
+        args: { path: "/Users/demo/Downloads/reports/research.md" },
+      }),
+    ).toMatchObject({ allowed: true });
+
+    expect(
+      authorizeToolCall(policy, {
+        toolName: "markdown_report_write",
+        args: { path: "/Users/demo/Desktop/research.md" },
+      }),
+    ).toEqual({
+      allowed: false,
+      reason: "markdown_report_write 路径不在已授权可写目录内。",
+    });
+
+    expect(
+      authorizeToolCall(policy, {
+        toolName: "citation_coverage_check",
+        args: { claims: [], citations: [] },
+      }),
+    ).toEqual({
+      allowed: true,
+      reason: "citation_coverage_check 仅检查已提供的引用结构。",
+    });
+  });
+
   it("allows shell execution only when a safe command matches an approved template", () => {
     expect(
       authorizeToolCall(policy, {
@@ -436,6 +479,48 @@ describe("tool authorization", () => {
     ).toEqual({
       allowed: false,
       reason: "test_run 被运行沙箱阻止：命令执行已禁用。",
+    });
+  });
+
+  it("narrows markdown report writes to the active run workspace", () => {
+    const broadPolicy: TaskPermissionPolicy = {
+      files: {
+        read: ["/Users/demo"],
+        write: ["/Users/demo"],
+      },
+      web: { search: true, fetchDomains: ["example.com"] },
+      shell: { commands: [] },
+      memory: { read: true, write: false },
+    };
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: "/Users/demo/project",
+    });
+
+    expect(
+      authorizeToolCallWithinRunContext(
+        broadPolicy,
+        {
+          toolName: "markdown_report_write",
+          args: { path: "/Users/demo/project/research.md" },
+        },
+        runContext,
+      ),
+    ).toMatchObject({ allowed: true });
+
+    expect(
+      authorizeToolCallWithinRunContext(
+        broadPolicy,
+        {
+          toolName: "markdown_report_write",
+          args: { path: "/Users/demo/Desktop/research.md" },
+        },
+        runContext,
+      ),
+    ).toEqual({
+      allowed: false,
+      reason:
+        "markdown_report_write 被运行沙箱阻止：路径不在工作区或额外可写目录内。",
     });
   });
 

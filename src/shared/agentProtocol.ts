@@ -42,6 +42,10 @@ const supportedTools = new Set<AgentToolName>([
   "conversation_search",
   "web_search",
   "web_fetch",
+  "web_fetch_document",
+  "citation_record",
+  "citation_coverage_check",
+  "markdown_report_write",
   "shell_exec",
 ]);
 
@@ -338,6 +342,106 @@ export function buildToolDefinitions(): ToolDefinition[] {
     {
       type: "function",
       function: {
+        name: "web_fetch_document",
+        description:
+          "抓取指定 URL 并返回适合研究写作的规范化文档和引用种子。需要任务授权对应域名的 web.fetchDomains 权限。",
+        parameters: {
+          type: "object",
+          properties: {
+            url: {
+              type: "string",
+              description: "要抓取的完整 URL，必须以 http:// 或 https:// 开头",
+            },
+          },
+          required: ["url"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "citation_record",
+        description:
+          "把来源 URL、标题和摘录记录为结构化 citation evidence。报告正文应引用 citation id，而不是把证据混入自由文本。",
+        parameters: {
+          type: "object",
+          properties: {
+            id: {
+              type: "string",
+              description: "可选 citation id；省略时由 URL 生成稳定 id",
+            },
+            url: { type: "string", description: "来源 URL" },
+            title: { type: "string", description: "来源标题" },
+            quote: { type: "string", description: "支持该结论的短摘录" },
+            note: { type: "string", description: "可选审计备注" },
+            accessedAt: {
+              type: "string",
+              description: "可选 ISO 时间；省略时由运行时生成",
+            },
+          },
+          required: ["url"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "citation_coverage_check",
+        description:
+          "检查 claims 中每个 sourced_fact 是否引用了已知 citation；model_inference 会被单独统计但不要求 citation。",
+        parameters: {
+          type: "object",
+          properties: {
+            citations: {
+              type: "array",
+              description: "citation_record 产生的 citation 数组",
+            },
+            claims: {
+              type: "array",
+              description:
+                "研究结论数组，每项包含 id、kind、text、citationIds",
+            },
+          },
+          required: ["citations", "claims"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "markdown_report_write",
+        description:
+          "写入 citation-backed Markdown 报告，并在相邻位置写入 .citations.json 证据 sidecar。若 sourced_fact 缺少有效引用会拒绝写入。",
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "要写入的 Markdown 绝对路径" },
+            title: { type: "string", description: "报告标题" },
+            generatedAt: {
+              type: "string",
+              description: "可选 ISO 时间；省略时由运行时生成",
+            },
+            citations: {
+              type: "array",
+              description: "结构化 citation 数组，会写入 sidecar",
+            },
+            claims: {
+              type: "array",
+              description:
+                "结论数组。sourced_fact 必须包含 citationIds，model_inference 会在摘要中单列。",
+            },
+            sections: {
+              type: "array",
+              description: "正文 section 数组，每项包含 heading 和 claimIds",
+            },
+          },
+          required: ["path", "title", "citations", "claims", "sections"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
         name: "shell_exec",
         description:
           "执行 shell 命令。默认超时 120 秒，可用 timeoutMs 为明确的长命令申请 25-600000 ms。仅允许执行已授权模板匹配的命令。优先使用 file_stat/file_search/file_read 等原生工具完成文件诊断。",
@@ -363,11 +467,12 @@ export function buildToolDefinitions(): ToolDefinition[] {
 export function buildAgentSystemPrompt(): string {
   return [
     "你是一个本地桌面 AI agent 的运行时核心。",
-    "你可以调用工具来完成任务：列出目录、读取元信息、搜索文件、读写文件、搜索代码、读取 git 状态和 diff、运行已授权测试、检索本地记忆、搜索网页、抓取网页内容、执行受权 shell 命令。",
+    "你可以调用工具来完成任务：列出目录、读取元信息、搜索文件、读写文件、搜索代码、读取 git 状态和 diff、运行已授权测试、检索本地记忆、搜索网页、抓取网页内容、记录引用、写 citation-backed Markdown 报告、执行受权 shell 命令。",
     "",
     "工作原则：",
     "- 文件诊断优先使用 file_list、file_stat、file_search、file_read；只有原生工具无法完成时再使用 shell_exec。",
     "- 代码工程优先使用 code_search、git_status、git_diff、test_run；只有这些原生工具无法完成时再申请 shell_exec。",
+    "- 研究写作优先使用 web_fetch_document、citation_record、citation_coverage_check、markdown_report_write；报告摘要必须区分 sourced facts 和 model inference。",
     "- 将复杂任务分解为清晰的步骤序列。",
     "- 每个工具调用返回结果后，分析结果再决定下一步。",
     "- 如果工具返回错误，先分析原因，尝试调整参数或方法。",

@@ -254,7 +254,7 @@ export function ToolsPanel() {
 }
 
 function defaultArgsJson(toolName: AgentToolName): string {
-  const defaults: Record<AgentToolName, Record<string, string>> = {
+  const defaults: Record<AgentToolName, Record<string, unknown>> = {
     file_list: { path: "~/Downloads" },
     file_stat: { path: "~/Downloads/notes.md" },
     file_search: { root: "~/Downloads", query: "report", mode: "both" },
@@ -271,6 +271,50 @@ function defaultArgsJson(toolName: AgentToolName): string {
     conversation_search: { query: "报告 保存", limit: "5" },
     web_search: { query: "智能体记忆设计" },
     web_fetch: { url: "https://example.com" },
+    web_fetch_document: { url: "https://example.com" },
+    citation_record: {
+      id: "src_example",
+      url: "https://example.com",
+      title: "Example",
+      quote: "A short sourced excerpt.",
+    },
+    citation_coverage_check: {
+      citations: [
+        {
+          id: "src_example",
+          url: "https://example.com",
+          title: "Example",
+        },
+      ],
+      claims: [
+        {
+          id: "fact_1",
+          kind: "sourced_fact",
+          text: "Example sourced fact.",
+          citationIds: ["src_example"],
+        },
+      ],
+    },
+    markdown_report_write: {
+      path: "~/Downloads/reports/research.md",
+      title: "Research Report",
+      citations: [
+        {
+          id: "src_example",
+          url: "https://example.com",
+          title: "Example",
+        },
+      ],
+      claims: [
+        {
+          id: "fact_1",
+          kind: "sourced_fact",
+          text: "Example sourced fact.",
+          citationIds: ["src_example"],
+        },
+      ],
+      sections: [{ heading: "Findings", claimIds: ["fact_1"] }],
+    },
     shell_exec: { command: "find ~/Downloads -maxdepth 1 -type f" },
   };
 
