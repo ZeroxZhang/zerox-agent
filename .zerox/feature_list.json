@@ -73,6 +73,24 @@
         "npm test -- src/shared/harnessScore.test.ts src/main/agentLearningExtractor.test.ts src/renderer/materialDesign.test.ts",
         "npm run harness:score"
       ]
+    },
+    {
+      "id": "P2.1-native-code-tools",
+      "priority": 5,
+      "status": "done",
+      "title": "Native code engineering tools",
+      "definitionOfDone": [
+        "code_search, git_status, git_diff, and test_run are registered as native tools",
+        "Native tools have task permission checks and workspace sandbox checks",
+        "Native invocation and observation events are recorded in runtime and chat trajectories",
+        "Overview displays an Agent Capability score",
+        "Agent evals include a native code engineering golden path"
+      ],
+      "verification": [
+        "npm test -- src/shared/toolPermissions.test.ts src/main/agentToolExecutor.test.ts src/main/agentRuntimeEngine.test.ts src/main/chatService.test.ts src/main/eval/agentEvalRunner.test.ts src/renderer/materialDesign.test.ts",
+        "npm run build",
+        "node scripts/run-agent-evals.mjs"
+      ]
     }
   ]
 }

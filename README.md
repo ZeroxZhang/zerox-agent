@@ -56,7 +56,7 @@ It is not a chat wrapper or a generic hosted agent surface. It runs locally, con
 
 The product boundary is documented in [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md): Zerox optimizes for trusted local control, recoverable agent runs, explicit permissions, workspace-scoped runs, observable trajectories, parent/child multi-agent sessions, and user-reviewed learning. Runtime, workspace, and learning details live in [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md), [`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md), and [`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md).
 
-v1.3.0 adds a repo-local operating harness for future agent sessions: [`AGENTS.md`](AGENTS.md), [`init.sh`](init.sh), `.zerox` progress files, deterministic `harness:check` / `harness:score` scripts, chat trajectory evidence, episode export, and ordered/payload-aware contract evals. The implementation plan is preserved in [`docs/superpowers/plans/2026-06-09-harness-engineering-iteration.md`](docs/superpowers/plans/2026-06-09-harness-engineering-iteration.md).
+v1.3.0 adds a repo-local operating harness for future agent sessions: [`AGENTS.md`](AGENTS.md), [`init.sh`](init.sh), `.zerox` progress files, deterministic `harness:check` / `harness:score` scripts, chat trajectory evidence, episode export, and ordered/payload-aware contract evals. The current P2.1 iteration extends that harness with native code engineering tools, native trajectory evidence, an Overview Agent Capability score, and an 8-case deterministic agent eval suite. The implementation plan is preserved in [`docs/superpowers/plans/2026-06-09-harness-engineering-iteration.md`](docs/superpowers/plans/2026-06-09-harness-engineering-iteration.md).
 
 <p align="center">
   <img src="zerox-agent-onepage.png" alt="Zerox Agent one-page product overview" width="720" />
@@ -224,7 +224,7 @@ Parent/child multi-agent sessions are recorded as lineage metadata on top of the
 
 ### 7. Tool System
 
-Ten built-in tools cover core agent capabilities:
+Fourteen built-in tools cover core agent capabilities:
 
 | Tool | Function | Authorization |
 |------|----------|---------------|
@@ -233,13 +233,17 @@ Ten built-in tools cover core agent capabilities:
 | `file_search` | Search names and file contents under an authorized root | Path whitelist for readable dirs |
 | `file_read` | Read file contents | Path whitelist for readable dirs |
 | `file_write` | Write file (auto-creates dirs) | Path whitelist for writable dirs |
+| `code_search` | Search source code with ripgrep-first fallback behavior | Workspace read whitelist |
+| `git_status` | Read branch and changed-file summary | Workspace read whitelist |
+| `git_diff` | Read raw diff and numstat summary | Workspace read whitelist |
+| `test_run` | Run approved test commands with structured output and cancellation | Workspace read whitelist + command template whitelist |
 | `memory_search` | Search bounded long-term memory context | Task memory-read permission |
 | `conversation_search` | Search bounded chat-session evidence | Task memory-read permission |
 | `web_search` | DuckDuckGo search | Explicit search permission |
 | `web_fetch` | Fetch webpage content | Domain whitelist |
 | `shell_exec` | Execute shell command with timeout, cancellation, and structured failure details | Command template whitelist |
 
-Tools come from three sources: built-in (10), skill-defined (from `SKILL.md`), and MCP servers.
+Tools come from three sources: built-in (14), skill-defined (from `SKILL.md`), and MCP servers. Native code engineering tools also emit `native_tool_invocation` and `native_tool_observation` trajectory events so evals and episode exports can distinguish first-party tools from shell fallbacks.
 
 ### 8. Permissions & Security
 
@@ -508,6 +512,8 @@ ToolCall Request
   ├── 1. Parse args JSON
   ├── 2. Check task permission policy
   │    ├── file_list/stat/search/read/write → path whitelist match
+  │    ├── code_search/git_status/git_diff → workspace read whitelist match
+  │    ├── test_run → workspace read whitelist + approved test command template
   │    ├── memory_search / conversation_search → memory-read permission
   │    ├── web_search → boolean toggle
   │    ├── web_fetch → domain whitelist (incl. subdomains)
@@ -577,7 +583,7 @@ npm run episode:export -- --config-dir <userData/config> --run-id <runId>
 npm run verify        # Tests + build + deterministic eval
 ```
 
-As of v1.3.0, `npm run verify` covers 78 Vitest files / 346 tests, the production build, agent evals, and memory evals. `npm run harness:score` emits the seven-category ETCLOVG score used by Overview as a local quality signal.
+As of v1.3.0, `npm run verify` covers the Vitest suite, the production build, agent evals, and memory evals. The agent eval suite currently contains 8 deterministic fixtures, including a native code engineering golden path. `npm run harness:score` emits the seven-category ETCLOVG score used by Overview as a local quality signal, and Overview also displays the native Agent Capability score.
 
 ### Test Coverage
 
@@ -599,11 +605,12 @@ Recently shipped:
 - [x] Runtime memory P0-P4: bounded recall, conversation evidence, persona profile, evals, and governance reports
 - [x] Workspace-scoped runs, parent/child multi-agent lineage, and user-reviewed procedural learning
 - [x] Repo-local harness, chat evidence, episode export, contract evals, and Overview harness score
+- [x] Native code engineering tools (`code_search`, `git_status`, `git_diff`, `test_run`) with native trajectory evidence and Agent Capability score
 
 Planned:
 
 - [ ] Apple signing, notarization, auto-update, and clearer release distribution
-- [ ] More native first-party tools so agents depend less on shell fallbacks
+- [ ] More native first-party tools beyond the P2.1 code engineering set
 - [ ] Skill marketplace, remote skill installation, and visual skill/workflow editing
 - [ ] Event-triggered tasks (file changes, system events, etc.)
 - [ ] Windows & Linux desktop support
@@ -641,7 +648,7 @@ Planned:
 
 产品边界写在 [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md)：Zerox 优先建设可信的本地控制、可恢复运行、显式权限、workspace 作用域、可观察轨迹、父子多 Agent 会话和用户审核后的学习。运行时、workspace 与学习机制分别见 [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md)、[`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md)、[`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md)。
 
-v1.3.0 新增面向后续 Agent 接手的 repo-local harness：[`AGENTS.md`](AGENTS.md)、[`init.sh`](init.sh)、`.zerox` 进度文件、确定性的 `harness:check` / `harness:score`、会话轨迹证据、episode 导出，以及带顺序和 payload 断言的 contract eval。完整实现计划保存在 [`docs/superpowers/plans/2026-06-09-harness-engineering-iteration.md`](docs/superpowers/plans/2026-06-09-harness-engineering-iteration.md)。
+v1.3.0 新增面向后续 Agent 接手的 repo-local harness：[`AGENTS.md`](AGENTS.md)、[`init.sh`](init.sh)、`.zerox` 进度文件、确定性的 `harness:check` / `harness:score`、会话轨迹证据、episode 导出，以及带顺序和 payload 断言的 contract eval。当前 P2.1 迭代在此基础上补齐原生代码工程工具、native 轨迹证据、Overview Agent Capability 分数，以及 8 个确定性 Agent eval fixture。完整实现计划保存在 [`docs/superpowers/plans/2026-06-09-harness-engineering-iteration.md`](docs/superpowers/plans/2026-06-09-harness-engineering-iteration.md)。
 
 ### 设计原则
 
@@ -822,7 +829,7 @@ Agent Runner 是执行核心，采用 **Plan → Execute → Reflect** 三阶段
 
 ### 7. 工具系统 (Tools)
 
-十种内置工具，覆盖核心 Agent 能力：
+十四种内置工具，覆盖核心 Agent 能力：
 
 | 工具 | 功能 | 权限控制 |
 |------|------|----------|
@@ -831,6 +838,10 @@ Agent Runner 是执行核心，采用 **Plan → Execute → Reflect** 三阶段
 | `file_search` | 在授权根目录内搜索文件名和文件内容 | 限制可读目录路径 |
 | `file_read` | 读取文件内容 | 限制可读目录路径 |
 | `file_write` | 写入文件（自动创建目录） | 限制可写目录路径 |
+| `code_search` | 以 ripgrep 优先的方式搜索源码 | workspace 可读目录白名单 |
+| `git_status` | 读取分支和改动文件摘要 | workspace 可读目录白名单 |
+| `git_diff` | 读取 raw diff 和 numstat 摘要 | workspace 可读目录白名单 |
+| `test_run` | 运行已授权测试命令，返回结构化结果并支持中断 | workspace 可读目录白名单 + 命令模板白名单 |
 | `memory_search` | 检索有预算限制的长期记忆上下文 | 需要任务 memory.read 权限 |
 | `conversation_search` | 检索有预算限制的会话证据 | 需要任务 memory.read 权限 |
 | `web_search` | DuckDuckGo 网页搜索 | 需显式授权 search 权限 |
@@ -838,15 +849,18 @@ Agent Runner 是执行核心，采用 **Plan → Execute → Reflect** 三阶段
 | `shell_exec` | 执行 shell 命令，支持超时、中断和结构化失败诊断 | 需匹配已授权命令模板 |
 
 工具注册表采用动态注册机制 (`DynamicToolRegistry`)，支持三类工具来源：
-- **内置工具**：10 种核心工具开箱即用
+- **内置工具**：14 种核心工具开箱即用
 - **技能工具**：技能 SKILL.md 中定义的 `tools` 自动注册
 - **MCP 工具**：通过 MCP 协议接入的外部工具服务器
+
+原生代码工程工具会额外写入 `native_tool_invocation` 和 `native_tool_observation` 轨迹事件，让 eval 和 episode export 能区分一方工具调用与 shell fallback。
 
 ### 8. 权限与安全 (Permissions & Security)
 
 每个任务创建时，基于技能的 `permissions` 配置生成权限清单：
 
 - **文件权限**：按绝对路径白名单限制读写范围，支持 `{{placeholder}}` 占位符
+- **原生代码工具权限**：`code_search`、`git_status`、`git_diff` 需匹配 workspace 可读目录；`test_run` 还需匹配已授权测试命令模板
 - **Shell 权限**：按命令行模板白名单匹配，阻止包含控制操作符 (`;`、`&&`、`|`、`` ` ``、`$(`) 和破坏性命令 (`rm -rf`、`git push -f`、`DROP TABLE` 等) 的调用
 - **Web 权限**：搜索需显式启用，抓取按域名白名单匹配
 - **记忆权限**：任务策略中包含 memory.read / memory.write 开关，记忆检索工具只读
@@ -1265,7 +1279,7 @@ mac:
 
 ## 测试
 
-截至 v1.3.0，`npm run verify` 覆盖 78 个 Vitest 测试文件 / 346 个测试、生产构建、Agent 评测和记忆检索评测：
+截至 v1.3.0，`npm run verify` 覆盖 Vitest 测试、生产构建、Agent 评测和记忆检索评测；Agent eval 当前包含 8 个确定性 fixture，其中包括原生代码工程黄金路径：
 
 ```bash
 npm test              # 运行全部测试
@@ -1278,7 +1292,7 @@ npm run episode:export -- --config-dir <userData/config> --run-id <runId>
 npm run verify        # 测试 + 构建 + 确定性评测
 ```
 
-`npm run harness:score` 输出与 Overview 面板一致的七类 ETCLOVG harness score，便于发布前判断执行环境、工具接口、上下文、生命周期、可观测、验证和治理是否仍然健康。
+`npm run harness:score` 输出与 Overview 面板一致的七类 ETCLOVG harness score，便于发布前判断执行环境、工具接口、上下文、生命周期、可观测、验证和治理是否仍然健康。Overview 也会显示 Native Agent Capability 分数。
 
 ### 测试覆盖
 
@@ -1300,11 +1314,12 @@ npm run verify        # 测试 + 构建 + 确定性评测
 - [x] Memory P0-P4：有预算召回、会话证据、画像文档、评测和治理报告
 - [x] Workspace 作用域运行、父子多 Agent 关系和用户审核后的流程学习
 - [x] Repo-local harness、会话证据、episode 导出、contract eval 和 Overview harness score
+- [x] 原生代码工程工具（`code_search`、`git_status`、`git_diff`、`test_run`）、native 轨迹证据和 Agent Capability score
 
 后续计划：
 
 - [ ] Apple 签名、公证、自动更新和更清晰的分发流程
-- [ ] 增加更多一方原生工具，减少 Agent 对 shell fallback 的依赖
+- [ ] 在 P2.1 代码工程工具之外继续增加更多一方原生工具
 - [ ] 技能市场、远程技能安装和可视化技能/工作流编辑
 - [ ] 条件触发任务（文件变化、系统事件等）
 - [ ] Windows 和 Linux 桌面支持
