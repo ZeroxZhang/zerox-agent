@@ -235,6 +235,64 @@ describe("tool authorization", () => {
     });
   });
 
+  it("authorizes native code search and git tools through readable workspace paths", () => {
+    const nativePolicy = getDefaultTaskPermissionPolicy();
+    nativePolicy.files.read = ["/workspace/project"];
+
+    expect(
+      authorizeToolCall(nativePolicy, {
+        toolName: "code_search",
+        args: { workspaceRoot: "/workspace/project", query: "Agent" },
+      }),
+    ).toEqual({
+      allowed: true,
+      reason: "路径在已授权范围内。",
+    });
+    expect(
+      authorizeToolCall(nativePolicy, {
+        toolName: "git_status",
+        args: { workspaceRoot: "/workspace/project" },
+      }).allowed,
+    ).toBe(true);
+    expect(
+      authorizeToolCall(nativePolicy, {
+        toolName: "git_diff",
+        args: { workspaceRoot: "/private/project" },
+      }),
+    ).toEqual({
+      allowed: false,
+      reason: "git_diff workspaceRoot 不在已授权可读目录内。",
+    });
+  });
+
+  it("authorizes test_run only when the command matches shell policy", () => {
+    const nativePolicy = getDefaultTaskPermissionPolicy();
+    nativePolicy.files.read = ["/workspace/project"];
+    nativePolicy.shell.commands = ["npm test -- *"];
+
+    expect(
+      authorizeToolCall(nativePolicy, {
+        toolName: "test_run",
+        args: {
+          workspaceRoot: "/workspace/project",
+          command: "npm test -- src/shared/nativeCapabilities.test.ts",
+        },
+      }).allowed,
+    ).toBe(true);
+    expect(
+      authorizeToolCall(nativePolicy, {
+        toolName: "test_run",
+        args: {
+          workspaceRoot: "/workspace/project",
+          command: "npm install left-pad",
+        },
+      }),
+    ).toEqual({
+      allowed: false,
+      reason: "test_run command 不匹配已授权测试模板。",
+    });
+  });
+
   it("rejects shell commands with shell control operators before template matching", () => {
     expect(
       authorizeToolCall(policy, {
@@ -305,6 +363,79 @@ describe("tool authorization", () => {
     ).toEqual({
       allowed: false,
       reason: "file_write 被运行沙箱阻止：路径不在工作区或额外可写目录内。",
+    });
+  });
+
+  it("narrows native workspaceRoot permissions to the active run workspace", () => {
+    const broadPolicy: TaskPermissionPolicy = {
+      files: {
+        read: ["/Users/demo"],
+        write: ["/Users/demo"],
+      },
+      web: { search: true, fetchDomains: ["example.com"] },
+      shell: { commands: ["npm test -- *"] },
+      memory: { read: true, write: false },
+    };
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: "/Users/demo/project",
+    });
+
+    expect(
+      authorizeToolCallWithinRunContext(
+        broadPolicy,
+        {
+          toolName: "code_search",
+          args: { workspaceRoot: "/Users/demo/project", query: "Agent" },
+        },
+        runContext,
+      ),
+    ).toMatchObject({ allowed: true });
+
+    expect(
+      authorizeToolCallWithinRunContext(
+        broadPolicy,
+        {
+          toolName: "test_run",
+          args: {
+            workspaceRoot: "/Users/demo/Desktop",
+            command: "npm test -- src/shared/nativeCapabilities.test.ts",
+          },
+        },
+        runContext,
+      ),
+    ).toEqual({
+      allowed: false,
+      reason:
+        "test_run 被运行沙箱阻止：workspaceRoot 不在工作区或额外可读目录内。",
+    });
+
+    expect(
+      authorizeToolCallWithinRunContext(
+        broadPolicy,
+        {
+          toolName: "test_run",
+          args: {
+            workspaceRoot: "/Users/demo/project",
+            command: "npm test -- src/shared/nativeCapabilities.test.ts",
+          },
+        },
+        buildPrimaryRunContext({
+          workspaceId: "workspace_1",
+          workspaceRoot: "/Users/demo/project",
+          sandbox: {
+            mode: "workspace_write",
+            network: "task_policy",
+            shell: "disabled",
+            allowWorkspaceEscape: false,
+            extraReadRoots: [],
+            extraWriteRoots: [],
+          },
+        }),
+      ),
+    ).toEqual({
+      allowed: false,
+      reason: "test_run 被运行沙箱阻止：命令执行已禁用。",
     });
   });
 
