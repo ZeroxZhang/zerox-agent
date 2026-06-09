@@ -196,6 +196,58 @@ export function createAgentEvalFixtures(): AgentEvalFixture[] {
       ],
     },
     {
+      id: "reflection-after-test-failure",
+      description:
+        "A failed test_run records reflection before failure classification.",
+      events: createEvents("reflection-after-test-failure", [
+        ["tool_call", { toolName: "test_run" }],
+        ["tool_result", { toolName: "test_run", ok: false }],
+        [
+          "reflection_added",
+          { toolName: "test_run", failureClass: "verification_failed" },
+        ],
+        ["failure_classified", { failureClass: "tool_execution_failed" }],
+      ]),
+      requiredEventTypes: [
+        "tool_call",
+        "tool_result",
+        "reflection_added",
+        "failure_classified",
+      ],
+      assertions: [
+        {
+          type: "reflection_added",
+          payload: { failureClass: "verification_failed" },
+          after: "tool_result",
+        },
+      ],
+      recoverabilityRequired: true,
+    },
+    {
+      id: "episode-eval-candidate",
+      description:
+        "A completed episode records eval candidate artifact generation.",
+      events: createEvents("episode-eval-candidate", [
+        ["tool_call", { toolName: "code_search" }],
+        ["tool_result", { toolName: "code_search", ok: true }],
+        ["artifact_created", { artifactType: "eval_candidate" }],
+        ["final_summary", { status: "succeeded" }],
+      ]),
+      requiredEventTypes: [
+        "tool_call",
+        "tool_result",
+        "artifact_created",
+        "final_summary",
+      ],
+      assertions: [
+        {
+          type: "artifact_created",
+          payload: { artifactType: "eval_candidate" },
+          after: "tool_result",
+        },
+      ],
+    },
+    {
       id: "multi-agent-lineage",
       description: "A parent run records a child agent session boundary.",
       events: createEvents("multi-agent-lineage", [

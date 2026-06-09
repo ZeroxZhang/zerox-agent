@@ -91,6 +91,23 @@
         "npm run build",
         "node scripts/run-agent-evals.mjs"
       ]
+    },
+    {
+      "id": "P2.2-reflection-episode-eval",
+      "priority": 6,
+      "status": "done",
+      "title": "Reflection evidence and episode eval candidates",
+      "definitionOfDone": [
+        "Tool failures create reflection_added trajectory evidence",
+        "Reflection policy classifies verification, permission, network, duplicate retry, and budget failures",
+        "Episode exports include eval-candidate.json for review before permanent fixture promotion",
+        "Agent evals include reflection and episode eval-candidate contracts"
+      ],
+      "verification": [
+        "npm test -- src/shared/agentReflection.test.ts src/main/agentRuntimeEngine.test.ts src/main/agentEvalCandidateGenerator.test.ts src/main/agentEpisodeExporter.test.ts src/main/eval/agentEvalRunner.test.ts",
+        "npm run verify",
+        "npm run harness:score"
+      ]
     }
   ]
 }

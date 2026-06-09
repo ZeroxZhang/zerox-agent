@@ -11,11 +11,11 @@ describe("agent eval runner", () => {
     const report = await runAgentEvals(createAgentEvalFixtures());
 
     expect(report).toEqual({
-      total: 8,
-      passed: 8,
+      total: 10,
+      passed: 10,
       failed: 0,
       passRate: 1,
-      toolSuccessRate: 0.8889,
+      toolSuccessRate: 0.8182,
       recoverabilityRate: 1,
       failures: [],
     });
@@ -28,6 +28,8 @@ describe("agent eval runner", () => {
       expect.arrayContaining([
         "workspace-escape-denied",
         "code-engineering-native-tools",
+        "reflection-after-test-failure",
+        "episode-eval-candidate",
         "multi-agent-lineage",
       ]),
     );
