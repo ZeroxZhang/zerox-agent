@@ -2,6 +2,7 @@ import type { AgentExecutionCheckpoint } from "../shared/agentExecution";
 import type { AgentLearningCandidate } from "../shared/agentLearning";
 import type { AgentRunRecord } from "../shared/agentRuns";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
+import { createEvalCandidateFromEpisode } from "./agentEvalCandidateGenerator";
 
 export type AgentEpisodeVerification = {
   passed: boolean;
@@ -25,9 +26,14 @@ export function createAgentEpisodePackage(input: {
   const metadata = {
     runId: input.run.id,
     exportedAt: input.exportedAt,
-    fileCount: 6,
+    fileCount: 7,
     redaction: summarizeRedaction(input.trajectory),
   };
+  const evalCandidate = createEvalCandidateFromEpisode({
+    run: input.run,
+    trajectory: input.trajectory,
+    createdAt: input.exportedAt,
+  });
 
   return {
     runId: input.run.id,
@@ -42,6 +48,7 @@ export function createAgentEpisodePackage(input: {
         2,
       )}\n`,
       "verification.json": `${JSON.stringify(input.verification, null, 2)}\n`,
+      "eval-candidate.json": `${JSON.stringify(evalCandidate, null, 2)}\n`,
       "metadata.json": `${JSON.stringify(metadata, null, 2)}\n`,
     },
   };

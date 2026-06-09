@@ -28,6 +28,7 @@ describe("createAgentEpisodePackage", () => {
 
     expect(Object.keys(episode.files).sort()).toEqual([
       "checkpoint.json",
+      "eval-candidate.json",
       "learning-candidates.json",
       "metadata.json",
       "run.json",
@@ -35,6 +36,9 @@ describe("createAgentEpisodePackage", () => {
       "verification.json",
     ]);
     expect(episode.files["trajectory.jsonl"]).toContain("\"final_summary\"");
-    expect(episode.files["metadata.json"]).toContain("\"fileCount\": 6");
+    expect(episode.files["eval-candidate.json"]).toContain(
+      "\"status\": \"pending_review\"",
+    );
+    expect(episode.files["metadata.json"]).toContain("\"fileCount\": 7");
   });
 });
