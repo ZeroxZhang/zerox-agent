@@ -78,6 +78,12 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(overviewPanelSource).toContain("ETCLOVG 七类");
   });
 
+  it("surfaces the agent capability score in Overview", () => {
+    expect(overviewPanelSource).toContain("computeAgentCapabilityScore");
+    expect(overviewPanelSource).toContain("Agent Capability");
+    expect(overviewPanelSource).toContain("native tools");
+  });
+
   it("provides reusable component classes for all screens", () => {
     // Buttons
     expect(styles).toContain(".primary-action");

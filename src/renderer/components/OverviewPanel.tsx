@@ -27,6 +27,7 @@ import {
   type DesktopRuntimeInfo,
 } from "../../shared/desktopRuntime";
 import { computeHarnessScore } from "../../shared/harnessScore";
+import { computeAgentCapabilityScore } from "../../shared/nativeCapabilities";
 import {
   createDemoValidationSnapshot,
   demoAgentEvalReport,
@@ -174,6 +175,21 @@ export function OverviewPanel(props: {
             evalPassRate: data.evalReport.passRate,
             recoverabilityRate: data.evalReport.recoverabilityRate,
             toolSuccessRate: data.evalReport.toolSuccessRate,
+            pendingLearningCandidates: data.learningCandidates.length,
+          })
+        : null,
+    [data],
+  );
+  const agentCapabilityScore = useMemo(
+    () =>
+      data
+        ? computeAgentCapabilityScore({
+            nativeToolCount: 4,
+            expectedNativeToolCount: 8,
+            evalPassRate: data.evalReport.passRate,
+            retrySuccessRate: data.evalReport.toolSuccessRate,
+            childHandoffSuccessRate: hasChildHandoff(data.runs) ? 1 : 0,
+            pendingEvalCandidates: 0,
             pendingLearningCandidates: data.learningCandidates.length,
           })
         : null,
@@ -342,6 +358,16 @@ export function OverviewPanel(props: {
           status={harnessScore ? `${harnessScore.overall}/10` : "待加载"}
           tone={harnessScore?.tone ?? "warn"}
           value={harnessScore?.summary ?? "ETCLOVG 七类"}
+        />
+        <HealthCard
+          label="Agent Capability"
+          status={
+            agentCapabilityScore
+              ? `${agentCapabilityScore.overall}/10`
+              : "待加载"
+          }
+          tone={agentCapabilityScore?.tone ?? "warn"}
+          value={agentCapabilityScore?.summary ?? "native tools"}
         />
         <HealthCard
           label="记忆"
@@ -748,6 +774,15 @@ function getEvalTone(
   }
 
   return report.passRate >= 0.6 ? "warn" : "bad";
+}
+
+function hasChildHandoff(runs: AgentRunRecord[]): boolean {
+  return runs.some((run) => {
+    const runContext = run.runContext;
+    return Boolean(
+      runContext?.parentRunId || (runContext?.depth && runContext.depth > 0),
+    );
+  });
 }
 
 function buildAttentionItems(data: OverviewData): AttentionItem[] {
