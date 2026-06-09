@@ -36,6 +36,7 @@ import type {
   AgentTrajectoryEvent,
   AgentTrajectoryEventType,
 } from "../shared/agentTrajectory";
+import type { NativeToolDescriptor } from "../shared/nativeCapabilities";
 import type {
   AgentRunEvent,
   AgentRunRecord,
@@ -389,6 +390,21 @@ export function createAgentRuntimeEngine(options: {
           throw new Error(`工具调用被拒绝：${reason}`);
         }
 
+        const nativeDescriptor = getNativeToolDescriptor(
+          options.toolExecutor,
+          toolName,
+        );
+        if (nativeDescriptor) {
+          await appendTrajectory(current.runId, "native_tool_invocation", {
+            toolCallId: toolCall.id,
+            ...buildNativeToolEvidencePayload(nativeDescriptor),
+          }, {
+            containsApiKey: false,
+            containsFileContent: false,
+            containsUserText: false,
+          }, current.runContext);
+        }
+
         const result = await options.toolExecutor.execute(
           { toolName, args },
           {
@@ -397,6 +413,20 @@ export function createAgentRuntimeEngine(options: {
           },
         );
         toolCallCount += 1;
+        if (nativeDescriptor) {
+          await appendTrajectory(current.runId, "native_tool_observation", {
+            toolCallId: toolCall.id,
+            ...buildNativeToolEvidencePayload(nativeDescriptor),
+            ok: result.ok,
+            ...(result.ok
+              ? { resultKeys: Object.keys(result.result).slice(0, 10) }
+              : { error: result.error }),
+          }, {
+            containsApiKey: false,
+            containsFileContent: false,
+            containsUserText: false,
+          }, current.runContext);
+        }
         const serializedObservation =
           await serializeToolObservationWithOffload({
             tool: toolName,
@@ -644,6 +674,31 @@ function getToolDefinitions(toolExecutor: AgentToolExecutor): ToolDefinition[] {
   }
 
   return buildToolDefinitions();
+}
+
+function getNativeToolDescriptor(
+  toolExecutor: AgentToolExecutor,
+  toolName: string,
+): NativeToolDescriptor | null {
+  const maybeExecutor = toolExecutor as Partial<Pick<AgentToolExecutor, "getRegistry">>;
+  if (typeof maybeExecutor.getRegistry !== "function") {
+    return null;
+  }
+
+  return maybeExecutor.getRegistry().getNativeDescriptor(toolName);
+}
+
+function buildNativeToolEvidencePayload(
+  descriptor: NativeToolDescriptor,
+): Record<string, unknown> {
+  return {
+    toolName: descriptor.id,
+    nativeKind: descriptor.kind,
+    riskLevel: descriptor.riskLevel,
+    permissionScope: descriptor.permissionScope,
+    source: "registry",
+    label: descriptor.label,
+  };
 }
 
 function parseToolArguments(raw: string): Record<string, unknown> {

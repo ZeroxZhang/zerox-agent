@@ -25,6 +25,7 @@ import type {
 } from "../shared/chat";
 import type { AgentRunRecord, RunScheduledTaskResult } from "../shared/agentRuns";
 import type { MemoryRecord, MemorySearchResult } from "../shared/memory";
+import type { NativeToolDescriptor } from "../shared/nativeCapabilities";
 import {
   buildScheduledTaskInputFromIntent,
   classifyAgentIntent,
@@ -262,6 +263,7 @@ export function createChatService(options: {
       if (options.toolExecutor) {
         // Unified agent mode: chat goes through agent loop with tool access
         try {
+          const toolExecutor = options.toolExecutor;
           let observedToolCallsExecuted =
             continuationToResume?.toolCallsExecuted ?? 0;
           const evidence = createChatAgentEvidenceRecorder({
@@ -275,12 +277,12 @@ export function createChatService(options: {
             profile,
             {
               chatClient: options.chatClient,
-              toolExecutor: options.toolExecutor,
+              toolExecutor,
               toolAuthorizationService: options.toolAuthorizationService,
               systemPrompt: buildChatSystemPrompt(),
               maxTurns: agentLoopMaxTurns,
               signal: runtimeOptions.signal,
-              tools: options.toolExecutor.getRegistry().getDefinitions(),
+              tools: toolExecutor.getRegistry().getDefinitions(),
               toolResultOffloadStore: options.toolResultOffloadStore,
               toolResultOffloadThreshold: options.toolResultOffloadThreshold,
               pauseOnTurnLimit: true,
@@ -323,6 +325,15 @@ export function createChatService(options: {
               },
               onToolCall(toolName, args) {
                 void evidence.append("tool_call", { toolName, args });
+                const nativeDescriptor = getNativeToolDescriptor(
+                  toolExecutor,
+                  toolName,
+                );
+                if (nativeDescriptor) {
+                  void evidence.append("native_tool_invocation", {
+                    ...buildNativeToolEvidencePayload(nativeDescriptor),
+                  });
+                }
                 emitStatus.send({
                   state: "tool_call",
                   message: `正在调用工具：${toolName}`,
@@ -332,6 +343,19 @@ export function createChatService(options: {
               },
               onToolResult(toolName, ok, result) {
                 observedToolCallsExecuted += 1;
+                const nativeDescriptor = getNativeToolDescriptor(
+                  toolExecutor,
+                  toolName,
+                );
+                if (nativeDescriptor) {
+                  void evidence.append("native_tool_observation", {
+                    ...buildNativeToolEvidencePayload(nativeDescriptor),
+                    ok,
+                    ...(ok && result && typeof result === "object"
+                      ? { resultKeys: Object.keys(result).slice(0, 10) }
+                      : {}),
+                  });
+                }
                 void evidence.append("tool_result", { toolName, ok });
                 emitStatus.send({
                   state: "tool_result",
@@ -921,6 +945,33 @@ function toRelatedMemory(result: MemorySearchResult): ChatRelatedMemory {
     title: result.record.title,
     kind: result.record.kind,
     score: result.score,
+  };
+}
+
+function getNativeToolDescriptor(
+  toolExecutor: AgentToolExecutor,
+  toolName: string,
+): NativeToolDescriptor | null {
+  const registry = toolExecutor.getRegistry() as {
+    getNativeDescriptor?: (toolName: string) => NativeToolDescriptor | null;
+  };
+  if (typeof registry.getNativeDescriptor !== "function") {
+    return null;
+  }
+
+  return registry.getNativeDescriptor(toolName);
+}
+
+function buildNativeToolEvidencePayload(
+  descriptor: NativeToolDescriptor,
+): Record<string, unknown> {
+  return {
+    toolName: descriptor.id,
+    nativeKind: descriptor.kind,
+    riskLevel: descriptor.riskLevel,
+    permissionScope: descriptor.permissionScope,
+    source: "registry",
+    label: descriptor.label,
   };
 }
 

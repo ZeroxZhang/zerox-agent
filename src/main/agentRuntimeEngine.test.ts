@@ -5,6 +5,7 @@ import type { AgentLearningStore } from "./agentLearningStore";
 import type { AgentRunStore } from "./agentRunStore";
 import type { AgentToolExecutor } from "./agentToolExecutor";
 import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
+import { createDynamicToolRegistry } from "./dynamicToolRegistry";
 import type {
   ChatClient,
   ChatCompletionResponse,
@@ -30,6 +31,7 @@ import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
 import type { MemoryInput, MemoryRecord, MemorySearchResult } from "../shared/memory";
 import type { ScheduledTask } from "../shared/scheduledTasks";
 import type { SkillRecord } from "../shared/skills";
+import { defineNativeToolDescriptor } from "../shared/nativeCapabilities";
 import { getDefaultTaskPermissionPolicy } from "../shared/toolPermissions";
 
 describe("agent runtime engine", () => {
@@ -305,6 +307,115 @@ describe("agent runtime engine", () => {
     );
     expect(trajectoryEvents.every((event) => event.redaction.containsApiKey === false)).toBe(
       true,
+    );
+  });
+
+  it("records native tool invocation and observation events from registry metadata", async () => {
+    const trajectoryEvents: AgentTrajectoryEvent[] = [];
+    const registry = createDynamicToolRegistry();
+    registry.register(
+      {
+        type: "function",
+        function: {
+          name: "code_search",
+          description: "Search code",
+          parameters: {
+            type: "object",
+            properties: {
+              workspaceRoot: { type: "string" },
+              query: { type: "string" },
+            },
+            required: ["workspaceRoot", "query"],
+          },
+        },
+      },
+      async () => ({
+        ok: true,
+        result: { results: [{ relativePath: "src/main.ts" }] },
+      }),
+      "test",
+      defineNativeToolDescriptor({
+        id: "code_search",
+        kind: "code",
+        label: "Code Search",
+        description: "Search code through native registry metadata.",
+        riskLevel: "low",
+        permissionScope: { files: "read", shell: "none", web: "none" },
+        observableEvents: ["native_tool_invocation", "native_tool_observation"],
+      }),
+    );
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore([]),
+      trajectoryStore: createMemoryTrajectoryStore(trajectoryEvents),
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: createChatClient([
+        toolCallResponse("code_search", {
+          workspaceRoot: "/repo",
+          query: "createAgentRuntimeEngine",
+        }),
+        finalResponse("Report complete"),
+      ]),
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: {
+        async execute(request) {
+          return registry.execute(request.toolName, request.args);
+        },
+        getRegistry() {
+          return registry;
+        },
+        hasTool(toolName) {
+          return registry.has(toolName);
+        },
+      },
+      createId: createSequentialId("native_trajectory"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+
+    await engine.startTask("task_123");
+
+    expect(trajectoryEvents.map((event) => event.type)).toEqual([
+      "state_transition",
+      "checkpoint_written",
+      "state_transition",
+      "checkpoint_written",
+      "model_request",
+      "model_response",
+      "tool_call",
+      "native_tool_invocation",
+      "native_tool_observation",
+      "tool_result",
+      "checkpoint_written",
+      "model_request",
+      "model_response",
+      "final_summary",
+      "state_transition",
+      "checkpoint_written",
+    ]);
+    expect(trajectoryEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "native_tool_invocation",
+          payload: expect.objectContaining({
+            toolCallId: "call_1",
+            toolName: "code_search",
+            nativeKind: "code",
+            riskLevel: "low",
+          }),
+        }),
+        expect.objectContaining({
+          type: "native_tool_observation",
+          payload: expect.objectContaining({
+            toolCallId: "call_1",
+            toolName: "code_search",
+            nativeKind: "code",
+            riskLevel: "low",
+            ok: true,
+          }),
+        }),
+      ]),
     );
   });
 
