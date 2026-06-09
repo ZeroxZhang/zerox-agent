@@ -134,6 +134,6 @@ export function getNavigationSection(id: string): NavigationSection {
   );
 }
 
-export function getStartupNavigationSection(_hash: string): NavigationSection {
-  return getDefaultNavigationSection();
+export function getStartupNavigationSection(hash: string): NavigationSection {
+  return getNavigationSection(hash.replace(/^#/, ""));
 }

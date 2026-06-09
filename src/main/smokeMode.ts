@@ -1,12 +1,19 @@
 export type SmokeModeOptions = {
   enabled: boolean;
+  readySelector: string;
+  requiredTexts: string[];
   timeoutMs: number;
+  viewport: { width: number; height: number } | null;
 };
 
 export type SmokeRendererCheckResult = {
   ok: boolean;
   hasReadyElement: boolean;
   hasRoot: boolean;
+  hasHorizontalOverflow: boolean;
+  missingTexts: string[];
+  scrollWidth: number;
+  clientWidth: number;
   rootTextLength: number;
   title: string;
   locationHref: string;
@@ -22,16 +29,25 @@ export function getSmokeModeOptions(
 
   return {
     enabled: env.BUILDING_AGENT_SMOKE === "1",
+    readySelector:
+      env.BUILDING_AGENT_SMOKE_READY_SELECTOR?.trim() ||
+      smokeRendererReadySelector,
+    requiredTexts: parseRequiredTexts(env.BUILDING_AGENT_SMOKE_REQUIRED_TEXTS),
     timeoutMs:
       Number.isFinite(timeoutMs) && timeoutMs > 0
         ? timeoutMs
         : defaultSmokeTimeoutMs,
+    viewport: parseViewport(env.BUILDING_AGENT_SMOKE_VIEWPORT),
   };
 }
 
-export function getSmokeRendererCheckScript(): string {
+export function getSmokeRendererCheckScript(
+  options: Pick<SmokeModeOptions, "readySelector" | "requiredTexts"> =
+    getSmokeModeOptions({}),
+): string {
   return `(() => new Promise((resolve) => {
-    const readySelector = ${JSON.stringify(smokeRendererReadySelector)};
+    const readySelector = ${JSON.stringify(options.readySelector)};
+    const requiredTexts = ${JSON.stringify(options.requiredTexts)};
     const startedAt = Date.now();
     const timeoutMs = 4000;
 
@@ -39,11 +55,19 @@ export function getSmokeRendererCheckScript(): string {
       const readyElement = document.querySelector(readySelector);
       const root = document.getElementById("root");
       const rootText = root?.textContent?.trim() ?? "";
+      const missingTexts = requiredTexts.filter((text) => !rootText.includes(text));
+      const scrollWidth = document.documentElement.scrollWidth;
+      const clientWidth = document.documentElement.clientWidth;
+      const hasHorizontalOverflow = scrollWidth > clientWidth;
 
       return {
-        ok: Boolean(readyElement),
+        ok: Boolean(readyElement) && missingTexts.length === 0 && !hasHorizontalOverflow,
         hasReadyElement: Boolean(readyElement),
         hasRoot: Boolean(root),
+        hasHorizontalOverflow,
+        missingTexts,
+        scrollWidth,
+        clientWidth,
         rootTextLength: rootText.length,
         title: document.title,
         locationHref: window.location.href,
@@ -75,6 +99,11 @@ export function isSmokeRendererCheckResult(
     typeof result.ok === "boolean" &&
     typeof result.hasReadyElement === "boolean" &&
     typeof result.hasRoot === "boolean" &&
+    typeof result.hasHorizontalOverflow === "boolean" &&
+    Array.isArray(result.missingTexts) &&
+    result.missingTexts.every((text) => typeof text === "string") &&
+    typeof result.scrollWidth === "number" &&
+    typeof result.clientWidth === "number" &&
     typeof result.rootTextLength === "number" &&
     typeof result.title === "string" &&
     typeof result.locationHref === "string"
@@ -90,8 +119,34 @@ export function getSmokeRendererFailureMessage(result: unknown): string {
     "Smoke startup failed: renderer did not render the agent chat panel.",
     `root=${result.hasRoot ? "present" : "missing"}`,
     `readyElement=${result.hasReadyElement ? "present" : "missing"}`,
+    `missingTexts=${result.missingTexts.join(",") || "none"}`,
+    `horizontalOverflow=${result.hasHorizontalOverflow} scrollWidth=${result.scrollWidth} clientWidth=${result.clientWidth}`,
     `rootTextLength=${result.rootTextLength}`,
     `title=${result.title}`,
     `url=${result.locationHref}`,
   ].join(" ");
+}
+
+function parseRequiredTexts(value: string | undefined): string[] {
+  return (value ?? "")
+    .split("|")
+    .map((text) => text.trim())
+    .filter(Boolean);
+}
+
+function parseViewport(
+  value: string | undefined,
+): SmokeModeOptions["viewport"] {
+  const match = value?.trim().match(/^(\d{2,5})x(\d{2,5})$/i);
+  if (!match) {
+    return null;
+  }
+
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  if (!Number.isFinite(width) || !Number.isFinite(height)) {
+    return null;
+  }
+
+  return { width, height };
 }

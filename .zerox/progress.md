@@ -11,8 +11,8 @@
   - `npm run harness:check`
   - `node scripts/run-agent-evals.mjs` → agent eval 8/8, tool success 0.8889
   - `npm run build`
-  - `npm run harness:score` → last recorded score 9.21/10 before P2.1 full rerun
-  - `npm run verify` → previous baseline 78 Vitest files / 346 tests, agent eval 7/7, memory eval 2/2
+  - `npm run harness:score` → score 9.34/10, agent eval 8/8
+  - `npm run verify` → 83 Vitest files / 370 tests, agent eval 8/8, memory eval 2/2
   - `npm run smoke:prod` → renderer rendered agent chat UI
-  - Browser Overview QA → Harness card rendered on desktop and 390px viewport, no console warnings/errors
-- Current focus: P2.1 docs refresh, full verification, Browser Overview QA for Agent Capability, then audit remaining Agent Capability P2 scope.
+  - Targeted Overview QA → `.overview-panel` rendered on desktop and 390x844 smoke viewport with Harness, Agent Capability, native tools, and no horizontal overflow
+- Current focus: audit remaining Agent Capability P2 scope after P2.1 native code tools.

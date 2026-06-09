@@ -260,6 +260,14 @@ function createMainWindow(): BrowserWindow {
   });
   mainWindow = windowInstance;
 
+  if (smokeMode.viewport) {
+    windowInstance.setSize(
+      smokeMode.viewport.width,
+      smokeMode.viewport.height,
+      false,
+    );
+  }
+
   windowInstance.on("close", (event) => {
     if (!isQuitting) {
       event.preventDefault();
@@ -378,7 +386,7 @@ function attachSmokeModeLifecycle(windowInstance: BrowserWindow) {
 
   windowInstance.webContents.once("did-finish-load", () => {
     void windowInstance.webContents
-      .executeJavaScript(getSmokeRendererCheckScript(), true)
+      .executeJavaScript(getSmokeRendererCheckScript(smokeMode), true)
       .then((result: unknown) => {
         if (isSmokeRendererCheckResult(result) && result.ok) {
           exit(0, "Smoke startup passed: renderer rendered agent chat UI.");
