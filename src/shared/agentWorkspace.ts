@@ -50,6 +50,7 @@ export type AgentSandboxPolicy = {
 
 export type AgentRole =
   | "primary"
+  | "researcher"
   | "planner"
   | "executor"
   | "reviewer"

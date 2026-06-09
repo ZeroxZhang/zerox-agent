@@ -23,7 +23,7 @@ export type ResolveRunContextInput = {
   sandbox?: AgentSandboxPolicy;
   parentContext?: AgentRunContext;
   parentRunId?: string;
-  agentRole?: "planner" | "executor" | "reviewer" | "critic";
+  agentRole?: "researcher" | "planner" | "executor" | "reviewer" | "critic";
   sessionId?: string;
 };
 

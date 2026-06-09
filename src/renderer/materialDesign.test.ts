@@ -19,6 +19,10 @@ describe("Design System — Notion-inspired app shell", () => {
     path.join(process.cwd(), "src/renderer/components/OverviewPanel.tsx"),
     "utf8",
   );
+  const runsPanelSource = readFileSync(
+    path.join(process.cwd(), "src/renderer/components/RunsPanel.tsx"),
+    "utf8",
+  );
 
   it("defines comprehensive CSS custom property design tokens", () => {
     // Color tokens
@@ -82,6 +86,13 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(overviewPanelSource).toContain("computeAgentCapabilityScore");
     expect(overviewPanelSource).toContain("Agent Capability");
     expect(overviewPanelSource).toContain("native tools");
+  });
+
+  it("surfaces child handoff review gates in Runs", () => {
+    expect(runsPanelSource).toContain("summarizeHandoffReviewCards");
+    expect(runsPanelSource).toContain("handoff-review-card");
+    expect(runsPanelSource).toContain("Handoff Review");
+    expect(styles).toContain(".handoff-review-card");
   });
 
   it("provides reusable component classes for all screens", () => {

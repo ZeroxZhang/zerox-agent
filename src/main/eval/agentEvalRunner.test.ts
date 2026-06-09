@@ -71,7 +71,10 @@ describe("agent eval runner", () => {
     ).toMatchObject({
       requiredEventTypes: [
         "run_context_created",
+        "child_handoff_created",
         "child_run_scheduled",
+        "child_handoff_completed",
+        "child_handoff_reviewed",
         "final_summary",
       ],
     });

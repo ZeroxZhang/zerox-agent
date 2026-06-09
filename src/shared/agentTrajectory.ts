@@ -13,6 +13,9 @@ export type AgentTrajectoryEventType =
   | "artifact_created"
   | "workspace_escape_denied"
   | "child_run_scheduled"
+  | "child_handoff_created"
+  | "child_handoff_completed"
+  | "child_handoff_reviewed"
   | "reflection_added"
   | "failure_classified"
   | "final_summary";

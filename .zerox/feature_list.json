@@ -126,6 +126,23 @@
         "npm run verify",
         "npm run harness:score"
       ]
+    },
+    {
+      "id": "P2.4-lightweight-handoff",
+      "priority": 8,
+      "status": "done",
+      "title": "Lightweight child handoff review gate",
+      "definitionOfDone": [
+        "researcher, executor, and reviewer child handoff contracts validate objective, allowed tools, budget, expected artifacts, and review gate",
+        "Parent trajectory records child_handoff_created, child_handoff_completed, and child_handoff_reviewed events",
+        "Runs UI shows compact child handoff review cards from trajectory evidence",
+        "Agent evals assert child handoff event order and accepted review decision"
+      ],
+      "verification": [
+        "npm test -- src/shared/agentHandoff.test.ts src/main/multiAgentCoordinator.test.ts src/main/eval/agentEvalRunner.test.ts src/renderer/materialDesign.test.ts",
+        "npm run verify",
+        "npm run harness:score"
+      ]
     }
   ]
 }

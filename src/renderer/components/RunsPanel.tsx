@@ -5,6 +5,7 @@ import {
   summarizeRunEventKinds,
   type RunTimelineItem,
 } from "../../shared/agentRunInsights";
+import { summarizeHandoffReviewCards } from "../../shared/agentHandoff";
 import type { AgentRunRecord } from "../../shared/agentRuns";
 import type { AgentExecutionCheckpoint } from "../../shared/agentExecution";
 import type { AgentTrajectoryEvent } from "../../shared/agentTrajectory";
@@ -386,6 +387,11 @@ function RunInspector(props: {
   run: AgentRunRecord | null;
   trajectoryEvents: AgentTrajectoryEvent[];
 }) {
+  const handoffCards = useMemo(
+    () => summarizeHandoffReviewCards(props.trajectoryEvents),
+    [props.trajectoryEvents],
+  );
+
   return (
     <aside className="run-inspector" aria-label="运行检查器">
       <div className="inspector-section">
@@ -482,6 +488,55 @@ function RunInspector(props: {
         </div>
       ) : null}
 
+      {handoffCards.length ? (
+        <div className="inspector-section" aria-label="Handoff Review">
+          <span className="inspector-label">Handoff Review</span>
+          {handoffCards.map((card) => (
+            <article
+              className={`handoff-review-card is-${card.status}`}
+              key={card.handoffId}
+            >
+              <div>
+                <strong>{formatAgentRole(card.childRole)}</strong>
+                <span>{translateHandoffStatus(card.status)}</span>
+              </div>
+              <p>{card.objective}</p>
+              <dl className="inspector-dl">
+                {card.childRunId ? (
+                  <div>
+                    <dt>子运行</dt>
+                    <dd>{card.childRunId}</dd>
+                  </div>
+                ) : null}
+                <div>
+                  <dt>审核</dt>
+                  <dd>
+                    {card.reviewDecision
+                      ? translateReviewDecision(card.reviewDecision)
+                      : "等待审核"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>产物</dt>
+                  <dd>
+                    {card.artifactLabels.length
+                      ? card.artifactLabels.join(", ")
+                      : "未记录"}
+                  </dd>
+                </div>
+              </dl>
+              {card.checklist.length ? (
+                <ul>
+                  {card.checklist.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </article>
+          ))}
+        </div>
+      ) : null}
+
       <RunTrajectoryPanel events={props.trajectoryEvents} />
     </aside>
   );
@@ -512,6 +567,7 @@ function formatAgentRole(role: NonNullable<AgentRunRecord["runContext"]>["agentR
     string
   > = {
     primary: "主运行",
+    researcher: "研究",
     planner: "规划",
     executor: "执行",
     reviewer: "审查",
@@ -519,6 +575,43 @@ function formatAgentRole(role: NonNullable<AgentRunRecord["runContext"]>["agentR
   };
 
   return labels[role];
+}
+
+function translateHandoffStatus(
+  status: ReturnType<typeof summarizeHandoffReviewCards>[number]["status"],
+): string {
+  const labels: Record<
+    ReturnType<typeof summarizeHandoffReviewCards>[number]["status"],
+    string
+  > = {
+    pending: "待启动",
+    running: "子运行中",
+    completed: "待审核",
+    accepted: "已接受",
+    rejected: "已拒绝",
+    revision_requested: "需修订",
+  };
+
+  return labels[status];
+}
+
+function translateReviewDecision(
+  decision: NonNullable<
+    ReturnType<typeof summarizeHandoffReviewCards>[number]["reviewDecision"]
+  >,
+): string {
+  const labels: Record<
+    NonNullable<
+      ReturnType<typeof summarizeHandoffReviewCards>[number]["reviewDecision"]
+    >,
+    string
+  > = {
+    accepted: "接受",
+    rejected: "拒绝",
+    revision_requested: "要求修订",
+  };
+
+  return labels[decision];
 }
 
 function formatSandboxSummary(

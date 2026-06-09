@@ -387,24 +387,77 @@ export function createAgentEvalFixtures(): AgentEvalFixture[] {
     },
     {
       id: "multi-agent-lineage",
-      description: "A parent run records a child agent session boundary.",
+      description:
+        "A parent run delegates a bounded child handoff and records the review gate.",
       events: createEvents("multi-agent-lineage", [
         ["run_context_created", { workspaceId: "workspace_eval" }],
+        [
+          "child_handoff_created",
+          {
+            handoffId: "handoff_eval",
+            parentRunId: "run_parent",
+            childRole: "researcher",
+            objective: "Collect citation evidence.",
+            reviewGateRequired: true,
+          },
+        ],
         [
           "child_run_scheduled",
           {
             sessionId: "session_eval",
             parentRunId: "run_parent",
             childRunId: "run_child",
-            agentRole: "executor",
+            agentRole: "researcher",
+          },
+        ],
+        [
+          "child_handoff_completed",
+          {
+            handoffId: "handoff_eval",
+            childRunId: "run_child",
+            status: "succeeded",
+            artifacts: 1,
+          },
+        ],
+        [
+          "child_handoff_reviewed",
+          {
+            handoffId: "handoff_eval",
+            childRunId: "run_child",
+            decision: "accepted",
           },
         ],
         ["final_summary", { status: "succeeded" }],
       ]),
       requiredEventTypes: [
         "run_context_created",
+        "child_handoff_created",
         "child_run_scheduled",
+        "child_handoff_completed",
+        "child_handoff_reviewed",
         "final_summary",
+      ],
+      assertions: [
+        {
+          type: "child_handoff_created",
+          payload: { childRole: "researcher", reviewGateRequired: true },
+          after: "run_context_created",
+        },
+        {
+          type: "child_run_scheduled",
+          payload: { childRunId: "run_child", agentRole: "researcher" },
+          after: "child_handoff_created",
+        },
+        {
+          type: "child_handoff_completed",
+          payload: { status: "succeeded" },
+          after: "child_run_scheduled",
+        },
+        {
+          type: "child_handoff_reviewed",
+          payload: { decision: "accepted" },
+          after: "child_handoff_completed",
+        },
       ],
     },
   ];
