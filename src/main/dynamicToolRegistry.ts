@@ -1,12 +1,19 @@
 import type { ToolDefinition } from "./openAiCompatibleClient";
+import type { AgentRunContext } from "../shared/agentWorkspace";
 import type { NativeToolDescriptor } from "../shared/nativeCapabilities";
 
 export type AgentToolExecutionResult =
   | { ok: true; result: Record<string, unknown> }
   | { ok: false; error: string; errorDetails?: Record<string, unknown> };
 
+export type ToolExecutionOptions = {
+  runContext?: AgentRunContext;
+  signal?: AbortSignal;
+};
+
 export type ToolHandler = (
   args: Record<string, unknown>,
+  options?: ToolExecutionOptions,
 ) => Promise<AgentToolExecutionResult>;
 
 export type DynamicToolRegistry = {
@@ -23,6 +30,7 @@ export type DynamicToolRegistry = {
   execute(
     toolName: string,
     args: Record<string, unknown>,
+    options?: ToolExecutionOptions,
   ): Promise<AgentToolExecutionResult>;
   listBySource(): Map<string, string[]>;
   has(toolName: string): boolean;
@@ -74,7 +82,7 @@ export function createDynamicToolRegistry(): DynamicToolRegistry {
       return nativeDescriptors.get(toolName) ?? null;
     },
 
-    async execute(toolName, args) {
+    async execute(toolName, args, options) {
       const handler = handlers.get(toolName);
 
       if (!handler) {
@@ -82,7 +90,7 @@ export function createDynamicToolRegistry(): DynamicToolRegistry {
       }
 
       try {
-        return await handler(args);
+        return await handler(args, options);
       } catch (error) {
         return {
           ok: false,

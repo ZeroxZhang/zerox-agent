@@ -6,9 +6,13 @@ import { promisify } from "node:util";
 import type { ChatSessionStore } from "./chatSessionStore";
 import { createWebTools, type WebTools } from "./webTools";
 import { createDynamicToolRegistry, type DynamicToolRegistry } from "./dynamicToolRegistry";
+import { searchCode } from "./nativeCodeTools";
+import { readGitDiff, readGitStatus } from "./nativeGitTools";
+import { runNativeTestCommand } from "./nativeTestRunTool";
 import type { MemoryStore } from "./memoryStore";
 import type { AgentRunContext } from "../shared/agentWorkspace";
 import { getMemoryKinds, type MemoryKind } from "../shared/memory";
+import { defineNativeToolDescriptor } from "../shared/nativeCapabilities";
 import type { ToolCallRequest } from "../shared/toolPermissions";
 
 const execAsync = promisify(exec);
@@ -57,7 +61,7 @@ export function createAgentToolExecutor(options?: {
         );
       }
 
-      return registry.execute(request.toolName, request.args);
+      return registry.execute(request.toolName, request.args, executionOptions);
     },
 
     getRegistry() {
@@ -188,6 +192,166 @@ function registerBuiltinTools(
         String(args.content ?? ""),
       ),
     "built-in",
+  );
+
+  registry.register(
+    {
+      type: "function",
+      function: {
+        name: "code_search",
+        description:
+          "在代码仓库中搜索文本，优先使用 ripgrep，自动跳过 node_modules/dist/release 等生成目录。",
+        parameters: {
+          type: "object",
+          properties: {
+            workspaceRoot: {
+              type: "string",
+              description: "要搜索的仓库或工作区绝对路径",
+            },
+            query: { type: "string", description: "要搜索的代码文本" },
+            maxResults: {
+              type: "number",
+              description: "最多返回结果数，默认 20，最大 100",
+            },
+          },
+          required: ["workspaceRoot", "query"],
+        },
+      },
+    },
+    async (args) =>
+      searchCode({
+        workspaceRoot: String(args.workspaceRoot ?? ""),
+        query: String(args.query ?? ""),
+        maxResults: optionalNumber(args.maxResults),
+      }),
+    "built-in",
+    defineNativeToolDescriptor({
+      id: "code_search",
+      kind: "code",
+      label: "Code Search",
+      description: "Search source code without shell fallback.",
+      riskLevel: "low",
+      permissionScope: { files: "read", shell: "none", web: "none" },
+      observableEvents: ["native_tool_invocation", "native_tool_observation"],
+    }),
+  );
+
+  registry.register(
+    {
+      type: "function",
+      function: {
+        name: "git_status",
+        description:
+          "读取仓库分支和工作区改动摘要，避免为 git status 调用 shell_exec。",
+        parameters: {
+          type: "object",
+          properties: {
+            workspaceRoot: {
+              type: "string",
+              description: "Git 仓库工作区绝对路径",
+            },
+          },
+          required: ["workspaceRoot"],
+        },
+      },
+    },
+    async (args) =>
+      readGitStatus({
+        workspaceRoot: String(args.workspaceRoot ?? ""),
+      }),
+    "built-in",
+    defineNativeToolDescriptor({
+      id: "git_status",
+      kind: "git",
+      label: "Git Status",
+      description: "Inspect branch and changed files without shell fallback.",
+      riskLevel: "low",
+      permissionScope: { files: "read", shell: "none", web: "none" },
+      observableEvents: ["native_tool_invocation", "native_tool_observation"],
+    }),
+  );
+
+  registry.register(
+    {
+      type: "function",
+      function: {
+        name: "git_diff",
+        description:
+          "读取仓库 diff 和 numstat 摘要，可选择 staged diff，避免为 git diff 调用 shell_exec。",
+        parameters: {
+          type: "object",
+          properties: {
+            workspaceRoot: {
+              type: "string",
+              description: "Git 仓库工作区绝对路径",
+            },
+            staged: {
+              type: "boolean",
+              description: "是否读取 staged/cached diff，默认 false",
+            },
+          },
+          required: ["workspaceRoot"],
+        },
+      },
+    },
+    async (args) =>
+      readGitDiff({
+        workspaceRoot: String(args.workspaceRoot ?? ""),
+        staged: Boolean(args.staged),
+      }),
+    "built-in",
+    defineNativeToolDescriptor({
+      id: "git_diff",
+      kind: "git",
+      label: "Git Diff",
+      description: "Read source diffs without shell fallback.",
+      riskLevel: "medium",
+      permissionScope: { files: "read", shell: "none", web: "none" },
+      observableEvents: ["native_tool_invocation", "native_tool_observation"],
+    }),
+  );
+
+  registry.register(
+    {
+      type: "function",
+      function: {
+        name: "test_run",
+        description:
+          "在工作区运行已授权的测试命令，返回 stdout/stderr/exitCode，并支持超时与中断。",
+        parameters: {
+          type: "object",
+          properties: {
+            workspaceRoot: {
+              type: "string",
+              description: "运行测试命令的工作区绝对路径",
+            },
+            command: { type: "string", description: "要运行的测试命令" },
+            timeoutMs: {
+              type: "number",
+              description: "可选超时时间，范围 1000-600000 ms，默认 120000 ms",
+            },
+          },
+          required: ["workspaceRoot", "command"],
+        },
+      },
+    },
+    async (args, executionOptions) =>
+      runNativeTestCommand({
+        workspaceRoot: String(args.workspaceRoot ?? ""),
+        command: String(args.command ?? ""),
+        timeoutMs: optionalNumber(args.timeoutMs),
+        signal: executionOptions?.signal,
+      }),
+    "built-in",
+    defineNativeToolDescriptor({
+      id: "test_run",
+      kind: "test",
+      label: "Test Run",
+      description: "Run approved test commands with structured output.",
+      riskLevel: "medium",
+      permissionScope: { files: "read", shell: "approved_command", web: "none" },
+      observableEvents: ["native_tool_invocation", "native_tool_observation"],
+    }),
   );
 
   registry.register(
@@ -599,6 +763,15 @@ function clampNumber(
     return fallback;
   }
   return Math.min(max, Math.max(min, Math.floor(numeric)));
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : undefined;
 }
 
 function buildShellErrorDetails(options: {

@@ -39,18 +39,19 @@ export async function runNativeTestCommand(args: {
         maxBuffer: 1024 * 1024 * 8,
       },
       (error, stdout, stderr) => {
+        const execError = error as
+          | (Error & { code?: number | string; killed?: boolean })
+          | null;
         const exitCode =
-          typeof (error as NodeJS.ErrnoException | null)?.code === "number"
-            ? Number((error as NodeJS.ErrnoException).code)
-            : 0;
+          typeof execError?.code === "number" ? Number(execError.code) : 0;
         if (error) {
           settle({
             ok: false,
-            error: (error as NodeJS.ErrnoException).killed
+            error: execError?.killed
               ? `test_run timed out after ${timeoutMs} ms.`
               : `test_run failed with exit code ${exitCode}.`,
             errorDetails: {
-              kind: (error as NodeJS.ErrnoException).killed
+              kind: execError?.killed
                 ? "timeout"
                 : "exit",
               command,

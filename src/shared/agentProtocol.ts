@@ -34,6 +34,10 @@ const supportedTools = new Set<AgentToolName>([
   "file_search",
   "file_read",
   "file_write",
+  "code_search",
+  "git_status",
+  "git_diff",
+  "test_run",
   "memory_search",
   "conversation_search",
   "web_search",
@@ -147,6 +151,98 @@ export function buildToolDefinitions(): ToolDefinition[] {
             },
           },
           required: ["path", "content"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "code_search",
+        description:
+          "在代码仓库中搜索文本，优先使用 ripgrep，自动跳过 node_modules/dist/release 等生成目录。代码诊断优先使用它，而不是 shell_exec。",
+        parameters: {
+          type: "object",
+          properties: {
+            workspaceRoot: {
+              type: "string",
+              description: "要搜索的仓库或工作区绝对路径",
+            },
+            query: {
+              type: "string",
+              description: "要搜索的代码文本",
+            },
+            maxResults: {
+              type: "number",
+              description: "最多返回结果数，默认 20，最大 100",
+            },
+          },
+          required: ["workspaceRoot", "query"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "git_status",
+        description:
+          "读取仓库分支和工作区改动摘要。代码工程任务需要了解改动面时优先使用它，而不是 shell_exec。",
+        parameters: {
+          type: "object",
+          properties: {
+            workspaceRoot: {
+              type: "string",
+              description: "Git 仓库工作区绝对路径",
+            },
+          },
+          required: ["workspaceRoot"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "git_diff",
+        description:
+          "读取仓库 diff 和 numstat 摘要，可选择 staged diff。代码 review 或变更确认优先使用它，而不是 shell_exec。",
+        parameters: {
+          type: "object",
+          properties: {
+            workspaceRoot: {
+              type: "string",
+              description: "Git 仓库工作区绝对路径",
+            },
+            staged: {
+              type: "boolean",
+              description: "是否读取 staged/cached diff，默认 false",
+            },
+          },
+          required: ["workspaceRoot"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "test_run",
+        description:
+          "在工作区运行已授权的测试命令，返回 stdout/stderr/exitCode，并支持超时与中断。验证代码改动优先使用它，而不是 shell_exec。",
+        parameters: {
+          type: "object",
+          properties: {
+            workspaceRoot: {
+              type: "string",
+              description: "运行测试命令的工作区绝对路径",
+            },
+            command: {
+              type: "string",
+              description: "要运行的测试命令",
+            },
+            timeoutMs: {
+              type: "number",
+              description: "可选超时时间，范围 1000-600000 ms，默认 120000 ms",
+            },
+          },
+          required: ["workspaceRoot", "command"],
         },
       },
     },
@@ -267,10 +363,11 @@ export function buildToolDefinitions(): ToolDefinition[] {
 export function buildAgentSystemPrompt(): string {
   return [
     "你是一个本地桌面 AI agent 的运行时核心。",
-    "你可以调用工具来完成任务：列出目录、读取元信息、搜索文件、读写文件、检索本地记忆、搜索网页、抓取网页内容、执行受权 shell 命令。",
+    "你可以调用工具来完成任务：列出目录、读取元信息、搜索文件、读写文件、搜索代码、读取 git 状态和 diff、运行已授权测试、检索本地记忆、搜索网页、抓取网页内容、执行受权 shell 命令。",
     "",
     "工作原则：",
     "- 文件诊断优先使用 file_list、file_stat、file_search、file_read；只有原生工具无法完成时再使用 shell_exec。",
+    "- 代码工程优先使用 code_search、git_status、git_diff、test_run；只有这些原生工具无法完成时再申请 shell_exec。",
     "- 将复杂任务分解为清晰的步骤序列。",
     "- 每个工具调用返回结果后，分析结果再决定下一步。",
     "- 如果工具返回错误，先分析原因，尝试调整参数或方法。",

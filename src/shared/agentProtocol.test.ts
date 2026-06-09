@@ -50,6 +50,21 @@ describe("agent JSON protocol", () => {
     });
   });
 
+  it("accepts native code engineering tool calls in the fallback protocol", () => {
+    expect(
+      parseAgentModelResponse(
+        `{"type":"tool_call","tool":"code_search","args":{"workspaceRoot":"/repo","query":"Agent"}}`,
+      ),
+    ).toEqual({
+      ok: true,
+      message: {
+        type: "tool_call",
+        tool: "code_search",
+        args: { workspaceRoot: "/repo", query: "Agent" },
+      },
+    });
+  });
+
   it("serializes tool observations as JSON for the next model turn", () => {
     expect(
       serializeToolObservation({
@@ -80,6 +95,13 @@ describe("agent JSON protocol", () => {
 
     expect(prompt).toContain("本地桌面 AI agent");
     expect(prompt).toContain("file_list");
+    expect(prompt).toContain("code_search");
+    expect(prompt).toContain("git_status");
+    expect(prompt).toContain("git_diff");
+    expect(prompt).toContain("test_run");
+    expect(prompt).toContain(
+      "代码工程优先使用 code_search、git_status、git_diff、test_run",
+    );
     expect(prompt).toContain("工具");
     expect(prompt).toContain("默认使用中文");
   });
@@ -87,13 +109,17 @@ describe("agent JSON protocol", () => {
   it("builds tool definitions with JSON Schema for built-in tools", () => {
     const definitions = buildToolDefinitions();
 
-    expect(definitions).toHaveLength(10);
+    expect(definitions).toHaveLength(14);
     const names = definitions.map((d) => d.function.name);
     expect(names).toContain("file_list");
     expect(names).toContain("file_stat");
     expect(names).toContain("file_search");
     expect(names).toContain("file_read");
     expect(names).toContain("file_write");
+    expect(names).toContain("code_search");
+    expect(names).toContain("git_status");
+    expect(names).toContain("git_diff");
+    expect(names).toContain("test_run");
     expect(names).toContain("memory_search");
     expect(names).toContain("conversation_search");
     expect(names).toContain("web_search");
