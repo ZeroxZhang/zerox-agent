@@ -626,12 +626,12 @@ ipcMain.handle(
 ipcMain.handle(
   "agentEvalCandidates:accept",
   (_event, candidateId: string): Promise<AgentEvalCandidate | null> =>
-    getAgentEvalCandidateStore().setStatus(candidateId, "accepted"),
+    getAgentEvalCandidateService().acceptCandidate(candidateId),
 );
 ipcMain.handle(
   "agentEvalCandidates:reject",
   (_event, candidateId: string): Promise<AgentEvalCandidate | null> =>
-    getAgentEvalCandidateStore().setStatus(candidateId, "rejected"),
+    getAgentEvalCandidateService().rejectCandidate(candidateId),
 );
 ipcMain.handle(
   "agentEvalCandidates:promote",

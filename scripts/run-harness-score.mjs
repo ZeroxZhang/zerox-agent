@@ -9,6 +9,7 @@ const configDir = args["config-dir"] ?? process.env.BUILDING_AGENT_CONFIG_DIR;
 
 const [
   { computeHarnessScore },
+  { createAgentContextProfileReport },
   { evaluateToolAciPolicy },
   { createAgentToolExecutor },
   { createAgentEvalFixtures },
@@ -20,6 +21,7 @@ const [
   { runAdversarialAgentEvals },
 ] = await Promise.all([
     import("../dist-electron/shared/harnessScore.js"),
+    import("../dist-electron/shared/agentContextProfile.js"),
     import("../dist-electron/shared/toolAciPolicy.js"),
     import("../dist-electron/main/agentToolExecutor.js"),
     import("../dist-electron/main/eval/agentEvalFixtures.js"),
@@ -42,6 +44,7 @@ const evalFixtures = configDir
   : builtInFixtures;
 const evalReport = await runAgentEvals(evalFixtures);
 const adversarial = await runAdversarialAgentEvals(evalFixtures);
+const context = createAgentContextProfileReport();
 const pendingLearningCandidates = configDir
   ? await countPendingLearningCandidates(configDir)
   : 0;
@@ -64,6 +67,7 @@ console.log(
     {
       score,
       aci,
+      context,
       eval: evalReport,
       adversarial: adversarial,
       promotedFixtureCount: promotedFixtures.length,

@@ -109,6 +109,48 @@ describe("agent eval candidate service", () => {
     });
     expect(promotedFixtureStore.fixtures).toEqual([accepted.fixture]);
   });
+
+  it("accepts only candidates that are still pending review", async () => {
+    const pending = createCandidate("run_1", "pending_review");
+    const promoted = createCandidate("run_2", "promoted");
+    const candidateStore = createMemoryCandidateStore([pending, promoted]);
+    const service = createAgentEvalCandidateService({
+      runStore: createMemoryRunStore([]),
+      trajectoryStore: createMemoryTrajectoryStore({}),
+      candidateStore,
+      promotedFixtureStore: createMemoryPromotedFixtureStore(),
+    });
+
+    await expect(service.acceptCandidate(pending.id)).resolves.toMatchObject({
+      id: pending.id,
+      status: "accepted",
+    });
+    await expect(service.acceptCandidate(promoted.id)).resolves.toBeNull();
+    await expect(service.acceptCandidate("missing")).resolves.toBeNull();
+    expect(candidateStore.candidates.find((candidate) => candidate.id === promoted.id))
+      .toEqual(promoted);
+  });
+
+  it("rejects only candidates that are still pending review", async () => {
+    const pending = createCandidate("run_1", "pending_review");
+    const accepted = createCandidate("run_2", "accepted");
+    const candidateStore = createMemoryCandidateStore([pending, accepted]);
+    const service = createAgentEvalCandidateService({
+      runStore: createMemoryRunStore([]),
+      trajectoryStore: createMemoryTrajectoryStore({}),
+      candidateStore,
+      promotedFixtureStore: createMemoryPromotedFixtureStore(),
+    });
+
+    await expect(service.rejectCandidate(pending.id)).resolves.toMatchObject({
+      id: pending.id,
+      status: "rejected",
+    });
+    await expect(service.rejectCandidate(accepted.id)).resolves.toBeNull();
+    await expect(service.rejectCandidate("missing")).resolves.toBeNull();
+    expect(candidateStore.candidates.find((candidate) => candidate.id === accepted.id))
+      .toEqual(accepted);
+  });
 });
 
 function createMemoryRunStore(runs: AgentRunRecord[]): AgentRunStore {

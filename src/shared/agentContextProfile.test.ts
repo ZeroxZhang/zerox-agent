@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { createAgentContextProfile } from "./agentContextProfile";
+import {
+  createAgentContextProfile,
+  createAgentContextProfileReport,
+} from "./agentContextProfile";
 
 describe("createAgentContextProfile", () => {
   it("prioritizes procedural, semantic, and episodic memory for code tasks", () => {
@@ -56,5 +59,24 @@ describe("createAgentContextProfile", () => {
       "semantic",
       "episodic",
     ]);
+  });
+
+  it("reports passing context profiles for each supported task intent", () => {
+    const report = createAgentContextProfileReport();
+
+    expect(report.passed).toBe(true);
+    expect(Object.keys(report.profiles)).toEqual([
+      "code",
+      "research",
+      "writing",
+      "memory",
+      "general",
+    ]);
+    for (const profile of Object.values(report.profiles)) {
+      expect(profile.memoryKinds.length).toBeGreaterThan(0);
+      expect(profile.coreBudgetTokens).toBeGreaterThan(0);
+      expect(profile.hotTurnCount).toBeGreaterThan(0);
+      expect(profile.coldSummaryBudgetTokens).toBeGreaterThan(0);
+    }
   });
 });

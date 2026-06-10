@@ -12,6 +12,8 @@ import type { AgentRunStatus } from "../shared/agentRuns";
 
 export type AgentEvalCandidateService = {
   generateForRun(runId: string): Promise<GenerateEvalCandidateForRunResult>;
+  acceptCandidate(candidateId: string): Promise<AgentEvalCandidate | null>;
+  rejectCandidate(candidateId: string): Promise<AgentEvalCandidate | null>;
   promoteAccepted(candidateId: string): Promise<PromoteEvalCandidateResult>;
 };
 
@@ -63,6 +65,22 @@ export function createAgentEvalCandidateService(options: {
       };
     },
 
+    async acceptCandidate(candidateId) {
+      return transitionPendingReviewCandidate(
+        options.candidateStore,
+        candidateId,
+        "accepted",
+      );
+    },
+
+    async rejectCandidate(candidateId) {
+      return transitionPendingReviewCandidate(
+        options.candidateStore,
+        candidateId,
+        "rejected",
+      );
+    },
+
     async promoteAccepted(candidateId) {
       const candidate = await findCandidate(options.candidateStore, candidateId);
       if (!candidate) {
@@ -95,6 +113,19 @@ export function createAgentEvalCandidateService(options: {
       };
     },
   };
+}
+
+async function transitionPendingReviewCandidate(
+  candidateStore: AgentEvalCandidateStore,
+  candidateId: string,
+  status: "accepted" | "rejected",
+): Promise<AgentEvalCandidate | null> {
+  const candidate = await findCandidate(candidateStore, candidateId);
+  if (!candidate || candidate.status !== "pending_review") {
+    return null;
+  }
+
+  return candidateStore.setStatus(candidate.id, status);
 }
 
 function isTerminalRunStatus(status: AgentRunStatus): boolean {

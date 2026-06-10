@@ -64,7 +64,7 @@ describe("promoted agent eval fixture store", () => {
     ]);
   });
 
-  it("replaces built-in duplicate ids in place with promoted fixtures", () => {
+  it("keeps built-in duplicate ids and skips promoted replacements", () => {
     const builtIn = [
       createFixture("built-in-1", "Built-in 1"),
       createFixture("duplicate-id", "Built-in duplicate"),
@@ -80,10 +80,11 @@ describe("promoted agent eval fixture store", () => {
 
     expect(combined).toEqual([
       builtIn[0],
-      replacement,
+      builtIn[1],
       builtIn[2],
       promoted[1],
     ]);
+    expect(combined).not.toContain(replacement);
   });
 });
 
