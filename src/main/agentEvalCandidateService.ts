@@ -25,6 +25,7 @@ export function createAgentEvalCandidateService(options: {
   now?: () => Date;
 }): AgentEvalCandidateService {
   const now = options.now ?? (() => new Date());
+  let reviewQueue: Promise<unknown> = Promise.resolve();
 
   return {
     async generateForRun(runId) {
@@ -66,66 +67,94 @@ export function createAgentEvalCandidateService(options: {
     },
 
     async acceptCandidate(candidateId) {
-      return transitionPendingReviewCandidate(
-        options.candidateStore,
-        candidateId,
-        "accepted",
+      return enqueueReviewMutation(
+        reviewQueue,
+        (nextQueue) => {
+          reviewQueue = nextQueue;
+        },
+        () =>
+          options.candidateStore.transitionStatus(
+            candidateId,
+            "pending_review",
+            "accepted",
+          ),
       );
     },
 
     async rejectCandidate(candidateId) {
-      return transitionPendingReviewCandidate(
-        options.candidateStore,
-        candidateId,
-        "rejected",
+      return enqueueReviewMutation(
+        reviewQueue,
+        (nextQueue) => {
+          reviewQueue = nextQueue;
+        },
+        () =>
+          options.candidateStore.transitionStatus(
+            candidateId,
+            "pending_review",
+            "rejected",
+          ),
       );
     },
 
     async promoteAccepted(candidateId) {
-      const candidate = await findCandidate(options.candidateStore, candidateId);
-      if (!candidate) {
-        return {
-          ok: false,
-          message: "eval candidate 不存在。",
-        };
-      }
+      return enqueueReviewMutation(
+        reviewQueue,
+        (nextQueue) => {
+          reviewQueue = nextQueue;
+        },
+        async () => {
+          const candidate = await findCandidate(options.candidateStore, candidateId);
+          if (!candidate) {
+            return {
+              ok: false,
+              message: "eval candidate 不存在。",
+            };
+          }
 
-      if (candidate.status !== "accepted") {
-        return {
-          ok: false,
-          message: "只有已接受的 eval candidate 可以晋升。",
-        };
-      }
+          if (candidate.status !== "accepted") {
+            return {
+              ok: false,
+              message: "只有已接受的 eval candidate 可以晋升。",
+            };
+          }
 
-      await options.promotedFixtureStore.upsert(candidate.fixture);
-      const promoted = await options.candidateStore.setStatus(candidate.id, "promoted");
-      if (!promoted) {
-        return {
-          ok: false,
-          message: "eval candidate 不存在。",
-        };
-      }
+          await options.promotedFixtureStore.upsert(candidate.fixture);
+          const promoted = await options.candidateStore.transitionStatus(
+            candidate.id,
+            "accepted",
+            "promoted",
+          );
+          if (!promoted) {
+            return {
+              ok: false,
+              message: "只有已接受的 eval candidate 可以晋升。",
+            };
+          }
 
-      return {
-        ok: true,
-        candidate: promoted,
-        fixtureId: candidate.fixture.id,
-      };
+          return {
+            ok: true,
+            candidate: promoted,
+            fixtureId: candidate.fixture.id,
+          };
+        },
+      );
     },
   };
 }
 
-async function transitionPendingReviewCandidate(
-  candidateStore: AgentEvalCandidateStore,
-  candidateId: string,
-  status: "accepted" | "rejected",
-): Promise<AgentEvalCandidate | null> {
-  const candidate = await findCandidate(candidateStore, candidateId);
-  if (!candidate || candidate.status !== "pending_review") {
-    return null;
-  }
-
-  return candidateStore.setStatus(candidate.id, status);
+function enqueueReviewMutation<T>(
+  queue: Promise<unknown>,
+  setQueue: (nextQueue: Promise<unknown>) => void,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const result = queue.then(operation, operation);
+  setQueue(
+    result.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+  return result;
 }
 
 function isTerminalRunStatus(status: AgentRunStatus): boolean {

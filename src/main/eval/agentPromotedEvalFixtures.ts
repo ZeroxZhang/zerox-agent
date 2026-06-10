@@ -29,6 +29,7 @@ export function createPromotedAgentEvalFixtureStore(options: {
     options.configDir,
     "agent-promoted-eval-fixtures.json",
   );
+  let mutationQueue: Promise<unknown> = Promise.resolve();
 
   async function readStored(): Promise<StoredPromotedAgentEvalFixtures> {
     try {
@@ -58,6 +59,15 @@ export function createPromotedAgentEvalFixtureStore(options: {
     });
   }
 
+  function enqueueMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const result = mutationQueue.then(operation, operation);
+    mutationQueue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+
   return {
     async list() {
       const stored = await readStored();
@@ -65,19 +75,21 @@ export function createPromotedAgentEvalFixtureStore(options: {
     },
 
     async upsert(fixture) {
-      const stored = await readStored();
-      const existingIndex = stored.fixtures.findIndex(
-        (item) => item.id === fixture.id,
-      );
-      const fixtures =
-        existingIndex === -1
-          ? [...stored.fixtures, fixture]
-          : stored.fixtures.map((item, index) =>
-              index === existingIndex ? fixture : item,
-            );
+      return enqueueMutation(async () => {
+        const stored = await readStored();
+        const existingIndex = stored.fixtures.findIndex(
+          (item) => item.id === fixture.id,
+        );
+        const fixtures =
+          existingIndex === -1
+            ? [...stored.fixtures, fixture]
+            : stored.fixtures.map((item, index) =>
+                index === existingIndex ? fixture : item,
+              );
 
-      await writeStored({ schemaVersion: 1, fixtures });
-      return fixture;
+        await writeStored({ schemaVersion: 1, fixtures });
+        return fixture;
+      });
     },
   };
 }

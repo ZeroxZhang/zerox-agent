@@ -220,6 +220,25 @@ function createMemoryCandidateStore(initial: AgentEvalCandidate[] = []) {
       store.candidates[candidateIndex] = updated;
       return updated;
     },
+    async transitionStatus(candidateId, expectedStatus, nextStatus) {
+      const candidateIndex = store.candidates.findIndex(
+        (candidate) => candidate.id === candidateId,
+      );
+      if (
+        candidateIndex === -1 ||
+        store.candidates[candidateIndex].status !== expectedStatus
+      ) {
+        return null;
+      }
+
+      const updated = {
+        ...store.candidates[candidateIndex],
+        status: nextStatus,
+        updatedAt: "2026-06-10T00:01:00.000Z",
+      };
+      store.candidates[candidateIndex] = updated;
+      return updated;
+    },
   };
   return store;
 }

@@ -44,6 +44,20 @@ describe("promoted agent eval fixture store", () => {
     });
   });
 
+  it("serializes concurrent upserts without dropping promoted fixtures", async () => {
+    const store = createPromotedAgentEvalFixtureStore({ configDir });
+    const first = createFixture("episode-run-1", "First description");
+    const second = createFixture("episode-run-2", "Second description");
+
+    await Promise.all([store.upsert(first), store.upsert(second)]);
+
+    const stored = await store.list();
+    expect(stored.map((fixture) => fixture.id).sort()).toEqual([
+      first.id,
+      second.id,
+    ]);
+  });
+
   it("appends promoted-only fixtures after built-in fixtures", () => {
     const builtIn = [
       createFixture("built-in-1", "Built-in 1"),

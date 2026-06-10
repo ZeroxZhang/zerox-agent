@@ -18,6 +18,11 @@ export type AgentEvalCandidateStore = {
     candidateId: string,
     status: AgentEvalCandidateStatus,
   ): Promise<AgentEvalCandidate | null>;
+  transitionStatus(
+    candidateId: string,
+    expectedStatus: AgentEvalCandidateStatus,
+    nextStatus: AgentEvalCandidateStatus,
+  ): Promise<AgentEvalCandidate | null>;
 };
 
 export function createAgentEvalCandidateStore(options: {
@@ -26,6 +31,7 @@ export function createAgentEvalCandidateStore(options: {
 }): AgentEvalCandidateStore {
   const candidatesPath = path.join(options.configDir, "agent-eval-candidates.json");
   const now = options.now ?? (() => new Date());
+  let mutationQueue: Promise<unknown> = Promise.resolve();
 
   async function readStored(): Promise<StoredAgentEvalCandidates> {
     try {
@@ -55,24 +61,35 @@ export function createAgentEvalCandidateStore(options: {
     });
   }
 
+  function enqueueMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const result = mutationQueue.then(operation, operation);
+    mutationQueue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+
   return {
     async create(candidate) {
-      const stored = await readStored();
-      const existing = stored.candidates.find(
-        (item) =>
-          item.id === candidate.id ||
-          (item.sourceRunId === candidate.sourceRunId &&
-            item.fixture.id === candidate.fixture.id),
-      );
-      if (existing) {
-        return existing;
-      }
+      return enqueueMutation(async () => {
+        const stored = await readStored();
+        const existing = stored.candidates.find(
+          (item) =>
+            item.id === candidate.id ||
+            (item.sourceRunId === candidate.sourceRunId &&
+              item.fixture.id === candidate.fixture.id),
+        );
+        if (existing) {
+          return existing;
+        }
 
-      await writeStored({
-        schemaVersion: 1,
-        candidates: [...stored.candidates, candidate],
+        await writeStored({
+          schemaVersion: 1,
+          candidates: [...stored.candidates, candidate],
+        });
+        return candidate;
       });
-      return candidate;
     },
 
     async list(listOptions) {
@@ -87,27 +104,72 @@ export function createAgentEvalCandidateStore(options: {
     },
 
     async setStatus(candidateId, status) {
-      const stored = await readStored();
-      let updatedCandidate: AgentEvalCandidate | null = null;
-      const candidates = stored.candidates.map((candidate) => {
-        if (candidate.id !== candidateId) {
-          return candidate;
+      return enqueueMutation(async () => {
+        const stored = await readStored();
+        const { candidates, updatedCandidate } = updateCandidateStatus(
+          stored.candidates,
+          candidateId,
+          status,
+          now().toISOString(),
+        );
+
+        if (!updatedCandidate) {
+          return null;
         }
 
-        updatedCandidate = {
-          ...candidate,
-          status,
-          updatedAt: now().toISOString(),
-        };
+        await writeStored({ schemaVersion: 1, candidates });
         return updatedCandidate;
       });
-
-      if (!updatedCandidate) {
-        return null;
-      }
-
-      await writeStored({ schemaVersion: 1, candidates });
-      return updatedCandidate;
     },
+
+    async transitionStatus(candidateId, expectedStatus, nextStatus) {
+      return enqueueMutation(async () => {
+        const stored = await readStored();
+        const current = stored.candidates.find(
+          (candidate) => candidate.id === candidateId,
+        );
+        if (!current || current.status !== expectedStatus) {
+          return null;
+        }
+
+        const { candidates, updatedCandidate } = updateCandidateStatus(
+          stored.candidates,
+          candidateId,
+          nextStatus,
+          now().toISOString(),
+        );
+        await writeStored({ schemaVersion: 1, candidates });
+        return updatedCandidate;
+      });
+    },
+  };
+}
+
+function updateCandidateStatus(
+  candidates: AgentEvalCandidate[],
+  candidateId: string,
+  status: AgentEvalCandidateStatus,
+  updatedAt: string,
+): {
+  candidates: AgentEvalCandidate[];
+  updatedCandidate: AgentEvalCandidate | null;
+} {
+  let updatedCandidate: AgentEvalCandidate | null = null;
+  const updatedCandidates = candidates.map((candidate) => {
+    if (candidate.id !== candidateId) {
+      return candidate;
+    }
+
+    updatedCandidate = {
+      ...candidate,
+      status,
+      updatedAt,
+    };
+    return updatedCandidate;
+  });
+
+  return {
+    candidates: updatedCandidates,
+    updatedCandidate,
   };
 }

@@ -81,6 +81,51 @@ describe("agent eval candidate store", () => {
     await expect(store.list({ status: "accepted" })).resolves.toEqual([accepted]);
   });
 
+  it("transitions status only when the current status matches", async () => {
+    const store = createAgentEvalCandidateStore({
+      configDir,
+      now: () => new Date("2026-06-10T00:01:00.000Z"),
+    });
+    const candidate = await store.create(createCandidate("run_1"));
+
+    const accepted = await store.transitionStatus(
+      candidate.id,
+      "pending_review",
+      "accepted",
+    );
+    const rejected = await store.transitionStatus(
+      candidate.id,
+      "pending_review",
+      "rejected",
+    );
+
+    expect(accepted).toMatchObject({
+      id: candidate.id,
+      status: "accepted",
+      updatedAt: "2026-06-10T00:01:00.000Z",
+    });
+    expect(rejected).toBeNull();
+    await expect(store.list()).resolves.toEqual([accepted]);
+  });
+
+  it("serializes competing transitions so a pending candidate changes once", async () => {
+    const store = createAgentEvalCandidateStore({
+      configDir,
+      now: () => new Date("2026-06-10T00:01:00.000Z"),
+    });
+    const candidate = await store.create(createCandidate("run_1"));
+
+    const results = await Promise.all([
+      store.transitionStatus(candidate.id, "pending_review", "accepted"),
+      store.transitionStatus(candidate.id, "pending_review", "rejected"),
+    ]);
+
+    expect(results.filter(Boolean)).toHaveLength(1);
+    await expect(store.list({ status: "pending_review" })).resolves.toEqual([]);
+    const stored = await store.list();
+    expect(["accepted", "rejected"]).toContain(stored[0]?.status);
+  });
+
   it("returns null when updating a missing candidate", async () => {
     const store = createAgentEvalCandidateStore({ configDir });
 
