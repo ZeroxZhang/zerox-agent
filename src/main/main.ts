@@ -29,6 +29,14 @@ import {
   type AgentLearningService,
 } from "./agentLearningService";
 import {
+  createAgentEvalCandidateStore,
+  type AgentEvalCandidateStore,
+} from "./agentEvalCandidateStore";
+import {
+  createAgentEvalCandidateService,
+  type AgentEvalCandidateService,
+} from "./agentEvalCandidateService";
+import {
   createAgentWorkspaceStore,
   type AgentWorkspaceStore,
 } from "./agentWorkspaceStore";
@@ -47,6 +55,10 @@ import {
   type MultiAgentCoordinator,
 } from "./multiAgentCoordinator";
 import { createAgentEvalFixtures } from "./eval/agentEvalFixtures";
+import {
+  createPromotedAgentEvalFixtureStore,
+  type PromotedAgentEvalFixtureStore,
+} from "./eval/agentPromotedEvalFixtures";
 import { runAgentEvals } from "./eval/agentEvalRunner";
 import {
   getDefaultLoginItemSettings,
@@ -167,6 +179,12 @@ import type {
 import type { AgentLearningListOptions } from "../shared/agentLearning";
 import type { ToolCallRequest } from "../shared/toolPermissions";
 import type { AgentEvalReport } from "../shared/agentEval";
+import type {
+  AgentEvalCandidate,
+  AgentEvalCandidateListOptions,
+  GenerateEvalCandidateForRunResult,
+  PromoteEvalCandidateResult,
+} from "../shared/agentEvalCandidate";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
 import type { AgentWorkspace, MultiAgentSession } from "../shared/agentWorkspace";
 import type {
@@ -218,6 +236,9 @@ let agentTrajectoryStore: AgentTrajectoryStore | null = null;
 let agentRunStore: AgentRunStore | null = null;
 let agentLearningStore: AgentLearningStore | null = null;
 let agentLearningService: AgentLearningService | null = null;
+let agentEvalCandidateStore: AgentEvalCandidateStore | null = null;
+let promotedAgentEvalFixtureStore: PromotedAgentEvalFixtureStore | null = null;
+let agentEvalCandidateService: AgentEvalCandidateService | null = null;
 let agentWorkspaceStore: AgentWorkspaceStore | null = null;
 let agentWorkspaceService: AgentWorkspaceService | null = null;
 let multiAgentSessionStore: MultiAgentSessionStore | null = null;
@@ -587,6 +608,37 @@ ipcMain.handle(
   "agentRuns:listTrajectory",
   (_event, runId: string): Promise<AgentTrajectoryEvent[]> =>
     getAgentTrajectoryStore().list(runId),
+);
+ipcMain.handle(
+  "agentEvalCandidates:list",
+  (_event, options?: AgentEvalCandidateListOptions): Promise<AgentEvalCandidate[]> =>
+    getAgentEvalCandidateStore().list(options),
+);
+ipcMain.handle(
+  "agentEvalCandidates:generateForRun",
+  (
+    _event,
+    runId: string,
+  ): Promise<GenerateEvalCandidateForRunResult> =>
+    getAgentEvalCandidateService().generateForRun(runId),
+);
+ipcMain.handle(
+  "agentEvalCandidates:accept",
+  (_event, candidateId: string): Promise<AgentEvalCandidate | null> =>
+    getAgentEvalCandidateStore().setStatus(candidateId, "accepted"),
+);
+ipcMain.handle(
+  "agentEvalCandidates:reject",
+  (_event, candidateId: string): Promise<AgentEvalCandidate | null> =>
+    getAgentEvalCandidateStore().setStatus(candidateId, "rejected"),
+);
+ipcMain.handle(
+  "agentEvalCandidates:promote",
+  (
+    _event,
+    candidateId: string,
+  ): Promise<PromoteEvalCandidateResult> =>
+    getAgentEvalCandidateService().promoteAccepted(candidateId),
 );
 ipcMain.handle(
   "toolResults:readRef",
@@ -1201,6 +1253,39 @@ function getAgentLearningService(): AgentLearningService {
   }
 
   return agentLearningService;
+}
+
+function getAgentEvalCandidateStore(): AgentEvalCandidateStore {
+  if (!agentEvalCandidateStore) {
+    agentEvalCandidateStore = createAgentEvalCandidateStore({
+      configDir: path.join(app.getPath("userData"), "config"),
+    });
+  }
+
+  return agentEvalCandidateStore;
+}
+
+function getPromotedAgentEvalFixtureStore(): PromotedAgentEvalFixtureStore {
+  if (!promotedAgentEvalFixtureStore) {
+    promotedAgentEvalFixtureStore = createPromotedAgentEvalFixtureStore({
+      configDir: path.join(app.getPath("userData"), "config"),
+    });
+  }
+
+  return promotedAgentEvalFixtureStore;
+}
+
+function getAgentEvalCandidateService(): AgentEvalCandidateService {
+  if (!agentEvalCandidateService) {
+    agentEvalCandidateService = createAgentEvalCandidateService({
+      runStore: getAgentRunStore(),
+      trajectoryStore: getAgentTrajectoryStore(),
+      candidateStore: getAgentEvalCandidateStore(),
+      promotedFixtureStore: getPromotedAgentEvalFixtureStore(),
+    });
+  }
+
+  return agentEvalCandidateService;
 }
 
 function getAgentRunnerService(): AgentRunnerService {

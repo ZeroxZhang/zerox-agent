@@ -15,6 +15,12 @@ import type {
 } from "../shared/chat";
 import type { DesktopRuntimeInfo } from "../shared/desktopRuntime";
 import type { AgentEvalReport } from "../shared/agentEval";
+import type {
+  AgentEvalCandidate,
+  AgentEvalCandidateListOptions,
+  GenerateEvalCandidateForRunResult,
+  PromoteEvalCandidateResult,
+} from "../shared/agentEvalCandidate";
 import type { ReadToolResultRefResult } from "../shared/toolResultRefs";
 import type {
   CreateMemoryResult,
@@ -139,6 +145,26 @@ const buildingAgent = {
     ipcRenderer.invoke("toolResults:readRef", ref),
   getAgentEvalReport: (): Promise<AgentEvalReport> =>
     ipcRenderer.invoke("agentQuality:getEvalReport"),
+  listEvalCandidates: (
+    options?: AgentEvalCandidateListOptions,
+  ): Promise<AgentEvalCandidate[]> =>
+    ipcRenderer.invoke("agentEvalCandidates:list", options),
+  generateEvalCandidateForRun: (
+    runId: string,
+  ): Promise<GenerateEvalCandidateForRunResult> =>
+    ipcRenderer.invoke("agentEvalCandidates:generateForRun", runId),
+  acceptEvalCandidate: (
+    candidateId: string,
+  ): Promise<AgentEvalCandidate | null> =>
+    ipcRenderer.invoke("agentEvalCandidates:accept", candidateId),
+  rejectEvalCandidate: (
+    candidateId: string,
+  ): Promise<AgentEvalCandidate | null> =>
+    ipcRenderer.invoke("agentEvalCandidates:reject", candidateId),
+  promoteEvalCandidate: (
+    candidateId: string,
+  ): Promise<PromoteEvalCandidateResult> =>
+    ipcRenderer.invoke("agentEvalCandidates:promote", candidateId),
   runScheduledTask: (taskId: string): Promise<RunScheduledTaskResult> =>
     ipcRenderer.invoke("agentRuns:runTask", taskId),
   runScheduledTaskStreaming: (taskId: string): Promise<void> =>

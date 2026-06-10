@@ -18,3 +18,22 @@
   - `npm run smoke:prod` → renderer rendered agent chat UI
   - `npm test -- src/shared/agentHandoff.test.ts src/main/multiAgentCoordinator.test.ts src/main/eval/agentEvalRunner.test.ts src/renderer/materialDesign.test.ts` → 4 files / 22 tests
 - Current focus: P2 closeout.
+
+## 2026-06-10 P3 Agent Learning Harness Loop - Worker 2
+
+- Implemented Task 2 refined scope: eval candidate service, promoted eval fixture store, IPC handlers, and preload APIs.
+- Changed files:
+  - `src/shared/agentEvalCandidate.ts`
+  - `src/main/agentEvalCandidateService.ts`
+  - `src/main/agentEvalCandidateService.test.ts`
+  - `src/main/eval/agentPromotedEvalFixtures.ts`
+  - `src/main/eval/agentPromotedEvalFixtures.test.ts`
+  - `src/main/main.ts`
+  - `src/preload/index.ts`
+- TDD evidence:
+  - `npm test -- src/main/agentEvalCandidateService.test.ts` → RED, no test file found before creation.
+  - `npm test -- src/main/agentEvalCandidateService.test.ts src/main/eval/agentPromotedEvalFixtures.test.ts` → RED, missing service/store modules after tests were added.
+  - `npm test -- src/main/agentEvalCandidateService.test.ts src/main/eval/agentPromotedEvalFixtures.test.ts src/main/agentEvalCandidateStore.test.ts` → 3 files / 10 tests passed.
+  - `npm run build` → passed.
+  - `git diff --check` → passed.
+  - `npm run harness:check` → passed.

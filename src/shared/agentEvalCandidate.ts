@@ -37,3 +37,25 @@ export type AgentEvalCandidate = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type GenerateEvalCandidateForRunResult =
+  | {
+      ok: true;
+      candidate: AgentEvalCandidate;
+      existing: boolean;
+    }
+  | {
+      ok: false;
+      message: string;
+    };
+
+export type PromoteEvalCandidateResult =
+  | {
+      ok: true;
+      candidate: AgentEvalCandidate;
+      fixtureId: string;
+    }
+  | {
+      ok: false;
+      message: string;
+    };
