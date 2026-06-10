@@ -119,3 +119,23 @@
   - `npm run harness:score` -> score 9.31/10, agent eval 11/11, adversarial passed true with 23 checked and 0 escaped.
   - `npm run verify` -> 92 Vitest files / 415 tests, agent eval 11/11, memory eval 2/2.
   - `npm run harness:check` -> passed.
+
+## 2026-06-11 P3 Agent Learning Harness Loop - Worker 6
+
+- Implemented Task 6 scope: Tool ACI policy sensor, deterministic agent context profiles, and informational harness score ACI output.
+- Changed files:
+  - `src/shared/toolAciPolicy.ts`
+  - `src/shared/toolAciPolicy.test.ts`
+  - `src/shared/agentContextProfile.ts`
+  - `src/shared/agentContextProfile.test.ts`
+  - `scripts/run-harness-score.mjs`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `npm test -- src/shared/toolAciPolicy.test.ts src/shared/agentContextProfile.test.ts` -> RED, missing `toolAciPolicy` and `agentContextProfile` modules.
+  - `node scripts/run-harness-score.mjs | node -e <aci assertion>` -> RED, missing top-level `aci` report before harness wiring.
+  - `npm test -- src/shared/toolAciPolicy.test.ts src/shared/agentContextProfile.test.ts` -> 2 files / 6 tests passed.
+  - `npm run build` -> passed.
+  - `npm run harness:score` -> score 9.31/10, agent eval 11/11, adversarial passed true, ACI passed true with 0 findings.
+  - `git diff --check` -> passed.
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> 94 Vitest files / 421 tests, agent eval 11/11, memory eval 2/2.
