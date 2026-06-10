@@ -50,6 +50,15 @@ describe("agent eval candidate store", () => {
     await expect(store.list()).resolves.toHaveLength(1);
   });
 
+  it("dedupes candidates by candidate id", async () => {
+    const store = createAgentEvalCandidateStore({ configDir });
+    const first = await store.create(createCandidate("run_1"));
+    const second = await store.create(createCandidate("run_1", "episode-run-1-revised"));
+
+    expect(second).toEqual(first);
+    await expect(store.list()).resolves.toEqual([first]);
+  });
+
   it("updates status and preserves fixture evidence", async () => {
     const store = createAgentEvalCandidateStore({
       configDir,
@@ -80,7 +89,10 @@ describe("agent eval candidate store", () => {
   });
 });
 
-function createCandidate(runId: string): AgentEvalCandidate {
+function createCandidate(
+  runId: string,
+  fixtureId = `episode-${runId.replace(/_/g, "-")}`,
+): AgentEvalCandidate {
   return {
     id: `eval_candidate_${runId}`,
     sourceRunId: runId,
@@ -89,7 +101,7 @@ function createCandidate(runId: string): AgentEvalCandidate {
     createdAt: "2026-06-10T00:00:00.000Z",
     updatedAt: "2026-06-10T00:00:00.000Z",
     fixture: {
-      id: `episode-${runId.replace(/_/g, "-")}`,
+      id: fixtureId,
       description: `Episode candidate from ${runId}`,
       events: [
         {

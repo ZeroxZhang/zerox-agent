@@ -60,8 +60,9 @@ export function createAgentEvalCandidateStore(options: {
       const stored = await readStored();
       const existing = stored.candidates.find(
         (item) =>
-          item.sourceRunId === candidate.sourceRunId &&
-          item.fixture.id === candidate.fixture.id,
+          item.id === candidate.id ||
+          (item.sourceRunId === candidate.sourceRunId &&
+            item.fixture.id === candidate.fixture.id),
       );
       if (existing) {
         return existing;
