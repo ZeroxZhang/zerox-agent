@@ -128,7 +128,7 @@ export function OverviewPanel(props: {
       }),
       window.buildingAgent.listEvalCandidates({
         status: "pending_review",
-      }),
+      }).catch(() => []),
       window.buildingAgent.getAgentEvalReport(),
     ])
       .then(([
@@ -635,7 +635,7 @@ export function OverviewPanel(props: {
       }),
       window.buildingAgent.listEvalCandidates({
         status: "pending_review",
-      }),
+      }).catch(() => []),
       window.buildingAgent.getAgentEvalReport(),
     ]);
     setData({
@@ -698,7 +698,7 @@ export function OverviewPanel(props: {
       }),
       window.buildingAgent.listEvalCandidates({
         status: "pending_review",
-      }),
+      }).catch(() => []),
       window.buildingAgent.getAgentEvalReport(),
     ]);
     setData({

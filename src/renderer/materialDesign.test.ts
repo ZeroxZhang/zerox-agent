@@ -27,6 +27,9 @@ describe("Design System — Notion-inspired app shell", () => {
     process.cwd(),
     "src/renderer/components/EvalReviewPanel.tsx",
   );
+  const evalReviewPanelSource = existsSync(evalReviewPanelPath)
+    ? readFileSync(evalReviewPanelPath, "utf8")
+    : "";
 
   it("defines comprehensive CSS custom property design tokens", () => {
     // Color tokens
@@ -106,7 +109,6 @@ describe("Design System — Notion-inspired app shell", () => {
 
   it("surfaces eval candidate review and promotion controls", () => {
     expect(existsSync(evalReviewPanelPath)).toBe(true);
-    const evalReviewPanelSource = readFileSync(evalReviewPanelPath, "utf8");
 
     expect(evalReviewPanelSource).toContain("listEvalCandidates");
     expect(evalReviewPanelSource).toContain("promoteEvalCandidate");
@@ -115,6 +117,38 @@ describe("Design System — Notion-inspired app shell", () => {
   it("loads pending eval candidates into the Overview capability score", () => {
     expect(overviewPanelSource).not.toContain("pendingEvalCandidates: 0");
     expect(overviewPanelSource).toContain("listEvalCandidates({");
+  });
+
+  it("keeps eval candidate review mutations recoverable on preload rejection", () => {
+    const setCandidateStatusSource = getFunctionSource(
+      evalReviewPanelSource,
+      "setCandidateStatus",
+    );
+    const promoteCandidateSource = getFunctionSource(
+      evalReviewPanelSource,
+      "promoteCandidate",
+    );
+
+    expect(setCandidateStatusSource).toContain("catch (error)");
+    expect(setCandidateStatusSource).toContain("kind: \"error\"");
+    expect(promoteCandidateSource).toContain("catch (error)");
+    expect(promoteCandidateSource).toContain("kind: \"error\"");
+  });
+
+  it("keeps run eval candidate generation recoverable on preload rejection", () => {
+    const generateCandidateSource = getFunctionSource(
+      runsPanelSource,
+      "handleGenerateEvalCandidateForSelectedRun",
+    );
+
+    expect(generateCandidateSource).toContain("catch (error)");
+    expect(generateCandidateSource).toContain("kind: \"error\"");
+  });
+
+  it("lets Overview load when pending eval candidate loading fails", () => {
+    expect(overviewPanelSource).toMatch(
+      /listEvalCandidates\(\{\s*status: "pending_review",\s*\}\)\.catch\(\(\) => \[\]\)/s,
+    );
   });
 
   it("provides reusable component classes for all screens", () => {
@@ -169,3 +203,32 @@ describe("Design System — Notion-inspired app shell", () => {
     );
   });
 });
+
+function getFunctionSource(source: string, functionName: string): string {
+  const marker = `async function ${functionName}`;
+  const startIndex = source.indexOf(marker);
+  if (startIndex === -1) {
+    return "";
+  }
+
+  const bodyStartIndex = source.indexOf("{", startIndex);
+  if (bodyStartIndex === -1) {
+    return source.slice(startIndex);
+  }
+
+  let depth = 0;
+  for (let index = bodyStartIndex; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === "{") {
+      depth += 1;
+    }
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(startIndex, index + 1);
+      }
+    }
+  }
+
+  return source.slice(startIndex);
+}

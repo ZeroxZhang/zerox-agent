@@ -60,3 +60,22 @@
   - `npm run build` → passed.
   - `git diff --check` → passed.
   - `npm run harness:check` → passed.
+
+## 2026-06-11 P3 Task 3 Review Follow-up
+
+- Hardened eval candidate UI rejection handling after code review:
+  - Eval review accept/reject/promote mutations recover from rejected preload calls with an error status.
+  - Runs eval-candidate generation recovers from rejected preload calls with an error status.
+  - Overview pending eval candidate loading falls back to `[]` without failing the whole dashboard.
+- Changed files:
+  - `src/renderer/components/EvalReviewPanel.tsx`
+  - `src/renderer/components/RunsPanel.tsx`
+  - `src/renderer/components/OverviewPanel.tsx`
+  - `src/renderer/materialDesign.test.ts`
+- TDD and verification evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts` → RED, 3 expected failures for missing mutation catches, missing Runs generation catch, and missing Overview eval fallback.
+  - `npm test -- src/renderer/materialDesign.test.ts` → 1 file / 14 tests passed.
+  - `npm test -- src/renderer/materialDesign.test.ts src/shared/navigation.test.ts src/shared/materialNavigation.test.ts src/shared/appMeta.test.ts` → 4 files / 20 tests passed.
+  - `npx tsc -p tsconfig.renderer.json --noEmit` → passed.
+  - `git diff --check` → passed.
+  - `npm run harness:check` → passed.

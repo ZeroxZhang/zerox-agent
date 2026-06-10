@@ -76,21 +76,29 @@ export function EvalReviewPanel() {
     }
 
     setStatus({ kind: "loading", message: "正在更新评测候选..." });
-    const updated =
-      action === "accept"
-        ? await window.buildingAgent.acceptEvalCandidate(candidate.id)
-        : await window.buildingAgent.rejectEvalCandidate(candidate.id);
+    try {
+      const updated =
+        action === "accept"
+          ? await window.buildingAgent.acceptEvalCandidate(candidate.id)
+          : await window.buildingAgent.rejectEvalCandidate(candidate.id);
 
-    if (!updated) {
-      setStatus({ kind: "error", message: "候选不存在或已被更新。" });
-      return;
+      if (!updated) {
+        setStatus({ kind: "error", message: "候选不存在或已被更新。" });
+        return;
+      }
+
+      upsertCandidate(updated);
+      setStatus({
+        kind: "idle",
+        message: action === "accept" ? "评测候选已接受。" : "评测候选已拒绝。",
+      });
+    } catch (error) {
+      setStatus({
+        kind: "error",
+        message:
+          error instanceof Error ? error.message : "无法更新评测候选。",
+      });
     }
-
-    upsertCandidate(updated);
-    setStatus({
-      kind: "idle",
-      message: action === "accept" ? "评测候选已接受。" : "评测候选已拒绝。",
-    });
   }
 
   async function promoteCandidate(candidate: AgentEvalCandidate) {
@@ -99,18 +107,28 @@ export function EvalReviewPanel() {
     }
 
     setStatus({ kind: "loading", message: "正在提升评测候选..." });
-    const result = await window.buildingAgent.promoteEvalCandidate(candidate.id);
+    try {
+      const result = await window.buildingAgent.promoteEvalCandidate(
+        candidate.id,
+      );
 
-    if (!result.ok) {
-      setStatus({ kind: "error", message: result.message });
-      return;
+      if (!result.ok) {
+        setStatus({ kind: "error", message: result.message });
+        return;
+      }
+
+      upsertCandidate(result.candidate);
+      setStatus({
+        kind: "idle",
+        message: `已提升为固定评测：${result.fixtureId}。`,
+      });
+    } catch (error) {
+      setStatus({
+        kind: "error",
+        message:
+          error instanceof Error ? error.message : "无法提升评测候选。",
+      });
     }
-
-    upsertCandidate(result.candidate);
-    setStatus({
-      kind: "idle",
-      message: `已提升为固定评测：${result.fixtureId}。`,
-    });
   }
 
   function upsertCandidate(candidate: AgentEvalCandidate) {

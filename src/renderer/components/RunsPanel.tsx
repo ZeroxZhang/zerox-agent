@@ -240,38 +240,46 @@ export function RunsPanel() {
       kind: "loading",
       message: `正在生成评测候选：${selectedRun.taskName}`,
     });
-    const result = await window.buildingAgent.generateEvalCandidateForRun(
-      selectedRun.id,
-    );
-
-    if (!result.ok) {
-      setStatus({ kind: "error", message: result.message });
-      return;
-    }
-
-    setEvalCandidates((currentCandidates) => {
-      const exists = currentCandidates.some(
-        (candidate) =>
-          candidate.id === result.candidate.id ||
-          candidate.sourceRunId === result.candidate.sourceRunId,
+    try {
+      const result = await window.buildingAgent.generateEvalCandidateForRun(
+        selectedRun.id,
       );
-      if (!exists) {
-        return [result.candidate, ...currentCandidates];
+
+      if (!result.ok) {
+        setStatus({ kind: "error", message: result.message });
+        return;
       }
 
-      return currentCandidates.map((candidate) =>
-        candidate.id === result.candidate.id ||
-        candidate.sourceRunId === result.candidate.sourceRunId
-          ? result.candidate
-          : candidate,
-      );
-    });
-    setStatus({
-      kind: "idle",
-      message: result.existing
-        ? "已加载这条运行的现有评测候选。"
-        : "评测候选已生成，等待审核。",
-    });
+      setEvalCandidates((currentCandidates) => {
+        const exists = currentCandidates.some(
+          (candidate) =>
+            candidate.id === result.candidate.id ||
+            candidate.sourceRunId === result.candidate.sourceRunId,
+        );
+        if (!exists) {
+          return [result.candidate, ...currentCandidates];
+        }
+
+        return currentCandidates.map((candidate) =>
+          candidate.id === result.candidate.id ||
+          candidate.sourceRunId === result.candidate.sourceRunId
+            ? result.candidate
+            : candidate,
+        );
+      });
+      setStatus({
+        kind: "idle",
+        message: result.existing
+          ? "已加载这条运行的现有评测候选。"
+          : "评测候选已生成，等待审核。",
+      });
+    } catch (error) {
+      setStatus({
+        kind: "error",
+        message:
+          error instanceof Error ? error.message : "无法生成评测候选。",
+      });
+    }
   }
 
   return (
