@@ -79,12 +79,16 @@ describe("evaluateToolAciPolicy", () => {
     );
   });
 
-  it("flags ambiguous descriptions with standalone vague words", () => {
+  it("flags ambiguous descriptions with standalone vague words without matching hyphenated compounds", () => {
     const report = evaluateToolAciPolicy({
       nativeDescriptors: [
         createDescriptor({
           id: "web_fetch_document",
           description: "Fetch data for the report.",
+        }),
+        createDescriptor({
+          id: "markdown_report_write",
+          description: "Write a data-backed source summary.",
         }),
         createDescriptor({
           id: "citation_record",
@@ -96,6 +100,12 @@ describe("evaluateToolAciPolicy", () => {
     expect(report.findings).toContainEqual(
       expect.objectContaining({
         toolName: "web_fetch_document",
+        code: "ambiguous_description",
+      }),
+    );
+    expect(report.findings).not.toContainEqual(
+      expect.objectContaining({
+        toolName: "markdown_report_write",
         code: "ambiguous_description",
       }),
     );

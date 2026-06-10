@@ -84,6 +84,8 @@ function findStandaloneVagueWords(description: unknown): string[] {
     return [];
   }
 
-  const matches = description.toLowerCase().match(/\b(thing|stuff|data)\b/g);
+  const matches = description
+    .toLowerCase()
+    .match(/(?<![\w-])(thing|stuff|data)(?![\w-])/g);
   return [...new Set(matches ?? [])];
 }

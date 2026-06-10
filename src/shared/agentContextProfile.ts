@@ -25,7 +25,7 @@ export function createAgentContextProfile(input: {
     coreBudgetTokens: 2000,
     hotTurnCount: input.intent === "memory" ? 4 : 6,
     coldSummaryBudgetTokens: 1200,
-    memoryKinds: memoryKindsByIntent[input.intent],
+    memoryKinds: [...memoryKindsByIntent[input.intent]],
   };
 }
 

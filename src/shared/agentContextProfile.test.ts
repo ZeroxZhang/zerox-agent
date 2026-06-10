@@ -46,4 +46,15 @@ describe("createAgentContextProfile", () => {
       "semantic",
     ]);
   });
+
+  it("returns independent memory kind arrays for each profile", () => {
+    const profile = createAgentContextProfile({ intent: "code" });
+    profile.memoryKinds.push("core");
+
+    expect(createAgentContextProfile({ intent: "code" }).memoryKinds).toEqual([
+      "procedural",
+      "semantic",
+      "episodic",
+    ]);
+  });
 });
