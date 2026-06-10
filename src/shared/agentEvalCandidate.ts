@@ -6,7 +6,12 @@ import type {
 export type AgentEvalCandidateStatus =
   | "pending_review"
   | "accepted"
-  | "rejected";
+  | "rejected"
+  | "promoted";
+
+export type AgentEvalCandidateListOptions = {
+  status?: AgentEvalCandidateStatus;
+};
 
 export type AgentEvalCandidateAssertion = {
   type: AgentTrajectoryEventType;
@@ -30,4 +35,5 @@ export type AgentEvalCandidate = {
   rationale: string;
   fixture: AgentEvalCandidateFixture;
   createdAt: string;
+  updatedAt: string;
 };

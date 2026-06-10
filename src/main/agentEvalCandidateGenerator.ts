@@ -23,6 +23,7 @@ export function createEvalCandidateFromEpisode(input: {
     rationale:
       "Generated from an exported episode. Review before promoting to permanent eval fixtures.",
     createdAt: input.createdAt,
+    updatedAt: input.createdAt,
     fixture: {
       id: `episode-${slugify(input.run.id)}`,
       description: `Episode candidate from run ${input.run.id}: ${input.run.taskName}`,
