@@ -101,3 +101,21 @@
   - `git diff --check` -> passed.
   - `npm run harness:check` -> passed.
   - `npm run verify` -> 91 Vitest files / 411 tests, agent eval 11/11, memory eval 2/2.
+
+## 2026-06-11 P3 Agent Learning Harness Loop - Worker 5
+
+- Implemented Task 5 scope: adversarial eval mutation helper, adversarial eval runner, and harness score integration.
+- Changed files:
+  - `src/main/eval/agentEvalAdversary.ts`
+  - `src/main/eval/agentEvalAdversary.test.ts`
+  - `scripts/run-harness-score.mjs`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `npm test -- src/main/eval/agentEvalAdversary.test.ts` -> RED, missing `agentEvalAdversary` module.
+  - `npm test -- src/main/eval/agentEvalAdversary.test.ts` -> RED, harness score script missing adversarial wiring.
+  - `npm test -- src/main/eval/agentEvalAdversary.test.ts` -> 1 file / 4 tests passed.
+  - `npm test -- src/main/eval/agentEvalAdversary.test.ts src/main/eval/agentEvalRunner.test.ts` -> 2 files / 9 tests passed.
+  - `npm run build` -> passed.
+  - `npm run harness:score` -> score 9.31/10, agent eval 11/11, adversarial passed true with 23 checked and 0 escaped.
+  - `npm run verify` -> 92 Vitest files / 415 tests, agent eval 11/11, memory eval 2/2.
+  - `npm run harness:check` -> passed.

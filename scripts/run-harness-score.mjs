@@ -15,11 +15,13 @@ const [
     createPromotedAgentEvalFixtureStore,
   },
   { runAgentEvals },
+  { runAdversarialAgentEvals },
 ] = await Promise.all([
     import("../dist-electron/shared/harnessScore.js"),
     import("../dist-electron/main/eval/agentEvalFixtures.js"),
     import("../dist-electron/main/eval/agentPromotedEvalFixtures.js"),
     import("../dist-electron/main/eval/agentEvalRunner.js"),
+    import("../dist-electron/main/eval/agentEvalAdversary.js"),
   ]);
 
 const builtInFixtures = createAgentEvalFixtures();
@@ -30,6 +32,7 @@ const evalFixtures = configDir
   ? createCombinedAgentEvalFixtures(builtInFixtures, promotedFixtures)
   : builtInFixtures;
 const evalReport = await runAgentEvals(evalFixtures);
+const adversarial = await runAdversarialAgentEvals(evalFixtures);
 const pendingLearningCandidates = configDir
   ? await countPendingLearningCandidates(configDir)
   : 0;
@@ -52,6 +55,7 @@ console.log(
     {
       score,
       eval: evalReport,
+      adversarial: adversarial,
       promotedFixtureCount: promotedFixtures.length,
       pendingEvalCandidates,
     },
@@ -60,7 +64,7 @@ console.log(
   ),
 );
 
-if (evalReport.failed > 0 || score.tone === "bad") {
+if (evalReport.failed > 0 || !adversarial.passed || score.tone === "bad") {
   process.exitCode = 1;
 }
 
