@@ -37,3 +37,26 @@
   - `npm run build` → passed.
   - `git diff --check` → passed.
   - `npm run harness:check` → passed.
+
+## 2026-06-11 P3 Agent Learning Harness Loop - Worker 3
+
+- Implemented Task 3 scope: Runs eval-candidate generation, eval review/promotion UI, Overview pending eval candidate attention and capability score input, and `evals` navigation.
+- Changed files:
+  - `src/renderer/components/EvalReviewPanel.tsx`
+  - `src/renderer/components/RunsPanel.tsx`
+  - `src/renderer/components/OverviewPanel.tsx`
+  - `src/renderer/App.tsx`
+  - `src/shared/navigation.ts`
+  - `src/shared/materialNavigation.ts`
+  - `src/shared/appMeta.ts`
+  - `src/renderer/materialDesign.test.ts`
+  - `src/shared/navigation.test.ts`
+  - `src/shared/appMeta.test.ts`
+- TDD and verification evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts` → RED, 3 expected failures for missing Runs eval generation, missing EvalReviewPanel, and hardcoded Overview pending eval count.
+  - `npm test -- src/renderer/materialDesign.test.ts` → 1 file / 11 tests passed.
+  - `npm test -- src/renderer/materialDesign.test.ts src/shared/navigation.test.ts src/shared/materialNavigation.test.ts` → 3 files / 16 tests passed.
+  - `npm test -- src/shared/appMeta.test.ts` → 1 file / 1 test passed.
+  - `npm run build` → passed.
+  - `git diff --check` → passed.
+  - `npm run harness:check` → passed.

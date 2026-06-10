@@ -17,6 +17,7 @@ const materialNavigationIcons: Record<
   tools: { label: "工具", glyph: "⌘" },
   memory: { label: "记忆", glyph: "◎" },
   learning: { label: "学习", glyph: "✓" },
+  evals: { label: "评测", glyph: "▣" },
   settings: { label: "设置", glyph: "⚙" },
 };
 

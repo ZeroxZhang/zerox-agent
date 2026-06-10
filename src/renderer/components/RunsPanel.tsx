@@ -8,6 +8,7 @@ import {
 import { summarizeHandoffReviewCards } from "../../shared/agentHandoff";
 import type { AgentRunRecord } from "../../shared/agentRuns";
 import type { AgentExecutionCheckpoint } from "../../shared/agentExecution";
+import type { AgentEvalCandidate } from "../../shared/agentEvalCandidate";
 import type { AgentTrajectoryEvent } from "../../shared/agentTrajectory";
 import { demoRuns } from "../demoAgentData";
 import { RunTrajectoryPanel } from "./RunTrajectoryPanel";
@@ -22,6 +23,7 @@ export function RunsPanel() {
   const [activeExecutions, setActiveExecutions] = useState<
     AgentExecutionCheckpoint[]
   >([]);
+  const [evalCandidates, setEvalCandidates] = useState<AgentEvalCandidate[]>([]);
   const [selectedRunId, setSelectedRunId] = useState("");
   const [selectedEventId, setSelectedEventId] = useState("");
   const [trajectoryEvents, setTrajectoryEvents] = useState<AgentTrajectoryEvent[]>([]);
@@ -33,6 +35,7 @@ export function RunsPanel() {
   useEffect(() => {
     if (!window.buildingAgent) {
       setRuns(demoRuns);
+      setEvalCandidates([]);
       setSelectedRunId(demoRuns[0]?.id ?? "");
       setStatus({
         kind: "idle",
@@ -44,10 +47,12 @@ export function RunsPanel() {
     Promise.all([
       window.buildingAgent.listAgentRuns(),
       window.buildingAgent.listActiveAgentExecutions(),
+      window.buildingAgent.listEvalCandidates(),
     ])
-      .then(([loadedRuns, loadedExecutions]) => {
+      .then(([loadedRuns, loadedExecutions, loadedEvalCandidates]) => {
         setRuns(loadedRuns);
         setActiveExecutions(loadedExecutions);
+        setEvalCandidates(loadedEvalCandidates);
         setSelectedRunId(loadedRuns[0]?.id ?? "");
         setStatus({
           kind: "idle",
@@ -78,6 +83,15 @@ export function RunsPanel() {
     timeline.find((item) => item.id === selectedEventId) ?? timeline[0] ?? null;
   const guidance = selectedRun ? getRunGuidance(selectedRun) : null;
   const summary = selectedRun ? summarizeRunEventKinds(selectedRun) : null;
+  const selectedEvalCandidate = useMemo(
+    () =>
+      selectedRun
+        ? evalCandidates.find(
+            (candidate) => candidate.sourceRunId === selectedRun.id,
+          ) ?? null
+        : null,
+    [evalCandidates, selectedRun],
+  );
 
   useEffect(() => {
     setSelectedEventId("");
@@ -206,6 +220,57 @@ export function RunsPanel() {
     setStatus({
       kind: "idle",
       message: result.message,
+    });
+  }
+
+  async function handleGenerateEvalCandidateForSelectedRun() {
+    if (!selectedRun || !isTerminalRun(selectedRun)) {
+      return;
+    }
+
+    if (!window.buildingAgent) {
+      setStatus({
+        kind: "idle",
+        message: "浏览器预览模式无法生成真实评测候选。",
+      });
+      return;
+    }
+
+    setStatus({
+      kind: "loading",
+      message: `正在生成评测候选：${selectedRun.taskName}`,
+    });
+    const result = await window.buildingAgent.generateEvalCandidateForRun(
+      selectedRun.id,
+    );
+
+    if (!result.ok) {
+      setStatus({ kind: "error", message: result.message });
+      return;
+    }
+
+    setEvalCandidates((currentCandidates) => {
+      const exists = currentCandidates.some(
+        (candidate) =>
+          candidate.id === result.candidate.id ||
+          candidate.sourceRunId === result.candidate.sourceRunId,
+      );
+      if (!exists) {
+        return [result.candidate, ...currentCandidates];
+      }
+
+      return currentCandidates.map((candidate) =>
+        candidate.id === result.candidate.id ||
+        candidate.sourceRunId === result.candidate.sourceRunId
+          ? result.candidate
+          : candidate,
+      );
+    });
+    setStatus({
+      kind: "idle",
+      message: result.existing
+        ? "已加载这条运行的现有评测候选。"
+        : "评测候选已生成，等待审核。",
     });
   }
 
@@ -369,8 +434,14 @@ export function RunsPanel() {
         </section>
 
         <RunInspector
+          canGenerateEvalCandidate={Boolean(
+            selectedRun && isTerminalRun(selectedRun),
+          )}
+          evalCandidate={selectedEvalCandidate}
           event={selectedEvent}
           guidance={guidance}
+          isBusy={status.kind === "loading"}
+          onGenerateEvalCandidate={handleGenerateEvalCandidateForSelectedRun}
           run={selectedRun}
           trajectoryEvents={trajectoryEvents}
         />
@@ -382,8 +453,12 @@ export function RunsPanel() {
 }
 
 function RunInspector(props: {
+  canGenerateEvalCandidate: boolean;
+  evalCandidate: AgentEvalCandidate | null;
   event: RunTimelineItem | null;
   guidance: ReturnType<typeof getRunGuidance> | null;
+  isBusy: boolean;
+  onGenerateEvalCandidate: () => void;
   run: AgentRunRecord | null;
   trajectoryEvents: AgentTrajectoryEvent[];
 }) {
@@ -485,6 +560,38 @@ function RunInspector(props: {
               </div>
             ) : null}
           </dl>
+        </div>
+      ) : null}
+
+      {props.run ? (
+        <div className="inspector-section" aria-label="Eval Candidate">
+          <span className="inspector-label">Eval Candidate</span>
+          {props.evalCandidate ? (
+            <dl className="inspector-dl">
+              <div>
+                <dt>状态</dt>
+                <dd>{translateEvalCandidateStatus(props.evalCandidate.status)}</dd>
+              </div>
+              <div>
+                <dt>Fixture</dt>
+                <dd>{props.evalCandidate.fixture.id}</dd>
+              </div>
+            </dl>
+          ) : props.canGenerateEvalCandidate ? (
+            <>
+              <p>这条运行还没有评测候选。</p>
+              <button
+                className="primary-action"
+                disabled={props.isBusy}
+                onClick={() => props.onGenerateEvalCandidate()}
+                type="button"
+              >
+                生成评测候选
+              </button>
+            </>
+          ) : (
+            <p>运行结束后可生成评测候选。</p>
+          )}
         </div>
       ) : null}
 
@@ -632,6 +739,32 @@ function formatSandboxSummary(
         : "授权命令";
 
   return `${mode} / ${network} / ${shell}`;
+}
+
+function isTerminalRun(run: AgentRunRecord): boolean {
+  return (
+    run.status === "succeeded" ||
+    run.status === "failed" ||
+    run.status === "canceled"
+  );
+}
+
+function translateEvalCandidateStatus(
+  status: AgentEvalCandidate["status"],
+): string {
+  if (status === "pending_review") {
+    return "待审核";
+  }
+
+  if (status === "accepted") {
+    return "已接受";
+  }
+
+  if (status === "promoted") {
+    return "已提升";
+  }
+
+  return "已拒绝";
 }
 
 function translateRunStatus(status: AgentRunRecord["status"]): string {

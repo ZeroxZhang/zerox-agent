@@ -11,6 +11,7 @@ import {
 } from "../../shared/agentOnboarding";
 import type { AgentRunRecord } from "../../shared/agentRuns";
 import type { AgentEvalReport } from "../../shared/agentEval";
+import type { AgentEvalCandidate } from "../../shared/agentEvalCandidate";
 import type { AgentLearningCandidate } from "../../shared/agentLearning";
 import type {
   AgentBootstrapReport,
@@ -44,6 +45,7 @@ import {
 } from "../agentValidationPreviewStore";
 
 type OverviewData = {
+  evalCandidates: AgentEvalCandidate[];
   evalReport: AgentEvalReport;
   learningCandidates: AgentLearningCandidate[];
   memories: MemoryRecord[];
@@ -92,6 +94,7 @@ export function OverviewPanel(props: {
         }),
       );
       setData({
+        evalCandidates: [],
         evalReport: demoAgentEvalReport,
         learningCandidates: demoLearningCandidates,
         memories: demoMemories,
@@ -123,6 +126,9 @@ export function OverviewPanel(props: {
       window.buildingAgent.listLearningCandidates({
         status: "pending_review",
       }),
+      window.buildingAgent.listEvalCandidates({
+        status: "pending_review",
+      }),
       window.buildingAgent.getAgentEvalReport(),
     ])
       .then(([
@@ -134,9 +140,11 @@ export function OverviewPanel(props: {
         validation,
         runtime,
         learningCandidates,
+        evalCandidates,
         evalReport,
       ]) => {
         setData({
+          evalCandidates,
           evalReport,
           learningCandidates,
           memories,
@@ -189,7 +197,7 @@ export function OverviewPanel(props: {
             evalPassRate: data.evalReport.passRate,
             retrySuccessRate: data.evalReport.toolSuccessRate,
             childHandoffSuccessRate: hasChildHandoff(data.runs) ? 1 : 0,
-            pendingEvalCandidates: 0,
+            pendingEvalCandidates: data.evalCandidates.length,
             pendingLearningCandidates: data.learningCandidates.length,
           })
         : null,
@@ -614,6 +622,7 @@ export function OverviewPanel(props: {
       memories,
       skills,
       learningCandidates,
+      evalCandidates,
       evalReport,
     ] = await Promise.all([
       window.buildingAgent.loadModelSettings(),
@@ -624,9 +633,13 @@ export function OverviewPanel(props: {
       window.buildingAgent.listLearningCandidates({
         status: "pending_review",
       }),
+      window.buildingAgent.listEvalCandidates({
+        status: "pending_review",
+      }),
       window.buildingAgent.getAgentEvalReport(),
     ]);
     setData({
+      evalCandidates,
       evalReport,
       learningCandidates,
       modelSettings,
@@ -672,6 +685,7 @@ export function OverviewPanel(props: {
       memories,
       skills,
       learningCandidates,
+      evalCandidates,
       evalReport,
     ] = await Promise.all([
       window.buildingAgent.loadModelSettings(),
@@ -682,9 +696,13 @@ export function OverviewPanel(props: {
       window.buildingAgent.listLearningCandidates({
         status: "pending_review",
       }),
+      window.buildingAgent.listEvalCandidates({
+        status: "pending_review",
+      }),
       window.buildingAgent.getAgentEvalReport(),
     ]);
     setData({
+      evalCandidates,
       evalReport,
       learningCandidates,
       modelSettings,
@@ -823,6 +841,15 @@ function buildAttentionItems(data: OverviewData): AttentionItem[] {
       title: `${data.learningCandidates.length} 个学习候选待审核`,
       action: "打开“学习”，决定哪些经验可以写入长期流程记忆。",
       target: "learning",
+    });
+  }
+
+  if (data.evalCandidates.length) {
+    items.push({
+      tone: "warn",
+      title: `${data.evalCandidates.length} 个评测候选待审核`,
+      action: "打开“评测”，决定哪些候选可以提升为固定回归样例。",
+      target: "evals",
     });
   }
 

@@ -7,6 +7,7 @@ export type NavigationSectionId =
   | "tools"
   | "memory"
   | "learning"
+  | "evals"
   | "settings";
 
 export type NavigationSection = {
@@ -104,6 +105,17 @@ const navigationSections: NavigationSection[] = [
       "查看待审核的流程记忆、失败教训和技能改进建议。",
       "接受或拒绝每条候选经验，避免静默改变 Agent 行为。",
       "把已接受的流程经验应用为可检索的 procedural memory。",
+    ],
+  },
+  {
+    id: "evals",
+    label: "评测",
+    module: "审核",
+    summary: "审核运行轨迹生成的评测候选，并提升为固定回归样例。",
+    details: [
+      "查看从终端运行生成的 eval fixture 候选。",
+      "接受、拒绝或提升候选，避免未经审核的回归样例进入固定集。",
+      "用必需事件和断言数量判断候选是否覆盖关键行为。",
     ],
   },
   {

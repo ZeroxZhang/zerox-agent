@@ -6,6 +6,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { AgentChatPanel } from "./components/AgentChatPanel";
+import { EvalReviewPanel } from "./components/EvalReviewPanel";
 import { LearningReviewPanel } from "./components/LearningReviewPanel";
 import { MemoryPanel } from "./components/MemoryPanel";
 import { ModelSettingsPanel } from "./components/ModelSettingsPanel";
@@ -243,6 +244,7 @@ export function App() {
         {activeSection.id === "tools" ? <ToolsPanel /> : null}
         {activeSection.id === "memory" ? <MemoryPanel /> : null}
         {activeSection.id === "learning" ? <LearningReviewPanel /> : null}
+        {activeSection.id === "evals" ? <EvalReviewPanel /> : null}
       </section>
     </main>
   );

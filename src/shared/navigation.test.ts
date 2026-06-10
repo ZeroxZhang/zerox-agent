@@ -25,6 +25,7 @@ describe("navigation", () => {
       "tools",
       "memory",
       "learning",
+      "evals",
       "settings",
     ]);
   });

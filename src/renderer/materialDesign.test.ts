@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -22,6 +22,10 @@ describe("Design System — Notion-inspired app shell", () => {
   const runsPanelSource = readFileSync(
     path.join(process.cwd(), "src/renderer/components/RunsPanel.tsx"),
     "utf8",
+  );
+  const evalReviewPanelPath = path.join(
+    process.cwd(),
+    "src/renderer/components/EvalReviewPanel.tsx",
   );
 
   it("defines comprehensive CSS custom property design tokens", () => {
@@ -93,6 +97,24 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(runsPanelSource).toContain("handoff-review-card");
     expect(runsPanelSource).toContain("Handoff Review");
     expect(styles).toContain(".handoff-review-card");
+  });
+
+  it("surfaces eval candidate generation from terminal Runs", () => {
+    expect(runsPanelSource).toContain("Eval Candidate");
+    expect(runsPanelSource).toContain("generateEvalCandidateForRun");
+  });
+
+  it("surfaces eval candidate review and promotion controls", () => {
+    expect(existsSync(evalReviewPanelPath)).toBe(true);
+    const evalReviewPanelSource = readFileSync(evalReviewPanelPath, "utf8");
+
+    expect(evalReviewPanelSource).toContain("listEvalCandidates");
+    expect(evalReviewPanelSource).toContain("promoteEvalCandidate");
+  });
+
+  it("loads pending eval candidates into the Overview capability score", () => {
+    expect(overviewPanelSource).not.toContain("pendingEvalCandidates: 0");
+    expect(overviewPanelSource).toContain("listEvalCandidates({");
   });
 
   it("provides reusable component classes for all screens", () => {
