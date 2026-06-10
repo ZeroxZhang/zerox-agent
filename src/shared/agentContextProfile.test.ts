@@ -39,4 +39,11 @@ describe("createAgentContextProfile", () => {
       "procedural",
     ]);
   });
+
+  it("prioritizes procedural and semantic memory for general tasks", () => {
+    expect(createAgentContextProfile({ intent: "general" }).memoryKinds).toEqual([
+      "procedural",
+      "semantic",
+    ]);
+  });
 });

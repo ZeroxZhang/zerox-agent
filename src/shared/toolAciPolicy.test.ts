@@ -41,6 +41,44 @@ describe("evaluateToolAciPolicy", () => {
     );
   });
 
+  it("flags descriptors missing a risk level", () => {
+    const report = evaluateToolAciPolicy({
+      nativeDescriptors: [
+        createDescriptor({
+          id: "git_diff",
+          riskLevel: undefined,
+        }),
+      ],
+    });
+
+    expect(report.passed).toBe(false);
+    expect(report.findings).toContainEqual(
+      expect.objectContaining({
+        toolName: "git_diff",
+        code: "missing_risk_level",
+      }),
+    );
+  });
+
+  it("flags descriptors missing a permission scope", () => {
+    const report = evaluateToolAciPolicy({
+      nativeDescriptors: [
+        createDescriptor({
+          id: "markdown_report_write",
+          permissionScope: undefined,
+        }),
+      ],
+    });
+
+    expect(report.passed).toBe(false);
+    expect(report.findings).toContainEqual(
+      expect.objectContaining({
+        toolName: "markdown_report_write",
+        code: "missing_permission_scope",
+      }),
+    );
+  });
+
   it("flags ambiguous descriptions with standalone vague words", () => {
     const report = evaluateToolAciPolicy({
       nativeDescriptors: [
