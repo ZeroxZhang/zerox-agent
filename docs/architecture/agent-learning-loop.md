@@ -15,6 +15,35 @@ agent run
   -> task and planning prompts include reviewed procedure
 ```
 
+## Eval Candidate Loop
+
+P3 extends the learning loop from memory-only learning into reviewable regression coverage:
+
+```text
+real agent run
+  -> trajectory events
+  -> eval candidate
+  -> user accept/reject
+  -> accepted candidate promoted to local fixture
+  -> future eval and harness-score runs include the promoted fixture
+```
+
+Eval candidates are stored locally in:
+
+```text
+userData/config/agent-eval-candidates.json
+```
+
+Accepted candidates can be promoted into local regression fixtures stored in:
+
+```text
+userData/config/agent-promoted-eval-fixtures.json
+```
+
+Promotion never mutates the source-controlled built-in eval fixtures. Built-in fixtures remain the shipped baseline, while promoted fixtures are userData-local additions loaded by eval and harness commands when a config directory is provided.
+
+`npm run harness:score` also checks verification signals around the loop: adversarial eval confirms invalid fixture mutations are rejected, and ACI/context sensors report whether tool interfaces and deterministic context profiles still match the expected local-first contract.
+
 ## Candidate Sources
 
 `AgentLearningExtractor` reads completed trajectories and creates candidates from durable evidence:

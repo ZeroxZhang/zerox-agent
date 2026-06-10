@@ -139,3 +139,18 @@
   - `git diff --check` -> passed.
   - `npm run harness:check` -> passed.
   - `npm run verify` -> 94 Vitest files / 421 tests, agent eval 11/11, memory eval 2/2.
+
+## 2026-06-11 P3 Agent Learning Harness Loop - Worker 7
+
+- Implemented Task 7 scope: documented the eval candidate loop, updated README testing and roadmap sections in English and Chinese, marked the P3 feature done, and recorded final verification evidence.
+- Changed files:
+  - `docs/architecture/agent-learning-loop.md`
+  - `README.md`
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+- Verification evidence:
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> 94 Vitest files / 425 tests, build passed, agent eval 11/11, memory eval 2/2.
+  - `npm run harness:score` -> score 9.31/10, ACI passed true with 0 findings, agent eval 11/11, adversarial passed true with 23 checked and 0 escaped, promoted fixture count 0, pending eval candidates 0.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `git diff --check` -> passed.

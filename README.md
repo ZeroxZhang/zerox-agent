@@ -583,11 +583,13 @@ npm run eval:agent    # Deterministic agent eval suite
 npm run eval:memory   # Deterministic memory retrieval eval suite
 npm run harness:check # Check repo-local operating harness files
 npm run harness:score # Build, run contract evals, and emit ETCLOVG score
+BUILDING_AGENT_CONFIG_DIR=/path/to/config npm run eval:agent
+BUILDING_AGENT_CONFIG_DIR=/path/to/config npm run harness:score
 npm run episode:export -- --config-dir <userData/config> --run-id <runId>
 npm run verify        # Tests + build + deterministic eval
 ```
 
-As of v1.4.0, `npm run verify` covers the Vitest suite, the production build, agent evals, and memory evals. The suite currently includes 88 Vitest files / 393 tests, 11 deterministic agent eval fixtures, and 2 memory eval fixtures. Agent evals include native code engineering, research writing, reflection-after-test-failure, episode eval-candidate, and child handoff review-gate golden paths. `npm run harness:score` emits the seven-category ETCLOVG score used by Overview as a local quality signal, and Overview also displays the native Agent Capability score.
+As of v1.4.0, `npm run verify` covers the Vitest suite, the production build, agent evals, and memory evals. The suite currently includes 94 Vitest files / 425 tests, 11 deterministic agent eval fixtures, and 2 memory eval fixtures. Agent evals include native code engineering, research writing, reflection-after-test-failure, episode eval-candidate, and child handoff review-gate golden paths. Set `BUILDING_AGENT_CONFIG_DIR=/path/to/config` when running `npm run eval:agent` or `npm run harness:score` to include local promoted fixtures and pending eval candidates from that config directory. `npm run harness:score` emits the seven-category ETCLOVG score used by Overview as a local quality signal and now includes adversarial eval plus the ACI/context report; Overview also displays the native Agent Capability score.
 
 ### Test Coverage
 
@@ -613,6 +615,7 @@ Recently shipped:
 - [x] Reflection evidence (`reflection_added`) and reviewable episode eval-candidate export
 - [x] Research writing tools (`web_fetch_document`, `citation_record`, `citation_coverage_check`, `markdown_report_write`) with citation sidecars and a sourced Markdown eval
 - [x] Lightweight child handoff contracts and Runs review-gate cards for researcher/executor/reviewer roles
+- [x] P3 Agent Learning Harness Loop with reviewable eval candidates, local promoted fixtures, adversarial eval, ACI/context sensors, and Overview pending eval count
 
 Planned:
 
@@ -716,7 +719,7 @@ v1.4.0 在 repo-local harness（`AGENTS.md`、`init.sh`、`.zerox`、确定性 h
 | 构建 | Vite 8 | 渲染进程热更新打包 |
 | 类型 | TypeScript 6 | 全栈类型安全，三套 tsconfig（主进程 / 渲染进程 / 共享） |
 | UI | React 19 | 函数组件 + Hooks 的 Material Design 桌面 UI |
-| 测试 | Vitest 4 | 76 个测试文件 / 333 个测试，覆盖共享层、主进程和渲染进程 |
+| 测试 | Vitest 4 | 94 个测试文件 / 425 个测试，覆盖共享层、主进程和渲染进程 |
 | 打包 | electron-builder 26 | macOS `.app` / `.dmg` / `.zip` 分发 |
 | 解析 | yaml (cron-parser) | SKILL.md 前端元数据解析、cron 表达式 |
 
@@ -1290,7 +1293,7 @@ mac:
 
 ## 测试
 
-截至 v1.4.0，`npm run verify` 覆盖 Vitest 测试、生产构建、Agent 评测和记忆检索评测；当前包含 88 个 Vitest 文件 / 393 个测试、11 个确定性 Agent eval fixture 和 2 个 memory eval fixture。Agent eval 覆盖原生代码工程、研究写作、测试失败反思、episode eval candidate 和 child handoff review gate 黄金路径：
+截至 v1.4.0，`npm run verify` 覆盖 Vitest 测试、生产构建、Agent 评测和记忆检索评测；当前包含 94 个 Vitest 文件 / 425 个测试、11 个确定性 Agent eval fixture 和 2 个 memory eval fixture。Agent eval 覆盖原生代码工程、研究写作、测试失败反思、episode eval candidate 和 child handoff review gate 黄金路径：
 
 ```bash
 npm test              # 运行全部测试
@@ -1299,11 +1302,13 @@ npm run eval:agent    # 确定性 Agent 评测
 npm run eval:memory   # 确定性记忆检索评测
 npm run harness:check # 检查 repo-local operating harness
 npm run harness:score # 构建、运行 contract eval，并输出 ETCLOVG 分数
+BUILDING_AGENT_CONFIG_DIR=/path/to/config npm run eval:agent
+BUILDING_AGENT_CONFIG_DIR=/path/to/config npm run harness:score
 npm run episode:export -- --config-dir <userData/config> --run-id <runId>
 npm run verify        # 测试 + 构建 + 确定性评测
 ```
 
-`npm run harness:score` 输出与 Overview 面板一致的七类 ETCLOVG harness score，便于发布前判断执行环境、工具接口、上下文、生命周期、可观测、验证和治理是否仍然健康。Overview 也会显示 Native Agent Capability 分数。
+使用 `BUILDING_AGENT_CONFIG_DIR=/path/to/config` 运行 `npm run eval:agent` 或 `npm run harness:score` 时，会加载该配置目录里的本地 promoted fixture 和 pending eval candidate。`npm run harness:score` 输出与 Overview 面板一致的七类 ETCLOVG harness score，并纳入 adversarial eval 与 ACI/context report，便于发布前判断执行环境、工具接口、上下文、生命周期、可观测、验证和治理是否仍然健康。Overview 也会显示 Native Agent Capability 分数。
 
 ### 测试覆盖
 
@@ -1329,6 +1334,7 @@ npm run verify        # 测试 + 构建 + 确定性评测
 - [x] Reflection 证据（`reflection_added`）和可审核的 episode eval candidate 导出
 - [x] 研究写作工具（`web_fetch_document`、`citation_record`、`citation_coverage_check`、`markdown_report_write`）、引用 sidecar 和有来源 Markdown eval
 - [x] 轻量子 Agent handoff contract，以及 researcher/executor/reviewer 的 Runs 审核卡片
+- [x] P3 Agent Learning Harness Loop：可审核 eval candidate、本地 promoted fixture、adversarial eval、ACI/context sensor 和 Overview pending eval 计数
 
 后续计划：
 

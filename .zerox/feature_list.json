@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-06-10T00:00:00.000Z",
+  "updatedAt": "2026-06-11T00:00:00.000Z",
   "features": [
     {
       "id": "P0-repo-local-harness",
@@ -142,6 +142,24 @@
         "npm test -- src/shared/agentHandoff.test.ts src/main/multiAgentCoordinator.test.ts src/main/eval/agentEvalRunner.test.ts src/renderer/materialDesign.test.ts",
         "npm run verify",
         "npm run harness:score"
+      ]
+    },
+    {
+      "id": "P3-agent-learning-harness-loop",
+      "priority": 9,
+      "status": "done",
+      "title": "Agent Learning Harness Loop",
+      "definitionOfDone": [
+        "Eval candidate review UI supports reviewing, accepting, rejecting, and promoting candidates",
+        "Promoted local fixtures are stored in userData and included in eval and harness runs when configured",
+        "Adversarial eval rejects invalid fixture mutations",
+        "ACI/context sensors report harness verification signals",
+        "Overview displays pending eval candidate count"
+      ],
+      "verification": [
+        "npm run verify",
+        "npm run harness:score",
+        "npm run smoke:prod"
       ]
     }
   ]
