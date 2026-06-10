@@ -2,7 +2,10 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createPromotedAgentEvalFixtureStore } from "./agentPromotedEvalFixtures";
+import {
+  createCombinedAgentEvalFixtures,
+  createPromotedAgentEvalFixtureStore,
+} from "./agentPromotedEvalFixtures";
 import type { AgentEvalFixture } from "./agentEvalFixtures";
 
 describe("promoted agent eval fixture store", () => {
@@ -39,6 +42,48 @@ describe("promoted agent eval fixture store", () => {
       schemaVersion: 1,
       fixtures: [replacement],
     });
+  });
+
+  it("appends promoted-only fixtures after built-in fixtures", () => {
+    const builtIn = [
+      createFixture("built-in-1", "Built-in 1"),
+      createFixture("built-in-2", "Built-in 2"),
+    ];
+    const promoted = [
+      createFixture("promoted-1", "Promoted 1"),
+      createFixture("promoted-2", "Promoted 2"),
+    ];
+
+    const combined = createCombinedAgentEvalFixtures(builtIn, promoted);
+
+    expect(combined.map((fixture) => fixture.id)).toEqual([
+      "built-in-1",
+      "built-in-2",
+      "promoted-1",
+      "promoted-2",
+    ]);
+  });
+
+  it("replaces built-in duplicate ids in place with promoted fixtures", () => {
+    const builtIn = [
+      createFixture("built-in-1", "Built-in 1"),
+      createFixture("duplicate-id", "Built-in duplicate"),
+      createFixture("built-in-2", "Built-in 2"),
+    ];
+    const replacement = createFixture("duplicate-id", "Promoted duplicate");
+    const promoted = [
+      replacement,
+      createFixture("promoted-only", "Promoted only"),
+    ];
+
+    const combined = createCombinedAgentEvalFixtures(builtIn, promoted);
+
+    expect(combined).toEqual([
+      builtIn[0],
+      replacement,
+      builtIn[2],
+      promoted[1],
+    ]);
   });
 });
 

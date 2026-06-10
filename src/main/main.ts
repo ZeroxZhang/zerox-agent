@@ -56,6 +56,7 @@ import {
 } from "./multiAgentCoordinator";
 import { createAgentEvalFixtures } from "./eval/agentEvalFixtures";
 import {
+  createCombinedAgentEvalFixtures,
   createPromotedAgentEvalFixtureStore,
   type PromotedAgentEvalFixtureStore,
 } from "./eval/agentPromotedEvalFixtures";
@@ -666,8 +667,13 @@ ipcMain.handle(
     };
   },
 );
-ipcMain.handle("agentQuality:getEvalReport", (): Promise<AgentEvalReport> =>
-  runAgentEvals(createAgentEvalFixtures()),
+ipcMain.handle("agentQuality:getEvalReport", async (): Promise<AgentEvalReport> =>
+  runAgentEvals(
+    createCombinedAgentEvalFixtures(
+      createAgentEvalFixtures(),
+      await getPromotedAgentEvalFixtureStore().list(),
+    ),
+  ),
 );
 ipcMain.handle(
   "agentRuns:runTask",

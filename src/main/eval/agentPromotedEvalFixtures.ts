@@ -12,6 +12,22 @@ export type PromotedAgentEvalFixtureStore = {
   upsert(fixture: AgentEvalFixture): Promise<AgentEvalFixture>;
 };
 
+export function createCombinedAgentEvalFixtures(
+  builtIn: AgentEvalFixture[],
+  promoted: AgentEvalFixture[],
+): AgentEvalFixture[] {
+  const promotedById = new Map(
+    promoted.map((fixture) => [fixture.id, fixture] as const),
+  );
+  const builtInIds = new Set(builtIn.map((fixture) => fixture.id));
+  const mergedBuiltIns = builtIn.map(
+    (fixture) => promotedById.get(fixture.id) ?? fixture,
+  );
+  const promotedOnly = promoted.filter((fixture) => !builtInIds.has(fixture.id));
+
+  return [...mergedBuiltIns, ...promotedOnly];
+}
+
 export function createPromotedAgentEvalFixtureStore(options: {
   configDir: string;
 }): PromotedAgentEvalFixtureStore {

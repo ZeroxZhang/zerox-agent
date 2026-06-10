@@ -7,14 +7,35 @@ const root = process.cwd();
 const args = parseArgs(process.argv.slice(2));
 const configDir = args["config-dir"] ?? process.env.BUILDING_AGENT_CONFIG_DIR;
 
-const [{ computeHarnessScore }, { createAgentEvalFixtures }, { runAgentEvals }] =
-  await Promise.all([
+const [
+  { computeHarnessScore },
+  { createAgentEvalFixtures },
+  {
+    createCombinedAgentEvalFixtures,
+    createPromotedAgentEvalFixtureStore,
+  },
+  { runAgentEvals },
+] = await Promise.all([
     import("../dist-electron/shared/harnessScore.js"),
     import("../dist-electron/main/eval/agentEvalFixtures.js"),
+    import("../dist-electron/main/eval/agentPromotedEvalFixtures.js"),
     import("../dist-electron/main/eval/agentEvalRunner.js"),
   ]);
 
-const evalReport = await runAgentEvals(createAgentEvalFixtures());
+const builtInFixtures = createAgentEvalFixtures();
+const promotedFixtures = configDir
+  ? await createPromotedAgentEvalFixtureStore({ configDir }).list()
+  : [];
+const evalFixtures = configDir
+  ? createCombinedAgentEvalFixtures(builtInFixtures, promotedFixtures)
+  : builtInFixtures;
+const evalReport = await runAgentEvals(evalFixtures);
+const pendingLearningCandidates = configDir
+  ? await countPendingLearningCandidates(configDir)
+  : 0;
+const pendingEvalCandidates = configDir
+  ? await countPendingEvalCandidates(configDir)
+  : 0;
 const score = computeHarnessScore({
   hasAgentGuide: await exists("AGENTS.md"),
   hasExecutionStore: await exists("src/main/agentExecutionStore.ts"),
@@ -23,9 +44,7 @@ const score = computeHarnessScore({
   evalPassRate: evalReport.passRate,
   recoverabilityRate: evalReport.recoverabilityRate,
   toolSuccessRate: evalReport.toolSuccessRate,
-  pendingLearningCandidates: configDir
-    ? await countPendingLearningCandidates(configDir)
-    : 0,
+  pendingLearningCandidates,
 });
 
 console.log(
@@ -33,6 +52,8 @@ console.log(
     {
       score,
       eval: evalReport,
+      promotedFixtureCount: promotedFixtures.length,
+      pendingEvalCandidates,
     },
     null,
     2,
@@ -63,6 +84,29 @@ async function countPendingLearningCandidates(baseDir) {
       ? parsed.candidates
       : [];
     return candidates.filter(
+      (candidate) => candidate?.status === "pending_review",
+    ).length;
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return 0;
+    }
+
+    throw error;
+  }
+}
+
+async function countPendingEvalCandidates(baseDir) {
+  try {
+    const raw = await readFile(
+      path.join(baseDir, "agent-eval-candidates.json"),
+      "utf8",
+    );
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed?.candidates)) {
+      throw new Error("Malformed agent eval candidate store.");
+    }
+
+    return parsed.candidates.filter(
       (candidate) => candidate?.status === "pending_review",
     ).length;
   } catch (error) {

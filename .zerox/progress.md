@@ -79,3 +79,25 @@
   - `npx tsc -p tsconfig.renderer.json --noEmit` → passed.
   - `git diff --check` → passed.
   - `npm run harness:check` → passed.
+
+## 2026-06-11 P3 Agent Learning Harness Loop - Worker 4
+
+- Implemented Task 4 scope: local promoted eval fixtures are combined with built-in agent eval fixtures for desktop reports, `run-agent-evals`, and harness scoring.
+- Changed files:
+  - `src/main/eval/agentPromotedEvalFixtures.ts`
+  - `src/main/eval/agentPromotedEvalFixtures.test.ts`
+  - `src/main/main.ts`
+  - `scripts/run-agent-evals.mjs`
+  - `scripts/run-harness-score.mjs`
+- TDD and verification evidence:
+  - `npm test -- src/main/eval/agentPromotedEvalFixtures.test.ts` -> RED, missing `createCombinedAgentEvalFixtures`.
+  - `npm test -- src/main/eval/agentPromotedEvalFixtures.test.ts` -> 1 file / 3 tests passed.
+  - `npm test -- src/main/eval/agentPromotedEvalFixtures.test.ts src/main/eval/agentEvalRunner.test.ts` -> 2 files / 8 tests passed.
+  - `npm run build` -> passed.
+  - `node scripts/run-agent-evals.mjs` -> agent eval 11/11.
+  - `BUILDING_AGENT_CONFIG_DIR=<tmp> node scripts/run-agent-evals.mjs` -> promoted fixture loaded, agent eval 12/12.
+  - `npm run harness:score` -> score 9.31/10, agent eval 11/11, promoted fixture count 0, pending eval candidates 0.
+  - `BUILDING_AGENT_CONFIG_DIR=<tmp> node scripts/run-harness-score.mjs` -> promoted fixture count 1, pending eval candidates 1, agent eval 12/12.
+  - `git diff --check` -> passed.
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> 91 Vitest files / 411 tests, agent eval 11/11, memory eval 2/2.
