@@ -50,13 +50,13 @@
 
 <h2 id="overview-en">Overview</h2>
 
-**Zerox Agent** is a local-first desktop control plane for personal AI agents. The current release is **v1.5.0**. The name derives from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
+**Zerox Agent** is a local-first desktop control plane for personal AI agents. The current release is **v1.6.0**. The name derives from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
 
 It is not a chat wrapper or a generic hosted agent surface. It runs locally, configures OpenAI-compatible models, scans local `SKILL.md` skill files, executes recoverable agent runs, invokes permission-controlled tools, tracks parent/child multi-agent sessions, persists experiential knowledge into local long-term memory, and keeps learning user-reviewed before it changes future behavior.
 
 The product boundary is documented in [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md): Zerox optimizes for trusted local control, recoverable agent runs, explicit permissions, workspace-scoped runs, observable trajectories, parent/child multi-agent sessions, and user-reviewed learning. Runtime, workspace, and learning details live in [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md), [`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md), and [`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md).
 
-v1.5.0 completes the Agent Learning Harness Loop on top of the repo-local harness (`AGENTS.md`, `init.sh`, `.zerox`, deterministic harness checks) and Agent Capability P2 foundation: reviewable eval candidates, local promoted regression fixtures, adversarial eval checks, ACI/context harness sensors, serialized eval review writes, and Overview pending-eval visibility. The release keeps the native code engineering tools, citation-backed research writing tools, reflection evidence, lightweight child handoff review gates, Agent Capability score, citation sidecars, and 11-case deterministic agent eval suite from the P2 iteration. The implementation plans are preserved in [`docs/superpowers/plans`](docs/superpowers/plans).
+v1.6.0 upgrades the active runtime core on top of the Agent Learning Harness Loop and Agent Capability foundation. Dynamic skill and MCP tools can now pass authorization through explicit tool names or registered sources; recoverable runs feed failed tool observations back to the model; duplicate retries and exhausted recovery budgets are visible in trajectory evidence; active chat and runtime loops compact long histories before model calls; runtime checkpoints are written after each tool observation; transient model failures retry with `model_retry` evidence; and the Runs trajectory inspector surfaces readable recovery, retry, and compaction insight cards. The deterministic agent eval suite now covers 15 runtime, native-tool, recovery, compaction, checkpoint, model-retry, research-writing, eval-candidate, and multi-agent lineage contracts.
 
 <p align="center">
   <img src="zerox-agent-onepage.png" alt="Zerox Agent one-page product overview" width="720" />
@@ -195,26 +195,22 @@ Each task is bound to a skill and runs with user-provided input parameters.
 
 ### 5. Agent Runner
 
-The execution core uses a **Plan → Execute → Reflect** three-phase cycle:
+The active runtime is split into two production paths with shared core behavior:
 
-```
-┌──────────┐      ┌──────────────┐      ┌───────────┐
-│  PLAN    │ ───→ │   EXECUTE    │ ───→ │ REFLECT   │
-└──────────┘      └──────────────┘      └───────────┘
-                        │                      │
-                        │ step OK              │ step FAIL
-                        ↓                      ↓
-                   next step            retry / skip / abort
-```
+- **Agent chat loop**: interactive chat turns with tool calling, duplicate-tool detection, repeated-failure pause diagnostics, context compaction, and transient model retry.
+- **Recoverable runtime engine**: scheduled/manual task execution with durable checkpoints, trajectory evidence, resume/cancel/pause support, workspace context, authorization audit, memory recall, learning extraction, tool-result offload, and the same context/model retry safeguards.
 
-- **Plan**: LLM analyzes task + skill description, produces a step-by-step execution plan
-- **Execute**: Steps are executed sequentially; each step may involve multiple tool call turns
-- **Reflect**: On step failure, LLM analyzes the cause and suggests retry, skip, or abort
-- Automatic context window management and compression
-- Exponential backoff retry for LLM API failures (up to 2 retries)
-- Successful runs automatically write episodic memory
-- Streaming event output via IPC
-- Each recoverable run can carry a workspace and sandbox context, so file, shell, trajectory, and resume behavior stay scoped to the same local boundary.
+v1.6.0 focuses on making the recoverable runtime harder to strand:
+
+- Dynamic skill and MCP tools are authorized by explicit tool name or registered source.
+- Tool failures are appended as model-visible observations before retrying.
+- Duplicate retry blocks and exhausted retry budgets become structured `reflection_added` and `failure_classified` evidence.
+- Long histories are compacted before model requests and recorded as `context_compacted`.
+- Transient model failures retry with bounded exponential backoff and `model_retry` evidence.
+- Checkpoints are written after each tool result, so a crash between tools does not erase completed observations.
+- Runs trajectory insight cards summarize recovery stops, model retries, and context compaction before users inspect raw payloads.
+
+The older Plan → Execute → Reflect implementation still exists behind the runner facade for legacy/no-checkpoint paths, while the default desktop task path favors the recoverable runtime and its replayable trajectory.
 
 ### 6. Agent Orchestrator
 
@@ -276,13 +272,17 @@ Critical tool calls can also be escalated to system dialog for manual user appro
 # 1. Clone
 git clone <repo-url> && cd "building agent"
 
-# 2. Install dependencies
+# 2. Initialize the repo-local harness and read the agent guide
+./init.sh
+less AGENTS.md
+
+# 3. Install dependencies
 npm install
 
-# 3. Run full self-check (tests + build + deterministic agent/memory evals)
+# 4. Run full self-check (tests + build + deterministic agent/memory evals)
 npm run doctor
 
-# 4. Launch the desktop app (production mode)
+# 5. Launch the desktop app (production mode)
 npm run start:prod
 ```
 
@@ -431,24 +431,20 @@ The desktop app wires scheduled and manual task runs through the recoverable run
 ```
 startedAt
   │
-  ├── [planning]   Plan creation
-  │    ├── LLM analyzes task + skill
-  │    ├── Produces ExecutionPlan (steps + reasoning)
-  │    └── Skippable for simple tasks
+  ├── [preflight]  Workspace, skill, memory, and tool schema setup
   │
-  ├── [executing]  Step-by-step execution
-  │    ├── Per step: context → LLM tool calls → auth check → execute → observe
-  │    ├── Parallel authorization + parallel tool execution
-  │    ├── Automatic context window management
-  │    ├── Automatic LLM retry (exponential backoff, up to 2x)
-  │    ├── Turn-limit checkpoints can pause and ask the user whether to continue
-  │    └── Repeated same-kind tool failures pause with diagnostics instead of looping silently
+  ├── [executing]  Model/tool loop
+  │    ├── Compact oversized message history before model_request
+  │    ├── Retry transient model_request failures with model_retry evidence
+  │    ├── Authorize every requested tool against task policy and source metadata
+  │    ├── Execute the tool, append native/tool observation evidence
+  │    ├── Write a checkpoint after each tool result
+  │    └── Feed recoverable failures back to the model as observations
   │
-  ├── [reflecting] Error recovery
-  │    ├── Triggered on step failure
-  │    ├── LLM diagnoses → suggests retry / skip / abort
-  │    ├── Up to 3 reflection rounds
-  │    └── retry → back to executing; abort → end
+  ├── [recovering] Runtime reflection
+  │    ├── Classifies permission, verification, network, duplicate, and budget failures
+  │    ├── Allows bounded retry only when the failure is recoverable
+  │    └── Emits structured trajectory evidence before aborting unrecoverable loops
   │
   └── [done]       Completion
        ├── Writes AgentRunRecord → agent-runs.jsonl
@@ -559,7 +555,7 @@ can't be opened." The image is usually valid; remove the quarantine attribute
 before opening:
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/Zerox\ Agent-1.5.0-arm64.dmg
+xattr -dr com.apple.quarantine ~/Downloads/Zerox\ Agent-1.6.0-arm64.dmg
 ```
 
 If you already dragged the app into Applications, run:
@@ -589,7 +585,7 @@ npm run episode:export -- --config-dir <userData/config> --run-id <runId>
 npm run verify        # Tests + build + deterministic eval
 ```
 
-As of v1.5.0, `npm run verify` covers the Vitest suite, the production build, agent evals, and memory evals. The suite currently includes 94 Vitest files / 431 tests, 11 deterministic agent eval fixtures, and 2 memory eval fixtures. Agent evals include native code engineering, research writing, reflection-after-test-failure, episode eval-candidate, and child handoff review-gate golden paths. Set `BUILDING_AGENT_CONFIG_DIR=/path/to/config` when running `npm run eval:agent` or `npm run harness:score` to include local promoted fixtures and pending eval candidates from that config directory. `npm run harness:score` emits the seven-category ETCLOVG score used by Overview as a local quality signal and now includes adversarial eval plus the ACI/context report; Overview also displays the native Agent Capability score.
+As of v1.6.0, `npm run verify` covers the Vitest suite, the production build, agent evals, and memory evals. The suite currently includes 96 Vitest files / 448 tests, 15 deterministic agent eval fixtures, and 2 memory eval fixtures. Agent evals include native code engineering, research writing, reflection-after-test-failure, retry-budget exhaustion, context compaction, tool-call checkpointing, model retry, episode eval-candidate, and child handoff review-gate golden paths. Set `BUILDING_AGENT_CONFIG_DIR=/path/to/config` when running `npm run eval:agent` or `npm run harness:score` to include local promoted fixtures and pending eval candidates from that config directory. `npm run harness:score` emits the seven-category ETCLOVG score used by Overview as a local quality signal and now includes adversarial eval plus the ACI/context report; Overview also displays the native Agent Capability score.
 
 ### Test Coverage
 
@@ -601,7 +597,7 @@ As of v1.5.0, `npm run verify` covers the Vitest suite, the production build, ag
 
 <h2 id="roadmap">Roadmap</h2>
 
-Current version: v1.5.0.
+Current version: v1.6.0.
 
 Recently shipped:
 
@@ -616,11 +612,12 @@ Recently shipped:
 - [x] Research writing tools (`web_fetch_document`, `citation_record`, `citation_coverage_check`, `markdown_report_write`) with citation sidecars and a sourced Markdown eval
 - [x] Lightweight child handoff contracts and Runs review-gate cards for researcher/executor/reviewer roles
 - [x] P3 Agent Learning Harness Loop with reviewable eval candidates, local promoted fixtures, adversarial eval, ACI/context sensors, and Overview pending eval count
+- [x] P4 Runtime Core Upgrade with dynamic MCP/skill tool authorization, recoverable tool-failure observations, retry-budget diagnostics, active context compaction, per-tool checkpoints, model retry, and Runs trajectory insight cards
 
 Planned:
 
 - [ ] Apple signing, notarization, auto-update, and clearer release distribution
-- [ ] More native first-party tools beyond the P2.1 code engineering set
+- [ ] Deeper runtime-loop consolidation with first-class persistent plans and verifier/critic passes
 - [ ] Skill marketplace, remote skill installation, and visual skill/workflow editing
 - [ ] Event-triggered tasks (file changes, system events, etc.)
 - [ ] Windows & Linux desktop support
@@ -652,13 +649,13 @@ Planned:
 
 ## 项目概述
 
-**Zerox Agent** 是一个本地优先的桌面智能体控制台，当前版本是 **v1.5.0**。名字取自 **Zero + X**——从留白开始，把未知的本地工作流转成可观察、受权限管控、可恢复的 Agent 运行。
+**Zerox Agent** 是一个本地优先的桌面智能体控制台，当前版本是 **v1.6.0**。名字取自 **Zero + X**——从留白开始，把未知的本地工作流转成可观察、受权限管控、可恢复的 Agent 运行。
 
 它不是聊天壳，也不是泛用云端 Agent 入口。它运行在本机：配置 OpenAI‑compatible 模型、扫描本地 `SKILL.md` 技能文件、执行可恢复的 Agent 运行、调用受权限管控的工具、跟踪父子多 Agent 会话、把经验和知识写入本地长期记忆，并且在改变未来行为前保留用户审核。
 
 产品边界写在 [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md)：Zerox 优先建设可信的本地控制、可恢复运行、显式权限、workspace 作用域、可观察轨迹、父子多 Agent 会话和用户审核后的学习。运行时、workspace 与学习机制分别见 [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md)、[`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md)、[`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md)。
 
-v1.5.0 在 repo-local harness（`AGENTS.md`、`init.sh`、`.zerox`、确定性 harness checks）和 Agent Capability P2 基础上完成 Agent Learning Harness Loop：可审核 eval candidate、本地 promoted 回归 fixture、adversarial eval 检查、ACI/context harness sensor、串行化 eval 审核写入，以及 Overview 的 pending eval 可见性。本版本继续保留 P2 迭代中的原生代码工程工具、带引用证据的研究写作工具、reflection 证据、轻量子 Agent handoff review gate、Agent Capability 分数、引用 sidecar，以及 11 个确定性 Agent eval fixture。完整实现计划保存在 [`docs/superpowers/plans`](docs/superpowers/plans)。
+v1.6.0 在 Agent Learning Harness Loop 和 Agent Capability 基础上升级活跃运行时核心：动态 skill / MCP 工具可通过显式工具名或注册来源授权；可恢复运行会把失败工具结果作为 observation 反喂模型；重复重试与恢复预算耗尽会写入结构化轨迹；活跃 chat/runtime loop 会在模型请求前压缩长上下文；runtime 在每个工具结果后写 checkpoint；瞬时模型失败会记录 `model_retry` 并有限重试；Runs 轨迹面板会把恢复、重试、压缩事件渲染为可读诊断卡。确定性 Agent eval suite 现在覆盖 15 个 runtime、原生工具、恢复、压缩、checkpoint、模型重试、研究写作、eval candidate 和多 Agent lineage 契约。
 
 ### 设计原则
 
@@ -719,7 +716,7 @@ v1.5.0 在 repo-local harness（`AGENTS.md`、`init.sh`、`.zerox`、确定性 h
 | 构建 | Vite 8 | 渲染进程热更新打包 |
 | 类型 | TypeScript 6 | 全栈类型安全，三套 tsconfig（主进程 / 渲染进程 / 共享） |
 | UI | React 19 | 函数组件 + Hooks 的 Material Design 桌面 UI |
-| 测试 | Vitest 4 | 94 个测试文件 / 431 个测试，覆盖共享层、主进程和渲染进程 |
+| 测试 | Vitest 4 | 96 个测试文件 / 448 个测试，覆盖共享层、主进程和渲染进程 |
 | 打包 | electron-builder 26 | macOS `.app` / `.dmg` / `.zip` 分发 |
 | 解析 | yaml (cron-parser) | SKILL.md 前端元数据解析、cron 表达式 |
 
@@ -806,28 +803,22 @@ API Key 通过 Electron `safeStorage` 加密保存，永不写入明文文件或
 
 ### 5. Agent Runner（智能体运行器）
 
-Agent Runner 是执行核心，采用 **Plan → Execute → Reflect** 三阶段循环：
+当前生产运行时由两条活跃路径组成，并共享一组核心防护：
 
-```
-┌──────────┐      ┌──────────────┐      ┌───────────┐
-│  PLAN    │ ───→ │   EXECUTE    │ ───→ │ REFLECT   │
-│  制定计划 │      │  逐步执行工具  │      │  反思纠错  │
-└──────────┘      └──────────────┘      └───────────┘
-                        │                      │
-                        │ 步骤成功              │ 步骤失败
-                        ↓                      ↓
-                  继续下一步              retry / skip / abort
-```
+- **对话 Agent loop**：面向交互式聊天，支持工具调用、重复工具检测、连续失败暂停诊断、上下文压缩和瞬时模型失败重试。
+- **可恢复 runtime engine**：面向手动/定时任务，提供 durable checkpoint、trajectory evidence、resume/cancel/pause、workspace context、授权审计、记忆召回、学习候选提取、工具结果 offload，以及同样的上下文压缩和模型重试防护。
 
-- **规划 (Plan)**：LLM 分析任务和技能描述，产出分步执行计划
-- **执行 (Execute)**：按计划逐步执行，每步可通过多次工具调用完成
-- **反思 (Reflect)**：步骤失败时进入反思，LLM 分析原因并建议 retry、skip 或 abort
-- 支持上下文窗口管理和自动压缩
-- LLM 调用内置指数退避重试机制
-- 成功运行自动写入情景记忆 (episodic memory)
-- 支持流式事件输出 (通过 IPC 推送到渲染进程)
-- 轮次达到检查点时可暂停并等待用户确认继续，而不是直接终止长任务
-- 连续同类工具失败会带诊断信息暂停，避免模型在同一个失败上反复消耗轮次
+v1.6.0 的重点是让可恢复运行不再轻易卡死：
+
+- 动态 skill / MCP 工具可通过显式工具名或注册来源授权。
+- 工具失败会作为模型可见 observation 写回，再决定是否重试。
+- 重复 retry 和恢复预算耗尽会成为结构化 `reflection_added` / `failure_classified` 证据。
+- 长历史会在模型请求前压缩，并记录 `context_compacted`。
+- 瞬时模型失败会有限指数退避重试，并记录 `model_retry`。
+- 每个工具结果之后立即写 checkpoint，工具之间崩溃不会丢掉已完成 observation。
+- Runs 轨迹诊断卡会摘要恢复停止、模型重试和上下文压缩，再让用户查看 raw payload。
+
+旧的 Plan → Execute → Reflect 实现仍保留在 runner facade 的 legacy/no-checkpoint 路径中；默认桌面任务路径优先使用可恢复 runtime 和可回放 trajectory。
 
 ### 6. Agent Orchestrator（任务编排器）
 
@@ -899,13 +890,17 @@ Agent Runner 是执行核心，采用 **Plan → Execute → Reflect** 三阶段
 # 1. 克隆仓库
 git clone <repo-url> && cd "building agent"
 
-# 2. 安装依赖
+# 2. 初始化仓库本地 harness，并阅读 Agent 操作指南
+./init.sh
+less AGENTS.md
+
+# 3. 安装依赖
 npm install
 
-# 3. 运行完整自检（测试 + 构建 + Agent/记忆评测）
+# 4. 运行完整自检（测试 + 构建 + Agent/记忆评测）
 npm run doctor
 
-# 4. 启动桌面应用（生产模式）
+# 5. 启动桌面应用（生产模式）
 npm run start:prod
 ```
 
@@ -1138,29 +1133,25 @@ mcpServers:               # 可选，MCP 服务器配置
 
 ## Agent 运行生命周期
 
-每次任务运行产生完整的事件时间线：
+桌面端手动/定时任务默认走可恢复 runtime。每次运行都会写 checkpoint、追加 trajectory event、保存终态 run record，并可从完成轨迹生成学习候选：
 
 ```
 startedAt
   │
-  ├── [planning]   制定执行计划
-  │    ├── LLM 分析任务 + 技能描述
-  │    ├── 产出 ExecutionPlan (steps + reasoning)
-  │    └── 跳过简单任务的可选步骤
+  ├── [preflight]  workspace、skill、memory、tool schema 准备
   │
-  ├── [executing]  逐步执行
-  │    ├── 每步：发送上下文 → LLM 决定工具调用 → 授权检查 → 执行 → 观察结果
-  │    ├── 工具调用并行授权 + 并行执行
-  │    ├── 上下文窗口自动管理（接近上限时压缩）
-  │    ├── LLM 调用失败自动重试（指数退避，最多 2 次）
-  │    ├── 轮次检查点可暂停，并询问用户是否继续
-  │    └── 连续同类工具失败会带诊断暂停，避免静默循环
+  ├── [executing]  模型/工具循环
+  │    ├── 模型请求前压缩过长历史
+  │    ├── 瞬时模型失败写入 model_retry 并有限重试
+  │    ├── 每个工具调用按任务权限和来源元数据授权
+  │    ├── 执行工具并追加 native/tool observation 证据
+  │    ├── 每个工具结果后写 checkpoint
+  │    └── 可恢复失败作为 observation 反喂模型
   │
-  ├── [reflecting] 反思纠错
-  │    ├── 步骤失败时触发
-  │    ├── LLM 分析原因 → 建议 retry / skip / abort
-  │    ├── 最多 3 轮反思
-  │    └── retry → 回到 executing；abort → 结束
+  ├── [recovering] 运行时反思
+  │    ├── 分类权限、验证、网络、重复 retry、预算耗尽等失败
+  │    ├── 仅在可恢复时允许有限重试
+  │    └── 不可恢复循环终止前写入结构化轨迹证据
   │
   └── [done]       完成
        ├── 写入 AgentRunRecord → agent-runs.jsonl
@@ -1266,7 +1257,7 @@ Gatekeeper 可能提示「Zerox Agent 已损坏，无法打开」。这通常不
 而是下载隔离属性导致的拦截。打开前在终端执行：
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/Zerox\ Agent-1.5.0-arm64.dmg
+xattr -dr com.apple.quarantine ~/Downloads/Zerox\ Agent-1.6.0-arm64.dmg
 ```
 
 如果已经把应用拖进 Applications，则执行：
@@ -1293,7 +1284,7 @@ mac:
 
 ## 测试
 
-截至 v1.5.0，`npm run verify` 覆盖 Vitest 测试、生产构建、Agent 评测和记忆检索评测；当前包含 94 个 Vitest 文件 / 431 个测试、11 个确定性 Agent eval fixture 和 2 个 memory eval fixture。Agent eval 覆盖原生代码工程、研究写作、测试失败反思、episode eval candidate 和 child handoff review gate 黄金路径：
+截至 v1.6.0，`npm run verify` 覆盖 Vitest 测试、生产构建、Agent 评测和记忆检索评测；当前包含 96 个 Vitest 文件 / 448 个测试、15 个确定性 Agent eval fixture 和 2 个 memory eval fixture。Agent eval 覆盖原生代码工程、研究写作、测试失败反思、retry budget exhaustion、上下文压缩、tool-call checkpoint、模型重试、episode eval candidate 和 child handoff review gate 黄金路径：
 
 ```bash
 npm test              # 运行全部测试
@@ -1320,7 +1311,7 @@ npm run verify        # 测试 + 构建 + 确定性评测
 
 ## 路线图
 
-当前版本：v1.5.0。
+当前版本：v1.6.0。
 
 近期已完成：
 
@@ -1335,11 +1326,12 @@ npm run verify        # 测试 + 构建 + 确定性评测
 - [x] 研究写作工具（`web_fetch_document`、`citation_record`、`citation_coverage_check`、`markdown_report_write`）、引用 sidecar 和有来源 Markdown eval
 - [x] 轻量子 Agent handoff contract，以及 researcher/executor/reviewer 的 Runs 审核卡片
 - [x] P3 Agent Learning Harness Loop：可审核 eval candidate、本地 promoted fixture、adversarial eval、ACI/context sensor 和 Overview pending eval 计数
+- [x] P4 Runtime Core Upgrade：动态 MCP/skill 工具授权、可恢复工具失败 observation、retry-budget 诊断、活跃上下文压缩、per-tool checkpoint、模型重试和 Runs 轨迹诊断卡
 
 后续计划：
 
 - [ ] Apple 签名、公证、自动更新和更清晰的分发流程
-- [ ] 在 P2.1 代码工程工具之外继续增加更多一方原生工具
+- [ ] 更深的 runtime loop 统一，包含一等持久化 plan 与 verifier/critic 回路
 - [ ] 技能市场、远程技能安装和可视化技能/工作流编辑
 - [ ] 条件触发任务（文件变化、系统事件等）
 - [ ] Windows 和 Linux 桌面支持

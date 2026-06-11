@@ -1,10 +1,16 @@
 import type { AgentToolExecutor } from "./agentToolExecutor";
+import { createContextManager, type ContextManager } from "./contextManager";
 import type {
   ChatClient,
   ChatCompletionResponse,
   ChatMessage,
   ToolCall,
 } from "./openAiCompatibleClient";
+import {
+  completeWithModelRetry,
+  type ModelRetryEvent,
+  type ModelRetryOptions,
+} from "./modelRetry";
 import type { ToolAuthorizationService } from "./toolAuthorizationService";
 import {
   buildAgentSystemPrompt,
@@ -29,6 +35,8 @@ export type AgentLoopOptions = {
   resumeMessages?: ChatMessage[];
   initialToolCallsExecuted?: number;
   pauseOnFailureLoop?: boolean;
+  contextManager?: ContextManager;
+  modelRetry?: ModelRetryOptions;
   onToolCall?: (toolName: string, args: Record<string, unknown>) => void;
   onToolResult?: (
     toolName: string,
@@ -38,6 +46,15 @@ export type AgentLoopOptions = {
   onTurn?: (turn: number, phase: string) => void;
   onReasoning?: (reasoningContent: string, turn: number) => void;
   onModelResponse?: (response: ChatCompletionResponse, turn: number) => void;
+  onContextCompacted?: (event: AgentLoopContextCompaction) => void;
+  onModelRetry?: (event: ModelRetryEvent) => void;
+};
+
+export type AgentLoopContextCompaction = {
+  originalMessageCount: number;
+  compactedMessageCount: number;
+  estimatedTokens: number;
+  tokenBudget: number;
 };
 
 export type AgentLoopContinuation = {
@@ -83,11 +100,15 @@ export async function runAgentLoop(
     resumeMessages,
     initialToolCallsExecuted = 0,
     pauseOnFailureLoop = false,
+    contextManager = createContextManager(),
+    modelRetry,
     onToolCall,
     onToolResult,
     onTurn,
     onReasoning,
     onModelResponse,
+    onContextCompacted,
+    onModelRetry,
   } = options;
 
   const toolDefinitions = customTools ?? buildToolDefinitions();
@@ -118,6 +139,31 @@ export async function runAgentLoop(
     kind: string;
     count: number;
   } | null = null;
+  const contextTokenBudget = Math.max(1, Math.floor(modelProfile.maxTokens * 0.7));
+
+  function compactMessagesBeforeModelRequest() {
+    const estimatedTokens = contextManager.estimateTokens(messages);
+    if (estimatedTokens <= contextTokenBudget) {
+      return;
+    }
+
+    const originalMessageCount = messages.length;
+    const compacted = contextManager.compressMessages(
+      messages,
+      contextTokenBudget,
+    );
+    if (compacted.length === originalMessageCount && compacted === messages) {
+      return;
+    }
+
+    messages.splice(0, messages.length, ...compacted);
+    onContextCompacted?.({
+      originalMessageCount,
+      compactedMessageCount: messages.length,
+      estimatedTokens,
+      tokenBudget: contextTokenBudget,
+    });
+  }
 
   async function finalizeWithoutTools(options: {
     prompt: string;
@@ -129,13 +175,19 @@ export async function runAgentLoop(
       role: "system",
       content: options.prompt,
     });
+    compactMessagesBeforeModelRequest();
 
     try {
-      const response = await chatClient.complete({
-        ...modelProfile,
-        messages,
-        ...(signal ? { signal } : {}),
-      });
+      const response = await completeWithModelRetry(
+        chatClient,
+        {
+          ...modelProfile,
+          messages,
+          ...(signal ? { signal } : {}),
+        },
+        modelRetry,
+        onModelRetry,
+      );
 
       if (response.content) {
         summary = `${options.summaryPrefix}\n\n${response.content}`;
@@ -165,14 +217,20 @@ export async function runAgentLoop(
       }
 
       onTurn?.(turns, "executing");
+      compactMessagesBeforeModelRequest();
 
-      const response = await chatClient.complete({
-        ...modelProfile,
-        messages,
-        tools: toolDefinitions,
-        tool_choice: "auto",
-        ...(signal ? { signal } : {}),
-      });
+      const response = await completeWithModelRetry(
+        chatClient,
+        {
+          ...modelProfile,
+          messages,
+          tools: toolDefinitions,
+          tool_choice: "auto",
+          ...(signal ? { signal } : {}),
+        },
+        modelRetry,
+        onModelRetry,
+      );
       onModelResponse?.(response, turns + 1);
       if (response.reasoningContent) {
         onReasoning?.(response.reasoningContent, turns + 1);
@@ -257,8 +315,10 @@ export async function runAgentLoop(
 
           // Authorization check (if authorizer is available)
           if (toolAuthorizationService && taskId) {
+            const toolSource = getToolSource(toolExecutor, toolName);
             const auth = await toolAuthorizationService.authorize(taskId, {
               toolName: toolName as never,
+              ...(toolSource ? { source: toolSource } : {}),
               args,
             });
 
@@ -420,6 +480,17 @@ function buildToolFailureLoopPauseSummary(options: {
     `我已经暂停，避免继续在同一个失败模式里空转。累计执行 ${options.toolCallsExecuted} 个工具。`,
     "你可以回复“继续”让我带着已有诊断接着试，也可以调整目标、提供脚本参数或要求我换一种工具路径。",
   ].join("\n");
+}
+
+function getToolSource(
+  toolExecutor: AgentToolExecutor,
+  toolName: string,
+): string | null {
+  try {
+    return toolExecutor.getRegistry().getSource(toolName);
+  } catch {
+    return null;
+  }
 }
 
 function updateToolFailureStreak(

@@ -198,7 +198,7 @@ export function createAgentEvalFixtures(): AgentEvalFixture[] {
     {
       id: "reflection-after-test-failure",
       description:
-        "A failed test_run records reflection before failure classification.",
+        "A failed test_run records reflection before a recovered final summary.",
       events: createEvents("reflection-after-test-failure", [
         ["tool_call", { toolName: "test_run" }],
         ["tool_result", { toolName: "test_run", ok: false }],
@@ -206,7 +206,57 @@ export function createAgentEvalFixtures(): AgentEvalFixture[] {
           "reflection_added",
           { toolName: "test_run", failureClass: "verification_failed" },
         ],
-        ["failure_classified", { failureClass: "tool_execution_failed" }],
+        ["final_summary", { status: "succeeded" }],
+      ]),
+      requiredEventTypes: [
+        "tool_call",
+        "tool_result",
+        "reflection_added",
+        "final_summary",
+      ],
+      assertions: [
+        {
+          type: "reflection_added",
+          payload: { failureClass: "verification_failed" },
+          after: "tool_result",
+        },
+        {
+          type: "final_summary",
+          payload: { status: "succeeded" },
+          after: "reflection_added",
+        },
+      ],
+      recoverabilityRequired: true,
+    },
+    {
+      id: "reflection-retry-budget-exhausted",
+      description:
+        "Repeated recoverable tool failures record retry budget exhaustion before failure classification.",
+      events: createEvents("reflection-retry-budget-exhausted", [
+        ["tool_call", { toolName: "file_read", path: "~/Downloads/missing-1.md" }],
+        ["tool_result", { toolName: "file_read", ok: false }],
+        [
+          "reflection_added",
+          { toolName: "file_read", failureClass: "tool_failed", retryAllowed: true },
+        ],
+        ["tool_call", { toolName: "file_read", path: "~/Downloads/missing-2.md" }],
+        ["tool_result", { toolName: "file_read", ok: false }],
+        [
+          "reflection_added",
+          {
+            toolName: "file_read",
+            failureClass: "budget_exhausted",
+            retryAllowed: false,
+          },
+        ],
+        [
+          "failure_classified",
+          {
+            failureClass: "tool_error",
+            toolName: "file_read",
+            reflectionFailureClass: "budget_exhausted",
+          },
+        ],
       ]),
       requiredEventTypes: [
         "tool_call",
@@ -217,8 +267,118 @@ export function createAgentEvalFixtures(): AgentEvalFixture[] {
       assertions: [
         {
           type: "reflection_added",
-          payload: { failureClass: "verification_failed" },
+          payload: { failureClass: "budget_exhausted" },
           after: "tool_result",
+        },
+        {
+          type: "failure_classified",
+          payload: { reflectionFailureClass: "budget_exhausted" },
+          after: "reflection_added",
+        },
+      ],
+      recoverabilityRequired: true,
+    },
+    {
+      id: "context-compaction-before-model-request",
+      description:
+        "Long active-loop histories are compacted before the next model request.",
+      events: createEvents("context-compaction-before-model-request", [
+        [
+          "context_compacted",
+          {
+            originalMessageCount: 18,
+            compactedMessageCount: 8,
+            estimatedTokens: 12000,
+            tokenBudget: 5734,
+          },
+        ],
+        ["model_request", { messageCount: 8 }],
+        ["model_response", { finishReason: "stop" }],
+        ["final_summary", { status: "succeeded" }],
+      ]),
+      requiredEventTypes: [
+        "context_compacted",
+        "model_request",
+        "model_response",
+        "final_summary",
+      ],
+      assertions: [
+        {
+          type: "model_request",
+          after: "context_compacted",
+        },
+      ],
+    },
+    {
+      id: "tool-result-checkpoint-before-next-tool",
+      description:
+        "Recoverable runs write a checkpoint after each tool result before continuing.",
+      events: createEvents("tool-result-checkpoint-before-next-tool", [
+        ["model_request", {}],
+        ["model_response", { toolCallCount: 2 }],
+        ["tool_call", { toolName: "file_read", toolCallId: "call_1" }],
+        ["tool_result", { toolName: "file_read", ok: true, toolCallId: "call_1" }],
+        ["checkpoint_written", { status: "running", toolCallCount: 1 }],
+        ["tool_call", { toolName: "file_read", toolCallId: "call_2" }],
+        ["tool_result", { toolName: "file_read", ok: true, toolCallId: "call_2" }],
+        ["checkpoint_written", { status: "running", toolCallCount: 2 }],
+        ["model_request", {}],
+        ["model_response", { finishReason: "stop" }],
+        ["final_summary", { status: "succeeded" }],
+      ]),
+      requiredEventTypes: [
+        "tool_call",
+        "tool_result",
+        "checkpoint_written",
+        "final_summary",
+      ],
+      assertions: [
+        {
+          type: "checkpoint_written",
+          payload: { toolCallCount: 1 },
+          after: "tool_result",
+        },
+        {
+          type: "checkpoint_written",
+          payload: { toolCallCount: 2 },
+          after: "tool_result",
+        },
+      ],
+      recoverabilityRequired: true,
+    },
+    {
+      id: "model-retry-before-response",
+      description:
+        "Transient model request failures are retried before the run proceeds.",
+      events: createEvents("model-retry-before-response", [
+        ["model_request", { turn: 0 }],
+        [
+          "model_retry",
+          {
+            attempt: 1,
+            maxRetries: 2,
+            delayMs: 1000,
+            error: "LLM request failed with status 500: overloaded",
+          },
+        ],
+        ["model_response", { finishReason: "stop" }],
+        ["final_summary", { status: "succeeded" }],
+      ]),
+      requiredEventTypes: [
+        "model_request",
+        "model_retry",
+        "model_response",
+        "final_summary",
+      ],
+      assertions: [
+        {
+          type: "model_retry",
+          payload: { attempt: 1, maxRetries: 2 },
+          after: "model_request",
+        },
+        {
+          type: "model_response",
+          after: "model_retry",
         },
       ],
       recoverabilityRequired: true,

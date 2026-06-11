@@ -154,3 +154,198 @@
   - `npm run harness:score` -> score 9.31/10, ACI passed true with 0 findings, agent eval 11/11, adversarial passed true with 23 checked and 0 escaped, promoted fixture count 0, pending eval candidates 0.
   - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
   - `git diff --check` -> passed.
+
+## 2026-06-11 P4.1 Dynamic MCP and Skill Tool Authorization
+
+- Implemented the first P4 runtime-core slice: dynamic skill and MCP tools can be authorized through explicit task policy tool names or registered tool sources instead of failing the closed built-in tool switch.
+- Changed files:
+  - `src/shared/toolPermissions.ts`
+  - `src/shared/toolPermissions.test.ts`
+  - `src/main/dynamicToolRegistry.ts`
+  - `src/main/dynamicToolRegistry.test.ts`
+  - `src/main/agentLoop.ts`
+  - `src/main/agentLoop.test.ts`
+  - `src/main/agentRuntimeEngine.ts`
+  - `src/main/agentRuntimeEngine.test.ts`
+  - `src/main/main.ts`
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `npm test -- src/shared/toolPermissions.test.ts` -> RED, 3 expected failures for missing dynamic tool policy seeding and authorization.
+  - `npm test -- src/shared/toolPermissions.test.ts` -> 1 file / 22 tests passed.
+  - `npm test -- src/main/dynamicToolRegistry.test.ts src/main/agentLoop.test.ts` -> RED, missing registry source lookup and source forwarding.
+  - `npm test -- src/main/dynamicToolRegistry.test.ts src/main/agentLoop.test.ts src/shared/toolPermissions.test.ts` -> 3 files / 31 tests passed.
+  - `npm test -- src/main/agentRuntimeEngine.test.ts` -> RED, runtime authorization did not receive dynamic tool source.
+  - `npm test -- src/main/agentRuntimeEngine.test.ts src/main/dynamicToolRegistry.test.ts src/main/agentLoop.test.ts src/shared/toolPermissions.test.ts` -> 4 files / 47 tests passed.
+  - `npm test -- src/shared/toolPermissions.test.ts src/main/dynamicToolRegistry.test.ts src/main/agentLoop.test.ts src/main/agentRuntimeEngine.test.ts src/main/toolAuthorizationService.test.ts src/main/agentToolExecutor.test.ts` -> 6 files / 71 tests passed.
+  - `npm run build` -> passed.
+  - `npm run harness:check` -> passed.
+  - `node -e "JSON.parse(require('fs').readFileSync('.zerox/feature_list.json','utf8')); console.log('feature_list json ok')"` -> feature_list json ok.
+  - `npm run verify` -> 94 Vitest files / 436 tests, build passed, agent eval 11/11, memory eval 2/2.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `git diff --check` -> passed.
+
+## 2026-06-11 P4.2 Runtime Tool Failure Observation Recovery
+
+- Implemented the second P4 runtime-core slice: recoverable tool execution failures now remain in the model conversation as failed tool observations, with reflection evidence recorded before the model retries or finalizes.
+- Changed files:
+  - `src/main/agentRuntimeEngine.ts`
+  - `src/main/agentRuntimeEngine.test.ts`
+  - `src/main/eval/agentEvalFixtures.ts`
+  - `src/main/eval/agentEvalRunner.test.ts`
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `npm test -- src/main/agentRuntimeEngine.test.ts` -> RED, recoverable `file_read` failure still failed the run before the model could retry.
+  - `npm test -- src/main/agentRuntimeEngine.test.ts` -> 1 file / 17 tests passed.
+  - `npm test -- src/main/eval/agentEvalRunner.test.ts` -> RED, `reflection-after-test-failure` fixture still required `failure_classified` instead of recovered `final_summary`.
+  - `npm test -- src/main/agentRuntimeEngine.test.ts src/main/eval/agentEvalRunner.test.ts` -> 2 files / 22 tests passed.
+  - `npm test -- src/main/agentRuntimeEngine.test.ts src/main/eval/agentEvalRunner.test.ts src/main/eval/agentEvalAdversary.test.ts` -> 3 files / 26 tests passed.
+  - `node scripts/run-agent-evals.mjs` -> agent eval 11/11.
+  - `npm run build` -> passed.
+  - `npm run verify` -> 94 Vitest files / 437 tests, build passed, agent eval 11/11, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `git diff --check` -> passed.
+
+## 2026-06-12 P4.3 Runtime Retry Budget and Duplicate Retry Visibility
+
+- Implemented the third P4 runtime-core slice: repeated recovery failures now terminate with structured reflection metadata visible on the failure_classified trajectory event.
+- Changed files:
+  - `src/main/agentRuntimeEngine.ts`
+  - `src/main/agentRuntimeEngine.test.ts`
+  - `src/main/eval/agentEvalFixtures.ts`
+  - `src/main/eval/agentEvalRunner.test.ts`
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `npm test -- src/main/agentRuntimeEngine.test.ts` -> RED, duplicate retry and retry-budget failure messages lacked reflection failure class visibility.
+  - `npm test -- src/main/agentRuntimeEngine.test.ts` -> 1 file / 19 tests passed.
+  - `npm test -- src/main/eval/agentEvalRunner.test.ts` -> RED, `reflection-retry-budget-exhausted` fixture was missing from deterministic evals.
+  - `npm test -- src/main/eval/agentEvalRunner.test.ts` -> 1 file / 5 tests passed.
+  - `npm test -- src/shared/agentReflection.test.ts src/main/agentRuntimeEngine.test.ts src/main/eval/agentEvalRunner.test.ts src/main/eval/agentEvalAdversary.test.ts src/main/agentEvalCandidateGenerator.test.ts src/main/agentLearningExtractor.test.ts` -> 6 files / 36 tests passed.
+  - `node scripts/run-agent-evals.mjs` -> agent eval 12/12.
+  - `npm run build` -> passed.
+  - `npm run verify` -> 94 Vitest files / 439 tests, build passed, agent eval 12/12, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `node -e "JSON.parse(require('fs').readFileSync('.zerox/feature_list.json','utf8')); console.log('feature_list json ok')"` -> feature_list json ok.
+  - `git diff --check` -> passed.
+
+## 2026-06-12 P4.4 Active-loop Context Compaction
+
+- Implemented the fourth P4 runtime-core slice: both active agent loops compact oversized message histories before model requests, and recoverable runtime runs emit `context_compacted` trajectory evidence.
+- Changed files:
+  - `src/main/contextManager.test.ts`
+  - `src/main/agentLoop.ts`
+  - `src/main/agentLoop.test.ts`
+  - `src/main/agentRuntimeEngine.ts`
+  - `src/main/agentRuntimeEngine.test.ts`
+  - `src/main/eval/agentEvalFixtures.ts`
+  - `src/main/eval/agentEvalRunner.test.ts`
+  - `src/shared/agentTrajectory.ts`
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `npm test -- src/main/contextManager.test.ts src/main/agentLoop.test.ts src/main/agentRuntimeEngine.test.ts` -> RED, active loops sent uncompressed histories to the model.
+  - `npm test -- src/main/contextManager.test.ts src/main/agentLoop.test.ts src/main/agentRuntimeEngine.test.ts` -> 3 files / 28 tests passed.
+  - `npm test -- src/main/eval/agentEvalRunner.test.ts` -> RED, `context-compaction-before-model-request` fixture was missing from deterministic evals.
+  - `npm test -- src/main/eval/agentEvalRunner.test.ts` -> 1 file / 5 tests passed.
+  - `npm test -- src/main/contextManager.test.ts src/main/agentLoop.test.ts src/main/agentRuntimeEngine.test.ts src/main/eval/agentEvalRunner.test.ts src/main/agentEvalCandidateGenerator.test.ts src/main/agentEpisodeExporter.test.ts src/main/chatService.test.ts src/renderer/materialDesign.test.ts` -> 8 files / 63 tests passed.
+  - `npm run build` -> passed.
+  - `node scripts/run-agent-evals.mjs` -> agent eval 13/13.
+  - `npm run verify` -> 95 Vitest files / 442 tests, build passed, agent eval 13/13, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `node -e "JSON.parse(require('fs').readFileSync('.zerox/feature_list.json','utf8')); console.log('feature_list json ok')"` -> feature_list json ok.
+  - `git diff --check` -> passed.
+
+## 2026-06-12 P4.5 Tool-call Checkpoint Granularity
+
+- Implemented the fifth P4 runtime-core slice: recoverable runtime checkpoints are now written after each executed tool observation, not only after the whole model turn finishes.
+- Changed files:
+  - `src/main/agentRuntimeEngine.ts`
+  - `src/main/agentRuntimeEngine.test.ts`
+  - `src/main/eval/agentEvalFixtures.ts`
+  - `src/main/eval/agentEvalRunner.test.ts`
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `npm test -- src/main/agentRuntimeEngine.test.ts` -> RED, a same-turn two-tool response only wrote a single post-turn checkpoint with both tool observations.
+  - `npm test -- src/main/agentRuntimeEngine.test.ts` -> 1 file / 21 tests passed.
+  - `npm test -- src/main/eval/agentEvalRunner.test.ts` -> RED, `tool-result-checkpoint-before-next-tool` fixture was missing from deterministic evals.
+  - `npm test -- src/main/eval/agentEvalRunner.test.ts` -> 1 file / 5 tests passed.
+  - `npm test -- src/main/agentRuntimeEngine.test.ts src/main/eval/agentEvalRunner.test.ts src/main/agentEvalCandidateGenerator.test.ts src/main/agentEpisodeExporter.test.ts src/main/agentTrajectoryStore.test.ts` -> 5 files / 31 tests passed.
+  - `npm run build` -> passed.
+  - `node scripts/run-agent-evals.mjs` -> agent eval 14/14.
+  - `npm run verify` -> 95 Vitest files / 443 tests, build passed, agent eval 14/14, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `node -e "JSON.parse(require('fs').readFileSync('.zerox/feature_list.json','utf8')); console.log('feature_list json ok')"` -> feature_list json ok.
+  - `git diff --check` -> passed.
+
+## 2026-06-12 P4.6 Active-loop Model Request Retry
+
+- Implemented the sixth P4 runtime-core slice: active chat and recoverable runtime model calls now retry transient model failures, and runtime retries are visible in trajectory evidence.
+- Changed files:
+  - `src/main/modelRetry.ts`
+  - `src/main/agentLoop.ts`
+  - `src/main/agentLoop.test.ts`
+  - `src/main/agentRuntimeEngine.ts`
+  - `src/main/agentRuntimeEngine.test.ts`
+  - `src/main/eval/agentEvalFixtures.ts`
+  - `src/main/eval/agentEvalRunner.test.ts`
+  - `src/shared/agentTrajectory.ts`
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `npm test -- src/main/agentLoop.test.ts src/main/agentRuntimeEngine.test.ts` -> RED, transient model 500 failures failed active loops without retry.
+  - `npm test -- src/main/agentLoop.test.ts src/main/agentRuntimeEngine.test.ts` -> 2 files / 30 tests passed.
+  - `npm test -- src/main/eval/agentEvalRunner.test.ts` -> RED, `model-retry-before-response` fixture was missing from deterministic evals.
+  - `npm test -- src/main/eval/agentEvalRunner.test.ts` -> 1 file / 5 tests passed.
+  - `npm test -- src/main/agentLoop.test.ts src/main/agentRuntimeEngine.test.ts src/main/eval/agentEvalRunner.test.ts src/main/chatService.test.ts src/main/agentFailureClassifier.test.ts` -> 5 files / 53 tests passed.
+  - `npm run build` -> passed.
+  - `node scripts/run-agent-evals.mjs` -> agent eval 15/15.
+  - `npm run verify` -> 95 Vitest files / 445 tests, build passed, agent eval 15/15, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `node -e "JSON.parse(require('fs').readFileSync('.zerox/feature_list.json','utf8')); console.log('feature_list json ok')"` -> feature_list json ok.
+  - `git diff --check` -> passed.
+
+## 2026-06-12 P4.7 Runtime Trajectory Insights UI
+
+- Implemented the seventh P4 runtime-core slice: recovery, model retry, and context compaction trajectory events now have compact user-facing insight cards in the Runs trajectory inspector.
+- Changed files:
+  - `src/shared/agentTrajectoryInsights.ts`
+  - `src/shared/agentTrajectoryInsights.test.ts`
+  - `src/renderer/components/RunTrajectoryPanel.tsx`
+  - `src/renderer/materialDesign.test.ts`
+  - `src/renderer/styles.css`
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `npm test -- src/shared/agentTrajectoryInsights.test.ts src/renderer/materialDesign.test.ts` -> RED, missing trajectory insight summarizer and UI classes.
+  - `npm test -- src/shared/agentTrajectoryInsights.test.ts src/renderer/materialDesign.test.ts` -> 2 files / 17 tests passed.
+  - `npm test -- src/shared/agentTrajectoryInsights.test.ts src/renderer/materialDesign.test.ts src/shared/agentHandoff.test.ts src/main/agentRuntimeEngine.test.ts` -> 4 files / 44 tests passed.
+  - `npm run build` -> passed.
+  - `npm run verify` -> 96 Vitest files / 448 tests, build passed, agent eval 15/15, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `node -e "JSON.parse(require('fs').readFileSync('.zerox/feature_list.json','utf8')); console.log('feature_list json ok')"` -> feature_list json ok.
+  - `git diff --check` -> passed.
+
+## 2026-06-12 v1.6.0 Runtime Core Upgrade Release Acceptance
+
+- Accepted the P4 runtime-core iteration and prepared v1.6.0 for release.
+- Release documentation/version updates:
+  - `package.json` and `package-lock.json` bumped to `1.6.0`.
+  - `README.md` now documents the v1.6.0 runtime-core upgrade, current verification counts, Quick Start `./init.sh` / `AGENTS.md` flow, and v1.6.0 macOS artifact names.
+  - `src/shared/readme.test.ts` now asserts the v1.6.0 quarantine example.
+- Final verification and packaging evidence:
+  - `npm run verify` -> 96 Vitest files / 448 tests passed, build passed, agent eval 15/15, memory eval 2/2.
+  - `npm run harness:check` -> Harness check passed.
+  - `npm run harness:score` -> overall 9.20, eval 15/15, ACI passed, context passed, adversarial checked 34 with no escapes.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `npm run dist:mac` -> generated `release/Zerox Agent-1.6.0-arm64.dmg` and `release/Zerox Agent-1.6.0-arm64-mac.zip`.
+  - `node -e "JSON.parse(require('fs').readFileSync('.zerox/feature_list.json','utf8')); console.log('feature_list.json ok')"` -> feature_list.json ok.
+  - `git diff --check` -> passed.

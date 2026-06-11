@@ -27,6 +27,7 @@ export type DynamicToolRegistry = {
   getDefinitions(): ToolDefinition[];
   getNativeDescriptors(): NativeToolDescriptor[];
   getNativeDescriptor(toolName: string): NativeToolDescriptor | null;
+  getSource(toolName: string): string | null;
   execute(
     toolName: string,
     args: Record<string, unknown>,
@@ -80,6 +81,10 @@ export function createDynamicToolRegistry(): DynamicToolRegistry {
 
     getNativeDescriptor(toolName) {
       return nativeDescriptors.get(toolName) ?? null;
+    },
+
+    getSource(toolName) {
+      return sources.get(toolName) ?? null;
     },
 
     async execute(toolName, args, options) {

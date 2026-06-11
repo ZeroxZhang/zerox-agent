@@ -82,6 +82,21 @@ describe("task permission policy", () => {
         web: { search: false, fetchDomains: [] },
         memory: { read: true, write: true },
       },
+      tools: [
+        {
+          name: "organize_preview",
+          description: "Preview file organization.",
+          parameters: { type: "object", properties: {} },
+          entrypoint: "./tools/preview.js",
+        },
+      ],
+      mcpServers: [
+        {
+          name: "filesystem-index",
+          command: "node",
+          args: ["./mcp/filesystem-index.js"],
+        },
+      ],
     };
 
     expect(createPermissionPolicyFromSkillManifest(manifest)).toEqual({
@@ -89,6 +104,13 @@ describe("task permission policy", () => {
       web: { search: false, fetchDomains: [] },
       shell: { commands: [] },
       memory: { read: true, write: true },
+      tools: {
+        allowedNames: ["organize_preview"],
+        allowedSources: [
+          "skill:local-file-organizer",
+          "mcp:local-file-organizer:filesystem-index",
+        ],
+      },
     });
   });
 });
@@ -373,6 +395,60 @@ describe("tool authorization", () => {
     ).toMatchObject({
       allowed: false,
       reason: "这个任务未允许读取本地记忆。",
+    });
+  });
+
+  it("allows declared skill-defined dynamic tools by name", () => {
+    expect(
+      authorizeToolCall(
+        {
+          ...policy,
+          tools: {
+            allowedNames: ["organize_preview"],
+            allowedSources: [],
+          },
+        },
+        {
+          toolName: "organize_preview",
+          args: { targetDir: "/Users/demo/Downloads" },
+        },
+      ),
+    ).toEqual({
+      allowed: true,
+      reason: "动态工具 organize_preview 已由任务显式允许。",
+    });
+  });
+
+  it("allows MCP dynamic tools only from declared skill MCP sources", () => {
+    const dynamicPolicy: TaskPermissionPolicy = {
+      ...policy,
+      tools: {
+        allowedNames: [],
+        allowedSources: ["mcp:research-writer:source-fetcher"],
+      },
+    };
+
+    expect(
+      authorizeToolCall(dynamicPolicy, {
+        toolName: "remote_source_lookup",
+        source: "mcp:research-writer:source-fetcher",
+        args: { query: "agent eval" },
+      }),
+    ).toEqual({
+      allowed: true,
+      reason:
+        "动态工具 remote_source_lookup 来自已允许来源 mcp:research-writer:source-fetcher。",
+    });
+
+    expect(
+      authorizeToolCall(dynamicPolicy, {
+        toolName: "remote_source_lookup",
+        source: "mcp:other-skill:source-fetcher",
+        args: { query: "agent eval" },
+      }),
+    ).toEqual({
+      allowed: false,
+      reason: "工具 remote_source_lookup 尚未配置授权规则。",
     });
   });
 
