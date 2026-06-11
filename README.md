@@ -50,13 +50,13 @@
 
 <h2 id="overview-en">Overview</h2>
 
-**Zerox Agent** is a local-first desktop control plane for personal AI agents. The current release is **v1.4.0**. The name derives from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
+**Zerox Agent** is a local-first desktop control plane for personal AI agents. The current release is **v1.5.0**. The name derives from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
 
 It is not a chat wrapper or a generic hosted agent surface. It runs locally, configures OpenAI-compatible models, scans local `SKILL.md` skill files, executes recoverable agent runs, invokes permission-controlled tools, tracks parent/child multi-agent sessions, persists experiential knowledge into local long-term memory, and keeps learning user-reviewed before it changes future behavior.
 
 The product boundary is documented in [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md): Zerox optimizes for trusted local control, recoverable agent runs, explicit permissions, workspace-scoped runs, observable trajectories, parent/child multi-agent sessions, and user-reviewed learning. Runtime, workspace, and learning details live in [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md), [`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md), and [`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md).
 
-v1.4.0 completes the Agent Capability P2 iteration on top of the repo-local harness (`AGENTS.md`, `init.sh`, `.zerox`, deterministic harness checks): native code engineering tools, citation-backed research writing tools, reflection evidence, reviewable episode eval candidates, lightweight child handoff review gates, Overview Agent Capability score, citation sidecars, and an 11-case deterministic agent eval suite. The implementation plans are preserved in [`docs/superpowers/plans`](docs/superpowers/plans).
+v1.5.0 completes the Agent Learning Harness Loop on top of the repo-local harness (`AGENTS.md`, `init.sh`, `.zerox`, deterministic harness checks) and Agent Capability P2 foundation: reviewable eval candidates, local promoted regression fixtures, adversarial eval checks, ACI/context harness sensors, serialized eval review writes, and Overview pending-eval visibility. The release keeps the native code engineering tools, citation-backed research writing tools, reflection evidence, lightweight child handoff review gates, Agent Capability score, citation sidecars, and 11-case deterministic agent eval suite from the P2 iteration. The implementation plans are preserved in [`docs/superpowers/plans`](docs/superpowers/plans).
 
 <p align="center">
   <img src="zerox-agent-onepage.png" alt="Zerox Agent one-page product overview" width="720" />
@@ -559,7 +559,7 @@ can't be opened." The image is usually valid; remove the quarantine attribute
 before opening:
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/Zerox\ Agent-1.4.0-arm64.dmg
+xattr -dr com.apple.quarantine ~/Downloads/Zerox\ Agent-1.5.0-arm64.dmg
 ```
 
 If you already dragged the app into Applications, run:
@@ -589,7 +589,7 @@ npm run episode:export -- --config-dir <userData/config> --run-id <runId>
 npm run verify        # Tests + build + deterministic eval
 ```
 
-As of v1.4.0, `npm run verify` covers the Vitest suite, the production build, agent evals, and memory evals. The suite currently includes 94 Vitest files / 425 tests, 11 deterministic agent eval fixtures, and 2 memory eval fixtures. Agent evals include native code engineering, research writing, reflection-after-test-failure, episode eval-candidate, and child handoff review-gate golden paths. Set `BUILDING_AGENT_CONFIG_DIR=/path/to/config` when running `npm run eval:agent` or `npm run harness:score` to include local promoted fixtures and pending eval candidates from that config directory. `npm run harness:score` emits the seven-category ETCLOVG score used by Overview as a local quality signal and now includes adversarial eval plus the ACI/context report; Overview also displays the native Agent Capability score.
+As of v1.5.0, `npm run verify` covers the Vitest suite, the production build, agent evals, and memory evals. The suite currently includes 94 Vitest files / 431 tests, 11 deterministic agent eval fixtures, and 2 memory eval fixtures. Agent evals include native code engineering, research writing, reflection-after-test-failure, episode eval-candidate, and child handoff review-gate golden paths. Set `BUILDING_AGENT_CONFIG_DIR=/path/to/config` when running `npm run eval:agent` or `npm run harness:score` to include local promoted fixtures and pending eval candidates from that config directory. `npm run harness:score` emits the seven-category ETCLOVG score used by Overview as a local quality signal and now includes adversarial eval plus the ACI/context report; Overview also displays the native Agent Capability score.
 
 ### Test Coverage
 
@@ -601,7 +601,7 @@ As of v1.4.0, `npm run verify` covers the Vitest suite, the production build, ag
 
 <h2 id="roadmap">Roadmap</h2>
 
-Current version: v1.4.0.
+Current version: v1.5.0.
 
 Recently shipped:
 
@@ -652,13 +652,13 @@ Planned:
 
 ## 项目概述
 
-**Zerox Agent** 是一个本地优先的桌面智能体控制台，当前版本是 **v1.4.0**。名字取自 **Zero + X**——从留白开始，把未知的本地工作流转成可观察、受权限管控、可恢复的 Agent 运行。
+**Zerox Agent** 是一个本地优先的桌面智能体控制台，当前版本是 **v1.5.0**。名字取自 **Zero + X**——从留白开始，把未知的本地工作流转成可观察、受权限管控、可恢复的 Agent 运行。
 
 它不是聊天壳，也不是泛用云端 Agent 入口。它运行在本机：配置 OpenAI‑compatible 模型、扫描本地 `SKILL.md` 技能文件、执行可恢复的 Agent 运行、调用受权限管控的工具、跟踪父子多 Agent 会话、把经验和知识写入本地长期记忆，并且在改变未来行为前保留用户审核。
 
 产品边界写在 [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md)：Zerox 优先建设可信的本地控制、可恢复运行、显式权限、workspace 作用域、可观察轨迹、父子多 Agent 会话和用户审核后的学习。运行时、workspace 与学习机制分别见 [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md)、[`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md)、[`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md)。
 
-v1.4.0 在 repo-local harness（`AGENTS.md`、`init.sh`、`.zerox`、确定性 harness checks）之上完成 Agent Capability P2 迭代：原生代码工程工具、带引用证据的研究写作工具、reflection 证据、可审核的 episode eval candidate、轻量子 Agent handoff review gate、Overview Agent Capability 分数、引用 sidecar，以及 11 个确定性 Agent eval fixture。完整实现计划保存在 [`docs/superpowers/plans`](docs/superpowers/plans)。
+v1.5.0 在 repo-local harness（`AGENTS.md`、`init.sh`、`.zerox`、确定性 harness checks）和 Agent Capability P2 基础上完成 Agent Learning Harness Loop：可审核 eval candidate、本地 promoted 回归 fixture、adversarial eval 检查、ACI/context harness sensor、串行化 eval 审核写入，以及 Overview 的 pending eval 可见性。本版本继续保留 P2 迭代中的原生代码工程工具、带引用证据的研究写作工具、reflection 证据、轻量子 Agent handoff review gate、Agent Capability 分数、引用 sidecar，以及 11 个确定性 Agent eval fixture。完整实现计划保存在 [`docs/superpowers/plans`](docs/superpowers/plans)。
 
 ### 设计原则
 
@@ -719,7 +719,7 @@ v1.4.0 在 repo-local harness（`AGENTS.md`、`init.sh`、`.zerox`、确定性 h
 | 构建 | Vite 8 | 渲染进程热更新打包 |
 | 类型 | TypeScript 6 | 全栈类型安全，三套 tsconfig（主进程 / 渲染进程 / 共享） |
 | UI | React 19 | 函数组件 + Hooks 的 Material Design 桌面 UI |
-| 测试 | Vitest 4 | 94 个测试文件 / 425 个测试，覆盖共享层、主进程和渲染进程 |
+| 测试 | Vitest 4 | 94 个测试文件 / 431 个测试，覆盖共享层、主进程和渲染进程 |
 | 打包 | electron-builder 26 | macOS `.app` / `.dmg` / `.zip` 分发 |
 | 解析 | yaml (cron-parser) | SKILL.md 前端元数据解析、cron 表达式 |
 
@@ -1266,7 +1266,7 @@ Gatekeeper 可能提示「Zerox Agent 已损坏，无法打开」。这通常不
 而是下载隔离属性导致的拦截。打开前在终端执行：
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/Zerox\ Agent-1.4.0-arm64.dmg
+xattr -dr com.apple.quarantine ~/Downloads/Zerox\ Agent-1.5.0-arm64.dmg
 ```
 
 如果已经把应用拖进 Applications，则执行：
@@ -1293,7 +1293,7 @@ mac:
 
 ## 测试
 
-截至 v1.4.0，`npm run verify` 覆盖 Vitest 测试、生产构建、Agent 评测和记忆检索评测；当前包含 94 个 Vitest 文件 / 425 个测试、11 个确定性 Agent eval fixture 和 2 个 memory eval fixture。Agent eval 覆盖原生代码工程、研究写作、测试失败反思、episode eval candidate 和 child handoff review gate 黄金路径：
+截至 v1.5.0，`npm run verify` 覆盖 Vitest 测试、生产构建、Agent 评测和记忆检索评测；当前包含 94 个 Vitest 文件 / 431 个测试、11 个确定性 Agent eval fixture 和 2 个 memory eval fixture。Agent eval 覆盖原生代码工程、研究写作、测试失败反思、episode eval candidate 和 child handoff review gate 黄金路径：
 
 ```bash
 npm test              # 运行全部测试
@@ -1320,7 +1320,7 @@ npm run verify        # 测试 + 构建 + 确定性评测
 
 ## 路线图
 
-当前版本：v1.4.0。
+当前版本：v1.5.0。
 
 近期已完成：
 
