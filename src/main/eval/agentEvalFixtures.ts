@@ -8,7 +8,14 @@ export type AgentEvalFixture = {
   description: string;
   events: AgentTrajectoryEvent[];
   requiredEventTypes: AgentTrajectoryEventType[];
+  assertions?: AgentEvalEventAssertion[];
   recoverabilityRequired?: boolean;
+};
+
+export type AgentEvalEventAssertion = {
+  type: AgentTrajectoryEventType;
+  payload?: Record<string, unknown>;
+  after?: AgentTrajectoryEventType;
 };
 
 export function createAgentEvalFixtures(): AgentEvalFixture[] {
@@ -96,27 +103,361 @@ export function createAgentEvalFixtures(): AgentEvalFixture[] {
         "workspace_escape_denied",
         "failure_classified",
       ],
+      assertions: [
+        { type: "workspace_escape_denied", after: "tool_call" },
+        {
+          type: "failure_classified",
+          payload: { failureClass: "permission_denied" },
+        },
+      ],
+    },
+    {
+      id: "code-engineering-native-tools",
+      description:
+        "Code engineering runs use native code, git, and test tools before finalizing.",
+      events: createEvents("code-engineering-native-tools", [
+        ["model_request", {}],
+        ["model_response", {}],
+        ["tool_call", { toolName: "code_search" }],
+        [
+          "native_tool_invocation",
+          { toolName: "code_search", nativeKind: "code", riskLevel: "low" },
+        ],
+        [
+          "native_tool_observation",
+          { toolName: "code_search", nativeKind: "code", ok: true },
+        ],
+        ["tool_result", { toolName: "code_search", ok: true }],
+        ["tool_call", { toolName: "git_status" }],
+        [
+          "native_tool_invocation",
+          { toolName: "git_status", nativeKind: "git", riskLevel: "low" },
+        ],
+        [
+          "native_tool_observation",
+          { toolName: "git_status", nativeKind: "git", ok: true },
+        ],
+        ["tool_result", { toolName: "git_status", ok: true }],
+        ["tool_call", { toolName: "git_diff" }],
+        [
+          "native_tool_invocation",
+          { toolName: "git_diff", nativeKind: "git", riskLevel: "medium" },
+        ],
+        [
+          "native_tool_observation",
+          { toolName: "git_diff", nativeKind: "git", ok: true },
+        ],
+        ["tool_result", { toolName: "git_diff", ok: true }],
+        ["tool_call", { toolName: "test_run" }],
+        [
+          "native_tool_invocation",
+          { toolName: "test_run", nativeKind: "test", riskLevel: "medium" },
+        ],
+        [
+          "native_tool_observation",
+          { toolName: "test_run", nativeKind: "test", ok: true },
+        ],
+        ["tool_result", { toolName: "test_run", ok: true }],
+        ["final_summary", { status: "succeeded" }],
+      ]),
+      requiredEventTypes: [
+        "tool_call",
+        "native_tool_invocation",
+        "native_tool_observation",
+        "tool_result",
+        "final_summary",
+      ],
+      assertions: [
+        {
+          type: "native_tool_invocation",
+          payload: { toolName: "code_search", nativeKind: "code" },
+          after: "tool_call",
+        },
+        {
+          type: "native_tool_invocation",
+          payload: { toolName: "git_status", nativeKind: "git" },
+          after: "tool_call",
+        },
+        {
+          type: "native_tool_invocation",
+          payload: { toolName: "git_diff", nativeKind: "git" },
+          after: "tool_call",
+        },
+        {
+          type: "native_tool_invocation",
+          payload: { toolName: "test_run", nativeKind: "test" },
+          after: "tool_call",
+        },
+        {
+          type: "native_tool_observation",
+          payload: { toolName: "test_run", ok: true },
+          after: "native_tool_invocation",
+        },
+      ],
+    },
+    {
+      id: "reflection-after-test-failure",
+      description:
+        "A failed test_run records reflection before failure classification.",
+      events: createEvents("reflection-after-test-failure", [
+        ["tool_call", { toolName: "test_run" }],
+        ["tool_result", { toolName: "test_run", ok: false }],
+        [
+          "reflection_added",
+          { toolName: "test_run", failureClass: "verification_failed" },
+        ],
+        ["failure_classified", { failureClass: "tool_execution_failed" }],
+      ]),
+      requiredEventTypes: [
+        "tool_call",
+        "tool_result",
+        "reflection_added",
+        "failure_classified",
+      ],
+      assertions: [
+        {
+          type: "reflection_added",
+          payload: { failureClass: "verification_failed" },
+          after: "tool_result",
+        },
+      ],
+      recoverabilityRequired: true,
+    },
+    {
+      id: "episode-eval-candidate",
+      description:
+        "A completed episode records eval candidate artifact generation.",
+      events: createEvents("episode-eval-candidate", [
+        ["tool_call", { toolName: "code_search" }],
+        ["tool_result", { toolName: "code_search", ok: true }],
+        ["artifact_created", { artifactType: "eval_candidate" }],
+        ["final_summary", { status: "succeeded" }],
+      ]),
+      requiredEventTypes: [
+        "tool_call",
+        "tool_result",
+        "artifact_created",
+        "final_summary",
+      ],
+      assertions: [
+        {
+          type: "artifact_created",
+          payload: { artifactType: "eval_candidate" },
+          after: "tool_result",
+        },
+      ],
+    },
+    {
+      id: "research-writing-native-tools",
+      description:
+        "Research writing runs fetch sources, record citations, check coverage, and write a sourced Markdown report.",
+      events: createEvents("research-writing-native-tools", [
+        ["model_request", {}],
+        ["model_response", {}],
+        ["tool_call", { toolName: "web_fetch_document" }],
+        [
+          "native_tool_invocation",
+          {
+            toolName: "web_fetch_document",
+            nativeKind: "web",
+            riskLevel: "medium",
+          },
+        ],
+        [
+          "native_tool_observation",
+          { toolName: "web_fetch_document", nativeKind: "web", ok: true },
+        ],
+        ["tool_result", { toolName: "web_fetch_document", ok: true }],
+        ["tool_call", { toolName: "citation_record" }],
+        [
+          "native_tool_invocation",
+          {
+            toolName: "citation_record",
+            nativeKind: "citation",
+            riskLevel: "low",
+          },
+        ],
+        [
+          "native_tool_observation",
+          { toolName: "citation_record", nativeKind: "citation", ok: true },
+        ],
+        ["tool_result", { toolName: "citation_record", ok: true }],
+        ["tool_call", { toolName: "citation_coverage_check" }],
+        [
+          "native_tool_invocation",
+          {
+            toolName: "citation_coverage_check",
+            nativeKind: "citation",
+            riskLevel: "low",
+          },
+        ],
+        [
+          "native_tool_observation",
+          {
+            toolName: "citation_coverage_check",
+            nativeKind: "citation",
+            ok: true,
+          },
+        ],
+        [
+          "tool_result",
+          {
+            toolName: "citation_coverage_check",
+            ok: true,
+            coverageOk: true,
+          },
+        ],
+        ["tool_call", { toolName: "markdown_report_write" }],
+        [
+          "native_tool_invocation",
+          {
+            toolName: "markdown_report_write",
+            nativeKind: "report",
+            riskLevel: "medium",
+          },
+        ],
+        [
+          "native_tool_observation",
+          {
+            toolName: "markdown_report_write",
+            nativeKind: "report",
+            ok: true,
+          },
+        ],
+        [
+          "tool_result",
+          {
+            toolName: "markdown_report_write",
+            ok: true,
+            artifactType: "markdown_report",
+            citationsSidecar: true,
+          },
+        ],
+        [
+          "final_summary",
+          {
+            status: "succeeded",
+            sourcedFacts: 1,
+            modelInferences: 1,
+          },
+        ],
+      ]),
+      requiredEventTypes: [
+        "tool_call",
+        "native_tool_invocation",
+        "native_tool_observation",
+        "tool_result",
+        "final_summary",
+      ],
+      assertions: [
+        {
+          type: "native_tool_invocation",
+          payload: { toolName: "web_fetch_document", nativeKind: "web" },
+          after: "tool_call",
+        },
+        {
+          type: "native_tool_invocation",
+          payload: { toolName: "citation_record", nativeKind: "citation" },
+          after: "tool_call",
+        },
+        {
+          type: "native_tool_invocation",
+          payload: {
+            toolName: "citation_coverage_check",
+            nativeKind: "citation",
+          },
+          after: "tool_call",
+        },
+        {
+          type: "tool_result",
+          payload: { toolName: "citation_coverage_check", coverageOk: true },
+          after: "native_tool_observation",
+        },
+        {
+          type: "tool_result",
+          payload: { toolName: "markdown_report_write", citationsSidecar: true },
+          after: "native_tool_observation",
+        },
+        {
+          type: "final_summary",
+          payload: { sourcedFacts: 1, modelInferences: 1 },
+          after: "tool_result",
+        },
+      ],
     },
     {
       id: "multi-agent-lineage",
-      description: "A parent run records a child agent session boundary.",
+      description:
+        "A parent run delegates a bounded child handoff and records the review gate.",
       events: createEvents("multi-agent-lineage", [
         ["run_context_created", { workspaceId: "workspace_eval" }],
+        [
+          "child_handoff_created",
+          {
+            handoffId: "handoff_eval",
+            parentRunId: "run_parent",
+            childRole: "researcher",
+            objective: "Collect citation evidence.",
+            reviewGateRequired: true,
+          },
+        ],
         [
           "child_run_scheduled",
           {
             sessionId: "session_eval",
             parentRunId: "run_parent",
             childRunId: "run_child",
-            agentRole: "executor",
+            agentRole: "researcher",
+          },
+        ],
+        [
+          "child_handoff_completed",
+          {
+            handoffId: "handoff_eval",
+            childRunId: "run_child",
+            status: "succeeded",
+            artifacts: 1,
+          },
+        ],
+        [
+          "child_handoff_reviewed",
+          {
+            handoffId: "handoff_eval",
+            childRunId: "run_child",
+            decision: "accepted",
           },
         ],
         ["final_summary", { status: "succeeded" }],
       ]),
       requiredEventTypes: [
         "run_context_created",
+        "child_handoff_created",
         "child_run_scheduled",
+        "child_handoff_completed",
+        "child_handoff_reviewed",
         "final_summary",
+      ],
+      assertions: [
+        {
+          type: "child_handoff_created",
+          payload: { childRole: "researcher", reviewGateRequired: true },
+          after: "run_context_created",
+        },
+        {
+          type: "child_run_scheduled",
+          payload: { childRunId: "run_child", agentRole: "researcher" },
+          after: "child_handoff_created",
+        },
+        {
+          type: "child_handoff_completed",
+          payload: { status: "succeeded" },
+          after: "child_run_scheduled",
+        },
+        {
+          type: "child_handoff_reviewed",
+          payload: { decision: "accepted" },
+          after: "child_handoff_completed",
+        },
       ],
     },
   ];

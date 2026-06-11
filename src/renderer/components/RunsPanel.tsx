@@ -5,8 +5,10 @@ import {
   summarizeRunEventKinds,
   type RunTimelineItem,
 } from "../../shared/agentRunInsights";
+import { summarizeHandoffReviewCards } from "../../shared/agentHandoff";
 import type { AgentRunRecord } from "../../shared/agentRuns";
 import type { AgentExecutionCheckpoint } from "../../shared/agentExecution";
+import type { AgentEvalCandidate } from "../../shared/agentEvalCandidate";
 import type { AgentTrajectoryEvent } from "../../shared/agentTrajectory";
 import { demoRuns } from "../demoAgentData";
 import { RunTrajectoryPanel } from "./RunTrajectoryPanel";
@@ -21,6 +23,7 @@ export function RunsPanel() {
   const [activeExecutions, setActiveExecutions] = useState<
     AgentExecutionCheckpoint[]
   >([]);
+  const [evalCandidates, setEvalCandidates] = useState<AgentEvalCandidate[]>([]);
   const [selectedRunId, setSelectedRunId] = useState("");
   const [selectedEventId, setSelectedEventId] = useState("");
   const [trajectoryEvents, setTrajectoryEvents] = useState<AgentTrajectoryEvent[]>([]);
@@ -32,6 +35,7 @@ export function RunsPanel() {
   useEffect(() => {
     if (!window.buildingAgent) {
       setRuns(demoRuns);
+      setEvalCandidates([]);
       setSelectedRunId(demoRuns[0]?.id ?? "");
       setStatus({
         kind: "idle",
@@ -43,10 +47,12 @@ export function RunsPanel() {
     Promise.all([
       window.buildingAgent.listAgentRuns(),
       window.buildingAgent.listActiveAgentExecutions(),
+      window.buildingAgent.listEvalCandidates(),
     ])
-      .then(([loadedRuns, loadedExecutions]) => {
+      .then(([loadedRuns, loadedExecutions, loadedEvalCandidates]) => {
         setRuns(loadedRuns);
         setActiveExecutions(loadedExecutions);
+        setEvalCandidates(loadedEvalCandidates);
         setSelectedRunId(loadedRuns[0]?.id ?? "");
         setStatus({
           kind: "idle",
@@ -77,6 +83,15 @@ export function RunsPanel() {
     timeline.find((item) => item.id === selectedEventId) ?? timeline[0] ?? null;
   const guidance = selectedRun ? getRunGuidance(selectedRun) : null;
   const summary = selectedRun ? summarizeRunEventKinds(selectedRun) : null;
+  const selectedEvalCandidate = useMemo(
+    () =>
+      selectedRun
+        ? evalCandidates.find(
+            (candidate) => candidate.sourceRunId === selectedRun.id,
+          ) ?? null
+        : null,
+    [evalCandidates, selectedRun],
+  );
 
   useEffect(() => {
     setSelectedEventId("");
@@ -206,6 +221,65 @@ export function RunsPanel() {
       kind: "idle",
       message: result.message,
     });
+  }
+
+  async function handleGenerateEvalCandidateForSelectedRun() {
+    if (!selectedRun || !isTerminalRun(selectedRun)) {
+      return;
+    }
+
+    if (!window.buildingAgent) {
+      setStatus({
+        kind: "idle",
+        message: "浏览器预览模式无法生成真实评测候选。",
+      });
+      return;
+    }
+
+    setStatus({
+      kind: "loading",
+      message: `正在生成评测候选：${selectedRun.taskName}`,
+    });
+    try {
+      const result = await window.buildingAgent.generateEvalCandidateForRun(
+        selectedRun.id,
+      );
+
+      if (!result.ok) {
+        setStatus({ kind: "error", message: result.message });
+        return;
+      }
+
+      setEvalCandidates((currentCandidates) => {
+        const exists = currentCandidates.some(
+          (candidate) =>
+            candidate.id === result.candidate.id ||
+            candidate.sourceRunId === result.candidate.sourceRunId,
+        );
+        if (!exists) {
+          return [result.candidate, ...currentCandidates];
+        }
+
+        return currentCandidates.map((candidate) =>
+          candidate.id === result.candidate.id ||
+          candidate.sourceRunId === result.candidate.sourceRunId
+            ? result.candidate
+            : candidate,
+        );
+      });
+      setStatus({
+        kind: "idle",
+        message: result.existing
+          ? "已加载这条运行的现有评测候选。"
+          : "评测候选已生成，等待审核。",
+      });
+    } catch (error) {
+      setStatus({
+        kind: "error",
+        message:
+          error instanceof Error ? error.message : "无法生成评测候选。",
+      });
+    }
   }
 
   return (
@@ -368,8 +442,14 @@ export function RunsPanel() {
         </section>
 
         <RunInspector
+          canGenerateEvalCandidate={Boolean(
+            selectedRun && isTerminalRun(selectedRun),
+          )}
+          evalCandidate={selectedEvalCandidate}
           event={selectedEvent}
           guidance={guidance}
+          isBusy={status.kind === "loading"}
+          onGenerateEvalCandidate={handleGenerateEvalCandidateForSelectedRun}
           run={selectedRun}
           trajectoryEvents={trajectoryEvents}
         />
@@ -381,11 +461,20 @@ export function RunsPanel() {
 }
 
 function RunInspector(props: {
+  canGenerateEvalCandidate: boolean;
+  evalCandidate: AgentEvalCandidate | null;
   event: RunTimelineItem | null;
   guidance: ReturnType<typeof getRunGuidance> | null;
+  isBusy: boolean;
+  onGenerateEvalCandidate: () => void;
   run: AgentRunRecord | null;
   trajectoryEvents: AgentTrajectoryEvent[];
 }) {
+  const handoffCards = useMemo(
+    () => summarizeHandoffReviewCards(props.trajectoryEvents),
+    [props.trajectoryEvents],
+  );
+
   return (
     <aside className="run-inspector" aria-label="运行检查器">
       <div className="inspector-section">
@@ -482,6 +571,87 @@ function RunInspector(props: {
         </div>
       ) : null}
 
+      {props.run ? (
+        <div className="inspector-section" aria-label="Eval Candidate">
+          <span className="inspector-label">Eval Candidate</span>
+          {props.evalCandidate ? (
+            <dl className="inspector-dl">
+              <div>
+                <dt>状态</dt>
+                <dd>{translateEvalCandidateStatus(props.evalCandidate.status)}</dd>
+              </div>
+              <div>
+                <dt>Fixture</dt>
+                <dd>{props.evalCandidate.fixture.id}</dd>
+              </div>
+            </dl>
+          ) : props.canGenerateEvalCandidate ? (
+            <>
+              <p>这条运行还没有评测候选。</p>
+              <button
+                className="primary-action"
+                disabled={props.isBusy}
+                onClick={() => props.onGenerateEvalCandidate()}
+                type="button"
+              >
+                生成评测候选
+              </button>
+            </>
+          ) : (
+            <p>运行结束后可生成评测候选。</p>
+          )}
+        </div>
+      ) : null}
+
+      {handoffCards.length ? (
+        <div className="inspector-section" aria-label="Handoff Review">
+          <span className="inspector-label">Handoff Review</span>
+          {handoffCards.map((card) => (
+            <article
+              className={`handoff-review-card is-${card.status}`}
+              key={card.handoffId}
+            >
+              <div>
+                <strong>{formatAgentRole(card.childRole)}</strong>
+                <span>{translateHandoffStatus(card.status)}</span>
+              </div>
+              <p>{card.objective}</p>
+              <dl className="inspector-dl">
+                {card.childRunId ? (
+                  <div>
+                    <dt>子运行</dt>
+                    <dd>{card.childRunId}</dd>
+                  </div>
+                ) : null}
+                <div>
+                  <dt>审核</dt>
+                  <dd>
+                    {card.reviewDecision
+                      ? translateReviewDecision(card.reviewDecision)
+                      : "等待审核"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>产物</dt>
+                  <dd>
+                    {card.artifactLabels.length
+                      ? card.artifactLabels.join(", ")
+                      : "未记录"}
+                  </dd>
+                </div>
+              </dl>
+              {card.checklist.length ? (
+                <ul>
+                  {card.checklist.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </article>
+          ))}
+        </div>
+      ) : null}
+
       <RunTrajectoryPanel events={props.trajectoryEvents} />
     </aside>
   );
@@ -512,6 +682,7 @@ function formatAgentRole(role: NonNullable<AgentRunRecord["runContext"]>["agentR
     string
   > = {
     primary: "主运行",
+    researcher: "研究",
     planner: "规划",
     executor: "执行",
     reviewer: "审查",
@@ -519,6 +690,43 @@ function formatAgentRole(role: NonNullable<AgentRunRecord["runContext"]>["agentR
   };
 
   return labels[role];
+}
+
+function translateHandoffStatus(
+  status: ReturnType<typeof summarizeHandoffReviewCards>[number]["status"],
+): string {
+  const labels: Record<
+    ReturnType<typeof summarizeHandoffReviewCards>[number]["status"],
+    string
+  > = {
+    pending: "待启动",
+    running: "子运行中",
+    completed: "待审核",
+    accepted: "已接受",
+    rejected: "已拒绝",
+    revision_requested: "需修订",
+  };
+
+  return labels[status];
+}
+
+function translateReviewDecision(
+  decision: NonNullable<
+    ReturnType<typeof summarizeHandoffReviewCards>[number]["reviewDecision"]
+  >,
+): string {
+  const labels: Record<
+    NonNullable<
+      ReturnType<typeof summarizeHandoffReviewCards>[number]["reviewDecision"]
+    >,
+    string
+  > = {
+    accepted: "接受",
+    rejected: "拒绝",
+    revision_requested: "要求修订",
+  };
+
+  return labels[decision];
 }
 
 function formatSandboxSummary(
@@ -539,6 +747,32 @@ function formatSandboxSummary(
         : "授权命令";
 
   return `${mode} / ${network} / ${shell}`;
+}
+
+function isTerminalRun(run: AgentRunRecord): boolean {
+  return (
+    run.status === "succeeded" ||
+    run.status === "failed" ||
+    run.status === "canceled"
+  );
+}
+
+function translateEvalCandidateStatus(
+  status: AgentEvalCandidate["status"],
+): string {
+  if (status === "pending_review") {
+    return "待审核";
+  }
+
+  if (status === "accepted") {
+    return "已接受";
+  }
+
+  if (status === "promoted") {
+    return "已提升";
+  }
+
+  return "已拒绝";
 }
 
 function translateRunStatus(status: AgentRunRecord["status"]): string {

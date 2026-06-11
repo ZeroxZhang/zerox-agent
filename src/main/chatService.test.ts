@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { createChatService } from "./chatService";
 import type { AgentToolExecutor } from "./agentToolExecutor";
+import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
+import { createDynamicToolRegistry } from "./dynamicToolRegistry";
 import type { AppendChatMessageInput } from "./chatSessionStore";
 import type { ChatClient, ChatMessage, ChatCompletionResponse } from "./openAiCompatibleClient";
 import type { RunScheduledTaskResult } from "../shared/agentRuns";
@@ -8,6 +10,8 @@ import type { MemoryInput, MemoryRecord, MemorySearchResult } from "../shared/me
 import type { ScheduledTask, ScheduledTaskInput } from "../shared/scheduledTasks";
 import { getDefaultTaskPermissionPolicy } from "../shared/toolPermissions";
 import type { ChatTaskStatusEvent } from "../shared/chat";
+import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
+import { defineNativeToolDescriptor } from "../shared/nativeCapabilities";
 
 function chatReply(content: string): ChatCompletionResponse {
   return { content, toolCalls: [], finishReason: "stop" };
@@ -418,6 +422,179 @@ describe("chat service", () => {
           state: "completed",
           toolCallsExecuted: 1,
           message: "任务已完成",
+        }),
+      ]),
+    );
+  });
+
+  it("emits trajectory evidence for chat tool runs", async () => {
+    const trajectoryEvents: AgentTrajectoryEvent[] = [];
+    const service = createChatService({
+      chatClient: {
+        async complete(request) {
+          if (request.tools && !request.messages.some((message) => message.role === "tool")) {
+            return toolCallResponse("call_1", "/tmp/evidence");
+          }
+
+          return chatReply("证据已记录。");
+        },
+      },
+      getModelProfile: async () => ({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret",
+        model: "agent-model",
+        temperature: 0.2,
+        maxTokens: 8192,
+      }),
+      memoryStore: createMemoryStore(),
+      toolExecutor: createToolExecutor(),
+      trajectoryStore: createMemoryTrajectoryStore(trajectoryEvents),
+      createId: createSequentialId("chat_evidence"),
+      now: createSteppedClock("2026-06-06T08:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage({
+      message: "检查目录并保留运行证据",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      agentStatus: {
+        state: "completed",
+        runId: "chat_evidence_2",
+      },
+    });
+    expect(trajectoryEvents.map((event) => event.type)).toEqual([
+      "model_request",
+      "model_response",
+      "tool_call",
+      "tool_result",
+      "model_request",
+      "model_response",
+      "final_summary",
+    ]);
+    expect(trajectoryEvents.every((event) => event.runId === "chat_evidence_2")).toBe(
+      true,
+    );
+  });
+
+  it("emits native trajectory evidence for chat tool runs", async () => {
+    const trajectoryEvents: AgentTrajectoryEvent[] = [];
+    const registry = createDynamicToolRegistry();
+    registry.register(
+      {
+        type: "function",
+        function: {
+          name: "code_search",
+          description: "Search code",
+          parameters: {
+            type: "object",
+            properties: {
+              workspaceRoot: { type: "string" },
+              query: { type: "string" },
+            },
+            required: ["workspaceRoot", "query"],
+          },
+        },
+      },
+      async () => ({
+        ok: true,
+        result: { results: [{ relativePath: "src/main.ts" }] },
+      }),
+      "test",
+      defineNativeToolDescriptor({
+        id: "code_search",
+        kind: "code",
+        label: "Code Search",
+        description: "Search code through native registry metadata.",
+        riskLevel: "low",
+        permissionScope: { files: "read", shell: "none", web: "none" },
+        observableEvents: ["native_tool_invocation", "native_tool_observation"],
+      }),
+    );
+    const service = createChatService({
+      chatClient: {
+        async complete(request) {
+          if (request.tools && !request.messages.some((message) => message.role === "tool")) {
+            return {
+              content: null,
+              finishReason: "tool_calls",
+              toolCalls: [
+                {
+                  id: "call_native",
+                  type: "function",
+                  function: {
+                    name: "code_search",
+                    arguments: JSON.stringify({
+                      workspaceRoot: "/repo",
+                      query: "createChatService",
+                    }),
+                  },
+                },
+              ],
+            };
+          }
+
+          return chatReply("代码证据已记录。");
+        },
+      },
+      getModelProfile: async () => ({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret",
+        model: "agent-model",
+        temperature: 0.2,
+        maxTokens: 8192,
+      }),
+      memoryStore: createMemoryStore(),
+      toolExecutor: {
+        async execute(request) {
+          return registry.execute(request.toolName, request.args);
+        },
+        getRegistry() {
+          return registry;
+        },
+        hasTool(toolName) {
+          return registry.has(toolName);
+        },
+      },
+      trajectoryStore: createMemoryTrajectoryStore(trajectoryEvents),
+      createId: createSequentialId("chat_native"),
+      now: createSteppedClock("2026-06-06T08:00:00.000Z"),
+    });
+
+    await service.sendMessage({
+      message: "搜索代码并保留 native 运行证据",
+    });
+
+    expect(trajectoryEvents.map((event) => event.type)).toEqual([
+      "model_request",
+      "model_response",
+      "tool_call",
+      "native_tool_invocation",
+      "native_tool_observation",
+      "tool_result",
+      "model_request",
+      "model_response",
+      "final_summary",
+    ]);
+    expect(trajectoryEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "native_tool_invocation",
+          payload: expect.objectContaining({
+            toolName: "code_search",
+            nativeKind: "code",
+            riskLevel: "low",
+          }),
+        }),
+        expect.objectContaining({
+          type: "native_tool_observation",
+          payload: expect.objectContaining({
+            toolName: "code_search",
+            nativeKind: "code",
+            riskLevel: "low",
+            ok: true,
+          }),
         }),
       ]),
     );
@@ -865,6 +1042,35 @@ function createToolExecutor(
       return true;
     },
   } as AgentToolExecutor;
+}
+
+function createMemoryTrajectoryStore(
+  events: AgentTrajectoryEvent[],
+): AgentTrajectoryStore {
+  return {
+    async append(_runId, event) {
+      events.push(structuredClone(event));
+      return event;
+    },
+    async list() {
+      return events;
+    },
+  };
+}
+
+function createSequentialId(prefix: string): () => string {
+  let next = 1;
+  return () => `${prefix}_${next++}`;
+}
+
+function createSteppedClock(start: string): () => Date {
+  let offset = 0;
+  const startMs = new Date(start).getTime();
+  return () => {
+    const value = new Date(startMs + offset * 1000);
+    offset += 1;
+    return value;
+  };
 }
 
 function createMemoryRecord(

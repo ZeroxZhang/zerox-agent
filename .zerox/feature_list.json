@@ -1,0 +1,166 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-06-11T00:00:00.000Z",
+  "features": [
+    {
+      "id": "P0-repo-local-harness",
+      "priority": 0,
+      "status": "done",
+      "title": "Repo-local operating harness",
+      "definitionOfDone": [
+        "AGENTS.md exists",
+        "init.sh exists and runs harness checks",
+        "npm run harness:check passes"
+      ],
+      "verification": [
+        "npm run harness:check",
+        "npm test -- src/shared/packageScripts.test.ts"
+      ]
+    },
+    {
+      "id": "P1-runtime-state-fidelity",
+      "priority": 1,
+      "status": "done",
+      "title": "Runtime state fidelity",
+      "definitionOfDone": [
+        "Step running/completed states are persisted",
+        "Approval waiting state is checkpointed",
+        "Abort signals reach tool execution"
+      ],
+      "verification": [
+        "npm test -- src/main/agentRuntimeEngine.test.ts src/main/toolAuthorizationService.test.ts"
+      ]
+    },
+    {
+      "id": "P1-shell-workspace-governance",
+      "priority": 2,
+      "status": "done",
+      "title": "Shell workspace governance",
+      "definitionOfDone": [
+        "workspace_only shell denies outside-workspace path arguments",
+        "workspace denials emit evidence"
+      ],
+      "verification": [
+        "npm test -- src/shared/toolPermissions.test.ts src/main/agentRuntimeEngine.test.ts"
+      ]
+    },
+    {
+      "id": "P1-chat-evidence-and-episode-export",
+      "priority": 3,
+      "status": "done",
+      "title": "Chat evidence and episode export",
+      "definitionOfDone": [
+        "Chat tool runs append trajectory evidence",
+        "Episode packages export run, checkpoint, trajectory, learning, verification, and metadata files",
+        "Contract evals support ordered and payload-aware assertions"
+      ],
+      "verification": [
+        "npm test -- src/main/chatService.test.ts src/main/agentEpisodeExporter.test.ts src/main/eval/agentEvalRunner.test.ts",
+        "node scripts/run-agent-evals.mjs"
+      ]
+    },
+    {
+      "id": "P1-harness-score-and-learning",
+      "priority": 4,
+      "status": "done",
+      "title": "Harness score and reviewed learning signals",
+      "definitionOfDone": [
+        "Shared ETCLOVG harness score exists",
+        "Overview displays the harness score",
+        "Repeated tool failures produce reviewable learning candidates"
+      ],
+      "verification": [
+        "npm test -- src/shared/harnessScore.test.ts src/main/agentLearningExtractor.test.ts src/renderer/materialDesign.test.ts",
+        "npm run harness:score"
+      ]
+    },
+    {
+      "id": "P2.1-native-code-tools",
+      "priority": 5,
+      "status": "done",
+      "title": "Native code engineering tools",
+      "definitionOfDone": [
+        "code_search, git_status, git_diff, and test_run are registered as native tools",
+        "Native tools have task permission checks and workspace sandbox checks",
+        "Native invocation and observation events are recorded in runtime and chat trajectories",
+        "Overview displays an Agent Capability score",
+        "Agent evals include a native code engineering golden path"
+      ],
+      "verification": [
+        "npm test -- src/shared/toolPermissions.test.ts src/main/agentToolExecutor.test.ts src/main/agentRuntimeEngine.test.ts src/main/chatService.test.ts src/main/eval/agentEvalRunner.test.ts src/renderer/materialDesign.test.ts",
+        "npm run build",
+        "node scripts/run-agent-evals.mjs"
+      ]
+    },
+    {
+      "id": "P2.2-reflection-episode-eval",
+      "priority": 6,
+      "status": "done",
+      "title": "Reflection evidence and episode eval candidates",
+      "definitionOfDone": [
+        "Tool failures create reflection_added trajectory evidence",
+        "Reflection policy classifies verification, permission, network, duplicate retry, and budget failures",
+        "Episode exports include eval-candidate.json for review before permanent fixture promotion",
+        "Agent evals include reflection and episode eval-candidate contracts"
+      ],
+      "verification": [
+        "npm test -- src/shared/agentReflection.test.ts src/main/agentRuntimeEngine.test.ts src/main/agentEvalCandidateGenerator.test.ts src/main/agentEpisodeExporter.test.ts src/main/eval/agentEvalRunner.test.ts",
+        "npm run verify",
+        "npm run harness:score"
+      ]
+    },
+    {
+      "id": "P2.3-research-writing-tools",
+      "priority": 7,
+      "status": "done",
+      "title": "Citation-backed research writing tools",
+      "definitionOfDone": [
+        "web_fetch_document, citation_record, citation_coverage_check, and markdown_report_write are registered as native tools",
+        "Sourced facts require known citations before Markdown report writes",
+        "Markdown reports write a separate .citations.json evidence sidecar",
+        "Final summaries distinguish sourced facts from model inference",
+        "Agent evals include a research-writing golden path"
+      ],
+      "verification": [
+        "npm test -- src/shared/researchWriting.test.ts src/main/nativeResearchTools.test.ts src/shared/toolPermissions.test.ts src/shared/agentProtocol.test.ts src/main/agentToolExecutor.test.ts src/main/eval/agentEvalRunner.test.ts",
+        "npm run verify",
+        "npm run harness:score"
+      ]
+    },
+    {
+      "id": "P2.4-lightweight-handoff",
+      "priority": 8,
+      "status": "done",
+      "title": "Lightweight child handoff review gate",
+      "definitionOfDone": [
+        "researcher, executor, and reviewer child handoff contracts validate objective, allowed tools, budget, expected artifacts, and review gate",
+        "Parent trajectory records child_handoff_created, child_handoff_completed, and child_handoff_reviewed events",
+        "Runs UI shows compact child handoff review cards from trajectory evidence",
+        "Agent evals assert child handoff event order and accepted review decision"
+      ],
+      "verification": [
+        "npm test -- src/shared/agentHandoff.test.ts src/main/multiAgentCoordinator.test.ts src/main/eval/agentEvalRunner.test.ts src/renderer/materialDesign.test.ts",
+        "npm run verify",
+        "npm run harness:score"
+      ]
+    },
+    {
+      "id": "P3-agent-learning-harness-loop",
+      "priority": 9,
+      "status": "done",
+      "title": "Agent Learning Harness Loop",
+      "definitionOfDone": [
+        "Eval candidate review UI supports reviewing, accepting, rejecting, and promoting candidates",
+        "Promoted local fixtures are stored in userData and included in eval and harness runs when configured",
+        "Adversarial eval rejects invalid fixture mutations",
+        "ACI/context sensors report harness verification signals",
+        "Overview displays pending eval candidate count"
+      ],
+      "verification": [
+        "npm run verify",
+        "npm run harness:score",
+        "npm run smoke:prod"
+      ]
+    }
+  ]
+}

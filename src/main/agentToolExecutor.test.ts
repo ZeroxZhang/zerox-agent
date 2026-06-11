@@ -124,6 +124,89 @@ describe("agent tool executor", () => {
     });
   });
 
+  it("registers native code engineering tools with descriptors", () => {
+    const executor = createAgentToolExecutor();
+
+    expect(
+      executor.getRegistry().getNativeDescriptors().map((descriptor) => ({
+        id: descriptor.id,
+        kind: descriptor.kind,
+        enabled: descriptor.enabled,
+      })),
+    ).toEqual(
+      expect.arrayContaining([
+        { id: "code_search", kind: "code", enabled: true },
+        { id: "git_status", kind: "git", enabled: true },
+        { id: "git_diff", kind: "git", enabled: true },
+        { id: "test_run", kind: "test", enabled: true },
+        { id: "web_fetch_document", kind: "web", enabled: true },
+        { id: "citation_record", kind: "citation", enabled: true },
+        { id: "citation_coverage_check", kind: "citation", enabled: true },
+        { id: "markdown_report_write", kind: "report", enabled: true },
+      ]),
+    );
+  });
+
+  it("executes code_search through the native tool registry", async () => {
+    await writeFile(
+      path.join(tempDir, "agent.ts"),
+      "export const agentRuntime = 'native-tool-registry';\n",
+      "utf8",
+    );
+    const executor = createAgentToolExecutor();
+
+    await expect(
+      executor.execute({
+        toolName: "code_search",
+        args: {
+          workspaceRoot: tempDir,
+          query: "agentRuntime",
+          maxResults: 5,
+        },
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      result: {
+        workspaceRoot: tempDir,
+        query: "agentRuntime",
+        results: [
+          {
+            relativePath: "agent.ts",
+            line: 1,
+            preview: "export const agentRuntime = 'native-tool-registry';",
+          },
+        ],
+      },
+    });
+  });
+
+  it("passes abort signals to native test_run", async () => {
+    const executor = createAgentToolExecutor();
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 25);
+
+    const result = await executor.execute(
+      {
+        toolName: "test_run",
+        args: {
+          workspaceRoot: tempDir,
+          command: `${JSON.stringify(process.execPath)} -e "setTimeout(() => {}, 1000)"`,
+          timeoutMs: 1000,
+        },
+      },
+      { signal: controller.signal },
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: "test_run was canceled.",
+      errorDetails: {
+        kind: "canceled",
+        cwd: tempDir,
+      },
+    });
+  });
+
   it("writes a local text file and creates parent directories", async () => {
     const filePath = path.join(tempDir, "reports", "today.md");
     const executor = createAgentToolExecutor();
@@ -302,6 +385,102 @@ describe("agent tool executor", () => {
       "fetch:https://example.com",
       "search:agent memory",
     ]);
+  });
+
+  it("executes native research writing tools through the registry", async () => {
+    const reportPath = path.join(tempDir, "research.md");
+    const executor = createAgentToolExecutor({
+      webTools: {
+        async fetchPage(url) {
+          return {
+            ok: true,
+            result: {
+              url,
+              title: "Harness Guide",
+              text: "Harness tracks deterministic eval results.",
+            },
+          };
+        },
+        async search(query) {
+          return { ok: true, result: { query, results: [] } };
+        },
+      },
+    });
+
+    await expect(
+      executor.execute({
+        toolName: "web_fetch_document",
+        args: { url: "https://docs.example.com/guide" },
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      result: {
+        document: {
+          url: "https://docs.example.com/guide",
+          title: "Harness Guide",
+        },
+      },
+    });
+
+    await expect(
+      executor.execute({
+        toolName: "citation_coverage_check",
+        args: {
+          citations: [
+            {
+              id: "src_docs",
+              url: "https://docs.example.com/guide",
+              title: "Harness Guide",
+            },
+          ],
+          claims: [
+            {
+              id: "fact_1",
+              kind: "sourced_fact",
+              text: "Harness tracks deterministic eval results.",
+              citationIds: ["src_docs"],
+            },
+          ],
+        },
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      result: {
+        coverage: { ok: true },
+      },
+    });
+
+    await expect(
+      executor.execute({
+        toolName: "markdown_report_write",
+        args: {
+          path: reportPath,
+          title: "Agent Capability Research",
+          citations: [
+            {
+              id: "src_docs",
+              url: "https://docs.example.com/guide",
+              title: "Harness Guide",
+            },
+          ],
+          claims: [
+            {
+              id: "fact_1",
+              kind: "sourced_fact",
+              text: "Harness tracks deterministic eval results.",
+              citationIds: ["src_docs"],
+            },
+          ],
+          sections: [{ heading: "Findings", claimIds: ["fact_1"] }],
+        },
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      result: {
+        path: reportPath,
+        citationsPath: path.join(tempDir, "research.citations.json"),
+      },
+    });
   });
 
   it("searches long-term memory through a bounded memory_search tool", async () => {

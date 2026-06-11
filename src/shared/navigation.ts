@@ -7,6 +7,7 @@ export type NavigationSectionId =
   | "tools"
   | "memory"
   | "learning"
+  | "evals"
   | "settings";
 
 export type NavigationSection = {
@@ -107,6 +108,17 @@ const navigationSections: NavigationSection[] = [
     ],
   },
   {
+    id: "evals",
+    label: "评测",
+    module: "审核",
+    summary: "审核运行轨迹生成的评测候选，并提升为固定回归样例。",
+    details: [
+      "查看从终端运行生成的 eval fixture 候选。",
+      "接受、拒绝或提升候选，避免未经审核的回归样例进入固定集。",
+      "用必需事件和断言数量判断候选是否覆盖关键行为。",
+    ],
+  },
+  {
     id: "settings",
     label: "设置",
     module: "配置",
@@ -134,6 +146,6 @@ export function getNavigationSection(id: string): NavigationSection {
   );
 }
 
-export function getStartupNavigationSection(_hash: string): NavigationSection {
-  return getDefaultNavigationSection();
+export function getStartupNavigationSection(hash: string): NavigationSection {
+  return getNavigationSection(hash.replace(/^#/, ""));
 }

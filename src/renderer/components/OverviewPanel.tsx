@@ -11,6 +11,7 @@ import {
 } from "../../shared/agentOnboarding";
 import type { AgentRunRecord } from "../../shared/agentRuns";
 import type { AgentEvalReport } from "../../shared/agentEval";
+import type { AgentEvalCandidate } from "../../shared/agentEvalCandidate";
 import type { AgentLearningCandidate } from "../../shared/agentLearning";
 import type {
   AgentBootstrapReport,
@@ -26,6 +27,8 @@ import {
   buildDesktopRuntimeInfo,
   type DesktopRuntimeInfo,
 } from "../../shared/desktopRuntime";
+import { computeHarnessScore } from "../../shared/harnessScore";
+import { computeAgentCapabilityScore } from "../../shared/nativeCapabilities";
 import {
   createDemoValidationSnapshot,
   demoAgentEvalReport,
@@ -42,6 +45,7 @@ import {
 } from "../agentValidationPreviewStore";
 
 type OverviewData = {
+  evalCandidates: AgentEvalCandidate[];
   evalReport: AgentEvalReport;
   learningCandidates: AgentLearningCandidate[];
   memories: MemoryRecord[];
@@ -90,6 +94,7 @@ export function OverviewPanel(props: {
         }),
       );
       setData({
+        evalCandidates: [],
         evalReport: demoAgentEvalReport,
         learningCandidates: demoLearningCandidates,
         memories: demoMemories,
@@ -121,6 +126,9 @@ export function OverviewPanel(props: {
       window.buildingAgent.listLearningCandidates({
         status: "pending_review",
       }),
+      window.buildingAgent.listEvalCandidates({
+        status: "pending_review",
+      }).catch(() => []),
       window.buildingAgent.getAgentEvalReport(),
     ])
       .then(([
@@ -132,9 +140,11 @@ export function OverviewPanel(props: {
         validation,
         runtime,
         learningCandidates,
+        evalCandidates,
         evalReport,
       ]) => {
         setData({
+          evalCandidates,
           evalReport,
           learningCandidates,
           memories,
@@ -162,6 +172,37 @@ export function OverviewPanel(props: {
   }, []);
 
   const latestRun = data?.runs[0] ?? null;
+  const harnessScore = useMemo(
+    () =>
+      data
+        ? computeHarnessScore({
+            hasAgentGuide: true,
+            hasExecutionStore: true,
+            hasInitScript: true,
+            hasTrajectoryStore: true,
+            evalPassRate: data.evalReport.passRate,
+            recoverabilityRate: data.evalReport.recoverabilityRate,
+            toolSuccessRate: data.evalReport.toolSuccessRate,
+            pendingLearningCandidates: data.learningCandidates.length,
+          })
+        : null,
+    [data],
+  );
+  const agentCapabilityScore = useMemo(
+    () =>
+      data
+        ? computeAgentCapabilityScore({
+            nativeToolCount: 8,
+            expectedNativeToolCount: 8,
+            evalPassRate: data.evalReport.passRate,
+            retrySuccessRate: data.evalReport.toolSuccessRate,
+            childHandoffSuccessRate: hasChildHandoff(data.runs) ? 1 : 0,
+            pendingEvalCandidates: data.evalCandidates.length,
+            pendingLearningCandidates: data.learningCandidates.length,
+          })
+        : null,
+    [data],
+  );
   const attentionItems = useMemo(
     () => (data ? buildAttentionItems(data) : []),
     [data],
@@ -319,6 +360,22 @@ export function OverviewPanel(props: {
           status={`${Math.round((data?.evalReport.passRate ?? 0) * 100)}%`}
           tone={getEvalTone(data?.evalReport)}
           value={data ? `${data.evalReport.passed}/${data.evalReport.total}` : "待加载"}
+        />
+        <HealthCard
+          label="Harness"
+          status={harnessScore ? `${harnessScore.overall}/10` : "待加载"}
+          tone={harnessScore?.tone ?? "warn"}
+          value={harnessScore?.summary ?? "ETCLOVG 七类"}
+        />
+        <HealthCard
+          label="Agent Capability"
+          status={
+            agentCapabilityScore
+              ? `${agentCapabilityScore.overall}/10`
+              : "待加载"
+          }
+          tone={agentCapabilityScore?.tone ?? "warn"}
+          value={agentCapabilityScore?.summary ?? "native tools"}
         />
         <HealthCard
           label="记忆"
@@ -565,6 +622,7 @@ export function OverviewPanel(props: {
       memories,
       skills,
       learningCandidates,
+      evalCandidates,
       evalReport,
     ] = await Promise.all([
       window.buildingAgent.loadModelSettings(),
@@ -575,9 +633,13 @@ export function OverviewPanel(props: {
       window.buildingAgent.listLearningCandidates({
         status: "pending_review",
       }),
+      window.buildingAgent.listEvalCandidates({
+        status: "pending_review",
+      }).catch(() => []),
       window.buildingAgent.getAgentEvalReport(),
     ]);
     setData({
+      evalCandidates,
       evalReport,
       learningCandidates,
       modelSettings,
@@ -623,6 +685,7 @@ export function OverviewPanel(props: {
       memories,
       skills,
       learningCandidates,
+      evalCandidates,
       evalReport,
     ] = await Promise.all([
       window.buildingAgent.loadModelSettings(),
@@ -633,9 +696,13 @@ export function OverviewPanel(props: {
       window.buildingAgent.listLearningCandidates({
         status: "pending_review",
       }),
+      window.buildingAgent.listEvalCandidates({
+        status: "pending_review",
+      }).catch(() => []),
       window.buildingAgent.getAgentEvalReport(),
     ]);
     setData({
+      evalCandidates,
       evalReport,
       learningCandidates,
       modelSettings,
@@ -727,6 +794,15 @@ function getEvalTone(
   return report.passRate >= 0.6 ? "warn" : "bad";
 }
 
+function hasChildHandoff(runs: AgentRunRecord[]): boolean {
+  return runs.some((run) => {
+    const runContext = run.runContext;
+    return Boolean(
+      runContext?.parentRunId || (runContext?.depth && runContext.depth > 0),
+    );
+  });
+}
+
 function buildAttentionItems(data: OverviewData): AttentionItem[] {
   const items: AttentionItem[] = [];
 
@@ -765,6 +841,15 @@ function buildAttentionItems(data: OverviewData): AttentionItem[] {
       title: `${data.learningCandidates.length} 个学习候选待审核`,
       action: "打开“学习”，决定哪些经验可以写入长期流程记忆。",
       target: "learning",
+    });
+  }
+
+  if (data.evalCandidates.length) {
+    items.push({
+      tone: "warn",
+      title: `${data.evalCandidates.length} 个评测候选待审核`,
+      action: "打开“评测”，决定哪些候选可以提升为固定回归样例。",
+      target: "evals",
     });
   }
 

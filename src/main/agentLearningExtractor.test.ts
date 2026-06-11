@@ -67,6 +67,27 @@ describe("agent learning extractor", () => {
       }),
     ]);
   });
+
+  it("extracts repeated tool failure lessons before another retry", () => {
+    const candidates = extractLearningCandidatesFromTrajectory(
+      createRun("failed"),
+      createEvents("run_1", [
+        ["tool_call", { toolName: "file_read", path: "/workspace/a.md" }],
+        ["tool_result", { toolName: "file_read", ok: false }],
+        ["tool_call", { toolName: "file_read", path: "/workspace/a.md" }],
+        ["tool_result", { toolName: "file_read", ok: false }],
+        ["failure_classified", { failureClass: "tool_error" }],
+      ]),
+    );
+
+    expect(candidates).toContainEqual(
+      expect.objectContaining({
+        type: "failure_lesson",
+        sourceTrajectoryEventIds: ["event_2", "event_4"],
+        claim: "Run repeated failing tool file_read 2 times.",
+      }),
+    );
+  });
 });
 
 function createRun(

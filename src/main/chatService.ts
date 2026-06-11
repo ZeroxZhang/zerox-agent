@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { AgentModelProfile } from "./agentRunnerService";
 import type { AgentToolExecutor } from "./agentToolExecutor";
+import { createChatAgentEvidenceRecorder } from "./chatAgentEvidence";
+import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
 import { runAgentLoop } from "./agentLoop";
 import type { AppendChatMessageResult, ChatSessionStore } from "./chatSessionStore";
 import { extractAtomicMemoriesFromChatTurn } from "./memoryL1Extractor";
@@ -23,6 +25,7 @@ import type {
 } from "../shared/chat";
 import type { AgentRunRecord, RunScheduledTaskResult } from "../shared/agentRuns";
 import type { MemoryRecord, MemorySearchResult } from "../shared/memory";
+import type { NativeToolDescriptor } from "../shared/nativeCapabilities";
 import {
   buildScheduledTaskInputFromIntent,
   classifyAgentIntent,
@@ -47,6 +50,7 @@ type ChatContinuationState = {
   messages: ChatMessage[];
   maxTurns: number;
   toolCallsExecuted: number;
+  evidenceRunId?: string;
 };
 
 export function createChatService(options: {
@@ -66,6 +70,7 @@ export function createChatService(options: {
   agentLoopMaxTurns?: number;
   toolResultOffloadStore?: ToolResultOffloadStore;
   toolResultOffloadThreshold?: number;
+  trajectoryStore?: AgentTrajectoryStore;
 }): ChatService {
   const createId = options.createId ?? randomUUID;
   const memoryLimit = options.memoryLimit ?? 4;
@@ -258,19 +263,26 @@ export function createChatService(options: {
       if (options.toolExecutor) {
         // Unified agent mode: chat goes through agent loop with tool access
         try {
+          const toolExecutor = options.toolExecutor;
           let observedToolCallsExecuted =
             continuationToResume?.toolCallsExecuted ?? 0;
+          const evidence = createChatAgentEvidenceRecorder({
+            trajectoryStore: options.trajectoryStore,
+            runId: continuationToResume?.evidenceRunId,
+            createId,
+            now: options.now,
+          });
           const loopResult = await runAgentLoop(
             chatMessages,
             profile,
             {
               chatClient: options.chatClient,
-              toolExecutor: options.toolExecutor,
+              toolExecutor,
               toolAuthorizationService: options.toolAuthorizationService,
               systemPrompt: buildChatSystemPrompt(),
               maxTurns: agentLoopMaxTurns,
               signal: runtimeOptions.signal,
-              tools: options.toolExecutor.getRegistry().getDefinitions(),
+              tools: toolExecutor.getRegistry().getDefinitions(),
               toolResultOffloadStore: options.toolResultOffloadStore,
               toolResultOffloadThreshold: options.toolResultOffloadThreshold,
               pauseOnTurnLimit: true,
@@ -283,6 +295,10 @@ export function createChatService(options: {
                   }
                 : {}),
               onTurn(turn, phase) {
+                void evidence.append("model_request", {
+                  turn: turn + 1,
+                  phase,
+                });
                 if (phase === "executing") {
                   emitStatus.send({
                     state: "model",
@@ -292,6 +308,14 @@ export function createChatService(options: {
                   });
                 }
               },
+              onModelResponse(response, turn) {
+                void evidence.append("model_response", {
+                  turn,
+                  hasContent: Boolean(response.content),
+                  toolCallCount: response.toolCalls.length,
+                  finishReason: response.finishReason,
+                });
+              },
               onReasoning(reasoningContent) {
                 emitStatus.send({
                   state: "reasoning",
@@ -299,7 +323,17 @@ export function createChatService(options: {
                   toolCallsExecuted: observedToolCallsExecuted,
                 });
               },
-              onToolCall(toolName) {
+              onToolCall(toolName, args) {
+                void evidence.append("tool_call", { toolName, args });
+                const nativeDescriptor = getNativeToolDescriptor(
+                  toolExecutor,
+                  toolName,
+                );
+                if (nativeDescriptor) {
+                  void evidence.append("native_tool_invocation", {
+                    ...buildNativeToolEvidencePayload(nativeDescriptor),
+                  });
+                }
                 emitStatus.send({
                   state: "tool_call",
                   message: `正在调用工具：${toolName}`,
@@ -309,6 +343,20 @@ export function createChatService(options: {
               },
               onToolResult(toolName, ok, result) {
                 observedToolCallsExecuted += 1;
+                const nativeDescriptor = getNativeToolDescriptor(
+                  toolExecutor,
+                  toolName,
+                );
+                if (nativeDescriptor) {
+                  void evidence.append("native_tool_observation", {
+                    ...buildNativeToolEvidencePayload(nativeDescriptor),
+                    ok,
+                    ...(ok && result && typeof result === "object"
+                      ? { resultKeys: Object.keys(result).slice(0, 10) }
+                      : {}),
+                  });
+                }
+                void evidence.append("tool_result", { toolName, ok });
                 emitStatus.send({
                   state: "tool_result",
                   message: buildToolResultStatusMessage(toolName, result),
@@ -321,6 +369,10 @@ export function createChatService(options: {
           );
           reply = loopResult.summary;
           toolCallsUsed = loopResult.toolCallsExecuted;
+          await evidence.append("final_summary", {
+            status: loopResult.status,
+            toolCallsExecuted: loopResult.toolCallsExecuted,
+          });
 
           if (loopResult.status === "canceled") {
             emitStatus.send({
@@ -339,9 +391,11 @@ export function createChatService(options: {
               messages: loopResult.messages,
               maxTurns: loopResult.continuation.maxTurns,
               toolCallsExecuted: loopResult.continuation.toolCallsExecuted,
+              evidenceRunId: evidence.runId,
             });
             agentStatus = {
               state: "paused",
+              runId: evidence.runId,
               reason: loopResult.continuation.reason,
               maxTurns: loopResult.continuation.maxTurns,
               toolCallsExecuted: loopResult.continuation.toolCallsExecuted,
@@ -360,6 +414,7 @@ export function createChatService(options: {
             pendingContinuations.delete(sessionId);
             agentStatus = {
               state: "completed",
+              runId: evidence.runId,
               toolCallsExecuted: loopResult.toolCallsExecuted,
             };
             emitStatus.send({
@@ -890,6 +945,33 @@ function toRelatedMemory(result: MemorySearchResult): ChatRelatedMemory {
     title: result.record.title,
     kind: result.record.kind,
     score: result.score,
+  };
+}
+
+function getNativeToolDescriptor(
+  toolExecutor: AgentToolExecutor,
+  toolName: string,
+): NativeToolDescriptor | null {
+  const registry = toolExecutor.getRegistry() as {
+    getNativeDescriptor?: (toolName: string) => NativeToolDescriptor | null;
+  };
+  if (typeof registry.getNativeDescriptor !== "function") {
+    return null;
+  }
+
+  return registry.getNativeDescriptor(toolName);
+}
+
+function buildNativeToolEvidencePayload(
+  descriptor: NativeToolDescriptor,
+): Record<string, unknown> {
+  return {
+    toolName: descriptor.id,
+    nativeKind: descriptor.kind,
+    riskLevel: descriptor.riskLevel,
+    permissionScope: descriptor.permissionScope,
+    source: "registry",
+    label: descriptor.label,
   };
 }
 

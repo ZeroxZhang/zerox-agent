@@ -18,6 +18,15 @@ export async function runAgentEvals(
       continue;
     }
 
+    const contractFailure = findContractFailure(fixture);
+    if (contractFailure) {
+      failures.push({
+        fixtureId: fixture.id,
+        reason: contractFailure,
+      });
+      continue;
+    }
+
     passed += 1;
   }
 
@@ -31,7 +40,7 @@ export async function runAgentEvals(
     (fixture) => fixture.recoverabilityRequired,
   );
   const recoverablePassed = recoverableFixtures.filter(
-    (fixture) => !findMissingRequiredEvent(fixture),
+    (fixture) => !findMissingRequiredEvent(fixture) && !findContractFailure(fixture),
   );
 
   return {
@@ -43,6 +52,39 @@ export async function runAgentEvals(
     recoverabilityRate: ratio(recoverablePassed.length, recoverableFixtures.length),
     failures,
   };
+}
+
+function findContractFailure(fixture: AgentEvalFixture): string | null {
+  for (const assertion of fixture.assertions ?? []) {
+    const eventIndexes = fixture.events
+      .map((event, index) => ({ event, index }))
+      .filter(({ event }) => event.type === assertion.type);
+    if (!eventIndexes.length) {
+      return `Missing asserted event "${assertion.type}".`;
+    }
+
+    const payloadEntries = Object.entries(assertion.payload ?? {});
+    const payloadMatches = eventIndexes.filter(({ event }) =>
+      payloadEntries.every(([key, value]) => event.payload[key] === value),
+    );
+    if (!payloadMatches.length && payloadEntries.length) {
+      const [key, value] = payloadEntries[0];
+      return `"${assertion.type}" payload.${key} expected ${String(value)}.`;
+    }
+
+    if (assertion.after) {
+      const orderedMatch = payloadMatches.find(({ index: eventIndex }) =>
+        fixture.events.some(
+          (event, index) => index < eventIndex && event.type === assertion.after,
+        ),
+      );
+      if (!orderedMatch) {
+        return `"${assertion.type}" must occur after "${assertion.after}".`;
+      }
+    }
+  }
+
+  return null;
 }
 
 function findMissingRequiredEvent(

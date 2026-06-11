@@ -8,10 +8,18 @@ export type AgentToolName =
   | "file_search"
   | "file_read"
   | "file_write"
+  | "code_search"
+  | "git_status"
+  | "git_diff"
+  | "test_run"
   | "memory_search"
   | "conversation_search"
   | "web_search"
   | "web_fetch"
+  | "web_fetch_document"
+  | "citation_record"
+  | "citation_coverage_check"
+  | "markdown_report_write"
   | "shell_exec";
 
 export type TaskPermissionPolicy = {
@@ -76,7 +84,6 @@ export type TaskPermissionPolicyValidationResult = {
 const destructiveShellPattern =
   /\b(rm\s+-[^\n]*(r|f)|git\s+reset\s+--hard|git\s+push\s+(-f|--force)|drop\s+(table|database)|truncate\s+table|kubectl\s+delete|docker\s+rm\s+-f)\b/i;
 const shellControlOperatorPattern = /(;|&&|\|\||`|\$\(|\|)/;
-const placeholderPattern = /\{\{[a-zA-Z][a-zA-Z0-9_]*\}\}/g;
 
 export function getDefaultTaskPermissionPolicy(): TaskPermissionPolicy {
   return {
@@ -202,6 +209,40 @@ export function authorizeToolCall(
         normalized.files.write,
         "file_write 路径不在已授权可写目录内。",
       );
+    case "code_search":
+      return authorizeWorkspaceRoot(
+        String(request.args.workspaceRoot ?? ""),
+        normalized.files.read,
+        "code_search workspaceRoot 不在已授权可读目录内。",
+      );
+    case "git_status":
+      return authorizeWorkspaceRoot(
+        String(request.args.workspaceRoot ?? ""),
+        normalized.files.read,
+        "git_status workspaceRoot 不在已授权可读目录内。",
+      );
+    case "git_diff":
+      return authorizeWorkspaceRoot(
+        String(request.args.workspaceRoot ?? ""),
+        normalized.files.read,
+        "git_diff workspaceRoot 不在已授权可读目录内。",
+      );
+    case "test_run": {
+      const workspaceDecision = authorizeWorkspaceRoot(
+        String(request.args.workspaceRoot ?? ""),
+        normalized.files.read,
+        "test_run workspaceRoot 不在已授权可读目录内。",
+      );
+      if (!workspaceDecision.allowed) {
+        return workspaceDecision;
+      }
+
+      return authorizeShellCommand(
+        String(request.args.command ?? ""),
+        normalized.shell.commands,
+        { toolName: "test_run", templateLabel: "测试模板" },
+      );
+    }
     case "memory_search":
     case "conversation_search":
       return normalized.memory?.read
@@ -213,12 +254,26 @@ export function authorizeToolCall(
         : deny("这个任务未允许 web_search。");
     case "web_fetch":
       return authorizeWebFetch(String(request.args.url ?? ""), normalized);
+    case "web_fetch_document":
+      return authorizeWebFetch(String(request.args.url ?? ""), normalized);
+    case "citation_record":
+      return authorizeWebFetch(String(request.args.url ?? ""), normalized);
+    case "citation_coverage_check":
+      return allow("citation_coverage_check 仅检查已提供的引用结构。");
+    case "markdown_report_write":
+      return authorizeFilePath(
+        String(request.args.path ?? ""),
+        normalized.files.write,
+        "markdown_report_write 路径不在已授权可写目录内。",
+      );
     case "shell_exec":
       return authorizeShellCommand(
         String(request.args.command ?? ""),
         normalized.shell.commands,
       );
   }
+
+  return deny(`工具 ${request.toolName} 尚未配置授权规则。`);
 }
 
 export function authorizeToolCallWithinRunContext(
@@ -235,8 +290,12 @@ export function authorizeToolCallWithinRunContext(
     return deny(`${request.toolName} 被运行沙箱阻止：网络访问已禁用。`);
   }
 
-  if (request.toolName === "file_write" && runContext.sandbox.mode === "read_only") {
-    return deny("file_write 被运行沙箱阻止：当前运行是只读沙箱。");
+  if (
+    (request.toolName === "file_write" ||
+      request.toolName === "markdown_report_write") &&
+    runContext.sandbox.mode === "read_only"
+  ) {
+    return deny(`${request.toolName} 被运行沙箱阻止：当前运行是只读沙箱。`);
   }
 
   if (!runContext.sandbox.allowWorkspaceEscape) {
@@ -246,8 +305,29 @@ export function authorizeToolCallWithinRunContext(
     }
   }
 
-  if (request.toolName === "shell_exec" && runContext.sandbox.shell === "disabled") {
-    return deny("shell_exec 被运行沙箱阻止：命令执行已禁用。");
+  if (
+    (request.toolName === "shell_exec" || request.toolName === "test_run") &&
+    runContext.sandbox.shell === "disabled"
+  ) {
+    return deny(`${request.toolName} 被运行沙箱阻止：命令执行已禁用。`);
+  }
+
+  if (
+    request.toolName === "shell_exec" &&
+    runContext.sandbox.shell === "workspace_only"
+  ) {
+    const command = String(request.args.command ?? "");
+    const outsidePath = extractPathLikeShellTokens(command).find(
+      (token) =>
+        !isPathInsideRunContext(token, runContext, "read") &&
+        !isPathInsideRunContext(token, runContext, "write"),
+    );
+
+    if (outsidePath) {
+      return deny(
+        `shell_exec 被 workspace_only 沙箱阻止：路径 ${outsidePath} 不在工作区或额外可读目录内。`,
+      );
+    }
   }
 
   return taskDecision;
@@ -270,6 +350,23 @@ function authorizeFilePath(
   return allowed ? allow("文件路径位于已授权目录内。") : deny(deniedReason);
 }
 
+function authorizeWorkspaceRoot(
+  workspaceRoot: string,
+  approvedDirectories: string[],
+  deniedReason: string,
+): ToolAuthorizationDecision {
+  if (!workspaceRoot) {
+    return deny("原生工具调用缺少 workspaceRoot。");
+  }
+
+  const resolvedWorkspaceRoot = expandHomePath(workspaceRoot);
+  const allowed = approvedDirectories.some((approvedDirectory) =>
+    isPathInsideDirectory(resolvedWorkspaceRoot, expandHomePath(approvedDirectory)),
+  );
+
+  return allowed ? allow("路径在已授权范围内。") : deny(deniedReason);
+}
+
 function authorizeWorkspaceFileRequest(
   request: ToolCallRequest,
   runContext: AgentRunContext,
@@ -279,14 +376,30 @@ function authorizeWorkspaceFileRequest(
     request.toolName !== "file_stat" &&
     request.toolName !== "file_search" &&
     request.toolName !== "file_read" &&
-    request.toolName !== "file_write"
+    request.toolName !== "file_write" &&
+    request.toolName !== "code_search" &&
+    request.toolName !== "git_status" &&
+    request.toolName !== "git_diff" &&
+    request.toolName !== "test_run" &&
+    request.toolName !== "markdown_report_write"
   ) {
     return null;
   }
 
-  const access = request.toolName === "file_write" ? "write" : "read";
+  const access =
+    request.toolName === "file_write" ||
+    request.toolName === "markdown_report_write"
+      ? "write"
+      : "read";
+  const isNativeWorkspaceRootTool =
+    request.toolName === "code_search" ||
+    request.toolName === "git_status" ||
+    request.toolName === "git_diff" ||
+    request.toolName === "test_run";
   const requestedPath = String(
-    request.toolName === "file_search"
+    isNativeWorkspaceRootTool
+      ? request.args.workspaceRoot ?? ""
+      : request.toolName === "file_search"
       ? request.args.root ?? ""
       : request.args.path ?? "",
   );
@@ -298,8 +411,9 @@ function authorizeWorkspaceFileRequest(
     return null;
   }
 
+  const pathLabel = isNativeWorkspaceRootTool ? "workspaceRoot " : "路径";
   return deny(
-    `${request.toolName} 被运行沙箱阻止：路径不在工作区或额外可${access === "read" ? "读" : "写"}目录内。`,
+    `${request.toolName} 被运行沙箱阻止：${pathLabel}不在工作区或额外可${access === "read" ? "读" : "写"}目录内。`,
   );
 }
 
@@ -327,13 +441,19 @@ function authorizeWebFetch(
 function authorizeShellCommand(
   command: string,
   templates: string[],
+  options: {
+    toolName?: AgentToolName;
+    templateLabel?: string;
+  } = {},
 ): ToolAuthorizationDecision {
+  const toolName = options.toolName ?? "shell_exec";
+  const templateLabel = options.templateLabel ?? "模板";
   if (!command) {
-    return deny("shell_exec command 必填。");
+    return deny(`${toolName} command 必填。`);
   }
 
   if (shellControlOperatorPattern.test(command)) {
-    return deny("shell_exec command 包含被阻止的 shell 控制符。");
+    return deny(`${toolName} command 包含被阻止的 shell 控制符。`);
   }
 
   const allowed = templates.some((template) =>
@@ -341,15 +461,27 @@ function authorizeShellCommand(
   );
 
   return allowed
-    ? allow("shell_exec command 匹配已授权模板。")
-    : deny("shell_exec command 不匹配已授权模板。");
+    ? allow(`${toolName} command 匹配已授权${templateLabel}。`)
+    : deny(`${toolName} command 不匹配已授权${templateLabel}。`);
+}
+
+function extractPathLikeShellTokens(command: string): string[] {
+  const tokens = command.match(/(?:"[^"]+"|'[^']+'|[^\s]+)/g) ?? [];
+  return tokens
+    .map((token) => token.replace(/^["']|["']$/g, ""))
+    .map((token) => {
+      const equalsIndex = token.indexOf("=");
+      return equalsIndex >= 0 ? token.slice(equalsIndex + 1) : token;
+    })
+    .filter((token) => token.startsWith("/") || token.startsWith("~/"));
 }
 
 function compileShellTemplate(template: string): RegExp {
   const pieces: string[] = [];
   let cursor = 0;
+  const tokenPattern = /(\{\{[a-zA-Z][a-zA-Z0-9_]*\}\}|\*)/g;
 
-  for (const match of template.matchAll(placeholderPattern)) {
+  for (const match of template.matchAll(tokenPattern)) {
     pieces.push(escapeRegExp(template.slice(cursor, match.index)));
     pieces.push(shellArgPattern());
     cursor = match.index + match[0].length;

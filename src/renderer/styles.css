@@ -1064,6 +1064,28 @@ nav {
 .guidance-card.is-warn { border-color: var(--status-warning-border); background: var(--status-warning-bg); }
 .guidance-card.is-error { border-color: var(--status-error-border); background: var(--status-error-bg); }
 .guidance-card p { color: var(--text-secondary); font-size: var(--text-base); line-height: var(--leading-normal); }
+.handoff-review-card {
+  display: grid; gap: var(--space-2);
+  padding: var(--space-3); border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg); background: var(--bg-surface);
+}
+.handoff-review-card > div:first-child {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
+}
+.handoff-review-card strong { color: var(--text-primary); }
+.handoff-review-card span {
+  color: var(--status-info-text); background: var(--status-info-bg);
+  border: 1px solid var(--status-info-border); border-radius: var(--radius-full);
+  padding: 2px var(--space-2); font-size: var(--text-xs); white-space: nowrap;
+}
+.handoff-review-card.is-accepted span { color: var(--status-success-text); background: var(--status-success-bg); border-color: var(--status-success-border); }
+.handoff-review-card.is-rejected span { color: var(--status-error-text); background: var(--status-error-bg); border-color: var(--status-error-border); }
+.handoff-review-card.is-revision_requested span { color: var(--status-warning-text); background: var(--status-warning-bg); border-color: var(--status-warning-border); }
+.handoff-review-card p { color: var(--text-secondary); line-height: var(--leading-normal); }
+.handoff-review-card ul {
+  display: grid; gap: var(--space-1);
+  margin: 0; padding-left: var(--space-5); color: var(--text-secondary);
+}
 
 /* ── Latest run & attention ────────────────────────────────────────────── */
 .latest-run-card, .attention-panel, .quick-actions {

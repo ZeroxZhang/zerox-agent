@@ -1,12 +1,19 @@
 import type { ToolDefinition } from "./openAiCompatibleClient";
-import type { AgentToolName } from "../shared/toolPermissions";
+import type { AgentRunContext } from "../shared/agentWorkspace";
+import type { NativeToolDescriptor } from "../shared/nativeCapabilities";
 
 export type AgentToolExecutionResult =
   | { ok: true; result: Record<string, unknown> }
   | { ok: false; error: string; errorDetails?: Record<string, unknown> };
 
+export type ToolExecutionOptions = {
+  runContext?: AgentRunContext;
+  signal?: AbortSignal;
+};
+
 export type ToolHandler = (
   args: Record<string, unknown>,
+  options?: ToolExecutionOptions,
 ) => Promise<AgentToolExecutionResult>;
 
 export type DynamicToolRegistry = {
@@ -14,12 +21,16 @@ export type DynamicToolRegistry = {
     definition: ToolDefinition,
     handler: ToolHandler,
     source: string,
+    descriptor?: NativeToolDescriptor,
   ): void;
   unregister(toolName: string): boolean;
   getDefinitions(): ToolDefinition[];
+  getNativeDescriptors(): NativeToolDescriptor[];
+  getNativeDescriptor(toolName: string): NativeToolDescriptor | null;
   execute(
     toolName: string,
     args: Record<string, unknown>,
+    options?: ToolExecutionOptions,
   ): Promise<AgentToolExecutionResult>;
   listBySource(): Map<string, string[]>;
   has(toolName: string): boolean;
@@ -29,9 +40,10 @@ export function createDynamicToolRegistry(): DynamicToolRegistry {
   const handlers = new Map<string, ToolHandler>();
   const definitions = new Map<string, ToolDefinition>();
   const sources = new Map<string, string>();
+  const nativeDescriptors = new Map<string, NativeToolDescriptor>();
 
   return {
-    register(definition, handler, source) {
+    register(definition, handler, source, descriptor) {
       const name = definition.function.name;
 
       if (handlers.has(name)) {
@@ -41,6 +53,9 @@ export function createDynamicToolRegistry(): DynamicToolRegistry {
       definitions.set(name, definition);
       handlers.set(name, handler);
       sources.set(name, source);
+      if (descriptor) {
+        nativeDescriptors.set(name, descriptor);
+      }
     },
 
     unregister(toolName) {
@@ -51,6 +66,7 @@ export function createDynamicToolRegistry(): DynamicToolRegistry {
       handlers.delete(toolName);
       definitions.delete(toolName);
       sources.delete(toolName);
+      nativeDescriptors.delete(toolName);
       return true;
     },
 
@@ -58,7 +74,15 @@ export function createDynamicToolRegistry(): DynamicToolRegistry {
       return [...definitions.values()];
     },
 
-    async execute(toolName, args) {
+    getNativeDescriptors() {
+      return [...nativeDescriptors.values()];
+    },
+
+    getNativeDescriptor(toolName) {
+      return nativeDescriptors.get(toolName) ?? null;
+    },
+
+    async execute(toolName, args, options) {
       const handler = handlers.get(toolName);
 
       if (!handler) {
@@ -66,7 +90,7 @@ export function createDynamicToolRegistry(): DynamicToolRegistry {
       }
 
       try {
-        return await handler(args);
+        return await handler(args, options);
       } catch (error) {
         return {
           ok: false,

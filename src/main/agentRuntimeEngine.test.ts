@@ -5,6 +5,7 @@ import type { AgentLearningStore } from "./agentLearningStore";
 import type { AgentRunStore } from "./agentRunStore";
 import type { AgentToolExecutor } from "./agentToolExecutor";
 import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
+import { createDynamicToolRegistry } from "./dynamicToolRegistry";
 import type {
   ChatClient,
   ChatCompletionResponse,
@@ -30,6 +31,7 @@ import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
 import type { MemoryInput, MemoryRecord, MemorySearchResult } from "../shared/memory";
 import type { ScheduledTask } from "../shared/scheduledTasks";
 import type { SkillRecord } from "../shared/skills";
+import { defineNativeToolDescriptor } from "../shared/nativeCapabilities";
 import { getDefaultTaskPermissionPolicy } from "../shared/toolPermissions";
 
 describe("agent runtime engine", () => {
@@ -150,6 +152,37 @@ describe("agent runtime engine", () => {
       taskId: "task_123",
       status: "succeeded",
       toolCallCount: 1,
+    });
+  });
+
+  it("marks the current runtime step completed when the run succeeds", async () => {
+    const savedCheckpoints: AgentExecutionCheckpoint[] = [];
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore(savedCheckpoints),
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: createChatClient([finalResponse("Report complete")]),
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor([]),
+      createId: createSequentialId("step_state"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+
+    const result = await engine.startTask("task_123");
+
+    expect(result).toMatchObject({
+      ok: true,
+      run: {
+        status: "succeeded",
+      },
+    });
+    expect(savedCheckpoints.at(-1)?.steps[0]).toMatchObject({
+      state: "completed",
+      attempts: 1,
+      startedAt: "2026-06-07T00:02:00.000Z",
+      finishedAt: "2026-06-07T00:04:00.000Z",
     });
   });
 
@@ -274,6 +307,168 @@ describe("agent runtime engine", () => {
     );
     expect(trajectoryEvents.every((event) => event.redaction.containsApiKey === false)).toBe(
       true,
+    );
+  });
+
+  it("records native tool invocation and observation events from registry metadata", async () => {
+    const trajectoryEvents: AgentTrajectoryEvent[] = [];
+    const registry = createDynamicToolRegistry();
+    registry.register(
+      {
+        type: "function",
+        function: {
+          name: "code_search",
+          description: "Search code",
+          parameters: {
+            type: "object",
+            properties: {
+              workspaceRoot: { type: "string" },
+              query: { type: "string" },
+            },
+            required: ["workspaceRoot", "query"],
+          },
+        },
+      },
+      async () => ({
+        ok: true,
+        result: { results: [{ relativePath: "src/main.ts" }] },
+      }),
+      "test",
+      defineNativeToolDescriptor({
+        id: "code_search",
+        kind: "code",
+        label: "Code Search",
+        description: "Search code through native registry metadata.",
+        riskLevel: "low",
+        permissionScope: { files: "read", shell: "none", web: "none" },
+        observableEvents: ["native_tool_invocation", "native_tool_observation"],
+      }),
+    );
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore([]),
+      trajectoryStore: createMemoryTrajectoryStore(trajectoryEvents),
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: createChatClient([
+        toolCallResponse("code_search", {
+          workspaceRoot: "/repo",
+          query: "createAgentRuntimeEngine",
+        }),
+        finalResponse("Report complete"),
+      ]),
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: {
+        async execute(request) {
+          return registry.execute(request.toolName, request.args);
+        },
+        getRegistry() {
+          return registry;
+        },
+        hasTool(toolName) {
+          return registry.has(toolName);
+        },
+      },
+      createId: createSequentialId("native_trajectory"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+
+    await engine.startTask("task_123");
+
+    expect(trajectoryEvents.map((event) => event.type)).toEqual([
+      "state_transition",
+      "checkpoint_written",
+      "state_transition",
+      "checkpoint_written",
+      "model_request",
+      "model_response",
+      "tool_call",
+      "native_tool_invocation",
+      "native_tool_observation",
+      "tool_result",
+      "checkpoint_written",
+      "model_request",
+      "model_response",
+      "final_summary",
+      "state_transition",
+      "checkpoint_written",
+    ]);
+    expect(trajectoryEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "native_tool_invocation",
+          payload: expect.objectContaining({
+            toolCallId: "call_1",
+            toolName: "code_search",
+            nativeKind: "code",
+            riskLevel: "low",
+          }),
+        }),
+        expect.objectContaining({
+          type: "native_tool_observation",
+          payload: expect.objectContaining({
+            toolCallId: "call_1",
+            toolName: "code_search",
+            nativeKind: "code",
+            riskLevel: "low",
+            ok: true,
+          }),
+        }),
+      ]),
+    );
+  });
+
+  it("records reflection evidence before failing a test_run tool failure", async () => {
+    const trajectoryEvents: AgentTrajectoryEvent[] = [];
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore([]),
+      trajectoryStore: createMemoryTrajectoryStore(trajectoryEvents),
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: createChatClient([
+        toolCallResponse("test_run", {
+          workspaceRoot: "/repo",
+          command: "npm test -- src/failing.test.ts",
+        }),
+      ]),
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: {
+        async execute() {
+          return {
+            ok: false,
+            error: "test_run failed with exit code 1.",
+            errorDetails: { kind: "exit", stderr: "expected true to be false" },
+          };
+        },
+      },
+      createId: createSequentialId("reflection"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+
+    await engine.startTask("task_123");
+
+    expect(trajectoryEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "reflection_added",
+          payload: expect.objectContaining({
+            toolName: "test_run",
+            failureClass: "verification_failed",
+            suggestion: "retry",
+            retryAllowed: true,
+          }),
+        }),
+      ]),
+    );
+    expect(trajectoryEvents.map((event) => event.type)).toEqual(
+      expect.arrayContaining([
+        "tool_result",
+        "reflection_added",
+        "failure_classified",
+      ]),
     );
   });
 
@@ -425,6 +620,92 @@ describe("agent runtime engine", () => {
 
     expect(authorizationContexts).toEqual([runContext]);
     expect(toolContexts).toEqual([runContext]);
+  });
+
+  it("passes the abort signal to runtime tool execution", async () => {
+    const controller = new AbortController();
+    let receivedSignal: AbortSignal | undefined;
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore([]),
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: createChatClient([
+        toolCallResponse("file_read", { path: "~/Downloads/notes.md" }),
+        finalResponse("Report complete"),
+      ]),
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: {
+        async execute(_request, options) {
+          receivedSignal = options?.signal;
+          return {
+            ok: true,
+            result: { content: "notes" },
+          };
+        },
+      },
+      createId: createSequentialId("signal"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+
+    await engine.startTask("task_123", { signal: controller.signal });
+
+    expect(receivedSignal).toBe(controller.signal);
+  });
+
+  it("checkpoints waiting_for_approval while tool authorization is pending", async () => {
+    const savedCheckpoints: AgentExecutionCheckpoint[] = [];
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore(savedCheckpoints),
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: createChatClient([
+        toolCallResponse("file_read", { path: "~/Downloads/notes.md" }),
+        finalResponse("Report complete"),
+      ]),
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: {
+        async authorize(_taskId, request, options) {
+          const lifecycle = options as {
+            onApprovalRequested?: () => Promise<void>;
+            onApprovalResolved?: () => Promise<void>;
+          } | undefined;
+          await lifecycle?.onApprovalRequested?.();
+          await lifecycle?.onApprovalResolved?.();
+          return {
+            ok: true,
+            decision: {
+              allowed: true,
+              reason: "approved after prompt",
+            },
+            auditEvent: {
+              id: "audit_approval",
+              taskId: "task_123",
+              request,
+              decision: {
+                allowed: true,
+                reason: "approved after prompt",
+              },
+              createdAt: "2026-06-07T00:00:00.000Z",
+            },
+          };
+        },
+      },
+      toolExecutor: createToolExecutor([]),
+      createId: createSequentialId("approval"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+
+    await engine.startTask("task_123");
+
+    expect(savedCheckpoints.map((checkpoint) => checkpoint.status)).toContain(
+      "waiting_for_approval",
+    );
+    expect(savedCheckpoints.map((checkpoint) => checkpoint.status)).toEqual(
+      expect.arrayContaining(["running", "waiting_for_approval", "succeeded"]),
+    );
   });
 
   it("records workspace escape denials before failing the run", async () => {

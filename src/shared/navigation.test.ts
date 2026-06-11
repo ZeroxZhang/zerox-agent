@@ -25,6 +25,7 @@ describe("navigation", () => {
       "tools",
       "memory",
       "learning",
+      "evals",
       "settings",
     ]);
   });
@@ -33,12 +34,13 @@ describe("navigation", () => {
     expect(getNavigationSection("missing").id).toBe("chat");
   });
 
-  it("opens cold starts on the chat workspace even when a stale hash points elsewhere", () => {
+  it("opens valid startup hashes and falls back to chat for unknown hashes", () => {
     expect(getStartupNavigationSection("#tools")).toMatchObject({
-      id: "chat",
-      label: "会话",
-      module: "智能体工作台",
+      id: "tools",
+      label: "工具",
+      module: "第 5 模块",
     });
-    expect(getStartupNavigationSection("#memory").id).toBe("chat");
+    expect(getStartupNavigationSection("#memory").id).toBe("memory");
+    expect(getStartupNavigationSection("#missing").id).toBe("chat");
   });
 });

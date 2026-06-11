@@ -1,6 +1,7 @@
 import type { AgentToolExecutor } from "./agentToolExecutor";
 import type {
   ChatClient,
+  ChatCompletionResponse,
   ChatMessage,
   ToolCall,
 } from "./openAiCompatibleClient";
@@ -36,6 +37,7 @@ export type AgentLoopOptions = {
   ) => void;
   onTurn?: (turn: number, phase: string) => void;
   onReasoning?: (reasoningContent: string, turn: number) => void;
+  onModelResponse?: (response: ChatCompletionResponse, turn: number) => void;
 };
 
 export type AgentLoopContinuation = {
@@ -85,6 +87,7 @@ export async function runAgentLoop(
     onToolResult,
     onTurn,
     onReasoning,
+    onModelResponse,
   } = options;
 
   const toolDefinitions = customTools ?? buildToolDefinitions();
@@ -170,6 +173,7 @@ export async function runAgentLoop(
         tool_choice: "auto",
         ...(signal ? { signal } : {}),
       });
+      onModelResponse?.(response, turns + 1);
       if (response.reasoningContent) {
         onReasoning?.(response.reasoningContent, turns + 1);
       }

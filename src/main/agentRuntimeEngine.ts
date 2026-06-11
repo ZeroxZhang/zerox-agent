@@ -24,6 +24,10 @@ import {
   buildTaskPrompt,
   buildToolDefinitions,
 } from "../shared/agentProtocol";
+import {
+  createToolFailureReflection,
+  type AgentReflectionDecision,
+} from "../shared/agentReflection";
 import { serializeToolObservationWithOffload } from "./toolObservationOffload";
 import type { ToolResultOffloadStore } from "./toolResultOffloadStore";
 import type {
@@ -36,6 +40,7 @@ import type {
   AgentTrajectoryEvent,
   AgentTrajectoryEventType,
 } from "../shared/agentTrajectory";
+import type { NativeToolDescriptor } from "../shared/nativeCapabilities";
 import type {
   AgentRunEvent,
   AgentRunRecord,
@@ -259,9 +264,16 @@ export function createAgentRuntimeEngine(options: {
     events: AgentRunEvent[],
     startedAt: string,
   ): Promise<RunScheduledTaskResult> {
-    let current = await saveCheckpoint(checkpoint, "running");
+    let current = await saveCheckpoint(checkpoint, "running", {
+      steps: markCurrentStepRunning(
+        checkpoint.steps,
+        checkpoint.currentStepId,
+        now().toISOString(),
+      ),
+    });
     let messages: ChatMessage[] = current.messages.map(toChatMessage);
     let toolCallCount = current.toolCallCount;
+    const reflectionDecisions: AgentReflectionDecision[] = [];
     const profile = await options.getModelProfile();
     const maxTurns = skill.manifest.execution.maxTurns ?? 10;
     const toolDefinitions = getToolDefinitions(options.toolExecutor);
@@ -299,6 +311,11 @@ export function createAgentRuntimeEngine(options: {
           ...current,
           messages: messages.map(toExecutionMessage),
           toolCallCount,
+          steps: markCurrentStepCompleted(
+            current.steps,
+            current.currentStepId,
+            now().toISOString(),
+          ),
         };
         await appendTrajectory(current.runId, "final_summary", {
           status: "succeeded",
@@ -342,20 +359,33 @@ export function createAgentRuntimeEngine(options: {
           containsFileContent: false,
           containsUserText: true,
         }, current.runContext);
-        const auth = await options.toolAuthorizationService.authorize(task.id, {
-          toolName,
-          args,
-        }, {
-          runContext: current.runContext,
-        });
+        const auth = await options.toolAuthorizationService.authorize(
+          task.id,
+          {
+            toolName,
+            args,
+          },
+          {
+            runContext: current.runContext,
+            onApprovalRequested: async () => {
+              current = await saveCheckpoint(current, "waiting_for_approval");
+            },
+            onApprovalResolved: async () => {
+              current = await saveCheckpoint(current, "running");
+            },
+          },
+        );
         if (!auth.ok || !auth.decision.allowed) {
           const reason = auth.ok ? auth.decision.reason : auth.message;
-          if (/运行沙箱阻止|workspace/i.test(reason)) {
+          if (/运行沙箱阻止|workspace|workspace_only/i.test(reason)) {
             await appendTrajectory(current.runId, "workspace_escape_denied", {
               toolCallId: toolCall.id,
               toolName,
               reason,
               ...(typeof args.path === "string" ? { path: args.path } : {}),
+              ...(typeof args.command === "string"
+                ? { command: args.command }
+                : {}),
             }, {
               containsApiKey: false,
               containsFileContent: false,
@@ -365,11 +395,43 @@ export function createAgentRuntimeEngine(options: {
           throw new Error(`工具调用被拒绝：${reason}`);
         }
 
+        const nativeDescriptor = getNativeToolDescriptor(
+          options.toolExecutor,
+          toolName,
+        );
+        if (nativeDescriptor) {
+          await appendTrajectory(current.runId, "native_tool_invocation", {
+            toolCallId: toolCall.id,
+            ...buildNativeToolEvidencePayload(nativeDescriptor),
+          }, {
+            containsApiKey: false,
+            containsFileContent: false,
+            containsUserText: false,
+          }, current.runContext);
+        }
+
         const result = await options.toolExecutor.execute(
           { toolName, args },
-          { runContext: current.runContext },
+          {
+            runContext: current.runContext,
+            ...(signal ? { signal } : {}),
+          },
         );
         toolCallCount += 1;
+        if (nativeDescriptor) {
+          await appendTrajectory(current.runId, "native_tool_observation", {
+            toolCallId: toolCall.id,
+            ...buildNativeToolEvidencePayload(nativeDescriptor),
+            ok: result.ok,
+            ...(result.ok
+              ? { resultKeys: Object.keys(result.result).slice(0, 10) }
+              : { error: result.error }),
+          }, {
+            containsApiKey: false,
+            containsFileContent: false,
+            containsUserText: false,
+          }, current.runContext);
+        }
         const serializedObservation =
           await serializeToolObservationWithOffload({
             tool: toolName,
@@ -406,6 +468,24 @@ export function createAgentRuntimeEngine(options: {
         });
 
         if (!result.ok) {
+          const reflection = createToolFailureReflection({
+            toolName,
+            args,
+            error: result.error,
+            errorDetails: result.errorDetails,
+            previousReflections: reflectionDecisions,
+            budget: { retryBudget: 1 },
+          });
+          reflectionDecisions.push(reflection);
+          await appendTrajectory(current.runId, "reflection_added", {
+            toolCallId: toolCall.id,
+            toolName,
+            ...reflection,
+          }, {
+            containsApiKey: false,
+            containsFileContent: false,
+            containsUserText: false,
+          }, current.runContext);
           throw new Error(`工具 ${toolName} 执行失败：${result.error}`);
         }
       }
@@ -619,6 +699,31 @@ function getToolDefinitions(toolExecutor: AgentToolExecutor): ToolDefinition[] {
   return buildToolDefinitions();
 }
 
+function getNativeToolDescriptor(
+  toolExecutor: AgentToolExecutor,
+  toolName: string,
+): NativeToolDescriptor | null {
+  const maybeExecutor = toolExecutor as Partial<Pick<AgentToolExecutor, "getRegistry">>;
+  if (typeof maybeExecutor.getRegistry !== "function") {
+    return null;
+  }
+
+  return maybeExecutor.getRegistry().getNativeDescriptor(toolName);
+}
+
+function buildNativeToolEvidencePayload(
+  descriptor: NativeToolDescriptor,
+): Record<string, unknown> {
+  return {
+    toolName: descriptor.id,
+    nativeKind: descriptor.kind,
+    riskLevel: descriptor.riskLevel,
+    permissionScope: descriptor.permissionScope,
+    source: "registry",
+    label: descriptor.label,
+  };
+}
+
 function parseToolArguments(raw: string): Record<string, unknown> {
   try {
     const parsed = JSON.parse(raw) as unknown;
@@ -682,6 +787,39 @@ function toChatMessage(message: AgentExecutionMessage): ChatMessage {
     ...(message.tool_call_id ? { tool_call_id: message.tool_call_id } : {}),
     ...(message.tool_calls ? { tool_calls: message.tool_calls as ChatMessage["tool_calls"] } : {}),
   };
+}
+
+function markCurrentStepRunning(
+  steps: AgentExecutionStep[],
+  currentStepId: string | undefined,
+  startedAt: string,
+): AgentExecutionStep[] {
+  return steps.map((step) =>
+    step.id === currentStepId
+      ? {
+          ...step,
+          state: step.state === "pending" ? "running" : step.state,
+          attempts: step.attempts === 0 ? 1 : step.attempts,
+          startedAt: step.startedAt ?? startedAt,
+        }
+      : step,
+  );
+}
+
+function markCurrentStepCompleted(
+  steps: AgentExecutionStep[],
+  currentStepId: string | undefined,
+  finishedAt: string,
+): AgentExecutionStep[] {
+  return steps.map((step) =>
+    step.id === currentStepId
+      ? {
+          ...step,
+          state: "completed",
+          finishedAt,
+        }
+      : step,
+  );
 }
 
 function markCurrentStepFailed(

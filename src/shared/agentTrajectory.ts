@@ -7,10 +7,16 @@ export type AgentTrajectoryEventType =
   | "model_response"
   | "tool_call"
   | "tool_result"
+  | "native_tool_invocation"
+  | "native_tool_observation"
   | "checkpoint_written"
   | "artifact_created"
   | "workspace_escape_denied"
   | "child_run_scheduled"
+  | "child_handoff_created"
+  | "child_handoff_completed"
+  | "child_handoff_reviewed"
+  | "reflection_added"
   | "failure_classified"
   | "final_summary";
 

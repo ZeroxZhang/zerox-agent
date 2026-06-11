@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -15,6 +15,21 @@ describe("Design System — Notion-inspired app shell", () => {
     path.join(process.cwd(), "src/renderer/components/AgentChatPanel.tsx"),
     "utf8",
   );
+  const overviewPanelSource = readFileSync(
+    path.join(process.cwd(), "src/renderer/components/OverviewPanel.tsx"),
+    "utf8",
+  );
+  const runsPanelSource = readFileSync(
+    path.join(process.cwd(), "src/renderer/components/RunsPanel.tsx"),
+    "utf8",
+  );
+  const evalReviewPanelPath = path.join(
+    process.cwd(),
+    "src/renderer/components/EvalReviewPanel.tsx",
+  );
+  const evalReviewPanelSource = existsSync(evalReviewPanelPath)
+    ? readFileSync(evalReviewPanelPath, "utf8")
+    : "";
 
   it("defines comprehensive CSS custom property design tokens", () => {
     // Color tokens
@@ -66,6 +81,74 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(appSource).not.toContain("v1.0.0");
     expect(appSource).toContain("getRuntimeInfo");
     expect(appSource).toContain("appVersion");
+  });
+
+  it("surfaces the local harness score in Overview", () => {
+    expect(overviewPanelSource).toContain("computeHarnessScore");
+    expect(overviewPanelSource).toContain("Harness");
+    expect(overviewPanelSource).toContain("ETCLOVG 七类");
+  });
+
+  it("surfaces the agent capability score in Overview", () => {
+    expect(overviewPanelSource).toContain("computeAgentCapabilityScore");
+    expect(overviewPanelSource).toContain("Agent Capability");
+    expect(overviewPanelSource).toContain("native tools");
+  });
+
+  it("surfaces child handoff review gates in Runs", () => {
+    expect(runsPanelSource).toContain("summarizeHandoffReviewCards");
+    expect(runsPanelSource).toContain("handoff-review-card");
+    expect(runsPanelSource).toContain("Handoff Review");
+    expect(styles).toContain(".handoff-review-card");
+  });
+
+  it("surfaces eval candidate generation from terminal Runs", () => {
+    expect(runsPanelSource).toContain("Eval Candidate");
+    expect(runsPanelSource).toContain("generateEvalCandidateForRun");
+  });
+
+  it("surfaces eval candidate review and promotion controls", () => {
+    expect(existsSync(evalReviewPanelPath)).toBe(true);
+
+    expect(evalReviewPanelSource).toContain("listEvalCandidates");
+    expect(evalReviewPanelSource).toContain("promoteEvalCandidate");
+  });
+
+  it("loads pending eval candidates into the Overview capability score", () => {
+    expect(overviewPanelSource).not.toContain("pendingEvalCandidates: 0");
+    expect(overviewPanelSource).toContain("listEvalCandidates({");
+  });
+
+  it("keeps eval candidate review mutations recoverable on preload rejection", () => {
+    const setCandidateStatusSource = getFunctionSource(
+      evalReviewPanelSource,
+      "setCandidateStatus",
+    );
+    const promoteCandidateSource = getFunctionSource(
+      evalReviewPanelSource,
+      "promoteCandidate",
+    );
+
+    expect(setCandidateStatusSource).toContain("catch (error)");
+    expect(setCandidateStatusSource).toContain("kind: \"error\"");
+    expect(promoteCandidateSource).toContain("catch (error)");
+    expect(promoteCandidateSource).toContain("kind: \"error\"");
+  });
+
+  it("keeps run eval candidate generation recoverable on preload rejection", () => {
+    const generateCandidateSource = getFunctionSource(
+      runsPanelSource,
+      "handleGenerateEvalCandidateForSelectedRun",
+    );
+
+    expect(generateCandidateSource).toContain("catch (error)");
+    expect(generateCandidateSource).toContain("kind: \"error\"");
+  });
+
+  it("lets Overview load when pending eval candidate loading fails", () => {
+    expect(overviewPanelSource).toMatch(
+      /listEvalCandidates\(\{\s*status: "pending_review",\s*\}\)\.catch\(\(\) => \[\]\)/s,
+    );
   });
 
   it("provides reusable component classes for all screens", () => {
@@ -120,3 +203,32 @@ describe("Design System — Notion-inspired app shell", () => {
     );
   });
 });
+
+function getFunctionSource(source: string, functionName: string): string {
+  const marker = `async function ${functionName}`;
+  const startIndex = source.indexOf(marker);
+  if (startIndex === -1) {
+    return "";
+  }
+
+  const bodyStartIndex = source.indexOf("{", startIndex);
+  if (bodyStartIndex === -1) {
+    return source.slice(startIndex);
+  }
+
+  let depth = 0;
+  for (let index = bodyStartIndex; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === "{") {
+      depth += 1;
+    }
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(startIndex, index + 1);
+      }
+    }
+  }
+
+  return source.slice(startIndex);
+}
