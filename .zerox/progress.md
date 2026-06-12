@@ -422,3 +422,19 @@
   - `npm run harness:check` -> passed.
   - `git diff --check` -> passed.
   - `npm run smoke:prod` not run because this slice changed main-process persistence code and tests only, with no UI/runtime-affecting behavior wired yet.
+
+## 2026-06-12 Goal Mode P5.3 Planner
+
+- Added an injected-model goal planner that decomposes natural-language goals into acceptance-bearing milestones without real model calls in tests.
+- Reused P5.1 draft validation, added deterministic dependency-cycle rejection, one repair re-prompt for invalid plans, and replan behavior that preserves accepted milestones while incrementing `planVersion` and `budgetUsage.replans`.
+- Changed files:
+  - `src/main/agentGoalPlanner.ts`
+  - `src/main/agentGoalPlanner.test.ts`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `npm test -- src/main/agentGoalPlanner.test.ts` -> RED, missing `./agentGoalPlanner` module.
+  - `npm test -- src/main/agentGoalPlanner.test.ts` -> 1 file / 4 tests passed.
+  - `npm run verify` -> 100 Vitest files / 465 tests passed, build passed, agent eval 15/15, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run smoke:prod` not run because this slice changed planner code and tests only, with no UI/runtime-affecting behavior wired yet.
