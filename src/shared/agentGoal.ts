@@ -77,6 +77,8 @@ export type GoalBudgetUsage = {
 
 export type Goal = {
   id: string;
+  chatSessionId?: string;
+  originMessageId?: string;
   description: string;
   successCriteria: SuccessCriterion[];
   milestones: Milestone[];

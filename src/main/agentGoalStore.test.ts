@@ -162,6 +162,53 @@ describe("agent goal store", () => {
       access(path.join(configDir, "agent-goals", "goal_delete.json")),
     ).rejects.toMatchObject({ code: "ENOENT" });
   });
+
+  it("lists goals attached to a chat session newest first", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const older = createGoal(
+      "goal_older",
+      "achieved",
+      "2026-06-12T00:01:00.000Z",
+    );
+    const newer = createGoal(
+      "goal_newer",
+      "executing",
+      "2026-06-12T00:02:00.000Z",
+    );
+    const other = createGoal(
+      "goal_other",
+      "executing",
+      "2026-06-12T00:03:00.000Z",
+    );
+
+    await store.save({
+      ...older,
+      chatSessionId: "chat_release",
+      originMessageId: "message_goal_1",
+    });
+    await store.save({
+      ...newer,
+      chatSessionId: "chat_release",
+      originMessageId: "message_goal_2",
+    });
+    await store.save({
+      ...other,
+      chatSessionId: "chat_other",
+    });
+
+    await expect(store.listByChatSession("chat_release")).resolves.toMatchObject([
+      {
+        id: "goal_newer",
+        chatSessionId: "chat_release",
+        originMessageId: "message_goal_2",
+      },
+      {
+        id: "goal_older",
+        chatSessionId: "chat_release",
+        originMessageId: "message_goal_1",
+      },
+    ]);
+  });
 });
 
 const criterion: SuccessCriterion = {

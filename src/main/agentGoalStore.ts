@@ -22,6 +22,7 @@ export type AgentGoalStore = {
   save(goal: Goal): Promise<Goal>;
   get(goalId: string): Promise<Goal | null>;
   listActive(): Promise<Goal[]>;
+  listByChatSession(chatSessionId: string): Promise<Goal[]>;
   appendLedger(goalId: string, event: ProgressLedgerEvent): Promise<void>;
   readLedger(goalId: string): Promise<ProgressLedgerEvent[]>;
   delete(goalId: string): Promise<boolean>;
@@ -51,7 +52,7 @@ export function createAgentGoalStore(options: {
   async function readGoal(goalId: string): Promise<Goal | null> {
     try {
       const raw = await readFile(goalPath(goalId), "utf8");
-      return JSON.parse(raw) as Goal;
+      return normalizeGoal(JSON.parse(raw) as Goal);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         return null;
@@ -59,6 +60,27 @@ export function createAgentGoalStore(options: {
 
       throw error;
     }
+  }
+
+  async function readAllGoals(): Promise<Goal[]> {
+    let files: string[];
+    try {
+      files = await readdir(goalsDir);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return [];
+      }
+
+      throw error;
+    }
+
+    const goals = await Promise.all(
+      files
+        .filter((file) => file.endsWith(".json"))
+        .map((file) => readGoal(path.basename(file, ".json"))),
+    );
+
+    return goals.filter((goal): goal is Goal => goal !== null);
   }
 
   return {
@@ -75,31 +97,16 @@ export function createAgentGoalStore(options: {
     },
 
     async listActive() {
-      let files: string[];
-      try {
-        files = await readdir(goalsDir);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-          return [];
-        }
-
-        throw error;
-      }
-
-      const goals = await Promise.all(
-        files
-          .filter((file) => file.endsWith(".json"))
-          .map((file) => readGoal(path.basename(file, ".json"))),
-      );
-
-      return goals
+      return (await readAllGoals())
         .filter(isActiveGoal)
-        .sort(
-          (left, right) =>
-            new Date(right.updatedAt).getTime() -
-              new Date(left.updatedAt).getTime() ||
-            right.id.localeCompare(left.id),
-        );
+        .sort(compareGoalsByUpdatedAtDesc);
+    },
+
+    async listByChatSession(chatSessionId) {
+      const goals = await readAllGoals();
+      return goals
+        .filter((goal) => goal.chatSessionId === chatSessionId)
+        .sort(compareGoalsByUpdatedAtDesc);
     },
 
     async appendLedger(goalId, event) {
@@ -143,4 +150,21 @@ export function createAgentGoalStore(options: {
 
 function isActiveGoal(goal: Goal | null): goal is Goal {
   return goal !== null && !terminalGoalStatuses.has(goal.status);
+}
+
+function normalizeGoal(goal: Goal): Goal {
+  return {
+    ...goal,
+    ...(goal.chatSessionId ? { chatSessionId: String(goal.chatSessionId) } : {}),
+    ...(goal.originMessageId
+      ? { originMessageId: String(goal.originMessageId) }
+      : {}),
+  };
+}
+
+function compareGoalsByUpdatedAtDesc(left: Goal, right: Goal): number {
+  return (
+    new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime() ||
+    right.id.localeCompare(left.id)
+  );
 }
