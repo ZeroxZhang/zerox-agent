@@ -3,6 +3,11 @@ import type { AgentRunContext } from "./agentWorkspace";
 export type AgentTrajectoryEventType =
   | "run_context_created"
   | "state_transition"
+  | "goal_planned"
+  | "milestone_started"
+  | "goal_replanned"
+  | "goal_review_requested"
+  | "goal_stopped"
   | "model_request"
   | "model_retry"
   | "model_response"
