@@ -41,6 +41,10 @@ import {
   type AgentWorkspaceStore,
 } from "./agentWorkspaceStore";
 import {
+  createAgentGoalStore,
+  type AgentGoalStore,
+} from "./agentGoalStore";
+import {
   createAgentWorkspaceService,
   type AgentWorkspaceService,
   type CreateGitWorktreeWorkspaceInput,
@@ -159,6 +163,16 @@ import type {
   RunScheduledTaskResult,
 } from "../shared/agentRuns";
 import { isTerminalExecutionStatus } from "../shared/agentExecution";
+import {
+  assertGoalTransition,
+  type Goal,
+  type GoalBudget,
+  type SuccessCriterion,
+} from "../shared/agentGoal";
+import type {
+  GoalReviewDecision,
+  GoalReviewPolicy,
+} from "../shared/agentGoalReview";
 import type {
   CreateMemoryResult,
   DeleteMemoryResult,
@@ -242,6 +256,7 @@ let promotedAgentEvalFixtureStore: PromotedAgentEvalFixtureStore | null = null;
 let agentEvalCandidateService: AgentEvalCandidateService | null = null;
 let agentWorkspaceStore: AgentWorkspaceStore | null = null;
 let agentWorkspaceService: AgentWorkspaceService | null = null;
+let agentGoalStore: AgentGoalStore | null = null;
 let multiAgentSessionStore: MultiAgentSessionStore | null = null;
 let multiAgentCoordinator: MultiAgentCoordinator | null = null;
 let agentRunnerService: AgentRunnerService | null = null;
@@ -609,6 +624,82 @@ ipcMain.handle(
   "agentRuns:listTrajectory",
   (_event, runId: string): Promise<AgentTrajectoryEvent[]> =>
     getAgentTrajectoryStore().list(runId),
+);
+ipcMain.handle("goal:listActive", (): Promise<Goal[]> =>
+  getAgentGoalStore().listActive(),
+);
+ipcMain.handle("goal:get", (_event, goalId: string): Promise<Goal | null> =>
+  getAgentGoalStore().get(goalId),
+);
+ipcMain.handle(
+  "goal:create",
+  async (
+    _event,
+    input: {
+      description: string;
+      successCriteria: string[];
+      budget: GoalBudget;
+      reviewPolicy: GoalReviewPolicy;
+    },
+  ): Promise<{ ok: boolean; goal?: Goal; message?: string }> => {
+    try {
+      const goal = createGoalDraft(input);
+      await getAgentGoalStore().save(goal);
+      await getAgentGoalStore().appendLedger(goal.id, {
+        at: goal.createdAt,
+        kind: "goal_planned",
+        summary: "Goal created and ready for planning.",
+      });
+      return { ok: true, goal };
+    } catch (error) {
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : "无法创建目标。",
+      };
+    }
+  },
+);
+ipcMain.handle("goal:start", async (_event, goalId: string) =>
+  updateGoalStatus(goalId, "executing"),
+);
+ipcMain.handle("goal:pause", async (_event, goalId: string) =>
+  updateGoalStatus(goalId, "waiting_for_review"),
+);
+ipcMain.handle("goal:resume", async (_event, goalId: string) =>
+  updateGoalStatus(goalId, "executing"),
+);
+ipcMain.handle("goal:cancel", async (_event, goalId: string) =>
+  updateGoalStatus(goalId, "canceled", "user_canceled"),
+);
+ipcMain.handle(
+  "goal:resolveReview",
+  async (
+    _event,
+    goalId: string,
+    decision: GoalReviewDecision,
+  ): Promise<{ ok: boolean; goal?: Goal; message?: string }> => {
+    const goal = await getAgentGoalStore().get(goalId);
+    if (!goal) {
+      return { ok: false, message: "目标不存在。" };
+    }
+
+    await getAgentGoalStore().appendLedger(goalId, {
+      at: new Date().toISOString(),
+      kind: "review_resolved",
+      summary: `Review resolved with ${decision.kind}.`,
+    });
+
+    if (decision.kind === "terminate") {
+      return updateGoalStatus(goalId, "canceled", "review_rejected");
+    }
+
+    if (decision.kind === "modify_plan") {
+      goal.planVersion += 1;
+      goal.budgetUsage.replans += 1;
+    }
+
+    return saveGoalStatus(goal, "executing");
+  },
 );
 ipcMain.handle(
   "agentEvalCandidates:list",
@@ -1116,6 +1207,103 @@ function ensureVisibleApprovalWindow(): BrowserWindow {
   return windowInstance;
 }
 
+function createGoalDraft(input: {
+  description: string;
+  successCriteria: string[];
+  budget: GoalBudget;
+  reviewPolicy: GoalReviewPolicy;
+}): Goal {
+  const now = new Date().toISOString();
+  const criteria = input.successCriteria
+    .filter((description) => description.trim())
+    .map((description, index): SuccessCriterion => ({
+      id: `criterion_${index + 1}`,
+      description: description.trim(),
+      acceptanceChecks: [
+        {
+          id: `criterion_${index + 1}_review`,
+          kind: "model_review",
+          description: "Evidence-backed review is required.",
+          params: {},
+          requiresEvidence: true,
+        },
+      ],
+    }));
+
+  return {
+    id: `goal_${randomUUID()}`,
+    description: input.description.trim(),
+    successCriteria: criteria.length
+      ? criteria
+      : [
+          {
+            id: "criterion_1",
+            description: "Goal must be accepted with evidence.",
+            acceptanceChecks: [
+              {
+                id: "criterion_1_review",
+                kind: "model_review",
+                description: "Evidence-backed review is required.",
+                params: {},
+                requiresEvidence: true,
+              },
+            ],
+          },
+        ],
+    milestones: [],
+    status: "planning",
+    budget: input.budget,
+    budgetUsage: {
+      iterations: 0,
+      toolCalls: 0,
+      wallClockMs: 0,
+      tokens: 0,
+      replans: 0,
+    },
+    reviewPolicy: input.reviewPolicy,
+    planVersion: 1,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+async function updateGoalStatus(
+  goalId: string,
+  status: Goal["status"],
+  stopReason?: Goal["stopReason"],
+): Promise<{ ok: boolean; goal?: Goal; message?: string }> {
+  const goal = await getAgentGoalStore().get(goalId);
+  if (!goal) {
+    return { ok: false, message: "目标不存在。" };
+  }
+
+  return saveGoalStatus(goal, status, stopReason);
+}
+
+async function saveGoalStatus(
+  goal: Goal,
+  status: Goal["status"],
+  stopReason?: Goal["stopReason"],
+): Promise<{ ok: boolean; goal?: Goal; message?: string }> {
+  try {
+    if (goal.status !== status) {
+      assertGoalTransition(goal.status, status);
+    }
+    goal.status = status;
+    if (stopReason) {
+      goal.stopReason = stopReason;
+    }
+    goal.updatedAt = new Date().toISOString();
+    await getAgentGoalStore().save(goal);
+    return { ok: true, goal };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : "无法更新目标状态。",
+    };
+  }
+}
+
 function getAgentRunStore(): AgentRunStore {
   if (!agentRunStore) {
     agentRunStore = createAgentRunStore({
@@ -1144,6 +1332,16 @@ function getAgentTrajectoryStore(): AgentTrajectoryStore {
   }
 
   return agentTrajectoryStore;
+}
+
+function getAgentGoalStore(): AgentGoalStore {
+  if (!agentGoalStore) {
+    agentGoalStore = createAgentGoalStore({
+      configDir: path.join(app.getPath("userData"), "config"),
+    });
+  }
+
+  return agentGoalStore;
 }
 
 function getAgentWorkspaceStore(): AgentWorkspaceStore {

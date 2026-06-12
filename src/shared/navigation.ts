@@ -1,6 +1,7 @@
 export type NavigationSectionId =
   | "chat"
   | "overview"
+  | "goals"
   | "runs"
   | "skills"
   | "scheduled-tasks"
@@ -39,6 +40,17 @@ const navigationSections: NavigationSection[] = [
       "查看本地智能体是否已经准备好工作。",
       "一眼看到最近运行、调度器和记忆状态。",
       "直接跳到能解决问题的页面。",
+    ],
+  },
+  {
+    id: "goals",
+    label: "目标",
+    module: "Goal Mode",
+    summary: "创建、运行和审核有边界自治目标。",
+    details: [
+      "把高层目标拆成带验收条件的里程碑。",
+      "查看预算、进度 ledger 和 review gate。",
+      "在继续、修改计划或终止之前保留人工审核点。",
     ],
   },
   {

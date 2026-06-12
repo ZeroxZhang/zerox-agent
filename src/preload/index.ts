@@ -59,6 +59,11 @@ import type {
 } from "../shared/agentRuns";
 import type { AgentExecutionCheckpoint } from "../shared/agentExecution";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
+import type { Goal, GoalBudget } from "../shared/agentGoal";
+import type {
+  GoalReviewDecision,
+  GoalReviewPolicy,
+} from "../shared/agentGoalReview";
 import type {
   AgentWorkspace,
   AgentWorkspaceCleanup,
@@ -77,6 +82,19 @@ import type {
   ToolAuditEvent,
   ToolCallRequest,
 } from "../shared/toolPermissions";
+
+export type CreateGoalInput = {
+  description: string;
+  successCriteria: string[];
+  budget: GoalBudget;
+  reviewPolicy: GoalReviewPolicy;
+};
+
+export type GoalOperationResult = {
+  ok: boolean;
+  goal?: Goal;
+  message?: string;
+};
 
 const buildingAgent = {
   getAppMeta: (): Promise<AppMeta> => ipcRenderer.invoke("app:getMeta"),
@@ -141,6 +159,24 @@ const buildingAgent = {
     ipcRenderer.invoke("multiAgentSessions:list"),
   listAgentRunTrajectory: (runId: string): Promise<AgentTrajectoryEvent[]> =>
     ipcRenderer.invoke("agentRuns:listTrajectory", runId),
+  createGoal: (input: CreateGoalInput): Promise<GoalOperationResult> =>
+    ipcRenderer.invoke("goal:create", input),
+  startGoal: (goalId: string): Promise<GoalOperationResult> =>
+    ipcRenderer.invoke("goal:start", goalId),
+  pauseGoal: (goalId: string): Promise<GoalOperationResult> =>
+    ipcRenderer.invoke("goal:pause", goalId),
+  resumeGoal: (goalId: string): Promise<GoalOperationResult> =>
+    ipcRenderer.invoke("goal:resume", goalId),
+  resolveGoalReview: (
+    goalId: string,
+    decision: GoalReviewDecision,
+  ): Promise<GoalOperationResult> =>
+    ipcRenderer.invoke("goal:resolveReview", goalId, decision),
+  cancelGoal: (goalId: string): Promise<GoalOperationResult> =>
+    ipcRenderer.invoke("goal:cancel", goalId),
+  getGoal: (goalId: string): Promise<Goal | null> =>
+    ipcRenderer.invoke("goal:get", goalId),
+  listActiveGoals: (): Promise<Goal[]> => ipcRenderer.invoke("goal:listActive"),
   readToolResultRef: (ref: string): Promise<ReadToolResultRefResult> =>
     ipcRenderer.invoke("toolResults:readRef", ref),
   getAgentEvalReport: (): Promise<AgentEvalReport> =>

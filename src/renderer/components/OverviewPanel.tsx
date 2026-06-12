@@ -12,6 +12,7 @@ import {
 import type { AgentRunRecord } from "../../shared/agentRuns";
 import type { AgentEvalReport } from "../../shared/agentEval";
 import type { AgentEvalCandidate } from "../../shared/agentEvalCandidate";
+import type { Goal } from "../../shared/agentGoal";
 import type { AgentLearningCandidate } from "../../shared/agentLearning";
 import type {
   AgentBootstrapReport,
@@ -45,6 +46,7 @@ import {
 } from "../agentValidationPreviewStore";
 
 type OverviewData = {
+  activeGoals: Goal[];
   evalCandidates: AgentEvalCandidate[];
   evalReport: AgentEvalReport;
   learningCandidates: AgentLearningCandidate[];
@@ -94,6 +96,7 @@ export function OverviewPanel(props: {
         }),
       );
       setData({
+        activeGoals: [],
         evalCandidates: [],
         evalReport: demoAgentEvalReport,
         learningCandidates: demoLearningCandidates,
@@ -129,6 +132,7 @@ export function OverviewPanel(props: {
       window.buildingAgent.listEvalCandidates({
         status: "pending_review",
       }).catch(() => []),
+      window.buildingAgent.listActiveGoals().catch(() => []),
       window.buildingAgent.getAgentEvalReport(),
     ])
       .then(([
@@ -141,9 +145,11 @@ export function OverviewPanel(props: {
         runtime,
         learningCandidates,
         evalCandidates,
+        activeGoals,
         evalReport,
       ]) => {
         setData({
+          activeGoals,
           evalCandidates,
           evalReport,
           learningCandidates,
@@ -205,6 +211,12 @@ export function OverviewPanel(props: {
   );
   const attentionItems = useMemo(
     () => (data ? buildAttentionItems(data) : []),
+    [data],
+  );
+  const goalsWaitingForReview = useMemo(
+    () =>
+      data?.activeGoals.filter((goal) => goal.status === "waiting_for_review")
+        .length ?? 0,
     [data],
   );
   const readinessChecklist = useMemo(
@@ -376,6 +388,16 @@ export function OverviewPanel(props: {
           }
           tone={agentCapabilityScore?.tone ?? "warn"}
           value={agentCapabilityScore?.summary ?? "native tools"}
+        />
+        <HealthCard
+          label="Goals"
+          status={`${data?.activeGoals.length ?? 0} 个活跃`}
+          tone={goalsWaitingForReview ? "warn" : "good"}
+          value={
+            goalsWaitingForReview
+              ? `${goalsWaitingForReview} 个等待审核`
+              : "有边界自治"
+          }
         />
         <HealthCard
           label="记忆"
@@ -623,6 +645,7 @@ export function OverviewPanel(props: {
       skills,
       learningCandidates,
       evalCandidates,
+      activeGoals,
       evalReport,
     ] = await Promise.all([
       window.buildingAgent.loadModelSettings(),
@@ -636,9 +659,11 @@ export function OverviewPanel(props: {
       window.buildingAgent.listEvalCandidates({
         status: "pending_review",
       }).catch(() => []),
+      window.buildingAgent.listActiveGoals().catch(() => []),
       window.buildingAgent.getAgentEvalReport(),
     ]);
     setData({
+      activeGoals,
       evalCandidates,
       evalReport,
       learningCandidates,
@@ -686,6 +711,7 @@ export function OverviewPanel(props: {
       skills,
       learningCandidates,
       evalCandidates,
+      activeGoals,
       evalReport,
     ] = await Promise.all([
       window.buildingAgent.loadModelSettings(),
@@ -699,9 +725,11 @@ export function OverviewPanel(props: {
       window.buildingAgent.listEvalCandidates({
         status: "pending_review",
       }).catch(() => []),
+      window.buildingAgent.listActiveGoals().catch(() => []),
       window.buildingAgent.getAgentEvalReport(),
     ]);
     setData({
+      activeGoals,
       evalCandidates,
       evalReport,
       learningCandidates,
@@ -850,6 +878,18 @@ function buildAttentionItems(data: OverviewData): AttentionItem[] {
       title: `${data.evalCandidates.length} 个评测候选待审核`,
       action: "打开“评测”，决定哪些候选可以提升为固定回归样例。",
       target: "evals",
+    });
+  }
+
+  const goalsWaitingForReview = data.activeGoals.filter(
+    (goal) => goal.status === "waiting_for_review",
+  ).length;
+  if (goalsWaitingForReview) {
+    items.push({
+      tone: "warn",
+      title: `${goalsWaitingForReview} 个目标等待审核`,
+      action: "打开“目标”，决定继续、修改计划或终止。",
+      target: "goals",
     });
   }
 
