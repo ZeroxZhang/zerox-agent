@@ -888,8 +888,8 @@ function buildAttentionItems(data: OverviewData): AttentionItem[] {
     items.push({
       tone: "warn",
       title: `${goalsWaitingForReview} 个目标等待审核`,
-      action: "打开“目标”，决定继续、修改计划或终止。",
-      target: "goals",
+      action: "打开会话，决定继续、修改计划或终止。",
+      target: "chat",
     });
   }
 

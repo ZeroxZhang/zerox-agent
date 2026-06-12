@@ -34,13 +34,6 @@ describe("Design System — Notion-inspired app shell", () => {
   const evalReviewPanelSource = existsSync(evalReviewPanelPath)
     ? readFileSync(evalReviewPanelPath, "utf8")
     : "";
-  const goalPanelPath = path.join(
-    process.cwd(),
-    "src/renderer/components/GoalPanel.tsx",
-  );
-  const goalPanelSource = existsSync(goalPanelPath)
-    ? readFileSync(goalPanelPath, "utf8")
-    : "";
 
   it("defines comprehensive CSS custom property design tokens", () => {
     // Color tokens
@@ -150,18 +143,13 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".settings-section-body");
   });
 
-  it("surfaces Goal Mode review gates and controls", () => {
-    expect(existsSync(goalPanelPath)).toBe(true);
-    expect(appSource).toContain("GoalPanel");
-    expect(goalPanelSource).toContain("createGoal");
-    expect(goalPanelSource).toContain("listActiveGoals");
-    expect(goalPanelSource).toContain("resolveGoalReview");
-    expect(goalPanelSource).toContain("review-gate-card");
-    expect(goalPanelSource).toContain("approve_continue");
-    expect(goalPanelSource).toContain("modify_plan");
-    expect(goalPanelSource).toContain("terminate");
+  it("keeps Goal Mode inside Chat instead of a standalone page", () => {
+    expect(appSource).not.toContain("activeSection.id === \"goals\"");
+    expect(appSource).not.toContain("<GoalPanel");
     expect(overviewPanelSource).toContain("listActiveGoals");
     expect(overviewPanelSource).toContain("goalsWaitingForReview");
+    expect(overviewPanelSource).toContain("target: \"chat\"");
+    expect(overviewPanelSource).not.toContain("target: \"goals\"");
   });
 
   it("surfaces session-native Goal Mode inside Chat", () => {
