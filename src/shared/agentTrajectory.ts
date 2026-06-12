@@ -12,6 +12,7 @@ export type AgentTrajectoryEventType =
   | "native_tool_observation"
   | "checkpoint_written"
   | "context_compacted"
+  | "acceptance_checked"
   | "artifact_created"
   | "workspace_escape_denied"
   | "child_run_scheduled"

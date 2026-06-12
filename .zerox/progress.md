@@ -438,3 +438,20 @@
   - `npm run harness:check` -> passed.
   - `git diff --check` -> passed.
   - `npm run smoke:prod` not run because this slice changed planner code and tests only, with no UI/runtime-affecting behavior wired yet.
+
+## 2026-06-12 Goal Mode P5.4 Acceptance Engine
+
+- Added a deterministic-first acceptance engine for milestone and goal-level success criteria.
+- Covered `file_exists`, `command_exit_code`, `test_passes`, structured artifact `assertion`, model-review evidence gating, deterministic-before-inferential ordering, and `acceptance_checked` trajectory evidence.
+- Changed files:
+  - `src/main/agentGoalAcceptance.ts`
+  - `src/main/agentGoalAcceptance.test.ts`
+  - `src/shared/agentTrajectory.ts`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `npm test -- src/main/agentGoalAcceptance.test.ts` -> RED, missing `./agentGoalAcceptance` module.
+  - `npm test -- src/main/agentGoalAcceptance.test.ts` -> 1 file / 7 tests passed.
+  - `npm run verify` -> 101 Vitest files / 472 tests passed, build passed, agent eval 15/15, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run smoke:prod` not run because this slice changed main-process acceptance code and shared trajectory types only, with no UI/runtime-affecting behavior wired yet.
