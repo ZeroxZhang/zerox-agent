@@ -349,3 +349,24 @@
   - `npm run dist:mac` -> generated `release/Zerox Agent-1.6.0-arm64.dmg` and `release/Zerox Agent-1.6.0-arm64-mac.zip`.
   - `node -e "JSON.parse(require('fs').readFileSync('.zerox/feature_list.json','utf8')); console.log('feature_list.json ok')"` -> feature_list.json ok.
   - `git diff --check` -> passed.
+
+## 2026-06-12 Goal Mode A1 Bounded Autonomy Contract
+
+- Started the Goal Mode planning iteration from `/tmp/codex-remote-attachments/019ebab7-245f-73c3-9e29-c28c45571dae/779C0DB6-83A3-4C16-8D42-FF5118163FE1/1-2026-06-12-agent-goal-mode.md`.
+- `.zerox/feature_list.json` had no unfinished entries, so this round selected exactly one unfinished slice from the attached plan: A1 Encode Bounded Autonomy.
+- Encoded the product boundary before runtime implementation: autonomous goal runs must be budgeted, inspectable, interruptible, recoverable, evidence-backed, and review-gated.
+- Changed files:
+  - `docs/product/zerox-positioning.md`
+  - `README.md`
+  - `src/shared/readme.test.ts`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `./init.sh` -> harness check passed; `src/shared/packageScripts.test.ts` 1 file / 5 tests passed.
+  - `npm test -- src/shared/readme.test.ts` -> RED, missing `Autonomous goal run` positioning contract.
+  - `npm test -- src/shared/readme.test.ts` -> 1 file / 2 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> 96 Vitest files / 448 tests passed, build passed, agent eval 15/15, memory eval 2/2.
+  - `npm run harness:check` after progress update -> passed.
+  - `git diff --check` -> passed.
+  - `npm test` after progress update -> 96 Vitest files / 448 tests passed.
+  - `npm run smoke:prod` not run because this slice changed docs and a docs contract test only, with no UI/runtime behavior change.

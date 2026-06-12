@@ -616,6 +616,7 @@ Recently shipped:
 
 Planned:
 
+- [ ] Goal Mode (bounded autonomy): high-level goals with explicit budgets, deterministic or evidence-backed acceptance, interruption, recovery, and review gates
 - [ ] Apple signing, notarization, auto-update, and clearer release distribution
 - [ ] Deeper runtime-loop consolidation with first-class persistent plans and verifier/critic passes
 - [ ] Skill marketplace, remote skill installation, and visual skill/workflow editing
@@ -1330,6 +1331,7 @@ npm run verify        # 测试 + 构建 + 确定性评测
 
 后续计划：
 
+- [ ] Goal Mode（有边界自治）：支持高层目标运行，但必须带预算、确定性或证据支撑的验收、中断/恢复和审核门
 - [ ] Apple 签名、公证、自动更新和更清晰的分发流程
 - [ ] 更深的 runtime loop 统一，包含一等持久化 plan 与 verifier/critic 回路
 - [ ] 技能市场、远程技能安装和可视化技能/工作流编辑

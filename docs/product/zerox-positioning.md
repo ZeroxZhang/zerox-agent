@@ -18,6 +18,7 @@ Turn recurring or messy local workflows into observable, permissioned, recoverab
 - Zerox is not a cloud agent hosting service.
 - Zerox is not primarily a coding CLI.
 - Zerox does not execute unreviewed self-modifications.
+- Zerox does not run unbounded autonomous loops; every autonomous goal run has explicit termination conditions and review gates.
 
 ## Product Bet
 
@@ -31,3 +32,4 @@ The durable advantage is trust: local data, explicit permissions, observable tra
 | New UI panel | It helps inspect, resume, evaluate, or review agent work. | It only markets capability without improving control or trust. |
 | New memory behavior | It changes future behavior in a traceable and reversible way. | It silently rewrites user preference or skill behavior. |
 | New automation | It has clear schedule, permissions, failure reporting, and cancel path. | It runs indefinitely without inspection or recovery. |
+| Autonomous goal run | It is bounded by budget, has deterministic or evidence-backed acceptance, is interruptible, recoverable, and respects review gates. | It runs without a budget, cannot be inspected or interrupted, or accepts its own work with no evidence. |

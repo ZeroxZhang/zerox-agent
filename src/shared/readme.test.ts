@@ -46,5 +46,9 @@ describe("README", () => {
     expect(positioning).toContain("Decision Matrix");
     expect(positioning).toContain("Zerox is not a generic chat companion.");
     expect(positioning).toContain("The durable advantage is trust");
+    expect(positioning).toContain("Autonomous goal run");
+    expect(positioning).toContain("Zerox does not run unbounded autonomous loops");
+    expect(readme).toContain("Goal Mode (bounded autonomy)");
+    expect(readme).toContain("Goal Mode（有边界自治）");
   });
 });
