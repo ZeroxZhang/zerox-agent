@@ -1,13 +1,16 @@
-# Agent Goal Mode Architecture
+# Chat Session Goal Mode Architecture
 
-Goal Mode adds bounded autonomy above the recoverable runtime. A user can define a high-level goal, but the agent can only run inside explicit budgets, deterministic or evidence-backed acceptance, review gates, and durable local checkpoints.
+Goal Mode adds bounded autonomy above the recoverable runtime. In the current UX it is a Chat Session Goal Mode: a user defines, continues, reviews, modifies, or ends a high-level goal inside the conversation where the work is happening. The agent can only run inside explicit budgets, deterministic or evidence-backed acceptance, review gates, and durable local checkpoints.
+
+Goal Mode is no longer a parallel standalone page. Chat sessions carry `activeGoalId`, `goalIds`, and goal summaries; goal events are written back to assistant messages with `goalId` and `goalEventRef`. Legacy `#goals` navigation resolves to Chat so old links land in the session-native surface.
 
 ## Layer Diagram
 
 ```text
-Renderer GoalPanel
-  -> preload goal:* bridge
-    -> main-process Goal IPC
+Renderer AgentChatPanel
+  -> GoalContractBar / GoalDetailDrawer / inline review gate
+  -> ChatService goal intent routing
+    -> GoalChatService
       -> AgentGoalStore JSON + ledger JSONL
       -> AgentGoalController
         -> AgentGoalPlanner
@@ -17,7 +20,7 @@ Renderer GoalPanel
         -> AgentTrajectoryStore evidence
 ```
 
-The goal layer sits above `AgentRuntimeEngine`. A milestone dispatch is one recoverable runtime run, so existing workspace sandboxing, tool authorization, checkpoints, reflection, model retry, and trajectory records remain the execution boundary.
+The goal layer sits above `AgentRuntimeEngine`. A milestone dispatch is one recoverable runtime run, so existing workspace sandboxing, tool authorization, checkpoints, reflection, model retry, and trajectory records remain the execution boundary. The renderer surface is the chat session: active-goal badges live in the session rail, the Goal Contract Bar summarizes the current goal, review gates render inline, and detailed progress opens as a drawer.
 
 ## Goal State Machine
 

@@ -433,6 +433,24 @@
         "npm run harness:check",
         "npm run harness:score"
       ]
+    },
+    {
+      "id": "P6-chat-session-goal-mode",
+      "priority": 26,
+      "status": "done",
+      "title": "Chat Session native Goal Mode",
+      "definitionOfDone": [
+        "Goal Mode is created and resumed from chat sessions",
+        "Top-level navigation removes standalone Goals and nests technical surfaces under Settings",
+        "Review gates render inline in Chat and call the goal controller",
+        "Existing standalone goals are recoverable through migrated chat sessions"
+      ],
+      "verification": [
+        "npm test -- src/main/chatService.test.ts src/main/chatSessionStore.test.ts src/main/agentGoalController.test.ts src/shared/navigation.test.ts src/renderer/materialDesign.test.ts src/shared/readme.test.ts",
+        "npm run verify",
+        "npm run harness:check",
+        "npm run smoke:prod"
+      ]
     }
   ]
 }

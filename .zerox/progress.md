@@ -575,3 +575,52 @@
   - `npm run harness:check` -> passed.
   - `git diff --check` -> passed.
   - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+
+## 2026-06-12 P6 Chat Session Native Goal Mode
+
+- Reworked Goal Mode from a standalone page into a chat-session-native flow: chat sessions now persist active/historical goal linkage, Chat renders an active Goal Contract Bar, session badges, inline review gates, and an on-demand goal detail drawer.
+- Collapsed low-frequency technical surfaces into Settings secondary sections and removed standalone Goals from the primary navigation; legacy `#goals` resolves to Chat.
+- Added conservative chat goal intent routing for explicit goal creation, continuation, cancellation, and review modification, wired through `GoalChatService` and `AgentGoalController`.
+- Removed the standalone `GoalPanel` route/file and changed Overview waiting-review attention items to open Chat.
+- Updated README, `docs/architecture/agent-goal-mode.md`, and `.zerox/feature_list.json` with the P6 session-native Goal Mode status.
+- Changed files:
+  - `src/shared/chat.ts`
+  - `src/main/chatSessionStore.ts`
+  - `src/main/chatSessionStore.test.ts`
+  - `src/shared/agentGoal.ts`
+  - `src/main/agentGoalStore.ts`
+  - `src/main/agentGoalStore.test.ts`
+  - `src/shared/navigation.ts`
+  - `src/shared/navigation.test.ts`
+  - `src/renderer/App.tsx`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/components/GoalContractBar.tsx`
+  - `src/renderer/components/GoalDetailDrawer.tsx`
+  - `src/renderer/components/OverviewPanel.tsx`
+  - `src/renderer/components/GoalPanel.tsx`
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+  - `src/main/goalChatService.ts`
+  - `src/main/goalChatService.test.ts`
+  - `src/main/main.ts`
+  - `src/renderer/materialDesign.test.ts`
+  - `src/renderer/styles.css`
+  - `README.md`
+  - `docs/architecture/agent-goal-mode.md`
+  - `src/shared/readme.test.ts`
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `./init.sh` -> harness check passed; `src/shared/packageScripts.test.ts` 1 file / 5 tests passed.
+  - `npm test -- src/main/chatSessionStore.test.ts` -> RED, missing `attachGoal`/`clearActiveGoal`; then 1 file / 5 tests passed.
+  - `npm test -- src/main/agentGoalStore.test.ts src/shared/agentGoal.test.ts` -> RED, missing `listByChatSession`; then 2 files / 12 tests passed.
+  - `npm test -- src/shared/navigation.test.ts src/shared/materialNavigation.test.ts` -> 2 files / 6 tests passed.
+  - `npm test -- src/renderer/materialDesign.test.ts src/shared/navigation.test.ts` -> 2 files / 23 tests passed after removing standalone Goals page.
+  - `npm test -- src/main/chatService.test.ts` -> RED, goal intents fell through to ordinary chat; then 1 file / 16 tests passed.
+  - `npm test -- src/main/goalChatService.test.ts src/main/agentGoalController.test.ts` -> RED, missing `goalChatService`; then 2 files / 10 tests passed.
+  - `npm test -- src/shared/readme.test.ts` -> RED, docs still described standalone Goals UI; then 1 file / 3 tests passed.
+  - `npm test -- src/main/chatService.test.ts src/main/chatSessionStore.test.ts src/main/agentGoalController.test.ts src/shared/navigation.test.ts src/renderer/materialDesign.test.ts src/shared/readme.test.ts` -> 6 files / 54 tests passed.
+  - `npm run verify` -> 105 Vitest files / 503 tests passed, build passed, agent eval 21/21, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.

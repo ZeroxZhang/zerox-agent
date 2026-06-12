@@ -48,8 +48,8 @@ describe("README", () => {
     expect(positioning).toContain("The durable advantage is trust");
     expect(positioning).toContain("Autonomous goal run");
     expect(positioning).toContain("Zerox does not run unbounded autonomous loops");
-    expect(readme).toContain("Goal Mode (bounded autonomy)");
-    expect(readme).toContain("Goal Mode（有边界自治）");
+    expect(readme).toContain("session-native Goal Mode");
+    expect(readme).toContain("Chat Session mode");
   });
 
   it("documents Goal Mode architecture, eval coverage, and feature-list status", () => {
@@ -72,8 +72,11 @@ describe("README", () => {
     expect(readme).toContain("docs/architecture/agent-goal-mode.md");
     expect(readme).toContain("21 deterministic agent eval fixtures");
     expect(readme).toContain("goal-mode pass rate");
-    expect(readme).toContain("Goal Mode foundation");
+    expect(readme).toContain("session-native Goal Mode");
+    expect(readme).toContain("Chat Session mode");
+    expect(readme).not.toContain("Goals UI");
     expect(readme).toContain("Goal Mode 架构");
+    expect(architecture).toContain("Chat Session Goal Mode");
     expect(architecture).toContain("Goal State Machine");
     expect(architecture).toContain("Five Termination Conditions");
     expect(architecture).toContain("Deterministic-first Acceptance");
