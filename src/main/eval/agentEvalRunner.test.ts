@@ -11,13 +11,79 @@ describe("agent eval runner", () => {
     const report = await runAgentEvals(createAgentEvalFixtures());
 
     expect(report).toEqual({
-      total: 15,
-      passed: 15,
+      total: 21,
+      passed: 21,
       failed: 0,
       passRate: 1,
       toolSuccessRate: 0.7895,
       recoverabilityRate: 1,
       failures: [],
+    });
+  });
+
+  it("includes goal-mode bounded-autonomy fixtures", () => {
+    const fixtures = createAgentEvalFixtures();
+    const goalFixtures = fixtures.filter((fixture) =>
+      fixture.id.startsWith("goal-"),
+    );
+
+    expect(goalFixtures.map((fixture) => fixture.id)).toEqual([
+      "goal-achieved-within-budget",
+      "goal-stopped-by-budget",
+      "goal-stalled-detection",
+      "goal-replan-on-acceptance-failure",
+      "goal-review-gate-blocks",
+      "goal-context-compaction-preserves-anchors",
+    ]);
+    expect(goalFixtures).toHaveLength(6);
+    expect(
+      goalFixtures.every((fixture) =>
+        fixture.requiredEventTypes.includes("acceptance_checked"),
+      ),
+    ).toBe(true);
+    expect(
+      fixtures.find((fixture) => fixture.id === "goal-stopped-by-budget"),
+    ).toMatchObject({
+      assertions: expect.arrayContaining([
+        {
+          type: "goal_stopped",
+          payload: {
+            status: "stopped_budget",
+            budgetStopBeforeDispatch: true,
+          },
+          after: "checkpoint_written",
+        },
+      ]),
+    });
+    expect(
+      fixtures.find((fixture) => fixture.id === "goal-review-gate-blocks"),
+    ).toMatchObject({
+      assertions: expect.arrayContaining([
+        {
+          type: "goal_review_requested",
+          payload: { reviewPolicy: "review_each_milestone" },
+          after: "acceptance_checked",
+        },
+        {
+          type: "milestone_started",
+          payload: { milestoneId: "milestone_after_review" },
+          after: "goal_review_requested",
+        },
+      ]),
+    });
+    expect(
+      fixtures.find(
+        (fixture) =>
+          fixture.id === "goal-context-compaction-preserves-anchors",
+      ),
+    ).toMatchObject({
+      assertions: expect.arrayContaining([
+        {
+          type: "context_compacted",
+          payload: { anchorsPreserved: true },
+          after: "goal_planned",
+        },
+      ]),
     });
   });
 

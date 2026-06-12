@@ -7,6 +7,7 @@ import {
 } from "react";
 import { AgentChatPanel } from "./components/AgentChatPanel";
 import { EvalReviewPanel } from "./components/EvalReviewPanel";
+import { GoalPanel } from "./components/GoalPanel";
 import { LearningReviewPanel } from "./components/LearningReviewPanel";
 import { MemoryPanel } from "./components/MemoryPanel";
 import { ModelSettingsPanel } from "./components/ModelSettingsPanel";
@@ -235,6 +236,7 @@ export function App() {
         {activeSection.id === "overview" ? (
           <OverviewPanel onNavigate={navigateTo} />
         ) : null}
+        {activeSection.id === "goals" ? <GoalPanel /> : null}
         {activeSection.id === "runs" ? <RunsPanel /> : null}
         {activeSection.id === "settings" ? <ModelSettingsPanel /> : null}
         {activeSection.id === "skills" ? <SkillLibraryPanel /> : null}

@@ -19,6 +19,7 @@ describe("navigation", () => {
     expect(getNavigationSections().map((section) => section.id)).toEqual([
       "chat",
       "overview",
+      "goals",
       "runs",
       "scheduled-tasks",
       "skills",
@@ -41,6 +42,7 @@ describe("navigation", () => {
       module: "第 5 模块",
     });
     expect(getStartupNavigationSection("#memory").id).toBe("memory");
+    expect(getStartupNavigationSection("#goals").id).toBe("goals");
     expect(getStartupNavigationSection("#missing").id).toBe("chat");
   });
 });

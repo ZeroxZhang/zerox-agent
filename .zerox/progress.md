@@ -349,3 +349,208 @@
   - `npm run dist:mac` -> generated `release/Zerox Agent-1.6.0-arm64.dmg` and `release/Zerox Agent-1.6.0-arm64-mac.zip`.
   - `node -e "JSON.parse(require('fs').readFileSync('.zerox/feature_list.json','utf8')); console.log('feature_list.json ok')"` -> feature_list.json ok.
   - `git diff --check` -> passed.
+
+## 2026-06-12 Goal Mode A1 Bounded Autonomy Contract
+
+- Started the Goal Mode planning iteration from `/tmp/codex-remote-attachments/019ebab7-245f-73c3-9e29-c28c45571dae/779C0DB6-83A3-4C16-8D42-FF5118163FE1/1-2026-06-12-agent-goal-mode.md`.
+- `.zerox/feature_list.json` had no unfinished entries, so this round selected exactly one unfinished slice from the attached plan: A1 Encode Bounded Autonomy.
+- Encoded the product boundary before runtime implementation: autonomous goal runs must be budgeted, inspectable, interruptible, recoverable, evidence-backed, and review-gated.
+- Changed files:
+  - `docs/product/zerox-positioning.md`
+  - `README.md`
+  - `src/shared/readme.test.ts`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `./init.sh` -> harness check passed; `src/shared/packageScripts.test.ts` 1 file / 5 tests passed.
+  - `npm test -- src/shared/readme.test.ts` -> RED, missing `Autonomous goal run` positioning contract.
+  - `npm test -- src/shared/readme.test.ts` -> 1 file / 2 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> 96 Vitest files / 448 tests passed, build passed, agent eval 15/15, memory eval 2/2.
+  - `npm run harness:check` after progress update -> passed.
+  - `git diff --check` -> passed.
+  - `npm test` after progress update -> 96 Vitest files / 448 tests passed.
+  - `npm run smoke:prod` not run because this slice changed docs and a docs contract test only, with no UI/runtime behavior change.
+
+## 2026-06-12 Goal Mode P5.0 CI Workflow
+
+- Implemented the Goal Mode prerequisite CI gate before starting P5.1 domain model work.
+- Added a GitHub Actions workflow that runs deterministic local checks on pull requests and pushes to `main`: `npm ci`, `npm run verify`, and `npm run harness:check`.
+- Kept display-dependent Electron smoke commands out of CI; `npm run verify` remains test/build/deterministic eval only.
+- Changed files:
+  - `.github/workflows/verify.yml`
+  - `src/shared/ciWorkflow.test.ts`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `npm test -- src/shared/ciWorkflow.test.ts` -> RED, missing `.github/workflows/verify.yml`.
+  - `npm test -- src/shared/ciWorkflow.test.ts` -> 1 file / 2 tests passed.
+  - `npm run verify` -> 97 Vitest files / 450 tests passed, build passed, agent eval 15/15, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run smoke:prod` not run because this slice changed CI configuration and a CI contract test only, with no UI/runtime behavior change.
+
+## 2026-06-12 Goal Mode P5.1 Domain Model
+
+- Added the bounded Goal Mode shared domain model, review policy type, goal status state machine, and deterministic draft validation helpers.
+- Linked recoverable runtime checkpoints back to optional goal and milestone provenance without changing runtime behavior.
+- Changed files:
+  - `src/shared/agentGoal.ts`
+  - `src/shared/agentGoalReview.ts`
+  - `src/shared/agentGoal.test.ts`
+  - `src/shared/agentExecution.ts`
+  - `src/shared/agentExecution.test.ts`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `npm test -- src/shared/agentGoal.test.ts src/shared/agentExecution.test.ts` -> RED, missing `./agentGoal` module.
+  - `npm test -- src/shared/agentGoal.test.ts src/shared/agentExecution.test.ts` -> 2 files / 8 tests passed.
+  - `npm run verify` -> 98 Vitest files / 454 tests passed, build passed, agent eval 15/15, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run smoke:prod` not run because this slice changed shared types/tests only, with no UI/runtime behavior change.
+
+## 2026-06-12 Goal Mode P5.2 Persistence And Progress Ledger
+
+- Added a local-first goal store under `agent-goals/{goalId}.json` and append-only progress ledgers under `agent-goals/{goalId}.ledger.jsonl`.
+- Covered active-goal reload after restart, status/budget/milestone updates, terminal-status filtering, missing directory behavior, and ledger append/read ordering.
+- Changed files:
+  - `src/main/agentGoalStore.ts`
+  - `src/main/agentGoalStore.test.ts`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `npm test -- src/main/agentGoalStore.test.ts` -> RED, missing `./agentGoalStore` module.
+  - `npm test -- src/main/agentGoalStore.test.ts` -> 1 file / 7 tests passed.
+  - `npm run verify` -> 99 Vitest files / 461 tests passed, build passed, agent eval 15/15, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run smoke:prod` not run because this slice changed main-process persistence code and tests only, with no UI/runtime-affecting behavior wired yet.
+
+## 2026-06-12 Goal Mode P5.3 Planner
+
+- Added an injected-model goal planner that decomposes natural-language goals into acceptance-bearing milestones without real model calls in tests.
+- Reused P5.1 draft validation, added deterministic dependency-cycle rejection, one repair re-prompt for invalid plans, and replan behavior that preserves accepted milestones while incrementing `planVersion` and `budgetUsage.replans`.
+- Changed files:
+  - `src/main/agentGoalPlanner.ts`
+  - `src/main/agentGoalPlanner.test.ts`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `npm test -- src/main/agentGoalPlanner.test.ts` -> RED, missing `./agentGoalPlanner` module.
+  - `npm test -- src/main/agentGoalPlanner.test.ts` -> 1 file / 4 tests passed.
+  - `npm run verify` -> 100 Vitest files / 465 tests passed, build passed, agent eval 15/15, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run smoke:prod` not run because this slice changed planner code and tests only, with no UI/runtime-affecting behavior wired yet.
+
+## 2026-06-12 Goal Mode P5.4 Acceptance Engine
+
+- Added a deterministic-first acceptance engine for milestone and goal-level success criteria.
+- Covered `file_exists`, `command_exit_code`, `test_passes`, structured artifact `assertion`, model-review evidence gating, deterministic-before-inferential ordering, and `acceptance_checked` trajectory evidence.
+- Changed files:
+  - `src/main/agentGoalAcceptance.ts`
+  - `src/main/agentGoalAcceptance.test.ts`
+  - `src/shared/agentTrajectory.ts`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `npm test -- src/main/agentGoalAcceptance.test.ts` -> RED, missing `./agentGoalAcceptance` module.
+  - `npm test -- src/main/agentGoalAcceptance.test.ts` -> 1 file / 7 tests passed.
+  - `npm run verify` -> 101 Vitest files / 472 tests passed, build passed, agent eval 15/15, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run smoke:prod` not run because this slice changed main-process acceptance code and shared trajectory types only, with no UI/runtime-affecting behavior wired yet.
+
+## 2026-06-12 Goal Mode P5.5 Bounded Orchestration Loop
+
+- Added the bounded autonomous goal controller with injected runtime, planner, acceptance, goal store, and trajectory store dependencies.
+- Covered goal acceptance, budget stop-before-next-dispatch, stalled-goal stop, rejection-driven replan, review-gate suspension/resolution, accepted-milestone resume idempotence, and per-milestone goal checkpoint trajectory evidence.
+- Added goal-level trajectory event kinds: `goal_planned`, `milestone_started`, `goal_replanned`, `goal_review_requested`, and `goal_stopped`.
+- Changed files:
+  - `src/main/agentGoalController.ts`
+  - `src/main/agentGoalController.test.ts`
+  - `src/shared/agentGoalReview.ts`
+  - `src/shared/agentTrajectory.ts`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `npm test -- src/main/agentGoalController.test.ts src/main/agentRuntimeEngine.test.ts` -> RED, missing `./agentGoalController` module.
+  - `npm test -- src/main/agentGoalController.test.ts src/main/agentRuntimeEngine.test.ts` -> 2 files / 28 tests passed.
+  - `npm run verify` -> 102 Vitest files / 478 tests passed, build passed, agent eval 15/15, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+
+## 2026-06-12 Goal Mode P5.6 Goal-aware Context Compaction
+
+- Added a goal context assembler that preserves never-compact goal anchors: goal description, success criteria, latest progress ledger summary, accepted milestone conclusions, and evidence refs.
+- Summarizes accepted milestones while keeping running/pending milestone detail, preserves offloaded tool-result refs as context anchors, and emits `context_compacted` trajectory evidence when compaction occurs.
+- Changed files:
+  - `src/main/agentGoalContext.ts`
+  - `src/main/agentGoalContext.test.ts`
+  - `src/main/contextManager.ts`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `npm test -- src/main/agentGoalContext.test.ts src/main/contextManager.test.ts` -> RED, missing `./agentGoalContext` module.
+  - `npm test -- src/main/agentGoalContext.test.ts src/main/contextManager.test.ts` -> RED, offloaded tool-result ref was compacted away by generic history compression.
+  - `npm test -- src/main/agentGoalContext.test.ts src/main/contextManager.test.ts` -> 2 files / 5 tests passed.
+  - `npm run verify` -> 103 Vitest files / 482 tests passed, build passed, agent eval 15/15, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run smoke:prod` not run because this slice added an unwired goal context helper and token estimation export only.
+
+## 2026-06-12 Goal Mode P5.7 Review Gates And UI
+
+- Added review-policy evaluation for per-milestone, key milestone, final-only, and high-risk review gates.
+- Wired local-first Goal Mode IPC into the main process and preload API for create/start/resume/cancel/list/resolve-review operations backed by `agentGoalStore`.
+- Added the Goals navigation section, Overview alerting for goals waiting on review, and a Goal Mode panel with bounded budget inputs, active goal list, milestone tree, and approve/modify/terminate review-gate controls.
+- Changed files:
+  - `src/shared/agentGoalReview.ts`
+  - `src/shared/agentGoalReview.test.ts`
+  - `src/main/main.ts`
+  - `src/preload/index.ts`
+  - `src/shared/navigation.ts`
+  - `src/shared/navigation.test.ts`
+  - `src/shared/materialNavigation.ts`
+  - `src/renderer/App.tsx`
+  - `src/renderer/components/GoalPanel.tsx`
+  - `src/renderer/components/OverviewPanel.tsx`
+  - `src/renderer/materialDesign.test.ts`
+  - `src/renderer/styles.css`
+- TDD and verification evidence:
+  - `npm test -- src/shared/agentGoalReview.test.ts src/renderer/materialDesign.test.ts src/shared/navigation.test.ts src/shared/materialNavigation.test.ts` -> RED, missing `shouldRequestReview`, missing `GoalPanel`, and missing Goals navigation.
+  - `npm test -- src/shared/agentGoalReview.test.ts src/renderer/materialDesign.test.ts src/shared/navigation.test.ts src/shared/materialNavigation.test.ts` -> 4 files / 25 tests passed.
+  - `npm run verify` -> 104 Vitest files / 487 tests passed, build passed, agent eval 15/15, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_READY_SELECTOR='.goal-panel' BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='Goal Mode|有边界自治目标|创建目标|审核策略' ELECTRON_RENDERER_URL='http://127.0.0.1:5173/#goals' ./node_modules/.bin/electron .` -> passed.
+  - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_READY_SELECTOR='.goal-panel' BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='Goal Mode|有边界自治目标|创建目标|审核策略' BUILDING_AGENT_SMOKE_VIEWPORT='390x844' ELECTRON_RENDERER_URL='http://127.0.0.1:5173/#goals' ./node_modules/.bin/electron .` -> passed.
+
+## 2026-06-12 Goal Mode P5.8 Eval, Harness, And Docs
+
+- Added six deterministic Goal Mode eval fixtures covering achieved-within-budget, budget stop-before-dispatch, stall detection, replan on acceptance failure, review-gate blocking, and compaction anchor retention.
+- Extended adversarial eval generation with goal-specific budget tampering and removed acceptance-check mutations.
+- Integrated goal-mode pass rate and fixture count into `npm run harness:score`; latest score was 9.20 with goal 6/6 and adversarial 59/59 rejected.
+- Added `docs/architecture/agent-goal-mode.md`, updated README testing/roadmap language, and added P5.* done entries to `.zerox/feature_list.json`.
+- Fixed the Goal controller to consume the shared review policy matrix, so `review_final_only` pauses after the final accepted milestone before goal-level acceptance.
+- Changed files:
+  - `src/main/agentGoalController.ts`
+  - `src/main/agentGoalController.test.ts`
+  - `src/main/eval/agentEvalFixtures.ts`
+  - `src/main/eval/agentEvalRunner.test.ts`
+  - `src/main/eval/agentEvalAdversary.ts`
+  - `src/main/eval/agentEvalAdversary.test.ts`
+  - `src/shared/harnessScore.ts`
+  - `src/shared/harnessScore.test.ts`
+  - `scripts/run-harness-score.mjs`
+  - `docs/architecture/agent-goal-mode.md`
+  - `README.md`
+  - `src/shared/readme.test.ts`
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `./init.sh` -> harness check passed; `src/shared/packageScripts.test.ts` 1 file / 5 tests passed.
+  - `npm test -- src/main/agentGoalController.test.ts src/main/eval/agentEvalRunner.test.ts src/main/eval/agentEvalAdversary.test.ts src/shared/harnessScore.test.ts src/shared/readme.test.ts` -> RED, missing goal fixtures, goal adversary mutations, harness goal pass-rate summary, architecture doc/feature-list entry, and shared review-policy use in the controller.
+  - `npm test -- src/main/agentGoalController.test.ts src/main/eval/agentEvalRunner.test.ts src/main/eval/agentEvalAdversary.test.ts src/shared/harnessScore.test.ts src/shared/readme.test.ts` -> 5 files / 24 tests passed.
+  - `npm run verify` -> 104 Vitest files / 492 tests passed, build passed, agent eval 21/21, memory eval 2/2.
+  - `node scripts/run-agent-evals.mjs` -> 21/21 passed.
+  - `npm run harness:check` -> passed.
+  - `node -e "JSON.parse(require('fs').readFileSync('.zerox/feature_list.json','utf8')); console.log('feature_list.json ok')"` -> feature_list.json ok.
+  - `git diff --check` -> passed.
+  - `npm run harness:score` -> overall 9.20, goal 6/6, adversarial 59 checked with no escapes.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.

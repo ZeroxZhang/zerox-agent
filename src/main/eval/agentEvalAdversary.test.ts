@@ -16,6 +16,25 @@ describe("agent eval adversary", () => {
         "remove_required_event",
         "wrong_payload",
         "wrong_order",
+        "tamper_goal_budget",
+        "remove_acceptance_check",
+      ]),
+    );
+  });
+
+  it("creates goal-specific adversarial cases for budget and acceptance tampering", () => {
+    const cases = createAdversarialAgentEvalCases(createAgentEvalFixtures());
+
+    expect(cases).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceFixtureId: "goal-stopped-by-budget",
+          mutation: "tamper_goal_budget",
+        }),
+        expect.objectContaining({
+          sourceFixtureId: "goal-achieved-within-budget",
+          mutation: "remove_acceptance_check",
+        }),
       ]),
     );
   });
@@ -51,6 +70,9 @@ describe("agent eval adversary", () => {
 
     expect(script).toContain("runAdversarialAgentEvals");
     expect(script).toContain("adversarial:");
+    expect(script).toContain("goalFixtureCount");
+    expect(script).toContain("goalPassRate");
+    expect(script).toContain("goal:");
     expect(script).toContain("!adversarial.passed");
   });
 });

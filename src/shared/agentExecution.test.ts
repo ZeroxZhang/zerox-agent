@@ -52,6 +52,8 @@ describe("agent execution model", () => {
       id: "checkpoint-1",
       runId: "run-1",
       taskId: "task-1",
+      goalId: "goal-1",
+      milestoneId: "milestone-1",
       status: "queued",
       currentStepId: "step-1",
       steps: [step],
@@ -68,5 +70,7 @@ describe("agent execution model", () => {
 
     expect(checkpoint.steps[0]).toEqual(step);
     expect(checkpoint.messages[0]?.content).toBe("Organize Downloads");
+    expect(checkpoint.goalId).toBe("goal-1");
+    expect(checkpoint.milestoneId).toBe("milestone-1");
   });
 });

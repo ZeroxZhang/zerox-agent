@@ -51,6 +51,8 @@ export type AgentExecutionCheckpoint = {
   id: string;
   runId: string;
   taskId: string;
+  goalId?: string;
+  milestoneId?: string;
   status: AgentExecutionStatus;
   runContext?: AgentRunContext;
   currentStepId?: string;

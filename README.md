@@ -56,7 +56,7 @@ It is not a chat wrapper or a generic hosted agent surface. It runs locally, con
 
 The product boundary is documented in [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md): Zerox optimizes for trusted local control, recoverable agent runs, explicit permissions, workspace-scoped runs, observable trajectories, parent/child multi-agent sessions, and user-reviewed learning. Runtime, workspace, and learning details live in [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md), [`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md), and [`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md).
 
-v1.6.0 upgrades the active runtime core on top of the Agent Learning Harness Loop and Agent Capability foundation. Dynamic skill and MCP tools can now pass authorization through explicit tool names or registered sources; recoverable runs feed failed tool observations back to the model; duplicate retries and exhausted recovery budgets are visible in trajectory evidence; active chat and runtime loops compact long histories before model calls; runtime checkpoints are written after each tool observation; transient model failures retry with `model_retry` evidence; and the Runs trajectory inspector surfaces readable recovery, retry, and compaction insight cards. The deterministic agent eval suite now covers 15 runtime, native-tool, recovery, compaction, checkpoint, model-retry, research-writing, eval-candidate, and multi-agent lineage contracts.
+v1.6.0 upgrades the active runtime core on top of the Agent Learning Harness Loop and Agent Capability foundation. Dynamic skill and MCP tools can now pass authorization through explicit tool names or registered sources; recoverable runs feed failed tool observations back to the model; duplicate retries and exhausted recovery budgets are visible in trajectory evidence; active chat and runtime loops compact long histories before model calls; runtime checkpoints are written after each tool observation; transient model failures retry with `model_retry` evidence; and the Runs trajectory inspector surfaces readable recovery, retry, and compaction insight cards. The Goal Mode foundation adds bounded-autonomy goal state, local ledgers, planning, deterministic-first acceptance, review gates, a Goals panel, and goal-mode eval coverage. The deterministic agent eval suite now covers 21 runtime, native-tool, recovery, compaction, checkpoint, model-retry, research-writing, eval-candidate, multi-agent lineage, and goal-mode contracts.
 
 <p align="center">
   <img src="zerox-agent-onepage.png" alt="Zerox Agent one-page product overview" width="720" />
@@ -585,7 +585,7 @@ npm run episode:export -- --config-dir <userData/config> --run-id <runId>
 npm run verify        # Tests + build + deterministic eval
 ```
 
-As of v1.6.0, `npm run verify` covers the Vitest suite, the production build, agent evals, and memory evals. The suite currently includes 96 Vitest files / 448 tests, 15 deterministic agent eval fixtures, and 2 memory eval fixtures. Agent evals include native code engineering, research writing, reflection-after-test-failure, retry-budget exhaustion, context compaction, tool-call checkpointing, model retry, episode eval-candidate, and child handoff review-gate golden paths. Set `BUILDING_AGENT_CONFIG_DIR=/path/to/config` when running `npm run eval:agent` or `npm run harness:score` to include local promoted fixtures and pending eval candidates from that config directory. `npm run harness:score` emits the seven-category ETCLOVG score used by Overview as a local quality signal and now includes adversarial eval plus the ACI/context report; Overview also displays the native Agent Capability score.
+As of v1.6.0, `npm run verify` covers the Vitest suite, the production build, agent evals, and memory evals. The suite currently includes 104 Vitest files / 492 tests, 21 deterministic agent eval fixtures, and 2 memory eval fixtures. Agent evals include native code engineering, research writing, reflection-after-test-failure, retry-budget exhaustion, context compaction, tool-call checkpointing, model retry, episode eval-candidate, child handoff review-gate, and goal-mode bounded-autonomy golden paths. Goal Mode architecture is documented in `docs/architecture/agent-goal-mode.md`. Set `BUILDING_AGENT_CONFIG_DIR=/path/to/config` when running `npm run eval:agent` or `npm run harness:score` to include local promoted fixtures and pending eval candidates from that config directory. `npm run harness:score` emits the seven-category ETCLOVG score used by Overview as a local quality signal and now includes adversarial eval, goal-mode pass rate, plus the ACI/context report; Overview also displays the native Agent Capability score.
 
 ### Test Coverage
 
@@ -613,6 +613,7 @@ Recently shipped:
 - [x] Lightweight child handoff contracts and Runs review-gate cards for researcher/executor/reviewer roles
 - [x] P3 Agent Learning Harness Loop with reviewable eval candidates, local promoted fixtures, adversarial eval, ACI/context sensors, and Overview pending eval count
 - [x] P4 Runtime Core Upgrade with dynamic MCP/skill tool authorization, recoverable tool-failure observations, retry-budget diagnostics, active context compaction, per-tool checkpoints, model retry, and Runs trajectory insight cards
+- [x] Goal Mode (bounded autonomy) foundation with bounded goal state, local progress ledger, deterministic-first acceptance, review gates, Goals UI, architecture doc, and six deterministic goal eval fixtures
 
 Planned:
 
@@ -655,7 +656,7 @@ Planned:
 
 产品边界写在 [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md)：Zerox 优先建设可信的本地控制、可恢复运行、显式权限、workspace 作用域、可观察轨迹、父子多 Agent 会话和用户审核后的学习。运行时、workspace 与学习机制分别见 [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md)、[`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md)、[`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md)。
 
-v1.6.0 在 Agent Learning Harness Loop 和 Agent Capability 基础上升级活跃运行时核心：动态 skill / MCP 工具可通过显式工具名或注册来源授权；可恢复运行会把失败工具结果作为 observation 反喂模型；重复重试与恢复预算耗尽会写入结构化轨迹；活跃 chat/runtime loop 会在模型请求前压缩长上下文；runtime 在每个工具结果后写 checkpoint；瞬时模型失败会记录 `model_retry` 并有限重试；Runs 轨迹面板会把恢复、重试、压缩事件渲染为可读诊断卡。确定性 Agent eval suite 现在覆盖 15 个 runtime、原生工具、恢复、压缩、checkpoint、模型重试、研究写作、eval candidate 和多 Agent lineage 契约。
+v1.6.0 在 Agent Learning Harness Loop 和 Agent Capability 基础上升级活跃运行时核心：动态 skill / MCP 工具可通过显式工具名或注册来源授权；可恢复运行会把失败工具结果作为 observation 反喂模型；重复重试与恢复预算耗尽会写入结构化轨迹；活跃 chat/runtime loop 会在模型请求前压缩长上下文；runtime 在每个工具结果后写 checkpoint；瞬时模型失败会记录 `model_retry` 并有限重试；Runs 轨迹面板会把恢复、重试、压缩事件渲染为可读诊断卡。Goal Mode foundation 增加有边界自治目标状态、本地 ledger、规划、确定性优先验收、审核门、Goals 面板和 goal-mode eval 覆盖。确定性 Agent eval suite 现在覆盖 21 个 runtime、原生工具、恢复、压缩、checkpoint、模型重试、研究写作、eval candidate、多 Agent lineage 和 goal-mode 契约。
 
 ### 设计原则
 
@@ -1284,7 +1285,7 @@ mac:
 
 ## 测试
 
-截至 v1.6.0，`npm run verify` 覆盖 Vitest 测试、生产构建、Agent 评测和记忆检索评测；当前包含 96 个 Vitest 文件 / 448 个测试、15 个确定性 Agent eval fixture 和 2 个 memory eval fixture。Agent eval 覆盖原生代码工程、研究写作、测试失败反思、retry budget exhaustion、上下文压缩、tool-call checkpoint、模型重试、episode eval candidate 和 child handoff review gate 黄金路径：
+截至 v1.6.0，`npm run verify` 覆盖 Vitest 测试、生产构建、Agent 评测和记忆检索评测；当前包含 104 个 Vitest 文件 / 492 个测试、21 个确定性 Agent eval fixture 和 2 个 memory eval fixture。Agent eval 覆盖原生代码工程、研究写作、测试失败反思、retry budget exhaustion、上下文压缩、tool-call checkpoint、模型重试、episode eval candidate、child handoff review gate 和 goal-mode bounded-autonomy 黄金路径。Goal Mode 架构记录在 `docs/architecture/agent-goal-mode.md`：
 
 ```bash
 npm test              # 运行全部测试
@@ -1299,7 +1300,7 @@ npm run episode:export -- --config-dir <userData/config> --run-id <runId>
 npm run verify        # 测试 + 构建 + 确定性评测
 ```
 
-使用 `BUILDING_AGENT_CONFIG_DIR=/path/to/config` 运行 `npm run eval:agent` 或 `npm run harness:score` 时，会加载该配置目录里的本地 promoted fixture 和 pending eval candidate。`npm run harness:score` 输出与 Overview 面板一致的七类 ETCLOVG harness score，并纳入 adversarial eval 与 ACI/context report，便于发布前判断执行环境、工具接口、上下文、生命周期、可观测、验证和治理是否仍然健康。Overview 也会显示 Native Agent Capability 分数。
+使用 `BUILDING_AGENT_CONFIG_DIR=/path/to/config` 运行 `npm run eval:agent` 或 `npm run harness:score` 时，会加载该配置目录里的本地 promoted fixture 和 pending eval candidate。`npm run harness:score` 输出与 Overview 面板一致的七类 ETCLOVG harness score，并纳入 adversarial eval、goal-mode pass rate 与 ACI/context report，便于发布前判断执行环境、工具接口、上下文、生命周期、可观测、验证和治理是否仍然健康。Overview 也会显示 Native Agent Capability 分数。
 
 ### 测试覆盖
 
@@ -1327,6 +1328,7 @@ npm run verify        # 测试 + 构建 + 确定性评测
 - [x] 轻量子 Agent handoff contract，以及 researcher/executor/reviewer 的 Runs 审核卡片
 - [x] P3 Agent Learning Harness Loop：可审核 eval candidate、本地 promoted fixture、adversarial eval、ACI/context sensor 和 Overview pending eval 计数
 - [x] P4 Runtime Core Upgrade：动态 MCP/skill 工具授权、可恢复工具失败 observation、retry-budget 诊断、活跃上下文压缩、per-tool checkpoint、模型重试和 Runs 轨迹诊断卡
+- [x] Goal Mode（有边界自治）foundation：有边界目标状态、本地进度 ledger、确定性优先验收、审核门、Goals UI、架构文档和 6 个确定性 goal eval fixture
 
 后续计划：
 
