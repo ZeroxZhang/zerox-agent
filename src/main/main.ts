@@ -174,12 +174,7 @@ import type {
   RunScheduledTaskResult,
 } from "../shared/agentRuns";
 import { isTerminalExecutionStatus } from "../shared/agentExecution";
-import {
-  assertGoalTransition,
-  type Goal,
-  type GoalBudget,
-  type SuccessCriterion,
-} from "../shared/agentGoal";
+import type { Goal, GoalBudget, SuccessCriterion } from "../shared/agentGoal";
 import type {
   GoalReviewDecision,
   GoalReviewPolicy,
@@ -681,7 +676,7 @@ ipcMain.handle("goal:start", async (_event, goalId: string) =>
   runGoalOperation(() => getGoalChatService().start(goalId)),
 );
 ipcMain.handle("goal:pause", async (_event, goalId: string) =>
-  updateGoalStatus(goalId, "waiting_for_review"),
+  runGoalOperation(() => getGoalChatService().pause(goalId)),
 );
 ipcMain.handle("goal:resume", async (_event, goalId: string) =>
   runGoalOperation(() => getGoalChatService().resume(goalId)),
@@ -1267,19 +1262,6 @@ function createGoalDraft(input: {
   };
 }
 
-async function updateGoalStatus(
-  goalId: string,
-  status: Goal["status"],
-  stopReason?: Goal["stopReason"],
-): Promise<{ ok: boolean; goal?: Goal; message?: string }> {
-  const goal = await getAgentGoalStore().get(goalId);
-  if (!goal) {
-    return { ok: false, message: "目标不存在。" };
-  }
-
-  return saveGoalStatus(goal, status, stopReason);
-}
-
 async function runGoalOperation(
   operation: () => Promise<ChatSessionGoalSummary>,
 ): Promise<{ ok: boolean; goal?: Goal; message?: string }> {
@@ -1290,30 +1272,6 @@ async function runGoalOperation(
       return { ok: false, message: "目标不存在。" };
     }
 
-    return { ok: true, goal };
-  } catch (error) {
-    return {
-      ok: false,
-      message: error instanceof Error ? error.message : "无法更新目标状态。",
-    };
-  }
-}
-
-async function saveGoalStatus(
-  goal: Goal,
-  status: Goal["status"],
-  stopReason?: Goal["stopReason"],
-): Promise<{ ok: boolean; goal?: Goal; message?: string }> {
-  try {
-    if (goal.status !== status) {
-      assertGoalTransition(goal.status, status);
-    }
-    goal.status = status;
-    if (stopReason) {
-      goal.stopReason = stopReason;
-    }
-    goal.updatedAt = new Date().toISOString();
-    await getAgentGoalStore().save(goal);
     return { ok: true, goal };
   } catch (error) {
     return {

@@ -4,7 +4,7 @@ type GoalContractBarProps = {
   goal: ChatSessionGoalSummary;
   onEnd: () => void;
   onModify: () => void;
-  onPause: () => void;
+  onPause?: () => void;
   onViewProgress: () => void;
 };
 
@@ -23,9 +23,11 @@ export function GoalContractBar(props: GoalContractBarProps) {
         <button type="button" onClick={props.onModify}>
           修改
         </button>
-        <button type="button" onClick={props.onPause}>
-          暂停
-        </button>
+        {props.onPause ? (
+          <button type="button" onClick={props.onPause}>
+            暂停
+          </button>
+        ) : null}
         <button type="button" onClick={props.onEnd}>
           结束
         </button>

@@ -165,8 +165,7 @@ function resolvePrimaryNavigationId(id: string): NavigationSectionId {
   }
 
   if (
-    settingsNavigationSections.some((section) => section.id === id) &&
-    id !== "model-settings"
+    settingsNavigationSections.some((section) => section.id === id)
   ) {
     return "settings";
   }

@@ -1899,10 +1899,12 @@ nav {
 .composer-input-shell {
   position: relative;
   min-width: 0;
+  --composer-action-size: 32px;
+  --composer-action-inset: 14px;
 }
 .composer textarea {
   width: 100%; min-height: 68px; resize: none;
-  padding: var(--space-3) 164px 46px var(--space-4); border: 1px solid var(--border-strong);
+  padding: var(--space-3) 150px 54px var(--space-4); border: 1px solid var(--border-strong);
   border-radius: var(--radius-xl); color: var(--text-primary);
   background: var(--bg-root); font: inherit; font-size: var(--text-md);
   line-height: var(--leading-normal); outline: none;
@@ -1926,13 +1928,16 @@ nav {
   background: var(--bg-surface-hover);
 }
 .composer-floating-actions {
-  position: absolute; right: var(--space-3); bottom: var(--space-2);
+  position: absolute;
+  right: var(--composer-action-inset);
+  bottom: var(--composer-action-inset);
   display: flex; gap: var(--space-2);
   align-items: center; justify-content: flex-end;
 }
 .composer .composer-icon-button {
   display: inline-grid; place-items: center;
-  width: 36px; height: 36px; min-width: 36px; min-height: 36px;
+  width: var(--composer-action-size); height: var(--composer-action-size);
+  min-width: var(--composer-action-size); min-height: var(--composer-action-size);
   padding: 0;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-full);
@@ -1982,7 +1987,7 @@ nav {
   color: currentColor;
   line-height: 1;
 }
-.composer-icon-permission::before {
+.composer-icon-command::before {
   content: "⌘";
   font-size: 15px; font-weight: var(--font-semibold);
 }
@@ -1996,6 +2001,76 @@ nav {
   content: "↑";
   font-size: 18px; font-weight: var(--font-bold);
   transform: translateY(-1px);
+}
+.slash-command-menu {
+  position: absolute;
+  right: var(--composer-action-inset);
+  bottom: calc(100% + var(--space-2));
+  z-index: 12;
+  width: min(320px, calc(100% - (var(--composer-action-inset) * 2)));
+  padding: var(--space-1);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface-raised);
+  box-shadow: var(--shadow-md);
+}
+.composer .slash-command-item {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  background: transparent;
+  text-align: left;
+}
+.composer .slash-command-item:hover,
+.composer .slash-command-item:focus-visible {
+  color: var(--text-primary);
+  background: var(--bg-surface-hover);
+}
+.composer .slash-command-item:disabled {
+  cursor: not-allowed;
+  color: var(--text-tertiary);
+  background: transparent;
+  opacity: 0.6;
+}
+.composer .slash-command-item:disabled span,
+.composer .slash-command-item:disabled strong,
+.composer .slash-command-item:disabled small {
+  color: var(--text-tertiary);
+}
+.slash-command-item span {
+  color: var(--text-accent);
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+}
+.slash-command-item div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.slash-command-item strong {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  line-height: var(--leading-tight);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.slash-command-item small {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--font-normal);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── Agent Context Panel (removed from chat — info is in hero chips) ──── */
@@ -2064,7 +2139,7 @@ nav {
   .onboarding-actions { justify-content: flex-start; }
   .session-list { grid-template-columns: repeat(3, minmax(150px, 1fr)); overflow-x: auto; }
   .chat-hero { grid-template-columns: 1fr; }
-  .composer textarea { padding-right: 152px; }
+  .composer textarea { padding-right: 140px; }
   .chat-hero { display: grid; }
   .context-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .readiness-list { grid-template-columns: 1fr; }

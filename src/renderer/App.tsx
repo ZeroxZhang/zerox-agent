@@ -66,7 +66,14 @@ export function App() {
   const [navRailWidth, setNavRailWidth] = useState(96);
 
   function navigateTo(sectionId: NavigationSectionId) {
-    setActiveSectionId(sectionId);
+    const settingsSection = getSettingsNavigationSections().find(
+      (section) => section.id === sectionId,
+    );
+    if (settingsSection) {
+      setActiveSettingsSectionId(settingsSection.id);
+    }
+    const primarySectionId = getNavigationSection(sectionId).id;
+    setActiveSectionId(primarySectionId);
     const nextHash = `#${sectionId}`;
     if (window.location.hash !== nextHash) {
       window.history.replaceState(null, "", nextHash);

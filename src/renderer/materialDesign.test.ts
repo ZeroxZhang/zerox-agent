@@ -143,6 +143,23 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".settings-section-body");
   });
 
+  it("keeps composer command actions inside the chat input", () => {
+    expect(chatPanelSource).not.toContain("onClick={() => onNavigate(\"tools\")}");
+    expect(chatPanelSource).toContain("aria-label=\"打开命令菜单\"");
+    expect(chatPanelSource).toContain("className=\"composer-icon-button composer-command-button\"");
+    expect(chatPanelSource).toContain("const composerCommandItems");
+    expect(chatPanelSource).toContain("id: \"goal\"");
+    expect(chatPanelSource).toContain("comingSoon: true");
+    expect(chatPanelSource).toContain("handleOpenCommandMenu");
+    expect(chatPanelSource).toContain("handleSelectComposerCommand(command.id)");
+    expect(chatPanelSource).toContain("createGoalCommandDraft(draft)");
+    expect(styles).toContain(".composer-icon-command");
+    expect(styles).toContain("content: \"⌘\";");
+    expect(styles).toContain("--composer-action-inset: 14px;");
+    expect(styles).toContain("right: var(--composer-action-inset);");
+    expect(styles).toContain("bottom: var(--composer-action-inset);");
+  });
+
   it("keeps Goal Mode inside Chat instead of a standalone page", () => {
     expect(appSource).not.toContain("activeSection.id === \"goals\"");
     expect(appSource).not.toContain("<GoalPanel");
@@ -158,9 +175,12 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(chatPanelSource).toContain("goal-session-badge");
     expect(chatPanelSource).toContain("goal-review-gate-card");
     expect(chatPanelSource).toContain("GoalDetailDrawer");
+    expect(chatPanelSource).toContain("slash-command-menu");
+    expect(chatPanelSource).toContain("handleSelectComposerCommand(\"goal\")");
     expect(styles).toContain(".goal-contract-bar");
     expect(styles).toContain(".goal-session-badge");
     expect(styles).toContain(".goal-detail-drawer");
+    expect(styles).toContain(".slash-command-menu");
   });
 
   it("loads pending eval candidates into the Overview capability score", () => {
@@ -227,6 +247,8 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".composer-floating-actions");
     expect(styles).toContain(".composer-icon-button");
     expect(styles).toContain(".composer-icon-stop");
+    expect(styles).toContain("--composer-action-size: 32px;");
+    expect(styles).toContain("width: var(--composer-action-size); height: var(--composer-action-size);");
     expect(styles).toContain(".chat-hero {");
     expect(styles).toContain(".message-list {");
     expect(styles).toContain("border: none; background: transparent");
@@ -238,7 +260,7 @@ describe("Design System — Notion-inspired app shell", () => {
   });
 
   it("keeps chatbox actions icon-only and stop available while work is running", () => {
-    expect(chatPanelSource).toContain("aria-label=\"工具权限\"");
+    expect(chatPanelSource).toContain("aria-label=\"打开命令菜单\"");
     expect(chatPanelSource).toContain("aria-label=\"调整会话历史栏宽度\"");
     expect(chatPanelSource).toContain("aria-label=\"中断当前任务\"");
     expect(chatPanelSource).toContain("aria-label=\"发送消息\"");

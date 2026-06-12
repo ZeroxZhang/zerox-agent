@@ -52,6 +52,7 @@ describe("navigation", () => {
       label: "设置",
       module: "配置",
     });
+    expect(getStartupNavigationSection("#model-settings").id).toBe("settings");
     expect(getStartupNavigationSection("#memory").id).toBe("settings");
     expect(getStartupNavigationSection("#learning").id).toBe("settings");
     expect(getStartupNavigationSection("#evals").id).toBe("settings");

@@ -24,6 +24,7 @@ export type GoalChatService = {
     goalId: string,
     options?: { signal?: AbortSignal },
   ): Promise<ChatSessionGoalSummary>;
+  pause(goalId: string): Promise<ChatSessionGoalSummary>;
   cancel(goalId: string): Promise<ChatSessionGoalSummary>;
   resolveReview(
     goalId: string,
@@ -64,6 +65,27 @@ export function createGoalChatService(options: {
 
     async resume(goalId, runOptions) {
       return toGoalSummary(await options.controller.resume(goalId, runOptions));
+    },
+
+    async pause(goalId) {
+      const goal = await options.goalStore.get(goalId);
+      if (!goal) {
+        throw new Error(`Goal "${goalId}" was not found.`);
+      }
+
+      if (goal.status !== "waiting_for_review") {
+        assertGoalTransition(goal.status, "waiting_for_review");
+        goal.status = "waiting_for_review";
+        goal.updatedAt = now();
+        await options.goalStore.save(goal);
+        await options.goalStore.appendLedger(goal.id, {
+          at: goal.updatedAt,
+          kind: "review_requested",
+          summary: "Goal paused from chat and is waiting for review.",
+        });
+      }
+
+      return toGoalSummary(goal);
     },
 
     async cancel(goalId) {

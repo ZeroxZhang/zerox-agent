@@ -107,6 +107,38 @@ describe("goal chat service", () => {
       summary: "Goal canceled from chat.",
     });
   });
+
+  it("pauses an active chat goal at a review gate", async () => {
+    const savedGoals: Goal[] = [];
+    const ledgerEvents: ProgressLedgerEvent[] = [];
+    const service = createGoalChatService({
+      controller: createController(),
+      goalStore: createGoalStore({
+        existingGoal: createGoal({ status: "executing" }),
+        savedGoals,
+        ledgerEvents,
+      }),
+      createId: () => "goal_release",
+      now: () => "2026-06-12T08:00:00.000Z",
+    });
+
+    const summary = await service.pause("goal_release");
+
+    expect(summary).toEqual({
+      id: "goal_release",
+      description: "发布 v1.8.0",
+      status: "waiting_for_review",
+    });
+    expect(savedGoals.at(-1)).toMatchObject({
+      id: "goal_release",
+      status: "waiting_for_review",
+    });
+    expect(ledgerEvents.at(-1)).toEqual({
+      at: "2026-06-12T08:00:00.000Z",
+      kind: "review_requested",
+      summary: "Goal paused from chat and is waiting for review.",
+    });
+  });
 });
 
 function createController(overrides: Partial<{

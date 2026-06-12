@@ -65,6 +65,7 @@ type ChatGoalService = {
     goalId: string,
     options?: { signal?: AbortSignal },
   ): Promise<ChatSessionGoalSummary>;
+  pause(goalId: string): Promise<ChatSessionGoalSummary>;
   cancel(goalId: string): Promise<ChatSessionGoalSummary>;
   resolveReview(
     goalId: string,
@@ -75,6 +76,7 @@ type ChatGoalService = {
 type GoalIntentRoute =
   | { kind: "set_goal"; description: string }
   | { kind: "continue_goal" }
+  | { kind: "pause_goal" }
   | { kind: "cancel_goal" }
   | { kind: "modify_goal"; instructions: string }
   | { kind: "none" };
@@ -683,8 +685,20 @@ function detectGoalIntent(message: string): GoalIntentRoute {
     return { kind: "none" };
   }
 
+  const slashGoalMatch = compact.match(/^\/(?:目标|goal)(?:\s+|$)(.*)$/i);
+  if (slashGoalMatch) {
+    return {
+      kind: "set_goal",
+      description: slashGoalMatch[1]?.trim() || compact,
+    };
+  }
+
   if (/^(把这轮设为目标|这轮目标是|接下来目标是|目标[:：])/i.test(compact)) {
     return { kind: "set_goal", description: extractGoalDescription(compact) };
+  }
+
+  if (/^(暂停这个目标|暂停目标)$/.test(compact)) {
+    return { kind: "pause_goal" };
   }
 
   if (/^(取消这个目标|结束目标|终止目标|取消目标)/.test(compact)) {
@@ -790,6 +804,29 @@ async function tryRouteGoalIntent(options: {
       content: reply,
       goalId: activeGoal.id,
       goalEventRef: "goal_resumed",
+    });
+    return {
+      result: {
+        ok: true,
+        reply,
+        sessionId: options.sessionId,
+        relatedMemories: [],
+        memoryId: null,
+        activeGoal,
+      },
+    };
+  }
+
+  if (options.route.kind === "pause_goal") {
+    const activeGoal = await options.goalService.pause(options.activeGoal.id);
+    await options.chatSessionStore?.attachGoal(options.sessionId, activeGoal);
+    const reply = `已暂停目标：${activeGoal.description}。`;
+    await appendAssistantMessage({
+      chatSessionStore: options.chatSessionStore,
+      sessionId: options.sessionId,
+      content: reply,
+      goalId: activeGoal.id,
+      goalEventRef: "goal_paused",
     });
     return {
       result: {

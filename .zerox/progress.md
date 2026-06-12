@@ -624,3 +624,59 @@
   - `npm run harness:check` -> passed.
   - `git diff --check` -> passed.
   - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+
+## 2026-06-12 P6 Goal Slash Command Follow-up
+
+- Added `/目标 ...` and `/goal ...` chat intent routing so slash-command input creates a session-native goal with the remaining user text as the goal description.
+- Added chat goal pause routing: `暂停这个目标` / `暂停目标` now moves the active goal to `waiting_for_review`, records a `review_requested` ledger event, and keeps IPC `goal:pause` on the same `GoalChatService` path.
+- Added a composer command menu that appears after typing `/` or pressing the composer command button, inserts `/目标 ` or wraps existing text as `/目标 <text>`, and keeps the goal command inside the chat flow instead of a standalone page.
+- Reworked the composer command entry from a slash-looking icon to a Command-style icon, backed by a data-driven command list with Goal enabled and Tool/Permission entries reserved as disabled future commands.
+- Hid the Goal Contract Bar pause action unless the active goal is executing, avoiding a planning-state pause control that cannot transition cleanly.
+- Tuned composer icon buttons from 36px to 32px and raised the floating action group with a shared 14px right/bottom inset so the send circle aligns visually with the composer bottom-right corner.
+- Corrected the composer toolbar semantics after review: the left input action is now "打开命令菜单" and no longer navigates to Tools/Settings; nested Settings routing remains available for Overview and other non-composer navigation.
+- Fixed `#model-settings` startup routing so direct settings hashes resolve to Settings.
+- Changed files:
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+  - `src/main/goalChatService.ts`
+  - `src/main/goalChatService.test.ts`
+  - `src/main/main.ts`
+  - `src/shared/navigation.ts`
+  - `src/shared/navigation.test.ts`
+  - `src/renderer/App.tsx`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/components/GoalContractBar.tsx`
+  - `src/renderer/materialDesign.test.ts`
+  - `src/renderer/styles.css`
+  - `src/shared/readme.test.ts`
+  - `README.md`
+  - `package.json`
+  - `package-lock.json`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `npm test -- src/main/chatService.test.ts src/main/goalChatService.test.ts src/renderer/materialDesign.test.ts` -> RED, missing slash goal command, chat pause route, slash menu, and updated composer button sizing; then 3 files / 40 tests passed.
+  - `npm test -- src/shared/navigation.test.ts src/renderer/materialDesign.test.ts` -> RED, `#model-settings` fell back to Chat and chat utility routing did not sync the Settings subsection; then 2 files / 24 tests passed.
+  - `npm test -- src/renderer/materialDesign.test.ts` -> RED, composer still contained `onNavigate("tools")` and the old "工具权限" contract; then 1 file / 19 tests passed after changing the button to an in-input command trigger.
+  - `npm test -- src/renderer/materialDesign.test.ts` -> RED, composer still used a slash icon, a single hardcoded command, and fixed 10px offsets; then 1 file / 19 tests passed after the Command icon, data-driven command list, and shared 14px inset landed.
+  - `npm test -- src/renderer/materialDesign.test.ts src/shared/navigation.test.ts src/main/chatService.test.ts src/main/goalChatService.test.ts` -> 4 files / 46 tests passed.
+  - `npm run build` -> passed.
+  - Browser check at `http://127.0.0.1:5173/#chat` -> composer action inset token is 14px, measured right/bottom insets are both 14px, send button is 32x32, Command icon renders as `⌘`, the command menu exposes Goal as the only enabled command with Tool/Permission disabled as reserved entries, and selecting Goal changes the input to `/目标 `.
+  - Dev app HMR after the composer command-button change reported no new compile error; an existing duplicate-key console error remains from duplicated `flowchart-generator-skill` entries and is unrelated to this interaction.
+  - `npm run verify` -> 105 Vitest files / 507 tests passed, build passed, agent eval 21/21, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+
+## 2026-06-12 v1.8.0 Release Prep
+
+- Bumped package metadata from `1.7.0` to `1.8.0`.
+- Updated README release language, quarantine examples, verification counts, and roadmap status for the session-native Goal Command release.
+- Built macOS release artifacts for GitHub Release upload:
+  - `release/Zerox.Agent-1.8.0-arm64.dmg`
+  - `release/Zerox.Agent-1.8.0-arm64-mac.zip`
+- Verification evidence:
+  - `npm test -- src/shared/readme.test.ts` -> 1 file / 3 tests passed.
+  - `npm run verify` -> 105 Vitest files / 507 tests passed, build passed, agent eval 21/21, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `npm run dist:mac` -> generated macOS DMG and ZIP artifacts for `1.8.0`.

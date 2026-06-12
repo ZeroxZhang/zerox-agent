@@ -91,6 +91,16 @@ type ChatSession = {
   messageCount?: number;
 };
 
+type ComposerCommandId = "goal" | "tool" | "permission";
+
+type ComposerCommandItem = {
+  id: ComposerCommandId;
+  shortcut: string;
+  label: string;
+  description: string;
+  comingSoon?: boolean;
+};
+
 const fallbackSessions: ChatSession[] = [
   {
     id: "main",
@@ -112,6 +122,28 @@ const minSessionRailWidth = 180;
 const maxSessionRailWidth = 360;
 const minChatWorkspaceWidth = 520;
 const chatResizeStep = 12;
+const composerCommandItems: ComposerCommandItem[] = [
+  {
+    id: "goal",
+    shortcut: "/目标",
+    label: "目标",
+    description: "把输入设为这轮会话的目标",
+  },
+  {
+    id: "tool",
+    shortcut: "/工具",
+    label: "工具",
+    description: "预留给后续工具指令",
+    comingSoon: true,
+  },
+  {
+    id: "permission",
+    shortcut: "/权限",
+    label: "权限",
+    description: "预留给运行授权入口",
+    comingSoon: true,
+  },
+];
 
 const initialMessages: ChatMessage[] = [
   {
@@ -136,6 +168,7 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
   );
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [draft, setDraft] = useState("");
+  const [commandMenuOpen, setCommandMenuOpen] = useState(false);
   const [sessions, setSessions] = useState<ChatSession[]>(fallbackSessions);
   const [tasks, setTasks] = useState<ScheduledTask[]>(demoTasks);
   const [runs, setRuns] = useState<AgentRunRecord[]>(demoRuns);
@@ -165,6 +198,7 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
   const [activityTick, setActivityTick] = useState(Date.now());
   const chatPanelRef = useRef<HTMLElement>(null);
   const messageListRef = useRef<HTMLDivElement>(null);
+  const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const sessionIdRef = useRef<string | null>(sessionId);
   const activeStatusSessionIdRef = useRef<string | null>(null);
   const activeChatRequestIdRef = useRef<string | null>(null);
@@ -343,6 +377,8 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
     (status.kind === "working" ||
       taskActivity.kind === "working" ||
       activeChatRequestId !== null);
+  const composerCommandMenuVisible =
+    commandMenuOpen || shouldShowComposerCommandMenu(draft);
 
   const contextCards = useMemo(
     () => [
@@ -412,6 +448,25 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
   function setActiveChatRequest(requestId: string | null) {
     activeChatRequestIdRef.current = requestId;
     setActiveChatRequestId(requestId);
+  }
+
+  function handleOpenCommandMenu() {
+    setCommandMenuOpen(true);
+    window.requestAnimationFrame(() => {
+      messageInputRef.current?.focus();
+    });
+  }
+
+  function handleSelectComposerCommand(commandId: ComposerCommandId) {
+    if (commandId !== "goal") {
+      return;
+    }
+
+    setDraft(createGoalCommandDraft(draft));
+    setCommandMenuOpen(false);
+    window.requestAnimationFrame(() => {
+      messageInputRef.current?.focus();
+    });
   }
 
   async function submitUserMessage(rawContent: string) {
@@ -557,6 +612,10 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (composerCommandMenuVisible) {
+      handleSelectComposerCommand("goal");
+      return;
+    }
     await submitUserMessage(draft);
   }
 
@@ -979,7 +1038,9 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
             goal={activeGoal}
             onEnd={() => void submitUserMessage("结束目标")}
             onModify={() => setDraft("目标改一下：")}
-            onPause={() => void submitUserMessage("暂停这个目标")}
+            {...(activeGoal.status === "executing"
+              ? { onPause: () => void submitUserMessage("暂停这个目标") }
+              : {})}
             onViewProgress={() => setGoalDrawerOpen(true)}
           />
         ) : null}
@@ -1055,31 +1116,75 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
           />
           <div className="composer-inner">
             <div className="composer-input-shell">
+              {composerCommandMenuVisible ? (
+                <div
+                  aria-label="命令菜单"
+                  className="slash-command-menu"
+                  role="listbox"
+                >
+                  {composerCommandItems.map((command) => (
+                    <button
+                      aria-disabled={command.comingSoon ? "true" : undefined}
+                      className={`slash-command-item${
+                        command.comingSoon ? " is-coming-soon" : ""
+                      }`}
+                      disabled={command.comingSoon}
+                      key={command.id}
+                      onClick={() => handleSelectComposerCommand(command.id)}
+                      onMouseDown={(event) => event.preventDefault()}
+                      role="option"
+                      type="button"
+                    >
+                      <span>{command.shortcut}</span>
+                      <div>
+                        <strong>{command.label}</strong>
+                        <small>{command.description}</small>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
               <textarea
                 data-testid="agent-message-input"
                 id="agent-message"
+                ref={messageInputRef}
                 value={draft}
-                onChange={(event) => setDraft(event.currentTarget.value)}
+                onChange={(event) => {
+                  setDraft(event.currentTarget.value);
+                  setCommandMenuOpen(false);
+                }}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
+                    if (composerCommandMenuVisible) {
+                      handleSelectComposerCommand("goal");
+                      return;
+                    }
                     const form = event.currentTarget.closest("form");
                     form?.requestSubmit();
+                    return;
+                  }
+                  if (event.key === "Escape" && composerCommandMenuVisible) {
+                    event.preventDefault();
+                    setCommandMenuOpen(false);
+                    if (shouldShowComposerCommandMenu(draft)) {
+                      setDraft("");
+                    }
                   }
                 }}
-                placeholder="输入消息，Enter 发送，Shift+Enter 换行"
+                placeholder="输入消息，/ 选择命令，Enter 发送"
                 rows={2}
               />
               <div className="composer-floating-actions" aria-label="对话操作">
                 <button
-                  aria-label="工具权限"
-                  className="composer-icon-button composer-permission-button"
-                  onClick={() => onNavigate("tools")}
-                  title="工具权限"
+                  aria-label="打开命令菜单"
+                  className="composer-icon-button composer-command-button"
+                  onClick={handleOpenCommandMenu}
+                  title="打开命令菜单"
                   type="button"
                 >
-                  <span className="composer-icon composer-icon-permission" aria-hidden="true" />
-                  <span className="sr-only">工具权限</span>
+                  <span className="composer-icon composer-icon-command" aria-hidden="true" />
+                  <span className="sr-only">打开命令菜单</span>
                 </button>
                 <button
                   aria-label="中断当前任务"
@@ -1391,6 +1496,28 @@ function createClientRequestId(): string {
 
 function isCanceledMessage(message: string): boolean {
   return /中断|取消|cancel|canceled|cancelled|abort|aborted/i.test(message);
+}
+
+function shouldShowComposerCommandMenu(draft: string): boolean {
+  const commandDraft = draft.trimStart();
+  if (!commandDraft.startsWith("/") || commandDraft.includes("\n")) {
+    return false;
+  }
+  if (/^\/(?:目标|goal)\s+/i.test(commandDraft)) {
+    return false;
+  }
+
+  const query = commandDraft.slice(1).trim().toLowerCase();
+  return query.length === 0 || "目标".includes(query) || "goal".startsWith(query);
+}
+
+function createGoalCommandDraft(draft: string): string {
+  const trimmed = draft.trim();
+  if (!trimmed || trimmed.startsWith("/")) {
+    return "/目标 ";
+  }
+
+  return `/目标 ${trimmed}`;
 }
 
 function MarkdownMessage({ content }: { content: string }) {
