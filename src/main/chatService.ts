@@ -19,10 +19,12 @@ import type { ToolAuthorizationService } from "./toolAuthorizationService";
 import type {
   ChatAgentStatus,
   ChatRelatedMemory,
+  ChatSessionGoalSummary,
   ChatTaskStatusEvent,
   SendChatMessageInput,
   SendChatMessageResult,
 } from "../shared/chat";
+import type { GoalReviewDecision } from "../shared/agentGoalReview";
 import type { AgentRunRecord, RunScheduledTaskResult } from "../shared/agentRuns";
 import type { MemoryRecord, MemorySearchResult } from "../shared/memory";
 import type { NativeToolDescriptor } from "../shared/nativeCapabilities";
@@ -53,12 +55,40 @@ type ChatContinuationState = {
   evidenceRunId?: string;
 };
 
+type ChatGoalService = {
+  createFromChat(input: {
+    sessionId: string;
+    originMessageId: string | null;
+    description: string;
+  }): Promise<ChatSessionGoalSummary>;
+  resume(
+    goalId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<ChatSessionGoalSummary>;
+  cancel(goalId: string): Promise<ChatSessionGoalSummary>;
+  resolveReview(
+    goalId: string,
+    decision: GoalReviewDecision,
+  ): Promise<ChatSessionGoalSummary>;
+};
+
+type GoalIntentRoute =
+  | { kind: "set_goal"; description: string }
+  | { kind: "continue_goal" }
+  | { kind: "cancel_goal" }
+  | { kind: "modify_goal"; instructions: string }
+  | { kind: "none" };
+
 export function createChatService(options: {
   chatClient: ChatClient;
   getModelProfile: () => Promise<AgentModelProfile>;
   memoryStore: Pick<MemoryStore, "create" | "search">;
   memoryProfileStore?: MemoryProfileStore;
-  chatSessionStore?: Pick<ChatSessionStore, "appendMessage">;
+  chatSessionStore?: Pick<
+    ChatSessionStore,
+    "appendMessage" | "attachGoal" | "clearActiveGoal"
+  >;
+  goalService?: ChatGoalService;
   taskStore?: Pick<ScheduledTaskStore, "create" | "list">;
   runScheduledTask?: (taskId: string) => Promise<RunScheduledTaskResult>;
   toolExecutor?: AgentToolExecutor;
@@ -94,6 +124,7 @@ export function createChatService(options: {
         onStatusEvent: runtimeOptions.onStatusEvent,
       });
       let userMessageId: string | null = null;
+      let activeGoal: ChatSessionGoalSummary | null = null;
       if (options.chatSessionStore) {
         const appendResult = await options.chatSessionStore.appendMessage({
           ...(input.sessionId ? { sessionId: input.sessionId } : {}),
@@ -103,6 +134,21 @@ export function createChatService(options: {
         sessionId = appendResult.session.id;
         emitStatus.setSessionId(sessionId);
         userMessageId = appendResult.message.id;
+        activeGoal = getActiveGoalSummary(appendResult.session);
+      }
+
+      const goalRoute = await tryRouteGoalIntent({
+        route: detectGoalIntent(userMessage),
+        activeGoal,
+        chatSessionStore: options.chatSessionStore,
+        goalService: options.goalService,
+        originMessageId: userMessageId,
+        sessionId,
+        signal: runtimeOptions.signal,
+      });
+
+      if (goalRoute) {
+        return goalRoute.result;
       }
 
       const pendingContinuation = pendingContinuations.get(sessionId);
@@ -631,6 +677,184 @@ function isContinuationRequest(message: string): boolean {
   );
 }
 
+function detectGoalIntent(message: string): GoalIntentRoute {
+  const compact = message.trim();
+  if (!compact) {
+    return { kind: "none" };
+  }
+
+  if (/^(把这轮设为目标|这轮目标是|接下来目标是|目标[:：])/i.test(compact)) {
+    return { kind: "set_goal", description: extractGoalDescription(compact) };
+  }
+
+  if (/^(取消这个目标|结束目标|终止目标|取消目标)/.test(compact)) {
+    return { kind: "cancel_goal" };
+  }
+
+  const modifyMatch = compact.match(/^(目标改一下|修改计划|调整目标)[:：]?\s*(.*)$/);
+  if (modifyMatch) {
+    return {
+      kind: "modify_goal",
+      instructions: modifyMatch[2]?.trim() || compact,
+    };
+  }
+
+  if (isContinuationRequest(compact)) {
+    return { kind: "continue_goal" };
+  }
+
+  return { kind: "none" };
+}
+
+function extractGoalDescription(message: string): string {
+  return (
+    message
+      .replace(/^(把这轮设为目标|这轮目标是|接下来目标是|目标)\s*[:：]?\s*/i, "")
+      .trim() || message.trim()
+  );
+}
+
+function getActiveGoalSummary(
+  session: AppendChatMessageResult["session"],
+): ChatSessionGoalSummary | null {
+  if (!session.activeGoalId || !session.goalSummaries?.length) {
+    return null;
+  }
+
+  return (
+    session.goalSummaries.find((goal) => goal.id === session.activeGoalId) ??
+    null
+  );
+}
+
+async function tryRouteGoalIntent(options: {
+  route: GoalIntentRoute;
+  activeGoal: ChatSessionGoalSummary | null;
+  chatSessionStore:
+    | Pick<ChatSessionStore, "appendMessage" | "attachGoal" | "clearActiveGoal">
+    | undefined;
+  goalService: ChatGoalService | undefined;
+  originMessageId: string | null;
+  sessionId: string;
+  signal?: AbortSignal;
+}): Promise<{ result: SendChatMessageResult } | null> {
+  if (options.route.kind === "none" || !options.goalService) {
+    return null;
+  }
+
+  if (options.route.kind === "set_goal") {
+    const activeGoal = await options.goalService.createFromChat({
+      sessionId: options.sessionId,
+      originMessageId: options.originMessageId,
+      description: options.route.description,
+    });
+    await options.chatSessionStore?.attachGoal(options.sessionId, activeGoal);
+    const reply = `已把这轮会话设为目标：${activeGoal.description}。`;
+    await appendAssistantMessage({
+      chatSessionStore: options.chatSessionStore,
+      sessionId: options.sessionId,
+      content: reply,
+      goalId: activeGoal.id,
+      goalEventRef: "goal_created",
+    });
+    return {
+      result: {
+        ok: true,
+        reply,
+        sessionId: options.sessionId,
+        relatedMemories: [],
+        memoryId: null,
+        activeGoal,
+      },
+    };
+  }
+
+  if (!options.activeGoal) {
+    return null;
+  }
+
+  if (options.route.kind === "continue_goal") {
+    const activeGoal =
+      options.activeGoal.status === "waiting_for_review"
+        ? await options.goalService.resolveReview(options.activeGoal.id, {
+            kind: "approve_continue",
+          })
+        : await options.goalService.resume(options.activeGoal.id, {
+            ...(options.signal ? { signal: options.signal } : {}),
+          });
+    await options.chatSessionStore?.attachGoal(options.sessionId, activeGoal);
+    const reply = `继续推进目标：${activeGoal.description}。`;
+    await appendAssistantMessage({
+      chatSessionStore: options.chatSessionStore,
+      sessionId: options.sessionId,
+      content: reply,
+      goalId: activeGoal.id,
+      goalEventRef: "goal_resumed",
+    });
+    return {
+      result: {
+        ok: true,
+        reply,
+        sessionId: options.sessionId,
+        relatedMemories: [],
+        memoryId: null,
+        activeGoal,
+      },
+    };
+  }
+
+  if (options.route.kind === "cancel_goal") {
+    const activeGoal = await options.goalService.cancel(options.activeGoal.id);
+    await options.chatSessionStore?.attachGoal(options.sessionId, activeGoal);
+    await options.chatSessionStore?.clearActiveGoal(
+      options.sessionId,
+      activeGoal.id,
+    );
+    const reply = `已结束目标：${activeGoal.description}。`;
+    await appendAssistantMessage({
+      chatSessionStore: options.chatSessionStore,
+      sessionId: options.sessionId,
+      content: reply,
+      goalId: activeGoal.id,
+      goalEventRef: "goal_canceled",
+    });
+    return {
+      result: {
+        ok: true,
+        reply,
+        sessionId: options.sessionId,
+        relatedMemories: [],
+        memoryId: null,
+        activeGoal,
+      },
+    };
+  }
+
+  const activeGoal = await options.goalService.resolveReview(
+    options.activeGoal.id,
+    { kind: "modify_plan", instructions: options.route.instructions },
+  );
+  await options.chatSessionStore?.attachGoal(options.sessionId, activeGoal);
+  const reply = `已记录目标调整：${options.route.instructions}`;
+  await appendAssistantMessage({
+    chatSessionStore: options.chatSessionStore,
+    sessionId: options.sessionId,
+    content: reply,
+    goalId: activeGoal.id,
+    goalEventRef: "goal_modified",
+  });
+  return {
+    result: {
+      ok: true,
+      reply,
+      sessionId: options.sessionId,
+      relatedMemories: [],
+      memoryId: null,
+      activeGoal,
+    },
+  };
+}
+
 function buildContinuationMessages(options: {
   continuation: ChatContinuationState;
   userMessage: string;
@@ -655,6 +879,8 @@ async function appendAssistantMessage(options: {
   content: string;
   relatedMemoryIds?: string[];
   executedRunId?: string;
+  goalId?: string;
+  goalEventRef?: string;
 }): Promise<string | null> {
   if (!options.chatSessionStore) {
     return null;
@@ -669,6 +895,8 @@ async function appendAssistantMessage(options: {
         ? { relatedMemoryIds: options.relatedMemoryIds }
         : {}),
       ...(options.executedRunId ? { executedRunId: options.executedRunId } : {}),
+      ...(options.goalId ? { goalId: options.goalId } : {}),
+      ...(options.goalEventRef ? { goalEventRef: options.goalEventRef } : {}),
     });
   return appendResult.message.id;
 }

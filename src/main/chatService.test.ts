@@ -9,7 +9,7 @@ import type { RunScheduledTaskResult } from "../shared/agentRuns";
 import type { MemoryInput, MemoryRecord, MemorySearchResult } from "../shared/memory";
 import type { ScheduledTask, ScheduledTaskInput } from "../shared/scheduledTasks";
 import { getDefaultTaskPermissionPolicy } from "../shared/toolPermissions";
-import type { ChatTaskStatusEvent } from "../shared/chat";
+import type { ChatSessionGoalSummary, ChatTaskStatusEvent } from "../shared/chat";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
 import { defineNativeToolDescriptor } from "../shared/nativeCapabilities";
 
@@ -177,6 +177,109 @@ describe("chat service", () => {
         relatedMemoryIds: ["mem_downloads"],
       },
     ]);
+  });
+
+  it("creates a session goal from an explicit goal-setting message", async () => {
+    let completeCalled = false;
+    const chatMessages: AppendChatMessageInput[] = [];
+    const goalCreates: unknown[] = [];
+    const attachedGoals: ChatSessionGoalSummary[] = [];
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          completeCalled = true;
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore(chatMessages, { attachedGoals }),
+      goalService: createGoalService({ goalCreates }),
+      createId: () => "chat_goal",
+      now: () => new Date("2026-06-12T08:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage({
+      message: "把这轮设为目标：发布 v1.8.0，直到 GitHub Release 完成才算结束",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      activeGoal: {
+        id: "goal_release",
+        description: "发布 v1.8.0，直到 GitHub Release 完成才算结束",
+        status: "planning",
+      },
+    });
+    expect(goalCreates).toEqual([
+      {
+        sessionId: "persisted_session",
+        originMessageId: "message_1",
+        description: "发布 v1.8.0，直到 GitHub Release 完成才算结束",
+      },
+    ]);
+    expect(attachedGoals).toEqual([
+      {
+        id: "goal_release",
+        description: "发布 v1.8.0，直到 GitHub Release 完成才算结束",
+        status: "planning",
+      },
+    ]);
+    expect(chatMessages).toEqual([
+      {
+        role: "user",
+        content: "把这轮设为目标：发布 v1.8.0，直到 GitHub Release 完成才算结束",
+      },
+      {
+        sessionId: "persisted_session",
+        role: "assistant",
+        content:
+          "已把这轮会话设为目标：发布 v1.8.0，直到 GitHub Release 完成才算结束。",
+        goalId: "goal_release",
+        goalEventRef: "goal_created",
+      },
+    ]);
+    expect(completeCalled).toBe(false);
+  });
+
+  it("continues the active session goal before ordinary chat continuation", async () => {
+    let completeCalled = false;
+    const resumes: string[] = [];
+    const activeGoal: ChatSessionGoalSummary = {
+      id: "goal_release",
+      description: "发布",
+      status: "executing",
+    };
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          completeCalled = true;
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([], { activeGoal }),
+      goalService: createGoalService({ resumes }),
+      createId: () => "chat_goal",
+      now: () => new Date("2026-06-12T08:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage({
+      sessionId: "persisted_session",
+      message: "继续",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      activeGoal: {
+        id: "goal_release",
+        description: "发布",
+        status: "executing",
+      },
+    });
+    expect(resumes).toEqual(["goal_release"]);
+    expect(completeCalled).toBe(false);
   });
 
   it("extracts preference-like chat turns into L1 memory and updates the persona profile", async () => {
@@ -942,7 +1045,13 @@ function createMemoryStore(options: {
   };
 }
 
-function createChatSessionStore(messages: AppendChatMessageInput[]) {
+function createChatSessionStore(
+  messages: AppendChatMessageInput[],
+  options: {
+    activeGoal?: ChatSessionGoalSummary;
+    attachedGoals?: ChatSessionGoalSummary[];
+  } = {},
+) {
   return {
     async appendMessage(input: AppendChatMessageInput) {
       messages.push(input);
@@ -958,11 +1067,84 @@ function createChatSessionStore(messages: AppendChatMessageInput[]) {
           title: "会话",
           summary: input.content,
           messages: [],
+          ...(options.activeGoal
+            ? {
+                activeGoalId: options.activeGoal.id,
+                goalIds: [options.activeGoal.id],
+                goalSummaries: [options.activeGoal],
+              }
+            : {}),
           createdAt: "2026-06-06T08:00:00.000Z",
           updatedAt: "2026-06-06T08:00:00.000Z",
         },
       };
     },
+    async attachGoal(_sessionId: string, goal: ChatSessionGoalSummary) {
+      options.attachedGoals?.push(goal);
+      return {
+        id: "persisted_session",
+        title: "会话",
+        summary: goal.description,
+        messages: [],
+        activeGoalId: goal.id,
+        goalIds: [goal.id],
+        goalSummaries: [goal],
+        createdAt: "2026-06-06T08:00:00.000Z",
+        updatedAt: "2026-06-06T08:00:00.000Z",
+      };
+    },
+  };
+}
+
+function createGoalService(options: {
+  goalCreates?: unknown[];
+  resumes?: string[];
+} = {}) {
+  return {
+    async createFromChat(input: {
+      sessionId: string;
+      originMessageId: string | null;
+      description: string;
+    }): Promise<ChatSessionGoalSummary> {
+      options.goalCreates?.push(input);
+      return {
+        id: "goal_release",
+        description: input.description,
+        status: "planning",
+      };
+    },
+    async resume(goalId: string): Promise<ChatSessionGoalSummary> {
+      options.resumes?.push(goalId);
+      return {
+        id: goalId,
+        description: "发布",
+        status: "executing",
+      };
+    },
+    async cancel(goalId: string): Promise<ChatSessionGoalSummary> {
+      return {
+        id: goalId,
+        description: "发布",
+        status: "canceled",
+      };
+    },
+    async resolveReview(goalId: string): Promise<ChatSessionGoalSummary> {
+      return {
+        id: goalId,
+        description: "发布",
+        status: "executing",
+      };
+    },
+  };
+}
+
+async function createCompleteProfile() {
+  return {
+    baseUrl: "https://api.example.com/v1",
+    apiKey: "secret",
+    model: "agent-model",
+    temperature: 0.2,
+    maxTokens: 8192,
   };
 }
 

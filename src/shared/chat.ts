@@ -133,6 +133,7 @@ export type SendChatMessageResult =
       executedRun?: AgentRunRecord;
       createdTask?: ScheduledTask;
       agentStatus?: ChatAgentStatus;
+      activeGoal?: ChatSessionGoalSummary;
     }
   | {
       ok: false;
