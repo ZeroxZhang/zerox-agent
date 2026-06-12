@@ -190,7 +190,9 @@ export function App() {
                 onClick={() => navigateTo(section.id)}
               >
                 <span className="material-nav-icon" aria-hidden="true">
-                  {icon.glyph}
+                  <svg viewBox="0 0 24 24" width="24" height="24" focusable="false">
+                    <path d={icon.path} fill="currentColor" />
+                  </svg>
                 </span>
                 <span className="material-nav-label">{section.label}</span>
                 <small className="material-nav-supporting">
