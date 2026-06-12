@@ -387,3 +387,22 @@
   - `npm run harness:check` -> passed.
   - `git diff --check` -> passed.
   - `npm run smoke:prod` not run because this slice changed CI configuration and a CI contract test only, with no UI/runtime behavior change.
+
+## 2026-06-12 Goal Mode P5.1 Domain Model
+
+- Added the bounded Goal Mode shared domain model, review policy type, goal status state machine, and deterministic draft validation helpers.
+- Linked recoverable runtime checkpoints back to optional goal and milestone provenance without changing runtime behavior.
+- Changed files:
+  - `src/shared/agentGoal.ts`
+  - `src/shared/agentGoalReview.ts`
+  - `src/shared/agentGoal.test.ts`
+  - `src/shared/agentExecution.ts`
+  - `src/shared/agentExecution.test.ts`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `npm test -- src/shared/agentGoal.test.ts src/shared/agentExecution.test.ts` -> RED, missing `./agentGoal` module.
+  - `npm test -- src/shared/agentGoal.test.ts src/shared/agentExecution.test.ts` -> 2 files / 8 tests passed.
+  - `npm run verify` -> 98 Vitest files / 454 tests passed, build passed, agent eval 15/15, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run smoke:prod` not run because this slice changed shared types/tests only, with no UI/runtime behavior change.
