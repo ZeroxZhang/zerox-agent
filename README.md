@@ -50,13 +50,13 @@
 
 <h2 id="overview-en">Overview</h2>
 
-**Zerox Agent** is a local-first desktop control plane for personal AI agents. The current release is **v1.6.0**. The name derives from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
+**Zerox Agent** is a local-first desktop control plane for personal AI agents. The current release is **v1.7.0**. The name derives from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
 
 It is not a chat wrapper or a generic hosted agent surface. It runs locally, configures OpenAI-compatible models, scans local `SKILL.md` skill files, executes recoverable agent runs, invokes permission-controlled tools, tracks parent/child multi-agent sessions, persists experiential knowledge into local long-term memory, and keeps learning user-reviewed before it changes future behavior.
 
 The product boundary is documented in [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md): Zerox optimizes for trusted local control, recoverable agent runs, explicit permissions, workspace-scoped runs, observable trajectories, parent/child multi-agent sessions, and user-reviewed learning. Runtime, workspace, and learning details live in [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md), [`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md), and [`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md).
 
-v1.6.0 upgrades the active runtime core on top of the Agent Learning Harness Loop and Agent Capability foundation. Dynamic skill and MCP tools can now pass authorization through explicit tool names or registered sources; recoverable runs feed failed tool observations back to the model; duplicate retries and exhausted recovery budgets are visible in trajectory evidence; active chat and runtime loops compact long histories before model calls; runtime checkpoints are written after each tool observation; transient model failures retry with `model_retry` evidence; and the Runs trajectory inspector surfaces readable recovery, retry, and compaction insight cards. The Goal Mode foundation adds bounded-autonomy goal state, local ledgers, planning, deterministic-first acceptance, review gates, a Goals panel, and goal-mode eval coverage. The deterministic agent eval suite now covers 21 runtime, native-tool, recovery, compaction, checkpoint, model-retry, research-writing, eval-candidate, multi-agent lineage, and goal-mode contracts.
+v1.7.0 ships the Goal Mode foundation on top of the Agent Learning Harness Loop and Agent Capability runtime core. Goal Mode adds bounded-autonomy goal state, local ledgers, planning, deterministic-first acceptance, review gates, a Goals panel, goal-aware compaction, and goal-mode eval coverage. The underlying runtime still provides dynamic skill/MCP authorization, recoverable tool-failure observations, retry-budget diagnostics, active context compaction, per-tool checkpoints, model retry, and readable Runs trajectory insights. The deterministic agent eval suite now covers 21 runtime, native-tool, recovery, compaction, checkpoint, model-retry, research-writing, eval-candidate, multi-agent lineage, and goal-mode contracts.
 
 <p align="center">
   <img src="zerox-agent-onepage.png" alt="Zerox Agent one-page product overview" width="720" />
@@ -200,7 +200,7 @@ The active runtime is split into two production paths with shared core behavior:
 - **Agent chat loop**: interactive chat turns with tool calling, duplicate-tool detection, repeated-failure pause diagnostics, context compaction, and transient model retry.
 - **Recoverable runtime engine**: scheduled/manual task execution with durable checkpoints, trajectory evidence, resume/cancel/pause support, workspace context, authorization audit, memory recall, learning extraction, tool-result offload, and the same context/model retry safeguards.
 
-v1.6.0 focuses on making the recoverable runtime harder to strand:
+The recoverable runtime is designed to be hard to strand:
 
 - Dynamic skill and MCP tools are authorized by explicit tool name or registered source.
 - Tool failures are appended as model-visible observations before retrying.
@@ -555,7 +555,7 @@ can't be opened." The image is usually valid; remove the quarantine attribute
 before opening:
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/Zerox.Agent-1.6.0-arm64.dmg
+xattr -dr com.apple.quarantine ~/Downloads/Zerox.Agent-1.7.0-arm64.dmg
 ```
 
 If you already dragged the app into Applications, run:
@@ -585,7 +585,7 @@ npm run episode:export -- --config-dir <userData/config> --run-id <runId>
 npm run verify        # Tests + build + deterministic eval
 ```
 
-As of v1.6.0, `npm run verify` covers the Vitest suite, the production build, agent evals, and memory evals. The suite currently includes 104 Vitest files / 492 tests, 21 deterministic agent eval fixtures, and 2 memory eval fixtures. Agent evals include native code engineering, research writing, reflection-after-test-failure, retry-budget exhaustion, context compaction, tool-call checkpointing, model retry, episode eval-candidate, child handoff review-gate, and goal-mode bounded-autonomy golden paths. Goal Mode architecture is documented in `docs/architecture/agent-goal-mode.md`. Set `BUILDING_AGENT_CONFIG_DIR=/path/to/config` when running `npm run eval:agent` or `npm run harness:score` to include local promoted fixtures and pending eval candidates from that config directory. `npm run harness:score` emits the seven-category ETCLOVG score used by Overview as a local quality signal and now includes adversarial eval, goal-mode pass rate, plus the ACI/context report; Overview also displays the native Agent Capability score.
+As of v1.7.0, `npm run verify` covers the Vitest suite, the production build, agent evals, and memory evals. The suite currently includes 104 Vitest files / 492 tests, 21 deterministic agent eval fixtures, and 2 memory eval fixtures. Agent evals include native code engineering, research writing, reflection-after-test-failure, retry-budget exhaustion, context compaction, tool-call checkpointing, model retry, episode eval-candidate, child handoff review-gate, and goal-mode bounded-autonomy golden paths. Goal Mode architecture is documented in `docs/architecture/agent-goal-mode.md`. Set `BUILDING_AGENT_CONFIG_DIR=/path/to/config` when running `npm run eval:agent` or `npm run harness:score` to include local promoted fixtures and pending eval candidates from that config directory. `npm run harness:score` emits the seven-category ETCLOVG score used by Overview as a local quality signal and now includes adversarial eval, goal-mode pass rate, plus the ACI/context report; Overview also displays the native Agent Capability score.
 
 ### Test Coverage
 
@@ -597,7 +597,7 @@ As of v1.6.0, `npm run verify` covers the Vitest suite, the production build, ag
 
 <h2 id="roadmap">Roadmap</h2>
 
-Current version: v1.6.0.
+Current version: v1.7.0.
 
 Recently shipped:
 
@@ -650,13 +650,13 @@ Planned:
 
 ## 项目概述
 
-**Zerox Agent** 是一个本地优先的桌面智能体控制台，当前版本是 **v1.6.0**。名字取自 **Zero + X**——从留白开始，把未知的本地工作流转成可观察、受权限管控、可恢复的 Agent 运行。
+**Zerox Agent** 是一个本地优先的桌面智能体控制台，当前版本是 **v1.7.0**。名字取自 **Zero + X**——从留白开始，把未知的本地工作流转成可观察、受权限管控、可恢复的 Agent 运行。
 
 它不是聊天壳，也不是泛用云端 Agent 入口。它运行在本机：配置 OpenAI‑compatible 模型、扫描本地 `SKILL.md` 技能文件、执行可恢复的 Agent 运行、调用受权限管控的工具、跟踪父子多 Agent 会话、把经验和知识写入本地长期记忆，并且在改变未来行为前保留用户审核。
 
 产品边界写在 [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md)：Zerox 优先建设可信的本地控制、可恢复运行、显式权限、workspace 作用域、可观察轨迹、父子多 Agent 会话和用户审核后的学习。运行时、workspace 与学习机制分别见 [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md)、[`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md)、[`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md)。
 
-v1.6.0 在 Agent Learning Harness Loop 和 Agent Capability 基础上升级活跃运行时核心：动态 skill / MCP 工具可通过显式工具名或注册来源授权；可恢复运行会把失败工具结果作为 observation 反喂模型；重复重试与恢复预算耗尽会写入结构化轨迹；活跃 chat/runtime loop 会在模型请求前压缩长上下文；runtime 在每个工具结果后写 checkpoint；瞬时模型失败会记录 `model_retry` 并有限重试；Runs 轨迹面板会把恢复、重试、压缩事件渲染为可读诊断卡。Goal Mode foundation 增加有边界自治目标状态、本地 ledger、规划、确定性优先验收、审核门、Goals 面板和 goal-mode eval 覆盖。确定性 Agent eval suite 现在覆盖 21 个 runtime、原生工具、恢复、压缩、checkpoint、模型重试、研究写作、eval candidate、多 Agent lineage 和 goal-mode 契约。
+v1.7.0 在 Agent Learning Harness Loop 和 Agent Capability runtime core 之上发布 Goal Mode foundation：有边界自治目标状态、本地 ledger、规划、确定性优先验收、审核门、Goals 面板、goal-aware compaction 和 goal-mode eval 覆盖。底层 runtime 继续提供动态 skill/MCP 授权、可恢复工具失败 observation、retry-budget 诊断、活跃上下文压缩、per-tool checkpoint、模型重试和 Runs 轨迹诊断卡。确定性 Agent eval suite 现在覆盖 21 个 runtime、原生工具、恢复、压缩、checkpoint、模型重试、研究写作、eval candidate、多 Agent lineage 和 goal-mode 契约。
 
 ### 设计原则
 
@@ -809,7 +809,7 @@ API Key 通过 Electron `safeStorage` 加密保存，永不写入明文文件或
 - **对话 Agent loop**：面向交互式聊天，支持工具调用、重复工具检测、连续失败暂停诊断、上下文压缩和瞬时模型失败重试。
 - **可恢复 runtime engine**：面向手动/定时任务，提供 durable checkpoint、trajectory evidence、resume/cancel/pause、workspace context、授权审计、记忆召回、学习候选提取、工具结果 offload，以及同样的上下文压缩和模型重试防护。
 
-v1.6.0 的重点是让可恢复运行不再轻易卡死：
+可恢复 runtime 的设计目标是让运行不再轻易卡死：
 
 - 动态 skill / MCP 工具可通过显式工具名或注册来源授权。
 - 工具失败会作为模型可见 observation 写回，再决定是否重试。
@@ -1258,7 +1258,7 @@ Gatekeeper 可能提示「Zerox Agent 已损坏，无法打开」。这通常不
 而是下载隔离属性导致的拦截。打开前在终端执行：
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/Zerox.Agent-1.6.0-arm64.dmg
+xattr -dr com.apple.quarantine ~/Downloads/Zerox.Agent-1.7.0-arm64.dmg
 ```
 
 如果已经把应用拖进 Applications，则执行：
@@ -1285,7 +1285,7 @@ mac:
 
 ## 测试
 
-截至 v1.6.0，`npm run verify` 覆盖 Vitest 测试、生产构建、Agent 评测和记忆检索评测；当前包含 104 个 Vitest 文件 / 492 个测试、21 个确定性 Agent eval fixture 和 2 个 memory eval fixture。Agent eval 覆盖原生代码工程、研究写作、测试失败反思、retry budget exhaustion、上下文压缩、tool-call checkpoint、模型重试、episode eval candidate、child handoff review gate 和 goal-mode bounded-autonomy 黄金路径。Goal Mode 架构记录在 `docs/architecture/agent-goal-mode.md`：
+截至 v1.7.0，`npm run verify` 覆盖 Vitest 测试、生产构建、Agent 评测和记忆检索评测；当前包含 104 个 Vitest 文件 / 492 个测试、21 个确定性 Agent eval fixture 和 2 个 memory eval fixture。Agent eval 覆盖原生代码工程、研究写作、测试失败反思、retry budget exhaustion、上下文压缩、tool-call checkpoint、模型重试、episode eval candidate、child handoff review gate 和 goal-mode bounded-autonomy 黄金路径。Goal Mode 架构记录在 `docs/architecture/agent-goal-mode.md`：
 
 ```bash
 npm test              # 运行全部测试
@@ -1312,7 +1312,7 @@ npm run verify        # 测试 + 构建 + 确定性评测
 
 ## 路线图
 
-当前版本：v1.6.0。
+当前版本：v1.7.0。
 
 近期已完成：
 

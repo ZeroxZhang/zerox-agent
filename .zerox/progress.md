@@ -554,3 +554,24 @@
   - `git diff --check` -> passed.
   - `npm run harness:score` -> overall 9.20, goal 6/6, adversarial 59 checked with no escapes.
   - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+
+## 2026-06-12 v1.7.0 Release Prep
+
+- Bumped package metadata from `1.6.0` to `1.7.0`.
+- Updated README release language, install quarantine examples, roadmap current version, and README coverage assertions for the Goal Mode foundation release.
+- Built macOS release artifacts for GitHub Release upload:
+  - `release/Zerox.Agent-1.7.0-arm64.dmg`
+  - `release/Zerox.Agent-1.7.0-arm64-mac.zip`
+- Changed files:
+  - `README.md`
+  - `package.json`
+  - `package-lock.json`
+  - `src/shared/readme.test.ts`
+  - `.zerox/progress.md`
+- Verification evidence:
+  - `npm test -- src/shared/readme.test.ts src/shared/packageScripts.test.ts` -> 2 files / 8 tests passed.
+  - `npm run verify` -> 104 Vitest files / 492 tests passed, build passed, agent eval 21/21, memory eval 2/2.
+  - `npm run dist:mac` -> generated macOS DMG and ZIP artifacts for `1.7.0`.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
