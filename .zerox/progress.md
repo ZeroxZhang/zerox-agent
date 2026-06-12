@@ -474,3 +474,21 @@
   - `npm run harness:check` -> passed.
   - `git diff --check` -> passed.
   - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+
+## 2026-06-12 Goal Mode P5.6 Goal-aware Context Compaction
+
+- Added a goal context assembler that preserves never-compact goal anchors: goal description, success criteria, latest progress ledger summary, accepted milestone conclusions, and evidence refs.
+- Summarizes accepted milestones while keeping running/pending milestone detail, preserves offloaded tool-result refs as context anchors, and emits `context_compacted` trajectory evidence when compaction occurs.
+- Changed files:
+  - `src/main/agentGoalContext.ts`
+  - `src/main/agentGoalContext.test.ts`
+  - `src/main/contextManager.ts`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `npm test -- src/main/agentGoalContext.test.ts src/main/contextManager.test.ts` -> RED, missing `./agentGoalContext` module.
+  - `npm test -- src/main/agentGoalContext.test.ts src/main/contextManager.test.ts` -> RED, offloaded tool-result ref was compacted away by generic history compression.
+  - `npm test -- src/main/agentGoalContext.test.ts src/main/contextManager.test.ts` -> 2 files / 5 tests passed.
+  - `npm run verify` -> 103 Vitest files / 482 tests passed, build passed, agent eval 15/15, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run smoke:prod` not run because this slice added an unwired goal context helper and token estimation export only.

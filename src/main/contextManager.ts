@@ -56,6 +56,10 @@ function estimateTotalTokens(messages: ChatMessage[]): number {
   return total;
 }
 
+export function estimateMessageTokens(messages: ChatMessage[]): number {
+  return estimateTotalTokens(messages);
+}
+
 function compressMessagesInternal(
   messages: ChatMessage[],
   limit: number,
