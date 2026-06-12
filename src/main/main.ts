@@ -45,6 +45,17 @@ import {
   type AgentGoalStore,
 } from "./agentGoalStore";
 import {
+  createAgentGoalController,
+  type AgentGoalController,
+  type GoalRuntimeEngine,
+} from "./agentGoalController";
+import { createAgentGoalAcceptance } from "./agentGoalAcceptance";
+import { createAgentGoalPlanner } from "./agentGoalPlanner";
+import {
+  createGoalChatService,
+  type GoalChatService,
+} from "./goalChatService";
+import {
   createAgentWorkspaceService,
   type AgentWorkspaceService,
   type CreateGitWorktreeWorkspaceInput,
@@ -201,8 +212,13 @@ import type {
   PromoteEvalCandidateResult,
 } from "../shared/agentEvalCandidate";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
-import type { AgentWorkspace, MultiAgentSession } from "../shared/agentWorkspace";
+import {
+  buildPrimaryRunContext,
+  type AgentWorkspace,
+  type MultiAgentSession,
+} from "../shared/agentWorkspace";
 import type {
+  ChatSessionGoalSummary,
   ChatSessionListItem,
   ChatSessionRecord,
   ChatTaskStatusEvent,
@@ -257,6 +273,8 @@ let agentEvalCandidateService: AgentEvalCandidateService | null = null;
 let agentWorkspaceStore: AgentWorkspaceStore | null = null;
 let agentWorkspaceService: AgentWorkspaceService | null = null;
 let agentGoalStore: AgentGoalStore | null = null;
+let agentGoalController: AgentGoalController | null = null;
+let goalChatService: GoalChatService | null = null;
 let multiAgentSessionStore: MultiAgentSessionStore | null = null;
 let multiAgentCoordinator: MultiAgentCoordinator | null = null;
 let agentRunnerService: AgentRunnerService | null = null;
@@ -660,16 +678,16 @@ ipcMain.handle(
   },
 );
 ipcMain.handle("goal:start", async (_event, goalId: string) =>
-  updateGoalStatus(goalId, "executing"),
+  runGoalOperation(() => getGoalChatService().start(goalId)),
 );
 ipcMain.handle("goal:pause", async (_event, goalId: string) =>
   updateGoalStatus(goalId, "waiting_for_review"),
 );
 ipcMain.handle("goal:resume", async (_event, goalId: string) =>
-  updateGoalStatus(goalId, "executing"),
+  runGoalOperation(() => getGoalChatService().resume(goalId)),
 );
 ipcMain.handle("goal:cancel", async (_event, goalId: string) =>
-  updateGoalStatus(goalId, "canceled", "user_canceled"),
+  runGoalOperation(() => getGoalChatService().cancel(goalId)),
 );
 ipcMain.handle(
   "goal:resolveReview",
@@ -678,27 +696,9 @@ ipcMain.handle(
     goalId: string,
     decision: GoalReviewDecision,
   ): Promise<{ ok: boolean; goal?: Goal; message?: string }> => {
-    const goal = await getAgentGoalStore().get(goalId);
-    if (!goal) {
-      return { ok: false, message: "目标不存在。" };
-    }
-
-    await getAgentGoalStore().appendLedger(goalId, {
-      at: new Date().toISOString(),
-      kind: "review_resolved",
-      summary: `Review resolved with ${decision.kind}.`,
-    });
-
-    if (decision.kind === "terminate") {
-      return updateGoalStatus(goalId, "canceled", "review_rejected");
-    }
-
-    if (decision.kind === "modify_plan") {
-      goal.planVersion += 1;
-      goal.budgetUsage.replans += 1;
-    }
-
-    return saveGoalStatus(goal, "executing");
+    return runGoalOperation(() =>
+      getGoalChatService().resolveReview(goalId, decision),
+    );
   },
 );
 ipcMain.handle(
@@ -1280,6 +1280,25 @@ async function updateGoalStatus(
   return saveGoalStatus(goal, status, stopReason);
 }
 
+async function runGoalOperation(
+  operation: () => Promise<ChatSessionGoalSummary>,
+): Promise<{ ok: boolean; goal?: Goal; message?: string }> {
+  try {
+    const summary = await operation();
+    const goal = await getAgentGoalStore().get(summary.id);
+    if (!goal) {
+      return { ok: false, message: "目标不存在。" };
+    }
+
+    return { ok: true, goal };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : "无法更新目标状态。",
+    };
+  }
+}
+
 async function saveGoalStatus(
   goal: Goal,
   status: Goal["status"],
@@ -1342,6 +1361,172 @@ function getAgentGoalStore(): AgentGoalStore {
   }
 
   return agentGoalStore;
+}
+
+function getGoalChatService(): GoalChatService {
+  if (!goalChatService) {
+    goalChatService = createGoalChatService({
+      controller: getAgentGoalController(),
+      goalStore: getAgentGoalStore(),
+    });
+  }
+
+  return goalChatService;
+}
+
+function getAgentGoalController(): AgentGoalController {
+  if (!agentGoalController) {
+    const toolExecutor = createAgentToolExecutor({
+      memoryStore: getMemoryStore(),
+      chatSessionStore: getChatSessionStore(),
+    });
+    let trajectorySequence = 0;
+
+    void initializeMcpTools(toolExecutor);
+
+    agentGoalController = createAgentGoalController({
+      goalStore: getAgentGoalStore(),
+      runtimeEngine: createGoalRuntimeEngine(),
+      acceptance: createAgentGoalAcceptance(),
+      planner: {
+        async replan(goal, reason) {
+          const planner = createAgentGoalPlanner({
+            chatClient: createOpenAiCompatibleClient(),
+            modelProfile: await getGoalPlannerModelProfile(),
+          });
+          return planner.replan(goal, reason);
+        },
+      },
+      trajectoryStore: getAgentTrajectoryStore(),
+      createAcceptanceContext: (goal, milestone) => ({
+        runId: milestone?.runIds.at(-1) ?? goal.id,
+        goalId: goal.id,
+        ...(milestone ? { milestoneId: milestone.id } : {}),
+        workspacePath: app.getPath("home"),
+        toolExecutor,
+        trajectoryStore: getAgentTrajectoryStore(),
+      }),
+      createId: () => `goal_event_${randomUUID()}`,
+      nextSequence: () => {
+        trajectorySequence += 1;
+        return trajectorySequence;
+      },
+      now: () => new Date().toISOString(),
+    });
+  }
+
+  return agentGoalController;
+}
+
+function createGoalRuntimeEngine(): GoalRuntimeEngine {
+  let sequence = 0;
+  const nextSequence = () => {
+    sequence += 1;
+    return sequence;
+  };
+
+  return {
+    async runMilestone(goal, milestone) {
+      const startedAt = new Date().toISOString();
+      const runId = `goal_run_${randomUUID()}`;
+      const runContext = buildPrimaryRunContext({
+        workspaceId: goal.workspaceId ?? "local",
+        workspaceRoot: app.getPath("home"),
+        ...(goal.chatSessionId ? { sessionId: goal.chatSessionId } : {}),
+      });
+      const payload = {
+        goalId: goal.id,
+        milestoneId: milestone.id,
+        ...(goal.chatSessionId ? { chatSessionId: goal.chatSessionId } : {}),
+      };
+      const finishedAt = new Date().toISOString();
+
+      await getAgentRunStore().append({
+        id: runId,
+        taskId: `goal:${goal.id}`,
+        taskName: goal.description,
+        skillName: "goal-milestone",
+        status: "succeeded",
+        runContext,
+        summary: `Recorded goal milestone: ${milestone.description}`,
+        events: [
+          {
+            level: "info",
+            phase: "executing",
+            message: `Goal milestone started: ${milestone.description}`,
+            data: payload,
+            createdAt: startedAt,
+          },
+          {
+            level: "info",
+            phase: "done",
+            message: "Goal milestone recorded.",
+            data: payload,
+            createdAt: finishedAt,
+          },
+        ],
+        startedAt,
+        finishedAt,
+      });
+
+      await getAgentTrajectoryStore().append(runId, {
+        id: `trajectory_${randomUUID()}`,
+        runId,
+        type: "run_context_created",
+        sequence: nextSequence(),
+        runContext,
+        payload,
+        redaction: {
+          containsApiKey: false,
+          containsFileContent: false,
+          containsUserText: true,
+        },
+        createdAt: startedAt,
+      });
+      await getAgentTrajectoryStore().append(runId, {
+        id: `trajectory_${randomUUID()}`,
+        runId,
+        type: "final_summary",
+        sequence: nextSequence(),
+        runContext,
+        payload: {
+          ...payload,
+          summary: `Recorded goal milestone: ${milestone.description}`,
+        },
+        redaction: {
+          containsApiKey: false,
+          containsFileContent: false,
+          containsUserText: true,
+        },
+        createdAt: finishedAt,
+      });
+
+      return {
+        runId,
+        toolCallCount: 0,
+        wallClockMs:
+          new Date(finishedAt).getTime() - new Date(startedAt).getTime(),
+        tokens: 0,
+      };
+    },
+  };
+}
+
+async function getGoalPlannerModelProfile() {
+  const settings = await getModelSettingsStore().load();
+  const apiKey = await getModelSettingsStore().getApiKey();
+
+  if (!settings.chatModel || !apiKey) {
+    throw new Error("模型配置不完整。");
+  }
+
+  return {
+    baseUrl: settings.baseUrl,
+    apiKey,
+    model: settings.chatModel,
+    temperature: settings.temperature,
+    maxTokens: settings.maxTokens,
+  };
 }
 
 function getAgentWorkspaceStore(): AgentWorkspaceStore {
@@ -1680,6 +1865,7 @@ function getChatService(): ChatService {
       memoryStore: getMemoryStore(),
       memoryProfileStore: getMemoryProfileStore(),
       chatSessionStore: getChatSessionStore(),
+      goalService: getGoalChatService(),
       taskStore: getScheduledTaskStore(),
       runScheduledTask: (taskId) => getAgentRunnerService().runTask(taskId),
       toolExecutor,
