@@ -11,12 +11,27 @@ export type NavigationSectionId =
   | "evals"
   | "settings";
 
+export type SettingsNavigationSectionId =
+  | "model-settings"
+  | "skills"
+  | "tools"
+  | "memory"
+  | "learning"
+  | "evals";
+
 export type NavigationSection = {
   id: NavigationSectionId;
   label: string;
   module: string;
   summary: string;
   details: string[];
+};
+
+export type SettingsNavigationSection = {
+  id: SettingsNavigationSectionId;
+  label: string;
+  module: string;
+  summary: string;
 };
 
 const navigationSections: NavigationSection[] = [
@@ -43,17 +58,6 @@ const navigationSections: NavigationSection[] = [
     ],
   },
   {
-    id: "goals",
-    label: "目标",
-    module: "Goal Mode",
-    summary: "创建、运行和审核有边界自治目标。",
-    details: [
-      "把高层目标拆成带验收条件的里程碑。",
-      "查看预算、进度 ledger 和 review gate。",
-      "在继续、修改计划或终止之前保留人工审核点。",
-    ],
-  },
-  {
     id: "runs",
     label: "运行",
     module: "可观测性",
@@ -76,61 +80,6 @@ const navigationSections: NavigationSection[] = [
     ],
   },
   {
-    id: "skills",
-    label: "技能",
-    module: "第 3 模块",
-    summary: "本地 SKILL.md 发现与执行元数据。",
-    details: [
-      "从批准的位置扫描技能文件夹。",
-      "把 frontmatter 解析成稳定的 manifest。",
-      "在同一个库中展示智能体型和脚本型技能。",
-    ],
-  },
-  {
-    id: "tools",
-    label: "工具",
-    module: "第 5 模块",
-    summary: "文件、shell、web_search 和 web_fetch 权限。",
-    details: [
-      "自动执行前按任务授权工具。",
-      "每一次工具调用都检查任务权限清单。",
-      "为文件、shell 和网络访问写入审计日志。",
-    ],
-  },
-  {
-    id: "memory",
-    label: "记忆",
-    module: "第 8 模块",
-    summary: "支持 embedding 和导出的本地长期记忆。",
-    details: [
-      "区分 session、core、semantic、episodic 和 procedural memory。",
-      "使用 embedding 做语义检索。",
-      "让记忆可查看、可编辑、可删除、可导出。",
-    ],
-  },
-  {
-    id: "learning",
-    label: "学习",
-    module: "审核",
-    summary: "从运行轨迹提取候选经验，并由用户审核后写入记忆。",
-    details: [
-      "查看待审核的流程记忆、失败教训和技能改进建议。",
-      "接受或拒绝每条候选经验，避免静默改变 Agent 行为。",
-      "把已接受的流程经验应用为可检索的 procedural memory。",
-    ],
-  },
-  {
-    id: "evals",
-    label: "评测",
-    module: "审核",
-    summary: "审核运行轨迹生成的评测候选，并提升为固定回归样例。",
-    details: [
-      "查看从终端运行生成的 eval fixture 候选。",
-      "接受、拒绝或提升候选，避免未经审核的回归样例进入固定集。",
-      "用必需事件和断言数量判断候选是否覆盖关键行为。",
-    ],
-  },
-  {
     id: "settings",
     label: "设置",
     module: "配置",
@@ -143,6 +92,45 @@ const navigationSections: NavigationSection[] = [
   },
 ];
 
+const settingsNavigationSections: SettingsNavigationSection[] = [
+  {
+    id: "model-settings",
+    label: "模型",
+    module: "配置",
+    summary: "OpenAI-compatible 对话、embedding、密钥和运行默认值。",
+  },
+  {
+    id: "skills",
+    label: "技能",
+    module: "本地能力",
+    summary: "本地 SKILL.md 发现与执行元数据。",
+  },
+  {
+    id: "tools",
+    label: "工具",
+    module: "权限",
+    summary: "文件、shell、web_search 和 web_fetch 权限。",
+  },
+  {
+    id: "memory",
+    label: "记忆",
+    module: "本地记忆",
+    summary: "支持 embedding 和导出的本地长期记忆。",
+  },
+  {
+    id: "learning",
+    label: "学习",
+    module: "审核",
+    summary: "从运行轨迹提取候选经验，并由用户审核后写入记忆。",
+  },
+  {
+    id: "evals",
+    label: "评测",
+    module: "审核",
+    summary: "审核运行轨迹生成的评测候选，并提升为固定回归样例。",
+  },
+];
+
 export function getNavigationSections(): NavigationSection[] {
   return navigationSections;
 }
@@ -152,12 +140,36 @@ export function getDefaultNavigationSection(): NavigationSection {
 }
 
 export function getNavigationSection(id: string): NavigationSection {
+  const primaryId = resolvePrimaryNavigationId(id);
   return (
-    navigationSections.find((section) => section.id === id) ??
+    navigationSections.find((section) => section.id === primaryId) ??
     getDefaultNavigationSection()
   );
 }
 
 export function getStartupNavigationSection(hash: string): NavigationSection {
   return getNavigationSection(hash.replace(/^#/, ""));
+}
+
+export function getSettingsNavigationSections(): SettingsNavigationSection[] {
+  return settingsNavigationSections;
+}
+
+export function getDefaultSettingsNavigationSection(): SettingsNavigationSection {
+  return settingsNavigationSections[0];
+}
+
+function resolvePrimaryNavigationId(id: string): NavigationSectionId {
+  if (id === "goals") {
+    return "chat";
+  }
+
+  if (
+    settingsNavigationSections.some((section) => section.id === id) &&
+    id !== "model-settings"
+  ) {
+    return "settings";
+  }
+
+  return id as NavigationSectionId;
 }

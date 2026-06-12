@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  getDefaultSettingsNavigationSection,
   getDefaultNavigationSection,
   getNavigationSection,
   getNavigationSections,
+  getSettingsNavigationSections,
   getStartupNavigationSection,
 } from "./navigation";
 
@@ -19,15 +21,24 @@ describe("navigation", () => {
     expect(getNavigationSections().map((section) => section.id)).toEqual([
       "chat",
       "overview",
-      "goals",
       "runs",
       "scheduled-tasks",
+      "settings",
+    ]);
+  });
+
+  it("nests technical control surfaces under Settings", () => {
+    expect(getDefaultSettingsNavigationSection()).toMatchObject({
+      id: "model-settings",
+      label: "模型",
+    });
+    expect(getSettingsNavigationSections().map((section) => section.id)).toEqual([
+      "model-settings",
       "skills",
       "tools",
       "memory",
       "learning",
       "evals",
-      "settings",
     ]);
   });
 
@@ -37,12 +48,14 @@ describe("navigation", () => {
 
   it("opens valid startup hashes and falls back to chat for unknown hashes", () => {
     expect(getStartupNavigationSection("#tools")).toMatchObject({
-      id: "tools",
-      label: "工具",
-      module: "第 5 模块",
+      id: "settings",
+      label: "设置",
+      module: "配置",
     });
-    expect(getStartupNavigationSection("#memory").id).toBe("memory");
-    expect(getStartupNavigationSection("#goals").id).toBe("goals");
+    expect(getStartupNavigationSection("#memory").id).toBe("settings");
+    expect(getStartupNavigationSection("#learning").id).toBe("settings");
+    expect(getStartupNavigationSection("#evals").id).toBe("settings");
+    expect(getStartupNavigationSection("#goals").id).toBe("chat");
     expect(getStartupNavigationSection("#missing").id).toBe("chat");
   });
 });
