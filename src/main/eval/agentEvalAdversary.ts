@@ -9,7 +9,9 @@ import { runAgentEvals } from "./agentEvalRunner";
 export type AgentEvalAdversarialMutation =
   | "remove_required_event"
   | "wrong_payload"
-  | "wrong_order";
+  | "wrong_order"
+  | "tamper_goal_budget"
+  | "remove_acceptance_check";
 
 export type AgentEvalAdversarialCase = {
   sourceFixtureId: string;
@@ -35,6 +37,8 @@ export function createAdversarialAgentEvalCases(
       createRemoveRequiredEventCase(fixture),
       createWrongPayloadCase(fixture),
       createWrongOrderCase(fixture),
+      createTamperGoalBudgetCase(fixture),
+      createRemoveAcceptanceCheckCase(fixture),
     ].filter((testCase): testCase is AgentEvalAdversarialCase =>
       Boolean(testCase),
     ),
@@ -134,6 +138,51 @@ function createWrongOrderCase(
   mutated.events = resequenceEvents([...assertedEvents, ...otherEvents]);
 
   return createCase(fixture, "wrong_order", mutated);
+}
+
+function createTamperGoalBudgetCase(
+  fixture: AgentEvalFixture,
+): AgentEvalAdversarialCase | null {
+  const assertionIndex = fixture.assertions?.findIndex((assertion) =>
+    Object.prototype.hasOwnProperty.call(
+      assertion.payload ?? {},
+      "budgetStopBeforeDispatch",
+    ),
+  );
+  if (assertionIndex === undefined || assertionIndex < 0) {
+    return null;
+  }
+
+  const mutated = cloneFixture(fixture);
+  const assertion = mutated.assertions?.[assertionIndex];
+  if (!assertion?.payload) {
+    return null;
+  }
+
+  assertion.payload = {
+    ...assertion.payload,
+    budgetStopBeforeDispatch: false,
+  };
+
+  return createCase(fixture, "tamper_goal_budget", mutated);
+}
+
+function createRemoveAcceptanceCheckCase(
+  fixture: AgentEvalFixture,
+): AgentEvalAdversarialCase | null {
+  if (
+    !fixture.requiredEventTypes.includes("acceptance_checked") ||
+    !fixture.events.some((event) => event.type === "acceptance_checked")
+  ) {
+    return null;
+  }
+
+  const mutated = cloneFixture(fixture);
+  mutated.events = resequenceEvents(
+    mutated.events.filter((event) => event.type !== "acceptance_checked"),
+  );
+
+  return createCase(fixture, "remove_acceptance_check", mutated);
 }
 
 function createCase(

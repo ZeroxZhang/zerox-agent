@@ -17,6 +17,8 @@ export type HarnessScoreInput = {
   evalPassRate: number;
   recoverabilityRate: number;
   pendingLearningCandidates: number;
+  goalPassRate?: number;
+  goalFixtureCount?: number;
   toolSuccessRate?: number;
 };
 
@@ -36,6 +38,10 @@ export type HarnessScore = {
 export function computeHarnessScore(input: HarnessScoreInput): HarnessScore {
   const evalPassScore = ratioToScore(input.evalPassRate);
   const recoverabilityScore = ratioToScore(input.recoverabilityRate);
+  const goalPassScore =
+    input.goalFixtureCount && input.goalFixtureCount > 0
+      ? ratioToScore(input.goalPassRate ?? 0)
+      : null;
   const toolSuccessScore = ratioToScore(input.toolSuccessRate ?? 0.8);
   const governanceScore = scoreGovernance(input.pendingLearningCandidates);
 
@@ -77,7 +83,11 @@ export function computeHarnessScore(input: HarnessScoreInput): HarnessScore {
     {
       id: "verification",
       label: "Verification",
-      score: average([evalPassScore, recoverabilityScore]),
+      score: average(
+        goalPassScore === null
+          ? [evalPassScore, recoverabilityScore]
+          : [evalPassScore, recoverabilityScore, goalPassScore],
+      ),
     },
     {
       id: "governance",
@@ -90,14 +100,29 @@ export function computeHarnessScore(input: HarnessScoreInput): HarnessScore {
   return {
     overall,
     tone: getTone(overall),
-    summary: `${input.pendingLearningCandidates} reviewed learning candidates pending; eval pass ${Math.round(
-      clampRatio(input.evalPassRate) * 100,
-    )}%.`,
+    summary: createSummary(input),
     categories: categories.map((category) => ({
       ...category,
       score: roundScore(category.score),
     })),
   };
+}
+
+function createSummary(input: HarnessScoreInput): string {
+  const parts = [
+    `${input.pendingLearningCandidates} reviewed learning candidates pending`,
+    `eval pass ${Math.round(clampRatio(input.evalPassRate) * 100)}%`,
+  ];
+
+  if (input.goalFixtureCount && input.goalFixtureCount > 0) {
+    parts.push(
+      `goal-mode pass ${Math.round(
+        clampRatio(input.goalPassRate ?? 0) * 100,
+      )}% across ${input.goalFixtureCount} fixtures`,
+    );
+  }
+
+  return `${parts.join("; ")}.`;
 }
 
 function scoreGovernance(pendingLearningCandidates: number): number {

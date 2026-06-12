@@ -520,3 +520,37 @@
   - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
   - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_READY_SELECTOR='.goal-panel' BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='Goal Mode|有边界自治目标|创建目标|审核策略' ELECTRON_RENDERER_URL='http://127.0.0.1:5173/#goals' ./node_modules/.bin/electron .` -> passed.
   - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_READY_SELECTOR='.goal-panel' BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='Goal Mode|有边界自治目标|创建目标|审核策略' BUILDING_AGENT_SMOKE_VIEWPORT='390x844' ELECTRON_RENDERER_URL='http://127.0.0.1:5173/#goals' ./node_modules/.bin/electron .` -> passed.
+
+## 2026-06-12 Goal Mode P5.8 Eval, Harness, And Docs
+
+- Added six deterministic Goal Mode eval fixtures covering achieved-within-budget, budget stop-before-dispatch, stall detection, replan on acceptance failure, review-gate blocking, and compaction anchor retention.
+- Extended adversarial eval generation with goal-specific budget tampering and removed acceptance-check mutations.
+- Integrated goal-mode pass rate and fixture count into `npm run harness:score`; latest score was 9.20 with goal 6/6 and adversarial 59/59 rejected.
+- Added `docs/architecture/agent-goal-mode.md`, updated README testing/roadmap language, and added P5.* done entries to `.zerox/feature_list.json`.
+- Fixed the Goal controller to consume the shared review policy matrix, so `review_final_only` pauses after the final accepted milestone before goal-level acceptance.
+- Changed files:
+  - `src/main/agentGoalController.ts`
+  - `src/main/agentGoalController.test.ts`
+  - `src/main/eval/agentEvalFixtures.ts`
+  - `src/main/eval/agentEvalRunner.test.ts`
+  - `src/main/eval/agentEvalAdversary.ts`
+  - `src/main/eval/agentEvalAdversary.test.ts`
+  - `src/shared/harnessScore.ts`
+  - `src/shared/harnessScore.test.ts`
+  - `scripts/run-harness-score.mjs`
+  - `docs/architecture/agent-goal-mode.md`
+  - `README.md`
+  - `src/shared/readme.test.ts`
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `./init.sh` -> harness check passed; `src/shared/packageScripts.test.ts` 1 file / 5 tests passed.
+  - `npm test -- src/main/agentGoalController.test.ts src/main/eval/agentEvalRunner.test.ts src/main/eval/agentEvalAdversary.test.ts src/shared/harnessScore.test.ts src/shared/readme.test.ts` -> RED, missing goal fixtures, goal adversary mutations, harness goal pass-rate summary, architecture doc/feature-list entry, and shared review-policy use in the controller.
+  - `npm test -- src/main/agentGoalController.test.ts src/main/eval/agentEvalRunner.test.ts src/main/eval/agentEvalAdversary.test.ts src/shared/harnessScore.test.ts src/shared/readme.test.ts` -> 5 files / 24 tests passed.
+  - `npm run verify` -> 104 Vitest files / 492 tests passed, build passed, agent eval 21/21, memory eval 2/2.
+  - `node scripts/run-agent-evals.mjs` -> 21/21 passed.
+  - `npm run harness:check` -> passed.
+  - `node -e "JSON.parse(require('fs').readFileSync('.zerox/feature_list.json','utf8')); console.log('feature_list.json ok')"` -> feature_list.json ok.
+  - `git diff --check` -> passed.
+  - `npm run harness:score` -> overall 9.20, goal 6/6, adversarial 59 checked with no escapes.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.

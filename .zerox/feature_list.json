@@ -292,6 +292,147 @@
         "npm run harness:check",
         "npm run smoke:prod"
       ]
+    },
+    {
+      "id": "P5.0-goal-mode-ci-gate",
+      "priority": 17,
+      "status": "done",
+      "title": "Goal Mode CI verification gate",
+      "definitionOfDone": [
+        "GitHub workflow runs npm ci, npm run verify, and npm run harness:check on PRs and main pushes",
+        "Display-dependent Electron smoke stays out of deterministic CI"
+      ],
+      "verification": [
+        "npm test -- src/shared/ciWorkflow.test.ts",
+        "npm run verify",
+        "npm run harness:check"
+      ]
+    },
+    {
+      "id": "P5.1-goal-domain-model",
+      "priority": 18,
+      "status": "done",
+      "title": "Goal Mode bounded domain model",
+      "definitionOfDone": [
+        "Goal, milestone, budget, acceptance, and review policy types exist in shared models",
+        "Goal status transitions reject invalid moves",
+        "Goal drafts require non-empty evidence-backed acceptance checks"
+      ],
+      "verification": [
+        "npm test -- src/shared/agentGoal.test.ts src/shared/agentExecution.test.ts",
+        "npm run verify"
+      ]
+    },
+    {
+      "id": "P5.2-goal-store-ledger",
+      "priority": 19,
+      "status": "done",
+      "title": "Goal persistence and append-only ledger",
+      "definitionOfDone": [
+        "Goals persist under userData config as local JSON",
+        "Progress ledger events append as JSONL",
+        "Active goal listing excludes terminal states"
+      ],
+      "verification": [
+        "npm test -- src/main/agentGoalStore.test.ts",
+        "npm run verify"
+      ]
+    },
+    {
+      "id": "P5.3-goal-planner",
+      "priority": 20,
+      "status": "done",
+      "title": "Goal decomposition and replanning",
+      "definitionOfDone": [
+        "Injected-model planner creates acceptance-bearing milestone trees",
+        "Invalid plans without acceptance checks are rejected or repaired",
+        "Replanning preserves accepted milestones and increments plan version"
+      ],
+      "verification": [
+        "npm test -- src/main/agentGoalPlanner.test.ts",
+        "npm run verify"
+      ]
+    },
+    {
+      "id": "P5.4-goal-acceptance-engine",
+      "priority": 21,
+      "status": "done",
+      "title": "Deterministic-first goal acceptance",
+      "definitionOfDone": [
+        "Acceptance evaluates deterministic checks before model review",
+        "Model review requires evidence refs",
+        "Acceptance checks emit trajectory evidence"
+      ],
+      "verification": [
+        "npm test -- src/main/agentGoalAcceptance.test.ts",
+        "npm run verify"
+      ]
+    },
+    {
+      "id": "P5.5-goal-controller",
+      "priority": 22,
+      "status": "done",
+      "title": "Bounded autonomous goal controller",
+      "definitionOfDone": [
+        "Controller stops on goal acceptance, budget exhaustion, stall, review gate, or interrupt",
+        "Milestones dispatch as recoverable runtime child runs",
+        "Resume does not re-dispatch accepted milestones"
+      ],
+      "verification": [
+        "npm test -- src/main/agentGoalController.test.ts src/main/agentRuntimeEngine.test.ts",
+        "npm run verify",
+        "npm run smoke:prod"
+      ]
+    },
+    {
+      "id": "P5.6-goal-context-compaction",
+      "priority": 23,
+      "status": "done",
+      "title": "Goal-aware context compaction",
+      "definitionOfDone": [
+        "Goal description, success criteria, ledger summary, accepted milestones, and evidence refs survive compaction",
+        "Completed milestones summarize while pending/running milestones retain detail",
+        "Compaction emits trajectory evidence"
+      ],
+      "verification": [
+        "npm test -- src/main/agentGoalContext.test.ts src/main/contextManager.test.ts",
+        "npm run verify"
+      ]
+    },
+    {
+      "id": "P5.7-goal-review-ui",
+      "priority": 24,
+      "status": "done",
+      "title": "Goal review gates and UI",
+      "definitionOfDone": [
+        "Shared review policy matrix is tested",
+        "Goal IPC is exposed through the preload bridge",
+        "Goals navigation, Overview signal, and Goal panel render review-gate controls"
+      ],
+      "verification": [
+        "npm test -- src/shared/agentGoalReview.test.ts src/renderer/materialDesign.test.ts src/shared/navigation.test.ts src/shared/materialNavigation.test.ts",
+        "npm run verify",
+        "npm run smoke:prod"
+      ]
+    },
+    {
+      "id": "P5.8-goal-mode-evals-docs",
+      "priority": 25,
+      "status": "done",
+      "title": "Goal Mode evals, adversarial coverage, and architecture docs",
+      "definitionOfDone": [
+        "Six deterministic goal-mode eval fixtures cover bounded-autonomy termination and compaction behavior",
+        "Adversarial eval rejects budget tampering and removed acceptance checks",
+        "Harness score reports goal-mode pass rate and goal fixture count",
+        "Architecture docs and README explain Goal Mode boundaries and verification"
+      ],
+      "verification": [
+        "npm test -- src/main/eval/agentEvalRunner.test.ts src/main/eval/agentEvalAdversary.test.ts src/shared/harnessScore.test.ts src/shared/readme.test.ts",
+        "node scripts/run-agent-evals.mjs",
+        "npm run verify",
+        "npm run harness:check",
+        "npm run harness:score"
+      ]
     }
   ]
 }

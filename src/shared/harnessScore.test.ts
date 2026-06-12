@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeHarnessScore } from "./harnessScore";
+import { computeHarnessScore, type HarnessScoreInput } from "./harnessScore";
 
 describe("computeHarnessScore", () => {
   it("scores all seven ETCLOVG harness categories", () => {
@@ -44,5 +44,30 @@ describe("computeHarnessScore", () => {
       }),
     );
     expect(score.summary).toContain("12 reviewed learning candidates pending");
+  });
+
+  it("includes goal-mode pass rate in the verification signal", () => {
+    const score = computeHarnessScore({
+      hasAgentGuide: true,
+      hasExecutionStore: true,
+      hasInitScript: true,
+      hasTrajectoryStore: true,
+      evalPassRate: 1,
+      recoverabilityRate: 1,
+      pendingLearningCandidates: 0,
+      goalPassRate: 1,
+      goalFixtureCount: 6,
+    } as HarnessScoreInput & {
+      goalPassRate: number;
+      goalFixtureCount: number;
+    });
+
+    expect(score.categories).toContainEqual(
+      expect.objectContaining({
+        id: "verification",
+        score: 10,
+      }),
+    );
+    expect(score.summary).toContain("goal-mode pass 100% across 6 fixtures");
   });
 });

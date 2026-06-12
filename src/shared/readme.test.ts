@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -50,5 +50,42 @@ describe("README", () => {
     expect(positioning).toContain("Zerox does not run unbounded autonomous loops");
     expect(readme).toContain("Goal Mode (bounded autonomy)");
     expect(readme).toContain("Goal Mode（有边界自治）");
+  });
+
+  it("documents Goal Mode architecture, eval coverage, and feature-list status", () => {
+    const readme = readFileSync(path.join(process.cwd(), "README.md"), "utf8");
+    const architecturePath = path.join(
+      process.cwd(),
+      "docs/architecture/agent-goal-mode.md",
+    );
+    const featureList = JSON.parse(
+      readFileSync(path.join(process.cwd(), ".zerox/feature_list.json"), "utf8"),
+    ) as {
+      features: Array<{ id: string; status: string; verification: string[] }>;
+    };
+
+    expect(existsSync(architecturePath)).toBe(true);
+    const architecture = existsSync(architecturePath)
+      ? readFileSync(architecturePath, "utf8")
+      : "";
+
+    expect(readme).toContain("docs/architecture/agent-goal-mode.md");
+    expect(readme).toContain("21 deterministic agent eval fixtures");
+    expect(readme).toContain("goal-mode pass rate");
+    expect(readme).toContain("Goal Mode foundation");
+    expect(readme).toContain("Goal Mode 架构");
+    expect(architecture).toContain("Goal State Machine");
+    expect(architecture).toContain("Five Termination Conditions");
+    expect(architecture).toContain("Deterministic-first Acceptance");
+    expect(architecture).toContain("Review Policies");
+    expect(architecture).toContain("Goal-aware Compaction Anchors");
+    expect(architecture).toContain("Recovery Guarantees");
+    expect(featureList.features).toContainEqual(
+      expect.objectContaining({
+        id: "P5.8-goal-mode-evals-docs",
+        status: "done",
+        verification: expect.arrayContaining(["npm run harness:score"]),
+      }),
+    );
   });
 });

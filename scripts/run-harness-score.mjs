@@ -43,6 +43,12 @@ const evalFixtures = configDir
   ? createCombinedAgentEvalFixtures(builtInFixtures, promotedFixtures)
   : builtInFixtures;
 const evalReport = await runAgentEvals(evalFixtures);
+const goalFixtures = evalFixtures.filter((fixture) =>
+  fixture.id.startsWith("goal-"),
+);
+const goal = await runAgentEvals(goalFixtures);
+const goalFixtureCount = goal.total;
+const goalPassRate = goal.passRate;
 const adversarial = await runAdversarialAgentEvals(evalFixtures);
 const context = createAgentContextProfileReport();
 const pendingLearningCandidates = configDir
@@ -59,6 +65,8 @@ const score = computeHarnessScore({
   evalPassRate: evalReport.passRate,
   recoverabilityRate: evalReport.recoverabilityRate,
   toolSuccessRate: evalReport.toolSuccessRate,
+  goalPassRate,
+  goalFixtureCount,
   pendingLearningCandidates,
 });
 
@@ -69,6 +77,9 @@ console.log(
       aci,
       context,
       eval: evalReport,
+      goal: goal,
+      goalFixtureCount,
+      goalPassRate,
       adversarial: adversarial,
       promotedFixtureCount: promotedFixtures.length,
       pendingEvalCandidates,

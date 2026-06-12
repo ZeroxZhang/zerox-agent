@@ -175,6 +175,39 @@ describe("agent goal controller", () => {
     );
   });
 
+  it("uses the shared review policy instead of reviewing only every milestone", async () => {
+    await store.save(
+      createGoal(
+        [milestone("milestone_1"), milestone("milestone_2", ["milestone_1"])],
+        { reviewPolicy: "review_final_only" },
+      ),
+    );
+    const runtime = createRuntime();
+    const controller = createController({
+      runtime,
+      acceptance: createAcceptance({
+        milestoneAccepted: [true, true],
+        goalAccepted: [true],
+      }),
+    });
+
+    const waiting = await controller.start("goal_1");
+
+    expect(waiting.status).toBe("waiting_for_review");
+    expect(runtime.runMilestoneIds).toEqual(["milestone_1", "milestone_2"]);
+    expect(
+      trajectoryEvents.filter((event) => event.type === "goal_review_requested"),
+    ).toHaveLength(1);
+
+    const afterApproval = await controller.resolveReview("goal_1", {
+      kind: "approve_continue",
+    });
+
+    expect(afterApproval.status).toBe("achieved");
+    expect(afterApproval.stopReason).toBe("goal_accepted");
+    expect(runtime.runMilestoneIds).toEqual(["milestone_1", "milestone_2"]);
+  });
+
   it("resumes without re-dispatching accepted milestones", async () => {
     await store.save(
       createGoal([
@@ -271,7 +304,7 @@ function createGoal(
       tokens: 0,
       replans: 0,
     },
-    reviewPolicy: "review_final_only",
+    reviewPolicy: "review_high_risk_only",
     planVersion: 1,
     createdAt: "2026-06-12T00:00:00.000Z",
     updatedAt: "2026-06-12T00:00:00.000Z",

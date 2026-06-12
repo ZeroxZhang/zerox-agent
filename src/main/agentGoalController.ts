@@ -5,7 +5,10 @@ import {
   type Milestone,
   type StopReason,
 } from "../shared/agentGoal";
-import type { GoalReviewDecision } from "../shared/agentGoalReview";
+import {
+  shouldRequestReview as shouldRequestGoalReview,
+  type GoalReviewDecision,
+} from "../shared/agentGoalReview";
 import type { AgentTrajectoryEvent, AgentTrajectoryEventType } from "../shared/agentTrajectory";
 import type { AgentGoalAcceptance, AcceptanceContext, AcceptanceResult } from "./agentGoalAcceptance";
 import type { AgentGoalPlanner } from "./agentGoalPlanner";
@@ -416,8 +419,12 @@ function isBudgetExhausted(goal: Goal): boolean {
   );
 }
 
-function shouldRequestReview(goal: Goal, _milestone: Milestone): boolean {
-  return goal.reviewPolicy === "review_each_milestone";
+function shouldRequestReview(goal: Goal, milestone: Milestone): boolean {
+  return shouldRequestGoalReview(
+    goal.reviewPolicy,
+    milestone,
+    allMilestonesAccepted(goal),
+  );
 }
 
 function summarizeAcceptanceSuccess(result: AcceptanceResult): string {

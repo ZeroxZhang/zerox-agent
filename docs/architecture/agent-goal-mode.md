@@ -1,0 +1,111 @@
+# Agent Goal Mode Architecture
+
+Goal Mode adds bounded autonomy above the recoverable runtime. A user can define a high-level goal, but the agent can only run inside explicit budgets, deterministic or evidence-backed acceptance, review gates, and durable local checkpoints.
+
+## Layer Diagram
+
+```text
+Renderer GoalPanel
+  -> preload goal:* bridge
+    -> main-process Goal IPC
+      -> AgentGoalStore JSON + ledger JSONL
+      -> AgentGoalController
+        -> AgentGoalPlanner
+        -> AgentRuntimeEngine child runs
+        -> AgentGoalAcceptance
+        -> AgentGoalContext compaction
+        -> AgentTrajectoryStore evidence
+```
+
+The goal layer sits above `AgentRuntimeEngine`. A milestone dispatch is one recoverable runtime run, so existing workspace sandboxing, tool authorization, checkpoints, reflection, model retry, and trajectory records remain the execution boundary.
+
+## Goal State Machine
+
+| State | Meaning | Terminal |
+| --- | --- | --- |
+| `planning` | Goal draft exists and can be decomposed into milestones. | No |
+| `executing` | The controller may dispatch the next ready milestone. | No |
+| `waiting_for_review` | A review gate is open; no milestone can advance. | No |
+| `achieved` | Goal-level acceptance passed. | Yes |
+| `stopped_budget` | Budget was exhausted before more work could start. | Yes |
+| `stopped_stalled` | The controller detected no progress. | Yes |
+| `failed` | Acceptance or runtime failure became unrecoverable. | Yes |
+| `canceled` | User or review decision stopped the goal. | Yes |
+
+Allowed transitions are defined in `src/shared/agentGoal.ts`. The important recovery transition is `waiting_for_review -> executing` after an explicit review decision.
+
+## Five Termination Conditions
+
+Goal Mode is bounded autonomy. The controller must stop or suspend when any termination condition is reached:
+
+1. Goal acceptance passes: set `achieved` and `stopReason: goal_accepted`.
+2. Budget is exhausted: set `stopped_budget` before dispatching another milestone.
+3. Progress stalls: set `stopped_stalled` with a help summary.
+4. Review gate is reached: set `waiting_for_review` and wait for user action.
+5. User interrupt or termination: set `canceled` with a reviewed stop reason.
+
+Budget checks happen before dispatch. An exhausted budget must never start a new runtime run.
+
+## Deterministic-first Acceptance
+
+Acceptance checks live on success criteria and are non-empty. The acceptance engine evaluates deterministic checks first:
+
+- `file_exists`
+- `command_exit_code`
+- `test_passes`
+- `assertion`
+
+`model_review` is an inferential fallback only. It must require evidence refs, and a model review with no evidence is not accepted. Every acceptance evaluation emits `acceptance_checked` trajectory evidence so eval fixtures and the UI can inspect why a milestone or goal passed.
+
+## Review Policies
+
+Review policy is shared in `src/shared/agentGoalReview.ts` and consumed by the controller:
+
+| Policy | Gate condition |
+| --- | --- |
+| `review_each_milestone` | Suspend after every accepted milestone. |
+| `review_key_milestones` | Suspend for final acceptance or milestone metadata `reviewRequired: true`. |
+| `review_final_only` | Suspend only at final milestone or goal acceptance boundary. |
+| `review_high_risk_only` | Suspend for milestone metadata `riskLevel: "high"`. |
+
+Review decisions are explicit:
+
+- `approve_continue`: resume the bounded loop.
+- `modify_plan`: replan remaining non-terminal milestones.
+- `terminate`: stop as `canceled` with `review_rejected`.
+
+## Goal-aware Compaction Anchors
+
+Long goals must not lose their objective. `AgentGoalContext` preserves these anchors when compacting:
+
+- goal description
+- goal success criteria
+- latest progress ledger summary
+- accepted milestone conclusions
+- evidence refs and tool-result offload refs
+
+Completed milestones can be summarized to conclusion plus evidence. Running and pending milestones keep enough detail to safely continue.
+
+## Recovery Guarantees
+
+Goal state is local-first:
+
+```text
+userData/config/agent-goals/<goalId>.json
+userData/config/agent-goals/<goalId>.ledger.jsonl
+userData/config/agent-trajectories/<goalId>.jsonl
+```
+
+On restart, active goals can be listed from `AgentGoalStore`. Accepted milestones are not re-dispatched on resume. Ledger entries and trajectory events explain each milestone start, acceptance result, replan, review request, review resolution, context compaction, checkpoint, and stop reason.
+
+## Verification
+
+Fast focused paths:
+
+```bash
+npm test -- src/main/agentGoalController.test.ts src/main/eval/agentEvalRunner.test.ts src/main/eval/agentEvalAdversary.test.ts src/shared/harnessScore.test.ts src/shared/readme.test.ts
+node scripts/run-agent-evals.mjs
+npm run harness:score
+```
+
+The deterministic eval suite includes six goal-mode fixtures covering achievement, budget stop, stall detection, replan on acceptance failure, review gate blocking, and compaction anchor retention.

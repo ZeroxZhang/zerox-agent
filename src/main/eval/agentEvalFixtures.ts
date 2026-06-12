@@ -545,6 +545,7 @@ export function createAgentEvalFixtures(): AgentEvalFixture[] {
         },
       ],
     },
+    ...createGoalEvalFixtures(),
     {
       id: "multi-agent-lineage",
       description:
@@ -617,6 +618,433 @@ export function createAgentEvalFixtures(): AgentEvalFixture[] {
           type: "child_handoff_reviewed",
           payload: { decision: "accepted" },
           after: "child_handoff_completed",
+        },
+      ],
+    },
+  ];
+}
+
+function createGoalEvalFixtures(): AgentEvalFixture[] {
+  return [
+    {
+      id: "goal-achieved-within-budget",
+      description:
+        "Goal Mode accepts three milestones and reaches achieved inside explicit budget limits.",
+      events: createEvents("goal-achieved-within-budget", [
+        [
+          "goal_planned",
+          {
+            goalId: "goal_eval_achieved",
+            milestoneCount: 3,
+            budget: { maxIterations: 6, maxToolCalls: 12 },
+          },
+        ],
+        [
+          "milestone_started",
+          { goalId: "goal_eval_achieved", milestoneId: "milestone_plan" },
+        ],
+        [
+          "acceptance_checked",
+          {
+            goalId: "goal_eval_achieved",
+            milestoneId: "milestone_plan",
+            accepted: true,
+            deterministicFirst: true,
+            evidenceRefs: ["run_plan#artifact"],
+          },
+        ],
+        ["checkpoint_written", { goalId: "goal_eval_achieved", status: "executing" }],
+        [
+          "milestone_started",
+          { goalId: "goal_eval_achieved", milestoneId: "milestone_execute" },
+        ],
+        [
+          "acceptance_checked",
+          {
+            goalId: "goal_eval_achieved",
+            milestoneId: "milestone_execute",
+            accepted: true,
+            deterministicFirst: true,
+            evidenceRefs: ["run_execute#artifact"],
+          },
+        ],
+        ["checkpoint_written", { goalId: "goal_eval_achieved", status: "executing" }],
+        [
+          "milestone_started",
+          { goalId: "goal_eval_achieved", milestoneId: "milestone_verify" },
+        ],
+        [
+          "acceptance_checked",
+          {
+            goalId: "goal_eval_achieved",
+            milestoneId: "milestone_verify",
+            accepted: true,
+            deterministicFirst: true,
+            evidenceRefs: ["run_verify#artifact"],
+          },
+        ],
+        [
+          "goal_stopped",
+          {
+            goalId: "goal_eval_achieved",
+            status: "achieved",
+            stopReason: "goal_accepted",
+          },
+        ],
+        ["final_summary", { status: "succeeded" }],
+      ]),
+      requiredEventTypes: [
+        "goal_planned",
+        "milestone_started",
+        "acceptance_checked",
+        "checkpoint_written",
+        "goal_stopped",
+        "final_summary",
+      ],
+      assertions: [
+        {
+          type: "acceptance_checked",
+          payload: { accepted: true, deterministicFirst: true },
+          after: "milestone_started",
+        },
+        {
+          type: "goal_stopped",
+          payload: { status: "achieved", stopReason: "goal_accepted" },
+          after: "acceptance_checked",
+        },
+      ],
+    },
+    {
+      id: "goal-stopped-by-budget",
+      description:
+        "Goal Mode stops on budget exhaustion before dispatching another milestone.",
+      events: createEvents("goal-stopped-by-budget", [
+        [
+          "goal_planned",
+          {
+            goalId: "goal_eval_budget",
+            milestoneCount: 2,
+            budget: { maxIterations: 1, maxToolCalls: 1 },
+          },
+        ],
+        [
+          "milestone_started",
+          { goalId: "goal_eval_budget", milestoneId: "milestone_first" },
+        ],
+        [
+          "acceptance_checked",
+          {
+            goalId: "goal_eval_budget",
+            milestoneId: "milestone_first",
+            accepted: true,
+            deterministicFirst: true,
+            evidenceRefs: ["run_first#artifact"],
+          },
+        ],
+        [
+          "checkpoint_written",
+          {
+            goalId: "goal_eval_budget",
+            status: "executing",
+            budgetUsage: { iterations: 1, toolCalls: 1 },
+          },
+        ],
+        [
+          "goal_stopped",
+          {
+            goalId: "goal_eval_budget",
+            status: "stopped_budget",
+            stopReason: "budget_exhausted",
+            budgetStopBeforeDispatch: true,
+          },
+        ],
+        ["final_summary", { status: "stopped_budget" }],
+      ]),
+      requiredEventTypes: [
+        "goal_planned",
+        "milestone_started",
+        "acceptance_checked",
+        "checkpoint_written",
+        "goal_stopped",
+        "final_summary",
+      ],
+      assertions: [
+        {
+          type: "goal_stopped",
+          payload: {
+            status: "stopped_budget",
+            budgetStopBeforeDispatch: true,
+          },
+          after: "checkpoint_written",
+        },
+      ],
+    },
+    {
+      id: "goal-stalled-detection",
+      description:
+        "Goal Mode reports stalled progress when no ready milestone can advance.",
+      events: createEvents("goal-stalled-detection", [
+        [
+          "goal_planned",
+          {
+            goalId: "goal_eval_stalled",
+            milestoneCount: 1,
+            blockedDependency: "missing_dependency",
+          },
+        ],
+        [
+          "acceptance_checked",
+          {
+            goalId: "goal_eval_stalled",
+            accepted: false,
+            deterministicFirst: true,
+            evidenceRefs: [],
+          },
+        ],
+        [
+          "goal_stopped",
+          {
+            goalId: "goal_eval_stalled",
+            status: "stopped_stalled",
+            stopReason: "progress_stalled",
+            helpSummary: "No ready milestones are available.",
+          },
+        ],
+        ["final_summary", { status: "stopped_stalled" }],
+      ]),
+      requiredEventTypes: [
+        "goal_planned",
+        "acceptance_checked",
+        "goal_stopped",
+        "final_summary",
+      ],
+      assertions: [
+        {
+          type: "goal_stopped",
+          payload: { status: "stopped_stalled", stopReason: "progress_stalled" },
+          after: "acceptance_checked",
+        },
+      ],
+    },
+    {
+      id: "goal-replan-on-acceptance-failure",
+      description:
+        "Goal Mode replans after a rejected milestone and later accepts the replacement milestone.",
+      events: createEvents("goal-replan-on-acceptance-failure", [
+        [
+          "goal_planned",
+          { goalId: "goal_eval_replan", planVersion: 1, milestoneCount: 1 },
+        ],
+        [
+          "milestone_started",
+          { goalId: "goal_eval_replan", milestoneId: "milestone_original" },
+        ],
+        [
+          "acceptance_checked",
+          {
+            goalId: "goal_eval_replan",
+            milestoneId: "milestone_original",
+            accepted: false,
+            deterministicFirst: true,
+            evidenceRefs: ["run_original#failure"],
+          },
+        ],
+        [
+          "goal_replanned",
+          { goalId: "goal_eval_replan", planVersion: 2, replans: 1 },
+        ],
+        [
+          "milestone_started",
+          { goalId: "goal_eval_replan", milestoneId: "milestone_replanned" },
+        ],
+        [
+          "acceptance_checked",
+          {
+            goalId: "goal_eval_replan",
+            milestoneId: "milestone_replanned",
+            accepted: true,
+            deterministicFirst: true,
+            evidenceRefs: ["run_replanned#artifact"],
+          },
+        ],
+        [
+          "goal_stopped",
+          {
+            goalId: "goal_eval_replan",
+            status: "achieved",
+            stopReason: "goal_accepted",
+          },
+        ],
+        ["final_summary", { status: "succeeded" }],
+      ]),
+      requiredEventTypes: [
+        "goal_planned",
+        "milestone_started",
+        "acceptance_checked",
+        "goal_replanned",
+        "goal_stopped",
+        "final_summary",
+      ],
+      assertions: [
+        {
+          type: "goal_replanned",
+          payload: { planVersion: 2, replans: 1 },
+          after: "acceptance_checked",
+        },
+        {
+          type: "goal_stopped",
+          payload: { status: "achieved" },
+          after: "goal_replanned",
+        },
+      ],
+    },
+    {
+      id: "goal-review-gate-blocks",
+      description:
+        "Goal Mode suspends at a review gate and only starts the next milestone after approval.",
+      events: createEvents("goal-review-gate-blocks", [
+        [
+          "goal_planned",
+          {
+            goalId: "goal_eval_review",
+            reviewPolicy: "review_each_milestone",
+            milestoneCount: 2,
+          },
+        ],
+        [
+          "milestone_started",
+          { goalId: "goal_eval_review", milestoneId: "milestone_before_review" },
+        ],
+        [
+          "acceptance_checked",
+          {
+            goalId: "goal_eval_review",
+            milestoneId: "milestone_before_review",
+            accepted: true,
+            deterministicFirst: true,
+            evidenceRefs: ["run_before_review#artifact"],
+          },
+        ],
+        [
+          "goal_review_requested",
+          {
+            goalId: "goal_eval_review",
+            milestoneId: "milestone_before_review",
+            reviewPolicy: "review_each_milestone",
+          },
+        ],
+        ["checkpoint_written", { goalId: "goal_eval_review", status: "waiting_for_review" }],
+        [
+          "milestone_started",
+          { goalId: "goal_eval_review", milestoneId: "milestone_after_review" },
+        ],
+        [
+          "acceptance_checked",
+          {
+            goalId: "goal_eval_review",
+            milestoneId: "milestone_after_review",
+            accepted: true,
+            deterministicFirst: true,
+            evidenceRefs: ["run_after_review#artifact"],
+          },
+        ],
+        [
+          "goal_stopped",
+          {
+            goalId: "goal_eval_review",
+            status: "achieved",
+            stopReason: "goal_accepted",
+          },
+        ],
+        ["final_summary", { status: "succeeded" }],
+      ]),
+      requiredEventTypes: [
+        "goal_planned",
+        "milestone_started",
+        "acceptance_checked",
+        "goal_review_requested",
+        "checkpoint_written",
+        "goal_stopped",
+        "final_summary",
+      ],
+      assertions: [
+        {
+          type: "goal_review_requested",
+          payload: { reviewPolicy: "review_each_milestone" },
+          after: "acceptance_checked",
+        },
+        {
+          type: "milestone_started",
+          payload: { milestoneId: "milestone_after_review" },
+          after: "goal_review_requested",
+        },
+      ],
+    },
+    {
+      id: "goal-context-compaction-preserves-anchors",
+      description:
+        "Goal Mode compacts long context while retaining goal anchors and evidence references.",
+      events: createEvents("goal-context-compaction-preserves-anchors", [
+        [
+          "goal_planned",
+          {
+            goalId: "goal_eval_context",
+            successCriteria: 2,
+            ledgerEntries: 6,
+          },
+        ],
+        [
+          "context_compacted",
+          {
+            goalId: "goal_eval_context",
+            anchorsPreserved: true,
+            retainedAnchorIds: [
+              "goal_description",
+              "success_criteria",
+              "progress_ledger",
+              "accepted_milestones",
+              "evidence_refs",
+            ],
+            tokenBudget: 5734,
+          },
+        ],
+        ["model_request", { goalId: "goal_eval_context", messageCount: 8 }],
+        [
+          "acceptance_checked",
+          {
+            goalId: "goal_eval_context",
+            accepted: true,
+            deterministicFirst: true,
+            evidenceRefs: ["tool_result_ref:abc123"],
+          },
+        ],
+        [
+          "goal_stopped",
+          {
+            goalId: "goal_eval_context",
+            status: "achieved",
+            stopReason: "goal_accepted",
+          },
+        ],
+        ["final_summary", { status: "succeeded" }],
+      ]),
+      requiredEventTypes: [
+        "goal_planned",
+        "context_compacted",
+        "model_request",
+        "acceptance_checked",
+        "goal_stopped",
+        "final_summary",
+      ],
+      assertions: [
+        {
+          type: "context_compacted",
+          payload: { anchorsPreserved: true },
+          after: "goal_planned",
+        },
+        {
+          type: "model_request",
+          after: "context_compacted",
         },
       ],
     },
