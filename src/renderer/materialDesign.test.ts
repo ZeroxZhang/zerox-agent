@@ -164,6 +164,17 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(overviewPanelSource).toContain("goalsWaitingForReview");
   });
 
+  it("surfaces session-native Goal Mode inside Chat", () => {
+    expect(chatPanelSource).toContain("GoalContractBar");
+    expect(chatPanelSource).toContain("activeGoal");
+    expect(chatPanelSource).toContain("goal-session-badge");
+    expect(chatPanelSource).toContain("goal-review-gate-card");
+    expect(chatPanelSource).toContain("GoalDetailDrawer");
+    expect(styles).toContain(".goal-contract-bar");
+    expect(styles).toContain(".goal-session-badge");
+    expect(styles).toContain(".goal-detail-drawer");
+  });
+
   it("loads pending eval candidates into the Overview capability score", () => {
     expect(overviewPanelSource).not.toContain("pendingEvalCandidates: 0");
     expect(overviewPanelSource).toContain("listEvalCandidates({");

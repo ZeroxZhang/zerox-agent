@@ -26,10 +26,12 @@ import type { AgentRunRecord } from "../../shared/agentRuns";
 import type {
   ChatAgentStatus,
   ChatHistoryMessage,
+  ChatSessionGoalSummary,
   ChatSessionListItem,
   ChatSessionRecord,
   ChatTaskStatusEvent,
 } from "../../shared/chat";
+import type { Goal } from "../../shared/agentGoal";
 import type { MemoryRecord } from "../../shared/memory";
 import type { PublicModelSettings } from "../../shared/modelSettings";
 import type { NavigationSectionId } from "../../shared/navigation";
@@ -62,6 +64,8 @@ import {
   idleTaskActivity,
   type TaskActivityState,
 } from "../chatTaskActivity";
+import { GoalContractBar } from "./GoalContractBar";
+import { GoalDetailDrawer } from "./GoalDetailDrawer";
 
 type AgentChatPanelProps = {
   onNavigate: (sectionId: NavigationSectionId) => void;
@@ -83,6 +87,7 @@ type ChatSession = {
   id: string;
   title: string;
   summary: string;
+  activeGoal?: ChatSessionGoalSummary;
   messageCount?: number;
 };
 
@@ -152,6 +157,8 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
     [],
   );
   const [sessionRailWidth, setSessionRailWidth] = useState(220);
+  const [activeGoalDetail, setActiveGoalDetail] = useState<Goal | null>(null);
+  const [goalDrawerOpen, setGoalDrawerOpen] = useState(false);
   const [activeChatRequestId, setActiveChatRequestId] = useState<string | null>(
     null,
   );
@@ -296,6 +303,12 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
     setWorkPhase("idle");
     setTaskActivity(idleTaskActivity);
     setTaskProcessEvents([]);
+    if (loadedSession.activeGoalId) {
+      setActiveGoalDetail(await window.buildingAgent.getGoal(loadedSession.activeGoalId));
+    } else {
+      setActiveGoalDetail(null);
+      setGoalDrawerOpen(false);
+    }
   }
 
   async function refreshSessions(nextActiveSessionId?: string) {
@@ -313,6 +326,8 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
   }
 
   const latestRun = runs[0];
+  const activeSession = sessions.find((session) => session.id === sessionId) ?? null;
+  const activeGoal = activeSession?.activeGoal ?? null;
   const activeTasks = tasks.filter((task) => task.enabled);
   const workSteps = useMemo(() => buildAgentWorkSteps(workPhase), [workPhase]);
   const taskActivityDetail = useMemo(
@@ -910,6 +925,13 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
             >
               <strong>{session.title}</strong>
               <small>{session.summary}</small>
+              {session.activeGoal ? (
+                <span
+                  className={`goal-session-badge is-${session.activeGoal.status}`}
+                >
+                  {translateGoalStatus(session.activeGoal.status)}
+                </span>
+              ) : null}
             </button>
           ))}
         </div>
@@ -951,6 +973,38 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
           status={status}
           steps={workSteps}
         />
+
+        {activeGoal ? (
+          <GoalContractBar
+            goal={activeGoal}
+            onEnd={() => void submitUserMessage("结束目标")}
+            onModify={() => setDraft("目标改一下：")}
+            onPause={() => void submitUserMessage("暂停这个目标")}
+            onViewProgress={() => setGoalDrawerOpen(true)}
+          />
+        ) : null}
+
+        {activeGoal?.status === "waiting_for_review" ? (
+          <article className="goal-review-gate-card" aria-label="目标等待审核">
+            <span>Review Gate</span>
+            <h4>目标等待审核</h4>
+            <p>检查当前阶段证据后，选择继续、修改计划或终止目标。</p>
+            <div className="goal-actions">
+              <button type="button" onClick={() => void submitUserMessage("继续")}>
+                继续
+              </button>
+              <button type="button" onClick={() => setDraft("修改计划：")}>
+                修改计划
+              </button>
+              <button
+                type="button"
+                onClick={() => void submitUserMessage("终止目标")}
+              >
+                终止
+              </button>
+            </div>
+          </article>
+        ) : null}
 
         {firstRunGuide.primaryAction.command === "prepare" &&
           !modelSettings.hasApiKey && (
@@ -1056,6 +1110,12 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
             </div>
           </div>
         </form>
+        <GoalDetailDrawer
+          goal={activeGoalDetail}
+          open={goalDrawerOpen}
+          summary={activeGoal}
+          onClose={() => setGoalDrawerOpen(false)}
+        />
       </section>
     </section>
   );
@@ -1422,6 +1482,7 @@ function toSessionRailItem(session: ChatSessionListItem): ChatSession {
     title: session.title,
     summary: session.summary || `${session.messageCount} 条消息`,
     messageCount: session.messageCount,
+    ...(session.activeGoal ? { activeGoal: session.activeGoal } : {}),
   };
 }
 
@@ -1445,4 +1506,18 @@ function translateRunStatus(status: AgentRunRecord["status"]): string {
   if (status === "succeeded") return "成功";
   if (status === "canceled") return "已取消";
   return "失败";
+}
+
+function translateGoalStatus(status: ChatSessionGoalSummary["status"]): string {
+  const labels: Record<ChatSessionGoalSummary["status"], string> = {
+    planning: "规划中",
+    executing: "执行中",
+    waiting_for_review: "等待审核",
+    achieved: "已达成",
+    stopped_budget: "预算停止",
+    stopped_stalled: "停滞停止",
+    failed: "失败",
+    canceled: "已取消",
+  };
+  return labels[status];
 }
