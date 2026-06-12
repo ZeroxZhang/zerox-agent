@@ -417,6 +417,49 @@ nav {
 }
 .app-shell.is-agent-chat .topbar { display: none; }
 
+/* ── Settings Secondary Sections ──────────────────────────────────────── */
+.settings-section-shell {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+.settings-section-nav {
+  display: grid;
+  gap: var(--space-2);
+}
+.settings-section-nav button {
+  display: grid;
+  gap: var(--space-1);
+  width: 100%;
+  padding: var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  background: transparent;
+  text-align: left;
+}
+.settings-section-nav button:hover {
+  color: var(--text-primary);
+  background: var(--bg-surface-hover);
+}
+.settings-section-nav button.is-active {
+  border-color: var(--border-default);
+  color: var(--text-primary);
+  background: var(--bg-surface);
+}
+.settings-section-nav strong {
+  font-size: var(--text-base);
+}
+.settings-section-nav span {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+.settings-section-body {
+  min-width: 0;
+}
+
 /* ── Top Bar ───────────────────────────────────────────────────────────── */
 .topbar {
   display: flex;
@@ -1814,7 +1857,7 @@ nav {
   .app-shell.is-agent-chat .workspace { padding: var(--space-4); }
   .health-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .overview-layout, .runs-layout, .task-layout, .tools-layout, .memory-layout,
-  .goal-workspace { grid-template-columns: 1fr; }
+  .goal-workspace, .settings-section-shell { grid-template-columns: 1fr; }
   .goal-list {
     max-height: none;
     min-height: auto;

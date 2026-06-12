@@ -23,9 +23,11 @@ import {
   getDefaultNavigationSection,
   getNavigationSection,
   getNavigationSections,
+  getSettingsNavigationSections,
   getStartupNavigationSection,
   type NavigationSection,
   type NavigationSectionId,
+  type SettingsNavigationSectionId,
 } from "../shared/navigation";
 
 const fallbackMeta = getAppMeta();
@@ -43,6 +45,13 @@ function getStartupSectionId(): NavigationSectionId {
   return getStartupNavigationSection(window.location.hash).id;
 }
 
+function getStartupSettingsSectionId(): SettingsNavigationSectionId {
+  const hash = window.location.hash.replace(/^#/, "");
+  return getSettingsNavigationSections().some((section) => section.id === hash)
+    ? (hash as SettingsNavigationSectionId)
+    : "model-settings";
+}
+
 export function App() {
   const dataBoundary = buildAgentDataBoundary(
     window.buildingAgent ? "desktop" : "preview",
@@ -53,6 +62,8 @@ export function App() {
   const [activeSectionId, setActiveSectionId] = useState<NavigationSectionId>(
     () => getStartupSectionId(),
   );
+  const [activeSettingsSectionId, setActiveSettingsSectionId] =
+    useState<SettingsNavigationSectionId>(() => getStartupSettingsSectionId());
   const [navRailWidth, setNavRailWidth] = useState(96);
 
   function navigateTo(sectionId: NavigationSectionId) {
@@ -86,6 +97,10 @@ export function App() {
 
   useEffect(() => {
     function handleHashChange() {
+      const hash = window.location.hash.replace(/^#/, "");
+      if (getSettingsNavigationSections().some((section) => section.id === hash)) {
+        setActiveSettingsSectionId(hash as SettingsNavigationSectionId);
+      }
       setActiveSectionId(getSectionFromHash());
     }
 
@@ -238,17 +253,48 @@ export function App() {
         ) : null}
         {activeSection.id === "goals" ? <GoalPanel /> : null}
         {activeSection.id === "runs" ? <RunsPanel /> : null}
-        {activeSection.id === "settings" ? <ModelSettingsPanel /> : null}
-        {activeSection.id === "skills" ? <SkillLibraryPanel /> : null}
         {activeSection.id === "scheduled-tasks" ? (
           <ScheduledTasksPanel />
         ) : null}
-        {activeSection.id === "tools" ? <ToolsPanel /> : null}
-        {activeSection.id === "memory" ? <MemoryPanel /> : null}
-        {activeSection.id === "learning" ? <LearningReviewPanel /> : null}
-        {activeSection.id === "evals" ? <EvalReviewPanel /> : null}
+        {activeSection.id === "settings" ? (
+          <SettingsSectionShell
+            activeSectionId={activeSettingsSectionId}
+            onSelect={setActiveSettingsSectionId}
+          />
+        ) : null}
       </section>
     </main>
+  );
+}
+
+function SettingsSectionShell(props: {
+  activeSectionId: SettingsNavigationSectionId;
+  onSelect: (sectionId: SettingsNavigationSectionId) => void;
+}) {
+  return (
+    <section className="settings-section-shell" aria-label="设置分区">
+      <aside className="settings-section-nav" aria-label="设置菜单">
+        {getSettingsNavigationSections().map((section) => (
+          <button
+            key={section.id}
+            className={section.id === props.activeSectionId ? "is-active" : ""}
+            type="button"
+            onClick={() => props.onSelect(section.id)}
+          >
+            <strong>{section.label}</strong>
+            <span>{section.summary}</span>
+          </button>
+        ))}
+      </aside>
+      <section className="settings-section-body">
+        {props.activeSectionId === "model-settings" ? <ModelSettingsPanel /> : null}
+        {props.activeSectionId === "skills" ? <SkillLibraryPanel /> : null}
+        {props.activeSectionId === "tools" ? <ToolsPanel /> : null}
+        {props.activeSectionId === "memory" ? <MemoryPanel /> : null}
+        {props.activeSectionId === "learning" ? <LearningReviewPanel /> : null}
+        {props.activeSectionId === "evals" ? <EvalReviewPanel /> : null}
+      </section>
+    </section>
   );
 }
 

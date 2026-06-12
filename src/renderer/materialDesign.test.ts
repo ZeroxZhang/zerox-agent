@@ -133,6 +133,23 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(evalReviewPanelSource).toContain("promoteEvalCandidate");
   });
 
+  it("renders technical surfaces as collapsed Settings secondary sections", () => {
+    expect(appSource).toContain("SettingsSectionShell");
+    expect(appSource).toContain("getSettingsNavigationSections");
+    expect(appSource).toContain("ToolsPanel");
+    expect(appSource).toContain("MemoryPanel");
+    expect(appSource).toContain("LearningReviewPanel");
+    expect(appSource).toContain("EvalReviewPanel");
+    expect(appSource).not.toContain("activeSection.id === \"skills\"");
+    expect(appSource).not.toContain("activeSection.id === \"tools\"");
+    expect(appSource).not.toContain("activeSection.id === \"memory\"");
+    expect(appSource).not.toContain("activeSection.id === \"learning\"");
+    expect(appSource).not.toContain("activeSection.id === \"evals\"");
+    expect(styles).toContain(".settings-section-shell");
+    expect(styles).toContain(".settings-section-nav");
+    expect(styles).toContain(".settings-section-body");
+  });
+
   it("surfaces Goal Mode review gates and controls", () => {
     expect(existsSync(goalPanelPath)).toBe(true);
     expect(appSource).toContain("GoalPanel");
