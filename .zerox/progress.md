@@ -370,3 +370,20 @@
   - `git diff --check` -> passed.
   - `npm test` after progress update -> 96 Vitest files / 448 tests passed.
   - `npm run smoke:prod` not run because this slice changed docs and a docs contract test only, with no UI/runtime behavior change.
+
+## 2026-06-12 Goal Mode P5.0 CI Workflow
+
+- Implemented the Goal Mode prerequisite CI gate before starting P5.1 domain model work.
+- Added a GitHub Actions workflow that runs deterministic local checks on pull requests and pushes to `main`: `npm ci`, `npm run verify`, and `npm run harness:check`.
+- Kept display-dependent Electron smoke commands out of CI; `npm run verify` remains test/build/deterministic eval only.
+- Changed files:
+  - `.github/workflows/verify.yml`
+  - `src/shared/ciWorkflow.test.ts`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `npm test -- src/shared/ciWorkflow.test.ts` -> RED, missing `.github/workflows/verify.yml`.
+  - `npm test -- src/shared/ciWorkflow.test.ts` -> 1 file / 2 tests passed.
+  - `npm run verify` -> 97 Vitest files / 450 tests passed, build passed, agent eval 15/15, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run smoke:prod` not run because this slice changed CI configuration and a CI contract test only, with no UI/runtime behavior change.
