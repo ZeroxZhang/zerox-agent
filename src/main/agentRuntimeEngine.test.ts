@@ -310,6 +310,170 @@ describe("agent runtime engine", () => {
     );
   });
 
+  it("writes a checkpoint after each tool result within the same model turn", async () => {
+    const savedCheckpoints: AgentExecutionCheckpoint[] = [];
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore(savedCheckpoints),
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: createChatClient([
+        {
+          content: null,
+          finishReason: "tool_calls",
+          toolCalls: [
+            createToolCall("call_1", "file_read", {
+              path: "~/Downloads/first.md",
+            }),
+            createToolCall("call_2", "file_read", {
+              path: "~/Downloads/second.md",
+            }),
+          ],
+        },
+        finalResponse("Report complete"),
+      ]),
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: {
+        async execute(request) {
+          return {
+            ok: true,
+            result: { content: `content for ${String(request.args.path)}` },
+          };
+        },
+      },
+      createId: createSequentialId("tool_checkpoint"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+
+    await engine.startTask("task_123");
+
+    const runningCheckpoints = savedCheckpoints.filter(
+      (checkpoint) => checkpoint.status === "running",
+    );
+    expect(runningCheckpoints).toEqual([
+      expect.objectContaining({ toolCallCount: 0 }),
+      expect.objectContaining({ toolCallCount: 1 }),
+      expect.objectContaining({ toolCallCount: 2 }),
+    ]);
+    expect(
+      runningCheckpoints[1].messages.filter((message) => message.role === "tool"),
+    ).toHaveLength(1);
+    expect(
+      runningCheckpoints[2].messages.filter((message) => message.role === "tool"),
+    ).toHaveLength(2);
+  });
+
+  it("compacts runtime messages before model requests and records trajectory evidence", async () => {
+    const trajectoryEvents: AgentTrajectoryEvent[] = [];
+    const capturedMessages: ChatMessage[][] = [];
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore([]),
+      trajectoryStore: createMemoryTrajectoryStore(trajectoryEvents),
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: {
+        async complete(request) {
+          capturedMessages.push(request.messages);
+          return finalResponse("Compacted report complete");
+        },
+      },
+      getModelProfile: async () => ({ ...createModelProfile(), maxTokens: 128 }),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor([]),
+      contextManager: {
+        estimateTokens(messages) {
+          return messages.length * 100;
+        },
+        compressMessages(messages) {
+          return [
+            messages[0],
+            { role: "user", content: "[之前对话摘要]\n任务输入已压缩。" },
+            messages.at(-1),
+          ].filter(Boolean) as ChatMessage[];
+        },
+      },
+      createId: createSequentialId("runtime_compaction"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+
+    const result = await engine.startTask("task_123");
+
+    expect(result).toMatchObject({
+      ok: true,
+      run: { status: "succeeded" },
+    });
+    expect(capturedMessages[0]).toEqual([
+      expect.objectContaining({ role: "system" }),
+      { role: "user", content: "[之前对话摘要]\n任务输入已压缩。" },
+      expect.objectContaining({ role: "user" }),
+    ]);
+    expect(trajectoryEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "context_compacted",
+          payload: expect.objectContaining({
+            originalMessageCount: expect.any(Number),
+            compactedMessageCount: 3,
+            estimatedTokens: expect.any(Number),
+          }),
+        }),
+      ]),
+    );
+  });
+
+  it("retries transient runtime model request failures with trajectory evidence", async () => {
+    const trajectoryEvents: AgentTrajectoryEvent[] = [];
+    let attempts = 0;
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore([]),
+      trajectoryStore: createMemoryTrajectoryStore(trajectoryEvents),
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: {
+        async complete() {
+          attempts += 1;
+          if (attempts === 1) {
+            throw new Error("LLM request failed with status 500: overloaded");
+          }
+          return finalResponse("Retry recovered.");
+        },
+      },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor([]),
+      modelRetry: { maxRetries: 2, baseDelayMs: 0, maxDelayMs: 0 },
+      createId: createSequentialId("model_retry"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+
+    const result = await engine.startTask("task_123");
+
+    expect(result).toMatchObject({
+      ok: true,
+      run: {
+        status: "succeeded",
+        summary: "Retry recovered.",
+      },
+    });
+    expect(attempts).toBe(2);
+    expect(trajectoryEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "model_retry",
+          payload: expect.objectContaining({
+            attempt: 1,
+            maxRetries: 2,
+            delayMs: 0,
+            error: "LLM request failed with status 500: overloaded",
+          }),
+        }),
+      ]),
+    );
+  });
+
   it("records native tool invocation and observation events from registry metadata", async () => {
     const trajectoryEvents: AgentTrajectoryEvent[] = [];
     const registry = createDynamicToolRegistry();
@@ -419,7 +583,157 @@ describe("agent runtime engine", () => {
     );
   });
 
-  it("records reflection evidence before failing a test_run tool failure", async () => {
+  it("passes dynamic registry source to runtime tool authorization", async () => {
+    const authorizationRequests: Array<{
+      toolName: string;
+      source?: string;
+      args: Record<string, unknown>;
+    }> = [];
+    const registry = createDynamicToolRegistry();
+    registry.register(
+      {
+        type: "function",
+        function: {
+          name: "remote_source_lookup",
+          description: "Lookup remote source",
+          parameters: {
+            type: "object",
+            properties: { query: { type: "string" } },
+            required: ["query"],
+          },
+        },
+      },
+      async () => ({ ok: true, result: { sourceCount: 1 } }),
+      "mcp:research-writer:source-fetcher",
+    );
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore([]),
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: createChatClient([
+        toolCallResponse("remote_source_lookup", { query: "agent eval" }),
+        finalResponse("Report complete"),
+      ]),
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: {
+        async authorize(_taskId, request) {
+          authorizationRequests.push(request);
+          return createAuthorizationService(true).authorize(_taskId, request);
+        },
+      },
+      toolExecutor: {
+        async execute(request) {
+          return registry.execute(request.toolName, request.args);
+        },
+        getRegistry() {
+          return registry;
+        },
+        hasTool(toolName) {
+          return registry.has(toolName);
+        },
+      },
+      createId: createSequentialId("dynamic_source"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+
+    const result = await engine.startTask("task_123");
+
+    expect(result).toMatchObject({
+      ok: true,
+      run: { status: "succeeded" },
+    });
+    expect(authorizationRequests).toEqual([
+      {
+        toolName: "remote_source_lookup",
+        source: "mcp:research-writer:source-fetcher",
+        args: { query: "agent eval" },
+      },
+    ]);
+  });
+
+  it("feeds recoverable tool failures back to the model before retrying", async () => {
+    const trajectoryEvents: AgentTrajectoryEvent[] = [];
+    const capturedMessages: ChatMessage[][] = [];
+    const executedPaths: string[] = [];
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore([]),
+      trajectoryStore: createMemoryTrajectoryStore(trajectoryEvents),
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: {
+        async complete(request) {
+          capturedMessages.push(request.messages);
+          if (capturedMessages.length === 1) {
+            return toolCallResponse("file_read", {
+              path: "~/Downloads/missing.md",
+            });
+          }
+          if (capturedMessages.length === 2) {
+            const failedObservation = request.messages.find(
+              (message) =>
+                message.role === "tool" &&
+                message.content.includes("File not found."),
+            );
+            expect(failedObservation).toBeDefined();
+            return toolCallResponse("file_read", {
+              path: "~/Downloads/notes.md",
+            });
+          }
+          return finalResponse("Recovered after reading notes.");
+        },
+      },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: {
+        async execute(request) {
+          executedPaths.push(String(request.args.path ?? ""));
+          if (request.args.path === "~/Downloads/missing.md") {
+            return {
+              ok: false,
+              error: "File not found.",
+              errorDetails: { kind: "not_found" },
+            };
+          }
+          return {
+            ok: true,
+            result: { content: "notes" },
+          };
+        },
+      },
+      createId: createSequentialId("tool_recovery"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+
+    const result = await engine.startTask("task_123");
+
+    expect(result).toMatchObject({
+      ok: true,
+      run: {
+        status: "succeeded",
+        summary: "Recovered after reading notes.",
+      },
+    });
+    expect(executedPaths).toEqual([
+      "~/Downloads/missing.md",
+      "~/Downloads/notes.md",
+    ]);
+    expect(trajectoryEvents.map((event) => event.type)).toEqual(
+      expect.arrayContaining([
+        "tool_result",
+        "reflection_added",
+        "final_summary",
+      ]),
+    );
+    expect(trajectoryEvents).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "failure_classified" }),
+      ]),
+    );
+  });
+
+  it("records reflection evidence before letting the model finalize after a tool failure", async () => {
     const trajectoryEvents: AgentTrajectoryEvent[] = [];
     const engine = createAgentRuntimeEngine({
       taskStore: createTaskStore(createTask()),
@@ -467,7 +781,148 @@ describe("agent runtime engine", () => {
       expect.arrayContaining([
         "tool_result",
         "reflection_added",
-        "failure_classified",
+        "final_summary",
+      ]),
+    );
+    expect(trajectoryEvents).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "failure_classified" }),
+      ]),
+    );
+  });
+
+  it("classifies duplicate retry blocks in failure trajectory", async () => {
+    const trajectoryEvents: AgentTrajectoryEvent[] = [];
+    const modelRequests: ChatMessage[][] = [];
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore([]),
+      trajectoryStore: createMemoryTrajectoryStore(trajectoryEvents),
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: {
+        async complete(request) {
+          modelRequests.push(request.messages);
+          if (modelRequests.length > 2) {
+            throw new Error("unexpected third model request");
+          }
+          return toolCallResponse("file_read", {
+            path: "~/Downloads/missing.md",
+          });
+        },
+      },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: {
+        async execute() {
+          return {
+            ok: false,
+            error: "File not found.",
+            errorDetails: { kind: "not_found" },
+          };
+        },
+      },
+      createId: createSequentialId("duplicate_retry"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+
+    const result = await engine.startTask("task_123");
+
+    expect(result).toMatchObject({
+      ok: true,
+      run: {
+        status: "failed",
+        failureClass: "tool_error",
+        failureMessage: expect.stringContaining("duplicate_retry_blocked"),
+      },
+    });
+    expect(modelRequests).toHaveLength(2);
+    const reflectionClasses = trajectoryEvents
+      .filter((event) => event.type === "reflection_added")
+      .map((event) => event.payload.failureClass);
+    expect(reflectionClasses).toEqual([
+      "tool_failed",
+      "duplicate_retry_blocked",
+    ]);
+    expect(trajectoryEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "failure_classified",
+          payload: expect.objectContaining({
+            failureClass: "tool_error",
+            toolName: "file_read",
+            reflectionFailureClass: "duplicate_retry_blocked",
+            retryAllowed: false,
+            suggestion: "abort",
+          }),
+        }),
+      ]),
+    );
+  });
+
+  it("classifies retry budget exhaustion in failure trajectory", async () => {
+    const trajectoryEvents: AgentTrajectoryEvent[] = [];
+    const executedPaths: string[] = [];
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore([]),
+      trajectoryStore: createMemoryTrajectoryStore(trajectoryEvents),
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: createChatClient([
+        toolCallResponse("file_read", {
+          path: "~/Downloads/missing-1.md",
+        }),
+        toolCallResponse("file_read", {
+          path: "~/Downloads/missing-2.md",
+        }),
+      ]),
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: {
+        async execute(request) {
+          executedPaths.push(String(request.args.path ?? ""));
+          return {
+            ok: false,
+            error: "File not found.",
+            errorDetails: { kind: "not_found" },
+          };
+        },
+      },
+      createId: createSequentialId("budget_exhausted"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+
+    const result = await engine.startTask("task_123");
+
+    expect(result).toMatchObject({
+      ok: true,
+      run: {
+        status: "failed",
+        failureClass: "tool_error",
+        failureMessage: expect.stringContaining("budget_exhausted"),
+      },
+    });
+    expect(executedPaths).toEqual([
+      "~/Downloads/missing-1.md",
+      "~/Downloads/missing-2.md",
+    ]);
+    const reflectionClasses = trajectoryEvents
+      .filter((event) => event.type === "reflection_added")
+      .map((event) => event.payload.failureClass);
+    expect(reflectionClasses).toEqual(["tool_failed", "budget_exhausted"]);
+    expect(trajectoryEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "failure_classified",
+          payload: expect.objectContaining({
+            failureClass: "tool_error",
+            toolName: "file_read",
+            reflectionFailureClass: "budget_exhausted",
+            retryAllowed: false,
+            suggestion: "abort",
+          }),
+        }),
       ]),
     );
   });
@@ -802,6 +1257,18 @@ function toolCallResponse(
       },
     ],
     finishReason: "tool_calls",
+  };
+}
+
+function createToolCall(
+  id: string,
+  toolName: string,
+  args: Record<string, unknown>,
+): ChatCompletionResponse["toolCalls"][number] {
+  return {
+    id,
+    type: "function",
+    function: { name: toolName, arguments: JSON.stringify(args) },
   };
 }
 

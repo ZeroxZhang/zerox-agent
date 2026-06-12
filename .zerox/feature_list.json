@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-06-11T00:00:00.000Z",
+  "updatedAt": "2026-06-12T00:00:00.000Z",
   "features": [
     {
       "id": "P0-repo-local-harness",
@@ -159,6 +159,137 @@
       "verification": [
         "npm run verify",
         "npm run harness:score",
+        "npm run smoke:prod"
+      ]
+    },
+    {
+      "id": "P4.1-dynamic-tool-authorization",
+      "priority": 10,
+      "status": "done",
+      "title": "Dynamic MCP and skill tool authorization",
+      "definitionOfDone": [
+        "Task permission policies can explicitly allow dynamic tool names and registered tool sources",
+        "Skill manifest permissions seed skill tool names and MCP server sources into task policies",
+        "Chat and recoverable runtime authorization requests include dynamic tool registry source evidence",
+        "MCP tool registration sources include the owning skill and server name"
+      ],
+      "verification": [
+        "npm test -- src/shared/toolPermissions.test.ts src/main/dynamicToolRegistry.test.ts src/main/agentLoop.test.ts src/main/agentRuntimeEngine.test.ts src/main/toolAuthorizationService.test.ts src/main/agentToolExecutor.test.ts",
+        "npm run build",
+        "npm run harness:check"
+      ]
+    },
+    {
+      "id": "P4.2-runtime-tool-failure-recovery",
+      "priority": 11,
+      "status": "done",
+      "title": "Runtime tool failure observation recovery",
+      "definitionOfDone": [
+        "Recoverable tool failures are appended as tool observations before the model retries",
+        "Runtime reflection evidence is recorded before retrying failed tool calls",
+        "Non-retryable tool failures still terminate through the existing failure path",
+        "Agent eval fixtures assert reflection-to-recovered-summary ordering"
+      ],
+      "verification": [
+        "npm test -- src/main/agentRuntimeEngine.test.ts src/main/eval/agentEvalRunner.test.ts src/main/eval/agentEvalAdversary.test.ts",
+        "node scripts/run-agent-evals.mjs",
+        "npm run verify",
+        "npm run harness:check",
+        "npm run smoke:prod"
+      ]
+    },
+    {
+      "id": "P4.3-runtime-retry-budget-visibility",
+      "priority": 12,
+      "status": "done",
+      "title": "Runtime retry budget and duplicate retry visibility",
+      "definitionOfDone": [
+        "Runtime stops repeated identical failed tool retries with duplicate_retry_blocked reflection evidence",
+        "Runtime stops changed failed retries after the recovery budget is exhausted",
+        "Failure classification trajectory includes the blocked reflection class, tool name, retry flag, and suggestion",
+        "Agent eval fixtures assert retry-budget exhaustion before final tool_error classification"
+      ],
+      "verification": [
+        "npm test -- src/shared/agentReflection.test.ts src/main/agentRuntimeEngine.test.ts src/main/eval/agentEvalRunner.test.ts src/main/eval/agentEvalAdversary.test.ts src/main/agentEvalCandidateGenerator.test.ts src/main/agentLearningExtractor.test.ts",
+        "node scripts/run-agent-evals.mjs",
+        "npm run verify",
+        "npm run harness:check",
+        "npm run smoke:prod"
+      ]
+    },
+    {
+      "id": "P4.4-active-loop-context-compaction",
+      "priority": 13,
+      "status": "done",
+      "title": "Active-loop context compaction",
+      "definitionOfDone": [
+        "The chat agent loop compacts long histories before model requests using the active model token budget",
+        "The recoverable runtime engine compacts long histories before model requests using the active model token budget",
+        "Runtime compaction records context_compacted trajectory evidence before model_request",
+        "Agent eval fixtures assert context compaction before model requests"
+      ],
+      "verification": [
+        "npm test -- src/main/contextManager.test.ts src/main/agentLoop.test.ts src/main/agentRuntimeEngine.test.ts src/main/eval/agentEvalRunner.test.ts src/main/agentEvalCandidateGenerator.test.ts src/main/agentEpisodeExporter.test.ts src/main/chatService.test.ts src/renderer/materialDesign.test.ts",
+        "node scripts/run-agent-evals.mjs",
+        "npm run verify",
+        "npm run harness:check",
+        "npm run smoke:prod"
+      ]
+    },
+    {
+      "id": "P4.5-tool-call-checkpoint-granularity",
+      "priority": 14,
+      "status": "done",
+      "title": "Tool-call checkpoint granularity",
+      "definitionOfDone": [
+        "Recoverable runtime writes a running checkpoint after each executed tool result",
+        "Same-turn multi-tool responses persist one checkpoint per tool observation",
+        "Checkpoint messages preserve the incremental tool observations already completed",
+        "Agent eval fixtures assert checkpoint_written after tool_result before continuing"
+      ],
+      "verification": [
+        "npm test -- src/main/agentRuntimeEngine.test.ts src/main/eval/agentEvalRunner.test.ts src/main/agentEvalCandidateGenerator.test.ts src/main/agentEpisodeExporter.test.ts src/main/agentTrajectoryStore.test.ts",
+        "node scripts/run-agent-evals.mjs",
+        "npm run verify",
+        "npm run harness:check",
+        "npm run smoke:prod"
+      ]
+    },
+    {
+      "id": "P4.6-active-loop-model-retry",
+      "priority": 15,
+      "status": "done",
+      "title": "Active-loop model request retry",
+      "definitionOfDone": [
+        "Chat agent loop retries transient model request failures before failing the loop",
+        "Recoverable runtime retries transient model request failures before failing the run",
+        "Runtime model retries emit model_retry trajectory evidence",
+        "Authorization and cancellation failures are not retried as transient model errors"
+      ],
+      "verification": [
+        "npm test -- src/main/agentLoop.test.ts src/main/agentRuntimeEngine.test.ts src/main/eval/agentEvalRunner.test.ts src/main/chatService.test.ts src/main/agentFailureClassifier.test.ts",
+        "node scripts/run-agent-evals.mjs",
+        "npm run verify",
+        "npm run harness:check",
+        "npm run smoke:prod"
+      ]
+    },
+    {
+      "id": "P4.7-runtime-trajectory-insights-ui",
+      "priority": 16,
+      "status": "done",
+      "title": "Runtime trajectory insights UI",
+      "definitionOfDone": [
+        "Trajectory events for reflection, model retry, and context compaction are summarized into readable insights",
+        "Runs trajectory panel displays insight cards above raw event payloads",
+        "Insight cards select the corresponding raw trajectory event for audit",
+        "Renderer styling keeps insight cards compact and status-colored"
+      ],
+      "verification": [
+        "npm test -- src/shared/agentTrajectoryInsights.test.ts src/renderer/materialDesign.test.ts src/shared/agentHandoff.test.ts src/main/agentRuntimeEngine.test.ts",
+        "npm run build",
+        "npm run verify",
+        "npm run harness:check",
         "npm run smoke:prod"
       ]
     }

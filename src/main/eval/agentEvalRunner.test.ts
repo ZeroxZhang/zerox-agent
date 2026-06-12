@@ -11,11 +11,11 @@ describe("agent eval runner", () => {
     const report = await runAgentEvals(createAgentEvalFixtures());
 
     expect(report).toEqual({
-      total: 11,
-      passed: 11,
+      total: 15,
+      passed: 15,
       failed: 0,
       passRate: 1,
-      toolSuccessRate: 0.8667,
+      toolSuccessRate: 0.7895,
       recoverabilityRate: 1,
       failures: [],
     });
@@ -29,6 +29,10 @@ describe("agent eval runner", () => {
         "workspace-escape-denied",
         "code-engineering-native-tools",
         "reflection-after-test-failure",
+        "reflection-retry-budget-exhausted",
+        "context-compaction-before-model-request",
+        "tool-result-checkpoint-before-next-tool",
+        "model-retry-before-response",
         "episode-eval-candidate",
         "research-writing-native-tools",
         "multi-agent-lineage",
@@ -65,6 +69,110 @@ describe("agent eval runner", () => {
         "tool_result",
         "final_summary",
       ],
+    });
+    expect(
+      fixtures.find((fixture) => fixture.id === "reflection-after-test-failure"),
+    ).toMatchObject({
+      requiredEventTypes: [
+        "tool_call",
+        "tool_result",
+        "reflection_added",
+        "final_summary",
+      ],
+      assertions: expect.arrayContaining([
+        {
+          type: "final_summary",
+          payload: { status: "succeeded" },
+          after: "reflection_added",
+        },
+      ]),
+    });
+    expect(
+      fixtures.find(
+        (fixture) => fixture.id === "reflection-retry-budget-exhausted",
+      ),
+    ).toMatchObject({
+      requiredEventTypes: [
+        "tool_call",
+        "tool_result",
+        "reflection_added",
+        "failure_classified",
+      ],
+      assertions: expect.arrayContaining([
+        {
+          type: "reflection_added",
+          payload: { failureClass: "budget_exhausted" },
+          after: "tool_result",
+        },
+        {
+          type: "failure_classified",
+          payload: { reflectionFailureClass: "budget_exhausted" },
+          after: "reflection_added",
+        },
+      ]),
+    });
+    expect(
+      fixtures.find(
+        (fixture) => fixture.id === "context-compaction-before-model-request",
+      ),
+    ).toMatchObject({
+      requiredEventTypes: [
+        "context_compacted",
+        "model_request",
+        "model_response",
+        "final_summary",
+      ],
+      assertions: expect.arrayContaining([
+        {
+          type: "model_request",
+          after: "context_compacted",
+        },
+      ]),
+    });
+    expect(
+      fixtures.find(
+        (fixture) => fixture.id === "tool-result-checkpoint-before-next-tool",
+      ),
+    ).toMatchObject({
+      requiredEventTypes: [
+        "tool_call",
+        "tool_result",
+        "checkpoint_written",
+        "final_summary",
+      ],
+      assertions: expect.arrayContaining([
+        {
+          type: "checkpoint_written",
+          payload: { toolCallCount: 1 },
+          after: "tool_result",
+        },
+        {
+          type: "checkpoint_written",
+          payload: { toolCallCount: 2 },
+          after: "tool_result",
+        },
+      ]),
+    });
+    expect(
+      fixtures.find((fixture) => fixture.id === "model-retry-before-response"),
+    ).toMatchObject({
+      requiredEventTypes: [
+        "model_request",
+        "model_retry",
+        "model_response",
+        "final_summary",
+      ],
+      assertions: expect.arrayContaining([
+        {
+          type: "model_retry",
+          payload: { attempt: 1, maxRetries: 2 },
+          after: "model_request",
+        },
+        {
+          type: "model_response",
+          after: "model_retry",
+        },
+      ]),
     });
     expect(
       fixtures.find((fixture) => fixture.id === "multi-agent-lineage"),

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { AgentTrajectoryEvent } from "../../shared/agentTrajectory";
+import { summarizeTrajectoryInsights } from "../../shared/agentTrajectoryInsights";
 import {
   extractToolResultRef,
   type ReadToolResultRefResult,
@@ -17,6 +18,10 @@ export function RunTrajectoryPanel(props: {
       props.events[0] ??
       null,
     [props.events, selectedEventId],
+  );
+  const insights = useMemo(
+    () => summarizeTrajectoryInsights(props.events),
+    [props.events],
   );
   const resultRef = extractToolResultRef(selectedEvent?.payload);
 
@@ -53,6 +58,21 @@ export function RunTrajectoryPanel(props: {
         <span>轨迹</span>
         <small>{props.events.length} 个事件</small>
       </div>
+      {insights.length ? (
+        <div className="trajectory-insight-list">
+          {insights.map((insight) => (
+            <button
+              className={`trajectory-insight is-${insight.tone}`}
+              key={insight.eventId}
+              onClick={() => setSelectedEventId(insight.eventId)}
+              type="button"
+            >
+              <strong>{insight.title}</strong>
+              <span>{insight.detail}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
       <div className="trajectory-event-list">
         {props.events.map((event) => (
           <button

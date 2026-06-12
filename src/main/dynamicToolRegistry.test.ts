@@ -65,4 +65,25 @@ describe("dynamic tool registry", () => {
     expect(registry.getNativeDescriptors()).toEqual([]);
     expect(registry.getNativeDescriptor("git_diff")).toBeNull();
   });
+
+  it("returns the registration source for dynamic authorization", () => {
+    const registry = createDynamicToolRegistry();
+    registry.register(
+      {
+        type: "function",
+        function: {
+          name: "remote_source_lookup",
+          description: "Lookup remote source.",
+          parameters: { type: "object", properties: {}, required: [] },
+        },
+      },
+      async () => ({ ok: true, result: {} }),
+      "mcp:research-writer:source-fetcher",
+    );
+
+    expect(registry.getSource("remote_source_lookup")).toBe(
+      "mcp:research-writer:source-fetcher",
+    );
+    expect(registry.getSource("missing_tool")).toBeNull();
+  });
 });

@@ -1041,6 +1041,23 @@ nav {
 }
 .trajectory-panel { display: grid; gap: var(--space-2); }
 .trajectory-panel p { margin: 0; color: var(--text-secondary); line-height: var(--leading-normal); }
+.trajectory-insight-list {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-2);
+}
+.trajectory-insight {
+  display: grid; gap: 2px; min-width: 0;
+  padding: var(--space-2); border: 1px solid var(--border-default);
+  border-radius: var(--radius-md); background: var(--bg-surface);
+  color: var(--text-primary); text-align: left;
+}
+.trajectory-insight:hover { background: var(--bg-surface-hover); }
+.trajectory-insight strong, .trajectory-insight span { overflow-wrap: anywhere; }
+.trajectory-insight span { color: var(--text-secondary); font-size: var(--text-xs); }
+.trajectory-insight.is-info { border-color: var(--border-accent); background: var(--bg-accent-muted); }
+.trajectory-insight.is-warn { border-color: var(--status-warning-border); background: var(--status-warning-bg); }
+.trajectory-insight.is-error { border-color: var(--status-error-border); background: var(--status-error-bg); }
+.trajectory-insight.is-success { border-color: var(--status-success-border); background: var(--status-success-bg); }
 .trajectory-event-list {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
   gap: var(--space-2);

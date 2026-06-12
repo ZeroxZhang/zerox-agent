@@ -1384,11 +1384,11 @@ async function initializeMcpTools(
                   tool.function.name,
                   args,
                 );
-                if (result.ok) return result;
-                return { ok: false, error: result.error };
-              },
-              `mcp:${config.name}`,
-            );
+	                if (result.ok) return result;
+	                return { ok: false, error: result.error };
+	              },
+	              `mcp:${config.sourceSkill}:${config.name}`,
+	            );
           } catch {
             // Skip tools that conflict with already registered ones
           }

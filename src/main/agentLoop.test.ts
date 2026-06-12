@@ -11,6 +11,9 @@ import type {
   ToolResultOffloadStore,
   ToolResultOffloadWriteInput,
 } from "./toolResultOffloadStore";
+import type { ToolAuthorizationService } from "./toolAuthorizationService";
+import { createDynamicToolRegistry } from "./dynamicToolRegistry";
+import type { ToolCallRequest } from "../shared/toolPermissions";
 
 const modelProfile = {
   baseUrl: "https://api.example.com/v1",
@@ -36,6 +39,99 @@ const testTools: ToolDefinition[] = [
 ];
 
 describe("agent loop", () => {
+  it("retries transient model request failures before failing the loop", async () => {
+    let attempts = 0;
+    const retryEvents: Array<{ attempt: number; delayMs: number; error: string }> = [];
+    const chatClient: ChatClient = {
+      async complete() {
+        attempts += 1;
+        if (attempts === 1) {
+          throw new Error("LLM request failed with status 500: overloaded");
+        }
+        return {
+          content: "重试后完成。",
+          toolCalls: [],
+          finishReason: "stop",
+        };
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "总结一下" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(),
+        tools: testTools,
+        modelRetry: { maxRetries: 2, baseDelayMs: 0, maxDelayMs: 0 },
+        onModelRetry(event) {
+          retryEvents.push(event);
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: "succeeded",
+      summary: "重试后完成。",
+    });
+    expect(attempts).toBe(2);
+    expect(retryEvents).toEqual([
+      {
+        attempt: 1,
+        maxRetries: 2,
+        delayMs: 0,
+        error: "LLM request failed with status 500: overloaded",
+      },
+    ]);
+  });
+
+  it("compacts messages before model requests when the context exceeds budget", async () => {
+    const requests: ChatCompletionRequest[] = [];
+    const chatClient: ChatClient = {
+      async complete(request) {
+        requests.push(request);
+        return {
+          content: "压缩后完成。",
+          toolCalls: [],
+          finishReason: "stop",
+        };
+      },
+    };
+
+    const result = await runAgentLoop(
+      [
+        { role: "user", content: "old request" },
+        { role: "assistant", content: "old answer" },
+        { role: "user", content: "current request" },
+      ],
+      { ...modelProfile, maxTokens: 128 },
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(),
+        tools: testTools,
+        contextManager: {
+          estimateTokens(messages) {
+            return messages.length * 100;
+          },
+          compressMessages(messages) {
+            return [
+              messages[0],
+              { role: "user", content: "[之前对话摘要]\nold request -> old answer" },
+              messages.at(-1),
+            ].filter(Boolean) as ChatCompletionRequest["messages"];
+          },
+        },
+      },
+    );
+
+    expect(result.status).toBe("succeeded");
+    expect(requests[0].messages).toEqual([
+      expect.objectContaining({ role: "system" }),
+      { role: "user", content: "[之前对话摘要]\nold request -> old answer" },
+      { role: "user", content: "current request" },
+    ]);
+  });
+
   it("offloads oversized tool results before the next model turn", async () => {
     const largeContent = "x".repeat(1000);
     const requests: ChatCompletionRequest[] = [];
@@ -271,6 +367,74 @@ describe("agent loop", () => {
     expect(result.summary).toContain("连续 3 次工具失败");
     expect(result.summary).toContain("file_list");
   });
+
+  it("passes dynamic registry source to tool authorization", async () => {
+    const requests: ChatCompletionRequest[] = [];
+    const authorizationRequests: ToolCallRequest[] = [];
+    const chatClient: ChatClient = {
+      async complete(request) {
+        requests.push(request);
+        if (requests.length === 1) {
+          return dynamicToolCallResponse("tool_call_1");
+        }
+
+        return {
+          content: "动态工具已经执行。",
+          toolCalls: [],
+          finishReason: "stop",
+        };
+      },
+    };
+    const toolAuthorizationService: ToolAuthorizationService = {
+      async authorize(_taskId, request) {
+        authorizationRequests.push(request);
+        return {
+          ok: true,
+          decision: { allowed: true, reason: "allowed" },
+          auditEvent: {
+            id: "audit_1",
+            taskId: "task_1",
+            request,
+            decision: { allowed: true, reason: "allowed" },
+            createdAt: "2026-06-11T00:00:00.000Z",
+          },
+        };
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "查一下来源" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createDynamicSourceToolExecutor(
+          "mcp:research-writer:source-fetcher",
+        ),
+        toolAuthorizationService,
+        taskId: "task_1",
+        maxTurns: 4,
+        tools: [
+          {
+            type: "function",
+            function: {
+              name: "remote_source_lookup",
+              description: "Lookup source",
+              parameters: { type: "object", properties: {}, required: [] },
+            },
+          },
+        ],
+      },
+    );
+
+    expect(result.status).toBe("succeeded");
+    expect(authorizationRequests).toEqual([
+      {
+        toolName: "remote_source_lookup",
+        source: "mcp:research-writer:source-fetcher",
+        args: { query: "agent eval" },
+      },
+    ]);
+  });
 });
 
 function toolCallResponse(id: string, path = "/tmp"): ChatCompletionResponse {
@@ -284,6 +448,23 @@ function toolCallResponse(id: string, path = "/tmp"): ChatCompletionResponse {
         function: {
           name: "file_list",
           arguments: JSON.stringify({ path }),
+        },
+      },
+    ],
+  };
+}
+
+function dynamicToolCallResponse(id: string): ChatCompletionResponse {
+  return {
+    content: null,
+    finishReason: "tool_calls",
+    toolCalls: [
+      {
+        id,
+        type: "function",
+        function: {
+          name: "remote_source_lookup",
+          arguments: JSON.stringify({ query: "agent eval" }),
         },
       },
     ],
@@ -311,6 +492,34 @@ function createToolExecutor(
     },
     hasTool() {
       return true;
+    },
+  };
+}
+
+function createDynamicSourceToolExecutor(source: string): AgentToolExecutor {
+  const registry = createDynamicToolRegistry();
+  registry.register(
+    {
+      type: "function",
+      function: {
+        name: "remote_source_lookup",
+        description: "Lookup source",
+        parameters: { type: "object", properties: {}, required: [] },
+      },
+    },
+    async () => ({ ok: true, result: { sourceCount: 1 } }),
+    source,
+  );
+
+  return {
+    async execute(request) {
+      return registry.execute(request.toolName, request.args);
+    },
+    getRegistry() {
+      return registry;
+    },
+    hasTool(toolName) {
+      return registry.has(toolName);
     },
   };
 }

@@ -23,6 +23,10 @@ describe("Design System — Notion-inspired app shell", () => {
     path.join(process.cwd(), "src/renderer/components/RunsPanel.tsx"),
     "utf8",
   );
+  const runTrajectoryPanelSource = readFileSync(
+    path.join(process.cwd(), "src/renderer/components/RunTrajectoryPanel.tsx"),
+    "utf8",
+  );
   const evalReviewPanelPath = path.join(
     process.cwd(),
     "src/renderer/components/EvalReviewPanel.tsx",
@@ -100,6 +104,14 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(runsPanelSource).toContain("handoff-review-card");
     expect(runsPanelSource).toContain("Handoff Review");
     expect(styles).toContain(".handoff-review-card");
+  });
+
+  it("surfaces runtime recovery and compaction insights in Run trajectories", () => {
+    expect(runTrajectoryPanelSource).toContain("summarizeTrajectoryInsights");
+    expect(runTrajectoryPanelSource).toContain("trajectory-insight");
+    expect(runTrajectoryPanelSource).toContain("trajectory-insight-list");
+    expect(styles).toContain(".trajectory-insight");
+    expect(styles).toContain(".trajectory-insight-list");
   });
 
   it("surfaces eval candidate generation from terminal Runs", () => {

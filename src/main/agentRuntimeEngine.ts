@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { createContextManager, type ContextManager } from "./contextManager";
 import type { AgentExecutionStore } from "./agentExecutionStore";
 import { classifyAgentFailure } from "./agentFailureClassifier";
 import { extractLearningCandidatesFromTrajectory } from "./agentLearningExtractor";
@@ -12,6 +13,10 @@ import type { AgentToolExecutor } from "./agentToolExecutor";
 import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
 import type { AgentWorkspaceService } from "./agentWorkspaceService";
 import type { MemoryStore } from "./memoryStore";
+import {
+  completeWithModelRetry,
+  type ModelRetryOptions,
+} from "./modelRetry";
 import type {
   ChatClient,
   ChatMessage,
@@ -83,11 +88,14 @@ export function createAgentRuntimeEngine(options: {
   memoryStore?: Partial<Pick<MemoryStore, "create" | "search">>;
   toolResultOffloadStore?: ToolResultOffloadStore;
   toolResultOffloadThreshold?: number;
+  contextManager?: ContextManager;
+  modelRetry?: ModelRetryOptions;
   createId?: () => string;
   now?: () => Date;
 }): AgentRuntimeEngine {
   const createId = options.createId ?? randomUUID;
   const now = options.now ?? (() => new Date());
+  const contextManager = options.contextManager ?? createContextManager();
   let trajectorySequence = 0;
 
   function createEvent(
@@ -179,10 +187,15 @@ export function createAgentRuntimeEngine(options: {
       ? formatFailureMessage(input.failure)
       : undefined;
     if (failureClass) {
-      await appendTrajectory(input.checkpoint.runId, "failure_classified", {
-        failureClass,
-        ...(failureMessage ? { failureMessage } : {}),
-      });
+      await appendTrajectory(
+        input.checkpoint.runId,
+        "failure_classified",
+        buildFailureClassifiedPayload(
+          input.failure,
+          failureClass,
+          failureMessage,
+        ),
+      );
     }
     const checkpoint = await saveCheckpoint(
       input.checkpoint,
@@ -277,9 +290,39 @@ export function createAgentRuntimeEngine(options: {
     const profile = await options.getModelProfile();
     const maxTurns = skill.manifest.execution.maxTurns ?? 10;
     const toolDefinitions = getToolDefinitions(options.toolExecutor);
+    const contextTokenBudget = Math.max(1, Math.floor(profile.maxTokens * 0.7));
+
+    async function compactMessagesBeforeModelRequest() {
+      const estimatedTokens = contextManager.estimateTokens(messages);
+      if (estimatedTokens <= contextTokenBudget) {
+        return;
+      }
+
+      const originalMessageCount = messages.length;
+      const compacted = contextManager.compressMessages(
+        messages,
+        contextTokenBudget,
+      );
+      if (compacted.length === originalMessageCount && compacted === messages) {
+        return;
+      }
+
+      messages = compacted;
+      await appendTrajectory(current.runId, "context_compacted", {
+        originalMessageCount,
+        compactedMessageCount: messages.length,
+        estimatedTokens,
+        tokenBudget: contextTokenBudget,
+      }, {
+        containsApiKey: false,
+        containsFileContent: false,
+        containsUserText: false,
+      }, current.runContext);
+    }
 
     for (let turn = 0; turn < maxTurns; turn += 1) {
       throwIfCanceled(signal);
+      await compactMessagesBeforeModelRequest();
       await appendTrajectory(current.runId, "model_request", {
         turn,
         messageCount: messages.length,
@@ -288,13 +331,24 @@ export function createAgentRuntimeEngine(options: {
         containsFileContent: false,
         containsUserText: true,
       }, current.runContext);
-      const response = await options.chatClient.complete({
-        ...profile,
-        messages,
-        tools: toolDefinitions,
-        tool_choice: "auto",
-        ...(signal ? { signal } : {}),
-      });
+      const response = await completeWithModelRetry(
+        options.chatClient,
+        {
+          ...profile,
+          messages,
+          tools: toolDefinitions,
+          tool_choice: "auto",
+          ...(signal ? { signal } : {}),
+        },
+        options.modelRetry,
+        async (event) => {
+          await appendTrajectory(current.runId, "model_retry", event, {
+            containsApiKey: false,
+            containsFileContent: false,
+            containsUserText: false,
+          }, current.runContext);
+        },
+      );
       await appendTrajectory(current.runId, "model_response", {
         turn,
         hasContent: Boolean(response.content),
@@ -347,6 +401,7 @@ export function createAgentRuntimeEngine(options: {
         tool_calls: response.toolCalls,
       });
 
+      let wroteToolCheckpoint = false;
       for (const toolCall of response.toolCalls) {
         const toolName = toolCall.function.name as AgentToolName;
         const args = parseToolArguments(toolCall.function.arguments);
@@ -359,10 +414,12 @@ export function createAgentRuntimeEngine(options: {
           containsFileContent: false,
           containsUserText: true,
         }, current.runContext);
+        const toolSource = getToolSource(options.toolExecutor, toolName);
         const auth = await options.toolAuthorizationService.authorize(
           task.id,
           {
             toolName,
+            ...(toolSource ? { source: toolSource } : {}),
             args,
           },
           {
@@ -466,6 +523,11 @@ export function createAgentRuntimeEngine(options: {
           tool_call_id: toolCall.id,
           content: serializedObservation.content,
         });
+        current = await saveCheckpoint(current, "running", {
+          messages: messages.map(toExecutionMessage),
+          toolCallCount,
+        });
+        wroteToolCheckpoint = true;
 
         if (!result.ok) {
           const reflection = createToolFailureReflection({
@@ -486,14 +548,19 @@ export function createAgentRuntimeEngine(options: {
             containsFileContent: false,
             containsUserText: false,
           }, current.runContext);
-          throw new Error(`工具 ${toolName} 执行失败：${result.error}`);
+          if (reflection.retryAllowed && reflection.suggestion === "retry") {
+            continue;
+          }
+          throw new ToolReflectionFailureError(toolName, result.error, reflection);
         }
       }
 
-      current = await saveCheckpoint(current, "running", {
-        messages: messages.map(toExecutionMessage),
-        toolCallCount,
-      });
+      if (!wroteToolCheckpoint) {
+        current = await saveCheckpoint(current, "running", {
+          messages: messages.map(toExecutionMessage),
+          toolCallCount,
+        });
+      }
     }
 
     throw new Error("Agent run reached the maximum turn limit.");
@@ -711,6 +778,18 @@ function getNativeToolDescriptor(
   return maybeExecutor.getRegistry().getNativeDescriptor(toolName);
 }
 
+function getToolSource(
+  toolExecutor: AgentToolExecutor,
+  toolName: string,
+): string | null {
+  const maybeExecutor = toolExecutor as Partial<Pick<AgentToolExecutor, "getRegistry">>;
+  if (typeof maybeExecutor.getRegistry !== "function") {
+    return null;
+  }
+
+  return maybeExecutor.getRegistry().getSource(toolName);
+}
+
 function buildNativeToolEvidencePayload(
   descriptor: NativeToolDescriptor,
 ): Record<string, unknown> {
@@ -769,6 +848,38 @@ function isCancellationError(
 
 function formatFailureMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error ?? "Agent run failed.");
+}
+
+class ToolReflectionFailureError extends Error {
+  constructor(
+    readonly toolName: AgentToolName,
+    toolError: string,
+    readonly reflection: AgentReflectionDecision,
+  ) {
+    super(
+      `工具 ${toolName} 执行失败且恢复已停止（${reflection.failureClass}）：${toolError}`,
+    );
+    this.name = "ToolReflectionFailureError";
+  }
+}
+
+function buildFailureClassifiedPayload(
+  failure: unknown,
+  failureClass: ReturnType<typeof classifyAgentFailure>,
+  failureMessage: string | undefined,
+): Record<string, unknown> {
+  return {
+    failureClass,
+    ...(failureMessage ? { failureMessage } : {}),
+    ...(failure instanceof ToolReflectionFailureError
+      ? {
+          toolName: failure.toolName,
+          reflectionFailureClass: failure.reflection.failureClass,
+          retryAllowed: failure.reflection.retryAllowed,
+          suggestion: failure.reflection.suggestion,
+        }
+      : {}),
+  };
 }
 
 function toExecutionMessage(message: ChatMessage): AgentExecutionMessage {

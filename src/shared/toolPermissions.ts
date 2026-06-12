@@ -38,10 +38,15 @@ export type TaskPermissionPolicy = {
     read: boolean;
     write: boolean;
   };
+  tools?: {
+    allowedNames: string[];
+    allowedSources: string[];
+  };
 };
 
 export type ToolCallRequest = {
-  toolName: AgentToolName;
+  toolName: string;
+  source?: string;
   args: Record<string, unknown>;
 };
 
@@ -113,12 +118,23 @@ export function createPermissionPolicyFromSkillManifest(
       read: manifest.permissions.memory.read,
       write: manifest.permissions.memory.write,
     },
+    tools: {
+      allowedNames: manifest.tools?.map((tool) => tool.name) ?? [],
+      allowedSources: [
+        ...(manifest.tools?.length ? [`skill:${manifest.name}`] : []),
+        ...(manifest.mcpServers?.map(
+          (server) => `mcp:${manifest.name}:${server.name}`,
+        ) ?? []),
+      ],
+    },
   });
 }
 
 export function normalizeTaskPermissionPolicy(
   policy: TaskPermissionPolicy,
 ): TaskPermissionPolicy {
+  const tools = normalizeDynamicToolPolicy(policy.tools);
+
   return {
     files: {
       read: unique(policy.files.read.map(normalizePermissionPath).filter(Boolean)),
@@ -137,6 +153,7 @@ export function normalizeTaskPermissionPolicy(
       read: Boolean(policy.memory?.read),
       write: Boolean(policy.memory?.write),
     },
+    ...(tools ? { tools } : {}),
   };
 }
 
@@ -271,6 +288,19 @@ export function authorizeToolCall(
         String(request.args.command ?? ""),
         normalized.shell.commands,
       );
+  }
+
+  if (normalized.tools?.allowedNames.includes(request.toolName)) {
+    return allow(`动态工具 ${request.toolName} 已由任务显式允许。`);
+  }
+
+  if (
+    request.source &&
+    normalized.tools?.allowedSources.includes(request.source)
+  ) {
+    return allow(
+      `动态工具 ${request.toolName} 来自已允许来源 ${request.source}。`,
+    );
   }
 
   return deny(`工具 ${request.toolName} 尚未配置授权规则。`);
@@ -528,6 +558,26 @@ function normalizeDomain(value: string): string {
   }
 
   return trimmed.replace(/\/.*$/, "");
+}
+
+function normalizeDynamicToolPolicy(
+  tools: TaskPermissionPolicy["tools"] | undefined,
+): TaskPermissionPolicy["tools"] | null {
+  const allowedNames = unique(
+    (tools?.allowedNames ?? []).map((name) => name.trim()).filter(Boolean),
+  );
+  const allowedSources = unique(
+    (tools?.allowedSources ?? []).map((source) => source.trim()).filter(Boolean),
+  );
+
+  if (!allowedNames.length && !allowedSources.length) {
+    return null;
+  }
+
+  return {
+    allowedNames,
+    allowedSources,
+  };
 }
 
 function isApprovedPermissionPath(value: string): boolean {
