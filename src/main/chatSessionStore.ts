@@ -5,6 +5,7 @@ import type {
   ChatMessageSearchOptions,
   ChatMessageSearchResult,
   ChatMessageRecord,
+  ChatSessionGoalSummary,
   ChatSessionListItem,
   ChatSessionRecord,
 } from "../shared/chat";
@@ -20,6 +21,8 @@ export type AppendChatMessageInput = {
   content: string;
   relatedMemoryIds?: string[];
   executedRunId?: string;
+  goalId?: string;
+  goalEventRef?: string;
 };
 
 export type AppendChatMessageResult = {
@@ -31,6 +34,14 @@ export type ChatSessionStore = {
   list(): Promise<ChatSessionListItem[]>;
   get(sessionId: string): Promise<ChatSessionRecord | null>;
   appendMessage(input: AppendChatMessageInput): Promise<AppendChatMessageResult>;
+  attachGoal(
+    sessionId: string,
+    goal: ChatSessionGoalSummary,
+  ): Promise<ChatSessionRecord>;
+  clearActiveGoal(
+    sessionId: string,
+    goalId: string,
+  ): Promise<ChatSessionRecord | null>;
   searchMessages(
     options: ChatMessageSearchOptions,
   ): Promise<ChatMessageSearchResult[]>;
@@ -101,6 +112,8 @@ export function createChatSessionStore(options: {
           ? { relatedMemoryIds: input.relatedMemoryIds }
           : {}),
         ...(input.executedRunId ? { executedRunId: input.executedRunId } : {}),
+        ...(input.goalId ? { goalId: input.goalId } : {}),
+        ...(input.goalEventRef ? { goalEventRef: input.goalEventRef } : {}),
         createdAt: timestamp,
       };
       const session = existingSession
@@ -128,6 +141,55 @@ export function createChatSessionStore(options: {
       });
 
       return { session, message };
+    },
+
+    async attachGoal(sessionId, goal) {
+      const stored = await readStoredSessions();
+      const existingSession = stored.sessions.find(
+        (session) => session.id === sessionId,
+      );
+      if (!existingSession) {
+        throw new Error(`Chat session "${sessionId}" was not found.`);
+      }
+
+      const timestamp = now().toISOString();
+      const nextSession = attachGoalToSession(existingSession, goal, timestamp);
+      await writeStoredSessions({
+        schemaVersion: 1,
+        sessions: stored.sessions.map((session) =>
+          session.id === sessionId ? nextSession : session,
+        ),
+      });
+
+      return nextSession;
+    },
+
+    async clearActiveGoal(sessionId, goalId) {
+      const stored = await readStoredSessions();
+      const existingSession = stored.sessions.find(
+        (session) => session.id === sessionId,
+      );
+      if (!existingSession) {
+        return null;
+      }
+      if (existingSession.activeGoalId !== goalId) {
+        return existingSession;
+      }
+
+      const { activeGoalId: _activeGoalId, ...sessionWithoutActiveGoal } =
+        existingSession;
+      const nextSession = {
+        ...sessionWithoutActiveGoal,
+        updatedAt: now().toISOString(),
+      };
+      await writeStoredSessions({
+        schemaVersion: 1,
+        sessions: stored.sessions.map((session) =>
+          session.id === sessionId ? nextSession : session,
+        ),
+      });
+
+      return nextSession;
     },
 
     async searchMessages(options) {
@@ -176,16 +238,29 @@ function createSession(options: {
 }
 
 function toListItem(session: ChatSessionRecord): ChatSessionListItem {
+  const activeGoal = session.goalSummaries?.find(
+    (goal) => goal.id === session.activeGoalId,
+  );
   return {
     id: session.id,
     title: session.title,
     summary: session.summary,
     messageCount: session.messages.length,
+    ...(activeGoal ? { activeGoal } : {}),
     updatedAt: session.updatedAt,
   };
 }
 
 function normalizeStoredSession(session: ChatSessionRecord): ChatSessionRecord {
+  const activeGoalId = session.activeGoalId
+    ? String(session.activeGoalId)
+    : undefined;
+  const goalIds = Array.isArray(session.goalIds)
+    ? uniqueStrings(session.goalIds)
+    : [];
+  const goalSummaries = Array.isArray(session.goalSummaries)
+    ? session.goalSummaries.map(normalizeGoalSummary)
+    : [];
   return {
     id: String(session.id ?? ""),
     title: String(session.title ?? "未命名会话"),
@@ -193,6 +268,9 @@ function normalizeStoredSession(session: ChatSessionRecord): ChatSessionRecord {
     messages: Array.isArray(session.messages)
       ? session.messages.map(normalizeStoredMessage)
       : [],
+    ...(activeGoalId ? { activeGoalId } : {}),
+    ...(goalIds.length ? { goalIds } : {}),
+    ...(goalSummaries.length ? { goalSummaries } : {}),
     createdAt: String(session.createdAt ?? new Date(0).toISOString()),
     updatedAt: String(session.updatedAt ?? session.createdAt ?? new Date(0).toISOString()),
   };
@@ -208,8 +286,46 @@ function normalizeStoredMessage(message: ChatMessageRecord): ChatMessageRecord {
       ? { relatedMemoryIds: message.relatedMemoryIds.map(String) }
       : {}),
     ...(message.executedRunId ? { executedRunId: String(message.executedRunId) } : {}),
+    ...(message.goalId ? { goalId: String(message.goalId) } : {}),
+    ...(message.goalEventRef ? { goalEventRef: String(message.goalEventRef) } : {}),
     createdAt: String(message.createdAt ?? new Date(0).toISOString()),
   };
+}
+
+function normalizeGoalSummary(goal: ChatSessionGoalSummary): ChatSessionGoalSummary {
+  return {
+    id: String(goal.id ?? ""),
+    description: String(goal.description ?? ""),
+    status: goal.status,
+  };
+}
+
+function attachGoalToSession(
+  session: ChatSessionRecord,
+  goal: ChatSessionGoalSummary,
+  updatedAt: string,
+): ChatSessionRecord {
+  const normalizedGoal = normalizeGoalSummary(goal);
+  const goalIds = uniqueStrings([...(session.goalIds ?? []), normalizedGoal.id]);
+  const existingSummaries = session.goalSummaries ?? [];
+  const goalSummaries = [
+    ...existingSummaries.filter((candidate) => candidate.id !== normalizedGoal.id),
+    normalizedGoal,
+  ];
+
+  return {
+    ...session,
+    activeGoalId: normalizedGoal.id,
+    goalIds,
+    goalSummaries,
+    updatedAt,
+  };
+}
+
+function uniqueStrings(values: unknown[]): string[] {
+  return Array.from(
+    new Set(values.map((value) => String(value)).filter(Boolean)),
+  );
 }
 
 function createSessionTitle(content: string): string {

@@ -116,6 +116,74 @@ describe("chat session store", () => {
       },
     ]);
   });
+
+  it("persists active and historical goal ids on chat sessions", async () => {
+    const store = createChatSessionStore({
+      configDir,
+      createId: createSequentialId("chat"),
+      now: createSteppedClock("2026-06-12T08:00:00.000Z"),
+    });
+
+    const first = await store.appendMessage({
+      role: "user",
+      content: "把这轮设为目标：发布 v1.8.0",
+    });
+    const linked = await store.attachGoal(first.session.id, {
+      id: "goal_release",
+      status: "executing",
+      description: "发布 v1.8.0",
+    });
+
+    expect(linked.activeGoalId).toBe("goal_release");
+    expect(linked.goalIds).toEqual(["goal_release"]);
+    expect(linked.goalSummaries).toEqual([
+      {
+        id: "goal_release",
+        status: "executing",
+        description: "发布 v1.8.0",
+      },
+    ]);
+    await expect(store.list()).resolves.toEqual([
+      expect.objectContaining({
+        id: first.session.id,
+        activeGoal: {
+          id: "goal_release",
+          description: "发布 v1.8.0",
+          status: "executing",
+        },
+      }),
+    ]);
+  });
+
+  it("clears the active goal while preserving goal history", async () => {
+    const store = createChatSessionStore({
+      configDir,
+      createId: createSequentialId("chat"),
+      now: createSteppedClock("2026-06-12T08:00:00.000Z"),
+    });
+
+    const first = await store.appendMessage({
+      role: "user",
+      content: "目标：完成 release",
+    });
+    await store.attachGoal(first.session.id, {
+      id: "goal_release",
+      status: "executing",
+      description: "完成 release",
+    });
+
+    const cleared = await store.clearActiveGoal(first.session.id, "goal_release");
+
+    expect(cleared?.activeGoalId).toBeUndefined();
+    expect(cleared?.goalIds).toEqual(["goal_release"]);
+    const listed = await store.list();
+    expect(listed).toEqual([
+      expect.objectContaining({
+        id: first.session.id,
+      }),
+    ]);
+    expect(listed[0].activeGoal).toBeUndefined();
+  });
 });
 
 function createSequentialId(prefix: string): () => string {

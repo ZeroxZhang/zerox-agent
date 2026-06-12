@@ -1,6 +1,7 @@
 import type { MemoryKind } from "./memory";
 import type { AgentRunRecord } from "./agentRuns";
 import type { ScheduledTask } from "./scheduledTasks";
+import type { GoalStatus } from "./agentGoal";
 
 export type ChatHistoryMessage = {
   role: "assistant" | "user";
@@ -12,6 +13,14 @@ export type ChatMessageRecord = ChatHistoryMessage & {
   createdAt: string;
   relatedMemoryIds?: string[];
   executedRunId?: string;
+  goalId?: string;
+  goalEventRef?: string;
+};
+
+export type ChatSessionGoalSummary = {
+  id: string;
+  description: string;
+  status: GoalStatus;
 };
 
 export type ChatMessageSearchOptions = {
@@ -36,6 +45,9 @@ export type ChatSessionRecord = {
   title: string;
   summary: string;
   messages: ChatMessageRecord[];
+  activeGoalId?: string;
+  goalIds?: string[];
+  goalSummaries?: ChatSessionGoalSummary[];
   createdAt: string;
   updatedAt: string;
 };
@@ -45,6 +57,7 @@ export type ChatSessionListItem = {
   title: string;
   summary: string;
   messageCount: number;
+  activeGoal?: ChatSessionGoalSummary;
   updatedAt: string;
 };
 
