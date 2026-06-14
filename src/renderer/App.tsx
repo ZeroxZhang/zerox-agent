@@ -119,6 +119,10 @@ export function App() {
   const activeSection =
     sections.find((section) => section.id === activeSectionId) ??
     getNavigationSection(getDefaultNavigationSection().id);
+  const shellClassName =
+    activeSection.id === "chat"
+      ? "app-shell material-shell is-kimi-work is-agent-chat"
+      : "app-shell material-shell";
 
   function updateNavRailWidth(nextWidth: number) {
     setNavRailWidth(clampNumber(nextWidth, minNavRailWidth, maxNavRailWidth));
@@ -164,9 +168,7 @@ export function App() {
 
   return (
     <main
-      className={`app-shell material-shell ${
-        activeSection.id === "chat" ? "is-agent-chat" : ""
-      }`}
+      className={shellClassName}
       style={
         {
           "--nav-rail-width": `${navRailWidth}px`,

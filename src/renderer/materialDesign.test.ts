@@ -163,7 +163,7 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(chatPanelSource).toContain("createGoalCommandDraft(draft)");
     expect(styles).toContain(".composer-icon-command");
     expect(styles).toContain("content: \"⌘\";");
-    expect(styles).toContain("--composer-action-inset: 14px;");
+    expect(styles).toContain("--composer-action-inset: 12px;");
     expect(styles).toContain("right: var(--composer-action-inset);");
     expect(styles).toContain("bottom: var(--composer-action-inset);");
   });
@@ -286,7 +286,9 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(chatPanelSource).toContain("aria-label=\"调整会话历史栏宽度\"");
     expect(chatPanelSource).toContain("aria-label=\"中断当前任务\"");
     expect(chatPanelSource).toContain("aria-label=\"发送消息\"");
-    expect(chatPanelSource).toContain("className=\"composer-floating-actions\"");
+    expect(chatPanelSource).toContain(
+      "className=\"composer-floating-actions composer-right-actions\"",
+    );
     expect(chatPanelSource).toContain("disabled={!canInterruptCurrentWork}");
     expect(chatPanelSource).toContain(
       "handleInterruptCurrentWork",
@@ -326,6 +328,41 @@ describe("Design System — Notion-inspired app shell", () => {
     );
     expect(styles).toContain("-webkit-line-clamp: 2;");
     expect(styles).toContain(".agent-work-steps { min-width: 0;");
+  });
+
+  it("implements the v2.0.1 Kimi Work shell contract", () => {
+    expect(appSource).toContain("app-shell material-shell is-kimi-work");
+    expect(styles).toContain(".app-shell.is-agent-chat {");
+    expect(styles).toContain(".app-shell.is-agent-chat .sidebar");
+    expect(styles).toContain(".app-shell.is-agent-chat .nav-resize-handle");
+    expect(styles).toContain("grid-template-columns: minmax(0, 1fr);");
+
+    expect(chatPanelSource).toContain("className=\"work-mode-switch\"");
+    expect(chatPanelSource).toContain("aria-label=\"Kimi Work 与 Chat 模式\"");
+    expect(chatPanelSource).toContain("Work");
+    expect(chatPanelSource).toContain("Chat");
+    expect(chatPanelSource).toContain("className=\"work-quick-actions\"");
+    expect(chatPanelSource).toContain("新建任务");
+    expect(chatPanelSource).toContain("定时任务");
+    expect(chatPanelSource).toContain("WebBridge");
+    expect(chatPanelSource).toContain("className=\"session-section-title\"");
+
+    expect(chatPanelSource).toContain("className=\"chat-titlebar\"");
+    expect(chatPanelSource).toContain("aria-label=\"在运行中查看\"");
+    expect(chatPanelSource).toContain("className=\"composer-left-actions\"");
+    expect(chatPanelSource).toContain("添加内容");
+    expect(chatPanelSource).toContain("全部允许");
+    expect(chatPanelSource).toContain("className=\"composer-model-pill\"");
+    expect(chatPanelSource).toContain("className=\"context-capacity\"");
+    expect(chatPanelSource).toContain("K2.6 Agent 集群");
+
+    expect(styles).toContain("--kimi-sidebar-bg: #f7f8fb;");
+    expect(styles).toContain("--kimi-border: #eef1f5;");
+    expect(styles).toContain(".work-mode-switch");
+    expect(styles).toContain(".work-quick-actions");
+    expect(styles).toContain(".chat-titlebar");
+    expect(styles).toContain(".composer-left-actions");
+    expect(styles).toContain(".context-capacity");
   });
 });
 

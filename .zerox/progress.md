@@ -1165,3 +1165,48 @@
   - Created a fresh session and submitted `/目标 请在本轮测试中回复一句：Goal Mode v1.9.5 packaged smoke ok。只要回复这句话就完成。`.
   - Packaged app replied `已设置并开始执行目标...`, created a single milestone, executed it, recorded evidence, and reached green `已达成 · 1/1 已完成`.
   - After the repair build and relaunch, the same packaged app automatically corrected stale session badges and right-side context from `执行中` to `已达成`, bottom activity showed `当前没有任务运行 · 待命`, and the interrupt button was disabled.
+
+## 2026-06-15 v2.0.1 Kimi Work UI Replica Release
+
+- Goal:
+  - Rebuilt the primary work surface around the Kimi Work reference captured from the local Kimi app through Computer Use.
+  - Preserved local-first runtime, `ToolAuthorizationService` authorization paths, workspace sandboxing, Goal Mode, chat sending, tool approval, and recoverable runtime behavior.
+- UI / interaction changes:
+  - Chat/work view now removes the outer Zerox navigation rail and fills the window as a Kimi-style work console.
+  - Left rail now has Work/Chat segmented mode switch, work shortcuts (`新建任务`, `技能`, `定时任务`, `WebBridge`), project grouping, conversation grouping, and bottom account treatment.
+  - Center workspace now has a compact project titlebar, document-style task transcript, compact runtime status, and a Kimi-like bottom composer.
+  - Composer now uses Add content, All allow, context capacity, model, interrupt, and send controls while keeping the existing slash goal command flow.
+  - Right rail preserves functional progress/context cards with Kimi-like light card styling.
+- Changed files:
+  - `README.md`
+  - `package.json`
+  - `package-lock.json`
+  - `src/renderer/App.tsx`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/styles.css`
+  - `src/renderer/materialDesign.test.ts`
+  - `src/shared/packageScripts.test.ts`
+  - `src/shared/readme.test.ts`
+  - `.zerox/progress.md`
+- TDD evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts` -> RED: missing `is-kimi-work`, Work/Chat mode switch, work quick actions, titlebar, and Kimi composer contract; then 1 file / 22 tests passed.
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> RED: package metadata and README still referenced `1.9.5`; then 2 files / 10 tests passed after the 2.0.1 update.
+- Browser / visual QA evidence:
+  - Computer Use reference: local `/Applications/Kimi.app` Work tab showed a light Kimi work console with Work/Chat segmented switch, work shortcuts, project/conversation groups, document task transcript, bottom composer, and right `进度` / `上下文` cards.
+  - Browser plugin at `http://127.0.0.1:5174/#chat` -> DOM loaded, title `Zerox Agent`, no console warn/error logs, snapshot contained `Work`, `新建任务`, and `进度`.
+  - Browser desktop layout metrics -> `agent-chat-panel` grid `220px 760px 300px`, left rail `#f7f8fb`, right cards `进度` / `上下文`, composer width 722px, no horizontal overflow at 1280px.
+  - Browser interaction proof -> typed `/`, command menu appeared, selected Goal, composer value became `/目标 `, no console warn/error logs after interaction.
+  - Browser screenshot API failed with `Page.captureScreenshot` timeout, so screenshot evidence used Chrome/CDP fallback.
+  - Chrome/CDP desktop screenshot saved at `/tmp/zerox-kimi-reference/zerox-work-desktop.png`.
+  - Chrome/CDP mobile viewport 390x844 -> `innerWidth=390`, `scrollWidth=390`, `agent-chat-panel` grid `390px`, send button visible at x=329, screenshot saved at `/tmp/zerox-kimi-reference/zerox-work-mobile.png`.
+- Verification evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 3 files / 32 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> 110 files / 538 tests passed, build passed, agent eval 21/21, memory eval 2/2.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `npm run dist:mac` -> build and packaging succeeded.
+- Release artifact evidence:
+  - `release/mac-arm64/Zerox Agent.app/Contents/Info.plist` reports `CFBundleShortVersionString=2.0.1` and `CFBundleVersion=2.0.1`.
+  - `release/Zerox Agent-2.0.1-arm64.dmg` -> 118M.
+  - `release/Zerox Agent-2.0.1-arm64-mac.zip` -> 329M.
+  - `release/latest-mac.yml` -> version `2.0.1`; GitHub Release upload uses `Zerox.Agent-2.0.1-*` asset aliases to match README download guidance.
