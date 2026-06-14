@@ -1,6 +1,15 @@
 import type { ChatTaskStatusEvent } from "../shared/chat";
+import type { GoalStatus } from "../shared/agentGoal";
+import type { AgentWorkPhase } from "./agentWorkStatus";
 
 export type TaskActivityKind = "idle" | "working" | "paused" | "done" | "error";
+export type GoalUiStatusKind = "ready" | "working" | "paused" | "error";
+
+export type GoalUiSyncState = {
+  statusKind: GoalUiStatusKind;
+  workPhase: AgentWorkPhase;
+  shouldClearActiveRequest: boolean;
+};
 
 export type TaskActivityState = {
   kind: TaskActivityKind;
@@ -58,6 +67,117 @@ export function createTaskActivity(options: {
       ? { toolCallsExecuted: options.toolCallsExecuted }
       : {}),
     ...(typeof options.maxTurns === "number" ? { maxTurns: options.maxTurns } : {}),
+  };
+}
+
+export function buildGoalTaskActivity(options: {
+  status: GoalStatus;
+  description: string;
+  now?: number;
+}): TaskActivityState {
+  if (options.status === "executing") {
+    return createTaskActivity({
+      kind: "working",
+      title: "目标执行中",
+      detail: options.description,
+      now: options.now,
+    });
+  }
+
+  if (options.status === "waiting_for_review") {
+    return createTaskActivity({
+      kind: "paused",
+      title: "目标等待审核",
+      detail: options.description,
+      now: options.now,
+    });
+  }
+
+  if (
+    options.status === "failed" ||
+    options.status === "stopped_budget" ||
+    options.status === "stopped_stalled"
+  ) {
+    return createTaskActivity({
+      kind: "error",
+      title:
+        options.status === "stopped_budget"
+          ? "目标预算停止"
+          : options.status === "stopped_stalled"
+            ? "目标停滞停止"
+            : "目标执行失败",
+      detail: options.description,
+      now: options.now,
+    });
+  }
+
+  if (options.status === "achieved") {
+    return createTaskActivity({
+      kind: "done",
+      title: "目标已达成",
+      detail: options.description,
+      now: options.now,
+    });
+  }
+
+  if (options.status === "canceled") {
+    return createTaskActivity({
+      kind: "done",
+      title: "目标已取消",
+      detail: options.description,
+      now: options.now,
+    });
+  }
+
+  return createTaskActivity({
+    kind: "done",
+    title: "目标已记录",
+    detail: options.description,
+    now: options.now,
+  });
+}
+
+export function getGoalUiSyncState(status: GoalStatus): GoalUiSyncState {
+  if (status === "executing") {
+    return {
+      statusKind: "working",
+      workPhase: "tool",
+      shouldClearActiveRequest: false,
+    };
+  }
+
+  if (status === "waiting_for_review") {
+    return {
+      statusKind: "paused",
+      workPhase: "paused",
+      shouldClearActiveRequest: true,
+    };
+  }
+
+  if (
+    status === "failed" ||
+    status === "stopped_budget" ||
+    status === "stopped_stalled"
+  ) {
+    return {
+      statusKind: "error",
+      workPhase: "error",
+      shouldClearActiveRequest: true,
+    };
+  }
+
+  if (status === "planning") {
+    return {
+      statusKind: "ready",
+      workPhase: "done",
+      shouldClearActiveRequest: true,
+    };
+  }
+
+  return {
+    statusKind: "ready",
+    workPhase: "done",
+    shouldClearActiveRequest: true,
   };
 }
 

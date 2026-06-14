@@ -114,9 +114,9 @@ function describeGoalStatus(
       return {
         statusLabel: "失败",
         statusDetail: "目标执行遇到不可恢复的问题，需要查看运行证据后处理。",
-        nextActionLabel: "重新开始",
+        nextActionLabel: "恢复路径",
         nextActionDetail:
-          "点击后会用同一目标描述重新创建并启动一轮目标执行。",
+          "使用下方“重试目标”或“结束目标”处理，失败记录会保留用于排查。",
       };
     case "canceled":
       return {

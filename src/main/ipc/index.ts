@@ -679,8 +679,8 @@ function registerChatIpcHandlers(container: AppContainer): void {
       };
     },
   );
-  ipcMain.handle("chatSessions:list", () => container.chatSessionStore().list());
+  ipcMain.handle("chatSessions:list", () => container.listChatSessions());
   ipcMain.handle("chatSessions:get", (_event, sessionId: string) =>
-    container.chatSessionStore().get(sessionId),
+    container.getChatSession(sessionId),
   );
 }

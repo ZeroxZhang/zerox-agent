@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildGoalTaskActivity,
   buildTaskActivityDetail,
   buildTaskProcessItems,
   createTaskActivity,
+  getGoalUiSyncState,
 } from "./chatTaskActivity";
 import type { ChatTaskStatusEvent } from "../shared/chat";
 
@@ -80,6 +82,44 @@ describe("chat task activity", () => {
         meta: "第 1 轮",
       },
     ]);
+  });
+
+  it("keeps the bottom activity in a running state while a goal is executing", () => {
+    const activity = buildGoalTaskActivity({
+      status: "executing",
+      description: "调研 Serenity",
+      now: 1_000,
+    });
+
+    expect(activity).toMatchObject({
+      kind: "working",
+      title: "目标执行中",
+      detail: "调研 Serenity",
+      startedAt: 1_000,
+    });
+    expect(buildTaskActivityDetail(activity, 16_000)).toBe(
+      "调研 Serenity · 已运行 15 秒",
+    );
+  });
+
+  it("moves completed goals out of the running UI state", () => {
+    const activity = buildGoalTaskActivity({
+      status: "achieved",
+      description: "回复固定验收短句",
+      now: 2_000,
+    });
+
+    expect(activity).toMatchObject({
+      kind: "done",
+      title: "目标已达成",
+      detail: "回复固定验收短句",
+    });
+    expect(activity.startedAt).toBeUndefined();
+    expect(getGoalUiSyncState("achieved")).toEqual({
+      statusKind: "ready",
+      workPhase: "done",
+      shouldClearActiveRequest: true,
+    });
   });
 });
 

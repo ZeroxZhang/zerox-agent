@@ -206,6 +206,8 @@ export const demoModelSettings: PublicModelSettings = {
   hasApiKey: true,
   maxTokens: 8192,
   temperature: 0.2,
+  thinkingEnabled: false,
+  thinkingBudgetTokens: 8192,
   updatedAt: "2026-06-05T08:00:00.000Z",
 };
 

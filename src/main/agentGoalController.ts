@@ -56,6 +56,7 @@ export function createAgentGoalController(options: {
   onProgress?: (event: GoalProgressEvent) => void;
 }): AgentGoalController {
   const stallThreshold = options.stallThreshold ?? 3;
+  const activeRuns = new Map<string, Promise<Goal>>();
 
   function notifyProgress(
     event: GoalProgressEvent["event"],
@@ -84,14 +85,30 @@ export function createAgentGoalController(options: {
   }
 
   async function runLoop(goal: Goal, runOptions?: { signal?: AbortSignal }) {
+    if (activeRuns.has(goal.id)) {
+      return activeRuns.get(goal.id)!;
+    }
+
+    const runPromise = runLoopInternal(goal, runOptions).finally(() => {
+      activeRuns.delete(goal.id);
+    });
+    activeRuns.set(goal.id, runPromise);
+    return runPromise;
+  }
+
+  async function runLoopInternal(
+    goal: Goal,
+    runOptions?: { signal?: AbortSignal },
+  ) {
     let stalledIterations = 0;
 
-    while (goal.status === "executing") {
-      if (runOptions?.signal?.aborted) {
-        return stopGoal(goal, "canceled", "user_canceled", "Goal canceled.");
-      }
+    try {
+      while (goal.status === "executing") {
+        if (runOptions?.signal?.aborted) {
+          return stopGoal(goal, "canceled", "user_canceled", "Goal canceled.");
+        }
 
-      if (isBudgetExhausted(goal)) {
+        if (isBudgetExhausted(goal)) {
         return stopGoal(
           goal,
           "stopped_budget",
@@ -114,6 +131,30 @@ export function createAgentGoalController(options: {
               "goal_accepted",
               "Goal acceptance passed.",
             );
+          }
+
+          if (goal.budgetUsage.replans < goal.budget.maxReplans) {
+            const reason = summarizeAcceptanceFailure(result);
+            goal.milestones = await options.planner.replan(goal, reason);
+            touch(goal);
+            await options.goalStore.appendLedger(goal.id, {
+              at: currentTime(),
+              kind: "goal_replanned",
+              summary: "Replanned after final goal acceptance needed more evidence.",
+            });
+            await emit(goal.id, "goal_replanned", {
+              goalId: goal.id,
+              planVersion: goal.planVersion,
+              replans: goal.budgetUsage.replans,
+              reason,
+            });
+            notifyProgress(
+              "replanned",
+              goal,
+              "目标验收证据不足，已重新规划继续推进。",
+            );
+            await writeGoalCheckpoint(goal, "goal_acceptance_replanned");
+            continue;
           }
 
           return stopGoal(
@@ -147,7 +188,12 @@ export function createAgentGoalController(options: {
       }
     }
 
-    return goal;
+      return goal;
+    } catch (error) {
+      const summary = error instanceof Error ? error.message : "目标运行时发生未知错误。";
+      notifyProgress("stopped", goal, summary);
+      return stopGoal(goal, "failed", "unrecoverable_failure", summary);
+    }
   }
 
   async function runOneMilestone(

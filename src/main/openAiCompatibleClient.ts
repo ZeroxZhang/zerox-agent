@@ -34,6 +34,7 @@ export type ChatCompletionRequest = {
   tools?: ToolDefinition[];
   tool_choice?: "auto" | "none" | { type: "function"; function: { name: string } };
   signal?: AbortSignal;
+  thinking?: { type: "enabled" | "disabled"; budgetTokens?: number };
 };
 
 export type ChatCompletionResponse = {
@@ -336,6 +337,15 @@ function buildChatCompletionBody(
   if (request.tools?.length) {
     body.tools = request.tools;
     body.tool_choice = request.tool_choice ?? "auto";
+  }
+
+  if (request.thinking?.type === "enabled") {
+    body.thinking = {
+      type: "enabled",
+      ...(typeof request.thinking.budgetTokens === "number"
+        ? { budget_tokens: request.thinking.budgetTokens }
+        : {}),
+    };
   }
 
   return body;

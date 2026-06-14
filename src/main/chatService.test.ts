@@ -179,10 +179,11 @@ describe("chat service", () => {
     ]);
   });
 
-  it("creates a session goal from an explicit goal-setting message", async () => {
+  it("creates and immediately starts a session goal from an explicit goal-setting message", async () => {
     let completeCalled = false;
     const chatMessages: AppendChatMessageInput[] = [];
     const goalCreates: unknown[] = [];
+    const resumes: string[] = [];
     const attachedGoals: ChatSessionGoalSummary[] = [];
     const service = createChatService({
       chatClient: {
@@ -194,7 +195,7 @@ describe("chat service", () => {
       getModelProfile: createCompleteProfile,
       memoryStore: createMemoryStore(),
       chatSessionStore: createChatSessionStore(chatMessages, { attachedGoals }),
-      goalService: createGoalService({ goalCreates }),
+      goalService: createGoalService({ goalCreates, resumes }),
       createId: () => "chat_goal",
       now: () => new Date("2026-06-12T08:00:00.000Z"),
     });
@@ -208,7 +209,7 @@ describe("chat service", () => {
       activeGoal: {
         id: "goal_release",
         description: "发布 v1.8.0，直到 GitHub Release 完成才算结束",
-        status: "planning",
+        status: "executing",
       },
     });
     expect(goalCreates).toEqual([
@@ -218,11 +219,12 @@ describe("chat service", () => {
         description: "发布 v1.8.0，直到 GitHub Release 完成才算结束",
       },
     ]);
+    expect(resumes).toEqual(["goal_release"]);
     expect(attachedGoals).toEqual([
       {
         id: "goal_release",
         description: "发布 v1.8.0，直到 GitHub Release 完成才算结束",
-        status: "planning",
+        status: "executing",
       },
     ]);
     expect(chatMessages).toEqual([
@@ -234,17 +236,18 @@ describe("chat service", () => {
         sessionId: "persisted_session",
         role: "assistant",
         content:
-          "已把这轮会话设为目标：发布 v1.8.0，直到 GitHub Release 完成才算结束。",
+          "已设置并开始执行目标：发布 v1.8.0，直到 GitHub Release 完成才算结束。",
         goalId: "goal_release",
-        goalEventRef: "goal_created",
+        goalEventRef: "goal_started",
       },
     ]);
     expect(completeCalled).toBe(false);
   });
 
-  it("creates a session goal from a slash goal command", async () => {
+  it("creates and immediately starts a session goal from a slash goal command", async () => {
     let completeCalled = false;
     const goalCreates: unknown[] = [];
+    const resumes: string[] = [];
     const service = createChatService({
       chatClient: {
         async complete() {
@@ -255,7 +258,7 @@ describe("chat service", () => {
       getModelProfile: createCompleteProfile,
       memoryStore: createMemoryStore(),
       chatSessionStore: createChatSessionStore([]),
-      goalService: createGoalService({ goalCreates }),
+      goalService: createGoalService({ goalCreates, resumes }),
       createId: () => "chat_goal",
       now: () => new Date("2026-06-12T08:00:00.000Z"),
     });
@@ -269,7 +272,7 @@ describe("chat service", () => {
       activeGoal: {
         id: "goal_release",
         description: "发布 v1.8.0，直到 GitHub Release 完成才算结束",
-        status: "planning",
+        status: "executing",
       },
     });
     expect(goalCreates).toEqual([
@@ -279,6 +282,7 @@ describe("chat service", () => {
         description: "发布 v1.8.0，直到 GitHub Release 完成才算结束",
       },
     ]);
+    expect(resumes).toEqual(["goal_release"]);
     expect(completeCalled).toBe(false);
   });
 
@@ -322,7 +326,7 @@ describe("chat service", () => {
     expect(completeCalled).toBe(false);
   });
 
-  it("recreates and starts a terminal session goal when continuing it", async () => {
+  it("creates a new retry attempt for a terminal session goal when continuing it", async () => {
     let completeCalled = false;
     const statusEvents: ChatTaskStatusEvent[] = [];
     const resumes: string[] = [];
@@ -365,10 +369,10 @@ describe("chat service", () => {
 
     expect(result).toMatchObject({
       ok: true,
-      reply: "已重新开始目标：发布。",
+      reply: "上一次目标已失败，已基于原描述创建新一轮重试：深度调研 Serenity。",
       activeGoal: {
         id: "goal_release",
-        description: "发布",
+        description: "深度调研 Serenity",
         status: "executing",
       },
     });
@@ -382,11 +386,11 @@ describe("chat service", () => {
     expect(resumes).toEqual(["goal_release"]);
     expect(attachedGoals.at(-1)).toEqual({
       id: "goal_release",
-      description: "发布",
+      description: "深度调研 Serenity",
       status: "executing",
     });
     expect(statusEvents.map((event) => event.message)).toContain(
-      "正在重新开始目标执行",
+      "已创建新一轮目标重试",
     );
     expect(completeCalled).toBe(false);
   });
@@ -1251,6 +1255,7 @@ function createGoalService(options: {
   resumes?: string[];
   pauses?: string[];
 } = {}) {
+  const goalDescriptions = new Map<string, string>();
   return {
     async createFromChat(input: {
       sessionId: string;
@@ -1258,6 +1263,7 @@ function createGoalService(options: {
       description: string;
     }): Promise<ChatSessionGoalSummary> {
       options.goalCreates?.push(input);
+      goalDescriptions.set("goal_release", input.description);
       return {
         id: "goal_release",
         description: input.description,
@@ -1268,7 +1274,7 @@ function createGoalService(options: {
       options.resumes?.push(goalId);
       return {
         id: goalId,
-        description: "发布",
+        description: goalDescriptions.get(goalId) ?? "发布",
         status: "executing",
       };
     },

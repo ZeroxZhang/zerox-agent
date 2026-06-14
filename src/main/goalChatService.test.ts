@@ -44,19 +44,24 @@ describe("goal chat service", () => {
       },
     ]);
     expect(savedGoals[0]?.successCriteria[0]?.acceptanceChecks[0]).toMatchObject({
-      kind: "file_exists",
+      kind: "model_review",
       params: {
-        path: "goal-goal_release-result.md",
+        condition: "发布 v1.8.0",
+        evidenceRefs: ["artifact:goalEvidence"],
       },
+      requiresEvidence: true,
     });
     expect(
       savedGoals[0]?.milestones[0]?.successCriteria[0]?.acceptanceChecks[0],
     ).toMatchObject({
-      kind: "file_exists",
+      kind: "model_review",
       params: {
-        path: "goal-goal_release-result.md",
+        condition: "发布 v1.8.0",
+        evidenceRefs: ["artifact:goalEvidence"],
       },
+      requiresEvidence: true,
     });
+    expect(savedGoals[0]?.reviewPolicy).toBe("review_high_risk_only");
     expect(ledgerEvents).toEqual([
       {
         at: "2026-06-12T08:00:00.000Z",
@@ -75,7 +80,9 @@ describe("goal chat service", () => {
           return createGoal({ id: goalId, status: "achieved" });
         },
       }),
-      goalStore: createGoalStore(),
+      goalStore: createGoalStore({
+        existingGoal: createGoal({ status: "executing" }),
+      }),
       planner: createFakePlanner(),
       createId: () => "goal_release",
       now: () => "2026-06-12T08:00:00.000Z",
@@ -87,7 +94,47 @@ describe("goal chat service", () => {
     expect(summary).toEqual({
       id: "goal_release",
       description: "发布 v1.8.0",
-      status: "achieved",
+      status: "executing",
+    });
+  });
+
+  it("marks a planning goal executing before the background controller run settles", async () => {
+    const savedGoals: Goal[] = [];
+    const ledgerEvents: ProgressLedgerEvent[] = [];
+    let startedSignal: AbortSignal | undefined;
+    const service = createGoalChatService({
+      controller: createController({
+        async resume(_goalId, options) {
+          startedSignal = options?.signal;
+          return new Promise<Goal>(() => undefined);
+        },
+      }),
+      goalStore: createGoalStore({
+        existingGoal: createGoal({ status: "planning" }),
+        savedGoals,
+        ledgerEvents,
+      }),
+      planner: createFakePlanner(),
+      createId: () => "goal_release",
+      now: () => "2026-06-12T08:00:00.000Z",
+    });
+
+    const summary = await service.resume("goal_release");
+
+    expect(summary).toEqual({
+      id: "goal_release",
+      description: "发布 v1.8.0",
+      status: "executing",
+    });
+    expect(startedSignal?.aborted).toBe(false);
+    expect(savedGoals.at(-1)).toMatchObject({
+      id: "goal_release",
+      status: "executing",
+    });
+    expect(ledgerEvents.at(-1)).toEqual({
+      at: "2026-06-12T08:00:00.000Z",
+      kind: "goal_planned",
+      summary: "Goal execution queued from chat.",
     });
   });
 
@@ -156,6 +203,30 @@ describe("goal chat service", () => {
       kind: "review_requested",
       summary: "Goal paused from chat and is waiting for review.",
     });
+  });
+
+  it("aborts a background controller run when canceling the goal", async () => {
+    let startedSignal: AbortSignal | undefined;
+    const service = createGoalChatService({
+      controller: createController({
+        async start(_goalId, options) {
+          startedSignal = options?.signal;
+          return new Promise<Goal>(() => undefined);
+        },
+      }),
+      goalStore: createGoalStore({
+        existingGoal: createGoal({ status: "planning" }),
+      }),
+      planner: createFakePlanner(),
+      createId: () => "goal_release",
+      now: () => "2026-06-12T08:00:00.000Z",
+    });
+
+    await service.start("goal_release");
+    expect(startedSignal?.aborted).toBe(false);
+
+    await service.cancel("goal_release");
+    expect(startedSignal?.aborted).toBe(true);
   });
 });
 

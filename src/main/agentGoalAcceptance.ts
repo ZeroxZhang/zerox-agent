@@ -1,4 +1,4 @@
-import { access } from "node:fs/promises";
+import { access, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import type { AgentToolExecutor, AgentToolExecutionResult } from "./agentToolExecutor";
 import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
@@ -32,6 +32,8 @@ export type AcceptanceContext = {
   goalId?: string;
   milestoneId?: string;
   workspacePath: string;
+  extraReadRoots?: string[];
+  extraWriteRoots?: string[];
   toolExecutor: Pick<AgentToolExecutor, "execute">;
   trajectoryStore: Pick<AgentTrajectoryStore, "append">;
   chatClient?: ChatClient;
@@ -130,7 +132,11 @@ async function evaluateFileExists(
   ctx: AcceptanceContext,
 ): Promise<CheckResult> {
   const requestedPath = String(check.params.path ?? "");
-  const candidatePath = resolveWorkspacePath(ctx.workspacePath, requestedPath);
+  const candidatePath = resolveWorkspacePath(
+    ctx.workspacePath,
+    requestedPath,
+    getAllowedExtraRoots(ctx),
+  );
   if (!candidatePath) {
     return checkResult(check, false, [], "Path is outside the workspace.");
   }
@@ -152,7 +158,12 @@ async function evaluateCommandExitCode(
   ctx: AcceptanceContext,
 ): Promise<CheckResult> {
   const command = String(check.params.command ?? "");
-  const pathCheck = checkCommandPaths(check, command, ctx.workspacePath);
+  const pathCheck = checkCommandPaths(
+    check,
+    command,
+    ctx.workspacePath,
+    getAllowedExtraRoots(ctx),
+  );
   if (pathCheck) {
     return pathCheck;
   }
@@ -178,7 +189,12 @@ async function evaluateTestPasses(
   ctx: AcceptanceContext,
 ): Promise<CheckResult> {
   const command = String(check.params.command ?? "");
-  const pathCheck = checkCommandPaths(check, command, ctx.workspacePath);
+  const pathCheck = checkCommandPaths(
+    check,
+    command,
+    ctx.workspacePath,
+    getAllowedExtraRoots(ctx),
+  );
   if (pathCheck) {
     return pathCheck;
   }
@@ -207,6 +223,7 @@ function checkCommandPaths(
   check: AcceptanceCheck,
   command: string,
   workspacePath: string,
+  extraRoots: string[] = [],
 ): CheckResult | null {
   // Split by common shell separators and strip simple quotes.
   const tokens = command.split(/[\s;"'`|&()]+/).filter(Boolean);
@@ -217,7 +234,7 @@ function checkCommandPaths(
     if (!path.isAbsolute(token) && !hasParentTraversal) {
       continue;
     }
-    if (resolveWorkspacePath(workspacePath, token) === null) {
+    if (resolveWorkspacePath(workspacePath, token, extraRoots) === null) {
       return checkResult(
         check,
         false,
@@ -279,15 +296,31 @@ async function evaluateModelReview(
     };
   }
 
+  const evidence = await formatEvidenceForPrompt(evidenceRefs, ctx);
+  if (evidence.missingArtifactRefs.length > 0) {
+    return {
+      checkResult: checkResult(
+        check,
+        false,
+        evidenceRefs,
+        `Missing required artifact evidence: ${evidence.missingArtifactRefs.join(", ")}.`,
+      ),
+      inferentialUsed: false,
+    };
+  }
+
   const response = await ctx.chatClient.complete({
     ...getModelProfile(ctx),
     messages: [
       {
         role: "user",
         content: [
-          "Review the provided goal acceptance evidence.",
+          "You are an independent goal acceptance judge.",
+          "Decide whether the requested condition is satisfied using only the evidence below.",
+          `Condition: ${String(check.params.condition ?? check.description)}`,
           `Check: ${check.description}`,
-          `Evidence refs: ${evidenceRefs.join(", ")}`,
+          "Evidence:",
+          ...evidence.lines,
           "Return JSON: {\"accepted\":true|false,\"detail\":\"reason\"}",
         ].join("\n"),
       },
@@ -362,16 +395,49 @@ function checkResult(
 function resolveWorkspacePath(
   workspacePath: string,
   requestedPath: string,
+  extraRoots: string[] = [],
 ): string | null {
   const workspaceRoot = path.resolve(workspacePath);
-  const candidate = path.resolve(workspaceRoot, requestedPath);
-  const relative = path.relative(workspaceRoot, candidate);
-  // Reject any path that escapes the workspace. This covers relative ".." traversal
-  // and absolute paths that resolve outside the workspace (including Windows drives).
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
-    return null;
+  const candidate = resolveRequestedPath(workspaceRoot, requestedPath);
+  if (isPathInsideDirectory(candidate, workspaceRoot)) {
+    return candidate;
   }
-  return candidate;
+
+  for (const root of extraRoots) {
+    if (isPathInsideDirectory(candidate, root)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function resolveRequestedPath(workspaceRoot: string, requestedPath: string): string {
+  if (requestedPath.startsWith("~/")) {
+    return path.join("__HOME__", requestedPath.slice(2));
+  }
+
+  return path.resolve(workspaceRoot, requestedPath);
+}
+
+function getAllowedExtraRoots(ctx: AcceptanceContext): string[] {
+  return [
+    ...(ctx.extraReadRoots ?? []),
+    ...(ctx.extraWriteRoots ?? []),
+  ];
+}
+
+function isPathInsideDirectory(
+  candidatePath: string,
+  directoryPath: string,
+): boolean {
+  const candidate = normalizeComparablePath(candidatePath);
+  const directory = normalizeComparablePath(directoryPath);
+  return candidate === directory || candidate.startsWith(`${directory}/`);
+}
+
+function normalizeComparablePath(value: string): string {
+  const normalized = value.replace(/\\/g, "/").replace(/\/+$/, "");
+  return normalized || "/";
 }
 
 function getExitCode(result: AgentToolExecutionResult): number {
@@ -390,6 +456,126 @@ function parseEvidenceRefs(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((entry): entry is string => typeof entry === "string")
     : [];
+}
+
+async function formatEvidenceForPrompt(
+  evidenceRefs: string[],
+  ctx: AcceptanceContext,
+): Promise<{ lines: string[]; missingArtifactRefs: string[] }> {
+  const lines: string[] = [];
+  const missingArtifactRefs: string[] = [];
+  for (const ref of evidenceRefs) {
+    if (!ref.startsWith("artifact:")) {
+      lines.push(`- ${ref}`);
+      continue;
+    }
+
+    const artifactName = ref.slice("artifact:".length);
+    const artifact = ctx.artifacts?.[artifactName];
+    if (artifact === undefined) {
+      const fileArtifact = await resolveArtifactEvidenceFile(artifactName, ctx);
+      if (!fileArtifact) {
+        missingArtifactRefs.push(ref);
+      }
+      lines.push(
+        fileArtifact
+          ? `- ${ref}: ${truncateEvidence(JSON.stringify(fileArtifact))}`
+          : `- ${ref}: missing`,
+      );
+      continue;
+    }
+
+    lines.push(`- ${ref}: ${truncateEvidence(JSON.stringify(artifact))}`);
+  }
+  return { lines, missingArtifactRefs };
+}
+
+async function resolveArtifactEvidenceFile(
+  artifactName: string,
+  ctx: AcceptanceContext,
+): Promise<Record<string, unknown> | null> {
+  if (!isSafeArtifactName(artifactName)) {
+    return null;
+  }
+
+  for (const candidatePath of getArtifactEvidenceCandidatePaths(artifactName, ctx)) {
+    try {
+      const stats = await stat(candidatePath);
+      if (!stats.isFile()) {
+        continue;
+      }
+
+      const content = await readFile(candidatePath, "utf8");
+      return {
+        path: candidatePath,
+        sizeBytes: stats.size,
+        contentPreview: truncateEvidence(content),
+      };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  return null;
+}
+
+function getArtifactEvidenceCandidatePaths(
+  artifactName: string,
+  ctx: AcceptanceContext,
+): string[] {
+  const fileNames = getArtifactEvidenceFileNames(artifactName);
+  const roots = dedupePaths([ctx.workspacePath, ...getAllowedExtraRoots(ctx)]);
+  const candidates: string[] = [];
+
+  for (const root of roots) {
+    for (const fileName of fileNames) {
+      const candidatePath = path.resolve(root, fileName);
+      if (isPathInsideDirectory(candidatePath, root)) {
+        candidates.push(candidatePath);
+      }
+    }
+  }
+
+  return candidates;
+}
+
+function getArtifactEvidenceFileNames(artifactName: string): string[] {
+  if (path.extname(artifactName)) {
+    return [artifactName];
+  }
+
+  return [
+    artifactName,
+    `${artifactName}.md`,
+    `${artifactName}.markdown`,
+    `${artifactName}.txt`,
+    `${artifactName}.json`,
+  ];
+}
+
+function isSafeArtifactName(value: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value) && !value.includes("..");
+}
+
+function dedupePaths(paths: string[]): string[] {
+  const normalized: string[] = [];
+  for (const value of paths) {
+    const candidate = normalizeComparablePath(path.resolve(value));
+    if (!normalized.includes(candidate)) {
+      normalized.push(candidate);
+    }
+  }
+  return normalized;
+}
+
+function truncateEvidence(value: string): string {
+  const maxChars = 4000;
+  return value.length > maxChars
+    ? `${value.slice(0, maxChars)}... [truncated]`
+    : value;
 }
 
 function readNestedValue(value: unknown, dottedPath: string): unknown {

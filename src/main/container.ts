@@ -1,4 +1,4 @@
-import { app, safeStorage } from "electron";
+import { app, BrowserWindow, safeStorage } from "electron";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { createAgentExecutionStore } from "./agentExecutionStore";
@@ -14,6 +14,7 @@ import { createAgentGoalAcceptance } from "./agentGoalAcceptance";
 import { createAgentGoalContext } from "./agentGoalContext";
 import { createAgentGoalPlanner } from "./agentGoalPlanner";
 import { createGoalRuntimeEngine } from "./goalRuntimeEngine";
+import { applyGoalOutputRootsToRunContext } from "./goalOutputRoots";
 import { createGoalChatService } from "./goalChatService";
 import { createAgentWorkspaceService } from "./agentWorkspaceService";
 import { createMultiAgentSessionStore } from "./multiAgentSessionStore";
@@ -55,13 +56,19 @@ import { createTaskSchedulerService } from "./taskSchedulerService";
 import { createToolAuditLog } from "./toolAuditLog";
 import {
   createToolAuthorizationService,
+  type ToolUserApprovalResult,
   type ToolUserApprovalRequest,
 } from "./toolAuthorizationService";
 import { getAppMeta } from "../shared/appMeta";
 import { getNavigationSections } from "../shared/navigation";
 import type { Goal, GoalBudget, SuccessCriterion } from "../shared/agentGoal";
 import type { GoalReviewPolicy } from "../shared/agentGoalReview";
-import type { ChatSessionGoalSummary, GoalProgressEvent } from "../shared/chat";
+import type {
+  ChatSessionGoalSummary,
+  ChatSessionListItem,
+  ChatSessionRecord,
+  GoalProgressEvent,
+} from "../shared/chat";
 import type {
   CancelScheduledTaskRunResult,
   PauseAgentRunResult,
@@ -84,10 +91,9 @@ import {
 export type AppContainer = ReturnType<typeof createAppContainer>;
 
 export function createAppContainer(options: {
-  requestToolApproval: (request: ToolUserApprovalRequest) => Promise<{
-    approved: boolean;
-    reason: string;
-  }>;
+  requestToolApproval: (
+    request: ToolUserApprovalRequest,
+  ) => Promise<ToolUserApprovalResult>;
 }) {
   const configDir = path.join(app.getPath("userData"), "config");
   const skillsDir = path.join(app.getAppPath(), "skills");
@@ -108,6 +114,14 @@ export function createAppContainer(options: {
   }
 
   function emitGoalProgressEvent(event: GoalProgressEvent) {
+    void syncGoalProgressToChatSession(event)
+      .catch(() => undefined)
+      .finally(() => {
+        notifyGoalProgressListeners(event);
+      });
+  }
+
+  function notifyGoalProgressListeners(event: GoalProgressEvent) {
     for (const listener of goalProgressListeners) {
       try {
         listener(event);
@@ -115,6 +129,107 @@ export function createAppContainer(options: {
         // Subscriber errors must not break the goal runtime.
       }
     }
+  }
+
+  async function syncGoalProgressToChatSession(event: GoalProgressEvent) {
+    if (!event.sessionId) {
+      return;
+    }
+
+    const goal = await agentGoalStore().get(event.goalId);
+    if (!goal) {
+      return;
+    }
+
+    await attachGoalSummaryIfChanged(event.sessionId, toChatGoalSummary(goal));
+  }
+
+  async function attachGoalSummaryIfChanged(
+    sessionId: string,
+    summary: ChatSessionGoalSummary,
+  ): Promise<boolean> {
+    const session = await chatSessionStore().get(sessionId);
+    if (!session) {
+      return false;
+    }
+
+    const existingSummary = session.goalSummaries?.find(
+      (candidate) => candidate.id === summary.id,
+    );
+    if (
+      session.activeGoalId === summary.id &&
+      existingSummary?.description === summary.description &&
+      existingSummary.status === summary.status
+    ) {
+      return false;
+    }
+
+    await chatSessionStore().attachGoal(sessionId, summary);
+    return true;
+  }
+
+  function toChatGoalSummary(goal: Goal): ChatSessionGoalSummary {
+    return {
+      id: goal.id,
+      description: goal.description,
+      status: goal.status,
+    };
+  }
+
+  async function reconcileChatSessionGoalSummary(
+    sessionId: string,
+    activeGoal: ChatSessionGoalSummary | undefined,
+  ): Promise<ChatSessionGoalSummary | undefined> {
+    if (!activeGoal) {
+      return undefined;
+    }
+
+    const goal = await agentGoalStore().get(activeGoal.id);
+    if (!goal) {
+      return activeGoal;
+    }
+
+    const summary = toChatGoalSummary(goal);
+    await attachGoalSummaryIfChanged(sessionId, summary);
+    return summary;
+  }
+
+  async function listChatSessions(): Promise<ChatSessionListItem[]> {
+    const sessions = await chatSessionStore().list();
+    return Promise.all(
+      sessions.map(async (session) => {
+        const activeGoal = await reconcileChatSessionGoalSummary(
+          session.id,
+          session.activeGoal,
+        );
+        return {
+          ...session,
+          ...(activeGoal ? { activeGoal } : {}),
+        };
+      }),
+    );
+  }
+
+  async function getChatSession(
+    sessionId: string,
+  ): Promise<ChatSessionRecord | null> {
+    const session = await chatSessionStore().get(sessionId);
+    if (!session?.activeGoalId) {
+      return session;
+    }
+
+    const activeGoal = session.goalSummaries?.find(
+      (summary) => summary.id === session.activeGoalId,
+    );
+    const reconciledGoal = await reconcileChatSessionGoalSummary(
+      session.id,
+      activeGoal,
+    );
+    if (!reconciledGoal) {
+      return session;
+    }
+
+    return chatSessionStore().get(sessionId);
   }
 
   function createToolExecutor() {
@@ -300,6 +415,14 @@ export function createAppContainer(options: {
       model: settings.chatModel,
       temperature: settings.temperature,
       maxTokens: settings.maxTokens,
+      ...(settings.thinkingEnabled
+        ? {
+            thinking: {
+              type: "enabled" as const,
+              budgetTokens: settings.thinkingBudgetTokens,
+            },
+          }
+        : {}),
     };
   }
 
@@ -365,6 +488,13 @@ export function createAppContainer(options: {
           createId: () => `goal_run_${randomUUID()}`,
           now: () => new Date().toISOString(),
           onProgress: emitGoalProgressEvent,
+          onEvent(event) {
+            for (const window of BrowserWindow.getAllWindows()) {
+              if (!window.isDestroyed()) {
+                window.webContents.send("goal:milestoneRunEvent", event);
+              }
+            }
+          },
         }),
         acceptance: createAgentGoalAcceptance(),
         onProgress: emitGoalProgressEvent,
@@ -378,17 +508,62 @@ export function createAppContainer(options: {
         },
         trajectoryStore: agentTrajectoryStore(),
         createAcceptanceContext: async (goal, milestone) => {
-          const runContext = await agentWorkspaceService().resolveRunContext({
-            workspaceId: goal.workspaceId,
-          });
+          const runContext = applyGoalOutputRootsToRunContext(
+            await agentWorkspaceService().resolveRunContext({
+              workspaceId: goal.workspaceId,
+              ...(goal.chatSessionId ? { sessionId: goal.chatSessionId } : {}),
+            }),
+            goal,
+          );
+          const acceptedMilestones = goal.milestones
+            .filter(
+              (candidate) =>
+                candidate.state === "accepted" || candidate.state === "skipped",
+            )
+            .map((candidate) => ({
+              id: candidate.id,
+              description: candidate.description,
+              state: candidate.state,
+              summary:
+                candidate.lastAcceptanceSummary ?? candidate.lastRunSummary ?? null,
+              runIds: candidate.runIds,
+            }));
+          const currentMilestone = milestone
+            ? {
+                id: milestone.id,
+                description: milestone.description,
+                state: milestone.state,
+                status: milestone.lastRunStatus ?? null,
+                summary: milestone.lastRunSummary ?? null,
+                acceptanceSummary: milestone.lastAcceptanceSummary ?? null,
+                runIds: milestone.runIds,
+              }
+            : null;
           return {
             runId: milestone?.runIds.at(-1) ?? goal.id,
             goalId: goal.id,
             ...(milestone ? { milestoneId: milestone.id } : {}),
             workspacePath: runContext.workspaceRoot,
+            extraReadRoots: runContext.sandbox.extraReadRoots,
+            extraWriteRoots: runContext.sandbox.extraWriteRoots,
             toolExecutor,
             trajectoryStore: agentTrajectoryStore(),
+            chatClient: createOpenAiCompatibleClient(),
+            modelProfile: await getModelProfile(),
             artifacts: {
+              goalEvidence: {
+                condition: goal.description,
+                status: goal.status,
+                currentMilestone,
+                acceptedMilestones,
+                progress: {
+                  acceptedCount: acceptedMilestones.length,
+                  totalCount: goal.milestones.length,
+                  allMilestonesAccepted:
+                    goal.milestones.length > 0 &&
+                    acceptedMilestones.length === goal.milestones.length,
+                },
+              },
               milestoneProgress: {
                 hasRun: Boolean(
                   milestone?.runIds.length &&
@@ -656,6 +831,7 @@ export function createAppContainer(options: {
     reviewPolicy: GoalReviewPolicy;
   }): Goal {
     const now = new Date().toISOString();
+    const goalCondition = input.description.trim() || "Goal must be accepted with evidence.";
     const criteria = input.successCriteria
       .filter((description) => description.trim())
       .map((description, index): SuccessCriterion => ({
@@ -666,7 +842,10 @@ export function createAppContainer(options: {
             id: `criterion_${index + 1}_review`,
             kind: "model_review",
             description: "Evidence-backed review is required.",
-            params: {},
+            params: {
+              condition: description.trim(),
+              evidenceRefs: ["artifact:goalEvidence"],
+            },
             requiresEvidence: true,
           },
         ],
@@ -686,7 +865,10 @@ export function createAppContainer(options: {
                   id: "criterion_1_review",
                   kind: "model_review",
                   description: "Evidence-backed review is required.",
-                  params: {},
+                  params: {
+                    condition: goalCondition,
+                    evidenceRefs: ["artifact:goalEvidence"],
+                  },
                   requiresEvidence: true,
                 },
               ],
@@ -839,6 +1021,8 @@ export function createAppContainer(options: {
     agentEvalCandidateService,
     agentRunnerService,
     chatSessionStore,
+    listChatSessions,
+    getChatSession,
     chatService,
     taskSchedulerService,
     runAgentTask,

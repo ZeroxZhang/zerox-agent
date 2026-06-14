@@ -51,6 +51,7 @@ export function createGoalChatService(options: {
 }): GoalChatService {
   const createId = options.createId ?? (() => `goal_${randomUUID()}`);
   const now = options.now ?? (() => new Date().toISOString());
+  const activeGoalControllers = new Map<string, AbortController>();
 
   function notifyProgress(
     event: GoalProgressEvent["event"],
@@ -70,21 +71,77 @@ export function createGoalChatService(options: {
     });
   }
 
+  function startBackgroundGoalRun(
+    goalId: string,
+    runOptions: { signal?: AbortSignal } | undefined,
+    runner: (goalId: string, options: { signal?: AbortSignal }) => Promise<Goal>,
+  ) {
+    const existing = activeGoalControllers.get(goalId);
+    if (existing && !existing.signal.aborted) {
+      return;
+    }
+
+    const controller = new AbortController();
+    activeGoalControllers.set(goalId, controller);
+    const abortFromParent = () => controller.abort();
+    runOptions?.signal?.addEventListener("abort", abortFromParent, { once: true });
+
+    void runner(goalId, { signal: controller.signal })
+      .catch(() => {
+        // Errors are captured by the controller and surfaced via progress events.
+      })
+      .finally(() => {
+        runOptions?.signal?.removeEventListener("abort", abortFromParent);
+        if (activeGoalControllers.get(goalId) === controller) {
+          activeGoalControllers.delete(goalId);
+        }
+      });
+  }
+
+  function abortBackgroundGoalRun(goalId: string) {
+    const controller = activeGoalControllers.get(goalId);
+    if (controller && !controller.signal.aborted) {
+      controller.abort();
+    }
+    activeGoalControllers.delete(goalId);
+  }
+
+  async function queueGoalExecution(goal: Goal): Promise<Goal> {
+    if (goal.status !== "planning") {
+      return goal;
+    }
+
+    assertGoalTransition(goal.status, "executing");
+    goal.status = "executing";
+    goal.updatedAt = now();
+    await options.goalStore.save(goal);
+    await options.goalStore.appendLedger(goal.id, {
+      at: goal.updatedAt,
+      kind: "goal_planned",
+      summary: "Goal execution queued from chat.",
+    });
+    notifyProgress("started", goal, "目标已开始执行。");
+    return goal;
+  }
+
   return {
     async createFromChat(input) {
       const goalId = createId();
       const description = input.description.trim() || "Chat goal";
-      const artifactPath = `goal-${goalId}-result.md`;
       const goalCriterion: SuccessCriterion = {
-        id: "criterion_goal_done",
-        description: `Goal artifact exists: ${artifactPath}`,
+        id: "criterion_goal_satisfied",
+        description: `Goal condition is satisfied: ${description}`,
         acceptanceChecks: [
           {
-            id: "criterion_goal_done_check",
-            kind: "file_exists",
-            description: `The goal artifact ${artifactPath} must exist in the workspace.`,
-            params: { path: artifactPath },
-            requiresEvidence: false,
+            id: "criterion_goal_satisfied_review",
+            kind: "model_review",
+            description:
+              "An independent judge confirms the goal condition is satisfied from recorded execution evidence.",
+            params: {
+              condition: description,
+              evidenceRefs: ["artifact:goalEvidence"],
+            },
+            requiresEvidence: true,
           },
         ],
       };
@@ -129,7 +186,7 @@ export function createGoalChatService(options: {
           tokens: 0,
           replans: 0,
         },
-        reviewPolicy: "review_each_milestone",
+        reviewPolicy: "review_high_risk_only",
         planVersion: 1,
         createdAt: now(),
         updatedAt: now(),
@@ -146,11 +203,35 @@ export function createGoalChatService(options: {
     },
 
     async start(goalId, runOptions) {
-      return toGoalSummary(await options.controller.start(goalId, runOptions));
+      const goal = await options.goalStore.get(goalId);
+      if (!goal) {
+        throw new Error(`Goal "${goalId}" was not found.`);
+      }
+      const queuedGoal = await queueGoalExecution(goal);
+      if (queuedGoal.status === "executing") {
+        startBackgroundGoalRun(goalId, runOptions, (id, runnerOptions) =>
+          options.controller.start(id, runnerOptions),
+        );
+      }
+      return toGoalSummary(
+        (await options.goalStore.get(goalId)) ?? queuedGoal,
+      );
     },
 
     async resume(goalId, runOptions) {
-      return toGoalSummary(await options.controller.resume(goalId, runOptions));
+      const goal = await options.goalStore.get(goalId);
+      if (!goal) {
+        throw new Error(`Goal "${goalId}" was not found.`);
+      }
+      const queuedGoal = await queueGoalExecution(goal);
+      if (queuedGoal.status !== "waiting_for_review") {
+        startBackgroundGoalRun(goalId, runOptions, (id, runnerOptions) =>
+          options.controller.resume(id, runnerOptions),
+        );
+      }
+      return toGoalSummary(
+        (await options.goalStore.get(goalId)) ?? queuedGoal,
+      );
     },
 
     async pause(goalId) {
@@ -160,6 +241,7 @@ export function createGoalChatService(options: {
       }
 
       if (goal.status !== "waiting_for_review") {
+        abortBackgroundGoalRun(goalId);
         assertGoalTransition(goal.status, "waiting_for_review");
         goal.status = "waiting_for_review";
         goal.updatedAt = now();
@@ -184,6 +266,7 @@ export function createGoalChatService(options: {
       if (goal.status !== "canceled") {
         assertGoalTransition(goal.status, "canceled");
       }
+      abortBackgroundGoalRun(goalId);
       goal.status = "canceled";
       goal.stopReason = "user_canceled";
       goal.updatedAt = now();
@@ -288,8 +371,11 @@ export function createGoalChatService(options: {
         summary: "Goal retried from chat recovery UI.",
       });
       notifyProgress("started", goal, "目标已恢复执行。");
+      startBackgroundGoalRun(goalId, { signal: undefined }, (id, runnerOptions) =>
+        options.controller.resume(id, runnerOptions),
+      );
       return toGoalSummary(
-        await options.controller.resume(goalId, { signal: undefined }),
+        (await options.goalStore.get(goalId)) ?? goal,
       );
     },
   };

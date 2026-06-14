@@ -22,7 +22,7 @@ import {
   type FirstRunGuideAction,
 } from "../../shared/firstRunGuide";
 import { buildAgentReadinessChecklist } from "../../shared/agentReadiness";
-import type { AgentRunRecord } from "../../shared/agentRuns";
+import type { AgentRunEvent, AgentRunRecord } from "../../shared/agentRuns";
 import type {
   ChatAgentStatus,
   ChatHistoryMessage,
@@ -60,12 +60,18 @@ import {
 import {
   buildTaskProcessItems,
   buildTaskActivityDetail,
+  buildGoalTaskActivity,
   createTaskActivity,
+  getGoalUiSyncState,
   idleTaskActivity,
   type TaskActivityState,
 } from "../chatTaskActivity";
-import { GoalContractBar } from "./GoalContractBar";
 import { GoalDetailDrawer } from "./GoalDetailDrawer";
+import { GoalStatusStrip } from "./GoalStatusStrip";
+import type {
+  ToolApprovalDecisionPayload,
+  ToolApprovalRequestPayload,
+} from "../../shared/toolApproval";
 
 type AgentChatPanelProps = {
   onNavigate: (sectionId: NavigationSectionId) => void;
@@ -189,6 +195,13 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
   const [taskProcessEvents, setTaskProcessEvents] = useState<ChatTaskStatusEvent[]>(
     [],
   );
+  const [goalRunEvents, setGoalRunEvents] = useState<AgentRunEvent[]>([]);
+  const [autoApprovalEnabled, setAutoApprovalEnabled] = useState(false);
+  const [pendingToolApproval, setPendingToolApproval] =
+    useState<ToolApprovalRequestPayload | null>(null);
+  const [toolApprovalEvents, setToolApprovalEvents] = useState<
+    ToolApprovalDecisionPayload[]
+  >([]);
   const [sessionRailWidth, setSessionRailWidth] = useState(220);
   const [activeGoalDetail, setActiveGoalDetail] = useState<Goal | null>(null);
   const [goalDrawerOpen, setGoalDrawerOpen] = useState(false);
@@ -222,12 +235,86 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
 
     return window.buildingAgent.onGoalProgressEvent((event) => {
       const activeGoalId = activeGoalRef.current?.id;
+      const activeSessionId = sessionIdRef.current;
       if (activeGoalId && event.goalId === activeGoalId) {
+        const goalUiState = getGoalUiSyncState(event.status);
+        const description = activeGoalRef.current?.description ?? event.message;
         void refreshActiveGoalDetail(activeGoalId);
+        setStatus({ kind: goalUiState.statusKind, message: event.message });
+        setWorkPhase(goalUiState.workPhase);
+        setTaskActivity(
+          buildGoalTaskActivity({
+            status: event.status,
+            description,
+          }),
+        );
+        setSessions((currentSessions) =>
+          currentSessions.map((session) => {
+            if (session.activeGoal?.id !== event.goalId) {
+              return session;
+            }
+            return {
+              ...session,
+              activeGoal: {
+                ...session.activeGoal,
+                status: event.status,
+              },
+            };
+          }),
+        );
+        if (goalUiState.shouldClearActiveRequest) {
+          activeStatusSessionIdRef.current = null;
+          setActiveChatRequest(null);
+        }
       }
-      if (event.sessionId === sessionIdRef.current) {
-        void refreshSessions(sessionIdRef.current ?? undefined);
+      if (event.sessionId === activeSessionId || event.goalId === activeGoalId) {
+        void refreshSessions(event.sessionId ?? activeSessionId ?? undefined);
       }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!window.buildingAgent) {
+      return;
+    }
+
+    void window.buildingAgent
+      .getToolApprovalMode()
+      .then((state) => setAutoApprovalEnabled(state.autoApprovalEnabled))
+      .catch(() => undefined);
+    const unsubscribeRequest = window.buildingAgent.onToolApprovalRequest(
+      (request) => {
+        setPendingToolApproval(request);
+      },
+    );
+    const unsubscribeDecision = window.buildingAgent.onToolApprovalDecision(
+      (decision) => {
+        setPendingToolApproval((current) =>
+          current?.id === decision.id ? null : current,
+        );
+        setToolApprovalEvents((current) => [...current.slice(-9), decision]);
+      },
+    );
+    const unsubscribeMode = window.buildingAgent.onToolApprovalModeChanged(
+      (state) => {
+        setAutoApprovalEnabled(state.autoApprovalEnabled);
+      },
+    );
+
+    return () => {
+      unsubscribeRequest();
+      unsubscribeDecision();
+      unsubscribeMode();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!window.buildingAgent) {
+      return;
+    }
+
+    return window.buildingAgent.onGoalMilestoneRunEvent((event) => {
+      setGoalRunEvents((current) => [...current, event]);
     });
   }, []);
 
@@ -354,6 +441,7 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
     setWorkPhase("idle");
     setTaskActivity(idleTaskActivity);
     setTaskProcessEvents([]);
+    setGoalRunEvents([]);
     if (loadedSession.activeGoalId) {
       setActiveGoalDetail(await window.buildingAgent.getGoal(loadedSession.activeGoalId));
     } else {
@@ -403,6 +491,8 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
     (status.kind === "working" ||
       taskActivity.kind === "working" ||
       activeChatRequestId !== null);
+  const canInterruptCurrentWork =
+    canCancelChatTask || Boolean(activeGoal?.status === "executing");
   const composerCommandMenuVisible =
     commandMenuOpen || shouldShowComposerCommandMenu(draft);
 
@@ -431,6 +521,17 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
     ],
     [activeTasks.length, memories.length, modelSettings, skillCount, tasks],
   );
+  const progressPanelItems = buildContextProgressItems({
+    activeGoalDetail,
+    taskProcessItems,
+    workSteps,
+    status,
+  });
+  const contextPanelItems = buildContextPanelItems({
+    contextCards,
+    memories,
+    activeGoal,
+  });
   const readinessChecklist = useMemo(
     () =>
       buildAgentReadinessChecklist({
@@ -503,6 +604,7 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
   }
 
   function handleStartGoal() {
+    setGoalDrawerOpen(false);
     void submitUserMessage("继续这个目标");
   }
 
@@ -612,6 +714,34 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
     }
   }
 
+  async function handleSetAutoApprovalEnabled(enabled: boolean) {
+    setAutoApprovalEnabled(enabled);
+    const state = await window.buildingAgent
+      ?.setToolAutoApprovalEnabled(enabled)
+      .catch(() => ({ autoApprovalEnabled: !enabled }));
+    if (state) {
+      setAutoApprovalEnabled(state.autoApprovalEnabled);
+    }
+  }
+
+  async function handleResolveToolApproval(approved: boolean) {
+    if (!window.buildingAgent || !pendingToolApproval) {
+      return;
+    }
+
+    const id = pendingToolApproval.id;
+    setPendingToolApproval(null);
+    const resolved = await window.buildingAgent
+      .resolveToolApproval({ id, approved })
+      .catch(() => false);
+    if (!resolved) {
+      setStatus({
+        kind: "error",
+        message: "授权请求已失效，请查看最新运行状态。",
+      });
+    }
+  }
+
   async function submitUserMessage(rawContent: string) {
     const content = rawContent.trim();
     if (!content) {
@@ -632,6 +762,7 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
     setWorkPhase("planning");
     activeStatusSessionIdRef.current = sessionId;
     setTaskProcessEvents([]);
+    setGoalRunEvents([]);
     setTaskActivity(
       createTaskActivity({
         kind: "working",
@@ -728,9 +859,12 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
       void refreshActiveGoalDetail(result.activeGoal.id);
     }
     const isPaused = result.agentStatus?.state === "paused";
+    const isGoalExecuting = result.activeGoal?.status === "executing";
     setStatus({
-      kind: isPaused ? "paused" : "ready",
-      message: isPaused
+      kind: isGoalExecuting ? "working" : isPaused ? "paused" : "ready",
+      message: isGoalExecuting
+        ? "目标正在后台执行"
+        : isPaused
         ? "等待你确认是否继续"
         : result.createdTask
           ? "任务已创建"
@@ -740,15 +874,21 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
               ? `已参考 ${result.relatedMemories.length} 条记忆`
               : "模型已回复",
     });
-    setWorkPhase(isPaused ? "paused" : "done");
+    setWorkPhase(isGoalExecuting ? "tool" : isPaused ? "paused" : "done");
     setTaskActivity(
-      buildTaskActivityFromAgentStatus({
-        agentStatus: result.agentStatus,
-        relatedMemoryCount: result.relatedMemories.length,
-        fallbackDetail: isPaused ? "等待确认" : "回复已写入会话",
-      }),
+      isGoalExecuting && result.activeGoal
+        ? buildGoalTaskActivity({
+            status: result.activeGoal.status,
+            description: result.activeGoal.description,
+          })
+        : buildTaskActivityFromAgentStatus({
+            agentStatus: result.agentStatus,
+            relatedMemoryCount: result.relatedMemories.length,
+            fallbackDetail: isPaused ? "等待确认" : "回复已写入会话",
+          }),
     );
-    activeStatusSessionIdRef.current = isPaused ? result.sessionId : null;
+    activeStatusSessionIdRef.current =
+      isPaused || isGoalExecuting ? result.sessionId : null;
     appendMessage({
       role: "assistant",
       content: result.reply,
@@ -765,8 +905,40 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
     await submitUserMessage(draft);
   }
 
-  async function handleCancelChatMessage() {
-    if (!window.buildingAgent || !canCancelChatTask) {
+  async function handleInterruptCurrentWork() {
+    if (!window.buildingAgent || !canInterruptCurrentWork) {
+      return;
+    }
+
+    if (activeGoal?.status === "executing") {
+      setStatus({ kind: "working", message: "正在中断目标..." });
+      setTaskActivity(
+        createTaskActivity({
+          kind: "working",
+          title: "正在中断目标",
+          detail: "已请求中断目标，等待当前调用返回",
+          startedAt: taskActivity.startedAt,
+        }),
+      );
+      const result = await window.buildingAgent
+        .cancelGoal(activeGoal.id)
+        .catch((error) => ({
+          ok: false as const,
+          message:
+            error instanceof Error ? error.message : "中断目标失败，请稍后重试。",
+        }));
+      if (!result.ok) {
+        setStatus({ kind: "error", message: result.message ?? "中断目标失败。" });
+        setTaskActivity(
+          createTaskActivity({
+            kind: "error",
+            title: "中断目标失败",
+            detail: result.message ?? "请稍后重试。",
+          }),
+        );
+      } else if (result.goal) {
+        void refreshActiveGoalDetail(result.goal.id);
+      }
       return;
     }
 
@@ -1161,7 +1333,7 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
       <section className="chat-workspace" aria-label="会话窗口">
         <div className="chat-hero">
           <div className="chat-hero-main">
-            <h2>今天想让智能体做什么？</h2>
+            <h2>{activeSession?.title ?? "新会话"}</h2>
             <div className="chat-hero-chips">
               {contextCards.map((card) => (
                 <span key={card.label} className="hero-chip" title={card.detail}>
@@ -1179,49 +1351,7 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
           steps={workSteps}
         />
 
-        {activeGoal ? (
-          <GoalContractBar
-            goal={activeGoal}
-            onEnd={handleCancelGoal}
-            onModify={() => setDraft("目标改一下：")}
-            {...(activeGoal.status === "executing"
-              ? { onPause: () => void submitUserMessage("暂停这个目标") }
-              : {})}
-            {...(activeGoal.status === "planning"
-              || activeGoal.status === "failed"
-              || activeGoal.status === "stopped_budget"
-              || activeGoal.status === "stopped_stalled"
-              || activeGoal.status === "canceled"
-              ? { onStart: handleStartGoal }
-              : {})}
-            onViewProgress={handleViewGoalProgress}
-            onIncreaseBudget={handleIncreaseGoalBudget}
-            onReplan={handleReplanGoal}
-            onRetry={handleRetryGoal}
-          />
-        ) : null}
 
-        {activeGoal?.status === "waiting_for_review" ? (
-          <article className="goal-review-gate-card" aria-label="目标等待审核">
-            <span>Review Gate</span>
-            <h4>目标等待审核</h4>
-            <p>检查当前阶段证据后，选择继续、修改计划或终止目标。</p>
-            <div className="goal-actions">
-              <button type="button" onClick={() => void handleResolveGoalReview("approve")}>
-                继续
-              </button>
-              <button type="button" onClick={() => void handleResolveGoalReview("reject")}>
-                修改计划
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleResolveGoalReview("terminate")}
-              >
-                终止
-              </button>
-            </div>
-          </article>
-        ) : null}
 
         {firstRunGuide.primaryAction.command === "prepare" &&
           !modelSettings.hasApiKey && (
@@ -1256,6 +1386,93 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
             </article>
           ))}
         </div>
+
+        {activeGoal ? (
+          <GoalStatusStrip
+            goal={activeGoal}
+            detail={activeGoalDetail}
+            onViewDetail={handleViewGoalProgress}
+            {...(activeGoal.status === "planning" ||
+              activeGoal.status === "failed" ||
+              activeGoal.status === "stopped_budget" ||
+              activeGoal.status === "stopped_stalled" ||
+              activeGoal.status === "canceled"
+              ? { onStart: handleStartGoal }
+              : {})}
+            {...(activeGoal.status === "executing"
+              ? { onPause: () => void submitUserMessage("暂停这个目标") }
+              : {})}
+            onResolveReview={handleResolveGoalReview}
+            onIncreaseBudget={handleIncreaseGoalBudget}
+            onReplan={handleReplanGoal}
+            onRetry={handleRetryGoal}
+            onCancel={handleCancelGoal}
+          />
+        ) : null}
+
+        {activeGoal && goalRunEvents.length > 0 ? (
+          <details
+            className="goal-run-process"
+            open={activeGoal.status === "executing"}
+          >
+            <summary>
+              <span>里程碑运行过程</span>
+              <small>{goalRunEvents.length} 个事件</small>
+            </summary>
+            <ol className="task-process-list" aria-label="里程碑运行过程">
+              {goalRunEvents.map((event, index) => (
+                <li
+                  key={`${event.createdAt}-${index}`}
+                  className={event.phase === "reflecting" ? "is-reasoning" : ""}
+                >
+                  <time>
+                    {new Date(event.createdAt).toLocaleTimeString("zh-CN", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      second: "2-digit",
+                    })}
+                  </time>
+                  <strong>{getGoalRunEventLabel(event)}</strong>
+                  <span>{event.message}</span>
+                </li>
+              ))}
+            </ol>
+            {toolApprovalEvents.length > 0 ? (
+              <ol className="task-process-list" aria-label="工具授权监控">
+                {toolApprovalEvents.map((event) => (
+                  <li
+                    key={`${event.id}-${event.createdAt}`}
+                    className={
+                      event.risk.level === "critical" ? "is-critical-risk" : ""
+                    }
+                  >
+                    <time>
+                      {new Date(event.createdAt).toLocaleTimeString("zh-CN", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        second: "2-digit",
+                      })}
+                    </time>
+                    <strong>{event.automatic ? "自动授权" : "授权处理"}</strong>
+                    <span>
+                      {event.approved ? "已同意" : "已拒绝"} {event.toolName} ·{" "}
+                      {event.risk.reason}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            ) : null}
+          </details>
+        ) : null}
+
+        {pendingToolApproval && !autoApprovalEnabled ? (
+          <ToolApprovalPanel
+            request={pendingToolApproval}
+            onResolve={(approved) => {
+              void handleResolveToolApproval(approved);
+            }}
+          />
+        ) : null}
 
         <form className="composer" onSubmit={handleSubmit}>
           <TaskActivityStrip
@@ -1328,10 +1545,30 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
                     }
                   }
                 }}
-                placeholder="输入消息，/ 选择命令，Enter 发送"
+                placeholder={
+                  activeGoal?.status === "executing"
+                    ? "继续你的任务…"
+                    : "输入消息，/ 选择命令，Enter 发送"
+                }
                 rows={2}
               />
               <div className="composer-floating-actions" aria-label="对话操作">
+                <label
+                  className={`auto-approval-toggle${
+                    autoApprovalEnabled ? " is-enabled" : ""
+                  }`}
+                  title="自动授权工具请求"
+                >
+                  <input
+                    aria-label="自动授权工具请求"
+                    checked={autoApprovalEnabled}
+                    onChange={(event) => {
+                      void handleSetAutoApprovalEnabled(event.currentTarget.checked);
+                    }}
+                    type="checkbox"
+                  />
+                  <span>自动</span>
+                </label>
                 <button
                   aria-label="打开命令菜单"
                   className="composer-icon-button composer-command-button"
@@ -1346,9 +1583,9 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
                   aria-label="中断当前任务"
                   className="composer-icon-button composer-stop-button"
                   data-testid="agent-stop-button"
-                  disabled={!canCancelChatTask}
+                  disabled={!canInterruptCurrentWork}
                   onClick={() => {
-                    void handleCancelChatMessage();
+                    void handleInterruptCurrentWork();
                   }}
                   title="中断当前任务"
                   type="button"
@@ -1388,6 +1625,42 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
           onCancel={handleCancelGoal}
         />
       </section>
+
+      <aside className="agent-context-panel" aria-label="进度与上下文">
+        <section className="kimi-side-card">
+          <header>
+            <strong>进度</strong>
+          </header>
+          <ol className="kimi-progress-list">
+            {progressPanelItems.map((item) => (
+              <li className={`is-${item.status}`} key={item.id}>
+                <span aria-hidden="true" />
+                <p>{item.label}</p>
+              </li>
+            ))}
+          </ol>
+        </section>
+        <section className="kimi-side-card">
+          <header>
+            <strong>上下文</strong>
+          </header>
+          <div className="kimi-context-list">
+            {contextPanelItems.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                disabled
+              >
+                <span aria-hidden="true">{item.icon}</span>
+                <div>
+                  <strong>{item.label}</strong>
+                  <small>{item.detail}</small>
+                </div>
+              </button>
+            ))}
+          </div>
+        </section>
+      </aside>
     </section>
   );
 }
@@ -1449,6 +1722,92 @@ function buildLocalAgentReply(options: {
   ].join("\n");
 }
 
+type ContextProgressItem = {
+  id: string;
+  label: string;
+  status: "done" | "active" | "pending" | "error";
+};
+
+function buildContextProgressItems(options: {
+  activeGoalDetail: Goal | null;
+  taskProcessItems: ReturnType<typeof buildTaskProcessItems>;
+  workSteps: AgentWorkStep[];
+  status: ChatStatus;
+}): ContextProgressItem[] {
+  if (options.activeGoalDetail?.milestones.length) {
+    return options.activeGoalDetail.milestones.map((milestone, index) => ({
+      id: milestone.id,
+      label: `${String(index + 1).padStart(2, "0")} ${milestone.description}`,
+      status: mapMilestoneStatusToContextStatus(milestone.state),
+    }));
+  }
+
+  if (options.taskProcessItems.length) {
+    return options.taskProcessItems.slice(0, 5).map((item, index) => ({
+      id: item.id,
+      label: item.message || item.label,
+      status: index === 0 && options.status.kind === "working" ? "active" : "done",
+    }));
+  }
+
+  return options.workSteps.map((step) => ({
+    id: step.id,
+    label: `${step.label} · ${step.detail}`,
+    status:
+      step.status === "waiting"
+        ? "pending"
+        : step.status === "active"
+          ? "active"
+          : step.status,
+  }));
+}
+
+function mapMilestoneStatusToContextStatus(
+  state: Goal["milestones"][number]["state"],
+): ContextProgressItem["status"] {
+  if (state === "accepted" || state === "skipped") {
+    return "done";
+  }
+  if (state === "running" || state === "ready") {
+    return "active";
+  }
+  if (state === "rejected" || state === "failed") {
+    return "error";
+  }
+  return "pending";
+}
+
+function buildContextPanelItems(options: {
+  contextCards: Array<{ label: string; value: string; detail: string }>;
+  memories: MemoryRecord[];
+  activeGoal: ChatSessionGoalSummary | null;
+}) {
+  const baseItems = options.contextCards.map((card) => ({
+    id: `card-${card.label}`,
+    icon: "◷",
+    label: `${card.label} · ${card.value}`,
+    detail: card.detail,
+  }));
+  const goalItem = options.activeGoal
+    ? [
+        {
+          id: `goal-${options.activeGoal.id}`,
+          icon: "◎",
+          label: "当前目标",
+          detail: `${translateGoalStatus(options.activeGoal.status)} · ${options.activeGoal.description}`,
+        },
+      ]
+    : [];
+  const memoryItems = options.memories.slice(0, 3).map((memory) => ({
+    id: `memory-${memory.id}`,
+    icon: "□",
+    label: memory.title,
+    detail: memory.content,
+  }));
+
+  return [...goalItem, ...baseItems, ...memoryItems].slice(0, 8);
+}
+
 function AgentWorkTimeline({
   phase,
   status,
@@ -1503,11 +1862,15 @@ function TaskActivityStrip({
   processItems: ReturnType<typeof buildTaskProcessItems>;
   onContinue?: () => void;
 }) {
+  const latestReasoning = processItems.find((item) => item.label === "思考");
   return (
-    <details className={`task-activity-strip is-${activity.kind}`}>
+    <details
+      className={`task-activity-strip is-${activity.kind}`}
+      open={activity.kind === "working"}
+    >
       <summary>
         <span className="task-activity-dot" aria-hidden="true" />
-        <em>
+        <em className="task-activity-summary-text" title={detail}>
           {activity.title} · {detail}
         </em>
         {typeof activity.toolCallsExecuted === "number" && (
@@ -1528,19 +1891,99 @@ function TaskActivityStrip({
           </button>
         )}
       </summary>
+      {latestReasoning ? (
+        <div className="task-activity-reasoning-preview">
+          <span>最新思考</span>
+          <p>{latestReasoning.message}</p>
+        </div>
+      ) : null}
       {processItems.length > 0 && (
         <ol className="task-process-list" aria-label="思考与执行过程">
           {processItems.map((item) => (
-            <li key={item.id}>
-              <time>{item.time}</time>
-              <strong>{item.label}</strong>
-              <span>{item.message}</span>
-              {item.meta && <small>{item.meta}</small>}
-            </li>
+            <TaskProcessItem key={item.id} item={item} />
           ))}
         </ol>
       )}
     </details>
+  );
+}
+
+function ToolApprovalPanel({
+  request,
+  onResolve,
+}: {
+  request: ToolApprovalRequestPayload;
+  onResolve: (approved: boolean) => void;
+}) {
+  const isCritical = request.risk.level === "critical";
+
+  return (
+    <section
+      aria-label="工具授权请求"
+      className={`tool-approval-panel${
+        isCritical ? " is-critical-risk" : ""
+      }`}
+      role="dialog"
+    >
+      <div>
+        <span>{isCritical ? "高危授权" : "工具授权"}</span>
+        <strong>{request.request.toolName}</strong>
+        <p>{request.deniedReason}</p>
+      </div>
+      <dl>
+        <div>
+          <dt>任务</dt>
+          <dd>{request.taskName}</dd>
+        </div>
+        <div>
+          <dt>风险</dt>
+          <dd>{request.risk.reason}</dd>
+        </div>
+        {Object.entries(request.argsSummary).map(([key, value]) => (
+          <div key={key}>
+            <dt>{key}</dt>
+            <dd>{String(value)}</dd>
+          </div>
+        ))}
+      </dl>
+      <div className="tool-approval-actions">
+        <button type="button" onClick={() => onResolve(true)}>
+          授权本次
+        </button>
+        <button type="button" onClick={() => onResolve(false)}>
+          拒绝
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function TaskProcessItem({
+  item,
+}: {
+  item: ReturnType<typeof buildTaskProcessItems>[number];
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const shouldCollapse = item.message.length > 160;
+  const displayMessage =
+    expanded || !shouldCollapse ? item.message : `${item.message.slice(0, 157)}...`;
+
+  return (
+    <li className={item.label === "思考" ? "is-reasoning" : ""}>
+      <time>{item.time}</time>
+      <strong>{item.label}</strong>
+      <span>{displayMessage}</span>
+      {shouldCollapse && (
+        <button
+          type="button"
+          className="task-process-item-toggle"
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded ? "收起" : "展开"}
+        </button>
+      )}
+      {item.meta && <small>{item.meta}</small>}
+    </li>
   );
 }
 
@@ -1647,6 +2090,16 @@ function getWorkPhaseFromStatusEvent(event: ChatTaskStatusEvent): AgentWorkPhase
 function parseEventTime(value: string): number {
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? parsed : Date.now();
+}
+
+function getGoalRunEventLabel(event: AgentRunEvent): string {
+  if (event.phase === "reflecting") return "思考";
+  if (event.phase === "executing") return "执行";
+  if (event.phase === "planning") return "规划";
+  if (event.phase === "done") return "完成";
+  if (event.level === "error") return "错误";
+  if (event.level === "warn") return "警告";
+  return "信息";
 }
 
 function clampNumber(value: number, min: number, max: number): number {
@@ -1816,11 +2269,5 @@ function translateGoalStatus(status: ChatSessionGoalSummary["status"]): string {
 }
 
 function canStartGoalFromChat(status: ChatSessionGoalSummary["status"]): boolean {
-  return (
-    status === "planning" ||
-    status === "failed" ||
-    status === "stopped_budget" ||
-    status === "stopped_stalled" ||
-    status === "canceled"
-  );
+  return status === "planning";
 }

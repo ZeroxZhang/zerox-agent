@@ -98,6 +98,8 @@ function createModelSettings(
     embeddingModel: "",
     temperature: 0.2,
     maxTokens: 8192,
+    thinkingEnabled: false,
+    thinkingBudgetTokens: 8192,
     hasApiKey: true,
     updatedAt: "2026-06-06T08:00:00.000Z",
     ...partial,

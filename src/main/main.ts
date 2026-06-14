@@ -20,8 +20,8 @@ import {
 } from "./desktopLifecycle";
 import { runDesktopAgentValidation } from "./desktopAgentValidator";
 import { getAppMeta } from "../shared/appMeta";
-import { buildToolApprovalDialogOptions } from "./toolApprovalDialog";
-import type { ToolUserApprovalRequest } from "./toolAuthorizationService";
+import { createToolApprovalCoordinator } from "./toolApprovalCoordinator";
+import type { ResolveToolApprovalInput } from "../shared/toolApproval";
 import {
   getSmokeModeOptions,
   getSmokeRendererCheckScript,
@@ -45,8 +45,18 @@ let memoryMaintenanceTimer: NodeJS.Timeout | null = null;
 const memoryMaintenanceIntervalMs = 30 * 60 * 1000;
 const taskSchedulerIntervalMs = 60 * 1000;
 
+const toolApprovalCoordinator = createToolApprovalCoordinator({
+  sendToRenderers(channel, payload) {
+    for (const windowInstance of BrowserWindow.getAllWindows()) {
+      if (!windowInstance.isDestroyed()) {
+        windowInstance.webContents.send(channel, payload);
+      }
+    }
+  },
+});
+
 const container = createAppContainer({
-  requestToolApproval: requestToolApprovalWithDialog,
+  requestToolApproval: toolApprovalCoordinator.requestUserApproval,
 });
 
 function createMainWindow(): BrowserWindow {
@@ -223,36 +233,6 @@ function attachSmokeModeLifecycle(windowInstance: BrowserWindow) {
   );
 }
 
-async function requestToolApprovalWithDialog(request: ToolUserApprovalRequest) {
-  const windowInstance = ensureVisibleApprovalWindow();
-  const result = await dialog.showMessageBox(
-    windowInstance,
-    buildToolApprovalDialogOptions(request),
-  );
-
-  return result.response === 0
-    ? {
-        approved: true,
-        reason: `用户已在弹窗中授权本次 ${request.request.toolName}。`,
-      }
-    : {
-        approved: false,
-        reason: `用户拒绝授权本次 ${request.request.toolName}。`,
-      };
-}
-
-function ensureVisibleApprovalWindow(): BrowserWindow {
-  const windowInstance = createMainWindow();
-
-  if (windowInstance.isMinimized()) {
-    windowInstance.restore();
-  }
-  windowInstance.show();
-  windowInstance.focus();
-
-  return windowInstance;
-}
-
 function startTaskScheduler() {
   if (taskSchedulerTimer) {
     return;
@@ -302,6 +282,7 @@ function stopMemoryMaintenanceScheduler() {
 
 app.whenReady().then(() => {
   registerAllIpcHandlers(container);
+  registerToolApprovalIpcHandlers();
 
   if (validationMode.enabled) {
     void runValidationModeAndExit();
@@ -338,6 +319,22 @@ app.whenReady().then(() => {
     }
   });
 });
+
+function registerToolApprovalIpcHandlers() {
+  ipcMain.handle("toolApproval:getMode", () =>
+    toolApprovalCoordinator.getAutoApprovalState(),
+  );
+  ipcMain.handle(
+    "toolApproval:setAutoApprovalEnabled",
+    (_event, enabled: boolean) =>
+      toolApprovalCoordinator.setAutoApprovalEnabled(Boolean(enabled)),
+  );
+  ipcMain.handle(
+    "toolApproval:resolve",
+    (_event, input: ResolveToolApprovalInput) =>
+      toolApprovalCoordinator.resolveApproval(input),
+  );
+}
 
 app.on("before-quit", () => {
   isQuitting = true;

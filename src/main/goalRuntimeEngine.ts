@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 import type { Goal, Milestone } from "../shared/agentGoal";
 import type { AgentRunEvent, AgentRunRecord } from "../shared/agentRuns";
-import { buildPrimaryRunContext } from "../shared/agentWorkspace";
+import {
+  buildPrimaryRunContext,
+  type AgentRunContext,
+} from "../shared/agentWorkspace";
+import type { TaskPermissionPolicy } from "../shared/toolPermissions";
 import {
   runAgentLoop,
   type AgentLoopOptions,
@@ -14,10 +19,14 @@ import type { AgentToolExecutor } from "./agentToolExecutor";
 import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
 import type { AgentWorkspaceService } from "./agentWorkspaceService";
 import type { ChatClient, ChatMessage } from "./openAiCompatibleClient";
-import type { ToolAuthorizationService } from "./toolAuthorizationService";
+import type {
+  RuntimeToolAuthorizationTask,
+  ToolAuthorizationService,
+} from "./toolAuthorizationService";
 import type { ToolResultOffloadStore } from "./toolResultOffloadStore";
 import { estimateMessageTokens } from "./contextManager";
 import type { GoalProgressEvent } from "../shared/chat";
+import { applyGoalOutputRootsToRunContext } from "./goalOutputRoots";
 
 export type GoalRuntimeModelProfile = {
   baseUrl: string;
@@ -46,6 +55,7 @@ export function createGoalRuntimeEngine(options: {
   maxTurns?: number;
   tokenBudget?: number;
   onProgress?: (event: GoalProgressEvent) => void;
+  onEvent?: (event: AgentRunEvent) => void;
 }): GoalRuntimeEngine {
   const createId = options.createId ?? (() => `goal_run_${randomUUID()}`);
   const now = options.now ?? (() => new Date().toISOString());
@@ -82,13 +92,15 @@ export function createGoalRuntimeEngine(options: {
     message: string,
     data?: Record<string, unknown>,
   ): AgentRunEvent {
-    return {
+    const event: AgentRunEvent = {
       level,
       phase,
       message,
       ...(data ? { data } : {}),
       createdAt: now(),
     };
+    options.onEvent?.(event);
+    return event;
   }
 
   async function appendTrajectory(
@@ -113,11 +125,13 @@ export function createGoalRuntimeEngine(options: {
   }
 
   async function resolveRunContext(goal: Goal) {
+    let runContext: AgentRunContext;
     if (options.workspaceService) {
-      return options.workspaceService.resolveRunContext({
+      runContext = await options.workspaceService.resolveRunContext({
         workspaceId: goal.workspaceId,
         ...(goal.chatSessionId ? { sessionId: goal.chatSessionId } : {}),
       });
+      return applyGoalOutputRootsToRunContext(runContext, goal);
     }
 
     // Legacy fallback for callers that still provide a fixed root.
@@ -127,11 +141,12 @@ export function createGoalRuntimeEngine(options: {
         "GoalRuntimeEngine requires workspaceService or workspaceRoot.",
       );
     }
-    return buildPrimaryRunContext({
+    runContext = buildPrimaryRunContext({
       workspaceId: goal.workspaceId ?? "local",
       workspaceRoot,
       ...(goal.chatSessionId ? { sessionId: goal.chatSessionId } : {}),
     });
+    return applyGoalOutputRootsToRunContext(runContext, goal);
   }
 
   return {
@@ -167,7 +182,7 @@ export function createGoalRuntimeEngine(options: {
       const assembled = options.goalContext.assemble(goal, [], tokenBudget);
       const milestoneInstruction: ChatMessage = {
         role: "user",
-        content: buildMilestoneInstruction(milestone),
+        content: buildMilestoneInstruction(goal, milestone, runContext),
       };
       const initialMessages: ChatMessage[] = [
         ...assembled.messages,
@@ -182,6 +197,8 @@ export function createGoalRuntimeEngine(options: {
           toolExecutor: options.toolExecutor,
           toolAuthorizationService: options.toolAuthorizationService,
           taskId,
+          runContext,
+          runtimeTask: buildGoalMilestoneRuntimeTask(goal, runContext),
           systemPrompt: buildGoalSystemPrompt(),
           maxTurns: options.maxTurns ?? 8,
           tools: options.toolExecutor.getRegistry().getDefinitions(),
@@ -204,6 +221,19 @@ export function createGoalRuntimeEngine(options: {
               toolCallCount: response.toolCalls.length,
               finishReason: response.finishReason,
             });
+          },
+          onReasoning(reasoningContent, turn) {
+            void appendTrajectory(runId, "model_reasoning", {
+              ...payload,
+              turn,
+              reasoningContent,
+            });
+            events.push(
+              createEvent("info", "reflecting", reasoningContent, {
+                ...payload,
+                turn,
+              }),
+            );
           },
           onToolCall(toolName, args) {
             void appendTrajectory(runId, "tool_call", {
@@ -300,6 +330,63 @@ export function createGoalRuntimeEngine(options: {
   };
 }
 
+function buildGoalMilestoneRuntimeTask(
+  goal: Goal,
+  runContext: AgentRunContext,
+): RuntimeToolAuthorizationTask {
+  return {
+    name: `Goal milestone: ${goal.description}`,
+    policyLabel: "goal milestone runtime policy",
+    permissions: buildGoalMilestonePermissionPolicy(runContext),
+  };
+}
+
+function buildGoalMilestonePermissionPolicy(
+  runContext: AgentRunContext,
+): TaskPermissionPolicy {
+  const readRoots = [
+    runContext.workspaceRoot,
+    ...runContext.sandbox.extraReadRoots,
+  ];
+  const writeRoots =
+    runContext.sandbox.mode === "read_only"
+      ? []
+      : [
+          runContext.workspaceRoot,
+          ...runContext.sandbox.extraWriteRoots,
+        ];
+
+  return {
+    files: {
+      read: readRoots,
+      write: writeRoots,
+    },
+    web: {
+      search: runContext.sandbox.network !== "none",
+      fetchDomains: [],
+    },
+    shell: {
+      commands: [
+        "npm test",
+        "npm test -- *",
+        "npm run build",
+        "npm run verify",
+        "npm run harness:check",
+        "npm run harness:score",
+        "npm run smoke:prod",
+        "node *",
+        "git status",
+        "git diff",
+        "git diff -- *",
+      ],
+    },
+    memory: {
+      read: true,
+      write: false,
+    },
+  };
+}
+
 function buildGoalSystemPrompt(): string {
   return [
     "你是 Zerox Agent 的长期目标执行器，运行在用户本地桌面环境中。",
@@ -309,12 +396,92 @@ function buildGoalSystemPrompt(): string {
   ].join("\n");
 }
 
-function buildMilestoneInstruction(milestone: Milestone): string {
+function buildMilestoneInstruction(
+  goal: Goal,
+  milestone: Milestone,
+  runContext: AgentRunContext,
+): string {
+  const criteriaLines = milestone.successCriteria.flatMap((criterion, index) => {
+    const lines = [
+      `  验收标准 ${index + 1}: ${criterion.description}`,
+      ...criterion.acceptanceChecks.map(
+        (check) =>
+          `    - ${check.description}${
+            check.requiresEvidence ? "（需要证据）" : ""
+          }`,
+      ),
+    ];
+    return lines;
+  });
+  const artifactContractLines = buildArtifactEvidenceContract(
+    goal,
+    milestone,
+    runContext,
+  );
+
   return [
     "[Goal milestone execution instruction]",
     `Milestone: ${milestone.description}`,
-    "请执行这个里程碑。优先产出可追溯证据和阶段性结论。",
+    "",
+    "本里程碑的验收标准如下，你必须确保每一项验收检查最终通过：",
+    ...criteriaLines,
+    ...artifactContractLines,
+    "",
+    "请执行这个里程碑。优先产出可追溯证据和阶段性结论。如果验收标准涉及文件路径，请准确创建对应文件。",
   ].join("\n");
+}
+
+function buildArtifactEvidenceContract(
+  goal: Goal,
+  milestone: Milestone,
+  runContext: AgentRunContext,
+): string[] {
+  const artifactNames = getArtifactEvidenceNames(milestone);
+  if (artifactNames.length === 0) {
+    return [];
+  }
+
+  const outputRoot = getArtifactOutputRoot(runContext);
+  return [
+    "",
+    "Artifact evidence contract:",
+    "以下 artifact 是后续验收会直接读取的证据引用。完成本里程碑前必须把对应内容写入指定文件，不能只在回复中声明已经完成：",
+    ...artifactNames.map((artifactName) => {
+      const artifactPath = path.join(outputRoot, `${artifactName}.md`);
+      return `  - artifact:${artifactName} -> ${artifactPath}`;
+    }),
+    `目标：${goal.description}`,
+    "如果你还需要生成更友好的展示文件名，可以额外生成；但上述 artifact alias 文件必须保留并包含可验收的完整内容或最终文件清单。",
+  ];
+}
+
+function getArtifactEvidenceNames(milestone: Milestone): string[] {
+  const names: string[] = [];
+  for (const criterion of milestone.successCriteria) {
+    for (const check of criterion.acceptanceChecks) {
+      const evidenceRefs = Array.isArray(check.params.evidenceRefs)
+        ? check.params.evidenceRefs
+        : [];
+      for (const ref of evidenceRefs) {
+        if (typeof ref !== "string" || !ref.startsWith("artifact:")) {
+          continue;
+        }
+        const artifactName = ref.slice("artifact:".length);
+        if (isSafeArtifactName(artifactName) && !names.includes(artifactName)) {
+          names.push(artifactName);
+        }
+      }
+    }
+  }
+  return names;
+}
+
+function getArtifactOutputRoot(runContext: AgentRunContext): string {
+  return runContext.sandbox.extraWriteRoots[0] ?? runContext.workspaceRoot;
+}
+
+function isSafeArtifactName(value: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value) && !value.includes("..");
 }
 
 function toRunStatus(status: AgentLoopResult["status"]): AgentRunRecord["status"] {

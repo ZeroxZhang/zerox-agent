@@ -62,6 +62,48 @@ describe("agent goal acceptance", () => {
     ]);
   });
 
+  it("accepts absolute file outputs only inside explicit goal output roots", async () => {
+    const outputRoot = await mkdtemp(path.join(os.tmpdir(), "goal-output-root-"));
+    const outsideRoot = await mkdtemp(path.join(os.tmpdir(), "goal-output-outside-"));
+
+    try {
+      const reportPath = path.join(outputRoot, "serenity-report.md");
+      const outsideReportPath = path.join(outsideRoot, "serenity-report.md");
+      await writeFile(reportPath, "done", "utf8");
+      await writeFile(outsideReportPath, "done", "utf8");
+      const acceptance = createAgentGoalAcceptance();
+
+      const passed = await acceptance.evaluate(
+        createMilestone([
+          check("check_absolute_output", "file_exists", { path: reportPath }),
+        ]),
+        createContext({ extraWriteRoots: [outputRoot] }),
+      );
+      const failed = await acceptance.evaluate(
+        createMilestone([
+          check("check_outside_output", "file_exists", {
+            path: outsideReportPath,
+          }),
+        ]),
+        createContext({ extraWriteRoots: [outputRoot] }),
+      );
+
+      expect(passed.accepted).toBe(true);
+      expect(passed.checkResults[0]).toMatchObject({
+        passed: true,
+        detail: `File exists: ${reportPath}`,
+      });
+      expect(failed.accepted).toBe(false);
+      expect(failed.checkResults[0]).toMatchObject({
+        passed: false,
+        detail: "Path is outside the workspace.",
+      });
+    } finally {
+      await rm(outputRoot, { recursive: true, force: true });
+      await rm(outsideRoot, { recursive: true, force: true });
+    }
+  });
+
   it("runs command_exit_code checks through the permissioned tool path", async () => {
     const acceptance = createAgentGoalAcceptance();
     const result = await acceptance.evaluate(
@@ -196,6 +238,147 @@ describe("agent goal acceptance", () => {
     expect(modelCalls).toBe(0);
   });
 
+  it("passes artifact evidence content into model_review checks", async () => {
+    const capturedPrompts: string[] = [];
+    const acceptance = createAgentGoalAcceptance();
+
+    const result = await acceptance.evaluate(
+      createMilestone([
+        check(
+          "check_review",
+          "model_review",
+          {
+            condition: "发布版本并确认验证命令通过",
+            evidenceRefs: ["artifact:goalEvidence"],
+          },
+          true,
+        ),
+      ]),
+      createContext({
+        artifacts: {
+          goalEvidence: {
+            currentMilestone: {
+              status: "succeeded",
+              summary: "npm run verify passed and release notes were written.",
+            },
+          },
+        },
+        chatClient: {
+          async complete(request) {
+            capturedPrompts.push(request.messages.at(-1)?.content ?? "");
+            return {
+              content: '{"accepted":true,"detail":"verify evidence is present"}',
+              toolCalls: [],
+              finishReason: "stop",
+            };
+          },
+        },
+      }),
+    );
+
+    expect(result.accepted).toBe(true);
+    expect(result.checkResults[0]).toMatchObject({
+      checkId: "check_review",
+      evidenceRefs: ["artifact:goalEvidence"],
+      passed: true,
+    });
+    expect(capturedPrompts[0]).toContain("发布版本并确认验证命令通过");
+    expect(capturedPrompts[0]).toContain("artifact:goalEvidence");
+    expect(capturedPrompts[0]).toContain("npm run verify passed");
+  });
+
+  it("resolves artifact evidence from files in explicit goal output roots before model_review checks", async () => {
+    const outputRoot = await mkdtemp(path.join(os.tmpdir(), "goal-artifact-root-"));
+    const capturedPrompts: string[] = [];
+
+    try {
+      const notesPath = path.join(outputRoot, "research_notes.md");
+      await writeFile(
+        notesPath,
+        "# Research Notes\n\n段永平长期主义与本分方法论笔记。",
+        "utf8",
+      );
+      const acceptance = createAgentGoalAcceptance();
+
+      const result = await acceptance.evaluate(
+        createMilestone([
+          check(
+            "check_review",
+            "model_review",
+            {
+              condition: "研究笔记文件已经生成并包含可验收内容",
+              evidenceRefs: ["artifact:research_notes"],
+            },
+            true,
+          ),
+        ]),
+        createContext({
+          extraWriteRoots: [outputRoot],
+          chatClient: {
+            async complete(request) {
+              capturedPrompts.push(request.messages.at(-1)?.content ?? "");
+              return {
+                content: '{"accepted":true,"detail":"notes evidence is present"}',
+                toolCalls: [],
+                finishReason: "stop",
+              };
+            },
+          },
+        }),
+      );
+
+      expect(result.accepted).toBe(true);
+      expect(capturedPrompts[0]).toContain("artifact:research_notes");
+      expect(capturedPrompts[0]).toContain(notesPath);
+      expect(capturedPrompts[0]).toContain("段永平长期主义");
+      expect(capturedPrompts[0]).not.toContain("artifact:research_notes: missing");
+    } finally {
+      await rm(outputRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects model_review checks when required artifact evidence cannot be resolved", async () => {
+    let modelCalls = 0;
+    const acceptance = createAgentGoalAcceptance();
+
+    const result = await acceptance.evaluate(
+      createMilestone([
+        check(
+          "check_review",
+          "model_review",
+          {
+            condition: "研究笔记文件已经生成",
+            evidenceRefs: ["artifact:research_notes"],
+          },
+          true,
+        ),
+      ]),
+      createContext({
+        chatClient: {
+          async complete() {
+            modelCalls += 1;
+            return {
+              content: '{"accepted":true,"detail":"looks good"}',
+              toolCalls: [],
+              finishReason: "stop",
+            };
+          },
+        },
+      }),
+    );
+
+    expect(result.accepted).toBe(false);
+    expect(result.inferentialUsed).toBe(false);
+    expect(result.checkResults[0]).toMatchObject({
+      checkId: "check_review",
+      kind: "model_review",
+      passed: false,
+      evidenceRefs: ["artifact:research_notes"],
+      detail: "Missing required artifact evidence: artifact:research_notes.",
+    });
+    expect(modelCalls).toBe(0);
+  });
+
   it("evaluates deterministic checks before model_review checks", async () => {
     let modelCalls = 0;
     const acceptance = createAgentGoalAcceptance();
@@ -266,6 +449,7 @@ describe("agent goal acceptance", () => {
     toolResults?: AgentToolExecutionResult[];
     artifacts?: Record<string, unknown>;
     chatClient?: ChatClient;
+    extraWriteRoots?: string[];
   } = {}): AcceptanceContext {
     const queuedResults = [...(options.toolResults ?? [])];
     return {
@@ -273,6 +457,7 @@ describe("agent goal acceptance", () => {
       goalId: "goal_1",
       milestoneId: "milestone_1",
       workspacePath,
+      extraWriteRoots: options.extraWriteRoots ?? [],
       artifacts: options.artifacts ?? {},
       chatClient: options.chatClient,
       toolExecutor: {

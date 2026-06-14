@@ -17,6 +17,8 @@ type StoredModelSettings = {
   encryptedApiKey: string | null;
   temperature: number;
   maxTokens: number;
+  thinkingEnabled: boolean;
+  thinkingBudgetTokens: number;
   updatedAt: string;
 };
 
@@ -95,6 +97,8 @@ export function createModelSettingsStore(options: {
         encryptedApiKey,
         temperature: normalized.temperature,
         maxTokens: normalized.maxTokens,
+        thinkingEnabled: normalized.thinkingEnabled,
+        thinkingBudgetTokens: normalized.thinkingBudgetTokens,
         updatedAt: new Date().toISOString(),
       };
 
@@ -144,12 +148,16 @@ function encryptApiKey(vault: SecretVault, apiKey: string): string {
 }
 
 function toPublicSettings(settings: StoredModelSettings): PublicModelSettings {
+  const defaults = getDefaultModelSettings();
   return {
     baseUrl: settings.baseUrl,
     chatModel: settings.chatModel,
     embeddingModel: settings.embeddingModel,
     temperature: settings.temperature,
     maxTokens: settings.maxTokens,
+    thinkingEnabled: settings.thinkingEnabled ?? defaults.thinkingEnabled,
+    thinkingBudgetTokens:
+      settings.thinkingBudgetTokens ?? defaults.thinkingBudgetTokens,
     hasApiKey: Boolean(settings.encryptedApiKey),
     updatedAt: settings.updatedAt,
   };

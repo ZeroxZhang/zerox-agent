@@ -83,6 +83,12 @@ import type {
   ToolAuditEvent,
   ToolCallRequest,
 } from "../shared/toolPermissions";
+import type {
+  ResolveToolApprovalInput,
+  ToolApprovalDecisionPayload,
+  ToolApprovalModeState,
+  ToolApprovalRequestPayload,
+} from "../shared/toolApproval";
 
 export type CreateGoalInput = {
   description: string;
@@ -137,6 +143,50 @@ const buildingAgent = {
     request: ToolCallRequest,
   ): Promise<AuthorizeTaskToolCallResult> =>
     ipcRenderer.invoke("toolPermissions:authorize", taskId, request),
+  getToolApprovalMode: (): Promise<ToolApprovalModeState> =>
+    ipcRenderer.invoke("toolApproval:getMode"),
+  setToolAutoApprovalEnabled: (
+    enabled: boolean,
+  ): Promise<ToolApprovalModeState> =>
+    ipcRenderer.invoke("toolApproval:setAutoApprovalEnabled", enabled),
+  resolveToolApproval: (input: ResolveToolApprovalInput): Promise<boolean> =>
+    ipcRenderer.invoke("toolApproval:resolve", input),
+  onToolApprovalRequest: (
+    callback: (request: ToolApprovalRequestPayload) => void,
+  ) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      data: ToolApprovalRequestPayload,
+    ) => callback(data);
+    ipcRenderer.on("toolApproval:request", handler);
+    return () => {
+      ipcRenderer.removeListener("toolApproval:request", handler);
+    };
+  },
+  onToolApprovalDecision: (
+    callback: (decision: ToolApprovalDecisionPayload) => void,
+  ) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      data: ToolApprovalDecisionPayload,
+    ) => callback(data);
+    ipcRenderer.on("toolApproval:decision", handler);
+    return () => {
+      ipcRenderer.removeListener("toolApproval:decision", handler);
+    };
+  },
+  onToolApprovalModeChanged: (
+    callback: (state: ToolApprovalModeState) => void,
+  ) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      data: ToolApprovalModeState,
+    ) => callback(data);
+    ipcRenderer.on("toolApproval:modeChanged", handler);
+    return () => {
+      ipcRenderer.removeListener("toolApproval:modeChanged", handler);
+    };
+  },
   listToolAuditEvents: (): Promise<ToolAuditEvent[]> =>
     ipcRenderer.invoke("toolAudit:list"),
   listAgentRuns: (): Promise<AgentRunRecord[]> =>
@@ -262,6 +312,16 @@ const buildingAgent = {
     ipcRenderer.on("goal:progressEvent", handler);
     return () => {
       ipcRenderer.removeListener("goal:progressEvent", handler);
+    };
+  },
+  onGoalMilestoneRunEvent: (callback: (event: AgentRunEvent) => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      data: AgentRunEvent,
+    ) => callback(data);
+    ipcRenderer.on("goal:milestoneRunEvent", handler);
+    return () => {
+      ipcRenderer.removeListener("goal:milestoneRunEvent", handler);
     };
   },
   listChatSessions: (): Promise<ChatSessionListItem[]> =>

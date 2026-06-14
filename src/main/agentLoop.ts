@@ -1,5 +1,6 @@
 import type { AgentToolExecutor } from "./agentToolExecutor";
 import { createContextManager, type ContextManager } from "./contextManager";
+import type { AgentRunContext } from "../shared/agentWorkspace";
 import type {
   ChatClient,
   ChatCompletionResponse,
@@ -11,7 +12,10 @@ import {
   type ModelRetryEvent,
   type ModelRetryOptions,
 } from "./modelRetry";
-import type { ToolAuthorizationService } from "./toolAuthorizationService";
+import type {
+  RuntimeToolAuthorizationTask,
+  ToolAuthorizationService,
+} from "./toolAuthorizationService";
 import {
   buildAgentSystemPrompt,
   buildToolDefinitions,
@@ -25,6 +29,8 @@ export type AgentLoopOptions = {
   toolExecutor: AgentToolExecutor;
   toolAuthorizationService?: ToolAuthorizationService;
   taskId?: string;
+  runContext?: AgentRunContext;
+  runtimeTask?: RuntimeToolAuthorizationTask;
   systemPrompt?: string;
   maxTurns?: number;
   signal?: AbortSignal;
@@ -90,6 +96,8 @@ export async function runAgentLoop(
     toolExecutor,
     toolAuthorizationService,
     taskId,
+    runContext,
+    runtimeTask,
     systemPrompt,
     maxTurns = 4,
     signal,
@@ -320,6 +328,9 @@ export async function runAgentLoop(
               toolName: toolName as never,
               ...(toolSource ? { source: toolSource } : {}),
               args,
+            }, {
+              ...(runContext ? { runContext } : {}),
+              ...(runtimeTask ? { runtimeTask } : {}),
             });
 
             if (!auth.ok || !auth.decision.allowed) {
@@ -351,6 +362,7 @@ export async function runAgentLoop(
             args,
           }, {
             ...(signal ? { signal } : {}),
+            ...(runContext ? { runContext } : {}),
           });
 
           toolCallsExecuted += 1;

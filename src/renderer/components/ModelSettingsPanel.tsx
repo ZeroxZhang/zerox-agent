@@ -278,6 +278,50 @@ export function ModelSettingsPanel() {
         </label>
       </div>
 
+      <div className="field-grid">
+        <label className="field is-checkbox">
+          <span>{fieldGuidance.thinkingEnabled.label}</span>
+          <input
+            checked={form.thinkingEnabled ?? false}
+            onChange={(event) =>
+              setForm({
+                ...form,
+                thinkingEnabled: event.currentTarget.checked,
+              })
+            }
+            type="checkbox"
+          />
+          <strong className="field-hint">
+            {fieldGuidance.thinkingEnabled.hint}
+          </strong>
+        </label>
+
+        {form.thinkingEnabled ? (
+          <label className="field">
+            <span>{fieldGuidance.thinkingBudgetTokens.label}</span>
+            <input
+              min="256"
+              max="32000"
+              onChange={(event) =>
+                setForm({
+                  ...form,
+                  thinkingBudgetTokens: Number(event.currentTarget.value),
+                })
+              }
+              step="1"
+              type="number"
+              value={form.thinkingBudgetTokens ?? 8192}
+            />
+            <strong className="field-hint">
+              {fieldGuidance.thinkingBudgetTokens.hint}
+            </strong>
+            {errors.thinkingBudgetTokens ? (
+              <small>{errors.thinkingBudgetTokens}</small>
+            ) : null}
+          </label>
+        ) : null}
+      </div>
+
       <div className="settings-actions">
         <button className="primary-action" disabled={status.kind === "saving"}>
           保存配置
@@ -332,5 +376,7 @@ function toModelSettingsInput(
     apiKey: "",
     temperature: settings.temperature,
     maxTokens: settings.maxTokens,
+    thinkingEnabled: settings.thinkingEnabled,
+    thinkingBudgetTokens: settings.thinkingBudgetTokens,
   };
 }

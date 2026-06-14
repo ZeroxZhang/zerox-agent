@@ -15,6 +15,8 @@ describe("model settings", () => {
       embeddingModel: "",
       temperature: 0.2,
       maxTokens: 8192,
+      thinkingEnabled: false,
+      thinkingBudgetTokens: 8192,
       hasApiKey: false,
       updatedAt: null,
     });
@@ -37,6 +39,8 @@ describe("model settings", () => {
       apiKey: "sk-test",
       temperature: 0.33,
       maxTokens: 2049,
+      thinkingEnabled: false,
+      thinkingBudgetTokens: 8192,
     });
   });
 
@@ -131,6 +135,12 @@ describe("model settings", () => {
       },
       maxTokens: {
         label: "单次回复最大输出（max tokens）",
+      },
+      thinkingEnabled: {
+        label: "启用模型思考过程",
+      },
+      thinkingBudgetTokens: {
+        label: "思考预算（tokens）",
       },
     });
   });

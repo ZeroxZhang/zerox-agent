@@ -5,9 +5,11 @@ export type ModelSettingsInput = {
   apiKey: string;
   temperature: number;
   maxTokens: number;
+  thinkingEnabled?: boolean;
+  thinkingBudgetTokens?: number;
 };
 
-export type NormalizedModelSettingsInput = ModelSettingsInput;
+export type NormalizedModelSettingsInput = Required<ModelSettingsInput>;
 
 export type PublicModelSettings = {
   baseUrl: string;
@@ -15,6 +17,8 @@ export type PublicModelSettings = {
   embeddingModel: string;
   temperature: number;
   maxTokens: number;
+  thinkingEnabled: boolean;
+  thinkingBudgetTokens: number;
   hasApiKey: boolean;
   updatedAt: string | null;
 };
@@ -86,6 +90,14 @@ export type ModelSettingsFieldGuidance = {
     label: string;
     hint: string;
   };
+  thinkingEnabled: {
+    label: string;
+    hint: string;
+  };
+  thinkingBudgetTokens: {
+    label: string;
+    hint: string;
+  };
 };
 
 export function getDefaultModelSettings(): PublicModelSettings {
@@ -95,6 +107,8 @@ export function getDefaultModelSettings(): PublicModelSettings {
     embeddingModel: "",
     temperature: 0.2,
     maxTokens: 8192,
+    thinkingEnabled: false,
+    thinkingBudgetTokens: 8192,
     hasApiKey: false,
     updatedAt: null,
   };
@@ -152,6 +166,14 @@ export function getModelSettingsFieldGuidance(): ModelSettingsFieldGuidance {
       label: "单次回复最大输出（max tokens）",
       hint: "这是一次模型回复的输出上限，不是整个会话长度、历史上下文长度，也不是界面显示字数。",
     },
+    thinkingEnabled: {
+      label: "启用模型思考过程",
+      hint: "开启后模型会返回推理内容，适用于 Qwen3.6-plus、Claude 3.7 Sonnet (thinking) 等支持思考的模型。",
+    },
+    thinkingBudgetTokens: {
+      label: "思考预算（tokens）",
+      hint: "模型用于思考的最大 token 数，通常 1024-8192。",
+    },
   };
 }
 
@@ -165,6 +187,11 @@ export function normalizeModelSettingsInput(
     apiKey: input.apiKey.trim(),
     temperature: roundToTwoDecimals(input.temperature),
     maxTokens: Math.round(input.maxTokens),
+    thinkingEnabled: input.thinkingEnabled ?? false,
+    thinkingBudgetTokens: Math.max(
+      256,
+      Math.round(input.thinkingBudgetTokens ?? 8192),
+    ),
   };
 }
 
@@ -193,6 +220,14 @@ export function validateModelSettingsInput(
 
   if (normalized.maxTokens < 1 || normalized.maxTokens > 200000) {
     errors.maxTokens = "单次回复最大输出（max tokens）必须在 1 到 200000 之间。";
+  }
+
+  if (
+    normalized.thinkingEnabled &&
+    (normalized.thinkingBudgetTokens < 256 ||
+      normalized.thinkingBudgetTokens > 32000)
+  ) {
+    errors.thinkingBudgetTokens = "思考预算必须在 256 到 32000 之间。";
   }
 
   return {

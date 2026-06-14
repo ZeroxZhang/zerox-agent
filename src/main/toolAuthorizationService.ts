@@ -20,8 +20,15 @@ export type ToolAuthorizationService = {
 
 export type ToolAuthorizationOptions = {
   runContext?: AgentRunContext;
+  runtimeTask?: RuntimeToolAuthorizationTask;
   onApprovalRequested?: (request: ToolUserApprovalRequest) => Promise<void>;
   onApprovalResolved?: (result: ToolUserApprovalResult) => Promise<void>;
+};
+
+export type RuntimeToolAuthorizationTask = {
+  name: string;
+  permissions: TaskPermissionPolicy;
+  policyLabel?: string;
 };
 
 export type ToolUserApprovalRequest = {
@@ -49,8 +56,23 @@ export function createToolAuthorizationService(options: {
   return {
     async authorize(taskId, request, authorizeOptions) {
       const task = await options.taskStore.get(taskId);
+      const subject = task
+        ? {
+            id: task.id,
+            name: task.name,
+            permissions: task.permissions,
+            policyLabel: undefined,
+          }
+        : authorizeOptions?.runtimeTask
+          ? {
+              id: taskId,
+              name: authorizeOptions.runtimeTask.name,
+              permissions: authorizeOptions.runtimeTask.permissions,
+              policyLabel: authorizeOptions.runtimeTask.policyLabel,
+            }
+          : null;
 
-      if (!task) {
+      if (!subject) {
         return {
           ok: false,
           message: "Scheduled task was not found.",
@@ -58,18 +80,24 @@ export function createToolAuthorizationService(options: {
       }
 
       let decision = authorizeToolCallWithinRunContext(
-        expandHomePermissionPolicy(task.permissions, homeDir),
+        expandHomePermissionPolicy(subject.permissions, homeDir),
         request,
         authorizeOptions?.runContext,
       );
+      if (decision.allowed && subject.policyLabel) {
+        decision = {
+          ...decision,
+          reason: `${decision.reason} (${subject.policyLabel})`,
+        };
+      }
       if (
         !decision.allowed &&
         options.requestUserApproval &&
         shouldRequestUserApproval(decision.reason)
       ) {
         const approvalRequest = {
-          taskId: task.id,
-          taskName: task.name,
+          taskId: subject.id,
+          taskName: subject.name,
           request,
           deniedReason: decision.reason,
         };
@@ -92,7 +120,7 @@ export function createToolAuthorizationService(options: {
             };
       }
       const auditEvent = await options.auditLog.append({
-        taskId,
+        taskId: subject.id,
         request,
         decision,
       });

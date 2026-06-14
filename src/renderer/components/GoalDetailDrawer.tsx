@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type { Goal } from "../../shared/agentGoal";
 import type { ChatSessionGoalSummary } from "../../shared/chat";
 import { buildGoalProgressViewModel } from "../goalProgressViewModel";
@@ -16,173 +17,194 @@ type GoalDetailDrawerProps = {
 };
 
 export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
-  if (!props.open || !props.summary) {
+  const milestonesRef = useRef<HTMLDivElement>(null);
+  const progress = props.summary
+    ? buildGoalProgressViewModel(props.summary, props.goal)
+    : null;
+
+  useEffect(() => {
+    const element = milestonesRef.current;
+    if (element && progress) {
+      element.scrollTop = element.scrollHeight;
+    }
+  }, [progress?.milestoneRows.length, progress?.milestoneRows.at(-1)?.state]);
+
+  if (!props.open || !props.summary || !progress) {
     return null;
   }
 
-  const progress = buildGoalProgressViewModel(props.summary, props.goal);
-
   return (
-    <aside className="goal-detail-drawer" aria-label="目标详情">
-      <header>
-        <div>
-          <span>Goal detail</span>
-          <h3>{props.summary.description}</h3>
-        </div>
-        <button type="button" onClick={props.onClose}>
-          关闭
-        </button>
-      </header>
-
-      <section className="goal-progress-status">
-        <div>
-          <span>{progress.statusLabel}</span>
-          <p>{progress.statusDetail}</p>
-        </div>
-        {canStartGoal(props.summary.status) && props.onStart ? (
-          <button type="button" onClick={props.onStart}>
-            {progress.nextActionLabel}
-          </button>
-        ) : null}
-      </section>
-
-      {props.summary.status === "waiting_for_review" && props.onResolveReview ? (
-        <section className="goal-review-gate">
-          <span>审核门</span>
-          <p>里程碑已完成，需要你基于运行证据决定是否继续。</p>
-          {props.goal ? renderEvidenceList(props.goal) : null}
-          <div className="goal-review-actions">
-            <button
-              type="button"
-              className="goal-primary-action"
-              onClick={() => props.onResolveReview!("approve")}
-            >
-              通过并继续
-            </button>
-            <button
-              type="button"
-              onClick={() => props.onResolveReview!("reject")}
-            >
-              拒绝并重新规划
-            </button>
-            <button
-              type="button"
-              className="goal-danger-action"
-              onClick={() => props.onResolveReview!("terminate")}
-            >
-              终止目标
-            </button>
-          </div>
-        </section>
-      ) : null}
-
-      {isRecoverableStatus(props.summary.status) ? (
-        <section className="goal-recovery-actions">
-          <span>恢复路径</span>
-          <p>{getRecoveryHint(props.summary.status)}</p>
-          <div className="goal-review-actions">
-            {props.summary.status === "stopped_budget" && props.onIncreaseBudget ? (
-              <button
-                type="button"
-                className="goal-primary-action"
-                onClick={props.onIncreaseBudget}
-              >
-                增加预算并继续
-              </button>
-            ) : null}
-            {props.summary.status === "stopped_stalled" && props.onReplan ? (
-              <button
-                type="button"
-                className="goal-primary-action"
-                onClick={props.onReplan}
-              >
-                重新规划
-              </button>
-            ) : null}
-            {(props.summary.status === "failed" ||
-              props.summary.status === "stopped_stalled") &&
-            props.onRetry ? (
-              <button
-                type="button"
-                className="goal-primary-action"
-                onClick={props.onRetry}
-              >
-                重试目标
-              </button>
-            ) : null}
-            {props.onCancel ? (
-              <button
-                type="button"
-                className="goal-danger-action"
-                onClick={props.onCancel}
-              >
-                结束目标
-              </button>
-            ) : null}
-          </div>
-        </section>
-      ) : null}
-
-      <section className="goal-progress-next">
-        <span>下一步</span>
-        <strong>{progress.nextActionLabel}</strong>
-        <p>{progress.nextActionDetail}</p>
-      </section>
-
-      <dl className="goal-progress-metrics">
-        <div>
-          <dt>进度</dt>
-          <dd>{progress.progressText}</dd>
-        </div>
-        {props.goal ? (
+    <div
+      className="goal-detail-drawer-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          props.onClose();
+        }
+      }}
+    >
+      <aside
+        className="goal-detail-drawer"
+        aria-label="目标详情"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header>
           <div>
-            <dt>计划版本</dt>
-            <dd>{props.goal.planVersion}</dd>
+            <span>Goal detail</span>
+            <h3>{props.summary.description}</h3>
           </div>
-        ) : null}
-        {progress.metricCards.map((card) => (
-          <div key={card.label}>
-            <dt>{card.label}</dt>
-            <dd>{card.value}</dd>
-          </div>
-        ))}
-      </dl>
+          <button type="button" onClick={props.onClose}>
+            关闭
+          </button>
+        </header>
 
-      <div className="goal-detail-drawer-milestones">
-        <div className="goal-detail-section-header">
-          <span>里程碑</span>
-          <small>{progress.progressText}</small>
+        <div className="goal-detail-drawer-body">
+          <section className="goal-progress-status">
+            <div>
+              <span>{progress.statusLabel}</span>
+              <p>{progress.statusDetail}</p>
+            </div>
+            {canStartGoal(props.summary.status) && props.onStart ? (
+              <button type="button" onClick={props.onStart}>
+                {progress.nextActionLabel}
+              </button>
+            ) : null}
+          </section>
+
+          {props.summary.status === "waiting_for_review" &&
+          props.onResolveReview ? (
+            <section className="goal-review-gate">
+              <span>审核门</span>
+              <p>里程碑已完成，需要你基于运行证据决定是否继续。</p>
+              {props.goal ? renderEvidenceList(props.goal) : null}
+              <div className="goal-review-actions">
+                <button
+                  type="button"
+                  className="goal-primary-action"
+                  onClick={() => props.onResolveReview!("approve")}
+                >
+                  通过并继续
+                </button>
+                <button
+                  type="button"
+                  onClick={() => props.onResolveReview!("reject")}
+                >
+                  拒绝并重新规划
+                </button>
+                <button
+                  type="button"
+                  className="goal-danger-action"
+                  onClick={() => props.onResolveReview!("terminate")}
+                >
+                  终止目标
+                </button>
+              </div>
+            </section>
+          ) : null}
+
+          {isRecoverableStatus(props.summary.status) ? (
+            <section className="goal-recovery-actions">
+              <span>恢复路径</span>
+              <p>{getRecoveryHint(props.summary.status)}</p>
+              <div className="goal-review-actions">
+                {props.summary.status === "stopped_budget" &&
+                props.onIncreaseBudget ? (
+                  <button
+                    type="button"
+                    className="goal-primary-action"
+                    onClick={props.onIncreaseBudget}
+                  >
+                    增加预算并继续
+                  </button>
+                ) : null}
+                {props.summary.status === "stopped_stalled" && props.onReplan ? (
+                  <button
+                    type="button"
+                    className="goal-primary-action"
+                    onClick={props.onReplan}
+                  >
+                    重新规划
+                  </button>
+                ) : null}
+                {(props.summary.status === "failed" ||
+                  props.summary.status === "stopped_stalled") &&
+                props.onRetry ? (
+                  <button
+                    type="button"
+                    className="goal-primary-action"
+                    onClick={props.onRetry}
+                  >
+                    重试目标
+                  </button>
+                ) : null}
+                {props.onCancel ? (
+                  <button
+                    type="button"
+                    className="goal-danger-action"
+                    onClick={props.onCancel}
+                  >
+                    结束目标
+                  </button>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
+
+          <section className="goal-progress-next">
+            <span>下一步</span>
+            <strong>{progress.nextActionLabel}</strong>
+            <p>{progress.nextActionDetail}</p>
+          </section>
+
+          <dl className="goal-progress-metrics">
+            <div>
+              <dt>进度</dt>
+              <dd>{progress.progressText}</dd>
+            </div>
+            {props.goal ? (
+              <div>
+                <dt>计划版本</dt>
+                <dd>{props.goal.planVersion}</dd>
+              </div>
+            ) : null}
+            {progress.metricCards.map((card) => (
+              <div key={card.label}>
+                <dt>{card.label}</dt>
+                <dd>{card.value}</dd>
+              </div>
+            ))}
+          </dl>
+
+          <div className="goal-detail-drawer-milestones" ref={milestonesRef}>
+            <div className="goal-detail-section-header">
+              <span>里程碑</span>
+              <small>{progress.progressText}</small>
+            </div>
+            {progress.milestoneRows.length ? (
+              progress.milestoneRows.map((milestone) => (
+                <article className={`is-${milestone.state}`} key={milestone.id}>
+                  <span>{milestone.stateLabel}</span>
+                  <strong>{milestone.description}</strong>
+                  <small>
+                    {milestone.id} · 尝试 {milestone.attempts} · 运行{" "}
+                    {milestone.runCount}
+                  </small>
+                  {milestone.lastAcceptanceSummary ? (
+                    <p>{milestone.lastAcceptanceSummary}</p>
+                  ) : null}
+                </article>
+              ))
+            ) : (
+              <p>目标详情加载后会显示里程碑。</p>
+            )}
+          </div>
         </div>
-        {progress.milestoneRows.length ? (
-          progress.milestoneRows.map((milestone) => (
-            <article className={`is-${milestone.state}`} key={milestone.id}>
-              <span>{milestone.stateLabel}</span>
-              <strong>{milestone.description}</strong>
-              <small>
-                {milestone.id} · 尝试 {milestone.attempts} · 运行{" "}
-                {milestone.runCount}
-              </small>
-              {milestone.lastAcceptanceSummary ? (
-                <p>{milestone.lastAcceptanceSummary}</p>
-              ) : null}
-            </article>
-          ))
-        ) : (
-          <p>目标详情加载后会显示里程碑。</p>
-        )}
-      </div>
-    </aside>
+      </aside>
+    </div>
   );
 }
 
 function canStartGoal(status: ChatSessionGoalSummary["status"]): boolean {
-  return (
-    status === "planning" ||
-    status === "failed" ||
-    status === "stopped_budget" ||
-    status === "stopped_stalled" ||
-    status === "canceled"
-  );
+  return status === "planning";
 }
 
 function isRecoverableStatus(status: ChatSessionGoalSummary["status"]): boolean {

@@ -140,6 +140,43 @@ describe("agent goal controller", () => {
     expect(trajectoryEvents.map((event) => event.type)).toContain("goal_replanned");
   });
 
+  it("continues with replanned work when final goal acceptance needs more evidence", async () => {
+    await store.save(createGoal([milestone("milestone_initial")]));
+    const runtime = createRuntime();
+    const replanReasons: string[] = [];
+    const controller = createController({
+      runtime,
+      acceptance: createAcceptance({
+        milestoneAccepted: [true, true],
+        goalAccepted: [false, true],
+      }),
+      planner: {
+        async replan(goal, reason) {
+          replanReasons.push(reason);
+          goal.planVersion += 1;
+          goal.budgetUsage.replans += 1;
+          return [
+            ...goal.milestones,
+            milestone("milestone_followup", ["milestone_initial"]),
+          ];
+        },
+      },
+    });
+
+    const result = await controller.start("goal_1");
+
+    expect(result.status).toBe("achieved");
+    expect(result.stopReason).toBe("goal_accepted");
+    expect(result.planVersion).toBe(2);
+    expect(result.budgetUsage.replans).toBe(1);
+    expect(replanReasons).toEqual(["Goal rejected."]);
+    expect(runtime.runMilestoneIds).toEqual([
+      "milestone_initial",
+      "milestone_followup",
+    ]);
+    expect(trajectoryEvents.map((event) => event.type)).toContain("goal_replanned");
+  });
+
   it("suspends at review gates and does not advance until review is resolved", async () => {
     await store.save(
       createGoal(

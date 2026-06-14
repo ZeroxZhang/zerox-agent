@@ -15,8 +15,8 @@ describe("Design System — Notion-inspired app shell", () => {
     path.join(process.cwd(), "src/renderer/components/AgentChatPanel.tsx"),
     "utf8",
   );
-  const goalContractBarSource = readFileSync(
-    path.join(process.cwd(), "src/renderer/components/GoalContractBar.tsx"),
+  const goalStatusStripSource = readFileSync(
+    path.join(process.cwd(), "src/renderer/components/GoalStatusStrip.tsx"),
     "utf8",
   );
   const goalDetailDrawerSource = readFileSync(
@@ -178,19 +178,18 @@ describe("Design System — Notion-inspired app shell", () => {
   });
 
   it("surfaces session-native Goal Mode inside Chat", () => {
-    expect(chatPanelSource).toContain("GoalContractBar");
+    expect(chatPanelSource).toContain("GoalStatusStrip");
     expect(chatPanelSource).toContain("activeGoal");
     expect(chatPanelSource).toContain("goal-session-badge");
-    expect(chatPanelSource).toContain("goal-review-gate-card");
     expect(chatPanelSource).toContain("GoalDetailDrawer");
     expect(chatPanelSource).toContain("handleViewGoalProgress");
     expect(chatPanelSource).toContain("handleStartGoal");
     expect(chatPanelSource).toContain("refreshSessions(sessionIdToLoad)");
     expect(chatPanelSource).toContain("slash-command-menu");
     expect(chatPanelSource).toContain("handleSelectComposerCommand(\"goal\")");
-    expect(goalContractBarSource).toContain("buildGoalProgressViewModel");
-    expect(goalContractBarSource).toContain("progress.nextActionLabel");
-    expect(goalContractBarSource).toContain("canStartGoal");
+    expect(goalStatusStripSource).toContain("buildGoalProgressViewModel");
+    expect(goalStatusStripSource).toContain("progress.statusLabel");
+    expect(goalStatusStripSource).toContain("onResolveReview");
     expect(goalDetailDrawerSource).toContain("goal-progress-status");
     expect(goalDetailDrawerSource).toContain("goal-progress-next");
     expect(goalDetailDrawerSource).toContain("goal-progress-metrics");
@@ -259,9 +258,11 @@ describe("Design System — Notion-inspired app shell", () => {
     // Chat
     expect(styles).toContain(".agent-chat-panel");
     expect(styles).toContain("--session-rail-width");
+    expect(styles).toContain("--context-panel-width");
     expect(styles).toContain(".nav-resize-handle");
     expect(styles).toContain(".session-rail-resize-handle");
-    expect(styles).toContain("grid-template-columns: minmax(520px, 1fr) var(--resize-handle-width) var(--session-rail-width)");
+    expect(styles).toContain("grid-template-columns: var(--session-rail-width) minmax(520px, 1fr) var(--context-panel-width)");
+    expect(styles).toContain(".kimi-side-card");
     expect(styles).toContain(".chat-message");
     expect(styles).toContain(".composer");
     expect(styles).toContain(".composer-input-shell");
@@ -286,19 +287,56 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(chatPanelSource).toContain("aria-label=\"中断当前任务\"");
     expect(chatPanelSource).toContain("aria-label=\"发送消息\"");
     expect(chatPanelSource).toContain("className=\"composer-floating-actions\"");
-    expect(chatPanelSource).toContain("disabled={!canCancelChatTask}");
+    expect(chatPanelSource).toContain("disabled={!canInterruptCurrentWork}");
     expect(chatPanelSource).toContain(
-      "cancelChatMessage(activeChatRequestIdRef.current ?? undefined)",
+      "handleInterruptCurrentWork",
     );
+    expect(chatPanelSource).toContain("activeGoal.status === \"executing\"");
+    expect(chatPanelSource).toContain("cancelGoal(activeGoal.id)");
     expect(chatPanelSource).not.toContain(
       "disabled={status.kind !== \"working\" || !activeChatRequestId}",
     );
   });
+
+  it("keeps tool approval inside chat with an auto-authorization toggle and critical risk styling", () => {
+    expect(chatPanelSource).toContain("autoApprovalEnabled");
+    expect(chatPanelSource).toContain("setToolAutoApprovalEnabled");
+    expect(chatPanelSource).toContain("onToolApprovalRequest");
+    expect(chatPanelSource).toContain("tool-approval-panel");
+    expect(chatPanelSource).toContain("aria-label=\"自动授权工具请求\"");
+    expect(chatPanelSource).toContain("resolveToolApproval");
+    expect(chatPanelSource).toContain("is-critical-risk");
+    expect(styles).toContain(".tool-approval-panel");
+    expect(styles).toContain(".auto-approval-toggle");
+    expect(styles).toContain(".is-critical-risk");
+    expect(styles).toContain("var(--status-error-text)");
+  });
+
+  it("keeps goal execution UI compact when long milestone text is active", () => {
+    const handleStartGoalSource = getFunctionSource(
+      chatPanelSource,
+      "handleStartGoal",
+    );
+
+    expect(handleStartGoalSource).toContain("setGoalDrawerOpen(false)");
+    expect(goalDetailDrawerSource).toContain("goal-detail-drawer-backdrop");
+    expect(styles).toContain(".goal-detail-drawer-backdrop");
+    expect(styles).toContain(
+      "grid-template-columns: minmax(0, 0.9fr) minmax(320px, 1.1fr);",
+    );
+    expect(styles).toContain("-webkit-line-clamp: 2;");
+    expect(styles).toContain(".agent-work-steps { min-width: 0;");
+  });
 });
 
 function getFunctionSource(source: string, functionName: string): string {
-  const marker = `async function ${functionName}`;
-  const startIndex = source.indexOf(marker);
+  const markers = [`async function ${functionName}`, `function ${functionName}`];
+  const startIndex = markers.reduce((found, marker) => {
+    if (found !== -1) {
+      return found;
+    }
+    return source.indexOf(marker);
+  }, -1);
   if (startIndex === -1) {
     return "";
   }

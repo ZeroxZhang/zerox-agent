@@ -60,7 +60,7 @@ describe("goal progress view model", () => {
     );
   });
 
-  it("offers restart as the next action for failed goals", () => {
+  it("explains failed goals through explicit recovery actions", () => {
     const viewModel = buildGoalProgressViewModel(
       {
         id: "goal_failed",
@@ -71,8 +71,8 @@ describe("goal progress view model", () => {
     );
 
     expect(viewModel.statusLabel).toBe("失败");
-    expect(viewModel.nextActionLabel).toBe("重新开始");
-    expect(viewModel.nextActionDetail).toContain("重新创建并启动");
+    expect(viewModel.nextActionLabel).toBe("恢复路径");
+    expect(viewModel.nextActionDetail).toContain("重试目标");
   });
 });
 
