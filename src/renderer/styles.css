@@ -1617,6 +1617,13 @@ nav {
   line-height: var(--leading-tight);
   overflow-wrap: anywhere;
 }
+.goal-contract-bar em {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-style: normal;
+  line-height: var(--leading-normal);
+  overflow-wrap: anywhere;
+}
 .goal-contract-bar small {
   color: var(--status-info-text);
   font-size: var(--text-xs);
@@ -1642,6 +1649,12 @@ nav {
   border-color: var(--border-strong);
   background: var(--bg-surface-hover);
 }
+.goal-contract-actions .goal-primary-action,
+.goal-detail-drawer .goal-progress-status button {
+  border-color: var(--border-accent);
+  color: var(--text-accent);
+  background: var(--bg-accent-muted);
+}
 .goal-contract-bar.is-achieved {
   border-color: var(--status-success-border);
   background: var(--status-success-bg);
@@ -1660,7 +1673,7 @@ nav {
 .goal-detail-drawer {
   position: absolute; top: var(--space-4); right: var(--space-4); bottom: var(--space-4);
   z-index: 4;
-  display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: var(--space-4);
+  display: grid; grid-template-rows: auto auto auto auto minmax(0, 1fr); gap: var(--space-3);
   width: min(360px, calc(100% - var(--space-8)));
   padding: var(--space-4);
   border: 1px solid var(--border-default);
@@ -1684,11 +1697,39 @@ nav {
   color: var(--text-secondary);
   line-height: var(--leading-normal);
 }
-.goal-detail-drawer dl {
+.goal-progress-status,
+.goal-progress-next {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+}
+.goal-progress-status {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  border-color: var(--status-info-border);
+  background: var(--status-info-bg);
+}
+.goal-progress-status span,
+.goal-progress-next span,
+.goal-detail-section-header span {
+  color: var(--status-info-text);
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+}
+.goal-progress-next strong {
+  color: var(--text-primary);
+  font-size: var(--text-md);
+}
+.goal-detail-drawer dl,
+.goal-progress-metrics {
   display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2);
   margin: 0;
 }
-.goal-detail-drawer dl div {
+.goal-detail-drawer dl div,
+.goal-progress-metrics div {
   display: grid; gap: var(--space-1);
   min-width: 0;
   padding: var(--space-2);
@@ -1696,11 +1737,13 @@ nav {
   border-radius: var(--radius-sm);
   background: var(--bg-surface);
 }
-.goal-detail-drawer dt {
+.goal-detail-drawer dt,
+.goal-progress-metrics dt {
   color: var(--text-tertiary);
   font-size: var(--text-xs);
 }
-.goal-detail-drawer dd {
+.goal-detail-drawer dd,
+.goal-progress-metrics dd {
   margin: 0;
   color: var(--text-primary);
   font-size: var(--text-xs);
@@ -1709,6 +1752,14 @@ nav {
 .goal-detail-drawer-milestones {
   display: grid; align-content: start; gap: var(--space-2);
   min-height: 0; overflow-y: auto;
+}
+.goal-detail-section-header {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
+}
+.goal-detail-section-header small,
+.goal-detail-drawer-milestones article small {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
 }
 .goal-detail-drawer-milestones article {
   display: grid; gap: var(--space-1);
@@ -1725,6 +1776,20 @@ nav {
   color: var(--text-primary);
   font-size: var(--text-sm);
   line-height: var(--leading-tight);
+}
+.goal-detail-drawer-milestones article.is-running {
+  border-color: var(--status-info-border);
+  background: var(--status-info-bg);
+}
+.goal-detail-drawer-milestones article.is-accepted,
+.goal-detail-drawer-milestones article.is-skipped {
+  border-color: var(--status-success-border);
+  background: var(--status-success-bg);
+}
+.goal-detail-drawer-milestones article.is-rejected,
+.goal-detail-drawer-milestones article.is-failed {
+  border-color: var(--status-error-border);
+  background: var(--status-error-bg);
 }
 
 /* ── First Run Guide (only when model not configured) ─────────────────── */

@@ -202,6 +202,7 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
   const sessionIdRef = useRef<string | null>(sessionId);
   const activeStatusSessionIdRef = useRef<string | null>(null);
   const activeChatRequestIdRef = useRef<string | null>(null);
+  const activeGoalRef = useRef<ChatSessionGoalSummary | null>(null);
 
   // Auto-scroll to latest message
   useEffect(() => {
@@ -213,6 +214,22 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
   useEffect(() => {
     sessionIdRef.current = sessionId;
   }, [sessionId]);
+
+  useEffect(() => {
+    if (!window.buildingAgent) {
+      return;
+    }
+
+    return window.buildingAgent.onGoalProgressEvent((event) => {
+      const activeGoalId = activeGoalRef.current?.id;
+      if (activeGoalId && event.goalId === activeGoalId) {
+        void refreshActiveGoalDetail(activeGoalId);
+      }
+      if (event.sessionId === sessionIdRef.current) {
+        void refreshSessions(sessionIdRef.current ?? undefined);
+      }
+    });
+  }, []);
 
   useEffect(() => {
     if (!window.buildingAgent) {
@@ -343,6 +360,7 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
       setActiveGoalDetail(null);
       setGoalDrawerOpen(false);
     }
+    void refreshSessions(sessionIdToLoad);
   }
 
   async function refreshSessions(nextActiveSessionId?: string) {
@@ -359,9 +377,17 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
     }
   }
 
+  async function refreshActiveGoalDetail(goalId: string) {
+    if (!window.buildingAgent) {
+      return;
+    }
+    setActiveGoalDetail(await window.buildingAgent.getGoal(goalId));
+  }
+
   const latestRun = runs[0];
   const activeSession = sessions.find((session) => session.id === sessionId) ?? null;
   const activeGoal = activeSession?.activeGoal ?? null;
+  activeGoalRef.current = activeGoal;
   const activeTasks = tasks.filter((task) => task.enabled);
   const workSteps = useMemo(() => buildAgentWorkSteps(workPhase), [workPhase]);
   const taskActivityDetail = useMemo(
@@ -467,6 +493,123 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
     window.requestAnimationFrame(() => {
       messageInputRef.current?.focus();
     });
+  }
+
+  function handleViewGoalProgress() {
+    setGoalDrawerOpen(true);
+    if (activeGoal?.id) {
+      void refreshActiveGoalDetail(activeGoal.id);
+    }
+  }
+
+  function handleStartGoal() {
+    void submitUserMessage("继续这个目标");
+  }
+
+  async function handleResolveGoalReview(decision: "approve" | "reject" | "terminate") {
+    if (!window.buildingAgent || !activeGoal?.id) {
+      return;
+    }
+
+    const goalId = activeGoal.id;
+    if (decision === "approve") {
+      const result = await window.buildingAgent.resolveGoalReview(goalId, {
+        kind: "approve_continue",
+      });
+      if (result.ok && result.goal) {
+        void refreshActiveGoalDetail(goalId);
+      }
+      appendMessage({
+        role: "assistant",
+        content: result.ok ? "已审核通过，继续执行目标。" : `审核处理失败：${result.message}`,
+      });
+      return;
+    }
+
+    if (decision === "terminate") {
+      const result = await window.buildingAgent.cancelGoal(goalId);
+      appendMessage({
+        role: "assistant",
+        content: result.ok ? "已终止目标。" : `终止目标失败：${result.message}`,
+      });
+      return;
+    }
+
+    setDraft("修改计划：");
+  }
+
+  async function handleIncreaseGoalBudget() {
+    if (!window.buildingAgent || !activeGoal?.id) {
+      return;
+    }
+
+    const result = await window.buildingAgent.increaseGoalBudget(activeGoal.id, {
+      maxIterations: 4,
+      maxToolCalls: 32,
+      maxWallClockMs: 15 * 60 * 1000,
+      maxReplans: 2,
+    });
+    appendMessage({
+      role: "assistant",
+      content: result.ok
+        ? "已增加目标预算，可以继续执行。"
+        : `增加预算失败：${result.message}`,
+    });
+    if (result.ok && result.goal) {
+      void refreshActiveGoalDetail(result.goal.id);
+    }
+  }
+
+  async function handleReplanGoal() {
+    if (!window.buildingAgent || !activeGoal?.id) {
+      return;
+    }
+
+    const result = await window.buildingAgent.replanGoal(
+      activeGoal.id,
+      "用户从恢复界面请求重新规划。",
+    );
+    appendMessage({
+      role: "assistant",
+      content: result.ok
+        ? "已重新规划目标，请查看新的里程碑。"
+        : `重新规划失败：${result.message}`,
+    });
+    if (result.ok && result.goal) {
+      void refreshActiveGoalDetail(result.goal.id);
+    }
+  }
+
+  async function handleRetryGoal() {
+    if (!window.buildingAgent || !activeGoal?.id) {
+      return;
+    }
+
+    const result = await window.buildingAgent.retryGoal(activeGoal.id);
+    appendMessage({
+      role: "assistant",
+      content: result.ok
+        ? "已重试目标，继续执行。"
+        : `重试目标失败：${result.message}`,
+    });
+    if (result.ok && result.goal) {
+      void refreshActiveGoalDetail(result.goal.id);
+    }
+  }
+
+  async function handleCancelGoal() {
+    if (!window.buildingAgent || !activeGoal?.id) {
+      return;
+    }
+
+    const result = await window.buildingAgent.cancelGoal(activeGoal.id);
+    appendMessage({
+      role: "assistant",
+      content: result.ok ? "已取消目标。" : `取消目标失败：${result.message}`,
+    });
+    if (result.ok && result.goal) {
+      void refreshActiveGoalDetail(result.goal.id);
+    }
   }
 
   async function submitUserMessage(rawContent: string) {
@@ -580,6 +723,9 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
     }
     if (result.createdTask) {
       setTasks((currentTasks) => [result.createdTask!, ...currentTasks]);
+    }
+    if (result.activeGoal) {
+      void refreshActiveGoalDetail(result.activeGoal.id);
     }
     const isPaused = result.agentStatus?.state === "paused";
     setStatus({
@@ -1036,12 +1182,22 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
         {activeGoal ? (
           <GoalContractBar
             goal={activeGoal}
-            onEnd={() => void submitUserMessage("结束目标")}
+            onEnd={handleCancelGoal}
             onModify={() => setDraft("目标改一下：")}
             {...(activeGoal.status === "executing"
               ? { onPause: () => void submitUserMessage("暂停这个目标") }
               : {})}
-            onViewProgress={() => setGoalDrawerOpen(true)}
+            {...(activeGoal.status === "planning"
+              || activeGoal.status === "failed"
+              || activeGoal.status === "stopped_budget"
+              || activeGoal.status === "stopped_stalled"
+              || activeGoal.status === "canceled"
+              ? { onStart: handleStartGoal }
+              : {})}
+            onViewProgress={handleViewGoalProgress}
+            onIncreaseBudget={handleIncreaseGoalBudget}
+            onReplan={handleReplanGoal}
+            onRetry={handleRetryGoal}
           />
         ) : null}
 
@@ -1051,15 +1207,15 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
             <h4>目标等待审核</h4>
             <p>检查当前阶段证据后，选择继续、修改计划或终止目标。</p>
             <div className="goal-actions">
-              <button type="button" onClick={() => void submitUserMessage("继续")}>
+              <button type="button" onClick={() => void handleResolveGoalReview("approve")}>
                 继续
               </button>
-              <button type="button" onClick={() => setDraft("修改计划：")}>
+              <button type="button" onClick={() => void handleResolveGoalReview("reject")}>
                 修改计划
               </button>
               <button
                 type="button"
-                onClick={() => void submitUserMessage("终止目标")}
+                onClick={() => void handleResolveGoalReview("terminate")}
               >
                 终止
               </button>
@@ -1219,7 +1375,17 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
           goal={activeGoalDetail}
           open={goalDrawerOpen}
           summary={activeGoal}
+          onStart={
+            activeGoal && canStartGoalFromChat(activeGoal.status)
+              ? handleStartGoal
+              : undefined
+          }
           onClose={() => setGoalDrawerOpen(false)}
+          onResolveReview={handleResolveGoalReview}
+          onIncreaseBudget={handleIncreaseGoalBudget}
+          onReplan={handleReplanGoal}
+          onRetry={handleRetryGoal}
+          onCancel={handleCancelGoal}
         />
       </section>
     </section>
@@ -1647,4 +1813,14 @@ function translateGoalStatus(status: ChatSessionGoalSummary["status"]): string {
     canceled: "已取消",
   };
   return labels[status];
+}
+
+function canStartGoalFromChat(status: ChatSessionGoalSummary["status"]): boolean {
+  return (
+    status === "planning" ||
+    status === "failed" ||
+    status === "stopped_budget" ||
+    status === "stopped_stalled" ||
+    status === "canceled"
+  );
 }

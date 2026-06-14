@@ -451,6 +451,30 @@
         "npm run harness:check",
         "npm run smoke:prod"
       ]
+    },
+    {
+      "id": "P6.1-goal-mode-realization-architecture",
+      "priority": 27,
+      "status": "done",
+      "title": "Goal Mode realization, main-process decoupling, and UX closure",
+      "definitionOfDone": [
+        "Goal runtime resolves workspace through AgentWorkspaceService",
+        "Goal runtime calls AgentGoalContext.assemble and reports token usage",
+        "Chat-created goals use the planner with a deterministic fallback",
+        "Main process uses an explicit DI container and domain-split IPC handlers",
+        "main.ts is reduced to window/tray/lifecycle orchestration",
+        "Goal progress events stream to Chat and refresh the UI live",
+        "Review gate UI shows acceptance criteria evidence and approve/reject/terminate actions",
+        "Failed/stopped/budget goals expose increase-budget/replan/retry recovery actions"
+      ],
+      "verification": [
+        "npm test",
+        "npm run build",
+        "npm run verify",
+        "npm run harness:score",
+        "npm run smoke:prod",
+        "git diff --check"
+      ]
     }
   ]
 }

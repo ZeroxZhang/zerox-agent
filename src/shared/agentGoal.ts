@@ -57,6 +57,8 @@ export type Milestone = {
   runIds: string[];
   attempts: number;
   lastAcceptanceSummary?: string;
+  lastRunStatus?: "succeeded" | "failed" | "canceled" | "paused";
+  lastRunSummary?: string;
 };
 
 export type GoalBudget = {

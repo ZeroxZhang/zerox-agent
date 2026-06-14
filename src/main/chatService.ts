@@ -146,6 +146,7 @@ export function createChatService(options: {
         goalService: options.goalService,
         originMessageId: userMessageId,
         sessionId,
+        emitStatus,
         signal: runtimeOptions.signal,
       });
 
@@ -750,6 +751,7 @@ async function tryRouteGoalIntent(options: {
   goalService: ChatGoalService | undefined;
   originMessageId: string | null;
   sessionId: string;
+  emitStatus?: ReturnType<typeof createChatStatusEmitter>;
   signal?: AbortSignal;
 }): Promise<{ result: SendChatMessageResult } | null> {
   if (options.route.kind === "none" || !options.goalService) {
@@ -788,16 +790,40 @@ async function tryRouteGoalIntent(options: {
   }
 
   if (options.route.kind === "continue_goal") {
+    const restartingTerminalGoal = isTerminalGoalStatus(options.activeGoal.status);
+    options.emitStatus?.send({
+      state: "model",
+      message: restartingTerminalGoal
+        ? "正在重新开始目标执行"
+        : "正在启动目标执行",
+      toolCallsExecuted: 0,
+    });
+    const goalToContinue = restartingTerminalGoal
+      ? await options.goalService.createFromChat({
+          sessionId: options.sessionId,
+          originMessageId: options.originMessageId,
+          description: options.activeGoal.description,
+        })
+      : options.activeGoal;
     const activeGoal =
-      options.activeGoal.status === "waiting_for_review"
-        ? await options.goalService.resolveReview(options.activeGoal.id, {
+      goalToContinue.status === "waiting_for_review"
+        ? await options.goalService.resolveReview(goalToContinue.id, {
             kind: "approve_continue",
           })
-        : await options.goalService.resume(options.activeGoal.id, {
+        : await options.goalService.resume(goalToContinue.id, {
             ...(options.signal ? { signal: options.signal } : {}),
           });
     await options.chatSessionStore?.attachGoal(options.sessionId, activeGoal);
-    const reply = `继续推进目标：${activeGoal.description}。`;
+    const reply = restartingTerminalGoal
+      ? `已重新开始目标：${activeGoal.description}。`
+      : `继续推进目标：${activeGoal.description}。`;
+    options.emitStatus?.send({
+      state: "completed",
+      message: restartingTerminalGoal
+        ? "目标已重新开始"
+        : "目标执行已更新",
+      toolCallsExecuted: 0,
+    });
     await appendAssistantMessage({
       chatSessionStore: options.chatSessionStore,
       sessionId: options.sessionId,
@@ -890,6 +916,16 @@ async function tryRouteGoalIntent(options: {
       activeGoal,
     },
   };
+}
+
+function isTerminalGoalStatus(status: ChatSessionGoalSummary["status"]): boolean {
+  return (
+    status === "achieved" ||
+    status === "stopped_budget" ||
+    status === "stopped_stalled" ||
+    status === "failed" ||
+    status === "canceled"
+  );
 }
 
 function buildContinuationMessages(options: {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Goal } from "../shared/agentGoal";
+import type { Goal, Milestone } from "../shared/agentGoal";
 import type { GoalReviewDecision } from "../shared/agentGoalReview";
 import { createGoalChatService } from "./goalChatService";
 import type { ProgressLedgerEvent } from "./agentGoalStore";
@@ -11,6 +11,7 @@ describe("goal chat service", () => {
     const service = createGoalChatService({
       controller: createController(),
       goalStore: createGoalStore({ savedGoals, ledgerEvents }),
+      planner: createFakePlanner(),
       createId: () => "goal_release",
       now: () => "2026-06-12T08:00:00.000Z",
     });
@@ -42,6 +43,20 @@ describe("goal chat service", () => {
         ],
       },
     ]);
+    expect(savedGoals[0]?.successCriteria[0]?.acceptanceChecks[0]).toMatchObject({
+      kind: "file_exists",
+      params: {
+        path: "goal-goal_release-result.md",
+      },
+    });
+    expect(
+      savedGoals[0]?.milestones[0]?.successCriteria[0]?.acceptanceChecks[0],
+    ).toMatchObject({
+      kind: "file_exists",
+      params: {
+        path: "goal-goal_release-result.md",
+      },
+    });
     expect(ledgerEvents).toEqual([
       {
         at: "2026-06-12T08:00:00.000Z",
@@ -61,6 +76,7 @@ describe("goal chat service", () => {
         },
       }),
       goalStore: createGoalStore(),
+      planner: createFakePlanner(),
       createId: () => "goal_release",
       now: () => "2026-06-12T08:00:00.000Z",
     });
@@ -85,6 +101,7 @@ describe("goal chat service", () => {
         savedGoals,
         ledgerEvents,
       }),
+      planner: createFakePlanner(),
       createId: () => "goal_release",
       now: () => "2026-06-12T08:00:00.000Z",
     });
@@ -118,6 +135,7 @@ describe("goal chat service", () => {
         savedGoals,
         ledgerEvents,
       }),
+      planner: createFakePlanner(),
       createId: () => "goal_release",
       now: () => "2026-06-12T08:00:00.000Z",
     });
@@ -140,6 +158,27 @@ describe("goal chat service", () => {
     });
   });
 });
+
+function createFakePlanner(): Pick<
+  import("./agentGoalPlanner").AgentGoalPlanner,
+  "plan"
+> {
+  return {
+    async plan(description, planOptions) {
+      return [
+        {
+          id: "milestone_1",
+          description,
+          dependsOn: [],
+          successCriteria: planOptions?.successCriteria ?? [],
+          state: "ready",
+          runIds: [],
+          attempts: 0,
+        },
+      ];
+    },
+  };
+}
 
 function createController(overrides: Partial<{
   start(goalId: string, options?: { signal?: AbortSignal }): Promise<Goal>;

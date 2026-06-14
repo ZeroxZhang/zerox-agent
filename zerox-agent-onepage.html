@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zerox Agent OnePage</title>
+  <style>
+    @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700;900&family=JetBrains+Mono:wght@400;500;700&display=swap");
+  </style>
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --white: #ffffff;
+      --surface: #f8f9fa;
+      --ink: #202124;
+      --muted: #5f6368;
+      --soft: #80868b;
+      --line: #dadce0;
+      --google-blue: #1a73e8;
+      --brand-blue: #4285f4;
+      --brand-red: #ea4335;
+      --brand-yellow: #fbbc04;
+      --brand-green: #34a853;
+      --dark: #202124;
+      --font-sans: "Inter", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      --font-mono: "JetBrains Mono", "IBM Plex Mono", "SF Mono", monospace;
+    }
+
+    body {
+      width: 100%;
+      min-height: 100vh;
+      background: #f8f9fa;
+      color: #202124;
+      font-family: var(--font-sans);
+      line-height: 1.6;
+    }
+
+    .icon {
+      width: 22px;
+      height: 22px;
+      display: inline-block;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    /* design intent: B9-Light product persuasion poster. The primary visual language is Google-like white/gray section rhythm with restrained border cards; Google blue is the single CTA and BigNumber accent; brand four-color appears only as data markers and small section signals. */
+    .page {
+      width: 1080px;
+      height: 1440px;
+      margin: 0 auto;
+      padding: 48px;
+      background: #ffffff;
+      color: #202124;
+      display: grid;
+      grid-template-rows: 212px 202px 732px 150px;
+      gap: 16px;
+      align-content: start;
+      overflow: hidden;
+      font-family: var(--font-sans);
+    }
+
+    .header {
+      display: grid;
+      grid-template-columns: 1fr 252px;
+      grid-template-rows: 28px 84px 70px;
+      gap: 8px 28px;
+      padding-bottom: 14px;
+      border-bottom: 2px solid var(--ink);
+      align-content: start;
+    }
+
+    .kicker,
+    .meta,
+    .label,
+    .chip,
+    .bignum-label,
+    .bignum-note,
+    .diagram-label,
+    .footer,
+    .mini-label {
+      font-family: var(--font-mono);
+      letter-spacing: 0.05em;
+    }
+
+    .kicker {
+      grid-column: 1 / 2;
+      color: var(--google-blue);
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .kicker::before {
+      content: "";
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--google-blue);
+      display: inline-block;
+    }
+
+    .meta {
+      grid-column: 2 / 3;
+      color: var(--soft);
+      font-size: 12px;
+      text-align: right;
+      align-self: center;
+    }
+
+    h1 {
+      grid-column: 1 / 2;
+      font-size: 58px;
+      font-weight: 900;
+      line-height: 1.08;
+      color: var(--ink);
+      letter-spacing: 0;
+      max-width: 720px;
+    }
+
+    .positioning {
+      grid-column: 2 / 3;
+      grid-row: 2 / 4;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      display: grid;
+      grid-template-rows: 24px 1fr 24px;
+      align-content: start;
+    }
+
+    .positioning strong {
+      color: var(--ink);
+      font-size: 19px;
+      font-weight: 700;
+      line-height: 1.35;
+    }
+
+    .positioning small {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .subtitle {
+      grid-column: 1 / 2;
+      color: var(--muted);
+      font-size: 19px;
+      line-height: 1.55;
+      max-width: 720px;
+    }
+
+    .bignum-module {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      grid-template-rows: 1fr;
+      gap: 14px;
+      align-content: start;
+    }
+
+    .bignum-item {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--white);
+      padding: 18px 18px 16px;
+      display: grid;
+      grid-template-rows: 86px 24px 42px;
+      align-content: start;
+    }
+
+    .bignum-item:nth-child(1) { border-top: 8px solid var(--brand-blue); }
+    .bignum-item:nth-child(2) { border-top: 8px solid var(--brand-red); }
+    .bignum-item:nth-child(3) { border-top: 8px solid var(--brand-yellow); }
+    .bignum-item:nth-child(4) { border-top: 8px solid var(--brand-green); }
+
+    .bignum-value {
+      font-family: var(--font-mono);
+      font-size: 92px;
+      line-height: 0.88;
+      font-weight: 700;
+      color: #1a73e8;
+      letter-spacing: -0.02em;
+      display: flex;
+      align-items: end;
+    }
+
+    .bignum-unit {
+      font-size: 32px;
+      color: var(--muted);
+      margin-left: 4px;
+      line-height: 1;
+      padding-bottom: 10px;
+    }
+
+    .bignum-label {
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .bignum-note {
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.45;
+      letter-spacing: 0;
+    }
+
+    .content-grid {
+      display: grid;
+      grid-template-rows: 270px 330px 100px;
+      gap: 16px;
+      align-content: start;
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      grid-template-rows: 270px;
+      gap: 14px;
+      align-content: start;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      background: var(--white);
+      display: grid;
+      grid-template-rows: 28px 56px 108px 40px;
+      align-content: start;
+    }
+
+    .card.blue { border-top: 8px solid var(--brand-blue); }
+    .card.red { border-top: 8px solid var(--brand-red); }
+    .card.yellow { border-top: 8px solid var(--brand-yellow); }
+    .card.green { border-top: 8px solid var(--brand-green); }
+
+    .card-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: var(--muted);
+    }
+
+    .label {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    .card h2 {
+      font-size: 21px;
+      line-height: 1.22;
+      font-weight: 700;
+      color: var(--ink);
+      letter-spacing: 0;
+    }
+
+    .card p {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.48;
+      padding-top: 4px;
+    }
+
+    .chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-content: end;
+      gap: 6px;
+    }
+
+    .chip {
+      font-size: 10px;
+      line-height: 1;
+      color: var(--ink);
+      border: 1px solid var(--line);
+      background: var(--white);
+      border-radius: 999px;
+      padding: 6px 8px;
+      letter-spacing: 0.02em;
+    }
+
+    .architecture {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      padding: 18px;
+      display: grid;
+      grid-template-columns: 290px 1fr;
+      grid-template-rows: 1fr;
+      gap: 18px;
+      align-content: start;
+    }
+
+    .arch-copy {
+      display: grid;
+      grid-template-rows: 20px 58px 58px 126px;
+      gap: 6px;
+      align-content: start;
+    }
+
+    .arch-copy h2 {
+      font-size: 25px;
+      line-height: 1.2;
+      font-weight: 900;
+      letter-spacing: 0;
+    }
+
+    .arch-copy p {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .mini-list {
+      display: grid;
+      grid-template-rows: repeat(5, 22px);
+      gap: 4px;
+    }
+
+    .mini-list span {
+      background: var(--white);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1;
+      padding: 5px 10px;
+    }
+
+    .diagram {
+      display: grid;
+      grid-template-rows: 44px 108px 52px 22px;
+      gap: 8px;
+      align-content: start;
+    }
+
+    .diagram-row {
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+
+    .diagram-row.inputs {
+      grid-template-columns: repeat(4, 1fr);
+      grid-template-rows: 44px;
+    }
+
+    .diagram-row.runtime {
+      grid-template-columns: 1.08fr 1.08fr 1.08fr 1.08fr;
+      grid-template-rows: 108px;
+    }
+
+    .diagram-row.storage {
+      grid-template-columns: 1.4fr 1fr 1fr;
+      grid-template-rows: 52px;
+    }
+
+    .node {
+      background: var(--white);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 9px;
+      display: grid;
+      align-content: start;
+      gap: 6px;
+    }
+
+    .node strong {
+      color: var(--ink);
+      font-size: 13px;
+      line-height: 1.2;
+      font-weight: 700;
+    }
+
+    .node small {
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 1.25;
+    }
+
+    .node.blue { border-left: 8px solid var(--brand-blue); }
+    .node.red { border-left: 8px solid var(--brand-red); }
+    .node.yellow { border-left: 8px solid var(--brand-yellow); }
+    .node.green { border-left: 8px solid var(--brand-green); }
+
+    .flow-line {
+      height: 22px;
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      align-items: center;
+      gap: 10px;
+      color: var(--muted);
+    }
+
+    .flow-line span {
+      height: 2px;
+      background: var(--line);
+      display: block;
+    }
+
+    .flow-line .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--google-blue);
+      margin: 0 auto;
+    }
+
+    .capability-strip {
+      display: grid;
+      grid-template-columns: 1.1fr 1.1fr 1.1fr 1fr;
+      grid-template-rows: 100px;
+      gap: 14px;
+      align-content: start;
+    }
+
+    .capability {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px 14px;
+      background: var(--white);
+      display: grid;
+      grid-template-rows: 18px 22px 1fr;
+      align-content: start;
+      gap: 5px;
+    }
+
+    .capability strong {
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .capability p {
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.34;
+    }
+
+    .footer {
+      background: #202124;
+      color: #ffffff;
+      border-radius: 8px;
+      padding: 18px 24px;
+      display: grid;
+      grid-template-columns: 1fr 292px;
+      grid-template-rows: 30px 44px 24px;
+      gap: 8px 24px;
+      align-content: start;
+    }
+
+    .footer h2 {
+      font-family: var(--font-sans);
+      font-size: 24px;
+      line-height: 1.25;
+      font-weight: 700;
+      letter-spacing: 0;
+      color: #ffffff;
+    }
+
+    .footer p {
+      font-family: var(--font-sans);
+      color: #ffffff;
+      font-size: 14px;
+      line-height: 1.55;
+      max-width: 660px;
+    }
+
+    .cta {
+      grid-column: 2 / 3;
+      grid-row: 1 / 4;
+      align-self: center;
+      background: var(--google-blue);
+      color: #ffffff;
+      border-radius: 999px;
+      min-height: 48px;
+      display: grid;
+      place-items: center;
+      font-size: 13px;
+      font-weight: 700;
+      text-decoration: none;
+    }
+
+    .signature {
+      color: #ffffff;
+      font-size: 11px;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      align-self: end;
+      grid-column: 1 / 2;
+      grid-row: 3 / 4;
+    }
+
+    .signature::before {
+      content: "";
+      width: 44px;
+      height: 1px;
+      background: #ffffff;
+      display: inline-block;
+    }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" style="display: none;" aria-hidden="true">
+    <symbol id="icon-lock" viewBox="0 0 24 24">
+      <rect x="5" y="10" width="14" height="10" rx="2"></rect>
+      <path d="M8 10V7a4 4 0 0 1 8 0v3"></path>
+    </symbol>
+    <symbol id="icon-cpu" viewBox="0 0 24 24">
+      <rect x="7" y="7" width="10" height="10" rx="2"></rect>
+      <path d="M9 1v4M15 1v4M9 19v4M15 19v4M1 9h4M1 15h4M19 9h4M19 15h4"></path>
+    </symbol>
+    <symbol id="icon-route" viewBox="0 0 24 24">
+      <path d="M4 6h6a4 4 0 0 1 0 8H8a4 4 0 0 0 0 8h12"></path>
+      <circle cx="4" cy="6" r="2"></circle>
+      <circle cx="20" cy="22" r="2"></circle>
+    </symbol>
+    <symbol id="icon-database" viewBox="0 0 24 24">
+      <ellipse cx="12" cy="5" rx="8" ry="3"></ellipse>
+      <path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"></path>
+      <path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"></path>
+    </symbol>
+  </svg>
+
+  <article class="page page-a4">
+    <header class="header">
+      <div class="kicker">LOCAL-FIRST DESKTOP AI AGENT</div>
+      <div class="meta">A4 / B9-LIGHT / C3 / T1 PRODUCT</div>
+      <h1>Zerox Agent</h1>
+      <aside class="positioning">
+        <div class="label">POSITION</div>
+        <strong>不是聊天壳，而是把模型变成可审计动作的本地运行时。</strong>
+        <small>OpenAI-compatible 模型 + 本地 SKILL.md + 权限工具 + 长期记忆。</small>
+      </aside>
+      <p class="subtitle">
+        从留白开始，把未知任务拆成计划、工具调用、反思纠错和可追踪结果。任务、会话、权限、运行日志和记忆都落在本机。
+      </p>
+    </header>
+
+    <section class="bignum-module" aria-label="关键指标">
+      <div class="bignum-item">
+        <div class="bignum-value">8</div>
+        <div class="bignum-label">PANELS</div>
+        <div class="bignum-note">会话、总览、运行、任务、技能、工具、记忆、设置。</div>
+      </div>
+      <div class="bignum-item">
+        <div class="bignum-value">6</div>
+        <div class="bignum-label">BUILT-IN TOOLS</div>
+        <div class="bignum-note">文件读写、Shell、网页搜索与抓取。</div>
+      </div>
+      <div class="bignum-item">
+        <div class="bignum-value">30</div>
+        <div class="bignum-label">IPC CHANNELS</div>
+        <div class="bignum-note">模型、技能、任务、运行、记忆、审计都经 IPC 受控暴露。</div>
+      </div>
+      <div class="bignum-item">
+        <div class="bignum-value">50<span class="bignum-unit">/51</span></div>
+        <div class="bignum-label">TEST FILES PASS</div>
+        <div class="bignum-note">当前测试 200/201 通过；唯一失败为 README 缺少“首次启动引导”字样。</div>
+      </div>
+    </section>
+
+    <main class="content-grid">
+      <section class="cards" aria-label="产品叙事">
+        <article class="card blue">
+          <div class="card-head">
+            <span class="label">PAIN</span>
+            <svg class="icon"><use href="#icon-route"></use></svg>
+          </div>
+          <h2>桌面 Agent 卡在“能聊但不能办”</h2>
+          <p>用户真正需要的是文件、命令、网页、调度和记忆一起动起来，而不是只输出建议。</p>
+          <div class="chip-row">
+            <span class="chip">unknown task</span>
+            <span class="chip">manual ops</span>
+            <span class="chip">no audit</span>
+          </div>
+        </article>
+
+        <article class="card red">
+          <div class="card-head">
+            <span class="label">ANSWER</span>
+            <svg class="icon"><use href="#icon-cpu"></use></svg>
+          </div>
+          <h2>Plan -> Execute -> Reflect</h2>
+          <p>先制定步骤，再按任务权限调用工具；失败时反思并决定 retry / skip / abort。</p>
+          <div class="chip-row">
+            <span class="chip">planning</span>
+            <span class="chip">execution</span>
+            <span class="chip">reflection</span>
+          </div>
+        </article>
+
+        <article class="card yellow">
+          <div class="card-head">
+            <span class="label">PRODUCT</span>
+            <svg class="icon"><use href="#icon-lock"></use></svg>
+          </div>
+          <h2>技能驱动，权限先行</h2>
+          <p>SKILL.md 定义输入、工具、MCP 和权限。路径、域名、Shell 模板都按任务白名单授权。</p>
+          <div class="chip-row">
+            <span class="chip">SKILL.md</span>
+            <span class="chip">MCP</span>
+            <span class="chip">audit log</span>
+          </div>
+        </article>
+
+        <article class="card green">
+          <div class="card-head">
+            <span class="label">TRUST</span>
+            <svg class="icon"><use href="#icon-database"></use></svg>
+          </div>
+          <h2>本地优先，可观测，可恢复</h2>
+          <p>API Key 加密；运行日志和工具审计写入 JSONL；成功任务进入 episodic memory。</p>
+          <div class="chip-row">
+            <span class="chip">safeStorage</span>
+            <span class="chip">JSONL</span>
+            <span class="chip">memory</span>
+          </div>
+        </article>
+      </section>
+
+      <section class="architecture" aria-label="本地 Agent 闭环架构">
+        <div class="arch-copy">
+          <span class="label">ARCHITECTURE LOOP</span>
+          <h2>一个桌面应用，四层闭环。</h2>
+          <p>React 负责入口；Preload 暴露受控 IPC；Electron 主进程管理模型、工具、技能、任务和存储。</p>
+          <div class="mini-list">
+            <span>Data mode: desktop / preview 明确标识</span>
+            <span>Schedules: manual / daily / interval / cron</span>
+            <span>Memory: core / session / semantic / episodic / procedural</span>
+            <span>Model: OpenAI-compatible chat + embedding</span>
+            <span>Packaging: macOS app / dmg / zip via electron-builder</span>
+          </div>
+        </div>
+
+        <div class="diagram">
+          <div class="diagram-row inputs">
+            <div class="node blue"><strong>Chat</strong><small>触发任务</small></div>
+            <div class="node red"><strong>Skills</strong><small>技能图</small></div>
+            <div class="node yellow"><strong>Tasks</strong><small>调度权限</small></div>
+            <div class="node green"><strong>Settings</strong><small>密钥加密</small></div>
+          </div>
+          <div class="diagram-row runtime">
+            <div class="node blue"><strong>Agent Runner</strong><small>计划、工具轮次、压缩、退避。</small></div>
+            <div class="node red"><strong>Tool Auth</strong><small>路径、域名、Shell 模板匹配。</small></div>
+            <div class="node yellow"><strong>Tool Registry</strong><small>内置、技能、MCP 动态注册。</small></div>
+            <div class="node green"><strong>Reflect</strong><small>最多 3 轮，retry / skip / abort。</small></div>
+          </div>
+          <div class="diagram-row storage">
+            <div class="node blue"><strong>Runs Timeline</strong><small>四阶段结构化事件。</small></div>
+            <div class="node red"><strong>Audit JSONL</strong><small>工具授权决策持久化。</small></div>
+            <div class="node green"><strong>Memory Store</strong><small>检索、rerank、定时整理。</small></div>
+          </div>
+          <div class="flow-line" aria-hidden="true">
+            <span></span><div class="dot"></div><span></span><div class="dot"></div><span></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="capability-strip" aria-label="核心能力矩阵">
+        <article class="capability">
+          <span class="label">MODEL</span>
+          <strong>兼容任意 OpenAI API</strong>
+          <p>Base URL、Chat Model、Embedding、temperature、max tokens 和延迟测试。</p>
+        </article>
+        <article class="capability">
+          <span class="label">SECURITY</span>
+          <strong>Shell 控制符与破坏性命令拦截</strong>
+          <p>阻止控制符、rm -rf、git push -f、DROP TABLE、kubectl delete。</p>
+        </article>
+        <article class="capability">
+          <span class="label">OBSERVE</span>
+          <strong>运行时间线可回放</strong>
+          <p>工具载荷、模型阶段、失败指引和重试入口集中回放。</p>
+        </article>
+        <article class="capability">
+          <span class="label">MVP RISK</span>
+          <strong>当前缺口明确</strong>
+          <p>README 测试需补文案；公开分发还需签名、公证、自动更新。</p>
+        </article>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <h2>下一步：先跑自检，再启动桌面验收。</h2>
+      <a class="cta" href="#">npm run doctor</a>
+      <p>产品入口不是“再问一句”，而是“一键准备”与“一键验收运行”：先自检，再用 npm run validate:agent 跑桌面端验收。</p>
+      <div class="signature">zerox / generated from source research / 2026-06-07</div>
+    </footer>
+  </article>
+</body>
+</html>

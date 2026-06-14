@@ -152,6 +152,11 @@ async function evaluateCommandExitCode(
   ctx: AcceptanceContext,
 ): Promise<CheckResult> {
   const command = String(check.params.command ?? "");
+  const pathCheck = checkCommandPaths(check, command, ctx.workspacePath);
+  if (pathCheck) {
+    return pathCheck;
+  }
+
   const expectedExitCode = Number(check.params.expectedExitCode ?? 0);
   const result = await ctx.toolExecutor.execute({
     toolName: "shell_exec",
@@ -173,6 +178,11 @@ async function evaluateTestPasses(
   ctx: AcceptanceContext,
 ): Promise<CheckResult> {
   const command = String(check.params.command ?? "");
+  const pathCheck = checkCommandPaths(check, command, ctx.workspacePath);
+  if (pathCheck) {
+    return pathCheck;
+  }
+
   const result = await ctx.toolExecutor.execute({
     toolName: "test_run",
     args: {
@@ -191,6 +201,32 @@ async function evaluateTestPasses(
       ? "Test command passed."
       : `Test command failed with exit code ${exitCode}.`,
   );
+}
+
+function checkCommandPaths(
+  check: AcceptanceCheck,
+  command: string,
+  workspacePath: string,
+): CheckResult | null {
+  // Split by common shell separators and strip simple quotes.
+  const tokens = command.split(/[\s;"'`|&()]+/).filter(Boolean);
+  for (const raw of tokens) {
+    const token = raw.replace(/^["']+|["']+$/g, "");
+    if (!token) continue;
+    const hasParentTraversal = /(^|\/)\.\.(\/|$)/.test(token);
+    if (!path.isAbsolute(token) && !hasParentTraversal) {
+      continue;
+    }
+    if (resolveWorkspacePath(workspacePath, token) === null) {
+      return checkResult(
+        check,
+        false,
+        [],
+        `Command references a path outside the workspace: ${token}`,
+      );
+    }
+  }
+  return null;
 }
 
 function evaluateAssertion(
@@ -330,6 +366,8 @@ function resolveWorkspacePath(
   const workspaceRoot = path.resolve(workspacePath);
   const candidate = path.resolve(workspaceRoot, requestedPath);
   const relative = path.relative(workspaceRoot, candidate);
+  // Reject any path that escapes the workspace. This covers relative ".." traversal
+  // and absolute paths that resolve outside the workspace (including Windows drives).
   if (relative.startsWith("..") || path.isAbsolute(relative)) {
     return null;
   }

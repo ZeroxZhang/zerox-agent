@@ -15,6 +15,14 @@ describe("Design System — Notion-inspired app shell", () => {
     path.join(process.cwd(), "src/renderer/components/AgentChatPanel.tsx"),
     "utf8",
   );
+  const goalContractBarSource = readFileSync(
+    path.join(process.cwd(), "src/renderer/components/GoalContractBar.tsx"),
+    "utf8",
+  );
+  const goalDetailDrawerSource = readFileSync(
+    path.join(process.cwd(), "src/renderer/components/GoalDetailDrawer.tsx"),
+    "utf8",
+  );
   const overviewPanelSource = readFileSync(
     path.join(process.cwd(), "src/renderer/components/OverviewPanel.tsx"),
     "utf8",
@@ -175,11 +183,24 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(chatPanelSource).toContain("goal-session-badge");
     expect(chatPanelSource).toContain("goal-review-gate-card");
     expect(chatPanelSource).toContain("GoalDetailDrawer");
+    expect(chatPanelSource).toContain("handleViewGoalProgress");
+    expect(chatPanelSource).toContain("handleStartGoal");
+    expect(chatPanelSource).toContain("refreshSessions(sessionIdToLoad)");
     expect(chatPanelSource).toContain("slash-command-menu");
     expect(chatPanelSource).toContain("handleSelectComposerCommand(\"goal\")");
+    expect(goalContractBarSource).toContain("buildGoalProgressViewModel");
+    expect(goalContractBarSource).toContain("progress.nextActionLabel");
+    expect(goalContractBarSource).toContain("canStartGoal");
+    expect(goalDetailDrawerSource).toContain("goal-progress-status");
+    expect(goalDetailDrawerSource).toContain("goal-progress-next");
+    expect(goalDetailDrawerSource).toContain("goal-progress-metrics");
+    expect(goalDetailDrawerSource).toContain("progress.milestoneRows");
     expect(styles).toContain(".goal-contract-bar");
     expect(styles).toContain(".goal-session-badge");
     expect(styles).toContain(".goal-detail-drawer");
+    expect(styles).toContain(".goal-progress-status");
+    expect(styles).toContain(".goal-progress-next");
+    expect(styles).toContain(".goal-progress-metrics");
     expect(styles).toContain(".slash-command-menu");
   });
 

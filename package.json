@@ -1,6 +1,6 @@
 {
   "name": "zerox-agent",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "description": "Zerox Agent, a local-first desktop agent built module by module.",
   "main": "dist-electron/main/main.js",
   "scripts": {

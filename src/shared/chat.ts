@@ -113,6 +113,17 @@ export type ChatTaskStatusEvent = {
   ok?: boolean;
 };
 
+export type GoalProgressEvent = {
+  kind: "goal_progress";
+  goalId: string;
+  sessionId?: string;
+  status: GoalStatus;
+  milestoneId?: string;
+  event: "started" | "milestone_started" | "milestone_accepted" | "milestone_rejected" | "review_requested" | "replanned" | "stopped" | "checkpoint";
+  message: string;
+  timestamp: string;
+};
+
 export type CancelChatMessageResult =
   | {
       ok: true;

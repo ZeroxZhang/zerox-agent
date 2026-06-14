@@ -9,6 +9,7 @@ import {
   shouldRequestReview as shouldRequestGoalReview,
   type GoalReviewDecision,
 } from "../shared/agentGoalReview";
+import type { GoalProgressEvent } from "../shared/chat";
 import type { AgentTrajectoryEvent, AgentTrajectoryEventType } from "../shared/agentTrajectory";
 import type { AgentGoalAcceptance, AcceptanceContext, AcceptanceResult } from "./agentGoalAcceptance";
 import type { AgentGoalPlanner } from "./agentGoalPlanner";
@@ -18,6 +19,8 @@ import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
 export type GoalRuntimeRunResult = {
   runId: string;
   toolCallCount: number;
+  status?: "succeeded" | "failed" | "canceled" | "paused";
+  summary?: string;
   wallClockMs?: number;
   tokens?: number;
 };
@@ -45,13 +48,32 @@ export function createAgentGoalController(options: {
   createAcceptanceContext?: (
     goal: Goal,
     milestone?: Milestone,
-  ) => AcceptanceContext;
+  ) => AcceptanceContext | Promise<AcceptanceContext>;
   stallThreshold?: number;
   createId?: () => string;
   nextSequence?: () => number;
   now?: () => string;
+  onProgress?: (event: GoalProgressEvent) => void;
 }): AgentGoalController {
   const stallThreshold = options.stallThreshold ?? 3;
+
+  function notifyProgress(
+    event: GoalProgressEvent["event"],
+    goal: Goal,
+    message: string,
+    milestoneId?: string,
+  ) {
+    options.onProgress?.({
+      kind: "goal_progress",
+      goalId: goal.id,
+      sessionId: goal.chatSessionId,
+      status: goal.status,
+      milestoneId,
+      event,
+      message,
+      timestamp: currentTime(),
+    });
+  }
 
   async function loadGoal(goalId: string): Promise<Goal> {
     const goal = await options.goalStore.get(goalId);
@@ -83,7 +105,7 @@ export function createAgentGoalController(options: {
         if (allMilestonesAccepted(goal)) {
           const result = await options.acceptance.evaluateGoal(
             goal,
-            options.createAcceptanceContext?.(goal) as never,
+            (await options.createAcceptanceContext?.(goal)) as never,
           );
           if (result.accepted) {
             return stopGoal(
@@ -146,6 +168,12 @@ export function createAgentGoalController(options: {
       goalId: goal.id,
       milestoneId: milestone.id,
     });
+    notifyProgress(
+      "milestone_started",
+      goal,
+      `里程碑开始：${milestone.description}`,
+      milestone.id,
+    );
 
     const runResult = await options.runtimeEngine.runMilestone(
       goal,
@@ -153,6 +181,10 @@ export function createAgentGoalController(options: {
       runOptions,
     );
     milestone.runIds.push(runResult.runId);
+    milestone.lastRunStatus = runResult.status ?? "succeeded";
+    if (runResult.summary) {
+      milestone.lastRunSummary = runResult.summary;
+    }
     goal.budgetUsage.iterations += 1;
     goal.budgetUsage.toolCalls += runResult.toolCallCount;
     goal.budgetUsage.wallClockMs += runResult.wallClockMs ?? 0;
@@ -160,7 +192,7 @@ export function createAgentGoalController(options: {
 
     const acceptance = await options.acceptance.evaluate(
       milestone,
-      options.createAcceptanceContext?.(goal, milestone) as never,
+      (await options.createAcceptanceContext?.(goal, milestone)) as never,
     );
 
     if (acceptance.accepted) {
@@ -174,6 +206,12 @@ export function createAgentGoalController(options: {
         summary: milestone.lastAcceptanceSummary,
       });
       await writeGoalCheckpoint(goal, "milestone_accepted");
+      notifyProgress(
+        "milestone_accepted",
+        goal,
+        milestone.lastAcceptanceSummary ?? `里程碑已完成：${milestone.description}`,
+        milestone.id,
+      );
 
       if (shouldRequestReview(goal, milestone)) {
         goal.status = "waiting_for_review";
@@ -188,6 +226,12 @@ export function createAgentGoalController(options: {
           goalId: goal.id,
           milestoneId: milestone.id,
         });
+        notifyProgress(
+          "review_requested",
+          goal,
+          "里程碑完成，等待你审核。",
+          milestone.id,
+        );
         await options.goalStore.save(goal);
         return true;
       }
@@ -204,6 +248,12 @@ export function createAgentGoalController(options: {
       milestoneId: milestone.id,
       summary: milestone.lastAcceptanceSummary,
     });
+    notifyProgress(
+      "milestone_rejected",
+      goal,
+      milestone.lastAcceptanceSummary ?? `里程碑未通过：${milestone.description}`,
+      milestone.id,
+    );
 
     if (goal.budgetUsage.replans < goal.budget.maxReplans) {
       goal.milestones = await options.planner.replan(
@@ -223,6 +273,12 @@ export function createAgentGoalController(options: {
         planVersion: goal.planVersion,
         replans: goal.budgetUsage.replans,
       });
+      notifyProgress(
+        "replanned",
+        goal,
+        "里程碑未通过，已重新规划。",
+        milestone.id,
+      );
       await writeGoalCheckpoint(goal, "goal_replanned");
       return false;
     }
@@ -257,6 +313,7 @@ export function createAgentGoalController(options: {
       stopReason,
       summary,
     });
+    notifyProgress("stopped", goal, summary);
     await options.goalStore.save(goal);
     return goal;
   }
@@ -274,6 +331,7 @@ export function createAgentGoalController(options: {
       planVersion: goal.planVersion,
       budgetUsage: goal.budgetUsage,
     });
+    notifyProgress("checkpoint", goal, `目标状态已保存：${reason}`);
   }
 
   async function emit(
@@ -318,6 +376,7 @@ export function createAgentGoalController(options: {
           summary: "Goal execution started.",
         });
         await emit(goal.id, "goal_planned", { goalId: goal.id });
+        notifyProgress("started", goal, "目标已开始执行。");
         await options.goalStore.save(goal);
       }
       return runLoop(goal, runOptions);

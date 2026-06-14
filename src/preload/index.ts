@@ -10,6 +10,7 @@ import type {
   ChatSessionListItem,
   ChatSessionRecord,
   ChatTaskStatusEvent,
+  GoalProgressEvent,
   SendChatMessageInput,
   SendChatMessageResult,
 } from "../shared/chat";
@@ -174,6 +175,18 @@ const buildingAgent = {
     ipcRenderer.invoke("goal:resolveReview", goalId, decision),
   cancelGoal: (goalId: string): Promise<GoalOperationResult> =>
     ipcRenderer.invoke("goal:cancel", goalId),
+  increaseGoalBudget: (
+    goalId: string,
+    delta: Partial<GoalBudget>,
+  ): Promise<GoalOperationResult> =>
+    ipcRenderer.invoke("goal:increaseBudget", goalId, delta),
+  replanGoal: (
+    goalId: string,
+    instructions: string,
+  ): Promise<GoalOperationResult> =>
+    ipcRenderer.invoke("goal:replan", goalId, instructions),
+  retryGoal: (goalId: string): Promise<GoalOperationResult> =>
+    ipcRenderer.invoke("goal:retry", goalId),
   getGoal: (goalId: string): Promise<Goal | null> =>
     ipcRenderer.invoke("goal:get", goalId),
   listActiveGoals: (): Promise<Goal[]> => ipcRenderer.invoke("goal:listActive"),
@@ -239,6 +252,16 @@ const buildingAgent = {
     ipcRenderer.on("chat:statusEvent", handler);
     return () => {
       ipcRenderer.removeListener("chat:statusEvent", handler);
+    };
+  },
+  onGoalProgressEvent: (callback: (event: GoalProgressEvent) => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      data: GoalProgressEvent,
+    ) => callback(data);
+    ipcRenderer.on("goal:progressEvent", handler);
+    return () => {
+      ipcRenderer.removeListener("goal:progressEvent", handler);
     };
   },
   listChatSessions: (): Promise<ChatSessionListItem[]> =>

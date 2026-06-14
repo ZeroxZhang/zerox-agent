@@ -322,6 +322,75 @@ describe("chat service", () => {
     expect(completeCalled).toBe(false);
   });
 
+  it("recreates and starts a terminal session goal when continuing it", async () => {
+    let completeCalled = false;
+    const statusEvents: ChatTaskStatusEvent[] = [];
+    const resumes: string[] = [];
+    const goalCreates: unknown[] = [];
+    const attachedGoals: ChatSessionGoalSummary[] = [];
+    const activeGoal: ChatSessionGoalSummary = {
+      id: "goal_failed",
+      description: "深度调研 Serenity",
+      status: "failed",
+    };
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          completeCalled = true;
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([], {
+        activeGoal,
+        attachedGoals,
+      }),
+      goalService: createGoalService({ goalCreates, resumes }),
+      createId: () => "chat_goal",
+      now: () => new Date("2026-06-13T08:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage(
+      {
+        sessionId: "persisted_session",
+        message: "继续这个目标",
+      },
+      {
+        onStatusEvent(event) {
+          statusEvents.push(event);
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      reply: "已重新开始目标：发布。",
+      activeGoal: {
+        id: "goal_release",
+        description: "发布",
+        status: "executing",
+      },
+    });
+    expect(goalCreates).toEqual([
+      {
+        sessionId: "persisted_session",
+        originMessageId: "message_1",
+        description: "深度调研 Serenity",
+      },
+    ]);
+    expect(resumes).toEqual(["goal_release"]);
+    expect(attachedGoals.at(-1)).toEqual({
+      id: "goal_release",
+      description: "发布",
+      status: "executing",
+    });
+    expect(statusEvents.map((event) => event.message)).toContain(
+      "正在重新开始目标执行",
+    );
+    expect(completeCalled).toBe(false);
+  });
+
   it("pauses the active session goal from a chat command", async () => {
     let completeCalled = false;
     const pauses: string[] = [];

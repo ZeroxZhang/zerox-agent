@@ -680,3 +680,117 @@
   - `npm run harness:check` -> passed.
   - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
   - `npm run dist:mac` -> generated macOS DMG and ZIP artifacts for `1.8.0`.
+
+## 2026-06-13 Goal Progress Visibility Follow-up
+
+- Clarified session-native goal planning state in the chat surface: a newly created goal now reads as `已规划，待启动` instead of implying active execution.
+- Added a visible `开始执行` action for planning goals on both the Goal Contract Bar and Goal Detail Drawer.
+- Reworked the progress drawer from raw goal fields into status, next action, metrics, and translated milestone rows.
+- Refreshed active goal detail when opening progress and after chat goal responses so the drawer does not show stale detail.
+- Changed files:
+  - `src/renderer/goalProgressViewModel.ts`
+  - `src/renderer/goalProgressViewModel.test.ts`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/components/GoalContractBar.tsx`
+  - `src/renderer/components/GoalDetailDrawer.tsx`
+  - `src/renderer/materialDesign.test.ts`
+  - `src/renderer/styles.css`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `npm test -- src/renderer/goalProgressViewModel.test.ts` -> RED, missing view-model module; then 1 file / 2 tests passed.
+  - `npm test -- src/renderer/materialDesign.test.ts` -> RED, missing progress handlers and drawer sections; then passed after wiring.
+  - `npm test -- src/renderer/goalProgressViewModel.test.ts src/renderer/materialDesign.test.ts` -> 2 files / 21 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> 106 Vitest files / 509 tests passed, build passed, agent eval 21/21, memory eval 2/2.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - Browser preview at `http://127.0.0.1:5173/#chat` -> shell, chat heading, and composer rendered; console warnings/errors were empty.
+  - Electron dev app check -> active goal bar showed `已规划，待启动`, `开始执行`, and the progress drawer showed next action, progress, budget metrics, and translated `待执行` milestone state.
+
+## 2026-06-13 Goal Execution Runtime Follow-up
+
+- Root-caused failed chat goals to the milestone runtime only recording a placeholder run; model-review acceptance then rejected the run because it had no evidence references, causing repeated replans and terminal `failed`.
+- Extracted `goalRuntimeEngine` so goal milestones now run through the shared agent loop with the existing tool executor, tool authorization service, model profile, run store, trajectory store, and offload store.
+- Changed chat-created goal acceptance from empty `model_review` checks to deterministic progress artifacts:
+  - milestone acceptance checks `milestoneProgress.hasRun`.
+  - goal acceptance checks `goalProgress.allMilestonesAccepted`.
+- Added persisted milestone run metadata (`lastRunStatus`, `lastRunSummary`) so acceptance can distinguish successful runs from mere run IDs.
+- Added recovery behavior for terminal active goals: continuing a failed/canceled/stopped goal recreates it from the same description and immediately starts the new goal.
+- Added visible recovery UI: terminal goals now show `重新开始`, while planned goals still show `开始执行`.
+- Refreshed session summaries when loading persisted sessions so switching away and back does not drop the active goal bar.
+- Changed files:
+  - `src/main/goalRuntimeEngine.ts`
+  - `src/main/goalRuntimeEngine.test.ts`
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+  - `src/main/goalChatService.ts`
+  - `src/main/goalChatService.test.ts`
+  - `src/main/agentGoalController.ts`
+  - `src/main/main.ts`
+  - `src/shared/agentGoal.ts`
+  - `src/renderer/goalProgressViewModel.ts`
+  - `src/renderer/goalProgressViewModel.test.ts`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/components/GoalContractBar.tsx`
+  - `src/renderer/components/GoalDetailDrawer.tsx`
+  - `src/renderer/materialDesign.test.ts`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `npm test -- src/main/goalRuntimeEngine.test.ts src/main/goalChatService.test.ts` -> RED, missing runtime module and chat goal still using `model_review`; then 2 files / 5 tests passed.
+  - `npm test -- src/renderer/materialDesign.test.ts` -> RED, persisted session loading did not refresh session summaries; then passed after `refreshSessions(sessionIdToLoad)`.
+  - `npm test -- src/main/chatService.test.ts -t "recreates and starts"` -> RED, terminal goals resumed the failed ID directly and emitted no goal execution status event; then passed after recreate-and-start routing and status emission.
+  - `npm test -- src/renderer/goalProgressViewModel.test.ts -t "restart"` -> RED, failed goals offered only `失败状态`; then passed after `重新开始` next action.
+  - `npm test -- src/renderer/goalProgressViewModel.test.ts src/main/chatService.test.ts src/main/goalRuntimeEngine.test.ts src/main/goalChatService.test.ts src/renderer/materialDesign.test.ts` -> 5 files / 46 tests passed.
+  - `npm run build` -> passed.
+  - Browser preview at `http://127.0.0.1:5173/#chat` -> shell, chat heading, composer rendered, no framework overlay, console warnings/errors empty.
+  - Electron dev app check -> failed active goal now shows `重新开始`.
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> 107 Vitest files / 512 tests passed, build passed, agent eval 21/21, memory eval 2/2.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+
+## 2026-06-13 Goal Mode Realization + Main Process Decoupling + UX Closure (A/B/C)
+
+- Phase A: made Goal Mode runtime and planning real.
+  - A1 Workspace sandbox: goal acceptance and runtime now resolve workspace through `AgentWorkspaceService` instead of a hard-coded home directory.
+  - A2 Goal-aware runtime: `goalRuntimeEngine` calls `AgentGoalContext.assemble`, returns inferred tokens, and emits `checkpoint_written` trajectory evidence.
+  - A3 Chat planner integration: chat-created goals now call the planner; if planning fails they fall back to a single deterministic milestone with a `file_exists` artifact check.
+- Phase B: decoupled the main process.
+  - Extracted all IPC handlers from `src/main/main.ts` into `src/main/ipc/index.ts` organized by domain (app/tasks/tools/runs/workspaces/multi-agent/goals/evals/memory/learning/model-settings/chat).
+  - Introduced `src/main/container.ts` as the explicit DI container: lazy service factories, shared tool executor, MCP lifecycle, and high-level operations like `runAgentTask`, `runGoalOperation`, and `runMemoryEvals`.
+  - Rewrote `src/main/main.ts` to window/tray/lifecycle/validation orchestration only; it creates the container and registers IPC handlers.
+- Phase C: closed the goal UX loop.
+  - C1 Real-time progress streaming: added `GoalProgressEvent`, container-level pub/sub, `goal:progressEvent` IPC broadcast, preload `onGoalProgressEvent`, and chat-panel listener that refreshes the active goal detail and session rail live.
+  - C2 Evidence-backed review gate: `GoalDetailDrawer` now shows success-criteria acceptance checks with evidence requirements and `通过并继续 / 拒绝并重新规划 / 终止目标` actions; the inline review gate card uses the same resolve handler.
+  - C3 Failure/stall/budget recovery: added `goal:increaseBudget`, `goal:replan`, and `goal:retry` IPC paths backed by `GoalChatService` methods; recovery actions render in both `GoalContractBar` and `GoalDetailDrawer` for `failed`, `stopped_stalled`, and `stopped_budget` goals.
+- Changed files:
+  - `src/main/container.ts` (new)
+  - `src/main/ipc/index.ts` (new)
+  - `src/main/main.ts` (rewritten)
+  - `src/main/agentGoalController.ts`
+  - `src/main/goalRuntimeEngine.ts`
+  - `src/main/goalChatService.ts`
+  - `src/shared/chat.ts`
+  - `src/preload/index.ts`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/components/GoalContractBar.tsx`
+  - `src/renderer/components/GoalDetailDrawer.tsx`
+- TDD and verification evidence:
+  - `npm test` -> 107 Vitest files / 512 tests passed.
+  - `npm run build` -> passed.
+  - `npm run verify` -> 107 files / 512 tests passed, build passed, agent eval 21/21, memory eval 2/2.
+  - `npm run harness:score` -> overall 9.20, eval 21/21, ACI passed, context passed, adversarial checked with no escapes.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `git diff --check` -> passed.
+
+## 2026-06-13 v1.9.0 Release Packaging
+
+- Bumped package version: `package.json` and `package-lock.json` `1.8.0 -> 1.9.0`.
+- Updated `README.md` release notes, verification counts, artifact names, and both English/Chinese feature descriptions for v1.9.0.
+- Updated `src/shared/readme.test.ts` to expect `Zerox.Agent-1.9.0-arm64.dmg`.
+- Added completed feature entry `P6.1-goal-mode-realization-architecture` to `.zerox/feature_list.json`.
+- Built macOS release artifacts:
+  - `release/Zerox Agent-1.9.0-arm64.dmg`
+  - `release/Zerox Agent-1.9.0-arm64-mac.zip`
+  - `release/latest-mac.yml`
+- Verification before packaging:
+  - `npm test` -> 107 files / 512 tests passed.
+  - `npm run dist:mac` -> build and packaging succeeded.
