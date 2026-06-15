@@ -29,7 +29,7 @@ describe("agent eval runner", () => {
 
     expect(goalFixtures.map((fixture) => fixture.id)).toEqual([
       "goal-achieved-within-budget",
-      "goal-stopped-by-budget",
+      "goal-continues-without-budget-stop",
       "goal-stalled-detection",
       "goal-replan-on-acceptance-failure",
       "goal-review-gate-blocks",
@@ -43,14 +43,15 @@ describe("agent eval runner", () => {
       ),
     ).toBe(true);
     expect(
-      fixtures.find((fixture) => fixture.id === "goal-stopped-by-budget"),
+      fixtures.find(
+        (fixture) => fixture.id === "goal-continues-without-budget-stop",
+      ),
     ).toMatchObject({
       assertions: expect.arrayContaining([
         {
-          type: "goal_stopped",
+          type: "milestone_started",
           payload: {
-            status: "stopped_budget",
-            budgetStopBeforeDispatch: true,
+            milestoneId: "milestone_second",
           },
           after: "checkpoint_written",
         },

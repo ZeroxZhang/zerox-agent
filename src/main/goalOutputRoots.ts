@@ -63,7 +63,9 @@ function normalizeOutputRoot(
   rawPath: string,
   hint: "file" | "unknown",
 ): string | null {
-  const cleaned = rawPath.trim().replace(/[。；;、,，）)]+$/g, "");
+  const cleaned = stripAttachedNaturalLanguageSuffix(rawPath)
+    .trim()
+    .replace(/[。；;、,，）)]+$/g, "");
   if (!isExplicitPath(cleaned)) {
     return null;
   }
@@ -75,6 +77,13 @@ function normalizeOutputRoot(
   const normalized = normalizeBoundaryPath(candidate);
   const parts = normalized.split("/").filter(Boolean);
   return parts.length >= 2 ? normalized : null;
+}
+
+function stripAttachedNaturalLanguageSuffix(rawPath: string): string {
+  return rawPath.replace(
+    /(?<=[A-Za-z0-9._~-])(?:目录下的文件|目录下|目录中的文件|目录里的文件|目录中|目录里|文件夹下的文件|文件夹下|文件夹中的文件|文件夹里的文件|文件夹中|文件夹里|下的文件|里的文件|中的文件|目录|文件夹).*$/u,
+    "",
+  );
 }
 
 function isExplicitPath(value: string): boolean {

@@ -228,6 +228,50 @@ describe("goal chat service", () => {
     await service.cancel("goal_release");
     expect(startedSignal?.aborted).toBe(true);
   });
+
+  it("retries budget-stopped chat goals directly without requiring a budget increase", async () => {
+    const savedGoals: Goal[] = [];
+    const ledgerEvents: ProgressLedgerEvent[] = [];
+    const resumed: string[] = [];
+    const service = createGoalChatService({
+      controller: createController({
+        async resume(goalId) {
+          resumed.push(goalId);
+          return createGoal({ id: goalId, status: "executing" });
+        },
+      }),
+      goalStore: createGoalStore({
+        existingGoal: createGoal({
+          status: "stopped_budget",
+          stopReason: "budget_exhausted",
+        }),
+        savedGoals,
+        ledgerEvents,
+      }),
+      planner: createFakePlanner(),
+      createId: () => "goal_release",
+      now: () => "2026-06-12T08:00:00.000Z",
+    });
+
+    const summary = await service.retry("goal_release");
+
+    expect(summary).toEqual({
+      id: "goal_release",
+      description: "发布 v1.8.0",
+      status: "executing",
+    });
+    expect(resumed).toEqual(["goal_release"]);
+    expect(savedGoals.at(-1)).toMatchObject({
+      id: "goal_release",
+      status: "executing",
+      stopReason: undefined,
+    });
+    expect(ledgerEvents.at(-1)).toEqual({
+      at: "2026-06-12T08:00:00.000Z",
+      kind: "goal_planned",
+      summary: "Goal retried from chat recovery UI.",
+    });
+  });
 });
 
 function createFakePlanner(): Pick<

@@ -16,22 +16,20 @@ describe("agent eval adversary", () => {
         "remove_required_event",
         "wrong_payload",
         "wrong_order",
-        "tamper_goal_budget",
         "remove_acceptance_check",
         "remove_goal_judge",
       ]),
     );
+    expect(cases.map((testCase) => testCase.mutation)).not.toContain(
+      "tamper_goal_budget",
+    );
   });
 
-  it("creates goal-specific adversarial cases for budget, acceptance, and judge tampering", () => {
+  it("creates goal-specific adversarial cases for acceptance and judge tampering", () => {
     const cases = createAdversarialAgentEvalCases(createAgentEvalFixtures());
 
     expect(cases).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({
-          sourceFixtureId: "goal-stopped-by-budget",
-          mutation: "tamper_goal_budget",
-        }),
         expect.objectContaining({
           sourceFixtureId: "goal-achieved-within-budget",
           mutation: "remove_acceptance_check",

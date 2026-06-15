@@ -329,12 +329,48 @@ function uniqueStrings(values: unknown[]): string[] {
 }
 
 function createSessionTitle(content: string): string {
-  const normalized = content.trim();
+  const normalized = normalizeSessionTitleText(content);
   if (!normalized) {
     return "新会话";
   }
 
-  return normalized.length > 32 ? `${normalized.slice(0, 31)}…` : normalized;
+  if (
+    /项目|仓库|代码|repo/i.test(normalized) &&
+    /review|复盘|审查|检查/i.test(normalized) &&
+    /优化|迭代|改进|方案|建议/i.test(normalized)
+  ) {
+    return "项目 Review 优化";
+  }
+
+  if (/整理/.test(normalized) && /下载/.test(normalized) && /报告/.test(normalized)) {
+    return "整理下载报告";
+  }
+
+  if (/整理/.test(normalized) && /下载/.test(normalized)) {
+    return "整理下载文件夹";
+  }
+
+  if (/调研|研究/.test(normalized) && /投资/.test(normalized)) {
+    return "投资方法调研";
+  }
+
+  return normalized.length > 16 ? `${normalized.slice(0, 15)}…` : normalized;
+}
+
+function normalizeSessionTitleText(content: string): string {
+  return content
+    .trim()
+    .replace(/^\/(?:目标|goal)\s*/i, "")
+    .replace(/(["'`])\/.*?\1/g, "")
+    .replace(/\/[^\s，。；;,]+(?:\s+[^\s，。；;,]+)*/g, "")
+    .replace(/项目位置是[:：]?/g, "")
+    .replace(/(?:请|麻烦)?帮我/g, "")
+    .replace(/你自己这个/g, "")
+    .replace(/自己这个/g, "")
+    .replace(/这个/g, "")
+    .replace(/[，。；;:：、"'`]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function scoreMessage(

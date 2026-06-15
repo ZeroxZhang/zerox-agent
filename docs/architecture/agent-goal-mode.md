@@ -1,6 +1,6 @@
 # Chat Session Goal Mode Architecture
 
-Goal Mode adds bounded autonomy above the recoverable runtime. In the current UX it is a Chat Session Goal Mode: a user defines, continues, reviews, modifies, or ends a high-level goal inside the conversation where the work is happening. The agent can only run inside explicit budgets, deterministic or evidence-backed acceptance, review gates, and durable local checkpoints.
+Goal Mode adds observable, recoverable autonomy above the runtime. In the current UX it is a Chat Session Goal Mode: a user defines, continues, reviews, modifies, or ends a high-level goal inside the conversation where the work is happening. The agent runs inside local workspace permissions, deterministic or evidence-backed acceptance, review gates, explicit user interruption, and durable local checkpoints.
 
 Goal Mode is no longer a parallel standalone page. Chat sessions carry `activeGoalId`, `goalIds`, and goal summaries; goal events are written back to assistant messages with `goalId` and `goalEventRef`. Legacy `#goals` navigation resolves to Chat so old links land in the session-native surface.
 
@@ -30,24 +30,23 @@ The goal layer sits above `AgentRuntimeEngine`. A milestone dispatch is one reco
 | `executing` | The controller may dispatch the next ready milestone. | No |
 | `waiting_for_review` | A review gate is open; no milestone can advance. | No |
 | `achieved` | Goal-level acceptance passed. | Yes |
-| `stopped_budget` | Budget was exhausted before more work could start. | Yes |
+| `stopped_budget` | Legacy v2.0 budget-stop state; v2.1+ treats it as directly continuable. | No |
 | `stopped_stalled` | The controller detected no progress. | Yes |
 | `failed` | Acceptance or runtime failure became unrecoverable. | Yes |
 | `canceled` | User or review decision stopped the goal. | Yes |
 
-Allowed transitions are defined in `src/shared/agentGoal.ts`. The important recovery transition is `waiting_for_review -> executing` after an explicit review decision.
+Allowed transitions are defined in `src/shared/agentGoal.ts`. The important recovery transitions are `waiting_for_review -> executing` after an explicit review decision and `stopped_budget -> executing` for goals stopped by older releases.
 
-## Five Termination Conditions
+## Termination And Suspension Conditions
 
-Goal Mode is bounded autonomy. The controller must stop or suspend when any termination condition is reached:
+Goal Mode avoids hidden system budget stops. The controller must stop or suspend only when a behavioral condition is reached:
 
 1. Goal acceptance passes: set `achieved` and `stopReason: goal_accepted`.
-2. Budget is exhausted: set `stopped_budget` before dispatching another milestone.
-3. Progress stalls: set `stopped_stalled` with a help summary.
-4. Review gate is reached: set `waiting_for_review` and wait for user action.
-5. User interrupt or termination: set `canceled` with a reviewed stop reason.
+2. Progress stalls: set `stopped_stalled` with a help summary.
+3. Review gate is reached: set `waiting_for_review` and wait for user action.
+4. User interrupt or termination: set `canceled` with a reviewed stop reason.
 
-Budget checks happen before dispatch. An exhausted budget must never start a new runtime run.
+`budgetUsage` remains an audit counter for iterations, tool calls, runtime, tokens, and replans. It is not a dispatch gate in v2.1+.
 
 ## Deterministic-first Acceptance
 

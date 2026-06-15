@@ -63,7 +63,7 @@ describe("agent goal controller", () => {
     ).toHaveLength(3);
   });
 
-  it("stops before dispatching another milestone when budget is exhausted", async () => {
+  it("continues dispatching milestones instead of stopping on internal budget counters", async () => {
     await store.save(
       createGoal(
         [milestone("milestone_1"), milestone("milestone_2", ["milestone_1"])],
@@ -80,14 +80,17 @@ describe("agent goal controller", () => {
     const runtime = createRuntime();
     const controller = createController({
       runtime,
-      acceptance: createAcceptance({ milestoneAccepted: [true] }),
+      acceptance: createAcceptance({
+        milestoneAccepted: [true, true],
+        goalAccepted: [true],
+      }),
     });
 
     const result = await controller.start("goal_1");
 
-    expect(result.status).toBe("stopped_budget");
-    expect(result.stopReason).toBe("budget_exhausted");
-    expect(runtime.runMilestoneIds).toEqual(["milestone_1"]);
+    expect(result.status).toBe("achieved");
+    expect(result.stopReason).toBe("goal_accepted");
+    expect(runtime.runMilestoneIds).toEqual(["milestone_1", "milestone_2"]);
   });
 
   it("stops stalled goals after consecutive iterations without ledger progress", async () => {
@@ -110,7 +113,7 @@ describe("agent goal controller", () => {
     expect(ledger.at(-1)?.summary).toContain("No ready milestones");
   });
 
-  it("replans after acceptance failure and counts replans against the budget", async () => {
+  it("replans after acceptance failure and records replan usage", async () => {
     await store.save(createGoal([milestone("milestone_original")]));
     const runtime = createRuntime();
     const controller = createController({
@@ -267,6 +270,40 @@ describe("agent goal controller", () => {
 
     expect(result.status).toBe("achieved");
     expect(runtime.runMilestoneIds).toEqual(["milestone_next"]);
+  });
+
+  it("persists a running milestone before dispatching the runtime loop", async () => {
+    await store.save(createGoal([milestone("milestone_1")]));
+    const observedPersistedStates: string[] = [];
+    const runtime: GoalRuntimeEngine & { runMilestoneIds: string[] } = {
+      runMilestoneIds: [],
+      async runMilestone(_goal, currentMilestone) {
+        runtime.runMilestoneIds.push(currentMilestone.id);
+        const persisted = await store.get("goal_1");
+        observedPersistedStates.push(
+          persisted?.milestones.find((item) => item.id === currentMilestone.id)
+            ?.state ?? "missing",
+        );
+        return {
+          runId: `run_${currentMilestone.id}_1`,
+          toolCallCount: 1,
+          wallClockMs: 100,
+          tokens: 10,
+        };
+      },
+    };
+    const controller = createController({
+      runtime,
+      acceptance: createAcceptance({
+        milestoneAccepted: [true],
+        goalAccepted: [true],
+      }),
+    });
+
+    await controller.start("goal_1");
+
+    expect(observedPersistedStates).toEqual(["running"]);
+    expect(runtime.runMilestoneIds).toEqual(["milestone_1"]);
   });
 
   function createController(options: {

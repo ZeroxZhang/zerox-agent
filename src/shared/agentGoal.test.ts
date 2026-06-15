@@ -70,9 +70,10 @@ describe("agent goal model", () => {
     expect(canTransitionGoalStatus("executing", "failed")).toBe(true);
     expect(canTransitionGoalStatus("executing", "canceled")).toBe(true);
     expect(canTransitionGoalStatus("waiting_for_review", "canceled")).toBe(true);
+    expect(canTransitionGoalStatus("stopped_budget", "executing")).toBe(true);
   });
 
-  it("rejects transitions out of terminal goal states", () => {
+  it("rejects transitions out of completed terminal goal states", () => {
     expect(canTransitionGoalStatus("achieved", "executing")).toBe(false);
     expect(() => assertGoalTransition("achieved", "executing")).toThrow(
       'Cannot transition goal from "achieved" to "executing".',

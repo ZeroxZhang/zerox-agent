@@ -395,6 +395,49 @@ describe("chat service", () => {
     expect(completeCalled).toBe(false);
   });
 
+  it("continues legacy budget-stopped goals without creating a new retry attempt", async () => {
+    let completeCalled = false;
+    const resumes: string[] = [];
+    const goalCreates: unknown[] = [];
+    const activeGoal: ChatSessionGoalSummary = {
+      id: "goal_release",
+      description: "发布",
+      status: "stopped_budget",
+    };
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          completeCalled = true;
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([], { activeGoal }),
+      goalService: createGoalService({ goalCreates, resumes }),
+      createId: () => "chat_goal",
+      now: () => new Date("2026-06-13T08:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage({
+      sessionId: "persisted_session",
+      message: "继续这个目标",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      reply: "继续推进目标：发布。",
+      activeGoal: {
+        id: "goal_release",
+        description: "发布",
+        status: "executing",
+      },
+    });
+    expect(goalCreates).toEqual([]);
+    expect(resumes).toEqual(["goal_release"]);
+    expect(completeCalled).toBe(false);
+  });
+
   it("pauses the active session goal from a chat command", async () => {
     let completeCalled = false;
     const pauses: string[] = [];

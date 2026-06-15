@@ -243,6 +243,12 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".slash-command-menu");
   });
 
+  it("keeps goal progress synced even before the active goal summary refreshes", () => {
+    expect(chatPanelSource).toContain("const eventBelongsToActiveGoal");
+    expect(chatPanelSource).toContain("event.sessionId === activeSessionId");
+    expect(chatPanelSource).toContain("void refreshActiveGoalDetail(event.goalId)");
+  });
+
   it("starts Chat in a command-first empty home state", () => {
     expect(chatPanelSource).toContain("const initialMessages: ChatMessage[] = [];");
     expect(chatPanelSource).toContain("function AgentHomeHero");
@@ -262,6 +268,31 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(chatPanelSource).not.toContain("<aside className=\"session-rail\"");
     expect(styles).toContain(".agent-chat-panel.is-focus-mode");
     expect(styles).toContain(".agent-chat-panel.has-context-panel");
+    expect(styles).toContain(".agent-context-panel");
+    expect(styles).toContain("padding: 28px;");
+  });
+
+  it("moves active work status into the right context rail instead of a large composer strip", () => {
+    expect(chatPanelSource).toContain("ContextActivityCard");
+    expect(chatPanelSource).not.toContain("<TaskActivityStrip");
+    expect(chatPanelSource).not.toContain("function TaskActivityStrip");
+    expect(styles).toContain(".context-activity-card");
+    expect(styles).toContain(".context-activity-pill");
+  });
+
+  it("contains long chat titles and live status text inside the hero header", () => {
+    expect(chatPanelSource).toContain("const chatTitle = activeSession?.title ?? \"新会话\";");
+    expect(chatPanelSource).toContain("title={chatTitle}");
+    expect(chatPanelSource).toContain("title={status.message}");
+    expect(chatPanelSource).toContain("const chatStatusIsLong");
+    expect(chatPanelSource).toContain("aria-expanded={chatStatusIsLong ? chatStatusExpanded : undefined}");
+    expect(chatPanelSource).toContain("setChatStatusExpanded((expanded) => !expanded)");
+    expect(styles).toContain(".chat-hero h2");
+    expect(styles).toContain("-webkit-line-clamp: 2;");
+    expect(styles).toContain(".chat-state > span");
+    expect(styles).toContain(".chat-state.is-expanded");
+    expect(styles).toContain("max-width: min(420px, 42vw);");
+    expect(styles).toContain("text-overflow: ellipsis;");
   });
 
   it("loads pending eval candidates into the Overview capability score", () => {
@@ -352,6 +383,7 @@ describe("Design System — Notion-inspired app shell", () => {
     );
     expect(chatPanelSource).toContain("activeGoal.status === \"executing\"");
     expect(chatPanelSource).toContain("cancelGoal(activeGoal.id)");
+    expect(chatPanelSource).toContain("applyGoalSummaryToSessions(result.goal)");
     expect(chatPanelSource).not.toContain(
       "disabled={status.kind !== \"working\" || !activeChatRequestId}",
     );

@@ -86,6 +86,21 @@ describe("agent JSON protocol", () => {
     });
   });
 
+  it("accepts offloaded tool-result ref reads in the fallback protocol", () => {
+    expect(
+      parseAgentModelResponse(
+        `{"type":"tool_call","tool":"tool_result_read","args":{"ref":"tool-result-refs/run_call_file_list_ref.json"}}`,
+      ),
+    ).toEqual({
+      ok: true,
+      message: {
+        type: "tool_call",
+        tool: "tool_result_read",
+        args: { ref: "tool-result-refs/run_call_file_list_ref.json" },
+      },
+    });
+  });
+
   it("serializes tool observations as JSON for the next model turn", () => {
     expect(
       serializeToolObservation({
@@ -162,12 +177,13 @@ describe("agent JSON protocol", () => {
   it("builds tool definitions with JSON Schema for built-in tools", () => {
     const definitions = buildToolDefinitions();
 
-    expect(definitions).toHaveLength(18);
+    expect(definitions).toHaveLength(19);
     const names = definitions.map((d) => d.function.name);
     expect(names).toContain("file_list");
     expect(names).toContain("file_stat");
     expect(names).toContain("file_search");
     expect(names).toContain("file_read");
+    expect(names).toContain("tool_result_read");
     expect(names).toContain("file_write");
     expect(names).toContain("code_search");
     expect(names).toContain("git_status");

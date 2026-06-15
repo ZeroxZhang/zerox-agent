@@ -53,11 +53,33 @@ describe("goal progress view model", () => {
     expect(viewModel.progressText).toBe("1/2 已完成");
     expect(viewModel.metricCards).toEqual(
       expect.arrayContaining([
-        { label: "迭代", value: "1/8" },
-        { label: "工具调用", value: "5/64" },
-        { label: "运行时间", value: "1.5/45 分钟" },
+        { label: "迭代", value: "1" },
+        { label: "工具调用", value: "5" },
+        { label: "运行时间", value: "1.5 分钟" },
       ]),
     );
+  });
+
+  it("treats legacy budget-stopped goals as directly recoverable", () => {
+    const goal = createGoal({
+      status: "stopped_budget",
+      stopReason: "budget_exhausted",
+      budgetUsage: {
+        iterations: 8,
+        toolCalls: 64,
+        wallClockMs: 45 * 60 * 1000,
+        tokens: 0,
+        replans: 0,
+      },
+    });
+
+    const viewModel = buildGoalProgressViewModel(toSummary(goal), goal);
+
+    expect(viewModel.statusLabel).toBe("可继续");
+    expect(viewModel.statusDetail).toContain("旧版本预算停止");
+    expect(viewModel.nextActionLabel).toBe("继续执行");
+    expect(viewModel.metricCards.map((card) => card.label)).not.toContain("预算");
+    expect(viewModel.metricCards.map((card) => card.value)).not.toContain("8/8");
   });
 
   it("explains failed goals through explicit recovery actions", () => {

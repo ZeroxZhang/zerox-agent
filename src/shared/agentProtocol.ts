@@ -47,6 +47,7 @@ const supportedTools = new Set<AgentToolName>([
   "file_stat",
   "file_search",
   "file_read",
+  "tool_result_read",
   "file_write",
   "code_search",
   "git_status",
@@ -137,7 +138,7 @@ export function buildToolDefinitions(): ToolDefinition[] {
       function: {
         name: "file_read",
         description:
-          "读取指定文件的内容并返回文本。仅读取已授权的路径。",
+          "读取指定文件的内容并返回文本。仅读取已授权的路径；不要用它读取 tool-result-refs 引用。",
         parameters: {
           type: "object",
           properties: {
@@ -147,6 +148,24 @@ export function buildToolDefinitions(): ToolDefinition[] {
             },
           },
           required: ["path"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "tool_result_read",
+        description:
+          "读取工具返回的大型结果引用。当上一步结果包含 result_ref 或 tool-result-refs/... 时，使用此工具读取完整结果，不要改用 file_read。",
+        parameters: {
+          type: "object",
+          properties: {
+            ref: {
+              type: "string",
+              description: "工具结果引用，例如 tool-result-refs/run_call_file_list_ref.json",
+            },
+          },
+          required: ["ref"],
         },
       },
     },
@@ -484,7 +503,7 @@ export function buildAgentSystemPrompt(
   const profile = selectAgentPromptProfile(options.modelId);
   return [
     "你是一个本地桌面 AI agent 的运行时核心。",
-    "你可以调用工具来完成任务：列出目录、读取元信息、搜索文件、读写文件、搜索代码、读取 git 状态和 diff、运行已授权测试、检索本地记忆、搜索网页、抓取网页内容、记录引用、写 citation-backed Markdown 报告、执行受权 shell 命令。",
+    "你可以调用工具来完成任务：列出目录、读取元信息、搜索文件、读写文件、读取大型工具结果引用、搜索代码、读取 git 状态和 diff、运行已授权测试、检索本地记忆、搜索网页、抓取网页内容、记录引用、写 citation-backed Markdown 报告、执行受权 shell 命令。",
     "",
     "运行环境：",
     `- Model profile: ${profile}`,
@@ -497,6 +516,7 @@ export function buildAgentSystemPrompt(
     "",
     "工作原则：",
     "- 文件诊断优先使用 file_list、file_stat、file_search、file_read；只有原生工具无法完成时再使用 shell_exec。",
+    "- 当工具结果包含 result_ref 或 tool-result-refs/... 时，必须使用 tool_result_read 读取完整工具结果，不要把引用路径传给 file_read。",
     "- 代码工程优先使用 code_search、git_status、git_diff、test_run；只有这些原生工具无法完成时再申请 shell_exec。",
     "- 研究写作优先使用 web_fetch_document、citation_record、citation_coverage_check、markdown_report_write；报告摘要必须区分 sourced facts 和 model inference。",
     "- 将复杂任务分解为清晰的步骤序列。",

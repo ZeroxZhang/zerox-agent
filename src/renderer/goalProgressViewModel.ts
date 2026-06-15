@@ -98,10 +98,11 @@ function describeGoalStatus(
       };
     case "stopped_budget":
       return {
-        statusLabel: "预算停止",
-        statusDetail: "目标因为预算耗尽停止，继续前需要调整预算或计划。",
-        nextActionLabel: "停止原因",
-        nextActionDetail: "预算已达到上限。",
+        statusLabel: "可继续",
+        statusDetail:
+          "这是旧版本预算停止状态；当前版本不会再用系统预算拦截目标推进，可以直接继续执行。",
+        nextActionLabel: "继续执行",
+        nextActionDetail: milestoneDetail,
       };
     case "stopped_stalled":
       return {
@@ -132,28 +133,26 @@ function buildMetricCards(goal: Goal | null): GoalProgressMetricCard[] {
   if (!goal) {
     return [
       { label: "状态", value: "加载中" },
-      { label: "预算", value: "待加载" },
+      { label: "运行", value: "待加载" },
     ];
   }
 
   return [
     {
       label: "迭代",
-      value: `${goal.budgetUsage.iterations}/${goal.budget.maxIterations}`,
+      value: String(goal.budgetUsage.iterations),
     },
     {
       label: "工具调用",
-      value: `${goal.budgetUsage.toolCalls}/${goal.budget.maxToolCalls}`,
+      value: String(goal.budgetUsage.toolCalls),
     },
     {
       label: "运行时间",
-      value: `${formatMinutes(goal.budgetUsage.wallClockMs)}/${formatMinutes(
-        goal.budget.maxWallClockMs,
-      )} 分钟`,
+      value: `${formatMinutes(goal.budgetUsage.wallClockMs)} 分钟`,
     },
     {
       label: "重规划",
-      value: `${goal.budgetUsage.replans}/${goal.budget.maxReplans}`,
+      value: String(goal.budgetUsage.replans),
     },
   ];
 }

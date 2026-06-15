@@ -1217,6 +1217,62 @@
   - Packaged app replied `已设置并开始执行目标...`, created a single milestone, executed it, recorded evidence, and reached green `已达成 · 1/1 已完成`.
   - After the repair build and relaunch, the same packaged app automatically corrected stale session badges and right-side context from `执行中` to `已达成`, bottom activity showed `当前没有任务运行 · 待命`, and the interrupt button was disabled.
 
+## 2026-06-15 v2.1.1 UI/runtime control release
+
+- Request:
+  - Fix the remaining UI framework issues, verify the iteration as test engineer, package, release, and push the corrected release as `2.1.1`.
+- Implementation:
+  - Integrated active work status into the right progress/context rail as `ContextActivityCard`; removed the redundant composer activity strip and main chat work timeline from the active chat surface.
+  - Added balanced 28px padding to the right context rail and compact activity-card styling.
+  - Switched the Electron main window to a macOS integrated `hiddenInset` titlebar with traffic light positioning and aligned app background; adjusted sidebar top padding and drag regions.
+  - Made goal cancellation update local chat/session UI immediately so the stop button and status no longer stay stuck in terminating/executing.
+  - Removed Goal Mode budget hard-stop dispatch checks and replan budget gates; `budgetUsage` remains audit telemetry only.
+  - Reclassified legacy `stopped_budget` goals as directly recoverable, including UI copy, chat continue routing, status transitions, and eval fixtures.
+  - Updated release metadata, README, and tests from `2.1.0` to `2.1.1`.
+- Changed files:
+  - `package.json`
+  - `package-lock.json`
+  - `README.md`
+  - `docs/architecture/agent-goal-mode.md`
+  - `src/main/agentGoalController.ts`
+  - `src/main/goalChatService.ts`
+  - `src/main/chatService.ts`
+  - `src/main/desktopLifecycle.ts`
+  - `src/main/eval/agentEvalAdversary.ts`
+  - `src/main/eval/agentEvalFixtures.ts`
+  - `src/renderer/App.tsx`
+  - `src/renderer/chatTaskActivity.ts`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/components/GoalDetailDrawer.tsx`
+  - `src/renderer/components/GoalStatusStrip.tsx`
+  - `src/renderer/goalProgressViewModel.ts`
+  - `src/renderer/styles/app-shell.css`
+  - `src/renderer/styles/chat.css`
+  - `src/renderer/styles/composer.css`
+  - `src/renderer/styles/sidebar.css`
+  - focused tests under `src/main`, `src/renderer`, and `src/shared`
+- TDD evidence:
+  - `npm test -- src/main/agentGoalController.test.ts src/main/goalChatService.test.ts src/renderer/goalProgressViewModel.test.ts src/main/desktopLifecycle.test.ts src/renderer/materialDesign.test.ts src/main/eval/agentEvalRunner.test.ts src/main/eval/agentEvalAdversary.test.ts` -> RED with expected failures for budget hard stop, legacy budget resume, titlebar config, right-rail padding, and composer activity strip.
+  - After implementation, `npm test -- src/main/agentGoalController.test.ts src/main/goalChatService.test.ts src/main/chatService.test.ts src/shared/agentGoal.test.ts src/renderer/chatTaskActivity.test.ts src/renderer/goalProgressViewModel.test.ts src/main/desktopLifecycle.test.ts src/renderer/materialDesign.test.ts src/main/eval/agentEvalRunner.test.ts src/main/eval/agentEvalAdversary.test.ts` -> 10 files / 89 tests passed.
+  - After correcting release version to `2.1.1`, `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts src/main/agentGoalController.test.ts src/main/goalChatService.test.ts src/main/chatService.test.ts src/shared/agentGoal.test.ts src/renderer/chatTaskActivity.test.ts src/renderer/goalProgressViewModel.test.ts src/main/desktopLifecycle.test.ts src/renderer/materialDesign.test.ts src/main/eval/agentEvalRunner.test.ts src/main/eval/agentEvalAdversary.test.ts` -> 12 files / 98 tests passed.
+- Verification evidence:
+  - `npm test` -> 110 files / 544 tests passed.
+  - `npm run verify` -> 110 files / 544 tests passed, build passed, agent eval 21/21, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - Browser QA at `http://127.0.0.1:5173/#chat` -> desktop DOM contained no `agent-work-timeline` and no `task-activity-strip`; sidebar top padding was `52px`; chat topbar was hidden in chat mode; mobile 390x844 had no horizontal overflow and composer width stayed within viewport.
+  - `git diff --check` -> passed.
+- Release artifact evidence:
+  - `npm version 2.1.1 --no-git-tag-version` -> updated package metadata without creating a git tag.
+  - `npm run dist:mac` -> generated unsigned macOS arm64 `.dmg`, `.zip`, blockmaps, and `latest-mac.yml` for v2.1.1.
+  - `release/mac-arm64/Zerox Agent.app/Contents/Info.plist` -> `CFBundleShortVersionString=2.1.1`, `CFBundleVersion=2.1.1`.
+  - `release/latest-mac.yml` -> version `2.1.1`.
+  - Artifacts:
+    - `release/Zerox Agent-2.1.1-arm64.dmg` -> 118M.
+    - `release/Zerox Agent-2.1.1-arm64.dmg.blockmap` -> 127K.
+    - `release/Zerox Agent-2.1.1-arm64-mac.zip` -> 329M.
+    - `release/Zerox Agent-2.1.1-arm64-mac.zip.blockmap` -> 331K.
+
 ## 2026-06-15 Rollback to v1.9.5
 
 - Request:
@@ -1306,6 +1362,7 @@
   - Engineer subagent reviewed MiMo-Code and the report with emphasis on Goal Judge, TaskGate, system prompt layering, trajectory/ledger behavior, checkpoints, loop control, and sandbox risks.
   - Adopted the transferable patterns while preserving Zerox local-first boundaries, `ToolAuthorizationService`, workspace sandbox checks, and reviewed learning gates.
   - Wrote the implementation plan at `docs/superpowers/plans/2026-06-16-mimo-inspired-agent-harness-2-2.md`.
+  - Before publishing, merged the existing v2.1.2 release baseline into this branch so v2.2.0 keeps the chat title/status, tool-result recovery, planner JSON recovery, and goal artifact output-root hotfixes.
 - Implementation:
   - Added model-profiled system prompt routing for Codex, Claude, Gemini, GPT, Kimi, and default models.
   - Replaced compact goal anchors with an eleven-section goal continuity checkpoint.
@@ -1364,17 +1421,147 @@
   - `npm test -- src/main/agentGoalAcceptance.test.ts src/main/goalRuntimeEngine.test.ts` -> RED for untrusted transcript role replay and missing terminal assistant summary, then 2 files / 19 tests passed.
   - `npm test -- src/shared/agentProtocol.test.ts src/shared/agentGoalContinuity.test.ts src/main/agentGoalAcceptance.test.ts src/main/goalRuntimeEngine.test.ts src/main/agentGoalContext.test.ts src/main/eval/agentEvalRunner.test.ts src/main/eval/agentEvalAdversary.test.ts src/shared/harnessScore.test.ts src/main/agentGoalController.test.ts src/main/container.test.ts src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 12 files / 76 tests passed.
   - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> RED before v2.2.0 README/package metadata, then 2 files / 9 tests passed.
-  - `npm test` -> 111 files / 548 tests passed.
-  - `npm run verify` -> 111 files / 548 tests passed, build passed, agent eval 22/22, memory eval 2/2.
+  - `npm test` -> 112 files / 566 tests passed after merging the v2.1.2 release baseline.
+  - `npm run verify` -> 112 files / 566 tests passed, build passed, agent eval 22/22, memory eval 2/2.
   - `npm run harness:check` -> passed.
-  - `npm run harness:score` -> score 9.2 good; eval 22/22; goal 7/7; goal-judge 1/1; adversarial 64 checked / 0 escaped.
+  - `npm run harness:score` -> score 9.2 good; eval 22/22; goal 7/7; goal-judge 1/1; adversarial 63 checked / 0 escaped.
   - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
   - `git diff --check` -> passed.
   - Independent test engineer subagent re-review -> `PASS`; original four findings resolved; no new release blocker.
 - Release artifact evidence:
-  - `npm run dist:mac` -> build and packaging succeeded for v2.2.0.
+  - `npm run dist:mac` -> build and packaging succeeded for v2.2.0 after merging the v2.1.2 release baseline.
   - `release/mac-arm64/Zerox Agent.app/Contents/Info.plist` reports `CFBundleShortVersionString=2.2.0` and `CFBundleVersion=2.2.0`.
   - `release/Zerox Agent-2.2.0-arm64.dmg` -> 118M.
   - `release/Zerox Agent-2.2.0-arm64-mac.zip` -> 329M.
   - `release/latest-mac.yml` -> version `2.2.0`.
-  - Packaged app smoke with old required idle-panel text `进度|上下文` failed because the command-first UI hides idle progress/context text; default packaged app smoke then passed with renderer rendering agent chat UI.
+  - Packaged app smoke with old required idle-panel text `进度|上下文` failed before the final merge package because the command-first UI hides idle progress/context text; default packaged app smoke passed after the final merge package with renderer rendering agent chat UI.
+  - SHA-256:
+    - dmg: `27b6ad2cfe21b314fcf84e45e671a0b5c81183e0c718161ba6f623bb1aeeb5b8`
+    - zip: `4bec7c1853ca2c05d6cb4be96130569bd732a693daa768664f4befac65b4b838`
+
+## 2026-06-15 Chat hero long-text containment hotfix
+
+- Request:
+  - Fix the visible header display issue where a long chat title and long live status text overlapped inside the top chat hero area.
+- Implementation:
+  - Added a stable `chatTitle` value and title tooltips for full chat title/status disclosure.
+  - Wrapped live status text so the status pill can ellipsize reliably inside a flex header.
+  - Constrained the chat hero layout: title area can shrink, title clamps to two lines, and live status stays inside a max-width pill.
+- Changed files:
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/styles/chat.css`
+  - `src/renderer/materialDesign.test.ts`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts` -> RED with 1 expected failure for missing chat title/status containment.
+  - `npm test -- src/renderer/materialDesign.test.ts` -> 1 file / 26 tests passed after the fix.
+  - Browser QA at `http://127.0.0.1:5173/#chat` -> agent chat panel and hero rendered, document had no horizontal overflow, hero had no horizontal overflow.
+  - Browser CSS QA -> `.chat-hero-main` computed `flex: 1 1 auto`; title CSS included `-webkit-line-clamp: 2`; `.chat-state` max width computed to `420px`; `.chat-state > span` computed `text-overflow: ellipsis` and `white-space: nowrap`.
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> 110 files / 545 tests passed, build passed, agent eval 21/21, memory eval 2/2.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `git diff --check` -> passed.
+
+## 2026-06-15 Chat title, status capsule, and tool-result recovery hotfix
+
+- Request:
+  - Fix the remaining chat hero display issue by generating brief session names and making long status capsules collapsed by default.
+  - Fix goal execution failures caused by planner JSON parsing and repeated `file_read` failures when reading offloaded tool results.
+- Root cause:
+  - Chat sessions used the first user message as the title, so `/目标 ... 项目位置 ...` prompts leaked long paths into the hero/header and sidebar.
+  - The live status capsule only ellipsized text; it had no explicit collapsed/expanded interaction, so long progress text still competed with the title area.
+  - The goal planner accepted only bare JSON; markdown/code-fenced or non-JSON replanning responses could surface as unrecoverable goal failures.
+  - Offloaded tool observations exposed `result_ref`, but the model had no native tool to read that ref during execution, so it repeatedly attempted `file_read` on `tool-result-refs/...`.
+- Implementation:
+  - Added deterministic short chat title generation that strips slash commands, local paths, and filler text before naming the session.
+  - Made long chat status capsules collapsed by default, with explicit click-to-expand/collapse behavior and full-width expanded layout.
+  - Hardened goal planner parsing to extract JSON objects from code fences or explanatory text; replanning now falls back to a safe remaining milestone if the model response stays invalid.
+  - Added `tool_result_read` as a built-in low-risk tool, protocol entry, permission case, approval summary, executor handler, and runtime executor injection.
+  - Routed legacy `file_read` calls for safe `tool-result-refs/...` paths to the offload store for compatibility with prior model behavior.
+- Changed files:
+  - `src/main/chatSessionStore.ts`
+  - `src/main/agentGoalPlanner.ts`
+  - `src/main/agentToolExecutor.ts`
+  - `src/main/container.ts`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/components/ToolsPanel.tsx`
+  - `src/renderer/styles/chat.css`
+  - `src/shared/agentProtocol.ts`
+  - `src/shared/toolApproval.ts`
+  - `src/shared/toolPermissions.ts`
+  - focused tests for the files above
+- TDD and verification evidence:
+  - `npm test -- src/main/chatSessionStore.test.ts src/main/agentGoalPlanner.test.ts src/shared/agentProtocol.test.ts src/main/agentToolExecutor.test.ts src/renderer/materialDesign.test.ts` -> RED with 10 expected failures for missing short titles, planner JSON extraction/fallback, tool-result ref reading, and status capsule expansion logic.
+  - `npm test -- src/main/chatSessionStore.test.ts src/main/agentGoalPlanner.test.ts src/shared/agentProtocol.test.ts src/main/agentToolExecutor.test.ts src/shared/toolPermissions.test.ts src/renderer/materialDesign.test.ts` -> 6 files / 95 tests passed.
+  - Browser QA at `http://127.0.0.1:5173/#chat` -> desktop page title `Zerox Agent`, chat hero rendered, no framework overlay, no console warn/error logs, no horizontal overflow, and CSS contained title clamp plus `.chat-state.is-expanded` capsule rules.
+  - Browser mobile QA at 390x844 -> no horizontal overflow, context panel hidden, no framework overlay, no console warn/error logs.
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> 110 files / 553 tests passed, build passed, agent eval 21/21, memory eval 2/2.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `git diff --check` -> passed.
+
+## 2026-06-15 Goal milestone progress and artifact stop-condition hotfix
+
+- Request:
+  - Fix goal runs where milestone progress in the right context panel stayed pending even after visible progress.
+  - Fix goal execution continuing after the model had completed the work, with `Missing required artifact evidence: artifact:inventory_log.` still shown.
+- Root cause:
+  - Goal output-root extraction treated Chinese prose directly attached to a path, such as `/Users/zerox/Downloads目录下的文件`, as part of the filesystem path. Artifact contracts and acceptance checks then looked for `inventory_log.md` under a nonexistent root.
+  - The goal controller marked a milestone `running` in memory but did not persist that state before dispatching the runtime loop, so UI refreshes read stale `ready/pending` milestone state.
+  - The chat panel only reacted to goal progress events when `activeGoalRef` was already populated; early session-scoped events could arrive before the active goal summary refresh completed.
+- Implementation:
+  - Added natural-language suffix trimming for explicit goal output roots while preserving slash-separated Chinese path segments.
+  - Persisted `running` milestone state before runtime dispatch and persisted run metadata before acceptance evaluation.
+  - Updated chat goal progress syncing to refresh active goal details for the current session even when the active goal summary is still catching up.
+- Changed files:
+  - `src/main/goalOutputRoots.ts`
+  - `src/main/goalOutputRoots.test.ts`
+  - `src/main/agentGoalController.ts`
+  - `src/main/agentGoalController.test.ts`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/materialDesign.test.ts`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `npm test -- src/main/goalOutputRoots.test.ts` -> RED with expected failure showing `/Users/zerox/Downloads目录下的文件` was extracted instead of `/Users/zerox/Downloads`.
+  - `npm test -- src/main/agentGoalController.test.ts` -> RED with expected failure showing persisted milestone state was still `ready` during runtime dispatch.
+  - `npm test -- src/renderer/materialDesign.test.ts` -> RED with expected failure for missing session-scoped goal progress sync.
+  - `npm test -- src/main/goalOutputRoots.test.ts src/main/agentGoalController.test.ts src/renderer/materialDesign.test.ts` -> all focused tests passed after implementation.
+  - `npm test -- src/main/goalOutputRoots.test.ts src/main/goalRuntimeEngine.test.ts src/main/agentGoalAcceptance.test.ts src/main/agentGoalController.test.ts src/renderer/materialDesign.test.ts src/renderer/goalProgressViewModel.test.ts` -> 6 files / 57 tests passed.
+  - Browser QA at `http://127.0.0.1:5173/` -> desktop page rendered app shell with no horizontal overflow; status capsule and chat shell visible.
+  - Browser mobile QA at 390x844 -> no horizontal overflow; status capsule remained contained; composer remained usable; viewport reset afterward.
+  - `npm run build` -> TypeScript and Vite production build passed.
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> 111 files / 557 tests passed, build passed, agent eval 21/21, memory eval 2/2.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `git diff --check` -> passed.
+
+## 2026-06-15 v2.1.2 release preparation
+
+- Request:
+  - Bump the app version to 2.1.2, update the local app metadata, package the macOS app, update README, push, and publish a new GitHub Release.
+- Implementation:
+  - Created release branch `release/2.1.2` from the latest v2.1.1 hotfix branch.
+  - Updated `package.json` and `package-lock.json` from 2.1.1 to 2.1.2.
+  - Updated README English/Chinese release positioning, packaging command examples, current version labels, and verification counts.
+  - Updated release metadata tests and README tests to assert v2.1.2.
+  - Built unsigned macOS distribution artifacts with electron-builder.
+- Changed files:
+  - `package.json`
+  - `package-lock.json`
+  - `README.md`
+  - `src/shared/packageScripts.test.ts`
+  - `src/shared/readme.test.ts`
+  - `.zerox/progress.md`
+- Verification evidence:
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 2 files / 9 tests passed after updating version and README assertions.
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> 111 files / 557 tests passed, build passed, agent eval 21/21, memory eval 2/2.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `npm run dist:mac` -> build passed and generated:
+    - `release/Zerox Agent-2.1.2-arm64.dmg` (118MB)
+    - `release/Zerox Agent-2.1.2-arm64-mac.zip` (329MB)
+    - `release/Zerox Agent-2.1.2-arm64.dmg.blockmap`
+    - `release/Zerox Agent-2.1.2-arm64-mac.zip.blockmap`
+  - SHA-256:
+    - dmg: `06b9552704bbc0e19e6a151409312d79fbe60fa467e73209b427643b9d695766`
+    - zip: `38ab58b8de433a7cba1a490372556525ef55ca3ab920dce27d8b01910c1b2754`

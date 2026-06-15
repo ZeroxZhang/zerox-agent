@@ -43,6 +43,78 @@ describe("agent tool executor", () => {
     });
   });
 
+  it("reads offloaded tool-result refs without using file_read", async () => {
+    const executor = createAgentToolExecutor({
+      toolResultOffloadStore: {
+        async read(ref) {
+          return ref === "tool-result-refs/run_call_file_list_ref.json"
+            ? '{"type":"tool_result","tool":"file_list","ok":true,"result":{"entries":[{"name":"src","type":"directory"}]}}'
+            : null;
+        },
+      },
+    });
+
+    await expect(
+      executor.execute({
+        toolName: "tool_result_read",
+        args: { ref: "tool-result-refs/run_call_file_list_ref.json" },
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      result: {
+        ref: "tool-result-refs/run_call_file_list_ref.json",
+        content:
+          '{"type":"tool_result","tool":"file_list","ok":true,"result":{"entries":[{"name":"src","type":"directory"}]}}',
+      },
+    });
+  });
+
+  it("routes legacy file_read calls for safe tool-result refs to the offload store", async () => {
+    const executor = createAgentToolExecutor({
+      toolResultOffloadStore: {
+        async read(ref) {
+          return ref === "tool-result-refs/run_call_file_list_ref.json"
+            ? '{"type":"tool_result","tool":"file_list","ok":true,"result":{"entries":[]}}'
+            : null;
+        },
+      },
+    });
+
+    await expect(
+      executor.execute({
+        toolName: "file_read",
+        args: { path: "tool-result-refs/run_call_file_list_ref.json" },
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      result: {
+        ref: "tool-result-refs/run_call_file_list_ref.json",
+        content:
+          '{"type":"tool_result","tool":"file_list","ok":true,"result":{"entries":[]}}',
+      },
+    });
+  });
+
+  it("rejects unsafe offloaded tool-result refs", async () => {
+    const executor = createAgentToolExecutor({
+      toolResultOffloadStore: {
+        async read() {
+          throw new Error("unsafe ref should not reach store");
+        },
+      },
+    });
+
+    await expect(
+      executor.execute({
+        toolName: "tool_result_read",
+        args: { ref: "../chat-sessions.json" },
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      error: "tool_result_read requires a safe tool-result ref.",
+    });
+  });
+
   it("lists a local directory without reading file contents", async () => {
     await writeFile(path.join(tempDir, "notes.md"), "hello runner", "utf8");
     await mkdir(path.join(tempDir, "screenshots"));

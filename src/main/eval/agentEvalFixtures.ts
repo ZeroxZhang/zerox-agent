@@ -715,26 +715,26 @@ function createGoalEvalFixtures(): AgentEvalFixture[] {
       ],
     },
     {
-      id: "goal-stopped-by-budget",
+      id: "goal-continues-without-budget-stop",
       description:
-        "Goal Mode stops on budget exhaustion before dispatching another milestone.",
-      events: createEvents("goal-stopped-by-budget", [
+        "Goal Mode continues dispatching ready milestones instead of stopping on old budget counters.",
+      events: createEvents("goal-continues-without-budget-stop", [
         [
           "goal_planned",
           {
-            goalId: "goal_eval_budget",
+            goalId: "goal_eval_continue",
             milestoneCount: 2,
             budget: { maxIterations: 1, maxToolCalls: 1 },
           },
         ],
         [
           "milestone_started",
-          { goalId: "goal_eval_budget", milestoneId: "milestone_first" },
+          { goalId: "goal_eval_continue", milestoneId: "milestone_first" },
         ],
         [
           "acceptance_checked",
           {
-            goalId: "goal_eval_budget",
+            goalId: "goal_eval_continue",
             milestoneId: "milestone_first",
             accepted: true,
             deterministicFirst: true,
@@ -744,21 +744,34 @@ function createGoalEvalFixtures(): AgentEvalFixture[] {
         [
           "checkpoint_written",
           {
-            goalId: "goal_eval_budget",
+            goalId: "goal_eval_continue",
             status: "executing",
             budgetUsage: { iterations: 1, toolCalls: 1 },
           },
         ],
         [
-          "goal_stopped",
+          "milestone_started",
+          { goalId: "goal_eval_continue", milestoneId: "milestone_second" },
+        ],
+        [
+          "acceptance_checked",
           {
-            goalId: "goal_eval_budget",
-            status: "stopped_budget",
-            stopReason: "budget_exhausted",
-            budgetStopBeforeDispatch: true,
+            goalId: "goal_eval_continue",
+            milestoneId: "milestone_second",
+            accepted: true,
+            deterministicFirst: true,
+            evidenceRefs: ["run_second#artifact"],
           },
         ],
-        ["final_summary", { status: "stopped_budget" }],
+        [
+          "goal_stopped",
+          {
+            goalId: "goal_eval_continue",
+            status: "achieved",
+            stopReason: "goal_accepted",
+          },
+        ],
+        ["final_summary", { status: "succeeded" }],
       ]),
       requiredEventTypes: [
         "goal_planned",
@@ -770,10 +783,9 @@ function createGoalEvalFixtures(): AgentEvalFixture[] {
       ],
       assertions: [
         {
-          type: "goal_stopped",
+          type: "milestone_started",
           payload: {
-            status: "stopped_budget",
-            budgetStopBeforeDispatch: true,
+            milestoneId: "milestone_second",
           },
           after: "checkpoint_written",
         },

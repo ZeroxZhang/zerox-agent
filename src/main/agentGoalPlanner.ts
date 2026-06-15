@@ -84,10 +84,15 @@ export function createAgentGoalPlanner(options: {
       const acceptedIds = new Set(
         acceptedMilestones.map((milestone) => milestone.id),
       );
-      const replanned = await requestMilestones({
-        prompt: buildReplanPrompt(goal, reason),
-        successCriteria: goal.successCriteria,
-      });
+      let replanned: Milestone[];
+      try {
+        replanned = await requestMilestones({
+          prompt: buildReplanPrompt(goal, reason),
+          successCriteria: goal.successCriteria,
+        });
+      } catch {
+        replanned = [createFallbackReplanMilestone(goal, reason)];
+      }
       const merged = [
         ...acceptedMilestones,
         ...replanned.filter((milestone) => !acceptedIds.has(milestone.id)),
@@ -166,7 +171,7 @@ function validateMilestonePlan(
 function parseMilestones(content: string): Milestone[] {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(content);
+    parsed = JSON.parse(extractJsonObject(content));
   } catch {
     throw new Error("Goal planner response must be valid JSON.");
   }
@@ -178,6 +183,66 @@ function parseMilestones(content: string): Milestone[] {
   return parsed.milestones.map((milestone, index) =>
     normalizeMilestone(milestone, index),
   );
+}
+
+function extractJsonObject(content: string): string {
+  const trimmed = content.trim();
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fenced?.[1]?.trim() ?? trimmed;
+  const start = candidate.indexOf("{");
+  if (start === -1) {
+    return candidate;
+  }
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < candidate.length; index += 1) {
+    const char = candidate[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (char === "\"") {
+      inString = !inString;
+      continue;
+    }
+    if (inString) {
+      continue;
+    }
+    if (char === "{") {
+      depth += 1;
+    }
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return candidate.slice(start, index + 1);
+      }
+    }
+  }
+
+  return candidate;
+}
+
+function createFallbackReplanMilestone(goal: Goal, reason: string): Milestone {
+  const acceptedIds = goal.milestones
+    .filter((milestone) => milestone.state === "accepted")
+    .map((milestone) => milestone.id);
+  const nextIndex = acceptedIds.length + 1;
+
+  return {
+    id: `milestone_replan_${nextIndex}`,
+    description: reason.trim() || "Continue remaining goal work.",
+    dependsOn: acceptedIds,
+    successCriteria: goal.successCriteria,
+    state: acceptedIds.length ? "pending" : "ready",
+    runIds: [],
+    attempts: 0,
+  };
 }
 
 function normalizeMilestone(value: unknown, index: number): Milestone {

@@ -259,6 +259,7 @@ function defaultArgsJson(toolName: AgentToolName): string {
     file_stat: { path: "~/Downloads/notes.md" },
     file_search: { root: "~/Downloads", query: "report", mode: "both" },
     file_read: { path: "~/Downloads/notes.md" },
+    tool_result_read: { ref: "tool-result-refs/run_call_file_list_ref.json" },
     file_write: { path: "~/Downloads/reports/today.md" },
     code_search: { workspaceRoot: "~/Projects/demo", query: "Agent" },
     git_status: { workspaceRoot: "~/Projects/demo" },

@@ -143,19 +143,6 @@
   text-align: left;
 }
 
-.task-activity-strip { color: var(--text-tertiary); }
-
-.task-activity-strip summary {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: var(--space-2);
-  min-height: 22px;
-  list-style: none;
-}
-
-.task-activity-strip summary::-webkit-details-marker { display: none; }
-
 .tool-approval-panel {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(180px, 0.7fr) auto;

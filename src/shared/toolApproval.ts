@@ -86,6 +86,10 @@ export function summarizeToolApprovalArgs(
       return {
         path: String(request.args.path ?? ""),
       };
+    case "tool_result_read":
+      return {
+        ref: String(request.args.ref ?? ""),
+      };
     case "file_search":
       return {
         root: String(request.args.root ?? ""),

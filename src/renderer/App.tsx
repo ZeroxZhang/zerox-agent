@@ -361,7 +361,7 @@ function translateSidebarGoalStatus(
     executing: "执行中",
     waiting_for_review: "等待审核",
     achieved: "已达成",
-    stopped_budget: "预算停止",
+    stopped_budget: "可继续",
     stopped_stalled: "停滞停止",
     failed: "失败",
     canceled: "已取消",

@@ -10,7 +10,6 @@ type GoalDetailDrawerProps = {
   onClose: () => void;
   onStart?: () => void;
   onResolveReview?: (decision: "approve" | "reject" | "terminate") => void;
-  onIncreaseBudget?: () => void;
   onReplan?: () => void;
   onRetry?: () => void;
   onCancel?: () => void;
@@ -106,14 +105,13 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
               <span>恢复路径</span>
               <p>{getRecoveryHint(props.summary.status)}</p>
               <div className="goal-review-actions">
-                {props.summary.status === "stopped_budget" &&
-                props.onIncreaseBudget ? (
+                {props.summary.status === "stopped_budget" && props.onRetry ? (
                   <button
                     type="button"
                     className="goal-primary-action"
-                    onClick={props.onIncreaseBudget}
+                    onClick={props.onRetry}
                   >
-                    增加预算并继续
+                    继续执行
                   </button>
                 ) : null}
                 {props.summary.status === "stopped_stalled" && props.onReplan ? (
@@ -218,7 +216,7 @@ function isRecoverableStatus(status: ChatSessionGoalSummary["status"]): boolean 
 function getRecoveryHint(status: ChatSessionGoalSummary["status"]): string {
   switch (status) {
     case "stopped_budget":
-      return "预算已耗尽。你可以增加预算后继续，或结束目标。";
+      return "这是旧版本预算停止状态。当前版本可以直接继续执行，或结束目标。";
     case "stopped_stalled":
       return "目标没有可推进的里程碑。你可以重新规划、重试或结束目标。";
     case "failed":

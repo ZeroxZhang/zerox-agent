@@ -121,6 +121,25 @@ describe("chat task activity", () => {
       shouldClearActiveRequest: true,
     });
   });
+
+  it("maps legacy budget-stopped goals to a continuable paused UI state", () => {
+    const activity = buildGoalTaskActivity({
+      status: "stopped_budget",
+      description: "发布 v2.1.1",
+      now: 3_000,
+    });
+
+    expect(activity).toMatchObject({
+      kind: "paused",
+      title: "目标可继续",
+      detail: "发布 v2.1.1",
+    });
+    expect(getGoalUiSyncState("stopped_budget")).toEqual({
+      statusKind: "paused",
+      workPhase: "paused",
+      shouldClearActiveRequest: true,
+    });
+  });
 });
 
 function createStatusEvent(

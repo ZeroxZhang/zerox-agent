@@ -21,7 +21,7 @@ describe("chat session store", () => {
     await expect(store.list()).resolves.toEqual([]);
   });
 
-  it("creates a session from the first user message and persists messages", async () => {
+  it("creates a session with a brief generated title and persists messages", async () => {
     const store = createChatSessionStore({
       configDir,
       createId: createSequentialId("chat"),
@@ -42,8 +42,8 @@ describe("chat session store", () => {
 
     expect(userAppend.session).toMatchObject({
       id: "chat_1",
-      title: "帮我整理下载文件夹，并生成报告",
-      summary: "帮我整理下载文件夹，并生成报告",
+      title: "整理下载报告",
+      summary: "整理下载报告",
       createdAt: "2026-06-06T08:00:00.000Z",
       updatedAt: "2026-06-06T08:00:00.000Z",
     });
@@ -60,7 +60,7 @@ describe("chat session store", () => {
     await expect(store.list()).resolves.toEqual([
       {
         id: "chat_1",
-        title: "帮我整理下载文件夹，并生成报告",
+        title: "整理下载报告",
         summary: "我会先检查权限，然后运行本地文件整理任务。",
         messageCount: 2,
         updatedAt: "2026-06-06T08:01:00.000Z",
@@ -78,6 +78,24 @@ describe("chat session store", () => {
 
     const reloaded = createChatSessionStore({ configDir });
     await expect(reloaded.get("chat_1")).resolves.toEqual(assistantAppend.session);
+  });
+
+  it("summarizes long goal-style prompts without keeping project paths in the title", async () => {
+    const store = createChatSessionStore({
+      configDir,
+      createId: createSequentialId("chat"),
+      now: createSteppedClock("2026-06-06T08:00:00.000Z"),
+    });
+
+    const appended = await store.appendMessage({
+      role: "user",
+      content:
+        "/目标 帮我review你自己这个项目，项目位置是：'/Volumes/Out/codex_projects/building agent'，提出迭代优化的方案",
+    });
+
+    expect(appended.session.title).toBe("项目 Review 优化");
+    expect(appended.session.title).not.toContain("/Volumes");
+    expect(appended.session.title.length).toBeLessThanOrEqual(16);
   });
 
   it("searches raw chat messages as conversation evidence", async () => {
@@ -106,7 +124,7 @@ describe("chat session store", () => {
     ).resolves.toEqual([
       {
         sessionId: "chat_1",
-        sessionTitle: "帮我整理下载文件夹",
+        sessionTitle: "整理下载文件夹",
         messageId: "chat_3",
         role: "assistant",
         content: "报告已保存为 Markdown。",
