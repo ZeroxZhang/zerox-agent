@@ -44,7 +44,7 @@
 .chat-hero {
   flex-shrink: 0;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-3);
   min-height: 36px;
@@ -54,16 +54,24 @@
 }
 
 .chat-hero-main {
+  flex: 1 1 auto;
   display: grid;
   gap: var(--space-2);
+  max-width: 100%;
   min-width: 0;
 }
 
 .chat-hero h2 {
+  display: -webkit-box;
+  overflow: hidden;
   margin: 0;
   color: var(--text-secondary);
   font-size: 15px;
   font-weight: var(--font-medium);
+  line-height: var(--leading-tight);
+  text-overflow: ellipsis;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .chat-hero-chips {
@@ -75,9 +83,12 @@
 .hero-chip { display: none; }
 
 .chat-state {
+  flex: 0 1 auto;
   display: inline-flex;
   align-items: center;
+  max-width: min(420px, 42vw);
   min-height: 28px;
+  min-width: 0;
   padding: 0 var(--space-3);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-full);
@@ -85,6 +96,13 @@
   background: var(--bg-surface-raised);
   font-size: var(--text-xs);
   font-weight: var(--font-medium);
+  white-space: nowrap;
+}
+
+.chat-state > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 

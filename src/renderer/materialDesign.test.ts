@@ -274,6 +274,17 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".context-activity-pill");
   });
 
+  it("contains long chat titles and live status text inside the hero header", () => {
+    expect(chatPanelSource).toContain("const chatTitle = activeSession?.title ?? \"新会话\";");
+    expect(chatPanelSource).toContain("title={chatTitle}");
+    expect(chatPanelSource).toContain("title={status.message}");
+    expect(styles).toContain(".chat-hero h2");
+    expect(styles).toContain("-webkit-line-clamp: 2;");
+    expect(styles).toContain(".chat-state > span");
+    expect(styles).toContain("max-width: min(420px, 42vw);");
+    expect(styles).toContain("text-overflow: ellipsis;");
+  });
+
   it("loads pending eval candidates into the Overview capability score", () => {
     expect(overviewPanelSource).not.toContain("pendingEvalCandidates: 0");
     expect(overviewPanelSource).toContain("listEvalCandidates({");

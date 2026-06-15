@@ -504,6 +504,7 @@ export function AgentChatPanel({
 
   const latestRun = runs[0];
   const activeSession = sessions.find((session) => session.id === sessionId) ?? null;
+  const chatTitle = activeSession?.title ?? "新会话";
   const activeGoal = activeSession?.activeGoal ?? null;
   activeGoalRef.current = activeGoal;
   const activeTasks = tasks.filter((task) => task.enabled);
@@ -1267,7 +1268,7 @@ export function AgentChatPanel({
       <section className="chat-workspace" aria-label="会话窗口">
         <div className="chat-hero">
           <div className="chat-hero-main">
-            <h2>{activeSession?.title ?? "新会话"}</h2>
+            <h2 title={chatTitle}>{chatTitle}</h2>
             <div className="chat-hero-chips">
               {contextCards.map((card) => (
                 <span key={card.label} className="hero-chip" title={card.detail}>
@@ -1276,7 +1277,9 @@ export function AgentChatPanel({
               ))}
             </div>
           </div>
-          <span className={`chat-state is-${status.kind}`}>{status.message}</span>
+          <span className={`chat-state is-${status.kind}`} title={status.message}>
+            <span>{status.message}</span>
+          </span>
         </div>
 
         {firstRunGuide.primaryAction.command === "prepare" &&

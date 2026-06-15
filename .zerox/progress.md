@@ -1352,3 +1352,26 @@
   - `npm run harness:check` -> passed.
   - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
   - `git diff --check` -> passed.
+
+## 2026-06-15 Chat hero long-text containment hotfix
+
+- Request:
+  - Fix the visible header display issue where a long chat title and long live status text overlapped inside the top chat hero area.
+- Implementation:
+  - Added a stable `chatTitle` value and title tooltips for full chat title/status disclosure.
+  - Wrapped live status text so the status pill can ellipsize reliably inside a flex header.
+  - Constrained the chat hero layout: title area can shrink, title clamps to two lines, and live status stays inside a max-width pill.
+- Changed files:
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/styles/chat.css`
+  - `src/renderer/materialDesign.test.ts`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts` -> RED with 1 expected failure for missing chat title/status containment.
+  - `npm test -- src/renderer/materialDesign.test.ts` -> 1 file / 26 tests passed after the fix.
+  - Browser QA at `http://127.0.0.1:5173/#chat` -> agent chat panel and hero rendered, document had no horizontal overflow, hero had no horizontal overflow.
+  - Browser CSS QA -> `.chat-hero-main` computed `flex: 1 1 auto`; title CSS included `-webkit-line-clamp: 2`; `.chat-state` max width computed to `420px`; `.chat-state > span` computed `text-overflow: ellipsis` and `white-space: nowrap`.
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> 110 files / 545 tests passed, build passed, agent eval 21/21, memory eval 2/2.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `git diff --check` -> passed.
