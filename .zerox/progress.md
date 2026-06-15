@@ -1413,3 +1413,38 @@
   - `npm run verify` -> 110 files / 553 tests passed, build passed, agent eval 21/21, memory eval 2/2.
   - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
   - `git diff --check` -> passed.
+
+## 2026-06-15 Goal milestone progress and artifact stop-condition hotfix
+
+- Request:
+  - Fix goal runs where milestone progress in the right context panel stayed pending even after visible progress.
+  - Fix goal execution continuing after the model had completed the work, with `Missing required artifact evidence: artifact:inventory_log.` still shown.
+- Root cause:
+  - Goal output-root extraction treated Chinese prose directly attached to a path, such as `/Users/zerox/Downloads目录下的文件`, as part of the filesystem path. Artifact contracts and acceptance checks then looked for `inventory_log.md` under a nonexistent root.
+  - The goal controller marked a milestone `running` in memory but did not persist that state before dispatching the runtime loop, so UI refreshes read stale `ready/pending` milestone state.
+  - The chat panel only reacted to goal progress events when `activeGoalRef` was already populated; early session-scoped events could arrive before the active goal summary refresh completed.
+- Implementation:
+  - Added natural-language suffix trimming for explicit goal output roots while preserving slash-separated Chinese path segments.
+  - Persisted `running` milestone state before runtime dispatch and persisted run metadata before acceptance evaluation.
+  - Updated chat goal progress syncing to refresh active goal details for the current session even when the active goal summary is still catching up.
+- Changed files:
+  - `src/main/goalOutputRoots.ts`
+  - `src/main/goalOutputRoots.test.ts`
+  - `src/main/agentGoalController.ts`
+  - `src/main/agentGoalController.test.ts`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/materialDesign.test.ts`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `npm test -- src/main/goalOutputRoots.test.ts` -> RED with expected failure showing `/Users/zerox/Downloads目录下的文件` was extracted instead of `/Users/zerox/Downloads`.
+  - `npm test -- src/main/agentGoalController.test.ts` -> RED with expected failure showing persisted milestone state was still `ready` during runtime dispatch.
+  - `npm test -- src/renderer/materialDesign.test.ts` -> RED with expected failure for missing session-scoped goal progress sync.
+  - `npm test -- src/main/goalOutputRoots.test.ts src/main/agentGoalController.test.ts src/renderer/materialDesign.test.ts` -> all focused tests passed after implementation.
+  - `npm test -- src/main/goalOutputRoots.test.ts src/main/goalRuntimeEngine.test.ts src/main/agentGoalAcceptance.test.ts src/main/agentGoalController.test.ts src/renderer/materialDesign.test.ts src/renderer/goalProgressViewModel.test.ts` -> 6 files / 57 tests passed.
+  - Browser QA at `http://127.0.0.1:5173/` -> desktop page rendered app shell with no horizontal overflow; status capsule and chat shell visible.
+  - Browser mobile QA at 390x844 -> no horizontal overflow; status capsule remained contained; composer remained usable; viewport reset afterward.
+  - `npm run build` -> TypeScript and Vite production build passed.
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> 111 files / 557 tests passed, build passed, agent eval 21/21, memory eval 2/2.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `git diff --check` -> passed.

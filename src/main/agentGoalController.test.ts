@@ -272,6 +272,40 @@ describe("agent goal controller", () => {
     expect(runtime.runMilestoneIds).toEqual(["milestone_next"]);
   });
 
+  it("persists a running milestone before dispatching the runtime loop", async () => {
+    await store.save(createGoal([milestone("milestone_1")]));
+    const observedPersistedStates: string[] = [];
+    const runtime: GoalRuntimeEngine & { runMilestoneIds: string[] } = {
+      runMilestoneIds: [],
+      async runMilestone(_goal, currentMilestone) {
+        runtime.runMilestoneIds.push(currentMilestone.id);
+        const persisted = await store.get("goal_1");
+        observedPersistedStates.push(
+          persisted?.milestones.find((item) => item.id === currentMilestone.id)
+            ?.state ?? "missing",
+        );
+        return {
+          runId: `run_${currentMilestone.id}_1`,
+          toolCallCount: 1,
+          wallClockMs: 100,
+          tokens: 10,
+        };
+      },
+    };
+    const controller = createController({
+      runtime,
+      acceptance: createAcceptance({
+        milestoneAccepted: [true],
+        goalAccepted: [true],
+      }),
+    });
+
+    await controller.start("goal_1");
+
+    expect(observedPersistedStates).toEqual(["running"]);
+    expect(runtime.runMilestoneIds).toEqual(["milestone_1"]);
+  });
+
   function createController(options: {
     runtime: GoalRuntimeEngine;
     acceptance: ReturnType<typeof createAcceptance>;

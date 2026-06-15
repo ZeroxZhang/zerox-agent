@@ -243,6 +243,12 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".slash-command-menu");
   });
 
+  it("keeps goal progress synced even before the active goal summary refreshes", () => {
+    expect(chatPanelSource).toContain("const eventBelongsToActiveGoal");
+    expect(chatPanelSource).toContain("event.sessionId === activeSessionId");
+    expect(chatPanelSource).toContain("void refreshActiveGoalDetail(event.goalId)");
+  });
+
   it("starts Chat in a command-first empty home state", () => {
     expect(chatPanelSource).toContain("const initialMessages: ChatMessage[] = [];");
     expect(chatPanelSource).toContain("function AgentHomeHero");

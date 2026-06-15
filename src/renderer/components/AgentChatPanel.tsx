@@ -256,10 +256,15 @@ export function AgentChatPanel({
     return window.buildingAgent.onGoalProgressEvent((event) => {
       const activeGoalId = activeGoalRef.current?.id;
       const activeSessionId = sessionIdRef.current;
-      if (activeGoalId && event.goalId === activeGoalId) {
+      const eventBelongsToActiveGoal =
+        event.goalId === activeGoalId || event.sessionId === activeSessionId;
+      if (eventBelongsToActiveGoal) {
         const goalUiState = getGoalUiSyncState(event.status);
-        const description = activeGoalRef.current?.description ?? event.message;
-        void refreshActiveGoalDetail(activeGoalId);
+        const description =
+          activeGoalRef.current?.id === event.goalId
+            ? activeGoalRef.current.description
+            : event.message;
+        void refreshActiveGoalDetail(event.goalId);
         setStatus({ kind: goalUiState.statusKind, message: event.message });
         setWorkPhase(goalUiState.workPhase);
         setTaskActivity(
@@ -287,7 +292,7 @@ export function AgentChatPanel({
           setActiveChatRequest(null);
         }
       }
-      if (event.sessionId === activeSessionId || event.goalId === activeGoalId) {
+      if (eventBelongsToActiveGoal) {
         void refreshSessions(event.sessionId ?? activeSessionId ?? undefined);
       }
     });

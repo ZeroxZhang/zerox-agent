@@ -186,6 +186,7 @@ export function createAgentGoalController(options: {
     milestone.state = "running";
     milestone.attempts += 1;
     touch(goal);
+    await options.goalStore.save(goal);
     await options.goalStore.appendLedger(goal.id, {
       at: currentTime(),
       kind: "milestone_started",
@@ -217,6 +218,8 @@ export function createAgentGoalController(options: {
     goal.budgetUsage.toolCalls += runResult.toolCallCount;
     goal.budgetUsage.wallClockMs += runResult.wallClockMs ?? 0;
     goal.budgetUsage.tokens += runResult.tokens ?? 0;
+    touch(goal);
+    await options.goalStore.save(goal);
 
     const acceptance = await options.acceptance.evaluate(
       milestone,
