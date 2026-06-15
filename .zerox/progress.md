@@ -251,6 +251,13 @@
     - `release/Zerox Agent-2.1.0-arm64-mac.zip` -> 329M.
     - `release/Zerox Agent-2.1.0-arm64-mac.zip.blockmap` -> 331K.
     - `release/latest-mac.yml` -> 517B.
+- Remote release evidence:
+  - `git push origin main` -> remote `main` advanced from `0d6246b` to `7c57f01`.
+  - `git push -u origin release/2.1.0` -> created remote release branch at `7c57f01`.
+  - `git push origin v2.1.0` -> created annotated release tag; `v2.1.0^{}` resolves to `7c57f01`.
+  - `gh release create v2.1.0 ... --latest` -> published `https://github.com/ZeroxZhang/zerox-agent/releases/tag/v2.1.0`.
+  - `gh api repos/ZeroxZhang/zerox-agent/releases/latest --jq '{tag_name, name, draft, prerelease, html_url}'` -> `tag_name=v2.1.0`, `draft=false`, `prerelease=false`.
+  - v2.1.0 assets uploaded: `latest-mac.yml`, `Zerox.Agent-2.1.0-arm64.dmg`, `Zerox.Agent-2.1.0-arm64.dmg.blockmap`, `Zerox.Agent-2.1.0-arm64-mac.zip`, `Zerox.Agent-2.1.0-arm64-mac.zip.blockmap`.
 
 ## 2026-06-12 P4.3 Runtime Retry Budget and Duplicate Retry Visibility
 
