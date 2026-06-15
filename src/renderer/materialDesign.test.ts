@@ -3,10 +3,27 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("Design System — Notion-inspired app shell", () => {
-  const styles = readFileSync(
+  const rootStyles = readFileSync(
     path.join(process.cwd(), "src/renderer/styles.css"),
     "utf8",
   );
+  const rendererStyleFiles = [
+    "tokens.css",
+    "base.css",
+    "app-shell.css",
+    "sidebar.css",
+    "cards.css",
+    "chat.css",
+    "composer.css",
+    "responsive.css",
+  ];
+  const styles = [
+    rootStyles,
+    ...rendererStyleFiles.map((fileName) => {
+      const filePath = path.join(process.cwd(), "src/renderer/styles", fileName);
+      return existsSync(filePath) ? readFileSync(filePath, "utf8") : "";
+    }),
+  ].join("\n");
   const appSource = readFileSync(
     path.join(process.cwd(), "src/renderer/App.tsx"),
     "utf8",
@@ -44,6 +61,14 @@ describe("Design System — Notion-inspired app shell", () => {
     : "";
 
   it("defines comprehensive CSS custom property design tokens", () => {
+    expect(rootStyles).toContain("@import \"./styles/tokens.css\";");
+    expect(rootStyles).toContain("@import \"./styles/base.css\";");
+    expect(rootStyles).toContain("@import \"./styles/app-shell.css\";");
+    expect(rootStyles).toContain("@import \"./styles/sidebar.css\";");
+    expect(rootStyles).toContain("@import \"./styles/chat.css\";");
+    expect(rootStyles).toContain("@import \"./styles/composer.css\";");
+    expect(rootStyles).toContain("@import \"./styles/cards.css\";");
+    expect(rootStyles).toContain("@import \"./styles/responsive.css\";");
     // Color tokens
     expect(styles).toContain("--bg-root");
     expect(styles).toContain("--bg-page");
@@ -80,13 +105,28 @@ describe("Design System — Notion-inspired app shell", () => {
 
   it("uses app shell and navigation classes in the app frame", () => {
     expect(appSource).toContain("app-shell");
-    expect(appSource).toContain("sidebar");
-    expect(appSource).toContain("nav-resize-handle");
-    expect(appSource).toContain("aria-label=\"调整功能导航栏宽度\"");
+    expect(appSource).toContain("workspace-sidebar");
+    expect(appSource).toContain("new-chat-button");
+    expect(appSource).toContain("sidebar-section");
+    expect(appSource).toContain("sidebar-recents");
+    expect(appSource).not.toContain("nav-resize-handle");
+    expect(appSource).not.toContain("aria-label=\"调整功能导航栏宽度\"");
     expect(appSource).toContain("material-brand"); // brand component class
     expect(appSource).toContain("material-nav-icon"); // icon wrapper class
     expect(appSource).toContain("workspace");
     expect(appSource).toContain("topbar");
+  });
+
+  it("renders a command-center chat shell with a workspace sidebar", () => {
+    expect(appSource).toContain("listChatSessions");
+    expect(appSource).toContain("selectedChatSessionId");
+    expect(appSource).toContain("newChatRequestKey");
+    expect(appSource).toContain("onChatSessionsChange");
+    expect(appSource).toContain("onSelectChatSession");
+    expect(styles).toContain("--nav-rail-width: 280px;");
+    expect(styles).toContain(".workspace-sidebar");
+    expect(styles).toContain(".new-chat-button");
+    expect(styles).toContain(".sidebar-session-item");
   });
 
   it("renders the sidebar version from runtime metadata instead of a hardcoded value", () => {
@@ -180,7 +220,7 @@ describe("Design System — Notion-inspired app shell", () => {
   it("surfaces session-native Goal Mode inside Chat", () => {
     expect(chatPanelSource).toContain("GoalStatusStrip");
     expect(chatPanelSource).toContain("activeGoal");
-    expect(chatPanelSource).toContain("goal-session-badge");
+    expect(appSource).toContain("goal-session-badge");
     expect(chatPanelSource).toContain("GoalDetailDrawer");
     expect(chatPanelSource).toContain("handleViewGoalProgress");
     expect(chatPanelSource).toContain("handleStartGoal");
@@ -201,6 +241,27 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".goal-progress-next");
     expect(styles).toContain(".goal-progress-metrics");
     expect(styles).toContain(".slash-command-menu");
+  });
+
+  it("starts Chat in a command-first empty home state", () => {
+    expect(chatPanelSource).toContain("const initialMessages: ChatMessage[] = [];");
+    expect(chatPanelSource).toContain("function AgentHomeHero");
+    expect(chatPanelSource).toContain("messages.length === 0");
+    expect(chatPanelSource).toContain("agent-home-hero");
+    expect(chatPanelSource).toContain("onPickPrompt");
+    expect(chatPanelSource).toContain("今天想让智能体做什么？");
+    expect(styles).toContain(".agent-home-hero");
+    expect(styles).toContain(".home-suggestions");
+  });
+
+  it("shows the right context panel only when active work needs it", () => {
+    expect(chatPanelSource).toContain("const showContextPanel");
+    expect(chatPanelSource).toContain("has-context-panel");
+    expect(chatPanelSource).toContain("is-focus-mode");
+    expect(chatPanelSource).toContain("{showContextPanel ? (");
+    expect(chatPanelSource).not.toContain("<aside className=\"session-rail\"");
+    expect(styles).toContain(".agent-chat-panel.is-focus-mode");
+    expect(styles).toContain(".agent-chat-panel.has-context-panel");
   });
 
   it("loads pending eval candidates into the Overview capability score", () => {
@@ -257,11 +318,10 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".memory-tags");
     // Chat
     expect(styles).toContain(".agent-chat-panel");
-    expect(styles).toContain("--session-rail-width");
     expect(styles).toContain("--context-panel-width");
-    expect(styles).toContain(".nav-resize-handle");
-    expect(styles).toContain(".session-rail-resize-handle");
-    expect(styles).toContain("grid-template-columns: var(--session-rail-width) minmax(520px, 1fr) var(--context-panel-width)");
+    expect(styles).toContain(".agent-chat-panel.is-focus-mode");
+    expect(styles).toContain(".agent-chat-panel.has-context-panel");
+    expect(styles).not.toContain("grid-template-columns: var(--session-rail-width) minmax(520px, 1fr) var(--context-panel-width)");
     expect(styles).toContain(".kimi-side-card");
     expect(styles).toContain(".chat-message");
     expect(styles).toContain(".composer");
@@ -283,7 +343,6 @@ describe("Design System — Notion-inspired app shell", () => {
 
   it("keeps chatbox actions icon-only and stop available while work is running", () => {
     expect(chatPanelSource).toContain("aria-label=\"打开命令菜单\"");
-    expect(chatPanelSource).toContain("aria-label=\"调整会话历史栏宽度\"");
     expect(chatPanelSource).toContain("aria-label=\"中断当前任务\"");
     expect(chatPanelSource).toContain("aria-label=\"发送消息\"");
     expect(chatPanelSource).toContain("className=\"composer-floating-actions\"");

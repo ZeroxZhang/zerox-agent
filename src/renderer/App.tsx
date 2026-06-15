@@ -1,11 +1,12 @@
 import {
+  useCallback,
   useEffect,
   useState,
-  type CSSProperties,
-  type KeyboardEvent,
-  type PointerEvent as ReactPointerEvent,
 } from "react";
-import { AgentChatPanel } from "./components/AgentChatPanel";
+import {
+  AgentChatPanel,
+  type ChatSidebarSession,
+} from "./components/AgentChatPanel";
 import { EvalReviewPanel } from "./components/EvalReviewPanel";
 import { LearningReviewPanel } from "./components/LearningReviewPanel";
 import { MemoryPanel } from "./components/MemoryPanel";
@@ -16,6 +17,7 @@ import { ScheduledTasksPanel } from "./components/ScheduledTasksPanel";
 import { SkillLibraryPanel } from "./components/SkillLibraryPanel";
 import { ToolsPanel } from "./components/ToolsPanel";
 import { getAppMeta, type AppMeta } from "../shared/appMeta";
+import type { ChatSessionListItem } from "../shared/chat";
 import { buildAgentDataBoundary } from "../shared/dataBoundary";
 import { getMaterialNavigationIcon } from "../shared/materialNavigation";
 import {
@@ -32,9 +34,29 @@ import {
 const fallbackMeta = getAppMeta();
 const fallbackSections = getNavigationSections();
 const fallbackAppVersion = "preview";
-const minNavRailWidth = 80;
-const maxNavRailWidth = 156;
-const resizeStep = 8;
+const fallbackChatSessions: ChatSessionListItem[] = [
+  {
+    id: "main",
+    title: "当前会话",
+    summary: "直接发指令给本地智能体",
+    messageCount: 0,
+    updatedAt: new Date(0).toISOString(),
+  },
+  {
+    id: "files",
+    title: "文件整理会话",
+    summary: "整理下载目录并写报告",
+    messageCount: 2,
+    updatedAt: new Date(0).toISOString(),
+  },
+  {
+    id: "research",
+    title: "资料调研会话",
+    summary: "搜索、抓取、总结网页",
+    messageCount: 2,
+    updatedAt: new Date(0).toISOString(),
+  },
+];
 
 function getSectionFromHash(): NavigationSectionId {
   return getNavigationSection(window.location.hash.replace(/^#/, "")).id;
@@ -63,7 +85,11 @@ export function App() {
   );
   const [activeSettingsSectionId, setActiveSettingsSectionId] =
     useState<SettingsNavigationSectionId>(() => getStartupSettingsSectionId());
-  const [navRailWidth, setNavRailWidth] = useState(96);
+  const [chatSessions, setChatSessions] =
+    useState<ChatSessionListItem[]>(fallbackChatSessions);
+  const [selectedChatSessionId, setSelectedChatSessionId] =
+    useState<string | null>(null);
+  const [newChatRequestKey, setNewChatRequestKey] = useState(0);
 
   function navigateTo(sectionId: NavigationSectionId) {
     const settingsSection = getSettingsNavigationSections().find(
@@ -95,6 +121,13 @@ export function App() {
       .catch(() => {
         setSections(fallbackSections);
       });
+    window.buildingAgent?.listChatSessions().then((loadedSessions) => {
+      if (loadedSessions.length) {
+        setChatSessions(loadedSessions);
+      }
+    }).catch(() => {
+      setChatSessions(fallbackChatSessions);
+    });
   }, []);
 
   useEffect(() => {
@@ -120,60 +153,33 @@ export function App() {
     sections.find((section) => section.id === activeSectionId) ??
     getNavigationSection(getDefaultNavigationSection().id);
 
-  function updateNavRailWidth(nextWidth: number) {
-    setNavRailWidth(clampNumber(nextWidth, minNavRailWidth, maxNavRailWidth));
+  function handleNewChat() {
+    setSelectedChatSessionId(null);
+    setNewChatRequestKey((current) => current + 1);
+    navigateTo("chat");
   }
 
-  function handleNavResizePointerDown(
-    event: ReactPointerEvent<HTMLButtonElement>,
-  ) {
-    event.preventDefault();
-    const startX = event.clientX;
-    const startWidth = navRailWidth;
-
-    function handlePointerMove(moveEvent: PointerEvent) {
-      updateNavRailWidth(startWidth + moveEvent.clientX - startX);
-    }
-
-    function cleanup() {
-      document.removeEventListener("pointermove", handlePointerMove);
-    }
-
-    document.addEventListener("pointermove", handlePointerMove);
-    document.addEventListener("pointerup", cleanup, { once: true });
+  function onSelectChatSession(sessionId: string) {
+    setSelectedChatSessionId(sessionId);
+    navigateTo("chat");
   }
 
-  function handleNavResizeKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
-    if (event.key === "ArrowLeft") {
-      event.preventDefault();
-      updateNavRailWidth(navRailWidth - resizeStep);
+  const handleChatSessionsChange = useCallback((sessions: ChatSidebarSession[]) => {
+    if (sessions.length) {
+      setChatSessions(sessions.map(toChatSessionListItem));
     }
-    if (event.key === "ArrowRight") {
-      event.preventDefault();
-      updateNavRailWidth(navRailWidth + resizeStep);
-    }
-    if (event.key === "Home") {
-      event.preventDefault();
-      updateNavRailWidth(minNavRailWidth);
-    }
-    if (event.key === "End") {
-      event.preventDefault();
-      updateNavRailWidth(maxNavRailWidth);
-    }
-  }
+  }, []);
 
   return (
     <main
       className={`app-shell material-shell ${
         activeSection.id === "chat" ? "is-agent-chat" : ""
       }`}
-      style={
-        {
-          "--nav-rail-width": `${navRailWidth}px`,
-        } as CSSProperties
-      }
     >
-      <aside className="sidebar material-navigation-rail" aria-label="主导航">
+      <aside
+        className="sidebar workspace-sidebar material-navigation-rail"
+        aria-label="主导航"
+      >
         <div className="brand material-brand">
           <img className="brand-mark" src="./logo.png" alt="Zerox Agent" />
           <div className="material-brand-copy">
@@ -181,7 +187,11 @@ export function App() {
             <small>本地桌面智能体</small>
           </div>
         </div>
-        <nav aria-label="功能分区">
+        <button className="new-chat-button" type="button" onClick={handleNewChat}>
+          <span aria-hidden="true">＋</span>
+          新会话
+        </button>
+        <nav className="primary-nav" aria-label="功能分区">
           {sections.map((section) => {
             const icon = getMaterialNavigationIcon(section.id);
 
@@ -209,27 +219,45 @@ export function App() {
             );
           })}
         </nav>
+        <section className="sidebar-section sidebar-pinned" aria-label="固定入口">
+          <p className="sidebar-section-title">Pinned</p>
+          <button type="button" onClick={() => navigateTo("scheduled-tasks")}>
+            <strong>自动任务</strong>
+            <small>调度与本地执行</small>
+          </button>
+          <button type="button" onClick={() => navigateTo("settings")}>
+            <strong>本地配置</strong>
+            <small>模型、权限与记忆</small>
+          </button>
+        </section>
+        <section className="sidebar-section sidebar-recents" aria-label="最近会话">
+          <p className="sidebar-section-title">Recents</p>
+          <div className="sidebar-session-list">
+            {chatSessions.slice(0, 8).map((session) => (
+              <button
+                className={`sidebar-session-item ${
+                  session.id === selectedChatSessionId ? "is-active" : ""
+                }`}
+                key={session.id}
+                type="button"
+                onClick={() => onSelectChatSession(session.id)}
+              >
+                <strong>{session.title}</strong>
+                <small>{session.summary || `${session.messageCount} 条消息`}</small>
+                {session.activeGoal ? (
+                  <span className={`goal-session-badge is-${session.activeGoal.status}`}>
+                    {translateSidebarGoalStatus(session.activeGoal.status)}
+                  </span>
+                ) : null}
+              </button>
+            ))}
+          </div>
+        </section>
         <div className="nav-footer">
           <span>v{appVersion}</span>
           <small>by Zerox</small>
         </div>
       </aside>
-
-      <button
-        aria-label="调整功能导航栏宽度"
-        aria-orientation="vertical"
-        aria-valuemax={maxNavRailWidth}
-        aria-valuemin={minNavRailWidth}
-        aria-valuenow={navRailWidth}
-        className="nav-resize-handle"
-        onKeyDown={handleNavResizeKeyDown}
-        onPointerDown={handleNavResizePointerDown}
-        role="separator"
-        title="拖动调整功能导航栏宽度"
-        type="button"
-      >
-        <span aria-hidden="true" />
-      </button>
 
       <section className="workspace">
         <header className="topbar material-top-app-bar">
@@ -254,7 +282,13 @@ export function App() {
         </header>
 
         {activeSection.id === "chat" ? (
-          <AgentChatPanel onNavigate={navigateTo} />
+          <AgentChatPanel
+            newChatRequestKey={newChatRequestKey}
+            requestedSessionId={selectedChatSessionId}
+            onActiveSessionChange={setSelectedChatSessionId}
+            onChatSessionsChange={handleChatSessionsChange}
+            onNavigate={navigateTo}
+          />
         ) : null}
         {activeSection.id === "overview" ? (
           <OverviewPanel onNavigate={navigateTo} />
@@ -305,6 +339,32 @@ function SettingsSectionShell(props: {
   );
 }
 
-function clampNumber(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, Math.round(value)));
+function toChatSessionListItem(session: ChatSidebarSession): ChatSessionListItem {
+  return {
+    id: session.id,
+    title: session.title,
+    summary: session.summary,
+    messageCount: session.messageCount ?? 0,
+    ...(session.activeGoal ? { activeGoal: session.activeGoal } : {}),
+    updatedAt: new Date(0).toISOString(),
+  };
+}
+
+function translateSidebarGoalStatus(
+  status: NonNullable<ChatSessionListItem["activeGoal"]>["status"],
+): string {
+  const labels: Record<
+    NonNullable<ChatSessionListItem["activeGoal"]>["status"],
+    string
+  > = {
+    planning: "规划中",
+    executing: "执行中",
+    waiting_for_review: "等待审核",
+    achieved: "已达成",
+    stopped_budget: "预算停止",
+    stopped_stalled: "停滞停止",
+    failed: "失败",
+    canceled: "已取消",
+  };
+  return labels[status];
 }

@@ -1,0 +1,28 @@
+.primary-action, .secondary-action, .danger-action {
+  min-height: 36px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+}
+
+.module-card, .health-card, .skill-card {
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface-raised);
+}
+
+.field input, .field select, .field textarea {
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface-raised);
+}
+
+.field-grid { display: grid; gap: var(--space-3); }
+.status-pill, .memory-tags { display: inline-flex; }
+
+.handoff-review-card,
+.trajectory-insight,
+.trajectory-insight-list {
+  border-color: var(--border-default);
+}

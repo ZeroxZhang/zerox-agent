@@ -1205,3 +1205,43 @@
   - `gh release create v1.9.5 ... --latest` -> published `https://github.com/ZeroxZhang/zerox-agent/releases/tag/v1.9.5`.
   - `gh api repos/ZeroxZhang/zerox-agent/releases/latest --jq '{tag_name, name, draft, prerelease, html_url}'` -> `tag_name=v1.9.5`, `draft=false`, `prerelease=false`.
   - v1.9.5 assets uploaded: `latest-mac.yml`, `Zerox.Agent-1.9.5-arm64.dmg`, `Zerox.Agent-1.9.5-arm64.dmg.blockmap`, `Zerox.Agent-1.9.5-arm64-mac.zip`, `Zerox.Agent-1.9.5-arm64-mac.zip.blockmap`.
+
+## 2026-06-15 Command-first UI and shell refactor
+
+- Request:
+  - Optimize the interface UI and framework according to the attached UI feedback.
+- Implementation:
+  - Reworked Chat from a permanent Kimi-style three-column console into a command-first agent stage with an empty home hero, large composer, and conditional progress/context panel.
+  - Moved session discovery into a wider workspace sidebar with New Chat, primary navigation, pinned entries, and recents.
+  - Replaced Material 3 / Google-blue dominance with warm low-saturation desktop productivity tokens and dark body text for assistant output.
+  - Split renderer styling into focused CSS modules with `legacy.css` retained as a compatibility layer for non-chat surfaces.
+  - Hid idle task activity noise so the empty state shows only the main command surface and composer.
+- Changed files:
+  - `src/renderer/App.tsx`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/materialDesign.test.ts`
+  - `src/renderer/styles.css`
+  - `src/renderer/styles/tokens.css`
+  - `src/renderer/styles/base.css`
+  - `src/renderer/styles/app-shell.css`
+  - `src/renderer/styles/sidebar.css`
+  - `src/renderer/styles/chat.css`
+  - `src/renderer/styles/composer.css`
+  - `src/renderer/styles/cards.css`
+  - `src/renderer/styles/responsive.css`
+  - `src/renderer/styles/legacy.css`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts` -> RED with 6 expected failures for missing modular CSS imports, workspace sidebar, command-first home state, and conditional context panel.
+  - `npm test -- src/renderer/materialDesign.test.ts` -> 1 file / 24 tests passed after implementation; reran after hiding idle activity strip with the same pass result.
+  - `npm test -- src/renderer/materialDesign.test.ts src/shared/navigation.test.ts src/shared/materialNavigation.test.ts` -> 3 files / 30 tests passed.
+  - `npm run build` -> TypeScript and Vite production build passed.
+  - Browser QA at `http://127.0.0.1:5173/#chat` -> desktop DOM contained workspace sidebar, command hero, composer, and no idle context panel; console warn/error logs were empty.
+  - Browser interaction QA -> clicking `把这个目标拆成可执行计划` populated the composer with that text and enabled the send button; console warn/error logs stayed empty.
+  - Browser mobile QA at 390x844 -> hero and composer visible, right context panel hidden, `scrollWidth=390`, no horizontal overflow, console warn/error logs empty.
+  - Screenshot evidence captured with Playwright after Browser screenshot timed out: `/tmp/zerox-chat-desktop.png` and `/tmp/zerox-chat-mobile.png`; both were inspected with `view_image`.
+  - Accepted concept inspected with `view_image`: `/Users/zerox/.codex/generated_images/019eca98-53b7-7483-a25d-6f4c53cb809e/ig_0f0ecacd943c1222016a2fc671cef481918c4f6502c4419f04.png`.
+  - `npm run verify` -> 110 files / 538 tests passed, build passed, agent eval 21/21, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `git diff --check` -> passed.

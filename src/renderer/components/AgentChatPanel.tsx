@@ -3,9 +3,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
-  type KeyboardEvent,
-  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
 import type {
@@ -74,6 +71,10 @@ import type {
 } from "../../shared/toolApproval";
 
 type AgentChatPanelProps = {
+  newChatRequestKey?: number;
+  requestedSessionId?: string | null;
+  onActiveSessionChange?: (sessionId: string | null) => void;
+  onChatSessionsChange?: (sessions: ChatSidebarSession[]) => void;
   onNavigate: (sectionId: NavigationSectionId) => void;
 };
 
@@ -96,6 +97,8 @@ type ChatSession = {
   activeGoal?: ChatSessionGoalSummary;
   messageCount?: number;
 };
+
+export type ChatSidebarSession = ChatSession;
 
 type ComposerCommandId = "goal" | "tool" | "permission";
 
@@ -124,10 +127,6 @@ const fallbackSessions: ChatSession[] = [
     summary: "搜索、抓取、总结网页",
   },
 ];
-const minSessionRailWidth = 180;
-const maxSessionRailWidth = 360;
-const minChatWorkspaceWidth = 520;
-const chatResizeStep = 12;
 const composerCommandItems: ComposerCommandItem[] = [
   {
     id: "goal",
@@ -151,24 +150,15 @@ const composerCommandItems: ComposerCommandItem[] = [
   },
 ];
 
-const initialMessages: ChatMessage[] = [
-  {
-    id: "assistant-welcome",
-    role: "assistant",
-    content:
-      "我是你的本地桌面智能体。你可以直接告诉我要做什么，例如：每天 9 点整理下载文件夹、运行本地文件整理技能、查一下最近失败原因。",
-    createdAt: "刚刚",
-  },
-  {
-    id: "assistant-safety",
-    role: "assistant",
-    content:
-      "我会先看模型、技能、任务、工具权限和记忆状态；涉及文件、网页或命令行的动作，会按任务权限执行并留下运行日志。",
-    createdAt: "刚刚",
-  },
-];
+const initialMessages: ChatMessage[] = [];
 
-export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
+export function AgentChatPanel({
+  newChatRequestKey = 0,
+  requestedSessionId = null,
+  onActiveSessionChange,
+  onChatSessionsChange,
+  onNavigate,
+}: AgentChatPanelProps) {
   const dataBoundary = buildAgentDataBoundary(
     window.buildingAgent ? "desktop" : "preview",
   );
@@ -202,14 +192,12 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
   const [toolApprovalEvents, setToolApprovalEvents] = useState<
     ToolApprovalDecisionPayload[]
   >([]);
-  const [sessionRailWidth, setSessionRailWidth] = useState(220);
   const [activeGoalDetail, setActiveGoalDetail] = useState<Goal | null>(null);
   const [goalDrawerOpen, setGoalDrawerOpen] = useState(false);
   const [activeChatRequestId, setActiveChatRequestId] = useState<string | null>(
     null,
   );
   const [activityTick, setActivityTick] = useState(Date.now());
-  const chatPanelRef = useRef<HTMLElement>(null);
   const messageListRef = useRef<HTMLDivElement>(null);
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const sessionIdRef = useRef<string | null>(sessionId);
@@ -226,7 +214,34 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
 
   useEffect(() => {
     sessionIdRef.current = sessionId;
-  }, [sessionId]);
+    onActiveSessionChange?.(sessionId);
+  }, [onActiveSessionChange, sessionId]);
+
+  useEffect(() => {
+    setSessionId(null);
+    setMessages(initialMessages);
+    setStatus({ kind: "ready", message: "会话已就绪" });
+    setWorkPhase("idle");
+    setTaskActivity(idleTaskActivity);
+    setTaskProcessEvents([]);
+    setGoalRunEvents([]);
+    setActiveGoalDetail(null);
+    setGoalDrawerOpen(false);
+  }, [newChatRequestKey]);
+
+  useEffect(() => {
+    if (!requestedSessionId || requestedSessionId === sessionId) {
+      return;
+    }
+
+    if (window.buildingAgent) {
+      void loadPersistedSession(requestedSessionId);
+      return;
+    }
+
+    setSessionId(requestedSessionId);
+    setMessages(initialMessages);
+  }, [requestedSessionId, sessionId]);
 
   useEffect(() => {
     if (!window.buildingAgent) {
@@ -409,8 +424,9 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
           setLastValidationSnapshot(validation.snapshot);
         }
         if (loadedSessions.length) {
-          setSessions(loadedSessions.map(toSessionRailItem));
-          await loadPersistedSession(loadedSessions[0].id);
+          const nextSessions = loadedSessions.map(toSessionRailItem);
+          setSessions(nextSessions);
+          onChatSessionsChange?.(nextSessions);
         }
         setStatus({
           kind: "ready",
@@ -424,7 +440,7 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
             error instanceof Error ? error.message : "读取智能体状态失败",
         });
       });
-  }, []);
+  }, [onChatSessionsChange]);
 
   async function loadPersistedSession(sessionIdToLoad: string) {
     if (!window.buildingAgent) {
@@ -458,7 +474,9 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
 
     const loadedSessions = await window.buildingAgent.listChatSessions();
     if (loadedSessions.length) {
-      setSessions(loadedSessions.map(toSessionRailItem));
+      const nextSessions = loadedSessions.map(toSessionRailItem);
+      setSessions(nextSessions);
+      onChatSessionsChange?.(nextSessions);
     }
     if (nextActiveSessionId) {
       setSessionId(nextActiveSessionId);
@@ -556,6 +574,12 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
     () => buildFirstRunGuide(readinessChecklist, dataBoundary.mode),
     [dataBoundary.mode, readinessChecklist],
   );
+  const showContextPanel =
+    (workPhase !== "idle" && workPhase !== "done") ||
+    taskActivity.kind === "working" ||
+    taskActivity.kind === "paused" ||
+    Boolean(activeGoal) ||
+    Boolean(pendingToolApproval);
 
   function createMessage(
     message: Omit<ChatMessage, "id" | "createdAt">,
@@ -591,6 +615,13 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
 
     setDraft(createGoalCommandDraft(draft));
     setCommandMenuOpen(false);
+    window.requestAnimationFrame(() => {
+      messageInputRef.current?.focus();
+    });
+  }
+
+  function handlePickPrompt(prompt: string) {
+    setDraft(prompt);
     window.requestAnimationFrame(() => {
       messageInputRef.current?.focus();
     });
@@ -1190,146 +1221,14 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
     onNavigate(action.target);
   }
 
-  function getMaxSessionRailWidth(): number {
-    const panelWidth = chatPanelRef.current?.getBoundingClientRect().width ?? 0;
-    if (!panelWidth) {
-      return maxSessionRailWidth;
-    }
-
-    return Math.max(
-      minSessionRailWidth,
-      Math.min(maxSessionRailWidth, panelWidth - minChatWorkspaceWidth - 8),
-    );
-  }
-
-  function updateSessionRailWidth(nextWidth: number) {
-    setSessionRailWidth(
-      clampNumber(
-        nextWidth,
-        minSessionRailWidth,
-        getMaxSessionRailWidth(),
-      ),
-    );
-  }
-
-  function handleSessionRailResizePointerDown(
-    event: ReactPointerEvent<HTMLButtonElement>,
-  ) {
-    event.preventDefault();
-    const startX = event.clientX;
-    const startWidth = sessionRailWidth;
-
-    function handlePointerMove(moveEvent: PointerEvent) {
-      updateSessionRailWidth(startWidth - (moveEvent.clientX - startX));
-    }
-
-    function cleanup() {
-      document.removeEventListener("pointermove", handlePointerMove);
-    }
-
-    document.addEventListener("pointermove", handlePointerMove);
-    document.addEventListener("pointerup", cleanup, { once: true });
-  }
-
-  function handleSessionRailResizeKeyDown(
-    event: KeyboardEvent<HTMLButtonElement>,
-  ) {
-    if (event.key === "ArrowLeft") {
-      event.preventDefault();
-      updateSessionRailWidth(sessionRailWidth + chatResizeStep);
-    }
-    if (event.key === "ArrowRight") {
-      event.preventDefault();
-      updateSessionRailWidth(sessionRailWidth - chatResizeStep);
-    }
-    if (event.key === "Home") {
-      event.preventDefault();
-      updateSessionRailWidth(minSessionRailWidth);
-    }
-    if (event.key === "End") {
-      event.preventDefault();
-      updateSessionRailWidth(getMaxSessionRailWidth());
-    }
-  }
-
   return (
     <section
-      className="agent-chat-panel"
+      className={`agent-chat-panel ${
+        showContextPanel ? "has-context-panel" : "is-focus-mode"
+      } ${messages.length === 0 ? "is-empty" : "has-messages"}`}
       aria-label="智能体会话工作台"
       data-testid="agent-chat-panel"
-      ref={chatPanelRef}
-      style={
-        {
-          "--session-rail-width": `${sessionRailWidth}px`,
-        } as CSSProperties
-      }
     >
-      <aside className="session-rail" aria-label="会话列表">
-        <div className="session-rail-header">
-          <span>会话</span>
-          <button
-            type="button"
-            aria-label="新建会话"
-            onClick={() => {
-              setSessionId(null);
-              setMessages(initialMessages);
-              setStatus({ kind: "ready", message: "会话已就绪" });
-              setWorkPhase("idle");
-              setTaskActivity(idleTaskActivity);
-              setTaskProcessEvents([]);
-            }}
-          >
-            ＋
-          </button>
-        </div>
-        <div className="session-list">
-          {sessions.map((session) => (
-            <button
-              className={`session-item ${
-                session.id === sessionId || (!sessionId && session.id === "main")
-                  ? "is-active"
-                  : ""
-              }`}
-              key={session.id}
-              onClick={() => {
-                if (window.buildingAgent) {
-                  void loadPersistedSession(session.id);
-                  return;
-                }
-                setSessionId(session.id);
-              }}
-              type="button"
-            >
-              <strong>{session.title}</strong>
-              <small>{session.summary}</small>
-              {session.activeGoal ? (
-                <span
-                  className={`goal-session-badge is-${session.activeGoal.status}`}
-                >
-                  {translateGoalStatus(session.activeGoal.status)}
-                </span>
-              ) : null}
-            </button>
-          ))}
-        </div>
-      </aside>
-
-      <button
-        aria-label="调整会话历史栏宽度"
-        aria-orientation="vertical"
-        aria-valuemax={getMaxSessionRailWidth()}
-        aria-valuemin={minSessionRailWidth}
-        aria-valuenow={sessionRailWidth}
-        className="session-rail-resize-handle"
-        onKeyDown={handleSessionRailResizeKeyDown}
-        onPointerDown={handleSessionRailResizePointerDown}
-        role="separator"
-        title="拖动调整会话历史栏宽度"
-        type="button"
-      >
-        <span aria-hidden="true" />
-      </button>
-
       <section className="chat-workspace" aria-label="会话窗口">
         <div className="chat-hero">
           <div className="chat-hero-main">
@@ -1374,18 +1273,26 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
           </section>
         )}
 
-        <div className="message-list" aria-label="消息列表" ref={messageListRef}>
-          {messages.map((message) => (
-            <article
-              className={`chat-message is-${message.role}`}
-              key={message.id}
-            >
-              <span>{message.role === "assistant" ? "智能体" : "你"}</span>
-              <MarkdownMessage content={message.content} />
-              <small>{message.createdAt}</small>
-            </article>
-          ))}
-        </div>
+        {messages.length === 0 ? (
+          <AgentHomeHero
+            contextCards={contextCards}
+            modelReady={modelSettings.hasApiKey}
+            onPickPrompt={handlePickPrompt}
+          />
+        ) : (
+          <div className="message-list" aria-label="消息列表" ref={messageListRef}>
+            {messages.map((message) => (
+              <article
+                className={`chat-message is-${message.role}`}
+                key={message.id}
+              >
+                <span>{message.role === "assistant" ? "智能体" : "你"}</span>
+                <MarkdownMessage content={message.content} />
+                <small>{message.createdAt}</small>
+              </article>
+            ))}
+          </div>
+        )}
 
         {activeGoal ? (
           <GoalStatusStrip
@@ -1475,18 +1382,20 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
         ) : null}
 
         <form className="composer" onSubmit={handleSubmit}>
-          <TaskActivityStrip
-            activity={taskActivity}
-            detail={taskActivityDetail}
-            processItems={taskProcessItems}
-            onContinue={
-              taskActivity.kind === "paused"
-                ? () => {
-                    void submitUserMessage("继续");
-                  }
-                : undefined
-            }
-          />
+          {taskActivity.kind !== "idle" ? (
+            <TaskActivityStrip
+              activity={taskActivity}
+              detail={taskActivityDetail}
+              processItems={taskProcessItems}
+              onContinue={
+                taskActivity.kind === "paused"
+                  ? () => {
+                      void submitUserMessage("继续");
+                    }
+                  : undefined
+              }
+            />
+          ) : null}
           <div className="composer-inner">
             <div className="composer-input-shell">
               {composerCommandMenuVisible ? (
@@ -1626,6 +1535,7 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
         />
       </section>
 
+      {showContextPanel ? (
       <aside className="agent-context-panel" aria-label="进度与上下文">
         <section className="kimi-side-card">
           <header>
@@ -1661,6 +1571,50 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
           </div>
         </section>
       </aside>
+      ) : null}
+    </section>
+  );
+}
+
+function AgentHomeHero(props: {
+  contextCards: Array<{ label: string; value: string; detail: string }>;
+  modelReady: boolean;
+  onPickPrompt: (prompt: string) => void;
+}) {
+  const suggestions = [
+    "分析最近一次失败任务，并告诉我怎么修",
+    "整理下载目录，生成一份 Markdown 报告",
+    "把这个目标拆成可执行计划",
+  ];
+
+  return (
+    <section className="agent-home-hero" aria-label="智能体首页">
+      <img src="./logo.png" alt="" aria-hidden="true" />
+      <h2>今天想让智能体做什么？</h2>
+      <p>让 Zerox 帮你规划、执行、检查和沉淀本地工作流。</p>
+      <div
+        className={`home-status-chips ${
+          props.modelReady ? "is-ready" : "needs-model"
+        }`}
+        aria-label="本地智能体状态"
+      >
+        {props.contextCards.map((card) => (
+          <span key={card.label} title={card.detail}>
+            {card.label}：{card.value}
+          </span>
+        ))}
+      </div>
+      <div className="home-suggestions" aria-label="建议动作">
+        {suggestions.map((prompt) => (
+          <button
+            key={prompt}
+            type="button"
+            onClick={() => props.onPickPrompt(prompt)}
+          >
+            {prompt}
+          </button>
+        ))}
+      </div>
     </section>
   );
 }
@@ -2100,10 +2054,6 @@ function getGoalRunEventLabel(event: AgentRunEvent): string {
   if (event.level === "error") return "错误";
   if (event.level === "warn") return "警告";
   return "信息";
-}
-
-function clampNumber(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, Math.round(value)));
 }
 
 function createClientRequestId(): string {
