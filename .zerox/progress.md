@@ -1448,3 +1448,34 @@
   - `npm run verify` -> 111 files / 557 tests passed, build passed, agent eval 21/21, memory eval 2/2.
   - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
   - `git diff --check` -> passed.
+
+## 2026-06-15 v2.1.2 release preparation
+
+- Request:
+  - Bump the app version to 2.1.2, update the local app metadata, package the macOS app, update README, push, and publish a new GitHub Release.
+- Implementation:
+  - Created release branch `release/2.1.2` from the latest v2.1.1 hotfix branch.
+  - Updated `package.json` and `package-lock.json` from 2.1.1 to 2.1.2.
+  - Updated README English/Chinese release positioning, packaging command examples, current version labels, and verification counts.
+  - Updated release metadata tests and README tests to assert v2.1.2.
+  - Built unsigned macOS distribution artifacts with electron-builder.
+- Changed files:
+  - `package.json`
+  - `package-lock.json`
+  - `README.md`
+  - `src/shared/packageScripts.test.ts`
+  - `src/shared/readme.test.ts`
+  - `.zerox/progress.md`
+- Verification evidence:
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 2 files / 9 tests passed after updating version and README assertions.
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> 111 files / 557 tests passed, build passed, agent eval 21/21, memory eval 2/2.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `npm run dist:mac` -> build passed and generated:
+    - `release/Zerox Agent-2.1.2-arm64.dmg` (118MB)
+    - `release/Zerox Agent-2.1.2-arm64-mac.zip` (329MB)
+    - `release/Zerox Agent-2.1.2-arm64.dmg.blockmap`
+    - `release/Zerox Agent-2.1.2-arm64-mac.zip.blockmap`
+  - SHA-256:
+    - dmg: `06b9552704bbc0e19e6a151409312d79fbe60fa467e73209b427643b9d695766`
+    - zip: `38ab58b8de433a7cba1a490372556525ef55ca3ab920dce27d8b01910c1b2754`
