@@ -1199,3 +1199,9 @@
   - `release/Zerox Agent-1.9.5-arm64.dmg` -> 118M.
   - `release/Zerox Agent-1.9.5-arm64-mac.zip` -> 329M.
   - `release/latest-mac.yml` -> version `1.9.5`; GitHub Release upload uses `Zerox.Agent-1.9.5-*` asset aliases to match README download guidance.
+- GitHub release evidence:
+  - `git push origin main` -> remote `main` advanced to rollback commit `9cae698`.
+  - `git push origin v1.9.5` -> created rollback release tag.
+  - `gh release create v1.9.5 ... --latest` -> published `https://github.com/ZeroxZhang/zerox-agent/releases/tag/v1.9.5`.
+  - `gh api repos/ZeroxZhang/zerox-agent/releases/latest --jq '{tag_name, name, draft, prerelease, html_url}'` -> `tag_name=v1.9.5`, `draft=false`, `prerelease=false`.
+  - v1.9.5 assets uploaded: `latest-mac.yml`, `Zerox.Agent-1.9.5-arm64.dmg`, `Zerox.Agent-1.9.5-arm64.dmg.blockmap`, `Zerox.Agent-1.9.5-arm64-mac.zip`, `Zerox.Agent-1.9.5-arm64-mac.zip.blockmap`.
