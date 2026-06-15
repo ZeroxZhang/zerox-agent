@@ -1438,6 +1438,12 @@
   - SHA-256:
     - dmg: `27b6ad2cfe21b314fcf84e45e671a0b5c81183e0c718161ba6f623bb1aeeb5b8`
     - zip: `4bec7c1853ca2c05d6cb4be96130569bd732a693daa768664f4befac65b4b838`
+- GitHub release evidence:
+  - `git push -u origin codex/system_up` -> pushed branch `codex/system_up`.
+  - `git push origin v2.2.0` -> pushed release tag `v2.2.0`.
+  - `gh release create v2.2.0 ... --latest` -> published `https://github.com/ZeroxZhang/zerox-agent/releases/tag/v2.2.0`.
+  - `gh api repos/ZeroxZhang/zerox-agent/releases/latest --jq '{tag_name, name, draft, prerelease, html_url}'` -> `tag_name=v2.2.0`, `draft=false`, `prerelease=false`.
+  - v2.2.0 assets uploaded: `latest-mac.yml`, `Zerox.Agent-2.2.0-arm64.dmg`, `Zerox.Agent-2.2.0-arm64.dmg.blockmap`, `Zerox.Agent-2.2.0-arm64-mac.zip`, `Zerox.Agent-2.2.0-arm64-mac.zip.blockmap`.
 
 ## 2026-06-15 Chat hero long-text containment hotfix
 
