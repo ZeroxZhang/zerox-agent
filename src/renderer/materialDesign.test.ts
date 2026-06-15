@@ -278,9 +278,13 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(chatPanelSource).toContain("const chatTitle = activeSession?.title ?? \"新会话\";");
     expect(chatPanelSource).toContain("title={chatTitle}");
     expect(chatPanelSource).toContain("title={status.message}");
+    expect(chatPanelSource).toContain("const chatStatusIsLong");
+    expect(chatPanelSource).toContain("aria-expanded={chatStatusIsLong ? chatStatusExpanded : undefined}");
+    expect(chatPanelSource).toContain("setChatStatusExpanded((expanded) => !expanded)");
     expect(styles).toContain(".chat-hero h2");
     expect(styles).toContain("-webkit-line-clamp: 2;");
     expect(styles).toContain(".chat-state > span");
+    expect(styles).toContain(".chat-state.is-expanded");
     expect(styles).toContain("max-width: min(420px, 42vw);");
     expect(styles).toContain("text-overflow: ellipsis;");
   });

@@ -10,11 +10,13 @@ import { searchCode } from "./nativeCodeTools";
 import { readGitDiff, readGitStatus } from "./nativeGitTools";
 import { createNativeResearchTools } from "./nativeResearchTools";
 import { runNativeTestCommand } from "./nativeTestRunTool";
+import type { ToolResultOffloadStore } from "./toolResultOffloadStore";
 import type { MemoryStore } from "./memoryStore";
 import type { AgentRunContext } from "../shared/agentWorkspace";
 import { getMemoryKinds, type MemoryKind } from "../shared/memory";
 import { defineNativeToolDescriptor } from "../shared/nativeCapabilities";
 import type { ToolCallRequest } from "../shared/toolPermissions";
+import { isSafeToolResultRef } from "../shared/toolResultRefs";
 
 const execAsync = promisify(exec);
 
@@ -41,6 +43,7 @@ export function createAgentToolExecutor(options?: {
   registry?: DynamicToolRegistry;
   memoryStore?: Pick<MemoryStore, "search">;
   chatSessionStore?: Pick<ChatSessionStore, "searchMessages">;
+  toolResultOffloadStore?: Pick<ToolResultOffloadStore, "read">;
 }): AgentToolExecutor {
   const webTools = options?.webTools ?? createWebTools();
   const registry = options?.registry ?? createDynamicToolRegistry();
@@ -50,6 +53,7 @@ export function createAgentToolExecutor(options?: {
     webTools,
     memoryStore: options?.memoryStore,
     chatSessionStore: options?.chatSessionStore,
+    toolResultOffloadStore: options?.toolResultOffloadStore,
   });
 
   return {
@@ -81,6 +85,7 @@ function registerBuiltinTools(
     webTools: WebTools;
     memoryStore?: Pick<MemoryStore, "search">;
     chatSessionStore?: Pick<ChatSessionStore, "searchMessages">;
+    toolResultOffloadStore?: Pick<ToolResultOffloadStore, "read">;
   },
 ) {
   const researchTools = createNativeResearchTools({
@@ -171,8 +176,42 @@ function registerBuiltinTools(
         },
       },
     },
-    async (args) => readLocalFile(String(args.path ?? "")),
+    async (args) =>
+      readLocalFileOrToolResultRef(
+        String(args.path ?? ""),
+        options.toolResultOffloadStore,
+      ),
     "built-in",
+  );
+
+  registry.register(
+    {
+      type: "function",
+      function: {
+        name: "tool_result_read",
+        description:
+          "读取工具返回的大型结果引用。当上一步结果包含 result_ref 或 tool-result-refs/... 时使用。",
+        parameters: {
+          type: "object",
+          properties: {
+            ref: { type: "string", description: "工具结果引用" },
+          },
+          required: ["ref"],
+        },
+      },
+    },
+    async (args) =>
+      readToolResultRef(String(args.ref ?? ""), options.toolResultOffloadStore),
+    "built-in",
+    defineNativeToolDescriptor({
+      id: "tool_result_read",
+      kind: "file",
+      label: "Tool Result Read",
+      description: "Read offloaded tool observations without treating refs as files.",
+      riskLevel: "low",
+      permissionScope: { files: "none", shell: "none", web: "none" },
+      observableEvents: ["native_tool_invocation", "native_tool_observation"],
+    }),
   );
 
   registry.register(
@@ -642,6 +681,51 @@ async function readLocalFile(filePath: string): Promise<AgentToolExecutionResult
   const content = await readFile(resolvedPath, "utf8");
 
   return { ok: true, result: { path: resolvedPath, content } };
+}
+
+async function readLocalFileOrToolResultRef(
+  filePath: string,
+  store?: Pick<ToolResultOffloadStore, "read">,
+): Promise<AgentToolExecutionResult> {
+  if (isSafeToolResultRef(filePath)) {
+    return readToolResultRef(filePath, store);
+  }
+
+  return readLocalFile(filePath);
+}
+
+async function readToolResultRef(
+  ref: string,
+  store?: Pick<ToolResultOffloadStore, "read">,
+): Promise<AgentToolExecutionResult> {
+  if (!isSafeToolResultRef(ref)) {
+    return {
+      ok: false,
+      error: "tool_result_read requires a safe tool-result ref.",
+    };
+  }
+  if (!store) {
+    return {
+      ok: false,
+      error: "tool_result_read is not available in this runtime.",
+    };
+  }
+
+  const content = await store.read(ref);
+  if (!content) {
+    return {
+      ok: false,
+      error: "tool_result_read could not find the requested ref.",
+    };
+  }
+
+  return {
+    ok: true,
+    result: {
+      ref,
+      content,
+    },
+  };
 }
 
 async function statLocalPath(

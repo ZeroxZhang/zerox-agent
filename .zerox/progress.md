@@ -1375,3 +1375,41 @@
   - `npm run verify` -> 110 files / 545 tests passed, build passed, agent eval 21/21, memory eval 2/2.
   - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
   - `git diff --check` -> passed.
+
+## 2026-06-15 Chat title, status capsule, and tool-result recovery hotfix
+
+- Request:
+  - Fix the remaining chat hero display issue by generating brief session names and making long status capsules collapsed by default.
+  - Fix goal execution failures caused by planner JSON parsing and repeated `file_read` failures when reading offloaded tool results.
+- Root cause:
+  - Chat sessions used the first user message as the title, so `/目标 ... 项目位置 ...` prompts leaked long paths into the hero/header and sidebar.
+  - The live status capsule only ellipsized text; it had no explicit collapsed/expanded interaction, so long progress text still competed with the title area.
+  - The goal planner accepted only bare JSON; markdown/code-fenced or non-JSON replanning responses could surface as unrecoverable goal failures.
+  - Offloaded tool observations exposed `result_ref`, but the model had no native tool to read that ref during execution, so it repeatedly attempted `file_read` on `tool-result-refs/...`.
+- Implementation:
+  - Added deterministic short chat title generation that strips slash commands, local paths, and filler text before naming the session.
+  - Made long chat status capsules collapsed by default, with explicit click-to-expand/collapse behavior and full-width expanded layout.
+  - Hardened goal planner parsing to extract JSON objects from code fences or explanatory text; replanning now falls back to a safe remaining milestone if the model response stays invalid.
+  - Added `tool_result_read` as a built-in low-risk tool, protocol entry, permission case, approval summary, executor handler, and runtime executor injection.
+  - Routed legacy `file_read` calls for safe `tool-result-refs/...` paths to the offload store for compatibility with prior model behavior.
+- Changed files:
+  - `src/main/chatSessionStore.ts`
+  - `src/main/agentGoalPlanner.ts`
+  - `src/main/agentToolExecutor.ts`
+  - `src/main/container.ts`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/components/ToolsPanel.tsx`
+  - `src/renderer/styles/chat.css`
+  - `src/shared/agentProtocol.ts`
+  - `src/shared/toolApproval.ts`
+  - `src/shared/toolPermissions.ts`
+  - focused tests for the files above
+- TDD and verification evidence:
+  - `npm test -- src/main/chatSessionStore.test.ts src/main/agentGoalPlanner.test.ts src/shared/agentProtocol.test.ts src/main/agentToolExecutor.test.ts src/renderer/materialDesign.test.ts` -> RED with 10 expected failures for missing short titles, planner JSON extraction/fallback, tool-result ref reading, and status capsule expansion logic.
+  - `npm test -- src/main/chatSessionStore.test.ts src/main/agentGoalPlanner.test.ts src/shared/agentProtocol.test.ts src/main/agentToolExecutor.test.ts src/shared/toolPermissions.test.ts src/renderer/materialDesign.test.ts` -> 6 files / 95 tests passed.
+  - Browser QA at `http://127.0.0.1:5173/#chat` -> desktop page title `Zerox Agent`, chat hero rendered, no framework overlay, no console warn/error logs, no horizontal overflow, and CSS contained title clamp plus `.chat-state.is-expanded` capsule rules.
+  - Browser mobile QA at 390x844 -> no horizontal overflow, context panel hidden, no framework overlay, no console warn/error logs.
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> 110 files / 553 tests passed, build passed, agent eval 21/21, memory eval 2/2.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `git diff --check` -> passed.

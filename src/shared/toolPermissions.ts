@@ -7,6 +7,7 @@ export type AgentToolName =
   | "file_stat"
   | "file_search"
   | "file_read"
+  | "tool_result_read"
   | "file_write"
   | "code_search"
   | "git_status"
@@ -215,11 +216,18 @@ export function authorizeToolCall(
         "file_search 根目录不在已授权可读目录内。",
       );
     case "file_read":
+      if (isSafeToolResultRef(String(request.args.path ?? ""))) {
+        return allow("允许读取本次运行的工具结果引用。");
+      }
       return authorizeFilePath(
         String(request.args.path ?? ""),
         normalized.files.read,
         "file_read 路径不在已授权可读目录内。",
       );
+    case "tool_result_read":
+      return isSafeToolResultRef(String(request.args.ref ?? ""))
+        ? allow("允许读取本次运行的工具结果引用。")
+        : deny("tool_result_read 引用无效。");
     case "file_write":
       return authorizeFilePath(
         String(request.args.path ?? ""),
@@ -395,6 +403,10 @@ function authorizeWorkspaceRoot(
   );
 
   return allowed ? allow("路径在已授权范围内。") : deny(deniedReason);
+}
+
+function isSafeToolResultRef(ref: string): boolean {
+  return /^tool-result-refs\/[a-zA-Z0-9._-]+\.json$/.test(ref);
 }
 
 function authorizeWorkspaceFileRequest(

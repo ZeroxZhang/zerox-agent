@@ -124,6 +124,42 @@ describe("agent goal planner", () => {
     ]);
   });
 
+  it("extracts milestone JSON from fenced model responses", async () => {
+    const planner = createAgentGoalPlanner({
+      chatClient: createFakeChatClient([
+        [
+          "```json",
+          JSON.stringify({
+            milestones: [
+              {
+                id: "milestone_json",
+                description: "Parse fenced JSON.",
+                dependsOn: [],
+                successCriteria: [criterion],
+              },
+            ],
+          }),
+          "```",
+        ].join("\n"),
+      ]),
+      modelProfile: fakeModelProfile,
+      maxPlanAttempts: 1,
+    });
+
+    await expect(
+      planner.plan("Recover from markdown-wrapped JSON", {
+        successCriteria: [criterion],
+        availableTools: [],
+        availableSkills: [],
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: "milestone_json",
+        description: "Parse fenced JSON.",
+      }),
+    ]);
+  });
+
   it("preserves accepted milestones while replanning remaining work", async () => {
     const goal = createGoal();
     const accepted = goal.milestones[0];
@@ -165,6 +201,28 @@ describe("agent goal planner", () => {
     ]);
     expect(goal.planVersion).toBe(2);
     expect(goal.budgetUsage.replans).toBe(1);
+  });
+
+  it("falls back to a safe remaining milestone when replanning responses stay non-json", async () => {
+    const goal = createGoal();
+    const planner = createAgentGoalPlanner({
+      chatClient: createFakeChatClient(["I cannot return JSON"]),
+      modelProfile: fakeModelProfile,
+      maxPlanAttempts: 1,
+    });
+
+    const replanned = await planner.replan(goal, "Goal evidence was incomplete.");
+
+    expect(replanned).toEqual([
+      goal.milestones[0],
+      expect.objectContaining({
+        id: "milestone_replan_2",
+        description: "Goal evidence was incomplete.",
+        state: "pending",
+        runIds: [],
+        attempts: 0,
+      }),
+    ]);
   });
 
   it("rejects dependency cycles deterministically", async () => {
@@ -257,7 +315,7 @@ function createGoal(): Goal {
 }
 
 function createFakeChatClient(
-  responses: Array<Record<string, unknown>>,
+  responses: Array<Record<string, unknown> | string>,
   requests: ChatCompletionRequest[] = [],
 ): ChatClient {
   let index = 0;
@@ -270,7 +328,7 @@ function createFakeChatClient(
         throw new Error("Unexpected model request.");
       }
       return {
-        content: JSON.stringify(response),
+        content: typeof response === "string" ? response : JSON.stringify(response),
         toolCalls: [],
         finishReason: "stop",
       };

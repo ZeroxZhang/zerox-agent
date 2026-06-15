@@ -236,6 +236,7 @@ export function createAppContainer(options: {
     const executor = createAgentToolExecutor({
       memoryStore: memoryStore(),
       chatSessionStore: chatSessionStore(),
+      toolResultOffloadStore: toolResultOffloadStore(),
     });
     void initializeMcpTools(executor);
     return executor;

@@ -197,6 +197,7 @@ export function AgentChatPanel({
   const [activeChatRequestId, setActiveChatRequestId] = useState<string | null>(
     null,
   );
+  const [chatStatusExpanded, setChatStatusExpanded] = useState(false);
   const [activityTick, setActivityTick] = useState(Date.now());
   const messageListRef = useRef<HTMLDivElement>(null);
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
@@ -216,6 +217,10 @@ export function AgentChatPanel({
     sessionIdRef.current = sessionId;
     onActiveSessionChange?.(sessionId);
   }, [onActiveSessionChange, sessionId]);
+
+  useEffect(() => {
+    setChatStatusExpanded(false);
+  }, [status.message]);
 
   useEffect(() => {
     setSessionId(null);
@@ -505,6 +510,13 @@ export function AgentChatPanel({
   const latestRun = runs[0];
   const activeSession = sessions.find((session) => session.id === sessionId) ?? null;
   const chatTitle = activeSession?.title ?? "新会话";
+  const chatStatusIsLong = status.message.length > 64;
+  const chatStateClassName = [
+    "chat-state",
+    `is-${status.kind}`,
+    chatStatusIsLong ? "is-expandable" : "",
+    chatStatusExpanded ? "is-expanded" : "",
+  ].filter(Boolean).join(" ");
   const activeGoal = activeSession?.activeGoal ?? null;
   activeGoalRef.current = activeGoal;
   const activeTasks = tasks.filter((task) => task.enabled);
@@ -1277,9 +1289,24 @@ export function AgentChatPanel({
               ))}
             </div>
           </div>
-          <span className={`chat-state is-${status.kind}`} title={status.message}>
-            <span>{status.message}</span>
-          </span>
+          {chatStatusIsLong ? (
+            <button
+              type="button"
+              className={chatStateClassName}
+              title={status.message}
+              aria-expanded={chatStatusIsLong ? chatStatusExpanded : undefined}
+              onClick={() => setChatStatusExpanded((expanded) => !expanded)}
+            >
+              <span>{status.message}</span>
+              <small className="chat-state-toggle">
+                {chatStatusExpanded ? "收起" : "展开"}
+              </small>
+            </button>
+          ) : (
+            <span className={chatStateClassName} title={status.message}>
+              <span>{status.message}</span>
+            </span>
+          )}
         </div>
 
         {firstRunGuide.primaryAction.command === "prepare" &&

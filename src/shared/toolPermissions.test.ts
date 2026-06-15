@@ -153,6 +153,32 @@ describe("tool authorization", () => {
     });
   });
 
+  it("allows safe tool-result refs without broadening normal file reads", () => {
+    expect(
+      authorizeToolCall(policy, {
+        toolName: "tool_result_read",
+        args: { ref: "tool-result-refs/run_call_file_list_ref.json" },
+      }),
+    ).toMatchObject({ allowed: true });
+
+    expect(
+      authorizeToolCall(policy, {
+        toolName: "file_read",
+        args: { path: "tool-result-refs/run_call_file_list_ref.json" },
+      }),
+    ).toMatchObject({ allowed: true });
+
+    expect(
+      authorizeToolCall(policy, {
+        toolName: "tool_result_read",
+        args: { ref: "../chat-sessions.json" },
+      }),
+    ).toMatchObject({
+      allowed: false,
+      reason: "tool_result_read 引用无效。",
+    });
+  });
+
   it("uses read-directory authorization for file_list", () => {
     expect(
       authorizeToolCall(policy, {
