@@ -208,6 +208,50 @@
   - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
   - `git diff --check` -> passed.
 
+## 2026-06-15 v2.1.0 release closeout
+
+- Request:
+  - Close out this iteration as version `2.1.0`.
+- Implementation:
+  - Bumped package metadata from `1.9.5` to `2.1.0` in `package.json` and `package-lock.json`.
+  - Updated README English and Chinese release copy to describe the command-first agent stage, modular renderer CSS, wider session rail, large composer, and conditional progress/context panel.
+  - Updated README package examples from `Zerox.Agent-1.9.5-arm64.dmg` to `Zerox.Agent-2.1.0-arm64.dmg`.
+  - Updated README verification counts to 110 Vitest files / 539 tests after adding release metadata coverage.
+  - Added tests that keep package metadata, lockfile metadata, README release version, download asset name, and test counts aligned with v2.1.0.
+- Changed files:
+  - `README.md`
+  - `package.json`
+  - `package-lock.json`
+  - `src/shared/packageScripts.test.ts`
+  - `src/shared/readme.test.ts`
+  - `.zerox/progress.md`
+- TDD and verification evidence:
+  - `./init.sh` -> harness check passed; `src/shared/packageScripts.test.ts` passed under the initial v1.9.5 state.
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> RED with expected failures for package version `1.9.5`, README asset `Zerox.Agent-1.9.5-arm64.dmg`, and old test count.
+  - `npm version 2.1.0 --no-git-tag-version` -> updated package metadata without creating a git tag.
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 2 files / 9 tests passed.
+  - `rg -n "1\.9\.5|535 tests|535 个测试|538 tests|538 个测试|Zerox\.Agent-1\.9\.5|v1\.9\.5" README.md package.json package-lock.json src/shared/readme.test.ts src/shared/packageScripts.test.ts` -> no matches.
+  - `npm run verify` -> 110 files / 539 tests passed, build passed, agent eval 21/21, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `npm run harness:score` -> overall 9.2, ACI passed, context passed, eval 21/21, goal eval 6/6, adversarial checked 59 with no escapes.
+  - `git diff --check` -> passed.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+- Packaging and release-prep evidence:
+  - `gh --version && gh auth status` -> GitHub CLI 2.93.0 authenticated as `ZeroxZhang`.
+  - `git fetch origin --tags --prune` -> remote refs and tags synced; no existing `v2.1.0` tag or GitHub release was found.
+  - `npm run verify` -> 110 files / 539 tests passed, build passed, agent eval 21/21, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `npm run dist:mac` -> generated unsigned macOS arm64 `.dmg`, `.zip`, blockmaps, and `latest-mac.yml` for v2.1.0.
+  - `release/mac-arm64/Zerox Agent.app/Contents/Info.plist` -> `CFBundleShortVersionString=2.1.0`, `CFBundleVersion=2.1.0`.
+  - `release/latest-mac.yml` -> version `2.1.0`.
+  - Release assets prepared:
+    - `release/Zerox Agent-2.1.0-arm64.dmg` -> 118M.
+    - `release/Zerox Agent-2.1.0-arm64.dmg.blockmap` -> 127K.
+    - `release/Zerox Agent-2.1.0-arm64-mac.zip` -> 329M.
+    - `release/Zerox Agent-2.1.0-arm64-mac.zip.blockmap` -> 331K.
+    - `release/latest-mac.yml` -> 517B.
+
 ## 2026-06-12 P4.3 Runtime Retry Budget and Duplicate Retry Visibility
 
 - Implemented the third P4 runtime-core slice: repeated recovery failures now terminate with structured reflection metadata visible on the failure_classified trajectory event.

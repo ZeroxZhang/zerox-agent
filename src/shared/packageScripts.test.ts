@@ -3,10 +3,24 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 type PackageJson = {
+  version?: string;
   scripts?: Record<string, string>;
 };
 
 describe("package scripts", () => {
+  it("sets release metadata to v2.1.0", () => {
+    const packageJson = JSON.parse(
+      readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
+    ) as PackageJson;
+    const packageLock = JSON.parse(
+      readFileSync(path.join(process.cwd(), "package-lock.json"), "utf8"),
+    ) as { version?: string; packages?: Record<string, { version?: string }> };
+
+    expect(packageJson.version).toBe("2.1.0");
+    expect(packageLock.version).toBe("2.1.0");
+    expect(packageLock.packages?.[""]?.version).toBe("2.1.0");
+  });
+
   it("exposes a production start command for the built Electron app", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
