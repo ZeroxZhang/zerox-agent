@@ -490,6 +490,18 @@ export function AgentChatPanel({
     setActiveGoalDetail(await window.buildingAgent.getGoal(goalId));
   }
 
+  function applyGoalSummaryToSessions(goal: ChatSessionGoalSummary) {
+    setSessions((currentSessions) => {
+      const nextSessions = currentSessions.map((session) =>
+        session.activeGoal?.id === goal.id
+          ? { ...session, activeGoal: goal }
+          : session,
+      );
+      onChatSessionsChange?.(nextSessions);
+      return nextSessions;
+    });
+  }
+
   const latestRun = runs[0];
   const activeSession = sessions.find((session) => session.id === sessionId) ?? null;
   const activeGoal = activeSession?.activeGoal ?? null;
@@ -550,6 +562,9 @@ export function AgentChatPanel({
     memories,
     activeGoal,
   });
+  const shouldShowActivityCard =
+    taskActivity.kind !== "idle" &&
+    (taskActivity.kind !== "done" || Boolean(activeGoal));
   const readinessChecklist = useMemo(
     () =>
       buildAgentReadinessChecklist({
@@ -576,8 +591,7 @@ export function AgentChatPanel({
   );
   const showContextPanel =
     (workPhase !== "idle" && workPhase !== "done") ||
-    taskActivity.kind === "working" ||
-    taskActivity.kind === "paused" ||
+    shouldShowActivityCard ||
     Boolean(activeGoal) ||
     Boolean(pendingToolApproval);
 
@@ -661,6 +675,20 @@ export function AgentChatPanel({
 
     if (decision === "terminate") {
       const result = await window.buildingAgent.cancelGoal(goalId);
+      if (result.ok && result.goal) {
+        applyGoalSummaryToSessions(result.goal);
+        setStatus({ kind: "ready", message: "目标已终止" });
+        setWorkPhase("done");
+        setTaskActivity(
+          createTaskActivity({
+            kind: "done",
+            title: "目标已终止",
+            detail: "不会继续执行",
+          }),
+        );
+        void refreshActiveGoalDetail(result.goal.id);
+        void refreshSessions(sessionId ?? undefined);
+      }
       appendMessage({
         role: "assistant",
         content: result.ok ? "已终止目标。" : `终止目标失败：${result.message}`,
@@ -669,28 +697,6 @@ export function AgentChatPanel({
     }
 
     setDraft("修改计划：");
-  }
-
-  async function handleIncreaseGoalBudget() {
-    if (!window.buildingAgent || !activeGoal?.id) {
-      return;
-    }
-
-    const result = await window.buildingAgent.increaseGoalBudget(activeGoal.id, {
-      maxIterations: 4,
-      maxToolCalls: 32,
-      maxWallClockMs: 15 * 60 * 1000,
-      maxReplans: 2,
-    });
-    appendMessage({
-      role: "assistant",
-      content: result.ok
-        ? "已增加目标预算，可以继续执行。"
-        : `增加预算失败：${result.message}`,
-    });
-    if (result.ok && result.goal) {
-      void refreshActiveGoalDetail(result.goal.id);
-    }
   }
 
   async function handleReplanGoal() {
@@ -719,6 +725,11 @@ export function AgentChatPanel({
     }
 
     const result = await window.buildingAgent.retryGoal(activeGoal.id);
+    if (result.ok && result.goal) {
+      applyGoalSummaryToSessions(result.goal);
+      setStatus({ kind: "working", message: "目标已恢复执行" });
+      setWorkPhase("tool");
+    }
     appendMessage({
       role: "assistant",
       content: result.ok
@@ -736,6 +747,18 @@ export function AgentChatPanel({
     }
 
     const result = await window.buildingAgent.cancelGoal(activeGoal.id);
+    if (result.ok && result.goal) {
+      applyGoalSummaryToSessions(result.goal);
+      setStatus({ kind: "ready", message: "目标已取消" });
+      setWorkPhase("done");
+      setTaskActivity(
+        createTaskActivity({
+          kind: "done",
+          title: "目标已取消",
+          detail: "不会继续执行",
+        }),
+      );
+    }
     appendMessage({
       role: "assistant",
       content: result.ok ? "已取消目标。" : `取消目标失败：${result.message}`,
@@ -968,7 +991,19 @@ export function AgentChatPanel({
           }),
         );
       } else if (result.goal) {
+        applyGoalSummaryToSessions(result.goal);
+        setStatus({ kind: "ready", message: "目标已终止" });
+        setWorkPhase("done");
+        activeStatusSessionIdRef.current = null;
+        setTaskActivity(
+          createTaskActivity({
+            kind: "done",
+            title: "目标已终止",
+            detail: "不会继续执行",
+          }),
+        );
         void refreshActiveGoalDetail(result.goal.id);
+        void refreshSessions(sessionId ?? undefined);
       }
       return;
     }
@@ -1244,14 +1279,6 @@ export function AgentChatPanel({
           <span className={`chat-state is-${status.kind}`}>{status.message}</span>
         </div>
 
-        <AgentWorkTimeline
-          phase={workPhase}
-          status={status}
-          steps={workSteps}
-        />
-
-
-
         {firstRunGuide.primaryAction.command === "prepare" &&
           !modelSettings.hasApiKey && (
           <section className="first-run-guide" aria-label="首次启动引导">
@@ -1300,9 +1327,6 @@ export function AgentChatPanel({
             detail={activeGoalDetail}
             onViewDetail={handleViewGoalProgress}
             {...(activeGoal.status === "planning" ||
-              activeGoal.status === "failed" ||
-              activeGoal.status === "stopped_budget" ||
-              activeGoal.status === "stopped_stalled" ||
               activeGoal.status === "canceled"
               ? { onStart: handleStartGoal }
               : {})}
@@ -1310,7 +1334,6 @@ export function AgentChatPanel({
               ? { onPause: () => void submitUserMessage("暂停这个目标") }
               : {})}
             onResolveReview={handleResolveGoalReview}
-            onIncreaseBudget={handleIncreaseGoalBudget}
             onReplan={handleReplanGoal}
             onRetry={handleRetryGoal}
             onCancel={handleCancelGoal}
@@ -1382,20 +1405,6 @@ export function AgentChatPanel({
         ) : null}
 
         <form className="composer" onSubmit={handleSubmit}>
-          {taskActivity.kind !== "idle" ? (
-            <TaskActivityStrip
-              activity={taskActivity}
-              detail={taskActivityDetail}
-              processItems={taskProcessItems}
-              onContinue={
-                taskActivity.kind === "paused"
-                  ? () => {
-                      void submitUserMessage("继续");
-                    }
-                  : undefined
-              }
-            />
-          ) : null}
           <div className="composer-inner">
             <div className="composer-input-shell">
               {composerCommandMenuVisible ? (
@@ -1528,7 +1537,6 @@ export function AgentChatPanel({
           }
           onClose={() => setGoalDrawerOpen(false)}
           onResolveReview={handleResolveGoalReview}
-          onIncreaseBudget={handleIncreaseGoalBudget}
           onReplan={handleReplanGoal}
           onRetry={handleRetryGoal}
           onCancel={handleCancelGoal}
@@ -1537,6 +1545,20 @@ export function AgentChatPanel({
 
       {showContextPanel ? (
       <aside className="agent-context-panel" aria-label="进度与上下文">
+        {shouldShowActivityCard ? (
+          <ContextActivityCard
+            activity={taskActivity}
+            detail={taskActivityDetail}
+            processItems={taskProcessItems}
+            onContinue={
+              taskActivity.kind === "paused"
+                ? () => {
+                    void submitUserMessage("继续");
+                  }
+                : undefined
+            }
+          />
+        ) : null}
         <section className="kimi-side-card">
           <header>
             <strong>进度</strong>
@@ -1805,7 +1827,7 @@ function AgentWorkTimeline({
   );
 }
 
-function TaskActivityStrip({
+function ContextActivityCard({
   activity,
   detail,
   processItems,
@@ -1817,49 +1839,58 @@ function TaskActivityStrip({
   onContinue?: () => void;
 }) {
   const latestReasoning = processItems.find((item) => item.label === "思考");
+  const recentItems = processItems.slice(0, 3);
   return (
-    <details
-      className={`task-activity-strip is-${activity.kind}`}
-      open={activity.kind === "working"}
-    >
-      <summary>
+    <section className={`context-activity-card is-${activity.kind}`}>
+      <header>
+        <span className="context-activity-pill">{getActivityKindLabel(activity.kind)}</span>
+        {typeof activity.toolCallsExecuted === "number" ? (
+          <small>工具 {activity.toolCallsExecuted}</small>
+        ) : null}
+      </header>
+      <div className="context-activity-main">
         <span className="task-activity-dot" aria-hidden="true" />
-        <em className="task-activity-summary-text" title={detail}>
-          {activity.title} · {detail}
-        </em>
+        <div>
+          <strong>{activity.title}</strong>
+          <p title={detail}>{detail}</p>
+        </div>
+      </div>
+      <div className="context-activity-meta">
         {typeof activity.toolCallsExecuted === "number" && (
-          <span className="task-activity-meter">
-            工具 {activity.toolCallsExecuted}
-          </span>
+          <span>工具调用 {activity.toolCallsExecuted}</span>
         )}
         {onContinue && (
           <button
             type="button"
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              onContinue();
-            }}
+            onClick={onContinue}
           >
             继续执行
           </button>
         )}
-      </summary>
+      </div>
       {latestReasoning ? (
         <div className="task-activity-reasoning-preview">
           <span>最新思考</span>
           <p>{latestReasoning.message}</p>
         </div>
       ) : null}
-      {processItems.length > 0 && (
-        <ol className="task-process-list" aria-label="思考与执行过程">
-          {processItems.map((item) => (
+      {recentItems.length > 0 && (
+        <ol className="task-process-list" aria-label="最近执行过程">
+          {recentItems.map((item) => (
             <TaskProcessItem key={item.id} item={item} />
           ))}
         </ol>
       )}
-    </details>
+    </section>
   );
+}
+
+function getActivityKindLabel(kind: TaskActivityState["kind"]): string {
+  if (kind === "working") return "执行中";
+  if (kind === "paused") return "等待确认";
+  if (kind === "error") return "需处理";
+  if (kind === "done") return "已结束";
+  return "待命";
 }
 
 function ToolApprovalPanel({
@@ -2210,7 +2241,7 @@ function translateGoalStatus(status: ChatSessionGoalSummary["status"]): string {
     executing: "执行中",
     waiting_for_review: "等待审核",
     achieved: "已达成",
-    stopped_budget: "预算停止",
+    stopped_budget: "可继续",
     stopped_stalled: "停滞停止",
     failed: "失败",
     canceled: "已取消",

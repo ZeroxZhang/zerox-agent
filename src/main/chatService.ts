@@ -918,7 +918,6 @@ async function tryRouteGoalIntent(options: {
 function isTerminalGoalStatus(status: ChatSessionGoalSummary["status"]): boolean {
   return (
     status === "achieved" ||
-    status === "stopped_budget" ||
     status === "stopped_stalled" ||
     status === "failed" ||
     status === "canceled"

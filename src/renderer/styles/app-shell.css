@@ -3,6 +3,7 @@
   grid-template-columns: var(--nav-rail-width) minmax(0, 1fr);
   min-height: 100vh;
   background: var(--bg-page);
+  -webkit-app-region: no-drag;
 }
 
 .app-shell > * { min-width: 0; }
@@ -28,6 +29,14 @@
   gap: var(--space-5);
   min-height: var(--topbar-height);
   margin-bottom: var(--space-6);
+  -webkit-app-region: drag;
+}
+
+.topbar button,
+.topbar a,
+.topbar input,
+.topbar select {
+  -webkit-app-region: no-drag;
 }
 
 .topbar h1 {

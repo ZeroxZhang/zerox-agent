@@ -335,10 +335,6 @@ export function createGoalChatService(options: {
         throw new Error(`Goal "${goalId}" was not found.`);
       }
 
-      if (goal.budgetUsage.replans >= goal.budget.maxReplans) {
-        throw new Error("重新规划次数已达上限，请先增加预算。");
-      }
-
       goal.milestones = await options.planner.replan(goal, instructions);
       goal.budgetUsage.replans += 1;
       goal.updatedAt = now();

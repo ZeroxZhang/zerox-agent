@@ -1217,6 +1217,62 @@
   - Packaged app replied `已设置并开始执行目标...`, created a single milestone, executed it, recorded evidence, and reached green `已达成 · 1/1 已完成`.
   - After the repair build and relaunch, the same packaged app automatically corrected stale session badges and right-side context from `执行中` to `已达成`, bottom activity showed `当前没有任务运行 · 待命`, and the interrupt button was disabled.
 
+## 2026-06-15 v2.1.1 UI/runtime control release
+
+- Request:
+  - Fix the remaining UI framework issues, verify the iteration as test engineer, package, release, and push the corrected release as `2.1.1`.
+- Implementation:
+  - Integrated active work status into the right progress/context rail as `ContextActivityCard`; removed the redundant composer activity strip and main chat work timeline from the active chat surface.
+  - Added balanced 28px padding to the right context rail and compact activity-card styling.
+  - Switched the Electron main window to a macOS integrated `hiddenInset` titlebar with traffic light positioning and aligned app background; adjusted sidebar top padding and drag regions.
+  - Made goal cancellation update local chat/session UI immediately so the stop button and status no longer stay stuck in terminating/executing.
+  - Removed Goal Mode budget hard-stop dispatch checks and replan budget gates; `budgetUsage` remains audit telemetry only.
+  - Reclassified legacy `stopped_budget` goals as directly recoverable, including UI copy, chat continue routing, status transitions, and eval fixtures.
+  - Updated release metadata, README, and tests from `2.1.0` to `2.1.1`.
+- Changed files:
+  - `package.json`
+  - `package-lock.json`
+  - `README.md`
+  - `docs/architecture/agent-goal-mode.md`
+  - `src/main/agentGoalController.ts`
+  - `src/main/goalChatService.ts`
+  - `src/main/chatService.ts`
+  - `src/main/desktopLifecycle.ts`
+  - `src/main/eval/agentEvalAdversary.ts`
+  - `src/main/eval/agentEvalFixtures.ts`
+  - `src/renderer/App.tsx`
+  - `src/renderer/chatTaskActivity.ts`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/components/GoalDetailDrawer.tsx`
+  - `src/renderer/components/GoalStatusStrip.tsx`
+  - `src/renderer/goalProgressViewModel.ts`
+  - `src/renderer/styles/app-shell.css`
+  - `src/renderer/styles/chat.css`
+  - `src/renderer/styles/composer.css`
+  - `src/renderer/styles/sidebar.css`
+  - focused tests under `src/main`, `src/renderer`, and `src/shared`
+- TDD evidence:
+  - `npm test -- src/main/agentGoalController.test.ts src/main/goalChatService.test.ts src/renderer/goalProgressViewModel.test.ts src/main/desktopLifecycle.test.ts src/renderer/materialDesign.test.ts src/main/eval/agentEvalRunner.test.ts src/main/eval/agentEvalAdversary.test.ts` -> RED with expected failures for budget hard stop, legacy budget resume, titlebar config, right-rail padding, and composer activity strip.
+  - After implementation, `npm test -- src/main/agentGoalController.test.ts src/main/goalChatService.test.ts src/main/chatService.test.ts src/shared/agentGoal.test.ts src/renderer/chatTaskActivity.test.ts src/renderer/goalProgressViewModel.test.ts src/main/desktopLifecycle.test.ts src/renderer/materialDesign.test.ts src/main/eval/agentEvalRunner.test.ts src/main/eval/agentEvalAdversary.test.ts` -> 10 files / 89 tests passed.
+  - After correcting release version to `2.1.1`, `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts src/main/agentGoalController.test.ts src/main/goalChatService.test.ts src/main/chatService.test.ts src/shared/agentGoal.test.ts src/renderer/chatTaskActivity.test.ts src/renderer/goalProgressViewModel.test.ts src/main/desktopLifecycle.test.ts src/renderer/materialDesign.test.ts src/main/eval/agentEvalRunner.test.ts src/main/eval/agentEvalAdversary.test.ts` -> 12 files / 98 tests passed.
+- Verification evidence:
+  - `npm test` -> 110 files / 544 tests passed.
+  - `npm run verify` -> 110 files / 544 tests passed, build passed, agent eval 21/21, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - Browser QA at `http://127.0.0.1:5173/#chat` -> desktop DOM contained no `agent-work-timeline` and no `task-activity-strip`; sidebar top padding was `52px`; chat topbar was hidden in chat mode; mobile 390x844 had no horizontal overflow and composer width stayed within viewport.
+  - `git diff --check` -> passed.
+- Release artifact evidence:
+  - `npm version 2.1.1 --no-git-tag-version` -> updated package metadata without creating a git tag.
+  - `npm run dist:mac` -> generated unsigned macOS arm64 `.dmg`, `.zip`, blockmaps, and `latest-mac.yml` for v2.1.1.
+  - `release/mac-arm64/Zerox Agent.app/Contents/Info.plist` -> `CFBundleShortVersionString=2.1.1`, `CFBundleVersion=2.1.1`.
+  - `release/latest-mac.yml` -> version `2.1.1`.
+  - Artifacts:
+    - `release/Zerox Agent-2.1.1-arm64.dmg` -> 118M.
+    - `release/Zerox Agent-2.1.1-arm64.dmg.blockmap` -> 127K.
+    - `release/Zerox Agent-2.1.1-arm64-mac.zip` -> 329M.
+    - `release/Zerox Agent-2.1.1-arm64-mac.zip.blockmap` -> 331K.
+
 ## 2026-06-15 Rollback to v1.9.5
 
 - Request:

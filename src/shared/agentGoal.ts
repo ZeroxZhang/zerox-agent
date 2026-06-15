@@ -107,7 +107,7 @@ const allowedTransitions: Record<GoalStatus, GoalStatus[]> = {
   ],
   waiting_for_review: ["executing", "canceled"],
   achieved: [],
-  stopped_budget: [],
+  stopped_budget: ["executing", "canceled"],
   stopped_stalled: [],
   failed: [],
   canceled: [],

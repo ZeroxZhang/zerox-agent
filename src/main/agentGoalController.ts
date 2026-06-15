@@ -108,32 +108,22 @@ export function createAgentGoalController(options: {
           return stopGoal(goal, "canceled", "user_canceled", "Goal canceled.");
         }
 
-        if (isBudgetExhausted(goal)) {
-        return stopGoal(
-          goal,
-          "stopped_budget",
-          "budget_exhausted",
-          "Goal budget exhausted before dispatching another milestone.",
-        );
-      }
-
-      const nextMilestone = pickNextReadyMilestone(goal);
-      if (!nextMilestone) {
-        if (allMilestonesAccepted(goal)) {
-          const result = await options.acceptance.evaluateGoal(
-            goal,
-            (await options.createAcceptanceContext?.(goal)) as never,
-          );
-          if (result.accepted) {
-            return stopGoal(
+        const nextMilestone = pickNextReadyMilestone(goal);
+        if (!nextMilestone) {
+          if (allMilestonesAccepted(goal)) {
+            const result = await options.acceptance.evaluateGoal(
               goal,
-              "achieved",
-              "goal_accepted",
-              "Goal acceptance passed.",
+              (await options.createAcceptanceContext?.(goal)) as never,
             );
-          }
+            if (result.accepted) {
+              return stopGoal(
+                goal,
+                "achieved",
+                "goal_accepted",
+                "Goal acceptance passed.",
+              );
+            }
 
-          if (goal.budgetUsage.replans < goal.budget.maxReplans) {
             const reason = summarizeAcceptanceFailure(result);
             goal.milestones = await options.planner.replan(goal, reason);
             touch(goal);
@@ -157,36 +147,28 @@ export function createAgentGoalController(options: {
             continue;
           }
 
-          return stopGoal(
-            goal,
-            "failed",
-            "unrecoverable_failure",
-            summarizeAcceptanceFailure(result),
-          );
+          stalledIterations += 1;
+          if (stalledIterations >= stallThreshold) {
+            return stopGoal(
+              goal,
+              "stopped_stalled",
+              "progress_stalled",
+              "No ready milestones are available; goal progress appears stalled.",
+            );
+          }
+          continue;
         }
 
-        stalledIterations += 1;
-        if (stalledIterations >= stallThreshold) {
-          return stopGoal(
-            goal,
-            "stopped_stalled",
-            "progress_stalled",
-            "No ready milestones are available; goal progress appears stalled.",
-          );
+        stalledIterations = 0;
+        const shouldSuspend = await runOneMilestone(
+          goal,
+          nextMilestone,
+          runOptions,
+        );
+        if (shouldSuspend) {
+          return goal;
         }
-        continue;
       }
-
-      stalledIterations = 0;
-      const shouldSuspend = await runOneMilestone(
-        goal,
-        nextMilestone,
-        runOptions,
-      );
-      if (shouldSuspend) {
-        return goal;
-      }
-    }
 
       return goal;
     } catch (error) {
@@ -301,41 +283,31 @@ export function createAgentGoalController(options: {
       milestone.id,
     );
 
-    if (goal.budgetUsage.replans < goal.budget.maxReplans) {
-      goal.milestones = await options.planner.replan(
-        goal,
-        milestone.lastAcceptanceSummary,
-      );
-      touch(goal);
-      await options.goalStore.appendLedger(goal.id, {
-        at: currentTime(),
-        kind: "goal_replanned",
-        milestoneId: milestone.id,
-        summary: `Replanned after milestone "${milestone.id}" was rejected.`,
-      });
-      await emit(goal.id, "goal_replanned", {
-        goalId: goal.id,
-        milestoneId: milestone.id,
-        planVersion: goal.planVersion,
-        replans: goal.budgetUsage.replans,
-      });
-      notifyProgress(
-        "replanned",
-        goal,
-        "里程碑未通过，已重新规划。",
-        milestone.id,
-      );
-      await writeGoalCheckpoint(goal, "goal_replanned");
-      return false;
-    }
-
-    await stopGoal(
+    goal.milestones = await options.planner.replan(
       goal,
-      "failed",
-      "review_rejected",
-      "Milestone rejected and replan budget exhausted.",
+      milestone.lastAcceptanceSummary,
     );
-    return true;
+    touch(goal);
+    await options.goalStore.appendLedger(goal.id, {
+      at: currentTime(),
+      kind: "goal_replanned",
+      milestoneId: milestone.id,
+      summary: `Replanned after milestone "${milestone.id}" was rejected.`,
+    });
+    await emit(goal.id, "goal_replanned", {
+      goalId: goal.id,
+      milestoneId: milestone.id,
+      planVersion: goal.planVersion,
+      replans: goal.budgetUsage.replans,
+    });
+    notifyProgress(
+      "replanned",
+      goal,
+      "里程碑未通过，已重新规划。",
+      milestone.id,
+    );
+    await writeGoalCheckpoint(goal, "goal_replanned");
+    return false;
   }
 
   async function stopGoal(
@@ -511,16 +483,6 @@ function allMilestonesAccepted(goal: Goal): boolean {
       (milestone) =>
         milestone.state === "accepted" || milestone.state === "skipped",
     )
-  );
-}
-
-function isBudgetExhausted(goal: Goal): boolean {
-  return (
-    goal.budgetUsage.iterations >= goal.budget.maxIterations ||
-    goal.budgetUsage.toolCalls >= goal.budget.maxToolCalls ||
-    goal.budgetUsage.wallClockMs >= goal.budget.maxWallClockMs ||
-    (goal.budget.maxTokens !== undefined &&
-      goal.budgetUsage.tokens >= goal.budget.maxTokens)
   );
 }
 

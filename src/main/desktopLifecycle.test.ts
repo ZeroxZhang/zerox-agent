@@ -14,7 +14,9 @@ describe("desktop lifecycle helpers", () => {
       minWidth: 960,
       minHeight: 640,
       title: "Zerox Agent",
-      backgroundColor: "#f8fafc",
+      backgroundColor: "#f5f1ea",
+      titleBarStyle: "hiddenInset",
+      trafficLightPosition: { x: 18, y: 18 },
     });
   });
 

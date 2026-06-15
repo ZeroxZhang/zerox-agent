@@ -93,19 +93,22 @@ export function buildGoalTaskActivity(options: {
     });
   }
 
-  if (
-    options.status === "failed" ||
-    options.status === "stopped_budget" ||
-    options.status === "stopped_stalled"
-  ) {
+  if (options.status === "stopped_budget") {
+    return createTaskActivity({
+      kind: "paused",
+      title: "目标可继续",
+      detail: options.description,
+      now: options.now,
+    });
+  }
+
+  if (options.status === "failed" || options.status === "stopped_stalled") {
     return createTaskActivity({
       kind: "error",
       title:
-        options.status === "stopped_budget"
-          ? "目标预算停止"
-          : options.status === "stopped_stalled"
-            ? "目标停滞停止"
-            : "目标执行失败",
+        options.status === "stopped_stalled"
+          ? "目标停滞停止"
+          : "目标执行失败",
       detail: options.description,
       now: options.now,
     });
@@ -154,11 +157,15 @@ export function getGoalUiSyncState(status: GoalStatus): GoalUiSyncState {
     };
   }
 
-  if (
-    status === "failed" ||
-    status === "stopped_budget" ||
-    status === "stopped_stalled"
-  ) {
+  if (status === "stopped_budget") {
+    return {
+      statusKind: "paused",
+      workPhase: "paused",
+      shouldClearActiveRequest: true,
+    };
+  }
+
+  if (status === "failed" || status === "stopped_stalled") {
     return {
       statusKind: "error",
       workPhase: "error",

@@ -262,9 +262,106 @@
   align-content: start;
   gap: 16px;
   min-width: 0;
-  padding: 28px 28px 28px 0;
+  padding: 28px;
   background: transparent;
   overflow-y: auto;
+}
+
+.context-activity-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.context-activity-card header,
+.context-activity-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.context-activity-card header small,
+.context-activity-meta span {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-activity-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-full);
+  color: var(--text-secondary);
+  background: var(--bg-surface-raised);
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+}
+
+.context-activity-main {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.context-activity-main strong {
+  display: block;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-activity-main p {
+  display: -webkit-box;
+  margin: 2px 0 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.context-activity-card .task-activity-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: var(--radius-full);
+  background: var(--text-accent);
+}
+
+.context-activity-card.is-paused .task-activity-dot {
+  background: var(--text-warning);
+}
+
+.context-activity-card.is-error .task-activity-dot {
+  background: var(--bg-danger);
+}
+
+.context-activity-meta button {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  background: var(--bg-surface-raised);
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
 }
 
 .kimi-side-card {

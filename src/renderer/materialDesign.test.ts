@@ -262,6 +262,16 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(chatPanelSource).not.toContain("<aside className=\"session-rail\"");
     expect(styles).toContain(".agent-chat-panel.is-focus-mode");
     expect(styles).toContain(".agent-chat-panel.has-context-panel");
+    expect(styles).toContain(".agent-context-panel");
+    expect(styles).toContain("padding: 28px;");
+  });
+
+  it("moves active work status into the right context rail instead of a large composer strip", () => {
+    expect(chatPanelSource).toContain("ContextActivityCard");
+    expect(chatPanelSource).not.toContain("<TaskActivityStrip");
+    expect(chatPanelSource).not.toContain("function TaskActivityStrip");
+    expect(styles).toContain(".context-activity-card");
+    expect(styles).toContain(".context-activity-pill");
   });
 
   it("loads pending eval candidates into the Overview capability score", () => {
@@ -352,6 +362,7 @@ describe("Design System — Notion-inspired app shell", () => {
     );
     expect(chatPanelSource).toContain("activeGoal.status === \"executing\"");
     expect(chatPanelSource).toContain("cancelGoal(activeGoal.id)");
+    expect(chatPanelSource).toContain("applyGoalSummaryToSessions(result.goal)");
     expect(chatPanelSource).not.toContain(
       "disabled={status.kind !== \"working\" || !activeChatRequestId}",
     );

@@ -8,7 +8,7 @@
   gap: var(--space-4);
   width: var(--nav-rail-width);
   height: 100vh;
-  padding: 18px 16px;
+  padding: 52px 16px 18px;
   border-right: 1px solid var(--border-default);
   background: var(--nav-bg);
   overflow-y: auto;
@@ -21,6 +21,13 @@
   gap: var(--space-3);
   width: 100%;
   padding: 0;
+  -webkit-app-region: drag;
+}
+
+.workspace-sidebar button,
+.workspace-sidebar a,
+.workspace-sidebar input {
+  -webkit-app-region: no-drag;
 }
 
 .brand-mark {
