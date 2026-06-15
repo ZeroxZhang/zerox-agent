@@ -58,7 +58,7 @@ Acceptance checks live on success criteria and are non-empty. The acceptance eng
 - `test_passes`
 - `assertion`
 
-`model_review` is an inferential fallback only. It must require evidence refs, and a model review with no evidence is not accepted. Every acceptance evaluation emits `acceptance_checked` trajectory evidence so eval fixtures and the UI can inspect why a milestone or goal passed.
+`model_review` is an inferential fallback only. It must require evidence refs, and a model review with no evidence is not accepted. When a bounded runtime transcript is available, the acceptance engine asks a transcript-backed goal judge for a JSON verdict before accepting inferential evidence. The judge emits `goal_judged` trajectory evidence with goal, milestone, check, verdict, reason, and transcript message count; acceptance then emits `acceptance_checked` so eval fixtures and the UI can inspect why a milestone or goal passed.
 
 ## Review Policies
 
@@ -77,17 +77,23 @@ Review decisions are explicit:
 - `modify_plan`: replan remaining non-terminal milestones.
 - `terminate`: stop as `canceled` with `review_rejected`.
 
-## Goal-aware Compaction Anchors
+## Goal Continuity Checkpoint
 
-Long goals must not lose their objective. `AgentGoalContext` preserves these anchors when compacting:
+Long goals must not lose their objective. `AgentGoalContext` now injects an eleven-section continuity checkpoint when compacting:
 
-- goal description
-- goal success criteria
-- latest progress ledger summary
-- accepted milestone conclusions
-- evidence refs and tool-result offload refs
+- active intent
+- next concrete action
+- directives
+- task tree
+- current work
+- files and evidence
+- discovered knowledge
+- errors and fixes
+- live resources
+- design decisions
+- open notes
 
-Completed milestones can be summarized to conclusion plus evidence. Running and pending milestones keep enough detail to safely continue.
+Completed milestones can be summarized to conclusion plus evidence. Running and pending milestones keep enough detail to safely continue, and the checkpoint is emitted as a system anchor marked never compact.
 
 ## Recovery Guarantees
 
@@ -111,4 +117,4 @@ node scripts/run-agent-evals.mjs
 npm run harness:score
 ```
 
-The deterministic eval suite includes six goal-mode fixtures covering achievement, budget stop, stall detection, replan on acceptance failure, review gate blocking, and compaction anchor retention.
+The deterministic eval suite includes seven goal-mode fixtures covering achievement, budget stop, stall detection, replan on acceptance failure, review gate blocking, continuity checkpoint retention, and transcript-backed goal judge ordering. Harness score reports both goal-mode pass rate and goal-judge pass rate, while adversarial eval rejects removed acceptance checks and removed judge events.

@@ -37,6 +37,9 @@ describe("agent goal context", () => {
 
     expect(assembled.compacted).toBe(true);
     expect(combined).toContain("Goal: Build a citation-backed local report.");
+    expect(combined).toContain("[Goal continuity checkpoint - never compact]");
+    expect(combined).toContain("§1 Active intent");
+    expect(combined).toContain("§4 Task tree");
     expect(combined).toContain("Goal-level success criterion");
     expect(combined).toContain("Current progress ledger");
     expect(combined).toContain("Sources accepted with citation evidence.");

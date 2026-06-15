@@ -49,6 +49,14 @@ const goalFixtures = evalFixtures.filter((fixture) =>
 const goal = await runAgentEvals(goalFixtures);
 const goalFixtureCount = goal.total;
 const goalPassRate = goal.passRate;
+const goalJudgeFixtures = evalFixtures.filter(
+  (fixture) =>
+    fixture.requiredEventTypes?.includes("goal_judged") ||
+    fixture.events.some((event) => event.type === "goal_judged"),
+);
+const goalJudge = await runAgentEvals(goalJudgeFixtures);
+const goalJudgeFixtureCount = goalJudge.total;
+const goalJudgePassRate = goalJudge.passRate;
 const adversarial = await runAdversarialAgentEvals(evalFixtures);
 const context = createAgentContextProfileReport();
 const pendingLearningCandidates = configDir
@@ -67,6 +75,8 @@ const score = computeHarnessScore({
   toolSuccessRate: evalReport.toolSuccessRate,
   goalPassRate,
   goalFixtureCount,
+  goalJudgePassRate,
+  goalJudgeFixtureCount,
   pendingLearningCandidates,
 });
 
@@ -80,6 +90,9 @@ console.log(
       goal: goal,
       goalFixtureCount,
       goalPassRate,
+      goalJudge: goalJudge,
+      goalJudgeFixtureCount,
+      goalJudgePassRate,
       adversarial: adversarial,
       promotedFixtureCount: promotedFixtures.length,
       pendingEvalCandidates,

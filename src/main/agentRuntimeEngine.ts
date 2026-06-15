@@ -582,6 +582,7 @@ export function createAgentRuntimeEngine(options: {
       const runId = createId();
       const events = [createEvent("info", "Agent runtime started.")];
       const runContext = await options.workspaceService?.resolveRunContext();
+      const initialProfile = await options.getModelProfile();
       const proceduralMemoryContext =
         await buildProceduralMemoryPromptContext({
           memoryStore: options.memoryStore,
@@ -605,7 +606,10 @@ export function createAgentRuntimeEngine(options: {
         currentStepId: step.id,
         steps: [step],
         messages: [
-          { role: "system", content: buildAgentSystemPrompt() },
+          {
+            role: "system",
+            content: buildAgentSystemPrompt({ modelId: initialProfile.model }),
+          },
           {
             role: "user",
             content: appendProceduralMemoryContext(

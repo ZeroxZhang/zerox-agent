@@ -28,6 +28,20 @@ export type ToolObservation = {
   toolCallId?: string;
 };
 
+export type AgentPromptProfile =
+  | "codex"
+  | "claude"
+  | "gemini"
+  | "gpt"
+  | "kimi"
+  | "default";
+
+export type AgentSystemPromptOptions = {
+  modelId?: string;
+  workspaceRoot?: string;
+  currentDate?: string;
+};
+
 const supportedTools = new Set<AgentToolName>([
   "file_list",
   "file_stat",
@@ -464,10 +478,22 @@ export function buildToolDefinitions(): ToolDefinition[] {
   ];
 }
 
-export function buildAgentSystemPrompt(): string {
+export function buildAgentSystemPrompt(
+  options: AgentSystemPromptOptions = {},
+): string {
+  const profile = selectAgentPromptProfile(options.modelId);
   return [
     "你是一个本地桌面 AI agent 的运行时核心。",
     "你可以调用工具来完成任务：列出目录、读取元信息、搜索文件、读写文件、搜索代码、读取 git 状态和 diff、运行已授权测试、检索本地记忆、搜索网页、抓取网页内容、记录引用、写 citation-backed Markdown 报告、执行受权 shell 命令。",
+    "",
+    "运行环境：",
+    `- Model profile: ${profile}`,
+    ...(options.modelId ? [`- Model ID: ${options.modelId}`] : []),
+    ...(options.workspaceRoot ? [`- Workspace root: ${options.workspaceRoot}`] : []),
+    ...(options.currentDate ? [`- Current date: ${options.currentDate}`] : []),
+    "",
+    "模型适配：",
+    ...buildModelProfileGuidance(profile),
     "",
     "工作原则：",
     "- 文件诊断优先使用 file_list、file_stat、file_search、file_read；只有原生工具无法完成时再使用 shell_exec。",
@@ -482,6 +508,54 @@ export function buildAgentSystemPrompt(): string {
     "输出语言：默认使用中文输出最终消息、报告正文和用户可见摘要。",
     "只有任务输入明确要求其他语言时才切换。",
   ].join("\n");
+}
+
+export function selectAgentPromptProfile(modelId: string | undefined): AgentPromptProfile {
+  const normalized = modelId?.toLowerCase() ?? "";
+  if (normalized.includes("codex")) return "codex";
+  if (normalized.includes("claude")) return "claude";
+  if (normalized.includes("gemini")) return "gemini";
+  if (normalized.includes("kimi")) return "kimi";
+  if (
+    normalized.includes("gpt") ||
+    normalized.includes("o1") ||
+    normalized.includes("o3") ||
+    normalized.includes("o4")
+  ) {
+    return "gpt";
+  }
+  return "default";
+}
+
+function buildModelProfileGuidance(profile: AgentPromptProfile): string[] {
+  switch (profile) {
+    case "codex":
+      return [
+        "- Codex profile: stay concise, tool-first, and verification-driven.",
+        "- Prefer small scoped edits and fresh command evidence before reporting completion.",
+      ];
+    case "claude":
+      return [
+        "- Claude profile: use independent review for non-trivial conclusions.",
+        "- Maintain file discipline: avoid creating files unless necessary for the task.",
+      ];
+    case "gemini":
+      return [
+        "- Gemini profile: keep tool arguments explicit and restate constraints before risky actions.",
+      ];
+    case "gpt":
+      return [
+        "- GPT profile: keep plans structured, avoid premature final answers, and verify before stopping.",
+      ];
+    case "kimi":
+      return [
+        "- Kimi profile: keep instructions compact and prioritize direct tool observations.",
+      ];
+    case "default":
+      return [
+        "- Default profile: follow the shared local-first harness rules and ask for evidence when uncertain.",
+      ];
+  }
 }
 
 export function buildPlanningPrompt(

@@ -50,13 +50,13 @@
 
 <h2 id="overview-en">Overview</h2>
 
-**Zerox Agent** is a local-first desktop control plane for personal AI agents. The current release is **v2.1.0**. The name derives from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
+**Zerox Agent** is a local-first desktop control plane for personal AI agents. The current release is **v2.2.0**. The name derives from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
 
 It is not a chat wrapper or a generic hosted agent surface. It runs locally, configures OpenAI-compatible models, scans local `SKILL.md` skill files, executes recoverable agent runs, invokes permission-controlled tools, tracks parent/child multi-agent sessions, persists experiential knowledge into local long-term memory, and keeps learning user-reviewed before it changes future behavior.
 
 The product boundary is documented in [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md): Zerox optimizes for trusted local control, recoverable agent runs, explicit permissions, workspace-scoped runs, observable trajectories, parent/child multi-agent sessions, and user-reviewed learning. Runtime, workspace, and learning details live in [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md), [`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md), and [`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md).
 
-v2.1.0 keeps the Goal Mode stop-gate and artifact evidence fixes, then closes the UI iteration around a command-first agent stage. Chat goals start immediately instead of stopping at planning, use evidence-backed `model_review` checks tied to `artifact:goalEvidence`, and continue with replanned follow-up work when the final judge says the goal still lacks proof. The chat surface now opens on a focused command workspace with a wider session rail, large composer, warm desktop tokens, modular renderer CSS, hidden idle activity noise, and a conditional progress/context panel that appears only when work is active. The deterministic agent eval suite covers 21 runtime, native-tool, recovery, compaction, checkpoint, model-retry, research-writing, eval-candidate, multi-agent lineage, and goal-mode contracts.
+v2.2.0 hardens the system-level harness after a MiMo-Code research pass while preserving Zerox's local-first trust boundaries and the command-first agent stage. Agent prompts are now model-profiled with runtime metadata, Goal Mode carries an eleven-section continuity checkpoint through compaction, and evidence-based `model_review` checks can use a transcript-backed goal judge that emits `goal_judged` before `acceptance_checked`. The deterministic agent eval suite covers 22 runtime, native-tool, recovery, compaction, checkpoint, model-retry, research-writing, eval-candidate, multi-agent lineage, and goal-mode contracts, including adversarial coverage for removed goal judge events.
 
 <p align="center">
   <img src="zerox-agent-onepage.png" alt="Zerox Agent one-page product overview" width="720" />
@@ -558,7 +558,7 @@ can't be opened." The image is usually valid; remove the quarantine attribute
 before opening:
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/Zerox.Agent-2.1.0-arm64.dmg
+xattr -dr com.apple.quarantine ~/Downloads/Zerox.Agent-2.2.0-arm64.dmg
 ```
 
 If you already dragged the app into Applications, run:
@@ -588,7 +588,7 @@ npm run episode:export -- --config-dir <userData/config> --run-id <runId>
 npm run verify        # Tests + build + deterministic eval
 ```
 
-As of v2.1.0, `npm run verify` covers the Vitest suite, the production build, agent evals, and memory evals. The suite currently includes 110 Vitest files / 539 tests, 21 deterministic agent eval fixtures, and 2 memory eval fixtures. Agent evals include native code engineering, research writing, reflection-after-test-failure, retry-budget exhaustion, context compaction, tool-call checkpointing, model retry, episode eval-candidate, child handoff review-gate, and goal-mode bounded-autonomy golden paths. session-native Goal Mode architecture is documented in `docs/architecture/agent-goal-mode.md`, including the Chat Session mode flow, slash goal command flow, composer command menu, real-time progress streaming, evidence-backed review gates, artifact evidence contract, recovery actions, and `#goals` redirect behavior. Set `BUILDING_AGENT_CONFIG_DIR=/path/to/config` when running `npm run eval:agent` or `npm run harness:score` to include local promoted fixtures and pending eval candidates from that config directory. `npm run harness:score` emits the seven-category ETCLOVG score used by Overview as a local quality signal and now includes adversarial eval, goal-mode pass rate, plus the ACI/context report; Overview also displays the native Agent Capability score.
+As of v2.2.0, `npm run verify` covers the Vitest suite, the production build, agent evals, and memory evals. The suite currently includes 111 Vitest files / 548 tests, 22 deterministic agent eval fixtures, and 2 memory eval fixtures. Agent evals include native code engineering, research writing, reflection-after-test-failure, retry-budget exhaustion, context compaction, tool-call checkpointing, model retry, episode eval-candidate, child handoff review-gate, and goal-mode bounded-autonomy golden paths. session-native Goal Mode architecture is documented in `docs/architecture/agent-goal-mode.md`, including the Chat Session mode flow, slash goal command flow, composer command menu, real-time progress streaming, evidence-backed review gates, transcript-backed goal judge, artifact evidence contract, recovery actions, and `#goals` redirect behavior. Set `BUILDING_AGENT_CONFIG_DIR=/path/to/config` when running `npm run eval:agent` or `npm run harness:score` to include local promoted fixtures and pending eval candidates from that config directory. `npm run harness:score` emits the seven-category ETCLOVG score used by Overview as a local quality signal and now includes adversarial eval, goal-mode pass rate, goal-judge pass rate, plus the ACI/context report; Overview also displays the native Agent Capability score.
 
 ### Test Coverage
 
@@ -600,7 +600,7 @@ As of v2.1.0, `npm run verify` covers the Vitest suite, the production build, ag
 
 <h2 id="roadmap">Roadmap</h2>
 
-Current version: v2.1.0.
+Current version: v2.2.0.
 
 Recently shipped:
 
@@ -616,9 +616,10 @@ Recently shipped:
 - [x] Lightweight child handoff contracts and Runs review-gate cards for researcher/executor/reviewer roles
 - [x] P3 Agent Learning Harness Loop with reviewable eval candidates, local promoted fixtures, adversarial eval, ACI/context sensors, and Overview pending eval count
 - [x] P4 Runtime Core Upgrade with dynamic MCP/skill tool authorization, recoverable tool-failure observations, retry-budget diagnostics, active context compaction, per-tool checkpoints, model retry, and Runs trajectory insight cards
-- [x] session-native Goal Mode in Chat Session mode with bounded goal state, local progress ledger, deterministic-first acceptance, inline review gates, architecture doc, and six deterministic goal eval fixtures
+- [x] session-native Goal Mode in Chat Session mode with bounded goal state, local progress ledger, deterministic-first acceptance, inline review gates, architecture doc, and seven deterministic goal eval fixtures
 - [x] Goal command UX with `/目标 ...`, a composer command menu, future tool-command slots, and aligned icon-only composer controls
 - [x] Command-first agent stage with workspace sidebar, modular renderer CSS, large composer, and conditional progress/context panel
+- [x] MiMo-inspired harness hardening with model-profiled prompts, eleven-section goal continuity checkpoints, transcript-backed goal judge events, and goal-judge adversarial eval coverage
 
 Planned:
 
@@ -655,13 +656,13 @@ Planned:
 
 ## 项目概述
 
-**Zerox Agent** 是一个本地优先的桌面智能体控制台，当前版本是 **v2.1.0**。名字取自 **Zero + X**——从留白开始，把未知的本地工作流转成可观察、受权限管控、可恢复的 Agent 运行。
+**Zerox Agent** 是一个本地优先的桌面智能体控制台，当前版本是 **v2.2.0**。名字取自 **Zero + X**——从留白开始，把未知的本地工作流转成可观察、受权限管控、可恢复的 Agent 运行。
 
 它不是聊天壳，也不是泛用云端 Agent 入口。它运行在本机：配置 OpenAI‑compatible 模型、扫描本地 `SKILL.md` 技能文件、执行可恢复的 Agent 运行、调用受权限管控的工具、跟踪父子多 Agent 会话、把经验和知识写入本地长期记忆，并且在改变未来行为前保留用户审核。
 
 产品边界写在 [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md)：Zerox 优先建设可信的本地控制、可恢复运行、显式权限、workspace 作用域、可观察轨迹、父子多 Agent 会话和用户审核后的学习。运行时、workspace 与学习机制分别见 [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md)、[`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md)、[`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md)。
 
-v2.1.0 保留 Goal Mode stop-gate 与 artifact evidence 修复，并把本轮界面迭代收口为 command-first agent stage。聊天里设置目标会立即开始执行，不再停在 planning；目标成功标准绑定 `artifact:goalEvidence` 的证据化 `model_review`；当最终 judge 认为证据不足时，控制器会继续重规划和补证据。聊天界面现在以聚焦命令工作区作为首屏，配套更宽的会话侧栏、大输入框、低饱和桌面配色、拆分后的 renderer CSS、隐藏空闲活动噪音，以及只在工作活跃时出现的进度/上下文面板。确定性 Agent eval suite 覆盖 21 个 runtime、原生工具、恢复、压缩、checkpoint、模型重试、研究写作、eval candidate、多 Agent lineage 和 goal-mode 契约。
+v2.2.0 在研究 MiMo-Code 后强化系统级 harness，同时保留 Zerox 的本地优先信任边界。Agent prompt 现在会按模型画像注入运行元数据，Goal Mode 在上下文压缩中携带 11 段连续性 checkpoint，证据化 `model_review` 可以使用 transcript-backed goal judge，并在 `acceptance_checked` 前写入 `goal_judged` 轨迹事件。确定性 Agent eval suite 覆盖 22 个 runtime、原生工具、恢复、压缩、checkpoint、模型重试、研究写作、eval candidate、多 Agent lineage 和 goal-mode 契约，并包含删除 goal judge 事件的对抗测试。
 
 ### 设计原则
 
@@ -722,7 +723,7 @@ v2.1.0 保留 Goal Mode stop-gate 与 artifact evidence 修复，并把本轮界
 | 构建 | Vite 8 | 渲染进程热更新打包 |
 | 类型 | TypeScript 6 | 全栈类型安全，三套 tsconfig（主进程 / 渲染进程 / 共享） |
 | UI | React 19 | 函数组件 + Hooks 的 Material Design 桌面 UI |
-| 测试 | Vitest 4 | 110 个测试文件 / 539 个测试，覆盖共享层、主进程和渲染进程 |
+| 测试 | Vitest 4 | 111 个测试文件 / 547 个测试，覆盖共享层、主进程和渲染进程 |
 | 打包 | electron-builder 26 | macOS `.app` / `.dmg` / `.zip` 分发 |
 | 解析 | yaml (cron-parser) | SKILL.md 前端元数据解析、cron 表达式 |
 
@@ -1266,7 +1267,7 @@ Gatekeeper 可能提示「Zerox Agent 已损坏，无法打开」。这通常不
 而是下载隔离属性导致的拦截。打开前在终端执行：
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/Zerox.Agent-2.1.0-arm64.dmg
+xattr -dr com.apple.quarantine ~/Downloads/Zerox.Agent-2.2.0-arm64.dmg
 ```
 
 如果已经把应用拖进 Applications，则执行：
@@ -1293,7 +1294,7 @@ mac:
 
 ## 测试
 
-截至 v2.1.0，`npm run verify` 覆盖 Vitest 测试、生产构建、Agent 评测和记忆检索评测；当前包含 110 个 Vitest 文件 / 539 个测试、21 个确定性 Agent eval fixture 和 2 个 memory eval fixture。Agent eval 覆盖原生代码工程、研究写作、测试失败反思、retry budget exhaustion、上下文压缩、tool-call checkpoint、模型重试、episode eval candidate、child handoff review gate 和 goal-mode bounded-autonomy 黄金路径。session-native Goal Mode 架构记录在 `docs/architecture/agent-goal-mode.md`，包含 Chat Session mode 流程、slash goal command、输入框命令菜单、实时进度流推送、证据化审核门、artifact evidence contract、恢复操作和旧 `#goals` 地址回到会话的行为：
+截至 v2.2.0，`npm run verify` 覆盖 Vitest 测试、生产构建、Agent 评测和记忆检索评测；当前包含 111 个 Vitest 文件 / 548 个测试、22 个确定性 Agent eval fixture 和 2 个 memory eval fixture。Agent eval 覆盖原生代码工程、研究写作、测试失败反思、retry budget exhaustion、上下文压缩、tool-call checkpoint、模型重试、episode eval candidate、child handoff review gate 和 goal-mode bounded-autonomy 黄金路径。session-native Goal Mode 架构记录在 `docs/architecture/agent-goal-mode.md`，包含 Chat Session mode 流程、slash goal command、输入框命令菜单、实时进度流推送、证据化审核门、transcript-backed goal judge、artifact evidence contract、恢复操作和旧 `#goals` 地址回到会话的行为：
 
 ```bash
 npm test              # 运行全部测试
@@ -1308,7 +1309,7 @@ npm run episode:export -- --config-dir <userData/config> --run-id <runId>
 npm run verify        # 测试 + 构建 + 确定性评测
 ```
 
-使用 `BUILDING_AGENT_CONFIG_DIR=/path/to/config` 运行 `npm run eval:agent` 或 `npm run harness:score` 时，会加载该配置目录里的本地 promoted fixture 和 pending eval candidate。`npm run harness:score` 输出与 Overview 面板一致的七类 ETCLOVG harness score，并纳入 adversarial eval、goal-mode pass rate 与 ACI/context report，便于发布前判断执行环境、工具接口、上下文、生命周期、可观测、验证和治理是否仍然健康。Overview 也会显示 Native Agent Capability 分数。
+使用 `BUILDING_AGENT_CONFIG_DIR=/path/to/config` 运行 `npm run eval:agent` 或 `npm run harness:score` 时，会加载该配置目录里的本地 promoted fixture 和 pending eval candidate。`npm run harness:score` 输出与 Overview 面板一致的七类 ETCLOVG harness score，并纳入 adversarial eval、goal-mode pass rate、goal-judge pass rate 与 ACI/context report，便于发布前判断执行环境、工具接口、上下文、生命周期、可观测、验证和治理是否仍然健康。Overview 也会显示 Native Agent Capability 分数。
 
 ### 测试覆盖
 
@@ -1320,7 +1321,7 @@ npm run verify        # 测试 + 构建 + 确定性评测
 
 ## 路线图
 
-当前版本：v2.1.0。
+当前版本：v2.2.0。
 
 近期已完成：
 
@@ -1336,9 +1337,10 @@ npm run verify        # 测试 + 构建 + 确定性评测
 - [x] 轻量子 Agent handoff contract，以及 researcher/executor/reviewer 的 Runs 审核卡片
 - [x] P3 Agent Learning Harness Loop：可审核 eval candidate、本地 promoted fixture、adversarial eval、ACI/context sensor 和 Overview pending eval 计数
 - [x] P4 Runtime Core Upgrade：动态 MCP/skill 工具授权、可恢复工具失败 observation、retry-budget 诊断、活跃上下文压缩、per-tool checkpoint、模型重试和 Runs 轨迹诊断卡
-- [x] session-native Goal Mode in Chat Session mode：有边界目标状态、本地进度 ledger、确定性优先验收、会话内审核门、架构文档和 6 个确定性 goal eval fixture
+- [x] session-native Goal Mode in Chat Session mode：有边界目标状态、本地进度 ledger、确定性优先验收、会话内审核门、架构文档和 7 个确定性 goal eval fixture
 - [x] Goal command UX：支持 `/目标 ...`、输入框命令菜单、未来工具命令预留位，以及对齐输入框圆角的图标按钮组
 - [x] Command-first agent stage：工作区侧栏、模块化 renderer CSS、大输入框，以及按运行状态出现的进度/上下文面板
+- [x] MiMo-inspired harness hardening：模型画像 prompt、11 段目标连续性 checkpoint、transcript-backed goal judge 轨迹事件和 goal-judge 对抗评测覆盖
 
 后续计划：
 

@@ -1,4 +1,4 @@
-import type { Goal, Milestone } from "../shared/agentGoal";
+import type { Goal } from "../shared/agentGoal";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
 import type { ChatMessage } from "./openAiCompatibleClient";
 import type { ProgressLedgerEvent } from "./agentGoalStore";
@@ -7,6 +7,7 @@ import {
   createContextManager,
   estimateMessageTokens,
 } from "./contextManager";
+import { buildGoalContinuityCheckpoint } from "../shared/agentGoalContinuity";
 
 export type AgentGoalContext = {
   assemble(
@@ -90,88 +91,10 @@ function buildAnchorMessages(
     {
       role: "system",
       content: [
-        "[Goal anchors - never compact]",
-        `Goal: ${goal.description}`,
-        `Goal status: ${goal.status}`,
-        `Plan version: ${goal.planVersion}`,
-        "Success criteria:",
-        ...goal.successCriteria.map(
-          (criterion) =>
-            `- ${criterion.id}: ${criterion.description}; checks=${criterion.acceptanceChecks
-              .map((check) => `${check.id}:${check.kind}`)
-              .join(", ")}`,
-        ),
-        "Current progress ledger:",
-        ...summarizeLedger(ledgerEvents),
-      ].join("\n"),
-    },
-    {
-      role: "user",
-      content: [
-        "[Goal milestone context]",
-        "Accepted milestone conclusions:",
-        ...summarizeAcceptedMilestones(goal.milestones, ledgerEvents),
-        "Running and pending milestone detail:",
-        ...summarizeOpenMilestones(goal.milestones),
+        buildGoalContinuityCheckpoint({ goal, ledgerEvents, compact: true }),
       ].join("\n"),
     },
   ];
-}
-
-function summarizeLedger(events: ProgressLedgerEvent[]): string[] {
-  if (!events.length) {
-    return ["- No progress ledger events yet."];
-  }
-
-  return events.slice(-6).map((event) => {
-    const refs = event.evidenceRefs?.length
-      ? ` evidence=${event.evidenceRefs.join(",")}`
-      : "";
-    const milestone = event.milestoneId ? ` milestone=${event.milestoneId}` : "";
-    return `- ${event.at} ${event.kind}${milestone}: ${event.summary}${refs}`;
-  });
-}
-
-function summarizeAcceptedMilestones(
-  milestones: Milestone[],
-  ledgerEvents: ProgressLedgerEvent[],
-): string[] {
-  const accepted = milestones.filter((milestone) => milestone.state === "accepted");
-  if (!accepted.length) {
-    return ["- None accepted yet."];
-  }
-
-  return accepted.map((milestone) => {
-    const refs = ledgerEvents
-      .filter((event) => event.milestoneId === milestone.id)
-      .flatMap((event) => event.evidenceRefs ?? []);
-    const evidence = refs.length ? ` evidence=${refs.join(",")}` : "";
-    return `- ${milestone.id}: ${
-      milestone.lastAcceptanceSummary ?? "Accepted."
-    }${evidence}`;
-  });
-}
-
-function summarizeOpenMilestones(milestones: Milestone[]): string[] {
-  const open = milestones.filter(
-    (milestone) =>
-      milestone.state === "running" ||
-      milestone.state === "pending" ||
-      milestone.state === "ready" ||
-      milestone.state === "rejected",
-  );
-  if (!open.length) {
-    return ["- None open."];
-  }
-
-  return open.map(
-    (milestone) =>
-      `- ${milestone.id}: ${milestone.description}; state=${milestone.state}; dependsOn=${
-        milestone.dependsOn.join(",") || "none"
-      }; criteria=${milestone.successCriteria
-        .map((criterion) => `${criterion.id}:${criterion.description}`)
-        .join(", ")}`,
-  );
 }
 
 function normalizeHistory(history: ChatMessage[]): {

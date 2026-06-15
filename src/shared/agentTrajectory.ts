@@ -8,6 +8,7 @@ export type AgentTrajectoryEventType =
   | "goal_replanned"
   | "goal_review_requested"
   | "goal_stopped"
+  | "goal_judged"
   | "model_request"
   | "model_retry"
   | "model_response"

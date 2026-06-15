@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-06-12T00:00:00.000Z",
+  "updatedAt": "2026-06-16T00:00:00.000Z",
   "features": [
     {
       "id": "P0-repo-local-harness",
@@ -471,6 +471,27 @@
         "npm test",
         "npm run build",
         "npm run verify",
+        "npm run harness:score",
+        "npm run smoke:prod",
+        "git diff --check"
+      ]
+    },
+    {
+      "id": "P7-mimo-inspired-agent-harness",
+      "priority": 28,
+      "status": "done",
+      "title": "MiMo-inspired goal judge and harness hardening",
+      "definitionOfDone": [
+        "Model-profiled system prompts include environment metadata without secrets",
+        "Goal context injects an eleven-section continuity checkpoint that survives compaction",
+        "Model-review acceptance can use transcript-backed judge verdicts and emits goal_judged before acceptance_checked",
+        "Agent eval, adversarial eval, and harness score cover transcript-backed goal judge behavior"
+      ],
+      "verification": [
+        "npm test -- src/shared/agentProtocol.test.ts src/shared/agentGoalContinuity.test.ts src/main/agentGoalAcceptance.test.ts src/main/goalRuntimeEngine.test.ts src/main/agentGoalContext.test.ts src/main/eval/agentEvalRunner.test.ts src/main/eval/agentEvalAdversary.test.ts src/shared/harnessScore.test.ts src/main/agentGoalController.test.ts",
+        "npm test",
+        "npm run verify",
+        "npm run harness:check",
         "npm run harness:score",
         "npm run smoke:prod",
         "git diff --check"

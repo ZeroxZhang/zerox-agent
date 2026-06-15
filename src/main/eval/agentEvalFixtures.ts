@@ -1048,6 +1048,79 @@ function createGoalEvalFixtures(): AgentEvalFixture[] {
         },
       ],
     },
+    {
+      id: "goal-transcript-judge-before-acceptance",
+      description:
+        "Goal Mode records a transcript-backed judge verdict before accepting inferential evidence.",
+      events: createEvents("goal-transcript-judge-before-acceptance", [
+        [
+          "goal_planned",
+          { goalId: "goal_eval_judge", milestoneCount: 1 },
+        ],
+        [
+          "milestone_started",
+          { goalId: "goal_eval_judge", milestoneId: "milestone_verify" },
+        ],
+        [
+          "final_summary",
+          {
+            goalId: "goal_eval_judge",
+            status: "succeeded",
+            transcriptMessageCount: 6,
+          },
+        ],
+        [
+          "goal_judged",
+          {
+            goalId: "goal_eval_judge",
+            milestoneId: "milestone_verify",
+            checkId: "check_transcript",
+            ok: true,
+            impossible: false,
+            reason: "Transcript shows npm run verify passed.",
+            transcriptMessageCount: 6,
+          },
+        ],
+        [
+          "acceptance_checked",
+          {
+            goalId: "goal_eval_judge",
+            milestoneId: "milestone_verify",
+            accepted: true,
+            inferentialUsed: true,
+            transcriptBacked: true,
+          },
+        ],
+        [
+          "goal_stopped",
+          {
+            goalId: "goal_eval_judge",
+            status: "achieved",
+            stopReason: "goal_accepted",
+          },
+        ],
+      ]),
+      requiredEventTypes: [
+        "goal_planned",
+        "milestone_started",
+        "final_summary",
+        "goal_judged",
+        "acceptance_checked",
+        "goal_stopped",
+      ],
+      assertions: [
+        {
+          type: "goal_judged",
+          payload: { ok: true, impossible: false },
+          after: "final_summary",
+        },
+        {
+          type: "acceptance_checked",
+          payload: { accepted: true },
+          after: "goal_judged",
+        },
+      ],
+    },
   ];
 }
 

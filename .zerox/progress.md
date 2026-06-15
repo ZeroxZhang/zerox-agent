@@ -1296,3 +1296,85 @@
   - `npm run harness:check` -> passed.
   - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
   - `git diff --check` -> passed.
+
+## 2026-06-16 MiMo-inspired Agent Harness v2.2.0
+
+- Request:
+  - Study the local MiMo-Code source and technical research report under `/Volumes/Out/trae_projects/research of mimo code`.
+  - Integrate the useful parts into Zerox Agent as a major `2.2.0` iteration, especially goal handling, system prompts, system-level harness, and loop behavior.
+- Research and plan:
+  - Engineer subagent reviewed MiMo-Code and the report with emphasis on Goal Judge, TaskGate, system prompt layering, trajectory/ledger behavior, checkpoints, loop control, and sandbox risks.
+  - Adopted the transferable patterns while preserving Zerox local-first boundaries, `ToolAuthorizationService`, workspace sandbox checks, and reviewed learning gates.
+  - Wrote the implementation plan at `docs/superpowers/plans/2026-06-16-mimo-inspired-agent-harness-2-2.md`.
+- Implementation:
+  - Added model-profiled system prompt routing for Codex, Claude, Gemini, GPT, Kimi, and default models.
+  - Replaced compact goal anchors with an eleven-section goal continuity checkpoint.
+  - Added transcript-backed model-review acceptance judging with `goal_judged` trajectory evidence before `acceptance_checked`.
+  - Hardened transcript judging so prior transcript messages are quoted as inert evidence instead of replayed as live chat roles.
+  - Added the final assistant summary to bounded goal transcripts so the judge can see terminal run evidence.
+  - Shared the goal trajectory sequence source between milestone runtime and acceptance/controller events in the desktop container.
+  - Added a goal judge eval fixture, adversarial deletion mutation, and harness score/report coverage for goal judge pass rate.
+  - Added feature tracking entry `P7-mimo-inspired-agent-harness`.
+- Changed files:
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+  - `README.md`
+  - `docs/architecture/agent-goal-mode.md`
+  - `docs/superpowers/plans/2026-06-16-mimo-inspired-agent-harness-2-2.md`
+  - `package.json`
+  - `package-lock.json`
+  - `scripts/run-harness-score.mjs`
+  - `src/main/agentGoalAcceptance.ts`
+  - `src/main/agentGoalAcceptance.test.ts`
+  - `src/main/agentGoalContext.ts`
+  - `src/main/agentGoalContext.test.ts`
+  - `src/main/agentGoalController.ts`
+  - `src/main/agentLoop.ts`
+  - `src/main/agentRuntimeEngine.ts`
+  - `src/main/container.ts`
+  - `src/main/eval/agentEvalAdversary.ts`
+  - `src/main/eval/agentEvalAdversary.test.ts`
+  - `src/main/eval/agentEvalFixtures.ts`
+  - `src/main/eval/agentEvalRunner.test.ts`
+  - `src/main/goalRuntimeEngine.ts`
+  - `src/main/goalRuntimeEngine.test.ts`
+  - `src/shared/agentGoalContinuity.ts`
+  - `src/shared/agentGoalContinuity.test.ts`
+  - `src/shared/agentProtocol.ts`
+  - `src/shared/agentProtocol.test.ts`
+  - `src/shared/agentTrajectory.ts`
+  - `src/shared/harnessScore.ts`
+  - `src/shared/harnessScore.test.ts`
+  - `src/shared/packageScripts.test.ts`
+  - `src/shared/readme.test.ts`
+- Independent adversarial review:
+  - Test engineer subagent Halley initially returned `FAIL` after running focused tests, `npm run verify`, `npm run harness:check`, `npm run harness:score`, `npm run smoke:prod`, and `git diff --check`.
+  - P1 fixed: transcript judge no longer replays untrusted transcript messages as live `system` / `user` / `assistant` roles; transcript is now quoted inside a single judge user prompt.
+  - P1 fixed: goal runtime appends the terminal assistant summary to the bounded transcript passed into model-review acceptance.
+  - P2 fixed: desktop goal runtime and acceptance/controller trajectory events share one sequence source for monotonic run evidence.
+  - P2 fixed: progress evidence updated after feature status was marked done.
+- TDD and verification evidence:
+  - `./init.sh` -> harness check passed; packageScripts test 6 passed.
+  - `npm test -- src/shared/agentProtocol.test.ts` -> RED before prompt profile support.
+  - `npm test -- src/shared/agentProtocol.test.ts src/main/agentLoop.test.ts src/main/agentRuntimeEngine.test.ts src/main/goalRuntimeEngine.test.ts` -> 4 files / 49 tests passed.
+  - `npm test -- src/shared/agentGoalContinuity.test.ts src/main/agentGoalContext.test.ts` -> RED before checkpoint/anchor replacement, then 2 files / 6 tests passed.
+  - `npm test -- src/main/agentGoalAcceptance.test.ts src/main/goalRuntimeEngine.test.ts src/main/agentGoalController.test.ts` -> RED before transcript-backed judge, then 3 files / 26 tests passed.
+  - `npm test -- src/main/eval/agentEvalRunner.test.ts src/main/eval/agentEvalAdversary.test.ts src/shared/harnessScore.test.ts` -> RED before goal judge eval/adversary/harness score support, then 3 files / 15 tests passed.
+  - `npm test -- src/shared/agentProtocol.test.ts src/shared/agentGoalContinuity.test.ts src/main/agentGoalAcceptance.test.ts src/main/goalRuntimeEngine.test.ts src/main/agentGoalContext.test.ts src/main/eval/agentEvalRunner.test.ts src/main/eval/agentEvalAdversary.test.ts src/shared/harnessScore.test.ts src/main/agentGoalController.test.ts` -> 9 files / 62 tests passed.
+  - `npm test -- src/main/agentGoalAcceptance.test.ts src/main/goalRuntimeEngine.test.ts` -> RED for untrusted transcript role replay and missing terminal assistant summary, then 2 files / 19 tests passed.
+  - `npm test -- src/shared/agentProtocol.test.ts src/shared/agentGoalContinuity.test.ts src/main/agentGoalAcceptance.test.ts src/main/goalRuntimeEngine.test.ts src/main/agentGoalContext.test.ts src/main/eval/agentEvalRunner.test.ts src/main/eval/agentEvalAdversary.test.ts src/shared/harnessScore.test.ts src/main/agentGoalController.test.ts src/main/container.test.ts src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 12 files / 76 tests passed.
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> RED before v2.2.0 README/package metadata, then 2 files / 9 tests passed.
+  - `npm test` -> 111 files / 548 tests passed.
+  - `npm run verify` -> 111 files / 548 tests passed, build passed, agent eval 22/22, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `npm run harness:score` -> score 9.2 good; eval 22/22; goal 7/7; goal-judge 1/1; adversarial 64 checked / 0 escaped.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `git diff --check` -> passed.
+  - Independent test engineer subagent re-review -> `PASS`; original four findings resolved; no new release blocker.
+- Release artifact evidence:
+  - `npm run dist:mac` -> build and packaging succeeded for v2.2.0.
+  - `release/mac-arm64/Zerox Agent.app/Contents/Info.plist` reports `CFBundleShortVersionString=2.2.0` and `CFBundleVersion=2.2.0`.
+  - `release/Zerox Agent-2.2.0-arm64.dmg` -> 118M.
+  - `release/Zerox Agent-2.2.0-arm64-mac.zip` -> 329M.
+  - `release/latest-mac.yml` -> version `2.2.0`.
+  - Packaged app smoke with old required idle-panel text `进度|上下文` failed because the command-first UI hides idle progress/context text; default packaged app smoke then passed with renderer rendering agent chat UI.

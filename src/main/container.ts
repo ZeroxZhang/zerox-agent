@@ -468,6 +468,10 @@ export function createAppContainer(options: {
     return lazy("agentGoalController", () => {
       const toolExecutor = createToolExecutor();
       let sequence = 0;
+      const nextGoalTrajectorySequence = () => {
+        sequence += 1;
+        return sequence;
+      };
 
       return createAgentGoalController({
         goalStore: agentGoalStore(),
@@ -486,6 +490,7 @@ export function createAppContainer(options: {
             now: () => new Date().toISOString(),
           }),
           createId: () => `goal_run_${randomUUID()}`,
+          nextSequence: nextGoalTrajectorySequence,
           now: () => new Date().toISOString(),
           onProgress: emitGoalProgressEvent,
           onEvent(event) {
@@ -507,7 +512,7 @@ export function createAppContainer(options: {
           },
         },
         trajectoryStore: agentTrajectoryStore(),
-        createAcceptanceContext: async (goal, milestone) => {
+        createAcceptanceContext: async (goal, milestone, runResult) => {
           const runContext = applyGoalOutputRootsToRunContext(
             await agentWorkspaceService().resolveRunContext({
               workspaceId: goal.workspaceId,
@@ -550,6 +555,7 @@ export function createAppContainer(options: {
             trajectoryStore: agentTrajectoryStore(),
             chatClient: createOpenAiCompatibleClient(),
             modelProfile: await getModelProfile(),
+            transcriptMessages: runResult?.transcriptMessages,
             artifacts: {
               goalEvidence: {
                 condition: goal.description,
@@ -590,10 +596,7 @@ export function createAppContainer(options: {
           };
         },
         createId: () => `goal_event_${randomUUID()}`,
-        nextSequence: () => {
-          sequence += 1;
-          return sequence;
-        },
+        nextSequence: nextGoalTrajectorySequence,
         now: () => new Date().toISOString(),
       });
     });

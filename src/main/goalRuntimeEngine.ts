@@ -27,6 +27,7 @@ import type { ToolResultOffloadStore } from "./toolResultOffloadStore";
 import { estimateMessageTokens } from "./contextManager";
 import type { GoalProgressEvent } from "../shared/chat";
 import { applyGoalOutputRootsToRunContext } from "./goalOutputRoots";
+import { buildAgentSystemPrompt } from "../shared/agentProtocol";
 
 export type GoalRuntimeModelProfile = {
   baseUrl: string;
@@ -175,10 +176,11 @@ export function createGoalRuntimeEngine(options: {
         runContext,
       });
 
+      const modelProfile = await options.getModelProfile();
       const tokenBudget =
         options.tokenBudget ??
         goal.budget.maxTokens ??
-        (await options.getModelProfile()).maxTokens;
+        modelProfile.maxTokens;
       const assembled = options.goalContext.assemble(goal, [], tokenBudget);
       const milestoneInstruction: ChatMessage = {
         role: "user",
@@ -191,7 +193,7 @@ export function createGoalRuntimeEngine(options: {
 
       const loopResult = await runLoop(
         initialMessages,
-        await options.getModelProfile(),
+        modelProfile,
         {
           chatClient: options.chatClient,
           toolExecutor: options.toolExecutor,
@@ -199,7 +201,7 @@ export function createGoalRuntimeEngine(options: {
           taskId,
           runContext,
           runtimeTask: buildGoalMilestoneRuntimeTask(goal, runContext),
-          systemPrompt: buildGoalSystemPrompt(),
+          systemPrompt: buildGoalSystemPrompt(modelProfile.model),
           maxTurns: options.maxTurns ?? 8,
           tools: options.toolExecutor.getRegistry().getDefinitions(),
           toolResultOffloadStore: options.toolResultOffloadStore,
@@ -325,6 +327,10 @@ export function createGoalRuntimeEngine(options: {
         summary: loopResult.summary,
         wallClockMs: new Date(finishedAt).getTime() - new Date(startedAt).getTime(),
         tokens: inferTokens(loopResult, initialMessages),
+        transcriptMessages: toBoundedTranscriptMessages(
+          loopResult.messages,
+          loopResult.summary,
+        ),
       };
     },
   };
@@ -387,8 +393,11 @@ function buildGoalMilestonePermissionPolicy(
   };
 }
 
-function buildGoalSystemPrompt(): string {
+function buildGoalSystemPrompt(modelId?: string): string {
   return [
+    buildAgentSystemPrompt({ modelId }),
+    "",
+    "[Goal Mode execution profile]",
     "你是 Zerox Agent 的长期目标执行器，运行在用户本地桌面环境中。",
     "默认使用中文，围绕当前长期目标推进一个明确里程碑。",
     "需要证据时直接调用可用工具；不要只声明会做，要实际推进。",
@@ -501,4 +510,22 @@ function inferTokens(
   }
 
   return Math.max(1, estimateMessageTokens(initialMessages));
+}
+
+function toBoundedTranscriptMessages(
+  messages: ChatMessage[],
+  finalSummary?: string,
+): ChatMessage[] {
+  const maxMessages = 24;
+  const maxChars = 4000;
+  const transcriptMessages = finalSummary
+    ? [...messages, { role: "assistant" as const, content: finalSummary }]
+    : messages;
+  return transcriptMessages.slice(-maxMessages).map((message) => ({
+    ...message,
+    content:
+      message.content.length > maxChars
+        ? `${message.content.slice(0, maxChars)}... [truncated]`
+        : message.content,
+  }));
 }

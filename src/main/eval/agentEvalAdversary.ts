@@ -11,7 +11,8 @@ export type AgentEvalAdversarialMutation =
   | "wrong_payload"
   | "wrong_order"
   | "tamper_goal_budget"
-  | "remove_acceptance_check";
+  | "remove_acceptance_check"
+  | "remove_goal_judge";
 
 export type AgentEvalAdversarialCase = {
   sourceFixtureId: string;
@@ -39,6 +40,7 @@ export function createAdversarialAgentEvalCases(
       createWrongOrderCase(fixture),
       createTamperGoalBudgetCase(fixture),
       createRemoveAcceptanceCheckCase(fixture),
+      createRemoveGoalJudgeCase(fixture),
     ].filter((testCase): testCase is AgentEvalAdversarialCase =>
       Boolean(testCase),
     ),
@@ -183,6 +185,24 @@ function createRemoveAcceptanceCheckCase(
   );
 
   return createCase(fixture, "remove_acceptance_check", mutated);
+}
+
+function createRemoveGoalJudgeCase(
+  fixture: AgentEvalFixture,
+): AgentEvalAdversarialCase | null {
+  if (
+    !fixture.requiredEventTypes.includes("goal_judged") ||
+    !fixture.events.some((event) => event.type === "goal_judged")
+  ) {
+    return null;
+  }
+
+  const mutated = cloneFixture(fixture);
+  mutated.events = resequenceEvents(
+    mutated.events.filter((event) => event.type !== "goal_judged"),
+  );
+
+  return createCase(fixture, "remove_goal_judge", mutated);
 }
 
 function createCase(

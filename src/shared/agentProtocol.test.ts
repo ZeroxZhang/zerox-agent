@@ -133,6 +133,32 @@ describe("agent JSON protocol", () => {
     expect(prompt).toContain("默认使用中文");
   });
 
+  it("builds a Codex-profiled system prompt with environment metadata", () => {
+    const prompt = buildAgentSystemPrompt({
+      modelId: "gpt-5-codex",
+      workspaceRoot: "/repo",
+      currentDate: "2026-06-16",
+    });
+
+    expect(prompt).toContain("Model profile: codex");
+    expect(prompt).toContain("tool-first");
+    expect(prompt).toContain("Workspace root: /repo");
+    expect(prompt).toContain("Current date: 2026-06-16");
+    expect(prompt).not.toContain("apiKey");
+    expect(prompt).not.toContain("secret");
+  });
+
+  it("builds a Claude-profiled system prompt with review and file discipline", () => {
+    const prompt = buildAgentSystemPrompt({
+      modelId: "claude-sonnet-5",
+      workspaceRoot: "/repo",
+    });
+
+    expect(prompt).toContain("Model profile: claude");
+    expect(prompt).toContain("independent review");
+    expect(prompt).toContain("avoid creating files unless necessary");
+  });
+
   it("builds tool definitions with JSON Schema for built-in tools", () => {
     const definitions = buildToolDefinitions();
 

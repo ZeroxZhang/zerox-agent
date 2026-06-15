@@ -70,4 +70,22 @@ describe("computeHarnessScore", () => {
     );
     expect(score.summary).toContain("goal-mode pass 100% across 6 fixtures");
   });
+
+  it("surfaces goal judge pass rate when judge fixtures exist", () => {
+    const score = computeHarnessScore({
+      hasAgentGuide: true,
+      hasExecutionStore: true,
+      hasInitScript: true,
+      hasTrajectoryStore: true,
+      evalPassRate: 1,
+      recoverabilityRate: 1,
+      pendingLearningCandidates: 0,
+      goalPassRate: 1,
+      goalFixtureCount: 7,
+      goalJudgePassRate: 1,
+      goalJudgeFixtureCount: 1,
+    });
+
+    expect(score.summary).toContain("goal-judge pass 100% across 1 fixture");
+  });
 });

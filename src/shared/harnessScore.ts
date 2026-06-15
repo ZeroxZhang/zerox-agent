@@ -19,6 +19,8 @@ export type HarnessScoreInput = {
   pendingLearningCandidates: number;
   goalPassRate?: number;
   goalFixtureCount?: number;
+  goalJudgePassRate?: number;
+  goalJudgeFixtureCount?: number;
   toolSuccessRate?: number;
 };
 
@@ -41,6 +43,10 @@ export function computeHarnessScore(input: HarnessScoreInput): HarnessScore {
   const goalPassScore =
     input.goalFixtureCount && input.goalFixtureCount > 0
       ? ratioToScore(input.goalPassRate ?? 0)
+      : null;
+  const goalJudgePassScore =
+    input.goalJudgeFixtureCount && input.goalJudgeFixtureCount > 0
+      ? ratioToScore(input.goalJudgePassRate ?? 0)
       : null;
   const toolSuccessScore = ratioToScore(input.toolSuccessRate ?? 0.8);
   const governanceScore = scoreGovernance(input.pendingLearningCandidates);
@@ -84,9 +90,9 @@ export function computeHarnessScore(input: HarnessScoreInput): HarnessScore {
       id: "verification",
       label: "Verification",
       score: average(
-        goalPassScore === null
-          ? [evalPassScore, recoverabilityScore]
-          : [evalPassScore, recoverabilityScore, goalPassScore],
+        [evalPassScore, recoverabilityScore, goalPassScore, goalJudgePassScore].filter(
+          (score): score is number => score !== null,
+        ),
       ),
     },
     {
@@ -122,7 +128,21 @@ function createSummary(input: HarnessScoreInput): string {
     );
   }
 
+  if (input.goalJudgeFixtureCount && input.goalJudgeFixtureCount > 0) {
+    parts.push(
+      `goal-judge pass ${Math.round(
+        clampRatio(input.goalJudgePassRate ?? 0) * 100,
+      )}% across ${input.goalJudgeFixtureCount} ${formatFixtureCount(
+        input.goalJudgeFixtureCount,
+      )}`,
+    );
+  }
+
   return `${parts.join("; ")}.`;
+}
+
+function formatFixtureCount(count: number): string {
+  return count === 1 ? "fixture" : "fixtures";
 }
 
 function scoreGovernance(pendingLearningCandidates: number): number {

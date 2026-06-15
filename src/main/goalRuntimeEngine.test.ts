@@ -95,12 +95,13 @@ describe("goal runtime engine", () => {
     expect(loopInputs).toHaveLength(1);
     expect(loopInputs[0]?.taskId).toBe("goal:goal_1");
     expect(loopInputs[0]?.systemPrompt).toContain("长期目标执行");
+    expect(loopInputs[0]?.systemPrompt).toContain("Model profile: default");
     expect(loopInputs[0]?.messages.at(-1)).toEqual({
       role: "user",
       content: expect.stringContaining("Milestone: 调研 Serenity 投资方法论"),
     });
     expect(loopInputs[0]?.messages.some((message) =>
-      message.content.includes("[Goal anchors - never compact]")
+      message.content.includes("[Goal continuity checkpoint - never compact]")
     )).toBe(true);
     expect(runs).toHaveLength(1);
     expect(runs[0]).toMatchObject({
@@ -111,6 +112,17 @@ describe("goal runtime engine", () => {
       status: "succeeded",
       summary: "已完成 Serenity 投资方法论调研摘要。",
     });
+    expect(result.transcriptMessages?.map((message) => message.role)).toEqual([
+      "system",
+      "user",
+      "assistant",
+    ]);
+    expect(result.transcriptMessages?.at(-2)?.content).toContain(
+      "Milestone: 调研 Serenity 投资方法论",
+    );
+    expect(result.transcriptMessages?.at(-1)?.content).toBe(
+      "已完成 Serenity 投资方法论调研摘要。",
+    );
     expect(runs[0]?.events.map((event) => event.message)).toContain(
       "Goal milestone agent loop completed.",
     );

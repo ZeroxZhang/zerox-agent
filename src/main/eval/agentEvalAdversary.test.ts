@@ -18,11 +18,12 @@ describe("agent eval adversary", () => {
         "wrong_order",
         "tamper_goal_budget",
         "remove_acceptance_check",
+        "remove_goal_judge",
       ]),
     );
   });
 
-  it("creates goal-specific adversarial cases for budget and acceptance tampering", () => {
+  it("creates goal-specific adversarial cases for budget, acceptance, and judge tampering", () => {
     const cases = createAdversarialAgentEvalCases(createAgentEvalFixtures());
 
     expect(cases).toEqual(
@@ -34,6 +35,10 @@ describe("agent eval adversary", () => {
         expect.objectContaining({
           sourceFixtureId: "goal-achieved-within-budget",
           mutation: "remove_acceptance_check",
+        }),
+        expect.objectContaining({
+          sourceFixtureId: "goal-transcript-judge-before-acceptance",
+          mutation: "remove_goal_judge",
         }),
       ]),
     );

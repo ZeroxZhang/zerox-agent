@@ -15,6 +15,7 @@ import type { AgentGoalAcceptance, AcceptanceContext, AcceptanceResult } from ".
 import type { AgentGoalPlanner } from "./agentGoalPlanner";
 import type { AgentGoalStore } from "./agentGoalStore";
 import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
+import type { ChatMessage } from "./openAiCompatibleClient";
 
 export type GoalRuntimeRunResult = {
   runId: string;
@@ -23,6 +24,7 @@ export type GoalRuntimeRunResult = {
   summary?: string;
   wallClockMs?: number;
   tokens?: number;
+  transcriptMessages?: ChatMessage[];
 };
 
 export type GoalRuntimeEngine = {
@@ -48,6 +50,7 @@ export function createAgentGoalController(options: {
   createAcceptanceContext?: (
     goal: Goal,
     milestone?: Milestone,
+    runResult?: GoalRuntimeRunResult,
   ) => AcceptanceContext | Promise<AcceptanceContext>;
   stallThreshold?: number;
   createId?: () => string;
@@ -238,7 +241,7 @@ export function createAgentGoalController(options: {
 
     const acceptance = await options.acceptance.evaluate(
       milestone,
-      (await options.createAcceptanceContext?.(goal, milestone)) as never,
+      (await options.createAcceptanceContext?.(goal, milestone, runResult)) as never,
     );
 
     if (acceptance.accepted) {

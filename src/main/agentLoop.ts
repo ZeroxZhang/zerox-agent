@@ -128,7 +128,7 @@ export async function runAgentLoop(
     } else {
       messages.push({
         role: "system",
-        content: buildAgentSystemPrompt(),
+        content: buildAgentSystemPrompt({ modelId: modelProfile.model }),
       });
     }
 

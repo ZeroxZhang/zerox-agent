@@ -14,7 +14,7 @@ describe("README", () => {
     expect(readme).toContain("npm run pack:mac");
     expect(readme).toContain("npm run dist:mac");
     expect(readme).toContain("xattr -dr com.apple.quarantine");
-    expect(readme).toContain("Zerox.Agent-2.1.0-arm64.dmg");
+    expect(readme).toContain("Zerox.Agent-2.2.0-arm64.dmg");
     expect(readme).toContain("npm run harness:check");
     expect(readme).toContain("npm run harness:score");
     expect(readme).toContain("npm run episode:export");
@@ -50,8 +50,8 @@ describe("README", () => {
     expect(positioning).toContain("Zerox does not run unbounded autonomous loops");
     expect(readme).toContain("session-native Goal Mode");
     expect(readme).toContain("Chat Session mode");
-    expect(readme).toContain("current release is **v2.1.0**");
-    expect(readme).toContain("当前版本是 **v2.1.0**");
+    expect(readme).toContain("current release is **v2.2.0**");
+    expect(readme).toContain("当前版本是 **v2.2.0**");
   });
 
   it("documents Goal Mode architecture, eval coverage, and feature-list status", () => {
@@ -72,7 +72,7 @@ describe("README", () => {
       : "";
 
     expect(readme).toContain("docs/architecture/agent-goal-mode.md");
-    expect(readme).toContain("21 deterministic agent eval fixtures");
+    expect(readme).toContain("22 deterministic agent eval fixtures");
     expect(readme).toContain("goal-mode pass rate");
     expect(readme).toContain("session-native Goal Mode");
     expect(readme).toContain("Chat Session mode");
@@ -80,21 +80,30 @@ describe("README", () => {
     expect(readme).toContain("Goal Mode 架构");
     expect(readme).toContain("artifact evidence contract");
     expect(readme).toContain("artifact evidence files");
-    expect(readme).toContain("539 tests");
-    expect(readme).toContain("539 个测试");
-    expect(readme).toContain("Current version: v2.1.0.");
-    expect(readme).toContain("当前版本：v2.1.0。");
+    expect(readme).toContain("548 tests");
+    expect(readme).toContain("548 个测试");
+    expect(readme).toContain("Current version: v2.2.0.");
+    expect(readme).toContain("当前版本：v2.2.0。");
     expect(readme).toContain("command-first agent stage");
+    expect(readme).toContain("transcript-backed goal judge");
+    expect(readme).toContain("goal-judge pass rate");
     expect(architecture).toContain("Chat Session Goal Mode");
     expect(architecture).toContain("Goal State Machine");
     expect(architecture).toContain("Five Termination Conditions");
     expect(architecture).toContain("Deterministic-first Acceptance");
     expect(architecture).toContain("Review Policies");
-    expect(architecture).toContain("Goal-aware Compaction Anchors");
+    expect(architecture).toContain("Goal Continuity Checkpoint");
     expect(architecture).toContain("Recovery Guarantees");
     expect(featureList.features).toContainEqual(
       expect.objectContaining({
         id: "P5.8-goal-mode-evals-docs",
+        status: "done",
+        verification: expect.arrayContaining(["npm run harness:score"]),
+      }),
+    );
+    expect(featureList.features).toContainEqual(
+      expect.objectContaining({
+        id: "P7-mimo-inspired-agent-harness",
         status: "done",
         verification: expect.arrayContaining(["npm run harness:score"]),
       }),

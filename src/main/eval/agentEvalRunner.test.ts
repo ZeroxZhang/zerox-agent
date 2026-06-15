@@ -11,8 +11,8 @@ describe("agent eval runner", () => {
     const report = await runAgentEvals(createAgentEvalFixtures());
 
     expect(report).toEqual({
-      total: 21,
-      passed: 21,
+      total: 22,
+      passed: 22,
       failed: 0,
       passRate: 1,
       toolSuccessRate: 0.7895,
@@ -34,8 +34,9 @@ describe("agent eval runner", () => {
       "goal-replan-on-acceptance-failure",
       "goal-review-gate-blocks",
       "goal-context-compaction-preserves-anchors",
+      "goal-transcript-judge-before-acceptance",
     ]);
-    expect(goalFixtures).toHaveLength(6);
+    expect(goalFixtures).toHaveLength(7);
     expect(
       goalFixtures.every((fixture) =>
         fixture.requiredEventTypes.includes("acceptance_checked"),
@@ -82,6 +83,29 @@ describe("agent eval runner", () => {
           type: "context_compacted",
           payload: { anchorsPreserved: true },
           after: "goal_planned",
+        },
+      ]),
+    });
+    expect(
+      fixtures.find(
+        (fixture) =>
+          fixture.id === "goal-transcript-judge-before-acceptance",
+      ),
+    ).toMatchObject({
+      requiredEventTypes: expect.arrayContaining([
+        "goal_judged",
+        "acceptance_checked",
+      ]),
+      assertions: expect.arrayContaining([
+        {
+          type: "goal_judged",
+          payload: { ok: true, impossible: false },
+          after: "final_summary",
+        },
+        {
+          type: "acceptance_checked",
+          payload: { accepted: true },
+          after: "goal_judged",
         },
       ]),
     });
