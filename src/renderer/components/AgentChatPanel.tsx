@@ -476,8 +476,6 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
   const activeSession = sessions.find((session) => session.id === sessionId) ?? null;
   const activeGoal = activeSession?.activeGoal ?? null;
   activeGoalRef.current = activeGoal;
-  const projectTitle = activeSession?.title ?? "新建任务";
-  const composerModelLabel = modelSettings.chatModel || "K2.6 Agent 集群";
   const activeTasks = tasks.filter((task) => task.enabled);
   const workSteps = useMemo(() => buildAgentWorkSteps(workPhase), [workPhase]);
   const taskActivityDetail = useMemo(
@@ -1266,28 +1264,12 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
         } as CSSProperties
       }
     >
-      <aside className="session-rail" aria-label="Kimi Work 导航">
-        <div className="work-mode-switch" aria-label="Kimi Work 与 Chat 模式">
-          <button aria-selected="true" className="is-active" role="tab" type="button">
-            <span className="work-mode-icon is-work" aria-hidden="true" />
-            Work
-          </button>
+      <aside className="session-rail" aria-label="会话列表">
+        <div className="session-rail-header">
+          <span>会话</span>
           <button
-            aria-disabled="true"
-            aria-selected="false"
-            role="tab"
-            title="本轮只复刻 Work 模式"
             type="button"
-          >
-            <span className="work-mode-icon is-chat" aria-hidden="true" />
-            Chat
-          </button>
-        </div>
-
-        <div className="work-quick-actions" aria-label="工作功能">
-          <button
-            aria-label="新建任务"
-            type="button"
+            aria-label="新建会话"
             onClick={() => {
               setSessionId(null);
               setMessages(initialMessages);
@@ -1295,106 +1277,40 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
               setWorkPhase("idle");
               setTaskActivity(idleTaskActivity);
               setTaskProcessEvents([]);
-              window.requestAnimationFrame(() => {
-                messageInputRef.current?.focus();
-              });
             }}
           >
-            <span className="work-action-icon is-new-task" aria-hidden="true" />
-            <strong>新建任务</strong>
-            <kbd>⌘ K</kbd>
-          </button>
-          <button type="button" onClick={() => onNavigate("skills")}>
-            <span className="work-action-icon is-skill" aria-hidden="true" />
-            <strong>技能</strong>
-          </button>
-          <button type="button" onClick={() => onNavigate("scheduled-tasks")}>
-            <span className="work-action-icon is-schedule" aria-hidden="true" />
-            <strong>定时任务</strong>
-          </button>
-          <button type="button" onClick={() => onNavigate("settings")}>
-            <span className="work-action-icon is-bridge" aria-hidden="true" />
-            <strong>WebBridge</strong>
+            ＋
           </button>
         </div>
-
-        <div className="rail-section" aria-label="项目">
-          <div className="session-section-title">
-            <span>项目</span>
+        <div className="session-list">
+          {sessions.map((session) => (
             <button
-              aria-label="添加工作空间"
-              type="button"
-              onClick={() => onNavigate("settings")}
-            >
-              ＋
-            </button>
-          </div>
-          <button className="project-item is-active" type="button">
-            <span className="work-action-icon is-folder" aria-hidden="true" />
-            <strong>投资方法论</strong>
-          </button>
-        </div>
-
-        <div className="rail-section is-conversations" aria-label="对话">
-          <div className="session-section-title">
-            <span>对话</span>
-            <button
-              type="button"
-              aria-label="新建会话"
-              title="新建会话"
+              className={`session-item ${
+                session.id === sessionId || (!sessionId && session.id === "main")
+                  ? "is-active"
+                  : ""
+              }`}
+              key={session.id}
               onClick={() => {
-                setSessionId(null);
-                setMessages(initialMessages);
-                setStatus({ kind: "ready", message: "会话已就绪" });
-                setWorkPhase("idle");
-                setTaskActivity(idleTaskActivity);
-                setTaskProcessEvents([]);
+                if (window.buildingAgent) {
+                  void loadPersistedSession(session.id);
+                  return;
+                }
+                setSessionId(session.id);
               }}
+              type="button"
             >
-              ＋
+              <strong>{session.title}</strong>
+              <small>{session.summary}</small>
+              {session.activeGoal ? (
+                <span
+                  className={`goal-session-badge is-${session.activeGoal.status}`}
+                >
+                  {translateGoalStatus(session.activeGoal.status)}
+                </span>
+              ) : null}
             </button>
-          </div>
-          <div className="session-list">
-            {sessions.map((session) => (
-              <button
-                className={`session-item ${
-                  session.id === sessionId || (!sessionId && session.id === "main")
-                    ? "is-active"
-                    : ""
-                }`}
-                key={session.id}
-                onClick={() => {
-                  if (window.buildingAgent) {
-                    void loadPersistedSession(session.id);
-                    return;
-                  }
-                  setSessionId(session.id);
-                }}
-                type="button"
-              >
-                <strong>{session.title}</strong>
-                <small>{session.summary}</small>
-                {session.activeGoal ? (
-                  <span
-                    className={`goal-session-badge is-${session.activeGoal.status}`}
-                  >
-                    {translateGoalStatus(session.activeGoal.status)}
-                  </span>
-                ) : null}
-              </button>
-            ))}
-          </div>
-          {!sessions.length ? (
-            <p className="session-empty-copy">历史对话会显示在这里</p>
-          ) : null}
-        </div>
-
-        <div className="work-account-card" aria-label="当前账号">
-          <span aria-hidden="true">Z</span>
-          <div>
-            <strong>登月者3913</strong>
-            <small>Moderato</small>
-          </div>
+          ))}
         </div>
       </aside>
 
@@ -1414,30 +1330,10 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
         <span aria-hidden="true" />
       </button>
 
-      <section className="chat-workspace" aria-label="任务工作区">
-        <div className="chat-titlebar">
-          <button className="chat-title-main" type="button">
-            <strong>{projectTitle}</strong>
-            <span aria-hidden="true">⌄</span>
-          </button>
-          <div className="chat-title-actions">
-            <button
-              aria-label="在运行中查看"
-              title="在运行中查看"
-              type="button"
-              onClick={() => onNavigate("runs")}
-            >
-              <span className="titlebar-icon is-folder" aria-hidden="true" />
-            </button>
-            <button aria-label="切换上下文栏" title="切换上下文栏" type="button">
-              <span className="titlebar-icon is-panel" aria-hidden="true" />
-            </button>
-          </div>
-        </div>
-
+      <section className="chat-workspace" aria-label="会话窗口">
         <div className="chat-hero">
           <div className="chat-hero-main">
-            <h2>{projectTitle}</h2>
+            <h2>{activeSession?.title ?? "新会话"}</h2>
             <div className="chat-hero-chips">
               {contextCards.map((card) => (
                 <span key={card.label} className="hero-chip" title={card.detail}>
@@ -1656,75 +1552,58 @@ export function AgentChatPanel({ onNavigate }: AgentChatPanelProps) {
                 }
                 rows={2}
               />
-              <div className="composer-bottom-bar">
-                <div className="composer-left-actions" aria-label="内容与权限">
-                  <button
-                    aria-label="打开命令菜单"
-                    className="composer-icon-button composer-command-button"
-                    onClick={handleOpenCommandMenu}
-                    title="添加内容"
-                    type="button"
-                  >
-                    <span className="composer-icon composer-icon-add" aria-hidden="true" />
-                    <span className="sr-only">添加内容</span>
-                  </button>
-                  <label
-                    className={`auto-approval-toggle${
-                      autoApprovalEnabled ? " is-enabled" : ""
-                    }`}
-                    title="全部允许"
-                  >
-                    <input
-                      aria-label="自动授权工具请求"
-                      checked={autoApprovalEnabled}
-                      onChange={(event) => {
-                        void handleSetAutoApprovalEnabled(
-                          event.currentTarget.checked,
-                        );
-                      }}
-                      type="checkbox"
-                    />
-                    <span>全部允许</span>
-                    <i aria-hidden="true">⌄</i>
-                  </label>
-                </div>
-                <div
-                  className="composer-floating-actions composer-right-actions"
-                  aria-label="对话操作"
+              <div className="composer-floating-actions" aria-label="对话操作">
+                <label
+                  className={`auto-approval-toggle${
+                    autoApprovalEnabled ? " is-enabled" : ""
+                  }`}
+                  title="自动授权工具请求"
                 >
-                  <span className="context-capacity" title="已用57%上下文容量">
-                    <i aria-hidden="true" />
-                    已用57%
-                  </span>
-                  <span className="composer-model-pill" title={composerModelLabel}>
-                    {composerModelLabel}
-                  </span>
-                  <button
-                    aria-label="中断当前任务"
-                    className="composer-icon-button composer-stop-button"
-                    data-testid="agent-stop-button"
-                    disabled={!canInterruptCurrentWork}
-                    onClick={() => {
-                      void handleInterruptCurrentWork();
+                  <input
+                    aria-label="自动授权工具请求"
+                    checked={autoApprovalEnabled}
+                    onChange={(event) => {
+                      void handleSetAutoApprovalEnabled(event.currentTarget.checked);
                     }}
-                    title="中断当前任务"
-                    type="button"
-                  >
-                    <span className="composer-icon composer-icon-stop" aria-hidden="true" />
-                    <span className="sr-only">中断当前任务</span>
-                  </button>
-                  <button
-                    aria-label="发送消息"
-                    className="composer-icon-button composer-send-button"
-                    data-testid="agent-send-button"
-                    disabled={status.kind === "working" || !draft.trim()}
-                    title="发送消息"
-                    type="submit"
-                  >
-                    <span className="composer-icon composer-icon-send" aria-hidden="true" />
-                    <span className="sr-only">发送消息</span>
-                  </button>
-                </div>
+                    type="checkbox"
+                  />
+                  <span>自动</span>
+                </label>
+                <button
+                  aria-label="打开命令菜单"
+                  className="composer-icon-button composer-command-button"
+                  onClick={handleOpenCommandMenu}
+                  title="打开命令菜单"
+                  type="button"
+                >
+                  <span className="composer-icon composer-icon-command" aria-hidden="true" />
+                  <span className="sr-only">打开命令菜单</span>
+                </button>
+                <button
+                  aria-label="中断当前任务"
+                  className="composer-icon-button composer-stop-button"
+                  data-testid="agent-stop-button"
+                  disabled={!canInterruptCurrentWork}
+                  onClick={() => {
+                    void handleInterruptCurrentWork();
+                  }}
+                  title="中断当前任务"
+                  type="button"
+                >
+                  <span className="composer-icon composer-icon-stop" aria-hidden="true" />
+                  <span className="sr-only">中断当前任务</span>
+                </button>
+                <button
+                  aria-label="发送消息"
+                  className="composer-icon-button composer-send-button"
+                  data-testid="agent-send-button"
+                  disabled={status.kind === "working" || !draft.trim()}
+                  title="发送消息"
+                  type="submit"
+                >
+                  <span className="composer-icon composer-icon-send" aria-hidden="true" />
+                  <span className="sr-only">发送消息</span>
+                </button>
               </div>
             </div>
           </div>

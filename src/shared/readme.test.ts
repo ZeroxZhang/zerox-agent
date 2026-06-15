@@ -14,7 +14,7 @@ describe("README", () => {
     expect(readme).toContain("npm run pack:mac");
     expect(readme).toContain("npm run dist:mac");
     expect(readme).toContain("xattr -dr com.apple.quarantine");
-    expect(readme).toContain("Zerox.Agent-2.0.1-arm64.dmg");
+    expect(readme).toContain("Zerox.Agent-1.9.5-arm64.dmg");
     expect(readme).toContain("npm run harness:check");
     expect(readme).toContain("npm run harness:score");
     expect(readme).toContain("npm run episode:export");
@@ -52,18 +52,6 @@ describe("README", () => {
     expect(readme).toContain("Chat Session mode");
   });
 
-  it("documents the v2.0.1 Kimi Work UI release", () => {
-    const readme = readFileSync(path.join(process.cwd(), "README.md"), "utf8");
-
-    expect(readme).toContain("current release is **v2.0.1**");
-    expect(readme).toContain("v2.0.1 rebuilds the work surface as a Kimi Work-style desktop task console");
-    expect(readme).toContain("Work/Chat segmented switch");
-    expect(readme).toContain("bottom composer with Add content, All allow, context capacity, model, interrupt, and send controls");
-    expect(readme).toContain("当前版本是 **v2.0.1**");
-    expect(readme).toContain("v2.0.1 将工作界面重构为 Kimi Work 风格的桌面任务控制台");
-    expect(readme).toContain("当前版本：v2.0.1");
-  });
-
   it("documents Goal Mode architecture, eval coverage, and feature-list status", () => {
     const readme = readFileSync(path.join(process.cwd(), "README.md"), "utf8");
     const architecturePath = path.join(
@@ -90,8 +78,8 @@ describe("README", () => {
     expect(readme).toContain("Goal Mode 架构");
     expect(readme).toContain("artifact evidence contract");
     expect(readme).toContain("artifact evidence files");
-    expect(readme).toContain("538 tests");
-    expect(readme).toContain("538 个测试");
+    expect(readme).toContain("535 tests");
+    expect(readme).toContain("535 个测试");
     expect(architecture).toContain("Chat Session Goal Mode");
     expect(architecture).toContain("Goal State Machine");
     expect(architecture).toContain("Five Termination Conditions");

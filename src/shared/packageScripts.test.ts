@@ -3,28 +3,10 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 type PackageJson = {
-  version?: string;
   scripts?: Record<string, string>;
-};
-type PackageLockJson = {
-  version?: string;
-  packages?: Record<string, { version?: string }>;
 };
 
 describe("package scripts", () => {
-  it("ships the 2.0.1 Kimi Work release version in package metadata", () => {
-    const packageJson = JSON.parse(
-      readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
-    ) as PackageJson;
-    const packageLockJson = JSON.parse(
-      readFileSync(path.join(process.cwd(), "package-lock.json"), "utf8"),
-    ) as PackageLockJson;
-
-    expect(packageJson.version).toBe("2.0.1");
-    expect(packageLockJson.version).toBe("2.0.1");
-    expect(packageLockJson.packages?.[""]?.version).toBe("2.0.1");
-  });
-
   it("exposes a production start command for the built Electron app", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
