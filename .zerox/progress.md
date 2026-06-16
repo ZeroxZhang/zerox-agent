@@ -1,5 +1,211 @@
 # Zerox Harness Progress
 
+## 2026-06-16 P8.0 Agent Runtime Kernel Foundation
+
+- Started the v2.3.0 Agent Runtime Kernel iteration from the attached roadmap by adding P8 feature entries to `.zerox/feature_list.json` and selecting the first unfinished slice, P8.0.
+- Implemented the additive ARK foundation: shared kernel contract, main-process kernel event bus, and dependency-injected runtime-kernel skeleton. Existing chat, recoverable runtime, and Goal Mode behavior remain unchanged in this slice.
+- Changed files:
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+  - `docs/superpowers/specs/2026-06-16-agent-runtime-kernel-2-3-design.md`
+  - `docs/superpowers/plans/2026-06-16-agent-runtime-kernel-foundation.md`
+  - `src/shared/kernelContract.ts`
+  - `src/shared/kernelContract.test.ts`
+  - `src/main/kernel/eventBus.ts`
+  - `src/main/kernel/eventBus.test.ts`
+  - `src/main/kernel/kernelTypes.ts`
+  - `src/main/kernel/runtimeKernel.ts`
+  - `src/main/kernel/runtimeKernel.test.ts`
+- TDD and verification evidence:
+  - `./init.sh` -> harness check passed; `src/shared/packageScripts.test.ts` passed with 6 tests.
+  - `npm test -- src/shared/kernelContract.test.ts` -> RED, missing `./kernelContract`.
+  - `npm test -- src/shared/kernelContract.test.ts` -> 1 file / 3 tests passed.
+  - `npm test -- src/main/kernel/eventBus.test.ts` -> RED, missing `./eventBus`.
+  - `npm test -- src/main/kernel/eventBus.test.ts src/shared/kernelContract.test.ts` -> 2 files / 8 tests passed.
+  - `npm test -- src/main/kernel/runtimeKernel.test.ts` -> RED, missing `./runtimeKernel`.
+  - `npm test -- src/main/kernel/runtimeKernel.test.ts src/main/kernel/eventBus.test.ts src/shared/kernelContract.test.ts` -> 3 files / 12 tests passed.
+  - `npm run build` -> passed.
+  - `npm run verify` -> 115 Vitest files / 578 tests passed, build passed, agent eval 22/22, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+
+## 2026-06-16 P8.1 Checkpointed Context Compaction
+
+- Implemented checkpoint-backed kernel compaction primitives for the v2.3.0 ARK iteration.
+- Added a local `KernelCheckpointStore` that writes full pre-compaction `ChatMessage[]` snapshots under `kernel-checkpoints/<runId>/` and rebuilds those messages from a guarded local ref.
+- Added `compactKernelContext`, which writes a checkpoint before compaction, preserves `[Goal continuity checkpoint - never compact]` anchors and recent tail turns, replaces bulky historical tool results with checkpoint refs, and emits `checkpoint_written` then `compaction` kernel events.
+- Changed files:
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+  - `docs/superpowers/plans/2026-06-16-checkpointed-context-compaction.md`
+  - `src/main/kernel/checkpointStore.ts`
+  - `src/main/kernel/checkpointStore.test.ts`
+  - `src/main/kernel/compactionEngine.ts`
+  - `src/main/kernel/compactionEngine.test.ts`
+- TDD and verification evidence:
+  - `npm test -- src/main/kernel/checkpointStore.test.ts` -> RED, missing `./checkpointStore`.
+  - `npm test -- src/main/kernel/checkpointStore.test.ts` -> 1 file / 2 tests passed.
+  - `npm test -- src/main/kernel/compactionEngine.test.ts` -> RED, missing `./compactionEngine`.
+  - `npm test -- src/main/kernel/compactionEngine.test.ts src/main/kernel/checkpointStore.test.ts src/main/kernel/eventBus.test.ts` -> 3 files / 9 tests passed.
+  - `npm test -- src/main/kernel/checkpointStore.test.ts src/main/kernel/compactionEngine.test.ts src/main/kernel/eventBus.test.ts src/shared/kernelContract.test.ts` -> 4 files / 12 tests passed.
+  - `npm run build` -> passed.
+  - `npm run verify` -> 117 Vitest files / 582 tests passed, build passed, agent eval 22/22, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+
+## 2026-06-16 P8.2 Runtime Resilience And Dynamic Turns
+
+- Implemented retry-after-aware model request retry and a reusable ARK turn-budget helper.
+- Hardened `completeWithModelRetry` to honor `retry-after-ms`, `retry-after` seconds, and `retry-after` HTTP dates from common error header shapes before falling back to exponential delay.
+- Made custom retry sleep functions abortable by racing them against the run `AbortSignal`, preventing a canceled long task from waiting on an unresolved custom sleep.
+- Added `deriveRuntimeMaxTurns` defaults for chat and Goal Mode: chat defaults to 8 turns, Goal Mode derives milestone count x 6 and caps at 60.
+- Changed files:
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+  - `docs/superpowers/plans/2026-06-16-runtime-resilience-dynamic-turns.md`
+  - `src/main/modelRetry.ts`
+  - `src/main/modelRetry.test.ts`
+  - `src/main/kernel/resilience.ts`
+  - `src/main/kernel/resilience.test.ts`
+- TDD and verification evidence:
+  - `npm test -- src/main/modelRetry.test.ts` -> RED, retry-after-ms and retry-after seconds used fallback delay, custom sleep abort timed out.
+  - `npm test -- src/main/modelRetry.test.ts src/main/agentLoop.test.ts src/main/agentRuntimeEngine.test.ts` -> 3 files / 35 tests passed.
+  - `npm test -- src/main/kernel/resilience.test.ts` -> RED, missing `./resilience`.
+  - `npm test -- src/main/kernel/resilience.test.ts src/main/kernel/runtimeKernel.test.ts` -> 2 files / 9 tests passed.
+  - `npm test -- src/main/modelRetry.test.ts src/main/kernel/resilience.test.ts src/main/agentLoop.test.ts src/main/agentRuntimeEngine.test.ts` -> 4 files / 40 tests passed.
+  - `npm run build` -> passed.
+  - `npm run verify` -> 119 Vitest files / 592 tests passed, build passed, agent eval 22/22, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+
+## 2026-06-16 P8.3 Evidence-Driven Stop Policy
+
+- Implemented kernel-level evidence stop policy primitives for ARK without changing existing Goal Mode acceptance behavior.
+- Added `createEvidenceJudgePolicy`, which uses an injected judge adapter and requires successful verdict evidence to appear in transcript text before returning `stop: true`.
+- Added `createTurnLimitPolicy` for future runtime migration and max-react protection that returns an impossible stop decision when the judge loop is exhausted.
+- Changed files:
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+  - `docs/superpowers/plans/2026-06-16-evidence-driven-stop-policy.md`
+  - `src/main/kernel/stopPolicy.ts`
+  - `src/main/kernel/stopPolicy.test.ts`
+- TDD and verification evidence:
+  - `npm test -- src/main/kernel/stopPolicy.test.ts` -> RED, missing `./stopPolicy`.
+  - `npm test -- src/main/kernel/stopPolicy.test.ts src/main/kernel/runtimeKernel.test.ts` -> 2 files / 10 tests passed.
+  - `npm test -- src/main/kernel/stopPolicy.test.ts src/main/kernel/runtimeKernel.test.ts src/main/agentGoalAcceptance.test.ts src/main/goalRuntimeEngine.test.ts` -> 4 files / 29 tests passed.
+  - `npm run build` -> passed.
+  - `npm run verify` -> 120 Vitest files / 598 tests passed, build passed, agent eval 22/22, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+
+## 2026-06-16 P8.4 Rule-Based Permission Engine
+
+- Implemented rule-based allow/deny/ask evaluation for unattended runs while keeping `ToolAuthorizationService` as the authorization boundary.
+- Added `evaluatePermission` with wildcard matching, last matching rule wins, shell command arity prefixes, and full-command matching for dangerous patterns such as `rm -rf *`.
+- Integrated allow/deny rules inside `ToolAuthorizationService`; rule decisions still write the existing audit event. No-match/ask continues through the existing task-policy and approval path.
+- Changed files:
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+  - `docs/superpowers/plans/2026-06-16-rule-based-permission-engine.md`
+  - `src/main/kernel/permissionEngine.ts`
+  - `src/main/kernel/permissionEngine.test.ts`
+  - `src/main/toolAuthorizationService.ts`
+  - `src/main/toolAuthorizationService.test.ts`
+- TDD and verification evidence:
+  - `npm test -- src/main/kernel/permissionEngine.test.ts` -> RED, missing `./permissionEngine`; after first implementation, wildcard matching failed for `git *` and `rm -rf *`.
+  - `npm test -- src/main/kernel/permissionEngine.test.ts` -> 1 file / 5 tests passed.
+  - `npm test -- src/main/toolAuthorizationService.test.ts` -> RED, rule allow/deny fell through to existing shell template denial.
+  - `npm test -- src/main/kernel/permissionEngine.test.ts src/main/toolAuthorizationService.test.ts` -> 2 files / 14 tests passed.
+  - `npm test -- src/main/kernel/permissionEngine.test.ts src/main/toolAuthorizationService.test.ts src/shared/toolPermissions.test.ts src/shared/toolApproval.test.ts src/main/toolApprovalCoordinator.test.ts` -> 5 files / 42 tests passed.
+  - `npm run build` -> initially failed because `Array.findLast` is unavailable under ES2022; fixed with explicit reverse iteration, then passed.
+  - `npm run verify` -> 121 Vitest files / 605 tests passed, build passed, agent eval 22/22, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `git diff --check` -> passed.
+
+## 2026-06-16 P8.5 Kernel Renderer Timeline
+
+- Implemented the renderer-facing Agent Runtime Kernel event bridge and Runs inspector timeline for long-task events.
+- Added a shared kernel event view reducer so renderer state is derived from `KernelEvent[]` instead of ad hoc UI-only state.
+- Wired main-process kernel event history/live forwarding through preload, added runtime permission-rule updates that still flow through `ToolAuthorizationService`, and rendered compact Kernel Event cards for checkpoint, compaction, retry, judge, and run-end evidence.
+- Changed files:
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+  - `docs/superpowers/plans/2026-06-16-kernel-renderer-timeline.md`
+  - `src/shared/kernelEventView.ts`
+  - `src/shared/kernelEventView.test.ts`
+  - `src/preload/index.ts`
+  - `src/main/container.ts`
+  - `src/main/main.ts`
+  - `src/main/toolAuthorizationService.ts`
+  - `src/renderer/components/RunsPanel.tsx`
+  - `src/renderer/materialDesign.test.ts`
+  - `src/renderer/styles/cards.css`
+  - `src/renderer/styles/legacy.css`
+- TDD and verification evidence:
+  - `npm test -- src/shared/kernelEventView.test.ts` -> RED, missing `./kernelEventView`.
+  - `npm test -- src/shared/kernelEventView.test.ts src/shared/kernelContract.test.ts` -> 2 files / 5 tests passed.
+  - `npm test -- src/renderer/materialDesign.test.ts` -> RED, missing `KERNEL_IPC`, `onKernelEvent`, `resumeKernelRun`, `kernel-event-card`, and kernel event styles.
+  - `npm test -- src/renderer/materialDesign.test.ts src/shared/kernelEventView.test.ts src/shared/kernelContract.test.ts` -> 3 files / 33 tests passed.
+  - `npm run build` -> initially failed on the test helper's non-distributive `Omit<KernelEvent,...>`; fixed the helper, then build passed.
+  - `npm run verify` -> 122 Vitest files / 608 tests passed, build passed, agent eval 22/22, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `git diff --check` -> passed.
+  - Browser QA at `http://127.0.0.1:5173/` -> Runs page rendered Kernel Events with 6 event cards: turn, checkpoint, compaction, retry, judge verdict, and run end.
+  - Browser mobile QA at 390x844 -> Kernel Events still rendered with 6 visible cards and no horizontal overflow (`scrollWidth=384`, `viewportWidth=390`).
+
+## 2026-06-16 P8.6 v2.3.0 Release Acceptance And Independent QA
+
+- Completed the v2.3.0 Agent Runtime Kernel release acceptance slice.
+- Bumped package metadata to `2.3.0`, updated README and architecture docs for the Agent Runtime Kernel, and added deterministic eval coverage for kernel event replay and permission-rule behavior.
+- Launched independent test-engineer subagent `Leibniz` for this iteration. Initial review returned `FAIL` with two critical permission-boundary blockers and one paperwork blocker.
+- Fixed the permission blockers: deny rules still reject early with audit evidence, but allow rules now run only after base task policy and run-context sandbox authorization succeeds; compound shell commands containing control operators no longer match reduced allow rules.
+- Independent subagent re-review confirmed the original runtime/security blockers are fixed and reported no new runtime or safety release blockers; final remaining item was this P8.6 metadata/progress closeout, now recorded.
+- Changed files:
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+  - `README.md`
+  - `docs/architecture/agent-runtime.md`
+  - `package.json`
+  - `package-lock.json`
+  - `src/main/kernel/permissionEngine.ts`
+  - `src/main/kernel/permissionEngine.test.ts`
+  - `src/main/toolAuthorizationService.ts`
+  - `src/main/toolAuthorizationService.test.ts`
+  - `src/main/eval/agentEvalFixtures.ts`
+  - `src/main/eval/agentEvalRunner.test.ts`
+  - `src/shared/packageScripts.test.ts`
+  - `src/shared/readme.test.ts`
+- TDD and verification evidence:
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts src/main/eval/agentEvalRunner.test.ts` -> RED with expected failures for `2.3.0` metadata, README/architecture text, and missing ARK eval fixtures.
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts src/main/eval/agentEvalRunner.test.ts` -> 3 files / 16 tests passed after version, docs, and eval fixture updates.
+  - Independent QA initial review -> `FAIL`; blockers: allow rules bypassed task/sandbox authorization, reduced shell command matching could allow compound shell commands, and P8.6 closeout evidence was missing.
+  - `npm test -- src/main/kernel/permissionEngine.test.ts src/main/toolAuthorizationService.test.ts` -> RED with 4 expected failures for the permission-boundary regressions.
+  - `npm test -- src/main/kernel/permissionEngine.test.ts src/main/toolAuthorizationService.test.ts` -> 2 files / 17 tests passed after permission-boundary fixes.
+  - `npm test -- src/main/kernel/permissionEngine.test.ts src/main/toolAuthorizationService.test.ts src/shared/packageScripts.test.ts src/shared/readme.test.ts src/main/eval/agentEvalRunner.test.ts` -> 5 files / 33 tests passed.
+  - `npm run verify` -> 122 Vitest files / 612 tests passed, build passed, agent eval 24/24, memory eval 2/2.
+  - `npm run harness:score` -> overall 9.2 good; eval 24/24; goal 7/7; goal judge 2/2; adversarial 70 checked / 0 escaped.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `git diff --check` -> passed.
+  - Independent QA re-review -> original runtime/security blockers fixed; no new runtime or safety release blockers; only P8.6 metadata/progress closeout remained before final pass.
+  - Independent QA final check -> `PASS`; residual non-blocking risks: narrow kernel event history/live subscription race could duplicate an event, and `KernelEventBus.history()` shallow-copies event objects.
+- Release packaging evidence:
+  - `npm run verify` -> 122 Vitest files / 612 tests passed, build passed, agent eval 24/24, memory eval 2/2.
+  - `npm run dist:mac` -> build and packaging succeeded for v2.3.0.
+  - `release/mac-arm64/Zerox Agent.app/Contents/Info.plist` reports `CFBundleShortVersionString=2.3.0` and `CFBundleVersion=2.3.0`.
+  - `release/Zerox Agent-2.3.0-arm64.dmg` -> 118M.
+  - `release/Zerox Agent-2.3.0-arm64-mac.zip` -> 329M.
+  - `release/latest-mac.yml` -> version `2.3.0`.
+  - SHA-256:
+    - dmg: `659961f2ec310a23da26a54ebcf8b70b1c62838909e780bb99d6ffe06e9fc1df`
+    - zip: `7fd2561e85d3fc5b7abc3f929194bc16c3237715aa95363e4e942388e33d08d9`
+    - latest-mac.yml: `681548622780ea5492367aaa6c9e08fd6839523d8636f8dc6203ff736bd931ad`
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - GitHub Release target: `https://github.com/ZeroxZhang/zerox-agent/releases/tag/v2.3.0`.
+
 ## 2026-06-10 Baseline
 
 - Active iteration: Agent Capability P2.4 lightweight child handoff review gate.

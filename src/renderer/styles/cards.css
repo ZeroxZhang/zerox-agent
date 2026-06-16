@@ -22,6 +22,8 @@
 .status-pill, .memory-tags { display: inline-flex; }
 
 .handoff-review-card,
+.kernel-event-card,
+.kernel-event-list,
 .trajectory-insight,
 .trajectory-insight-list {
   border-color: var(--border-default);

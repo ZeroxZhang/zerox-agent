@@ -1362,6 +1362,34 @@ nav {
 }
 .trajectory-event.is-selected { border-color: var(--border-accent); background: var(--bg-accent-muted); }
 .trajectory-event strong, .trajectory-event small { overflow-wrap: anywhere; }
+.kernel-event-list {
+  display: grid; gap: var(--space-2);
+  max-height: 280px; overflow: auto;
+  padding-right: 2px;
+}
+.kernel-event-card {
+  display: grid; gap: var(--space-1);
+  min-width: 0; padding: var(--space-2);
+  border: 1px solid var(--border-default); border-radius: var(--radius-sm);
+  background: var(--bg-surface); color: var(--text-primary);
+}
+.kernel-event-card > div {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
+}
+.kernel-event-card strong,
+.kernel-event-card p,
+.kernel-event-card small {
+  overflow-wrap: anywhere;
+}
+.kernel-event-card span,
+.kernel-event-card small {
+  color: var(--text-tertiary); font-size: var(--text-xs);
+}
+.kernel-event-card p { margin: 0; color: var(--text-secondary); line-height: var(--leading-normal); }
+.kernel-event-card.is-info { border-color: var(--status-info-border); background: var(--status-info-bg); }
+.kernel-event-card.is-warn { border-color: var(--status-warning-border); background: var(--status-warning-bg); }
+.kernel-event-card.is-error { border-color: var(--status-error-border); background: var(--status-error-bg); }
+.kernel-event-card.is-success { border-color: var(--status-success-border); background: var(--status-success-bg); }
 .tool-result-ref-viewer {
   display: grid; gap: var(--space-3);
   border: 1px solid var(--border-default); border-radius: var(--radius-lg);

@@ -41,7 +41,7 @@ export async function completeWithModelRetry(
         throw error;
       }
 
-      const delayMs = Math.min(baseDelayMs * 2 ** attempt, maxDelayMs);
+      const delayMs = getRetryDelayMs(error, attempt, baseDelayMs, maxDelayMs);
       await onRetry?.({
         attempt: attempt + 1,
         maxRetries,
@@ -63,6 +63,101 @@ function isRetryableModelError(error: unknown): boolean {
 
   return /status\s+(408|409|425|429|5\d\d)|timeout|timed out|network|fetch|ENOTFOUND|ECONNRESET|EPIPE|overloaded/i
     .test(message);
+}
+
+function getRetryDelayMs(
+  error: unknown,
+  attempt: number,
+  baseDelayMs: number,
+  maxDelayMs: number,
+): number {
+  const retryAfterMs = parseRetryAfterMs(error);
+  if (retryAfterMs !== null) {
+    return Math.min(retryAfterMs, maxDelayMs);
+  }
+
+  return Math.min(baseDelayMs * 2 ** attempt, maxDelayMs);
+}
+
+function parseRetryAfterMs(error: unknown): number | null {
+  const retryAfterMs = readRetryHeader(error, "retry-after-ms");
+  if (retryAfterMs) {
+    const parsedMs = Number.parseFloat(retryAfterMs);
+    if (!Number.isNaN(parsedMs) && parsedMs >= 0) {
+      return Math.ceil(parsedMs);
+    }
+  }
+
+  const retryAfter = readRetryHeader(error, "retry-after");
+  if (!retryAfter) {
+    return null;
+  }
+
+  const parsedSeconds = Number.parseFloat(retryAfter);
+  if (!Number.isNaN(parsedSeconds) && parsedSeconds >= 0) {
+    return Math.ceil(parsedSeconds * 1000);
+  }
+
+  const parsedDateMs = Date.parse(retryAfter) - Date.now();
+  if (!Number.isNaN(parsedDateMs) && parsedDateMs > 0) {
+    return Math.ceil(parsedDateMs);
+  }
+
+  return null;
+}
+
+function readRetryHeader(error: unknown, headerName: string): string | null {
+  const sources = retryHeaderSources(error);
+  for (const source of sources) {
+    const value = readHeader(source, headerName);
+    if (value) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function retryHeaderSources(error: unknown): unknown[] {
+  if (!error || typeof error !== "object") {
+    return [];
+  }
+
+  const value = error as {
+    responseHeaders?: unknown;
+    headers?: unknown;
+    response?: { headers?: unknown };
+    data?: { responseHeaders?: unknown };
+  };
+
+  return [
+    value.responseHeaders,
+    value.headers,
+    value.response?.headers,
+    value.data?.responseHeaders,
+  ].filter(Boolean);
+}
+
+function readHeader(source: unknown, headerName: string): string | null {
+  const lowerHeaderName = headerName.toLowerCase();
+  if (source && typeof (source as { get?: unknown }).get === "function") {
+    const value = (source as { get(name: string): unknown }).get(headerName) ??
+      (source as { get(name: string): unknown }).get(lowerHeaderName);
+    return typeof value === "string" ? value : null;
+  }
+
+  if (!source || typeof source !== "object") {
+    return null;
+  }
+
+  const record = source as Record<string, unknown>;
+  for (const [key, value] of Object.entries(record)) {
+    if (key.toLowerCase() === lowerHeaderName && typeof value === "string") {
+      return value;
+    }
+  }
+
+  return null;
 }
 
 function isCancellationError(
@@ -91,7 +186,7 @@ async function sleep(
   }
   throwIfCanceled(signal);
   if (sleepFn) {
-    await sleepFn(delayMs);
+    await raceWithAbort(sleepFn(delayMs), signal);
     throwIfCanceled(signal);
     return;
   }
@@ -102,6 +197,38 @@ async function sleep(
       clearTimeout(timeout);
       reject(new Error("Agent run canceled."));
     }, { once: true });
+  });
+}
+
+function raceWithAbort<T>(
+  promise: Promise<T>,
+  signal: AbortSignal | undefined,
+): Promise<T> {
+  if (!signal) {
+    return promise;
+  }
+
+  throwIfCanceled(signal);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      cleanup();
+      reject(new Error("Agent run canceled."));
+    };
+    const cleanup = () => {
+      signal.removeEventListener("abort", onAbort);
+    };
+
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        cleanup();
+        resolve(value);
+      },
+      (error) => {
+        cleanup();
+        reject(error);
+      },
+    );
   });
 }
 

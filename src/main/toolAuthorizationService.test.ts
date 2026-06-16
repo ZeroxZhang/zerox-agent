@@ -73,6 +73,210 @@ describe("tool authorization service", () => {
     await expect(auditLog.list()).resolves.toHaveLength(1);
   });
 
+  it("authorizes a policy-allowed shell command through an allow permission rule and writes audit evidence", async () => {
+    const taskStore = createScheduledTaskStore({
+      configDir,
+      createId: () => "task_rule_allow",
+      now: () => new Date("2026-06-05T08:00:00.000Z"),
+    });
+    const auditLog = createToolAuditLog({
+      configDir,
+      createId: () => "audit_rule_allow",
+      now: () => new Date("2026-06-05T08:01:00.000Z"),
+    });
+    const service = createToolAuthorizationService({
+      taskStore,
+      auditLog,
+      permissionRules: [{ pattern: "git *", action: "allow" }],
+    });
+    await taskStore.create({
+      name: "Rule allow",
+      skillName: "local-shell",
+      enabled: true,
+      schedule: { kind: "manual" },
+      input: {},
+      permissions: {
+        files: { read: [], write: [] },
+        web: { search: false, fetchDomains: [] },
+        shell: { commands: ["git status *"] },
+      },
+    });
+
+    const result = await service.authorize("task_rule_allow", {
+      toolName: "shell_exec",
+      args: { command: "git status --short" },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      decision: {
+        allowed: true,
+        reason:
+          "Permission rule allowed git status (git *). shell_exec command 匹配已授权模板。",
+      },
+      auditEvent: {
+        id: "audit_rule_allow",
+        decision: {
+          allowed: true,
+          reason:
+            "Permission rule allowed git status (git *). shell_exec command 匹配已授权模板。",
+        },
+      },
+    });
+    await expect(auditLog.list()).resolves.toHaveLength(1);
+  });
+
+  it("does not let an allow permission rule bypass task shell policy", async () => {
+    const taskStore = createScheduledTaskStore({
+      configDir,
+      createId: () => "task_rule_policy_guard",
+      now: () => new Date("2026-06-05T08:00:00.000Z"),
+    });
+    const auditLog = createToolAuditLog({
+      configDir,
+      createId: () => "audit_rule_policy_guard",
+      now: () => new Date("2026-06-05T08:01:00.000Z"),
+    });
+    const service = createToolAuthorizationService({
+      taskStore,
+      auditLog,
+      permissionRules: [{ pattern: "git *", action: "allow" }],
+    });
+    await taskStore.create({
+      name: "Rule allow guarded",
+      skillName: "local-shell",
+      enabled: true,
+      schedule: { kind: "manual" },
+      input: {},
+      permissions: {
+        files: { read: [], write: [] },
+        web: { search: false, fetchDomains: [] },
+        shell: { commands: [] },
+      },
+    });
+
+    const result = await service.authorize("task_rule_policy_guard", {
+      toolName: "shell_exec",
+      args: { command: "git status --short" },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      decision: {
+        allowed: false,
+        reason: "shell_exec command 不匹配已授权模板。",
+      },
+      auditEvent: {
+        id: "audit_rule_policy_guard",
+        decision: {
+          allowed: false,
+          reason: "shell_exec command 不匹配已授权模板。",
+        },
+      },
+    });
+  });
+
+  it("does not let an allow permission rule bypass shell safety guards", async () => {
+    const taskStore = createScheduledTaskStore({
+      configDir,
+      createId: () => "task_rule_shell_guard",
+      now: () => new Date("2026-06-05T08:00:00.000Z"),
+    });
+    const auditLog = createToolAuditLog({
+      configDir,
+      createId: () => "audit_rule_shell_guard",
+      now: () => new Date("2026-06-05T08:01:00.000Z"),
+    });
+    const service = createToolAuthorizationService({
+      taskStore,
+      auditLog,
+      permissionRules: [{ pattern: "git *", action: "allow" }],
+    });
+    await taskStore.create({
+      name: "Rule shell guard",
+      skillName: "local-shell",
+      enabled: true,
+      schedule: { kind: "manual" },
+      input: {},
+      permissions: {
+        files: { read: [], write: [] },
+        web: { search: false, fetchDomains: [] },
+        shell: { commands: ["git *"] },
+      },
+    });
+
+    const result = await service.authorize("task_rule_shell_guard", {
+      toolName: "shell_exec",
+      args: { command: "git status --short && rm -rf /tmp/cache" },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      decision: {
+        allowed: false,
+        reason: "shell_exec command 包含被阻止的 shell 控制符。",
+      },
+      auditEvent: {
+        id: "audit_rule_shell_guard",
+        decision: {
+          allowed: false,
+          reason: "shell_exec command 包含被阻止的 shell 控制符。",
+        },
+      },
+    });
+  });
+
+  it("denies a shell command through a deny permission rule and writes audit evidence", async () => {
+    const taskStore = createScheduledTaskStore({
+      configDir,
+      createId: () => "task_rule_deny",
+      now: () => new Date("2026-06-05T08:00:00.000Z"),
+    });
+    const auditLog = createToolAuditLog({
+      configDir,
+      createId: () => "audit_rule_deny",
+      now: () => new Date("2026-06-05T08:01:00.000Z"),
+    });
+    const service = createToolAuthorizationService({
+      taskStore,
+      auditLog,
+      permissionRules: [{ pattern: "rm -rf *", action: "deny" }],
+    });
+    await taskStore.create({
+      name: "Rule deny",
+      skillName: "local-shell",
+      enabled: true,
+      schedule: { kind: "manual" },
+      input: {},
+      permissions: {
+        files: { read: [], write: [] },
+        web: { search: false, fetchDomains: [] },
+        shell: { commands: [] },
+      },
+    });
+
+    const result = await service.authorize("task_rule_deny", {
+      toolName: "shell_exec",
+      args: { command: "rm -rf /tmp/cache" },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      decision: {
+        allowed: false,
+        reason: "Permission rule denied rm (rm -rf *).",
+      },
+      auditEvent: {
+        id: "audit_rule_deny",
+        decision: {
+          allowed: false,
+          reason: "Permission rule denied rm (rm -rf *).",
+        },
+      },
+    });
+    await expect(auditLog.list()).resolves.toHaveLength(1);
+  });
+
   it("treats absolute paths inside the current home directory as equivalent to ~/ permissions", async () => {
     const taskStore = createScheduledTaskStore({
       configDir,

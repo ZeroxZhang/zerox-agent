@@ -496,6 +496,215 @@
         "npm run smoke:prod",
         "git diff --check"
       ]
+    },
+    {
+      "id": "P8.0-agent-runtime-kernel-foundation",
+      "priority": 29,
+      "status": "done",
+      "title": "Agent Runtime Kernel contract and event bus foundation",
+      "files": [
+        "docs/superpowers/specs/2026-06-16-agent-runtime-kernel-2-3-design.md",
+        "docs/superpowers/plans/2026-06-16-agent-runtime-kernel-foundation.md",
+        "src/shared/kernelContract.ts",
+        "src/shared/kernelContract.test.ts",
+        "src/main/kernel/eventBus.ts",
+        "src/main/kernel/eventBus.test.ts",
+        "src/main/kernel/kernelTypes.ts",
+        "src/main/kernel/runtimeKernel.ts",
+        "src/main/kernel/runtimeKernel.test.ts"
+      ],
+      "definitionOfDone": [
+        "Shared kernel contract defines versioned KernelEvent, StopDecision, RunView, PermissionRule, and KERNEL_IPC",
+        "Main-process KernelEventBus supports publish, subscribe, history, and filtered async streams without Electron dependency",
+        "Runtime kernel skeleton emits turn_start, judge_verdict, and run_end events through injected dependencies",
+        "Existing chat, recoverable runtime, and Goal Mode behavior remains unchanged in this additive slice"
+      ],
+      "verification": [
+        "npm test -- src/shared/kernelContract.test.ts src/main/kernel/eventBus.test.ts src/main/kernel/runtimeKernel.test.ts",
+        "npm run build",
+        "npm run verify",
+        "npm run harness:check"
+      ]
+    },
+    {
+      "id": "P8.1-checkpointed-context-compaction",
+      "priority": 30,
+      "status": "done",
+      "title": "Checkpoint-backed context compaction and rebuild",
+      "files": [
+        "docs/superpowers/plans/2026-06-16-checkpointed-context-compaction.md",
+        "src/main/kernel/compactionEngine.ts",
+        "src/main/kernel/compactionEngine.test.ts",
+        "src/main/kernel/checkpointStore.ts",
+        "src/main/kernel/checkpointStore.test.ts",
+        "src/main/contextManager.ts",
+        "src/main/agentLoop.ts",
+        "src/main/agentRuntimeEngine.ts",
+        "src/main/goalRuntimeEngine.ts"
+      ],
+      "definitionOfDone": [
+        "Compaction writes a checkpoint before pruning or summarizing context",
+        "Recent turns and goal continuity anchors survive compaction",
+        "Pruned tool results can be rebuilt from local checkpoint data",
+        "Trajectory or kernel events expose compaction and checkpoint evidence"
+      ],
+      "verification": [
+        "npm test -- src/main/kernel/checkpointStore.test.ts src/main/kernel/compactionEngine.test.ts src/main/kernel/eventBus.test.ts src/shared/kernelContract.test.ts",
+        "node scripts/run-agent-evals.mjs",
+        "npm run verify",
+        "npm run harness:check"
+      ]
+    },
+    {
+      "id": "P8.2-runtime-resilience-dynamic-turns",
+      "priority": 31,
+      "status": "done",
+      "title": "Retry-after-aware resilience and dynamic turn budgeting",
+      "files": [
+        "docs/superpowers/plans/2026-06-16-runtime-resilience-dynamic-turns.md",
+        "src/main/modelRetry.ts",
+        "src/main/modelRetry.test.ts",
+        "src/main/kernel/resilience.ts",
+        "src/main/kernel/resilience.test.ts",
+        "src/main/kernel/runtimeKernel.ts",
+        "src/main/agentLoop.ts",
+        "src/main/goalRuntimeEngine.ts"
+      ],
+      "definitionOfDone": [
+        "Retry delays honor retry-after-ms and retry-after headers before exponential fallback",
+        "Retry waits are abortable",
+        "Chat and goal runs derive max turns from mode, user override, milestone count, and hard safety limits",
+        "Retry and dynamic turn decisions emit observable kernel or trajectory evidence"
+      ],
+      "verification": [
+        "npm test -- src/main/modelRetry.test.ts src/main/kernel/resilience.test.ts src/main/agentLoop.test.ts src/main/agentRuntimeEngine.test.ts",
+        "node scripts/run-agent-evals.mjs",
+        "npm run verify",
+        "npm run harness:check"
+      ]
+    },
+    {
+      "id": "P8.3-evidence-driven-stop-policy",
+      "priority": 32,
+      "status": "done",
+      "title": "Evidence-driven kernel stop policy",
+      "files": [
+        "docs/superpowers/plans/2026-06-16-evidence-driven-stop-policy.md",
+        "src/main/kernel/stopPolicy.ts",
+        "src/main/kernel/stopPolicy.test.ts",
+        "src/main/agentGoalAcceptance.ts",
+        "src/main/agentGoalController.ts",
+        "src/main/goalRuntimeEngine.ts",
+        "src/shared/agentTrajectory.ts"
+      ],
+      "definitionOfDone": [
+        "Goal stop decisions require transcript-backed evidence before success",
+        "Missing evidence keeps the run active instead of accepting self-report",
+        "Impossible verdicts terminate gracefully with reason evidence",
+        "Judge verdicts emit typed kernel and trajectory events"
+      ],
+      "verification": [
+        "npm test -- src/main/kernel/stopPolicy.test.ts src/main/kernel/runtimeKernel.test.ts src/main/agentGoalAcceptance.test.ts src/main/goalRuntimeEngine.test.ts",
+        "node scripts/run-agent-evals.mjs",
+        "npm run verify",
+        "npm run harness:check"
+      ]
+    },
+    {
+      "id": "P8.4-rule-based-permission-engine",
+      "priority": 33,
+      "status": "done",
+      "title": "Rule-based permission engine for unattended runs",
+      "files": [
+        "docs/superpowers/plans/2026-06-16-rule-based-permission-engine.md",
+        "src/main/kernel/permissionEngine.ts",
+        "src/main/kernel/permissionEngine.test.ts",
+        "src/main/toolApprovalCoordinator.ts",
+        "src/main/toolAuthorizationService.ts",
+        "src/main/toolAuthorizationService.test.ts",
+        "src/shared/toolApproval.ts",
+        "src/shared/toolPermissions.ts"
+      ],
+      "definitionOfDone": [
+        "Permission rules evaluate allow, deny, and ask with default ask",
+        "Shell command arity produces human-readable command prefixes",
+        "Allow and deny decisions preserve audit evidence without bypassing ToolAuthorizationService",
+        "Existing ask-based approval UI behavior remains compatible"
+      ],
+      "verification": [
+        "npm test -- src/main/kernel/permissionEngine.test.ts src/main/toolAuthorizationService.test.ts src/shared/toolPermissions.test.ts src/shared/toolApproval.test.ts src/main/toolApprovalCoordinator.test.ts",
+        "npm run verify",
+        "npm run harness:check",
+        "npm run smoke:prod"
+      ]
+    },
+    {
+      "id": "P8.5-kernel-renderer-timeline",
+      "priority": 34,
+      "status": "done",
+      "title": "Kernel event bridge and long-task timeline UI",
+      "files": [
+        "docs/superpowers/plans/2026-06-16-kernel-renderer-timeline.md",
+        "src/shared/kernelContract.ts",
+        "src/shared/kernelEventView.ts",
+        "src/shared/kernelEventView.test.ts",
+        "src/preload/index.ts",
+        "src/main/container.ts",
+        "src/main/main.ts",
+        "src/main/toolAuthorizationService.ts",
+        "src/renderer/components/RunsPanel.tsx",
+        "src/renderer/materialDesign.test.ts",
+        "src/renderer/styles/cards.css",
+        "src/renderer/styles/legacy.css"
+      ],
+      "definitionOfDone": [
+        "Preload exposes a typed read-only kernel event subscription API",
+        "Renderer derives run views from KernelEvent streams",
+        "Runs UI shows compaction, retry, checkpoint, and judge verdict timeline insights",
+        "Permission prompts can show human-readable command evidence from kernel permission events"
+      ],
+      "verification": [
+        "npm test -- src/shared/kernelEventView.test.ts src/renderer/materialDesign.test.ts src/shared/kernelContract.test.ts",
+        "npm run build",
+        "npm run verify",
+        "npm run harness:check",
+        "npm run smoke:prod"
+      ]
+    },
+    {
+      "id": "P8.6-v2.3-release-acceptance",
+      "priority": 35,
+      "status": "done",
+      "title": "v2.3.0 release acceptance and independent QA",
+      "files": [
+        "README.md",
+        "docs/architecture/agent-runtime.md",
+        "package.json",
+        "package-lock.json",
+        ".zerox/progress.md",
+        "src/main/kernel/permissionEngine.ts",
+        "src/main/kernel/permissionEngine.test.ts",
+        "src/main/toolAuthorizationService.ts",
+        "src/main/toolAuthorizationService.test.ts",
+        "src/main/eval/agentEvalFixtures.ts",
+        "src/main/eval/agentEvalRunner.test.ts",
+        "src/shared/packageScripts.test.ts",
+        "src/shared/readme.test.ts"
+      ],
+      "definitionOfDone": [
+        "Long-task eval fixtures cover compaction, retry, judge, event replay, and permission-rule behavior",
+        "README and architecture docs describe the 2.3.0 Agent Runtime Kernel",
+        "Package metadata is bumped to 2.3.0",
+        "An independent test-engineer subagent reviews this iteration and records acceptance findings"
+      ],
+      "verification": [
+        "npm test",
+        "npm run verify",
+        "npm run harness:score",
+        "npm run harness:check",
+        "npm run smoke:prod",
+        "git diff --check"
+      ]
     }
   ]
 }

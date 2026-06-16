@@ -54,6 +54,7 @@ import { createSkillExecutor } from "./skillExecutor";
 import { createScheduledTaskStore } from "./taskStore";
 import { createTaskSchedulerService } from "./taskSchedulerService";
 import { createToolAuditLog } from "./toolAuditLog";
+import { KernelEventBus } from "./kernel/eventBus";
 import {
   createToolAuthorizationService,
   type ToolUserApprovalResult,
@@ -87,6 +88,7 @@ import {
   summarizeToolResultContent,
   type ReadToolResultRefResult,
 } from "../shared/toolResultRefs";
+import type { PermissionRule } from "../shared/kernelContract";
 
 export type AppContainer = ReturnType<typeof createAppContainer>;
 
@@ -103,6 +105,7 @@ export function createAppContainer(options: {
     configDir,
     vault: createElectronSecretVault(safeStorage),
   });
+  let kernelPermissionRules: PermissionRule[] = [];
 
   const goalProgressListeners = new Set<(event: GoalProgressEvent) => void>();
 
@@ -270,9 +273,22 @@ export function createAppContainer(options: {
       createToolAuthorizationService({
         taskStore: scheduledTaskStore(),
         auditLog: toolAuditLog(),
+        permissionRules: () => kernelPermissionRules,
         requestUserApproval: options.requestToolApproval,
       }),
     );
+  }
+
+  function kernelEventBus() {
+    return lazy("kernelEventBus", () => new KernelEventBus());
+  }
+
+  function setKernelPermissionRules(rules: PermissionRule[]): {
+    ok: true;
+    count: number;
+  } {
+    kernelPermissionRules = [...rules];
+    return { ok: true, count: kernelPermissionRules.length };
   }
 
   function agentRunStore() {
@@ -1003,6 +1019,8 @@ export function createAppContainer(options: {
     agentBootstrapService,
     agentValidationStore,
     scheduledTaskStore,
+    kernelEventBus,
+    setKernelPermissionRules,
     toolAuditLog,
     toolAuthorizationService,
     agentRunStore,

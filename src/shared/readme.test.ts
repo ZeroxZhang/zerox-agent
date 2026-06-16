@@ -14,7 +14,7 @@ describe("README", () => {
     expect(readme).toContain("npm run pack:mac");
     expect(readme).toContain("npm run dist:mac");
     expect(readme).toContain("xattr -dr com.apple.quarantine");
-    expect(readme).toContain("Zerox.Agent-2.2.0-arm64.dmg");
+    expect(readme).toContain("Zerox.Agent-2.3.0-arm64.dmg");
     expect(readme).toContain("npm run harness:check");
     expect(readme).toContain("npm run harness:score");
     expect(readme).toContain("npm run episode:export");
@@ -50,8 +50,8 @@ describe("README", () => {
     expect(positioning).toContain("Zerox does not run unbounded autonomous loops");
     expect(readme).toContain("session-native Goal Mode");
     expect(readme).toContain("Chat Session mode");
-    expect(readme).toContain("current release is **v2.2.0**");
-    expect(readme).toContain("当前版本是 **v2.2.0**");
+    expect(readme).toContain("current release is **v2.3.0**");
+    expect(readme).toContain("当前版本是 **v2.3.0**");
   });
 
   it("documents Goal Mode architecture, eval coverage, and feature-list status", () => {
@@ -60,6 +60,10 @@ describe("README", () => {
       process.cwd(),
       "docs/architecture/agent-goal-mode.md",
     );
+    const runtimeArchitecturePath = path.join(
+      process.cwd(),
+      "docs/architecture/agent-runtime.md",
+    );
     const featureList = JSON.parse(
       readFileSync(path.join(process.cwd(), ".zerox/feature_list.json"), "utf8"),
     ) as {
@@ -67,23 +71,30 @@ describe("README", () => {
     };
 
     expect(existsSync(architecturePath)).toBe(true);
+    expect(existsSync(runtimeArchitecturePath)).toBe(true);
     const architecture = existsSync(architecturePath)
       ? readFileSync(architecturePath, "utf8")
       : "";
+    const runtimeArchitecture = existsSync(runtimeArchitecturePath)
+      ? readFileSync(runtimeArchitecturePath, "utf8")
+      : "";
 
     expect(readme).toContain("docs/architecture/agent-goal-mode.md");
-    expect(readme).toContain("22 deterministic agent eval fixtures");
+    expect(readme).toContain("24 deterministic agent eval fixtures");
     expect(readme).toContain("goal-mode pass rate");
+    expect(readme).toContain("Agent Runtime Kernel");
+    expect(readme).toContain("kernel event replay");
+    expect(readme).toContain("permission-rule behavior");
     expect(readme).toContain("session-native Goal Mode");
     expect(readme).toContain("Chat Session mode");
     expect(readme).not.toContain("Goals UI");
     expect(readme).toContain("Goal Mode 架构");
     expect(readme).toContain("artifact evidence contract");
     expect(readme).toContain("artifact evidence files");
-    expect(readme).toContain("566 tests");
-    expect(readme).toContain("566 个测试");
-    expect(readme).toContain("Current version: v2.2.0.");
-    expect(readme).toContain("当前版本：v2.2.0。");
+    expect(readme).toContain("612 tests");
+    expect(readme).toContain("612 个测试");
+    expect(readme).toContain("Current version: v2.3.0.");
+    expect(readme).toContain("当前版本：v2.3.0。");
     expect(readme).toContain("command-first agent stage");
     expect(readme).toContain("command-first agent release");
     expect(readme).toContain("transcript-backed goal judge");
@@ -95,6 +106,9 @@ describe("README", () => {
     expect(architecture).toContain("Review Policies");
     expect(architecture).toContain("Goal Continuity Checkpoint");
     expect(architecture).toContain("Recovery Guarantees");
+    expect(runtimeArchitecture).toContain("Agent Runtime Kernel");
+    expect(runtimeArchitecture).toContain("Kernel Event Bridge");
+    expect(runtimeArchitecture).toContain("Permission Rule Engine");
     expect(featureList.features).toContainEqual(
       expect.objectContaining({
         id: "P5.8-goal-mode-evals-docs",

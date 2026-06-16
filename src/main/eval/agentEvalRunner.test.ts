@@ -11,13 +11,67 @@ describe("agent eval runner", () => {
     const report = await runAgentEvals(createAgentEvalFixtures());
 
     expect(report).toEqual({
-      total: 22,
-      passed: 22,
+      total: 24,
+      passed: 24,
       failed: 0,
       passRate: 1,
       toolSuccessRate: 0.7895,
       recoverabilityRate: 1,
       failures: [],
+    });
+  });
+
+  it("includes v2.3 Agent Runtime Kernel long-task acceptance fixtures", () => {
+    const fixtures = createAgentEvalFixtures();
+
+    expect(fixtures.map((fixture) => fixture.id)).toEqual(
+      expect.arrayContaining([
+        "ark-long-task-event-replay",
+        "ark-permission-rule-deny",
+      ]),
+    );
+    expect(
+      fixtures.find((fixture) => fixture.id === "ark-long-task-event-replay"),
+    ).toMatchObject({
+      requiredEventTypes: [
+        "checkpoint_written",
+        "context_compacted",
+        "model_request",
+        "model_retry",
+        "model_response",
+        "goal_judged",
+        "artifact_created",
+        "final_summary",
+      ],
+      assertions: expect.arrayContaining([
+        {
+          type: "context_compacted",
+          payload: { anchorsPreserved: true },
+          after: "checkpoint_written",
+        },
+        {
+          type: "artifact_created",
+          payload: { artifactType: "kernel_event_replay" },
+          after: "goal_judged",
+        },
+      ]),
+    });
+    expect(
+      fixtures.find((fixture) => fixture.id === "ark-permission-rule-deny"),
+    ).toMatchObject({
+      requiredEventTypes: [
+        "tool_call",
+        "failure_classified",
+        "checkpoint_written",
+        "final_summary",
+      ],
+      assertions: expect.arrayContaining([
+        {
+          type: "failure_classified",
+          payload: { permissionRule: "rm -rf *", ruleAction: "deny" },
+          after: "tool_call",
+        },
+      ]),
     });
   });
 

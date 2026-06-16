@@ -89,6 +89,11 @@ import type {
   ToolApprovalModeState,
   ToolApprovalRequestPayload,
 } from "../shared/toolApproval";
+import {
+  KERNEL_IPC,
+  type KernelEvent,
+  type PermissionRule,
+} from "../shared/kernelContract";
 
 export type CreateGoalInput = {
   description: string;
@@ -276,6 +281,45 @@ const buildingAgent = {
       ipcRenderer.removeListener("agent:streamEvent", handler);
     };
   },
+  onKernelEvent: (callback: (event: KernelEvent) => void) => {
+    let active = true;
+    const handler = (_event: Electron.IpcRendererEvent, data: KernelEvent) => {
+      if (active) {
+        callback(data);
+      }
+    };
+
+    ipcRenderer.on(KERNEL_IPC.event, handler);
+    void ipcRenderer
+      .invoke(KERNEL_IPC.subscribe)
+      .then((events: KernelEvent[]) => {
+        if (!active || !Array.isArray(events)) {
+          return;
+        }
+
+        for (const event of events) {
+          callback(event);
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      active = false;
+      ipcRenderer.removeListener(KERNEL_IPC.event, handler);
+    };
+  },
+  resumeKernelRun: (checkpointRef: string): Promise<RunScheduledTaskResult> =>
+    ipcRenderer.invoke(KERNEL_IPC.resumeRun, checkpointRef),
+  updateKernelPermissionRules: (rules: PermissionRule[]) =>
+    ipcRenderer.invoke(KERNEL_IPC.updatePermissionRules, rules),
+  respondKernelPermission: (
+    permissionId: string,
+    decision: "allow" | "deny",
+  ) =>
+    ipcRenderer.invoke(KERNEL_IPC.respondPermission, {
+      id: permissionId,
+      decision,
+    }),
   cancelScheduledTaskRun: (
     taskId: string,
   ): Promise<CancelScheduledTaskRunResult> =>
