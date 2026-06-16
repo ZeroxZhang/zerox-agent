@@ -28,6 +28,10 @@ describe("Design System — Notion-inspired app shell", () => {
     path.join(process.cwd(), "src/renderer/App.tsx"),
     "utf8",
   );
+  const preloadSource = readFileSync(
+    path.join(process.cwd(), "src/preload/index.ts"),
+    "utf8",
+  );
   const chatPanelSource = readFileSync(
     path.join(process.cwd(), "src/renderer/components/AgentChatPanel.tsx"),
     "utf8",
@@ -160,6 +164,17 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(runTrajectoryPanelSource).toContain("trajectory-insight-list");
     expect(styles).toContain(".trajectory-insight");
     expect(styles).toContain(".trajectory-insight-list");
+  });
+
+  it("surfaces kernel event bridge and long-task timeline cards in Runs", () => {
+    expect(preloadSource).toContain("KERNEL_IPC");
+    expect(preloadSource).toContain("onKernelEvent");
+    expect(preloadSource).toContain("resumeKernelRun");
+    expect(runsPanelSource).toContain("summarizeKernelEventForTimeline");
+    expect(runsPanelSource).toContain("kernel-event-card");
+    expect(runsPanelSource).toContain("Kernel Events");
+    expect(styles).toContain(".kernel-event-list");
+    expect(styles).toContain(".kernel-event-card");
   });
 
   it("surfaces eval candidate generation from terminal Runs", () => {

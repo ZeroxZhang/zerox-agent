@@ -1,0 +1,189 @@
+import { describe, expect, it } from "vitest";
+import { KernelEventBus } from "./eventBus";
+import {
+  runRuntimeKernel,
+  type RunContext,
+  type StopPolicy,
+} from "./runtimeKernel";
+
+describe("runRuntimeKernel", () => {
+  it("runs chat turns until a turn-limit stop policy stops it", async () => {
+    const bus = new KernelEventBus();
+    const turns: number[] = [];
+
+    const result = await runRuntimeKernel(createContext({
+      mode: "chat",
+      maxTurns: 2,
+      stopPolicy: turnLimitPolicy(),
+    }), {
+      bus,
+      now: fixedNow,
+      async runTurn(ctx) {
+        turns.push(ctx.turn);
+        return {
+          summary: `turn ${ctx.turn}`,
+        };
+      },
+    });
+
+    expect(result).toEqual({
+      runId: "run_1",
+      status: "succeeded",
+      turns: 2,
+      reason: "turn limit reached",
+      summary: "turn 2",
+    });
+    expect(turns).toEqual([1, 2]);
+    expect(bus.history().map((event) => event.type)).toEqual([
+      "turn_start",
+      "turn_start",
+      "run_end",
+    ]);
+  });
+
+  it("emits judge verdicts for evidence stop policies", async () => {
+    const bus = new KernelEventBus();
+
+    const result = await runRuntimeKernel(createContext({
+      mode: "goal",
+      maxTurns: 12,
+      stopPolicy: {
+        kind: "evidence_judge",
+        async shouldStop() {
+          return {
+            stop: true,
+            reason: "transcript contains verification evidence",
+            evidence: ["npm run verify -> passed"],
+          };
+        },
+      },
+    }), {
+      bus,
+      now: fixedNow,
+      async runTurn(ctx) {
+        return {
+          summary: `goal turn ${ctx.turn}`,
+        };
+      },
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(bus.history().map((event) => event.type)).toEqual([
+      "turn_start",
+      "judge_verdict",
+      "run_end",
+    ]);
+    expect(bus.history()[1]).toMatchObject({
+      type: "judge_verdict",
+      decision: {
+        stop: true,
+        evidence: ["npm run verify -> passed"],
+      },
+    });
+  });
+
+  it("marks impossible stop decisions as failed", async () => {
+    const bus = new KernelEventBus();
+
+    const result = await runRuntimeKernel(createContext({
+      mode: "goal",
+      maxTurns: 12,
+      stopPolicy: {
+        kind: "evidence_judge",
+        async shouldStop() {
+          return {
+            stop: true,
+            impossible: true,
+            reason: "required local resource is unavailable",
+          };
+        },
+      },
+    }), {
+      bus,
+      now: fixedNow,
+      async runTurn() {
+        return {
+          summary: "resource check failed",
+        };
+      },
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.reason).toBe("required local resource is unavailable");
+    expect(bus.history().at(-1)).toMatchObject({
+      type: "run_end",
+      status: "failed",
+      reason: "required local resource is unavailable",
+    });
+  });
+
+  it("cancels before running a turn when the signal is already aborted", async () => {
+    const bus = new KernelEventBus();
+    const controller = new AbortController();
+    controller.abort();
+    let turnRan = false;
+
+    const result = await runRuntimeKernel(createContext({
+      signal: controller.signal,
+      stopPolicy: turnLimitPolicy(),
+    }), {
+      bus,
+      now: fixedNow,
+      async runTurn() {
+        turnRan = true;
+        return {};
+      },
+    });
+
+    expect(turnRan).toBe(false);
+    expect(result).toMatchObject({
+      status: "canceled",
+      turns: 0,
+      reason: "Agent run canceled.",
+    });
+    expect(bus.history()).toEqual([
+      {
+        v: 1,
+        type: "run_end",
+        runId: "run_1",
+        status: "canceled",
+        reason: "Agent run canceled.",
+        createdAt: fixedNow(),
+      },
+    ]);
+  });
+});
+
+function createContext(overrides: Partial<RunContext> = {}): RunContext {
+  return {
+    runId: "run_1",
+    mode: "chat",
+    turn: 0,
+    maxTurns: 4,
+    stopPolicy: turnLimitPolicy(),
+    ...overrides,
+  };
+}
+
+function turnLimitPolicy(): StopPolicy {
+  return {
+    kind: "turn_limit",
+    async shouldStop(ctx) {
+      if (ctx.turn >= ctx.maxTurns) {
+        return {
+          stop: true,
+          reason: "turn limit reached",
+        };
+      }
+
+      return {
+        stop: false,
+        reason: "turns remain",
+      };
+    },
+  };
+}
+
+function fixedNow() {
+  return "2026-06-16T00:00:00.000Z";
+}

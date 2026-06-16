@@ -2,6 +2,7 @@ import path from "node:path";
 import os from "node:os";
 import type { ScheduledTaskStore } from "./taskStore";
 import type { ToolAuditLog } from "./toolAuditLog";
+import { evaluatePermission } from "./kernel/permissionEngine";
 import {
   authorizeToolCallWithinRunContext,
   type AuthorizeTaskToolCallResult,
@@ -9,6 +10,7 @@ import {
   type ToolCallRequest,
 } from "../shared/toolPermissions";
 import type { AgentRunContext } from "../shared/agentWorkspace";
+import type { PermissionRule } from "../shared/kernelContract";
 
 export type ToolAuthorizationService = {
   authorize(
@@ -47,6 +49,7 @@ export function createToolAuthorizationService(options: {
   taskStore: ScheduledTaskStore;
   auditLog: ToolAuditLog;
   homeDir?: string;
+  permissionRules?: PermissionRule[] | (() => PermissionRule[]);
   requestUserApproval?: (
     request: ToolUserApprovalRequest,
   ) => Promise<ToolUserApprovalResult>;
@@ -79,11 +82,35 @@ export function createToolAuthorizationService(options: {
         };
       }
 
+      const ruleEvaluation = evaluatePermission(
+        request,
+        resolvePermissionRules(options.permissionRules),
+      );
+      if (ruleEvaluation.action === "deny") {
+        const ruleDecision = evaluateRuleDecision(ruleEvaluation);
+        const auditEvent = await options.auditLog.append({
+          taskId: subject.id,
+          request,
+          decision: ruleDecision,
+        });
+        return {
+          ok: true,
+          decision: ruleDecision,
+          auditEvent,
+        };
+      }
+
       let decision = authorizeToolCallWithinRunContext(
         expandHomePermissionPolicy(subject.permissions, homeDir),
         request,
         authorizeOptions?.runContext,
       );
+      if (decision.allowed && ruleEvaluation.action === "allow") {
+        decision = {
+          allowed: true,
+          reason: `${formatRuleDecisionReason(ruleEvaluation)} ${decision.reason}`,
+        };
+      }
       if (decision.allowed && subject.policyLabel) {
         decision = {
           ...decision,
@@ -132,6 +159,32 @@ export function createToolAuthorizationService(options: {
       };
     },
   };
+}
+
+function resolvePermissionRules(
+  rules: PermissionRule[] | (() => PermissionRule[]) | undefined,
+): PermissionRule[] {
+  if (!rules) {
+    return [];
+  }
+
+  return typeof rules === "function" ? rules() : rules;
+}
+
+function evaluateRuleDecision(
+  evaluation: ReturnType<typeof evaluatePermission>,
+) {
+  return {
+    allowed: false,
+    reason: formatRuleDecisionReason(evaluation),
+  };
+}
+
+function formatRuleDecisionReason(
+  evaluation: ReturnType<typeof evaluatePermission>,
+): string {
+  const verb = evaluation.action === "allow" ? "allowed" : "denied";
+  return `Permission rule ${verb} ${evaluation.command} (${evaluation.matchedRule}).`;
 }
 
 function shouldRequestUserApproval(reason: string): boolean {

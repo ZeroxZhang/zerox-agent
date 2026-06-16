@@ -10,6 +10,11 @@ import type { AgentRunRecord } from "../../shared/agentRuns";
 import type { AgentExecutionCheckpoint } from "../../shared/agentExecution";
 import type { AgentEvalCandidate } from "../../shared/agentEvalCandidate";
 import type { AgentTrajectoryEvent } from "../../shared/agentTrajectory";
+import type { KernelEvent } from "../../shared/kernelContract";
+import {
+  reduceKernelEventsToRunViews,
+  summarizeKernelEventForTimeline,
+} from "../../shared/kernelEventView";
 import { demoRuns } from "../demoAgentData";
 import { RunTrajectoryPanel } from "./RunTrajectoryPanel";
 
@@ -27,6 +32,7 @@ export function RunsPanel() {
   const [selectedRunId, setSelectedRunId] = useState("");
   const [selectedEventId, setSelectedEventId] = useState("");
   const [trajectoryEvents, setTrajectoryEvents] = useState<AgentTrajectoryEvent[]>([]);
+  const [kernelEvents, setKernelEvents] = useState<KernelEvent[]>([]);
   const [status, setStatus] = useState<RunsStatus>({
     kind: "loading",
     message: "正在加载运行记录...",
@@ -36,6 +42,7 @@ export function RunsPanel() {
     if (!window.buildingAgent) {
       setRuns(demoRuns);
       setEvalCandidates([]);
+      setKernelEvents(createDemoKernelEvents());
       setSelectedRunId(demoRuns[0]?.id ?? "");
       setStatus({
         kind: "idle",
@@ -71,6 +78,16 @@ export function RunsPanel() {
       });
   }, []);
 
+  useEffect(() => {
+    if (!window.buildingAgent) {
+      return;
+    }
+
+    return window.buildingAgent.onKernelEvent((event) => {
+      setKernelEvents((currentEvents) => appendKernelEvent(currentEvents, event));
+    });
+  }, []);
+
   const selectedRun = useMemo(
     () => runs.find((run) => run.id === selectedRunId) ?? runs[0] ?? null,
     [runs, selectedRunId],
@@ -91,6 +108,13 @@ export function RunsPanel() {
           ) ?? null
         : null,
     [evalCandidates, selectedRun],
+  );
+  const selectedKernelEvents = useMemo(
+    () =>
+      selectedRun
+        ? kernelEvents.filter((event) => event.runId === selectedRun.id)
+        : [],
+    [kernelEvents, selectedRun],
   );
 
   useEffect(() => {
@@ -449,6 +473,7 @@ export function RunsPanel() {
           event={selectedEvent}
           guidance={guidance}
           isBusy={status.kind === "loading"}
+          kernelEvents={selectedKernelEvents}
           onGenerateEvalCandidate={handleGenerateEvalCandidateForSelectedRun}
           run={selectedRun}
           trajectoryEvents={trajectoryEvents}
@@ -466,6 +491,7 @@ function RunInspector(props: {
   event: RunTimelineItem | null;
   guidance: ReturnType<typeof getRunGuidance> | null;
   isBusy: boolean;
+  kernelEvents: KernelEvent[];
   onGenerateEvalCandidate: () => void;
   run: AgentRunRecord | null;
   trajectoryEvents: AgentTrajectoryEvent[];
@@ -473,6 +499,23 @@ function RunInspector(props: {
   const handoffCards = useMemo(
     () => summarizeHandoffReviewCards(props.trajectoryEvents),
     [props.trajectoryEvents],
+  );
+  const kernelRunView = useMemo(
+    () =>
+      props.run
+        ? reduceKernelEventsToRunViews(props.kernelEvents).find(
+            (view) => view.runId === props.run?.id,
+          ) ?? null
+        : null,
+    [props.kernelEvents, props.run],
+  );
+  const kernelTimelineCards = useMemo(
+    () =>
+      props.kernelEvents.map((event) => ({
+        event,
+        summary: summarizeKernelEventForTimeline(event),
+      })),
+    [props.kernelEvents],
   );
 
   return (
@@ -514,6 +557,47 @@ function RunInspector(props: {
           </>
         ) : (
           <p>选择一个事件后，可以查看 payload 详情。</p>
+        )}
+      </div>
+
+      <div className="inspector-section" aria-label="Kernel Events">
+        <span className="inspector-label">Kernel Events</span>
+        {kernelTimelineCards.length ? (
+          <>
+            {kernelRunView ? (
+              <dl className="inspector-dl">
+                <div>
+                  <dt>状态</dt>
+                  <dd>{translateRunStatus(kernelRunView.status)}</dd>
+                </div>
+                <div>
+                  <dt>Turn</dt>
+                  <dd>
+                    {kernelRunView.turn}/{kernelRunView.maxTurns || "?"}
+                  </dd>
+                </div>
+              </dl>
+            ) : null}
+            <div className="kernel-event-list">
+              {kernelTimelineCards.map(({ event, summary }, index) => (
+                <article
+                  className={`kernel-event-card is-${summary.tone}`}
+                  key={getKernelEventKey(event, index)}
+                >
+                  <div>
+                    <strong>{summary.title}</strong>
+                    <span>{formatTime(event.createdAt)}</span>
+                  </div>
+                  <p>{summary.detail}</p>
+                  {event.type === "retry" ? (
+                    <small>{event.error}</small>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+          </>
+        ) : (
+          <p>No kernel events recorded for this run.</p>
         )}
       </div>
 
@@ -755,6 +839,82 @@ function isTerminalRun(run: AgentRunRecord): boolean {
     run.status === "failed" ||
     run.status === "canceled"
   );
+}
+
+function appendKernelEvent(
+  events: KernelEvent[],
+  nextEvent: KernelEvent,
+): KernelEvent[] {
+  const nextKey = getKernelEventKey(nextEvent);
+  if (events.some((event) => getKernelEventKey(event) === nextKey)) {
+    return events;
+  }
+
+  return [...events, nextEvent].slice(-500);
+}
+
+function getKernelEventKey(event: KernelEvent, fallbackIndex = 0): string {
+  return `${event.runId}:${event.type}:${event.createdAt}:${fallbackIndex}`;
+}
+
+function createDemoKernelEvents(): KernelEvent[] {
+  return [
+    {
+      v: 1,
+      type: "turn_start",
+      runId: "demo_run_1",
+      turn: 1,
+      maxTurns: 8,
+      createdAt: "2026-06-05T08:00:01.000Z",
+    },
+    {
+      v: 1,
+      type: "checkpoint_written",
+      runId: "demo_run_1",
+      ref: "kernel-checkpoints/demo_run_1/checkpoint_1.json",
+      turn: 1,
+      createdAt: "2026-06-05T08:00:02.000Z",
+    },
+    {
+      v: 1,
+      type: "compaction",
+      runId: "demo_run_1",
+      beforeTokens: 128000,
+      afterTokens: 42000,
+      prunedTurns: [1, 2, 3],
+      checkpointRef: "kernel-checkpoints/demo_run_1/checkpoint_1.json",
+      createdAt: "2026-06-05T08:00:03.000Z",
+    },
+    {
+      v: 1,
+      type: "retry",
+      runId: "demo_run_1",
+      attempt: 1,
+      maxRetries: 3,
+      afterMs: 1200,
+      error: "rate_limit_exceeded",
+      createdAt: "2026-06-05T08:00:04.000Z",
+    },
+    {
+      v: 1,
+      type: "judge_verdict",
+      runId: "demo_run_1",
+      decision: {
+        stop: true,
+        reason: "Evidence confirms the report and memory write completed.",
+        evidence: ["agent-report.md", "memory:demo_memory_1"],
+      },
+      createdAt: "2026-06-05T08:00:05.000Z",
+    },
+    {
+      v: 1,
+      type: "run_end",
+      runId: "demo_run_1",
+      status: "succeeded",
+      reason: "Goal evidence accepted.",
+      createdAt: "2026-06-05T08:00:06.000Z",
+    },
+  ];
 }
 
 function translateEvalCandidateStatus(

@@ -384,6 +384,148 @@ export function createAgentEvalFixtures(): AgentEvalFixture[] {
       recoverabilityRequired: true,
     },
     {
+      id: "ark-long-task-event-replay",
+      description:
+        "Agent Runtime Kernel long-task events preserve checkpoint, compaction, retry, judge, and replay evidence.",
+      events: createEvents("ark-long-task-event-replay", [
+        [
+          "checkpoint_written",
+          {
+            ref: "kernel-checkpoints/run_ark/checkpoint_1.json",
+            status: "running",
+            turn: 1,
+          },
+        ],
+        [
+          "context_compacted",
+          {
+            checkpointRef: "kernel-checkpoints/run_ark/checkpoint_1.json",
+            kernelEventType: "compaction",
+            beforeTokens: 128000,
+            afterTokens: 42000,
+            prunedTurns: [1, 2, 3],
+            anchorsPreserved: true,
+          },
+        ],
+        ["model_request", { turn: 2, messageCount: 9 }],
+        [
+          "model_retry",
+          {
+            attempt: 1,
+            maxRetries: 3,
+            retryAfterMs: 1200,
+            error: "rate_limit_exceeded",
+          },
+        ],
+        ["model_response", { finishReason: "stop" }],
+        [
+          "goal_judged",
+          {
+            ok: true,
+            impossible: false,
+            evidence: ["artifact:final_report"],
+          },
+        ],
+        [
+          "artifact_created",
+          {
+            artifactType: "kernel_event_replay",
+            replayedEventTypes: [
+              "checkpoint_written",
+              "compaction",
+              "retry",
+              "judge_verdict",
+            ],
+          },
+        ],
+        ["final_summary", { status: "succeeded" }],
+      ]),
+      requiredEventTypes: [
+        "checkpoint_written",
+        "context_compacted",
+        "model_request",
+        "model_retry",
+        "model_response",
+        "goal_judged",
+        "artifact_created",
+        "final_summary",
+      ],
+      assertions: [
+        {
+          type: "context_compacted",
+          payload: { anchorsPreserved: true },
+          after: "checkpoint_written",
+        },
+        {
+          type: "model_retry",
+          payload: { attempt: 1, maxRetries: 3 },
+          after: "model_request",
+        },
+        {
+          type: "goal_judged",
+          payload: { ok: true, impossible: false },
+          after: "model_response",
+        },
+        {
+          type: "artifact_created",
+          payload: { artifactType: "kernel_event_replay" },
+          after: "goal_judged",
+        },
+      ],
+      recoverabilityRequired: true,
+    },
+    {
+      id: "ark-permission-rule-deny",
+      description:
+        "Rule-based kernel permissions deny dangerous shell commands through ToolAuthorizationService evidence.",
+      events: createEvents("ark-permission-rule-deny", [
+        [
+          "tool_call",
+          {
+            toolName: "shell_exec",
+            command: "rm -rf /tmp/cache",
+            permissionRule: "rm -rf *",
+          },
+        ],
+        [
+          "failure_classified",
+          {
+            failureClass: "permission_denied",
+            permissionRule: "rm -rf *",
+            ruleAction: "deny",
+            command: "rm",
+          },
+        ],
+        [
+          "checkpoint_written",
+          {
+            status: "failed",
+            permissionRule: "rm -rf *",
+          },
+        ],
+        ["final_summary", { status: "failed" }],
+      ]),
+      requiredEventTypes: [
+        "tool_call",
+        "failure_classified",
+        "checkpoint_written",
+        "final_summary",
+      ],
+      assertions: [
+        {
+          type: "failure_classified",
+          payload: { permissionRule: "rm -rf *", ruleAction: "deny" },
+          after: "tool_call",
+        },
+        {
+          type: "checkpoint_written",
+          payload: { permissionRule: "rm -rf *" },
+          after: "failure_classified",
+        },
+      ],
+      recoverabilityRequired: true,
+    },
+    {
       id: "episode-eval-candidate",
       description:
         "A completed episode records eval candidate artifact generation.",

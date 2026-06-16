@@ -22,6 +22,7 @@ import { runDesktopAgentValidation } from "./desktopAgentValidator";
 import { getAppMeta } from "../shared/appMeta";
 import { createToolApprovalCoordinator } from "./toolApprovalCoordinator";
 import type { ResolveToolApprovalInput } from "../shared/toolApproval";
+import { KERNEL_IPC, type PermissionRule } from "../shared/kernelContract";
 import {
   getSmokeModeOptions,
   getSmokeRendererCheckScript,
@@ -41,6 +42,7 @@ let tray: Tray | null = null;
 let isQuitting = false;
 let taskSchedulerTimer: NodeJS.Timeout | null = null;
 let memoryMaintenanceTimer: NodeJS.Timeout | null = null;
+let unsubscribeKernelEvents: (() => void) | null = null;
 
 const memoryMaintenanceIntervalMs = 30 * 60 * 1000;
 const taskSchedulerIntervalMs = 60 * 1000;
@@ -283,6 +285,7 @@ function stopMemoryMaintenanceScheduler() {
 app.whenReady().then(() => {
   registerAllIpcHandlers(container);
   registerToolApprovalIpcHandlers();
+  registerKernelIpcHandlers();
 
   if (validationMode.enabled) {
     void runValidationModeAndExit();
@@ -332,12 +335,104 @@ function registerToolApprovalIpcHandlers() {
   ipcMain.handle(
     "toolApproval:resolve",
     (_event, input: ResolveToolApprovalInput) =>
-      toolApprovalCoordinator.resolveApproval(input),
+    toolApprovalCoordinator.resolveApproval(input),
   );
+}
+
+function registerKernelIpcHandlers() {
+  const kernelEventBus = container.kernelEventBus();
+  unsubscribeKernelEvents = kernelEventBus.subscribe((event) => {
+    sendToRendererWindows(KERNEL_IPC.event, event);
+  });
+
+  ipcMain.handle(KERNEL_IPC.subscribe, () => kernelEventBus.history());
+  ipcMain.handle(KERNEL_IPC.resumeRun, (_event, checkpointRef: string) =>
+    container.resumeAgentRun(extractRunIdFromCheckpointRef(checkpointRef)),
+  );
+  ipcMain.handle(KERNEL_IPC.updatePermissionRules, (_event, rules: unknown) =>
+    container.setKernelPermissionRules(normalizePermissionRules(rules)),
+  );
+  ipcMain.handle(KERNEL_IPC.respondPermission, (_event, input: unknown) =>
+    resolveKernelPermission(input),
+  );
+}
+
+function sendToRendererWindows(channel: string, payload: unknown) {
+  for (const windowInstance of BrowserWindow.getAllWindows()) {
+    if (!windowInstance.isDestroyed()) {
+      windowInstance.webContents.send(channel, payload);
+    }
+  }
+}
+
+function extractRunIdFromCheckpointRef(checkpointRef: string): string {
+  const parts = String(checkpointRef).split(/[\\/]/).filter(Boolean);
+  if (parts.length >= 3 && parts.at(-3) === "kernel-checkpoints") {
+    return parts.at(-2) ?? checkpointRef;
+  }
+
+  return checkpointRef;
+}
+
+function normalizePermissionRules(rules: unknown): PermissionRule[] {
+  if (!Array.isArray(rules)) {
+    return [];
+  }
+
+  return rules.flatMap((rule): PermissionRule[] => {
+    if (!rule || typeof rule !== "object") {
+      return [];
+    }
+
+    const pattern = "pattern" in rule ? String(rule.pattern).trim() : "";
+    const action = "action" in rule ? rule.action : "";
+    if (!pattern || !isPermissionRuleAction(action)) {
+      return [];
+    }
+
+    return [{ pattern, action }];
+  });
+}
+
+function isPermissionRuleAction(
+  action: unknown,
+): action is PermissionRule["action"] {
+  return action === "allow" || action === "deny" || action === "ask";
+}
+
+function resolveKernelPermission(input: unknown): {
+  ok: boolean;
+  message: string;
+} {
+  const payload =
+    input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  const id =
+    typeof payload.id === "string"
+      ? payload.id
+      : typeof payload.permissionId === "string"
+        ? payload.permissionId
+        : "";
+  const approved =
+    payload.decision === "allow"
+      ? true
+      : payload.decision === "deny"
+        ? false
+        : null;
+
+  if (!id || approved === null) {
+    return { ok: false, message: "Permission decision payload is invalid." };
+  }
+
+  const resolved = toolApprovalCoordinator.resolveApproval({ id, approved });
+  return resolved
+    ? { ok: true, message: "Permission decision recorded." }
+    : { ok: false, message: "No pending permission request matched." };
 }
 
 app.on("before-quit", () => {
   isQuitting = true;
+  unsubscribeKernelEvents?.();
+  unsubscribeKernelEvents = null;
   stopTaskScheduler();
   stopMemoryMaintenanceScheduler();
   for (const client of container.getActiveMcpClients()) {

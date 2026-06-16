@@ -2,6 +2,21 @@
 
 Zerox Agent runs local work through a recoverable runtime instead of a one-shot chat loop. The runtime is responsible for checkpointing, trajectory emission, failure classification, resume, and durable run records.
 
+## Agent Runtime Kernel
+
+The v2.3.0 Agent Runtime Kernel is an additive runtime layer for long-running local work. It does not replace the existing recoverable runtime path yet; it provides typed kernel contracts that can be adopted slice by slice without bypassing the local-first trust boundary.
+
+The kernel layer currently includes:
+
+- a shared `KernelEvent` contract for turns, tool calls, checkpoint writes, compaction, judge verdicts, retry scheduling, and run end states
+- a process-local `KernelEventBus` that stores event history and streams new events to observers
+- checkpointed context compaction that writes rebuildable local refs before replacing bulky historical tool results
+- retry-after-aware model retry behavior for transient provider failures
+- evidence-driven stop policies for judge-backed long tasks
+- a rule-based permission engine that is invoked inside `ToolAuthorizationService`, so rule allow/deny decisions still write the normal tool audit log
+
+These primitives are local only. Kernel checkpoints remain under local runtime storage, permission rules are applied in process, and renderer surfaces consume event history through IPC instead of becoming the source of truth.
+
 ## Runtime Boundary
 
 The production task path is:
@@ -91,6 +106,18 @@ userData/config/agent-trajectories/<runId>.jsonl
 Events carry redaction flags so future replay and inspection tools can avoid exposing API keys, file content, or user text accidentally.
 
 The Runs panel reads trajectory files through `agentRuns:listTrajectory` and shows event payloads plus redaction flags for the selected run.
+
+## Kernel Event Bridge
+
+The renderer-facing Kernel Event Bridge is a read-oriented IPC surface. Preload exposes `onKernelEvent`, `resumeKernelRun`, `updateKernelPermissionRules`, and `respondKernelPermission` using the shared `KERNEL_IPC` channel names. `onKernelEvent` first replays the current kernel event history and then streams live `kernel:event` updates from the process-local event bus.
+
+Runs derives compact `RunView` state from `KernelEvent[]` with a shared reducer. The UI then renders Kernel Event cards for checkpoint writes, context compaction, retry scheduling, judge verdicts, and run-end states. Browser preview mode uses deterministic demo kernel events so UI review can verify kernel event replay without executing a real desktop run.
+
+## Permission Rule Engine
+
+Rule-based permission evaluation is intentionally inside `ToolAuthorizationService`. The kernel permission engine can match exact or wildcard command patterns and returns `allow`, `deny`, or `ask`; `ask` falls through to the existing task-policy and approval path. Allow/deny outcomes still append the normal tool audit event, preserving the same reviewable evidence as task-policy decisions.
+
+The renderer can update runtime permission rules through the kernel IPC bridge, but tool execution never trusts renderer decisions directly. Final authorization remains in the main process, scoped by task policy, workspace sandbox checks, and the tool authorization service.
 
 ## Workspace And Multi-Agent Context
 
