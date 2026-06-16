@@ -89,11 +89,15 @@ import type {
   ToolApprovalModeState,
   ToolApprovalRequestPayload,
 } from "../shared/toolApproval";
-import {
-  KERNEL_IPC,
-  type KernelEvent,
-  type PermissionRule,
-} from "../shared/kernelContract";
+import type { KernelEvent, PermissionRule } from "../shared/kernelContract";
+
+const KERNEL_IPC = {
+  event: "kernel:event",
+  subscribe: "kernel:subscribe",
+  resumeRun: "kernel:resumeRun",
+  updatePermissionRules: "kernel:updatePermissionRules",
+  respondPermission: "kernel:respondPermission",
+} as const;
 
 export type CreateGoalInput = {
   description: string;

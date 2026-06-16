@@ -8,6 +8,23 @@
 
 .app-shell > * { min-width: 0; }
 
+.window-drag-strip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  height: 28px;
+  -webkit-app-region: drag;
+}
+
+.window-drag-strip button,
+.window-drag-strip a,
+.window-drag-strip input,
+.window-drag-strip select {
+  -webkit-app-region: no-drag;
+}
+
 .workspace {
   grid-column: 2;
   min-width: 0;

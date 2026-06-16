@@ -12,6 +12,7 @@ describe("smoke mode", () => {
       timeoutMs: 10_000,
       readySelector: '[data-testid="agent-chat-panel"]',
       requiredTexts: [],
+      requireDesktopApi: true,
       viewport: null,
     });
   });
@@ -27,6 +28,7 @@ describe("smoke mode", () => {
       timeoutMs: 2_500,
       readySelector: '[data-testid="agent-chat-panel"]',
       requiredTexts: [],
+      requireDesktopApi: true,
       viewport: null,
     });
   });
@@ -42,6 +44,7 @@ describe("smoke mode", () => {
       timeoutMs: 10_000,
       readySelector: '[data-testid="agent-chat-panel"]',
       requiredTexts: [],
+      requireDesktopApi: true,
       viewport: null,
     });
   });
@@ -60,6 +63,7 @@ describe("smoke mode", () => {
       timeoutMs: 10_000,
       readySelector: ".overview-panel",
       requiredTexts: ["Harness", "Agent Capability", "native tools"],
+      requireDesktopApi: true,
       viewport: { width: 390, height: 844 },
     });
   });
@@ -75,8 +79,19 @@ describe("smoke mode", () => {
 
     expect(script).toContain(".overview-panel");
     expect(script).toContain("Agent Capability");
+    expect(script).toContain("hasDesktopApi");
     expect(script).toContain("hasHorizontalOverflow");
     expect(script).toContain("rootTextLength");
+  });
+
+  it("allows targeted smoke checks to opt out of desktop API checks", () => {
+    expect(
+      getSmokeModeOptions({
+        BUILDING_AGENT_SMOKE_REQUIRE_DESKTOP_API: "0",
+      }),
+    ).toMatchObject({
+      requireDesktopApi: false,
+    });
   });
 
   it("reports a useful failure when the renderer document is blank", () => {
@@ -85,6 +100,7 @@ describe("smoke mode", () => {
         ok: false,
         hasReadyElement: false,
         hasRoot: true,
+        hasDesktopApi: false,
         hasHorizontalOverflow: false,
         scrollWidth: 1200,
         clientWidth: 1200,
@@ -102,6 +118,7 @@ describe("smoke mode", () => {
         ok: false,
         hasReadyElement: true,
         hasRoot: true,
+        hasDesktopApi: true,
         hasHorizontalOverflow: false,
         scrollWidth: 390,
         clientWidth: 390,
@@ -119,6 +136,7 @@ describe("smoke mode", () => {
         ok: false,
         hasReadyElement: true,
         hasRoot: true,
+        hasDesktopApi: true,
         hasHorizontalOverflow: true,
         scrollWidth: 420,
         clientWidth: 390,
@@ -128,5 +146,23 @@ describe("smoke mode", () => {
         locationHref: "http://127.0.0.1:5173/#overview",
       }),
     ).toContain("horizontalOverflow=true scrollWidth=420 clientWidth=390");
+  });
+
+  it("reports when the desktop preload bridge is missing", () => {
+    expect(
+      getSmokeRendererFailureMessage({
+        ok: false,
+        hasReadyElement: true,
+        hasRoot: true,
+        hasDesktopApi: false,
+        hasHorizontalOverflow: false,
+        scrollWidth: 1120,
+        clientWidth: 1120,
+        rootTextLength: 347,
+        missingTexts: [],
+        title: "Zerox Agent",
+        locationHref: "file:///app/dist/index.html#chat",
+      }),
+    ).toContain("desktopApi=missing");
   });
 });

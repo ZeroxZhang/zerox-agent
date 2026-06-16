@@ -1,5 +1,52 @@
 # Zerox Harness Progress
 
+## 2026-06-16 v2.3.1 Desktop Preload And Window Drag Hotfix
+
+- Fixed the packaged Electron app opening in browser preview/demo mode because the sandboxed preload failed to load after v2.3.0 added a runtime import from `../shared/kernelContract`.
+- The preload now keeps kernel IPC channel names local and imports shared kernel types type-only, so `window.buildingAgent` is injected again in production and model settings can save through IPC.
+- Hardened production smoke mode to fail when the desktop preload bridge is missing instead of only checking that the React shell rendered.
+- Added a fixed `window-drag-strip` so the chat-first desktop shell still has a draggable region when the normal topbar is hidden.
+- Bumped hotfix metadata to `2.3.1`, updated README release notes/download examples/test counts, and prepared new macOS distribution artifacts.
+- Changed files:
+  - `.zerox/progress.md`
+  - `README.md`
+  - `package.json`
+  - `package-lock.json`
+  - `src/preload/index.ts`
+  - `src/preload/index.test.ts`
+  - `src/main/smokeMode.ts`
+  - `src/main/smokeMode.test.ts`
+  - `src/renderer/App.tsx`
+  - `src/renderer/styles/app-shell.css`
+  - `src/renderer/materialDesign.test.ts`
+  - `src/shared/packageScripts.test.ts`
+  - `src/shared/readme.test.ts`
+- Root-cause evidence:
+  - `ELECTRON_ENABLE_LOGGING=1 BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='正式本地数据' npx electron .` -> RED before the fix with `Unable to load preload script` and `Error: module not found: ../shared/kernelContract`; renderer fell back to preview/demo mode.
+  - Chat mode hid `.topbar`, while only `.topbar` had `-webkit-app-region: drag`, leaving the first screen without a draggable window region.
+- TDD and verification evidence:
+  - `npm test -- src/preload/index.test.ts` -> RED with the runtime `../shared/kernelContract` import identified.
+  - `npm test -- src/preload/index.test.ts src/main/smokeMode.test.ts src/renderer/materialDesign.test.ts` -> RED with expected failures for missing desktop API smoke checks and missing `window-drag-strip`.
+  - `npm test -- src/preload/index.test.ts src/main/smokeMode.test.ts src/renderer/materialDesign.test.ts` -> 3 files / 40 tests passed.
+  - `npm version 2.3.1 --no-git-tag-version` -> updated package metadata without creating a git tag.
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts src/preload/index.test.ts src/main/smokeMode.test.ts src/renderer/materialDesign.test.ts` -> 5 files / 49 tests passed.
+  - `npm run build && ELECTRON_ENABLE_LOGGING=1 BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='正式本地数据' npx electron .` -> passed; no preload load failure.
+  - `npm run pack:mac` -> packaged unsigned macOS `.app`.
+  - `ELECTRON_ENABLE_LOGGING=1 BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='正式本地数据' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> packaged app smoke passed.
+  - `npm run verify` -> 123 Vitest files / 616 tests passed, build passed, agent eval 24/24, memory eval 2/2.
+  - `npm run smoke:prod` -> passed with desktop API smoke requirement.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+- Independent QA evidence:
+  - Test engineer subagent `Erdos` reviewed the hotfix and release metadata, ran focused tests, `npm run smoke:prod`, `npm run harness:check`, and `git diff --check`, and returned `PASS` with no release blockers.
+- Release packaging evidence:
+  - `npm run dist:mac` -> generated v2.3.1 macOS `.dmg`, `.zip`, blockmaps, and `release/latest-mac.yml`.
+  - `release/mac-arm64/Zerox Agent.app/Contents/Info.plist` reports `CFBundleShortVersionString=2.3.1` and `CFBundleVersion=2.3.1`.
+  - `release/latest-mac.yml` reports `version: 2.3.1`.
+  - `release/Zerox Agent-2.3.1-arm64.dmg` -> 118M, SHA-256 `f5b6398eead07e5a5d760ee228cafc1ea88bf55151d5bf4ae0a78bcd4a2aad2f`.
+  - `release/Zerox Agent-2.3.1-arm64-mac.zip` -> 329M, SHA-256 `0f99b0e1f14f9769ad51406630f2c14b5a37ff14a3d1fcdd90c107e3d3bc1a0d`.
+  - `ELECTRON_ENABLE_LOGGING=1 BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='正式本地数据' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> packaged app smoke passed after v2.3.1 distribution build.
+
 ## 2026-06-16 P8.0 Agent Runtime Kernel Foundation
 
 - Started the v2.3.0 Agent Runtime Kernel iteration from the attached roadmap by adding P8 feature entries to `.zerox/feature_list.json` and selecting the first unfinished slice, P8.0.

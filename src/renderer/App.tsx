@@ -176,6 +176,7 @@ export function App() {
         activeSection.id === "chat" ? "is-agent-chat" : ""
       }`}
     >
+      <div className="window-drag-strip" aria-hidden="true" />
       <aside
         className="sidebar workspace-sidebar material-navigation-rail"
         aria-label="主导航"
