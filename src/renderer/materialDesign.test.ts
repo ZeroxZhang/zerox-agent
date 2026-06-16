@@ -133,6 +133,14 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".sidebar-session-item");
   });
 
+  it("keeps a draggable window strip visible on the chat-first desktop shell", () => {
+    expect(appSource).toContain("window-drag-strip");
+    expect(styles).toContain(".window-drag-strip");
+    expect(styles).toContain("-webkit-app-region: drag");
+    expect(styles).toContain(".window-drag-strip button");
+    expect(styles).toContain("-webkit-app-region: no-drag");
+  });
+
   it("renders the sidebar version from runtime metadata instead of a hardcoded value", () => {
     expect(appSource).not.toContain("v1.0.0");
     expect(appSource).toContain("getRuntimeInfo");
