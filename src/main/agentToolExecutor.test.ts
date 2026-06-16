@@ -9,7 +9,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createAgentToolExecutor } from "./agentToolExecutor";
+import { createAgentToolExecutor, getShellExecShell } from "./agentToolExecutor";
 import { buildPrimaryRunContext } from "../shared/agentWorkspace";
 import type { MemoryRecord } from "../shared/memory";
 
@@ -315,6 +315,13 @@ describe("agent tool executor", () => {
         exitCode: 0,
       },
     });
+  });
+
+  it("keeps macOS zsh behavior while using a portable shell on Linux CI", () => {
+    expect(getShellExecShell("darwin", "/bin/bash")).toBe("/bin/zsh");
+    expect(getShellExecShell("linux", "/bin/bash")).toBe("/bin/bash");
+    expect(getShellExecShell("linux", "")).toBe("/bin/sh");
+    expect(getShellExecShell("win32", "")).toBeUndefined();
   });
 
   it("executes shell commands from the run workspace", async () => {

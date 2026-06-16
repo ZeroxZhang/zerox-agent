@@ -871,7 +871,7 @@ async function executeShellCommand(
     const result = await execAsync(command, {
       timeout: timeoutMs,
       maxBuffer: 1024 * 1024,
-      shell: "/bin/zsh",
+      shell: getShellExecShell(),
       ...(signal ? { signal } : {}),
       ...(runContext ? { cwd: runContext.workspaceRoot } : {}),
     });
@@ -911,6 +911,21 @@ async function executeShellCommand(
       errorDetails: details,
     };
   }
+}
+
+export function getShellExecShell(
+  platform: NodeJS.Platform = process.platform,
+  shellEnv: string | undefined = process.env.SHELL,
+): string | undefined {
+  if (platform === "win32") {
+    return undefined;
+  }
+  if (platform === "darwin") {
+    return "/bin/zsh";
+  }
+
+  const shell = shellEnv?.trim();
+  return shell || "/bin/sh";
 }
 
 function normalizeSearchMode(value: unknown): "name" | "content" | "both" {

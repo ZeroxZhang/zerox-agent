@@ -91,8 +91,8 @@ describe("README", () => {
     expect(readme).toContain("Goal Mode 架构");
     expect(readme).toContain("artifact evidence contract");
     expect(readme).toContain("artifact evidence files");
-    expect(readme).toContain("616 tests");
-    expect(readme).toContain("616 个测试");
+    expect(readme).toContain("617 tests");
+    expect(readme).toContain("617 个测试");
     expect(readme).toContain("Current version: v2.3.1.");
     expect(readme).toContain("当前版本：v2.3.1。");
     expect(readme).toContain("command-first agent stage");

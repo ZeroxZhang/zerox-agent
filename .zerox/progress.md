@@ -1,5 +1,23 @@
 # Zerox Harness Progress
 
+## 2026-06-16 GitHub Actions Shell CI Follow-up
+
+- Investigated the red GitHub Actions `verify` run after v2.3.1 was released.
+- Confirmed the same 4 `src/main/agentToolExecutor.test.ts` shell-related failures existed in the earlier v2.3.0 PR/main runs, so this was not introduced by the desktop preload hotfix.
+- Root cause: `shell_exec` hardcoded `shell: "/bin/zsh"`, which is correct for the macOS desktop target but not portable to GitHub `ubuntu-latest`.
+- Changed `shell_exec` shell selection to preserve `/bin/zsh` on macOS while using `$SHELL` or `/bin/sh` on non-macOS platforms.
+- Added coverage for the shell selection contract.
+- Changed files:
+  - `.zerox/progress.md`
+  - `README.md`
+  - `src/main/agentToolExecutor.ts`
+  - `src/main/agentToolExecutor.test.ts`
+  - `src/shared/readme.test.ts`
+- Verification evidence:
+  - `npm test -- src/main/agentToolExecutor.test.ts` -> 1 file / 21 tests passed.
+  - `npm run verify` -> 123 Vitest files / 617 tests passed, build passed, agent eval 24/24, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+
 ## 2026-06-16 v2.3.1 Desktop Preload And Window Drag Hotfix
 
 - Fixed the packaged Electron app opening in browser preview/demo mode because the sandboxed preload failed to load after v2.3.0 added a runtime import from `../shared/kernelContract`.
