@@ -2133,3 +2133,84 @@
   - SHA-256:
     - dmg: `06b9552704bbc0e19e6a151409312d79fbe60fa467e73209b427643b9d695766`
     - zip: `38ab58b8de433a7cba1a490372556525ef55ca3ab920dce27d8b01910c1b2754`
+
+## 2026-06-17 v2.3.5 P10 Run Graph Harness iteration
+
+- Request:
+  - Study the attached Harness Engineering docs, the `oh-my-openagent` repository, and the current Zerox Agent architecture.
+  - Coordinate architecture, development, test, and user-path acceptance subagents for a new v2.3.5 major iteration.
+- Planning evidence:
+  - Attachment research emphasized Graph State vs Work State, typed Node Result, explicit Gate, Reconcile, and evidence-first UI.
+  - External `oh-my-openagent` research identified useful ideas: Core/MCP/Skills/Adapters layering, evidence directories, hook/event validation, mailbox/tasklist, and doctor/status commands.
+  - Runtime/UI/test/acceptance subagents recommended prioritizing Run Graph Truth, gate visibility, typed episode evidence, runtime-backed verification, and user-path evidence export.
+- Implementation:
+  - Added shared Run Graph contract and projector over `AgentRunRecord`, trajectory events, and kernel events.
+  - Projected runtime runs, turns, goals, milestones, model requests, tool calls, checkpoints, summaries, and explicit gate nodes.
+  - Fixed review-found projector issues: no dangling gate edges, no-`toolCallId` tool-result matching, mixed-run event filtering, and unique same-millisecond kernel evidence refs.
+  - Added Runs Inspector Run Graph summary and gate list from selected run, trajectory, and kernel evidence.
+  - Added `run-graph.json` to typed episode packages.
+  - Added typed latest-validation episode export service and wired `npm run episode:export` to build and export `run-graph.json`, `eval-candidate.json`, trajectory, verification, and metadata.
+  - Documented `--latest-validation` and Run Graph evidence export in README.
+- Changed files:
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+  - `README.md`
+  - `package.json`
+  - `scripts/export-agent-episode.mjs`
+  - `src/main/agentEpisodeExportCli.ts`
+  - `src/main/agentEpisodeExportCli.test.ts`
+  - `src/main/agentEpisodeExporter.ts`
+  - `src/main/agentEpisodeExporter.test.ts`
+  - `src/renderer/components/RunsPanel.tsx`
+  - `src/renderer/materialDesign.test.ts`
+  - `src/renderer/styles/cards.css`
+  - `src/renderer/styles/legacy.css`
+  - `src/shared/packageScripts.test.ts`
+  - `src/shared/readme.test.ts`
+  - `src/shared/runGraph.ts`
+  - `src/shared/runGraph.test.ts`
+- TDD and verification evidence:
+  - `npm test -- src/shared/runGraph.test.ts` -> RED with expected failures for missing goal/milestone projection, dangling gate edges, no-`toolCallId` tool-result matching, and mixed-run event contamination; later passed with 5 tests.
+  - `npm test -- src/renderer/materialDesign.test.ts` -> RED for missing Run Graph surface; later passed with 31 tests.
+  - `npm test -- src/main/agentEpisodeExporter.test.ts` -> RED for missing `run-graph.json`; later passed.
+  - `npm test -- src/main/agentEpisodeExportCli.test.ts` -> RED for missing typed export service; later passed.
+  - `npm test -- src/shared/runGraph.test.ts src/main/agentEpisodeExporter.test.ts src/main/agentEpisodeExportCli.test.ts src/renderer/materialDesign.test.ts src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 6 files / 47 tests passed.
+  - `npm run build` -> TypeScript and Vite production build passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run episode:export -- --help` -> build passed and CLI help documented `--latest-validation`, `run-graph.json`, and `eval-candidate.json`.
+  - `npm run verify` -> 131 files / 672 tests passed, build passed, agent eval 25/25, memory eval 2/2.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `npm run dist:mac` -> build passed and generated:
+    - `release/Zerox Agent-2.3.5-arm64.dmg` (118MB)
+    - `release/Zerox Agent-2.3.5-arm64-mac.zip` (329MB)
+    - `release/Zerox Agent-2.3.5-arm64.dmg.blockmap`
+    - `release/Zerox Agent-2.3.5-arm64-mac.zip.blockmap`
+  - SHA-256:
+    - dmg: `c4b886d09c6bd3a1985e4454d3f4b45c5e9c77cfc45d01d9137d1b0c83734bc1`
+    - zip: `11d9bf55511c3ea799a113ee290baa94c5bb24747e7441d0861182141f3d4ba6`
+  - Browser QA at `http://127.0.0.1:5173/#runs` -> desktop Run Graph rendered, no horizontal overflow, no console warn/error logs.
+  - Browser mobile QA at 390x844 -> Run Graph rendered, no horizontal overflow, no console warn/error logs, viewport reset afterward.
+
+## 2026-06-17 v2.3.5 release metadata finalization
+
+- Request:
+  - Finish the v2.3.5 iteration as a concrete versioned release state, not only an internal feature branch capability.
+- Implementation:
+  - Bumped `package.json` and `package-lock.json` from 2.3.2 to 2.3.5.
+  - Updated README English/Chinese current release labels, quarantine examples, verification counts, and v2.3.5 Run Graph Harness release notes.
+  - Updated package and README tests to assert v2.3.5 metadata.
+- Changed files:
+  - `README.md`
+  - `package.json`
+  - `package-lock.json`
+  - `src/shared/packageScripts.test.ts`
+  - `src/shared/readme.test.ts`
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+- Verification evidence:
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 2 files / 9 tests passed.
+  - `git diff --check` -> passed.
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> 131 files / 672 tests passed, build passed, agent eval 25/25, memory eval 2/2.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.

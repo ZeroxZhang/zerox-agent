@@ -1,6 +1,6 @@
 {
   "name": "zerox-agent",
-  "version": "2.3.2",
+  "version": "2.3.5",
   "description": "Zerox Agent, a local-first desktop agent built module by module.",
   "main": "dist-electron/main/main.js",
   "scripts": {
@@ -20,7 +20,7 @@
     "eval:memory": "npm run build && node scripts/run-memory-evals.mjs",
     "harness:check": "node scripts/check-harness-state.mjs",
     "harness:score": "npm run build && node scripts/run-harness-score.mjs",
-    "episode:export": "node scripts/export-agent-episode.mjs",
+    "episode:export": "npm run build && node scripts/export-agent-episode.mjs",
     "pack:mac": "npm run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --dir",
     "dist:mac": "npm run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg zip",
     "clean": "rm -rf dist dist-electron",

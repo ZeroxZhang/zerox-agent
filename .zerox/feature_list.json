@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-06-16T00:00:00.000Z",
+  "updatedAt": "2026-06-17T04:47:07.000Z",
   "features": [
     {
       "id": "P0-repo-local-harness",
@@ -884,6 +884,135 @@
         "npm run verify",
         "npm run harness:check",
         "npm run smoke:prod"
+      ]
+    },
+    {
+      "id": "P10.0-run-graph-contract",
+      "priority": 40,
+      "status": "done",
+      "title": "Run Graph shared contract and evidence projector",
+      "files": [
+        "src/shared/runGraph.ts",
+        "src/shared/runGraph.test.ts",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md"
+      ],
+      "definitionOfDone": [
+        "Shared Run Graph model represents runtime runs, goals, milestones, turns, tool calls, gates, checkpoints, and summaries",
+        "Projection merges AgentRunRecord, trajectory events, and kernel events into stable nodes, edges, gates, and evidence refs",
+        "Goal review, acceptance, and workspace sandbox denials are represented as explicit graph gates",
+        "Graph edges never point at missing nodes, including gate nodes",
+        "Tool results without toolCallId are matched to the latest same-name tool call",
+        "Mixed-run event streams are filtered and same-millisecond kernel events keep distinct evidence refs",
+        "Focused tests cover runtime/tool/checkpoint projection, gate projection, and goal/milestone dependency projection"
+      ],
+      "verification": [
+        "npm test -- src/shared/runGraph.test.ts",
+        "npm run harness:check"
+      ]
+    },
+    {
+      "id": "P10.1-run-graph-runs-visibility",
+      "priority": 41,
+      "status": "done",
+      "title": "Runs panel evidence-backed Run Graph visibility",
+      "files": [
+        "src/renderer/components/RunsPanel.tsx",
+        "src/renderer/materialDesign.test.ts",
+        "src/renderer/styles/legacy.css",
+        "src/renderer/styles/cards.css",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md"
+      ],
+      "definitionOfDone": [
+        "Runs Inspector projects the selected run, trajectory, and kernel events into one Run Graph",
+        "Run Graph summary shows node, edge, gate, and evidence counts",
+        "Goal review, acceptance, and sandbox gates are visible with status labels and source refs",
+        "UI guard tests cover the Run Graph surface and styling hooks"
+      ],
+      "verification": [
+        "npm test -- src/renderer/materialDesign.test.ts",
+        "npm run build",
+        "npm run harness:check"
+      ]
+    },
+    {
+      "id": "P10.2-run-graph-episode-evidence",
+      "priority": 42,
+      "status": "done",
+      "title": "Episode exports include Run Graph evidence",
+      "files": [
+        "src/main/agentEpisodeExporter.ts",
+        "src/main/agentEpisodeExporter.test.ts",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md"
+      ],
+      "definitionOfDone": [
+        "Episode packages include run-graph.json generated from run, trajectory, and optional kernel events",
+        "Run Graph gate evidence is preserved in exported packages",
+        "Episode metadata file count includes the new Run Graph artifact",
+        "Focused exporter tests cover the new artifact"
+      ],
+      "verification": [
+        "npm test -- src/main/agentEpisodeExporter.test.ts",
+        "npm run build",
+        "npm run harness:check"
+      ]
+    },
+    {
+      "id": "P10.3-latest-validation-episode-export",
+      "priority": 43,
+      "status": "done",
+      "title": "Latest validation episode export CLI",
+      "files": [
+        "README.md",
+        "package.json",
+        "scripts/export-agent-episode.mjs",
+        "src/main/agentEpisodeExportCli.ts",
+        "src/main/agentEpisodeExportCli.test.ts",
+        "src/shared/packageScripts.test.ts",
+        "src/shared/readme.test.ts",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md"
+      ],
+      "definitionOfDone": [
+        "episode:export builds the typed main-process exporter before running the CLI",
+        "CLI supports explicit --run-id and --latest-validation from agent-validation.json",
+        "Exported packages are written from createAgentEpisodePackage and include run-graph.json plus eval-candidate.json",
+        "README documents latest validation evidence export and Run Graph artifact"
+      ],
+      "verification": [
+        "npm test -- src/main/agentEpisodeExportCli.test.ts src/main/agentEpisodeExporter.test.ts",
+        "npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts",
+        "npm run build",
+        "npm run harness:check"
+      ]
+    },
+    {
+      "id": "P10.4-v2.3.5-release-metadata",
+      "priority": 44,
+      "status": "done",
+      "title": "v2.3.5 release metadata and documentation",
+      "files": [
+        "README.md",
+        "package.json",
+        "package-lock.json",
+        "src/shared/packageScripts.test.ts",
+        "src/shared/readme.test.ts",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md"
+      ],
+      "definitionOfDone": [
+        "Package metadata reports version 2.3.5",
+        "README current release, current version, artifact names, and verification counts match v2.3.5",
+        "README documents the Run Graph Harness release notes in English and Chinese",
+        "Package and README tests assert the v2.3.5 metadata"
+      ],
+      "verification": [
+        "npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check"
       ]
     }
   ]

@@ -8,7 +8,7 @@ type PackageJson = {
 };
 
 describe("package scripts", () => {
-  it("sets release metadata to v2.3.2", () => {
+  it("sets release metadata to v2.3.5", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -16,9 +16,9 @@ describe("package scripts", () => {
       readFileSync(path.join(process.cwd(), "package-lock.json"), "utf8"),
     ) as { version?: string; packages?: Record<string, { version?: string }> };
 
-    expect(packageJson.version).toBe("2.3.2");
-    expect(packageLock.version).toBe("2.3.2");
-    expect(packageLock.packages?.[""]?.version).toBe("2.3.2");
+    expect(packageJson.version).toBe("2.3.5");
+    expect(packageLock.version).toBe("2.3.5");
+    expect(packageLock.packages?.[""]?.version).toBe("2.3.5");
   });
 
   it("exposes a production start command for the built Electron app", () => {
@@ -79,7 +79,8 @@ describe("package scripts", () => {
     expect(packageJson.scripts).toMatchObject({
       "harness:check": "node scripts/check-harness-state.mjs",
       "harness:score": "npm run build && node scripts/run-harness-score.mjs",
-      "episode:export": "node scripts/export-agent-episode.mjs",
+      "episode:export":
+        "npm run build && node scripts/export-agent-episode.mjs",
     });
   });
 });
