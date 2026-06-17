@@ -8,7 +8,7 @@ type PackageJson = {
 };
 
 describe("package scripts", () => {
-  it("sets release metadata to v2.3.1", () => {
+  it("sets release metadata to v2.3.2", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -16,9 +16,9 @@ describe("package scripts", () => {
       readFileSync(path.join(process.cwd(), "package-lock.json"), "utf8"),
     ) as { version?: string; packages?: Record<string, { version?: string }> };
 
-    expect(packageJson.version).toBe("2.3.1");
-    expect(packageLock.version).toBe("2.3.1");
-    expect(packageLock.packages?.[""]?.version).toBe("2.3.1");
+    expect(packageJson.version).toBe("2.3.2");
+    expect(packageLock.version).toBe("2.3.2");
+    expect(packageLock.packages?.[""]?.version).toBe("2.3.2");
   });
 
   it("exposes a production start command for the built Electron app", () => {

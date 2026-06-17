@@ -148,6 +148,108 @@ describe("app container goal drafts", () => {
     });
   });
 
+  it("appends a final assistant result when a background goal is achieved", async () => {
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const session = await container.chatSessionStore().appendMessage({
+      role: "user",
+      content: "/目标 帮我看一下我chrome浏览器的书签都有哪些",
+    });
+    const goal = createStoredGoal({
+      id: "goal_terminal_result",
+      chatSessionId: session.session.id,
+      status: "waiting_for_review",
+      description: "帮我看一下我chrome浏览器的书签都有哪些",
+      successCriteria: [
+        {
+          id: "criterion_goal_progress",
+          description: "所有里程碑都已完成",
+          acceptanceChecks: [
+            {
+              id: "check_goal_progress",
+              kind: "assertion",
+              description: "Goal progress shows all milestones accepted.",
+              params: {
+                artifactRef: "goalProgress",
+                path: "allMilestonesAccepted",
+                equals: true,
+              },
+              requiresEvidence: false,
+            },
+          ],
+        },
+      ],
+      milestones: [
+        {
+          id: "milestone_bookmarks",
+          description: "读取 Chrome 书签",
+          dependsOn: [],
+          successCriteria: [
+            {
+              id: "criterion_bookmarks",
+              description: "Chrome 书签已读取",
+              acceptanceChecks: [
+                {
+                  id: "check_bookmarks",
+                  kind: "assertion",
+                  description: "Bookmark summary exists.",
+                  params: {
+                    artifactRef: "milestoneProgress",
+                    path: "hasRun",
+                    equals: true,
+                  },
+                  requiresEvidence: false,
+                },
+              ],
+            },
+          ],
+          state: "accepted",
+          runIds: ["goal_run_bookmarks"],
+          attempts: 1,
+          lastRunStatus: "succeeded",
+          lastRunSummary: "Chrome 书签：OpenAI https://openai.com",
+          lastAcceptanceSummary: "Chrome 书签清单已完成。",
+        },
+      ],
+    });
+
+    await container.agentGoalStore().save(goal);
+    await container.chatSessionStore().attachGoal(session.session.id, {
+      id: goal.id,
+      description: goal.description,
+      status: "waiting_for_review",
+    });
+
+    const progress = new Promise<GoalProgressEvent>((resolve) => {
+      const unsubscribe = container.onGoalProgressEvent((event) => {
+        if (event.goalId === goal.id && event.status === "achieved") {
+          unsubscribe();
+          resolve(event);
+        }
+      });
+    });
+
+    const result = await container.goalChatService().resolveReview(goal.id, {
+      kind: "approve_continue",
+    });
+    expect(result.status).toBe("achieved");
+    await progress;
+
+    const loadedSession = await container.chatSessionStore().get(session.session.id);
+    const terminalMessage = loadedSession?.messages.find(
+      (message) =>
+        message.role === "assistant" &&
+        message.goalEventRef === "goal-terminal:goal_terminal_result:achieved",
+    );
+    expect(terminalMessage?.content).toContain("目标已达成");
+    expect(terminalMessage?.content).toContain("Chrome 书签");
+    expect(terminalMessage?.content).toContain("https://openai.com");
+    expect(terminalMessage?.goalId).toBe(goal.id);
+  });
+
   it("repairs stale persisted chat goal summaries from the goal store when sessions load", async () => {
     const container = createAppContainer({
       async requestToolApproval() {
@@ -198,15 +300,15 @@ describe("app container goal drafts", () => {
 });
 
 function createStoredGoal(
-  overrides: Pick<Goal, "id" | "chatSessionId" | "status">,
+  overrides: Pick<Goal, "id" | "chatSessionId" | "status"> & Partial<Goal>,
 ): Goal {
   const timestamp = "2026-06-14T15:00:00.000Z";
 
   return {
     id: overrides.id,
     chatSessionId: overrides.chatSessionId,
-    description: "回复 smoke 短句",
-    successCriteria: [
+    description: overrides.description ?? "回复 smoke 短句",
+    successCriteria: overrides.successCriteria ?? [
       {
         id: "criterion_smoke",
         description: "回复 smoke 短句",
@@ -224,7 +326,7 @@ function createStoredGoal(
         ],
       },
     ],
-    milestones: [
+    milestones: overrides.milestones ?? [
       {
         id: "milestone_smoke",
         description: "回复 smoke 短句",
@@ -253,21 +355,23 @@ function createStoredGoal(
       },
     ],
     status: overrides.status,
-    budget: {
+    budget: overrides.budget ?? {
       maxIterations: 2,
       maxToolCalls: 4,
       maxWallClockMs: 60_000,
       maxReplans: 1,
     },
-    budgetUsage: {
+    budgetUsage: overrides.budgetUsage ?? {
       iterations: 0,
       toolCalls: 0,
       wallClockMs: 0,
       tokens: 0,
       replans: 0,
     },
-    reviewPolicy: "review_final_only",
-    planVersion: 1,
+    reviewPolicy: overrides.reviewPolicy ?? "review_final_only",
+    planVersion: overrides.planVersion ?? 1,
+    ...(overrides.stopReason ? { stopReason: overrides.stopReason } : {}),
+    ...(overrides.workspaceId ? { workspaceId: overrides.workspaceId } : {}),
     createdAt: timestamp,
     updatedAt: timestamp,
   };

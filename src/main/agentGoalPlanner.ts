@@ -10,6 +10,7 @@ import {
   type Milestone,
   type SuccessCriterion,
 } from "../shared/agentGoal";
+import { classifyTaskFrame } from "../shared/agentTaskStrategy";
 
 export type AgentGoalPlanner = {
   plan(
@@ -71,6 +72,14 @@ export function createAgentGoalPlanner(options: {
 
   return {
     async plan(goalDescription, planOptions) {
+      const nativePlan = createNativeChromeBookmarkPlan(
+        goalDescription,
+        planOptions,
+      );
+      if (nativePlan) {
+        return nativePlan;
+      }
+
       return requestMilestones({
         prompt: buildPlanPrompt(goalDescription, planOptions),
         successCriteria: planOptions.successCriteria,
@@ -107,6 +116,82 @@ export function createAgentGoalPlanner(options: {
   };
 }
 
+function createNativeChromeBookmarkPlan(
+  goalDescription: string,
+  options: {
+    successCriteria: SuccessCriterion[];
+    availableTools: string[];
+  },
+): Milestone[] | null {
+  if (!isChromeBookmarkGoal(goalDescription, options.availableTools)) {
+    return null;
+  }
+  if (!isEvidenceBackedModelReviewOnly(options.successCriteria)) {
+    return null;
+  }
+
+  return [
+    {
+      id: "extract_chrome_bookmarks",
+      description:
+        "Read Chrome bookmarks with chrome_bookmarks_read, present a concise preview, and write complete bookmark_list.md and goalEvidence.md artifacts.",
+      dependsOn: [],
+      successCriteria: [
+        ...cloneSuccessCriteria(options.successCriteria),
+        {
+          id: "criterion_chrome_bookmark_artifacts",
+          description: "Chrome bookmark artifacts are written.",
+          acceptanceChecks: [
+            {
+              id: "check_bookmark_list_artifact",
+              kind: "file_exists",
+              description: "Complete Chrome bookmark list artifact exists.",
+              params: { path: "bookmark_list.md" },
+              requiresEvidence: false,
+            },
+            {
+              id: "check_goal_evidence_artifact",
+              kind: "file_exists",
+              description: "Goal evidence artifact exists.",
+              params: { path: "goalEvidence.md" },
+              requiresEvidence: false,
+            },
+          ],
+        },
+      ],
+      state: "ready",
+      runIds: [],
+      attempts: 0,
+    },
+  ];
+}
+
+function isChromeBookmarkGoal(
+  goalDescription: string,
+  availableTools: string[],
+): boolean {
+  return (
+    availableTools.includes("chrome_bookmarks_read") &&
+    /(chrome|浏览器).*(bookmark|bookmarks|书签)|(?:bookmark|bookmarks|书签).*(chrome|浏览器)/i.test(
+      goalDescription,
+    )
+  );
+}
+
+function isEvidenceBackedModelReviewOnly(criteria: SuccessCriterion[]): boolean {
+  const checks = criteria.flatMap((criterion) => criterion.acceptanceChecks);
+  return (
+    checks.length > 0 &&
+    checks.every(
+      (check) => check.kind === "model_review" && check.requiresEvidence,
+    )
+  );
+}
+
+function cloneSuccessCriteria(criteria: SuccessCriterion[]): SuccessCriterion[] {
+  return JSON.parse(JSON.stringify(criteria)) as SuccessCriterion[];
+}
+
 function buildPlanPrompt(
   goalDescription: string,
   options: {
@@ -115,10 +200,19 @@ function buildPlanPrompt(
     availableSkills: string[];
   },
 ): string {
+  const taskFrame = classifyTaskFrame(goalDescription);
+
   return [
     "Decompose this high-level goal into bounded milestones.",
     "",
     `Goal: ${goalDescription}`,
+    "",
+    "Task strategy frame:",
+    JSON.stringify(taskFrame),
+    "Use the task strategy frame as a planning guard. Do not decompose small deterministic quick-action work into Goal Mode milestones.",
+    "If the recommendedRuntime is quick_action, produce the smallest evidence-bearing milestone and avoid fragmented tool-heavy plans.",
+    "Do not create clarification-only milestones that merely ask the user what they meant. If the user already named a concrete target, execute read-only inspection directly.",
+    ...buildDomainToolGuidance(goalDescription, options.availableTools),
     "",
     `Goal success criteria: ${JSON.stringify(options.successCriteria)}`,
     `Available tools: ${options.availableTools.join(", ") || "none"}`,
@@ -129,6 +223,21 @@ function buildPlanPrompt(
     "",
     "Every milestone must include at least one success criterion with at least one acceptance check.",
   ].join("\n");
+}
+
+function buildDomainToolGuidance(
+  goalDescription: string,
+  availableTools: string[],
+): string[] {
+  if (isChromeBookmarkGoal(goalDescription, availableTools)) {
+    return [
+      "Chrome/browser bookmark goals must use chrome_bookmarks_read as the primary evidence tool.",
+      "If bookmark evidence is needed, use artifact:bookmark_list or artifact:goalEvidence; chrome_bookmarks_read writes bookmark_list.md and goalEvidence.md during Goal execution.",
+      "Do not plan file_read, file_stat, shell_exec, jq, python, or generated scripts for Chrome Bookmarks JSON parsing when chrome_bookmarks_read is available.",
+    ];
+  }
+
+  return [];
 }
 
 function buildReplanPrompt(goal: Goal, reason: string): string {
@@ -301,13 +410,37 @@ function normalizeAcceptanceCheck(value: unknown): AcceptanceCheck {
   }
 
   const kind = normalizeAcceptanceCheckKind(value.kind);
+  const requiresEvidence = value.requiresEvidence === true;
+  const params = normalizeAcceptanceCheckParams(kind, requiresEvidence, value.params);
   return {
     id: typeof value.id === "string" && value.id.trim() ? value.id.trim() : "check",
     kind,
     description:
       typeof value.description === "string" ? value.description.trim() : "",
-    params: isRecord(value.params) ? value.params : {},
-    requiresEvidence: value.requiresEvidence === true,
+    params,
+    requiresEvidence,
+  };
+}
+
+function normalizeAcceptanceCheckParams(
+  kind: AcceptanceCheckKind,
+  requiresEvidence: boolean,
+  value: unknown,
+): Record<string, unknown> {
+  const params = isRecord(value) ? { ...value } : {};
+  if (kind !== "model_review" || !requiresEvidence) {
+    return params;
+  }
+
+  const evidenceRefs = Array.isArray(params.evidenceRefs)
+    ? params.evidenceRefs.filter((ref): ref is string =>
+        typeof ref === "string" && ref.trim().length > 0
+      )
+    : [];
+
+  return {
+    ...params,
+    evidenceRefs: evidenceRefs.length ? evidenceRefs : ["artifact:goalEvidence"],
   };
 }
 

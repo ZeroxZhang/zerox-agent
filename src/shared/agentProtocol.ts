@@ -46,9 +46,15 @@ const supportedTools = new Set<AgentToolName>([
   "file_list",
   "file_stat",
   "file_search",
+  "file_inventory",
+  "file_move_plan",
+  "file_apply_moves",
+  "file_verify_moves",
+  "file_rollback_moves",
   "file_read",
   "tool_result_read",
   "file_write",
+  "chrome_bookmarks_read",
   "code_search",
   "git_status",
   "git_diff",
@@ -136,6 +142,95 @@ export function buildToolDefinitions(): ToolDefinition[] {
     {
       type: "function",
       function: {
+        name: "file_inventory",
+        description:
+          "批量读取目录清单和文件元信息，用于整理、迁移或审计前的预览。不修改文件。",
+        parameters: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "要盘点的目录绝对路径",
+            },
+          },
+          required: ["path"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "file_move_plan",
+        description:
+          "为本地目录整理生成可审核移动预览，不覆盖目标文件，不修改文件。",
+        parameters: {
+          type: "object",
+          properties: {
+            targetDir: {
+              type: "string",
+              description: "要整理的目录绝对路径",
+            },
+          },
+          required: ["targetDir"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "file_apply_moves",
+        description:
+          "执行已经审核的本地文件移动计划。会先写事务日志，可用事务回滚。仅在用户确认预览后调用。",
+        parameters: {
+          type: "object",
+          properties: {
+            preview: {
+              type: "object",
+              description: "file_move_plan 返回的 preview 对象",
+            },
+          },
+          required: ["preview"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "file_verify_moves",
+        description: "验证本地文件移动事务的目标文件存在且源文件已移走。",
+        parameters: {
+          type: "object",
+          properties: {
+            transaction: {
+              type: "object",
+              description: "file_apply_moves 返回的 transaction 对象",
+            },
+          },
+          required: ["transaction"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "file_rollback_moves",
+        description:
+          "按事务日志反向移动文件，回滚 file_apply_moves 的本地整理结果。仅在需要恢复时调用。",
+        parameters: {
+          type: "object",
+          properties: {
+            transaction: {
+              type: "object",
+              description: "file_apply_moves 返回的 transaction 对象",
+            },
+          },
+          required: ["transaction"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
         name: "file_read",
         description:
           "读取指定文件的内容并返回文本。仅读取已授权的路径；不要用它读取 tool-result-refs 引用。",
@@ -188,6 +283,38 @@ export function buildToolDefinitions(): ToolDefinition[] {
             },
           },
           required: ["path", "content"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "chrome_bookmarks_read",
+        description:
+          "读取本机 Google Chrome 书签并返回结构化预览、统计和 Markdown 摘要；在 Goal 运行中会自动写入完整 artifact:bookmark_list / bookmark_list.md 和 artifact:goalEvidence / goalEvidence.md。用于 Chrome/浏览器书签任务；不要用 file_read 或 shell_exec 手动解析 Chrome Bookmarks JSON。",
+        parameters: {
+          type: "object",
+          properties: {
+            profile: {
+              type: "string",
+              description:
+                "可选 Chrome profile 名称，例如 Default 或 Profile 1；省略时扫描所有包含 Bookmarks 文件的 profile",
+            },
+            chromeUserDataDir: {
+              type: "string",
+              description:
+                "可选 Chrome 用户数据目录；默认使用当前系统的 Google Chrome 用户数据目录",
+            },
+            bookmarksPath: {
+              type: "string",
+              description:
+                "可选：直接指定某个 Chrome Bookmarks JSON 文件路径，用于测试或非标准 profile",
+            },
+            maxBookmarks: {
+              type: "number",
+              description: "最多返回多少条书签明细，默认 5000，最大 10000",
+            },
+          },
         },
       },
     },
@@ -503,7 +630,7 @@ export function buildAgentSystemPrompt(
   const profile = selectAgentPromptProfile(options.modelId);
   return [
     "你是一个本地桌面 AI agent 的运行时核心。",
-    "你可以调用工具来完成任务：列出目录、读取元信息、搜索文件、读写文件、读取大型工具结果引用、搜索代码、读取 git 状态和 diff、运行已授权测试、检索本地记忆、搜索网页、抓取网页内容、记录引用、写 citation-backed Markdown 报告、执行受权 shell 命令。",
+    "你可以调用工具来完成任务：列出目录、读取元信息、搜索文件、读写文件、读取大型工具结果引用、读取 Chrome 书签、搜索代码、读取 git 状态和 diff、运行已授权测试、检索本地记忆、搜索网页、抓取网页内容、记录引用、写 citation-backed Markdown 报告、执行受权 shell 命令。",
     "",
     "运行环境：",
     `- Model profile: ${profile}`,
@@ -515,7 +642,8 @@ export function buildAgentSystemPrompt(
     ...buildModelProfileGuidance(profile),
     "",
     "工作原则：",
-    "- 文件诊断优先使用 file_list、file_stat、file_search、file_read；只有原生工具无法完成时再使用 shell_exec。",
+    "- 文件诊断优先使用 file_list、file_stat、file_search、file_read；本地文件整理优先使用 file_inventory、file_move_plan、file_apply_moves、file_verify_moves；只有原生工具无法完成时再使用 shell_exec。",
+    "- Chrome/浏览器书签读取必须优先使用 chrome_bookmarks_read；它会自动产出完整 artifact:bookmark_list 和 artifact:goalEvidence，不要用 file_read/file_stat/shell_exec 读取或解析 Chrome Bookmarks。",
     "- 当工具结果包含 result_ref 或 tool-result-refs/... 时，必须使用 tool_result_read 读取完整工具结果，不要把引用路径传给 file_read。",
     "- 代码工程优先使用 code_search、git_status、git_diff、test_run；只有这些原生工具无法完成时再申请 shell_exec。",
     "- 研究写作优先使用 web_fetch_document、citation_record、citation_coverage_check、markdown_report_write；报告摘要必须区分 sourced facts 和 model inference。",

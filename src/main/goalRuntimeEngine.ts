@@ -207,6 +207,7 @@ export function createGoalRuntimeEngine(options: {
           toolResultOffloadStore: options.toolResultOffloadStore,
           toolResultOffloadThreshold: options.toolResultOffloadThreshold,
           pauseOnFailureLoop: true,
+          pauseOnStrategyGuard: true,
           ...(runOptions?.signal ? { signal: runOptions.signal } : {}),
           onTurn(turn, phase) {
             void appendTrajectory(runId, "model_request", {
@@ -263,6 +264,23 @@ export function createGoalRuntimeEngine(options: {
                 "executing",
                 ok ? `Tool completed: ${toolName}` : `Tool failed: ${toolName}`,
                 { ...payload, toolName },
+              ),
+            );
+          },
+          onStrategyGuard(event) {
+            void appendTrajectory(runId, "strategy_guard_triggered", {
+              ...payload,
+              ...event,
+            }, false);
+            events.push(
+              createEvent(
+                event.severity === "warn" ? "warn" : "info",
+                "reflecting",
+                `Strategy guard triggered: ${event.code}`,
+                {
+                  ...payload,
+                  ...event,
+                },
               ),
             );
           },

@@ -6,9 +6,15 @@ export type AgentToolName =
   | "file_list"
   | "file_stat"
   | "file_search"
+  | "file_inventory"
+  | "file_move_plan"
+  | "file_apply_moves"
+  | "file_verify_moves"
+  | "file_rollback_moves"
   | "file_read"
   | "tool_result_read"
   | "file_write"
+  | "chrome_bookmarks_read"
   | "code_search"
   | "git_status"
   | "git_diff"
@@ -215,6 +221,36 @@ export function authorizeToolCall(
         normalized.files.read,
         "file_search 根目录不在已授权可读目录内。",
       );
+    case "file_inventory":
+      return authorizeFilePath(
+        String(request.args.path ?? ""),
+        normalized.files.read,
+        "file_inventory 路径不在已授权可读目录内。",
+      );
+    case "file_move_plan":
+      return authorizeFilePath(
+        String(request.args.targetDir ?? ""),
+        normalized.files.read,
+        "file_move_plan 目标目录不在已授权可读目录内。",
+      );
+    case "file_apply_moves":
+      return authorizeFilePath(
+        getOrganizerRoot(request.args),
+        normalized.files.write,
+        "file_apply_moves 根目录不在已授权可写目录内。",
+      );
+    case "file_verify_moves":
+      return authorizeFilePath(
+        getOrganizerRoot(request.args),
+        normalized.files.read,
+        "file_verify_moves 根目录不在已授权可读目录内。",
+      );
+    case "file_rollback_moves":
+      return authorizeFilePath(
+        getOrganizerRoot(request.args),
+        normalized.files.write,
+        "file_rollback_moves 根目录不在已授权可写目录内。",
+      );
     case "file_read":
       if (isSafeToolResultRef(String(request.args.path ?? ""))) {
         return allow("允许读取本次运行的工具结果引用。");
@@ -233,6 +269,12 @@ export function authorizeToolCall(
         String(request.args.path ?? ""),
         normalized.files.write,
         "file_write 路径不在已授权可写目录内。",
+      );
+    case "chrome_bookmarks_read":
+      return authorizeFilePath(
+        getChromeBookmarksAuthorizationPath(request.args),
+        normalized.files.read,
+        "chrome_bookmarks_read Chrome 书签目录不在已授权可读目录内。",
       );
     case "code_search":
       return authorizeWorkspaceRoot(
@@ -330,6 +372,8 @@ export function authorizeToolCallWithinRunContext(
 
   if (
     (request.toolName === "file_write" ||
+      request.toolName === "file_apply_moves" ||
+      request.toolName === "file_rollback_moves" ||
       request.toolName === "markdown_report_write") &&
     runContext.sandbox.mode === "read_only"
   ) {
@@ -405,6 +449,35 @@ function authorizeWorkspaceRoot(
   return allowed ? allow("路径在已授权范围内。") : deny(deniedReason);
 }
 
+function getOrganizerRoot(args: Record<string, unknown>): string {
+  if (typeof args.root === "string") {
+    return args.root;
+  }
+  if (isRecord(args.preview) && typeof args.preview.root === "string") {
+    return args.preview.root;
+  }
+  if (isRecord(args.transaction) && typeof args.transaction.root === "string") {
+    return args.transaction.root;
+  }
+  return "";
+}
+
+function getChromeBookmarksAuthorizationPath(args: Record<string, unknown>): string {
+  if (typeof args.bookmarksPath === "string" && args.bookmarksPath.trim()) {
+    return args.bookmarksPath;
+  }
+
+  if (typeof args.chromeUserDataDir === "string" && args.chromeUserDataDir.trim()) {
+    return args.chromeUserDataDir;
+  }
+
+  return "~/Library/Application Support/Google/Chrome";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object";
+}
+
 function isSafeToolResultRef(ref: string): boolean {
   return /^tool-result-refs\/[a-zA-Z0-9._-]+\.json$/.test(ref);
 }
@@ -417,6 +490,11 @@ function authorizeWorkspaceFileRequest(
     request.toolName !== "file_list" &&
     request.toolName !== "file_stat" &&
     request.toolName !== "file_search" &&
+    request.toolName !== "file_inventory" &&
+    request.toolName !== "file_move_plan" &&
+    request.toolName !== "file_apply_moves" &&
+    request.toolName !== "file_verify_moves" &&
+    request.toolName !== "file_rollback_moves" &&
     request.toolName !== "file_read" &&
     request.toolName !== "file_write" &&
     request.toolName !== "code_search" &&
@@ -430,6 +508,8 @@ function authorizeWorkspaceFileRequest(
 
   const access =
     request.toolName === "file_write" ||
+    request.toolName === "file_apply_moves" ||
+    request.toolName === "file_rollback_moves" ||
     request.toolName === "markdown_report_write"
       ? "write"
       : "read";
@@ -443,6 +523,12 @@ function authorizeWorkspaceFileRequest(
       ? request.args.workspaceRoot ?? ""
       : request.toolName === "file_search"
       ? request.args.root ?? ""
+      : request.toolName === "file_move_plan"
+      ? request.args.targetDir ?? ""
+      : request.toolName === "file_apply_moves" ||
+        request.toolName === "file_verify_moves" ||
+        request.toolName === "file_rollback_moves"
+      ? getOrganizerRoot(request.args)
       : request.args.path ?? "",
   );
   if (!requestedPath) {

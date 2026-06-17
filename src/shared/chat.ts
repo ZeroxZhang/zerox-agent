@@ -84,7 +84,7 @@ export type ChatAgentStatus =
   | {
       state: "paused";
       runId?: string;
-      reason: "turn_limit" | "tool_failure_loop";
+      reason: "turn_limit" | "tool_failure_loop" | "strategy_guard";
       maxTurns: number;
       toolCallsExecuted: number;
       message: string;

@@ -55,6 +55,20 @@ export function summarizeTrajectoryEvent(
     };
   }
 
+  if (event.type === "strategy_guard_triggered") {
+    return {
+      eventId: event.id,
+      tone: "warn",
+      title: "策略守护",
+      detail: `${readString(
+        event.payload.code,
+        "strategy_guard",
+      )}: ${readString(event.payload.toolName, "tool")} 连续触发 ${readNumber(
+        event.payload.count,
+      )} 次，建议切换批量或递归策略`,
+    };
+  }
+
   return null;
 }
 

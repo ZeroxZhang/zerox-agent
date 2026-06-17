@@ -71,6 +71,100 @@ describe("goal chat service", () => {
     ]);
   });
 
+  it("routes small deterministic quick-action goals to review without planning milestones", async () => {
+    const savedGoals: Goal[] = [];
+    const ledgerEvents: ProgressLedgerEvent[] = [];
+    let plannerCalls = 0;
+    const service = createGoalChatService({
+      controller: createController(),
+      goalStore: createGoalStore({ savedGoals, ledgerEvents }),
+      planner: {
+        async plan() {
+          plannerCalls += 1;
+          throw new Error("Planner should not be called for quick actions.");
+        },
+        async replan() {
+          throw new Error("Unexpected replan.");
+        },
+      },
+      createId: () => "goal_quick_action",
+      now: () => "2026-06-12T08:00:00.000Z",
+    });
+
+    const summary = await service.createFromChat({
+      sessionId: "chat_1",
+      originMessageId: "message_1",
+      description: "整理 /Users/bytedance/Downloads 这个文件夹",
+    });
+
+    expect(plannerCalls).toBe(0);
+    expect(summary).toEqual({
+      id: "goal_quick_action",
+      description: "整理 /Users/bytedance/Downloads 这个文件夹",
+      status: "waiting_for_review",
+    });
+    expect(savedGoals[0]).toMatchObject({
+      id: "goal_quick_action",
+      status: "waiting_for_review",
+      milestones: [
+        {
+          id: "milestone_quick_action_review",
+          description:
+            "Review local_file_organize quick-action plan before executing: 整理 /Users/bytedance/Downloads 这个文件夹",
+          state: "pending",
+        },
+      ],
+    });
+    expect(ledgerEvents).toEqual([
+      {
+        at: "2026-06-12T08:00:00.000Z",
+        kind: "review_requested",
+        summary:
+          "Quick-action local_file_organize recommended before Goal Mode execution: files/deterministic/moves_data via file_inventory, file_move_plan, file_apply_moves, file_verify_moves.",
+      },
+    ]);
+  });
+
+  it("passes available native tools into goal planning", async () => {
+    const savedGoals: Goal[] = [];
+    const ledgerEvents: ProgressLedgerEvent[] = [];
+    let plannedTools: string[] = [];
+    const service = createGoalChatService({
+      controller: createController(),
+      goalStore: createGoalStore({ savedGoals, ledgerEvents }),
+      planner: {
+        async plan(description, planOptions) {
+          plannedTools = planOptions.availableTools;
+          return [
+            {
+              id: "milestone_chrome_bookmarks",
+              description,
+              dependsOn: [],
+              successCriteria: planOptions.successCriteria,
+              state: "ready",
+              runIds: [],
+              attempts: 0,
+            },
+          ];
+        },
+        async replan() {
+          throw new Error("Unexpected replan.");
+        },
+      },
+      getAvailableTools: () => ["chrome_bookmarks_read", "file_read"],
+      createId: () => "goal_chrome_bookmarks",
+      now: () => "2026-06-12T08:00:00.000Z",
+    });
+
+    await service.createFromChat({
+      sessionId: "chat_1",
+      originMessageId: "message_1",
+      description: "看一下 Chrome 浏览器的书签",
+    });
+
+    expect(plannedTools).toEqual(["chrome_bookmarks_read", "file_read"]);
+  });
+
   it("uses the goal controller when resuming a chat goal", async () => {
     const resumed: string[] = [];
     const service = createGoalChatService({

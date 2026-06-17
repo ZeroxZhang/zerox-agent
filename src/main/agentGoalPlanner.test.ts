@@ -17,6 +17,23 @@ const criterion: SuccessCriterion = {
   ],
 };
 
+const modelReviewCriterion: SuccessCriterion = {
+  id: "criterion_goal_review",
+  description: "Chrome bookmarks are summarized.",
+  acceptanceChecks: [
+    {
+      id: "check_bookmarks_review",
+      kind: "model_review",
+      description: "Judge confirms bookmark summary.",
+      params: {
+        condition: "Chrome bookmarks are summarized.",
+        evidenceRefs: ["artifact:goalEvidence"],
+      },
+      requiresEvidence: true,
+    },
+  ],
+};
+
 describe("agent goal planner", () => {
   it("decomposes a natural-language goal into acceptance-bearing milestones", async () => {
     const requests: ChatCompletionRequest[] = [];
@@ -69,6 +86,94 @@ describe("agent goal planner", () => {
         dependsOn: ["milestone_research"],
         successCriteria: [criterion],
         state: "pending",
+        runIds: [],
+        attempts: 0,
+      },
+    ]);
+  });
+
+  it("injects task strategy guidance into the planning prompt", async () => {
+    const requests: ChatCompletionRequest[] = [];
+    const planner = createAgentGoalPlanner({
+      chatClient: createFakeChatClient([
+        {
+          milestones: [
+            {
+              id: "milestone_inventory",
+              description: "Inventory the folder.",
+              dependsOn: [],
+              successCriteria: [criterion],
+            },
+          ],
+        },
+      ], requests),
+      modelProfile: fakeModelProfile,
+    });
+
+    await planner.plan("整理 /Users/bytedance/Downloads 这个文件夹", {
+      successCriteria: [criterion],
+      availableTools: ["file_list", "shell_exec"],
+      availableSkills: ["local-file-organizer"],
+    });
+
+    const prompt = requests[0].messages[0]?.content;
+    expect(prompt).toContain("Task strategy frame:");
+    expect(prompt).toContain('"domain":"files"');
+    expect(prompt).toContain('"recommendedRuntime":"quick_action"');
+    expect(prompt).toContain("/Users/bytedance/Downloads");
+    expect(prompt).toContain(
+      "Do not decompose small deterministic quick-action work into Goal Mode milestones.",
+    );
+    expect(prompt).toContain(
+      "Do not create clarification-only milestones that merely ask the user what they meant.",
+    );
+  });
+
+  it("creates a single native milestone for Chrome bookmark goals", async () => {
+    const requests: ChatCompletionRequest[] = [];
+    const planner = createAgentGoalPlanner({
+      chatClient: createFakeChatClient([], requests),
+      modelProfile: fakeModelProfile,
+      maxPlanAttempts: 1,
+    });
+
+    const milestones = await planner.plan("看一下 Chrome 浏览器的书签", {
+      successCriteria: [modelReviewCriterion],
+      availableTools: ["chrome_bookmarks_read", "file_read", "tool_result_read"],
+      availableSkills: [],
+    });
+
+    expect(requests).toHaveLength(0);
+    expect(milestones).toEqual([
+      {
+        id: "extract_chrome_bookmarks",
+        description:
+          "Read Chrome bookmarks with chrome_bookmarks_read, present a concise preview, and write complete bookmark_list.md and goalEvidence.md artifacts.",
+        dependsOn: [],
+        successCriteria: [
+          modelReviewCriterion,
+          {
+            id: "criterion_chrome_bookmark_artifacts",
+            description: "Chrome bookmark artifacts are written.",
+            acceptanceChecks: [
+              {
+                id: "check_bookmark_list_artifact",
+                kind: "file_exists",
+                description: "Complete Chrome bookmark list artifact exists.",
+                params: { path: "bookmark_list.md" },
+                requiresEvidence: false,
+              },
+              {
+                id: "check_goal_evidence_artifact",
+                kind: "file_exists",
+                description: "Goal evidence artifact exists.",
+                params: { path: "goalEvidence.md" },
+                requiresEvidence: false,
+              },
+            ],
+          },
+        ],
+        state: "ready",
         runIds: [],
         attempts: 0,
       },

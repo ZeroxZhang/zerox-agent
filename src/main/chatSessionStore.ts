@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type {
   ChatMessageSearchOptions,
@@ -55,6 +55,7 @@ export function createChatSessionStore(options: {
   const sessionsPath = path.join(options.configDir, "chat-sessions.json");
   const createId = options.createId ?? randomUUID;
   const now = options.now ?? (() => new Date());
+  let mutationQueue = Promise.resolve();
 
   async function readStoredSessions(): Promise<StoredChatSessions> {
     try {
@@ -70,16 +71,21 @@ export function createChatSessionStore(options: {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         return { schemaVersion: 1, sessions: [] };
       }
+      if (error instanceof SyntaxError) {
+        await quarantineCorruptJsonFile(sessionsPath);
+        return { schemaVersion: 1, sessions: [] };
+      }
 
       throw error;
     }
   }
 
   async function writeStoredSessions(stored: StoredChatSessions) {
-    await mkdir(options.configDir, { recursive: true });
-    await writeFile(sessionsPath, `${JSON.stringify(stored, null, 2)}\n`, {
-      encoding: "utf8",
-    });
+    await writeJsonFileAtomically(
+      options.configDir,
+      sessionsPath,
+      `${JSON.stringify(stored, null, 2)}\n`,
+    );
   }
 
   return {
@@ -97,99 +103,111 @@ export function createChatSessionStore(options: {
     },
 
     async appendMessage(input) {
-      const content = input.content.trim();
-      const timestamp = now().toISOString();
-      const stored = await readStoredSessions();
-      const existingSession = input.sessionId
-        ? stored.sessions.find((session) => session.id === input.sessionId)
-        : null;
-      const newSessionId = existingSession ? null : createId();
-      const message: ChatMessageRecord = {
-        id: createId(),
-        role: input.role,
-        content,
-        ...(input.relatedMemoryIds?.length
-          ? { relatedMemoryIds: input.relatedMemoryIds }
-          : {}),
-        ...(input.executedRunId ? { executedRunId: input.executedRunId } : {}),
-        ...(input.goalId ? { goalId: input.goalId } : {}),
-        ...(input.goalEventRef ? { goalEventRef: input.goalEventRef } : {}),
-        createdAt: timestamp,
-      };
-      const session = existingSession
-        ? {
-            ...existingSession,
-            summary: content || existingSession.summary,
-            messages: [...existingSession.messages, message],
-            updatedAt: timestamp,
-          }
-        : createSession({
-            sessionId: newSessionId ?? createId(),
-            content,
-            message,
-            timestamp,
-          });
-      const nextSessions = existingSession
-        ? stored.sessions.map((storedSession) =>
-            storedSession.id === session.id ? session : storedSession,
-          )
-        : [...stored.sessions, session];
+      return serializeMutation(mutationQueue, (nextQueue) => {
+        mutationQueue = nextQueue;
+      }, async () => {
+        const content = input.content.trim();
+        const timestamp = now().toISOString();
+        const stored = await readStoredSessions();
+        const existingSession = input.sessionId
+          ? stored.sessions.find((session) => session.id === input.sessionId)
+          : null;
+        const newSessionId = existingSession ? null : createId();
+        const message: ChatMessageRecord = {
+          id: createId(),
+          role: input.role,
+          content,
+          ...(input.relatedMemoryIds?.length
+            ? { relatedMemoryIds: input.relatedMemoryIds }
+            : {}),
+          ...(input.executedRunId ? { executedRunId: input.executedRunId } : {}),
+          ...(input.goalId ? { goalId: input.goalId } : {}),
+          ...(input.goalEventRef ? { goalEventRef: input.goalEventRef } : {}),
+          createdAt: timestamp,
+        };
+        const session = existingSession
+          ? {
+              ...existingSession,
+              summary: content || existingSession.summary,
+              messages: [...existingSession.messages, message],
+              updatedAt: timestamp,
+            }
+          : createSession({
+              sessionId: newSessionId ?? createId(),
+              content,
+              message,
+              timestamp,
+            });
+        const nextSessions = existingSession
+          ? stored.sessions.map((storedSession) =>
+              storedSession.id === session.id ? session : storedSession,
+            )
+          : [...stored.sessions, session];
 
-      await writeStoredSessions({
-        schemaVersion: 1,
-        sessions: nextSessions,
+        await writeStoredSessions({
+          schemaVersion: 1,
+          sessions: nextSessions,
+        });
+
+        return { session, message };
       });
-
-      return { session, message };
     },
 
     async attachGoal(sessionId, goal) {
-      const stored = await readStoredSessions();
-      const existingSession = stored.sessions.find(
-        (session) => session.id === sessionId,
-      );
-      if (!existingSession) {
-        throw new Error(`Chat session "${sessionId}" was not found.`);
-      }
+      return serializeMutation(mutationQueue, (nextQueue) => {
+        mutationQueue = nextQueue;
+      }, async () => {
+        const stored = await readStoredSessions();
+        const existingSession = stored.sessions.find(
+          (session) => session.id === sessionId,
+        );
+        if (!existingSession) {
+          throw new Error(`Chat session "${sessionId}" was not found.`);
+        }
 
-      const timestamp = now().toISOString();
-      const nextSession = attachGoalToSession(existingSession, goal, timestamp);
-      await writeStoredSessions({
-        schemaVersion: 1,
-        sessions: stored.sessions.map((session) =>
-          session.id === sessionId ? nextSession : session,
-        ),
+        const timestamp = now().toISOString();
+        const nextSession = attachGoalToSession(existingSession, goal, timestamp);
+        await writeStoredSessions({
+          schemaVersion: 1,
+          sessions: stored.sessions.map((session) =>
+            session.id === sessionId ? nextSession : session,
+          ),
+        });
+
+        return nextSession;
       });
-
-      return nextSession;
     },
 
     async clearActiveGoal(sessionId, goalId) {
-      const stored = await readStoredSessions();
-      const existingSession = stored.sessions.find(
-        (session) => session.id === sessionId,
-      );
-      if (!existingSession) {
-        return null;
-      }
-      if (existingSession.activeGoalId !== goalId) {
-        return existingSession;
-      }
+      return serializeMutation(mutationQueue, (nextQueue) => {
+        mutationQueue = nextQueue;
+      }, async () => {
+        const stored = await readStoredSessions();
+        const existingSession = stored.sessions.find(
+          (session) => session.id === sessionId,
+        );
+        if (!existingSession) {
+          return null;
+        }
+        if (existingSession.activeGoalId !== goalId) {
+          return existingSession;
+        }
 
-      const { activeGoalId: _activeGoalId, ...sessionWithoutActiveGoal } =
-        existingSession;
-      const nextSession = {
-        ...sessionWithoutActiveGoal,
-        updatedAt: now().toISOString(),
-      };
-      await writeStoredSessions({
-        schemaVersion: 1,
-        sessions: stored.sessions.map((session) =>
-          session.id === sessionId ? nextSession : session,
-        ),
+        const { activeGoalId: _activeGoalId, ...sessionWithoutActiveGoal } =
+          existingSession;
+        const nextSession = {
+          ...sessionWithoutActiveGoal,
+          updatedAt: now().toISOString(),
+        };
+        await writeStoredSessions({
+          schemaVersion: 1,
+          sessions: stored.sessions.map((session) =>
+            session.id === sessionId ? nextSession : session,
+          ),
+        });
+
+        return nextSession;
       });
-
-      return nextSession;
     },
 
     async searchMessages(options) {
@@ -218,6 +236,38 @@ export function createChatSessionStore(options: {
         .slice(0, options.limit ?? 20);
     },
   };
+}
+
+function serializeMutation<T>(
+  currentQueue: Promise<void>,
+  setQueue: (queue: Promise<void>) => void,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const result = currentQueue.then(operation, operation);
+  setQueue(result.then(
+    () => undefined,
+    () => undefined,
+  ));
+  return result;
+}
+
+async function writeJsonFileAtomically(
+  directory: string,
+  filePath: string,
+  content: string,
+): Promise<void> {
+  await mkdir(directory, { recursive: true });
+  const tempPath = path.join(
+    directory,
+    `.${path.basename(filePath)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`,
+  );
+  try {
+    await writeFile(tempPath, content, { encoding: "utf8" });
+    await rename(tempPath, filePath);
+  } catch (error) {
+    await unlink(tempPath).catch(() => undefined);
+    throw error;
+  }
 }
 
 function createSession(options: {
@@ -249,6 +299,16 @@ function toListItem(session: ChatSessionRecord): ChatSessionListItem {
     ...(activeGoal ? { activeGoal } : {}),
     updatedAt: session.updatedAt,
   };
+}
+
+async function quarantineCorruptJsonFile(filePath: string): Promise<void> {
+  try {
+    await rename(filePath, `${filePath}.corrupt-${Date.now()}`);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
 }
 
 function normalizeStoredSession(session: ChatSessionRecord): ChatSessionRecord {

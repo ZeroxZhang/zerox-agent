@@ -38,6 +38,13 @@ function summarizeToolArgs(request: ToolCallRequest): Record<string, unknown> {
       return {
         path: String(request.args.path ?? ""),
       };
+    case "chrome_bookmarks_read":
+      return {
+        profile: String(request.args.profile ?? ""),
+        chromeUserDataDir: String(request.args.chromeUserDataDir ?? ""),
+        bookmarksPath: String(request.args.bookmarksPath ?? ""),
+        maxBookmarks: Number(request.args.maxBookmarks ?? 5000),
+      };
     case "file_search":
       return {
         root: String(request.args.root ?? ""),

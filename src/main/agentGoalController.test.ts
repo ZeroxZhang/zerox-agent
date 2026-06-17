@@ -180,6 +180,64 @@ describe("agent goal controller", () => {
     expect(trajectoryEvents.map((event) => event.type)).toContain("goal_replanned");
   });
 
+  it("achieves covered model-review goals from accepted milestone evidence", async () => {
+    let finalGoalReviewCalls = 0;
+    await store.save(
+      createGoal([milestone("milestone_bookmarks")], {
+        successCriteria: [modelReviewCriterion],
+        milestones: [
+          {
+            ...milestone("milestone_bookmarks"),
+            successCriteria: [modelReviewCriterion],
+          },
+        ],
+      }),
+    );
+    const runtime = createRuntime();
+    const controller = createController({
+      runtime,
+      acceptance: {
+        async evaluate() {
+          return {
+            accepted: true,
+            inferentialUsed: true,
+            checkResults: [
+              {
+                checkId: "check_goal_review",
+                kind: "model_review",
+                passed: true,
+                evidenceRefs: ["artifact:goalEvidence"],
+                detail: "Chrome bookmark evidence was accepted.",
+              },
+            ],
+          };
+        },
+        async evaluateGoal() {
+          finalGoalReviewCalls += 1;
+          return {
+            accepted: false,
+            inferentialUsed: true,
+            checkResults: [
+              {
+                checkId: "check_goal_review",
+                kind: "model_review",
+                passed: false,
+                evidenceRefs: ["artifact:goalEvidence"],
+                detail: "Should not need a second model review.",
+              },
+            ],
+          };
+        },
+      },
+    });
+
+    const result = await controller.start("goal_1");
+
+    expect(result.status).toBe("achieved");
+    expect(result.stopReason).toBe("goal_accepted");
+    expect(finalGoalReviewCalls).toBe(0);
+  });
+
   it("suspends at review gates and does not advance until review is resolved", async () => {
     await store.save(
       createGoal(
@@ -351,6 +409,23 @@ const criterion: SuccessCriterion = {
       description: "Accepted.",
       params: { artifactRef: "summary", path: "accepted", equals: true },
       requiresEvidence: false,
+    },
+  ],
+};
+
+const modelReviewCriterion: SuccessCriterion = {
+  id: "criterion_goal_review",
+  description: "Chrome bookmarks are visible.",
+  acceptanceChecks: [
+    {
+      id: "check_goal_review",
+      kind: "model_review",
+      description: "The goal result is supported by artifact evidence.",
+      params: {
+        condition: "帮我看一下我chrome浏览器的书签都有哪些",
+        evidenceRefs: ["artifact:goalEvidence"],
+      },
+      requiresEvidence: true,
     },
   ],
 };

@@ -196,6 +196,247 @@ describe("agent tool executor", () => {
     });
   });
 
+  it("previews, applies, verifies, and rolls back file organization with native tools", async () => {
+    await writeFile(path.join(tempDir, "photo.jpg"), "image", "utf8");
+    await writeFile(path.join(tempDir, "invoice.pdf"), "pdf", "utf8");
+    const executor = createAgentToolExecutor();
+
+    await expect(
+      executor.execute({
+        toolName: "file_inventory",
+        args: { path: tempDir },
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      result: {
+        root: tempDir,
+        entries: expect.arrayContaining([
+          expect.objectContaining({ name: "invoice.pdf", type: "file" }),
+          expect.objectContaining({ name: "photo.jpg", type: "file" }),
+        ]),
+      },
+    });
+
+    const previewResult = await executor.execute({
+      toolName: "file_move_plan",
+      args: { targetDir: tempDir },
+    });
+    expect(previewResult).toMatchObject({
+      ok: true,
+      result: {
+        preview: {
+          root: tempDir,
+          moves: expect.arrayContaining([
+            expect.objectContaining({
+              to: path.join(tempDir, "Documents", "invoice.pdf"),
+            }),
+            expect.objectContaining({
+              to: path.join(tempDir, "Images", "photo.jpg"),
+            }),
+          ]),
+        },
+      },
+    });
+    if (!previewResult.ok) {
+      throw new Error(previewResult.error);
+    }
+
+    const applyResult = await executor.execute({
+      toolName: "file_apply_moves",
+      args: { preview: previewResult.result.preview },
+    });
+    expect(applyResult).toMatchObject({
+      ok: true,
+      result: {
+        transaction: {
+          status: "applied",
+          movesApplied: 2,
+        },
+      },
+    });
+    if (!applyResult.ok) {
+      throw new Error(applyResult.error);
+    }
+
+    await expect(
+      readFile(path.join(tempDir, "Images", "photo.jpg"), "utf8"),
+    ).resolves.toBe("image");
+    await expect(
+      executor.execute({
+        toolName: "file_verify_moves",
+        args: { transaction: applyResult.result.transaction },
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      result: {
+        verified: true,
+        checked: 2,
+      },
+    });
+
+    await expect(
+      executor.execute({
+        toolName: "file_rollback_moves",
+        args: { transaction: applyResult.result.transaction },
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      result: {
+        transaction: {
+          status: "rolled_back",
+          movesRolledBack: 2,
+        },
+      },
+    });
+    await expect(readFile(path.join(tempDir, "photo.jpg"), "utf8")).resolves.toBe(
+      "image",
+    );
+  });
+
+  it("reads Chrome bookmarks through a native structured tool", async () => {
+    const bookmarksPath = path.join(tempDir, "Chrome", "Default", "Bookmarks");
+    await mkdir(path.dirname(bookmarksPath), { recursive: true });
+    await writeFile(
+      bookmarksPath,
+      JSON.stringify({
+        roots: {
+          bookmark_bar: {
+            type: "folder",
+            name: "Bookmarks Bar",
+            children: [
+              {
+                type: "url",
+                name: "OpenAI",
+                url: "https://openai.com/",
+                date_added: "13345678900000000",
+              },
+              {
+                type: "folder",
+                name: "Docs",
+                children: [
+                  {
+                    type: "url",
+                    name: "Zerox Docs",
+                    url: "https://docs.example.com/zerox",
+                  },
+                ],
+              },
+            ],
+          },
+          other: {
+            type: "folder",
+            name: "Other Bookmarks",
+            children: [],
+          },
+        },
+      }),
+      "utf8",
+    );
+    const executor = createAgentToolExecutor();
+
+    await expect(
+      executor.execute({
+        toolName: "chrome_bookmarks_read",
+        args: { bookmarksPath },
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      result: {
+        browser: "Google Chrome",
+        profileCount: 1,
+        bookmarkCount: 2,
+        folderCount: 1,
+        profiles: [
+          {
+            profileName: "Default",
+            bookmarksPath,
+            bookmarkCount: 2,
+            folderCount: 1,
+          },
+        ],
+        bookmarks: [
+          {
+            profileName: "Default",
+            title: "OpenAI",
+            url: "https://openai.com/",
+            folderPath: ["书签栏"],
+          },
+          {
+            profileName: "Default",
+            title: "Zerox Docs",
+            url: "https://docs.example.com/zerox",
+            folderPath: ["书签栏", "Docs"],
+          },
+        ],
+        markdown: expect.stringContaining("OpenAI"),
+      },
+    });
+  });
+
+  it("caps Chrome bookmark detail rows and writes the complete artifact", async () => {
+    const bookmarksPath = path.join(tempDir, "Chrome", "Default", "Bookmarks");
+    const outputRoot = path.join(tempDir, "goal-output");
+    await mkdir(path.dirname(bookmarksPath), { recursive: true });
+    await writeFile(
+      bookmarksPath,
+      JSON.stringify({
+        roots: {
+          bookmark_bar: {
+            type: "folder",
+            name: "Bookmarks Bar",
+            children: Array.from({ length: 100 }, (_, index) => ({
+              type: "url",
+              name: `Bookmark ${index + 1}`,
+              url: `https://example.com/${index + 1}`,
+            })),
+          },
+        },
+      }),
+      "utf8",
+    );
+    const executor = createAgentToolExecutor();
+
+    const result = await executor.execute({
+      toolName: "chrome_bookmarks_read",
+      args: { bookmarksPath, maxBookmarks: 10000 },
+    }, {
+      runContext: buildPrimaryRunContext({
+        workspaceId: "workspace_chrome",
+        workspaceRoot: tempDir,
+        sandbox: {
+          mode: "workspace_write",
+          network: "task_policy",
+          shell: "approved_commands",
+          allowWorkspaceEscape: false,
+          extraReadRoots: [],
+          extraWriteRoots: [outputRoot],
+        },
+      }),
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      result: {
+        bookmarkCount: 100,
+        returnedBookmarkCount: 25,
+        requestedMaxBookmarks: 10000,
+        returnedBookmarkLimit: 25,
+        truncated: true,
+        artifactRef: "artifact:bookmark_list",
+        artifactPath: path.join(outputRoot, "bookmark_list.md"),
+        goalEvidenceRef: "artifact:goalEvidence",
+        goalEvidencePath: path.join(outputRoot, "goalEvidence.md"),
+        answerPreview: expect.stringContaining("共找到 100 个书签，返回 25 个。"),
+      },
+    });
+    await expect(
+      readFile(path.join(outputRoot, "bookmark_list.md"), "utf8"),
+    ).resolves.toContain("Bookmark 100 - https://example.com/100");
+    await expect(
+      readFile(path.join(outputRoot, "goalEvidence.md"), "utf8"),
+    ).resolves.toContain("Total bookmarks: 100");
+  });
+
   it("registers native code engineering tools with descriptors", () => {
     const executor = createAgentToolExecutor();
 
@@ -215,6 +456,12 @@ describe("agent tool executor", () => {
         { id: "citation_record", kind: "citation", enabled: true },
         { id: "citation_coverage_check", kind: "citation", enabled: true },
         { id: "markdown_report_write", kind: "report", enabled: true },
+        { id: "file_inventory", kind: "file", enabled: true },
+        { id: "file_move_plan", kind: "file", enabled: true },
+        { id: "file_apply_moves", kind: "file", enabled: true },
+        { id: "file_verify_moves", kind: "file", enabled: true },
+        { id: "file_rollback_moves", kind: "file", enabled: true },
+        { id: "chrome_bookmarks_read", kind: "browser", enabled: true },
       ]),
     );
   });

@@ -384,6 +384,78 @@ export function createAgentEvalFixtures(): AgentEvalFixture[] {
       recoverabilityRequired: true,
     },
     {
+      id: "strategy-guard-fragmented-tool-calls",
+      description:
+        "Fragmented repeated tool calls trigger a strategy guard and checkpoint the paused run before final summary.",
+      events: createEvents("strategy-guard-fragmented-tool-calls", [
+        ["tool_call", { toolName: "file_list", path: "/tmp/inbox/a" }],
+        ["tool_result", { toolName: "file_list", ok: true }],
+        ["tool_call", { toolName: "file_list", path: "/tmp/inbox/b" }],
+        ["tool_result", { toolName: "file_list", ok: true }],
+        ["tool_call", { toolName: "file_list", path: "/tmp/inbox/c" }],
+        ["tool_result", { toolName: "file_list", ok: true }],
+        ["tool_call", { toolName: "file_list", path: "/tmp/inbox/d" }],
+        ["tool_result", { toolName: "file_list", ok: true }],
+        [
+          "strategy_guard_triggered",
+          {
+            code: "FRAGMENTED_TOOL_CALLS",
+            severity: "warn",
+            toolName: "file_list",
+            count: 4,
+          },
+        ],
+        [
+          "checkpoint_written",
+          {
+            status: "paused",
+            reason: "strategy_guard",
+            toolName: "file_list",
+            toolCallCount: 4,
+          },
+        ],
+        [
+          "final_summary",
+          {
+            status: "paused",
+            reason: "strategy_guard",
+            recommendedStrategy: "batch_or_recursive",
+          },
+        ],
+      ]),
+      requiredEventTypes: [
+        "tool_call",
+        "tool_result",
+        "strategy_guard_triggered",
+        "checkpoint_written",
+        "final_summary",
+      ],
+      assertions: [
+        {
+          type: "strategy_guard_triggered",
+          payload: {
+            code: "FRAGMENTED_TOOL_CALLS",
+            toolName: "file_list",
+          },
+          after: "tool_result",
+        },
+        {
+          type: "checkpoint_written",
+          payload: { status: "paused", reason: "strategy_guard" },
+          after: "strategy_guard_triggered",
+        },
+        {
+          type: "final_summary",
+          payload: {
+            status: "paused",
+            recommendedStrategy: "batch_or_recursive",
+          },
+          after: "checkpoint_written",
+        },
+      ],
+      recoverabilityRequired: true,
+    },
+    {
       id: "ark-long-task-event-replay",
       description:
         "Agent Runtime Kernel long-task events preserve checkpoint, compaction, retry, judge, and replay evidence.",

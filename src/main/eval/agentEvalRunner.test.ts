@@ -11,11 +11,11 @@ describe("agent eval runner", () => {
     const report = await runAgentEvals(createAgentEvalFixtures());
 
     expect(report).toEqual({
-      total: 24,
-      passed: 24,
+      total: 25,
+      passed: 25,
       failed: 0,
       passRate: 1,
-      toolSuccessRate: 0.7895,
+      toolSuccessRate: 0.8261,
       recoverabilityRate: 1,
       failures: [],
     });
@@ -178,6 +178,7 @@ describe("agent eval runner", () => {
         "context-compaction-before-model-request",
         "tool-result-checkpoint-before-next-tool",
         "model-retry-before-response",
+        "strategy-guard-fragmented-tool-calls",
         "episode-eval-candidate",
         "research-writing-native-tools",
         "multi-agent-lineage",
@@ -316,6 +317,34 @@ describe("agent eval runner", () => {
         {
           type: "model_response",
           after: "model_retry",
+        },
+      ]),
+    });
+    expect(
+      fixtures.find(
+        (fixture) => fixture.id === "strategy-guard-fragmented-tool-calls",
+      ),
+    ).toMatchObject({
+      requiredEventTypes: [
+        "tool_call",
+        "tool_result",
+        "strategy_guard_triggered",
+        "checkpoint_written",
+        "final_summary",
+      ],
+      assertions: expect.arrayContaining([
+        {
+          type: "strategy_guard_triggered",
+          payload: {
+            code: "FRAGMENTED_TOOL_CALLS",
+            toolName: "file_list",
+          },
+          after: "tool_result",
+        },
+        {
+          type: "checkpoint_written",
+          payload: { status: "paused", reason: "strategy_guard" },
+          after: "strategy_guard_triggered",
         },
       ]),
     });

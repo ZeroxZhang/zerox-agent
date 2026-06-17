@@ -455,6 +455,8 @@ export function createChatService(options: {
               message:
                 loopResult.continuation.reason === "tool_failure_loop"
                   ? "连续工具失败，等待确认"
+                  : loopResult.continuation.reason === "strategy_guard"
+                    ? "策略守护触发，等待确认"
                   : "已到达检查点，等待确认",
               maxTurns: loopResult.continuation.maxTurns,
               toolCallsExecuted: loopResult.continuation.toolCallsExecuted,

@@ -4,6 +4,7 @@ import {
   type GoalStatus,
   type Milestone,
   type StopReason,
+  type SuccessCriterion,
 } from "../shared/agentGoal";
 import {
   shouldRequestReview as shouldRequestGoalReview,
@@ -114,6 +115,15 @@ export function createAgentGoalController(options: {
         const nextMilestone = pickNextReadyMilestone(goal);
         if (!nextMilestone) {
           if (allMilestonesAccepted(goal)) {
+            if (canAcceptCoveredModelReviewGoal(goal)) {
+              return stopGoal(
+                goal,
+                "achieved",
+                "goal_accepted",
+                "Goal acceptance passed from accepted milestone evidence.",
+              );
+            }
+
             const result = await options.acceptance.evaluateGoal(
               goal,
               (await options.createAcceptanceContext?.(goal)) as never,
@@ -337,8 +347,8 @@ export function createAgentGoalController(options: {
       stopReason,
       summary,
     });
-    notifyProgress("stopped", goal, summary);
     await options.goalStore.save(goal);
+    notifyProgress("stopped", goal, summary);
     return goal;
   }
 
@@ -492,6 +502,43 @@ function allMilestonesAccepted(goal: Goal): boolean {
   );
 }
 
+function canAcceptCoveredModelReviewGoal(goal: Goal): boolean {
+  const goalChecks = goal.successCriteria.flatMap(
+    (criterion) => criterion.acceptanceChecks,
+  );
+  if (goalChecks.length === 0) {
+    return false;
+  }
+  if (
+    goalChecks.some(
+      (check) => check.kind !== "model_review" || !check.requiresEvidence,
+    )
+  ) {
+    return false;
+  }
+
+  const acceptedMilestones = goal.milestones.filter(
+    (milestone) => milestone.state === "accepted" || milestone.state === "skipped",
+  );
+  const coveredCheckSignatures = new Set(
+    acceptedMilestones.flatMap((milestone) =>
+      milestone.successCriteria.flatMap((criterion) =>
+        criterion.acceptanceChecks.map(createAcceptanceCheckSignature),
+      ),
+    ),
+  );
+  const hasAcceptedRunEvidence = acceptedMilestones.some((milestone) =>
+    Boolean(milestone.lastRunSummary?.trim() || milestone.lastAcceptanceSummary?.trim()),
+  );
+
+  return (
+    hasAcceptedRunEvidence &&
+    goalChecks.every((check) =>
+      coveredCheckSignatures.has(createAcceptanceCheckSignature(check)),
+    )
+  );
+}
+
 function shouldRequestReview(goal: Goal, milestone: Milestone): boolean {
   return shouldRequestGoalReview(
     goal.reviewPolicy,
@@ -512,4 +559,29 @@ function summarizeAcceptanceFailure(result: AcceptanceResult): string {
     result.checkResults.find((checkResult) => !checkResult.passed)?.detail ??
     "Acceptance rejected."
   );
+}
+
+function createAcceptanceCheckSignature(
+  check: SuccessCriterion["acceptanceChecks"][number],
+): string {
+  return JSON.stringify({
+    kind: check.kind,
+    description: check.description,
+    requiresEvidence: check.requiresEvidence,
+    params: stableJsonValue(check.params),
+  });
+}
+
+function stableJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(stableJsonValue);
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, entry]) => [key, stableJsonValue(entry)]),
+    );
+  }
+  return value;
 }

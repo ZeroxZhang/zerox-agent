@@ -23,6 +23,7 @@ describe("goal runtime engine", () => {
       messages: ChatMessage[];
       taskId: string | undefined;
       systemPrompt: string | undefined;
+      pauseOnStrategyGuard: boolean | undefined;
     }> = [];
     const goal = createGoal();
     const milestone = goal.milestones[0]!;
@@ -72,6 +73,7 @@ describe("goal runtime engine", () => {
           messages,
           taskId: options.taskId,
           systemPrompt: options.systemPrompt,
+          pauseOnStrategyGuard: options.pauseOnStrategyGuard,
         });
         return {
           summary: "已完成 Serenity 投资方法论调研摘要。",
@@ -94,6 +96,7 @@ describe("goal runtime engine", () => {
     expect(result.tokens).toBeGreaterThan(0);
     expect(loopInputs).toHaveLength(1);
     expect(loopInputs[0]?.taskId).toBe("goal:goal_1");
+    expect(loopInputs[0]?.pauseOnStrategyGuard).toBe(true);
     expect(loopInputs[0]?.systemPrompt).toContain("长期目标执行");
     expect(loopInputs[0]?.systemPrompt).toContain("Model profile: default");
     expect(loopInputs[0]?.messages.at(-1)).toEqual({
@@ -128,6 +131,86 @@ describe("goal runtime engine", () => {
     );
     expect(trajectoryEvents.map((event) => event.type)).toContain("final_summary");
     expect(trajectoryEvents.map((event) => event.type)).toContain("checkpoint_written");
+  });
+
+  it("records strategy guard events from the agent loop trajectory", async () => {
+    const runs: AgentRunRecord[] = [];
+    const trajectoryEvents: AgentTrajectoryEvent[] = [];
+    const goal = createGoal();
+    const engine = createGoalRuntimeEngine({
+      workspaceRoot: "/Users/example",
+      chatClient: {
+        async complete() {
+          throw new Error("fake loop should be used");
+        },
+      },
+      getModelProfile: async () => ({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret",
+        model: "agent-model",
+        temperature: 0.2,
+        maxTokens: 8192,
+      }),
+      toolExecutor: {
+        async execute() {
+          return { ok: true, result: {} };
+        },
+        getRegistry() {
+          return createDynamicToolRegistry();
+        },
+        hasTool() {
+          return true;
+        },
+      },
+      runStore: {
+        async append(run) {
+          runs.push(run);
+          return run;
+        },
+      },
+      trajectoryStore: {
+        async append(_runId, event) {
+          trajectoryEvents.push(event);
+          return event;
+        },
+      },
+      goalContext: createAgentGoalContext(),
+      createId: () => "goal_run_1",
+      now: () => "2026-06-13T10:00:00.000Z",
+      runAgentLoop: async (messages, _profile, options): Promise<AgentLoopResult> => {
+        options.onStrategyGuard?.({
+          code: "FRAGMENTED_TOOL_CALLS",
+          severity: "warn",
+          message:
+            "file_list has been called 4 times in one loop; switch to a batch or recursive strategy.",
+          toolName: "file_list",
+          count: 4,
+        });
+        return {
+          summary: "已完成。",
+          status: "succeeded",
+          turns: 1,
+          messages,
+          toolCallsExecuted: 4,
+        };
+      },
+    });
+
+    await engine.runMilestone(goal, goal.milestones[0]!);
+
+    expect(trajectoryEvents).toContainEqual(
+      expect.objectContaining({
+        type: "strategy_guard_triggered",
+        payload: expect.objectContaining({
+          code: "FRAGMENTED_TOOL_CALLS",
+          toolName: "file_list",
+          count: 4,
+        }),
+      }),
+    );
+    expect(runs[0]?.events.map((event) => event.message)).toContain(
+      "Strategy guard triggered: FRAGMENTED_TOOL_CALLS",
+    );
   });
 
   it("includes artifact evidence file contracts in milestone instructions", async () => {

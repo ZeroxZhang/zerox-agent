@@ -92,6 +92,81 @@ import type { PermissionRule } from "../shared/kernelContract";
 
 export type AppContainer = ReturnType<typeof createAppContainer>;
 
+function acceptanceContextNeedsModel(
+  goal: Goal,
+  milestone?: Goal["milestones"][number],
+): boolean {
+  const criteria = [
+    ...goal.successCriteria,
+    ...(milestone?.successCriteria ?? []),
+  ];
+  return criteria.some((criterion) =>
+    criterion.acceptanceChecks.some((check) => check.kind === "model_review"),
+  );
+}
+
+function isTerminalGoalStatus(status: Goal["status"]): boolean {
+  return (
+    status === "achieved" ||
+    status === "stopped_budget" ||
+    status === "stopped_stalled" ||
+    status === "failed" ||
+    status === "canceled"
+  );
+}
+
+function formatGoalTerminalMessage(goal: Goal, eventMessage?: string): string {
+  const lines = [formatGoalTerminalHeading(goal)];
+  const summaries = collectGoalResultSummaries(goal);
+
+  if (summaries.length > 0) {
+    lines.push(
+      "",
+      "结果摘要：",
+      ...summaries.slice(-5).map((summary) => `- ${summary}`),
+    );
+  } else if (eventMessage?.trim()) {
+    lines.push("", eventMessage.trim());
+  }
+
+  return lines.join("\n");
+}
+
+function formatGoalTerminalHeading(goal: Goal): string {
+  switch (goal.status) {
+    case "achieved":
+      return `目标已达成：${goal.description}`;
+    case "failed":
+      return `目标执行失败：${goal.description}`;
+    case "canceled":
+      return `目标已取消：${goal.description}`;
+    case "stopped_budget":
+      return `目标因预算停止：${goal.description}`;
+    case "stopped_stalled":
+      return `目标因进展停滞停止：${goal.description}`;
+    case "planning":
+    case "executing":
+    case "waiting_for_review":
+      return `目标状态更新：${goal.description}`;
+  }
+}
+
+function collectGoalResultSummaries(goal: Goal): string[] {
+  const summaries: string[] = [];
+  for (const milestone of goal.milestones) {
+    const details = [
+      milestone.lastRunSummary?.trim(),
+      milestone.lastAcceptanceSummary?.trim(),
+    ].filter((value): value is string => Boolean(value));
+    const uniqueDetails = [...new Set(details)];
+    if (uniqueDetails.length === 0) {
+      continue;
+    }
+    summaries.push(`${milestone.description}：${uniqueDetails.join("；")}`);
+  }
+  return summaries;
+}
+
 export function createAppContainer(options: {
   requestToolApproval: (
     request: ToolUserApprovalRequest,
@@ -144,7 +219,13 @@ export function createAppContainer(options: {
       return;
     }
 
-    await attachGoalSummaryIfChanged(event.sessionId, toChatGoalSummary(goal));
+    const syncedGoal =
+      goal.status === event.status ? goal : { ...goal, status: event.status };
+    await attachGoalSummaryIfChanged(
+      event.sessionId,
+      toChatGoalSummary(syncedGoal),
+    );
+    await appendGoalTerminalMessageIfNeeded(event.sessionId, syncedGoal, event);
   }
 
   async function attachGoalSummaryIfChanged(
@@ -169,6 +250,33 @@ export function createAppContainer(options: {
 
     await chatSessionStore().attachGoal(sessionId, summary);
     return true;
+  }
+
+  async function appendGoalTerminalMessageIfNeeded(
+    sessionId: string,
+    goal: Goal,
+    event: GoalProgressEvent,
+  ) {
+    if (!isTerminalGoalStatus(goal.status)) {
+      return;
+    }
+
+    const goalEventRef = `goal-terminal:${goal.id}:${goal.status}`;
+    const session = await chatSessionStore().get(sessionId);
+    if (!session) {
+      return;
+    }
+    if (session.messages.some((message) => message.goalEventRef === goalEventRef)) {
+      return;
+    }
+
+    await chatSessionStore().appendMessage({
+      sessionId,
+      role: "assistant",
+      content: formatGoalTerminalMessage(goal, event.message),
+      goalId: goal.id,
+      goalEventRef,
+    });
   }
 
   function toChatGoalSummary(goal: Goal): ChatSessionGoalSummary {
@@ -530,6 +638,9 @@ export function createAppContainer(options: {
         },
         trajectoryStore: agentTrajectoryStore(),
         createAcceptanceContext: async (goal, milestone, runResult) => {
+          const modelProfile = acceptanceContextNeedsModel(goal, milestone)
+            ? await getModelProfile()
+            : undefined;
           const runContext = applyGoalOutputRootsToRunContext(
             await agentWorkspaceService().resolveRunContext({
               workspaceId: goal.workspaceId,
@@ -570,8 +681,12 @@ export function createAppContainer(options: {
             extraWriteRoots: runContext.sandbox.extraWriteRoots,
             toolExecutor,
             trajectoryStore: agentTrajectoryStore(),
-            chatClient: createOpenAiCompatibleClient(),
-            modelProfile: await getModelProfile(),
+            ...(modelProfile
+              ? {
+                  chatClient: createOpenAiCompatibleClient(),
+                  modelProfile,
+                }
+              : {}),
             transcriptMessages: runResult?.transcriptMessages,
             artifacts: {
               goalEvidence: {
@@ -626,10 +741,17 @@ export function createAppContainer(options: {
         goalStore: agentGoalStore(),
         planner: {
           async plan(description, planOptions) {
+            const availableTools = dedupeStrings([
+              ...planOptions.availableTools,
+              ...getAvailableToolNames(),
+            ]);
             return createAgentGoalPlanner({
               chatClient: createOpenAiCompatibleClient(),
               modelProfile: await getModelProfile(),
-            }).plan(description, planOptions);
+            }).plan(description, {
+              ...planOptions,
+              availableTools,
+            });
           },
           async replan(goal, reason) {
             return createAgentGoalPlanner({
@@ -638,9 +760,21 @@ export function createAppContainer(options: {
             }).replan(goal, reason);
           },
         },
+        getAvailableTools: getAvailableToolNames,
         onProgress: emitGoalProgressEvent,
       }),
     );
+  }
+
+  function getAvailableToolNames(): string[] {
+    return createToolExecutor()
+      .getRegistry()
+      .getDefinitions()
+      .map((definition) => definition.function.name);
+  }
+
+  function dedupeStrings(values: string[]): string[] {
+    return [...new Set(values)];
   }
 
   function chatService() {

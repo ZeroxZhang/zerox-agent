@@ -38,6 +38,68 @@ const testTools: ToolDefinition[] = [
   },
 ];
 
+const chromeBookmarkTools: ToolDefinition[] = [
+  {
+    type: "function",
+    function: {
+      name: "chrome_bookmarks_read",
+      description: "Read Chrome bookmarks",
+      parameters: {
+        type: "object",
+        properties: { maxBookmarks: { type: "number" } },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "tool_result_read",
+      description: "Read offloaded result",
+      parameters: {
+        type: "object",
+        properties: { ref: { type: "string" } },
+        required: ["ref"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "file_read",
+      description: "Read file",
+      parameters: {
+        type: "object",
+        properties: { path: { type: "string" } },
+        required: ["path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "file_stat",
+      description: "Stat file",
+      parameters: {
+        type: "object",
+        properties: { path: { type: "string" } },
+        required: ["path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "shell_exec",
+      description: "Execute shell",
+      parameters: {
+        type: "object",
+        properties: { command: { type: "string" } },
+        required: ["command"],
+      },
+    },
+  },
+];
+
 describe("agent loop", () => {
   it("retries transient model request failures before failing the loop", async () => {
     let attempts = 0;
@@ -280,6 +342,500 @@ describe("agent loop", () => {
       turns: 2,
       toolCallsExecuted: 2,
     });
+  });
+
+  it("emits a strategy guard event when repeated single-tool calls fragment work", async () => {
+    const guardEvents: Array<{ code: string; toolName?: string; count?: number }> = [];
+    const requests: ChatCompletionRequest[] = [];
+    const chatClient: ChatClient = {
+      async complete(request) {
+        requests.push(request);
+        if (requests.length <= 4) {
+          return toolCallResponse(
+            `tool_call_${requests.length}`,
+            `/tmp/path_${requests.length}`,
+          );
+        }
+
+        return {
+          content: "目录检查完成。",
+          toolCalls: [],
+          finishReason: "stop",
+        };
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "递归检查这个目录" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(),
+        maxTurns: 6,
+        tools: testTools,
+        onStrategyGuard(event) {
+          guardEvents.push(event);
+        },
+      },
+    );
+
+    expect(result.status).toBe("succeeded");
+    expect(guardEvents).toEqual([
+      {
+        code: "FRAGMENTED_TOOL_CALLS",
+        severity: "warn",
+        message:
+          "file_list has been called 4 times in one loop; switch to a batch or recursive strategy.",
+        toolName: "file_list",
+        count: 4,
+      },
+    ]);
+  });
+
+  it("can pause instead of continuing after a strategy guard event", async () => {
+    const requests: ChatCompletionRequest[] = [];
+    const chatClient: ChatClient = {
+      async complete(request) {
+        requests.push(request);
+        return toolCallResponse(
+          `tool_call_${requests.length}`,
+          `/tmp/path_${requests.length}`,
+        );
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "把这个目录整理一下" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(),
+        maxTurns: 6,
+        pauseOnStrategyGuard: true,
+        tools: testTools,
+      },
+    );
+
+    expect(requests).toHaveLength(4);
+    expect(result).toMatchObject({
+      status: "paused",
+      turns: 3,
+      toolCallsExecuted: 4,
+      continuation: {
+        reason: "strategy_guard",
+        toolName: "file_list",
+        strategyGuardCode: "FRAGMENTED_TOOL_CALLS",
+        toolCallsExecuted: 4,
+      },
+    });
+    expect(result.summary).toContain("策略守护触发");
+    expect(result.summary).toContain("file_list");
+    expect(result.summary).toContain("批量或递归策略");
+  });
+
+  it("blocks shell fallback after chrome_bookmarks_read has returned structured data", async () => {
+    const requests: ChatCompletionRequest[] = [];
+    const executedTools: string[] = [];
+    const authorizedTools: string[] = [];
+    const chatClient: ChatClient = {
+      async complete(request) {
+        requests.push(request);
+        if (requests.length === 1) {
+          return {
+            content: null,
+            finishReason: "tool_calls",
+            toolCalls: [
+              {
+                id: "tool_call_bookmarks",
+                type: "function",
+                function: {
+                  name: "chrome_bookmarks_read",
+                  arguments: JSON.stringify({ maxBookmarks: 10000 }),
+                },
+              },
+            ],
+          };
+        }
+        if (requests.length === 2) {
+          return {
+            content: null,
+            finishReason: "tool_calls",
+            toolCalls: [
+              {
+                id: "tool_call_shell",
+                type: "function",
+                function: {
+                  name: "shell_exec",
+                  arguments: JSON.stringify({
+                    command:
+                      'cat "/Users/demo/Library/Application Support/Google/Chrome/Default/Bookmarks" | python3 parse.py',
+                  }),
+                },
+              },
+            ],
+          };
+        }
+        return {
+          content: "Chrome 书签：\\n- OpenAI - https://openai.com/",
+          finishReason: "stop",
+          toolCalls: [],
+        };
+      },
+    };
+    const toolExecutor: AgentToolExecutor = {
+      async execute(request) {
+        executedTools.push(request.toolName);
+        return {
+          ok: true,
+          result: {
+            answerPreview: "Chrome 书签：\\n- OpenAI - https://openai.com/",
+            bookmarkCount: 1,
+          },
+        };
+      },
+      getRegistry() {
+        throw new Error("not used");
+      },
+      hasTool() {
+        return true;
+      },
+    };
+    const toolAuthorizationService: ToolAuthorizationService = {
+      async authorize(_taskId, request) {
+        authorizedTools.push(request.toolName);
+        return {
+          ok: true,
+          decision: { allowed: true, reason: "allowed" },
+          auditEvent: {
+            id: `audit_${authorizedTools.length}`,
+            taskId: "task_chrome",
+            request,
+            decision: { allowed: true, reason: "allowed" },
+            createdAt: "2026-06-16T00:00:00.000Z",
+          },
+        };
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "看一下 Chrome 浏览器的书签" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor,
+        toolAuthorizationService,
+        taskId: "task_chrome",
+        tools: chromeBookmarkTools,
+      },
+    );
+
+    expect(result.status).toBe("succeeded");
+    expect(executedTools).toEqual(["chrome_bookmarks_read"]);
+    expect(authorizedTools).toEqual(["chrome_bookmarks_read"]);
+    expect(requests).toHaveLength(3);
+    expect(JSON.stringify(requests[2].messages)).toContain(
+      "chrome_bookmarks_read already returned structured Chrome bookmark data",
+    );
+  });
+
+  it("self-finalizes after chrome_bookmarks_read returns an answer preview and artifacts", async () => {
+    const requests: ChatCompletionRequest[] = [];
+    const executedTools: string[] = [];
+    const chatClient: ChatClient = {
+      async complete(request) {
+        requests.push(request);
+        return {
+          content: null,
+          finishReason: "tool_calls",
+          toolCalls: [
+            {
+              id: "tool_call_bookmarks",
+              type: "function",
+              function: {
+                name: "chrome_bookmarks_read",
+                arguments: JSON.stringify({ maxBookmarks: 10000 }),
+              },
+            },
+          ],
+        };
+      },
+    };
+    const toolExecutor: AgentToolExecutor = {
+      async execute(request) {
+        executedTools.push(request.toolName);
+        return {
+          ok: true,
+          result: {
+            answerPreview:
+              "Chrome 书签：共找到 335 个书签，完整清单已写入 bookmark_list.md。",
+            artifactRef: "artifact:bookmark_list",
+            artifactPath:
+              "/Users/demo/Zerox Agent/workspaces/default/bookmark_list.md",
+            goalEvidenceRef: "artifact:goalEvidence",
+          },
+        };
+      },
+      getRegistry() {
+        throw new Error("not used");
+      },
+      hasTool() {
+        return true;
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "看一下 Chrome 浏览器的书签" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor,
+        tools: chromeBookmarkTools,
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: "succeeded",
+      turns: 0,
+      toolCallsExecuted: 1,
+      summary:
+        "Chrome 书签：共找到 335 个书签，完整清单已写入 bookmark_list.md。",
+    });
+    expect(requests).toHaveLength(1);
+    expect(executedTools).toEqual(["chrome_bookmarks_read"]);
+  });
+
+  it("blocks raw Chrome Bookmarks file probes after chrome_bookmarks_read succeeds", async () => {
+    const requests: ChatCompletionRequest[] = [];
+    const executedTools: string[] = [];
+    const authorizedTools: string[] = [];
+    const chatClient: ChatClient = {
+      async complete(request) {
+        requests.push(request);
+        if (requests.length === 1) {
+          return {
+            content: null,
+            finishReason: "tool_calls",
+            toolCalls: [
+              {
+                id: "tool_call_bookmarks",
+                type: "function",
+                function: {
+                  name: "chrome_bookmarks_read",
+                  arguments: JSON.stringify({ maxBookmarks: 10000 }),
+                },
+              },
+            ],
+          };
+        }
+        if (requests.length === 2) {
+          return {
+            content: null,
+            finishReason: "tool_calls",
+            toolCalls: [
+              {
+                id: "tool_call_stat",
+                type: "function",
+                function: {
+                  name: "file_stat",
+                  arguments: JSON.stringify({
+                    path:
+                      "/Users/demo/Library/Application Support/Google/Chrome/Default/Bookmarks",
+                  }),
+                },
+              },
+            ],
+          };
+        }
+        return {
+          content: "Chrome 书签：\\n- OpenAI - https://openai.com/",
+          finishReason: "stop",
+          toolCalls: [],
+        };
+      },
+    };
+    const toolExecutor: AgentToolExecutor = {
+      async execute(request) {
+        executedTools.push(request.toolName);
+        return {
+          ok: true,
+          result: {
+            answerPreview: "Chrome 书签：\\n- OpenAI - https://openai.com/",
+            bookmarkCount: 1,
+          },
+        };
+      },
+      getRegistry() {
+        throw new Error("not used");
+      },
+      hasTool() {
+        return true;
+      },
+    };
+    const toolAuthorizationService: ToolAuthorizationService = {
+      async authorize(_taskId, request) {
+        authorizedTools.push(request.toolName);
+        return {
+          ok: true,
+          decision: { allowed: true, reason: "allowed" },
+          auditEvent: {
+            id: `audit_${authorizedTools.length}`,
+            taskId: "task_chrome",
+            request,
+            decision: { allowed: true, reason: "allowed" },
+            createdAt: "2026-06-16T00:00:00.000Z",
+          },
+        };
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "看一下 Chrome 浏览器的书签" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor,
+        toolAuthorizationService,
+        taskId: "task_chrome",
+        tools: chromeBookmarkTools,
+      },
+    );
+
+    expect(result.status).toBe("succeeded");
+    expect(executedTools).toEqual(["chrome_bookmarks_read"]);
+    expect(authorizedTools).toEqual(["chrome_bookmarks_read"]);
+    expect(JSON.stringify(requests[2].messages)).toContain(
+      "Do not inspect the raw Chrome Bookmarks path",
+    );
+  });
+
+  it("blocks shell inspection of the bookmark artifact after chrome_bookmarks_read succeeds", async () => {
+    const requests: ChatCompletionRequest[] = [];
+    const executedTools: string[] = [];
+    const authorizedTools: string[] = [];
+    const chatClient: ChatClient = {
+      async complete(request) {
+        requests.push(request);
+        if (requests.length === 1) {
+          return {
+            content: null,
+            finishReason: "tool_calls",
+            toolCalls: [
+              {
+                id: "tool_call_bookmarks",
+                type: "function",
+                function: {
+                  name: "chrome_bookmarks_read",
+                  arguments: JSON.stringify({ maxBookmarks: 10000 }),
+                },
+              },
+            ],
+          };
+        }
+        if (requests.length === 2) {
+          return {
+            content: null,
+            finishReason: "tool_calls",
+            toolCalls: [
+              {
+                id: "tool_call_read_artifact",
+                type: "function",
+                function: {
+                  name: "file_read",
+                  arguments: JSON.stringify({
+                    path:
+                      "/Users/demo/Zerox Agent/workspaces/default/bookmark_list.md",
+                  }),
+                },
+              },
+              {
+                id: "tool_call_result_artifact",
+                type: "function",
+                function: {
+                  name: "tool_result_read",
+                  arguments: JSON.stringify({ ref: "artifact:bookmark_list" }),
+                },
+              },
+              {
+                id: "tool_call_shell_artifact",
+                type: "function",
+                function: {
+                  name: "shell_exec",
+                  arguments: JSON.stringify({
+                    command:
+                      'wc -l "/Users/demo/Zerox Agent/workspaces/default/bookmark_list.md" && head -5 "/Users/demo/Zerox Agent/workspaces/default/bookmark_list.md"',
+                  }),
+                },
+              },
+            ],
+          };
+        }
+        return {
+          content: "Chrome 书签完整清单已写入 bookmark_list.md。",
+          finishReason: "stop",
+          toolCalls: [],
+        };
+      },
+    };
+    const toolExecutor: AgentToolExecutor = {
+      async execute(request) {
+        executedTools.push(request.toolName);
+        return {
+          ok: true,
+          result: {
+            artifactRef: "artifact:bookmark_list",
+            artifactPath:
+              "/Users/demo/Zerox Agent/workspaces/default/bookmark_list.md",
+          },
+        };
+      },
+      getRegistry() {
+        throw new Error("not used");
+      },
+      hasTool() {
+        return true;
+      },
+    };
+    const toolAuthorizationService: ToolAuthorizationService = {
+      async authorize(_taskId, request) {
+        authorizedTools.push(request.toolName);
+        return {
+          ok: true,
+          decision: { allowed: true, reason: "allowed" },
+          auditEvent: {
+            id: `audit_${authorizedTools.length}`,
+            taskId: "task_chrome",
+            request,
+            decision: { allowed: true, reason: "allowed" },
+            createdAt: "2026-06-16T00:00:00.000Z",
+          },
+        };
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "看一下 Chrome 浏览器的书签" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor,
+        toolAuthorizationService,
+        taskId: "task_chrome",
+        tools: chromeBookmarkTools,
+      },
+    );
+
+    expect(result.status).toBe("succeeded");
+    expect(executedTools).toEqual(["chrome_bookmarks_read"]);
+    expect(authorizedTools).toEqual(["chrome_bookmarks_read"]);
+    expect(JSON.stringify(requests[2].messages)).toContain(
+      "bookmark_list artifact was already written",
+    );
+    expect(JSON.stringify(requests[2].messages)).toContain(
+      "Do not read bookmark_list.md back into the model",
+    );
+    expect(JSON.stringify(requests[2].messages)).toContain(
+      "artifact refs are evidence references, not tool_result_read refs",
+    );
   });
 
   it("can pause at a turn checkpoint instead of ending the task", async () => {

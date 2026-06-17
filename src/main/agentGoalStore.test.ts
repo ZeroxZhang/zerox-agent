@@ -1,4 +1,12 @@
-import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -59,6 +67,34 @@ describe("agent goal store", () => {
     await store.save(executing);
 
     await expect(store.get("goal_1")).resolves.toEqual(executing);
+  });
+
+  it("serializes concurrent goal saves through atomic JSON replacement", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const goalsDir = path.join(configDir, "agent-goals");
+    const updates = Array.from({ length: 5 }, (_, index) => ({
+      ...createGoal("goal_concurrent", "executing"),
+      updatedAt: `2026-06-12T00:0${index}:00.000Z`,
+      budgetUsage: {
+        iterations: index,
+        toolCalls: index,
+        wallClockMs: 0,
+        tokens: 0,
+        replans: 0,
+      },
+    }));
+
+    await Promise.all(updates.map((goal) => store.save(goal)));
+
+    const loaded = await store.get("goal_concurrent");
+    expect(loaded?.id).toBe("goal_concurrent");
+    const files = await readdir(goalsDir);
+    expect(files.some((file) => file.endsWith(".tmp"))).toBe(false);
+    const raw = await readFile(
+      path.join(goalsDir, "goal_concurrent.json"),
+      "utf8",
+    );
+    expect(() => JSON.parse(raw)).not.toThrow();
   });
 
   it("lists active goals and excludes terminal statuses", async () => {
@@ -126,6 +162,36 @@ describe("agent goal store", () => {
     await expect(store.get("missing")).resolves.toBeNull();
     await expect(store.listActive()).resolves.toEqual([]);
     await expect(store.readLedger("missing")).resolves.toEqual([]);
+  });
+
+  it("quarantines corrupt goal JSON and skips it during recovery", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const goalsDir = path.join(configDir, "agent-goals");
+    await mkdir(goalsDir, { recursive: true });
+    await writeFile(path.join(goalsDir, "goal_broken.json"), "", "utf8");
+
+    await expect(store.get("goal_broken")).resolves.toBeNull();
+    await expect(store.listActive()).resolves.toEqual([]);
+
+    const files = await readdir(goalsDir);
+    expect(
+      files.some((file) => file.startsWith("goal_broken.json.corrupt-")),
+    ).toBe(true);
+  });
+
+  it("handles concurrent corrupt goal recovery without surfacing rename errors", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const goalsDir = path.join(configDir, "agent-goals");
+    await mkdir(goalsDir, { recursive: true });
+    await writeFile(path.join(goalsDir, "goal_broken.json"), "", "utf8");
+
+    await expect(
+      Promise.all([
+        store.get("goal_broken"),
+        store.get("goal_broken"),
+        store.get("goal_broken"),
+      ]),
+    ).resolves.toEqual([null, null, null]);
   });
 
   it("reloads in-progress goals after restart without losing state", async () => {

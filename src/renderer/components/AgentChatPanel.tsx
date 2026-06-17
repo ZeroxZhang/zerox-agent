@@ -294,6 +294,11 @@ export function AgentChatPanel({
       }
       if (eventBelongsToActiveGoal) {
         void refreshSessions(event.sessionId ?? activeSessionId ?? undefined);
+        if (isTerminalGoalStatus(event.status)) {
+          void refreshCurrentSessionMessages(
+            event.sessionId ?? activeSessionId ?? undefined,
+          );
+        }
       }
     });
   }, []);
@@ -498,6 +503,27 @@ export function AgentChatPanel({
       return;
     }
     setActiveGoalDetail(await window.buildingAgent.getGoal(goalId));
+  }
+
+  async function refreshCurrentSessionMessages(sessionIdToRefresh?: string) {
+    if (!window.buildingAgent) {
+      return;
+    }
+
+    const currentSessionId = sessionIdToRefresh ?? sessionIdRef.current;
+    if (!currentSessionId) {
+      return;
+    }
+
+    const loadedSession = await window.buildingAgent
+      .getChatSession(currentSessionId)
+      .catch(() => null);
+    if (!loadedSession) {
+      return;
+    }
+
+    setSessionId(loadedSession.id);
+    setMessages(loadedSession.messages.map(toChatMessage));
   }
 
   function applyGoalSummaryToSessions(goal: ChatSessionGoalSummary) {
@@ -2014,11 +2040,18 @@ function buildTaskActivityFromAgentStatus(options: {
 }): TaskActivityState {
   if (options.agentStatus?.state === "paused") {
     const isFailureLoop = options.agentStatus.reason === "tool_failure_loop";
+    const isStrategyGuard = options.agentStatus.reason === "strategy_guard";
     return createTaskActivity({
       kind: "paused",
-      title: isFailureLoop ? "连续工具失败，等待确认" : "长任务等待确认",
+      title: isFailureLoop
+        ? "连续工具失败，等待确认"
+        : isStrategyGuard
+          ? "策略守护触发，等待确认"
+          : "长任务等待确认",
       detail: isFailureLoop
         ? `已执行 ${options.agentStatus.toolCallsExecuted} 个工具，检测到同类失败循环`
+        : isStrategyGuard
+          ? `已执行 ${options.agentStatus.toolCallsExecuted} 个工具，检测到碎片化工具调用`
         : `已执行 ${options.agentStatus.toolCallsExecuted} 个工具，停在第 ${options.agentStatus.maxTurns} 轮检查点`,
       toolCallsExecuted: options.agentStatus.toolCallsExecuted,
       maxTurns: options.agentStatus.maxTurns,
@@ -2282,6 +2315,16 @@ function translateGoalStatus(status: ChatSessionGoalSummary["status"]): string {
     canceled: "已取消",
   };
   return labels[status];
+}
+
+function isTerminalGoalStatus(status: ChatSessionGoalSummary["status"]): boolean {
+  return (
+    status === "achieved" ||
+    status === "stopped_budget" ||
+    status === "stopped_stalled" ||
+    status === "failed" ||
+    status === "canceled"
+  );
 }
 
 function canStartGoalFromChat(status: ChatSessionGoalSummary["status"]): boolean {

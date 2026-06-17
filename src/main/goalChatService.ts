@@ -9,6 +9,11 @@ import {
 
 import type { GoalReviewDecision } from "../shared/agentGoalReview";
 import type { ChatSessionGoalSummary, GoalProgressEvent } from "../shared/chat";
+import { classifyTaskFrame, type TaskFrame } from "../shared/agentTaskStrategy";
+import {
+  createQuickActionPlan,
+  type QuickActionPlan,
+} from "../shared/agentQuickAction";
 import type { AgentGoalController } from "./agentGoalController";
 import type { AgentGoalPlanner } from "./agentGoalPlanner";
 import type { AgentGoalStore } from "./agentGoalStore";
@@ -45,6 +50,8 @@ export function createGoalChatService(options: {
   controller: Pick<AgentGoalController, "start" | "resume" | "resolveReview">;
   goalStore: Pick<AgentGoalStore, "save" | "get" | "appendLedger">;
   planner: Pick<AgentGoalPlanner, "plan" | "replan">;
+  getAvailableTools?: () => string[];
+  getAvailableSkills?: () => string[];
   createId?: () => string;
   now?: () => string;
   onProgress?: (event: GoalProgressEvent) => void;
@@ -145,28 +152,22 @@ export function createGoalChatService(options: {
           },
         ],
       };
+      const taskFrame = classifyTaskFrame(description);
+      const quickActionPlan = createQuickActionPlan(description, taskFrame);
+      const quickActionReview = shouldRouteToQuickActionReview(
+        taskFrame,
+        quickActionPlan,
+      );
 
-      let milestones: Milestone[];
-      try {
-        milestones = await options.planner.plan(description, {
-          successCriteria: [goalCriterion],
-          availableTools: [],
-          availableSkills: [],
-        });
-      } catch {
-        // Fallback: create a single achievable milestone that produces the artifact.
-        milestones = [
-          {
-            id: "milestone_1",
-            description,
-            dependsOn: [],
-            successCriteria: [goalCriterion],
-            state: "ready",
-            runIds: [],
-            attempts: 0,
-          },
-        ];
-      }
+      const milestones = quickActionReview
+        ? [
+            createQuickActionReviewMilestone(
+              description,
+              goalCriterion,
+              quickActionPlan,
+            ),
+          ]
+        : await planGoalMilestones(description, goalCriterion);
 
       const goal: Goal = {
         id: goalId,
@@ -177,7 +178,7 @@ export function createGoalChatService(options: {
         description,
         successCriteria: [goalCriterion],
         milestones,
-        status: "planning",
+        status: quickActionReview ? "waiting_for_review" : "planning",
         budget: createDefaultChatGoalBudget(),
         budgetUsage: {
           iterations: 0,
@@ -193,12 +194,25 @@ export function createGoalChatService(options: {
       };
 
       await options.goalStore.save(goal);
-      await options.goalStore.appendLedger(goal.id, {
-        at: goal.createdAt,
-        kind: "goal_planned",
-        summary: `Goal created from chat session ${input.sessionId}.`,
-      });
-      notifyProgress("started", goal, "目标已创建，等待启动。");
+      if (quickActionReview) {
+        await options.goalStore.appendLedger(goal.id, {
+          at: goal.createdAt,
+          kind: "review_requested",
+          summary: buildQuickActionReviewSummary(taskFrame, quickActionPlan),
+        });
+        notifyProgress(
+          "review_requested",
+          goal,
+          "该目标更适合快速动作，已暂停等待审核。",
+        );
+      } else {
+        await options.goalStore.appendLedger(goal.id, {
+          at: goal.createdAt,
+          kind: "goal_planned",
+          summary: `Goal created from chat session ${input.sessionId}.`,
+        });
+        notifyProgress("started", goal, "目标已创建，等待启动。");
+      }
       return toGoalSummary(goal);
     },
 
@@ -375,6 +389,70 @@ export function createGoalChatService(options: {
       );
     },
   };
+
+  async function planGoalMilestones(
+    description: string,
+    goalCriterion: SuccessCriterion,
+  ): Promise<Milestone[]> {
+    try {
+      return await options.planner.plan(description, {
+        successCriteria: [goalCriterion],
+        availableTools: options.getAvailableTools?.() ?? [],
+        availableSkills: options.getAvailableSkills?.() ?? [],
+      });
+    } catch {
+      // Fallback: create a single achievable milestone that produces the artifact.
+      return [
+        {
+          id: "milestone_1",
+          description,
+          dependsOn: [],
+          successCriteria: [goalCriterion],
+          state: "ready",
+          runIds: [],
+          attempts: 0,
+        },
+      ];
+    }
+  }
+}
+
+function shouldRouteToQuickActionReview(
+  frame: TaskFrame,
+  quickActionPlan: QuickActionPlan | null,
+): quickActionPlan is QuickActionPlan {
+  return (
+    frame.recommendedRuntime === "quick_action" &&
+    frame.needsConfirmation &&
+    Boolean(quickActionPlan)
+  );
+}
+
+function createQuickActionReviewMilestone(
+  description: string,
+  goalCriterion: SuccessCriterion,
+  quickActionPlan: QuickActionPlan,
+): Milestone {
+  return {
+    id: "milestone_quick_action_review",
+    description: `Review ${quickActionPlan.workflowId} quick-action plan before executing: ${description}`,
+    dependsOn: [],
+    successCriteria: [goalCriterion],
+    state: "pending",
+    runIds: [],
+    attempts: 0,
+  };
+}
+
+function buildQuickActionReviewSummary(
+  frame: TaskFrame,
+  quickActionPlan: QuickActionPlan,
+): string {
+  const toolNames = quickActionPlan.steps
+    .map((step) => step.toolName)
+    .filter((toolName): toolName is string => Boolean(toolName));
+
+  return `Quick-action ${quickActionPlan.workflowId} recommended before Goal Mode execution: ${frame.domain}/${frame.mode}/${frame.risk} via ${toolNames.join(", ")}.`;
 }
 
 function createDefaultChatGoalBudget(): GoalBudget {

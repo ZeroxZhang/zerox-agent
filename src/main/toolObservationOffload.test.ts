@@ -85,6 +85,40 @@ describe("tool observation offload serializer", () => {
     ]);
   });
 
+  it("keeps answerPreview prominent when oversized observations are offloaded", async () => {
+    const store = createRecordingStore();
+    const answerPreview = "Chrome 书签：\n- OpenAI - https://openai.com/";
+    const observation = {
+      tool: "chrome_bookmarks_read" as const,
+      ok: true,
+      result: {
+        bookmarks: Array.from({ length: 200 }, (_, index) => ({
+          title: `Bookmark ${index + 1}`,
+          url: `https://example.com/${index + 1}`,
+        })),
+        profiles: [{ profileName: "Default" }],
+        browser: "Google Chrome",
+        bookmarkCount: 200,
+        returnedBookmarkCount: 80,
+        folderCount: 12,
+        answerPreview,
+      },
+      toolCallId: "call_chrome",
+    };
+
+    const serialized = await serializeToolObservationWithOffload(observation, {
+      store,
+      thresholdChars: 120,
+      runId: "run_chrome",
+    });
+    const compact = JSON.parse(serialized.content) as {
+      result_preview: { answerPreview?: string };
+    };
+
+    expect(serialized.offloaded).toBe(true);
+    expect(compact.result_preview.answerPreview).toBe(answerPreview);
+  });
+
   it("keeps failed observations inline", async () => {
     const store = createRecordingStore();
     const observation = {

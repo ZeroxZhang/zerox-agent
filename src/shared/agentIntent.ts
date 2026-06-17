@@ -4,6 +4,7 @@ import {
   type ScheduledTaskInput,
   type TaskSchedule,
 } from "./scheduledTasks";
+import { resolveUserReferences } from "./agentTaskStrategy";
 import { getDefaultTaskPermissionPolicy } from "./toolPermissions";
 
 export type AgentIntentKind = "create_task" | "run_task" | "chat";
@@ -100,6 +101,13 @@ export function buildScheduledTaskInputFromIntent(
 }
 
 export function detectTargetDirectory(message: string): string | null {
+  const explicitPath = resolveUserReferences(message).find(
+    (reference) => reference.kind === "path",
+  );
+  if (explicitPath) {
+    return explicitPath.canonical;
+  }
+
   const normalized = normalizeMatchText(message);
 
   if (normalized.includes("下载") || normalized.includes("downloads")) {

@@ -177,14 +177,20 @@ describe("agent JSON protocol", () => {
   it("builds tool definitions with JSON Schema for built-in tools", () => {
     const definitions = buildToolDefinitions();
 
-    expect(definitions).toHaveLength(19);
+    expect(definitions).toHaveLength(25);
     const names = definitions.map((d) => d.function.name);
     expect(names).toContain("file_list");
     expect(names).toContain("file_stat");
     expect(names).toContain("file_search");
+    expect(names).toContain("file_inventory");
+    expect(names).toContain("file_move_plan");
+    expect(names).toContain("file_apply_moves");
+    expect(names).toContain("file_verify_moves");
+    expect(names).toContain("file_rollback_moves");
     expect(names).toContain("file_read");
     expect(names).toContain("tool_result_read");
     expect(names).toContain("file_write");
+    expect(names).toContain("chrome_bookmarks_read");
     expect(names).toContain("code_search");
     expect(names).toContain("git_status");
     expect(names).toContain("git_diff");
@@ -198,6 +204,10 @@ describe("agent JSON protocol", () => {
     expect(names).toContain("citation_coverage_check");
     expect(names).toContain("markdown_report_write");
     expect(names).toContain("shell_exec");
+    expect(
+      definitions.find((definition) => definition.function.name === "chrome_bookmarks_read")
+        ?.function.description,
+    ).toContain("不要用 file_read 或 shell_exec");
 
     for (const def of definitions) {
       expect(def.type).toBe("function");

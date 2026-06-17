@@ -104,8 +104,16 @@ function buildResultPreview(
 ): Record<string, unknown> {
   if (!result) return {};
 
+  const priorityKeys = ["answerPreview", "summary", "markdown"];
+  const orderedEntries = [
+    ...priorityKeys
+      .filter((key) => Object.prototype.hasOwnProperty.call(result, key))
+      .map((key) => [key, result[key]] as const),
+    ...Object.entries(result).filter(([key]) => !priorityKeys.includes(key)),
+  ];
+
   return Object.fromEntries(
-    Object.entries(result)
+    orderedEntries
       .slice(0, 5)
       .map(([key, value]) => [key, previewValue(value)]),
   );

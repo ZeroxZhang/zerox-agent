@@ -179,6 +179,51 @@ describe("tool authorization", () => {
     });
   });
 
+  it("authorizes Chrome bookmark reads through the Chrome user data directory", () => {
+    const chromePolicy: TaskPermissionPolicy = {
+      ...policy,
+      files: {
+        ...policy.files,
+        read: ["/Users/demo/Library/Application Support/Google/Chrome"],
+      },
+    };
+
+    expect(
+      authorizeToolCall(chromePolicy, {
+        toolName: "chrome_bookmarks_read",
+        args: {
+          chromeUserDataDir:
+            "/Users/demo/Library/Application Support/Google/Chrome",
+          profile: "Default",
+        },
+      }),
+    ).toEqual({
+      allowed: true,
+      reason: "文件路径位于已授权目录内。",
+    });
+    expect(
+      authorizeToolCall(chromePolicy, {
+        toolName: "chrome_bookmarks_read",
+        args: {
+          bookmarksPath:
+            "/Users/demo/Library/Application Support/Google/Chrome/Profile 1/Bookmarks",
+        },
+      }),
+    ).toEqual({
+      allowed: true,
+      reason: "文件路径位于已授权目录内。",
+    });
+    expect(
+      authorizeToolCall(policy, {
+        toolName: "chrome_bookmarks_read",
+        args: { profile: "Default" },
+      }),
+    ).toEqual({
+      allowed: false,
+      reason: "chrome_bookmarks_read Chrome 书签目录不在已授权可读目录内。",
+    });
+  });
+
   it("uses read-directory authorization for file_list", () => {
     expect(
       authorizeToolCall(policy, {
@@ -195,6 +240,62 @@ describe("tool authorization", () => {
     ).toMatchObject({
       allowed: false,
       reason: "file_list 路径不在已授权可读目录内。",
+    });
+  });
+
+  it("authorizes native batch file organizer tools by read and write scope", () => {
+    const organizerPolicy: TaskPermissionPolicy = {
+      ...policy,
+      files: {
+        read: ["/Users/demo/Downloads"],
+        write: ["/Users/demo/Downloads"],
+      },
+    };
+
+    expect(
+      authorizeToolCall(organizerPolicy, {
+        toolName: "file_inventory",
+        args: { path: "/Users/demo/Downloads" },
+      }),
+    ).toEqual({
+      allowed: true,
+      reason: "文件路径位于已授权目录内。",
+    });
+    expect(
+      authorizeToolCall(organizerPolicy, {
+        toolName: "file_move_plan",
+        args: { targetDir: "/Users/demo/Downloads" },
+      }),
+    ).toEqual({
+      allowed: true,
+      reason: "文件路径位于已授权目录内。",
+    });
+    expect(
+      authorizeToolCall(organizerPolicy, {
+        toolName: "file_apply_moves",
+        args: { root: "/Users/demo/Downloads" },
+      }),
+    ).toEqual({
+      allowed: true,
+      reason: "文件路径位于已授权目录内。",
+    });
+    expect(
+      authorizeToolCall(policy, {
+        toolName: "file_apply_moves",
+        args: { root: "/Users/demo/Downloads" },
+      }),
+    ).toEqual({
+      allowed: false,
+      reason: "file_apply_moves 根目录不在已授权可写目录内。",
+    });
+    expect(
+      authorizeToolCall(organizerPolicy, {
+        toolName: "file_rollback_moves",
+        args: { transaction: { root: "/Users/demo/Downloads" } },
+      }),
+    ).toEqual({
+      allowed: true,
+      reason: "文件路径位于已授权目录内。",
     });
   });
 

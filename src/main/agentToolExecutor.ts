@@ -1,5 +1,5 @@
 import { exec } from "node:child_process";
-import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -10,6 +10,13 @@ import { searchCode } from "./nativeCodeTools";
 import { readGitDiff, readGitStatus } from "./nativeGitTools";
 import { createNativeResearchTools } from "./nativeResearchTools";
 import { runNativeTestCommand } from "./nativeTestRunTool";
+import {
+  applyLocalFileOrganization,
+  previewLocalFileOrganization,
+  rollbackLocalFileOrganization,
+  type LocalFileOrganizationPreview,
+  type LocalFileOrganizationTransaction,
+} from "./localFileOrganizer";
 import type { ToolResultOffloadStore } from "./toolResultOffloadStore";
 import type { MemoryStore } from "./memoryStore";
 import type { AgentRunContext } from "../shared/agentWorkspace";
@@ -165,6 +172,155 @@ function registerBuiltinTools(
     {
       type: "function",
       function: {
+        name: "file_inventory",
+        description:
+          "批量读取目录清单和文件元信息，用于整理、迁移或审计前的预览。不修改文件。",
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "要盘点的目录绝对路径" },
+          },
+          required: ["path"],
+        },
+      },
+    },
+    async (args) => inventoryLocalFiles(String(args.path ?? "")),
+    "built-in",
+    defineNativeToolDescriptor({
+      id: "file_inventory",
+      kind: "file",
+      label: "File Inventory",
+      description: "Batch local file inventory without shell commands.",
+      riskLevel: "low",
+      permissionScope: { files: "read", shell: "none", web: "none" },
+      observableEvents: ["native_tool_invocation", "native_tool_observation"],
+    }),
+  );
+
+  registry.register(
+    {
+      type: "function",
+      function: {
+        name: "file_move_plan",
+        description:
+          "为本地目录整理生成可审核移动预览，不覆盖目标文件，不修改文件。",
+        parameters: {
+          type: "object",
+          properties: {
+            targetDir: { type: "string", description: "要整理的目录绝对路径" },
+          },
+          required: ["targetDir"],
+        },
+      },
+    },
+    async (args) => planLocalFileMoves(String(args.targetDir ?? "")),
+    "built-in",
+    defineNativeToolDescriptor({
+      id: "file_move_plan",
+      kind: "file",
+      label: "File Move Plan",
+      description: "Create a reviewable local file move plan.",
+      riskLevel: "low",
+      permissionScope: { files: "read", shell: "none", web: "none" },
+      observableEvents: ["native_tool_invocation", "native_tool_observation"],
+    }),
+  );
+
+  registry.register(
+    {
+      type: "function",
+      function: {
+        name: "file_apply_moves",
+        description:
+          "执行已经审核的本地文件移动计划。会先写事务日志，可用事务回滚。",
+        parameters: {
+          type: "object",
+          properties: {
+            preview: { type: "object", description: "file_move_plan 返回的 preview" },
+          },
+          required: ["preview"],
+        },
+      },
+    },
+    async (args) => applyLocalFileMoves(args.preview),
+    "built-in",
+    defineNativeToolDescriptor({
+      id: "file_apply_moves",
+      kind: "file",
+      label: "File Apply Moves",
+      description: "Apply reviewed local file moves with a transaction log.",
+      riskLevel: "medium",
+      permissionScope: { files: "write", shell: "none", web: "none" },
+      observableEvents: ["native_tool_invocation", "native_tool_observation"],
+    }),
+  );
+
+  registry.register(
+    {
+      type: "function",
+      function: {
+        name: "file_verify_moves",
+        description: "验证本地文件移动事务的目标文件存在且源文件已移走。",
+        parameters: {
+          type: "object",
+          properties: {
+            transaction: {
+              type: "object",
+              description: "file_apply_moves 返回的 transaction",
+            },
+          },
+          required: ["transaction"],
+        },
+      },
+    },
+    async (args) => verifyLocalFileMoves(args.transaction),
+    "built-in",
+    defineNativeToolDescriptor({
+      id: "file_verify_moves",
+      kind: "file",
+      label: "File Verify Moves",
+      description: "Verify a local file organization transaction.",
+      riskLevel: "low",
+      permissionScope: { files: "read", shell: "none", web: "none" },
+      observableEvents: ["native_tool_invocation", "native_tool_observation"],
+    }),
+  );
+
+  registry.register(
+    {
+      type: "function",
+      function: {
+        name: "file_rollback_moves",
+        description: "按事务日志反向移动文件，回滚 file_apply_moves 的本地整理结果。",
+        parameters: {
+          type: "object",
+          properties: {
+            transaction: {
+              type: "object",
+              description: "file_apply_moves 返回的 transaction",
+            },
+          },
+          required: ["transaction"],
+        },
+      },
+    },
+    async (args) => rollbackLocalFileMoves(args.transaction),
+    "built-in",
+    defineNativeToolDescriptor({
+      id: "file_rollback_moves",
+      kind: "file",
+      label: "File Rollback Moves",
+      description: "Rollback a local file organization transaction.",
+      riskLevel: "medium",
+      permissionScope: { files: "write", shell: "none", web: "none" },
+      observableEvents: ["native_tool_invocation", "native_tool_observation"],
+    }),
+  );
+
+  registry.register(
+    {
+      type: "function",
+      function: {
         name: "file_read",
         description: "读取指定文件的内容并返回文本。",
         parameters: {
@@ -236,6 +392,50 @@ function registerBuiltinTools(
         String(args.content ?? ""),
       ),
     "built-in",
+  );
+
+  registry.register(
+    {
+      type: "function",
+      function: {
+        name: "chrome_bookmarks_read",
+        description:
+          "读取本机 Google Chrome 书签，返回结构化预览、统计和 Markdown 摘要，并在 Goal 运行上下文中自动写入完整 artifact:bookmark_list 和 artifact:goalEvidence。用于 Chrome/浏览器书签任务，不要用 file_read 或 shell_exec 手动解析 Bookmarks JSON。",
+        parameters: {
+          type: "object",
+          properties: {
+            profile: {
+              type: "string",
+              description: "可选 Chrome profile 名称，例如 Default 或 Profile 1",
+            },
+            chromeUserDataDir: {
+              type: "string",
+              description: "可选 Chrome 用户数据目录",
+            },
+            bookmarksPath: {
+              type: "string",
+              description: "可选：直接指定 Chrome Bookmarks JSON 文件",
+            },
+            maxBookmarks: {
+              type: "number",
+              description: "最多返回多少条书签明细，默认 5000，最大 10000",
+            },
+          },
+        },
+      },
+    },
+    async (args, executionOptions) =>
+      readChromeBookmarks(args, executionOptions?.runContext),
+    "built-in",
+    defineNativeToolDescriptor({
+      id: "chrome_bookmarks_read",
+      kind: "browser",
+      label: "Chrome Bookmarks Read",
+      description: "Read Chrome bookmarks with structured output plus bookmark_list and goalEvidence artifacts.",
+      riskLevel: "medium",
+      permissionScope: { files: "write", shell: "none", web: "none" },
+      observableEvents: ["native_tool_invocation", "native_tool_observation"],
+    }),
   );
 
   registry.register(
@@ -672,6 +872,132 @@ async function listLocalDirectory(
   };
 }
 
+async function inventoryLocalFiles(
+  directoryPath: string,
+): Promise<AgentToolExecutionResult> {
+  if (!directoryPath) {
+    return { ok: false, error: "file_inventory requires a path." };
+  }
+
+  const resolvedPath = resolveUserPath(directoryPath);
+  const entries = await readdir(resolvedPath, { withFileTypes: true });
+  const listedEntries = await Promise.all(
+    entries
+      .sort((left, right) => left.name.localeCompare(right.name))
+      .map(async (entry) => {
+        const entryPath = path.join(resolvedPath, entry.name);
+        const entryStat = await stat(entryPath);
+
+        return {
+          name: entry.name,
+          path: entryPath,
+          type: entry.isDirectory()
+            ? "directory"
+            : entry.isFile()
+              ? "file"
+              : "other",
+          size: entryStat.size,
+          modifiedAt: entryStat.mtime.toISOString(),
+        };
+      }),
+  );
+
+  return {
+    ok: true,
+    result: {
+      root: resolvedPath,
+      entries: listedEntries,
+      summary: {
+        files: listedEntries.filter((entry) => entry.type === "file").length,
+        directories: listedEntries.filter((entry) => entry.type === "directory")
+          .length,
+        other: listedEntries.filter((entry) => entry.type === "other").length,
+      },
+    },
+  };
+}
+
+async function planLocalFileMoves(
+  targetDir: string,
+): Promise<AgentToolExecutionResult> {
+  if (!targetDir) {
+    return { ok: false, error: "file_move_plan requires targetDir." };
+  }
+
+  const preview = await previewLocalFileOrganization(targetDir);
+  return {
+    ok: true,
+    result: {
+      preview,
+      moveCount: preview.moves.length,
+      conflictCount: preview.conflicts.length,
+    },
+  };
+}
+
+async function applyLocalFileMoves(
+  preview: unknown,
+): Promise<AgentToolExecutionResult> {
+  if (!isLocalFileOrganizationPreview(preview)) {
+    return { ok: false, error: "file_apply_moves requires a valid preview." };
+  }
+
+  const transaction = await applyLocalFileOrganization(preview);
+  return {
+    ok: true,
+    result: { transaction },
+  };
+}
+
+async function verifyLocalFileMoves(
+  transaction: unknown,
+): Promise<AgentToolExecutionResult> {
+  if (!isLocalFileOrganizationTransaction(transaction)) {
+    return {
+      ok: false,
+      error: "file_verify_moves requires a valid transaction.",
+    };
+  }
+
+  const missingTargets: string[] = [];
+  const unmovedSources: string[] = [];
+  for (const move of transaction.moves) {
+    if (!(await pathExists(move.to))) {
+      missingTargets.push(move.to);
+    }
+    if (await pathExists(move.from)) {
+      unmovedSources.push(move.from);
+    }
+  }
+
+  return {
+    ok: true,
+    result: {
+      verified: missingTargets.length === 0 && unmovedSources.length === 0,
+      checked: transaction.moves.length,
+      missingTargets,
+      unmovedSources,
+    },
+  };
+}
+
+async function rollbackLocalFileMoves(
+  transaction: unknown,
+): Promise<AgentToolExecutionResult> {
+  if (!isLocalFileOrganizationTransaction(transaction)) {
+    return {
+      ok: false,
+      error: "file_rollback_moves requires a valid transaction.",
+    };
+  }
+
+  const rolledBack = await rollbackLocalFileOrganization(transaction);
+  return {
+    ok: true,
+    result: { transaction: rolledBack },
+  };
+}
+
 async function readLocalFile(filePath: string): Promise<AgentToolExecutionResult> {
   if (!filePath) {
     return { ok: false, error: "file_read requires a path." };
@@ -852,6 +1178,464 @@ async function writeLocalFile(
     ok: true,
     result: { path: resolvedPath, bytesWritten: Buffer.byteLength(content) },
   };
+}
+
+type ChromeBookmarkEntry = {
+  profileName: string;
+  title: string;
+  url: string;
+  folderPath: string[];
+  root: string;
+  createdAt?: string;
+};
+
+type ChromeBookmarkProfileResult = {
+  profileName: string;
+  bookmarksPath: string;
+  bookmarkCount: number;
+  folderCount: number;
+  rootCount: number;
+  truncated: boolean;
+  bookmarks: ChromeBookmarkEntry[];
+};
+
+const chromeRootLabels: Record<string, string> = {
+  bookmark_bar: "书签栏",
+  other: "其他书签",
+  synced: "移动设备书签",
+};
+
+const chromeEpochDeltaMicros = 11_644_473_600_000_000;
+const chromeBookmarkInlineLimit = 25;
+
+async function readChromeBookmarks(
+  args: Record<string, unknown>,
+  runContext?: AgentRunContext,
+): Promise<AgentToolExecutionResult> {
+  const requestedMaxBookmarks = clampNumber(args.maxBookmarks, 5000, 1, 10_000);
+  const targets = await resolveChromeBookmarkTargets(args);
+  if (!targets.length) {
+    return {
+      ok: false,
+      error: "chrome_bookmarks_read could not find a Chrome Bookmarks file.",
+      errorDetails: {
+        chromeUserDataDir: getChromeUserDataDir(args),
+        profile: optionalString(args.profile),
+      },
+    };
+  }
+
+  const profiles: ChromeBookmarkProfileResult[] = [];
+  let remainingBookmarks = requestedMaxBookmarks;
+
+  for (const target of targets) {
+    const parsed = await readChromeBookmarksFile(target.bookmarksPath);
+    if (!parsed.ok) {
+      return parsed;
+    }
+
+    const profile = collectChromeBookmarks({
+      profileName: target.profileName,
+      bookmarksPath: target.bookmarksPath,
+      data: parsed.data,
+      maxBookmarks: remainingBookmarks,
+    });
+    remainingBookmarks = Math.max(0, remainingBookmarks - profile.bookmarks.length);
+    profiles.push(profile);
+  }
+
+  const bookmarks = profiles.flatMap((profile) => profile.bookmarks);
+  const previewProfiles = limitChromeBookmarkProfiles(
+    profiles,
+    chromeBookmarkInlineLimit,
+  );
+  const previewBookmarks = previewProfiles.flatMap((profile) => profile.bookmarks);
+  const bookmarkCount = profiles.reduce(
+    (sum, profile) => sum + profile.bookmarkCount,
+    0,
+  );
+  const folderCount = profiles.reduce(
+    (sum, profile) => sum + profile.folderCount,
+    0,
+  );
+  const truncated =
+    profiles.some((profile) => profile.truncated) ||
+    bookmarkCount > previewBookmarks.length;
+  const artifactMarkdown = formatChromeBookmarksMarkdown({
+    profiles,
+    bookmarkCount,
+    returnedBookmarkCount: bookmarks.length,
+    truncated: profiles.some((profile) => profile.truncated),
+  });
+  const artifact = await writeChromeBookmarksArtifacts({
+    bookmarkListMarkdown: artifactMarkdown,
+    runContext,
+    bookmarkCount,
+    returnedBookmarkCount: bookmarks.length,
+    profileCount: profiles.length,
+  });
+  const markdown = formatChromeBookmarksMarkdown({
+    profiles: previewProfiles,
+    bookmarkCount,
+    returnedBookmarkCount: previewBookmarks.length,
+    truncated,
+    ...(artifact ? { artifactPath: artifact.bookmarkList.path } : {}),
+  });
+
+  return {
+    ok: true,
+    result: {
+      answerPreview: markdown,
+      browser: "Google Chrome",
+      profileCount: profiles.length,
+      bookmarkCount,
+      returnedBookmarkCount: previewBookmarks.length,
+      requestedMaxBookmarks,
+      returnedBookmarkLimit: chromeBookmarkInlineLimit,
+      folderCount,
+      truncated,
+      ...(artifact
+        ? {
+            artifactRef: artifact.bookmarkList.ref,
+            artifactPath: artifact.bookmarkList.path,
+            goalEvidenceRef: artifact.goalEvidence.ref,
+            goalEvidencePath: artifact.goalEvidence.path,
+            evidenceRefs: [artifact.bookmarkList.ref, artifact.goalEvidence.ref],
+          }
+        : {}),
+      profiles: profiles.map((profile) => ({
+        profileName: profile.profileName,
+        bookmarksPath: profile.bookmarksPath,
+        bookmarkCount: profile.bookmarkCount,
+        returnedBookmarkCount: profile.bookmarks.length,
+        folderCount: profile.folderCount,
+        rootCount: profile.rootCount,
+        truncated: profile.truncated,
+      })),
+      bookmarks: previewBookmarks,
+      markdown,
+    },
+  };
+}
+
+async function resolveChromeBookmarkTargets(
+  args: Record<string, unknown>,
+): Promise<Array<{ profileName: string; bookmarksPath: string }>> {
+  const explicitBookmarksPath = optionalString(args.bookmarksPath);
+  if (explicitBookmarksPath) {
+    const bookmarksPath = resolveUserPath(explicitBookmarksPath);
+    return (await pathExists(bookmarksPath))
+      ? [{ profileName: path.basename(path.dirname(bookmarksPath)), bookmarksPath }]
+      : [];
+  }
+
+  const userDataDir = getChromeUserDataDir(args);
+  const requestedProfile = optionalString(args.profile);
+  if (requestedProfile) {
+    const bookmarksPath = path.join(userDataDir, requestedProfile, "Bookmarks");
+    return (await pathExists(bookmarksPath))
+      ? [{ profileName: requestedProfile, bookmarksPath }]
+      : [];
+  }
+
+  if (!(await pathExists(userDataDir))) {
+    return [];
+  }
+
+  const entries = await readdir(userDataDir, { withFileTypes: true });
+  const profileTargets = await Promise.all(
+    entries
+      .filter((entry) => entry.isDirectory())
+      .sort(compareChromeProfileEntries)
+      .map(async (entry) => {
+        const bookmarksPath = path.join(userDataDir, entry.name, "Bookmarks");
+        return (await pathExists(bookmarksPath))
+          ? { profileName: entry.name, bookmarksPath }
+          : null;
+      }),
+  );
+
+  return profileTargets.filter(
+    (target): target is { profileName: string; bookmarksPath: string } =>
+      target !== null,
+  );
+}
+
+function compareChromeProfileEntries(
+  left: { name: string },
+  right: { name: string },
+): number {
+  if (left.name === "Default") return -1;
+  if (right.name === "Default") return 1;
+  return left.name.localeCompare(right.name);
+}
+
+function getChromeUserDataDir(args: Record<string, unknown>): string {
+  const explicitUserDataDir = optionalString(args.chromeUserDataDir);
+  if (explicitUserDataDir) {
+    return resolveUserPath(explicitUserDataDir);
+  }
+
+  switch (process.platform) {
+    case "darwin":
+      return path.join(os.homedir(), "Library", "Application Support", "Google", "Chrome");
+    case "win32":
+      return path.join(
+        process.env.LOCALAPPDATA ?? path.join(os.homedir(), "AppData", "Local"),
+        "Google",
+        "Chrome",
+        "User Data",
+      );
+    default:
+      return path.join(os.homedir(), ".config", "google-chrome");
+  }
+}
+
+async function readChromeBookmarksFile(
+  bookmarksPath: string,
+): Promise<
+  | { ok: true; data: unknown }
+  | { ok: false; error: string; errorDetails?: Record<string, unknown> }
+> {
+  try {
+    return {
+      ok: true,
+      data: JSON.parse(await readFile(bookmarksPath, "utf8")),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: `chrome_bookmarks_read could not parse ${bookmarksPath}.`,
+      errorDetails: {
+        bookmarksPath,
+        cause: (error as Error).message,
+      },
+    };
+  }
+}
+
+function collectChromeBookmarks(input: {
+  profileName: string;
+  bookmarksPath: string;
+  data: unknown;
+  maxBookmarks: number;
+}): ChromeBookmarkProfileResult {
+  const bookmarks: ChromeBookmarkEntry[] = [];
+  let bookmarkCount = 0;
+  let folderCount = 0;
+  let rootCount = 0;
+  let truncated = false;
+  const roots = isRecord(input.data) && isRecord(input.data.roots)
+    ? input.data.roots
+    : {};
+
+  for (const [rootKey, rootNode] of Object.entries(roots)) {
+    if (!isRecord(rootNode)) {
+      continue;
+    }
+    rootCount += 1;
+    const rootLabel = chromeRootLabels[rootKey] ?? String(rootNode.name ?? rootKey);
+    walkChromeBookmarkNode(rootNode, {
+      profileName: input.profileName,
+      root: rootLabel,
+      folderPath: [rootLabel],
+      countRootFolder: false,
+    });
+  }
+
+  return {
+    profileName: input.profileName,
+    bookmarksPath: input.bookmarksPath,
+    bookmarkCount,
+    folderCount,
+    rootCount,
+    truncated,
+    bookmarks,
+  };
+
+  function walkChromeBookmarkNode(
+    node: Record<string, unknown>,
+    context: {
+      profileName: string;
+      root: string;
+      folderPath: string[];
+      countRootFolder: boolean;
+    },
+  ) {
+    const type = String(node.type ?? "");
+    if (type === "url") {
+      bookmarkCount += 1;
+      if (bookmarks.length >= input.maxBookmarks) {
+        truncated = true;
+        return;
+      }
+
+      const title = String(node.name ?? "").trim() || "(untitled)";
+      const url = String(node.url ?? "").trim();
+      if (!url) {
+        return;
+      }
+
+      const createdAt = parseChromeBookmarkDate(node.date_added);
+      bookmarks.push({
+        profileName: context.profileName,
+        title,
+        url,
+        folderPath: context.folderPath,
+        root: context.root,
+        ...(createdAt ? { createdAt } : {}),
+      });
+      return;
+    }
+
+    if (type !== "folder") {
+      return;
+    }
+
+    if (context.countRootFolder) {
+      folderCount += 1;
+    }
+
+    const children = Array.isArray(node.children) ? node.children : [];
+    for (const child of children) {
+      if (!isRecord(child)) {
+        continue;
+      }
+
+      if (String(child.type ?? "") === "folder") {
+        const folderName = String(child.name ?? "").trim() || "(untitled folder)";
+        walkChromeBookmarkNode(child, {
+          ...context,
+          folderPath: [...context.folderPath, folderName],
+          countRootFolder: true,
+        });
+      } else {
+        walkChromeBookmarkNode(child, {
+          ...context,
+          countRootFolder: false,
+        });
+      }
+    }
+  }
+}
+
+function parseChromeBookmarkDate(value: unknown): string | undefined {
+  const raw = typeof value === "string" ? Number(value) : Number.NaN;
+  if (!Number.isFinite(raw) || raw <= chromeEpochDeltaMicros) {
+    return undefined;
+  }
+
+  const date = new Date((raw - chromeEpochDeltaMicros) / 1000);
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+}
+
+function limitChromeBookmarkProfiles(
+  profiles: ChromeBookmarkProfileResult[],
+  limit: number,
+): ChromeBookmarkProfileResult[] {
+  let remaining = limit;
+  return profiles.map((profile) => {
+    const bookmarks = profile.bookmarks.slice(0, Math.max(0, remaining));
+    remaining = Math.max(0, remaining - bookmarks.length);
+    return {
+      ...profile,
+      bookmarks,
+      truncated: profile.truncated || profile.bookmarks.length > bookmarks.length,
+    };
+  });
+}
+
+async function writeChromeBookmarksArtifacts(input: {
+  bookmarkListMarkdown: string;
+  runContext?: AgentRunContext;
+  bookmarkCount: number;
+  returnedBookmarkCount: number;
+  profileCount: number;
+}): Promise<{
+  bookmarkList: { ref: "artifact:bookmark_list"; path: string };
+  goalEvidence: { ref: "artifact:goalEvidence"; path: string };
+} | null> {
+  if (!input.runContext) {
+    return null;
+  }
+
+  const outputRoot =
+    input.runContext.sandbox.extraWriteRoots[0] ?? input.runContext.workspaceRoot;
+  const bookmarkListPath = path.join(outputRoot, "bookmark_list.md");
+  const goalEvidencePath = path.join(outputRoot, "goalEvidence.md");
+  await mkdir(outputRoot, { recursive: true });
+  await writeFile(bookmarkListPath, input.bookmarkListMarkdown, "utf8");
+  await writeFile(
+    goalEvidencePath,
+    [
+      "# Goal Evidence",
+      "",
+      "Chrome bookmark inspection completed with the native chrome_bookmarks_read tool.",
+      "",
+      `- Total bookmarks: ${input.bookmarkCount}`,
+      `- Returned in complete artifact: ${input.returnedBookmarkCount}`,
+      `- Chrome profiles scanned: ${input.profileCount}`,
+      `- Complete bookmark list artifact: ${bookmarkListPath}`,
+      "",
+      "The full bookmark titles, URLs, and folder hierarchy are available in artifact:bookmark_list.",
+    ].join("\n"),
+    "utf8",
+  );
+  return {
+    bookmarkList: { ref: "artifact:bookmark_list", path: bookmarkListPath },
+    goalEvidence: { ref: "artifact:goalEvidence", path: goalEvidencePath },
+  };
+}
+
+function formatChromeBookmarksMarkdown(input: {
+  profiles: ChromeBookmarkProfileResult[];
+  bookmarkCount: number;
+  returnedBookmarkCount: number;
+  truncated: boolean;
+  artifactPath?: string;
+}): string {
+  const lines = [
+    "# Chrome 书签",
+    "",
+    `共找到 ${input.bookmarkCount} 个书签，返回 ${input.returnedBookmarkCount} 个。`,
+  ];
+  if (input.truncated) {
+    lines.push(
+      input.artifactPath
+        ? `聊天内仅显示预览；完整清单已写入 ${input.artifactPath}。`
+        : "结果已截断，请提高 maxBookmarks 后重试。",
+    );
+  } else if (input.artifactPath) {
+    lines.push(`完整清单已写入 ${input.artifactPath}。`);
+  }
+
+  for (const profile of input.profiles) {
+    lines.push("", `## ${profile.profileName}`);
+    const grouped = groupBookmarksByFolder(profile.bookmarks);
+    for (const [folderPath, bookmarks] of grouped) {
+      lines.push("", `### ${folderPath}`);
+      for (const bookmark of bookmarks) {
+        lines.push(`- ${bookmark.title} - ${bookmark.url}`);
+      }
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function groupBookmarksByFolder(
+  bookmarks: ChromeBookmarkEntry[],
+): Array<[string, ChromeBookmarkEntry[]]> {
+  const groups = new Map<string, ChromeBookmarkEntry[]>();
+  for (const bookmark of bookmarks) {
+    const key = bookmark.folderPath.join(" / ");
+    groups.set(key, [...(groups.get(key) ?? []), bookmark]);
+  }
+  return [...groups.entries()];
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 async function executeShellCommand(
@@ -1085,6 +1869,53 @@ function resolveUserPath(value: string): string {
     return path.join(os.homedir(), value.slice(2));
   }
   return path.resolve(value);
+}
+
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isLocalFileOrganizationPreview(
+  value: unknown,
+): value is LocalFileOrganizationPreview {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    typeof value.id === "string" &&
+    typeof value.root === "string" &&
+    typeof value.generatedAt === "string" &&
+    Array.isArray(value.moves) &&
+    Array.isArray(value.conflicts)
+  );
+}
+
+function isLocalFileOrganizationTransaction(
+  value: unknown,
+): value is LocalFileOrganizationTransaction {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    typeof value.id === "string" &&
+    typeof value.root === "string" &&
+    typeof value.logPath === "string" &&
+    Array.isArray(value.moves) &&
+    (value.status === "pending" ||
+      value.status === "applied" ||
+      value.status === "rolled_back")
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object";
 }
 
 async function searchMemory(

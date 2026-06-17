@@ -24,6 +24,22 @@ describe("agent intent router", () => {
     });
   });
 
+  it("preserves explicit filesystem paths before keyword folder fallbacks", () => {
+    const route = classifyAgentIntent(
+      "每天 9 点整理 /Users/bytedance/Downloads 这个文件夹",
+    );
+
+    expect(route).toMatchObject({
+      kind: "create_task",
+      confidence: 0.95,
+      slots: {
+        schedule: { kind: "daily", time: "09:00" },
+        targetDir: "/Users/bytedance/Downloads",
+      },
+      missingSlots: [],
+    });
+  });
+
   it("routes an English scheduled desktop request to create_task", () => {
     const route = classifyAgentIntent("daily at 18:45 organize desktop folder");
 

@@ -51,6 +51,7 @@ import type { ModelSettingsInput, SaveModelSettingsResult } from "../../shared/m
 import { MemoryValidationError } from "../memoryStore";
 import { ModelSettingsValidationError } from "../modelSettingsStore";
 import { ScheduledTaskValidationError } from "../taskStore";
+import { toChatSendMessageFailure } from "./chatSendMessageError";
 
 export function registerAllIpcHandlers(container: AppContainer): void {
   registerAppIpcHandlers(container);
@@ -639,6 +640,8 @@ function registerChatIpcHandlers(container: AppContainer): void {
             }
           },
         });
+      } catch (error) {
+        return toChatSendMessageFailure(error);
       } finally {
         activeChatMessageControllers.delete(requestId);
       }

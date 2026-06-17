@@ -290,7 +290,8 @@
         "npm run build",
         "npm run verify",
         "npm run harness:check",
-        "npm run smoke:prod"
+        "npm run smoke:prod",
+        "Production Electron CDP black-box Chrome bookmark Goal PASS"
       ]
     },
     {
@@ -704,6 +705,185 @@
         "npm run harness:check",
         "npm run smoke:prod",
         "git diff --check"
+      ]
+    },
+    {
+      "id": "P9.0-task-strategy-guard",
+      "priority": 36,
+      "status": "done",
+      "title": "Typed task strategy guard for runtime planning",
+      "files": [
+        "src/shared/agentTaskStrategy.ts",
+        "src/shared/agentTaskStrategy.test.ts",
+        "src/main/agentGoalPlanner.ts",
+        "src/main/agentGoalPlanner.test.ts"
+      ],
+      "definitionOfDone": [
+        "TaskFrame classifies domain, mode, risk, expected scale, target references, and recommended runtime",
+        "Reference resolver strips natural-language path suffixes such as Chinese '这个文件夹' from canonical paths",
+        "Strategy linter rejects small deterministic tasks in Goal Mode, missing confirmation for side effects, shell-first deterministic plans, and fragmented repeated tool calls",
+        "Goal planner prompt includes the task strategy frame so planning sees runtime fit before decomposing milestones"
+      ],
+      "verification": [
+        "npm test -- src/shared/agentTaskStrategy.test.ts src/main/agentGoalPlanner.test.ts",
+        "npm run build",
+        "npm run verify",
+        "npm run harness:check"
+      ]
+    },
+    {
+      "id": "P9.1-runtime-strategy-enforcement",
+      "priority": 37,
+      "status": "done",
+      "title": "Runtime strategy enforcement and capability-aware guards",
+      "files": [
+        "src/shared/agentTaskStrategy.ts",
+        "src/shared/agentTaskStrategy.test.ts",
+        "src/shared/agentToolCapabilities.ts",
+        "src/shared/agentToolCapabilities.test.ts",
+        "src/shared/agentIntent.ts",
+        "src/shared/agentIntent.test.ts",
+        "src/shared/agentTrajectory.ts",
+        "src/main/goalChatService.ts",
+        "src/main/goalChatService.test.ts",
+        "src/main/agentLoop.ts",
+        "src/main/agentLoop.test.ts",
+        "src/main/goalRuntimeEngine.ts",
+        "src/main/goalRuntimeEngine.test.ts"
+      ],
+      "definitionOfDone": [
+        "Chat-created quick-action side-effect goals route to review before Goal planner decomposition",
+        "Tool capability registry describes batching, recursion, side effects, platform sensitivity, result size risk, and native operation preferences",
+        "Strategy linter warns when shell is used for operations with native tools such as test_run",
+        "Agent loop emits strategy guard events for fragmented repeated non-batch tool calls",
+        "Goal runtime records strategy guard trajectory evidence and visible run events",
+        "Intent routing preserves explicit filesystem paths before keyword folder fallbacks"
+      ],
+      "verification": [
+        "npm test -- src/shared/agentTaskStrategy.test.ts src/shared/agentToolCapabilities.test.ts src/shared/agentIntent.test.ts src/main/agentGoalPlanner.test.ts src/main/goalChatService.test.ts src/main/agentLoop.test.ts src/main/goalRuntimeEngine.test.ts",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check"
+      ]
+    },
+    {
+      "id": "P9.2-quick-action-workflow-runtime",
+      "priority": 38,
+      "status": "done",
+      "title": "Quick Action workflow runtime with native file organization tools",
+      "files": [
+        "README.md",
+        "src/shared/agentWorkflowCatalog.ts",
+        "src/shared/agentWorkflowCatalog.test.ts",
+        "src/shared/agentQuickAction.ts",
+        "src/shared/agentQuickAction.test.ts",
+        "src/shared/agentToolCapabilities.ts",
+        "src/shared/agentToolCapabilities.test.ts",
+        "src/shared/agentProtocol.ts",
+        "src/shared/agentProtocol.test.ts",
+        "src/shared/toolPermissions.ts",
+        "src/shared/toolPermissions.test.ts",
+        "src/shared/chat.ts",
+        "src/shared/agentTrajectoryInsights.ts",
+        "src/shared/agentTrajectoryInsights.test.ts",
+        "src/main/localFileOrganizer.ts",
+        "src/main/localFileOrganizer.test.ts",
+        "src/main/agentToolExecutor.ts",
+        "src/main/agentToolExecutor.test.ts",
+        "src/main/agentLoop.ts",
+        "src/main/agentLoop.test.ts",
+        "src/main/goalRuntimeEngine.ts",
+        "src/main/goalRuntimeEngine.test.ts",
+        "src/main/goalChatService.ts",
+        "src/main/goalChatService.test.ts",
+        "src/main/eval/agentEvalFixtures.ts",
+        "src/main/eval/agentEvalRunner.test.ts",
+        "src/renderer/components/AgentChatPanel.tsx",
+        "src/renderer/components/ToolsPanel.tsx",
+        "src/shared/readme.test.ts"
+      ],
+      "definitionOfDone": [
+        "Workflow Catalog maps task frames to runtime strategies, preferred native tools, guardrails, and recovery tools across core task domains",
+        "Quick Action plans carry workflow id, canonical target refs, confirmation gates, native batch steps, and rollback tools",
+        "Local file organization has native inventory, move-plan, apply, verify, and rollback tools backed by transaction logs",
+        "Tool permissions and run-context sandbox checks cover the native organizer tools without bypassing ToolAuthorizationService",
+        "Strategy guard events can pause Goal Runtime execution and surface UI trajectory insights",
+        "Agent eval fixtures include strategy-guard fragmentation recovery"
+      ],
+      "verification": [
+        "npm test -- src/shared/agentWorkflowCatalog.test.ts src/shared/agentQuickAction.test.ts src/shared/agentToolCapabilities.test.ts src/shared/toolPermissions.test.ts src/shared/agentProtocol.test.ts src/main/localFileOrganizer.test.ts src/main/agentToolExecutor.test.ts src/main/goalChatService.test.ts src/main/agentLoop.test.ts src/main/goalRuntimeEngine.test.ts src/shared/agentTrajectoryInsights.test.ts src/main/eval/agentEvalRunner.test.ts",
+        "npm test",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "git diff --check"
+      ]
+    },
+    {
+      "id": "P9.3-goal-result-delivery-and-ipc-hardening",
+      "priority": 39,
+      "status": "done",
+      "title": "Goal result delivery and chat IPC hardening",
+      "files": [
+        "README.md",
+        "src/main/agentGoalController.ts",
+        "src/main/agentGoalPlanner.ts",
+        "src/main/agentGoalPlanner.test.ts",
+        "src/main/agentLoop.ts",
+        "src/main/agentLoop.test.ts",
+        "src/main/agentToolExecutor.ts",
+        "src/main/agentToolExecutor.test.ts",
+        "src/main/agentGoalStore.ts",
+        "src/main/agentGoalStore.test.ts",
+        "src/main/chatSessionStore.ts",
+        "src/main/chatSessionStore.test.ts",
+        "src/main/container.ts",
+        "src/main/container.test.ts",
+        "src/main/goalChatService.ts",
+        "src/main/goalChatService.test.ts",
+        "src/main/goalRuntimeEngine.ts",
+        "src/main/goalRuntimeEngine.test.ts",
+        "src/main/ipc/index.ts",
+        "src/main/ipc/chatSendMessageError.ts",
+        "src/main/ipc/chatSendMessageError.test.ts",
+        "src/main/toolObservationOffload.ts",
+        "src/main/toolObservationOffload.test.ts",
+        "src/renderer/components/AgentChatPanel.tsx",
+        "src/renderer/components/ToolsPanel.tsx",
+        "src/renderer/materialDesign.test.ts",
+        "src/shared/agentProtocol.ts",
+        "src/shared/agentProtocol.test.ts",
+        "src/shared/agentToolCapabilities.ts",
+        "src/shared/agentToolCapabilities.test.ts",
+        "src/shared/nativeCapabilities.ts",
+        "src/shared/readme.test.ts",
+        "src/shared/toolApproval.ts",
+        "src/shared/toolPermissions.ts",
+        "src/shared/toolPermissions.test.ts"
+      ],
+      "definitionOfDone": [
+        "Goal planner prompt forbids clarification-only milestones for concrete tasks",
+        "Evidence-backed model review checks are normalized with artifact:goalEvidence when missing evidence refs",
+        "Terminal Goal progress events append a deduplicated assistant result message with run summaries to the originating chat session",
+        "Deterministic Goal acceptance no longer requires model settings when no model_review checks are present",
+        "Corrupt local chat session and goal JSON files are quarantined instead of crashing the app",
+        "Terminal Goal progress events refresh the active chat transcript so the appended result is visible without manual reload",
+        "Chrome bookmark inspection uses chrome_bookmarks_read as a structured native browser tool instead of file_read plus shell/script parsing",
+        "Successful Chrome bookmark native reads block subsequent shell/file_read parser fallbacks before user authorization",
+        "Chrome bookmark chat goals plan as a single native chrome_bookmarks_read milestone when the tool is available",
+        "Covered evidence-backed model-review goals stop from accepted milestone evidence without redundant final model re-review loops",
+        "Chat and goal JSON state writes are serialized and atomically replaced to prevent partial-read corruption",
+        "chat:sendMessage returns structured failures instead of surfacing raw Electron IPC invocation errors"
+      ],
+      "verification": [
+        "npm test -- src/main/agentGoalPlanner.test.ts src/main/container.test.ts src/main/ipc/chatSendMessageError.test.ts src/main/chatSessionStore.test.ts src/main/agentGoalStore.test.ts src/renderer/materialDesign.test.ts",
+        "npm test",
+        "npm run build",
+        "npm run verify",
+        "npm run harness:check",
+        "npm run smoke:prod"
       ]
     }
   ]

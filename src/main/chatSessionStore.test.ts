@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -19,6 +19,38 @@ describe("chat session store", () => {
     const store = createChatSessionStore({ configDir });
 
     await expect(store.list()).resolves.toEqual([]);
+  });
+
+  it("quarantines corrupt chat session JSON and starts from an empty store", async () => {
+    await writeFile(path.join(configDir, "chat-sessions.json"), "", "utf8");
+    const store = createChatSessionStore({
+      configDir,
+      createId: createSequentialId("chat"),
+    });
+
+    await expect(store.list()).resolves.toEqual([]);
+
+    const files = await readdir(configDir);
+    expect(
+      files.some((file) => file.startsWith("chat-sessions.json.corrupt-")),
+    ).toBe(true);
+
+    const appended = await store.appendMessage({
+      role: "user",
+      content: "继续",
+    });
+    expect(appended.session.messages).toHaveLength(1);
+  });
+
+  it("handles concurrent corrupt chat session recovery without surfacing rename errors", async () => {
+    await writeFile(path.join(configDir, "chat-sessions.json"), "", "utf8");
+    const store = createChatSessionStore({ configDir });
+
+    await expect(Promise.all([store.list(), store.list(), store.list()])).resolves.toEqual([
+      [],
+      [],
+      [],
+    ]);
   });
 
   it("creates a session with a brief generated title and persists messages", async () => {
@@ -78,6 +110,38 @@ describe("chat session store", () => {
 
     const reloaded = createChatSessionStore({ configDir });
     await expect(reloaded.get("chat_1")).resolves.toEqual(assistantAppend.session);
+  });
+
+  it("serializes concurrent session mutations without dropping messages", async () => {
+    const store = createChatSessionStore({
+      configDir,
+      createId: createSequentialId("chat"),
+      now: createSteppedClock("2026-06-06T08:00:00.000Z"),
+    });
+    const userAppend = await store.appendMessage({
+      role: "user",
+      content: "帮我看一下 Chrome 书签",
+    });
+
+    await Promise.all([
+      store.appendMessage({
+        sessionId: userAppend.session.id,
+        role: "assistant",
+        content: "第一条结果。",
+      }),
+      store.appendMessage({
+        sessionId: userAppend.session.id,
+        role: "assistant",
+        content: "第二条结果。",
+      }),
+    ]);
+
+    const session = await store.get(userAppend.session.id);
+    expect(session?.messages.map((message) => message.content)).toEqual([
+      "帮我看一下 Chrome 书签",
+      "第一条结果。",
+      "第二条结果。",
+    ]);
   });
 
   it("summarizes long goal-style prompts without keeping project paths in the title", async () => {

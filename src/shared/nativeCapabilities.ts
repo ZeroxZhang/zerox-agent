@@ -2,6 +2,7 @@ import type { AgentTrajectoryEventType } from "./agentTrajectory";
 import type { AgentToolName } from "./toolPermissions";
 
 export type NativeToolKind =
+  | "browser"
   | "code"
   | "file"
   | "git"

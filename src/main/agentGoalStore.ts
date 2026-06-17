@@ -1,4 +1,12 @@
-import { mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { Goal, GoalStatus } from "../shared/agentGoal";
 
@@ -40,6 +48,7 @@ export function createAgentGoalStore(options: {
   configDir: string;
 }): AgentGoalStore {
   const goalsDir = path.join(options.configDir, "agent-goals");
+  let mutationQueue = Promise.resolve();
 
   function goalPath(goalId: string): string {
     return path.join(goalsDir, `${goalId}.json`);
@@ -51,10 +60,15 @@ export function createAgentGoalStore(options: {
 
   async function readGoal(goalId: string): Promise<Goal | null> {
     try {
-      const raw = await readFile(goalPath(goalId), "utf8");
+      const filePath = goalPath(goalId);
+      const raw = await readFile(filePath, "utf8");
       return normalizeGoal(JSON.parse(raw) as Goal);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return null;
+      }
+      if (error instanceof SyntaxError) {
+        await quarantineCorruptJsonFile(goalPath(goalId));
         return null;
       }
 
@@ -85,11 +99,16 @@ export function createAgentGoalStore(options: {
 
   return {
     async save(goal) {
-      await mkdir(goalsDir, { recursive: true });
-      await writeFile(goalPath(goal.id), `${JSON.stringify(goal, null, 2)}\n`, {
-        encoding: "utf8",
+      return serializeMutation(mutationQueue, (nextQueue) => {
+        mutationQueue = nextQueue;
+      }, async () => {
+        await writeJsonFileAtomically(
+          goalsDir,
+          goalPath(goal.id),
+          `${JSON.stringify(goal, null, 2)}\n`,
+        );
+        return goal;
       });
-      return goal;
     },
 
     async get(goalId) {
@@ -134,18 +153,64 @@ export function createAgentGoalStore(options: {
     },
 
     async delete(goalId) {
-      try {
-        await unlink(goalPath(goalId));
-        return true;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-          return false;
-        }
+      return serializeMutation(mutationQueue, (nextQueue) => {
+        mutationQueue = nextQueue;
+      }, async () => {
+        try {
+          await unlink(goalPath(goalId));
+          return true;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            return false;
+          }
 
-        throw error;
-      }
+          throw error;
+        }
+      });
     },
   };
+}
+
+function serializeMutation<T>(
+  currentQueue: Promise<void>,
+  setQueue: (queue: Promise<void>) => void,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const result = currentQueue.then(operation, operation);
+  setQueue(result.then(
+    () => undefined,
+    () => undefined,
+  ));
+  return result;
+}
+
+async function writeJsonFileAtomically(
+  directory: string,
+  filePath: string,
+  content: string,
+): Promise<void> {
+  await mkdir(directory, { recursive: true });
+  const tempPath = path.join(
+    directory,
+    `.${path.basename(filePath)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`,
+  );
+  try {
+    await writeFile(tempPath, content, { encoding: "utf8" });
+    await rename(tempPath, filePath);
+  } catch (error) {
+    await unlink(tempPath).catch(() => undefined);
+    throw error;
+  }
+}
+
+async function quarantineCorruptJsonFile(filePath: string): Promise<void> {
+  try {
+    await rename(filePath, `${filePath}.corrupt-${Date.now()}`);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
 }
 
 function isActiveGoal(goal: Goal | null): goal is Goal {

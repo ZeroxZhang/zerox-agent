@@ -50,6 +50,21 @@ describe("agent trajectory insights", () => {
     ]);
   });
 
+  it("summarizes strategy guard events as warning insights", () => {
+    expect(
+      summarizeTrajectoryEvent(createEvent("strategy_guard_triggered", {
+        code: "FRAGMENTED_TOOL_CALLS",
+        toolName: "file_list",
+        count: 4,
+      })),
+    ).toEqual({
+      eventId: "event_4",
+      tone: "warn",
+      title: "策略守护",
+      detail: "FRAGMENTED_TOOL_CALLS: file_list 连续触发 4 次，建议切换批量或递归策略",
+    });
+  });
+
   it("returns null for low-signal trajectory events", () => {
     expect(summarizeTrajectoryEvent(createEvent("tool_result", { ok: true }))).toBeNull();
   });

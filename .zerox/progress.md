@@ -1,5 +1,296 @@
 # Zerox Harness Progress
 
+## 2026-06-17 v2.3.2 release preparation
+
+- Request:
+  - Update README, package the app, push the iteration, and publish a release.
+- Implementation:
+  - Bumped release metadata from `2.3.1` to `2.3.2` in `package.json` and `package-lock.json`.
+  - Updated README English/Chinese current-version copy, release notes, verification count copy, roadmap entries, and Gatekeeper quarantine example to match the actual macOS artifact name.
+  - Updated README and package metadata tests to assert v2.3.2.
+  - Built unsigned macOS distribution artifacts with electron-builder.
+- Changed files:
+  - `package.json`
+  - `package-lock.json`
+  - `README.md`
+  - `src/shared/packageScripts.test.ts`
+  - `src/shared/readme.test.ts`
+  - `.zerox/progress.md`
+- Verification evidence:
+  - `./init.sh` -> harness check passed; `src/shared/packageScripts.test.ts` 6 tests passed.
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 2 files / 9 tests passed.
+  - `npm run verify` -> 129 Vitest files / 665 tests passed, build passed, agent eval 25/25, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+- Release artifact evidence:
+  - `npm run dist:mac` -> build and packaging succeeded for v2.3.2.
+  - `release/mac-arm64/Zerox Agent.app/Contents/Info.plist` reports `CFBundleShortVersionString=2.3.2` and `CFBundleVersion=2.3.2`.
+  - `release/Zerox Agent-2.3.2-arm64.dmg` -> 118M.
+  - `release/Zerox Agent-2.3.2-arm64-mac.zip` -> 329M.
+  - `release/latest-mac.yml` -> version `2.3.2`.
+  - Packaged app smoke -> `Smoke startup passed: renderer rendered agent chat UI.`
+  - SHA-256:
+    - dmg: `d0572fd59524bd5a663ce446757c7611aaff4ca1ab391fbd4f0ab6b3c833eeb2`
+    - zip: `cbb05e039559ad6a4ddbb6e06dc880ade9350056e6143ce677cb0143ac8a0945`
+
+## 2026-06-16 P9.3 Goal Result Delivery And IPC Hardening
+
+- Request:
+  - Address user test feedback where a `/目标` Chrome bookmarks task finished as achieved but the chat transcript did not receive any final result.
+  - Address raw Electron IPC output in the chat pane: `Error invoking remote method 'chat:sendMessage': SyntaxError: Unexpected end of JSON input`.
+  - Fold the feedback into the broader architecture fixes from P9 instead of only optimizing one local-file workflow.
+- Root cause:
+  - Goal progress sync only attached the goal summary to the chat session; terminal Goal events did not append an assistant result message.
+  - `agentGoalController.stopGoal` notified progress before saving the terminal goal status, so downstream sync could read stale goal state.
+  - Goal acceptance context unconditionally loaded model settings even when all acceptance checks were deterministic.
+  - Goal planner allowed evidence-backed `model_review` checks with empty evidence refs and did not explicitly forbid clarification-only milestones for concrete tasks.
+  - `chat:sendMessage` did not catch thrown errors at the IPC boundary.
+  - Existing local JSON state could be empty/corrupt, causing `chat-sessions.json` and individual goal reads to throw `Unexpected end of JSON input`.
+  - Computer Use black-box validation showed the UI still did not display the terminal result because the renderer refreshed goal/sidebar state but did not reload active chat messages after terminal Goal progress.
+  - The same black-box validation exposed a corrupt-file recovery race: concurrent readers could both parse the old corrupt file, then the second quarantine rename failed with ENOENT after the first reader had already moved it.
+  - A second black-box run exposed the deeper architecture gap: Chrome bookmark inspection had no native browser-domain tool, so the model fell back to `file_read`, `tool_result_read`, generated scripts, and shell parsing for Chrome `Bookmarks` JSON.
+  - A third black-box run showed the native Chrome bookmark tool was called, but an oversized result still led the model to request a high-risk `shell_exec` parser fallback instead of presenting the native result.
+  - A fourth black-box run showed the model could still request `file_stat` on the raw Chrome `Bookmarks` file after the native tool succeeded, causing a repeated permission prompt instead of a final result.
+  - A fifth black-box run showed the native tool wrote `bookmark_list.md`, but the model still requested high-risk shell (`wc/head/tail`) to inspect that artifact instead of presenting the result.
+  - A sixth black-box run showed the model could read `bookmark_list.md` and `artifact:bookmark_list` back into the context, causing tool-result offload loops instead of finalizing.
+  - A later black-box run showed `chrome_bookmarks_read` self-finalized the milestone, but the Goal stayed `executing` after `1/1` milestones because final goal acceptance re-reviewed already accepted evidence and replanned repeatedly.
+  - A follow-up black-box run showed chat-created goals passed `availableTools: []` into planning, so the planner could not deterministically select the native Chrome bookmark plan and the model could still invent raw JSON parsing milestones.
+  - Goal/chat JSON state was still written with direct `writeFile`, so concurrent reads could observe partial JSON and quarantine valid in-flight state as corrupt.
+- Implementation:
+  - Added planner normalization that injects `artifact:goalEvidence` for evidence-backed model reviews with missing/empty `evidenceRefs`.
+  - Added planner prompt guidance to avoid clarification-only milestones when the user has already named a concrete target.
+  - Added `chrome_bookmarks_read` as a native browser tool that scans Chrome profiles with `Bookmarks` files and returns structured bookmark rows, profile stats, truncation metadata, and Markdown for final presentation.
+  - Added Chrome bookmark tool definitions, capability metadata, permission checks, approval summaries, and planner guidance so Chrome/browser bookmark goals use the native tool instead of `file_read` plus shell/python/jq parsing.
+  - Capped inline Chrome bookmark detail rows at 25 while preserving total counts, requested limits, truncation metadata, and `answerPreview` Markdown so the model has a direct final-answer payload.
+  - Prioritized `answerPreview`/`summary`/`markdown` in offloaded tool-result previews so large native observations still carry user-facing content into the next model turn.
+  - Added an agent-loop guard that blocks `shell_exec`, `file_read`, `file_stat`, `file_list`, and `file_search` raw Chrome `Bookmarks` fallbacks after `chrome_bookmarks_read` succeeds, before those requests reach user authorization.
+  - Changed `chrome_bookmarks_read` to write complete `artifact:bookmark_list` / `bookmark_list.md` during Goal execution and return only a compact 25-row chat preview with artifact path metadata.
+  - Extended the agent-loop guard to block shell inspection of the generated `bookmark_list.md` artifact after the native tool succeeds.
+  - Changed `chrome_bookmarks_read` to also write `artifact:goalEvidence` / `goalEvidence.md` during Goal execution.
+  - Added native self-finalization for successful `chrome_bookmarks_read` results with `answerPreview` and artifact metadata so Goal execution does not re-enter the model for redundant artifact inspection.
+  - Added deterministic final Goal convergence for evidence-backed `model_review` goals whose checks are already covered by accepted milestone evidence.
+  - Added deterministic single-milestone native planning for Chrome bookmark goals when `chrome_bookmarks_read` is available.
+  - Passed available native tool names from the container/tool registry into `GoalChatService` planning.
+  - Upgraded chat session and goal JSON stores to serialize mutable state changes and atomically replace JSON via temp-file rename.
+  - Added terminal Goal assistant result backfill with dedupe via `goal-terminal:<goalId>:<status>` and included both run summaries and acceptance summaries.
+  - Moved terminal Goal persistence before progress notification and avoided model-profile loading for deterministic-only acceptance contexts.
+  - Added structured `chat:sendMessage` failure conversion so IPC errors return `{ ok: false, message }` instead of surfacing raw Electron invoke errors.
+  - Added corrupt local JSON quarantine for chat sessions and individual goal state files before recovering to empty/null state.
+  - Made corrupt JSON quarantine idempotent when concurrent readers race to move the same file.
+  - Refreshed the active chat transcript after terminal Goal progress events so the appended result appears in the visible chat.
+  - Updated README verification counts to 129 Vitest files / 665 tests.
+- Changed files:
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+  - `README.md`
+  - `src/main/agentGoalController.ts`
+  - `src/main/agentGoalPlanner.ts`
+  - `src/main/agentGoalPlanner.test.ts`
+  - `src/main/agentLoop.ts`
+  - `src/main/agentLoop.test.ts`
+  - `src/main/agentToolExecutor.ts`
+  - `src/main/agentToolExecutor.test.ts`
+  - `src/main/agentGoalStore.ts`
+  - `src/main/agentGoalStore.test.ts`
+  - `src/main/chatSessionStore.ts`
+  - `src/main/chatSessionStore.test.ts`
+  - `src/main/container.ts`
+  - `src/main/container.test.ts`
+  - `src/main/goalChatService.ts`
+  - `src/main/goalChatService.test.ts`
+  - `src/main/goalRuntimeEngine.ts`
+  - `src/main/goalRuntimeEngine.test.ts`
+  - `src/main/ipc/index.ts`
+  - `src/main/ipc/chatSendMessageError.ts`
+  - `src/main/ipc/chatSendMessageError.test.ts`
+  - `src/main/toolObservationOffload.ts`
+  - `src/main/toolObservationOffload.test.ts`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/components/ToolsPanel.tsx`
+  - `src/renderer/materialDesign.test.ts`
+  - `src/shared/agentProtocol.ts`
+  - `src/shared/agentProtocol.test.ts`
+  - `src/shared/agentToolCapabilities.ts`
+  - `src/shared/agentToolCapabilities.test.ts`
+  - `src/shared/nativeCapabilities.ts`
+  - `src/shared/readme.test.ts`
+  - `src/shared/toolApproval.ts`
+  - `src/shared/toolPermissions.ts`
+  - `src/shared/toolPermissions.test.ts`
+- TDD and verification evidence:
+  - `npm test -- src/main/agentGoalPlanner.test.ts` -> planner tests passed after adding evidence-ref normalization and clarification-only guard prompt expectations.
+  - `npm test -- src/main/container.test.ts -t "appends a final assistant result"` -> RED, no `goal-terminal:*:achieved` assistant message was appended.
+  - `npm test -- src/main/container.test.ts -t "appends a final assistant result"` -> passed after terminal result backfill, deterministic acceptance context, and stop-order fix.
+  - `npm test -- src/main/ipc/chatSendMessageError.test.ts` -> RED, missing structured error conversion module.
+  - `npm test -- src/main/ipc/chatSendMessageError.test.ts` -> 1 file / 2 tests passed.
+  - `npm test -- src/main/chatSessionStore.test.ts src/main/agentGoalStore.test.ts` -> RED, corrupt JSON still threw `Unexpected end of JSON input`.
+  - `npm test -- src/main/chatSessionStore.test.ts src/main/agentGoalStore.test.ts` -> 2 files / 16 tests passed.
+  - Test engineer subagent Planck used Computer Use on the real Electron UI and returned FAIL: terminal Goal state was visible, but no bookmark result appeared in the chat transcript; a corrupt-session rename race produced ENOENT.
+  - `npm test -- src/main/chatSessionStore.test.ts src/main/agentGoalStore.test.ts -t "concurrent corrupt"` -> RED, concurrent quarantine surfaced ENOENT.
+  - `npm test -- src/main/chatSessionStore.test.ts src/main/agentGoalStore.test.ts -t "concurrent corrupt"` -> 2 files / 2 targeted tests passed.
+  - `npm test -- src/renderer/materialDesign.test.ts -t "reloads the active chat transcript"` -> RED, renderer did not refresh messages on terminal Goal progress.
+  - `npm test -- src/renderer/materialDesign.test.ts -t "reloads the active chat transcript"` -> 1 file / 1 targeted test passed.
+  - `npm test -- src/main/agentToolExecutor.test.ts src/shared/agentProtocol.test.ts src/shared/toolPermissions.test.ts src/shared/agentToolCapabilities.test.ts src/main/agentGoalPlanner.test.ts -t "Chrome|tool definitions|prefers native"` -> RED for missing Chrome bookmark native tool/protocol/permission/capability support, then 4 files passed / 1 skipped with 5 targeted tests passed after implementation.
+  - `npm test -- src/main/agentLoop.test.ts -t "blocks shell fallback after chrome_bookmarks_read"` -> RED, shell fallback was authorized/executed after the native tool; then passed after adding the pre-authorization fallback guard.
+  - Black-box CDP validation with production Electron -> FAIL: after `chrome_bookmarks_read` authorization, the model requested `file_stat` on `/Users/zerox/Library/Application Support/Google/Chrome/Default/Bookmarks`, causing repeated authorization prompts.
+  - `npm test -- src/main/agentLoop.test.ts -t "raw Chrome Bookmarks file probes"` -> RED, `file_stat` was authorized/executed after the native tool; then passed after extending the fallback guard to raw Chrome path probes.
+  - Black-box CDP validation with production Electron -> FAIL: after `chrome_bookmarks_read` wrote `bookmark_list.md`, the model requested high-risk `shell_exec` with `wc/head/tail` to inspect the artifact.
+  - `npm test -- src/main/agentLoop.test.ts -t "bookmark artifact"` -> RED, shell artifact inspection was authorized/executed after the native tool; then passed after blocking shell checks of `bookmark_list.md`.
+  - Black-box CDP validation with production Electron -> FAIL: after `chrome_bookmarks_read`, the model read `bookmark_list.md` / `artifact:bookmark_list` and got stuck in offload loops.
+  - `npm test -- src/main/agentLoop.test.ts -t "self-finalizes"` -> RED, `chrome_bookmarks_read` handed control back to the model; then passed after native self-finalization.
+  - `npm test -- src/main/toolObservationOffload.test.ts -t "answerPreview"` -> RED, offloaded previews dropped late `answerPreview`; then passed after prioritizing user-facing preview fields.
+  - `npm test -- src/main/agentLoop.test.ts src/main/agentToolExecutor.test.ts src/main/toolObservationOffload.test.ts -t "chrome_bookmarks_read|Chrome bookmark|answerPreview"` -> 3 files / 4 targeted tests passed.
+  - `npm test -- src/main/agentToolExecutor.test.ts src/shared/agentProtocol.test.ts src/shared/toolPermissions.test.ts src/shared/agentToolCapabilities.test.ts src/main/agentGoalPlanner.test.ts src/shared/nativeCapabilities.test.ts src/shared/toolApproval.test.ts` -> 7 files / 81 tests passed.
+  - `npm test -- src/main/agentGoalPlanner.test.ts src/main/container.test.ts src/main/ipc/chatSendMessageError.test.ts src/main/chatSessionStore.test.ts src/main/agentGoalStore.test.ts src/renderer/materialDesign.test.ts` -> 6 files / 63 tests passed.
+  - `npm test -- src/main/agentGoalController.test.ts src/main/agentGoalStore.test.ts src/main/chatSessionStore.test.ts src/main/container.test.ts` -> 4 files / 35 tests passed after atomic JSON writes and covered model-review Goal convergence.
+  - `npm test -- src/main/goalChatService.test.ts src/main/agentGoalPlanner.test.ts src/main/agentGoalController.test.ts` -> 3 files / 27 tests passed after available-tool injection and native Chrome bookmark planning.
+  - `npm test` -> 129 files / 665 tests passed.
+  - `npm run build` -> passed.
+  - `npm run verify` -> 129 Vitest files / 665 tests passed, build passed, agent eval 25/25, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - Production Electron CDP black-box validation -> PASS: sent `/目标 帮我看一下我chrome浏览器的书签都有哪些`; one deterministic `extract_chrome_bookmarks` milestone ran; only one `chrome_bookmarks_read` approval appeared; no `shell_exec`, `file_read`, `file_stat`, raw Chrome path probe, or artifact reread fallback occurred; final chat showed `目标已达成`, `共找到 335 个书签，返回 25 个`, visible bookmark URLs, and `/Users/zerox/Library/Application Support/Zerox Agent/workspaces/default/bookmark_list.md`.
+  - Artifact verification -> `bookmark_list.md` contains 335 Chrome bookmarks; `goalEvidence.md` records `Total bookmarks: 335`; latest goal JSON `goal_9143af48-5c10-4fb1-b8f1-027fe354edc2.json` is valid with `status: achieved`, `stopReason: goal_accepted`, and `replans: 0`.
+
+## 2026-06-16 P9.2 Quick Action Workflow Runtime
+
+- Continued the systemic optimization work beyond prompt/linter guardrails into executable runtime capabilities.
+- Added a shared Workflow Catalog that maps task frames to runtime strategies, preferred native tools, guardrails, confirmation risks, and recovery tools across local files, code, web, data, writing, and research work.
+- Added Quick Action plans that carry workflow id, canonical target refs, confirmation gate, native batch steps, and rollback tools for deterministic side-effect work.
+- Added native local file organizer runtime with preview, transaction log, apply, verify, and rollback behavior. The runtime does not overwrite conflicts and does not use shell commands.
+- Exposed file organization as built-in native tools: `file_inventory`, `file_move_plan`, `file_apply_moves`, `file_verify_moves`, and `file_rollback_moves`.
+- Extended tool capabilities, protocol definitions, tool permissions, and run-context sandbox checks for the native organizer tools.
+- Upgraded strategy guard behavior so Goal Runtime pauses on repeated fragmented non-batch tool calls, records `strategy_guard_triggered`, and surfaces a trajectory insight/UI warning.
+- Added a deterministic eval fixture for strategy-guard fragmentation recovery and updated README verification counts.
+- Changed files:
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+  - `README.md`
+  - `src/shared/agentWorkflowCatalog.ts`
+  - `src/shared/agentWorkflowCatalog.test.ts`
+  - `src/shared/agentQuickAction.ts`
+  - `src/shared/agentQuickAction.test.ts`
+  - `src/shared/agentToolCapabilities.ts`
+  - `src/shared/agentToolCapabilities.test.ts`
+  - `src/shared/agentProtocol.ts`
+  - `src/shared/agentProtocol.test.ts`
+  - `src/shared/toolPermissions.ts`
+  - `src/shared/toolPermissions.test.ts`
+  - `src/shared/chat.ts`
+  - `src/shared/agentTrajectoryInsights.ts`
+  - `src/shared/agentTrajectoryInsights.test.ts`
+  - `src/main/localFileOrganizer.ts`
+  - `src/main/localFileOrganizer.test.ts`
+  - `src/main/agentToolExecutor.ts`
+  - `src/main/agentToolExecutor.test.ts`
+  - `src/main/agentLoop.ts`
+  - `src/main/agentLoop.test.ts`
+  - `src/main/goalRuntimeEngine.ts`
+  - `src/main/goalRuntimeEngine.test.ts`
+  - `src/main/goalChatService.ts`
+  - `src/main/goalChatService.test.ts`
+  - `src/main/eval/agentEvalFixtures.ts`
+  - `src/main/eval/agentEvalRunner.test.ts`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/components/ToolsPanel.tsx`
+  - `src/shared/readme.test.ts`
+- TDD and verification evidence:
+  - `npm test -- src/main/agentLoop.test.ts` -> RED, `pauseOnStrategyGuard` did not pause fragmented tool-call execution.
+  - `npm test -- src/main/agentLoop.test.ts` -> 1 file / 10 tests passed.
+  - `npm test -- src/main/goalRuntimeEngine.test.ts` -> RED, Goal Runtime did not enable `pauseOnStrategyGuard`.
+  - `npm test -- src/main/goalRuntimeEngine.test.ts` -> 1 file / 5 tests passed.
+  - `npm test -- src/shared/agentTrajectoryInsights.test.ts` -> RED, `strategy_guard_triggered` did not produce an insight.
+  - `npm test -- src/shared/agentTrajectoryInsights.test.ts` -> 1 file / 3 tests passed.
+  - `npm test -- src/main/eval/agentEvalRunner.test.ts` -> RED before the strategy-guard fixture was added.
+  - `npm test -- src/main/eval/agentEvalRunner.test.ts` -> 1 file / 7 tests passed.
+  - `npm test -- src/shared/agentWorkflowCatalog.test.ts` -> RED, missing Workflow Catalog module.
+  - `npm test -- src/shared/agentWorkflowCatalog.test.ts` -> 1 file / 3 tests passed.
+  - `npm test -- src/shared/agentQuickAction.test.ts` -> RED, missing Quick Action plan module.
+  - `npm test -- src/shared/agentQuickAction.test.ts` -> 1 file / 2 tests passed.
+  - `npm test -- src/main/localFileOrganizer.test.ts` -> RED, missing local organizer runtime.
+  - `npm test -- src/main/localFileOrganizer.test.ts` -> 1 file / 2 tests passed.
+  - `npm test -- src/main/agentToolExecutor.test.ts` -> RED, missing native organizer tools and rollback tool.
+  - `npm test -- src/main/agentToolExecutor.test.ts` -> 1 file / 22 tests passed.
+  - `npm test -- src/shared/toolPermissions.test.ts` -> RED, organizer tools lacked authorization rules.
+  - `npm test -- src/shared/toolPermissions.test.ts` -> 1 file / 24 tests passed.
+  - `npm test -- src/shared/agentProtocol.test.ts` -> RED, protocol definitions did not expose organizer tools.
+  - `npm test -- src/shared/agentProtocol.test.ts` -> 1 file / 16 tests passed.
+  - `npm test -- src/shared/agentWorkflowCatalog.test.ts src/shared/agentQuickAction.test.ts src/shared/agentToolCapabilities.test.ts src/shared/toolPermissions.test.ts src/shared/agentProtocol.test.ts src/main/localFileOrganizer.test.ts src/main/agentToolExecutor.test.ts src/main/goalChatService.test.ts src/main/agentLoop.test.ts src/main/goalRuntimeEngine.test.ts src/shared/agentTrajectoryInsights.test.ts src/main/eval/agentEvalRunner.test.ts` -> 12 files / 106 tests passed.
+  - `npm test` -> 128 files / 643 tests passed.
+  - `npm run build` -> passed.
+  - `npm run verify` -> 128 Vitest files / 643 tests passed, build passed, agent eval 25/25, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `git diff --check` -> passed.
+
+## 2026-06-16 P9.1 Runtime Strategy Enforcement
+
+- Extended the P9 task-strategy work from prompt guidance into runtime enforcement and observable guardrails.
+- Chat-created goals that classify as quick-action side-effect work now pause at review instead of calling the Goal planner immediately. This prevents small deterministic local mutations from being decomposed into long-running Goal Mode by default.
+- Added a shared `agentToolCapabilities` registry describing tool side effects, batching/recursive support, result-size risk, platform sensitivity, confirmation needs, preferred operations, and anti-patterns.
+- Strategy lint now warns when shell is used for a known native operation, such as running tests through `shell_exec` instead of `test_run`.
+- Agent loop now emits `FRAGMENTED_TOOL_CALLS` strategy guard events when a non-batch tool such as `file_list` is called repeatedly in one loop.
+- Goal runtime records strategy guard events into trajectory evidence as `strategy_guard_triggered` and surfaces a visible run event.
+- Intent routing now preserves explicit filesystem paths before keyword fallbacks, so `/Users/bytedance/Downloads 这个文件夹` resolves to `/Users/bytedance/Downloads` instead of `~/Downloads` or a malformed path.
+- Changed files:
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+  - `src/shared/agentTaskStrategy.ts`
+  - `src/shared/agentTaskStrategy.test.ts`
+  - `src/shared/agentToolCapabilities.ts`
+  - `src/shared/agentToolCapabilities.test.ts`
+  - `src/shared/agentIntent.ts`
+  - `src/shared/agentIntent.test.ts`
+  - `src/shared/agentTrajectory.ts`
+  - `src/main/agentGoalPlanner.ts`
+  - `src/main/agentGoalPlanner.test.ts`
+  - `src/main/goalChatService.ts`
+  - `src/main/goalChatService.test.ts`
+  - `src/main/agentLoop.ts`
+  - `src/main/agentLoop.test.ts`
+  - `src/main/goalRuntimeEngine.ts`
+  - `src/main/goalRuntimeEngine.test.ts`
+- TDD and verification evidence:
+  - `npm test -- src/main/goalChatService.test.ts` -> RED, quick-action chat goal still called planner.
+  - `npm test -- src/main/goalChatService.test.ts` -> 1 file / 8 tests passed.
+  - `npm test -- src/shared/agentToolCapabilities.test.ts src/shared/agentTaskStrategy.test.ts` -> RED, missing `./agentToolCapabilities` and missing `PREFER_NATIVE_TOOL`.
+  - `npm test -- src/shared/agentToolCapabilities.test.ts src/shared/agentTaskStrategy.test.ts` -> 2 files / 9 tests passed.
+  - `npm test -- src/main/agentLoop.test.ts` -> RED, repeated non-batch tool calls did not emit a strategy guard event.
+  - `npm test -- src/main/agentLoop.test.ts` -> 1 file / 9 tests passed.
+  - `npm test -- src/main/goalRuntimeEngine.test.ts` -> RED, strategy guard events were not written to trajectory.
+  - `npm test -- src/main/goalRuntimeEngine.test.ts` -> 1 file / 5 tests passed.
+  - `npm test -- src/shared/agentIntent.test.ts` -> RED, explicit `/Users/bytedance/Downloads 这个文件夹` still resolved through the keyword fallback.
+  - `npm test -- src/shared/agentIntent.test.ts` -> 1 file / 9 tests passed.
+  - `npm test -- src/shared/agentTaskStrategy.test.ts src/shared/agentToolCapabilities.test.ts src/shared/agentIntent.test.ts src/main/agentGoalPlanner.test.ts src/main/goalChatService.test.ts src/main/agentLoop.test.ts src/main/goalRuntimeEngine.test.ts` -> 7 files / 47 tests passed.
+  - `npm run build` -> passed.
+  - `npm run verify` -> 125 Vitest files / 631 tests passed, build passed, agent eval 24/24, memory eval 2/2.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+
+## 2026-06-16 P9.0 Task Strategy Guard
+
+- Started the first systemic architecture slice after reviewing the v2.3.1 Downloads cleanup run failure pattern.
+- Added a typed task strategy contract that classifies task domain, execution mode, side-effect risk, expected scale, target references, ambiguity, and recommended runtime.
+- Added a reference resolver that strips natural-language path suffixes such as `这个文件夹` from canonical filesystem paths, preventing `/Users/bytedance/Downloads这个文件夹`-style artifacts.
+- Added a strategy linter that rejects small deterministic work in Goal Mode, missing confirmation gates for side effects, shell-first deterministic plans, and fragmented repeated tool calls.
+- Injected the task strategy frame into Goal planner prompts so milestone decomposition sees runtime-fit guidance before producing a plan.
+- Changed files:
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+  - `src/shared/agentTaskStrategy.ts`
+  - `src/shared/agentTaskStrategy.test.ts`
+  - `src/main/agentGoalPlanner.ts`
+  - `src/main/agentGoalPlanner.test.ts`
+- TDD and verification evidence:
+  - `npm test -- src/shared/agentTaskStrategy.test.ts` -> RED, missing `./agentTaskStrategy`.
+  - `npm test -- src/shared/agentTaskStrategy.test.ts` -> 1 file / 5 tests passed.
+  - `npm test -- src/main/agentGoalPlanner.test.ts` -> RED, planning prompt did not include `Task strategy frame:`.
+  - `npm test -- src/shared/agentTaskStrategy.test.ts src/main/agentGoalPlanner.test.ts` -> 2 files / 12 tests passed.
+  - `npm run build` -> passed.
+  - `npm run verify` -> 124 Vitest files / 623 tests passed, build passed, agent eval 24/24, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+
 ## 2026-06-16 GitHub Actions Shell CI Follow-up
 
 - Investigated the red GitHub Actions `verify` run after v2.3.1 was released.

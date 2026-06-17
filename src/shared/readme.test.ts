@@ -14,7 +14,7 @@ describe("README", () => {
     expect(readme).toContain("npm run pack:mac");
     expect(readme).toContain("npm run dist:mac");
     expect(readme).toContain("xattr -dr com.apple.quarantine");
-    expect(readme).toContain("Zerox.Agent-2.3.1-arm64.dmg");
+    expect(readme).toContain("Zerox Agent-2.3.2-arm64.dmg");
     expect(readme).toContain("npm run harness:check");
     expect(readme).toContain("npm run harness:score");
     expect(readme).toContain("npm run episode:export");
@@ -50,8 +50,8 @@ describe("README", () => {
     expect(positioning).toContain("Zerox does not run unbounded autonomous loops");
     expect(readme).toContain("session-native Goal Mode");
     expect(readme).toContain("Chat Session mode");
-    expect(readme).toContain("current release is **v2.3.1**");
-    expect(readme).toContain("当前版本是 **v2.3.1**");
+    expect(readme).toContain("current release is **v2.3.2**");
+    expect(readme).toContain("当前版本是 **v2.3.2**");
   });
 
   it("documents Goal Mode architecture, eval coverage, and feature-list status", () => {
@@ -80,7 +80,7 @@ describe("README", () => {
       : "";
 
     expect(readme).toContain("docs/architecture/agent-goal-mode.md");
-    expect(readme).toContain("24 deterministic agent eval fixtures");
+    expect(readme).toContain("25 deterministic agent eval fixtures");
     expect(readme).toContain("goal-mode pass rate");
     expect(readme).toContain("Agent Runtime Kernel");
     expect(readme).toContain("kernel event replay");
@@ -91,16 +91,18 @@ describe("README", () => {
     expect(readme).toContain("Goal Mode 架构");
     expect(readme).toContain("artifact evidence contract");
     expect(readme).toContain("artifact evidence files");
-    expect(readme).toContain("617 tests");
-    expect(readme).toContain("617 个测试");
-    expect(readme).toContain("Current version: v2.3.1.");
-    expect(readme).toContain("当前版本：v2.3.1。");
+    expect(readme).toContain("665 tests");
+    expect(readme).toContain("665 个测试");
+    expect(readme).toContain("Current version: v2.3.2.");
+    expect(readme).toContain("当前版本：v2.3.2。");
     expect(readme).toContain("command-first agent stage");
     expect(readme).toContain("command-first agent release");
     expect(readme).toContain("transcript-backed goal judge");
     expect(readme).toContain("goal-judge pass rate");
     expect(readme).toContain("v2.3.1 desktop hotfix");
     expect(readme).toContain("v2.3.1 桌面热修");
+    expect(readme).toContain("v2.3.2 hardens Goal execution");
+    expect(readme).toContain("v2.3.2 基于真实桌面测试继续加固 Goal 执行");
     expect(architecture).toContain("Chat Session Goal Mode");
     expect(architecture).toContain("Goal State Machine");
     expect(architecture).toContain("Termination And Suspension Conditions");

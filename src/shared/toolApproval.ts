@@ -70,6 +70,14 @@ export function classifyToolApprovalRisk(input: {
     };
   }
 
+  if (input.request.toolName === "chrome_bookmarks_read") {
+    return {
+      level: "high",
+      reason:
+        "chrome_bookmarks_read reads personal browser bookmark data and may write a local bookmark_list artifact.",
+    };
+  }
+
   return {
     level: "normal",
     reason: "The request needs one-time permission outside the current policy.",
@@ -89,6 +97,13 @@ export function summarizeToolApprovalArgs(
     case "tool_result_read":
       return {
         ref: String(request.args.ref ?? ""),
+      };
+    case "chrome_bookmarks_read":
+      return {
+        profile: String(request.args.profile ?? ""),
+        chromeUserDataDir: String(request.args.chromeUserDataDir ?? ""),
+        bookmarksPath: String(request.args.bookmarksPath ?? ""),
+        maxBookmarks: Number(request.args.maxBookmarks ?? 5000),
       };
     case "file_search":
       return {

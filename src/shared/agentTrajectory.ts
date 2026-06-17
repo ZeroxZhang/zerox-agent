@@ -27,6 +27,7 @@ export type AgentTrajectoryEventType =
   | "child_handoff_completed"
   | "child_handoff_reviewed"
   | "reflection_added"
+  | "strategy_guard_triggered"
   | "failure_classified"
   | "final_summary";
 

@@ -23,6 +23,7 @@ import {
 } from "../shared/agentProtocol";
 import { serializeToolObservationWithOffload } from "./toolObservationOffload";
 import type { ToolResultOffloadStore } from "./toolResultOffloadStore";
+import { getToolCapability } from "../shared/agentToolCapabilities";
 
 export type AgentLoopOptions = {
   chatClient: ChatClient;
@@ -38,6 +39,7 @@ export type AgentLoopOptions = {
   toolResultOffloadStore?: ToolResultOffloadStore;
   toolResultOffloadThreshold?: number;
   pauseOnTurnLimit?: boolean;
+  pauseOnStrategyGuard?: boolean;
   resumeMessages?: ChatMessage[];
   initialToolCallsExecuted?: number;
   pauseOnFailureLoop?: boolean;
@@ -54,6 +56,7 @@ export type AgentLoopOptions = {
   onModelResponse?: (response: ChatCompletionResponse, turn: number) => void;
   onContextCompacted?: (event: AgentLoopContextCompaction) => void;
   onModelRetry?: (event: ModelRetryEvent) => void;
+  onStrategyGuard?: (event: AgentLoopStrategyGuardEvent) => void;
 };
 
 export type AgentLoopContextCompaction = {
@@ -63,12 +66,21 @@ export type AgentLoopContextCompaction = {
   tokenBudget: number;
 };
 
+export type AgentLoopStrategyGuardEvent = {
+  code: "FRAGMENTED_TOOL_CALLS";
+  severity: "warn";
+  message: string;
+  toolName: string;
+  count: number;
+};
+
 export type AgentLoopContinuation = {
-  reason: "turn_limit" | "tool_failure_loop";
+  reason: "turn_limit" | "tool_failure_loop" | "strategy_guard";
   maxTurns: number;
   toolCallsExecuted: number;
   toolName?: string;
   failureKind?: string;
+  strategyGuardCode?: AgentLoopStrategyGuardEvent["code"];
 };
 
 export type AgentLoopResult = {
@@ -105,6 +117,7 @@ export async function runAgentLoop(
     toolResultOffloadStore,
     toolResultOffloadThreshold,
     pauseOnTurnLimit = false,
+    pauseOnStrategyGuard = false,
     resumeMessages,
     initialToolCallsExecuted = 0,
     pauseOnFailureLoop = false,
@@ -117,6 +130,7 @@ export async function runAgentLoop(
     onModelResponse,
     onContextCompacted,
     onModelRetry,
+    onStrategyGuard,
   } = options;
 
   const toolDefinitions = customTools ?? buildToolDefinitions();
@@ -147,6 +161,9 @@ export async function runAgentLoop(
     kind: string;
     count: number;
   } | null = null;
+  const toolCallCounts = new Map<string, number>();
+  const emittedStrategyGuards = new Set<string>();
+  const successfulToolNames = new Set<string>();
   const contextTokenBudget = Math.max(1, Math.floor(modelProfile.maxTokens * 0.7));
 
   function compactMessagesBeforeModelRequest() {
@@ -214,6 +231,35 @@ export async function runAgentLoop(
       }`;
       status = "failed";
     }
+  }
+
+  function recordToolStrategySignals(
+    toolName: string,
+  ): AgentLoopStrategyGuardEvent | null {
+    const count = (toolCallCounts.get(toolName) ?? 0) + 1;
+    toolCallCounts.set(toolName, count);
+
+    const capability = getToolCapability(toolName);
+    const guardKey = `FRAGMENTED_TOOL_CALLS:${toolName}`;
+    if (
+      count === 4 &&
+      capability &&
+      !capability.supportsBatch &&
+      !emittedStrategyGuards.has(guardKey)
+    ) {
+      emittedStrategyGuards.add(guardKey);
+      const event: AgentLoopStrategyGuardEvent = {
+        code: "FRAGMENTED_TOOL_CALLS",
+        severity: "warn",
+        message: `${toolName} has been called ${count} times in one loop; switch to a batch or recursive strategy.`,
+        toolName,
+        count,
+      };
+      onStrategyGuard?.(event);
+      return event;
+    }
+
+    return null;
   }
 
   try {
@@ -320,6 +366,29 @@ export async function runAgentLoop(
           }
 
           const args = preparedToolCall.args;
+          const nativeFallbackRejection = rejectNativeToolFallback({
+            toolName,
+            args,
+            successfulToolNames,
+          });
+          if (nativeFallbackRejection) {
+            const rejectedResult = {
+              ok: false as const,
+              error: nativeFallbackRejection,
+            };
+            messages.push({
+              role: "tool",
+              tool_call_id: toolCall.id,
+              content: serializeToolObservation({
+                tool: toolName as never,
+                ok: false,
+                error: nativeFallbackRejection,
+                toolCallId: toolCall.id,
+              }),
+            });
+            onToolResult?.(toolName, false, rejectedResult);
+            continue;
+          }
 
           // Authorization check (if authorizer is available)
           if (toolAuthorizationService && taskId) {
@@ -366,7 +435,11 @@ export async function runAgentLoop(
           });
 
           toolCallsExecuted += 1;
+          const strategyGuardEvent = recordToolStrategySignals(toolName);
           lastExecutedToolSignature = signature;
+          if (result.ok) {
+            successfulToolNames.add(toolName);
+          }
           onToolResult?.(toolName, result.ok, result);
           const failureLoop = updateToolFailureStreak(
             toolFailureStreak,
@@ -407,6 +480,32 @@ export async function runAgentLoop(
             content: serializedObservation.content,
           });
 
+          const selfFinalizingSummary = buildSelfFinalizingToolSummary(
+            toolName,
+            result,
+          );
+          if (selfFinalizingSummary) {
+            status = "succeeded";
+            summary = selfFinalizingSummary;
+            break;
+          }
+
+          if (pauseOnStrategyGuard && strategyGuardEvent) {
+            status = "paused";
+            continuation = {
+              reason: "strategy_guard",
+              maxTurns,
+              toolCallsExecuted,
+              toolName,
+              strategyGuardCode: strategyGuardEvent.code,
+            };
+            summary = buildStrategyGuardPauseSummary(
+              strategyGuardEvent,
+              toolCallsExecuted,
+            );
+            break;
+          }
+
           if (
             pauseOnFailureLoop &&
             failureLoop.shouldPause &&
@@ -432,6 +531,9 @@ export async function runAgentLoop(
         }
 
         if (status === "paused") {
+          break;
+        }
+        if (status === "succeeded") {
           break;
         }
 
@@ -491,6 +593,17 @@ function buildToolFailureLoopPauseSummary(options: {
     `连续 ${options.count} 次工具失败（${options.toolName}，${options.failureKind}）。`,
     `我已经暂停，避免继续在同一个失败模式里空转。累计执行 ${options.toolCallsExecuted} 个工具。`,
     "你可以回复“继续”让我带着已有诊断接着试，也可以调整目标、提供脚本参数或要求我换一种工具路径。",
+  ].join("\n");
+}
+
+function buildStrategyGuardPauseSummary(
+  event: AgentLoopStrategyGuardEvent,
+  toolCallsExecuted: number,
+): string {
+  return [
+    `策略守护触发（${event.code}）：${event.toolName} 已在同一轮运行中调用 ${event.count} 次。`,
+    `我已经暂停，避免继续用碎片化工具调用消耗时间。累计执行 ${toolCallsExecuted} 个工具。`,
+    "继续前应切换到批量或递归策略，或缩小目标范围后再恢复。",
   ].join("\n");
 }
 
@@ -605,6 +718,120 @@ function buildRepeatedToolCallFallbackSummary(
   toolCallsExecuted: number,
 ): string {
   return `检测到模型重复请求相同工具（${toolName}），已停止继续执行以避免循环。已执行 ${toolCallsExecuted} 个工具，请缩小任务范围或换一个明确目标后重试。`;
+}
+
+function rejectNativeToolFallback(input: {
+  toolName: string;
+  args: Record<string, unknown>;
+  successfulToolNames: ReadonlySet<string>;
+}): string | null {
+  if (!input.successfulToolNames.has("chrome_bookmarks_read")) {
+    return null;
+  }
+
+  if (input.toolName === "shell_exec") {
+    const command = String(input.args.command ?? "");
+    if (isChromeBookmarkArtifactTarget(command)) {
+      return [
+        "chrome_bookmarks_read already returned structured Chrome bookmark data and bookmark_list artifact was already written.",
+        "Do not use shell_exec to inspect bookmark_list.md after the native tool succeeds.",
+        "Use the artifactPath/artifactRef from chrome_bookmarks_read in the final answer.",
+      ].join(" ");
+    }
+    if (isChromeBookmarksFallbackTarget(command)) {
+      return [
+        "chrome_bookmarks_read already returned structured Chrome bookmark data.",
+        "Do not use shell_exec, python, jq, cat, or generated scripts to parse Chrome Bookmarks JSON after the native tool succeeds.",
+        "Use the chrome_bookmarks_read result or call tool_result_read when the observation was offloaded.",
+      ].join(" ");
+    }
+  }
+
+  if (input.toolName === "file_read") {
+    const filePath = String(input.args.path ?? "");
+    if (isChromeBookmarkArtifactTarget(filePath)) {
+      return [
+        "chrome_bookmarks_read already returned structured Chrome bookmark data and bookmark_list artifact was already written.",
+        "Do not read bookmark_list.md back into the model after the native tool succeeds.",
+        "Use the artifactPath/artifactRef from chrome_bookmarks_read in the final answer.",
+      ].join(" ");
+    }
+    if (isChromeBookmarksFallbackTarget(filePath)) {
+      return [
+        "chrome_bookmarks_read already returned structured Chrome bookmark data.",
+        "Do not inspect the raw Chrome Bookmarks path after the native tool succeeds.",
+        "Use the chrome_bookmarks_read result or call tool_result_read when the observation was offloaded.",
+      ].join(" ");
+    }
+  }
+
+  if (input.toolName === "tool_result_read") {
+    const ref = String(input.args.ref ?? "");
+    if (ref.startsWith("artifact:")) {
+      return [
+        "chrome_bookmarks_read already returned structured Chrome bookmark data and bookmark_list artifact was already written.",
+        "artifact refs are evidence references, not tool_result_read refs.",
+        "Use the artifactPath/artifactRef from chrome_bookmarks_read in the final answer.",
+      ].join(" ");
+    }
+  }
+
+  if (
+    input.toolName === "file_stat" ||
+    input.toolName === "file_list" ||
+    input.toolName === "file_search"
+  ) {
+    const requestedPath = String(
+      input.toolName === "file_search"
+        ? input.args.root ?? ""
+        : input.args.path ?? "",
+    );
+    if (isChromeBookmarkArtifactTarget(requestedPath)) {
+      return [
+        "chrome_bookmarks_read already returned structured Chrome bookmark data and bookmark_list artifact was already written.",
+        "Do not inspect bookmark_list.md after the native tool succeeds.",
+        "Use the artifactPath/artifactRef from chrome_bookmarks_read in the final answer.",
+      ].join(" ");
+    }
+    if (isChromeBookmarksFallbackTarget(requestedPath)) {
+      return [
+        "chrome_bookmarks_read already returned structured Chrome bookmark data.",
+        "Do not inspect the raw Chrome Bookmarks path after the native tool succeeds.",
+        "Use the chrome_bookmarks_read result or call tool_result_read when the observation was offloaded.",
+      ].join(" ");
+    }
+  }
+
+  return null;
+}
+
+function buildSelfFinalizingToolSummary(
+  toolName: string,
+  result: Awaited<ReturnType<AgentToolExecutor["execute"]>>,
+): string | null {
+  if (toolName !== "chrome_bookmarks_read" || !result.ok) {
+    return null;
+  }
+
+  const answerPreview = result.result.answerPreview;
+  const artifactRef = result.result.artifactRef;
+  if (typeof answerPreview !== "string" || !answerPreview.trim()) {
+    return null;
+  }
+
+  return typeof artifactRef === "string" && artifactRef
+    ? answerPreview
+    : null;
+}
+
+function isChromeBookmarksFallbackTarget(value: string): boolean {
+  return /Google\/Chrome\/.*\/Bookmarks|Application Support\/Google\/Chrome|Chrome[^\n]*Bookmarks|Bookmarks[^\n]*Chrome/i.test(
+    value,
+  );
+}
+
+function isChromeBookmarkArtifactTarget(value: string): boolean {
+  return /bookmark_list\.md|artifact:bookmark_list/i.test(value);
 }
 
 function createToolCallSignature(
