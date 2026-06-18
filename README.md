@@ -570,7 +570,7 @@ can't be opened." The image is usually valid; remove the quarantine attribute
 before opening:
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/"Zerox Agent-2.3.6-arm64.dmg"
+xattr -dr com.apple.quarantine ~/Downloads/"Zerox.Agent-2.3.6-arm64.dmg"
 ```
 
 If you already dragged the app into Applications, run:
@@ -1299,7 +1299,7 @@ Gatekeeper 可能提示「Zerox Agent 已损坏，无法打开」。这通常不
 而是下载隔离属性导致的拦截。打开前在终端执行：
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/"Zerox Agent-2.3.6-arm64.dmg"
+xattr -dr com.apple.quarantine ~/Downloads/"Zerox.Agent-2.3.6-arm64.dmg"
 ```
 
 如果已经把应用拖进 Applications，则执行：

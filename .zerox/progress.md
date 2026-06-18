@@ -46,6 +46,16 @@
   - No-space release asset aliases match the same SHA-256 values:
     - `release/Zerox-Agent-2.3.6-arm64.dmg`
     - `release/Zerox-Agent-2.3.6-arm64-mac.zip`
+  - `git commit -m "feat: ship deterministic artifact goals v2.3.6"` -> commit `131a699`.
+  - `git push -u origin codex/v2.3.5-run-graph-harness` -> pushed `131a699` to the remote branch.
+  - `git tag -a v2.3.6 -m "Zerox Agent v2.3.6" 131a699 && git push origin v2.3.6` -> pushed the `v2.3.6` tag.
+  - `gh release create v2.3.6 ...` -> created `https://github.com/ZeroxZhang/zerox-agent/releases/tag/v2.3.6`.
+  - `gh release view v2.3.6 --json url,tagName,isDraft,isPrerelease,name,assets` -> release is not draft, not prerelease, and contains:
+    - `Zerox.Agent-2.3.6-arm64.dmg` size `123643137`, digest `sha256:bad3dbe073da62c43b4e84fc1a55d92471528c26d5effefb900e1006838cff44`
+    - `Zerox.Agent-2.3.6-arm64-mac.zip` size `344885866`, digest `sha256:d6db3aad5bdef997d6f212c10b3735a0ee53f58ca28c21dc90b03175927172de`
+    - `Zerox.Agent-2.3.6-arm64.dmg.blockmap` size `131163`
+    - `Zerox.Agent-2.3.6-arm64-mac.zip.blockmap` size `339293`
+  - GitHub Release asset names are normalized to the existing `Zerox.Agent-*` convention, so README quarantine examples were updated to match the published download names.
 
 ## 2026-06-18 P11.6 Command-Line And Packaged Acceptance Gate
 
