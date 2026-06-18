@@ -1,5 +1,10 @@
 import type { AgentRunContext } from "./agentWorkspace";
 import { isPathInsideRunContext } from "./agentWorkspace";
+import {
+  isPathInsideLocationRoot,
+  normalizeLocationEnvironment,
+  type LocationResourceEnvironment,
+} from "./locationResource";
 import type { SkillManifest } from "./skills";
 
 export type AgentToolName =
@@ -95,7 +100,7 @@ export type TaskPermissionPolicyValidationResult = {
 
 const destructiveShellPattern =
   /\b(rm\s+-[^\n]*(r|f)|git\s+reset\s+--hard|git\s+push\s+(-f|--force)|drop\s+(table|database)|truncate\s+table|kubectl\s+delete|docker\s+rm\s+-f)\b/i;
-const shellControlOperatorPattern = /(;|&&|\|\||`|\$\(|\|)/;
+const shellControlOperatorPattern = /(;|&&|\|\||`|\$\(|\||[<>])/;
 
 export function getDefaultTaskPermissionPolicy(): TaskPermissionPolicy {
   return {
@@ -199,8 +204,10 @@ export function validateTaskPermissionPolicy(
 export function authorizeToolCall(
   policy: TaskPermissionPolicy,
   request: ToolCallRequest,
+  locationEnv?: LocationResourceEnvironment,
 ): ToolAuthorizationDecision {
   const normalized = normalizeTaskPermissionPolicy(policy);
+  const env = normalizeLocationEnvironment(locationEnv);
 
   switch (request.toolName) {
     case "file_list":
@@ -208,48 +215,56 @@ export function authorizeToolCall(
         String(request.args.path ?? ""),
         normalized.files.read,
         "file_list 路径不在已授权可读目录内。",
+        env,
       );
     case "file_stat":
       return authorizeFilePath(
         String(request.args.path ?? ""),
         normalized.files.read,
         "file_stat 路径不在已授权可读目录内。",
+        env,
       );
     case "file_search":
       return authorizeFilePath(
         String(request.args.root ?? ""),
         normalized.files.read,
         "file_search 根目录不在已授权可读目录内。",
+        env,
       );
     case "file_inventory":
       return authorizeFilePath(
         String(request.args.path ?? ""),
         normalized.files.read,
         "file_inventory 路径不在已授权可读目录内。",
+        env,
       );
     case "file_move_plan":
       return authorizeFilePath(
         String(request.args.targetDir ?? ""),
         normalized.files.read,
         "file_move_plan 目标目录不在已授权可读目录内。",
+        env,
       );
     case "file_apply_moves":
       return authorizeFilePath(
         getOrganizerRoot(request.args),
         normalized.files.write,
         "file_apply_moves 根目录不在已授权可写目录内。",
+        env,
       );
     case "file_verify_moves":
       return authorizeFilePath(
         getOrganizerRoot(request.args),
         normalized.files.read,
         "file_verify_moves 根目录不在已授权可读目录内。",
+        env,
       );
     case "file_rollback_moves":
       return authorizeFilePath(
         getOrganizerRoot(request.args),
         normalized.files.write,
         "file_rollback_moves 根目录不在已授权可写目录内。",
+        env,
       );
     case "file_read":
       if (isSafeToolResultRef(String(request.args.path ?? ""))) {
@@ -259,6 +274,7 @@ export function authorizeToolCall(
         String(request.args.path ?? ""),
         normalized.files.read,
         "file_read 路径不在已授权可读目录内。",
+        env,
       );
     case "tool_result_read":
       return isSafeToolResultRef(String(request.args.ref ?? ""))
@@ -269,36 +285,42 @@ export function authorizeToolCall(
         String(request.args.path ?? ""),
         normalized.files.write,
         "file_write 路径不在已授权可写目录内。",
+        env,
       );
     case "chrome_bookmarks_read":
       return authorizeFilePath(
         getChromeBookmarksAuthorizationPath(request.args),
         normalized.files.read,
         "chrome_bookmarks_read Chrome 书签目录不在已授权可读目录内。",
+        env,
       );
     case "code_search":
       return authorizeWorkspaceRoot(
         String(request.args.workspaceRoot ?? ""),
         normalized.files.read,
         "code_search workspaceRoot 不在已授权可读目录内。",
+        env,
       );
     case "git_status":
       return authorizeWorkspaceRoot(
         String(request.args.workspaceRoot ?? ""),
         normalized.files.read,
         "git_status workspaceRoot 不在已授权可读目录内。",
+        env,
       );
     case "git_diff":
       return authorizeWorkspaceRoot(
         String(request.args.workspaceRoot ?? ""),
         normalized.files.read,
         "git_diff workspaceRoot 不在已授权可读目录内。",
+        env,
       );
     case "test_run": {
       const workspaceDecision = authorizeWorkspaceRoot(
         String(request.args.workspaceRoot ?? ""),
         normalized.files.read,
         "test_run workspaceRoot 不在已授权可读目录内。",
+        env,
       );
       if (!workspaceDecision.allowed) {
         return workspaceDecision;
@@ -332,6 +354,7 @@ export function authorizeToolCall(
         String(request.args.path ?? ""),
         normalized.files.write,
         "markdown_report_write 路径不在已授权可写目录内。",
+        env,
       );
     case "shell_exec":
       return authorizeShellCommand(
@@ -361,7 +384,16 @@ export function authorizeToolCallWithinRunContext(
   request: ToolCallRequest,
   runContext?: AgentRunContext,
 ): ToolAuthorizationDecision {
-  const taskDecision = authorizeToolCall(policy, request);
+  const taskDecision = authorizeToolCall(
+    policy,
+    request,
+    runContext
+      ? {
+          ...runContext.locationEnv,
+          workspaceRoot: runContext.workspaceRoot,
+        }
+      : undefined,
+  );
   if (!taskDecision.allowed || !runContext) {
     return taskDecision;
   }
@@ -419,14 +451,17 @@ function authorizeFilePath(
   requestedPath: string,
   approvedDirectories: string[],
   deniedReason: string,
+  locationEnv?: LocationResourceEnvironment,
 ): ToolAuthorizationDecision {
   if (!requestedPath) {
     return deny("文件工具调用缺少 path。");
   }
 
-  const resolvedRequestedPath = expandHomePath(requestedPath);
+  const env = normalizeLocationEnvironment(locationEnv);
   const allowed = approvedDirectories.some((approvedDirectory) =>
-    isPathInsideDirectory(resolvedRequestedPath, expandHomePath(approvedDirectory)),
+    isSkillPlaceholder(approvedDirectory)
+      ? false
+      : isPathInsideLocationRoot(requestedPath, approvedDirectory, env),
   );
 
   return allowed ? allow("文件路径位于已授权目录内。") : deny(deniedReason);
@@ -436,14 +471,17 @@ function authorizeWorkspaceRoot(
   workspaceRoot: string,
   approvedDirectories: string[],
   deniedReason: string,
+  locationEnv?: LocationResourceEnvironment,
 ): ToolAuthorizationDecision {
   if (!workspaceRoot) {
     return deny("原生工具调用缺少 workspaceRoot。");
   }
 
-  const resolvedWorkspaceRoot = expandHomePath(workspaceRoot);
+  const env = normalizeLocationEnvironment(locationEnv);
   const allowed = approvedDirectories.some((approvedDirectory) =>
-    isPathInsideDirectory(resolvedWorkspaceRoot, expandHomePath(approvedDirectory)),
+    isSkillPlaceholder(approvedDirectory)
+      ? false
+      : isPathInsideLocationRoot(workspaceRoot, approvedDirectory, env),
   );
 
   return allowed ? allow("路径在已授权范围内。") : deny(deniedReason);
@@ -601,7 +639,15 @@ function extractPathLikeShellTokens(command: string): string[] {
       const equalsIndex = token.indexOf("=");
       return equalsIndex >= 0 ? token.slice(equalsIndex + 1) : token;
     })
-    .filter((token) => token.startsWith("/") || token.startsWith("~/"));
+    .filter((token) => isShellPathLikeToken(token));
+}
+
+function isShellPathLikeToken(token: string): boolean {
+  return (
+    token.startsWith("/") ||
+    token.startsWith("~/") ||
+    /^(?:Desktop|Downloads|桌面|下载)\//.test(token)
+  );
 }
 
 function compileShellTemplate(template: string): RegExp {
@@ -621,7 +667,7 @@ function compileShellTemplate(template: string): RegExp {
 }
 
 function shellArgPattern(): string {
-  return "(?:\"[^\"\\n;&|`$]+\"|'[^'\\n;&|`$]+'|[A-Za-z0-9_./~:@%+=,-]+)";
+  return "(?:\"[^\"\\n;&|`$<>]+\"|'[^'\\n;&|`$<>]+'|[^\\s;&|`$<>]+)";
 }
 
 function normalizePermissionPath(value: string): string {

@@ -183,6 +183,68 @@ describe("projectRunGraph", () => {
     expect(expectDanglingEdges(graph)).toEqual([]);
   });
 
+  test("projects artifact_created events with provenance refs", () => {
+    const graph = projectRunGraph({
+      run: createRun(),
+      trajectoryEvents: [
+        trajectory("event_artifact", 1, "artifact_created", {
+          artifactId: "bookmark_list",
+          artifactRef: "artifact:bookmark_list",
+          artifactPath: "/workspace/bookmark_list.md",
+          provenanceRef: "provenance:bookmark_list",
+          provenancePath: "/workspace/bookmark_list.md.provenance.json",
+        }),
+      ],
+      kernelEvents: [],
+    });
+
+    expect(graph.nodes.find((node) => node.id === "artifact:bookmark_list")).toMatchObject({
+      id: "artifact:bookmark_list",
+      kind: "artifact",
+      status: "succeeded",
+      title: "bookmark_list",
+      result: {
+        status: "succeeded",
+        evidenceRefs: ["trajectory:event_artifact", "provenance:bookmark_list"],
+        artifactRefs: ["artifact:bookmark_list"],
+      },
+    });
+    expect(graph.evidence).toEqual(
+      expect.arrayContaining([
+        {
+          ref: "provenance:bookmark_list",
+          source: "trajectory",
+          eventType: "artifact_created",
+        },
+      ]),
+    );
+  });
+
+  test("does not publish structurally inconsistent provenance refs from artifact events", () => {
+    const graph = projectRunGraph({
+      run: createRun(),
+      trajectoryEvents: [
+        trajectory("event_artifact", 1, "artifact_created", {
+          artifactId: "bookmark_list",
+          artifactRef: "artifact:bookmark_list",
+          provenanceRef: "provenance:goalEvidence",
+          provenancePath: "/workspace/goalEvidence.md.provenance.json",
+        }),
+      ],
+      kernelEvents: [],
+    });
+
+    expect(graph.nodes.find((node) => node.id === "artifact:bookmark_list")).toMatchObject({
+      result: {
+        evidenceRefs: ["trajectory:event_artifact"],
+        artifactRefs: ["artifact:bookmark_list"],
+      },
+    });
+    expect(graph.evidence.map((item) => item.ref)).not.toContain(
+      "provenance:goalEvidence",
+    );
+  });
+
   test("ignores unrelated run events and keeps same-millisecond kernel evidence distinct", () => {
     const graph = projectRunGraph({
       run: createRun({ status: "running" }),

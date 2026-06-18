@@ -1,5 +1,5 @@
 import { exec } from "node:child_process";
-import { access, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { access, lstat, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -24,6 +24,14 @@ import { getMemoryKinds, type MemoryKind } from "../shared/memory";
 import { defineNativeToolDescriptor } from "../shared/nativeCapabilities";
 import type { ToolCallRequest } from "../shared/toolPermissions";
 import { isSafeToolResultRef } from "../shared/toolResultRefs";
+import {
+  normalizeLocationBoundaryPath,
+  normalizeLocationEnvironment,
+} from "../shared/locationResource";
+import {
+  assertArtifactParentPathHasNoSymlinks,
+  writeArtifactProvenance,
+} from "../shared/agentArtifactProvenance";
 
 const execAsync = promisify(exec);
 
@@ -34,6 +42,13 @@ export type AgentToolExecutionResult =
 export type AgentToolExecutionOptions = {
   runContext?: AgentRunContext;
   signal?: AbortSignal;
+  artifactWrite?: TrustedArtifactWriteMetadata;
+};
+
+export type TrustedArtifactWriteMetadata = {
+  artifactId: string;
+  artifactRef: string;
+  source: { type: string; path?: string; sha256?: string };
 };
 
 export type AgentToolExecutor = {
@@ -386,10 +401,12 @@ function registerBuiltinTools(
         },
       },
     },
-    async (args) =>
+    async (args, executionOptions) =>
       writeLocalFile(
-        String(args.path ?? ""),
-        String(args.content ?? ""),
+        args,
+        executionOptions?.runContext,
+        (executionOptions as AgentToolExecutionOptions | undefined)
+          ?.artifactWrite,
       ),
     "built-in",
   );
@@ -1163,20 +1180,78 @@ async function searchLocalFiles(
 }
 
 async function writeLocalFile(
-  filePath: string,
-  content: string,
+  args: Record<string, unknown>,
+  runContext?: AgentRunContext,
+  artifactWrite?: TrustedArtifactWriteMetadata,
 ): Promise<AgentToolExecutionResult> {
+  const filePath = String(args.path ?? "");
+  const content = String(args.content ?? "");
   if (!filePath) {
     return { ok: false, error: "file_write requires a path." };
   }
 
   const resolvedPath = resolveUserPath(filePath);
+  const artifactId = artifactWrite?.artifactId;
+  const artifactRef = artifactWrite?.artifactRef;
+  const shouldWriteProvenance = Boolean(artifactId && artifactRef);
+  if (shouldWriteProvenance) {
+    const identity = runContext ? getRunContextProvenanceIdentity(runContext) : null;
+    if (!identity) {
+      return {
+        ok: false,
+        error: "file_write requires runId in runContext to write provenance.",
+      };
+    }
+    try {
+      await assertArtifactParentPathHasNoSymlinks(
+        path.dirname(resolvedPath),
+        "file_write refuses to write artifacts through symlinked output roots.",
+      );
+    } catch (error) {
+      return { ok: false, error: (error as Error).message };
+    }
+    if ((await pathIsSymlink(resolvedPath)) === true) {
+      return {
+        ok: false,
+        error: "file_write refuses to overwrite symlink artifact paths.",
+      };
+    }
+  }
   await mkdir(path.dirname(resolvedPath), { recursive: true });
   await writeFile(resolvedPath, content, "utf8");
+  const result: Record<string, unknown> = {
+    path: resolvedPath,
+    bytesWritten: Buffer.byteLength(content),
+  };
+
+  if (shouldWriteProvenance && artifactId && artifactRef && runContext) {
+    const identity = getRunContextProvenanceIdentity(runContext);
+    if (!identity) {
+      return {
+        ok: false,
+        error: "file_write requires runId in runContext to write provenance.",
+      };
+    }
+    const provenancePath = await writeArtifactProvenance({
+      artifactPath: resolvedPath,
+      artifactId,
+      artifactRef,
+      runId: identity.runId,
+      ...(identity.goalId ? { goalId: identity.goalId } : {}),
+      ...(identity.milestoneId ? { milestoneId: identity.milestoneId } : {}),
+      source: artifactWrite.source,
+      generatedAt: new Date().toISOString(),
+    });
+    result.artifactRef = artifactRef;
+    result.artifactPath = resolvedPath;
+    result.provenanceRef = `provenance:${artifactId}`;
+    result.provenancePath = provenancePath;
+    result.evidenceRefs = [artifactRef, result.provenanceRef];
+  }
 
   return {
     ok: true,
-    result: { path: resolvedPath, bytesWritten: Buffer.byteLength(content) },
+    result,
   };
 }
 
@@ -1274,6 +1349,12 @@ async function readChromeBookmarks(
     returnedBookmarkCount: bookmarks.length,
     profileCount: profiles.length,
   });
+  if (artifact && "error" in artifact) {
+    return {
+      ok: false,
+      error: artifact.error,
+    };
+  }
   const markdown = formatChromeBookmarksMarkdown({
     profiles: previewProfiles,
     bookmarkCount,
@@ -1298,9 +1379,18 @@ async function readChromeBookmarks(
         ? {
             artifactRef: artifact.bookmarkList.ref,
             artifactPath: artifact.bookmarkList.path,
+            provenanceRef: artifact.bookmarkList.provenanceRef,
+            provenancePath: artifact.bookmarkList.provenancePath,
             goalEvidenceRef: artifact.goalEvidence.ref,
             goalEvidencePath: artifact.goalEvidence.path,
-            evidenceRefs: [artifact.bookmarkList.ref, artifact.goalEvidence.ref],
+            goalEvidenceProvenanceRef: artifact.goalEvidence.provenanceRef,
+            goalEvidenceProvenancePath: artifact.goalEvidence.provenancePath,
+            evidenceRefs: [
+              artifact.bookmarkList.ref,
+              artifact.bookmarkList.provenanceRef,
+              artifact.goalEvidence.ref,
+              artifact.goalEvidence.provenanceRef,
+            ],
           }
         : {}),
       profiles: profiles.map((profile) => ({
@@ -1552,18 +1642,57 @@ async function writeChromeBookmarksArtifacts(input: {
   returnedBookmarkCount: number;
   profileCount: number;
 }): Promise<{
-  bookmarkList: { ref: "artifact:bookmark_list"; path: string };
-  goalEvidence: { ref: "artifact:goalEvidence"; path: string };
-} | null> {
+  bookmarkList: {
+    ref: "artifact:bookmark_list";
+    path: string;
+    provenanceRef: "provenance:bookmark_list";
+    provenancePath: string;
+  };
+  goalEvidence: {
+    ref: "artifact:goalEvidence";
+    path: string;
+    provenanceRef: "provenance:goalEvidence";
+    provenancePath: string;
+  };
+} | { error: string } | null> {
   if (!input.runContext) {
     return null;
   }
 
-  const outputRoot =
-    input.runContext.sandbox.extraWriteRoots[0] ?? input.runContext.workspaceRoot;
+  const identity = getRunContextProvenanceIdentity(input.runContext);
+  if (!identity) {
+    return {
+      error: "chrome_bookmarks_read requires runId in runContext to write provenance.",
+    };
+  }
+
+  const locationEnv = normalizeLocationEnvironment({
+    ...input.runContext.locationEnv,
+    workspaceRoot: input.runContext.workspaceRoot,
+  });
+  const outputRoot = normalizeLocationBoundaryPath(
+    input.runContext.sandbox.extraWriteRoots[0] ?? input.runContext.workspaceRoot,
+    locationEnv,
+  );
+  try {
+    await assertArtifactParentPathHasNoSymlinks(
+      outputRoot,
+      "chrome_bookmarks_read refuses to write artifacts through symlinked output roots.",
+    );
+  } catch (error) {
+    return { error: (error as Error).message };
+  }
   const bookmarkListPath = path.join(outputRoot, "bookmark_list.md");
   const goalEvidencePath = path.join(outputRoot, "goalEvidence.md");
   await mkdir(outputRoot, { recursive: true });
+  if (
+    (await pathIsSymlink(bookmarkListPath)) === true ||
+    (await pathIsSymlink(goalEvidencePath)) === true
+  ) {
+    return {
+      error: "chrome_bookmarks_read refuses to overwrite symlink artifact paths.",
+    };
+  }
   await writeFile(bookmarkListPath, input.bookmarkListMarkdown, "utf8");
   await writeFile(
     goalEvidencePath,
@@ -1581,10 +1710,67 @@ async function writeChromeBookmarksArtifacts(input: {
     ].join("\n"),
     "utf8",
   );
+  const generatedAt = new Date().toISOString();
+  const bookmarkListProvenancePath = await writeArtifactProvenance({
+    artifactPath: bookmarkListPath,
+    artifactId: "bookmark_list",
+    artifactRef: "artifact:bookmark_list",
+    runId: identity.runId,
+    ...(identity.goalId ? { goalId: identity.goalId } : {}),
+    ...(identity.milestoneId ? { milestoneId: identity.milestoneId } : {}),
+    source: { type: "chrome_bookmarks" },
+    generatedAt,
+  });
+  const goalEvidenceProvenancePath = await writeArtifactProvenance({
+    artifactPath: goalEvidencePath,
+    artifactId: "goalEvidence",
+    artifactRef: "artifact:goalEvidence",
+    runId: identity.runId,
+    ...(identity.goalId ? { goalId: identity.goalId } : {}),
+    ...(identity.milestoneId ? { milestoneId: identity.milestoneId } : {}),
+    source: { type: "chrome_bookmarks" },
+    generatedAt,
+  });
   return {
-    bookmarkList: { ref: "artifact:bookmark_list", path: bookmarkListPath },
-    goalEvidence: { ref: "artifact:goalEvidence", path: goalEvidencePath },
+    bookmarkList: {
+      ref: "artifact:bookmark_list",
+      path: bookmarkListPath,
+      provenanceRef: "provenance:bookmark_list",
+      provenancePath: bookmarkListProvenancePath,
+    },
+    goalEvidence: {
+      ref: "artifact:goalEvidence",
+      path: goalEvidencePath,
+      provenanceRef: "provenance:goalEvidence",
+      provenancePath: goalEvidenceProvenancePath,
+    },
   };
+}
+
+function getRunContextProvenanceIdentity(runContext: AgentRunContext): {
+  runId: string;
+  goalId?: string;
+  milestoneId?: string;
+} | null {
+  if (!runContext.runId) {
+    return null;
+  }
+  return {
+    runId: runContext.runId,
+    ...(runContext.goalId ? { goalId: runContext.goalId } : {}),
+    ...(runContext.milestoneId ? { milestoneId: runContext.milestoneId } : {}),
+  };
+}
+
+async function pathIsSymlink(targetPath: string): Promise<boolean | null> {
+  try {
+    return (await lstat(targetPath)).isSymbolicLink();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
 }
 
 function formatChromeBookmarksMarkdown(input: {

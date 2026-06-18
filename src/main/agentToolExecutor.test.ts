@@ -4,6 +4,7 @@ import {
   readFile,
   realpath,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import os from "node:os";
@@ -11,6 +12,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createAgentToolExecutor, getShellExecShell } from "./agentToolExecutor";
 import { buildPrimaryRunContext } from "../shared/agentWorkspace";
+import { getArtifactProvenancePath } from "../shared/agentArtifactProvenance";
 import type { MemoryRecord } from "../shared/memory";
 
 describe("agent tool executor", () => {
@@ -403,6 +405,9 @@ describe("agent tool executor", () => {
       runContext: buildPrimaryRunContext({
         workspaceId: "workspace_chrome",
         workspaceRoot: tempDir,
+        runId: "goal_run_1",
+        goalId: "goal_1",
+        milestoneId: "milestone_1",
         sandbox: {
           mode: "workspace_write",
           network: "task_policy",
@@ -424,8 +429,18 @@ describe("agent tool executor", () => {
         truncated: true,
         artifactRef: "artifact:bookmark_list",
         artifactPath: path.join(outputRoot, "bookmark_list.md"),
+        provenanceRef: "provenance:bookmark_list",
+        provenancePath: getArtifactProvenancePath(path.join(outputRoot, "bookmark_list.md")),
         goalEvidenceRef: "artifact:goalEvidence",
         goalEvidencePath: path.join(outputRoot, "goalEvidence.md"),
+        goalEvidenceProvenanceRef: "provenance:goalEvidence",
+        goalEvidenceProvenancePath: getArtifactProvenancePath(path.join(outputRoot, "goalEvidence.md")),
+        evidenceRefs: [
+          "artifact:bookmark_list",
+          "provenance:bookmark_list",
+          "artifact:goalEvidence",
+          "provenance:goalEvidence",
+        ],
         answerPreview: expect.stringContaining("共找到 100 个书签，返回 25 个。"),
       },
     });
@@ -435,6 +450,235 @@ describe("agent tool executor", () => {
     await expect(
       readFile(path.join(outputRoot, "goalEvidence.md"), "utf8"),
     ).resolves.toContain("Total bookmarks: 100");
+    await expect(
+      readFile(getArtifactProvenancePath(path.join(outputRoot, "bookmark_list.md")), "utf8"),
+    ).resolves.toContain("\"artifactRef\": \"artifact:bookmark_list\"");
+    await expect(
+      readFile(getArtifactProvenancePath(path.join(outputRoot, "goalEvidence.md")), "utf8"),
+    ).resolves.toContain("\"artifactRef\": \"artifact:goalEvidence\"");
+  });
+
+  it("refuses to write Chrome bookmark provenance without a real run identity", async () => {
+    const bookmarksPath = path.join(tempDir, "Chrome", "Default", "Bookmarks");
+    const outputRoot = path.join(tempDir, "goal-output");
+    await mkdir(path.dirname(bookmarksPath), { recursive: true });
+    await writeFile(
+      bookmarksPath,
+      JSON.stringify({
+        roots: {
+          bookmark_bar: {
+            type: "folder",
+            name: "Bookmarks Bar",
+            children: [{ type: "url", name: "OpenAI", url: "https://openai.com/" }],
+          },
+        },
+      }),
+      "utf8",
+    );
+    const executor = createAgentToolExecutor();
+
+    await expect(
+      executor.execute(
+        {
+          toolName: "chrome_bookmarks_read",
+          args: { bookmarksPath },
+        },
+        {
+          runContext: buildPrimaryRunContext({
+            workspaceId: "workspace_chrome",
+            workspaceRoot: tempDir,
+            sandbox: {
+              mode: "workspace_write",
+              network: "task_policy",
+              shell: "approved_commands",
+              allowWorkspaceEscape: false,
+              extraReadRoots: [],
+              extraWriteRoots: [outputRoot],
+            },
+          }),
+        },
+      ),
+    ).resolves.toEqual({
+      ok: false,
+      error: "chrome_bookmarks_read requires runId in runContext to write provenance.",
+    });
+  });
+
+  it("does not follow symlink artifact paths when writing Chrome bookmark artifacts", async () => {
+    const bookmarksPath = path.join(tempDir, "Chrome", "Default", "Bookmarks");
+    const outputRoot = path.join(tempDir, "goal-output");
+    const outsideRoot = path.join(tempDir, "outside");
+    const outsideSecret = path.join(outsideRoot, "secret.md");
+    await mkdir(path.dirname(bookmarksPath), { recursive: true });
+    await mkdir(outputRoot, { recursive: true });
+    await mkdir(outsideRoot, { recursive: true });
+    await writeFile(outsideSecret, "do not overwrite", "utf8");
+    await symlink(outsideSecret, path.join(outputRoot, "bookmark_list.md"));
+    await writeFile(
+      bookmarksPath,
+      JSON.stringify({
+        roots: {
+          bookmark_bar: {
+            type: "folder",
+            name: "Bookmarks Bar",
+            children: [{ type: "url", name: "OpenAI", url: "https://openai.com/" }],
+          },
+        },
+      }),
+      "utf8",
+    );
+    const executor = createAgentToolExecutor();
+
+    await expect(
+      executor.execute(
+        {
+          toolName: "chrome_bookmarks_read",
+          args: { bookmarksPath },
+        },
+        {
+          runContext: buildPrimaryRunContext({
+            workspaceId: "workspace_chrome",
+            workspaceRoot: tempDir,
+            runId: "goal_run_1",
+            goalId: "goal_1",
+            milestoneId: "milestone_1",
+            sandbox: {
+              mode: "workspace_write",
+              network: "task_policy",
+              shell: "approved_commands",
+              allowWorkspaceEscape: false,
+              extraReadRoots: [],
+              extraWriteRoots: [outputRoot],
+            },
+          }),
+        },
+      ),
+    ).resolves.toEqual({
+      ok: false,
+      error: "chrome_bookmarks_read refuses to overwrite symlink artifact paths.",
+    });
+    await expect(readFile(outsideSecret, "utf8")).resolves.toBe("do not overwrite");
+  });
+
+  it("does not follow symlink output roots when writing Chrome bookmark artifacts", async () => {
+    const bookmarksPath = path.join(tempDir, "Chrome", "Default", "Bookmarks");
+    const apparentRoot = path.join(tempDir, "goal-output-link");
+    const outsideRoot = path.join(tempDir, "outside-output");
+    await mkdir(path.dirname(bookmarksPath), { recursive: true });
+    await mkdir(outsideRoot, { recursive: true });
+    await symlink(outsideRoot, apparentRoot);
+    await writeFile(
+      bookmarksPath,
+      JSON.stringify({
+        roots: {
+          bookmark_bar: {
+            type: "folder",
+            name: "Bookmarks Bar",
+            children: [{ type: "url", name: "OpenAI", url: "https://openai.com/" }],
+          },
+        },
+      }),
+      "utf8",
+    );
+    const executor = createAgentToolExecutor();
+
+    await expect(
+      executor.execute(
+        {
+          toolName: "chrome_bookmarks_read",
+          args: { bookmarksPath },
+        },
+        {
+          runContext: buildPrimaryRunContext({
+            workspaceId: "workspace_chrome",
+            workspaceRoot: tempDir,
+            runId: "goal_run_1",
+            goalId: "goal_1",
+            milestoneId: "milestone_1",
+            sandbox: {
+              mode: "workspace_write",
+              network: "task_policy",
+              shell: "approved_commands",
+              allowWorkspaceEscape: false,
+              extraReadRoots: [],
+              extraWriteRoots: [apparentRoot],
+            },
+          }),
+        },
+      ),
+    ).resolves.toEqual({
+      ok: false,
+      error: "chrome_bookmarks_read refuses to write artifacts through symlinked output roots.",
+    });
+    await expect(readFile(path.join(outsideRoot, "bookmark_list.md"), "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("writes Chrome bookmark artifacts under canonical home Desktop output roots", async () => {
+    const bookmarksPath = path.join(tempDir, "Chrome", "Default", "Bookmarks");
+    const homePath = path.join(tempDir, "home");
+    const realDesktop = path.join(homePath, "Desktop");
+    await mkdir(path.dirname(bookmarksPath), { recursive: true });
+    await writeFile(
+      bookmarksPath,
+      JSON.stringify({
+        roots: {
+          bookmark_bar: {
+            type: "folder",
+            name: "Bookmarks Bar",
+            children: [
+              {
+                type: "url",
+                name: "OpenAI",
+                url: "https://openai.com/",
+              },
+            ],
+          },
+        },
+      }),
+      "utf8",
+    );
+    const executor = createAgentToolExecutor();
+
+    const result = await executor.execute(
+      {
+        toolName: "chrome_bookmarks_read",
+        args: { bookmarksPath },
+      },
+      {
+        runContext: buildPrimaryRunContext({
+          workspaceId: "workspace_chrome",
+          workspaceRoot: tempDir,
+          runId: "goal_run_1",
+          goalId: "goal_1",
+          milestoneId: "milestone_1",
+          locationEnv: { homeDir: homePath, platform: "darwin" },
+          sandbox: {
+            mode: "workspace_write",
+            network: "task_policy",
+            shell: "approved_commands",
+            allowWorkspaceEscape: false,
+            extraReadRoots: [],
+            extraWriteRoots: ["~/Desktop"],
+          },
+        }),
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      result: {
+        artifactPath: path.join(realDesktop, "bookmark_list.md"),
+        goalEvidencePath: path.join(realDesktop, "goalEvidence.md"),
+      },
+    });
+    await expect(
+      readFile(path.join(realDesktop, "bookmark_list.md"), "utf8"),
+    ).resolves.toContain("OpenAI - https://openai.com/");
+    await expect(readFile(path.join(tempDir, "~", "Desktop", "bookmark_list.md"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
   });
 
   it("registers native code engineering tools with descriptors", () => {
@@ -543,6 +787,106 @@ describe("agent tool executor", () => {
       },
     });
     await expect(readFile(filePath, "utf8")).resolves.toBe("done");
+  });
+
+  it("does not mint provenance from model-visible file_write artifact args", async () => {
+    const filePath = path.join(tempDir, "reports", "spoofed.md");
+    const executor = createAgentToolExecutor();
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: tempDir,
+      runId: "goal_run_1",
+      goalId: "goal_1",
+      milestoneId: "milestone_1",
+      sandbox: {
+        mode: "workspace_write",
+        network: "task_policy",
+        shell: "approved_commands",
+        allowWorkspaceEscape: false,
+        extraReadRoots: [],
+        extraWriteRoots: [path.join(tempDir, "reports")],
+      },
+    });
+
+    const result = await executor.execute(
+      {
+        toolName: "file_write",
+        args: {
+          path: filePath,
+          content: "# Spoofed\n",
+          artifactId: "bookmark_list",
+          artifactRef: "artifact:bookmark_list",
+          source: { type: "chrome_bookmarks" },
+        },
+      },
+      { runContext },
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      result: {
+        path: filePath,
+        bytesWritten: Buffer.byteLength("# Spoofed\n"),
+      },
+    });
+    await expect(
+      readFile(getArtifactProvenancePath(filePath), "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("writes provenance for internally authorized deterministic artifact file writes", async () => {
+    const filePath = path.join(tempDir, "reports", "local_fixture.md");
+    const executor = createAgentToolExecutor();
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: tempDir,
+      runId: "goal_run_1",
+      goalId: "goal_1",
+      milestoneId: "milestone_1",
+      sandbox: {
+        mode: "workspace_write",
+        network: "task_policy",
+        shell: "approved_commands",
+        allowWorkspaceEscape: false,
+        extraReadRoots: [],
+        extraWriteRoots: [path.join(tempDir, "reports")],
+      },
+    });
+
+    const result = await executor.execute(
+      {
+        toolName: "file_write",
+        args: {
+          path: filePath,
+          content: "# Local Fixture\n",
+        },
+      },
+      {
+        runContext,
+        artifactWrite: {
+          artifactId: "local_fixture",
+          artifactRef: "artifact:local_fixture",
+          source: {
+            type: "json_file",
+            path: path.join(tempDir, "input.json"),
+          },
+        },
+      },
+    );
+
+    const provenancePath = getArtifactProvenancePath(filePath);
+    expect(result).toMatchObject({
+      ok: true,
+      result: {
+        path: filePath,
+        artifactRef: "artifact:local_fixture",
+        provenanceRef: "provenance:local_fixture",
+        provenancePath,
+      },
+    });
+    await expect(readFile(provenancePath, "utf8")).resolves.toContain(
+      '"artifactId": "local_fixture"',
+    );
   });
 
   it("executes an approved shell command with stdout and exit code", async () => {

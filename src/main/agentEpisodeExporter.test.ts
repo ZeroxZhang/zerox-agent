@@ -47,6 +47,23 @@ describe("createAgentEpisodePackage", () => {
           },
           createdAt: "2026-06-09T00:00:01.000Z",
         },
+        {
+          id: "event_3",
+          runId: "run_1",
+          type: "artifact_created",
+          sequence: 3,
+          payload: {
+            artifactId: "bookmark_list",
+            artifactRef: "artifact:bookmark_list",
+            provenanceRef: "provenance:bookmark_list",
+          },
+          redaction: {
+            containsApiKey: false,
+            containsFileContent: false,
+            containsUserText: false,
+          },
+          createdAt: "2026-06-09T00:00:02.000Z",
+        },
       ],
       learningCandidates: [],
       verification: { passed: true, checks: ["final_summary"] },
@@ -66,6 +83,9 @@ describe("createAgentEpisodePackage", () => {
     expect(episode.files["trajectory.jsonl"]).toContain("\"final_summary\"");
     expect(episode.files["run-graph.json"]).toContain(
       "\"id\": \"gate:workspace_sandbox:event_2\"",
+    );
+    expect(episode.files["run-graph.json"]).toContain(
+      "\"ref\": \"provenance:bookmark_list\"",
     );
     expect(episode.files["eval-candidate.json"]).toContain(
       "\"status\": \"pending_review\"",

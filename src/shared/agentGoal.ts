@@ -1,4 +1,5 @@
 import type { GoalReviewPolicy } from "./agentGoalReview";
+import type { AgentTaskContract } from "./agentTaskContract";
 
 export type GoalStatus =
   | "planning"
@@ -91,6 +92,7 @@ export type Goal = {
   reviewPolicy: GoalReviewPolicy;
   planVersion: number;
   workspaceId?: string;
+  taskContract?: AgentTaskContract;
   createdAt: string;
   updatedAt: string;
 };

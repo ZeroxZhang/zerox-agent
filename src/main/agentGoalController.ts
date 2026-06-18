@@ -115,7 +115,7 @@ export function createAgentGoalController(options: {
         const nextMilestone = pickNextReadyMilestone(goal);
         if (!nextMilestone) {
           if (allMilestonesAccepted(goal)) {
-            if (canAcceptCoveredModelReviewGoal(goal)) {
+            if (canAcceptCoveredGoal(goal)) {
               return stopGoal(
                 goal,
                 "achieved",
@@ -502,7 +502,7 @@ function allMilestonesAccepted(goal: Goal): boolean {
   );
 }
 
-function canAcceptCoveredModelReviewGoal(goal: Goal): boolean {
+function canAcceptCoveredGoal(goal: Goal): boolean {
   const goalChecks = goal.successCriteria.flatMap(
     (criterion) => criterion.acceptanceChecks,
   );
@@ -510,9 +510,8 @@ function canAcceptCoveredModelReviewGoal(goal: Goal): boolean {
     return false;
   }
   if (
-    goalChecks.some(
-      (check) => check.kind !== "model_review" || !check.requiresEvidence,
-    )
+    !isEvidenceBackedModelReviewOnly(goalChecks) &&
+    !isProvenanceArtifactFileExistsOnly(goalChecks)
   ) {
     return false;
   }
@@ -536,6 +535,26 @@ function canAcceptCoveredModelReviewGoal(goal: Goal): boolean {
     goalChecks.every((check) =>
       coveredCheckSignatures.has(createAcceptanceCheckSignature(check)),
     )
+  );
+}
+
+function isEvidenceBackedModelReviewOnly(
+  checks: SuccessCriterion["acceptanceChecks"],
+): boolean {
+  return checks.every(
+    (check) => check.kind === "model_review" && check.requiresEvidence,
+  );
+}
+
+function isProvenanceArtifactFileExistsOnly(
+  checks: SuccessCriterion["acceptanceChecks"],
+): boolean {
+  return checks.every(
+    (check) =>
+      check.kind === "file_exists" &&
+      check.params.requireProvenance === true &&
+      typeof check.params.artifactRef === "string" &&
+      check.params.artifactRef.trim().length > 0,
   );
 }
 

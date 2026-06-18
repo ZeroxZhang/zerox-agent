@@ -8,7 +8,7 @@ import {
   validateTaskPermissionPolicy,
   type TaskPermissionPolicy,
 } from "./toolPermissions";
-import { buildPrimaryRunContext } from "./agentWorkspace";
+import { buildDefaultSandboxPolicy, buildPrimaryRunContext } from "./agentWorkspace";
 import type { SkillManifest } from "./skills";
 
 describe("task permission policy", () => {
@@ -612,6 +612,75 @@ describe("tool authorization", () => {
     });
   });
 
+  it("denies Desktop writes without an explicit Desktop run-context write root", () => {
+    const broadPolicy: TaskPermissionPolicy = {
+      files: {
+        read: ["/Users/demo"],
+        write: ["/Users/demo"],
+      },
+      web: { search: false, fetchDomains: [] },
+      shell: { commands: [] },
+      memory: { read: false, write: false },
+    };
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: "/Users/demo/project",
+      locationEnv: { homeDir: "/Users/demo", platform: "darwin" },
+    });
+
+    expect(
+      authorizeToolCallWithinRunContext(
+        broadPolicy,
+        {
+          toolName: "file_write",
+          args: { path: "Desktop/report.md", content: "done" },
+        },
+        runContext,
+      ),
+    ).toEqual({
+      allowed: false,
+      reason: "file_write 被运行沙箱阻止：路径不在工作区或额外可写目录内。",
+    });
+  });
+
+  it("allows Desktop aliases when Desktop is an explicit run-context write root", () => {
+    const broadPolicy: TaskPermissionPolicy = {
+      files: {
+        read: ["/Users/demo"],
+        write: ["/Users/demo"],
+      },
+      web: { search: false, fetchDomains: [] },
+      shell: { commands: [] },
+      memory: { read: false, write: false },
+    };
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: "/Users/demo/project",
+      locationEnv: { homeDir: "/Users/demo", platform: "darwin" },
+      sandbox: {
+        ...buildDefaultSandboxPolicy(),
+        extraWriteRoots: ["~/Desktop"],
+      },
+    });
+
+    for (const candidate of [
+      "~/Desktop/report.md",
+      "Desktop/report.md",
+      "/Users/demo/Desktop/report.md",
+    ]) {
+      expect(
+        authorizeToolCallWithinRunContext(
+          broadPolicy,
+          {
+            toolName: "file_write",
+            args: { path: candidate, content: "done" },
+          },
+          runContext,
+        ),
+      ).toMatchObject({ allowed: true });
+    }
+  });
+
   it("narrows native workspaceRoot permissions to the active run workspace", () => {
     const broadPolicy: TaskPermissionPolicy = {
       files: {
@@ -763,6 +832,88 @@ describe("tool authorization", () => {
       allowed: false,
       reason:
         "shell_exec 被 workspace_only 沙箱阻止：路径 /etc/passwd 不在工作区或额外可读目录内。",
+    });
+  });
+
+  it("denies shell redirection operators before template matching", () => {
+    const broadPolicy: TaskPermissionPolicy = {
+      files: {
+        read: ["/Users/demo"],
+        write: ["/Users/demo"],
+      },
+      web: { search: false, fetchDomains: [] },
+      shell: { commands: ["cat {{target}}"] },
+      memory: { read: false, write: false },
+    };
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: "/Users/demo/project",
+      sandbox: {
+        mode: "workspace_write",
+        network: "task_policy",
+        shell: "workspace_only",
+        allowWorkspaceEscape: false,
+        extraReadRoots: [],
+        extraWriteRoots: [],
+      },
+    });
+
+    expect(
+      authorizeToolCallWithinRunContext(
+        broadPolicy,
+        {
+          toolName: "shell_exec",
+          args: { command: "cat README.md>/tmp/out" },
+        },
+        runContext,
+      ),
+    ).toEqual({
+      allowed: false,
+      reason: "shell_exec command 包含被阻止的 shell 控制符。",
+    });
+  });
+
+  it.each([
+    "Desktop/report.md",
+    "Downloads/report.md",
+    "桌面/report.md",
+    "下载/report.md",
+  ])("denies workspace_only shell commands that mention outside alias paths: %s", (target) => {
+    const broadPolicy: TaskPermissionPolicy = {
+      files: {
+        read: ["/Users/demo"],
+        write: ["/Users/demo"],
+      },
+      web: { search: false, fetchDomains: [] },
+      shell: { commands: ["cat {{target}}"] },
+      memory: { read: false, write: false },
+    };
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: "/Users/demo/project",
+      locationEnv: { homeDir: "/Users/demo", platform: "darwin" },
+      sandbox: {
+        mode: "workspace_write",
+        network: "task_policy",
+        shell: "workspace_only",
+        allowWorkspaceEscape: false,
+        extraReadRoots: [],
+        extraWriteRoots: [],
+      },
+    });
+
+    expect(
+      authorizeToolCallWithinRunContext(
+        broadPolicy,
+        {
+          toolName: "shell_exec",
+          args: { command: `cat ${target}` },
+        },
+        runContext,
+      ),
+    ).toEqual({
+      allowed: false,
+      reason: `shell_exec 被 workspace_only 沙箱阻止：路径 ${target} 不在工作区或额外可读目录内。`,
     });
   });
 });

@@ -8,7 +8,7 @@ type PackageJson = {
 };
 
 describe("package scripts", () => {
-  it("sets release metadata to v2.3.5", () => {
+  it("sets release metadata to v2.3.6", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -16,9 +16,56 @@ describe("package scripts", () => {
       readFileSync(path.join(process.cwd(), "package-lock.json"), "utf8"),
     ) as { version?: string; packages?: Record<string, { version?: string }> };
 
-    expect(packageJson.version).toBe("2.3.5");
-    expect(packageLock.version).toBe("2.3.5");
-    expect(packageLock.packages?.[""]?.version).toBe("2.3.5");
+    expect(packageJson.version).toBe("2.3.6");
+    expect(packageLock.version).toBe("2.3.6");
+    expect(packageLock.packages?.[""]?.version).toBe("2.3.6");
+  });
+
+  it("marks the v2.3.6 release metadata and distribution handoff done", () => {
+    const packageJson = JSON.parse(
+      readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
+    ) as PackageJson;
+    const featureList = JSON.parse(
+      readFileSync(path.join(process.cwd(), ".zerox/feature_list.json"), "utf8"),
+    ) as {
+      features: Array<{
+        id: string;
+        status: string;
+        definitionOfDone?: string[];
+      }>;
+    };
+
+    expect(packageJson.version).toBe("2.3.6");
+    expect(featureList.features).toContainEqual(
+      expect.objectContaining({
+        id: "P11.6-command-line-and-packaged-acceptance-gate",
+        status: "done",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("computer-use subagent"),
+        ]),
+      }),
+    );
+    expect(featureList.features).toContainEqual(
+      expect.objectContaining({
+        id: "P11.7-v2.3.6-release-metadata-and-distribution",
+        status: "done",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("GitHub Release v2.3.6"),
+        ]),
+      }),
+    );
+    expect(featureList.features).not.toContainEqual(
+      expect.objectContaining({
+        id: "P11.6-command-line-and-packaged-acceptance-gate",
+        status: "in_progress",
+      }),
+    );
+    expect(featureList.features).not.toContainEqual(
+      expect.objectContaining({
+        id: "P11.7-v2.3.6-release-metadata-and-distribution",
+        status: "in_progress",
+      }),
+    );
   });
 
   it("exposes a production start command for the built Electron app", () => {

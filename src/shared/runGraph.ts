@@ -308,6 +308,46 @@ export function projectRunGraph(input: ProjectRunGraphInput): RunGraphView {
       }
     }
 
+    if (event.type === "artifact_created") {
+      const artifactRef = readString(event.payload.artifactRef);
+      const artifactId = readString(event.payload.artifactId) ?? artifactRef ?? event.id;
+      const provenanceRef = readString(event.payload.provenanceRef);
+      const artifactRefIsConsistent = artifactRef === `artifact:${artifactId}`;
+      const provenanceIsConsistent = isConsistentArtifactProvenanceEvent(
+        event.payload,
+        artifactId,
+        artifactRef,
+        provenanceRef,
+      );
+      const nodeId = artifactRefIsConsistent ? artifactRef : `artifact:${artifactId}`;
+      const evidenceRefs = provenanceIsConsistent ? [ref, provenanceRef] : [ref];
+      if (provenanceIsConsistent) {
+        evidence.set(provenanceRef, {
+          ref: provenanceRef,
+          source: "trajectory",
+          eventType: event.type,
+        });
+      }
+      addNode(nodes, {
+        id: nodeId,
+        kind: "artifact",
+        status: "succeeded",
+        title: artifactId,
+        sourceRefs: [ref],
+        result: {
+          status: "succeeded",
+          evidenceRefs,
+          ...(artifactRefIsConsistent ? { artifactRefs: [artifactRef] } : {}),
+          decidedBy: "runtime",
+        },
+        order: trajectoryOrder(event),
+      });
+      addEdge(edges, runNodeId, nodeId, "contains");
+      if (lastToolNodeId) {
+        addEdge(edges, lastToolNodeId, nodeId, "produced");
+      }
+    }
+
     if (event.type === "goal_review_requested") {
       const goalId = readString(event.payload.goalId) ?? event.runId;
       const milestoneId = readString(event.payload.milestoneId) ?? "goal";
@@ -490,6 +530,26 @@ function readString(value: unknown): string | null {
 
 function readNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function isConsistentArtifactProvenanceEvent(
+  payload: Record<string, unknown>,
+  artifactId: string,
+  artifactRef: string | null,
+  provenanceRef: string | null,
+): provenanceRef is string {
+  if (artifactRef !== `artifact:${artifactId}`) {
+    return false;
+  }
+  if (provenanceRef !== `provenance:${artifactId}`) {
+    return false;
+  }
+  const artifactPath = readString(payload.artifactPath);
+  const provenancePath = readString(payload.provenancePath);
+  if (artifactPath && provenancePath && provenancePath !== `${artifactPath}.provenance.json`) {
+    return false;
+  }
+  return true;
 }
 
 function buildAcceptedTrajectoryRunIds(run: AgentRunRecord): Set<string> {

@@ -1,5 +1,258 @@
 # Zerox Harness Progress
 
+## 2026-06-18 v2.3.6 release metadata and distribution handoff
+
+- Request:
+  - Continue after the P11.6 acceptance gate by packaging, publishing, updating the release, and pushing the v2.3.6 work.
+- Registration:
+  - Added `P11.7-v2.3.6-release-metadata-and-distribution` as the single in-progress feature after P11.6 closed.
+  - Scoped P11.7 to the final package metadata bump, README/test release status, fresh macOS distribution artifacts, git push/tag, and GitHub Release handoff.
+- Baseline evidence:
+  - `./init.sh` -> harness check passed; `src/shared/packageScripts.test.ts` 7 tests passed with package metadata still at `2.3.5`.
+  - `gh auth status` -> authenticated as `ZeroxZhang`; default branch detected as `main`.
+- Changed files planned:
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+  - `package.json`
+  - `package-lock.json`
+  - `README.md`
+  - `src/shared/packageScripts.test.ts`
+  - `src/shared/readme.test.ts`
+- Implementation:
+  - Bumped `package.json` and `package-lock.json` from `2.3.5` to `2.3.6`.
+  - Updated README English and Chinese current release/current version text, quarantine examples, testing status, deterministic artifact release notes, and roadmap to describe v2.3.6 as released instead of metadata-pending.
+  - Updated package/readme tests to assert the v2.3.6 release state and the completed P11.7 handoff feature.
+  - Rebuilt the macOS dmg/zip distribution artifacts and generated no-space aliases matching `release/latest-mac.yml`.
+  - Marked `P11.7-v2.3.6-release-metadata-and-distribution` done before the source commit that will be pushed, tagged, and used for the GitHub Release.
+- Changed files:
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+  - `package.json`
+  - `package-lock.json`
+  - `README.md`
+  - `src/shared/packageScripts.test.ts`
+  - `src/shared/readme.test.ts`
+- Verification evidence:
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 2 files / 10 tests passed after the initial v2.3.6 metadata bump.
+  - `npm run verify` -> 135 files / 767 tests passed, build passed, agent eval 26/26, memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `npm run dist:mac` -> built `release/mac-arm64/Zerox Agent.app`, `release/Zerox Agent-2.3.6-arm64.dmg`, and `release/Zerox Agent-2.3.6-arm64-mac.zip`.
+  - Packaged app Info.plist reports `CFBundleShortVersionString=2.3.6` and `CFBundleVersion=2.3.6`.
+  - `release/latest-mac.yml` reports `version: 2.3.6`.
+  - SHA-256:
+    - dmg: `bad3dbe073da62c43b4e84fc1a55d92471528c26d5effefb900e1006838cff44`
+    - zip: `d6db3aad5bdef997d6f212c10b3735a0ee53f58ca28c21dc90b03175927172de`
+  - No-space release asset aliases match the same SHA-256 values:
+    - `release/Zerox-Agent-2.3.6-arm64.dmg`
+    - `release/Zerox-Agent-2.3.6-arm64-mac.zip`
+
+## 2026-06-18 P11.6 Command-Line And Packaged Acceptance Gate
+
+- Request:
+  - Close the v2.3.6 iteration with full command-line verification plus an independent packaged-app computer-use acceptance gate before treating v2.3.6 as complete.
+- Registration:
+  - Added `P11.6-command-line-and-packaged-acceptance-gate` as the single unfinished feature after P11.5 closed.
+  - Scoped P11.6 to command-line verification, production smoke, fresh macOS packaging, and independent packaged-app UI acceptance evidence.
+  - Kept package metadata at `2.3.5` until the final v2.3.6 release metadata bump.
+- RED evidence:
+  - `./init.sh` -> RED in `src/shared/packageScripts.test.ts`: the test still expected `P11.5-eval-docs-release-metadata` to be `in_progress` even though P11.5 had been correctly closed.
+- Implementation:
+  - Moved the unfinished-final-gate metadata assertion from P11.5 to `P11.6-command-line-and-packaged-acceptance-gate`.
+  - Updated README English and Chinese status text so P11.5 was documented as completed and P11.6 was the then-current final gate.
+  - Updated README verification counts to the current `npm run verify` result: 135 Vitest files / 767 tests.
+- Changed files:
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+  - `README.md`
+  - `src/shared/packageScripts.test.ts`
+  - `src/shared/readme.test.ts`
+- GREEN evidence before packaged-app acceptance:
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 2 files / 10 tests passed.
+  - `./init.sh` -> harness check passed; `src/shared/packageScripts.test.ts` 7 tests passed.
+  - `npm run verify` -> 135 files / 767 tests passed, build passed, agent eval 26/26, memory eval 2/2.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `npm run dist:mac` -> built `release/mac-arm64/Zerox Agent.app`, `release/Zerox Agent-2.3.5-arm64.dmg`, and `release/Zerox Agent-2.3.5-arm64-mac.zip`.
+  - Packaged app Info.plist reports `CFBundleShortVersionString=2.3.5` and `CFBundleVersion=2.3.5`; this is expected until the final v2.3.6 release metadata bump.
+  - SHA-256:
+    - dmg: `0e32feaf96ae2534c1d9ea7a7a559c01a671ef60d7d5469b782e953319ba8c51`
+    - zip: `874c361716e98b17b88741da845813bae09c9b70b95974b35f12985ffba9f917`
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+- Packaged-app acceptance defect found after the rejected gate:
+  - Parent launched the fresh packaged app with a separate user data dir and Chrome DevTools Protocol after Computer Use `get_app_state` continued timing out on Electron apps.
+  - The packaged renderer was production/packaged and created a real Chrome bookmarks goal from the UI.
+  - The deterministic pipeline wrote fresh `/Users/zerox/Desktop/bookmark_list.md` and `/Users/zerox/Desktop/bookmark_list.md.provenance.json` using `chrome_bookmarks_read`.
+  - The run trajectory showed deterministic pipeline success with `chrome_bookmarks_read` and artifact provenance, but the goal still ended `failed` because final acceptance fell back to `model_review` and the packaged app had incomplete model settings.
+- Acceptance defect RED evidence:
+  - `npm test -- src/main/goalChatService.test.ts src/main/agentGoalPlanner.test.ts` -> RED with 2 expected failures: deterministic bookmark contract goals were routed to quick-action review instead of planning, and the native planner requested the model for deterministic artifact/provenance criteria.
+- Acceptance defect implementation:
+  - Added shared task-contract acceptance synthesis for Chrome bookmark artifact/provenance checks.
+  - Chat goal creation now compiles the deterministic task contract before choosing success criteria, uses artifact/provenance checks when available, and bypasses the generic quick-action review gate for deterministic contracts.
+  - The native Chrome bookmark planner now accepts deterministic artifact/provenance success criteria and avoids duplicating artifact checks when the goal already owns them.
+- Acceptance defect changed files:
+  - `src/shared/agentTaskContractAcceptance.ts`
+  - `src/main/goalChatService.ts`
+  - `src/main/goalChatService.test.ts`
+  - `src/main/agentGoalPlanner.ts`
+  - `src/main/agentGoalPlanner.test.ts`
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+- Acceptance defect GREEN evidence:
+  - `npm test -- src/main/goalChatService.test.ts src/main/agentGoalPlanner.test.ts` -> 2 files / 24 tests passed.
+  - `npm test -- src/main/goalChatService.test.ts src/main/agentGoalPlanner.test.ts src/main/agentGoalController.test.ts src/main/goalRuntimeEngine.test.ts src/main/agentDeterministicGoalPipeline.test.ts src/main/agentGoalAcceptance.test.ts` -> 6 files / 83 tests passed.
+  - `npm run build` -> passed.
+  - `npm run verify` -> 135 files / 764 tests passed, build passed, agent eval 26/26, memory eval 2/2.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 2 files / 10 tests passed after updating README verification counts.
+  - `npm run harness:check` -> passed.
+- Structured destination acceptance defect found after rebuilding the packaged app:
+  - Parent CDP drove the fresh packaged app UI from `release/mac-arm64/Zerox Agent.app` with a clean user data dir and a fresh Desktop artifact backup.
+  - The new goal no longer contained `model_review` checks and the deterministic pipeline wrote fresh Desktop artifact/provenance files.
+  - The goal still ended `failed` because `file_exists` evaluated `path: "bookmark_list.md"` relative to the workspace and ignored the structured destination `{ kind: "desktop", filename: "bookmark_list.md" }`.
+- Structured destination RED evidence:
+  - `npm test -- src/main/agentGoalAcceptance.test.ts src/main/goalOutputRoots.test.ts` -> RED with 2 expected failures: file_exists did not resolve structured Desktop destinations, and output-root extraction ignored acceptance destination metadata.
+- Structured destination implementation:
+  - `file_exists` acceptance now resolves structured `desktop`, `downloads`, and absolute `path` destinations through the existing location/sandbox resolver before checking the filesystem and artifact provenance.
+  - Goal output-root extraction now includes roots from structured acceptance destinations, so deterministic artifact checks grant the same reviewed Desktop/Downloads boundaries as text-derived output locations.
+- Structured destination changed files:
+  - `src/main/agentGoalAcceptance.ts`
+  - `src/main/agentGoalAcceptance.test.ts`
+  - `src/main/goalOutputRoots.ts`
+  - `src/main/goalOutputRoots.test.ts`
+  - `README.md`
+  - `src/shared/readme.test.ts`
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+- Structured destination GREEN evidence:
+  - `npm test -- src/main/agentGoalAcceptance.test.ts src/main/goalOutputRoots.test.ts src/main/goalChatService.test.ts src/main/agentGoalPlanner.test.ts` -> 4 files / 77 tests passed.
+  - `npm run verify` -> 135 files / 766 tests passed, build passed, agent eval 26/26, memory eval 2/2.
+- Covered goal-acceptance defect found after evidence destination fix:
+  - Parent CDP drove the fresh packaged app UI again. The milestone became `accepted` and both artifact checks passed with provenance.
+  - Final goal acceptance still failed because the same goal-level artifact checks were re-evaluated with `runId = goal.id`, while the provenance sidecars correctly record the milestone run id.
+  - The failed final acceptance then tried to replan and hit missing model settings, producing the packaged-app `failed` terminal status.
+- Covered goal-acceptance RED evidence:
+  - `npm test -- src/main/agentGoalController.test.ts` -> RED on the new provenance-artifact coverage case: the controller did not treat accepted milestone evidence as covering goal-level artifact/provenance checks.
+- Covered goal-acceptance implementation:
+  - Generalized covered-goal acceptance beyond model review, but only for provenance-backed `file_exists` artifact checks so ordinary assertion goals still require final goal-level acceptance.
+  - Added a controller regression test proving covered artifact/provenance goals reach `achieved` without duplicate goal-level provenance validation.
+- Covered goal-acceptance changed files:
+  - `src/main/agentGoalController.ts`
+  - `src/main/agentGoalController.test.ts`
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+- Covered goal-acceptance GREEN evidence:
+  - `npm test -- src/main/agentGoalController.test.ts` -> 1 file / 11 tests passed.
+  - `npm test -- src/main/goalChatService.test.ts src/main/agentGoalPlanner.test.ts src/main/agentGoalController.test.ts src/main/goalRuntimeEngine.test.ts src/main/agentDeterministicGoalPipeline.test.ts src/main/agentGoalAcceptance.test.ts src/main/goalOutputRoots.test.ts` -> 7 files / 105 tests passed.
+  - `npm run verify` -> 135 files / 767 tests passed, build passed, agent eval 26/26, memory eval 2/2.
+- Final parent packaged-app CDP verification after fixes:
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 2 files / 10 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+  - `npm run dist:mac` -> built fresh `release/mac-arm64/Zerox Agent.app`, `release/Zerox Agent-2.3.5-arm64.dmg`, and `release/Zerox Agent-2.3.5-arm64-mac.zip`.
+  - Packaged app Info.plist reports `CFBundleShortVersionString=2.3.5` and `CFBundleVersion=2.3.5`; this remains expected until the final release metadata bump.
+  - SHA-256:
+    - dmg: `e165e86ba8ca3a240c27e082b8b56a195bbb99112ca0888ffb105fb4e01b7772`
+    - zip: `014d4defa1ec4d27c6ba2842237ea6cf119248f538912ccb9239978857212ae6`
+  - Parent launched the packaged app from `release/mac-arm64/Zerox Agent.app` with `rendererMode=production`, `isPackaged=true`, and clean user data dir `/tmp/zerox-v236-final-cdp-20260617T194849Z`.
+  - Parent drove the real chat UI input and send button through CDP with `/目标 读取当前 Chrome 书签，按文件夹/分组整理成 Markdown，保存到桌面 bookmark_list.md。`.
+  - Resulting goal file `/private/tmp/zerox-v236-final-cdp-20260617T194849Z/config/agent-goals/goal_20a8971b-8bdd-4570-a258-a8f019f74763.json` ended `status=achieved`, `stopReason=goal_accepted`.
+  - Goal and milestone success checks were only `file_exists`; `model_review` was absent.
+  - Milestone `milestone_1` ended `accepted` with `lastRunStatus=succeeded` and summary `Deterministic Chrome bookmark artifact pipeline completed.`.
+  - Fresh Desktop artifacts:
+    - `/Users/zerox/Desktop/bookmark_list.md` -> size `50489`, sha256 `f3ffa60e237fb4f58fcf845944cbc8519577f99ba3866625ce9475c004a12669`, mtime `2026-06-17T19:49:33.773Z`.
+    - `/Users/zerox/Desktop/goalEvidence.md` -> size `355`, sha256 `f29863a3bf2ef71f8a44f994db9c043f583cf3763b9c6900e28c9e35e6b5c073`, mtime `2026-06-17T19:49:33.774Z`.
+  - Provenance sidecars matched artifact paths, sizes, and sha256 values for both `artifact:bookmark_list` and `artifact:goalEvidence`.
+  - `git diff --check` -> passed.
+- Final independent packaged-app acceptance:
+  - Agent Lagrange (`019ed722-cfcc-74a3-9ce9-8ec0a1ec86a6`) independently ran the final packaged-app acceptance and returned `ACCEPTED`.
+  - Computer Use participation:
+    - `tool_search` found `mcp__computer_use`.
+    - `list_apps` successfully enumerated `Zerox Agent`.
+    - `get_app_state` by app path returned `remoteConnection` without a usable AX tree/screenshot.
+    - `get_app_state` by `Zerox Agent` name timed out after roughly 120s, matching the previously observed Electron AX limitation.
+    - Because AX state remained unavailable, the acceptance agent used shell launch plus CDP to drive the real packaged renderer UI.
+  - The independent agent moved stale Desktop artifacts to `/Users/zerox/Desktop/zerox-v236-acceptance-backup-20260618-035117`.
+  - Packaged runtime evidence:
+    - `userDataPath=/private/tmp/zerox-v236-independent-acceptance-20260617T195544Z`
+    - `configDir=/private/tmp/zerox-v236-independent-acceptance-20260617T195544Z/config`
+    - `isPackaged=true`
+    - `rendererMode=production`
+    - `appPath=/Volumes/Out/codex_projects/building agent/release/mac-arm64/Zerox Agent.app/Contents/Resources/app.asar`
+  - The independent agent used the real UI through CDP input/click events to submit `/目标 读取当前 Chrome 书签，按文件夹/分组整理成 Markdown，保存到桌面 bookmark_list.md`.
+  - Independent goal file `/private/tmp/zerox-v236-independent-acceptance-20260617T195544Z/config/agent-goals/goal_3a5d3710-17f4-4726-b5ed-d1875a8e799a.json` ended `status=achieved`, `stopReason=goal_accepted`.
+  - Independent milestone evidence: `state=accepted`, `lastRunStatus=succeeded`, `lastRunSummary=Deterministic Chrome bookmark artifact pipeline completed.`
+  - Independent success checks were deterministic `file_exists` only; `model_review` count was `0`.
+  - Independent fresh artifacts:
+    - `/Users/zerox/Desktop/bookmark_list.md` -> local mtime `Jun 18 03:56:34 2026`, size `50489`, sha256 `f3ffa60e237fb4f58fcf845944cbc8519577f99ba3866625ce9475c004a12669`.
+    - `/Users/zerox/Desktop/goalEvidence.md` -> local mtime `Jun 18 03:56:34 2026`, size `355`, sha256 `f29863a3bf2ef71f8a44f994db9c043f583cf3763b9c6900e28c9e35e6b5c073`.
+  - Independent provenance sidecars existed and matched `destination.path`, `sha256`, and `sizeBytes` for both artifacts.
+  - Independent trajectory evidence included only `chrome_bookmarks_read` for the tool call path, with no `file_read` or `shell_exec` fallback calls, and `acceptance_checked` had `accepted=true`, `inferentialUsed=false`.
+  - Marked `P11.6-command-line-and-packaged-acceptance-gate` done after this independent `ACCEPTED` verdict.
+- Final closure verification:
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 2 files / 10 tests passed after marking P11.6 done and updating README status.
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> 135 files / 767 tests passed, build passed, agent eval 26/26, memory eval 2/2.
+  - `git diff --check` -> passed.
+
+## 2026-06-18 P11.5 Eval Docs Release Metadata
+
+- Parent closure evidence:
+  - Code-quality re-review after fixes -> APPROVED.
+  - Spec re-review after fixes -> APPROVED.
+  - Parent reran `npm test -- src/main/eval/agentEvalRunner.test.ts src/shared/readme.test.ts src/shared/packageScripts.test.ts` -> 3 files / 20 tests passed.
+  - Parent reran `npm run build` -> passed.
+  - Parent reran `node scripts/run-agent-evals.mjs` -> 26/26 passed, `toolSuccessRate: 0.8333`, `recoverabilityRate: 1`.
+  - Parent reran `npm run harness:check` -> passed.
+  - Parent reran `git diff --check` -> passed.
+  - Marked `P11.5-eval-docs-release-metadata` done in `.zerox/feature_list.json`.
+  - Independent packaged-app computer-use acceptance remains the final v2.3.6 gate and is not marked complete here.
+
+- Review-fix update:
+  - Addressed CHANGES_REQUIRED feedback that fallback checks used synthetic `fallbackKind` markers and that task-contract coverage only asserted `contractMode` / `sourceType`.
+  - Changed deterministic local artifact eval assertions to forbid real `tool_call` payloads for `{ toolName: "file_read" }` and `{ toolName: "shell_exec" }`.
+  - Added deep partial payload matching in the eval runner so nested `taskContract` fields are executable eval assertions, not only fixture-shape expectations.
+  - Strengthened the fixture and fixture-shape test to require deterministic contract fields: `taskKind`, `mode`, Chrome bookmark source, grouped Markdown transform, bookmark artifact deliverable, `chrome_bookmarks_read` capability, and provenance-required acceptance.
+- Review-fix RED evidence:
+  - `npm test -- src/main/eval/agentEvalRunner.test.ts src/shared/readme.test.ts src/shared/packageScripts.test.ts` -> RED with 2 expected failures: fixture assertions still used synthetic fallback markers and nested `taskContract` payload matching failed as shallow `[object Object]` equality.
+- Review-fix GREEN evidence:
+  - `npm test -- src/main/eval/agentEvalRunner.test.ts src/shared/readme.test.ts src/shared/packageScripts.test.ts` -> 3 files / 20 tests passed.
+  - `npm run build` -> passed.
+  - `node scripts/run-agent-evals.mjs` -> 26/26 passed, `toolSuccessRate: 0.8333`.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+- Review-fix residual risk:
+  - Independent packaged-app computer-use acceptance remains a later final gate and was intentionally not run or marked complete.
+
+- Request:
+  - Add deterministic local artifact provenance eval coverage and release documentation for v2.3.6 without claiming packaged-app computer-use acceptance has passed.
+  - Keep package/README metadata honest: package release remains `2.3.5`; v2.3.6 deterministic path is implemented through P11.4 and still needs final command-line plus independent packaged-app acceptance gates.
+- Implementation:
+  - Added eval-runner max-count assertions so fixtures can forbid replan and fallback events.
+  - Added `deterministic-local-artifact-provenance-acceptance` covering task-contract payload, native `chrome_bookmarks_read`, provenance-backed artifact evidence, acceptance, `goal_accepted`, and zero replan/raw-parser/shell fallback events.
+  - Updated README English and Chinese docs for deterministic local artifact goals, location/resource canonicalization, provenance-backed acceptance, and final packaged-app computer-use acceptance as a pending release gate.
+  - Updated README/package metadata tests to keep package version `2.3.5` and prevent claims that packaged-app acceptance has passed.
+- Changed files:
+  - `README.md`
+  - `src/main/eval/agentEvalFixtures.ts`
+  - `src/main/eval/agentEvalRunner.ts`
+  - `src/main/eval/agentEvalRunner.test.ts`
+  - `src/shared/packageScripts.test.ts`
+  - `src/shared/readme.test.ts`
+  - `.zerox/progress.md`
+  - `.git/sdd/task-5-report.md`
+- RED evidence:
+  - `npm test -- src/main/eval/agentEvalRunner.test.ts src/shared/readme.test.ts src/shared/packageScripts.test.ts` -> RED with 4 expected failures: README still documented 25 fixtures, eval score still expected 25 fixtures, the new deterministic local artifact fixture was missing, and max-count assertions were ignored.
+- GREEN evidence:
+  - `npm test -- src/main/eval/agentEvalRunner.test.ts src/shared/readme.test.ts src/shared/packageScripts.test.ts` -> 3 files / 19 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm run build` -> passed.
+  - `node scripts/run-agent-evals.mjs` after the fresh build -> 26/26 passed, `toolSuccessRate: 0.8333`.
+  - `git diff --check` -> passed.
+- Residual risks:
+  - Independent packaged-app computer-use acceptance was intentionally not run and is still a final release gate.
+  - `node scripts/run-agent-evals.mjs` reads `dist-electron`; pre-build runs can report stale fixture counts.
+
 ## 2026-06-17 v2.3.2 release preparation
 
 - Request:
@@ -82,6 +335,40 @@
 - Changed files:
   - `.zerox/feature_list.json`
   - `.zerox/progress.md`
+
+## 2026-06-18 v2.3.6 P11.3 artifact provenance review fixes
+
+- Request:
+  - Address CHANGES_REQUIRED findings for P11.3 only: first-class provenance identity, real runtime artifact trajectory evidence, symlink-safe artifact/provenance handling, structurally consistent run-graph provenance refs, and expanded acceptance mismatch coverage.
+- Implementation:
+  - Added explicit optional `runId`, `goalId`, and `milestoneId` fields to `AgentRunContext` and primary run-context construction.
+  - Updated `GoalRuntimeEngine` to pass run-scoped context identity into the loop/tool executor after the real milestone run id is created.
+  - Removed workspace/session fallback provenance identity from Chrome bookmark artifact writes; artifact provenance now requires a real `runId`.
+  - Added runtime `artifact_created` trajectory events from actual successful artifact-producing tool results and preserved artifact/provenance refs on `tool_result` payloads.
+  - Hardened provenance verification and Chrome artifact writes to reject symlink artifact/sidecar paths instead of following them.
+  - Hardened run graph projection so provenance refs are only published when `artifactId`, `artifactRef`, `provenanceRef`, and provided paths are structurally consistent.
+  - Added `src/main/goalRuntimeEngine.ts`, `src/main/goalRuntimeEngine.test.ts`, `src/shared/agentWorkspace.ts`, and `src/shared/agentWorkspace.test.ts` to the P11.3 feature file list because the reviewer identified real run identity and runtime provenance emission as necessary for this slice.
+- RED evidence:
+  - `npm test -- src/shared/agentArtifactProvenance.test.ts src/main/agentToolExecutor.test.ts src/main/agentGoalAcceptance.test.ts src/shared/runGraph.test.ts src/main/agentEpisodeExporter.test.ts src/main/goalRuntimeEngine.test.ts src/shared/agentWorkspace.test.ts` -> RED with 6 expected failures: missing explicit context identity, fallback Chrome provenance identity, symlink artifact overwrite, missing runtime run identity, symlink verifier following/missing-sidecar ordering, and spoofed run-graph provenance refs.
+- Changed files:
+  - `src/shared/agentArtifactProvenance.ts`
+  - `src/shared/agentArtifactProvenance.test.ts`
+  - `src/shared/agentWorkspace.ts`
+  - `src/shared/agentWorkspace.test.ts`
+  - `src/main/agentToolExecutor.ts`
+  - `src/main/agentToolExecutor.test.ts`
+  - `src/main/agentGoalAcceptance.test.ts`
+  - `src/main/goalRuntimeEngine.ts`
+  - `src/main/goalRuntimeEngine.test.ts`
+  - `src/shared/runGraph.ts`
+  - `src/shared/runGraph.test.ts`
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+- Verification evidence:
+  - `npm test -- src/shared/agentArtifactProvenance.test.ts src/main/agentToolExecutor.test.ts src/main/agentGoalAcceptance.test.ts src/shared/runGraph.test.ts src/main/agentEpisodeExporter.test.ts src/main/goalRuntimeEngine.test.ts src/shared/agentWorkspace.test.ts` -> GREEN after fixes: 7 files / 83 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm run build` -> passed after a TypeScript narrowing fix in runtime artifact evidence extraction.
+  - `git diff --check` -> passed.
   - `README.md`
   - `src/main/agentGoalController.ts`
   - `src/main/agentGoalPlanner.ts`
@@ -2214,3 +2501,295 @@
   - `npm run harness:check` -> passed.
   - `npm run verify` -> 131 files / 672 tests passed, build passed, agent eval 25/25, memory eval 2/2.
   - `npm run smoke:prod` -> build passed; smoke startup passed with renderer rendering agent chat UI.
+
+## 2026-06-18 v2.3.6 deterministic goal contract subagent planning
+
+- Request:
+  - Before starting the v2.3.6 implementation, plan the independent subagents needed for the iteration.
+  - Make a final independent subagent use computer-use to launch the local packaged app, create a real task on behalf of the user, and treat its acceptance verdict as the standard for completing the v2.3.6 goal.
+- Planning:
+  - Added the v2.3.6 subagent orchestration plan covering read-only explorer agents, implementation workers, per-slice spec/code reviewers, command-line verification, and final packaged-app computer-use acceptance.
+  - The plan defines Agent M as the final release gate: it must launch the packaged local app, create the Chrome-bookmarks-to-Desktop Markdown task through the UI, collect UI/Desktop/provenance/trajectory evidence, and return `ACCEPTED` before v2.3.6 can be considered complete.
+  - The plan explicitly rejects treating command-line verification as a substitute for the independent computer-use acceptance subagent.
+- Changed files:
+  - `docs/superpowers/plans/2026-06-18-v2-3-6-deterministic-goal-contract-subagents.md`
+  - `.zerox/progress.md`
+- Verification evidence:
+  - `./init.sh` -> harness check passed; `src/shared/packageScripts.test.ts` passed with 6 tests.
+  - `node -p "require('./package.json').version"` -> `2.3.5`, confirming v2.3.6 implementation has not started yet.
+  - `rg -n "TBD|TODO|implement later|fill in|appropriate|similar to|computer-use|ACCEPTED|REJECTED|pack:mac|P11|Agent M" docs/superpowers/plans/2026-06-18-v2-3-6-deterministic-goal-contract-subagents.md` -> confirmed the plan names the final computer-use gate, packaged launch, P11 metadata work, and accepted/rejected verdict semantics; no unresolved placeholders were introduced.
+
+## 2026-06-18 v2.3.6 Wave 0 explorer synthesis
+
+- Request:
+  - Continue the v2.3.6 iteration by using the planned independent subagents before implementation begins.
+- Subagent evidence:
+  - Agent A / Contract Cartographer -> completed read-only analysis: compile `AgentTaskContract` in `goalChatService`, store it as optional `Goal.taskContract`, make `agentGoalPlanner` consume the contract rather than rediscovering Chrome bookmark behavior from goal text.
+  - Agent B / Location And Sandbox Cartographer -> completed read-only analysis: current path handling is split across `agentWorkspace`, `toolPermissions`, `goalOutputRoots`, `goalRuntimeEngine`, `agentToolExecutor`, `agentGoalAcceptance`, and `toolAuthorizationService`; v2.3.6 needs one canonical location resolver before paths enter sandbox roots, tool args, artifact roots, or acceptance.
+  - Agent C / Provenance Cartographer -> completed read-only analysis: artifact provenance is currently vocabulary rather than a gate; v2.3.6 should add sidecar manifests and acceptance verification against run/goal identity, canonical destination, and current content hash.
+  - Agent D / Test Strategy Cartographer -> completed read-only analysis: command-line verification is required but insufficient; final acceptance must be packaged-app UI validation through computer-use and must return `ACCEPTED` or `REJECTED`.
+- Planning:
+  - Added a detailed v2.3.6 implementation plan based on Wave 0 findings.
+  - Marked Wave 0 as completed in the subagent orchestration plan.
+- Changed files:
+  - `docs/superpowers/plans/2026-06-18-v2-3-6-deterministic-goal-contract-subagents.md`
+  - `docs/superpowers/plans/2026-06-18-v2-3-6-deterministic-goal-contract-implementation.md`
+  - `.zerox/progress.md`
+- Verification evidence:
+  - `rg -n "TBD|TODO|implement later|fill in|similar to|appropriate|computer-use|ACCEPTED|REJECTED|Task Contract|Location|Provenance" docs/superpowers/plans/2026-06-18-v2-3-6-deterministic-goal-contract-implementation.md` -> confirmed the implementation plan names the computer-use gate and core design surfaces; no unresolved placeholders were introduced.
+  - `git diff --check` -> passed.
+
+## 2026-06-18 v2.3.6 P11.1 feature registration
+
+- Request:
+  - Move from planning into the first implementation slice while preserving the AGENTS.md rule to pick exactly one unfinished feature.
+- Planning:
+  - Added `P11.1-task-contract-compiler` as the single in-progress v2.3.6 feature.
+  - Scoped P11.1 to the shared task contract compiler, optional `Goal.taskContract` storage, contract-aware planner routing, and focused compatibility tests.
+- Changed files:
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+
+## 2026-06-18 v2.3.6 P11.1 task contract compiler
+
+- Request:
+  - Implement the first v2.3.6 slice: compile deterministic task contracts before planning without starting the location/provenance/pipeline slices.
+- Implementation:
+  - Added `AgentTaskContract` and `compileAgentTaskContract` for Chrome bookmarks -> grouped Markdown -> Desktop deterministic local artifact goals.
+  - Added optional `Goal.taskContract` storage while preserving old goal JSON compatibility.
+  - `GoalChatService` now compiles and stores the contract before milestone planning, then passes it to the planner.
+  - `AgentGoalPlanner` now accepts `taskContract`; supported Chrome bookmark contracts with `chrome_bookmarks_read` available produce the single native bookmark milestone without a model request.
+  - Preserved legacy no-contract Chrome bookmark native planning behavior.
+  - Hardened the contract guard so malformed contracts, missing acceptance, wrong evidence refs, missing capability, or unsupported sources fall back to model planning rather than crashing or taking the native path.
+- Review evidence:
+  - P11.1 implementation worker followed TDD and reported RED for missing contract module / undefined saved contract, then GREEN after implementation.
+  - Spec reviewer approved the initial implementation, code quality reviewer requested fixes for over-broad Chinese grouping detection, static contract IDs, malformed contract crashes, and brittle tests.
+  - Worker fixed those issues with RED/GREEN evidence.
+  - Spec re-review requested validation of exact acceptance evidence refs before native contract routing.
+  - Worker added evidence-ref validation and regression coverage with RED/GREEN evidence.
+  - Final spec re-review -> APPROVED, confirming wrong evidence refs fall back to model planning and P11.1 does not implement location/provenance/pipeline behavior.
+  - Code quality re-review -> APPROVED, with no blocking issues.
+- Changed files:
+  - `src/shared/agentTaskContract.ts`
+  - `src/shared/agentTaskContract.test.ts`
+  - `src/shared/agentGoal.ts`
+  - `src/main/goalChatService.ts`
+  - `src/main/goalChatService.test.ts`
+  - `src/main/agentGoalPlanner.ts`
+  - `src/main/agentGoalPlanner.test.ts`
+  - `src/main/agentGoalStore.test.ts`
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+- Verification evidence:
+  - `npm test -- src/shared/agentTaskContract.test.ts src/main/goalChatService.test.ts src/main/agentGoalPlanner.test.ts src/main/agentGoalStore.test.ts` -> 4 files / 40 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm run build` -> passed.
+  - `git diff --check` -> passed.
+
+## 2026-06-18 v2.3.6 P11.2 feature registration
+
+- Request:
+  - Continue the v2.3.6 implementation after P11.1 by picking exactly one new unfinished feature.
+- Planning:
+  - Added `P11.2-location-resource-model` as the single in-progress feature.
+  - Scoped P11.2 to canonical location resolution for `~`, Desktop, Downloads, workspace-relative and absolute paths across goal output roots, sandbox roots, acceptance, tool permission narrowing, and Chrome bookmark artifact writes.
+- Baseline evidence:
+  - `./init.sh` -> harness check passed; `src/shared/packageScripts.test.ts` passed with 6 tests.
+  - `node -e "const f=require('./.zerox/feature_list.json'); const open=f.features.filter(x=>x.status!=='done'); console.log(JSON.stringify({updatedAt:f.updatedAt,total:f.features.length,open}, null, 2))"` -> no open features before registering P11.2.
+- Changed files:
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+
+## 2026-06-18 v2.3.6 P11.2 unified location resource model
+
+- Request:
+  - Implement the second v2.3.6 slice: canonicalize local destination resources without starting provenance manifests or deterministic pipeline execution.
+- Implementation:
+  - Added a shared `locationResource` resolver for home-relative paths, localized Desktop/Downloads aliases, workspace-relative paths, absolute paths, and boundary-root checks.
+  - Stored canonical location environment data in run contexts so sandbox roots compare against the real user home/Desktop/Downloads instead of literal `~` strings.
+  - Updated goal output root extraction, tool permission narrowing, acceptance checks, and Chrome bookmark artifact writes to use canonical location roots.
+  - Hardened output-root extraction so standalone Desktop/Downloads aliases count only when tied to explicit output destination language, and incidental mentions such as "write tests for Desktop alias parsing" do not grant real Desktop access.
+  - Hardened shell command path prechecks so bare alias paths such as `Desktop/report.md`, `Downloads/report.md`, `桌面/report.md`, and `下载/report.md` are blocked unless the matching root is explicitly allowed.
+  - Blocked shell redirection operators before shell template matching and before acceptance command execution so `cat README.md>/tmp/out` and `cat </etc/passwd` cannot bypass workspace-only path checks.
+- Review evidence:
+  - P11.2 worker followed TDD and reported RED for missing shared resolver behavior, literal `~/Desktop` artifact writes, stale workspace Desktop acceptance, localized alias gaps, standalone output destination extraction, bare alias shell path narrowing, incidental Desktop false positives, and shell redirection bypasses.
+  - Initial spec/code reviews requested fixes for acceptance standalone aliases granting home, missing bare alias shell token extraction, over-broad standalone Desktop output intent extraction, and over-broad command tokenization.
+  - Worker fixed those review findings and reported GREEN with focused tests passing.
+  - Parent reran focused tests, harness, build, and diff checks after each review fix.
+  - Final spec re-review -> APPROVED.
+  - Final narrow code-quality re-review -> APPROVED, confirming the redirection fix and no obvious unacceptable false positives for `node -e "console.log('Desktop')"` or `grep Desktop README.md`.
+- Changed files:
+  - `src/shared/locationResource.ts`
+  - `src/shared/locationResource.test.ts`
+  - `src/shared/agentWorkspace.ts`
+  - `src/shared/agentWorkspace.test.ts`
+  - `src/shared/toolPermissions.ts`
+  - `src/shared/toolPermissions.test.ts`
+  - `src/main/goalOutputRoots.ts`
+  - `src/main/goalOutputRoots.test.ts`
+  - `src/main/agentGoalAcceptance.ts`
+  - `src/main/agentGoalAcceptance.test.ts`
+  - `src/main/agentToolExecutor.ts`
+  - `src/main/agentToolExecutor.test.ts`
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+- Verification evidence:
+  - `npm test -- src/shared/toolPermissions.test.ts src/main/agentGoalAcceptance.test.ts` -> RED before fix: 2 expected failures for shell redirection bypass; GREEN after fix: 2 files / 62 tests passed.
+  - `npm test -- src/shared/locationResource.test.ts src/shared/agentWorkspace.test.ts src/shared/toolPermissions.test.ts src/main/goalOutputRoots.test.ts src/main/agentGoalAcceptance.test.ts src/main/agentToolExecutor.test.ts` -> 6 files / 119 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm run build` -> passed.
+  - `git diff --check` -> passed.
+
+## 2026-06-18 v2.3.6 P11.3 feature registration
+
+- Request:
+  - Continue the v2.3.6 implementation after P11.2 by picking exactly one new unfinished feature.
+- Planning:
+  - Added `P11.3-artifact-provenance-acceptance` as the single in-progress feature.
+  - Scoped P11.3 to sidecar provenance manifests, deterministic artifact write provenance refs, provenance-backed acceptance checks, and trajectory/run graph evidence projection.
+  - Explicitly kept deterministic pipeline routing, eval/docs release metadata, and packaged-app computer-use acceptance out of this slice.
+- Baseline evidence:
+  - `./init.sh` -> harness check passed; `src/shared/packageScripts.test.ts` passed with 6 tests.
+  - `node -e "const f=require('./.zerox/feature_list.json'); const open=f.features.filter(x=>x.status!=='done'); console.log(JSON.stringify({updatedAt:f.updatedAt,total:f.features.length,openCount:open.length,open}, null, 2))"` -> no open features after closing P11.2 and before registering P11.3.
+- Changed files:
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+
+## 2026-06-18 v2.3.6 P11.3 artifact provenance acceptance
+
+- Request:
+  - Implement the third v2.3.6 slice: make deterministic artifact completion provenance-backed so stale files cannot satisfy acceptance.
+- Implementation:
+  - Added `agentArtifactProvenance` sidecar helpers for manifest path derivation, SHA-256 hashing, writing, and verification.
+  - Manifest schema records `runId`, optional `goalId`/`milestoneId`, `artifactId`, `artifactRef`, source metadata, canonical destination path, destination SHA-256, size, and `generatedAt`.
+  - Chrome bookmark artifact writes now create provenance sidecars for `bookmark_list.md` and `goalEvidence.md`, return `provenance:*` refs/paths, and include those refs in tool evidence.
+  - `file_exists` acceptance checks now require provenance when `requireProvenance: true` or `artifactRef` is present, and reject missing, stale, wrong-run, wrong-goal, wrong-milestone, wrong-artifact, wrong-ref, wrong-destination, or hash-mismatched sidecars.
+  - `AgentRunContext` now carries explicit optional `runId`, `goalId`, and `milestoneId`; `GoalRuntimeEngine` passes real goal-run identity to tools and emits provenance-backed `artifact_created` trajectory events from actual artifact-producing tool results.
+  - Run graph projection now creates artifact nodes from `artifact_created` events while filtering inconsistent/spoofed `provenanceRef` payloads.
+  - Deterministic artifact write and verification paths conservatively reject symlinked artifact files, sidecars, output roots, and intermediate artifact parents; known macOS system aliases `/var` and `/tmp` are allowed only at that system-alias segment to avoid false positives.
+- Review evidence:
+  - P11.3 worker followed TDD and reported RED for missing helper module, missing Chrome provenance fields/sidecars, acceptance ignoring provenance, missing run graph artifact nodes, and missing exported provenance refs.
+  - Initial spec/code reviews requested fixes for first-class run/goal/milestone identity, real runtime `artifact_created` emission instead of hand-seeded events, symlink-safe writes/verification, runGraph provenanceRef spoofing, and broader mismatch tests.
+  - Worker fixed those findings with RED/GREEN evidence; spec re-review -> APPROVED.
+  - Code-quality re-review found one remaining P1 for symlinked output roots/intermediate parents. Worker added parent-segment symlink guards and tests; narrow code-quality re-review -> APPROVED.
+- Changed files:
+  - `src/shared/agentArtifactProvenance.ts`
+  - `src/shared/agentArtifactProvenance.test.ts`
+  - `src/shared/agentWorkspace.ts`
+  - `src/shared/agentWorkspace.test.ts`
+  - `src/main/agentToolExecutor.ts`
+  - `src/main/agentToolExecutor.test.ts`
+  - `src/main/agentGoalAcceptance.ts`
+  - `src/main/agentGoalAcceptance.test.ts`
+  - `src/main/goalRuntimeEngine.ts`
+  - `src/main/goalRuntimeEngine.test.ts`
+  - `src/shared/runGraph.ts`
+  - `src/shared/runGraph.test.ts`
+  - `src/main/agentEpisodeExporter.test.ts`
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+- Verification evidence:
+  - `npm test -- src/shared/agentArtifactProvenance.test.ts src/main/agentToolExecutor.test.ts` -> RED before second fix: 2 expected failures for parent-directory symlink escape; GREEN after fix: 2 files / 32 tests passed.
+  - `npm test -- src/shared/agentArtifactProvenance.test.ts src/main/agentToolExecutor.test.ts src/main/agentGoalAcceptance.test.ts src/shared/runGraph.test.ts src/main/agentEpisodeExporter.test.ts src/main/goalRuntimeEngine.test.ts src/shared/agentWorkspace.test.ts` -> 7 files / 85 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm run build` -> passed.
+  - `git diff --check` -> passed.
+
+## 2026-06-18 v2.3.6 P11.4 feature registration
+
+- Request:
+  - Continue the v2.3.6 implementation after P11.3 by picking exactly one new unfinished feature.
+- Planning:
+  - Added `P11.4-deterministic-local-artifact-pipeline` as the single in-progress feature.
+  - Scoped P11.4 to the contract-driven deterministic local artifact execution path, existing authorization/sandbox/provenance boundaries, Chrome bookmark native execution without parser fallback loops, and one non-Chrome deterministic pipeline test path.
+  - Explicitly kept eval/docs release metadata, full command-line gate, and packaged-app computer-use acceptance out of this slice.
+- Baseline evidence:
+  - `./init.sh` -> harness check passed; `src/shared/packageScripts.test.ts` passed with 6 tests.
+  - `node -e "const f=require('./.zerox/feature_list.json'); const open=f.features.filter(x=>x.status!=='done'); console.log(JSON.stringify({updatedAt:f.updatedAt,total:f.features.length,openCount:open.length,open}, null, 2))"` -> no open features after closing P11.3 and before registering P11.4.
+- Changed files:
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+
+## 2026-06-18 v2.3.6 P11.4 deterministic local artifact pipeline
+
+- Request:
+  - Implement only P11.4: deterministic local artifact contracts should execute through a narrow pipeline while preserving existing tool execution, authorization, sandbox, location, and provenance boundaries.
+- Implementation:
+  - Added `executeDeterministicGoalPipeline` for supported deterministic local artifact contracts.
+  - Chrome bookmark contracts call `chrome_bookmarks_read` exactly once and normalize returned `bookmark_list` / `goalEvidence` artifact and provenance refs.
+  - Added a non-Chrome JSON-file-to-Markdown deterministic path that reads via `file_read`, transforms the JSON fixture to Markdown, and writes via `file_write`.
+  - Routed supported `goal.taskContract` executions in `GoalRuntimeEngine` before model-profile/model-loop assembly; unsupported or absent contracts continue through existing Goal Mode execution.
+  - The runtime deterministic branch authorizes each tool through `ToolAuthorizationService`, executes through the existing `AgentToolExecutor`, passes the run-scoped `AgentRunContext`, and emits `tool_call`, `tool_result`, `artifact_created`, `final_summary`, and checkpoint trajectory evidence.
+  - Extended `file_write` so artifact metadata plus run context writes provenance sidecars with run/goal/milestone identity; ordinary file writes keep their existing behavior.
+  - Marked `P11.4-deterministic-local-artifact-pipeline` done in `.zerox/feature_list.json`.
+- Changed files:
+  - `src/main/agentDeterministicGoalPipeline.ts`
+  - `src/main/agentDeterministicGoalPipeline.test.ts`
+  - `src/main/goalRuntimeEngine.ts`
+  - `src/main/goalRuntimeEngine.test.ts`
+  - `src/main/agentToolExecutor.ts`
+  - `src/main/agentToolExecutor.test.ts`
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+  - `.git/sdd/task-4-report.md`
+- RED evidence:
+  - `npm test -- src/main/agentDeterministicGoalPipeline.test.ts` -> failed because `./agentDeterministicGoalPipeline` did not exist.
+  - `npm test -- src/main/goalRuntimeEngine.test.ts -t "routes supported deterministic"` -> failed because deterministic contracts still loaded the model profile.
+  - `npm test -- src/main/agentToolExecutor.test.ts -t "writes provenance for deterministic artifact file writes"` -> failed because `file_write` returned only path/byte count and no provenance refs.
+- GREEN evidence:
+  - `npm test -- src/main/agentDeterministicGoalPipeline.test.ts src/main/agentGoalController.test.ts src/main/goalRuntimeEngine.test.ts src/main/agentToolExecutor.test.ts src/shared/agentToolCapabilities.test.ts` -> 5 files / 53 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm run build` -> passed.
+  - `git diff --check` -> passed.
+- Residual risks:
+  - P11.4 did not run packaged-app computer-use acceptance or add eval/docs release metadata, per slice constraints.
+
+## 2026-06-18 v2.3.6 P11.4 review hardening
+
+- Request:
+  - Address P11.4 review findings before treating the deterministic local artifact pipeline slice as closed.
+- Review fixes:
+  - Moved `file_write` artifact provenance creation behind trusted internal `artifactWrite` execution metadata instead of model-visible args, so arbitrary model-loop `file_write` calls cannot mint valid-looking artifact provenance.
+  - Added required artifact/provenance validation so Chrome and JSON deterministic pipelines fail when tool results omit required artifact refs, artifact paths, provenance refs, or provenance sidecar paths.
+  - Added a typed `JsonMarkdownTaskContract` variant in `AgentTaskContract`; removed the previous test-only structural cast for the non-Chrome path.
+  - Added real `ToolAuthorizationService` coverage for Chrome deterministic routing, including the narrow Chrome user data read root needed by `chrome_bookmarks_read`.
+  - Added runtime tests for unsupported deterministic and non-deterministic contracts falling back to the existing Goal Mode/model loop.
+  - Awaited deterministic `tool_call`, `tool_result`, and `artifact_created` trajectory writes before `runMilestone` returns.
+  - Removed JSON pipeline synthesis of required artifact evidence fields; required refs and provenance evidence must now come from the actual `file_write` result.
+- Review evidence:
+  - Initial P11.4 spec review -> CHANGES_REQUIRED for real Chrome authorization, typed non-Chrome contract support, fallback tests, and awaited trajectory writes.
+  - Initial P11.4 code-quality review -> CHANGES_REQUIRED for spoofable `file_write` provenance minting and missing required artifact/provenance validation.
+  - Worker fixed those findings with RED/GREEN evidence; spec re-review -> APPROVED.
+  - Code-quality re-review found one remaining JSON `artifactRef` synthesis issue; worker removed the synthesis and added regression coverage; narrow code-quality re-review -> APPROVED.
+- Changed files:
+  - `src/shared/agentTaskContract.ts`
+  - `src/shared/agentTaskContract.test.ts`
+  - `src/main/agentDeterministicGoalPipeline.ts`
+  - `src/main/agentDeterministicGoalPipeline.test.ts`
+  - `src/main/goalRuntimeEngine.ts`
+  - `src/main/goalRuntimeEngine.test.ts`
+  - `src/main/agentToolExecutor.ts`
+  - `src/main/agentToolExecutor.test.ts`
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+- Final verification evidence:
+  - `npm test -- src/main/agentDeterministicGoalPipeline.test.ts` -> RED before final strictness fix: JSON `file_write` could omit `artifactRef` while the pipeline synthesized it and returned success.
+  - `npm test -- src/main/agentDeterministicGoalPipeline.test.ts src/main/agentGoalController.test.ts src/main/goalRuntimeEngine.test.ts src/main/agentToolExecutor.test.ts src/shared/agentToolCapabilities.test.ts src/shared/agentTaskContract.test.ts` -> 6 files / 69 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm run build` -> passed.
+  - `git diff --check` -> passed.
+
+## 2026-06-18 v2.3.6 P11.5 feature registration
+
+- Request:
+  - Continue the v2.3.6 implementation after P11.4 by picking exactly one new unfinished feature.
+- Planning:
+  - Added `P11.5-eval-docs-release-metadata` as the single in-progress feature.
+  - Scoped P11.5 to deterministic eval coverage, README/package metadata tests, and progress evidence.
+  - Explicitly kept full command-line verification and independent packaged-app computer-use acceptance out of this slice; those remain later gates before v2.3.6 can be complete.
+- Baseline evidence:
+  - `./init.sh` -> harness check passed; `src/shared/packageScripts.test.ts` passed with 6 tests.
+  - `node -e "const f=require('./.zerox/feature_list.json'); const open=f.features.filter(x=>x.status!=='done'); console.log(JSON.stringify({updatedAt:f.updatedAt,total:f.features.length,openCount:open.length,open}, null, 2))"` -> no open features after closing P11.4 and before registering P11.5.
+- Changed files:
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`

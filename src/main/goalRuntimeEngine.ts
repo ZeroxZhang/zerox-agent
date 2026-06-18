@@ -28,6 +28,12 @@ import { estimateMessageTokens } from "./contextManager";
 import type { GoalProgressEvent } from "../shared/chat";
 import { applyGoalOutputRootsToRunContext } from "./goalOutputRoots";
 import { buildAgentSystemPrompt } from "../shared/agentProtocol";
+import {
+  type DeterministicToolExecutionOptions,
+  executeDeterministicGoalPipeline,
+  getDeterministicGoalPipelineReadRoots,
+  isDeterministicGoalPipelineSupported,
+} from "./agentDeterministicGoalPipeline";
 
 export type GoalRuntimeModelProfile = {
   baseUrl: string;
@@ -155,7 +161,12 @@ export function createGoalRuntimeEngine(options: {
       const startedAt = now();
       const runId = createId();
       const taskId = `goal:${goal.id}`;
-      const runContext = await resolveRunContext(goal);
+      const runContext = withGoalRunIdentity(
+        await resolveRunContext(goal),
+        runId,
+        goal.id,
+        milestone.id,
+      );
       const payload = {
         goalId: goal.id,
         milestoneId: milestone.id,
@@ -175,6 +186,161 @@ export function createGoalRuntimeEngine(options: {
         ...payload,
         runContext,
       });
+
+      const taskContract = goal.taskContract;
+      if (isDeterministicGoalPipelineSupported(taskContract)) {
+        const pipelineResult = await executeDeterministicGoalPipeline({
+          contract: taskContract,
+          runContext,
+          async executeTool(
+            toolName,
+            args,
+            deterministicOptions?: DeterministicToolExecutionOptions,
+          ) {
+            if (options.toolAuthorizationService) {
+              const auth = await options.toolAuthorizationService.authorize(
+                taskId,
+                {
+                  toolName: toolName as never,
+                  args,
+                },
+                {
+                  runContext,
+                  runtimeTask: buildGoalMilestoneRuntimeTask(goal, runContext),
+                },
+              );
+              if (!auth.ok || !auth.decision.allowed) {
+                const rejectedResult = {
+                  ok: false as const,
+                  error: auth.ok ? auth.decision.reason : auth.message,
+                };
+                await appendTrajectory(runId, "tool_result", {
+                  ...payload,
+                  toolName,
+                  ok: false,
+                  error: rejectedResult.error,
+                });
+                return rejectedResult;
+              }
+            }
+
+            await appendTrajectory(runId, "tool_call", {
+              ...payload,
+              toolName,
+              args,
+            });
+            events.push(
+              createEvent("info", "executing", `Tool called: ${toolName}`, {
+                ...payload,
+                toolName,
+              }),
+            );
+            const result = await options.toolExecutor.execute(
+              {
+                toolName: toolName as never,
+                args,
+              },
+              {
+                ...(runOptions?.signal ? { signal: runOptions.signal } : {}),
+                runContext,
+                ...(deterministicOptions?.artifactWrite
+                  ? { artifactWrite: deterministicOptions.artifactWrite }
+                  : {}),
+              },
+            );
+            observedToolCalls += 1;
+            const artifactEvidence = extractArtifactEvidence(result);
+            await appendTrajectory(runId, "tool_result", {
+              ...payload,
+              toolName,
+              ok: result.ok,
+              ...artifactEvidence.toolResultPayload,
+            });
+            for (const artifact of artifactEvidence.artifacts ?? []) {
+              await appendTrajectory(runId, "artifact_created", {
+                ...payload,
+                ...artifact,
+                toolName,
+              }, false);
+            }
+            events.push(
+              createEvent(
+                result.ok ? "info" : "warn",
+                "executing",
+                result.ok
+                  ? `Tool completed: ${toolName}`
+                  : `Tool failed: ${toolName}`,
+                { ...payload, toolName },
+              ),
+            );
+            return result;
+          },
+        });
+        const finishedAt = now();
+        const status = pipelineResult.status;
+        events.push(
+          createEvent(
+            status === "succeeded" ? "info" : "error",
+            status === "succeeded" ? "done" : "executing",
+            status === "succeeded"
+              ? "Deterministic goal pipeline completed."
+              : "Deterministic goal pipeline failed.",
+            {
+              ...payload,
+              status,
+              toolCallsExecuted: pipelineResult.toolNames.length,
+            },
+          ),
+        );
+        await appendTrajectory(runId, "final_summary", {
+          ...payload,
+          status,
+          toolCallsExecuted: pipelineResult.toolNames.length,
+          summary: pipelineResult.summary,
+          artifacts: pipelineResult.artifacts,
+        }, false);
+
+        const run: AgentRunRecord = {
+          id: runId,
+          taskId,
+          taskName: goal.description,
+          skillName: "deterministic-goal-pipeline",
+          status,
+          runContext,
+          summary: pipelineResult.summary,
+          events,
+          startedAt,
+          finishedAt,
+        };
+        notifyProgress(
+          status === "succeeded" ? "milestone_accepted" : "milestone_rejected",
+          goal,
+          pipelineResult.summary,
+          milestone.id,
+        );
+        await options.runStore.append(run);
+        await appendTrajectory(runId, "checkpoint_written", {
+          ...payload,
+          runId,
+          status,
+        });
+
+        return {
+          runId,
+          toolCallCount: Math.max(
+            pipelineResult.toolNames.length,
+            observedToolCalls,
+          ),
+          status,
+          summary: pipelineResult.summary,
+          wallClockMs:
+            new Date(finishedAt).getTime() - new Date(startedAt).getTime(),
+          tokens: 0,
+          transcriptMessages: [
+            { role: "assistant", content: pipelineResult.summary },
+          ],
+        };
+      }
 
       const modelProfile = await options.getModelProfile();
       const tokenBudget =
@@ -251,13 +417,22 @@ export function createGoalRuntimeEngine(options: {
               }),
             );
           },
-          onToolResult(toolName, ok) {
+          onToolResult(toolName, ok, result) {
             observedToolCalls += 1;
+            const artifactEvidence = extractArtifactEvidence(result);
             void appendTrajectory(runId, "tool_result", {
               ...payload,
               toolName,
               ok,
+              ...artifactEvidence.toolResultPayload,
             });
+            for (const artifact of artifactEvidence.artifacts ?? []) {
+              void appendTrajectory(runId, "artifact_created", {
+                ...payload,
+                ...artifact,
+                toolName,
+              }, false);
+            }
             events.push(
               createEvent(
                 ok ? "info" : "warn",
@@ -354,6 +529,109 @@ export function createGoalRuntimeEngine(options: {
   };
 }
 
+function withGoalRunIdentity(
+  runContext: AgentRunContext,
+  runId: string,
+  goalId: string,
+  milestoneId: string,
+): AgentRunContext {
+  return {
+    ...runContext,
+    runId,
+    goalId,
+    milestoneId,
+  };
+}
+
+function extractArtifactEvidence(
+  result: Awaited<ReturnType<AgentToolExecutor["execute"]>>,
+): {
+  toolResultPayload: Record<string, unknown>;
+  artifacts: Record<string, unknown>[];
+} {
+  if (!result.ok) {
+    return { toolResultPayload: {}, artifacts: [] };
+  }
+
+  const artifactRefs = buildArtifactCreatedPayloads(result.result);
+  const toolResultPayload = pickKnownArtifactResultFields(result.result);
+  return {
+    toolResultPayload,
+    artifacts: artifactRefs,
+  };
+}
+
+function buildArtifactCreatedPayloads(
+  result: Record<string, unknown>,
+): Record<string, unknown>[] {
+  const artifacts: Record<string, unknown>[] = [];
+  appendArtifactCreatedPayload(artifacts, {
+    artifactRef: readString(result.artifactRef),
+    artifactPath: readString(result.artifactPath),
+    provenanceRef: readString(result.provenanceRef),
+    provenancePath: readString(result.provenancePath),
+  });
+  appendArtifactCreatedPayload(artifacts, {
+    artifactRef: readString(result.goalEvidenceRef),
+    artifactPath: readString(result.goalEvidencePath),
+    provenanceRef: readString(result.goalEvidenceProvenanceRef),
+    provenancePath: readString(result.goalEvidenceProvenancePath),
+  });
+  return artifacts;
+}
+
+function appendArtifactCreatedPayload(
+  artifacts: Record<string, unknown>[],
+  input: {
+    artifactRef: string | null;
+    artifactPath: string | null;
+    provenanceRef: string | null;
+    provenancePath: string | null;
+  },
+) {
+  if (!input.artifactRef) {
+    return;
+  }
+  artifacts.push({
+    artifactId: artifactIdFromRef(input.artifactRef),
+    artifactRef: input.artifactRef,
+    ...(input.artifactPath ? { artifactPath: input.artifactPath } : {}),
+    ...(input.provenanceRef ? { provenanceRef: input.provenanceRef } : {}),
+    ...(input.provenancePath ? { provenancePath: input.provenancePath } : {}),
+  });
+}
+
+function pickKnownArtifactResultFields(
+  result: Record<string, unknown>,
+): Record<string, unknown> {
+  const keys = [
+    "artifactRef",
+    "artifactPath",
+    "provenanceRef",
+    "provenancePath",
+    "goalEvidenceRef",
+    "goalEvidencePath",
+    "goalEvidenceProvenanceRef",
+    "goalEvidenceProvenancePath",
+    "evidenceRefs",
+  ];
+  const payload: Record<string, unknown> = {};
+  for (const key of keys) {
+    if (result[key] !== undefined) {
+      payload[key] = result[key];
+    }
+  }
+  return payload;
+}
+
+function artifactIdFromRef(ref: string): string {
+  return ref.startsWith("artifact:") ? ref.slice("artifact:".length) : ref;
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
 function buildGoalMilestoneRuntimeTask(
   goal: Goal,
   runContext: AgentRunContext,
@@ -361,16 +639,18 @@ function buildGoalMilestoneRuntimeTask(
   return {
     name: `Goal milestone: ${goal.description}`,
     policyLabel: "goal milestone runtime policy",
-    permissions: buildGoalMilestonePermissionPolicy(runContext),
+    permissions: buildGoalMilestonePermissionPolicy(goal, runContext),
   };
 }
 
 function buildGoalMilestonePermissionPolicy(
+  goal: Goal,
   runContext: AgentRunContext,
 ): TaskPermissionPolicy {
   const readRoots = [
     runContext.workspaceRoot,
     ...runContext.sandbox.extraReadRoots,
+    ...getDeterministicGoalPipelineReadRoots(goal.taskContract, runContext),
   ];
   const writeRoots =
     runContext.sandbox.mode === "read_only"

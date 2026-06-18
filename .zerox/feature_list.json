@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-06-17T04:47:07.000Z",
+  "updatedAt": "2026-06-18T14:04:30.000Z",
   "features": [
     {
       "id": "P0-repo-local-harness",
@@ -1013,6 +1013,246 @@
         "npm run verify",
         "npm run smoke:prod",
         "npm run harness:check"
+      ]
+    },
+    {
+      "id": "P11.1-task-contract-compiler",
+      "priority": 45,
+      "status": "done",
+      "title": "v2.3.6 deterministic task contract compiler",
+      "files": [
+        "src/shared/agentTaskContract.ts",
+        "src/shared/agentTaskContract.test.ts",
+        "src/shared/agentGoal.ts",
+        "src/main/goalChatService.ts",
+        "src/main/goalChatService.test.ts",
+        "src/main/agentGoalPlanner.ts",
+        "src/main/agentGoalPlanner.test.ts",
+        "src/main/agentGoalStore.test.ts",
+        "docs/superpowers/plans/2026-06-18-v2-3-6-deterministic-goal-contract-subagents.md",
+        "docs/superpowers/plans/2026-06-18-v2-3-6-deterministic-goal-contract-implementation.md",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md"
+      ],
+      "definitionOfDone": [
+        "Chat-created deterministic local artifact goals compile an AgentTaskContract before milestone planning",
+        "Goal records store optional taskContract without breaking old goal JSON loading",
+        "AgentGoalPlanner consumes taskContract for Chrome bookmark Markdown delivery instead of relying on description-only native-plan detection",
+        "Focused tests cover contract compilation, planner contract routing, and old-goal compatibility"
+      ],
+      "verification": [
+        "npm test -- src/shared/agentTaskContract.test.ts src/main/goalChatService.test.ts src/main/agentGoalPlanner.test.ts src/main/agentGoalStore.test.ts",
+        "npm run harness:check",
+        "git diff --check"
+      ]
+    },
+    {
+      "id": "P11.2-location-resource-model",
+      "priority": 46,
+      "status": "done",
+      "title": "v2.3.6 unified location resource model",
+      "files": [
+        "src/shared/locationResource.ts",
+        "src/shared/locationResource.test.ts",
+        "src/shared/agentWorkspace.ts",
+        "src/shared/agentWorkspace.test.ts",
+        "src/shared/toolPermissions.ts",
+        "src/shared/toolPermissions.test.ts",
+        "src/main/goalOutputRoots.ts",
+        "src/main/goalOutputRoots.test.ts",
+        "src/main/agentGoalAcceptance.ts",
+        "src/main/agentGoalAcceptance.test.ts",
+        "src/main/agentToolExecutor.ts",
+        "src/main/agentToolExecutor.test.ts",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md"
+      ],
+      "definitionOfDone": [
+        "Shared location resolver canonicalizes home-relative, Desktop, Downloads, workspace-relative, and absolute paths",
+        "Goal output roots, run-context sandbox roots, acceptance checks, tool permission narrowing, and Chrome bookmark artifact writes use canonical absolute roots instead of literal ~",
+        "Desktop aliases such as ~/Desktop, Desktop, 桌面, and absolute home Desktop resolve consistently without granting global Desktop access",
+        "Focused tests cover canonical path equivalence, sandbox narrowing, stale workspace Desktop rejection, and Chrome artifact output roots"
+      ],
+      "verification": [
+        "npm test -- src/shared/locationResource.test.ts src/shared/agentWorkspace.test.ts src/shared/toolPermissions.test.ts src/main/goalOutputRoots.test.ts src/main/agentGoalAcceptance.test.ts src/main/agentToolExecutor.test.ts",
+        "npm run harness:check",
+        "npm run build",
+        "git diff --check"
+      ]
+    },
+    {
+      "id": "P11.3-artifact-provenance-acceptance",
+      "priority": 47,
+      "status": "done",
+      "title": "v2.3.6 artifact provenance acceptance",
+      "files": [
+        "src/shared/agentArtifactProvenance.ts",
+        "src/shared/agentArtifactProvenance.test.ts",
+        "src/main/agentToolExecutor.ts",
+        "src/main/agentToolExecutor.test.ts",
+        "src/main/agentGoalAcceptance.ts",
+        "src/main/agentGoalAcceptance.test.ts",
+        "src/main/goalRuntimeEngine.ts",
+        "src/main/goalRuntimeEngine.test.ts",
+        "src/shared/agentWorkspace.ts",
+        "src/shared/agentWorkspace.test.ts",
+        "src/shared/agentTrajectory.ts",
+        "src/shared/runGraph.ts",
+        "src/shared/runGraph.test.ts",
+        "src/main/agentEpisodeExporter.test.ts",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md"
+      ],
+      "definitionOfDone": [
+        "Deterministic artifact writes create sidecar provenance manifests with run, goal, artifact, source, canonical destination, size, content hash, and generatedAt fields",
+        "Artifact write results and trajectory evidence expose provenance refs without creating a new artifact database",
+        "Acceptance checks requiring provenance fail for missing, stale, wrong-run, wrong-goal, wrong-destination, or hash-mismatched sidecars",
+        "Run graph and episode-export tests preserve provenance-backed artifact evidence"
+      ],
+      "verification": [
+        "npm test -- src/shared/agentArtifactProvenance.test.ts src/main/agentToolExecutor.test.ts src/main/agentGoalAcceptance.test.ts src/shared/runGraph.test.ts src/main/agentEpisodeExporter.test.ts src/main/goalRuntimeEngine.test.ts src/shared/agentWorkspace.test.ts",
+        "npm run harness:check",
+        "npm run build",
+        "git diff --check"
+      ]
+    },
+    {
+      "id": "P11.4-deterministic-local-artifact-pipeline",
+      "priority": 48,
+      "status": "done",
+      "title": "v2.3.6 deterministic local artifact pipeline",
+      "files": [
+        "src/main/agentDeterministicGoalPipeline.ts",
+        "src/main/agentDeterministicGoalPipeline.test.ts",
+        "src/main/agentGoalController.ts",
+        "src/main/agentGoalController.test.ts",
+        "src/main/goalRuntimeEngine.ts",
+        "src/main/goalRuntimeEngine.test.ts",
+        "src/main/agentToolExecutor.ts",
+        "src/main/agentToolExecutor.test.ts",
+        "src/shared/agentTaskContract.ts",
+        "src/shared/agentTaskContract.test.ts",
+        "src/shared/agentToolCapabilities.ts",
+        "src/shared/agentToolCapabilities.test.ts",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md"
+      ],
+      "definitionOfDone": [
+        "Eligible deterministic local artifact contracts execute through a narrow capability pipeline instead of open-ended replan loops",
+        "Chrome bookmark artifact goals call the native chrome_bookmarks_read path exactly once and produce deliverable plus provenance evidence",
+        "The pipeline still uses existing tool execution, authorization, sandbox, location, and provenance boundaries instead of reading local sources directly",
+        "Unsupported or non-deterministic goals continue through existing Goal Mode behavior",
+        "Focused tests include a non-Chrome deterministic local artifact path so the pipeline is not hardcoded to bookmarks"
+      ],
+      "verification": [
+        "npm test -- src/main/agentDeterministicGoalPipeline.test.ts src/main/agentGoalController.test.ts src/main/goalRuntimeEngine.test.ts src/main/agentToolExecutor.test.ts src/shared/agentToolCapabilities.test.ts src/shared/agentTaskContract.test.ts",
+        "npm run harness:check",
+        "npm run build",
+        "git diff --check"
+      ]
+    },
+    {
+      "id": "P11.5-eval-docs-release-metadata",
+      "priority": 49,
+      "status": "done",
+      "title": "v2.3.6 deterministic evals and release documentation",
+      "files": [
+        ".zerox/feature_list.json",
+        ".zerox/progress.md",
+        "README.md",
+        "src/shared/readme.test.ts",
+        "src/shared/packageScripts.test.ts",
+        "src/main/eval/agentEvalFixtures.ts",
+        "src/main/eval/agentEvalRunner.ts",
+        "src/main/eval/agentEvalRunner.test.ts"
+      ],
+      "definitionOfDone": [
+        "Agent eval coverage proves deterministic local artifact goals include contract, native Chrome artifact creation, provenance-backed acceptance, and no fallback loops after native success",
+        "README documents deterministic local artifact goals, location/resource canonicalization, provenance-backed acceptance, and independent packaged-app computer-use acceptance as the final release gate",
+        "Package/readme tests reflect v2.3.6 metadata without claiming final packaged-app acceptance has passed",
+        "Progress records concrete focused command evidence"
+      ],
+      "verification": [
+        "npm test -- src/main/eval/agentEvalRunner.test.ts src/shared/readme.test.ts src/shared/packageScripts.test.ts",
+        "node scripts/run-agent-evals.mjs",
+        "npm run harness:check",
+        "npm run build",
+        "git diff --check"
+      ]
+    },
+    {
+      "id": "P11.6-command-line-and-packaged-acceptance-gate",
+      "priority": 50,
+      "status": "done",
+      "title": "v2.3.6 command-line verification and packaged-app acceptance gate",
+      "files": [
+        ".zerox/feature_list.json",
+        ".zerox/progress.md",
+        "README.md",
+        "src/shared/readme.test.ts",
+        "src/shared/packageScripts.test.ts",
+        "src/main/goalChatService.ts",
+        "src/main/goalChatService.test.ts",
+        "src/main/agentGoalPlanner.ts",
+        "src/main/agentGoalPlanner.test.ts",
+        "src/main/agentGoalController.ts",
+        "src/main/agentGoalController.test.ts",
+        "src/main/agentGoalAcceptance.ts",
+        "src/main/agentGoalAcceptance.test.ts",
+        "src/main/goalOutputRoots.ts",
+        "src/main/goalOutputRoots.test.ts",
+        "src/shared/agentTaskContractAcceptance.ts"
+      ],
+      "definitionOfDone": [
+        "Full command-line verification passes after the integrated P11.1-P11.5 v2.3.6 changes",
+        "Production Electron smoke passes for the UI/runtime-affecting deterministic local artifact changes",
+        "Deterministic local artifact task contracts create artifact/provenance acceptance criteria without a model-review or quick-action review gate",
+        "Structured artifact destinations participate in output-root expansion and file_exists acceptance instead of falling back to workspace-relative paths",
+        "Goal-level artifact/provenance checks already accepted by milestone evidence complete without duplicate runId-bound provenance validation",
+        "A fresh packaged macOS app is built from the current tree before desktop acceptance",
+        "An independent computer-use subagent launches the packaged app, creates the Chrome-bookmarks-to-Desktop Markdown goal through the UI, and returns ACCEPTED with evidence",
+        "Package/readme metadata keeps the package release at 2.3.5 until the final v2.3.6 release metadata bump"
+      ],
+      "verification": [
+        "npm test -- src/main/goalChatService.test.ts src/main/agentGoalPlanner.test.ts",
+        "npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run dist:mac",
+        "Independent packaged-app computer-use acceptance subagent returns ACCEPTED",
+        "npm run harness:check",
+        "git diff --check"
+      ]
+    },
+    {
+      "id": "P11.7-v2.3.6-release-metadata-and-distribution",
+      "priority": 51,
+      "status": "done",
+      "title": "v2.3.6 release metadata and distribution handoff",
+      "files": [
+        ".zerox/feature_list.json",
+        ".zerox/progress.md",
+        "package.json",
+        "package-lock.json",
+        "README.md",
+        "src/shared/packageScripts.test.ts",
+        "src/shared/readme.test.ts"
+      ],
+      "definitionOfDone": [
+        "Package metadata reports version 2.3.6 in package.json and package-lock.json",
+        "README current release, current version, quarantine examples, roadmap, and verification status describe v2.3.6 as the released distribution instead of pending metadata",
+        "macOS distribution artifacts are rebuilt as v2.3.6 and checksums are recorded",
+        "The branch, tag, and GitHub Release v2.3.6 are pushed with the macOS dmg and zip assets",
+        "Release-focused tests, full verification, production smoke, harness check, packaging, and whitespace checks pass after the metadata bump"
+      ],
+      "verification": [
+        "npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "npm run dist:mac",
+        "git diff --check",
+        "gh release view v2.3.6"
       ]
     }
   ]

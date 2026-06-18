@@ -1,11 +1,16 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Goal, Milestone } from "../shared/agentGoal";
 import type { AgentRunRecord } from "../shared/agentRuns";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
+import type { AgentTaskContract } from "../shared/agentTaskContract";
+import { getArtifactProvenancePath } from "../shared/agentArtifactProvenance";
+import { buildPrimaryRunContext } from "../shared/agentWorkspace";
 import type { AgentToolExecutor } from "./agentToolExecutor";
+import { createAgentToolExecutor } from "./agentToolExecutor";
+import { createAgentGoalAcceptance } from "./agentGoalAcceptance";
 import { createDynamicToolRegistry } from "./dynamicToolRegistry";
 import { createGoalRuntimeEngine } from "./goalRuntimeEngine";
 import { createAgentGoalContext } from "./agentGoalContext";
@@ -14,8 +19,559 @@ import type { ChatMessage } from "./openAiCompatibleClient";
 import { createScheduledTaskStore } from "./taskStore";
 import { createToolAuditLog } from "./toolAuditLog";
 import { createToolAuthorizationService } from "./toolAuthorizationService";
+import { projectRunGraph } from "../shared/runGraph";
 
 describe("goal runtime engine", () => {
+  it("routes supported deterministic contracts through the native pipeline without a model loop", async () => {
+    const runs: AgentRunRecord[] = [];
+    const trajectoryEvents: AgentTrajectoryEvent[] = [];
+    const executedTools: string[] = [];
+    const authorizedTools: string[] = [];
+    const goal = createGoal({ taskContract: chromeBookmarkTaskContract });
+    const milestone = goal.milestones[0]!;
+    const engine = createGoalRuntimeEngine({
+      workspaceRoot: "/Users/demo/project",
+      chatClient: {
+        async complete() {
+          throw new Error("deterministic pipeline should not call the model");
+        },
+      },
+      getModelProfile: async () => {
+        throw new Error("deterministic pipeline should not load a model profile");
+      },
+      toolExecutor: {
+        async execute(request) {
+          executedTools.push(request.toolName);
+          return {
+            ok: true,
+            result: {
+              artifactRef: "artifact:bookmark_list",
+              artifactPath: "/Users/demo/Desktop/bookmark_list.md",
+              provenanceRef: "provenance:bookmark_list",
+              provenancePath: "/Users/demo/Desktop/bookmark_list.md.provenance.json",
+              goalEvidenceRef: "artifact:goalEvidence",
+              goalEvidencePath: "/Users/demo/Desktop/goalEvidence.md",
+              goalEvidenceProvenanceRef: "provenance:goalEvidence",
+              goalEvidenceProvenancePath:
+                "/Users/demo/Desktop/goalEvidence.md.provenance.json",
+              evidenceRefs: [
+                "artifact:bookmark_list",
+                "provenance:bookmark_list",
+                "artifact:goalEvidence",
+                "provenance:goalEvidence",
+              ],
+            },
+          };
+        },
+        getRegistry() {
+          return createDynamicToolRegistry();
+        },
+        hasTool() {
+          return true;
+        },
+      },
+      toolAuthorizationService: {
+        async authorize(_taskId, request, options) {
+          authorizedTools.push(request.toolName);
+          expect(options?.runContext).toMatchObject({
+            runId: "goal_run_1",
+            goalId: "goal_1",
+            milestoneId: "milestone_1",
+          });
+          return {
+            ok: true,
+            decision: {
+              allowed: true,
+              reason: "authorized deterministic tool",
+            },
+          };
+        },
+      },
+      runStore: {
+        async append(run) {
+          runs.push(run);
+          return run;
+        },
+      },
+      trajectoryStore: {
+        async append(_runId, event) {
+          trajectoryEvents.push(event);
+          return event;
+        },
+      },
+      goalContext: createAgentGoalContext(),
+      createId: () => "goal_run_1",
+      now: () => "2026-06-13T10:00:00.000Z",
+      runAgentLoop: async (): Promise<AgentLoopResult> => {
+        throw new Error("deterministic pipeline should not enter runAgentLoop");
+      },
+    });
+
+    const result = await engine.runMilestone(goal, milestone);
+
+    expect(result).toMatchObject({
+      runId: "goal_run_1",
+      status: "succeeded",
+      toolCallCount: 1,
+    });
+    expect(executedTools).toEqual(["chrome_bookmarks_read"]);
+    expect(authorizedTools).toEqual(["chrome_bookmarks_read"]);
+    expect(runs[0]).toMatchObject({
+      id: "goal_run_1",
+      skillName: "deterministic-goal-pipeline",
+      status: "succeeded",
+      summary: expect.stringContaining("Deterministic Chrome bookmark"),
+    });
+    expect(trajectoryEvents.map((event) => event.type)).not.toContain(
+      "model_request",
+    );
+    expect(trajectoryEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "tool_call",
+          payload: expect.objectContaining({
+            toolName: "chrome_bookmarks_read",
+          }),
+        }),
+        expect.objectContaining({
+          type: "artifact_created",
+          payload: expect.objectContaining({
+            artifactRef: "artifact:bookmark_list",
+            provenanceRef: "provenance:bookmark_list",
+          }),
+        }),
+      ]),
+    );
+  });
+
+  it("authorizes Chrome deterministic pipeline with the real goal policy and executes once", async () => {
+    const configDir = await mkdtemp(path.join(os.tmpdir(), "goal-chrome-authz-"));
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), "goal-home-"));
+    const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "goal-workspace-"));
+    const outputRoot = path.join(workspaceRoot, "Desktop");
+    const chromeUserDataDir = path.join(
+      homeDir,
+      "Library",
+      "Application Support",
+      "Google",
+      "Chrome",
+    );
+    const bookmarksPath = path.join(chromeUserDataDir, "Default", "Bookmarks");
+    const runs: AgentRunRecord[] = [];
+    const trajectoryEvents: AgentTrajectoryEvent[] = [];
+
+    try {
+      await mkdir(path.dirname(bookmarksPath), { recursive: true });
+      await writeFile(
+        bookmarksPath,
+        JSON.stringify({
+          roots: {
+            bookmark_bar: {
+              type: "folder",
+              name: "Bookmarks Bar",
+              children: [
+                {
+                  type: "url",
+                  name: "OpenAI",
+                  url: "https://openai.com/",
+                },
+              ],
+            },
+          },
+        }),
+        "utf8",
+      );
+      const auditLog = createToolAuditLog({ configDir });
+      const toolAuthorizationService = createToolAuthorizationService({
+        taskStore: createScheduledTaskStore({ configDir }),
+        auditLog,
+        homeDir,
+      });
+      const toolExecutor = createAgentToolExecutor();
+      const executedToolNames: string[] = [];
+      const engine = createGoalRuntimeEngine({
+        workspaceService: {
+          async resolveRunContext() {
+            return buildPrimaryRunContext({
+              workspaceId: "workspace_1",
+              workspaceRoot,
+              locationEnv: { homeDir, workspaceRoot },
+              sandbox: {
+                mode: "workspace_write",
+                network: "task_policy",
+                shell: "approved_commands",
+                allowWorkspaceEscape: false,
+                extraReadRoots: [],
+                extraWriteRoots: [outputRoot],
+              },
+            });
+          },
+        },
+        chatClient: {
+          async complete() {
+            throw new Error("deterministic pipeline should not call the model");
+          },
+        },
+        getModelProfile: async () => {
+          throw new Error("deterministic pipeline should not load a model profile");
+        },
+        toolExecutor: {
+          async execute(request, options) {
+            executedToolNames.push(request.toolName);
+            return toolExecutor.execute(request, options);
+          },
+          getRegistry() {
+            return toolExecutor.getRegistry();
+          },
+          hasTool(toolName) {
+            return toolExecutor.hasTool(toolName);
+          },
+        },
+        toolAuthorizationService,
+        runStore: {
+          async append(run) {
+            runs.push(run);
+            return run;
+          },
+        },
+        trajectoryStore: {
+          async append(_runId, event) {
+            trajectoryEvents.push(event);
+            return event;
+          },
+        },
+        goalContext: createAgentGoalContext(),
+        createId: () => "goal_run_1",
+        now: () => "2026-06-13T10:00:00.000Z",
+      });
+
+      const goal = createGoal({ taskContract: chromeBookmarkTaskContract });
+      const result = await engine.runMilestone(goal, goal.milestones[0]!);
+
+      expect(result.status).toBe("succeeded");
+      expect(executedToolNames).toEqual(["chrome_bookmarks_read"]);
+      await expect(auditLog.list()).resolves.toMatchObject([
+        {
+          taskId: "goal:goal_1",
+          request: {
+            toolName: "chrome_bookmarks_read",
+            args: expect.objectContaining({
+              chromeUserDataDir,
+            }),
+          },
+          decision: {
+            allowed: true,
+            reason: expect.stringContaining("goal milestone"),
+          },
+        },
+      ]);
+      expect(trajectoryEvents).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "artifact_created",
+            payload: expect.objectContaining({
+              artifactRef: "artifact:bookmark_list",
+            }),
+          }),
+        ]),
+      );
+      expect(runs[0]?.skillName).toBe("deterministic-goal-pipeline");
+    } finally {
+      await rm(configDir, { recursive: true, force: true });
+      await rm(homeDir, { recursive: true, force: true });
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("executes a typed JSON deterministic contract with real file tools and provenance", async () => {
+    const configDir = await mkdtemp(path.join(os.tmpdir(), "goal-json-authz-"));
+    const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "goal-workspace-"));
+    const inputPath = path.join(workspaceRoot, "input", "links.json");
+    const outputPath = path.join(workspaceRoot, "reports", "local_fixture.md");
+    const runs: AgentRunRecord[] = [];
+    const trajectoryEvents: AgentTrajectoryEvent[] = [];
+
+    try {
+      await mkdir(path.dirname(inputPath), { recursive: true });
+      await writeFile(
+        inputPath,
+        JSON.stringify({
+          title: "Local fixture",
+          links: ["https://example.com", "https://openai.com"],
+        }),
+        "utf8",
+      );
+      const auditLog = createToolAuditLog({ configDir });
+      const toolAuthorizationService = createToolAuthorizationService({
+        taskStore: createScheduledTaskStore({ configDir }),
+        auditLog,
+      });
+      const toolExecutor = createAgentToolExecutor();
+      const goal = createGoal({
+        taskContract: createJsonMarkdownTaskContract(inputPath, outputPath),
+      });
+      const engine = createGoalRuntimeEngine({
+        workspaceRoot,
+        chatClient: {
+          async complete() {
+            throw new Error("deterministic pipeline should not call the model");
+          },
+        },
+        getModelProfile: async () => {
+          throw new Error("deterministic pipeline should not load a model profile");
+        },
+        toolExecutor,
+        toolAuthorizationService,
+        runStore: {
+          async append(run) {
+            runs.push(run);
+            return run;
+          },
+        },
+        trajectoryStore: {
+          async append(_runId, event) {
+            trajectoryEvents.push(event);
+            return event;
+          },
+        },
+        goalContext: createAgentGoalContext(),
+        createId: () => "goal_run_json",
+        now: () => "2026-06-13T10:00:00.000Z",
+      });
+
+      const result = await engine.runMilestone(goal, goal.milestones[0]!);
+
+      expect(result.status).toBe("succeeded");
+      await expect(readFile(outputPath, "utf8")).resolves.toContain(
+        "https://openai.com",
+      );
+      await expect(
+        readFile(getArtifactProvenancePath(outputPath), "utf8"),
+      ).resolves.toContain('"artifactId": "local_fixture"');
+      expect(trajectoryEvents).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "artifact_created",
+            payload: expect.objectContaining({
+              artifactRef: "artifact:local_fixture",
+              provenanceRef: "provenance:local_fixture",
+            }),
+          }),
+        ]),
+      );
+      expect(runs[0]?.skillName).toBe("deterministic-goal-pipeline");
+    } finally {
+      await rm(configDir, { recursive: true, force: true });
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to the model loop for unsupported deterministic contracts", async () => {
+    const loopInputs: string[] = [];
+    const goal = createGoal({
+      taskContract: unsupportedDeterministicContract,
+    });
+    const engine = createGoalRuntimeEngine({
+      workspaceRoot: "/Users/example",
+      chatClient: {
+        async complete() {
+          throw new Error("fake loop should be used");
+        },
+      },
+      getModelProfile: async () => ({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret",
+        model: "agent-model",
+        temperature: 0.2,
+        maxTokens: 8192,
+      }),
+      toolExecutor: {
+        async execute() {
+          throw new Error("no tool expected");
+        },
+        getRegistry() {
+          return createDynamicToolRegistry();
+        },
+        hasTool() {
+          return true;
+        },
+      },
+      runStore: {
+        async append(run) {
+          return run;
+        },
+      },
+      trajectoryStore: {
+        async append(_runId, event) {
+          return event;
+        },
+      },
+      goalContext: createAgentGoalContext(),
+      createId: () => "goal_run_fallback",
+      now: () => "2026-06-13T10:00:00.000Z",
+      runAgentLoop: async (messages): Promise<AgentLoopResult> => {
+        loopInputs.push(messages.at(-1)?.content ?? "");
+        return {
+          summary: "Existing Goal Mode handled unsupported contract.",
+          status: "succeeded",
+          turns: 1,
+          messages,
+          toolCallsExecuted: 0,
+        };
+      },
+    });
+
+    const result = await engine.runMilestone(goal, goal.milestones[0]!);
+
+    expect(result.status).toBe("succeeded");
+    expect(loopInputs).toHaveLength(1);
+    expect(result.summary).toBe("Existing Goal Mode handled unsupported contract.");
+  });
+
+  it("falls back to the model loop for non-deterministic contracts", async () => {
+    const loopInputs: string[] = [];
+    const goal = createGoal({
+      taskContract: nonDeterministicContract,
+    });
+    const engine = createGoalRuntimeEngine({
+      workspaceRoot: "/Users/example",
+      chatClient: {
+        async complete() {
+          throw new Error("fake loop should be used");
+        },
+      },
+      getModelProfile: async () => ({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret",
+        model: "agent-model",
+        temperature: 0.2,
+        maxTokens: 8192,
+      }),
+      toolExecutor: {
+        async execute() {
+          throw new Error("no tool expected");
+        },
+        getRegistry() {
+          return createDynamicToolRegistry();
+        },
+        hasTool() {
+          return true;
+        },
+      },
+      runStore: {
+        async append(run) {
+          return run;
+        },
+      },
+      trajectoryStore: {
+        async append(_runId, event) {
+          return event;
+        },
+      },
+      goalContext: createAgentGoalContext(),
+      createId: () => "goal_run_nondeterministic",
+      now: () => "2026-06-13T10:00:00.000Z",
+      runAgentLoop: async (messages): Promise<AgentLoopResult> => {
+        loopInputs.push(messages.at(-1)?.content ?? "");
+        return {
+          summary: "Existing Goal Mode handled non-deterministic contract.",
+          status: "succeeded",
+          turns: 1,
+          messages,
+          toolCallsExecuted: 0,
+        };
+      },
+    });
+
+    const result = await engine.runMilestone(goal, goal.milestones[0]!);
+
+    expect(result.status).toBe("succeeded");
+    expect(loopInputs).toHaveLength(1);
+    expect(result.summary).toBe(
+      "Existing Goal Mode handled non-deterministic contract.",
+    );
+  });
+
+  it("awaits deterministic artifact trajectory writes before returning", async () => {
+    const trajectoryEvents: AgentTrajectoryEvent[] = [];
+    const delayedWrites: Array<Promise<void>> = [];
+    const goal = createGoal({ taskContract: chromeBookmarkTaskContract });
+    const engine = createGoalRuntimeEngine({
+      workspaceRoot: "/Users/demo/project",
+      chatClient: {
+        async complete() {
+          throw new Error("deterministic pipeline should not call the model");
+        },
+      },
+      getModelProfile: async () => {
+        throw new Error("deterministic pipeline should not load a model profile");
+      },
+      toolExecutor: {
+        async execute() {
+          return {
+            ok: true,
+            result: {
+              artifactRef: "artifact:bookmark_list",
+              artifactPath: "/Users/demo/Desktop/bookmark_list.md",
+              provenanceRef: "provenance:bookmark_list",
+              provenancePath: "/Users/demo/Desktop/bookmark_list.md.provenance.json",
+              goalEvidenceRef: "artifact:goalEvidence",
+              goalEvidencePath: "/Users/demo/Desktop/goalEvidence.md",
+              goalEvidenceProvenanceRef: "provenance:goalEvidence",
+              goalEvidenceProvenancePath:
+                "/Users/demo/Desktop/goalEvidence.md.provenance.json",
+            },
+          };
+        },
+        getRegistry() {
+          return createDynamicToolRegistry();
+        },
+        hasTool() {
+          return true;
+        },
+      },
+      runStore: {
+        async append(run) {
+          return run;
+        },
+      },
+      trajectoryStore: {
+        async append(_runId, event) {
+          if (event.type === "artifact_created") {
+            const write = new Promise<void>((resolve) => {
+              setTimeout(() => {
+                trajectoryEvents.push(event);
+                resolve();
+              }, 20);
+            });
+            delayedWrites.push(write);
+            await write;
+            return event;
+          }
+          trajectoryEvents.push(event);
+          return event;
+        },
+      },
+      goalContext: createAgentGoalContext(),
+      createId: () => "goal_run_awaited",
+      now: () => "2026-06-13T10:00:00.000Z",
+    });
+
+    await engine.runMilestone(goal, goal.milestones[0]!);
+
+    expect(delayedWrites.length).toBeGreaterThan(0);
+    expect(trajectoryEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "artifact_created",
+          payload: expect.objectContaining({
+            artifactRef: "artifact:bookmark_list",
+          }),
+        }),
+      ]),
+    );
+  });
+
   it("runs a goal milestone through the agent loop and records the run", async () => {
     const runs: AgentRunRecord[] = [];
     const trajectoryEvents: AgentTrajectoryEvent[] = [];
@@ -131,6 +687,209 @@ describe("goal runtime engine", () => {
     );
     expect(trajectoryEvents.map((event) => event.type)).toContain("final_summary");
     expect(trajectoryEvents.map((event) => event.type)).toContain("checkpoint_written");
+  });
+
+  it("passes run-scoped identity into chrome bookmark provenance and projects artifact events", async () => {
+    const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "goal-workspace-"));
+    const outputRoot = await mkdtemp(path.join(os.tmpdir(), "goal-output-"));
+    const bookmarksPath = path.join(workspaceRoot, "Chrome", "Default", "Bookmarks");
+    const runs: AgentRunRecord[] = [];
+    const trajectoryEvents: AgentTrajectoryEvent[] = [];
+    const toolExecutor = createAgentToolExecutor();
+
+    try {
+      await mkdir(path.dirname(bookmarksPath), { recursive: true });
+      await writeFile(
+        bookmarksPath,
+        JSON.stringify({
+          roots: {
+            bookmark_bar: {
+              type: "folder",
+              name: "Bookmarks Bar",
+              children: [
+                {
+                  type: "url",
+                  name: "OpenAI",
+                  url: "https://openai.com/",
+                },
+              ],
+            },
+          },
+        }),
+        "utf8",
+      );
+      const criterion = {
+        id: "criterion_bookmarks",
+        description: "Bookmark artifacts exist with provenance.",
+        acceptanceChecks: [
+          {
+            id: "check_bookmark_list",
+            kind: "file_exists" as const,
+            description: "bookmark_list.md exists with provenance.",
+            params: {
+              path: path.join(outputRoot, "bookmark_list.md"),
+              artifactRef: "artifact:bookmark_list",
+              requireProvenance: true,
+            },
+            requiresEvidence: true,
+          },
+          {
+            id: "check_goal_evidence",
+            kind: "file_exists" as const,
+            description: "goalEvidence.md exists with provenance.",
+            params: {
+              path: path.join(outputRoot, "goalEvidence.md"),
+              artifactRef: "artifact:goalEvidence",
+              requireProvenance: true,
+            },
+            requiresEvidence: true,
+          },
+        ],
+      };
+      const goal = createGoal({
+        description: `Read Chrome bookmarks and write artifacts to ${outputRoot}`,
+        successCriteria: [criterion],
+        milestoneSuccessCriteria: [criterion],
+      });
+      const milestone = goal.milestones[0]!;
+      const engine = createGoalRuntimeEngine({
+        workspaceRoot,
+        chatClient: {
+          async complete() {
+            throw new Error("fake loop should be used");
+          },
+        },
+        getModelProfile: async () => ({
+          baseUrl: "https://api.example.com/v1",
+          apiKey: "secret",
+          model: "agent-model",
+          temperature: 0.2,
+          maxTokens: 8192,
+        }),
+        toolExecutor,
+        runStore: {
+          async append(run) {
+            runs.push(run);
+            return run;
+          },
+        },
+        trajectoryStore: {
+          async append(_runId, event) {
+            trajectoryEvents.push(event);
+            return event;
+          },
+        },
+        goalContext: createAgentGoalContext(),
+        createId: () => "goal_run_1",
+        now: () => "2026-06-13T10:00:00.000Z",
+        runAgentLoop: async (messages, _profile, options): Promise<AgentLoopResult> => {
+          expect(options.runContext).toMatchObject({
+            runId: "goal_run_1",
+            goalId: "goal_1",
+            milestoneId: "milestone_1",
+          });
+          const toolResult = await options.toolExecutor.execute(
+            {
+              toolName: "chrome_bookmarks_read",
+              args: { bookmarksPath },
+            },
+            { runContext: options.runContext },
+          );
+          options.onToolResult?.("chrome_bookmarks_read", toolResult.ok, toolResult);
+          return {
+            summary: "已读取 Chrome 书签。",
+            status: "succeeded",
+            turns: 1,
+            messages,
+            toolCallsExecuted: 1,
+          };
+        },
+      });
+
+      const result = await engine.runMilestone(goal, milestone);
+
+      expect(result.status).toBe("succeeded");
+      const bookmarkManifest = JSON.parse(
+        await readFile(
+          path.join(outputRoot, "bookmark_list.md.provenance.json"),
+          "utf8",
+        ),
+      );
+      expect(bookmarkManifest).toMatchObject({
+        runId: "goal_run_1",
+        goalId: "goal_1",
+        milestoneId: "milestone_1",
+        artifactId: "bookmark_list",
+        artifactRef: "artifact:bookmark_list",
+      });
+
+      const acceptance = createAgentGoalAcceptance();
+      const acceptanceResult = await acceptance.evaluate(milestone, {
+        runId: result.runId,
+        goalId: goal.id,
+        milestoneId: milestone.id,
+        workspacePath: workspaceRoot,
+        extraReadRoots: [outputRoot],
+        extraWriteRoots: [outputRoot],
+        toolExecutor,
+        trajectoryStore: {
+          async append(_runId, event) {
+            trajectoryEvents.push(event);
+            return event;
+          },
+        },
+      });
+
+      expect(acceptanceResult.accepted).toBe(true);
+      expect(trajectoryEvents).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "tool_result",
+            payload: expect.objectContaining({
+              toolName: "chrome_bookmarks_read",
+              artifactRef: "artifact:bookmark_list",
+              provenanceRef: "provenance:bookmark_list",
+              evidenceRefs: expect.arrayContaining([
+                "artifact:bookmark_list",
+                "provenance:bookmark_list",
+                "artifact:goalEvidence",
+                "provenance:goalEvidence",
+              ]),
+            }),
+          }),
+          expect.objectContaining({
+            type: "artifact_created",
+            payload: expect.objectContaining({
+              artifactId: "bookmark_list",
+              artifactRef: "artifact:bookmark_list",
+              provenanceRef: "provenance:bookmark_list",
+            }),
+          }),
+          expect.objectContaining({
+            type: "artifact_created",
+            payload: expect.objectContaining({
+              artifactId: "goalEvidence",
+              artifactRef: "artifact:goalEvidence",
+              provenanceRef: "provenance:goalEvidence",
+            }),
+          }),
+        ]),
+      );
+      const graph = projectRunGraph({
+        run: runs[0]!,
+        trajectoryEvents,
+        kernelEvents: [],
+      });
+      expect(graph.evidence).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ ref: "provenance:bookmark_list" }),
+          expect.objectContaining({ ref: "provenance:goalEvidence" }),
+        ]),
+      );
+    } finally {
+      await rm(workspaceRoot, { recursive: true, force: true });
+      await rm(outputRoot, { recursive: true, force: true });
+    }
   });
 
   it("records strategy guard events from the agent loop trajectory", async () => {
@@ -550,6 +1309,7 @@ function createGoal(overrides: {
   description?: string;
   successCriteria?: Goal["successCriteria"];
   milestoneSuccessCriteria?: Milestone["successCriteria"];
+  taskContract?: Goal["taskContract"];
 } = {}): Goal {
   const milestone: Milestone = {
     id: "milestone_1",
@@ -583,7 +1343,111 @@ function createGoal(overrides: {
     },
     reviewPolicy: "review_each_milestone",
     planVersion: 1,
+    ...(overrides.taskContract ? { taskContract: overrides.taskContract } : {}),
     createdAt: "2026-06-13T10:00:00.000Z",
     updatedAt: "2026-06-13T10:00:00.000Z",
   };
 }
+
+const chromeBookmarkTaskContract: AgentTaskContract = {
+  schemaVersion: 1,
+  id: "task_contract_chrome_bookmarks_demo",
+  taskKind: "local_data_to_artifact",
+  mode: "deterministic",
+  source: { type: "chrome_bookmarks" },
+  transform: { type: "grouped_markdown" },
+  deliverable: {
+    artifactId: "bookmark_list",
+    artifactRef: "artifact:bookmark_list",
+    mediaType: "text/markdown",
+    destination: { kind: "desktop", filename: "bookmark_list.md" },
+  },
+  capabilities: [
+    { id: "chrome_bookmarks_read", toolName: "chrome_bookmarks_read" },
+  ],
+  acceptance: {
+    evidenceRefs: ["artifact:bookmark_list", "artifact:goalEvidence"],
+    provenanceRequired: true,
+  },
+  createdFrom: {
+    description:
+      "Get my Chrome bookmarks, group them, and write a Markdown file to Desktop.",
+  },
+};
+
+function createJsonMarkdownTaskContract(
+  inputPath: string,
+  outputPath: string,
+): AgentTaskContract {
+  return {
+    schemaVersion: 1,
+    id: "task_contract_json_fixture_demo",
+    taskKind: "local_data_to_artifact",
+    mode: "deterministic",
+    source: {
+      type: "json_file",
+      path: inputPath,
+    },
+    transform: { type: "json_markdown" },
+    deliverable: {
+      artifactId: "local_fixture",
+      artifactRef: "artifact:local_fixture",
+      mediaType: "text/markdown",
+      destination: { kind: "path", path: outputPath },
+    },
+    capabilities: [
+      { id: "file_read", toolName: "file_read" },
+      { id: "file_write", toolName: "file_write" },
+    ],
+    acceptance: {
+      evidenceRefs: ["artifact:local_fixture"],
+      provenanceRequired: true,
+    },
+    createdFrom: {
+      description:
+        "Transform the local JSON fixture into Markdown and write it to Desktop.",
+    },
+  };
+}
+
+const unsupportedDeterministicContract = {
+  schemaVersion: 1,
+  id: "task_contract_unsupported_demo",
+  taskKind: "local_data_to_artifact",
+  mode: "deterministic",
+  source: { type: "sqlite_database", path: "/Users/demo/db.sqlite" },
+  transform: { type: "table_markdown" },
+  deliverable: {
+    artifactId: "database_report",
+    artifactRef: "artifact:database_report",
+    mediaType: "text/markdown",
+    destination: { kind: "desktop", filename: "database_report.md" },
+  },
+  capabilities: [{ id: "sqlite_read", toolName: "sqlite_read" }],
+  acceptance: {
+    evidenceRefs: ["artifact:database_report"],
+    provenanceRequired: true,
+  },
+  createdFrom: { description: "Unsupported deterministic database report." },
+} as unknown as AgentTaskContract;
+
+const nonDeterministicContract = {
+  schemaVersion: 1,
+  id: "task_contract_research_demo",
+  taskKind: "local_data_to_artifact",
+  mode: "agentic",
+  source: { type: "web_research" },
+  transform: { type: "synthesis_markdown" },
+  deliverable: {
+    artifactId: "research_report",
+    artifactRef: "artifact:research_report",
+    mediaType: "text/markdown",
+    destination: { kind: "desktop", filename: "research_report.md" },
+  },
+  capabilities: [{ id: "web_search", toolName: "web_search" }],
+  acceptance: {
+    evidenceRefs: ["artifact:research_report"],
+    provenanceRequired: false,
+  },
+  createdFrom: { description: "Agentic research report." },
+} as unknown as AgentTaskContract;

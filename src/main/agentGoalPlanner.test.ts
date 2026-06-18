@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ChatClient, ChatCompletionRequest } from "./openAiCompatibleClient";
 import type { Goal, SuccessCriterion } from "../shared/agentGoal";
+import { compileAgentTaskContract } from "../shared/agentTaskContract";
 import { createAgentGoalPlanner } from "./agentGoalPlanner";
 
 const criterion: SuccessCriterion = {
@@ -30,6 +31,37 @@ const modelReviewCriterion: SuccessCriterion = {
         evidenceRefs: ["artifact:goalEvidence"],
       },
       requiresEvidence: true,
+    },
+  ],
+};
+
+const deterministicArtifactCriterion: SuccessCriterion = {
+  id: "criterion_deterministic_bookmark_artifacts",
+  description: "Chrome bookmark artifacts exist with provenance.",
+  acceptanceChecks: [
+    {
+      id: "check_bookmark_list_artifact",
+      kind: "file_exists",
+      description: "Complete Chrome bookmark list artifact exists.",
+      params: {
+        path: "bookmark_list.md",
+        artifactRef: "artifact:bookmark_list",
+        destination: { kind: "desktop", filename: "bookmark_list.md" },
+        requireProvenance: true,
+      },
+      requiresEvidence: false,
+    },
+    {
+      id: "check_goal_evidence_artifact",
+      kind: "file_exists",
+      description: "Goal evidence artifact exists.",
+      params: {
+        path: "goalEvidence.md",
+        artifactRef: "artifact:goalEvidence",
+        destination: { kind: "desktop", filename: "goalEvidence.md" },
+        requireProvenance: true,
+      },
+      requiresEvidence: false,
     },
   ],
 };
@@ -177,6 +209,277 @@ describe("agent goal planner", () => {
         runIds: [],
         attempts: 0,
       },
+    ]);
+  });
+
+  it("creates a single native milestone from a Chrome bookmark task contract without a model request", async () => {
+    const requests: ChatCompletionRequest[] = [];
+    const planner = createAgentGoalPlanner({
+      chatClient: createFakeChatClient([], requests),
+      modelProfile: fakeModelProfile,
+      maxPlanAttempts: 1,
+    });
+    const taskContract = compileAgentTaskContract({
+      description:
+        "Get my Chrome bookmarks, group them, write a Markdown file to Desktop.",
+      chatSessionId: "chat_1",
+      originMessageId: "message_1",
+    });
+
+    const milestones = await planner.plan(
+      "Use the supplied task contract rather than description heuristics.",
+      {
+        successCriteria: [modelReviewCriterion],
+        availableTools: ["chrome_bookmarks_read", "file_read"],
+        availableSkills: [],
+        taskContract,
+      },
+    );
+
+    expect(requests).toHaveLength(0);
+    expect(milestones).toEqual([
+      {
+        id: "extract_chrome_bookmarks",
+        description:
+          "Read Chrome bookmarks with chrome_bookmarks_read, present a concise preview, and write complete bookmark_list.md and goalEvidence.md artifacts.",
+        dependsOn: [],
+        successCriteria: [
+          modelReviewCriterion,
+          {
+            id: "criterion_chrome_bookmark_artifacts",
+            description: "Chrome bookmark artifacts are written.",
+            acceptanceChecks: [
+              {
+                id: "check_bookmark_list_artifact",
+                kind: "file_exists",
+                description: "Complete Chrome bookmark list artifact exists.",
+                params: {
+                  path: "bookmark_list.md",
+                  artifactRef: "artifact:bookmark_list",
+                  destination: { kind: "desktop", filename: "bookmark_list.md" },
+                  requireProvenance: true,
+                },
+                requiresEvidence: false,
+              },
+              {
+                id: "check_goal_evidence_artifact",
+                kind: "file_exists",
+                description: "Goal evidence artifact exists.",
+                params: {
+                  path: "goalEvidence.md",
+                  artifactRef: "artifact:goalEvidence",
+                  destination: { kind: "desktop", filename: "goalEvidence.md" },
+                  requireProvenance: true,
+                },
+                requiresEvidence: false,
+              },
+            ],
+          },
+        ],
+        state: "ready",
+        runIds: [],
+        attempts: 0,
+      },
+    ]);
+  });
+
+  it("accepts deterministic artifact criteria for Chrome bookmark task contracts", async () => {
+    const requests: ChatCompletionRequest[] = [];
+    const planner = createAgentGoalPlanner({
+      chatClient: createFakeChatClient([], requests),
+      modelProfile: fakeModelProfile,
+      maxPlanAttempts: 1,
+    });
+    const taskContract = compileAgentTaskContract({
+      description:
+        "Get my Chrome bookmarks, group them, write a Markdown file to Desktop.",
+      chatSessionId: "chat_1",
+      originMessageId: "message_1",
+    });
+
+    const milestones = await planner.plan(
+      "Use the supplied deterministic task contract.",
+      {
+        successCriteria: [deterministicArtifactCriterion],
+        availableTools: ["chrome_bookmarks_read"],
+        availableSkills: [],
+        taskContract,
+      },
+    );
+
+    expect(requests).toHaveLength(0);
+    expect(milestones).toEqual([
+      {
+        id: "extract_chrome_bookmarks",
+        description:
+          "Read Chrome bookmarks with chrome_bookmarks_read, present a concise preview, and write complete bookmark_list.md and goalEvidence.md artifacts.",
+        dependsOn: [],
+        successCriteria: [deterministicArtifactCriterion],
+        state: "ready",
+        runIds: [],
+        attempts: 0,
+      },
+    ]);
+  });
+
+  it("falls back to model planning when the task contract is unsupported", async () => {
+    const requests: ChatCompletionRequest[] = [];
+    const planner = createAgentGoalPlanner({
+      chatClient: createFakeChatClient([
+        {
+          milestones: [
+            {
+              id: "milestone_model",
+              description: "Use the model for unsupported contracts.",
+              dependsOn: [],
+              successCriteria: [criterion],
+            },
+          ],
+        },
+      ], requests),
+      modelProfile: fakeModelProfile,
+    });
+    const unsupportedContract = {
+      schemaVersion: 1,
+      id: "task_contract_unsupported",
+      taskKind: "local_data_to_artifact",
+      mode: "deterministic",
+      source: { type: "unsupported_source" },
+      transform: { type: "grouped_markdown" },
+      deliverable: {
+        artifactId: "bookmark_list",
+        artifactRef: "artifact:bookmark_list",
+        mediaType: "text/markdown",
+        destination: { kind: "desktop", filename: "bookmark_list.md" },
+      },
+      capabilities: [],
+      acceptance: {
+        evidenceRefs: ["artifact:bookmark_list", "artifact:goalEvidence"],
+        provenanceRequired: true,
+      },
+      createdFrom: { description: "Unsupported deterministic work." },
+    };
+
+    const milestones = await planner.plan("Unsupported deterministic work.", {
+      successCriteria: [criterion],
+      availableTools: ["chrome_bookmarks_read"],
+      availableSkills: [],
+      taskContract: unsupportedContract,
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(milestones.map((milestone) => milestone.id)).toEqual([
+      "milestone_model",
+    ]);
+  });
+
+  it("falls back to model planning when a Chrome bookmark contract is missing acceptance", async () => {
+    const requests: ChatCompletionRequest[] = [];
+    const planner = createAgentGoalPlanner({
+      chatClient: createFakeChatClient([
+        {
+          milestones: [
+            {
+              id: "milestone_model",
+              description: "Use the model for malformed contracts.",
+              dependsOn: [],
+              successCriteria: [modelReviewCriterion],
+            },
+          ],
+        },
+      ], requests),
+      modelProfile: fakeModelProfile,
+    });
+    const malformedContract = {
+      schemaVersion: 1,
+      id: "task_contract_malformed",
+      taskKind: "local_data_to_artifact",
+      mode: "deterministic",
+      source: { type: "chrome_bookmarks" },
+      transform: { type: "grouped_markdown" },
+      deliverable: {
+        artifactId: "bookmark_list",
+        artifactRef: "artifact:bookmark_list",
+        mediaType: "text/markdown",
+        destination: { kind: "desktop", filename: "bookmark_list.md" },
+      },
+      capabilities: [
+        { id: "chrome_bookmarks_read", toolName: "chrome_bookmarks_read" },
+      ],
+      createdFrom: { description: "Malformed deterministic bookmark work." },
+    };
+
+    const milestones = await planner.plan(
+      "Malformed deterministic bookmark work.",
+      {
+        successCriteria: [modelReviewCriterion],
+        availableTools: ["chrome_bookmarks_read"],
+        availableSkills: [],
+        taskContract: malformedContract,
+      },
+    );
+
+    expect(requests).toHaveLength(1);
+    expect(milestones.map((milestone) => milestone.id)).toEqual([
+      "milestone_model",
+    ]);
+  });
+
+  it("falls back to model planning when a Chrome bookmark contract has wrong evidence refs", async () => {
+    const requests: ChatCompletionRequest[] = [];
+    const planner = createAgentGoalPlanner({
+      chatClient: createFakeChatClient([
+        {
+          milestones: [
+            {
+              id: "milestone_model",
+              description: "Use the model for contracts with wrong evidence.",
+              dependsOn: [],
+              successCriteria: [modelReviewCriterion],
+            },
+          ],
+        },
+      ], requests),
+      modelProfile: fakeModelProfile,
+    });
+    const malformedContract = {
+      schemaVersion: 1,
+      id: "task_contract_wrong_evidence",
+      taskKind: "local_data_to_artifact",
+      mode: "deterministic",
+      source: { type: "chrome_bookmarks" },
+      transform: { type: "grouped_markdown" },
+      deliverable: {
+        artifactId: "bookmark_list",
+        artifactRef: "artifact:bookmark_list",
+        mediaType: "text/markdown",
+        destination: { kind: "desktop", filename: "bookmark_list.md" },
+      },
+      capabilities: [
+        { id: "chrome_bookmarks_read", toolName: "chrome_bookmarks_read" },
+      ],
+      acceptance: {
+        evidenceRefs: ["artifact:goalEvidence"],
+        provenanceRequired: true,
+      },
+      createdFrom: {
+        description: "Malformed deterministic bookmark work.",
+      },
+    };
+
+    const milestones = await planner.plan(
+      "Malformed deterministic bookmark work.",
+      {
+        successCriteria: [modelReviewCriterion],
+        availableTools: ["chrome_bookmarks_read"],
+        availableSkills: [],
+        taskContract: malformedContract,
+      },
+    );
+
+    expect(requests).toHaveLength(1);
+    expect(milestones.map((milestone) => milestone.id)).toEqual([
+      "milestone_model",
     ]);
   });
 

@@ -22,11 +22,17 @@ describe("agent workspace model", () => {
     const context = buildPrimaryRunContext({
       workspaceId: "workspace_default",
       workspaceRoot: "/tmp/zerox/workspace",
+      runId: "run_1",
+      goalId: "goal_1",
+      milestoneId: "milestone_1",
     });
 
     expect(context).toMatchObject({
       workspaceId: "workspace_default",
       workspaceRoot: "/tmp/zerox/workspace",
+      runId: "run_1",
+      goalId: "goal_1",
+      milestoneId: "milestone_1",
       agentRole: "primary",
       depth: 0,
     });
@@ -92,5 +98,48 @@ describe("agent workspace model", () => {
         "write",
       ),
     ).toBe(false);
+  });
+
+  it("canonicalizes primary run context extra write roots with injected home", () => {
+    const context = buildPrimaryRunContext({
+      workspaceId: "workspace_default",
+      workspaceRoot: "/Users/demo/project",
+      locationEnv: { homeDir: "/Users/demo", platform: "darwin" },
+      sandbox: {
+        ...buildDefaultSandboxPolicy(),
+        extraWriteRoots: ["~/Desktop"],
+      },
+    });
+
+    expect(context.sandbox.extraWriteRoots).toEqual(["/Users/demo/Desktop"]);
+  });
+
+  it("treats Desktop aliases as inside only when Desktop is an explicit extra root", () => {
+    const context = buildPrimaryRunContext({
+      workspaceId: "workspace_default",
+      workspaceRoot: "/Users/demo/project",
+      locationEnv: { homeDir: "/Users/demo", platform: "darwin" },
+      sandbox: {
+        ...buildDefaultSandboxPolicy(),
+        extraWriteRoots: ["~/Desktop"],
+      },
+    });
+    const workspaceOnlyContext = buildPrimaryRunContext({
+      workspaceId: "workspace_default",
+      workspaceRoot: "/Users/demo/project",
+      locationEnv: { homeDir: "/Users/demo", platform: "darwin" },
+    });
+
+    for (const candidate of [
+      "~/Desktop/a.md",
+      "Desktop/a.md",
+      "桌面/a.md",
+      "/Users/demo/Desktop/a.md",
+    ]) {
+      expect(isPathInsideRunContext(candidate, context, "write")).toBe(true);
+      expect(isPathInsideRunContext(candidate, workspaceOnlyContext, "write")).toBe(
+        false,
+      );
+    }
   });
 });

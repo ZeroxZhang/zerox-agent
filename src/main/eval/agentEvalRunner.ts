@@ -59,14 +59,36 @@ function findContractFailure(fixture: AgentEvalFixture): string | null {
     const eventIndexes = fixture.events
       .map((event, index) => ({ event, index }))
       .filter(({ event }) => event.type === assertion.type);
+    if (
+      !eventIndexes.length &&
+      typeof assertion.maxCount === "number" &&
+      assertion.maxCount >= 0
+    ) {
+      continue;
+    }
     if (!eventIndexes.length) {
       return `Missing asserted event "${assertion.type}".`;
     }
 
     const payloadEntries = Object.entries(assertion.payload ?? {});
     const payloadMatches = eventIndexes.filter(({ event }) =>
-      payloadEntries.every(([key, value]) => event.payload[key] === value),
+      payloadEntries.every(([key, value]) =>
+        payloadValueMatches(event.payload[key], value),
+      ),
     );
+    const relevantMatches = payloadEntries.length ? payloadMatches : eventIndexes;
+    if (
+      typeof assertion.maxCount === "number" &&
+      relevantMatches.length > assertion.maxCount
+    ) {
+      return `"${assertion.type}" expected at most ${assertion.maxCount} occurrence(s), found ${relevantMatches.length}.`;
+    }
+    if (
+      typeof assertion.maxCount === "number" &&
+      relevantMatches.length <= assertion.maxCount
+    ) {
+      continue;
+    }
     if (!payloadMatches.length && payloadEntries.length) {
       const [key, value] = payloadEntries[0];
       return `"${assertion.type}" payload.${key} expected ${String(value)}.`;
@@ -85,6 +107,38 @@ function findContractFailure(fixture: AgentEvalFixture): string | null {
   }
 
   return null;
+}
+
+function payloadValueMatches(actual: unknown, expected: unknown): boolean {
+  if (Object.is(actual, expected)) {
+    return true;
+  }
+
+  if (Array.isArray(expected)) {
+    if (!Array.isArray(actual) || actual.length < expected.length) {
+      return false;
+    }
+
+    return expected.every((value, index) =>
+      payloadValueMatches(actual[index], value),
+    );
+  }
+
+  if (isRecord(expected)) {
+    if (!isRecord(actual)) {
+      return false;
+    }
+
+    return Object.entries(expected).every(([key, value]) =>
+      payloadValueMatches(actual[key], value),
+    );
+  }
+
+  return false;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function findMissingRequiredEvent(

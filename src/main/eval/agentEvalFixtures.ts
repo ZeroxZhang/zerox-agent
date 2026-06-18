@@ -16,6 +16,7 @@ export type AgentEvalEventAssertion = {
   type: AgentTrajectoryEventType;
   payload?: Record<string, unknown>;
   after?: AgentTrajectoryEventType;
+  maxCount?: number;
 };
 
 export function createAgentEvalFixtures(): AgentEvalFixture[] {
@@ -756,6 +757,198 @@ export function createAgentEvalFixtures(): AgentEvalFixture[] {
           type: "final_summary",
           payload: { sourcedFacts: 1, modelInferences: 1 },
           after: "tool_result",
+        },
+      ],
+    },
+    {
+      id: "deterministic-local-artifact-provenance-acceptance",
+      description:
+        "A deterministic Chrome bookmark artifact goal compiles a task contract, uses the native path once, creates provenance-backed artifact evidence, and accepts without fallback loops.",
+      events: createEvents("deterministic-local-artifact-provenance-acceptance", [
+        [
+          "goal_planned",
+          {
+            goalId: "goal_eval_deterministic_artifact",
+            milestoneCount: 1,
+            contractMode: "deterministic",
+            sourceType: "chrome_bookmarks",
+            taskContract: {
+              schemaVersion: 1,
+              taskKind: "local_data_to_artifact",
+              mode: "deterministic",
+              source: { type: "chrome_bookmarks" },
+              transform: { type: "grouped_markdown" },
+              deliverable: {
+                artifactId: "bookmark_list",
+                artifactRef: "artifact:bookmark_list",
+                mediaType: "text/markdown",
+                destination: {
+                  kind: "desktop",
+                  filename: "bookmark_list.md",
+                },
+              },
+              capabilities: [
+                {
+                  id: "chrome_bookmarks_read",
+                  toolName: "chrome_bookmarks_read",
+                },
+              ],
+              acceptance: {
+                evidenceRefs: [
+                  "artifact:bookmark_list",
+                  "artifact:goalEvidence",
+                ],
+                provenanceRequired: true,
+              },
+            },
+          },
+        ],
+        [
+          "tool_call",
+          {
+            toolName: "chrome_bookmarks_read",
+            goalId: "goal_eval_deterministic_artifact",
+          },
+        ],
+        [
+          "native_tool_invocation",
+          {
+            toolName: "chrome_bookmarks_read",
+            nativeKind: "browser",
+            riskLevel: "medium",
+          },
+        ],
+        [
+          "native_tool_observation",
+          {
+            toolName: "chrome_bookmarks_read",
+            nativeKind: "browser",
+            ok: true,
+          },
+        ],
+        [
+          "tool_result",
+          {
+            toolName: "chrome_bookmarks_read",
+            ok: true,
+            artifactRef: "artifact:bookmark_list",
+            provenanceRef: "provenance:bookmark_list",
+          },
+        ],
+        [
+          "artifact_created",
+          {
+            artifactType: "markdown_report",
+            artifactId: "bookmark_list",
+            artifactRef: "artifact:bookmark_list",
+            provenanceRef: "provenance:bookmark_list",
+            sourceToolName: "chrome_bookmarks_read",
+            canonicalDestination:
+              "/Users/example/Desktop/bookmark_list.md",
+          },
+        ],
+        [
+          "acceptance_checked",
+          {
+            goalId: "goal_eval_deterministic_artifact",
+            accepted: true,
+            deterministicFirst: true,
+            provenanceBacked: true,
+            evidenceRefs: [
+              "artifact:bookmark_list",
+              "provenance:bookmark_list",
+            ],
+          },
+        ],
+        [
+          "goal_stopped",
+          {
+            goalId: "goal_eval_deterministic_artifact",
+            status: "achieved",
+            stopReason: "goal_accepted",
+            replans: 0,
+          },
+        ],
+        ["final_summary", { status: "succeeded" }],
+      ]),
+      requiredEventTypes: [
+        "goal_planned",
+        "tool_call",
+        "native_tool_invocation",
+        "native_tool_observation",
+        "tool_result",
+        "artifact_created",
+        "acceptance_checked",
+        "goal_stopped",
+        "final_summary",
+      ],
+      assertions: [
+        {
+          type: "goal_planned",
+          payload: {
+            contractMode: "deterministic",
+            sourceType: "chrome_bookmarks",
+            taskContract: {
+              schemaVersion: 1,
+              taskKind: "local_data_to_artifact",
+              mode: "deterministic",
+              source: { type: "chrome_bookmarks" },
+              transform: { type: "grouped_markdown" },
+              deliverable: {
+                artifactId: "bookmark_list",
+                artifactRef: "artifact:bookmark_list",
+                mediaType: "text/markdown",
+              },
+              capabilities: [
+                {
+                  id: "chrome_bookmarks_read",
+                  toolName: "chrome_bookmarks_read",
+                },
+              ],
+              acceptance: {
+                provenanceRequired: true,
+              },
+            },
+          },
+        },
+        {
+          type: "native_tool_invocation",
+          payload: { toolName: "chrome_bookmarks_read" },
+          after: "tool_call",
+        },
+        {
+          type: "native_tool_observation",
+          payload: { toolName: "chrome_bookmarks_read", ok: true },
+          after: "native_tool_invocation",
+        },
+        {
+          type: "artifact_created",
+          payload: {
+            artifactRef: "artifact:bookmark_list",
+            provenanceRef: "provenance:bookmark_list",
+          },
+          after: "native_tool_observation",
+        },
+        {
+          type: "acceptance_checked",
+          payload: { accepted: true, provenanceBacked: true },
+          after: "artifact_created",
+        },
+        {
+          type: "goal_stopped",
+          payload: { status: "achieved", stopReason: "goal_accepted" },
+          after: "acceptance_checked",
+        },
+        { type: "goal_replanned", maxCount: 0 },
+        {
+          type: "tool_call",
+          payload: { toolName: "file_read" },
+          maxCount: 0,
+        },
+        {
+          type: "tool_call",
+          payload: { toolName: "shell_exec" },
+          maxCount: 0,
         },
       ],
     },
