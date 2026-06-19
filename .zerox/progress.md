@@ -3219,3 +3219,25 @@
 - Changed files:
   - `.zerox/feature_list.json`
   - `.zerox/progress.md`
+
+## 2026-06-20 v2.4.0 release
+
+- ABC activation complete (P1-P8 wired into the runtime, observability events
+  emitted, version bumped, packaged, tagged, released).
+- Version: package.json/package-lock 2.3.6 → 2.4.0; packageScripts + readme
+  tests assert 2.4.0; feature_list P12-2.4.0-iteration-activation-and-release
+  (done).
+- better-sqlite3 upgraded 11 → 12.x (v11 cannot compile against Electron 42's
+  V8 External::Value tag API); npmRebuild:true + asarUnpack so the packaged app
+  uses the SQLite storage backend at runtime (no JSON fallback).
+- Distribution: `npm run dist:mac` built
+  - release/Zerox Agent-2.4.0-arm64.dmg (128279195 bytes, sha256 5ce654bf...)
+  - release/Zerox Agent-2.4.0-arm64-mac.zip (349320265 bytes, sha256 cca73728...)
+  - Info.plist CFBundleShortVersionString = 2.4.0
+- git tag v2.4.0 pushed; GitHub Release v2.4.0 created (not draft, not
+  prerelease) with dmg + zip + blockmaps:
+  https://github.com/ZeroxZhang/zerox-agent/releases/tag/v2.4.0
+- Final verification: npm run verify 151 files / 911 tests, agent eval 26/26,
+  memory eval 2/2; harness:check green.
+- Test growth across the iteration: 135 files / 767 tests → 151 files / 911
+  tests (+16 files, +144 tests; zero regression).
