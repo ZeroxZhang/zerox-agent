@@ -1,5 +1,55 @@
 # Zerox Harness Progress
 
+## 2026-06-19 P6 Actor model full + Workflow runtime
+
+- Request:
+  - Continue the 2.4.0 iteration. P6 = actor model full (extends P5 v0 with
+    send/inbox/background/outputSchema/contextMode:none|state/peer) + Workflow
+    runtime (§6) + deep-research + runGraph actor/workflow nodes. Unblocks P7
+    (dream/distill via background actors + workflow + registerWorkflowAsSkill)
+    and P8 (max-mode replay via ephemeral state actors).
+- Implementation:
+  - ActorRuntime full: extended `spawn` with `background`/`outputSchema`/
+    `parentActorId` + `send` (inbox) + outcome `value` (validated against
+    outputSchema). v0 path (contextMode:"full", no send/background/outputSchema)
+    frozen — parity-tested.
+  - New `src/main/actors/`: `actorInbox.ts` (ActorInbox + MAX_PRE_REACT=4),
+    `actorOutputSchema.ts` (lightweight JSON-Schema subset validator — no Ajv
+    bundle risk per R10), `actorWorkflowOptions.ts` (ZEROX_ACTOR_RUNTIME
+    full|v0|legacy + ZEROX_WORKFLOW_RUNTIME on|off).
+  - New `src/main/workflow/`: `workflowRuntime.ts` (WorkflowRuntime +
+    WorkflowSandbox host hooks agent/webfetch/websearch/parallel/pipeline;
+    WORKFLOW_PARALLEL_MAX=8, AggregateError, failFast, deadline), `deepResearchWorkflow.ts`
+    (plan→search→extract→group→3-voter verify REJECT_QUORUM=2→report, 15 source/
+    25 fact caps), `registerWorkflowAsSkill.ts` (P7 placeholder, throws
+    not-implemented per spec O7).
+    - Deviation note (spec R1): QuickJS (`quickjs-emscripten`) WASM carries
+      Electron-packaging cost; the spec permits a fallback. This runs registered
+      workflow functions (not arbitrary eval) with a frozen host-hook surface —
+      the orchestration value P7 needs. A QuickJS-backed sandbox can replace the
+      executor behind the same WorkflowSandbox interface.
+  - `src/shared/agentTrajectory.ts` — added actor_message_* + workflow_* event
+    types (32 → 41).
+  - `src/shared/runGraph.ts` — added `actor`/`workflow` node kinds +
+    `spawned_by` edge + additive projection branches (existing 11 kinds / 29
+    trajectory projections untouched; runGraph.test + parity test stay green).
+  - `container.ts` — `workflowRuntime()` accessor (deep-research registered
+    eagerly; host hooks delegate to actor runtime).
+- Verification evidence:
+  - `npx tsc -p tsconfig.electron.json --noEmit` -> passed.
+  - `npm test` -> 147 files / 878 tests passed (was 146/861; +17: actor full
+    send/background/outputSchema/contextMode-state, inbox, outputSchema,
+    workflow parallel/pipeline/deep-research, runGraph actor/workflow additive,
+    flags, placeholder).
+  - `npm run verify` -> build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run harness:check` -> passed.
+- Open follow-ups (non-blocking downstream; tool/registry activation cutover):
+  - Register `actor`/`workflow` tools on `DynamicToolRegistry` + extend
+    `AgentToolName` (operation run/spawn/status/wait/cancel/send; run/list).
+  - Wire workflow host hooks webfetch/websearch to the real tool handlers.
+  - Emit actor_message_*/workflow_* trajectory events from the runtime.
+  - QuickJS-backed WorkflowSandbox (replace Node executor behind same interface).
+
 ## 2026-06-19 P5 Checkpoint-writer fork agent (ActorRuntime v0)
 
 - Request:

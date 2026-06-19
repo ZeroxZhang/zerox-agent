@@ -14,7 +14,9 @@ export type RunGraphNodeKind =
   | "acceptance_check"
   | "checkpoint"
   | "artifact"
-  | "summary";
+  | "summary"
+  | "actor" // P6 (Patch 21)
+  | "workflow"; // P6 (Patch 21)
 
 export type RunGraphNodeStatus =
   | "planned"
@@ -63,7 +65,8 @@ export type RunGraphEdgeRelation =
   | "depends_on"
   | "produced"
   | "checked_by"
-  | "blocked_by";
+  | "blocked_by"
+  | "spawned_by"; // P6 (Patch 21): actor → parent actor / run
 
 export type RunGraphEdge = {
   id: string;
@@ -412,6 +415,68 @@ export function projectRunGraph(input: ProjectRunGraphInput): RunGraphView {
         order: trajectoryOrder(event),
       });
       addEdge(edges, runNodeId, nodeId, "contains");
+    }
+
+    // P6 (Patch 21): actor + workflow node projection (pure additive — does not
+    // touch the existing 11 node-producing branches above).
+    if (event.type === "actor_spawned") {
+      const actorId = readString(event.payload.actorId);
+      if (actorId) {
+        const nodeId = `actor:${actorId}`;
+        const task = readString(event.payload.task);
+        addNode(nodes, {
+          id: nodeId,
+          kind: "actor",
+          status: "running",
+          title: task ? `Actor: ${task.slice(0, 60)}` : "Actor",
+          sourceRefs: [ref],
+          order: trajectoryOrder(event),
+        });
+        addEdge(edges, runNodeId, nodeId, "spawned_by");
+      }
+    }
+    if (event.type === "actor_done") {
+      const actorId = readString(event.payload.actorId);
+      if (actorId) {
+        const nodeId = `actor:${actorId}`;
+        const existing = nodes.get(nodeId);
+        if (existing) {
+          const status = readString(event.payload.status);
+          const summary = readString(event.payload.summary);
+          nodes.set(nodeId, {
+            ...existing,
+            status: status === "done" ? "succeeded" : status === "error" ? "failed" : "canceled",
+            result: { status: status === "done" ? "succeeded" : status === "error" ? "failed" : "canceled", ...(summary ? { summary } : {}), evidenceRefs: [ref] },
+          });
+        }
+      }
+    }
+    if (event.type === "workflow_started") {
+      const wfId = readString(event.payload.name);
+      if (wfId) {
+        const nodeId = `workflow:${event.id}`;
+        addNode(nodes, {
+          id: nodeId,
+          kind: "workflow",
+          status: "running",
+          title: `Workflow: ${wfId}`,
+          sourceRefs: [ref],
+          order: trajectoryOrder(event),
+        });
+        addEdge(edges, runNodeId, nodeId, "contains");
+      }
+    }
+    if (event.type === "workflow_completed") {
+      const status = readString(event.payload.status);
+      const nodeId = `workflow:${event.id}`;
+      const existing = nodes.get(nodeId);
+      if (existing) {
+        nodes.set(nodeId, {
+          ...existing,
+          status: status === "done" ? "succeeded" : "failed",
+          result: { status: status === "done" ? "succeeded" : "failed", evidenceRefs: [ref] },
+        });
+      }
     }
   }
 

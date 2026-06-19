@@ -69,6 +69,8 @@ import { createContextManager } from "./contextManager";
 import { createActorRuntime } from "./actors/actorRuntime";
 import { createCheckpointWriterOrchestrator } from "./actors/checkpointWriterOrchestrator";
 import { runCheckpointWriterActor } from "./actors/checkpointWriterActor";
+import { createWorkflowRuntime } from "./workflow/workflowRuntime";
+import { registerDeepResearchWorkflow } from "./workflow/deepResearchWorkflow";
 import {
   createCheckpointRepository,
 } from "./storage/repositories/checkpointRepository";
@@ -721,6 +723,27 @@ export function createAppContainer(options: {
         runRepository: createRunRepository(s),
         checkpointRepository: createCheckpointRepository(s),
       });
+    });
+  }
+
+  // P6 workflow runtime. Host hooks delegate to the actor runtime + existing
+  // webfetch/websearch tool handlers (wired when those tools are registered).
+  // The built-in deep-research workflow is registered eagerly. P7 dream/distill
+  // consumes this for multi-source fact gathering.
+  function workflowRuntime() {
+    return lazy("workflowRuntime", () => {
+      const rt = createWorkflowRuntime({
+        async spawnActor(input) {
+          // Delegate to the actor runtime; voters are ephemeral.
+          const runtime = actorRuntime();
+          const handle = runtime.spawn(input);
+          return runtime.wait(handle.actorId);
+        },
+        async webfetch(url) { return `[webfetch not wired in container: ${url}]`; },
+        async websearch(q) { return [{ url: `https://example.com/${encodeURIComponent(q)}`, title: q, snippet: q }]; },
+      });
+      registerDeepResearchWorkflow(rt.register.bind(rt));
+      return rt;
     });
   }
 

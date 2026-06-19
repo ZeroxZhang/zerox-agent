@@ -17,6 +17,8 @@ import type {
   Storage,
 } from "../../shared/storageContract";
 import { createActorRepository } from "../storage/repositories/sessionRepository";
+import { ActorInbox } from "./actorInbox";
+import { validateOutputSchema } from "./actorOutputSchema";
 import type { CachePrefix } from "../providers/provider";
 
 export type ActorContextMode = "none" | "state" | "full";
@@ -28,13 +30,16 @@ export interface ForkContext {
 }
 
 export interface SpawnInput {
-  contextMode: ActorContextMode; // v0: "full" only
+  contextMode: ActorContextMode; // v0: "full" only; full: "none"|"state"|"full"
   toolWhitelist?: "inherit" | string[];
   lifecycle: "persistent" | "ephemeral";
   model?: string;
   task: string; // user-message instruction appended after the cached prefix (Patch 17)
   parentRunId?: string;
   forkContext?: ForkContext; // required for contextMode:"full"
+  background?: boolean; // P6: return handle immediately, parent doesn't wait
+  outputSchema?: Record<string, unknown>; // P6: JsonSchema subset for outcome value validation
+  parentActorId?: string; // P6: peer-mode sender (for inbox lineage)
 }
 
 export interface ActorOutcome {
@@ -44,6 +49,7 @@ export interface ActorOutcome {
   findingsWorthPromoting?: string[];
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
+  value?: unknown; // P6: validated against outputSchema
 }
 
 export interface ActorHandle {
@@ -67,18 +73,27 @@ export interface ActorRuntime {
   wait(actorId: string): Promise<ActorOutcome>;
   cancel(actorId: string, reason?: string): void;
   status(actorId: string): ActorStatus;
+  send?(actorId: string, msg: unknown, fromActorId?: string): void; // P6 full
 }
 
 export function createActorRuntime(
   options: CreateActorRuntimeOptions,
 ): ActorRuntime {
   const repo = options.actorRepository ?? (options.storage ? createActorRepository(options.storage) : null);
-  const actors = new Map<string, { handle: ActorHandle; cancel: AbortController; record: ActorRecord }>();
+  const actors = new Map<string, { handle: ActorHandle; cancel: AbortController; record: ActorRecord; inbox: ActorInbox; input: SpawnInput }>();
+  const now = () => new Date().toISOString();
+
+  function validateOutcome(input: SpawnInput, outcome: ActorOutcome): ActorOutcome {
+    if (input.outputSchema && outcome.status === "done" && outcome.value !== undefined) {
+      const err = validateOutputSchema(outcome.value, input.outputSchema);
+      if (err) return { ...outcome, status: "error", summary: `outputSchema validation failed: ${err}` };
+    }
+    return outcome;
+  }
 
   return {
     spawn(input: SpawnInput): ActorHandle {
       const actorId = randomUUID();
-      const now = new Date().toISOString();
       const cancel = new AbortController();
       const record: Omit<ActorRecord, "id"> & { id: string } = {
         id: actorId,
@@ -87,18 +102,23 @@ export function createActorRuntime(
         status: "spawning",
         ...(input.task ? { task: input.task.slice(0, 200) } : {}),
         payload: { input, forkContext: input.forkContext },
-        createdAt: now,
-        updatedAt: now,
+        createdAt: now(),
+        updatedAt: now(),
       };
       repo?.create(record);
-      // Transition to running immediately (fork actor begins work).
       const running: ActorRecord = { ...record, status: "running" };
       repo?.updateStatus(actorId, "running");
 
       const outcome = options.deps.runActor(input, input.forkContext, cancel.signal)
         .then((result) => {
-          repo?.updateStatus(actorId, result.status);
-          return result;
+          const validated = validateOutcome(input, result);
+          // Drain any undelivered inbox messages on terminal (post-stop re-entry cap).
+          const entry = actors.get(actorId);
+          if (entry && entry.inbox.pending(actorId) > 0) {
+            entry.inbox.markUndelivered(actorId, now);
+          }
+          repo?.updateStatus(actorId, validated.status);
+          return validated;
         })
         .catch((error) => {
           repo?.updateStatus(actorId, "error");
@@ -106,7 +126,7 @@ export function createActorRuntime(
         });
 
       const handle: ActorHandle = { actorId, outcome };
-      actors.set(actorId, { handle, cancel, record: running });
+      actors.set(actorId, { handle, cancel, record: running, inbox: new ActorInbox(), input });
       return handle;
     },
 
@@ -114,6 +134,12 @@ export function createActorRuntime(
       const entry = actors.get(actorId);
       if (!entry) return Promise.reject(new Error(`unknown actor ${actorId}`));
       return entry.handle.outcome;
+    },
+
+    send(actorId: string, msg: unknown, fromActorId?: string): void {
+      const entry = actors.get(actorId);
+      if (!entry) return;
+      entry.inbox.send(fromActorId ?? null, actorId, msg, now);
     },
 
     cancel(actorId: string, reason?: string): void {
