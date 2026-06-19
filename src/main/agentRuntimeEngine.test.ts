@@ -1237,6 +1237,40 @@ describe("agent runtime engine", () => {
       ]),
     );
   });
+
+  it("emits model_response trajectory events carrying provider usage for runGraph cost aggregation (P8)", async () => {
+    const trajectoryEvents: AgentTrajectoryEvent[] = [];
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore([]),
+      trajectoryStore: createMemoryTrajectoryStore(trajectoryEvents),
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: {
+        async complete() {
+          return {
+            content: "done with usage",
+            toolCalls: [],
+            finishReason: "stop",
+            usage: { inputTokens: 42, outputTokens: 7 },
+            cacheReadTokens: 10,
+          };
+        },
+      },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor([]),
+      toolResultOffloadStore: createRecordingOffloadStore(),
+    });
+
+    await engine.startTask("task_123");
+
+    const modelResponseEvents = trajectoryEvents.filter((e) => e.type === "model_response");
+    expect(modelResponseEvents.length).toBeGreaterThan(0);
+    const last = modelResponseEvents[modelResponseEvents.length - 1]!;
+    expect(last.payload.usage).toEqual({ inputTokens: 42, outputTokens: 7 });
+    expect(last.payload.cacheReadTokens).toBe(10);
+  });
 });
 
 function finalResponse(content: string): ChatCompletionResponse {

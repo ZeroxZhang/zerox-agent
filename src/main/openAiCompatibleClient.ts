@@ -42,6 +42,11 @@ export type ChatCompletionResponse = {
   toolCalls: ToolCall[];
   finishReason: string;
   reasoningContent?: string;
+  /** P8: token usage for runGraph cost aggregation (populated when the provider
+   *  returns it; absent for providers that don't report usage). */
+  usage?: { inputTokens: number; outputTokens: number };
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
 };
 
 export type ChatClient = {
@@ -113,6 +118,11 @@ export function createOpenAiCompatibleClient(options?: {
           };
           finish_reason?: string;
         }>;
+        usage?: {
+          prompt_tokens?: number;
+          completion_tokens?: number;
+          prompt_tokens_details?: { cached_tokens?: number };
+        };
         error?: { message?: string };
       };
 
@@ -139,6 +149,18 @@ export function createOpenAiCompatibleClient(options?: {
         toolCalls,
         finishReason: choice?.finish_reason ?? "stop",
         ...(reasoningContent ? { reasoningContent } : {}),
+        // P8: surface provider usage for runGraph cost aggregation.
+        ...(payload.usage
+          ? {
+              usage: {
+                inputTokens: payload.usage.prompt_tokens ?? 0,
+                outputTokens: payload.usage.completion_tokens ?? 0,
+              },
+              ...(payload.usage.prompt_tokens_details?.cached_tokens !== undefined
+                ? { cacheReadTokens: payload.usage.prompt_tokens_details.cached_tokens }
+                : {}),
+            }
+          : {}),
       };
     },
 

@@ -50,6 +50,8 @@ import {
   collectSkillMcpConfigs,
 } from "./skillRegistry";
 import { createMcpClient } from "./mcpClient";
+import { resolveTransportKind } from "./mcpTransport";
+import { createMaxMode } from "./providers/maxMode";
 import { createSkillExecutor } from "./skillExecutor";
 import { createScheduledTaskStore } from "./taskStore";
 import { createTaskSchedulerService } from "./taskSchedulerService";
@@ -847,6 +849,15 @@ export function createAppContainer(options: {
         memoryStore: memoryStore(),
         toolResultOffloadStore: toolResultOffloadStore(),
         compactionStrategy: compactionStrategy(),
+        // P8: max-mode (best-of-N) — opt-in via ZEROX_MAX_MODE. runStep
+        // resolves the provider lazily on first call (getProvider is async).
+        maxMode: {
+          async runStep(req, opts) {
+            const provider = await getProvider();
+            return createMaxMode(provider).runStep(req, opts);
+          },
+        },
+        actorRuntimeForMaxMode: actorRuntime(),
       }),
     );
   }
@@ -1076,6 +1087,21 @@ export function createAppContainer(options: {
 
       for (const config of mcpConfigs) {
         try {
+          // P8: resolve the MCP transport kind (default stdio for backward
+          // compat). http/sse configs are recognized here; the stdio path uses
+          // the existing mcpClient. (http/sse client wiring is a follow-up —
+          // the McpTransport factory + interface are in place.)
+          const transportKind = resolveTransportKind(
+            (config as { transport?: string }).transport,
+          );
+          if (transportKind !== "stdio") {
+            // eslint-disable-next-line no-console
+            console.warn(
+              `[mcp] server "${config.name}" uses transport "${transportKind}"; ` +
+                `http/sse client wiring is a staged follow-up (transport factory ready). Skipping for now.`,
+            );
+            continue;
+          }
           const client = createMcpClient({
             name: config.name,
             transport: "stdio",
