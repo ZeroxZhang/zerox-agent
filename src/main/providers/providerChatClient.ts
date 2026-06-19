@@ -77,3 +77,72 @@ export function createProviderChatClient(
 // Re-export normalize helpers for consumers that build CompleteRequest directly.
 export { toNormalized, fromNormalized, toCompleteRequest };
 export type { CompleteRequest };
+
+// ---------------------------------------------------------------------------
+// Settings-backed chat client (P3 activation).
+//
+// Routes each request through the provider for the current model settings:
+// `openai-compatible` (default) → the raw fallback client (byte-identical to
+// the legacy single-path behavior — zero regression); `anthropic`/`gemini` → a
+// native provider via the factory. This is the single swap the 8 container
+// `createOpenAiCompatibleClient()` points use to "turn on" multi-provider
+// routing without touching the synchronous construction or the loop's ChatClient
+// dependency shape.
+// ---------------------------------------------------------------------------
+
+import type { PublicModelSettings } from "../../shared/modelSettings";
+import { createProvider } from "./providerFactory";
+
+export interface SettingsBackedChatClientOptions {
+  loadSettings: () => Promise<PublicModelSettings>;
+  getApiKey: () => Promise<string | null>;
+  /** Raw OpenAI-compatible client used for providerId "openai-compatible" (default). */
+  fallback: ChatClient & StreamingChatClient;
+  fetch?: typeof fetch;
+}
+
+export function createSettingsBackedChatClient(
+  options: SettingsBackedChatClientOptions,
+): ChatClient & StreamingChatClient {
+  // Cache the provider-wrapped client keyed by (providerId, apiKey, chatModel, baseUrl)
+  // so we don't reconstruct a provider on every turn. The raw fallback is used
+  // directly for openai-compatible (the common case) — no wrapping overhead.
+  let cacheKey: string | null = null;
+  let cachedWrapped: ChatClient & StreamingChatClient | null = null;
+
+  async function resolveClient(): Promise<ChatClient & StreamingChatClient> {
+    const settings = await options.loadSettings();
+    const apiKey = (await options.getApiKey()) ?? "";
+    const providerId = settings.providerId ?? "openai-compatible";
+    if (providerId === "openai-compatible") {
+      return options.fallback;
+    }
+    const key = `${providerId}|${apiKey}|${settings.chatModel}|${settings.baseUrl}`;
+    if (key === cacheKey && cachedWrapped) return cachedWrapped;
+    const provider = createProvider(
+      {
+        providerId,
+        apiKey,
+        chatModel: settings.chatModel,
+        baseUrl: settings.baseUrl,
+        thinkingEnabled: settings.thinkingEnabled,
+        thinkingBudgetTokens: settings.thinkingBudgetTokens,
+      },
+      options.fetch ? { fetch: options.fetch } : {},
+    );
+    cachedWrapped = createProviderChatClient({ provider, fallback: options.fallback });
+    cacheKey = key;
+    return cachedWrapped;
+  }
+
+  return {
+    async complete(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
+      const client = await resolveClient();
+      return client.complete(request);
+    },
+    async *streamComplete(request: ChatCompletionRequest): AsyncIterable<LowLevelStreamEvent> {
+      const client = await resolveClient();
+      yield* client.streamComplete(request);
+    },
+  };
+}

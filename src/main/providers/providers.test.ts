@@ -2,10 +2,11 @@ import { describe, expect, it } from "vitest";
 import { toNormalized, fromNormalized } from "./normalize";
 import { buildCachePrefix, serializeCachePrefix } from "./cachePrefix";
 import { createProvider } from "./providerFactory";
-import { createProviderChatClient } from "./providerChatClient";
-import { createOpenAICompatibleProvider } from "./openAiCompatibleProvider";
-import type { ChatMessage } from "../openAiCompatibleClient";
+import { createProviderChatClient, createSettingsBackedChatClient } from "./providerChatClient";
+import { createOpenAICompatibleProvider } from "./openAICompatibleProvider";
+import type { ChatMessage, ChatCompletionRequest } from "../openAiCompatibleClient";
 import type { CompleteRequest, NormalizedMessage } from "./provider";
+import type { PublicModelSettings } from "../../shared/modelSettings";
 
 describe("normalize round-trip", () => {
   it("preserves system / user / assistant-with-tools / tool messages", () => {
@@ -172,5 +173,49 @@ describe("OpenAICompatibleProvider", () => {
     const provider = createOpenAICompatibleProvider({ fetch: mockFetch({}) as never });
     const n = await provider.countTokens([{ role: "user", content: [{ type: "text", text: "hello" }] }]);
     expect(n).toBeGreaterThan(0);
+  });
+});
+
+describe("createSettingsBackedChatClient (P3 activation)", () => {
+  function mockFetch(response: unknown, status = 200): typeof fetch {
+    return (async () => ({
+      ok: status >= 200 && status < 300, status,
+      text: async () => (typeof response === "string" ? response : JSON.stringify(response)),
+      json: async () => response, body: null,
+    })) as unknown as typeof fetch;
+  }
+  const baseSettings: PublicModelSettings = {
+    baseUrl: "https://api.openai.com/v1", chatModel: "gpt-4", embeddingModel: "",
+    temperature: 0.2, maxTokens: 8192, thinkingEnabled: false, thinkingBudgetTokens: 8192,
+    hasApiKey: true, updatedAt: null,
+  };
+  const req: ChatCompletionRequest = { baseUrl: "", apiKey: "k", model: "m", temperature: 0, maxTokens: 10, messages: [{ role: "user", content: "hi" }] };
+
+  it("uses the raw fallback for providerId openai-compatible (zero regression)", async () => {
+    let fallbackCalled = false;
+    const fallback = {
+      async complete() { fallbackCalled = true; return { content: "fallback", toolCalls: [], finishReason: "stop" }; },
+      async *streamComplete() { yield { type: "done" as const, finishReason: "stop" }; },
+    };
+    const client = createSettingsBackedChatClient({
+      loadSettings: async () => baseSettings,
+      getApiKey: async () => "k",
+      fallback: fallback as never,
+    });
+    const res = await client.complete(req);
+    expect(res.content).toBe("fallback");
+    expect(fallbackCalled).toBe(true);
+  });
+
+  it("routes to a native anthropic provider when providerId=anthropic", async () => {
+    const fallback = { async complete() { return { content: "FALLBACK_SHOULD_NOT_BE_USED", toolCalls: [], finishReason: "stop" }; }, async *streamComplete() { yield { type: "done" as const, finishReason: "stop" }; } };
+    const client = createSettingsBackedChatClient({
+      loadSettings: async () => ({ ...baseSettings, providerId: "anthropic", chatModel: "claude-3-5-sonnet", baseUrl: "https://api.anthropic.com" }),
+      getApiKey: async () => "k",
+      fallback: fallback as never,
+      fetch: mockFetch({ content: [{ type: "text", text: "from anthropic" }], stop_reason: "end_turn", usage: { input_tokens: 1, output_tokens: 1 } }),
+    });
+    const res = await client.complete({ ...req, model: "claude-3-5-sonnet" });
+    expect(res.content).toBe("from anthropic");
   });
 });

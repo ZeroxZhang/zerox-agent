@@ -58,6 +58,7 @@ import { KernelEventBus } from "./kernel/eventBus";
 import { createStorageImpl } from "./storage/storageDb";
 import { resolveStorageBackend } from "./storage/backendResolver";
 import { createProvider } from "./providers/providerFactory";
+import { createSettingsBackedChatClient } from "./providers/providerChatClient";
 import { analyzeShell } from "./tools/shell/shellAnalyzer";
 import { createToolWorker } from "./tools/toolWorker";
 import { getToolWorkerOptions } from "./tools/toolWorkerOptions";
@@ -420,7 +421,7 @@ export function createAppContainer(options: {
     return lazy("modelConnectionService", () =>
       createModelConnectionService({
         modelSettingsStore,
-        chatClient: createOpenAiCompatibleClient(),
+        chatClient: chatClient(),
       }),
     );
   }
@@ -623,6 +624,18 @@ export function createAppContainer(options: {
   // (checkpoint-writer fork agent) and P8 (streaming/max-mode) consume this.
   // Existing ChatClient consumers are unchanged (gradual migration via the
   // ProviderChatClient adapter — zero regression).
+  function chatClient() {
+    // Settings-backed: openai-compatible (default) routes to the raw client
+    // (byte-identical to legacy); anthropic/gemini route to a native provider.
+    return lazy("chatClient", () =>
+      createSettingsBackedChatClient({
+        loadSettings: () => modelSettingsStore.load(),
+        getApiKey: () => modelSettingsStore.getApiKey(),
+        fallback: createOpenAiCompatibleClient(),
+      }),
+    );
+  }
+
   function getProvider() {
     return lazy("llmProvider", async () => {
       const settings = await modelSettingsStore.load();
@@ -771,7 +784,7 @@ export function createAppContainer(options: {
             result.skills.find((skill) => skill.manifest.name === skillName) ?? null
           );
         },
-        chatClient: createOpenAiCompatibleClient(),
+        chatClient: chatClient(),
         getModelProfile,
         toolAuthorizationService: toolAuthorizationService(),
         toolExecutor: createToolExecutor(),
@@ -798,7 +811,7 @@ export function createAppContainer(options: {
         goalStore: agentGoalStore(),
         runtimeEngine: createGoalRuntimeEngine({
           workspaceService: agentWorkspaceService(),
-          chatClient: createOpenAiCompatibleClient(),
+          chatClient: chatClient(),
           getModelProfile,
           toolExecutor,
           toolAuthorizationService: toolAuthorizationService(),
@@ -827,7 +840,7 @@ export function createAppContainer(options: {
         planner: {
           async replan(goal, reason) {
             return createAgentGoalPlanner({
-              chatClient: createOpenAiCompatibleClient(),
+              chatClient: chatClient(),
               modelProfile: await getModelProfile(),
             }).replan(goal, reason);
           },
@@ -879,7 +892,7 @@ export function createAppContainer(options: {
             trajectoryStore: agentTrajectoryStore(),
             ...(modelProfile
               ? {
-                  chatClient: createOpenAiCompatibleClient(),
+                  chatClient: chatClient(),
                   modelProfile,
                 }
               : {}),
@@ -942,7 +955,7 @@ export function createAppContainer(options: {
               ...getAvailableToolNames(),
             ]);
             return createAgentGoalPlanner({
-              chatClient: createOpenAiCompatibleClient(),
+              chatClient: chatClient(),
               modelProfile: await getModelProfile(),
             }).plan(description, {
               ...planOptions,
@@ -951,7 +964,7 @@ export function createAppContainer(options: {
           },
           async replan(goal, reason) {
             return createAgentGoalPlanner({
-              chatClient: createOpenAiCompatibleClient(),
+              chatClient: chatClient(),
               modelProfile: await getModelProfile(),
             }).replan(goal, reason);
           },
@@ -976,7 +989,7 @@ export function createAppContainer(options: {
   function chatService() {
     return lazy("chatService", () =>
       createChatService({
-        chatClient: createOpenAiCompatibleClient(),
+        chatClient: chatClient(),
         getModelProfile,
         memoryStore: memoryStore(),
         memoryProfileStore: memoryProfileStore(),
