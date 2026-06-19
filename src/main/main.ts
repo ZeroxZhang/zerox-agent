@@ -310,6 +310,9 @@ app.whenReady().then(() => {
     createTray();
     startTaskScheduler();
     startMemoryMaintenanceScheduler();
+    // P7: start the self-improvement scheduler (dream + distill). Default OFF
+    // (ZEROX_SELF_IMPROVEMENT=off); a no-op start() when disabled.
+    container.selfImprovementService()?.start();
   }
 
   app.on("activate", () => {

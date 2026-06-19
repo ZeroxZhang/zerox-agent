@@ -78,8 +78,10 @@ import { registerWorkflowTool } from "./workflow/workflowTool";
 import {
   createCheckpointRepository,
 } from "./storage/repositories/checkpointRepository";
-import { createRunRepository } from "./storage/repositories/runRepository";
+import { createRunRepository, createTrajectoryRepository } from "./storage/repositories/runRepository";
 import { createMemoryRepository } from "./storage/repositories/memoryRepository";
+import { createSessionRepository } from "./storage/repositories/sessionRepository";
+import { createSelfImprovementService } from "./actors/selfImprovementService";
 import type { Storage } from "../shared/storageContract";
 import {
   createToolAuthorizationService,
@@ -784,6 +786,32 @@ export function createAppContainer(options: {
     });
   }
 
+  // P7: self-improvement scheduler (dream + distill). Default OFF
+  // (ZEROX_SELF_IMPROVEMENT=off) — background LLM cost; users opt in. Wired
+  // alongside the memory-maintenance timer; runNow() supports /dream /distill.
+  function sessionRepository() {
+    return lazy("sessionRepository", () => {
+      const s = storage();
+      return s ? createSessionRepository(s) : null;
+    });
+  }
+
+  function selfImprovementService() {
+    return lazy("selfImprovementService", () => {
+      const s = storage();
+      if (!s) return null;
+      return createSelfImprovementService({
+        storage: s,
+        memoryRepository: createMemoryRepository(s),
+        runRepository: createRunRepository(s),
+        trajectoryRepository: createTrajectoryRepository(s),
+        sessionRepository: createSessionRepository(s),
+        workflowRuntime: workflowRuntime(),
+        skillsDir,
+      });
+    });
+  }
+
   function agentBootstrapService() {
     return lazy("agentBootstrapService", () =>
       createAgentBootstrapService({
@@ -1434,6 +1462,7 @@ export function createAppContainer(options: {
     readToolResultRef,
     runMemoryEvals,
     runAgentQualityEvals,
+    selfImprovementService,
     onGoalProgressEvent,
   };
 }
