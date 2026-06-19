@@ -1,5 +1,46 @@
 # Zerox Harness Progress
 
+## 2026-06-19 P7 Dream / Distill self-improvement loop
+
+- Request:
+  - Continue the 2.4.0 iteration. P7 = dream (LLM/history-driven distillation of
+    persistent project knowledge + stale pruning) + distill (cluster repeated
+    workflows → package as skills via registerWorkflowAsSkill). Terminal phase
+    (no downstream consumer except P8, which is independent).
+- Implementation:
+  - `src/shared/memory.ts` — added `MemorySource` dream/distill variants (Patch 23)
+    + broadened `archiveReason` to `MemoryArchiveReason` union (Patch 22).
+  - `src/shared/agentTrajectory.ts` — added dream_*/distill_* event types (41 → 48).
+  - `src/shared/runGraph.ts` — added `dream`/`distill` node kinds + additive
+    projection (Patch 25; existing kinds/projections untouched).
+  - `src/main/storage/repositories/memoryRepository.ts` — dream/distill-sourced
+    memories auto-assigned `scope:"project"` (others global).
+  - New `src/main/actors/dreamService.ts` — `runDream`: background state actor
+    (P6 ActorRuntime) read-only scans trajectory/sessions/memories → rule-based
+    distill (recurring tool bigrams, failure patterns, stale detection) →
+    auto-writes high-confidence findings (≥0.7) as project memories
+    (source:{type:"dream"}) + prunes superseded/stale; low-confidence →
+    learning_candidates queue (layered coexistence per spec).
+  - New `src/main/actors/distillService.ts` — `runDistill`: clusters repeated
+    3-tool sequences across runs → packages high-confidence clusters (≥0.7) as
+    skills via registerWorkflowAsSkill; low-confidence → queue.
+  - `src/main/workflow/registerWorkflowAsSkill.ts` — implemented (fills P6
+    placeholder): path-guarded SKILL.md write to skillsDir (slug validation +
+    traversal rejection + containment check) + dynamic workflow catalog entry.
+  - Tests: dream auto-write+prune, low-confidence queue, ruleBasedDistill bigrams;
+    distill cluster+package; registerWorkflowAsSkill write+path-guard; runGraph
+    dream/distill additive projection.
+- Verification evidence:
+  - `npx tsc -p tsconfig.electron.json --noEmit` -> passed.
+  - `npm test` -> 148 files / 886 tests passed (was 147/878; +8).
+  - `npm run verify` -> build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run harness:check` -> passed.
+- Open follow-ups (non-blocking; activation cutover):
+  - Wire `runDream`/`runDistill` to the task scheduler (scheduled self-improvement)
+    + `/dream` `/distill` commands.
+  - Emit dream_*/distill_* trajectory events from the services.
+  - LLM-backed `distill` override (rule-based is the reliable default).
+
 ## 2026-06-19 P6 Actor model full + Workflow runtime
 
 - Request:

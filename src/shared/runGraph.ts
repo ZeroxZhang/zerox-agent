@@ -16,7 +16,9 @@ export type RunGraphNodeKind =
   | "artifact"
   | "summary"
   | "actor" // P6 (Patch 21)
-  | "workflow"; // P6 (Patch 21)
+  | "workflow" // P6 (Patch 21)
+  | "dream" // P7 (Patch 25)
+  | "distill"; // P7 (Patch 25)
 
 export type RunGraphNodeStatus =
   | "planned"
@@ -476,6 +478,38 @@ export function projectRunGraph(input: ProjectRunGraphInput): RunGraphView {
           status: status === "done" ? "succeeded" : "failed",
           result: { status: status === "done" ? "succeeded" : "failed", evidenceRefs: [ref] },
         });
+      }
+    }
+
+    // P7 (Patch 25): dream + distill node projection (pure additive).
+    if (event.type === "dream_started") {
+      const nodeId = `dream:${event.id}`;
+      addNode(nodes, {
+        id: nodeId, kind: "dream", status: "running",
+        title: "Dream (history distillation)", sourceRefs: [ref], order: trajectoryOrder(event),
+      });
+      addEdge(edges, runNodeId, nodeId, "spawned_by");
+    }
+    if (event.type === "dream_completed") {
+      const nodeId = `dream:${event.id}`;
+      const existing = nodes.get(nodeId);
+      if (existing) {
+        nodes.set(nodeId, { ...existing, status: "succeeded", result: { status: "succeeded", evidenceRefs: [ref] } });
+      }
+    }
+    if (event.type === "distill_started") {
+      const nodeId = `distill:${event.id}`;
+      addNode(nodes, {
+        id: nodeId, kind: "distill", status: "running",
+        title: "Distill (workflow → skill)", sourceRefs: [ref], order: trajectoryOrder(event),
+      });
+      addEdge(edges, runNodeId, nodeId, "spawned_by");
+    }
+    if (event.type === "distill_completed") {
+      const nodeId = `distill:${event.id}`;
+      const existing = nodes.get(nodeId);
+      if (existing) {
+        nodes.set(nodeId, { ...existing, status: "succeeded", result: { status: "succeeded", evidenceRefs: [ref] } });
       }
     }
   }

@@ -163,12 +163,12 @@ describe("WorkflowRuntime", () => {
   it("REJECT_QUORUM is 2", () => { expect(REJECT_QUORUM).toBe(2); });
 });
 
-describe("registerWorkflowAsSkill placeholder", () => {
-  it("throws not-implemented (P7 lands it)", () => {
+describe("registerWorkflowAsSkill", () => {
+  it("rejects invalid slugs (P7 path-guard)", async () => {
     const rt = createWorkflowRuntime(mockHooks());
-    expect(() => registerWorkflowAsSkill(rt, "deep-research", {
-      name: "x", displayName: "X", description: "d", mode: "agent", permissions: {}, sourceRunIds: [],
-    })).toThrow("not implemented in P6");
+    await expect(registerWorkflowAsSkill(rt, "deep-research", {
+      name: "Bad Slug!", displayName: "X", description: "d", mode: "agent", permissions: {}, sourceRunIds: [],
+    })).rejects.toThrow("invalid skill name");
   });
 });
 

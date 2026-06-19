@@ -25,10 +25,12 @@ import { searchMemoryRecords } from "../../../shared/memory";
 import { getPayloadRow, jsonify, parseJson, selectPayloadRows } from "../repositoryUtils";
 
 function recordToRow(record: MemoryRecord) {
+  // P7: dream/distill-sourced memories are project-scoped; others global.
+  const scope: MemoryScope = record.source.type === "dream" || record.source.type === "distill" ? "project" : "global";
   return {
     id: record.id,
     kind: record.kind,
-    scope: "global" as MemoryScope, // P1 stores all as global; P7 dream writes "project"
+    scope,
     title: record.title,
     content: record.content,
     tags: JSON.stringify(record.tags ?? []),
