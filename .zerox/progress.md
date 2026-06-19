@@ -3241,3 +3241,24 @@
   memory eval 2/2; harness:check green.
 - Test growth across the iteration: 135 files / 767 tests → 151 files / 911
   tests (+16 files, +144 tests; zero regression).
+
+## 2026-06-20 Wave 5 implementation consistency review (D)
+
+- Reviewed all 8 implemented phases against contracts v1.4: **PASS, no drift**.
+- Every frozen interface signature matches its implementation (audited §1–§10:
+  Storage migrate/backup/close + 17 repos; LLMProvider complete/stream/
+  countTokens/buildCachePrefix; analyzeShell→ShellPlan + ToolWorker.execute;
+  CompactionStrategy shouldCompact/compact; ActorRuntime spawn/send/wait/cancel/
+  status + ForkContext; WorkflowRuntime run/register + parallel/pipeline;
+  MemoryRepository archive(reason?); McpTransport start/send/onNotification/
+  close; MaxMode runStep).
+- §11 consumption table realized in code: each implemented contract is imported
+  by its declared downstream phases (Storage↔P2/P5/P6/P7; Provider↔P5/P6/P8;
+  ShellPlan/ToolWorker↔P5/P6; WorkflowRuntime↔P7; ActorRuntime↔P7/P8).
+- All 26 §12 patches realized in code.
+- Additive invariants hold: trajectory events 29→48, runGraph node kinds 11→17;
+  existing 11 node-producing projections + runGraph parity test unchanged.
+- 5 non-blocking deviations documented (tree-sitter→tokenizer, QuickJS→Node
+  executor, MCP http/sse client staged, flag-gated runtime activation, 15-store
+  cutover follow-up) — all spec-permitted fallbacks / staged cutovers.
+- Full review: iteration-roadmap/CONSISTENCY-REVIEW-IMPL.md (local, gitignored).
