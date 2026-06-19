@@ -8,7 +8,7 @@ type PackageJson = {
 };
 
 describe("package scripts", () => {
-  it("sets release metadata to v2.3.6", () => {
+  it("sets release metadata to v2.4.0", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -16,12 +16,12 @@ describe("package scripts", () => {
       readFileSync(path.join(process.cwd(), "package-lock.json"), "utf8"),
     ) as { version?: string; packages?: Record<string, { version?: string }> };
 
-    expect(packageJson.version).toBe("2.3.6");
-    expect(packageLock.version).toBe("2.3.6");
-    expect(packageLock.packages?.[""]?.version).toBe("2.3.6");
+    expect(packageJson.version).toBe("2.4.0");
+    expect(packageLock.version).toBe("2.4.0");
+    expect(packageLock.packages?.[""]?.version).toBe("2.4.0");
   });
 
-  it("marks the v2.3.6 release metadata and distribution handoff done", () => {
+  it("marks the v2.4.0 iteration activation and release done", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -35,35 +35,28 @@ describe("package scripts", () => {
       }>;
     };
 
-    expect(packageJson.version).toBe("2.3.6");
+    expect(packageJson.version).toBe("2.4.0");
     expect(featureList.features).toContainEqual(
       expect.objectContaining({
-        id: "P11.6-command-line-and-packaged-acceptance-gate",
+        id: "P12-2.4.0-iteration-activation-and-release",
         status: "done",
         definitionOfDone: expect.arrayContaining([
-          expect.stringContaining("computer-use subagent"),
-        ]),
-      }),
-    );
-    expect(featureList.features).toContainEqual(
-      expect.objectContaining({
-        id: "P11.7-v2.3.6-release-metadata-and-distribution",
-        status: "done",
-        definitionOfDone: expect.arrayContaining([
-          expect.stringContaining("GitHub Release v2.3.6"),
+          expect.stringContaining("iteration-roadmap P1-P8 activated"),
+          expect.stringContaining("package version bumped to 2.4.0"),
         ]),
       }),
     );
     expect(featureList.features).not.toContainEqual(
       expect.objectContaining({
-        id: "P11.6-command-line-and-packaged-acceptance-gate",
+        id: "P12-2.4.0-iteration-activation-and-release",
         status: "in_progress",
       }),
     );
-    expect(featureList.features).not.toContainEqual(
+    // Prior release gate stays done (no regression).
+    expect(featureList.features).toContainEqual(
       expect.objectContaining({
         id: "P11.7-v2.3.6-release-metadata-and-distribution",
-        status: "in_progress",
+        status: "done",
       }),
     );
   });

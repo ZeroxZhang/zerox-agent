@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-06-18T14:04:30.000Z",
+  "updatedAt": "2026-06-20T00:00:00.000Z",
   "features": [
     {
       "id": "P0-repo-local-harness",
@@ -1253,6 +1253,16 @@
         "npm run dist:mac",
         "git diff --check",
         "gh release view v2.3.6"
+      ]
+    },
+    {
+      "id": "P12-2.4.0-iteration-activation-and-release",
+      "status": "done",
+      "definitionOfDone": [
+        "iteration-roadmap P1-P8 activated in the runtime (provider routing, compaction rebuild, shell plan, checkpoint writer, actor/workflow tools, dream/distill scheduler, streaming usage + max-mode, MCP transport)",
+        "npm run verify green (151 files / 911 tests, agent eval 26/26, memory eval 2/2)",
+        "npm run harness:check green",
+        "package version bumped to 2.4.0; GitHub Release v2.4.0"
       ]
     }
   ]
