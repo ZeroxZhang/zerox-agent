@@ -61,6 +61,15 @@ import { createProvider } from "./providers/providerFactory";
 import { analyzeShell } from "./tools/shell/shellAnalyzer";
 import { createToolWorker } from "./tools/toolWorker";
 import { getToolWorkerOptions } from "./tools/toolWorkerOptions";
+import {
+  resolveCompactionFlag,
+  selectCompactionStrategy,
+} from "./kernel/compactionStrategy";
+import { createContextManager } from "./contextManager";
+import {
+  createCheckpointRepository,
+} from "./storage/repositories/checkpointRepository";
+import { createMemoryRepository } from "./storage/repositories/memoryRepository";
 import type { Storage } from "../shared/storageContract";
 import {
   createToolAuthorizationService,
@@ -638,6 +647,35 @@ export function createAppContainer(options: {
       // harmless until P5/P6 register side-effect handlers. The flag still
       // allows opting into subprocess for consumers that provide an entry.
       return createToolWorker({ mode: opts.worker === "subprocess" ? "inproc" : "inproc" });
+    });
+  }
+
+  // P2 context rebuild. Repositories + compaction strategy selector are exposed
+  // for the runtime loops to consume (activation cutover lands with P5, when
+  // markdown checkpoints exist; default `auto` degrades to summarize = current
+  // behavior, so wiring is zero-regression).
+  function checkpointRepository() {
+    return lazy("checkpointRepository", () => {
+      const s = storage();
+      return s ? createCheckpointRepository(s) : null;
+    });
+  }
+
+  function memoryRepository() {
+    return lazy("memoryRepository", () => {
+      const s = storage();
+      return s ? createMemoryRepository(s) : null;
+    });
+  }
+
+  function compactionStrategy() {
+    return lazy("compactionStrategy", () => {
+      const flag = resolveCompactionFlag();
+      return selectCompactionStrategy(flag, {
+        contextManager: createContextManager(),
+        ...(checkpointRepository() ? { checkpointRepository: checkpointRepository()! } : {}),
+        ...(memoryRepository() ? { memoryRepository: memoryRepository()! } : {}),
+      });
     });
   }
 

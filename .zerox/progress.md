@@ -1,5 +1,45 @@
 # Zerox Harness Progress
 
+## 2026-06-19 P2 Context rebuild (CompactionStrategy + RebuildFromCheckpoint)
+
+- Request:
+  - Continue the 2.4.0 iteration. P2 = context rebuild (contracts v1.4 §4):
+    overflow-priority rebuild from a structured markdown checkpoint + project
+    memories, replacing lossy-only summarization. Unblocks P5 (delivers the
+    read-side consumption contract: RebuildFromCheckpoint + markdown-v1 format).
+- Implementation:
+  - New `src/shared/compactionMarkers.ts` — single source for
+    `NEVER_COMPACT_MARKER`/`REBUILD_BOUNDARY_MARKER`/`CONTEXT_BUDGET_RATIO`
+    (collapses the three duplicate marker literals).
+  - New `src/main/kernel/compactionStrategy.ts` — `CompactionStrategy`/
+    `CompactionContext`/`CompactionResult` + `SummarizeCompaction` (byte-
+    equivalent wrapper over `contextManager.compressMessages` — the eval
+    non-regression guarantee) + `RebuildFromCheckpoint` (reads
+    `CheckpointRepository.latest(runId,"markdown")` + `MemoryRepository.search`,
+    retains recent tail, microcompacts regenerable tool results, inserts
+    `rebuildBoundary`) + `selectCompactionStrategy`/`resolveCompactionFlag`.
+  - New `src/main/kernel/markdownCheckpointWriter.ts` — approved transition
+    sole writer (source:"p2-transition") of 11-segment markdown-v1 checkpoints
+    via `CheckpointRepository.write(runId,"markdown",...)`; P5 takes over and
+    this module is deleted, read-side unchanged (Patch 9).
+  - `src/shared/agentTrajectory.ts` — added `"context_rebuilt"` to the event
+    union (29 → 30 types).
+  - `container.ts` — `checkpointRepository()`/`memoryRepository()`/
+    `compactionStrategy()` accessors (from the P1 Storage singleton).
+- Verification evidence:
+  - `npx tsc -p tsconfig.electron.json --noEmit` -> passed.
+  - `npm test` -> 145 files / 849 tests passed (was 144/839; +10: markers,
+    summarize byte-equivalence, rebuild from checkpoint, degrade, writer).
+  - `npm run verify` -> build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run harness:check` -> passed.
+- Open follow-ups (non-blocking downstream; activation cutover lands with P5):
+  - Rewire `agentLoop.compactMessagesBeforeModelRequest` + `agentRuntimeEngine`
+    compact path to route through `compactionStrategy` (opt-in `compactionDeps`;
+    default `auto` degrades to summarize = current behavior — zero regression).
+  - Trigger `markdownCheckpointWriter` from `goalRuntimeEngine` on goal-start +
+    milestone-accepted/goal-replanned ledger events (P5 fork-agent takes over).
+  - Emit `context_rebuilt` trajectory event from the rewired compact path.
+
 ## 2026-06-19 P4 Shell analysis + tool subprocess isolation
 
 - Request:
