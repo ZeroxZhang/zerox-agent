@@ -73,6 +73,8 @@ import { createCheckpointWriterOrchestrator } from "./actors/checkpointWriterOrc
 import { runCheckpointWriterActor } from "./actors/checkpointWriterActor";
 import { createWorkflowRuntime } from "./workflow/workflowRuntime";
 import { registerDeepResearchWorkflow } from "./workflow/deepResearchWorkflow";
+import { registerActorTool } from "./actors/actorTool";
+import { registerWorkflowTool } from "./workflow/workflowTool";
 import {
   createCheckpointRepository,
 } from "./storage/repositories/checkpointRepository";
@@ -414,6 +416,11 @@ export function createAppContainer(options: {
       chatSessionStore: chatSessionStore(),
       toolResultOffloadStore: toolResultOffloadStore(),
     });
+    // P6: register the actor + workflow tools on the dynamic registry so the
+    // model can spawn sub-agents and run workflows (e.g. deep-research).
+    const registry = executor.getRegistry();
+    registerActorTool(registry, { actorRuntime: actorRuntime() });
+    registerWorkflowTool(registry, { workflowRuntime: workflowRuntime() });
     void initializeMcpTools(executor);
     return executor;
   }

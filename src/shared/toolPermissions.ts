@@ -32,7 +32,9 @@ export type AgentToolName =
   | "citation_record"
   | "citation_coverage_check"
   | "markdown_report_write"
-  | "shell_exec";
+  | "shell_exec"
+  | "actor" // P6
+  | "workflow"; // P6
 
 export type TaskPermissionPolicy = {
   files: {
