@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createContextManager, type ContextManager } from "./contextManager";
+import type { CompactionStrategy } from "./kernel/compactionStrategy";
+import { NEVER_COMPACT_MARKER } from "../shared/compactionMarkers";
 import type { AgentExecutionStore } from "./agentExecutionStore";
 import { classifyAgentFailure } from "./agentFailureClassifier";
 import { extractLearningCandidatesFromTrajectory } from "./agentLearningExtractor";
@@ -89,6 +91,10 @@ export function createAgentRuntimeEngine(options: {
   toolResultOffloadStore?: ToolResultOffloadStore;
   toolResultOffloadThreshold?: number;
   contextManager?: ContextManager;
+  /** P2: when provided, overflow compaction routes through this strategy
+   *  (auto→rebuild when a checkpoint exists, else summarize = current behavior).
+   *  Absent → legacy compressMessages (zero regression). */
+  compactionStrategy?: CompactionStrategy;
   modelRetry?: ModelRetryOptions;
   createId?: () => string;
   now?: () => Date;
@@ -295,6 +301,51 @@ export function createAgentRuntimeEngine(options: {
     async function compactMessagesBeforeModelRequest() {
       const estimatedTokens = contextManager.estimateTokens(messages);
       if (estimatedTokens <= contextTokenBudget) {
+        return;
+      }
+
+      // P2: route through the compaction strategy when provided. Default flag
+      // `auto` degrades to summarize (= compressMessages) when no checkpoint
+      // exists, so this is byte-equivalent to the legacy path unless a markdown
+      // checkpoint is present (rebuild). Absent strategy → legacy path.
+      if (options.compactionStrategy) {
+        const result = await options.compactionStrategy.compact({
+          messages,
+          budget: contextTokenBudget,
+          runId: current.runId,
+          protectedMarkers: [NEVER_COMPACT_MARKER],
+        });
+        if (!result.compacted) {
+          return;
+        }
+        messages = result.messages;
+        if (result.strategy === "rebuild" || result.strategy === "summarize-degraded") {
+          await appendTrajectory(current.runId, "context_rebuilt", {
+            strategy: result.strategy,
+            ...(result.checkpointRef ? { checkpointRef: result.checkpointRef } : {}),
+            beforeTokens: result.beforeTokens,
+            afterTokens: result.afterTokens,
+            memoryHits: result.memoryHits ?? [],
+            microcompactedRefs: result.microcompactedRefs ?? [],
+            ...(result.degradedReason ? { degradedReason: result.degradedReason } : {}),
+            createdAt: now().toISOString(),
+          }, {
+            containsApiKey: false,
+            containsFileContent: false,
+            containsUserText: false,
+          }, current.runContext);
+        } else {
+          await appendTrajectory(current.runId, "context_compacted", {
+            originalMessageCount: messages.length,
+            compactedMessageCount: messages.length,
+            estimatedTokens,
+            tokenBudget: contextTokenBudget,
+          }, {
+            containsApiKey: false,
+            containsFileContent: false,
+            containsUserText: false,
+          }, current.runContext);
+        }
         return;
       }
 

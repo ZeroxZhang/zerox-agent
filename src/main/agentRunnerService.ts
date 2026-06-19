@@ -7,6 +7,7 @@ import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
 import type { AgentWorkspaceService } from "./agentWorkspaceService";
 import { createAgentRuntimeEngine } from "./agentRuntimeEngine";
 import { createContextManager, type ContextManager } from "./contextManager";
+import type { CompactionStrategy } from "./kernel/compactionStrategy";
 import type { MemoryStore } from "./memoryStore";
 import {
   appendProceduralMemoryContext,
@@ -78,6 +79,8 @@ export function createAgentRunnerService(options: {
   learningStore?: Pick<AgentLearningStore, "create">;
   memoryStore?: Partial<Pick<MemoryStore, "create" | "search">>;
   contextManager?: ContextManager;
+  /** P2: passed through to the runtime engine's compaction path. */
+  compactionStrategy?: CompactionStrategy;
   toolResultOffloadStore?: ToolResultOffloadStore;
   toolResultOffloadThreshold?: number;
   createId?: () => string;
@@ -107,6 +110,9 @@ export function createAgentRunnerService(options: {
           : {}),
         ...(options.toolResultOffloadThreshold !== undefined
           ? { toolResultOffloadThreshold: options.toolResultOffloadThreshold }
+          : {}),
+        ...(options.compactionStrategy
+          ? { compactionStrategy: options.compactionStrategy }
           : {}),
         createId,
         now,

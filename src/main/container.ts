@@ -794,6 +794,7 @@ export function createAppContainer(options: {
         learningStore: agentLearningStore(),
         memoryStore: memoryStore(),
         toolResultOffloadStore: toolResultOffloadStore(),
+        compactionStrategy: compactionStrategy(),
       }),
     );
   }
@@ -1000,6 +1001,7 @@ export function createAppContainer(options: {
         toolExecutor: createToolExecutor(),
         toolAuthorizationService: toolAuthorizationService(),
         toolResultOffloadStore: toolResultOffloadStore(),
+        compactionStrategy: compactionStrategy(),
       }),
     );
   }

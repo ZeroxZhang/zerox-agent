@@ -194,6 +194,58 @@ describe("agent loop", () => {
     ]);
   });
 
+  it("routes overflow compaction through the injected strategy when provided (P2)", async () => {
+    const requests: ChatCompletionRequest[] = [];
+    const chatClient: ChatClient = {
+      async complete(request) {
+        requests.push(request);
+        return { content: "done", toolCalls: [], finishReason: "stop" };
+      },
+    };
+    let strategyCalled = false;
+    const compactionStrategy = {
+      id: "rebuild" as const,
+      shouldCompact: () => true,
+      async compact() {
+        strategyCalled = true;
+        return {
+          messages: [{ role: "system", content: "[Goal continuity checkpoint - never compact]\nrebuilt prefix" }, { role: "user", content: "current request" }],
+          compacted: true,
+          beforeTokens: 500,
+          afterTokens: 50,
+          strategy: "rebuild" as const,
+          rebuilt: true,
+          checkpointRef: "checkpoints/r/x",
+          memoryHits: [],
+          microcompactedRefs: [],
+        };
+      },
+    };
+
+    const result = await runAgentLoop(
+      [
+        { role: "user", content: "old request" },
+        { role: "assistant", content: "old answer" },
+        { role: "user", content: "current request" },
+      ],
+      { ...modelProfile, maxTokens: 128 },
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(),
+        tools: testTools,
+        compactionStrategy: compactionStrategy as never,
+        contextManager: {
+          estimateTokens: () => 500, // exceeds budget → triggers compaction
+          compressMessages: () => { throw new Error("legacy compress should not run when strategy provided"); },
+        },
+      },
+    );
+
+    expect(result.status).toBe("succeeded");
+    expect(strategyCalled).toBe(true);
+    expect(requests[0].messages.some((m) => m.content.includes("rebuilt prefix"))).toBe(true);
+  });
+
   it("offloads oversized tool results before the next model turn", async () => {
     const largeContent = "x".repeat(1000);
     const requests: ChatCompletionRequest[] = [];
