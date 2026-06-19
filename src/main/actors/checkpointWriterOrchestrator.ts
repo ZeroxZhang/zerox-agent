@@ -83,7 +83,52 @@ export function createCheckpointWriterOrchestrator(
       };
 
       const handle = runtime.spawn(spawnInput);
-      return runtime.wait(handle.actorId);
+      // P5 observability: emit actor_spawned/actor_done trajectory events so
+      // the fork-agent checkpoint writer shows up in the run graph.
+      emitActorEvent(options.runRepository, input.parentRunId, "actor_spawned", {
+        actorId: handle.actorId,
+        contextMode: "full",
+        parentRunId: input.parentRunId,
+        task: spawnInput.task.slice(0, 200),
+        frozenAt: forkContext.frozenAt,
+        spawnedAt: new Date().toISOString(),
+      });
+      const outcome = await runtime.wait(handle.actorId);
+      emitActorEvent(options.runRepository, input.parentRunId, "actor_done", {
+        actorId: handle.actorId,
+        status: outcome.status,
+        summary: outcome.summary,
+        filesTouched: outcome.filesTouched,
+        ...(outcome.cacheReadTokens !== undefined ? { cacheReadTokens: outcome.cacheReadTokens } : {}),
+        ...(outcome.cacheWriteTokens !== undefined ? { cacheWriteTokens: outcome.cacheWriteTokens } : {}),
+        endedAt: new Date().toISOString(),
+      });
+      return outcome;
     },
   };
+}
+
+function emitActorEvent(
+  runRepository: RunRepository,
+  runId: string,
+  type: "actor_spawned" | "actor_done",
+  payload: Record<string, unknown>,
+): void {
+  try {
+    // Pick a sequence strictly greater than the run's current max to satisfy
+    // the trajectory_events UNIQUE(run_id, seq) constraint.
+    const existing = runRepository.getTrajectory(runId);
+    const nextSeq = existing.reduce((max, e) => Math.max(max, e.sequence), 0) + 1;
+    runRepository.appendTrajectory(runId, {
+      id: `evt-${type}-${Math.random().toString(36).slice(2, 10)}`,
+      runId,
+      type,
+      sequence: nextSeq,
+      payload,
+      redaction: { containsApiKey: false, containsFileContent: false, containsUserText: false },
+      createdAt: new Date().toISOString(),
+    });
+  } catch {
+    // trajectory emission is best-effort; never block the checkpoint write
+  }
 }

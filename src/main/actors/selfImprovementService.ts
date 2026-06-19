@@ -60,6 +60,8 @@ export function createSelfImprovementService(
 
   async function cycle(): Promise<SelfImprovementReport> {
     const at = new Date().toISOString();
+    const siRunId = "self-improvement";
+    emitEvent(deps.runRepository, siRunId, "dream_started", { at });
     const dream = await runDream({
       storage: deps.storage,
       memoryRepository: deps.memoryRepository,
@@ -71,6 +73,13 @@ export function createSelfImprovementService(
       console.warn("[self-improvement] dream failed:", String(error));
       return { findingsConsidered: 0, memoriesWritten: 0, memoriesArchived: 0, candidatesQueued: 0 };
     });
+    emitEvent(deps.runRepository, siRunId, "dream_completed", {
+      findingsConsidered: dream.findingsConsidered,
+      memoriesWritten: dream.memoriesWritten,
+      memoriesArchived: dream.memoriesArchived,
+      at: new Date().toISOString(),
+    });
+    emitEvent(deps.runRepository, siRunId, "distill_started", { at: new Date().toISOString() });
     const distill = await runDistill({
       storage: deps.storage,
       trajectoryRepository: deps.trajectoryRepository,
@@ -81,7 +90,34 @@ export function createSelfImprovementService(
       console.warn("[self-improvement] distill failed:", String(error));
       return { clustersConsidered: 0, skillsPackaged: 0, candidatesQueued: 0, packagedSkillIds: [] };
     });
+    emitEvent(deps.runRepository, siRunId, "distill_completed", {
+      clustersConsidered: distill.clustersConsidered,
+      skillsPackaged: distill.skillsPackaged,
+      packagedSkillIds: distill.packagedSkillIds,
+      at: new Date().toISOString(),
+    });
     return { dream, distill, at };
+  }
+
+  function emitEvent(
+    runRepository: RunRepository,
+    runId: string,
+    type: "dream_started" | "dream_completed" | "distill_started" | "distill_completed",
+    payload: Record<string, unknown>,
+  ): void {
+    try {
+      runRepository.appendTrajectory(runId, {
+        id: `evt-${type}-${Math.random().toString(36).slice(2, 10)}`,
+        runId,
+        type,
+        sequence: Date.now(),
+        payload,
+        redaction: { containsApiKey: false, containsFileContent: false, containsUserText: false },
+        createdAt: new Date().toISOString(),
+      });
+    } catch {
+      // best-effort
+    }
   }
 
   return {

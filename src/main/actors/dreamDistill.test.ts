@@ -6,12 +6,14 @@ import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { createInMemoryStorage } from "../storage/storageDb";
 import { createRunRepository, createTrajectoryRepository } from "../storage/repositories/runRepository";
+import { createCheckpointRepository } from "../storage/repositories/checkpointRepository";
 import { createMemoryRepository } from "../storage/repositories/memoryRepository";
 import { createSessionRepository } from "../storage/repositories/sessionRepository";
 import { runDream, ruleBasedDistill, DREAM_AUTO_WRITE_THRESHOLD } from "./dreamService";
 import { runDistill, DISTILL_PACKAGE_THRESHOLD } from "./distillService";
 import { registerWorkflowAsSkill } from "../workflow/registerWorkflowAsSkill";
 import { createWorkflowRuntime } from "../workflow/workflowRuntime";
+import { createCheckpointWriterOrchestrator } from "./checkpointWriterOrchestrator";
 import { projectRunGraph } from "../../shared/runGraph";
 import type { AgentRunRecord } from "../../shared/agentRuns";
 import type { AgentTrajectoryEvent } from "../../shared/agentTrajectory";
@@ -161,5 +163,30 @@ describe("runGraph dream/distill projection (additive)", () => {
     expect(kinds).toContain("dream");
     expect(kinds).toContain("distill");
     expect(graph.edges.some((e) => e.relation === "spawned_by")).toBe(true);
+  });
+});
+
+describe("P5/P7 observability event emission", () => {
+  it("checkpoint writer orchestrator emits actor_spawned + actor_done trajectory events", async () => {
+    const storage = await createInMemoryStorage();
+    const runs = createRunRepository(storage);
+    const ck = createCheckpointRepository(storage);
+    runs.create(makeRun("run-emit"));
+    const orchestrator = createCheckpointWriterOrchestrator({
+      runRepository: runs, checkpointRepository: ck,
+      resolveGoal: () => ({ goal: baseGoal(), ledgerEvents: [] }),
+    });
+    await orchestrator.maybeWriteCheckpoint({ parentRunId: "run-emit", parentMessages: [] });
+    const traj = runs.getTrajectory("run-emit");
+    const types = traj.map((e) => e.type);
+    expect(types).toContain("actor_spawned");
+    expect(types).toContain("actor_done");
+    // runGraph projects them
+    const graph = projectRunGraph({
+      run: makeRun("run-emit"),
+      trajectoryEvents: traj,
+    });
+    expect(graph.nodes.some((n) => n.kind === "actor")).toBe(true);
+    storage.close();
   });
 });
