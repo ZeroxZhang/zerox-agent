@@ -27,6 +27,8 @@ export type AgentTrajectoryEventType =
   | "child_handoff_created"
   | "child_handoff_completed"
   | "child_handoff_reviewed"
+  | "actor_spawned"
+  | "actor_done"
   | "reflection_added"
   | "strategy_guard_triggered"
   | "failure_classified"

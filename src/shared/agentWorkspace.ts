@@ -249,6 +249,37 @@ function narrowSandboxPolicy(
   };
 }
 
+/**
+ * Public wrapper around the private `narrowSandboxPolicy` (contract §5.2, Patch 15).
+ * Narrows a parent sandbox policy by an optional child override (any unset field
+ * inherits the parent's value). `workspaceRoot` derives the location environment
+ * used for path-boundary checks. P5 (fork agent) and P6 (actor) reuse this to
+ * narrow child sandboxes.
+ */
+export function buildChildSandboxPolicy(
+  parent: AgentSandboxPolicy,
+  child?: Partial<AgentSandboxPolicy>,
+  workspaceRoot?: string,
+): AgentSandboxPolicy {
+  const env = normalizeLocationEnvironment({
+    ...(workspaceRoot ? { workspaceRoot } : {}),
+  });
+  if (!child) {
+    return narrowSandboxPolicy(parent, undefined, env);
+  }
+  // Merge the partial child onto the parent so narrowSandboxPolicy receives a
+  // fully-formed policy (its internal canonicalize expects all fields present).
+  const merged: AgentSandboxPolicy = {
+    mode: child.mode ?? parent.mode,
+    network: child.network ?? parent.network,
+    shell: child.shell ?? parent.shell,
+    allowWorkspaceEscape: child.allowWorkspaceEscape ?? parent.allowWorkspaceEscape,
+    extraReadRoots: child.extraReadRoots ?? parent.extraReadRoots,
+    extraWriteRoots: child.extraWriteRoots ?? parent.extraWriteRoots,
+  };
+  return narrowSandboxPolicy(parent, merged, env);
+}
+
 function canonicalizeSandboxPolicy(
   sandbox: AgentSandboxPolicy,
   env: LocationResourceEnvironment,

@@ -66,9 +66,13 @@ import {
   selectCompactionStrategy,
 } from "./kernel/compactionStrategy";
 import { createContextManager } from "./contextManager";
+import { createActorRuntime } from "./actors/actorRuntime";
+import { createCheckpointWriterOrchestrator } from "./actors/checkpointWriterOrchestrator";
+import { runCheckpointWriterActor } from "./actors/checkpointWriterActor";
 import {
   createCheckpointRepository,
 } from "./storage/repositories/checkpointRepository";
+import { createRunRepository } from "./storage/repositories/runRepository";
 import { createMemoryRepository } from "./storage/repositories/memoryRepository";
 import type { Storage } from "../shared/storageContract";
 import {
@@ -675,6 +679,47 @@ export function createAppContainer(options: {
         contextManager: createContextManager(),
         ...(checkpointRepository() ? { checkpointRepository: checkpointRepository()! } : {}),
         ...(memoryRepository() ? { memoryRepository: memoryRepository()! } : {}),
+      });
+    });
+  }
+
+  // P5 actor runtime + checkpoint-writer orchestrator. Exposed for P6 (actor
+  // model extends this v0) and P8 (max-mode replay via actor). The fork-agent
+  // writer is wired but not yet triggered from the runtime loops (activation
+  // cutover is incremental; default flag `p5-fork` is honored when triggered).
+  function runRepository() {
+    return lazy("runRepository", () => {
+      const s = storage();
+      return s ? createRunRepository(s) : null;
+    });
+  }
+
+  function actorRuntime() {
+    return lazy("actorRuntime", () =>
+      createActorRuntime({
+        ...(storage() ? { storage: storage()! } : {}),
+        deps: {
+          runActor: async (input, forkContext, cancel) => {
+            const s = storage();
+            if (!s) return { status: "error", summary: "no storage", filesTouched: [] };
+            return runCheckpointWriterActor(input, forkContext, cancel, {
+              runRepository: createRunRepository(s),
+              checkpointRepository: createCheckpointRepository(s),
+            });
+          },
+        },
+      }),
+    );
+  }
+
+  function checkpointWriterOrchestrator() {
+    return lazy("checkpointWriterOrchestrator", () => {
+      const s = storage();
+      if (!s) return null;
+      return createCheckpointWriterOrchestrator({
+        storage: s,
+        runRepository: createRunRepository(s),
+        checkpointRepository: createCheckpointRepository(s),
       });
     });
   }

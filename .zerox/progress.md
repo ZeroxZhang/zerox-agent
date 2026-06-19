@@ -1,5 +1,54 @@
 # Zerox Harness Progress
 
+## 2026-06-19 P5 Checkpoint-writer fork agent (ActorRuntime v0)
+
+- Request:
+  - Continue the 2.4.0 iteration. P5 = checkpoint-writer fork agent (contracts
+    v1.4 §5): `ActorRuntime` v0 (spawn/wait/cancel/status) + `ForkContext`
+    (byte-stable prompt-cache prefix reuse) + the fork actor that cold-reads
+    the transcript and writes the 11-segment markdown checkpoint. Unblocks P6
+    (extends ActorRuntime v0 → full) and P8 (max-mode replay via actor).
+- Implementation:
+  - New `src/main/actors/`:
+    - `actorRuntime.ts` — `ActorRuntime` v0 (`spawn` contextMode:"full" only +
+      `wait`/`cancel`/`status`), `SpawnInput`/`ForkContext`/`ActorOutcome`/
+      `ActorHandle` types; records lifecycle in the P1 `actors` table
+      (ActorRepository); delegates execution to an injected `runActor` callback
+      (testable, no hard subprocess/LLM coupling).
+    - `forkContext.ts` — `buildForkContext` wraps P3 `buildCachePrefix` (byte-
+      stable); `frozenAt` = trajectory seq at capture (Patch 16).
+    - `checkpointWriterActor.ts` — cold-reads trajectory via `RunRepository.
+      getTrajectory` → distills 11-segment markdown-v1 (LLM-optional, cache-
+      aligned to parent prefix; rule-based `buildGoalContinuityCheckpoint`
+      fallback) → writes via `CheckpointRepository.write(runId,"markdown",
+      {source:"p5-fork"})`. Always reliable (error → error outcome, never blocks).
+    - `checkpointWriterOrchestrator.ts` — trigger coordination: buildForkContext
+      → spawn → wait → outcome; honors `ZEROX_CHECKPOINT_WRITER` flag.
+    - `checkpointWriterOptions.ts` — `resolveCheckpointWriterFlag`
+      (`p5-fork`|`p2-transition`|`off`, default `p5-fork`).
+  - `src/shared/agentWorkspace.ts` — exported `buildChildSandboxPolicy` (public
+    wrapper of private `narrowSandboxPolicy`, Patch 15) for P5/P6 child-sandbox
+    narrowing.
+  - `src/shared/agentTrajectory.ts` — added `actor_spawned`/`actor_done` event
+    types (30 → 32).
+  - `container.ts` — `runRepository()`/`actorRuntime()`/
+    `checkpointWriterOrchestrator()` accessors.
+- Verification evidence:
+  - `npx tsc -p tsconfig.electron.json --noEmit` -> passed.
+  - `npm test` -> 146 files / 861 tests passed (was 145/849; +12: buildChildSandboxPolicy,
+    actor runtime lifecycle/cancel/error/storage, forkContext byte-stability,
+    checkpoint-writer actor cold-read+write, orchestrator, flag).
+  - `npm run verify` -> build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run harness:check` -> passed.
+- Open follow-ups (non-blocking downstream; activation cutover is incremental):
+  - Trigger `checkpointWriterOrchestrator.maybeWriteCheckpoint` from the runtime
+    compact path (when `CompactionStrategy.shouldCompact` fires) and from
+    milestone_accepted/goal_replanned ledger events (proactive refresh).
+  - Retire P2's `markdownCheckpointWriter` once P5 fork-agent triggering is live
+    (Patch 9 handover; read-side unchanged).
+  - Emit `actor_spawned`/`actor_done` trajectory events from the runtime +
+    project them to runGraph (Patch 21).
+
 ## 2026-06-19 P2 Context rebuild (CompactionStrategy + RebuildFromCheckpoint)
 
 - Request:
