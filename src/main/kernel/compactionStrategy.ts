@@ -58,6 +58,9 @@ export interface CompactionDeps {
   contextManager: ContextManager;
   checkpointRepository?: CheckpointRepository;
   memoryRepository?: MemoryRepository;
+  /** P5: when provided, RebuildFromCheckpoint triggers the fork-agent
+   *  checkpoint writer before rebuilding (so a fresh checkpoint exists). */
+  checkpointWriter?: { maybeWriteCheckpoint(input: { parentRunId: string; parentMessages: ChatMessage[] }): Promise<unknown> };
   /** Tail token budget to retain on rebuild (default 12_000). */
   rebuildTailTokens?: number;
   /** Tool names whose results may be microcompacted to placeholders. */
@@ -123,6 +126,20 @@ export function createRebuildFromCheckpoint(
     async compact(ctx) {
       const beforeTokens = estimateMessageTokens(ctx.messages);
       const summarize = createSummarizeCompaction(deps);
+
+      // P5: trigger the fork-agent checkpoint writer before reading, so a fresh
+      // markdown checkpoint exists (proactive refresh). Best-effort: failures
+      // degrade to summarize without blocking the main loop.
+      if (deps.checkpointWriter) {
+        try {
+          await deps.checkpointWriter.maybeWriteCheckpoint({
+            parentRunId: ctx.runId,
+            parentMessages: ctx.messages,
+          });
+        } catch {
+          // best-effort; rebuild will degrade to summarize if no checkpoint lands
+        }
+      }
 
       const checkpoint = deps.checkpointRepository?.latest(ctx.runId, "markdown");
       if (!checkpoint) {

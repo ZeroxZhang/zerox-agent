@@ -154,3 +154,31 @@ describe("markdownCheckpointWriter", () => {
     expect(() => assertMarkdownCheckpointInvariants("not a checkpoint")).toThrow();
   });
 });
+
+describe("RebuildFromCheckpoint P5 activation (checkpoint writer trigger)", () => {
+  it("invokes the checkpoint writer before reading, then rebuilds from the written checkpoint", async () => {
+    const storage = await createInMemoryStorage();
+    const ck = createCheckpointRepository(storage);
+    const mem = createMemoryRepository(storage);
+    let writerCalls = 0;
+    const strategy = createRebuildFromCheckpoint({
+      contextManager,
+      checkpointRepository: ck,
+      memoryRepository: mem,
+      checkpointWriter: {
+        async maybeWriteCheckpoint(input: { parentRunId: string }) {
+          writerCalls += 1;
+          // Simulate the fork agent writing a checkpoint.
+          ck.write(input.parentRunId, "markdown", { format: "markdown-v1", content: "# Checkpoint\n[Goal continuity checkpoint - never compact]\nrebuilt", source: "p5-fork", createdAt: "2026-06-19T00:00:00.000Z" });
+        },
+      },
+    });
+    const result = await strategy.compact({
+      messages: bigMessages(), budget: 500, runId: "r1", protectedMarkers: [NEVER_COMPACT_MARKER],
+    });
+    expect(writerCalls).toBe(1);
+    expect(result.strategy).toBe("rebuild");
+    expect(result.checkpointRef).toBeTruthy();
+    storage.close();
+  });
+});

@@ -59,6 +59,7 @@ import { createStorageImpl } from "./storage/storageDb";
 import { resolveStorageBackend } from "./storage/backendResolver";
 import { createProvider } from "./providers/providerFactory";
 import { createSettingsBackedChatClient } from "./providers/providerChatClient";
+import { toNormalized } from "./providers/normalize";
 import { analyzeShell } from "./tools/shell/shellAnalyzer";
 import { createToolWorker } from "./tools/toolWorker";
 import { getToolWorkerOptions } from "./tools/toolWorkerOptions";
@@ -690,10 +691,26 @@ export function createAppContainer(options: {
   function compactionStrategy() {
     return lazy("compactionStrategy", () => {
       const flag = resolveCompactionFlag();
+      const orchestrator = checkpointWriterOrchestrator();
       return selectCompactionStrategy(flag, {
         contextManager: createContextManager(),
         ...(checkpointRepository() ? { checkpointRepository: checkpointRepository()! } : {}),
         ...(memoryRepository() ? { memoryRepository: memoryRepository()! } : {}),
+        // P5: trigger the fork-agent checkpoint writer before a rebuild so a
+        // fresh markdown checkpoint exists. Adapter converts ChatMessage[] →
+        // NormalizedMessage[] for the orchestrator.
+        ...(orchestrator
+          ? {
+              checkpointWriter: {
+                async maybeWriteCheckpoint(input: { parentRunId: string; parentMessages: import("./openAiCompatibleClient").ChatMessage[] }) {
+                  return orchestrator.maybeWriteCheckpoint({
+                    parentRunId: input.parentRunId,
+                    parentMessages: toNormalized(input.parentMessages),
+                  });
+                },
+              },
+            }
+          : {}),
       });
     });
   }
