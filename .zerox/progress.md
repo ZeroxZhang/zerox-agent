@@ -1,5 +1,51 @@
 # Zerox Harness Progress
 
+## 2026-06-19 P3 Provider abstraction + native Anthropic/Gemini + prompt cache
+
+- Request:
+  - Continue the 2.4.0 iteration. P3 = model-layer abstraction (contracts
+    v1.4 §2): frozen `LLMProvider` interface + `NormalizedMessage`/`NormalizedContent`
+    + three providers (OpenAI-compatible / Anthropic / Gemini) + prompt-cache
+    `CachePrefix` + real `countTokens` + `stream()` signature. Unblocks P5
+    (fork-agent cache-prefix reuse) and P8 (streaming/max-mode).
+- Implementation:
+  - New `src/main/providers/`:
+    - `provider.ts` — frozen `LLMProvider`/`ProviderCapabilities`/`NormalizedMessage`/
+      `NormalizedContent` (contract §2.1 verbatim) + dependency types
+      (`ProviderId`/`CompleteRequest`/`CompleteResponse`/`StreamEvent`/`CachePrefix`/
+      `ToolCall`/`ToolDefinition`, §12 Patch 2/3 authoritative shape).
+    - `normalize.ts` — lossless `ChatMessage` ⇄ `NormalizedMessage` round-trip
+      (the key to zero-regression adapter routing).
+    - `cachePrefix.ts` — pure byte-stable `buildCachePrefix` + `serializeCachePrefix`.
+    - `openAiCompatibleProvider.ts` — wraps the existing client; maps low-level
+      `content_delta`→contract `text_delta`; heuristic `countTokens`; 0 cache tokens.
+    - `anthropicProvider.ts` — native Messages API (x-api-key + anthropic-version,
+      tool_use/tool_result, thinking, `cache_control` breakpoint, `/v1/messages/count_tokens`).
+    - `geminiProvider.ts` — native generateContent (x-goog-api-key, functionCall/
+      functionResponse, thinkingConfig, cachedContent, `:countTokens`).
+    - `providerFactory.ts` — dispatch by `providerId` (default `openai-compatible`).
+    - `providerChatClient.ts` — adapter implementing `ChatClient & StreamingChatClient`,
+      routing legacy consumers through a provider transparently.
+  - `src/shared/modelSettings.ts` + `src/main/modelSettingsStore.ts` — added
+    optional `providerId` (default `openai-compatible`); backward-compatible
+    (absent on old `model-settings.json` → treated as default; no schemaVersion bump).
+  - `src/main/container.ts` — `getProvider()` accessor (async, settings-driven)
+    for P5/P8 consumption; existing `createOpenAiCompatibleClient` wiring unchanged
+    (gradual migration via adapter — zero regression).
+- Verification evidence:
+  - `npx tsc -p tsconfig.electron.json --noEmit` -> passed.
+  - `npm test` -> 142 files / 822 tests passed (was 141/810; +12 provider tests).
+  - `npm run verify` -> build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run harness:check` -> passed.
+- Open follow-ups (non-blocking downstream):
+  - Rewire the 8 `createOpenAiCompatibleClient` container points to
+    `createProviderChatClient(getProvider())` (gradual; default openai-compatible
+    is behavior-identical, so this is a no-op until users pick anthropic/gemini).
+  - Migrate `agentLoop`/`agentRuntimeEngine` to depend on `LLMProvider` directly.
+  - `selectAgentPromptProfile(modelId, providerId?)` extension.
+  - Live-API eval fixtures (anthropic-tooluse / gemini-functioncall / prompt-cache-hit)
+    require provider API keys; mock-fetch unit tests cover the mapping for now.
+
 ## 2026-06-19 P1 SQLite unified storage layer (2.4.0 iteration)
 
 - Request:

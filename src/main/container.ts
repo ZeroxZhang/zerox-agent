@@ -57,6 +57,7 @@ import { createToolAuditLog } from "./toolAuditLog";
 import { KernelEventBus } from "./kernel/eventBus";
 import { createStorageImpl } from "./storage/storageDb";
 import { resolveStorageBackend } from "./storage/backendResolver";
+import { createProvider } from "./providers/providerFactory";
 import type { Storage } from "../shared/storageContract";
 import {
   createToolAuthorizationService,
@@ -597,6 +598,26 @@ export function createAppContainer(options: {
           }
         : {}),
     };
+  }
+
+  // P3 provider abstraction. Returns the LLMProvider for the current model
+  // settings (dispatched by `providerId`, default `openai-compatible`). P5
+  // (checkpoint-writer fork agent) and P8 (streaming/max-mode) consume this.
+  // Existing ChatClient consumers are unchanged (gradual migration via the
+  // ProviderChatClient adapter — zero regression).
+  function getProvider() {
+    return lazy("llmProvider", async () => {
+      const settings = await modelSettingsStore.load();
+      const apiKey = (await modelSettingsStore.getApiKey()) ?? "";
+      return createProvider({
+        providerId: settings.providerId ?? "openai-compatible",
+        apiKey,
+        chatModel: settings.chatModel,
+        baseUrl: settings.baseUrl,
+        thinkingEnabled: settings.thinkingEnabled,
+        thinkingBudgetTokens: settings.thinkingBudgetTokens,
+      });
+    });
   }
 
   function agentBootstrapService() {

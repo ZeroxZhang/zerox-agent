@@ -1,3 +1,5 @@
+export type ProviderId = "openai-compatible" | "anthropic" | "gemini" | (string & {});
+
 export type ModelSettingsInput = {
   baseUrl: string;
   chatModel: string;
@@ -7,9 +9,20 @@ export type ModelSettingsInput = {
   maxTokens: number;
   thinkingEnabled?: boolean;
   thinkingBudgetTokens?: number;
+  providerId?: ProviderId;
 };
 
-export type NormalizedModelSettingsInput = Required<ModelSettingsInput>;
+export type NormalizedModelSettingsInput = {
+  baseUrl: string;
+  chatModel: string;
+  embeddingModel: string;
+  apiKey: string;
+  temperature: number;
+  maxTokens: number;
+  thinkingEnabled: boolean;
+  thinkingBudgetTokens: number;
+  providerId?: ProviderId;
+};
 
 export type PublicModelSettings = {
   baseUrl: string;
@@ -21,6 +34,7 @@ export type PublicModelSettings = {
   thinkingBudgetTokens: number;
   hasApiKey: boolean;
   updatedAt: string | null;
+  providerId?: ProviderId;
 };
 
 export type ModelSettingsValidationErrors = Partial<
@@ -192,6 +206,7 @@ export function normalizeModelSettingsInput(
       256,
       Math.round(input.thinkingBudgetTokens ?? 8192),
     ),
+    ...(input.providerId ? { providerId: input.providerId } : {}),
   };
 }
 
