@@ -383,6 +383,7 @@ export function authorizeToolCallWithinRunContext(
   policy: TaskPermissionPolicy,
   request: ToolCallRequest,
   runContext?: AgentRunContext,
+  opts?: { shellPlan?: { touchedPaths: string[] } },
 ): ToolAuthorizationDecision {
   const taskDecision = authorizeToolCall(
     policy,
@@ -431,7 +432,13 @@ export function authorizeToolCallWithinRunContext(
     runContext.sandbox.shell === "workspace_only"
   ) {
     const command = String(request.args.command ?? "");
-    const outsidePath = extractPathLikeShellTokens(command).find(
+    // Patch 4: prefer ShellPlan.touchedPaths (per-command read/write paths)
+    // as the single source of truth; fall back to the legacy tokenizer when
+    // no plan is provided (zero regression).
+    const candidatePaths = opts?.shellPlan
+      ? opts.shellPlan.touchedPaths
+      : extractPathLikeShellTokens(command);
+    const outsidePath = candidatePaths.find(
       (token) =>
         !isPathInsideRunContext(token, runContext, "read") &&
         !isPathInsideRunContext(token, runContext, "write"),

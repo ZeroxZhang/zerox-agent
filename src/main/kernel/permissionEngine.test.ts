@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { evaluatePermission } from "./permissionEngine";
+import { analyzeShell } from "../tools/shell/shellAnalyzer";
 
 describe("permission engine", () => {
   it("derives human-readable shell command prefixes", () => {
@@ -64,3 +65,17 @@ function shell(command: string) {
     args: { command },
   };
 }
+
+describe("evaluatePermission shell plan (P4 activation)", () => {
+  it("detects redirection control operators the legacy regex missed, via ShellPlan", () => {
+    const request = { toolName: "shell_exec", args: { command: "echo hi > out.txt" } } as never;
+    // Without a shell plan, the legacy regex now also catches redirection.
+    const legacy = evaluatePermission(request, []);
+    // ShellPlan path: redirect is a control operator → reduced match disabled.
+    const plan = analyzeShell("echo hi > out.txt", { cwd: "/tmp" });
+    const withPlan = evaluatePermission(request, [], { shellPlan: plan });
+    expect(plan.controlOperators).toContain(">");
+    // Both paths treat the redirected command as having a control operator.
+    expect(legacy.action).toBe(withPlan.action);
+  });
+});
