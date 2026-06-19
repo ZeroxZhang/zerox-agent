@@ -1,5 +1,48 @@
 # Zerox Harness Progress
 
+## 2026-06-19 P8 Max-mode / streaming tool-calling / MCP multi-transport
+
+- Request:
+  - Final phase of the 2.4.0 iteration. P8 = full-streaming tool-calling
+    (StreamProcessor consuming LLMProvider.stream) + max-mode/best-of-N (judge
+    + actor replay) + MCP multi-transport (http/sse + OAuth) + runGraph cost
+    model. Terminal phase (no downstream consumer).
+- Implementation:
+  - `src/shared/runGraph.ts` — added `model_response`/`ensemble` node kinds +
+    `candidate_of` edge + `RunGraphTokenUsage`/`totalUsage` aggregation
+    (Patch 11); additive `model_response` projection aggregates usage across
+    responses (existing kinds/projections untouched).
+  - New `src/main/providers/streamProcessor.ts` — `processStream`: consumes
+    contract StreamEvent variants (text_delta/tool_call_delta/thinking_delta/
+    done/error), aggregates into a CompleteResponse field-equivalent to the
+    non-streaming path (minimal-change loop migration); rethrows on error.
+  - New `src/main/providers/maxMode.ts` — `MaxMode.runStep`: N parallel
+    propose-only candidates (toolChoice:none, schema-only, no exec) → judge
+    selects winner → winner tool calls replayed via P6 ephemeral state actor
+    (Patch 13 executedViaActor); ensembleTokens tracked but not in context;
+    ZEROX_MAX_MODE flag (default off).
+  - New `src/main/mcpTransport.ts` — `McpTransport` interface (start/send/
+    onNotification/close, Patch 12) + StreamableHttpTransport + SseTransport
+    (Bearer/OAuth) + factory; stdio preserves the existing mcpClient path
+    (backward compat). resolveTransportKind defaults to stdio.
+  - Tests: StreamProcessor aggregation (text+tool+thinking+done, synthesize,
+    error rethrow), MaxMode (N candidates + judge + actor replay + flag), MCP
+    transports (kind resolution, http JSON-RPC round-trip, stdio legacy),
+    runGraph model_response + totalUsage aggregation.
+- Verification evidence:
+  - `npx tsc -p tsconfig.electron.json --noEmit` -> passed.
+  - `npm test` -> 149 files / 896 tests passed (was 148/886; +10).
+  - `npm run verify` -> build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run harness:check` -> passed.
+- Open follow-ups (non-blocking; activation cutover):
+  - Rewire `agentLoop`/`agentRuntimeEngine` request path through
+    `processStream` (streaming processor); preserve non-stream fallback.
+  - Wire `MaxMode` behind ZEROX_MAX_MODE in the loop's model-request step.
+  - Route MCP http/sse transports through `createMcpTransport` in
+    `initializeMcpTools` (stdio unchanged); OAuth PKCE + local callback.
+  - Emit `model_response` trajectory events with usage/cache fields from the
+    provider CompleteResponse.
+
 ## 2026-06-19 P7 Dream / Distill self-improvement loop
 
 - Request:

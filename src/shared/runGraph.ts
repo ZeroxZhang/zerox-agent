@@ -18,7 +18,9 @@ export type RunGraphNodeKind =
   | "actor" // P6 (Patch 21)
   | "workflow" // P6 (Patch 21)
   | "dream" // P7 (Patch 25)
-  | "distill"; // P7 (Patch 25)
+  | "distill" // P7 (Patch 25)
+  | "model_response" // P8 (Patch 11)
+  | "ensemble"; // P8 (Patch 11)
 
 export type RunGraphNodeStatus =
   | "planned"
@@ -68,7 +70,8 @@ export type RunGraphEdgeRelation =
   | "produced"
   | "checked_by"
   | "blocked_by"
-  | "spawned_by"; // P6 (Patch 21): actor → parent actor / run
+  | "spawned_by" // P6 (Patch 21): actor → parent actor / run
+  | "candidate_of"; // P8 (Patch 11): ensemble candidate → winner
 
 export type RunGraphEdge = {
   id: string;
@@ -98,6 +101,15 @@ export type RunGraphView = {
   edges: RunGraphEdge[];
   gates: RunGraphGate[];
   evidence: RunGraphEvidence[];
+  totalUsage?: RunGraphTokenUsage; // P8 (Patch 11)
+};
+
+// P8 (Patch 11): token cost aggregation for runGraph.
+export type RunGraphTokenUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
 };
 
 export type ProjectRunGraphInput = {
@@ -175,6 +187,7 @@ export function projectRunGraph(input: ProjectRunGraphInput): RunGraphView {
 
   let lastToolNodeId: string | null = null;
   const openToolNodeIdsByName = new Map<string, string[]>();
+  const totalUsage: RunGraphTokenUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
   const orderedTrajectoryEvents = [...(input.trajectoryEvents ?? [])]
     .filter((event) => acceptedTrajectoryRunIds.has(event.runId))
     .sort(compareTrajectoryEvents);
@@ -512,6 +525,37 @@ export function projectRunGraph(input: ProjectRunGraphInput): RunGraphView {
         nodes.set(nodeId, { ...existing, status: "succeeded", result: { status: "succeeded", evidenceRefs: [ref] } });
       }
     }
+
+    // P8 (Patch 11): model_response node + cost aggregation (pure additive).
+    if (event.type === "model_response") {
+      const nodeId = `model_response:${event.id}`;
+      const usage = event.payload.usage as { inputTokens?: number; outputTokens?: number } | undefined;
+      const cacheRead = readNumber(event.payload.cacheReadTokens);
+      const cacheWrite = readNumber(event.payload.cacheWriteTokens);
+      addNode(nodes, {
+        id: nodeId,
+        kind: "model_response",
+        status: "succeeded",
+        title: "Model response",
+        sourceRefs: [ref],
+        result: {
+          status: "succeeded",
+          evidenceRefs: [ref],
+          decidedBy: "runtime",
+          ...(usage ? { tokens: usage } : {}),
+          ...(cacheRead !== null ? { cacheReadTokens: cacheRead } : {}),
+          ...(cacheWrite !== null ? { cacheWriteTokens: cacheWrite } : {}),
+        },
+        order: trajectoryOrder(event),
+      });
+      addEdge(edges, runNodeId, nodeId, "produced");
+      if (usage) {
+        totalUsage.inputTokens += usage.inputTokens ?? 0;
+        totalUsage.outputTokens += usage.outputTokens ?? 0;
+      }
+      totalUsage.cacheReadTokens += cacheRead ?? 0;
+      totalUsage.cacheWriteTokens += cacheWrite ?? 0;
+    }
   }
 
   return {
@@ -523,6 +567,7 @@ export function projectRunGraph(input: ProjectRunGraphInput): RunGraphView {
     edges: [...edges.values()],
     gates: [...gates.values()],
     evidence: [...evidence.values()],
+    totalUsage,
   };
 }
 
