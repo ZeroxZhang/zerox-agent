@@ -1,5 +1,54 @@
 # Zerox Harness Progress
 
+## 2026-06-19 P4 Shell analysis + tool subprocess isolation
+
+- Request:
+  - Continue the 2.4.0 iteration. P4 = shell parsing + tool subprocess isolation
+    (contracts v1.4 §3): `analyzeShell` → `ShellPlan` (single source of truth for
+    shell permission decisions, replacing wildcard + naive-tokenizer matching)
+    and `ToolWorker` (side-effect tools execute out-of-process). Unblocks P5
+    (fork agent reuses ToolWorker fork/IPC) and P6 (actor isolation).
+- Implementation:
+  - New `src/main/tools/`:
+    - `shell/shellAnalyzer.ts` — `analyzeShell(raw, {cwd})` → `ShellPlan`
+      (commands with per-command readsPaths/writesPaths, touchedPaths union,
+      controlOperators incl. `$()`/backtick/redirects, networkAccess). Robust
+      tokenizer: control-operator splitting, command-substitution capture,
+      redirection-target classification, `~`/`$VAR` expansion.
+      - Deviation note (spec R1/Q4): tree-sitter bash grammar is a native
+        module with Electron ABI packaging cost; the spec explicitly permits a
+        fallback. This tokenizer captures the injection-detection security
+        value without a second native dep. `ZEROX_SHELL_ANALYZER=legacy`
+        falls back to the original regex behavior.
+    - `toolWorkerProtocol.ts` — `WorkerRunContext` (serializable subset of
+      AgentRunContext: workspaceRoot, sandbox, provenanceIdentity, runId),
+      `WorkerRequest`/`WorkerResponse`, `ToolHandler`.
+    - `toolWorker.ts` — `ToolWorker` interface + `createToolWorker({mode})`:
+      `inproc` (handler-map dispatch) + `subprocess` (child_process.fork +
+      IPC round-trip + timeout). Parent holds only the result.
+    - `toolWorkerEntry.ts` — subprocess entry template (IPC dispatch, handler
+      registry, no main-process singletons). P5/P6 actor entries extend this.
+    - `toolWorkerOptions.ts` — `ZEROX_TOOL_WORKER` (inproc|subprocess) +
+      `ZEROX_SHELL_ANALYZER` (legacy|shadow|plan) flags (Patch 7; honors
+      BUILDING_AGENT_ legacy alias).
+  - `container.ts` — `shellAnalyzer()` + `toolWorker()` accessors for P5/P6;
+    existing side-effect tools run in-process unchanged (gradual cutover
+    behind flags — zero regression).
+- Verification evidence:
+  - `npx tsc -p tsconfig.electron.json --noEmit` -> passed.
+  - `npm test` -> 144 files / 839 tests passed (was 142/822; +17: 10 analyzer
+    incl. injection-bypass cases, 7 toolWorker incl. real subprocess IPC).
+  - `npm run verify` -> build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run harness:check` -> passed.
+- Open follow-ups (non-blocking downstream):
+  - Wire `ShellPlan` into the two permission layers (`permissionEngine` +
+    `toolPermissions.authorizeToolCallWithinRunContext`) in `shadow` then `plan`
+    mode (default `shadow`/`legacy` keeps current decisions — zero regression).
+  - Route `shell_exec`/`file_write`/`file_apply_moves`/`test_run`/
+    `chrome_bookmarks_read` through `ToolWorker` (default inproc; subprocess
+    cutover behind `ZEROX_TOOL_WORKER`).
+  - Unify the two divergent control-operator regexes onto `ShellPlan`.
+
 ## 2026-06-19 P3 Provider abstraction + native Anthropic/Gemini + prompt cache
 
 - Request:
