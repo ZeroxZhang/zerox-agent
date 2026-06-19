@@ -306,3 +306,13 @@ function narrowShellMode(
 
   return "workspace_only";
 }
+
+// Input for creating a workspace. Moved to shared so the storage contract
+// (src/shared/storageContract.ts) can reference it.
+export type AgentWorkspaceInput = {
+  name: string;
+  rootPath: string;
+  kind: AgentWorkspaceKind;
+  cleanup: AgentWorkspaceCleanup;
+  git?: AgentWorkspaceGitMetadata;
+};

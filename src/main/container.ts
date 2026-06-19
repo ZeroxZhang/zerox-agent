@@ -55,6 +55,9 @@ import { createScheduledTaskStore } from "./taskStore";
 import { createTaskSchedulerService } from "./taskSchedulerService";
 import { createToolAuditLog } from "./toolAuditLog";
 import { KernelEventBus } from "./kernel/eventBus";
+import { createStorageImpl } from "./storage/storageDb";
+import { resolveStorageBackend } from "./storage/backendResolver";
+import type { Storage } from "../shared/storageContract";
 import {
   createToolAuthorizationService,
   type ToolUserApprovalResult,
@@ -175,6 +178,47 @@ export function createAppContainer(options: {
   const configDir = path.join(app.getPath("userData"), "config");
   const skillsDir = path.join(app.getAppPath(), "skills");
   const appMeta = getAppMeta();
+
+  // P1 SQLite storage. The Storage singleton is created lazily and is
+  // fault-tolerant: if better-sqlite3 fails to load (e.g. an Electron ABI
+  // mismatch before @electron/rebuild runs), the container falls back to the
+  // `json` backend so the app still starts. Stores that have been converted to
+  // dual-write proxies (agentRunStore, agentTrajectoryStore) consume this.
+  let storageBackendCache: "json" | "sqlite" | "dual" | null = null;
+  function storageBackend(): "json" | "sqlite" | "dual" {
+    if (storageBackendCache) return storageBackendCache;
+    const resolved = resolveStorageBackend();
+    if (resolved !== "json") {
+      try {
+        storage(); // ensure the native module loads + migrates
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[storage] SQLite backend unavailable (${String(error)}); falling back to json.`,
+        );
+        storageBackendCache = "json";
+        return "json";
+      }
+    }
+    storageBackendCache = resolved;
+    return resolved;
+  }
+
+  function storage(): Storage | null {
+    return lazy<Storage | null>("storage", () => {
+      try {
+        // createStorageImpl runs migrations synchronously at construction, so
+        // the schema is ready before any store write.
+        return createStorageImpl({ dbPath: path.join(configDir, "zerox.db") });
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[storage] could not open SQLite (${String(error)}); continuing on JSON.`,
+        );
+        return null;
+      }
+    });
+  }
 
   const modelSettingsStore = createModelSettingsStore({
     configDir,
@@ -400,7 +444,9 @@ export function createAppContainer(options: {
   }
 
   function agentRunStore() {
-    return lazy("agentRunStore", () => createAgentRunStore({ configDir }));
+    return lazy("agentRunStore", () =>
+      createAgentRunStore({ configDir, backend: storageBackend(), storage: storage() ?? undefined }),
+    );
   }
 
   function agentExecutionStore() {
@@ -408,7 +454,9 @@ export function createAppContainer(options: {
   }
 
   function agentTrajectoryStore() {
-    return lazy("agentTrajectoryStore", () => createAgentTrajectoryStore({ configDir }));
+    return lazy("agentTrajectoryStore", () =>
+      createAgentTrajectoryStore({ configDir, backend: storageBackend(), storage: storage() ?? undefined }),
+    );
   }
 
   function agentGoalStore() {

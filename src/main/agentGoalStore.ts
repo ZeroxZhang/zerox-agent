@@ -8,23 +8,9 @@ import {
 } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import type { Goal, GoalStatus } from "../shared/agentGoal";
+import type { Goal, GoalStatus, ProgressLedgerEvent } from "../shared/agentGoal";
 
-export type ProgressLedgerEvent = {
-  at: string;
-  kind:
-    | "goal_planned"
-    | "milestone_started"
-    | "milestone_accepted"
-    | "milestone_rejected"
-    | "goal_replanned"
-    | "review_requested"
-    | "review_resolved"
-    | "goal_stopped";
-  milestoneId?: string;
-  summary: string;
-  evidenceRefs?: string[];
-};
+export type { ProgressLedgerEvent } from "../shared/agentGoal";
 
 export type AgentGoalStore = {
   save(goal: Goal): Promise<Goal>;

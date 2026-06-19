@@ -169,3 +169,21 @@ function validateSuccessCriterion(criterion: SuccessCriterion): void {
     }
   }
 }
+
+// Progress ledger event — appended to each goal's ledger JSONL. Moved to shared
+// so the storage contract (src/shared/storageContract.ts) can reference it.
+export type ProgressLedgerEvent = {
+  at: string;
+  kind:
+    | "goal_planned"
+    | "milestone_started"
+    | "milestone_accepted"
+    | "milestone_rejected"
+    | "goal_replanned"
+    | "review_requested"
+    | "review_resolved"
+    | "goal_stopped";
+  milestoneId?: string;
+  summary: string;
+  evidenceRefs?: string[];
+};

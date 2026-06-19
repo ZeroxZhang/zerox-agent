@@ -1,0 +1,135 @@
+#!/usr/bin/env node
+// P1 rollback: re-export legacy JSON/JSONL files from zerox.db, freezing any
+// existing on-disk JSON as *.legacy.json first so nothing is overwritten
+// destructively. Inverse of migrate-to-sqlite.mjs.
+//
+//   node scripts/rollback-sqlite-to-json.mjs --configDir <path>
+
+import { existsSync, writeFileSync, renameSync, mkdirSync } from "node:fs";
+import path from "node:path";
+
+const args = parseArgs(process.argv.slice(2));
+const configDir = args.configDir;
+if (!configDir) {
+  console.error("usage: node scripts/rollback-sqlite-to-json.mjs --configDir <path>");
+  process.exit(2);
+}
+
+const root = path.resolve(new URL("..", import.meta.url).pathname);
+const { createStorageImpl } = await import(path.join(root, "dist-electron/main/storage/storageDb.js"));
+const runsRepo = await import(path.join(root, "dist-electron/main/storage/repositories/runRepository.js"));
+const repos = await import(path.join(root, "dist-electron/main/storage/repositories/index.js"));
+const goalRepo = await import(path.join(root, "dist-electron/main/storage/repositories/goalRepository.js"));
+const memRepo = await import(path.join(root, "dist-electron/main/storage/repositories/memoryRepository.js"));
+const sessRepo = await import(path.join(root, "dist-electron/main/storage/repositories/sessionRepository.js"));
+
+const dbPath = path.join(configDir, "zerox.db");
+if (!existsSync(dbPath)) {
+  console.error(`no zerox.db at ${dbPath}; nothing to roll back.`);
+  process.exit(0);
+}
+
+function freeze(file) {
+  if (existsSync(file)) renameSync(file, file.replace(/(\.[^.]+)$/, ".legacy$1"));
+}
+function writeJson(file, obj) {
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, JSON.stringify(obj, null, 2) + "\n", "utf8");
+}
+function writeJsonl(file, rows) {
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, rows.map((r) => JSON.stringify(r)).join("\n") + "\n", "utf8");
+}
+
+const storage = createStorageImpl({ dbPath });
+await storage.migrate();
+const db = storage.db;
+const counts = {};
+
+// runs + trajectory
+{
+  const runs = runsRepo.createRunRepository(storage).list({ limit: Number.MAX_SAFE_INTEGER });
+  freeze(path.join(configDir, "agent-runs.jsonl"));
+  writeJsonl(path.join(configDir, "agent-runs.jsonl"), runs);
+  counts.runs = runs.length;
+  const trajDir = path.join(configDir, "agent-trajectories");
+  let trajCount = 0;
+  for (const r of runs) {
+    const events = runsRepo.createRunRepository(storage).getTrajectory(r.id);
+    if (events.length) { writeJsonl(path.join(trajDir, `${r.id}.jsonl`), events); trajCount += events.length; }
+  }
+  counts.trajectory_events = trajCount;
+}
+
+// memory_records
+{
+  const records = memRepo.createMemoryRepository(storage).list({ limit: Number.MAX_SAFE_INTEGER });
+  freeze(path.join(configDir, "memory-records.json"));
+  writeJson(path.join(configDir, "memory-records.json"), { schemaVersion: 1, records });
+  counts.memory_records = records.length;
+}
+
+// memory_profile
+{
+  const profile = repos.createMemoryProfileRepository(storage).read();
+  if (profile.content) {
+    freeze(path.join(configDir, "memory-persona.md"));
+    writeFileSync(path.join(configDir, "memory-persona.md"), profile.content, "utf8");
+    counts.memory_profile = 1;
+  }
+}
+
+// goals + ledger
+{
+  const dir = path.join(configDir, "agent-goals");
+  mkdirSync(dir, { recursive: true });
+  const rows = db.prepare("SELECT payload FROM goals").all().map((r) => JSON.parse(r.payload));
+  for (const g of rows) {
+    writeJson(path.join(dir, `${g.id}.json`), g);
+    const ledger = goalRepo.createGoalRepository(storage).readLedger(g.id);
+    if (ledger.length) writeJsonl(path.join(dir, `${g.id}.ledger.jsonl`), ledger);
+  }
+  counts.goals = rows.length;
+}
+
+// chat sessions (reconstruct messages from chat_messages)
+{
+  const sessions = sessRepo.createSessionRepository(storage).listSessions({ kind: "chat" });
+  const out = [];
+  for (const s of sessions) {
+    const payload = s.payload ?? {};
+    const msgRows = db.prepare("SELECT payload FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC").all(s.id).map((r) => JSON.parse(r.payload));
+    out.push({ ...payload, messages: msgRows.length ? msgRows : (payload.messages ?? []) });
+  }
+  if (out.length) { freeze(path.join(configDir, "chat-sessions.json")); writeJson(path.join(configDir, "chat-sessions.json"), { schemaVersion: 1, sessions: out }); }
+  counts.sessions = out.length;
+}
+
+// tool_audit
+{
+  const rows = db.prepare("SELECT payload FROM tool_audit ORDER BY created_at ASC").all().map((r) => JSON.parse(r.payload));
+  if (rows.length) { freeze(path.join(configDir, "tool-audit.jsonl")); writeJsonl(path.join(configDir, "tool-audit.jsonl"), rows); }
+  counts.tool_audit = rows.length;
+}
+
+// validation
+{
+  const v = repos.createValidationRepository(storage).load();
+  if (v) { freeze(path.join(configDir, "agent-validation.json")); writeJson(path.join(configDir, "agent-validation.json"), { schemaVersion: 1, latest: v }); counts.validation = 1; }
+}
+
+storage.close();
+console.log(JSON.stringify({ rolledBack: counts }, null, 2));
+
+function parseArgs(argv) {
+  const out = {};
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a.startsWith("--")) {
+      const key = a.slice(2);
+      if (argv[i + 1] && !argv[i + 1].startsWith("--")) out[key] = argv[++i];
+      else out[key] = true;
+    }
+  }
+  return out;
+}

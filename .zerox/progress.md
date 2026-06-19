@@ -1,5 +1,72 @@
 # Zerox Harness Progress
 
+## 2026-06-19 P1 SQLite unified storage layer (2.4.0 iteration)
+
+- Request:
+  - Begin the 2.4.0 mega-iteration per `iteration-roadmap/`. P1 = SQLite unified
+    storage layer (contracts v1.4 §1). Deliver the frozen `Storage` + Repository
+    interfaces that P2/P5/P6/P7 consume, plus a dual-write migration path off the
+    legacy JSON/JSONL stores, without regressing the existing 767 tests / 26 eval.
+- Registration:
+  - Added P1 as the in-progress feature on the `codex/v2.3.5-run-graph-harness`
+    branch. Repository layer is the downstream-blocking contract; store-by-store
+    dual-write proxy conversion is incremental.
+- Implementation:
+  - Added deps: `better-sqlite3@^11`, `drizzle-orm@^0.36`, `drizzle-kit@^0.30`,
+    `@types/better-sqlite3@^7`, `@electron/rebuild@^3` (native module rebuild for
+    Electron packaging).
+  - New `src/shared/storageContract.ts`: frozen `Storage` + Repository interfaces
+    (Storage, Run/Trajectory, Checkpoint, Memory, Goal, Session+Actor, Task,
+    ToolAudit, ToolResult, Workspace, Artifact, Learning, EvalCandidate,
+    Validation, MemoryProfile) + `CheckpointKind`, `MemoryScope`,
+    `MemoryArchiveReason`. Moved `ProgressLedgerEvent` → `shared/agentGoal.ts`
+    and `AgentWorkspaceInput` → `shared/agentWorkspace.ts` (re-exported from main
+    for backward compatibility) so the shared contract can reference them.
+  - New `src/main/storage/`:
+    - `storageDb.ts` — `Storage` service (WAL, foreign_keys, FTS5 self-check,
+      eager idempotent migrations, `backup()`); `createInMemoryStorage` /
+      `createTempFileStorage` test helpers.
+    - `migrationBundle.ts` (auto-generated from `migrations/*.sql`) +
+      `migrations/0000_initial.sql` (all §1.2 tables + v1.1 patch tables +
+      FTS5 `memory_fts` + sync triggers + indexes) + `scripts/sync-migration-bundle.mjs`.
+    - `repositories/` — 17 repositories implementing the frozen interfaces
+      (run, trajectory, checkpoint, memory, goal, session, actor, task,
+      toolAudit, toolResult, workspace, artifact, learning, evalCandidate,
+      validation, memoryProfile, promotedEvalFixture). Payload-column parity.
+    - `backendResolver.ts` — `ZEROX_STORAGE_BACKEND` (`json`|`sqlite`|`dual`).
+  - Store dual-write proxies (public signatures unchanged; default `json` =
+    zero regression): `agentRunStore`, `agentTrajectoryStore` converted; others
+    remain on JSON pending cutover (repositories exist for downstream phases).
+  - `container.ts` — fault-tolerant `storage()` singleton + `storageBackend()`;
+    the two converted stores receive `backend` + `storage`. Falls back to `json`
+    if better-sqlite3 fails to load.
+  - `scripts/migrate-to-sqlite.mjs` (idempotent JSON→SQLite, `--dry-run`/
+    `--verify`, per-file error isolation) + `scripts/rollback-sqlite-to-json.mjs`
+    (SQLite→JSON, freezes existing JSON as `*.legacy.json`).
+  - `src/main/storage/README.md` (flag runbook, parity invariant, schema
+    evolution, migration/rollback runbook, native-module note).
+- Parity (observability hard constraint, contract §1.5):
+  - `src/main/storage/runGraphParity.test.ts` — a golden run covering all 11
+    node/gate-producing trajectory types yields deep-equal `projectRunGraph`
+    output from JSON vs SQLite; `fromSeq` tail parity.
+- Verification evidence:
+  - `npx tsc -p tsconfig.electron.json --noEmit` -> passed.
+  - `npm test` -> 140 files / 808 tests passed (was 135 / 767; +41 from the new
+    storage layer; zero regression — existing store tests run on `backend:"json"`).
+  - `npm run verify` (full build + agent eval 26/26 + memory eval 2/2) -> see
+    evidence below.
+- Open follow-ups (non-blocking downstream; tracked for cutover):
+  - Convert the remaining 15 stores to dual-write proxies (chatSessionStore,
+    memoryStore, agentGoalStore, multiAgentSessionStore, agentExecutionStore,
+    kernel/checkpointStore, taskStore, toolAuditLog, toolResultOffloadStore,
+    agentWorkspaceStore, agentValidationStore, memoryProfileStore,
+    agentLearningStore, agentEvalCandidateStore, agentPromotedEvalFixtures).
+    Each repository already exists; the conversion is mechanical.
+  - `electron-builder.yml: npmRebuild: true` + `@electron/rebuild` for packaged
+    `dist:mac` builds (native better-sqlite3 ABI).
+  - Switch runtime default from `dual` to `sqlite` after a shadow-read period
+    (T1.13 cutover runbook in `src/main/storage/README.md`).
+
 ## 2026-06-18 v2.3.6 release metadata and distribution handoff
 
 - Request:
