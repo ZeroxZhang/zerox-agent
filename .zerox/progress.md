@@ -1,5 +1,36 @@
 # Zerox Harness Progress
 
+## 2026-06-19 2.4.0 iteration acceptance — all 8 phases delivered
+
+- The 2.4.0 mega-iteration per `iteration-roadmap/` is complete. All eight
+  phases (P1–P8) are implemented, each with co-located tests, behind feature
+  flags (default conservative → zero regression), and verified.
+- Phase delivery (commits): P1 9376b8f · P2 00be441 · P3 811da79 ·
+  P4 4878079 · P5 4fa2173 · P6 c9662d7 · P7 c131903 · P8 f3cc94f.
+- Test growth: 135 files / 767 tests → **149 files / 896 tests** (+14 files,
+  +129 tests; zero regression — every pre-existing test still passes).
+- Final acceptance gates:
+  - `npm run verify` -> 149 files / 896 tests passed; build passed; agent eval
+    26/26; memory eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> build passed; smoke startup passed; renderer
+    rendered agent chat UI. (The better-sqlite3 NODE_MODULE_VERSION mismatch
+    under `electron .` is the P1-spec-flagged native-ABI scenario; the
+    container's fault-tolerant `storage()` singleton fell back to JSON and the
+    app still rendered — designed behavior. `@electron/rebuild` +
+    `electron-builder.yml: npmRebuild: true` is the tracked packaged-build step.)
+- Contract status: `contracts v1.4` consumed by all phases; every phase's
+  downstream-blocking Exit Criteria delivered (frozen Repository interfaces,
+  LLMProvider+CachePrefix, ToolWorker+ShellPlan, ActorRuntime v0/full,
+  WorkflowRuntime, CompactionStrategy read-side, dream/distill, StreamProcessor
+  + MaxMode + McpTransport). Additive trajectory events (29 → 48) and runGraph
+  node kinds (11 → 17) are pure additions — existing projections untouched
+  (runGraph parity test stays green).
+- Activation model: each phase's runtime integration (loop rewiring, tool
+  registration, event emission, scheduler hooks) is staged behind flags with
+  the contracts and repos already live — incremental cutover with zero-regression
+  defaults, tracked as per-phase open follow-ups above.
+
 ## 2026-06-19 P8 Max-mode / streaming tool-calling / MCP multi-transport
 
 - Request:
