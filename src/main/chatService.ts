@@ -4,6 +4,7 @@ import type { AgentToolExecutor } from "./agentToolExecutor";
 import { createChatAgentEvidenceRecorder } from "./chatAgentEvidence";
 import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
 import { runAgentLoop } from "./agentLoop";
+import { estimateMessageTokens } from "./contextManager";
 import type { CompactionStrategy } from "./kernel/compactionStrategy";
 import type { AppendChatMessageResult, ChatSessionStore } from "./chatSessionStore";
 import { extractAtomicMemoriesFromChatTurn } from "./memoryL1Extractor";
@@ -14,13 +15,18 @@ import {
   formatMemoryRecallContext,
   recallMemoriesWithBudget,
 } from "./memoryRecall";
-import type { ChatClient, ChatMessage } from "./openAiCompatibleClient";
+import type {
+  ChatClient,
+  ChatCompletionResponse,
+  ChatMessage,
+} from "./openAiCompatibleClient";
 import type { ScheduledTaskStore } from "./taskStore";
 import type { ToolAuthorizationService } from "./toolAuthorizationService";
 import type {
   ChatAgentStatus,
   ChatRelatedMemory,
   ChatSessionGoalSummary,
+  ChatSessionTokenUsage,
   ChatTaskStatusEvent,
   SendChatMessageInput,
   SendChatMessageResult,
@@ -89,7 +95,7 @@ export function createChatService(options: {
   memoryProfileStore?: MemoryProfileStore;
   chatSessionStore?: Pick<
     ChatSessionStore,
-    "appendMessage" | "attachGoal" | "clearActiveGoal"
+    "appendMessage" | "attachGoal" | "clearActiveGoal" | "addTokenUsage"
   >;
   goalService?: ChatGoalService;
   taskStore?: Pick<ScheduledTaskStore, "create" | "list">;
@@ -311,6 +317,7 @@ export function createChatService(options: {
       let reply: string;
       let toolCallsUsed = 0;
       let agentStatus: ChatAgentStatus | undefined;
+      let accumulatedUsage: ChatSessionTokenUsage | null = null;
 
       if (options.toolExecutor) {
         // Unified agent mode: chat goes through agent loop with tool access
@@ -364,6 +371,10 @@ export function createChatService(options: {
                 }
               },
               onModelResponse(response, turn) {
+                accumulatedUsage = mergeChatSessionTokenUsage(
+                  accumulatedUsage,
+                  toChatSessionTokenUsage(response.usage),
+                );
                 void evidence.append("model_response", {
                   turn,
                   hasContent: Boolean(response.content),
@@ -525,6 +536,10 @@ export function createChatService(options: {
               toolCallsExecuted: 0,
             });
           }
+          accumulatedUsage = mergeChatSessionTokenUsage(
+            accumulatedUsage,
+            toChatSessionTokenUsage(response.usage),
+          );
           reply = response.content ?? "";
           emitStatus.send({
             state: "completed",
@@ -576,6 +591,17 @@ export function createChatService(options: {
         assistantMessageId,
         userMessage,
         assistantReply: reply,
+      });
+      await recordSessionTokenUsage({
+        chatSessionStore: options.chatSessionStore,
+        sessionId,
+        usage:
+          accumulatedUsage ??
+          estimateChatTurnUsage([
+            { role: "system", content: buildChatSystemPrompt() },
+            ...chatMessages,
+            { role: "assistant", content: reply },
+          ]),
       });
 
       return {
@@ -1186,6 +1212,92 @@ async function searchRelatedMemories(options: {
     kind: "all",
     limit: options.limit,
   });
+}
+
+function toChatSessionTokenUsage(
+  usage: ChatCompletionResponse["usage"] | undefined,
+): ChatSessionTokenUsage | null {
+  if (!usage) {
+    return null;
+  }
+
+  const promptTokens = normalizeTokenCount(usage.promptTokens ?? usage.inputTokens);
+  const completionTokens = normalizeTokenCount(
+    usage.completionTokens ?? usage.outputTokens,
+  );
+  const totalTokens = normalizeTokenCount(
+    usage.totalTokens ?? (promptTokens ?? 0) + (completionTokens ?? 0),
+  );
+  if (totalTokens === undefined || totalTokens <= 0) {
+    return null;
+  }
+
+  return {
+    totalTokens,
+    ...(promptTokens !== undefined ? { promptTokens } : {}),
+    ...(completionTokens !== undefined ? { completionTokens } : {}),
+    estimated: false,
+  };
+}
+
+function mergeChatSessionTokenUsage(
+  current: ChatSessionTokenUsage | null,
+  next: ChatSessionTokenUsage | null,
+): ChatSessionTokenUsage | null {
+  if (!next) {
+    return current;
+  }
+  if (!current) {
+    return next;
+  }
+
+  const promptTokens = addOptionalTokenCounts(
+    current.promptTokens,
+    next.promptTokens,
+  );
+  const completionTokens = addOptionalTokenCounts(
+    current.completionTokens,
+    next.completionTokens,
+  );
+
+  return {
+    totalTokens: current.totalTokens + next.totalTokens,
+    ...(promptTokens !== undefined ? { promptTokens } : {}),
+    ...(completionTokens !== undefined ? { completionTokens } : {}),
+    estimated: current.estimated || next.estimated,
+  };
+}
+
+function estimateChatTurnUsage(messages: ChatMessage[]): ChatSessionTokenUsage {
+  return {
+    totalTokens: Math.max(1, estimateMessageTokens(messages)),
+    estimated: true,
+  };
+}
+
+async function recordSessionTokenUsage(options: {
+  chatSessionStore: Pick<ChatSessionStore, "addTokenUsage"> | undefined;
+  sessionId: string;
+  usage: ChatSessionTokenUsage;
+}): Promise<void> {
+  await options.chatSessionStore?.addTokenUsage(options.sessionId, options.usage);
+}
+
+function normalizeTokenCount(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return undefined;
+  }
+  return Math.max(0, Math.floor(value));
+}
+
+function addOptionalTokenCounts(
+  left: number | undefined,
+  right: number | undefined,
+): number | undefined {
+  if (left === undefined && right === undefined) {
+    return undefined;
+  }
+  return (left ?? 0) + (right ?? 0);
 }
 
 async function writeSessionMemory(options: {

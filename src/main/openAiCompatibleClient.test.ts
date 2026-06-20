@@ -170,6 +170,52 @@ describe("OpenAI-compatible chat client", () => {
     });
   });
 
+  it("returns provider token usage when present", async () => {
+    const client = createOpenAiCompatibleClient({
+      fetch: async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: "OK",
+                },
+                finish_reason: "stop",
+              },
+            ],
+            usage: {
+              prompt_tokens: 12,
+              completion_tokens: 5,
+              total_tokens: 17,
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    });
+
+    await expect(
+      client.complete({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret-key",
+        model: "agent-model",
+        temperature: 0.2,
+        maxTokens: 8192,
+        messages: [{ role: "user", content: "Hi" }],
+      }),
+    ).resolves.toEqual({
+      content: "OK",
+      toolCalls: [],
+      finishReason: "stop",
+      usage: {
+        inputTokens: 12,
+        outputTokens: 5,
+        promptTokens: 12,
+        completionTokens: 5,
+        totalTokens: 17,
+      },
+    });
+  });
+
   it("throws a compact error when the provider returns a non-2xx response", async () => {
     const client = createOpenAiCompatibleClient({
       fetch: async () =>

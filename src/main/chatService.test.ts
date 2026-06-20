@@ -9,7 +9,11 @@ import type { RunScheduledTaskResult } from "../shared/agentRuns";
 import type { MemoryInput, MemoryRecord, MemorySearchResult } from "../shared/memory";
 import type { ScheduledTask, ScheduledTaskInput } from "../shared/scheduledTasks";
 import { getDefaultTaskPermissionPolicy } from "../shared/toolPermissions";
-import type { ChatSessionGoalSummary, ChatTaskStatusEvent } from "../shared/chat";
+import type {
+  ChatSessionGoalSummary,
+  ChatSessionTokenUsage,
+  ChatTaskStatusEvent,
+} from "../shared/chat";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
 import { defineNativeToolDescriptor } from "../shared/nativeCapabilities";
 
@@ -177,6 +181,84 @@ describe("chat service", () => {
         relatedMemoryIds: ["mem_downloads"],
       },
     ]);
+  });
+
+  it("records provider token usage for a successful model reply", async () => {
+    const chatMessages: AppendChatMessageInput[] = [];
+    const tokenUsageWrites: Array<{
+      sessionId: string;
+      usage: ChatSessionTokenUsage;
+    }> = [];
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return {
+            content: "已完成。",
+            toolCalls: [],
+            finishReason: "stop",
+            usage: {
+              inputTokens: 100,
+              outputTokens: 25,
+              promptTokens: 100,
+              completionTokens: 25,
+              totalTokens: 125,
+            },
+          };
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore(chatMessages, { tokenUsageWrites }),
+      createId: () => "chat_usage",
+      now: () => new Date("2026-06-20T08:00:00.000Z"),
+    });
+
+    await service.sendMessage({ message: "统计 token" });
+
+    expect(tokenUsageWrites).toEqual([
+      {
+        sessionId: "persisted_session",
+        usage: {
+          totalTokens: 125,
+          promptTokens: 100,
+          completionTokens: 25,
+          estimated: false,
+        },
+      },
+    ]);
+  });
+
+  it("records estimated token usage when the provider omits usage", async () => {
+    const chatMessages: AppendChatMessageInput[] = [];
+    const tokenUsageWrites: Array<{
+      sessionId: string;
+      usage: ChatSessionTokenUsage;
+    }> = [];
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("已完成。");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore(chatMessages, { tokenUsageWrites }),
+      createId: () => "chat_usage_estimated",
+      now: () => new Date("2026-06-20T08:00:00.000Z"),
+    });
+
+    await service.sendMessage({ message: "估算 token" });
+
+    expect(tokenUsageWrites).toEqual([
+      {
+        sessionId: "persisted_session",
+        usage: expect.objectContaining({
+          totalTokens: expect.any(Number),
+          estimated: true,
+        }),
+      },
+    ]);
+    expect(tokenUsageWrites[0].usage.totalTokens).toBeGreaterThan(0);
   });
 
   it("creates and immediately starts a session goal from an explicit goal-setting message", async () => {
@@ -1247,6 +1329,10 @@ function createChatSessionStore(
   options: {
     activeGoal?: ChatSessionGoalSummary;
     attachedGoals?: ChatSessionGoalSummary[];
+    tokenUsageWrites?: Array<{
+      sessionId: string;
+      usage: ChatSessionTokenUsage;
+    }>;
   } = {},
 ) {
   return {
@@ -1276,6 +1362,10 @@ function createChatSessionStore(
         },
       };
     },
+    async addTokenUsage(sessionId: string, usage: ChatSessionTokenUsage) {
+      options.tokenUsageWrites?.push({ sessionId, usage });
+      return null;
+    },
     async attachGoal(_sessionId: string, goal: ChatSessionGoalSummary) {
       options.attachedGoals?.push(goal);
       return {
@@ -1289,6 +1379,9 @@ function createChatSessionStore(
         createdAt: "2026-06-06T08:00:00.000Z",
         updatedAt: "2026-06-06T08:00:00.000Z",
       };
+    },
+    async clearActiveGoal() {
+      return null;
     },
   };
 }

@@ -44,7 +44,13 @@ export type ChatCompletionResponse = {
   reasoningContent?: string;
   /** P8: token usage for runGraph cost aggregation (populated when the provider
    *  returns it; absent for providers that don't report usage). */
-  usage?: { inputTokens: number; outputTokens: number };
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+  };
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
 };
@@ -121,6 +127,7 @@ export function createOpenAiCompatibleClient(options?: {
         usage?: {
           prompt_tokens?: number;
           completion_tokens?: number;
+          total_tokens?: number;
           prompt_tokens_details?: { cached_tokens?: number };
         };
         error?: { message?: string };
@@ -139,6 +146,7 @@ export function createOpenAiCompatibleClient(options?: {
       const toolCalls = normalizeToolCalls(message?.tool_calls ?? []);
       const content = message?.content?.trim() || null;
       const reasoningContent = normalizeReasoningContent(message);
+      const usage = normalizeCompletionUsage(payload.usage);
 
       if (!content && !toolCalls.length) {
         throw new Error("LLM response did not include message content or tool calls.");
@@ -150,13 +158,10 @@ export function createOpenAiCompatibleClient(options?: {
         finishReason: choice?.finish_reason ?? "stop",
         ...(reasoningContent ? { reasoningContent } : {}),
         // P8: surface provider usage for runGraph cost aggregation.
-        ...(payload.usage
+        ...(usage
           ? {
-              usage: {
-                inputTokens: payload.usage.prompt_tokens ?? 0,
-                outputTokens: payload.usage.completion_tokens ?? 0,
-              },
-              ...(payload.usage.prompt_tokens_details?.cached_tokens !== undefined
+              usage,
+              ...(payload.usage?.prompt_tokens_details?.cached_tokens !== undefined
                 ? { cacheReadTokens: payload.usage.prompt_tokens_details.cached_tokens }
                 : {}),
             }
@@ -297,6 +302,43 @@ function readReasoningValue(value: unknown): string | undefined {
   }
 
   return undefined;
+}
+
+function normalizeCompletionUsage(
+  usage:
+    | {
+        prompt_tokens?: number;
+        completion_tokens?: number;
+        total_tokens?: number;
+      }
+    | undefined,
+): NonNullable<ChatCompletionResponse["usage"]> | undefined {
+  const promptTokens = normalizeTokenCount(usage?.prompt_tokens);
+  const completionTokens = normalizeTokenCount(usage?.completion_tokens);
+  const totalTokens = normalizeTokenCount(usage?.total_tokens);
+
+  if (
+    promptTokens === undefined &&
+    completionTokens === undefined &&
+    totalTokens === undefined
+  ) {
+    return undefined;
+  }
+
+  return {
+    inputTokens: promptTokens ?? 0,
+    outputTokens: completionTokens ?? 0,
+    ...(promptTokens !== undefined ? { promptTokens } : {}),
+    ...(completionTokens !== undefined ? { completionTokens } : {}),
+    ...(totalTokens !== undefined ? { totalTokens } : {}),
+  };
+}
+
+function normalizeTokenCount(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return undefined;
+  }
+  return Math.max(0, Math.floor(value));
 }
 
 export function createOpenAiCompatibleEmbeddingClient(options?: {
