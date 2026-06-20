@@ -450,7 +450,9 @@ export function createAppContainer(options: {
   }
 
   function toolAuditLog() {
-    return lazy("toolAuditLog", () => createToolAuditLog({ configDir }));
+    return lazy("toolAuditLog", () =>
+      createToolAuditLog({ configDir, backend: storageBackend(), storage: storage() ?? undefined }),
+    );
   }
 
   function toolAuthorizationService() {

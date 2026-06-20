@@ -99,3 +99,20 @@ describe("dual-write shadows to JSON", () => {
     });
   });
 });
+
+describe.each(["sqlite", "dual"] as StorageBackend[])(
+  "toolAuditLog backend=%s",
+  (backend) => {
+    it("append/list round-trip", async () => {
+      await withStorage(backend, async (dir, storage) => {
+        const { createToolAuditLog } = await import("../toolAuditLog");
+        const log = createToolAuditLog({ configDir: dir, backend, storage });
+        await log.append({ taskId: "t1", request: { toolName: "shell_exec", args: {} }, decision: { allowed: true, reason: "ok" } });
+        await log.append({ taskId: "t2", request: { toolName: "file_write", args: {} }, decision: { allowed: false, reason: "no" } });
+        const events = await log.list();
+        expect(events.length).toBe(2);
+        expect(events[0]!.request.toolName).toBe("file_write"); // newest first
+      });
+    });
+  },
+);

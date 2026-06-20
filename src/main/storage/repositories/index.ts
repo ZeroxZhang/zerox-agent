@@ -134,7 +134,7 @@ export function createToolAuditRepository(storage: Storage): ToolAuditRepository
       const limit = options?.limit ?? 1000;
       return selectPayloadRows<ToolAuditEvent>(
         db,
-        "SELECT payload FROM tool_audit ORDER BY created_at DESC LIMIT ?",
+        "SELECT payload FROM tool_audit ORDER BY created_at DESC, rowid DESC LIMIT ?",
         [limit],
       );
     },
