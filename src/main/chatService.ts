@@ -4,6 +4,7 @@ import type { AgentToolExecutor } from "./agentToolExecutor";
 import { createChatAgentEvidenceRecorder } from "./chatAgentEvidence";
 import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
 import { runAgentLoop } from "./agentLoop";
+import type { CompactionStrategy } from "./kernel/compactionStrategy";
 import type { AppendChatMessageResult, ChatSessionStore } from "./chatSessionStore";
 import { extractAtomicMemoriesFromChatTurn } from "./memoryL1Extractor";
 import type { MemoryProfileStore } from "./memoryProfileStore";
@@ -103,6 +104,8 @@ export function createChatService(options: {
   toolResultOffloadStore?: ToolResultOffloadStore;
   toolResultOffloadThreshold?: number;
   trajectoryStore?: AgentTrajectoryStore;
+  /** P2: overflow compaction strategy passed through to the chat agent loop. */
+  compactionStrategy?: CompactionStrategy;
 }): ChatService {
   const createId = options.createId ?? randomUUID;
   const memoryLimit = options.memoryLimit ?? 4;
@@ -334,6 +337,9 @@ export function createChatService(options: {
               tools: toolExecutor.getRegistry().getDefinitions(),
               toolResultOffloadStore: options.toolResultOffloadStore,
               toolResultOffloadThreshold: options.toolResultOffloadThreshold,
+              ...(options.compactionStrategy
+                ? { compactionStrategy: options.compactionStrategy }
+                : {}),
               pauseOnTurnLimit: true,
               pauseOnFailureLoop: true,
               ...(continuationToResume

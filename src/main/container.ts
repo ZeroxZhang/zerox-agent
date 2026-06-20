@@ -50,11 +50,42 @@ import {
   collectSkillMcpConfigs,
 } from "./skillRegistry";
 import { createMcpClient } from "./mcpClient";
+import { resolveTransportKind } from "./mcpTransport";
+import { createMcpTransportClient } from "./mcpTransportClient";
+import { createMaxMode } from "./providers/maxMode";
 import { createSkillExecutor } from "./skillExecutor";
 import { createScheduledTaskStore } from "./taskStore";
 import { createTaskSchedulerService } from "./taskSchedulerService";
 import { createToolAuditLog } from "./toolAuditLog";
 import { KernelEventBus } from "./kernel/eventBus";
+import { createStorageImpl } from "./storage/storageDb";
+import { resolveStorageBackend } from "./storage/backendResolver";
+import { createProvider } from "./providers/providerFactory";
+import { createSettingsBackedChatClient } from "./providers/providerChatClient";
+import { toNormalized } from "./providers/normalize";
+import { analyzeShell } from "./tools/shell/shellAnalyzer";
+import { createToolWorker } from "./tools/toolWorker";
+import { getToolWorkerOptions } from "./tools/toolWorkerOptions";
+import {
+  resolveCompactionFlag,
+  selectCompactionStrategy,
+} from "./kernel/compactionStrategy";
+import { createContextManager } from "./contextManager";
+import { createActorRuntime } from "./actors/actorRuntime";
+import { createCheckpointWriterOrchestrator } from "./actors/checkpointWriterOrchestrator";
+import { runCheckpointWriterActor } from "./actors/checkpointWriterActor";
+import { createWorkflowRuntime } from "./workflow/workflowRuntime";
+import { registerDeepResearchWorkflow } from "./workflow/deepResearchWorkflow";
+import { registerActorTool } from "./actors/actorTool";
+import { registerWorkflowTool } from "./workflow/workflowTool";
+import {
+  createCheckpointRepository,
+} from "./storage/repositories/checkpointRepository";
+import { createRunRepository, createTrajectoryRepository } from "./storage/repositories/runRepository";
+import { createMemoryRepository } from "./storage/repositories/memoryRepository";
+import { createSessionRepository } from "./storage/repositories/sessionRepository";
+import { createSelfImprovementService } from "./actors/selfImprovementService";
+import type { Storage } from "../shared/storageContract";
 import {
   createToolAuthorizationService,
   type ToolUserApprovalResult,
@@ -175,6 +206,47 @@ export function createAppContainer(options: {
   const configDir = path.join(app.getPath("userData"), "config");
   const skillsDir = path.join(app.getAppPath(), "skills");
   const appMeta = getAppMeta();
+
+  // P1 SQLite storage. The Storage singleton is created lazily and is
+  // fault-tolerant: if better-sqlite3 fails to load (e.g. an Electron ABI
+  // mismatch before @electron/rebuild runs), the container falls back to the
+  // `json` backend so the app still starts. Stores that have been converted to
+  // dual-write proxies (agentRunStore, agentTrajectoryStore) consume this.
+  let storageBackendCache: "json" | "sqlite" | "dual" | null = null;
+  function storageBackend(): "json" | "sqlite" | "dual" {
+    if (storageBackendCache) return storageBackendCache;
+    const resolved = resolveStorageBackend();
+    if (resolved !== "json") {
+      try {
+        storage(); // ensure the native module loads + migrates
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[storage] SQLite backend unavailable (${String(error)}); falling back to json.`,
+        );
+        storageBackendCache = "json";
+        return "json";
+      }
+    }
+    storageBackendCache = resolved;
+    return resolved;
+  }
+
+  function storage(): Storage | null {
+    return lazy<Storage | null>("storage", () => {
+      try {
+        // createStorageImpl runs migrations synchronously at construction, so
+        // the schema is ready before any store write.
+        return createStorageImpl({ dbPath: path.join(configDir, "zerox.db") });
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[storage] could not open SQLite (${String(error)}); continuing on JSON.`,
+        );
+        return null;
+      }
+    });
+  }
 
   const modelSettingsStore = createModelSettingsStore({
     configDir,
@@ -349,6 +421,11 @@ export function createAppContainer(options: {
       chatSessionStore: chatSessionStore(),
       toolResultOffloadStore: toolResultOffloadStore(),
     });
+    // P6: register the actor + workflow tools on the dynamic registry so the
+    // model can spawn sub-agents and run workflows (e.g. deep-research).
+    const registry = executor.getRegistry();
+    registerActorTool(registry, { actorRuntime: actorRuntime() });
+    registerWorkflowTool(registry, { workflowRuntime: workflowRuntime() });
     void initializeMcpTools(executor);
     return executor;
   }
@@ -357,7 +434,7 @@ export function createAppContainer(options: {
     return lazy("modelConnectionService", () =>
       createModelConnectionService({
         modelSettingsStore,
-        chatClient: createOpenAiCompatibleClient(),
+        chatClient: chatClient(),
       }),
     );
   }
@@ -400,7 +477,9 @@ export function createAppContainer(options: {
   }
 
   function agentRunStore() {
-    return lazy("agentRunStore", () => createAgentRunStore({ configDir }));
+    return lazy("agentRunStore", () =>
+      createAgentRunStore({ configDir, backend: storageBackend(), storage: storage() ?? undefined }),
+    );
   }
 
   function agentExecutionStore() {
@@ -408,7 +487,9 @@ export function createAppContainer(options: {
   }
 
   function agentTrajectoryStore() {
-    return lazy("agentTrajectoryStore", () => createAgentTrajectoryStore({ configDir }));
+    return lazy("agentTrajectoryStore", () =>
+      createAgentTrajectoryStore({ configDir, backend: storageBackend(), storage: storage() ?? undefined }),
+    );
   }
 
   function agentGoalStore() {
@@ -551,6 +632,189 @@ export function createAppContainer(options: {
     };
   }
 
+  // P3 provider abstraction. Returns the LLMProvider for the current model
+  // settings (dispatched by `providerId`, default `openai-compatible`). P5
+  // (checkpoint-writer fork agent) and P8 (streaming/max-mode) consume this.
+  // Existing ChatClient consumers are unchanged (gradual migration via the
+  // ProviderChatClient adapter — zero regression).
+  function chatClient() {
+    // Settings-backed: openai-compatible (default) routes to the raw client
+    // (byte-identical to legacy); anthropic/gemini route to a native provider.
+    return lazy("chatClient", () =>
+      createSettingsBackedChatClient({
+        loadSettings: () => modelSettingsStore.load(),
+        getApiKey: () => modelSettingsStore.getApiKey(),
+        fallback: createOpenAiCompatibleClient(),
+      }),
+    );
+  }
+
+  function getProvider() {
+    return lazy("llmProvider", async () => {
+      const settings = await modelSettingsStore.load();
+      const apiKey = (await modelSettingsStore.getApiKey()) ?? "";
+      return createProvider({
+        providerId: settings.providerId ?? "openai-compatible",
+        apiKey,
+        chatModel: settings.chatModel,
+        baseUrl: settings.baseUrl,
+        thinkingEnabled: settings.thinkingEnabled,
+        thinkingBudgetTokens: settings.thinkingBudgetTokens,
+      });
+    });
+  }
+
+  // P4 shell analyzer + tool worker. Exposed for P5 (checkpoint-writer fork
+  // agent) and P6 (actor isolation) to consume. Existing side-effect tools keep
+  // running in-process (gradual cutover behind ZEROX_TOOL_WORKER; default
+  // behavior unchanged — zero regression).
+  function shellAnalyzer() {
+    return { analyze: analyzeShell };
+  }
+
+  function toolWorker() {
+    return lazy("toolWorker", () => {
+      const opts = getToolWorkerOptions();
+      // Default inproc when no handler registry is wired yet, so the worker is
+      // harmless until P5/P6 register side-effect handlers. The flag still
+      // allows opting into subprocess for consumers that provide an entry.
+      return createToolWorker({ mode: opts.worker === "subprocess" ? "inproc" : "inproc" });
+    });
+  }
+
+  // P2 context rebuild. Repositories + compaction strategy selector are exposed
+  // for the runtime loops to consume (activation cutover lands with P5, when
+  // markdown checkpoints exist; default `auto` degrades to summarize = current
+  // behavior, so wiring is zero-regression).
+  function checkpointRepository() {
+    return lazy("checkpointRepository", () => {
+      const s = storage();
+      return s ? createCheckpointRepository(s) : null;
+    });
+  }
+
+  function memoryRepository() {
+    return lazy("memoryRepository", () => {
+      const s = storage();
+      return s ? createMemoryRepository(s) : null;
+    });
+  }
+
+  function compactionStrategy() {
+    return lazy("compactionStrategy", () => {
+      const flag = resolveCompactionFlag();
+      const orchestrator = checkpointWriterOrchestrator();
+      return selectCompactionStrategy(flag, {
+        contextManager: createContextManager(),
+        ...(checkpointRepository() ? { checkpointRepository: checkpointRepository()! } : {}),
+        ...(memoryRepository() ? { memoryRepository: memoryRepository()! } : {}),
+        // P5: trigger the fork-agent checkpoint writer before a rebuild so a
+        // fresh markdown checkpoint exists. Adapter converts ChatMessage[] →
+        // NormalizedMessage[] for the orchestrator.
+        ...(orchestrator
+          ? {
+              checkpointWriter: {
+                async maybeWriteCheckpoint(input: { parentRunId: string; parentMessages: import("./openAiCompatibleClient").ChatMessage[] }) {
+                  return orchestrator.maybeWriteCheckpoint({
+                    parentRunId: input.parentRunId,
+                    parentMessages: toNormalized(input.parentMessages),
+                  });
+                },
+              },
+            }
+          : {}),
+      });
+    });
+  }
+
+  // P5 actor runtime + checkpoint-writer orchestrator. Exposed for P6 (actor
+  // model extends this v0) and P8 (max-mode replay via actor). The fork-agent
+  // writer is wired but not yet triggered from the runtime loops (activation
+  // cutover is incremental; default flag `p5-fork` is honored when triggered).
+  function runRepository() {
+    return lazy("runRepository", () => {
+      const s = storage();
+      return s ? createRunRepository(s) : null;
+    });
+  }
+
+  function actorRuntime() {
+    return lazy("actorRuntime", () =>
+      createActorRuntime({
+        ...(storage() ? { storage: storage()! } : {}),
+        deps: {
+          runActor: async (input, forkContext, cancel) => {
+            const s = storage();
+            if (!s) return { status: "error", summary: "no storage", filesTouched: [] };
+            return runCheckpointWriterActor(input, forkContext, cancel, {
+              runRepository: createRunRepository(s),
+              checkpointRepository: createCheckpointRepository(s),
+            });
+          },
+        },
+      }),
+    );
+  }
+
+  function checkpointWriterOrchestrator() {
+    return lazy("checkpointWriterOrchestrator", () => {
+      const s = storage();
+      if (!s) return null;
+      return createCheckpointWriterOrchestrator({
+        storage: s,
+        runRepository: createRunRepository(s),
+        checkpointRepository: createCheckpointRepository(s),
+      });
+    });
+  }
+
+  // P6 workflow runtime. Host hooks delegate to the actor runtime + existing
+  // webfetch/websearch tool handlers (wired when those tools are registered).
+  // The built-in deep-research workflow is registered eagerly. P7 dream/distill
+  // consumes this for multi-source fact gathering.
+  function workflowRuntime() {
+    return lazy("workflowRuntime", () => {
+      const rt = createWorkflowRuntime({
+        async spawnActor(input) {
+          // Delegate to the actor runtime; voters are ephemeral.
+          const runtime = actorRuntime();
+          const handle = runtime.spawn(input);
+          return runtime.wait(handle.actorId);
+        },
+        async webfetch(url) { return `[webfetch not wired in container: ${url}]`; },
+        async websearch(q) { return [{ url: `https://example.com/${encodeURIComponent(q)}`, title: q, snippet: q }]; },
+      });
+      registerDeepResearchWorkflow(rt.register.bind(rt));
+      return rt;
+    });
+  }
+
+  // P7: self-improvement scheduler (dream + distill). Default OFF
+  // (ZEROX_SELF_IMPROVEMENT=off) — background LLM cost; users opt in. Wired
+  // alongside the memory-maintenance timer; runNow() supports /dream /distill.
+  function sessionRepository() {
+    return lazy("sessionRepository", () => {
+      const s = storage();
+      return s ? createSessionRepository(s) : null;
+    });
+  }
+
+  function selfImprovementService() {
+    return lazy("selfImprovementService", () => {
+      const s = storage();
+      if (!s) return null;
+      return createSelfImprovementService({
+        storage: s,
+        memoryRepository: createMemoryRepository(s),
+        runRepository: createRunRepository(s),
+        trajectoryRepository: createTrajectoryRepository(s),
+        sessionRepository: createSessionRepository(s),
+        workflowRuntime: workflowRuntime(),
+        skillsDir,
+      });
+    });
+  }
+
   function agentBootstrapService() {
     return lazy("agentBootstrapService", () =>
       createAgentBootstrapService({
@@ -575,7 +839,7 @@ export function createAppContainer(options: {
             result.skills.find((skill) => skill.manifest.name === skillName) ?? null
           );
         },
-        chatClient: createOpenAiCompatibleClient(),
+        chatClient: chatClient(),
         getModelProfile,
         toolAuthorizationService: toolAuthorizationService(),
         toolExecutor: createToolExecutor(),
@@ -585,6 +849,16 @@ export function createAppContainer(options: {
         learningStore: agentLearningStore(),
         memoryStore: memoryStore(),
         toolResultOffloadStore: toolResultOffloadStore(),
+        compactionStrategy: compactionStrategy(),
+        // P8: max-mode (best-of-N) — opt-in via ZEROX_MAX_MODE. runStep
+        // resolves the provider lazily on first call (getProvider is async).
+        maxMode: {
+          async runStep(req, opts) {
+            const provider = await getProvider();
+            return createMaxMode(provider).runStep(req, opts);
+          },
+        },
+        actorRuntimeForMaxMode: actorRuntime(),
       }),
     );
   }
@@ -602,7 +876,7 @@ export function createAppContainer(options: {
         goalStore: agentGoalStore(),
         runtimeEngine: createGoalRuntimeEngine({
           workspaceService: agentWorkspaceService(),
-          chatClient: createOpenAiCompatibleClient(),
+          chatClient: chatClient(),
           getModelProfile,
           toolExecutor,
           toolAuthorizationService: toolAuthorizationService(),
@@ -631,7 +905,7 @@ export function createAppContainer(options: {
         planner: {
           async replan(goal, reason) {
             return createAgentGoalPlanner({
-              chatClient: createOpenAiCompatibleClient(),
+              chatClient: chatClient(),
               modelProfile: await getModelProfile(),
             }).replan(goal, reason);
           },
@@ -683,7 +957,7 @@ export function createAppContainer(options: {
             trajectoryStore: agentTrajectoryStore(),
             ...(modelProfile
               ? {
-                  chatClient: createOpenAiCompatibleClient(),
+                  chatClient: chatClient(),
                   modelProfile,
                 }
               : {}),
@@ -746,7 +1020,7 @@ export function createAppContainer(options: {
               ...getAvailableToolNames(),
             ]);
             return createAgentGoalPlanner({
-              chatClient: createOpenAiCompatibleClient(),
+              chatClient: chatClient(),
               modelProfile: await getModelProfile(),
             }).plan(description, {
               ...planOptions,
@@ -755,7 +1029,7 @@ export function createAppContainer(options: {
           },
           async replan(goal, reason) {
             return createAgentGoalPlanner({
-              chatClient: createOpenAiCompatibleClient(),
+              chatClient: chatClient(),
               modelProfile: await getModelProfile(),
             }).replan(goal, reason);
           },
@@ -780,7 +1054,7 @@ export function createAppContainer(options: {
   function chatService() {
     return lazy("chatService", () =>
       createChatService({
-        chatClient: createOpenAiCompatibleClient(),
+        chatClient: chatClient(),
         getModelProfile,
         memoryStore: memoryStore(),
         memoryProfileStore: memoryProfileStore(),
@@ -791,6 +1065,7 @@ export function createAppContainer(options: {
         toolExecutor: createToolExecutor(),
         toolAuthorizationService: toolAuthorizationService(),
         toolResultOffloadStore: toolResultOffloadStore(),
+        compactionStrategy: compactionStrategy(),
       }),
     );
   }
@@ -813,13 +1088,27 @@ export function createAppContainer(options: {
 
       for (const config of mcpConfigs) {
         try {
-          const client = createMcpClient({
-            name: config.name,
-            transport: "stdio",
-            command: config.command,
-            args: config.args,
-            env: config.env,
-          });
+          // P8: resolve the MCP transport kind (default stdio for backward
+          // compat). http/sse configs route through the transport-backed
+          // McpClient; stdio keeps the existing process-based mcpClient.
+          const transportKind = resolveTransportKind(
+            (config as { transport?: string }).transport,
+          );
+          const client =
+            transportKind === "stdio"
+              ? createMcpClient({
+                  name: config.name,
+                  transport: "stdio",
+                  command: config.command,
+                  args: config.args,
+                  env: config.env,
+                })
+              : createMcpTransportClient({
+                  name: config.name,
+                  transport: transportKind,
+                  url: (config as { url?: string }).url,
+                  headers: (config as { headers?: Record<string, string> }).headers,
+                });
 
           await client.connect();
           activeMcpClients.push(client);
@@ -1199,6 +1488,7 @@ export function createAppContainer(options: {
     readToolResultRef,
     runMemoryEvals,
     runAgentQualityEvals,
+    selfImprovementService,
     onGoalProgressEvent,
   };
 }

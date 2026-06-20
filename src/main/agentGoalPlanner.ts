@@ -10,16 +10,27 @@ import {
   type Milestone,
   type SuccessCriterion,
 } from "../shared/agentGoal";
+import type {
+  AgentTaskContract,
+  ChromeBookmarksTaskContract,
+} from "../shared/agentTaskContract";
+import {
+  createChromeBookmarkArtifactCriterion,
+  hasTaskContractAcceptanceCriteria,
+} from "../shared/agentTaskContractAcceptance";
 import { classifyTaskFrame } from "../shared/agentTaskStrategy";
+
+type AgentGoalPlanOptions = {
+  successCriteria: SuccessCriterion[];
+  availableTools: string[];
+  availableSkills: string[];
+  taskContract?: AgentTaskContract;
+};
 
 export type AgentGoalPlanner = {
   plan(
     goalDescription: string,
-    options: {
-      successCriteria: SuccessCriterion[];
-      availableTools: string[];
-      availableSkills: string[];
-    },
+    options: AgentGoalPlanOptions,
   ): Promise<Milestone[]>;
   replan(goal: Goal, reason: string): Promise<Milestone[]>;
 };
@@ -118,16 +129,54 @@ export function createAgentGoalPlanner(options: {
 
 function createNativeChromeBookmarkPlan(
   goalDescription: string,
-  options: {
-    successCriteria: SuccessCriterion[];
-    availableTools: string[];
-  },
+  options: Pick<
+    AgentGoalPlanOptions,
+    "successCriteria" | "availableTools" | "taskContract"
+  >,
 ): Milestone[] | null {
+  if (options.taskContract) {
+    if (!isSupportedChromeBookmarkContract(options.taskContract)) {
+      return null;
+    }
+    if (!options.availableTools.includes("chrome_bookmarks_read")) {
+      return null;
+    }
+    if (
+      !isEvidenceBackedModelReviewOnly(options.successCriteria) &&
+      !hasTaskContractAcceptanceCriteria(
+        options.successCriteria,
+        options.taskContract,
+      )
+    ) {
+      return null;
+    }
+    return createChromeBookmarkMilestones(
+      options.successCriteria,
+      options.taskContract,
+    );
+  }
+
+  if (!isEvidenceBackedModelReviewOnly(options.successCriteria)) {
+    return null;
+  }
+
   if (!isChromeBookmarkGoal(goalDescription, options.availableTools)) {
     return null;
   }
-  if (!isEvidenceBackedModelReviewOnly(options.successCriteria)) {
-    return null;
+
+  return createChromeBookmarkMilestones(options.successCriteria);
+}
+
+function createChromeBookmarkMilestones(
+  successCriteria: SuccessCriterion[],
+  taskContract?: ChromeBookmarksTaskContract,
+): Milestone[] {
+  const milestoneCriteria = cloneSuccessCriteria(successCriteria);
+  if (
+    !taskContract ||
+    !hasTaskContractAcceptanceCriteria(successCriteria, taskContract)
+  ) {
+    milestoneCriteria.push(createChromeBookmarkArtifactCriterion(taskContract));
   }
 
   return [
@@ -136,34 +185,70 @@ function createNativeChromeBookmarkPlan(
       description:
         "Read Chrome bookmarks with chrome_bookmarks_read, present a concise preview, and write complete bookmark_list.md and goalEvidence.md artifacts.",
       dependsOn: [],
-      successCriteria: [
-        ...cloneSuccessCriteria(options.successCriteria),
-        {
-          id: "criterion_chrome_bookmark_artifacts",
-          description: "Chrome bookmark artifacts are written.",
-          acceptanceChecks: [
-            {
-              id: "check_bookmark_list_artifact",
-              kind: "file_exists",
-              description: "Complete Chrome bookmark list artifact exists.",
-              params: { path: "bookmark_list.md" },
-              requiresEvidence: false,
-            },
-            {
-              id: "check_goal_evidence_artifact",
-              kind: "file_exists",
-              description: "Goal evidence artifact exists.",
-              params: { path: "goalEvidence.md" },
-              requiresEvidence: false,
-            },
-          ],
-        },
-      ],
+      successCriteria: milestoneCriteria,
       state: "ready",
       runIds: [],
       attempts: 0,
     },
   ];
+}
+
+function isSupportedChromeBookmarkContract(
+  contract: unknown,
+): contract is ChromeBookmarksTaskContract {
+  if (!isRecord(contract)) {
+    return false;
+  }
+  const source = contract.source;
+  const transform = contract.transform;
+  const deliverable = contract.deliverable;
+  const destination = isRecord(deliverable) ? deliverable.destination : undefined;
+  const acceptance = contract.acceptance;
+  const capabilities = contract.capabilities;
+
+  return (
+    contract.schemaVersion === 1 &&
+    contract.taskKind === "local_data_to_artifact" &&
+    contract.mode === "deterministic" &&
+    isRecord(source) &&
+    source.type === "chrome_bookmarks" &&
+    isRecord(transform) &&
+    transform.type === "grouped_markdown" &&
+    isRecord(deliverable) &&
+    deliverable.artifactId === "bookmark_list" &&
+    deliverable.artifactRef === "artifact:bookmark_list" &&
+    deliverable.mediaType === "text/markdown" &&
+    isRecord(destination) &&
+    destination.kind === "desktop" &&
+    destination.filename === "bookmark_list.md" &&
+    isRecord(acceptance) &&
+    acceptance.provenanceRequired === true &&
+    hasExpectedEvidenceRefs(acceptance.evidenceRefs) &&
+    hasChromeBookmarksReadCapability(capabilities)
+  );
+}
+
+function hasExpectedEvidenceRefs(evidenceRefs: unknown): boolean {
+  if (!Array.isArray(evidenceRefs) || evidenceRefs.length !== 2) {
+    return false;
+  }
+
+  return (
+    evidenceRefs[0] === "artifact:bookmark_list" &&
+    evidenceRefs[1] === "artifact:goalEvidence"
+  );
+}
+
+function hasChromeBookmarksReadCapability(capabilities: unknown): boolean {
+  return (
+    Array.isArray(capabilities) &&
+    capabilities.some(
+      (capability) =>
+        isRecord(capability) &&
+        capability.id === "chrome_bookmarks_read" &&
+        capability.toolName === "chrome_bookmarks_read",
+    )
+  );
 }
 
 function isChromeBookmarkGoal(

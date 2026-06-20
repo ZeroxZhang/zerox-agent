@@ -1,0 +1,256 @@
+import { describe, expect, it } from "vitest";
+import { writeFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
+import { createInMemoryStorage } from "../storageDb";
+import {
+  createArtifactRepository,
+  createEvalCandidateRepository,
+  createLearningRepository,
+  createMemoryProfileRepository,
+  createPromotedEvalFixtureRepository,
+  createTaskRepository,
+  createToolAuditRepository,
+  createToolResultRepository,
+  createValidationRepository,
+  createWorkspaceRepository,
+} from "./index";
+import { createCheckpointRepository } from "./checkpointRepository";
+import { createGoalRepository } from "./goalRepository";
+import { createMemoryRepository } from "./memoryRepository";
+import { createSessionRepository, createActorRepository } from "./sessionRepository";
+import type { Goal } from "../../../shared/agentGoal";
+import type { MemoryRecord } from "../../../shared/memory";
+import type { AgentEvalCandidate } from "../../../shared/agentEvalCandidate";
+
+function baseGoal(overrides: Partial<Goal> = {}): Goal {
+  return {
+    id: "goal-1",
+    description: "Test goal",
+    successCriteria: [],
+    milestones: [],
+    status: "executing",
+    budget: { maxTurns: 10, maxMinutes: 60, maxCostUsd: 1 } as Goal["budget"],
+    budgetUsage: { turns: 0, minutes: 0, costUsd: 0 } as Goal["budgetUsage"],
+    reviewPolicy: { mode: "human" } as Goal["reviewPolicy"],
+    planVersion: 1,
+    createdAt: "2026-06-19T00:00:00.000Z",
+    updatedAt: "2026-06-19T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+describe("CheckpointRepository", () => {
+  it("write/latest/list/read/delete + listActive", async () => {
+    const storage = await createInMemoryStorage();
+    const ck = createCheckpointRepository(storage);
+    const ref = ck.write("run-1", "runtime", { status: "executing", turn: 1 });
+    ck.write("run-1", "runtime", { status: "done", turn: 2 });
+    ck.write("run-1", "checkpoint", { messages: [] });
+    expect(ck.latest("run-1", "runtime")?.payload).toMatchObject({ turn: 2 });
+    expect(ck.list("run-1").length).toBe(3);
+    expect(ck.read(ref)).toMatchObject({ turn: 1 });
+    // listActive excludes terminal runtime statuses
+    expect(ck.listActive().length).toBe(0);
+    ck.write("run-2", "runtime", { status: "executing" });
+    expect(ck.listActive().length).toBe(1);
+    expect(ck.delete("run-1")).toBe(true);
+    expect(ck.list("run-1").length).toBe(0);
+    storage.close();
+  });
+});
+
+describe("MemoryRepository", () => {
+  it("write/get/search/list/archive/delete", async () => {
+    const storage = await createInMemoryStorage();
+    const mem = createMemoryRepository(storage);
+    const rec: MemoryRecord = {
+      kind: "semantic",
+      title: "SQLite storage layer",
+      content: "The agent now persists runs to SQLite.",
+      tags: ["storage", "sqlite"],
+      source: { type: "manual" },
+      importance: 4,
+      id: "m1",
+      createdAt: "2026-06-19T00:00:00.000Z",
+      updatedAt: "2026-06-19T00:00:00.000Z",
+    };
+    mem.write(rec);
+    expect(mem.get("m1")?.title).toBe("SQLite storage layer");
+    const results = mem.search({ query: "sqlite" });
+    expect(results.length).toBe(1);
+    expect(results[0].record.id).toBe("m1");
+    mem.archive("m1", undefined, "stale");
+    expect(mem.get("m1")?.archivedAt).toBeTruthy();
+    expect(mem.get("m1")?.archiveReason).toBe("stale");
+    // archived records excluded by default
+    expect(mem.search({ query: "sqlite" }).length).toBe(0);
+    expect(mem.search({ query: "sqlite", includeArchived: true }).length).toBe(1);
+    expect(mem.delete("m1")).toBe(true);
+    expect(mem.get("m1")).toBeNull();
+    storage.close();
+  });
+});
+
+describe("GoalRepository", () => {
+  it("save/get/listActive/listByChatSession/ledger/delete", async () => {
+    const storage = await createInMemoryStorage();
+    const goals = createGoalRepository(storage);
+    const g = baseGoal({ id: "g1", chatSessionId: "sess-1", status: "executing" });
+    goals.save(g);
+    expect(goals.get("g1")?.id).toBe("g1");
+    expect(goals.listActive().length).toBe(1);
+    expect(goals.listByChatSession("sess-1").length).toBe(1);
+    goals.appendLedger("g1", { at: "2026-06-19T00:00:01.000Z", kind: "goal_planned", summary: "planned" });
+    goals.appendLedger("g1", { at: "2026-06-19T00:00:02.000Z", kind: "milestone_started", milestoneId: "m1", summary: "started" });
+    const ledger = goals.readLedger("g1");
+    expect(ledger.length).toBe(2);
+    expect(ledger[1].kind).toBe("milestone_started");
+    goals.save({ ...g, status: "achieved" });
+    expect(goals.listActive().length).toBe(0);
+    expect(goals.delete("g1")).toBe(true);
+    storage.close();
+  });
+});
+
+describe("SessionRepository + ActorRepository", () => {
+  it("creates sessions, appends child runs, messages, searches, actors", async () => {
+    const storage = await createInMemoryStorage();
+    const sessions = createSessionRepository(storage);
+    const actors = createActorRepository(storage);
+    sessions.createSession({ id: "s1", kind: "multi_agent", title: "Research swarm", status: "running", payload: {} });
+    const updated = sessions.appendChildRun("s1", "run-9", "researcher");
+    expect(updated?.payload).toMatchObject({ childRunIds: ["run-9"], roles: { "run-9": "researcher" } });
+    sessions.appendMessage({ sessionId: "s1", role: "user", content: "find sqlite docs" });
+    const hits = sessions.searchMessages({ query: "sqlite" });
+    expect(hits.length).toBe(1);
+    expect(hits[0].sessionTitle).toBe("Research swarm");
+    actors.create({ id: "a1", runId: "run-9", contextMode: "state", status: "spawning", task: "research" });
+    actors.updateStatus("a1", "done");
+    expect(actors.get("a1")?.status).toBe("done");
+    expect(actors.listByRun("run-9").length).toBe(1);
+    storage.close();
+  });
+});
+
+describe("remaining repositories", () => {
+  it("task create/recordRun/setEnabled/list/get/delete", async () => {
+    const storage = await createInMemoryStorage();
+    const tasks = createTaskRepository(storage);
+    const task = tasks.create({ name: "Daily", skillName: "noop", enabled: true, schedule: { kind: "manual" }, input: {} });
+    expect(tasks.get(task.id)?.name).toBe("Daily");
+    tasks.recordRun(task.id, new Date("2026-06-19T01:00:00.000Z"));
+    expect(tasks.get(task.id)?.lastRunAt).toBeTruthy();
+    tasks.setEnabled(task.id, false);
+    expect(tasks.get(task.id)?.enabled).toBe(false);
+    expect(tasks.list().length).toBe(1);
+    expect(tasks.delete(task.id)).toBe(true);
+    storage.close();
+  });
+
+  it("toolAudit append/list", async () => {
+    const storage = await createInMemoryStorage();
+    const audit = createToolAuditRepository(storage);
+    audit.append({ taskId: "t1", request: { toolName: "shell_exec", args: {} }, decision: { allowed: true, reason: "ok" } });
+    expect(audit.list().length).toBe(1);
+    storage.close();
+  });
+
+  it("toolResult write/read with raw string content", async () => {
+    const storage = await createInMemoryStorage();
+    const tr = createToolResultRepository(storage);
+    const ref = tr.write({ runId: "r1", content: 'not json { raw' });
+    expect(tr.read(ref.relativePath)).toBe('not json { raw');
+    expect(tr.read(ref.refId)).toBe('not json { raw');
+    storage.close();
+  });
+
+  it("workspace create/save/touch/list/get/delete", async () => {
+    const storage = await createInMemoryStorage();
+    const ws = createWorkspaceRepository(storage);
+    const w = ws.create({ name: "proj", rootPath: "/tmp/proj", kind: "project", cleanup: "keep" });
+    expect(ws.get(w.id)?.rootPath).toBe("/tmp/proj");
+    ws.touch(w.id);
+    expect(ws.get(w.id)?.lastUsedAt).toBeTruthy();
+    expect(ws.list().length).toBe(1);
+    expect(ws.delete(w.id)).toBe(true);
+    storage.close();
+  });
+
+  it("artifact writeProvenance/get/listByRun", async () => {
+    const dir = join(tmpdir(), `zerox-art-${randomUUID()}`);
+    mkdirSync(dir, { recursive: true });
+    const artifactPath = join(dir, "out.txt");
+    writeFileSync(artifactPath, "hello world");
+    const storage = await createInMemoryStorage();
+    const arts = createArtifactRepository(storage);
+    const manifest = arts.writeProvenance({
+      artifactPath,
+      artifactId: "art-1",
+      artifactRef: "ref-1",
+      runId: "run-1",
+      source: { type: "tool" },
+    });
+    expect(manifest.destination.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(manifest.destination.sizeBytes).toBe(11);
+    expect(arts.get("art-1")?.artifactId).toBe("art-1");
+    expect(arts.listByRun("run-1").length).toBe(1);
+    storage.close();
+  });
+
+  it("learning create/list/setStatus", async () => {
+    const storage = await createInMemoryStorage();
+    const lrn = createLearningRepository(storage);
+    const c = lrn.create({ type: "failure_lesson", sourceRunId: "r1", sourceTrajectoryEventIds: [], claim: "x", recommendedAction: "y", risk: "low" });
+    expect(lrn.list().length).toBe(1);
+    lrn.setStatus(c.id, "accepted");
+    expect(lrn.list({ status: "accepted" }).length).toBe(1);
+    storage.close();
+  });
+
+  it("evalCandidate create/list/transitionStatus CAS", async () => {
+    const storage = await createInMemoryStorage();
+    const evals = createEvalCandidateRepository(storage);
+    const cand: AgentEvalCandidate = {
+      id: "ec1",
+      sourceRunId: "r1",
+      status: "pending_review",
+      rationale: "x",
+      fixture: { id: "f1", description: "d", events: [], requiredEventTypes: [] },
+      createdAt: "2026-06-19T00:00:00.000Z",
+      updatedAt: "2026-06-19T00:00:00.000Z",
+    };
+    evals.create(cand);
+    expect(evals.transitionStatus("ec1", "pending_review", "accepted")?.status).toBe("accepted");
+    // CAS fails when expected doesn't match
+    expect(evals.transitionStatus("ec1", "pending_review", "rejected")).toBeNull();
+    storage.close();
+  });
+
+  it("validation singleton save/load", async () => {
+    const storage = await createInMemoryStorage();
+    const v = createValidationRepository(storage);
+    expect(v.load()).toBeNull();
+    v.save({ report: { ready: true, model: { ok: true, detail: "" }, skill: { ok: true, detail: "" }, task: { ok: true, detail: "", tasks: [] }, connection: { ok: true, detail: "" }, run: { ok: true, detail: "", run: undefined } } as never, validatedAt: "2026-06-19T00:00:00.000Z" });
+    expect(v.load()?.validatedAt).toBe("2026-06-19T00:00:00.000Z");
+    storage.close();
+  });
+
+  it("memoryProfile singleton read/save", async () => {
+    const storage = await createInMemoryStorage();
+    const p = createMemoryProfileRepository(storage);
+    expect(p.read().content).toBe("");
+    p.save("## Preferences\n- test");
+    expect(p.read().content).toContain("Preferences");
+    storage.close();
+  });
+
+  it("promotedEvalFixture upsert/list", async () => {
+    const storage = await createInMemoryStorage();
+    const f = createPromotedEvalFixtureRepository(storage);
+    f.upsert({ id: "f1", description: "d", events: [], requiredEventTypes: [] });
+    expect(f.list().length).toBe(1);
+    storage.close();
+  });
+});

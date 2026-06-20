@@ -1,17 +1,32 @@
 import path from "node:path";
 import type { Goal, SuccessCriterion } from "../shared/agentGoal";
 import type { AgentRunContext } from "../shared/agentWorkspace";
-import { isPathInsideDirectory, normalizeBoundaryPath } from "../shared/agentWorkspace";
+import {
+  isPathInsideLocationRoot,
+  normalizeLocationBoundaryPath,
+  normalizeLocationPath,
+  type LocationResourceEnvironment,
+} from "../shared/locationResource";
 
 const explicitAbsolutePathPattern =
-  /(?:~\/[^\s"'<>，。；；、,，）)]+|\/(?:Volumes|Users|tmp|var|private|opt|home|mnt|media)\/[^\s"'<>，。；；、,，）)]+)/g;
+  /(?<path>~\/[^\s"'<>，。；；、,，）)]+|\/(?:Volumes|Users|tmp|var|private|opt|home|mnt|media)\/[^\s"'<>，。；；、,，）)]+)/g;
+const explicitBareAliasPathPattern =
+  /(?<![A-Za-z0-9_/.-])(?<path>(?:Desktop|Downloads|桌面|下载)\/[^\s"'<>，。；；、,，）)]+)/g;
+const englishStandaloneDestinationPattern =
+  /\b(?:save|write|export|put|place|store|create)\b[\s\S]{0,80}?\b(?:to|in|on|under|into)\s+(?<alias>Desktop|Downloads)(?=$|[\s"')）:：,，;；。])/gi;
+const chineseStandaloneDestinationPattern =
+  /(?:保存到|保存至|导出到|导出至|写入到|写入至|放到|放在|输出到|输出至)\s*(?<alias>Desktop|Downloads|桌面|下载)(?=$|[\s"')）:：,，;；。])/g;
 
 export function applyGoalOutputRootsToRunContext(
   runContext: AgentRunContext,
   goal: Goal,
 ): AgentRunContext {
-  const outputRoots = extractGoalOutputRoots(goal).filter(
-    (root) => !isPathInsideDirectory(root, runContext.workspaceRoot),
+  const locationEnv = {
+    ...runContext.locationEnv,
+    workspaceRoot: runContext.workspaceRoot,
+  };
+  const outputRoots = extractGoalOutputRoots(goal, locationEnv).filter(
+    (root) => !isPathInsideLocationRoot(root, runContext.workspaceRoot, locationEnv),
   );
   if (outputRoots.length === 0) {
     return runContext;
@@ -27,56 +42,140 @@ export function applyGoalOutputRootsToRunContext(
   };
 }
 
-export function extractGoalOutputRoots(goal: Goal): string[] {
+export function extractGoalOutputRoots(
+  goal: Goal,
+  locationEnv: LocationResourceEnvironment = {},
+): string[] {
   return mergeRoots(
     [],
     [
-      ...extractOutputRootsFromText(goal.description),
-      ...extractOutputRootsFromCriteria(goal.successCriteria),
+      ...extractOutputRootsFromText(goal.description, locationEnv),
+      ...extractOutputRootsFromCriteria(goal.successCriteria, locationEnv),
       ...goal.milestones.flatMap((milestone) =>
-        extractOutputRootsFromCriteria(milestone.successCriteria),
+        extractOutputRootsFromCriteria(milestone.successCriteria, locationEnv),
       ),
     ],
+    locationEnv,
   );
 }
 
-function extractOutputRootsFromCriteria(criteria: SuccessCriterion[]): string[] {
+function extractOutputRootsFromCriteria(
+  criteria: SuccessCriterion[],
+  locationEnv: LocationResourceEnvironment,
+): string[] {
   return criteria.flatMap((criterion) =>
     criterion.acceptanceChecks.flatMap((check) => {
+      const destinationRoot = extractOutputRootFromDestination(
+        check.params.destination,
+        locationEnv,
+      );
+      if (destinationRoot) {
+        return [destinationRoot];
+      }
+
       const requestedPath = String(check.params.path ?? "").trim();
-      if (!isExplicitPath(requestedPath)) {
+      if (!isOutputPathCandidate(requestedPath)) {
         return [];
       }
-      const outputRoot = normalizeOutputRoot(requestedPath, "file");
+      const outputRoot = normalizeOutputRoot(requestedPath, "file", locationEnv);
       return outputRoot ? [outputRoot] : [];
     }),
   );
 }
 
-function extractOutputRootsFromText(text: string): string[] {
-  return [...text.matchAll(explicitAbsolutePathPattern)]
-    .map((match) => normalizeOutputRoot(match[0], "unknown"))
+function extractOutputRootFromDestination(
+  destination: unknown,
+  locationEnv: LocationResourceEnvironment,
+): string | null {
+  const destinationPath = getStructuredDestinationPath(destination);
+  if (!destinationPath) {
+    return null;
+  }
+
+  return normalizeOutputRoot(destinationPath, "file", locationEnv);
+}
+
+function getStructuredDestinationPath(destination: unknown): string | null {
+  if (!isRecord(destination)) {
+    return null;
+  }
+
+  if (
+    destination.kind === "desktop" &&
+    typeof destination.filename === "string" &&
+    destination.filename.trim()
+  ) {
+    return `Desktop/${destination.filename.trim()}`;
+  }
+
+  if (
+    destination.kind === "downloads" &&
+    typeof destination.filename === "string" &&
+    destination.filename.trim()
+  ) {
+    return `Downloads/${destination.filename.trim()}`;
+  }
+
+  if (
+    destination.kind === "path" &&
+    typeof destination.path === "string" &&
+    destination.path.trim()
+  ) {
+    return destination.path.trim();
+  }
+
+  return null;
+}
+
+function extractOutputRootsFromText(
+  text: string,
+  locationEnv: LocationResourceEnvironment,
+): string[] {
+  const explicitRoots = [
+    ...text.matchAll(explicitAbsolutePathPattern),
+    ...text.matchAll(explicitBareAliasPathPattern),
+  ]
+    .map((match) => normalizeOutputRoot(match.groups?.path ?? "", "unknown", locationEnv))
     .filter((root): root is string => Boolean(root));
+  const standaloneRoots = [
+    ...text.matchAll(englishStandaloneDestinationPattern),
+    ...text.matchAll(chineseStandaloneDestinationPattern),
+  ]
+    .map((match) =>
+      normalizeOutputRoot(match.groups?.alias ?? "", "directory", locationEnv),
+    )
+    .filter((root): root is string => Boolean(root));
+
+  return [...explicitRoots, ...standaloneRoots];
 }
 
 function normalizeOutputRoot(
   rawPath: string,
-  hint: "file" | "unknown",
+  hint: "file" | "unknown" | "directory",
+  locationEnv: LocationResourceEnvironment,
 ): string | null {
   const cleaned = stripAttachedNaturalLanguageSuffix(rawPath)
     .trim()
     .replace(/[。；;、,，）)]+$/g, "");
-  if (!isExplicitPath(cleaned)) {
+  if (!isOutputPathCandidate(cleaned)) {
     return null;
   }
 
-  const candidate =
-    hint === "file" || path.extname(cleaned)
-      ? path.dirname(cleaned)
-      : cleaned;
-  const normalized = normalizeBoundaryPath(candidate);
+  const normalizedPath = normalizeLocationPath(cleaned, locationEnv);
+  const normalized =
+    hint !== "directory" &&
+    !isExactOutputDirectoryAlias(cleaned) &&
+    (hint === "file" || path.extname(cleaned))
+      ? path.posix.dirname(normalizedPath)
+      : normalizedPath;
   const parts = normalized.split("/").filter(Boolean);
   return parts.length >= 2 ? normalized : null;
+}
+
+function isExactOutputDirectoryAlias(value: string): boolean {
+  return /^(?:Desktop|Downloads|桌面|下载|~\/(?:Desktop|Downloads|桌面|下载))$/.test(
+    value,
+  );
 }
 
 function stripAttachedNaturalLanguageSuffix(rawPath: string): string {
@@ -86,17 +185,29 @@ function stripAttachedNaturalLanguageSuffix(rawPath: string): string {
   );
 }
 
-function isExplicitPath(value: string): boolean {
-  return value.startsWith("~/") || path.isAbsolute(value);
+function isOutputPathCandidate(value: string): boolean {
+  return (
+    value.startsWith("~/") ||
+    path.isAbsolute(value) ||
+    /^(?:Desktop|Downloads|桌面|下载)(?:\/|$)/.test(value)
+  );
 }
 
-function mergeRoots(existing: string[], additions: string[]): string[] {
+function mergeRoots(
+  existing: string[],
+  additions: string[],
+  locationEnv: LocationResourceEnvironment = {},
+): string[] {
   const merged: string[] = [];
   for (const root of [...existing, ...additions]) {
-    const normalized = normalizeBoundaryPath(root);
+    const normalized = normalizeLocationBoundaryPath(root, locationEnv);
     if (normalized && !merged.includes(normalized)) {
       merged.push(normalized);
     }
   }
   return merged;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

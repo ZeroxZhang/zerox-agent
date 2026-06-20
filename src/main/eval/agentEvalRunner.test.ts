@@ -11,13 +11,109 @@ describe("agent eval runner", () => {
     const report = await runAgentEvals(createAgentEvalFixtures());
 
     expect(report).toEqual({
-      total: 25,
-      passed: 25,
+      total: 26,
+      passed: 26,
       failed: 0,
       passRate: 1,
-      toolSuccessRate: 0.8261,
+      toolSuccessRate: 0.8333,
       recoverabilityRate: 1,
       failures: [],
+    });
+  });
+
+  it("includes v2.3.6 deterministic local artifact provenance acceptance", () => {
+    const fixtures = createAgentEvalFixtures();
+
+    expect(fixtures.map((fixture) => fixture.id)).toEqual(
+      expect.arrayContaining([
+        "deterministic-local-artifact-provenance-acceptance",
+      ]),
+    );
+    expect(
+      fixtures.find(
+        (fixture) =>
+          fixture.id ===
+          "deterministic-local-artifact-provenance-acceptance",
+      ),
+    ).toMatchObject({
+      requiredEventTypes: [
+        "goal_planned",
+        "tool_call",
+        "native_tool_invocation",
+        "native_tool_observation",
+        "tool_result",
+        "artifact_created",
+        "acceptance_checked",
+        "goal_stopped",
+        "final_summary",
+      ],
+      assertions: expect.arrayContaining([
+        {
+          type: "goal_planned",
+          payload: {
+            contractMode: "deterministic",
+            sourceType: "chrome_bookmarks",
+            taskContract: {
+              schemaVersion: 1,
+              taskKind: "local_data_to_artifact",
+              mode: "deterministic",
+              source: { type: "chrome_bookmarks" },
+              transform: { type: "grouped_markdown" },
+              deliverable: {
+                artifactId: "bookmark_list",
+                artifactRef: "artifact:bookmark_list",
+                mediaType: "text/markdown",
+              },
+              capabilities: [
+                {
+                  id: "chrome_bookmarks_read",
+                  toolName: "chrome_bookmarks_read",
+                },
+              ],
+              acceptance: {
+                provenanceRequired: true,
+              },
+            },
+          },
+        },
+        {
+          type: "native_tool_invocation",
+          payload: { toolName: "chrome_bookmarks_read" },
+          after: "tool_call",
+        },
+        {
+          type: "artifact_created",
+          payload: {
+            artifactRef: "artifact:bookmark_list",
+            provenanceRef: "provenance:bookmark_list",
+          },
+          after: "native_tool_observation",
+        },
+        {
+          type: "acceptance_checked",
+          payload: { accepted: true, provenanceBacked: true },
+          after: "artifact_created",
+        },
+        {
+          type: "goal_stopped",
+          payload: { status: "achieved", stopReason: "goal_accepted" },
+          after: "acceptance_checked",
+        },
+        {
+          type: "goal_replanned",
+          maxCount: 0,
+        },
+        {
+          type: "tool_call",
+          payload: { toolName: "file_read" },
+          maxCount: 0,
+        },
+        {
+          type: "tool_call",
+          payload: { toolName: "shell_exec" },
+          maxCount: 0,
+        },
+      ]),
     });
   });
 
@@ -400,6 +496,52 @@ describe("agent eval runner", () => {
     expect(report.failures).toEqual([]);
   });
 
+  it("matches nested asserted payload fields", async () => {
+    const report = await runAgentEvals([
+      {
+        id: "nested-contract-payload",
+        description: "Nested payload assertions require real contract fields.",
+        events: createEvents("nested-contract-payload", [
+          [
+            "goal_planned",
+            {
+              taskContract: {
+                schemaVersion: 1,
+                taskKind: "local_data_to_artifact",
+                mode: "deterministic",
+                source: { type: "chrome_bookmarks" },
+                transform: { type: "grouped_markdown" },
+                deliverable: {
+                  artifactId: "bookmark_list",
+                  artifactRef: "artifact:bookmark_list",
+                  mediaType: "text/markdown",
+                },
+              },
+            },
+          ],
+          ["final_summary", {}],
+        ]),
+        requiredEventTypes: ["goal_planned", "final_summary"],
+        assertions: [
+          {
+            type: "goal_planned",
+            payload: {
+              taskContract: {
+                taskKind: "local_data_to_artifact",
+                source: { type: "chrome_bookmarks" },
+                deliverable: {
+                  artifactRef: "artifact:bookmark_list",
+                },
+              },
+            },
+          },
+        ],
+      },
+    ]);
+
+    expect(report.failures).toEqual([]);
+  });
+
   it("reports fixture failures with reasons", async () => {
     const [fixture] = createAgentEvalFixtures();
     const report = await runAgentEvals([
@@ -449,6 +591,36 @@ describe("agent eval runner", () => {
           fixtureId: "bad-order",
           reason:
             '"workspace_escape_denied" must occur after "tool_call".',
+        },
+      ],
+    });
+  });
+
+  it("fails when asserted event max count is exceeded", async () => {
+    const report = await runAgentEvals([
+      {
+        id: "too-many-events",
+        description: "Max-count assertions reject forbidden events.",
+        events: createEvents("too-many-events", [
+          ["tool_call", { toolName: "chrome_bookmarks_read" }],
+          ["tool_call", { toolName: "shell_exec" }],
+          ["final_summary", {}],
+        ]),
+        requiredEventTypes: ["tool_call", "final_summary"],
+        assertions: [
+          { type: "tool_call", payload: { toolName: "shell_exec" }, maxCount: 0 },
+        ],
+      },
+    ]);
+
+    expect(report).toMatchObject({
+      total: 1,
+      passed: 0,
+      failed: 1,
+      failures: [
+        {
+          fixtureId: "too-many-events",
+          reason: '"tool_call" expected at most 0 occurrence(s), found 1.',
         },
       ],
     });

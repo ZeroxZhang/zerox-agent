@@ -325,6 +325,8 @@ function defaultArgsJson(toolName: AgentToolName): string {
       sections: [{ heading: "Findings", claimIds: ["fact_1"] }],
     },
     shell_exec: { command: "find ~/Downloads -maxdepth 1 -type f" },
+    actor: { op: "run", task: "research the spec", contextMode: "state" },
+    workflow: { op: "list" },
   };
 
   return JSON.stringify(defaults[toolName], null, 2);

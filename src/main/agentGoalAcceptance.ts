@@ -15,6 +15,16 @@ import type {
   SuccessCriterion,
 } from "../shared/agentGoal";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
+import {
+  isPathInsideLocationRoot,
+  normalizeLocationBoundaryPath,
+  normalizeLocationEnvironment,
+  normalizeLocationPath,
+  type LocationResourceEnvironment,
+} from "../shared/locationResource";
+import { verifyArtifactProvenance } from "../shared/agentArtifactProvenance";
+
+const shellRedirectionOperatorPattern = /[<>]/;
 
 export type AcceptanceResult = {
   accepted: boolean;
@@ -35,6 +45,7 @@ export type AcceptanceContext = {
   workspacePath: string;
   extraReadRoots?: string[];
   extraWriteRoots?: string[];
+  locationEnv?: LocationResourceEnvironment;
   toolExecutor: Pick<AgentToolExecutor, "execute">;
   trajectoryStore: Pick<AgentTrajectoryStore, "append">;
   chatClient?: ChatClient;
@@ -150,10 +161,14 @@ async function evaluateFileExists(
   ctx: AcceptanceContext,
 ): Promise<CheckResult> {
   const requestedPath = String(check.params.path ?? "");
+  const destinationPath = getStructuredDestinationPath(check.params.destination);
+  const resolutionPath = destinationPath ?? requestedPath;
+  const displayPath = requestedPath || resolutionPath;
   const candidatePath = resolveWorkspacePath(
     ctx.workspacePath,
-    requestedPath,
+    resolutionPath,
     getAllowedExtraRoots(ctx),
+    getAcceptanceLocationEnv(ctx),
   );
   if (!candidatePath) {
     return checkResult(check, false, [], "Path is outside the workspace.");
@@ -161,14 +176,93 @@ async function evaluateFileExists(
 
   try {
     await access(candidatePath);
-    return checkResult(check, true, [], `File exists: ${requestedPath}`);
+    if (shouldRequireArtifactProvenance(check)) {
+      const artifactRef = getArtifactRef(check);
+      const verification = await verifyArtifactProvenance({
+        artifactPath: candidatePath,
+        ...(artifactRef ? { artifactRef, artifactId: getArtifactId(artifactRef) } : {}),
+        runId: ctx.runId,
+        ...(ctx.goalId ? { goalId: ctx.goalId } : {}),
+        ...(ctx.milestoneId ? { milestoneId: ctx.milestoneId } : {}),
+      });
+      const evidenceRefs = getArtifactProvenanceEvidenceRefs(artifactRef);
+      if (!verification.ok) {
+        return checkResult(check, false, evidenceRefs, verification.reason);
+      }
+
+      return checkResult(
+        check,
+        true,
+        evidenceRefs,
+        `File exists with valid provenance: ${displayPath}`,
+      );
+    }
+    return checkResult(check, true, [], `File exists: ${displayPath}`);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return checkResult(check, false, [], `File does not exist: ${requestedPath}`);
+      return checkResult(check, false, [], `File does not exist: ${displayPath}`);
     }
 
     throw error;
   }
+}
+
+function getStructuredDestinationPath(destination: unknown): string | null {
+  if (!isRecord(destination)) {
+    return null;
+  }
+
+  if (
+    destination.kind === "desktop" &&
+    typeof destination.filename === "string" &&
+    destination.filename.trim()
+  ) {
+    return `Desktop/${destination.filename.trim()}`;
+  }
+
+  if (
+    destination.kind === "downloads" &&
+    typeof destination.filename === "string" &&
+    destination.filename.trim()
+  ) {
+    return `Downloads/${destination.filename.trim()}`;
+  }
+
+  if (
+    destination.kind === "path" &&
+    typeof destination.path === "string" &&
+    destination.path.trim()
+  ) {
+    return destination.path.trim();
+  }
+
+  return null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function shouldRequireArtifactProvenance(check: AcceptanceCheck): boolean {
+  return check.params.requireProvenance === true || getArtifactRef(check) !== "";
+}
+
+function getArtifactRef(check: AcceptanceCheck): string {
+  const value = check.params.artifactRef;
+  return typeof value === "string" ? value : "";
+}
+
+function getArtifactId(artifactRef: string): string {
+  return artifactRef.startsWith("artifact:")
+    ? artifactRef.slice("artifact:".length)
+    : artifactRef;
+}
+
+function getArtifactProvenanceEvidenceRefs(artifactRef: string): string[] {
+  if (!artifactRef) {
+    return [];
+  }
+  return [artifactRef, `provenance:${getArtifactId(artifactRef)}`];
 }
 
 async function evaluateCommandExitCode(
@@ -181,6 +275,7 @@ async function evaluateCommandExitCode(
     command,
     ctx.workspacePath,
     getAllowedExtraRoots(ctx),
+    getAcceptanceLocationEnv(ctx),
   );
   if (pathCheck) {
     return pathCheck;
@@ -207,21 +302,40 @@ async function evaluateTestPasses(
   ctx: AcceptanceContext,
 ): Promise<CheckResult> {
   const command = String(check.params.command ?? "");
+  const locationEnv = getAcceptanceLocationEnv(ctx);
+  const extraRoots = getAllowedExtraRoots(ctx);
   const pathCheck = checkCommandPaths(
     check,
     command,
     ctx.workspacePath,
-    getAllowedExtraRoots(ctx),
+    extraRoots,
+    locationEnv,
   );
   if (pathCheck) {
     return pathCheck;
+  }
+
+  const requestedWorkspaceRoot = String(check.params.workspaceRoot ?? ctx.workspacePath);
+  const resolvedWorkspaceRoot = resolveWorkspacePath(
+    ctx.workspacePath,
+    requestedWorkspaceRoot,
+    extraRoots,
+    locationEnv,
+  );
+  if (!resolvedWorkspaceRoot) {
+    return checkResult(
+      check,
+      false,
+      [],
+      `workspaceRoot is outside the workspace: ${requestedWorkspaceRoot}`,
+    );
   }
 
   const result = await ctx.toolExecutor.execute({
     toolName: "test_run",
     args: {
       command,
-      workspaceRoot: String(check.params.workspaceRoot ?? ctx.workspacePath),
+      workspaceRoot: resolvedWorkspaceRoot,
     },
   });
   const exitCode = getExitCode(result);
@@ -242,17 +356,25 @@ function checkCommandPaths(
   command: string,
   workspacePath: string,
   extraRoots: string[] = [],
+  locationEnv: LocationResourceEnvironment = {},
 ): CheckResult | null {
-  // Split by common shell separators and strip simple quotes.
-  const tokens = command.split(/[\s;"'`|&()]+/).filter(Boolean);
+  if (shellRedirectionOperatorPattern.test(command)) {
+    return checkResult(
+      check,
+      false,
+      [],
+      "Command contains blocked shell redirection.",
+    );
+  }
+
+  const tokens = command.match(/(?:"[^"]*"|'[^']*'|[^\s;"'`|&()]+)/g) ?? [];
   for (const raw of tokens) {
-    const token = raw.replace(/^["']+|["']+$/g, "");
+    const token = raw.replace(/^["']|["']$/g, "");
     if (!token) continue;
-    const hasParentTraversal = /(^|\/)\.\.(\/|$)/.test(token);
-    if (!path.isAbsolute(token) && !hasParentTraversal) {
+    if (!isPathLikeCommandToken(token)) {
       continue;
     }
-    if (resolveWorkspacePath(workspacePath, token, extraRoots) === null) {
+    if (resolveWorkspacePath(workspacePath, token, extraRoots, locationEnv) === null) {
       return checkResult(
         check,
         false,
@@ -262,6 +384,16 @@ function checkCommandPaths(
     }
   }
   return null;
+}
+
+function isPathLikeCommandToken(token: string): boolean {
+  return (
+    token === "~" ||
+    token.startsWith("~/") ||
+    path.isAbsolute(token) ||
+    /(^|\/)\.\.(\/|$)/.test(token) ||
+    /^(?:Desktop|Downloads|桌面|下载)\//.test(token)
+  );
 }
 
 function evaluateAssertion(
@@ -505,48 +637,41 @@ function resolveWorkspacePath(
   workspacePath: string,
   requestedPath: string,
   extraRoots: string[] = [],
+  locationEnv: LocationResourceEnvironment = {},
 ): string | null {
-  const workspaceRoot = path.resolve(workspacePath);
-  const candidate = resolveRequestedPath(workspaceRoot, requestedPath);
-  if (isPathInsideDirectory(candidate, workspaceRoot)) {
+  const env = normalizeLocationEnvironment({
+    ...locationEnv,
+    workspaceRoot: workspacePath,
+  });
+  const workspaceRoot = env.workspaceRoot;
+  const candidate = normalizeLocationPath(requestedPath, env);
+  if (isPathInsideLocationRoot(candidate, workspaceRoot, env)) {
     return candidate;
   }
 
   for (const root of extraRoots) {
-    if (isPathInsideDirectory(candidate, root)) {
+    if (isPathInsideLocationRoot(candidate, root, env)) {
       return candidate;
     }
   }
   return null;
 }
 
-function resolveRequestedPath(workspaceRoot: string, requestedPath: string): string {
-  if (requestedPath.startsWith("~/")) {
-    return path.join("__HOME__", requestedPath.slice(2));
-  }
-
-  return path.resolve(workspaceRoot, requestedPath);
-}
-
 function getAllowedExtraRoots(ctx: AcceptanceContext): string[] {
+  const env = getAcceptanceLocationEnv(ctx);
   return [
     ...(ctx.extraReadRoots ?? []),
     ...(ctx.extraWriteRoots ?? []),
-  ];
+  ].map((root) => normalizeLocationBoundaryPath(root, env));
 }
 
-function isPathInsideDirectory(
-  candidatePath: string,
-  directoryPath: string,
-): boolean {
-  const candidate = normalizeComparablePath(candidatePath);
-  const directory = normalizeComparablePath(directoryPath);
-  return candidate === directory || candidate.startsWith(`${directory}/`);
-}
-
-function normalizeComparablePath(value: string): string {
-  const normalized = value.replace(/\\/g, "/").replace(/\/+$/, "");
-  return normalized || "/";
+function getAcceptanceLocationEnv(
+  ctx: AcceptanceContext,
+): Required<LocationResourceEnvironment> {
+  return normalizeLocationEnvironment({
+    ...ctx.locationEnv,
+    workspaceRoot: ctx.workspacePath,
+  });
 }
 
 function getExitCode(result: AgentToolExecutionResult): number {
@@ -636,13 +761,14 @@ function getArtifactEvidenceCandidatePaths(
   ctx: AcceptanceContext,
 ): string[] {
   const fileNames = getArtifactEvidenceFileNames(artifactName);
-  const roots = dedupePaths([ctx.workspacePath, ...getAllowedExtraRoots(ctx)]);
+  const env = getAcceptanceLocationEnv(ctx);
+  const roots = dedupePaths([ctx.workspacePath, ...getAllowedExtraRoots(ctx)], env);
   const candidates: string[] = [];
 
   for (const root of roots) {
     for (const fileName of fileNames) {
       const candidatePath = path.resolve(root, fileName);
-      if (isPathInsideDirectory(candidatePath, root)) {
+      if (isPathInsideLocationRoot(candidatePath, root, env)) {
         candidates.push(candidatePath);
       }
     }
@@ -669,10 +795,13 @@ function isSafeArtifactName(value: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value) && !value.includes("..");
 }
 
-function dedupePaths(paths: string[]): string[] {
+function dedupePaths(
+  paths: string[],
+  locationEnv: LocationResourceEnvironment,
+): string[] {
   const normalized: string[] = [];
   for (const value of paths) {
-    const candidate = normalizeComparablePath(path.resolve(value));
+    const candidate = normalizeLocationBoundaryPath(value, locationEnv);
     if (!normalized.includes(candidate)) {
       normalized.push(candidate);
     }

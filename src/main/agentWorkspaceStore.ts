@@ -3,22 +3,14 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type {
   AgentWorkspace,
-  AgentWorkspaceCleanup,
-  AgentWorkspaceGitMetadata,
-  AgentWorkspaceKind,
+  AgentWorkspaceInput,
 } from "../shared/agentWorkspace";
+
+export type { AgentWorkspaceInput } from "../shared/agentWorkspace";
 
 type StoredAgentWorkspaces = {
   schemaVersion: 1;
   workspaces: AgentWorkspace[];
-};
-
-export type AgentWorkspaceInput = {
-  name: string;
-  rootPath: string;
-  kind: AgentWorkspaceKind;
-  cleanup: AgentWorkspaceCleanup;
-  git?: AgentWorkspaceGitMetadata;
 };
 
 export type AgentWorkspaceStore = {

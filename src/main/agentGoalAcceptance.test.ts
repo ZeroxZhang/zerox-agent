@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -10,20 +10,27 @@ import {
   createAgentGoalAcceptance,
   type AcceptanceContext,
 } from "./agentGoalAcceptance";
+import {
+  getArtifactProvenancePath,
+  writeArtifactProvenance,
+} from "../shared/agentArtifactProvenance";
 
 describe("agent goal acceptance", () => {
   let workspacePath: string;
+  let homePath: string;
   let trajectoryEvents: AgentTrajectoryEvent[];
   let toolCalls: Array<{ toolName: string; args: Record<string, unknown> }>;
 
   beforeEach(async () => {
     workspacePath = await mkdtemp(path.join(os.tmpdir(), "building-agent-acceptance-"));
+    homePath = await mkdtemp(path.join(os.tmpdir(), "building-agent-home-"));
     trajectoryEvents = [];
     toolCalls = [];
   });
 
   afterEach(async () => {
     await rm(workspacePath, { recursive: true, force: true });
+    await rm(homePath, { recursive: true, force: true });
   });
 
   it("passes and fails file_exists checks based on workspace files", async () => {
@@ -60,6 +67,169 @@ describe("agent goal acceptance", () => {
       "acceptance_checked",
       "acceptance_checked",
     ]);
+  });
+
+  it("requires matching provenance for file_exists artifact checks", async () => {
+    await mkdir(path.join(workspacePath, "reports"), { recursive: true });
+    const artifactPath = path.join(workspacePath, "reports", "bookmark_list.md");
+    await writeFile(artifactPath, "# Bookmarks\n", "utf8");
+    await writeArtifactProvenance({
+      artifactPath,
+      artifactId: "bookmark_list",
+      artifactRef: "artifact:bookmark_list",
+      runId: "run_acceptance",
+      goalId: "goal_1",
+      milestoneId: "milestone_1",
+      source: { type: "chrome_bookmarks" },
+      generatedAt: "2026-06-18T00:00:00.000Z",
+    });
+    const acceptance = createAgentGoalAcceptance();
+
+    const passed = await acceptance.evaluate(
+      createMilestone([
+        check("check_provenance", "file_exists", {
+          path: "reports/bookmark_list.md",
+          artifactRef: "artifact:bookmark_list",
+          requireProvenance: true,
+        }),
+      ]),
+      createContext(),
+    );
+
+    expect(passed.accepted).toBe(true);
+    expect(passed.checkResults[0]).toMatchObject({
+      passed: true,
+      evidenceRefs: ["artifact:bookmark_list", "provenance:bookmark_list"],
+      detail: "File exists with valid provenance: reports/bookmark_list.md",
+    });
+
+    await writeFile(artifactPath, "# Bookmarks\n- changed\n", "utf8");
+
+    const failed = await acceptance.evaluate(
+      createMilestone([
+        check("check_provenance", "file_exists", {
+          path: "reports/bookmark_list.md",
+          artifactRef: "artifact:bookmark_list",
+          requireProvenance: true,
+        }),
+      ]),
+      createContext(),
+    );
+
+    expect(failed.accepted).toBe(false);
+    expect(failed.checkResults[0]).toMatchObject({
+      passed: false,
+      evidenceRefs: ["artifact:bookmark_list", "provenance:bookmark_list"],
+      detail: "Artifact provenance destination hash does not match current content.",
+    });
+  });
+
+  it("rejects file_exists artifact checks with invalid provenance identity or destination", async () => {
+    await mkdir(path.join(workspacePath, "reports"), { recursive: true });
+    const artifactPath = path.join(workspacePath, "reports", "bookmark_list.md");
+    await writeFile(artifactPath, "# Bookmarks\n", "utf8");
+    const acceptance = createAgentGoalAcceptance();
+
+    await expectProvenanceFailure(
+      "missing sidecar",
+      "Artifact provenance sidecar is missing.",
+    );
+
+    const mismatchCases = [
+      {
+        label: "runId mismatch",
+        manifest: { runId: "run_other" },
+        reason: "Artifact provenance runId does not match.",
+      },
+      {
+        label: "goalId mismatch",
+        manifest: { goalId: "goal_other" },
+        reason: "Artifact provenance goalId does not match.",
+      },
+      {
+        label: "milestoneId mismatch",
+        manifest: { milestoneId: "milestone_other" },
+        reason: "Artifact provenance milestoneId does not match.",
+      },
+      {
+        label: "artifactId mismatch",
+        manifest: { artifactId: "goalEvidence" },
+        reason: "Artifact provenance artifactId does not match.",
+      },
+      {
+        label: "artifactRef mismatch",
+        manifest: { artifactRef: "artifact:goalEvidence" },
+        reason: "Artifact provenance artifactRef does not match.",
+      },
+    ];
+
+    for (const testCase of mismatchCases) {
+      await writeArtifactProvenance({
+        artifactPath,
+        artifactId: testCase.manifest.artifactId ?? "bookmark_list",
+        artifactRef: testCase.manifest.artifactRef ?? "artifact:bookmark_list",
+        runId: testCase.manifest.runId ?? "run_acceptance",
+        goalId: testCase.manifest.goalId ?? "goal_1",
+        milestoneId: testCase.manifest.milestoneId ?? "milestone_1",
+        source: { type: "chrome_bookmarks" },
+        generatedAt: "2026-06-18T00:00:00.000Z",
+      });
+      await expectProvenanceFailure(testCase.label, testCase.reason);
+    }
+
+    const sourcePath = path.join(workspacePath, "reports", "source.md");
+    await writeFile(sourcePath, "# Bookmarks\n", "utf8");
+    const sourceManifestPath = await writeArtifactProvenance({
+      artifactPath: sourcePath,
+      artifactId: "bookmark_list",
+      artifactRef: "artifact:bookmark_list",
+      runId: "run_acceptance",
+      goalId: "goal_1",
+      milestoneId: "milestone_1",
+      source: { type: "chrome_bookmarks" },
+      generatedAt: "2026-06-18T00:00:00.000Z",
+    });
+    await copyFile(sourceManifestPath, getArtifactProvenancePath(artifactPath));
+    await expectProvenanceFailure(
+      "stale copied sidecar",
+      "Artifact provenance destination path does not match the requested path.",
+    );
+
+    await writeArtifactProvenance({
+      artifactPath,
+      artifactId: "bookmark_list",
+      artifactRef: "artifact:bookmark_list",
+      runId: "run_acceptance",
+      goalId: "goal_1",
+      milestoneId: "milestone_1",
+      source: { type: "chrome_bookmarks" },
+      generatedAt: "2026-06-18T00:00:00.000Z",
+    });
+    await writeFile(artifactPath, "# Bookmarks\n- changed\n", "utf8");
+    await expectProvenanceFailure(
+      "stale file content",
+      "Artifact provenance destination hash does not match current content.",
+    );
+
+    async function expectProvenanceFailure(label: string, reason: string) {
+      const result = await acceptance.evaluate(
+        createMilestone([
+          check(`check_${label.replace(/\W+/g, "_")}`, "file_exists", {
+            path: "reports/bookmark_list.md",
+            artifactRef: "artifact:bookmark_list",
+            requireProvenance: true,
+          }),
+        ]),
+        createContext(),
+      );
+
+      expect(result.accepted, label).toBe(false);
+      expect(result.checkResults[0]).toMatchObject({
+        passed: false,
+        evidenceRefs: ["artifact:bookmark_list", "provenance:bookmark_list"],
+        detail: reason,
+      });
+    }
   });
 
   it("accepts absolute file outputs only inside explicit goal output roots", async () => {
@@ -104,6 +274,94 @@ describe("agent goal acceptance", () => {
     }
   });
 
+  it("resolves Desktop file_exists checks to real Desktop aliases, not stale workspace files", async () => {
+    await mkdir(path.join(workspacePath, "Desktop"), { recursive: true });
+    await writeFile(path.join(workspacePath, "Desktop", "report.md"), "stale", "utf8");
+    const realDesktop = path.join(homePath, "Desktop");
+    const acceptance = createAgentGoalAcceptance();
+
+    const missing = await acceptance.evaluate(
+      createMilestone([
+        check("check_desktop_missing", "file_exists", {
+          path: "Desktop/report.md",
+        }),
+      ]),
+      createContext({
+        extraWriteRoots: ["~/Desktop"],
+        locationEnv: { homeDir: homePath, platform: "darwin" },
+      }),
+    );
+
+    expect(missing.accepted).toBe(false);
+    expect(missing.checkResults[0]).toMatchObject({
+      passed: false,
+      detail: "File does not exist: Desktop/report.md",
+    });
+
+    await mkdir(realDesktop, { recursive: true });
+    await writeFile(path.join(realDesktop, "report.md"), "done", "utf8");
+
+    for (const candidate of [
+      "Desktop/report.md",
+      "桌面/report.md",
+      "~/Desktop/report.md",
+      "~/桌面/report.md",
+      path.join(homePath, "Desktop", "report.md"),
+    ]) {
+      const result = await acceptance.evaluate(
+        createMilestone([
+          check("check_desktop_exists", "file_exists", { path: candidate }),
+        ]),
+        createContext({
+          extraWriteRoots: ["~/Desktop"],
+          locationEnv: { homeDir: homePath, platform: "darwin" },
+        }),
+      );
+
+      expect(result.accepted).toBe(true);
+    }
+  });
+
+  it("resolves structured Desktop destinations for relative artifact checks", async () => {
+    const realDesktop = path.join(homePath, "Desktop");
+    const artifactPath = path.join(realDesktop, "bookmark_list.md");
+    await mkdir(realDesktop, { recursive: true });
+    await writeFile(artifactPath, "# Bookmarks\n", "utf8");
+    await writeArtifactProvenance({
+      artifactPath,
+      artifactId: "bookmark_list",
+      artifactRef: "artifact:bookmark_list",
+      runId: "run_acceptance",
+      goalId: "goal_1",
+      milestoneId: "milestone_1",
+      source: { type: "chrome_bookmarks" },
+      generatedAt: "2026-06-18T00:00:00.000Z",
+    });
+    const acceptance = createAgentGoalAcceptance();
+
+    const result = await acceptance.evaluate(
+      createMilestone([
+        check("check_desktop_destination", "file_exists", {
+          path: "bookmark_list.md",
+          artifactRef: "artifact:bookmark_list",
+          destination: { kind: "desktop", filename: "bookmark_list.md" },
+          requireProvenance: true,
+        }),
+      ]),
+      createContext({
+        extraWriteRoots: ["~/Desktop"],
+        locationEnv: { homeDir: homePath, platform: "darwin" },
+      }),
+    );
+
+    expect(result.accepted).toBe(true);
+    expect(result.checkResults[0]).toMatchObject({
+      passed: true,
+      evidenceRefs: ["artifact:bookmark_list", "provenance:bookmark_list"],
+      detail: "File exists with valid provenance: bookmark_list.md",
+    });
+  });
+
   it("runs command_exit_code checks through the permissioned tool path", async () => {
     const acceptance = createAgentGoalAcceptance();
     const result = await acceptance.evaluate(
@@ -134,6 +392,118 @@ describe("agent goal acceptance", () => {
       {
         toolName: "shell_exec",
         args: { command: "npm test -- src/shared/agentGoal.test.ts" },
+      },
+    ]);
+  });
+
+  it.each([
+    "~",
+    "~/Desktop/report.md",
+    "~/桌面/report.md",
+    "Desktop/report.md",
+    "Downloads/report.md",
+    "桌面/report.md",
+    "下载/report.md",
+  ])("rejects command_exit_code path-like token outside allowed roots: %s", async (token) => {
+    const acceptance = createAgentGoalAcceptance();
+
+    const result = await acceptance.evaluate(
+      createMilestone([
+        check("check_command_path", "command_exit_code", {
+          command: `cat ${token}`,
+          expectedExitCode: 0,
+        }),
+      ]),
+      createContext(),
+    );
+
+    expect(result.accepted).toBe(false);
+    expect(result.checkResults[0]).toMatchObject({
+      passed: false,
+      detail: `Command references a path outside the workspace: ${token}`,
+    });
+    expect(toolCalls).toEqual([]);
+  });
+
+  it("rejects command_exit_code shell redirection before executing", async () => {
+    const acceptance = createAgentGoalAcceptance();
+
+    const result = await acceptance.evaluate(
+      createMilestone([
+        check("check_command_redirection", "command_exit_code", {
+          command: "cat </etc/passwd",
+          expectedExitCode: 0,
+        }),
+      ]),
+      createContext(),
+    );
+
+    expect(result.accepted).toBe(false);
+    expect(result.checkResults[0]).toMatchObject({
+      passed: false,
+      detail: "Command contains blocked shell redirection.",
+    });
+    expect(toolCalls).toEqual([]);
+  });
+
+  it("allows command_exit_code Desktop aliases when Desktop is an explicit output root", async () => {
+    const acceptance = createAgentGoalAcceptance();
+
+    const result = await acceptance.evaluate(
+      createMilestone([
+        check("check_command_desktop", "command_exit_code", {
+          command: "cat ~/桌面/report.md",
+          expectedExitCode: 0,
+        }),
+      ]),
+      createContext({
+        extraWriteRoots: ["~/Desktop"],
+        toolResults: [
+          {
+            ok: true,
+            result: { exitCode: 0, evidenceRefs: ["tool_shell_desktop"] },
+          },
+        ],
+      }),
+    );
+
+    expect(result.accepted).toBe(true);
+    expect(toolCalls).toEqual([
+      {
+        toolName: "shell_exec",
+        args: { command: "cat ~/桌面/report.md" },
+      },
+    ]);
+  });
+
+  it.each([
+    `node -e "console.log('Desktop')"`,
+    "grep Desktop README.md",
+  ])("does not reject non-path command text that mentions Desktop: %s", async (command) => {
+    const acceptance = createAgentGoalAcceptance();
+
+    const result = await acceptance.evaluate(
+      createMilestone([
+        check("check_command_text", "command_exit_code", {
+          command,
+          expectedExitCode: 0,
+        }),
+      ]),
+      createContext({
+        toolResults: [
+          {
+            ok: true,
+            result: { exitCode: 0, evidenceRefs: ["tool_shell_text"] },
+          },
+        ],
+      }),
+    );
+
+    expect(result.accepted).toBe(true);
+    expect(toolCalls).toEqual([
+      {
+        toolName: "shell_exec",
+        args: { command },
       },
     ]);
   });
@@ -169,6 +539,80 @@ describe("agent goal acceptance", () => {
         args: {
           command: "npm test -- src/main/agentGoalAcceptance.test.ts",
           workspaceRoot: workspacePath,
+        },
+      },
+    ]);
+  });
+
+  it("rejects test_passes command path aliases outside allowed roots", async () => {
+    const acceptance = createAgentGoalAcceptance();
+
+    const result = await acceptance.evaluate(
+      createMilestone([
+        check("check_test_command_path", "test_passes", {
+          command: "node Desktop/check.js",
+        }),
+      ]),
+      createContext(),
+    );
+
+    expect(result.accepted).toBe(false);
+    expect(result.checkResults[0]).toMatchObject({
+      passed: false,
+      detail: "Command references a path outside the workspace: Desktop/check.js",
+    });
+    expect(toolCalls).toEqual([]);
+  });
+
+  it("rejects test_passes workspaceRoot aliases outside allowed roots", async () => {
+    const acceptance = createAgentGoalAcceptance();
+
+    const result = await acceptance.evaluate(
+      createMilestone([
+        check("check_test_workspace_root", "test_passes", {
+          command: "npm test",
+          workspaceRoot: "Desktop",
+        }),
+      ]),
+      createContext(),
+    );
+
+    expect(result.accepted).toBe(false);
+    expect(result.checkResults[0]).toMatchObject({
+      passed: false,
+      detail: "workspaceRoot is outside the workspace: Desktop",
+    });
+    expect(toolCalls).toEqual([]);
+  });
+
+  it("allows test_passes workspaceRoot aliases when Desktop is explicit", async () => {
+    const acceptance = createAgentGoalAcceptance();
+
+    const result = await acceptance.evaluate(
+      createMilestone([
+        check("check_test_workspace_root_desktop", "test_passes", {
+          command: "npm test",
+          workspaceRoot: "~/桌面",
+        }),
+      ]),
+      createContext({
+        extraWriteRoots: ["~/Desktop"],
+        toolResults: [
+          {
+            ok: true,
+            result: { exitCode: 0, evidenceRefs: ["test_run_desktop"] },
+          },
+        ],
+      }),
+    );
+
+    expect(result.accepted).toBe(true);
+    expect(toolCalls).toEqual([
+      {
+        toolName: "test_run",
+        args: {
+          command: "npm test",
+          workspaceRoot: path.join(homePath, "Desktop"),
         },
       },
     ]);
@@ -670,7 +1114,9 @@ describe("agent goal acceptance", () => {
     toolResults?: AgentToolExecutionResult[];
     artifacts?: Record<string, unknown>;
     chatClient?: ChatClient;
+    extraReadRoots?: string[];
     extraWriteRoots?: string[];
+    locationEnv?: AcceptanceContext["locationEnv"];
     transcriptMessages?: AcceptanceContext["transcriptMessages"];
   } = {}): AcceptanceContext {
     const queuedResults = [...(options.toolResults ?? [])];
@@ -679,7 +1125,12 @@ describe("agent goal acceptance", () => {
       goalId: "goal_1",
       milestoneId: "milestone_1",
       workspacePath,
+      extraReadRoots: options.extraReadRoots ?? [],
       extraWriteRoots: options.extraWriteRoots ?? [],
+      locationEnv: options.locationEnv ?? {
+        homeDir: homePath,
+        platform: "darwin",
+      },
       artifacts: options.artifacts ?? {},
       chatClient: options.chatClient,
       transcriptMessages: options.transcriptMessages,

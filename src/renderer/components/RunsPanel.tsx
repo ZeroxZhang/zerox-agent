@@ -15,6 +15,10 @@ import {
   reduceKernelEventsToRunViews,
   summarizeKernelEventForTimeline,
 } from "../../shared/kernelEventView";
+import {
+  projectRunGraph,
+  type RunGraphGate,
+} from "../../shared/runGraph";
 import { demoRuns } from "../demoAgentData";
 import { RunTrajectoryPanel } from "./RunTrajectoryPanel";
 
@@ -517,6 +521,17 @@ function RunInspector(props: {
       })),
     [props.kernelEvents],
   );
+  const runGraph = useMemo(
+    () =>
+      props.run
+        ? projectRunGraph({
+            run: props.run,
+            trajectoryEvents: props.trajectoryEvents,
+            kernelEvents: props.kernelEvents,
+          })
+        : null,
+    [props.kernelEvents, props.run, props.trajectoryEvents],
+  );
 
   return (
     <aside className="run-inspector" aria-label="运行检查器">
@@ -557,6 +572,53 @@ function RunInspector(props: {
           </>
         ) : (
           <p>选择一个事件后，可以查看 payload 详情。</p>
+        )}
+      </div>
+
+      <div className="inspector-section" aria-label="Run Graph">
+        <span className="inspector-label">Run Graph</span>
+        {runGraph ? (
+          <>
+            <dl className="run-graph-summary">
+              <div>
+                <dt>节点</dt>
+                <dd>{runGraph.nodes.length}</dd>
+              </div>
+              <div>
+                <dt>边</dt>
+                <dd>{runGraph.edges.length}</dd>
+              </div>
+              <div>
+                <dt>Gate</dt>
+                <dd>{runGraph.gates.length}</dd>
+              </div>
+              <div>
+                <dt>证据</dt>
+                <dd>{runGraph.evidence.length}</dd>
+              </div>
+            </dl>
+            {runGraph.gates.length ? (
+              <div className="run-graph-gate-list">
+                {runGraph.gates.map((gate) => (
+                  <article
+                    className={`run-graph-gate is-${gate.status}`}
+                    key={gate.id}
+                  >
+                    <div>
+                      <strong>{translateRunGraphGateKind(gate.kind)}</strong>
+                      <span>{translateRunGraphGateStatus(gate.status)}</span>
+                    </div>
+                    <p>{gate.title}</p>
+                    <small>{gate.sourceRefs.join(", ")}</small>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p>尚未记录 Gate。</p>
+            )}
+          </>
+        ) : (
+          <p>选择一条运行后，可以查看证据合成图。</p>
         )}
       </div>
 
@@ -811,6 +873,29 @@ function translateReviewDecision(
   };
 
   return labels[decision];
+}
+
+function translateRunGraphGateKind(kind: RunGraphGate["kind"]): string {
+  const labels: Record<RunGraphGate["kind"], string> = {
+    acceptance: "验收",
+    goal_review: "目标审核",
+    permission: "权限",
+    reconcile: "状态对账",
+    strategy_guard: "策略护栏",
+    workspace_sandbox: "工作区沙箱",
+  };
+
+  return labels[kind];
+}
+
+function translateRunGraphGateStatus(status: RunGraphGate["status"]): string {
+  const labels: Record<RunGraphGate["status"], string> = {
+    blocked: "阻塞",
+    succeeded: "通过",
+    waiting: "等待",
+  };
+
+  return labels[status];
 }
 
 function formatSandboxSummary(

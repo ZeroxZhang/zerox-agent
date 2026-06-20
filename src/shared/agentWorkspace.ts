@@ -1,3 +1,10 @@
+import {
+  isPathInsideLocationRoot,
+  normalizeLocationBoundaryPath,
+  normalizeLocationEnvironment,
+  type LocationResourceEnvironment,
+} from "./locationResource";
+
 export type AgentWorkspaceKind =
   | "default"
   | "project"
@@ -60,6 +67,10 @@ export type AgentRunContext = {
   workspaceId: string;
   workspaceRoot: string;
   sandbox: AgentSandboxPolicy;
+  locationEnv?: Required<LocationResourceEnvironment>;
+  runId?: string;
+  goalId?: string;
+  milestoneId?: string;
   parentRunId?: string;
   sessionId?: string;
   agentRole: AgentRole;
@@ -89,6 +100,10 @@ export type BuildPrimaryRunContextInput = {
   workspaceId: string;
   workspaceRoot: string;
   sandbox?: AgentSandboxPolicy;
+  locationEnv?: LocationResourceEnvironment;
+  runId?: string;
+  goalId?: string;
+  milestoneId?: string;
   sessionId?: string;
   agentRole?: Extract<AgentRole, "primary">;
 };
@@ -116,10 +131,22 @@ export function buildDefaultSandboxPolicy(): AgentSandboxPolicy {
 export function buildPrimaryRunContext(
   input: BuildPrimaryRunContextInput,
 ): AgentRunContext {
+  const locationEnv = normalizeLocationEnvironment({
+    ...input.locationEnv,
+    workspaceRoot: input.workspaceRoot,
+  });
+
   return {
     workspaceId: input.workspaceId,
-    workspaceRoot: normalizeBoundaryPath(input.workspaceRoot),
-    sandbox: input.sandbox ?? buildDefaultSandboxPolicy(),
+    workspaceRoot: locationEnv.workspaceRoot,
+    sandbox: canonicalizeSandboxPolicy(
+      input.sandbox ?? buildDefaultSandboxPolicy(),
+      locationEnv,
+    ),
+    locationEnv,
+    ...(input.runId ? { runId: input.runId } : {}),
+    ...(input.goalId ? { goalId: input.goalId } : {}),
+    ...(input.milestoneId ? { milestoneId: input.milestoneId } : {}),
     ...(input.sessionId ? { sessionId: input.sessionId } : {}),
     agentRole: input.agentRole ?? "primary",
     depth: 0,
@@ -130,12 +157,16 @@ export function buildChildRunContext(
   parent: AgentRunContext,
   input: BuildChildRunContextInput,
 ): AgentRunContext {
-  const sandbox = narrowSandboxPolicy(parent.sandbox, input.sandbox);
+  const locationEnv = getRunContextLocationEnv(parent);
+  const sandbox = narrowSandboxPolicy(parent.sandbox, input.sandbox, locationEnv);
 
   return {
     workspaceId: parent.workspaceId,
     workspaceRoot: parent.workspaceRoot,
     sandbox,
+    locationEnv,
+    ...(parent.goalId ? { goalId: parent.goalId } : {}),
+    ...(parent.milestoneId ? { milestoneId: parent.milestoneId } : {}),
     parentRunId: input.parentRunId,
     sessionId: input.sessionId ?? parent.sessionId,
     agentRole: input.agentRole,
@@ -148,6 +179,7 @@ export function isPathInsideRunContext(
   context: AgentRunContext,
   access: RunContextPathAccess,
 ): boolean {
+  const locationEnv = getRunContextLocationEnv(context);
   const roots = [
     context.workspaceRoot,
     ...(access === "read"
@@ -155,7 +187,9 @@ export function isPathInsideRunContext(
       : context.sandbox.extraWriteRoots),
   ];
 
-  return roots.some((root) => isPathInsideDirectory(candidatePath, root));
+  return roots.some((root) =>
+    isPathInsideLocationRoot(candidatePath, root, locationEnv),
+  );
 }
 
 export function isPathInsideDirectory(
@@ -181,6 +215,7 @@ export function normalizeBoundaryPath(value: string): string {
 function narrowSandboxPolicy(
   parent: AgentSandboxPolicy,
   child: AgentSandboxPolicy | undefined,
+  env: LocationResourceEnvironment,
 ): AgentSandboxPolicy {
   if (!child) {
     return {
@@ -190,26 +225,87 @@ function narrowSandboxPolicy(
     };
   }
 
+  const canonicalChild = canonicalizeSandboxPolicy(child, env);
+
   return {
     mode:
-      parent.mode === "read_only" || child.mode === "read_only"
+      parent.mode === "read_only" || canonicalChild.mode === "read_only"
         ? "read_only"
         : "workspace_write",
-    network: narrowNetworkMode(parent.network, child.network),
-    shell: narrowShellMode(parent.shell, child.shell),
+    network: narrowNetworkMode(parent.network, canonicalChild.network),
+    shell: narrowShellMode(parent.shell, canonicalChild.shell),
     allowWorkspaceEscape:
-      parent.allowWorkspaceEscape && child.allowWorkspaceEscape,
-    extraReadRoots: child.extraReadRoots.filter((root) =>
+      parent.allowWorkspaceEscape && canonicalChild.allowWorkspaceEscape,
+    extraReadRoots: canonicalChild.extraReadRoots.filter((root) =>
       parent.extraReadRoots.some((parentRoot) =>
-        isPathInsideDirectory(root, parentRoot),
+        isPathInsideLocationRoot(root, parentRoot, env),
       ),
     ),
-    extraWriteRoots: child.extraWriteRoots.filter((root) =>
+    extraWriteRoots: canonicalChild.extraWriteRoots.filter((root) =>
       parent.extraWriteRoots.some((parentRoot) =>
-        isPathInsideDirectory(root, parentRoot),
+        isPathInsideLocationRoot(root, parentRoot, env),
       ),
     ),
   };
+}
+
+/**
+ * Public wrapper around the private `narrowSandboxPolicy` (contract §5.2, Patch 15).
+ * Narrows a parent sandbox policy by an optional child override (any unset field
+ * inherits the parent's value). `workspaceRoot` derives the location environment
+ * used for path-boundary checks. P5 (fork agent) and P6 (actor) reuse this to
+ * narrow child sandboxes.
+ */
+export function buildChildSandboxPolicy(
+  parent: AgentSandboxPolicy,
+  child?: Partial<AgentSandboxPolicy>,
+  workspaceRoot?: string,
+): AgentSandboxPolicy {
+  const env = normalizeLocationEnvironment({
+    ...(workspaceRoot ? { workspaceRoot } : {}),
+  });
+  if (!child) {
+    return narrowSandboxPolicy(parent, undefined, env);
+  }
+  // Merge the partial child onto the parent so narrowSandboxPolicy receives a
+  // fully-formed policy (its internal canonicalize expects all fields present).
+  const merged: AgentSandboxPolicy = {
+    mode: child.mode ?? parent.mode,
+    network: child.network ?? parent.network,
+    shell: child.shell ?? parent.shell,
+    allowWorkspaceEscape: child.allowWorkspaceEscape ?? parent.allowWorkspaceEscape,
+    extraReadRoots: child.extraReadRoots ?? parent.extraReadRoots,
+    extraWriteRoots: child.extraWriteRoots ?? parent.extraWriteRoots,
+  };
+  return narrowSandboxPolicy(parent, merged, env);
+}
+
+function canonicalizeSandboxPolicy(
+  sandbox: AgentSandboxPolicy,
+  env: LocationResourceEnvironment,
+): AgentSandboxPolicy {
+  return {
+    ...sandbox,
+    extraReadRoots: unique(
+      sandbox.extraReadRoots.map((root) => normalizeLocationBoundaryPath(root, env)),
+    ),
+    extraWriteRoots: unique(
+      sandbox.extraWriteRoots.map((root) => normalizeLocationBoundaryPath(root, env)),
+    ),
+  };
+}
+
+function getRunContextLocationEnv(
+  context: AgentRunContext,
+): Required<LocationResourceEnvironment> {
+  return normalizeLocationEnvironment({
+    ...context.locationEnv,
+    workspaceRoot: context.workspaceRoot,
+  });
+}
+
+function unique(values: string[]): string[] {
+  return [...new Set(values)];
 }
 
 function narrowNetworkMode(
@@ -241,3 +337,13 @@ function narrowShellMode(
 
   return "workspace_only";
 }
+
+// Input for creating a workspace. Moved to shared so the storage contract
+// (src/shared/storageContract.ts) can reference it.
+export type AgentWorkspaceInput = {
+  name: string;
+  rootPath: string;
+  kind: AgentWorkspaceKind;
+  cleanup: AgentWorkspaceCleanup;
+  git?: AgentWorkspaceGitMetadata;
+};

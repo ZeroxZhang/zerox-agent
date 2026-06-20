@@ -1,6 +1,6 @@
 {
   "name": "zerox-agent",
-  "version": "2.3.2",
+  "version": "2.4.0",
   "description": "Zerox Agent, a local-first desktop agent built module by module.",
   "main": "dist-electron/main/main.js",
   "scripts": {
@@ -20,7 +20,7 @@
     "eval:memory": "npm run build && node scripts/run-memory-evals.mjs",
     "harness:check": "node scripts/check-harness-state.mjs",
     "harness:score": "npm run build && node scripts/run-harness-score.mjs",
-    "episode:export": "node scripts/export-agent-episode.mjs",
+    "episode:export": "npm run build && node scripts/export-agent-episode.mjs",
     "pack:mac": "npm run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --dir",
     "dist:mac": "npm run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg zip",
     "clean": "rm -rf dist dist-electron",
@@ -31,17 +31,22 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "better-sqlite3": "^12.11.1",
     "cron-parser": "^5.5.0",
+    "drizzle-orm": "^0.36.4",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "yaml": "^2.9.0"
   },
   "devDependencies": {
+    "@electron/rebuild": "^3.7.2",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.9.1",
     "@types/react": "^19.2.16",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.2",
     "concurrently": "^10.0.3",
+    "drizzle-kit": "^0.30.6",
     "electron": "^42.3.3",
     "electron-builder": "^26.15.0",
     "typescript": "^6.0.3",

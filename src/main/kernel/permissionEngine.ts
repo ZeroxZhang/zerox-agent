@@ -1,5 +1,6 @@
 import type { PermissionRule } from "../../shared/kernelContract";
 import type { ToolCallRequest } from "../../shared/toolPermissions";
+import type { ShellPlan } from "../tools/shell/shellAnalyzer";
 
 export type PermissionEvaluation = {
   action: PermissionRule["action"];
@@ -7,6 +8,12 @@ export type PermissionEvaluation = {
   fullCommand: string;
   matchedRule?: string;
 };
+
+// Patch 4: control-operator detection unified on ShellPlan as the single source
+// of truth. The legacy regex is retained as the fallback when no ShellPlan is
+// provided (zero regression for non-shell paths), now including redirection
+// (`<>`) so it matches the shared toolPermissions regex.
+const LEGACY_SHELL_CONTROL_OPERATOR = /(;|&&|\|\||`|\$\(|\||[<>])/;
 
 const COMMAND_ARITY: Record<string, number> = {
   git: 2,
@@ -25,11 +32,17 @@ const COMMAND_ARITY: Record<string, number> = {
 export function evaluatePermission(
   request: ToolCallRequest,
   rules: PermissionRule[],
+  opts?: { shellPlan?: ShellPlan },
 ): PermissionEvaluation {
   const fullCommand = deriveFullCommand(request);
   const command = deriveHumanCommand(request, fullCommand);
+  // Patch 4: prefer ShellPlan.controlOperators as the single source of truth;
+  // fall back to the legacy regex (now incl. redirection) when no plan is given.
+  const hasControlOperator = opts?.shellPlan
+    ? opts.shellPlan.controlOperators.length > 0
+    : LEGACY_SHELL_CONTROL_OPERATOR.test(fullCommand);
   const allowReducedCommandMatch =
-    request.toolName !== "shell_exec" || !hasShellControlOperator(fullCommand);
+    request.toolName !== "shell_exec" || !hasControlOperator;
   const matched = findLastMatchingRule(
     rules,
     command,
@@ -129,10 +142,6 @@ function primaryToolArgument(request: ToolCallRequest): string {
 function wildcardMatch(pattern: string, value: string): boolean {
   const regex = new RegExp(`^${pattern.split("*").map(escapeRegex).join(".*")}$`);
   return regex.test(value);
-}
-
-function hasShellControlOperator(command: string): boolean {
-  return /(;|&&|\|\||`|\$\(|\|)/.test(command);
 }
 
 function escapeRegex(value: string): string {

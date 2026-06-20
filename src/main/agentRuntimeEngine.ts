@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { createContextManager, type ContextManager } from "./contextManager";
+import type { CompactionStrategy } from "./kernel/compactionStrategy";
+import { NEVER_COMPACT_MARKER } from "../shared/compactionMarkers";
+import { isMaxModeEnabled } from "./providers/maxMode";
+import type { ActorRuntime } from "./actors/actorRuntime";
 import type { AgentExecutionStore } from "./agentExecutionStore";
 import { classifyAgentFailure } from "./agentFailureClassifier";
 import { extractLearningCandidatesFromTrajectory } from "./agentLearningExtractor";
@@ -19,9 +23,12 @@ import {
 } from "./modelRetry";
 import type {
   ChatClient,
+  ChatCompletionRequest,
+  ChatCompletionResponse,
   ChatMessage,
   ToolDefinition,
 } from "./openAiCompatibleClient";
+import { toCompleteRequest } from "./providers/normalize";
 import type { ScheduledTaskStore } from "./taskStore";
 import type { ToolAuthorizationService } from "./toolAuthorizationService";
 import {
@@ -89,6 +96,16 @@ export function createAgentRuntimeEngine(options: {
   toolResultOffloadStore?: ToolResultOffloadStore;
   toolResultOffloadThreshold?: number;
   contextManager?: ContextManager;
+  /** P2: when provided, overflow compaction routes through this strategy
+   *  (auto→rebuild when a checkpoint exists, else summarize = current behavior).
+   *  Absent → legacy compressMessages (zero regression). */
+  compactionStrategy?: CompactionStrategy;
+  /** P8: when provided AND ZEROX_MAX_MODE is on, the model request step runs
+   *  best-of-N candidates through this MaxMode instead of a single complete.
+   *  Absent/off → single completeWithModelRetry (zero regression). */
+  maxMode?: { runStep: (req: import("./providers/provider").CompleteRequest, opts: import("./providers/maxMode").MaxModeRunStepOptions) => Promise<import("./providers/maxMode").MaxModeResult> };
+  /** P8: actor runtime for max-mode winner replay. */
+  actorRuntimeForMaxMode?: ActorRuntime;
   modelRetry?: ModelRetryOptions;
   createId?: () => string;
   now?: () => Date;
@@ -298,6 +315,51 @@ export function createAgentRuntimeEngine(options: {
         return;
       }
 
+      // P2: route through the compaction strategy when provided. Default flag
+      // `auto` degrades to summarize (= compressMessages) when no checkpoint
+      // exists, so this is byte-equivalent to the legacy path unless a markdown
+      // checkpoint is present (rebuild). Absent strategy → legacy path.
+      if (options.compactionStrategy) {
+        const result = await options.compactionStrategy.compact({
+          messages,
+          budget: contextTokenBudget,
+          runId: current.runId,
+          protectedMarkers: [NEVER_COMPACT_MARKER],
+        });
+        if (!result.compacted) {
+          return;
+        }
+        messages = result.messages;
+        if (result.strategy === "rebuild" || result.strategy === "summarize-degraded") {
+          await appendTrajectory(current.runId, "context_rebuilt", {
+            strategy: result.strategy,
+            ...(result.checkpointRef ? { checkpointRef: result.checkpointRef } : {}),
+            beforeTokens: result.beforeTokens,
+            afterTokens: result.afterTokens,
+            memoryHits: result.memoryHits ?? [],
+            microcompactedRefs: result.microcompactedRefs ?? [],
+            ...(result.degradedReason ? { degradedReason: result.degradedReason } : {}),
+            createdAt: now().toISOString(),
+          }, {
+            containsApiKey: false,
+            containsFileContent: false,
+            containsUserText: false,
+          }, current.runContext);
+        } else {
+          await appendTrajectory(current.runId, "context_compacted", {
+            originalMessageCount: messages.length,
+            compactedMessageCount: messages.length,
+            estimatedTokens,
+            tokenBudget: contextTokenBudget,
+          }, {
+            containsApiKey: false,
+            containsFileContent: false,
+            containsUserText: false,
+          }, current.runContext);
+        }
+        return;
+      }
+
       const originalMessageCount = messages.length;
       const compacted = contextManager.compressMessages(
         messages,
@@ -331,29 +393,69 @@ export function createAgentRuntimeEngine(options: {
         containsFileContent: false,
         containsUserText: true,
       }, current.runContext);
-      const response = await completeWithModelRetry(
-        options.chatClient,
-        {
-          ...profile,
-          messages,
-          tools: toolDefinitions,
-          tool_choice: "auto",
-          ...(signal ? { signal } : {}),
-        },
-        options.modelRetry,
-        async (event) => {
-          await appendTrajectory(current.runId, "model_retry", event, {
-            containsApiKey: false,
-            containsFileContent: false,
-            containsUserText: false,
-          }, current.runContext);
-        },
-      );
+      const response = await runModelRequest();
+      async function runModelRequest(): Promise<ChatCompletionResponse> {
+        // P8: max-mode (best-of-N) when enabled + deps present. Default off.
+        if (options.maxMode && isMaxModeEnabled()) {
+          try {
+            const result = await options.maxMode.runStep(
+              toCompleteRequest({
+                ...profile,
+                messages,
+                tools: toolDefinitions,
+                tool_choice: "auto",
+                ...(signal ? { signal } : {}),
+              } as ChatCompletionRequest),
+              {
+                candidates: 3,
+                judgeModel: profile.model,
+                ...(options.actorRuntimeForMaxMode ? { actorRuntime: options.actorRuntimeForMaxMode } : {}),
+                parentRunId: current.runId,
+                ...(signal ? { signal } : {}),
+              },
+            );
+            const w = result.winner;
+            return {
+              content: w.content,
+              toolCalls: w.toolCalls,
+              finishReason: w.finishReason,
+              ...(w.reasoningContent ? { reasoningContent: w.reasoningContent } : {}),
+              ...(w.usage ? { usage: w.usage } : {}),
+              ...(w.cacheReadTokens ? { cacheReadTokens: w.cacheReadTokens } : {}),
+              ...(w.cacheWriteTokens ? { cacheWriteTokens: w.cacheWriteTokens } : {}),
+            };
+          } catch {
+            // fall through to the standard single-complete path on any max-mode failure
+          }
+        }
+        return completeWithModelRetry(
+          options.chatClient,
+          {
+            ...profile,
+            messages,
+            tools: toolDefinitions,
+            tool_choice: "auto",
+            ...(signal ? { signal } : {}),
+          },
+          options.modelRetry,
+          async (event) => {
+            await appendTrajectory(current.runId, "model_retry", event, {
+              containsApiKey: false,
+              containsFileContent: false,
+              containsUserText: false,
+            }, current.runContext);
+          },
+        );
+      }
       await appendTrajectory(current.runId, "model_response", {
         turn,
         hasContent: Boolean(response.content),
         toolCallCount: response.toolCalls.length,
         finishReason: response.finishReason,
+        // P8: usage for runGraph cost aggregation (Patch 11 model_response node).
+        ...(response.usage ? { usage: response.usage } : {}),
+        ...(response.cacheReadTokens !== undefined ? { cacheReadTokens: response.cacheReadTokens } : {}),
+        ...(response.cacheWriteTokens !== undefined ? { cacheWriteTokens: response.cacheWriteTokens } : {}),
       }, {
         containsApiKey: false,
         containsFileContent: false,

@@ -11,6 +11,11 @@ import type { GoalReviewDecision } from "../shared/agentGoalReview";
 import type { ChatSessionGoalSummary, GoalProgressEvent } from "../shared/chat";
 import { classifyTaskFrame, type TaskFrame } from "../shared/agentTaskStrategy";
 import {
+  compileAgentTaskContract,
+  type AgentTaskContract,
+} from "../shared/agentTaskContract";
+import { createTaskContractSuccessCriterion } from "../shared/agentTaskContractAcceptance";
+import {
   createQuickActionPlan,
   type QuickActionPlan,
 } from "../shared/agentQuickAction";
@@ -135,39 +140,33 @@ export function createGoalChatService(options: {
     async createFromChat(input) {
       const goalId = createId();
       const description = input.description.trim() || "Chat goal";
-      const goalCriterion: SuccessCriterion = {
-        id: "criterion_goal_satisfied",
-        description: `Goal condition is satisfied: ${description}`,
-        acceptanceChecks: [
-          {
-            id: "criterion_goal_satisfied_review",
-            kind: "model_review",
-            description:
-              "An independent judge confirms the goal condition is satisfied from recorded execution evidence.",
-            params: {
-              condition: description,
-              evidenceRefs: ["artifact:goalEvidence"],
-            },
-            requiresEvidence: true,
-          },
-        ],
-      };
+      const taskContract = compileAgentTaskContract({
+        description,
+        chatSessionId: input.sessionId,
+        ...(input.originMessageId
+          ? { originMessageId: input.originMessageId }
+          : {}),
+      });
+      const goalCriterion = createGoalSuccessCriterion(
+        description,
+        taskContract,
+      );
       const taskFrame = classifyTaskFrame(description);
       const quickActionPlan = createQuickActionPlan(description, taskFrame);
-      const quickActionReview = shouldRouteToQuickActionReview(
-        taskFrame,
-        quickActionPlan,
-      );
+      const quickActionReviewPlan =
+        !taskContract && shouldRouteToQuickActionReview(taskFrame, quickActionPlan)
+          ? quickActionPlan
+          : null;
 
-      const milestones = quickActionReview
+      const milestones = quickActionReviewPlan
         ? [
             createQuickActionReviewMilestone(
               description,
               goalCriterion,
-              quickActionPlan,
+              quickActionReviewPlan,
             ),
           ]
-        : await planGoalMilestones(description, goalCriterion);
+        : await planGoalMilestones(description, goalCriterion, taskContract);
 
       const goal: Goal = {
         id: goalId,
@@ -176,9 +175,10 @@ export function createGoalChatService(options: {
           ? { originMessageId: input.originMessageId }
           : {}),
         description,
+        ...(taskContract ? { taskContract } : {}),
         successCriteria: [goalCriterion],
         milestones,
-        status: quickActionReview ? "waiting_for_review" : "planning",
+        status: quickActionReviewPlan ? "waiting_for_review" : "planning",
         budget: createDefaultChatGoalBudget(),
         budgetUsage: {
           iterations: 0,
@@ -194,11 +194,11 @@ export function createGoalChatService(options: {
       };
 
       await options.goalStore.save(goal);
-      if (quickActionReview) {
+      if (quickActionReviewPlan) {
         await options.goalStore.appendLedger(goal.id, {
           at: goal.createdAt,
           kind: "review_requested",
-          summary: buildQuickActionReviewSummary(taskFrame, quickActionPlan),
+          summary: buildQuickActionReviewSummary(taskFrame, quickActionReviewPlan),
         });
         notifyProgress(
           "review_requested",
@@ -393,12 +393,14 @@ export function createGoalChatService(options: {
   async function planGoalMilestones(
     description: string,
     goalCriterion: SuccessCriterion,
+    taskContract: AgentTaskContract | undefined,
   ): Promise<Milestone[]> {
     try {
       return await options.planner.plan(description, {
         successCriteria: [goalCriterion],
         availableTools: options.getAvailableTools?.() ?? [],
         availableSkills: options.getAvailableSkills?.() ?? [],
+        ...(taskContract ? { taskContract } : {}),
       });
     } catch {
       // Fallback: create a single achievable milestone that produces the artifact.
@@ -415,6 +417,36 @@ export function createGoalChatService(options: {
       ];
     }
   }
+}
+
+function createGoalSuccessCriterion(
+  description: string,
+  taskContract: AgentTaskContract | undefined,
+): SuccessCriterion {
+  const contractCriterion = taskContract
+    ? createTaskContractSuccessCriterion(taskContract)
+    : undefined;
+  if (contractCriterion) {
+    return contractCriterion;
+  }
+
+  return {
+    id: "criterion_goal_satisfied",
+    description: `Goal condition is satisfied: ${description}`,
+    acceptanceChecks: [
+      {
+        id: "criterion_goal_satisfied_review",
+        kind: "model_review",
+        description:
+          "An independent judge confirms the goal condition is satisfied from recorded execution evidence.",
+        params: {
+          condition: description,
+          evidenceRefs: ["artifact:goalEvidence"],
+        },
+        requiresEvidence: true,
+      },
+    ],
+  };
 }
 
 function shouldRouteToQuickActionReview(

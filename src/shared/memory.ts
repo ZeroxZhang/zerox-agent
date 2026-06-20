@@ -10,7 +10,9 @@ export type MemorySource =
   | { type: "agent_run"; refId: string }
   | { type: "chat_session"; sessionId: string; messageIds: string[] }
   | { type: "skill"; refId: string }
-  | { type: "system" };
+  | { type: "system" }
+  | { type: "dream"; runId: string } // P7 (Patch 23)
+  | { type: "distill"; runId: string }; // P7 (Patch 23)
 
 export type MemoryEmbedding = {
   model: string;
@@ -49,12 +51,18 @@ export type NormalizedMemoryInput = {
   consolidation?: MemoryConsolidation;
 };
 
+export type MemoryArchiveReason =
+  | "consolidated"
+  | "superseded"
+  | "stale"
+  | "user_archived";
+
 export type MemoryRecord = NormalizedMemoryInput & {
   id: string;
   createdAt: string;
   updatedAt: string;
   archivedAt?: string;
-  archiveReason?: "consolidated";
+  archiveReason?: MemoryArchiveReason;
   consolidatedInto?: string;
 };
 

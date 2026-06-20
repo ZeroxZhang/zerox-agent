@@ -1362,6 +1362,58 @@ nav {
 }
 .trajectory-event.is-selected { border-color: var(--border-accent); background: var(--bg-accent-muted); }
 .trajectory-event strong, .trajectory-event small { overflow-wrap: anywhere; }
+.run-graph-summary {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-2); margin: 0;
+}
+.run-graph-summary div {
+  min-width: 0; padding: var(--space-2);
+  border: 1px solid var(--border-default); border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+}
+.run-graph-summary dt {
+  color: var(--text-tertiary); font-size: var(--text-xs); white-space: nowrap;
+}
+.run-graph-summary dd {
+  margin: 2px 0 0; color: var(--text-primary);
+  font-size: var(--text-lg); font-weight: var(--font-semibold);
+}
+.run-graph-gate-list {
+  display: grid; gap: var(--space-2);
+  max-height: 220px; overflow: auto;
+  padding-right: 2px;
+}
+.run-graph-gate {
+  display: grid; gap: var(--space-1);
+  min-width: 0; padding: var(--space-2);
+  border: 1px solid var(--border-default); border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+}
+.run-graph-gate > div {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
+}
+.run-graph-gate strong,
+.run-graph-gate p,
+.run-graph-gate small {
+  overflow-wrap: anywhere;
+}
+.run-graph-gate span {
+  flex: 0 0 auto;
+  padding: 2px var(--space-2);
+  border: 1px solid var(--status-info-border);
+  border-radius: var(--radius-full);
+  color: var(--status-info-text);
+  background: var(--status-info-bg);
+  font-size: var(--text-xs);
+}
+.run-graph-gate p { margin: 0; color: var(--text-secondary); line-height: var(--leading-normal); }
+.run-graph-gate small { color: var(--text-tertiary); font-size: var(--text-xs); }
+.run-graph-gate.is-waiting { border-color: var(--status-warning-border); background: var(--status-warning-bg); }
+.run-graph-gate.is-waiting span { color: var(--status-warning-text); background: var(--status-warning-bg); border-color: var(--status-warning-border); }
+.run-graph-gate.is-blocked { border-color: var(--status-error-border); background: var(--status-error-bg); }
+.run-graph-gate.is-blocked span { color: var(--status-error-text); background: var(--status-error-bg); border-color: var(--status-error-border); }
+.run-graph-gate.is-succeeded { border-color: var(--status-success-border); background: var(--status-success-bg); }
+.run-graph-gate.is-succeeded span { color: var(--status-success-text); background: var(--status-success-bg); border-color: var(--status-success-border); }
 .kernel-event-list {
   display: grid; gap: var(--space-2);
   max-height: 280px; overflow: auto;

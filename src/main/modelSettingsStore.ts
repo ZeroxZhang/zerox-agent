@@ -20,6 +20,7 @@ type StoredModelSettings = {
   thinkingEnabled: boolean;
   thinkingBudgetTokens: number;
   updatedAt: string;
+  providerId?: import("../shared/modelSettings").ProviderId;
 };
 
 export type SecretVault = {
@@ -100,6 +101,7 @@ export function createModelSettingsStore(options: {
         thinkingEnabled: normalized.thinkingEnabled,
         thinkingBudgetTokens: normalized.thinkingBudgetTokens,
         updatedAt: new Date().toISOString(),
+        ...(normalized.providerId ? { providerId: normalized.providerId } : {}),
       };
 
       await writeStoredSettings(nextStored);
@@ -160,5 +162,6 @@ function toPublicSettings(settings: StoredModelSettings): PublicModelSettings {
       settings.thinkingBudgetTokens ?? defaults.thinkingBudgetTokens,
     hasApiKey: Boolean(settings.encryptedApiKey),
     updatedAt: settings.updatedAt,
+    ...(settings.providerId ? { providerId: settings.providerId } : {}),
   };
 }

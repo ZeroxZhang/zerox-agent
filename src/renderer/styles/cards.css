@@ -24,6 +24,8 @@
 .handoff-review-card,
 .kernel-event-card,
 .kernel-event-list,
+.run-graph-gate,
+.run-graph-summary,
 .trajectory-insight,
 .trajectory-insight-list {
   border-color: var(--border-default);

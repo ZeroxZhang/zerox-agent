@@ -1,5 +1,7 @@
 import type { AgentToolExecutor } from "./agentToolExecutor";
 import { createContextManager, type ContextManager } from "./contextManager";
+import type { CompactionStrategy } from "./kernel/compactionStrategy";
+import { NEVER_COMPACT_MARKER } from "../shared/compactionMarkers";
 import type { AgentRunContext } from "../shared/agentWorkspace";
 import type {
   ChatClient,
@@ -44,6 +46,10 @@ export type AgentLoopOptions = {
   initialToolCallsExecuted?: number;
   pauseOnFailureLoop?: boolean;
   contextManager?: ContextManager;
+  /** P2: overflow compaction routes through this strategy when provided
+   *  (auto→rebuild when a checkpoint exists, else summarize = current behavior).
+   *  Absent → legacy compressMessages (zero regression). */
+  compactionStrategy?: CompactionStrategy;
   modelRetry?: ModelRetryOptions;
   onToolCall?: (toolName: string, args: Record<string, unknown>) => void;
   onToolResult?: (
@@ -122,6 +128,7 @@ export async function runAgentLoop(
     initialToolCallsExecuted = 0,
     pauseOnFailureLoop = false,
     contextManager = createContextManager(),
+    compactionStrategy,
     modelRetry,
     onToolCall,
     onToolResult,
@@ -166,13 +173,37 @@ export async function runAgentLoop(
   const successfulToolNames = new Set<string>();
   const contextTokenBudget = Math.max(1, Math.floor(modelProfile.maxTokens * 0.7));
 
-  function compactMessagesBeforeModelRequest() {
+  async function compactMessagesBeforeModelRequest() {
     const estimatedTokens = contextManager.estimateTokens(messages);
     if (estimatedTokens <= contextTokenBudget) {
       return;
     }
 
     const originalMessageCount = messages.length;
+
+    // P2: route through the compaction strategy when provided. Default flag
+    // `auto` degrades to summarize (= compressMessages) when no checkpoint
+    // exists — byte-equivalent to the legacy path unless a rebuild happens.
+    if (compactionStrategy) {
+      const result = await compactionStrategy.compact({
+        messages,
+        budget: contextTokenBudget,
+        runId: modelProfile.model,
+        protectedMarkers: [NEVER_COMPACT_MARKER],
+      });
+      if (!result.compacted) {
+        return;
+      }
+      messages.splice(0, messages.length, ...result.messages);
+      onContextCompacted?.({
+        originalMessageCount,
+        compactedMessageCount: messages.length,
+        estimatedTokens,
+        tokenBudget: contextTokenBudget,
+      });
+      return;
+    }
+
     const compacted = contextManager.compressMessages(
       messages,
       contextTokenBudget,
@@ -200,7 +231,7 @@ export async function runAgentLoop(
       role: "system",
       content: options.prompt,
     });
-    compactMessagesBeforeModelRequest();
+    await compactMessagesBeforeModelRequest();
 
     try {
       const response = await completeWithModelRetry(
@@ -271,7 +302,7 @@ export async function runAgentLoop(
       }
 
       onTurn?.(turns, "executing");
-      compactMessagesBeforeModelRequest();
+      await compactMessagesBeforeModelRequest();
 
       const response = await completeWithModelRetry(
         chatClient,

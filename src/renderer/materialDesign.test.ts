@@ -185,6 +185,16 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".kernel-event-card");
   });
 
+  it("surfaces evidence-backed Run Graph gates in Runs", () => {
+    expect(runsPanelSource).toContain("projectRunGraph");
+    expect(runsPanelSource).toContain("Run Graph");
+    expect(runsPanelSource).toContain("run-graph-summary");
+    expect(runsPanelSource).toContain("run-graph-gate");
+    expect(runsPanelSource).toContain("translateRunGraphGateKind");
+    expect(styles).toContain(".run-graph-summary");
+    expect(styles).toContain(".run-graph-gate");
+  });
+
   it("surfaces eval candidate generation from terminal Runs", () => {
     expect(runsPanelSource).toContain("Eval Candidate");
     expect(runsPanelSource).toContain("generateEvalCandidateForRun");

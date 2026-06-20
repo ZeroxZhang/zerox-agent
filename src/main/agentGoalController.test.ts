@@ -238,6 +238,64 @@ describe("agent goal controller", () => {
     expect(finalGoalReviewCalls).toBe(0);
   });
 
+  it("achieves covered provenance artifact goals from accepted milestone evidence", async () => {
+    let finalGoalAcceptanceCalls = 0;
+    await store.save(
+      createGoal([milestone("milestone_bookmarks")], {
+        successCriteria: [artifactCriterion],
+        milestones: [
+          {
+            ...milestone("milestone_bookmarks"),
+            successCriteria: [artifactCriterion],
+          },
+        ],
+      }),
+    );
+    const runtime = createRuntime();
+    const controller = createController({
+      runtime,
+      acceptance: {
+        async evaluate() {
+          return {
+            accepted: true,
+            inferentialUsed: false,
+            checkResults: [
+              {
+                checkId: "check_bookmark_artifact",
+                kind: "file_exists",
+                passed: true,
+                evidenceRefs: ["artifact:bookmark_list", "provenance:bookmark_list"],
+                detail: "File exists with valid provenance: bookmark_list.md",
+              },
+            ],
+          };
+        },
+        async evaluateGoal() {
+          finalGoalAcceptanceCalls += 1;
+          return {
+            accepted: false,
+            inferentialUsed: false,
+            checkResults: [
+              {
+                checkId: "check_bookmark_artifact",
+                kind: "file_exists",
+                passed: false,
+                evidenceRefs: ["artifact:bookmark_list", "provenance:bookmark_list"],
+                detail: "Should not need duplicate provenance validation.",
+              },
+            ],
+          };
+        },
+      },
+    });
+
+    const result = await controller.start("goal_1");
+
+    expect(result.status).toBe("achieved");
+    expect(result.stopReason).toBe("goal_accepted");
+    expect(finalGoalAcceptanceCalls).toBe(0);
+  });
+
   it("suspends at review gates and does not advance until review is resolved", async () => {
     await store.save(
       createGoal(
@@ -426,6 +484,25 @@ const modelReviewCriterion: SuccessCriterion = {
         evidenceRefs: ["artifact:goalEvidence"],
       },
       requiresEvidence: true,
+    },
+  ],
+};
+
+const artifactCriterion: SuccessCriterion = {
+  id: "criterion_chrome_bookmark_artifacts",
+  description: "Chrome bookmark artifacts are written.",
+  acceptanceChecks: [
+    {
+      id: "check_bookmark_artifact",
+      kind: "file_exists",
+      description: "Complete Chrome bookmark list artifact exists.",
+      params: {
+        path: "bookmark_list.md",
+        artifactRef: "artifact:bookmark_list",
+        destination: { kind: "desktop", filename: "bookmark_list.md" },
+        requireProvenance: true,
+      },
+      requiresEvidence: false,
     },
   ],
 };

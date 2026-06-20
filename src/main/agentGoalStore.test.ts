@@ -275,6 +275,34 @@ describe("agent goal store", () => {
       },
     ]);
   });
+
+  it("loads old goal JSON without taskContract for active and chat session queries", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const goalsDir = path.join(configDir, "agent-goals");
+    const legacyGoal = {
+      ...createGoal(
+        "goal_legacy",
+        "executing",
+        "2026-06-12T00:04:00.000Z",
+      ),
+      chatSessionId: "chat_legacy",
+      originMessageId: "message_legacy",
+    };
+    const { taskContract: _taskContract, ...legacyGoalJson } =
+      legacyGoal as Goal & { taskContract?: unknown };
+    await mkdir(goalsDir, { recursive: true });
+    await writeFile(
+      path.join(goalsDir, "goal_legacy.json"),
+      `${JSON.stringify(legacyGoalJson, null, 2)}\n`,
+      "utf8",
+    );
+
+    await expect(store.get("goal_legacy")).resolves.toEqual(legacyGoalJson);
+    await expect(store.listActive()).resolves.toEqual([legacyGoalJson]);
+    await expect(store.listByChatSession("chat_legacy")).resolves.toEqual([
+      legacyGoalJson,
+    ]);
+  });
 });
 
 const criterion: SuccessCriterion = {

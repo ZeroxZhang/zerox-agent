@@ -9,6 +9,7 @@ import {
   type TaskPermissionPolicy,
   type ToolCallRequest,
 } from "../shared/toolPermissions";
+import { analyzeShell, type ShellPlan } from "./tools/shell/shellAnalyzer";
 import type { AgentRunContext } from "../shared/agentWorkspace";
 import type { PermissionRule } from "../shared/kernelContract";
 
@@ -82,9 +83,19 @@ export function createToolAuthorizationService(options: {
         };
       }
 
+      const runContext = authorizeOptions?.runContext;
+      // P4: build a ShellPlan for shell_exec when a runContext is available,
+      // feeding both permission layers as the single source of truth (Patch 4).
+      // Zero regression for non-shell tools / when no runContext is present.
+      const shellPlan: ShellPlan | undefined =
+        request.toolName === "shell_exec" && runContext
+          ? analyzeShell(String(request.args.command ?? ""), { cwd: runContext.workspaceRoot })
+          : undefined;
+
       const ruleEvaluation = evaluatePermission(
         request,
         resolvePermissionRules(options.permissionRules),
+        shellPlan ? { shellPlan } : undefined,
       );
       if (ruleEvaluation.action === "deny") {
         const ruleDecision = evaluateRuleDecision(ruleEvaluation);
@@ -103,7 +114,8 @@ export function createToolAuthorizationService(options: {
       let decision = authorizeToolCallWithinRunContext(
         expandHomePermissionPolicy(subject.permissions, homeDir),
         request,
-        authorizeOptions?.runContext,
+        runContext,
+        shellPlan ? { shellPlan } : undefined,
       );
       if (decision.allowed && ruleEvaluation.action === "allow") {
         decision = {

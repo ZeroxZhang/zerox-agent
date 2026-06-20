@@ -8,7 +8,7 @@ type PackageJson = {
 };
 
 describe("package scripts", () => {
-  it("sets release metadata to v2.3.2", () => {
+  it("sets release metadata to v2.4.0", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -16,9 +16,49 @@ describe("package scripts", () => {
       readFileSync(path.join(process.cwd(), "package-lock.json"), "utf8"),
     ) as { version?: string; packages?: Record<string, { version?: string }> };
 
-    expect(packageJson.version).toBe("2.3.2");
-    expect(packageLock.version).toBe("2.3.2");
-    expect(packageLock.packages?.[""]?.version).toBe("2.3.2");
+    expect(packageJson.version).toBe("2.4.0");
+    expect(packageLock.version).toBe("2.4.0");
+    expect(packageLock.packages?.[""]?.version).toBe("2.4.0");
+  });
+
+  it("marks the v2.4.0 iteration activation and release done", () => {
+    const packageJson = JSON.parse(
+      readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
+    ) as PackageJson;
+    const featureList = JSON.parse(
+      readFileSync(path.join(process.cwd(), ".zerox/feature_list.json"), "utf8"),
+    ) as {
+      features: Array<{
+        id: string;
+        status: string;
+        definitionOfDone?: string[];
+      }>;
+    };
+
+    expect(packageJson.version).toBe("2.4.0");
+    expect(featureList.features).toContainEqual(
+      expect.objectContaining({
+        id: "P12-2.4.0-iteration-activation-and-release",
+        status: "done",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("iteration-roadmap P1-P8 activated"),
+          expect.stringContaining("package version bumped to 2.4.0"),
+        ]),
+      }),
+    );
+    expect(featureList.features).not.toContainEqual(
+      expect.objectContaining({
+        id: "P12-2.4.0-iteration-activation-and-release",
+        status: "in_progress",
+      }),
+    );
+    // Prior release gate stays done (no regression).
+    expect(featureList.features).toContainEqual(
+      expect.objectContaining({
+        id: "P11.7-v2.3.6-release-metadata-and-distribution",
+        status: "done",
+      }),
+    );
   });
 
   it("exposes a production start command for the built Electron app", () => {
@@ -79,7 +119,8 @@ describe("package scripts", () => {
     expect(packageJson.scripts).toMatchObject({
       "harness:check": "node scripts/check-harness-state.mjs",
       "harness:score": "npm run build && node scripts/run-harness-score.mjs",
-      "episode:export": "node scripts/export-agent-episode.mjs",
+      "episode:export":
+        "npm run build && node scripts/export-agent-episode.mjs",
     });
   });
 });

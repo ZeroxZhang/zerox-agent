@@ -8,3 +8,4 @@ session_recording/
 npm-debug.log*
 *.local
 .api_info.md
+iteration-roadmap/
