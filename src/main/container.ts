@@ -446,7 +446,9 @@ export function createAppContainer(options: {
   }
 
   function scheduledTaskStore() {
-    return lazy("scheduledTaskStore", () => createScheduledTaskStore({ configDir }));
+    return lazy("scheduledTaskStore", () =>
+      createScheduledTaskStore({ configDir, backend: storageBackend(), storage: storage() ?? undefined }),
+    );
   }
 
   function toolAuditLog() {

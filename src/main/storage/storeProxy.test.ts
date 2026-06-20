@@ -116,3 +116,24 @@ describe.each(["sqlite", "dual"] as StorageBackend[])(
     });
   },
 );
+
+describe.each(["sqlite", "dual"] as StorageBackend[])(
+  "scheduledTaskStore backend=%s",
+  (backend) => {
+    it("create/get/list/setEnabled/recordRun/delete round-trip", async () => {
+      await withStorage(backend, async (dir, storage) => {
+        const { createScheduledTaskStore } = await import("../taskStore");
+        const store = createScheduledTaskStore({ configDir: dir, backend, storage });
+        const task = await store.create({ name: "Daily", skillName: "noop", enabled: true, schedule: { kind: "manual" }, input: {} });
+        expect((await store.get(task.id))?.name).toBe("Daily");
+        await store.setEnabled(task.id, false);
+        expect((await store.get(task.id))?.enabled).toBe(false);
+        await store.recordRun(task.id, new Date("2026-06-19T01:00:00.000Z"));
+        expect((await store.get(task.id))?.lastRunAt).toBeTruthy();
+        expect((await store.list()).length).toBe(1);
+        expect(await store.delete(task.id)).toBe(true);
+        expect(await store.get(task.id)).toBeNull();
+      });
+    });
+  },
+);

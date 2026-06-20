@@ -9,6 +9,8 @@ import {
   type ScheduledTaskInput,
   type ScheduledTaskValidationErrors,
 } from "../shared/scheduledTasks";
+import type { StorageBackend, Storage, TaskRepository } from "../shared/storageContract";
+import { createTaskRepository } from "./storage/repositories/index";
 
 type StoredScheduledTasks = {
   schemaVersion: 1;
@@ -34,11 +36,23 @@ export class ScheduledTaskValidationError extends Error {
   }
 }
 
-export function createScheduledTaskStore(options: {
+export interface ScheduledTaskStoreOptions {
   configDir: string;
   createId?: () => string;
   now?: () => Date;
-}): ScheduledTaskStore {
+  /** Storage backend (default "json" — legacy behavior, zero regression). */
+  backend?: StorageBackend;
+  /** Storage instance required when backend is sqlite/dual. */
+  storage?: Storage;
+}
+
+function shadowWriteError(error: unknown): void {
+  // eslint-disable-next-line no-console
+  console.warn("[storage] dual-write JSON shadow write failed:", String(error));
+}
+
+export function createScheduledTaskStore(options: ScheduledTaskStoreOptions): ScheduledTaskStore {
+  const backend: StorageBackend = options.backend ?? "json";
   const tasksPath = path.join(options.configDir, "scheduled-tasks.json");
   const createId = options.createId ?? randomUUID;
   const now = options.now ?? (() => new Date());
@@ -69,7 +83,7 @@ export function createScheduledTaskStore(options: {
     });
   }
 
-  return {
+  const jsonImpl: ScheduledTaskStore = {
     async list() {
       const stored = await readStoredTasks();
       return stored.tasks;
@@ -188,6 +202,50 @@ export function createScheduledTaskStore(options: {
       return true;
     },
   };
+
+  if (backend === "json" || !options.storage) {
+    return jsonImpl;
+  }
+
+  // --- sqlite / dual ---
+  // Validation + normalization stay on the JSON impl's create path (it throws
+  // ScheduledTaskValidationError); the repository persists + reads. For
+  // recordRun/setEnabled/delete we re-use jsonImpl to compute the updated task
+  // then mirror to the repo.
+  const repo: TaskRepository = createTaskRepository(options.storage);
+
+  async function jsonCreate(input: ScheduledTaskInput): Promise<ScheduledTask> {
+    return jsonImpl.create(input);
+  }
+
+  return {
+    async list() {
+      return repo.list();
+    },
+    async get(taskId) {
+      return repo.get(taskId);
+    },
+    async create(input) {
+      const task = await jsonCreate(input); // validates + normalizes + writes JSON
+      repo.create({ ...input, id: task.id });
+      return task;
+    },
+    async recordRun(taskId, completedAt) {
+      const updated = await jsonImpl.recordRun(taskId, completedAt);
+      if (updated) repo.recordRun(taskId, completedAt);
+      return updated;
+    },
+    async setEnabled(taskId, enabled, changedAt) {
+      const updated = await jsonImpl.setEnabled(taskId, enabled, changedAt);
+      if (updated) repo.setEnabled(taskId, enabled, changedAt);
+      return updated;
+    },
+    async delete(taskId) {
+      const removed = await jsonImpl.delete(taskId);
+      if (removed) repo.delete(taskId);
+      return removed;
+    },
+  };
 }
 
 function normalizeStoredTask(task: ScheduledTask): ScheduledTask {
@@ -196,3 +254,6 @@ function normalizeStoredTask(task: ScheduledTask): ScheduledTask {
     ...normalizeScheduledTaskInput(task),
   };
 }
+
+export { shadowWriteError };
+
