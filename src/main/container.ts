@@ -51,6 +51,7 @@ import {
 } from "./skillRegistry";
 import { createMcpClient } from "./mcpClient";
 import { resolveTransportKind } from "./mcpTransport";
+import { createMcpTransportClient } from "./mcpTransportClient";
 import { createMaxMode } from "./providers/maxMode";
 import { createSkillExecutor } from "./skillExecutor";
 import { createScheduledTaskStore } from "./taskStore";
@@ -1088,27 +1089,26 @@ export function createAppContainer(options: {
       for (const config of mcpConfigs) {
         try {
           // P8: resolve the MCP transport kind (default stdio for backward
-          // compat). http/sse configs are recognized here; the stdio path uses
-          // the existing mcpClient. (http/sse client wiring is a follow-up —
-          // the McpTransport factory + interface are in place.)
+          // compat). http/sse configs route through the transport-backed
+          // McpClient; stdio keeps the existing process-based mcpClient.
           const transportKind = resolveTransportKind(
             (config as { transport?: string }).transport,
           );
-          if (transportKind !== "stdio") {
-            // eslint-disable-next-line no-console
-            console.warn(
-              `[mcp] server "${config.name}" uses transport "${transportKind}"; ` +
-                `http/sse client wiring is a staged follow-up (transport factory ready). Skipping for now.`,
-            );
-            continue;
-          }
-          const client = createMcpClient({
-            name: config.name,
-            transport: "stdio",
-            command: config.command,
-            args: config.args,
-            env: config.env,
-          });
+          const client =
+            transportKind === "stdio"
+              ? createMcpClient({
+                  name: config.name,
+                  transport: "stdio",
+                  command: config.command,
+                  args: config.args,
+                  env: config.env,
+                })
+              : createMcpTransportClient({
+                  name: config.name,
+                  transport: transportKind,
+                  url: (config as { url?: string }).url,
+                  headers: (config as { headers?: Record<string, string> }).headers,
+                });
 
           await client.connect();
           activeMcpClients.push(client);
