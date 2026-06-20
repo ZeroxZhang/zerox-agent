@@ -23,6 +23,13 @@ export type ChatSessionGoalSummary = {
   status: GoalStatus;
 };
 
+export type ChatSessionTokenUsage = {
+  totalTokens: number;
+  promptTokens?: number;
+  completionTokens?: number;
+  estimated: boolean;
+};
+
 export type ChatMessageSearchOptions = {
   query: string;
   sessionId?: string;
@@ -48,6 +55,8 @@ export type ChatSessionRecord = {
   activeGoalId?: string;
   goalIds?: string[];
   goalSummaries?: ChatSessionGoalSummary[];
+  archivedAt?: string;
+  tokenUsage?: ChatSessionTokenUsage;
   createdAt: string;
   updatedAt: string;
 };
@@ -58,8 +67,15 @@ export type ChatSessionListItem = {
   summary: string;
   messageCount: number;
   activeGoal?: ChatSessionGoalSummary;
+  archivedAt?: string;
+  lastAssistantMessageAt?: string;
+  tokenUsage?: ChatSessionTokenUsage;
   updatedAt: string;
 };
+
+export type ChatSessionOperationResult =
+  | { ok: true; session?: ChatSessionRecord }
+  | { ok: false; message: string };
 
 export type SendChatMessageInput = {
   sessionId?: string;

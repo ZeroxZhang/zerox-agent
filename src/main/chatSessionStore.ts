@@ -8,6 +8,7 @@ import type {
   ChatSessionGoalSummary,
   ChatSessionListItem,
   ChatSessionRecord,
+  ChatSessionTokenUsage,
 } from "../shared/chat";
 
 type StoredChatSessions = {
@@ -34,6 +35,13 @@ export type ChatSessionStore = {
   list(): Promise<ChatSessionListItem[]>;
   get(sessionId: string): Promise<ChatSessionRecord | null>;
   appendMessage(input: AppendChatMessageInput): Promise<AppendChatMessageResult>;
+  archive(sessionId: string): Promise<ChatSessionRecord | null>;
+  restore(sessionId: string): Promise<ChatSessionRecord | null>;
+  delete(sessionId: string): Promise<boolean>;
+  addTokenUsage(
+    sessionId: string,
+    usage: ChatSessionTokenUsage,
+  ): Promise<ChatSessionRecord | null>;
   attachGoal(
     sessionId: string,
     goal: ChatSessionGoalSummary,
@@ -88,12 +96,39 @@ export function createChatSessionStore(options: {
     );
   }
 
+  async function updateSessionById(
+    sessionId: string,
+    update: (session: ChatSessionRecord) => ChatSessionRecord,
+  ): Promise<ChatSessionRecord | null> {
+    return serializeMutation(mutationQueue, (nextQueue) => {
+      mutationQueue = nextQueue;
+    }, async () => {
+      const stored = await readStoredSessions();
+      const existingSession = stored.sessions.find(
+        (session) => session.id === sessionId,
+      );
+      if (!existingSession) {
+        return null;
+      }
+
+      const nextSession = update(existingSession);
+      await writeStoredSessions({
+        schemaVersion: 1,
+        sessions: stored.sessions.map((session) =>
+          session.id === sessionId ? nextSession : session,
+        ),
+      });
+
+      return nextSession;
+    });
+  }
+
   return {
     async list() {
       const stored = await readStoredSessions();
       return stored.sessions
         .slice()
-        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+        .sort(compareSessionsForList)
         .map(toListItem);
     },
 
@@ -151,6 +186,49 @@ export function createChatSessionStore(options: {
 
         return { session, message };
       });
+    },
+
+    async archive(sessionId) {
+      return updateSessionById(sessionId, (session) => ({
+        ...session,
+        archivedAt: now().toISOString(),
+      }));
+    },
+
+    async restore(sessionId) {
+      return updateSessionById(sessionId, (session) => {
+        const { archivedAt: _archivedAt, ...rest } = session;
+        return rest;
+      });
+    },
+
+    async delete(sessionId) {
+      return serializeMutation(mutationQueue, (nextQueue) => {
+        mutationQueue = nextQueue;
+      }, async () => {
+        const stored = await readStoredSessions();
+        const nextSessions = stored.sessions.filter(
+          (session) => session.id !== sessionId,
+        );
+        if (nextSessions.length === stored.sessions.length) {
+          return false;
+        }
+
+        await writeStoredSessions({
+          schemaVersion: 1,
+          sessions: nextSessions,
+        });
+
+        return true;
+      });
+    },
+
+    async addTokenUsage(sessionId, usage) {
+      const normalizedUsage = normalizeTokenUsage(usage);
+      return updateSessionById(sessionId, (session) => ({
+        ...session,
+        tokenUsage: mergeTokenUsage(session.tokenUsage, normalizedUsage),
+      }));
     },
 
     async attachGoal(sessionId, goal) {
@@ -297,6 +375,9 @@ function toListItem(session: ChatSessionRecord): ChatSessionListItem {
     summary: session.summary,
     messageCount: session.messages.length,
     ...(activeGoal ? { activeGoal } : {}),
+    ...(session.archivedAt ? { archivedAt: session.archivedAt } : {}),
+    lastAssistantMessageAt: getLastAssistantMessageAt(session),
+    ...(session.tokenUsage ? { tokenUsage: session.tokenUsage } : {}),
     updatedAt: session.updatedAt,
   };
 }
@@ -331,6 +412,10 @@ function normalizeStoredSession(session: ChatSessionRecord): ChatSessionRecord {
     ...(activeGoalId ? { activeGoalId } : {}),
     ...(goalIds.length ? { goalIds } : {}),
     ...(goalSummaries.length ? { goalSummaries } : {}),
+    ...(session.archivedAt ? { archivedAt: String(session.archivedAt) } : {}),
+    ...(session.tokenUsage
+      ? { tokenUsage: normalizeTokenUsage(session.tokenUsage) }
+      : {}),
     createdAt: String(session.createdAt ?? new Date(0).toISOString()),
     updatedAt: String(session.updatedAt ?? session.createdAt ?? new Date(0).toISOString()),
   };
@@ -357,6 +442,74 @@ function normalizeGoalSummary(goal: ChatSessionGoalSummary): ChatSessionGoalSumm
     id: String(goal.id ?? ""),
     description: String(goal.description ?? ""),
     status: goal.status,
+  };
+}
+
+function compareSessionsForList(
+  left: ChatSessionRecord,
+  right: ChatSessionRecord,
+): number {
+  const leftArchived = Boolean(left.archivedAt);
+  const rightArchived = Boolean(right.archivedAt);
+  if (leftArchived !== rightArchived) {
+    return leftArchived ? 1 : -1;
+  }
+  if (leftArchived && rightArchived) {
+    return (
+      (right.archivedAt ?? "").localeCompare(left.archivedAt ?? "") ||
+      right.updatedAt.localeCompare(left.updatedAt)
+    );
+  }
+  return right.updatedAt.localeCompare(left.updatedAt);
+}
+
+function getLastAssistantMessageAt(session: ChatSessionRecord): string {
+  const assistantMessage = session.messages
+    .slice()
+    .reverse()
+    .find((message) => message.role === "assistant");
+  return assistantMessage?.createdAt ?? session.updatedAt;
+}
+
+function normalizeTokenUsage(
+  usage: ChatSessionTokenUsage,
+): ChatSessionTokenUsage {
+  const promptTokens = normalizeOptionalTokenCount(usage.promptTokens);
+  const completionTokens = normalizeOptionalTokenCount(usage.completionTokens);
+  const totalTokens = Math.max(0, Math.floor(Number(usage.totalTokens) || 0));
+
+  return {
+    totalTokens,
+    ...(promptTokens !== undefined ? { promptTokens } : {}),
+    ...(completionTokens !== undefined ? { completionTokens } : {}),
+    estimated: Boolean(usage.estimated),
+  };
+}
+
+function normalizeOptionalTokenCount(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return undefined;
+  }
+  return Math.max(0, Math.floor(value));
+}
+
+function mergeTokenUsage(
+  current: ChatSessionTokenUsage | undefined,
+  next: ChatSessionTokenUsage,
+): ChatSessionTokenUsage {
+  return {
+    totalTokens: (current?.totalTokens ?? 0) + next.totalTokens,
+    ...(current?.promptTokens !== undefined || next.promptTokens !== undefined
+      ? { promptTokens: (current?.promptTokens ?? 0) + (next.promptTokens ?? 0) }
+      : {}),
+    ...(current?.completionTokens !== undefined ||
+    next.completionTokens !== undefined
+      ? {
+          completionTokens:
+            (current?.completionTokens ?? 0) + (next.completionTokens ?? 0),
+        }
+      : {}),
+    estimated: Boolean(current?.estimated || next.estimated),
   };
 }
 

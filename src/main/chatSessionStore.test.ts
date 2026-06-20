@@ -95,6 +95,7 @@ describe("chat session store", () => {
         title: "整理下载报告",
         summary: "我会先检查权限，然后运行本地文件整理任务。",
         messageCount: 2,
+        lastAssistantMessageAt: "2026-06-06T08:01:00.000Z",
         updatedAt: "2026-06-06T08:01:00.000Z",
       },
     ]);
@@ -110,6 +111,126 @@ describe("chat session store", () => {
 
     const reloaded = createChatSessionStore({ configDir });
     await expect(reloaded.get("chat_1")).resolves.toEqual(assistantAppend.session);
+  });
+
+  it("lists sessions with last assistant response time and token usage", async () => {
+    const store = createChatSessionStore({
+      configDir,
+      createId: createSequentialId("chat"),
+      now: createSteppedClock("2026-06-20T08:00:00.000Z"),
+    });
+
+    const first = await store.appendMessage({
+      role: "user",
+      content: "整理历史会话",
+    });
+    await store.appendMessage({
+      sessionId: first.session.id,
+      role: "assistant",
+      content: "已整理。",
+    });
+    await store.addTokenUsage(first.session.id, {
+      totalTokens: 18700,
+      promptTokens: 12000,
+      completionTokens: 6700,
+      estimated: false,
+    });
+
+    await expect(store.list()).resolves.toEqual([
+      expect.objectContaining({
+        id: first.session.id,
+        lastAssistantMessageAt: "2026-06-20T08:01:00.000Z",
+        tokenUsage: {
+          totalTokens: 18700,
+          promptTokens: 12000,
+          completionTokens: 6700,
+          estimated: false,
+        },
+      }),
+    ]);
+  });
+
+  it("archives restores and deletes sessions without touching other sessions", async () => {
+    const store = createChatSessionStore({
+      configDir,
+      createId: createSequentialId("chat"),
+      now: createSteppedClock("2026-06-20T08:00:00.000Z"),
+    });
+
+    const archived = await store.appendMessage({
+      role: "user",
+      content: "旧会话",
+    });
+    const active = await store.appendMessage({
+      role: "user",
+      content: "新会话",
+    });
+
+    await expect(store.archive(archived.session.id)).resolves.toMatchObject({
+      id: archived.session.id,
+      archivedAt: "2026-06-20T08:02:00.000Z",
+    });
+    const listedSessions = await store.list();
+    expect(listedSessions).toEqual([
+      expect.objectContaining({
+        id: active.session.id,
+      }),
+      expect.objectContaining({
+        id: archived.session.id,
+        archivedAt: "2026-06-20T08:02:00.000Z",
+      }),
+    ]);
+    expect(listedSessions[0]).not.toHaveProperty("archivedAt");
+
+    const restoredSession = await store.restore(archived.session.id);
+    expect(restoredSession).toMatchObject({
+      id: archived.session.id,
+    });
+    expect(restoredSession).not.toHaveProperty("archivedAt");
+    await expect(store.delete(active.session.id)).resolves.toBe(true);
+    await expect(store.get(active.session.id)).resolves.toBeNull();
+    await expect(store.get(archived.session.id)).resolves.toMatchObject({
+      id: archived.session.id,
+    });
+  });
+
+  it("normalizes legacy sessions without archive or token metadata", async () => {
+    await writeFile(
+      path.join(configDir, "chat-sessions.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        sessions: [
+          {
+            id: "legacy",
+            title: "旧会话",
+            summary: "旧摘要",
+            messages: [
+              {
+                id: "m1",
+                role: "user",
+                content: "继续",
+                createdAt: "2026-06-18T08:00:00.000Z",
+              },
+            ],
+            createdAt: "2026-06-18T08:00:00.000Z",
+            updatedAt: "2026-06-18T08:00:00.000Z",
+          },
+        ],
+      }),
+      "utf8",
+    );
+    const store = createChatSessionStore({ configDir });
+
+    await expect(store.list()).resolves.toEqual([
+      {
+        id: "legacy",
+        title: "旧会话",
+        summary: "旧摘要",
+        messageCount: 1,
+        updatedAt: "2026-06-18T08:00:00.000Z",
+        lastAssistantMessageAt: "2026-06-18T08:00:00.000Z",
+      },
+    ]);
   });
 
   it("serializes concurrent session mutations without dropping messages", async () => {
