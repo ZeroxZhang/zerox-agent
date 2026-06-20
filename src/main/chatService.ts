@@ -31,6 +31,7 @@ import type {
   SendChatMessageInput,
   SendChatMessageResult,
 } from "../shared/chat";
+import { getSystemPromptAssembler } from "../shared/agentProtocol";
 import type { GoalReviewDecision } from "../shared/agentGoalReview";
 import type { AgentRunRecord, RunScheduledTaskResult } from "../shared/agentRuns";
 import type { MemoryRecord, MemorySearchResult } from "../shared/memory";
@@ -128,6 +129,8 @@ export function createChatService(options: {
 
       let sessionId = input.sessionId ?? createId();
       const startedAtMs = getNowMs(options.now);
+      // Anchor the system prompt date to session start for cache stability.
+      const chatDate = new Date(startedAtMs).toISOString().split("T")[0];
       const emitStatus = createChatStatusEmitter({
         sessionId,
         startedAtMs,
@@ -338,7 +341,7 @@ export function createChatService(options: {
               chatClient: options.chatClient,
               toolExecutor,
               toolAuthorizationService: options.toolAuthorizationService,
-              systemPrompt: buildChatSystemPrompt(),
+              systemPrompt: buildChatSystemPrompt(chatDate),
               maxTurns: agentLoopMaxTurns,
               signal: runtimeOptions.signal,
               tools: toolExecutor.getRegistry().getDefinitions(),
@@ -521,7 +524,7 @@ export function createChatService(options: {
         // Fallback: simple LLM chat (no tools)
         try {
           const messages: ChatMessage[] = [
-            { role: "system", content: buildChatSystemPrompt() },
+            { role: "system", content: buildChatSystemPrompt(chatDate) },
             ...chatMessages,
           ];
           const response = await options.chatClient.complete({
@@ -598,7 +601,7 @@ export function createChatService(options: {
         usage:
           accumulatedUsage ??
           estimateChatTurnUsage([
-            { role: "system", content: buildChatSystemPrompt() },
+            { role: "system", content: buildChatSystemPrompt(chatDate) },
             ...chatMessages,
             { role: "assistant", content: reply },
           ]),
@@ -1157,16 +1160,11 @@ function translateRunStatus(status: AgentRunRecord["status"]): string {
   return "失败";
 }
 
-function buildChatSystemPrompt(): string {
-  return [
-    "你是一个本地优先的桌面 Agent，运行在用户的电脑上。",
-    "默认使用中文回答。",
-    "你可以使用工具来帮助用户：查看文件、读取文件元信息、搜索文件、搜索网页、执行受权的 shell 命令。",
-    "文件诊断优先使用 file_list、file_stat、file_search、file_read；只有原生工具无法完成时再使用 shell_exec。",
-    "涉及文件、网页或命令行的操作，直接调用工具执行，并在回复中说明你做了什么。",
-    "回答要直接、可执行，避免空泛寒暄。",
-    "如果有相关记忆，优先参考记忆中的信息。",
-  ].join("\n");
+function buildChatSystemPrompt(currentDate?: string): string {
+  return getSystemPromptAssembler().assemble({
+    mode: "chat",
+    currentDate,
+  }).prompt;
 }
 
 function buildChatMessages(options: {

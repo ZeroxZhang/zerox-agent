@@ -302,7 +302,24 @@ export function createAgentRunnerService(options: {
         ? (options.toolExecutor as AgentToolExecutor & { getRegistry(): { getDefinitions(): ToolDefinition[] } }).getRegistry().getDefinitions()
         : buildToolDefinitions();
     const toolNames = toolDefinitions.map((td) => td.function.name);
-    const systemPrompt = buildAgentSystemPrompt();
+
+    // Fetch model profile early so we can pass modelId to the system prompt builder.
+    // Wrapped in try/catch because this runs outside the main try block below.
+    let profile: AgentModelProfile;
+    try {
+      profile = await options.getModelProfile();
+    } catch (error) {
+      return {
+        ok: false,
+        message: `Failed to load model profile: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      };
+    }
+    const systemPrompt = buildAgentSystemPrompt({
+      modelId: profile.model,
+      currentDate: startedAt.split("T")[0],
+    });
     const proceduralMemoryContext =
       await buildProceduralMemoryPromptContext({
         memoryStore: options.memoryStore,
@@ -334,7 +351,7 @@ export function createAgentRunnerService(options: {
 
     try {
       throwIfCanceled(signal);
-      const profile = await options.getModelProfile();
+      // profile already fetched above — reuse here
 
       function ensureContextWindow(msgs: ChatMessage[]): ChatMessage[] {
         const tokens = contextManager.estimateTokens(msgs);

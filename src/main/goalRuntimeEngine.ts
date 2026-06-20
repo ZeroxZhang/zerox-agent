@@ -27,7 +27,7 @@ import type { ToolResultOffloadStore } from "./toolResultOffloadStore";
 import { estimateMessageTokens } from "./contextManager";
 import type { GoalProgressEvent } from "../shared/chat";
 import { applyGoalOutputRootsToRunContext } from "./goalOutputRoots";
-import { buildAgentSystemPrompt } from "../shared/agentProtocol";
+import { buildAgentSystemPrompt, getSystemPromptAssembler } from "../shared/agentProtocol";
 import {
   type DeterministicToolExecutionOptions,
   executeDeterministicGoalPipeline,
@@ -367,7 +367,7 @@ export function createGoalRuntimeEngine(options: {
           taskId,
           runContext,
           runtimeTask: buildGoalMilestoneRuntimeTask(goal, runContext),
-          systemPrompt: buildGoalSystemPrompt(modelProfile.model),
+          systemPrompt: buildGoalSystemPrompt(modelProfile.model, startedAt.split("T")[0]),
           maxTurns: options.maxTurns ?? 8,
           tools: options.toolExecutor.getRegistry().getDefinitions(),
           toolResultOffloadStore: options.toolResultOffloadStore,
@@ -691,16 +691,12 @@ function buildGoalMilestonePermissionPolicy(
   };
 }
 
-function buildGoalSystemPrompt(modelId?: string): string {
-  return [
-    buildAgentSystemPrompt({ modelId }),
-    "",
-    "[Goal Mode execution profile]",
-    "你是 Zerox Agent 的长期目标执行器，运行在用户本地桌面环境中。",
-    "默认使用中文，围绕当前长期目标推进一个明确里程碑。",
-    "需要证据时直接调用可用工具；不要只声明会做，要实际推进。",
-    "完成后给出本轮已做的事、证据来源、剩余风险和下一步建议。",
-  ].join("\n");
+function buildGoalSystemPrompt(modelId?: string, currentDate?: string): string {
+  return getSystemPromptAssembler().assemble({
+    modelId,
+    currentDate,
+    mode: "goal",
+  }).prompt;
 }
 
 function buildMilestoneInstruction(

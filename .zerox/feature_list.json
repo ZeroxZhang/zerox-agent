@@ -1312,6 +1312,65 @@
         "npm run harness:check",
         "git diff --check"
       ]
+    },
+    {
+      "id": "P13-system-prompt-architecture-2.4.5",
+      "status": "done",
+      "title": "v2.4.5 system prompt architecture refactoring",
+      "files": [
+        "src/shared/systemPromptLayer.ts",
+        "src/shared/systemPromptAssembler.ts",
+        "src/shared/systemPromptLayerProviders.ts",
+        "src/shared/memorySystemInstructions.ts",
+        "src/shared/systemReminder.ts",
+        "src/main/systemReminderTriggers.ts",
+        "src/main/systemReminderRegistry.ts",
+        "src/main/promptFileLoader.ts",
+        "src/main/agentLoop.ts",
+        "src/main/agentRunnerService.ts",
+        "src/main/agentRuntimeEngine.ts",
+        "src/main/chatService.ts",
+        "src/main/goalRuntimeEngine.ts",
+        "src/main/main.ts",
+        "src/main/providers/anthropicProvider.ts",
+        "src/shared/agentProtocol.ts",
+        "src/shared/agentProtocol.test.ts",
+        "prompts/default.txt",
+        "prompts/codex.txt",
+        "prompts/claude.txt",
+        "prompts/gemini.txt",
+        "prompts/gpt.txt",
+        "prompts/kimi.txt",
+        "electron-builder.yml",
+        "package.json",
+        "package-lock.json",
+        "README.md",
+        ".zerox/progress.md",
+        "src/shared/packageScripts.test.ts",
+        "src/shared/readme.test.ts"
+      ],
+      "definitionOfDone": [
+        "layered SystemPromptAssembler with 7 providers and mode-aware composition",
+        "6 model-specific prompt .txt files replacing 2-line buildModelProfileGuidance",
+        "memory system instructions layer in system prompt",
+        "6 system-reminder triggers with registry (all default OFF)",
+        "date anchoring in all 5 callers for Anthropic cache stability",
+        "multi-segment Anthropic system messages (ZEROX_MULTI_SEGMENT_SYSTEM flag)",
+        "package version bumped to 2.4.5"
+      ],
+      "verification": [
+        "npm test -- src/shared/systemPromptLayer.test.ts",
+        "npm test -- src/shared/systemPromptAssembler.test.ts",
+        "npm test -- src/shared/memorySystemInstructions.test.ts",
+        "npm test -- src/main/systemReminderTriggers.test.ts",
+        "npm test -- src/main/systemReminderRegistry.test.ts",
+        "npm test -- src/main/promptFileLoader.test.ts",
+        "npm test -- src/shared/agentProtocol.test.ts",
+        "npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts",
+        "npm run build",
+        "npm run verify",
+        "npm run harness:check"
+      ]
     }
   ]
 }

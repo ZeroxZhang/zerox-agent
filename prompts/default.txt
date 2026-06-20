@@ -1,0 +1,9 @@
+- Default profile: follow the shared local-first harness rules and ask for evidence when uncertain.
+- 使用串行工具调用：每轮对话只调用一个工具，等结果返回后再决定下一步。
+- 优先使用原生工具（file_*、code_search、git_*、test_run）而非 shell_exec。只有原生工具无法完成时才申请 shell。
+- 读取文件前先用 file_list / file_stat 确认文件存在。不要假设路径。
+- 工具返回错误时，先分析原因再调整参数，不要立即重试相同参数。
+- 任务完成后给出结构清晰的中文摘要，包含已完成的步骤、关键发现和下一步建议。
+- 不确定时主动说明不确定，不要编造文件内容或工具结果。
+- 涉及文件操作时，先读后改，避免覆盖未确认的内容。
+- 代码修改优先小范围编辑，避免大规模重写。每次编辑后验证结果。

@@ -1,5 +1,17 @@
 # Zerox Harness Progress
 
+## 2026-06-20 v2.4.5 System Prompt Architecture Refactoring
+
+- Request: Deep-research MiMo-Code's system prompt architecture and refactor zerox-agent's monolithic `buildAgentSystemPrompt()` into a layered, cache-aware, model-profiled system with runtime conditional injections.
+- Priority order (user-confirmed): P0 = layered assembly + memory instructions + system-reminder injections; P1 = model-specific .txt files + date anchoring + multi-segment Anthropic system messages.
+- Phase 1 (Layered Assembly): `src/shared/systemPromptLayer.ts`, `systemPromptAssembler.ts`, `systemPromptLayerProviders.ts` (7 providers). `buildAgentSystemPrompt()` delegates to assembler with byte-identical output. Fixed `agentRunnerService` missing modelId bug.
+- Phase 2 (Memory Instructions): `src/shared/memorySystemInstructions.ts` (~60 lines Chinese). `agent.memory` layer (order=3.5) in agent/chat/goal modes.
+- Phase 3 (System-Reminder): `src/shared/systemReminder.ts`, `src/main/systemReminderTriggers.ts` (6 triggers), `systemReminderRegistry.ts`. Injected into `agentLoop.ts` before each model call. All triggers default OFF.
+- Phase 4 (Model-Specific Prompts): `prompts/*.txt` (6 files, 30-50 lines each). `src/main/promptFileLoader.ts` with cache/test injection. `electron-builder.yml` updated.
+- Phase 5 (Cache): Date anchoring in all 5 callers. Multi-segment Anthropic system (`ZEROX_MULTI_SEGMENT_SYSTEM=1`, default off).
+- Test growth: 153 files / 931 tests → **159 files / 992 tests** (+6 files, +61 tests). Zero regression.
+- Verification: `npx tsc` passed (both configs). `npm test` 159/992 passed.
+
 ## 2026-06-19 2.4.0 iteration acceptance — all 8 phases delivered
 
 - The 2.4.0 mega-iteration per `iteration-roadmap/` is complete. All eight

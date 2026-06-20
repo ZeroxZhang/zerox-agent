@@ -50,7 +50,7 @@
 
 <h2 id="overview-en">Overview</h2>
 
-**Zerox Agent** is a local-first desktop control plane for personal AI agents. The current release is **v2.4.1**. The name derives from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
+**Zerox Agent** is a local-first desktop control plane for personal AI agents. The current release is **v2.4.5**. The name derives from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
 
 It is not a chat wrapper or a generic hosted agent surface. It runs locally, configures OpenAI-compatible models, scans local `SKILL.md` skill files, executes recoverable agent runs, invokes permission-controlled tools, tracks parent/child multi-agent sessions, persists experiential knowledge into local long-term memory, and keeps learning user-reviewed before it changes future behavior.
 
@@ -70,6 +70,15 @@ v2.3.5 adds Run Graph Harness evidence across the shared model, Runs UI, and epi
 v2.4.0 activates the iteration-roadmap P1–P8: a SQLite unified storage layer (better-sqlite3) with versioned migrations and dual-write migration, a provider abstraction with native Anthropic/Gemini + prompt-cache prefix reuse, tree-sitter-style shell analysis feeding both permission layers, a checkpoint-writer fork actor, an actor/workflow runtime (deep-research workflow), dream/distill self-improvement, and streaming tool-calling + max-mode + MCP multi-transport. runGraph gains actor/workflow/dream/distill/model_response nodes and token-cost aggregation. Runs now project runtime, trajectory, kernel, goal, milestone, tool, checkpoint, summary, and gate evidence into one stable graph; gate nodes are explicit and edge-safe; validation episodes export `run-graph.json` and `eval-candidate.json`; and `episode:export --latest-validation` packages the most recent local validation run for review.
 
 v2.4.1 adds managed chat history in the workspace sidebar: each session row shows the latest assistant-response time and cumulative token usage, hover actions expose archive/delete controls, and archived sessions are collected into a collapsible archive group while preserving restore and delete operations.
+
+v2.4.5 rebuilds the system prompt architecture with a MiMo-Code inspired layered assembly:
+
+- **Layered System Prompt Assembly** — 7 composable `SystemPromptLayer` providers replace the monolithic `buildAgentSystemPrompt()`. Layers are assembled by `SystemPromptAssembler` with mode-aware composition (agent/chat/goal), register/remove extension points for plugins, and byte-identical backward compatibility for all existing callers.
+- **Model-Specific Prompt Files** — 6 model-family `.txt` files (`prompts/anthropic.txt`, `codex.txt`, `claude.txt`, `gemini.txt`, `gpt.txt`, `kimi.txt`, `default.txt`) replace the former 2-line `buildModelProfileGuidance()` hints with 30-50 line behavioral instructions per model profile. Loaded via `promptFileLoader` with cache and test injection.
+- **Memory System Instructions** — A new `agent.memory` layer (~60 lines Chinese) teaches the model when and how to use `memory_search`, `conversation_search`, `MEMORY.md`, active recall protocol, and anti-patterns. Embedded in the system prompt for all modes.
+- **System-Reminder Runtime Injection** — 6 conditional `<system-reminder>` triggers (`context_pressure`, `loop_detection`, `structured_output_retry`, `mode_transition`, `output_continuation`, `task_gate`) evaluate runtime context before each model call in `agentLoop.ts`. All default OFF; enabled per-trigger via `SystemReminderRegistry`.
+- **Date Anchoring** — System prompt `currentDate` is anchored to session/run creation time across all 5 callers, keeping the prompt byte-identical across turns within a session for Anthropic prompt cache stability.
+- **Multi-Segment System Messages** — Anthropic provider supports multi-segment `system` arrays (`ZEROX_MULTI_SEGMENT_SYSTEM=1`, default off), keeping the base layer independently cacheable from dynamic layers.
 
 v2.4.0 ships the iteration-roadmap P1–P8 activation (SQLite storage, provider abstraction, shell plan, checkpoint-writer fork agent, actor/workflow runtime, dream/distill self-improvement, streaming/max-mode/MCP) on top of the v2.3.6 deterministic local artifact goals with task-contract compilation, location/resource canonicalization for workspace and user-selected roots, native `chrome_bookmarks_read` execution, artifact provenance manifests, provenance-backed acceptance, and an independent packaged-app computer-use acceptance gate that passed against the local macOS package. The v2.3.6 distribution is versioned, packaged, and ready for GitHub Release handoff.
 
@@ -573,7 +582,7 @@ can't be opened." The image is usually valid; remove the quarantine attribute
 before opening:
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/"Zerox.Agent-2.4.1-arm64.dmg"
+xattr -dr com.apple.quarantine ~/Downloads/"Zerox.Agent-2.4.5-arm64.dmg"
 ```
 
 If you already dragged the app into Applications, run:
@@ -604,7 +613,7 @@ npm run episode:export -- --config-dir <userData/config> --latest-validation
 npm run verify        # Tests + build + deterministic eval
 ```
 
-As of v2.3.6, `npm run verify` covers the Vitest suite, the production build, agent evals, and memory evals. The suite currently includes 135 Vitest files / 767 tests, 26 deterministic agent eval fixtures, and 2 memory eval fixtures. Agent evals include native code engineering, research writing, reflection-after-test-failure, retry-budget exhaustion, context compaction, tool-call checkpointing, model retry, strategy-guard fragmentation recovery, episode eval-candidate, child handoff review-gate, goal-mode recovery/control, bounded-autonomy golden paths, Agent Runtime Kernel event replay, permission-rule behavior, and deterministic local artifact provenance acceptance. session-native Goal Mode architecture is documented in `docs/architecture/agent-goal-mode.md`, including the artifact evidence contract, and Agent Runtime Kernel architecture is documented in `docs/architecture/agent-runtime.md`, including the Kernel Event Bridge, checkpointed compaction, retry evidence, judge verdicts, event replay, and rule-based permission evidence. Set `BUILDING_AGENT_CONFIG_DIR=/path/to/config` when running `npm run eval:agent` or `npm run harness:score` to include local promoted fixtures and pending eval candidates from that config directory. `npm run episode:export` writes local evidence packages with `run-graph.json`, `eval-candidate.json`, `trajectory.jsonl`, and verification metadata; `--latest-validation` exports the run captured by `agent-validation.json`. `npm run harness:score` emits the seven-category ETCLOVG score used by Overview as a local quality signal and now includes adversarial eval, goal-mode pass rate, goal-judge pass rate, plus the ACI/context report; Overview also displays the native Agent Capability score.
+As of v2.4.5, `npm run verify` covers the Vitest suite, the production build, agent evals, and memory evals. The suite currently includes 159 Vitest files / 992 tests, 26 deterministic agent eval fixtures, and 2 memory eval fixtures. Agent evals include native code engineering, research writing, reflection-after-test-failure, retry-budget exhaustion, context compaction, tool-call checkpointing, model retry, strategy-guard fragmentation recovery, episode eval-candidate, child handoff review-gate, goal-mode recovery/control, bounded-autonomy golden paths, Agent Runtime Kernel event replay, permission-rule behavior, and deterministic local artifact provenance acceptance. session-native Goal Mode architecture is documented in `docs/architecture/agent-goal-mode.md`, including the artifact evidence contract, and Agent Runtime Kernel architecture is documented in `docs/architecture/agent-runtime.md`, including the Kernel Event Bridge, checkpointed compaction, retry evidence, judge verdicts, event replay, and rule-based permission evidence. Set `BUILDING_AGENT_CONFIG_DIR=/path/to/config` when running `npm run eval:agent` or `npm run harness:score` to include local promoted fixtures and pending eval candidates from that config directory. `npm run episode:export` writes local evidence packages with `run-graph.json`, `eval-candidate.json`, `trajectory.jsonl`, and verification metadata; `--latest-validation` exports the run captured by `agent-validation.json`. `npm run harness:score` emits the seven-category ETCLOVG score used by Overview as a local quality signal and now includes adversarial eval, goal-mode pass rate, goal-judge pass rate, plus the ACI/context report; Overview also displays the native Agent Capability score.
 
 Deterministic local artifact goals are accepted only when the task contract, canonical destination, generated artifact, and provenance evidence agree. Location/resource canonicalization normalizes home-relative, workspace-relative, Desktop, Downloads, and absolute roots before sandbox and acceptance checks. Provenance-backed acceptance requires the artifact sidecar to match the run, goal, artifact id, canonical destination, and content hash. v2.4.1 passed the command-line verification gate, production smoke, and harness check for the managed chat-history release; release metadata now matches the v2.4.1 app version.
 
@@ -618,7 +627,7 @@ Deterministic local artifact goals are accepted only when the task contract, can
 
 <h2 id="roadmap">Roadmap</h2>
 
-Current version: v2.4.1.
+Current version: v2.4.5.
 
 Recently shipped:
 
@@ -681,7 +690,7 @@ Planned:
 
 ## 项目概述
 
-**Zerox Agent** 是一个本地优先的桌面智能体控制台，当前版本是 **v2.4.1**。名字取自 **Zero + X**——从留白开始，把未知的本地工作流转成可观察、受权限管控、可恢复的 Agent 运行。
+**Zerox Agent** 是一个本地优先的桌面智能体控制台，当前版本是 **v2.4.5**。名字取自 **Zero + X**——从留白开始，把未知的本地工作流转成可观察、受权限管控、可恢复的 Agent 运行。
 
 它不是聊天壳，也不是泛用云端 Agent 入口。它运行在本机：配置 OpenAI‑compatible 模型、扫描本地 `SKILL.md` 技能文件、执行可恢复的 Agent 运行、调用受权限管控的工具、跟踪父子多 Agent 会话、把经验和知识写入本地长期记忆，并且在改变未来行为前保留用户审核。
 
@@ -763,7 +772,7 @@ v2.4.0 在 v2.3.6 确定性本地 artifact 目标能力之上，落地 iteration
 | 构建 | Vite 8 | 渲染进程热更新打包 |
 | 类型 | TypeScript 6 | 全栈类型安全，三套 tsconfig（主进程 / 渲染进程 / 共享） |
 | UI | React 19 | 函数组件 + Hooks 的 Material Design 桌面 UI |
-| 测试 | Vitest 4 | 135 个测试文件 / 767 个测试，覆盖共享层、主进程和渲染进程 |
+| 测试 | Vitest 4 | 159 个测试文件 / 992 个测试，覆盖共享层、主进程和渲染进程 |
 | 打包 | electron-builder 26 | macOS `.app` / `.dmg` / `.zip` 分发 |
 | 解析 | yaml (cron-parser) | SKILL.md 前端元数据解析、cron 表达式 |
 
@@ -1307,7 +1316,7 @@ Gatekeeper 可能提示「Zerox Agent 已损坏，无法打开」。这通常不
 而是下载隔离属性导致的拦截。打开前在终端执行：
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/"Zerox.Agent-2.4.1-arm64.dmg"
+xattr -dr com.apple.quarantine ~/Downloads/"Zerox.Agent-2.4.5-arm64.dmg"
 ```
 
 如果已经把应用拖进 Applications，则执行：
@@ -1334,7 +1343,7 @@ mac:
 
 ## 测试
 
-截至 v2.3.6，`npm run verify` 覆盖 Vitest 测试、生产构建、Agent 评测和记忆检索评测；当前包含 135 个 Vitest 文件 / 767 个测试、26 个确定性 Agent eval fixture 和 2 个 memory eval fixture。Agent eval 覆盖原生代码工程、研究写作、测试失败反思、retry budget exhaustion、上下文压缩、tool-call checkpoint、模型重试、strategy guard 碎片化恢复、episode eval candidate、child handoff review gate、goal-mode recovery/control、bounded-autonomy 黄金路径、Agent Runtime Kernel kernel event replay、permission-rule behavior 和 deterministic local artifact provenance acceptance。session-native Goal Mode 架构记录在 `docs/architecture/agent-goal-mode.md`；Agent Runtime Kernel 架构记录在 `docs/architecture/agent-runtime.md`，包含 Kernel Event Bridge、checkpointed compaction、retry evidence、judge verdict、event replay 和规则化权限证据：
+截至 v2.4.5，`npm run verify` 覆盖 Vitest 测试、生产构建、Agent 评测和记忆检索评测；当前包含 159 个 Vitest 文件 / 992 个测试、26 个确定性 Agent eval fixture 和 2 个 memory eval fixture。Agent eval 覆盖原生代码工程、研究写作、测试失败反思、retry budget exhaustion、上下文压缩、tool-call checkpoint、模型重试、strategy guard 碎片化恢复、episode eval candidate、child handoff review gate、goal-mode recovery/control、bounded-autonomy 黄金路径、Agent Runtime Kernel kernel event replay、permission-rule behavior 和 deterministic local artifact provenance acceptance。session-native Goal Mode 架构记录在 `docs/architecture/agent-goal-mode.md`；Agent Runtime Kernel 架构记录在 `docs/architecture/agent-runtime.md`，包含 Kernel Event Bridge、checkpointed compaction、retry evidence、judge verdict、event replay 和规则化权限证据：
 
 ```bash
 npm test              # 运行全部测试
@@ -1364,7 +1373,7 @@ npm run verify        # 测试 + 构建 + 确定性评测
 
 ## 路线图
 
-当前版本：v2.4.1。
+当前版本：v2.4.5。
 
 近期已完成：
 

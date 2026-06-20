@@ -624,39 +624,20 @@ export function buildToolDefinitions(): ToolDefinition[] {
   ];
 }
 
+import { getSystemPromptAssembler } from "./systemPromptAssembler";
+
 export function buildAgentSystemPrompt(
   options: AgentSystemPromptOptions = {},
 ): string {
-  const profile = selectAgentPromptProfile(options.modelId);
-  return [
-    "你是一个本地桌面 AI agent 的运行时核心。",
-    "你可以调用工具来完成任务：列出目录、读取元信息、搜索文件、读写文件、读取大型工具结果引用、读取 Chrome 书签、搜索代码、读取 git 状态和 diff、运行已授权测试、检索本地记忆、搜索网页、抓取网页内容、记录引用、写 citation-backed Markdown 报告、执行受权 shell 命令。",
-    "",
-    "运行环境：",
-    `- Model profile: ${profile}`,
-    ...(options.modelId ? [`- Model ID: ${options.modelId}`] : []),
-    ...(options.workspaceRoot ? [`- Workspace root: ${options.workspaceRoot}`] : []),
-    ...(options.currentDate ? [`- Current date: ${options.currentDate}`] : []),
-    "",
-    "模型适配：",
-    ...buildModelProfileGuidance(profile),
-    "",
-    "工作原则：",
-    "- 文件诊断优先使用 file_list、file_stat、file_search、file_read；本地文件整理优先使用 file_inventory、file_move_plan、file_apply_moves、file_verify_moves；只有原生工具无法完成时再使用 shell_exec。",
-    "- Chrome/浏览器书签读取必须优先使用 chrome_bookmarks_read；它会自动产出完整 artifact:bookmark_list 和 artifact:goalEvidence，不要用 file_read/file_stat/shell_exec 读取或解析 Chrome Bookmarks。",
-    "- 当工具结果包含 result_ref 或 tool-result-refs/... 时，必须使用 tool_result_read 读取完整工具结果，不要把引用路径传给 file_read。",
-    "- 代码工程优先使用 code_search、git_status、git_diff、test_run；只有这些原生工具无法完成时再申请 shell_exec。",
-    "- 研究写作优先使用 web_fetch_document、citation_record、citation_coverage_check、markdown_report_write；报告摘要必须区分 sourced facts 和 model inference。",
-    "- 将复杂任务分解为清晰的步骤序列。",
-    "- 每个工具调用返回结果后，分析结果再决定下一步。",
-    "- 如果工具返回错误，先分析原因，尝试调整参数或方法。",
-    "- memory_search 和 conversation_search 只用于按需回忆；每轮最多调用 3 次，避免把记忆检索当成循环动作。",
-    "- 任务完成后给出结构清晰的中文摘要。",
-    "",
-    "输出语言：默认使用中文输出最终消息、报告正文和用户可见摘要。",
-    "只有任务输入明确要求其他语言时才切换。",
-  ].join("\n");
+  return getSystemPromptAssembler().assemble({
+    modelId: options.modelId,
+    workspaceRoot: options.workspaceRoot,
+    currentDate: options.currentDate,
+    mode: "agent",
+  }).prompt;
 }
+
+export { getSystemPromptAssembler, setSystemPromptAssembler } from "./systemPromptAssembler";
 
 export function selectAgentPromptProfile(modelId: string | undefined): AgentPromptProfile {
   const normalized = modelId?.toLowerCase() ?? "";
@@ -675,7 +656,12 @@ export function selectAgentPromptProfile(modelId: string | undefined): AgentProm
   return "default";
 }
 
-function buildModelProfileGuidance(profile: AgentPromptProfile): string[] {
+/**
+ * @deprecated Model profile guidance is now composed via the layered
+ * SystemPromptAssembler (agent.profile layer). This function is retained
+ * for backward compatibility during the v2.4.5 migration.
+ */
+export function buildModelProfileGuidance(profile: AgentPromptProfile): string[] {
   switch (profile) {
     case "codex":
       return [

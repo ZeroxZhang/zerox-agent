@@ -710,7 +710,10 @@ export function createAgentRuntimeEngine(options: {
         messages: [
           {
             role: "system",
-            content: buildAgentSystemPrompt({ modelId: initialProfile.model }),
+            content: buildAgentSystemPrompt({
+              modelId: initialProfile.model,
+              currentDate: startedAt.split("T")[0],
+            }),
           },
           {
             role: "user",

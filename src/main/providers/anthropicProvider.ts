@@ -115,13 +115,50 @@ export function createAnthropicProvider(
   };
 }
 
+/** Multi-segment system messages improve Anthropic prompt cache hit rate
+ *  by keeping the base layer byte-identical. Controlled by env flag; defaults off. */
+const MULTI_SEGMENT_SYSTEM = process.env.ZEROX_MULTI_SEGMENT_SYSTEM === "1";
+
+type AnthropicSystemPart = { type: "text"; text: string; cache_control?: { type: "ephemeral" } };
+type AnthropicSystem = string | AnthropicSystemPart[];
+
 // --- body conversion ---
 
 function toAnthropicBodyParts(
   messages: NormalizedMessage[],
   systemOverride?: string,
   tools?: ToolDefinition[],
-): { system: string; messages: unknown[]; tools?: unknown[] } {
+): { system: AnthropicSystem; messages: unknown[]; tools?: unknown[] } {
+  if (MULTI_SEGMENT_SYSTEM) {
+    const parts: AnthropicSystemPart[] = [];
+    if (systemOverride) {
+      parts.push({ type: "text", text: systemOverride });
+    }
+    for (const m of messages) {
+      if (m.role === "system") {
+        parts.push({ type: "text", text: m.content });
+        continue;
+      }
+    }
+    const out: unknown[] = [];
+    for (const m of messages) {
+      if (m.role === "system") continue;
+      if (m.role === "tool") {
+        out.push({ role: "user", content: [{ type: "tool_result", tool_use_id: m.toolCallId, content: m.content }] });
+        continue;
+      }
+      const content = m.content.map(toAnthropicBlock);
+      out.push({ role: m.role, content });
+    }
+    const t = tools?.map((td) => ({
+      name: td.function.name,
+      description: td.function.description,
+      input_schema: td.function.parameters,
+    }));
+    return { system: parts, messages: out, ...(t ? { tools: t } : {}) };
+  }
+
+  // Legacy: merge all system messages into a single string
   let system = systemOverride ?? "";
   const out: unknown[] = [];
   for (const m of messages) {
@@ -157,8 +194,18 @@ function toAnthropicToolChoice(choice: NonNullable<CompleteRequest["toolChoice"]
 }
 
 function applyCacheBreakpoint(body: Record<string, unknown>): void {
-  if (typeof body.system === "string" && body.system) {
-    body.system = { type: "text", text: body.system, cache_control: { type: "ephemeral" } };
+  const sys = body.system;
+  if (typeof sys === "string" && sys) {
+    // Legacy single-string: wrap with cache_control
+    body.system = { type: "text", text: sys, cache_control: { type: "ephemeral" } };
+  } else if (Array.isArray(sys) && sys.length > 0) {
+    // Multi-segment: apply cache_control only to the first (base) segment.
+    // The base layer is the most stable; subsequent layers may be dynamic.
+    const parts = sys as AnthropicSystemPart[];
+    if (!parts[0].cache_control) {
+      parts[0] = { ...parts[0], cache_control: { type: "ephemeral" } };
+    }
+    body.system = parts;
   }
 }
 

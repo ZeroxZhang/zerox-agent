@@ -13,6 +13,7 @@ files:
   - dist/**/*
   - dist-electron/**/*
   - skills/**/*
+  - prompts/**/*
   - package.json
 extraMetadata:
   main: dist-electron/main/main.js

@@ -29,8 +29,14 @@ import {
   getSmokeRendererFailureMessage,
   isSmokeRendererCheckResult,
 } from "./smokeMode";
+import { setPromptBaseDir, loadModelPromptFile } from "./promptFileLoader";
+import { setProfileContentLoader } from "../shared/systemPromptLayerProviders";
 
 app.setName("Zerox Agent");
+
+// Prompt files live alongside skills/ in the app root.
+setPromptBaseDir(path.join(app.getAppPath(), "prompts"));
+setProfileContentLoader(loadModelPromptFile);
 
 const rendererUrl = process.env.ELECTRON_RENDERER_URL;
 const appMeta = getAppMeta();

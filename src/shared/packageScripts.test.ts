@@ -16,12 +16,12 @@ describe("package scripts", () => {
       readFileSync(path.join(process.cwd(), "package-lock.json"), "utf8"),
     ) as { version?: string; packages?: Record<string, { version?: string }> };
 
-    expect(packageJson.version).toBe("2.4.1");
-    expect(packageLock.version).toBe("2.4.1");
-    expect(packageLock.packages?.[""]?.version).toBe("2.4.1");
+    expect(packageJson.version).toBe("2.4.5");
+    expect(packageLock.version).toBe("2.4.5");
+    expect(packageLock.packages?.[""]?.version).toBe("2.4.5");
   });
 
-  it("marks the v2.4.1 session history management release done", () => {
+  it("marks the v2.4.1 system prompt architecture refactoring release done", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -35,7 +35,7 @@ describe("package scripts", () => {
       }>;
     };
 
-    expect(packageJson.version).toBe("2.4.1");
+    expect(packageJson.version).toBe("2.4.5");
     expect(featureList.features).toContainEqual(
       expect.objectContaining({
         id: "P12.1-session-history-management-2.4.1",

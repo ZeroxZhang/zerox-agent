@@ -3,6 +3,7 @@ import { createContextManager, type ContextManager } from "./contextManager";
 import type { CompactionStrategy } from "./kernel/compactionStrategy";
 import { NEVER_COMPACT_MARKER } from "../shared/compactionMarkers";
 import type { AgentRunContext } from "../shared/agentWorkspace";
+import type { SystemReminderContext, SystemReminderRegistry } from "../shared/systemReminder";
 import type {
   ChatClient,
   ChatCompletionResponse,
@@ -50,6 +51,10 @@ export type AgentLoopOptions = {
    *  (auto→rebuild when a checkpoint exists, else summarize = current behavior).
    *  Absent → legacy compressMessages (zero regression). */
   compactionStrategy?: CompactionStrategy;
+  /** P3: system-reminder registry for conditional runtime injections.
+   *  When provided, triggers are evaluated before each model call and matching
+   *  reminders are injected as synthetic user messages. All triggers default OFF. */
+  systemReminderRegistry?: SystemReminderRegistry;
   modelRetry?: ModelRetryOptions;
   onToolCall?: (toolName: string, args: Record<string, unknown>) => void;
   onToolResult?: (
@@ -129,6 +134,7 @@ export async function runAgentLoop(
     pauseOnFailureLoop = false,
     contextManager = createContextManager(),
     compactionStrategy,
+    systemReminderRegistry,
     modelRetry,
     onToolCall,
     onToolResult,
@@ -142,6 +148,9 @@ export async function runAgentLoop(
 
   const toolDefinitions = customTools ?? buildToolDefinitions();
   const messages: ChatMessage[] = resumeMessages ? [...resumeMessages] : [];
+  // Anchor date to loop creation so the system prompt stays byte-identical
+  // across turns — critical for Anthropic prompt cache hit rate.
+  const loopDate = new Date().toISOString().split("T")[0];
 
   if (!resumeMessages) {
     if (systemPrompt) {
@@ -149,7 +158,10 @@ export async function runAgentLoop(
     } else {
       messages.push({
         role: "system",
-        content: buildAgentSystemPrompt({ modelId: modelProfile.model }),
+        content: buildAgentSystemPrompt({
+          modelId: modelProfile.model,
+          currentDate: loopDate,
+        }),
       });
     }
 
@@ -221,6 +233,27 @@ export async function runAgentLoop(
     });
   }
 
+  /** Evaluate system-reminder triggers and inject matching reminders as synthetic user messages. */
+  function injectSystemReminders(ctx: SystemReminderContext): void {
+    if (!systemReminderRegistry) return;
+    const reminders = systemReminderRegistry.evaluate(ctx);
+    if (reminders.length === 0) return;
+
+    // Insert each reminder after the last user message in the list.
+    // This ensures system-reminders appear after any real user instruction
+    // but before the model's next assistant/tool response.
+    for (const reminder of reminders) {
+      let lastUserIdx = -1;
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === "user") {
+          lastUserIdx = i;
+          break;
+        }
+      }
+      messages.splice(lastUserIdx + 1, 0, { role: "user", content: reminder });
+    }
+  }
+
   async function finalizeWithoutTools(options: {
     prompt: string;
     summaryPrefix: string;
@@ -230,6 +263,10 @@ export async function runAgentLoop(
     messages.push({
       role: "system",
       content: options.prompt,
+    });
+    injectSystemReminders({
+      estimatedTokens: contextManager.estimateTokens(messages),
+      tokenBudget: contextTokenBudget,
     });
     await compactMessagesBeforeModelRequest();
 
@@ -302,6 +339,15 @@ export async function runAgentLoop(
       }
 
       onTurn?.(turns, "executing");
+      injectSystemReminders({
+        estimatedTokens: contextManager.estimateTokens(messages),
+        tokenBudget: contextTokenBudget,
+        loopSignature: lastExecutedToolSignature,
+        loopCount: toolFailureStreak?.count,
+        // Only signal "execution" on the first turn after planning,
+        // so mode_transition fires exactly once at the boundary.
+        mode: turns === 0 ? "planning" : turns === 1 ? "execution" : undefined,
+      });
       await compactMessagesBeforeModelRequest();
 
       const response = await completeWithModelRetry(
