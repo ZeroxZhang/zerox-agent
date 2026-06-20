@@ -20,6 +20,7 @@ import {
 } from "../../shared/firstRunGuide";
 import { buildAgentReadinessChecklist } from "../../shared/agentReadiness";
 import type { AgentRunEvent, AgentRunRecord } from "../../shared/agentRuns";
+import type { AgentWorkspace } from "../../shared/agentWorkspace";
 import type {
   ChatAgentStatus,
   ChatHistoryMessage,
@@ -33,6 +34,12 @@ import type { MemoryRecord } from "../../shared/memory";
 import type { PublicModelSettings } from "../../shared/modelSettings";
 import type { NavigationSectionId } from "../../shared/navigation";
 import type { ScheduledTask } from "../../shared/scheduledTasks";
+import {
+  extractActiveSkillMention,
+  matchSkillMentionCandidates,
+  replaceActiveSkillMention,
+  type SkillMentionCandidate,
+} from "../../shared/skillMentions";
 import {
   createDemoValidationSnapshot,
   demoMemories,
@@ -57,10 +64,14 @@ import {
 import {
   buildTaskProcessItems,
   buildTaskActivityDetail,
+  buildTaskActivityFromStatusEvent,
   buildGoalTaskActivity,
   createTaskActivity,
+  getChatStatusKindFromStatusEvent,
   getGoalUiSyncState,
+  getWorkPhaseFromChatStatusEvent,
   idleTaskActivity,
+  restoreChatTaskActivity,
   type TaskActivityState,
 } from "../chatTaskActivity";
 import { GoalDetailDrawer } from "./GoalDetailDrawer";
@@ -98,7 +109,12 @@ type ChatSession = {
   messageCount?: number;
 } & Pick<
   ChatSessionListItem,
-  "updatedAt" | "archivedAt" | "lastAssistantMessageAt" | "tokenUsage"
+  | "updatedAt"
+  | "archivedAt"
+  | "lastAssistantMessageAt"
+  | "tokenUsage"
+  | "workspaceId"
+  | "workspaceSummary"
 >;
 
 export type ChatSidebarSession = ChatSession;
@@ -175,15 +191,22 @@ export function AgentChatPanel({
   );
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [draft, setDraft] = useState("");
+  const [draftCursor, setDraftCursor] = useState(0);
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
   const [sessions, setSessions] = useState<ChatSession[]>(fallbackSessions);
   const [tasks, setTasks] = useState<ScheduledTask[]>(demoTasks);
   const [runs, setRuns] = useState<AgentRunRecord[]>(demoRuns);
   const [memories, setMemories] = useState<MemoryRecord[]>(demoMemories);
+  const [workspaces, setWorkspaces] = useState<AgentWorkspace[]>([]);
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(
+    null,
+  );
   const [modelSettings, setModelSettings] =
     useState<PublicModelSettings>(demoModelSettings);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [skillCount, setSkillCount] = useState(1);
+  const [skillOptions, setSkillOptions] = useState<SkillMentionCandidate[]>([]);
+  const [selectedSkillName, setSelectedSkillName] = useState<string | null>(null);
   const [lastValidationSnapshot, setLastValidationSnapshot] =
     useState<AgentBootstrapValidationSnapshot | null>(null);
   const [workPhase, setWorkPhase] = useState<AgentWorkPhase>("idle");
@@ -241,6 +264,8 @@ export function AgentChatPanel({
     setTaskActivity(idleTaskActivity);
     setTaskProcessEvents([]);
     setGoalRunEvents([]);
+    setSelectedSkillName(null);
+    setSelectedWorkspaceId(null);
     setActiveGoalDetail(null);
     setGoalDrawerOpen(false);
   }, [newChatRequestKey]);
@@ -379,10 +404,10 @@ export function AgentChatPanel({
       setTaskProcessEvents((current) => [...current, event]);
       setTaskActivity(buildTaskActivityFromStatusEvent(event));
       setStatus({
-        kind: getChatStatusKindFromEvent(event),
+        kind: getChatStatusKindFromStatusEvent(event),
         message: event.message,
       });
-      setWorkPhase(getWorkPhaseFromStatusEvent(event));
+      setWorkPhase(getWorkPhaseFromChatStatusEvent(event));
       if (
         event.state === "paused" ||
         event.state === "canceled" ||
@@ -428,6 +453,7 @@ export function AgentChatPanel({
       window.buildingAgent.listAgentRuns(),
       window.buildingAgent.listMemories({ limit: 6 }),
       window.buildingAgent.listSkills(),
+      window.buildingAgent.listAgentWorkspaces(),
       window.buildingAgent.listChatSessions(),
       window.buildingAgent.loadAgentValidation(),
     ])
@@ -438,6 +464,7 @@ export function AgentChatPanel({
           loadedRuns,
           loadedMemories,
           skills,
+          loadedWorkspaces,
           loadedSessions,
           validation,
         ]) => {
@@ -446,6 +473,8 @@ export function AgentChatPanel({
         setRuns(loadedRuns);
         setMemories(loadedMemories);
         setSkillCount(skills.skills.length);
+        setSkillOptions(skills.skills.map(toSkillMentionCandidate));
+        setWorkspaces(loadedWorkspaces);
         if (validation.ok && validation.snapshot) {
           setLastValidationSnapshot(validation.snapshot);
         }
@@ -480,9 +509,20 @@ export function AgentChatPanel({
 
     setSessionId(loadedSession.id);
     setMessages(loadedSession.messages.map(toChatMessage));
-    setWorkPhase("idle");
-    setTaskActivity(idleTaskActivity);
-    setTaskProcessEvents([]);
+    setSelectedWorkspaceId(loadedSession.workspaceId ?? null);
+    const restoredActivity = restoreChatTaskActivity(loadedSession.activity);
+    if (restoredActivity) {
+      setWorkPhase(restoredActivity.workPhase);
+      setStatus(restoredActivity.status);
+      setTaskActivity(restoredActivity.taskActivity);
+      setTaskProcessEvents(restoredActivity.taskProcessEvents);
+      activeStatusSessionIdRef.current = loadedSession.id;
+    } else {
+      setWorkPhase("idle");
+      setTaskActivity(idleTaskActivity);
+      setTaskProcessEvents([]);
+      activeStatusSessionIdRef.current = null;
+    }
     setGoalRunEvents([]);
     if (loadedSession.activeGoalId) {
       setActiveGoalDetail(await window.buildingAgent.getGoal(loadedSession.activeGoalId));
@@ -580,6 +620,36 @@ export function AgentChatPanel({
     canCancelChatTask || Boolean(activeGoal?.status === "executing");
   const composerCommandMenuVisible =
     commandMenuOpen || shouldShowComposerCommandMenu(draft);
+  const activeSkillMention = useMemo(
+    () => extractActiveSkillMention(draft, draftCursor),
+    [draft, draftCursor],
+  );
+  const skillMentionMatches = useMemo(
+    () =>
+      activeSkillMention
+        ? matchSkillMentionCandidates(skillOptions, activeSkillMention.query)
+        : [],
+    [activeSkillMention, skillOptions],
+  );
+  const selectedSkill = selectedSkillName
+    ? skillOptions.find((skill) => skill.name === selectedSkillName) ?? null
+    : null;
+  const selectedWorkspace = selectedWorkspaceId
+    ? workspaces.find((workspace) => workspace.id === selectedWorkspaceId) ?? null
+    : null;
+  const activeWorkspaceLabel =
+    selectedWorkspace?.name ??
+    activeSession?.workspaceSummary?.name ??
+    "默认工作区";
+  const activeWorkspacePath =
+    selectedWorkspace?.rootPath ?? activeSession?.workspaceSummary?.rootPath ?? "";
+  const skillMentionMenuVisible =
+    Boolean(activeSkillMention) &&
+    skillMentionMatches.length > 0 &&
+    !(
+      selectedSkillName &&
+      activeSkillMention?.query.toLowerCase() === selectedSkillName
+    );
 
   const contextCards = useMemo(
     () => [
@@ -617,9 +687,7 @@ export function AgentChatPanel({
     memories,
     activeGoal,
   });
-  const shouldShowActivityCard =
-    taskActivity.kind !== "idle" &&
-    (taskActivity.kind !== "done" || Boolean(activeGoal));
+  const shouldShowActivityCard = taskActivity.kind !== "idle";
   const readinessChecklist = useMemo(
     () =>
       buildAgentReadinessChecklist({
@@ -691,8 +759,31 @@ export function AgentChatPanel({
 
   function handlePickPrompt(prompt: string) {
     setDraft(prompt);
+    setDraftCursor(prompt.length);
+    setSelectedSkillName(null);
     window.requestAnimationFrame(() => {
       messageInputRef.current?.focus();
+    });
+  }
+
+  function updateDraftCursor() {
+    const input = messageInputRef.current;
+    if (input) {
+      setDraftCursor(input.selectionStart ?? input.value.length);
+    }
+  }
+
+  function handleSelectSkillMention(skill: SkillMentionCandidate) {
+    const mention = activeSkillMention;
+    const nextDraft = mention
+      ? replaceActiveSkillMention(draft, mention, skill.name)
+      : `${draft.trimEnd()} @${skill.name} `;
+    setDraft(nextDraft);
+    setDraftCursor(nextDraft.length);
+    setSelectedSkillName(skill.name);
+    window.requestAnimationFrame(() => {
+      messageInputRef.current?.focus();
+      messageInputRef.current?.setSelectionRange(nextDraft.length, nextDraft.length);
     });
   }
 
@@ -922,6 +1013,8 @@ export function AgentChatPanel({
         ...(sessionId ? { sessionId } : {}),
         requestId,
         message: content,
+        ...(selectedSkillName ? { selectedSkillName } : {}),
+        ...(selectedWorkspaceId ? { workspaceId: selectedWorkspaceId } : {}),
         history,
       })
       .catch((error) => ({
@@ -967,6 +1060,7 @@ export function AgentChatPanel({
     if (result.activeGoal) {
       void refreshActiveGoalDetail(result.activeGoal.id);
     }
+    setSelectedSkillName(null);
     const isPaused = result.agentStatus?.state === "paused";
     const isGoalExecuting = result.activeGoal?.status === "executing";
     setStatus({
@@ -1009,6 +1103,10 @@ export function AgentChatPanel({
     event.preventDefault();
     if (composerCommandMenuVisible) {
       handleSelectComposerCommand("goal");
+      return;
+    }
+    if (skillMentionMenuVisible && skillMentionMatches[0]) {
+      handleSelectSkillMention(skillMentionMatches[0]);
       return;
     }
     await submitUserMessage(draft);
@@ -1479,6 +1577,31 @@ export function AgentChatPanel({
         <form className="composer" onSubmit={handleSubmit}>
           <div className="composer-inner">
             <div className="composer-input-shell">
+              <div className="composer-context-row" aria-label="会话上下文">
+                <label className="workspace-picker">
+                  <span>工作区</span>
+                  <select
+                    aria-label="选择工作区"
+                    value={selectedWorkspaceId ?? ""}
+                    onChange={(event) =>
+                      setSelectedWorkspaceId(event.currentTarget.value || null)
+                    }
+                  >
+                    <option value="">默认工作区</option>
+                    {workspaces.map((workspace) => (
+                      <option key={workspace.id} value={workspace.id}>
+                        {workspace.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <span
+                  className="workspace-context-path"
+                  title={activeWorkspacePath || activeWorkspaceLabel}
+                >
+                  {activeWorkspacePath || activeWorkspaceLabel}
+                </span>
+              </div>
               {composerCommandMenuVisible ? (
                 <div
                   aria-label="命令菜单"
@@ -1507,18 +1630,66 @@ export function AgentChatPanel({
                   ))}
                 </div>
               ) : null}
+              {selectedSkill ? (
+                <div className="selected-skill-chip" aria-label="已选择技能">
+                  <span>@{selectedSkill.name}</span>
+                  <button
+                    type="button"
+                    aria-label={`取消选择技能 ${selectedSkill.name}`}
+                    onClick={() => setSelectedSkillName(null)}
+                  >
+                    ×
+                  </button>
+                </div>
+              ) : null}
+              {skillMentionMenuVisible ? (
+                <div
+                  aria-label="选择技能"
+                  className="skill-mention-menu"
+                  role="listbox"
+                >
+                  {skillMentionMatches.map((skill) => (
+                    <button
+                      key={skill.name}
+                      type="button"
+                      role="option"
+                      onClick={() => handleSelectSkillMention(skill)}
+                      onMouseDown={(event) => event.preventDefault()}
+                    >
+                      <span>@{skill.name}</span>
+                      <div>
+                        <strong>{skill.displayName}</strong>
+                        <small>{skill.description}</small>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
               <textarea
                 data-testid="agent-message-input"
                 id="agent-message"
                 ref={messageInputRef}
                 value={draft}
                 onChange={(event) => {
-                  setDraft(event.currentTarget.value);
+                  const nextDraft = event.currentTarget.value;
+                  setDraft(nextDraft);
+                  setDraftCursor(event.currentTarget.selectionStart ?? nextDraft.length);
+                  if (
+                    selectedSkillName &&
+                    !nextDraft.includes(`@${selectedSkillName}`)
+                  ) {
+                    setSelectedSkillName(null);
+                  }
                   setCommandMenuOpen(false);
                 }}
+                onClick={updateDraftCursor}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
+                    if (skillMentionMenuVisible && skillMentionMatches[0]) {
+                      handleSelectSkillMention(skillMentionMatches[0]);
+                      return;
+                    }
                     if (composerCommandMenuVisible) {
                       handleSelectComposerCommand("goal");
                       return;
@@ -1535,6 +1706,7 @@ export function AgentChatPanel({
                     }
                   }
                 }}
+                onKeyUp={updateDraftCursor}
                 placeholder={
                   activeGoal?.status === "executing"
                     ? "继续你的任务…"
@@ -2094,68 +2266,6 @@ function buildTaskActivityFromAgentStatus(options: {
   });
 }
 
-function buildTaskActivityFromStatusEvent(
-  event: ChatTaskStatusEvent,
-): TaskActivityState {
-  const eventTime = parseEventTime(event.createdAt);
-  const startedAt = eventTime - event.elapsedMs;
-  const kind =
-    event.state === "paused"
-      ? "paused"
-      : event.state === "completed" || event.state === "canceled"
-        ? "done"
-        : event.state === "failed"
-          ? "error"
-          : "working";
-
-  return createTaskActivity({
-    kind,
-    title: getTaskActivityTitleFromStatusEvent(event),
-    detail: event.message,
-    now: eventTime,
-    startedAt,
-    lastEventAt: eventTime,
-    toolCallsExecuted: event.toolCallsExecuted,
-    maxTurns: event.maxTurns,
-  });
-}
-
-function getTaskActivityTitleFromStatusEvent(event: ChatTaskStatusEvent): string {
-  if (event.state === "started") return "正在启动任务";
-  if (event.state === "memory") return "正在检索记忆";
-  if (event.state === "model") return "正在调用模型";
-  if (event.state === "reasoning") return "模型思考";
-  if (event.state === "tool_call") return "正在执行工具";
-  if (event.state === "tool_result") return "工具结果已返回";
-  if (event.state === "paused") return "长任务等待确认";
-  if (event.state === "canceled") return "任务已中断";
-  if (event.state === "completed") return "本轮已完成";
-  return "执行遇到问题";
-}
-
-function getChatStatusKindFromEvent(event: ChatTaskStatusEvent): ChatStatus["kind"] {
-  if (event.state === "paused") return "paused";
-  if (event.state === "failed") return "error";
-  if (event.state === "canceled") return "ready";
-  if (event.state === "completed") return "ready";
-  return "working";
-}
-
-function getWorkPhaseFromStatusEvent(event: ChatTaskStatusEvent): AgentWorkPhase {
-  if (event.state === "started") return "planning";
-  if (event.state === "memory") return "memory";
-  if (event.state === "model" || event.state === "reasoning") return "model";
-  if (event.state === "tool_call" || event.state === "tool_result") return "tool";
-  if (event.state === "paused") return "paused";
-  if (event.state === "failed") return "error";
-  return "done";
-}
-
-function parseEventTime(value: string): number {
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : Date.now();
-}
-
 function getGoalRunEventLabel(event: AgentRunEvent): string {
   if (event.phase === "reflecting") return "思考";
   if (event.phase === "executing") return "执行";
@@ -2294,7 +2404,25 @@ function toSessionRailItem(session: ChatSessionListItem): ChatSession {
       ? { lastAssistantMessageAt: session.lastAssistantMessageAt }
       : {}),
     ...(session.tokenUsage ? { tokenUsage: session.tokenUsage } : {}),
+    ...(session.workspaceId ? { workspaceId: session.workspaceId } : {}),
+    ...(session.workspaceSummary
+      ? { workspaceSummary: session.workspaceSummary }
+      : {}),
     updatedAt: session.updatedAt,
+  };
+}
+
+function toSkillMentionCandidate(skill: {
+  manifest: {
+    name: string;
+    displayName: string;
+    description: string;
+  };
+}): SkillMentionCandidate {
+  return {
+    name: skill.manifest.name,
+    displayName: skill.manifest.displayName,
+    description: skill.manifest.description,
   };
 }
 

@@ -329,7 +329,7 @@ export function buildToolDefinitions(): ToolDefinition[] {
           properties: {
             workspaceRoot: {
               type: "string",
-              description: "要搜索的仓库或工作区绝对路径",
+              description: "可选；省略时使用当前会话或任务工作区",
             },
             query: {
               type: "string",
@@ -340,7 +340,7 @@ export function buildToolDefinitions(): ToolDefinition[] {
               description: "最多返回结果数，默认 20，最大 100",
             },
           },
-          required: ["workspaceRoot", "query"],
+          required: ["query"],
         },
       },
     },
@@ -355,10 +355,9 @@ export function buildToolDefinitions(): ToolDefinition[] {
           properties: {
             workspaceRoot: {
               type: "string",
-              description: "Git 仓库工作区绝对路径",
+              description: "可选；省略时使用当前会话或任务工作区",
             },
           },
-          required: ["workspaceRoot"],
         },
       },
     },
@@ -373,14 +372,13 @@ export function buildToolDefinitions(): ToolDefinition[] {
           properties: {
             workspaceRoot: {
               type: "string",
-              description: "Git 仓库工作区绝对路径",
+              description: "可选；省略时使用当前会话或任务工作区",
             },
             staged: {
               type: "boolean",
               description: "是否读取 staged/cached diff，默认 false",
             },
           },
-          required: ["workspaceRoot"],
         },
       },
     },
@@ -395,7 +393,7 @@ export function buildToolDefinitions(): ToolDefinition[] {
           properties: {
             workspaceRoot: {
               type: "string",
-              description: "运行测试命令的工作区绝对路径",
+              description: "可选；省略时使用当前会话或任务工作区",
             },
             command: {
               type: "string",
@@ -406,7 +404,7 @@ export function buildToolDefinitions(): ToolDefinition[] {
               description: "可选超时时间，范围 1000-600000 ms，默认 120000 ms",
             },
           },
-          required: ["workspaceRoot", "command"],
+          required: ["command"],
         },
       },
     },

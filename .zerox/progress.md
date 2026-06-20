@@ -1,5 +1,91 @@
 # Zerox Harness Progress
 
+## 2026-06-21 v2.5.0 Workspace-Bound Skill Execution
+
+- Request: promote workspace into a first-class chat execution boundary, harden explicit skill invocation/execution, keep right-side process state recoverable, and ship a packaged v2.5.0 build for testing.
+- Root cause fixed:
+  - Chat sessions previously did not carry a workspace contract into model/tool execution, so the model had to infer paths and could spend many tool calls probing.
+  - Explicit skill selection injected skill text, but chat execution did not yet carry a workspace-bound runtime task and dynamic skill/MCP tools could be registered on a different executor than chat used.
+  - Right-rail status was recoverable from session activity, but long process history still needed a durable workspace-run ledger beyond the bounded UI cache.
+- Implementation:
+  - `src/shared/agentWorkspace.ts`, `src/shared/chat.ts`, `src/main/chatSessionStore.ts`: add/persist workspace contract identity and chat workspace summaries.
+  - `src/renderer/components/AgentChatPanel.tsx`, `src/renderer/styles/composer.css`: add composer workspace selector, preserve restored session workspace, and send `workspaceId` with chat turns.
+  - `src/main/chatService.ts`, `src/main/agentLoop.ts`, `src/main/agentToolExecutor.ts`, `src/shared/agentProtocol.ts`: resolve `AgentRunContext`, pass `taskId`/`runtimeTask` into chat agent loop, default native code-tool `workspaceRoot` from run context, and honor skill `execution.maxTurns`.
+  - `src/shared/skillExecutionContract.ts`: add staged skill execution contract and transition tests.
+  - `src/shared/workspaceRunLedger.ts`, `src/main/workspaceRunStore.ts`: add JSONL workspace-run ledger and dual-write chat status events for replay-grade process records.
+  - `src/main/container.ts`: reuse a single dynamic tool executor so skill/MCP tools remain available after initialization; inject workspace and workspace-run services into chat.
+  - Release metadata, README, and `.zerox/feature_list.json` updated to v2.5.0.
+- Remaining tracked follow-ups:
+  - `SkillExecutionService` as a first-class main-process service is still left in the plan for a later iteration; this release ships the shared contract plus chat/runtime integration.
+  - Run Graph/episode export UI for workspace-run ledgers is not yet surfaced; ledger files are written locally and covered by store/projection tests.
+- Test growth: 161 files / 1002 tests -> **164 files / 1019 tests** (+3 files, +17 tests). Zero regression.
+- Verification evidence:
+  - Focused workspace/skill/ledger tests: `npm test -- src/main/chatSessionStore.test.ts src/shared/skillExecutionContract.test.ts src/shared/workspaceRunLedger.test.ts src/main/workspaceRunStore.test.ts` -> 4 files / 26 tests passed.
+  - Focused execution tests: `npm test -- src/main/chatService.test.ts src/main/agentToolExecutor.test.ts src/main/agentLoop.test.ts src/shared/agentProtocol.test.ts` -> 4 files / 89 tests passed.
+  - Focused UI/activity tests: `npm test -- src/renderer/materialDesign.test.ts src/shared/skillMentions.test.ts src/renderer/chatTaskActivityRestore.test.ts` -> passed.
+  - `npx tsc -p tsconfig.electron.json --noEmit --pretty false` -> passed.
+  - `npm run verify` -> 164 files / 1019 tests passed; build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Source-tree smoke continues to fall back to JSON when the local better-sqlite3 binary targets a different ABI.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run dist:mac` -> generated `release/Zerox Agent-2.5.0-arm64.dmg` and `release/Zerox Agent-2.5.0-arm64-mac.zip`; `better-sqlite3` rebuilt for Electron packaging and restored after packaging.
+  - Packaged app version smoke: `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v2.5.0' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+  - Package metadata: `release/mac-arm64/Zerox Agent.app/Contents/Info.plist` reports `CFBundleShortVersionString=2.5.0` and `CFBundleVersion=2.5.0`.
+- Artifacts:
+  - `release/Zerox Agent-2.5.0-arm64.dmg` (122M, sha256 `e5180ae1d79845ed725658424fd9d99423fc5d9fa20aa6b5fd2482a60ee65bb2`)
+  - `release/Zerox Agent-2.5.0-arm64.dmg.blockmap` (131K, sha256 `02c1acd141df33524c41fe36ce256dec760fbb9718fb002f754b08efa50f4a40`)
+  - `release/Zerox Agent-2.5.0-arm64-mac.zip` (333M, sha256 `592f48bc8247d0ba22a635ac782b2f2e0cbba8f1473a21864d9f33ea781de344`)
+  - `release/Zerox Agent-2.5.0-arm64-mac.zip.blockmap` (336K, sha256 `bfaa92782401e98728d8e1b39111c41eb1901d2c2c87703a66e976f3cd0e7a84`)
+
+## 2026-06-20 v2.4.7 Tool Failure Recovery Hotfix
+
+- Request: investigate the packaged-app `@onepager` run that stopped at "连续工具失败，等待确认" after repeated `file_read` / `file_list` failures, then ship a testable hotfix package.
+- Root cause fixed:
+  - `AgentLoop` paused immediately after three same-class tool failures. For long skill-driven project analysis, a few guessed or stale file paths could stop the run before the model got a chance to recover with a safer discovery strategy.
+  - Tool-failure UI/status text only showed generic `工具失败：file_read/file_list` and the pause summary collapsed missing-path errors into `tool_error`, so the right rail did not expose the failed path or concrete reason.
+- Implementation:
+  - `src/main/agentLoop.ts`: gives the model one recovery turn after repeated same-class tool failures before pausing, resets the streak for that recovery turn, and includes the latest error/arguments in any later pause continuation and summary.
+  - `src/main/agentLoop.ts`: classifies missing-path errors (`ENOENT`, "not found", "no such file", etc.) as `not_found` instead of generic `tool_error`.
+  - `src/main/chatService.ts`: includes summarized tool execution errors in chat task status events so the right rail can show the actual failure reason.
+  - Release metadata and README updated to v2.4.7.
+- Test growth: 161 files / 1000 tests -> **161 files / 1002 tests** (+2 tests). Zero regression.
+- Verification evidence:
+  - Focused tests: `npm test -- src/main/agentLoop.test.ts src/main/chatService.test.ts src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 4 files / 51 tests passed.
+  - `npm run build` -> TypeScript + Vite production build passed.
+  - `npm test` -> 161 files / 1002 tests passed.
+  - `npm run verify` -> 161 files / 1002 tests passed; build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. better-sqlite3 ABI mismatch fell back to JSON as designed.
+  - `npm run harness:check` -> passed.
+  - `npm run dist:mac` -> generated `release/Zerox Agent-2.4.7-arm64.dmg` and `release/Zerox Agent-2.4.7-arm64-mac.zip`; `better-sqlite3` rebuilt for Electron packaging and restored for local Node after packaging.
+  - Packaged app smoke: `BUILDING_AGENT_SMOKE=1 "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+  - Packaged app version smoke: `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v2.4.7' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+  - Package metadata: `release/mac-arm64/Zerox Agent.app/Contents/Info.plist` reports `CFBundleShortVersionString=2.4.7` and `CFBundleVersion=2.4.7`.
+
+## 2026-06-20 v2.4.6 Explicit Skill Invocation + Activity Recovery
+
+- Request: fix chat turns that verbally request a skill but do not actually load/use that skill; add `@skill` fuzzy selection in the composer; restore the right-side progress/context modules after switching away from and back to a conversation.
+- Root cause fixed:
+  - Skill intent was only text inside the user message. Chat routing could infer and solve the task directly without converting the selected/named skill into an execution contract.
+  - Chat task activity lived in renderer state only. When navigating to another section/session, the session reload rebuilt messages but dropped task status history, leaving the right rail empty.
+- Implementation:
+  - `src/shared/skillMentions.ts`: active `@` extraction, fuzzy matching, replacement, and natural-language skill request detection.
+  - `src/renderer/components/AgentChatPanel.tsx` + `src/renderer/styles/composer.css`: `@skill` menu, highlighted selected-skill chip, send payload carrying `selectedSkillName`, and right-rail restore from persisted activity.
+  - `src/main/chatService.ts`: resolves selected/named skills via discovery, emits `skill` status, injects the full `SKILL.md` body into the model context, skips task routing for skill requests, and records `skill_invoked` trajectory evidence.
+  - `src/main/chatSessionStore.ts` + `src/shared/chat.ts`: persists bounded chat activity snapshots on the session record and normalizes them on reload.
+  - Release metadata and README updated to v2.4.6.
+- Test growth: 159 files / 992 tests -> **161 files / 1000 tests** (+2 files, +8 tests). Zero regression.
+- Verification evidence:
+  - Focused tests: `npm test -- src/shared/skillMentions.test.ts src/renderer/chatTaskActivityRestore.test.ts src/main/chatService.test.ts src/main/chatSessionStore.test.ts src/renderer/materialDesign.test.ts src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 7 files / 84 tests passed.
+  - `npm run build` -> TypeScript + Vite production build passed.
+  - `npm test` -> 161 files / 1000 tests passed.
+  - `npm run verify` -> 161 files / 1000 tests passed; build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. better-sqlite3 ABI mismatch fell back to JSON as designed.
+  - `npm run harness:check` -> passed.
+  - Rendered UI check: dev Electron at `127.0.0.1:5173` showed v2.4.6; DOM interaction with `@one` opened the skill menu, selecting the first candidate changed the input to `@onepager` and rendered the highlighted `@onepager` chip.
+  - `npm run dist:mac` -> generated `release/Zerox Agent-2.4.6-arm64.dmg` and `release/Zerox Agent-2.4.6-arm64-mac.zip`; `better-sqlite3` rebuilt for Electron packaging and restored for local Node after packaging.
+  - Packaged app smoke: `BUILDING_AGENT_SMOKE=1 "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+  - Packaged app version smoke: `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v2.4.6' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+
 ## 2026-06-20 v2.4.5 System Prompt Architecture Refactoring
 
 - Request: Deep-research MiMo-Code's system prompt architecture and refactor zerox-agent's monolithic `buildAgentSystemPrompt()` into a layered, cache-aware, model-profiled system with runtime conditional injections.

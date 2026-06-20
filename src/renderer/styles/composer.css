@@ -16,11 +16,67 @@
   --composer-action-inset: 14px;
 }
 
+.composer-context-row {
+  position: absolute;
+  top: 14px;
+  left: 18px;
+  right: 18px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.workspace-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  max-width: min(300px, 58%);
+  height: 32px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-full);
+  color: var(--text-secondary);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-xs);
+}
+
+.workspace-picker > span {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  white-space: nowrap;
+}
+
+.workspace-picker select {
+  min-width: 0;
+  max-width: 180px;
+  border: 0;
+  color: var(--text-primary);
+  background: transparent;
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  outline: none;
+}
+
+.workspace-context-path {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .composer textarea {
   width: 100%;
-  min-height: 128px;
+  min-height: 148px;
   resize: none;
-  padding: 20px 150px 58px 22px;
+  padding: 58px 150px 58px 22px;
   border: 1px solid var(--border-default);
   border-radius: 24px;
   color: var(--text-primary);
@@ -115,12 +171,15 @@
   transform: translateY(-1px);
 }
 
-.slash-command-menu {
+.slash-command-menu,
+.skill-mention-menu {
   position: absolute;
   right: var(--composer-action-inset);
   bottom: calc(100% + var(--space-2));
   z-index: 12;
-  width: min(320px, calc(100% - (var(--composer-action-inset) * 2)));
+  width: min(360px, calc(100% - (var(--composer-action-inset) * 2)));
+  max-height: min(320px, 42vh);
+  overflow-y: auto;
   padding: var(--space-1);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-lg);
@@ -128,7 +187,8 @@
   box-shadow: var(--shadow-md);
 }
 
-.composer .slash-command-item {
+.composer .slash-command-item,
+.composer .skill-mention-menu button {
   display: grid;
   grid-template-columns: 52px minmax(0, 1fr);
   align-items: center;
@@ -141,6 +201,86 @@
   color: var(--text-primary);
   background: transparent;
   text-align: left;
+}
+
+.composer .skill-mention-menu button:hover,
+.composer .slash-command-item:hover {
+  background: var(--bg-surface-hover);
+}
+
+.composer .skill-mention-menu button > span,
+.composer .slash-command-item > span {
+  overflow: hidden;
+  color: var(--text-accent);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer .skill-mention-menu strong,
+.composer .skill-mention-menu small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer .skill-mention-menu strong {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+
+.composer .skill-mention-menu small {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.selected-skill-chip {
+  position: absolute;
+  left: 18px;
+  bottom: 18px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: min(280px, calc(100% - 190px));
+  min-height: 32px;
+  padding: 0 6px 0 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-full);
+  color: var(--text-accent);
+  background: var(--bg-surface);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  box-shadow: var(--shadow-xs);
+}
+
+.selected-skill-chip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selected-skill-chip button {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-full);
+  color: var(--text-tertiary);
+  background: transparent;
+}
+
+.selected-skill-chip button:hover {
+  color: var(--text-primary);
+  background: var(--bg-surface-hover);
 }
 
 .tool-approval-panel {

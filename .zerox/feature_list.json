@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-06-20T00:00:00.000Z",
+  "updatedAt": "2026-06-21T00:00:00.000Z",
   "features": [
     {
       "id": "P0-repo-local-harness",
@@ -1370,6 +1370,53 @@
         "npm run build",
         "npm run verify",
         "npm run harness:check"
+      ]
+    },
+    {
+      "id": "P14-workspace-skill-execution-2.5.0",
+      "status": "done",
+      "title": "v2.5.0 workspace-bound skill execution",
+      "files": [
+        "src/shared/agentWorkspace.ts",
+        "src/shared/chat.ts",
+        "src/shared/skillExecutionContract.ts",
+        "src/shared/workspaceRunLedger.ts",
+        "src/shared/skillMentions.ts",
+        "src/main/chatSessionStore.ts",
+        "src/main/chatService.ts",
+        "src/main/agentLoop.ts",
+        "src/main/agentToolExecutor.ts",
+        "src/main/container.ts",
+        "src/main/workspaceRunStore.ts",
+        "src/renderer/components/AgentChatPanel.tsx",
+        "src/renderer/chatTaskActivity.ts",
+        "src/renderer/styles/composer.css",
+        "package.json",
+        "package-lock.json",
+        "README.md",
+        ".zerox/progress.md"
+      ],
+      "definitionOfDone": [
+        "Chat sessions persist workspace identity and workspace summaries",
+        "The chat composer exposes first-class workspace selection and passes selected workspaceId into chat execution",
+        "Chat agent-loop runs resolve AgentRunContext, taskId, and runtimeTask so skill/tool execution goes through workspace authorization",
+        "Native code tools default workspaceRoot from the active run context instead of requiring the model to guess paths",
+        "Skill invocation has a shared staged execution contract and @skill fuzzy selection remains highlighted in the composer",
+        "Chat status events are persisted to session activity and dual-written to a workspace run ledger for replay-grade process records",
+        "The shared tool executor is reused so dynamic skill/MCP tools are available to chat after initialization",
+        "package version bumped to 2.5.0 and release documentation reflects v2.5.0"
+      ],
+      "verification": [
+        "npm test -- src/main/chatSessionStore.test.ts src/shared/skillExecutionContract.test.ts src/shared/workspaceRunLedger.test.ts src/main/workspaceRunStore.test.ts",
+        "npm test -- src/main/chatService.test.ts src/main/agentToolExecutor.test.ts src/main/agentLoop.test.ts src/shared/agentProtocol.test.ts",
+        "npm test -- src/renderer/materialDesign.test.ts src/shared/skillMentions.test.ts src/renderer/chatTaskActivityRestore.test.ts",
+        "npx tsc -p tsconfig.electron.json --noEmit --pretty false",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run dist:mac",
+        "npm run harness:check",
+        "git diff --check"
       ]
     }
   ]

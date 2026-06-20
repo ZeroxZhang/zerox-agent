@@ -930,7 +930,7 @@ describe("agent loop", () => {
     expect(result.summary).not.toContain("请把任务拆小一点");
   });
 
-  it("pauses when the model keeps hitting the same class of tool failure", async () => {
+  it("pauses when the model keeps hitting the same class of tool failure after recovery", async () => {
     const requests: ChatCompletionRequest[] = [];
     const chatClient: ChatClient = {
       async complete(request) {
@@ -962,18 +962,74 @@ describe("agent loop", () => {
       },
     );
 
-    expect(requests).toHaveLength(3);
+    expect(requests).toHaveLength(6);
     expect(result).toMatchObject({
       status: "paused",
-      turns: 2,
-      toolCallsExecuted: 3,
+      turns: 5,
+      toolCallsExecuted: 6,
       continuation: {
         reason: "tool_failure_loop",
-        toolCallsExecuted: 3,
+        toolCallsExecuted: 6,
       },
     });
     expect(result.summary).toContain("连续 3 次工具失败");
     expect(result.summary).toContain("file_list");
+  });
+
+  it("asks the model to recover once from repeated tool failures before pausing", async () => {
+    const requests: ChatCompletionRequest[] = [];
+    const chatClient: ChatClient = {
+      async complete(request) {
+        requests.push(request);
+        if (requests.length === 1) {
+          return {
+            content: null,
+            finishReason: "tool_calls",
+            toolCalls: [1, 2, 3].map((index) => ({
+              id: `tool_call_${index}`,
+              type: "function" as const,
+              function: {
+                name: "file_list",
+                arguments: JSON.stringify({ path: `/missing-${index}` }),
+              },
+            })),
+          };
+        }
+
+        expect(request.messages.at(-1)).toMatchObject({
+          role: "system",
+          content: expect.stringContaining("连续 3 次工具失败"),
+        });
+        expect(request.messages.at(-1)?.content).toContain("/missing-3");
+        return {
+          content: "我会基于已有结果继续，不再猜测不存在的路径。",
+          toolCalls: [],
+          finishReason: "stop",
+        };
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "深度理解项目后生成 onepage" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(undefined, undefined, {
+          ok: false,
+          error: "ENOENT: no such file or directory, scandir '/missing-3'",
+        }),
+        maxTurns: 6,
+        pauseOnFailureLoop: true,
+        tools: testTools,
+      },
+    );
+
+    expect(requests).toHaveLength(2);
+    expect(result).toMatchObject({
+      status: "succeeded",
+      toolCallsExecuted: 3,
+      summary: "我会基于已有结果继续，不再猜测不存在的路径。",
+    });
   });
 
   it("passes dynamic registry source to tool authorization", async () => {

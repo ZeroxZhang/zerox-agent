@@ -8,7 +8,7 @@ type PackageJson = {
 };
 
 describe("package scripts", () => {
-  it("sets release metadata to v2.4.1", () => {
+  it("sets release metadata to v2.5.0", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -16,12 +16,12 @@ describe("package scripts", () => {
       readFileSync(path.join(process.cwd(), "package-lock.json"), "utf8"),
     ) as { version?: string; packages?: Record<string, { version?: string }> };
 
-    expect(packageJson.version).toBe("2.4.5");
-    expect(packageLock.version).toBe("2.4.5");
-    expect(packageLock.packages?.[""]?.version).toBe("2.4.5");
+    expect(packageJson.version).toBe("2.5.0");
+    expect(packageLock.version).toBe("2.5.0");
+    expect(packageLock.packages?.[""]?.version).toBe("2.5.0");
   });
 
-  it("marks the v2.4.1 system prompt architecture refactoring release done", () => {
+  it("keeps prior release gates done while publishing v2.5.0", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -35,7 +35,17 @@ describe("package scripts", () => {
       }>;
     };
 
-    expect(packageJson.version).toBe("2.4.5");
+    expect(packageJson.version).toBe("2.5.0");
+    expect(featureList.features).toContainEqual(
+      expect.objectContaining({
+        id: "P14-workspace-skill-execution-2.5.0",
+        status: "done",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("first-class workspace selection"),
+          expect.stringContaining("package version bumped to 2.5.0"),
+        ]),
+      }),
+    );
     expect(featureList.features).toContainEqual(
       expect.objectContaining({
         id: "P12.1-session-history-management-2.4.1",

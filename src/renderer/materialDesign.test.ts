@@ -133,6 +133,26 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".sidebar-session-item");
   });
 
+  it("supports @skill selection from the chat composer", () => {
+    expect(chatPanelSource).toContain("extractActiveSkillMention");
+    expect(chatPanelSource).toContain("matchSkillMentionCandidates");
+    expect(chatPanelSource).toContain("selectedSkillName");
+    expect(chatPanelSource).toContain("skill-mention-menu");
+    expect(chatPanelSource).toContain("selected-skill-chip");
+    expect(styles).toContain(".skill-mention-menu");
+    expect(styles).toContain(".selected-skill-chip");
+  });
+
+  it("surfaces workspace selection in the chat composer", () => {
+    expect(chatPanelSource).toContain("listAgentWorkspaces");
+    expect(chatPanelSource).toContain("selectedWorkspaceId");
+    expect(chatPanelSource).toContain("workspaceId: selectedWorkspaceId");
+    expect(chatPanelSource).toContain("composer-context-row");
+    expect(chatPanelSource).toContain("workspace-picker");
+    expect(styles).toContain(".composer-context-row");
+    expect(styles).toContain(".workspace-picker");
+  });
+
   it("surfaces managed chat history with archive, delete, time and token metadata", () => {
     expect(appSource).toContain("archiveChatSession");
     expect(appSource).toContain("restoreChatSession");

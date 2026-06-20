@@ -77,6 +77,19 @@ export type AgentRunContext = {
   depth: number;
 };
 
+export type WorkspaceContract = {
+  workspaceId: string;
+  name: string;
+  rootPath: string;
+  kind: AgentWorkspaceKind;
+  sandboxMode: AgentSandboxPolicy["mode"];
+  writableRoots: string[];
+  readableRoots: string[];
+  networkAllowed: boolean;
+  shellAllowed: boolean;
+  git?: AgentWorkspaceGitMetadata;
+};
+
 export type MultiAgentSessionStatus =
   | "running"
   | "paused"
@@ -150,6 +163,34 @@ export function buildPrimaryRunContext(
     ...(input.sessionId ? { sessionId: input.sessionId } : {}),
     agentRole: input.agentRole ?? "primary",
     depth: 0,
+  };
+}
+
+export function toWorkspaceContract(
+  workspace: AgentWorkspace,
+  runContext: AgentRunContext,
+): WorkspaceContract {
+  const writableRoots =
+    runContext.sandbox.mode === "workspace_write"
+      ? unique([runContext.workspaceRoot, ...runContext.sandbox.extraWriteRoots])
+      : [];
+  const readableRoots = unique([
+    runContext.workspaceRoot,
+    ...runContext.sandbox.extraReadRoots,
+    ...writableRoots,
+  ]);
+
+  return {
+    workspaceId: workspace.id,
+    name: workspace.name,
+    rootPath: runContext.workspaceRoot,
+    kind: workspace.kind,
+    sandboxMode: runContext.sandbox.mode,
+    writableRoots,
+    readableRoots,
+    networkAllowed: runContext.sandbox.network !== "none",
+    shellAllowed: runContext.sandbox.shell !== "disabled",
+    ...(workspace.git ? { git: workspace.git } : {}),
   };
 }
 

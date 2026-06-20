@@ -8,6 +8,7 @@ import { createAgentLearningService } from "./agentLearningService";
 import { createAgentEvalCandidateStore } from "./agentEvalCandidateStore";
 import { createAgentEvalCandidateService } from "./agentEvalCandidateService";
 import { createAgentWorkspaceStore } from "./agentWorkspaceStore";
+import { createWorkspaceRunStore } from "./workspaceRunStore";
 import { createAgentGoalStore } from "./agentGoalStore";
 import { createAgentGoalController } from "./agentGoalController";
 import { createAgentGoalAcceptance } from "./agentGoalAcceptance";
@@ -471,18 +472,20 @@ export function createAppContainer(options: {
   }
 
   function createToolExecutor() {
-    const executor = createAgentToolExecutor({
-      memoryStore: memoryStore(),
-      chatSessionStore: chatSessionStore(),
-      toolResultOffloadStore: toolResultOffloadStore(),
+    return lazy("agentToolExecutor", () => {
+      const executor = createAgentToolExecutor({
+        memoryStore: memoryStore(),
+        chatSessionStore: chatSessionStore(),
+        toolResultOffloadStore: toolResultOffloadStore(),
+      });
+      // P6: register the actor + workflow tools on the dynamic registry so the
+      // model can spawn sub-agents and run workflows (e.g. deep-research).
+      const registry = executor.getRegistry();
+      registerActorTool(registry, { actorRuntime: actorRuntime() });
+      registerWorkflowTool(registry, { workflowRuntime: workflowRuntime() });
+      void initializeMcpTools(executor);
+      return executor;
     });
-    // P6: register the actor + workflow tools on the dynamic registry so the
-    // model can spawn sub-agents and run workflows (e.g. deep-research).
-    const registry = executor.getRegistry();
-    registerActorTool(registry, { actorRuntime: actorRuntime() });
-    registerWorkflowTool(registry, { workflowRuntime: workflowRuntime() });
-    void initializeMcpTools(executor);
-    return executor;
   }
 
   function modelConnectionService() {
@@ -557,6 +560,10 @@ export function createAppContainer(options: {
 
   function agentWorkspaceStore() {
     return lazy("agentWorkspaceStore", () => createAgentWorkspaceStore({ configDir }));
+  }
+
+  function workspaceRunStore() {
+    return lazy("workspaceRunStore", () => createWorkspaceRunStore({ configDir }));
   }
 
   function agentWorkspaceService() {
@@ -1123,8 +1130,12 @@ export function createAppContainer(options: {
         goalService: goalChatService(),
         taskStore: scheduledTaskStore(),
         runScheduledTask: (taskId: string) => runAgentTask(taskId),
+        discoverSkills: () => discoverSkills({ skillsDir }),
+        workspaceService: agentWorkspaceService(),
         toolExecutor: createToolExecutor(),
         toolAuthorizationService: toolAuthorizationService(),
+        trajectoryStore: agentTrajectoryStore(),
+        workspaceRunStore: workspaceRunStore(),
         toolResultOffloadStore: toolResultOffloadStore(),
         compactionStrategy: compactionStrategy(),
       }),
@@ -1514,6 +1525,7 @@ export function createAppContainer(options: {
     goalChatService,
     agentGoalController,
     agentWorkspaceStore,
+    workspaceRunStore,
     agentWorkspaceService,
     multiAgentSessionStore,
     multiAgentCoordinator,

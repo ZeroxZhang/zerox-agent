@@ -743,6 +743,63 @@ describe("agent tool executor", () => {
     });
   });
 
+  it("defaults native workspace tools to the run context workspace root", async () => {
+    await writeFile(
+      path.join(tempDir, "agent.ts"),
+      "export const workspaceContext = 'native-tool-registry';\n",
+      "utf8",
+    );
+    const executor = createAgentToolExecutor();
+    const definitions = executor.getRegistry().getDefinitions();
+    const codeSearch = definitions.find(
+      (definition) => definition.function.name === "code_search",
+    );
+    const gitStatus = definitions.find(
+      (definition) => definition.function.name === "git_status",
+    );
+    const gitDiff = definitions.find(
+      (definition) => definition.function.name === "git_diff",
+    );
+    const testRun = definitions.find(
+      (definition) => definition.function.name === "test_run",
+    );
+
+    expect(codeSearch?.function.parameters.required).toEqual(["query"]);
+    expect(gitStatus?.function.parameters.required).toBeUndefined();
+    expect(gitDiff?.function.parameters.required).toBeUndefined();
+    expect(testRun?.function.parameters.required).toEqual(["command"]);
+
+    await expect(
+      executor.execute(
+        {
+          toolName: "code_search",
+          args: {
+            query: "workspaceContext",
+            maxResults: 5,
+          },
+        },
+        {
+          runContext: buildPrimaryRunContext({
+            workspaceId: "workspace_temp",
+            workspaceRoot: tempDir,
+          }),
+        },
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      result: {
+        workspaceRoot: tempDir,
+        query: "workspaceContext",
+        results: [
+          {
+            relativePath: "agent.ts",
+            line: 1,
+          },
+        ],
+      },
+    });
+  });
+
   it("passes abort signals to native test_run", async () => {
     const executor = createAgentToolExecutor();
     const controller = new AbortController();

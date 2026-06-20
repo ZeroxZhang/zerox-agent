@@ -91,6 +91,8 @@ export type AgentLoopContinuation = {
   toolCallsExecuted: number;
   toolName?: string;
   failureKind?: string;
+  failureError?: string;
+  failureArgs?: Record<string, unknown>;
   strategyGuardCode?: AgentLoopStrategyGuardEvent["code"];
 };
 
@@ -180,6 +182,7 @@ export async function runAgentLoop(
     kind: string;
     count: number;
   } | null = null;
+  let toolFailureLoopRecoveryAttempts = 0;
   const toolCallCounts = new Map<string, number>();
   const emittedStrategyGuards = new Set<string>();
   const successfulToolNames = new Set<string>();
@@ -442,7 +445,11 @@ export async function runAgentLoop(
             continue;
           }
 
-          const args = preparedToolCall.args;
+          const args = applyRunContextDefaultsToToolArgs(
+            toolName,
+            preparedToolCall.args,
+            runContext,
+          );
           const nativeFallbackRejection = rejectNativeToolFallback({
             toolName,
             args,
@@ -524,6 +531,9 @@ export async function runAgentLoop(
             result,
           );
           toolFailureStreak = failureLoop.streak;
+          if (result.ok) {
+            toolFailureLoopRecoveryAttempts = 0;
+          }
 
           const serializedObservation =
             await serializeToolObservationWithOffload({
@@ -589,6 +599,24 @@ export async function runAgentLoop(
             !result.ok
           ) {
             const failureKind = failureLoop.streak?.kind ?? "unknown";
+            const failureCount = failureLoop.streak?.count ?? 3;
+            if (toolFailureLoopRecoveryAttempts < 1) {
+              toolFailureLoopRecoveryAttempts += 1;
+              toolFailureStreak = null;
+              messages.push({
+                role: "system",
+                content: buildToolFailureLoopRecoveryPrompt({
+                  toolName,
+                  failureKind,
+                  error: result.error,
+                  args,
+                  toolCallsExecuted,
+                  count: failureCount,
+                }),
+              });
+              break;
+            }
+
             status = "paused";
             continuation = {
               reason: "tool_failure_loop",
@@ -596,12 +624,16 @@ export async function runAgentLoop(
               toolCallsExecuted,
               toolName,
               failureKind,
+              failureError: result.error,
+              failureArgs: args,
             };
             summary = buildToolFailureLoopPauseSummary({
               toolName,
               failureKind,
+              error: result.error,
+              args,
               toolCallsExecuted,
-              count: failureLoop.streak?.count ?? 3,
+              count: failureCount,
             });
             break;
           }
@@ -663,13 +695,65 @@ export async function runAgentLoop(
 function buildToolFailureLoopPauseSummary(options: {
   toolName: string;
   failureKind: string;
+  error?: string;
+  args?: Record<string, unknown>;
   toolCallsExecuted: number;
   count: number;
 }): string {
   return [
     `连续 ${options.count} 次工具失败（${options.toolName}，${options.failureKind}）。`,
+    ...(options.error ? [`最近错误：${truncateForPrompt(options.error, 240)}`] : []),
+    ...(options.args ? [`最近参数：${formatToolArgsForPrompt(options.args)}`] : []),
     `我已经暂停，避免继续在同一个失败模式里空转。累计执行 ${options.toolCallsExecuted} 个工具。`,
     "你可以回复“继续”让我带着已有诊断接着试，也可以调整目标、提供脚本参数或要求我换一种工具路径。",
+  ].join("\n");
+}
+
+function applyRunContextDefaultsToToolArgs(
+  toolName: string,
+  args: Record<string, unknown>,
+  runContext: AgentRunContext | undefined,
+): Record<string, unknown> {
+  if (!runContext || !isNativeWorkspaceRootTool(toolName)) {
+    return args;
+  }
+  if (typeof args.workspaceRoot === "string" && args.workspaceRoot.trim()) {
+    return args;
+  }
+  return {
+    ...args,
+    workspaceRoot: runContext.workspaceRoot,
+  };
+}
+
+function isNativeWorkspaceRootTool(toolName: string): boolean {
+  return (
+    toolName === "code_search" ||
+    toolName === "git_status" ||
+    toolName === "git_diff" ||
+    toolName === "test_run"
+  );
+}
+
+function buildToolFailureLoopRecoveryPrompt(options: {
+  toolName: string;
+  failureKind: string;
+  error: string;
+  args: Record<string, unknown>;
+  toolCallsExecuted: number;
+  count: number;
+}): string {
+  return [
+    `连续 ${options.count} 次工具失败（${options.toolName}，${options.failureKind}）。`,
+    `最近错误：${truncateForPrompt(options.error, 240)}`,
+    `最近参数：${formatToolArgsForPrompt(options.args)}`,
+    `已执行工具数：${options.toolCallsExecuted}`,
+    "",
+    "恢复要求：",
+    "- 不要继续用相同工具重试相同或猜测出来的路径。",
+    "- 如果是路径不存在、文件名不确定或目录结构不清，先用 file_search 或列出已知父目录确认真实路径。",
+    "- 如果已有成功工具结果足以回答用户，就停止继续探索，直接基于已有证据完成或给出阶段性结论。",
+    "- 如果必须继续使用同类工具，先改变策略并说明依据。",
   ].join("\n");
 }
 
@@ -739,11 +823,26 @@ function normalizeToolFailureKind(
     return detailKind.trim();
   }
   if (/timeout|超时/i.test(result.error)) return "timeout";
+  if (/enoent|not found|no such file|不存在|找不到/i.test(result.error)) {
+    return "not_found";
+  }
   if (/中断|cancel|abort/i.test(result.error)) return "canceled";
   if (/stdout\/stderr|no stdout|no stderr|无 stdout/i.test(result.error)) {
     return "empty_exit";
   }
   return "tool_error";
+}
+
+function formatToolArgsForPrompt(args: Record<string, unknown>): string {
+  return truncateForPrompt(JSON.stringify(args), 240);
+}
+
+function truncateForPrompt(value: string, maxLength: number): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLength - 1)}…`;
 }
 
 function buildTurnLimitPauseSummary(

@@ -6,9 +6,12 @@ import type {
   ChatMessageSearchResult,
   ChatMessageRecord,
   ChatSessionGoalSummary,
+  ChatSessionActivitySnapshot,
   ChatSessionListItem,
   ChatSessionRecord,
   ChatSessionTokenUsage,
+  ChatTaskStatusEvent,
+  ChatWorkspaceSummary,
 } from "../shared/chat";
 
 type StoredChatSessions = {
@@ -24,6 +27,8 @@ export type AppendChatMessageInput = {
   executedRunId?: string;
   goalId?: string;
   goalEventRef?: string;
+  workspaceId?: string;
+  workspaceSummary?: ChatWorkspaceSummary;
 };
 
 export type AppendChatMessageResult = {
@@ -41,6 +46,11 @@ export type ChatSessionStore = {
   addTokenUsage(
     sessionId: string,
     usage: ChatSessionTokenUsage,
+  ): Promise<ChatSessionRecord | null>;
+  appendActivityEvent(
+    sessionId: string,
+    event: ChatTaskStatusEvent,
+    options?: { selectedSkillName?: string },
   ): Promise<ChatSessionRecord | null>;
   attachGoal(
     sessionId: string,
@@ -148,6 +158,11 @@ export function createChatSessionStore(options: {
           ? stored.sessions.find((session) => session.id === input.sessionId)
           : null;
         const newSessionId = existingSession ? null : createId();
+        const workspaceId =
+          normalizeOptionalString(input.workspaceId) ?? existingSession?.workspaceId;
+        const workspaceSummary =
+          normalizeChatWorkspaceSummary(input.workspaceSummary) ??
+          existingSession?.workspaceSummary;
         const message: ChatMessageRecord = {
           id: createId(),
           role: input.role,
@@ -165,6 +180,8 @@ export function createChatSessionStore(options: {
               ...existingSession,
               summary: content || existingSession.summary,
               messages: [...existingSession.messages, message],
+              ...(workspaceId ? { workspaceId } : {}),
+              ...(workspaceSummary ? { workspaceSummary } : {}),
               updatedAt: timestamp,
             }
           : createSession({
@@ -172,6 +189,8 @@ export function createChatSessionStore(options: {
               content,
               message,
               timestamp,
+              ...(workspaceId ? { workspaceId } : {}),
+              ...(workspaceSummary ? { workspaceSummary } : {}),
             });
         const nextSessions = existingSession
           ? stored.sessions.map((storedSession) =>
@@ -229,6 +248,26 @@ export function createChatSessionStore(options: {
         ...session,
         tokenUsage: mergeTokenUsage(session.tokenUsage, normalizedUsage),
       }));
+    },
+
+    async appendActivityEvent(sessionId, event, eventOptions) {
+      return updateSessionById(sessionId, (session) => {
+        const previousEvents = session.activity?.statusEvents ?? [];
+        const statusEvents = [...previousEvents, event].slice(-80);
+        const selectedSkillName =
+          eventOptions?.selectedSkillName ??
+          event.selectedSkillName ??
+          session.activity?.selectedSkillName;
+        return {
+          ...session,
+          activity: {
+            updatedAt: event.createdAt,
+            statusEvents,
+            ...(selectedSkillName ? { selectedSkillName } : {}),
+          },
+          updatedAt: event.createdAt,
+        };
+      });
     },
 
     async attachGoal(sessionId, goal) {
@@ -353,6 +392,8 @@ function createSession(options: {
   content: string;
   message: ChatMessageRecord;
   timestamp: string;
+  workspaceId?: string;
+  workspaceSummary?: ChatWorkspaceSummary;
 }): ChatSessionRecord {
   const title = createSessionTitle(options.content);
   return {
@@ -360,6 +401,10 @@ function createSession(options: {
     title,
     summary: title,
     messages: [options.message],
+    ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
+    ...(options.workspaceSummary
+      ? { workspaceSummary: options.workspaceSummary }
+      : {}),
     createdAt: options.timestamp,
     updatedAt: options.timestamp,
   };
@@ -374,6 +419,10 @@ function toListItem(session: ChatSessionRecord): ChatSessionListItem {
     title: session.title,
     summary: session.summary,
     messageCount: session.messages.length,
+    ...(session.workspaceId ? { workspaceId: session.workspaceId } : {}),
+    ...(session.workspaceSummary
+      ? { workspaceSummary: session.workspaceSummary }
+      : {}),
     ...(activeGoal ? { activeGoal } : {}),
     ...(session.archivedAt ? { archivedAt: session.archivedAt } : {}),
     lastAssistantMessageAt: getLastAssistantMessageAt(session),
@@ -402,6 +451,8 @@ function normalizeStoredSession(session: ChatSessionRecord): ChatSessionRecord {
   const goalSummaries = Array.isArray(session.goalSummaries)
     ? session.goalSummaries.map(normalizeGoalSummary)
     : [];
+  const workspaceId = normalizeOptionalString(session.workspaceId);
+  const workspaceSummary = normalizeChatWorkspaceSummary(session.workspaceSummary);
   return {
     id: String(session.id ?? ""),
     title: String(session.title ?? "未命名会话"),
@@ -409,9 +460,14 @@ function normalizeStoredSession(session: ChatSessionRecord): ChatSessionRecord {
     messages: Array.isArray(session.messages)
       ? session.messages.map(normalizeStoredMessage)
       : [],
+    ...(workspaceId ? { workspaceId } : {}),
+    ...(workspaceSummary ? { workspaceSummary } : {}),
     ...(activeGoalId ? { activeGoalId } : {}),
     ...(goalIds.length ? { goalIds } : {}),
     ...(goalSummaries.length ? { goalSummaries } : {}),
+    ...(session.activity
+      ? { activity: normalizeActivitySnapshot(session.activity) }
+      : {}),
     ...(session.archivedAt ? { archivedAt: String(session.archivedAt) } : {}),
     ...(session.tokenUsage
       ? { tokenUsage: normalizeTokenUsage(session.tokenUsage) }
@@ -419,6 +475,66 @@ function normalizeStoredSession(session: ChatSessionRecord): ChatSessionRecord {
     createdAt: String(session.createdAt ?? new Date(0).toISOString()),
     updatedAt: String(session.updatedAt ?? session.createdAt ?? new Date(0).toISOString()),
   };
+}
+
+function normalizeActivitySnapshot(
+  snapshot: ChatSessionActivitySnapshot,
+): ChatSessionActivitySnapshot {
+  const statusEvents = Array.isArray(snapshot.statusEvents)
+    ? snapshot.statusEvents.map(normalizeStatusEvent).filter(Boolean)
+    : [];
+  return {
+    updatedAt: String(snapshot.updatedAt ?? new Date(0).toISOString()),
+    statusEvents,
+    ...(snapshot.selectedSkillName
+      ? { selectedSkillName: String(snapshot.selectedSkillName) }
+      : {}),
+  };
+}
+
+function normalizeStatusEvent(event: ChatTaskStatusEvent): ChatTaskStatusEvent {
+  const state = normalizeStatusEventState(event.state);
+  return {
+    sessionId: String(event.sessionId ?? ""),
+    state,
+    message: String(event.message ?? ""),
+    createdAt: String(event.createdAt ?? new Date(0).toISOString()),
+    elapsedMs:
+      typeof event.elapsedMs === "number" && Number.isFinite(event.elapsedMs)
+        ? event.elapsedMs
+        : 0,
+    ...(typeof event.turn === "number" ? { turn: event.turn } : {}),
+    ...(event.toolName ? { toolName: String(event.toolName) } : {}),
+    ...(event.selectedSkillName
+      ? { selectedSkillName: String(event.selectedSkillName) }
+      : {}),
+    ...(typeof event.toolCallsExecuted === "number"
+      ? { toolCallsExecuted: event.toolCallsExecuted }
+      : {}),
+    ...(typeof event.maxTurns === "number" ? { maxTurns: event.maxTurns } : {}),
+    ...(typeof event.ok === "boolean" ? { ok: event.ok } : {}),
+  };
+}
+
+function normalizeStatusEventState(
+  state: ChatTaskStatusEvent["state"],
+): ChatTaskStatusEvent["state"] {
+  if (
+    state === "started" ||
+    state === "skill" ||
+    state === "memory" ||
+    state === "model" ||
+    state === "reasoning" ||
+    state === "tool_call" ||
+    state === "tool_result" ||
+    state === "paused" ||
+    state === "canceled" ||
+    state === "completed" ||
+    state === "failed"
+  ) {
+    return state;
+  }
+  return "failed";
 }
 
 function normalizeStoredMessage(message: ChatMessageRecord): ChatMessageRecord {
@@ -443,6 +559,42 @@ function normalizeGoalSummary(goal: ChatSessionGoalSummary): ChatSessionGoalSumm
     description: String(goal.description ?? ""),
     status: goal.status,
   };
+}
+
+function normalizeChatWorkspaceSummary(
+  value: unknown,
+): ChatWorkspaceSummary | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const summary = value as Partial<Record<keyof ChatWorkspaceSummary, unknown>>;
+  const name = normalizeOptionalString(summary.name);
+  const rootPath = normalizeOptionalString(summary.rootPath);
+  const kind = normalizeOptionalString(summary.kind);
+  const sandboxMode = normalizeOptionalString(summary.sandboxMode);
+  const branch = normalizeOptionalString(summary.branch);
+
+  if (!name || !rootPath || !kind || !sandboxMode) {
+    return undefined;
+  }
+
+  return {
+    name,
+    rootPath,
+    kind,
+    sandboxMode,
+    ...(branch ? { branch } : {}),
+  };
+}
+
+function normalizeOptionalString(value: unknown): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  const normalized = String(value).trim();
+  return normalized ? normalized : undefined;
 }
 
 function compareSessionsForList(

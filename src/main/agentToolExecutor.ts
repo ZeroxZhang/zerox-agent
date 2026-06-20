@@ -467,7 +467,7 @@ function registerBuiltinTools(
           properties: {
             workspaceRoot: {
               type: "string",
-              description: "要搜索的仓库或工作区绝对路径",
+              description: "可选；省略时使用当前会话工作区",
             },
             query: { type: "string", description: "要搜索的代码文本" },
             maxResults: {
@@ -475,13 +475,13 @@ function registerBuiltinTools(
               description: "最多返回结果数，默认 20，最大 100",
             },
           },
-          required: ["workspaceRoot", "query"],
+          required: ["query"],
         },
       },
     },
-    async (args) =>
+    async (args, executionOptions) =>
       searchCode({
-        workspaceRoot: String(args.workspaceRoot ?? ""),
+        workspaceRoot: getWorkspaceRootArg(args, executionOptions?.runContext),
         query: String(args.query ?? ""),
         maxResults: optionalNumber(args.maxResults),
       }),
@@ -509,16 +509,15 @@ function registerBuiltinTools(
           properties: {
             workspaceRoot: {
               type: "string",
-              description: "Git 仓库工作区绝对路径",
+              description: "可选；省略时使用当前会话工作区",
             },
           },
-          required: ["workspaceRoot"],
         },
       },
     },
-    async (args) =>
+    async (args, executionOptions) =>
       readGitStatus({
-        workspaceRoot: String(args.workspaceRoot ?? ""),
+        workspaceRoot: getWorkspaceRootArg(args, executionOptions?.runContext),
       }),
     "built-in",
     defineNativeToolDescriptor({
@@ -544,20 +543,19 @@ function registerBuiltinTools(
           properties: {
             workspaceRoot: {
               type: "string",
-              description: "Git 仓库工作区绝对路径",
+              description: "可选；省略时使用当前会话工作区",
             },
             staged: {
               type: "boolean",
               description: "是否读取 staged/cached diff，默认 false",
             },
           },
-          required: ["workspaceRoot"],
         },
       },
     },
-    async (args) =>
+    async (args, executionOptions) =>
       readGitDiff({
-        workspaceRoot: String(args.workspaceRoot ?? ""),
+        workspaceRoot: getWorkspaceRootArg(args, executionOptions?.runContext),
         staged: Boolean(args.staged),
       }),
     "built-in",
@@ -584,7 +582,7 @@ function registerBuiltinTools(
           properties: {
             workspaceRoot: {
               type: "string",
-              description: "运行测试命令的工作区绝对路径",
+              description: "可选；省略时使用当前会话工作区",
             },
             command: { type: "string", description: "要运行的测试命令" },
             timeoutMs: {
@@ -592,13 +590,13 @@ function registerBuiltinTools(
               description: "可选超时时间，范围 1000-600000 ms，默认 120000 ms",
             },
           },
-          required: ["workspaceRoot", "command"],
+          required: ["command"],
         },
       },
     },
     async (args, executionOptions) =>
       runNativeTestCommand({
-        workspaceRoot: String(args.workspaceRoot ?? ""),
+        workspaceRoot: getWorkspaceRootArg(args, executionOptions?.runContext),
         command: String(args.command ?? ""),
         timeoutMs: optionalNumber(args.timeoutMs),
         signal: executionOptions?.signal,
@@ -1973,6 +1971,14 @@ function optionalNumber(value: unknown): number | undefined {
 
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : undefined;
+}
+
+function getWorkspaceRootArg(
+  args: Record<string, unknown>,
+  runContext: AgentRunContext | undefined,
+): string {
+  const explicit = String(args.workspaceRoot ?? "").trim();
+  return explicit || runContext?.workspaceRoot || "";
 }
 
 function buildShellErrorDetails(options: {

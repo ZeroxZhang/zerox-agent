@@ -1,4 +1,4 @@
-import type { ChatTaskStatusEvent } from "../shared/chat";
+import type { ChatSessionActivitySnapshot, ChatTaskStatusEvent } from "../shared/chat";
 import type { GoalStatus } from "../shared/agentGoal";
 import type { AgentWorkPhase } from "./agentWorkStatus";
 
@@ -28,6 +28,16 @@ export type TaskProcessItem = {
   message: string;
   time: string;
   meta?: string;
+};
+
+export type RestoredChatTaskActivity = {
+  status: {
+    kind: GoalUiStatusKind;
+    message: string;
+  };
+  workPhase: AgentWorkPhase;
+  taskActivity: TaskActivityState;
+  taskProcessEvents: ChatTaskStatusEvent[];
 };
 
 const staleStatusThresholdMs = 90_000;
@@ -222,8 +232,80 @@ export function buildTaskProcessItems(
   }));
 }
 
+export function restoreChatTaskActivity(
+  snapshot: ChatSessionActivitySnapshot | undefined,
+): RestoredChatTaskActivity | null {
+  if (!snapshot?.statusEvents.length) {
+    return null;
+  }
+
+  const events = snapshot.statusEvents;
+  const latestEvent = events[events.length - 1];
+  return {
+    status: {
+      kind: getChatStatusKindFromStatusEvent(latestEvent),
+      message: latestEvent.message,
+    },
+    workPhase: getWorkPhaseFromChatStatusEvent(latestEvent),
+    taskActivity: buildTaskActivityFromStatusEvent(latestEvent),
+    taskProcessEvents: events,
+  };
+}
+
+export function buildTaskActivityFromStatusEvent(
+  event: ChatTaskStatusEvent,
+): TaskActivityState {
+  const eventTime = parseEventTime(event.createdAt);
+  const startedAt = eventTime - event.elapsedMs;
+  const kind =
+    event.state === "paused"
+      ? "paused"
+      : event.state === "completed" || event.state === "canceled"
+        ? "done"
+        : event.state === "failed"
+          ? "error"
+          : "working";
+
+  return createTaskActivity({
+    kind,
+    title: getTaskActivityTitleFromStatusEvent(event),
+    detail: event.message,
+    now: eventTime,
+    startedAt,
+    lastEventAt: eventTime,
+    toolCallsExecuted: event.toolCallsExecuted,
+    maxTurns: event.maxTurns,
+  });
+}
+
+export function getChatStatusKindFromStatusEvent(
+  event: ChatTaskStatusEvent,
+): GoalUiStatusKind {
+  if (event.state === "paused") return "paused";
+  if (event.state === "failed") return "error";
+  if (event.state === "canceled") return "ready";
+  if (event.state === "completed") return "ready";
+  return "working";
+}
+
+export function getWorkPhaseFromChatStatusEvent(
+  event: ChatTaskStatusEvent,
+): AgentWorkPhase {
+  if (event.state === "started") return "planning";
+  if (event.state === "workspace") return "planning";
+  if (event.state === "skill") return "planning";
+  if (event.state === "memory") return "memory";
+  if (event.state === "model" || event.state === "reasoning") return "model";
+  if (event.state === "tool_call" || event.state === "tool_result") return "tool";
+  if (event.state === "paused") return "paused";
+  if (event.state === "failed") return "error";
+  return "done";
+}
+
 function getProcessLabel(event: ChatTaskStatusEvent): string {
   if (event.state === "started") return "启动";
+  if (event.state === "workspace") return "工作区";
+  if (event.state === "skill") return "技能";
   if (event.state === "memory") return "记忆";
   if (event.state === "model") return "模型";
   if (event.state === "reasoning") return "思考";
@@ -255,4 +337,24 @@ function formatEventTime(value: string): string {
     hour12: false,
     timeZone: "Asia/Shanghai",
   }).format(date);
+}
+
+function getTaskActivityTitleFromStatusEvent(event: ChatTaskStatusEvent): string {
+  if (event.state === "started") return "正在启动任务";
+  if (event.state === "workspace") return "正在确定工作区";
+  if (event.state === "skill") return "正在调用技能";
+  if (event.state === "memory") return "正在检索记忆";
+  if (event.state === "model") return "正在调用模型";
+  if (event.state === "reasoning") return "模型思考";
+  if (event.state === "tool_call") return "正在执行工具";
+  if (event.state === "tool_result") return "工具结果已返回";
+  if (event.state === "paused") return "长任务等待确认";
+  if (event.state === "canceled") return "任务已中断";
+  if (event.state === "completed") return "本轮已完成";
+  return "执行遇到问题";
+}
+
+function parseEventTime(value: string): number {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : Date.now();
 }

@@ -113,6 +113,77 @@ describe("chat session store", () => {
     await expect(reloaded.get("chat_1")).resolves.toEqual(assistantAppend.session);
   });
 
+  it("persists workspace identity and summary on chat sessions", async () => {
+    const store = createChatSessionStore({
+      configDir,
+      createId: createSequentialId("chat"),
+      now: createSteppedClock("2026-06-21T00:00:00.000Z"),
+    });
+
+    const created = await store.appendMessage({
+      role: "user",
+      content: "hello",
+      workspaceId: "workspace_building_agent",
+      workspaceSummary: {
+        name: "building agent",
+        rootPath: "/Volumes/Out/codex_projects/building agent",
+        kind: "default",
+        sandboxMode: "workspace-write",
+        branch: "codex/v2.5.0-workspace-skill-execution",
+      },
+    });
+
+    const reloaded = createChatSessionStore({ configDir });
+    const loaded = await reloaded.get(created.session.id);
+    expect(loaded?.workspaceId).toBe("workspace_building_agent");
+    expect(loaded?.workspaceSummary).toEqual({
+      name: "building agent",
+      rootPath: "/Volumes/Out/codex_projects/building agent",
+      kind: "default",
+      sandboxMode: "workspace-write",
+      branch: "codex/v2.5.0-workspace-skill-execution",
+    });
+    await expect(reloaded.list()).resolves.toEqual([
+      expect.objectContaining({
+        id: created.session.id,
+        workspaceId: "workspace_building_agent",
+        workspaceSummary: expect.objectContaining({
+          rootPath: "/Volumes/Out/codex_projects/building agent",
+        }),
+      }),
+    ]);
+  });
+
+  it("preserves prior workspace fields on follow-up messages", async () => {
+    const store = createChatSessionStore({
+      configDir,
+      createId: createSequentialId("chat"),
+      now: createSteppedClock("2026-06-21T00:00:00.000Z"),
+    });
+
+    const created = await store.appendMessage({
+      role: "user",
+      content: "inspect",
+      workspaceId: "workspace_building_agent",
+      workspaceSummary: {
+        name: "building agent",
+        rootPath: "/Volumes/Out/codex_projects/building agent",
+        kind: "default",
+        sandboxMode: "workspace-write",
+      },
+    });
+    const followUp = await store.appendMessage({
+      sessionId: created.session.id,
+      role: "assistant",
+      content: "done",
+    });
+
+    expect(followUp.session.workspaceId).toBe("workspace_building_agent");
+    expect(followUp.session.workspaceSummary?.rootPath).toBe(
+      "/Volumes/Out/codex_projects/building agent",
+    );
+  });
+
   it("lists sessions with last assistant response time and token usage", async () => {
     const store = createChatSessionStore({
       configDir,
@@ -148,6 +219,46 @@ describe("chat session store", () => {
         },
       }),
     ]);
+  });
+
+  it("persists rebuildable chat activity snapshots with a bounded event history", async () => {
+    const store = createChatSessionStore({
+      configDir,
+      createId: createSequentialId("chat"),
+      now: createSteppedClock("2026-06-20T08:00:00.000Z"),
+    });
+    const first = await store.appendMessage({
+      role: "user",
+      content: "使用 onepager 技能生成 onepage",
+    });
+
+    for (let index = 0; index < 82; index += 1) {
+      await store.appendActivityEvent(first.session.id, {
+        sessionId: first.session.id,
+        state: index === 0 ? "skill" : "model",
+        message: `状态 ${index}`,
+        createdAt: new Date(Date.UTC(2026, 5, 20, 8, 0, index)).toISOString(),
+        elapsedMs: index * 1000,
+        ...(index === 0 ? { selectedSkillName: "onepager" } : {}),
+      });
+    }
+
+    const reloaded = createChatSessionStore({ configDir });
+    const session = await reloaded.get(first.session.id);
+
+    expect(session?.activity).toMatchObject({
+      updatedAt: "2026-06-20T08:01:21.000Z",
+      selectedSkillName: "onepager",
+    });
+    expect(session?.activity?.statusEvents).toHaveLength(80);
+    expect(session?.activity?.statusEvents[0]).toMatchObject({
+      state: "model",
+      message: "状态 2",
+    });
+    expect(session?.activity?.statusEvents.at(-1)).toMatchObject({
+      state: "model",
+      message: "状态 81",
+    });
   });
 
   it("archives restores and deletes sessions without touching other sessions", async () => {
@@ -231,6 +342,38 @@ describe("chat session store", () => {
         lastAssistantMessageAt: "2026-06-18T08:00:00.000Z",
       },
     ]);
+  });
+
+  it("drops malformed persisted workspace summaries", async () => {
+    await writeFile(
+      path.join(configDir, "chat-sessions.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        sessions: [
+          {
+            id: "legacy",
+            title: "旧会话",
+            summary: "旧摘要",
+            messages: [],
+            workspaceId: 42,
+            workspaceSummary: {
+              name: "building agent",
+              rootPath: "",
+              kind: "default",
+              sandboxMode: "workspace-write",
+            },
+            createdAt: "2026-06-18T08:00:00.000Z",
+            updatedAt: "2026-06-18T08:00:00.000Z",
+          },
+        ],
+      }),
+      "utf8",
+    );
+    const store = createChatSessionStore({ configDir });
+
+    const loaded = await store.get("legacy");
+    expect(loaded?.workspaceId).toBe("42");
+    expect(loaded?.workspaceSummary).toBeUndefined();
   });
 
   it("serializes concurrent session mutations without dropping messages", async () => {

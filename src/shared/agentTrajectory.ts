@@ -13,6 +13,7 @@ export type AgentTrajectoryEventType =
   | "model_retry"
   | "model_response"
   | "model_reasoning"
+  | "skill_invoked"
   | "tool_call"
   | "tool_result"
   | "native_tool_invocation"

@@ -8,6 +8,7 @@ import type { ChatClient, ChatMessage, ChatCompletionResponse } from "./openAiCo
 import type { RunScheduledTaskResult } from "../shared/agentRuns";
 import type { MemoryInput, MemoryRecord, MemorySearchResult } from "../shared/memory";
 import type { ScheduledTask, ScheduledTaskInput } from "../shared/scheduledTasks";
+import type { SkillRecord } from "../shared/skills";
 import { getDefaultTaskPermissionPolicy } from "../shared/toolPermissions";
 import type {
   ChatSessionGoalSummary,
@@ -15,7 +16,14 @@ import type {
   ChatTaskStatusEvent,
 } from "../shared/chat";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
+import { buildPrimaryRunContext } from "../shared/agentWorkspace";
 import { defineNativeToolDescriptor } from "../shared/nativeCapabilities";
+import type {
+  WorkspaceRun,
+  WorkspaceRunEvent,
+  WorkspaceRunEventInput,
+  WorkspaceRunTerminalStatus,
+} from "../shared/workspaceRunLedger";
 
 function chatReply(content: string): ChatCompletionResponse {
   return { content, toolCalls: [], finishReason: "stop" };
@@ -809,6 +817,56 @@ describe("chat service", () => {
     );
   });
 
+  it("includes tool execution errors in task status events", async () => {
+    const statusEvents: ChatTaskStatusEvent[] = [];
+    const service = createChatService({
+      chatClient: {
+        async complete(request) {
+          if (request.tools && !request.messages.some((message) => message.role === "tool")) {
+            return toolCallResponse("call_missing", "/missing-path");
+          }
+
+          return chatReply("我会换一种路径继续。");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      toolExecutor: createToolExecutor({
+        ok: false,
+        error: "ENOENT: no such file or directory, scandir '/missing-path'",
+      }),
+      createId: () => "chat_tool_error_status",
+      now: () => new Date("2026-06-20T10:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage(
+      {
+        message: "检查一个不存在的路径",
+      },
+      {
+        onStatusEvent(event) {
+          statusEvents.push(event);
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      reply: expect.stringContaining("我会换一种路径继续。"),
+    });
+    expect(statusEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          state: "tool_result",
+          toolName: "file_list",
+          ok: false,
+          message:
+            "工具失败：file_list（ENOENT: no such file or directory, scandir '/missing-path'）",
+        }),
+      ]),
+    );
+  });
+
   it("emits trajectory evidence for chat tool runs", async () => {
     const trajectoryEvents: AgentTrajectoryEvent[] = [];
     const service = createChatService({
@@ -858,6 +916,152 @@ describe("chat service", () => {
     expect(trajectoryEvents.every((event) => event.runId === "chat_evidence_2")).toBe(
       true,
     );
+  });
+
+  it("resolves the selected workspace and passes run context into the agent loop", async () => {
+    const resolvedWorkspaces: unknown[] = [];
+    const chatMessages: AppendChatMessageInput[] = [];
+    const statusEvents: ChatTaskStatusEvent[] = [];
+    const workspaceRunCreates: unknown[] = [];
+    const workspaceRunEvents: WorkspaceRunEventInput[] = [];
+    const workspaceRunFinishes: Array<{
+      workspaceRunId: string;
+      status: WorkspaceRunTerminalStatus;
+      summary?: string;
+    }> = [];
+    let observedLoopOptions: unknown = null;
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore(chatMessages),
+      workspaceService: {
+        async resolveRunContext(input) {
+          resolvedWorkspaces.push(input);
+          return buildPrimaryRunContext({
+            workspaceId: "workspace_project",
+            workspaceRoot: "/workspace/project",
+          });
+        },
+      },
+      toolExecutor: createToolExecutor(),
+      workspaceRunStore: createMemoryWorkspaceRunStore({
+        creates: workspaceRunCreates,
+        events: workspaceRunEvents,
+        finishes: workspaceRunFinishes,
+      }),
+      async runAgentLoop(_messages, _profile, options) {
+        observedLoopOptions = options;
+        return {
+          status: "succeeded",
+          summary: "done",
+          turns: 1,
+          messages: [],
+          toolCallsExecuted: 0,
+        };
+      },
+      createId: () => "chat_workspace",
+      now: () => new Date("2026-06-21T08:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage(
+      {
+        sessionId: "chat_session_1",
+        requestId: "request_1",
+        message: "inspect project",
+        workspaceId: "workspace_project",
+      },
+      {
+        onStatusEvent(event) {
+          statusEvents.push(event);
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      reply: "done",
+      sessionId: "chat_session_1",
+    });
+    expect(resolvedWorkspaces).toEqual([{ workspaceId: "workspace_project" }]);
+    expect(chatMessages[0]).toMatchObject({
+      role: "user",
+      content: "inspect project",
+      workspaceId: "workspace_project",
+      workspaceSummary: {
+        name: "project",
+        rootPath: "/workspace/project",
+        kind: "project",
+        sandboxMode: "workspace_write",
+      },
+    });
+    expect(statusEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          state: "workspace",
+          workspaceId: "workspace_project",
+          workspaceSummary: expect.objectContaining({
+            rootPath: "/workspace/project",
+          }),
+        }),
+      ]),
+    );
+    expect(observedLoopOptions).toMatchObject({
+      taskId: "chat_chat_session_1_request_1",
+      runContext: {
+        workspaceId: "workspace_project",
+        workspaceRoot: "/workspace/project",
+        sessionId: "chat_session_1",
+      },
+      runtimeTask: {
+        name: "Chat task",
+        policyLabel: "chat workspace contract",
+        permissions: {
+          files: {
+            read: ["/workspace/project"],
+            write: ["/workspace/project"],
+          },
+          memory: {
+            read: true,
+            write: false,
+          },
+        },
+      },
+    });
+    expect(workspaceRunCreates).toEqual([
+      expect.objectContaining({
+        workspaceRunId: "chat_run_chat_session_1_request_1",
+        sessionId: "chat_session_1",
+        requestId: "request_1",
+        workspaceId: "workspace_project",
+        workspaceRoot: "/workspace/project",
+      }),
+    ]);
+    expect(workspaceRunEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "status",
+          status: "running",
+          message: "工作区：project",
+        }),
+        expect.objectContaining({
+          type: "status",
+          status: "succeeded",
+          message: "任务已完成",
+        }),
+      ]),
+    );
+    expect(workspaceRunFinishes).toEqual([
+      {
+        workspaceRunId: "chat_run_chat_session_1_request_1",
+        status: "succeeded",
+        summary: "任务已完成",
+      },
+    ]);
   });
 
   it("emits native trajectory evidence for chat tool runs", async () => {
@@ -1021,6 +1225,149 @@ describe("chat service", () => {
           message: "我正在比较用户目标与可用工具。",
         }),
       ]),
+    );
+  });
+
+  it("loads and enforces an explicitly selected agent skill in chat", async () => {
+    const capturedMessages: ChatMessage[][] = [];
+    const statusEvents: ChatTaskStatusEvent[] = [];
+    const trajectoryEvents: AgentTrajectoryEvent[] = [];
+    const service = createChatService({
+      chatClient: {
+        async complete(request) {
+          capturedMessages.push(request.messages);
+          return chatReply("OnePage 已按技能流程生成。");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      toolExecutor: createToolExecutor(),
+      discoverSkills: async () => ({
+        skills: [createSkillRecord({ name: "onepager", body: "Onepager 技能流程：必须先做内容架构分析。" })],
+        errors: [],
+      }),
+      trajectoryStore: createMemoryTrajectoryStore(trajectoryEvents),
+      createId: createSequentialId("skill_chat"),
+      now: createSteppedClock("2026-06-20T10:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage(
+      {
+        message: "给这个项目生成一张 OnePage",
+        selectedSkillName: "onepager",
+      },
+      { onStatusEvent: (event) => statusEvents.push(event) },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      selectedSkill: {
+        name: "onepager",
+        displayName: "onepager",
+      },
+    });
+    expect(capturedMessages.at(-1)?.map((message) => message.content).join("\n")).toContain(
+      "Onepager 技能流程：必须先做内容架构分析。",
+    );
+    expect(statusEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          state: "skill",
+          selectedSkillName: "onepager",
+          message: "正在调用技能：onepager",
+        }),
+      ]),
+    );
+    expect(trajectoryEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "skill_invoked",
+          payload: expect.objectContaining({ skillName: "onepager" }),
+        }),
+      ]),
+    );
+  });
+
+  it("uses the selected skill maxTurns budget for chat agent runs", async () => {
+    let observedMaxTurns: number | undefined;
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      toolExecutor: createToolExecutor(),
+      discoverSkills: async () => ({
+        skills: [
+          createSkillRecord({
+            name: "onepager",
+            manifest: {
+              execution: {
+                mode: "agent",
+                entrypoint: null,
+                maxTurns: 9,
+              },
+            },
+          }),
+        ],
+        errors: [],
+      }),
+      async runAgentLoop(_messages, _profile, options) {
+        observedMaxTurns = options.maxTurns;
+        return {
+          status: "succeeded",
+          summary: "done",
+          turns: 1,
+          messages: [],
+          toolCallsExecuted: 0,
+        };
+      },
+      agentLoopMaxTurns: 2,
+      createId: () => "skill_budget",
+      now: () => new Date("2026-06-20T10:00:00.000Z"),
+    });
+
+    await service.sendMessage({
+      message: "给这个项目生成一张 OnePage",
+      selectedSkillName: "onepager",
+    });
+
+    expect(observedMaxTurns).toBe(9);
+  });
+
+  it("detects a natural language skill request before falling back to task routing", async () => {
+    const capturedMessages: ChatMessage[][] = [];
+    const service = createChatService({
+      chatClient: {
+        async complete(request) {
+          capturedMessages.push(request.messages);
+          return chatReply("已按 onepager 技能执行。");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      toolExecutor: createToolExecutor(),
+      taskStore: createTaskStore([]),
+      discoverSkills: async () => ({
+        skills: [createSkillRecord({ name: "onepager", body: "Onepager 技能正文" })],
+        errors: [],
+      }),
+      createId: () => "skill_natural",
+      now: () => new Date("2026-06-20T10:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage({
+      message: "执行 onepager 技能，给这个项目生成一张图",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      selectedSkill: { name: "onepager" },
+    });
+    expect(capturedMessages.at(-1)?.map((message) => message.content).join("\n")).toContain(
+      "Onepager 技能正文",
     );
   });
 
@@ -1488,6 +1835,33 @@ function createTask(partial: Partial<ScheduledTask> = {}): ScheduledTask {
   };
 }
 
+function createSkillRecord(
+  partial: Partial<SkillRecord> & Pick<SkillRecord["manifest"], "name"> & { body?: string },
+): SkillRecord {
+  const name = partial.name;
+  return {
+    rootDir: `/tmp/skills/${name}`,
+    skillFile: `/tmp/skills/${name}/SKILL.md`,
+    body: partial.body ?? "Skill body",
+    manifest: {
+      name,
+      displayName: partial.manifest?.displayName ?? name,
+      description: partial.manifest?.description ?? `${name} description`,
+      version: partial.manifest?.version ?? "0.1.0",
+      execution: partial.manifest?.execution ?? {
+        mode: "agent",
+        entrypoint: null,
+      },
+      inputs: partial.manifest?.inputs ?? [],
+      permissions: partial.manifest?.permissions ?? getDefaultTaskPermissionPolicy(),
+      ...(partial.manifest?.planning ? { planning: partial.manifest.planning } : {}),
+      ...(partial.manifest?.tools ? { tools: partial.manifest.tools } : {}),
+      ...(partial.manifest?.mcpServers ? { mcpServers: partial.manifest.mcpServers } : {}),
+      ...(partial.manifest?.dependencies ? { dependencies: partial.manifest.dependencies } : {}),
+    },
+  };
+}
+
 function createToolExecutor(
   forcedResult?: Awaited<ReturnType<AgentToolExecutor["execute"]>>,
 ): AgentToolExecutor {
@@ -1525,6 +1899,81 @@ function createToolExecutor(
       return true;
     },
   } as AgentToolExecutor;
+}
+
+function createMemoryWorkspaceRunStore(options: {
+  creates: unknown[];
+  events: WorkspaceRunEventInput[];
+  finishes: Array<{
+    workspaceRunId: string;
+    status: WorkspaceRunTerminalStatus;
+    summary?: string;
+  }>;
+}) {
+  return {
+    async createRun(input: unknown): Promise<WorkspaceRun> {
+      options.creates.push(input);
+      const runInput = input as {
+        workspaceRunId: string;
+        sessionId: string;
+        requestId: string;
+        workspaceId?: string;
+        workspaceRoot?: string;
+        selectedSkillName?: string;
+        status?: WorkspaceRun["status"];
+        createdAt?: string;
+      };
+      return {
+        workspaceRunId: runInput.workspaceRunId,
+        sessionId: runInput.sessionId,
+        requestId: runInput.requestId,
+        ...(runInput.workspaceId ? { workspaceId: runInput.workspaceId } : {}),
+        ...(runInput.workspaceRoot ? { workspaceRoot: runInput.workspaceRoot } : {}),
+        ...(runInput.selectedSkillName
+          ? { selectedSkillName: runInput.selectedSkillName }
+          : {}),
+        status: runInput.status ?? "running",
+        createdAt: runInput.createdAt ?? "2026-06-21T08:00:00.000Z",
+        updatedAt: runInput.createdAt ?? "2026-06-21T08:00:00.000Z",
+      };
+    },
+    async appendEvent(
+      workspaceRunId: string,
+      event: WorkspaceRunEventInput,
+    ): Promise<WorkspaceRunEvent> {
+      options.events.push(event);
+      return {
+        ...event,
+        id: `event_${options.events.length}`,
+        workspaceRunId,
+        sessionId: "chat_session_1",
+        requestId: "request_1",
+        seq: options.events.length,
+        createdAt: event.createdAt ?? "2026-06-21T08:00:00.000Z",
+      } as WorkspaceRunEvent;
+    },
+    async finishRun(
+      workspaceRunId: string,
+      status: WorkspaceRunTerminalStatus,
+      summary?: string,
+    ): Promise<WorkspaceRun> {
+      options.finishes.push({
+        workspaceRunId,
+        status,
+        ...(summary ? { summary } : {}),
+      });
+      return {
+        workspaceRunId,
+        sessionId: "chat_session_1",
+        requestId: "request_1",
+        status,
+        ...(summary ? { summary } : {}),
+        createdAt: "2026-06-21T08:00:00.000Z",
+        updatedAt: "2026-06-21T08:00:01.000Z",
+        finishedAt: "2026-06-21T08:00:01.000Z",
+      };
+    },
+  };
 }
 
 function createMemoryTrajectoryStore(
