@@ -441,7 +441,7 @@ export function createAppContainer(options: {
 
   function agentValidationStore() {
     return lazy("agentValidationStore", () =>
-      createAgentValidationStore({ configDir }),
+      createAgentValidationStore({ configDir, backend: storageBackend(), storage: storage() ?? undefined }),
     );
   }
 

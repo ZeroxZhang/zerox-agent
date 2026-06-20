@@ -137,3 +137,19 @@ describe.each(["sqlite", "dual"] as StorageBackend[])(
     });
   },
 );
+
+describe.each(["sqlite", "dual"] as StorageBackend[])(
+  "agentValidationStore backend=%s",
+  (backend) => {
+    it("save/load singleton round-trip", async () => {
+      await withStorage(backend, async (dir, storage) => {
+        const { createAgentValidationStore } = await import("../agentValidationStore");
+        const store = createAgentValidationStore({ configDir: dir, backend, storage });
+        expect(await store.load()).toBeNull();
+        await store.save({ report: { ready: true, model: { ok: true, detail: "" }, skill: { ok: true, detail: "" }, task: { ok: true, detail: "", tasks: [] }, connection: { ok: true, detail: "" }, run: { ok: true, detail: "", run: undefined } } as never, validatedAt: "2026-06-19T00:00:00.000Z" });
+        const loaded = await store.load();
+        expect(loaded?.validatedAt).toBe("2026-06-19T00:00:00.000Z");
+      });
+    });
+  },
+);
