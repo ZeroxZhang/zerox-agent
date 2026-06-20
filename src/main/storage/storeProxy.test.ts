@@ -153,3 +153,24 @@ describe.each(["sqlite", "dual"] as StorageBackend[])(
     });
   },
 );
+
+describe.each(["sqlite", "dual"] as StorageBackend[])(
+  "memoryProfileStore backend=%s",
+  (backend) => {
+    it("save/read + updateFromMemories round-trip", async () => {
+      await withStorage(backend, async (dir, storage) => {
+        const { createMemoryProfileStore } = await import("../memoryProfileStore");
+        const store = createMemoryProfileStore({ configDir: dir, backend, storage, now: () => new Date("2026-06-19T00:00:00.000Z") });
+        expect((await store.read()).content).toBe("");
+        await store.save("## Preferences\n- [m1] likes dark mode");
+        const doc = await store.read();
+        expect(doc.content).toContain("dark mode");
+        await store.updateFromMemories([
+          { kind: "semantic", title: "pref", content: "likes Vim", tags: ["preference"], source: { type: "manual" }, importance: 3, id: "m2", createdAt: "2026-06-19T00:00:00.000Z", updatedAt: "2026-06-19T00:00:00.000Z" } as never,
+        ]);
+        const updated = await store.read();
+        expect(updated.content).toContain("Vim");
+      });
+    });
+  },
+);

@@ -518,7 +518,9 @@ export function createAppContainer(options: {
   }
 
   function memoryProfileStore() {
-    return lazy("memoryProfileStore", () => createMemoryProfileStore({ configDir }));
+    return lazy("memoryProfileStore", () =>
+      createMemoryProfileStore({ configDir, backend: storageBackend(), storage: storage() ?? undefined }),
+    );
   }
 
   function toolResultOffloadStore() {
