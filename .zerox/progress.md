@@ -3262,3 +3262,72 @@
   executor, MCP http/sse client staged, flag-gated runtime activation, 15-store
   cutover follow-up) — all spec-permitted fallbacks / staged cutovers.
 - Full review: iteration-roadmap/CONSISTENCY-REVIEW-IMPL.md (local, gitignored).
+
+## 2026-06-20 v2.4.1 session history management
+
+- Request:
+  - Ship v2.4.1 with managed historical chat sessions in the workspace sidebar:
+    per-session hover actions, delete, archive/restore, a collapsible archive
+    group, latest assistant-response time, and cumulative token usage.
+- Implementation:
+  - Added `archivedAt`, `lastAssistantMessageAt`, and cumulative `tokenUsage`
+    metadata to shared chat session list/record models.
+  - Extended `ChatSessionStore` with archive, restore, delete, and additive
+    token usage mutations, including legacy normalization.
+  - Surfaced provider token usage from OpenAI-compatible responses and recorded
+    provider or estimated turn usage from `ChatService`.
+  - Exposed `chatSessions:archive`, `chatSessions:restore`, and
+    `chatSessions:delete` through container, IPC, and preload.
+  - Reworked the workspace sidebar into managed history rows with hover menus,
+    latest-response time, cumulative token display, and a collapsible archive
+    group. Actual implementation follows the selected A information architecture
+    but uses the app's existing restrained shell instead of the rough mockup.
+  - Bumped package metadata and release docs to v2.4.1.
+- Changed files:
+  - `src/shared/chat.ts`
+  - `src/main/chatSessionStore.ts`
+  - `src/main/chatSessionStore.test.ts`
+  - `src/main/openAiCompatibleClient.ts`
+  - `src/main/openAiCompatibleClient.test.ts`
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+  - `src/main/container.ts`
+  - `src/main/ipc/index.ts`
+  - `src/preload/index.ts`
+  - `src/preload/index.test.ts`
+  - `src/renderer/App.tsx`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/styles/sidebar.css`
+  - `src/renderer/materialDesign.test.ts`
+  - `package.json`
+  - `package-lock.json`
+  - `README.md`
+  - `src/shared/packageScripts.test.ts`
+  - `src/shared/readme.test.ts`
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/main/chatSessionStore.test.ts` -> failed before store
+    operations existed (`addTokenUsage`/archive/delete metadata assertions).
+  - `npm test -- src/main/chatService.test.ts` -> failed because token usage
+    writes were not recorded.
+  - `npm test -- src/preload/index.test.ts` -> failed because archive/restore/
+    delete preload APIs were not exposed.
+  - `npm test -- src/renderer/materialDesign.test.ts` -> failed because the
+    managed history UI and operation channels were absent.
+- GREEN evidence:
+  - `npm test -- src/main/chatSessionStore.test.ts` -> 12 tests passed.
+  - `npm test -- src/main/openAiCompatibleClient.test.ts src/main/chatService.test.ts` -> 32 tests passed.
+  - `npm test -- src/preload/index.test.ts` -> 2 tests passed.
+  - `npm test -- src/renderer/materialDesign.test.ts` -> 32 tests passed.
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 10 tests passed.
+  - `npm run build` -> passed.
+  - Visual QA: Vite/Electron dev preview at `http://127.0.0.1:5173/#chat`
+    showed aligned sidebar rows, hidden hover actions, and a correctly placed
+    archive/delete menu.
+  - `npm run verify` -> 153 test files / 931 tests passed; agent eval 26/26;
+    memory eval 2/2.
+  - `npm run smoke:prod` -> passed; local `better-sqlite3` ABI mismatch fell
+    back to JSON through the existing storage fallback during smoke.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.

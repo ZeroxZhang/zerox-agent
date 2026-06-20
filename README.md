@@ -50,7 +50,7 @@
 
 <h2 id="overview-en">Overview</h2>
 
-**Zerox Agent** is a local-first desktop control plane for personal AI agents. The current release is **v2.4.0**. The name derives from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
+**Zerox Agent** is a local-first desktop control plane for personal AI agents. The current release is **v2.4.1**. The name derives from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
 
 It is not a chat wrapper or a generic hosted agent surface. It runs locally, configures OpenAI-compatible models, scans local `SKILL.md` skill files, executes recoverable agent runs, invokes permission-controlled tools, tracks parent/child multi-agent sessions, persists experiential knowledge into local long-term memory, and keeps learning user-reviewed before it changes future behavior.
 
@@ -68,6 +68,8 @@ v2.3.2 hardens Goal execution after live desktop testing. Goal runs now finish b
 
 v2.3.5 adds Run Graph Harness evidence across the shared model, Runs UI, and episode export path.
 v2.4.0 activates the iteration-roadmap P1–P8: a SQLite unified storage layer (better-sqlite3) with versioned migrations and dual-write migration, a provider abstraction with native Anthropic/Gemini + prompt-cache prefix reuse, tree-sitter-style shell analysis feeding both permission layers, a checkpoint-writer fork actor, an actor/workflow runtime (deep-research workflow), dream/distill self-improvement, and streaming tool-calling + max-mode + MCP multi-transport. runGraph gains actor/workflow/dream/distill/model_response nodes and token-cost aggregation. Runs now project runtime, trajectory, kernel, goal, milestone, tool, checkpoint, summary, and gate evidence into one stable graph; gate nodes are explicit and edge-safe; validation episodes export `run-graph.json` and `eval-candidate.json`; and `episode:export --latest-validation` packages the most recent local validation run for review.
+
+v2.4.1 adds managed chat history in the workspace sidebar: each session row shows the latest assistant-response time and cumulative token usage, hover actions expose archive/delete controls, and archived sessions are collected into a collapsible archive group while preserving restore and delete operations.
 
 v2.4.0 ships the iteration-roadmap P1–P8 activation (SQLite storage, provider abstraction, shell plan, checkpoint-writer fork agent, actor/workflow runtime, dream/distill self-improvement, streaming/max-mode/MCP) on top of the v2.3.6 deterministic local artifact goals with task-contract compilation, location/resource canonicalization for workspace and user-selected roots, native `chrome_bookmarks_read` execution, artifact provenance manifests, provenance-backed acceptance, and an independent packaged-app computer-use acceptance gate that passed against the local macOS package. The v2.3.6 distribution is versioned, packaged, and ready for GitHub Release handoff.
 
@@ -571,7 +573,7 @@ can't be opened." The image is usually valid; remove the quarantine attribute
 before opening:
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/"Zerox.Agent-2.4.0-arm64.dmg"
+xattr -dr com.apple.quarantine ~/Downloads/"Zerox.Agent-2.4.1-arm64.dmg"
 ```
 
 If you already dragged the app into Applications, run:
@@ -604,7 +606,7 @@ npm run verify        # Tests + build + deterministic eval
 
 As of v2.3.6, `npm run verify` covers the Vitest suite, the production build, agent evals, and memory evals. The suite currently includes 135 Vitest files / 767 tests, 26 deterministic agent eval fixtures, and 2 memory eval fixtures. Agent evals include native code engineering, research writing, reflection-after-test-failure, retry-budget exhaustion, context compaction, tool-call checkpointing, model retry, strategy-guard fragmentation recovery, episode eval-candidate, child handoff review-gate, goal-mode recovery/control, bounded-autonomy golden paths, Agent Runtime Kernel event replay, permission-rule behavior, and deterministic local artifact provenance acceptance. session-native Goal Mode architecture is documented in `docs/architecture/agent-goal-mode.md`, including the artifact evidence contract, and Agent Runtime Kernel architecture is documented in `docs/architecture/agent-runtime.md`, including the Kernel Event Bridge, checkpointed compaction, retry evidence, judge verdicts, event replay, and rule-based permission evidence. Set `BUILDING_AGENT_CONFIG_DIR=/path/to/config` when running `npm run eval:agent` or `npm run harness:score` to include local promoted fixtures and pending eval candidates from that config directory. `npm run episode:export` writes local evidence packages with `run-graph.json`, `eval-candidate.json`, `trajectory.jsonl`, and verification metadata; `--latest-validation` exports the run captured by `agent-validation.json`. `npm run harness:score` emits the seven-category ETCLOVG score used by Overview as a local quality signal and now includes adversarial eval, goal-mode pass rate, goal-judge pass rate, plus the ACI/context report; Overview also displays the native Agent Capability score.
 
-Deterministic local artifact goals are accepted only when the task contract, canonical destination, generated artifact, and provenance evidence agree. Location/resource canonicalization normalizes home-relative, workspace-relative, Desktop, Downloads, and absolute roots before sandbox and acceptance checks. Provenance-backed acceptance requires the artifact sidecar to match the run, goal, artifact id, canonical destination, and content hash. v2.4.0 passed the command-line verification gate and independent packaged-app computer-use acceptance; release metadata now matches the v2.4.0 distribution.
+Deterministic local artifact goals are accepted only when the task contract, canonical destination, generated artifact, and provenance evidence agree. Location/resource canonicalization normalizes home-relative, workspace-relative, Desktop, Downloads, and absolute roots before sandbox and acceptance checks. Provenance-backed acceptance requires the artifact sidecar to match the run, goal, artifact id, canonical destination, and content hash. v2.4.1 passed the command-line verification gate, production smoke, and harness check for the managed chat-history release; release metadata now matches the v2.4.1 app version.
 
 ### Test Coverage
 
@@ -616,7 +618,7 @@ Deterministic local artifact goals are accepted only when the task contract, can
 
 <h2 id="roadmap">Roadmap</h2>
 
-Current version: v2.4.0.
+Current version: v2.4.1.
 
 Recently shipped:
 
@@ -641,6 +643,8 @@ Recently shipped:
 - [x] v2.3.2 Goal result delivery, deterministic Chrome bookmark capability, atomic chat/goal JSON writes, and structured send-message errors
 - [x] v2.3.5 Run Graph Harness, explicit gate graph nodes, Runs graph visibility, typed episode `run-graph.json`, and latest-validation evidence export
 - [x] v2.3.6 deterministic local artifact path through P11.7: task contracts, canonical local resources, provenance-backed acceptance, deterministic native artifact pipeline, command-line verification, independent packaged-app computer-use acceptance, release metadata bump, and macOS distribution handoff
+- [x] v2.4.0 iteration-roadmap P1-P8 activation with unified storage, provider abstraction, actor/workflow runtime, dream/distill, streaming/max-mode/MCP, and token-aware runGraph evidence
+- [x] v2.4.1 managed chat history with archive/delete actions, collapsible archived sessions, latest-response time, and cumulative token usage in the workspace sidebar
 
 Planned:
 
@@ -677,7 +681,7 @@ Planned:
 
 ## 项目概述
 
-**Zerox Agent** 是一个本地优先的桌面智能体控制台，当前版本是 **v2.4.0**。名字取自 **Zero + X**——从留白开始，把未知的本地工作流转成可观察、受权限管控、可恢复的 Agent 运行。
+**Zerox Agent** 是一个本地优先的桌面智能体控制台，当前版本是 **v2.4.1**。名字取自 **Zero + X**——从留白开始，把未知的本地工作流转成可观察、受权限管控、可恢复的 Agent 运行。
 
 它不是聊天壳，也不是泛用云端 Agent 入口。它运行在本机：配置 OpenAI‑compatible 模型、扫描本地 `SKILL.md` 技能文件、执行可恢复的 Agent 运行、调用受权限管控的工具、跟踪父子多 Agent 会话、把经验和知识写入本地长期记忆，并且在改变未来行为前保留用户审核。
 
@@ -695,6 +699,8 @@ v2.3.2 基于真实桌面测试继续加固 Goal 执行：Goal 完成后会把�
 
 v2.3.5 新增 Run Graph Harness 证据链，贯穿共享模型、Runs 面板和 episode 导出路径。
 v2.4.0 激活 iteration-roadmap P1–P8：SQLite 统一存储层（better-sqlite3，版本化 migration + dual-write 迁移）、provider 抽象（原生 Anthropic/Gemini + prompt-cache 前缀复用）、tree-sitter 风格 shell 解析接入两层权限、checkpoint-writer fork actor、actor/workflow 运行时（含 deep-research workflow）、dream/distill 自我改进、流式 tool-calling + max-mode + MCP 多 transport。runGraph 新增 actor/workflow/dream/distill/model_response 节点与 token 成本聚合。Runs 会把 runtime、trajectory、kernel、goal、milestone、tool、checkpoint、summary 和 gate 证据投影成一个稳定图；Gate 作为显式节点参与边完整性校验；验收 episode 会导出 `run-graph.json` 与 `eval-candidate.json`；`episode:export --latest-validation` 可以直接打包最近一次本地验收运行。
+
+v2.4.1 新增历史会话管理：工作区侧栏会在每个会话行显示最新 Assistant 响应时间和累计 token 消耗，鼠标悬停后露出归档/删除操作，被归档的会话统一收纳进可折叠归档组，并保留恢复与删除能力。
 
 v2.4.0 在 v2.3.6 确定性本地 artifact 目标能力之上，落地 iteration-roadmap P1–P8 激活（SQLite 存储、provider 抽象、shell plan、checkpoint-writer fork agent、actor/workflow 运行时、dream/distill 自我改进、流式/max-mode/MCP），覆盖 task contract 编译、workspace 与用户选择目录的 location/resource canonicalization、原生 `chrome_bookmarks_read` 执行、artifact provenance manifest、provenance-backed acceptance，并且独立 packaged-app computer-use acceptance 已经针对本地 macOS 包通过。v2.3.6 分发包已经完成版本号、打包和 GitHub Release 交接准备。
 
@@ -1301,7 +1307,7 @@ Gatekeeper 可能提示「Zerox Agent 已损坏，无法打开」。这通常不
 而是下载隔离属性导致的拦截。打开前在终端执行：
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/"Zerox.Agent-2.4.0-arm64.dmg"
+xattr -dr com.apple.quarantine ~/Downloads/"Zerox.Agent-2.4.1-arm64.dmg"
 ```
 
 如果已经把应用拖进 Applications，则执行：
@@ -1346,7 +1352,7 @@ npm run verify        # 测试 + 构建 + 确定性评测
 
 使用 `BUILDING_AGENT_CONFIG_DIR=/path/to/config` 运行 `npm run eval:agent` 或 `npm run harness:score` 时，会加载该配置目录里的本地 promoted fixture 和 pending eval candidate。`npm run episode:export` 会导出包含 `run-graph.json`、`eval-candidate.json`、`trajectory.jsonl` 和 verification metadata 的本地证据包；`--latest-validation` 会导出 `agent-validation.json` 记录的最近验收运行。`npm run harness:score` 输出与 Overview 面板一致的七类 ETCLOVG harness score，并纳入 adversarial eval、goal-mode pass rate、goal-judge pass rate 与 ACI/context report，便于发布前判断执行环境、工具接口、上下文、生命周期、可观测、验证和治理是否仍然健康。Overview 也会显示 Native Agent Capability 分数。
 
-确定性本地 artifact 目标只有在 task contract、canonical destination、生成的 artifact 和 provenance evidence 相互匹配时才会通过验收。Location/resource canonicalization 会在 sandbox 和 acceptance check 前规范化 `~`、workspace-relative、Desktop、Downloads 和绝对路径。Provenance-backed acceptance 要求 sidecar 中的 run、goal、artifact id、canonical destination 和 content hash 与实际文件一致。v2.4.0 已通过命令行验证 gate 和独立 packaged-app computer-use acceptance；release metadata 现在已经匹配 v2.4.0 分发版本。
+确定性本地 artifact 目标只有在 task contract、canonical destination、生成的 artifact 和 provenance evidence 相互匹配时才会通过验收。Location/resource canonicalization 会在 sandbox 和 acceptance check 前规范化 `~`、workspace-relative、Desktop、Downloads 和绝对路径。Provenance-backed acceptance 要求 sidecar 中的 run、goal、artifact id、canonical destination 和 content hash 与实际文件一致。v2.4.1 已通过命令行验证 gate、生产冒烟和 harness check；release metadata 现在已经匹配 v2.4.1 应用版本。
 
 ### 测试覆盖
 
@@ -1358,7 +1364,7 @@ npm run verify        # 测试 + 构建 + 确定性评测
 
 ## 路线图
 
-当前版本：v2.4.0。
+当前版本：v2.4.1。
 
 近期已完成：
 
@@ -1383,6 +1389,8 @@ npm run verify        # 测试 + 构建 + 确定性评测
 - [x] v2.3.2 Goal 结果回填、确定性 Chrome 书签能力、会话/目标 JSON 原子写入和结构化发送错误
 - [x] v2.3.5 Run Graph Harness、显式 Gate 图节点、Runs 图可视化、typed episode `run-graph.json` 和最近验收证据导出
 - [x] v2.3.6 P11.7 确定性本地 artifact 路径：task contract、canonical local resource、provenance-backed acceptance、原生确定性 artifact pipeline、命令行验证、独立 packaged-app computer-use acceptance、release metadata bump 和 macOS 分发交接
+- [x] v2.4.0 iteration-roadmap P1-P8 激活：统一存储、provider 抽象、actor/workflow 运行时、dream/distill、streaming/max-mode/MCP 和 token-aware runGraph 证据
+- [x] v2.4.1 历史会话管理：归档/删除操作、可折叠归档组、最新响应时间和工作区侧栏累计 token 显示
 
 后续计划：
 

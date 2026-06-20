@@ -1264,6 +1264,54 @@
         "npm run harness:check green",
         "package version bumped to 2.4.0; GitHub Release v2.4.0"
       ]
+    },
+    {
+      "id": "P12.1-session-history-management-2.4.1",
+      "status": "done",
+      "title": "v2.4.1 session history management",
+      "files": [
+        "src/shared/chat.ts",
+        "src/main/chatSessionStore.ts",
+        "src/main/chatSessionStore.test.ts",
+        "src/main/openAiCompatibleClient.ts",
+        "src/main/openAiCompatibleClient.test.ts",
+        "src/main/chatService.ts",
+        "src/main/chatService.test.ts",
+        "src/main/container.ts",
+        "src/main/ipc/index.ts",
+        "src/preload/index.ts",
+        "src/preload/index.test.ts",
+        "src/renderer/App.tsx",
+        "src/renderer/components/AgentChatPanel.tsx",
+        "src/renderer/styles/sidebar.css",
+        "src/renderer/materialDesign.test.ts",
+        "package.json",
+        "package-lock.json",
+        "README.md",
+        "src/shared/packageScripts.test.ts",
+        "src/shared/readme.test.ts",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md"
+      ],
+      "definitionOfDone": [
+        "Chat sessions support archive/delete session actions with restore for archived sessions",
+        "Archived sessions are grouped under a collapsible archive session structure in the workspace sidebar",
+        "Each sidebar session row shows latest assistant-response time and cumulative token usage",
+        "Provider token usage is accumulated when available; sessions store an estimated fallback when providers omit usage",
+        "package version bumped to 2.4.1 and release documentation reflects v2.4.1"
+      ],
+      "verification": [
+        "npm test -- src/main/chatSessionStore.test.ts",
+        "npm test -- src/main/openAiCompatibleClient.test.ts src/main/chatService.test.ts",
+        "npm test -- src/preload/index.test.ts",
+        "npm test -- src/renderer/materialDesign.test.ts",
+        "npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "git diff --check"
+      ]
     }
   ]
 }
