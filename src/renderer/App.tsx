@@ -34,27 +34,30 @@ import {
 const fallbackMeta = getAppMeta();
 const fallbackSections = getNavigationSections();
 const fallbackAppVersion = "preview";
+const fallbackSessionTimestamp = new Date().toISOString();
 const fallbackChatSessions: ChatSessionListItem[] = [
   {
     id: "main",
     title: "当前会话",
     summary: "直接发指令给本地智能体",
     messageCount: 0,
-    updatedAt: new Date(0).toISOString(),
+    updatedAt: fallbackSessionTimestamp,
   },
   {
     id: "files",
     title: "文件整理会话",
     summary: "整理下载目录并写报告",
     messageCount: 2,
-    updatedAt: new Date(0).toISOString(),
+    tokenUsage: { totalTokens: 1280, estimated: true },
+    updatedAt: fallbackSessionTimestamp,
   },
   {
     id: "research",
     title: "资料调研会话",
     summary: "搜索、抓取、总结网页",
     messageCount: 2,
-    updatedAt: new Date(0).toISOString(),
+    tokenUsage: { totalTokens: 2430, estimated: true },
+    updatedAt: fallbackSessionTimestamp,
   },
 ];
 
@@ -90,6 +93,9 @@ export function App() {
   const [selectedChatSessionId, setSelectedChatSessionId] =
     useState<string | null>(null);
   const [newChatRequestKey, setNewChatRequestKey] = useState(0);
+  const [openChatSessionMenuId, setOpenChatSessionMenuId] =
+    useState<string | null>(null);
+  const [archiveGroupOpen, setArchiveGroupOpen] = useState(false);
 
   function navigateTo(sectionId: NavigationSectionId) {
     const settingsSection = getSettingsNavigationSections().find(
@@ -122,9 +128,7 @@ export function App() {
         setSections(fallbackSections);
       });
     window.buildingAgent?.listChatSessions().then((loadedSessions) => {
-      if (loadedSessions.length) {
-        setChatSessions(loadedSessions);
-      }
+      setChatSessions(loadedSessions);
     }).catch(() => {
       setChatSessions(fallbackChatSessions);
     });
@@ -160,15 +164,103 @@ export function App() {
   }
 
   function onSelectChatSession(sessionId: string) {
+    setOpenChatSessionMenuId(null);
     setSelectedChatSessionId(sessionId);
     navigateTo("chat");
   }
 
   const handleChatSessionsChange = useCallback((sessions: ChatSidebarSession[]) => {
-    if (sessions.length) {
-      setChatSessions(sessions.map(toChatSessionListItem));
-    }
+    setChatSessions(sessions.map(toChatSessionListItem));
   }, []);
+
+  async function refreshChatSessions() {
+    if (!window.buildingAgent) {
+      return;
+    }
+
+    const loadedSessions = await window.buildingAgent.listChatSessions();
+    setChatSessions(loadedSessions);
+  }
+
+  async function handleArchiveChatSession(session: ChatSessionListItem) {
+    setOpenChatSessionMenuId(null);
+    if (!window.buildingAgent) {
+      const archivedAt = new Date().toISOString();
+      setChatSessions((currentSessions) =>
+        currentSessions.map((currentSession) =>
+          currentSession.id === session.id
+            ? { ...currentSession, archivedAt }
+            : currentSession,
+        ),
+      );
+      setArchiveGroupOpen(true);
+      return;
+    }
+
+    const result = await window.buildingAgent.archiveChatSession(session.id);
+    if (!result.ok) {
+      window.alert(result.message);
+      return;
+    }
+    setArchiveGroupOpen(true);
+    await refreshChatSessions();
+  }
+
+  async function handleRestoreChatSession(session: ChatSessionListItem) {
+    setOpenChatSessionMenuId(null);
+    if (!window.buildingAgent) {
+      setChatSessions((currentSessions) =>
+        currentSessions.map((currentSession) => {
+          if (currentSession.id !== session.id) {
+            return currentSession;
+          }
+          const { archivedAt: _archivedAt, ...restoredSession } = currentSession;
+          return restoredSession;
+        }),
+      );
+      return;
+    }
+
+    const result = await window.buildingAgent.restoreChatSession(session.id);
+    if (!result.ok) {
+      window.alert(result.message);
+      return;
+    }
+    await refreshChatSessions();
+  }
+
+  async function handleDeleteChatSession(session: ChatSessionListItem) {
+    setOpenChatSessionMenuId(null);
+    if (!window.confirm(`删除会话“${session.title}”？这不会删除已产生的运行日志。`)) {
+      return;
+    }
+
+    if (!window.buildingAgent) {
+      setChatSessions((currentSessions) =>
+        currentSessions.filter((currentSession) => currentSession.id !== session.id),
+      );
+      if (selectedChatSessionId === session.id) {
+        setSelectedChatSessionId(null);
+        setNewChatRequestKey((current) => current + 1);
+      }
+      return;
+    }
+
+    const result = await window.buildingAgent.deleteChatSession(session.id);
+    if (!result.ok) {
+      window.alert(result.message);
+      return;
+    }
+    if (selectedChatSessionId === session.id) {
+      setSelectedChatSessionId(null);
+      setNewChatRequestKey((current) => current + 1);
+    }
+    await refreshChatSessions();
+  }
+
+  const activeChatSessions = chatSessions.filter((session) => !session.archivedAt);
+  const archivedChatSessions = chatSessions.filter((session) => session.archivedAt);
+  const latestArchivedSession = archivedChatSessions[0] ?? null;
 
   return (
     <main
@@ -234,24 +326,81 @@ export function App() {
         <section className="sidebar-section sidebar-recents" aria-label="最近会话">
           <p className="sidebar-section-title">Recents</p>
           <div className="sidebar-session-list">
-            {chatSessions.slice(0, 8).map((session) => (
-              <button
-                className={`sidebar-session-item ${
-                  session.id === selectedChatSessionId ? "is-active" : ""
-                }`}
-                key={session.id}
-                type="button"
-                onClick={() => onSelectChatSession(session.id)}
-              >
-                <strong>{session.title}</strong>
-                <small>{session.summary || `${session.messageCount} 条消息`}</small>
-                {session.activeGoal ? (
-                  <span className={`goal-session-badge is-${session.activeGoal.status}`}>
-                    {translateSidebarGoalStatus(session.activeGoal.status)}
+            {activeChatSessions.length ? (
+              activeChatSessions.map((session) => (
+                <SidebarSessionRow
+                  key={session.id}
+                  session={session}
+                  isActive={session.id === selectedChatSessionId}
+                  menuOpen={openChatSessionMenuId === session.id}
+                  onSelect={onSelectChatSession}
+                  onToggleMenu={(sessionId) =>
+                    setOpenChatSessionMenuId((current) =>
+                      current === sessionId ? null : sessionId,
+                    )
+                  }
+                  onArchive={handleArchiveChatSession}
+                  onRestore={handleRestoreChatSession}
+                  onDelete={handleDeleteChatSession}
+                />
+              ))
+            ) : (
+              <p className="sidebar-empty-state">暂无会话</p>
+            )}
+            {archivedChatSessions.length ? (
+              <div className="sidebar-archive-group">
+                <button
+                  className={`sidebar-session-item sidebar-archive-toggle ${
+                    archiveGroupOpen ? "is-open" : ""
+                  }`}
+                  type="button"
+                  aria-expanded={archiveGroupOpen}
+                  onClick={() => setArchiveGroupOpen((open) => !open)}
+                >
+                  <span className="sidebar-session-main">
+                    <span className="sidebar-session-title-line">
+                      <strong>归档会话</strong>
+                      <span className="sidebar-session-time">
+                        {latestArchivedSession
+                          ? formatSessionRelativeTime(
+                              latestArchivedSession.archivedAt ??
+                                latestArchivedSession.updatedAt,
+                            )
+                          : ""}
+                      </span>
+                    </span>
+                    <small>{archivedChatSessions.length} 个会话已收纳</small>
+                    <span className="sidebar-session-meta">
+                      <span className="sidebar-session-message-count">归档组</span>
+                      <span className="sidebar-session-token">
+                        {formatTokenUsage(sumArchivedTokenUsage(archivedChatSessions))}
+                      </span>
+                    </span>
                   </span>
+                </button>
+                {archiveGroupOpen ? (
+                  <div className="sidebar-archive-list">
+                    {archivedChatSessions.map((session) => (
+                      <SidebarSessionRow
+                        key={session.id}
+                        session={session}
+                        isActive={session.id === selectedChatSessionId}
+                        menuOpen={openChatSessionMenuId === session.id}
+                        onSelect={onSelectChatSession}
+                        onToggleMenu={(sessionId) =>
+                          setOpenChatSessionMenuId((current) =>
+                            current === sessionId ? null : sessionId,
+                          )
+                        }
+                        onArchive={handleArchiveChatSession}
+                        onRestore={handleRestoreChatSession}
+                        onDelete={handleDeleteChatSession}
+                      />
+                    ))}
+                  </div>
                 ) : null}
-              </button>
-            ))}
+              </div>
+            ) : null}
           </div>
         </section>
         <div className="nav-footer">
@@ -340,6 +489,101 @@ function SettingsSectionShell(props: {
   );
 }
 
+function SidebarSessionRow(props: {
+  session: ChatSessionListItem;
+  isActive: boolean;
+  menuOpen: boolean;
+  onSelect: (sessionId: string) => void;
+  onToggleMenu: (sessionId: string) => void;
+  onArchive: (session: ChatSessionListItem) => void;
+  onRestore: (session: ChatSessionListItem) => void;
+  onDelete: (session: ChatSessionListItem) => void;
+}) {
+  const { session } = props;
+  const isArchived = Boolean(session.archivedAt);
+
+  return (
+    <div
+      className={`sidebar-session-row ${props.isActive ? "is-active" : ""} ${
+        props.menuOpen ? "has-open-menu" : ""
+      } ${isArchived ? "is-archived" : ""}`}
+    >
+      <button
+        className={`sidebar-session-item ${props.isActive ? "is-active" : ""}`}
+        type="button"
+        onClick={() => props.onSelect(session.id)}
+      >
+        <span className="sidebar-session-main">
+          <span className="sidebar-session-title-line">
+            <strong>{session.title}</strong>
+            <span className="sidebar-session-time">
+              {formatSessionRelativeTime(
+                session.lastAssistantMessageAt ?? session.updatedAt,
+              )}
+            </span>
+          </span>
+          <small>{session.summary || `${session.messageCount} 条消息`}</small>
+          <span className="sidebar-session-meta">
+            <span className="sidebar-session-message-count">
+              {session.messageCount} 条消息
+            </span>
+            <span className="sidebar-session-token">
+              {formatTokenUsage(session.tokenUsage)}
+            </span>
+          </span>
+          {session.activeGoal ? (
+            <span className={`goal-session-badge is-${session.activeGoal.status}`}>
+              {translateSidebarGoalStatus(session.activeGoal.status)}
+            </span>
+          ) : null}
+        </span>
+      </button>
+      <button
+        className="sidebar-session-actions"
+        type="button"
+        aria-label={`打开 ${session.title} 的会话操作`}
+        aria-haspopup="menu"
+        aria-expanded={props.menuOpen}
+        onClick={(event) => {
+          event.stopPropagation();
+          props.onToggleMenu(session.id);
+        }}
+      >
+        <span aria-hidden="true">⋯</span>
+      </button>
+      {props.menuOpen ? (
+        <div className="sidebar-session-menu" role="menu">
+          {isArchived ? (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => props.onRestore(session)}
+            >
+              恢复
+            </button>
+          ) : (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => props.onArchive(session)}
+            >
+              归档
+            </button>
+          )}
+          <button
+            className="is-danger"
+            type="button"
+            role="menuitem"
+            onClick={() => props.onDelete(session)}
+          >
+            删除
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function toChatSessionListItem(session: ChatSidebarSession): ChatSessionListItem {
   return {
     id: session.id,
@@ -347,8 +591,80 @@ function toChatSessionListItem(session: ChatSidebarSession): ChatSessionListItem
     summary: session.summary,
     messageCount: session.messageCount ?? 0,
     ...(session.activeGoal ? { activeGoal: session.activeGoal } : {}),
-    updatedAt: new Date(0).toISOString(),
+    ...(session.archivedAt ? { archivedAt: session.archivedAt } : {}),
+    ...(session.lastAssistantMessageAt
+      ? { lastAssistantMessageAt: session.lastAssistantMessageAt }
+      : {}),
+    ...(session.tokenUsage ? { tokenUsage: session.tokenUsage } : {}),
+    updatedAt: session.updatedAt,
   };
+}
+
+function formatSessionRelativeTime(value: string): string {
+  const timestamp = new Date(value).getTime();
+  if (!Number.isFinite(timestamp)) {
+    return "未知";
+  }
+
+  const diffMs = Math.max(0, Date.now() - timestamp);
+  const minuteMs = 60_000;
+  const hourMs = minuteMs * 60;
+  const dayMs = hourMs * 24;
+  if (diffMs < minuteMs) {
+    return "刚刚";
+  }
+  if (diffMs < hourMs) {
+    return `${Math.max(1, Math.floor(diffMs / minuteMs))} 分钟`;
+  }
+  if (diffMs < dayMs) {
+    return `${Math.max(1, Math.floor(diffMs / hourMs))} 小时`;
+  }
+  if (diffMs < dayMs * 7) {
+    return `${Math.max(1, Math.floor(diffMs / dayMs))} 天`;
+  }
+  if (diffMs < dayMs * 35) {
+    return `${Math.max(1, Math.floor(diffMs / (dayMs * 7)))} 周`;
+  }
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+  }).format(timestamp);
+}
+
+function formatTokenUsage(
+  usage: ChatSessionListItem["tokenUsage"] | undefined,
+): string {
+  const totalTokens = usage?.totalTokens ?? 0;
+  const prefix = usage?.estimated ? "~" : "";
+  if (totalTokens >= 1_000_000) {
+    return `${prefix}${trimFixed(totalTokens / 1_000_000, 1)}m tok`;
+  }
+  if (totalTokens >= 1_000) {
+    return `${prefix}${trimFixed(totalTokens / 1_000, totalTokens >= 10_000 ? 0 : 1)}k tok`;
+  }
+  return `${prefix}${totalTokens} tok`;
+}
+
+function sumArchivedTokenUsage(
+  sessions: ChatSessionListItem[],
+): ChatSessionListItem["tokenUsage"] | undefined {
+  const usages = sessions
+    .map((session) => session.tokenUsage)
+    .filter((usage): usage is NonNullable<ChatSessionListItem["tokenUsage"]> =>
+      Boolean(usage),
+    );
+  if (!usages.length) {
+    return undefined;
+  }
+
+  return {
+    totalTokens: usages.reduce((total, usage) => total + usage.totalTokens, 0),
+    estimated: usages.some((usage) => usage.estimated),
+  };
+}
+
+function trimFixed(value: number, digits: number): string {
+  return value.toFixed(digits).replace(/\.0$/, "");
 }
 
 function translateSidebarGoalStatus(

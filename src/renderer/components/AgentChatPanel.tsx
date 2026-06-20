@@ -96,7 +96,10 @@ type ChatSession = {
   summary: string;
   activeGoal?: ChatSessionGoalSummary;
   messageCount?: number;
-};
+} & Pick<
+  ChatSessionListItem,
+  "updatedAt" | "archivedAt" | "lastAssistantMessageAt" | "tokenUsage"
+>;
 
 export type ChatSidebarSession = ChatSession;
 
@@ -115,16 +118,24 @@ const fallbackSessions: ChatSession[] = [
     id: "main",
     title: "当前会话",
     summary: "直接发指令给本地智能体",
+    messageCount: 0,
+    updatedAt: new Date().toISOString(),
   },
   {
     id: "files",
     title: "文件整理会话",
     summary: "整理下载目录并写报告",
+    messageCount: 2,
+    updatedAt: new Date().toISOString(),
+    tokenUsage: { totalTokens: 1280, estimated: true },
   },
   {
     id: "research",
     title: "资料调研会话",
     summary: "搜索、抓取、总结网页",
+    messageCount: 2,
+    updatedAt: new Date().toISOString(),
+    tokenUsage: { totalTokens: 2430, estimated: true },
   },
 ];
 const composerCommandItems: ComposerCommandItem[] = [
@@ -2278,6 +2289,12 @@ function toSessionRailItem(session: ChatSessionListItem): ChatSession {
     summary: session.summary || `${session.messageCount} 条消息`,
     messageCount: session.messageCount,
     ...(session.activeGoal ? { activeGoal: session.activeGoal } : {}),
+    ...(session.archivedAt ? { archivedAt: session.archivedAt } : {}),
+    ...(session.lastAssistantMessageAt
+      ? { lastAssistantMessageAt: session.lastAssistantMessageAt }
+      : {}),
+    ...(session.tokenUsage ? { tokenUsage: session.tokenUsage } : {}),
+    updatedAt: session.updatedAt,
   };
 }
 

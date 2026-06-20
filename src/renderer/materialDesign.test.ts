@@ -133,6 +133,21 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".sidebar-session-item");
   });
 
+  it("surfaces managed chat history with archive, delete, time and token metadata", () => {
+    expect(appSource).toContain("archiveChatSession");
+    expect(appSource).toContain("restoreChatSession");
+    expect(appSource).toContain("deleteChatSession");
+    expect(appSource).toContain("sidebar-archive-group");
+    expect(appSource).toContain("sidebar-session-actions");
+    expect(appSource).toContain("sidebar-session-meta");
+    expect(appSource).toContain("formatSessionRelativeTime");
+    expect(appSource).toContain("formatTokenUsage");
+    expect(styles).toContain(".sidebar-archive-group");
+    expect(styles).toContain(".sidebar-session-actions");
+    expect(styles).toContain(".sidebar-session-menu");
+    expect(styles).toContain(".sidebar-session-token");
+  });
+
   it("keeps a draggable window strip visible on the chat-first desktop shell", () => {
     expect(appSource).toContain("window-drag-strip");
     expect(styles).toContain(".window-drag-strip");
