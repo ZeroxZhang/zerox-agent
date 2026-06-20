@@ -75,10 +75,10 @@ abort the overall run.
 
 ## Native module note
 
-`better-sqlite3` is a native module. For the Electron runtime, rebuild against
-the Electron ABI (`@electron/rebuild`) and set `electron-builder.yml:
-npmRebuild: true` before packaging (`dist:mac`). Under vitest/Node the prebuilt
-binary is used directly. The FTS5 compile option is self-checked at startup.
+`better-sqlite3` is a native module. For the Electron runtime,
+`scripts/package-mac.mjs` rebuilds it against the Electron ABI before packaging
+and restores the Node ABI afterward. Under vitest/Node the restored Node binary
+is used directly. The FTS5 compile option is self-checked at startup.
 
 ## Native-module ABI swap caveat
 
@@ -86,9 +86,9 @@ binary is used directly. The FTS5 compile option is self-checked at startup.
 - **Node ABI** — used by `npm test` / vitest.
 - **Electron ABI** — used by `electron .` and the packaged app.
 
-`npm run dist:mac` (with `npmRebuild: true`) rebuilds better-sqlite3 against the
-**Electron** ABI. After running `dist:mac`, run `npm rebuild better-sqlite3`
-before `npm test` to restore the Node ABI (or tests will fail to load the
-module). The container's fault-tolerant `storage()` singleton falls back to the
-JSON backend if the native module fails to load, so the app still starts — but
-the SQLite path is the production target.
+`npm run dist:mac` and `npm run pack:mac` rebuild better-sqlite3 against the
+**Electron** ABI before invoking electron-builder, then run
+`npm rebuild better-sqlite3` to restore the **Node** ABI for local tests. The
+container's fault-tolerant `storage()` singleton falls back to the JSON backend
+if the native module fails to load, so the app still starts, but the SQLite path
+is the production target.

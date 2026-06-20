@@ -21,8 +21,8 @@
     "harness:check": "node scripts/check-harness-state.mjs",
     "harness:score": "npm run build && node scripts/run-harness-score.mjs",
     "episode:export": "npm run build && node scripts/export-agent-episode.mjs",
-    "pack:mac": "npm run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --dir",
-    "dist:mac": "npm run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg zip",
+    "pack:mac": "node scripts/package-mac.mjs --dir",
+    "dist:mac": "node scripts/package-mac.mjs dmg zip",
     "clean": "rm -rf dist dist-electron",
     "test": "vitest run",
     "test:watch": "vitest"

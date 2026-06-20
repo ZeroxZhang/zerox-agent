@@ -1,9 +1,9 @@
 appId: local.zerox.agent.desktop
 productName: Zerox Agent
 asar: true
-# P1: rebuild native modules (better-sqlite3) against the Electron ABI so the
-# packaged app can use the SQLite storage backend. Unpacked for native .node.
-npmRebuild: true
+# Native modules are rebuilt explicitly by scripts/package-mac.mjs before
+# packaging, then restored to the Node ABI for local tests.
+npmRebuild: false
 asarUnpack:
   - "**/node_modules/better-sqlite3/**/*"
 directories:

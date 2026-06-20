@@ -114,10 +114,8 @@ describe("package scripts", () => {
     ) as PackageJson;
 
     expect(packageJson.scripts).toMatchObject({
-      "pack:mac":
-        "npm run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --dir",
-      "dist:mac":
-        "npm run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg zip",
+      "pack:mac": "node scripts/package-mac.mjs --dir",
+      "dist:mac": "node scripts/package-mac.mjs dmg zip",
     });
   });
 

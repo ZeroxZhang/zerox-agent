@@ -3331,3 +3331,33 @@
     back to JSON through the existing storage fallback during smoke.
   - `npm run harness:check` -> passed.
   - `git diff --check` -> passed.
+- Update/package/release evidence:
+  - Merged latest `origin/main` into `codex/v2.3.5-run-graph-harness` before
+    packaging.
+  - Added `scripts/package-mac.mjs` so `npm run dist:mac` explicitly rebuilds
+    `better-sqlite3` for the Electron ABI before packaging and restores the
+    Node ABI afterward; `electron-builder.yml` now leaves native rebuilds to
+    this script.
+  - `npx vitest run src/shared/packageScripts.test.ts` -> 7 tests passed.
+  - `npm run dist:mac` -> passed; generated macOS arm64 DMG + ZIP and
+    blockmaps.
+  - `ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron -e "... packaged
+    better-sqlite3 ..."` -> packaged SQLite opened `:memory:` successfully.
+  - `BUILDING_AGENT_SMOKE=1 "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> packaged smoke passed with SQLite available.
+  - `npm run verify` -> 153 test files / 931 tests passed; agent eval 26/26;
+    memory eval 2/2.
+  - `npm run smoke:prod` -> passed; source-tree smoke uses JSON fallback after
+    the packaging script restores the root native module to the Node ABI.
+  - `npm run harness:check` -> passed.
+  - Info.plist CFBundleShortVersionString = 2.4.1; CFBundleVersion = 2.4.1.
+  - Artifacts:
+    - `release/Zerox Agent-2.4.1-arm64.dmg` (128276939 bytes, sha256
+      ca2b4d892841e4938b2b538f3ab644f35bbe84f9096b1331e446c25b840d74c7)
+    - `release/Zerox Agent-2.4.1-arm64.dmg.blockmap` (135107 bytes, sha256
+      edfc88bdc656c3471d7ff947a5b968787319d372ec933850365719c206067183)
+    - `release/Zerox Agent-2.4.1-arm64-mac.zip` (349324769 bytes, sha256
+      23c296926631998f600517e7a3eac9b3ef9d7f5df0bdd7254120a5b0f633f8e7)
+    - `release/Zerox Agent-2.4.1-arm64-mac.zip.blockmap` (343716 bytes,
+      sha256 5454d00c3369a40e42e7dea011f600a76adff2bd5a7d8aeafa46f82faa1ec2cb)
+  - GitHub Release target:
+    https://github.com/ZeroxZhang/zerox-agent/releases/tag/v2.4.1
