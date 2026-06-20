@@ -8,6 +8,7 @@ import type {
 import type {
   CancelChatMessageResult,
   ChatSessionListItem,
+  ChatSessionOperationResult,
   ChatSessionRecord,
   ChatTaskStatusEvent,
   GoalProgressEvent,
@@ -376,6 +377,18 @@ const buildingAgent = {
     ipcRenderer.invoke("chatSessions:list"),
   getChatSession: (sessionId: string): Promise<ChatSessionRecord | null> =>
     ipcRenderer.invoke("chatSessions:get", sessionId),
+  archiveChatSession: (
+    sessionId: string,
+  ): Promise<ChatSessionOperationResult> =>
+    ipcRenderer.invoke("chatSessions:archive", sessionId),
+  restoreChatSession: (
+    sessionId: string,
+  ): Promise<ChatSessionOperationResult> =>
+    ipcRenderer.invoke("chatSessions:restore", sessionId),
+  deleteChatSession: (
+    sessionId: string,
+  ): Promise<ChatSessionOperationResult> =>
+    ipcRenderer.invoke("chatSessions:delete", sessionId),
   listMemories: (options?: MemoryListOptions): Promise<MemoryRecord[]> =>
     ipcRenderer.invoke("memory:list", options),
   searchMemories: (

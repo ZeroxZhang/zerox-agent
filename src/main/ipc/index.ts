@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { AppContainer } from "../container";
 import type {
   CancelChatMessageResult,
+  ChatSessionOperationResult,
   ChatTaskStatusEvent,
   SendChatMessageInput,
   SendChatMessageResult,
@@ -685,5 +686,20 @@ function registerChatIpcHandlers(container: AppContainer): void {
   ipcMain.handle("chatSessions:list", () => container.listChatSessions());
   ipcMain.handle("chatSessions:get", (_event, sessionId: string) =>
     container.getChatSession(sessionId),
+  );
+  ipcMain.handle(
+    "chatSessions:archive",
+    (_event, sessionId: string): Promise<ChatSessionOperationResult> =>
+      container.archiveChatSession(sessionId),
+  );
+  ipcMain.handle(
+    "chatSessions:restore",
+    (_event, sessionId: string): Promise<ChatSessionOperationResult> =>
+      container.restoreChatSession(sessionId),
+  );
+  ipcMain.handle(
+    "chatSessions:delete",
+    (_event, sessionId: string): Promise<ChatSessionOperationResult> =>
+      container.deleteChatSession(sessionId),
   );
 }

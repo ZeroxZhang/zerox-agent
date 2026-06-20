@@ -24,4 +24,13 @@ describe("preload bridge", () => {
     expect(preloadSource).toContain("import type");
     expect(preloadSource).toContain("const KERNEL_IPC");
   });
+
+  it("exposes chat session management operations through stable IPC channels", () => {
+    expect(preloadSource).toContain("archiveChatSession");
+    expect(preloadSource).toContain('ipcRenderer.invoke("chatSessions:archive"');
+    expect(preloadSource).toContain("restoreChatSession");
+    expect(preloadSource).toContain('ipcRenderer.invoke("chatSessions:restore"');
+    expect(preloadSource).toContain("deleteChatSession");
+    expect(preloadSource).toContain('ipcRenderer.invoke("chatSessions:delete"');
+  });
 });

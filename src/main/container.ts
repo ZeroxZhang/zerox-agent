@@ -98,6 +98,7 @@ import type { GoalReviewPolicy } from "../shared/agentGoalReview";
 import type {
   ChatSessionGoalSummary,
   ChatSessionListItem,
+  ChatSessionOperationResult,
   ChatSessionRecord,
   GoalProgressEvent,
 } from "../shared/chat";
@@ -413,6 +414,60 @@ export function createAppContainer(options: {
     }
 
     return chatSessionStore().get(sessionId);
+  }
+
+  async function archiveChatSession(
+    sessionId: string,
+  ): Promise<ChatSessionOperationResult> {
+    try {
+      const session = await chatSessionStore().archive(sessionId);
+      if (!session) {
+        return { ok: false, message: "会话不存在，无法归档。" };
+      }
+
+      return { ok: true, session };
+    } catch (error) {
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : "无法归档会话。",
+      };
+    }
+  }
+
+  async function restoreChatSession(
+    sessionId: string,
+  ): Promise<ChatSessionOperationResult> {
+    try {
+      const session = await chatSessionStore().restore(sessionId);
+      if (!session) {
+        return { ok: false, message: "会话不存在，无法恢复。" };
+      }
+
+      return { ok: true, session };
+    } catch (error) {
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : "无法恢复会话。",
+      };
+    }
+  }
+
+  async function deleteChatSession(
+    sessionId: string,
+  ): Promise<ChatSessionOperationResult> {
+    try {
+      const deleted = await chatSessionStore().delete(sessionId);
+      if (!deleted) {
+        return { ok: false, message: "会话不存在，无法删除。" };
+      }
+
+      return { ok: true };
+    } catch (error) {
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : "无法删除会话。",
+      };
+    }
   }
 
   function createToolExecutor() {
@@ -1474,6 +1529,9 @@ export function createAppContainer(options: {
     chatSessionStore,
     listChatSessions,
     getChatSession,
+    archiveChatSession,
+    restoreChatSession,
+    deleteChatSession,
     chatService,
     taskSchedulerService,
     runAgentTask,
