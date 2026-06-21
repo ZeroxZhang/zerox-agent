@@ -830,9 +830,9 @@ export function createAppContainer(options: {
   }
 
   // P4 shell analyzer + tool worker. Exposed for P5 (checkpoint-writer fork
-  // agent) and P6 (actor isolation) to consume. Existing side-effect tools keep
-  // running in-process (gradual cutover behind ZEROX_TOOL_WORKER; default
-  // behavior unchanged — zero regression).
+  // agent) and P6 (actor isolation) to consume. ZEROX_TOOL_WORKER controls the
+  // isolation mode while keeping explicit in-process mode available for
+  // development and focused tests.
   function shellAnalyzer() {
     return { analyze: analyzeShell };
   }
@@ -840,10 +840,7 @@ export function createAppContainer(options: {
   function toolWorker() {
     return lazy("toolWorker", () => {
       const opts = getToolWorkerOptions();
-      // Default inproc when no handler registry is wired yet, so the worker is
-      // harmless until P5/P6 register side-effect handlers. The flag still
-      // allows opting into subprocess for consumers that provide an entry.
-      return createToolWorker({ mode: opts.worker === "subprocess" ? "inproc" : "inproc" });
+      return createToolWorker({ mode: opts.worker });
     });
   }
 
@@ -1647,6 +1644,7 @@ export function createAppContainer(options: {
     setKernelPermissionRules,
     toolAuditLog,
     toolAuthorizationService,
+    toolWorker,
     agentRunStore,
     agentExecutionStore,
     agentTrajectoryStore,

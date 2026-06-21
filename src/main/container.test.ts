@@ -13,6 +13,14 @@ import type { GoalProgressEvent } from "../shared/chat";
 
 const execFileAsync = promisify(execFileCallback);
 
+const toolWorkerMock = vi.hoisted(() => ({
+  createToolWorker: vi.fn((options: unknown) => ({
+    close: vi.fn(),
+    execute: vi.fn(),
+    options,
+  })),
+}));
+
 const electronState = vi.hoisted(() => ({
   userDataPath: "",
   appPath: "",
@@ -46,18 +54,76 @@ vi.mock("electron", () => ({
   },
 }));
 
+vi.mock("./tools/toolWorker", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./tools/toolWorker")>()),
+  createToolWorker: toolWorkerMock.createToolWorker,
+}));
+
 describe("app container goal drafts", () => {
   let tempDir: string;
+  const originalToolWorkerEnv = process.env.ZEROX_TOOL_WORKER;
+  const originalLegacyToolWorkerEnv = process.env.BUILDING_AGENT_TOOL_WORKER;
 
   beforeEach(async () => {
     tempDir = await mkdtemp(path.join(os.tmpdir(), "zerox-container-"));
     electronState.userDataPath = tempDir;
     electronState.appPath = process.cwd();
     electronState.ipcHandlers.clear();
+    toolWorkerMock.createToolWorker.mockClear();
+    delete process.env.ZEROX_TOOL_WORKER;
+    delete process.env.BUILDING_AGENT_TOOL_WORKER;
   });
 
   afterEach(async () => {
+    if (originalToolWorkerEnv === undefined) {
+      delete process.env.ZEROX_TOOL_WORKER;
+    } else {
+      process.env.ZEROX_TOOL_WORKER = originalToolWorkerEnv;
+    }
+    if (originalLegacyToolWorkerEnv === undefined) {
+      delete process.env.BUILDING_AGENT_TOOL_WORKER;
+    } else {
+      process.env.BUILDING_AGENT_TOOL_WORKER = originalLegacyToolWorkerEnv;
+    }
     await rm(tempDir, { force: true, recursive: true });
+  });
+
+  it("wires ZEROX_TOOL_WORKER=subprocess through the production container worker", () => {
+    process.env.ZEROX_TOOL_WORKER = "subprocess";
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+
+    const containerWithWorker = container as typeof container & {
+      toolWorker?: () => unknown;
+    };
+    expect(containerWithWorker.toolWorker).toBeTypeOf("function");
+    containerWithWorker.toolWorker?.();
+
+    expect(toolWorkerMock.createToolWorker).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "subprocess" }),
+    );
+  });
+
+  it("preserves explicit in-process worker mode for development and tests", () => {
+    process.env.ZEROX_TOOL_WORKER = "inproc";
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+
+    const containerWithWorker = container as typeof container & {
+      toolWorker?: () => unknown;
+    };
+    expect(containerWithWorker.toolWorker).toBeTypeOf("function");
+    containerWithWorker.toolWorker?.();
+
+    expect(toolWorkerMock.createToolWorker).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "inproc" }),
+    );
   });
 
   it("creates evidence-backed model review checks for manual goals", () => {

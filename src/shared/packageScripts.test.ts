@@ -118,6 +118,26 @@ describe("package scripts", () => {
     });
   });
 
+  it("exposes built-artifact variants for post-build verification workflows", () => {
+    const packageJson = JSON.parse(
+      readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
+    ) as PackageJson;
+
+    expect(packageJson.scripts).toMatchObject({
+      "eval:agent": "npm run build && node scripts/run-agent-evals.mjs",
+      "eval:agent:built": "node scripts/run-agent-evals.mjs",
+      "eval:memory": "npm run build && node scripts/run-memory-evals.mjs",
+      "eval:memory:built": "node scripts/run-memory-evals.mjs",
+      "harness:score": "npm run build && node scripts/run-harness-score.mjs",
+      "harness:score:built": "node scripts/run-harness-score.mjs",
+      "episode:export":
+        "npm run build && node scripts/export-agent-episode.mjs",
+      "episode:export:built": "node scripts/export-agent-episode.mjs",
+      "smoke:prod": "npm run build && BUILDING_AGENT_SMOKE=1 electron .",
+      "smoke:prod:built": "BUILDING_AGENT_SMOKE=1 electron .",
+    });
+  });
+
   it("exposes macOS packaging commands for local app distribution", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),

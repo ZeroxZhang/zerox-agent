@@ -1,5 +1,28 @@
 # Zerox Harness Progress
 
+## 2026-06-21 - Task 6 Worker Isolation And Verification Efficiency
+
+- Request: implement Task 6 from the bug-hardening SDD/TDD plan: production subprocess worker wiring, timed-out worker child recycling, configurable smoke readiness polling, clean-checkout migration coverage verification, and built-artifact script variants.
+- Changed files:
+  - `src/main/tools/toolWorker.ts`, `src/main/container.ts`, `src/main/smokeMode.ts`, `package.json`
+  - `src/main/tools/toolWorker.test.ts`, `src/main/container.test.ts`, `src/main/smokeMode.test.ts`, `src/shared/packageScripts.test.ts`
+  - `.superpowers/sdd/task-6-report.md`, `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/main/container.test.ts src/main/tools/toolWorker.test.ts` -> failed: container did not expose/wire `toolWorker`; timed-out subprocess child poisoned the next request.
+  - `npm test -- src/main/smokeMode.test.ts` -> failed: renderer readiness script still embedded `const timeoutMs = 4000`.
+  - `npm test -- src/shared/packageScripts.test.ts` -> failed: built-artifact script variants were missing.
+  - `npm test -- src/main/storage/migrateRoundTrip.test.ts` -> passed before Task 6 edits; existing Task 2 coverage already compiles migration scripts into a fresh temporary `dist-electron` instead of silently skipping.
+- GREEN evidence:
+  - `npm test -- src/main/container.test.ts src/main/tools/toolWorker.test.ts` -> 2 files / 17 tests passed.
+  - `npm test -- src/main/smokeMode.test.ts` -> 1 file / 11 tests passed.
+  - `npm test -- src/shared/packageScripts.test.ts` -> 1 file / 8 tests passed.
+  - `npm test -- src/main/storage/migrateRoundTrip.test.ts` -> 1 file / 1 test passed.
+  - `npm test -- src/main/container.test.ts src/main/tools/toolWorker.test.ts src/main/smokeMode.test.ts src/shared/packageScripts.test.ts` -> 4 files / 36 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> 165 files / 1077 tests passed; build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI with expected better-sqlite3 ABI fallback to JSON.
+  - Built variants: `npm run eval:agent:built` -> 26/26 passed; `npm run eval:memory:built` -> 2/2 passed; `npm run harness:score:built` -> score 9.26 good; `npm run episode:export:built -- --help` -> passed; `npm run smoke:prod:built` -> passed with expected SQLite ABI fallback.
+
 ## 2026-06-21 - Task 5 Renderer/IPC/User-Visible State Coherence
 
 - Request: implement Task 5 from the bug-hardening SDD/TDD plan: worktree approval gating, terminal-goal active link cleanup, live Runs panel refresh, and empty chat session list acceptance.
