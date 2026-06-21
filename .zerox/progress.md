@@ -3651,3 +3651,34 @@
   - `npm run build` -> passed.
   - `npm run verify` -> 165 files / 1063 tests passed; build passed; agent eval 26/26; memory eval 2/2.
   - `npm run smoke:prod` -> passed; renderer rendered agent chat UI with expected SQLite ABI fallback to JSON.
+
+## 2026-06-21 - Task 4 Follow-Up Scoped Tool-Result Ref Reads
+
+- Summary:
+  - Passed matching `toolResultReadScope` into `agentRuntimeEngine` and the legacy `agentRunnerService` fallback so same-run `tool_result_read` can read scoped refs written earlier in the same run.
+  - Added shared UI read options for scoped/capability-based tool-result ref reads and threaded them through container, IPC, preload, and the trajectory panel.
+  - Preserved denial for no-context and cross-run scoped UI reads while allowing explicit `tool_result_ref_read` capability reads.
+- Changed files:
+  - `src/main/agentRuntimeEngine.ts`
+  - `src/main/agentRunnerService.ts`
+  - `src/main/container.ts`
+  - `src/main/ipc/index.ts`
+  - `src/main/toolResultOffloadStore.ts`
+  - `src/preload/index.ts`
+  - `src/renderer/components/RunTrajectoryPanel.tsx`
+  - `src/shared/toolResultRefs.ts`
+  - `src/main/agentRuntimeEngine.test.ts`
+  - `src/main/agentRunnerService.test.ts`
+  - `src/main/container.test.ts`
+- RED evidence:
+  - `npm test -- src/main/agentRuntimeEngine.test.ts -t "owning runtime run read"` -> failed: `tool_result_read` returned `ok:false` / `scoped ref denied`.
+  - `npm test -- src/main/agentRunnerService.test.ts -t "owning legacy runner read"` -> failed: legacy runner ended with failed status instead of reading the scoped ref.
+  - `npm test -- src/main/container.test.ts -t "scoped tool-result ref reads"` -> failed: matching `runId` container read still returned `ok:false`.
+- GREEN evidence:
+  - `npm test -- src/main/agentRuntimeEngine.test.ts -t "owning runtime run read"` -> 1 test passed.
+  - `npm test -- src/main/agentRunnerService.test.ts -t "owning legacy runner read"` -> 1 test passed.
+  - `npm test -- src/main/container.test.ts -t "scoped tool-result ref reads"` -> 1 test passed.
+  - `npm test -- src/main/agentRuntimeEngine.test.ts src/main/agentRunnerService.test.ts src/main/container.test.ts src/main/toolResultOffloadStore.test.ts src/main/agentToolExecutor.test.ts src/shared/toolResultRefs.test.ts` -> 6 files / 83 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> 165 files / 1066 tests passed; build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI with expected SQLite ABI fallback to JSON.

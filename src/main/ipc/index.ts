@@ -20,6 +20,7 @@ import type {
   UpdateScheduledTaskEnabledResult,
 } from "../../shared/scheduledTasks";
 import type { ToolCallRequest } from "../../shared/toolPermissions";
+import type { ReadToolResultRefOptions } from "../../shared/toolResultRefs";
 import type {
   CreateMemoryResult,
   DeleteMemoryResult,
@@ -223,7 +224,8 @@ function registerToolsIpcHandlers(container: AppContainer): void {
   ipcMain.handle("toolAudit:list", () => container.toolAuditLog().list({ limit: 50 }));
   ipcMain.handle(
     "toolResults:readRef",
-    async (_event, ref: string) => container.readToolResultRef(ref),
+    async (_event, ref: string, options?: ReadToolResultRefOptions) =>
+      container.readToolResultRef(ref, options),
   );
 }
 

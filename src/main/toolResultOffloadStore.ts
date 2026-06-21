@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import type {
+  ReadToolResultRefOptions,
+  ToolResultRefReadCapability,
+} from "../shared/toolResultRefs";
 
 export type ToolResultOffloadWriteInput = {
   runId?: string;
@@ -12,19 +16,8 @@ export type ToolResultOffloadWriteInput = {
   content: string;
 };
 
-export type ToolResultRefReadCapability = {
-  kind: "tool_result_ref_read";
-  ref: string;
-  issuedByRunId?: string;
-};
-
-export type ToolResultOffloadReadScope = {
-  runId?: string;
-  sessionId?: string;
-  requestId?: string;
-  workspaceRunId?: string;
-  capability?: ToolResultRefReadCapability;
-};
+export type { ToolResultRefReadCapability };
+export type ToolResultOffloadReadScope = ReadToolResultRefOptions;
 
 export type ToolResultOffloadRef = {
   refId: string;

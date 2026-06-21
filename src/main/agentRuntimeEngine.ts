@@ -574,6 +574,15 @@ export function createAgentRuntimeEngine(options: {
           {
             runContext: current.runContext,
             ...(signal ? { signal } : {}),
+            toolResultReadScope: {
+              runId: current.runId,
+              ...(current.runContext?.sessionId
+                ? { sessionId: current.runContext.sessionId }
+                : {}),
+              ...(current.runContext?.runId
+                ? { workspaceRunId: current.runContext.runId }
+                : {}),
+            },
           },
         );
         toolCallCount += 1;
@@ -603,6 +612,8 @@ export function createAgentRuntimeEngine(options: {
             store: options.toolResultOffloadStore,
             thresholdChars: options.toolResultOffloadThreshold,
             runId: current.runId,
+            sessionId: current.runContext?.sessionId,
+            workspaceRunId: current.runContext?.runId,
           });
         await appendTrajectory(current.runId, "tool_result", {
           toolCallId: toolCall.id,

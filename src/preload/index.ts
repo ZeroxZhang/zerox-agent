@@ -23,7 +23,10 @@ import type {
   GenerateEvalCandidateForRunResult,
   PromoteEvalCandidateResult,
 } from "../shared/agentEvalCandidate";
-import type { ReadToolResultRefResult } from "../shared/toolResultRefs";
+import type {
+  ReadToolResultRefOptions,
+  ReadToolResultRefResult,
+} from "../shared/toolResultRefs";
 import type {
   CreateMemoryResult,
   DeleteMemoryResult,
@@ -250,8 +253,11 @@ const buildingAgent = {
   getGoal: (goalId: string): Promise<Goal | null> =>
     ipcRenderer.invoke("goal:get", goalId),
   listActiveGoals: (): Promise<Goal[]> => ipcRenderer.invoke("goal:listActive"),
-  readToolResultRef: (ref: string): Promise<ReadToolResultRefResult> =>
-    ipcRenderer.invoke("toolResults:readRef", ref),
+  readToolResultRef: (
+    ref: string,
+    options?: ReadToolResultRefOptions,
+  ): Promise<ReadToolResultRefResult> =>
+    ipcRenderer.invoke("toolResults:readRef", ref, options),
   getAgentEvalReport: (): Promise<AgentEvalReport> =>
     ipcRenderer.invoke("agentQuality:getEvalReport"),
   listEvalCandidates: (

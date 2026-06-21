@@ -3,12 +3,14 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createAppContainer } from "./container";
+import { registerAllIpcHandlers } from "./ipc";
 import type { Goal } from "../shared/agentGoal";
 import type { GoalProgressEvent } from "../shared/chat";
 
 const electronState = vi.hoisted(() => ({
   userDataPath: "",
   appPath: "",
+  ipcHandlers: new Map<string, (...args: unknown[]) => unknown>(),
 }));
 
 vi.mock("electron", () => ({
@@ -26,6 +28,11 @@ vi.mock("electron", () => ({
   BrowserWindow: {
     getAllWindows: () => [],
   },
+  ipcMain: {
+    handle: (channel: string, handler: (...args: unknown[]) => unknown) => {
+      electronState.ipcHandlers.set(channel, handler);
+    },
+  },
   safeStorage: {
     decryptString: (value: Buffer) => value.toString("utf8"),
     encryptString: (value: string) => Buffer.from(value, "utf8"),
@@ -40,6 +47,7 @@ describe("app container goal drafts", () => {
     tempDir = await mkdtemp(path.join(os.tmpdir(), "zerox-container-"));
     electronState.userDataPath = tempDir;
     electronState.appPath = process.cwd();
+    electronState.ipcHandlers.clear();
   });
 
   afterEach(async () => {
@@ -101,6 +109,57 @@ describe("app container goal drafts", () => {
         condition: "修复目标模式",
         evidenceRefs: ["artifact:goalEvidence"],
       },
+    });
+  });
+
+  it("requires matching scope or explicit capability for scoped tool-result ref reads over container and IPC", async () => {
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const written = await container.toolResultOffloadStore().write({
+      runId: "run_owner",
+      toolName: "file_read",
+      content: JSON.stringify({
+        type: "tool_result",
+        tool: "file_read",
+        ok: true,
+        result: { content: "scoped UI content" },
+      }),
+    });
+    await expect(container.readToolResultRef(written.relativePath)).resolves.toMatchObject({
+      ok: false,
+    });
+    await expect(
+      container.readToolResultRef(written.relativePath, { runId: "run_other" }),
+    ).resolves.toMatchObject({ ok: false });
+    await expect(
+      container.readToolResultRef(written.relativePath, { runId: "run_owner" }),
+    ).resolves.toMatchObject({
+      ok: true,
+      content: expect.stringContaining("scoped UI content"),
+    });
+    await expect(
+      container.readToolResultRef(written.relativePath, {
+        capability: {
+          kind: "tool_result_ref_read",
+          ref: written.relativePath,
+        },
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      content: expect.stringContaining("scoped UI content"),
+    });
+
+    registerAllIpcHandlers(container);
+    const ipcReadRef = electronState.ipcHandlers.get("toolResults:readRef");
+    expect(ipcReadRef).toBeTypeOf("function");
+    await expect(
+      ipcReadRef?.({}, written.relativePath, { runId: "run_owner" }),
+    ).resolves.toMatchObject({
+      ok: true,
+      content: expect.stringContaining("scoped UI content"),
     });
   });
 

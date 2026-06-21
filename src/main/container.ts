@@ -118,6 +118,7 @@ import type { AgentEvalReport } from "../shared/agentEval";
 import { buildDesktopRuntimeInfo, type DesktopRuntimeInfo } from "../shared/desktopRuntime";
 import {
   isSafeToolResultRef,
+  type ReadToolResultRefOptions,
   summarizeToolResultContent,
   type ReadToolResultRefResult,
 } from "../shared/toolResultRefs";
@@ -1431,7 +1432,10 @@ export function createAppContainer(options: {
     return runGoalOperation(operation);
   }
 
-  async function readToolResultRef(ref: string): Promise<ReadToolResultRefResult> {
+  async function readToolResultRef(
+    ref: string,
+    options?: ReadToolResultRefOptions,
+  ): Promise<ReadToolResultRefResult> {
     if (!isSafeToolResultRef(ref)) {
       return {
         ok: false,
@@ -1439,7 +1443,7 @@ export function createAppContainer(options: {
       };
     }
 
-    const content = await toolResultOffloadStore().read(ref);
+    const content = await toolResultOffloadStore().read(ref, options);
     if (!content) {
       return {
         ok: false,
