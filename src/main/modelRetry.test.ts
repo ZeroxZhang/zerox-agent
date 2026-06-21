@@ -3,6 +3,8 @@ import {
   completeWithModelRetry,
   type ModelRetryEvent,
 } from "./modelRetry";
+import { createProviderChatClient } from "./providers/providerChatClient";
+import { createProvider } from "./providers/providerFactory";
 import type {
   ChatClient,
   ChatCompletionRequest,
@@ -136,6 +138,53 @@ describe("completeWithModelRetry", () => {
     expect(result).toBe("Agent run canceled.");
     expect(attempts).toBe(1);
   });
+
+  it.each([
+    { providerId: "anthropic" as const, model: "claude-3", message: /Anthropic request timed out after 5 ms/ },
+    { providerId: "gemini" as const, model: "gemini-1.5-pro", message: /Gemini request timed out after 5 ms/ },
+  ])("classifies $providerId native provider timeouts as retryable", async ({ providerId, model, message }) => {
+    let fetchCalls = 0;
+    const retryEvents: ModelRetryEvent[] = [];
+    const provider = createProvider(
+      {
+        providerId,
+        apiKey: "k",
+        chatModel: model,
+        baseUrl: "https://api.example.test",
+      },
+      {
+        timeoutMs: 5,
+        fetch: (() => {
+          fetchCalls += 1;
+          return new Promise<Response>(() => {
+            // Intentionally unresolved: the provider timeout must drive retry.
+          });
+        }) as unknown as typeof fetch,
+      },
+    );
+    const client = createProviderChatClient({ provider });
+
+    await expectRejectsBefore(
+      completeWithModelRetry(
+        client,
+        { ...request, model },
+        {
+          maxRetries: 1,
+          baseDelayMs: 0,
+          sleep: async () => {},
+        },
+        (event) => {
+          retryEvents.push(event);
+        },
+      ),
+      80,
+      message,
+    );
+
+    expect(fetchCalls).toBe(2);
+    expect(retryEvents).toHaveLength(1);
+    expect(retryEvents[0]?.error).toMatch(message);
+  });
 });
 
 function createFlakyClient(error: Error): ChatClient {
@@ -167,4 +216,27 @@ function retryableError(
       responseHeaders: headers,
     },
   );
+}
+
+async function expectRejectsBefore(
+  promise: Promise<unknown>,
+  timeoutMs: number,
+  messagePattern: RegExp,
+): Promise<void> {
+  const outcome = await Promise.race([
+    promise.then(
+      () => ({ type: "resolved" as const }),
+      (error) => ({ type: "rejected" as const, error }),
+    ),
+    new Promise<{ type: "pending" }>((resolve) => {
+      setTimeout(() => resolve({ type: "pending" }), timeoutMs);
+    }),
+  ]);
+
+  expect(outcome.type).toBe("rejected");
+  if (outcome.type !== "rejected") {
+    return;
+  }
+  expect(outcome.error).toBeInstanceOf(Error);
+  expect((outcome.error as Error).message).toMatch(messagePattern);
 }

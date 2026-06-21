@@ -1,3 +1,5 @@
+import { defaultRequestTimeoutMs, fetchWithTimeout } from "./fetchWithTimeout";
+
 export type ChatMessage = {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
@@ -85,8 +87,6 @@ export type StreamingChatClient = ChatClient & {
     request: ChatCompletionRequest,
   ): AsyncIterable<StreamEvent>;
 };
-
-const defaultRequestTimeoutMs = 300_000;
 
 export function createOpenAiCompatibleClient(options?: {
   fetch?: typeof fetch;
@@ -480,45 +480,4 @@ function buildJsonRequest(options: {
     },
     body: JSON.stringify(options.body),
   };
-}
-
-async function fetchWithTimeout(
-  fetchImpl: typeof fetch,
-  url: string,
-  init: RequestInit,
-  timeoutMs: number,
-  label: string,
-  externalSignal?: AbortSignal,
-): Promise<Response> {
-  const controller = new AbortController();
-  let didTimeout = false;
-  const abortFromExternalSignal = () => controller.abort();
-  const timeout = setTimeout(() => {
-    didTimeout = true;
-    controller.abort();
-  }, timeoutMs);
-
-  try {
-    if (externalSignal?.aborted) {
-      controller.abort();
-    } else {
-      externalSignal?.addEventListener("abort", abortFromExternalSignal, {
-        once: true,
-      });
-    }
-
-    return await fetchImpl(url, {
-      ...init,
-      signal: controller.signal,
-    });
-  } catch (error) {
-    if (didTimeout) {
-      throw new Error(`${label} request timed out after ${timeoutMs} ms.`);
-    }
-
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-    externalSignal?.removeEventListener("abort", abortFromExternalSignal);
-  }
 }

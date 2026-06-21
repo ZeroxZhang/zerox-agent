@@ -11,6 +11,7 @@ export type AgentTrajectoryStore = {
     event: AgentTrajectoryEvent,
   ): Promise<AgentTrajectoryEvent>;
   list(runId: string): Promise<AgentTrajectoryEvent[]>;
+  flushShadowWrites(): Promise<void>;
 };
 
 export interface AgentTrajectoryStoreOptions {
@@ -53,6 +54,9 @@ export function createAgentTrajectoryStore(
     async list(runId) {
       return readRecoverableJsonl<AgentTrajectoryEvent>(trajectoryPath(runId));
     },
+    async flushShadowWrites() {
+      return;
+    },
   };
 
   if (backend === "json" || !repo) {
@@ -60,14 +64,29 @@ export function createAgentTrajectoryStore(
   }
 
   // --- sqlite / dual (hot path stays sync) ---
+  const shadowWrites = new Set<Promise<void>>();
+  function enqueueShadowWrite(promise: Promise<unknown>): void {
+    let tracked: Promise<void>;
+    tracked = promise
+      .catch(shadowWriteError)
+      .then(() => undefined)
+      .finally(() => {
+        shadowWrites.delete(tracked);
+      });
+    shadowWrites.add(tracked);
+  }
+
   return {
     async append(runId, event) {
       repo.appendTrajectory(runId, event); // sync hot path
-      if (backend === "dual") void jsonImpl.append(runId, event).catch(shadowWriteError);
+      if (backend === "dual") enqueueShadowWrite(jsonImpl.append(runId, event));
       return event;
     },
     async list(runId) {
       return repo.getTrajectory(runId);
+    },
+    async flushShadowWrites() {
+      await Promise.all([...shadowWrites]);
     },
   };
 }

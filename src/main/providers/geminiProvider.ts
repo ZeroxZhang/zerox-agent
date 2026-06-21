@@ -7,6 +7,7 @@
 
 import { buildCachePrefix } from "./cachePrefix";
 import { estimateTextTokens } from "../contextManager";
+import { defaultRequestTimeoutMs, fetchWithTimeout } from "../fetchWithTimeout";
 import type {
   CompleteRequest,
   CompleteResponse,
@@ -34,11 +35,13 @@ export interface GeminiProviderOptions {
   baseUrl?: string;
   apiKey?: string;
   model?: string;
+  timeoutMs?: number;
 }
 
 export function createGeminiProvider(options: GeminiProviderOptions = {}): LLMProvider {
   const fetchImpl = options.fetch ?? fetch;
   const baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
+  const timeoutMs = options.timeoutMs ?? defaultRequestTimeoutMs;
 
   return {
     id: "gemini" as ProviderId,
@@ -53,7 +56,7 @@ export function createGeminiProvider(options: GeminiProviderOptions = {}): LLMPr
         generationConfig: { temperature: req.temperature, maxOutputTokens: req.maxTokens },
         ...(req.thinking?.type === "enabled" ? { thinkingConfig: { thinkingBudget: req.thinking.budgetTokens ?? 0 } } : {}),
       };
-      const json = await geminiFetch(fetchImpl, baseUrl, `/v1beta/models/${req.model}:generateContent`, req.apiKey, body, req.signal);
+      const json = await geminiFetch(fetchImpl, baseUrl, `/v1beta/models/${req.model}:generateContent`, req.apiKey, body, timeoutMs, req.signal);
       return parseGeminiResponse(json);
     },
 
@@ -65,7 +68,7 @@ export function createGeminiProvider(options: GeminiProviderOptions = {}): LLMPr
         ...(tools ? { tools: [{ functionDeclarations: tools.map(toGeminiFunctionDecl) }] } : {}),
         generationConfig: { temperature: req.temperature, maxOutputTokens: req.maxTokens },
       };
-      const res = await geminiFetchRaw(fetchImpl, baseUrl, `/v1beta/models/${req.model}:streamGenerateContent?alt=sse`, req.apiKey, body, req.signal);
+      const res = await geminiFetchRaw(fetchImpl, baseUrl, `/v1beta/models/${req.model}:streamGenerateContent?alt=sse`, req.apiKey, body, timeoutMs, req.signal);
       if (!res.ok) {
         yield { type: "error", error: new Error(`HTTP ${res.status}: ${await res.text()}`) };
         return;
@@ -106,7 +109,7 @@ export function createGeminiProvider(options: GeminiProviderOptions = {}): LLMPr
       if (!options.apiKey || !options.model) return heuristicCount(messages, opts?.system, opts?.tools);
       try {
         const { contents } = toGeminiBody(messages, opts?.tools, opts?.system);
-        const json = await geminiFetch(fetchImpl, baseUrl, `/v1beta/models/${options.model}:countTokens`, options.apiKey, { contents }, undefined);
+        const json = await geminiFetch(fetchImpl, baseUrl, `/v1beta/models/${options.model}:countTokens`, options.apiKey, { contents }, timeoutMs, undefined);
         return (json as { totalTokens?: number }).totalTokens ?? heuristicCount(messages, opts?.system, opts?.tools);
       } catch {
         return heuristicCount(messages, opts?.system, opts?.tools);
@@ -158,9 +161,10 @@ async function geminiFetch(
   path: string,
   apiKey: string,
   body: Record<string, unknown>,
+  timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<Record<string, unknown>> {
-  const res = await geminiFetchRaw(fetchImpl, baseUrl, path, apiKey, body, signal);
+  const res = await geminiFetchRaw(fetchImpl, baseUrl, path, apiKey, body, timeoutMs, signal);
   const text = await res.text();
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${text}`);
   return JSON.parse(text) as Record<string, unknown>;
@@ -172,14 +176,14 @@ async function geminiFetchRaw(
   path: string,
   apiKey: string,
   body: Record<string, unknown>,
+  timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<Response> {
-  return fetchImpl(`${baseUrl}${path}`, {
+  return fetchWithTimeout(fetchImpl, `${baseUrl}${path}`, {
     method: "POST",
     headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
     body: JSON.stringify(body),
-    ...(signal ? { signal } : {}),
-  });
+  }, timeoutMs, "Gemini", signal);
 }
 
 function parseGeminiResponse(json: Record<string, unknown>): CompleteResponse {

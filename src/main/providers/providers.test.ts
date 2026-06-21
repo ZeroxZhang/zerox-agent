@@ -78,6 +78,35 @@ function mockFetch(response: unknown, status = 200): typeof fetch {
   })) as unknown as typeof fetch;
 }
 
+function neverSettlingFetch(): typeof fetch {
+  return (() => new Promise<Response>(() => {
+    // Intentionally unresolved: provider timeout must settle the call.
+  })) as unknown as typeof fetch;
+}
+
+async function expectRejectsBefore(
+  promise: Promise<unknown>,
+  timeoutMs: number,
+  messagePattern: RegExp,
+): Promise<void> {
+  const outcome = await Promise.race([
+    promise.then(
+      () => ({ type: "resolved" as const }),
+      (error) => ({ type: "rejected" as const, error }),
+    ),
+    new Promise<{ type: "pending" }>((resolve) => {
+      setTimeout(() => resolve({ type: "pending" }), timeoutMs);
+    }),
+  ]);
+
+  expect(outcome.type).toBe("rejected");
+  if (outcome.type !== "rejected") {
+    return;
+  }
+  expect(outcome.error).toBeInstanceOf(Error);
+  expect((outcome.error as Error).message).toMatch(messagePattern);
+}
+
 describe("AnthropicProvider", () => {
   it("parses a native Messages response into CompleteResponse", async () => {
     const provider = createProvider(
@@ -105,6 +134,25 @@ describe("AnthropicProvider", () => {
     ).rejects.toThrow(/HTTP 529/);
   });
 
+  it("times out a fetch that never settles", async () => {
+    const provider = createProvider(
+      { providerId: "anthropic", apiKey: "k", chatModel: "claude-3" },
+      { fetch: neverSettlingFetch(), timeoutMs: 5 },
+    );
+
+    await expectRejectsBefore(
+      provider.complete({
+        model: "claude-3",
+        apiKey: "k",
+        temperature: 0,
+        maxTokens: 10,
+        messages: [{ role: "user", content: [{ type: "text", text: "x" }] }],
+      }),
+      50,
+      /Anthropic request timed out after 5 ms/,
+    );
+  });
+
   it("countTokens falls back to heuristic without credentials", async () => {
     const provider = createProvider({ providerId: "anthropic", apiKey: "", chatModel: "" }, { fetch: mockFetch({}) });
     const n = await provider.countTokens([{ role: "user", content: [{ type: "text", text: "hello world" }] }]);
@@ -125,6 +173,25 @@ describe("GeminiProvider", () => {
     expect(res.content).toBe("Hi");
     expect(res.toolCalls[0].function.name).toBe("file_read");
     expect(res.cacheReadTokens).toBe(4);
+  });
+
+  it("times out a fetch that never settles", async () => {
+    const provider = createProvider(
+      { providerId: "gemini", apiKey: "k", chatModel: "gemini-1.5-pro" },
+      { fetch: neverSettlingFetch(), timeoutMs: 5 },
+    );
+
+    await expectRejectsBefore(
+      provider.complete({
+        model: "gemini-1.5-pro",
+        apiKey: "k",
+        temperature: 0,
+        maxTokens: 10,
+        messages: [{ role: "user", content: [{ type: "text", text: "x" }] }],
+      }),
+      50,
+      /Gemini request timed out after 5 ms/,
+    );
   });
 });
 
@@ -177,13 +244,6 @@ describe("OpenAICompatibleProvider", () => {
 });
 
 describe("createSettingsBackedChatClient (P3 activation)", () => {
-  function mockFetch(response: unknown, status = 200): typeof fetch {
-    return (async () => ({
-      ok: status >= 200 && status < 300, status,
-      text: async () => (typeof response === "string" ? response : JSON.stringify(response)),
-      json: async () => response, body: null,
-    })) as unknown as typeof fetch;
-  }
   const baseSettings: PublicModelSettings = {
     baseUrl: "https://api.openai.com/v1", chatModel: "gpt-4", embeddingModel: "",
     temperature: 0.2, maxTokens: 8192, thinkingEnabled: false, thinkingBudgetTokens: 8192,

@@ -3559,3 +3559,33 @@
   - `npm test -- src/main/storage/storeProxy.test.ts src/main/toolAuditLog.test.ts src/main/storage/migrateRoundTrip.test.ts src/main/storage/repositories/repositories.test.ts src/main/storage/repositories/runRepository.test.ts src/main/chatSessionStore.test.ts src/main/workspaceRunStore.test.ts src/main/agentRunStore.test.ts src/main/agentTrajectoryStore.test.ts src/main/agentGoalStore.test.ts` -> 10 files / 86 tests passed.
   - `npm run harness:check` -> passed.
   - `npm run verify` -> 164 files / 1046 tests passed; build passed; agent eval 26/26; memory eval 2/2.
+
+## 2026-06-21 - Task 3 Provider Timeout And Observability Durability
+
+- Summary:
+  - Added a shared abortable fetch timeout helper and routed OpenAI-compatible, Anthropic, and Gemini provider requests through it.
+  - Passed provider-factory timeout dependencies into native Anthropic/Gemini providers.
+  - Added explicit `flushShadowWrites()` drains for dual-mode run and trajectory JSON sidecars.
+- Changed files:
+  - `src/main/fetchWithTimeout.ts`
+  - `src/main/openAiCompatibleClient.ts`
+  - `src/main/providers/providerFactory.ts`
+  - `src/main/providers/anthropicProvider.ts`
+  - `src/main/providers/geminiProvider.ts`
+  - `src/main/agentRunStore.ts`
+  - `src/main/agentTrajectoryStore.ts`
+  - `src/main/providers/providers.test.ts`
+  - `src/main/modelRetry.test.ts`
+  - `src/main/storage/storeProxy.test.ts`
+  - `.superpowers/sdd/task-3-report.md`
+- RED evidence:
+  - `npm test -- src/main/providers/providers.test.ts src/main/modelRetry.test.ts` -> failed: native Anthropic/Gemini never-settling fetches remained `pending` instead of timing out; retry classification tests also remained `pending`.
+  - `npm test -- src/main/storage/storeProxy.test.ts` -> failed: dual-mode run and trajectory stores did not expose `flushShadowWrites()`.
+- GREEN evidence:
+  - `npm test -- src/main/providers/providers.test.ts src/main/modelRetry.test.ts` -> 2 files / 23 tests passed.
+  - `npm test -- src/main/storage/storeProxy.test.ts src/main/agentTrajectoryStore.test.ts src/main/agentRunStore.test.ts` -> 3 files / 26 tests passed.
+  - `npm test` -> 164 files / 1051 tests passed.
+  - `npm run build` -> passed.
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> 164 files / 1051 tests passed; build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI with expected SQLite ABI fallback to JSON.

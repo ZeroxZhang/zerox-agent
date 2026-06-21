@@ -87,15 +87,25 @@ describe.each(["sqlite", "dual"] as StorageBackend[])(
 );
 
 describe("dual-write shadows to JSON", () => {
-  it("JSON sidecar receives the same writes in dual mode", async () => {
+  it("run JSON sidecar receives the same writes after explicit drain", async () => {
     await withStorage("dual", async (dir, storage) => {
       const store = createAgentRunStore({ configDir: dir, backend: "dual", storage });
       await store.append(makeRun("a"));
-      // Give the fire-and-forget JSON shadow write time to flush.
-      await new Promise((r) => setTimeout(r, 50));
+      await store.flushShadowWrites();
       // A fresh json-only store reading the same configDir should see the run.
       const jsonOnly = createAgentRunStore({ configDir: dir, backend: "json" });
       expect((await jsonOnly.get("a"))?.id).toBe("a");
+    });
+  });
+
+  it("trajectory JSON sidecar receives the same writes after explicit drain", async () => {
+    await withStorage("dual", async (dir, storage) => {
+      const store = createAgentTrajectoryStore({ configDir: dir, backend: "dual", storage });
+      await store.append("run-1", makeEvent(1));
+      await store.flushShadowWrites();
+
+      const jsonOnly = createAgentTrajectoryStore({ configDir: dir, backend: "json" });
+      expect((await jsonOnly.list("run-1")).map((event) => event.sequence)).toEqual([1]);
     });
   });
 });
