@@ -224,9 +224,32 @@ function registerToolsIpcHandlers(container: AppContainer): void {
   ipcMain.handle("toolAudit:list", () => container.toolAuditLog().list({ limit: 50 }));
   ipcMain.handle(
     "toolResults:readRef",
-    async (_event, ref: string, options?: ReadToolResultRefOptions) =>
-      container.readToolResultRef(ref, options),
+    async (_event, ref: string, options?: unknown) =>
+      container.readToolResultRef(ref, sanitizeReadToolResultRefOptions(options)),
   );
+}
+
+function sanitizeReadToolResultRefOptions(
+  options: unknown,
+): ReadToolResultRefOptions | undefined {
+  if (!options || typeof options !== "object") {
+    return undefined;
+  }
+
+  const input = options as Record<string, unknown>;
+  const sanitized: ReadToolResultRefOptions = {};
+  for (const key of [
+    "runId",
+    "sessionId",
+    "requestId",
+    "workspaceRunId",
+  ] as const) {
+    if (typeof input[key] === "string") {
+      sanitized[key] = input[key];
+    }
+  }
+
+  return Object.keys(sanitized).length > 0 ? sanitized : undefined;
 }
 
 function registerRunsIpcHandlers(container: AppContainer): void {

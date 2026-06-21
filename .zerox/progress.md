@@ -3682,3 +3682,26 @@
   - `npm run harness:check` -> passed.
   - `npm run verify` -> 165 files / 1066 tests passed; build passed; agent eval 26/26; memory eval 2/2.
   - `npm run smoke:prod` -> passed; renderer rendered agent chat UI with expected SQLite ABI fallback to JSON.
+
+## 2026-06-21 - Task 4 Follow-Up 2 Renderer-Safe Tool-Result Ref Reads
+
+- Summary:
+  - Removed capability-bearing options from the renderer/preload/shared read-ref API shape; renderer calls now provide only run/session/request/workspace-run scope.
+  - Sanitized the IPC `toolResults:readRef` handler to forward only known string scope fields, dropping forged renderer `capability` payloads.
+  - Added main-process-issued `tool_result_ref_read` capabilities backed by a private store token so trusted internal grants still work without accepting plain renderer objects.
+- Changed files:
+  - `src/shared/toolResultRefs.ts`
+  - `src/main/ipc/index.ts`
+  - `src/main/container.ts`
+  - `src/main/toolResultOffloadStore.ts`
+  - `src/main/container.test.ts`
+  - `src/main/toolResultOffloadStore.test.ts`
+- RED evidence:
+  - `npm test -- src/main/toolResultOffloadStore.test.ts src/main/container.test.ts` -> failed: forged `{ kind: "tool_result_ref_read", ref }` capability returned stored content instead of denial in both store and container coverage.
+- GREEN evidence:
+  - `npm test -- src/main/toolResultOffloadStore.test.ts src/main/container.test.ts` -> 2 files / 9 tests passed.
+  - `npm test -- src/main/agentRuntimeEngine.test.ts src/main/agentRunnerService.test.ts src/main/container.test.ts src/main/toolResultOffloadStore.test.ts src/main/agentToolExecutor.test.ts src/shared/toolResultRefs.test.ts` -> 6 files / 83 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm run build` -> passed.
+  - `npm run verify` -> 165 files / 1066 tests passed; build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI with expected SQLite ABI fallback to JSON.

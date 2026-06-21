@@ -1,10 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type {
-  ReadToolResultRefOptions,
-  ToolResultRefReadCapability,
-} from "../shared/toolResultRefs";
+import type { ToolResultRefReadScope } from "../shared/toolResultRefs";
+
+const TOOL_RESULT_REF_READ_CAPABILITY = Symbol("tool_result_ref_read_capability");
 
 export type ToolResultOffloadWriteInput = {
   runId?: string;
@@ -16,8 +15,28 @@ export type ToolResultOffloadWriteInput = {
   content: string;
 };
 
-export type { ToolResultRefReadCapability };
-export type ToolResultOffloadReadScope = ReadToolResultRefOptions;
+export type ToolResultRefReadCapability = {
+  kind: "tool_result_ref_read";
+  ref: string;
+  issuedByRunId?: string;
+  readonly [TOOL_RESULT_REF_READ_CAPABILITY]: true;
+};
+
+export type ToolResultOffloadReadScope = ToolResultRefReadScope & {
+  capability?: unknown;
+};
+
+export function issueToolResultRefReadCapability(input: {
+  ref: string;
+  issuedByRunId?: string;
+}): ToolResultRefReadCapability {
+  return {
+    kind: "tool_result_ref_read",
+    ref: input.ref,
+    ...(input.issuedByRunId ? { issuedByRunId: input.issuedByRunId } : {}),
+    [TOOL_RESULT_REF_READ_CAPABILITY]: true,
+  };
+}
 
 export type ToolResultOffloadRef = {
   refId: string;
@@ -141,10 +160,19 @@ function metadataPath(absolutePath: string): string {
 }
 
 function capabilityAllowsRef(
-  capability: ToolResultRefReadCapability,
+  capability: unknown,
   relativePath: string,
 ): boolean {
-  return capability.kind === "tool_result_ref_read" && capability.ref === relativePath;
+  if (!capability || typeof capability !== "object") {
+    return false;
+  }
+
+  const candidate = capability as Partial<ToolResultRefReadCapability>;
+  return (
+    candidate.kind === "tool_result_ref_read" &&
+    candidate.ref === relativePath &&
+    candidate[TOOL_RESULT_REF_READ_CAPABILITY] === true
+  );
 }
 
 function matchesScope(

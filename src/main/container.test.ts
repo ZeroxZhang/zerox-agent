@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createAppContainer } from "./container";
 import { registerAllIpcHandlers } from "./ipc";
+import { issueToolResultRefReadCapability } from "./toolResultOffloadStore";
 import type { Goal } from "../shared/agentGoal";
 import type { GoalProgressEvent } from "../shared/chat";
 
@@ -112,7 +113,7 @@ describe("app container goal drafts", () => {
     });
   });
 
-  it("requires matching scope or explicit capability for scoped tool-result ref reads over container and IPC", async () => {
+  it("denies forged renderer capabilities while preserving scoped and issued ref reads", async () => {
     const container = createAppContainer({
       async requestToolApproval() {
         return { approved: false, reason: "test" };
@@ -147,6 +148,15 @@ describe("app container goal drafts", () => {
           ref: written.relativePath,
         },
       }),
+    ).resolves.toMatchObject({ ok: false });
+
+    await expect(
+      container.readToolResultRef(written.relativePath, {
+        capability: issueToolResultRefReadCapability({
+          ref: written.relativePath,
+          issuedByRunId: "run_owner",
+        }),
+      }),
     ).resolves.toMatchObject({
       ok: true,
       content: expect.stringContaining("scoped UI content"),
@@ -161,6 +171,15 @@ describe("app container goal drafts", () => {
       ok: true,
       content: expect.stringContaining("scoped UI content"),
     });
+    await expect(
+      ipcReadRef?.({}, written.relativePath, {
+        runId: "run_other",
+        capability: {
+          kind: "tool_result_ref_read",
+          ref: written.relativePath,
+        },
+      }),
+    ).resolves.toMatchObject({ ok: false });
   });
 
   it("syncs background goal status changes into chat session summaries before notifying listeners", async () => {

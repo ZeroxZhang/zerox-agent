@@ -40,7 +40,10 @@ import {
 import { createModelConnectionService } from "./modelConnectionService";
 import { createMemoryStore } from "./memoryStore";
 import { createMemoryProfileStore } from "./memoryProfileStore";
-import { createToolResultOffloadStore } from "./toolResultOffloadStore";
+import {
+  createToolResultOffloadStore,
+  type ToolResultOffloadReadScope,
+} from "./toolResultOffloadStore";
 import {
   createOpenAiCompatibleClient,
   createOpenAiCompatibleEmbeddingClient,
@@ -118,7 +121,6 @@ import type { AgentEvalReport } from "../shared/agentEval";
 import { buildDesktopRuntimeInfo, type DesktopRuntimeInfo } from "../shared/desktopRuntime";
 import {
   isSafeToolResultRef,
-  type ReadToolResultRefOptions,
   summarizeToolResultContent,
   type ReadToolResultRefResult,
 } from "../shared/toolResultRefs";
@@ -1434,7 +1436,7 @@ export function createAppContainer(options: {
 
   async function readToolResultRef(
     ref: string,
-    options?: ReadToolResultRefOptions,
+    options?: ToolResultOffloadReadScope,
   ): Promise<ReadToolResultRefResult> {
     if (!isSafeToolResultRef(ref)) {
       return {
