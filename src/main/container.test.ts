@@ -220,7 +220,12 @@ describe("app container goal drafts", () => {
     const listedSession = (await container.chatSessionStore().list()).find(
       (item) => item.id === session.session.id,
     );
-    expect(listedSession?.activeGoal).toMatchObject({
+    expect(listedSession?.activeGoal).toBeUndefined();
+    expect(
+      (await container.chatSessionStore().get(session.session.id))?.goalSummaries?.find(
+        (summary) => summary.id === goal.id,
+      ),
+    ).toMatchObject({
       id: goal.id,
       status: "canceled",
     });
@@ -354,7 +359,12 @@ describe("app container goal drafts", () => {
     const listedSession = (await container.listChatSessions()).find(
       (item) => item.id === session.session.id,
     );
-    expect(listedSession?.activeGoal).toMatchObject({
+    expect(listedSession?.activeGoal).toBeUndefined();
+    expect(
+      (await container.chatSessionStore().get(session.session.id))?.goalSummaries?.find(
+        (summary) => summary.id === goal.id,
+      ),
+    ).toMatchObject({
       id: goal.id,
       status: "achieved",
     });
@@ -370,7 +380,10 @@ describe("app container goal drafts", () => {
     const persistedSession = (await container.chatSessionStore().list()).find(
       (item) => item.id === session.session.id,
     );
-    expect(persistedSession?.activeGoal).toMatchObject({
+    const persistedRecord = await container.chatSessionStore().get(session.session.id);
+    expect(persistedSession?.activeGoal).toBeUndefined();
+    expect(persistedRecord?.activeGoalId).toBeUndefined();
+    expect(persistedRecord?.goalSummaries?.find((summary) => summary.id === goal.id)).toMatchObject({
       id: goal.id,
       status: "achieved",
     });

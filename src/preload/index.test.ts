@@ -33,4 +33,14 @@ describe("preload bridge", () => {
     expect(preloadSource).toContain("deleteChatSession");
     expect(preloadSource).toContain('ipcRenderer.invoke("chatSessions:delete"');
   });
+
+  it("routes git worktree creation through the user-approval request channel", () => {
+    expect(preloadSource).toContain("createGitWorktreeAgentWorkspace");
+    expect(preloadSource).toContain(
+      'ipcRenderer.invoke("agentWorkspaces:requestGitWorktree"',
+    );
+    expect(preloadSource).not.toContain(
+      'ipcRenderer.invoke("agentWorkspaces:createGitWorktree"',
+    );
+  });
 });

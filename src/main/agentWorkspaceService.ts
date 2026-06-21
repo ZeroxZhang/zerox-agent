@@ -36,6 +36,23 @@ export type CreateGitWorktreeWorkspaceInput = {
   name: string;
   repositoryRoot: string;
   branch: string;
+  approval?: GitWorktreeCreationApproval;
+};
+
+export type GitWorktreeCreationApproval =
+  | {
+      kind: "explicit_user_approval";
+      approvedAt: string;
+      approvedBy: "user";
+    }
+  | {
+      kind: "trusted_repository_policy";
+      policyId: string;
+    };
+
+export type TrustedGitWorktreeRepositoryPolicy = {
+  id: string;
+  repositoryRoot: string;
 };
 
 export type AgentWorkspaceService = {
@@ -58,6 +75,7 @@ export function createAgentWorkspaceService(options: {
     args: string[],
     options: { cwd?: string },
   ) => Promise<void>;
+  trustedGitWorktreeRepositories?: TrustedGitWorktreeRepositoryPolicy[];
 }): AgentWorkspaceService {
   const createId = options.createId ?? randomUUID;
   const execFile =
@@ -136,6 +154,12 @@ export function createAgentWorkspaceService(options: {
     },
 
     async createGitWorktreeWorkspace(input) {
+      const repositoryRoot = path.resolve(input.repositoryRoot);
+      assertGitWorktreeCreationAllowed(
+        repositoryRoot,
+        input.approval,
+        options.trustedGitWorktreeRepositories,
+      );
       const id = createId();
       const worktreePath = path.join(
         options.workspaceRoot,
@@ -146,7 +170,7 @@ export function createAgentWorkspaceService(options: {
       await execFile(
         "git",
         ["worktree", "add", worktreePath, "-b", input.branch],
-        { cwd: input.repositoryRoot },
+        { cwd: repositoryRoot },
       );
 
       return options.workspaceStore.create({
@@ -155,7 +179,7 @@ export function createAgentWorkspaceService(options: {
         kind: "git_worktree",
         cleanup: "keep",
         git: {
-          repositoryRoot: input.repositoryRoot,
+          repositoryRoot,
           branch: input.branch,
           worktreePath,
         },
@@ -170,4 +194,36 @@ export function createAgentWorkspaceService(options: {
 
 function sanitizePathSegment(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]+/g, "_");
+}
+
+function assertGitWorktreeCreationAllowed(
+  repositoryRoot: string,
+  approval: GitWorktreeCreationApproval | undefined,
+  trustedPolicies: TrustedGitWorktreeRepositoryPolicy[] | undefined,
+): void {
+  if (approval?.kind === "explicit_user_approval") {
+    return;
+  }
+
+  const matchingTrustedPolicy = trustedPolicies?.find((policy) =>
+    isSameOrInsidePath(repositoryRoot, path.resolve(policy.repositoryRoot)),
+  );
+  if (matchingTrustedPolicy) {
+    return;
+  }
+
+  if (approval?.kind === "trusted_repository_policy") {
+    throw new Error(
+      `Git worktree creation policy "${approval.policyId}" is not trusted for ${repositoryRoot}.`,
+    );
+  }
+
+  throw new Error(
+    "Git worktree creation requires explicit user approval or a trusted repository policy.",
+  );
+}
+
+function isSameOrInsidePath(candidate: string, root: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }

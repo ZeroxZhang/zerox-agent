@@ -102,6 +102,11 @@ describe("agent workspace service", () => {
       name: "Feature branch",
       repositoryRoot: "/Users/demo/repo",
       branch: "codex/feature",
+      approval: {
+        kind: "explicit_user_approval",
+        approvedAt: "2026-06-08T00:00:00.000Z",
+        approvedBy: "user",
+      },
     });
 
     const expectedPath = path.join(workspaceRoot, "worktrees", "feature_branch");
@@ -109,7 +114,7 @@ describe("agent workspace service", () => {
       {
         command: "git",
         args: ["worktree", "add", expectedPath, "-b", "codex/feature"],
-        options: { cwd: "/Users/demo/repo" },
+        options: { cwd: path.resolve("/Users/demo/repo") },
       },
     ]);
     expect(workspace).toMatchObject({
@@ -118,10 +123,42 @@ describe("agent workspace service", () => {
       rootPath: expectedPath,
       kind: "git_worktree",
       git: {
-        repositoryRoot: "/Users/demo/repo",
+        repositoryRoot: path.resolve("/Users/demo/repo"),
         branch: "codex/feature",
         worktreePath: expectedPath,
       },
     });
+  });
+
+  it("refuses git worktree creation before explicit approval or trusted policy", async () => {
+    const calls: Array<{
+      command: string;
+      args: string[];
+      options: { cwd?: string };
+    }> = [];
+    const store = createAgentWorkspaceStore({
+      configDir,
+      createId: () => "workspace_git",
+      now: () => new Date("2026-06-08T00:00:00.000Z"),
+    });
+    const service = createAgentWorkspaceService({
+      workspaceStore: store,
+      workspaceRoot,
+      createId: () => "feature_branch",
+      execFile: async (command, args, options) => {
+        calls.push({ command, args, options });
+      },
+    });
+
+    await expect(
+      service.createGitWorktreeWorkspace({
+        name: "Feature branch",
+        repositoryRoot: "/Users/demo/repo",
+        branch: "codex/feature",
+      }),
+    ).rejects.toThrow(/approval|trusted/i);
+
+    expect(calls).toEqual([]);
+    await expect(store.list()).resolves.toEqual([]);
   });
 });

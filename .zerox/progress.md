@@ -1,5 +1,29 @@
 # Zerox Harness Progress
 
+## 2026-06-21 - Task 5 Renderer/IPC/User-Visible State Coherence
+
+- Request: implement Task 5 from the bug-hardening SDD/TDD plan: worktree approval gating, terminal-goal active link cleanup, live Runs panel refresh, and empty chat session list acceptance.
+- Changed files:
+  - `src/main/agentWorkspaceService.ts`, `src/main/container.ts`, `src/main/ipc/index.ts`, `src/main/chatService.ts`
+  - `src/preload/index.ts`
+  - `src/renderer/components/AgentChatPanel.tsx`, `src/renderer/components/RunsPanel.tsx`
+  - `src/main/agentWorkspaceService.test.ts`, `src/preload/index.test.ts`, `src/main/chatService.test.ts`, `src/main/container.test.ts`, `src/renderer/materialDesign.test.ts`
+  - `.superpowers/sdd/task-5-report.md`, `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/main/agentWorkspaceService.test.ts src/preload/index.test.ts` -> failed: git worktree creation resolved without approval and preload still invoked the direct create channel.
+  - `npm test -- src/main/chatService.test.ts src/main/goalChatService.test.ts src/renderer/chatTaskActivity.test.ts` -> failed: achieved review continuation did not clear the active chat goal link.
+  - `npm test -- src/renderer/materialDesign.test.ts` -> failed: Runs had no run lifecycle subscription and empty chat session lists were ignored.
+- GREEN evidence:
+  - `npm test -- src/main/agentWorkspaceService.test.ts src/preload/index.test.ts` -> 2 files / 7 tests passed.
+  - `npm test -- src/main/chatService.test.ts src/main/goalChatService.test.ts src/renderer/chatTaskActivity.test.ts` -> 3 files / 46 tests passed.
+  - `npm test -- src/renderer/materialDesign.test.ts src/renderer/chatTaskActivityRestore.test.ts` -> 2 files / 37 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm test` -> 165 files / 1071 tests passed.
+  - `npm run build` -> passed.
+  - `npm run verify` -> 165 files / 1071 tests passed; build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI with expected SQLite ABI fallback to JSON.
+  - `git diff --check` -> passed.
+
 ## 2026-06-21 Task 3 Follow-up Abort-aware Provider Timeout Race
 
 - Request: fix the abort-aware fetch race where `fetchWithTimeout` aborted the underlying fetch before rejecting the local timeout promise, allowing `AbortError` to win and preventing `completeWithModelRetry` from retrying local provider timeouts.

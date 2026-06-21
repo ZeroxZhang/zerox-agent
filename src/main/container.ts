@@ -17,7 +17,10 @@ import { createAgentGoalPlanner } from "./agentGoalPlanner";
 import { createGoalRuntimeEngine } from "./goalRuntimeEngine";
 import { applyGoalOutputRootsToRunContext } from "./goalOutputRoots";
 import { createGoalChatService } from "./goalChatService";
-import { createAgentWorkspaceService } from "./agentWorkspaceService";
+import {
+  createAgentWorkspaceService,
+  type CreateGitWorktreeWorkspaceInput,
+} from "./agentWorkspaceService";
 import { createMultiAgentSessionStore } from "./multiAgentSessionStore";
 import { createMultiAgentCoordinator } from "./multiAgentCoordinator";
 import { createAgentEvalFixtures } from "./eval/agentEvalFixtures";
@@ -127,6 +130,13 @@ import {
 import type { PermissionRule } from "../shared/kernelContract";
 
 export type AppContainer = ReturnType<typeof createAppContainer>;
+
+export type AgentRunsChangedEvent = {
+  reason: "active_execution_changed" | "run_updated";
+  runId?: string;
+  taskId?: string;
+  createdAt: string;
+};
 
 function acceptanceContextNeedsModel(
   goal: Goal,
@@ -260,6 +270,7 @@ export function createAppContainer(options: {
   let kernelPermissionRules: PermissionRule[] = [];
 
   const goalProgressListeners = new Set<(event: GoalProgressEvent) => void>();
+  const agentRunsChangedListeners = new Set<(event: AgentRunsChangedEvent) => void>();
 
   function onGoalProgressEvent(callback: (event: GoalProgressEvent) => void) {
     goalProgressListeners.add(callback);
@@ -282,6 +293,29 @@ export function createAppContainer(options: {
         listener(event);
       } catch {
         // Subscriber errors must not break the goal runtime.
+      }
+    }
+  }
+
+  function onAgentRunsChanged(callback: (event: AgentRunsChangedEvent) => void) {
+    agentRunsChangedListeners.add(callback);
+    return () => {
+      agentRunsChangedListeners.delete(callback);
+    };
+  }
+
+  function emitAgentRunsChanged(
+    event: Omit<AgentRunsChangedEvent, "createdAt">,
+  ) {
+    const nextEvent: AgentRunsChangedEvent = {
+      ...event,
+      createdAt: new Date().toISOString(),
+    };
+    for (const listener of agentRunsChangedListeners) {
+      try {
+        listener(nextEvent);
+      } catch {
+        // Subscriber errors must not break agent execution.
       }
     }
   }
@@ -322,11 +356,22 @@ export function createAppContainer(options: {
       existingSummary?.description === summary.description &&
       existingSummary.status === summary.status
     ) {
+      await clearActiveChatGoalIfTerminal(sessionId, summary);
       return false;
     }
 
     await chatSessionStore().attachGoal(sessionId, summary);
+    await clearActiveChatGoalIfTerminal(sessionId, summary);
     return true;
+  }
+
+  async function clearActiveChatGoalIfTerminal(
+    sessionId: string,
+    summary: ChatSessionGoalSummary,
+  ) {
+    if (shouldClearActiveChatGoal(summary.status)) {
+      await chatSessionStore().clearActiveGoal(sessionId, summary.id);
+    }
   }
 
   async function appendGoalTerminalMessageIfNeeded(
@@ -364,6 +409,10 @@ export function createAppContainer(options: {
     };
   }
 
+  function shouldClearActiveChatGoal(status: Goal["status"]): boolean {
+    return status === "achieved" || status === "failed" || status === "canceled";
+  }
+
   async function reconcileChatSessionGoalSummary(
     sessionId: string,
     activeGoal: ChatSessionGoalSummary | undefined,
@@ -379,6 +428,9 @@ export function createAppContainer(options: {
 
     const summary = toChatGoalSummary(goal);
     await attachGoalSummaryIfChanged(sessionId, summary);
+    if (shouldClearActiveChatGoal(summary.status)) {
+      return undefined;
+    }
     return summary;
   }
 
@@ -390,8 +442,10 @@ export function createAppContainer(options: {
           session.id,
           session.activeGoal,
         );
+        const sessionWithoutActiveGoal = { ...session };
+        delete sessionWithoutActiveGoal.activeGoal;
         return {
-          ...session,
+          ...sessionWithoutActiveGoal,
           ...(activeGoal ? { activeGoal } : {}),
         };
       }),
@@ -414,7 +468,7 @@ export function createAppContainer(options: {
       activeGoal,
     );
     if (!reconciledGoal) {
-      return session;
+      return chatSessionStore().get(sessionId);
     }
 
     return chatSessionStore().get(sessionId);
@@ -576,6 +630,40 @@ export function createAppContainer(options: {
         workspaceRoot: path.join(app.getPath("userData"), "workspaces"),
       }),
     );
+  }
+
+  async function requestGitWorktreeAgentWorkspace(
+    input: CreateGitWorktreeWorkspaceInput,
+  ) {
+    const approval = await options.requestToolApproval({
+      taskId: "agent_workspaces",
+      taskName: "Create Git worktree workspace",
+      request: {
+        toolName: "git_worktree_add",
+        args: {
+          name: input.name,
+          repositoryRoot: input.repositoryRoot,
+          branch: input.branch,
+        },
+      },
+      deniedReason:
+        "Creating a Git worktree runs git worktree add against a renderer-provided repository path.",
+    });
+
+    if (!approval.approved) {
+      throw new Error(approval.reason ?? "Git worktree creation was not approved.");
+    }
+
+    return agentWorkspaceService().createGitWorktreeWorkspace({
+      name: input.name,
+      repositoryRoot: input.repositoryRoot,
+      branch: input.branch,
+      approval: {
+        kind: "explicit_user_approval",
+        approvedAt: new Date().toISOString(),
+        approvedBy: "user",
+      },
+    });
   }
 
   function multiAgentSessionStore() {
@@ -1261,15 +1349,23 @@ export function createAppContainer(options: {
 
     const controller = new AbortController();
     activeTaskRunControllers.set(taskId, controller);
+    emitAgentRunsChanged({ reason: "active_execution_changed", taskId });
 
     try {
-      return await agentRunnerService().runTask(taskId, {
+      const result = await agentRunnerService().runTask(taskId, {
         signal: controller.signal,
       });
+      emitAgentRunsChanged({
+        reason: "run_updated",
+        taskId,
+        ...(result.ok ? { runId: result.run.id } : {}),
+      });
+      return result;
     } finally {
       if (activeTaskRunControllers.get(taskId) === controller) {
         activeTaskRunControllers.delete(taskId);
       }
+      emitAgentRunsChanged({ reason: "active_execution_changed", taskId });
     }
   }
 
@@ -1292,15 +1388,31 @@ export function createAppContainer(options: {
 
     const controller = new AbortController();
     activeTaskRunControllers.set(checkpoint.taskId, controller);
+    emitAgentRunsChanged({
+      reason: "active_execution_changed",
+      runId,
+      taskId: checkpoint.taskId,
+    });
 
     try {
-      return await agentRunnerService().resumeRun(runId, {
+      const result = await agentRunnerService().resumeRun(runId, {
         signal: controller.signal,
       });
+      emitAgentRunsChanged({
+        reason: "run_updated",
+        runId: result.ok ? result.run.id : runId,
+        taskId: checkpoint.taskId,
+      });
+      return result;
     } finally {
       if (activeTaskRunControllers.get(checkpoint.taskId) === controller) {
         activeTaskRunControllers.delete(checkpoint.taskId);
       }
+      emitAgentRunsChanged({
+        reason: "active_execution_changed",
+        runId,
+        taskId: checkpoint.taskId,
+      });
     }
   }
 
@@ -1334,6 +1446,11 @@ export function createAppContainer(options: {
       ...checkpoint,
       status: "paused",
       updatedAt: new Date().toISOString(),
+    });
+    emitAgentRunsChanged({
+      reason: "active_execution_changed",
+      runId,
+      taskId: checkpoint.taskId,
     });
 
     return {
@@ -1533,6 +1650,7 @@ export function createAppContainer(options: {
     agentWorkspaceStore,
     workspaceRunStore,
     agentWorkspaceService,
+    requestGitWorktreeAgentWorkspace,
     multiAgentSessionStore,
     multiAgentCoordinator,
     memoryStore,
@@ -1572,5 +1690,6 @@ export function createAppContainer(options: {
     runAgentQualityEvals,
     selfImprovementService,
     onGoalProgressEvent,
+    onAgentRunsChanged,
   };
 }

@@ -569,6 +569,53 @@ describe("chat service", () => {
     expect(completeCalled).toBe(false);
   });
 
+  it("clears the active chat goal link when review continuation achieves the goal", async () => {
+    const attachedGoals: ChatSessionGoalSummary[] = [];
+    const clearedGoals: Array<{ sessionId: string; goalId: string }> = [];
+    const activeGoal: ChatSessionGoalSummary = {
+      id: "goal_release",
+      description: "发布",
+      status: "waiting_for_review",
+    };
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([], {
+        activeGoal,
+        attachedGoals,
+        clearedGoals,
+      }),
+      goalService: createGoalService({ resolveStatus: "achieved" }),
+      createId: () => "chat_goal",
+      now: () => new Date("2026-06-12T08:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage({
+      sessionId: "persisted_session",
+      message: "继续",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      activeGoal: {
+        id: "goal_release",
+        status: "achieved",
+      },
+    });
+    expect(attachedGoals.at(-1)).toMatchObject({
+      id: "goal_release",
+      status: "achieved",
+    });
+    expect(clearedGoals).toEqual([
+      { sessionId: "persisted_session", goalId: "goal_release" },
+    ]);
+  });
+
   it("extracts preference-like chat turns into L1 memory and updates the persona profile", async () => {
     const memoryWrites: MemoryInput[] = [];
     const profileUpdates: MemoryRecord[][] = [];
@@ -1755,6 +1802,7 @@ function createChatSessionStore(
   options: {
     activeGoal?: ChatSessionGoalSummary;
     attachedGoals?: ChatSessionGoalSummary[];
+    clearedGoals?: Array<{ sessionId: string; goalId: string }>;
     tokenUsageWrites?: Array<{
       sessionId: string;
       usage: ChatSessionTokenUsage;
@@ -1806,7 +1854,8 @@ function createChatSessionStore(
         updatedAt: "2026-06-06T08:00:00.000Z",
       };
     },
-    async clearActiveGoal() {
+    async clearActiveGoal(sessionId: string, goalId: string) {
+      options.clearedGoals?.push({ sessionId, goalId });
       return null;
     },
   };
@@ -1816,6 +1865,7 @@ function createGoalService(options: {
   goalCreates?: unknown[];
   resumes?: string[];
   pauses?: string[];
+  resolveStatus?: ChatSessionGoalSummary["status"];
 } = {}) {
   const goalDescriptions = new Map<string, string>();
   return {
@@ -1859,7 +1909,7 @@ function createGoalService(options: {
       return {
         id: goalId,
         description: "发布",
-        status: "executing",
+        status: options.resolveStatus ?? "executing",
       };
     },
   };

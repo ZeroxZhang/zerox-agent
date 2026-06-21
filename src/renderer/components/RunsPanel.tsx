@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   buildRunTimeline,
   getRunGuidance,
@@ -42,7 +42,7 @@ export function RunsPanel() {
     message: "正在加载运行记录...",
   });
 
-  useEffect(() => {
+  const refreshRunsSnapshot = useCallback(async (selectFirstRun = false) => {
     if (!window.buildingAgent) {
       setRuns(demoRuns);
       setEvalCandidates([]);
@@ -55,7 +55,7 @@ export function RunsPanel() {
       return;
     }
 
-    Promise.all([
+    await Promise.all([
       window.buildingAgent.listAgentRuns(),
       window.buildingAgent.listActiveAgentExecutions(),
       window.buildingAgent.listEvalCandidates(),
@@ -64,7 +64,16 @@ export function RunsPanel() {
         setRuns(loadedRuns);
         setActiveExecutions(loadedExecutions);
         setEvalCandidates(loadedEvalCandidates);
-        setSelectedRunId(loadedRuns[0]?.id ?? "");
+        setSelectedRunId((currentRunId) => {
+          if (
+            !selectFirstRun &&
+            currentRunId &&
+            loadedRuns.some((run) => run.id === currentRunId)
+          ) {
+            return currentRunId;
+          }
+          return loadedRuns[0]?.id ?? "";
+        });
         setStatus({
           kind: "idle",
           message:
@@ -81,6 +90,30 @@ export function RunsPanel() {
         });
       });
   }, []);
+
+  useEffect(() => {
+    void refreshRunsSnapshot(true);
+  }, [refreshRunsSnapshot]);
+
+  useEffect(() => {
+    if (!window.buildingAgent) {
+      return;
+    }
+
+    return window.buildingAgent.onAgentRunsChanged(() => {
+      void refreshRunsSnapshot(false);
+    });
+  }, [refreshRunsSnapshot]);
+
+  useEffect(() => {
+    if (!window.buildingAgent) {
+      return;
+    }
+
+    return window.buildingAgent.onAgentStreamEvent(() => {
+      void refreshRunsSnapshot(false);
+    });
+  }, [refreshRunsSnapshot]);
 
   useEffect(() => {
     if (!window.buildingAgent) {

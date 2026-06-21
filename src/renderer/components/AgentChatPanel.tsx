@@ -478,11 +478,9 @@ export function AgentChatPanel({
         if (validation.ok && validation.snapshot) {
           setLastValidationSnapshot(validation.snapshot);
         }
-        if (loadedSessions.length) {
-          const nextSessions = loadedSessions.map(toSessionRailItem);
-          setSessions(nextSessions);
-          onChatSessionsChange?.(nextSessions);
-        }
+        const nextSessions = loadedSessions.map(toSessionRailItem);
+        setSessions(nextSessions);
+        onChatSessionsChange?.(nextSessions);
         setStatus({
           kind: "ready",
           message: settings.hasApiKey ? "模型已配置" : "还需要配置模型密钥",
@@ -539,13 +537,16 @@ export function AgentChatPanel({
     }
 
     const loadedSessions = await window.buildingAgent.listChatSessions();
-    if (loadedSessions.length) {
-      const nextSessions = loadedSessions.map(toSessionRailItem);
-      setSessions(nextSessions);
-      onChatSessionsChange?.(nextSessions);
-    }
+    const nextSessions = loadedSessions.map(toSessionRailItem);
+    setSessions(nextSessions);
+    onChatSessionsChange?.(nextSessions);
     if (nextActiveSessionId) {
       setSessionId(nextActiveSessionId);
+    } else if (
+      sessionIdRef.current &&
+      !nextSessions.some((session) => session.id === sessionIdRef.current)
+    ) {
+      setSessionId(null);
     }
   }
 

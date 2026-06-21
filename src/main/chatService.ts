@@ -1311,7 +1311,11 @@ async function tryRouteGoalIntent(options: {
     const activeGoal = await options.goalService.resume(createdGoal.id, {
       ...(options.signal ? { signal: options.signal } : {}),
     });
-    await options.chatSessionStore?.attachGoal(options.sessionId, activeGoal);
+    await syncChatGoalSummary(
+      options.chatSessionStore,
+      options.sessionId,
+      activeGoal,
+    );
     const reply = `已设置并开始执行目标：${activeGoal.description}。`;
     options.emitStatus?.send({
       state: "completed",
@@ -1360,7 +1364,11 @@ async function tryRouteGoalIntent(options: {
             ...(options.signal ? { signal: options.signal } : {}),
           });
 
-    await options.chatSessionStore?.attachGoal(options.sessionId, activeGoal);
+    await syncChatGoalSummary(
+      options.chatSessionStore,
+      options.sessionId,
+      activeGoal,
+    );
     const reply = restartingTerminalGoal
       ? formatTerminalGoalRestartReply(options.activeGoal.status, activeGoal.description)
       : `继续推进目标：${activeGoal.description}。`;
@@ -1392,7 +1400,11 @@ async function tryRouteGoalIntent(options: {
 
   if (options.route.kind === "pause_goal") {
     const activeGoal = await options.goalService.pause(options.activeGoal.id);
-    await options.chatSessionStore?.attachGoal(options.sessionId, activeGoal);
+    await syncChatGoalSummary(
+      options.chatSessionStore,
+      options.sessionId,
+      activeGoal,
+    );
     const reply = `已暂停目标：${activeGoal.description}。`;
     await appendAssistantMessage({
       chatSessionStore: options.chatSessionStore,
@@ -1415,10 +1427,10 @@ async function tryRouteGoalIntent(options: {
 
   if (options.route.kind === "cancel_goal") {
     const activeGoal = await options.goalService.cancel(options.activeGoal.id);
-    await options.chatSessionStore?.attachGoal(options.sessionId, activeGoal);
-    await options.chatSessionStore?.clearActiveGoal(
+    await syncChatGoalSummary(
+      options.chatSessionStore,
       options.sessionId,
-      activeGoal.id,
+      activeGoal,
     );
     const reply = `已结束目标：${activeGoal.description}。`;
     await appendAssistantMessage({
@@ -1444,7 +1456,11 @@ async function tryRouteGoalIntent(options: {
     options.activeGoal.id,
     { kind: "modify_plan", instructions: options.route.instructions },
   );
-  await options.chatSessionStore?.attachGoal(options.sessionId, activeGoal);
+  await syncChatGoalSummary(
+    options.chatSessionStore,
+    options.sessionId,
+    activeGoal,
+  );
   const reply = `已记录目标调整：${options.route.instructions}`;
   await appendAssistantMessage({
     chatSessionStore: options.chatSessionStore,
@@ -1472,6 +1488,25 @@ function isTerminalGoalStatus(status: ChatSessionGoalSummary["status"]): boolean
     status === "failed" ||
     status === "canceled"
   );
+}
+
+async function syncChatGoalSummary(
+  chatSessionStore:
+    | Pick<ChatSessionStore, "appendMessage" | "attachGoal" | "clearActiveGoal">
+    | undefined,
+  sessionId: string,
+  goal: ChatSessionGoalSummary,
+) {
+  await chatSessionStore?.attachGoal(sessionId, goal);
+  if (shouldClearActiveChatGoal(goal.status)) {
+    await chatSessionStore?.clearActiveGoal(sessionId, goal.id);
+  }
+}
+
+function shouldClearActiveChatGoal(
+  status: ChatSessionGoalSummary["status"],
+): boolean {
+  return status === "achieved" || status === "failed" || status === "canceled";
 }
 
 function formatTerminalGoalRestartReply(

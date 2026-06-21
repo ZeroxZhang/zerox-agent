@@ -103,6 +103,13 @@ const KERNEL_IPC = {
   respondPermission: "kernel:respondPermission",
 } as const;
 
+export type AgentRunsChangedEvent = {
+  reason: "active_execution_changed" | "run_updated";
+  runId?: string;
+  taskId?: string;
+  createdAt: string;
+};
+
 export type CreateGoalInput = {
   description: string;
   successCriteria: string[];
@@ -218,7 +225,7 @@ const buildingAgent = {
     repositoryRoot: string;
     branch: string;
   }): Promise<AgentWorkspace> =>
-    ipcRenderer.invoke("agentWorkspaces:createGitWorktree", input),
+    ipcRenderer.invoke("agentWorkspaces:requestGitWorktree", input),
   listMultiAgentSessions: (): Promise<MultiAgentSession[]> =>
     ipcRenderer.invoke("multiAgentSessions:list"),
   listAgentRunTrajectory: (runId: string): Promise<AgentTrajectoryEvent[]> =>
@@ -290,6 +297,16 @@ const buildingAgent = {
     ipcRenderer.on("agent:streamEvent", handler);
     return () => {
       ipcRenderer.removeListener("agent:streamEvent", handler);
+    };
+  },
+  onAgentRunsChanged: (callback: (event: AgentRunsChangedEvent) => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      data: AgentRunsChangedEvent,
+    ) => callback(data);
+    ipcRenderer.on("agentRuns:changed", handler);
+    return () => {
+      ipcRenderer.removeListener("agentRuns:changed", handler);
     };
   },
   onKernelEvent: (callback: (event: KernelEvent) => void) => {

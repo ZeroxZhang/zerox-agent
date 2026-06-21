@@ -220,6 +220,18 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".kernel-event-card");
   });
 
+  it("refreshes Runs from run lifecycle events instead of relying only on kernel details", () => {
+    expect(preloadSource).toContain("onAgentRunsChanged");
+    expect(runsPanelSource).toContain("refreshRunsSnapshot");
+    expect(runsPanelSource).toContain("onAgentRunsChanged");
+    expect(runsPanelSource).toContain("window.buildingAgent.listAgentRuns()");
+    expect(runsPanelSource).toContain(
+      "window.buildingAgent.listActiveAgentExecutions()",
+    );
+    expect(runsPanelSource).toContain("onKernelEvent");
+    expect(runsPanelSource).toContain("appendKernelEvent");
+  });
+
   it("surfaces evidence-backed Run Graph gates in Runs", () => {
     expect(runsPanelSource).toContain("projectRunGraph");
     expect(runsPanelSource).toContain("Run Graph");
@@ -315,6 +327,20 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(chatPanelSource).toContain("const eventBelongsToActiveGoal");
     expect(chatPanelSource).toContain("event.sessionId === activeSessionId");
     expect(chatPanelSource).toContain("void refreshActiveGoalDetail(event.goalId)");
+  });
+
+  it("accepts empty desktop chat session lists as real state", () => {
+    const refreshSessionsSource = getFunctionSource(
+      chatPanelSource,
+      "refreshSessions",
+    );
+
+    expect(refreshSessionsSource).toContain(
+      "const nextSessions = loadedSessions.map(toSessionRailItem);",
+    );
+    expect(refreshSessionsSource).toContain("setSessions(nextSessions);");
+    expect(refreshSessionsSource).toContain("onChatSessionsChange?.(nextSessions);");
+    expect(refreshSessionsSource).not.toContain("if (loadedSessions.length)");
   });
 
   it("reloads the active chat transcript when a background goal reaches a terminal state", () => {

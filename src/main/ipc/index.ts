@@ -69,6 +69,7 @@ export function registerAllIpcHandlers(container: AppContainer): void {
   registerModelSettingsIpcHandlers(container);
   registerChatIpcHandlers(container);
   registerGoalProgressBroadcaster(container);
+  registerAgentRunsChangedBroadcaster(container);
 }
 
 function registerGoalProgressBroadcaster(container: AppContainer): void {
@@ -76,6 +77,16 @@ function registerGoalProgressBroadcaster(container: AppContainer): void {
     for (const window of BrowserWindow.getAllWindows()) {
       if (!window.isDestroyed()) {
         window.webContents.send("goal:progressEvent", event);
+      }
+    }
+  });
+}
+
+function registerAgentRunsChangedBroadcaster(container: AppContainer): void {
+  container.onAgentRunsChanged((event) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) {
+        window.webContents.send("agentRuns:changed", event);
       }
     }
   });
@@ -341,8 +352,8 @@ function registerWorkspacesIpcHandlers(container: AppContainer): void {
   ipcMain.handle("agentWorkspaces:createTemporary", (_event, input) =>
     container.agentWorkspaceService().createTemporaryWorkspace(input),
   );
-  ipcMain.handle("agentWorkspaces:createGitWorktree", (_event, input) =>
-    container.agentWorkspaceService().createGitWorktreeWorkspace(input),
+  ipcMain.handle("agentWorkspaces:requestGitWorktree", (_event, input) =>
+    container.requestGitWorktreeAgentWorkspace(input),
   );
 }
 
