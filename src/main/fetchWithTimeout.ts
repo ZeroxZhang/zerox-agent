@@ -15,8 +15,8 @@ export async function fetchWithTimeout(
   let rejectAbortable: ((error: Error) => void) | null = null;
 
   const abortWith = (error: Error) => {
-    controller.abort();
     rejectAbortable?.(error);
+    controller.abort();
   };
 
   const abortFromExternalSignal = () => {
@@ -43,11 +43,17 @@ export async function fetchWithTimeout(
   });
 
   try {
+    const fetchPromise = fetchImpl(url, {
+      ...init,
+      signal: controller.signal,
+    });
+    void fetchPromise.catch(() => {
+      // Promise.race observes this too; the extra observer prevents abandoned
+      // transport aborts from becoming unhandled rejections after local timeout wins.
+    });
+
     return await Promise.race([
-      fetchImpl(url, {
-        ...init,
-        signal: controller.signal,
-      }),
+      fetchPromise,
       abortable,
     ]);
   } finally {

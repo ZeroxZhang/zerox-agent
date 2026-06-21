@@ -1,5 +1,25 @@
 # Zerox Harness Progress
 
+## 2026-06-21 Task 3 Follow-up Abort-aware Provider Timeout Race
+
+- Request: fix the abort-aware fetch race where `fetchWithTimeout` aborted the underlying fetch before rejecting the local timeout promise, allowing `AbortError` to win and preventing `completeWithModelRetry` from retrying local provider timeouts.
+- Changed files:
+  - `src/main/fetchWithTimeout.ts`
+  - `src/main/providers/providers.test.ts`
+  - `src/main/modelRetry.test.ts`
+  - `.superpowers/sdd/task-3-followup-report.md`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/main/providers/providers.test.ts src/main/modelRetry.test.ts` -> failed as expected: abort-aware provider timeout and retry tests received `The operation was aborted.` instead of provider timeout messages.
+- GREEN evidence:
+  - `npm test -- src/main/providers/providers.test.ts src/main/modelRetry.test.ts` -> 2 files / 28 tests passed.
+  - `npm test -- src/main/storage/storeProxy.test.ts src/main/agentTrajectoryStore.test.ts src/main/agentRunStore.test.ts` -> 3 files / 26 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm test` -> 164 files / 1056 tests passed.
+  - `npm run build` -> passed.
+  - `npm run verify` -> 164 files / 1056 tests passed; build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI, with designed JSON fallback for the local better-sqlite3 ABI mismatch.
+
 ## 2026-06-21 Task 2 SQLite/Migration/JSONL Recovery Integrity
 
 - Request: implement Task 2 from the bug-hardening SDD/TDD plan: SQLite/dual storage parity, reviewed-learning migration fidelity, audit event identity, tolerant JSONL recovery, SQLite chat search parity, and rollback completeness.

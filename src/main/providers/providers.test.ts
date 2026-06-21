@@ -84,6 +84,20 @@ function neverSettlingFetch(): typeof fetch {
   })) as unknown as typeof fetch;
 }
 
+function abortAwareNeverSettlingFetch(): typeof fetch {
+  return ((_, init?: RequestInit) => new Promise<Response>((_, reject) => {
+    const signal = init?.signal;
+    const abort = () => {
+      reject(new DOMException("The operation was aborted.", "AbortError"));
+    };
+    if (signal?.aborted) {
+      abort();
+      return;
+    }
+    signal?.addEventListener("abort", abort, { once: true });
+  })) as unknown as typeof fetch;
+}
+
 async function expectRejectsBefore(
   promise: Promise<unknown>,
   timeoutMs: number,
@@ -153,6 +167,46 @@ describe("AnthropicProvider", () => {
     );
   });
 
+  it("surfaces local timeout instead of AbortError when fetch rejects on abort", async () => {
+    const provider = createProvider(
+      { providerId: "anthropic", apiKey: "k", chatModel: "claude-3" },
+      { fetch: abortAwareNeverSettlingFetch(), timeoutMs: 5 },
+    );
+
+    await expectRejectsBefore(
+      provider.complete({
+        model: "claude-3",
+        apiKey: "k",
+        temperature: 0,
+        maxTokens: 10,
+        messages: [{ role: "user", content: [{ type: "text", text: "x" }] }],
+      }),
+      50,
+      /Anthropic request timed out after 5 ms/,
+    );
+  });
+
+  it("surfaces external abort semantics instead of local timeout", async () => {
+    const controller = new AbortController();
+    const provider = createProvider(
+      { providerId: "anthropic", apiKey: "k", chatModel: "claude-3" },
+      { fetch: abortAwareNeverSettlingFetch(), timeoutMs: 1000 },
+    );
+
+    const completion = provider.complete({
+      model: "claude-3",
+      apiKey: "k",
+      temperature: 0,
+      maxTokens: 10,
+      messages: [{ role: "user", content: [{ type: "text", text: "x" }] }],
+      signal: controller.signal,
+    });
+    controller.abort();
+
+    await expect(completion).rejects.toThrow(/abort/i);
+    await expect(completion).rejects.not.toThrow(/timed out/i);
+  });
+
   it("countTokens falls back to heuristic without credentials", async () => {
     const provider = createProvider({ providerId: "anthropic", apiKey: "", chatModel: "" }, { fetch: mockFetch({}) });
     const n = await provider.countTokens([{ role: "user", content: [{ type: "text", text: "hello world" }] }]);
@@ -179,6 +233,25 @@ describe("GeminiProvider", () => {
     const provider = createProvider(
       { providerId: "gemini", apiKey: "k", chatModel: "gemini-1.5-pro" },
       { fetch: neverSettlingFetch(), timeoutMs: 5 },
+    );
+
+    await expectRejectsBefore(
+      provider.complete({
+        model: "gemini-1.5-pro",
+        apiKey: "k",
+        temperature: 0,
+        maxTokens: 10,
+        messages: [{ role: "user", content: [{ type: "text", text: "x" }] }],
+      }),
+      50,
+      /Gemini request timed out after 5 ms/,
+    );
+  });
+
+  it("surfaces local timeout instead of AbortError when fetch rejects on abort", async () => {
+    const provider = createProvider(
+      { providerId: "gemini", apiKey: "k", chatModel: "gemini-1.5-pro" },
+      { fetch: abortAwareNeverSettlingFetch(), timeoutMs: 5 },
     );
 
     await expectRejectsBefore(

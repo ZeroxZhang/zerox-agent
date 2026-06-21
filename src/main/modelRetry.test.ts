@@ -185,6 +185,61 @@ describe("completeWithModelRetry", () => {
     expect(retryEvents).toHaveLength(1);
     expect(retryEvents[0]?.error).toMatch(message);
   });
+
+  it.each([
+    { providerId: "anthropic" as const, model: "claude-3", message: /Anthropic request timed out after 5 ms/ },
+    { providerId: "gemini" as const, model: "gemini-1.5-pro", message: /Gemini request timed out after 5 ms/ },
+  ])("retries $providerId local timeouts when fetch rejects immediately on abort", async ({ providerId, model, message }) => {
+    let fetchCalls = 0;
+    const retryEvents: ModelRetryEvent[] = [];
+    const provider = createProvider(
+      {
+        providerId,
+        apiKey: "k",
+        chatModel: model,
+        baseUrl: "https://api.example.test",
+      },
+      {
+        timeoutMs: 5,
+        fetch: ((_, init?: RequestInit) => {
+          fetchCalls += 1;
+          return new Promise<Response>((_, reject) => {
+            const signal = init?.signal;
+            const abort = () => {
+              reject(new DOMException("The operation was aborted.", "AbortError"));
+            };
+            if (signal?.aborted) {
+              abort();
+              return;
+            }
+            signal?.addEventListener("abort", abort, { once: true });
+          });
+        }) as unknown as typeof fetch,
+      },
+    );
+    const client = createProviderChatClient({ provider });
+
+    await expectRejectsBefore(
+      completeWithModelRetry(
+        client,
+        { ...request, model },
+        {
+          maxRetries: 1,
+          baseDelayMs: 0,
+          sleep: async () => {},
+        },
+        (event) => {
+          retryEvents.push(event);
+        },
+      ),
+      80,
+      message,
+    );
+
+    expect(fetchCalls).toBe(2);
+    expect(retryEvents).toHaveLength(1);
+    expect(retryEvents[0]?.error).toMatch(message);
+  });
 });
 
 function createFlakyClient(error: Error): ChatClient {
