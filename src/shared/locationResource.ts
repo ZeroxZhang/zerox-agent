@@ -4,6 +4,11 @@ export type LocationResourceEnvironment = {
   platform?: NodeJS.Platform;
 };
 
+type NodeFsBoundaryApi = {
+  lstatSync(value: string): { isSymbolicLink(): boolean };
+  realpathSync(value: string): string;
+};
+
 export type LocationResource = {
   original: string;
   path: string;
@@ -16,6 +21,14 @@ export type LocationResolver = {
   normalizePath(value: string): string;
   normalizeBoundaryPath(value: string): string;
   isInsideRoot(candidatePath: string, rootPath: string): boolean;
+};
+
+export type LocationPathBoundaryResult =
+  | { ok: true; path: string; root: string }
+  | { ok: false; path: string; reason: string };
+
+export type LocationPathBoundaryOptions = {
+  allowSymlinks?: boolean;
 };
 
 const desktopAliases = new Set(["Desktop", "桌面"]);
@@ -123,6 +136,48 @@ export function isPathInsideLocationRoot(
   return candidate === root || candidate.startsWith(`${root}/`);
 }
 
+export function validatePathInsideLocationRoots(
+  candidatePath: string,
+  rootPaths: string[],
+  env: LocationResourceEnvironment = {},
+  options: LocationPathBoundaryOptions = {},
+): LocationPathBoundaryResult {
+  const resolvedEnv = normalizeLocationEnvironment(env);
+  const candidate = normalizeLocationPath(candidatePath, resolvedEnv);
+  const roots = rootPaths.map((rootPath) =>
+    normalizeLocationBoundaryPath(rootPath, resolvedEnv),
+  );
+
+  for (const root of roots) {
+    if (!isNormalizedPathInsideBoundary(candidate, root)) {
+      continue;
+    }
+
+    if (!options.allowSymlinks) {
+      const symlinkPath = findSymlinkPathSegment(root, candidate, resolvedEnv);
+      if (symlinkPath) {
+        return {
+          ok: false,
+          path: candidate,
+          reason: `Path crosses a symlinked boundary segment: ${symlinkPath}`,
+        };
+      }
+    }
+
+    const realRoot = resolveComparableRealPath(root);
+    const realCandidate = resolveComparableRealPath(candidate);
+    if (isNormalizedPathInsideBoundary(realCandidate, realRoot)) {
+      return { ok: true, path: candidate, root };
+    }
+  }
+
+  return {
+    ok: false,
+    path: candidate,
+    reason: "Path resolves outside the allowed boundary roots.",
+  };
+}
+
 export function normalizeLocationEnvironment(
   env: LocationResourceEnvironment = {},
 ): Required<LocationResourceEnvironment> {
@@ -176,6 +231,144 @@ function normalizeAbsolutePath(value: string): string {
 
   const normalized = `/${parts.join("/")}`;
   return normalized.length > 1 ? normalized.replace(/\/+$/g, "") : normalized;
+}
+
+function isNormalizedPathInsideBoundary(
+  candidatePath: string,
+  rootPath: string,
+): boolean {
+  return candidatePath === rootPath || candidatePath.startsWith(`${rootPath}/`);
+}
+
+function findSymlinkPathSegment(
+  rootPath: string,
+  candidatePath: string,
+  env: Required<LocationResourceEnvironment>,
+): string | null {
+  const fs = getNodeFsBoundaryApi();
+  if (!fs) {
+    return null;
+  }
+
+  const root = normalizeLocationBoundaryPath(rootPath, env);
+  const candidate = normalizeLocationPath(candidatePath, env);
+  const relative = candidate === root ? "" : candidate.slice(root.length + 1);
+  const segments = relative ? relative.split("/") : [];
+  let current = root;
+
+  for (const segment of ["", ...segments]) {
+    if (segment) {
+      current = joinLocationPath(current, segment);
+    }
+
+    try {
+      if (fs.lstatSync(current).isSymbolicLink() && !isAllowedSystemPathAlias(current)) {
+        return current;
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  return null;
+}
+
+function resolveComparableRealPath(value: string): string {
+  const fs = getNodeFsBoundaryApi();
+  const normalized = normalizeAbsolutePath(value);
+  if (!fs) {
+    return normalized;
+  }
+
+  try {
+    return normalizeAbsolutePath(fs.realpathSync(normalized));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
+
+  const parts = normalized.split("/").filter(Boolean);
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    const existingPrefix = `/${parts.slice(0, index + 1).join("/")}`;
+    try {
+      const realPrefix = normalizeAbsolutePath(fs.realpathSync(existingPrefix));
+      const suffix = parts.slice(index + 1).join("/");
+      return normalizeAbsolutePath(joinLocationPath(realPrefix, suffix));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+    }
+  }
+
+  return normalized;
+}
+
+function isAllowedSystemPathAlias(segmentPath: string): boolean {
+  const fs = getNodeFsBoundaryApi();
+  if (!fs) {
+    return false;
+  }
+
+  if (getDefaultPlatform() !== "darwin") {
+    return false;
+  }
+
+  const normalized = normalizeAbsolutePath(segmentPath);
+  if (normalized !== "/var" && normalized !== "/tmp") {
+    return false;
+  }
+
+  try {
+    const target = normalizeAbsolutePath(fs.realpathSync(segmentPath));
+    return (
+      (normalized === "/var" && target === "/private/var") ||
+      (normalized === "/tmp" && target === "/private/tmp")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function getNodeFsBoundaryApi(): NodeFsBoundaryApi | null {
+  const runtimeRequire = getRuntimeRequire();
+  if (!runtimeRequire) {
+    return null;
+  }
+
+  try {
+    return runtimeRequire("node:fs") as NodeFsBoundaryApi;
+  } catch {
+    return null;
+  }
+}
+
+function getRuntimeRequire(): ((moduleName: string) => unknown) | null {
+  const builtinLoader = (
+    getRuntimeProcess() as
+      | (NodeJS.Process & {
+          getBuiltinModule?: (moduleName: string) => unknown;
+        })
+      | undefined
+  )?.getBuiltinModule;
+  if (builtinLoader) {
+    return (moduleName: string) => builtinLoader(moduleName);
+  }
+
+  try {
+    const runtimeRequire = (0, eval)(
+      "typeof require === 'function' ? require : undefined",
+    ) as unknown;
+    return typeof runtimeRequire === "function"
+      ? (moduleName: string) => runtimeRequire(moduleName)
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function normalizeSeparators(value: string): string {

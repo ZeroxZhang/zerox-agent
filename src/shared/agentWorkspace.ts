@@ -2,6 +2,8 @@ import {
   isPathInsideLocationRoot,
   normalizeLocationBoundaryPath,
   normalizeLocationEnvironment,
+  validatePathInsideLocationRoots,
+  type LocationPathBoundaryResult,
   type LocationResourceEnvironment,
 } from "./locationResource";
 
@@ -220,17 +222,39 @@ export function isPathInsideRunContext(
   context: AgentRunContext,
   access: RunContextPathAccess,
 ): boolean {
-  const locationEnv = getRunContextLocationEnv(context);
-  const roots = [
-    context.workspaceRoot,
-    ...(access === "read"
-      ? context.sandbox.extraReadRoots
-      : context.sandbox.extraWriteRoots),
-  ];
+  return validatePathInsideRunContext(candidatePath, context, access).ok;
+}
 
-  return roots.some((root) =>
-    isPathInsideLocationRoot(candidatePath, root, locationEnv),
-  );
+export function validatePathInsideRunContext(
+  candidatePath: string,
+  context: AgentRunContext,
+  access: RunContextPathAccess,
+): LocationPathBoundaryResult {
+  const locationEnv = getRunContextLocationEnv(context);
+  const roots = getRunContextPathRoots(context, access);
+
+  return validatePathInsideLocationRoots(candidatePath, roots, locationEnv);
+}
+
+export function getRunContextPathRoots(
+  context: AgentRunContext,
+  access: RunContextPathAccess,
+): string[] {
+  if (access === "write") {
+    return context.sandbox.mode === "workspace_write"
+      ? unique([context.workspaceRoot, ...context.sandbox.extraWriteRoots])
+      : [];
+  }
+
+  const writableRoots =
+    context.sandbox.mode === "workspace_write"
+      ? context.sandbox.extraWriteRoots
+      : [];
+  return unique([
+    context.workspaceRoot,
+    ...context.sandbox.extraReadRoots,
+    ...writableRoots,
+  ]);
 }
 
 export function isPathInsideDirectory(

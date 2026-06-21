@@ -1,8 +1,12 @@
 import type { AgentRunContext } from "./agentWorkspace";
-import { isPathInsideRunContext } from "./agentWorkspace";
+import {
+  isPathInsideRunContext,
+  validatePathInsideRunContext,
+} from "./agentWorkspace";
 import {
   isPathInsideLocationRoot,
   normalizeLocationEnvironment,
+  validatePathInsideLocationRoots,
   type LocationResourceEnvironment,
 } from "./locationResource";
 import type { SkillManifest } from "./skills";
@@ -248,22 +252,22 @@ export function authorizeToolCall(
         env,
       );
     case "file_apply_moves":
-      return authorizeFilePath(
-        getOrganizerRoot(request.args),
+      return authorizeOrganizerPaths(
+        request.args,
         normalized.files.write,
         "file_apply_moves 根目录不在已授权可写目录内。",
         env,
       );
     case "file_verify_moves":
-      return authorizeFilePath(
-        getOrganizerRoot(request.args),
+      return authorizeOrganizerPaths(
+        request.args,
         normalized.files.read,
         "file_verify_moves 根目录不在已授权可读目录内。",
         env,
       );
     case "file_rollback_moves":
-      return authorizeFilePath(
-        getOrganizerRoot(request.args),
+      return authorizeOrganizerPaths(
+        request.args,
         normalized.files.write,
         "file_rollback_moves 根目录不在已授权可写目录内。",
         env,
@@ -409,7 +413,8 @@ export function authorizeToolCallWithinRunContext(
     (request.toolName === "file_write" ||
       request.toolName === "file_apply_moves" ||
       request.toolName === "file_rollback_moves" ||
-      request.toolName === "markdown_report_write") &&
+      request.toolName === "markdown_report_write" ||
+      request.toolName === "chrome_bookmarks_read") &&
     runContext.sandbox.mode === "read_only"
   ) {
     return deny(`${request.toolName} 被运行沙箱阻止：当前运行是只读沙箱。`);
@@ -431,7 +436,8 @@ export function authorizeToolCallWithinRunContext(
 
   if (
     request.toolName === "shell_exec" &&
-    runContext.sandbox.shell === "workspace_only"
+    !runContext.sandbox.allowWorkspaceEscape &&
+    runContext.sandbox.shell !== "disabled"
   ) {
     const command = String(request.args.command ?? "");
     // Patch 4: prefer ShellPlan.touchedPaths (per-command read/write paths)
@@ -448,7 +454,7 @@ export function authorizeToolCallWithinRunContext(
 
     if (outsidePath) {
       return deny(
-        `shell_exec 被 workspace_only 沙箱阻止：路径 ${outsidePath} 不在工作区或额外可读目录内。`,
+        `shell_exec 被运行沙箱阻止：路径 ${outsidePath} 不在工作区或额外可读目录内。`,
       );
     }
   }
@@ -470,7 +476,7 @@ function authorizeFilePath(
   const allowed = approvedDirectories.some((approvedDirectory) =>
     isSkillPlaceholder(approvedDirectory)
       ? false
-      : isPathInsideLocationRoot(requestedPath, approvedDirectory, env),
+      : validatePathInsideLocationRoots(requestedPath, [approvedDirectory], env).ok,
   );
 
   return allowed ? allow("文件路径位于已授权目录内。") : deny(deniedReason);
@@ -490,10 +496,34 @@ function authorizeWorkspaceRoot(
   const allowed = approvedDirectories.some((approvedDirectory) =>
     isSkillPlaceholder(approvedDirectory)
       ? false
-      : isPathInsideLocationRoot(workspaceRoot, approvedDirectory, env),
+      : validatePathInsideLocationRoots(workspaceRoot, [approvedDirectory], env).ok,
   );
 
   return allowed ? allow("路径在已授权范围内。") : deny(deniedReason);
+}
+
+function authorizeOrganizerPaths(
+  args: Record<string, unknown>,
+  approvedDirectories: string[],
+  deniedReason: string,
+  locationEnv?: LocationResourceEnvironment,
+): ToolAuthorizationDecision {
+  const root = getOrganizerRoot(args);
+  if (!root) {
+    return deny("文件工具调用缺少 path。");
+  }
+
+  const paths = getOrganizerRequestPaths(args);
+  const env = normalizeLocationEnvironment(locationEnv);
+  const allowed = paths.every((requestedPath) =>
+    approvedDirectories.some((approvedDirectory) =>
+      isSkillPlaceholder(approvedDirectory)
+        ? false
+        : validatePathInsideLocationRoots(requestedPath, [approvedDirectory], env).ok,
+    ),
+  );
+
+  return allowed ? allow("文件路径位于已授权目录内。") : deny(deniedReason);
 }
 
 function getOrganizerRoot(args: Record<string, unknown>): string {
@@ -565,24 +595,16 @@ function authorizeWorkspaceFileRequest(
     request.toolName === "git_status" ||
     request.toolName === "git_diff" ||
     request.toolName === "test_run";
-  const requestedPath = String(
-    isNativeWorkspaceRootTool
-      ? request.args.workspaceRoot ?? ""
-      : request.toolName === "file_search"
-      ? request.args.root ?? ""
-      : request.toolName === "file_move_plan"
-      ? request.args.targetDir ?? ""
-      : request.toolName === "file_apply_moves" ||
-        request.toolName === "file_verify_moves" ||
-        request.toolName === "file_rollback_moves"
-      ? getOrganizerRoot(request.args)
-      : request.args.path ?? "",
-  );
-  if (!requestedPath) {
+  const requestedPaths = getWorkspaceFileRequestPaths(request);
+  if (!requestedPaths.length) {
     return null;
   }
 
-  if (isPathInsideRunContext(requestedPath, runContext, access)) {
+  const outsidePath = requestedPaths.find(
+    (requestedPath) =>
+      !validatePathInsideRunContext(requestedPath, runContext, access).ok,
+  );
+  if (!outsidePath) {
     return null;
   }
 
@@ -590,6 +612,75 @@ function authorizeWorkspaceFileRequest(
   return deny(
     `${request.toolName} 被运行沙箱阻止：${pathLabel}不在工作区或额外可${access === "read" ? "读" : "写"}目录内。`,
   );
+}
+
+function getWorkspaceFileRequestPaths(request: ToolCallRequest): string[] {
+  if (
+    request.toolName === "code_search" ||
+    request.toolName === "git_status" ||
+    request.toolName === "git_diff" ||
+    request.toolName === "test_run"
+  ) {
+    return compactStringList([request.args.workspaceRoot]);
+  }
+
+  if (request.toolName === "file_search") {
+    return compactStringList([request.args.root]);
+  }
+
+  if (request.toolName === "file_move_plan") {
+    return compactStringList([request.args.targetDir]);
+  }
+
+  if (
+    request.toolName === "file_apply_moves" ||
+    request.toolName === "file_verify_moves" ||
+    request.toolName === "file_rollback_moves"
+  ) {
+    return getOrganizerRequestPaths(request.args);
+  }
+
+  return compactStringList([request.args.path]);
+}
+
+function getOrganizerRequestPaths(args: Record<string, unknown>): string[] {
+  const paths: string[] = [];
+  const root = getOrganizerRoot(args);
+  if (root) {
+    paths.push(root);
+  }
+
+  for (const owner of [args.preview, args.transaction]) {
+    if (!isRecord(owner)) {
+      continue;
+    }
+    if (typeof owner.logPath === "string") {
+      paths.push(owner.logPath);
+    }
+    if (!Array.isArray(owner.moves)) {
+      continue;
+    }
+    for (const move of owner.moves) {
+      if (!isRecord(move)) {
+        continue;
+      }
+      if (typeof move.from === "string") {
+        paths.push(move.from);
+      }
+      if (typeof move.to === "string") {
+        paths.push(move.to);
+      }
+    }
+  }
+
+  return unique(paths);
+}
+
+function compactStringList(values: unknown[]): string[] {
+  return values
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.trim())
+    .filter(Boolean);
 }
 
 function authorizeWebFetch(
@@ -640,7 +731,7 @@ function authorizeShellCommand(
     : deny(`${toolName} command 不匹配已授权${templateLabel}。`);
 }
 
-function extractPathLikeShellTokens(command: string): string[] {
+export function extractPathLikeShellTokens(command: string): string[] {
   const tokens = command.match(/(?:"[^"]+"|'[^']+'|[^\s]+)/g) ?? [];
   return tokens
     .map((token) => token.replace(/^["']|["']$/g, ""))

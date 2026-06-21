@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { lstat, mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { AgentToolExecutionResult } from "./dynamicToolRegistry";
@@ -12,6 +12,7 @@ import {
   renderMarkdownResearchReport,
   stableHash,
 } from "../shared/researchWriting";
+import { validatePathInsideLocationRoots } from "../shared/locationResource";
 
 export type NativeResearchTools = {
   webFetchDocument(args: Record<string, unknown>): Promise<AgentToolExecutionResult>;
@@ -146,6 +147,13 @@ export function createNativeResearchTools(options: {
       try {
         const resolvedPath = resolveUserPath(reportPath);
         const citationsPath = deriveCitationsPath(resolvedPath);
+        const boundary = await validateReportWriteBoundary(resolvedPath);
+        if (!boundary.ok) {
+          return {
+            ok: false,
+            error: `markdown_report_write refused symlinked or escaped report path: ${boundary.reason}`,
+          };
+        }
         const generatedAt = args.generatedAt
           ? String(args.generatedAt)
           : now().toISOString();
@@ -191,6 +199,36 @@ export function createNativeResearchTools(options: {
       }
     },
   };
+}
+
+async function validateReportWriteBoundary(
+  reportPath: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const parentPath = path.dirname(reportPath);
+  const existingBoundary = await nearestExistingPath(parentPath);
+  const result = validatePathInsideLocationRoots(reportPath, [existingBoundary], {
+    workspaceRoot: existingBoundary,
+  });
+  return result.ok ? { ok: true } : { ok: false, reason: result.reason };
+}
+
+async function nearestExistingPath(targetPath: string): Promise<string> {
+  let current = path.resolve(targetPath);
+  for (;;) {
+    try {
+      await lstat(current);
+      return current;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+      const parent = path.dirname(current);
+      if (parent === current) {
+        return current;
+      }
+      current = parent;
+    }
+  }
 }
 
 function deriveCitationsPath(reportPath: string): string {

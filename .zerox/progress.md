@@ -3459,3 +3459,31 @@
       sha256 5454d00c3369a40e42e7dea011f600a76adff2bd5a7d8aeafa46f82faa1ec2cb)
   - GitHub Release target:
     https://github.com/ZeroxZhang/zerox-agent/releases/tag/v2.4.1
+
+## 2026-06-21 - Task 1 Workspace Sandbox And Tool Permission Hardening
+
+- Summary:
+  - Added shared realpath/no-symlink path-boundary validation and reused it in run-context checks, tool authorization, executor-side guards, local file organizer moves, and native Markdown report writes.
+  - Hardened read-only runs so writable roots are not exposed and `chrome_bookmarks_read` cannot write artifacts.
+  - Validated generated move previews/transactions as capabilities before `rename()`.
+- Changed files:
+  - `src/shared/locationResource.ts`
+  - `src/shared/agentWorkspace.ts`
+  - `src/shared/toolPermissions.ts`
+  - `src/main/agentToolExecutor.ts`
+  - `src/main/localFileOrganizer.ts`
+  - `src/main/nativeResearchTools.ts`
+  - `src/shared/agentWorkspace.test.ts`
+  - `src/shared/toolPermissions.test.ts`
+  - `src/main/agentToolExecutor.test.ts`
+  - `src/main/localFileOrganizer.test.ts`
+  - `src/main/nativeResearchTools.test.ts`
+- RED evidence:
+  - `npm test -- src/main/agentToolExecutor.test.ts src/shared/toolPermissions.test.ts src/main/nativeResearchTools.test.ts` -> failed: symlink read/write/native report paths were allowed or executed.
+  - `npm test -- src/main/agentToolExecutor.test.ts src/main/localFileOrganizer.test.ts src/shared/toolPermissions.test.ts` -> failed: crafted apply/rollback move paths outside root were accepted before rename.
+  - `npm test -- src/shared/agentWorkspace.test.ts src/shared/toolPermissions.test.ts src/main/chatService.test.ts src/main/agentToolExecutor.test.ts` -> failed: read-only write access, approved-command outside shell paths, and read-only Chrome artifact writes were allowed.
+- GREEN evidence:
+  - `npm test -- src/shared/agentWorkspace.test.ts src/shared/toolPermissions.test.ts src/main/agentToolExecutor.test.ts src/main/localFileOrganizer.test.ts src/main/nativeResearchTools.test.ts src/main/chatService.test.ts` -> 6 files / 112 tests passed.
+  - `npm test` -> 164 files / 1028 tests passed.
+  - `npm run build` -> passed.
+  - `npm run harness:check` -> passed.

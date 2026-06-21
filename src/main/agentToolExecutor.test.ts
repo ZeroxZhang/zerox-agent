@@ -800,6 +800,52 @@ describe("agent tool executor", () => {
     });
   });
 
+  it("refuses run-context file and native workspace tools through symlink escapes", async () => {
+    const workspaceRoot = path.join(tempDir, "workspace");
+    const outsideRoot = path.join(tempDir, "outside");
+    const linkPath = path.join(workspaceRoot, "linked-outside");
+    await mkdir(workspaceRoot, { recursive: true });
+    await mkdir(outsideRoot, { recursive: true });
+    await writeFile(path.join(outsideRoot, "secret.md"), "secret token", "utf8");
+    await symlink(outsideRoot, linkPath);
+    const executor = createAgentToolExecutor();
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_temp",
+      workspaceRoot,
+    });
+
+    const requests = [
+      { toolName: "file_read", args: { path: path.join(linkPath, "secret.md") } },
+      { toolName: "file_write", args: { path: path.join(linkPath, "report.md"), content: "done" } },
+      { toolName: "file_stat", args: { path: path.join(linkPath, "secret.md") } },
+      { toolName: "file_list", args: { path: linkPath } },
+      { toolName: "file_search", args: { root: linkPath, query: "secret" } },
+      { toolName: "code_search", args: { workspaceRoot: linkPath, query: "secret" } },
+      {
+        toolName: "markdown_report_write",
+        args: {
+          path: path.join(linkPath, "research.md"),
+          title: "Escaped Report",
+          citations: [],
+          claims: [],
+          sections: [],
+        },
+      },
+    ];
+
+    for (const request of requests) {
+      await expect(
+        executor.execute(request, { runContext }),
+      ).resolves.toMatchObject({ ok: false });
+    }
+    await expect(readFile(path.join(outsideRoot, "report.md"), "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(readFile(path.join(outsideRoot, "research.md"), "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
   it("passes abort signals to native test_run", async () => {
     const executor = createAgentToolExecutor();
     const controller = new AbortController();

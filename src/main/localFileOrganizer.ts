@@ -9,6 +9,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { validatePathInsideLocationRoots } from "../shared/locationResource";
 
 export type LocalFileCategory =
   | "Images"
@@ -160,6 +161,10 @@ export async function applyLocalFileOrganization(
     movesApplied: 0,
     history: [{ status: "pending", at: preview.generatedAt }],
   };
+  assertLocalOrganizationBoundary(transaction.root, [
+    transaction.logPath,
+    ...transaction.moves.flatMap((move) => [move.from, move.to]),
+  ]);
 
   await writeTransactionLog(transaction);
 
@@ -188,6 +193,11 @@ export async function rollbackLocalFileOrganization(
   transaction: LocalFileOrganizationTransaction,
   options: LocalFileOrganizerRuntimeOptions = {},
 ): Promise<LocalFileOrganizationTransaction> {
+  assertLocalOrganizationBoundary(transaction.root, [
+    transaction.logPath,
+    ...transaction.moves.flatMap((move) => [move.from, move.to]),
+  ]);
+
   let movesRolledBack = 0;
 
   for (const move of [...transaction.moves].reverse()) {
@@ -211,6 +221,18 @@ export async function rollbackLocalFileOrganization(
   };
   await writeTransactionLog(rolledBackTransaction);
   return rolledBackTransaction;
+}
+
+function assertLocalOrganizationBoundary(root: string, paths: string[]): void {
+  const resolvedRoot = resolveUserPath(root);
+  for (const candidatePath of [resolvedRoot, ...paths.map(resolveUserPath)]) {
+    const result = validatePathInsideLocationRoots(candidatePath, [resolvedRoot], {
+      workspaceRoot: resolvedRoot,
+    });
+    if (!result.ok) {
+      throw new Error(`Local file organization path is outside the preview root: ${candidatePath}`);
+    }
+  }
 }
 
 export async function readLocalFileOrganizationTransaction(

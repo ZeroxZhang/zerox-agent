@@ -108,6 +108,70 @@ describe("local file organizer", () => {
       },
     ]);
   });
+
+  it("rejects crafted previews with moves outside the preview root before rename", async () => {
+    const workspaceRoot = path.join(tempDir, "workspace");
+    const outsideRoot = path.join(tempDir, "outside");
+    const outsideFile = path.join(outsideRoot, "secret.txt");
+    await mkdir(workspaceRoot, { recursive: true });
+    await mkdir(outsideRoot, { recursive: true });
+    await writeFile(outsideFile, "secret", "utf8");
+
+    await expect(
+      applyLocalFileOrganization({
+        id: "tx_crafted",
+        root: workspaceRoot,
+        generatedAt: "2026-06-21T00:00:00.000Z",
+        confirmationRequired: true,
+        inventory: { files: 1, directories: 0, skipped: 0 },
+        conflicts: [],
+        moves: [
+          {
+            from: outsideFile,
+            to: path.join(workspaceRoot, "Documents", "secret.txt"),
+            category: "Documents",
+            reason: "crafted",
+          },
+        ],
+      }),
+    ).rejects.toThrow(/outside/i);
+
+    await expect(readFile(outsideFile, "utf8")).resolves.toBe("secret");
+    await expectPath(path.join(workspaceRoot, "Documents", "secret.txt"), false);
+  });
+
+  it("rejects crafted rollback transactions with paths outside the transaction root before rename", async () => {
+    const workspaceRoot = path.join(tempDir, "workspace");
+    const outsideRoot = path.join(tempDir, "outside");
+    const outsideFile = path.join(outsideRoot, "secret.txt");
+    await mkdir(workspaceRoot, { recursive: true });
+    await mkdir(outsideRoot, { recursive: true });
+    await writeFile(outsideFile, "secret", "utf8");
+
+    await expect(
+      rollbackLocalFileOrganization({
+        id: "tx_crafted",
+        root: workspaceRoot,
+        status: "applied",
+        createdAt: "2026-06-21T00:00:00.000Z",
+        appliedAt: "2026-06-21T00:01:00.000Z",
+        logPath: path.join(workspaceRoot, ".zerox-organize-transactions", "tx_crafted.json"),
+        moves: [
+          {
+            from: path.join(workspaceRoot, "secret.txt"),
+            to: outsideFile,
+            category: "Documents",
+            reason: "crafted",
+          },
+        ],
+        movesApplied: 1,
+        history: [],
+      }),
+    ).rejects.toThrow(/outside/i);
+
+    await expect(readFile(outsideFile, "utf8")).resolves.toBe("secret");
+    await expectPath(path.join(workspaceRoot, "secret.txt"), false);
+  });
 });
 
 async function expectPath(targetPath: string, exists: boolean) {

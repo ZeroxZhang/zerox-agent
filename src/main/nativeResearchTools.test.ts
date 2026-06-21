@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -169,6 +169,32 @@ describe("native research tools", () => {
       errorDetails: {
         unsupportedClaimIds: ["fact_1"],
       },
+    });
+  });
+
+  it("refuses to write Markdown reports through symlinked parent directories", async () => {
+    const tools = createTools();
+    const workspaceRoot = path.join(tempDir, "workspace");
+    const outsideRoot = path.join(tempDir, "outside");
+    const linkPath = path.join(workspaceRoot, "linked-outside");
+    await mkdir(workspaceRoot, { recursive: true });
+    await mkdir(outsideRoot, { recursive: true });
+    await symlink(outsideRoot, linkPath);
+
+    const result = await tools.markdownReportWrite({
+      path: path.join(linkPath, "escaped.md"),
+      title: "Escaped Report",
+      citations: [],
+      claims: [],
+      sections: [],
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("symlink"),
+    });
+    await expect(readFile(path.join(outsideRoot, "escaped.md"), "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
     });
   });
 });

@@ -1,3 +1,6 @@
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   authorizeToolCallWithinRunContext,
@@ -796,6 +799,198 @@ describe("tool authorization", () => {
     });
   });
 
+  it("denies symlink escapes for file and native workspace tools", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "tool-permissions-symlink-"));
+    try {
+      const workspaceRoot = path.join(tempDir, "workspace");
+      const outsideRoot = path.join(tempDir, "outside");
+      const linkPath = path.join(workspaceRoot, "linked-outside");
+      await mkdir(workspaceRoot, { recursive: true });
+      await mkdir(outsideRoot, { recursive: true });
+      await writeFile(path.join(outsideRoot, "secret.md"), "secret", "utf8");
+      await symlink(outsideRoot, linkPath);
+
+      const broadPolicy: TaskPermissionPolicy = {
+        files: {
+          read: [workspaceRoot],
+          write: [workspaceRoot],
+        },
+        web: { search: true, fetchDomains: ["example.com"] },
+        shell: { commands: [] },
+        memory: { read: false, write: false },
+      };
+      const runContext = buildPrimaryRunContext({
+        workspaceId: "workspace_1",
+        workspaceRoot,
+      });
+
+      const requests = [
+        { toolName: "file_read", args: { path: path.join(linkPath, "secret.md") } },
+        { toolName: "file_write", args: { path: path.join(linkPath, "report.md"), content: "x" } },
+        { toolName: "file_stat", args: { path: path.join(linkPath, "secret.md") } },
+        { toolName: "file_list", args: { path: linkPath } },
+        { toolName: "file_search", args: { root: linkPath, query: "secret" } },
+        { toolName: "code_search", args: { workspaceRoot: linkPath, query: "secret" } },
+        { toolName: "markdown_report_write", args: { path: path.join(linkPath, "report.md") } },
+      ];
+
+      for (const request of requests) {
+        expect(
+          authorizeToolCallWithinRunContext(broadPolicy, request, runContext),
+        ).toMatchObject({ allowed: false });
+      }
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("denies crafted move previews and transactions with paths outside the workspace", () => {
+    const workspaceRoot = "/tmp/zerox/workspace";
+    const outsideRoot = "/tmp/zerox/outside";
+    const broadPolicy: TaskPermissionPolicy = {
+      files: {
+        read: ["/tmp/zerox"],
+        write: ["/tmp/zerox"],
+      },
+      web: { search: false, fetchDomains: [] },
+      shell: { commands: [] },
+      memory: { read: false, write: false },
+    };
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot,
+    });
+
+    expect(
+      authorizeToolCallWithinRunContext(
+        broadPolicy,
+        {
+          toolName: "file_apply_moves",
+          args: {
+            preview: {
+              id: "tx_1",
+              root: workspaceRoot,
+              generatedAt: "2026-06-21T00:00:00.000Z",
+              confirmationRequired: true,
+              inventory: { files: 1, directories: 0, skipped: 0 },
+              conflicts: [],
+              moves: [
+                {
+                  from: path.join(outsideRoot, "secret.txt"),
+                  to: path.join(workspaceRoot, "Documents", "secret.txt"),
+                  category: "Documents",
+                  reason: "crafted",
+                },
+              ],
+            },
+          },
+        },
+        runContext,
+      ),
+    ).toMatchObject({ allowed: false });
+
+    expect(
+      authorizeToolCallWithinRunContext(
+        broadPolicy,
+        {
+          toolName: "file_rollback_moves",
+          args: {
+            transaction: {
+              id: "tx_1",
+              root: workspaceRoot,
+              status: "applied",
+              createdAt: "2026-06-21T00:00:00.000Z",
+              logPath: path.join(workspaceRoot, ".zerox-organize-transactions", "tx_1.json"),
+              movesApplied: 1,
+              history: [],
+              moves: [
+                {
+                  from: path.join(workspaceRoot, "secret.txt"),
+                  to: path.join(outsideRoot, "secret.txt"),
+                  category: "Documents",
+                  reason: "crafted",
+                },
+              ],
+            },
+          },
+        },
+        runContext,
+      ),
+    ).toMatchObject({ allowed: false });
+  });
+
+  it("applies workspace path boundaries to approved shell command templates", () => {
+    const broadPolicy: TaskPermissionPolicy = {
+      files: {
+        read: ["/"],
+        write: ["/"],
+      },
+      web: { search: false, fetchDomains: [] },
+      shell: { commands: ["cat {{target}}", "python {{script}}", "node {{script}}"] },
+      memory: { read: false, write: false },
+    };
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: "/workspace/project",
+      sandbox: {
+        mode: "workspace_write",
+        network: "task_policy",
+        shell: "approved_commands",
+        allowWorkspaceEscape: false,
+        extraReadRoots: [],
+        extraWriteRoots: [],
+      },
+    });
+
+    for (const command of [
+      "cat /etc/passwd",
+      "python /outside/script.py",
+      "node /outside/script.js",
+    ]) {
+      expect(
+        authorizeToolCallWithinRunContext(
+          broadPolicy,
+          { toolName: "shell_exec", args: { command } },
+          runContext,
+        ),
+      ).toMatchObject({ allowed: false });
+    }
+  });
+
+  it("denies Chrome bookmark artifact writes in read-only run contexts", () => {
+    const chromeRoot = "/Users/demo/Library/Application Support/Google/Chrome";
+    const chromePolicy: TaskPermissionPolicy = {
+      files: {
+        read: [chromeRoot],
+        write: ["/Users/demo/project"],
+      },
+      web: { search: false, fetchDomains: [] },
+      shell: { commands: [] },
+      memory: { read: false, write: false },
+    };
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: "/Users/demo/project",
+      sandbox: {
+        ...buildDefaultSandboxPolicy(),
+        mode: "read_only",
+      },
+    });
+
+    expect(
+      authorizeToolCallWithinRunContext(
+        chromePolicy,
+        {
+          toolName: "chrome_bookmarks_read",
+          args: {
+            bookmarksPath: `${chromeRoot}/Default/Bookmarks`,
+          },
+        },
+        runContext,
+      ),
+    ).toMatchObject({ allowed: false });
+  });
+
   it("denies workspace_only shell commands that mention outside absolute paths", () => {
     const broadPolicy: TaskPermissionPolicy = {
       files: {
@@ -831,7 +1026,7 @@ describe("tool authorization", () => {
     ).toEqual({
       allowed: false,
       reason:
-        "shell_exec 被 workspace_only 沙箱阻止：路径 /etc/passwd 不在工作区或额外可读目录内。",
+        "shell_exec 被运行沙箱阻止：路径 /etc/passwd 不在工作区或额外可读目录内。",
     });
   });
 
@@ -913,7 +1108,7 @@ describe("tool authorization", () => {
       ),
     ).toEqual({
       allowed: false,
-      reason: `shell_exec 被 workspace_only 沙箱阻止：路径 ${target} 不在工作区或额外可读目录内。`,
+      reason: `shell_exec 被运行沙箱阻止：路径 ${target} 不在工作区或额外可读目录内。`,
     });
   });
 });

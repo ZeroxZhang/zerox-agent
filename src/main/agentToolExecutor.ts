@@ -19,10 +19,17 @@ import {
 } from "./localFileOrganizer";
 import type { ToolResultOffloadStore } from "./toolResultOffloadStore";
 import type { MemoryStore } from "./memoryStore";
-import type { AgentRunContext } from "../shared/agentWorkspace";
+import {
+  validatePathInsideRunContext,
+  type AgentRunContext,
+  type RunContextPathAccess,
+} from "../shared/agentWorkspace";
 import { getMemoryKinds, type MemoryKind } from "../shared/memory";
 import { defineNativeToolDescriptor } from "../shared/nativeCapabilities";
-import type { ToolCallRequest } from "../shared/toolPermissions";
+import {
+  extractPathLikeShellTokens,
+  type ToolCallRequest,
+} from "../shared/toolPermissions";
 import { isSafeToolResultRef } from "../shared/toolResultRefs";
 import {
   normalizeLocationBoundaryPath,
@@ -80,6 +87,14 @@ export function createAgentToolExecutor(options?: {
 
   return {
     async execute(request, executionOptions) {
+      const guard = validateToolExecutionRequest(
+        request,
+        executionOptions?.runContext,
+      );
+      if (guard) {
+        return guard;
+      }
+
       if (request.toolName === "shell_exec") {
         return executeShellCommand(
           request.args,
@@ -99,6 +114,147 @@ export function createAgentToolExecutor(options?: {
       return registry.has(toolName);
     },
   };
+}
+
+function validateToolExecutionRequest(
+  request: ToolCallRequest,
+  runContext?: AgentRunContext,
+): AgentToolExecutionResult | null {
+  if (!runContext) {
+    return null;
+  }
+
+  if (
+    isWriteTool(request.toolName) &&
+    runContext.sandbox.mode === "read_only"
+  ) {
+    return {
+      ok: false,
+      error: `${request.toolName} refused by read-only run sandbox.`,
+    };
+  }
+
+  if (request.toolName === "shell_exec") {
+    if (runContext.sandbox.shell === "disabled") {
+      return { ok: false, error: "shell_exec refused by disabled shell sandbox." };
+    }
+    if (!runContext.sandbox.allowWorkspaceEscape) {
+      const outsidePath = extractPathLikeShellTokens(
+        String(request.args.command ?? ""),
+      ).find(
+        (token) =>
+          !validatePathInsideRunContext(token, runContext, "read").ok &&
+          !validatePathInsideRunContext(token, runContext, "write").ok,
+      );
+      if (outsidePath) {
+        return {
+          ok: false,
+          error: `shell_exec refused path outside the run sandbox: ${outsidePath}`,
+        };
+      }
+    }
+    return null;
+  }
+
+  if (runContext.sandbox.allowWorkspaceEscape) {
+    return null;
+  }
+
+  const pathChecks = getToolExecutionPathChecks(request);
+  const failedPath = pathChecks.find(
+    (pathCheck) =>
+      !validatePathInsideRunContext(pathCheck.path, runContext, pathCheck.access).ok,
+  );
+  if (!failedPath) {
+    return null;
+  }
+
+  return {
+    ok: false,
+    error: `${request.toolName} refused path outside the run sandbox: ${failedPath.path}`,
+  };
+}
+
+function isWriteTool(toolName: string): boolean {
+  return [
+    "file_write",
+    "file_apply_moves",
+    "file_rollback_moves",
+    "markdown_report_write",
+    "chrome_bookmarks_read",
+  ].includes(toolName);
+}
+
+function getToolExecutionPathChecks(
+  request: ToolCallRequest,
+): Array<{ path: string; access: RunContextPathAccess }> {
+  switch (request.toolName) {
+    case "file_read":
+    case "file_stat":
+    case "file_list":
+    case "file_inventory":
+      return pathChecks([request.args.path], "read");
+    case "file_search":
+      return pathChecks([request.args.root], "read");
+    case "file_move_plan":
+      return pathChecks([request.args.targetDir], "read");
+    case "code_search":
+    case "git_status":
+    case "git_diff":
+    case "test_run":
+      return pathChecks([request.args.workspaceRoot], "read");
+    case "file_write":
+    case "markdown_report_write":
+      return pathChecks([request.args.path], "write");
+    case "file_apply_moves":
+    case "file_rollback_moves":
+      return pathChecks(getOrganizerExecutionPaths(request.args), "write");
+    case "file_verify_moves":
+      return pathChecks(getOrganizerExecutionPaths(request.args), "read");
+    default:
+      return [];
+  }
+}
+
+function getOrganizerExecutionPaths(args: Record<string, unknown>): string[] {
+  const paths: string[] = [];
+  for (const owner of [args.preview, args.transaction]) {
+    if (!isRecord(owner)) {
+      continue;
+    }
+    if (typeof owner.root === "string") {
+      paths.push(owner.root);
+    }
+    if (typeof owner.logPath === "string") {
+      paths.push(owner.logPath);
+    }
+    if (!Array.isArray(owner.moves)) {
+      continue;
+    }
+    for (const move of owner.moves) {
+      if (!isRecord(move)) {
+        continue;
+      }
+      if (typeof move.from === "string") {
+        paths.push(move.from);
+      }
+      if (typeof move.to === "string") {
+        paths.push(move.to);
+      }
+    }
+  }
+  return [...new Set(paths)];
+}
+
+function pathChecks(
+  paths: unknown[],
+  access: RunContextPathAccess,
+): Array<{ path: string; access: RunContextPathAccess }> {
+  return paths
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .map((value) => ({ path: value, access }));
 }
 
 function registerBuiltinTools(
