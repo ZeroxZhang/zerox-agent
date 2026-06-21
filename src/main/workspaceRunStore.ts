@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { readRecoverableJsonl } from "./jsonlRecovery";
 import {
   createWorkspaceRunEvent,
   getNextWorkspaceRunEventSeq,
@@ -60,7 +61,7 @@ export function createWorkspaceRunStore(options: {
   }
 
   async function readRunSnapshots(): Promise<WorkspaceRun[]> {
-    return readJsonl<WorkspaceRun>(runsPath);
+    return readRecoverableJsonl<WorkspaceRun>(runsPath);
   }
 
   async function readLatestRun(
@@ -88,7 +89,7 @@ export function createWorkspaceRunStore(options: {
   async function readEvents(
     workspaceRunId: string,
   ): Promise<WorkspaceRunEvent[]> {
-    return readJsonl<WorkspaceRunEvent>(eventPath(workspaceRunId));
+    return readRecoverableJsonl<WorkspaceRunEvent>(eventPath(workspaceRunId));
   }
 
   return {
@@ -211,22 +212,6 @@ async function appendJsonl<T>(
     encoding: "utf8",
     flag: "a",
   });
-}
-
-async function readJsonl<T>(filePath: string): Promise<T[]> {
-  try {
-    const raw = await readFile(filePath, "utf8");
-    return raw
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => JSON.parse(line) as T);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return [];
-    }
-
-    throw error;
-  }
 }
 
 function compareRunsByCreatedAtAsc(

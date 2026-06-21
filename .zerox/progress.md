@@ -1,5 +1,29 @@
 # Zerox Harness Progress
 
+## 2026-06-21 Task 2 SQLite/Migration/JSONL Recovery Integrity
+
+- Request: implement Task 2 from the bug-hardening SDD/TDD plan: SQLite/dual storage parity, reviewed-learning migration fidelity, audit event identity, tolerant JSONL recovery, SQLite chat search parity, and rollback completeness.
+- Changed files:
+  - `src/main/taskStore.ts`, `src/main/toolAuditLog.ts`
+  - `src/main/storage/repositories/index.ts`, `src/main/storage/repositories/sessionRepository.ts`
+  - `src/main/jsonlRecovery.ts`
+  - `src/main/workspaceRunStore.ts`, `src/main/agentRunStore.ts`, `src/main/agentTrajectoryStore.ts`, `src/main/agentGoalStore.ts`
+  - `scripts/migrate-to-sqlite.mjs`, `scripts/rollback-sqlite-to-json.mjs`
+  - Focused tests in `src/main/storage/storeProxy.test.ts`, `src/main/toolAuditLog.test.ts`, `src/main/storage/migrateRoundTrip.test.ts`, `src/main/storage/repositories/repositories.test.ts`, `src/main/workspaceRunStore.test.ts`, `src/main/agentRunStore.test.ts`, `src/main/agentTrajectoryStore.test.ts`, `src/main/agentGoalStore.test.ts`
+- RED evidence:
+  - `npm test -- src/main/storage/storeProxy.test.ts src/main/toolAuditLog.test.ts` -> failed: persisted SQLite/dual audit events had different ids/timestamps; disabled daily tasks reloaded with recomputed timestamps and non-null `nextRunAt`.
+  - `npm test -- src/main/storage/repositories/repositories.test.ts src/main/chatSessionStore.test.ts` -> failed: SQLite search returned `[]` for `报告 markdown`.
+  - `npm test -- src/main/workspaceRunStore.test.ts src/main/agentRunStore.test.ts src/main/agentTrajectoryStore.test.ts src/main/agentGoalStore.test.ts` -> failed: malformed JSONL lines threw `SyntaxError`.
+  - `npm test -- src/main/storage/migrateRoundTrip.test.ts` -> failed: migrated learning candidates had regenerated ids, `pending_review` status, and new timestamps.
+- GREEN evidence:
+  - `npm test -- src/main/storage/storeProxy.test.ts src/main/toolAuditLog.test.ts src/main/storage/migrateRoundTrip.test.ts src/main/storage/repositories/repositories.test.ts src/main/storage/repositories/runRepository.test.ts src/main/chatSessionStore.test.ts src/main/workspaceRunStore.test.ts src/main/agentRunStore.test.ts src/main/agentTrajectoryStore.test.ts src/main/agentGoalStore.test.ts` -> 10 files / 86 tests passed.
+  - `npm test` -> 164 files / 1046 tests passed.
+  - `npm run build` -> passed.
+  - `npm run verify` -> 164 files / 1046 tests passed; build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI, with designed JSON fallback for the local better-sqlite3 ABI mismatch.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+
 ## 2026-06-21 Task 1 Follow-up 2 Bare Shell Parent Path
 
 - Request: fix production shell authorization when `ToolAuthorizationService` supplies a `ShellPlan` for `cat ..`; bare parent-directory operands were not included in `touchedPaths`, so sandbox authorization had nothing to inspect.

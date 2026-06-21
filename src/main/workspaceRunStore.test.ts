@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -154,6 +154,57 @@ describe("workspace run store", () => {
         sourceEventId: result.id,
       }),
     ]);
+  });
+
+  it("skips malformed JSONL lines while preserving workspace run trajectory records", async () => {
+    const run = {
+      workspaceRunId: "workspace_run_1",
+      sessionId: "session_1",
+      requestId: "request_1",
+      workspaceId: "workspace_building_agent",
+      status: "running",
+      createdAt: "2026-06-21T00:00:00.000Z",
+      updatedAt: "2026-06-21T00:00:00.000Z",
+      startedAt: "2026-06-21T00:00:00.000Z",
+    };
+    const event = {
+      id: "event_1",
+      workspaceRunId: "workspace_run_1",
+      sessionId: "session_1",
+      seq: 1,
+      type: "tool_result",
+      toolCallId: "tool_call_1",
+      toolName: "shell",
+      ok: true,
+      resultRef: "tool-result-refs/workspace_run_1_tool_call_1.json",
+      createdAt: "2026-06-21T00:00:01.000Z",
+    };
+    const root = path.join(configDir, "workspace-runs");
+    const eventsDir = path.join(root, "events");
+    await mkdir(eventsDir, { recursive: true });
+    await writeFile(
+      path.join(root, "runs.jsonl"),
+      `${JSON.stringify(run)}\n{"workspaceRunId": "partial"\n`,
+      "utf8",
+    );
+    await writeFile(
+      path.join(eventsDir, "workspace_run_1.jsonl"),
+      `{"id": "partial"\n${JSON.stringify(event)}\n`,
+      "utf8",
+    );
+
+    const store = createTestStore();
+
+    await expect(store.listChatTrajectory("session_1")).resolves.toEqual([
+      expect.objectContaining({
+        type: "tool_result",
+        toolCallId: "tool_call_1",
+        resultRef: "tool-result-refs/workspace_run_1_tool_call_1.json",
+        sourceEventId: "event_1",
+      }),
+    ]);
+    expect((await readdir(root)).some((file) => file.startsWith("runs.jsonl.corrupt-lines-"))).toBe(true);
+    expect((await readdir(eventsDir)).some((file) => file.startsWith("workspace_run_1.jsonl.corrupt-lines-"))).toBe(true);
   });
 
   function createTestStore() {

@@ -41,9 +41,12 @@ export function createToolAuditLog(options: ToolAuditLogOptions): ToolAuditLog {
   // --- legacy JSON implementation (unchanged) ---
   async function jsonAppend(input: ToolAuditEventInput): Promise<ToolAuditEvent> {
     const event = buildEvent(input);
+    await writeJsonEvent(event);
+    return event;
+  }
+  async function writeJsonEvent(event: ToolAuditEvent): Promise<void> {
     await mkdir(options.configDir, { recursive: true });
     await writeFile(auditPath, `${JSON.stringify(event)}\n`, { encoding: "utf8", flag: "a" });
-    return event;
   }
   async function jsonList(listOptions?: { limit?: number }): Promise<ToolAuditEvent[]> {
     const limit = listOptions?.limit ?? 50;
@@ -65,8 +68,8 @@ export function createToolAuditLog(options: ToolAuditLogOptions): ToolAuditLog {
   return {
     async append(input) {
       const event = buildEvent(input);
-      repo.append(input); // sync, hot path
-      if (backend === "dual") void jsonAppend(input).catch(shadowWriteError);
+      repo.append(event); // sync, hot path
+      if (backend === "dual") void writeJsonEvent(event).catch(shadowWriteError);
       return event;
     },
     async list(listOptions) {

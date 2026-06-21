@@ -3,6 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createToolAuditLog } from "./toolAuditLog";
+import { createStorageImpl } from "./storage/storageDb";
+import type { StorageBackend } from "../shared/storageContract";
 
 describe("tool audit log", () => {
   let configDir: string;
@@ -71,5 +73,37 @@ describe("tool audit log", () => {
     });
 
     await expect(auditLog.list({ limit: 1 })).resolves.toEqual([second]);
+  });
+
+  describe.each(["sqlite", "dual"] as StorageBackend[])("backend=%s", (backend) => {
+    it("returns the same audit event that it persists", async () => {
+      const storage = createStorageImpl({ dbPath: path.join(configDir, "zerox.db") });
+      await storage.migrate();
+      try {
+        const auditLog = createToolAuditLog({
+          configDir,
+          backend,
+          storage,
+          createId: () => "audit_sqlite_1",
+          now: () => new Date("2026-06-21T02:00:00.000Z"),
+        });
+
+        const event = await auditLog.append({
+          taskId: "task_sqlite",
+          request: {
+            toolName: "file_write",
+            args: { path: "/tmp/report.md" },
+          },
+          decision: {
+            allowed: false,
+            reason: "Outside the writable workspace.",
+          },
+        });
+
+        await expect(auditLog.list({ limit: 1 })).resolves.toEqual([event]);
+      } finally {
+        storage.close();
+      }
+    });
   });
 });

@@ -227,7 +227,7 @@ export function createScheduledTaskStore(options: ScheduledTaskStoreOptions): Sc
     },
     async create(input) {
       const task = await jsonCreate(input); // validates + normalizes + writes JSON
-      repo.create({ ...input, id: task.id });
+      repo.create(task);
       return task;
     },
     async recordRun(taskId, completedAt) {
@@ -256,4 +256,3 @@ function normalizeStoredTask(task: ScheduledTask): ScheduledTask {
 }
 
 export { shadowWriteError };
-

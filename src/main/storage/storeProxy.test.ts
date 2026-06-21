@@ -114,6 +114,26 @@ describe.each(["sqlite", "dual"] as StorageBackend[])(
         expect(events[0]!.request.toolName).toBe("file_write"); // newest first
       });
     });
+
+    it("returns the exact event persisted by list", async () => {
+      await withStorage(backend, async (dir, storage) => {
+        const { createToolAuditLog } = await import("../toolAuditLog");
+        const log = createToolAuditLog({
+          configDir: dir,
+          backend,
+          storage,
+          createId: () => "audit_exact",
+          now: () => new Date("2026-06-21T01:02:03.000Z"),
+        });
+        const event = await log.append({
+          taskId: "task_exact",
+          request: { toolName: "shell_exec", args: { cmd: "pwd" } },
+          decision: { allowed: true, reason: "approved" },
+        });
+
+        await expect(log.list({ limit: 1 })).resolves.toEqual([event]);
+      });
+    });
   },
 );
 
@@ -133,6 +153,37 @@ describe.each(["sqlite", "dual"] as StorageBackend[])(
         expect((await store.list()).length).toBe(1);
         expect(await store.delete(task.id)).toBe(true);
         expect(await store.get(task.id)).toBeNull();
+      });
+    });
+
+    it("preserves disabled daily task identity and null nextRunAt", async () => {
+      await withStorage(backend, async (dir, storage) => {
+        const { createScheduledTaskStore } = await import("../taskStore");
+        const store = createScheduledTaskStore({
+          configDir: dir,
+          backend,
+          storage,
+          createId: () => "task_disabled_daily",
+          now: () => new Date("2026-06-21T00:00:00.000Z"),
+        });
+
+        const created = await store.create({
+          name: "Disabled daily",
+          skillName: "noop",
+          enabled: false,
+          schedule: { kind: "daily", time: "09:30" },
+          input: { note: "keep disabled" },
+        });
+
+        expect(created).toMatchObject({
+          id: "task_disabled_daily",
+          enabled: false,
+          createdAt: "2026-06-21T00:00:00.000Z",
+          updatedAt: "2026-06-21T00:00:00.000Z",
+          nextRunAt: null,
+        });
+        await expect(store.get(created.id)).resolves.toEqual(created);
+        await expect(store.list()).resolves.toEqual([created]);
       });
     });
   },

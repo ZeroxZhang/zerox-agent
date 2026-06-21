@@ -1,8 +1,9 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AgentRunRecord } from "../shared/agentRuns";
 import type { StorageBackend, RunRepository, Storage } from "../shared/storageContract";
 import { createRunRepository } from "./storage/repositories/runRepository";
+import { readRecoverableJsonl } from "./jsonlRecovery";
 
 export type AgentRunStore = {
   append(run: AgentRunRecord): Promise<AgentRunRecord>;
@@ -43,19 +44,10 @@ export function createAgentRunStore(options: AgentRunStoreOptions): AgentRunStor
     },
     async list(listOptions?: { limit?: number; taskId?: string }): Promise<AgentRunRecord[]> {
       const limit = listOptions?.limit ?? 50;
-      try {
-        const raw = await readFile(runsPath, "utf8");
-        return raw
-          .split("\n")
-          .filter(Boolean)
-          .map((line) => JSON.parse(line) as AgentRunRecord)
-          .filter((run) => (listOptions?.taskId ? run.taskId === listOptions.taskId : true))
-          .reverse()
-          .slice(0, limit);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-        throw error;
-      }
+      return (await readRecoverableJsonl<AgentRunRecord>(runsPath))
+        .filter((run) => (listOptions?.taskId ? run.taskId === listOptions.taskId : true))
+        .reverse()
+        .slice(0, limit);
     },
     async get(runId: string): Promise<AgentRunRecord | null> {
       const runs = await jsonImpl.list({ limit: Number.MAX_SAFE_INTEGER });

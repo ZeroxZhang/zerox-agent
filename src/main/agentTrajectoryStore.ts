@@ -1,8 +1,9 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
 import type { StorageBackend, RunRepository, Storage } from "../shared/storageContract";
 import { createRunRepository } from "./storage/repositories/runRepository";
+import { readRecoverableJsonl } from "./jsonlRecovery";
 
 export type AgentTrajectoryStore = {
   append(
@@ -50,16 +51,7 @@ export function createAgentTrajectoryStore(
       return event;
     },
     async list(runId) {
-      try {
-        const raw = await readFile(trajectoryPath(runId), "utf8");
-        return raw
-          .split("\n")
-          .filter(Boolean)
-          .map((line) => JSON.parse(line) as AgentTrajectoryEvent);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-        throw error;
-      }
+      return readRecoverableJsonl<AgentTrajectoryEvent>(trajectoryPath(runId));
     },
   };
 

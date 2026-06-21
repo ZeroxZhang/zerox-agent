@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -48,6 +48,23 @@ describe("agent run store", () => {
 
     await expect(store.get("run_1")).resolves.toEqual(first);
     await expect(store.get("missing")).resolves.toBeNull();
+  });
+
+  it("skips malformed JSONL lines while preserving valid run records", async () => {
+    const first = createRun("run_1", "task_1", "2026-06-05T08:00:00.000Z");
+    const second = createRun("run_2", "task_2", "2026-06-05T08:01:00.000Z");
+    await writeFile(
+      path.join(configDir, "agent-runs.jsonl"),
+      `${JSON.stringify(first)}\n{"id": "partial"\n${JSON.stringify(second)}\n`,
+      "utf8",
+    );
+
+    const store = createAgentRunStore({ configDir });
+
+    await expect(store.list({ limit: 10 })).resolves.toEqual([second, first]);
+    await expect(store.get("run_1")).resolves.toEqual(first);
+    const files = await readdir(configDir);
+    expect(files.some((file) => file.startsWith("agent-runs.jsonl.corrupt-lines-"))).toBe(true);
   });
 });
 
