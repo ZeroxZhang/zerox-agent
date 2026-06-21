@@ -273,8 +273,9 @@ function classifyPathArg(tok: string, cwd: string): { path: string; read: boolea
   // Path-like: absolute, home-relative, contains a separator, OR looks like a
   // filename with an extension (e.g. `a.txt`, `out.md`). Bare tokens without a
   // slash/extension (e.g. `status`, `hello`) are treated as args, not paths.
+  const isBareParentDirectory = tok === "..";
   const looksLikeFile = /^[A-Za-z0-9._~][A-Za-z0-9._~-]*\.[A-Za-z0-9]+$/.test(tok);
-  if (!tok.includes("/") && !tok.startsWith("~") && !looksLikeFile) return null;
+  if (!isBareParentDirectory && !tok.includes("/") && !tok.startsWith("~") && !looksLikeFile) return null;
   const resolved = resolvePath(tok, cwd);
   if (!resolved) return null;
   // Conservative: classify as read by default; write detection for args is

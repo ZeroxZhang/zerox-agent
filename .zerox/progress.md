@@ -1,5 +1,19 @@
 # Zerox Harness Progress
 
+## 2026-06-21 Task 1 Follow-up 2 Bare Shell Parent Path
+
+- Request: fix production shell authorization when `ToolAuthorizationService` supplies a `ShellPlan` for `cat ..`; bare parent-directory operands were not included in `touchedPaths`, so sandbox authorization had nothing to inspect.
+- Implementation:
+  - `src/main/tools/shell/shellAnalyzer.ts`: classify exactly bare `..` as path-like while preserving ordinary bare-word args.
+  - `src/main/tools/shell/shellAnalyzer.test.ts`: cover `cat ..`, `ls ..`, and quoted `..` operands.
+  - `src/main/toolAuthorizationService.test.ts`: cover `authorizeToolCallWithinRunContext(..., { shellPlan: analyzeShell("cat ..") })` denying workspace escape.
+- Verification evidence:
+  - RED: `npm test -- src/main/tools/shell/shellAnalyzer.test.ts src/shared/toolPermissions.test.ts` failed before implementation with missing touched paths and authorization approval.
+  - `npm test -- src/main/tools/shell/shellAnalyzer.test.ts src/shared/toolPermissions.test.ts src/main/toolAuthorizationService.test.ts` -> 3 files / 63 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm test` -> 164 files / 1035 tests passed.
+  - `npm run build` -> passed.
+
 ## 2026-06-21 v2.5.0 Workspace-Bound Skill Execution
 
 - Request: promote workspace into a first-class chat execution boundary, harden explicit skill invocation/execution, keep right-side process state recoverable, and ship a packaged v2.5.0 build for testing.
