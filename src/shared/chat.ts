@@ -141,7 +141,10 @@ export type ChatTaskStatusEvent = {
   createdAt: string;
   elapsedMs: number;
   turn?: number;
+  toolCallId?: string;
   toolName?: string;
+  resultRef?: string;
+  resultBytes?: number;
   selectedSkillName?: string;
   workspaceId?: string;
   workspaceSummary?: ChatWorkspaceSummary;

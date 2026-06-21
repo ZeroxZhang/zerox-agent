@@ -53,6 +53,51 @@ describe("tool result offload store", () => {
     await expect(store.read("../secret.json")).resolves.toBeNull();
     await expect(store.read("tool-result-refs/missing.json")).resolves.toBeNull();
   });
+
+  it("denies cross-run scoped ref reads unless an explicit capability is supplied", async () => {
+    const configDir = await createTempConfigDir();
+    const store = createToolResultOffloadStore({
+      configDir,
+      createId: () => "ref_scoped",
+    });
+    const ref = await store.write({
+      runId: "run_a",
+      sessionId: "session_a",
+      requestId: "request_a",
+      workspaceRunId: "workspace_run_a",
+      toolCallId: "provider_call_1",
+      toolName: "file_read",
+      content: '{"ok":true}',
+    });
+
+    await expect(
+      store.read(ref.relativePath, {
+        runId: "run_a",
+        sessionId: "session_a",
+        requestId: "request_a",
+        workspaceRunId: "workspace_run_a",
+      }),
+    ).resolves.toBe('{"ok":true}');
+    await expect(
+      store.read(ref.relativePath, {
+        runId: "run_b",
+        sessionId: "session_a",
+        requestId: "request_a",
+        workspaceRunId: "workspace_run_a",
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      store.read(ref.relativePath, {
+        runId: "run_b",
+        sessionId: "session_other",
+        capability: {
+          kind: "tool_result_ref_read",
+          ref: ref.relativePath,
+          issuedByRunId: "run_a",
+        },
+      }),
+    ).resolves.toBe('{"ok":true}');
+  });
 });
 
 async function createTempConfigDir(): Promise<string> {

@@ -480,6 +480,10 @@ export function createChatService(options: {
               tools: toolExecutor.getRegistry().getDefinitions(),
               toolResultOffloadStore: options.toolResultOffloadStore,
               toolResultOffloadThreshold: options.toolResultOffloadThreshold,
+              requestId,
+              ...(workspaceRunRecorder?.workspaceRunId
+                ? { workspaceRunId: workspaceRunRecorder.workspaceRunId }
+                : {}),
               ...(options.compactionStrategy
                 ? { compactionStrategy: options.compactionStrategy }
                 : {}),
@@ -525,8 +529,12 @@ export function createChatService(options: {
                   toolCallsExecuted: observedToolCallsExecuted,
                 });
               },
-              onToolCall(toolName, args) {
-                void evidence.append("tool_call", { toolName, args });
+              onToolCall(toolName, args, event) {
+                void evidence.append("tool_call", {
+                  toolName,
+                  args,
+                  toolCallId: event.toolCallId,
+                });
                 const nativeDescriptor = getNativeToolDescriptor(
                   toolExecutor,
                   toolName,
@@ -540,10 +548,11 @@ export function createChatService(options: {
                   state: "tool_call",
                   message: `正在调用工具：${toolName}`,
                   toolName,
+                  toolCallId: event.toolCallId,
                   toolCallsExecuted: observedToolCallsExecuted,
                 });
               },
-              onToolResult(toolName, ok, result) {
+              onToolResult(toolName, ok, result, event) {
                 observedToolCallsExecuted += 1;
                 const nativeDescriptor = getNativeToolDescriptor(
                   toolExecutor,
@@ -558,11 +567,21 @@ export function createChatService(options: {
                       : {}),
                   });
                 }
-                void evidence.append("tool_result", { toolName, ok });
+                void evidence.append("tool_result", {
+                  toolName,
+                  ok,
+                  toolCallId: event.toolCallId,
+                  ...(event.resultRef ? { resultRef: event.resultRef } : {}),
+                });
                 emitStatus.send({
                   state: "tool_result",
                   message: buildToolResultStatusMessage(toolName, result),
                   toolName,
+                  toolCallId: event.toolCallId,
+                  ...(event.resultRef ? { resultRef: event.resultRef } : {}),
+                  ...(typeof event.resultBytes === "number"
+                    ? { resultBytes: event.resultBytes }
+                    : {}),
                   ok,
                   toolCallsExecuted: observedToolCallsExecuted,
                 });
@@ -802,6 +821,7 @@ function getNowMs(now: (() => Date) | undefined): number {
 }
 
 type ChatWorkspaceRunRecorder = {
+  workspaceRunId: string;
   appendStatusEvent(event: ChatTaskStatusEvent): Promise<void>;
 };
 
@@ -843,6 +863,7 @@ async function createChatWorkspaceRunRecorder(options: {
   }
 
   return {
+    workspaceRunId,
     async appendStatusEvent(event) {
       const ledgerEvent = toWorkspaceRunEventInput(event);
       if (!ledgerEvent) {
@@ -873,6 +894,11 @@ function toWorkspaceRunEventInput(
   const payload = {
     chatState: event.state,
     ...(typeof event.turn === "number" ? { turn: event.turn } : {}),
+    ...(event.toolCallId ? { toolCallId: event.toolCallId } : {}),
+    ...(event.resultRef ? { resultRef: event.resultRef } : {}),
+    ...(typeof event.resultBytes === "number"
+      ? { resultBytes: event.resultBytes }
+      : {}),
     ...(typeof event.toolCallsExecuted === "number"
       ? { toolCallsExecuted: event.toolCallsExecuted }
       : {}),
@@ -903,7 +929,7 @@ function toWorkspaceRunEventInput(
   if (event.state === "tool_call") {
     return {
       type: "tool_call",
-      toolCallId: getStatusEventToolCallId(event),
+      toolCallId: event.toolCallId ?? getStatusEventToolCallId(event),
       toolName: event.toolName ?? "unknown",
       message: event.message,
       payload,
@@ -914,9 +940,13 @@ function toWorkspaceRunEventInput(
   if (event.state === "tool_result") {
     return {
       type: "tool_result",
-      toolCallId: getStatusEventToolCallId(event),
+      toolCallId: event.toolCallId ?? getStatusEventToolCallId(event),
       toolName: event.toolName,
       ok: event.ok,
+      ...(event.resultRef ? { resultRef: event.resultRef } : {}),
+      ...(typeof event.resultBytes === "number"
+        ? { resultBytes: event.resultBytes }
+        : {}),
       message: event.message,
       payload,
       createdAt: event.createdAt,

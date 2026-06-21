@@ -41,6 +41,8 @@ export type AgentLoopOptions = {
   tools?: ReturnType<typeof buildToolDefinitions>;
   toolResultOffloadStore?: ToolResultOffloadStore;
   toolResultOffloadThreshold?: number;
+  requestId?: string;
+  workspaceRunId?: string;
   pauseOnTurnLimit?: boolean;
   pauseOnStrategyGuard?: boolean;
   resumeMessages?: ChatMessage[];
@@ -56,11 +58,16 @@ export type AgentLoopOptions = {
    *  reminders are injected as synthetic user messages. All triggers default OFF. */
   systemReminderRegistry?: SystemReminderRegistry;
   modelRetry?: ModelRetryOptions;
-  onToolCall?: (toolName: string, args: Record<string, unknown>) => void;
+  onToolCall?: (
+    toolName: string,
+    args: Record<string, unknown>,
+    event: AgentLoopToolEvent,
+  ) => void;
   onToolResult?: (
     toolName: string,
     ok: boolean,
     result: Awaited<ReturnType<AgentToolExecutor["execute"]>>,
+    event: AgentLoopToolEvent,
   ) => void;
   onTurn?: (turn: number, phase: string) => void;
   onReasoning?: (reasoningContent: string, turn: number) => void;
@@ -83,6 +90,16 @@ export type AgentLoopStrategyGuardEvent = {
   message: string;
   toolName: string;
   count: number;
+};
+
+export type AgentLoopToolEvent = {
+  toolCallId: string;
+  runId?: string;
+  sessionId?: string;
+  requestId?: string;
+  workspaceRunId?: string;
+  resultRef?: string;
+  resultBytes?: number;
 };
 
 export type AgentLoopContinuation = {
@@ -129,6 +146,8 @@ export async function runAgentLoop(
     tools: customTools,
     toolResultOffloadStore,
     toolResultOffloadThreshold,
+    requestId,
+    workspaceRunId,
     pauseOnTurnLimit = false,
     pauseOnStrategyGuard = false,
     resumeMessages,
@@ -427,10 +446,19 @@ export async function runAgentLoop(
           content: response.content ?? "",
           tool_calls: response.toolCalls,
         });
+        const assistantToolMessage = messages.at(-1);
+        const processedToolCalls: ToolCall[] = [];
 
         // Process each tool call
         for (const preparedToolCall of preparedToolCalls) {
           const { toolCall, toolName, signature } = preparedToolCall;
+          const toolEventBase = buildToolEvent({
+            toolCallId: toolCall.id,
+            runId: taskId,
+            sessionId: runContext?.sessionId,
+            requestId,
+            workspaceRunId,
+          });
           if (!preparedToolCall.args) {
             messages.push({
               role: "tool",
@@ -442,6 +470,11 @@ export async function runAgentLoop(
                 error: "参数 JSON 解析失败",
               }),
             });
+            processedToolCalls.push(toolCall);
+            onToolResult?.(toolName, false, {
+              ok: false,
+              error: "参数 JSON 解析失败",
+            }, toolEventBase);
             continue;
           }
 
@@ -470,7 +503,8 @@ export async function runAgentLoop(
                 toolCallId: toolCall.id,
               }),
             });
-            onToolResult?.(toolName, false, rejectedResult);
+            processedToolCalls.push(toolCall);
+            onToolResult?.(toolName, false, rejectedResult, toolEventBase);
             continue;
           }
 
@@ -499,15 +533,16 @@ export async function runAgentLoop(
                   toolCallId: toolCall.id,
                 }),
               });
+              processedToolCalls.push(toolCall);
               onToolResult?.(toolName, false, {
                 ok: false,
                 error: auth.ok ? auth.decision.reason : auth.message,
-              });
+              }, toolEventBase);
               continue;
             }
           }
 
-          onToolCall?.(toolName, args);
+          onToolCall?.(toolName, args, toolEventBase);
 
           // Execute tool
           const result = await toolExecutor.execute({
@@ -516,6 +551,12 @@ export async function runAgentLoop(
           }, {
             ...(signal ? { signal } : {}),
             ...(runContext ? { runContext } : {}),
+            toolResultReadScope: {
+              ...(taskId ? { runId: taskId } : {}),
+              ...(runContext?.sessionId ? { sessionId: runContext.sessionId } : {}),
+              ...(requestId ? { requestId } : {}),
+              ...(workspaceRunId ? { workspaceRunId } : {}),
+            },
           });
 
           toolCallsExecuted += 1;
@@ -524,7 +565,6 @@ export async function runAgentLoop(
           if (result.ok) {
             successfulToolNames.add(toolName);
           }
-          onToolResult?.(toolName, result.ok, result);
           const failureLoop = updateToolFailureStreak(
             toolFailureStreak,
             toolName,
@@ -559,13 +599,27 @@ export async function runAgentLoop(
               store: toolResultOffloadStore,
               thresholdChars: toolResultOffloadThreshold,
               runId: taskId,
+              sessionId: runContext?.sessionId,
+              requestId,
+              workspaceRunId,
             });
+          const toolResultEvent = buildToolEvent({
+            toolCallId: toolCall.id,
+            runId: taskId,
+            sessionId: runContext?.sessionId,
+            requestId,
+            workspaceRunId,
+            resultRef: serializedObservation.resultRef,
+            resultBytes: serializedObservation.originalChars,
+          });
 
           messages.push({
             role: "tool",
             tool_call_id: toolCall.id,
             content: serializedObservation.content,
           });
+          processedToolCalls.push(toolCall);
+          onToolResult?.(toolName, result.ok, result, toolResultEvent);
 
           const selfFinalizingSummary = buildSelfFinalizingToolSummary(
             toolName,
@@ -639,6 +693,8 @@ export async function runAgentLoop(
           }
         }
 
+        trimUnansweredToolCalls(assistantToolMessage, processedToolCalls);
+
         if (status === "paused") {
           break;
         }
@@ -707,6 +763,36 @@ function buildToolFailureLoopPauseSummary(options: {
     `我已经暂停，避免继续在同一个失败模式里空转。累计执行 ${options.toolCallsExecuted} 个工具。`,
     "你可以回复“继续”让我带着已有诊断接着试，也可以调整目标、提供脚本参数或要求我换一种工具路径。",
   ].join("\n");
+}
+
+function buildToolEvent(input: AgentLoopToolEvent): AgentLoopToolEvent {
+  return {
+    toolCallId: input.toolCallId,
+    ...(input.runId ? { runId: input.runId } : {}),
+    ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+    ...(input.requestId ? { requestId: input.requestId } : {}),
+    ...(input.workspaceRunId ? { workspaceRunId: input.workspaceRunId } : {}),
+    ...(input.resultRef ? { resultRef: input.resultRef } : {}),
+    ...(typeof input.resultBytes === "number"
+      ? { resultBytes: input.resultBytes }
+      : {}),
+  };
+}
+
+function trimUnansweredToolCalls(
+  assistantMessage: ChatMessage | undefined,
+  processedToolCalls: ToolCall[],
+) {
+  if (
+    !assistantMessage ||
+    assistantMessage.role !== "assistant" ||
+    !assistantMessage.tool_calls ||
+    processedToolCalls.length >= assistantMessage.tool_calls.length
+  ) {
+    return;
+  }
+
+  assistantMessage.tool_calls = processedToolCalls;
 }
 
 function applyRunContextDefaultsToToolArgs(

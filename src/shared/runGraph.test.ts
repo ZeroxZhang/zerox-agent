@@ -3,6 +3,7 @@ import { KERNEL_EVENT_VERSION, type KernelEvent } from "./kernelContract";
 import { projectRunGraph, type RunGraphView } from "./runGraph";
 import type { AgentRunRecord } from "./agentRuns";
 import type { AgentTrajectoryEvent } from "./agentTrajectory";
+import type { WorkspaceRunEvent } from "./workspaceRunLedger";
 
 const baseTime = "2026-06-17T00:00:00.000Z";
 
@@ -181,6 +182,47 @@ describe("projectRunGraph", () => {
       ]),
     );
     expect(expectDanglingEdges(graph)).toEqual([]);
+  });
+
+  test("projects workspace run ledger tool events with provider tool call ids", () => {
+    const graph = projectRunGraph({
+      run: createRun(),
+      workspaceRunEvents: [
+        workspaceRunEvent("workspace_event_call", 1, {
+          type: "tool_call",
+          toolCallId: "provider_call_1",
+          toolName: "file_read",
+          args: { path: "/repo/README.md" },
+        }),
+        workspaceRunEvent("workspace_event_result", 2, {
+          type: "tool_result",
+          toolCallId: "provider_call_1",
+          toolName: "file_read",
+          ok: true,
+          resultRef:
+            "tool-result-refs/run_1_session_1_request_1_provider_call_1_file_read_ref.json",
+        }),
+      ],
+    });
+
+    expect(graph.nodes.find((node) => node.id === "tool:provider_call_1")).toMatchObject({
+      kind: "tool_call",
+      status: "succeeded",
+      title: "file_read",
+      result: {
+        status: "succeeded",
+        evidenceRefs: ["workspace-run:workspace_event_result"],
+      },
+    });
+    expect(graph.evidence).toEqual(
+      expect.arrayContaining([
+        {
+          ref: "workspace-run:workspace_event_result",
+          source: "workspace_run",
+          eventType: "tool_result",
+        },
+      ]),
+    );
   });
 
   test("projects artifact_created events with provenance refs", () => {
@@ -391,6 +433,22 @@ function trajectory(
     },
     createdAt: baseTime,
   };
+}
+
+function workspaceRunEvent(
+  id: string,
+  seq: number,
+  input: Partial<WorkspaceRunEvent> & Pick<WorkspaceRunEvent, "type">,
+): WorkspaceRunEvent {
+  return {
+    id,
+    workspaceRunId: "workspace_run_1",
+    sessionId: "session_1",
+    requestId: "request_1",
+    seq,
+    createdAt: baseTime,
+    ...input,
+  } as WorkspaceRunEvent;
 }
 
 function kernelTurnStart(turn: number): KernelEvent {

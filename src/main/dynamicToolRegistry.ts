@@ -1,6 +1,7 @@
 import type { ToolDefinition } from "./openAiCompatibleClient";
 import type { AgentRunContext } from "../shared/agentWorkspace";
 import type { NativeToolDescriptor } from "../shared/nativeCapabilities";
+import type { ToolResultOffloadReadScope } from "./toolResultOffloadStore";
 
 export type AgentToolExecutionResult =
   | { ok: true; result: Record<string, unknown> }
@@ -9,6 +10,7 @@ export type AgentToolExecutionResult =
 export type ToolExecutionOptions = {
   runContext?: AgentRunContext;
   signal?: AbortSignal;
+  toolResultReadScope?: ToolResultOffloadReadScope;
 };
 
 export type ToolHandler = (

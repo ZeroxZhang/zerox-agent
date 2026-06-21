@@ -3609,3 +3609,45 @@
   - `npm run harness:check` -> passed.
   - `npm run verify` -> 164 files / 1051 tests passed; build passed; agent eval 26/26; memory eval 2/2.
   - `npm run smoke:prod` -> passed; renderer rendered agent chat UI with expected SQLite ABI fallback to JSON.
+
+## 2026-06-21 - Task 4 Runtime Protocol, Workflow, And Replay-Grade Observability
+
+- Summary:
+  - Kept paused multi-tool histories provider-valid by trimming unprocessed assistant tool calls when a pause/finalization interrupts a tool batch.
+  - Scoped offloaded tool-result refs to run/session/request/workspace-run identity with explicit-capability escape hatch, and carried provider tool_call ids through chat status, trajectory, workspace ledger, offload refs, and run graph projection.
+  - Closed workflow phases, preserved phase metadata, terminalized active phases on completion/error, and cleared deadline timers.
+  - Added `SkillExecutionService` snapshots and exported chat trajectory/workspace-run ledgers in episode packages.
+- Changed files:
+  - `src/main/agentLoop.ts`
+  - `src/main/chatService.ts`
+  - `src/main/toolObservationOffload.ts`
+  - `src/main/toolResultOffloadStore.ts`
+  - `src/main/workflow/workflowRuntime.ts`
+  - `src/main/skillExecutionService.ts`
+  - `src/main/agentEpisodeExporter.ts`
+  - `src/shared/runGraph.ts`
+  - `src/shared/chat.ts`
+  - `src/main/dynamicToolRegistry.ts`
+  - `src/main/agentToolExecutor.ts`
+  - `src/main/agentLoop.test.ts`
+  - `src/main/chatService.test.ts`
+  - `src/main/toolObservationOffload.test.ts`
+  - `src/main/toolResultOffloadStore.test.ts`
+  - `src/main/actors/actorRuntime.full.test.ts`
+  - `src/main/agentEpisodeExporter.test.ts`
+  - `src/shared/runGraph.test.ts`
+  - `src/main/skillExecutionService.test.ts`
+- RED evidence:
+  - `npm test -- src/main/agentLoop.test.ts src/main/chatService.test.ts` -> failed: paused multi-tool history had unmatched provider tool calls; chat/workspace ledger events lacked provider `toolCallId`.
+  - `npm test -- src/main/toolResultOffloadStore.test.ts src/main/toolObservationOffload.test.ts src/shared/toolPermissions.test.ts src/main/agentToolExecutor.test.ts` -> failed: scoped offload metadata was not written and cross-run ref read was allowed.
+  - `npm test -- src/main/actors/actorRuntime.full.test.ts src/main/agentEpisodeExporter.test.ts src/shared/runGraph.test.ts src/main/skillExecutionService.test.ts` -> failed: workflow phases stayed running, episode package lacked ledger files, run graph ignored workspace ledger events, and `skillExecutionService` was missing.
+- GREEN evidence:
+  - `npm test -- src/main/agentLoop.test.ts src/main/chatService.test.ts` -> 2 files / 45 tests passed.
+  - `npm test -- src/main/toolResultOffloadStore.test.ts src/main/toolObservationOffload.test.ts src/shared/toolPermissions.test.ts src/main/agentToolExecutor.test.ts` -> 4 files / 77 tests passed.
+  - `npm test -- src/main/chatService.test.ts src/shared/workspaceRunLedger.test.ts` -> 2 files / 31 tests passed.
+  - `npm test -- src/main/actors/actorRuntime.full.test.ts` -> 1 file / 19 tests passed.
+  - `npm test -- src/shared/skillExecutionContract.test.ts src/main/chatService.test.ts src/main/agentEpisodeExporter.test.ts src/shared/runGraph.test.ts src/main/skillExecutionService.test.ts` -> 5 files / 42 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm run build` -> passed.
+  - `npm run verify` -> 165 files / 1063 tests passed; build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI with expected SQLite ABI fallback to JSON.

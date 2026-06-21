@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createActorRuntime, type SpawnInput, type ActorOutcome } from "./actorRuntime";
 import { ActorInbox, MAX_PRE_REACT } from "./actorInbox";
 import { validateOutputSchema } from "./actorOutputSchema";
@@ -107,6 +107,10 @@ function mockHooks(): WorkflowHostHooks {
 }
 
 describe("WorkflowRuntime", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("parallel caps concurrency and aggregates errors", async () => {
     const rt = createWorkflowRuntime(mockHooks());
     rt.register("parallel-test", async (_args, sandbox) => {
@@ -158,6 +162,58 @@ describe("WorkflowRuntime", () => {
     const rt = createWorkflowRuntime(mockHooks());
     const res = await rt.run("nope", null, { runId: "r1" });
     expect(res.status).toBe("error");
+  });
+
+  it("closes previous phases, preserves phase metadata, terminalizes the last phase, and clears timers", async () => {
+    vi.useFakeTimers();
+    const rt = createWorkflowRuntime(mockHooks());
+    rt.register("phase-lifecycle", async (_args, _sandbox, journal) => {
+      journal.phase("plan", { owner: "planner" });
+      journal.phase("execute", { owner: "executor" });
+      return "ok";
+    });
+
+    const res = await rt.run("phase-lifecycle", null, {
+      runId: "r1",
+      deadlineMs: 60_000,
+    });
+
+    expect(res.status).toBe("done");
+    expect(res.phases).toEqual([
+      expect.objectContaining({
+        name: "plan",
+        status: "done",
+        meta: { owner: "planner" },
+        endedAt: expect.any(String),
+      }),
+      expect.objectContaining({
+        name: "execute",
+        status: "done",
+        meta: { owner: "executor" },
+        endedAt: expect.any(String),
+      }),
+    ]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("marks the active phase as error when a workflow fails", async () => {
+    const rt = createWorkflowRuntime(mockHooks());
+    rt.register("phase-error", async (_args, _sandbox, journal) => {
+      journal.phase("execute", { attempt: 1 });
+      throw new Error("boom");
+    });
+
+    const res = await rt.run("phase-error", null, { runId: "r1" });
+
+    expect(res.status).toBe("error");
+    expect(res.phases).toEqual([
+      expect.objectContaining({
+        name: "execute",
+        status: "error",
+        meta: { attempt: 1 },
+        endedAt: expect.any(String),
+      }),
+    ]);
   });
 
   it("REJECT_QUORUM is 2", () => { expect(REJECT_QUORUM).toBe(2); });

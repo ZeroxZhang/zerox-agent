@@ -17,7 +17,10 @@ import {
   type LocalFileOrganizationPreview,
   type LocalFileOrganizationTransaction,
 } from "./localFileOrganizer";
-import type { ToolResultOffloadStore } from "./toolResultOffloadStore";
+import type {
+  ToolResultOffloadReadScope,
+  ToolResultOffloadStore,
+} from "./toolResultOffloadStore";
 import type { MemoryStore } from "./memoryStore";
 import {
   validatePathInsideRunContext,
@@ -50,6 +53,7 @@ export type AgentToolExecutionOptions = {
   runContext?: AgentRunContext;
   signal?: AbortSignal;
   artifactWrite?: TrustedArtifactWriteMetadata;
+  toolResultReadScope?: ToolResultOffloadReadScope;
 };
 
 export type TrustedArtifactWriteMetadata = {
@@ -503,10 +507,11 @@ function registerBuiltinTools(
         },
       },
     },
-    async (args) =>
+    async (args, executionOptions) =>
       readLocalFileOrToolResultRef(
         String(args.path ?? ""),
         options.toolResultOffloadStore,
+        executionOptions?.toolResultReadScope,
       ),
     "built-in",
   );
@@ -527,8 +532,12 @@ function registerBuiltinTools(
         },
       },
     },
-    async (args) =>
-      readToolResultRef(String(args.ref ?? ""), options.toolResultOffloadStore),
+    async (args, executionOptions) =>
+      readToolResultRef(
+        String(args.ref ?? ""),
+        options.toolResultOffloadStore,
+        executionOptions?.toolResultReadScope,
+      ),
     "built-in",
     defineNativeToolDescriptor({
       id: "tool_result_read",
@@ -1183,9 +1192,10 @@ async function readLocalFile(filePath: string): Promise<AgentToolExecutionResult
 async function readLocalFileOrToolResultRef(
   filePath: string,
   store?: Pick<ToolResultOffloadStore, "read">,
+  scope?: ToolResultOffloadReadScope,
 ): Promise<AgentToolExecutionResult> {
   if (isSafeToolResultRef(filePath)) {
-    return readToolResultRef(filePath, store);
+    return readToolResultRef(filePath, store, scope);
   }
 
   return readLocalFile(filePath);
@@ -1194,6 +1204,7 @@ async function readLocalFileOrToolResultRef(
 async function readToolResultRef(
   ref: string,
   store?: Pick<ToolResultOffloadStore, "read">,
+  scope?: ToolResultOffloadReadScope,
 ): Promise<AgentToolExecutionResult> {
   if (!isSafeToolResultRef(ref)) {
     return {
@@ -1208,7 +1219,7 @@ async function readToolResultRef(
     };
   }
 
-  const content = await store.read(ref);
+  const content = await store.read(ref, scope);
   if (!content) {
     return {
       ok: false,

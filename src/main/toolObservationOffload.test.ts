@@ -46,6 +46,9 @@ describe("tool observation offload serializer", () => {
       store,
       thresholdChars: 120,
       runId: "run_1",
+      sessionId: "session_1",
+      requestId: "request_1",
+      workspaceRunId: "workspace_run_1",
     });
     const compact = JSON.parse(serialized.content) as Record<string, unknown>;
 
@@ -78,6 +81,9 @@ describe("tool observation offload serializer", () => {
     expect(store.writes).toEqual([
       {
         runId: "run_1",
+        sessionId: "session_1",
+        requestId: "request_1",
+        workspaceRunId: "workspace_run_1",
         toolCallId: "call_1",
         toolName: "file_read",
         content: original,
@@ -146,6 +152,9 @@ describe("tool observation offload serializer", () => {
 function createRecordingStore(): ToolResultOffloadStore & {
   writes: Array<{
     runId?: string;
+    sessionId?: string;
+    requestId?: string;
+    workspaceRunId?: string;
     toolCallId?: string;
     toolName: string;
     content: string;
@@ -153,6 +162,9 @@ function createRecordingStore(): ToolResultOffloadStore & {
 } {
   const writes: Array<{
     runId?: string;
+    sessionId?: string;
+    requestId?: string;
+    workspaceRunId?: string;
     toolCallId?: string;
     toolName: string;
     content: string;

@@ -140,6 +140,7 @@ export function createWorkflowRuntime(hooks: WorkflowHostHooks): WorkflowRuntime
       phases,
       actorSpawns,
       phase(name: string, meta?: Record<string, unknown>) {
+        closeRunningPhases(phases, "done");
         const existing = phases.find((p) => p.name === name && p.status === "running");
         if (existing) {
           existing.status = "done";
@@ -147,7 +148,12 @@ export function createWorkflowRuntime(hooks: WorkflowHostHooks): WorkflowRuntime
           if (meta) existing.meta = { ...(existing.meta ?? {}), ...meta };
           return;
         }
-        phases.push({ name, startedAt: new Date().toISOString(), status: "running" });
+        phases.push({
+          name,
+          startedAt: new Date().toISOString(),
+          status: "running",
+          ...(meta ? { meta } : {}),
+        });
       },
       factCapped(reason: string) {
         phases.push({ name: "fact_capped", startedAt: new Date().toISOString(), status: "done", meta: { reason } });
@@ -177,25 +183,49 @@ export function createWorkflowRuntime(hooks: WorkflowHostHooks): WorkflowRuntime
       const result: WorkflowResult = { status: "done", phases: journal.phases, actorSpawns: journal.actorSpawns };
       const sandbox = makeSandbox(opts);
       const deadline = opts.deadlineMs ?? 12 * 60 * 60 * 1000;
-      const timer = setTimeout(() => {}, 0); // keep event loop alive; abort via signal
-      void timer;
+      let deadlineTimer: ReturnType<typeof setTimeout> | null = null;
+      let abortHandler: (() => void) | null = null;
       try {
         if (opts.signal?.aborted) throw new Error("canceled");
         const value = await Promise.race([
           fn(args, sandbox, journal),
           new Promise<never>((_, reject) => {
-            const to = setTimeout(() => reject(new Error("deadline")), deadline);
-            opts.signal?.addEventListener("abort", () => { clearTimeout(to); reject(new Error("canceled")); });
+            deadlineTimer = setTimeout(() => reject(new Error("deadline")), deadline);
+            abortHandler = () => {
+              if (deadlineTimer) clearTimeout(deadlineTimer);
+              reject(new Error("canceled"));
+            };
+            opts.signal?.addEventListener("abort", abortHandler, { once: true });
           }),
         ]);
         result.value = value;
         result.status = "done";
+        closeRunningPhases(journal.phases, "done");
       } catch (error) {
         const msg = String(error);
         result.status = msg === "canceled" ? "canceled" : msg === "deadline" ? "deadline_exceeded" : "error";
         result.error = msg;
+        closeRunningPhases(journal.phases, "error");
+      } finally {
+        if (deadlineTimer) clearTimeout(deadlineTimer);
+        if (abortHandler) {
+          opts.signal?.removeEventListener("abort", abortHandler);
+        }
       }
       return result;
     },
   };
+}
+
+function closeRunningPhases(
+  phases: WorkflowPhase[],
+  status: Extract<WorkflowPhase["status"], "done" | "error">,
+) {
+  const endedAt = new Date().toISOString();
+  for (const phase of phases) {
+    if (phase.status === "running") {
+      phase.status = status;
+      phase.endedAt = endedAt;
+    }
+  }
 }

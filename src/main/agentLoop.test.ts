@@ -485,6 +485,60 @@ describe("agent loop", () => {
     expect(result.summary).toContain("批量或递归策略");
   });
 
+  it("keeps paused multi-tool histories provider-valid by not leaving unmatched tool calls", async () => {
+    const requests: ChatCompletionRequest[] = [];
+    const chatClient: ChatClient = {
+      async complete(request) {
+        requests.push(request);
+        if (requests.length <= 3) {
+          return toolCallResponse(
+            `warmup_call_${requests.length}`,
+            `/tmp/warmup-${requests.length}`,
+          );
+        }
+
+        return {
+          content: null,
+          finishReason: "tool_calls",
+          toolCalls: [
+            {
+              id: "provider_call_first",
+              type: "function",
+              function: {
+                name: "file_list",
+                arguments: JSON.stringify({ path: "/tmp/first" }),
+              },
+            },
+            {
+              id: "provider_call_second",
+              type: "function",
+              function: {
+                name: "file_list",
+                arguments: JSON.stringify({ path: "/tmp/second" }),
+              },
+            },
+          ],
+        };
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "检查多个目录，但在策略守护触发时暂停" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(),
+        maxTurns: 6,
+        pauseOnStrategyGuard: true,
+        tools: testTools,
+      },
+    );
+
+    expect(result.status).toBe("paused");
+    expect(result.toolCallsExecuted).toBe(4);
+    expect(everyAssistantToolCallHasResult(result.messages)).toBe(true);
+  });
+
   it("blocks shell fallback after chrome_bookmarks_read has returned structured data", async () => {
     const requests: ChatCompletionRequest[] = [];
     const executedTools: string[] = [];
@@ -1133,6 +1187,34 @@ function dynamicToolCallResponse(id: string): ChatCompletionResponse {
       },
     ],
   };
+}
+
+function everyAssistantToolCallHasResult(
+  messages: ChatCompletionRequest["messages"],
+): boolean {
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (message.role !== "assistant" || !message.tool_calls?.length) {
+      continue;
+    }
+
+    const toolResultIds = new Set<string>();
+    for (let nextIndex = index + 1; nextIndex < messages.length; nextIndex += 1) {
+      const nextMessage = messages[nextIndex];
+      if (nextMessage.role === "assistant") {
+        break;
+      }
+      if (nextMessage.role === "tool" && nextMessage.tool_call_id) {
+        toolResultIds.add(nextMessage.tool_call_id);
+      }
+    }
+
+    if (!message.tool_calls.every((toolCall) => toolResultIds.has(toolCall.id))) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function createToolExecutor(

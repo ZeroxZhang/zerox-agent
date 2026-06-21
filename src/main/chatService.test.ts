@@ -1064,6 +1064,85 @@ describe("chat service", () => {
     ]);
   });
 
+  it("records provider tool_call ids in chat status and workspace run ledger events", async () => {
+    const statusEvents: ChatTaskStatusEvent[] = [];
+    const workspaceRunEvents: WorkspaceRunEventInput[] = [];
+    const workspaceRunFinishes: Array<{
+      workspaceRunId: string;
+      status: WorkspaceRunTerminalStatus;
+      summary?: string;
+    }> = [];
+    const service = createChatService({
+      chatClient: {
+        async complete(request) {
+          if (request.tools && !request.messages.some((message) => message.role === "tool")) {
+            return toolCallResponse("provider_call_ledger", "/workspace/project");
+          }
+
+          return chatReply("ledger done");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([]),
+      workspaceService: {
+        async resolveRunContext() {
+          return buildPrimaryRunContext({
+            workspaceId: "workspace_project",
+            workspaceRoot: "/workspace/project",
+          });
+        },
+      },
+      toolExecutor: createToolExecutor(),
+      workspaceRunStore: createMemoryWorkspaceRunStore({
+        creates: [],
+        events: workspaceRunEvents,
+        finishes: workspaceRunFinishes,
+      }),
+      createId: () => "chat_provider_tool_ids",
+      now: createSteppedClock("2026-06-21T08:00:00.000Z"),
+    });
+
+    await service.sendMessage(
+      {
+        sessionId: "chat_session_ledger",
+        requestId: "request_ledger",
+        message: "record tool ids",
+        workspaceId: "workspace_project",
+      },
+      {
+        onStatusEvent(event) {
+          statusEvents.push(event);
+        },
+      },
+    );
+
+    expect(statusEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          state: "tool_call",
+          toolCallId: "provider_call_ledger",
+        }),
+        expect.objectContaining({
+          state: "tool_result",
+          toolCallId: "provider_call_ledger",
+        }),
+      ]),
+    );
+    expect(workspaceRunEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "tool_call",
+          toolCallId: "provider_call_ledger",
+        }),
+        expect.objectContaining({
+          type: "tool_result",
+          toolCallId: "provider_call_ledger",
+        }),
+      ]),
+    );
+  });
+
   it("emits native trajectory evidence for chat tool runs", async () => {
     const trajectoryEvents: AgentTrajectoryEvent[] = [];
     const registry = createDynamicToolRegistry();
