@@ -44,6 +44,7 @@ export type ToolUserApprovalRequest = {
 export type ToolUserApprovalResult = {
   approved: boolean;
   reason?: string;
+  automatic?: boolean;
 };
 
 export function createToolAuthorizationService(options: {

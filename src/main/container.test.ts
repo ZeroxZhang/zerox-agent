@@ -1,12 +1,17 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { execFile as execFileCallback } from "node:child_process";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createAppContainer } from "./container";
 import { registerAllIpcHandlers } from "./ipc";
+import { createToolApprovalCoordinator } from "./toolApprovalCoordinator";
 import { issueToolResultRefReadCapability } from "./toolResultOffloadStore";
 import type { Goal } from "../shared/agentGoal";
 import type { GoalProgressEvent } from "../shared/chat";
+
+const execFileAsync = promisify(execFileCallback);
 
 const electronState = vi.hoisted(() => ({
   userDataPath: "",
@@ -180,6 +185,33 @@ describe("app container goal drafts", () => {
         },
       }),
     ).resolves.toMatchObject({ ok: false });
+  });
+
+  it("rejects globally automatic approval for untrusted git worktree creation", async () => {
+    const coordinator = createToolApprovalCoordinator({
+      sendToRenderers() {},
+      createId: () => "approval_auto_worktree",
+      now: () => "2026-06-21T00:00:00.000Z",
+    });
+    coordinator.setAutoApprovalEnabled(true);
+    const container = createAppContainer({
+      requestToolApproval: coordinator.requestUserApproval,
+    });
+    const repositoryRoot = path.join(tempDir, "untrusted-repo");
+    await createSeedGitRepository(repositoryRoot);
+
+    await expect(
+      container.requestGitWorktreeAgentWorkspace({
+        name: "Auto-approved worktree",
+        repositoryRoot,
+        branch: "codex/auto-approved-worktree",
+      }),
+    ).rejects.toThrow(/explicit user approval/i);
+
+    await expect(container.agentWorkspaceStore().list()).resolves.toEqual([]);
+    await expect(listGitBranches(repositoryRoot)).resolves.not.toContain(
+      "codex/auto-approved-worktree",
+    );
   });
 
   it("syncs background goal status changes into chat session summaries before notifying listeners", async () => {
@@ -389,6 +421,30 @@ describe("app container goal drafts", () => {
     });
   });
 });
+
+async function createSeedGitRepository(repositoryRoot: string): Promise<void> {
+  await mkdir(repositoryRoot, { recursive: true });
+  await execFileAsync("git", ["init"], { cwd: repositoryRoot });
+  await execFileAsync("git", ["config", "user.email", "test@example.com"], {
+    cwd: repositoryRoot,
+  });
+  await execFileAsync("git", ["config", "user.name", "Zerox Test"], {
+    cwd: repositoryRoot,
+  });
+  await writeFile(path.join(repositoryRoot, "README.md"), "seed\n", "utf8");
+  await execFileAsync("git", ["add", "README.md"], { cwd: repositoryRoot });
+  await execFileAsync("git", ["commit", "-m", "seed"], { cwd: repositoryRoot });
+}
+
+async function listGitBranches(repositoryRoot: string): Promise<string[]> {
+  const { stdout } = await execFileAsync("git", ["branch", "--format=%(refname:short)"], {
+    cwd: repositoryRoot,
+  });
+  return stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
 
 function createStoredGoal(
   overrides: Pick<Goal, "id" | "chatSessionId" | "status"> & Partial<Goal>,

@@ -654,6 +654,12 @@ export function createAppContainer(options: {
       throw new Error(approval.reason ?? "Git worktree creation was not approved.");
     }
 
+    if (approval.automatic) {
+      throw new Error(
+        "Git worktree creation requires explicit user approval; global automatic approval is not sufficient.",
+      );
+    }
+
     return agentWorkspaceService().createGitWorktreeWorkspace({
       name: input.name,
       repositoryRoot: input.repositoryRoot,

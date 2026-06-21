@@ -3729,3 +3729,25 @@
   - `npm run build` -> passed.
   - `npm run verify` -> 165 files / 1066 tests passed; build passed; agent eval 26/26; memory eval 2/2.
   - `npm run smoke:prod` -> passed; renderer rendered agent chat UI with expected SQLite ABI fallback to JSON.
+
+## 2026-06-21 - Task 5 Follow-Up Worktree Auto-Approval Boundary
+
+- Summary:
+  - Added approval-result provenance for global auto-approval.
+  - Rejected automatic approvals before untrusted git worktree creation reaches the workspace service or `git worktree add`.
+  - Added a container regression with a disposable Git repo proving auto-approval no longer creates a worktree workspace or branch.
+- Changed files:
+  - `src/main/container.ts`
+  - `src/main/container.test.ts`
+  - `src/main/toolApprovalCoordinator.ts`
+  - `src/main/toolApprovalCoordinator.test.ts`
+  - `src/main/toolAuthorizationService.ts`
+  - `.superpowers/sdd/task-5-followup-report.md`
+- RED evidence:
+  - `npm test -- src/main/container.test.ts -t "rejects globally automatic approval"` -> failed: promise resolved with a `git_worktree` workspace and branch `codex/auto-approved-worktree` instead of rejecting.
+- GREEN evidence:
+  - `npm test -- src/main/container.test.ts -t "rejects globally automatic approval"` -> 1 test passed.
+  - `npm test -- src/main/container.test.ts src/main/toolApprovalCoordinator.test.ts src/main/toolAuthorizationService.test.ts src/main/agentWorkspaceService.test.ts` -> 4 files / 26 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm test` -> 165 files / 1072 tests passed.
+  - `npm run build` -> passed.

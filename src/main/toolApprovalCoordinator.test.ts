@@ -68,6 +68,7 @@ describe("tool approval coordinator", () => {
     ).resolves.toEqual({
       approved: true,
       reason: "自动授权已开启，已同意本次 shell_exec。",
+      automatic: true,
     });
 
     expect(sent).toContainEqual({
@@ -106,6 +107,7 @@ describe("tool approval coordinator", () => {
     await expect(approval).resolves.toEqual({
       approved: true,
       reason: "自动授权已开启，已同意本次 web_fetch。",
+      automatic: true,
     });
     expect(sent).toContainEqual({
       channel: "toolApproval:decision",
