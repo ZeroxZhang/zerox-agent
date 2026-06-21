@@ -1,30 +1,54 @@
 // P1 migration script round-trip test.
 //
-// The migrate-to-sqlite / rollback-sqlite-to-json scripts import the compiled
+// The migrate-to-sqlite / rollback-sqlite-to-json scripts import compiled
 // dist-electron modules, so they run as real child processes (not vitest
-// in-process). This test seeds a temp configDir with legacy JSON/JSONL, runs
-// `node scripts/migrate-to-sqlite.mjs --verify`, then `node
-// scripts/rollback-sqlite-to-json.mjs`, and asserts the rollback re-exports
-// the seeded data. Requires `npm run build` (run by `npm run verify` before
-// evals; this test is part of `npm test` which runs first in verify, so it
-// builds the dist-electron it needs via the test-time tsc — but to be safe we
-// skip when dist-electron is absent).
+// in-process). This test creates a fresh temporary script root, compiles the
+// current source tree into that root, then runs copied migration scripts from
+// there. That keeps script behavior realistic without depending on whatever
+// repository-level dist-electron happens to contain.
 
 import { describe, expect, it } from "vitest";
-import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync, mkdirSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { existsSync as exists } from "node:fs";
 import Database from "better-sqlite3";
 
 const root = path.resolve(__dirname, "..", "..", "..");
-const distReady = exists(path.join(root, "dist-electron", "main", "storage", "storageDb.js"));
 
-describe.skipIf(!distReady)("P1 migration scripts round-trip", () => {
+function createFreshMigrationScriptRoot(): string {
+  const scriptRoot = mkdtempSync(path.join(tmpdir(), "zerox-mig-scripts-"));
+  const scriptsDir = path.join(scriptRoot, "scripts");
+  mkdirSync(scriptsDir, { recursive: true });
+  symlinkSync(path.join(root, "node_modules"), path.join(scriptRoot, "node_modules"), "dir");
+  copyFileSync(path.join(root, "scripts", "migrate-to-sqlite.mjs"), path.join(scriptsDir, "migrate-to-sqlite.mjs"));
+  copyFileSync(path.join(root, "scripts", "rollback-sqlite-to-json.mjs"), path.join(scriptsDir, "rollback-sqlite-to-json.mjs"));
+  execFileSync(process.execPath, [
+    path.join(root, "node_modules", "typescript", "bin", "tsc"),
+    "-p",
+    path.join(root, "tsconfig.electron.json"),
+    "--outDir",
+    path.join(scriptRoot, "dist-electron"),
+  ], { cwd: root, encoding: "utf8" });
+  expect(existsSync(path.join(scriptRoot, "dist-electron", "main", "storage", "storageDb.js"))).toBe(true);
+  return scriptRoot;
+}
+
+describe("P1 migration scripts round-trip", () => {
   it("migrates legacy JSON→SQLite then rolls back SQLite→JSON, preserving data", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "zerox-mig-rt-"));
+    let scriptRoot: string | undefined;
     try {
+      scriptRoot = createFreshMigrationScriptRoot();
       // Seed legacy files.
       writeFileSync(
         path.join(dir, "agent-runs.jsonl"),
@@ -70,7 +94,7 @@ describe.skipIf(!distReady)("P1 migration scripts round-trip", () => {
       );
 
       // 1. Migrate JSON → SQLite (--verify asserts counts).
-      const migrateOut = execFileSync("node", [path.join(root, "scripts", "migrate-to-sqlite.mjs"), "--configDir", dir, "--verify"], { encoding: "utf8", cwd: root });
+      const migrateOut = execFileSync(process.execPath, [path.join(scriptRoot, "scripts", "migrate-to-sqlite.mjs"), "--configDir", dir, "--verify"], { encoding: "utf8", cwd: root });
       expect(migrateOut).toContain('"runs": 1');
       expect(migrateOut).toContain('"memory_records": 1');
       expect(migrateOut).toContain('"learning_candidates": 2');
@@ -106,7 +130,7 @@ describe.skipIf(!distReady)("P1 migration scripts round-trip", () => {
       }
 
       // 2. Roll back SQLite → JSON.
-      execFileSync("node", [path.join(root, "scripts", "rollback-sqlite-to-json.mjs"), "--configDir", dir], { encoding: "utf8", cwd: root });
+      execFileSync(process.execPath, [path.join(scriptRoot, "scripts", "rollback-sqlite-to-json.mjs"), "--configDir", dir], { encoding: "utf8", cwd: root });
       // The rollback re-exports agent-runs.jsonl (freezing the original as .legacy).
       const rolledBackRuns = path.join(dir, "agent-runs.jsonl");
       expect(existsSync(rolledBackRuns)).toBe(true);
@@ -128,6 +152,7 @@ describe.skipIf(!distReady)("P1 migration scripts round-trip", () => {
       expect(readFileSync(`${artifactPath}.provenance.json`, "utf8")).toContain("artifact_1");
     } finally {
       rmSync(dir, { recursive: true, force: true });
+      if (scriptRoot) rmSync(scriptRoot, { recursive: true, force: true });
     }
   });
 });

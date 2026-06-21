@@ -3542,3 +3542,20 @@
   - `npm test -- src/shared/toolPermissions.test.ts src/main/agentToolExecutor.test.ts` -> 2 files / 70 tests passed.
   - `npm run harness:check` -> passed.
   - `npm test` -> 164 files / 1030 tests passed.
+
+## 2026-06-21 - Task 2 Follow-up Migration Test Fresh Artifact
+
+- Summary:
+  - Removed the migration round-trip test's dependency on repository-level `dist-electron`.
+  - The test now compiles the current Electron source into a temporary script root and runs copied migration scripts from there, so clean checkouts exercise migration instead of skipping.
+- Changed files:
+  - `src/main/storage/migrateRoundTrip.test.ts`
+  - `.superpowers/sdd/task-2-followup-report.md`
+  - `.zerox/progress.md`
+- RED evidence:
+  - With repository `dist-electron` temporarily moved aside, `npm test -- src/main/storage/migrateRoundTrip.test.ts` reported `Test Files 1 skipped (1)` and `Tests 1 skipped (1)`.
+- GREEN evidence:
+  - With repository `dist-electron` temporarily moved aside after the fix, `npm test -- src/main/storage/migrateRoundTrip.test.ts` -> 1 file / 1 test passed; `DIST_RESTORED=yes`.
+  - `npm test -- src/main/storage/storeProxy.test.ts src/main/toolAuditLog.test.ts src/main/storage/migrateRoundTrip.test.ts src/main/storage/repositories/repositories.test.ts src/main/storage/repositories/runRepository.test.ts src/main/chatSessionStore.test.ts src/main/workspaceRunStore.test.ts src/main/agentRunStore.test.ts src/main/agentTrajectoryStore.test.ts src/main/agentGoalStore.test.ts` -> 10 files / 86 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> 164 files / 1046 tests passed; build passed; agent eval 26/26; memory eval 2/2.
