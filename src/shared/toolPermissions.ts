@@ -746,6 +746,10 @@ function isShellPathLikeToken(token: string): boolean {
   return (
     token.startsWith("/") ||
     token.startsWith("~/") ||
+    token === ".." ||
+    token.startsWith("../") ||
+    token.startsWith("./") ||
+    token.includes("/") ||
     /^(?:Desktop|Downloads|桌面|下载)\//.test(token)
   );
 }

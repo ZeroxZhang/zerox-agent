@@ -1043,6 +1043,35 @@ describe("agent tool executor", () => {
     });
   });
 
+  it("blocks relative shell path escapes before executing from the run workspace", async () => {
+    const workspaceRoot = path.join(tempDir, "workspace");
+    const outsideRoot = path.join(tempDir, "outside");
+    await mkdir(workspaceRoot);
+    await mkdir(outsideRoot);
+    await writeFile(path.join(outsideRoot, "secret.txt"), "outside secret", "utf8");
+
+    const executor = createAgentToolExecutor();
+
+    await expect(
+      executor.execute(
+        {
+          toolName: "shell_exec",
+          args: { command: "cat ../outside/secret.txt" },
+        },
+        {
+          runContext: buildPrimaryRunContext({
+            workspaceId: "workspace_1",
+            workspaceRoot,
+          }),
+        },
+      ),
+    ).resolves.toEqual({
+      ok: false,
+      error:
+        "shell_exec refused path outside the run sandbox: ../outside/secret.txt",
+    });
+  });
+
   it("returns structured diagnostics when a shell command fails without output", async () => {
     const executor = createAgentToolExecutor();
     const command = `${JSON.stringify(process.execPath)} -e "process.exit(1)"`;

@@ -957,6 +957,45 @@ describe("tool authorization", () => {
     }
   });
 
+  it("denies approved shell templates when a substituted relative path escapes the workspace", () => {
+    const broadPolicy: TaskPermissionPolicy = {
+      files: {
+        read: ["/Users/demo/project"],
+        write: ["/Users/demo/project"],
+      },
+      web: { search: false, fetchDomains: [] },
+      shell: { commands: ["cat {{target}}"] },
+      memory: { read: false, write: false },
+    };
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: "/Users/demo/project/workspace",
+      sandbox: {
+        mode: "workspace_write",
+        network: "task_policy",
+        shell: "approved_commands",
+        allowWorkspaceEscape: false,
+        extraReadRoots: [],
+        extraWriteRoots: [],
+      },
+    });
+
+    expect(
+      authorizeToolCallWithinRunContext(
+        broadPolicy,
+        {
+          toolName: "shell_exec",
+          args: { command: "cat ../outside/secret.txt" },
+        },
+        runContext,
+      ),
+    ).toEqual({
+      allowed: false,
+      reason:
+        "shell_exec 被运行沙箱阻止：路径 ../outside/secret.txt 不在工作区或额外可读目录内。",
+    });
+  });
+
   it("denies Chrome bookmark artifact writes in read-only run contexts", () => {
     const chromeRoot = "/Users/demo/Library/Application Support/Google/Chrome";
     const chromePolicy: TaskPermissionPolicy = {

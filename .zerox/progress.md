@@ -3487,3 +3487,20 @@
   - `npm test` -> 164 files / 1028 tests passed.
   - `npm run build` -> passed.
   - `npm run harness:check` -> passed.
+
+## 2026-06-21 - Task 1 Follow-up Relative Shell Path Escapes
+
+- Summary:
+  - Hardened approved shell command path extraction so relative path-shaped arguments are checked against the run workspace boundary.
+  - Added authorization and executor-side regressions for `cat ../outside/secret.txt` with `allowWorkspaceEscape: false`.
+- Changed files:
+  - `src/shared/toolPermissions.ts`
+  - `src/shared/toolPermissions.test.ts`
+  - `src/main/agentToolExecutor.test.ts`
+  - `.superpowers/sdd/task-1-followup-report.md`
+- RED evidence:
+  - `npm test -- src/shared/toolPermissions.test.ts src/main/agentToolExecutor.test.ts` -> failed before implementation: authorization allowed the approved `cat ../outside/secret.txt` template and executor `shell_exec` read `outside secret` from outside the workspace.
+- GREEN evidence:
+  - `npm test -- src/shared/toolPermissions.test.ts src/main/agentToolExecutor.test.ts` -> 2 files / 70 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm test` -> 164 files / 1030 tests passed.
