@@ -1,5 +1,26 @@
 # Zerox Harness Progress
 
+## 2026-06-22 - v2.6.0 Hardening Release
+
+- Request: assign a new version for the completed hardening iteration, update README/release metadata, package macOS artifacts, publish the release, and push.
+- Changed files:
+  - `package.json`, `package-lock.json`
+  - `README.md`
+  - `.zerox/feature_list.json`, `.zerox/progress.md`
+  - `src/shared/packageScripts.test.ts`, `src/shared/readme.test.ts`
+  - `docs/superpowers/plans/2026-06-21-zerox-agent-bug-hardening-iteration.md`
+- Release metadata:
+  - Version bumped from `2.5.0` to `2.6.0`.
+  - Added feature-list entry `P15-hardening-release-2.6.0`.
+  - README now documents v2.6.0 as the current release in English and Chinese.
+- Verification evidence:
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 2 files / 11 tests passed.
+  - `npm run verify` -> 165 files / 1077 tests passed; build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI with expected better-sqlite3 ABI fallback to JSON.
+  - `npm run harness:check` -> passed.
+  - `npm run dist:mac` -> produced `release/Zerox Agent-2.6.0-arm64.dmg`, `release/Zerox Agent-2.6.0-arm64-mac.zip`, and blockmaps.
+  - `npm run smoke:prod:built` -> passed with expected SQLite ABI fallback.
+
 ## 2026-06-21 - Task 6 Worker Isolation And Verification Efficiency
 
 - Request: implement Task 6 from the bug-hardening SDD/TDD plan: production subprocess worker wiring, timed-out worker child recycling, configurable smoke readiness polling, clean-checkout migration coverage verification, and built-artifact script variants.
