@@ -20,7 +20,6 @@ describe("navigation", () => {
   it("orders Chinese navigation by the user-facing agent workflow", () => {
     expect(getNavigationSections().map((section) => section.id)).toEqual([
       "chat",
-      "overview",
       "runs",
       "scheduled-tasks",
       "settings",
@@ -29,10 +28,11 @@ describe("navigation", () => {
 
   it("nests technical control surfaces under Settings", () => {
     expect(getDefaultSettingsNavigationSection()).toMatchObject({
-      id: "model-settings",
-      label: "模型",
+      id: "system-overview",
+      label: "系统",
     });
     expect(getSettingsNavigationSections().map((section) => section.id)).toEqual([
+      "system-overview",
       "model-settings",
       "skills",
       "tools",
@@ -51,6 +51,10 @@ describe("navigation", () => {
       id: "settings",
       label: "设置",
       module: "配置",
+    });
+    expect(getStartupNavigationSection("#overview")).toMatchObject({
+      id: "settings",
+      label: "设置",
     });
     expect(getStartupNavigationSection("#model-settings").id).toBe("settings");
     expect(getStartupNavigationSection("#memory").id).toBe("settings");

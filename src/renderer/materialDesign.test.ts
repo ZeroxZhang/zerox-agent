@@ -271,6 +271,13 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".settings-section-body");
   });
 
+  it("moves Overview diagnostics into the Settings system section", () => {
+    expect(appSource).toMatch(
+      /props\.activeSectionId === "system-overview"[\s\S]*<OverviewPanel onNavigate={navigateTo} \/>/,
+    );
+    expect(appSource).not.toContain("activeSection.id === \"overview\"");
+  });
+
   it("keeps composer command actions inside the chat input", () => {
     expect(chatPanelSource).not.toContain("onClick={() => onNavigate(\"tools\")}");
     expect(chatPanelSource).toContain("aria-label=\"打开命令菜单\"");

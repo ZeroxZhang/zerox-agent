@@ -85,6 +85,7 @@
   - `npm run harness:check` -> passed.
   - `npm test` -> 165 files / 1071 tests passed.
   - `npm run build` -> passed.
+
   - `npm run verify` -> 165 files / 1071 tests passed; build passed; agent eval 26/26; memory eval 2/2.
   - `npm run smoke:prod` -> passed; renderer rendered agent chat UI with expected SQLite ABI fallback to JSON.
   - `git diff --check` -> passed.
@@ -3816,3 +3817,26 @@
   - `npm run harness:check` -> passed.
   - `npm test` -> 165 files / 1072 tests passed.
   - `npm run build` -> passed.
+
+## 2026-06-23 - Worker T1 Task 1 Navigation And Overview Relocation
+
+- Summary:
+  - Removed Overview from primary navigation so primary order is Chat, Runs, Tasks, Settings.
+  - Added Settings system overview as the default Settings section and routed legacy `#overview` / `overview` targets into it.
+  - Moved `OverviewPanel` rendering into the Settings shell and kept the legacy material `overview` icon compatibility path.
+  - Updated app metadata primary modules to remove the old Overview module.
+- Changed files:
+  - `src/shared/navigation.ts`
+  - `src/shared/navigation.test.ts`
+  - `src/shared/appMeta.ts`
+  - `src/renderer/App.tsx`
+  - `src/renderer/materialDesign.test.ts`
+  - `src/shared/materialNavigation.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/shared/navigation.test.ts src/shared/materialNavigation.test.ts` -> failed as expected: primary nav still included `overview`, Settings default was `model-settings`, and `#overview` still resolved to Overview.
+  - `npm test -- src/renderer/materialDesign.test.ts` -> failed as expected: `OverviewPanel` was still rendered from the top-level `activeSection.id === "overview"` branch.
+- GREEN / verification evidence:
+  - `npm test -- src/shared/navigation.test.ts src/shared/materialNavigation.test.ts src/renderer/materialDesign.test.ts` -> 3 files / 44 tests passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.

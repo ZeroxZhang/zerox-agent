@@ -22,6 +22,7 @@ import { buildAgentDataBoundary } from "../shared/dataBoundary";
 import { getMaterialNavigationIcon } from "../shared/materialNavigation";
 import {
   getDefaultNavigationSection,
+  getDefaultSettingsNavigationSection,
   getNavigationSection,
   getNavigationSections,
   getSettingsNavigationSections,
@@ -73,7 +74,7 @@ function getStartupSettingsSectionId(): SettingsNavigationSectionId {
   const hash = window.location.hash.replace(/^#/, "");
   return getSettingsNavigationSections().some((section) => section.id === hash)
     ? (hash as SettingsNavigationSectionId)
-    : "model-settings";
+    : getDefaultSettingsNavigationSection().id;
 }
 
 export function App() {
@@ -103,6 +104,9 @@ export function App() {
     );
     if (settingsSection) {
       setActiveSettingsSectionId(settingsSection.id);
+    }
+    if (sectionId === "overview") {
+      setActiveSettingsSectionId("system-overview");
     }
     const primarySectionId = getNavigationSection(sectionId).id;
     setActiveSectionId(primarySectionId);
@@ -143,6 +147,9 @@ export function App() {
       const hash = window.location.hash.replace(/^#/, "");
       if (getSettingsNavigationSections().some((section) => section.id === hash)) {
         setActiveSettingsSectionId(hash as SettingsNavigationSectionId);
+      }
+      if (hash === "overview") {
+        setActiveSettingsSectionId("system-overview");
       }
       setActiveSectionId(getSectionFromHash());
     }
@@ -440,9 +447,6 @@ export function App() {
             onNavigate={navigateTo}
           />
         ) : null}
-        {activeSection.id === "overview" ? (
-          <OverviewPanel onNavigate={navigateTo} />
-        ) : null}
         {activeSection.id === "runs" ? <RunsPanel /> : null}
         {activeSection.id === "scheduled-tasks" ? (
           <ScheduledTasksPanel />
@@ -450,6 +454,7 @@ export function App() {
         {activeSection.id === "settings" ? (
           <SettingsSectionShell
             activeSectionId={activeSettingsSectionId}
+            onNavigate={navigateTo}
             onSelect={setActiveSettingsSectionId}
           />
         ) : null}
@@ -460,8 +465,11 @@ export function App() {
 
 function SettingsSectionShell(props: {
   activeSectionId: SettingsNavigationSectionId;
+  onNavigate: (sectionId: NavigationSectionId) => void;
   onSelect: (sectionId: SettingsNavigationSectionId) => void;
 }) {
+  const navigateTo = props.onNavigate;
+
   return (
     <section className="settings-section-shell" aria-label="设置分区">
       <aside className="settings-section-nav" aria-label="设置菜单">
@@ -478,6 +486,9 @@ function SettingsSectionShell(props: {
         ))}
       </aside>
       <section className="settings-section-body">
+        {props.activeSectionId === "system-overview" ? (
+          <OverviewPanel onNavigate={navigateTo} />
+        ) : null}
         {props.activeSectionId === "model-settings" ? <ModelSettingsPanel /> : null}
         {props.activeSectionId === "skills" ? <SkillLibraryPanel /> : null}
         {props.activeSectionId === "tools" ? <ToolsPanel /> : null}
