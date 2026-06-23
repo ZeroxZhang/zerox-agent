@@ -2423,7 +2423,7 @@ describe("chat service", () => {
       {
         inputRequestId: inputRequest?.id ?? "",
         values: {
-          targetDir: "/workspace/project/docs",
+          targetDir: "docs",
           format: "markdown",
           includeResearch: false,
         },
@@ -2459,6 +2459,7 @@ describe("chat service", () => {
     const skillPrompt = capturedMessages.at(-1)?.[0]?.content ?? "";
     expect(skillPrompt).toContain("已解析技能输入（JSON）：");
     expect(skillPrompt).toContain('"targetDir": "/workspace/project/docs"');
+    expect(skillPrompt).not.toContain('"targetDir": "docs"');
     expect(skillPrompt).toContain('"format": "markdown"');
     expect(skillPrompt).toContain('"includeResearch": false');
     expect(observedRuntimeTask).toMatchObject({

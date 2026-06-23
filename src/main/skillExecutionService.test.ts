@@ -195,10 +195,41 @@ describe("SkillExecutionService", () => {
     ).toEqual({
       status: "complete",
       values: {
-        targetDir: "docs",
+        targetDir: "/workspace/project/docs",
         includeResearch: false,
         format: "markdown",
         limit: 5,
+      },
+      missingFields: [],
+      invalidFields: [],
+    });
+  });
+
+  it("canonicalizes workspace-relative path inputs before resolving values", () => {
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: "/workspace/project",
+    });
+
+    expect(
+      resolveSkillInput({
+        skill: createSkillRecord([
+          {
+            name: "targetDir",
+            label: "Target directory",
+            type: "path",
+            required: true,
+          },
+        ]),
+        values: {
+          targetDir: "docs",
+        },
+        runContext,
+      }),
+    ).toEqual({
+      status: "complete",
+      values: {
+        targetDir: "/workspace/project/docs",
       },
       missingFields: [],
       invalidFields: [],

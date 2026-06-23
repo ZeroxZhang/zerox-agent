@@ -4121,3 +4121,22 @@
   - `npm run build` -> passed.
   - `npm run harness:check` -> passed.
   - `git diff --check` -> passed.
+
+## 2026-06-23 - Worker T4 Task 4 Guided Skill Path Canonicalization Repair
+
+- Summary:
+  - Canonicalized validated guided skill `path` input values by storing the absolute path returned by the run-context sandbox validator.
+  - Verified relative `targetDir` input resolves against the workspace root before skill prompt injection and permission placeholder expansion.
+  - Kept outside-workspace path rejection covered by existing service/chat tests.
+- Changed files:
+  - `src/main/skillExecutionService.ts`
+  - `src/main/skillExecutionService.test.ts`
+  - `src/main/chatService.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/main/skillExecutionService.test.ts src/main/chatService.test.ts` -> failed as expected: resolved values and chat prompt still contained raw `docs` instead of `/workspace/project/docs`.
+- GREEN / verification evidence:
+  - `npm test -- src/main/skillExecutionService.test.ts src/main/chatService.test.ts` -> 2 files / 49 tests passed.
+  - `npm test -- src/shared/skillExecutionContract.test.ts src/shared/skills.test.ts src/main/skillExecutionService.test.ts src/main/chatService.test.ts src/shared/toolPermissions.test.ts src/main/toolAuthorizationService.test.ts` -> 6 files / 109 tests passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.

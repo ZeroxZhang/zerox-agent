@@ -214,10 +214,20 @@ function validateSkillInputValue(
       if (typeof value !== "string" || !runContext) {
         return { ok: false };
       }
-      return validatePathInsideRunContext(value, runContext, "read").ok ||
-        validatePathInsideRunContext(value, runContext, "write").ok
-        ? { ok: true, value }
-        : { ok: false };
+      {
+        const readResult = validatePathInsideRunContext(value, runContext, "read");
+        if (readResult.ok) {
+          return { ok: true, value: readResult.path };
+        }
+        const writeResult = validatePathInsideRunContext(
+          value,
+          runContext,
+          "write",
+        );
+        return writeResult.ok
+          ? { ok: true, value: writeResult.path }
+          : { ok: false };
+      }
   }
 }
 
