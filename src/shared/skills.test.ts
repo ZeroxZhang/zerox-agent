@@ -95,6 +95,94 @@ describe("skill manifest parser", () => {
     );
   });
 
+  it("parses guided input metadata used by chat preflight forms", () => {
+    const parsed = parseSkillMarkdown(`---
+name: guided-onepager
+displayName: Guided OnePager
+description: Build a OnePage from structured source input.
+version: 0.2.0
+execution:
+  mode: agent
+inputs:
+  - name: sourcePath
+    label: Source path
+    type: path
+    required: true
+    description: A workspace-local file or folder.
+  - name: format
+    label: Format
+    type: choice
+    required: true
+    description: Output format.
+    defaultValue: markdown
+    choices:
+      - markdown
+      - html
+  - name: includeResearch
+    label: Include research
+    type: boolean
+    required: false
+    description: Search supporting material before writing.
+    defaultValue: false
+  - name: maxSections
+    label: Max sections
+    type: number
+    required: false
+    defaultValue: 5
+permissions:
+  files:
+    read:
+      - "{{sourcePath}}"
+    write:
+      - "{{sourcePath}}"
+  shell:
+    commands: []
+  web:
+    search: false
+    fetchDomains: []
+  memory:
+    read: false
+    write: false
+---
+
+# Guided OnePager
+`);
+
+    expect(parsed.manifest.inputs).toEqual([
+      {
+        name: "sourcePath",
+        label: "Source path",
+        type: "path",
+        required: true,
+        description: "A workspace-local file or folder.",
+      },
+      {
+        name: "format",
+        label: "Format",
+        type: "choice",
+        required: true,
+        description: "Output format.",
+        defaultValue: "markdown",
+        choices: ["markdown", "html"],
+      },
+      {
+        name: "includeResearch",
+        label: "Include research",
+        type: "boolean",
+        required: false,
+        description: "Search supporting material before writing.",
+        defaultValue: false,
+      },
+      {
+        name: "maxSections",
+        label: "Max sections",
+        type: "number",
+        required: false,
+        defaultValue: 5,
+      },
+    ]);
+  });
+
   it("ships the built-in file organizer skill with Chinese product copy", () => {
     const markdown = readFileSync(
       path.join(process.cwd(), "skills/local-file-organizer/SKILL.md"),

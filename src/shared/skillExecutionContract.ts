@@ -1,14 +1,27 @@
 export type SkillExecutionStage =
   | "resolving_skill"
   | "loading_resources"
+  | "auditing_requirements"
+  | "waiting_for_user_input"
+  | "validating_input"
   | "configuring"
   | "planning"
   | "executing"
+  | "waiting_for_approval"
   | "validating"
   | "finalizing"
   | "succeeded"
   | "failed"
   | "canceled";
+
+export type SkillInputValue = string | number | boolean;
+
+export type SkillInputResolution = {
+  status: "complete" | "missing" | "invalid";
+  values: Record<string, SkillInputValue>;
+  missingFields: string[];
+  invalidFields: string[];
+};
 
 export type SkillExecutionResourceKind =
   | "skill"
@@ -71,6 +84,8 @@ export type SkillExecutionSnapshot = SkillExecutionContract & {
   stageRecords: SkillStageRecord[];
   terminal: boolean;
   updatedAt: string;
+  inputResolution?: SkillInputResolution;
+  pendingInputRequestId?: string;
 };
 
 export type SkillExecutionTransitionOptions = {
@@ -78,6 +93,8 @@ export type SkillExecutionTransitionOptions = {
   message?: string;
   error?: string;
   metadata?: Record<string, unknown>;
+  inputResolution?: SkillInputResolution;
+  pendingInputRequestId?: string;
 };
 
 const terminalSkillStages = new Set<SkillExecutionStage>([
@@ -88,10 +105,25 @@ const terminalSkillStages = new Set<SkillExecutionStage>([
 
 const allowedSkillStageTransitions = {
   resolving_skill: ["loading_resources", "failed", "canceled"],
-  loading_resources: ["configuring", "failed", "canceled"],
+  loading_resources: ["auditing_requirements", "failed", "canceled"],
+  auditing_requirements: [
+    "waiting_for_user_input",
+    "validating_input",
+    "planning",
+    "failed",
+    "canceled",
+  ],
+  waiting_for_user_input: ["validating_input", "failed", "canceled"],
+  validating_input: [
+    "planning",
+    "waiting_for_user_input",
+    "failed",
+    "canceled",
+  ],
   configuring: ["planning", "failed", "canceled"],
   planning: ["executing", "failed", "canceled"],
-  executing: ["validating", "failed", "canceled"],
+  executing: ["waiting_for_approval", "validating", "failed", "canceled"],
+  waiting_for_approval: ["executing", "failed", "canceled"],
   validating: ["finalizing", "failed", "canceled"],
   finalizing: ["succeeded", "failed", "canceled"],
   succeeded: [],
@@ -144,11 +176,22 @@ export function transitionSkillExecution(
     ...(options.metadata ? { metadata: options.metadata } : {}),
   };
 
-  return {
+  const nextSnapshot: SkillExecutionSnapshot = {
     ...snapshot,
     stage: to,
     stageRecords: [...snapshot.stageRecords, record],
     terminal: isTerminalSkillExecutionStage(to),
     updatedAt: enteredAt,
   };
+
+  if (options.inputResolution !== undefined) {
+    nextSnapshot.inputResolution = options.inputResolution;
+  }
+  if (options.pendingInputRequestId !== undefined) {
+    nextSnapshot.pendingInputRequestId = options.pendingInputRequestId;
+  } else if (to !== "waiting_for_user_input") {
+    delete nextSnapshot.pendingInputRequestId;
+  }
+
+  return nextSnapshot;
 }

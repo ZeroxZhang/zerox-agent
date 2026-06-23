@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { createSkillExecutionService } from "./skillExecutionService";
+import {
+  createSkillExecutionService,
+  resolveSkillInput,
+} from "./skillExecutionService";
 import type { SkillRecord } from "../shared/skills";
+import { buildPrimaryRunContext } from "../shared/agentWorkspace";
 
 describe("SkillExecutionService", () => {
   it("creates replayable skill execution snapshots with session, request, provenance, and terminal stage records", async () => {
@@ -47,7 +51,7 @@ describe("SkillExecutionService", () => {
     expect(result.snapshot.stageRecords.map((record) => record.stage)).toEqual([
       "resolving_skill",
       "loading_resources",
-      "configuring",
+      "auditing_requirements",
       "planning",
       "executing",
       "validating",
@@ -59,9 +63,152 @@ describe("SkillExecutionService", () => {
       terminal: true,
     });
   });
+
+  it("resolves required missing skill inputs deterministically", () => {
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: "/workspace/project",
+    });
+
+    expect(
+      resolveSkillInput({
+        skill: createSkillRecord([
+          {
+            name: "targetDir",
+            label: "Target directory",
+            type: "path",
+            required: true,
+          },
+          {
+            name: "format",
+            label: "Format",
+            type: "choice",
+            required: true,
+            choices: ["markdown", "html"],
+          },
+        ]),
+        values: {},
+        runContext,
+      }),
+    ).toEqual({
+      status: "missing",
+      values: {},
+      missingFields: ["targetDir", "format"],
+      invalidFields: [],
+    });
+  });
+
+  it("rejects invalid number, boolean, choice, and outside-workspace path inputs", () => {
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: "/workspace/project",
+    });
+
+    expect(
+      resolveSkillInput({
+        skill: createSkillRecord([
+          {
+            name: "targetDir",
+            label: "Target directory",
+            type: "path",
+            required: true,
+          },
+          {
+            name: "limit",
+            label: "Limit",
+            type: "number",
+            required: true,
+          },
+          {
+            name: "includeResearch",
+            label: "Include research",
+            type: "boolean",
+            required: true,
+          },
+          {
+            name: "format",
+            label: "Format",
+            type: "choice",
+            required: true,
+            choices: ["markdown", "html"],
+          },
+        ]),
+        values: {
+          targetDir: "/etc",
+          limit: "10",
+          includeResearch: "false",
+          format: "pdf",
+        },
+        runContext,
+      }),
+    ).toEqual({
+      status: "invalid",
+      values: {},
+      missingFields: [],
+      invalidFields: ["targetDir", "limit", "includeResearch", "format"],
+    });
+  });
+
+  it("accepts boolean false, valid choices, defaults, and workspace-local paths", () => {
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: "/workspace/project",
+    });
+
+    expect(
+      resolveSkillInput({
+        skill: createSkillRecord([
+          {
+            name: "targetDir",
+            label: "Target directory",
+            type: "path",
+            required: true,
+          },
+          {
+            name: "includeResearch",
+            label: "Include research",
+            type: "boolean",
+            required: true,
+          },
+          {
+            name: "format",
+            label: "Format",
+            type: "choice",
+            required: true,
+            choices: ["markdown", "html"],
+          },
+          {
+            name: "limit",
+            label: "Limit",
+            type: "number",
+            required: false,
+            defaultValue: 5,
+          },
+        ]),
+        values: {
+          targetDir: "docs",
+          includeResearch: false,
+          format: "markdown",
+        },
+        runContext,
+      }),
+    ).toEqual({
+      status: "complete",
+      values: {
+        targetDir: "docs",
+        includeResearch: false,
+        format: "markdown",
+        limit: 5,
+      },
+      missingFields: [],
+      invalidFields: [],
+    });
+  });
 });
 
-function createSkillRecord(): SkillRecord {
+function createSkillRecord(
+  inputs: SkillRecord["manifest"]["inputs"] = [],
+): SkillRecord {
   return {
     rootDir: "/skills/agent-reach",
     skillFile: "/skills/agent-reach/SKILL.md",
@@ -72,7 +219,7 @@ function createSkillRecord(): SkillRecord {
       description: "Give agents browser reach.",
       version: "1.0.0",
       execution: { mode: "agent", entrypoint: null, maxTurns: 4 },
-      inputs: [],
+      inputs,
       permissions: {
         files: { read: [], write: [] },
         web: { search: false, fetchDomains: [] },

@@ -42,6 +42,7 @@ import type {
   SendChatMessageResult,
   SkillInputResponse,
   SkillInputResponseResult,
+  SkillUserInputRequest,
 } from "../shared/chat";
 import { getSystemPromptAssembler } from "../shared/agentProtocol";
 import type { GoalReviewDecision } from "../shared/agentGoalReview";
@@ -66,13 +67,21 @@ import {
 } from "../shared/skillMentions";
 import { describeSchedule } from "../shared/scheduledTasks";
 import type { TaskPermissionPolicy } from "../shared/toolPermissions";
+import { resolveSkillInput } from "./skillExecutionService";
+import type {
+  SkillInputResolution,
+  SkillInputValue,
+} from "../shared/skillExecutionContract";
 
 export type ChatService = {
   sendMessage(
     input: SendChatMessageInput,
     options?: SendChatMessageRuntimeOptions,
   ): Promise<SendChatMessageResult>;
-  respondSkillInput(input: SkillInputResponse): Promise<SkillInputResponseResult>;
+  respondSkillInput(
+    input: SkillInputResponse,
+    options?: SendChatMessageRuntimeOptions,
+  ): Promise<SkillInputResponseResult>;
 };
 
 export type SendChatMessageRuntimeOptions = {
@@ -86,6 +95,27 @@ type ChatContinuationState = {
   maxTurns: number;
   toolCallsExecuted: number;
   evidenceRunId?: string;
+};
+
+type PendingSkillInputState = {
+  sessionId: string;
+  requestId: string;
+  userMessage: string;
+  userMessageId: string | null;
+  selectedSkill: SkillRecord;
+  workspaceId?: string;
+  workspaceSummary?: ChatWorkspaceSummary;
+  runContext?: AgentRunContext;
+  partialValues: Record<string, SkillInputValue>;
+};
+
+type ChatTurnInternalOptions = {
+  skipUserMessageAppend?: boolean;
+  userMessageId?: string | null;
+  forcedSkill?: SkillRecord;
+  resolvedSkillInput?: SkillInputResolution;
+  preResolvedRunContext?: AgentRunContext;
+  preResolvedWorkspaceSummary?: ChatWorkspaceSummary;
 };
 
 type ChatGoalService = {
@@ -152,16 +182,13 @@ export function createChatService(options: {
   const historyLimit = options.historyLimit ?? 12;
   const agentLoopMaxTurns = normalizeAgentLoopMaxTurns(options.agentLoopMaxTurns);
   const pendingContinuations = new Map<string, ChatContinuationState>();
+  const pendingSkillInputRequests = new Map<string, PendingSkillInputState>();
 
-  return {
-    async respondSkillInput(_input) {
-      return {
-        ok: false,
-        message: "Guided skill input is not wired yet.",
-      };
-    },
-
-    async sendMessage(input, runtimeOptions = {}) {
+  async function sendMessageInternal(
+    input: SendChatMessageInput,
+    runtimeOptions: SendChatMessageRuntimeOptions = {},
+    internalOptions: ChatTurnInternalOptions = {},
+  ): Promise<SendChatMessageResult> {
       const userMessage = input.message.trim();
       if (!userMessage) {
         return { ok: false, message: "消息不能为空。" };
@@ -199,10 +226,12 @@ export function createChatService(options: {
           }
         },
       });
-      const workspaceResolution = await resolveChatWorkspace({
-        workspaceService: options.workspaceService,
-        workspaceId: input.workspaceId,
-      });
+      const workspaceResolution = internalOptions.preResolvedRunContext
+        ? { ok: true as const, runContext: internalOptions.preResolvedRunContext }
+        : await resolveChatWorkspace({
+            workspaceService: options.workspaceService,
+            workspaceId: input.workspaceId,
+          });
       if (!workspaceResolution.ok) {
         return {
           ok: false,
@@ -210,12 +239,12 @@ export function createChatService(options: {
         };
       }
       let chatRunContext = workspaceResolution.runContext;
-      const workspaceSummary = chatRunContext
-        ? buildChatWorkspaceSummary(chatRunContext)
-        : input.workspaceSummary;
+      const workspaceSummary =
+        internalOptions.preResolvedWorkspaceSummary ??
+        (chatRunContext ? buildChatWorkspaceSummary(chatRunContext) : input.workspaceSummary);
       let userMessageId: string | null = null;
       let activeGoal: ChatSessionGoalSummary | null = null;
-      if (options.chatSessionStore) {
+      if (options.chatSessionStore && !internalOptions.skipUserMessageAppend) {
         const appendResult = await options.chatSessionStore.appendMessage({
           ...(input.sessionId ? { sessionId: input.sessionId } : {}),
           role: "user",
@@ -229,6 +258,8 @@ export function createChatService(options: {
         emitStatus.setSessionId(sessionId);
         userMessageId = appendResult.message.id;
         activeGoal = getActiveGoalSummary(appendResult.session);
+      } else if (internalOptions.skipUserMessageAppend) {
+        userMessageId = internalOptions.userMessageId ?? null;
       }
       if (chatRunContext) {
         chatRunContext = {
@@ -278,13 +309,15 @@ export function createChatService(options: {
         pendingContinuations.delete(sessionId);
       }
 
-      const requestedSkill = !continuationToResume
-        ? await resolveRequestedSkill({
-            message: userMessage,
-            selectedSkillName: input.selectedSkillName,
-            discoverSkills: options.discoverSkills,
-          })
-        : null;
+      const requestedSkill = internalOptions.forcedSkill
+        ? ({ kind: "matched", skill: internalOptions.forcedSkill } as const)
+        : !continuationToResume
+          ? await resolveRequestedSkill({
+              message: userMessage,
+              selectedSkillName: input.selectedSkillName,
+              discoverSkills: options.discoverSkills,
+            })
+          : null;
       if (requestedSkill?.kind === "missing") {
         return {
           ok: false,
@@ -298,6 +331,46 @@ export function createChatService(options: {
           message: `正在调用技能：${requestedSkill.skill.manifest.name}`,
           selectedSkillName: requestedSkill.skill.manifest.name,
         });
+      }
+
+      let resolvedSkillInput = internalOptions.resolvedSkillInput;
+      if (
+        requestedSkill?.kind === "matched" &&
+        !continuationToResume &&
+        !resolvedSkillInput
+      ) {
+        const inputResolution = resolveSkillInput({
+          skill: requestedSkill.skill,
+          values: {},
+          runContext: chatRunContext,
+        });
+        if (inputResolution.status !== "complete") {
+          const inputRequest = createSkillUserInputRequest({
+            createId,
+            sessionId,
+            requestId,
+            skill: requestedSkill.skill,
+            inputResolution,
+            createdAt: new Date(getNowMs(options.now)).toISOString(),
+          });
+          pendingSkillInputRequests.set(inputRequest.id, {
+            sessionId,
+            requestId,
+            userMessage,
+            userMessageId,
+            selectedSkill: requestedSkill.skill,
+            ...(chatRunContext?.workspaceId ? { workspaceId: chatRunContext.workspaceId } : {}),
+            ...(workspaceSummary ? { workspaceSummary } : {}),
+            ...(chatRunContext ? { runContext: chatRunContext } : {}),
+            partialValues: inputResolution.values,
+          });
+          emitStatus.sendWaitingForInput(inputRequest, "Skill input required.");
+          return {
+            ok: false,
+            message: "Skill input required.",
+          };
+        }
+        resolvedSkillInput = inputResolution;
       }
 
       if (!continuationToResume) {
@@ -447,6 +520,7 @@ export function createChatService(options: {
           chatMessages = injectSkillInvocationMessage(
             chatMessages,
             requestedSkill.skill,
+            resolvedSkillInput,
           );
         }
       }
@@ -470,11 +544,14 @@ export function createChatService(options: {
               : agentLoopMaxTurns;
           const chatRuntimeTask = chatRunContext
             ? createChatRuntimeTask({
-                sessionId,
-                requestId,
-                runContext: chatRunContext,
-                selectedSkill,
-              })
+              sessionId,
+              requestId,
+              runContext: chatRunContext,
+              selectedSkill,
+              ...(resolvedSkillInput?.status === "complete"
+                ? { skillInputValues: resolvedSkillInput.values }
+                : {}),
+            })
             : null;
           let observedToolCallsExecuted =
             continuationToResume?.toolCallsExecuted ?? 0;
@@ -807,7 +884,94 @@ export function createChatService(options: {
             }
           : {}),
       };
+  }
+
+  return {
+    async respondSkillInput(input, runtimeOptions = {}) {
+      const pending = pendingSkillInputRequests.get(input.inputRequestId);
+      if (!pending) {
+        return {
+          ok: false,
+          message: "Unknown skill input request.",
+        };
+      }
+
+      const mergedValues = {
+        ...pending.partialValues,
+        ...input.values,
+      };
+      const inputResolution = resolveSkillInput({
+        skill: pending.selectedSkill,
+        values: mergedValues,
+        runContext: pending.runContext,
+      });
+      if (inputResolution.status !== "complete") {
+        pendingSkillInputRequests.delete(input.inputRequestId);
+        const inputRequest = createSkillUserInputRequest({
+          createId,
+          sessionId: pending.sessionId,
+          requestId: pending.requestId,
+          skill: pending.selectedSkill,
+          inputResolution,
+          createdAt: new Date(getNowMs(options.now)).toISOString(),
+        });
+        pendingSkillInputRequests.set(inputRequest.id, {
+          ...pending,
+          partialValues: inputResolution.values,
+        });
+        const emitStatus = createChatStatusEmitter({
+          sessionId: pending.sessionId,
+          requestId: pending.requestId,
+          startedAtMs: getNowMs(options.now),
+          now: options.now,
+          onStatusEvent: runtimeOptions.onStatusEvent,
+          onStreamEvent: runtimeOptions.onStreamEvent,
+          onPersistEvent(event) {
+            try {
+              const sessionActivityWrite =
+                options.chatSessionStore?.appendActivityEvent?.(
+                  event.sessionId,
+                  event,
+                );
+              void sessionActivityWrite?.catch(() => undefined);
+            } catch {
+              // Observability writes must not fail the response.
+            }
+          },
+        });
+        emitStatus.sendWaitingForInput(inputRequest, "Skill input required.");
+        return {
+          ok: false,
+          message: "Skill input required.",
+        };
+      }
+
+      pendingSkillInputRequests.delete(input.inputRequestId);
+      return sendMessageInternal(
+        {
+          sessionId: pending.sessionId,
+          requestId: pending.requestId,
+          message: pending.userMessage,
+          selectedSkillName: pending.selectedSkill.manifest.name,
+          ...(pending.workspaceId ? { workspaceId: pending.workspaceId } : {}),
+          ...(pending.workspaceSummary
+            ? { workspaceSummary: pending.workspaceSummary }
+            : {}),
+        },
+        runtimeOptions,
+        {
+          skipUserMessageAppend: true,
+          userMessageId: pending.userMessageId,
+          forcedSkill: pending.selectedSkill,
+          resolvedSkillInput: inputResolution,
+          ...(pending.runContext ? { preResolvedRunContext: pending.runContext } : {}),
+          ...(pending.workspaceSummary
+            ? { preResolvedWorkspaceSummary: pending.workspaceSummary }
+            : {}),
+        },
+      );
     },
+    sendMessage: sendMessageInternal,
   };
 }
 
@@ -861,6 +1025,26 @@ function createChatStatusEmitter(options: {
           requestId: options.requestId,
           status: statusEvent,
           createdAt: statusEvent.createdAt,
+        });
+      } catch {
+        // Renderer observers are best-effort.
+      }
+    },
+    sendWaitingForInput(inputRequest: SkillUserInputRequest, message: string) {
+      this.send({
+        state: "waiting_for_input",
+        message,
+        selectedSkillName: inputRequest.skillName,
+        inputRequest,
+      });
+      const nowMs = getNowMs(options.now);
+      try {
+        options.onStreamEvent?.({
+          type: "waiting_for_input",
+          sessionId,
+          requestId: options.requestId,
+          inputRequest,
+          createdAt: new Date(nowMs).toISOString(),
         });
       } catch {
         // Renderer observers are best-effort.
@@ -1142,6 +1326,7 @@ function createChatRuntimeTask(options: {
   requestId: string;
   runContext: AgentRunContext;
   selectedSkill?: SkillRecord;
+  skillInputValues?: Record<string, SkillInputValue>;
 }): {
   taskId: string;
   runtimeTask: RuntimeToolAuthorizationTask;
@@ -1158,7 +1343,7 @@ function createChatRuntimeTask(options: {
         options.runContext.workspaceRoot,
         ...options.runContext.sandbox.extraReadRoots,
         ...skillReadRoots,
-        ...readSkillPermissionPaths(options.selectedSkill),
+        ...readSkillPermissionPaths(options.selectedSkill, options.skillInputValues),
       ]),
       write:
         options.runContext.sandbox.mode === "read_only"
@@ -1166,7 +1351,10 @@ function createChatRuntimeTask(options: {
           : uniqueStrings([
               options.runContext.workspaceRoot,
               ...options.runContext.sandbox.extraWriteRoots,
-              ...writeSkillPermissionPaths(options.selectedSkill),
+              ...writeSkillPermissionPaths(
+                options.selectedSkill,
+                options.skillInputValues,
+              ),
             ]),
     },
     web: {
@@ -1214,28 +1402,39 @@ function createChatRuntimeTask(options: {
   };
 }
 
-function readSkillPermissionPaths(skill: SkillRecord | undefined): string[] {
+function readSkillPermissionPaths(
+  skill: SkillRecord | undefined,
+  values?: Record<string, SkillInputValue>,
+): string[] {
   return (skill?.manifest.permissions.files.read ?? []).map((permissionPath) =>
-    resolveSkillPermissionPath(permissionPath, skill),
+    resolveSkillPermissionPath(permissionPath, skill, values),
   );
 }
 
-function writeSkillPermissionPaths(skill: SkillRecord | undefined): string[] {
+function writeSkillPermissionPaths(
+  skill: SkillRecord | undefined,
+  values?: Record<string, SkillInputValue>,
+): string[] {
   return (skill?.manifest.permissions.files.write ?? []).map((permissionPath) =>
-    resolveSkillPermissionPath(permissionPath, skill),
+    resolveSkillPermissionPath(permissionPath, skill, values),
   );
 }
 
 function resolveSkillPermissionPath(
   permissionPath: string,
   skill: SkillRecord | undefined,
+  values?: Record<string, SkillInputValue>,
 ): string {
   if (!skill) {
     return permissionPath;
   }
-  return permissionPath
+  const withSkillPaths = permissionPath
     .replaceAll("{{skillRoot}}", skill.rootDir)
     .replaceAll("{{skillDir}}", skill.rootDir);
+  return withSkillPaths.replace(/\{\{([a-zA-Z][a-zA-Z0-9_]*)\}\}/g, (match, name) => {
+    const value = values?.[name];
+    return value === undefined ? match : String(value);
+  });
 }
 
 function buildDefaultChatShellTemplates(): string[] {
@@ -1817,6 +2016,51 @@ function translateRunStatus(status: AgentRunRecord["status"]): string {
   return "失败";
 }
 
+function createSkillUserInputRequest(options: {
+  createId: () => string;
+  sessionId: string;
+  requestId: string;
+  skill: SkillRecord;
+  inputResolution: SkillInputResolution;
+  createdAt: string;
+}): SkillUserInputRequest {
+  const unresolvedFieldNames = new Set([
+    ...options.inputResolution.missingFields,
+    ...options.inputResolution.invalidFields,
+  ]);
+  const requestedFields = options.skill.manifest.inputs.filter(
+    (field) => unresolvedFieldNames.size === 0 || unresolvedFieldNames.has(field.name),
+  );
+  const fields = (requestedFields.length > 0
+    ? requestedFields
+    : options.skill.manifest.inputs
+  ).map((field) => ({
+    name: field.name,
+    label: field.label,
+    type: field.type,
+    required: field.required,
+    ...(field.description ? { description: field.description } : {}),
+    ...(field.defaultValue !== undefined ? { defaultValue: field.defaultValue } : {}),
+    ...(field.choices?.length ? { choices: field.choices } : {}),
+  }));
+
+  return {
+    id: `skill_input_${sanitizeRuntimeId(options.createId())}`,
+    executionId: `skill_exec_${sanitizeRuntimeId(options.sessionId)}_${sanitizeRuntimeId(
+      options.requestId,
+    )}_${sanitizeRuntimeId(options.skill.manifest.name)}`,
+    sessionId: options.sessionId,
+    requestId: options.requestId,
+    skillName: options.skill.manifest.name,
+    reason:
+      options.inputResolution.status === "invalid"
+        ? "Invalid skill input."
+        : "Skill input required.",
+    fields,
+    createdAt: options.createdAt,
+  };
+}
+
 function buildChatSystemPrompt(currentDate?: string): string {
   return getSystemPromptAssembler().assemble({
     mode: "chat",
@@ -1889,18 +2133,22 @@ async function resolveRequestedSkill(options: {
 function injectSkillInvocationMessage(
   messages: ChatMessage[],
   skill: SkillRecord,
+  inputResolution?: SkillInputResolution,
 ): ChatMessage[] {
   return [
     {
       role: "system",
-      content: buildSelectedSkillInstruction(skill),
+      content: buildSelectedSkillInstruction(skill, inputResolution),
     },
     ...messages,
   ];
 }
 
-function buildSelectedSkillInstruction(skill: SkillRecord): string {
-  return [
+function buildSelectedSkillInstruction(
+  skill: SkillRecord,
+  inputResolution?: SkillInputResolution,
+): string {
+  const lines = [
     "本轮用户显式选择了一个 Agent Skill。你必须把它当作本轮任务的执行规范，而不是普通参考资料。",
     `技能名称：${skill.manifest.name}`,
     `技能显示名：${skill.manifest.displayName}`,
@@ -1913,7 +2161,19 @@ function buildSelectedSkillInstruction(skill: SkillRecord): string {
     "",
     "技能指令：",
     skill.body,
-  ].join("\n");
+  ];
+
+  if (inputResolution?.status === "complete") {
+    lines.splice(
+      4,
+      0,
+      "",
+      "已解析技能输入（JSON）：",
+      JSON.stringify(inputResolution.values, null, 2),
+    );
+  }
+
+  return lines.join("\n");
 }
 
 function buildChatMessages(options: {

@@ -4037,3 +4037,28 @@
   - `npx tsc -p tsconfig.electron.json --noEmit --pretty false` -> passed.
   - `npm run harness:check` -> passed.
   - `git diff --check` -> passed.
+
+## 2026-06-23 - Worker T4 Task 4 Guided Skill Input Preflight
+
+- Summary:
+  - Added skill execution preflight stages, input resolution snapshots, and guided input validation for missing/invalid/complete values.
+  - Aligned skill manifest inputs with guided chat fields, including `choice`, `description`, `defaultValue`, and `choices`.
+  - Wired chat skill preflight to pause before model/memory/tool execution, persist `waiting_for_input`, resume from structured responses, validate paths against the stored workspace context, and expand skill permission placeholders only after validated input.
+- Changed files:
+  - `src/shared/skillExecutionContract.ts`
+  - `src/shared/skillExecutionContract.test.ts`
+  - `src/shared/skills.ts`
+  - `src/shared/skills.test.ts`
+  - `src/main/skillExecutionService.ts`
+  - `src/main/skillExecutionService.test.ts`
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/shared/skillExecutionContract.test.ts src/shared/skills.test.ts src/main/skillExecutionService.test.ts src/main/chatService.test.ts` -> failed as expected: missing new stages/transitions, manifest guided metadata, `resolveSkillInput`, and chat preflight/resume wiring.
+- GREEN / verification evidence:
+  - `npm test -- src/shared/skillExecutionContract.test.ts src/shared/skills.test.ts src/main/skillExecutionService.test.ts src/main/chatService.test.ts` -> 4 files / 52 tests passed.
+  - `npm run build` -> passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `src/shared/toolPermissions.test.ts` was not run because Task 4 placeholder/root evidence is covered in `src/main/chatService.test.ts` and `src/shared/toolPermissions.test.ts` was not touched.

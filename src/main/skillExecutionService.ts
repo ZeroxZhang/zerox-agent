@@ -1,15 +1,23 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { SkillRecord } from "../shared/skills";
+import {
+  validatePathInsideRunContext,
+  type AgentRunContext,
+} from "../shared/agentWorkspace";
+import type { SkillInput, SkillRecord } from "../shared/skills";
 import {
   transitionSkillExecution,
   type SkillExecutionBudgets,
   type SkillExecutionSnapshot,
   type SkillExecutionStage,
+  type SkillExecutionTransitionOptions,
+  type SkillInputResolution,
+  type SkillInputValue,
 } from "../shared/skillExecutionContract";
 import type { SkillExecutionResult } from "./skillExecutor";
 
 export type SkillExecutionService = {
   execute(input: SkillExecutionServiceInput): Promise<SkillExecutionServiceResult>;
+  resolveInput(input: SkillInputResolutionInput): SkillInputResolution;
 };
 
 export type SkillExecutionServiceInput = {
@@ -19,7 +27,15 @@ export type SkillExecutionServiceInput = {
   requestId?: string;
   workspaceId?: string;
   budgets: SkillExecutionBudgets;
+  values?: Record<string, unknown>;
+  runContext?: AgentRunContext;
   runAgentSkill?: (snapshot: SkillExecutionSnapshot) => Promise<SkillExecutionResult>;
+};
+
+export type SkillInputResolutionInput = {
+  skill: SkillRecord;
+  values?: Record<string, unknown>;
+  runContext?: AgentRunContext;
 };
 
 export type SkillExecutionServiceResult =
@@ -51,22 +67,51 @@ export function createSkillExecutionService(options: {
     snapshot: SkillExecutionSnapshot,
     stage: SkillExecutionStage,
     message?: string,
+    transitionOptions: Omit<SkillExecutionTransitionOptions, "at" | "message"> = {},
   ): SkillExecutionSnapshot {
     return emit(
       transitionSkillExecution(snapshot, stage, {
         at: now().toISOString(),
         ...(message ? { message } : {}),
+        ...transitionOptions,
       }),
     );
   }
 
   return {
+    resolveInput: resolveSkillInput,
+
     async execute(input) {
       let snapshot = emit(createInitialSnapshot(input, createId(), now().toISOString()));
 
       try {
         snapshot = transition(snapshot, "loading_resources");
-        snapshot = transition(snapshot, "configuring");
+        snapshot = transition(snapshot, "auditing_requirements");
+        if (input.skill.manifest.inputs.length > 0) {
+          const inputResolution = resolveSkillInput({
+            skill: input.skill,
+            values: input.values,
+            runContext: input.runContext,
+          });
+          if (inputResolution.status !== "complete") {
+            return {
+              ok: false,
+              error: "Skill input required.",
+              snapshot: transition(
+                snapshot,
+                "waiting_for_user_input",
+                "Skill input required.",
+                { inputResolution },
+              ),
+            };
+          }
+          snapshot = transition(
+            snapshot,
+            "validating_input",
+            "Skill input validated.",
+            { inputResolution },
+          );
+        }
         snapshot = transition(snapshot, "planning");
         snapshot = transition(snapshot, "executing");
         const result = input.runAgentSkill
@@ -95,6 +140,85 @@ export function createSkillExecutionService(options: {
       }
     },
   };
+}
+
+export function resolveSkillInput(
+  input: SkillInputResolutionInput,
+): SkillInputResolution {
+  const values = input.values ?? {};
+  const resolvedValues: Record<string, SkillInputValue> = {};
+  const missingFields: string[] = [];
+  const invalidFields: string[] = [];
+
+  for (const field of input.skill.manifest.inputs) {
+    const rawValue = Object.prototype.hasOwnProperty.call(values, field.name)
+      ? values[field.name]
+      : field.defaultValue;
+
+    if (isMissingSkillInputValue(rawValue)) {
+      if (field.required) {
+        missingFields.push(field.name);
+      }
+      continue;
+    }
+
+    const validation = validateSkillInputValue(field, rawValue, input.runContext);
+    if (!validation.ok) {
+      invalidFields.push(field.name);
+      continue;
+    }
+
+    resolvedValues[field.name] = validation.value;
+  }
+
+  return {
+    status:
+      missingFields.length > 0
+        ? "missing"
+        : invalidFields.length > 0
+          ? "invalid"
+          : "complete",
+    values: resolvedValues,
+    missingFields,
+    invalidFields,
+  };
+}
+
+function isMissingSkillInputValue(value: unknown): boolean {
+  return (
+    value === undefined ||
+    value === null ||
+    (typeof value === "string" && value.trim().length === 0)
+  );
+}
+
+function validateSkillInputValue(
+  field: SkillInput,
+  value: unknown,
+  runContext: AgentRunContext | undefined,
+): { ok: true; value: SkillInputValue } | { ok: false } {
+  switch (field.type) {
+    case "string":
+      return typeof value === "string" ? { ok: true, value } : { ok: false };
+    case "number":
+      return typeof value === "number" && Number.isFinite(value)
+        ? { ok: true, value }
+        : { ok: false };
+    case "boolean":
+      return typeof value === "boolean" ? { ok: true, value } : { ok: false };
+    case "choice":
+      return typeof value === "string" && field.choices?.includes(value)
+        ? { ok: true, value }
+        : { ok: false };
+    case "path":
+      if (typeof value !== "string" || !runContext) {
+        return { ok: false };
+      }
+      return validatePathInsideRunContext(value, runContext, "read").ok ||
+        validatePathInsideRunContext(value, runContext, "write").ok
+        ? { ok: true, value }
+        : { ok: false };
+  }
 }
 
 function createInitialSnapshot(

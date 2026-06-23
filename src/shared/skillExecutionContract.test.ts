@@ -53,7 +53,7 @@ describe("skill execution contract", () => {
     const stages: SkillExecutionStage[] = [
       "resolving_skill",
       "loading_resources",
-      "configuring",
+      "auditing_requirements",
       "planning",
       "executing",
       "validating",
@@ -110,7 +110,7 @@ describe("skill execution contract", () => {
     const invalidTransitions: Array<[SkillExecutionStage, SkillExecutionStage]> = [
       ["resolving_skill", "executing"],
       ["loading_resources", "planning"],
-      ["planning", "configuring"],
+      ["loading_resources", "configuring"],
       ["executing", "finalizing"],
       ["validating", "succeeded"],
       ["finalizing", "executing"],
@@ -162,5 +162,87 @@ describe("skill execution contract", () => {
       stage: "validating",
       metadata: { validation: "preflight" },
     });
+  });
+
+  it("records guided input resolution while pausing and resuming preflight", () => {
+    let snapshot = transitionSkillExecution(
+      createSnapshot("loading_resources"),
+      "auditing_requirements",
+      {
+        at: "2026-06-21T00:00:01.000Z",
+        message: "auditing required inputs",
+      },
+    );
+
+    snapshot = transitionSkillExecution(snapshot, "waiting_for_user_input", {
+      at: "2026-06-21T00:00:02.000Z",
+      pendingInputRequestId: "input_1",
+      inputResolution: {
+        status: "missing",
+        values: {},
+        missingFields: ["targetDir"],
+        invalidFields: [],
+      },
+    });
+
+    expect(snapshot.pendingInputRequestId).toBe("input_1");
+    expect(snapshot.inputResolution).toEqual({
+      status: "missing",
+      values: {},
+      missingFields: ["targetDir"],
+      invalidFields: [],
+    });
+
+    snapshot = transitionSkillExecution(snapshot, "validating_input", {
+      at: "2026-06-21T00:00:03.000Z",
+      inputResolution: {
+        status: "complete",
+        values: { targetDir: "/workspace/project" },
+        missingFields: [],
+        invalidFields: [],
+      },
+    });
+    snapshot = transitionSkillExecution(snapshot, "planning", {
+      at: "2026-06-21T00:00:04.000Z",
+    });
+
+    expect(snapshot.stageRecords.map((record) => record.stage)).toEqual([
+      "loading_resources",
+      "auditing_requirements",
+      "waiting_for_user_input",
+      "validating_input",
+      "planning",
+    ]);
+    expect(snapshot.inputResolution).toMatchObject({
+      status: "complete",
+      values: { targetDir: "/workspace/project" },
+    });
+  });
+
+  it("allows tool approval waits while executing", () => {
+    let snapshot = transitionSkillExecution(
+      createSnapshot("executing"),
+      "waiting_for_approval",
+      {
+        at: "2026-06-21T00:00:20.000Z",
+        message: "waiting for tool approval",
+      },
+    );
+
+    expect(snapshot.stage).toBe("waiting_for_approval");
+    expect(canTransitionSkillStage("waiting_for_approval", "executing")).toBe(
+      true,
+    );
+
+    snapshot = transitionSkillExecution(snapshot, "executing", {
+      at: "2026-06-21T00:00:21.000Z",
+      message: "approval granted",
+    });
+
+    expect(snapshot.stageRecords.map((record) => record.stage)).toEqual([
+      "executing",
+      "waiting_for_approval",
+      "executing",
+    ]);
   });
 });
