@@ -4015,3 +4015,25 @@
   - `npx tsc -p tsconfig.electron.json --noEmit --pretty false` -> passed.
   - `npm run harness:check` -> passed.
   - `git diff --check` -> passed.
+
+## 2026-06-23 - Worker T3 Task 3 Streamed Tool Preview Safety Repair
+
+- Summary:
+  - Avoided unsafe native-provider tool streaming with tools present by deriving low-level stream events from `complete()` before any deltas are emitted.
+  - Preserved renderer-facing tool preview index and used deterministic `index:<n>` fallback ids for idless indexed chunks.
+- Changed files:
+  - `src/main/providers/providerChatClient.ts`
+  - `src/main/providers/providers.test.ts`
+  - `src/shared/chat.ts`
+  - `src/shared/chatStream.test.ts`
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/shared/chatStream.test.ts src/main/providers/providers.test.ts src/main/chatService.test.ts` -> failed as expected: native provider stream emitted unsafe empty tool name/stream args and chat preview emitted empty `toolCallId` without index.
+- GREEN / verification evidence:
+  - `npm test -- src/shared/chatStream.test.ts src/main/providers/providers.test.ts src/main/chatService.test.ts` -> 3 files / 61 tests passed.
+  - `npm test -- src/shared/chatStream.test.ts src/main/providers/p8.test.ts src/main/providers/providers.test.ts src/main/openAiCompatibleClient.test.ts src/main/agentLoop.test.ts src/main/chatService.test.ts` -> 6 files / 106 tests passed.
+  - `npx tsc -p tsconfig.electron.json --noEmit --pretty false` -> passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.

@@ -27,6 +27,7 @@ describe("chat stream contract", () => {
       sessionId: "session_1",
       requestId: "request_1",
       toolCallId: "tool_call_1",
+      index: 0,
       toolName: "file_read",
       argumentsDelta: '{"path":',
       createdAt: "2026-06-23T08:00:02.000Z",
@@ -38,6 +39,7 @@ describe("chat stream contract", () => {
     ]);
     expect(toolPreviewEvent).toMatchObject({
       toolCallId: "tool_call_1",
+      index: 0,
       toolName: "file_read",
     });
     expect(answerEvent).not.toHaveProperty("delta");

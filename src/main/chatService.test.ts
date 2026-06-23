@@ -1600,6 +1600,65 @@ describe("chat service", () => {
     ]);
   });
 
+  it("emits indexed tool previews with a usable fallback id for idless chunks", async () => {
+    const streamEvents: ChatStreamEvent[] = [];
+    const chatClient: ChatClient & StreamingChatClient = {
+      async complete() {
+        throw new Error("non-streaming complete should not be used");
+      },
+      async *streamComplete() {
+        yield {
+          type: "tool_call_delta",
+          index: 1,
+          id: "",
+          name: "",
+          arguments: '"}',
+        };
+        yield { type: "done", finishReason: "tool_calls" };
+      },
+    };
+    const service = createChatService({
+      chatClient,
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([]),
+      toolExecutor: createToolExecutor(),
+      createId: () => "chat_indexed_preview",
+      now: () => new Date("2026-06-23T08:00:00.000Z"),
+    });
+
+    await service.sendMessage(
+      {
+        requestId: "request_indexed_preview",
+        message: "preview indexed idless tool chunk",
+      },
+      {
+        onStreamEvent(event) {
+          streamEvents.push(event);
+        },
+      },
+    );
+
+    expect(streamEvents).toEqual(
+      expect.arrayContaining([
+        {
+          type: "tool_call_preview",
+          toolCallId: "index:1",
+          index: 1,
+          argumentsDelta: '"}',
+          sessionId: "persisted_session",
+          requestId: "request_indexed_preview",
+          createdAt: "2026-06-23T08:00:00.000Z",
+        },
+      ]),
+    );
+    const preview = streamEvents.find((event) => event.type === "tool_call_preview");
+    expect(preview).toMatchObject({
+      toolCallId: "index:1",
+      index: 1,
+    });
+  });
+
   it("loads and enforces an explicitly selected agent skill in chat", async () => {
     const capturedMessages: ChatMessage[][] = [];
     const statusEvents: ChatTaskStatusEvent[] = [];

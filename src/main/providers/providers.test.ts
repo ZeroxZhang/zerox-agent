@@ -356,6 +356,95 @@ describe("ProviderChatClient adapter", () => {
       { type: "done", finishReason: "stop" },
     ]);
   });
+
+  it("uses complete-derived tool calls for native provider streams when tools are present", async () => {
+    let completeCalls = 0;
+    let streamCalls = 0;
+    const provider: LLMProvider = {
+      id: "anthropic",
+      capabilities: { toolUse: true, thinking: true, vision: false, promptCache: true, streamingToolCalls: true },
+      async complete() {
+        completeCalls += 1;
+        return {
+          content: null,
+          finishReason: "tool_use",
+          reasoningContent: "native tool planning",
+          toolCalls: [
+            {
+              id: "toolu_real",
+              type: "function",
+              function: {
+                name: "file_list",
+                arguments: '{"path":"/safe"}',
+              },
+            },
+          ],
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        };
+      },
+      async *stream() {
+        streamCalls += 1;
+        yield {
+          type: "tool_call_delta",
+          toolCallId: "0",
+          argumentsDelta: '{"path":"/unsafe"}',
+        };
+        yield {
+          type: "done",
+          response: {
+            content: null,
+            toolCalls: [],
+            finishReason: "tool_use",
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+          },
+        };
+      },
+      async countTokens() {
+        return 0;
+      },
+      buildCachePrefix(messages) {
+        return { system: "", tools: [], messages, watermark: messages.length };
+      },
+    };
+    const client = createProviderChatClient({ provider });
+    const events = [];
+
+    for await (const event of client.streamComplete({
+      baseUrl: "",
+      apiKey: "k",
+      model: "claude-3",
+      temperature: 0,
+      maxTokens: 10,
+      messages: [{ role: "user", content: "list" }],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "file_list",
+            description: "List files",
+            parameters: { type: "object", properties: {}, required: [] },
+          },
+        },
+      ],
+    })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: "reasoning_delta", text: "native tool planning" },
+      {
+        type: "tool_call_delta",
+        id: "toolu_real",
+        name: "file_list",
+        arguments: '{"path":"/safe"}',
+      },
+      { type: "done", finishReason: "tool_use" },
+    ]);
+    expect(completeCalls).toBe(1);
+    expect(streamCalls).toBe(0);
+  });
 });
 
 function scriptedProvider(events: StreamEvent[]): LLMProvider {

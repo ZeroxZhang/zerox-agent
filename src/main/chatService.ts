@@ -907,13 +907,22 @@ function emitModelStreamEvent(
   }
 
   if (event.type === "tool_call_delta") {
+    const index = normalizeToolCallPreviewIndex(event.index);
     emitter.sendStreamEvent({
       type: "tool_call_preview",
-      toolCallId: event.id,
+      toolCallId: event.id || (index !== undefined ? `index:${index}` : ""),
+      ...(index !== undefined ? { index } : {}),
       ...(event.name ? { toolName: event.name } : {}),
       ...(event.arguments ? { argumentsDelta: event.arguments } : {}),
     });
   }
+}
+
+function normalizeToolCallPreviewIndex(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return undefined;
+  }
+  return Math.max(0, Math.floor(value));
 }
 
 function getNowMs(now: (() => Date) | undefined): number {

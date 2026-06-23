@@ -155,6 +155,7 @@ export type ChatStreamEvent =
   | (ChatStreamEventBase & {
       type: "tool_call_preview";
       toolCallId: string;
+      index?: number;
       toolName?: string;
       argumentsDelta?: string;
     })
