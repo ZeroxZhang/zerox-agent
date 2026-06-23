@@ -13,6 +13,7 @@ import { getDefaultTaskPermissionPolicy } from "../shared/toolPermissions";
 import type {
   ChatSessionGoalSummary,
   ChatSessionTokenUsage,
+  ChatStreamEvent,
   ChatTaskStatusEvent,
 } from "../shared/chat";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
@@ -80,7 +81,6 @@ describe("chat service", () => {
 
     await expect(
       service.respondSkillInput({
-        requestId: "request_1",
         inputRequestId: "input_1",
         values: {
           targetPath: "/workspace/project",
@@ -116,6 +116,62 @@ describe("chat service", () => {
       message: "模型配置不完整：请先在设置中保存 base URL、对话模型和 API Key。",
     });
     expect(completeCalled).toBe(false);
+  });
+
+  it("streams chat status events with the request id while preserving status callbacks", async () => {
+    const statusEvents: ChatTaskStatusEvent[] = [];
+    const streamEvents: ChatStreamEvent[] = [];
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("status stream done");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      createId: () => "chat_stream_status",
+      now: () => new Date("2026-06-23T08:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage(
+      {
+        requestId: "request_stream_1",
+        message: "stream status",
+      },
+      {
+        onStatusEvent(event) {
+          statusEvents.push(event);
+        },
+        onStreamEvent(event) {
+          streamEvents.push(event);
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      sessionId: "chat_stream_status",
+    });
+    expect(statusEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sessionId: "chat_stream_status",
+          state: "started",
+          message: "正在读取模型配置",
+        }),
+      ]),
+    );
+    expect(streamEvents).toEqual(
+      expect.arrayContaining([
+        {
+          type: "status",
+          sessionId: "chat_stream_status",
+          requestId: "request_stream_1",
+          status: statusEvents[0],
+          createdAt: statusEvents[0].createdAt,
+        },
+      ]),
+    );
   });
 
   it("sends memory-grounded chat messages to the model and stores session memory", async () => {

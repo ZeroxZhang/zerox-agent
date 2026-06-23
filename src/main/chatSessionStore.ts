@@ -13,8 +13,7 @@ import type {
   ChatTaskStatusEvent,
   ChatWorkspaceSummary,
   SkillInputField,
-  SkillInputOption,
-  SkillInputValue,
+  SkillInputFieldType,
   SkillUserInputRequest,
 } from "../shared/chat";
 
@@ -562,11 +561,11 @@ function normalizeSkillUserInputRequest(
 
   return {
     id: String(request.id ?? ""),
+    executionId: String(request.executionId ?? ""),
     sessionId: String(request.sessionId ?? ""),
     requestId: String(request.requestId ?? ""),
     skillName: String(request.skillName ?? ""),
-    skillDisplayName: String(request.skillDisplayName ?? ""),
-    message: String(request.message ?? ""),
+    reason: String(request.reason ?? ""),
     fields,
     createdAt: String(request.createdAt ?? new Date(0).toISOString()),
   };
@@ -578,13 +577,10 @@ function normalizeSkillInputField(value: unknown): SkillInputField | null {
   }
 
   const field = value as Partial<Record<keyof SkillInputField, unknown>>;
-  const options = Array.isArray(field.options)
-    ? field.options
-        .map(normalizeSkillInputOption)
-        .filter((option): option is SkillInputOption => Boolean(option))
-    : [];
   const defaultValue = normalizeSkillInputValue(field.defaultValue);
-  const currentValue = normalizeSkillInputValue(field.value);
+  const choices = Array.isArray(field.choices)
+    ? field.choices.map(String)
+    : [];
 
   return {
     name: String(field.name ?? ""),
@@ -592,53 +588,34 @@ function normalizeSkillInputField(value: unknown): SkillInputField | null {
     type: normalizeSkillInputFieldType(field.type),
     required: Boolean(field.required),
     ...(field.description ? { description: String(field.description) } : {}),
-    ...(field.placeholder ? { placeholder: String(field.placeholder) } : {}),
-    ...(options.length ? { options } : {}),
     ...(defaultValue !== undefined ? { defaultValue } : {}),
-    ...(currentValue !== undefined ? { value: currentValue } : {}),
-    ...(field.validationMessage
-      ? { validationMessage: String(field.validationMessage) }
-      : {}),
+    ...(choices.length ? { choices } : {}),
   };
 }
 
 function normalizeSkillInputFieldType(
   type: unknown,
-): SkillInputField["type"] {
+): SkillInputFieldType {
   if (
-    type === "text" ||
-    type === "textarea" ||
+    type === "string" ||
     type === "number" ||
     type === "boolean" ||
-    type === "select" ||
-    type === "path"
+    type === "path" ||
+    type === "choice"
   ) {
     return type;
   }
 
-  return "text";
+  return "string";
 }
 
-function normalizeSkillInputOption(value: unknown): SkillInputOption | null {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-
-  const option = value as Partial<Record<keyof SkillInputOption, unknown>>;
-  const normalizedValue = normalizeSkillInputValue(option.value);
-
-  return {
-    label: String(option.label ?? normalizedValue ?? ""),
-    value: normalizedValue ?? "",
-    ...(option.description ? { description: String(option.description) } : {}),
-  };
-}
-
-function normalizeSkillInputValue(value: unknown): SkillInputValue | undefined {
-  if (value === undefined) {
+function normalizeSkillInputValue(
+  value: unknown,
+): string | number | boolean | undefined {
+  if (value === undefined || value === null) {
     return undefined;
   }
-  if (value === null || typeof value === "string" || typeof value === "boolean") {
+  if (typeof value === "string" || typeof value === "boolean") {
     return value;
   }
   if (typeof value === "number" && Number.isFinite(value)) {

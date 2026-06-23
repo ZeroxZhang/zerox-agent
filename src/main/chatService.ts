@@ -174,9 +174,11 @@ export function createChatService(options: {
       const chatDate = new Date(startedAtMs).toISOString().split("T")[0];
       const emitStatus = createChatStatusEmitter({
         sessionId,
+        requestId,
         startedAtMs,
         now: options.now,
         onStatusEvent: runtimeOptions.onStatusEvent,
+        onStreamEvent: runtimeOptions.onStreamEvent,
         onPersistEvent(event) {
           void options.chatSessionStore?.appendActivityEvent?.(event.sessionId, event);
           void workspaceRunRecorder?.appendStatusEvent(event);
@@ -803,9 +805,11 @@ function normalizeAgentLoopMaxTurns(value: number | undefined): number {
 
 function createChatStatusEmitter(options: {
   sessionId: string;
+  requestId: string;
   startedAtMs: number;
   now?: () => Date;
   onStatusEvent?: (event: ChatTaskStatusEvent) => void;
+  onStreamEvent?: (event: ChatStreamEvent) => void;
   onPersistEvent?: (event: ChatTaskStatusEvent) => void;
 }) {
   let sessionId = options.sessionId;
@@ -823,6 +827,13 @@ function createChatStatusEmitter(options: {
         elapsedMs: Math.max(0, nowMs - options.startedAtMs),
       };
       options.onStatusEvent?.(statusEvent);
+      options.onStreamEvent?.({
+        type: "status",
+        sessionId: statusEvent.sessionId,
+        requestId: options.requestId,
+        status: statusEvent,
+        createdAt: statusEvent.createdAt,
+      });
       options.onPersistEvent?.(statusEvent);
     },
   };

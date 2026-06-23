@@ -405,17 +405,24 @@ describe("chat session store", () => {
                   elapsedMs: 200,
                   inputRequest: {
                     id: "input_1",
+                    executionId: "execution_1",
                     sessionId: "legacy_activity",
                     requestId: "request_1",
                     skillName: "onepager",
-                    skillDisplayName: "OnePager",
-                    message: "Choose a source path.",
+                    reason: "Choose a source path.",
                     fields: [
                       {
                         name: "sourcePath",
                         label: "Source path",
                         type: "path",
                         required: true,
+                      },
+                      {
+                        name: "format",
+                        label: "Format",
+                        type: "choice",
+                        required: true,
+                        choices: ["markdown", "html"],
                       },
                     ],
                     createdAt: "2026-06-23T08:00:01.000Z",
@@ -441,10 +448,17 @@ describe("chat session store", () => {
     expect(loaded?.activity?.statusEvents.at(-1)).toMatchObject({
       inputRequest: {
         id: "input_1",
+        executionId: "execution_1",
+        reason: "Choose a source path.",
         fields: [
           {
             name: "sourcePath",
             type: "path",
+          },
+          {
+            name: "format",
+            type: "choice",
+            choices: ["markdown", "html"],
           },
         ],
       },

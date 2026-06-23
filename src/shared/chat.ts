@@ -100,42 +100,32 @@ export type SendChatMessageInput = {
   history?: ChatHistoryMessage[];
 };
 
-export type SkillInputValue = string | number | boolean | null;
-
-export type SkillInputOption = {
-  label: string;
-  value: SkillInputValue;
-  description?: string;
-};
+export type SkillInputFieldType = "string" | "number" | "boolean" | "path" | "choice";
 
 export type SkillInputField = {
   name: string;
   label: string;
-  type: "text" | "textarea" | "number" | "boolean" | "select" | "path";
+  type: SkillInputFieldType;
   required: boolean;
   description?: string;
-  placeholder?: string;
-  options?: SkillInputOption[];
-  defaultValue?: SkillInputValue;
-  value?: SkillInputValue;
-  validationMessage?: string;
+  defaultValue?: string | number | boolean;
+  choices?: string[];
 };
 
 export type SkillUserInputRequest = {
   id: string;
+  executionId: string;
   sessionId: string;
   requestId: string;
   skillName: string;
-  skillDisplayName: string;
-  message: string;
+  reason: string;
   fields: SkillInputField[];
   createdAt: string;
 };
 
 export type SkillInputResponse = {
-  requestId: string;
   inputRequestId: string;
-  values: Record<string, SkillInputValue>;
+  values: Record<string, string | number | boolean>;
 };
 
 export type SkillInputResponseResult =
@@ -156,14 +146,14 @@ type ChatStreamEventBase = {
 export type ChatStreamEvent =
   | (ChatStreamEventBase & {
       type: "answer_delta";
-      delta: string;
+      text: string;
     })
   | (ChatStreamEventBase & {
       type: "thinking_delta";
-      delta: string;
+      text: string;
     })
   | (ChatStreamEventBase & {
-      type: "tool_call_delta";
+      type: "tool_call_preview";
       toolCallId: string;
       toolName?: string;
       argumentsDelta?: string;

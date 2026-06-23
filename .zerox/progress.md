@@ -3882,3 +3882,27 @@
   - `npm run harness:check` -> passed.
   - `git diff --check` -> passed.
   - `npm run build` -> passed.
+
+## 2026-06-23 - Worker T2 Task 2 Follow-Up Contract Alignment
+
+- Summary:
+  - Aligned guided skill input fields to the approved plan contract: `string`/`number`/`boolean`/`path`/`choice`, `executionId`, `reason`, and `choices`.
+  - Replaced chat stream answer/thinking payloads with `text` and renamed tool preview events to `tool_call_preview`.
+  - Removed conflicting guided input response `requestId` and nullable values.
+  - Mirrored chat task status callbacks into `onStreamEvent` as chat-layer `status` events with the send request id.
+  - Updated persisted input request normalization for the approved field shape.
+- Changed files:
+  - `src/shared/chat.ts`
+  - `src/shared/chatStream.test.ts`
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+  - `src/main/chatSessionStore.ts`
+  - `src/main/chatSessionStore.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/shared/chatStream.test.ts src/preload/index.test.ts src/main/chatService.test.ts src/main/chatSessionStore.test.ts` -> failed as expected: old `delta`/`tool_call_delta` contract remained, persisted choice fields normalized incorrectly, and `onStreamEvent` received no status events.
+- GREEN / verification evidence:
+  - `npm test -- src/shared/chatStream.test.ts src/preload/index.test.ts src/main/chatService.test.ts src/main/chatSessionStore.test.ts` -> 4 files / 55 tests passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run build` -> passed.
