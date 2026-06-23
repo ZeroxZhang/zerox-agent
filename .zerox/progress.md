@@ -4062,3 +4062,24 @@
   - `npm run harness:check` -> passed.
   - `git diff --check` -> passed.
   - `src/shared/toolPermissions.test.ts` was not run because Task 4 placeholder/root evidence is covered in `src/main/chatService.test.ts` and `src/shared/toolPermissions.test.ts` was not touched.
+
+## 2026-06-23 - Worker T4 Task 4 Guided Skill Input Preflight Repair
+
+- Summary:
+  - Persisted pending guided skill input state on chat activity events, including original session/request/message, selected skill name, workspace context, and partial values.
+  - Added recovery on fresh `createChatService` instances by scanning persisted session activity, rediscovering the skill by name, and resolving the workspace again.
+  - Marked consumed pending input requests completed so duplicate responses are rejected safely.
+  - Moved selected/natural skill resolution and missing-input preflight before goal intent routing for non-continuation turns.
+- Changed files:
+  - `src/shared/chat.ts`
+  - `src/main/chatSessionStore.ts`
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/shared/skillExecutionContract.test.ts src/shared/skills.test.ts src/main/skillExecutionService.test.ts src/main/chatService.test.ts` -> failed as expected: fresh-service `respondSkillInput` could not recover pending input, and selected `/goal`-style skill messages routed to goal handling before skill preflight.
+- GREEN / verification evidence:
+  - `npm test -- src/shared/skillExecutionContract.test.ts src/shared/skills.test.ts src/main/skillExecutionService.test.ts src/main/chatService.test.ts` -> 4 files / 55 tests passed.
+  - `npm run build` -> passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.

@@ -14,6 +14,7 @@ import type {
   ChatWorkspaceSummary,
   SkillInputField,
   SkillInputFieldType,
+  SkillPendingInputState,
   SkillUserInputRequest,
 } from "../shared/chat";
 
@@ -498,6 +499,9 @@ function normalizeActivitySnapshot(
 function normalizeStatusEvent(event: ChatTaskStatusEvent): ChatTaskStatusEvent {
   const state = normalizeStatusEventState(event.state);
   const inputRequest = normalizeSkillUserInputRequest(event.inputRequest);
+  const pendingSkillInput = normalizeSkillPendingInputState(
+    event.pendingSkillInput,
+  );
   return {
     sessionId: String(event.sessionId ?? ""),
     state,
@@ -517,6 +521,7 @@ function normalizeStatusEvent(event: ChatTaskStatusEvent): ChatTaskStatusEvent {
       : {}),
     ...(typeof event.maxTurns === "number" ? { maxTurns: event.maxTurns } : {}),
     ...(inputRequest ? { inputRequest } : {}),
+    ...(pendingSkillInput ? { pendingSkillInput } : {}),
     ...(typeof event.ok === "boolean" ? { ok: event.ok } : {}),
   };
 }
@@ -569,6 +574,62 @@ function normalizeSkillUserInputRequest(
     fields,
     createdAt: String(request.createdAt ?? new Date(0).toISOString()),
   };
+}
+
+function normalizeSkillPendingInputState(
+  value: unknown,
+): SkillPendingInputState | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const pending = value as Partial<
+    Record<keyof SkillPendingInputState, unknown>
+  >;
+  const inputRequestId = normalizeOptionalString(pending.inputRequestId);
+  const sessionId = normalizeOptionalString(pending.sessionId);
+  const requestId = normalizeOptionalString(pending.requestId);
+  const userMessage = normalizeOptionalString(pending.userMessage);
+  const selectedSkillName = normalizeOptionalString(pending.selectedSkillName);
+  if (!inputRequestId || !sessionId || !requestId || !userMessage || !selectedSkillName) {
+    return undefined;
+  }
+
+  return {
+    inputRequestId,
+    status: pending.status === "completed" ? "completed" : "pending",
+    sessionId,
+    requestId,
+    userMessage,
+    ...(normalizeOptionalString(pending.userMessageId)
+      ? { userMessageId: normalizeOptionalString(pending.userMessageId) }
+      : {}),
+    selectedSkillName,
+    ...(normalizeOptionalString(pending.workspaceId)
+      ? { workspaceId: normalizeOptionalString(pending.workspaceId) }
+      : {}),
+    ...(normalizeChatWorkspaceSummary(pending.workspaceSummary)
+      ? { workspaceSummary: normalizeChatWorkspaceSummary(pending.workspaceSummary) }
+      : {}),
+    partialValues: normalizeSkillInputValueRecord(pending.partialValues),
+  };
+}
+
+function normalizeSkillInputValueRecord(
+  value: unknown,
+): Record<string, string | number | boolean> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  const normalized: Record<string, string | number | boolean> = {};
+  for (const [key, rawValue] of Object.entries(value)) {
+    const normalizedValue = normalizeSkillInputValue(rawValue);
+    if (normalizedValue !== undefined) {
+      normalized[key] = normalizedValue;
+    }
+  }
+  return normalized;
 }
 
 function normalizeSkillInputField(value: unknown): SkillInputField | null {

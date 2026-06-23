@@ -11,6 +11,7 @@ import type { ScheduledTask, ScheduledTaskInput } from "../shared/scheduledTasks
 import type { SkillRecord } from "../shared/skills";
 import { getDefaultTaskPermissionPolicy } from "../shared/toolPermissions";
 import type {
+  ChatSessionRecord,
   ChatSessionGoalSummary,
   ChatSessionTokenUsage,
   ChatStreamEvent,
@@ -2217,6 +2218,338 @@ describe("chat service", () => {
     ).not.toContain("{{targetDir}}");
   });
 
+  it("recovers pending guided skill input from persisted session activity after service restart", async () => {
+    const chatMessages: AppendChatMessageInput[] = [];
+    const initialStreamEvents: ChatStreamEvent[] = [];
+    const responseStreamEvents: ChatStreamEvent[] = [];
+    const capturedMessages: ChatMessage[][] = [];
+    let observedRuntimeTask: unknown = null;
+    const persistentStore = createChatSessionStore(chatMessages);
+    const dependencies = {
+      chatClient: {
+        async complete() {
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: persistentStore,
+      workspaceService: {
+        async resolveRunContext() {
+          return buildPrimaryRunContext({
+            workspaceId: "workspace_project",
+            workspaceRoot: "/workspace/project",
+          });
+        },
+      },
+      toolExecutor: createToolExecutor(),
+      async runAgentLoop(messages: ChatMessage[], _profile: unknown, options: { runtimeTask?: unknown }) {
+        capturedMessages.push(messages);
+        observedRuntimeTask = options.runtimeTask;
+        return {
+          status: "succeeded" as const,
+          summary: "recovered guided skill done",
+          turns: 1,
+          messages,
+          toolCallsExecuted: 0,
+        };
+      },
+      discoverSkills: async () => ({
+        skills: [
+          createSkillRecord({
+            name: "local-file-organizer",
+            body: "Organize recovered pending input.",
+            manifest: {
+              inputs: [
+                {
+                  name: "targetDir",
+                  label: "Target directory",
+                  type: "path",
+                  required: true,
+                },
+              ],
+              permissions: {
+                ...getDefaultTaskPermissionPolicy(),
+                files: { read: ["{{targetDir}}"], write: ["{{targetDir}}"] },
+              },
+            },
+          }),
+        ],
+        errors: [],
+      }),
+      now: () => new Date("2026-06-23T08:00:00.000Z"),
+    };
+    const firstService = createChatService({
+      ...dependencies,
+      createId: createSequentialId("restart_first"),
+    });
+
+    await firstService.sendMessage(
+      {
+        sessionId: "session_1",
+        requestId: "request_1",
+        message: "organize files after restart",
+        selectedSkillName: "local-file-organizer",
+        workspaceId: "workspace_project",
+      },
+      { onStreamEvent: (event) => initialStreamEvents.push(event) },
+    );
+    const inputRequest = initialStreamEvents.find(
+      (event): event is Extract<ChatStreamEvent, { type: "waiting_for_input" }> =>
+        event.type === "waiting_for_input",
+    )?.inputRequest;
+    expect(inputRequest?.id).toBeTruthy();
+
+    const freshService = createChatService({
+      ...dependencies,
+      createId: createSequentialId("restart_second"),
+    });
+    const result = await freshService.respondSkillInput(
+      {
+        inputRequestId: inputRequest?.id ?? "",
+        values: { targetDir: "/workspace/project/docs" },
+      },
+      {
+        onStreamEvent(event) {
+          responseStreamEvents.push(event);
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      sessionId: "session_1",
+      reply: "recovered guided skill done",
+      selectedSkill: { name: "local-file-organizer" },
+    });
+    expect(chatMessages.filter((message) => message.role === "user")).toEqual([
+      expect.objectContaining({
+        role: "user",
+        content: "organize files after restart",
+      }),
+    ]);
+    expect(responseStreamEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "status",
+          requestId: "request_1",
+          status: expect.objectContaining({ state: "started" }),
+        }),
+      ]),
+    );
+    expect(capturedMessages.at(-1)?.[0]?.content ?? "").toContain(
+      '"targetDir": "/workspace/project/docs"',
+    );
+    expect(observedRuntimeTask).toMatchObject({
+      permissions: {
+        files: {
+          read: expect.arrayContaining(["/workspace/project/docs"]),
+          write: expect.arrayContaining(["/workspace/project/docs"]),
+        },
+      },
+    });
+
+    const secondFreshService = createChatService({
+      ...dependencies,
+      createId: createSequentialId("restart_third"),
+    });
+    await expect(
+      secondFreshService.respondSkillInput({
+        inputRequestId: inputRequest?.id ?? "",
+        values: { targetDir: "/workspace/project/docs" },
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      message: "Unknown skill input request.",
+    });
+    expect(capturedMessages).toHaveLength(1);
+  });
+
+  it("rejects a guided skill input response after the pending request was completed", async () => {
+    const chatMessages: AppendChatMessageInput[] = [];
+    const initialStreamEvents: ChatStreamEvent[] = [];
+    let agentLoopCalls = 0;
+    const persistentStore = createChatSessionStore(chatMessages);
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: persistentStore,
+      workspaceService: {
+        async resolveRunContext() {
+          return buildPrimaryRunContext({
+            workspaceId: "workspace_project",
+            workspaceRoot: "/workspace/project",
+          });
+        },
+      },
+      toolExecutor: createToolExecutor(),
+      async runAgentLoop(messages) {
+        agentLoopCalls += 1;
+        return {
+          status: "succeeded",
+          summary: "guided skill done once",
+          turns: 1,
+          messages,
+          toolCallsExecuted: 0,
+        };
+      },
+      discoverSkills: async () => ({
+        skills: [
+          createSkillRecord({
+            name: "local-file-organizer",
+            manifest: {
+              inputs: [
+                {
+                  name: "targetDir",
+                  label: "Target directory",
+                  type: "path",
+                  required: true,
+                },
+              ],
+            },
+          }),
+        ],
+        errors: [],
+      }),
+      createId: createSequentialId("guided_complete_once"),
+      now: () => new Date("2026-06-23T08:00:00.000Z"),
+    });
+
+    await service.sendMessage(
+      {
+        sessionId: "session_1",
+        requestId: "request_1",
+        message: "organize files once",
+        selectedSkillName: "local-file-organizer",
+        workspaceId: "workspace_project",
+      },
+      { onStreamEvent: (event) => initialStreamEvents.push(event) },
+    );
+    const inputRequest = initialStreamEvents.find(
+      (event): event is Extract<ChatStreamEvent, { type: "waiting_for_input" }> =>
+        event.type === "waiting_for_input",
+    )?.inputRequest;
+
+    await expect(
+      service.respondSkillInput({
+        inputRequestId: inputRequest?.id ?? "",
+        values: { targetDir: "/workspace/project/docs" },
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      reply: "guided skill done once",
+    });
+    await expect(
+      service.respondSkillInput({
+        inputRequestId: inputRequest?.id ?? "",
+        values: { targetDir: "/workspace/project/docs" },
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      message: "Unknown skill input request.",
+    });
+    expect(agentLoopCalls).toBe(1);
+  });
+
+  it("preflights selected guided skills before goal intent routing", async () => {
+    let completeCalled = false;
+    let memorySearches = 0;
+    const goalCreates: unknown[] = [];
+    const resumes: string[] = [];
+    const streamEvents: ChatStreamEvent[] = [];
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          completeCalled = true;
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: {
+        async search() {
+          memorySearches += 1;
+          return [];
+        },
+        async create(input: MemoryInput) {
+          return createMemoryRecord({
+            id: "created_memory",
+            title: input.title,
+            content: input.content,
+          });
+        },
+      },
+      chatSessionStore: createChatSessionStore([]),
+      goalService: createGoalService({ goalCreates, resumes }),
+      workspaceService: {
+        async resolveRunContext() {
+          return buildPrimaryRunContext({
+            workspaceId: "workspace_project",
+            workspaceRoot: "/workspace/project",
+          });
+        },
+      },
+      discoverSkills: async () => ({
+        skills: [
+          createSkillRecord({
+            name: "local-file-organizer",
+            manifest: {
+              inputs: [
+                {
+                  name: "targetDir",
+                  label: "Target directory",
+                  type: "path",
+                  required: true,
+                },
+              ],
+            },
+          }),
+        ],
+        errors: [],
+      }),
+      createId: createSequentialId("guided_goal"),
+      now: () => new Date("2026-06-23T08:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage(
+      {
+        sessionId: "session_1",
+        requestId: "request_1",
+        message: "目标: 整理这个项目",
+        selectedSkillName: "local-file-organizer",
+        workspaceId: "workspace_project",
+      },
+      {
+        onStreamEvent(event) {
+          streamEvents.push(event);
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      message: "Skill input required.",
+    });
+    expect(goalCreates).toEqual([]);
+    expect(resumes).toEqual([]);
+    expect(completeCalled).toBe(false);
+    expect(memorySearches).toBe(0);
+    expect(streamEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "waiting_for_input",
+          inputRequest: expect.objectContaining({
+            skillName: "local-file-organizer",
+          }),
+        }),
+      ]),
+    );
+  });
+
   it("surfaces structured shell failure diagnostics in task status", async () => {
     const statusEvents: ChatTaskStatusEvent[] = [];
     const service = createChatService({
@@ -2530,40 +2863,105 @@ function createChatSessionStore(
     activityEvents?: ChatTaskStatusEvent[];
   } = {},
 ) {
+  const sessions = new Map<string, ChatSessionRecord>();
+
+  function buildSession(
+    sessionId: string,
+    summary: string,
+    partial: Partial<ChatSessionRecord> = {},
+  ): ChatSessionRecord {
+    const existing = sessions.get(sessionId);
+    return {
+      id: sessionId,
+      title: existing?.title ?? "会话",
+      summary,
+      messages: existing?.messages ?? [],
+      ...(existing?.workspaceId ? { workspaceId: existing.workspaceId } : {}),
+      ...(existing?.workspaceSummary
+        ? { workspaceSummary: existing.workspaceSummary }
+        : {}),
+      ...(existing?.activity ? { activity: existing.activity } : {}),
+      ...(options.activeGoal
+        ? {
+            activeGoalId: options.activeGoal.id,
+            goalIds: [options.activeGoal.id],
+            goalSummaries: [options.activeGoal],
+          }
+        : existing?.activeGoalId
+          ? {
+              activeGoalId: existing.activeGoalId,
+              goalIds: existing.goalIds,
+              goalSummaries: existing.goalSummaries,
+            }
+          : {}),
+      createdAt: existing?.createdAt ?? "2026-06-06T08:00:00.000Z",
+      updatedAt: "2026-06-06T08:00:00.000Z",
+      ...partial,
+    };
+  }
+
   return {
+    async list() {
+      return [...sessions.values()].map((session) => ({
+        id: session.id,
+        title: session.title,
+        summary: session.summary,
+        messageCount: session.messages.length,
+        ...(session.workspaceId ? { workspaceId: session.workspaceId } : {}),
+        ...(session.workspaceSummary
+          ? { workspaceSummary: session.workspaceSummary }
+          : {}),
+        updatedAt: session.updatedAt,
+      }));
+    },
+    async get(sessionId: string) {
+      return sessions.get(sessionId) ?? null;
+    },
     async appendMessage(input: AppendChatMessageInput) {
       messages.push(input);
+      const sessionId = input.sessionId ?? "persisted_session";
+      const message = {
+        id: `message_${messages.length}`,
+        role: input.role,
+        content: input.content,
+        createdAt: "2026-06-06T08:00:00.000Z",
+      } as const;
+      const session = buildSession(sessionId, input.content, {
+        messages: [...(sessions.get(sessionId)?.messages ?? []), message],
+        ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
+        ...(input.workspaceSummary ? { workspaceSummary: input.workspaceSummary } : {}),
+      });
+      sessions.set(sessionId, session);
       return {
-        message: {
-          id: `message_${messages.length}`,
-          role: input.role,
-          content: input.content,
-          createdAt: "2026-06-06T08:00:00.000Z",
-        },
-        session: {
-          id: input.sessionId ?? "persisted_session",
-          title: "会话",
-          summary: input.content,
-          messages: [],
-          ...(options.activeGoal
-            ? {
-                activeGoalId: options.activeGoal.id,
-                goalIds: [options.activeGoal.id],
-                goalSummaries: [options.activeGoal],
-              }
-            : {}),
-          createdAt: "2026-06-06T08:00:00.000Z",
-          updatedAt: "2026-06-06T08:00:00.000Z",
-        },
+        message,
+        session,
       };
     },
     async addTokenUsage(sessionId: string, usage: ChatSessionTokenUsage) {
       options.tokenUsageWrites?.push({ sessionId, usage });
       return null;
     },
-    async appendActivityEvent(_sessionId: string, event: ChatTaskStatusEvent) {
+    async appendActivityEvent(sessionId: string, event: ChatTaskStatusEvent) {
       options.activityEvents?.push(event);
-      return null;
+      const session = buildSession(sessionId, sessions.get(sessionId)?.summary ?? "会话", {
+        activity: {
+          updatedAt: event.createdAt,
+          statusEvents: [
+            ...(sessions.get(sessionId)?.activity?.statusEvents ?? []),
+            event,
+          ],
+          ...(event.selectedSkillName
+            ? { selectedSkillName: event.selectedSkillName }
+            : sessions.get(sessionId)?.activity?.selectedSkillName
+              ? {
+                  selectedSkillName:
+                    sessions.get(sessionId)?.activity?.selectedSkillName,
+                }
+              : {}),
+        },
+      });
+      sessions.set(sessionId, session);
+      return session;
     },
     async attachGoal(_sessionId: string, goal: ChatSessionGoalSummary) {
       options.attachedGoals?.push(goal);

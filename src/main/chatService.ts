@@ -33,6 +33,8 @@ import type {
 import type {
   ChatAgentStatus,
   ChatRelatedMemory,
+  ChatSessionListItem,
+  ChatSessionRecord,
   ChatSessionGoalSummary,
   ChatSessionTokenUsage,
   ChatStreamEvent,
@@ -40,6 +42,7 @@ import type {
   ChatWorkspaceSummary,
   SendChatMessageInput,
   SendChatMessageResult,
+  SkillPendingInputState,
   SkillInputResponse,
   SkillInputResponseResult,
   SkillUserInputRequest,
@@ -98,6 +101,7 @@ type ChatContinuationState = {
 };
 
 type PendingSkillInputState = {
+  persisted: SkillPendingInputState;
   sessionId: string;
   requestId: string;
   userMessage: string;
@@ -153,7 +157,7 @@ export function createChatService(options: {
     ChatSessionStore,
     "appendMessage" | "attachGoal" | "clearActiveGoal" | "addTokenUsage"
   > &
-    Partial<Pick<ChatSessionStore, "appendActivityEvent">>;
+    Partial<Pick<ChatSessionStore, "appendActivityEvent" | "get" | "list">>;
   goalService?: ChatGoalService;
   taskStore?: Pick<ScheduledTaskStore, "create" | "list">;
   runScheduledTask?: (taskId: string) => Promise<RunScheduledTaskResult>;
@@ -183,6 +187,65 @@ export function createChatService(options: {
   const agentLoopMaxTurns = normalizeAgentLoopMaxTurns(options.agentLoopMaxTurns);
   const pendingContinuations = new Map<string, ChatContinuationState>();
   const pendingSkillInputRequests = new Map<string, PendingSkillInputState>();
+
+  async function recoverPendingSkillInputState(
+    inputRequestId: string,
+  ): Promise<PendingSkillInputState | null> {
+    const persisted = await findPersistedPendingSkillInputState({
+      inputRequestId,
+      chatSessionStore: options.chatSessionStore,
+    });
+    if (!persisted || persisted.status !== "pending") {
+      return null;
+    }
+
+    const requestedSkill = await resolveRequestedSkill({
+      message: "",
+      selectedSkillName: persisted.selectedSkillName,
+      discoverSkills: options.discoverSkills,
+    });
+    if (requestedSkill?.kind !== "matched") {
+      return null;
+    }
+
+    const workspaceResolution = await resolveChatWorkspace({
+      workspaceService: options.workspaceService,
+      workspaceId: persisted.workspaceId,
+    });
+    if (!workspaceResolution.ok) {
+      return null;
+    }
+
+    const recovered = toInMemoryPendingSkillInputState({
+      persisted,
+      selectedSkill: requestedSkill.skill,
+      ...(workspaceResolution.runContext
+        ? {
+            runContext: {
+              ...workspaceResolution.runContext,
+              sessionId: persisted.sessionId,
+            },
+          }
+        : {}),
+    });
+    pendingSkillInputRequests.set(inputRequestId, recovered);
+    return recovered;
+  }
+
+  async function markPersistedSkillInputCompleted(pending: PendingSkillInputState) {
+    await options.chatSessionStore?.appendActivityEvent?.(pending.sessionId, {
+      sessionId: pending.sessionId,
+      state: "completed",
+      message: "Skill input completed.",
+      createdAt: new Date(getNowMs(options.now)).toISOString(),
+      elapsedMs: 0,
+      selectedSkillName: pending.selectedSkill.manifest.name,
+      pendingSkillInput: {
+        ...pending.persisted,
+        status: "completed",
+      },
+    });
+  }
 
   async function sendMessageInternal(
     input: SendChatMessageInput,
@@ -284,21 +347,6 @@ export function createChatService(options: {
         });
       }
 
-      const goalRoute = await tryRouteGoalIntent({
-        route: detectGoalIntent(userMessage),
-        activeGoal,
-        chatSessionStore: options.chatSessionStore,
-        goalService: options.goalService,
-        originMessageId: userMessageId,
-        sessionId,
-        emitStatus,
-        signal: runtimeOptions.signal,
-      });
-
-      if (goalRoute) {
-        return goalRoute.result;
-      }
-
       const pendingContinuation = pendingContinuations.get(sessionId);
       const continuationToResume =
         pendingContinuation && isContinuationRequest(userMessage)
@@ -353,24 +401,52 @@ export function createChatService(options: {
             inputResolution,
             createdAt: new Date(getNowMs(options.now)).toISOString(),
           });
-          pendingSkillInputRequests.set(inputRequest.id, {
+          const persisted = createPendingSkillInputState({
+            inputRequest,
             sessionId,
             requestId,
             userMessage,
             userMessageId,
-            selectedSkill: requestedSkill.skill,
+            selectedSkillName: requestedSkill.skill.manifest.name,
             ...(chatRunContext?.workspaceId ? { workspaceId: chatRunContext.workspaceId } : {}),
             ...(workspaceSummary ? { workspaceSummary } : {}),
-            ...(chatRunContext ? { runContext: chatRunContext } : {}),
             partialValues: inputResolution.values,
           });
-          emitStatus.sendWaitingForInput(inputRequest, "Skill input required.");
+          pendingSkillInputRequests.set(inputRequest.id, {
+            ...toInMemoryPendingSkillInputState({
+              persisted,
+              selectedSkill: requestedSkill.skill,
+              ...(chatRunContext ? { runContext: chatRunContext } : {}),
+            }),
+          });
+          emitStatus.sendWaitingForInput(
+            inputRequest,
+            "Skill input required.",
+            persisted,
+          );
           return {
             ok: false,
             message: "Skill input required.",
           };
         }
         resolvedSkillInput = inputResolution;
+      }
+
+      if (!requestedSkill) {
+        const goalRoute = await tryRouteGoalIntent({
+          route: detectGoalIntent(userMessage),
+          activeGoal,
+          chatSessionStore: options.chatSessionStore,
+          goalService: options.goalService,
+          originMessageId: userMessageId,
+          sessionId,
+          emitStatus,
+          signal: runtimeOptions.signal,
+        });
+
+        if (goalRoute) {
+          return goalRoute.result;
+        }
       }
 
       if (!continuationToResume) {
@@ -888,7 +964,9 @@ export function createChatService(options: {
 
   return {
     async respondSkillInput(input, runtimeOptions = {}) {
-      const pending = pendingSkillInputRequests.get(input.inputRequestId);
+      const pending =
+        pendingSkillInputRequests.get(input.inputRequestId) ??
+        (await recoverPendingSkillInputState(input.inputRequestId));
       if (!pending) {
         return {
           ok: false,
@@ -907,6 +985,7 @@ export function createChatService(options: {
       });
       if (inputResolution.status !== "complete") {
         pendingSkillInputRequests.delete(input.inputRequestId);
+        await markPersistedSkillInputCompleted(pending);
         const inputRequest = createSkillUserInputRequest({
           createId,
           sessionId: pending.sessionId,
@@ -915,9 +994,25 @@ export function createChatService(options: {
           inputResolution,
           createdAt: new Date(getNowMs(options.now)).toISOString(),
         });
-        pendingSkillInputRequests.set(inputRequest.id, {
-          ...pending,
+        const persisted = createPendingSkillInputState({
+          inputRequest,
+          sessionId: pending.sessionId,
+          requestId: pending.requestId,
+          userMessage: pending.userMessage,
+          userMessageId: pending.userMessageId,
+          selectedSkillName: pending.selectedSkill.manifest.name,
+          ...(pending.workspaceId ? { workspaceId: pending.workspaceId } : {}),
+          ...(pending.workspaceSummary
+            ? { workspaceSummary: pending.workspaceSummary }
+            : {}),
           partialValues: inputResolution.values,
+        });
+        pendingSkillInputRequests.set(inputRequest.id, {
+          ...toInMemoryPendingSkillInputState({
+            persisted,
+            selectedSkill: pending.selectedSkill,
+            ...(pending.runContext ? { runContext: pending.runContext } : {}),
+          }),
         });
         const emitStatus = createChatStatusEmitter({
           sessionId: pending.sessionId,
@@ -939,7 +1034,11 @@ export function createChatService(options: {
             }
           },
         });
-        emitStatus.sendWaitingForInput(inputRequest, "Skill input required.");
+        emitStatus.sendWaitingForInput(
+          inputRequest,
+          "Skill input required.",
+          persisted,
+        );
         return {
           ok: false,
           message: "Skill input required.",
@@ -947,7 +1046,7 @@ export function createChatService(options: {
       }
 
       pendingSkillInputRequests.delete(input.inputRequestId);
-      return sendMessageInternal(
+      const result = await sendMessageInternal(
         {
           sessionId: pending.sessionId,
           requestId: pending.requestId,
@@ -970,6 +1069,10 @@ export function createChatService(options: {
             : {}),
         },
       );
+      if (result.ok) {
+        await markPersistedSkillInputCompleted(pending);
+      }
+      return result;
     },
     sendMessage: sendMessageInternal,
   };
@@ -1030,12 +1133,17 @@ function createChatStatusEmitter(options: {
         // Renderer observers are best-effort.
       }
     },
-    sendWaitingForInput(inputRequest: SkillUserInputRequest, message: string) {
+    sendWaitingForInput(
+      inputRequest: SkillUserInputRequest,
+      message: string,
+      pendingSkillInput: SkillPendingInputState,
+    ) {
       this.send({
         state: "waiting_for_input",
         message,
         selectedSkillName: inputRequest.skillName,
         inputRequest,
+        pendingSkillInput,
       });
       const nowMs = getNowMs(options.now);
       try {
@@ -2059,6 +2167,79 @@ function createSkillUserInputRequest(options: {
     fields,
     createdAt: options.createdAt,
   };
+}
+
+function createPendingSkillInputState(options: {
+  inputRequest: SkillUserInputRequest;
+  sessionId: string;
+  requestId: string;
+  userMessage: string;
+  userMessageId: string | null;
+  selectedSkillName: string;
+  workspaceId?: string;
+  workspaceSummary?: ChatWorkspaceSummary;
+  partialValues: Record<string, SkillInputValue>;
+}): SkillPendingInputState {
+  return {
+    inputRequestId: options.inputRequest.id,
+    status: "pending",
+    sessionId: options.sessionId,
+    requestId: options.requestId,
+    userMessage: options.userMessage,
+    ...(options.userMessageId ? { userMessageId: options.userMessageId } : {}),
+    selectedSkillName: options.selectedSkillName,
+    ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
+    ...(options.workspaceSummary ? { workspaceSummary: options.workspaceSummary } : {}),
+    partialValues: options.partialValues,
+  };
+}
+
+function toInMemoryPendingSkillInputState(options: {
+  persisted: SkillPendingInputState;
+  selectedSkill: SkillRecord;
+  runContext?: AgentRunContext;
+}): PendingSkillInputState {
+  return {
+    persisted: options.persisted,
+    sessionId: options.persisted.sessionId,
+    requestId: options.persisted.requestId,
+    userMessage: options.persisted.userMessage,
+    userMessageId: options.persisted.userMessageId ?? null,
+    selectedSkill: options.selectedSkill,
+    ...(options.persisted.workspaceId
+      ? { workspaceId: options.persisted.workspaceId }
+      : {}),
+    ...(options.persisted.workspaceSummary
+      ? { workspaceSummary: options.persisted.workspaceSummary }
+      : {}),
+    ...(options.runContext ? { runContext: options.runContext } : {}),
+    partialValues: options.persisted.partialValues,
+  };
+}
+
+async function findPersistedPendingSkillInputState(options: {
+  inputRequestId: string;
+  chatSessionStore:
+    | (Partial<Pick<ChatSessionStore, "get" | "list">>)
+    | undefined;
+}): Promise<SkillPendingInputState | null> {
+  if (!options.chatSessionStore?.list || !options.chatSessionStore.get) {
+    return null;
+  }
+
+  let latest: SkillPendingInputState | null = null;
+  const sessions: ChatSessionListItem[] = await options.chatSessionStore.list();
+  for (const session of sessions) {
+    const record: ChatSessionRecord | null =
+      await options.chatSessionStore.get(session.id);
+    for (const event of record?.activity?.statusEvents ?? []) {
+      if (event.pendingSkillInput?.inputRequestId === options.inputRequestId) {
+        latest = event.pendingSkillInput;
+      }
+    }
+  }
+
+  return latest?.status === "pending" ? latest : null;
 }
 
 function buildChatSystemPrompt(currentDate?: string): string {

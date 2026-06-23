@@ -128,6 +128,19 @@ export type SkillInputResponse = {
   values: Record<string, string | number | boolean>;
 };
 
+export type SkillPendingInputState = {
+  inputRequestId: string;
+  status: "pending" | "completed";
+  sessionId: string;
+  requestId: string;
+  userMessage: string;
+  userMessageId?: string;
+  selectedSkillName: string;
+  workspaceId?: string;
+  workspaceSummary?: ChatWorkspaceSummary;
+  partialValues: Record<string, string | number | boolean>;
+};
+
 export type SkillInputResponseResult =
   | {
       ok: true;
@@ -225,6 +238,7 @@ export type ChatTaskStatusEvent = {
   toolCallsExecuted?: number;
   maxTurns?: number;
   inputRequest?: SkillUserInputRequest;
+  pendingSkillInput?: SkillPendingInputState;
   ok?: boolean;
 };
 
