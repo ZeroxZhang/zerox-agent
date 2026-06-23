@@ -68,6 +68,8 @@ export function createOpenAICompatibleProvider(
       for await (const ev of client.streamComplete(chatReq)) {
         if (ev.type === "content_delta") {
           yield { type: "text_delta", text: ev.text };
+        } else if (ev.type === "reasoning_delta") {
+          yield { type: "thinking_delta", text: ev.text };
         } else if (ev.type === "tool_call_delta") {
           yield {
             type: "tool_call_delta",

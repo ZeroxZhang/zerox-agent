@@ -58,6 +58,8 @@ export function createProviderChatClient(
       for await (const ev of provider.stream(req)) {
         if (ev.type === "text_delta") {
           yield { type: "content_delta", text: ev.text };
+        } else if (ev.type === "thinking_delta") {
+          yield { type: "reasoning_delta", text: ev.text };
         } else if (ev.type === "tool_call_delta") {
           yield {
             type: "tool_call_delta",

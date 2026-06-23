@@ -4,7 +4,7 @@ import type { AgentToolExecutor } from "./agentToolExecutor";
 import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
 import { createDynamicToolRegistry } from "./dynamicToolRegistry";
 import type { AppendChatMessageInput } from "./chatSessionStore";
-import type { ChatClient, ChatMessage, ChatCompletionResponse } from "./openAiCompatibleClient";
+import type { ChatClient, ChatMessage, ChatCompletionResponse, StreamingChatClient } from "./openAiCompatibleClient";
 import type { RunScheduledTaskResult } from "../shared/agentRuns";
 import type { MemoryInput, MemoryRecord, MemorySearchResult } from "../shared/memory";
 import type { ScheduledTask, ScheduledTaskInput } from "../shared/scheduledTasks";
@@ -1510,6 +1510,94 @@ describe("chat service", () => {
         }),
       ]),
     );
+  });
+
+  it("emits streamed answer, thinking, and tool preview events without duplicating stored replies", async () => {
+    const streamEvents: ChatStreamEvent[] = [];
+    const chatMessages: AppendChatMessageInput[] = [];
+    let streamCalls = 0;
+    const chatClient: ChatClient & StreamingChatClient = {
+      async complete() {
+        throw new Error("non-streaming complete should not be used");
+      },
+      async *streamComplete() {
+        streamCalls += 1;
+        if (streamCalls === 1) {
+          yield { type: "content_delta", text: "I will inspect. " };
+          yield { type: "reasoning_delta", text: "Checking available tools." };
+          yield {
+            type: "tool_call_delta",
+            id: "preview_call_1",
+            name: "file_list",
+            arguments: '{"path":"/tmp"}',
+          };
+          yield { type: "done", finishReason: "tool_calls" };
+          return;
+        }
+        yield { type: "content_delta", text: "Final reply." };
+        yield { type: "done", finishReason: "stop" };
+      },
+    };
+    const service = createChatService({
+      chatClient,
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore(chatMessages),
+      toolExecutor: createToolExecutor(),
+      createId: () => "chat_stream_model",
+      now: () => new Date("2026-06-23T08:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage(
+      {
+        requestId: "request_model_stream_1",
+        message: "stream model deltas",
+      },
+      {
+        onStreamEvent(event) {
+          streamEvents.push(event);
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      sessionId: "persisted_session",
+      reply: expect.stringContaining("Final reply."),
+    });
+    expect(streamEvents).toEqual(
+      expect.arrayContaining([
+        {
+          type: "answer_delta",
+          text: "I will inspect. ",
+          sessionId: "persisted_session",
+          requestId: "request_model_stream_1",
+          createdAt: "2026-06-23T08:00:00.000Z",
+        },
+        {
+          type: "thinking_delta",
+          text: "Checking available tools.",
+          sessionId: "persisted_session",
+          requestId: "request_model_stream_1",
+          createdAt: "2026-06-23T08:00:00.000Z",
+        },
+        {
+          type: "tool_call_preview",
+          toolCallId: "preview_call_1",
+          toolName: "file_list",
+          argumentsDelta: '{"path":"/tmp"}',
+          sessionId: "persisted_session",
+          requestId: "request_model_stream_1",
+          createdAt: "2026-06-23T08:00:00.000Z",
+        },
+      ]),
+    );
+    expect(chatMessages.filter((message) => message.role === "assistant")).toEqual([
+      expect.objectContaining({
+        role: "assistant",
+        content: expect.stringContaining("Final reply."),
+      }),
+    ]);
   });
 
   it("loads and enforces an explicitly selected agent skill in chat", async () => {

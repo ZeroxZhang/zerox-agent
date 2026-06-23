@@ -5,7 +5,7 @@ import { createProvider } from "./providerFactory";
 import { createProviderChatClient, createSettingsBackedChatClient } from "./providerChatClient";
 import { createOpenAICompatibleProvider } from "./openAICompatibleProvider";
 import type { ChatMessage, ChatCompletionRequest } from "../openAiCompatibleClient";
-import type { CompleteRequest, NormalizedMessage } from "./provider";
+import type { CompleteRequest, LLMProvider, NormalizedMessage, StreamEvent } from "./provider";
 import type { PublicModelSettings } from "../../shared/modelSettings";
 
 describe("normalize round-trip", () => {
@@ -292,7 +292,53 @@ describe("ProviderChatClient adapter", () => {
     const res = await client.complete({ baseUrl: "", apiKey: "", model: "m", temperature: 0, maxTokens: 1, messages: [] });
     expect(res.content).toBe("fallback");
   });
+
+  it("maps provider thinking deltas to low-level reasoning deltas", async () => {
+    const provider = scriptedProvider([
+      { type: "thinking_delta", text: "check tools" },
+      { type: "text_delta", text: "answer" },
+      { type: "done", response: { content: "answer", toolCalls: [], finishReason: "stop", cacheReadTokens: 0, cacheWriteTokens: 0 } },
+    ]);
+    const client = createProviderChatClient({ provider });
+    const events = [];
+
+    for await (const event of client.streamComplete({
+      baseUrl: "",
+      apiKey: "k",
+      model: "m",
+      temperature: 0,
+      maxTokens: 10,
+      messages: [{ role: "user", content: "hi" }],
+    })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: "reasoning_delta", text: "check tools" },
+      { type: "content_delta", text: "answer" },
+      { type: "done", finishReason: "stop" },
+    ]);
+  });
 });
+
+function scriptedProvider(events: StreamEvent[]): LLMProvider {
+  return {
+    id: "openai-compatible",
+    capabilities: { toolUse: true, thinking: true, vision: false, promptCache: false, streamingToolCalls: true },
+    async complete() {
+      return { content: "unused", toolCalls: [], finishReason: "stop", cacheReadTokens: 0, cacheWriteTokens: 0 };
+    },
+    async *stream() {
+      for (const event of events) yield event;
+    },
+    async countTokens() {
+      return 0;
+    },
+    buildCachePrefix(messages) {
+      return { system: "", tools: [], messages, watermark: messages.length };
+    },
+  };
+}
 
 describe("OpenAICompatibleProvider", () => {
   it("reports zero cache tokens (no OpenAI cache reporting)", async () => {
@@ -307,6 +353,40 @@ describe("OpenAICompatibleProvider", () => {
     expect(res.content).toBe("hi");
     expect(res.cacheReadTokens).toBe(0);
     expect(res.cacheWriteTokens).toBe(0);
+  });
+
+  it("maps low-level streaming reasoning deltas to provider thinking deltas", async () => {
+    const encoder = new TextEncoder();
+    const provider = createOpenAICompatibleProvider({
+      fetch: (async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "stream thought" } }] })}\n\n`));
+              controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+              controller.close();
+            },
+          }),
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        )) as never,
+    });
+    const events = [];
+
+    for await (const event of provider.stream({
+      model: "gpt-4",
+      apiKey: "k",
+      baseUrl: "https://api.openai.com/v1",
+      temperature: 0,
+      maxTokens: 10,
+      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+    })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: "thinking_delta", text: "stream thought" },
+      { type: "done" },
+    ]);
   });
 
   it("countTokens uses the heuristic", async () => {

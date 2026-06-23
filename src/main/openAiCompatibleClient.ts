@@ -79,6 +79,7 @@ export type EmbeddingClient = {
 
 export type StreamEvent =
   | { type: "content_delta"; text: string }
+  | { type: "reasoning_delta"; text: string }
   | { type: "tool_call_delta"; id: string; name: string; arguments: string }
   | { type: "done"; finishReason: string };
 
@@ -230,6 +231,9 @@ export function createOpenAiCompatibleClient(options?: {
                 choices?: Array<{
                   delta?: {
                     content?: string | null;
+                    reasoning_content?: unknown;
+                    reasoning?: unknown;
+                    thinking?: unknown;
                     tool_calls?: Array<{
                       index?: number;
                       id?: string;
@@ -242,6 +246,11 @@ export function createOpenAiCompatibleClient(options?: {
               };
               const delta = chunk.choices?.[0]?.delta;
               const finishReason = chunk.choices?.[0]?.finish_reason;
+              const reasoningDelta = normalizeReasoningDelta(delta);
+
+              if (reasoningDelta) {
+                yield { type: "reasoning_delta", text: reasoningDelta };
+              }
 
               if (delta?.content) {
                 yield { type: "content_delta", text: delta.content };
@@ -284,6 +293,18 @@ function normalizeReasoningContent(message: {
     readReasoningValue(message?.thinking);
 
   return value?.trim() || undefined;
+}
+
+function normalizeReasoningDelta(delta: {
+  reasoning_content?: unknown;
+  reasoning?: unknown;
+  thinking?: unknown;
+} | undefined): string | undefined {
+  return (
+    readReasoningValue(delta?.reasoning_content) ??
+    readReasoningValue(delta?.reasoning) ??
+    readReasoningValue(delta?.thinking)
+  );
 }
 
 function readReasoningValue(value: unknown): string | undefined {

@@ -5,6 +5,8 @@ import type {
   ChatClient,
   ChatCompletionRequest,
   ChatCompletionResponse,
+  StreamingChatClient,
+  StreamEvent,
   ToolDefinition,
 } from "./openAiCompatibleClient";
 import type {
@@ -1152,6 +1154,113 @@ describe("agent loop", () => {
         args: { query: "agent eval" },
       },
     ]);
+  });
+
+  it("streams model deltas while aggregating the final tool call before authorization", async () => {
+    const modelEvents: StreamEvent[] = [];
+    const previewSnapshots: Array<{ authorized: number; executed: number }> = [];
+    const authorizationRequests: ToolCallRequest[] = [];
+    const executedTools: string[] = [];
+    let completeCalls = 0;
+    let streamCalls = 0;
+    const chatClient: ChatClient & StreamingChatClient = {
+      async complete() {
+        completeCalls += 1;
+        throw new Error("non-streaming complete should not be used");
+      },
+      async *streamComplete() {
+        streamCalls += 1;
+        if (streamCalls === 1) {
+          yield { type: "content_delta", text: "I will inspect. " };
+          yield { type: "reasoning_delta", text: "Need a directory listing." };
+          yield {
+            type: "tool_call_delta",
+            id: "stream_call_1",
+            name: "file_list",
+            arguments: '{"path"',
+          };
+          yield {
+            type: "tool_call_delta",
+            id: "stream_call_1",
+            name: "",
+            arguments: ':"/denied"}',
+          };
+          yield { type: "done", finishReason: "tool_calls" };
+          return;
+        }
+        yield { type: "content_delta", text: "I cannot access that path." };
+        yield { type: "done", finishReason: "stop" };
+      },
+    };
+    const toolAuthorizationService: ToolAuthorizationService = {
+      async authorize(_taskId, request) {
+        authorizationRequests.push(request);
+        return {
+          ok: true,
+          decision: { allowed: false, reason: "permission denied" },
+          auditEvent: {
+            id: "audit_stream_1",
+            taskId: "task_stream",
+            request,
+            decision: { allowed: false, reason: "permission denied" },
+            createdAt: "2026-06-23T00:00:00.000Z",
+          },
+        };
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "list /denied" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(() => {
+          executedTools.push("file_list");
+        }),
+        toolAuthorizationService,
+        taskId: "task_stream",
+        tools: testTools,
+        onModelStreamEvent(event) {
+          modelEvents.push(event);
+          if (event.type === "tool_call_delta") {
+            previewSnapshots.push({
+              authorized: authorizationRequests.length,
+              executed: executedTools.length,
+            });
+          }
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: "succeeded",
+      summary: "I cannot access that path.",
+      toolCallsExecuted: 0,
+    });
+    expect(completeCalls).toBe(0);
+    expect(streamCalls).toBe(2);
+    expect(modelEvents).toEqual(
+      expect.arrayContaining([
+        { type: "content_delta", text: "I will inspect. " },
+        { type: "reasoning_delta", text: "Need a directory listing." },
+        expect.objectContaining({
+          type: "tool_call_delta",
+          id: "stream_call_1",
+          name: "file_list",
+        }),
+      ]),
+    );
+    expect(previewSnapshots).toEqual([
+      { authorized: 0, executed: 0 },
+      { authorized: 0, executed: 0 },
+    ]);
+    expect(authorizationRequests).toEqual([
+      {
+        toolName: "file_list",
+        args: { path: "/denied" },
+      },
+    ]);
+    expect(executedTools).toEqual([]);
   });
 });
 

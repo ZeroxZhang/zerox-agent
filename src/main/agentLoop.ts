@@ -6,8 +6,11 @@ import type { AgentRunContext } from "../shared/agentWorkspace";
 import type { SystemReminderContext, SystemReminderRegistry } from "../shared/systemReminder";
 import type {
   ChatClient,
+  ChatCompletionRequest,
   ChatCompletionResponse,
   ChatMessage,
+  StreamEvent,
+  StreamingChatClient,
   ToolCall,
 } from "./openAiCompatibleClient";
 import {
@@ -72,6 +75,7 @@ export type AgentLoopOptions = {
   onTurn?: (turn: number, phase: string) => void;
   onReasoning?: (reasoningContent: string, turn: number) => void;
   onModelResponse?: (response: ChatCompletionResponse, turn: number) => void;
+  onModelStreamEvent?: (event: StreamEvent, turn: number) => void;
   onContextCompacted?: (event: AgentLoopContextCompaction) => void;
   onModelRetry?: (event: ModelRetryEvent) => void;
   onStrategyGuard?: (event: AgentLoopStrategyGuardEvent) => void;
@@ -162,6 +166,7 @@ export async function runAgentLoop(
     onTurn,
     onReasoning,
     onModelResponse,
+    onModelStreamEvent,
     onContextCompacted,
     onModelRetry,
     onStrategyGuard,
@@ -293,16 +298,11 @@ export async function runAgentLoop(
     await compactMessagesBeforeModelRequest();
 
     try {
-      const response = await completeWithModelRetry(
-        chatClient,
-        {
-          ...modelProfile,
-          messages,
-          ...(signal ? { signal } : {}),
-        },
-        modelRetry,
-        onModelRetry,
-      );
+      const response = await completeModelRequest({
+        ...modelProfile,
+        messages,
+        ...(signal ? { signal } : {}),
+      }, turns + 1);
 
       if (response.content) {
         summary = `${options.summaryPrefix}\n\n${response.content}`;
@@ -352,6 +352,24 @@ export async function runAgentLoop(
     return null;
   }
 
+  async function completeModelRequest(
+    request: ChatCompletionRequest,
+    turn: number,
+  ): Promise<ChatCompletionResponse> {
+    if (isStreamingChatClient(chatClient)) {
+      return aggregateStreamingCompletion(chatClient, request, (event) => {
+        onModelStreamEvent?.(event, turn);
+      });
+    }
+
+    return completeWithModelRetry(
+      chatClient,
+      request,
+      modelRetry,
+      onModelRetry,
+    );
+  }
+
   try {
     for (; turns < maxTurns; turns += 1) {
       if (signal?.aborted) {
@@ -372,18 +390,13 @@ export async function runAgentLoop(
       });
       await compactMessagesBeforeModelRequest();
 
-      const response = await completeWithModelRetry(
-        chatClient,
-        {
-          ...modelProfile,
-          messages,
-          tools: toolDefinitions,
-          tool_choice: "auto",
-          ...(signal ? { signal } : {}),
-        },
-        modelRetry,
-        onModelRetry,
-      );
+      const response = await completeModelRequest({
+        ...modelProfile,
+        messages,
+        tools: toolDefinitions,
+        tool_choice: "auto",
+        ...(signal ? { signal } : {}),
+      }, turns + 1);
       onModelResponse?.(response, turns + 1);
       if (response.reasoningContent) {
         onReasoning?.(response.reasoningContent, turns + 1);
@@ -745,6 +758,80 @@ export async function runAgentLoop(
     messages,
     toolCallsExecuted,
     ...(continuation ? { continuation } : {}),
+  };
+}
+
+function isStreamingChatClient(
+  client: ChatClient,
+): client is ChatClient & StreamingChatClient {
+  return typeof (client as { streamComplete?: unknown }).streamComplete === "function";
+}
+
+function throwIfCanceled(signal: AbortSignal | undefined) {
+  if (signal?.aborted) {
+    throw new Error("Agent loop canceled.");
+  }
+}
+
+async function aggregateStreamingCompletion(
+  chatClient: ChatClient & StreamingChatClient,
+  request: ChatCompletionRequest,
+  onStreamEvent?: (event: StreamEvent) => void,
+): Promise<ChatCompletionResponse> {
+  let content = "";
+  let reasoningContent = "";
+  let finishReason = "stop";
+  let activeToolCallId: string | null = null;
+  const toolCalls = new Map<string, { id: string; name: string; arguments: string }>();
+
+  for await (const event of chatClient.streamComplete(request)) {
+    throwIfCanceled(request.signal);
+    onStreamEvent?.(event);
+
+    if (event.type === "content_delta") {
+      content += event.text;
+      continue;
+    }
+
+    if (event.type === "reasoning_delta") {
+      reasoningContent += event.text;
+      continue;
+    }
+
+    if (event.type === "tool_call_delta") {
+      const id: string =
+        event.id ||
+        activeToolCallId ||
+        `tool_call_${toolCalls.size + 1}`;
+      activeToolCallId = id;
+      const existing = toolCalls.get(id) ?? { id, name: "", arguments: "" };
+      if (event.name) {
+        existing.name = event.name;
+      }
+      if (event.arguments) {
+        existing.arguments += event.arguments;
+      }
+      toolCalls.set(id, existing);
+      continue;
+    }
+
+    finishReason = event.finishReason || finishReason;
+  }
+
+  throwIfCanceled(request.signal);
+
+  return {
+    content: content || null,
+    toolCalls: [...toolCalls.values()].map((toolCall) => ({
+      id: toolCall.id,
+      type: "function" as const,
+      function: {
+        name: toolCall.name,
+        arguments: toolCall.arguments,
+      },
+    })),
+    finishReason,
+    ...(reasoningContent ? { reasoningContent } : {}),
   };
 }
 

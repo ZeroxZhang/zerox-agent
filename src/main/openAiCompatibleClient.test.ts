@@ -170,6 +170,42 @@ describe("OpenAI-compatible chat client", () => {
     });
   });
 
+  it("streams provider reasoning deltas from SSE chunks", async () => {
+    const encoder = new TextEncoder();
+    const client = createOpenAiCompatibleClient({
+      fetch: async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "plan " } }] })}\n\n`));
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: "answer" } }] })}\n\n`));
+              controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+              controller.close();
+            },
+          }),
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        ),
+    });
+
+    const events = [];
+    for await (const event of client.streamComplete({
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "secret-key",
+      model: "agent-model",
+      temperature: 0.2,
+      maxTokens: 8192,
+      messages: [{ role: "user", content: "Run" }],
+    })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: "reasoning_delta", text: "plan " },
+      { type: "content_delta", text: "answer" },
+      { type: "done", finishReason: "stop" },
+    ]);
+  });
+
   it("returns provider token usage when present", async () => {
     const client = createOpenAiCompatibleClient({
       fetch: async () =>

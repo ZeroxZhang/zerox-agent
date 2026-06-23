@@ -67,7 +67,11 @@ export async function processStream(
   // Prefer the provider's aggregated `done.response` when present; otherwise
   // synthesize from the accumulated deltas.
   if (doneResponse) {
-    return { response: doneResponse, textDeltas, toolCallDeltas, thinkingDeltas };
+    const response =
+      thinking && !doneResponse.reasoningContent
+        ? { ...doneResponse, reasoningContent: thinking }
+        : doneResponse;
+    return { response, textDeltas, toolCallDeltas, thinkingDeltas };
   }
   const toolCalls: ToolCall[] = [...toolCallArgs.values()].map((tc) => ({
     id: tc.id,

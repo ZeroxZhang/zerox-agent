@@ -3943,3 +3943,31 @@
   - `npm test -- src/shared/chatStream.test.ts src/preload/index.test.ts src/main/chatService.test.ts src/main/chatSessionStore.test.ts` -> 4 files / 57 tests passed.
   - `npm run harness:check` -> passed.
   - `git diff --check` -> passed.
+
+## 2026-06-23 - Worker T3 Task 3 Provider And Agent Loop Streaming Aggregation
+
+- Summary:
+  - Preserved provider thinking/reasoning deltas through low-level streaming adapters and stream aggregation.
+  - Added agent-loop streaming aggregation for answer, reasoning, and tool-call preview deltas before existing full tool-call authorization/execution.
+  - Mapped model stream deltas to chat `answer_delta`, `thinking_delta`, and `tool_call_preview` events without writing duplicate assistant messages.
+- Changed files:
+  - `src/main/providers/providerChatClient.ts`
+  - `src/main/providers/streamProcessor.ts`
+  - `src/main/providers/p8.test.ts`
+  - `src/main/providers/providers.test.ts`
+  - `src/main/providers/openAiCompatibleProvider.ts`
+  - `src/main/openAiCompatibleClient.ts`
+  - `src/main/openAiCompatibleClient.test.ts`
+  - `src/main/agentLoop.ts`
+  - `src/main/agentLoop.test.ts`
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/main/providers/p8.test.ts src/main/providers/providers.test.ts src/main/openAiCompatibleClient.test.ts src/main/agentLoop.test.ts src/main/chatService.test.ts` -> failed as expected: thinking deltas were dropped, streamed reasoning was not parsed, and agent loop used non-streaming `complete`.
+  - `npm test -- src/main/providers/providers.test.ts src/main/openAiCompatibleClient.test.ts` -> failed as expected for low-level/provider-wrapper reasoning delta mapping.
+- GREEN / verification evidence:
+  - `npm test -- src/main/providers/p8.test.ts src/main/providers/providers.test.ts src/main/openAiCompatibleClient.test.ts src/main/agentLoop.test.ts src/main/chatService.test.ts` -> 5 files / 94 tests passed.
+  - `npx tsc -p tsconfig.electron.json --noEmit --pretty false` -> passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.

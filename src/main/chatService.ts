@@ -23,6 +23,7 @@ import type {
   ChatClient,
   ChatCompletionResponse,
   ChatMessage,
+  StreamEvent as ModelStreamEvent,
 } from "./openAiCompatibleClient";
 import type { ScheduledTaskStore } from "./taskStore";
 import type {
@@ -557,6 +558,9 @@ export function createChatService(options: {
                   toolCallsExecuted: observedToolCallsExecuted,
                 });
               },
+              onModelStreamEvent(event) {
+                emitModelStreamEvent(emitStatus, event);
+              },
               onToolCall(toolName, args, event) {
                 void evidence.append("tool_call", {
                   toolName,
@@ -862,7 +866,54 @@ function createChatStatusEmitter(options: {
         // Renderer observers are best-effort.
       }
     },
+    sendStreamEvent(event: ChatModelStreamEventInput) {
+      const nowMs = getNowMs(options.now);
+      try {
+        options.onStreamEvent?.({
+          ...event,
+          sessionId,
+          requestId: options.requestId,
+          createdAt: new Date(nowMs).toISOString(),
+        });
+      } catch {
+        // Renderer observers are best-effort.
+      }
+    },
   };
+}
+
+type ChatModelStreamEventInput =
+  | { type: "answer_delta"; text: string }
+  | { type: "thinking_delta"; text: string }
+  | {
+      type: "tool_call_preview";
+      toolCallId: string;
+      toolName?: string;
+      argumentsDelta?: string;
+    };
+
+function emitModelStreamEvent(
+  emitter: ReturnType<typeof createChatStatusEmitter>,
+  event: ModelStreamEvent,
+) {
+  if (event.type === "content_delta") {
+    emitter.sendStreamEvent({ type: "answer_delta", text: event.text });
+    return;
+  }
+
+  if (event.type === "reasoning_delta") {
+    emitter.sendStreamEvent({ type: "thinking_delta", text: event.text });
+    return;
+  }
+
+  if (event.type === "tool_call_delta") {
+    emitter.sendStreamEvent({
+      type: "tool_call_preview",
+      toolCallId: event.id,
+      ...(event.name ? { toolName: event.name } : {}),
+      ...(event.arguments ? { argumentsDelta: event.arguments } : {}),
+    });
+  }
 }
 
 function getNowMs(now: (() => Date) | undefined): number {
