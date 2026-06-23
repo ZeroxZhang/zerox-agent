@@ -288,6 +288,9 @@ export function createChatService(options: {
             // Observability writes must not fail the user-facing chat turn.
           }
         },
+        async onRequiredPersistEvent(event) {
+          await persistRequiredChatActivityEvent(options.chatSessionStore, event);
+        },
       });
       const workspaceResolution = internalOptions.preResolvedRunContext
         ? { ok: true as const, runContext: internalOptions.preResolvedRunContext }
@@ -412,6 +415,18 @@ export function createChatService(options: {
             ...(workspaceSummary ? { workspaceSummary } : {}),
             partialValues: inputResolution.values,
           });
+          try {
+            await emitStatus.sendWaitingForInput(
+              inputRequest,
+              "Skill input required.",
+              persisted,
+            );
+          } catch {
+            return {
+              ok: false,
+              message: "Failed to persist skill input request.",
+            };
+          }
           pendingSkillInputRequests.set(inputRequest.id, {
             ...toInMemoryPendingSkillInputState({
               persisted,
@@ -419,11 +434,6 @@ export function createChatService(options: {
               ...(chatRunContext ? { runContext: chatRunContext } : {}),
             }),
           });
-          emitStatus.sendWaitingForInput(
-            inputRequest,
-            "Skill input required.",
-            persisted,
-          );
           return {
             ok: false,
             message: "Skill input required.",
@@ -985,7 +995,14 @@ export function createChatService(options: {
       });
       if (inputResolution.status !== "complete") {
         pendingSkillInputRequests.delete(input.inputRequestId);
-        await markPersistedSkillInputCompleted(pending);
+        try {
+          await markPersistedSkillInputCompleted(pending);
+        } catch {
+          return {
+            ok: false,
+            message: "Failed to persist skill input completion.",
+          };
+        }
         const inputRequest = createSkillUserInputRequest({
           createId,
           sessionId: pending.sessionId,
@@ -1007,13 +1024,6 @@ export function createChatService(options: {
             : {}),
           partialValues: inputResolution.values,
         });
-        pendingSkillInputRequests.set(inputRequest.id, {
-          ...toInMemoryPendingSkillInputState({
-            persisted,
-            selectedSkill: pending.selectedSkill,
-            ...(pending.runContext ? { runContext: pending.runContext } : {}),
-          }),
-        });
         const emitStatus = createChatStatusEmitter({
           sessionId: pending.sessionId,
           requestId: pending.requestId,
@@ -1033,12 +1043,29 @@ export function createChatService(options: {
               // Observability writes must not fail the response.
             }
           },
+          async onRequiredPersistEvent(event) {
+            await persistRequiredChatActivityEvent(options.chatSessionStore, event);
+          },
         });
-        emitStatus.sendWaitingForInput(
-          inputRequest,
-          "Skill input required.",
-          persisted,
-        );
+        try {
+          await emitStatus.sendWaitingForInput(
+            inputRequest,
+            "Skill input required.",
+            persisted,
+          );
+        } catch {
+          return {
+            ok: false,
+            message: "Failed to persist skill input request.",
+          };
+        }
+        pendingSkillInputRequests.set(inputRequest.id, {
+          ...toInMemoryPendingSkillInputState({
+            persisted,
+            selectedSkill: pending.selectedSkill,
+            ...(pending.runContext ? { runContext: pending.runContext } : {}),
+          }),
+        });
         return {
           ok: false,
           message: "Skill input required.",
@@ -1070,7 +1097,14 @@ export function createChatService(options: {
         },
       );
       if (result.ok) {
-        await markPersistedSkillInputCompleted(pending);
+        try {
+          await markPersistedSkillInputCompleted(pending);
+        } catch {
+          return {
+            ok: false,
+            message: "Failed to persist skill input completion.",
+          };
+        }
       }
       return result;
     },
@@ -1096,55 +1130,75 @@ function createChatStatusEmitter(options: {
   onStatusEvent?: (event: ChatTaskStatusEvent) => void;
   onStreamEvent?: (event: ChatStreamEvent) => void;
   onPersistEvent?: (event: ChatTaskStatusEvent) => void;
+  onRequiredPersistEvent?: (event: ChatTaskStatusEvent) => Promise<void>;
 }) {
   let sessionId = options.sessionId;
+
+  function createStatusEvent(
+    event: Omit<ChatTaskStatusEvent, "sessionId" | "createdAt" | "elapsedMs">,
+  ): ChatTaskStatusEvent {
+    const nowMs = getNowMs(options.now);
+    return {
+      ...event,
+      sessionId,
+      createdAt: new Date(nowMs).toISOString(),
+      elapsedMs: Math.max(0, nowMs - options.startedAtMs),
+    };
+  }
+
+  function publishStatusEvent(
+    statusEvent: ChatTaskStatusEvent,
+    optionsOverride: { persist: boolean },
+  ) {
+    if (optionsOverride.persist) {
+      try {
+        options.onPersistEvent?.(statusEvent);
+      } catch {
+        // Persistence observers are best-effort.
+      }
+    }
+    try {
+      options.onStatusEvent?.(statusEvent);
+    } catch {
+      // Renderer observers are best-effort.
+    }
+    try {
+      options.onStreamEvent?.({
+        type: "status",
+        sessionId: statusEvent.sessionId,
+        requestId: options.requestId,
+        status: statusEvent,
+        createdAt: statusEvent.createdAt,
+      });
+    } catch {
+      // Renderer observers are best-effort.
+    }
+  }
 
   return {
     setSessionId(nextSessionId: string) {
       sessionId = nextSessionId;
     },
     send(event: Omit<ChatTaskStatusEvent, "sessionId" | "createdAt" | "elapsedMs">) {
-      const nowMs = getNowMs(options.now);
-      const statusEvent = {
-        ...event,
-        sessionId,
-        createdAt: new Date(nowMs).toISOString(),
-        elapsedMs: Math.max(0, nowMs - options.startedAtMs),
-      };
-      try {
-        options.onPersistEvent?.(statusEvent);
-      } catch {
-        // Persistence observers are best-effort.
-      }
-      try {
-        options.onStatusEvent?.(statusEvent);
-      } catch {
-        // Renderer observers are best-effort.
-      }
-      try {
-        options.onStreamEvent?.({
-          type: "status",
-          sessionId: statusEvent.sessionId,
-          requestId: options.requestId,
-          status: statusEvent,
-          createdAt: statusEvent.createdAt,
-        });
-      } catch {
-        // Renderer observers are best-effort.
-      }
+      publishStatusEvent(createStatusEvent(event), { persist: true });
     },
-    sendWaitingForInput(
+    async sendWaitingForInput(
       inputRequest: SkillUserInputRequest,
       message: string,
       pendingSkillInput: SkillPendingInputState,
     ) {
-      this.send({
+      const statusEvent = createStatusEvent({
         state: "waiting_for_input",
         message,
         selectedSkillName: inputRequest.skillName,
         inputRequest,
         pendingSkillInput,
       });
+      if (!options.onRequiredPersistEvent) {
+        throw new Error("Chat activity persistence is unavailable.");
+      }
+      await options.onRequiredPersistEvent(statusEvent);
+      publishStatusEvent(statusEvent, { persist: false });
       const nowMs = getNowMs(options.now);
       try {
         options.onStreamEvent?.({
@@ -2240,6 +2294,19 @@ async function findPersistedPendingSkillInputState(options: {
   }
 
   return latest?.status === "pending" ? latest : null;
+}
+
+async function persistRequiredChatActivityEvent(
+  chatSessionStore:
+    | (Partial<Pick<ChatSessionStore, "appendActivityEvent">>)
+    | undefined,
+  event: ChatTaskStatusEvent,
+): Promise<void> {
+  if (!chatSessionStore?.appendActivityEvent) {
+    throw new Error("Chat session activity persistence is unavailable.");
+  }
+
+  await chatSessionStore.appendActivityEvent(event.sessionId, event);
 }
 
 function buildChatSystemPrompt(currentDate?: string): string {

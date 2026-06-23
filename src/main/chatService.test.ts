@@ -1957,6 +1957,169 @@ describe("chat service", () => {
     );
   });
 
+  it("does not return a guided skill wait before the pending input event is persisted", async () => {
+    const chatMessages: AppendChatMessageInput[] = [];
+    const baseStore = createChatSessionStore(chatMessages);
+    const persistGate = createDeferred<void>();
+    let pendingPersistStarted = false;
+    let sendSettled = false;
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: {
+        ...baseStore,
+        async appendActivityEvent(sessionId, event) {
+          if (event.pendingSkillInput?.status === "pending") {
+            pendingPersistStarted = true;
+            await persistGate.promise;
+          }
+          return baseStore.appendActivityEvent(sessionId, event);
+        },
+      },
+      workspaceService: {
+        async resolveRunContext() {
+          return buildPrimaryRunContext({
+            workspaceId: "workspace_project",
+            workspaceRoot: "/workspace/project",
+          });
+        },
+      },
+      discoverSkills: async () => ({
+        skills: [
+          createSkillRecord({
+            name: "local-file-organizer",
+            manifest: {
+              inputs: [
+                {
+                  name: "targetDir",
+                  label: "Target directory",
+                  type: "path",
+                  required: true,
+                },
+              ],
+            },
+          }),
+        ],
+        errors: [],
+      }),
+      createId: createSequentialId("durable_wait"),
+      now: () => new Date("2026-06-23T08:00:00.000Z"),
+    });
+
+    const sendPromise = service
+      .sendMessage({
+        sessionId: "session_1",
+        requestId: "request_1",
+        message: "organize files durably",
+        selectedSkillName: "local-file-organizer",
+        workspaceId: "workspace_project",
+      })
+      .then((result) => {
+        sendSettled = true;
+        return result;
+      });
+
+    await waitFor(() => pendingPersistStarted);
+    await flushAsyncTasks();
+    expect(sendSettled).toBe(false);
+
+    persistGate.resolve();
+    await expect(sendPromise).resolves.toEqual({
+      ok: false,
+      message: "Skill input required.",
+    });
+    expect(sendSettled).toBe(true);
+  });
+
+  it("returns failure and leaves no answerable pending request when durable skill wait persistence fails", async () => {
+    const chatMessages: AppendChatMessageInput[] = [];
+    const streamEvents: ChatStreamEvent[] = [];
+    const baseStore = createChatSessionStore(chatMessages);
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: {
+        ...baseStore,
+        async appendActivityEvent(sessionId, event) {
+          if (event.pendingSkillInput?.status === "pending") {
+            throw new Error("disk write failed");
+          }
+          return baseStore.appendActivityEvent(sessionId, event);
+        },
+      },
+      workspaceService: {
+        async resolveRunContext() {
+          return buildPrimaryRunContext({
+            workspaceId: "workspace_project",
+            workspaceRoot: "/workspace/project",
+          });
+        },
+      },
+      discoverSkills: async () => ({
+        skills: [
+          createSkillRecord({
+            name: "local-file-organizer",
+            manifest: {
+              inputs: [
+                {
+                  name: "targetDir",
+                  label: "Target directory",
+                  type: "path",
+                  required: true,
+                },
+              ],
+            },
+          }),
+        ],
+        errors: [],
+      }),
+      createId: createSequentialId("durable_fail"),
+      now: () => new Date("2026-06-23T08:00:00.000Z"),
+    });
+
+    await expect(
+      service.sendMessage(
+        {
+          sessionId: "session_1",
+          requestId: "request_1",
+          message: "organize files but persistence fails",
+          selectedSkillName: "local-file-organizer",
+          workspaceId: "workspace_project",
+        },
+        {
+          onStreamEvent(event) {
+            streamEvents.push(event);
+          },
+        },
+      ),
+    ).resolves.toEqual({
+      ok: false,
+      message: "Failed to persist skill input request.",
+    });
+    expect(streamEvents.some((event) => event.type === "waiting_for_input")).toBe(
+      false,
+    );
+    await expect(
+      service.respondSkillInput({
+        inputRequestId: "skill_input_durable_fail_1",
+        values: { targetDir: "/workspace/project/docs" },
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      message: "Unknown skill input request.",
+    });
+  });
+
   it("keeps waiting when a guided skill input response is invalid and does not run the model", async () => {
     let profileCalls = 0;
     let agentLoopCalls = 0;
@@ -2070,6 +2233,100 @@ describe("chat service", () => {
       ]),
     );
     expect(activityEvents.filter((event) => event.state === "waiting_for_input")).toHaveLength(2);
+  });
+
+  it("does not return an invalid guided input response before the next pending request is persisted", async () => {
+    const initialStreamEvents: ChatStreamEvent[] = [];
+    const baseStore = createChatSessionStore([]);
+    const secondPendingPersistGate = createDeferred<void>();
+    let pendingPersistCount = 0;
+    let secondPendingPersistStarted = false;
+    let responseSettled = false;
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: {
+        ...baseStore,
+        async appendActivityEvent(sessionId, event) {
+          if (event.pendingSkillInput?.status === "pending") {
+            pendingPersistCount += 1;
+            if (pendingPersistCount === 2) {
+              secondPendingPersistStarted = true;
+              await secondPendingPersistGate.promise;
+            }
+          }
+          return baseStore.appendActivityEvent(sessionId, event);
+        },
+      },
+      workspaceService: {
+        async resolveRunContext() {
+          return buildPrimaryRunContext({
+            workspaceId: "workspace_project",
+            workspaceRoot: "/workspace/project",
+          });
+        },
+      },
+      discoverSkills: async () => ({
+        skills: [
+          createSkillRecord({
+            name: "local-file-organizer",
+            manifest: {
+              inputs: [
+                {
+                  name: "targetDir",
+                  label: "Target directory",
+                  type: "path",
+                  required: true,
+                },
+              ],
+            },
+          }),
+        ],
+        errors: [],
+      }),
+      createId: createSequentialId("durable_invalid"),
+      now: () => new Date("2026-06-23T08:00:00.000Z"),
+    });
+
+    await service.sendMessage(
+      {
+        sessionId: "session_1",
+        requestId: "request_1",
+        message: "organize files invalid durably",
+        selectedSkillName: "local-file-organizer",
+        workspaceId: "workspace_project",
+      },
+      { onStreamEvent: (event) => initialStreamEvents.push(event) },
+    );
+    const inputRequest = initialStreamEvents.find(
+      (event): event is Extract<ChatStreamEvent, { type: "waiting_for_input" }> =>
+        event.type === "waiting_for_input",
+    )?.inputRequest;
+
+    const responsePromise = service
+      .respondSkillInput({
+        inputRequestId: inputRequest?.id ?? "",
+        values: { targetDir: "/etc" },
+      })
+      .then((result) => {
+        responseSettled = true;
+        return result;
+      });
+
+    await waitFor(() => secondPendingPersistStarted);
+    await flushAsyncTasks();
+    expect(responseSettled).toBe(false);
+
+    secondPendingPersistGate.resolve();
+    await expect(responsePromise).resolves.toEqual({
+      ok: false,
+      message: "Skill input required.",
+    });
   });
 
   it("resumes a guided skill input response in the same session without duplicating the user message", async () => {
@@ -3245,6 +3502,34 @@ function createMemoryTrajectoryStore(
 function createSequentialId(prefix: string): () => string {
   let next = 1;
   return () => `${prefix}_${next++}`;
+}
+
+function createDeferred<T = void>(): {
+  promise: Promise<T>;
+  resolve: (value: T | PromiseLike<T>) => void;
+  reject: (reason?: unknown) => void;
+} {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((innerResolve, innerReject) => {
+    resolve = innerResolve;
+    reject = innerReject;
+  });
+  return { promise, resolve, reject };
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (predicate()) {
+      return;
+    }
+    await flushAsyncTasks();
+  }
+  throw new Error("Timed out waiting for condition.");
+}
+
+async function flushAsyncTasks(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 function createSteppedClock(start: string): () => Date {
