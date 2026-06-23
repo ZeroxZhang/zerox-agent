@@ -3971,3 +3971,21 @@
   - `npx tsc -p tsconfig.electron.json --noEmit --pretty false` -> passed.
   - `npm run harness:check` -> passed.
   - `git diff --check` -> passed.
+
+## 2026-06-23 - Worker T3 Task 3 Streaming Fallback Repair
+
+- Summary:
+  - Added a pre-delta streaming failure fallback from `streamComplete` to the existing `completeWithModelRetry` path.
+  - Preserved partial-stream safety by propagating failures after answer/thinking/tool preview deltas instead of retrying and duplicating visible content.
+- Changed files:
+  - `src/main/agentLoop.ts`
+  - `src/main/agentLoop.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/main/agentLoop.test.ts` -> failed as expected because a client exposing `streamComplete` failed the loop when streaming threw before yielding any event.
+- GREEN / verification evidence:
+  - `npm test -- src/main/agentLoop.test.ts` -> 1 file / 20 tests passed.
+  - `npm test -- src/main/providers/p8.test.ts src/main/providers/providers.test.ts src/main/openAiCompatibleClient.test.ts src/main/agentLoop.test.ts src/main/chatService.test.ts` -> 5 files / 96 tests passed.
+  - `npx tsc -p tsconfig.electron.json --noEmit --pretty false` -> passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.

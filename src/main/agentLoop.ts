@@ -357,9 +357,25 @@ export async function runAgentLoop(
     turn: number,
   ): Promise<ChatCompletionResponse> {
     if (isStreamingChatClient(chatClient)) {
-      return aggregateStreamingCompletion(chatClient, request, (event) => {
-        onModelStreamEvent?.(event, turn);
-      });
+      try {
+        return await aggregateStreamingCompletion(chatClient, request, (event) => {
+          onModelStreamEvent?.(event, turn);
+        });
+      } catch (error) {
+        if (
+          error instanceof StreamingCompletionError &&
+          !error.hasMeaningfulStreamEvent &&
+          !isStreamAbortError(error.cause, request.signal)
+        ) {
+          return completeWithModelRetry(
+            chatClient,
+            request,
+            modelRetry,
+            onModelRetry,
+          );
+        }
+        throw error;
+      }
     }
 
     return completeWithModelRetry(
@@ -773,6 +789,18 @@ function throwIfCanceled(signal: AbortSignal | undefined) {
   }
 }
 
+class StreamingCompletionError extends Error {
+  readonly hasMeaningfulStreamEvent: boolean;
+  override readonly cause: unknown;
+
+  constructor(error: unknown, hasMeaningfulStreamEvent: boolean) {
+    super(error instanceof Error ? error.message : String(error ?? "Model stream failed."));
+    this.name = "StreamingCompletionError";
+    this.cause = error;
+    this.hasMeaningfulStreamEvent = hasMeaningfulStreamEvent;
+  }
+}
+
 async function aggregateStreamingCompletion(
   chatClient: ChatClient & StreamingChatClient,
   request: ChatCompletionRequest,
@@ -782,40 +810,48 @@ async function aggregateStreamingCompletion(
   let reasoningContent = "";
   let finishReason = "stop";
   let activeToolCallId: string | null = null;
+  let hasMeaningfulStreamEvent = false;
   const toolCalls = new Map<string, { id: string; name: string; arguments: string }>();
 
-  for await (const event of chatClient.streamComplete(request)) {
-    throwIfCanceled(request.signal);
-    onStreamEvent?.(event);
+  try {
+    for await (const event of chatClient.streamComplete(request)) {
+      throwIfCanceled(request.signal);
+      onStreamEvent?.(event);
 
-    if (event.type === "content_delta") {
-      content += event.text;
-      continue;
-    }
-
-    if (event.type === "reasoning_delta") {
-      reasoningContent += event.text;
-      continue;
-    }
-
-    if (event.type === "tool_call_delta") {
-      const id: string =
-        event.id ||
-        activeToolCallId ||
-        `tool_call_${toolCalls.size + 1}`;
-      activeToolCallId = id;
-      const existing = toolCalls.get(id) ?? { id, name: "", arguments: "" };
-      if (event.name) {
-        existing.name = event.name;
+      if (event.type === "content_delta") {
+        hasMeaningfulStreamEvent = true;
+        content += event.text;
+        continue;
       }
-      if (event.arguments) {
-        existing.arguments += event.arguments;
-      }
-      toolCalls.set(id, existing);
-      continue;
-    }
 
-    finishReason = event.finishReason || finishReason;
+      if (event.type === "reasoning_delta") {
+        hasMeaningfulStreamEvent = true;
+        reasoningContent += event.text;
+        continue;
+      }
+
+      if (event.type === "tool_call_delta") {
+        hasMeaningfulStreamEvent = true;
+        const id: string =
+          event.id ||
+          activeToolCallId ||
+          `tool_call_${toolCalls.size + 1}`;
+        activeToolCallId = id;
+        const existing = toolCalls.get(id) ?? { id, name: "", arguments: "" };
+        if (event.name) {
+          existing.name = event.name;
+        }
+        if (event.arguments) {
+          existing.arguments += event.arguments;
+        }
+        toolCalls.set(id, existing);
+        continue;
+      }
+
+      finishReason = event.finishReason || finishReason;
+    }
+  } catch (error) {
+    throw new StreamingCompletionError(error, hasMeaningfulStreamEvent);
   }
 
   throwIfCanceled(request.signal);
@@ -833,6 +869,16 @@ async function aggregateStreamingCompletion(
     finishReason,
     ...(reasoningContent ? { reasoningContent } : {}),
   };
+}
+
+function isStreamAbortError(
+  error: unknown,
+  signal: AbortSignal | undefined,
+): boolean {
+  return (
+    signal?.aborted ||
+    (error instanceof Error && /abort|aborted|cancell?ed|cancelled/i.test(error.message))
+  );
 }
 
 function buildToolFailureLoopPauseSummary(options: {

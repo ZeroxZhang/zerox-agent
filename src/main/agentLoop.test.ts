@@ -1262,6 +1262,89 @@ describe("agent loop", () => {
     ]);
     expect(executedTools).toEqual([]);
   });
+
+  it("falls back to complete when streaming fails before any model delta", async () => {
+    let completeCalls = 0;
+    let streamCalls = 0;
+    let executions = 0;
+    const chatClient: ChatClient & StreamingChatClient = {
+      async complete() {
+        completeCalls += 1;
+        return {
+          content: "fallback complete response",
+          toolCalls: [],
+          finishReason: "stop",
+        };
+      },
+      async *streamComplete() {
+        streamCalls += 1;
+        throw new Error("stream endpoint unavailable");
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "summarize without tools" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(() => {
+          executions += 1;
+        }),
+        tools: testTools,
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: "succeeded",
+      summary: "fallback complete response",
+      toolCallsExecuted: 0,
+    });
+    expect(streamCalls).toBe(1);
+    expect(completeCalls).toBe(1);
+    expect(executions).toBe(0);
+  });
+
+  it("does not fall back to complete after a streamed answer delta", async () => {
+    let completeCalls = 0;
+    const modelEvents: StreamEvent[] = [];
+    const chatClient: ChatClient & StreamingChatClient = {
+      async complete() {
+        completeCalls += 1;
+        return {
+          content: "duplicate fallback response",
+          toolCalls: [],
+          finishReason: "stop",
+        };
+      },
+      async *streamComplete() {
+        yield { type: "content_delta", text: "partial answer" };
+        throw new Error("stream broke after partial answer");
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "stream then fail" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(),
+        tools: testTools,
+        onModelStreamEvent(event) {
+          modelEvents.push(event);
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: "failed",
+      summary: "stream broke after partial answer",
+      toolCallsExecuted: 0,
+    });
+    expect(modelEvents).toEqual([
+      { type: "content_delta", text: "partial answer" },
+    ]);
+    expect(completeCalls).toBe(0);
+  });
 });
 
 function toolCallResponse(id: string, path = "/tmp"): ChatCompletionResponse {
