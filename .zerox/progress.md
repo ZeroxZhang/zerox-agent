@@ -3840,3 +3840,18 @@
   - `npm test -- src/shared/navigation.test.ts src/shared/materialNavigation.test.ts src/renderer/materialDesign.test.ts` -> 3 files / 44 tests passed.
   - `npm run harness:check` -> passed.
   - `git diff --check` -> passed.
+
+## 2026-06-23 - Worker T1 Task 1 Follow-Up App Metadata Test Alignment
+
+- Summary:
+  - Updated `getAppMeta` coverage to expect only the Chat-first primary modules: 会话, 运行, 任务, 设置.
+  - Removed stale test expectation for the former 总览 primary module and technical Settings subsections.
+- Changed files:
+  - `src/shared/appMeta.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/shared/appMeta.test.ts` -> failed as expected because the test still expected 总览/技能/工具/记忆/学习/评测 in `modules`.
+- GREEN / verification evidence:
+  - `npm test -- src/shared/appMeta.test.ts src/shared/navigation.test.ts src/shared/materialNavigation.test.ts src/renderer/materialDesign.test.ts` -> 4 files / 45 tests passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
