@@ -47,6 +47,7 @@ describe("preload bridge", () => {
   it("exposes chat stream and guided input IPC bridge operations", () => {
     expect(preloadSource).toContain("onChatStreamEvent");
     expect(preloadSource).toContain('ipcRenderer.on("chat:streamEvent"');
+    expect(preloadSource).toContain('removeListener("chat:streamEvent"');
     expect(preloadSource).toContain("respondSkillInput");
     expect(preloadSource).toContain(
       'ipcRenderer.invoke("chat:respondSkillInput"',

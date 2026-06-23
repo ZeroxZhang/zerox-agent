@@ -180,8 +180,22 @@ export function createChatService(options: {
         onStatusEvent: runtimeOptions.onStatusEvent,
         onStreamEvent: runtimeOptions.onStreamEvent,
         onPersistEvent(event) {
-          void options.chatSessionStore?.appendActivityEvent?.(event.sessionId, event);
-          void workspaceRunRecorder?.appendStatusEvent(event);
+          try {
+            const sessionActivityWrite =
+              options.chatSessionStore?.appendActivityEvent?.(
+                event.sessionId,
+                event,
+              );
+            void sessionActivityWrite?.catch(() => undefined);
+          } catch {
+            // Observability writes must not fail the user-facing chat turn.
+          }
+          try {
+            const workspaceRunWrite = workspaceRunRecorder?.appendStatusEvent(event);
+            void workspaceRunWrite?.catch(() => undefined);
+          } catch {
+            // Observability writes must not fail the user-facing chat turn.
+          }
         },
       });
       const workspaceResolution = await resolveChatWorkspace({
@@ -826,15 +840,27 @@ function createChatStatusEmitter(options: {
         createdAt: new Date(nowMs).toISOString(),
         elapsedMs: Math.max(0, nowMs - options.startedAtMs),
       };
-      options.onStatusEvent?.(statusEvent);
-      options.onStreamEvent?.({
-        type: "status",
-        sessionId: statusEvent.sessionId,
-        requestId: options.requestId,
-        status: statusEvent,
-        createdAt: statusEvent.createdAt,
-      });
-      options.onPersistEvent?.(statusEvent);
+      try {
+        options.onPersistEvent?.(statusEvent);
+      } catch {
+        // Persistence observers are best-effort.
+      }
+      try {
+        options.onStatusEvent?.(statusEvent);
+      } catch {
+        // Renderer observers are best-effort.
+      }
+      try {
+        options.onStreamEvent?.({
+          type: "status",
+          sessionId: statusEvent.sessionId,
+          requestId: options.requestId,
+          status: statusEvent,
+          createdAt: statusEvent.createdAt,
+        });
+      } catch {
+        // Renderer observers are best-effort.
+      }
     },
   };
 }

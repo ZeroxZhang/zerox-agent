@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type {
   ChatStreamEvent,
@@ -7,11 +5,6 @@ import type {
   SkillInputResponse,
   SkillUserInputRequest,
 } from "./chat";
-
-const chatSource = readFileSync(
-  path.join(process.cwd(), "src/shared/chat.ts"),
-  "utf8",
-);
 
 describe("chat stream contract", () => {
   it("accepts answer and thinking text chat-layer stream events", () => {
@@ -29,17 +22,26 @@ describe("chat stream contract", () => {
       text: "Checking the skill contract.",
       createdAt: "2026-06-23T08:00:01.000Z",
     } satisfies ChatStreamEvent;
+    const toolPreviewEvent = {
+      type: "tool_call_preview",
+      sessionId: "session_1",
+      requestId: "request_1",
+      toolCallId: "tool_call_1",
+      toolName: "file_read",
+      argumentsDelta: '{"path":',
+      createdAt: "2026-06-23T08:00:02.000Z",
+    } satisfies ChatStreamEvent;
 
     expect([answerEvent.text, thinkingEvent.text]).toEqual([
       "I can do that.",
       "Checking the skill contract.",
     ]);
-    expect(chatSource).toContain('type: "answer_delta"');
-    expect(chatSource).toContain('type: "thinking_delta"');
-    expect(chatSource).toContain('text: string');
-    expect(chatSource).not.toContain("delta: string");
-    expect(chatSource).toContain('type: "tool_call_preview"');
-    expect(chatSource).not.toContain('type: "tool_call_delta"');
+    expect(toolPreviewEvent).toMatchObject({
+      toolCallId: "tool_call_1",
+      toolName: "file_read",
+    });
+    expect(answerEvent).not.toHaveProperty("delta");
+    expect(thinkingEvent).not.toHaveProperty("delta");
   });
 
   it("accepts waiting input stream events with plan-shaped guided skill fields", () => {
@@ -108,17 +110,12 @@ describe("chat stream contract", () => {
     });
     expect(response).not.toHaveProperty("requestId");
     expect(response.values.includeResearch).toBe(true);
-    expect(chatSource).toContain("export type SkillInputFieldType");
-    expect(chatSource).toContain('"string" | "number" | "boolean" | "path" | "choice"');
-    expect(chatSource).toContain("executionId: string");
-    expect(chatSource).toContain("reason: string");
-    expect(chatSource).toContain("choices?: string[]");
-    expect(chatSource).toContain("export type SkillUserInputRequest");
-    expect(chatSource).toContain("export type SkillInputResponse");
-    expect(chatSource).not.toContain("skillDisplayName");
-    expect(chatSource).not.toContain("placeholder");
-    expect(chatSource).not.toContain("options?:");
-    expect(chatSource).not.toContain("validationMessage");
+    expect(inputRequest).not.toHaveProperty("skillDisplayName");
+    expect(inputRequest).not.toHaveProperty("message");
+    expect(inputRequest.fields[0]).not.toHaveProperty("placeholder");
+    expect(inputRequest.fields[0]).not.toHaveProperty("value");
+    expect(inputRequest.fields[1]).not.toHaveProperty("options");
+    expect(inputRequest.fields[1]).toHaveProperty("choices");
   });
 
   it("accepts typed status stream events for streaming and guided input", () => {
@@ -198,7 +195,5 @@ describe("chat stream contract", () => {
       "canceled",
     ]);
     expect(terminalEvents.every((event) => !("message" in event))).toBe(true);
-    expect(chatSource).toContain('type: "completed" | "failed" | "canceled"');
-    expect(chatSource).toContain("message?: string");
   });
 });

@@ -174,6 +174,83 @@ describe("chat service", () => {
     );
   });
 
+  it("persists status activity even when observer callbacks throw", async () => {
+    const statusThrowActivityEvents: ChatTaskStatusEvent[] = [];
+    const streamThrowActivityEvents: ChatTaskStatusEvent[] = [];
+    const statusThrowService = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("status observer failure ignored");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([], {
+        activityEvents: statusThrowActivityEvents,
+      }),
+      createId: () => "chat_status_throw",
+      now: () => new Date("2026-06-23T08:00:00.000Z"),
+    });
+    const streamThrowService = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("stream observer failure ignored");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([], {
+        activityEvents: streamThrowActivityEvents,
+      }),
+      createId: () => "chat_stream_throw",
+      now: () => new Date("2026-06-23T08:00:00.000Z"),
+    });
+
+    await expect(
+      statusThrowService.sendMessage(
+        { message: "status observer throws" },
+        {
+          onStatusEvent() {
+            throw new Error("status observer failed");
+          },
+        },
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      reply: "status observer failure ignored",
+    });
+    await expect(
+      streamThrowService.sendMessage(
+        { message: "stream observer throws" },
+        {
+          onStreamEvent() {
+            throw new Error("stream observer failed");
+          },
+        },
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      reply: "stream observer failure ignored",
+    });
+
+    expect(statusThrowActivityEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          state: "started",
+          sessionId: "persisted_session",
+        }),
+      ]),
+    );
+    expect(streamThrowActivityEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          state: "started",
+          sessionId: "persisted_session",
+        }),
+      ]),
+    );
+  });
+
   it("sends memory-grounded chat messages to the model and stores session memory", async () => {
     const capturedMessages: ChatMessage[][] = [];
     const memoryWrites: MemoryInput[] = [];
@@ -1888,6 +1965,7 @@ function createChatSessionStore(
       sessionId: string;
       usage: ChatSessionTokenUsage;
     }>;
+    activityEvents?: ChatTaskStatusEvent[];
   } = {},
 ) {
   return {
@@ -1919,6 +1997,10 @@ function createChatSessionStore(
     },
     async addTokenUsage(sessionId: string, usage: ChatSessionTokenUsage) {
       options.tokenUsageWrites?.push({ sessionId, usage });
+      return null;
+    },
+    async appendActivityEvent(_sessionId: string, event: ChatTaskStatusEvent) {
+      options.activityEvents?.push(event);
       return null;
     },
     async attachGoal(_sessionId: string, goal: ChatSessionGoalSummary) {

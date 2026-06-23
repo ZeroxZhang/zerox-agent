@@ -3923,3 +3923,23 @@
   - `npm test -- src/shared/chatStream.test.ts src/preload/index.test.ts src/main/chatService.test.ts src/main/chatSessionStore.test.ts` -> 4 files / 56 tests passed.
   - `npm run harness:check` -> passed.
   - `git diff --check` -> passed.
+
+## 2026-06-23 - Worker T2 Task 2 Follow-Up Observer Isolation
+
+- Summary:
+  - Made chat status, stream, and persistence observers best-effort so thrown observer callbacks do not break chat sends.
+  - Captured async status activity and workspace run persistence rejections with quiet `.catch(() => undefined)` handling.
+  - Removed source-string assertions from shared chat stream contract tests.
+  - Strengthened preload stream bridge coverage to assert listener cleanup for `chat:streamEvent`.
+- Changed files:
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+  - `src/shared/chatStream.test.ts`
+  - `src/preload/index.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/shared/chatStream.test.ts src/preload/index.test.ts src/main/chatService.test.ts src/main/chatSessionStore.test.ts` -> failed as expected because `onStatusEvent` throw rejected `sendMessage`.
+- GREEN / verification evidence:
+  - `npm test -- src/shared/chatStream.test.ts src/preload/index.test.ts src/main/chatService.test.ts src/main/chatSessionStore.test.ts` -> 4 files / 57 tests passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
