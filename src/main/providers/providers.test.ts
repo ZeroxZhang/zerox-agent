@@ -319,6 +319,43 @@ describe("ProviderChatClient adapter", () => {
       { type: "done", finishReason: "stop" },
     ]);
   });
+
+  it("passes provider tool call indexes through low-level stream events", async () => {
+    const provider = scriptedProvider([
+      {
+        type: "tool_call_delta",
+        index: 2,
+        toolCallId: "call_indexed",
+        name: "file_list",
+        argumentsDelta: '{"path":"/tmp"}',
+      },
+      { type: "done" },
+    ]);
+    const client = createProviderChatClient({ provider });
+    const events = [];
+
+    for await (const event of client.streamComplete({
+      baseUrl: "",
+      apiKey: "k",
+      model: "m",
+      temperature: 0,
+      maxTokens: 10,
+      messages: [{ role: "user", content: "hi" }],
+    })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      {
+        type: "tool_call_delta",
+        index: 2,
+        id: "call_indexed",
+        name: "file_list",
+        arguments: '{"path":"/tmp"}',
+      },
+      { type: "done", finishReason: "stop" },
+    ]);
+  });
 });
 
 function scriptedProvider(events: StreamEvent[]): LLMProvider {

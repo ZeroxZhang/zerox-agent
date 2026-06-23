@@ -3989,3 +3989,29 @@
   - `npx tsc -p tsconfig.electron.json --noEmit --pretty false` -> passed.
   - `npm run harness:check` -> passed.
   - `git diff --check` -> passed.
+
+## 2026-06-23 - Worker T3 Task 3 Indexed Streaming Tool Call Repair
+
+- Summary:
+  - Preserved OpenAI-compatible streamed `tool_calls[].index` on low-level stream events and through provider adapters when available.
+  - Updated agent-loop stream aggregation to correlate tool-call deltas by index before id, preserving legacy active-call fallback only for single-call streams.
+  - Added abort-style pre-delta stream failure coverage to ensure fallback completion is not used after cancellation.
+- Changed files:
+  - `src/main/openAiCompatibleClient.ts`
+  - `src/main/openAiCompatibleClient.test.ts`
+  - `src/main/providers/provider.ts`
+  - `src/main/providers/providerChatClient.ts`
+  - `src/main/providers/openAiCompatibleProvider.ts`
+  - `src/main/providers/streamProcessor.ts`
+  - `src/main/providers/providers.test.ts`
+  - `src/main/agentLoop.ts`
+  - `src/main/agentLoop.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/main/openAiCompatibleClient.test.ts src/main/providers/providers.test.ts src/main/agentLoop.test.ts` -> failed as expected: stream indexes were dropped and concurrent idless indexed tool-call deltas assembled into zero executable tool calls.
+- GREEN / verification evidence:
+  - `npm test -- src/main/openAiCompatibleClient.test.ts src/main/providers/providers.test.ts src/main/agentLoop.test.ts` -> 3 files / 56 tests passed.
+  - `npm test -- src/main/providers/p8.test.ts src/main/providers/providers.test.ts src/main/openAiCompatibleClient.test.ts src/main/agentLoop.test.ts src/main/chatService.test.ts` -> 5 files / 100 tests passed.
+  - `npx tsc -p tsconfig.electron.json --noEmit --pretty false` -> passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.

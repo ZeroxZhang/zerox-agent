@@ -50,10 +50,13 @@ export async function processStream(
         break;
       case "tool_call_delta": {
         toolCallDeltas += 1;
-        const existing = toolCallArgs.get(ev.toolCallId) ?? { id: ev.toolCallId, name: ev.name ?? "", args: "" };
+        const key = typeof ev.index === "number" ? `index:${ev.index}` : ev.toolCallId;
+        const fallbackId = typeof ev.index === "number" ? `tool_call_${ev.index + 1}` : ev.toolCallId;
+        const existing = toolCallArgs.get(key) ?? { id: ev.toolCallId || fallbackId, name: ev.name ?? "", args: "" };
+        if (ev.toolCallId) existing.id = ev.toolCallId;
         if (ev.name) existing.name = ev.name;
         if (ev.argumentsDelta) existing.args += ev.argumentsDelta;
-        toolCallArgs.set(ev.toolCallId, existing);
+        toolCallArgs.set(key, existing);
         break;
       }
       case "done":

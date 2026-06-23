@@ -1345,6 +1345,148 @@ describe("agent loop", () => {
     ]);
     expect(completeCalls).toBe(0);
   });
+
+  it("assembles concurrent indexed streamed tool calls before authorization", async () => {
+    let streamCalls = 0;
+    const authorizationRequests: ToolCallRequest[] = [];
+    const executions: Array<{ toolName: string; args: Record<string, unknown> }> = [];
+    const chatClient: ChatClient & StreamingChatClient = {
+      async complete() {
+        throw new Error("complete should not run for indexed streaming tools");
+      },
+      async *streamComplete() {
+        streamCalls += 1;
+        if (streamCalls === 1) {
+          yield {
+            type: "tool_call_delta",
+            index: 0,
+            id: "call_0",
+            name: "file_list",
+            arguments: '{"path":"/alpha',
+          };
+          yield {
+            type: "tool_call_delta",
+            index: 1,
+            id: "call_1",
+            name: "file_list",
+            arguments: '{"path":"/beta',
+          };
+          yield {
+            type: "tool_call_delta",
+            index: 0,
+            id: "",
+            name: "",
+            arguments: '"}',
+          };
+          yield {
+            type: "tool_call_delta",
+            index: 1,
+            id: "",
+            name: "",
+            arguments: '"}',
+          };
+          yield { type: "done", finishReason: "tool_calls" };
+          return;
+        }
+        yield { type: "content_delta", text: "indexed tools done" };
+        yield { type: "done", finishReason: "stop" };
+      },
+    };
+    const toolAuthorizationService: ToolAuthorizationService = {
+      async authorize(_taskId, request) {
+        authorizationRequests.push(request);
+        return {
+          ok: true,
+          decision: { allowed: true, reason: "allowed" },
+          auditEvent: {
+            id: `audit_indexed_${authorizationRequests.length}`,
+            taskId: "task_indexed",
+            request,
+            decision: { allowed: true, reason: "allowed" },
+            createdAt: "2026-06-23T00:00:00.000Z",
+          },
+        };
+      },
+    };
+    const toolExecutor: AgentToolExecutor = {
+      async execute(request) {
+        executions.push(request);
+        return {
+          ok: true,
+          result: { path: request.args.path },
+        };
+      },
+      getRegistry() {
+        throw new Error("not used");
+      },
+      hasTool() {
+        return true;
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "list two directories" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor,
+        toolAuthorizationService,
+        taskId: "task_indexed",
+        tools: testTools,
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: "succeeded",
+      summary: "indexed tools done",
+      toolCallsExecuted: 2,
+    });
+    expect(authorizationRequests).toEqual([
+      { toolName: "file_list", args: { path: "/alpha" } },
+      { toolName: "file_list", args: { path: "/beta" } },
+    ]);
+    expect(executions).toEqual([
+      { toolName: "file_list", args: { path: "/alpha" } },
+      { toolName: "file_list", args: { path: "/beta" } },
+    ]);
+  });
+
+  it("does not fall back to complete for an abort-style stream failure before deltas", async () => {
+    const controller = new AbortController();
+    let completeCalls = 0;
+    const chatClient: ChatClient & StreamingChatClient = {
+      async complete() {
+        completeCalls += 1;
+        return {
+          content: "complete should not run after abort",
+          toolCalls: [],
+          finishReason: "stop",
+        };
+      },
+      async *streamComplete() {
+        controller.abort();
+        throw new Error("aborted by stream");
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "abort streaming" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(),
+        tools: testTools,
+        signal: controller.signal,
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: "canceled",
+      summary: "Agent loop canceled.",
+      toolCallsExecuted: 0,
+    });
+    expect(completeCalls).toBe(0);
+  });
 });
 
 function toolCallResponse(id: string, path = "/tmp"): ChatCompletionResponse {

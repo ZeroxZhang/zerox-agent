@@ -74,6 +74,7 @@ export function createOpenAICompatibleProvider(
           yield {
             type: "tool_call_delta",
             toolCallId: ev.id,
+            ...(ev.index !== undefined ? { index: ev.index } : {}),
             name: ev.name,
             argumentsDelta: ev.arguments,
           };

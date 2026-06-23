@@ -64,6 +64,7 @@ export function createProviderChatClient(
           yield {
             type: "tool_call_delta",
             id: ev.toolCallId,
+            ...(ev.index !== undefined ? { index: ev.index } : {}),
             name: ev.name ?? "",
             arguments: ev.argumentsDelta ?? "",
           };

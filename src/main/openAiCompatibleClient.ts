@@ -80,7 +80,7 @@ export type EmbeddingClient = {
 export type StreamEvent =
   | { type: "content_delta"; text: string }
   | { type: "reasoning_delta"; text: string }
-  | { type: "tool_call_delta"; id: string; name: string; arguments: string }
+  | { type: "tool_call_delta"; id: string; index?: number; name: string; arguments: string }
   | { type: "done"; finishReason: string };
 
 export type StreamingChatClient = ChatClient & {
@@ -258,9 +258,11 @@ export function createOpenAiCompatibleClient(options?: {
 
               if (delta?.tool_calls?.length) {
                 for (const tc of delta.tool_calls) {
+                  const index = normalizeStreamToolCallIndex(tc.index);
                   yield {
                     type: "tool_call_delta",
                     id: tc.id ?? "",
+                    ...(index !== undefined ? { index } : {}),
                     name: tc.function?.name ?? "",
                     arguments: tc.function?.arguments ?? "",
                   };
@@ -356,6 +358,13 @@ function normalizeCompletionUsage(
 }
 
 function normalizeTokenCount(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return undefined;
+  }
+  return Math.max(0, Math.floor(value));
+}
+
+function normalizeStreamToolCallIndex(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return undefined;
   }

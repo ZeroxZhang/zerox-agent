@@ -809,7 +809,7 @@ async function aggregateStreamingCompletion(
   let content = "";
   let reasoningContent = "";
   let finishReason = "stop";
-  let activeToolCallId: string | null = null;
+  let activeToolCallKey: string | null = null;
   let hasMeaningfulStreamEvent = false;
   const toolCalls = new Map<string, { id: string; name: string; arguments: string }>();
 
@@ -832,19 +832,37 @@ async function aggregateStreamingCompletion(
 
       if (event.type === "tool_call_delta") {
         hasMeaningfulStreamEvent = true;
-        const id: string =
-          event.id ||
-          activeToolCallId ||
-          `tool_call_${toolCalls.size + 1}`;
-        activeToolCallId = id;
-        const existing = toolCalls.get(id) ?? { id, name: "", arguments: "" };
+        const index = normalizeStreamToolCallIndex(event.index);
+        const key: string =
+          index !== undefined
+            ? `index:${index}`
+            : event.id
+              ? `id:${event.id}`
+              : activeToolCallKey && toolCalls.size <= 1
+                ? activeToolCallKey
+                : `legacy:${toolCalls.size + 1}`;
+        if (index === undefined) {
+          activeToolCallKey = key;
+        }
+        const fallbackId =
+          index !== undefined
+            ? `tool_call_${index + 1}`
+            : key.replace(/^(id|legacy):/, "") || `tool_call_${toolCalls.size + 1}`;
+        const existing = toolCalls.get(key) ?? {
+          id: event.id || fallbackId,
+          name: "",
+          arguments: "",
+        };
+        if (event.id) {
+          existing.id = event.id;
+        }
         if (event.name) {
           existing.name = event.name;
         }
         if (event.arguments) {
           existing.arguments += event.arguments;
         }
-        toolCalls.set(id, existing);
+        toolCalls.set(key, existing);
         continue;
       }
 
@@ -869,6 +887,13 @@ async function aggregateStreamingCompletion(
     finishReason,
     ...(reasoningContent ? { reasoningContent } : {}),
   };
+}
+
+function normalizeStreamToolCallIndex(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return undefined;
+  }
+  return Math.max(0, Math.floor(value));
 }
 
 function isStreamAbortError(
