@@ -187,6 +187,7 @@ export function createChatService(options: {
   const agentLoopMaxTurns = normalizeAgentLoopMaxTurns(options.agentLoopMaxTurns);
   const pendingContinuations = new Map<string, ChatContinuationState>();
   const pendingSkillInputRequests = new Map<string, PendingSkillInputState>();
+  const inFlightSkillInputResponses = new Set<string>();
 
   async function recoverPendingSkillInputState(
     inputRequestId: string,
@@ -233,7 +234,11 @@ export function createChatService(options: {
   }
 
   async function markPersistedSkillInputCompleted(pending: PendingSkillInputState) {
-    await options.chatSessionStore?.appendActivityEvent?.(pending.sessionId, {
+    if (!options.chatSessionStore?.appendActivityEvent) {
+      throw new Error("Chat session activity persistence is unavailable.");
+    }
+
+    await options.chatSessionStore.appendActivityEvent(pending.sessionId, {
       sessionId: pending.sessionId,
       state: "completed",
       message: "Skill input completed.",
@@ -972,107 +977,86 @@ export function createChatService(options: {
       };
   }
 
-  return {
-    async respondSkillInput(input, runtimeOptions = {}) {
-      const pending =
-        pendingSkillInputRequests.get(input.inputRequestId) ??
-        (await recoverPendingSkillInputState(input.inputRequestId));
-      if (!pending) {
-        return {
-          ok: false,
-          message: "Unknown skill input request.",
-        };
-      }
-
-      const mergedValues = {
-        ...pending.partialValues,
-        ...input.values,
+  async function respondSkillInputOnce(
+    input: SkillInputResponse,
+    runtimeOptions: SendChatMessageRuntimeOptions,
+  ): Promise<SkillInputResponseResult> {
+    const pending =
+      pendingSkillInputRequests.get(input.inputRequestId) ??
+      (await recoverPendingSkillInputState(input.inputRequestId));
+    if (!pending) {
+      return {
+        ok: false,
+        message: "Unknown skill input request.",
       };
-      const inputResolution = resolveSkillInput({
+    }
+
+    const mergedValues = {
+      ...pending.partialValues,
+      ...input.values,
+    };
+    const inputResolution = resolveSkillInput({
+      skill: pending.selectedSkill,
+      values: mergedValues,
+      runContext: pending.runContext,
+    });
+    if (inputResolution.status !== "complete") {
+      const inputRequest = createSkillUserInputRequest({
+        createId,
+        sessionId: pending.sessionId,
+        requestId: pending.requestId,
         skill: pending.selectedSkill,
-        values: mergedValues,
-        runContext: pending.runContext,
+        inputResolution,
+        createdAt: new Date(getNowMs(options.now)).toISOString(),
       });
-      if (inputResolution.status !== "complete") {
-        pendingSkillInputRequests.delete(input.inputRequestId);
-        try {
-          await markPersistedSkillInputCompleted(pending);
-        } catch {
-          return {
-            ok: false,
-            message: "Failed to persist skill input completion.",
-          };
-        }
-        const inputRequest = createSkillUserInputRequest({
-          createId,
-          sessionId: pending.sessionId,
-          requestId: pending.requestId,
-          skill: pending.selectedSkill,
-          inputResolution,
-          createdAt: new Date(getNowMs(options.now)).toISOString(),
-        });
-        const persisted = createPendingSkillInputState({
+      const persisted = createPendingSkillInputState({
+        inputRequest,
+        sessionId: pending.sessionId,
+        requestId: pending.requestId,
+        userMessage: pending.userMessage,
+        userMessageId: pending.userMessageId,
+        selectedSkillName: pending.selectedSkill.manifest.name,
+        ...(pending.workspaceId ? { workspaceId: pending.workspaceId } : {}),
+        ...(pending.workspaceSummary
+          ? { workspaceSummary: pending.workspaceSummary }
+          : {}),
+        partialValues: inputResolution.values,
+      });
+      const emitStatus = createChatStatusEmitter({
+        sessionId: pending.sessionId,
+        requestId: pending.requestId,
+        startedAtMs: getNowMs(options.now),
+        now: options.now,
+        onStatusEvent: runtimeOptions.onStatusEvent,
+        onStreamEvent: runtimeOptions.onStreamEvent,
+        onPersistEvent(event) {
+          try {
+            const sessionActivityWrite =
+              options.chatSessionStore?.appendActivityEvent?.(
+                event.sessionId,
+                event,
+              );
+            void sessionActivityWrite?.catch(() => undefined);
+          } catch {
+            // Observability writes must not fail the response.
+          }
+        },
+        async onRequiredPersistEvent(event) {
+          await persistRequiredChatActivityEvent(options.chatSessionStore, event);
+        },
+      });
+      try {
+        await emitStatus.sendWaitingForInput(
           inputRequest,
-          sessionId: pending.sessionId,
-          requestId: pending.requestId,
-          userMessage: pending.userMessage,
-          userMessageId: pending.userMessageId,
-          selectedSkillName: pending.selectedSkill.manifest.name,
-          ...(pending.workspaceId ? { workspaceId: pending.workspaceId } : {}),
-          ...(pending.workspaceSummary
-            ? { workspaceSummary: pending.workspaceSummary }
-            : {}),
-          partialValues: inputResolution.values,
-        });
-        const emitStatus = createChatStatusEmitter({
-          sessionId: pending.sessionId,
-          requestId: pending.requestId,
-          startedAtMs: getNowMs(options.now),
-          now: options.now,
-          onStatusEvent: runtimeOptions.onStatusEvent,
-          onStreamEvent: runtimeOptions.onStreamEvent,
-          onPersistEvent(event) {
-            try {
-              const sessionActivityWrite =
-                options.chatSessionStore?.appendActivityEvent?.(
-                  event.sessionId,
-                  event,
-                );
-              void sessionActivityWrite?.catch(() => undefined);
-            } catch {
-              // Observability writes must not fail the response.
-            }
-          },
-          async onRequiredPersistEvent(event) {
-            await persistRequiredChatActivityEvent(options.chatSessionStore, event);
-          },
-        });
-        try {
-          await emitStatus.sendWaitingForInput(
-            inputRequest,
-            "Skill input required.",
-            persisted,
-          );
-        } catch {
-          return {
-            ok: false,
-            message: "Failed to persist skill input request.",
-          };
-        }
-        pendingSkillInputRequests.set(inputRequest.id, {
-          ...toInMemoryPendingSkillInputState({
-            persisted,
-            selectedSkill: pending.selectedSkill,
-            ...(pending.runContext ? { runContext: pending.runContext } : {}),
-          }),
-        });
+          "Skill input required.",
+          persisted,
+        );
+      } catch {
         return {
           ok: false,
-          message: "Skill input required.",
+          message: "Failed to persist skill input request.",
         };
       }
-
-      pendingSkillInputRequests.delete(input.inputRequestId);
       try {
         await markPersistedSkillInputCompleted(pending);
       } catch {
@@ -1081,30 +1065,70 @@ export function createChatService(options: {
           message: "Failed to persist skill input completion.",
         };
       }
-      const result = await sendMessageInternal(
-        {
-          sessionId: pending.sessionId,
-          requestId: pending.requestId,
-          message: pending.userMessage,
-          selectedSkillName: pending.selectedSkill.manifest.name,
-          ...(pending.workspaceId ? { workspaceId: pending.workspaceId } : {}),
-          ...(pending.workspaceSummary
-            ? { workspaceSummary: pending.workspaceSummary }
-            : {}),
-        },
-        runtimeOptions,
-        {
-          skipUserMessageAppend: true,
-          userMessageId: pending.userMessageId,
-          forcedSkill: pending.selectedSkill,
-          resolvedSkillInput: inputResolution,
-          ...(pending.runContext ? { preResolvedRunContext: pending.runContext } : {}),
-          ...(pending.workspaceSummary
-            ? { preResolvedWorkspaceSummary: pending.workspaceSummary }
-            : {}),
-        },
-      );
-      return result;
+      pendingSkillInputRequests.delete(input.inputRequestId);
+      pendingSkillInputRequests.set(inputRequest.id, {
+        ...toInMemoryPendingSkillInputState({
+          persisted,
+          selectedSkill: pending.selectedSkill,
+          ...(pending.runContext ? { runContext: pending.runContext } : {}),
+        }),
+      });
+      return {
+        ok: false,
+        message: "Skill input required.",
+      };
+    }
+
+    try {
+      await markPersistedSkillInputCompleted(pending);
+    } catch {
+      return {
+        ok: false,
+        message: "Failed to persist skill input completion.",
+      };
+    }
+    pendingSkillInputRequests.delete(input.inputRequestId);
+    const result = await sendMessageInternal(
+      {
+        sessionId: pending.sessionId,
+        requestId: pending.requestId,
+        message: pending.userMessage,
+        selectedSkillName: pending.selectedSkill.manifest.name,
+        ...(pending.workspaceId ? { workspaceId: pending.workspaceId } : {}),
+        ...(pending.workspaceSummary
+          ? { workspaceSummary: pending.workspaceSummary }
+          : {}),
+      },
+      runtimeOptions,
+      {
+        skipUserMessageAppend: true,
+        userMessageId: pending.userMessageId,
+        forcedSkill: pending.selectedSkill,
+        resolvedSkillInput: inputResolution,
+        ...(pending.runContext ? { preResolvedRunContext: pending.runContext } : {}),
+        ...(pending.workspaceSummary
+          ? { preResolvedWorkspaceSummary: pending.workspaceSummary }
+          : {}),
+      },
+    );
+    return result;
+  }
+
+  return {
+    async respondSkillInput(input, runtimeOptions = {}) {
+      if (inFlightSkillInputResponses.has(input.inputRequestId)) {
+        return {
+          ok: false,
+          message: "Skill input response already in progress.",
+        };
+      }
+
+      inFlightSkillInputResponses.add(input.inputRequestId);
+      try {
+        return await respondSkillInputOnce(input, runtimeOptions);
+      } finally {
+        inFlightSkillInputResponses.delete(input.inputRequestId);
+      }
     },
     sendMessage: sendMessageInternal,
   };

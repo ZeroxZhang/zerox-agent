@@ -4140,3 +4140,24 @@
   - `npm test -- src/shared/skillExecutionContract.test.ts src/shared/skills.test.ts src/main/skillExecutionService.test.ts src/main/chatService.test.ts src/shared/toolPermissions.test.ts src/main/toolAuthorizationService.test.ts` -> 6 files / 109 tests passed.
   - `npm run harness:check` -> passed.
   - `git diff --check` -> passed.
+
+## 2026-06-23 - Worker T4 Task 4 Guided Skill Input Response Serialization Repair
+
+- Summary:
+  - Added per-`inputRequestId` in-flight serialization so concurrent guided input responses cannot recover and execute the same pending request twice.
+  - Required durable activity persistence for completion claims, including recovered pending requests.
+  - Reordered invalid/still-missing responses to persist the next pending wait before consuming the old request, preserving retryability when that write fails.
+  - Aligned `SkillInputResponseResult` with the full chat send-message result shape returned by successful resumed execution.
+- Changed files:
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+  - `src/shared/chat.ts`
+  - `src/shared/chatStream.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/main/chatService.test.ts src/main/skillExecutionService.test.ts src/shared/skillExecutionContract.test.ts src/shared/skills.test.ts src/shared/chatStream.test.ts` -> failed as expected: invalid retry lost the original request, concurrent completion executed twice, and recovered completion executed without durable activity persistence.
+- GREEN / verification evidence:
+  - `npm test -- src/main/chatService.test.ts src/main/skillExecutionService.test.ts src/shared/skillExecutionContract.test.ts src/shared/skills.test.ts src/shared/chatStream.test.ts` -> 5 files / 68 tests passed.
+  - `npm run build` -> passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.

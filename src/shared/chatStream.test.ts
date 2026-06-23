@@ -3,6 +3,7 @@ import type {
   ChatStreamEvent,
   ChatTaskStatusEvent,
   SkillInputResponse,
+  SkillInputResponseResult,
   SkillUserInputRequest,
 } from "./chat";
 
@@ -118,6 +119,27 @@ describe("chat stream contract", () => {
     expect(inputRequest.fields[0]).not.toHaveProperty("value");
     expect(inputRequest.fields[1]).not.toHaveProperty("options");
     expect(inputRequest.fields[1]).toHaveProperty("choices");
+  });
+
+  it("accepts full chat send-result shape for successful guided input responses", () => {
+    const result = {
+      ok: true,
+      reply: "Skill run completed.",
+      sessionId: "session_1",
+      relatedMemories: [],
+      memoryId: null,
+      selectedSkill: {
+        name: "research",
+        displayName: "Research",
+      },
+      agentStatus: {
+        state: "completed",
+        toolCallsExecuted: 0,
+      },
+    } satisfies SkillInputResponseResult;
+
+    expect(result.reply).toBe("Skill run completed.");
+    expect(result.selectedSkill.name).toBe("research");
   });
 
   it("accepts typed status stream events for streaming and guided input", () => {

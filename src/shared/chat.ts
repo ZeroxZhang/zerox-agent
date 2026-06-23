@@ -141,14 +141,7 @@ export type SkillPendingInputState = {
   partialValues: Record<string, string | number | boolean>;
 };
 
-export type SkillInputResponseResult =
-  | {
-      ok: true;
-    }
-  | {
-      ok: false;
-      message: string;
-    };
+export type SkillInputResponseResult = SendChatMessageResult;
 
 type ChatStreamEventBase = {
   sessionId: string;

@@ -2329,6 +2329,114 @@ describe("chat service", () => {
     });
   });
 
+  it("keeps the original guided input request answerable when invalid retry wait persistence fails", async () => {
+    const chatMessages: AppendChatMessageInput[] = [];
+    const initialStreamEvents: ChatStreamEvent[] = [];
+    const baseStore = createChatSessionStore(chatMessages);
+    let pendingPersistCount = 0;
+    let agentLoopCalls = 0;
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: {
+        ...baseStore,
+        async appendActivityEvent(sessionId, event) {
+          if (event.pendingSkillInput?.status === "pending") {
+            pendingPersistCount += 1;
+            if (pendingPersistCount === 2) {
+              throw new Error("next wait persistence failed");
+            }
+          }
+          return baseStore.appendActivityEvent(sessionId, event);
+        },
+      },
+      workspaceService: {
+        async resolveRunContext() {
+          return buildPrimaryRunContext({
+            workspaceId: "workspace_project",
+            workspaceRoot: "/workspace/project",
+          });
+        },
+      },
+      toolExecutor: createToolExecutor(),
+      async runAgentLoop(messages) {
+        agentLoopCalls += 1;
+        return {
+          status: "succeeded",
+          summary: "guided retry done",
+          turns: 1,
+          messages,
+          toolCallsExecuted: 0,
+        };
+      },
+      discoverSkills: async () => ({
+        skills: [
+          createSkillRecord({
+            name: "local-file-organizer",
+            manifest: {
+              inputs: [
+                {
+                  name: "targetDir",
+                  label: "Target directory",
+                  type: "path",
+                  required: true,
+                },
+              ],
+            },
+          }),
+        ],
+        errors: [],
+      }),
+      createId: createSequentialId("invalid_persist_fail"),
+      now: () => new Date("2026-06-23T08:00:00.000Z"),
+    });
+
+    await service.sendMessage(
+      {
+        sessionId: "session_1",
+        requestId: "request_1",
+        message: "organize files retry after failed wait",
+        selectedSkillName: "local-file-organizer",
+        workspaceId: "workspace_project",
+      },
+      { onStreamEvent: (event) => initialStreamEvents.push(event) },
+    );
+    const inputRequest = initialStreamEvents.find(
+      (event): event is Extract<ChatStreamEvent, { type: "waiting_for_input" }> =>
+        event.type === "waiting_for_input",
+    )?.inputRequest;
+
+    await expect(
+      service.respondSkillInput({
+        inputRequestId: inputRequest?.id ?? "",
+        values: { targetDir: "/etc" },
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      message: "Failed to persist skill input request.",
+    });
+    expect(agentLoopCalls).toBe(0);
+
+    await expect(
+      service.respondSkillInput({
+        inputRequestId: inputRequest?.id ?? "",
+        values: { targetDir: "/workspace/project/docs" },
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      reply: "guided retry done",
+    });
+    expect(agentLoopCalls).toBe(1);
+    expect(chatMessages.filter((message) => message.role === "assistant")).toHaveLength(
+      1,
+    );
+  });
+
   it("resumes a guided skill input response in the same session without duplicating the user message", async () => {
     const chatMessages: AppendChatMessageInput[] = [];
     const initialStreamEvents: ChatStreamEvent[] = [];
@@ -2569,6 +2677,115 @@ describe("chat service", () => {
     );
   });
 
+  it("rejects concurrent guided input responses while the durable completion claim is in flight", async () => {
+    const chatMessages: AppendChatMessageInput[] = [];
+    const initialStreamEvents: ChatStreamEvent[] = [];
+    const baseStore = createChatSessionStore(chatMessages);
+    const claimGate = createDeferred<void>();
+    let claimPersistStarted = false;
+    let claimPersistCount = 0;
+    let agentLoopCalls = 0;
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: {
+        ...baseStore,
+        async appendActivityEvent(sessionId, event) {
+          if (event.pendingSkillInput?.status === "completed") {
+            claimPersistStarted = true;
+            claimPersistCount += 1;
+            await claimGate.promise;
+          }
+          return baseStore.appendActivityEvent(sessionId, event);
+        },
+      },
+      workspaceService: {
+        async resolveRunContext() {
+          return buildPrimaryRunContext({
+            workspaceId: "workspace_project",
+            workspaceRoot: "/workspace/project",
+          });
+        },
+      },
+      toolExecutor: createToolExecutor(),
+      async runAgentLoop(messages) {
+        agentLoopCalls += 1;
+        return {
+          status: "succeeded",
+          summary: "guided skill done once",
+          turns: 1,
+          messages,
+          toolCallsExecuted: 0,
+        };
+      },
+      discoverSkills: async () => ({
+        skills: [
+          createSkillRecord({
+            name: "local-file-organizer",
+            manifest: {
+              inputs: [
+                {
+                  name: "targetDir",
+                  label: "Target directory",
+                  type: "path",
+                  required: true,
+                },
+              ],
+            },
+          }),
+        ],
+        errors: [],
+      }),
+      createId: createSequentialId("guided_concurrent"),
+      now: () => new Date("2026-06-23T08:00:00.000Z"),
+    });
+
+    await service.sendMessage(
+      {
+        sessionId: "session_1",
+        requestId: "request_1",
+        message: "organize files concurrently",
+        selectedSkillName: "local-file-organizer",
+        workspaceId: "workspace_project",
+      },
+      { onStreamEvent: (event) => initialStreamEvents.push(event) },
+    );
+    const inputRequest = initialStreamEvents.find(
+      (event): event is Extract<ChatStreamEvent, { type: "waiting_for_input" }> =>
+        event.type === "waiting_for_input",
+    )?.inputRequest;
+
+    const firstResponse = service.respondSkillInput({
+      inputRequestId: inputRequest?.id ?? "",
+      values: { targetDir: "/workspace/project/docs" },
+    });
+    await waitFor(() => claimPersistStarted);
+    const secondResponse = service.respondSkillInput({
+      inputRequestId: inputRequest?.id ?? "",
+      values: { targetDir: "/workspace/project/docs" },
+    });
+    claimGate.resolve();
+
+    await expect(firstResponse).resolves.toMatchObject({
+      ok: true,
+      reply: "guided skill done once",
+    });
+    await expect(secondResponse).resolves.toEqual({
+      ok: false,
+      message: "Skill input response already in progress.",
+    });
+    expect(claimPersistCount).toBe(1);
+    expect(agentLoopCalls).toBe(1);
+    expect(chatMessages.filter((message) => message.role === "assistant")).toHaveLength(
+      1,
+    );
+  });
+
   it("recovers pending guided skill input from persisted session activity after service restart", async () => {
     const chatMessages: AppendChatMessageInput[] = [];
     const initialStreamEvents: ChatStreamEvent[] = [];
@@ -2714,6 +2931,108 @@ describe("chat service", () => {
       message: "Unknown skill input request.",
     });
     expect(capturedMessages).toHaveLength(1);
+  });
+
+  it("fails recovered guided input completion when durable activity persistence is unavailable", async () => {
+    const chatMessages: AppendChatMessageInput[] = [];
+    const initialStreamEvents: ChatStreamEvent[] = [];
+    const persistentStore = createChatSessionStore(chatMessages);
+    const storeWithoutActivityPersistence = {
+      list: persistentStore.list,
+      get: persistentStore.get,
+      appendMessage: persistentStore.appendMessage,
+      addTokenUsage: persistentStore.addTokenUsage,
+      attachGoal: persistentStore.attachGoal,
+      clearActiveGoal: persistentStore.clearActiveGoal,
+    };
+    let agentLoopCalls = 0;
+    const dependencies = {
+      chatClient: {
+        async complete() {
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      workspaceService: {
+        async resolveRunContext() {
+          return buildPrimaryRunContext({
+            workspaceId: "workspace_project",
+            workspaceRoot: "/workspace/project",
+          });
+        },
+      },
+      toolExecutor: createToolExecutor(),
+      discoverSkills: async () => ({
+        skills: [
+          createSkillRecord({
+            name: "local-file-organizer",
+            manifest: {
+              inputs: [
+                {
+                  name: "targetDir",
+                  label: "Target directory",
+                  type: "path",
+                  required: true,
+                },
+              ],
+            },
+          }),
+        ],
+        errors: [],
+      }),
+      now: () => new Date("2026-06-23T08:00:00.000Z"),
+    };
+    const firstService = createChatService({
+      ...dependencies,
+      chatSessionStore: persistentStore,
+      createId: createSequentialId("missing_claim_writer_first"),
+    });
+
+    await firstService.sendMessage(
+      {
+        sessionId: "session_1",
+        requestId: "request_1",
+        message: "organize files after missing claim writer",
+        selectedSkillName: "local-file-organizer",
+        workspaceId: "workspace_project",
+      },
+      { onStreamEvent: (event) => initialStreamEvents.push(event) },
+    );
+    const inputRequest = initialStreamEvents.find(
+      (event): event is Extract<ChatStreamEvent, { type: "waiting_for_input" }> =>
+        event.type === "waiting_for_input",
+    )?.inputRequest;
+
+    const freshService = createChatService({
+      ...dependencies,
+      chatSessionStore: storeWithoutActivityPersistence,
+      async runAgentLoop(messages) {
+        agentLoopCalls += 1;
+        return {
+          status: "succeeded",
+          summary: "should not run without durable claim writer",
+          turns: 1,
+          messages,
+          toolCallsExecuted: 0,
+        };
+      },
+      createId: createSequentialId("missing_claim_writer_second"),
+    });
+
+    await expect(
+      freshService.respondSkillInput({
+        inputRequestId: inputRequest?.id ?? "",
+        values: { targetDir: "/workspace/project/docs" },
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      message: "Failed to persist skill input completion.",
+    });
+    expect(agentLoopCalls).toBe(0);
+    expect(chatMessages.filter((message) => message.role === "assistant")).toEqual(
+      [],
+    );
   });
 
   it("rejects a guided skill input response after the pending request was completed", async () => {
