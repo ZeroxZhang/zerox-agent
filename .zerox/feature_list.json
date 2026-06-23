@@ -1492,6 +1492,56 @@
         "npm run dist:mac",
         "git diff --check"
       ]
+    },
+    {
+      "id": "P16-v2.7.0-ui-interaction",
+      "status": "planned",
+      "title": "v2.7.0 UI and interaction redesign",
+      "files": [
+        "docs/superpowers/specs/2026-06-23-zerox-agent-2-7-0-ui-interaction-design.md",
+        "docs/superpowers/plans/2026-06-23-zerox-agent-2-7-0-ui-interaction.md",
+        "src/shared/navigation.ts",
+        "src/shared/appMeta.ts",
+        "src/shared/materialNavigation.ts",
+        "src/shared/chat.ts",
+        "src/shared/skills.ts",
+        "src/shared/skillExecutionContract.ts",
+        "src/main/chatService.ts",
+        "src/main/agentLoop.ts",
+        "src/main/providers/providerChatClient.ts",
+        "src/main/providers/streamProcessor.ts",
+        "src/main/ipc/index.ts",
+        "src/preload/index.ts",
+        "src/renderer/components/AgentChatPanel.tsx",
+        "src/renderer/chatTaskActivity.ts",
+        "src/renderer/styles/chat.css",
+        "src/renderer/styles/composer.css",
+        "src/renderer/styles/responsive.css",
+        ".zerox/progress.md"
+      ],
+      "definitionOfDone": [
+        "Primary navigation is Chat, Runs, Tasks, Settings; Overview diagnostics live under Settings with compatibility routing",
+        "Chat supports first-class streamed answer output with distinct collapsed thinking/process output",
+        "Long answers, code blocks, tool results, and thinking/process details auto-collapse with accessible expansion controls",
+        "Interactive and guided skills preflight required inputs, pause for missing user input even in auto mode, and resume from structured responses",
+        "Guided skill input values are validated before prompts, permissions, or filesystem scope and cannot bypass ToolAuthorizationService or workspace sandbox checks",
+        "System icons are unified through a local icon component and raw glyph controls are replaced",
+        "UI/UE design artifacts cover empty, streaming, thinking, guided input, approval, paused, error, restored, desktop, and narrow states",
+        "Focused tests, full verification, production smoke, packaged smoke, black-box QA, and independent acceptance pass",
+        "package metadata, README, feature list, and progress evidence reflect v2.7.0"
+      ],
+      "verification": [
+        "npm test",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:score",
+        "npm run harness:check",
+        "npm run dist:mac",
+        "npm run smoke:prod:built",
+        "Independent packaged-app UI acceptance officer returns ACCEPTED",
+        "git diff --check"
+      ]
     }
   ]
 }

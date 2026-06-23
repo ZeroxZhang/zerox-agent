@@ -1,5 +1,26 @@
 # Zerox Harness Progress
 
+## 2026-06-23 - v2.7.0 UI/Interaction Planning
+
+- Request: begin the 2.7.0 major iteration to全面优化/重构交互和界面, remove Overview from primary navigation, add streamed answer/thinking separation, support interactive/guided skills, optimize system icons, and complete planning/development/testing/independent acceptance with architect and subagent coordination.
+- Approved direction: 方案1, Chat-first consumer experience with progressive disclosure.
+- Changed files:
+  - `.zerox/feature_list.json`
+  - `docs/superpowers/specs/2026-06-23-zerox-agent-2-7-0-ui-interaction-design.md`
+  - `docs/superpowers/plans/2026-06-23-zerox-agent-2-7-0-ui-interaction.md`
+  - `.zerox/progress.md`
+- Planning/design evidence:
+  - Added feature `P16-v2.7.0-ui-interaction` as the only unfinished feature.
+  - Top-level architecture, UI/UX, guided-skill interaction, and QA/acceptance subagent findings were folded into the approved spec.
+  - Implementation plan defines TDD slices for navigation relocation, stream contracts, provider/agent-loop streaming, guided skill input, renderer UX, icon/design artifacts, and independent acceptance.
+- Verification evidence:
+  - `node -e "const f=require('./.zerox/feature_list.json'); const unfinished=f.features.filter(x=>x.status!=='done'); if (unfinished.length!==1 || unfinished[0].id!=='P16-v2.7.0-ui-interaction' || unfinished[0].status!=='planned') { console.error(JSON.stringify(unfinished,null,2)); process.exit(1); } console.log('feature_list ok:', unfinished[0].id, unfinished[0].status);"` -> `feature_list ok: P16-v2.7.0-ui-interaction planned`.
+  - `rg -n "TODO|TBD|FIXME|PLACEHOLDER|\\[[^\\]]*(list|commands|scenario|focused|full|fill|paste|TODO)[^\\]]*\\]|If .*differ|If .*does not|optional" docs/superpowers/specs/2026-06-23-zerox-agent-2-7-0-ui-interaction-design.md docs/superpowers/plans/2026-06-23-zerox-agent-2-7-0-ui-interaction.md` -> no matches.
+  - `npm install` -> up to date; audit reported 12 existing vulnerabilities.
+  - `npm test` -> 165 files / 1077 tests passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+
 ## 2026-06-22 - v2.6.0 Hardening Release
 
 - Request: assign a new version for the completed hardening iteration, update README/release metadata, package macOS artifacts, publish the release, and push.
