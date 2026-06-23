@@ -169,4 +169,36 @@ describe("chat stream contract", () => {
     expect(statusEvent.status).toBe(streamingStatus);
     expect(waitingStatus.inputRequest.fields[0].name).toBe("topic");
   });
+
+  it("accepts terminal stream events without requiring messages", () => {
+    const terminalEvents = [
+      {
+        type: "completed",
+        sessionId: "session_3",
+        requestId: "request_3",
+        createdAt: "2026-06-23T08:00:06.000Z",
+      },
+      {
+        type: "failed",
+        sessionId: "session_3",
+        requestId: "request_3",
+        createdAt: "2026-06-23T08:00:07.000Z",
+      },
+      {
+        type: "canceled",
+        sessionId: "session_3",
+        requestId: "request_3",
+        createdAt: "2026-06-23T08:00:08.000Z",
+      },
+    ] satisfies ChatStreamEvent[];
+
+    expect(terminalEvents.map((event) => event.type)).toEqual([
+      "completed",
+      "failed",
+      "canceled",
+    ]);
+    expect(terminalEvents.every((event) => !("message" in event))).toBe(true);
+    expect(chatSource).toContain('type: "completed" | "failed" | "canceled"');
+    expect(chatSource).toContain("message?: string");
+  });
 });

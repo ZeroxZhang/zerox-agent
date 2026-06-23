@@ -3906,3 +3906,20 @@
   - `npm run harness:check` -> passed.
   - `git diff --check` -> passed.
   - `npm run build` -> passed.
+
+## 2026-06-23 - Worker T2 Task 2 Follow-Up Terminal Stream Messages
+
+- Summary:
+  - Collapsed terminal chat stream events into one `completed | failed | canceled` union arm.
+  - Made terminal stream event `message` optional for all three terminal states.
+  - Added shared contract coverage for completed, failed, and canceled events without messages.
+- Changed files:
+  - `src/shared/chat.ts`
+  - `src/shared/chatStream.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/shared/chatStream.test.ts src/preload/index.test.ts src/main/chatService.test.ts src/main/chatSessionStore.test.ts` -> failed as expected because the shared contract still had separate terminal arms.
+- GREEN / verification evidence:
+  - `npm test -- src/shared/chatStream.test.ts src/preload/index.test.ts src/main/chatService.test.ts src/main/chatSessionStore.test.ts` -> 4 files / 56 tests passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.

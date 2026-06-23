@@ -167,16 +167,8 @@ export type ChatStreamEvent =
       inputRequest: SkillUserInputRequest;
     })
   | (ChatStreamEventBase & {
-      type: "completed";
+      type: "completed" | "failed" | "canceled";
       message?: string;
-    })
-  | (ChatStreamEventBase & {
-      type: "failed";
-      message: string;
-    })
-  | (ChatStreamEventBase & {
-      type: "canceled";
-      message: string;
     });
 
 export type ChatRelatedMemory = {
