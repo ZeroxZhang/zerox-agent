@@ -3,10 +3,13 @@ import { randomUUID } from "node:crypto";
 import type { AppContainer } from "../container";
 import type {
   CancelChatMessageResult,
+  ChatStreamEvent,
   ChatSessionOperationResult,
   ChatTaskStatusEvent,
   SendChatMessageInput,
   SendChatMessageResult,
+  SkillInputResponse,
+  SkillInputResponseResult,
 } from "../../shared/chat";
 import type {
   CancelScheduledTaskRunResult,
@@ -676,6 +679,11 @@ function registerChatIpcHandlers(container: AppContainer): void {
               sender.send("chat:statusEvent", statusEvent);
             }
           },
+          onStreamEvent(streamEvent: ChatStreamEvent) {
+            if (!sender.isDestroyed()) {
+              sender.send("chat:streamEvent", streamEvent);
+            }
+          },
         });
       } catch (error) {
         return toChatSendMessageFailure(error);
@@ -718,6 +726,14 @@ function registerChatIpcHandlers(container: AppContainer): void {
         message: `已请求中断 ${canceledCount} 个任务。`,
       };
     },
+  );
+  ipcMain.handle(
+    "chat:respondSkillInput",
+    (
+      _event,
+      input: SkillInputResponse,
+    ): Promise<SkillInputResponseResult> =>
+      container.chatService().respondSkillInput(input),
   );
   ipcMain.handle("chatSessions:list", () => container.listChatSessions());
   ipcMain.handle("chatSessions:get", (_event, sessionId: string) =>

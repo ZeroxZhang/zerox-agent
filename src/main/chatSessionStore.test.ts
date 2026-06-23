@@ -376,6 +376,81 @@ describe("chat session store", () => {
     expect(loaded?.workspaceSummary).toBeUndefined();
   });
 
+  it("normalizes persisted streaming and waiting input activity states", async () => {
+    await writeFile(
+      path.join(configDir, "chat-sessions.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        sessions: [
+          {
+            id: "legacy_activity",
+            title: "技能会话",
+            summary: "等待输入",
+            messages: [],
+            activity: {
+              updatedAt: "2026-06-23T08:00:01.000Z",
+              statusEvents: [
+                {
+                  sessionId: "legacy_activity",
+                  state: "streaming",
+                  message: "Streaming answer",
+                  createdAt: "2026-06-23T08:00:00.000Z",
+                  elapsedMs: 100,
+                },
+                {
+                  sessionId: "legacy_activity",
+                  state: "waiting_for_input",
+                  message: "Waiting for skill input",
+                  createdAt: "2026-06-23T08:00:01.000Z",
+                  elapsedMs: 200,
+                  inputRequest: {
+                    id: "input_1",
+                    sessionId: "legacy_activity",
+                    requestId: "request_1",
+                    skillName: "onepager",
+                    skillDisplayName: "OnePager",
+                    message: "Choose a source path.",
+                    fields: [
+                      {
+                        name: "sourcePath",
+                        label: "Source path",
+                        type: "path",
+                        required: true,
+                      },
+                    ],
+                    createdAt: "2026-06-23T08:00:01.000Z",
+                  },
+                },
+              ],
+            },
+            createdAt: "2026-06-23T08:00:00.000Z",
+            updatedAt: "2026-06-23T08:00:01.000Z",
+          },
+        ],
+      }),
+      "utf8",
+    );
+    const store = createChatSessionStore({ configDir });
+
+    const loaded = await store.get("legacy_activity");
+
+    expect(loaded?.activity?.statusEvents.map((event) => event.state)).toEqual([
+      "streaming",
+      "waiting_for_input",
+    ]);
+    expect(loaded?.activity?.statusEvents.at(-1)).toMatchObject({
+      inputRequest: {
+        id: "input_1",
+        fields: [
+          {
+            name: "sourcePath",
+            type: "path",
+          },
+        ],
+      },
+    });
+  });
+
   it("serializes concurrent session mutations without dropping messages", async () => {
     const store = createChatSessionStore({
       configDir,

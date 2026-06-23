@@ -34,10 +34,13 @@ import type {
   ChatRelatedMemory,
   ChatSessionGoalSummary,
   ChatSessionTokenUsage,
+  ChatStreamEvent,
   ChatTaskStatusEvent,
   ChatWorkspaceSummary,
   SendChatMessageInput,
   SendChatMessageResult,
+  SkillInputResponse,
+  SkillInputResponseResult,
 } from "../shared/chat";
 import { getSystemPromptAssembler } from "../shared/agentProtocol";
 import type { GoalReviewDecision } from "../shared/agentGoalReview";
@@ -68,11 +71,13 @@ export type ChatService = {
     input: SendChatMessageInput,
     options?: SendChatMessageRuntimeOptions,
   ): Promise<SendChatMessageResult>;
+  respondSkillInput(input: SkillInputResponse): Promise<SkillInputResponseResult>;
 };
 
 export type SendChatMessageRuntimeOptions = {
   signal?: AbortSignal;
   onStatusEvent?: (event: ChatTaskStatusEvent) => void;
+  onStreamEvent?: (event: ChatStreamEvent) => void;
 };
 
 type ChatContinuationState = {
@@ -148,6 +153,13 @@ export function createChatService(options: {
   const pendingContinuations = new Map<string, ChatContinuationState>();
 
   return {
+    async respondSkillInput(_input) {
+      return {
+        ok: false,
+        message: "Guided skill input is not wired yet.",
+      };
+    },
+
     async sendMessage(input, runtimeOptions = {}) {
       const userMessage = input.message.trim();
       if (!userMessage) {

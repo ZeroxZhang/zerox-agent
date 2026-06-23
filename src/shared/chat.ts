@@ -100,6 +100,95 @@ export type SendChatMessageInput = {
   history?: ChatHistoryMessage[];
 };
 
+export type SkillInputValue = string | number | boolean | null;
+
+export type SkillInputOption = {
+  label: string;
+  value: SkillInputValue;
+  description?: string;
+};
+
+export type SkillInputField = {
+  name: string;
+  label: string;
+  type: "text" | "textarea" | "number" | "boolean" | "select" | "path";
+  required: boolean;
+  description?: string;
+  placeholder?: string;
+  options?: SkillInputOption[];
+  defaultValue?: SkillInputValue;
+  value?: SkillInputValue;
+  validationMessage?: string;
+};
+
+export type SkillUserInputRequest = {
+  id: string;
+  sessionId: string;
+  requestId: string;
+  skillName: string;
+  skillDisplayName: string;
+  message: string;
+  fields: SkillInputField[];
+  createdAt: string;
+};
+
+export type SkillInputResponse = {
+  requestId: string;
+  inputRequestId: string;
+  values: Record<string, SkillInputValue>;
+};
+
+export type SkillInputResponseResult =
+  | {
+      ok: true;
+    }
+  | {
+      ok: false;
+      message: string;
+    };
+
+type ChatStreamEventBase = {
+  sessionId: string;
+  requestId: string;
+  createdAt: string;
+};
+
+export type ChatStreamEvent =
+  | (ChatStreamEventBase & {
+      type: "answer_delta";
+      delta: string;
+    })
+  | (ChatStreamEventBase & {
+      type: "thinking_delta";
+      delta: string;
+    })
+  | (ChatStreamEventBase & {
+      type: "tool_call_delta";
+      toolCallId: string;
+      toolName?: string;
+      argumentsDelta?: string;
+    })
+  | (ChatStreamEventBase & {
+      type: "status";
+      status: ChatTaskStatusEvent;
+    })
+  | (ChatStreamEventBase & {
+      type: "waiting_for_input";
+      inputRequest: SkillUserInputRequest;
+    })
+  | (ChatStreamEventBase & {
+      type: "completed";
+      message?: string;
+    })
+  | (ChatStreamEventBase & {
+      type: "failed";
+      message: string;
+    })
+  | (ChatStreamEventBase & {
+      type: "canceled";
+      message: string;
+    });
+
 export type ChatRelatedMemory = {
   id: string;
   title: string;
@@ -131,8 +220,10 @@ export type ChatTaskStatusEvent = {
     | "memory"
     | "model"
     | "reasoning"
+    | "streaming"
     | "tool_call"
     | "tool_result"
+    | "waiting_for_input"
     | "paused"
     | "canceled"
     | "completed"
@@ -150,6 +241,7 @@ export type ChatTaskStatusEvent = {
   workspaceSummary?: ChatWorkspaceSummary;
   toolCallsExecuted?: number;
   maxTurns?: number;
+  inputRequest?: SkillUserInputRequest;
   ok?: boolean;
 };
 

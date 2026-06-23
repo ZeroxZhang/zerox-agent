@@ -7,6 +7,7 @@ import type {
 } from "../shared/agentBootstrap";
 import type {
   CancelChatMessageResult,
+  ChatStreamEvent,
   ChatSessionListItem,
   ChatSessionOperationResult,
   ChatSessionRecord,
@@ -14,6 +15,8 @@ import type {
   GoalProgressEvent,
   SendChatMessageInput,
   SendChatMessageResult,
+  SkillInputResponse,
+  SkillInputResponseResult,
 } from "../shared/chat";
 import type { DesktopRuntimeInfo } from "../shared/desktopRuntime";
 import type { AgentEvalReport } from "../shared/agentEval";
@@ -366,6 +369,20 @@ const buildingAgent = {
     requestId?: string,
   ): Promise<CancelChatMessageResult> =>
     ipcRenderer.invoke("chat:cancelMessage", requestId),
+  onChatStreamEvent: (callback: (event: ChatStreamEvent) => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      data: ChatStreamEvent,
+    ) => callback(data);
+    ipcRenderer.on("chat:streamEvent", handler);
+    return () => {
+      ipcRenderer.removeListener("chat:streamEvent", handler);
+    };
+  },
+  respondSkillInput: (
+    input: SkillInputResponse,
+  ): Promise<SkillInputResponseResult> =>
+    ipcRenderer.invoke("chat:respondSkillInput", input),
   onChatTaskStatusEvent: (callback: (event: ChatTaskStatusEvent) => void) => {
     const handler = (
       _event: Electron.IpcRendererEvent,

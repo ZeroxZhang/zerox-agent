@@ -3855,3 +3855,30 @@
   - `npm test -- src/shared/appMeta.test.ts src/shared/navigation.test.ts src/shared/materialNavigation.test.ts src/renderer/materialDesign.test.ts` -> 4 files / 45 tests passed.
   - `npm run harness:check` -> passed.
   - `git diff --check` -> passed.
+
+## 2026-06-23 - Worker T2 Task 2 Chat Stream Contract And IPC Bridge
+
+- Summary:
+  - Added shared guided skill input and chat-layer stream event contracts without reusing provider `StreamEvent`.
+  - Added preload APIs for `onChatStreamEvent` and `respondSkillInput`.
+  - Bridged `chat:streamEvent` through the chat send IPC sender and added `chat:respondSkillInput`.
+  - Added a chat service stream option type and explicit not-wired guided input response.
+  - Preserved persisted `streaming` and `waiting_for_input` chat activity states with input request normalization.
+- Changed files:
+  - `src/shared/chat.ts`
+  - `src/shared/chatStream.test.ts`
+  - `src/preload/index.ts`
+  - `src/preload/index.test.ts`
+  - `src/main/ipc/index.ts`
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+  - `src/main/chatSessionStore.ts`
+  - `src/main/chatSessionStore.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/shared/chatStream.test.ts src/preload/index.test.ts src/main/chatService.test.ts src/main/chatSessionStore.test.ts` -> failed as expected: missing stream contract/preload bridge, missing `respondSkillInput`, and persisted new states normalized to `failed`.
+- GREEN / verification evidence:
+  - `npm test -- src/shared/chatStream.test.ts src/preload/index.test.ts src/main/chatService.test.ts src/main/chatSessionStore.test.ts` -> 4 files / 54 tests passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run build` -> passed.

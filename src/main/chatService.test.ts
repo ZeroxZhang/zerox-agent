@@ -67,6 +67,31 @@ function shellToolCallResponse(
 }
 
 describe("chat service", () => {
+  it("returns a structured not-wired result for guided skill input responses", async () => {
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+    });
+
+    await expect(
+      service.respondSkillInput({
+        requestId: "request_1",
+        inputRequestId: "input_1",
+        values: {
+          targetPath: "/workspace/project",
+        },
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      message: "Guided skill input is not wired yet.",
+    });
+  });
+
   it("returns a structured setup error when the model profile is incomplete", async () => {
     let completeCalled = false;
     const service = createChatService({
