@@ -4102,3 +4102,22 @@
   - `npm run build` -> passed.
   - `npm run harness:check` -> passed.
   - `git diff --check` -> passed.
+
+## 2026-06-23 - Worker T4 Task 4 Guided Skill Input Claim-Before-Resume Repair
+
+- Summary:
+  - Moved the durable pending-input completed/claimed marker before resumed model/agent execution for complete guided input responses.
+  - If the claim marker fails, `respondSkillInput` now returns a structured failure before model/agent execution or assistant message append.
+  - Removed the post-execution required completion write so duplicate-prevention does not depend on a write after side effects.
+- Changed files:
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/shared/skillExecutionContract.test.ts src/shared/skills.test.ts src/main/skillExecutionService.test.ts src/main/chatService.test.ts` -> failed as expected: completion marker failure happened after resumed agent execution, so the agent loop was called before the failure response.
+- GREEN / verification evidence:
+  - `npm test -- src/shared/skillExecutionContract.test.ts src/shared/skills.test.ts src/main/skillExecutionService.test.ts src/main/chatService.test.ts` -> 4 files / 59 tests passed.
+  - `npm test -- src/shared/skillExecutionContract.test.ts src/shared/skills.test.ts src/main/skillExecutionService.test.ts src/main/chatService.test.ts src/shared/toolPermissions.test.ts src/main/toolAuthorizationService.test.ts` -> 6 files / 108 tests passed.
+  - `npm run build` -> passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.

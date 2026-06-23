@@ -1073,6 +1073,14 @@ export function createChatService(options: {
       }
 
       pendingSkillInputRequests.delete(input.inputRequestId);
+      try {
+        await markPersistedSkillInputCompleted(pending);
+      } catch {
+        return {
+          ok: false,
+          message: "Failed to persist skill input completion.",
+        };
+      }
       const result = await sendMessageInternal(
         {
           sessionId: pending.sessionId,
@@ -1096,16 +1104,6 @@ export function createChatService(options: {
             : {}),
         },
       );
-      if (result.ok) {
-        try {
-          await markPersistedSkillInputCompleted(pending);
-        } catch {
-          return {
-            ok: false,
-            message: "Failed to persist skill input completion.",
-          };
-        }
-      }
       return result;
     },
     sendMessage: sendMessageInternal,
