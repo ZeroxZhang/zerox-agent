@@ -2792,6 +2792,99 @@ describe("chat service", () => {
     );
   });
 
+  it("does not treat missing-session activity writes as durable guided input claims", async () => {
+    const chatMessages: AppendChatMessageInput[] = [];
+    const initialStreamEvents: ChatStreamEvent[] = [];
+    const baseStore = createChatSessionStore(chatMessages);
+    let agentLoopCalls = 0;
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: {
+        ...baseStore,
+        async appendActivityEvent(sessionId, event, eventOptions) {
+          if (event.pendingSkillInput?.status === "completed") {
+            return null;
+          }
+          return baseStore.appendActivityEvent(sessionId, event, eventOptions);
+        },
+      },
+      workspaceService: {
+        async resolveRunContext() {
+          return buildPrimaryRunContext({
+            workspaceId: "workspace_project",
+            workspaceRoot: "/workspace/project",
+          });
+        },
+      },
+      toolExecutor: createToolExecutor(),
+      async runAgentLoop(messages) {
+        agentLoopCalls += 1;
+        return {
+          status: "succeeded",
+          summary: "should not run",
+          turns: 1,
+          messages,
+          toolCallsExecuted: 0,
+        };
+      },
+      discoverSkills: async () => ({
+        skills: [
+          createSkillRecord({
+            name: "local-file-organizer",
+            manifest: {
+              inputs: [
+                {
+                  name: "targetDir",
+                  label: "Target directory",
+                  type: "path",
+                  required: true,
+                },
+              ],
+            },
+          }),
+        ],
+        errors: [],
+      }),
+      createId: createSequentialId("guided_claim_null"),
+      now: () => new Date("2026-06-23T08:00:00.000Z"),
+    });
+
+    await service.sendMessage(
+      {
+        sessionId: "session_1",
+        requestId: "request_1",
+        message: "organize files with missing claim session",
+        selectedSkillName: "local-file-organizer",
+        workspaceId: "workspace_project",
+      },
+      { onStreamEvent: (event) => initialStreamEvents.push(event) },
+    );
+    const inputRequest = initialStreamEvents.find(
+      (event): event is Extract<ChatStreamEvent, { type: "waiting_for_input" }> =>
+        event.type === "waiting_for_input",
+    )?.inputRequest;
+
+    await expect(
+      service.respondSkillInput({
+        inputRequestId: inputRequest?.id ?? "",
+        values: { targetDir: "/workspace/project/docs" },
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      message: "Failed to persist skill input completion.",
+    });
+    expect(agentLoopCalls).toBe(0);
+    expect(chatMessages.filter((message) => message.role === "assistant")).toEqual(
+      [],
+    );
+  });
+
   it("rejects concurrent guided input responses while the durable completion claim is in flight", async () => {
     const chatMessages: AppendChatMessageInput[] = [];
     const initialStreamEvents: ChatStreamEvent[] = [];

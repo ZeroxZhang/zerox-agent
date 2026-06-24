@@ -238,7 +238,7 @@ export function createChatService(options: {
       throw new Error("Chat session activity persistence is unavailable.");
     }
 
-    await options.chatSessionStore.appendActivityEvent(pending.sessionId, {
+    const record = await options.chatSessionStore.appendActivityEvent(pending.sessionId, {
       sessionId: pending.sessionId,
       state: "completed",
       message: "Skill input completed.",
@@ -250,6 +250,9 @@ export function createChatService(options: {
         status: "completed",
       },
     });
+    if (!record) {
+      throw new Error("Chat session activity persistence did not update a session.");
+    }
   }
 
   async function sendMessageInternal(
@@ -2321,7 +2324,10 @@ async function persistRequiredChatActivityEvent(
     throw new Error("Chat session activity persistence is unavailable.");
   }
 
-  await chatSessionStore.appendActivityEvent(event.sessionId, event);
+  const record = await chatSessionStore.appendActivityEvent(event.sessionId, event);
+  if (!record) {
+    throw new Error("Chat session activity persistence did not update a session.");
+  }
 }
 
 function buildChatSystemPrompt(currentDate?: string): string {

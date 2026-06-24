@@ -4181,3 +4181,22 @@
   - `npx tsc -p tsconfig.renderer.json --noEmit --pretty false` -> passed.
   - `npm run harness:check` -> passed.
   - `git diff --check` -> passed.
+
+## 2026-06-24 - Task 4 Guided Skill Required Persistence Null-Write Repair
+
+- Summary:
+  - Required guided-skill activity writes now treat a `null` session update as persistence failure.
+  - Completion/claim writes fail before model/agent execution if the session was deleted or the store cannot update it.
+  - Added regression coverage for missing-session claim writes so no pending input is claimed or executed without durable evidence.
+- Changed files:
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/main/chatService.test.ts -t "does not treat missing-session activity writes"` -> failed as expected: claim append returned `null` but execution still proceeded.
+- GREEN / verification evidence:
+  - `npm test -- src/main/chatService.test.ts -t "does not treat missing-session activity writes"` -> 1 file / 1 selected test passed.
+  - `npm test -- src/main/chatService.test.ts src/main/skillExecutionService.test.ts src/shared/skillExecutionContract.test.ts src/shared/skills.test.ts src/shared/chatStream.test.ts src/shared/toolPermissions.test.ts src/main/toolAuthorizationService.test.ts src/main/chatSessionStore.test.ts src/preload/index.test.ts` -> 9 files / 140 tests passed.
+  - `npx tsc -p tsconfig.electron.json --noEmit --pretty false` -> passed.
+  - `npx tsc -p tsconfig.renderer.json --noEmit --pretty false` -> passed.
+  - `npm run harness:check` -> passed.
