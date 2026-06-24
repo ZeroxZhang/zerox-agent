@@ -735,6 +735,11 @@ function registerChatIpcHandlers(container: AppContainer): void {
     ): Promise<SkillInputResponseResult> => {
       const sender = event.sender;
       return container.chatService().respondSkillInput(input, {
+        onStatusEvent(statusEvent: ChatTaskStatusEvent) {
+          if (!sender.isDestroyed()) {
+            sender.send("chat:statusEvent", statusEvent);
+          }
+        },
         onStreamEvent(streamEvent: ChatStreamEvent) {
           if (!sender.isDestroyed()) {
             sender.send("chat:streamEvent", streamEvent);

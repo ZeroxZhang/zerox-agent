@@ -3990,6 +3990,24 @@
   - `npx tsc -p tsconfig.renderer.json --noEmit --pretty false` -> passed.
   - `npm run harness:check` -> passed.
 
+## 2026-06-24 - Worker T5 Task 5 Fix Guided Input Status IPC Forwarding
+
+- Summary:
+  - Fixed guided-input continuation IPC so `chat:respondSkillInput` forwards resumed backend status events to the invoking renderer as `chat:statusEvent`.
+  - Added behavior-level IPC coverage that invokes the registered handler with a mocked chat service emitting both status and stream callbacks.
+- Changed files:
+  - `src/main/ipc/index.ts`
+  - `src/main/ipc/index.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/main/ipc/index.test.ts -t "forwards guided skill continuation status"` -> failed as expected: only `chat:streamEvent` was sent.
+- GREEN / verification evidence:
+  - `npm test -- src/main/ipc/index.test.ts -t "forwards guided skill continuation status"` -> 1 file / 1 selected test passed.
+  - `npm test -- src/main/ipc/index.test.ts src/main/ipc/chatSendMessageError.test.ts src/renderer/materialDesign.test.ts src/renderer/chatStreamReducer.test.ts src/renderer/chatTaskActivity.test.ts src/renderer/chatTaskActivityRestore.test.ts src/preload/index.test.ts` -> 7 files / 64 tests passed.
+  - `npx tsc -p tsconfig.electron.json --noEmit --pretty false` -> passed.
+  - `npx tsc -p tsconfig.renderer.json --noEmit --pretty false` -> passed.
+  - `npm run harness:check` -> passed.
+
 ## 2026-06-24 - Worker T5 Task 5 Fix Stale Guided Input Stream Ref
 
 - Summary:
