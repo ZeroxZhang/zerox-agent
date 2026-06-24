@@ -286,6 +286,7 @@ export function AgentChatPanel({
   }, [status.message]);
 
   useEffect(() => {
+    resetActiveChatRefs();
     setSessionId(null);
     setChatStreamState(createChatStreamState(initialMessages));
     setStatus({ kind: "ready", message: "会话已就绪" });
@@ -309,6 +310,7 @@ export function AgentChatPanel({
       return;
     }
 
+    resetActiveChatRefs();
     setSessionId(requestedSessionId);
     setMessages(initialMessages);
   }, [requestedSessionId, sessionId]);
@@ -598,6 +600,7 @@ export function AgentChatPanel({
       return;
     }
 
+    resetActiveChatRefs();
     const loadedSession = await window.buildingAgent.getChatSession(sessionIdToLoad);
     if (!loadedSession) {
       return;
@@ -859,6 +862,12 @@ export function AgentChatPanel({
 
   function appendMessage(message: Omit<ChatMessage, "id" | "createdAt">) {
     setMessages((current) => [...current, createMessage(message, current.length)]);
+  }
+
+  function resetActiveChatRefs() {
+    activeStatusSessionIdRef.current = null;
+    activeChatRequestIdRef.current = null;
+    setActiveChatRequestId(null);
   }
 
   function setActiveChatRequest(requestId: string | null) {

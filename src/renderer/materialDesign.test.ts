@@ -569,6 +569,21 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".agent-context-panel { display: none; }");
     expect(styles).toContain(".guided-skill-input-form");
   });
+
+  it("clears active stream refs during new chat reset so stale events cannot repopulate the transcript", () => {
+    const newChatResetSource = getUseEffectSource(
+      chatPanelSource,
+      "newChatRequestKey",
+    );
+
+    expect(newChatResetSource).toContain("resetActiveChatRefs()");
+    expect(newChatResetSource).toContain(
+      "setChatStreamState(createChatStreamState(initialMessages))",
+    );
+    expect(chatPanelSource).toContain("function resetActiveChatRefs");
+    expect(chatPanelSource).toContain("activeStatusSessionIdRef.current = null");
+    expect(chatPanelSource).toContain("activeChatRequestIdRef.current = null");
+  });
 });
 
 function getFunctionSource(source: string, functionName: string): string {
@@ -603,4 +618,20 @@ function getFunctionSource(source: string, functionName: string): string {
   }
 
   return source.slice(startIndex);
+}
+
+function getUseEffectSource(source: string, dependencyName: string): string {
+  const dependencyMarker = `}, [${dependencyName}]);`;
+  const endIndex = source.indexOf(dependencyMarker);
+  if (endIndex === -1) {
+    return "";
+  }
+
+  const searchStart = Math.max(0, endIndex - 900);
+  const effectStartIndex = source.lastIndexOf("useEffect(() => {", endIndex);
+  if (effectStartIndex === -1 || effectStartIndex < searchStart) {
+    return "";
+  }
+
+  return source.slice(effectStartIndex, endIndex + dependencyMarker.length);
 }

@@ -3972,6 +3972,24 @@
   - `npm run harness:check` -> passed.
   - `git diff --check` -> passed.
 
+## 2026-06-24 - Worker T5 Task 5 Fix Stale Stream After New Chat Reset
+
+- Summary:
+  - Fixed the rejected Task 5 blocker where the new-chat reset cleared visible transcript state but left active stream/status refs pointing at the previous request.
+  - Added a focused regression asserting the new-chat reset clears active stream refs before stale events can repopulate the transcript.
+  - Reused the same ref reset helper for persisted-session load and preview session reset paths.
+- Changed files:
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/materialDesign.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts -t "clears active stream refs"` -> failed as expected: the reset effect did not call `resetActiveChatRefs()` and did not clear `activeStatusSessionIdRef` / `activeChatRequestIdRef`.
+- GREEN / verification evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts -t "clears active stream refs"` -> 1 file / 1 selected test passed.
+  - `npm test -- src/renderer/materialDesign.test.ts src/renderer/chatStreamReducer.test.ts src/renderer/chatTaskActivity.test.ts src/renderer/chatTaskActivityRestore.test.ts` -> 4 files / 56 tests passed.
+  - `npx tsc -p tsconfig.renderer.json --noEmit --pretty false` -> passed.
+  - `npm run harness:check` -> passed.
+
 ## 2026-06-23 - Worker T3 Task 3 Streaming Fallback Repair
 
 - Summary:
