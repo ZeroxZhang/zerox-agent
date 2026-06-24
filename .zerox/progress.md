@@ -4345,3 +4345,19 @@
   - `npm run harness:check` -> passed.
   - `git diff --check` -> passed.
   - `npm run build` -> passed.
+
+## 2026-06-24 - Task 7 v2.7.0 README Acceptance-State Follow-Up
+
+- Summary:
+  - Corrected the README roadmap so `v2.7.0` is described as metadata prep in acceptance rather than already shipped.
+  - Added regression coverage that requires acceptance-pending wording and rejects `[x]` shipped wording for the `v2.7.0` Chat-first release metadata line.
+  - Kept `v2.7.0` current-version/package metadata references intact and did not mark `P16-v2.7.0-ui-interaction` done.
+- Changed files:
+  - `README.md`
+  - `src/shared/readme.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> failed as expected: README did not contain `pending final independent acceptance` / `待最终独立验收` and still listed `v2.7.0` as shipped.
+- GREEN / verification evidence:
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 2 files / 11 tests passed.
+  - `git diff --check` -> passed.

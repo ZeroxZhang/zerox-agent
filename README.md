@@ -667,8 +667,11 @@ Recently shipped:
 - [x] v2.4.0 iteration-roadmap P1-P8 activation with unified storage, provider abstraction, actor/workflow runtime, dream/distill, streaming/max-mode/MCP, and token-aware runGraph evidence
 - [x] v2.4.1 managed chat history with archive/delete actions, collapsible archived sessions, latest-response time, and cumulative token usage in the workspace sidebar
 - [x] v2.5.0 workspace-bound skill execution with first-class workspace selection, shared skill execution contracts, session activity recovery, and workspace-run ledgers
-- [x] v2.7.0 Chat-first interaction release metadata: primary Chat entry, streamed answers, distinct thinking/process output, guided skill input, and local icon unification
 - [x] v2.6.0 hardening release with sandbox escape fixes, recoverable storage, provider timeouts, scoped tool-result refs, workflow replay correctness, renderer state coherence, and subprocess worker isolation
+
+In acceptance:
+
+- [ ] v2.7.0 Chat-first interaction release metadata prep: primary Chat entry, streamed answers, distinct thinking/process output, guided skill input, and local icon unification; package metadata is prepared, but final release status is pending final independent acceptance
 
 Planned:
 
@@ -1428,8 +1431,11 @@ npm run verify        # 测试 + 构建 + 确定性评测
 - [x] v2.4.0 iteration-roadmap P1-P8 激活：统一存储、provider 抽象、actor/workflow 运行时、dream/distill、streaming/max-mode/MCP 和 token-aware runGraph 证据
 - [x] v2.4.1 历史会话管理：归档/删除操作、可折叠归档组、最新响应时间和工作区侧栏累计 token 显示
 - [x] v2.5.0 workspace-bound skill execution：一等 workspace 选择、共享技能执行契约、会话活动恢复和 workspace-run ledger
-- [x] v2.7.0 Chat-first 交互发布元数据：主入口回到 Chat、streamed answers、thinking/process 分离、guided skill input 和本地图标统一
 - [x] v2.6.0 加固发布：sandbox 逃逸修复、可恢复存储、provider timeout、scoped tool-result ref、workflow 复盘正确性、renderer 状态一致性和 subprocess worker 隔离
+
+验收中：
+
+- [ ] v2.7.0 Chat-first 交互发布元数据准备：主入口回到 Chat、streamed answers、thinking/process 分离、guided skill input 和本地图标统一；package metadata 已准备完成，但整体发布状态仍待最终独立验收
 
 后续计划：
 
