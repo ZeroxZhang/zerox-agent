@@ -7,6 +7,7 @@ import {
   AgentChatPanel,
   type ChatSidebarSession,
 } from "./components/AgentChatPanel";
+import { Icon } from "./components/Icon";
 import { EvalReviewPanel } from "./components/EvalReviewPanel";
 import { LearningReviewPanel } from "./components/LearningReviewPanel";
 import { MemoryPanel } from "./components/MemoryPanel";
@@ -288,7 +289,7 @@ export function App() {
           </div>
         </div>
         <button className="new-chat-button" type="button" onClick={handleNewChat}>
-          <span aria-hidden="true">＋</span>
+          <Icon name="plus" size={16} />
           新会话
         </button>
         <nav className="primary-nav" aria-label="功能分区">
@@ -560,7 +561,7 @@ function SidebarSessionRow(props: {
           props.onToggleMenu(session.id);
         }}
       >
-        <span aria-hidden="true">⋯</span>
+        <Icon name="more" size={16} />
       </button>
       {props.menuOpen ? (
         <div className="sidebar-session-menu" role="menu">

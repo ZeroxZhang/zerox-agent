@@ -78,6 +78,11 @@
   box-shadow: var(--shadow-xs);
 }
 
+.new-chat-button svg,
+.sidebar-session-actions svg {
+  flex: 0 0 auto;
+}
+
 .new-chat-button:hover { background: var(--bg-accent-hover); }
 
 .primary-nav {
@@ -274,6 +279,11 @@
 .sidebar-section .sidebar-session-actions:focus-visible {
   color: var(--text-primary);
   background: var(--bg-surface-hover);
+}
+
+.sidebar-session-actions svg {
+  width: 16px;
+  height: 16px;
 }
 
 .sidebar-session-menu {

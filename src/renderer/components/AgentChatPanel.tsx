@@ -86,6 +86,7 @@ import {
 } from "../chatStreamReducer";
 import { GoalDetailDrawer } from "./GoalDetailDrawer";
 import { GoalStatusStrip } from "./GoalStatusStrip";
+import { Icon } from "./Icon";
 import type {
   ToolApprovalDecisionPayload,
   ToolApprovalRequestPayload,
@@ -1925,7 +1926,7 @@ export function AgentChatPanel({
                     aria-label={`取消选择技能 ${selectedSkill.name}`}
                     onClick={() => setSelectedSkillName(null)}
                   >
-                    ×
+                    <Icon name="close" size={14} />
                   </button>
                 </div>
               ) : null}
@@ -2025,7 +2026,7 @@ export function AgentChatPanel({
                   title="打开命令菜单"
                   type="button"
                 >
-                  <span className="composer-icon composer-icon-command" aria-hidden="true" />
+                  <Icon name="command" className="composer-icon" />
                   <span className="sr-only">打开命令菜单</span>
                 </button>
                 <button
@@ -2039,7 +2040,7 @@ export function AgentChatPanel({
                   title="中断当前任务"
                   type="button"
                 >
-                  <span className="composer-icon composer-icon-stop" aria-hidden="true" />
+                  <Icon name="stop" className="composer-icon" />
                   <span className="sr-only">中断当前任务</span>
                 </button>
                 <button
@@ -2050,7 +2051,7 @@ export function AgentChatPanel({
                   title="发送消息"
                   type="submit"
                 >
-                  <span className="composer-icon composer-icon-send" aria-hidden="true" />
+                  <Icon name="send" className="composer-icon" />
                   <span className="sr-only">发送消息</span>
                 </button>
               </div>

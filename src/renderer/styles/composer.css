@@ -147,28 +147,11 @@
   width: 16px;
   height: 16px;
   color: currentColor;
-  line-height: 1;
+  flex: 0 0 auto;
 }
 
-.composer-icon-command::before {
-  content: "⌘";
-  font-size: 15px;
-  font-weight: var(--font-semibold);
-}
-
-.composer-icon-stop::before {
-  content: "";
-  width: 9px;
-  height: 9px;
-  border-radius: 2px;
-  background: currentColor;
-}
-
-.composer-icon-send::before {
-  content: "↑";
-  font-size: 18px;
-  font-weight: var(--font-bold);
-  transform: translateY(-1px);
+.composer-icon path {
+  vector-effect: non-scaling-stroke;
 }
 
 .slash-command-menu,
@@ -276,6 +259,11 @@
   border-radius: var(--radius-full);
   color: var(--text-tertiary);
   background: transparent;
+}
+
+.selected-skill-chip button svg {
+  width: 14px;
+  height: 14px;
 }
 
 .selected-skill-chip button:hover {

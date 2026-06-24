@@ -1,0 +1,1155 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Zerox Agent 2.7.0 UI Artifact</title>
+    <style>
+      :root {
+        --bg-root: #fbfaf7;
+        --bg-page: #f6f4ef;
+        --bg-surface: #efede6;
+        --bg-surface-hover: #e8e4db;
+        --bg-surface-raised: #ffffff;
+        --bg-accent: #25231f;
+        --bg-accent-hover: #11100e;
+        --border-default: #e6e0d6;
+        --border-strong: #d3cabb;
+        --text-primary: #25231f;
+        --text-secondary: #6f6a60;
+        --text-tertiary: #9a9488;
+        --text-accent: #1d4ed8;
+        --text-success: #18713a;
+        --text-danger: #b83232;
+        --status-info-bg: #eef4ff;
+        --status-info-border: #adc7f5;
+        --status-warning-bg: #fff8df;
+        --status-warning-border: #ecd894;
+        --status-error-bg: #fff0f0;
+        --status-error-border: #f1c8c8;
+        --status-success-bg: #edf8ef;
+        --status-success-border: #badfc2;
+        --shadow-sm: 0 8px 24px rgba(28, 25, 23, 0.06);
+        --shadow-md: 0 18px 48px rgba(28, 25, 23, 0.09);
+        --radius-sm: 8px;
+        --radius-md: 12px;
+        --radius-lg: 16px;
+        --radius-full: 999px;
+        --font-sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        --font-mono: "SF Mono", "JetBrains Mono", Consolas, monospace;
+      }
+
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: linear-gradient(180deg, var(--bg-root), var(--bg-page));
+        color: var(--text-primary);
+        font: 14px/1.5 var(--font-sans);
+      }
+
+      .page {
+        width: min(1440px, calc(100vw - 40px));
+        margin: 0 auto;
+        padding: 32px 0 48px;
+      }
+
+      .hero {
+        display: grid;
+        gap: 10px;
+        margin-bottom: 28px;
+      }
+
+      .hero h1 {
+        margin: 0;
+        font-size: 34px;
+        line-height: 1.05;
+        font-weight: 700;
+      }
+
+      .hero p,
+      .state-header p,
+      .artifact-copy,
+      .muted {
+        margin: 0;
+        color: var(--text-secondary);
+      }
+
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 30px;
+        padding: 0 12px;
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-full);
+        background: rgba(255, 255, 255, 0.74);
+        color: var(--text-secondary);
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .state-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 18px;
+      }
+
+      .artifact-state {
+        display: grid;
+        gap: 12px;
+        padding: 18px;
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-lg);
+        background: rgba(255, 255, 255, 0.55);
+        box-shadow: var(--shadow-sm);
+      }
+
+      .state-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: start;
+        gap: 12px;
+      }
+
+      .state-header h2 {
+        margin: 0;
+        font-size: 16px;
+        line-height: 1.2;
+      }
+
+      .frame {
+        border: 1px solid var(--border-default);
+        border-radius: 18px;
+        background: var(--bg-page);
+        box-shadow: var(--shadow-md);
+        overflow: hidden;
+      }
+
+      .shell {
+        display: grid;
+        grid-template-columns: 220px minmax(0, 1fr);
+        min-height: 430px;
+      }
+
+      .sidebar {
+        display: grid;
+        align-content: start;
+        gap: 14px;
+        padding: 18px 14px;
+        border-right: 1px solid var(--border-default);
+        background: #f2f0ea;
+      }
+
+      .brand,
+      .sidebar-group,
+      .session-list,
+      .workspace-column,
+      .timeline,
+      .context-column {
+        display: grid;
+        gap: 8px;
+      }
+
+      .brand {
+        gap: 4px;
+      }
+
+      .brand-mark {
+        width: 34px;
+        height: 34px;
+        border-radius: 10px;
+        background:
+          radial-gradient(circle at 30% 30%, #ffffff 0, #ffffff 20%, #d8c7ae 21%, #8f5a2d 56%, #25231f 100%);
+      }
+
+      .sidebar-button,
+      .nav-item,
+      .session {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 38px;
+        padding: 0 12px;
+        border: 1px solid transparent;
+        border-radius: 10px;
+        background: transparent;
+        color: var(--text-secondary);
+      }
+
+      .sidebar-button {
+        justify-content: center;
+        background: var(--bg-accent);
+        color: #fff;
+        font-weight: 700;
+      }
+
+      .nav-item.active,
+      .session.active {
+        border-color: var(--border-default);
+        background: #fff;
+        color: var(--text-primary);
+      }
+
+      .nav-dot,
+      .mini-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        background: currentColor;
+        opacity: 0.75;
+      }
+
+      .workspace {
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        gap: 16px;
+        padding: 18px;
+      }
+
+      .topbar,
+      .composer,
+      .message,
+      .status-card,
+      .approval-card,
+      .guided-card,
+      .restore-card,
+      .error-card,
+      .thinking-card,
+      .timeline-card,
+      .context-card {
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-md);
+        background: rgba(255, 255, 255, 0.88);
+      }
+
+      .topbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 14px;
+      }
+
+      .eyebrow {
+        color: var(--text-tertiary);
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
+      .topbar strong {
+        display: block;
+        font-size: 16px;
+      }
+
+      .content {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 280px;
+        gap: 16px;
+        min-height: 0;
+      }
+
+      .workspace-column {
+        align-content: start;
+      }
+
+      .hero-panel,
+      .message-list {
+        display: grid;
+        gap: 12px;
+      }
+
+      .hero-panel {
+        padding: 8px 2px 2px;
+      }
+
+      .hero-panel h3 {
+        margin: 0;
+        font-size: 22px;
+        line-height: 1.1;
+      }
+
+      .suggestion-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      .suggestion {
+        padding: 10px 12px;
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-md);
+        background: rgba(255, 255, 255, 0.74);
+        color: var(--text-secondary);
+      }
+
+      .message-list {
+        padding-top: 6px;
+      }
+
+      .message {
+        display: grid;
+        gap: 6px;
+        padding: 12px 14px;
+      }
+
+      .message.user {
+        justify-self: end;
+        max-width: 78%;
+        background: #ede9df;
+      }
+
+      .message.assistant {
+        max-width: 88%;
+      }
+
+      .message .label,
+      .keyline {
+        color: var(--text-tertiary);
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      .thinking-card,
+      .status-card,
+      .approval-card,
+      .guided-card,
+      .restore-card,
+      .error-card,
+      .timeline-card,
+      .context-card {
+        padding: 12px 14px;
+      }
+
+      .thinking-card,
+      .status-card,
+      .timeline-card {
+        background: rgba(255, 255, 255, 0.78);
+      }
+
+      .approval-card {
+        border-color: var(--status-warning-border);
+        background: var(--status-warning-bg);
+      }
+
+      .guided-card {
+        border-color: var(--status-info-border);
+        background: var(--status-info-bg);
+      }
+
+      .restore-card {
+        border-color: var(--status-success-border);
+        background: var(--status-success-bg);
+      }
+
+      .error-card {
+        border-color: var(--status-error-border);
+        background: var(--status-error-bg);
+      }
+
+      .context-column {
+        align-content: start;
+      }
+
+      .context-card h4,
+      .thinking-card h4,
+      .guided-card h4,
+      .approval-card h4,
+      .restore-card h4,
+      .error-card h4,
+      .timeline-card h4 {
+        margin: 0 0 6px;
+        font-size: 13px;
+      }
+
+      .progress-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .progress-item {
+        display: grid;
+        grid-template-columns: 10px minmax(0, 1fr);
+        gap: 10px;
+        align-items: start;
+      }
+
+      .progress-item p,
+      .two-col p,
+      .message p {
+        margin: 0;
+      }
+
+      .dot {
+        width: 10px;
+        height: 10px;
+        margin-top: 4px;
+        border-radius: 999px;
+        background: var(--text-accent);
+      }
+
+      .dot.warn { background: #86620a; }
+      .dot.error { background: var(--text-danger); }
+      .dot.success { background: var(--text-success); }
+
+      .composer {
+        display: grid;
+        gap: 12px;
+        padding: 14px;
+      }
+
+      .composer-top {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        color: var(--text-tertiary);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .workspace-pill,
+      .chip,
+      .danger-chip,
+      .success-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        min-height: 28px;
+        padding: 0 10px;
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-full);
+        background: #fff;
+      }
+
+      .chip { color: var(--text-accent); }
+      .danger-chip {
+        border-color: var(--status-error-border);
+        color: var(--text-danger);
+        background: var(--status-error-bg);
+      }
+
+      .success-chip {
+        border-color: var(--status-success-border);
+        color: var(--text-success);
+        background: var(--status-success-bg);
+      }
+
+      .input-shell {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 12px;
+        align-items: end;
+      }
+
+      .draft {
+        min-height: 118px;
+        padding: 16px;
+        border: 1px solid var(--border-default);
+        border-radius: 24px;
+        background: #fff;
+        color: var(--text-secondary);
+      }
+
+      .action-stack {
+        display: grid;
+        gap: 8px;
+      }
+
+      .icon-button,
+      .action-button,
+      .approve-actions button,
+      .footer-actions button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        min-height: 34px;
+        padding: 0 12px;
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-full);
+        background: #fff;
+        color: var(--text-secondary);
+        font-weight: 700;
+      }
+
+      .icon-button.primary,
+      .action-button.primary,
+      .approve-actions .primary {
+        border-color: var(--bg-accent);
+        background: var(--bg-accent);
+        color: #fff;
+      }
+
+      .icon-button.danger,
+      .approve-actions .danger {
+        color: var(--text-danger);
+      }
+
+      .two-col,
+      .approve-actions,
+      .footer-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .fields {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .field {
+        display: grid;
+        gap: 5px;
+      }
+
+      .field span {
+        color: var(--text-secondary);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .field-box {
+        min-height: 34px;
+        padding: 8px 10px;
+        border: 1px solid var(--status-info-border);
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.74);
+      }
+
+      .timeline {
+        gap: 10px;
+      }
+
+      .timeline-row {
+        display: grid;
+        grid-template-columns: 76px minmax(0, 1fr);
+        gap: 10px;
+      }
+
+      .timeline-row code {
+        color: var(--text-tertiary);
+        font: 11px/1.4 var(--font-mono);
+      }
+
+      .narrow-frame {
+        width: 360px;
+        max-width: 100%;
+        margin: 0 auto;
+      }
+
+      .narrow-frame .shell,
+      .narrow-frame .content {
+        grid-template-columns: 1fr;
+      }
+
+      .narrow-frame .sidebar {
+        border-right: 0;
+        border-bottom: 1px solid var(--border-default);
+      }
+
+      .narrow-frame .workspace {
+        gap: 12px;
+      }
+
+      .narrow-frame .fields,
+      .narrow-frame .input-shell {
+        grid-template-columns: 1fr;
+      }
+
+      .narrow-frame .draft {
+        min-height: 96px;
+      }
+
+      @media (max-width: 1100px) {
+        .state-grid { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="hero">
+        <div class="eyebrow">Approved 2.7.0 UI / UE Artifact</div>
+        <h1>Zerox Agent</h1>
+        <p>Icon unification, chat-first work surface, guided skills, approvals, recovery, and narrow-layout behavior captured as a single local design artifact.</p>
+        <div class="meta">
+          <span class="pill">Warm-neutral renderer palette</span>
+          <span class="pill">Shared local icon system</span>
+          <span class="pill">State coverage for review</span>
+        </div>
+      </header>
+
+      <main class="state-grid">
+        <section class="artifact-state" data-state="empty-chat">
+          <div class="state-header">
+            <div>
+              <h2>Empty Chat</h2>
+              <p>New session opens with a quiet launch surface and ready composer.</p>
+            </div>
+            <span class="pill">Ready</span>
+          </div>
+          <div class="frame">
+            <div class="shell">
+              <aside class="sidebar">
+                <div class="brand">
+                  <div class="brand-mark"></div>
+                  <strong>Zerox Agent</strong>
+                  <span class="muted">Local desktop agent</span>
+                </div>
+                <div class="sidebar-button">+ New Chat</div>
+                <div class="sidebar-group">
+                  <div class="nav-item active"><span class="nav-dot"></span>Chat</div>
+                  <div class="nav-item"><span class="nav-dot"></span>Runs</div>
+                  <div class="nav-item"><span class="nav-dot"></span>Settings</div>
+                </div>
+                <div class="session-list">
+                  <div class="session active"><span class="mini-dot"></span>Current session</div>
+                  <div class="session"><span class="mini-dot"></span>Refactor notes</div>
+                </div>
+              </aside>
+              <div class="workspace">
+                <div class="topbar">
+                  <div><span class="eyebrow">Chat</span><strong>Current session</strong></div>
+                  <span class="pill">Desktop data</span>
+                </div>
+                <div class="content">
+                  <div class="workspace-column">
+                    <div class="hero-panel">
+                      <h3>Tell the agent what to do next.</h3>
+                      <p class="artifact-copy">Quick starts stay visible until the first message lands.</p>
+                      <div class="suggestion-row">
+                        <div class="suggestion">Summarize a repo and propose next steps</div>
+                        <div class="suggestion">Open a workspace and run a focused test loop</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="context-column">
+                    <div class="context-card">
+                      <h4>Context</h4>
+                      <p class="muted">No active run yet. Tools, goals, and approvals stay out of the way.</p>
+                    </div>
+                  </div>
+                </div>
+                <div class="composer">
+                  <div class="composer-top">
+                    <span class="workspace-pill">Workspace: current repo</span>
+                  </div>
+                  <div class="input-shell">
+                    <div class="draft">Type a message, use / for commands, or mention a skill.</div>
+                    <div class="action-stack">
+                      <div class="icon-button">Cmd</div>
+                      <div class="icon-button">Stop</div>
+                      <div class="icon-button primary">Send</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="artifact-state" data-state="streaming-answer">
+          <div class="state-header">
+            <div>
+              <h2>Streaming Answer</h2>
+              <p>Assistant output, tool preview, and progress remain separated while the stop action stays visible.</p>
+            </div>
+            <span class="pill">Working</span>
+          </div>
+          <div class="frame">
+            <div class="shell">
+              <aside class="sidebar">
+                <div class="brand"><div class="brand-mark"></div><strong>Zerox Agent</strong></div>
+                <div class="sidebar-group">
+                  <div class="nav-item active"><span class="nav-dot"></span>Chat</div>
+                  <div class="session active"><span class="mini-dot"></span>Renderer icon swap</div>
+                </div>
+              </aside>
+              <div class="workspace">
+                <div class="topbar">
+                  <div><span class="eyebrow">Execution</span><strong>Renderer icon swap</strong></div>
+                  <span class="pill">Streaming</span>
+                </div>
+                <div class="content">
+                  <div class="workspace-column">
+                    <div class="message-list">
+                      <div class="message user">
+                        <span class="label">You</span>
+                        <p>Replace glyph buttons with the local icon component and keep the chat shell intact.</p>
+                      </div>
+                      <div class="thinking-card">
+                        <h4>Tool call preview</h4>
+                        <p class="muted">`code_search` locating composer glyph spans and sidebar action buttons.</p>
+                      </div>
+                      <div class="message assistant">
+                        <span class="label">Assistant</span>
+                        <p>I found the glyph controls in the composer and sidebar. I’m replacing them with the shared icon surface and keeping the surrounding layout stable...</p>
+                      </div>
+                      <div class="status-card">
+                        <div class="two-col">
+                          <span class="chip">answer_delta</span>
+                          <span class="muted">Stop remains enabled until the run completes.</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="context-column">
+                    <div class="context-card">
+                      <h4>Current activity</h4>
+                      <div class="progress-list">
+                        <div class="progress-item"><span class="dot"></span><p>Running targeted renderer tests</p></div>
+                        <div class="progress-item"><span class="dot"></span><p>Editing `AgentChatPanel.tsx` and `App.tsx`</p></div>
+                        <div class="progress-item"><span class="dot"></span><p>Preparing artifact coverage</p></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="composer">
+                  <div class="input-shell">
+                    <div class="draft">Waiting for the streaming response to finish...</div>
+                    <div class="action-stack">
+                      <div class="icon-button">Cmd</div>
+                      <div class="icon-button danger">Stop</div>
+                      <div class="icon-button primary">Send</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="artifact-state" data-state="thinking-collapsed">
+          <div class="state-header">
+            <div>
+              <h2>Thinking Collapsed</h2>
+              <p>Verbose reasoning compresses into a compact disclosure block instead of taking over the transcript.</p>
+            </div>
+            <span class="pill">Compact</span>
+          </div>
+          <div class="frame">
+            <div class="shell">
+              <aside class="sidebar">
+                <div class="brand"><div class="brand-mark"></div><strong>Zerox Agent</strong></div>
+                <div class="session active"><span class="mini-dot"></span>Dependency audit</div>
+              </aside>
+              <div class="workspace">
+                <div class="topbar">
+                  <div><span class="eyebrow">Transcript</span><strong>Dependency audit</strong></div>
+                  <span class="pill">Reasoning hidden</span>
+                </div>
+                <div class="content">
+                  <div class="workspace-column">
+                    <div class="message-list">
+                      <div class="thinking-card">
+                        <h4>Thinking summary</h4>
+                        <p class="muted">3 internal steps hidden. Expand only if the operator needs inspection.</p>
+                      </div>
+                      <div class="message assistant">
+                        <span class="label">Assistant</span>
+                        <p>I narrowed the change to the shared icon boundary, preserved existing interaction behavior, and kept the stop control present in the composer.</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="context-column">
+                    <div class="timeline-card">
+                      <h4>Run snapshot</h4>
+                      <div class="timeline">
+                        <div class="timeline-row"><code>16:34:12</code><p>Context compacted before next model request</p></div>
+                        <div class="timeline-row"><code>16:34:19</code><p>Renderer verification resumed</p></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="composer">
+                  <div class="input-shell">
+                    <div class="draft">Continue from the current audit.</div>
+                    <div class="action-stack">
+                      <div class="icon-button">Cmd</div>
+                      <div class="icon-button">Stop</div>
+                      <div class="icon-button primary">Send</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="artifact-state" data-state="guided-skill-input">
+          <div class="state-header">
+            <div>
+              <h2>Guided Skill Input</h2>
+              <p>When a skill needs structured input, the request stays inside chat and uses compact typed controls.</p>
+            </div>
+            <span class="pill">Paused for input</span>
+          </div>
+          <div class="frame">
+            <div class="shell">
+              <aside class="sidebar">
+                <div class="brand"><div class="brand-mark"></div><strong>Zerox Agent</strong></div>
+                <div class="session active"><span class="mini-dot"></span>Research brief</div>
+              </aside>
+              <div class="workspace">
+                <div class="topbar">
+                  <div><span class="eyebrow">Skill</span><strong>@report-writer</strong></div>
+                  <span class="pill">Needs input</span>
+                </div>
+                <div class="content">
+                  <div class="workspace-column">
+                    <div class="guided-card">
+                      <h4>Collect report constraints</h4>
+                      <p class="muted">The agent is waiting for confirmed structured inputs before continuing.</p>
+                      <div class="fields">
+                        <div class="field"><span>Audience</span><div class="field-box">Internal product team</div></div>
+                        <div class="field"><span>Output format</span><div class="field-box">Markdown memo</div></div>
+                        <div class="field"><span>Include citations</span><div class="field-box">Yes</div></div>
+                        <div class="field"><span>Deadline</span><div class="field-box">Today 18:00</div></div>
+                      </div>
+                      <div class="footer-actions">
+                        <button>Cancel</button>
+                        <button class="primary">Continue</button>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="context-column">
+                    <div class="context-card">
+                      <h4>Why it paused</h4>
+                      <p class="muted">The skill declared required fields and the run is recoverable after resume.</p>
+                    </div>
+                  </div>
+                </div>
+                <div class="composer">
+                  <div class="composer-top">
+                    <span class="chip">@report-writer</span>
+                    <span class="workspace-pill">Workspace: docs</span>
+                  </div>
+                  <div class="input-shell">
+                    <div class="draft">Structured skill input is active above.</div>
+                    <div class="action-stack">
+                      <div class="icon-button">Cmd</div>
+                      <div class="icon-button">Stop</div>
+                      <div class="icon-button primary">Send</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="artifact-state" data-state="tool-approval">
+          <div class="state-header">
+            <div>
+              <h2>Tool Approval</h2>
+              <p>High-risk tool requests are surfaced inline with enough context to approve, deny, or enable auto-approval deliberately.</p>
+            </div>
+            <span class="pill">Approval gate</span>
+          </div>
+          <div class="frame">
+            <div class="shell">
+              <aside class="sidebar">
+                <div class="brand"><div class="brand-mark"></div><strong>Zerox Agent</strong></div>
+                <div class="session active"><span class="mini-dot"></span>Workspace migration</div>
+              </aside>
+              <div class="workspace">
+                <div class="topbar">
+                  <div><span class="eyebrow">Approval</span><strong>Pending tool request</strong></div>
+                  <span class="danger-chip">Critical risk</span>
+                </div>
+                <div class="content">
+                  <div class="workspace-column">
+                    <div class="approval-card">
+                      <h4>`git` wants to modify tracked files</h4>
+                      <p class="muted">Workspace: `/Volumes/Out/codex_projects/building agent`</p>
+                      <div class="two-col">
+                        <span class="chip">Task policy matched</span>
+                        <span class="danger-chip">Manual review required</span>
+                      </div>
+                      <p>Arguments: `commit -m "feat: unify renderer icons and add ui artifact"`</p>
+                      <div class="approve-actions">
+                        <button>Auto approval off</button>
+                        <button>Reject</button>
+                        <button class="primary">Approve once</button>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="context-column">
+                    <div class="context-card">
+                      <h4>Observed evidence</h4>
+                      <div class="progress-list">
+                        <div class="progress-item"><span class="dot warn"></span><p>Tool touches tracked renderer files</p></div>
+                        <div class="progress-item"><span class="dot"></span><p>Command is inside workspace boundary</p></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="composer">
+                  <div class="input-shell">
+                    <div class="draft">The run is paused until approval resolves.</div>
+                    <div class="action-stack">
+                      <div class="icon-button">Cmd</div>
+                      <div class="icon-button danger">Stop</div>
+                      <div class="icon-button primary">Send</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="artifact-state" data-state="paused-run">
+          <div class="state-header">
+            <div>
+              <h2>Paused Run</h2>
+              <p>A paused execution keeps its timeline, open objective, and next action visible without looking like a failure.</p>
+            </div>
+            <span class="pill">Paused</span>
+          </div>
+          <div class="frame">
+            <div class="shell">
+              <aside class="sidebar">
+                <div class="brand"><div class="brand-mark"></div><strong>Zerox Agent</strong></div>
+                <div class="session active"><span class="mini-dot"></span>Release smoke</div>
+              </aside>
+              <div class="workspace">
+                <div class="topbar">
+                  <div><span class="eyebrow">Run state</span><strong>Release smoke</strong></div>
+                  <span class="pill">Resume available</span>
+                </div>
+                <div class="content">
+                  <div class="workspace-column">
+                    <div class="status-card">
+                      <div class="two-col">
+                        <span class="chip">Waiting</span>
+                        <span class="muted">Paused after verification checkpoint</span>
+                      </div>
+                      <p>Next recommended action: review the latest smoke output and continue with packaging.</p>
+                    </div>
+                    <div class="timeline-card">
+                      <h4>Recent activity</h4>
+                      <div class="timeline">
+                        <div class="timeline-row"><code>16:40:03</code><p>`npm run verify` finished green</p></div>
+                        <div class="timeline-row"><code>16:40:18</code><p>Paused before smoke package commit</p></div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="context-column">
+                    <div class="context-card">
+                      <h4>Resume surface</h4>
+                      <div class="progress-list">
+                        <div class="progress-item"><span class="dot warn"></span><p>Explicit resume required</p></div>
+                        <div class="progress-item"><span class="dot"></span><p>Context preserved for the run</p></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="composer">
+                  <div class="input-shell">
+                    <div class="draft">Resume the paused run and continue with packaging.</div>
+                    <div class="action-stack">
+                      <div class="icon-button">Cmd</div>
+                      <div class="icon-button">Stop</div>
+                      <div class="icon-button primary">Send</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="artifact-state" data-state="error-state">
+          <div class="state-header">
+            <div>
+              <h2>Error State</h2>
+              <p>Actionable failure details stay visible, scoped, and recoverable rather than collapsing into a generic chat error.</p>
+            </div>
+            <span class="pill">Failed</span>
+          </div>
+          <div class="frame">
+            <div class="shell">
+              <aside class="sidebar">
+                <div class="brand"><div class="brand-mark"></div><strong>Zerox Agent</strong></div>
+                <div class="session active"><span class="mini-dot"></span>Prod smoke</div>
+              </aside>
+              <div class="workspace">
+                <div class="topbar">
+                  <div><span class="eyebrow">Failure</span><strong>Smoke run blocked</strong></div>
+                  <span class="danger-chip">Needs attention</span>
+                </div>
+                <div class="content">
+                  <div class="workspace-column">
+                    <div class="error-card">
+                      <h4>Verification output did not match the expected ready signal</h4>
+                      <p>`npm run smoke:prod` returned before the renderer exposed the required text.</p>
+                      <div class="footer-actions">
+                        <button>Inspect logs</button>
+                        <button class="primary">Retry from last checkpoint</button>
+                      </div>
+                    </div>
+                    <div class="message assistant">
+                      <span class="label">Assistant</span>
+                      <p>The runtime is intact. I stopped before retrying so the operator can decide whether to adjust readiness polling or inspect the packaged app output.</p>
+                    </div>
+                  </div>
+                  <div class="context-column">
+                    <div class="context-card">
+                      <h4>Error class</h4>
+                      <div class="progress-list">
+                        <div class="progress-item"><span class="dot error"></span><p>Verification failure</p></div>
+                        <div class="progress-item"><span class="dot"></span><p>Checkpoint and transcript preserved</p></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="composer">
+                  <div class="input-shell">
+                    <div class="draft">Inspect the smoke logs and retry only if the cause is understood.</div>
+                    <div class="action-stack">
+                      <div class="icon-button">Cmd</div>
+                      <div class="icon-button danger">Stop</div>
+                      <div class="icon-button primary">Send</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="artifact-state" data-state="restored-session">
+          <div class="state-header">
+            <div>
+              <h2>Restored Session</h2>
+              <p>Reloading a conversation restores the transcript, workspace, and last-known activity without forcing the user to reconstruct context.</p>
+            </div>
+            <span class="pill">Recovered</span>
+          </div>
+          <div class="frame">
+            <div class="shell">
+              <aside class="sidebar">
+                <div class="brand"><div class="brand-mark"></div><strong>Zerox Agent</strong></div>
+                <div class="session active"><span class="mini-dot"></span>Task 6 icon system</div>
+                <div class="session"><span class="mini-dot"></span>Task 5 handoff</div>
+              </aside>
+              <div class="workspace">
+                <div class="topbar">
+                  <div><span class="eyebrow">Recovery</span><strong>Task 6 icon system</strong></div>
+                  <span class="success-chip">Session restored</span>
+                </div>
+                <div class="content">
+                  <div class="workspace-column">
+                    <div class="restore-card">
+                      <h4>Recovered from last local checkpoint</h4>
+                      <p class="muted">Workspace, selected skill, pending approval state, and activity timeline were restored.</p>
+                      <div class="two-col">
+                        <span class="chip">@design-review</span>
+                        <span class="workspace-pill">Workspace: building agent</span>
+                      </div>
+                    </div>
+                    <div class="message-list">
+                      <div class="message assistant">
+                        <span class="label">Assistant</span>
+                        <p>Before the reload, I had already made the icon replacements and captured the red test output for the report.</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="context-column">
+                    <div class="context-card">
+                      <h4>Recovered timeline</h4>
+                      <div class="progress-list">
+                        <div class="progress-item"><span class="dot success"></span><p>Session metadata reloaded</p></div>
+                        <div class="progress-item"><span class="dot success"></span><p>Composer state rehydrated</p></div>
+                        <div class="progress-item"><span class="dot"></span><p>Ready to continue verification</p></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="composer">
+                  <div class="composer-top">
+                    <span class="chip">@design-review</span>
+                  </div>
+                  <div class="input-shell">
+                    <div class="draft">Continue from the restored checkpoint.</div>
+                    <div class="action-stack">
+                      <div class="icon-button">Cmd</div>
+                      <div class="icon-button">Stop</div>
+                      <div class="icon-button primary">Send</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="artifact-state" data-state="narrow-layout">
+          <div class="state-header">
+            <div>
+              <h2>Narrow Layout</h2>
+              <p>The same workflow compresses for tighter widths without overlapping controls or losing the primary action lane.</p>
+            </div>
+            <span class="pill">360 px</span>
+          </div>
+          <div class="narrow-frame frame">
+            <div class="shell">
+              <aside class="sidebar">
+                <div class="brand">
+                  <div class="brand-mark"></div>
+                  <strong>Zerox Agent</strong>
+                </div>
+                <div class="sidebar-group">
+                  <div class="nav-item active"><span class="nav-dot"></span>Chat</div>
+                  <div class="nav-item"><span class="nav-dot"></span>Runs</div>
+                </div>
+              </aside>
+              <div class="workspace">
+                <div class="topbar">
+                  <div><span class="eyebrow">Mobile-tight</span><strong>Current session</strong></div>
+                </div>
+                <div class="content">
+                  <div class="workspace-column">
+                    <div class="message assistant">
+                      <span class="label">Assistant</span>
+                      <p>Actions stack beneath the draft, status chips wrap, and guided inputs collapse into a single column.</p>
+                    </div>
+                    <div class="guided-card">
+                      <h4>Quick input</h4>
+                      <div class="fields">
+                        <div class="field"><span>Workspace</span><div class="field-box">building agent</div></div>
+                        <div class="field"><span>Goal</span><div class="field-box">Icon swap + artifact</div></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="composer">
+                  <div class="composer-top">
+                    <span class="workspace-pill">building agent</span>
+                    <span class="chip">@skill</span>
+                  </div>
+                  <div class="input-shell">
+                    <div class="draft">Write a concise task summary and verify the focused renderer test.</div>
+                    <div class="action-stack">
+                      <div class="icon-button">Cmd</div>
+                      <div class="icon-button">Stop</div>
+                      <div class="icon-button primary">Send</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

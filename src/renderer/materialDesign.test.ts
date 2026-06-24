@@ -153,6 +153,20 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".workspace-picker");
   });
 
+  it("uses the shared local Icon component for primary controls", () => {
+    const iconSource = readFileSync(
+      path.join(process.cwd(), "src/renderer/components/Icon.tsx"),
+      "utf8",
+    );
+    expect(iconSource).toContain("export function Icon");
+    expect(chatPanelSource).toContain("<Icon name=\"send\"");
+    expect(chatPanelSource).toContain("<Icon name=\"stop\"");
+    expect(chatPanelSource).toContain("<Icon name=\"command\"");
+    expect(appSource).toContain("<Icon name=\"plus\"");
+    expect(appSource).not.toContain("＋");
+    expect(chatPanelSource).not.toContain("×");
+  });
+
   it("surfaces managed chat history with archive, delete, time and token metadata", () => {
     expect(appSource).toContain("archiveChatSession");
     expect(appSource).toContain("restoreChatSession");
@@ -288,8 +302,8 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(chatPanelSource).toContain("handleOpenCommandMenu");
     expect(chatPanelSource).toContain("handleSelectComposerCommand(command.id)");
     expect(chatPanelSource).toContain("createGoalCommandDraft(draft)");
-    expect(styles).toContain(".composer-icon-command");
-    expect(styles).toContain("content: \"⌘\";");
+    expect(styles).toContain(".composer-icon");
+    expect(styles).toContain(".composer-icon path");
     expect(styles).toContain("--composer-action-inset: 14px;");
     expect(styles).toContain("right: var(--composer-action-inset);");
     expect(styles).toContain("bottom: var(--composer-action-inset);");
@@ -468,7 +482,7 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".composer-input-shell");
     expect(styles).toContain(".composer-floating-actions");
     expect(styles).toContain(".composer-icon-button");
-    expect(styles).toContain(".composer-icon-stop");
+    expect(styles).toContain(".composer-icon");
     expect(styles).toContain("--composer-action-size: 32px;");
     expect(styles).toContain("width: var(--composer-action-size); height: var(--composer-action-size);");
     expect(styles).toContain(".chat-hero {");
