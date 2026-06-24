@@ -14,7 +14,7 @@ describe("README", () => {
     expect(readme).toContain("npm run pack:mac");
     expect(readme).toContain("npm run dist:mac");
     expect(readme).toContain("xattr -dr com.apple.quarantine");
-    expect(readme).toContain("Zerox.Agent-2.6.0-arm64.dmg");
+    expect(readme).toContain("Zerox.Agent-2.7.0-arm64.dmg");
     expect(readme).toContain("npm run harness:check");
     expect(readme).toContain("npm run harness:score");
     expect(readme).toContain("npm run episode:export");
@@ -52,8 +52,8 @@ describe("README", () => {
     expect(positioning).toContain("Zerox does not run unbounded autonomous loops");
     expect(readme).toContain("session-native Goal Mode");
     expect(readme).toContain("Chat Session mode");
-    expect(readme).toContain("current release is **v2.6.0**");
-    expect(readme).toContain("当前版本是 **v2.6.0**");
+    expect(readme).toContain("current release is **v2.7.0**");
+    expect(readme).toContain("当前版本是 **v2.7.0**");
   });
 
   it("documents Goal Mode architecture, eval coverage, and feature-list status", () => {
@@ -95,8 +95,12 @@ describe("README", () => {
     expect(readme).toContain("artifact evidence files");
     expect(readme).toContain("1077 tests");
     expect(readme).toContain("1077 个测试");
-    expect(readme).toContain("Current version: v2.6.0.");
-    expect(readme).toContain("当前版本：v2.6.0。");
+    expect(readme).toContain("Current version: v2.7.0.");
+    expect(readme).toContain("当前版本：v2.7.0。");
+    expect(readme).toContain("v2.7.0");
+    expect(readme).toContain("Chat-first");
+    expect(readme).toContain("streamed answers");
+    expect(readme).toContain("guided skill input");
     expect(readme).toContain("v2.6.0 is a hardening release");
     expect(readme).toContain("v2.6.0 是一次本地控制面的加固发布");
     expect(readme).toContain("v2.5.0 makes workspace a first-class execution boundary");

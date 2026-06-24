@@ -8,7 +8,7 @@ type PackageJson = {
 };
 
 describe("package scripts", () => {
-  it("sets release metadata to v2.6.0", () => {
+  it("sets release metadata to v2.7.0", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -16,12 +16,12 @@ describe("package scripts", () => {
       readFileSync(path.join(process.cwd(), "package-lock.json"), "utf8"),
     ) as { version?: string; packages?: Record<string, { version?: string }> };
 
-    expect(packageJson.version).toBe("2.6.0");
-    expect(packageLock.version).toBe("2.6.0");
-    expect(packageLock.packages?.[""]?.version).toBe("2.6.0");
+    expect(packageJson.version).toBe("2.7.0");
+    expect(packageLock.version).toBe("2.7.0");
+    expect(packageLock.packages?.[""]?.version).toBe("2.7.0");
   });
 
-  it("keeps prior release gates done while publishing v2.6.0", () => {
+  it("keeps prior release gates done while publishing v2.7.0", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -35,7 +35,7 @@ describe("package scripts", () => {
       }>;
     };
 
-    expect(packageJson.version).toBe("2.6.0");
+    expect(packageJson.version).toBe("2.7.0");
     expect(featureList.features).toContainEqual(
       expect.objectContaining({
         id: "P15-hardening-release-2.6.0",

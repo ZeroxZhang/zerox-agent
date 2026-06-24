@@ -50,11 +50,15 @@
 
 <h2 id="overview-en">Overview</h2>
 
-**Zerox Agent** is a local-first desktop control plane for personal AI agents. The current release is **v2.6.0**. The name derives from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
+**Zerox Agent** is a local-first desktop control plane for personal AI agents. The current release is **v2.7.0**. The name derives from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
 
 It is not a chat wrapper or a generic hosted agent surface. It runs locally, configures OpenAI-compatible models, scans local `SKILL.md` skill files, executes recoverable agent runs, invokes permission-controlled tools, tracks parent/child multi-agent sessions, persists experiential knowledge into local long-term memory, and keeps learning user-reviewed before it changes future behavior.
 
 The product boundary is documented in [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md): Zerox optimizes for trusted local control, recoverable agent runs, explicit permissions, workspace-scoped runs, observable trajectories, parent/child multi-agent sessions, and user-reviewed learning. Runtime, workspace, and learning details live in [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md), [`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md), and [`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md).
+
+## v2.7.0
+
+Zerox Agent v2.7.0 makes Chat the primary interaction surface. It removes Overview from primary navigation, adds Chat-first streamed answers with distinct thinking/process output, supports guided skill input before execution, unifies local icons, and preserves local-first permission and workspace boundaries.
 
 v2.1.2 stabilized the command-first agent release after the v2.1.1 UI/runtime controls. Chat sessions now use short deterministic names instead of leaking full slash-command prompts into the header, long live-status capsules stay collapsed until the user expands them, planner JSON recovery handles fenced or explanatory model responses, offloaded tool results can be read back through `tool_result_read` or compatible `file_read` refs, and Goal Mode now resolves natural-language output paths such as `/Users/name/Downloads目录下的文件` back to the real folder before checking artifact evidence. Milestone `running` state is persisted before runtime dispatch, so the right progress rail updates while work is happening instead of after the loop finishes.
 
@@ -103,7 +107,7 @@ v2.4.0 ships the iteration-roadmap P1–P8 activation (SQLite storage, provider 
 | **Skill-Driven** | Behavior is defined by composable `SKILL.md` files supporting agent mode (LLM-driven) and script mode, with optional MCP tool extensions. |
 | **Observable** | Every run produces a structured event timeline across memory lookup, model calls, public reasoning fields, tool calls, pauses, cancellation, and completion. |
 | **Recoverable** | Agent work should be inspectable, cancelable, and resumable instead of disappearing into one-shot chat turns or hard-stopping at a fixed loop limit. |
-| **Modular** | The primary app flow is Chat, Overview, Runs, Tasks, and Settings. Skills, Tools, Memory, Learning, and Evals live as collapsed secondary Settings sections; legacy `#goals` hashes redirect to Chat. |
+| **Modular** | The primary app flow is Chat, Runs, Tasks, and Settings. Overview diagnostics live under Settings, and legacy `#goals` hashes redirect to Chat. |
 
 ---
 
@@ -590,7 +594,7 @@ can't be opened." The image is usually valid; remove the quarantine attribute
 before opening:
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/"Zerox.Agent-2.6.0-arm64.dmg"
+xattr -dr com.apple.quarantine ~/Downloads/"Zerox.Agent-2.7.0-arm64.dmg"
 ```
 
 If you already dragged the app into Applications, run:
@@ -621,7 +625,7 @@ npm run episode:export -- --config-dir <userData/config> --latest-validation
 npm run verify        # Tests + build + deterministic eval
 ```
 
-As of v2.6.0, `npm run verify` covers the Vitest suite, the production build, agent evals, and memory evals. The suite currently includes 165 Vitest files / 1077 tests, 26 deterministic agent eval fixtures, and 2 memory eval fixtures. Agent evals include native code engineering, research writing, reflection-after-test-failure, retry-budget exhaustion, context compaction, tool-call checkpointing, model retry, strategy-guard fragmentation recovery, episode eval-candidate, child handoff review-gate, goal-mode recovery/control, bounded-autonomy golden paths, Agent Runtime Kernel event replay, permission-rule behavior, and deterministic local artifact provenance acceptance. session-native Goal Mode architecture is documented in `docs/architecture/agent-goal-mode.md`, including the artifact evidence contract, and Agent Runtime Kernel architecture is documented in `docs/architecture/agent-runtime.md`, including the Kernel Event Bridge, checkpointed compaction, retry evidence, judge verdicts, event replay, and rule-based permission evidence. Set `BUILDING_AGENT_CONFIG_DIR=/path/to/config` when running `npm run eval:agent` or `npm run harness:score` to include local promoted fixtures and pending eval candidates from that config directory. `npm run episode:export` writes local evidence packages with `run-graph.json`, `eval-candidate.json`, `trajectory.jsonl`, and verification metadata; `--latest-validation` exports the run captured by `agent-validation.json`. `npm run harness:score` emits the seven-category ETCLOVG score used by Overview as a local quality signal and now includes adversarial eval, goal-mode pass rate, goal-judge pass rate, plus the ACI/context report; Overview also displays the native Agent Capability score.
+As of v2.7.0, `npm run verify` covers the Vitest suite, the production build, agent evals, and memory evals. The suite currently includes 165 Vitest files / 1077 tests, 26 deterministic agent eval fixtures, and 2 memory eval fixtures. Agent evals include native code engineering, research writing, reflection-after-test-failure, retry-budget exhaustion, context compaction, tool-call checkpointing, model retry, strategy-guard fragmentation recovery, episode eval-candidate, child handoff review-gate, goal-mode recovery/control, bounded-autonomy golden paths, Agent Runtime Kernel event replay, permission-rule behavior, and deterministic local artifact provenance acceptance. session-native Goal Mode architecture is documented in `docs/architecture/agent-goal-mode.md`, including the artifact evidence contract, and Agent Runtime Kernel architecture is documented in `docs/architecture/agent-runtime.md`, including the Kernel Event Bridge, checkpointed compaction, retry evidence, judge verdicts, event replay, and rule-based permission evidence. Set `BUILDING_AGENT_CONFIG_DIR=/path/to/config` when running `npm run eval:agent` or `npm run harness:score` to include local promoted fixtures and pending eval candidates from that config directory. `npm run episode:export` writes local evidence packages with `run-graph.json`, `eval-candidate.json`, `trajectory.jsonl`, and verification metadata; `--latest-validation` exports the run captured by `agent-validation.json`. `npm run harness:score` emits the seven-category ETCLOVG score used by Overview as a local quality signal and now includes adversarial eval, goal-mode pass rate, goal-judge pass rate, plus the ACI/context report; Overview also displays the native Agent Capability score.
 
 Deterministic local artifact goals are accepted only when the task contract, canonical destination, generated artifact, and provenance evidence agree. Location/resource canonicalization normalizes home-relative, workspace-relative, Desktop, Downloads, and absolute roots before sandbox and acceptance checks. Provenance-backed acceptance requires the artifact sidecar to match the run, goal, artifact id, canonical destination, and content hash. v2.4.1 passed the command-line verification gate, production smoke, and harness check for the managed chat-history release; release metadata now matches the v2.4.1 app version.
 
@@ -635,7 +639,7 @@ Deterministic local artifact goals are accepted only when the task contract, can
 
 <h2 id="roadmap">Roadmap</h2>
 
-Current version: v2.6.0.
+Current version: v2.7.0.
 
 Recently shipped:
 
@@ -663,6 +667,7 @@ Recently shipped:
 - [x] v2.4.0 iteration-roadmap P1-P8 activation with unified storage, provider abstraction, actor/workflow runtime, dream/distill, streaming/max-mode/MCP, and token-aware runGraph evidence
 - [x] v2.4.1 managed chat history with archive/delete actions, collapsible archived sessions, latest-response time, and cumulative token usage in the workspace sidebar
 - [x] v2.5.0 workspace-bound skill execution with first-class workspace selection, shared skill execution contracts, session activity recovery, and workspace-run ledgers
+- [x] v2.7.0 Chat-first interaction release metadata: primary Chat entry, streamed answers, distinct thinking/process output, guided skill input, and local icon unification
 - [x] v2.6.0 hardening release with sandbox escape fixes, recoverable storage, provider timeouts, scoped tool-result refs, workflow replay correctness, renderer state coherence, and subprocess worker isolation
 
 Planned:
@@ -700,11 +705,15 @@ Planned:
 
 ## 项目概述
 
-**Zerox Agent** 是一个本地优先的桌面智能体控制台，当前版本是 **v2.6.0**。名字取自 **Zero + X**——从留白开始，把未知的本地工作流转成可观察、受权限管控、可恢复的 Agent 运行。
+**Zerox Agent** 是一个本地优先的桌面智能体控制台，当前版本是 **v2.7.0**。名字取自 **Zero + X**——从留白开始，把未知的本地工作流转成可观察、受权限管控、可恢复的 Agent 运行。
 
 它不是聊天壳，也不是泛用云端 Agent 入口。它运行在本机：配置 OpenAI‑compatible 模型、扫描本地 `SKILL.md` 技能文件、执行可恢复的 Agent 运行、调用受权限管控的工具、跟踪父子多 Agent 会话、把经验和知识写入本地长期记忆，并且在改变未来行为前保留用户审核。
 
 产品边界写在 [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md)：Zerox 优先建设可信的本地控制、可恢复运行、显式权限、workspace 作用域、可观察轨迹、父子多 Agent 会话和用户审核后的学习。运行时、workspace 与学习机制分别见 [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md)、[`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md)、[`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md)。
+
+## v2.7.0
+
+Zerox Agent v2.7.0 把 Chat 提升为第一交互入口：主导航移除 Overview，支持 Chat-first 的 streamed answers，并把 thinking/process 输出独立呈现；执行前支持 guided skill input，统一本地图标体系，同时继续保留 local-first 的权限边界与 workspace 边界。
 
 v2.1.2 在 v2.1.1 的 UI/运行控制基础上继续收口 command-first agent 发布问题：会话标题改成简短确定性名称，不再把完整 `/目标 ...` 提示词和本地路径挤进顶部区域；长状态胶囊默认折叠，用户点击后再展开；planner JSON 解析可以恢复 fenced code 或带解释文本的模型响应；被 offload 的工具结果可以通过 `tool_result_read` 或兼容的 `file_read` ref 读回；Goal Mode 会把 `/Users/name/Downloads目录下的文件` 这类自然语言路径还原到真实目录再验收 artifact evidence。里程碑进入 `running` 后会先持久化，因此右侧进度栏会在执行中更新，而不是等 loop 结束后才变化。
 
@@ -740,7 +749,7 @@ v2.4.0 在 v2.3.6 确定性本地 artifact 目标能力之上，落地 iteration
 | **技能驱动 (Skill-Driven)** | 行为由可组合的 `SKILL.md` 文件定义，支持智能体模式 (agent) 和脚本模式 (script)，可扩展 MCP 工具。 |
 | **可观测 (Observable)** | 每次运行产生结构化事件时间线，覆盖记忆检索、模型调用、公开 reasoning 字段、工具调用、暂停、中断和完成状态。 |
 | **可恢复 (Recoverable)** | Agent 工作应该可检查、可取消、可恢复，而不是消失在一次性聊天回合里，也不应该因为固定轮次上限直接硬停止。 |
-| **模块化 (Modular)** | 主流程保留会话、总览、运行、任务和设置；技能、工具、记忆、学习和评测作为设置内默认折叠的二级分区，旧 `#goals` 地址会回到会话。 |
+| **模块化 (Modular)** | 主流程保留会话、运行、任务和设置；Overview 诊断视图收纳到设置内，技能、工具、记忆、学习和评测作为默认折叠的二级分区，旧 `#goals` 地址会回到会话。 |
 
 ---
 
@@ -1334,7 +1343,7 @@ Gatekeeper 可能提示「Zerox Agent 已损坏，无法打开」。这通常不
 而是下载隔离属性导致的拦截。打开前在终端执行：
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/"Zerox.Agent-2.6.0-arm64.dmg"
+xattr -dr com.apple.quarantine ~/Downloads/"Zerox.Agent-2.7.0-arm64.dmg"
 ```
 
 如果已经把应用拖进 Applications，则执行：
@@ -1361,7 +1370,7 @@ mac:
 
 ## 测试
 
-截至 v2.6.0，`npm run verify` 覆盖 Vitest 测试、生产构建、Agent 评测和记忆检索评测；当前包含 165 个 Vitest 文件 / 1077 个测试、26 个确定性 Agent eval fixture 和 2 个 memory eval fixture。Agent eval 覆盖原生代码工程、研究写作、测试失败反思、retry budget exhaustion、上下文压缩、tool-call checkpoint、模型重试、strategy guard 碎片化恢复、episode eval candidate、child handoff review gate、goal-mode recovery/control、bounded-autonomy 黄金路径、Agent Runtime Kernel kernel event replay、permission-rule behavior 和 deterministic local artifact provenance acceptance。session-native Goal Mode 架构记录在 `docs/architecture/agent-goal-mode.md`；Agent Runtime Kernel 架构记录在 `docs/architecture/agent-runtime.md`，包含 Kernel Event Bridge、checkpointed compaction、retry evidence、judge verdict、event replay 和规则化权限证据：
+截至 v2.7.0，`npm run verify` 覆盖 Vitest 测试、生产构建、Agent 评测和记忆检索评测；当前包含 165 个 Vitest 文件 / 1077 个测试、26 个确定性 Agent eval fixture 和 2 个 memory eval fixture。Agent eval 覆盖原生代码工程、研究写作、测试失败反思、retry budget exhaustion、上下文压缩、tool-call checkpoint、模型重试、strategy guard 碎片化恢复、episode eval candidate、child handoff review gate、goal-mode recovery/control、bounded-autonomy 黄金路径、Agent Runtime Kernel kernel event replay、permission-rule behavior 和 deterministic local artifact provenance acceptance。session-native Goal Mode 架构记录在 `docs/architecture/agent-goal-mode.md`；Agent Runtime Kernel 架构记录在 `docs/architecture/agent-runtime.md`，包含 Kernel Event Bridge、checkpointed compaction、retry evidence、judge verdict、event replay 和规则化权限证据：
 
 ```bash
 npm test              # 运行全部测试
@@ -1391,7 +1400,7 @@ npm run verify        # 测试 + 构建 + 确定性评测
 
 ## 路线图
 
-当前版本：v2.6.0。
+当前版本：v2.7.0。
 
 近期已完成：
 
@@ -1419,6 +1428,7 @@ npm run verify        # 测试 + 构建 + 确定性评测
 - [x] v2.4.0 iteration-roadmap P1-P8 激活：统一存储、provider 抽象、actor/workflow 运行时、dream/distill、streaming/max-mode/MCP 和 token-aware runGraph 证据
 - [x] v2.4.1 历史会话管理：归档/删除操作、可折叠归档组、最新响应时间和工作区侧栏累计 token 显示
 - [x] v2.5.0 workspace-bound skill execution：一等 workspace 选择、共享技能执行契约、会话活动恢复和 workspace-run ledger
+- [x] v2.7.0 Chat-first 交互发布元数据：主入口回到 Chat、streamed answers、thinking/process 分离、guided skill input 和本地图标统一
 - [x] v2.6.0 加固发布：sandbox 逃逸修复、可恢复存储、provider timeout、scoped tool-result ref、workflow 复盘正确性、renderer 状态一致性和 subprocess worker 隔离
 
 后续计划：

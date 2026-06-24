@@ -4324,3 +4324,24 @@
   - `npx tsc -p tsconfig.electron.json --noEmit --pretty false` -> passed.
   - `npx tsc -p tsconfig.renderer.json --noEmit --pretty false` -> passed.
   - `npm run harness:check` -> passed.
+
+## 2026-06-24 - Task 7 v2.7.0 Release Metadata Prep
+
+- Summary:
+  - Updated release-metadata regression tests to require `v2.7.0` package/version strings plus README Chat-first release notes coverage.
+  - Bumped root package metadata to `2.7.0` and refreshed README current-version, packaging, roadmap, and bilingual `v2.7.0` release note references.
+  - Kept this prep scoped to metadata/tests only; `P16-v2.7.0-ui-interaction` is not marked `done` here and no final independent acceptance evidence was recorded.
+- Changed files:
+  - `README.md`
+  - `src/shared/readme.test.ts`
+  - `src/shared/packageScripts.test.ts`
+  - `package.json`
+  - `package-lock.json`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> failed as expected: package metadata still reported `2.6.0`, README still referenced `v2.6.0`, and README lacked the new `v2.7.0` / `Chat-first` / `streamed answers` / `guided skill input` assertions.
+- GREEN / verification evidence:
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 2 files / 11 tests passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run build` -> passed.
