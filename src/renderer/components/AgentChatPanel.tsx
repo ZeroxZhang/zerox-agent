@@ -867,6 +867,7 @@ export function AgentChatPanel({
   function resetActiveChatRefs() {
     activeStatusSessionIdRef.current = null;
     activeChatRequestIdRef.current = null;
+    pendingInputRequestRef.current = null;
     setActiveChatRequestId(null);
   }
 

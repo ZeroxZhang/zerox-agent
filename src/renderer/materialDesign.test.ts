@@ -570,7 +570,7 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".guided-skill-input-form");
   });
 
-  it("clears active stream refs during new chat reset so stale events cannot repopulate the transcript", () => {
+  it("clears all active stream refs during new chat reset so stale events cannot repopulate the transcript", () => {
     const newChatResetSource = getUseEffectSource(
       chatPanelSource,
       "newChatRequestKey",
@@ -583,6 +583,7 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(chatPanelSource).toContain("function resetActiveChatRefs");
     expect(chatPanelSource).toContain("activeStatusSessionIdRef.current = null");
     expect(chatPanelSource).toContain("activeChatRequestIdRef.current = null");
+    expect(chatPanelSource).toContain("pendingInputRequestRef.current = null");
   });
 });
 

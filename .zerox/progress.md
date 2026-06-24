@@ -3990,6 +3990,23 @@
   - `npx tsc -p tsconfig.renderer.json --noEmit --pretty false` -> passed.
   - `npm run harness:check` -> passed.
 
+## 2026-06-24 - Worker T5 Task 5 Fix Stale Guided Input Stream Ref
+
+- Summary:
+  - Fixed the remaining Task 5 re-review blocker where `pendingInputRequestRef` could keep a previous guided-input request active between new-chat state reset and the pending-input effect sync.
+  - Tightened the reset regression to require clearing all stream-active refs, including the pending guided-input ref used by `onChatStreamEvent` request fallback.
+- Changed files:
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/materialDesign.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts -t "clears all active stream refs"` -> failed as expected: `pendingInputRequestRef.current = null` was missing.
+- GREEN / verification evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts -t "clears all active stream refs"` -> 1 file / 1 selected test passed.
+  - `npm test -- src/renderer/materialDesign.test.ts src/renderer/chatStreamReducer.test.ts src/renderer/chatTaskActivity.test.ts src/renderer/chatTaskActivityRestore.test.ts` -> 4 files / 56 tests passed.
+  - `npx tsc -p tsconfig.renderer.json --noEmit --pretty false` -> passed.
+  - `npm run harness:check` -> passed.
+
 ## 2026-06-23 - Worker T3 Task 3 Streaming Fallback Repair
 
 - Summary:
