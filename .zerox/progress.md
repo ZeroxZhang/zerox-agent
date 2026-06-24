@@ -4180,6 +4180,37 @@
   - `npx tsc -p tsconfig.electron.json --noEmit --pretty false` -> passed.
   - `npx tsc -p tsconfig.renderer.json --noEmit --pretty false` -> passed.
   - `npm run harness:check` -> passed.
+
+## 2026-06-24 - Worker T5 Task 5 Renderer Streaming Transcript And Guided Input UI
+
+- Summary:
+  - Added renderer chat stream reduction for active-session/request-filtered answer deltas, thinking deltas, tool call previews, terminal finalization, and pending guided input requests.
+  - Wired `AgentChatPanel` to subscribe/unsubscribe to `onChatStreamEvent`, render separated collapsed thinking/tool preview surfaces, finalize streamed replies without duplicate assistant messages, and special-case guided input waits as paused state.
+  - Rendered `guided-skill-input-form` in the main chat surface with string/path/number/boolean/choice controls and `respondSkillInput` submission.
+  - Mapped `streaming`/`waiting_for_input` activity and restore state, including latest pending input after reload.
+  - Forwarded `respondSkillInput` stream events through `chat:streamEvent` to the invoking renderer.
+- Changed files:
+  - `src/main/ipc/index.ts`
+  - `src/main/ipc/index.test.ts`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/chatStreamReducer.ts`
+  - `src/renderer/chatStreamReducer.test.ts`
+  - `src/renderer/chatTaskActivity.ts`
+  - `src/renderer/chatTaskActivity.test.ts`
+  - `src/renderer/chatTaskActivityRestore.test.ts`
+  - `src/renderer/materialDesign.test.ts`
+  - `src/renderer/styles/chat.css`
+  - `src/renderer/styles/responsive.css`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/renderer/chatTaskActivity.test.ts src/renderer/chatTaskActivityRestore.test.ts src/renderer/materialDesign.test.ts src/renderer/chatStreamReducer.test.ts src/main/ipc/index.test.ts` -> failed as expected: activity mapped guided input/streaming to fallback states, reducer was inert/missing behavior, panel lacked stream/guided/collapse surfaces, and IPC did not forward response stream events.
+- GREEN / verification evidence:
+  - `npm test -- src/renderer/chatTaskActivity.test.ts src/renderer/chatTaskActivityRestore.test.ts src/renderer/materialDesign.test.ts src/renderer/chatStreamReducer.test.ts src/main/ipc/index.test.ts` -> 5 files / 56 tests passed.
+  - `npm test -- src/renderer/chatTaskActivity.test.ts src/renderer/chatTaskActivityRestore.test.ts src/renderer/materialDesign.test.ts src/renderer/chatStreamReducer.test.ts src/preload/index.test.ts src/main/ipc/*.test.ts` -> 7 files / 62 tests passed.
+  - `npx tsc -p tsconfig.renderer.json --noEmit --pretty false` -> passed.
+  - `npx tsc -p tsconfig.electron.json --noEmit --pretty false` -> passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
   - `git diff --check` -> passed.
 
 ## 2026-06-24 - Task 4 Guided Skill Required Persistence Null-Write Repair

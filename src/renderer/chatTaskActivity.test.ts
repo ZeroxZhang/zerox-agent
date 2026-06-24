@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   buildGoalTaskActivity,
+  buildTaskActivityFromStatusEvent,
   buildTaskActivityDetail,
   buildTaskProcessItems,
   createTaskActivity,
+  getChatStatusKindFromStatusEvent,
   getGoalUiSyncState,
+  getWorkPhaseFromChatStatusEvent,
 } from "./chatTaskActivity";
 import type { ChatTaskStatusEvent } from "../shared/chat";
 
@@ -139,6 +142,59 @@ describe("chat task activity", () => {
       workPhase: "paused",
       shouldClearActiveRequest: true,
     });
+  });
+
+  it("maps guided input waits to paused input state instead of an error fallback", () => {
+    const waitingEvent = createStatusEvent({
+      state: "waiting_for_input",
+      message: "Skill input required.",
+      createdAt: "2026-06-23T08:00:05.000Z",
+      elapsedMs: 2000,
+      inputRequest: {
+        id: "input_1",
+        executionId: "execution_1",
+        sessionId: "session_1",
+        requestId: "request_1",
+        skillName: "onepager",
+        reason: "Pick a source file.",
+        fields: [
+          {
+            name: "source",
+            label: "Source",
+            type: "path",
+            required: true,
+          },
+        ],
+        createdAt: "2026-06-23T08:00:05.000Z",
+      },
+    });
+
+    expect(getChatStatusKindFromStatusEvent(waitingEvent)).toBe("paused");
+    expect(getWorkPhaseFromChatStatusEvent(waitingEvent)).toBe("paused");
+    expect(buildTaskActivityFromStatusEvent(waitingEvent)).toMatchObject({
+      kind: "paused",
+      title: "等待技能输入",
+      detail: "Skill input required.",
+    });
+    expect(buildTaskProcessItems([waitingEvent])[0]?.label).toBe("输入");
+  });
+
+  it("maps streaming status to working model output state", () => {
+    const streamingEvent = createStatusEvent({
+      state: "streaming",
+      message: "正在输出回复",
+      createdAt: "2026-06-23T08:00:04.000Z",
+      elapsedMs: 1500,
+    });
+
+    expect(getChatStatusKindFromStatusEvent(streamingEvent)).toBe("working");
+    expect(getWorkPhaseFromChatStatusEvent(streamingEvent)).toBe("model");
+    expect(buildTaskActivityFromStatusEvent(streamingEvent)).toMatchObject({
+      kind: "working",
+      title: "正在输出回复",
+      detail: "正在输出回复",
+    });
+    expect(buildTaskProcessItems([streamingEvent])[0]?.label).toBe("输出");
   });
 });
 

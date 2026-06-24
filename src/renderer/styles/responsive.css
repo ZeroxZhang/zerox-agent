@@ -7,6 +7,9 @@
     margin: 0 auto;
     padding-left: 0;
   }
+  .guided-skill-input-form {
+    margin-inline: 4px;
+  }
 }
 
 @media (max-width: 900px) {
@@ -101,6 +104,10 @@
   .composer textarea {
     min-height: 116px;
     padding-right: 132px;
+  }
+
+  .guided-skill-input-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

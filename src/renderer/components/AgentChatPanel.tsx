@@ -27,7 +27,11 @@ import type {
   ChatSessionGoalSummary,
   ChatSessionListItem,
   ChatSessionRecord,
+  ChatStreamEvent,
   ChatTaskStatusEvent,
+  SendChatMessageResult,
+  SkillInputField,
+  SkillUserInputRequest,
 } from "../../shared/chat";
 import type { Goal } from "../../shared/agentGoal";
 import type { MemoryRecord } from "../../shared/memory";
@@ -74,6 +78,12 @@ import {
   restoreChatTaskActivity,
   type TaskActivityState,
 } from "../chatTaskActivity";
+import {
+  applyChatStreamEvent,
+  createChatStreamState,
+  finalizeChatStreamResult,
+  type ChatStreamMessage,
+} from "../chatStreamReducer";
 import { GoalDetailDrawer } from "./GoalDetailDrawer";
 import { GoalStatusStrip } from "./GoalStatusStrip";
 import type {
@@ -89,12 +99,9 @@ type AgentChatPanelProps = {
   onNavigate: (sectionId: NavigationSectionId) => void;
 };
 
-type ChatMessage = {
-  id: string;
-  role: "assistant" | "user";
-  content: string;
-  createdAt: string;
-};
+type ChatMessage = ChatStreamMessage;
+
+type SuccessfulChatResult = Extract<SendChatMessageResult, { ok: true }>;
 
 type ChatStatus = {
   kind: "ready" | "working" | "paused" | "error";
@@ -189,7 +196,11 @@ export function AgentChatPanel({
   const dataBoundary = buildAgentDataBoundary(
     window.buildingAgent ? "desktop" : "preview",
   );
-  const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
+  const [chatStreamState, setChatStreamState] = useState(() =>
+    createChatStreamState(initialMessages),
+  );
+  const messages = chatStreamState.messages;
+  const pendingInputRequest = chatStreamState.pendingInputRequest;
   const [draft, setDraft] = useState("");
   const [draftCursor, setDraftCursor] = useState(0);
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
@@ -231,6 +242,9 @@ export function AgentChatPanel({
   const [activeChatRequestId, setActiveChatRequestId] = useState<string | null>(
     null,
   );
+  const [guidedInputValues, setGuidedInputValues] = useState<
+    Record<string, string | number | boolean>
+  >({});
   const [chatStatusExpanded, setChatStatusExpanded] = useState(false);
   const [activityTick, setActivityTick] = useState(Date.now());
   const messageListRef = useRef<HTMLDivElement>(null);
@@ -238,6 +252,7 @@ export function AgentChatPanel({
   const sessionIdRef = useRef<string | null>(sessionId);
   const activeStatusSessionIdRef = useRef<string | null>(null);
   const activeChatRequestIdRef = useRef<string | null>(null);
+  const pendingInputRequestRef = useRef<SkillUserInputRequest | null>(null);
   const activeGoalRef = useRef<ChatSessionGoalSummary | null>(null);
 
   // Auto-scroll to latest message
@@ -253,12 +268,26 @@ export function AgentChatPanel({
   }, [onActiveSessionChange, sessionId]);
 
   useEffect(() => {
+    const previousInputRequest = pendingInputRequestRef.current;
+    pendingInputRequestRef.current = pendingInputRequest;
+    setGuidedInputValues((current) => {
+      if (!pendingInputRequest) {
+        return {};
+      }
+      return {
+        ...createGuidedInputInitialValues(pendingInputRequest.fields),
+        ...(previousInputRequest?.id === pendingInputRequest.id ? current : {}),
+      };
+    });
+  }, [pendingInputRequest]);
+
+  useEffect(() => {
     setChatStatusExpanded(false);
   }, [status.message]);
 
   useEffect(() => {
     setSessionId(null);
-    setMessages(initialMessages);
+    setChatStreamState(createChatStreamState(initialMessages));
     setStatus({ kind: "ready", message: "会话已就绪" });
     setWorkPhase("idle");
     setTaskActivity(idleTaskActivity);
@@ -389,6 +418,71 @@ export function AgentChatPanel({
       return;
     }
 
+    return window.buildingAgent.onChatStreamEvent((event) => {
+      if (event.type === "status") {
+        return;
+      }
+
+      const activeStream = {
+        activeSessionId: activeStatusSessionIdRef.current ?? sessionIdRef.current,
+        activeRequestId:
+          activeChatRequestIdRef.current ??
+          pendingInputRequestRef.current?.requestId ??
+          null,
+      };
+      if (!chatStreamEventMatchesActive(event, activeStream)) {
+        return;
+      }
+
+      activeStatusSessionIdRef.current = event.sessionId;
+      setSessionId((current) => current ?? event.sessionId);
+      setChatStreamState((current) =>
+        applyChatStreamEvent(current, event, activeStream),
+      );
+
+      if (
+        event.type === "answer_delta" ||
+        event.type === "thinking_delta" ||
+        event.type === "tool_call_preview"
+      ) {
+        setStatus({ kind: "working", message: "正在输出回复" });
+        setWorkPhase("model");
+        setTaskActivity(
+          createTaskActivity({
+            kind: "working",
+            title: "正在输出回复",
+            detail: "正在输出回复",
+          }),
+        );
+      }
+
+      if (event.type === "waiting_for_input") {
+        setStatus({
+          kind: "paused",
+          message: event.inputRequest.reason || "等待技能输入",
+        });
+        setWorkPhase("paused");
+        setTaskActivity(
+          createTaskActivity({
+            kind: "paused",
+            title: "等待技能输入",
+            detail: event.inputRequest.reason || "等待技能输入",
+          }),
+        );
+        setActiveChatRequest(null);
+      }
+
+      if (event.type === "failed" || event.type === "canceled") {
+        setActiveChatRequest(null);
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!window.buildingAgent) {
+      return;
+    }
+
     return window.buildingAgent.onChatTaskStatusEvent((event) => {
       const activeSessionId = activeStatusSessionIdRef.current;
       const currentSessionId = sessionIdRef.current;
@@ -408,8 +502,12 @@ export function AgentChatPanel({
         message: event.message,
       });
       setWorkPhase(getWorkPhaseFromChatStatusEvent(event));
+      if (event.state === "waiting_for_input" && event.inputRequest) {
+        setPendingInputRequest(event.inputRequest);
+      }
       if (
         event.state === "paused" ||
+        event.state === "waiting_for_input" ||
         event.state === "canceled" ||
         event.state === "completed" ||
         event.state === "failed"
@@ -506,9 +604,12 @@ export function AgentChatPanel({
     }
 
     setSessionId(loadedSession.id);
-    setMessages(loadedSession.messages.map(toChatMessage));
     setSelectedWorkspaceId(loadedSession.workspaceId ?? null);
     const restoredActivity = restoreChatTaskActivity(loadedSession.activity);
+    setChatStreamState({
+      ...createChatStreamState(loadedSession.messages.map(toChatMessage)),
+      pendingInputRequest: restoredActivity?.pendingInputRequest ?? null,
+    });
     if (restoredActivity) {
       setWorkPhase(restoredActivity.workPhase);
       setStatus(restoredActivity.status);
@@ -730,6 +831,32 @@ export function AgentChatPanel({
     };
   }
 
+  function setMessages(
+    updater: ChatMessage[] | ((current: ChatMessage[]) => ChatMessage[]),
+  ) {
+    setChatStreamState((current) => ({
+      ...current,
+      messages:
+        typeof updater === "function" ? updater(current.messages) : updater,
+    }));
+  }
+
+  function setPendingInputRequest(request: SkillUserInputRequest | null) {
+    setChatStreamState((current) => ({
+      ...current,
+      pendingInputRequest: request,
+    }));
+  }
+
+  function resetStreamProcessState() {
+    setChatStreamState((current) => ({
+      ...current,
+      thinkingText: "",
+      toolCallPreviews: [],
+      pendingInputRequest: null,
+    }));
+  }
+
   function appendMessage(message: Omit<ChatMessage, "id" | "createdAt">) {
     setMessages((current) => [...current, createMessage(message, current.length)]);
   }
@@ -943,6 +1070,62 @@ export function AgentChatPanel({
     }
   }
 
+  function applySuccessfulChatResult(
+    result: SuccessfulChatResult,
+    requestId: string,
+  ) {
+    setSessionId(result.sessionId);
+    if (result.executedRun) {
+      setRuns((currentRuns) => [result.executedRun!, ...currentRuns]);
+    }
+    if (result.createdTask) {
+      setTasks((currentTasks) => [result.createdTask!, ...currentTasks]);
+    }
+    if (result.activeGoal) {
+      void refreshActiveGoalDetail(result.activeGoal.id);
+    }
+    setSelectedSkillName(null);
+    const isPaused = result.agentStatus?.state === "paused";
+    const isGoalExecuting = result.activeGoal?.status === "executing";
+    setStatus({
+      kind: isGoalExecuting ? "working" : isPaused ? "paused" : "ready",
+      message: isGoalExecuting
+        ? "目标正在后台执行"
+        : isPaused
+        ? "等待你确认是否继续"
+        : result.createdTask
+          ? "任务已创建"
+          : result.executedRun
+            ? `任务已运行：${translateRunStatus(result.executedRun.status)}`
+            : result.relatedMemories.length
+              ? `已参考 ${result.relatedMemories.length} 条记忆`
+              : "模型已回复",
+    });
+    setWorkPhase(isGoalExecuting ? "tool" : isPaused ? "paused" : "done");
+    setTaskActivity(
+      isGoalExecuting && result.activeGoal
+        ? buildGoalTaskActivity({
+            status: result.activeGoal.status,
+            description: result.activeGoal.description,
+          })
+        : buildTaskActivityFromAgentStatus({
+            agentStatus: result.agentStatus,
+            relatedMemoryCount: result.relatedMemories.length,
+            fallbackDetail: isPaused ? "等待确认" : "回复已写入会话",
+          }),
+    );
+    activeStatusSessionIdRef.current =
+      isPaused || isGoalExecuting ? result.sessionId : null;
+    setChatStreamState((current) =>
+      finalizeChatStreamResult(current, {
+        requestId,
+        sessionId: result.sessionId,
+        reply: result.reply,
+      }),
+    );
+    void refreshSessions(result.sessionId);
+  }
+
   async function submitUserMessage(rawContent: string) {
     const content = rawContent.trim();
     if (!content) {
@@ -959,6 +1142,7 @@ export function AgentChatPanel({
     );
 
     setMessages((current) => [...current, userMessage]);
+    resetStreamProcessState();
     setDraft("");
     setWorkPhase("planning");
     activeStatusSessionIdRef.current = sessionId;
@@ -1028,6 +1212,23 @@ export function AgentChatPanel({
     }
 
     if (!result.ok) {
+      if (isSkillInputRequiredMessage(result.message)) {
+        setStatus({
+          kind: "paused",
+          message:
+            pendingInputRequestRef.current?.reason || "等待技能输入",
+        });
+        setWorkPhase("paused");
+        setTaskActivity(
+          createTaskActivity({
+            kind: "paused",
+            title: "等待技能输入",
+            detail:
+              pendingInputRequestRef.current?.reason || "等待技能输入",
+          }),
+        );
+        return;
+      }
       activeStatusSessionIdRef.current = null;
       const wasCanceled = isCanceledMessage(result.message);
       setStatus({
@@ -1051,53 +1252,86 @@ export function AgentChatPanel({
       return;
     }
 
-    setSessionId(result.sessionId);
-    if (result.executedRun) {
-      setRuns((currentRuns) => [result.executedRun!, ...currentRuns]);
+    applySuccessfulChatResult(result, requestId);
+  }
+
+  async function handleSubmitGuidedSkillInput(
+    event: React.FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
+    if (!window.buildingAgent || !pendingInputRequest) {
+      return;
     }
-    if (result.createdTask) {
-      setTasks((currentTasks) => [result.createdTask!, ...currentTasks]);
-    }
-    if (result.activeGoal) {
-      void refreshActiveGoalDetail(result.activeGoal.id);
-    }
-    setSelectedSkillName(null);
-    const isPaused = result.agentStatus?.state === "paused";
-    const isGoalExecuting = result.activeGoal?.status === "executing";
-    setStatus({
-      kind: isGoalExecuting ? "working" : isPaused ? "paused" : "ready",
-      message: isGoalExecuting
-        ? "目标正在后台执行"
-        : isPaused
-        ? "等待你确认是否继续"
-        : result.createdTask
-          ? "任务已创建"
-          : result.executedRun
-            ? `任务已运行：${translateRunStatus(result.executedRun.status)}`
-            : result.relatedMemories.length
-              ? `已参考 ${result.relatedMemories.length} 条记忆`
-              : "模型已回复",
-    });
-    setWorkPhase(isGoalExecuting ? "tool" : isPaused ? "paused" : "done");
+
+    const inputRequest = pendingInputRequest;
+    const requestId = inputRequest.requestId;
+    setStatus({ kind: "working", message: "正在继续技能" });
+    setWorkPhase("model");
     setTaskActivity(
-      isGoalExecuting && result.activeGoal
-        ? buildGoalTaskActivity({
-            status: result.activeGoal.status,
-            description: result.activeGoal.description,
-          })
-        : buildTaskActivityFromAgentStatus({
-            agentStatus: result.agentStatus,
-            relatedMemoryCount: result.relatedMemories.length,
-            fallbackDetail: isPaused ? "等待确认" : "回复已写入会话",
-          }),
+      createTaskActivity({
+        kind: "working",
+        title: "正在继续技能",
+        detail: inputRequest.skillName,
+      }),
     );
-    activeStatusSessionIdRef.current =
-      isPaused || isGoalExecuting ? result.sessionId : null;
-    appendMessage({
-      role: "assistant",
-      content: result.reply,
-    });
-    void refreshSessions(result.sessionId);
+    activeStatusSessionIdRef.current = inputRequest.sessionId;
+    setActiveChatRequest(requestId);
+
+    const result = await window.buildingAgent
+      .respondSkillInput({
+        inputRequestId: inputRequest.id,
+        values: buildSkillInputResponseValues(
+          inputRequest.fields,
+          guidedInputValues,
+        ),
+      })
+      .catch((error) => ({
+        ok: false as const,
+        message:
+          error instanceof Error ? error.message : "技能输入提交失败，请稍后重试。",
+      }));
+
+    if (activeChatRequestIdRef.current === requestId) {
+      setActiveChatRequest(null);
+    }
+
+    if (!result.ok) {
+      if (isSkillInputRequiredMessage(result.message)) {
+        setStatus({
+          kind: "paused",
+          message:
+            pendingInputRequestRef.current?.reason || "等待技能输入",
+        });
+        setWorkPhase("paused");
+        setTaskActivity(
+          createTaskActivity({
+            kind: "paused",
+            title: "等待技能输入",
+            detail:
+              pendingInputRequestRef.current?.reason || "等待技能输入",
+          }),
+        );
+        return;
+      }
+
+      setStatus({ kind: "error", message: result.message });
+      setWorkPhase("error");
+      setTaskActivity(
+        createTaskActivity({
+          kind: "error",
+          title: "技能输入失败",
+          detail: result.message,
+        }),
+      );
+      appendMessage({
+        role: "assistant",
+        content: result.message,
+      });
+      return;
+    }
+
+    setPendingInputRequest(null);
+    applySuccessfulChatResult(result, requestId);
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -1481,7 +1715,9 @@ export function AgentChatPanel({
           <div className="message-list" aria-label="消息列表" ref={messageListRef}>
             {messages.map((message) => (
               <article
-                className={`chat-message is-${message.role}`}
+                className={`chat-message is-${message.role}${
+                  message.isStreaming ? " is-streaming" : ""
+                }`}
                 key={message.id}
               >
                 <span>{message.role === "assistant" ? "智能体" : "你"}</span>
@@ -1491,6 +1727,30 @@ export function AgentChatPanel({
             ))}
           </div>
         )}
+
+        {chatStreamState.thinkingText ? (
+          <CollapsibleTextBlock
+            className="thinking-process-block"
+            label="思考"
+            text={chatStreamState.thinkingText}
+          />
+        ) : null}
+
+        {chatStreamState.toolCallPreviews.length > 0 ? (
+          <section
+            className="tool-call-preview-block"
+            aria-label="工具预览"
+          >
+            {chatStreamState.toolCallPreviews.map((preview) => (
+              <CollapsibleTextBlock
+                key={preview.toolCallId}
+                className="tool-call-preview-item"
+                label={preview.toolName ?? "工具"}
+                text={preview.argumentsText || "{}"}
+              />
+            ))}
+          </section>
+        ) : null}
 
         {activeGoal ? (
           <GoalStatusStrip
@@ -1571,6 +1831,22 @@ export function AgentChatPanel({
             request={pendingToolApproval}
             onResolve={(approved) => {
               void handleResolveToolApproval(approved);
+            }}
+          />
+        ) : null}
+
+        {pendingInputRequest ? (
+          <GuidedSkillInputForm
+            inputRequest={pendingInputRequest}
+            values={guidedInputValues}
+            onChange={(name, value) =>
+              setGuidedInputValues((current) => ({
+                ...current,
+                [name]: value,
+              }))
+            }
+            onSubmit={(event) => {
+              void handleSubmitGuidedSkillInput(event);
             }}
           />
         ) : null}
@@ -2188,6 +2464,146 @@ function ToolApprovalPanel({
   );
 }
 
+function GuidedSkillInputForm({
+  inputRequest,
+  values,
+  onChange,
+  onSubmit,
+}: {
+  inputRequest: SkillUserInputRequest;
+  values: Record<string, string | number | boolean>;
+  onChange: (name: string, value: string | number | boolean) => void;
+  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <form
+      className="guided-skill-input-form"
+      aria-label="技能输入"
+      onSubmit={onSubmit}
+    >
+      <header>
+        <span>@{inputRequest.skillName}</span>
+        <strong>输入</strong>
+        <small>{inputRequest.reason}</small>
+      </header>
+      <div className="guided-skill-input-grid">
+        {inputRequest.fields.map((field) => (
+          <label key={field.name} className={`guided-skill-field is-${field.type}`}>
+            <span>
+              {field.label}
+              {field.required ? " *" : ""}
+            </span>
+            {renderGuidedSkillInputControl(field, values[field.name], (value) =>
+              onChange(field.name, value),
+            )}
+          </label>
+        ))}
+      </div>
+      <div className="guided-skill-input-actions">
+        <button type="submit">继续</button>
+      </div>
+    </form>
+  );
+}
+
+function renderGuidedSkillInputControl(
+  field: SkillInputField,
+  value: string | number | boolean | undefined,
+  onChange: (value: string | number | boolean) => void,
+) {
+  if (field.type === "boolean") {
+    return (
+      <input
+        checked={value === true}
+        onChange={(event) => onChange(event.currentTarget.checked)}
+        type="checkbox"
+      />
+    );
+  }
+
+  if (field.type === "choice") {
+    return (
+      <select
+        required={field.required}
+        value={typeof value === "string" ? value : ""}
+        onChange={(event) => onChange(event.currentTarget.value)}
+      >
+        <option value="">-</option>
+        {(field.choices ?? []).map((choice) => (
+          <option key={choice} value={choice}>
+            {choice}
+          </option>
+        ))}
+      </select>
+    );
+  }
+
+  if (field.type === "number") {
+    return (
+      <input
+        inputMode="decimal"
+        required={field.required}
+        type="number"
+        value={typeof value === "number" || typeof value === "string" ? value : ""}
+        onChange={(event) => onChange(event.currentTarget.value)}
+      />
+    );
+  }
+
+  if (field.type === "path") {
+    return (
+      <input
+        required={field.required}
+        type="text"
+        value={typeof value === "string" ? value : ""}
+        onChange={(event) => onChange(event.currentTarget.value)}
+      />
+    );
+  }
+
+  if (field.type === "string") {
+    return (
+      <input
+        required={field.required}
+        type="text"
+        value={typeof value === "string" ? value : ""}
+        onChange={(event) => onChange(event.currentTarget.value)}
+      />
+    );
+  }
+
+  return null;
+}
+
+function CollapsibleTextBlock({
+  className,
+  label,
+  text,
+}: {
+  className: string;
+  label: string;
+  text: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const preview = text.length > 280 ? `${text.slice(0, 277)}...` : text;
+
+  return (
+    <section className={`${className} chat-message-collapse`}>
+      <header>
+        <strong>{label}</strong>
+        <button
+          type="button"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((current) => !current)}
+        >
+          {expanded ? "收起" : "展开"}
+        </button>
+      </header>
+      <pre>{expanded ? text : preview}</pre>
+    </section>
+  );
+}
+
 function TaskProcessItem({
   item,
 }: {
@@ -2199,14 +2615,22 @@ function TaskProcessItem({
     expanded || !shouldCollapse ? item.message : `${item.message.slice(0, 157)}...`;
 
   return (
-    <li className={item.label === "思考" ? "is-reasoning" : ""}>
+    <li
+      className={[
+        item.label === "思考" ? "is-reasoning" : "",
+        shouldCollapse ? "chat-message-collapse" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
       <time>{item.time}</time>
       <strong>{item.label}</strong>
       <span>{displayMessage}</span>
       {shouldCollapse && (
         <button
           type="button"
-          className="task-process-item-toggle"
+          aria-expanded={expanded}
+          className="task-process-item-toggle chat-message-collapse-button"
           onClick={() => setExpanded((value) => !value)}
         >
           {expanded ? "收起" : "展开"}
@@ -2284,8 +2708,88 @@ function createClientRequestId(): string {
   );
 }
 
+function chatStreamEventMatchesActive(
+  event: ChatStreamEvent,
+  activeStream: {
+    activeSessionId: string | null;
+    activeRequestId: string | null;
+  },
+): boolean {
+  if (!activeStream.activeRequestId) {
+    return false;
+  }
+  if (event.requestId !== activeStream.activeRequestId) {
+    return false;
+  }
+  if (
+    activeStream.activeSessionId &&
+    event.sessionId !== activeStream.activeSessionId
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function createGuidedInputInitialValues(
+  fields: SkillInputField[],
+): Record<string, string | number | boolean> {
+  return fields.reduce<Record<string, string | number | boolean>>(
+    (values, field) => {
+      if (field.defaultValue !== undefined) {
+        values[field.name] = field.defaultValue;
+        return values;
+      }
+      if (field.type === "boolean") {
+        values[field.name] = false;
+        return values;
+      }
+      values[field.name] = "";
+      return values;
+    },
+    {},
+  );
+}
+
+function buildSkillInputResponseValues(
+  fields: SkillInputField[],
+  values: Record<string, string | number | boolean>,
+): Record<string, string | number | boolean> {
+  return fields.reduce<Record<string, string | number | boolean>>(
+    (resolvedValues, field) => {
+      const value = values[field.name];
+      if (field.type === "boolean") {
+        resolvedValues[field.name] = value === true;
+        return resolvedValues;
+      }
+
+      if (field.type === "number") {
+        if (value === "" || value === undefined) {
+          return resolvedValues;
+        }
+        const numberValue =
+          typeof value === "number" ? value : Number.parseFloat(String(value));
+        if (Number.isFinite(numberValue)) {
+          resolvedValues[field.name] = numberValue;
+        }
+        return resolvedValues;
+      }
+
+      if (value === undefined || value === "") {
+        return resolvedValues;
+      }
+      resolvedValues[field.name] = String(value);
+      return resolvedValues;
+    },
+    {},
+  );
+}
+
 function isCanceledMessage(message: string): boolean {
   return /中断|取消|cancel|canceled|cancelled|abort|aborted/i.test(message);
+}
+
+function isSkillInputRequiredMessage(message: string): boolean {
+  return /skill input required|input required|等待技能输入/i.test(message);
 }
 
 function shouldShowComposerCommandMenu(draft: string): boolean {
@@ -2323,6 +2827,10 @@ function MarkdownMessage({ content }: { content: string }) {
 }
 
 function MarkdownBlockView({ block }: { block: MarkdownBlock }) {
+  const [expanded, setExpanded] = useState(false);
+  const shouldCollapse = shouldCollapseMarkdownBlock(block);
+  const showFullBlock = expanded || !shouldCollapse;
+
   if (block.type === "heading") {
     const HeadingTag = `h${Math.min(block.depth + 2, 5)}` as
       | "h3"
@@ -2335,10 +2843,36 @@ function MarkdownBlockView({ block }: { block: MarkdownBlock }) {
     );
   }
 
+  return (
+    <div
+      className={`markdown-block${
+        shouldCollapse ? " chat-message-collapse" : ""
+      }${shouldCollapse && !expanded ? " is-collapsed" : ""}`}
+    >
+      {renderMarkdownBlockContent(block, showFullBlock)}
+      {shouldCollapse ? (
+        <button
+          type="button"
+          aria-expanded={expanded}
+          className="chat-message-collapse-button"
+          onClick={() => setExpanded((current) => !current)}
+        >
+          {expanded ? "收起" : "展开"}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function renderMarkdownBlockContent(
+  block: MarkdownBlock,
+  showFullBlock: boolean,
+): ReactNode {
   if (block.type === "unorderedList") {
+    const items = showFullBlock ? block.items : block.items.slice(0, 4);
     return (
       <ul>
-        {block.items.map((item, index) => (
+        {items.map((item, index) => (
           <li key={`${item}-${index}`}>
             <InlineMarkdown text={item} />
           </li>
@@ -2348,9 +2882,10 @@ function MarkdownBlockView({ block }: { block: MarkdownBlock }) {
   }
 
   if (block.type === "orderedList") {
+    const items = showFullBlock ? block.items : block.items.slice(0, 4);
     return (
       <ol>
-        {block.items.map((item, index) => (
+        {items.map((item, index) => (
           <li key={`${item}-${index}`}>
             <InlineMarkdown text={item} />
           </li>
@@ -2362,16 +2897,30 @@ function MarkdownBlockView({ block }: { block: MarkdownBlock }) {
   if (block.type === "code") {
     return (
       <pre>
-        <code>{block.code}</code>
+        <code>{showFullBlock ? block.code : `${block.code.slice(0, 800)}...`}</code>
       </pre>
     );
   }
 
+  const text = showFullBlock ? block.text : `${block.text.slice(0, 360)}...`;
   return (
     <p>
-      <InlineMarkdown text={block.text} />
+      <InlineMarkdown text={text} />
     </p>
   );
+}
+
+function shouldCollapseMarkdownBlock(block: MarkdownBlock): boolean {
+  if (block.type === "code") {
+    return block.code.length > 800 || block.code.split("\n").length > 16;
+  }
+  if (block.type === "orderedList" || block.type === "unorderedList") {
+    return block.items.length > 4 || block.items.join("\n").length > 520;
+  }
+  if (block.type === "paragraph") {
+    return block.text.length > 420;
+  }
+  return false;
 }
 
 function InlineMarkdown({ text }: { text: string }): ReactNode {

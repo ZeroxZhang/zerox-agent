@@ -730,10 +730,18 @@ function registerChatIpcHandlers(container: AppContainer): void {
   ipcMain.handle(
     "chat:respondSkillInput",
     (
-      _event,
+      event: IpcMainInvokeEvent,
       input: SkillInputResponse,
-    ): Promise<SkillInputResponseResult> =>
-      container.chatService().respondSkillInput(input),
+    ): Promise<SkillInputResponseResult> => {
+      const sender = event.sender;
+      return container.chatService().respondSkillInput(input, {
+        onStreamEvent(streamEvent: ChatStreamEvent) {
+          if (!sender.isDestroyed()) {
+            sender.send("chat:streamEvent", streamEvent);
+          }
+        },
+      });
+    },
   );
   ipcMain.handle("chatSessions:list", () => container.listChatSessions());
   ipcMain.handle("chatSessions:get", (_event, sessionId: string) =>

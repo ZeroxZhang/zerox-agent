@@ -527,6 +527,48 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain("-webkit-line-clamp: 2;");
     expect(styles).toContain(".agent-work-steps { min-width: 0;");
   });
+
+  it("subscribes to chat stream events and renders separated streaming transcript state", () => {
+    expect(chatPanelSource).toContain("onChatStreamEvent");
+    expect(chatPanelSource).toContain("applyChatStreamEvent");
+    expect(chatPanelSource).toContain("finalizeChatStreamResult");
+    expect(chatPanelSource).toContain("thinking-process-block");
+    expect(chatPanelSource).toContain("tool-call-preview-block");
+    expect(styles).toContain(".thinking-process-block");
+    expect(styles).toContain(".tool-call-preview-block");
+  });
+
+  it("renders guided skill input in the main chat surface with all required controls", () => {
+    expect(chatPanelSource).toContain("guided-skill-input-form");
+    expect(chatPanelSource).toContain("pendingInputRequest");
+    expect(chatPanelSource).toContain("respondSkillInput");
+    expect(chatPanelSource).toContain("renderGuidedSkillInputControl");
+    expect(chatPanelSource).toContain('field.type === "string"');
+    expect(chatPanelSource).toContain('field.type === "path"');
+    expect(chatPanelSource).toContain('field.type === "number"');
+    expect(chatPanelSource).toContain('field.type === "boolean"');
+    expect(chatPanelSource).toContain('field.type === "choice"');
+    expect(styles).toContain(".guided-skill-input-form");
+    expect(styles).toContain(".guided-skill-input-grid");
+  });
+
+  it("provides accessible collapse affordances for long message and process surfaces", () => {
+    expect(chatPanelSource).toContain("chat-message-collapse");
+    expect(chatPanelSource).toContain("aria-expanded={expanded}");
+    expect(chatPanelSource).toContain("shouldCollapseMarkdownBlock");
+    expect(styles).toContain(".chat-message-collapse");
+    expect(styles).toContain("overflow-wrap: anywhere;");
+  });
+
+  it("keeps guided input reachable when the right context rail is hidden", () => {
+    expect(chatPanelSource).toContain("GuidedSkillInputForm");
+    expect(chatPanelSource).toMatch(
+      /<GuidedSkillInputForm[\s\S]*pendingInputRequest/,
+    );
+    expect(styles).toContain("@media (max-width: 1180px)");
+    expect(styles).toContain(".agent-context-panel { display: none; }");
+    expect(styles).toContain(".guided-skill-input-form");
+  });
 });
 
 function getFunctionSource(source: string, functionName: string): string {

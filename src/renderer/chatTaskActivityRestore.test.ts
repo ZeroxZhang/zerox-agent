@@ -42,4 +42,59 @@ describe("chat task activity restore", () => {
     });
     expect(restored?.taskProcessEvents).toHaveLength(2);
   });
+
+  it("restores the latest pending guided skill input after reload", () => {
+    const snapshot: ChatSessionActivitySnapshot = {
+      updatedAt: "2026-06-23T08:00:05.000Z",
+      statusEvents: [
+        {
+          sessionId: "session_1",
+          state: "streaming",
+          message: "正在输出回复",
+          createdAt: "2026-06-23T08:00:04.000Z",
+          elapsedMs: 1000,
+        },
+        {
+          sessionId: "session_1",
+          state: "waiting_for_input",
+          message: "Skill input required.",
+          createdAt: "2026-06-23T08:00:05.000Z",
+          elapsedMs: 2000,
+          inputRequest: {
+            id: "input_1",
+            executionId: "execution_1",
+            sessionId: "session_1",
+            requestId: "request_1",
+            skillName: "research",
+            reason: "Missing topic.",
+            fields: [
+              {
+                name: "topic",
+                label: "Topic",
+                type: "string",
+                required: true,
+              },
+            ],
+            createdAt: "2026-06-23T08:00:05.000Z",
+          },
+        },
+      ],
+    };
+
+    const restored = restoreChatTaskActivity(snapshot);
+
+    expect(restored).toMatchObject({
+      status: { kind: "paused", message: "Skill input required." },
+      workPhase: "paused",
+      taskActivity: {
+        kind: "paused",
+        title: "等待技能输入",
+      },
+      pendingInputRequest: {
+        id: "input_1",
+        requestId: "request_1",
+        skillName: "research",
+      },
+    });
+  });
 });

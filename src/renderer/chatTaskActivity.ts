@@ -1,4 +1,8 @@
-import type { ChatSessionActivitySnapshot, ChatTaskStatusEvent } from "../shared/chat";
+import type {
+  ChatSessionActivitySnapshot,
+  ChatTaskStatusEvent,
+  SkillUserInputRequest,
+} from "../shared/chat";
 import type { GoalStatus } from "../shared/agentGoal";
 import type { AgentWorkPhase } from "./agentWorkStatus";
 
@@ -38,6 +42,7 @@ export type RestoredChatTaskActivity = {
   workPhase: AgentWorkPhase;
   taskActivity: TaskActivityState;
   taskProcessEvents: ChatTaskStatusEvent[];
+  pendingInputRequest?: SkillUserInputRequest;
 };
 
 const staleStatusThresholdMs = 90_000;
@@ -249,6 +254,9 @@ export function restoreChatTaskActivity(
     workPhase: getWorkPhaseFromChatStatusEvent(latestEvent),
     taskActivity: buildTaskActivityFromStatusEvent(latestEvent),
     taskProcessEvents: events,
+    ...(latestEvent.state === "waiting_for_input" && latestEvent.inputRequest
+      ? { pendingInputRequest: latestEvent.inputRequest }
+      : {}),
   };
 }
 
@@ -258,7 +266,7 @@ export function buildTaskActivityFromStatusEvent(
   const eventTime = parseEventTime(event.createdAt);
   const startedAt = eventTime - event.elapsedMs;
   const kind =
-    event.state === "paused"
+    event.state === "paused" || event.state === "waiting_for_input"
       ? "paused"
       : event.state === "completed" || event.state === "canceled"
         ? "done"
@@ -281,7 +289,9 @@ export function buildTaskActivityFromStatusEvent(
 export function getChatStatusKindFromStatusEvent(
   event: ChatTaskStatusEvent,
 ): GoalUiStatusKind {
-  if (event.state === "paused") return "paused";
+  if (event.state === "paused" || event.state === "waiting_for_input") {
+    return "paused";
+  }
   if (event.state === "failed") return "error";
   if (event.state === "canceled") return "ready";
   if (event.state === "completed") return "ready";
@@ -295,9 +305,17 @@ export function getWorkPhaseFromChatStatusEvent(
   if (event.state === "workspace") return "planning";
   if (event.state === "skill") return "planning";
   if (event.state === "memory") return "memory";
-  if (event.state === "model" || event.state === "reasoning") return "model";
+  if (
+    event.state === "model" ||
+    event.state === "reasoning" ||
+    event.state === "streaming"
+  ) {
+    return "model";
+  }
   if (event.state === "tool_call" || event.state === "tool_result") return "tool";
-  if (event.state === "paused") return "paused";
+  if (event.state === "paused" || event.state === "waiting_for_input") {
+    return "paused";
+  }
   if (event.state === "failed") return "error";
   return "done";
 }
@@ -309,7 +327,9 @@ function getProcessLabel(event: ChatTaskStatusEvent): string {
   if (event.state === "memory") return "记忆";
   if (event.state === "model") return "模型";
   if (event.state === "reasoning") return "思考";
+  if (event.state === "streaming") return "输出";
   if (event.state === "tool_call" || event.state === "tool_result") return "工具";
+  if (event.state === "waiting_for_input") return "输入";
   if (event.state === "paused") return "暂停";
   if (event.state === "canceled") return "中断";
   if (event.state === "completed") return "完成";
@@ -346,8 +366,10 @@ function getTaskActivityTitleFromStatusEvent(event: ChatTaskStatusEvent): string
   if (event.state === "memory") return "正在检索记忆";
   if (event.state === "model") return "正在调用模型";
   if (event.state === "reasoning") return "模型思考";
+  if (event.state === "streaming") return "正在输出回复";
   if (event.state === "tool_call") return "正在执行工具";
   if (event.state === "tool_result") return "工具结果已返回";
+  if (event.state === "waiting_for_input") return "等待技能输入";
   if (event.state === "paused") return "长任务等待确认";
   if (event.state === "canceled") return "任务已中断";
   if (event.state === "completed") return "本轮已完成";

@@ -235,11 +235,13 @@
   display: grid;
   gap: var(--space-1);
   max-width: min(760px, 86%);
+  min-width: 0;
   padding: 0;
   border: 0;
   border-radius: 0;
   color: var(--text-primary);
   background: transparent;
+  overflow-wrap: anywhere;
 }
 
 .chat-message.is-user {
@@ -251,7 +253,7 @@
   background: var(--chat-user-bubble-bg);
 }
 
-.chat-message span {
+.chat-message > span {
   margin-bottom: 4px;
   color: var(--text-tertiary);
   font-size: var(--text-xs);
@@ -274,6 +276,181 @@
 .markdown-message {
   display: grid;
   gap: var(--space-2);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.markdown-block {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.markdown-message pre {
+  max-width: 100%;
+  overflow: auto;
+  padding: var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  white-space: pre-wrap;
+}
+
+.markdown-message code {
+  overflow-wrap: anywhere;
+}
+
+.chat-message-collapse {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.chat-message-collapse-button,
+.chat-message-collapse header button {
+  justify-self: start;
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  background: var(--bg-surface);
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+}
+
+.thinking-process-block,
+.tool-call-preview-block {
+  flex-shrink: 0;
+  display: grid;
+  gap: var(--space-2);
+  max-width: min(760px, 92%);
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.thinking-process-block header,
+.tool-call-preview-item header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.thinking-process-block pre,
+.tool-call-preview-item pre {
+  max-height: 220px;
+  margin: 0;
+  overflow: auto;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-relaxed);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.tool-call-preview-block {
+  background: var(--status-info-bg);
+}
+
+.tool-call-preview-item {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.guided-skill-input-form {
+  flex-shrink: 0;
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--status-info-border);
+  border-radius: var(--radius-md);
+  background: var(--status-info-bg);
+  overflow-wrap: anywhere;
+}
+
+.guided-skill-input-form header {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.guided-skill-input-form header span {
+  color: var(--text-accent);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+}
+
+.guided-skill-input-form header strong {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+
+.guided-skill-input-form header small {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.guided-skill-input-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.guided-skill-field {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.guided-skill-field > span {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+}
+
+.guided-skill-field input,
+.guided-skill-field select {
+  min-width: 0;
+  width: 100%;
+  min-height: 34px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+
+.guided-skill-field input[type="checkbox"] {
+  width: 18px;
+  min-height: 18px;
+  justify-self: start;
+}
+
+.guided-skill-input-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.guided-skill-input-actions button {
+  min-height: 34px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--bg-accent);
+  border-radius: var(--radius-md);
+  color: var(--text-on-accent);
+  background: var(--bg-accent);
+  font-weight: var(--font-semibold);
 }
 
 .agent-work-timeline {
