@@ -4161,3 +4161,23 @@
   - `npm run build` -> passed.
   - `npm run harness:check` -> passed.
   - `git diff --check` -> passed.
+
+## 2026-06-24 - Task 4 Guided Skill Invalid Retry Idempotency Repair
+
+- Summary:
+  - Closed the invalid-response retry window where a new pending request could be created before the old request was durably completed.
+  - Invalid/still-missing guided input responses now reuse the original `inputRequestId` and update the pending state in place.
+  - A failed completion marker during invalid retry no longer creates two answerable guided input requests.
+- Changed files:
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/main/chatService.test.ts -t "does not create a second answerable guided input request"` -> failed as expected: invalid retry attempted a completed marker and returned `Failed to persist skill input completion.`
+- GREEN / verification evidence:
+  - `npm test -- src/main/chatService.test.ts -t "does not create a second answerable guided input request"` -> 1 file / 1 selected test passed.
+  - `npm test -- src/main/chatService.test.ts src/main/skillExecutionService.test.ts src/shared/skillExecutionContract.test.ts src/shared/skills.test.ts src/shared/chatStream.test.ts src/shared/toolPermissions.test.ts src/main/toolAuthorizationService.test.ts` -> 7 files / 118 tests passed.
+  - `npx tsc -p tsconfig.electron.json --noEmit --pretty false` -> passed.
+  - `npx tsc -p tsconfig.renderer.json --noEmit --pretty false` -> passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.

@@ -1003,6 +1003,7 @@ export function createChatService(options: {
     if (inputResolution.status !== "complete") {
       const inputRequest = createSkillUserInputRequest({
         createId,
+        inputRequestId: input.inputRequestId,
         sessionId: pending.sessionId,
         requestId: pending.requestId,
         skill: pending.selectedSkill,
@@ -1057,15 +1058,6 @@ export function createChatService(options: {
           message: "Failed to persist skill input request.",
         };
       }
-      try {
-        await markPersistedSkillInputCompleted(pending);
-      } catch {
-        return {
-          ok: false,
-          message: "Failed to persist skill input completion.",
-        };
-      }
-      pendingSkillInputRequests.delete(input.inputRequestId);
       pendingSkillInputRequests.set(inputRequest.id, {
         ...toInMemoryPendingSkillInputState({
           persisted,
@@ -2202,6 +2194,7 @@ function translateRunStatus(status: AgentRunRecord["status"]): string {
 
 function createSkillUserInputRequest(options: {
   createId: () => string;
+  inputRequestId?: string;
   sessionId: string;
   requestId: string;
   skill: SkillRecord;
@@ -2229,7 +2222,7 @@ function createSkillUserInputRequest(options: {
   }));
 
   return {
-    id: `skill_input_${sanitizeRuntimeId(options.createId())}`,
+    id: options.inputRequestId ?? `skill_input_${sanitizeRuntimeId(options.createId())}`,
     executionId: `skill_exec_${sanitizeRuntimeId(options.sessionId)}_${sanitizeRuntimeId(
       options.requestId,
     )}_${sanitizeRuntimeId(options.skill.manifest.name)}`,

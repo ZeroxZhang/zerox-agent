@@ -2437,6 +2437,121 @@ describe("chat service", () => {
     );
   });
 
+  it("does not create a second answerable guided input request when invalid retry completion persistence fails", async () => {
+    const chatMessages: AppendChatMessageInput[] = [];
+    const initialStreamEvents: ChatStreamEvent[] = [];
+    const invalidResponseStreamEvents: ChatStreamEvent[] = [];
+    const baseStore = createChatSessionStore(chatMessages);
+    let rejectCompletedDuringInvalidRetry = true;
+    let agentLoopCalls = 0;
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: {
+        ...baseStore,
+        async appendActivityEvent(sessionId, event) {
+          if (
+            rejectCompletedDuringInvalidRetry &&
+            event.pendingSkillInput?.status === "completed"
+          ) {
+            throw new Error("completion marker failed");
+          }
+          return baseStore.appendActivityEvent(sessionId, event);
+        },
+      },
+      workspaceService: {
+        async resolveRunContext() {
+          return buildPrimaryRunContext({
+            workspaceId: "workspace_project",
+            workspaceRoot: "/workspace/project",
+          });
+        },
+      },
+      toolExecutor: createToolExecutor(),
+      async runAgentLoop(messages) {
+        agentLoopCalls += 1;
+        return {
+          status: "succeeded",
+          summary: "guided retry after marker failure",
+          turns: 1,
+          messages,
+          toolCallsExecuted: 0,
+        };
+      },
+      discoverSkills: async () => ({
+        skills: [
+          createSkillRecord({
+            name: "local-file-organizer",
+            manifest: {
+              inputs: [
+                {
+                  name: "targetDir",
+                  label: "Target directory",
+                  type: "path",
+                  required: true,
+                },
+              ],
+            },
+          }),
+        ],
+        errors: [],
+      }),
+      createId: createSequentialId("invalid_completion_fail"),
+      now: () => new Date("2026-06-23T08:00:00.000Z"),
+    });
+
+    await service.sendMessage(
+      {
+        sessionId: "session_1",
+        requestId: "request_1",
+        message: "organize files after invalid completion failure",
+        selectedSkillName: "local-file-organizer",
+        workspaceId: "workspace_project",
+      },
+      { onStreamEvent: (event) => initialStreamEvents.push(event) },
+    );
+    const inputRequest = initialStreamEvents.find(
+      (event): event is Extract<ChatStreamEvent, { type: "waiting_for_input" }> =>
+        event.type === "waiting_for_input",
+    )?.inputRequest;
+
+    await expect(
+      service.respondSkillInput(
+        {
+          inputRequestId: inputRequest?.id ?? "",
+          values: { targetDir: "/etc" },
+        },
+        { onStreamEvent: (event) => invalidResponseStreamEvents.push(event) },
+      ),
+    ).resolves.toEqual({
+      ok: false,
+      message: "Skill input required.",
+    });
+
+    const retryInputRequest = invalidResponseStreamEvents.find(
+      (event): event is Extract<ChatStreamEvent, { type: "waiting_for_input" }> =>
+        event.type === "waiting_for_input",
+    )?.inputRequest;
+    expect(retryInputRequest?.id).toBe(inputRequest?.id);
+    rejectCompletedDuringInvalidRetry = false;
+
+    await expect(
+      service.respondSkillInput({
+        inputRequestId: inputRequest?.id ?? "",
+        values: { targetDir: "/workspace/project/docs" },
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      reply: "guided retry after marker failure",
+    });
+    expect(agentLoopCalls).toBe(1);
+  });
+
   it("resumes a guided skill input response in the same session without duplicating the user message", async () => {
     const chatMessages: AppendChatMessageInput[] = [];
     const initialStreamEvents: ChatStreamEvent[] = [];
