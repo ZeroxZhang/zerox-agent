@@ -625,7 +625,7 @@ npm run episode:export -- --config-dir <userData/config> --latest-validation
 npm run verify        # Tests + build + deterministic eval
 ```
 
-As of v2.7.0, `npm run verify` covers the Vitest suite, the production build, agent evals, and memory evals. The suite currently includes 165 Vitest files / 1077 tests, 26 deterministic agent eval fixtures, and 2 memory eval fixtures. Agent evals include native code engineering, research writing, reflection-after-test-failure, retry-budget exhaustion, context compaction, tool-call checkpointing, model retry, strategy-guard fragmentation recovery, episode eval-candidate, child handoff review-gate, goal-mode recovery/control, bounded-autonomy golden paths, Agent Runtime Kernel event replay, permission-rule behavior, and deterministic local artifact provenance acceptance. session-native Goal Mode architecture is documented in `docs/architecture/agent-goal-mode.md`, including the artifact evidence contract, and Agent Runtime Kernel architecture is documented in `docs/architecture/agent-runtime.md`, including the Kernel Event Bridge, checkpointed compaction, retry evidence, judge verdicts, event replay, and rule-based permission evidence. Set `BUILDING_AGENT_CONFIG_DIR=/path/to/config` when running `npm run eval:agent` or `npm run harness:score` to include local promoted fixtures and pending eval candidates from that config directory. `npm run episode:export` writes local evidence packages with `run-graph.json`, `eval-candidate.json`, `trajectory.jsonl`, and verification metadata; `--latest-validation` exports the run captured by `agent-validation.json`. `npm run harness:score` emits the seven-category ETCLOVG score used by Overview as a local quality signal and now includes adversarial eval, goal-mode pass rate, goal-judge pass rate, plus the ACI/context report; Overview also displays the native Agent Capability score.
+As of v2.7.0, `npm run verify` covers the Vitest suite, the production build, agent evals, and memory evals. The suite currently includes 168 Vitest files / 1141 tests, 26 deterministic agent eval fixtures, and 2 memory eval fixtures. Agent evals include native code engineering, research writing, reflection-after-test-failure, retry-budget exhaustion, context compaction, tool-call checkpointing, model retry, strategy-guard fragmentation recovery, episode eval-candidate, child handoff review-gate, goal-mode recovery/control, bounded-autonomy golden paths, Agent Runtime Kernel event replay, permission-rule behavior, and deterministic local artifact provenance acceptance. session-native Goal Mode architecture is documented in `docs/architecture/agent-goal-mode.md`, including the artifact evidence contract, and Agent Runtime Kernel architecture is documented in `docs/architecture/agent-runtime.md`, including the Kernel Event Bridge, checkpointed compaction, retry evidence, judge verdicts, event replay, and rule-based permission evidence. Set `BUILDING_AGENT_CONFIG_DIR=/path/to/config` when running `npm run eval:agent` or `npm run harness:score` to include local promoted fixtures and pending eval candidates from that config directory. `npm run episode:export` writes local evidence packages with `run-graph.json`, `eval-candidate.json`, `trajectory.jsonl`, and verification metadata; `--latest-validation` exports the run captured by `agent-validation.json`. `npm run harness:score` emits the seven-category ETCLOVG score used by Overview as a local quality signal and now includes adversarial eval, goal-mode pass rate, goal-judge pass rate, plus the ACI/context report; Overview also displays the native Agent Capability score.
 
 Deterministic local artifact goals are accepted only when the task contract, canonical destination, generated artifact, and provenance evidence agree. Location/resource canonicalization normalizes home-relative, workspace-relative, Desktop, Downloads, and absolute roots before sandbox and acceptance checks. Provenance-backed acceptance requires the artifact sidecar to match the run, goal, artifact id, canonical destination, and content hash. v2.4.1 passed the command-line verification gate, production smoke, and harness check for the managed chat-history release; release metadata now matches the v2.4.1 app version.
 
@@ -668,10 +668,7 @@ Recently shipped:
 - [x] v2.4.1 managed chat history with archive/delete actions, collapsible archived sessions, latest-response time, and cumulative token usage in the workspace sidebar
 - [x] v2.5.0 workspace-bound skill execution with first-class workspace selection, shared skill execution contracts, session activity recovery, and workspace-run ledgers
 - [x] v2.6.0 hardening release with sandbox escape fixes, recoverable storage, provider timeouts, scoped tool-result refs, workflow replay correctness, renderer state coherence, and subprocess worker isolation
-
-In acceptance:
-
-- [ ] v2.7.0 Chat-first interaction release metadata prep: primary Chat entry, streamed answers, distinct thinking/process output, guided skill input, and local icon unification; package metadata is prepared, but final release status is pending final independent acceptance
+- [x] v2.7.0 Chat-first interaction release with primary Chat entry, streamed answers, distinct thinking/process output, guided skill input, local icon unification, packaged-app smoke, and independent packaged-app acceptance
 
 Planned:
 
@@ -1373,7 +1370,7 @@ mac:
 
 ## 测试
 
-截至 v2.7.0，`npm run verify` 覆盖 Vitest 测试、生产构建、Agent 评测和记忆检索评测；当前包含 165 个 Vitest 文件 / 1077 个测试、26 个确定性 Agent eval fixture 和 2 个 memory eval fixture。Agent eval 覆盖原生代码工程、研究写作、测试失败反思、retry budget exhaustion、上下文压缩、tool-call checkpoint、模型重试、strategy guard 碎片化恢复、episode eval candidate、child handoff review gate、goal-mode recovery/control、bounded-autonomy 黄金路径、Agent Runtime Kernel kernel event replay、permission-rule behavior 和 deterministic local artifact provenance acceptance。session-native Goal Mode 架构记录在 `docs/architecture/agent-goal-mode.md`；Agent Runtime Kernel 架构记录在 `docs/architecture/agent-runtime.md`，包含 Kernel Event Bridge、checkpointed compaction、retry evidence、judge verdict、event replay 和规则化权限证据：
+截至 v2.7.0，`npm run verify` 覆盖 Vitest 测试、生产构建、Agent 评测和记忆检索评测；当前包含 168 个 Vitest 文件 / 1141 个测试、26 个确定性 Agent eval fixture 和 2 个 memory eval fixture。Agent eval 覆盖原生代码工程、研究写作、测试失败反思、retry budget exhaustion、上下文压缩、tool-call checkpoint、模型重试、strategy guard 碎片化恢复、episode eval candidate、child handoff review gate、goal-mode recovery/control、bounded-autonomy 黄金路径、Agent Runtime Kernel kernel event replay、permission-rule behavior 和 deterministic local artifact provenance acceptance。session-native Goal Mode 架构记录在 `docs/architecture/agent-goal-mode.md`；Agent Runtime Kernel 架构记录在 `docs/architecture/agent-runtime.md`，包含 Kernel Event Bridge、checkpointed compaction、retry evidence、judge verdict、event replay 和规则化权限证据：
 
 ```bash
 npm test              # 运行全部测试
@@ -1432,10 +1429,7 @@ npm run verify        # 测试 + 构建 + 确定性评测
 - [x] v2.4.1 历史会话管理：归档/删除操作、可折叠归档组、最新响应时间和工作区侧栏累计 token 显示
 - [x] v2.5.0 workspace-bound skill execution：一等 workspace 选择、共享技能执行契约、会话活动恢复和 workspace-run ledger
 - [x] v2.6.0 加固发布：sandbox 逃逸修复、可恢复存储、provider timeout、scoped tool-result ref、workflow 复盘正确性、renderer 状态一致性和 subprocess worker 隔离
-
-验收中：
-
-- [ ] v2.7.0 Chat-first 交互发布元数据准备：主入口回到 Chat、streamed answers、thinking/process 分离、guided skill input 和本地图标统一；package metadata 已准备完成，但整体发布状态仍待最终独立验收
+- [x] v2.7.0 Chat-first 交互发布：主入口回到 Chat、streamed answers、thinking/process 分离、guided skill input、本地图标统一、packaged-app smoke 和独立 packaged-app 验收
 
 后续计划：
 

@@ -93,22 +93,22 @@ describe("README", () => {
     expect(readme).toContain("Goal Mode 架构");
     expect(readme).toContain("artifact evidence contract");
     expect(readme).toContain("artifact evidence files");
-    expect(readme).toContain("1077 tests");
-    expect(readme).toContain("1077 个测试");
+    expect(readme).toContain("1141 tests");
+    expect(readme).toContain("1141 个测试");
     expect(readme).toContain("Current version: v2.7.0.");
     expect(readme).toContain("当前版本：v2.7.0。");
     expect(readme).toContain("v2.7.0");
     expect(readme).toContain("Chat-first");
     expect(readme).toContain("streamed answers");
     expect(readme).toContain("guided skill input");
-    expect(readme).toContain("pending final independent acceptance");
-    expect(readme).toContain("待最终独立验收");
-    expect(readme).not.toContain(
-      "[x] v2.7.0 Chat-first interaction release metadata",
+    expect(readme).toContain(
+      "[x] v2.7.0 Chat-first interaction release",
     );
-    expect(readme).not.toContain(
-      "[x] v2.7.0 Chat-first 交互发布元数据",
-    );
+    expect(readme).toContain("[x] v2.7.0 Chat-first 交互发布");
+    expect(readme).toContain("independent packaged-app acceptance");
+    expect(readme).toContain("独立 packaged-app 验收");
+    expect(readme).not.toContain("pending final independent acceptance");
+    expect(readme).not.toContain("待最终独立验收");
     expect(readme).toContain("v2.6.0 is a hardening release");
     expect(readme).toContain("v2.6.0 是一次本地控制面的加固发布");
     expect(readme).toContain("v2.5.0 makes workspace a first-class execution boundary");

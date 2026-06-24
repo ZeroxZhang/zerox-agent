@@ -4361,3 +4361,66 @@
 - GREEN / verification evidence:
   - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 2 files / 11 tests passed.
   - `git diff --check` -> passed.
+
+## 2026-06-24 - v2.7.0 UI/Interaction Iteration Final Acceptance
+
+- Request:
+  - Fully optimize/rework interaction and UI with Chat-first consumer experience, streamed output, separated thinking/process, guided skill input, icon cleanup, testing, and independent acceptance.
+- Planning/design evidence:
+  - Spec: `docs/superpowers/specs/2026-06-23-zerox-agent-2-7-0-ui-interaction-design.md`
+  - Plan: `docs/superpowers/plans/2026-06-23-zerox-agent-2-7-0-ui-interaction.md`
+  - Design artifact: `docs/design/zerox-agent-2-7-0-ui-artifact.html`
+- Final status updates:
+  - `.zerox/feature_list.json` marks `P16-v2.7.0-ui-interaction` as `done`.
+  - README roadmap marks `v2.7.0 Chat-first interaction release` as shipped after independent acceptance.
+- Changed files in final status commit:
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+  - `README.md`
+  - `src/shared/readme.test.ts`
+  - `src/shared/packageScripts.test.ts`
+- Focused test evidence:
+  - Task 1: `npm test -- src/shared/navigation.test.ts src/shared/materialNavigation.test.ts src/renderer/materialDesign.test.ts` -> passed during reviewed Task 1 closure.
+  - Task 2: `npm test -- src/shared/chatStream.test.ts src/preload/index.test.ts src/main/ipc/index.test.ts` -> passed during reviewed Task 2 closure.
+  - Task 3: `npm test -- src/main/providers/p8.test.ts src/main/agentLoop.test.ts src/main/chatService.test.ts src/shared/chatStream.test.ts` -> passed during reviewed Task 3 closure.
+  - Task 4: `npm test -- src/main/chatService.test.ts src/main/skillExecutionService.test.ts src/shared/skillExecutionContract.test.ts src/shared/skills.test.ts src/shared/chatStream.test.ts src/shared/toolPermissions.test.ts src/main/toolAuthorizationService.test.ts src/main/chatSessionStore.test.ts src/preload/index.test.ts` -> 9 files / 140 tests passed.
+  - Task 5: `npm test -- src/main/ipc/index.test.ts src/main/ipc/chatSendMessageError.test.ts src/renderer/materialDesign.test.ts src/renderer/chatStreamReducer.test.ts src/renderer/chatTaskActivity.test.ts src/renderer/chatTaskActivityRestore.test.ts src/preload/index.test.ts` -> 7 files / 64 tests passed.
+  - Task 6: `npm test -- src/renderer/materialDesign.test.ts` -> 44/44 tests passed.
+  - Task 7 final RED: `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> failed as expected while README still said pending acceptance and P16 was not done.
+  - Task 7 final GREEN: `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 2 files / 11 tests passed.
+- Full command gates:
+  - `npm test` -> 168 files / 1141 tests passed.
+  - `npm run build` -> passed.
+  - `npm run verify` -> 168 files / 1141 tests passed, 26/26 agent evals passed, 2/2 memory evals passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `node_modules` emitted a better-sqlite3 ABI warning and fell back to JSON in this non-packaged smoke.
+  - `npm run harness:score` -> passed; overall score 9.26, agent eval 26/26, goal eval 7/7, goal-judge eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+- Packaged gates:
+  - `npm run dist:mac` -> passed; generated `release/Zerox Agent-2.7.0-arm64.dmg` and `release/Zerox Agent-2.7.0-arm64-mac.zip`.
+  - `npm run smoke:prod:built` -> passed; renderer rendered agent chat UI.
+  - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v2.7.0' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+- Independent acceptance:
+  - Officer: Socrates (`019ef8da-f2ed-71b2-890d-8fba57d33d47`)
+  - App path: `/Volumes/Out/codex_projects/building agent/release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent`
+  - Config dir: `/Users/zerox/Library/Application Support/Zerox Agent/config`
+  - Verdict: ACCEPTED
+  - Command evidence:
+    - Packaged app smoke with `v2.7.0` required text -> passed.
+    - Packaged app narrow viewport smoke `390x844` -> passed.
+    - Packaged app navigation text smoke `会话|运行|任务|设置` -> passed.
+    - `npm run harness:check` -> passed.
+    - `npm test -- src/main/smokeMode.test.ts src/preload/index.test.ts src/renderer/chatStreamReducer.test.ts src/renderer/materialDesign.test.ts` -> 4 files / 63 tests passed.
+    - `npm test -- src/shared/navigation.test.ts` -> 1 file / 5 tests passed.
+    - Focused authorization/runtime tests for no-bypass scenarios -> 2 files / 6 selected tests passed.
+  - Scenario evidence:
+    - Fresh launch uses Chat as the primary surface.
+    - Primary navigation is Chat/Runs/Tasks/Settings; Overview diagnostics are under Settings.
+    - Composer/workspace/icon affordances render and narrow viewport smoke has no overflow.
+    - Streamed answer finalizes without duplicate assistant reply.
+    - Thinking/process and tool preview output are distinct from final answer.
+    - Guided skill input form covers required field types and is reachable when the right rail is hidden.
+    - Tool approval remains explicit and authorization/runtime tests preserve permission and workspace boundaries.
+    - Runs audit surfaces remain covered.
+  - Screenshot: `/tmp/zerox-uat-shots/zerox-agent-2-7-0-ui-artifact.html.png`
+  - Defects: none blocking. Residual risk noted by officer: packaged smoke required manual cleanup of a lingering app process in the PTY environment, with no observed UI/navigation/streaming/approval/sandbox regression.

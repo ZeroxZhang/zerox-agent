@@ -38,6 +38,16 @@ describe("package scripts", () => {
     expect(packageJson.version).toBe("2.7.0");
     expect(featureList.features).toContainEqual(
       expect.objectContaining({
+        id: "P16-v2.7.0-ui-interaction",
+        status: "done",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("Chat supports first-class streamed answer output"),
+          expect.stringContaining("Focused tests, full verification, production smoke, packaged smoke, black-box QA, and independent acceptance pass"),
+        ]),
+      }),
+    );
+    expect(featureList.features).toContainEqual(
+      expect.objectContaining({
         id: "P15-hardening-release-2.6.0",
         status: "done",
         definitionOfDone: expect.arrayContaining([

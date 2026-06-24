@@ -1495,7 +1495,7 @@
     },
     {
       "id": "P16-v2.7.0-ui-interaction",
-      "status": "planned",
+      "status": "done",
       "title": "v2.7.0 UI and interaction redesign",
       "files": [
         "docs/superpowers/specs/2026-06-23-zerox-agent-2-7-0-ui-interaction-design.md",
