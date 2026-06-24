@@ -56,6 +56,13 @@ describe("Design System — Notion-inspired app shell", () => {
     path.join(process.cwd(), "src/renderer/components/RunTrajectoryPanel.tsx"),
     "utf8",
   );
+  const designArtifactSource = readFileSync(
+    path.join(
+      process.cwd(),
+      "docs/design/zerox-agent-2-7-0-ui-artifact.html",
+    ),
+    "utf8",
+  );
   const evalReviewPanelPath = path.join(
     process.cwd(),
     "src/renderer/components/EvalReviewPanel.tsx",
@@ -162,9 +169,21 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(chatPanelSource).toContain("<Icon name=\"send\"");
     expect(chatPanelSource).toContain("<Icon name=\"stop\"");
     expect(chatPanelSource).toContain("<Icon name=\"command\"");
+    expect(chatPanelSource).toContain("<Icon name=\"close\"");
     expect(appSource).toContain("<Icon name=\"plus\"");
+    expect(appSource).toContain("<Icon name=\"more\"");
     expect(appSource).not.toContain("＋");
     expect(chatPanelSource).not.toContain("×");
+  });
+
+  it("presents the local icon system in the 2.7.0 design artifact", () => {
+    expect(designArtifactSource).toContain("class=\"artifact-icon sidebar-button-icon\"");
+    expect(designArtifactSource).toContain("class=\"artifact-icon icon-button-icon\"");
+    expect(designArtifactSource).toContain("stroke=\"currentColor\"");
+    expect(designArtifactSource).not.toContain("+ New Chat");
+    expect(designArtifactSource).not.toContain(">Cmd<");
+    expect(designArtifactSource).not.toContain(">Stop<");
+    expect(designArtifactSource).not.toContain(">Send<");
   });
 
   it("surfaces managed chat history with archive, delete, time and token metadata", () => {

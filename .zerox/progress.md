@@ -25,6 +25,21 @@
   - Replaced the chat composer `command` / `stop` / `send` controls, selected-skill dismiss action, sidebar new-chat action, and session more-menu trigger with the shared icon component.
   - Added `docs/design/zerox-agent-2-7-0-ui-artifact.html` as a standalone warm-neutral 2.7.0 review artifact covering empty chat, streaming, collapsed thinking, guided input, approval, paused, error, restored, and narrow layout states.
 
+### 2026-06-24 Task 6 follow-up after quality review
+
+- Request: fix the rejected artifact/icon review findings by adding missing material test coverage for `more` and `close`, and by making the design artifact render actual local icon affordances instead of text placeholders.
+- Follow-up RED evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts -t "local icon"` -> failed as expected because `docs/design/zerox-agent-2-7-0-ui-artifact.html` did not yet contain actual icon markup classes or `currentColor`-stroked SVG stand-ins.
+- Follow-up GREEN evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts -t "local icon"` -> passed.
+  - `npm test -- src/renderer/materialDesign.test.ts` -> 1 file / 44 tests passed.
+  - `npx tsc -p tsconfig.electron.json --noEmit --pretty false` -> passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+- Follow-up implementation evidence:
+  - Extended `src/renderer/materialDesign.test.ts` to assert `<Icon name="more"` in `App.tsx`, `<Icon name="close"` in `AgentChatPanel.tsx`, and actual artifact icon markup with `currentColor` SVG strokes.
+  - Reworked `docs/design/zerox-agent-2-7-0-ui-artifact.html` to use inline SVG icon stand-ins for new chat and all composer action controls across the required states, removing the placeholder `+ New Chat`, `Cmd`, `Stop`, and `Send` text chips.
+
 ## 2026-06-23 - v2.7.0 UI/Interaction Planning
 
 - Request: begin the 2.7.0 major iteration to全面优化/重构交互和界面, remove Overview from primary navigation, add streamed answer/thinking separation, support interactive/guided skills, optimize system icons, and complete planning/development/testing/independent acceptance with architect and subagent coordination.
