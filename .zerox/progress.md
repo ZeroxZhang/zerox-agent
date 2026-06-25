@@ -4424,3 +4424,33 @@
     - Runs audit surfaces remain covered.
   - Screenshot: `/tmp/zerox-uat-shots/zerox-agent-2-7-0-ui-artifact.html.png`
   - Defects: none blocking. Residual risk noted by officer: packaged smoke required manual cleanup of a lingering app process in the PTY environment, with no observed UI/navigation/streaming/approval/sandbox regression.
+
+## 2026-06-25 - Workspace Picker Open/Create Regression Fix
+
+- Request:
+  - Fix the chat composer workspace selector, which only showed default workspaces and did not provide an obvious way to open an existing folder or create a new workspace.
+- Root cause:
+  - The workspace domain model already supported `project` and `temporary` workspaces, but the desktop bridge exposed only list/create-temporary/git-worktree paths.
+  - The chat composer rendered a selector for existing records only; it had no native directory-picker path to register a local project workspace.
+- Changed files:
+  - `src/main/agentWorkspaceService.ts`
+  - `src/main/agentWorkspaceService.test.ts`
+  - `src/main/ipc/index.ts`
+  - `src/main/ipc/index.test.ts`
+  - `src/preload/index.ts`
+  - `src/preload/index.test.ts`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/components/Icon.tsx`
+  - `src/renderer/styles/composer.css`
+  - `src/renderer/materialDesign.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/main/agentWorkspaceService.test.ts src/preload/index.test.ts src/renderer/materialDesign.test.ts` -> failed as expected: missing `createProjectWorkspace`, `openProjectAgentWorkspace`, and composer open/create affordances.
+- GREEN / verification evidence:
+  - `npm test -- src/main/agentWorkspaceService.test.ts src/preload/index.test.ts src/main/ipc/index.test.ts src/renderer/materialDesign.test.ts` -> 4 files / 58 tests passed.
+  - `npm run build` -> passed.
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> 168 files / 1145 tests passed, 26/26 agent evals passed, 2/2 memory evals passed.
+  - `BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='打开|新建' npm run smoke:prod` -> passed; renderer rendered agent chat UI with workspace open/create affordances. Note: local `node_modules` emitted the existing better-sqlite3 ABI warning and fell back to JSON storage during smoke.
+  - `npm run dist:mac` -> passed; regenerated `release/Zerox Agent-2.7.0-arm64.dmg` and `release/Zerox Agent-2.7.0-arm64-mac.zip`.
+  - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='打开|新建' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed; packaged app rendered the workspace open/create affordances.

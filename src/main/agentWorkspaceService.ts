@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
-import { mkdir } from "node:fs/promises";
+import { mkdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import type {
@@ -32,6 +32,11 @@ export type CreateTemporaryWorkspaceInput = {
   cleanup?: AgentWorkspaceCleanup;
 };
 
+export type CreateProjectWorkspaceInput = {
+  rootPath: string;
+  name?: string;
+};
+
 export type CreateGitWorktreeWorkspaceInput = {
   name: string;
   repositoryRoot: string;
@@ -59,6 +64,9 @@ export type AgentWorkspaceService = {
   resolveRunContext(input?: ResolveRunContextInput): Promise<AgentRunContext>;
   createTemporaryWorkspace(
     input?: CreateTemporaryWorkspaceInput,
+  ): Promise<AgentWorkspace>;
+  createProjectWorkspace(
+    input: CreateProjectWorkspaceInput,
   ): Promise<AgentWorkspace>;
   createGitWorktreeWorkspace(
     input: CreateGitWorktreeWorkspaceInput,
@@ -153,6 +161,30 @@ export function createAgentWorkspaceService(options: {
       });
     },
 
+    async createProjectWorkspace(input) {
+      const rootPath = path.resolve(input.rootPath);
+      const rootStats = await stat(rootPath);
+      if (!rootStats.isDirectory()) {
+        throw new Error(`Agent workspace path is not a directory: ${rootPath}`);
+      }
+
+      const existing = (await options.workspaceStore.list()).find((workspace) =>
+        isSamePath(path.resolve(workspace.rootPath), rootPath),
+      );
+      if (existing) {
+        return options.workspaceStore
+          .touch(existing.id)
+          .then((workspace) => workspace ?? existing);
+      }
+
+      return options.workspaceStore.create({
+        name: input.name?.trim() || path.basename(rootPath) || rootPath,
+        rootPath,
+        kind: "project",
+        cleanup: "keep",
+      });
+    },
+
     async createGitWorktreeWorkspace(input) {
       const repositoryRoot = path.resolve(input.repositoryRoot);
       assertGitWorktreeCreationAllowed(
@@ -226,4 +258,8 @@ function assertGitWorktreeCreationAllowed(
 function isSameOrInsidePath(candidate: string, root: string): boolean {
   const relative = path.relative(root, candidate);
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function isSamePath(left: string, right: string): boolean {
+  return path.relative(left, right) === "";
 }

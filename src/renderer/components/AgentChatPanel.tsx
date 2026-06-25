@@ -213,6 +213,9 @@ export function AgentChatPanel({
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(
     null,
   );
+  const [workspaceActionPending, setWorkspaceActionPending] = useState<
+    "open" | "create" | null
+  >(null);
   const [modelSettings, setModelSettings] =
     useState<PublicModelSettings>(demoModelSettings);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -724,6 +727,10 @@ export function AgentChatPanel({
       activeChatRequestId !== null);
   const canInterruptCurrentWork =
     canCancelChatTask || Boolean(activeGoal?.status === "executing");
+  const workspaceActionsDisabled =
+    !window.buildingAgent ||
+    Boolean(workspaceActionPending) ||
+    status.kind === "working";
   const composerCommandMenuVisible =
     commandMenuOpen || shouldShowComposerCommandMenu(draft);
   const activeSkillMention = useMemo(
@@ -875,6 +882,78 @@ export function AgentChatPanel({
   function setActiveChatRequest(requestId: string | null) {
     activeChatRequestIdRef.current = requestId;
     setActiveChatRequestId(requestId);
+  }
+
+  async function refreshWorkspaces(nextSelectedWorkspaceId?: string | null) {
+    if (!window.buildingAgent) {
+      return;
+    }
+
+    const loadedWorkspaces = await window.buildingAgent.listAgentWorkspaces();
+    setWorkspaces(loadedWorkspaces);
+    if (nextSelectedWorkspaceId !== undefined) {
+      setSelectedWorkspaceId(nextSelectedWorkspaceId);
+    }
+  }
+
+  function selectWorkspace(workspace: AgentWorkspace) {
+    setWorkspaces((current) => [
+      workspace,
+      ...current.filter((item) => item.id !== workspace.id),
+    ]);
+    setSelectedWorkspaceId(workspace.id);
+  }
+
+  async function handleOpenProjectWorkspace() {
+    if (!window.buildingAgent || workspaceActionsDisabled) {
+      return;
+    }
+
+    setWorkspaceActionPending("open");
+    try {
+      const workspace = await window.buildingAgent.openProjectAgentWorkspace();
+      if (!workspace) {
+        setStatus({ kind: "ready", message: "已取消打开工作区" });
+        return;
+      }
+
+      selectWorkspace(workspace);
+      setStatus({ kind: "ready", message: `已打开工作区：${workspace.name}` });
+      void refreshWorkspaces(workspace.id);
+    } catch (error) {
+      setStatus({
+        kind: "error",
+        message:
+          error instanceof Error ? error.message : "打开工作区失败，请稍后重试。",
+      });
+    } finally {
+      setWorkspaceActionPending(null);
+    }
+  }
+
+  async function handleCreateWorkspace() {
+    if (!window.buildingAgent || workspaceActionsDisabled) {
+      return;
+    }
+
+    setWorkspaceActionPending("create");
+    try {
+      const workspace = await window.buildingAgent.createTemporaryAgentWorkspace({
+        name: "新建工作区",
+        cleanup: "keep",
+      });
+      selectWorkspace(workspace);
+      setStatus({ kind: "ready", message: `已新建工作区：${workspace.name}` });
+      void refreshWorkspaces(workspace.id);
+    } catch (error) {
+      setStatus({
+        kind: "error",
+        message:
+          error instanceof Error ? error.message : "新建工作区失败，请稍后重试。",
+      });
+    } finally {
+      setWorkspaceActionPending(null);
+    }
   }
 
   function handleOpenCommandMenu() {
@@ -1889,6 +1968,38 @@ export function AgentChatPanel({
                 >
                   {activeWorkspacePath || activeWorkspaceLabel}
                 </span>
+                <div className="workspace-action-buttons" aria-label="工作区操作">
+                  <button
+                    aria-label="打开工作区"
+                    className="workspace-action-button"
+                    disabled={workspaceActionsDisabled}
+                    onClick={() => {
+                      void handleOpenProjectWorkspace();
+                    }}
+                    title="打开工作区"
+                    type="button"
+                  >
+                    <Icon name="folder" className="workspace-action-icon" />
+                    <span>
+                      {workspaceActionPending === "open" ? "打开中" : "打开"}
+                    </span>
+                  </button>
+                  <button
+                    aria-label="新建工作区"
+                    className="workspace-action-button"
+                    disabled={workspaceActionsDisabled}
+                    onClick={() => {
+                      void handleCreateWorkspace();
+                    }}
+                    title="新建工作区"
+                    type="button"
+                  >
+                    <Icon name="plus" className="workspace-action-icon" />
+                    <span>
+                      {workspaceActionPending === "create" ? "新建中" : "新建"}
+                    </span>
+                  </button>
+                </div>
               </div>
               {composerCommandMenuVisible ? (
                 <div

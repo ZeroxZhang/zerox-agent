@@ -154,10 +154,16 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(chatPanelSource).toContain("listAgentWorkspaces");
     expect(chatPanelSource).toContain("selectedWorkspaceId");
     expect(chatPanelSource).toContain("workspaceId: selectedWorkspaceId");
+    expect(chatPanelSource).toContain("openProjectAgentWorkspace");
+    expect(chatPanelSource).toContain("createTemporaryAgentWorkspace");
+    expect(chatPanelSource).toContain("打开工作区");
+    expect(chatPanelSource).toContain("新建工作区");
     expect(chatPanelSource).toContain("composer-context-row");
     expect(chatPanelSource).toContain("workspace-picker");
+    expect(chatPanelSource).toContain("workspace-action-buttons");
     expect(styles).toContain(".composer-context-row");
     expect(styles).toContain(".workspace-picker");
+    expect(styles).toContain(".workspace-action-buttons");
   });
 
   it("uses the shared local Icon component for primary controls", () => {

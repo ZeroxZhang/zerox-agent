@@ -11,6 +11,9 @@ vi.mock("electron", () => ({
   BrowserWindow: {
     getAllWindows: () => [],
   },
+  dialog: {
+    showOpenDialog: vi.fn(),
+  },
   ipcMain: {
     handle: (channel: string, handler: (...args: unknown[]) => unknown) => {
       electronState.ipcHandlers.set(channel, handler);
@@ -37,6 +40,18 @@ describe("chat IPC handlers", () => {
     );
     expect(respondSkillInputSource).toContain("onStreamEvent");
     expect(respondSkillInputSource).toContain('sender.send("chat:streamEvent"');
+  });
+
+  it("opens project workspaces through the native directory picker", () => {
+    const openProjectSource = getHandlerSource(
+      ipcSource,
+      '"agentWorkspaces:openProject"',
+    );
+
+    expect(openProjectSource).toContain("dialog.showOpenDialog");
+    expect(openProjectSource).toContain('"openDirectory"');
+    expect(openProjectSource).toContain("createProjectWorkspace");
+    expect(openProjectSource).toContain("return null");
   });
 
   it("forwards guided skill continuation status and stream events to the invoking renderer", async () => {

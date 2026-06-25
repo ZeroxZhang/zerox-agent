@@ -1,4 +1,9 @@
-import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from "electron";
+import {
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  type IpcMainInvokeEvent,
+} from "electron";
 import { randomUUID } from "node:crypto";
 import type { AppContainer } from "../container";
 import type {
@@ -355,6 +360,19 @@ function registerWorkspacesIpcHandlers(container: AppContainer): void {
   ipcMain.handle("agentWorkspaces:createTemporary", (_event, input) =>
     container.agentWorkspaceService().createTemporaryWorkspace(input),
   );
+  ipcMain.handle("agentWorkspaces:openProject", async () => {
+    const result = await dialog.showOpenDialog({
+      title: "打开工作区",
+      buttonLabel: "打开工作区",
+      properties: ["openDirectory", "createDirectory"],
+    });
+    const rootPath = result.filePaths[0];
+    if (result.canceled || !rootPath) {
+      return null;
+    }
+
+    return container.agentWorkspaceService().createProjectWorkspace({ rootPath });
+  });
   ipcMain.handle("agentWorkspaces:requestGitWorktree", (_event, input) =>
     container.requestGitWorktreeAgentWorkspace(input),
   );

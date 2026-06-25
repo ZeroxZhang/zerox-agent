@@ -44,6 +44,17 @@ describe("preload bridge", () => {
     );
   });
 
+  it("exposes workspace open and scratch creation through stable IPC channels", () => {
+    expect(preloadSource).toContain("openProjectAgentWorkspace");
+    expect(preloadSource).toContain(
+      'ipcRenderer.invoke("agentWorkspaces:openProject"',
+    );
+    expect(preloadSource).toContain("createTemporaryAgentWorkspace");
+    expect(preloadSource).toContain(
+      'ipcRenderer.invoke("agentWorkspaces:createTemporary"',
+    );
+  });
+
   it("exposes chat stream and guided input IPC bridge operations", () => {
     expect(preloadSource).toContain("onChatStreamEvent");
     expect(preloadSource).toContain('ipcRenderer.on("chat:streamEvent"');

@@ -223,6 +223,8 @@ const buildingAgent = {
     cleanup?: AgentWorkspaceCleanup;
   }): Promise<AgentWorkspace> =>
     ipcRenderer.invoke("agentWorkspaces:createTemporary", input),
+  openProjectAgentWorkspace: (): Promise<AgentWorkspace | null> =>
+    ipcRenderer.invoke("agentWorkspaces:openProject"),
   createGitWorktreeAgentWorkspace: (input: {
     name: string;
     repositoryRoot: string;

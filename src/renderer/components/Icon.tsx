@@ -3,6 +3,7 @@ export type IconName =
   | "more"
   | "close"
   | "command"
+  | "folder"
   | "send"
   | "stop"
   | "expand"
@@ -20,6 +21,7 @@ const iconPaths: Record<IconName, string> = {
   close: "M6 6l12 12M18 6 6 18",
   command:
     "M9 9H6.5A2.5 2.5 0 1 1 9 6.5V17.5A2.5 2.5 0 1 1 6.5 15H17.5A2.5 2.5 0 1 1 15 17.5V6.5A2.5 2.5 0 1 1 17.5 9H9Z",
+  folder: "M3 7h6l2 2h10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z",
   send: "M4 12 20 4l-4 16-4-6-8-2Z",
   stop: "M7 7h10v10H7z",
   expand: "M8 10l4 4 4-4",
