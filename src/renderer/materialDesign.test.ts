@@ -169,15 +169,47 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".composer-context-row");
     expect(styles).toContain(".workspace-picker");
     expect(styles).toContain(".workspace-menu");
-    expect(styles).toContain("bottom: calc(100% + var(--space-2));");
     expect(styles).toContain("grid-template-rows: auto minmax(0, 1fr) auto;");
-    expect(styles).toContain("max-height: min(440px, calc(100dvh - 220px));");
+    expect(styles).toContain("--workspace-menu-safe-width");
+    expect(styles).toContain("--workspace-menu-safe-height");
+    expect(styles).toContain("max-height: var(--workspace-menu-safe-height);");
     expect(styles).toContain("overflow: hidden;");
     expect(styles).toContain("min-height: 0;");
     expect(styles).toContain(".composer-context-row");
     expect(styles).toContain("flex-wrap: wrap;");
     expect(styles).toContain("padding-top: 78px;");
     expect(styles).not.toContain(".workspace-action-buttons");
+  });
+
+  it("keeps workspace menus viewport anchored and internally scrollable", () => {
+    expect(chatPanelSource).toContain("workspaceMenuPosition");
+    expect(chatPanelSource).toContain("measureWorkspaceMenuPosition");
+    expect(chatPanelSource).toContain("workspaceMenuStyle");
+    expect(chatPanelSource).toContain(
+      "data-placement={workspaceMenuPosition.placement}",
+    );
+    expect(styles).toContain("position: fixed;");
+    expect(styles).toContain("top: clamp(");
+    expect(styles).toContain("left: clamp(");
+    expect(styles).toContain("max-height: var(--workspace-menu-safe-height);");
+    expect(styles).toContain("overscroll-behavior: contain;");
+    expect(styles).toContain("@media (max-height: 720px)");
+  });
+
+  it("keeps runtime process surfaces in a responsive scroll region above a pinned composer", () => {
+    expect(chatPanelSource).toContain("chat-scroll-region");
+    expect(chatPanelSource).toContain("runtime-surface-stack");
+    expect(chatPanelSource.indexOf("chat-scroll-region")).toBeLessThan(
+      chatPanelSource.indexOf("runtime-surface-stack"),
+    );
+    expect(chatPanelSource.indexOf("runtime-surface-stack")).toBeLessThan(
+      chatPanelSource.indexOf("className=\"composer\""),
+    );
+    expect(styles).toContain(".chat-scroll-region");
+    expect(styles).toContain(".runtime-surface-stack");
+    expect(styles).toContain("flex: 0 0 auto;");
+    expect(styles).toContain("min-height: clamp(104px, 18dvh, 148px);");
+    expect(styles).toContain("max-height: min(34vh, 260px);");
   });
 
   it("uses the shared local Icon component for primary controls", () => {

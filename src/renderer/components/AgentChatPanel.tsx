@@ -1,8 +1,11 @@
 import {
+  useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 import type {
@@ -137,6 +140,14 @@ type ComposerCommandItem = {
   comingSoon?: boolean;
 };
 
+type WorkspaceMenuPosition = {
+  top: number;
+  left: number;
+  width: number;
+  maxHeight: number;
+  placement: "above" | "below";
+};
+
 const fallbackSessions: ChatSession[] = [
   {
     id: "main",
@@ -218,6 +229,14 @@ export function AgentChatPanel({
   >(null);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const [workspaceSearch, setWorkspaceSearch] = useState("");
+  const [workspaceMenuPosition, setWorkspaceMenuPosition] =
+    useState<WorkspaceMenuPosition>({
+      top: 0,
+      left: 0,
+      width: 420,
+      maxHeight: 360,
+      placement: "above",
+    });
   const [modelSettings, setModelSettings] =
     useState<PublicModelSettings>(demoModelSettings);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -261,13 +280,75 @@ export function AgentChatPanel({
   const pendingInputRequestRef = useRef<SkillUserInputRequest | null>(null);
   const activeGoalRef = useRef<ChatSessionGoalSummary | null>(null);
   const workspaceMenuRef = useRef<HTMLDivElement>(null);
+  const measureWorkspaceMenuPosition = useCallback(() => {
+    const trigger = workspaceMenuRef.current;
+    if (!trigger) {
+      return;
+    }
+
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const viewportMargin = 16;
+    const triggerRect = trigger.getBoundingClientRect();
+    const availableWidth = Math.max(240, viewportWidth - viewportMargin * 2);
+    const width = clampNumber(
+      Math.max(triggerRect.width, Math.min(420, availableWidth)),
+      Math.min(280, availableWidth),
+      availableWidth,
+    );
+    const left = clampNumber(
+      triggerRect.left,
+      viewportMargin,
+      Math.max(viewportMargin, viewportWidth - width - viewportMargin),
+    );
+    const spaceAbove = triggerRect.top - viewportMargin;
+    const spaceBelow = viewportHeight - triggerRect.bottom - viewportMargin;
+    const placement = spaceBelow >= 300 || spaceBelow > spaceAbove
+      ? "below"
+      : "above";
+    const availableHeight =
+      (placement === "below" ? spaceBelow : spaceAbove) - 8;
+    const minimumHeight = Math.min(
+      180,
+      Math.max(120, viewportHeight - viewportMargin * 2),
+    );
+    const maximumHeight = Math.max(
+      minimumHeight,
+      Math.min(440, viewportHeight - viewportMargin * 2),
+    );
+    const maxHeight = clampNumber(availableHeight, minimumHeight, maximumHeight);
+    const rawTop =
+      placement === "below"
+        ? triggerRect.bottom + 8
+        : triggerRect.top - maxHeight - 8;
+    const top = clampNumber(
+      rawTop,
+      viewportMargin,
+      Math.max(viewportMargin, viewportHeight - maxHeight - viewportMargin),
+    );
+
+    setWorkspaceMenuPosition({
+      top,
+      left,
+      width,
+      maxHeight,
+      placement,
+    });
+  }, []);
 
   // Auto-scroll to latest message
   useEffect(() => {
     if (messageListRef.current) {
       messageListRef.current.scrollTop = messageListRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [
+    chatStreamState.thinkingText,
+    chatStreamState.toolCallPreviews.length,
+    goalRunEvents.length,
+    messages,
+    pendingInputRequest,
+    pendingToolApproval,
+  ]);
 
   useEffect(() => {
     sessionIdRef.current = sessionId;
@@ -314,6 +395,28 @@ export function AgentChatPanel({
       document.removeEventListener("mousedown", handleDocumentMouseDown);
     };
   }, [workspaceMenuOpen]);
+
+  useLayoutEffect(() => {
+    if (!workspaceMenuOpen) {
+      return;
+    }
+
+    measureWorkspaceMenuPosition();
+    window.addEventListener("resize", measureWorkspaceMenuPosition);
+    window.addEventListener("scroll", measureWorkspaceMenuPosition, true);
+    window.visualViewport?.addEventListener(
+      "resize",
+      measureWorkspaceMenuPosition,
+    );
+    return () => {
+      window.removeEventListener("resize", measureWorkspaceMenuPosition);
+      window.removeEventListener("scroll", measureWorkspaceMenuPosition, true);
+      window.visualViewport?.removeEventListener(
+        "resize",
+        measureWorkspaceMenuPosition,
+      );
+    };
+  }, [measureWorkspaceMenuPosition, workspaceMenuOpen]);
 
   useEffect(() => {
     resetActiveChatRefs();
@@ -797,6 +900,19 @@ export function AgentChatPanel({
         .includes(query),
     );
   }, [workspaceSearch, workspaces]);
+  const workspaceMenuStyle = {
+    "--workspace-menu-top": `${workspaceMenuPosition.top}px`,
+    "--workspace-menu-left": `${workspaceMenuPosition.left}px`,
+    "--workspace-menu-width": `${workspaceMenuPosition.width}px`,
+    "--workspace-menu-max-height": `${workspaceMenuPosition.maxHeight}px`,
+  } as CSSProperties;
+  const hasRuntimeSurfaces =
+    Boolean(chatStreamState.thinkingText) ||
+    chatStreamState.toolCallPreviews.length > 0 ||
+    Boolean(activeGoal) ||
+    goalRunEvents.length > 0 ||
+    (Boolean(pendingToolApproval) && !autoApprovalEnabled) ||
+    Boolean(pendingInputRequest);
   const skillMentionMenuVisible =
     Boolean(activeSkillMention) &&
     skillMentionMatches.length > 0 &&
@@ -1794,6 +1910,7 @@ export function AgentChatPanel({
       data-testid="agent-chat-panel"
     >
       <section className="chat-workspace" aria-label="会话窗口">
+        <div className="chat-scroll-region" ref={messageListRef}>
         <div className="chat-hero">
           <div className="chat-hero-main">
             <h2 title={chatTitle}>{chatTitle}</h2>
@@ -1853,7 +1970,7 @@ export function AgentChatPanel({
             onPickPrompt={handlePickPrompt}
           />
         ) : (
-          <div className="message-list" aria-label="消息列表" ref={messageListRef}>
+          <div className="message-list" aria-label="消息列表">
             {messages.map((message) => (
               <article
                 className={`chat-message is-${message.role}${
@@ -1869,128 +1986,133 @@ export function AgentChatPanel({
           </div>
         )}
 
-        {chatStreamState.thinkingText ? (
-          <CollapsibleTextBlock
-            className="thinking-process-block"
-            label="思考"
-            text={chatStreamState.thinkingText}
-          />
-        ) : null}
-
-        {chatStreamState.toolCallPreviews.length > 0 ? (
-          <section
-            className="tool-call-preview-block"
-            aria-label="工具预览"
-          >
-            {chatStreamState.toolCallPreviews.map((preview) => (
+        {hasRuntimeSurfaces ? (
+          <div className="runtime-surface-stack" aria-label="执行过程">
+            {chatStreamState.thinkingText ? (
               <CollapsibleTextBlock
-                key={preview.toolCallId}
-                className="tool-call-preview-item"
-                label={preview.toolName ?? "工具"}
-                text={preview.argumentsText || "{}"}
+                className="thinking-process-block"
+                label="思考"
+                text={chatStreamState.thinkingText}
               />
-            ))}
-          </section>
-        ) : null}
-
-        {activeGoal ? (
-          <GoalStatusStrip
-            goal={activeGoal}
-            detail={activeGoalDetail}
-            onViewDetail={handleViewGoalProgress}
-            {...(activeGoal.status === "planning" ||
-              activeGoal.status === "canceled"
-              ? { onStart: handleStartGoal }
-              : {})}
-            {...(activeGoal.status === "executing"
-              ? { onPause: () => void submitUserMessage("暂停这个目标") }
-              : {})}
-            onResolveReview={handleResolveGoalReview}
-            onReplan={handleReplanGoal}
-            onRetry={handleRetryGoal}
-            onCancel={handleCancelGoal}
-          />
-        ) : null}
-
-        {activeGoal && goalRunEvents.length > 0 ? (
-          <details
-            className="goal-run-process"
-            open={activeGoal.status === "executing"}
-          >
-            <summary>
-              <span>里程碑运行过程</span>
-              <small>{goalRunEvents.length} 个事件</small>
-            </summary>
-            <ol className="task-process-list" aria-label="里程碑运行过程">
-              {goalRunEvents.map((event, index) => (
-                <li
-                  key={`${event.createdAt}-${index}`}
-                  className={event.phase === "reflecting" ? "is-reasoning" : ""}
-                >
-                  <time>
-                    {new Date(event.createdAt).toLocaleTimeString("zh-CN", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      second: "2-digit",
-                    })}
-                  </time>
-                  <strong>{getGoalRunEventLabel(event)}</strong>
-                  <span>{event.message}</span>
-                </li>
-              ))}
-            </ol>
-            {toolApprovalEvents.length > 0 ? (
-              <ol className="task-process-list" aria-label="工具授权监控">
-                {toolApprovalEvents.map((event) => (
-                  <li
-                    key={`${event.id}-${event.createdAt}`}
-                    className={
-                      event.risk.level === "critical" ? "is-critical-risk" : ""
-                    }
-                  >
-                    <time>
-                      {new Date(event.createdAt).toLocaleTimeString("zh-CN", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                        second: "2-digit",
-                      })}
-                    </time>
-                    <strong>{event.automatic ? "自动授权" : "授权处理"}</strong>
-                    <span>
-                      {event.approved ? "已同意" : "已拒绝"} {event.toolName} ·{" "}
-                      {event.risk.reason}
-                    </span>
-                  </li>
-                ))}
-              </ol>
             ) : null}
-          </details>
-        ) : null}
 
-        {pendingToolApproval && !autoApprovalEnabled ? (
-          <ToolApprovalPanel
-            request={pendingToolApproval}
-            onResolve={(approved) => {
-              void handleResolveToolApproval(approved);
-            }}
-          />
-        ) : null}
+            {chatStreamState.toolCallPreviews.length > 0 ? (
+              <section
+                className="tool-call-preview-block"
+                aria-label="工具预览"
+              >
+                {chatStreamState.toolCallPreviews.map((preview) => (
+                  <CollapsibleTextBlock
+                    key={preview.toolCallId}
+                    className="tool-call-preview-item"
+                    label={preview.toolName ?? "工具"}
+                    text={preview.argumentsText || "{}"}
+                  />
+                ))}
+              </section>
+            ) : null}
 
-        {pendingInputRequest ? (
-          <GuidedSkillInputForm
-            inputRequest={pendingInputRequest}
-            values={guidedInputValues}
-            onChange={(name, value) =>
-              setGuidedInputValues((current) => ({
-                ...current,
-                [name]: value,
-              }))
-            }
-            onSubmit={(event) => {
-              void handleSubmitGuidedSkillInput(event);
-            }}
-          />
+            {activeGoal ? (
+              <GoalStatusStrip
+                goal={activeGoal}
+                detail={activeGoalDetail}
+                onViewDetail={handleViewGoalProgress}
+                {...(activeGoal.status === "planning" ||
+                  activeGoal.status === "canceled"
+                  ? { onStart: handleStartGoal }
+                  : {})}
+                {...(activeGoal.status === "executing"
+                  ? { onPause: () => void submitUserMessage("暂停这个目标") }
+                  : {})}
+                onResolveReview={handleResolveGoalReview}
+                onReplan={handleReplanGoal}
+                onRetry={handleRetryGoal}
+                onCancel={handleCancelGoal}
+              />
+            ) : null}
+
+            {activeGoal && goalRunEvents.length > 0 ? (
+              <details
+                className="goal-run-process"
+                open={activeGoal.status === "executing"}
+              >
+                <summary>
+                  <span>里程碑运行过程</span>
+                  <small>{goalRunEvents.length} 个事件</small>
+                </summary>
+                <ol className="task-process-list" aria-label="里程碑运行过程">
+                  {goalRunEvents.map((event, index) => (
+                    <li
+                      key={`${event.createdAt}-${index}`}
+                      className={event.phase === "reflecting" ? "is-reasoning" : ""}
+                    >
+                      <time>
+                        {new Date(event.createdAt).toLocaleTimeString("zh-CN", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          second: "2-digit",
+                        })}
+                      </time>
+                      <strong>{getGoalRunEventLabel(event)}</strong>
+                      <span>{event.message}</span>
+                    </li>
+                  ))}
+                </ol>
+                {toolApprovalEvents.length > 0 ? (
+                  <ol className="task-process-list" aria-label="工具授权监控">
+                    {toolApprovalEvents.map((event) => (
+                      <li
+                        key={`${event.id}-${event.createdAt}`}
+                        className={
+                          event.risk.level === "critical" ? "is-critical-risk" : ""
+                        }
+                      >
+                        <time>
+                          {new Date(event.createdAt).toLocaleTimeString("zh-CN", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            second: "2-digit",
+                          })}
+                        </time>
+                        <strong>{event.automatic ? "自动授权" : "授权处理"}</strong>
+                        <span>
+                          {event.approved ? "已同意" : "已拒绝"} {event.toolName} ·{" "}
+                          {event.risk.reason}
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                ) : null}
+              </details>
+            ) : null}
+
+            {pendingToolApproval && !autoApprovalEnabled ? (
+              <ToolApprovalPanel
+                request={pendingToolApproval}
+                onResolve={(approved) => {
+                  void handleResolveToolApproval(approved);
+                }}
+              />
+            ) : null}
+
+            {pendingInputRequest ? (
+              <GuidedSkillInputForm
+                inputRequest={pendingInputRequest}
+                values={guidedInputValues}
+                onChange={(name, value) =>
+                  setGuidedInputValues((current) => ({
+                    ...current,
+                    [name]: value,
+                  }))
+                }
+                onSubmit={(event) => {
+                  void handleSubmitGuidedSkillInput(event);
+                }}
+              />
+            ) : null}
+          </div>
         ) : null}
+        </div>
 
         <form className="composer" onSubmit={handleSubmit}>
           <div className="composer-inner">
@@ -2018,7 +2140,9 @@ export function AgentChatPanel({
                     <div
                       aria-label="工作区菜单"
                       className="workspace-menu"
+                      data-placement={workspaceMenuPosition.placement}
                       role="menu"
+                      style={workspaceMenuStyle}
                     >
                       <label className="workspace-menu-search">
                         <span>搜索项目</span>
@@ -2965,6 +3089,10 @@ function createClientRequestId(): string {
     globalThis.crypto?.randomUUID?.() ??
     `chat-${Date.now()}-${Math.random().toString(36).slice(2)}`
   );
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
 }
 
 function chatStreamEventMatchesActive(

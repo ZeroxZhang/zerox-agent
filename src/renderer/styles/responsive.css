@@ -45,8 +45,8 @@
   }
 
   .agent-chat-panel {
-    height: calc(100vh - 190px);
-    min-height: 600px;
+    height: calc(100dvh - 190px);
+    min-height: 0;
   }
 }
 
@@ -84,8 +84,8 @@
   }
 
   .agent-chat-panel {
-    height: calc(100vh - 90px);
-    min-height: 560px;
+    height: calc(100dvh - 90px);
+    min-height: 0;
   }
 
   .agent-home-hero {
@@ -125,19 +125,44 @@
     max-width: 100%;
   }
 
-  .workspace-menu {
-    width: min(360px, calc(100vw - 42px));
-    max-height: min(420px, calc(100dvh - 190px));
-  }
-
   .composer textarea {
-    min-height: 116px;
+    min-height: clamp(104px, 20dvh, 132px);
     padding-top: 78px;
     padding-right: 132px;
   }
 
   .guided-skill-input-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-height: 720px) {
+  .chat-workspace,
+  .agent-chat-panel.has-context-panel .chat-workspace {
+    padding-top: var(--space-4);
+  }
+
+  .agent-home-hero {
+    gap: var(--space-3);
+    min-height: min(420px, 52dvh);
+    padding-block: var(--space-5);
+  }
+
+  .runtime-surface-stack {
+    max-height: min(30vh, 220px);
+  }
+
+  .workspace-menu {
+    padding: 6px;
+  }
+
+  .composer {
+    padding-bottom: var(--space-3);
+  }
+
+  .composer textarea {
+    min-height: 104px;
+    padding-bottom: 52px;
   }
 }
 

@@ -1,10 +1,12 @@
 .composer {
-  flex-shrink: 0;
+  flex: 0 0 auto;
   display: grid;
   gap: var(--space-2);
   padding: 0 0 22px;
   border: none;
   background: transparent;
+  position: relative;
+  z-index: 8;
 }
 
 .composer-inner { min-width: 0; }
@@ -90,15 +92,33 @@
 }
 
 .workspace-menu {
-  position: absolute;
-  bottom: calc(100% + var(--space-2));
-  left: 0;
-  z-index: 24;
+  position: fixed;
+  --workspace-menu-safe-width: min(
+    var(--workspace-menu-width),
+    calc(100vw - 32px)
+  );
+  --workspace-menu-safe-height: min(
+    var(--workspace-menu-max-height),
+    calc(100dvh - 32px)
+  );
+  top: clamp(
+    16px,
+    var(--workspace-menu-top),
+    calc(100dvh - var(--workspace-menu-safe-height) - 16px)
+  );
+  left: clamp(
+    16px,
+    var(--workspace-menu-left),
+    calc(100vw - var(--workspace-menu-safe-width) - 16px)
+  );
+  bottom: auto;
+  z-index: 48;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  width: min(420px, calc(100vw - 64px));
-  max-height: min(440px, calc(100dvh - 220px));
+  width: var(--workspace-menu-safe-width);
+  max-height: var(--workspace-menu-safe-height);
   overflow: hidden;
+  overscroll-behavior: contain;
   padding: var(--space-2);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-lg);
@@ -107,9 +127,13 @@
 }
 
 .workspace-menu-search {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   display: grid;
   gap: 6px;
   padding: var(--space-1) var(--space-1) var(--space-2);
+  background: var(--bg-surface-raised);
 }
 
 .workspace-menu-search span,
@@ -142,6 +166,7 @@
   gap: 2px;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: var(--space-1);
 }
 
@@ -222,11 +247,15 @@
 }
 
 .workspace-menu-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
   display: grid;
   gap: 2px;
   margin-top: var(--space-1);
   padding: var(--space-1);
   border-top: 1px solid var(--border-default);
+  background: var(--bg-surface-raised);
 }
 
 .workspace-context-path {
@@ -242,7 +271,8 @@
 
 .composer textarea {
   width: 100%;
-  min-height: 148px;
+  min-height: clamp(104px, 18dvh, 148px);
+  max-height: min(34vh, 260px);
   resize: none;
   padding: 58px 150px 58px 22px;
   border: 1px solid var(--border-default);
@@ -331,6 +361,7 @@
   width: min(360px, calc(100% - (var(--composer-action-inset) * 2)));
   max-height: min(320px, 42vh);
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: var(--space-1);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-lg);
@@ -443,6 +474,10 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(180px, 0.7fr) auto;
   gap: var(--space-3);
+  min-width: 0;
+  max-height: min(34vh, 260px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: var(--space-3);
   border: 1px solid var(--status-warning-border);
   border-radius: var(--radius-md);

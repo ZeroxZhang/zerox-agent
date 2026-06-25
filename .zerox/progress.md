@@ -4499,3 +4499,29 @@
   - `git diff --check` -> passed.
   - `npm run dist:mac` -> passed; regenerated `release/Zerox Agent-2.7.0-arm64.dmg` and `release/Zerox Agent-2.7.0-arm64-mac.zip`.
   - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='工作区|默认工作区' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed; packaged app rendered the workspace entry.
+
+## 2026-06-25 - Chat Runtime Surface and Workspace Popover Responsive Fix
+
+- Request:
+  - Fix the workspace dropdown so all options remain reachable under window resizing.
+  - Make the chat interaction layout responsive end-to-end so execution process, thinking, tool calls, tool approval, guided skill input, the message reading area, and composer no longer squeeze each other out.
+- Changed files:
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/styles/base.css`
+  - `src/renderer/styles/app-shell.css`
+  - `src/renderer/styles/chat.css`
+  - `src/renderer/styles/composer.css`
+  - `src/renderer/styles/responsive.css`
+  - `src/renderer/materialDesign.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- --run src/renderer/materialDesign.test.ts` -> failed as expected on the new assertions for viewport-anchored workspace menus and bounded `runtime-surface-stack` layout.
+- GREEN / verification evidence:
+  - `npm test -- --run src/renderer/materialDesign.test.ts` -> 46 tests passed.
+  - In-app Browser QA on `http://127.0.0.1:5173/#chat` -> passed for open workspace menu at `1440x900`, `1280x560`, `900x700`, `640x760`, and `390x844`: menu stayed fully inside the viewport, composer stayed visible, `chat-scroll-region` retained `overflow-y: auto`, and horizontal overflow was false.
+  - `npm run verify` -> 168 files / 1147 tests passed, 26/26 agent evals passed, 2/2 memory evals passed.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `node_modules` emitted the existing better-sqlite3 ABI warning and fell back to JSON storage during smoke.
+  - `git diff --check` -> passed.
+  - `npm run dist:mac` -> passed; regenerated `release/Zerox Agent-2.7.0-arm64.dmg` and `release/Zerox Agent-2.7.0-arm64-mac.zip`.
+  - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='工作区|默认工作区' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed; packaged app rendered the workspace entry.
