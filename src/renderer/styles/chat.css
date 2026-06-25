@@ -347,13 +347,48 @@
   background: rgba(255, 255, 255, 0.74);
 }
 
-.thinking-process-block header,
-.tool-call-preview-item header {
-  display: flex;
+.runtime-disclosure.is-collapsed {
+  gap: 0;
+}
+
+.runtime-disclosure header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   gap: var(--space-2);
   min-width: 0;
+}
+
+.runtime-disclosure header strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-disclosure-summary {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-disclosure-body {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  max-height: min(32vh, 240px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .thinking-process-block pre,
@@ -373,10 +408,32 @@
   background: var(--status-info-bg);
 }
 
+.tool-call-preview-list {
+  align-content: start;
+}
+
 .tool-call-preview-item {
   display: grid;
   gap: var(--space-2);
   min-width: 0;
+  padding: var(--space-2);
+  border: 1px solid rgba(37, 99, 235, 0.12);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.56);
+}
+
+.tool-call-preview-item header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.tool-call-preview-item header small {
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
 }
 
 .guided-skill-input-form {

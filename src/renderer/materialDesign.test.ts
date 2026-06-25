@@ -623,6 +623,23 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".tool-call-preview-block");
   });
 
+  it("keeps thinking and tool stream previews collapsed to one latest row by default", () => {
+    expect(chatPanelSource).toContain("RuntimeTextDisclosure");
+    expect(chatPanelSource).toContain("ToolCallPreviewDisclosure");
+    expect(chatPanelSource).toContain("latestToolCallPreview");
+    expect(chatPanelSource).toContain("getLatestRuntimeLine");
+    expect(chatPanelSource).toContain("runtime-disclosure-summary");
+    expect(chatPanelSource).not.toMatch(
+      /chatStreamState\.toolCallPreviews\.map[\s\S]*<CollapsibleTextBlock/,
+    );
+    expect(styles).toContain(".runtime-disclosure.is-collapsed");
+    expect(styles).toContain(".runtime-disclosure-summary");
+    expect(styles).toContain(".runtime-disclosure-body");
+    expect(styles).toContain(".tool-call-preview-list");
+    expect(styles).toContain("white-space: nowrap;");
+    expect(styles).toContain("max-height: min(32vh, 240px);");
+  });
+
   it("renders guided skill input in the main chat surface with all required controls", () => {
     expect(chatPanelSource).toContain("guided-skill-input-form");
     expect(chatPanelSource).toContain("pendingInputRequest");

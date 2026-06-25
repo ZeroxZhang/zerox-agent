@@ -85,6 +85,7 @@ import {
   applyChatStreamEvent,
   createChatStreamState,
   finalizeChatStreamResult,
+  type ChatToolCallPreview,
   type ChatStreamMessage,
 } from "../chatStreamReducer";
 import { GoalDetailDrawer } from "./GoalDetailDrawer";
@@ -913,6 +914,8 @@ export function AgentChatPanel({
     goalRunEvents.length > 0 ||
     (Boolean(pendingToolApproval) && !autoApprovalEnabled) ||
     Boolean(pendingInputRequest);
+  const latestToolCallPreview =
+    chatStreamState.toolCallPreviews.at(-1) ?? null;
   const skillMentionMenuVisible =
     Boolean(activeSkillMention) &&
     skillMentionMatches.length > 0 &&
@@ -1989,7 +1992,7 @@ export function AgentChatPanel({
         {hasRuntimeSurfaces ? (
           <div className="runtime-surface-stack" aria-label="执行过程">
             {chatStreamState.thinkingText ? (
-              <CollapsibleTextBlock
+              <RuntimeTextDisclosure
                 className="thinking-process-block"
                 label="思考"
                 text={chatStreamState.thinkingText}
@@ -1997,19 +2000,10 @@ export function AgentChatPanel({
             ) : null}
 
             {chatStreamState.toolCallPreviews.length > 0 ? (
-              <section
-                className="tool-call-preview-block"
-                aria-label="工具预览"
-              >
-                {chatStreamState.toolCallPreviews.map((preview) => (
-                  <CollapsibleTextBlock
-                    key={preview.toolCallId}
-                    className="tool-call-preview-item"
-                    label={preview.toolName ?? "工具"}
-                    text={preview.argumentsText || "{}"}
-                  />
-                ))}
-              </section>
+              <ToolCallPreviewDisclosure
+                latestToolCallPreview={latestToolCallPreview}
+                previews={chatStreamState.toolCallPreviews}
+              />
             ) : null}
 
             {activeGoal ? (
@@ -2958,7 +2952,7 @@ function renderGuidedSkillInputControl(
   return null;
 }
 
-function CollapsibleTextBlock({
+function RuntimeTextDisclosure({
   className,
   label,
   text,
@@ -2968,12 +2962,19 @@ function CollapsibleTextBlock({
   text: string;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const preview = text.length > 280 ? `${text.slice(0, 277)}...` : text;
+  const summary = getLatestRuntimeLine(text);
 
   return (
-    <section className={`${className} chat-message-collapse`}>
+    <section
+      className={`${className} runtime-disclosure ${
+        expanded ? "is-expanded" : "is-collapsed"
+      }`}
+    >
       <header>
         <strong>{label}</strong>
+        <p className="runtime-disclosure-summary" title={summary}>
+          {summary}
+        </p>
         <button
           type="button"
           aria-expanded={expanded}
@@ -2982,9 +2983,79 @@ function CollapsibleTextBlock({
           {expanded ? "收起" : "展开"}
         </button>
       </header>
-      <pre>{expanded ? text : preview}</pre>
+      {expanded ? (
+        <div className="runtime-disclosure-body">
+          <pre>{text}</pre>
+        </div>
+      ) : null}
     </section>
   );
+}
+
+function ToolCallPreviewDisclosure({
+  latestToolCallPreview,
+  previews,
+}: {
+  latestToolCallPreview: ChatToolCallPreview | null;
+  previews: ChatToolCallPreview[];
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const latestToolName = latestToolCallPreview?.toolName ?? "工具";
+  const latestToolArguments = latestToolCallPreview?.argumentsText ?? "{}";
+  const summary = `${latestToolName} · ${getLatestRuntimeLine(
+    latestToolArguments,
+  )}`;
+
+  return (
+    <section
+      className={`tool-call-preview-block runtime-disclosure ${
+        expanded ? "is-expanded" : "is-collapsed"
+      }`}
+      aria-label="工具预览"
+    >
+      <header>
+        <strong>工具</strong>
+        <p className="runtime-disclosure-summary" title={summary}>
+          {summary}
+        </p>
+        <button
+          type="button"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((current) => !current)}
+        >
+          {expanded ? "收起" : "展开"}
+        </button>
+      </header>
+      {expanded ? (
+        <div className="runtime-disclosure-body tool-call-preview-list">
+          {previews.map((preview) => (
+            <article className="tool-call-preview-item" key={preview.toolCallId}>
+              <header>
+                <strong>{preview.toolName ?? "工具"}</strong>
+                {typeof preview.index === "number" ? (
+                  <small>#{preview.index + 1}</small>
+                ) : null}
+              </header>
+              <pre>{preview.argumentsText || "{}"}</pre>
+            </article>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function getLatestRuntimeLine(text: string): string {
+  const latestLine =
+    text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .at(-1) ?? "";
+  const compactLine = latestLine || text.trim() || "{}";
+  return compactLine.length > 180
+    ? `${compactLine.slice(0, 177)}...`
+    : compactLine;
 }
 
 function TaskProcessItem({

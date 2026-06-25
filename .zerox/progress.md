@@ -4525,3 +4525,28 @@
   - `git diff --check` -> passed.
   - `npm run dist:mac` -> passed; regenerated `release/Zerox Agent-2.7.0-arm64.dmg` and `release/Zerox Agent-2.7.0-arm64-mac.zip`.
   - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='工作区|默认工作区' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed; packaged app rendered the workspace entry.
+
+## 2026-06-25 - Runtime Thinking and Tool Preview Collapse Fix
+
+- Request:
+  - Keep both thinking and tool stream preview modules collapsed by default.
+  - Show only the latest one-line summary when collapsed.
+  - Prevent tool previews from stacking multiple cards unless the user explicitly expands the tool module.
+  - Keep expanded details scrollable and collapsible.
+- Changed files:
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/styles/chat.css`
+  - `src/renderer/materialDesign.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- --run src/renderer/materialDesign.test.ts` -> failed as expected while `RuntimeTextDisclosure`, `ToolCallPreviewDisclosure`, latest-line summaries, and bounded disclosure-body styles were missing.
+- GREEN / verification evidence:
+  - `npm test -- --run src/renderer/materialDesign.test.ts` -> 47 tests passed.
+  - `npm run build` -> passed.
+  - In-app Browser QA on `http://127.0.0.1:5173/#chat` -> passed: page identity correct, chat UI not blank, no framework overlay, workspace interaction responded, composer stayed visible, horizontal overflow was false, console warn/error count 0.
+  - `git diff --check` -> passed.
+  - `npm run verify` -> 168 files / 1148 tests passed, 26/26 agent evals passed, 2/2 memory evals passed.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `node_modules` emitted the existing better-sqlite3 ABI warning and fell back to JSON storage during smoke.
+  - `npm run dist:mac` -> passed; regenerated `release/Zerox Agent-2.7.0-arm64.dmg` and `release/Zerox Agent-2.7.0-arm64-mac.zip`.
+  - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='工作区|默认工作区' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed; packaged app rendered the workspace entry.
