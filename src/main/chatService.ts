@@ -630,22 +630,32 @@ export function createChatService(options: {
           const toolExecutor = options.toolExecutor;
           const selectedSkill =
             requestedSkill?.kind === "matched" ? requestedSkill.skill : undefined;
+          const agentRunContext =
+            chatRunContext && selectedSkill
+              ? extendRunContextForSelectedSkill({
+                  runContext: chatRunContext,
+                  selectedSkill,
+                  ...(resolvedSkillInput?.status === "complete"
+                    ? { skillInputValues: resolvedSkillInput.values }
+                    : {}),
+                })
+              : chatRunContext;
           const loopMaxTurns =
             typeof selectedSkill?.manifest.execution.maxTurns === "number"
               ? normalizeAgentLoopMaxTurns(
                   selectedSkill.manifest.execution.maxTurns,
                 )
               : agentLoopMaxTurns;
-          const chatRuntimeTask = chatRunContext
+          const chatRuntimeTask = agentRunContext
             ? createChatRuntimeTask({
-              sessionId,
-              requestId,
-              runContext: chatRunContext,
-              selectedSkill,
-              ...(resolvedSkillInput?.status === "complete"
-                ? { skillInputValues: resolvedSkillInput.values }
-                : {}),
-            })
+                sessionId,
+                requestId,
+                runContext: agentRunContext,
+                selectedSkill,
+                ...(resolvedSkillInput?.status === "complete"
+                  ? { skillInputValues: resolvedSkillInput.values }
+                  : {}),
+              })
             : null;
           let observedToolCallsExecuted =
             continuationToResume?.toolCallsExecuted ?? 0;
@@ -670,7 +680,7 @@ export function createChatService(options: {
               toolExecutor,
               toolAuthorizationService: options.toolAuthorizationService,
               ...(chatRuntimeTask ? { taskId: chatRuntimeTask.taskId } : {}),
-              ...(chatRunContext ? { runContext: chatRunContext } : {}),
+              ...(agentRunContext ? { runContext: agentRunContext } : {}),
               ...(chatRuntimeTask
                 ? { runtimeTask: chatRuntimeTask.runtimeTask }
                 : {}),
@@ -1577,6 +1587,36 @@ function createChatRuntimeTask(options: {
         : "Chat task",
       permissions,
       policyLabel: "chat workspace contract",
+    },
+  };
+}
+
+function extendRunContextForSelectedSkill(options: {
+  runContext: AgentRunContext;
+  selectedSkill: SkillRecord;
+  skillInputValues?: Record<string, SkillInputValue>;
+}): AgentRunContext {
+  const skillReadRoots = [
+    options.selectedSkill.rootDir,
+    ...readSkillPermissionPaths(options.selectedSkill, options.skillInputValues),
+  ];
+  const skillWriteRoots = writeSkillPermissionPaths(
+    options.selectedSkill,
+    options.skillInputValues,
+  );
+
+  return {
+    ...options.runContext,
+    sandbox: {
+      ...options.runContext.sandbox,
+      extraReadRoots: uniqueStrings([
+        ...options.runContext.sandbox.extraReadRoots,
+        ...skillReadRoots,
+      ]),
+      extraWriteRoots: uniqueStrings([
+        ...options.runContext.sandbox.extraWriteRoots,
+        ...skillWriteRoots,
+      ]),
     },
   };
 }

@@ -1,5 +1,35 @@
 # Zerox Harness Progress
 
+## 2026-06-25 - v2.7.0 Workspace Skill Sandbox Fix
+
+- Request: fix the case where a user selects a project workspace and invokes an installed skill such as `@onepager`, but the agent reports that the skill files cannot be reached from the current workspace sandbox.
+- Root cause fixed:
+  - Chat skill runs added the selected skill root to the runtime task permission policy, but did not add it to the active `AgentRunContext` sandbox `extraReadRoots`.
+  - Tool authorization checks both layers. The task policy allowed the skill root, then the workspace sandbox denied `file_list` / `file_read` because the skill directory was outside the selected project workspace.
+- Changed files:
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/main/chatService.test.ts` -> failed as expected on `extends the active workspace sandbox with the selected skill read root`; observed `runContext.sandbox.extraReadRoots: []` while the selected skill root was required.
+- GREEN evidence:
+  - `npm test -- src/main/chatService.test.ts` -> 1 file / 50 tests passed.
+  - `npm test -- src/main/chatService.test.ts src/shared/toolPermissions.test.ts src/main/toolAuthorizationService.test.ts` -> 3 files / 99 tests passed.
+  - `npm run verify` -> 168 files / 1149 tests passed; build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. The existing better-sqlite3 ABI mismatch fell back to JSON as designed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+- Implementation evidence:
+  - Added `extendRunContextForSelectedSkill()` so a selected skill's root and declared permission paths are mirrored into the per-run sandbox before the agent loop starts.
+  - The regression test now verifies both the augmented run context and the actual `authorizeToolCallWithinRunContext()` decision for `file_list` against the selected skill directory.
+- Packaging evidence:
+  - `npm run dist:mac` -> generated `release/Zerox Agent-2.7.0-arm64.dmg` and `release/Zerox Agent-2.7.0-arm64-mac.zip`.
+  - Package metadata: `release/mac-arm64/Zerox Agent.app/Contents/Info.plist` reports `CFBundleShortVersionString=2.7.0` and `CFBundleVersion=2.7.0`.
+  - `release/Zerox Agent-2.7.0-arm64.dmg` (122M, sha256 `e6f87af07b2d723171fc8a422084e267ce1fc990f6007898d9bb260ee778b6fd`)
+  - `release/Zerox Agent-2.7.0-arm64-mac.zip` (333M, sha256 `4ffcdf2d806e43c5e9e8d544637dce2dbd5b486629b613fc8cfd4c75029846e7`)
+  - `release/Zerox Agent-2.7.0-arm64.dmg.blockmap` (132K, sha256 `28eb20d69d394732e36c4182fb6bf94d4466cc20e1beefbb69cd1a708fec7672`)
+  - `release/Zerox Agent-2.7.0-arm64-mac.zip.blockmap` (335K, sha256 `867eca7ceebb054e987dbbb27fcb10543080933ada053b4c24fdd7001b0ef711`)
+
 ## 2026-06-24 - v2.7.0 Task 6 Icon System And Visual Design Artifact
 
 - Request: implement Task 6 from the 2.7.0 UI iteration brief: add a shared local renderer icon component, replace the requested chat/sidebar glyph controls, and create the approved 2.7.0 UI artifact covering required chat states.

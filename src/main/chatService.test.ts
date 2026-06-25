@@ -9,7 +9,10 @@ import type { RunScheduledTaskResult } from "../shared/agentRuns";
 import type { MemoryInput, MemoryRecord, MemorySearchResult } from "../shared/memory";
 import type { ScheduledTask, ScheduledTaskInput } from "../shared/scheduledTasks";
 import type { SkillRecord } from "../shared/skills";
-import { getDefaultTaskPermissionPolicy } from "../shared/toolPermissions";
+import {
+  authorizeToolCallWithinRunContext,
+  getDefaultTaskPermissionPolicy,
+} from "../shared/toolPermissions";
 import type {
   ChatSessionRecord,
   ChatSessionGoalSummary,
@@ -1801,6 +1804,91 @@ describe("chat service", () => {
     expect(capturedMessages.at(-1)?.map((message) => message.content).join("\n")).toContain(
       "Onepager 技能正文",
     );
+  });
+
+  it("extends the active workspace sandbox with the selected skill read root", async () => {
+    let observedLoopOptions: unknown = null;
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      workspaceService: {
+        async resolveRunContext() {
+          return buildPrimaryRunContext({
+            workspaceId: "workspace_project",
+            workspaceRoot: "/workspace/project",
+          });
+        },
+      },
+      toolExecutor: createToolExecutor(),
+      discoverSkills: async () => ({
+        skills: [createSkillRecord({ name: "onepager", body: "Onepager 技能正文" })],
+        errors: [],
+      }),
+      async runAgentLoop(_messages, _profile, options) {
+        observedLoopOptions = options;
+        return {
+          status: "succeeded",
+          summary: "done",
+          turns: 1,
+          messages: [],
+          toolCallsExecuted: 0,
+        };
+      },
+      createId: () => "skill_workspace",
+      now: () => new Date("2026-06-20T10:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage({
+      message: "使用 @onepager 技能，给当前项目生成一张图",
+      workspaceId: "workspace_project",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      selectedSkill: { name: "onepager" },
+    });
+    expect(observedLoopOptions).toMatchObject({
+      runContext: {
+        workspaceRoot: "/workspace/project",
+        sandbox: {
+          extraReadRoots: expect.arrayContaining(["/tmp/skills/onepager"]),
+        },
+      },
+      runtimeTask: {
+        permissions: {
+          files: {
+            read: expect.arrayContaining([
+              "/workspace/project",
+              "/tmp/skills/onepager",
+            ]),
+          },
+        },
+      },
+    });
+
+    const loopOptions = observedLoopOptions as {
+      runContext: Parameters<typeof authorizeToolCallWithinRunContext>[2];
+      runtimeTask: {
+        permissions: Parameters<typeof authorizeToolCallWithinRunContext>[0];
+      };
+    };
+    expect(
+      authorizeToolCallWithinRunContext(
+        loopOptions.runtimeTask.permissions,
+        {
+          toolName: "file_list",
+          args: { path: "/tmp/skills/onepager" },
+        },
+        loopOptions.runContext,
+      ),
+    ).toMatchObject({
+      allowed: true,
+    });
   });
 
   it("pauses selected skills with missing guided input before model, memory, or tools run", async () => {
