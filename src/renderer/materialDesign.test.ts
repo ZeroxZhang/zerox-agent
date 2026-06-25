@@ -52,6 +52,10 @@ describe("Design System — Notion-inspired app shell", () => {
     path.join(process.cwd(), "src/renderer/components/RunsPanel.tsx"),
     "utf8",
   );
+  const memoryPanelSource = readFileSync(
+    path.join(process.cwd(), "src/renderer/components/MemoryPanel.tsx"),
+    "utf8",
+  );
   const runTrajectoryPanelSource = readFileSync(
     path.join(process.cwd(), "src/renderer/components/RunTrajectoryPanel.tsx"),
     "utf8",
@@ -146,8 +150,16 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(chatPanelSource).toContain("selectedSkillName");
     expect(chatPanelSource).toContain("skill-mention-menu");
     expect(chatPanelSource).toContain("selected-skill-chip");
+    expect(chatPanelSource.indexOf("selected-skill-chip")).toBeGreaterThan(
+      chatPanelSource.indexOf("workspace-context-path"),
+    );
+    expect(chatPanelSource.indexOf("selected-skill-chip")).toBeLessThan(
+      chatPanelSource.indexOf("skill-mention-menu"),
+    );
     expect(styles).toContain(".skill-mention-menu");
     expect(styles).toContain(".selected-skill-chip");
+    expect(styles).toContain("height: var(--composer-action-size);");
+    expect(styles).toContain("bottom: var(--composer-action-inset);");
   });
 
   it("surfaces workspace selection in the chat composer", () => {
@@ -330,6 +342,18 @@ describe("Design System — Notion-inspired app shell", () => {
   it("surfaces eval candidate generation from terminal Runs", () => {
     expect(runsPanelSource).toContain("Eval Candidate");
     expect(runsPanelSource).toContain("generateEvalCandidateForRun");
+  });
+
+  it("surfaces curated memory and raw history as distinct memory surfaces", () => {
+    expect(preloadSource).toContain("searchRawHistory");
+    expect(preloadSource).toContain("readRawHistoryAround");
+    expect(memoryPanelSource).toContain("raw-history-panel");
+    expect(memoryPanelSource).toContain("raw-history-action-row");
+    expect(memoryPanelSource).toContain("searchRawHistory");
+    expect(memoryPanelSource).toContain("Raw History");
+    expect(styles).toContain(".raw-history-panel");
+    expect(styles).toContain("repeat(auto-fit, minmax(min(100%, 160px), 1fr))");
+    expect(styles).toContain(".raw-history-action-row");
   });
 
   it("surfaces eval candidate review and promotion controls", () => {
@@ -629,10 +653,17 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(chatPanelSource).toContain("latestToolCallPreview");
     expect(chatPanelSource).toContain("getLatestRuntimeLine");
     expect(chatPanelSource).toContain("runtime-disclosure-summary");
+    expect(chatPanelSource).toContain("runtime-disclosure-label");
+    expect(chatPanelSource).toContain("runtime-disclosure-toggle");
+    expect(chatPanelSource).toContain("aria-label={expanded ? `收起${label}` : `展开${label}`}");
+    expect(chatPanelSource).toContain('Icon name={expanded ? "collapse" : "expand"}');
     expect(chatPanelSource).not.toMatch(
       /chatStreamState\.toolCallPreviews\.map[\s\S]*<CollapsibleTextBlock/,
     );
     expect(styles).toContain(".runtime-disclosure.is-collapsed");
+    expect(styles).toContain(".runtime-disclosure-label::before");
+    expect(styles).toContain(".runtime-disclosure-toggle");
+    expect(styles).toContain("border-radius: var(--radius-full);");
     expect(styles).toContain(".runtime-disclosure-summary");
     expect(styles).toContain(".runtime-disclosure-body");
     expect(styles).toContain(".tool-call-preview-list");

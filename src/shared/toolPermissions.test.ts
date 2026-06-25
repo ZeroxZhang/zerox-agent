@@ -109,6 +109,7 @@ describe("task permission policy", () => {
       memory: { read: true, write: true },
       tools: {
         allowedNames: ["organize_preview"],
+        allowedSkillNames: ["local-file-organizer"],
         allowedSources: [
           "skill:local-file-organizer",
           "mcp:local-file-organizer:filesystem-index",
@@ -518,6 +519,20 @@ describe("tool authorization", () => {
     ).toMatchObject({ allowed: true });
 
     expect(
+      authorizeToolCall(policy, {
+        toolName: "history_search",
+        args: { query: "skill_load" },
+      }),
+    ).toMatchObject({ allowed: true });
+
+    expect(
+      authorizeToolCall(policy, {
+        toolName: "history_around",
+        args: { entryId: "history_1" },
+      }),
+    ).toMatchObject({ allowed: true });
+
+    expect(
       authorizeToolCall(
         { ...policy, memory: { read: false, write: false } },
         { toolName: "memory_search", args: { query: "agent memory design" } },
@@ -525,6 +540,77 @@ describe("tool authorization", () => {
     ).toMatchObject({
       allowed: false,
       reason: "这个任务未允许读取本地记忆。",
+    });
+  });
+
+  it("requires explicit tool policy for skill lazy-load tools", () => {
+    expect(
+      authorizeToolCall(policy, {
+        toolName: "skill_load",
+        args: { skillName: "onepager" },
+      }),
+    ).toMatchObject({
+      allowed: false,
+      reason: "工具 skill_load 尚未配置授权规则。",
+    });
+
+    expect(
+      authorizeToolCall(
+        {
+          ...policy,
+          tools: {
+            allowedNames: ["skill_load", "skill_resource_list"],
+            allowedSources: [],
+          },
+        },
+        {
+          toolName: "skill_load",
+          args: { skillName: "onepager" },
+        },
+      ),
+    ).toMatchObject({
+      allowed: false,
+      reason: "skill_load 请求的技能 onepager 不在本次运行授权技能内。",
+    });
+
+    expect(
+      authorizeToolCall(
+        {
+          ...policy,
+          tools: {
+            allowedNames: ["skill_load", "skill_resource_list"],
+            allowedSources: [],
+            allowedSkillNames: ["onepager"],
+          },
+        },
+        {
+          toolName: "skill_load",
+          args: { skillName: "onepager" },
+        },
+      ),
+    ).toMatchObject({
+      allowed: true,
+      reason: "skill_load 已绑定到本次运行授权技能 onepager。",
+    });
+
+    expect(
+      authorizeToolCall(
+        {
+          ...policy,
+          tools: {
+            allowedNames: ["skill_load", "skill_resource_list"],
+            allowedSources: [],
+            allowedSkillNames: ["onepager"],
+          },
+        },
+        {
+          toolName: "skill_resource_list",
+          args: { skillName: "other-skill" },
+        },
+      ),
+    ).toMatchObject({
+      allowed: false,
+      reason: "skill_resource_list 请求的技能 other-skill 不在本次运行授权技能内。",
     });
   });
 

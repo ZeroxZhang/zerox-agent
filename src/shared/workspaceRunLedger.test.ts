@@ -106,4 +106,68 @@ describe("workspace run ledger model", () => {
       sourceEventId: "event_tool_result",
     });
   });
+
+  it("projects v2.8 tool invocation, checkpoint boundary, and memory scope events", () => {
+    const invocation = createWorkspaceRunEvent({
+      run,
+      input: {
+        type: "tool_invocation",
+        toolInvocationId: "tool_invocation_1",
+        toolCallId: "call_1",
+        toolName: "skill_load",
+        toolSource: "built-in",
+        invocationStatus: "waiting_approval",
+      },
+      id: "event_invocation",
+      seq: 1,
+      createdAt: "2026-06-25T00:00:01.000Z",
+    });
+    const boundary = createWorkspaceRunEvent({
+      run,
+      input: {
+        type: "checkpoint_boundary",
+        checkpointId: "checkpoint_1",
+        strategy: "boundary",
+        preservedTailMessages: 12,
+        protectedToolResults: ["call_1"],
+      },
+      id: "event_boundary",
+      seq: 2,
+      createdAt: "2026-06-25T00:00:02.000Z",
+    });
+    const memoryScope = createWorkspaceRunEvent({
+      run,
+      input: {
+        type: "memory_scope",
+        scopes: ["session:session_1", "workspace:workspace_building_agent"],
+        rawHistoryEnabled: true,
+      },
+      id: "event_memory_scope",
+      seq: 3,
+      createdAt: "2026-06-25T00:00:03.000Z",
+    });
+
+    const trajectory = projectChatTrajectoryEvents([
+      invocation,
+      boundary,
+      memoryScope,
+    ]);
+
+    expect(trajectory).toEqual([
+      expect.objectContaining({
+        type: "tool_invocation",
+        toolCallId: "call_1",
+        toolName: "skill_load",
+        invocationStatus: "waiting_approval",
+      }),
+      expect.objectContaining({
+        type: "checkpoint_boundary",
+        checkpointId: "checkpoint_1",
+      }),
+      expect.objectContaining({
+        type: "memory_scope",
+        memoryScopes: ["session:session_1", "workspace:workspace_building_agent"],
+      }),
+    ]);
+  });
 });

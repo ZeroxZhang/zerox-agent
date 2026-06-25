@@ -21,7 +21,9 @@ export type RunGraphNodeKind =
   | "dream" // P7 (Patch 25)
   | "distill" // P7 (Patch 25)
   | "model_response" // P8 (Patch 11)
-  | "ensemble"; // P8 (Patch 11)
+  | "ensemble" // P8 (Patch 11)
+  | "memory"
+  | "history";
 
 export type RunGraphNodeStatus =
   | "planned"
@@ -215,6 +217,39 @@ export function projectRunGraph(input: ProjectRunGraphInput): RunGraphView {
       lastToolNodeId = nodeId;
     }
 
+    if (event.type === "tool_invocation") {
+      const nodeId = `tool:${event.toolCallId}`;
+      addNode(nodes, {
+        id: nodeId,
+        kind: "tool_call",
+        status: toToolInvocationGraphStatus(event.invocationStatus),
+        title: event.toolName,
+        sourceRefs: [ref],
+        order: workspaceRunOrder(event),
+        ...(event.invocationStatus === "completed" ||
+        event.invocationStatus === "error" ||
+        event.invocationStatus === "recovered" ||
+        event.invocationStatus === "aborted"
+          ? {
+              result: {
+                status:
+                  event.invocationStatus === "completed" ||
+                  event.invocationStatus === "recovered"
+                    ? "succeeded"
+                    : event.invocationStatus === "aborted"
+                      ? "canceled"
+                      : "failed",
+                evidenceRefs: [ref],
+                decidedBy: "runtime",
+                ...(event.error ? { summary: event.error } : {}),
+              },
+            }
+          : {}),
+      });
+      addEdge(edges, runNodeId, nodeId, "contains");
+      lastToolNodeId = nodeId;
+    }
+
     if (event.type === "tool_result") {
       const nodeId = `tool:${event.toolCallId}`;
       const ok = event.ok === true;
@@ -230,6 +265,68 @@ export function projectRunGraph(input: ProjectRunGraphInput): RunGraphView {
       }
       closeOpenToolCall(openToolNodeIdsByName, event.toolName ?? null, nodeId);
       lastToolNodeId = nodeId;
+    }
+
+    if (event.type === "checkpoint_boundary") {
+      const nodeId = `checkpoint:${event.checkpointId}`;
+      addNode(nodes, {
+        id: nodeId,
+        kind: "checkpoint",
+        status: "succeeded",
+        title: event.checkpointId,
+        sourceRefs: [ref],
+        result: {
+          status: "succeeded",
+          evidenceRefs: [ref],
+          decidedBy: "runtime",
+        },
+        order: workspaceRunOrder(event),
+      });
+      addEdge(edges, runNodeId, nodeId, "contains");
+      if (lastToolNodeId) {
+        addEdge(edges, lastToolNodeId, nodeId, "produced");
+      }
+    }
+
+    if (event.type === "memory_scope") {
+      const nodeId = `memory:${event.id}`;
+      addNode(nodes, {
+        id: nodeId,
+        kind: "memory",
+        status: "succeeded",
+        title: "Memory scopes",
+        sourceRefs: [ref],
+        result: {
+          status: "succeeded",
+          summary: event.scopes.join(", "),
+          evidenceRefs: [ref],
+          decidedBy: "runtime",
+        },
+        order: workspaceRunOrder(event),
+      });
+      addEdge(edges, runNodeId, nodeId, "contains");
+    }
+
+    if (event.type === "history") {
+      const nodeId = `history:${event.id}`;
+      addNode(nodes, {
+        id: nodeId,
+        kind: "history",
+        status: "succeeded",
+        title: `History ${event.operation}`,
+        sourceRefs: [ref],
+        result: {
+          status: "succeeded",
+          summary:
+            typeof event.resultCount === "number"
+              ? `${event.resultCount} result(s)`
+              : undefined,
+          evidenceRefs: [ref],
+          decidedBy: "runtime",
+        },
+        order: workspaceRunOrder(event),
+      });
+      addEdge(edges, runNodeId, nodeId, "contains");
     }
   }
   const orderedTrajectoryEvents = [...(input.trajectoryEvents ?? [])]
@@ -671,6 +768,28 @@ function toGraphStatus(status: AgentExecutionStatus): RunGraphNodeStatus {
   if (status === "queued") return "planned";
   if (status === "waiting_for_approval") return "waiting";
   return status;
+}
+
+function toToolInvocationGraphStatus(status: string): RunGraphNodeStatus {
+  switch (status) {
+    case "proposed":
+    case "visible":
+      return "ready";
+    case "authorized":
+    case "running":
+      return "running";
+    case "waiting_approval":
+      return "waiting";
+    case "completed":
+    case "recovered":
+      return "succeeded";
+    case "aborted":
+      return "canceled";
+    case "error":
+      return "failed";
+    default:
+      return "ready";
+  }
 }
 
 function toTerminalResultStatus(

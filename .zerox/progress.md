@@ -4580,3 +4580,71 @@
   - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `node_modules` emitted the existing better-sqlite3 ABI warning and fell back to JSON storage during smoke.
   - `npm run dist:mac` -> passed; regenerated `release/Zerox Agent-2.7.0-arm64.dmg` and `release/Zerox Agent-2.7.0-arm64-mac.zip`.
   - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='工作区|默认工作区' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed; packaged app rendered the workspace entry.
+
+## 2026-06-25 - Zerox Agent 2.8.0 Runtime Orchestration and Memory
+
+- Request:
+  - Implement the full 2.8.0 iteration in one release, referencing MiMo-Code while preserving Zerox Agent's local-first permissions, workspace sandbox, reviewed learning, and observable/recoverable runtime model.
+  - Unify skill invocation, tool invocation, project/delegation evidence, long-task goal gates, context rebuild, and cross-session memory/history.
+- Changed areas:
+  - Version and release ledger: `package.json`, `package-lock.json`, `.zerox/feature_list.json`, `src/shared/packageScripts.test.ts`.
+  - Shared contracts: execution context packages, tool invocation ledger, run graph/workspace ledger, chat/task events, permissions, raw history, and goal gates.
+  - Main runtime: dynamic registry health/validation, skill lazy-load tools, agent/chat/goal/scheduled tool invocation ledgers, scoped raw history tools, checkpoint boundary rebuild, IPC/preload wiring, and explicit packaged-app userData override for isolated acceptance.
+  - Renderer: Memory raw history scoped search UI, tool defaults, task activity states, material layout coverage.
+- Review evidence:
+  - Independent MiMo/QA review found blockers in skill binding, ledger wiring, raw history scope, checkpoint refs/pairing, and UI layout; fixes were applied.
+  - Re-review found remaining blockers in history scope precedence, deterministic goal ledger evidence, and production compaction pairing; fixes were applied.
+- Focused verification evidence:
+  - `npm test -- src/main/agentToolExecutor.test.ts -t "raw history"` -> passed.
+  - `npm test -- src/main/goalRuntimeEngine.test.ts -t "deterministic contracts"` -> passed.
+  - `npm test -- src/main/kernel/compactionStrategy.test.ts -t "tool-call pairs"` -> passed.
+  - `npm test -- src/renderer/materialDesign.test.ts -t "raw history"` -> passed.
+  - `npm test -- src/main/userDataDirOverride.test.ts src/shared/packageScripts.test.ts` -> passed.
+- Full verification evidence:
+  - `npm test` -> 175 files / 1179 tests passed.
+  - `npm run build` -> passed; Vite emitted the existing large chunk warning.
+  - `npm run verify` -> passed; 175 files / 1179 tests passed, 26/26 agent evals passed, 2/2 memory evals passed.
+  - `npm run smoke:prod` -> passed; local `better-sqlite3` ABI mismatch warning triggered the existing JSON fallback, and production smoke completed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+- Computer-use acceptance evidence:
+  - `npm run dist:mac` -> passed; generated `release/Zerox Agent-2.8.0-arm64.dmg` and `release/Zerox Agent-2.8.0-arm64-mac.zip`.
+  - Launched `release/mac-arm64/Zerox Agent.app` with `BUILDING_AGENT_USER_DATA_DIR=/tmp/zerox-agent-2-8-acceptance-userdata`.
+  - Verified packaged Chat renders, sidebar shows `v 2.8.0`, and the workspace dropdown exposes default workspace, open existing directory, and new workspace actions.
+  - Verified Settings reports user data and config paths under `/tmp/zerox-agent-2-8-acceptance-userdata`.
+  - Verified Memory renders Raw History with Workspace Scope, Session Scope, query input, and a visible `检索历史` button after the responsive layout fix.
+  - Clicked `一键准备`; the UI changed tasks from 0 to 1 and wrote `/tmp/zerox-agent-2-8-acceptance-userdata/config/scheduled-tasks.json` with the default manual task and explicit file permissions.
+  - Acceptance was non-destructive: no real workspace files, private memory records, model keys, or external API calls were used.
+
+## 2026-06-26 - Zerox Agent 2.8.1 Runtime Surface Polish Release
+
+- Request:
+  - Assign this iteration version `2.8.1`.
+  - Update README and process/progress evidence.
+  - Package, release, and push.
+- Changed areas:
+  - Release metadata: `package.json`, `package-lock.json`, `.zerox/feature_list.json`.
+  - Documentation and process evidence: `README.md`, `.zerox/progress.md`.
+  - Release guard tests: `src/shared/packageScripts.test.ts`, `src/shared/readme.test.ts`, `src/renderer/materialDesign.test.ts`.
+  - Scoped UI fix: `src/renderer/components/AgentChatPanel.tsx`, `src/renderer/styles/chat.css`, `src/renderer/styles/composer.css`.
+- Scope correction:
+  - The selected `@skill` capsule remains in the composer bottom area and now aligns with the right-side composer action buttons.
+  - The new icon-only disclosure treatment is scoped to real-time thinking/tool preview rows only.
+  - Main transcript collapse controls and right-side evidence rail collapse/progress controls were restored to their prior behavior.
+- Verification evidence:
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts src/renderer/materialDesign.test.ts` -> 3 files / 59 tests passed.
+  - `npm test` -> 175 files / 1179 tests passed.
+  - `npm run build` -> passed; Vite emitted the existing large chunk warning.
+  - `npm run verify` -> passed; 175 files / 1179 tests passed, 26/26 agent evals passed, 2/2 memory evals passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `node_modules` emitted the existing better-sqlite3 ABI warning and fell back to JSON storage during smoke.
+  - `npm run harness:check` -> passed.
+  - `npm run dist:mac` -> passed; generated `release/Zerox Agent-2.8.1-arm64.dmg` and `release/Zerox Agent-2.8.1-arm64-mac.zip`.
+  - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v2.8.1' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+  - Package metadata: `release/mac-arm64/Zerox Agent.app/Contents/Info.plist` reports `CFBundleShortVersionString=2.8.1` and `CFBundleVersion=2.8.1`.
+  - `release/Zerox Agent-2.8.1-arm64.dmg` (122M, sha256 `00075beb2a94b764d999cec4fee787807da4c5651bc09bacac5fa357c7b97151`)
+  - `release/Zerox Agent-2.8.1-arm64-mac.zip` (333M, sha256 `2beb99b5c0c3f24c40765d5a23f349c2e7022cae9966f845c828812e04d18248`)
+  - `release/Zerox Agent-2.8.1-arm64.dmg.blockmap` (132K, sha256 `3748492b87a01a7d433c3725b3cf5a76a8949c8fcd482b2d4548a4d2644f8610`)
+  - `release/Zerox Agent-2.8.1-arm64-mac.zip.blockmap` (335K, sha256 `afd1a68dac0c635dff4aa2f1ae399af9a3a5a0397d57ab219dd2eafd0370a38e`)
+  - `git push -u origin codex/v2.8.0-runtime-orchestration-memory && git push origin v2.8.1` -> pushed branch and tag.
+  - `gh release create v2.8.1 ...` -> created GitHub Release `https://github.com/ZeroxZhang/zerox-agent/releases/tag/v2.8.1`.
+  - `gh release view v2.8.1 --json tagName,url,isDraft,isPrerelease,assets` -> release is not draft/prerelease; uploaded `Zerox.Agent-2.8.1-arm64.dmg`, `Zerox.Agent-2.8.1-arm64-mac.zip`, both blockmaps, and `latest-mac.yml` with matching sha256 digests.

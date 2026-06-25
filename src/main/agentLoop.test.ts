@@ -16,6 +16,7 @@ import type {
 import type { ToolAuthorizationService } from "./toolAuthorizationService";
 import { createDynamicToolRegistry } from "./dynamicToolRegistry";
 import type { ToolCallRequest } from "../shared/toolPermissions";
+import type { ToolInvocationRecord } from "../shared/toolInvocationLedger";
 
 const modelProfile = {
   baseUrl: "https://api.example.com/v1",
@@ -710,6 +711,90 @@ describe("agent loop", () => {
     });
     expect(requests).toHaveLength(1);
     expect(executedTools).toEqual(["chrome_bookmarks_read"]);
+  });
+
+  it("emits tool invocation ledger states during authorized execution", async () => {
+    const invocations: ToolInvocationRecord[] = [];
+    const chatClient: ChatClient = {
+      async complete(request) {
+        if (!request.messages.some((message) => message.role === "tool")) {
+          return {
+            content: null,
+            finishReason: "tool_calls",
+            toolCalls: [
+              {
+                id: "tool_call_files",
+                type: "function",
+                function: {
+                  name: "file_list",
+                  arguments: JSON.stringify({ path: "/tmp/workspace" }),
+                },
+              },
+            ],
+          };
+        }
+        return {
+          content: "done",
+          finishReason: "stop",
+          toolCalls: [],
+        };
+      },
+    };
+    const toolExecutor: AgentToolExecutor = {
+      async execute() {
+        return { ok: true, result: { entries: [] } };
+      },
+      getRegistry() {
+        return createDynamicToolRegistry();
+      },
+      hasTool() {
+        return true;
+      },
+    };
+    const toolAuthorizationService: ToolAuthorizationService = {
+      async authorize(_taskId, request) {
+        return {
+          ok: true,
+          decision: { allowed: true, reason: "allowed" },
+          auditEvent: {
+            id: "audit_1",
+            taskId: "task_files",
+            request,
+            decision: { allowed: true, reason: "allowed" },
+            createdAt: "2026-06-25T00:00:00.000Z",
+          },
+        };
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "list files" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor,
+        toolAuthorizationService,
+        taskId: "task_files",
+        tools: testTools,
+        onToolInvocation(record) {
+          invocations.push(record);
+        },
+      },
+    );
+
+    expect(result.status).toBe("succeeded");
+    expect(invocations.map((record) => record.status)).toEqual([
+      "proposed",
+      "visible",
+      "authorized",
+      "running",
+      "completed",
+    ]);
+    expect(invocations.at(-1)).toMatchObject({
+      toolCallId: "tool_call_files",
+      toolName: "file_list",
+      ok: true,
+    });
   });
 
   it("blocks raw Chrome Bookmarks file probes after chrome_bookmarks_read succeeds", async () => {

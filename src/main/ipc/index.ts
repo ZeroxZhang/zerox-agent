@@ -43,6 +43,10 @@ import type {
   ReadMemoryProfileResult,
   SaveMemoryProfileResult,
 } from "../../shared/memoryProfile";
+import type {
+  RawHistoryAroundOptions,
+  RawHistorySearchOptions,
+} from "../../shared/rawHistory";
 import type { AgentLearningListOptions } from "../../shared/agentLearning";
 import type {
   AgentEvalCandidate,
@@ -505,6 +509,16 @@ function registerMemoryIpcHandlers(container: AppContainer): void {
   ipcMain.handle("memory:search", (_event, options: MemorySearchOptions) =>
     container.memoryStore().search(options),
   );
+  ipcMain.handle("history:search", (_event, options: RawHistorySearchOptions) =>
+    hasRawHistoryScope(options)
+      ? container.historyIndexStore().search(options)
+      : [],
+  );
+  ipcMain.handle("history:around", (_event, options: RawHistoryAroundOptions) =>
+    hasRawHistoryScope(options)
+      ? container.historyIndexStore().around(options)
+      : null,
+  );
   ipcMain.handle(
     "memory:create",
     async (_event, input: MemoryInput): Promise<CreateMemoryResult> => {
@@ -622,6 +636,12 @@ function registerMemoryIpcHandlers(container: AppContainer): void {
       }
     },
   );
+}
+
+function hasRawHistoryScope(
+  options: Partial<RawHistorySearchOptions & RawHistoryAroundOptions> | undefined,
+): boolean {
+  return Boolean(options?.workspaceId || options?.sessionId);
 }
 
 function registerLearningIpcHandlers(container: AppContainer): void {

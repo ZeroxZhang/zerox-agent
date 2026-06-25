@@ -6,6 +6,8 @@ import { promisify } from "node:util";
 import type { ChatSessionStore } from "./chatSessionStore";
 import { createWebTools, type WebTools } from "./webTools";
 import { createDynamicToolRegistry, type DynamicToolRegistry } from "./dynamicToolRegistry";
+import { registerSkillLoadTools } from "./skillLoadTools";
+import type { HistoryIndexStore } from "./historyIndexStore";
 import { searchCode } from "./nativeCodeTools";
 import { readGitDiff, readGitStatus } from "./nativeGitTools";
 import { createNativeResearchTools } from "./nativeResearchTools";
@@ -42,6 +44,7 @@ import {
   assertArtifactParentPathHasNoSymlinks,
   writeArtifactProvenance,
 } from "../shared/agentArtifactProvenance";
+import type { SkillDiscoveryResult } from "../shared/skills";
 
 const execAsync = promisify(exec);
 
@@ -77,6 +80,8 @@ export function createAgentToolExecutor(options?: {
   memoryStore?: Pick<MemoryStore, "search">;
   chatSessionStore?: Pick<ChatSessionStore, "searchMessages">;
   toolResultOffloadStore?: Pick<ToolResultOffloadStore, "read">;
+  discoverSkills?: () => Promise<SkillDiscoveryResult>;
+  historyIndexStore?: Pick<HistoryIndexStore, "search" | "around">;
 }): AgentToolExecutor {
   const webTools = options?.webTools ?? createWebTools();
   const registry = options?.registry ?? createDynamicToolRegistry();
@@ -87,6 +92,8 @@ export function createAgentToolExecutor(options?: {
     memoryStore: options?.memoryStore,
     chatSessionStore: options?.chatSessionStore,
     toolResultOffloadStore: options?.toolResultOffloadStore,
+    discoverSkills: options?.discoverSkills,
+    historyIndexStore: options?.historyIndexStore,
   });
 
   return {
@@ -268,6 +275,8 @@ function registerBuiltinTools(
     memoryStore?: Pick<MemoryStore, "search">;
     chatSessionStore?: Pick<ChatSessionStore, "searchMessages">;
     toolResultOffloadStore?: Pick<ToolResultOffloadStore, "read">;
+    discoverSkills?: () => Promise<SkillDiscoveryResult>;
+    historyIndexStore?: Pick<HistoryIndexStore, "search" | "around">;
   },
 ) {
   const researchTools = createNativeResearchTools({
@@ -1014,6 +1023,56 @@ function registerBuiltinTools(
     async (args) => searchConversations(args, options.chatSessionStore),
     "built-in",
   );
+
+  registry.register(
+    {
+      type: "function",
+      function: {
+        name: "history_search",
+        description:
+          "检索跨会话 raw history 原文证据，包括聊天、工具输入输出、命令、路径和技能加载记录。",
+        parameters: {
+          type: "object",
+          properties: {
+            query: { type: "string", description: "关键词查询" },
+            sessionId: { type: "string", description: "可选：限制会话" },
+            limit: { type: "number", description: "最多返回几条，默认 5，最大 10" },
+          },
+          required: ["query"],
+        },
+      },
+    },
+    async (args, executionOptions) =>
+      searchHistory(args, options.historyIndexStore, executionOptions),
+    "built-in",
+  );
+
+  registry.register(
+    {
+      type: "function",
+      function: {
+        name: "history_around",
+        description:
+          "读取 raw history 命中项前后的原始上下文，用于恢复跨会话细节。",
+        parameters: {
+          type: "object",
+          properties: {
+            entryId: { type: "string", description: "raw history entry id" },
+            before: { type: "number", description: "向前读取条数，默认 3" },
+            after: { type: "number", description: "向后读取条数，默认 3" },
+          },
+          required: ["entryId"],
+        },
+      },
+    },
+    async (args, executionOptions) =>
+      aroundHistory(args, options.historyIndexStore, executionOptions),
+    "built-in",
+  );
+
+  if (options.discoverSkills) {
+    registerSkillLoadTools(registry, { discoverSkills: options.discoverSkills });
+  }
 }
 
 async function listLocalDirectory(
@@ -2350,6 +2409,90 @@ async function searchConversations(
         createdAt: result.createdAt,
         score: result.score,
       })),
+    },
+  };
+}
+
+async function searchHistory(
+  args: Record<string, unknown>,
+  historyIndexStore: Pick<HistoryIndexStore, "search"> | undefined,
+  executionOptions?: AgentToolExecutionOptions,
+): Promise<AgentToolExecutionResult> {
+  if (!historyIndexStore) {
+    return { ok: false, error: "history_search is not configured." };
+  }
+
+  const query = String(args.query ?? "").trim();
+  if (!query) {
+    return { ok: false, error: "history_search requires a query." };
+  }
+
+  const sessionId = executionOptions?.runContext
+    ? executionOptions.runContext.sessionId
+    : String(args.sessionId ?? "").trim();
+  const workspaceId = executionOptions?.runContext
+    ? executionOptions.runContext.workspaceId
+    : String(args.workspaceId ?? "").trim();
+  const results = await historyIndexStore.search({
+    query,
+    limit: clampLimit(args.limit),
+    ...(workspaceId ? { workspaceId } : {}),
+    ...(sessionId ? { sessionId } : {}),
+  });
+
+  return {
+    ok: true,
+    result: {
+      query,
+      results: results.map((result) => ({
+        id: result.entry.id,
+        ...(result.entry.sessionId ? { sessionId: result.entry.sessionId } : {}),
+        ...(result.entry.workspaceId ? { workspaceId: result.entry.workspaceId } : {}),
+        role: result.entry.role,
+        ...(result.entry.toolName ? { toolName: result.entry.toolName } : {}),
+        content: truncateForTool(result.entry.content, 800),
+        createdAt: result.entry.createdAt,
+        score: result.score,
+        matchedTerms: result.matchedTerms,
+      })),
+    },
+  };
+}
+
+async function aroundHistory(
+  args: Record<string, unknown>,
+  historyIndexStore: Pick<HistoryIndexStore, "around"> | undefined,
+  executionOptions?: AgentToolExecutionOptions,
+): Promise<AgentToolExecutionResult> {
+  if (!historyIndexStore) {
+    return { ok: false, error: "history_around is not configured." };
+  }
+
+  const entryId = String(args.entryId ?? "").trim();
+  if (!entryId) {
+    return { ok: false, error: "history_around requires entryId." };
+  }
+
+  const result = await historyIndexStore.around({
+    entryId,
+    ...(executionOptions?.runContext?.workspaceId
+      ? { workspaceId: executionOptions.runContext.workspaceId }
+      : {}),
+    ...(executionOptions?.runContext?.sessionId
+      ? { sessionId: executionOptions.runContext.sessionId }
+      : {}),
+    before: typeof args.before === "number" ? args.before : undefined,
+    after: typeof args.after === "number" ? args.after : undefined,
+  });
+  if (!result) {
+    return { ok: false, error: `history entry "${entryId}" was not found.` };
+  }
+
+  return {
+    ok: true,
+    result: {
+      anchor: result.anchor,
+      entries: result.entries,
     },
   };
 }

@@ -30,6 +30,12 @@ import {
 import { serializeToolObservationWithOffload } from "./toolObservationOffload";
 import type { ToolResultOffloadStore } from "./toolResultOffloadStore";
 import { getToolCapability } from "../shared/agentToolCapabilities";
+import {
+  createToolInvocation,
+  transitionToolInvocation,
+  type ToolInvocationRecord,
+  type ToolInvocationTransition,
+} from "../shared/toolInvocationLedger";
 
 export type AgentLoopOptions = {
   chatClient: ChatClient;
@@ -72,6 +78,7 @@ export type AgentLoopOptions = {
     result: Awaited<ReturnType<AgentToolExecutor["execute"]>>,
     event: AgentLoopToolEvent,
   ) => void;
+  onToolInvocation?: (record: ToolInvocationRecord) => void;
   onTurn?: (turn: number, phase: string) => void;
   onReasoning?: (reasoningContent: string, turn: number) => void;
   onModelResponse?: (response: ChatCompletionResponse, turn: number) => void;
@@ -163,6 +170,7 @@ export async function runAgentLoop(
     modelRetry,
     onToolCall,
     onToolResult,
+    onToolInvocation,
     onTurn,
     onReasoning,
     onModelResponse,
@@ -512,12 +520,42 @@ export async function runAgentLoop(
             preparedToolCall.args,
             runContext,
           );
+          const registeredToolSource = getToolSource(toolExecutor, toolName);
+          const toolSource = registeredToolSource ?? "built-in";
+          let toolInvocation = createToolInvocation({
+            id: `tool_invocation_${toolCall.id}`,
+            runId: taskId ?? workspaceRunId ?? requestId ?? runContext?.runId ?? "agent_loop",
+            toolCallId: toolCall.id,
+            toolName,
+            source: toolSource,
+            args,
+            createdAt: new Date().toISOString(),
+          });
+          const emitToolInvocation = () => {
+            onToolInvocation?.(toolInvocation);
+          };
+          const transitionInvocation = (
+            transition: Omit<ToolInvocationTransition, "at"> & { at?: string },
+          ) => {
+            toolInvocation = transitionToolInvocation(toolInvocation, {
+              ...transition,
+              at: transition.at ?? new Date().toISOString(),
+            });
+            emitToolInvocation();
+          };
+          emitToolInvocation();
+          transitionInvocation({ status: "visible" });
+
           const nativeFallbackRejection = rejectNativeToolFallback({
             toolName,
             args,
             successfulToolNames,
           });
           if (nativeFallbackRejection) {
+            transitionInvocation({
+              status: "error",
+              error: nativeFallbackRejection,
+            });
             const rejectedResult = {
               ok: false as const,
               error: nativeFallbackRejection,
@@ -539,17 +577,34 @@ export async function runAgentLoop(
 
           // Authorization check (if authorizer is available)
           if (toolAuthorizationService && taskId) {
-            const toolSource = getToolSource(toolExecutor, toolName);
             const auth = await toolAuthorizationService.authorize(taskId, {
               toolName: toolName as never,
-              ...(toolSource ? { source: toolSource } : {}),
+              ...(registeredToolSource ? { source: registeredToolSource } : {}),
               args,
             }, {
               ...(runContext ? { runContext } : {}),
               ...(runtimeTask ? { runtimeTask } : {}),
+              onApprovalRequested: async (request) => {
+                transitionInvocation({
+                  status: "waiting_approval",
+                  reason: request.deniedReason,
+                });
+              },
+              onApprovalResolved: async (result) => {
+                if (result.approved) {
+                  transitionInvocation({
+                    status: "authorized",
+                    reason: result.reason ?? "user approved",
+                  });
+                }
+              },
             });
 
             if (!auth.ok || !auth.decision.allowed) {
+              transitionInvocation({
+                status: "error",
+                error: auth.ok ? auth.decision.reason : auth.message,
+              });
               messages.push({
                 role: "tool",
                 tool_call_id: toolCall.id,
@@ -569,9 +624,21 @@ export async function runAgentLoop(
               }, toolEventBase);
               continue;
             }
+            if (toolInvocation.status !== "authorized") {
+              transitionInvocation({
+                status: "authorized",
+                reason: auth.decision.reason,
+              });
+            }
+          } else {
+            transitionInvocation({
+              status: "authorized",
+              reason: "tool authorization service not configured",
+            });
           }
 
           onToolCall?.(toolName, args, toolEventBase);
+          transitionInvocation({ status: "running" });
 
           // Execute tool
           const result = await toolExecutor.execute({
@@ -641,6 +708,24 @@ export async function runAgentLoop(
             resultRef: serializedObservation.resultRef,
             resultBytes: serializedObservation.originalChars,
           });
+          transitionInvocation(
+            result.ok
+              ? {
+                  status: "completed",
+                  ok: true,
+                  ...(serializedObservation.resultRef
+                    ? { resultRef: serializedObservation.resultRef }
+                    : {}),
+                }
+              : {
+                  status: "error",
+                  ok: false,
+                  error: result.error,
+                  ...(serializedObservation.resultRef
+                    ? { resultRef: serializedObservation.resultRef }
+                    : {}),
+                },
+          );
 
           messages.push({
             role: "tool",

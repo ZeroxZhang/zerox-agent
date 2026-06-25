@@ -19,6 +19,7 @@ import {
   shouldApplyLoginStartup,
 } from "./desktopLifecycle";
 import { runDesktopAgentValidation } from "./desktopAgentValidator";
+import { applyUserDataDirOverride } from "./userDataDirOverride";
 import { getAppMeta } from "../shared/appMeta";
 import { createToolApprovalCoordinator } from "./toolApprovalCoordinator";
 import type { ResolveToolApprovalInput } from "../shared/toolApproval";
@@ -33,6 +34,10 @@ import { setPromptBaseDir, loadModelPromptFile } from "./promptFileLoader";
 import { setProfileContentLoader } from "../shared/systemPromptLayerProviders";
 
 app.setName("Zerox Agent");
+applyUserDataDirOverride({
+  env: process.env,
+  setPath: (name, value) => app.setPath(name, value),
+});
 
 // Prompt files live alongside skills/ in the app root.
 setPromptBaseDir(path.join(app.getAppPath(), "prompts"));

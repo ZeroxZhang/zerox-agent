@@ -13,6 +13,8 @@ import type { AppendChatMessageResult, ChatSessionStore } from "./chatSessionSto
 import { extractAtomicMemoriesFromChatTurn } from "./memoryL1Extractor";
 import type { MemoryProfileStore } from "./memoryProfileStore";
 import type { MemoryStore } from "./memoryStore";
+import type { HistoryIndexStore } from "./historyIndexStore";
+import type { RawHistoryRole } from "../shared/rawHistory";
 import type { ToolResultOffloadStore } from "./toolResultOffloadStore";
 import type { WorkspaceRunStore } from "./workspaceRunStore";
 import {
@@ -178,6 +180,7 @@ export function createChatService(options: {
     WorkspaceRunStore,
     "createRun" | "appendEvent" | "finishRun"
   >;
+  historyIndexStore?: Pick<HistoryIndexStore, "append">;
   /** P2: overflow compaction strategy passed through to the chat agent loop. */
   compactionStrategy?: CompactionStrategy;
 }): ChatService {
@@ -357,6 +360,16 @@ export function createChatService(options: {
           ...(workspaceSummary ? { workspaceSummary } : {}),
         });
       }
+      appendRawHistoryEntry({
+        historyIndexStore: options.historyIndexStore,
+        createId,
+        sessionId,
+        requestId,
+        role: "user",
+        content: userMessage,
+        workspaceId: chatRunContext?.workspaceId ?? input.workspaceId,
+        createdAt: new Date(startedAtMs).toISOString(),
+      });
 
       const pendingContinuation = pendingContinuations.get(sessionId);
       const continuationToResume =
@@ -748,6 +761,17 @@ export function createChatService(options: {
                   args,
                   toolCallId: event.toolCallId,
                 });
+                appendRawHistoryEntry({
+                  historyIndexStore: options.historyIndexStore,
+                  createId,
+                  sessionId,
+                  requestId,
+                  role: "tool",
+                  toolName,
+                  content: `Tool call ${toolName}: ${truncateHistoryContent(JSON.stringify(args))}`,
+                  workspaceId: agentRunContext?.workspaceId,
+                  createdAt: new Date(getNowMs(options.now)).toISOString(),
+                });
                 const nativeDescriptor = getNativeToolDescriptor(
                   toolExecutor,
                   toolName,
@@ -765,8 +789,45 @@ export function createChatService(options: {
                   toolCallsExecuted: observedToolCallsExecuted,
                 });
               },
+              onToolInvocation(record) {
+                void evidence.append("tool_invocation", {
+                  toolInvocationId: record.id,
+                  toolCallId: record.toolCallId,
+                  toolName: record.toolName,
+                  toolSource: record.source,
+                  invocationStatus: record.status,
+                  args: record.args,
+                  ...(typeof record.ok === "boolean" ? { ok: record.ok } : {}),
+                  ...(record.resultRef ? { resultRef: record.resultRef } : {}),
+                  ...(record.error ? { error: record.error } : {}),
+                  history: record.history,
+                });
+                emitStatus.send({
+                  state: "tool_invocation",
+                  message: `工具状态：${record.toolName} ${record.status}`,
+                  toolInvocationId: record.id,
+                  toolCallId: record.toolCallId,
+                  toolName: record.toolName,
+                  toolSource: record.source,
+                  invocationStatus: record.status,
+                  ...(record.resultRef ? { resultRef: record.resultRef } : {}),
+                  ...(typeof record.ok === "boolean" ? { ok: record.ok } : {}),
+                  toolCallsExecuted: observedToolCallsExecuted,
+                });
+              },
               onToolResult(toolName, ok, result, event) {
                 observedToolCallsExecuted += 1;
+                appendRawHistoryEntry({
+                  historyIndexStore: options.historyIndexStore,
+                  createId,
+                  sessionId,
+                  requestId,
+                  role: "tool",
+                  toolName,
+                  content: `Tool result ${toolName}: ${ok ? "ok" : "error"} ${truncateHistoryContent(JSON.stringify(result))}`,
+                  workspaceId: agentRunContext?.workspaceId,
+                  createdAt: new Date(getNowMs(options.now)).toISOString(),
+                });
                 const nativeDescriptor = getNativeToolDescriptor(
                   toolExecutor,
                   toolName,
@@ -943,6 +1004,16 @@ export function createChatService(options: {
         sessionId,
         content: reply,
         relatedMemoryIds: relatedMemoryResults.map((result) => result.record.id),
+      });
+      appendRawHistoryEntry({
+        historyIndexStore: options.historyIndexStore,
+        createId,
+        sessionId,
+        requestId,
+        role: "assistant",
+        content: reply,
+        workspaceId: chatRunContext?.workspaceId ?? input.workspaceId,
+        createdAt: new Date(getNowMs(options.now)).toISOString(),
       });
       const memoryId = await writeSessionMemory({
         memoryStore: options.memoryStore,
@@ -1377,6 +1448,8 @@ function toWorkspaceRunEventInput(
     chatState: event.state,
     ...(typeof event.turn === "number" ? { turn: event.turn } : {}),
     ...(event.toolCallId ? { toolCallId: event.toolCallId } : {}),
+    ...(event.toolInvocationId ? { toolInvocationId: event.toolInvocationId } : {}),
+    ...(event.toolSource ? { toolSource: event.toolSource } : {}),
     ...(event.resultRef ? { resultRef: event.resultRef } : {}),
     ...(typeof event.resultBytes === "number"
       ? { resultBytes: event.resultBytes }
@@ -1425,6 +1498,30 @@ function toWorkspaceRunEventInput(
       toolCallId: event.toolCallId ?? getStatusEventToolCallId(event),
       toolName: event.toolName,
       ok: event.ok,
+      ...(event.resultRef ? { resultRef: event.resultRef } : {}),
+      ...(typeof event.resultBytes === "number"
+        ? { resultBytes: event.resultBytes }
+        : {}),
+      message: event.message,
+      payload,
+      createdAt: event.createdAt,
+    };
+  }
+
+  if (event.state === "tool_invocation") {
+    return {
+      type: "tool_invocation",
+      toolInvocationId:
+        event.toolInvocationId ??
+        `tool_invocation_${event.toolCallId ?? "unknown"}`,
+      toolCallId: event.toolCallId ?? getStatusEventToolCallId(event),
+      toolName: event.toolName ?? "unknown",
+      toolSource: event.toolSource ?? "unknown",
+      invocationStatus:
+        typeof event.invocationStatus === "string"
+          ? event.invocationStatus
+          : "proposed",
+      ...(typeof event.ok === "boolean" ? { ok: event.ok } : {}),
       ...(event.resultRef ? { resultRef: event.resultRef } : {}),
       ...(typeof event.resultBytes === "number"
         ? { resultBytes: event.resultBytes }
@@ -1563,8 +1660,16 @@ function createChatRuntimeTask(options: {
       write: false,
     },
     tools: {
-      allowedNames:
-        options.selectedSkill?.manifest.tools?.map((tool) => tool.name) ?? [],
+      allowedNames: options.selectedSkill
+        ? uniqueStrings([
+            "skill_resource_list",
+            "skill_load",
+            ...(options.selectedSkill.manifest.tools?.map((tool) => tool.name) ?? []),
+          ])
+        : [],
+      allowedSkillNames: options.selectedSkill
+        ? [options.selectedSkill.manifest.name]
+        : [],
       allowedSources: options.selectedSkill
         ? [
             ...(options.selectedSkill.manifest.tools?.length
@@ -2462,14 +2567,14 @@ function buildSelectedSkillInstruction(
     `技能名称：${skill.manifest.name}`,
     `技能显示名：${skill.manifest.displayName}`,
     `技能描述：${skill.manifest.description}`,
+    `技能位置：${skill.skillFile}`,
     "",
     "执行要求：",
-    "- 必须遵循下面的技能指令完成任务。",
+    "- 不要凭空补全技能细节；必须先调用 skill_resource_list 查看资源清单，再调用 skill_load 加载技能正文。",
+    `- 调用 skill_load 时使用参数：{"skillName":"${skill.manifest.name}"}`,
+    "- skill_load 返回的技能正文才是本轮任务的执行规范。",
     "- 如果技能要求渐进式交互、配置菜单、质量检查或特定输出格式，不得跳过。",
     "- 最终回复需要说明已使用该技能。",
-    "",
-    "技能指令：",
-    skill.body,
   ];
 
   if (inputResolution?.status === "complete") {
@@ -2644,6 +2749,36 @@ async function writeSessionMemory(options: {
   }
 }
 
+function appendRawHistoryEntry(options: {
+  historyIndexStore: Pick<HistoryIndexStore, "append"> | undefined;
+  createId: () => string;
+  sessionId: string;
+  requestId: string;
+  role: RawHistoryRole;
+  content: string;
+  workspaceId?: string;
+  toolName?: string;
+  createdAt: string;
+}) {
+  if (!options.historyIndexStore) {
+    return;
+  }
+
+  void options.historyIndexStore
+    .append({
+      id: options.createId(),
+      sessionId: options.sessionId,
+      runId: options.requestId,
+      ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
+      role: options.role,
+      ...(options.toolName ? { toolName: options.toolName } : {}),
+      content: truncateHistoryContent(options.content),
+      createdAt: options.createdAt,
+      source: options.role === "tool" ? "tool" : "chat",
+    })
+    .catch(() => undefined);
+}
+
 async function writeAtomicMemories(options: {
   memoryStore: Pick<MemoryStore, "create">;
   memoryProfileStore: MemoryProfileStore | undefined;
@@ -2677,6 +2812,14 @@ async function writeAtomicMemories(options: {
   } catch {
     // Atomic memory extraction must not block the visible chat response.
   }
+}
+
+function truncateHistoryContent(value: string): string {
+  const normalized = value.trim();
+  if (normalized.length <= 4_000) {
+    return normalized;
+  }
+  return `${normalized.slice(0, 4_000)}\n[truncated]`;
 }
 
 function compactMessageIds(...ids: Array<string | null>): string[] {

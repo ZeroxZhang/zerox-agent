@@ -117,6 +117,51 @@ describe("RebuildFromCheckpoint", () => {
     expect(result.messages.some((m) => m.content.includes(REBUILD_BOUNDARY_MARKER))).toBe(true);
     storage.close();
   });
+
+  it("preserves tool-call pairs when rebuilding a compacted tail", async () => {
+    const storage = await createInMemoryStorage();
+    const ck = createCheckpointRepository(storage);
+    writeMarkdownCheckpoint({
+      runId: "r1",
+      goal: baseGoal(),
+      checkpointRepository: ck,
+      now: "2026-06-19T00:00:00.000Z",
+    });
+    const assistantCall: ChatMessage = {
+      role: "assistant",
+      content: "",
+      tool_calls: [
+        {
+          id: "call_file_read",
+          type: "function",
+          function: { name: "file_read", arguments: '{"path":"README.md"}' },
+        },
+      ],
+    };
+    const toolResult: ChatMessage = {
+      role: "tool",
+      tool_call_id: "call_file_read",
+      name: "file_read",
+      content: "README content",
+    };
+    const strategy = createRebuildFromCheckpoint({
+      contextManager,
+      checkpointRepository: ck,
+      rebuildTailTokens: 1,
+    });
+
+    const result = await strategy.compact({
+      messages: [msg("user", "old"), assistantCall, toolResult],
+      budget: 1,
+      runId: "r1",
+      protectedMarkers: [NEVER_COMPACT_MARKER],
+    });
+
+    expect(result.messages).toEqual(
+      expect.arrayContaining([assistantCall, toolResult]),
+    );
+    storage.close();
+  });
 });
 
 describe("selectCompactionStrategy + flag", () => {

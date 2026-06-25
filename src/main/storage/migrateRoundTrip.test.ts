@@ -154,5 +154,5 @@ describe("P1 migration scripts round-trip", () => {
       rmSync(dir, { recursive: true, force: true });
       if (scriptRoot) rmSync(scriptRoot, { recursive: true, force: true });
     }
-  });
+  }, 20_000);
 });

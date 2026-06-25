@@ -8,7 +8,7 @@ type PackageJson = {
 };
 
 describe("package scripts", () => {
-  it("sets release metadata to v2.7.0", () => {
+  it("sets release metadata to v2.8.1", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -16,12 +16,12 @@ describe("package scripts", () => {
       readFileSync(path.join(process.cwd(), "package-lock.json"), "utf8"),
     ) as { version?: string; packages?: Record<string, { version?: string }> };
 
-    expect(packageJson.version).toBe("2.7.0");
-    expect(packageLock.version).toBe("2.7.0");
-    expect(packageLock.packages?.[""]?.version).toBe("2.7.0");
+    expect(packageJson.version).toBe("2.8.1");
+    expect(packageLock.version).toBe("2.8.1");
+    expect(packageLock.packages?.[""]?.version).toBe("2.8.1");
   });
 
-  it("keeps prior release gates done while publishing v2.7.0", () => {
+  it("keeps release gates done through v2.8.1", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -35,7 +35,32 @@ describe("package scripts", () => {
       }>;
     };
 
-    expect(packageJson.version).toBe("2.7.0");
+    expect(packageJson.version).toBe("2.8.1");
+    expect(featureList.features.filter((feature) => feature.status !== "done")).toEqual([]);
+    expect(featureList.features).toContainEqual(
+      expect.objectContaining({
+        id: "P18-v2.8.1-runtime-surface-polish-release",
+        status: "done",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("package metadata reports version 2.8.1"),
+          expect.stringContaining("real-time thinking and tool preview"),
+          expect.stringContaining("@skill capsule remains in the lower composer"),
+        ]),
+      }),
+    );
+    expect(featureList.features).toContainEqual(
+      expect.objectContaining({
+        id: "P17-v2.8.0-runtime-orchestration-memory",
+        status: "done",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("ExecutionContextPackage"),
+          expect.stringContaining("skill_load"),
+          expect.stringContaining("tool invocation ledger"),
+          expect.stringContaining("raw history"),
+          expect.stringContaining("computer-use black-box acceptance"),
+        ]),
+      }),
+    );
     expect(featureList.features).toContainEqual(
       expect.objectContaining({
         id: "P16-v2.7.0-ui-interaction",

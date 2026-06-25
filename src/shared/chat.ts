@@ -206,12 +206,17 @@ export type ChatTaskStatusEvent = {
     | "started"
     | "workspace"
     | "skill"
+    | "skill_load"
     | "memory"
+    | "memory_scope"
+    | "history"
     | "model"
     | "reasoning"
     | "streaming"
+    | "tool_invocation"
     | "tool_call"
     | "tool_result"
+    | "checkpoint_boundary"
     | "waiting_for_input"
     | "paused"
     | "canceled"
@@ -222,9 +227,15 @@ export type ChatTaskStatusEvent = {
   elapsedMs: number;
   turn?: number;
   toolCallId?: string;
+  toolInvocationId?: string;
   toolName?: string;
+  toolSource?: string;
   resultRef?: string;
   resultBytes?: number;
+  invocationStatus?: string;
+  checkpointId?: string;
+  memoryScopes?: string[];
+  historyOperation?: string;
   selectedSkillName?: string;
   workspaceId?: string;
   workspaceSummary?: ChatWorkspaceSummary;

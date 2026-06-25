@@ -1116,12 +1116,22 @@ describe("chat service", () => {
     expect(trajectoryEvents.map((event) => event.type)).toEqual([
       "model_request",
       "model_response",
+      "tool_invocation",
+      "tool_invocation",
+      "tool_invocation",
       "tool_call",
+      "tool_invocation",
+      "tool_invocation",
       "tool_result",
       "model_request",
       "model_response",
       "final_summary",
     ]);
+    expect(
+      trajectoryEvents
+        .filter((event) => event.type === "tool_invocation")
+        .map((event) => event.payload.invocationStatus),
+    ).toEqual(["proposed", "visible", "authorized", "running", "completed"]);
     expect(trajectoryEvents.every((event) => event.runId === "chat_evidence_2")).toBe(
       true,
     );
@@ -1443,14 +1453,24 @@ describe("chat service", () => {
     expect(trajectoryEvents.map((event) => event.type)).toEqual([
       "model_request",
       "model_response",
+      "tool_invocation",
+      "tool_invocation",
+      "tool_invocation",
       "tool_call",
       "native_tool_invocation",
+      "tool_invocation",
+      "tool_invocation",
       "native_tool_observation",
       "tool_result",
       "model_request",
       "model_response",
       "final_summary",
     ]);
+    expect(
+      trajectoryEvents
+        .filter((event) => event.type === "tool_invocation")
+        .map((event) => event.payload.invocationStatus),
+    ).toEqual(["proposed", "visible", "authorized", "running", "completed"]);
     expect(trajectoryEvents).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1663,6 +1683,50 @@ describe("chat service", () => {
     });
   });
 
+  it("records user and assistant turns into raw history when configured", async () => {
+    const rawHistoryEntries: Array<Record<string, unknown>> = [];
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("已完成。");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      historyIndexStore: {
+        async append(entry) {
+          rawHistoryEntries.push(entry);
+        },
+      },
+      createId: createSequentialId("history_chat"),
+      now: createSteppedClock("2026-06-25T00:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage({
+      sessionId: "session_history",
+      requestId: "request_history",
+      message: "记录 raw history",
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(rawHistoryEntries).toEqual([
+      expect.objectContaining({
+        id: "history_chat_1",
+        sessionId: "session_history",
+        role: "user",
+        content: "记录 raw history",
+        source: "chat",
+      }),
+      expect.objectContaining({
+        id: "history_chat_2",
+        sessionId: "session_history",
+        role: "assistant",
+        content: "已完成。",
+        source: "chat",
+      }),
+    ]);
+  });
+
   it("loads and enforces an explicitly selected agent skill in chat", async () => {
     const capturedMessages: ChatMessage[][] = [];
     const statusEvents: ChatTaskStatusEvent[] = [];
@@ -1701,9 +1765,10 @@ describe("chat service", () => {
         displayName: "onepager",
       },
     });
-    expect(capturedMessages.at(-1)?.map((message) => message.content).join("\n")).toContain(
-      "Onepager 技能流程：必须先做内容架构分析。",
-    );
+    const selectedSkillPrompt = capturedMessages.at(-1)?.map((message) => message.content).join("\n") ?? "";
+    expect(selectedSkillPrompt).toContain("skill_load");
+    expect(selectedSkillPrompt).toContain("skill_resource_list");
+    expect(selectedSkillPrompt).not.toContain("Onepager 技能流程：必须先做内容架构分析。");
     expect(statusEvents).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1801,9 +1866,9 @@ describe("chat service", () => {
       ok: true,
       selectedSkill: { name: "onepager" },
     });
-    expect(capturedMessages.at(-1)?.map((message) => message.content).join("\n")).toContain(
-      "Onepager 技能正文",
-    );
+    const selectedSkillPrompt = capturedMessages.at(-1)?.map((message) => message.content).join("\n") ?? "";
+    expect(selectedSkillPrompt).toContain("skill_load");
+    expect(selectedSkillPrompt).not.toContain("Onepager 技能正文");
   });
 
   it("extends the active workspace sandbox with the selected skill read root", async () => {
@@ -1867,6 +1932,12 @@ describe("chat service", () => {
               "/tmp/skills/onepager",
             ]),
           },
+          tools: {
+            allowedNames: expect.arrayContaining([
+              "skill_load",
+              "skill_resource_list",
+            ]),
+          },
         },
       },
     });
@@ -1883,6 +1954,18 @@ describe("chat service", () => {
         {
           toolName: "file_list",
           args: { path: "/tmp/skills/onepager" },
+        },
+        loopOptions.runContext,
+      ),
+    ).toMatchObject({
+      allowed: true,
+    });
+    expect(
+      authorizeToolCallWithinRunContext(
+        loopOptions.runtimeTask.permissions,
+        {
+          toolName: "skill_load",
+          args: { skillName: "onepager" },
         },
         loopOptions.runContext,
       ),

@@ -421,14 +421,15 @@
 
 .selected-skill-chip {
   position: absolute;
-  left: 18px;
-  bottom: 18px;
+  left: 22px;
+  bottom: var(--composer-action-inset);
   z-index: 5;
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
   max-width: min(280px, calc(100% - 190px));
-  min-height: 32px;
+  height: var(--composer-action-size);
+  min-height: var(--composer-action-size);
   padding: 0 6px 0 10px;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-full);
@@ -437,7 +438,8 @@
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   font-weight: var(--font-semibold);
-  box-shadow: var(--shadow-xs);
+  line-height: 1;
+  box-shadow: none;
 }
 
 .selected-skill-chip span {

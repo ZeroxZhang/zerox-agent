@@ -86,4 +86,132 @@ describe("dynamic tool registry", () => {
     );
     expect(registry.getSource("missing_tool")).toBeNull();
   });
+
+  it("records source health and conflict evidence for duplicate registrations", () => {
+    const registry = createDynamicToolRegistry({ now: () => "2026-06-25T00:00:00.000Z" });
+    registry.register(
+      {
+        type: "function",
+        function: {
+          name: "skill_load",
+          description: "Load skill.",
+          parameters: { type: "object", properties: {}, required: [] },
+        },
+      },
+      async () => ({ ok: true, result: {} }),
+      "built-in",
+    );
+
+    expect(() =>
+      registry.register(
+        {
+          type: "function",
+          function: {
+            name: "skill_load",
+            description: "Conflicting loader.",
+            parameters: { type: "object", properties: {}, required: [] },
+          },
+        },
+        async () => ({ ok: true, result: {} }),
+        "skill:conflict",
+      ),
+    ).toThrow(/already registered/);
+
+    expect(registry.getRegistrationConflicts()).toEqual([
+      {
+        toolName: "skill_load",
+        existingSource: "built-in",
+        attemptedSource: "skill:conflict",
+        reason: "duplicate_tool_name",
+        createdAt: "2026-06-25T00:00:00.000Z",
+      },
+    ]);
+    expect(registry.getSourceHealthSnapshot()).toEqual([
+      {
+        source: "built-in",
+        status: "ready",
+        toolCount: 1,
+        conflictCount: 0,
+      },
+      {
+        source: "skill:conflict",
+        status: "conflict",
+        toolCount: 0,
+        conflictCount: 1,
+      },
+    ]);
+  });
+
+  it("filters visible tools by explicit name and source without mutating registry state", () => {
+    const registry = createDynamicToolRegistry();
+    registry.register(
+      {
+        type: "function",
+        function: {
+          name: "skill_load",
+          description: "Load skill.",
+          parameters: { type: "object", properties: {}, required: [] },
+        },
+      },
+      async () => ({ ok: true, result: {} }),
+      "built-in",
+    );
+    registry.register(
+      {
+        type: "function",
+        function: {
+          name: "skill_pack",
+          description: "Skill tool.",
+          parameters: { type: "object", properties: {}, required: [] },
+        },
+      },
+      async () => ({ ok: true, result: {} }),
+      "skill:writer",
+    );
+
+    expect(
+      registry.getVisibleDefinitions({
+        allowedNames: ["skill_load"],
+        allowedSources: ["skill:writer"],
+      }).map((definition) => definition.function.name),
+    ).toEqual(["skill_load", "skill_pack"]);
+    expect(registry.getDefinitions()).toHaveLength(2);
+  });
+
+  it("returns recoverable validation errors before invoking handlers", async () => {
+    let executed = false;
+    const registry = createDynamicToolRegistry();
+    registry.register(
+      {
+        type: "function",
+        function: {
+          name: "history_search",
+          description: "Search raw history.",
+          parameters: {
+            type: "object",
+            properties: {
+              query: { type: "string" },
+              limit: { type: "number" },
+            },
+            required: ["query"],
+          },
+        },
+      },
+      async () => {
+        executed = true;
+        return { ok: true, result: {} };
+      },
+      "built-in",
+    );
+
+    await expect(registry.execute("history_search", { limit: "10" })).resolves.toEqual({
+      ok: false,
+      error: "Recoverable tool argument error: query is required; limit must be number.",
+      errorDetails: {
+        recoverable: true,
+        validationErrors: ["query is required", "limit must be number"],
+      },
+    });
+    expect(executed).toBe(false);
+  });
 });

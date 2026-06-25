@@ -43,6 +43,7 @@ import {
 import { createModelConnectionService } from "./modelConnectionService";
 import { createMemoryStore } from "./memoryStore";
 import { createMemoryProfileStore } from "./memoryProfileStore";
+import { createHistoryIndexStore } from "./historyIndexStore";
 import {
   createToolResultOffloadStore,
   type ToolResultOffloadReadScope,
@@ -534,6 +535,8 @@ export function createAppContainer(options: {
         memoryStore: memoryStore(),
         chatSessionStore: chatSessionStore(),
         toolResultOffloadStore: toolResultOffloadStore(),
+        discoverSkills: () => discoverSkills({ skillsDir }),
+        historyIndexStore: historyIndexStore(),
       });
       // P6: register the actor + workflow tools on the dynamic registry so the
       // model can spawn sub-agents and run workflows (e.g. deep-research).
@@ -730,6 +733,14 @@ export function createAppContainer(options: {
             };
           },
         },
+      }),
+    );
+  }
+
+  function historyIndexStore() {
+    return lazy("historyIndexStore", () =>
+      createHistoryIndexStore({
+        filePath: path.join(configDir, "raw-history.jsonl"),
       }),
     );
   }
@@ -1230,6 +1241,7 @@ export function createAppContainer(options: {
         toolAuthorizationService: toolAuthorizationService(),
         trajectoryStore: agentTrajectoryStore(),
         workspaceRunStore: workspaceRunStore(),
+        historyIndexStore: historyIndexStore(),
         toolResultOffloadStore: toolResultOffloadStore(),
         compactionStrategy: compactionStrategy(),
       }),
@@ -1659,6 +1671,7 @@ export function createAppContainer(options: {
     multiAgentCoordinator,
     memoryStore,
     memoryProfileStore,
+    historyIndexStore,
     toolResultOffloadStore,
     agentLearningStore,
     agentLearningService,

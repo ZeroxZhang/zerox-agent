@@ -32,9 +32,13 @@ export type WorkspaceRunEventType =
   | "model_request"
   | "reasoning"
   | "tool_call"
+  | "tool_invocation"
   | "tool_result"
   | "tool_denied"
   | "skill_stage"
+  | "checkpoint_boundary"
+  | "memory_scope"
+  | "history"
   | "status"
   | "summary";
 
@@ -80,6 +84,19 @@ export type WorkspaceRunToolResultEvent = WorkspaceRunEventBase & {
   resultBytes?: number;
 };
 
+export type WorkspaceRunToolInvocationEvent = WorkspaceRunEventBase & {
+  type: "tool_invocation";
+  toolInvocationId: string;
+  toolCallId: string;
+  toolName: string;
+  toolSource?: string;
+  invocationStatus: string;
+  args?: unknown;
+  ok?: boolean;
+  resultRef?: string;
+  error?: string;
+};
+
 export type WorkspaceRunToolDeniedEvent = WorkspaceRunEventBase & {
   type: "tool_denied";
   toolCallId?: string;
@@ -91,6 +108,29 @@ export type WorkspaceRunSkillStageEvent = WorkspaceRunEventBase & {
   type: "skill_stage";
   skillName?: string;
   stage: string;
+};
+
+export type WorkspaceRunCheckpointBoundaryEvent = WorkspaceRunEventBase & {
+  type: "checkpoint_boundary";
+  checkpointId: string;
+  strategy: "summarize" | "rebuild" | "boundary" | string;
+  preservedTailMessages?: number;
+  protectedToolResults?: string[];
+};
+
+export type WorkspaceRunMemoryScopeEvent = WorkspaceRunEventBase & {
+  type: "memory_scope";
+  scopes: string[];
+  rawHistoryEnabled?: boolean;
+  recallBudgetTokens?: number;
+};
+
+export type WorkspaceRunHistoryEvent = WorkspaceRunEventBase & {
+  type: "history";
+  operation: "indexed" | "searched" | "around";
+  query?: string;
+  resultCount?: number;
+  historyRef?: string;
 };
 
 export type WorkspaceRunStatusEvent = WorkspaceRunEventBase & {
@@ -107,9 +147,13 @@ export type WorkspaceRunEvent =
   | WorkspaceRunModelRequestEvent
   | WorkspaceRunReasoningEvent
   | WorkspaceRunToolCallEvent
+  | WorkspaceRunToolInvocationEvent
   | WorkspaceRunToolResultEvent
   | WorkspaceRunToolDeniedEvent
   | WorkspaceRunSkillStageEvent
+  | WorkspaceRunCheckpointBoundaryEvent
+  | WorkspaceRunMemoryScopeEvent
+  | WorkspaceRunHistoryEvent
   | WorkspaceRunStatusEvent
   | WorkspaceRunSummaryEvent;
 
@@ -138,6 +182,18 @@ export type WorkspaceRunEventInput =
       args?: unknown;
     })
   | (WorkspaceRunEventInputBase & {
+      type: "tool_invocation";
+      toolInvocationId: string;
+      toolCallId: string;
+      toolName: string;
+      toolSource?: string;
+      invocationStatus: string;
+      args?: unknown;
+      ok?: boolean;
+      resultRef?: string;
+      error?: string;
+    })
+  | (WorkspaceRunEventInputBase & {
       type: "tool_result";
       toolCallId: string;
       toolName?: string;
@@ -156,6 +212,26 @@ export type WorkspaceRunEventInput =
       type: "skill_stage";
       skillName?: string;
       stage: string;
+    })
+  | (WorkspaceRunEventInputBase & {
+      type: "checkpoint_boundary";
+      checkpointId: string;
+      strategy: "summarize" | "rebuild" | "boundary" | string;
+      preservedTailMessages?: number;
+      protectedToolResults?: string[];
+    })
+  | (WorkspaceRunEventInputBase & {
+      type: "memory_scope";
+      scopes: string[];
+      rawHistoryEnabled?: boolean;
+      recallBudgetTokens?: number;
+    })
+  | (WorkspaceRunEventInputBase & {
+      type: "history";
+      operation: "indexed" | "searched" | "around";
+      query?: string;
+      resultCount?: number;
+      historyRef?: string;
     })
   | (WorkspaceRunEventInputBase & {
       type: "status";
@@ -181,8 +257,13 @@ export type ChatTrajectoryEvent = {
   toolName?: string;
   resultRef?: string;
   ok?: boolean;
+  invocationStatus?: string;
+  toolSource?: string;
   skillName?: string;
   skillStage?: string;
+  checkpointId?: string;
+  memoryScopes?: string[];
+  historyOperation?: string;
   summary?: string;
   payload?: Record<string, unknown>;
   createdAt: string;
@@ -243,6 +324,9 @@ export function projectChatTrajectoryEvents(
     ...projectStatus(event),
     ...projectTool(event),
     ...projectSkill(event),
+    ...projectCheckpointBoundary(event),
+    ...projectMemoryScope(event),
+    ...projectHistory(event),
     ...projectSummary(event),
     ...(event.payload ? { payload: event.payload } : {}),
     createdAt: event.createdAt,
@@ -260,6 +344,7 @@ function projectTool(
 ): Pick<ChatTrajectoryEvent, "toolCallId" | "toolName" | "resultRef" | "ok"> {
   if (
     event.type !== "tool_call" &&
+    event.type !== "tool_invocation" &&
     event.type !== "tool_result" &&
     event.type !== "tool_denied"
   ) {
@@ -269,11 +354,22 @@ function projectTool(
   return {
     ...(event.toolCallId ? { toolCallId: event.toolCallId } : {}),
     toolName: event.toolName,
+    ...(event.type === "tool_invocation"
+      ? {
+          invocationStatus: event.invocationStatus,
+          ...(event.toolSource ? { toolSource: event.toolSource } : {}),
+        }
+      : {}),
     ...(event.type === "tool_result" && event.resultRef
       ? { resultRef: event.resultRef }
       : {}),
-    ...(event.type === "tool_result" && typeof event.ok === "boolean"
+    ...((event.type === "tool_result" || event.type === "tool_invocation") &&
+    typeof event.ok === "boolean"
       ? { ok: event.ok }
+      : {}),
+    ...((event.type === "tool_result" || event.type === "tool_invocation") &&
+    event.resultRef
+      ? { resultRef: event.resultRef }
       : {}),
   };
 }
@@ -295,4 +391,24 @@ function projectSummary(
   event: WorkspaceRunEvent,
 ): Pick<ChatTrajectoryEvent, "summary"> {
   return event.type === "summary" ? { summary: event.summary } : {};
+}
+
+function projectCheckpointBoundary(
+  event: WorkspaceRunEvent,
+): Pick<ChatTrajectoryEvent, "checkpointId"> {
+  return event.type === "checkpoint_boundary"
+    ? { checkpointId: event.checkpointId }
+    : {};
+}
+
+function projectMemoryScope(
+  event: WorkspaceRunEvent,
+): Pick<ChatTrajectoryEvent, "memoryScopes"> {
+  return event.type === "memory_scope" ? { memoryScopes: event.scopes } : {};
+}
+
+function projectHistory(
+  event: WorkspaceRunEvent,
+): Pick<ChatTrajectoryEvent, "historyOperation"> {
+  return event.type === "history" ? { historyOperation: event.operation } : {};
 }

@@ -335,6 +335,76 @@ describe("projectRunGraph", () => {
     expect(expectDanglingEdges(graph)).toEqual([]);
   });
 
+  test("projects v2.8 invocation ledger, checkpoint boundary, and memory history evidence", () => {
+    const graph = projectRunGraph({
+      run: createRun(),
+      workspaceRunEvents: [
+        workspaceRunEvent("workspace_invocation", 1, {
+          type: "tool_invocation",
+          toolInvocationId: "invocation_1",
+          toolCallId: "call_skill_load",
+          toolName: "skill_load",
+          toolSource: "built-in",
+          invocationStatus: "waiting_approval",
+        }),
+        workspaceRunEvent("workspace_boundary", 2, {
+          type: "checkpoint_boundary",
+          checkpointId: "checkpoint_boundary_1",
+          strategy: "boundary",
+          preservedTailMessages: 8,
+          protectedToolResults: ["call_skill_load"],
+        }),
+        workspaceRunEvent("workspace_memory", 3, {
+          type: "memory_scope",
+          scopes: ["session:session_1", "workspace:workspace_1"],
+          rawHistoryEnabled: true,
+        }),
+        workspaceRunEvent("workspace_history", 4, {
+          type: "history",
+          operation: "searched",
+          query: "skill_load",
+          resultCount: 2,
+        }),
+      ],
+    });
+
+    expect(graph.nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "tool:call_skill_load",
+          kind: "tool_call",
+          status: "waiting",
+          title: "skill_load",
+        }),
+        expect.objectContaining({
+          id: "checkpoint:checkpoint_boundary_1",
+          kind: "checkpoint",
+          status: "succeeded",
+        }),
+        expect.objectContaining({
+          id: "memory:workspace_memory",
+          kind: "memory",
+          title: "Memory scopes",
+        }),
+        expect.objectContaining({
+          id: "history:workspace_history",
+          kind: "history",
+          title: "History searched",
+        }),
+      ]),
+    );
+    expect(graph.evidence).toEqual(
+      expect.arrayContaining([
+        {
+          ref: "workspace-run:workspace_invocation",
+          source: "workspace_run",
+          eventType: "tool_invocation",
+        },
+      ]),
+    );
+    expect(expectDanglingEdges(graph)).toEqual([]);
+  });
+
   test("projects goal and milestone nodes with stable dependency edges", () => {
     const graph = projectRunGraph({
       run: createRun({ taskId: "goal:goal_1", taskName: "Release prep" }),

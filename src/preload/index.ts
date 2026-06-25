@@ -47,6 +47,12 @@ import type {
   SaveMemoryProfileResult,
 } from "../shared/memoryProfile";
 import type {
+  RawHistoryAroundOptions,
+  RawHistoryAroundResult,
+  RawHistorySearchOptions,
+  RawHistorySearchResult,
+} from "../shared/rawHistory";
+import type {
   AgentLearningCandidate,
   AgentLearningListOptions,
   ApplyAcceptedLearningReport,
@@ -436,6 +442,13 @@ const buildingAgent = {
   searchMemories: (
     options: MemorySearchOptions,
   ): Promise<MemorySearchResult[]> => ipcRenderer.invoke("memory:search", options),
+  searchRawHistory: (
+    options: RawHistorySearchOptions,
+  ): Promise<RawHistorySearchResult[]> => ipcRenderer.invoke("history:search", options),
+  readRawHistoryAround: (
+    options: RawHistoryAroundOptions,
+  ): Promise<RawHistoryAroundResult | null> =>
+    ipcRenderer.invoke("history:around", options),
   createMemory: (input: MemoryInput): Promise<CreateMemoryResult> =>
     ipcRenderer.invoke("memory:create", input),
   deleteMemory: (memoryId: string): Promise<DeleteMemoryResult> =>

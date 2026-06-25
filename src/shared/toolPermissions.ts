@@ -30,6 +30,10 @@ export type AgentToolName =
   | "test_run"
   | "memory_search"
   | "conversation_search"
+  | "history_search"
+  | "history_around"
+  | "skill_resource_list"
+  | "skill_load"
   | "web_search"
   | "web_fetch"
   | "web_fetch_document"
@@ -59,6 +63,7 @@ export type TaskPermissionPolicy = {
   tools?: {
     allowedNames: string[];
     allowedSources: string[];
+    allowedSkillNames?: string[];
   };
 };
 
@@ -138,6 +143,7 @@ export function createPermissionPolicyFromSkillManifest(
     },
     tools: {
       allowedNames: manifest.tools?.map((tool) => tool.name) ?? [],
+      allowedSkillNames: [manifest.name],
       allowedSources: [
         ...(manifest.tools?.length ? [`skill:${manifest.name}`] : []),
         ...(manifest.mcpServers?.map(
@@ -340,9 +346,14 @@ export function authorizeToolCall(
     }
     case "memory_search":
     case "conversation_search":
+    case "history_search":
+    case "history_around":
       return normalized.memory?.read
         ? allow(`这个任务已允许 ${request.toolName}。`)
         : deny("这个任务未允许读取本地记忆。");
+    case "skill_resource_list":
+    case "skill_load":
+      return authorizeSkillLazyLoadTool(request.toolName, request.args, normalized);
     case "web_search":
       return normalized.web.search
         ? allow("这个任务已允许 web_search。")
@@ -704,6 +715,27 @@ function authorizeWebFetch(
     : deny("web_fetch URL 域名不在允许列表内。");
 }
 
+function authorizeSkillLazyLoadTool(
+  toolName: "skill_resource_list" | "skill_load",
+  args: Record<string, unknown>,
+  policy: TaskPermissionPolicy,
+): ToolAuthorizationDecision {
+  if (!policy.tools?.allowedNames.includes(toolName)) {
+    return deny(`工具 ${toolName} 尚未配置授权规则。`);
+  }
+
+  const skillName = String(args.skillName ?? "").trim();
+  if (!skillName) {
+    return deny(`${toolName} skillName 必填。`);
+  }
+
+  if (!policy.tools.allowedSkillNames?.includes(skillName)) {
+    return deny(`${toolName} 请求的技能 ${skillName} 不在本次运行授权技能内。`);
+  }
+
+  return allow(`${toolName} 已绑定到本次运行授权技能 ${skillName}。`);
+}
+
 function authorizeShellCommand(
   command: string,
   templates: string[],
@@ -817,14 +849,20 @@ function normalizeDynamicToolPolicy(
   const allowedSources = unique(
     (tools?.allowedSources ?? []).map((source) => source.trim()).filter(Boolean),
   );
+  const allowedSkillNames = unique(
+    (tools?.allowedSkillNames ?? [])
+      .map((skillName) => skillName.trim())
+      .filter(Boolean),
+  );
 
-  if (!allowedNames.length && !allowedSources.length) {
+  if (!allowedNames.length && !allowedSources.length && !allowedSkillNames.length) {
     return null;
   }
 
   return {
     allowedNames,
     allowedSources,
+    ...(allowedSkillNames.length ? { allowedSkillNames } : {}),
   };
 }
 

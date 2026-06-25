@@ -134,6 +134,13 @@ describe("goal runtime engine", () => {
           }),
         }),
         expect.objectContaining({
+          type: "tool_invocation",
+          payload: expect.objectContaining({
+            toolName: "chrome_bookmarks_read",
+            invocationStatus: "completed",
+          }),
+        }),
+        expect.objectContaining({
           type: "artifact_created",
           payload: expect.objectContaining({
             artifactRef: "artifact:bookmark_list",
@@ -142,6 +149,11 @@ describe("goal runtime engine", () => {
         }),
       ]),
     );
+    expect(
+      trajectoryEvents
+        .filter((event) => event.type === "tool_invocation")
+        .map((event) => event.payload.invocationStatus),
+    ).toEqual(["proposed", "visible", "authorized", "running", "completed"]);
   });
 
   it("authorizes Chrome deterministic pipeline with the real goal policy and executes once", async () => {

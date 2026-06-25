@@ -11,6 +11,10 @@ import {
 } from "../../shared/memory";
 import type { MemoryEvalReport } from "../../shared/memoryEval";
 import type { MemoryGovernanceReport } from "../../shared/memoryGovernance";
+import type {
+  RawHistoryAroundResult,
+  RawHistorySearchResult,
+} from "../../shared/rawHistory";
 
 type MemoryStatus =
   | { kind: "idle"; message: string }
@@ -37,6 +41,14 @@ export function MemoryPanel() {
   const [exportedJson, setExportedJson] = useState("");
   const [profileContent, setProfileContent] = useState("");
   const [profileUpdatedAt, setProfileUpdatedAt] = useState("");
+  const [rawHistoryQuery, setRawHistoryQuery] = useState("");
+  const [rawHistoryWorkspaceId, setRawHistoryWorkspaceId] = useState("");
+  const [rawHistorySessionId, setRawHistorySessionId] = useState("");
+  const [rawHistoryResults, setRawHistoryResults] = useState<
+    RawHistorySearchResult[]
+  >([]);
+  const [rawHistoryAround, setRawHistoryAround] =
+    useState<RawHistoryAroundResult | null>(null);
   const [evalReport, setEvalReport] = useState<MemoryEvalReport | null>(null);
   const [governanceReport, setGovernanceReport] =
     useState<MemoryGovernanceReport | null>(null);
@@ -262,6 +274,66 @@ export function MemoryPanel() {
     });
   }
 
+  async function handleSearchRawHistory() {
+    if (!window.buildingAgent) {
+      setStatus({
+        kind: "error",
+        message: "浏览器预览模式无法检索 raw history。",
+      });
+      return;
+    }
+
+    const trimmed = rawHistoryQuery.trim();
+    if (!trimmed) {
+      setRawHistoryResults([]);
+      setRawHistoryAround(null);
+      return;
+    }
+    const workspaceId = rawHistoryWorkspaceId.trim();
+    const sessionId = rawHistorySessionId.trim();
+    if (!workspaceId && !sessionId) {
+      setRawHistoryResults([]);
+      setRawHistoryAround(null);
+      setStatus({
+        kind: "error",
+        message: "Raw History 需要 workspaceId 或 sessionId 范围。",
+      });
+      return;
+    }
+
+    const results = await window.buildingAgent.searchRawHistory({
+      query: trimmed,
+      limit: 10,
+      ...(workspaceId ? { workspaceId } : {}),
+      ...(sessionId ? { sessionId } : {}),
+    });
+    setRawHistoryResults(results);
+    setRawHistoryAround(null);
+    setStatus({
+      kind: "idle",
+      message: `Raw History ${results.length} 条结果。`,
+    });
+  }
+
+  async function handleReadRawHistoryAround(entryId: string) {
+    if (!window.buildingAgent) {
+      return;
+    }
+
+    const result = await window.buildingAgent.readRawHistoryAround({
+      entryId,
+      ...(rawHistoryWorkspaceId.trim()
+        ? { workspaceId: rawHistoryWorkspaceId.trim() }
+        : {}),
+      ...(rawHistorySessionId.trim()
+        ? { sessionId: rawHistorySessionId.trim() }
+        : {}),
+      before: 2,
+      after: 2,
+    });
+    setRawHistoryAround(result);
+  }
+
   async function handleReviewGovernance() {
     setStatus({ kind: "saving", message: "正在生成记忆治理报告..." });
 
@@ -458,6 +530,100 @@ export function MemoryPanel() {
           ) : null}
         </section>
       ) : null}
+
+      <section className="raw-history-panel" aria-label="Raw History">
+        <div className="section-heading">
+          <span>Raw History</span>
+          <small>{rawHistoryResults.length} 条命中</small>
+        </div>
+        <div className="memory-toolbar raw-history-toolbar">
+          <label className="field">
+            <span>Workspace Scope</span>
+            <input
+              onChange={(event) => setRawHistoryWorkspaceId(event.currentTarget.value)}
+              placeholder="workspace id"
+              value={rawHistoryWorkspaceId}
+            />
+          </label>
+          <label className="field">
+            <span>Session Scope</span>
+            <input
+              onChange={(event) => setRawHistorySessionId(event.currentTarget.value)}
+              placeholder="session id"
+              value={rawHistorySessionId}
+            />
+          </label>
+          <label className="field">
+            <span>原文检索</span>
+            <input
+              onChange={(event) => setRawHistoryQuery(event.currentTarget.value)}
+              placeholder="skill_load / 文件路径 / 工具输出"
+              value={rawHistoryQuery}
+            />
+          </label>
+        </div>
+        <div className="raw-history-action-row">
+          <button
+            className="secondary-action"
+            onClick={() => void handleSearchRawHistory()}
+            type="button"
+          >
+            检索历史
+          </button>
+        </div>
+        {rawHistoryResults.length ? (
+          <div className="raw-history-results">
+            {rawHistoryResults.map((result) => (
+              <article className="memory-card raw-history-result" key={result.entry.id}>
+                <div className="memory-card-header">
+                  <span>{result.entry.role}</span>
+                  <button
+                    className="secondary-action"
+                    onClick={() => void handleReadRawHistoryAround(result.entry.id)}
+                    type="button"
+                  >
+                    上下文
+                  </button>
+                </div>
+                <h4>
+                  {result.entry.toolName ?? result.entry.sessionId ?? result.entry.id}
+                </h4>
+                <p>{result.entry.content}</p>
+                <dl>
+                  <div>
+                    <dt>时间</dt>
+                    <dd>{new Date(result.entry.createdAt).toLocaleString()}</dd>
+                  </div>
+                  <div>
+                    <dt>分数</dt>
+                    <dd>{result.score}</dd>
+                  </div>
+                </dl>
+                <div className="memory-tags">
+                  {result.matchedTerms.map((term) => (
+                    <span key={term}>{term}</span>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="empty-state">Raw history 尚无检索结果。</div>
+        )}
+        {rawHistoryAround ? (
+          <div className="raw-history-around">
+            <div className="section-heading">
+              <span>上下文片段</span>
+              <small>{rawHistoryAround.anchor.id}</small>
+            </div>
+            {rawHistoryAround.entries.map((entry) => (
+              <p key={entry.id}>
+                <strong>{entry.role}</strong> {entry.content}
+              </p>
+            ))}
+          </div>
+        ) : null}
+      </section>
 
       <section className="memory-profile-editor" aria-label="记忆画像">
         <div className="section-heading">

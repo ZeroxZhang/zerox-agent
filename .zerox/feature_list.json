@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-06-22T00:00:00.000Z",
+  "updatedAt": "2026-06-25T16:51:27.000Z",
   "features": [
     {
       "id": "P0-repo-local-harness",
@@ -1541,6 +1541,98 @@
         "npm run smoke:prod:built",
         "Independent packaged-app UI acceptance officer returns ACCEPTED",
         "git diff --check"
+      ]
+    },
+    {
+      "id": "P17-v2.8.0-runtime-orchestration-memory",
+      "priority": 47,
+      "status": "done",
+      "title": "v2.8.0 runtime orchestration, skill/tool invocation, and memory overhaul",
+      "files": [
+        "src/shared/executionContextPackage.ts",
+        "src/shared/toolInvocationLedger.ts",
+        "src/shared/workspaceRunLedger.ts",
+        "src/shared/runGraph.ts",
+        "src/shared/chat.ts",
+        "src/shared/toolPermissions.ts",
+        "src/main/dynamicToolRegistry.ts",
+        "src/main/skillLoadTools.ts",
+        "src/main/agentToolExecutor.ts",
+        "src/main/historyIndexStore.ts",
+        "src/main/contextBoundary.ts",
+        "src/main/userDataDirOverride.ts",
+        "src/main/chatService.ts",
+        "src/main/container.ts",
+        "src/preload/index.ts",
+        "src/renderer/components/AgentChatPanel.tsx",
+        "src/renderer/components/RunsPanel.tsx",
+        "src/renderer/components/MemoryPanel.tsx",
+        "package.json",
+        "package-lock.json",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md"
+      ],
+      "definitionOfDone": [
+        "ExecutionContextPackage unifies chat, scheduled runtime, goal runtime, actor, workspace, skill, tool, memory, checkpoint, and trajectory identity",
+        "skill_load and skill_resource_list lazy-load selected skill instructions and resource inventory through ToolAuthorizationService and workspace sandbox policy",
+        "tool invocation ledger records proposed, visible, authorized, waiting_approval, running, completed, error, recovered, and aborted states into trajectory, workspace-run ledger, Run Graph, and UI",
+        "dynamic tool registry exposes source health, conflict evidence, visibility filtering, and recoverable argument validation without bypassing ToolAuthorizationService",
+        "goal/task/project/delegation convergence exposes task gate, goal gate, and child run evidence in shared contracts and Run Graph",
+        "checkpoint boundary rebuild protects skill/tool-call pairs and microcompacts large tool results while preserving raw trajectory evidence",
+        "curated memory remains reviewed while raw history search and around tools recover original conversation, command, path, and tool evidence across sessions",
+        "IPC and renderer panels surface skill loading, tool invocation lifecycle, checkpoint boundary, memory scopes, raw history, and child run graph evidence",
+        "independent review subagents check MiMo alignment, backend safety, UI/IPC coherence, test gaps, permissions, and sandbox regressions",
+        "computer-use black-box acceptance simulates a real user in temporary userData after command-line gates pass"
+      ],
+      "verification": [
+        "npm test -- src/shared/executionContextPackage.test.ts src/shared/toolInvocationLedger.test.ts src/shared/workspaceRunLedger.test.ts src/shared/runGraph.test.ts src/shared/packageScripts.test.ts",
+        "npm test -- src/main/skillLoadTools.test.ts src/main/dynamicToolRegistry.test.ts src/shared/toolPermissions.test.ts src/main/agentToolExecutor.test.ts",
+        "npm test -- src/main/historyIndexStore.test.ts src/main/contextBoundary.test.ts src/main/chatService.test.ts",
+        "npm test -- src/preload/index.test.ts src/renderer/materialDesign.test.ts src/renderer/chatTaskActivity.test.ts",
+        "npm test",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "computer-use packaged-app black-box acceptance with temporary userData",
+        "git diff --check"
+      ]
+    },
+    {
+      "id": "P18-v2.8.1-runtime-surface-polish-release",
+      "priority": 48,
+      "status": "done",
+      "title": "v2.8.1 runtime surface polish and release packaging",
+      "files": [
+        "README.md",
+        "package.json",
+        "package-lock.json",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md",
+        "src/shared/packageScripts.test.ts",
+        "src/shared/readme.test.ts",
+        "src/renderer/components/AgentChatPanel.tsx",
+        "src/renderer/styles/chat.css",
+        "src/renderer/styles/composer.css",
+        "src/renderer/materialDesign.test.ts"
+      ],
+      "definitionOfDone": [
+        "package metadata reports version 2.8.1 in package.json and package-lock.json",
+        "README current release, artifact examples, verification counts, and bilingual roadmap describe v2.8.1",
+        "real-time thinking and tool preview rows use scoped icon-only disclosure controls without changing main transcript collapse or right-side evidence rail behavior",
+        "@skill capsule remains in the lower composer and aligns to the composer action button height and baseline",
+        "material/readme/package release tests, full verification gates, macOS packaging, release creation, and push complete"
+      ],
+      "verification": [
+        "npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts src/renderer/materialDesign.test.ts",
+        "npm test",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "npm run dist:mac",
+        "git diff --check",
+        "gh release view v2.8.1"
       ]
     }
   ]

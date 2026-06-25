@@ -14,7 +14,7 @@ describe("README", () => {
     expect(readme).toContain("npm run pack:mac");
     expect(readme).toContain("npm run dist:mac");
     expect(readme).toContain("xattr -dr com.apple.quarantine");
-    expect(readme).toContain("Zerox.Agent-2.7.0-arm64.dmg");
+    expect(readme).toContain("Zerox.Agent-2.8.1-arm64.dmg");
     expect(readme).toContain("npm run harness:check");
     expect(readme).toContain("npm run harness:score");
     expect(readme).toContain("npm run episode:export");
@@ -52,8 +52,8 @@ describe("README", () => {
     expect(positioning).toContain("Zerox does not run unbounded autonomous loops");
     expect(readme).toContain("session-native Goal Mode");
     expect(readme).toContain("Chat Session mode");
-    expect(readme).toContain("current release is **v2.7.0**");
-    expect(readme).toContain("当前版本是 **v2.7.0**");
+    expect(readme).toContain("current release is **v2.8.1**");
+    expect(readme).toContain("当前版本是 **v2.8.1**");
   });
 
   it("documents Goal Mode architecture, eval coverage, and feature-list status", () => {
@@ -93,10 +93,17 @@ describe("README", () => {
     expect(readme).toContain("Goal Mode 架构");
     expect(readme).toContain("artifact evidence contract");
     expect(readme).toContain("artifact evidence files");
-    expect(readme).toContain("1141 tests");
-    expect(readme).toContain("1141 个测试");
-    expect(readme).toContain("Current version: v2.7.0.");
-    expect(readme).toContain("当前版本：v2.7.0。");
+    expect(readme).toContain("1179 tests");
+    expect(readme).toContain("1179 个测试");
+    expect(readme).toContain("Current version: v2.8.1.");
+    expect(readme).toContain("当前版本：v2.8.1。");
+    expect(readme).toContain("v2.8.1");
+    expect(readme).toContain("ExecutionContextPackage");
+    expect(readme).toContain("skill_load");
+    expect(readme).toContain("tool invocation ledgers");
+    expect(readme).toContain("raw history search");
+    expect(readme).toContain("real-time thinking and tool preview rows");
+    expect(readme).toContain("实时“思考 / 工具”预览");
     expect(readme).toContain("v2.7.0");
     expect(readme).toContain("Chat-first");
     expect(readme).toContain("streamed answers");
@@ -105,6 +112,14 @@ describe("README", () => {
       "[x] v2.7.0 Chat-first interaction release",
     );
     expect(readme).toContain("[x] v2.7.0 Chat-first 交互发布");
+    expect(readme).toContain(
+      "[x] v2.8.0 runtime orchestration and memory overhaul",
+    );
+    expect(readme).toContain(
+      "[x] v2.8.1 runtime surface polish",
+    );
+    expect(readme).toContain("[x] v2.8.0 运行编排与记忆大版本");
+    expect(readme).toContain("[x] v2.8.1 实时运行区域视觉修正");
     expect(readme).toContain("independent packaged-app acceptance");
     expect(readme).toContain("独立 packaged-app 验收");
     expect(readme).not.toContain("pending final independent acceptance");

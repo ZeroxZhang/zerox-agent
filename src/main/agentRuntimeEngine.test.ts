@@ -376,6 +376,11 @@ describe("agent runtime engine", () => {
       "model_request",
       "model_response",
       "tool_call",
+      "tool_invocation",
+      "tool_invocation",
+      "tool_invocation",
+      "tool_invocation",
+      "tool_invocation",
       "tool_result",
       "checkpoint_written",
       "model_request",
@@ -387,6 +392,11 @@ describe("agent runtime engine", () => {
     expect(trajectoryEvents.every((event) => event.runId === "trajectory_1")).toBe(
       true,
     );
+    expect(
+      trajectoryEvents
+        .filter((event) => event.type === "tool_invocation")
+        .map((event) => event.payload.invocationStatus),
+    ).toEqual(["proposed", "visible", "authorized", "running", "completed"]);
     expect(trajectoryEvents.every((event) => event.redaction.containsApiKey === false)).toBe(
       true,
     );
@@ -630,8 +640,13 @@ describe("agent runtime engine", () => {
       "model_request",
       "model_response",
       "tool_call",
+      "tool_invocation",
+      "tool_invocation",
+      "tool_invocation",
       "native_tool_invocation",
+      "tool_invocation",
       "native_tool_observation",
+      "tool_invocation",
       "tool_result",
       "checkpoint_written",
       "model_request",
@@ -663,6 +678,11 @@ describe("agent runtime engine", () => {
         }),
       ]),
     );
+    expect(
+      trajectoryEvents
+        .filter((event) => event.type === "tool_invocation")
+        .map((event) => event.payload.invocationStatus),
+    ).toEqual(["proposed", "visible", "authorized", "running", "completed"]);
   });
 
   it("passes dynamic registry source to runtime tool authorization", async () => {

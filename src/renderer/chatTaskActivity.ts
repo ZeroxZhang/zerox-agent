@@ -304,7 +304,13 @@ export function getWorkPhaseFromChatStatusEvent(
   if (event.state === "started") return "planning";
   if (event.state === "workspace") return "planning";
   if (event.state === "skill") return "planning";
-  if (event.state === "memory") return "memory";
+  if (event.state === "skill_load") return "planning";
+  if (
+    event.state === "memory" ||
+    event.state === "memory_scope" ||
+    event.state === "history" ||
+    event.state === "checkpoint_boundary"
+  ) return "memory";
   if (
     event.state === "model" ||
     event.state === "reasoning" ||
@@ -312,7 +318,11 @@ export function getWorkPhaseFromChatStatusEvent(
   ) {
     return "model";
   }
-  if (event.state === "tool_call" || event.state === "tool_result") return "tool";
+  if (
+    event.state === "tool_call" ||
+    event.state === "tool_result" ||
+    event.state === "tool_invocation"
+  ) return "tool";
   if (event.state === "paused" || event.state === "waiting_for_input") {
     return "paused";
   }
@@ -324,11 +334,19 @@ function getProcessLabel(event: ChatTaskStatusEvent): string {
   if (event.state === "started") return "启动";
   if (event.state === "workspace") return "工作区";
   if (event.state === "skill") return "技能";
+  if (event.state === "skill_load") return "技能";
   if (event.state === "memory") return "记忆";
+  if (event.state === "memory_scope") return "记忆";
+  if (event.state === "history") return "历史";
   if (event.state === "model") return "模型";
   if (event.state === "reasoning") return "思考";
   if (event.state === "streaming") return "输出";
-  if (event.state === "tool_call" || event.state === "tool_result") return "工具";
+  if (
+    event.state === "tool_call" ||
+    event.state === "tool_result" ||
+    event.state === "tool_invocation"
+  ) return "工具";
+  if (event.state === "checkpoint_boundary") return "检查点";
   if (event.state === "waiting_for_input") return "输入";
   if (event.state === "paused") return "暂停";
   if (event.state === "canceled") return "中断";
@@ -363,12 +381,17 @@ function getTaskActivityTitleFromStatusEvent(event: ChatTaskStatusEvent): string
   if (event.state === "started") return "正在启动任务";
   if (event.state === "workspace") return "正在确定工作区";
   if (event.state === "skill") return "正在调用技能";
+  if (event.state === "skill_load") return "正在加载技能";
   if (event.state === "memory") return "正在检索记忆";
+  if (event.state === "memory_scope") return "正在注入记忆范围";
+  if (event.state === "history") return "正在检索历史";
   if (event.state === "model") return "正在调用模型";
   if (event.state === "reasoning") return "模型思考";
   if (event.state === "streaming") return "正在输出回复";
   if (event.state === "tool_call") return "正在执行工具";
+  if (event.state === "tool_invocation") return "工具调用状态";
   if (event.state === "tool_result") return "工具结果已返回";
+  if (event.state === "checkpoint_boundary") return "上下文检查点";
   if (event.state === "waiting_for_input") return "等待技能输入";
   if (event.state === "paused") return "长任务等待确认";
   if (event.state === "canceled") return "任务已中断";

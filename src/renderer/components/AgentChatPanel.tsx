@@ -2971,16 +2971,20 @@ function RuntimeTextDisclosure({
       }`}
     >
       <header>
-        <strong>{label}</strong>
+        <strong className="runtime-disclosure-label">{label}</strong>
         <p className="runtime-disclosure-summary" title={summary}>
           {summary}
         </p>
         <button
+          className="runtime-disclosure-toggle"
           type="button"
+          aria-label={expanded ? `收起${label}` : `展开${label}`}
           aria-expanded={expanded}
+          title={expanded ? "收起" : "展开"}
           onClick={() => setExpanded((current) => !current)}
         >
-          {expanded ? "收起" : "展开"}
+          <Icon name={expanded ? "collapse" : "expand"} size={16} />
+          <span className="sr-only">{expanded ? "收起" : "展开"}</span>
         </button>
       </header>
       {expanded ? (
@@ -3014,16 +3018,20 @@ function ToolCallPreviewDisclosure({
       aria-label="工具预览"
     >
       <header>
-        <strong>工具</strong>
+        <strong className="runtime-disclosure-label">工具</strong>
         <p className="runtime-disclosure-summary" title={summary}>
           {summary}
         </p>
         <button
+          className="runtime-disclosure-toggle"
           type="button"
+          aria-label={expanded ? "收起工具" : "展开工具"}
           aria-expanded={expanded}
+          title={expanded ? "收起" : "展开"}
           onClick={() => setExpanded((current) => !current)}
         >
-          {expanded ? "收起" : "展开"}
+          <Icon name={expanded ? "collapse" : "expand"} size={16} />
+          <span className="sr-only">{expanded ? "收起" : "展开"}</span>
         </button>
       </header>
       {expanded ? (
