@@ -101,8 +101,38 @@
     width: 100%;
   }
 
+  .composer-context-row {
+    left: 14px;
+    right: 14px;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    row-gap: 6px;
+  }
+
+  .workspace-picker {
+    flex: 1 1 220px;
+    width: min(100%, 340px);
+    max-width: 100%;
+  }
+
+  .composer .workspace-picker-trigger {
+    width: 100%;
+  }
+
+  .workspace-context-path {
+    flex: 1 1 100%;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .workspace-menu {
+    width: min(360px, calc(100vw - 42px));
+    max-height: min(420px, calc(100dvh - 190px));
+  }
+
   .composer textarea {
     min-height: 116px;
+    padding-top: 78px;
     padding-right: 132px;
   }
 

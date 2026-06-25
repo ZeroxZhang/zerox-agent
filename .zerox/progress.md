@@ -4477,3 +4477,25 @@
   - `npm run harness:check` -> passed.
   - `npm run dist:mac` -> passed; regenerated `release/Zerox Agent-2.7.0-arm64.dmg` and `release/Zerox Agent-2.7.0-arm64-mac.zip`.
   - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='工作区|默认工作区' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed; packaged app rendered the workspace entry.
+
+## 2026-06-25 - Workspace Menu Responsive Layout Fix
+
+- Request:
+  - Fix the workspace dropdown display logic so all options remain reachable regardless of window resizing.
+  - Convert the composer workspace menu layout into a responsive structure instead of a fixed downward menu.
+- Changed files:
+  - `src/renderer/styles/composer.css`
+  - `src/renderer/styles/responsive.css`
+  - `src/renderer/materialDesign.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts` -> failed as expected while the menu still opened downward and lacked responsive max-height/internal-scroll rules.
+- GREEN / verification evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts` -> 44 tests passed.
+  - In-app Browser QA on `http://127.0.0.1:5173/#chat` -> passed at `1280x720`, `1280x520`, and `390x844`: workspace menu and action area stayed fully within the viewport, all options (`历史工作区`, `默认工作区`, `打开已有目录`, `新建工作区`) were present, horizontal overflow was false, console warn/error count 0.
+  - `npm run verify` -> 168 files / 1145 tests passed, 26/26 agent evals passed, 2/2 memory evals passed.
+  - `BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='工作区|默认工作区' npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `node_modules` emitted the existing better-sqlite3 ABI warning and fell back to JSON storage during smoke.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run dist:mac` -> passed; regenerated `release/Zerox Agent-2.7.0-arm64.dmg` and `release/Zerox Agent-2.7.0-arm64-mac.zip`.
+  - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='工作区|默认工作区' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed; packaged app rendered the workspace entry.

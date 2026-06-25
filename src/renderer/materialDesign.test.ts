@@ -169,6 +169,14 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".composer-context-row");
     expect(styles).toContain(".workspace-picker");
     expect(styles).toContain(".workspace-menu");
+    expect(styles).toContain("bottom: calc(100% + var(--space-2));");
+    expect(styles).toContain("grid-template-rows: auto minmax(0, 1fr) auto;");
+    expect(styles).toContain("max-height: min(440px, calc(100dvh - 220px));");
+    expect(styles).toContain("overflow: hidden;");
+    expect(styles).toContain("min-height: 0;");
+    expect(styles).toContain(".composer-context-row");
+    expect(styles).toContain("flex-wrap: wrap;");
+    expect(styles).toContain("padding-top: 78px;");
     expect(styles).not.toContain(".workspace-action-buttons");
   });
 

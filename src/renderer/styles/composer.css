@@ -91,10 +91,14 @@
 
 .workspace-menu {
   position: absolute;
-  top: calc(100% + var(--space-2));
+  bottom: calc(100% + var(--space-2));
   left: 0;
   z-index: 24;
-  width: min(380px, calc(100vw - 80px));
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: min(420px, calc(100vw - 64px));
+  max-height: min(440px, calc(100dvh - 220px));
+  overflow: hidden;
   padding: var(--space-2);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-lg);
@@ -136,7 +140,7 @@
 .workspace-menu-section {
   display: grid;
   gap: 2px;
-  max-height: 230px;
+  min-height: 0;
   overflow-y: auto;
   padding: var(--space-1);
 }
