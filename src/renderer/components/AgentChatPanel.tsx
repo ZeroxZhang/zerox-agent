@@ -216,6 +216,8 @@ export function AgentChatPanel({
   const [workspaceActionPending, setWorkspaceActionPending] = useState<
     "open" | "create" | null
   >(null);
+  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
+  const [workspaceSearch, setWorkspaceSearch] = useState("");
   const [modelSettings, setModelSettings] =
     useState<PublicModelSettings>(demoModelSettings);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -258,6 +260,7 @@ export function AgentChatPanel({
   const activeChatRequestIdRef = useRef<string | null>(null);
   const pendingInputRequestRef = useRef<SkillUserInputRequest | null>(null);
   const activeGoalRef = useRef<ChatSessionGoalSummary | null>(null);
+  const workspaceMenuRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to latest message
   useEffect(() => {
@@ -290,6 +293,29 @@ export function AgentChatPanel({
   }, [status.message]);
 
   useEffect(() => {
+    if (!workspaceMenuOpen) {
+      return;
+    }
+
+    function handleDocumentMouseDown(event: MouseEvent) {
+      const target = event.target;
+      if (
+        target instanceof Node &&
+        workspaceMenuRef.current?.contains(target)
+      ) {
+        return;
+      }
+
+      setWorkspaceMenuOpen(false);
+    }
+
+    document.addEventListener("mousedown", handleDocumentMouseDown);
+    return () => {
+      document.removeEventListener("mousedown", handleDocumentMouseDown);
+    };
+  }, [workspaceMenuOpen]);
+
+  useEffect(() => {
     resetActiveChatRefs();
     setSessionId(null);
     setChatStreamState(createChatStreamState(initialMessages));
@@ -300,6 +326,8 @@ export function AgentChatPanel({
     setGoalRunEvents([]);
     setSelectedSkillName(null);
     setSelectedWorkspaceId(null);
+    setWorkspaceMenuOpen(false);
+    setWorkspaceSearch("");
     setActiveGoalDetail(null);
     setGoalDrawerOpen(false);
   }, [newChatRequestKey]);
@@ -756,6 +784,19 @@ export function AgentChatPanel({
     "默认工作区";
   const activeWorkspacePath =
     selectedWorkspace?.rootPath ?? activeSession?.workspaceSummary?.rootPath ?? "";
+  const visibleWorkspaces = useMemo(() => {
+    const query = workspaceSearch.trim().toLowerCase();
+    if (!query) {
+      return workspaces;
+    }
+
+    return workspaces.filter((workspace) =>
+      [workspace.name, workspace.rootPath, workspace.kind]
+        .join(" ")
+        .toLowerCase()
+        .includes(query),
+    );
+  }, [workspaceSearch, workspaces]);
   const skillMentionMenuVisible =
     Boolean(activeSkillMention) &&
     skillMentionMatches.length > 0 &&
@@ -902,6 +943,14 @@ export function AgentChatPanel({
       ...current.filter((item) => item.id !== workspace.id),
     ]);
     setSelectedWorkspaceId(workspace.id);
+    setWorkspaceMenuOpen(false);
+    setWorkspaceSearch("");
+  }
+
+  function handleSelectDefaultWorkspace() {
+    setSelectedWorkspaceId(null);
+    setWorkspaceMenuOpen(false);
+    setWorkspaceSearch("");
   }
 
   async function handleOpenProjectWorkspace() {
@@ -909,6 +958,7 @@ export function AgentChatPanel({
       return;
     }
 
+    setWorkspaceMenuOpen(false);
     setWorkspaceActionPending("open");
     try {
       const workspace = await window.buildingAgent.openProjectAgentWorkspace();
@@ -936,6 +986,7 @@ export function AgentChatPanel({
       return;
     }
 
+    setWorkspaceMenuOpen(false);
     setWorkspaceActionPending("create");
     try {
       const workspace = await window.buildingAgent.createTemporaryAgentWorkspace({
@@ -1945,61 +1996,147 @@ export function AgentChatPanel({
           <div className="composer-inner">
             <div className="composer-input-shell">
               <div className="composer-context-row" aria-label="会话上下文">
-                <label className="workspace-picker">
-                  <span>工作区</span>
-                  <select
+                <div className="workspace-picker" ref={workspaceMenuRef}>
+                  <button
+                    aria-expanded={workspaceMenuOpen}
+                    aria-haspopup="menu"
                     aria-label="选择工作区"
-                    value={selectedWorkspaceId ?? ""}
-                    onChange={(event) =>
-                      setSelectedWorkspaceId(event.currentTarget.value || null)
-                    }
+                    className="workspace-picker-trigger"
+                    disabled={status.kind === "working"}
+                    onClick={() => setWorkspaceMenuOpen((open) => !open)}
+                    type="button"
                   >
-                    <option value="">默认工作区</option>
-                    {workspaces.map((workspace) => (
-                      <option key={workspace.id} value={workspace.id}>
-                        {workspace.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                    <Icon name="folder" className="workspace-picker-icon" />
+                    <span>工作区</span>
+                    <strong>{activeWorkspaceLabel}</strong>
+                    <Icon
+                      name={workspaceMenuOpen ? "collapse" : "expand"}
+                      className="workspace-picker-chevron"
+                    />
+                  </button>
+                  {workspaceMenuOpen ? (
+                    <div
+                      aria-label="工作区菜单"
+                      className="workspace-menu"
+                      role="menu"
+                    >
+                      <label className="workspace-menu-search">
+                        <span>搜索项目</span>
+                        <input
+                          autoFocus
+                          placeholder="搜索项目"
+                          value={workspaceSearch}
+                          onChange={(event) =>
+                            setWorkspaceSearch(event.currentTarget.value)
+                          }
+                        />
+                      </label>
+                      <div className="workspace-menu-section">
+                        <span>历史工作区</span>
+                        <button
+                          className="workspace-menu-item"
+                          onClick={handleSelectDefaultWorkspace}
+                          role="menuitem"
+                          type="button"
+                        >
+                          <Icon
+                            name="folder"
+                            className="workspace-menu-item-icon"
+                          />
+                          <span>
+                            <strong>默认工作区</strong>
+                            <small>不指定项目目录</small>
+                          </span>
+                          {!selectedWorkspaceId ? (
+                            <Icon
+                              name="approval"
+                              className="workspace-menu-check"
+                            />
+                          ) : null}
+                        </button>
+                        {visibleWorkspaces.map((workspace) => (
+                          <button
+                            className="workspace-menu-item"
+                            key={workspace.id}
+                            onClick={() => selectWorkspace(workspace)}
+                            role="menuitem"
+                            type="button"
+                          >
+                            <Icon
+                              name="folder"
+                              className="workspace-menu-item-icon"
+                            />
+                            <span>
+                              <strong>{workspace.name}</strong>
+                              <small>{workspace.rootPath}</small>
+                            </span>
+                            {selectedWorkspaceId === workspace.id ? (
+                              <Icon
+                                name="approval"
+                                className="workspace-menu-check"
+                              />
+                            ) : null}
+                          </button>
+                        ))}
+                        {visibleWorkspaces.length === 0 ? (
+                          <p className="workspace-menu-empty">
+                            没有匹配的历史工作区
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="workspace-menu-actions">
+                        <button
+                          disabled={workspaceActionsDisabled}
+                          onClick={() => {
+                            void handleOpenProjectWorkspace();
+                          }}
+                          role="menuitem"
+                          type="button"
+                        >
+                          <Icon
+                            name="folder"
+                            className="workspace-menu-item-icon"
+                          />
+                          <span>
+                            <strong>
+                              {workspaceActionPending === "open"
+                                ? "打开中"
+                                : "打开已有目录"}
+                            </strong>
+                            <small>选择本地项目文件夹</small>
+                          </span>
+                        </button>
+                        <button
+                          disabled={workspaceActionsDisabled}
+                          onClick={() => {
+                            void handleCreateWorkspace();
+                          }}
+                          role="menuitem"
+                          type="button"
+                        >
+                          <Icon
+                            name="plus"
+                            className="workspace-menu-item-icon"
+                          />
+                          <span>
+                            <strong>
+                              {workspaceActionPending === "create"
+                                ? "新建中"
+                                : "新建工作区"}
+                            </strong>
+                            <small>创建新的本地临时空间</small>
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
                 <span
                   className="workspace-context-path"
                   title={activeWorkspacePath || activeWorkspaceLabel}
                 >
                   {activeWorkspacePath || activeWorkspaceLabel}
                 </span>
-                <div className="workspace-action-buttons" aria-label="工作区操作">
-                  <button
-                    aria-label="打开工作区"
-                    className="workspace-action-button"
-                    disabled={workspaceActionsDisabled}
-                    onClick={() => {
-                      void handleOpenProjectWorkspace();
-                    }}
-                    title="打开工作区"
-                    type="button"
-                  >
-                    <Icon name="folder" className="workspace-action-icon" />
-                    <span>
-                      {workspaceActionPending === "open" ? "打开中" : "打开"}
-                    </span>
-                  </button>
-                  <button
-                    aria-label="新建工作区"
-                    className="workspace-action-button"
-                    disabled={workspaceActionsDisabled}
-                    onClick={() => {
-                      void handleCreateWorkspace();
-                    }}
-                    title="新建工作区"
-                    type="button"
-                  >
-                    <Icon name="plus" className="workspace-action-icon" />
-                    <span>
-                      {workspaceActionPending === "create" ? "新建中" : "新建"}
-                    </span>
-                  </button>
-                </div>
               </div>
               {composerCommandMenuVisible ? (
                 <div

@@ -4454,3 +4454,26 @@
   - `BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='打开|新建' npm run smoke:prod` -> passed; renderer rendered agent chat UI with workspace open/create affordances. Note: local `node_modules` emitted the existing better-sqlite3 ABI warning and fell back to JSON storage during smoke.
   - `npm run dist:mac` -> passed; regenerated `release/Zerox Agent-2.7.0-arm64.dmg` and `release/Zerox Agent-2.7.0-arm64-mac.zip`.
   - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='打开|新建' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed; packaged app rendered the workspace open/create affordances.
+
+## 2026-06-25 - Workspace Picker Lightweight Menu Follow-Up
+
+- Request:
+  - Remove the heavy right-side workspace action buttons.
+  - Make the current workspace pill open a drawer-style dropdown menu with historical project folders, default workspace, open existing directory, and new workspace actions.
+  - Rebuild packages, commit, and push after the fix.
+- Changed files:
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/styles/composer.css`
+  - `src/renderer/materialDesign.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts` -> failed as expected while `workspace-menu` did not exist and the old `workspace-action-buttons` structure was still present.
+- GREEN / verification evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts` -> 44 tests passed.
+  - In-app Browser QA on `http://127.0.0.1:5173/#chat` -> passed: one `选择工作区` button, one `工作区菜单`, no standalone workspace action buttons, menu includes `历史工作区`, `默认工作区`, `打开已有目录`, and `新建工作区`; console warn/error count 0.
+  - `npm run build` -> passed.
+  - `npm run verify` -> 168 files / 1145 tests passed, 26/26 agent evals passed, 2/2 memory evals passed.
+  - `BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='工作区|默认工作区' npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `node_modules` emitted the existing better-sqlite3 ABI warning and fell back to JSON storage during smoke.
+  - `npm run harness:check` -> passed.
+  - `npm run dist:mac` -> passed; regenerated `release/Zerox Agent-2.7.0-arm64.dmg` and `release/Zerox Agent-2.7.0-arm64-mac.zip`.
+  - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='工作区|默认工作区' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed; packaged app rendered the workspace entry.
