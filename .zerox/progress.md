@@ -5090,5 +5090,12 @@
   - `npm run verify` -> 179 files / 1233 tests passed, build passed, agent evals 26/26 passed, memory evals 2/2 passed.
   - `npm run harness:check` -> passed.
   - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `better-sqlite3` ABI mismatch triggered the existing JSON fallback during smoke.
+  - `npm run dist:mac` -> passed; regenerated unsigned macOS arm64 DMG, ZIP, blockmaps, and `latest-mac.yml` for v2.9.0 with this hotfix.
+  - Packaged app smoke: `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v2.9.0' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+  - `release/Zerox Agent-2.9.0-arm64.dmg` (122M, sha256 `fbbbeaf395c0d9aae65ee712e27609f909d7c6b3ec6173de5bce38f299bbdbaa`)
+  - `release/Zerox Agent-2.9.0-arm64-mac.zip` (333M, sha256 `7a0024babd450dbc0a775fbd106f1fcc0f2f3b088a2b7d5ad0ea82565ed8a82c`)
+  - `release/Zerox Agent-2.9.0-arm64.dmg.blockmap` (133K, sha256 `d0a1ee4a1dffc5ffb5d929cc335cd32f6cab7c5752f46904d4b9c74019ddaf99`)
+  - `release/Zerox Agent-2.9.0-arm64-mac.zip.blockmap` (335K, sha256 `2ec57a1d6ecc1b968ccdf943dab1e18e4689ead17dd9e95f3b36df218d37d93a`)
+  - `release/latest-mac.yml` sha256 `76a34e01d39deb428fe14be050e5954241f94cd0846ee54a3b80cf1befbc6f9d`.
 - Browser QA note:
   - Browser plugin setup completed and listed an in-app browser plus Chrome backend, but both tab navigation attempts failed with a stale session error (`Tab 1 is not part of browser session ...`). No external browser fallback was used; coverage rests on renderer unit/source regression tests, full verify, build, harness, and production smoke.
