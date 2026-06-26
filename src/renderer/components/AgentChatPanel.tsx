@@ -3493,6 +3493,7 @@ function toChatMessage(message: ChatSessionRecord["messages"][number]): ChatMess
     role: message.role,
     content: message.content,
     createdAt: message.createdAt,
+    ...(message.outputParts ? { outputParts: message.outputParts } : {}),
   };
 }
 
