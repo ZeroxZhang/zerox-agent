@@ -78,6 +78,11 @@
   box-shadow: var(--shadow-xs);
 }
 
+.new-chat-button svg,
+.sidebar-session-actions svg {
+  flex: 0 0 auto;
+}
+
 .new-chat-button:hover { background: var(--bg-accent-hover); }
 
 .primary-nav {
@@ -276,6 +281,11 @@
   background: var(--bg-surface-hover);
 }
 
+.sidebar-session-actions svg {
+  width: 16px;
+  height: 16px;
+}
+
 .sidebar-session-menu {
   position: absolute;
   top: 34px;
@@ -312,6 +322,118 @@
 
 .sidebar-section .sidebar-session-menu button.is-danger {
   color: var(--text-danger);
+}
+
+.session-rename-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: var(--space-5);
+  background: rgba(17, 24, 39, 0.24);
+}
+
+.session-rename-dialog {
+  display: grid;
+  gap: var(--space-4);
+  width: min(420px, calc(100vw - 32px));
+  padding: var(--space-5);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface-raised);
+  box-shadow: var(--shadow-md);
+}
+
+.session-rename-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.session-rename-copy h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--text-lg);
+  font-weight: var(--font-semibold);
+  letter-spacing: 0;
+}
+
+.session-rename-copy p,
+.session-rename-field span,
+.session-rename-error {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.session-rename-field {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.session-rename-field input {
+  width: 100%;
+  min-height: 40px;
+  padding: 9px 11px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  font: inherit;
+  font-size: var(--text-md);
+}
+
+.session-rename-field input:focus {
+  border-color: var(--text-accent);
+  outline: 2px solid var(--bg-overlay);
+  outline-offset: 0;
+}
+
+.session-rename-field input[aria-invalid="true"] {
+  border-color: var(--text-danger);
+}
+
+.session-rename-error {
+  color: var(--text-danger);
+}
+
+.session-rename-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.session-rename-actions button {
+  min-height: 36px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+}
+
+.session-rename-secondary {
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+  background: var(--bg-surface);
+}
+
+.session-rename-secondary:hover:not(:disabled),
+.session-rename-secondary:focus-visible {
+  color: var(--text-primary);
+  background: var(--bg-surface-hover);
+}
+
+.session-rename-primary {
+  border: 1px solid var(--bg-accent);
+  color: #fff;
+  background: var(--bg-accent);
+}
+
+.session-rename-primary:disabled,
+.session-rename-secondary:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .sidebar-archive-group {

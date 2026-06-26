@@ -30,7 +30,40 @@ describe("preload bridge", () => {
     expect(preloadSource).toContain('ipcRenderer.invoke("chatSessions:archive"');
     expect(preloadSource).toContain("restoreChatSession");
     expect(preloadSource).toContain('ipcRenderer.invoke("chatSessions:restore"');
+    expect(preloadSource).toContain("renameChatSession");
+    expect(preloadSource).toContain('ipcRenderer.invoke("chatSessions:rename"');
     expect(preloadSource).toContain("deleteChatSession");
     expect(preloadSource).toContain('ipcRenderer.invoke("chatSessions:delete"');
+  });
+
+  it("routes git worktree creation through the user-approval request channel", () => {
+    expect(preloadSource).toContain("createGitWorktreeAgentWorkspace");
+    expect(preloadSource).toContain(
+      'ipcRenderer.invoke("agentWorkspaces:requestGitWorktree"',
+    );
+    expect(preloadSource).not.toContain(
+      'ipcRenderer.invoke("agentWorkspaces:createGitWorktree"',
+    );
+  });
+
+  it("exposes workspace open and scratch creation through stable IPC channels", () => {
+    expect(preloadSource).toContain("openProjectAgentWorkspace");
+    expect(preloadSource).toContain(
+      'ipcRenderer.invoke("agentWorkspaces:openProject"',
+    );
+    expect(preloadSource).toContain("createTemporaryAgentWorkspace");
+    expect(preloadSource).toContain(
+      'ipcRenderer.invoke("agentWorkspaces:createTemporary"',
+    );
+  });
+
+  it("exposes chat stream and guided input IPC bridge operations", () => {
+    expect(preloadSource).toContain("onChatStreamEvent");
+    expect(preloadSource).toContain('ipcRenderer.on("chat:streamEvent"');
+    expect(preloadSource).toContain('removeListener("chat:streamEvent"');
+    expect(preloadSource).toContain("respondSkillInput");
+    expect(preloadSource).toContain(
+      'ipcRenderer.invoke("chat:respondSkillInput"',
+    );
   });
 });

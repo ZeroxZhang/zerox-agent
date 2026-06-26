@@ -11,4 +11,11 @@ describe("material navigation icons", () => {
       });
     }
   });
+
+  it("keeps a compatibility icon for overview hashes", () => {
+    expect(getMaterialNavigationIcon("overview")).toMatchObject({
+      label: "总览",
+      glyph: expect.any(String),
+    });
+  });
 });

@@ -51,15 +51,18 @@ import { getPayloadRow, jsonify, parseJson, selectPayloadRows } from "../reposit
 export function createTaskRepository(storage: Storage): TaskRepository {
   const db = storage.db;
   const buildTask = (input: ScheduledTaskInput & { id?: string }): ScheduledTask => {
-    const now = new Date().toISOString();
+    const existing = input as ScheduledTaskInput & Partial<ScheduledTask>;
+    const now = existing.createdAt ?? new Date().toISOString();
     const normalized = normalizeScheduledTaskInput(input);
     return {
       ...normalized,
       id: input.id ?? randomUUID(),
-      createdAt: now,
-      updatedAt: now,
-      lastRunAt: null,
-      nextRunAt: computeNextRunAt(normalized.schedule, new Date(now)),
+      createdAt: existing.createdAt ?? now,
+      updatedAt: existing.updatedAt ?? now,
+      lastRunAt: existing.lastRunAt ?? null,
+      nextRunAt: existing.nextRunAt ?? (normalized.enabled
+        ? computeNextRunAt(normalized.schedule, new Date(now))
+        : null),
     };
   };
   const persist = (task: ScheduledTask) => {
@@ -90,7 +93,9 @@ export function createTaskRepository(storage: Storage): TaskRepository {
       const updated: ScheduledTask = {
         ...existing,
         lastRunAt: at,
-        nextRunAt: computeNextRunAt(existing.schedule, completedAt),
+        nextRunAt: existing.enabled
+          ? computeNextRunAt(existing.schedule, completedAt)
+          : null,
         updatedAt: at,
       };
       persist(updated);
@@ -100,7 +105,12 @@ export function createTaskRepository(storage: Storage): TaskRepository {
       const existing = this.get(taskId);
       if (!existing) return null;
       const at = (changedAt ?? new Date()).toISOString();
-      const updated: ScheduledTask = { ...existing, enabled, updatedAt: at };
+      const updated: ScheduledTask = {
+        ...existing,
+        enabled,
+        nextRunAt: enabled ? computeNextRunAt(existing.schedule, new Date(at)) : null,
+        updatedAt: at,
+      };
       persist(updated);
       return updated;
     },
@@ -118,10 +128,11 @@ export function createToolAuditRepository(storage: Storage): ToolAuditRepository
   const db = storage.db;
   return {
     append(input: ToolAuditEventInput): ToolAuditEvent {
+      const existing = input as ToolAuditEventInput & Partial<ToolAuditEvent>;
       const event: ToolAuditEvent = {
         ...input,
-        id: randomUUID(),
-        createdAt: new Date().toISOString(),
+        id: existing.id ?? randomUUID(),
+        createdAt: existing.createdAt ?? new Date().toISOString(),
       };
       const tool = input.request?.toolName ?? null;
       const runId = (input as { taskId?: string }).taskId ?? null;
@@ -311,18 +322,30 @@ export function createLearningRepository(storage: Storage): LearningRepository {
   const db = storage.db;
   return {
     create(input: AgentLearningCandidateInput): AgentLearningCandidate {
-      const now = new Date().toISOString();
+      const existing = input as AgentLearningCandidateInput & Partial<AgentLearningCandidate>;
+      const now = existing.createdAt ?? new Date().toISOString();
       const candidate: AgentLearningCandidate = {
         ...input,
-        id: randomUUID(),
-        status: "pending_review",
-        createdAt: now,
-        updatedAt: now,
+        id: existing.id ?? randomUUID(),
+        status: existing.status ?? "pending_review",
+        createdAt: existing.createdAt ?? now,
+        updatedAt: existing.updatedAt ?? now,
       };
       db.prepare(
         `INSERT INTO learning_candidates (id, source_run_id, type, status, payload, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ).run(candidate.id, input.sourceRunId, input.type, candidate.status, jsonify(candidate), now, now);
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           source_run_id=excluded.source_run_id, type=excluded.type, status=excluded.status,
+           payload=excluded.payload, created_at=excluded.created_at, updated_at=excluded.updated_at`,
+      ).run(
+        candidate.id,
+        candidate.sourceRunId,
+        candidate.type,
+        candidate.status,
+        jsonify(candidate),
+        candidate.createdAt,
+        candidate.updatedAt,
+      );
       return candidate;
     },
     list(options?: AgentLearningListOptions): AgentLearningCandidate[] {

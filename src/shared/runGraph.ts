@@ -2,6 +2,7 @@ import type { AgentExecutionStatus, AgentFailureClass } from "./agentExecution";
 import type { AgentRunRecord } from "./agentRuns";
 import type { AgentTrajectoryEvent } from "./agentTrajectory";
 import type { KernelEvent } from "./kernelContract";
+import type { WorkspaceRunEvent } from "./workspaceRunLedger";
 
 export type RunGraphNodeKind =
   | "goal"
@@ -20,7 +21,9 @@ export type RunGraphNodeKind =
   | "dream" // P7 (Patch 25)
   | "distill" // P7 (Patch 25)
   | "model_response" // P8 (Patch 11)
-  | "ensemble"; // P8 (Patch 11)
+  | "ensemble" // P8 (Patch 11)
+  | "memory"
+  | "history";
 
 export type RunGraphNodeStatus =
   | "planned"
@@ -90,7 +93,7 @@ export type RunGraphGate = {
 
 export type RunGraphEvidence = {
   ref: string;
-  source: "trajectory" | "kernel" | "run";
+  source: "trajectory" | "kernel" | "run" | "workspace_run";
   eventType?: string;
 };
 
@@ -116,6 +119,7 @@ export type ProjectRunGraphInput = {
   run: AgentRunRecord;
   trajectoryEvents?: AgentTrajectoryEvent[];
   kernelEvents?: KernelEvent[];
+  workspaceRunEvents?: WorkspaceRunEvent[];
 };
 
 type MutableNode = RunGraphNode & { order: number };
@@ -188,6 +192,143 @@ export function projectRunGraph(input: ProjectRunGraphInput): RunGraphView {
   let lastToolNodeId: string | null = null;
   const openToolNodeIdsByName = new Map<string, string[]>();
   const totalUsage: RunGraphTokenUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+  const orderedWorkspaceRunEvents = [...(input.workspaceRunEvents ?? [])]
+    .sort(compareWorkspaceRunEvents);
+  for (const event of orderedWorkspaceRunEvents) {
+    const ref = `workspace-run:${event.id}`;
+    evidence.set(ref, {
+      ref,
+      source: "workspace_run",
+      eventType: event.type,
+    });
+
+    if (event.type === "tool_call") {
+      const nodeId = `tool:${event.toolCallId}`;
+      addNode(nodes, {
+        id: nodeId,
+        kind: "tool_call",
+        status: "running",
+        title: event.toolName,
+        sourceRefs: [ref],
+        order: workspaceRunOrder(event),
+      });
+      addEdge(edges, runNodeId, nodeId, "contains");
+      recordOpenToolCall(openToolNodeIdsByName, event.toolName, nodeId);
+      lastToolNodeId = nodeId;
+    }
+
+    if (event.type === "tool_invocation") {
+      const nodeId = `tool:${event.toolCallId}`;
+      addNode(nodes, {
+        id: nodeId,
+        kind: "tool_call",
+        status: toToolInvocationGraphStatus(event.invocationStatus),
+        title: event.toolName,
+        sourceRefs: [ref],
+        order: workspaceRunOrder(event),
+        ...(event.invocationStatus === "completed" ||
+        event.invocationStatus === "error" ||
+        event.invocationStatus === "recovered" ||
+        event.invocationStatus === "aborted"
+          ? {
+              result: {
+                status:
+                  event.invocationStatus === "completed" ||
+                  event.invocationStatus === "recovered"
+                    ? "succeeded"
+                    : event.invocationStatus === "aborted"
+                      ? "canceled"
+                      : "failed",
+                evidenceRefs: [ref],
+                decidedBy: "runtime",
+                ...(event.error ? { summary: event.error } : {}),
+              },
+            }
+          : {}),
+      });
+      addEdge(edges, runNodeId, nodeId, "contains");
+      lastToolNodeId = nodeId;
+    }
+
+    if (event.type === "tool_result") {
+      const nodeId = `tool:${event.toolCallId}`;
+      const ok = event.ok === true;
+      const node = nodes.get(nodeId);
+      if (node) {
+        node.status = ok ? "succeeded" : "failed";
+        node.result = {
+          status: ok ? "succeeded" : "failed",
+          evidenceRefs: [ref],
+          decidedBy: "runtime",
+        };
+        node.sourceRefs = [...new Set([...node.sourceRefs, ref])];
+      }
+      closeOpenToolCall(openToolNodeIdsByName, event.toolName ?? null, nodeId);
+      lastToolNodeId = nodeId;
+    }
+
+    if (event.type === "checkpoint_boundary") {
+      const nodeId = `checkpoint:${event.checkpointId}`;
+      addNode(nodes, {
+        id: nodeId,
+        kind: "checkpoint",
+        status: "succeeded",
+        title: event.checkpointId,
+        sourceRefs: [ref],
+        result: {
+          status: "succeeded",
+          evidenceRefs: [ref],
+          decidedBy: "runtime",
+        },
+        order: workspaceRunOrder(event),
+      });
+      addEdge(edges, runNodeId, nodeId, "contains");
+      if (lastToolNodeId) {
+        addEdge(edges, lastToolNodeId, nodeId, "produced");
+      }
+    }
+
+    if (event.type === "memory_scope") {
+      const nodeId = `memory:${event.id}`;
+      addNode(nodes, {
+        id: nodeId,
+        kind: "memory",
+        status: "succeeded",
+        title: "Memory scopes",
+        sourceRefs: [ref],
+        result: {
+          status: "succeeded",
+          summary: event.scopes.join(", "),
+          evidenceRefs: [ref],
+          decidedBy: "runtime",
+        },
+        order: workspaceRunOrder(event),
+      });
+      addEdge(edges, runNodeId, nodeId, "contains");
+    }
+
+    if (event.type === "history") {
+      const nodeId = `history:${event.id}`;
+      addNode(nodes, {
+        id: nodeId,
+        kind: "history",
+        status: "succeeded",
+        title: `History ${event.operation}`,
+        sourceRefs: [ref],
+        result: {
+          status: "succeeded",
+          summary:
+            typeof event.resultCount === "number"
+              ? `${event.resultCount} result(s)`
+              : undefined,
+          evidenceRefs: [ref],
+          decidedBy: "runtime",
+        },
+        order: workspaceRunOrder(event),
+      });
+      addEdge(edges, runNodeId, nodeId, "contains");
+    }
+  }
   const orderedTrajectoryEvents = [...(input.trajectoryEvents ?? [])]
     .filter((event) => acceptedTrajectoryRunIds.has(event.runId))
     .sort(compareTrajectoryEvents);
@@ -629,6 +770,28 @@ function toGraphStatus(status: AgentExecutionStatus): RunGraphNodeStatus {
   return status;
 }
 
+function toToolInvocationGraphStatus(status: string): RunGraphNodeStatus {
+  switch (status) {
+    case "proposed":
+    case "visible":
+      return "ready";
+    case "authorized":
+    case "running":
+      return "running";
+    case "waiting_approval":
+      return "waiting";
+    case "completed":
+    case "recovered":
+      return "succeeded";
+    case "aborted":
+      return "canceled";
+    case "error":
+      return "failed";
+    default:
+      return "ready";
+  }
+}
+
 function toTerminalResultStatus(
   status: Extract<AgentExecutionStatus, "succeeded" | "failed" | "paused" | "canceled">,
 ): RunGraphNodeResult["status"] {
@@ -657,8 +820,24 @@ function compareKernelEvents(left: KernelEvent, right: KernelEvent) {
   return left.createdAt.localeCompare(right.createdAt) || left.type.localeCompare(right.type);
 }
 
+function compareWorkspaceRunEvents(
+  left: WorkspaceRunEvent,
+  right: WorkspaceRunEvent,
+) {
+  return (
+    left.createdAt.localeCompare(right.createdAt) ||
+    left.workspaceRunId.localeCompare(right.workspaceRunId) ||
+    left.seq - right.seq ||
+    left.id.localeCompare(right.id)
+  );
+}
+
 function trajectoryOrder(event: AgentTrajectoryEvent): number {
   return event.sequence * 100;
+}
+
+function workspaceRunOrder(event: WorkspaceRunEvent): number {
+  return event.seq * 100;
 }
 
 function kernelOrder(event: KernelEvent): number {

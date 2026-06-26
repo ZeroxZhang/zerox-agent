@@ -52,6 +52,33 @@ describe("StreamProcessor", () => {
     expect(result.thinkingDeltas).toBe(1);
   });
 
+  it("preserves accumulated thinking when done.response omits reasoningContent", async () => {
+    const provider = scriptedStreamProvider([
+      { type: "thinking_delta", text: "plan " },
+      { type: "thinking_delta", text: "then answer" },
+      { type: "text_delta", text: "answer" },
+      {
+        type: "done",
+        response: {
+          content: "answer",
+          toolCalls: [],
+          finishReason: "stop",
+          cacheReadTokens: 3,
+          cacheWriteTokens: 2,
+        },
+      },
+    ]);
+    const req: CompleteRequest = { model: "m", apiKey: "k", temperature: 0, maxTokens: 10, messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }] };
+    const result = await processStream(provider, req);
+    expect(result.response).toMatchObject({
+      content: "answer",
+      reasoningContent: "plan then answer",
+      cacheReadTokens: 3,
+      cacheWriteTokens: 2,
+    });
+    expect(result.thinkingDeltas).toBe(2);
+  });
+
   it("rethrows on an error variant", async () => {
     const provider = scriptedStreamProvider([{ type: "error", error: new Error("boom") }]);
     const req: CompleteRequest = { model: "m", apiKey: "k", temperature: 0, maxTokens: 10, messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }] };

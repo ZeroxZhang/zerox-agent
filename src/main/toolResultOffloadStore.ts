@@ -1,13 +1,42 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import type { ToolResultRefReadScope } from "../shared/toolResultRefs";
+
+const TOOL_RESULT_REF_READ_CAPABILITY = Symbol("tool_result_ref_read_capability");
 
 export type ToolResultOffloadWriteInput = {
   runId?: string;
+  sessionId?: string;
+  requestId?: string;
+  workspaceRunId?: string;
   toolCallId?: string;
   toolName: string;
   content: string;
 };
+
+export type ToolResultRefReadCapability = {
+  kind: "tool_result_ref_read";
+  ref: string;
+  issuedByRunId?: string;
+  readonly [TOOL_RESULT_REF_READ_CAPABILITY]: true;
+};
+
+export type ToolResultOffloadReadScope = ToolResultRefReadScope & {
+  capability?: unknown;
+};
+
+export function issueToolResultRefReadCapability(input: {
+  ref: string;
+  issuedByRunId?: string;
+}): ToolResultRefReadCapability {
+  return {
+    kind: "tool_result_ref_read",
+    ref: input.ref,
+    ...(input.issuedByRunId ? { issuedByRunId: input.issuedByRunId } : {}),
+    [TOOL_RESULT_REF_READ_CAPABILITY]: true,
+  };
+}
 
 export type ToolResultOffloadRef = {
   refId: string;
@@ -18,7 +47,10 @@ export type ToolResultOffloadRef = {
 
 export type ToolResultOffloadStore = {
   write(input: ToolResultOffloadWriteInput): Promise<ToolResultOffloadRef>;
-  read(relativePath: string): Promise<string | null>;
+  read(
+    relativePath: string,
+    scope?: ToolResultOffloadReadScope,
+  ): Promise<string | null>;
 };
 
 export function createToolResultOffloadStore(options: {
@@ -37,6 +69,7 @@ export function createToolResultOffloadStore(options: {
       const relativePath = path.posix.join(rootName, `${refId}.json`);
       const absolutePath = path.join(options.configDir, relativePath);
       await writeFile(absolutePath, input.content, "utf8");
+      await writeMetadata(absolutePath, input);
 
       return {
         refId,
@@ -46,13 +79,17 @@ export function createToolResultOffloadStore(options: {
       };
     },
 
-    async read(relativePath) {
+    async read(relativePath, scope) {
       const absolutePath = path.resolve(options.configDir, relativePath);
       const allowedRoot = path.resolve(rootDir);
       if (
         absolutePath !== allowedRoot &&
         !absolutePath.startsWith(`${allowedRoot}${path.sep}`)
       ) {
+        return null;
+      }
+
+      if (!(await canReadRef(absolutePath, relativePath, scope))) {
         return null;
       }
 
@@ -65,12 +102,102 @@ export function createToolResultOffloadStore(options: {
   };
 }
 
+type ToolResultOffloadMetadata = {
+  runId?: string;
+  sessionId?: string;
+  requestId?: string;
+  workspaceRunId?: string;
+  toolCallId?: string;
+  toolName: string;
+};
+
+async function writeMetadata(
+  absolutePath: string,
+  input: ToolResultOffloadWriteInput,
+): Promise<void> {
+  const metadata: ToolResultOffloadMetadata = {
+    ...(input.runId ? { runId: input.runId } : {}),
+    ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+    ...(input.requestId ? { requestId: input.requestId } : {}),
+    ...(input.workspaceRunId ? { workspaceRunId: input.workspaceRunId } : {}),
+    ...(input.toolCallId ? { toolCallId: input.toolCallId } : {}),
+    toolName: input.toolName,
+  };
+
+  await writeFile(metadataPath(absolutePath), JSON.stringify(metadata), "utf8");
+}
+
+async function canReadRef(
+  absolutePath: string,
+  relativePath: string,
+  scope: ToolResultOffloadReadScope | undefined,
+): Promise<boolean> {
+  const metadata = await readMetadata(absolutePath);
+  if (!metadata) {
+    return true;
+  }
+  if (scope?.capability && capabilityAllowsRef(scope.capability, relativePath)) {
+    return true;
+  }
+
+  return matchesScope(metadata, scope);
+}
+
+async function readMetadata(
+  absolutePath: string,
+): Promise<ToolResultOffloadMetadata | null> {
+  try {
+    return JSON.parse(
+      await readFile(metadataPath(absolutePath), "utf8"),
+    ) as ToolResultOffloadMetadata;
+  } catch {
+    return null;
+  }
+}
+
+function metadataPath(absolutePath: string): string {
+  return `${absolutePath}.meta.json`;
+}
+
+function capabilityAllowsRef(
+  capability: unknown,
+  relativePath: string,
+): boolean {
+  if (!capability || typeof capability !== "object") {
+    return false;
+  }
+
+  const candidate = capability as Partial<ToolResultRefReadCapability>;
+  return (
+    candidate.kind === "tool_result_ref_read" &&
+    candidate.ref === relativePath &&
+    candidate[TOOL_RESULT_REF_READ_CAPABILITY] === true
+  );
+}
+
+function matchesScope(
+  metadata: ToolResultOffloadMetadata,
+  scope: ToolResultOffloadReadScope | undefined,
+): boolean {
+  const keys = ["runId", "sessionId", "requestId", "workspaceRunId"] as const;
+  for (const key of keys) {
+    if (metadata[key] && metadata[key] !== scope?.[key]) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 function createRefId(
   input: ToolResultOffloadWriteInput,
   suffix: string,
 ): string {
   return [
     input.runId,
+    input.sessionId,
+    input.requestId,
+    input.workspaceRunId,
     input.toolCallId,
     input.toolName,
     suffix,

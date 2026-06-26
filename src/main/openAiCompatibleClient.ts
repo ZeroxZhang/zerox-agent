@@ -1,3 +1,5 @@
+import { defaultRequestTimeoutMs, fetchWithTimeout } from "./fetchWithTimeout";
+
 export type ChatMessage = {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
@@ -77,7 +79,8 @@ export type EmbeddingClient = {
 
 export type StreamEvent =
   | { type: "content_delta"; text: string }
-  | { type: "tool_call_delta"; id: string; name: string; arguments: string }
+  | { type: "reasoning_delta"; text: string }
+  | { type: "tool_call_delta"; id: string; index?: number; name: string; arguments: string }
   | { type: "done"; finishReason: string };
 
 export type StreamingChatClient = ChatClient & {
@@ -85,8 +88,6 @@ export type StreamingChatClient = ChatClient & {
     request: ChatCompletionRequest,
   ): AsyncIterable<StreamEvent>;
 };
-
-const defaultRequestTimeoutMs = 300_000;
 
 export function createOpenAiCompatibleClient(options?: {
   fetch?: typeof fetch;
@@ -230,6 +231,9 @@ export function createOpenAiCompatibleClient(options?: {
                 choices?: Array<{
                   delta?: {
                     content?: string | null;
+                    reasoning_content?: unknown;
+                    reasoning?: unknown;
+                    thinking?: unknown;
                     tool_calls?: Array<{
                       index?: number;
                       id?: string;
@@ -242,6 +246,11 @@ export function createOpenAiCompatibleClient(options?: {
               };
               const delta = chunk.choices?.[0]?.delta;
               const finishReason = chunk.choices?.[0]?.finish_reason;
+              const reasoningDelta = normalizeReasoningDelta(delta);
+
+              if (reasoningDelta) {
+                yield { type: "reasoning_delta", text: reasoningDelta };
+              }
 
               if (delta?.content) {
                 yield { type: "content_delta", text: delta.content };
@@ -249,9 +258,11 @@ export function createOpenAiCompatibleClient(options?: {
 
               if (delta?.tool_calls?.length) {
                 for (const tc of delta.tool_calls) {
+                  const index = normalizeStreamToolCallIndex(tc.index);
                   yield {
                     type: "tool_call_delta",
                     id: tc.id ?? "",
+                    ...(index !== undefined ? { index } : {}),
                     name: tc.function?.name ?? "",
                     arguments: tc.function?.arguments ?? "",
                   };
@@ -284,6 +295,18 @@ function normalizeReasoningContent(message: {
     readReasoningValue(message?.thinking);
 
   return value?.trim() || undefined;
+}
+
+function normalizeReasoningDelta(delta: {
+  reasoning_content?: unknown;
+  reasoning?: unknown;
+  thinking?: unknown;
+} | undefined): string | undefined {
+  return (
+    readReasoningValue(delta?.reasoning_content) ??
+    readReasoningValue(delta?.reasoning) ??
+    readReasoningValue(delta?.thinking)
+  );
 }
 
 function readReasoningValue(value: unknown): string | undefined {
@@ -335,6 +358,13 @@ function normalizeCompletionUsage(
 }
 
 function normalizeTokenCount(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return undefined;
+  }
+  return Math.max(0, Math.floor(value));
+}
+
+function normalizeStreamToolCallIndex(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return undefined;
   }
@@ -480,45 +510,4 @@ function buildJsonRequest(options: {
     },
     body: JSON.stringify(options.body),
   };
-}
-
-async function fetchWithTimeout(
-  fetchImpl: typeof fetch,
-  url: string,
-  init: RequestInit,
-  timeoutMs: number,
-  label: string,
-  externalSignal?: AbortSignal,
-): Promise<Response> {
-  const controller = new AbortController();
-  let didTimeout = false;
-  const abortFromExternalSignal = () => controller.abort();
-  const timeout = setTimeout(() => {
-    didTimeout = true;
-    controller.abort();
-  }, timeoutMs);
-
-  try {
-    if (externalSignal?.aborted) {
-      controller.abort();
-    } else {
-      externalSignal?.addEventListener("abort", abortFromExternalSignal, {
-        once: true,
-      });
-    }
-
-    return await fetchImpl(url, {
-      ...init,
-      signal: controller.signal,
-    });
-  } catch (error) {
-    if (didTimeout) {
-      throw new Error(`${label} request timed out after ${timeoutMs} ms.`);
-    }
-
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-    externalSignal?.removeEventListener("abort", abortFromExternalSignal);
-  }
 }

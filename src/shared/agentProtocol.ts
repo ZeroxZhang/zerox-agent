@@ -40,6 +40,7 @@ export type AgentSystemPromptOptions = {
   modelId?: string;
   workspaceRoot?: string;
   currentDate?: string;
+  timeZone?: string;
 };
 
 const supportedTools = new Set<AgentToolName>([
@@ -329,7 +330,7 @@ export function buildToolDefinitions(): ToolDefinition[] {
           properties: {
             workspaceRoot: {
               type: "string",
-              description: "要搜索的仓库或工作区绝对路径",
+              description: "可选；省略时使用当前会话或任务工作区",
             },
             query: {
               type: "string",
@@ -340,7 +341,7 @@ export function buildToolDefinitions(): ToolDefinition[] {
               description: "最多返回结果数，默认 20，最大 100",
             },
           },
-          required: ["workspaceRoot", "query"],
+          required: ["query"],
         },
       },
     },
@@ -355,10 +356,9 @@ export function buildToolDefinitions(): ToolDefinition[] {
           properties: {
             workspaceRoot: {
               type: "string",
-              description: "Git 仓库工作区绝对路径",
+              description: "可选；省略时使用当前会话或任务工作区",
             },
           },
-          required: ["workspaceRoot"],
         },
       },
     },
@@ -373,14 +373,13 @@ export function buildToolDefinitions(): ToolDefinition[] {
           properties: {
             workspaceRoot: {
               type: "string",
-              description: "Git 仓库工作区绝对路径",
+              description: "可选；省略时使用当前会话或任务工作区",
             },
             staged: {
               type: "boolean",
               description: "是否读取 staged/cached diff，默认 false",
             },
           },
-          required: ["workspaceRoot"],
         },
       },
     },
@@ -395,7 +394,7 @@ export function buildToolDefinitions(): ToolDefinition[] {
           properties: {
             workspaceRoot: {
               type: "string",
-              description: "运行测试命令的工作区绝对路径",
+              description: "可选；省略时使用当前会话或任务工作区",
             },
             command: {
               type: "string",
@@ -406,7 +405,7 @@ export function buildToolDefinitions(): ToolDefinition[] {
               description: "可选超时时间，范围 1000-600000 ms，默认 120000 ms",
             },
           },
-          required: ["workspaceRoot", "command"],
+          required: ["command"],
         },
       },
     },
@@ -468,7 +467,7 @@ export function buildToolDefinitions(): ToolDefinition[] {
       function: {
         name: "web_search",
         description:
-          "使用 DuckDuckGo 搜索网页并返回结果列表（标题、URL、摘要）。需要任务授权 web.search 权限。",
+          "使用 DuckDuckGo 搜索网页并返回结果列表（标题、URL、摘要）。需要任务授权 web.search 权限。日期敏感查询必须先解析相对日期，并在 query 中包含绝对日期。",
         parameters: {
           type: "object",
           properties: {
@@ -633,6 +632,7 @@ export function buildAgentSystemPrompt(
     modelId: options.modelId,
     workspaceRoot: options.workspaceRoot,
     currentDate: options.currentDate,
+    timeZone: options.timeZone,
     mode: "agent",
   }).prompt;
 }

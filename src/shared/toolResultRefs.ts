@@ -15,6 +15,15 @@ export type ReadToolResultRefResult =
     }
   | { ok: false; message: string };
 
+export type ToolResultRefReadScope = {
+  runId?: string;
+  sessionId?: string;
+  requestId?: string;
+  workspaceRunId?: string;
+};
+
+export type ReadToolResultRefOptions = ToolResultRefReadScope;
+
 export function extractToolResultRef(value: unknown): string | null {
   if (!value || typeof value !== "object") {
     return null;

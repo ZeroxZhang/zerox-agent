@@ -47,7 +47,7 @@ export function getSmokeModeOptions(
 export function getSmokeRendererCheckScript(
   options: Pick<
     SmokeModeOptions,
-    "readySelector" | "requiredTexts" | "requireDesktopApi"
+    "readySelector" | "requiredTexts" | "requireDesktopApi" | "timeoutMs"
   > =
     getSmokeModeOptions({}),
 ): string {
@@ -56,7 +56,7 @@ export function getSmokeRendererCheckScript(
     const requiredTexts = ${JSON.stringify(options.requiredTexts)};
     const requireDesktopApi = ${JSON.stringify(options.requireDesktopApi)};
     const startedAt = Date.now();
-    const timeoutMs = 4000;
+    const timeoutMs = ${JSON.stringify(options.timeoutMs)};
 
     function snapshot() {
       const readyElement = document.querySelector(readySelector);

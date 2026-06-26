@@ -7,6 +7,7 @@ import type {
 } from "../shared/agentBootstrap";
 import type {
   CancelChatMessageResult,
+  ChatStreamEvent,
   ChatSessionListItem,
   ChatSessionOperationResult,
   ChatSessionRecord,
@@ -14,6 +15,8 @@ import type {
   GoalProgressEvent,
   SendChatMessageInput,
   SendChatMessageResult,
+  SkillInputResponse,
+  SkillInputResponseResult,
 } from "../shared/chat";
 import type { DesktopRuntimeInfo } from "../shared/desktopRuntime";
 import type { AgentEvalReport } from "../shared/agentEval";
@@ -23,7 +26,10 @@ import type {
   GenerateEvalCandidateForRunResult,
   PromoteEvalCandidateResult,
 } from "../shared/agentEvalCandidate";
-import type { ReadToolResultRefResult } from "../shared/toolResultRefs";
+import type {
+  ReadToolResultRefOptions,
+  ReadToolResultRefResult,
+} from "../shared/toolResultRefs";
 import type {
   CreateMemoryResult,
   DeleteMemoryResult,
@@ -40,6 +46,12 @@ import type {
   ReadMemoryProfileResult,
   SaveMemoryProfileResult,
 } from "../shared/memoryProfile";
+import type {
+  RawHistoryAroundOptions,
+  RawHistoryAroundResult,
+  RawHistorySearchOptions,
+  RawHistorySearchResult,
+} from "../shared/rawHistory";
 import type {
   AgentLearningCandidate,
   AgentLearningListOptions,
@@ -99,6 +111,13 @@ const KERNEL_IPC = {
   updatePermissionRules: "kernel:updatePermissionRules",
   respondPermission: "kernel:respondPermission",
 } as const;
+
+export type AgentRunsChangedEvent = {
+  reason: "active_execution_changed" | "run_updated";
+  runId?: string;
+  taskId?: string;
+  createdAt: string;
+};
 
 export type CreateGoalInput = {
   description: string;
@@ -210,12 +229,14 @@ const buildingAgent = {
     cleanup?: AgentWorkspaceCleanup;
   }): Promise<AgentWorkspace> =>
     ipcRenderer.invoke("agentWorkspaces:createTemporary", input),
+  openProjectAgentWorkspace: (): Promise<AgentWorkspace | null> =>
+    ipcRenderer.invoke("agentWorkspaces:openProject"),
   createGitWorktreeAgentWorkspace: (input: {
     name: string;
     repositoryRoot: string;
     branch: string;
   }): Promise<AgentWorkspace> =>
-    ipcRenderer.invoke("agentWorkspaces:createGitWorktree", input),
+    ipcRenderer.invoke("agentWorkspaces:requestGitWorktree", input),
   listMultiAgentSessions: (): Promise<MultiAgentSession[]> =>
     ipcRenderer.invoke("multiAgentSessions:list"),
   listAgentRunTrajectory: (runId: string): Promise<AgentTrajectoryEvent[]> =>
@@ -250,8 +271,11 @@ const buildingAgent = {
   getGoal: (goalId: string): Promise<Goal | null> =>
     ipcRenderer.invoke("goal:get", goalId),
   listActiveGoals: (): Promise<Goal[]> => ipcRenderer.invoke("goal:listActive"),
-  readToolResultRef: (ref: string): Promise<ReadToolResultRefResult> =>
-    ipcRenderer.invoke("toolResults:readRef", ref),
+  readToolResultRef: (
+    ref: string,
+    options?: ReadToolResultRefOptions,
+  ): Promise<ReadToolResultRefResult> =>
+    ipcRenderer.invoke("toolResults:readRef", ref, options),
   getAgentEvalReport: (): Promise<AgentEvalReport> =>
     ipcRenderer.invoke("agentQuality:getEvalReport"),
   listEvalCandidates: (
@@ -284,6 +308,16 @@ const buildingAgent = {
     ipcRenderer.on("agent:streamEvent", handler);
     return () => {
       ipcRenderer.removeListener("agent:streamEvent", handler);
+    };
+  },
+  onAgentRunsChanged: (callback: (event: AgentRunsChangedEvent) => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      data: AgentRunsChangedEvent,
+    ) => callback(data);
+    ipcRenderer.on("agentRuns:changed", handler);
+    return () => {
+      ipcRenderer.removeListener("agentRuns:changed", handler);
     };
   },
   onKernelEvent: (callback: (event: KernelEvent) => void) => {
@@ -343,6 +377,20 @@ const buildingAgent = {
     requestId?: string,
   ): Promise<CancelChatMessageResult> =>
     ipcRenderer.invoke("chat:cancelMessage", requestId),
+  onChatStreamEvent: (callback: (event: ChatStreamEvent) => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      data: ChatStreamEvent,
+    ) => callback(data);
+    ipcRenderer.on("chat:streamEvent", handler);
+    return () => {
+      ipcRenderer.removeListener("chat:streamEvent", handler);
+    };
+  },
+  respondSkillInput: (
+    input: SkillInputResponse,
+  ): Promise<SkillInputResponseResult> =>
+    ipcRenderer.invoke("chat:respondSkillInput", input),
   onChatTaskStatusEvent: (callback: (event: ChatTaskStatusEvent) => void) => {
     const handler = (
       _event: Electron.IpcRendererEvent,
@@ -385,6 +433,11 @@ const buildingAgent = {
     sessionId: string,
   ): Promise<ChatSessionOperationResult> =>
     ipcRenderer.invoke("chatSessions:restore", sessionId),
+  renameChatSession: (
+    sessionId: string,
+    title: string,
+  ): Promise<ChatSessionOperationResult> =>
+    ipcRenderer.invoke("chatSessions:rename", sessionId, title),
   deleteChatSession: (
     sessionId: string,
   ): Promise<ChatSessionOperationResult> =>
@@ -394,6 +447,13 @@ const buildingAgent = {
   searchMemories: (
     options: MemorySearchOptions,
   ): Promise<MemorySearchResult[]> => ipcRenderer.invoke("memory:search", options),
+  searchRawHistory: (
+    options: RawHistorySearchOptions,
+  ): Promise<RawHistorySearchResult[]> => ipcRenderer.invoke("history:search", options),
+  readRawHistoryAround: (
+    options: RawHistoryAroundOptions,
+  ): Promise<RawHistoryAroundResult | null> =>
+    ipcRenderer.invoke("history:around", options),
   createMemory: (input: MemoryInput): Promise<CreateMemoryResult> =>
     ipcRenderer.invoke("memory:create", input),
   deleteMemory: (memoryId: string): Promise<DeleteMemoryResult> =>

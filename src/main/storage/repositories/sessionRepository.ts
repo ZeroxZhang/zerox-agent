@@ -172,54 +172,100 @@ export function createSessionRepository(storage: Storage): SessionRepository {
       options: ChatMessageSearchOptions,
     ): ChatMessageSearchResult[] {
       const limit = options.limit ?? 50;
-      const terms = options.query
-        .toLowerCase()
-        .split(/[^a-z0-9一-龥]+/i)
-        .filter(Boolean);
+      const terms = tokenizeSearchQuery(options.query);
       if (!terms.length) return [];
-      const like = `%${options.query.toLowerCase()}%`;
       const rows = options.sessionId
         ? (db
             .prepare(
-              `SELECT m.id, m.session_id, m.role, m.content, m.created_at, s.title AS session_title
+              `SELECT m.id, m.session_id, m.role, m.content, m.payload, m.created_at, s.title AS session_title
                FROM chat_messages m JOIN sessions s ON s.id = m.session_id
-               WHERE m.session_id = ? AND LOWER(m.content) LIKE ?
-               ORDER BY m.created_at DESC LIMIT ?`,
+               WHERE m.session_id = ?
+               ORDER BY m.created_at DESC`,
             )
-            .all(options.sessionId, like, limit) as Array<{
+            .all(options.sessionId) as Array<{
             id: string;
             session_id: string;
             role: string;
             content: string;
+            payload: string;
             created_at: string;
             session_title: string | null;
           }>)
         : (db
             .prepare(
-              `SELECT m.id, m.session_id, m.role, m.content, m.created_at, s.title AS session_title
+              `SELECT m.id, m.session_id, m.role, m.content, m.payload, m.created_at, s.title AS session_title
                FROM chat_messages m JOIN sessions s ON s.id = m.session_id
-               WHERE LOWER(m.content) LIKE ?
-               ORDER BY m.created_at DESC LIMIT ?`,
+               ORDER BY m.created_at DESC`,
             )
-            .all(like, limit) as Array<{
+            .all() as Array<{
             id: string;
             session_id: string;
             role: string;
             content: string;
+            payload: string;
             created_at: string;
             session_title: string | null;
           }>);
-      return rows.map((r) => ({
-        sessionId: r.session_id,
-        sessionTitle: r.session_title ?? "",
-        messageId: r.id,
-        role: r.role as ChatMessageSearchResult["role"],
-        content: r.content,
-        createdAt: r.created_at,
-        score: terms.length,
-        matchedTerms: terms,
-      }));
+      return rows
+        .map((r) => scoreMessageRow(r, terms))
+        .filter((result) => result.score > 0)
+        .sort(
+          (left, right) =>
+            right.score - left.score ||
+            right.createdAt.localeCompare(left.createdAt),
+        )
+        .slice(0, limit);
     },
+  };
+}
+
+function tokenizeSearchQuery(value: string): string[] {
+  return value
+    .toLowerCase()
+    .split(/[^a-z0-9\u4e00-\u9fa5]+/i)
+    .map((token) => token.trim())
+    .filter(Boolean);
+}
+
+function scoreMessageRow(
+  row: {
+    id: string;
+    session_id: string;
+    role: string;
+    content: string;
+    payload: string;
+    created_at: string;
+    session_title: string | null;
+  },
+  terms: string[],
+): ChatMessageSearchResult {
+  const content = row.content.toLowerCase();
+  const title = (row.session_title ?? "").toLowerCase();
+  const matchedTerms: string[] = [];
+  let score = 0;
+
+  for (const term of terms) {
+    const contentMatch = content.includes(term);
+    const titleMatch = title.includes(term);
+    if (!contentMatch && !titleMatch) {
+      continue;
+    }
+
+    matchedTerms.push(term);
+    score += contentMatch ? 2 : 0;
+    score += titleMatch ? 1 : 0;
+  }
+
+  const payload = parseJson<{ id?: unknown }>(row.payload);
+  return {
+    sessionId: row.session_id,
+    sessionTitle: row.session_title ?? "",
+    messageId: typeof payload?.id === "string" ? payload.id : row.id,
+    role: row.role as ChatMessageSearchResult["role"],
+    content: row.content,
+    createdAt: row.created_at,
+    score,
+    matchedTerms,
   };
 }
 

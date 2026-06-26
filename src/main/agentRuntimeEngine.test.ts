@@ -108,6 +108,88 @@ describe("agent runtime engine", () => {
     expect(store.writes[0].content).toContain(largeContent);
   });
 
+  it("lets the owning runtime run read its scoped offloaded tool result ref", async () => {
+    const largeContent = "scoped result ".repeat(80);
+    const capturedMessages: ChatMessage[][] = [];
+    const store = createScopedRecordingOffloadStore();
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore([]),
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: {
+        async complete(request) {
+          capturedMessages.push(request.messages);
+          if (capturedMessages.length === 1) {
+            return {
+              content: null,
+              toolCalls: [
+                createToolCall("call_read", "file_read", {
+                  path: "~/Downloads/notes.md",
+                }),
+              ],
+              finishReason: "tool_calls",
+            };
+          }
+          if (capturedMessages.length === 2) {
+            return {
+              content: null,
+              toolCalls: [
+                createToolCall("call_ref", "tool_result_read", {
+                  ref: "tool-result-refs/ref_1.json",
+                }),
+              ],
+              finishReason: "tool_calls",
+            };
+          }
+          return finalResponse("Read scoped ref");
+        },
+      },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: {
+        async execute(request, executionOptions) {
+          if (request.toolName === "tool_result_read") {
+            const content = await store.read(
+              String(request.args.ref ?? ""),
+              executionOptions?.toolResultReadScope,
+            );
+            return content
+              ? { ok: true, result: { content } }
+              : { ok: false, error: "scoped ref denied" };
+          }
+
+          return {
+            ok: true,
+            result: { content: largeContent },
+          };
+        },
+      } as AgentToolExecutor,
+      toolResultOffloadStore: store,
+      toolResultOffloadThreshold: 120,
+      createId: createSequentialId("runtime_scope"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+
+    const result = await engine.startTask("task_123");
+
+    expect(result).toMatchObject({
+      ok: true,
+      run: { status: "succeeded", summary: "Read scoped ref" },
+    });
+    const refReadToolMessage = capturedMessages[2].find(
+      (message) =>
+        message.role === "tool" && message.tool_call_id === "call_ref",
+    );
+    expect(JSON.parse(refReadToolMessage?.content ?? "{}")).toMatchObject({
+      tool: "tool_result_read",
+      ok: true,
+    });
+    expect(store.reads.at(-1)?.scope).toMatchObject({
+      runId: "runtime_scope_1",
+    });
+  });
+
   it("runs a task, executes an authorized tool, and writes durable checkpoints", async () => {
     const savedCheckpoints: AgentExecutionCheckpoint[] = [];
     const executedTools: string[] = [];
@@ -294,6 +376,11 @@ describe("agent runtime engine", () => {
       "model_request",
       "model_response",
       "tool_call",
+      "tool_invocation",
+      "tool_invocation",
+      "tool_invocation",
+      "tool_invocation",
+      "tool_invocation",
       "tool_result",
       "checkpoint_written",
       "model_request",
@@ -305,6 +392,11 @@ describe("agent runtime engine", () => {
     expect(trajectoryEvents.every((event) => event.runId === "trajectory_1")).toBe(
       true,
     );
+    expect(
+      trajectoryEvents
+        .filter((event) => event.type === "tool_invocation")
+        .map((event) => event.payload.invocationStatus),
+    ).toEqual(["proposed", "visible", "authorized", "running", "completed"]);
     expect(trajectoryEvents.every((event) => event.redaction.containsApiKey === false)).toBe(
       true,
     );
@@ -548,8 +640,13 @@ describe("agent runtime engine", () => {
       "model_request",
       "model_response",
       "tool_call",
+      "tool_invocation",
+      "tool_invocation",
+      "tool_invocation",
       "native_tool_invocation",
+      "tool_invocation",
       "native_tool_observation",
+      "tool_invocation",
       "tool_result",
       "checkpoint_written",
       "model_request",
@@ -581,6 +678,11 @@ describe("agent runtime engine", () => {
         }),
       ]),
     );
+    expect(
+      trajectoryEvents
+        .filter((event) => event.type === "tool_invocation")
+        .map((event) => event.payload.invocationStatus),
+    ).toEqual(["proposed", "visible", "authorized", "running", "completed"]);
   });
 
   it("passes dynamic registry source to runtime tool authorization", async () => {
@@ -1559,6 +1661,47 @@ function createRecordingOffloadStore(): ToolResultOffloadStore & {
     },
     async read() {
       return null;
+    },
+  };
+}
+
+function createScopedRecordingOffloadStore(): ToolResultOffloadStore & {
+  writes: ToolResultOffloadWriteInput[];
+  reads: Array<{
+    relativePath: string;
+    scope: Parameters<ToolResultOffloadStore["read"]>[1];
+  }>;
+} {
+  const writes: ToolResultOffloadWriteInput[] = [];
+  const reads: Array<{
+    relativePath: string;
+    scope: Parameters<ToolResultOffloadStore["read"]>[1];
+  }> = [];
+  const refs = new Map<string, ToolResultOffloadWriteInput>();
+
+  return {
+    writes,
+    reads,
+    async write(input) {
+      writes.push(input);
+      refs.set("tool-result-refs/ref_1.json", input);
+      return {
+        refId: "ref_1",
+        relativePath: "tool-result-refs/ref_1.json",
+        absolutePath: "/tmp/tool-result-refs/ref_1.json",
+        bytesWritten: Buffer.byteLength(input.content, "utf8"),
+      };
+    },
+    async read(relativePath, scope) {
+      reads.push({ relativePath, scope });
+      const input = refs.get(relativePath);
+      if (!input) {
+        return null;
+      }
+      if (input.runId && input.runId !== scope?.runId) {
+        return null;
+      }
+      return input.content;
     },
   };
 }

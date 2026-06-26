@@ -50,11 +50,45 @@
 
 <h2 id="overview-en">Overview</h2>
 
-**Zerox Agent** is a local-first desktop control plane for personal AI agents. The current release is **v2.4.5**. The name derives from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
+**Zerox Agent** is a local-first desktop control plane for personal AI agents. The current release is **v2.8.5**. The name derives from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
 
 It is not a chat wrapper or a generic hosted agent surface. It runs locally, configures OpenAI-compatible models, scans local `SKILL.md` skill files, executes recoverable agent runs, invokes permission-controlled tools, tracks parent/child multi-agent sessions, persists experiential knowledge into local long-term memory, and keeps learning user-reviewed before it changes future behavior.
 
 The product boundary is documented in [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md): Zerox optimizes for trusted local control, recoverable agent runs, explicit permissions, workspace-scoped runs, observable trajectories, parent/child multi-agent sessions, and user-reviewed learning. Runtime, workspace, and learning details live in [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md), [`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md), and [`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md).
+
+## v2.8.5
+
+Zerox Agent v2.8.5 is a hotfix for reasoning-only final answers. Some model providers can emit an answer in `reasoningContent` while leaving formal `content` empty after tool use; the agent loop now treats that visible reasoning answer as the successful final reply and persists it into the assistant message history instead of showing "模型没有返回可用回复".
+
+This specifically fixes the case where the right-side latest-thought panel contains the answer but the main chat transcript reports no usable response.
+
+## v2.8.4
+
+Zerox Agent v2.8.4 is a hotfix for empty model responses after tool failures. When a tool fails and the model returns no final content on the follow-up turn, the agent loop now reports a Chinese diagnostic summary with the failed tool, error, and recent arguments instead of showing the generic English fallback `Agent did not produce a response.`
+
+This keeps user-visible chat failures actionable even when the model emits useful reasoning internally but fails to produce a formal answer.
+
+## v2.8.3
+
+Zerox Agent v2.8.3 is a hotfix for local-time and relative-date semantics in chat and agent runs. Chat mode now receives a protected local date context before memory guidance, including today, yesterday, the day before yesterday, and tomorrow in the user's system timezone. Date-sensitive web searches must include the resolved absolute date, and stale search results whose dates conflict with that anchor must be rejected or called out.
+
+The hotfix also removes UTC ISO-date truncation from chat turns, the agent loop, scheduled runtime execution, and the runner service. Manual memory can still help the model, but current-date interpretation no longer depends on memory recall.
+
+## v2.8.2
+
+Zerox Agent v2.8.2 refines the chat-first surface around daily use. The session more menu now supports renaming conversations and keeps the sidebar and active chat header in sync. Main transcript rendering is cleaner and more readable, with structured metadata, stronger markdown hierarchy, gray inline-code chips, and dedicated fenced-code blocks with language headers.
+
+v2.8.2 also fixes message time semantics: user messages keep ISO timestamps and update relative labels over time, while assistant replies render in the user's local timezone with readable labels. Explicitly selected skills are now preloaded by the main process and injected as mandatory execution instructions, so auto-mode runs no longer depend on the model deciding whether to call `skill_load` before following the selected skill.
+
+## v2.8.1
+
+Zerox Agent v2.8.1 ships the 2.8 runtime orchestration and memory line as the current release. The 2.8 line adds a first-class `ExecutionContextPackage`, permissioned lazy `skill_load` and `skill_resource_list` tools, durable tool invocation ledgers, dynamic registry source-health and argument validation, goal/task/delegation evidence convergence, checkpoint-boundary rebuilds that protect skill/tool-call pairs, and a two-layer memory model that keeps curated reviewed memory separate from raw history search.
+
+v2.8.1 also tightens the live chat runtime surface without changing the main transcript or right-side evidence rail: the real-time thinking and tool preview rows now use compact icon-only disclosure controls, warm app-native surfaces, clearer status dots, and sans-serif one-line summaries; the selected `@skill` capsule stays in the lower composer area but aligns to the same height and baseline as the right-side composer action buttons.
+
+## v2.7.0
+
+Zerox Agent v2.7.0 makes Chat the primary interaction surface. It removes Overview from primary navigation, adds Chat-first streamed answers with distinct thinking/process output, supports guided skill input before execution, unifies local icons, and preserves local-first permission and workspace boundaries.
 
 v2.1.2 stabilized the command-first agent release after the v2.1.1 UI/runtime controls. Chat sessions now use short deterministic names instead of leaking full slash-command prompts into the header, long live-status capsules stay collapsed until the user expands them, planner JSON recovery handles fenced or explanatory model responses, offloaded tool results can be read back through `tool_result_read` or compatible `file_read` refs, and Goal Mode now resolves natural-language output paths such as `/Users/name/Downloads目录下的文件` back to the real folder before checking artifact evidence. Milestone `running` state is persisted before runtime dispatch, so the right progress rail updates while work is happening instead of after the loop finishes.
 
@@ -70,6 +104,14 @@ v2.3.5 adds Run Graph Harness evidence across the shared model, Runs UI, and epi
 v2.4.0 activates the iteration-roadmap P1–P8: a SQLite unified storage layer (better-sqlite3) with versioned migrations and dual-write migration, a provider abstraction with native Anthropic/Gemini + prompt-cache prefix reuse, tree-sitter-style shell analysis feeding both permission layers, a checkpoint-writer fork actor, an actor/workflow runtime (deep-research workflow), dream/distill self-improvement, and streaming tool-calling + max-mode + MCP multi-transport. runGraph gains actor/workflow/dream/distill/model_response nodes and token-cost aggregation. Runs now project runtime, trajectory, kernel, goal, milestone, tool, checkpoint, summary, and gate evidence into one stable graph; gate nodes are explicit and edge-safe; validation episodes export `run-graph.json` and `eval-candidate.json`; and `episode:export --latest-validation` packages the most recent local validation run for review.
 
 v2.4.1 adds managed chat history in the workspace sidebar: each session row shows the latest assistant-response time and cumulative token usage, hover actions expose archive/delete controls, and archived sessions are collected into a collapsible archive group while preserving restore and delete operations.
+
+v2.6.0 is a hardening release for the local control plane. It closes workspace and symlink escape paths, makes approved shell commands enforce relative and absolute path boundaries, adds recoverable JSONL reads with corrupt-line evidence, preserves SQLite migration identity/state, applies local timeouts to native Anthropic/Gemini provider calls, makes offloaded tool-result refs run-scoped and renderer-safe, fixes multi-tool pause/resume histories, gates git worktree creation behind explicit approval or trusted repository policy, keeps Runs and chat session state live, and wires subprocess tool-worker isolation with timeout recycling. The release passed independent QA acceptance plus `npm run verify`, `npm run smoke:prod`, and `npm run harness:check`.
+
+v2.5.0 makes workspace a first-class execution boundary for chat and skill runs. The composer now exposes a workspace selector, sessions persist workspace identity, chat resolves an `AgentRunContext` plus `taskId`/`runtimeTask` before entering the agent loop, and native code tools default `workspaceRoot` from that run context instead of asking the model to guess paths. Skill invocation keeps the `@skill` fuzzy-selection chip, now backed by a staged shared `SkillExecutionContract`, while chat activity is dual-written to session activity and a workspace-run ledger for replay-grade process records. The app also reuses one dynamic tool executor so skill/MCP tools remain available after initialization.
+
+v2.4.7 hardens long skill-driven chat runs after packaged-app testing. The agent loop now gives the model one recovery turn after repeated same-class tool failures before pausing, classifies missing file paths as `not_found`, and includes the latest tool error/arguments in pause summaries and chat status events. This keeps `@onepager` project-analysis runs from stopping immediately on a few guessed paths and makes any remaining failure diagnosable from the UI.
+
+v2.4.6 restores explicit skill invocation from chat and makes live activity recoverable across navigation. The composer now supports `@skill` fuzzy selection (for example `@one` -> `onepager`), selected skills render as a highlighted chip, and chat sends the selected skill as an execution contract so the runtime injects the full `SKILL.md` body and records `skill_invoked` evidence. Chat activity events are persisted to the session and replayed when returning to a conversation, so the right progress/context rail rebuilds from real status history instead of transient renderer state.
 
 v2.4.5 rebuilds the system prompt architecture with a MiMo-Code inspired layered assembly:
 
@@ -95,7 +137,7 @@ v2.4.0 ships the iteration-roadmap P1–P8 activation (SQLite storage, provider 
 | **Skill-Driven** | Behavior is defined by composable `SKILL.md` files supporting agent mode (LLM-driven) and script mode, with optional MCP tool extensions. |
 | **Observable** | Every run produces a structured event timeline across memory lookup, model calls, public reasoning fields, tool calls, pauses, cancellation, and completion. |
 | **Recoverable** | Agent work should be inspectable, cancelable, and resumable instead of disappearing into one-shot chat turns or hard-stopping at a fixed loop limit. |
-| **Modular** | The primary app flow is Chat, Overview, Runs, Tasks, and Settings. Skills, Tools, Memory, Learning, and Evals live as collapsed secondary Settings sections; legacy `#goals` hashes redirect to Chat. |
+| **Modular** | The primary app flow is Chat, Runs, Tasks, and Settings. Overview diagnostics live under Settings, and legacy `#goals` hashes redirect to Chat. |
 
 ---
 
@@ -582,7 +624,7 @@ can't be opened." The image is usually valid; remove the quarantine attribute
 before opening:
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/"Zerox.Agent-2.4.5-arm64.dmg"
+xattr -dr com.apple.quarantine ~/Downloads/"Zerox.Agent-2.8.5-arm64.dmg"
 ```
 
 If you already dragged the app into Applications, run:
@@ -613,7 +655,7 @@ npm run episode:export -- --config-dir <userData/config> --latest-validation
 npm run verify        # Tests + build + deterministic eval
 ```
 
-As of v2.4.5, `npm run verify` covers the Vitest suite, the production build, agent evals, and memory evals. The suite currently includes 159 Vitest files / 992 tests, 26 deterministic agent eval fixtures, and 2 memory eval fixtures. Agent evals include native code engineering, research writing, reflection-after-test-failure, retry-budget exhaustion, context compaction, tool-call checkpointing, model retry, strategy-guard fragmentation recovery, episode eval-candidate, child handoff review-gate, goal-mode recovery/control, bounded-autonomy golden paths, Agent Runtime Kernel event replay, permission-rule behavior, and deterministic local artifact provenance acceptance. session-native Goal Mode architecture is documented in `docs/architecture/agent-goal-mode.md`, including the artifact evidence contract, and Agent Runtime Kernel architecture is documented in `docs/architecture/agent-runtime.md`, including the Kernel Event Bridge, checkpointed compaction, retry evidence, judge verdicts, event replay, and rule-based permission evidence. Set `BUILDING_AGENT_CONFIG_DIR=/path/to/config` when running `npm run eval:agent` or `npm run harness:score` to include local promoted fixtures and pending eval candidates from that config directory. `npm run episode:export` writes local evidence packages with `run-graph.json`, `eval-candidate.json`, `trajectory.jsonl`, and verification metadata; `--latest-validation` exports the run captured by `agent-validation.json`. `npm run harness:score` emits the seven-category ETCLOVG score used by Overview as a local quality signal and now includes adversarial eval, goal-mode pass rate, goal-judge pass rate, plus the ACI/context report; Overview also displays the native Agent Capability score.
+As of v2.8.5, `npm run verify` covers the Vitest suite, the production build, agent evals, and memory evals. The suite currently includes 176 Vitest files / 1191 tests, 26 deterministic agent eval fixtures, and 2 memory eval fixtures. Agent evals include native code engineering, research writing, reflection-after-test-failure, retry-budget exhaustion, context compaction, tool-call checkpointing, model retry, strategy-guard fragmentation recovery, episode eval-candidate, child handoff review-gate, goal-mode recovery/control, bounded-autonomy golden paths, Agent Runtime Kernel event replay, permission-rule behavior, deterministic local artifact provenance acceptance, 2.8 execution-context/tool-ledger/history contracts, and memory-history scope checks. session-native Goal Mode architecture is documented in `docs/architecture/agent-goal-mode.md`, including the artifact evidence contract, and Agent Runtime Kernel architecture is documented in `docs/architecture/agent-runtime.md`, including the Kernel Event Bridge, checkpointed compaction, retry evidence, judge verdicts, event replay, and rule-based permission evidence. Set `BUILDING_AGENT_CONFIG_DIR=/path/to/config` when running `npm run eval:agent` or `npm run harness:score` to include local promoted fixtures and pending eval candidates from that config directory. `npm run episode:export` writes local evidence packages with `run-graph.json`, `eval-candidate.json`, `trajectory.jsonl`, and verification metadata; `--latest-validation` exports the run captured by `agent-validation.json`. `npm run harness:score` emits the seven-category ETCLOVG score used by Overview as a local quality signal and now includes adversarial eval, goal-mode pass rate, goal-judge pass rate, plus the ACI/context report; Overview also displays the native Agent Capability score.
 
 Deterministic local artifact goals are accepted only when the task contract, canonical destination, generated artifact, and provenance evidence agree. Location/resource canonicalization normalizes home-relative, workspace-relative, Desktop, Downloads, and absolute roots before sandbox and acceptance checks. Provenance-backed acceptance requires the artifact sidecar to match the run, goal, artifact id, canonical destination, and content hash. v2.4.1 passed the command-line verification gate, production smoke, and harness check for the managed chat-history release; release metadata now matches the v2.4.1 app version.
 
@@ -627,7 +669,7 @@ Deterministic local artifact goals are accepted only when the task contract, can
 
 <h2 id="roadmap">Roadmap</h2>
 
-Current version: v2.4.5.
+Current version: v2.8.5.
 
 Recently shipped:
 
@@ -654,6 +696,15 @@ Recently shipped:
 - [x] v2.3.6 deterministic local artifact path through P11.7: task contracts, canonical local resources, provenance-backed acceptance, deterministic native artifact pipeline, command-line verification, independent packaged-app computer-use acceptance, release metadata bump, and macOS distribution handoff
 - [x] v2.4.0 iteration-roadmap P1-P8 activation with unified storage, provider abstraction, actor/workflow runtime, dream/distill, streaming/max-mode/MCP, and token-aware runGraph evidence
 - [x] v2.4.1 managed chat history with archive/delete actions, collapsible archived sessions, latest-response time, and cumulative token usage in the workspace sidebar
+- [x] v2.5.0 workspace-bound skill execution with first-class workspace selection, shared skill execution contracts, session activity recovery, and workspace-run ledgers
+- [x] v2.6.0 hardening release with sandbox escape fixes, recoverable storage, provider timeouts, scoped tool-result refs, workflow replay correctness, renderer state coherence, and subprocess worker isolation
+- [x] v2.7.0 Chat-first interaction release with primary Chat entry, streamed answers, distinct thinking/process output, guided skill input, local icon unification, packaged-app smoke, and independent packaged-app acceptance
+- [x] v2.8.0 runtime orchestration and memory overhaul with execution context packages, lazy skill loading, tool invocation ledgers, checkpoint-boundary rebuild, raw history search, scoped memory recall, and Run Graph evidence
+- [x] v2.8.1 runtime surface polish with icon-only thinking/tool disclosure controls and a composer-bottom `@skill` capsule aligned to the action button rhythm
+- [x] v2.8.2 chat rename, transcript readability, message time, and strict selected-skill execution
+- [x] v2.8.3 local timezone and relative-date hotfix for chat, agent runs, and date-sensitive web search
+- [x] v2.8.4 empty-response hotfix after tool failures, with actionable Chinese diagnostics
+- [x] v2.8.5 reasoning-only final answer hotfix for model providers that omit formal content
 
 Planned:
 
@@ -690,11 +741,45 @@ Planned:
 
 ## 项目概述
 
-**Zerox Agent** 是一个本地优先的桌面智能体控制台，当前版本是 **v2.4.5**。名字取自 **Zero + X**——从留白开始，把未知的本地工作流转成可观察、受权限管控、可恢复的 Agent 运行。
+**Zerox Agent** 是一个本地优先的桌面智能体控制台，当前版本是 **v2.8.5**。名字取自 **Zero + X**——从留白开始，把未知的本地工作流转成可观察、受权限管控、可恢复的 Agent 运行。
 
 它不是聊天壳，也不是泛用云端 Agent 入口。它运行在本机：配置 OpenAI‑compatible 模型、扫描本地 `SKILL.md` 技能文件、执行可恢复的 Agent 运行、调用受权限管控的工具、跟踪父子多 Agent 会话、把经验和知识写入本地长期记忆，并且在改变未来行为前保留用户审核。
 
 产品边界写在 [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md)：Zerox 优先建设可信的本地控制、可恢复运行、显式权限、workspace 作用域、可观察轨迹、父子多 Agent 会话和用户审核后的学习。运行时、workspace 与学习机制分别见 [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md)、[`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md)、[`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md)。
+
+## v2.8.5
+
+Zerox Agent v2.8.5 是一次 reasoning-only 最终回答热修。部分模型提供商会在工具调用后把答案放进 `reasoningContent`，但正式 `content` 为空；agent loop 现在会把这类可见思考答案作为成功的最终回复，并写入 assistant message history，不再显示「模型没有返回可用回复」。
+
+这次专门修复右侧「最新思考」已经有答案，但主会话区仍提示没有可用回复的问题。
+
+## v2.8.4
+
+Zerox Agent v2.8.4 是一次工具失败后模型空响应的热修。当工具失败后，模型在下一轮没有返回正式内容时，agent loop 现在会给出中文诊断摘要，包含最近失败工具、失败原因和最近参数，不再显示通用英文兜底 `Agent did not produce a response.`
+
+这样即使模型在内部 reasoning 里产生了有用内容、但没有输出正式 answer，用户可见的 Chat 失败也仍然可理解、可行动。
+
+## v2.8.3
+
+Zerox Agent v2.8.3 是一次本地时间与相对日期语义热修。Chat mode 现在会在记忆规则之前获得 protected 本地日期上下文，包含按用户系统时区计算的今天、昨天、前天和明天；日期敏感的 `web_search` 必须在查询词里带解析后的绝对日期，并拒绝或明确指出与该日期冲突的旧搜索结果。
+
+这次热修也移除了聊天回合、agent loop、计划任务运行和 runner service 中用 UTC ISO 截断日期的做法。手动记忆仍然可以帮助模型，但“当前日期/昨天”的解释不再依赖记忆召回。
+
+## v2.8.2
+
+Zerox Agent v2.8.2 围绕日常 Chat 使用继续收口。左侧会话「…」菜单新增重命名，会同步更新会话列表和当前会话顶部标题；主会话区重新梳理消息元信息、标题层级、列表、inline code 灰色胶囊和 fenced code 代码块，让长回复更简洁统一。
+
+v2.8.2 同时修正消息时间：用户消息保留 ISO 时间戳并自动刷新相对时间，助手回复按用户系统时区显示更可读的时间标签。显式选择的技能现在由主进程预加载并作为强制执行规范注入，自动模式不再依赖模型自行判断是否先调用 `skill_load` 才遵循技能。
+
+## v2.8.1
+
+Zerox Agent v2.8.1 将 2.8 运行编排与记忆机制作为当前发布线：新增一等 `ExecutionContextPackage`，通过权限管控的 `skill_load` / `skill_resource_list` 按需加载技能，落地持久化工具调用账本，补强 dynamic registry 的 source health 与参数校验，把 goal/task/delegation 证据统一到运行图，升级 checkpoint boundary rebuild 以保护 skill/tool-call pairing，并把已审核 curated memory 与 raw history search 分成双层记忆。
+
+v2.8.1 同时只针对实时运行区域做界面收口，不改变主会话消息和右侧证据栏：实时“思考 / 工具”预览改为紧凑的图标折叠控件、暖色应用原生 surface、清晰状态点和 sans-serif 单行摘要；已选择的 `@skill` 胶囊继续放在 composer 底部，但高度与 baseline 对齐右侧操作按钮。
+
+## v2.7.0
+
+Zerox Agent v2.7.0 把 Chat 提升为第一交互入口：主导航移除 Overview，支持 Chat-first 的 streamed answers，并把 thinking/process 输出独立呈现；执行前支持 guided skill input，统一本地图标体系，同时继续保留 local-first 的权限边界与 workspace 边界。
 
 v2.1.2 在 v2.1.1 的 UI/运行控制基础上继续收口 command-first agent 发布问题：会话标题改成简短确定性名称，不再把完整 `/目标 ...` 提示词和本地路径挤进顶部区域；长状态胶囊默认折叠，用户点击后再展开；planner JSON 解析可以恢复 fenced code 或带解释文本的模型响应；被 offload 的工具结果可以通过 `tool_result_read` 或兼容的 `file_read` ref 读回；Goal Mode 会把 `/Users/name/Downloads目录下的文件` 这类自然语言路径还原到真实目录再验收 artifact evidence。里程碑进入 `running` 后会先持久化，因此右侧进度栏会在执行中更新，而不是等 loop 结束后才变化。
 
@@ -711,6 +796,14 @@ v2.4.0 激活 iteration-roadmap P1–P8：SQLite 统一存储层（better-sqlite
 
 v2.4.1 新增历史会话管理：工作区侧栏会在每个会话行显示最新 Assistant 响应时间和累计 token 消耗，鼠标悬停后露出归档/删除操作，被归档的会话统一收纳进可折叠归档组，并保留恢复与删除能力。
 
+v2.6.0 是一次本地控制面的加固发布：修复 workspace 与符号链接逃逸，补齐 approved shell command 的相对/绝对路径边界校验，JSONL 读取在遇到坏行时会保留有效记录并写出证据，SQLite 迁移会保留身份与状态，原生 Anthropic/Gemini provider 具备本地 timeout，offloaded tool-result ref 绑定 run/session/workspace-run 且 renderer 不能伪造跨 run capability，multi-tool 暂停/恢复历史保持 provider-valid，git worktree 创建必须经过显式批准或可信仓库策略，Runs 与会话列表实时刷新，subprocess tool worker 支持超时回收。该版本已通过独立 QA 验收，以及 `npm run verify`、`npm run smoke:prod`、`npm run harness:check`。
+
+v2.5.0 把 workspace 明确提升为聊天和技能运行的一等边界。输入框现在有工作区选择器，会话会持久化 workspace 身份；聊天进入 agent loop 前会解析 `AgentRunContext`，并带上 `taskId` 与 `runtimeTask` 走同一套工具授权路径。原生代码工具会从运行上下文默认补齐 `workspaceRoot`，不再要求模型猜路径；`@skill` 模糊选择和高亮 chip 保留，并新增共享的分阶段 `SkillExecutionContract`。聊天活动同时写入 session activity 和 workspace-run ledger，右侧状态可恢复，完整过程也能复盘；动态 skill/MCP 工具则复用同一个 executor，避免初始化后在聊天里丢失。
+
+v2.4.7 基于打包应用实测继续加固长技能运行。Agent loop 现在会在同类工具连续失败后先给模型一次恢复策略机会，再进入等待确认；缺失文件路径会被归类为 `not_found`，暂停摘要和聊天状态事件会展示最近一次工具错误与参数。这样 `@onepager` 做项目深度分析时，不会因为少数猜测路径失败就立刻停住；即便仍然失败，右侧状态栏也能看清到底是哪类错误。
+
+v2.4.6 修复聊天中的显式技能调用，并让右侧进度/上下文状态在切换页面后可恢复。输入框现在支持 `@skill` 模糊选择（例如 `@one` -> `onepager`），选中的技能会以高亮 chip 展示，并作为执行契约传给运行时：主进程会注入完整 `SKILL.md` 内容并写入 `skill_invoked` 轨迹证据。聊天状态事件会持久化到会话记录，回到该会话时根据真实历史重建右侧进度栏，而不是依赖渲染进程临时状态。
+
 v2.4.0 在 v2.3.6 确定性本地 artifact 目标能力之上，落地 iteration-roadmap P1–P8 激活（SQLite 存储、provider 抽象、shell plan、checkpoint-writer fork agent、actor/workflow 运行时、dream/distill 自我改进、流式/max-mode/MCP），覆盖 task contract 编译、workspace 与用户选择目录的 location/resource canonicalization、原生 `chrome_bookmarks_read` 执行、artifact provenance manifest、provenance-backed acceptance，并且独立 packaged-app computer-use acceptance 已经针对本地 macOS 包通过。v2.3.6 分发包已经完成版本号、打包和 GitHub Release 交接准备。
 
 ### 设计原则
@@ -722,7 +815,7 @@ v2.4.0 在 v2.3.6 确定性本地 artifact 目标能力之上，落地 iteration
 | **技能驱动 (Skill-Driven)** | 行为由可组合的 `SKILL.md` 文件定义，支持智能体模式 (agent) 和脚本模式 (script)，可扩展 MCP 工具。 |
 | **可观测 (Observable)** | 每次运行产生结构化事件时间线，覆盖记忆检索、模型调用、公开 reasoning 字段、工具调用、暂停、中断和完成状态。 |
 | **可恢复 (Recoverable)** | Agent 工作应该可检查、可取消、可恢复，而不是消失在一次性聊天回合里，也不应该因为固定轮次上限直接硬停止。 |
-| **模块化 (Modular)** | 主流程保留会话、总览、运行、任务和设置；技能、工具、记忆、学习和评测作为设置内默认折叠的二级分区，旧 `#goals` 地址会回到会话。 |
+| **模块化 (Modular)** | 主流程保留会话、运行、任务和设置；Overview 诊断视图收纳到设置内，技能、工具、记忆、学习和评测作为默认折叠的二级分区，旧 `#goals` 地址会回到会话。 |
 
 ---
 
@@ -772,7 +865,7 @@ v2.4.0 在 v2.3.6 确定性本地 artifact 目标能力之上，落地 iteration
 | 构建 | Vite 8 | 渲染进程热更新打包 |
 | 类型 | TypeScript 6 | 全栈类型安全，三套 tsconfig（主进程 / 渲染进程 / 共享） |
 | UI | React 19 | 函数组件 + Hooks 的 Material Design 桌面 UI |
-| 测试 | Vitest 4 | 159 个测试文件 / 992 个测试，覆盖共享层、主进程和渲染进程 |
+| 测试 | Vitest 4 | 165 个测试文件 / 1077 个测试，覆盖共享层、主进程和渲染进程 |
 | 打包 | electron-builder 26 | macOS `.app` / `.dmg` / `.zip` 分发 |
 | 解析 | yaml (cron-parser) | SKILL.md 前端元数据解析、cron 表达式 |
 
@@ -1316,7 +1409,7 @@ Gatekeeper 可能提示「Zerox Agent 已损坏，无法打开」。这通常不
 而是下载隔离属性导致的拦截。打开前在终端执行：
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/"Zerox.Agent-2.4.5-arm64.dmg"
+xattr -dr com.apple.quarantine ~/Downloads/"Zerox.Agent-2.8.5-arm64.dmg"
 ```
 
 如果已经把应用拖进 Applications，则执行：
@@ -1343,7 +1436,7 @@ mac:
 
 ## 测试
 
-截至 v2.4.5，`npm run verify` 覆盖 Vitest 测试、生产构建、Agent 评测和记忆检索评测；当前包含 159 个 Vitest 文件 / 992 个测试、26 个确定性 Agent eval fixture 和 2 个 memory eval fixture。Agent eval 覆盖原生代码工程、研究写作、测试失败反思、retry budget exhaustion、上下文压缩、tool-call checkpoint、模型重试、strategy guard 碎片化恢复、episode eval candidate、child handoff review gate、goal-mode recovery/control、bounded-autonomy 黄金路径、Agent Runtime Kernel kernel event replay、permission-rule behavior 和 deterministic local artifact provenance acceptance。session-native Goal Mode 架构记录在 `docs/architecture/agent-goal-mode.md`；Agent Runtime Kernel 架构记录在 `docs/architecture/agent-runtime.md`，包含 Kernel Event Bridge、checkpointed compaction、retry evidence、judge verdict、event replay 和规则化权限证据：
+截至 v2.8.5，`npm run verify` 覆盖 Vitest 测试、生产构建、Agent 评测和记忆检索评测；当前包含 176 个 Vitest 文件 / 1191 个测试、26 个确定性 Agent eval fixture 和 2 个 memory eval fixture。Agent eval 覆盖原生代码工程、研究写作、测试失败反思、retry budget exhaustion、上下文压缩、tool-call checkpoint、模型重试、strategy guard 碎片化恢复、episode eval candidate、child handoff review gate、goal-mode recovery/control、bounded-autonomy 黄金路径、Agent Runtime Kernel kernel event replay、permission-rule behavior、deterministic local artifact provenance acceptance、2.8 execution-context/tool-ledger/history contracts 和 memory-history scope checks。session-native Goal Mode 架构记录在 `docs/architecture/agent-goal-mode.md`；Agent Runtime Kernel 架构记录在 `docs/architecture/agent-runtime.md`，包含 Kernel Event Bridge、checkpointed compaction、retry evidence、judge verdict、event replay 和规则化权限证据：
 
 ```bash
 npm test              # 运行全部测试
@@ -1373,7 +1466,7 @@ npm run verify        # 测试 + 构建 + 确定性评测
 
 ## 路线图
 
-当前版本：v2.4.5。
+当前版本：v2.8.5。
 
 近期已完成：
 
@@ -1400,6 +1493,15 @@ npm run verify        # 测试 + 构建 + 确定性评测
 - [x] v2.3.6 P11.7 确定性本地 artifact 路径：task contract、canonical local resource、provenance-backed acceptance、原生确定性 artifact pipeline、命令行验证、独立 packaged-app computer-use acceptance、release metadata bump 和 macOS 分发交接
 - [x] v2.4.0 iteration-roadmap P1-P8 激活：统一存储、provider 抽象、actor/workflow 运行时、dream/distill、streaming/max-mode/MCP 和 token-aware runGraph 证据
 - [x] v2.4.1 历史会话管理：归档/删除操作、可折叠归档组、最新响应时间和工作区侧栏累计 token 显示
+- [x] v2.5.0 workspace-bound skill execution：一等 workspace 选择、共享技能执行契约、会话活动恢复和 workspace-run ledger
+- [x] v2.6.0 加固发布：sandbox 逃逸修复、可恢复存储、provider timeout、scoped tool-result ref、workflow 复盘正确性、renderer 状态一致性和 subprocess worker 隔离
+- [x] v2.7.0 Chat-first 交互发布：主入口回到 Chat、streamed answers、thinking/process 分离、guided skill input、本地图标统一、packaged-app smoke 和独立 packaged-app 验收
+- [x] v2.8.0 运行编排与记忆大版本：execution context package、技能按需加载、工具调用账本、checkpoint boundary rebuild、raw history search、scoped memory recall 和 Run Graph 证据
+- [x] v2.8.1 实时运行区域视觉修正：思考/工具图标折叠控件，以及 composer 底部与操作按钮节奏对齐的 `@skill` 胶囊
+- [x] v2.8.2 会话重命名、主会话可读性、消息时间和显式技能强制执行
+- [x] v2.8.3 本地时区与相对日期热修：覆盖 Chat、agent run 和日期敏感网页搜索
+- [x] v2.8.4 工具失败后模型空响应热修：改为可行动中文诊断
+- [x] v2.8.5 reasoning-only 最终回答热修：右侧思考有答案时主会话同步落成回复
 
 后续计划：
 

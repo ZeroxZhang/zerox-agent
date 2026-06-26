@@ -132,6 +132,45 @@ describe("SessionRepository + ActorRepository", () => {
     expect(actors.listByRun("run-9").length).toBe(1);
     storage.close();
   });
+
+  it("searches chat messages by token parity and returns the payload message id", async () => {
+    const storage = await createInMemoryStorage();
+    const sessions = createSessionRepository(storage);
+    sessions.createSession({
+      id: "chat_1",
+      kind: "chat",
+      title: "整理下载文件夹",
+      payload: {},
+      createdAt: "2026-06-21T00:00:00.000Z",
+      updatedAt: "2026-06-21T00:01:00.000Z",
+    });
+    sessions.appendMessage({
+      sessionId: "chat_1",
+      role: "assistant",
+      content: "报告已保存为 Markdown。",
+      createdAt: "2026-06-21T00:01:00.000Z",
+      message: {
+        id: "chat_3",
+        role: "assistant",
+        content: "报告已保存为 Markdown。",
+        createdAt: "2026-06-21T00:01:00.000Z",
+      },
+    });
+
+    expect(sessions.searchMessages({ query: "报告 markdown", limit: 5 })).toEqual([
+      {
+        sessionId: "chat_1",
+        sessionTitle: "整理下载文件夹",
+        messageId: "chat_3",
+        role: "assistant",
+        content: "报告已保存为 Markdown。",
+        createdAt: "2026-06-21T00:01:00.000Z",
+        score: 4,
+        matchedTerms: ["报告", "markdown"],
+      },
+    ]);
+    storage.close();
+  });
 });
 
 describe("remaining repositories", () => {

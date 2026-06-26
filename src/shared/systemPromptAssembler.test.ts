@@ -116,6 +116,18 @@ describe("SystemPromptAssembler", () => {
       expect(result.prompt).not.toContain("工作原则：");
     });
 
+    it("anchors relative dates for chat searches and answers", () => {
+      const asm = freshAssembler();
+      const result = asm.assemble({ mode: "chat", currentDate: "2026-06-26" });
+
+      expect(result.prompt).toContain("本地日期与时间语义：");
+      expect(result.prompt).toContain("今天 / today: 2026-06-26");
+      expect(result.prompt).toContain("昨天 / yesterday: 2026-06-25");
+      expect(result.prompt).toContain("明天 / tomorrow: 2026-06-27");
+      expect(result.prompt).toContain("web_search 查询词必须包含解析后的绝对日期");
+      expect(result.prompt).toContain("不要使用与解析日期冲突的旧搜索结果");
+    });
+
     it("returns only identity, tool_guidance, and output layers", () => {
       const asm = freshAssembler();
       const layers = asm.assembleLayers({ mode: "chat" });

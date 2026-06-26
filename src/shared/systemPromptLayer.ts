@@ -34,8 +34,10 @@ export type SystemPromptLayer = {
 export type AssembleOptions = {
   modelId?: string;
   workspaceRoot?: string;
-  /** Anchored date (session creation time, NOT Date.now()). */
+  /** Local date used to resolve relative date wording in prompts. */
   currentDate?: string;
+  /** IANA timezone name used to interpret currentDate, when known. */
+  timeZone?: string;
   /** Execution mode. Determines which layers are included. */
   mode?: "agent" | "chat" | "goal";
 };

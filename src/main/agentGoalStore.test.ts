@@ -156,6 +156,31 @@ describe("agent goal store", () => {
     await expect(store.readLedger("goal_1")).resolves.toEqual([planned, started]);
   });
 
+  it("skips malformed JSONL lines while preserving valid progress ledger events", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const goalsDir = path.join(configDir, "agent-goals");
+    const planned: ProgressLedgerEvent = {
+      at: "2026-06-12T00:00:00.000Z",
+      kind: "goal_planned",
+      summary: "Goal planned.",
+    };
+    const stopped: ProgressLedgerEvent = {
+      at: "2026-06-12T00:01:00.000Z",
+      kind: "goal_stopped",
+      summary: "Goal stopped.",
+    };
+    await mkdir(goalsDir, { recursive: true });
+    await writeFile(
+      path.join(goalsDir, "goal_1.ledger.jsonl"),
+      `${JSON.stringify(planned)}\n{"kind": "partial"\n${JSON.stringify(stopped)}\n`,
+      "utf8",
+    );
+
+    await expect(store.readLedger("goal_1")).resolves.toEqual([planned, stopped]);
+    const files = await readdir(goalsDir);
+    expect(files.some((file) => file.startsWith("goal_1.ledger.jsonl.corrupt-lines-"))).toBe(true);
+  });
+
   it("returns empty active and ledger results when the goal directory is missing", async () => {
     const store = createAgentGoalStore({ configDir });
 

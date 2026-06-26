@@ -2,13 +2,16 @@ import { parse as parseYaml } from "yaml";
 
 export type SkillExecutionMode = "agent" | "script";
 
-export type SkillInputType = "string" | "path" | "number" | "boolean";
+export type SkillInputType = "string" | "path" | "number" | "boolean" | "choice";
 
 export type SkillInput = {
   name: string;
   label: string;
   type: SkillInputType;
   required: boolean;
+  description?: string;
+  defaultValue?: string | number | boolean;
+  choices?: string[];
 };
 
 export type SkillPermissions = {
@@ -207,6 +210,9 @@ function readInputs(value: unknown): SkillInput[] {
     const name = readString(input.name);
     const label = readString(input.label) || name;
     const type = readInputType(input.type);
+    const description = readString(input.description);
+    const defaultValue = readInputDefaultValue(input.defaultValue);
+    const choices = readStringArray(input.choices);
 
     if (!/^[a-zA-Z][a-zA-Z0-9_]*$/.test(name)) {
       throw new SkillManifestError(
@@ -219,6 +225,9 @@ function readInputs(value: unknown): SkillInput[] {
       label,
       type,
       required: readBoolean(input.required, false),
+      ...(description ? { description } : {}),
+      ...(defaultValue !== undefined ? { defaultValue } : {}),
+      ...(choices.length > 0 ? { choices } : {}),
     };
   });
 }
@@ -243,6 +252,17 @@ function readOptionalNumber(value: unknown): number | null {
     return value;
   }
   return null;
+}
+
+function readInputDefaultValue(value: unknown): string | number | boolean | undefined {
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+  return undefined;
 }
 
 function readSkillToolDefinitions(value: unknown): SkillToolDefinition[] {
@@ -315,7 +335,8 @@ function readInputType(value: unknown): SkillInputType {
     value === "string" ||
     value === "path" ||
     value === "number" ||
-    value === "boolean"
+    value === "boolean" ||
+    value === "choice"
   ) {
     return value;
   }

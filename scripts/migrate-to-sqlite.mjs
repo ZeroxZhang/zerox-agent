@@ -47,12 +47,16 @@ function readJson(file, fallback) {
 }
 function readJsonl(file) {
   if (!existsSync(file)) return [];
-  try {
-    return readFileSync(file, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
-  } catch (error) {
-    logError(file, `parse failed: ${String(error)}`);
-    return [];
-  }
+  const rows = [];
+  readFileSync(file, "utf8").split("\n").forEach((line, index) => {
+    if (!line.trim()) return;
+    try {
+      rows.push(JSON.parse(line));
+    } catch (error) {
+      logError(file, `line ${index + 1} parse failed: ${String(error)}`);
+    }
+  });
+  return rows;
 }
 
 const storage = createStorageImpl({ dbPath: path.join(configDir, "zerox.db") });
@@ -205,7 +209,7 @@ function dryRunOnly() { return args["dry-run"] === true; }
   const data = readJson(path.join(configDir, "agent-learning-candidates.json"), { candidates: [] });
   for (const c of data.candidates ?? []) {
     if (dryRunOnly()) { bump("learning_candidates", 1); continue; }
-    try { repos.createLearningRepository(storage).create({ type: c.type, sourceRunId: c.sourceRunId, sourceTrajectoryEventIds: c.sourceTrajectoryEventIds, claim: c.claim, recommendedAction: c.recommendedAction, risk: c.risk }); bump("learning_candidates", 1); } catch (e) { logError("learning_candidates", String(e)); }
+    try { repos.createLearningRepository(storage).create(c); bump("learning_candidates", 1); } catch (e) { logError("learning_candidates", String(e)); }
   }
 }
 

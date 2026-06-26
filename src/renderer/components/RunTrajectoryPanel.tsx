@@ -37,7 +37,13 @@ export function RunTrajectoryPanel(props: {
 
     setLoadingRef(true);
     try {
-      setLoadedRef(await window.buildingAgent.readToolResultRef(resultRef));
+      setLoadedRef(
+        await window.buildingAgent.readToolResultRef(resultRef, {
+          runId: selectedEvent?.runId,
+          sessionId: selectedEvent?.runContext?.sessionId,
+          workspaceRunId: selectedEvent?.runContext?.runId,
+        }),
+      );
     } finally {
       setLoadingRef(false);
     }

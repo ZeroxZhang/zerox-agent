@@ -68,9 +68,41 @@ describe("createAgentEpisodePackage", () => {
       learningCandidates: [],
       verification: { passed: true, checks: ["final_summary"] },
       exportedAt: "2026-06-09T00:00:00.000Z",
+      chatTrajectory: [
+        {
+          id: "chat_trajectory_event_tool_result",
+          workspaceRunId: "workspace_run_1",
+          sessionId: "session_1",
+          requestId: "request_1",
+          type: "tool_result",
+          sequence: 2,
+          sourceEventId: "workspace_event_2",
+          toolCallId: "provider_tool_call_1",
+          toolName: "file_read",
+          resultRef: "tool-result-refs/run_1_session_1_request_1_provider_tool_call_1_file_read_ref.json",
+          ok: true,
+          createdAt: "2026-06-09T00:00:02.000Z",
+        },
+      ],
+      workspaceRunEvents: [
+        {
+          id: "workspace_event_2",
+          workspaceRunId: "workspace_run_1",
+          sessionId: "session_1",
+          requestId: "request_1",
+          seq: 2,
+          type: "tool_result",
+          toolCallId: "provider_tool_call_1",
+          toolName: "file_read",
+          ok: true,
+          resultRef: "tool-result-refs/run_1_session_1_request_1_provider_tool_call_1_file_read_ref.json",
+          createdAt: "2026-06-09T00:00:02.000Z",
+        },
+      ],
     });
 
     expect(Object.keys(episode.files).sort()).toEqual([
+      "chat-trajectory.jsonl",
       "checkpoint.json",
       "eval-candidate.json",
       "learning-candidates.json",
@@ -79,6 +111,7 @@ describe("createAgentEpisodePackage", () => {
       "run.json",
       "trajectory.jsonl",
       "verification.json",
+      "workspace-run-events.jsonl",
     ]);
     expect(episode.files["trajectory.jsonl"]).toContain("\"final_summary\"");
     expect(episode.files["run-graph.json"]).toContain(
@@ -90,6 +123,12 @@ describe("createAgentEpisodePackage", () => {
     expect(episode.files["eval-candidate.json"]).toContain(
       "\"status\": \"pending_review\"",
     );
-    expect(episode.files["metadata.json"]).toContain("\"fileCount\": 8");
+    expect(episode.files["metadata.json"]).toContain("\"fileCount\": 10");
+    expect(episode.files["chat-trajectory.jsonl"]).toContain(
+      "\"toolCallId\":\"provider_tool_call_1\"",
+    );
+    expect(episode.files["workspace-run-events.jsonl"]).toContain(
+      "\"toolCallId\":\"provider_tool_call_1\"",
+    );
   });
 });

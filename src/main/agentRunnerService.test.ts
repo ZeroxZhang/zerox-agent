@@ -22,11 +22,19 @@ function finalResponse(content: string): ChatCompletionResponse {
 }
 
 function toolCallResponse(toolName: string, args: Record<string, unknown>): ChatCompletionResponse {
+  return toolCallResponseWithId("call_1", toolName, args);
+}
+
+function toolCallResponseWithId(
+  id: string,
+  toolName: string,
+  args: Record<string, unknown>,
+): ChatCompletionResponse {
   return {
     content: null,
     toolCalls: [
       {
-        id: "call_1",
+        id,
         type: "function",
         function: { name: toolName, arguments: JSON.stringify(args) },
       },
@@ -274,6 +282,75 @@ describe("agent runner service", () => {
       }),
     );
     expect(store.writes[0].content).toContain(largeContent);
+  });
+
+  it("lets the owning legacy runner read its scoped offloaded tool result ref", async () => {
+    const largeContent = "legacy scoped result ".repeat(80);
+    const capturedMessages: ChatMessage[][] = [];
+    const store = createScopedRecordingOffloadStore();
+    const service = createAgentRunnerService({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      resolveSkill: async () => createSkillRecord(3),
+      chatClient: {
+        async complete(request) {
+          capturedMessages.push(request.messages);
+          if (capturedMessages.length === 1) {
+            return toolCallResponseWithId("call_read", "file_read", {
+              path: "~/Downloads/notes.md",
+            });
+          }
+          if (capturedMessages.length === 2) {
+            return toolCallResponseWithId("call_ref", "tool_result_read", {
+              ref: "tool-result-refs/ref_1.json",
+            });
+          }
+          return finalResponse("Read legacy scoped ref");
+        },
+      },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: {
+        async execute(request, executionOptions) {
+          if (request.toolName === "tool_result_read") {
+            const content = await store.read(
+              String(request.args.ref ?? ""),
+              executionOptions?.toolResultReadScope,
+            );
+            return content
+              ? { ok: true, result: { content } }
+              : { ok: false, error: "scoped ref denied" };
+          }
+
+          return {
+            ok: true,
+            result: { content: largeContent },
+          };
+        },
+      } as AgentToolExecutor,
+      toolResultOffloadStore: store,
+      toolResultOffloadThreshold: 120,
+      createId: () => "run_legacy_scope",
+      now: () => new Date("2026-06-05T08:00:00.000Z"),
+    });
+
+    const result = await service.runTask("task_123");
+
+    expect(result).toMatchObject({
+      ok: true,
+      run: { status: "succeeded", summary: "Read legacy scoped ref" },
+    });
+    const refReadToolMessage = capturedMessages[2].find(
+      (message) =>
+        message.role === "tool" && message.tool_call_id === "call_ref",
+    );
+    expect(JSON.parse(refReadToolMessage?.content ?? "{}")).toMatchObject({
+      tool: "tool_result_read",
+      ok: true,
+    });
+    expect(store.reads.at(-1)?.scope).toMatchObject({
+      runId: "task_123",
+    });
   });
 
   it("fails the run and skips execution when a tool call is denied", async () => {
@@ -725,6 +802,47 @@ function createRecordingOffloadStore(): ToolResultOffloadStore & {
     },
     async read() {
       return null;
+    },
+  };
+}
+
+function createScopedRecordingOffloadStore(): ToolResultOffloadStore & {
+  writes: ToolResultOffloadWriteInput[];
+  reads: Array<{
+    relativePath: string;
+    scope: Parameters<ToolResultOffloadStore["read"]>[1];
+  }>;
+} {
+  const writes: ToolResultOffloadWriteInput[] = [];
+  const reads: Array<{
+    relativePath: string;
+    scope: Parameters<ToolResultOffloadStore["read"]>[1];
+  }> = [];
+  const refs = new Map<string, ToolResultOffloadWriteInput>();
+
+  return {
+    writes,
+    reads,
+    async write(input) {
+      writes.push(input);
+      refs.set("tool-result-refs/ref_1.json", input);
+      return {
+        refId: "ref_1",
+        relativePath: "tool-result-refs/ref_1.json",
+        absolutePath: "/tmp/tool-result-refs/ref_1.json",
+        bytesWritten: Buffer.byteLength(input.content, "utf8"),
+      };
+    },
+    async read(relativePath, scope) {
+      reads.push({ relativePath, scope });
+      const input = refs.get(relativePath);
+      if (!input) {
+        return null;
+      }
+      if (input.runId && input.runId !== scope?.runId) {
+        return null;
+      }
+      return input.content;
     },
   };
 }

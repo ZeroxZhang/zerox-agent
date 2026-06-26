@@ -6,9 +6,16 @@ import type {
   ChatMessageSearchResult,
   ChatMessageRecord,
   ChatSessionGoalSummary,
+  ChatSessionActivitySnapshot,
   ChatSessionListItem,
   ChatSessionRecord,
   ChatSessionTokenUsage,
+  ChatTaskStatusEvent,
+  ChatWorkspaceSummary,
+  SkillInputField,
+  SkillInputFieldType,
+  SkillPendingInputState,
+  SkillUserInputRequest,
 } from "../shared/chat";
 
 type StoredChatSessions = {
@@ -24,6 +31,8 @@ export type AppendChatMessageInput = {
   executedRunId?: string;
   goalId?: string;
   goalEventRef?: string;
+  workspaceId?: string;
+  workspaceSummary?: ChatWorkspaceSummary;
 };
 
 export type AppendChatMessageResult = {
@@ -35,12 +44,18 @@ export type ChatSessionStore = {
   list(): Promise<ChatSessionListItem[]>;
   get(sessionId: string): Promise<ChatSessionRecord | null>;
   appendMessage(input: AppendChatMessageInput): Promise<AppendChatMessageResult>;
+  rename(sessionId: string, title: string): Promise<ChatSessionRecord | null>;
   archive(sessionId: string): Promise<ChatSessionRecord | null>;
   restore(sessionId: string): Promise<ChatSessionRecord | null>;
   delete(sessionId: string): Promise<boolean>;
   addTokenUsage(
     sessionId: string,
     usage: ChatSessionTokenUsage,
+  ): Promise<ChatSessionRecord | null>;
+  appendActivityEvent(
+    sessionId: string,
+    event: ChatTaskStatusEvent,
+    options?: { selectedSkillName?: string },
   ): Promise<ChatSessionRecord | null>;
   attachGoal(
     sessionId: string,
@@ -148,6 +163,11 @@ export function createChatSessionStore(options: {
           ? stored.sessions.find((session) => session.id === input.sessionId)
           : null;
         const newSessionId = existingSession ? null : createId();
+        const workspaceId =
+          normalizeOptionalString(input.workspaceId) ?? existingSession?.workspaceId;
+        const workspaceSummary =
+          normalizeChatWorkspaceSummary(input.workspaceSummary) ??
+          existingSession?.workspaceSummary;
         const message: ChatMessageRecord = {
           id: createId(),
           role: input.role,
@@ -165,6 +185,8 @@ export function createChatSessionStore(options: {
               ...existingSession,
               summary: content || existingSession.summary,
               messages: [...existingSession.messages, message],
+              ...(workspaceId ? { workspaceId } : {}),
+              ...(workspaceSummary ? { workspaceSummary } : {}),
               updatedAt: timestamp,
             }
           : createSession({
@@ -172,6 +194,8 @@ export function createChatSessionStore(options: {
               content,
               message,
               timestamp,
+              ...(workspaceId ? { workspaceId } : {}),
+              ...(workspaceSummary ? { workspaceSummary } : {}),
             });
         const nextSessions = existingSession
           ? stored.sessions.map((storedSession) =>
@@ -186,6 +210,18 @@ export function createChatSessionStore(options: {
 
         return { session, message };
       });
+    },
+
+    async rename(sessionId, title) {
+      const normalizedTitle = normalizeSessionTitle(title);
+      if (!normalizedTitle) {
+        throw new Error("Session title is required.");
+      }
+
+      return updateSessionById(sessionId, (session) => ({
+        ...session,
+        title: normalizedTitle,
+      }));
     },
 
     async archive(sessionId) {
@@ -229,6 +265,26 @@ export function createChatSessionStore(options: {
         ...session,
         tokenUsage: mergeTokenUsage(session.tokenUsage, normalizedUsage),
       }));
+    },
+
+    async appendActivityEvent(sessionId, event, eventOptions) {
+      return updateSessionById(sessionId, (session) => {
+        const previousEvents = session.activity?.statusEvents ?? [];
+        const statusEvents = [...previousEvents, event].slice(-80);
+        const selectedSkillName =
+          eventOptions?.selectedSkillName ??
+          event.selectedSkillName ??
+          session.activity?.selectedSkillName;
+        return {
+          ...session,
+          activity: {
+            updatedAt: event.createdAt,
+            statusEvents,
+            ...(selectedSkillName ? { selectedSkillName } : {}),
+          },
+          updatedAt: event.createdAt,
+        };
+      });
     },
 
     async attachGoal(sessionId, goal) {
@@ -353,6 +409,8 @@ function createSession(options: {
   content: string;
   message: ChatMessageRecord;
   timestamp: string;
+  workspaceId?: string;
+  workspaceSummary?: ChatWorkspaceSummary;
 }): ChatSessionRecord {
   const title = createSessionTitle(options.content);
   return {
@@ -360,6 +418,10 @@ function createSession(options: {
     title,
     summary: title,
     messages: [options.message],
+    ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
+    ...(options.workspaceSummary
+      ? { workspaceSummary: options.workspaceSummary }
+      : {}),
     createdAt: options.timestamp,
     updatedAt: options.timestamp,
   };
@@ -374,6 +436,10 @@ function toListItem(session: ChatSessionRecord): ChatSessionListItem {
     title: session.title,
     summary: session.summary,
     messageCount: session.messages.length,
+    ...(session.workspaceId ? { workspaceId: session.workspaceId } : {}),
+    ...(session.workspaceSummary
+      ? { workspaceSummary: session.workspaceSummary }
+      : {}),
     ...(activeGoal ? { activeGoal } : {}),
     ...(session.archivedAt ? { archivedAt: session.archivedAt } : {}),
     lastAssistantMessageAt: getLastAssistantMessageAt(session),
@@ -402,6 +468,8 @@ function normalizeStoredSession(session: ChatSessionRecord): ChatSessionRecord {
   const goalSummaries = Array.isArray(session.goalSummaries)
     ? session.goalSummaries.map(normalizeGoalSummary)
     : [];
+  const workspaceId = normalizeOptionalString(session.workspaceId);
+  const workspaceSummary = normalizeChatWorkspaceSummary(session.workspaceSummary);
   return {
     id: String(session.id ?? ""),
     title: String(session.title ?? "未命名会话"),
@@ -409,9 +477,14 @@ function normalizeStoredSession(session: ChatSessionRecord): ChatSessionRecord {
     messages: Array.isArray(session.messages)
       ? session.messages.map(normalizeStoredMessage)
       : [],
+    ...(workspaceId ? { workspaceId } : {}),
+    ...(workspaceSummary ? { workspaceSummary } : {}),
     ...(activeGoalId ? { activeGoalId } : {}),
     ...(goalIds.length ? { goalIds } : {}),
     ...(goalSummaries.length ? { goalSummaries } : {}),
+    ...(session.activity
+      ? { activity: normalizeActivitySnapshot(session.activity) }
+      : {}),
     ...(session.archivedAt ? { archivedAt: String(session.archivedAt) } : {}),
     ...(session.tokenUsage
       ? { tokenUsage: normalizeTokenUsage(session.tokenUsage) }
@@ -419,6 +492,210 @@ function normalizeStoredSession(session: ChatSessionRecord): ChatSessionRecord {
     createdAt: String(session.createdAt ?? new Date(0).toISOString()),
     updatedAt: String(session.updatedAt ?? session.createdAt ?? new Date(0).toISOString()),
   };
+}
+
+function normalizeActivitySnapshot(
+  snapshot: ChatSessionActivitySnapshot,
+): ChatSessionActivitySnapshot {
+  const statusEvents = Array.isArray(snapshot.statusEvents)
+    ? snapshot.statusEvents.map(normalizeStatusEvent).filter(Boolean)
+    : [];
+  return {
+    updatedAt: String(snapshot.updatedAt ?? new Date(0).toISOString()),
+    statusEvents,
+    ...(snapshot.selectedSkillName
+      ? { selectedSkillName: String(snapshot.selectedSkillName) }
+      : {}),
+  };
+}
+
+function normalizeStatusEvent(event: ChatTaskStatusEvent): ChatTaskStatusEvent {
+  const state = normalizeStatusEventState(event.state);
+  const inputRequest = normalizeSkillUserInputRequest(event.inputRequest);
+  const pendingSkillInput = normalizeSkillPendingInputState(
+    event.pendingSkillInput,
+  );
+  return {
+    sessionId: String(event.sessionId ?? ""),
+    state,
+    message: String(event.message ?? ""),
+    createdAt: String(event.createdAt ?? new Date(0).toISOString()),
+    elapsedMs:
+      typeof event.elapsedMs === "number" && Number.isFinite(event.elapsedMs)
+        ? event.elapsedMs
+        : 0,
+    ...(typeof event.turn === "number" ? { turn: event.turn } : {}),
+    ...(event.toolName ? { toolName: String(event.toolName) } : {}),
+    ...(event.selectedSkillName
+      ? { selectedSkillName: String(event.selectedSkillName) }
+      : {}),
+    ...(typeof event.toolCallsExecuted === "number"
+      ? { toolCallsExecuted: event.toolCallsExecuted }
+      : {}),
+    ...(typeof event.maxTurns === "number" ? { maxTurns: event.maxTurns } : {}),
+    ...(inputRequest ? { inputRequest } : {}),
+    ...(pendingSkillInput ? { pendingSkillInput } : {}),
+    ...(typeof event.ok === "boolean" ? { ok: event.ok } : {}),
+  };
+}
+
+function normalizeStatusEventState(
+  state: ChatTaskStatusEvent["state"],
+): ChatTaskStatusEvent["state"] {
+  if (
+    state === "started" ||
+    state === "workspace" ||
+    state === "skill" ||
+    state === "memory" ||
+    state === "model" ||
+    state === "reasoning" ||
+    state === "streaming" ||
+    state === "tool_call" ||
+    state === "tool_result" ||
+    state === "waiting_for_input" ||
+    state === "paused" ||
+    state === "canceled" ||
+    state === "completed" ||
+    state === "failed"
+  ) {
+    return state;
+  }
+  return "failed";
+}
+
+function normalizeSkillUserInputRequest(
+  value: unknown,
+): SkillUserInputRequest | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const request = value as Partial<Record<keyof SkillUserInputRequest, unknown>>;
+  const fields = Array.isArray(request.fields)
+    ? request.fields
+        .map(normalizeSkillInputField)
+        .filter((field): field is SkillInputField => Boolean(field))
+    : [];
+
+  return {
+    id: String(request.id ?? ""),
+    executionId: String(request.executionId ?? ""),
+    sessionId: String(request.sessionId ?? ""),
+    requestId: String(request.requestId ?? ""),
+    skillName: String(request.skillName ?? ""),
+    reason: String(request.reason ?? ""),
+    fields,
+    createdAt: String(request.createdAt ?? new Date(0).toISOString()),
+  };
+}
+
+function normalizeSkillPendingInputState(
+  value: unknown,
+): SkillPendingInputState | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const pending = value as Partial<
+    Record<keyof SkillPendingInputState, unknown>
+  >;
+  const inputRequestId = normalizeOptionalString(pending.inputRequestId);
+  const sessionId = normalizeOptionalString(pending.sessionId);
+  const requestId = normalizeOptionalString(pending.requestId);
+  const userMessage = normalizeOptionalString(pending.userMessage);
+  const selectedSkillName = normalizeOptionalString(pending.selectedSkillName);
+  if (!inputRequestId || !sessionId || !requestId || !userMessage || !selectedSkillName) {
+    return undefined;
+  }
+
+  return {
+    inputRequestId,
+    status: pending.status === "completed" ? "completed" : "pending",
+    sessionId,
+    requestId,
+    userMessage,
+    ...(normalizeOptionalString(pending.userMessageId)
+      ? { userMessageId: normalizeOptionalString(pending.userMessageId) }
+      : {}),
+    selectedSkillName,
+    ...(normalizeOptionalString(pending.workspaceId)
+      ? { workspaceId: normalizeOptionalString(pending.workspaceId) }
+      : {}),
+    ...(normalizeChatWorkspaceSummary(pending.workspaceSummary)
+      ? { workspaceSummary: normalizeChatWorkspaceSummary(pending.workspaceSummary) }
+      : {}),
+    partialValues: normalizeSkillInputValueRecord(pending.partialValues),
+  };
+}
+
+function normalizeSkillInputValueRecord(
+  value: unknown,
+): Record<string, string | number | boolean> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  const normalized: Record<string, string | number | boolean> = {};
+  for (const [key, rawValue] of Object.entries(value)) {
+    const normalizedValue = normalizeSkillInputValue(rawValue);
+    if (normalizedValue !== undefined) {
+      normalized[key] = normalizedValue;
+    }
+  }
+  return normalized;
+}
+
+function normalizeSkillInputField(value: unknown): SkillInputField | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const field = value as Partial<Record<keyof SkillInputField, unknown>>;
+  const defaultValue = normalizeSkillInputValue(field.defaultValue);
+  const choices = Array.isArray(field.choices)
+    ? field.choices.map(String)
+    : [];
+
+  return {
+    name: String(field.name ?? ""),
+    label: String(field.label ?? ""),
+    type: normalizeSkillInputFieldType(field.type),
+    required: Boolean(field.required),
+    ...(field.description ? { description: String(field.description) } : {}),
+    ...(defaultValue !== undefined ? { defaultValue } : {}),
+    ...(choices.length ? { choices } : {}),
+  };
+}
+
+function normalizeSkillInputFieldType(
+  type: unknown,
+): SkillInputFieldType {
+  if (
+    type === "string" ||
+    type === "number" ||
+    type === "boolean" ||
+    type === "path" ||
+    type === "choice"
+  ) {
+    return type;
+  }
+
+  return "string";
+}
+
+function normalizeSkillInputValue(
+  value: unknown,
+): string | number | boolean | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value === "string" || typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  return String(value);
 }
 
 function normalizeStoredMessage(message: ChatMessageRecord): ChatMessageRecord {
@@ -443,6 +720,42 @@ function normalizeGoalSummary(goal: ChatSessionGoalSummary): ChatSessionGoalSumm
     description: String(goal.description ?? ""),
     status: goal.status,
   };
+}
+
+function normalizeChatWorkspaceSummary(
+  value: unknown,
+): ChatWorkspaceSummary | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const summary = value as Partial<Record<keyof ChatWorkspaceSummary, unknown>>;
+  const name = normalizeOptionalString(summary.name);
+  const rootPath = normalizeOptionalString(summary.rootPath);
+  const kind = normalizeOptionalString(summary.kind);
+  const sandboxMode = normalizeOptionalString(summary.sandboxMode);
+  const branch = normalizeOptionalString(summary.branch);
+
+  if (!name || !rootPath || !kind || !sandboxMode) {
+    return undefined;
+  }
+
+  return {
+    name,
+    rootPath,
+    kind,
+    sandboxMode,
+    ...(branch ? { branch } : {}),
+  };
+}
+
+function normalizeOptionalString(value: unknown): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  const normalized = String(value).trim();
+  return normalized ? normalized : undefined;
 }
 
 function compareSessionsForList(
@@ -568,6 +881,10 @@ function createSessionTitle(content: string): string {
   }
 
   return normalized.length > 16 ? `${normalized.slice(0, 15)}…` : normalized;
+}
+
+function normalizeSessionTitle(title: string): string {
+  return title.trim().replace(/\s+/g, " ").slice(0, 80);
 }
 
 function normalizeSessionTitleText(content: string): string {

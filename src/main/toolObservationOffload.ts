@@ -24,6 +24,9 @@ export async function serializeToolObservationWithOffload(
     store?: ToolResultOffloadStore;
     thresholdChars?: number;
     runId?: string;
+    sessionId?: string;
+    requestId?: string;
+    workspaceRunId?: string;
   } = {},
 ): Promise<SerializedToolObservation> {
   const content = serializeToolObservation(observation);
@@ -47,6 +50,9 @@ export async function serializeToolObservationWithOffload(
   try {
     const ref = await options.store.write({
       runId: options.runId,
+      sessionId: options.sessionId,
+      requestId: options.requestId,
+      workspaceRunId: options.workspaceRunId,
       toolCallId: observation.toolCallId,
       toolName: observation.tool,
       content,

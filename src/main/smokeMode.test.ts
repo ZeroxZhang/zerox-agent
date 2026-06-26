@@ -84,6 +84,17 @@ describe("smoke mode", () => {
     expect(script).toContain("rootTextLength");
   });
 
+  it("passes the configured smoke timeout into renderer readiness polling", () => {
+    const script = getSmokeRendererCheckScript(
+      getSmokeModeOptions({
+        BUILDING_AGENT_SMOKE_TIMEOUT_MS: "2500",
+      }),
+    );
+
+    expect(script).toContain("const timeoutMs = 2500;");
+    expect(script).not.toContain("const timeoutMs = 4000;");
+  });
+
   it("allows targeted smoke checks to opt out of desktop API checks", () => {
     expect(
       getSmokeModeOptions({

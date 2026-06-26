@@ -8,6 +8,7 @@ import { createAgentLearningService } from "./agentLearningService";
 import { createAgentEvalCandidateStore } from "./agentEvalCandidateStore";
 import { createAgentEvalCandidateService } from "./agentEvalCandidateService";
 import { createAgentWorkspaceStore } from "./agentWorkspaceStore";
+import { createWorkspaceRunStore } from "./workspaceRunStore";
 import { createAgentGoalStore } from "./agentGoalStore";
 import { createAgentGoalController } from "./agentGoalController";
 import { createAgentGoalAcceptance } from "./agentGoalAcceptance";
@@ -16,7 +17,10 @@ import { createAgentGoalPlanner } from "./agentGoalPlanner";
 import { createGoalRuntimeEngine } from "./goalRuntimeEngine";
 import { applyGoalOutputRootsToRunContext } from "./goalOutputRoots";
 import { createGoalChatService } from "./goalChatService";
-import { createAgentWorkspaceService } from "./agentWorkspaceService";
+import {
+  createAgentWorkspaceService,
+  type CreateGitWorktreeWorkspaceInput,
+} from "./agentWorkspaceService";
 import { createMultiAgentSessionStore } from "./multiAgentSessionStore";
 import { createMultiAgentCoordinator } from "./multiAgentCoordinator";
 import { createAgentEvalFixtures } from "./eval/agentEvalFixtures";
@@ -39,7 +43,11 @@ import {
 import { createModelConnectionService } from "./modelConnectionService";
 import { createMemoryStore } from "./memoryStore";
 import { createMemoryProfileStore } from "./memoryProfileStore";
-import { createToolResultOffloadStore } from "./toolResultOffloadStore";
+import { createHistoryIndexStore } from "./historyIndexStore";
+import {
+  createToolResultOffloadStore,
+  type ToolResultOffloadReadScope,
+} from "./toolResultOffloadStore";
 import {
   createOpenAiCompatibleClient,
   createOpenAiCompatibleEmbeddingClient,
@@ -123,6 +131,13 @@ import {
 import type { PermissionRule } from "../shared/kernelContract";
 
 export type AppContainer = ReturnType<typeof createAppContainer>;
+
+export type AgentRunsChangedEvent = {
+  reason: "active_execution_changed" | "run_updated";
+  runId?: string;
+  taskId?: string;
+  createdAt: string;
+};
 
 function acceptanceContextNeedsModel(
   goal: Goal,
@@ -256,6 +271,7 @@ export function createAppContainer(options: {
   let kernelPermissionRules: PermissionRule[] = [];
 
   const goalProgressListeners = new Set<(event: GoalProgressEvent) => void>();
+  const agentRunsChangedListeners = new Set<(event: AgentRunsChangedEvent) => void>();
 
   function onGoalProgressEvent(callback: (event: GoalProgressEvent) => void) {
     goalProgressListeners.add(callback);
@@ -278,6 +294,29 @@ export function createAppContainer(options: {
         listener(event);
       } catch {
         // Subscriber errors must not break the goal runtime.
+      }
+    }
+  }
+
+  function onAgentRunsChanged(callback: (event: AgentRunsChangedEvent) => void) {
+    agentRunsChangedListeners.add(callback);
+    return () => {
+      agentRunsChangedListeners.delete(callback);
+    };
+  }
+
+  function emitAgentRunsChanged(
+    event: Omit<AgentRunsChangedEvent, "createdAt">,
+  ) {
+    const nextEvent: AgentRunsChangedEvent = {
+      ...event,
+      createdAt: new Date().toISOString(),
+    };
+    for (const listener of agentRunsChangedListeners) {
+      try {
+        listener(nextEvent);
+      } catch {
+        // Subscriber errors must not break agent execution.
       }
     }
   }
@@ -318,11 +357,22 @@ export function createAppContainer(options: {
       existingSummary?.description === summary.description &&
       existingSummary.status === summary.status
     ) {
+      await clearActiveChatGoalIfTerminal(sessionId, summary);
       return false;
     }
 
     await chatSessionStore().attachGoal(sessionId, summary);
+    await clearActiveChatGoalIfTerminal(sessionId, summary);
     return true;
+  }
+
+  async function clearActiveChatGoalIfTerminal(
+    sessionId: string,
+    summary: ChatSessionGoalSummary,
+  ) {
+    if (shouldClearActiveChatGoal(summary.status)) {
+      await chatSessionStore().clearActiveGoal(sessionId, summary.id);
+    }
   }
 
   async function appendGoalTerminalMessageIfNeeded(
@@ -360,6 +410,10 @@ export function createAppContainer(options: {
     };
   }
 
+  function shouldClearActiveChatGoal(status: Goal["status"]): boolean {
+    return status === "achieved" || status === "failed" || status === "canceled";
+  }
+
   async function reconcileChatSessionGoalSummary(
     sessionId: string,
     activeGoal: ChatSessionGoalSummary | undefined,
@@ -375,6 +429,9 @@ export function createAppContainer(options: {
 
     const summary = toChatGoalSummary(goal);
     await attachGoalSummaryIfChanged(sessionId, summary);
+    if (shouldClearActiveChatGoal(summary.status)) {
+      return undefined;
+    }
     return summary;
   }
 
@@ -386,8 +443,10 @@ export function createAppContainer(options: {
           session.id,
           session.activeGoal,
         );
+        const sessionWithoutActiveGoal = { ...session };
+        delete sessionWithoutActiveGoal.activeGoal;
         return {
-          ...session,
+          ...sessionWithoutActiveGoal,
           ...(activeGoal ? { activeGoal } : {}),
         };
       }),
@@ -410,7 +469,7 @@ export function createAppContainer(options: {
       activeGoal,
     );
     if (!reconciledGoal) {
-      return session;
+      return chatSessionStore().get(sessionId);
     }
 
     return chatSessionStore().get(sessionId);
@@ -452,6 +511,28 @@ export function createAppContainer(options: {
     }
   }
 
+  async function renameChatSession(
+    sessionId: string,
+    title: string,
+  ): Promise<ChatSessionOperationResult> {
+    try {
+      const session = await chatSessionStore().rename(sessionId, title);
+      if (!session) {
+        return {
+          ok: false,
+          message: "会话不存在。",
+        };
+      }
+      return { ok: true, session };
+    } catch (error) {
+      return {
+        ok: false,
+        message:
+          error instanceof Error ? error.message : "无法重命名会话。",
+      };
+    }
+  }
+
   async function deleteChatSession(
     sessionId: string,
   ): Promise<ChatSessionOperationResult> {
@@ -471,18 +552,22 @@ export function createAppContainer(options: {
   }
 
   function createToolExecutor() {
-    const executor = createAgentToolExecutor({
-      memoryStore: memoryStore(),
-      chatSessionStore: chatSessionStore(),
-      toolResultOffloadStore: toolResultOffloadStore(),
+    return lazy("agentToolExecutor", () => {
+      const executor = createAgentToolExecutor({
+        memoryStore: memoryStore(),
+        chatSessionStore: chatSessionStore(),
+        toolResultOffloadStore: toolResultOffloadStore(),
+        discoverSkills: () => discoverSkills({ skillsDir }),
+        historyIndexStore: historyIndexStore(),
+      });
+      // P6: register the actor + workflow tools on the dynamic registry so the
+      // model can spawn sub-agents and run workflows (e.g. deep-research).
+      const registry = executor.getRegistry();
+      registerActorTool(registry, { actorRuntime: actorRuntime() });
+      registerWorkflowTool(registry, { workflowRuntime: workflowRuntime() });
+      void initializeMcpTools(executor);
+      return executor;
     });
-    // P6: register the actor + workflow tools on the dynamic registry so the
-    // model can spawn sub-agents and run workflows (e.g. deep-research).
-    const registry = executor.getRegistry();
-    registerActorTool(registry, { actorRuntime: actorRuntime() });
-    registerWorkflowTool(registry, { workflowRuntime: workflowRuntime() });
-    void initializeMcpTools(executor);
-    return executor;
   }
 
   function modelConnectionService() {
@@ -559,6 +644,10 @@ export function createAppContainer(options: {
     return lazy("agentWorkspaceStore", () => createAgentWorkspaceStore({ configDir }));
   }
 
+  function workspaceRunStore() {
+    return lazy("workspaceRunStore", () => createWorkspaceRunStore({ configDir }));
+  }
+
   function agentWorkspaceService() {
     return lazy("agentWorkspaceService", () =>
       createAgentWorkspaceService({
@@ -566,6 +655,46 @@ export function createAppContainer(options: {
         workspaceRoot: path.join(app.getPath("userData"), "workspaces"),
       }),
     );
+  }
+
+  async function requestGitWorktreeAgentWorkspace(
+    input: CreateGitWorktreeWorkspaceInput,
+  ) {
+    const approval = await options.requestToolApproval({
+      taskId: "agent_workspaces",
+      taskName: "Create Git worktree workspace",
+      request: {
+        toolName: "git_worktree_add",
+        args: {
+          name: input.name,
+          repositoryRoot: input.repositoryRoot,
+          branch: input.branch,
+        },
+      },
+      deniedReason:
+        "Creating a Git worktree runs git worktree add against a renderer-provided repository path.",
+    });
+
+    if (!approval.approved) {
+      throw new Error(approval.reason ?? "Git worktree creation was not approved.");
+    }
+
+    if (approval.automatic) {
+      throw new Error(
+        "Git worktree creation requires explicit user approval; global automatic approval is not sufficient.",
+      );
+    }
+
+    return agentWorkspaceService().createGitWorktreeWorkspace({
+      name: input.name,
+      repositoryRoot: input.repositoryRoot,
+      branch: input.branch,
+      approval: {
+        kind: "explicit_user_approval",
+        approvedAt: new Date().toISOString(),
+        approvedBy: "user",
+      },
+    });
   }
 
   function multiAgentSessionStore() {
@@ -626,6 +755,14 @@ export function createAppContainer(options: {
             };
           },
         },
+      }),
+    );
+  }
+
+  function historyIndexStore() {
+    return lazy("historyIndexStore", () =>
+      createHistoryIndexStore({
+        filePath: path.join(configDir, "raw-history.jsonl"),
       }),
     );
   }
@@ -726,9 +863,9 @@ export function createAppContainer(options: {
   }
 
   // P4 shell analyzer + tool worker. Exposed for P5 (checkpoint-writer fork
-  // agent) and P6 (actor isolation) to consume. Existing side-effect tools keep
-  // running in-process (gradual cutover behind ZEROX_TOOL_WORKER; default
-  // behavior unchanged — zero regression).
+  // agent) and P6 (actor isolation) to consume. ZEROX_TOOL_WORKER controls the
+  // isolation mode while keeping explicit in-process mode available for
+  // development and focused tests.
   function shellAnalyzer() {
     return { analyze: analyzeShell };
   }
@@ -736,10 +873,7 @@ export function createAppContainer(options: {
   function toolWorker() {
     return lazy("toolWorker", () => {
       const opts = getToolWorkerOptions();
-      // Default inproc when no handler registry is wired yet, so the worker is
-      // harmless until P5/P6 register side-effect handlers. The flag still
-      // allows opting into subprocess for consumers that provide an entry.
-      return createToolWorker({ mode: opts.worker === "subprocess" ? "inproc" : "inproc" });
+      return createToolWorker({ mode: opts.worker });
     });
   }
 
@@ -1123,8 +1257,13 @@ export function createAppContainer(options: {
         goalService: goalChatService(),
         taskStore: scheduledTaskStore(),
         runScheduledTask: (taskId: string) => runAgentTask(taskId),
+        discoverSkills: () => discoverSkills({ skillsDir }),
+        workspaceService: agentWorkspaceService(),
         toolExecutor: createToolExecutor(),
         toolAuthorizationService: toolAuthorizationService(),
+        trajectoryStore: agentTrajectoryStore(),
+        workspaceRunStore: workspaceRunStore(),
+        historyIndexStore: historyIndexStore(),
         toolResultOffloadStore: toolResultOffloadStore(),
         compactionStrategy: compactionStrategy(),
       }),
@@ -1247,15 +1386,23 @@ export function createAppContainer(options: {
 
     const controller = new AbortController();
     activeTaskRunControllers.set(taskId, controller);
+    emitAgentRunsChanged({ reason: "active_execution_changed", taskId });
 
     try {
-      return await agentRunnerService().runTask(taskId, {
+      const result = await agentRunnerService().runTask(taskId, {
         signal: controller.signal,
       });
+      emitAgentRunsChanged({
+        reason: "run_updated",
+        taskId,
+        ...(result.ok ? { runId: result.run.id } : {}),
+      });
+      return result;
     } finally {
       if (activeTaskRunControllers.get(taskId) === controller) {
         activeTaskRunControllers.delete(taskId);
       }
+      emitAgentRunsChanged({ reason: "active_execution_changed", taskId });
     }
   }
 
@@ -1278,15 +1425,31 @@ export function createAppContainer(options: {
 
     const controller = new AbortController();
     activeTaskRunControllers.set(checkpoint.taskId, controller);
+    emitAgentRunsChanged({
+      reason: "active_execution_changed",
+      runId,
+      taskId: checkpoint.taskId,
+    });
 
     try {
-      return await agentRunnerService().resumeRun(runId, {
+      const result = await agentRunnerService().resumeRun(runId, {
         signal: controller.signal,
       });
+      emitAgentRunsChanged({
+        reason: "run_updated",
+        runId: result.ok ? result.run.id : runId,
+        taskId: checkpoint.taskId,
+      });
+      return result;
     } finally {
       if (activeTaskRunControllers.get(checkpoint.taskId) === controller) {
         activeTaskRunControllers.delete(checkpoint.taskId);
       }
+      emitAgentRunsChanged({
+        reason: "active_execution_changed",
+        runId,
+        taskId: checkpoint.taskId,
+      });
     }
   }
 
@@ -1320,6 +1483,11 @@ export function createAppContainer(options: {
       ...checkpoint,
       status: "paused",
       updatedAt: new Date().toISOString(),
+    });
+    emitAgentRunsChanged({
+      reason: "active_execution_changed",
+      runId,
+      taskId: checkpoint.taskId,
     });
 
     return {
@@ -1420,7 +1588,10 @@ export function createAppContainer(options: {
     return runGoalOperation(operation);
   }
 
-  async function readToolResultRef(ref: string): Promise<ReadToolResultRefResult> {
+  async function readToolResultRef(
+    ref: string,
+    options?: ToolResultOffloadReadScope,
+  ): Promise<ReadToolResultRefResult> {
     if (!isSafeToolResultRef(ref)) {
       return {
         ok: false,
@@ -1428,7 +1599,7 @@ export function createAppContainer(options: {
       };
     }
 
-    const content = await toolResultOffloadStore().read(ref);
+    const content = await toolResultOffloadStore().read(ref, options);
     if (!content) {
       return {
         ok: false,
@@ -1507,6 +1678,7 @@ export function createAppContainer(options: {
     setKernelPermissionRules,
     toolAuditLog,
     toolAuthorizationService,
+    toolWorker,
     agentRunStore,
     agentExecutionStore,
     agentTrajectoryStore,
@@ -1514,11 +1686,14 @@ export function createAppContainer(options: {
     goalChatService,
     agentGoalController,
     agentWorkspaceStore,
+    workspaceRunStore,
     agentWorkspaceService,
+    requestGitWorktreeAgentWorkspace,
     multiAgentSessionStore,
     multiAgentCoordinator,
     memoryStore,
     memoryProfileStore,
+    historyIndexStore,
     toolResultOffloadStore,
     agentLearningStore,
     agentLearningService,
@@ -1531,6 +1706,7 @@ export function createAppContainer(options: {
     getChatSession,
     archiveChatSession,
     restoreChatSession,
+    renameChatSession,
     deleteChatSession,
     chatService,
     taskSchedulerService,
@@ -1554,5 +1730,6 @@ export function createAppContainer(options: {
     runAgentQualityEvals,
     selfImprovementService,
     onGoalProgressEvent,
+    onAgentRunsChanged,
   };
 }

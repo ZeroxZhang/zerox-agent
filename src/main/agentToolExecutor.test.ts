@@ -14,6 +14,7 @@ import { createAgentToolExecutor, getShellExecShell } from "./agentToolExecutor"
 import { buildPrimaryRunContext } from "../shared/agentWorkspace";
 import { getArtifactProvenancePath } from "../shared/agentArtifactProvenance";
 import type { MemoryRecord } from "../shared/memory";
+import type { SkillDiscoveryResult } from "../shared/skills";
 
 describe("agent tool executor", () => {
   let tempDir: string;
@@ -95,6 +96,148 @@ describe("agent tool executor", () => {
           '{"type":"tool_result","tool":"file_list","ok":true,"result":{"entries":[]}}',
       },
     });
+  });
+
+  it("searches and expands raw history through native history tools", async () => {
+    const searchRequests: unknown[] = [];
+    const aroundRequests: unknown[] = [];
+    const executor = createAgentToolExecutor({
+      historyIndexStore: {
+        async search(options) {
+          searchRequests.push(options);
+          return [
+            {
+              entry: {
+                id: "history_1",
+                sessionId: "session_1",
+                workspaceId: "workspace_1",
+                role: "tool",
+                toolName: "skill_load",
+                content: "Loaded onepager instructions",
+                createdAt: "2026-06-25T00:00:00.000Z",
+                source: "tool",
+              },
+              score: 2,
+              matchedTerms: ["skill_load", "onepager"],
+            },
+          ];
+        },
+        async around(options) {
+          aroundRequests.push(options);
+          return {
+            anchor: {
+              id: "history_1",
+              sessionId: "session_1",
+              workspaceId: "workspace_1",
+              role: "tool",
+              toolName: "skill_load",
+              content: "Loaded onepager instructions",
+              createdAt: "2026-06-25T00:00:00.000Z",
+              source: "tool",
+            },
+            entries: [
+              {
+                id: "history_0",
+                sessionId: "session_1",
+                role: "user",
+                content: "Use onepager.",
+                createdAt: "2026-06-24T23:59:59.000Z",
+                source: "chat",
+              },
+            ],
+          };
+        },
+      },
+    });
+
+    await expect(
+      executor.execute({
+        toolName: "history_search",
+        args: {
+          query: "skill_load onepager",
+          workspaceId: "workspace_escape",
+          sessionId: "session_escape",
+        },
+      }, {
+        runContext: {
+          runId: "run_1",
+          workspaceId: "workspace_1",
+          workspaceRoot: "/tmp/workspace-1",
+          agentRole: "primary",
+          depth: 0,
+          sandbox: {
+            mode: "read_write",
+            network: "enabled",
+            shell: "enabled",
+            allowWorkspaceEscape: false,
+            extraReadRoots: [],
+            extraWriteRoots: [],
+          },
+          sessionId: "session_1",
+        },
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      result: {
+        query: "skill_load onepager",
+        results: [
+          {
+            id: "history_1",
+            sessionId: "session_1",
+            workspaceId: "workspace_1",
+            role: "tool",
+            toolName: "skill_load",
+            content: "Loaded onepager instructions",
+            createdAt: "2026-06-25T00:00:00.000Z",
+            score: 2,
+            matchedTerms: ["skill_load", "onepager"],
+          },
+        ],
+      },
+    });
+    await expect(
+      executor.execute({
+        toolName: "history_around",
+        args: { entryId: "history_1", before: 1, after: 1 },
+      }, {
+        runContext: {
+          runId: "run_1",
+          workspaceId: "workspace_1",
+          workspaceRoot: "/tmp/workspace-1",
+          agentRole: "primary",
+          depth: 0,
+          sandbox: {
+            mode: "read_write",
+            network: "enabled",
+            shell: "enabled",
+            allowWorkspaceEscape: false,
+            extraReadRoots: [],
+            extraWriteRoots: [],
+          },
+          sessionId: "session_1",
+        },
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      result: {
+        anchor: { id: "history_1" },
+        entries: [expect.objectContaining({ id: "history_0" })],
+      },
+    });
+    expect(searchRequests).toEqual([
+      expect.objectContaining({
+        query: "skill_load onepager",
+        workspaceId: "workspace_1",
+        sessionId: "session_1",
+      }),
+    ]);
+    expect(aroundRequests).toEqual([
+      expect.objectContaining({
+        entryId: "history_1",
+        workspaceId: "workspace_1",
+        sessionId: "session_1",
+      }),
+    ]);
   });
 
   it("rejects unsafe offloaded tool-result refs", async () => {
@@ -194,6 +337,78 @@ describe("agent tool executor", () => {
             preview: "候选：测试股份",
           },
         ],
+      },
+    });
+  });
+
+  it("registers skill lazy-load tools when a skill discovery source is provided", async () => {
+    const skillRoot = path.join(tempDir, "skills", "onepager");
+    await mkdir(skillRoot, { recursive: true });
+    const skillFile = path.join(skillRoot, "SKILL.md");
+    await writeFile(
+      skillFile,
+      [
+        "---",
+        "name: onepager",
+        "description: Build a one-page artifact.",
+        "execution:",
+        "  mode: agent",
+        "permissions:",
+        "  files:",
+        "    read: []",
+        "    write: []",
+        "  shell:",
+        "    commands: []",
+        "  web:",
+        "    search: false",
+        "    fetchDomains: []",
+        "  memory:",
+        "    read: true",
+        "    write: false",
+        "---",
+        "Use the onepager steps.",
+      ].join("\n"),
+      "utf8",
+    );
+    const discovery: SkillDiscoveryResult = {
+      skills: [
+        {
+          manifest: {
+            name: "onepager",
+            displayName: "onepager",
+            description: "Build a one-page artifact.",
+            version: "0.1.0",
+            execution: { mode: "agent", entrypoint: null },
+            inputs: [],
+            permissions: {
+              files: { read: [], write: [] },
+              shell: { commands: [] },
+              web: { search: false, fetchDomains: [] },
+              memory: { read: true, write: false },
+            },
+          },
+          body: "Use the onepager steps.",
+          rootDir: skillRoot,
+          skillFile,
+        },
+      ],
+      errors: [],
+    };
+    const executor = createAgentToolExecutor({
+      discoverSkills: async () => discovery,
+    });
+
+    expect(executor.hasTool("skill_load")).toBe(true);
+    await expect(
+      executor.execute({
+        toolName: "skill_load",
+        args: { skillName: "onepager" },
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      result: {
+        skillName: "onepager",
+        instruction: "Use the onepager steps.",
       },
     });
   });
@@ -743,6 +958,109 @@ describe("agent tool executor", () => {
     });
   });
 
+  it("defaults native workspace tools to the run context workspace root", async () => {
+    await writeFile(
+      path.join(tempDir, "agent.ts"),
+      "export const workspaceContext = 'native-tool-registry';\n",
+      "utf8",
+    );
+    const executor = createAgentToolExecutor();
+    const definitions = executor.getRegistry().getDefinitions();
+    const codeSearch = definitions.find(
+      (definition) => definition.function.name === "code_search",
+    );
+    const gitStatus = definitions.find(
+      (definition) => definition.function.name === "git_status",
+    );
+    const gitDiff = definitions.find(
+      (definition) => definition.function.name === "git_diff",
+    );
+    const testRun = definitions.find(
+      (definition) => definition.function.name === "test_run",
+    );
+
+    expect(codeSearch?.function.parameters.required).toEqual(["query"]);
+    expect(gitStatus?.function.parameters.required).toBeUndefined();
+    expect(gitDiff?.function.parameters.required).toBeUndefined();
+    expect(testRun?.function.parameters.required).toEqual(["command"]);
+
+    await expect(
+      executor.execute(
+        {
+          toolName: "code_search",
+          args: {
+            query: "workspaceContext",
+            maxResults: 5,
+          },
+        },
+        {
+          runContext: buildPrimaryRunContext({
+            workspaceId: "workspace_temp",
+            workspaceRoot: tempDir,
+          }),
+        },
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      result: {
+        workspaceRoot: tempDir,
+        query: "workspaceContext",
+        results: [
+          {
+            relativePath: "agent.ts",
+            line: 1,
+          },
+        ],
+      },
+    });
+  });
+
+  it("refuses run-context file and native workspace tools through symlink escapes", async () => {
+    const workspaceRoot = path.join(tempDir, "workspace");
+    const outsideRoot = path.join(tempDir, "outside");
+    const linkPath = path.join(workspaceRoot, "linked-outside");
+    await mkdir(workspaceRoot, { recursive: true });
+    await mkdir(outsideRoot, { recursive: true });
+    await writeFile(path.join(outsideRoot, "secret.md"), "secret token", "utf8");
+    await symlink(outsideRoot, linkPath);
+    const executor = createAgentToolExecutor();
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_temp",
+      workspaceRoot,
+    });
+
+    const requests = [
+      { toolName: "file_read", args: { path: path.join(linkPath, "secret.md") } },
+      { toolName: "file_write", args: { path: path.join(linkPath, "report.md"), content: "done" } },
+      { toolName: "file_stat", args: { path: path.join(linkPath, "secret.md") } },
+      { toolName: "file_list", args: { path: linkPath } },
+      { toolName: "file_search", args: { root: linkPath, query: "secret" } },
+      { toolName: "code_search", args: { workspaceRoot: linkPath, query: "secret" } },
+      {
+        toolName: "markdown_report_write",
+        args: {
+          path: path.join(linkPath, "research.md"),
+          title: "Escaped Report",
+          citations: [],
+          claims: [],
+          sections: [],
+        },
+      },
+    ];
+
+    for (const request of requests) {
+      await expect(
+        executor.execute(request, { runContext }),
+      ).resolves.toMatchObject({ ok: false });
+    }
+    await expect(readFile(path.join(outsideRoot, "report.md"), "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(readFile(path.join(outsideRoot, "research.md"), "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
   it("passes abort signals to native test_run", async () => {
     const executor = createAgentToolExecutor();
     const controller = new AbortController();
@@ -940,6 +1258,35 @@ describe("agent tool executor", () => {
     });
   });
 
+  it("blocks relative shell path escapes before executing from the run workspace", async () => {
+    const workspaceRoot = path.join(tempDir, "workspace");
+    const outsideRoot = path.join(tempDir, "outside");
+    await mkdir(workspaceRoot);
+    await mkdir(outsideRoot);
+    await writeFile(path.join(outsideRoot, "secret.txt"), "outside secret", "utf8");
+
+    const executor = createAgentToolExecutor();
+
+    await expect(
+      executor.execute(
+        {
+          toolName: "shell_exec",
+          args: { command: "cat ../outside/secret.txt" },
+        },
+        {
+          runContext: buildPrimaryRunContext({
+            workspaceId: "workspace_1",
+            workspaceRoot,
+          }),
+        },
+      ),
+    ).resolves.toEqual({
+      ok: false,
+      error:
+        "shell_exec refused path outside the run sandbox: ../outside/secret.txt",
+    });
+  });
+
   it("returns structured diagnostics when a shell command fails without output", async () => {
     const executor = createAgentToolExecutor();
     const command = `${JSON.stringify(process.execPath)} -e "process.exit(1)"`;
@@ -1055,6 +1402,17 @@ describe("agent tool executor", () => {
       "fetch:https://example.com",
       "search:agent memory",
     ]);
+  });
+
+  it("describes web_search as requiring absolute dates for date-sensitive queries", () => {
+    const executor = createAgentToolExecutor();
+    const definition = executor
+      .getRegistry()
+      .getDefinitions()
+      .find((item) => item.function.name === "web_search");
+
+    expect(definition?.function.description).toContain("日期敏感");
+    expect(definition?.function.description).toContain("绝对日期");
   });
 
   it("executes native research writing tools through the registry", async () => {

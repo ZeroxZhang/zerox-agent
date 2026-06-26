@@ -36,6 +36,7 @@ import {
   buildTaskPrompt,
   buildToolDefinitions,
 } from "../shared/agentProtocol";
+import { formatDateInTimeZone, getSystemTimeZone } from "../shared/dateContext";
 import {
   createToolFailureReflection,
   type AgentReflectionDecision,
@@ -60,6 +61,12 @@ import type {
 } from "../shared/agentRuns";
 import type { SkillRecord } from "../shared/skills";
 import type { AgentToolName } from "../shared/toolPermissions";
+import {
+  createToolInvocation,
+  transitionToolInvocation,
+  type ToolInvocationRecord,
+  type ToolInvocationTransition,
+} from "../shared/toolInvocationLedger";
 
 export type AgentRuntimeModelProfile = {
   baseUrl: string;
@@ -517,6 +524,44 @@ export function createAgentRuntimeEngine(options: {
           containsUserText: true,
         }, current.runContext);
         const toolSource = getToolSource(options.toolExecutor, toolName);
+        let toolInvocation = createToolInvocation({
+          id: `tool_invocation_${toolCall.id}`,
+          runId: current.runId,
+          toolCallId: toolCall.id,
+          toolName,
+          source: toolSource ?? "built-in",
+          args,
+          createdAt: now().toISOString(),
+        });
+        const appendToolInvocation = async (record: ToolInvocationRecord) => {
+          await appendTrajectory(current.runId, "tool_invocation", {
+            toolInvocationId: record.id,
+            toolCallId: record.toolCallId,
+            toolName: record.toolName,
+            toolSource: record.source,
+            invocationStatus: record.status,
+            args: record.args,
+            ...(typeof record.ok === "boolean" ? { ok: record.ok } : {}),
+            ...(record.resultRef ? { resultRef: record.resultRef } : {}),
+            ...(record.error ? { error: record.error } : {}),
+            history: record.history,
+          }, {
+            containsApiKey: false,
+            containsFileContent: false,
+            containsUserText: true,
+          }, current.runContext);
+        };
+        const transitionInvocation = async (
+          transition: Omit<ToolInvocationTransition, "at"> & { at?: string },
+        ) => {
+          toolInvocation = transitionToolInvocation(toolInvocation, {
+            ...transition,
+            at: transition.at ?? now().toISOString(),
+          });
+          await appendToolInvocation(toolInvocation);
+        };
+        await appendToolInvocation(toolInvocation);
+        await transitionInvocation({ status: "visible" });
         const auth = await options.toolAuthorizationService.authorize(
           task.id,
           {
@@ -527,15 +572,21 @@ export function createAgentRuntimeEngine(options: {
           {
             runContext: current.runContext,
             onApprovalRequested: async () => {
+              await transitionInvocation({ status: "waiting_approval" });
               current = await saveCheckpoint(current, "waiting_for_approval");
             },
             onApprovalResolved: async () => {
+              await transitionInvocation({ status: "authorized" });
               current = await saveCheckpoint(current, "running");
             },
           },
         );
         if (!auth.ok || !auth.decision.allowed) {
           const reason = auth.ok ? auth.decision.reason : auth.message;
+          await transitionInvocation({
+            status: "error",
+            error: reason,
+          });
           if (/运行沙箱阻止|workspace|workspace_only/i.test(reason)) {
             await appendTrajectory(current.runId, "workspace_escape_denied", {
               toolCallId: toolCall.id,
@@ -553,6 +604,12 @@ export function createAgentRuntimeEngine(options: {
           }
           throw new Error(`工具调用被拒绝：${reason}`);
         }
+        if (toolInvocation.status !== "authorized") {
+          await transitionInvocation({
+            status: "authorized",
+            reason: auth.decision.reason,
+          });
+        }
 
         const nativeDescriptor = getNativeToolDescriptor(
           options.toolExecutor,
@@ -569,11 +626,21 @@ export function createAgentRuntimeEngine(options: {
           }, current.runContext);
         }
 
+        await transitionInvocation({ status: "running" });
         const result = await options.toolExecutor.execute(
           { toolName, args },
           {
             runContext: current.runContext,
             ...(signal ? { signal } : {}),
+            toolResultReadScope: {
+              runId: current.runId,
+              ...(current.runContext?.sessionId
+                ? { sessionId: current.runContext.sessionId }
+                : {}),
+              ...(current.runContext?.runId
+                ? { workspaceRunId: current.runContext.runId }
+                : {}),
+            },
           },
         );
         toolCallCount += 1;
@@ -603,7 +670,27 @@ export function createAgentRuntimeEngine(options: {
             store: options.toolResultOffloadStore,
             thresholdChars: options.toolResultOffloadThreshold,
             runId: current.runId,
+            sessionId: current.runContext?.sessionId,
+            workspaceRunId: current.runContext?.runId,
           });
+        await transitionInvocation(
+          result.ok
+            ? {
+                status: "completed",
+                ok: true,
+                ...(serializedObservation.resultRef
+                  ? { resultRef: serializedObservation.resultRef }
+                  : {}),
+              }
+            : {
+                status: "error",
+                ok: false,
+                error: result.error,
+                ...(serializedObservation.resultRef
+                  ? { resultRef: serializedObservation.resultRef }
+                  : {}),
+              },
+        );
         await appendTrajectory(current.runId, "tool_result", {
           toolCallId: toolCall.id,
           toolName,
@@ -685,6 +772,7 @@ export function createAgentRuntimeEngine(options: {
       const events = [createEvent("info", "Agent runtime started.")];
       const runContext = await options.workspaceService?.resolveRunContext();
       const initialProfile = await options.getModelProfile();
+      const systemTimeZone = getSystemTimeZone();
       const proceduralMemoryContext =
         await buildProceduralMemoryPromptContext({
           memoryStore: options.memoryStore,
@@ -712,7 +800,8 @@ export function createAgentRuntimeEngine(options: {
             role: "system",
             content: buildAgentSystemPrompt({
               modelId: initialProfile.model,
-              currentDate: startedAt.split("T")[0],
+              currentDate: formatDateInTimeZone(new Date(startedAt), systemTimeZone),
+              timeZone: systemTimeZone,
             }),
           },
           {

@@ -6,6 +6,11 @@ import { createScheduledTaskStore } from "./taskStore";
 import { createToolAuditLog } from "./toolAuditLog";
 import { createToolAuthorizationService } from "./toolAuthorizationService";
 import { buildPrimaryRunContext } from "../shared/agentWorkspace";
+import {
+  authorizeToolCallWithinRunContext,
+  type TaskPermissionPolicy,
+} from "../shared/toolPermissions";
+import { analyzeShell } from "./tools/shell/shellAnalyzer";
 
 describe("tool authorization service", () => {
   let configDir: string;
@@ -536,6 +541,49 @@ describe("tool authorization service", () => {
       },
     });
     expect(approvalCount).toBe(0);
+  });
+
+  it("denies approved shell templates when a ShellPlan includes a bare parent directory", () => {
+    const broadPolicy: TaskPermissionPolicy = {
+      files: {
+        read: ["/Users/demo/project"],
+        write: ["/Users/demo/project"],
+      },
+      web: { search: false, fetchDomains: [] },
+      shell: { commands: ["cat {{target}}"] },
+      memory: { read: false, write: false },
+    };
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: "/Users/demo/project/workspace",
+      sandbox: {
+        mode: "workspace_write",
+        network: "task_policy",
+        shell: "approved_commands",
+        allowWorkspaceEscape: false,
+        extraReadRoots: [],
+        extraWriteRoots: [],
+      },
+    });
+    const shellPlan = analyzeShell("cat ..", {
+      cwd: runContext.workspaceRoot,
+    });
+
+    expect(
+      authorizeToolCallWithinRunContext(
+        broadPolicy,
+        {
+          toolName: "shell_exec",
+          args: { command: "cat .." },
+        },
+        runContext,
+        { shellPlan },
+      ),
+    ).toEqual({
+      allowed: false,
+      reason:
+        "shell_exec 被运行沙箱阻止：路径 /Users/demo/project 不在工作区或额外可读目录内。",
+    });
   });
 
   it("returns a structured error when the task is missing", async () => {

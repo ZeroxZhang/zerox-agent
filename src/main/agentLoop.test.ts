@@ -5,6 +5,8 @@ import type {
   ChatClient,
   ChatCompletionRequest,
   ChatCompletionResponse,
+  StreamingChatClient,
+  StreamEvent,
   ToolDefinition,
 } from "./openAiCompatibleClient";
 import type {
@@ -14,6 +16,7 @@ import type {
 import type { ToolAuthorizationService } from "./toolAuthorizationService";
 import { createDynamicToolRegistry } from "./dynamicToolRegistry";
 import type { ToolCallRequest } from "../shared/toolPermissions";
+import type { ToolInvocationRecord } from "../shared/toolInvocationLedger";
 
 const modelProfile = {
   baseUrl: "https://api.example.com/v1",
@@ -485,6 +488,60 @@ describe("agent loop", () => {
     expect(result.summary).toContain("批量或递归策略");
   });
 
+  it("keeps paused multi-tool histories provider-valid by not leaving unmatched tool calls", async () => {
+    const requests: ChatCompletionRequest[] = [];
+    const chatClient: ChatClient = {
+      async complete(request) {
+        requests.push(request);
+        if (requests.length <= 3) {
+          return toolCallResponse(
+            `warmup_call_${requests.length}`,
+            `/tmp/warmup-${requests.length}`,
+          );
+        }
+
+        return {
+          content: null,
+          finishReason: "tool_calls",
+          toolCalls: [
+            {
+              id: "provider_call_first",
+              type: "function",
+              function: {
+                name: "file_list",
+                arguments: JSON.stringify({ path: "/tmp/first" }),
+              },
+            },
+            {
+              id: "provider_call_second",
+              type: "function",
+              function: {
+                name: "file_list",
+                arguments: JSON.stringify({ path: "/tmp/second" }),
+              },
+            },
+          ],
+        };
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "检查多个目录，但在策略守护触发时暂停" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(),
+        maxTurns: 6,
+        pauseOnStrategyGuard: true,
+        tools: testTools,
+      },
+    );
+
+    expect(result.status).toBe("paused");
+    expect(result.toolCallsExecuted).toBe(4);
+    expect(everyAssistantToolCallHasResult(result.messages)).toBe(true);
+  });
+
   it("blocks shell fallback after chrome_bookmarks_read has returned structured data", async () => {
     const requests: ChatCompletionRequest[] = [];
     const executedTools: string[] = [];
@@ -654,6 +711,90 @@ describe("agent loop", () => {
     });
     expect(requests).toHaveLength(1);
     expect(executedTools).toEqual(["chrome_bookmarks_read"]);
+  });
+
+  it("emits tool invocation ledger states during authorized execution", async () => {
+    const invocations: ToolInvocationRecord[] = [];
+    const chatClient: ChatClient = {
+      async complete(request) {
+        if (!request.messages.some((message) => message.role === "tool")) {
+          return {
+            content: null,
+            finishReason: "tool_calls",
+            toolCalls: [
+              {
+                id: "tool_call_files",
+                type: "function",
+                function: {
+                  name: "file_list",
+                  arguments: JSON.stringify({ path: "/tmp/workspace" }),
+                },
+              },
+            ],
+          };
+        }
+        return {
+          content: "done",
+          finishReason: "stop",
+          toolCalls: [],
+        };
+      },
+    };
+    const toolExecutor: AgentToolExecutor = {
+      async execute() {
+        return { ok: true, result: { entries: [] } };
+      },
+      getRegistry() {
+        return createDynamicToolRegistry();
+      },
+      hasTool() {
+        return true;
+      },
+    };
+    const toolAuthorizationService: ToolAuthorizationService = {
+      async authorize(_taskId, request) {
+        return {
+          ok: true,
+          decision: { allowed: true, reason: "allowed" },
+          auditEvent: {
+            id: "audit_1",
+            taskId: "task_files",
+            request,
+            decision: { allowed: true, reason: "allowed" },
+            createdAt: "2026-06-25T00:00:00.000Z",
+          },
+        };
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "list files" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor,
+        toolAuthorizationService,
+        taskId: "task_files",
+        tools: testTools,
+        onToolInvocation(record) {
+          invocations.push(record);
+        },
+      },
+    );
+
+    expect(result.status).toBe("succeeded");
+    expect(invocations.map((record) => record.status)).toEqual([
+      "proposed",
+      "visible",
+      "authorized",
+      "running",
+      "completed",
+    ]);
+    expect(invocations.at(-1)).toMatchObject({
+      toolCallId: "tool_call_files",
+      toolName: "file_list",
+      ok: true,
+    });
   });
 
   it("blocks raw Chrome Bookmarks file probes after chrome_bookmarks_read succeeds", async () => {
@@ -930,7 +1071,7 @@ describe("agent loop", () => {
     expect(result.summary).not.toContain("请把任务拆小一点");
   });
 
-  it("pauses when the model keeps hitting the same class of tool failure", async () => {
+  it("pauses when the model keeps hitting the same class of tool failure after recovery", async () => {
     const requests: ChatCompletionRequest[] = [];
     const chatClient: ChatClient = {
       async complete(request) {
@@ -962,18 +1103,148 @@ describe("agent loop", () => {
       },
     );
 
-    expect(requests).toHaveLength(3);
+    expect(requests).toHaveLength(6);
     expect(result).toMatchObject({
       status: "paused",
-      turns: 2,
-      toolCallsExecuted: 3,
+      turns: 5,
+      toolCallsExecuted: 6,
       continuation: {
         reason: "tool_failure_loop",
-        toolCallsExecuted: 3,
+        toolCallsExecuted: 6,
       },
     });
     expect(result.summary).toContain("连续 3 次工具失败");
     expect(result.summary).toContain("file_list");
+  });
+
+  it("reports the last tool failure when the model returns an empty follow-up response", async () => {
+    const chatClient: ChatClient = {
+      async complete(request) {
+        if (request.messages.some((message) => message.role === "tool")) {
+          return {
+            content: null,
+            finishReason: "stop",
+            toolCalls: [],
+          };
+        }
+        return toolCallResponse("tool_call_missing_url", "/missing-url");
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "查一下昨天双色球开奖结果" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(undefined, undefined, {
+          ok: false,
+          error: "web_fetch URL must be a valid http(s) URL.",
+        }),
+        maxTurns: 3,
+        tools: testTools,
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: "failed",
+      toolCallsExecuted: 1,
+    });
+    expect(result.summary).toContain("模型没有返回可用回复");
+    expect(result.summary).toContain("file_list");
+    expect(result.summary).toContain("web_fetch URL must be a valid http(s) URL.");
+    expect(result.summary).not.toContain("Agent did not produce a response.");
+  });
+
+  it("uses reasoning content as the final reply when the model omits formal content after tool success", async () => {
+    const chatClient: ChatClient = {
+      async complete(request) {
+        if (request.messages.some((message) => message.role === "tool")) {
+          return {
+            content: null,
+            reasoningContent:
+              "## 🏆 一等奖（6+1）\n- 中奖注数：4注\n- 单注奖金：8,287,457元\n- 地区分布：浙江、广东、山东、湖南各1注",
+            finishReason: "stop",
+            toolCalls: [],
+          };
+        }
+        return toolCallResponse("tool_call_search", "/search-result");
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "查一下昨天双色球开奖结果" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(),
+        maxTurns: 3,
+        tools: testTools,
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: "succeeded",
+      toolCallsExecuted: 1,
+    });
+    expect(result.summary).toContain("一等奖（6+1）");
+    expect(result.summary).toContain("中奖注数：4注");
+    expect(result.summary).not.toContain("模型没有返回可用回复");
+  });
+
+  it("asks the model to recover once from repeated tool failures before pausing", async () => {
+    const requests: ChatCompletionRequest[] = [];
+    const chatClient: ChatClient = {
+      async complete(request) {
+        requests.push(request);
+        if (requests.length === 1) {
+          return {
+            content: null,
+            finishReason: "tool_calls",
+            toolCalls: [1, 2, 3].map((index) => ({
+              id: `tool_call_${index}`,
+              type: "function" as const,
+              function: {
+                name: "file_list",
+                arguments: JSON.stringify({ path: `/missing-${index}` }),
+              },
+            })),
+          };
+        }
+
+        expect(request.messages.at(-1)).toMatchObject({
+          role: "system",
+          content: expect.stringContaining("连续 3 次工具失败"),
+        });
+        expect(request.messages.at(-1)?.content).toContain("/missing-3");
+        return {
+          content: "我会基于已有结果继续，不再猜测不存在的路径。",
+          toolCalls: [],
+          finishReason: "stop",
+        };
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "深度理解项目后生成 onepage" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(undefined, undefined, {
+          ok: false,
+          error: "ENOENT: no such file or directory, scandir '/missing-3'",
+        }),
+        maxTurns: 6,
+        pauseOnFailureLoop: true,
+        tools: testTools,
+      },
+    );
+
+    expect(requests).toHaveLength(2);
+    expect(result).toMatchObject({
+      status: "succeeded",
+      toolCallsExecuted: 3,
+      summary: "我会基于已有结果继续，不再猜测不存在的路径。",
+    });
   });
 
   it("passes dynamic registry source to tool authorization", async () => {
@@ -1043,6 +1314,338 @@ describe("agent loop", () => {
       },
     ]);
   });
+
+  it("streams model deltas while aggregating the final tool call before authorization", async () => {
+    const modelEvents: StreamEvent[] = [];
+    const previewSnapshots: Array<{ authorized: number; executed: number }> = [];
+    const authorizationRequests: ToolCallRequest[] = [];
+    const executedTools: string[] = [];
+    let completeCalls = 0;
+    let streamCalls = 0;
+    const chatClient: ChatClient & StreamingChatClient = {
+      async complete() {
+        completeCalls += 1;
+        throw new Error("non-streaming complete should not be used");
+      },
+      async *streamComplete() {
+        streamCalls += 1;
+        if (streamCalls === 1) {
+          yield { type: "content_delta", text: "I will inspect. " };
+          yield { type: "reasoning_delta", text: "Need a directory listing." };
+          yield {
+            type: "tool_call_delta",
+            id: "stream_call_1",
+            name: "file_list",
+            arguments: '{"path"',
+          };
+          yield {
+            type: "tool_call_delta",
+            id: "stream_call_1",
+            name: "",
+            arguments: ':"/denied"}',
+          };
+          yield { type: "done", finishReason: "tool_calls" };
+          return;
+        }
+        yield { type: "content_delta", text: "I cannot access that path." };
+        yield { type: "done", finishReason: "stop" };
+      },
+    };
+    const toolAuthorizationService: ToolAuthorizationService = {
+      async authorize(_taskId, request) {
+        authorizationRequests.push(request);
+        return {
+          ok: true,
+          decision: { allowed: false, reason: "permission denied" },
+          auditEvent: {
+            id: "audit_stream_1",
+            taskId: "task_stream",
+            request,
+            decision: { allowed: false, reason: "permission denied" },
+            createdAt: "2026-06-23T00:00:00.000Z",
+          },
+        };
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "list /denied" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(() => {
+          executedTools.push("file_list");
+        }),
+        toolAuthorizationService,
+        taskId: "task_stream",
+        tools: testTools,
+        onModelStreamEvent(event) {
+          modelEvents.push(event);
+          if (event.type === "tool_call_delta") {
+            previewSnapshots.push({
+              authorized: authorizationRequests.length,
+              executed: executedTools.length,
+            });
+          }
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: "succeeded",
+      summary: "I cannot access that path.",
+      toolCallsExecuted: 0,
+    });
+    expect(completeCalls).toBe(0);
+    expect(streamCalls).toBe(2);
+    expect(modelEvents).toEqual(
+      expect.arrayContaining([
+        { type: "content_delta", text: "I will inspect. " },
+        { type: "reasoning_delta", text: "Need a directory listing." },
+        expect.objectContaining({
+          type: "tool_call_delta",
+          id: "stream_call_1",
+          name: "file_list",
+        }),
+      ]),
+    );
+    expect(previewSnapshots).toEqual([
+      { authorized: 0, executed: 0 },
+      { authorized: 0, executed: 0 },
+    ]);
+    expect(authorizationRequests).toEqual([
+      {
+        toolName: "file_list",
+        args: { path: "/denied" },
+      },
+    ]);
+    expect(executedTools).toEqual([]);
+  });
+
+  it("falls back to complete when streaming fails before any model delta", async () => {
+    let completeCalls = 0;
+    let streamCalls = 0;
+    let executions = 0;
+    const chatClient: ChatClient & StreamingChatClient = {
+      async complete() {
+        completeCalls += 1;
+        return {
+          content: "fallback complete response",
+          toolCalls: [],
+          finishReason: "stop",
+        };
+      },
+      async *streamComplete() {
+        streamCalls += 1;
+        throw new Error("stream endpoint unavailable");
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "summarize without tools" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(() => {
+          executions += 1;
+        }),
+        tools: testTools,
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: "succeeded",
+      summary: "fallback complete response",
+      toolCallsExecuted: 0,
+    });
+    expect(streamCalls).toBe(1);
+    expect(completeCalls).toBe(1);
+    expect(executions).toBe(0);
+  });
+
+  it("does not fall back to complete after a streamed answer delta", async () => {
+    let completeCalls = 0;
+    const modelEvents: StreamEvent[] = [];
+    const chatClient: ChatClient & StreamingChatClient = {
+      async complete() {
+        completeCalls += 1;
+        return {
+          content: "duplicate fallback response",
+          toolCalls: [],
+          finishReason: "stop",
+        };
+      },
+      async *streamComplete() {
+        yield { type: "content_delta", text: "partial answer" };
+        throw new Error("stream broke after partial answer");
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "stream then fail" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(),
+        tools: testTools,
+        onModelStreamEvent(event) {
+          modelEvents.push(event);
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: "failed",
+      summary: "stream broke after partial answer",
+      toolCallsExecuted: 0,
+    });
+    expect(modelEvents).toEqual([
+      { type: "content_delta", text: "partial answer" },
+    ]);
+    expect(completeCalls).toBe(0);
+  });
+
+  it("assembles concurrent indexed streamed tool calls before authorization", async () => {
+    let streamCalls = 0;
+    const authorizationRequests: ToolCallRequest[] = [];
+    const executions: Array<{ toolName: string; args: Record<string, unknown> }> = [];
+    const chatClient: ChatClient & StreamingChatClient = {
+      async complete() {
+        throw new Error("complete should not run for indexed streaming tools");
+      },
+      async *streamComplete() {
+        streamCalls += 1;
+        if (streamCalls === 1) {
+          yield {
+            type: "tool_call_delta",
+            index: 0,
+            id: "call_0",
+            name: "file_list",
+            arguments: '{"path":"/alpha',
+          };
+          yield {
+            type: "tool_call_delta",
+            index: 1,
+            id: "call_1",
+            name: "file_list",
+            arguments: '{"path":"/beta',
+          };
+          yield {
+            type: "tool_call_delta",
+            index: 0,
+            id: "",
+            name: "",
+            arguments: '"}',
+          };
+          yield {
+            type: "tool_call_delta",
+            index: 1,
+            id: "",
+            name: "",
+            arguments: '"}',
+          };
+          yield { type: "done", finishReason: "tool_calls" };
+          return;
+        }
+        yield { type: "content_delta", text: "indexed tools done" };
+        yield { type: "done", finishReason: "stop" };
+      },
+    };
+    const toolAuthorizationService: ToolAuthorizationService = {
+      async authorize(_taskId, request) {
+        authorizationRequests.push(request);
+        return {
+          ok: true,
+          decision: { allowed: true, reason: "allowed" },
+          auditEvent: {
+            id: `audit_indexed_${authorizationRequests.length}`,
+            taskId: "task_indexed",
+            request,
+            decision: { allowed: true, reason: "allowed" },
+            createdAt: "2026-06-23T00:00:00.000Z",
+          },
+        };
+      },
+    };
+    const toolExecutor: AgentToolExecutor = {
+      async execute(request) {
+        executions.push(request);
+        return {
+          ok: true,
+          result: { path: request.args.path },
+        };
+      },
+      getRegistry() {
+        throw new Error("not used");
+      },
+      hasTool() {
+        return true;
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "list two directories" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor,
+        toolAuthorizationService,
+        taskId: "task_indexed",
+        tools: testTools,
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: "succeeded",
+      summary: "indexed tools done",
+      toolCallsExecuted: 2,
+    });
+    expect(authorizationRequests).toEqual([
+      { toolName: "file_list", args: { path: "/alpha" } },
+      { toolName: "file_list", args: { path: "/beta" } },
+    ]);
+    expect(executions).toEqual([
+      { toolName: "file_list", args: { path: "/alpha" } },
+      { toolName: "file_list", args: { path: "/beta" } },
+    ]);
+  });
+
+  it("does not fall back to complete for an abort-style stream failure before deltas", async () => {
+    const controller = new AbortController();
+    let completeCalls = 0;
+    const chatClient: ChatClient & StreamingChatClient = {
+      async complete() {
+        completeCalls += 1;
+        return {
+          content: "complete should not run after abort",
+          toolCalls: [],
+          finishReason: "stop",
+        };
+      },
+      async *streamComplete() {
+        controller.abort();
+        throw new Error("aborted by stream");
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "abort streaming" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(),
+        tools: testTools,
+        signal: controller.signal,
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: "canceled",
+      summary: "Agent loop canceled.",
+      toolCallsExecuted: 0,
+    });
+    expect(completeCalls).toBe(0);
+  });
 });
 
 function toolCallResponse(id: string, path = "/tmp"): ChatCompletionResponse {
@@ -1077,6 +1680,34 @@ function dynamicToolCallResponse(id: string): ChatCompletionResponse {
       },
     ],
   };
+}
+
+function everyAssistantToolCallHasResult(
+  messages: ChatCompletionRequest["messages"],
+): boolean {
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (message.role !== "assistant" || !message.tool_calls?.length) {
+      continue;
+    }
+
+    const toolResultIds = new Set<string>();
+    for (let nextIndex = index + 1; nextIndex < messages.length; nextIndex += 1) {
+      const nextMessage = messages[nextIndex];
+      if (nextMessage.role === "assistant") {
+        break;
+      }
+      if (nextMessage.role === "tool" && nextMessage.tool_call_id) {
+        toolResultIds.add(nextMessage.tool_call_id);
+      }
+    }
+
+    if (!message.tool_calls.every((toolCall) => toolResultIds.has(toolCall.id))) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function createToolExecutor(

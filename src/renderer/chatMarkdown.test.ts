@@ -26,11 +26,34 @@ describe("chat markdown", () => {
   });
 
   it("parses inline emphasis and code spans without using raw HTML", () => {
-    expect(parseInlineMarkdown("请看 **重点** 和 `task.json`")).toEqual([
+    expect(
+      parseInlineMarkdown(
+        "请看 **重点**、`task.json` 和 [报告](https://example.com/report)",
+      ),
+    ).toEqual([
       { type: "text", text: "请看 " },
       { type: "strong", text: "重点" },
-      { type: "text", text: " 和 " },
+      { type: "text", text: "、" },
       { type: "code", text: "task.json" },
+      { type: "text", text: " 和 " },
+      {
+        type: "link",
+        text: "报告",
+        href: "https://example.com/report",
+      },
+    ]);
+  });
+
+  it("parses bare web URLs as links while leaving local paths as text", () => {
+    expect(
+      parseInlineMarkdown("报告在 /Volumes/out/report.md，来源 https://example.com"),
+    ).toEqual([
+      { type: "text", text: "报告在 /Volumes/out/report.md，来源 " },
+      {
+        type: "link",
+        text: "https://example.com",
+        href: "https://example.com",
+      },
     ]);
   });
 });

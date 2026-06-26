@@ -6,6 +6,8 @@ import { promisify } from "node:util";
 import type { ChatSessionStore } from "./chatSessionStore";
 import { createWebTools, type WebTools } from "./webTools";
 import { createDynamicToolRegistry, type DynamicToolRegistry } from "./dynamicToolRegistry";
+import { registerSkillLoadTools } from "./skillLoadTools";
+import type { HistoryIndexStore } from "./historyIndexStore";
 import { searchCode } from "./nativeCodeTools";
 import { readGitDiff, readGitStatus } from "./nativeGitTools";
 import { createNativeResearchTools } from "./nativeResearchTools";
@@ -17,12 +19,22 @@ import {
   type LocalFileOrganizationPreview,
   type LocalFileOrganizationTransaction,
 } from "./localFileOrganizer";
-import type { ToolResultOffloadStore } from "./toolResultOffloadStore";
+import type {
+  ToolResultOffloadReadScope,
+  ToolResultOffloadStore,
+} from "./toolResultOffloadStore";
 import type { MemoryStore } from "./memoryStore";
-import type { AgentRunContext } from "../shared/agentWorkspace";
+import {
+  validatePathInsideRunContext,
+  type AgentRunContext,
+  type RunContextPathAccess,
+} from "../shared/agentWorkspace";
 import { getMemoryKinds, type MemoryKind } from "../shared/memory";
 import { defineNativeToolDescriptor } from "../shared/nativeCapabilities";
-import type { ToolCallRequest } from "../shared/toolPermissions";
+import {
+  extractPathLikeShellTokens,
+  type ToolCallRequest,
+} from "../shared/toolPermissions";
 import { isSafeToolResultRef } from "../shared/toolResultRefs";
 import {
   normalizeLocationBoundaryPath,
@@ -32,6 +44,7 @@ import {
   assertArtifactParentPathHasNoSymlinks,
   writeArtifactProvenance,
 } from "../shared/agentArtifactProvenance";
+import type { SkillDiscoveryResult } from "../shared/skills";
 
 const execAsync = promisify(exec);
 
@@ -43,6 +56,7 @@ export type AgentToolExecutionOptions = {
   runContext?: AgentRunContext;
   signal?: AbortSignal;
   artifactWrite?: TrustedArtifactWriteMetadata;
+  toolResultReadScope?: ToolResultOffloadReadScope;
 };
 
 export type TrustedArtifactWriteMetadata = {
@@ -66,6 +80,8 @@ export function createAgentToolExecutor(options?: {
   memoryStore?: Pick<MemoryStore, "search">;
   chatSessionStore?: Pick<ChatSessionStore, "searchMessages">;
   toolResultOffloadStore?: Pick<ToolResultOffloadStore, "read">;
+  discoverSkills?: () => Promise<SkillDiscoveryResult>;
+  historyIndexStore?: Pick<HistoryIndexStore, "search" | "around">;
 }): AgentToolExecutor {
   const webTools = options?.webTools ?? createWebTools();
   const registry = options?.registry ?? createDynamicToolRegistry();
@@ -76,10 +92,20 @@ export function createAgentToolExecutor(options?: {
     memoryStore: options?.memoryStore,
     chatSessionStore: options?.chatSessionStore,
     toolResultOffloadStore: options?.toolResultOffloadStore,
+    discoverSkills: options?.discoverSkills,
+    historyIndexStore: options?.historyIndexStore,
   });
 
   return {
     async execute(request, executionOptions) {
+      const guard = validateToolExecutionRequest(
+        request,
+        executionOptions?.runContext,
+      );
+      if (guard) {
+        return guard;
+      }
+
       if (request.toolName === "shell_exec") {
         return executeShellCommand(
           request.args,
@@ -101,6 +127,147 @@ export function createAgentToolExecutor(options?: {
   };
 }
 
+function validateToolExecutionRequest(
+  request: ToolCallRequest,
+  runContext?: AgentRunContext,
+): AgentToolExecutionResult | null {
+  if (!runContext) {
+    return null;
+  }
+
+  if (
+    isWriteTool(request.toolName) &&
+    runContext.sandbox.mode === "read_only"
+  ) {
+    return {
+      ok: false,
+      error: `${request.toolName} refused by read-only run sandbox.`,
+    };
+  }
+
+  if (request.toolName === "shell_exec") {
+    if (runContext.sandbox.shell === "disabled") {
+      return { ok: false, error: "shell_exec refused by disabled shell sandbox." };
+    }
+    if (!runContext.sandbox.allowWorkspaceEscape) {
+      const outsidePath = extractPathLikeShellTokens(
+        String(request.args.command ?? ""),
+      ).find(
+        (token) =>
+          !validatePathInsideRunContext(token, runContext, "read").ok &&
+          !validatePathInsideRunContext(token, runContext, "write").ok,
+      );
+      if (outsidePath) {
+        return {
+          ok: false,
+          error: `shell_exec refused path outside the run sandbox: ${outsidePath}`,
+        };
+      }
+    }
+    return null;
+  }
+
+  if (runContext.sandbox.allowWorkspaceEscape) {
+    return null;
+  }
+
+  const pathChecks = getToolExecutionPathChecks(request);
+  const failedPath = pathChecks.find(
+    (pathCheck) =>
+      !validatePathInsideRunContext(pathCheck.path, runContext, pathCheck.access).ok,
+  );
+  if (!failedPath) {
+    return null;
+  }
+
+  return {
+    ok: false,
+    error: `${request.toolName} refused path outside the run sandbox: ${failedPath.path}`,
+  };
+}
+
+function isWriteTool(toolName: string): boolean {
+  return [
+    "file_write",
+    "file_apply_moves",
+    "file_rollback_moves",
+    "markdown_report_write",
+    "chrome_bookmarks_read",
+  ].includes(toolName);
+}
+
+function getToolExecutionPathChecks(
+  request: ToolCallRequest,
+): Array<{ path: string; access: RunContextPathAccess }> {
+  switch (request.toolName) {
+    case "file_read":
+    case "file_stat":
+    case "file_list":
+    case "file_inventory":
+      return pathChecks([request.args.path], "read");
+    case "file_search":
+      return pathChecks([request.args.root], "read");
+    case "file_move_plan":
+      return pathChecks([request.args.targetDir], "read");
+    case "code_search":
+    case "git_status":
+    case "git_diff":
+    case "test_run":
+      return pathChecks([request.args.workspaceRoot], "read");
+    case "file_write":
+    case "markdown_report_write":
+      return pathChecks([request.args.path], "write");
+    case "file_apply_moves":
+    case "file_rollback_moves":
+      return pathChecks(getOrganizerExecutionPaths(request.args), "write");
+    case "file_verify_moves":
+      return pathChecks(getOrganizerExecutionPaths(request.args), "read");
+    default:
+      return [];
+  }
+}
+
+function getOrganizerExecutionPaths(args: Record<string, unknown>): string[] {
+  const paths: string[] = [];
+  for (const owner of [args.preview, args.transaction]) {
+    if (!isRecord(owner)) {
+      continue;
+    }
+    if (typeof owner.root === "string") {
+      paths.push(owner.root);
+    }
+    if (typeof owner.logPath === "string") {
+      paths.push(owner.logPath);
+    }
+    if (!Array.isArray(owner.moves)) {
+      continue;
+    }
+    for (const move of owner.moves) {
+      if (!isRecord(move)) {
+        continue;
+      }
+      if (typeof move.from === "string") {
+        paths.push(move.from);
+      }
+      if (typeof move.to === "string") {
+        paths.push(move.to);
+      }
+    }
+  }
+  return [...new Set(paths)];
+}
+
+function pathChecks(
+  paths: unknown[],
+  access: RunContextPathAccess,
+): Array<{ path: string; access: RunContextPathAccess }> {
+  return paths
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .map((value) => ({ path: value, access }));
+}
+
 function registerBuiltinTools(
   registry: DynamicToolRegistry,
   options: {
@@ -108,6 +275,8 @@ function registerBuiltinTools(
     memoryStore?: Pick<MemoryStore, "search">;
     chatSessionStore?: Pick<ChatSessionStore, "searchMessages">;
     toolResultOffloadStore?: Pick<ToolResultOffloadStore, "read">;
+    discoverSkills?: () => Promise<SkillDiscoveryResult>;
+    historyIndexStore?: Pick<HistoryIndexStore, "search" | "around">;
   },
 ) {
   const researchTools = createNativeResearchTools({
@@ -347,10 +516,11 @@ function registerBuiltinTools(
         },
       },
     },
-    async (args) =>
+    async (args, executionOptions) =>
       readLocalFileOrToolResultRef(
         String(args.path ?? ""),
         options.toolResultOffloadStore,
+        executionOptions?.toolResultReadScope,
       ),
     "built-in",
   );
@@ -371,8 +541,12 @@ function registerBuiltinTools(
         },
       },
     },
-    async (args) =>
-      readToolResultRef(String(args.ref ?? ""), options.toolResultOffloadStore),
+    async (args, executionOptions) =>
+      readToolResultRef(
+        String(args.ref ?? ""),
+        options.toolResultOffloadStore,
+        executionOptions?.toolResultReadScope,
+      ),
     "built-in",
     defineNativeToolDescriptor({
       id: "tool_result_read",
@@ -467,7 +641,7 @@ function registerBuiltinTools(
           properties: {
             workspaceRoot: {
               type: "string",
-              description: "要搜索的仓库或工作区绝对路径",
+              description: "可选；省略时使用当前会话工作区",
             },
             query: { type: "string", description: "要搜索的代码文本" },
             maxResults: {
@@ -475,13 +649,13 @@ function registerBuiltinTools(
               description: "最多返回结果数，默认 20，最大 100",
             },
           },
-          required: ["workspaceRoot", "query"],
+          required: ["query"],
         },
       },
     },
-    async (args) =>
+    async (args, executionOptions) =>
       searchCode({
-        workspaceRoot: String(args.workspaceRoot ?? ""),
+        workspaceRoot: getWorkspaceRootArg(args, executionOptions?.runContext),
         query: String(args.query ?? ""),
         maxResults: optionalNumber(args.maxResults),
       }),
@@ -509,16 +683,15 @@ function registerBuiltinTools(
           properties: {
             workspaceRoot: {
               type: "string",
-              description: "Git 仓库工作区绝对路径",
+              description: "可选；省略时使用当前会话工作区",
             },
           },
-          required: ["workspaceRoot"],
         },
       },
     },
-    async (args) =>
+    async (args, executionOptions) =>
       readGitStatus({
-        workspaceRoot: String(args.workspaceRoot ?? ""),
+        workspaceRoot: getWorkspaceRootArg(args, executionOptions?.runContext),
       }),
     "built-in",
     defineNativeToolDescriptor({
@@ -544,20 +717,19 @@ function registerBuiltinTools(
           properties: {
             workspaceRoot: {
               type: "string",
-              description: "Git 仓库工作区绝对路径",
+              description: "可选；省略时使用当前会话工作区",
             },
             staged: {
               type: "boolean",
               description: "是否读取 staged/cached diff，默认 false",
             },
           },
-          required: ["workspaceRoot"],
         },
       },
     },
-    async (args) =>
+    async (args, executionOptions) =>
       readGitDiff({
-        workspaceRoot: String(args.workspaceRoot ?? ""),
+        workspaceRoot: getWorkspaceRootArg(args, executionOptions?.runContext),
         staged: Boolean(args.staged),
       }),
     "built-in",
@@ -584,7 +756,7 @@ function registerBuiltinTools(
           properties: {
             workspaceRoot: {
               type: "string",
-              description: "运行测试命令的工作区绝对路径",
+              description: "可选；省略时使用当前会话工作区",
             },
             command: { type: "string", description: "要运行的测试命令" },
             timeoutMs: {
@@ -592,13 +764,13 @@ function registerBuiltinTools(
               description: "可选超时时间，范围 1000-600000 ms，默认 120000 ms",
             },
           },
-          required: ["workspaceRoot", "command"],
+          required: ["command"],
         },
       },
     },
     async (args, executionOptions) =>
       runNativeTestCommand({
-        workspaceRoot: String(args.workspaceRoot ?? ""),
+        workspaceRoot: getWorkspaceRootArg(args, executionOptions?.runContext),
         command: String(args.command ?? ""),
         timeoutMs: optionalNumber(args.timeoutMs),
         signal: executionOptions?.signal,
@@ -644,7 +816,8 @@ function registerBuiltinTools(
       type: "function",
       function: {
         name: "web_search",
-        description: "使用 DuckDuckGo 搜索网页并返回结果列表。",
+        description:
+          "使用 DuckDuckGo 搜索网页并返回结果列表。日期敏感查询必须先解析相对日期，并在 query 中包含绝对日期。",
         parameters: {
           type: "object",
           properties: {
@@ -851,6 +1024,56 @@ function registerBuiltinTools(
     async (args) => searchConversations(args, options.chatSessionStore),
     "built-in",
   );
+
+  registry.register(
+    {
+      type: "function",
+      function: {
+        name: "history_search",
+        description:
+          "检索跨会话 raw history 原文证据，包括聊天、工具输入输出、命令、路径和技能加载记录。",
+        parameters: {
+          type: "object",
+          properties: {
+            query: { type: "string", description: "关键词查询" },
+            sessionId: { type: "string", description: "可选：限制会话" },
+            limit: { type: "number", description: "最多返回几条，默认 5，最大 10" },
+          },
+          required: ["query"],
+        },
+      },
+    },
+    async (args, executionOptions) =>
+      searchHistory(args, options.historyIndexStore, executionOptions),
+    "built-in",
+  );
+
+  registry.register(
+    {
+      type: "function",
+      function: {
+        name: "history_around",
+        description:
+          "读取 raw history 命中项前后的原始上下文，用于恢复跨会话细节。",
+        parameters: {
+          type: "object",
+          properties: {
+            entryId: { type: "string", description: "raw history entry id" },
+            before: { type: "number", description: "向前读取条数，默认 3" },
+            after: { type: "number", description: "向后读取条数，默认 3" },
+          },
+          required: ["entryId"],
+        },
+      },
+    },
+    async (args, executionOptions) =>
+      aroundHistory(args, options.historyIndexStore, executionOptions),
+    "built-in",
+  );
+
+  if (options.discoverSkills) {
+    registerSkillLoadTools(registry, { discoverSkills: options.discoverSkills });
+  }
 }
 
 async function listLocalDirectory(
@@ -1029,9 +1252,10 @@ async function readLocalFile(filePath: string): Promise<AgentToolExecutionResult
 async function readLocalFileOrToolResultRef(
   filePath: string,
   store?: Pick<ToolResultOffloadStore, "read">,
+  scope?: ToolResultOffloadReadScope,
 ): Promise<AgentToolExecutionResult> {
   if (isSafeToolResultRef(filePath)) {
-    return readToolResultRef(filePath, store);
+    return readToolResultRef(filePath, store, scope);
   }
 
   return readLocalFile(filePath);
@@ -1040,6 +1264,7 @@ async function readLocalFileOrToolResultRef(
 async function readToolResultRef(
   ref: string,
   store?: Pick<ToolResultOffloadStore, "read">,
+  scope?: ToolResultOffloadReadScope,
 ): Promise<AgentToolExecutionResult> {
   if (!isSafeToolResultRef(ref)) {
     return {
@@ -1054,7 +1279,7 @@ async function readToolResultRef(
     };
   }
 
-  const content = await store.read(ref);
+  const content = await store.read(ref, scope);
   if (!content) {
     return {
       ok: false,
@@ -1975,6 +2200,14 @@ function optionalNumber(value: unknown): number | undefined {
   return Number.isFinite(numeric) ? numeric : undefined;
 }
 
+function getWorkspaceRootArg(
+  args: Record<string, unknown>,
+  runContext: AgentRunContext | undefined,
+): string {
+  const explicit = String(args.workspaceRoot ?? "").trim();
+  return explicit || runContext?.workspaceRoot || "";
+}
+
 function buildShellErrorDetails(options: {
   command: string;
   timeoutMs: number;
@@ -2177,6 +2410,90 @@ async function searchConversations(
         createdAt: result.createdAt,
         score: result.score,
       })),
+    },
+  };
+}
+
+async function searchHistory(
+  args: Record<string, unknown>,
+  historyIndexStore: Pick<HistoryIndexStore, "search"> | undefined,
+  executionOptions?: AgentToolExecutionOptions,
+): Promise<AgentToolExecutionResult> {
+  if (!historyIndexStore) {
+    return { ok: false, error: "history_search is not configured." };
+  }
+
+  const query = String(args.query ?? "").trim();
+  if (!query) {
+    return { ok: false, error: "history_search requires a query." };
+  }
+
+  const sessionId = executionOptions?.runContext
+    ? executionOptions.runContext.sessionId
+    : String(args.sessionId ?? "").trim();
+  const workspaceId = executionOptions?.runContext
+    ? executionOptions.runContext.workspaceId
+    : String(args.workspaceId ?? "").trim();
+  const results = await historyIndexStore.search({
+    query,
+    limit: clampLimit(args.limit),
+    ...(workspaceId ? { workspaceId } : {}),
+    ...(sessionId ? { sessionId } : {}),
+  });
+
+  return {
+    ok: true,
+    result: {
+      query,
+      results: results.map((result) => ({
+        id: result.entry.id,
+        ...(result.entry.sessionId ? { sessionId: result.entry.sessionId } : {}),
+        ...(result.entry.workspaceId ? { workspaceId: result.entry.workspaceId } : {}),
+        role: result.entry.role,
+        ...(result.entry.toolName ? { toolName: result.entry.toolName } : {}),
+        content: truncateForTool(result.entry.content, 800),
+        createdAt: result.entry.createdAt,
+        score: result.score,
+        matchedTerms: result.matchedTerms,
+      })),
+    },
+  };
+}
+
+async function aroundHistory(
+  args: Record<string, unknown>,
+  historyIndexStore: Pick<HistoryIndexStore, "around"> | undefined,
+  executionOptions?: AgentToolExecutionOptions,
+): Promise<AgentToolExecutionResult> {
+  if (!historyIndexStore) {
+    return { ok: false, error: "history_around is not configured." };
+  }
+
+  const entryId = String(args.entryId ?? "").trim();
+  if (!entryId) {
+    return { ok: false, error: "history_around requires entryId." };
+  }
+
+  const result = await historyIndexStore.around({
+    entryId,
+    ...(executionOptions?.runContext?.workspaceId
+      ? { workspaceId: executionOptions.runContext.workspaceId }
+      : {}),
+    ...(executionOptions?.runContext?.sessionId
+      ? { sessionId: executionOptions.runContext.sessionId }
+      : {}),
+    before: typeof args.before === "number" ? args.before : undefined,
+    after: typeof args.after === "number" ? args.after : undefined,
+  });
+  if (!result) {
+    return { ok: false, error: `history entry "${entryId}" was not found.` };
+  }
+
+  return {
+    ok: true,
+    result: {
+      anchor: result.anchor,
+      entries: result.entries,
     },
   };
 }

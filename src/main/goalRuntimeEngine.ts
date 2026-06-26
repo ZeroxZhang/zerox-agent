@@ -34,6 +34,12 @@ import {
   getDeterministicGoalPipelineReadRoots,
   isDeterministicGoalPipelineSupported,
 } from "./agentDeterministicGoalPipeline";
+import {
+  createToolInvocation,
+  transitionToolInvocation,
+  type ToolInvocationRecord,
+  type ToolInvocationTransition,
+} from "../shared/toolInvocationLedger";
 
 export type GoalRuntimeModelProfile = {
   baseUrl: string;
@@ -197,6 +203,42 @@ export function createGoalRuntimeEngine(options: {
             args,
             deterministicOptions?: DeterministicToolExecutionOptions,
           ) {
+            let invocation = createToolInvocation({
+              id: `tool_invocation_${createId()}`,
+              runId,
+              toolCallId: `deterministic_${observedToolCalls + 1}`,
+              toolName,
+              source: "deterministic-goal-pipeline",
+              args,
+              createdAt: now(),
+            });
+            const appendInvocation = async (record: ToolInvocationRecord) => {
+              await appendTrajectory(runId, "tool_invocation", {
+                ...payload,
+                toolInvocationId: record.id,
+                toolCallId: record.toolCallId,
+                toolName: record.toolName,
+                toolSource: record.source,
+                invocationStatus: record.status,
+                args: record.args,
+                ...(typeof record.ok === "boolean" ? { ok: record.ok } : {}),
+                ...(record.resultRef ? { resultRef: record.resultRef } : {}),
+                ...(record.error ? { error: record.error } : {}),
+                history: record.history,
+              });
+            };
+            const transitionInvocation = async (
+              transition: Omit<ToolInvocationTransition, "at"> & { at?: string },
+            ) => {
+              invocation = transitionToolInvocation(invocation, {
+                ...transition,
+                at: transition.at ?? now(),
+              });
+              await appendInvocation(invocation);
+            };
+            await appendInvocation(invocation);
+            await transitionInvocation({ status: "visible" });
+
             if (options.toolAuthorizationService) {
               const auth = await options.toolAuthorizationService.authorize(
                 taskId,
@@ -214,6 +256,11 @@ export function createGoalRuntimeEngine(options: {
                   ok: false as const,
                   error: auth.ok ? auth.decision.reason : auth.message,
                 };
+                await transitionInvocation({
+                  status: "error",
+                  ok: false,
+                  error: rejectedResult.error,
+                });
                 await appendTrajectory(runId, "tool_result", {
                   ...payload,
                   toolName,
@@ -222,6 +269,15 @@ export function createGoalRuntimeEngine(options: {
                 });
                 return rejectedResult;
               }
+              await transitionInvocation({
+                status: "authorized",
+                reason: auth.decision.reason,
+              });
+            } else {
+              await transitionInvocation({
+                status: "authorized",
+                reason: "tool authorization service not configured",
+              });
             }
 
             await appendTrajectory(runId, "tool_call", {
@@ -233,8 +289,9 @@ export function createGoalRuntimeEngine(options: {
               createEvent("info", "executing", `Tool called: ${toolName}`, {
                 ...payload,
                 toolName,
-              }),
+                }),
             );
+            await transitionInvocation({ status: "running" });
             const result = await options.toolExecutor.execute(
               {
                 toolName: toolName as never,
@@ -250,6 +307,11 @@ export function createGoalRuntimeEngine(options: {
             );
             observedToolCalls += 1;
             const artifactEvidence = extractArtifactEvidence(result);
+            await transitionInvocation(
+              result.ok
+                ? { status: "completed", ok: true }
+                : { status: "error", ok: false, error: result.error },
+            );
             await appendTrajectory(runId, "tool_result", {
               ...payload,
               toolName,
@@ -416,6 +478,21 @@ export function createGoalRuntimeEngine(options: {
                 toolName,
               }),
             );
+          },
+          onToolInvocation(record) {
+            void appendTrajectory(runId, "tool_invocation", {
+              ...payload,
+              toolInvocationId: record.id,
+              toolCallId: record.toolCallId,
+              toolName: record.toolName,
+              toolSource: record.source,
+              invocationStatus: record.status,
+              args: record.args,
+              ...(typeof record.ok === "boolean" ? { ok: record.ok } : {}),
+              ...(record.resultRef ? { resultRef: record.resultRef } : {}),
+              ...(record.error ? { error: record.error } : {}),
+              history: record.history,
+            });
           },
           onToolResult(toolName, ok, result) {
             observedToolCalls += 1;

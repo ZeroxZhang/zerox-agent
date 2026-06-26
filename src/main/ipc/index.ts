@@ -1,12 +1,20 @@
-import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from "electron";
+import {
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  type IpcMainInvokeEvent,
+} from "electron";
 import { randomUUID } from "node:crypto";
 import type { AppContainer } from "../container";
 import type {
   CancelChatMessageResult,
+  ChatStreamEvent,
   ChatSessionOperationResult,
   ChatTaskStatusEvent,
   SendChatMessageInput,
   SendChatMessageResult,
+  SkillInputResponse,
+  SkillInputResponseResult,
 } from "../../shared/chat";
 import type {
   CancelScheduledTaskRunResult,
@@ -20,6 +28,7 @@ import type {
   UpdateScheduledTaskEnabledResult,
 } from "../../shared/scheduledTasks";
 import type { ToolCallRequest } from "../../shared/toolPermissions";
+import type { ReadToolResultRefOptions } from "../../shared/toolResultRefs";
 import type {
   CreateMemoryResult,
   DeleteMemoryResult,
@@ -34,6 +43,10 @@ import type {
   ReadMemoryProfileResult,
   SaveMemoryProfileResult,
 } from "../../shared/memoryProfile";
+import type {
+  RawHistoryAroundOptions,
+  RawHistorySearchOptions,
+} from "../../shared/rawHistory";
 import type { AgentLearningListOptions } from "../../shared/agentLearning";
 import type {
   AgentEvalCandidate,
@@ -68,6 +81,7 @@ export function registerAllIpcHandlers(container: AppContainer): void {
   registerModelSettingsIpcHandlers(container);
   registerChatIpcHandlers(container);
   registerGoalProgressBroadcaster(container);
+  registerAgentRunsChangedBroadcaster(container);
 }
 
 function registerGoalProgressBroadcaster(container: AppContainer): void {
@@ -75,6 +89,16 @@ function registerGoalProgressBroadcaster(container: AppContainer): void {
     for (const window of BrowserWindow.getAllWindows()) {
       if (!window.isDestroyed()) {
         window.webContents.send("goal:progressEvent", event);
+      }
+    }
+  });
+}
+
+function registerAgentRunsChangedBroadcaster(container: AppContainer): void {
+  container.onAgentRunsChanged((event) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) {
+        window.webContents.send("agentRuns:changed", event);
       }
     }
   });
@@ -223,8 +247,32 @@ function registerToolsIpcHandlers(container: AppContainer): void {
   ipcMain.handle("toolAudit:list", () => container.toolAuditLog().list({ limit: 50 }));
   ipcMain.handle(
     "toolResults:readRef",
-    async (_event, ref: string) => container.readToolResultRef(ref),
+    async (_event, ref: string, options?: unknown) =>
+      container.readToolResultRef(ref, sanitizeReadToolResultRefOptions(options)),
   );
+}
+
+function sanitizeReadToolResultRefOptions(
+  options: unknown,
+): ReadToolResultRefOptions | undefined {
+  if (!options || typeof options !== "object") {
+    return undefined;
+  }
+
+  const input = options as Record<string, unknown>;
+  const sanitized: ReadToolResultRefOptions = {};
+  for (const key of [
+    "runId",
+    "sessionId",
+    "requestId",
+    "workspaceRunId",
+  ] as const) {
+    if (typeof input[key] === "string") {
+      sanitized[key] = input[key];
+    }
+  }
+
+  return Object.keys(sanitized).length > 0 ? sanitized : undefined;
 }
 
 function registerRunsIpcHandlers(container: AppContainer): void {
@@ -316,8 +364,21 @@ function registerWorkspacesIpcHandlers(container: AppContainer): void {
   ipcMain.handle("agentWorkspaces:createTemporary", (_event, input) =>
     container.agentWorkspaceService().createTemporaryWorkspace(input),
   );
-  ipcMain.handle("agentWorkspaces:createGitWorktree", (_event, input) =>
-    container.agentWorkspaceService().createGitWorktreeWorkspace(input),
+  ipcMain.handle("agentWorkspaces:openProject", async () => {
+    const result = await dialog.showOpenDialog({
+      title: "打开工作区",
+      buttonLabel: "打开工作区",
+      properties: ["openDirectory", "createDirectory"],
+    });
+    const rootPath = result.filePaths[0];
+    if (result.canceled || !rootPath) {
+      return null;
+    }
+
+    return container.agentWorkspaceService().createProjectWorkspace({ rootPath });
+  });
+  ipcMain.handle("agentWorkspaces:requestGitWorktree", (_event, input) =>
+    container.requestGitWorktreeAgentWorkspace(input),
   );
 }
 
@@ -448,6 +509,16 @@ function registerMemoryIpcHandlers(container: AppContainer): void {
   ipcMain.handle("memory:search", (_event, options: MemorySearchOptions) =>
     container.memoryStore().search(options),
   );
+  ipcMain.handle("history:search", (_event, options: RawHistorySearchOptions) =>
+    hasRawHistoryScope(options)
+      ? container.historyIndexStore().search(options)
+      : [],
+  );
+  ipcMain.handle("history:around", (_event, options: RawHistoryAroundOptions) =>
+    hasRawHistoryScope(options)
+      ? container.historyIndexStore().around(options)
+      : null,
+  );
   ipcMain.handle(
     "memory:create",
     async (_event, input: MemoryInput): Promise<CreateMemoryResult> => {
@@ -567,6 +638,12 @@ function registerMemoryIpcHandlers(container: AppContainer): void {
   );
 }
 
+function hasRawHistoryScope(
+  options: Partial<RawHistorySearchOptions & RawHistoryAroundOptions> | undefined,
+): boolean {
+  return Boolean(options?.workspaceId || options?.sessionId);
+}
+
 function registerLearningIpcHandlers(container: AppContainer): void {
   ipcMain.handle(
     "learning:listCandidates",
@@ -640,6 +717,11 @@ function registerChatIpcHandlers(container: AppContainer): void {
               sender.send("chat:statusEvent", statusEvent);
             }
           },
+          onStreamEvent(streamEvent: ChatStreamEvent) {
+            if (!sender.isDestroyed()) {
+              sender.send("chat:streamEvent", streamEvent);
+            }
+          },
         });
       } catch (error) {
         return toChatSendMessageFailure(error);
@@ -683,6 +765,27 @@ function registerChatIpcHandlers(container: AppContainer): void {
       };
     },
   );
+  ipcMain.handle(
+    "chat:respondSkillInput",
+    (
+      event: IpcMainInvokeEvent,
+      input: SkillInputResponse,
+    ): Promise<SkillInputResponseResult> => {
+      const sender = event.sender;
+      return container.chatService().respondSkillInput(input, {
+        onStatusEvent(statusEvent: ChatTaskStatusEvent) {
+          if (!sender.isDestroyed()) {
+            sender.send("chat:statusEvent", statusEvent);
+          }
+        },
+        onStreamEvent(streamEvent: ChatStreamEvent) {
+          if (!sender.isDestroyed()) {
+            sender.send("chat:streamEvent", streamEvent);
+          }
+        },
+      });
+    },
+  );
   ipcMain.handle("chatSessions:list", () => container.listChatSessions());
   ipcMain.handle("chatSessions:get", (_event, sessionId: string) =>
     container.getChatSession(sessionId),
@@ -696,6 +799,11 @@ function registerChatIpcHandlers(container: AppContainer): void {
     "chatSessions:restore",
     (_event, sessionId: string): Promise<ChatSessionOperationResult> =>
       container.restoreChatSession(sessionId),
+  );
+  ipcMain.handle(
+    "chatSessions:rename",
+    (_event, sessionId: string, title: string): Promise<ChatSessionOperationResult> =>
+      container.renameChatSession(sessionId, title),
   );
   ipcMain.handle(
     "chatSessions:delete",

@@ -67,13 +67,19 @@ function createSubprocessWorker(options: CreateToolWorkerOptions): ToolWorker {
   const entryModulePath = options.entryModulePath ?? defaultEntryPath();
   const timeoutMs = options.timeoutMs ?? 300_000;
   let child: import("node:child_process").ChildProcess | null = null;
-  const pending = new Map<string, { resolve: (r: ToolResult) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }>();
+  const pending = new Map<string, {
+    proc: import("node:child_process").ChildProcess;
+    resolve: (r: ToolResult) => void;
+    reject: (e: Error) => void;
+    timer: NodeJS.Timeout;
+  }>();
   let counter = 0;
 
   function ensureChild(): import("node:child_process").ChildProcess {
     if (child && !child.killed) return child;
-    child = fork(entryModulePath, [], { stdio: ["inherit", "inherit", "inherit", "ipc"] });
-    child.on("message", (msg: WorkerResponse) => {
+    const spawned = fork(entryModulePath, [], { stdio: ["inherit", "inherit", "inherit", "ipc"] });
+    child = spawned;
+    spawned.on("message", (msg: WorkerResponse) => {
       if (msg.kind !== "result") return;
       const entry = pending.get(msg.id);
       if (!entry) return;
@@ -82,15 +88,37 @@ function createSubprocessWorker(options: CreateToolWorkerOptions): ToolWorker {
       if (msg.ok) entry.resolve({ ok: true, result: msg.result });
       else entry.resolve({ ok: false, error: msg.error });
     });
-    child.on("exit", () => {
-      child = null;
-      for (const [, entry] of pending) {
+    spawned.on("exit", () => {
+      if (child === spawned) {
+        child = null;
+      }
+      for (const [id, entry] of pending) {
+        if (entry.proc !== spawned) continue;
         clearTimeout(entry.timer);
         entry.reject(new Error("tool worker subprocess exited"));
+        pending.delete(id);
       }
-      pending.clear();
     });
-    return child;
+    return spawned;
+  }
+
+  function retireChild(proc: import("node:child_process").ChildProcess): void {
+    if (child === proc) {
+      child = null;
+    }
+    let exited = false;
+    proc.once("exit", () => {
+      exited = true;
+    });
+    if (!proc.killed) {
+      proc.kill("SIGTERM");
+    }
+    const forceKillTimer = setTimeout(() => {
+      if (!exited) {
+        proc.kill("SIGKILL");
+      }
+    }, 1000);
+    forceKillTimer.unref?.();
   }
 
   return {
@@ -109,16 +137,25 @@ function createSubprocessWorker(options: CreateToolWorkerOptions): ToolWorker {
       return new Promise<ToolResult>((resolve, reject) => {
         const timer = setTimeout(() => {
           pending.delete(id);
+          retireChild(proc);
           resolve({ ok: false, error: `tool worker timed out after ${timeoutMs}ms` });
         }, timeoutMs);
-        pending.set(id, { resolve, reject, timer });
-        proc.send(req);
+        pending.set(id, { proc, resolve, reject, timer });
+        try {
+          proc.send(req);
+        } catch (error) {
+          clearTimeout(timer);
+          pending.delete(id);
+          resolve({ ok: false, error: `tool worker send failed: ${String(error)}` });
+        }
       });
     },
     close() {
       if (child) {
-        child.send({ kind: "shutdown" } satisfies WorkerRequest);
-        setTimeout(() => child?.kill(), 1000);
+        const closingChild = child;
+        child = null;
+        closingChild.send({ kind: "shutdown" } satisfies WorkerRequest);
+        setTimeout(() => closingChild.kill(), 1000).unref?.();
       }
     },
   };

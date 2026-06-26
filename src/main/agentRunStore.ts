@@ -1,13 +1,15 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AgentRunRecord } from "../shared/agentRuns";
 import type { StorageBackend, RunRepository, Storage } from "../shared/storageContract";
 import { createRunRepository } from "./storage/repositories/runRepository";
+import { readRecoverableJsonl } from "./jsonlRecovery";
 
 export type AgentRunStore = {
   append(run: AgentRunRecord): Promise<AgentRunRecord>;
   get(runId: string): Promise<AgentRunRecord | null>;
   list(options?: { limit?: number; taskId?: string }): Promise<AgentRunRecord[]>;
+  flushShadowWrites(): Promise<void>;
 };
 
 export interface AgentRunStoreOptions {
@@ -43,23 +45,17 @@ export function createAgentRunStore(options: AgentRunStoreOptions): AgentRunStor
     },
     async list(listOptions?: { limit?: number; taskId?: string }): Promise<AgentRunRecord[]> {
       const limit = listOptions?.limit ?? 50;
-      try {
-        const raw = await readFile(runsPath, "utf8");
-        return raw
-          .split("\n")
-          .filter(Boolean)
-          .map((line) => JSON.parse(line) as AgentRunRecord)
-          .filter((run) => (listOptions?.taskId ? run.taskId === listOptions.taskId : true))
-          .reverse()
-          .slice(0, limit);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-        throw error;
-      }
+      return (await readRecoverableJsonl<AgentRunRecord>(runsPath))
+        .filter((run) => (listOptions?.taskId ? run.taskId === listOptions.taskId : true))
+        .reverse()
+        .slice(0, limit);
     },
     async get(runId: string): Promise<AgentRunRecord | null> {
       const runs = await jsonImpl.list({ limit: Number.MAX_SAFE_INTEGER });
       return runs.find((run) => run.id === runId) ?? null;
+    },
+    async flushShadowWrites(): Promise<void> {
+      return;
     },
   };
 
@@ -68,10 +64,22 @@ export function createAgentRunStore(options: AgentRunStoreOptions): AgentRunStor
   }
 
   // --- sqlite / dual ---
+  const shadowWrites = new Set<Promise<void>>();
+  function enqueueShadowWrite(promise: Promise<unknown>): void {
+    let tracked: Promise<void>;
+    tracked = promise
+      .catch(shadowWriteError)
+      .then(() => undefined)
+      .finally(() => {
+        shadowWrites.delete(tracked);
+      });
+    shadowWrites.add(tracked);
+  }
+
   return {
     async append(run) {
       repo.create(run); // sync, hot path
-      if (backend === "dual") void jsonImpl.append(run).catch(shadowWriteError);
+      if (backend === "dual") enqueueShadowWrite(jsonImpl.append(run));
       return run;
     },
     async get(runId) {
@@ -80,6 +88,9 @@ export function createAgentRunStore(options: AgentRunStoreOptions): AgentRunStor
     async list(listOptions) {
       const limit = listOptions?.limit ?? 50;
       return repo.list({ limit, taskId: listOptions?.taskId });
+    },
+    async flushShadowWrites() {
+      await Promise.all([...shadowWrites]);
     },
   };
 }

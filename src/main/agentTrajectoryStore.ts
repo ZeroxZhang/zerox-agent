@@ -1,8 +1,9 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
 import type { StorageBackend, RunRepository, Storage } from "../shared/storageContract";
 import { createRunRepository } from "./storage/repositories/runRepository";
+import { readRecoverableJsonl } from "./jsonlRecovery";
 
 export type AgentTrajectoryStore = {
   append(
@@ -10,6 +11,7 @@ export type AgentTrajectoryStore = {
     event: AgentTrajectoryEvent,
   ): Promise<AgentTrajectoryEvent>;
   list(runId: string): Promise<AgentTrajectoryEvent[]>;
+  flushShadowWrites(): Promise<void>;
 };
 
 export interface AgentTrajectoryStoreOptions {
@@ -50,16 +52,10 @@ export function createAgentTrajectoryStore(
       return event;
     },
     async list(runId) {
-      try {
-        const raw = await readFile(trajectoryPath(runId), "utf8");
-        return raw
-          .split("\n")
-          .filter(Boolean)
-          .map((line) => JSON.parse(line) as AgentTrajectoryEvent);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-        throw error;
-      }
+      return readRecoverableJsonl<AgentTrajectoryEvent>(trajectoryPath(runId));
+    },
+    async flushShadowWrites() {
+      return;
     },
   };
 
@@ -68,14 +64,29 @@ export function createAgentTrajectoryStore(
   }
 
   // --- sqlite / dual (hot path stays sync) ---
+  const shadowWrites = new Set<Promise<void>>();
+  function enqueueShadowWrite(promise: Promise<unknown>): void {
+    let tracked: Promise<void>;
+    tracked = promise
+      .catch(shadowWriteError)
+      .then(() => undefined)
+      .finally(() => {
+        shadowWrites.delete(tracked);
+      });
+    shadowWrites.add(tracked);
+  }
+
   return {
     async append(runId, event) {
       repo.appendTrajectory(runId, event); // sync hot path
-      if (backend === "dual") void jsonImpl.append(runId, event).catch(shadowWriteError);
+      if (backend === "dual") enqueueShadowWrite(jsonImpl.append(runId, event));
       return event;
     },
     async list(runId) {
       return repo.getTrajectory(runId);
+    },
+    async flushShadowWrites() {
+      await Promise.all([...shadowWrites]);
     },
   };
 }

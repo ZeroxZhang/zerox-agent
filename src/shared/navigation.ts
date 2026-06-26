@@ -12,6 +12,7 @@ export type NavigationSectionId =
   | "settings";
 
 export type SettingsNavigationSectionId =
+  | "system-overview"
   | "model-settings"
   | "skills"
   | "tools"
@@ -44,17 +45,6 @@ const navigationSections: NavigationSection[] = [
       "把对话窗口作为第一入口，而不是只展示后台控制台。",
       "在会话中展示模型、技能、任务、记忆和工具状态。",
       "让用户能从自然语言开始，再进入运行时间线排查细节。",
-    ],
-  },
-  {
-    id: "overview",
-    label: "总览",
-    module: "指挥中心",
-    summary: "系统健康、最近运行、待处理问题和下一步动作。",
-    details: [
-      "查看本地智能体是否已经准备好工作。",
-      "一眼看到最近运行、调度器和记忆状态。",
-      "直接跳到能解决问题的页面。",
     ],
   },
   {
@@ -93,6 +83,12 @@ const navigationSections: NavigationSection[] = [
 ];
 
 const settingsNavigationSections: SettingsNavigationSection[] = [
+  {
+    id: "system-overview",
+    label: "系统",
+    module: "系统",
+    summary: "系统健康、最近运行、待处理问题和下一步动作。",
+  },
   {
     id: "model-settings",
     label: "模型",
@@ -162,6 +158,10 @@ export function getDefaultSettingsNavigationSection(): SettingsNavigationSection
 function resolvePrimaryNavigationId(id: string): NavigationSectionId {
   if (id === "goals") {
     return "chat";
+  }
+
+  if (id === "overview") {
+    return "settings";
   }
 
   if (

@@ -47,6 +47,7 @@ export function createToolApprovalCoordinator(options: {
         entry.resolve({
           approved: true,
           reason: `自动授权已开启，已同意本次 ${entry.request.request.toolName}。`,
+          automatic: true,
         });
       }
     }
@@ -63,6 +64,7 @@ export function createToolApprovalCoordinator(options: {
       return {
         approved: true,
         reason: `自动授权已开启，已同意本次 ${request.request.toolName}。`,
+        automatic: true,
       };
     }
 

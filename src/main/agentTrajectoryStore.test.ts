@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -51,6 +51,24 @@ describe("agent trajectory store", () => {
     const store = createAgentTrajectoryStore({ configDir });
 
     await expect(store.list("missing_run")).resolves.toEqual([]);
+  });
+
+  it("skips malformed JSONL lines while preserving valid trajectory events", async () => {
+    const first = createEvent("model_request", "event_1");
+    const second = createEvent("model_response", "event_2");
+    const dir = path.join(configDir, "agent-trajectories");
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      path.join(dir, "run_1.jsonl"),
+      `${JSON.stringify(first)}\n{"id": "partial"\n${JSON.stringify(second)}\n`,
+      "utf8",
+    );
+
+    const store = createAgentTrajectoryStore({ configDir });
+
+    await expect(store.list("run_1")).resolves.toEqual([first, second]);
+    const files = await readdir(dir);
+    expect(files.some((file) => file.startsWith("run_1.jsonl.corrupt-lines-"))).toBe(true);
   });
 });
 

@@ -85,6 +85,49 @@ describe("ToolWorker subprocess mode", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   }, 15000);
+
+  it("recycles a stuck child after a request timeout so future requests use a clean child", async () => {
+    const dir = join(tmpdir(), `zerox-worker-timeout-${randomUUID()}`);
+    mkdirSync(dir, { recursive: true });
+    const entry = join(dir, "entry.mjs");
+    const entrySrc = `
+      process.on("message", (msg) => {
+        if (msg.kind === "shutdown") { process.exit(0); }
+        if (msg.kind !== "execute") return;
+        const { toolName, args } = msg.ctx;
+        if (toolName === "hang") {
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10000);
+          return;
+        }
+        if (toolName === "echo") {
+          process.send({ kind: "result", id: msg.id, ok: true, result: { echoed: args, pid: process.pid } });
+        }
+      });
+    `;
+    writeFileSync(entry, entrySrc, "utf8");
+
+    const worker = createToolWorker({ mode: "subprocess", entryModulePath: entry, timeoutMs: 500 });
+    try {
+      const timedOut = await worker.execute("hang", {}, {
+        sandboxPolicy: sandbox, workspaceRoot: "/tmp", runId: "r1",
+      });
+      expect(timedOut).toMatchObject({
+        ok: false,
+        error: expect.stringContaining("timed out"),
+      });
+
+      const recovered = await worker.execute("echo", { clean: true }, {
+        sandboxPolicy: sandbox, workspaceRoot: "/tmp", runId: "r1",
+      });
+      expect(recovered).toMatchObject({
+        ok: true,
+        result: expect.objectContaining({ echoed: { clean: true } }),
+      });
+    } finally {
+      worker.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 15000);
 });
 
 describe("toolWorkerOptions", () => {

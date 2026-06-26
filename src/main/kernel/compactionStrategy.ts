@@ -248,29 +248,83 @@ function retainTail(
 ): { tail: ChatMessage[]; microcompactedRefs: string[] } {
   const microcompactedRefs: string[] = [];
   // Walk backwards collecting messages until the tail token budget is spent.
-  const tail: ChatMessage[] = [];
+  const retainedIndexes = new Set<number>();
   let used = 0;
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     if (!msg) break;
     if (protectedMarkers.some((m) => msg.content.includes(m))) {
-      tail.unshift(msg);
+      retainedIndexes.add(i);
       continue;
     }
     const tokens = estimateMessageTokens([msg]);
-    if (used + tokens > tailTokenBudget && tail.length > 0) break;
-    // Microcompact regenerable tool results to a placeholder.
-    if (msg.role === "tool" && isRegenerableToolMessage(msg, regenerable)) {
-      const ref = `tool-result-refs/tail-${i}.json`;
-      microcompactedRefs.push(ref);
-      tail.unshift({ ...msg, content: `[microcompacted tool result → ${ref}]` });
-      used += estimateMessageTokens([tail[0]!]);
-      continue;
-    }
-    tail.unshift(msg);
+    if (used + tokens > tailTokenBudget && retainedIndexes.size > 0) break;
+    retainedIndexes.add(i);
     used += tokens;
   }
+
+  completeToolPairIndexes(messages, retainedIndexes);
+
+  const tail: ChatMessage[] = [];
+  for (const index of [...retainedIndexes].sort((left, right) => left - right)) {
+    const msg = messages[index];
+    if (!msg) {
+      continue;
+    }
+    // Microcompact regenerable tool results to a placeholder.
+    if (msg.role === "tool" && isRegenerableToolMessage(msg, regenerable)) {
+      const ref = `checkpoint-tail-message-${index}`;
+      microcompactedRefs.push(ref);
+      tail.push({
+        ...msg,
+        content:
+          `[microcompacted tool result: ${ref}; original result remains in ` +
+          "the local checkpoint transcript]",
+      });
+      continue;
+    }
+    tail.push(msg);
+  }
   return { tail, microcompactedRefs };
+}
+
+function completeToolPairIndexes(messages: ChatMessage[], retainedIndexes: Set<number>) {
+  const toolCallIndexes = new Map<string, number>();
+  const toolResultIndexes = new Map<string, number>();
+
+  for (const [index, message] of messages.entries()) {
+    for (const toolCall of message.tool_calls ?? []) {
+      toolCallIndexes.set(toolCall.id, index);
+    }
+    if (message.role === "tool" && message.tool_call_id) {
+      toolResultIndexes.set(message.tool_call_id, index);
+    }
+  }
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const index of [...retainedIndexes]) {
+      const message = messages[index];
+      if (!message) {
+        continue;
+      }
+      if (message.role === "tool" && message.tool_call_id) {
+        const assistantIndex = toolCallIndexes.get(message.tool_call_id);
+        if (assistantIndex !== undefined && !retainedIndexes.has(assistantIndex)) {
+          retainedIndexes.add(assistantIndex);
+          changed = true;
+        }
+      }
+      for (const toolCall of message.tool_calls ?? []) {
+        const resultIndex = toolResultIndexes.get(toolCall.id);
+        if (resultIndex !== undefined && !retainedIndexes.has(resultIndex)) {
+          retainedIndexes.add(resultIndex);
+          changed = true;
+        }
+      }
+    }
+  }
 }
 
 function isRegenerableToolMessage(msg: ChatMessage, regenerable: string[]): boolean {

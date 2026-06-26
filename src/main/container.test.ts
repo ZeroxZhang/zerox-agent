@@ -1,14 +1,30 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { execFile as execFileCallback } from "node:child_process";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createAppContainer } from "./container";
+import { registerAllIpcHandlers } from "./ipc";
+import { createToolApprovalCoordinator } from "./toolApprovalCoordinator";
+import { issueToolResultRefReadCapability } from "./toolResultOffloadStore";
 import type { Goal } from "../shared/agentGoal";
 import type { GoalProgressEvent } from "../shared/chat";
+
+const execFileAsync = promisify(execFileCallback);
+
+const toolWorkerMock = vi.hoisted(() => ({
+  createToolWorker: vi.fn((options: unknown) => ({
+    close: vi.fn(),
+    execute: vi.fn(),
+    options,
+  })),
+}));
 
 const electronState = vi.hoisted(() => ({
   userDataPath: "",
   appPath: "",
+  ipcHandlers: new Map<string, (...args: unknown[]) => unknown>(),
 }));
 
 vi.mock("electron", () => ({
@@ -26,6 +42,11 @@ vi.mock("electron", () => ({
   BrowserWindow: {
     getAllWindows: () => [],
   },
+  ipcMain: {
+    handle: (channel: string, handler: (...args: unknown[]) => unknown) => {
+      electronState.ipcHandlers.set(channel, handler);
+    },
+  },
   safeStorage: {
     decryptString: (value: Buffer) => value.toString("utf8"),
     encryptString: (value: string) => Buffer.from(value, "utf8"),
@@ -33,17 +54,76 @@ vi.mock("electron", () => ({
   },
 }));
 
+vi.mock("./tools/toolWorker", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./tools/toolWorker")>()),
+  createToolWorker: toolWorkerMock.createToolWorker,
+}));
+
 describe("app container goal drafts", () => {
   let tempDir: string;
+  const originalToolWorkerEnv = process.env.ZEROX_TOOL_WORKER;
+  const originalLegacyToolWorkerEnv = process.env.BUILDING_AGENT_TOOL_WORKER;
 
   beforeEach(async () => {
     tempDir = await mkdtemp(path.join(os.tmpdir(), "zerox-container-"));
     electronState.userDataPath = tempDir;
     electronState.appPath = process.cwd();
+    electronState.ipcHandlers.clear();
+    toolWorkerMock.createToolWorker.mockClear();
+    delete process.env.ZEROX_TOOL_WORKER;
+    delete process.env.BUILDING_AGENT_TOOL_WORKER;
   });
 
   afterEach(async () => {
+    if (originalToolWorkerEnv === undefined) {
+      delete process.env.ZEROX_TOOL_WORKER;
+    } else {
+      process.env.ZEROX_TOOL_WORKER = originalToolWorkerEnv;
+    }
+    if (originalLegacyToolWorkerEnv === undefined) {
+      delete process.env.BUILDING_AGENT_TOOL_WORKER;
+    } else {
+      process.env.BUILDING_AGENT_TOOL_WORKER = originalLegacyToolWorkerEnv;
+    }
     await rm(tempDir, { force: true, recursive: true });
+  });
+
+  it("wires ZEROX_TOOL_WORKER=subprocess through the production container worker", () => {
+    process.env.ZEROX_TOOL_WORKER = "subprocess";
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+
+    const containerWithWorker = container as typeof container & {
+      toolWorker?: () => unknown;
+    };
+    expect(containerWithWorker.toolWorker).toBeTypeOf("function");
+    containerWithWorker.toolWorker?.();
+
+    expect(toolWorkerMock.createToolWorker).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "subprocess" }),
+    );
+  });
+
+  it("preserves explicit in-process worker mode for development and tests", () => {
+    process.env.ZEROX_TOOL_WORKER = "inproc";
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+
+    const containerWithWorker = container as typeof container & {
+      toolWorker?: () => unknown;
+    };
+    expect(containerWithWorker.toolWorker).toBeTypeOf("function");
+    containerWithWorker.toolWorker?.();
+
+    expect(toolWorkerMock.createToolWorker).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "inproc" }),
+    );
   });
 
   it("creates evidence-backed model review checks for manual goals", () => {
@@ -104,6 +184,102 @@ describe("app container goal drafts", () => {
     });
   });
 
+  it("denies forged renderer capabilities while preserving scoped and issued ref reads", async () => {
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const written = await container.toolResultOffloadStore().write({
+      runId: "run_owner",
+      toolName: "file_read",
+      content: JSON.stringify({
+        type: "tool_result",
+        tool: "file_read",
+        ok: true,
+        result: { content: "scoped UI content" },
+      }),
+    });
+    await expect(container.readToolResultRef(written.relativePath)).resolves.toMatchObject({
+      ok: false,
+    });
+    await expect(
+      container.readToolResultRef(written.relativePath, { runId: "run_other" }),
+    ).resolves.toMatchObject({ ok: false });
+    await expect(
+      container.readToolResultRef(written.relativePath, { runId: "run_owner" }),
+    ).resolves.toMatchObject({
+      ok: true,
+      content: expect.stringContaining("scoped UI content"),
+    });
+    await expect(
+      container.readToolResultRef(written.relativePath, {
+        capability: {
+          kind: "tool_result_ref_read",
+          ref: written.relativePath,
+        },
+      }),
+    ).resolves.toMatchObject({ ok: false });
+
+    await expect(
+      container.readToolResultRef(written.relativePath, {
+        capability: issueToolResultRefReadCapability({
+          ref: written.relativePath,
+          issuedByRunId: "run_owner",
+        }),
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      content: expect.stringContaining("scoped UI content"),
+    });
+
+    registerAllIpcHandlers(container);
+    const ipcReadRef = electronState.ipcHandlers.get("toolResults:readRef");
+    expect(ipcReadRef).toBeTypeOf("function");
+    await expect(
+      ipcReadRef?.({}, written.relativePath, { runId: "run_owner" }),
+    ).resolves.toMatchObject({
+      ok: true,
+      content: expect.stringContaining("scoped UI content"),
+    });
+    await expect(
+      ipcReadRef?.({}, written.relativePath, {
+        runId: "run_other",
+        capability: {
+          kind: "tool_result_ref_read",
+          ref: written.relativePath,
+        },
+      }),
+    ).resolves.toMatchObject({ ok: false });
+  });
+
+  it("rejects globally automatic approval for untrusted git worktree creation", async () => {
+    const coordinator = createToolApprovalCoordinator({
+      sendToRenderers() {},
+      createId: () => "approval_auto_worktree",
+      now: () => "2026-06-21T00:00:00.000Z",
+    });
+    coordinator.setAutoApprovalEnabled(true);
+    const container = createAppContainer({
+      requestToolApproval: coordinator.requestUserApproval,
+    });
+    const repositoryRoot = path.join(tempDir, "untrusted-repo");
+    await createSeedGitRepository(repositoryRoot);
+
+    await expect(
+      container.requestGitWorktreeAgentWorkspace({
+        name: "Auto-approved worktree",
+        repositoryRoot,
+        branch: "codex/auto-approved-worktree",
+      }),
+    ).rejects.toThrow(/explicit user approval/i);
+
+    await expect(container.agentWorkspaceStore().list()).resolves.toEqual([]);
+    await expect(listGitBranches(repositoryRoot)).resolves.not.toContain(
+      "codex/auto-approved-worktree",
+    );
+  });
+
   it("syncs background goal status changes into chat session summaries before notifying listeners", async () => {
     const container = createAppContainer({
       async requestToolApproval() {
@@ -142,7 +318,12 @@ describe("app container goal drafts", () => {
     const listedSession = (await container.chatSessionStore().list()).find(
       (item) => item.id === session.session.id,
     );
-    expect(listedSession?.activeGoal).toMatchObject({
+    expect(listedSession?.activeGoal).toBeUndefined();
+    expect(
+      (await container.chatSessionStore().get(session.session.id))?.goalSummaries?.find(
+        (summary) => summary.id === goal.id,
+      ),
+    ).toMatchObject({
       id: goal.id,
       status: "canceled",
     });
@@ -276,7 +457,12 @@ describe("app container goal drafts", () => {
     const listedSession = (await container.listChatSessions()).find(
       (item) => item.id === session.session.id,
     );
-    expect(listedSession?.activeGoal).toMatchObject({
+    expect(listedSession?.activeGoal).toBeUndefined();
+    expect(
+      (await container.chatSessionStore().get(session.session.id))?.goalSummaries?.find(
+        (summary) => summary.id === goal.id,
+      ),
+    ).toMatchObject({
       id: goal.id,
       status: "achieved",
     });
@@ -292,12 +478,39 @@ describe("app container goal drafts", () => {
     const persistedSession = (await container.chatSessionStore().list()).find(
       (item) => item.id === session.session.id,
     );
-    expect(persistedSession?.activeGoal).toMatchObject({
+    const persistedRecord = await container.chatSessionStore().get(session.session.id);
+    expect(persistedSession?.activeGoal).toBeUndefined();
+    expect(persistedRecord?.activeGoalId).toBeUndefined();
+    expect(persistedRecord?.goalSummaries?.find((summary) => summary.id === goal.id)).toMatchObject({
       id: goal.id,
       status: "achieved",
     });
   });
 });
+
+async function createSeedGitRepository(repositoryRoot: string): Promise<void> {
+  await mkdir(repositoryRoot, { recursive: true });
+  await execFileAsync("git", ["init"], { cwd: repositoryRoot });
+  await execFileAsync("git", ["config", "user.email", "test@example.com"], {
+    cwd: repositoryRoot,
+  });
+  await execFileAsync("git", ["config", "user.name", "Zerox Test"], {
+    cwd: repositoryRoot,
+  });
+  await writeFile(path.join(repositoryRoot, "README.md"), "seed\n", "utf8");
+  await execFileAsync("git", ["add", "README.md"], { cwd: repositoryRoot });
+  await execFileAsync("git", ["commit", "-m", "seed"], { cwd: repositoryRoot });
+}
+
+async function listGitBranches(repositoryRoot: string): Promise<string[]> {
+  const { stdout } = await execFileAsync("git", ["branch", "--format=%(refname:short)"], {
+    cwd: repositoryRoot,
+  });
+  return stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
 
 function createStoredGoal(
   overrides: Pick<Goal, "id" | "chatSessionId" | "status"> & Partial<Goal>,

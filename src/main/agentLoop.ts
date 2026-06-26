@@ -6,8 +6,11 @@ import type { AgentRunContext } from "../shared/agentWorkspace";
 import type { SystemReminderContext, SystemReminderRegistry } from "../shared/systemReminder";
 import type {
   ChatClient,
+  ChatCompletionRequest,
   ChatCompletionResponse,
   ChatMessage,
+  StreamEvent,
+  StreamingChatClient,
   ToolCall,
 } from "./openAiCompatibleClient";
 import {
@@ -24,9 +27,16 @@ import {
   buildToolDefinitions,
   serializeToolObservation,
 } from "../shared/agentProtocol";
+import { formatDateInTimeZone, getSystemTimeZone } from "../shared/dateContext";
 import { serializeToolObservationWithOffload } from "./toolObservationOffload";
 import type { ToolResultOffloadStore } from "./toolResultOffloadStore";
 import { getToolCapability } from "../shared/agentToolCapabilities";
+import {
+  createToolInvocation,
+  transitionToolInvocation,
+  type ToolInvocationRecord,
+  type ToolInvocationTransition,
+} from "../shared/toolInvocationLedger";
 
 export type AgentLoopOptions = {
   chatClient: ChatClient;
@@ -41,6 +51,8 @@ export type AgentLoopOptions = {
   tools?: ReturnType<typeof buildToolDefinitions>;
   toolResultOffloadStore?: ToolResultOffloadStore;
   toolResultOffloadThreshold?: number;
+  requestId?: string;
+  workspaceRunId?: string;
   pauseOnTurnLimit?: boolean;
   pauseOnStrategyGuard?: boolean;
   resumeMessages?: ChatMessage[];
@@ -56,15 +68,22 @@ export type AgentLoopOptions = {
    *  reminders are injected as synthetic user messages. All triggers default OFF. */
   systemReminderRegistry?: SystemReminderRegistry;
   modelRetry?: ModelRetryOptions;
-  onToolCall?: (toolName: string, args: Record<string, unknown>) => void;
+  onToolCall?: (
+    toolName: string,
+    args: Record<string, unknown>,
+    event: AgentLoopToolEvent,
+  ) => void;
   onToolResult?: (
     toolName: string,
     ok: boolean,
     result: Awaited<ReturnType<AgentToolExecutor["execute"]>>,
+    event: AgentLoopToolEvent,
   ) => void;
+  onToolInvocation?: (record: ToolInvocationRecord) => void;
   onTurn?: (turn: number, phase: string) => void;
   onReasoning?: (reasoningContent: string, turn: number) => void;
   onModelResponse?: (response: ChatCompletionResponse, turn: number) => void;
+  onModelStreamEvent?: (event: StreamEvent, turn: number) => void;
   onContextCompacted?: (event: AgentLoopContextCompaction) => void;
   onModelRetry?: (event: ModelRetryEvent) => void;
   onStrategyGuard?: (event: AgentLoopStrategyGuardEvent) => void;
@@ -85,12 +104,24 @@ export type AgentLoopStrategyGuardEvent = {
   count: number;
 };
 
+export type AgentLoopToolEvent = {
+  toolCallId: string;
+  runId?: string;
+  sessionId?: string;
+  requestId?: string;
+  workspaceRunId?: string;
+  resultRef?: string;
+  resultBytes?: number;
+};
+
 export type AgentLoopContinuation = {
   reason: "turn_limit" | "tool_failure_loop" | "strategy_guard";
   maxTurns: number;
   toolCallsExecuted: number;
   toolName?: string;
   failureKind?: string;
+  failureError?: string;
+  failureArgs?: Record<string, unknown>;
   strategyGuardCode?: AgentLoopStrategyGuardEvent["code"];
 };
 
@@ -127,6 +158,8 @@ export async function runAgentLoop(
     tools: customTools,
     toolResultOffloadStore,
     toolResultOffloadThreshold,
+    requestId,
+    workspaceRunId,
     pauseOnTurnLimit = false,
     pauseOnStrategyGuard = false,
     resumeMessages,
@@ -138,9 +171,11 @@ export async function runAgentLoop(
     modelRetry,
     onToolCall,
     onToolResult,
+    onToolInvocation,
     onTurn,
     onReasoning,
     onModelResponse,
+    onModelStreamEvent,
     onContextCompacted,
     onModelRetry,
     onStrategyGuard,
@@ -148,9 +183,9 @@ export async function runAgentLoop(
 
   const toolDefinitions = customTools ?? buildToolDefinitions();
   const messages: ChatMessage[] = resumeMessages ? [...resumeMessages] : [];
-  // Anchor date to loop creation so the system prompt stays byte-identical
-  // across turns — critical for Anthropic prompt cache hit rate.
-  const loopDate = new Date().toISOString().split("T")[0];
+  // Anchor date to loop creation, interpreted in the user's system timezone.
+  const loopTimeZone = getSystemTimeZone();
+  const loopDate = formatDateInTimeZone(new Date(), loopTimeZone);
 
   if (!resumeMessages) {
     if (systemPrompt) {
@@ -161,6 +196,7 @@ export async function runAgentLoop(
         content: buildAgentSystemPrompt({
           modelId: modelProfile.model,
           currentDate: loopDate,
+          timeZone: loopTimeZone,
         }),
       });
     }
@@ -172,6 +208,11 @@ export async function runAgentLoop(
   let status: AgentLoopResult["status"] = "failed";
   let turns = 0;
   let toolCallsExecuted = Math.max(0, Math.floor(initialToolCallsExecuted));
+  let lastToolFailure: {
+    toolName: string;
+    error: string;
+    args?: Record<string, unknown>;
+  } | null = null;
   let continuation: AgentLoopContinuation | undefined;
   let lastExecutedToolSignature: string | null =
     findLastExecutedToolSignature(messages);
@@ -180,6 +221,7 @@ export async function runAgentLoop(
     kind: string;
     count: number;
   } | null = null;
+  let toolFailureLoopRecoveryAttempts = 0;
   const toolCallCounts = new Map<string, number>();
   const emittedStrategyGuards = new Set<string>();
   const successfulToolNames = new Set<string>();
@@ -254,6 +296,18 @@ export async function runAgentLoop(
     }
   }
 
+  function rememberToolFailure(
+    toolName: string,
+    error: string,
+    args?: Record<string, unknown>,
+  ): void {
+    lastToolFailure = {
+      toolName,
+      error,
+      ...(args ? { args } : {}),
+    };
+  }
+
   async function finalizeWithoutTools(options: {
     prompt: string;
     summaryPrefix: string;
@@ -271,16 +325,11 @@ export async function runAgentLoop(
     await compactMessagesBeforeModelRequest();
 
     try {
-      const response = await completeWithModelRetry(
-        chatClient,
-        {
-          ...modelProfile,
-          messages,
-          ...(signal ? { signal } : {}),
-        },
-        modelRetry,
-        onModelRetry,
-      );
+      const response = await completeModelRequest({
+        ...modelProfile,
+        messages,
+        ...(signal ? { signal } : {}),
+      }, turns + 1);
 
       if (response.content) {
         summary = `${options.summaryPrefix}\n\n${response.content}`;
@@ -330,6 +379,40 @@ export async function runAgentLoop(
     return null;
   }
 
+  async function completeModelRequest(
+    request: ChatCompletionRequest,
+    turn: number,
+  ): Promise<ChatCompletionResponse> {
+    if (isStreamingChatClient(chatClient)) {
+      try {
+        return await aggregateStreamingCompletion(chatClient, request, (event) => {
+          onModelStreamEvent?.(event, turn);
+        });
+      } catch (error) {
+        if (
+          error instanceof StreamingCompletionError &&
+          !error.hasMeaningfulStreamEvent &&
+          !isStreamAbortError(error.cause, request.signal)
+        ) {
+          return completeWithModelRetry(
+            chatClient,
+            request,
+            modelRetry,
+            onModelRetry,
+          );
+        }
+        throw error;
+      }
+    }
+
+    return completeWithModelRetry(
+      chatClient,
+      request,
+      modelRetry,
+      onModelRetry,
+    );
+  }
+
   try {
     for (; turns < maxTurns; turns += 1) {
       if (signal?.aborted) {
@@ -350,18 +433,13 @@ export async function runAgentLoop(
       });
       await compactMessagesBeforeModelRequest();
 
-      const response = await completeWithModelRetry(
-        chatClient,
-        {
-          ...modelProfile,
-          messages,
-          tools: toolDefinitions,
-          tool_choice: "auto",
-          ...(signal ? { signal } : {}),
-        },
-        modelRetry,
-        onModelRetry,
-      );
+      const response = await completeModelRequest({
+        ...modelProfile,
+        messages,
+        tools: toolDefinitions,
+        tool_choice: "auto",
+        ...(signal ? { signal } : {}),
+      }, turns + 1);
       onModelResponse?.(response, turns + 1);
       if (response.reasoningContent) {
         onReasoning?.(response.reasoningContent, turns + 1);
@@ -371,6 +449,16 @@ export async function runAgentLoop(
       if (!response.toolCalls.length && response.content) {
         summary = response.content;
         status = "succeeded";
+        break;
+      }
+
+      if (!response.toolCalls.length && response.reasoningContent?.trim()) {
+        summary = buildFinalReplyFromReasoningContent(response.reasoningContent);
+        status = "succeeded";
+        messages.push({
+          role: "assistant",
+          content: summary,
+        });
         break;
       }
 
@@ -424,10 +512,19 @@ export async function runAgentLoop(
           content: response.content ?? "",
           tool_calls: response.toolCalls,
         });
+        const assistantToolMessage = messages.at(-1);
+        const processedToolCalls: ToolCall[] = [];
 
         // Process each tool call
         for (const preparedToolCall of preparedToolCalls) {
           const { toolCall, toolName, signature } = preparedToolCall;
+          const toolEventBase = buildToolEvent({
+            toolCallId: toolCall.id,
+            runId: taskId,
+            sessionId: runContext?.sessionId,
+            requestId,
+            workspaceRunId,
+          });
           if (!preparedToolCall.args) {
             messages.push({
               role: "tool",
@@ -439,16 +536,56 @@ export async function runAgentLoop(
                 error: "参数 JSON 解析失败",
               }),
             });
+            processedToolCalls.push(toolCall);
+            rememberToolFailure(toolName, "参数 JSON 解析失败");
+            onToolResult?.(toolName, false, {
+              ok: false,
+              error: "参数 JSON 解析失败",
+            }, toolEventBase);
             continue;
           }
 
-          const args = preparedToolCall.args;
+          const args = applyRunContextDefaultsToToolArgs(
+            toolName,
+            preparedToolCall.args,
+            runContext,
+          );
+          const registeredToolSource = getToolSource(toolExecutor, toolName);
+          const toolSource = registeredToolSource ?? "built-in";
+          let toolInvocation = createToolInvocation({
+            id: `tool_invocation_${toolCall.id}`,
+            runId: taskId ?? workspaceRunId ?? requestId ?? runContext?.runId ?? "agent_loop",
+            toolCallId: toolCall.id,
+            toolName,
+            source: toolSource,
+            args,
+            createdAt: new Date().toISOString(),
+          });
+          const emitToolInvocation = () => {
+            onToolInvocation?.(toolInvocation);
+          };
+          const transitionInvocation = (
+            transition: Omit<ToolInvocationTransition, "at"> & { at?: string },
+          ) => {
+            toolInvocation = transitionToolInvocation(toolInvocation, {
+              ...transition,
+              at: transition.at ?? new Date().toISOString(),
+            });
+            emitToolInvocation();
+          };
+          emitToolInvocation();
+          transitionInvocation({ status: "visible" });
+
           const nativeFallbackRejection = rejectNativeToolFallback({
             toolName,
             args,
             successfulToolNames,
           });
           if (nativeFallbackRejection) {
+            transitionInvocation({
+              status: "error",
+              error: nativeFallbackRejection,
+            });
             const rejectedResult = {
               ok: false as const,
               error: nativeFallbackRejection,
@@ -463,23 +600,42 @@ export async function runAgentLoop(
                 toolCallId: toolCall.id,
               }),
             });
-            onToolResult?.(toolName, false, rejectedResult);
+            processedToolCalls.push(toolCall);
+            rememberToolFailure(toolName, nativeFallbackRejection, args);
+            onToolResult?.(toolName, false, rejectedResult, toolEventBase);
             continue;
           }
 
           // Authorization check (if authorizer is available)
           if (toolAuthorizationService && taskId) {
-            const toolSource = getToolSource(toolExecutor, toolName);
             const auth = await toolAuthorizationService.authorize(taskId, {
               toolName: toolName as never,
-              ...(toolSource ? { source: toolSource } : {}),
+              ...(registeredToolSource ? { source: registeredToolSource } : {}),
               args,
             }, {
               ...(runContext ? { runContext } : {}),
               ...(runtimeTask ? { runtimeTask } : {}),
+              onApprovalRequested: async (request) => {
+                transitionInvocation({
+                  status: "waiting_approval",
+                  reason: request.deniedReason,
+                });
+              },
+              onApprovalResolved: async (result) => {
+                if (result.approved) {
+                  transitionInvocation({
+                    status: "authorized",
+                    reason: result.reason ?? "user approved",
+                  });
+                }
+              },
             });
 
             if (!auth.ok || !auth.decision.allowed) {
+              transitionInvocation({
+                status: "error",
+                error: auth.ok ? auth.decision.reason : auth.message,
+              });
               messages.push({
                 role: "tool",
                 tool_call_id: toolCall.id,
@@ -492,15 +648,33 @@ export async function runAgentLoop(
                   toolCallId: toolCall.id,
                 }),
               });
+              processedToolCalls.push(toolCall);
+              rememberToolFailure(
+                toolName,
+                auth.ok ? auth.decision.reason : auth.message,
+                args,
+              );
               onToolResult?.(toolName, false, {
                 ok: false,
                 error: auth.ok ? auth.decision.reason : auth.message,
-              });
+              }, toolEventBase);
               continue;
             }
+            if (toolInvocation.status !== "authorized") {
+              transitionInvocation({
+                status: "authorized",
+                reason: auth.decision.reason,
+              });
+            }
+          } else {
+            transitionInvocation({
+              status: "authorized",
+              reason: "tool authorization service not configured",
+            });
           }
 
-          onToolCall?.(toolName, args);
+          onToolCall?.(toolName, args, toolEventBase);
+          transitionInvocation({ status: "running" });
 
           // Execute tool
           const result = await toolExecutor.execute({
@@ -509,6 +683,12 @@ export async function runAgentLoop(
           }, {
             ...(signal ? { signal } : {}),
             ...(runContext ? { runContext } : {}),
+            toolResultReadScope: {
+              ...(taskId ? { runId: taskId } : {}),
+              ...(runContext?.sessionId ? { sessionId: runContext.sessionId } : {}),
+              ...(requestId ? { requestId } : {}),
+              ...(workspaceRunId ? { workspaceRunId } : {}),
+            },
           });
 
           toolCallsExecuted += 1;
@@ -516,14 +696,18 @@ export async function runAgentLoop(
           lastExecutedToolSignature = signature;
           if (result.ok) {
             successfulToolNames.add(toolName);
+          } else {
+            rememberToolFailure(toolName, result.error, args);
           }
-          onToolResult?.(toolName, result.ok, result);
           const failureLoop = updateToolFailureStreak(
             toolFailureStreak,
             toolName,
             result,
           );
           toolFailureStreak = failureLoop.streak;
+          if (result.ok) {
+            toolFailureLoopRecoveryAttempts = 0;
+          }
 
           const serializedObservation =
             await serializeToolObservationWithOffload({
@@ -549,13 +733,45 @@ export async function runAgentLoop(
               store: toolResultOffloadStore,
               thresholdChars: toolResultOffloadThreshold,
               runId: taskId,
+              sessionId: runContext?.sessionId,
+              requestId,
+              workspaceRunId,
             });
+          const toolResultEvent = buildToolEvent({
+            toolCallId: toolCall.id,
+            runId: taskId,
+            sessionId: runContext?.sessionId,
+            requestId,
+            workspaceRunId,
+            resultRef: serializedObservation.resultRef,
+            resultBytes: serializedObservation.originalChars,
+          });
+          transitionInvocation(
+            result.ok
+              ? {
+                  status: "completed",
+                  ok: true,
+                  ...(serializedObservation.resultRef
+                    ? { resultRef: serializedObservation.resultRef }
+                    : {}),
+                }
+              : {
+                  status: "error",
+                  ok: false,
+                  error: result.error,
+                  ...(serializedObservation.resultRef
+                    ? { resultRef: serializedObservation.resultRef }
+                    : {}),
+                },
+          );
 
           messages.push({
             role: "tool",
             tool_call_id: toolCall.id,
             content: serializedObservation.content,
           });
+          processedToolCalls.push(toolCall);
+          onToolResult?.(toolName, result.ok, result, toolResultEvent);
 
           const selfFinalizingSummary = buildSelfFinalizingToolSummary(
             toolName,
@@ -589,6 +805,24 @@ export async function runAgentLoop(
             !result.ok
           ) {
             const failureKind = failureLoop.streak?.kind ?? "unknown";
+            const failureCount = failureLoop.streak?.count ?? 3;
+            if (toolFailureLoopRecoveryAttempts < 1) {
+              toolFailureLoopRecoveryAttempts += 1;
+              toolFailureStreak = null;
+              messages.push({
+                role: "system",
+                content: buildToolFailureLoopRecoveryPrompt({
+                  toolName,
+                  failureKind,
+                  error: result.error,
+                  args,
+                  toolCallsExecuted,
+                  count: failureCount,
+                }),
+              });
+              break;
+            }
+
             status = "paused";
             continuation = {
               reason: "tool_failure_loop",
@@ -596,16 +830,22 @@ export async function runAgentLoop(
               toolCallsExecuted,
               toolName,
               failureKind,
+              failureError: result.error,
+              failureArgs: args,
             };
             summary = buildToolFailureLoopPauseSummary({
               toolName,
               failureKind,
+              error: result.error,
+              args,
               toolCallsExecuted,
-              count: failureLoop.streak?.count ?? 3,
+              count: failureCount,
             });
             break;
           }
         }
+
+        trimUnansweredToolCalls(assistantToolMessage, processedToolCalls);
 
         if (status === "paused") {
           break;
@@ -618,7 +858,9 @@ export async function runAgentLoop(
       }
 
       // No content and no tool calls
-      summary = "Agent did not produce a response.";
+      summary = lastToolFailure
+        ? buildEmptyModelResponseAfterToolFailureSummary(lastToolFailure)
+        : "模型没有返回可用回复。请稍后重试，或换一个更明确的问题。";
       break;
     }
 
@@ -660,17 +902,246 @@ export async function runAgentLoop(
   };
 }
 
+function isStreamingChatClient(
+  client: ChatClient,
+): client is ChatClient & StreamingChatClient {
+  return typeof (client as { streamComplete?: unknown }).streamComplete === "function";
+}
+
+function throwIfCanceled(signal: AbortSignal | undefined) {
+  if (signal?.aborted) {
+    throw new Error("Agent loop canceled.");
+  }
+}
+
+class StreamingCompletionError extends Error {
+  readonly hasMeaningfulStreamEvent: boolean;
+  override readonly cause: unknown;
+
+  constructor(error: unknown, hasMeaningfulStreamEvent: boolean) {
+    super(error instanceof Error ? error.message : String(error ?? "Model stream failed."));
+    this.name = "StreamingCompletionError";
+    this.cause = error;
+    this.hasMeaningfulStreamEvent = hasMeaningfulStreamEvent;
+  }
+}
+
+async function aggregateStreamingCompletion(
+  chatClient: ChatClient & StreamingChatClient,
+  request: ChatCompletionRequest,
+  onStreamEvent?: (event: StreamEvent) => void,
+): Promise<ChatCompletionResponse> {
+  let content = "";
+  let reasoningContent = "";
+  let finishReason = "stop";
+  let activeToolCallKey: string | null = null;
+  let hasMeaningfulStreamEvent = false;
+  const toolCalls = new Map<string, { id: string; name: string; arguments: string }>();
+
+  try {
+    for await (const event of chatClient.streamComplete(request)) {
+      throwIfCanceled(request.signal);
+      onStreamEvent?.(event);
+
+      if (event.type === "content_delta") {
+        hasMeaningfulStreamEvent = true;
+        content += event.text;
+        continue;
+      }
+
+      if (event.type === "reasoning_delta") {
+        hasMeaningfulStreamEvent = true;
+        reasoningContent += event.text;
+        continue;
+      }
+
+      if (event.type === "tool_call_delta") {
+        hasMeaningfulStreamEvent = true;
+        const index = normalizeStreamToolCallIndex(event.index);
+        const key: string =
+          index !== undefined
+            ? `index:${index}`
+            : event.id
+              ? `id:${event.id}`
+              : activeToolCallKey && toolCalls.size <= 1
+                ? activeToolCallKey
+                : `legacy:${toolCalls.size + 1}`;
+        if (index === undefined) {
+          activeToolCallKey = key;
+        }
+        const fallbackId =
+          index !== undefined
+            ? `tool_call_${index + 1}`
+            : key.replace(/^(id|legacy):/, "") || `tool_call_${toolCalls.size + 1}`;
+        const existing = toolCalls.get(key) ?? {
+          id: event.id || fallbackId,
+          name: "",
+          arguments: "",
+        };
+        if (event.id) {
+          existing.id = event.id;
+        }
+        if (event.name) {
+          existing.name = event.name;
+        }
+        if (event.arguments) {
+          existing.arguments += event.arguments;
+        }
+        toolCalls.set(key, existing);
+        continue;
+      }
+
+      finishReason = event.finishReason || finishReason;
+    }
+  } catch (error) {
+    throw new StreamingCompletionError(error, hasMeaningfulStreamEvent);
+  }
+
+  throwIfCanceled(request.signal);
+
+  return {
+    content: content || null,
+    toolCalls: [...toolCalls.values()].map((toolCall) => ({
+      id: toolCall.id,
+      type: "function" as const,
+      function: {
+        name: toolCall.name,
+        arguments: toolCall.arguments,
+      },
+    })),
+    finishReason,
+    ...(reasoningContent ? { reasoningContent } : {}),
+  };
+}
+
+function normalizeStreamToolCallIndex(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return undefined;
+  }
+  return Math.max(0, Math.floor(value));
+}
+
+function isStreamAbortError(
+  error: unknown,
+  signal: AbortSignal | undefined,
+): boolean {
+  return (
+    signal?.aborted ||
+    (error instanceof Error && /abort|aborted|cancell?ed|cancelled/i.test(error.message))
+  );
+}
+
 function buildToolFailureLoopPauseSummary(options: {
   toolName: string;
   failureKind: string;
+  error?: string;
+  args?: Record<string, unknown>;
   toolCallsExecuted: number;
   count: number;
 }): string {
   return [
     `连续 ${options.count} 次工具失败（${options.toolName}，${options.failureKind}）。`,
+    ...(options.error ? [`最近错误：${truncateForPrompt(options.error, 240)}`] : []),
+    ...(options.args ? [`最近参数：${formatToolArgsForPrompt(options.args)}`] : []),
     `我已经暂停，避免继续在同一个失败模式里空转。累计执行 ${options.toolCallsExecuted} 个工具。`,
     "你可以回复“继续”让我带着已有诊断接着试，也可以调整目标、提供脚本参数或要求我换一种工具路径。",
   ].join("\n");
+}
+
+function buildToolEvent(input: AgentLoopToolEvent): AgentLoopToolEvent {
+  return {
+    toolCallId: input.toolCallId,
+    ...(input.runId ? { runId: input.runId } : {}),
+    ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+    ...(input.requestId ? { requestId: input.requestId } : {}),
+    ...(input.workspaceRunId ? { workspaceRunId: input.workspaceRunId } : {}),
+    ...(input.resultRef ? { resultRef: input.resultRef } : {}),
+    ...(typeof input.resultBytes === "number"
+      ? { resultBytes: input.resultBytes }
+      : {}),
+  };
+}
+
+function trimUnansweredToolCalls(
+  assistantMessage: ChatMessage | undefined,
+  processedToolCalls: ToolCall[],
+) {
+  if (
+    !assistantMessage ||
+    assistantMessage.role !== "assistant" ||
+    !assistantMessage.tool_calls ||
+    processedToolCalls.length >= assistantMessage.tool_calls.length
+  ) {
+    return;
+  }
+
+  assistantMessage.tool_calls = processedToolCalls;
+}
+
+function applyRunContextDefaultsToToolArgs(
+  toolName: string,
+  args: Record<string, unknown>,
+  runContext: AgentRunContext | undefined,
+): Record<string, unknown> {
+  if (!runContext || !isNativeWorkspaceRootTool(toolName)) {
+    return args;
+  }
+  if (typeof args.workspaceRoot === "string" && args.workspaceRoot.trim()) {
+    return args;
+  }
+  return {
+    ...args,
+    workspaceRoot: runContext.workspaceRoot,
+  };
+}
+
+function isNativeWorkspaceRootTool(toolName: string): boolean {
+  return (
+    toolName === "code_search" ||
+    toolName === "git_status" ||
+    toolName === "git_diff" ||
+    toolName === "test_run"
+  );
+}
+
+function buildToolFailureLoopRecoveryPrompt(options: {
+  toolName: string;
+  failureKind: string;
+  error: string;
+  args: Record<string, unknown>;
+  toolCallsExecuted: number;
+  count: number;
+}): string {
+  return [
+    `连续 ${options.count} 次工具失败（${options.toolName}，${options.failureKind}）。`,
+    `最近错误：${truncateForPrompt(options.error, 240)}`,
+    `最近参数：${formatToolArgsForPrompt(options.args)}`,
+    `已执行工具数：${options.toolCallsExecuted}`,
+    "",
+    "恢复要求：",
+    "- 不要继续用相同工具重试相同或猜测出来的路径。",
+    "- 如果是路径不存在、文件名不确定或目录结构不清，先用 file_search 或列出已知父目录确认真实路径。",
+    "- 如果已有成功工具结果足以回答用户，就停止继续探索，直接基于已有证据完成或给出阶段性结论。",
+    "- 如果必须继续使用同类工具，先改变策略并说明依据。",
+  ].join("\n");
+}
+
+function buildEmptyModelResponseAfterToolFailureSummary(options: {
+  toolName: string;
+  error: string;
+  args?: Record<string, unknown>;
+}): string {
+  return [
+    "模型没有返回可用回复，已停止本轮执行。",
+    `最近失败工具：${options.toolName}`,
+    `失败原因：${truncateForPrompt(options.error, 240)}`,
+    ...(options.args ? [`最近参数：${formatToolArgsForPrompt(options.args)}`] : []),
+    "这通常表示模型在工具失败后没有给出最终总结。你可以直接重试，或补充一个更明确的数据来源/链接后继续。",
+  ].join("\n");
+}
+
+function buildFinalReplyFromReasoningContent(reasoningContent: string): string {
+  return reasoningContent.trim();
 }
 
 function buildStrategyGuardPauseSummary(
@@ -739,11 +1210,26 @@ function normalizeToolFailureKind(
     return detailKind.trim();
   }
   if (/timeout|超时/i.test(result.error)) return "timeout";
+  if (/enoent|not found|no such file|不存在|找不到/i.test(result.error)) {
+    return "not_found";
+  }
   if (/中断|cancel|abort/i.test(result.error)) return "canceled";
   if (/stdout\/stderr|no stdout|no stderr|无 stdout/i.test(result.error)) {
     return "empty_exit";
   }
   return "tool_error";
+}
+
+function formatToolArgsForPrompt(args: Record<string, unknown>): string {
+  return truncateForPrompt(JSON.stringify(args), 240);
+}
+
+function truncateForPrompt(value: string, maxLength: number): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLength - 1)}…`;
 }
 
 function buildTurnLimitPauseSummary(

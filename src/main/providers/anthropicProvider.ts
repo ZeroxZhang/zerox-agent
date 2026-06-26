@@ -10,6 +10,7 @@
 
 import { buildCachePrefix } from "./cachePrefix";
 import { estimateTextTokens } from "../contextManager";
+import { defaultRequestTimeoutMs, fetchWithTimeout } from "../fetchWithTimeout";
 import type {
   CompleteRequest,
   CompleteResponse,
@@ -40,6 +41,7 @@ export interface AnthropicProviderOptions {
   apiKey?: string;
   /** Default model for countTokens. */
   model?: string;
+  timeoutMs?: number;
 }
 
 export function createAnthropicProvider(
@@ -47,6 +49,7 @@ export function createAnthropicProvider(
 ): LLMProvider {
   const fetchImpl = options.fetch ?? fetch;
   const baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
+  const timeoutMs = options.timeoutMs ?? defaultRequestTimeoutMs;
 
   return {
     id: "anthropic" as ProviderId,
@@ -67,7 +70,7 @@ export function createAnthropicProvider(
           : {}),
       };
       if (req.cachePrefix) applyCacheBreakpoint(body);
-      const json = await anthropicFetch(fetchImpl, baseUrl, "/v1/messages", req.apiKey, body, req.signal);
+      const json = await anthropicFetch(fetchImpl, baseUrl, "/v1/messages", req.apiKey, body, timeoutMs, req.signal);
       return parseAnthropicResponse(json);
     },
 
@@ -83,7 +86,7 @@ export function createAnthropicProvider(
         ...(tools ? { tools } : {}),
         ...(req.toolChoice ? { tool_choice: toAnthropicToolChoice(req.toolChoice) } : {}),
       };
-      const res = await anthropicFetchRaw(fetchImpl, baseUrl, "/v1/messages", req.apiKey, body, req.signal);
+      const res = await anthropicFetchRaw(fetchImpl, baseUrl, "/v1/messages", req.apiKey, body, timeoutMs, req.signal);
       if (!res.ok) {
         yield { type: "error", error: new Error(`HTTP ${res.status}: ${await res.text()}`) };
         return;
@@ -102,7 +105,7 @@ export function createAnthropicProvider(
           model: options.model,
           system,
           messages: aMsgs,
-        }, undefined);
+        }, timeoutMs, undefined);
         return (json as { input_tokens?: number }).input_tokens ?? heuristicCount(messages, opts?.system, opts?.tools);
       } catch {
         return heuristicCount(messages, opts?.system, opts?.tools);
@@ -217,9 +220,10 @@ async function anthropicFetch(
   path: string,
   apiKey: string,
   body: Record<string, unknown>,
+  timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<Record<string, unknown>> {
-  const res = await anthropicFetchRaw(fetchImpl, baseUrl, path, apiKey, body, signal);
+  const res = await anthropicFetchRaw(fetchImpl, baseUrl, path, apiKey, body, timeoutMs, signal);
   const text = await res.text();
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${text}`);
   return JSON.parse(text) as Record<string, unknown>;
@@ -231,9 +235,10 @@ async function anthropicFetchRaw(
   path: string,
   apiKey: string,
   body: Record<string, unknown>,
+  timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<Response> {
-  return fetchImpl(`${baseUrl}${path}`, {
+  return fetchWithTimeout(fetchImpl, `${baseUrl}${path}`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -241,8 +246,7 @@ async function anthropicFetchRaw(
       "anthropic-version": ANTHROPIC_VERSION,
     },
     body: JSON.stringify(body),
-    ...(signal ? { signal } : {}),
-  });
+  }, timeoutMs, "Anthropic", signal);
 }
 
 function parseAnthropicResponse(json: Record<string, unknown>): CompleteResponse {

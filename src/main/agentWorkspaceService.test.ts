@@ -1,4 +1,4 @@
-import { access, mkdtemp, rm } from "node:fs/promises";
+import { access, mkdtemp, mkdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -78,6 +78,66 @@ describe("agent workspace service", () => {
     await expect(access(workspace.rootPath)).resolves.toBeUndefined();
   });
 
+  it("registers an existing project folder as a selectable workspace", async () => {
+    const projectRoot = path.join(workspaceRoot, "client-project");
+    await mkdir(projectRoot);
+    const store = createAgentWorkspaceStore({
+      configDir,
+      createId: () => "workspace_project",
+      now: () => new Date("2026-06-08T00:00:00.000Z"),
+    });
+    const service = createAgentWorkspaceService({
+      workspaceStore: store,
+      workspaceRoot,
+    });
+
+    const workspace = await service.createProjectWorkspace({
+      rootPath: projectRoot,
+    });
+
+    expect(workspace).toMatchObject({
+      id: "workspace_project",
+      name: "client-project",
+      rootPath: projectRoot,
+      kind: "project",
+      cleanup: "keep",
+    });
+    await expect(store.list()).resolves.toHaveLength(1);
+  });
+
+  it("reuses an already registered project folder instead of duplicating it", async () => {
+    let tick = 0;
+    const projectRoot = path.join(workspaceRoot, "client-project");
+    await mkdir(projectRoot);
+    const store = createAgentWorkspaceStore({
+      configDir,
+      createId: () => `workspace_project_${tick}`,
+      now: () =>
+        new Date(
+          [
+            "2026-06-08T00:00:00.000Z",
+            "2026-06-08T00:01:00.000Z",
+          ][tick++]!,
+        ),
+    });
+    const service = createAgentWorkspaceService({
+      workspaceStore: store,
+      workspaceRoot,
+    });
+
+    const first = await service.createProjectWorkspace({
+      rootPath: projectRoot,
+    });
+    const second = await service.createProjectWorkspace({
+      rootPath: `${projectRoot}/.`,
+      name: "Renamed duplicate",
+    });
+
+    expect(second.id).toBe(first.id);
+    expect(second.name).toBe("client-project");
+    await expect(store.list()).resolves.toHaveLength(1);
+  });
+
   it("creates and stores a git worktree workspace", async () => {
     const calls: Array<{
       command: string;
@@ -102,6 +162,11 @@ describe("agent workspace service", () => {
       name: "Feature branch",
       repositoryRoot: "/Users/demo/repo",
       branch: "codex/feature",
+      approval: {
+        kind: "explicit_user_approval",
+        approvedAt: "2026-06-08T00:00:00.000Z",
+        approvedBy: "user",
+      },
     });
 
     const expectedPath = path.join(workspaceRoot, "worktrees", "feature_branch");
@@ -109,7 +174,7 @@ describe("agent workspace service", () => {
       {
         command: "git",
         args: ["worktree", "add", expectedPath, "-b", "codex/feature"],
-        options: { cwd: "/Users/demo/repo" },
+        options: { cwd: path.resolve("/Users/demo/repo") },
       },
     ]);
     expect(workspace).toMatchObject({
@@ -118,10 +183,42 @@ describe("agent workspace service", () => {
       rootPath: expectedPath,
       kind: "git_worktree",
       git: {
-        repositoryRoot: "/Users/demo/repo",
+        repositoryRoot: path.resolve("/Users/demo/repo"),
         branch: "codex/feature",
         worktreePath: expectedPath,
       },
     });
+  });
+
+  it("refuses git worktree creation before explicit approval or trusted policy", async () => {
+    const calls: Array<{
+      command: string;
+      args: string[];
+      options: { cwd?: string };
+    }> = [];
+    const store = createAgentWorkspaceStore({
+      configDir,
+      createId: () => "workspace_git",
+      now: () => new Date("2026-06-08T00:00:00.000Z"),
+    });
+    const service = createAgentWorkspaceService({
+      workspaceStore: store,
+      workspaceRoot,
+      createId: () => "feature_branch",
+      execFile: async (command, args, options) => {
+        calls.push({ command, args, options });
+      },
+    });
+
+    await expect(
+      service.createGitWorktreeWorkspace({
+        name: "Feature branch",
+        repositoryRoot: "/Users/demo/repo",
+        branch: "codex/feature",
+      }),
+    ).rejects.toThrow(/approval|trusted/i);
+
+    expect(calls).toEqual([]);
+    await expect(store.list()).resolves.toEqual([]);
   });
 });

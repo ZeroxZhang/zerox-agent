@@ -1,4 +1,5 @@
 import {
+  type FormEvent,
   useCallback,
   useEffect,
   useState,
@@ -7,6 +8,7 @@ import {
   AgentChatPanel,
   type ChatSidebarSession,
 } from "./components/AgentChatPanel";
+import { Icon } from "./components/Icon";
 import { EvalReviewPanel } from "./components/EvalReviewPanel";
 import { LearningReviewPanel } from "./components/LearningReviewPanel";
 import { MemoryPanel } from "./components/MemoryPanel";
@@ -22,6 +24,7 @@ import { buildAgentDataBoundary } from "../shared/dataBoundary";
 import { getMaterialNavigationIcon } from "../shared/materialNavigation";
 import {
   getDefaultNavigationSection,
+  getDefaultSettingsNavigationSection,
   getNavigationSection,
   getNavigationSections,
   getSettingsNavigationSections,
@@ -61,6 +64,13 @@ const fallbackChatSessions: ChatSessionListItem[] = [
   },
 ];
 
+type RenameSessionDraft = {
+  error?: string;
+  pending: boolean;
+  session: ChatSessionListItem;
+  title: string;
+};
+
 function getSectionFromHash(): NavigationSectionId {
   return getNavigationSection(window.location.hash.replace(/^#/, "")).id;
 }
@@ -73,7 +83,7 @@ function getStartupSettingsSectionId(): SettingsNavigationSectionId {
   const hash = window.location.hash.replace(/^#/, "");
   return getSettingsNavigationSections().some((section) => section.id === hash)
     ? (hash as SettingsNavigationSectionId)
-    : "model-settings";
+    : getDefaultSettingsNavigationSection().id;
 }
 
 export function App() {
@@ -96,6 +106,8 @@ export function App() {
   const [openChatSessionMenuId, setOpenChatSessionMenuId] =
     useState<string | null>(null);
   const [archiveGroupOpen, setArchiveGroupOpen] = useState(false);
+  const [renameSessionDraft, setRenameSessionDraft] =
+    useState<RenameSessionDraft | null>(null);
 
   function navigateTo(sectionId: NavigationSectionId) {
     const settingsSection = getSettingsNavigationSections().find(
@@ -103,6 +115,9 @@ export function App() {
     );
     if (settingsSection) {
       setActiveSettingsSectionId(settingsSection.id);
+    }
+    if (sectionId === "overview") {
+      setActiveSettingsSectionId("system-overview");
     }
     const primarySectionId = getNavigationSection(sectionId).id;
     setActiveSectionId(primarySectionId);
@@ -144,6 +159,9 @@ export function App() {
       if (getSettingsNavigationSections().some((section) => section.id === hash)) {
         setActiveSettingsSectionId(hash as SettingsNavigationSectionId);
       }
+      if (hash === "overview") {
+        setActiveSettingsSectionId("system-overview");
+      }
       setActiveSectionId(getSectionFromHash());
     }
 
@@ -152,6 +170,24 @@ export function App() {
       window.removeEventListener("hashchange", handleHashChange);
     };
   }, []);
+
+  useEffect(() => {
+    if (!renameSessionDraft) {
+      return;
+    }
+
+    const isRenamePending = renameSessionDraft.pending;
+    function handleRenameDialogKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !isRenamePending) {
+        setRenameSessionDraft(null);
+      }
+    }
+
+    window.addEventListener("keydown", handleRenameDialogKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleRenameDialogKeyDown);
+    };
+  }, [renameSessionDraft]);
 
   const activeSection =
     sections.find((section) => section.id === activeSectionId) ??
@@ -229,6 +265,70 @@ export function App() {
     await refreshChatSessions();
   }
 
+  function handleStartRenameChatSession(session: ChatSessionListItem) {
+    setOpenChatSessionMenuId(null);
+    setRenameSessionDraft({
+      pending: false,
+      session,
+      title: session.title,
+    });
+  }
+
+  async function handleSubmitRenameChatSession(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!renameSessionDraft || renameSessionDraft.pending) {
+      return;
+    }
+
+    const session = renameSessionDraft.session;
+    const nextTitle = renameSessionDraft.title.trim().replace(/\s+/g, " ");
+    if (!nextTitle || nextTitle === session.title) {
+      if (!nextTitle) {
+        setRenameSessionDraft((current) =>
+          current
+            ? { ...current, error: "请输入会话名称。" }
+            : current,
+        );
+        return;
+      }
+      setRenameSessionDraft(null);
+      return;
+    }
+
+    setRenameSessionDraft((current) =>
+      current
+        ? { ...current, error: undefined, pending: true, title: nextTitle }
+        : current,
+    );
+
+    if (!window.buildingAgent) {
+      setChatSessions((currentSessions) =>
+        currentSessions.map((currentSession) =>
+          currentSession.id === session.id
+            ? { ...currentSession, title: nextTitle }
+            : currentSession,
+        ),
+      );
+      setRenameSessionDraft(null);
+      return;
+    }
+
+    const result = await window.buildingAgent.renameChatSession(
+      session.id,
+      nextTitle,
+    );
+    if (!result.ok) {
+      setRenameSessionDraft((current) =>
+        current && current.session.id === session.id
+          ? { ...current, error: result.message, pending: false }
+          : current,
+      );
+      return;
+    }
+    setRenameSessionDraft(null);
+    await refreshChatSessions();
+  }
+
   async function handleDeleteChatSession(session: ChatSessionListItem) {
     setOpenChatSessionMenuId(null);
     if (!window.confirm(`删除会话“${session.title}”？这不会删除已产生的运行日志。`)) {
@@ -261,6 +361,9 @@ export function App() {
   const activeChatSessions = chatSessions.filter((session) => !session.archivedAt);
   const archivedChatSessions = chatSessions.filter((session) => session.archivedAt);
   const latestArchivedSession = archivedChatSessions[0] ?? null;
+  const activeChatSessionTitle =
+    chatSessions.find((session) => session.id === selectedChatSessionId)?.title ??
+    null;
 
   return (
     <main
@@ -281,7 +384,7 @@ export function App() {
           </div>
         </div>
         <button className="new-chat-button" type="button" onClick={handleNewChat}>
-          <span aria-hidden="true">＋</span>
+          <Icon name="plus" size={16} />
           新会话
         </button>
         <nav className="primary-nav" aria-label="功能分区">
@@ -341,6 +444,7 @@ export function App() {
                   }
                   onArchive={handleArchiveChatSession}
                   onRestore={handleRestoreChatSession}
+                  onRename={handleStartRenameChatSession}
                   onDelete={handleDeleteChatSession}
                 />
               ))
@@ -394,6 +498,7 @@ export function App() {
                         }
                         onArchive={handleArchiveChatSession}
                         onRestore={handleRestoreChatSession}
+                        onRename={handleStartRenameChatSession}
                         onDelete={handleDeleteChatSession}
                       />
                     ))}
@@ -435,13 +540,11 @@ export function App() {
           <AgentChatPanel
             newChatRequestKey={newChatRequestKey}
             requestedSessionId={selectedChatSessionId}
+            activeChatSessionTitle={activeChatSessionTitle}
             onActiveSessionChange={setSelectedChatSessionId}
             onChatSessionsChange={handleChatSessionsChange}
             onNavigate={navigateTo}
           />
-        ) : null}
-        {activeSection.id === "overview" ? (
-          <OverviewPanel onNavigate={navigateTo} />
         ) : null}
         {activeSection.id === "runs" ? <RunsPanel /> : null}
         {activeSection.id === "scheduled-tasks" ? (
@@ -450,18 +553,40 @@ export function App() {
         {activeSection.id === "settings" ? (
           <SettingsSectionShell
             activeSectionId={activeSettingsSectionId}
+            onNavigate={navigateTo}
             onSelect={setActiveSettingsSectionId}
           />
         ) : null}
       </section>
+      {renameSessionDraft ? (
+        <RenameChatSessionDialog
+          draft={renameSessionDraft}
+          onCancel={() => {
+            if (!renameSessionDraft.pending) {
+              setRenameSessionDraft(null);
+            }
+          }}
+          onSubmit={handleSubmitRenameChatSession}
+          onTitleChange={(title) =>
+            setRenameSessionDraft((current) =>
+              current
+                ? { ...current, error: undefined, title }
+                : current,
+            )
+          }
+        />
+      ) : null}
     </main>
   );
 }
 
 function SettingsSectionShell(props: {
   activeSectionId: SettingsNavigationSectionId;
+  onNavigate: (sectionId: NavigationSectionId) => void;
   onSelect: (sectionId: SettingsNavigationSectionId) => void;
 }) {
+  const navigateTo = props.onNavigate;
+
   return (
     <section className="settings-section-shell" aria-label="设置分区">
       <aside className="settings-section-nav" aria-label="设置菜单">
@@ -478,6 +603,9 @@ function SettingsSectionShell(props: {
         ))}
       </aside>
       <section className="settings-section-body">
+        {props.activeSectionId === "system-overview" ? (
+          <OverviewPanel onNavigate={navigateTo} />
+        ) : null}
         {props.activeSectionId === "model-settings" ? <ModelSettingsPanel /> : null}
         {props.activeSectionId === "skills" ? <SkillLibraryPanel /> : null}
         {props.activeSectionId === "tools" ? <ToolsPanel /> : null}
@@ -497,6 +625,7 @@ function SidebarSessionRow(props: {
   onToggleMenu: (sessionId: string) => void;
   onArchive: (session: ChatSessionListItem) => void;
   onRestore: (session: ChatSessionListItem) => void;
+  onRename: (session: ChatSessionListItem) => void;
   onDelete: (session: ChatSessionListItem) => void;
 }) {
   const { session } = props;
@@ -549,7 +678,7 @@ function SidebarSessionRow(props: {
           props.onToggleMenu(session.id);
         }}
       >
-        <span aria-hidden="true">⋯</span>
+        <Icon name="more" size={16} />
       </button>
       {props.menuOpen ? (
         <div className="sidebar-session-menu" role="menu">
@@ -571,6 +700,13 @@ function SidebarSessionRow(props: {
             </button>
           )}
           <button
+            type="button"
+            role="menuitem"
+            onClick={() => props.onRename(session)}
+          >
+            重命名
+          </button>
+          <button
             className="is-danger"
             type="button"
             role="menuitem"
@@ -580,6 +716,78 @@ function SidebarSessionRow(props: {
           </button>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function RenameChatSessionDialog(props: {
+  draft: RenameSessionDraft;
+  onCancel: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onTitleChange: (title: string) => void;
+}) {
+  const { draft } = props;
+  const trimmedTitle = draft.title.trim();
+
+  return (
+    <div
+      className="session-rename-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !draft.pending) {
+          props.onCancel();
+        }
+      }}
+    >
+      <form
+        className="session-rename-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="session-rename-title"
+        aria-describedby="session-rename-description"
+        onMouseDown={(event) => event.stopPropagation()}
+        onSubmit={props.onSubmit}
+      >
+        <div className="session-rename-copy">
+          <h2 id="session-rename-title">重命名会话</h2>
+          <p id="session-rename-description">
+            新名称会同步显示在左侧会话列表和当前会话标题。
+          </p>
+        </div>
+        <label className="session-rename-field">
+          <span>会话名称</span>
+          <input
+            autoFocus
+            aria-invalid={Boolean(draft.error)}
+            maxLength={80}
+            value={draft.title}
+            onChange={(event) => props.onTitleChange(event.target.value)}
+            placeholder="输入会话名称"
+          />
+        </label>
+        {draft.error ? (
+          <p className="session-rename-error" role="alert">
+            {draft.error}
+          </p>
+        ) : null}
+        <div className="session-rename-actions">
+          <button
+            className="session-rename-secondary"
+            type="button"
+            disabled={draft.pending}
+            onClick={props.onCancel}
+          >
+            取消
+          </button>
+          <button
+            className="session-rename-primary"
+            type="submit"
+            disabled={draft.pending || !trimmedTitle}
+          >
+            {draft.pending ? "保存中" : "保存"}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

@@ -2,7 +2,10 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { createToolResultOffloadStore } from "./toolResultOffloadStore";
+import {
+  createToolResultOffloadStore,
+  issueToolResultRefReadCapability,
+} from "./toolResultOffloadStore";
 
 const tempDirs: string[] = [];
 
@@ -52,6 +55,62 @@ describe("tool result offload store", () => {
     await expect(store.read(ref.relativePath)).resolves.toBe('{"ok":true}');
     await expect(store.read("../secret.json")).resolves.toBeNull();
     await expect(store.read("tool-result-refs/missing.json")).resolves.toBeNull();
+  });
+
+  it("denies forged cross-run capabilities but accepts issued internal grants", async () => {
+    const configDir = await createTempConfigDir();
+    const store = createToolResultOffloadStore({
+      configDir,
+      createId: () => "ref_scoped",
+    });
+    const ref = await store.write({
+      runId: "run_a",
+      sessionId: "session_a",
+      requestId: "request_a",
+      workspaceRunId: "workspace_run_a",
+      toolCallId: "provider_call_1",
+      toolName: "file_read",
+      content: '{"ok":true}',
+    });
+
+    await expect(
+      store.read(ref.relativePath, {
+        runId: "run_a",
+        sessionId: "session_a",
+        requestId: "request_a",
+        workspaceRunId: "workspace_run_a",
+      }),
+    ).resolves.toBe('{"ok":true}');
+    await expect(
+      store.read(ref.relativePath, {
+        runId: "run_b",
+        sessionId: "session_a",
+        requestId: "request_a",
+        workspaceRunId: "workspace_run_a",
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      store.read(ref.relativePath, {
+        runId: "run_b",
+        sessionId: "session_other",
+        capability: {
+          kind: "tool_result_ref_read",
+          ref: ref.relativePath,
+          issuedByRunId: "run_a",
+        },
+      }),
+    ).resolves.toBeNull();
+
+    await expect(
+      store.read(ref.relativePath, {
+        runId: "run_b",
+        sessionId: "session_other",
+        capability: issueToolResultRefReadCapability({
+          ref: ref.relativePath,
+          issuedByRunId: "run_a",
+        }),
+      }),
+    ).resolves.toBe('{"ok":true}');
   });
 });
 

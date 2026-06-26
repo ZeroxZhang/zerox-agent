@@ -1,5 +1,348 @@
 # Zerox Harness Progress
 
+## 2026-06-26 - v2.8.2 Chat Rename, Message Rendering, Time, And Skill Strictness
+
+- Request: ship the 2.8.2 iteration with sidebar chat-session rename, cleaner main chat rendering, auto-updating/readable message times, and a root-cause fix for selected skills not being followed strictly in auto mode.
+- Root causes fixed:
+  - Rename existed only as archive/delete menu actions, so chat titles could not be changed from the sidebar or reflected in the active chat header.
+  - Chat messages used legacy inline `span` styling and raw timestamp strings, which kept user messages at `刚刚` and allowed old blue accent styles to leak into normal assistant text.
+  - Selected skills were only described as instructions to call skill-loading tools; with `tool_choice: "auto"`, the model could still decide whether to load/follow the skill body. The selected skill body is now preloaded into the chat instruction and framed as mandatory execution requirements.
+- Changed files:
+  - `package.json`, `package-lock.json`, `README.md`
+  - `.zerox/feature_list.json`, `.zerox/progress.md`
+  - `src/main/chatService.ts`, `src/main/chatSessionStore.ts`, `src/main/container.ts`, `src/main/ipc/index.ts`
+  - `src/preload/index.ts`
+  - `src/renderer/App.tsx`, `src/renderer/components/AgentChatPanel.tsx`, `src/renderer/chatMarkdown.ts`, `src/renderer/chatMessageTime.ts`, `src/renderer/chatStreamReducer.ts`
+  - `src/renderer/styles/chat.css`, `src/renderer/styles/sidebar.css`
+  - Updated/added focused tests under `src/main`, `src/preload`, `src/renderer`, and `src/shared`.
+- RED evidence:
+  - Focused TDD tests initially failed for the missing session rename path, hardcoded `刚刚` timestamps, assistant-result created-at propagation, preload/IPC rename exposure, and selected-skill instruction behavior.
+  - Browser QA also exposed that `window.prompt` is unsupported in the browser preview runtime, so the initial rename menu needed a real in-app dialog rather than native prompt.
+- GREEN evidence:
+  - `npm test -- src/renderer/chatMarkdown.test.ts src/renderer/materialDesign.test.ts src/renderer/chatMessageTime.test.ts` -> 3 files / 54 tests passed.
+  - `npm test` -> 176 files / 1186 tests passed.
+  - `npm run verify` -> tests passed; build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. The existing better-sqlite3 ABI mismatch fell back to JSON as designed.
+  - `npm run harness:check` -> passed.
+- Browser/IAB rendered QA:
+  - Target flow: `http://127.0.0.1:5173/#chat` -> open sidebar session menu -> rename existing session -> submit a chat message -> verify rendered title, timestamps, markdown styling, and console health.
+  - Verified the in-app rename dialog updates both the sidebar row and active chat header.
+  - Verified user message time moves from `刚刚` to relative time on the interval, while assistant replies render as local readable time such as `今天 10:48`.
+  - Verified color semantics after follow-up feedback: normal markdown `span`, `strong`, and list text compute to `rgb(37, 35, 31)`; metadata is neutral gray; only real `a` links compute to blue `rgb(29, 78, 216)`.
+  - Desktop screenshot: `/tmp/zerox-v282-color-desktop.png`; mobile screenshot: `/tmp/zerox-v282-color-mobile.png`; mobile probe reported no horizontal overflow at 390px.
+- Packaging evidence:
+  - `npm run dist:mac` -> generated `release/Zerox Agent-2.8.2-arm64.dmg`, `release/Zerox Agent-2.8.2-arm64-mac.zip`, and blockmaps.
+  - Package metadata: `release/mac-arm64/Zerox Agent.app/Contents/Info.plist` reports `CFBundleShortVersionString=2.8.2` and `CFBundleVersion=2.8.2`.
+  - `release/Zerox Agent-2.8.2-arm64.dmg` (122M, sha256 `a113cf0cdc59f97a16d3eea982b901c27b6d515ef74519cbab4d6b0fa1744cfe`)
+  - `release/Zerox Agent-2.8.2-arm64-mac.zip` (333M, sha256 `8e598f8b5a889815b1f1ec17790aa32d7d61dee30aa5c7faf201797c58b58fa9`)
+  - `release/Zerox Agent-2.8.2-arm64.dmg.blockmap` (132K, sha256 `c203c0bf9eb1dbacf701d826efb62b90519842c991cc00e704aa31c711d703aa`)
+  - `release/Zerox Agent-2.8.2-arm64-mac.zip.blockmap` (335K, sha256 `2ea8ba930bc3dc8c031b821ef6e0c13efc67cf078c44b944040f412c2ec18e5a`)
+  - `BUILDING_AGENT_SMOKE=1 "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+
+## 2026-06-25 - v2.7.0 Workspace Skill Sandbox Fix
+
+- Request: fix the case where a user selects a project workspace and invokes an installed skill such as `@onepager`, but the agent reports that the skill files cannot be reached from the current workspace sandbox.
+- Root cause fixed:
+  - Chat skill runs added the selected skill root to the runtime task permission policy, but did not add it to the active `AgentRunContext` sandbox `extraReadRoots`.
+  - Tool authorization checks both layers. The task policy allowed the skill root, then the workspace sandbox denied `file_list` / `file_read` because the skill directory was outside the selected project workspace.
+- Changed files:
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/main/chatService.test.ts` -> failed as expected on `extends the active workspace sandbox with the selected skill read root`; observed `runContext.sandbox.extraReadRoots: []` while the selected skill root was required.
+- GREEN evidence:
+  - `npm test -- src/main/chatService.test.ts` -> 1 file / 50 tests passed.
+  - `npm test -- src/main/chatService.test.ts src/shared/toolPermissions.test.ts src/main/toolAuthorizationService.test.ts` -> 3 files / 99 tests passed.
+  - `npm run verify` -> 168 files / 1149 tests passed; build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. The existing better-sqlite3 ABI mismatch fell back to JSON as designed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+- Implementation evidence:
+  - Added `extendRunContextForSelectedSkill()` so a selected skill's root and declared permission paths are mirrored into the per-run sandbox before the agent loop starts.
+  - The regression test now verifies both the augmented run context and the actual `authorizeToolCallWithinRunContext()` decision for `file_list` against the selected skill directory.
+- Packaging evidence:
+  - `npm run dist:mac` -> generated `release/Zerox Agent-2.7.0-arm64.dmg` and `release/Zerox Agent-2.7.0-arm64-mac.zip`.
+  - Package metadata: `release/mac-arm64/Zerox Agent.app/Contents/Info.plist` reports `CFBundleShortVersionString=2.7.0` and `CFBundleVersion=2.7.0`.
+  - `release/Zerox Agent-2.7.0-arm64.dmg` (122M, sha256 `e6f87af07b2d723171fc8a422084e267ce1fc990f6007898d9bb260ee778b6fd`)
+  - `release/Zerox Agent-2.7.0-arm64-mac.zip` (333M, sha256 `4ffcdf2d806e43c5e9e8d544637dce2dbd5b486629b613fc8cfd4c75029846e7`)
+  - `release/Zerox Agent-2.7.0-arm64.dmg.blockmap` (132K, sha256 `28eb20d69d394732e36c4182fb6bf94d4466cc20e1beefbb69cd1a708fec7672`)
+  - `release/Zerox Agent-2.7.0-arm64-mac.zip.blockmap` (335K, sha256 `867eca7ceebb054e987dbbb27fcb10543080933ada053b4c24fdd7001b0ef711`)
+
+## 2026-06-24 - v2.7.0 Task 6 Icon System And Visual Design Artifact
+
+- Request: implement Task 6 from the 2.7.0 UI iteration brief: add a shared local renderer icon component, replace the requested chat/sidebar glyph controls, and create the approved 2.7.0 UI artifact covering required chat states.
+- Changed files:
+  - `src/renderer/components/Icon.tsx`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/App.tsx`
+  - `src/renderer/materialDesign.test.ts`
+  - `src/renderer/styles/sidebar.css`
+  - `src/renderer/styles/composer.css`
+  - `docs/design/zerox-agent-2-7-0-ui-artifact.html`
+  - `.superpowers/sdd/2026-06-23-v270-task-6-report.md`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts -t "Icon component"` -> failed as expected with `ENOENT` for `src/renderer/components/Icon.tsx`, proving the new test was exercising the missing shared icon surface first.
+- GREEN evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts` -> 1 file / 43 tests passed.
+  - `npx tsc -p tsconfig.electron.json --noEmit --pretty false` -> passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+- Implementation evidence:
+  - Added `Icon.tsx` with typed local SVG names for renderer controls.
+  - Replaced the chat composer `command` / `stop` / `send` controls, selected-skill dismiss action, sidebar new-chat action, and session more-menu trigger with the shared icon component.
+  - Added `docs/design/zerox-agent-2-7-0-ui-artifact.html` as a standalone warm-neutral 2.7.0 review artifact covering empty chat, streaming, collapsed thinking, guided input, approval, paused, error, restored, and narrow layout states.
+
+### 2026-06-24 Task 6 follow-up after quality review
+
+- Request: fix the rejected artifact/icon review findings by adding missing material test coverage for `more` and `close`, and by making the design artifact render actual local icon affordances instead of text placeholders.
+- Follow-up RED evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts -t "local icon"` -> failed as expected because `docs/design/zerox-agent-2-7-0-ui-artifact.html` did not yet contain actual icon markup classes or `currentColor`-stroked SVG stand-ins.
+- Follow-up GREEN evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts -t "local icon"` -> passed.
+  - `npm test -- src/renderer/materialDesign.test.ts` -> 1 file / 44 tests passed.
+  - `npx tsc -p tsconfig.electron.json --noEmit --pretty false` -> passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+- Follow-up implementation evidence:
+  - Extended `src/renderer/materialDesign.test.ts` to assert `<Icon name="more"` in `App.tsx`, `<Icon name="close"` in `AgentChatPanel.tsx`, and actual artifact icon markup with `currentColor` SVG strokes.
+  - Reworked `docs/design/zerox-agent-2-7-0-ui-artifact.html` to use inline SVG icon stand-ins for new chat and all composer action controls across the required states, removing the placeholder `+ New Chat`, `Cmd`, `Stop`, and `Send` text chips.
+
+## 2026-06-23 - v2.7.0 UI/Interaction Planning
+
+- Request: begin the 2.7.0 major iteration to全面优化/重构交互和界面, remove Overview from primary navigation, add streamed answer/thinking separation, support interactive/guided skills, optimize system icons, and complete planning/development/testing/independent acceptance with architect and subagent coordination.
+- Approved direction: 方案1, Chat-first consumer experience with progressive disclosure.
+- Changed files:
+  - `.zerox/feature_list.json`
+  - `docs/superpowers/specs/2026-06-23-zerox-agent-2-7-0-ui-interaction-design.md`
+  - `docs/superpowers/plans/2026-06-23-zerox-agent-2-7-0-ui-interaction.md`
+  - `.zerox/progress.md`
+- Planning/design evidence:
+  - Added feature `P16-v2.7.0-ui-interaction` as the only unfinished feature.
+  - Top-level architecture, UI/UX, guided-skill interaction, and QA/acceptance subagent findings were folded into the approved spec.
+  - Implementation plan defines TDD slices for navigation relocation, stream contracts, provider/agent-loop streaming, guided skill input, renderer UX, icon/design artifacts, and independent acceptance.
+- Verification evidence:
+  - `node -e "const f=require('./.zerox/feature_list.json'); const unfinished=f.features.filter(x=>x.status!=='done'); if (unfinished.length!==1 || unfinished[0].id!=='P16-v2.7.0-ui-interaction' || unfinished[0].status!=='planned') { console.error(JSON.stringify(unfinished,null,2)); process.exit(1); } console.log('feature_list ok:', unfinished[0].id, unfinished[0].status);"` -> `feature_list ok: P16-v2.7.0-ui-interaction planned`.
+  - `rg -n "TODO|TBD|FIXME|PLACEHOLDER|\\[[^\\]]*(list|commands|scenario|focused|full|fill|paste|TODO)[^\\]]*\\]|If .*differ|If .*does not|optional" docs/superpowers/specs/2026-06-23-zerox-agent-2-7-0-ui-interaction-design.md docs/superpowers/plans/2026-06-23-zerox-agent-2-7-0-ui-interaction.md` -> no matches.
+  - `npm install` -> up to date; audit reported 12 existing vulnerabilities.
+  - `npm test` -> 165 files / 1077 tests passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+
+## 2026-06-22 - v2.6.0 Hardening Release
+
+- Request: assign a new version for the completed hardening iteration, update README/release metadata, package macOS artifacts, publish the release, and push.
+- Changed files:
+  - `package.json`, `package-lock.json`
+  - `README.md`
+  - `.zerox/feature_list.json`, `.zerox/progress.md`
+  - `src/shared/packageScripts.test.ts`, `src/shared/readme.test.ts`
+  - `docs/superpowers/plans/2026-06-21-zerox-agent-bug-hardening-iteration.md`
+- Release metadata:
+  - Version bumped from `2.5.0` to `2.6.0`.
+  - Added feature-list entry `P15-hardening-release-2.6.0`.
+  - README now documents v2.6.0 as the current release in English and Chinese.
+- Verification evidence:
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 2 files / 11 tests passed.
+  - `npm run verify` -> 165 files / 1077 tests passed; build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI with expected better-sqlite3 ABI fallback to JSON.
+  - `npm run harness:check` -> passed.
+  - `npm run dist:mac` -> produced `release/Zerox Agent-2.6.0-arm64.dmg`, `release/Zerox Agent-2.6.0-arm64-mac.zip`, and blockmaps.
+  - `npm run smoke:prod:built` -> passed with expected SQLite ABI fallback.
+
+## 2026-06-21 - Task 6 Worker Isolation And Verification Efficiency
+
+- Request: implement Task 6 from the bug-hardening SDD/TDD plan: production subprocess worker wiring, timed-out worker child recycling, configurable smoke readiness polling, clean-checkout migration coverage verification, and built-artifact script variants.
+- Changed files:
+  - `src/main/tools/toolWorker.ts`, `src/main/container.ts`, `src/main/smokeMode.ts`, `package.json`
+  - `src/main/tools/toolWorker.test.ts`, `src/main/container.test.ts`, `src/main/smokeMode.test.ts`, `src/shared/packageScripts.test.ts`
+  - `.superpowers/sdd/task-6-report.md`, `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/main/container.test.ts src/main/tools/toolWorker.test.ts` -> failed: container did not expose/wire `toolWorker`; timed-out subprocess child poisoned the next request.
+  - `npm test -- src/main/smokeMode.test.ts` -> failed: renderer readiness script still embedded `const timeoutMs = 4000`.
+  - `npm test -- src/shared/packageScripts.test.ts` -> failed: built-artifact script variants were missing.
+  - `npm test -- src/main/storage/migrateRoundTrip.test.ts` -> passed before Task 6 edits; existing Task 2 coverage already compiles migration scripts into a fresh temporary `dist-electron` instead of silently skipping.
+- GREEN evidence:
+  - `npm test -- src/main/container.test.ts src/main/tools/toolWorker.test.ts` -> 2 files / 17 tests passed.
+  - `npm test -- src/main/smokeMode.test.ts` -> 1 file / 11 tests passed.
+  - `npm test -- src/shared/packageScripts.test.ts` -> 1 file / 8 tests passed.
+  - `npm test -- src/main/storage/migrateRoundTrip.test.ts` -> 1 file / 1 test passed.
+  - `npm test -- src/main/container.test.ts src/main/tools/toolWorker.test.ts src/main/smokeMode.test.ts src/shared/packageScripts.test.ts` -> 4 files / 36 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> 165 files / 1077 tests passed; build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI with expected better-sqlite3 ABI fallback to JSON.
+  - Built variants: `npm run eval:agent:built` -> 26/26 passed; `npm run eval:memory:built` -> 2/2 passed; `npm run harness:score:built` -> score 9.26 good; `npm run episode:export:built -- --help` -> passed; `npm run smoke:prod:built` -> passed with expected SQLite ABI fallback.
+
+## 2026-06-21 - Task 5 Renderer/IPC/User-Visible State Coherence
+
+- Request: implement Task 5 from the bug-hardening SDD/TDD plan: worktree approval gating, terminal-goal active link cleanup, live Runs panel refresh, and empty chat session list acceptance.
+- Changed files:
+  - `src/main/agentWorkspaceService.ts`, `src/main/container.ts`, `src/main/ipc/index.ts`, `src/main/chatService.ts`
+  - `src/preload/index.ts`
+  - `src/renderer/components/AgentChatPanel.tsx`, `src/renderer/components/RunsPanel.tsx`
+  - `src/main/agentWorkspaceService.test.ts`, `src/preload/index.test.ts`, `src/main/chatService.test.ts`, `src/main/container.test.ts`, `src/renderer/materialDesign.test.ts`
+  - `.superpowers/sdd/task-5-report.md`, `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/main/agentWorkspaceService.test.ts src/preload/index.test.ts` -> failed: git worktree creation resolved without approval and preload still invoked the direct create channel.
+  - `npm test -- src/main/chatService.test.ts src/main/goalChatService.test.ts src/renderer/chatTaskActivity.test.ts` -> failed: achieved review continuation did not clear the active chat goal link.
+  - `npm test -- src/renderer/materialDesign.test.ts` -> failed: Runs had no run lifecycle subscription and empty chat session lists were ignored.
+- GREEN evidence:
+  - `npm test -- src/main/agentWorkspaceService.test.ts src/preload/index.test.ts` -> 2 files / 7 tests passed.
+  - `npm test -- src/main/chatService.test.ts src/main/goalChatService.test.ts src/renderer/chatTaskActivity.test.ts` -> 3 files / 46 tests passed.
+  - `npm test -- src/renderer/materialDesign.test.ts src/renderer/chatTaskActivityRestore.test.ts` -> 2 files / 37 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm test` -> 165 files / 1071 tests passed.
+  - `npm run build` -> passed.
+
+  - `npm run verify` -> 165 files / 1071 tests passed; build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI with expected SQLite ABI fallback to JSON.
+  - `git diff --check` -> passed.
+
+## 2026-06-21 Task 3 Follow-up Abort-aware Provider Timeout Race
+
+- Request: fix the abort-aware fetch race where `fetchWithTimeout` aborted the underlying fetch before rejecting the local timeout promise, allowing `AbortError` to win and preventing `completeWithModelRetry` from retrying local provider timeouts.
+- Changed files:
+  - `src/main/fetchWithTimeout.ts`
+  - `src/main/providers/providers.test.ts`
+  - `src/main/modelRetry.test.ts`
+  - `.superpowers/sdd/task-3-followup-report.md`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/main/providers/providers.test.ts src/main/modelRetry.test.ts` -> failed as expected: abort-aware provider timeout and retry tests received `The operation was aborted.` instead of provider timeout messages.
+- GREEN evidence:
+  - `npm test -- src/main/providers/providers.test.ts src/main/modelRetry.test.ts` -> 2 files / 28 tests passed.
+  - `npm test -- src/main/storage/storeProxy.test.ts src/main/agentTrajectoryStore.test.ts src/main/agentRunStore.test.ts` -> 3 files / 26 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm test` -> 164 files / 1056 tests passed.
+  - `npm run build` -> passed.
+  - `npm run verify` -> 164 files / 1056 tests passed; build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI, with designed JSON fallback for the local better-sqlite3 ABI mismatch.
+
+## 2026-06-21 Task 2 SQLite/Migration/JSONL Recovery Integrity
+
+- Request: implement Task 2 from the bug-hardening SDD/TDD plan: SQLite/dual storage parity, reviewed-learning migration fidelity, audit event identity, tolerant JSONL recovery, SQLite chat search parity, and rollback completeness.
+- Changed files:
+  - `src/main/taskStore.ts`, `src/main/toolAuditLog.ts`
+  - `src/main/storage/repositories/index.ts`, `src/main/storage/repositories/sessionRepository.ts`
+  - `src/main/jsonlRecovery.ts`
+  - `src/main/workspaceRunStore.ts`, `src/main/agentRunStore.ts`, `src/main/agentTrajectoryStore.ts`, `src/main/agentGoalStore.ts`
+  - `scripts/migrate-to-sqlite.mjs`, `scripts/rollback-sqlite-to-json.mjs`
+  - Focused tests in `src/main/storage/storeProxy.test.ts`, `src/main/toolAuditLog.test.ts`, `src/main/storage/migrateRoundTrip.test.ts`, `src/main/storage/repositories/repositories.test.ts`, `src/main/workspaceRunStore.test.ts`, `src/main/agentRunStore.test.ts`, `src/main/agentTrajectoryStore.test.ts`, `src/main/agentGoalStore.test.ts`
+- RED evidence:
+  - `npm test -- src/main/storage/storeProxy.test.ts src/main/toolAuditLog.test.ts` -> failed: persisted SQLite/dual audit events had different ids/timestamps; disabled daily tasks reloaded with recomputed timestamps and non-null `nextRunAt`.
+  - `npm test -- src/main/storage/repositories/repositories.test.ts src/main/chatSessionStore.test.ts` -> failed: SQLite search returned `[]` for `报告 markdown`.
+  - `npm test -- src/main/workspaceRunStore.test.ts src/main/agentRunStore.test.ts src/main/agentTrajectoryStore.test.ts src/main/agentGoalStore.test.ts` -> failed: malformed JSONL lines threw `SyntaxError`.
+  - `npm test -- src/main/storage/migrateRoundTrip.test.ts` -> failed: migrated learning candidates had regenerated ids, `pending_review` status, and new timestamps.
+- GREEN evidence:
+  - `npm test -- src/main/storage/storeProxy.test.ts src/main/toolAuditLog.test.ts src/main/storage/migrateRoundTrip.test.ts src/main/storage/repositories/repositories.test.ts src/main/storage/repositories/runRepository.test.ts src/main/chatSessionStore.test.ts src/main/workspaceRunStore.test.ts src/main/agentRunStore.test.ts src/main/agentTrajectoryStore.test.ts src/main/agentGoalStore.test.ts` -> 10 files / 86 tests passed.
+  - `npm test` -> 164 files / 1046 tests passed.
+  - `npm run build` -> passed.
+  - `npm run verify` -> 164 files / 1046 tests passed; build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI, with designed JSON fallback for the local better-sqlite3 ABI mismatch.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+
+## 2026-06-21 Task 1 Follow-up 2 Bare Shell Parent Path
+
+- Request: fix production shell authorization when `ToolAuthorizationService` supplies a `ShellPlan` for `cat ..`; bare parent-directory operands were not included in `touchedPaths`, so sandbox authorization had nothing to inspect.
+- Implementation:
+  - `src/main/tools/shell/shellAnalyzer.ts`: classify exactly bare `..` as path-like while preserving ordinary bare-word args.
+  - `src/main/tools/shell/shellAnalyzer.test.ts`: cover `cat ..`, `ls ..`, and quoted `..` operands.
+  - `src/main/toolAuthorizationService.test.ts`: cover `authorizeToolCallWithinRunContext(..., { shellPlan: analyzeShell("cat ..") })` denying workspace escape.
+- Verification evidence:
+  - RED: `npm test -- src/main/tools/shell/shellAnalyzer.test.ts src/shared/toolPermissions.test.ts` failed before implementation with missing touched paths and authorization approval.
+  - `npm test -- src/main/tools/shell/shellAnalyzer.test.ts src/shared/toolPermissions.test.ts src/main/toolAuthorizationService.test.ts` -> 3 files / 63 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm test` -> 164 files / 1035 tests passed.
+  - `npm run build` -> passed.
+
+## 2026-06-21 v2.5.0 Workspace-Bound Skill Execution
+
+- Request: promote workspace into a first-class chat execution boundary, harden explicit skill invocation/execution, keep right-side process state recoverable, and ship a packaged v2.5.0 build for testing.
+- Root cause fixed:
+  - Chat sessions previously did not carry a workspace contract into model/tool execution, so the model had to infer paths and could spend many tool calls probing.
+  - Explicit skill selection injected skill text, but chat execution did not yet carry a workspace-bound runtime task and dynamic skill/MCP tools could be registered on a different executor than chat used.
+  - Right-rail status was recoverable from session activity, but long process history still needed a durable workspace-run ledger beyond the bounded UI cache.
+- Implementation:
+  - `src/shared/agentWorkspace.ts`, `src/shared/chat.ts`, `src/main/chatSessionStore.ts`: add/persist workspace contract identity and chat workspace summaries.
+  - `src/renderer/components/AgentChatPanel.tsx`, `src/renderer/styles/composer.css`: add composer workspace selector, preserve restored session workspace, and send `workspaceId` with chat turns.
+  - `src/main/chatService.ts`, `src/main/agentLoop.ts`, `src/main/agentToolExecutor.ts`, `src/shared/agentProtocol.ts`: resolve `AgentRunContext`, pass `taskId`/`runtimeTask` into chat agent loop, default native code-tool `workspaceRoot` from run context, and honor skill `execution.maxTurns`.
+  - `src/shared/skillExecutionContract.ts`: add staged skill execution contract and transition tests.
+  - `src/shared/workspaceRunLedger.ts`, `src/main/workspaceRunStore.ts`: add JSONL workspace-run ledger and dual-write chat status events for replay-grade process records.
+  - `src/main/container.ts`: reuse a single dynamic tool executor so skill/MCP tools remain available after initialization; inject workspace and workspace-run services into chat.
+  - Release metadata, README, and `.zerox/feature_list.json` updated to v2.5.0.
+- Remaining tracked follow-ups:
+  - `SkillExecutionService` as a first-class main-process service is still left in the plan for a later iteration; this release ships the shared contract plus chat/runtime integration.
+  - Run Graph/episode export UI for workspace-run ledgers is not yet surfaced; ledger files are written locally and covered by store/projection tests.
+- Test growth: 161 files / 1002 tests -> **164 files / 1019 tests** (+3 files, +17 tests). Zero regression.
+- Verification evidence:
+  - Focused workspace/skill/ledger tests: `npm test -- src/main/chatSessionStore.test.ts src/shared/skillExecutionContract.test.ts src/shared/workspaceRunLedger.test.ts src/main/workspaceRunStore.test.ts` -> 4 files / 26 tests passed.
+  - Focused execution tests: `npm test -- src/main/chatService.test.ts src/main/agentToolExecutor.test.ts src/main/agentLoop.test.ts src/shared/agentProtocol.test.ts` -> 4 files / 89 tests passed.
+  - Focused UI/activity tests: `npm test -- src/renderer/materialDesign.test.ts src/shared/skillMentions.test.ts src/renderer/chatTaskActivityRestore.test.ts` -> passed.
+  - `npx tsc -p tsconfig.electron.json --noEmit --pretty false` -> passed.
+  - `npm run verify` -> 164 files / 1019 tests passed; build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Source-tree smoke continues to fall back to JSON when the local better-sqlite3 binary targets a different ABI.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run dist:mac` -> generated `release/Zerox Agent-2.5.0-arm64.dmg` and `release/Zerox Agent-2.5.0-arm64-mac.zip`; `better-sqlite3` rebuilt for Electron packaging and restored after packaging.
+  - Packaged app version smoke: `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v2.5.0' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+  - Package metadata: `release/mac-arm64/Zerox Agent.app/Contents/Info.plist` reports `CFBundleShortVersionString=2.5.0` and `CFBundleVersion=2.5.0`.
+- Artifacts:
+  - `release/Zerox Agent-2.5.0-arm64.dmg` (122M, sha256 `e5180ae1d79845ed725658424fd9d99423fc5d9fa20aa6b5fd2482a60ee65bb2`)
+  - `release/Zerox Agent-2.5.0-arm64.dmg.blockmap` (131K, sha256 `02c1acd141df33524c41fe36ce256dec760fbb9718fb002f754b08efa50f4a40`)
+  - `release/Zerox Agent-2.5.0-arm64-mac.zip` (333M, sha256 `592f48bc8247d0ba22a635ac782b2f2e0cbba8f1473a21864d9f33ea781de344`)
+  - `release/Zerox Agent-2.5.0-arm64-mac.zip.blockmap` (336K, sha256 `bfaa92782401e98728d8e1b39111c41eb1901d2c2c87703a66e976f3cd0e7a84`)
+
+## 2026-06-20 v2.4.7 Tool Failure Recovery Hotfix
+
+- Request: investigate the packaged-app `@onepager` run that stopped at "连续工具失败，等待确认" after repeated `file_read` / `file_list` failures, then ship a testable hotfix package.
+- Root cause fixed:
+  - `AgentLoop` paused immediately after three same-class tool failures. For long skill-driven project analysis, a few guessed or stale file paths could stop the run before the model got a chance to recover with a safer discovery strategy.
+  - Tool-failure UI/status text only showed generic `工具失败：file_read/file_list` and the pause summary collapsed missing-path errors into `tool_error`, so the right rail did not expose the failed path or concrete reason.
+- Implementation:
+  - `src/main/agentLoop.ts`: gives the model one recovery turn after repeated same-class tool failures before pausing, resets the streak for that recovery turn, and includes the latest error/arguments in any later pause continuation and summary.
+  - `src/main/agentLoop.ts`: classifies missing-path errors (`ENOENT`, "not found", "no such file", etc.) as `not_found` instead of generic `tool_error`.
+  - `src/main/chatService.ts`: includes summarized tool execution errors in chat task status events so the right rail can show the actual failure reason.
+  - Release metadata and README updated to v2.4.7.
+- Test growth: 161 files / 1000 tests -> **161 files / 1002 tests** (+2 tests). Zero regression.
+- Verification evidence:
+  - Focused tests: `npm test -- src/main/agentLoop.test.ts src/main/chatService.test.ts src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 4 files / 51 tests passed.
+  - `npm run build` -> TypeScript + Vite production build passed.
+  - `npm test` -> 161 files / 1002 tests passed.
+  - `npm run verify` -> 161 files / 1002 tests passed; build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. better-sqlite3 ABI mismatch fell back to JSON as designed.
+  - `npm run harness:check` -> passed.
+  - `npm run dist:mac` -> generated `release/Zerox Agent-2.4.7-arm64.dmg` and `release/Zerox Agent-2.4.7-arm64-mac.zip`; `better-sqlite3` rebuilt for Electron packaging and restored for local Node after packaging.
+  - Packaged app smoke: `BUILDING_AGENT_SMOKE=1 "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+  - Packaged app version smoke: `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v2.4.7' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+  - Package metadata: `release/mac-arm64/Zerox Agent.app/Contents/Info.plist` reports `CFBundleShortVersionString=2.4.7` and `CFBundleVersion=2.4.7`.
+
+## 2026-06-20 v2.4.6 Explicit Skill Invocation + Activity Recovery
+
+- Request: fix chat turns that verbally request a skill but do not actually load/use that skill; add `@skill` fuzzy selection in the composer; restore the right-side progress/context modules after switching away from and back to a conversation.
+- Root cause fixed:
+  - Skill intent was only text inside the user message. Chat routing could infer and solve the task directly without converting the selected/named skill into an execution contract.
+  - Chat task activity lived in renderer state only. When navigating to another section/session, the session reload rebuilt messages but dropped task status history, leaving the right rail empty.
+- Implementation:
+  - `src/shared/skillMentions.ts`: active `@` extraction, fuzzy matching, replacement, and natural-language skill request detection.
+  - `src/renderer/components/AgentChatPanel.tsx` + `src/renderer/styles/composer.css`: `@skill` menu, highlighted selected-skill chip, send payload carrying `selectedSkillName`, and right-rail restore from persisted activity.
+  - `src/main/chatService.ts`: resolves selected/named skills via discovery, emits `skill` status, injects the full `SKILL.md` body into the model context, skips task routing for skill requests, and records `skill_invoked` trajectory evidence.
+  - `src/main/chatSessionStore.ts` + `src/shared/chat.ts`: persists bounded chat activity snapshots on the session record and normalizes them on reload.
+  - Release metadata and README updated to v2.4.6.
+- Test growth: 159 files / 992 tests -> **161 files / 1000 tests** (+2 files, +8 tests). Zero regression.
+- Verification evidence:
+  - Focused tests: `npm test -- src/shared/skillMentions.test.ts src/renderer/chatTaskActivityRestore.test.ts src/main/chatService.test.ts src/main/chatSessionStore.test.ts src/renderer/materialDesign.test.ts src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 7 files / 84 tests passed.
+  - `npm run build` -> TypeScript + Vite production build passed.
+  - `npm test` -> 161 files / 1000 tests passed.
+  - `npm run verify` -> 161 files / 1000 tests passed; build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. better-sqlite3 ABI mismatch fell back to JSON as designed.
+  - `npm run harness:check` -> passed.
+  - Rendered UI check: dev Electron at `127.0.0.1:5173` showed v2.4.6; DOM interaction with `@one` opened the skill menu, selecting the first candidate changed the input to `@onepager` and rendered the highlighted `@onepager` chip.
+  - `npm run dist:mac` -> generated `release/Zerox Agent-2.4.6-arm64.dmg` and `release/Zerox Agent-2.4.6-arm64-mac.zip`; `better-sqlite3` rebuilt for Electron packaging and restored for local Node after packaging.
+  - Packaged app smoke: `BUILDING_AGENT_SMOKE=1 "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+  - Packaged app version smoke: `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v2.4.6' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+
 ## 2026-06-20 v2.4.5 System Prompt Architecture Refactoring
 
 - Request: Deep-research MiMo-Code's system prompt architecture and refactor zerox-agent's monolithic `buildAgentSystemPrompt()` into a layered, cache-aware, model-profiled system with runtime conditional injections.
@@ -3373,3 +3716,974 @@
       sha256 5454d00c3369a40e42e7dea011f600a76adff2bd5a7d8aeafa46f82faa1ec2cb)
   - GitHub Release target:
     https://github.com/ZeroxZhang/zerox-agent/releases/tag/v2.4.1
+
+## 2026-06-21 - Task 1 Workspace Sandbox And Tool Permission Hardening
+
+- Summary:
+  - Added shared realpath/no-symlink path-boundary validation and reused it in run-context checks, tool authorization, executor-side guards, local file organizer moves, and native Markdown report writes.
+  - Hardened read-only runs so writable roots are not exposed and `chrome_bookmarks_read` cannot write artifacts.
+  - Validated generated move previews/transactions as capabilities before `rename()`.
+- Changed files:
+  - `src/shared/locationResource.ts`
+  - `src/shared/agentWorkspace.ts`
+  - `src/shared/toolPermissions.ts`
+  - `src/main/agentToolExecutor.ts`
+  - `src/main/localFileOrganizer.ts`
+  - `src/main/nativeResearchTools.ts`
+  - `src/shared/agentWorkspace.test.ts`
+  - `src/shared/toolPermissions.test.ts`
+  - `src/main/agentToolExecutor.test.ts`
+  - `src/main/localFileOrganizer.test.ts`
+  - `src/main/nativeResearchTools.test.ts`
+- RED evidence:
+  - `npm test -- src/main/agentToolExecutor.test.ts src/shared/toolPermissions.test.ts src/main/nativeResearchTools.test.ts` -> failed: symlink read/write/native report paths were allowed or executed.
+  - `npm test -- src/main/agentToolExecutor.test.ts src/main/localFileOrganizer.test.ts src/shared/toolPermissions.test.ts` -> failed: crafted apply/rollback move paths outside root were accepted before rename.
+  - `npm test -- src/shared/agentWorkspace.test.ts src/shared/toolPermissions.test.ts src/main/chatService.test.ts src/main/agentToolExecutor.test.ts` -> failed: read-only write access, approved-command outside shell paths, and read-only Chrome artifact writes were allowed.
+- GREEN evidence:
+  - `npm test -- src/shared/agentWorkspace.test.ts src/shared/toolPermissions.test.ts src/main/agentToolExecutor.test.ts src/main/localFileOrganizer.test.ts src/main/nativeResearchTools.test.ts src/main/chatService.test.ts` -> 6 files / 112 tests passed.
+  - `npm test` -> 164 files / 1028 tests passed.
+  - `npm run build` -> passed.
+  - `npm run harness:check` -> passed.
+
+## 2026-06-21 - Task 1 Follow-up Relative Shell Path Escapes
+
+- Summary:
+  - Hardened approved shell command path extraction so relative path-shaped arguments are checked against the run workspace boundary.
+  - Added authorization and executor-side regressions for `cat ../outside/secret.txt` with `allowWorkspaceEscape: false`.
+- Changed files:
+  - `src/shared/toolPermissions.ts`
+  - `src/shared/toolPermissions.test.ts`
+  - `src/main/agentToolExecutor.test.ts`
+  - `.superpowers/sdd/task-1-followup-report.md`
+- RED evidence:
+  - `npm test -- src/shared/toolPermissions.test.ts src/main/agentToolExecutor.test.ts` -> failed before implementation: authorization allowed the approved `cat ../outside/secret.txt` template and executor `shell_exec` read `outside secret` from outside the workspace.
+- GREEN evidence:
+  - `npm test -- src/shared/toolPermissions.test.ts src/main/agentToolExecutor.test.ts` -> 2 files / 70 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm test` -> 164 files / 1030 tests passed.
+
+## 2026-06-21 - Task 2 Follow-up Migration Test Fresh Artifact
+
+- Summary:
+  - Removed the migration round-trip test's dependency on repository-level `dist-electron`.
+  - The test now compiles the current Electron source into a temporary script root and runs copied migration scripts from there, so clean checkouts exercise migration instead of skipping.
+- Changed files:
+  - `src/main/storage/migrateRoundTrip.test.ts`
+  - `.superpowers/sdd/task-2-followup-report.md`
+  - `.zerox/progress.md`
+- RED evidence:
+  - With repository `dist-electron` temporarily moved aside, `npm test -- src/main/storage/migrateRoundTrip.test.ts` reported `Test Files 1 skipped (1)` and `Tests 1 skipped (1)`.
+- GREEN evidence:
+  - With repository `dist-electron` temporarily moved aside after the fix, `npm test -- src/main/storage/migrateRoundTrip.test.ts` -> 1 file / 1 test passed; `DIST_RESTORED=yes`.
+  - `npm test -- src/main/storage/storeProxy.test.ts src/main/toolAuditLog.test.ts src/main/storage/migrateRoundTrip.test.ts src/main/storage/repositories/repositories.test.ts src/main/storage/repositories/runRepository.test.ts src/main/chatSessionStore.test.ts src/main/workspaceRunStore.test.ts src/main/agentRunStore.test.ts src/main/agentTrajectoryStore.test.ts src/main/agentGoalStore.test.ts` -> 10 files / 86 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> 164 files / 1046 tests passed; build passed; agent eval 26/26; memory eval 2/2.
+
+## 2026-06-21 - Task 3 Provider Timeout And Observability Durability
+
+- Summary:
+  - Added a shared abortable fetch timeout helper and routed OpenAI-compatible, Anthropic, and Gemini provider requests through it.
+  - Passed provider-factory timeout dependencies into native Anthropic/Gemini providers.
+  - Added explicit `flushShadowWrites()` drains for dual-mode run and trajectory JSON sidecars.
+- Changed files:
+  - `src/main/fetchWithTimeout.ts`
+  - `src/main/openAiCompatibleClient.ts`
+  - `src/main/providers/providerFactory.ts`
+  - `src/main/providers/anthropicProvider.ts`
+  - `src/main/providers/geminiProvider.ts`
+  - `src/main/agentRunStore.ts`
+  - `src/main/agentTrajectoryStore.ts`
+  - `src/main/providers/providers.test.ts`
+  - `src/main/modelRetry.test.ts`
+  - `src/main/storage/storeProxy.test.ts`
+  - `.superpowers/sdd/task-3-report.md`
+- RED evidence:
+  - `npm test -- src/main/providers/providers.test.ts src/main/modelRetry.test.ts` -> failed: native Anthropic/Gemini never-settling fetches remained `pending` instead of timing out; retry classification tests also remained `pending`.
+  - `npm test -- src/main/storage/storeProxy.test.ts` -> failed: dual-mode run and trajectory stores did not expose `flushShadowWrites()`.
+- GREEN evidence:
+  - `npm test -- src/main/providers/providers.test.ts src/main/modelRetry.test.ts` -> 2 files / 23 tests passed.
+  - `npm test -- src/main/storage/storeProxy.test.ts src/main/agentTrajectoryStore.test.ts src/main/agentRunStore.test.ts` -> 3 files / 26 tests passed.
+  - `npm test` -> 164 files / 1051 tests passed.
+  - `npm run build` -> passed.
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> 164 files / 1051 tests passed; build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI with expected SQLite ABI fallback to JSON.
+
+## 2026-06-21 - Task 4 Runtime Protocol, Workflow, And Replay-Grade Observability
+
+- Summary:
+  - Kept paused multi-tool histories provider-valid by trimming unprocessed assistant tool calls when a pause/finalization interrupts a tool batch.
+  - Scoped offloaded tool-result refs to run/session/request/workspace-run identity with explicit-capability escape hatch, and carried provider tool_call ids through chat status, trajectory, workspace ledger, offload refs, and run graph projection.
+  - Closed workflow phases, preserved phase metadata, terminalized active phases on completion/error, and cleared deadline timers.
+  - Added `SkillExecutionService` snapshots and exported chat trajectory/workspace-run ledgers in episode packages.
+- Changed files:
+  - `src/main/agentLoop.ts`
+  - `src/main/chatService.ts`
+  - `src/main/toolObservationOffload.ts`
+  - `src/main/toolResultOffloadStore.ts`
+  - `src/main/workflow/workflowRuntime.ts`
+  - `src/main/skillExecutionService.ts`
+  - `src/main/agentEpisodeExporter.ts`
+  - `src/shared/runGraph.ts`
+  - `src/shared/chat.ts`
+  - `src/main/dynamicToolRegistry.ts`
+  - `src/main/agentToolExecutor.ts`
+  - `src/main/agentLoop.test.ts`
+  - `src/main/chatService.test.ts`
+  - `src/main/toolObservationOffload.test.ts`
+  - `src/main/toolResultOffloadStore.test.ts`
+  - `src/main/actors/actorRuntime.full.test.ts`
+  - `src/main/agentEpisodeExporter.test.ts`
+  - `src/shared/runGraph.test.ts`
+  - `src/main/skillExecutionService.test.ts`
+- RED evidence:
+  - `npm test -- src/main/agentLoop.test.ts src/main/chatService.test.ts` -> failed: paused multi-tool history had unmatched provider tool calls; chat/workspace ledger events lacked provider `toolCallId`.
+  - `npm test -- src/main/toolResultOffloadStore.test.ts src/main/toolObservationOffload.test.ts src/shared/toolPermissions.test.ts src/main/agentToolExecutor.test.ts` -> failed: scoped offload metadata was not written and cross-run ref read was allowed.
+  - `npm test -- src/main/actors/actorRuntime.full.test.ts src/main/agentEpisodeExporter.test.ts src/shared/runGraph.test.ts src/main/skillExecutionService.test.ts` -> failed: workflow phases stayed running, episode package lacked ledger files, run graph ignored workspace ledger events, and `skillExecutionService` was missing.
+- GREEN evidence:
+  - `npm test -- src/main/agentLoop.test.ts src/main/chatService.test.ts` -> 2 files / 45 tests passed.
+  - `npm test -- src/main/toolResultOffloadStore.test.ts src/main/toolObservationOffload.test.ts src/shared/toolPermissions.test.ts src/main/agentToolExecutor.test.ts` -> 4 files / 77 tests passed.
+  - `npm test -- src/main/chatService.test.ts src/shared/workspaceRunLedger.test.ts` -> 2 files / 31 tests passed.
+  - `npm test -- src/main/actors/actorRuntime.full.test.ts` -> 1 file / 19 tests passed.
+  - `npm test -- src/shared/skillExecutionContract.test.ts src/main/chatService.test.ts src/main/agentEpisodeExporter.test.ts src/shared/runGraph.test.ts src/main/skillExecutionService.test.ts` -> 5 files / 42 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm run build` -> passed.
+  - `npm run verify` -> 165 files / 1063 tests passed; build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI with expected SQLite ABI fallback to JSON.
+
+## 2026-06-21 - Task 4 Follow-Up Scoped Tool-Result Ref Reads
+
+- Summary:
+  - Passed matching `toolResultReadScope` into `agentRuntimeEngine` and the legacy `agentRunnerService` fallback so same-run `tool_result_read` can read scoped refs written earlier in the same run.
+  - Added shared UI read options for scoped/capability-based tool-result ref reads and threaded them through container, IPC, preload, and the trajectory panel.
+  - Preserved denial for no-context and cross-run scoped UI reads while allowing explicit `tool_result_ref_read` capability reads.
+- Changed files:
+  - `src/main/agentRuntimeEngine.ts`
+  - `src/main/agentRunnerService.ts`
+  - `src/main/container.ts`
+  - `src/main/ipc/index.ts`
+  - `src/main/toolResultOffloadStore.ts`
+  - `src/preload/index.ts`
+  - `src/renderer/components/RunTrajectoryPanel.tsx`
+  - `src/shared/toolResultRefs.ts`
+  - `src/main/agentRuntimeEngine.test.ts`
+  - `src/main/agentRunnerService.test.ts`
+  - `src/main/container.test.ts`
+- RED evidence:
+  - `npm test -- src/main/agentRuntimeEngine.test.ts -t "owning runtime run read"` -> failed: `tool_result_read` returned `ok:false` / `scoped ref denied`.
+  - `npm test -- src/main/agentRunnerService.test.ts -t "owning legacy runner read"` -> failed: legacy runner ended with failed status instead of reading the scoped ref.
+  - `npm test -- src/main/container.test.ts -t "scoped tool-result ref reads"` -> failed: matching `runId` container read still returned `ok:false`.
+- GREEN evidence:
+  - `npm test -- src/main/agentRuntimeEngine.test.ts -t "owning runtime run read"` -> 1 test passed.
+  - `npm test -- src/main/agentRunnerService.test.ts -t "owning legacy runner read"` -> 1 test passed.
+  - `npm test -- src/main/container.test.ts -t "scoped tool-result ref reads"` -> 1 test passed.
+  - `npm test -- src/main/agentRuntimeEngine.test.ts src/main/agentRunnerService.test.ts src/main/container.test.ts src/main/toolResultOffloadStore.test.ts src/main/agentToolExecutor.test.ts src/shared/toolResultRefs.test.ts` -> 6 files / 83 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> 165 files / 1066 tests passed; build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI with expected SQLite ABI fallback to JSON.
+
+## 2026-06-21 - Task 4 Follow-Up 2 Renderer-Safe Tool-Result Ref Reads
+
+- Summary:
+  - Removed capability-bearing options from the renderer/preload/shared read-ref API shape; renderer calls now provide only run/session/request/workspace-run scope.
+  - Sanitized the IPC `toolResults:readRef` handler to forward only known string scope fields, dropping forged renderer `capability` payloads.
+  - Added main-process-issued `tool_result_ref_read` capabilities backed by a private store token so trusted internal grants still work without accepting plain renderer objects.
+- Changed files:
+  - `src/shared/toolResultRefs.ts`
+  - `src/main/ipc/index.ts`
+  - `src/main/container.ts`
+  - `src/main/toolResultOffloadStore.ts`
+  - `src/main/container.test.ts`
+  - `src/main/toolResultOffloadStore.test.ts`
+- RED evidence:
+  - `npm test -- src/main/toolResultOffloadStore.test.ts src/main/container.test.ts` -> failed: forged `{ kind: "tool_result_ref_read", ref }` capability returned stored content instead of denial in both store and container coverage.
+- GREEN evidence:
+  - `npm test -- src/main/toolResultOffloadStore.test.ts src/main/container.test.ts` -> 2 files / 9 tests passed.
+  - `npm test -- src/main/agentRuntimeEngine.test.ts src/main/agentRunnerService.test.ts src/main/container.test.ts src/main/toolResultOffloadStore.test.ts src/main/agentToolExecutor.test.ts src/shared/toolResultRefs.test.ts` -> 6 files / 83 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm run build` -> passed.
+  - `npm run verify` -> 165 files / 1066 tests passed; build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI with expected SQLite ABI fallback to JSON.
+
+## 2026-06-21 - Task 5 Follow-Up Worktree Auto-Approval Boundary
+
+- Summary:
+  - Added approval-result provenance for global auto-approval.
+  - Rejected automatic approvals before untrusted git worktree creation reaches the workspace service or `git worktree add`.
+  - Added a container regression with a disposable Git repo proving auto-approval no longer creates a worktree workspace or branch.
+- Changed files:
+  - `src/main/container.ts`
+  - `src/main/container.test.ts`
+  - `src/main/toolApprovalCoordinator.ts`
+  - `src/main/toolApprovalCoordinator.test.ts`
+  - `src/main/toolAuthorizationService.ts`
+  - `.superpowers/sdd/task-5-followup-report.md`
+- RED evidence:
+  - `npm test -- src/main/container.test.ts -t "rejects globally automatic approval"` -> failed: promise resolved with a `git_worktree` workspace and branch `codex/auto-approved-worktree` instead of rejecting.
+- GREEN evidence:
+  - `npm test -- src/main/container.test.ts -t "rejects globally automatic approval"` -> 1 test passed.
+  - `npm test -- src/main/container.test.ts src/main/toolApprovalCoordinator.test.ts src/main/toolAuthorizationService.test.ts src/main/agentWorkspaceService.test.ts` -> 4 files / 26 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm test` -> 165 files / 1072 tests passed.
+  - `npm run build` -> passed.
+
+## 2026-06-23 - Worker T1 Task 1 Navigation And Overview Relocation
+
+- Summary:
+  - Removed Overview from primary navigation so primary order is Chat, Runs, Tasks, Settings.
+  - Added Settings system overview as the default Settings section and routed legacy `#overview` / `overview` targets into it.
+  - Moved `OverviewPanel` rendering into the Settings shell and kept the legacy material `overview` icon compatibility path.
+  - Updated app metadata primary modules to remove the old Overview module.
+- Changed files:
+  - `src/shared/navigation.ts`
+  - `src/shared/navigation.test.ts`
+  - `src/shared/appMeta.ts`
+  - `src/renderer/App.tsx`
+  - `src/renderer/materialDesign.test.ts`
+  - `src/shared/materialNavigation.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/shared/navigation.test.ts src/shared/materialNavigation.test.ts` -> failed as expected: primary nav still included `overview`, Settings default was `model-settings`, and `#overview` still resolved to Overview.
+  - `npm test -- src/renderer/materialDesign.test.ts` -> failed as expected: `OverviewPanel` was still rendered from the top-level `activeSection.id === "overview"` branch.
+- GREEN / verification evidence:
+  - `npm test -- src/shared/navigation.test.ts src/shared/materialNavigation.test.ts src/renderer/materialDesign.test.ts` -> 3 files / 44 tests passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+
+## 2026-06-23 - Worker T1 Task 1 Follow-Up App Metadata Test Alignment
+
+- Summary:
+  - Updated `getAppMeta` coverage to expect only the Chat-first primary modules: 会话, 运行, 任务, 设置.
+  - Removed stale test expectation for the former 总览 primary module and technical Settings subsections.
+- Changed files:
+  - `src/shared/appMeta.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/shared/appMeta.test.ts` -> failed as expected because the test still expected 总览/技能/工具/记忆/学习/评测 in `modules`.
+- GREEN / verification evidence:
+  - `npm test -- src/shared/appMeta.test.ts src/shared/navigation.test.ts src/shared/materialNavigation.test.ts src/renderer/materialDesign.test.ts` -> 4 files / 45 tests passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+
+## 2026-06-23 - Worker T2 Task 2 Chat Stream Contract And IPC Bridge
+
+- Summary:
+  - Added shared guided skill input and chat-layer stream event contracts without reusing provider `StreamEvent`.
+  - Added preload APIs for `onChatStreamEvent` and `respondSkillInput`.
+  - Bridged `chat:streamEvent` through the chat send IPC sender and added `chat:respondSkillInput`.
+  - Added a chat service stream option type and explicit not-wired guided input response.
+  - Preserved persisted `streaming` and `waiting_for_input` chat activity states with input request normalization.
+- Changed files:
+  - `src/shared/chat.ts`
+  - `src/shared/chatStream.test.ts`
+  - `src/preload/index.ts`
+  - `src/preload/index.test.ts`
+  - `src/main/ipc/index.ts`
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+  - `src/main/chatSessionStore.ts`
+  - `src/main/chatSessionStore.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/shared/chatStream.test.ts src/preload/index.test.ts src/main/chatService.test.ts src/main/chatSessionStore.test.ts` -> failed as expected: missing stream contract/preload bridge, missing `respondSkillInput`, and persisted new states normalized to `failed`.
+- GREEN / verification evidence:
+  - `npm test -- src/shared/chatStream.test.ts src/preload/index.test.ts src/main/chatService.test.ts src/main/chatSessionStore.test.ts` -> 4 files / 54 tests passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run build` -> passed.
+
+## 2026-06-23 - Worker T2 Task 2 Follow-Up Contract Alignment
+
+- Summary:
+  - Aligned guided skill input fields to the approved plan contract: `string`/`number`/`boolean`/`path`/`choice`, `executionId`, `reason`, and `choices`.
+  - Replaced chat stream answer/thinking payloads with `text` and renamed tool preview events to `tool_call_preview`.
+  - Removed conflicting guided input response `requestId` and nullable values.
+  - Mirrored chat task status callbacks into `onStreamEvent` as chat-layer `status` events with the send request id.
+  - Updated persisted input request normalization for the approved field shape.
+- Changed files:
+  - `src/shared/chat.ts`
+  - `src/shared/chatStream.test.ts`
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+  - `src/main/chatSessionStore.ts`
+  - `src/main/chatSessionStore.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/shared/chatStream.test.ts src/preload/index.test.ts src/main/chatService.test.ts src/main/chatSessionStore.test.ts` -> failed as expected: old `delta`/`tool_call_delta` contract remained, persisted choice fields normalized incorrectly, and `onStreamEvent` received no status events.
+- GREEN / verification evidence:
+  - `npm test -- src/shared/chatStream.test.ts src/preload/index.test.ts src/main/chatService.test.ts src/main/chatSessionStore.test.ts` -> 4 files / 55 tests passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run build` -> passed.
+
+## 2026-06-23 - Worker T2 Task 2 Follow-Up Terminal Stream Messages
+
+- Summary:
+  - Collapsed terminal chat stream events into one `completed | failed | canceled` union arm.
+  - Made terminal stream event `message` optional for all three terminal states.
+  - Added shared contract coverage for completed, failed, and canceled events without messages.
+- Changed files:
+  - `src/shared/chat.ts`
+  - `src/shared/chatStream.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/shared/chatStream.test.ts src/preload/index.test.ts src/main/chatService.test.ts src/main/chatSessionStore.test.ts` -> failed as expected because the shared contract still had separate terminal arms.
+- GREEN / verification evidence:
+  - `npm test -- src/shared/chatStream.test.ts src/preload/index.test.ts src/main/chatService.test.ts src/main/chatSessionStore.test.ts` -> 4 files / 56 tests passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+
+## 2026-06-23 - Worker T2 Task 2 Follow-Up Observer Isolation
+
+- Summary:
+  - Made chat status, stream, and persistence observers best-effort so thrown observer callbacks do not break chat sends.
+  - Captured async status activity and workspace run persistence rejections with quiet `.catch(() => undefined)` handling.
+  - Removed source-string assertions from shared chat stream contract tests.
+  - Strengthened preload stream bridge coverage to assert listener cleanup for `chat:streamEvent`.
+- Changed files:
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+  - `src/shared/chatStream.test.ts`
+  - `src/preload/index.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/shared/chatStream.test.ts src/preload/index.test.ts src/main/chatService.test.ts src/main/chatSessionStore.test.ts` -> failed as expected because `onStatusEvent` throw rejected `sendMessage`.
+- GREEN / verification evidence:
+  - `npm test -- src/shared/chatStream.test.ts src/preload/index.test.ts src/main/chatService.test.ts src/main/chatSessionStore.test.ts` -> 4 files / 57 tests passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+
+## 2026-06-23 - Worker T3 Task 3 Provider And Agent Loop Streaming Aggregation
+
+- Summary:
+  - Preserved provider thinking/reasoning deltas through low-level streaming adapters and stream aggregation.
+  - Added agent-loop streaming aggregation for answer, reasoning, and tool-call preview deltas before existing full tool-call authorization/execution.
+  - Mapped model stream deltas to chat `answer_delta`, `thinking_delta`, and `tool_call_preview` events without writing duplicate assistant messages.
+- Changed files:
+  - `src/main/providers/providerChatClient.ts`
+  - `src/main/providers/streamProcessor.ts`
+  - `src/main/providers/p8.test.ts`
+  - `src/main/providers/providers.test.ts`
+  - `src/main/providers/openAiCompatibleProvider.ts`
+  - `src/main/openAiCompatibleClient.ts`
+  - `src/main/openAiCompatibleClient.test.ts`
+  - `src/main/agentLoop.ts`
+  - `src/main/agentLoop.test.ts`
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/main/providers/p8.test.ts src/main/providers/providers.test.ts src/main/openAiCompatibleClient.test.ts src/main/agentLoop.test.ts src/main/chatService.test.ts` -> failed as expected: thinking deltas were dropped, streamed reasoning was not parsed, and agent loop used non-streaming `complete`.
+  - `npm test -- src/main/providers/providers.test.ts src/main/openAiCompatibleClient.test.ts` -> failed as expected for low-level/provider-wrapper reasoning delta mapping.
+- GREEN / verification evidence:
+  - `npm test -- src/main/providers/p8.test.ts src/main/providers/providers.test.ts src/main/openAiCompatibleClient.test.ts src/main/agentLoop.test.ts src/main/chatService.test.ts` -> 5 files / 94 tests passed.
+  - `npx tsc -p tsconfig.electron.json --noEmit --pretty false` -> passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+
+## 2026-06-24 - Worker T5 Task 5 Fix Stale Stream After New Chat Reset
+
+- Summary:
+  - Fixed the rejected Task 5 blocker where the new-chat reset cleared visible transcript state but left active stream/status refs pointing at the previous request.
+  - Added a focused regression asserting the new-chat reset clears active stream refs before stale events can repopulate the transcript.
+  - Reused the same ref reset helper for persisted-session load and preview session reset paths.
+- Changed files:
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/materialDesign.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts -t "clears active stream refs"` -> failed as expected: the reset effect did not call `resetActiveChatRefs()` and did not clear `activeStatusSessionIdRef` / `activeChatRequestIdRef`.
+- GREEN / verification evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts -t "clears active stream refs"` -> 1 file / 1 selected test passed.
+  - `npm test -- src/renderer/materialDesign.test.ts src/renderer/chatStreamReducer.test.ts src/renderer/chatTaskActivity.test.ts src/renderer/chatTaskActivityRestore.test.ts` -> 4 files / 56 tests passed.
+  - `npx tsc -p tsconfig.renderer.json --noEmit --pretty false` -> passed.
+  - `npm run harness:check` -> passed.
+
+## 2026-06-24 - Worker T5 Task 5 Fix Guided Input Status IPC Forwarding
+
+- Summary:
+  - Fixed guided-input continuation IPC so `chat:respondSkillInput` forwards resumed backend status events to the invoking renderer as `chat:statusEvent`.
+  - Added behavior-level IPC coverage that invokes the registered handler with a mocked chat service emitting both status and stream callbacks.
+- Changed files:
+  - `src/main/ipc/index.ts`
+  - `src/main/ipc/index.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/main/ipc/index.test.ts -t "forwards guided skill continuation status"` -> failed as expected: only `chat:streamEvent` was sent.
+- GREEN / verification evidence:
+  - `npm test -- src/main/ipc/index.test.ts -t "forwards guided skill continuation status"` -> 1 file / 1 selected test passed.
+  - `npm test -- src/main/ipc/index.test.ts src/main/ipc/chatSendMessageError.test.ts src/renderer/materialDesign.test.ts src/renderer/chatStreamReducer.test.ts src/renderer/chatTaskActivity.test.ts src/renderer/chatTaskActivityRestore.test.ts src/preload/index.test.ts` -> 7 files / 64 tests passed.
+  - `npx tsc -p tsconfig.electron.json --noEmit --pretty false` -> passed.
+  - `npx tsc -p tsconfig.renderer.json --noEmit --pretty false` -> passed.
+  - `npm run harness:check` -> passed.
+
+## 2026-06-24 - Worker T5 Task 5 Fix Stale Guided Input Stream Ref
+
+- Summary:
+  - Fixed the remaining Task 5 re-review blocker where `pendingInputRequestRef` could keep a previous guided-input request active between new-chat state reset and the pending-input effect sync.
+  - Tightened the reset regression to require clearing all stream-active refs, including the pending guided-input ref used by `onChatStreamEvent` request fallback.
+- Changed files:
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/materialDesign.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts -t "clears all active stream refs"` -> failed as expected: `pendingInputRequestRef.current = null` was missing.
+- GREEN / verification evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts -t "clears all active stream refs"` -> 1 file / 1 selected test passed.
+  - `npm test -- src/renderer/materialDesign.test.ts src/renderer/chatStreamReducer.test.ts src/renderer/chatTaskActivity.test.ts src/renderer/chatTaskActivityRestore.test.ts` -> 4 files / 56 tests passed.
+  - `npx tsc -p tsconfig.renderer.json --noEmit --pretty false` -> passed.
+  - `npm run harness:check` -> passed.
+
+## 2026-06-23 - Worker T3 Task 3 Streaming Fallback Repair
+
+- Summary:
+  - Added a pre-delta streaming failure fallback from `streamComplete` to the existing `completeWithModelRetry` path.
+  - Preserved partial-stream safety by propagating failures after answer/thinking/tool preview deltas instead of retrying and duplicating visible content.
+- Changed files:
+  - `src/main/agentLoop.ts`
+  - `src/main/agentLoop.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/main/agentLoop.test.ts` -> failed as expected because a client exposing `streamComplete` failed the loop when streaming threw before yielding any event.
+- GREEN / verification evidence:
+  - `npm test -- src/main/agentLoop.test.ts` -> 1 file / 20 tests passed.
+  - `npm test -- src/main/providers/p8.test.ts src/main/providers/providers.test.ts src/main/openAiCompatibleClient.test.ts src/main/agentLoop.test.ts src/main/chatService.test.ts` -> 5 files / 96 tests passed.
+  - `npx tsc -p tsconfig.electron.json --noEmit --pretty false` -> passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+
+## 2026-06-23 - Worker T3 Task 3 Indexed Streaming Tool Call Repair
+
+- Summary:
+  - Preserved OpenAI-compatible streamed `tool_calls[].index` on low-level stream events and through provider adapters when available.
+  - Updated agent-loop stream aggregation to correlate tool-call deltas by index before id, preserving legacy active-call fallback only for single-call streams.
+  - Added abort-style pre-delta stream failure coverage to ensure fallback completion is not used after cancellation.
+- Changed files:
+  - `src/main/openAiCompatibleClient.ts`
+  - `src/main/openAiCompatibleClient.test.ts`
+  - `src/main/providers/provider.ts`
+  - `src/main/providers/providerChatClient.ts`
+  - `src/main/providers/openAiCompatibleProvider.ts`
+  - `src/main/providers/streamProcessor.ts`
+  - `src/main/providers/providers.test.ts`
+  - `src/main/agentLoop.ts`
+  - `src/main/agentLoop.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/main/openAiCompatibleClient.test.ts src/main/providers/providers.test.ts src/main/agentLoop.test.ts` -> failed as expected: stream indexes were dropped and concurrent idless indexed tool-call deltas assembled into zero executable tool calls.
+- GREEN / verification evidence:
+  - `npm test -- src/main/openAiCompatibleClient.test.ts src/main/providers/providers.test.ts src/main/agentLoop.test.ts` -> 3 files / 56 tests passed.
+  - `npm test -- src/main/providers/p8.test.ts src/main/providers/providers.test.ts src/main/openAiCompatibleClient.test.ts src/main/agentLoop.test.ts src/main/chatService.test.ts` -> 5 files / 100 tests passed.
+  - `npx tsc -p tsconfig.electron.json --noEmit --pretty false` -> passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+
+## 2026-06-23 - Worker T3 Task 3 Streamed Tool Preview Safety Repair
+
+- Summary:
+  - Avoided unsafe native-provider tool streaming with tools present by deriving low-level stream events from `complete()` before any deltas are emitted.
+  - Preserved renderer-facing tool preview index and used deterministic `index:<n>` fallback ids for idless indexed chunks.
+- Changed files:
+  - `src/main/providers/providerChatClient.ts`
+  - `src/main/providers/providers.test.ts`
+  - `src/shared/chat.ts`
+  - `src/shared/chatStream.test.ts`
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/shared/chatStream.test.ts src/main/providers/providers.test.ts src/main/chatService.test.ts` -> failed as expected: native provider stream emitted unsafe empty tool name/stream args and chat preview emitted empty `toolCallId` without index.
+- GREEN / verification evidence:
+  - `npm test -- src/shared/chatStream.test.ts src/main/providers/providers.test.ts src/main/chatService.test.ts` -> 3 files / 61 tests passed.
+  - `npm test -- src/shared/chatStream.test.ts src/main/providers/p8.test.ts src/main/providers/providers.test.ts src/main/openAiCompatibleClient.test.ts src/main/agentLoop.test.ts src/main/chatService.test.ts` -> 6 files / 106 tests passed.
+  - `npx tsc -p tsconfig.electron.json --noEmit --pretty false` -> passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+
+## 2026-06-23 - Worker T4 Task 4 Guided Skill Input Preflight
+
+- Summary:
+  - Added skill execution preflight stages, input resolution snapshots, and guided input validation for missing/invalid/complete values.
+  - Aligned skill manifest inputs with guided chat fields, including `choice`, `description`, `defaultValue`, and `choices`.
+  - Wired chat skill preflight to pause before model/memory/tool execution, persist `waiting_for_input`, resume from structured responses, validate paths against the stored workspace context, and expand skill permission placeholders only after validated input.
+- Changed files:
+  - `src/shared/skillExecutionContract.ts`
+  - `src/shared/skillExecutionContract.test.ts`
+  - `src/shared/skills.ts`
+  - `src/shared/skills.test.ts`
+  - `src/main/skillExecutionService.ts`
+  - `src/main/skillExecutionService.test.ts`
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/shared/skillExecutionContract.test.ts src/shared/skills.test.ts src/main/skillExecutionService.test.ts src/main/chatService.test.ts` -> failed as expected: missing new stages/transitions, manifest guided metadata, `resolveSkillInput`, and chat preflight/resume wiring.
+- GREEN / verification evidence:
+  - `npm test -- src/shared/skillExecutionContract.test.ts src/shared/skills.test.ts src/main/skillExecutionService.test.ts src/main/chatService.test.ts` -> 4 files / 52 tests passed.
+  - `npm run build` -> passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+
+## 2026-06-23 - Worker T4 Task 4 Guided Skill Input Durability Repair
+
+- Summary:
+  - Made guided `waiting_for_input` pending-state persistence a required awaited write before returning `Skill input required`.
+  - Kept ordinary status observability best-effort while preventing waiting-input stream/status claims when the durable pending write fails.
+  - Applied the same durability requirement when invalid `respondSkillInput` creates the next pending request.
+  - Kept completion-marker writes awaited before returning successful resumed responses, with structured failure on completion persistence errors.
+- Changed files:
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/shared/skillExecutionContract.test.ts src/shared/skills.test.ts src/main/skillExecutionService.test.ts src/main/chatService.test.ts` -> failed as expected: `sendMessage` and invalid `respondSkillInput` returned before delayed pending writes completed, and waiting persistence rejection still returned `Skill input required`.
+- GREEN / verification evidence:
+  - `npm test -- src/shared/skillExecutionContract.test.ts src/shared/skills.test.ts src/main/skillExecutionService.test.ts src/main/chatService.test.ts` -> 4 files / 58 tests passed.
+  - `npm run build` -> passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `src/shared/toolPermissions.test.ts` was not run because Task 4 placeholder/root evidence is covered in `src/main/chatService.test.ts` and `src/shared/toolPermissions.test.ts` was not touched.
+
+## 2026-06-23 - Worker T4 Task 4 Guided Skill Input Preflight Repair
+
+- Summary:
+  - Persisted pending guided skill input state on chat activity events, including original session/request/message, selected skill name, workspace context, and partial values.
+  - Added recovery on fresh `createChatService` instances by scanning persisted session activity, rediscovering the skill by name, and resolving the workspace again.
+  - Marked consumed pending input requests completed so duplicate responses are rejected safely.
+  - Moved selected/natural skill resolution and missing-input preflight before goal intent routing for non-continuation turns.
+- Changed files:
+  - `src/shared/chat.ts`
+  - `src/main/chatSessionStore.ts`
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/shared/skillExecutionContract.test.ts src/shared/skills.test.ts src/main/skillExecutionService.test.ts src/main/chatService.test.ts` -> failed as expected: fresh-service `respondSkillInput` could not recover pending input, and selected `/goal`-style skill messages routed to goal handling before skill preflight.
+- GREEN / verification evidence:
+  - `npm test -- src/shared/skillExecutionContract.test.ts src/shared/skills.test.ts src/main/skillExecutionService.test.ts src/main/chatService.test.ts` -> 4 files / 55 tests passed.
+  - `npm run build` -> passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+
+## 2026-06-23 - Worker T4 Task 4 Guided Skill Input Claim-Before-Resume Repair
+
+- Summary:
+  - Moved the durable pending-input completed/claimed marker before resumed model/agent execution for complete guided input responses.
+  - If the claim marker fails, `respondSkillInput` now returns a structured failure before model/agent execution or assistant message append.
+  - Removed the post-execution required completion write so duplicate-prevention does not depend on a write after side effects.
+- Changed files:
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/shared/skillExecutionContract.test.ts src/shared/skills.test.ts src/main/skillExecutionService.test.ts src/main/chatService.test.ts` -> failed as expected: completion marker failure happened after resumed agent execution, so the agent loop was called before the failure response.
+- GREEN / verification evidence:
+  - `npm test -- src/shared/skillExecutionContract.test.ts src/shared/skills.test.ts src/main/skillExecutionService.test.ts src/main/chatService.test.ts` -> 4 files / 59 tests passed.
+  - `npm test -- src/shared/skillExecutionContract.test.ts src/shared/skills.test.ts src/main/skillExecutionService.test.ts src/main/chatService.test.ts src/shared/toolPermissions.test.ts src/main/toolAuthorizationService.test.ts` -> 6 files / 108 tests passed.
+  - `npm run build` -> passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+
+## 2026-06-23 - Worker T4 Task 4 Guided Skill Path Canonicalization Repair
+
+- Summary:
+  - Canonicalized validated guided skill `path` input values by storing the absolute path returned by the run-context sandbox validator.
+  - Verified relative `targetDir` input resolves against the workspace root before skill prompt injection and permission placeholder expansion.
+  - Kept outside-workspace path rejection covered by existing service/chat tests.
+- Changed files:
+  - `src/main/skillExecutionService.ts`
+  - `src/main/skillExecutionService.test.ts`
+  - `src/main/chatService.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/main/skillExecutionService.test.ts src/main/chatService.test.ts` -> failed as expected: resolved values and chat prompt still contained raw `docs` instead of `/workspace/project/docs`.
+- GREEN / verification evidence:
+  - `npm test -- src/main/skillExecutionService.test.ts src/main/chatService.test.ts` -> 2 files / 49 tests passed.
+  - `npm test -- src/shared/skillExecutionContract.test.ts src/shared/skills.test.ts src/main/skillExecutionService.test.ts src/main/chatService.test.ts src/shared/toolPermissions.test.ts src/main/toolAuthorizationService.test.ts` -> 6 files / 109 tests passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+
+## 2026-06-23 - Worker T4 Task 4 Guided Skill Input Response Serialization Repair
+
+- Summary:
+  - Added per-`inputRequestId` in-flight serialization so concurrent guided input responses cannot recover and execute the same pending request twice.
+  - Required durable activity persistence for completion claims, including recovered pending requests.
+  - Reordered invalid/still-missing responses to persist the next pending wait before consuming the old request, preserving retryability when that write fails.
+  - Aligned `SkillInputResponseResult` with the full chat send-message result shape returned by successful resumed execution.
+- Changed files:
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+  - `src/shared/chat.ts`
+  - `src/shared/chatStream.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/main/chatService.test.ts src/main/skillExecutionService.test.ts src/shared/skillExecutionContract.test.ts src/shared/skills.test.ts src/shared/chatStream.test.ts` -> failed as expected: invalid retry lost the original request, concurrent completion executed twice, and recovered completion executed without durable activity persistence.
+- GREEN / verification evidence:
+  - `npm test -- src/main/chatService.test.ts src/main/skillExecutionService.test.ts src/shared/skillExecutionContract.test.ts src/shared/skills.test.ts src/shared/chatStream.test.ts` -> 5 files / 68 tests passed.
+  - `npm run build` -> passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+
+## 2026-06-24 - Task 4 Guided Skill Invalid Retry Idempotency Repair
+
+- Summary:
+  - Closed the invalid-response retry window where a new pending request could be created before the old request was durably completed.
+  - Invalid/still-missing guided input responses now reuse the original `inputRequestId` and update the pending state in place.
+  - A failed completion marker during invalid retry no longer creates two answerable guided input requests.
+- Changed files:
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/main/chatService.test.ts -t "does not create a second answerable guided input request"` -> failed as expected: invalid retry attempted a completed marker and returned `Failed to persist skill input completion.`
+- GREEN / verification evidence:
+  - `npm test -- src/main/chatService.test.ts -t "does not create a second answerable guided input request"` -> 1 file / 1 selected test passed.
+  - `npm test -- src/main/chatService.test.ts src/main/skillExecutionService.test.ts src/shared/skillExecutionContract.test.ts src/shared/skills.test.ts src/shared/chatStream.test.ts src/shared/toolPermissions.test.ts src/main/toolAuthorizationService.test.ts` -> 7 files / 118 tests passed.
+  - `npx tsc -p tsconfig.electron.json --noEmit --pretty false` -> passed.
+  - `npx tsc -p tsconfig.renderer.json --noEmit --pretty false` -> passed.
+  - `npm run harness:check` -> passed.
+
+## 2026-06-24 - Worker T5 Task 5 Renderer Streaming Transcript And Guided Input UI
+
+- Summary:
+  - Added renderer chat stream reduction for active-session/request-filtered answer deltas, thinking deltas, tool call previews, terminal finalization, and pending guided input requests.
+  - Wired `AgentChatPanel` to subscribe/unsubscribe to `onChatStreamEvent`, render separated collapsed thinking/tool preview surfaces, finalize streamed replies without duplicate assistant messages, and special-case guided input waits as paused state.
+  - Rendered `guided-skill-input-form` in the main chat surface with string/path/number/boolean/choice controls and `respondSkillInput` submission.
+  - Mapped `streaming`/`waiting_for_input` activity and restore state, including latest pending input after reload.
+  - Forwarded `respondSkillInput` stream events through `chat:streamEvent` to the invoking renderer.
+- Changed files:
+  - `src/main/ipc/index.ts`
+  - `src/main/ipc/index.test.ts`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/chatStreamReducer.ts`
+  - `src/renderer/chatStreamReducer.test.ts`
+  - `src/renderer/chatTaskActivity.ts`
+  - `src/renderer/chatTaskActivity.test.ts`
+  - `src/renderer/chatTaskActivityRestore.test.ts`
+  - `src/renderer/materialDesign.test.ts`
+  - `src/renderer/styles/chat.css`
+  - `src/renderer/styles/responsive.css`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/renderer/chatTaskActivity.test.ts src/renderer/chatTaskActivityRestore.test.ts src/renderer/materialDesign.test.ts src/renderer/chatStreamReducer.test.ts src/main/ipc/index.test.ts` -> failed as expected: activity mapped guided input/streaming to fallback states, reducer was inert/missing behavior, panel lacked stream/guided/collapse surfaces, and IPC did not forward response stream events.
+- GREEN / verification evidence:
+  - `npm test -- src/renderer/chatTaskActivity.test.ts src/renderer/chatTaskActivityRestore.test.ts src/renderer/materialDesign.test.ts src/renderer/chatStreamReducer.test.ts src/main/ipc/index.test.ts` -> 5 files / 56 tests passed.
+  - `npm test -- src/renderer/chatTaskActivity.test.ts src/renderer/chatTaskActivityRestore.test.ts src/renderer/materialDesign.test.ts src/renderer/chatStreamReducer.test.ts src/preload/index.test.ts src/main/ipc/*.test.ts` -> 7 files / 62 tests passed.
+  - `npx tsc -p tsconfig.renderer.json --noEmit --pretty false` -> passed.
+  - `npx tsc -p tsconfig.electron.json --noEmit --pretty false` -> passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `git diff --check` -> passed.
+
+## 2026-06-24 - Task 4 Guided Skill Required Persistence Null-Write Repair
+
+- Summary:
+  - Required guided-skill activity writes now treat a `null` session update as persistence failure.
+  - Completion/claim writes fail before model/agent execution if the session was deleted or the store cannot update it.
+  - Added regression coverage for missing-session claim writes so no pending input is claimed or executed without durable evidence.
+- Changed files:
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/main/chatService.test.ts -t "does not treat missing-session activity writes"` -> failed as expected: claim append returned `null` but execution still proceeded.
+- GREEN / verification evidence:
+  - `npm test -- src/main/chatService.test.ts -t "does not treat missing-session activity writes"` -> 1 file / 1 selected test passed.
+  - `npm test -- src/main/chatService.test.ts src/main/skillExecutionService.test.ts src/shared/skillExecutionContract.test.ts src/shared/skills.test.ts src/shared/chatStream.test.ts src/shared/toolPermissions.test.ts src/main/toolAuthorizationService.test.ts src/main/chatSessionStore.test.ts src/preload/index.test.ts` -> 9 files / 140 tests passed.
+  - `npx tsc -p tsconfig.electron.json --noEmit --pretty false` -> passed.
+  - `npx tsc -p tsconfig.renderer.json --noEmit --pretty false` -> passed.
+  - `npm run harness:check` -> passed.
+
+## 2026-06-24 - Task 7 v2.7.0 Release Metadata Prep
+
+- Summary:
+  - Updated release-metadata regression tests to require `v2.7.0` package/version strings plus README Chat-first release notes coverage.
+  - Bumped root package metadata to `2.7.0` and refreshed README current-version, packaging, roadmap, and bilingual `v2.7.0` release note references.
+  - Kept this prep scoped to metadata/tests only; `P16-v2.7.0-ui-interaction` is not marked `done` here and no final independent acceptance evidence was recorded.
+- Changed files:
+  - `README.md`
+  - `src/shared/readme.test.ts`
+  - `src/shared/packageScripts.test.ts`
+  - `package.json`
+  - `package-lock.json`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> failed as expected: package metadata still reported `2.6.0`, README still referenced `v2.6.0`, and README lacked the new `v2.7.0` / `Chat-first` / `streamed answers` / `guided skill input` assertions.
+- GREEN / verification evidence:
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 2 files / 11 tests passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run build` -> passed.
+
+## 2026-06-24 - Task 7 v2.7.0 README Acceptance-State Follow-Up
+
+- Summary:
+  - Corrected the README roadmap so `v2.7.0` is described as metadata prep in acceptance rather than already shipped.
+  - Added regression coverage that requires acceptance-pending wording and rejects `[x]` shipped wording for the `v2.7.0` Chat-first release metadata line.
+  - Kept `v2.7.0` current-version/package metadata references intact and did not mark `P16-v2.7.0-ui-interaction` done.
+- Changed files:
+  - `README.md`
+  - `src/shared/readme.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> failed as expected: README did not contain `pending final independent acceptance` / `待最终独立验收` and still listed `v2.7.0` as shipped.
+- GREEN / verification evidence:
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 2 files / 11 tests passed.
+  - `git diff --check` -> passed.
+
+## 2026-06-24 - v2.7.0 UI/Interaction Iteration Final Acceptance
+
+- Request:
+  - Fully optimize/rework interaction and UI with Chat-first consumer experience, streamed output, separated thinking/process, guided skill input, icon cleanup, testing, and independent acceptance.
+- Planning/design evidence:
+  - Spec: `docs/superpowers/specs/2026-06-23-zerox-agent-2-7-0-ui-interaction-design.md`
+  - Plan: `docs/superpowers/plans/2026-06-23-zerox-agent-2-7-0-ui-interaction.md`
+  - Design artifact: `docs/design/zerox-agent-2-7-0-ui-artifact.html`
+- Final status updates:
+  - `.zerox/feature_list.json` marks `P16-v2.7.0-ui-interaction` as `done`.
+  - README roadmap marks `v2.7.0 Chat-first interaction release` as shipped after independent acceptance.
+- Changed files in final status commit:
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+  - `README.md`
+  - `src/shared/readme.test.ts`
+  - `src/shared/packageScripts.test.ts`
+- Focused test evidence:
+  - Task 1: `npm test -- src/shared/navigation.test.ts src/shared/materialNavigation.test.ts src/renderer/materialDesign.test.ts` -> passed during reviewed Task 1 closure.
+  - Task 2: `npm test -- src/shared/chatStream.test.ts src/preload/index.test.ts src/main/ipc/index.test.ts` -> passed during reviewed Task 2 closure.
+  - Task 3: `npm test -- src/main/providers/p8.test.ts src/main/agentLoop.test.ts src/main/chatService.test.ts src/shared/chatStream.test.ts` -> passed during reviewed Task 3 closure.
+  - Task 4: `npm test -- src/main/chatService.test.ts src/main/skillExecutionService.test.ts src/shared/skillExecutionContract.test.ts src/shared/skills.test.ts src/shared/chatStream.test.ts src/shared/toolPermissions.test.ts src/main/toolAuthorizationService.test.ts src/main/chatSessionStore.test.ts src/preload/index.test.ts` -> 9 files / 140 tests passed.
+  - Task 5: `npm test -- src/main/ipc/index.test.ts src/main/ipc/chatSendMessageError.test.ts src/renderer/materialDesign.test.ts src/renderer/chatStreamReducer.test.ts src/renderer/chatTaskActivity.test.ts src/renderer/chatTaskActivityRestore.test.ts src/preload/index.test.ts` -> 7 files / 64 tests passed.
+  - Task 6: `npm test -- src/renderer/materialDesign.test.ts` -> 44/44 tests passed.
+  - Task 7 final RED: `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> failed as expected while README still said pending acceptance and P16 was not done.
+  - Task 7 final GREEN: `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 2 files / 11 tests passed.
+- Full command gates:
+  - `npm test` -> 168 files / 1141 tests passed.
+  - `npm run build` -> passed.
+  - `npm run verify` -> 168 files / 1141 tests passed, 26/26 agent evals passed, 2/2 memory evals passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `node_modules` emitted a better-sqlite3 ABI warning and fell back to JSON in this non-packaged smoke.
+  - `npm run harness:score` -> passed; overall score 9.26, agent eval 26/26, goal eval 7/7, goal-judge eval 2/2.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+- Packaged gates:
+  - `npm run dist:mac` -> passed; generated `release/Zerox Agent-2.7.0-arm64.dmg` and `release/Zerox Agent-2.7.0-arm64-mac.zip`.
+  - `npm run smoke:prod:built` -> passed; renderer rendered agent chat UI.
+  - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v2.7.0' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+- Independent acceptance:
+  - Officer: Socrates (`019ef8da-f2ed-71b2-890d-8fba57d33d47`)
+  - App path: `/Volumes/Out/codex_projects/building agent/release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent`
+  - Config dir: `/Users/zerox/Library/Application Support/Zerox Agent/config`
+  - Verdict: ACCEPTED
+  - Command evidence:
+    - Packaged app smoke with `v2.7.0` required text -> passed.
+    - Packaged app narrow viewport smoke `390x844` -> passed.
+    - Packaged app navigation text smoke `会话|运行|任务|设置` -> passed.
+    - `npm run harness:check` -> passed.
+    - `npm test -- src/main/smokeMode.test.ts src/preload/index.test.ts src/renderer/chatStreamReducer.test.ts src/renderer/materialDesign.test.ts` -> 4 files / 63 tests passed.
+    - `npm test -- src/shared/navigation.test.ts` -> 1 file / 5 tests passed.
+    - Focused authorization/runtime tests for no-bypass scenarios -> 2 files / 6 selected tests passed.
+  - Scenario evidence:
+    - Fresh launch uses Chat as the primary surface.
+    - Primary navigation is Chat/Runs/Tasks/Settings; Overview diagnostics are under Settings.
+    - Composer/workspace/icon affordances render and narrow viewport smoke has no overflow.
+    - Streamed answer finalizes without duplicate assistant reply.
+    - Thinking/process and tool preview output are distinct from final answer.
+    - Guided skill input form covers required field types and is reachable when the right rail is hidden.
+    - Tool approval remains explicit and authorization/runtime tests preserve permission and workspace boundaries.
+    - Runs audit surfaces remain covered.
+  - Screenshot: `/tmp/zerox-uat-shots/zerox-agent-2-7-0-ui-artifact.html.png`
+  - Defects: none blocking. Residual risk noted by officer: packaged smoke required manual cleanup of a lingering app process in the PTY environment, with no observed UI/navigation/streaming/approval/sandbox regression.
+
+## 2026-06-25 - Workspace Picker Open/Create Regression Fix
+
+- Request:
+  - Fix the chat composer workspace selector, which only showed default workspaces and did not provide an obvious way to open an existing folder or create a new workspace.
+- Root cause:
+  - The workspace domain model already supported `project` and `temporary` workspaces, but the desktop bridge exposed only list/create-temporary/git-worktree paths.
+  - The chat composer rendered a selector for existing records only; it had no native directory-picker path to register a local project workspace.
+- Changed files:
+  - `src/main/agentWorkspaceService.ts`
+  - `src/main/agentWorkspaceService.test.ts`
+  - `src/main/ipc/index.ts`
+  - `src/main/ipc/index.test.ts`
+  - `src/preload/index.ts`
+  - `src/preload/index.test.ts`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/components/Icon.tsx`
+  - `src/renderer/styles/composer.css`
+  - `src/renderer/materialDesign.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/main/agentWorkspaceService.test.ts src/preload/index.test.ts src/renderer/materialDesign.test.ts` -> failed as expected: missing `createProjectWorkspace`, `openProjectAgentWorkspace`, and composer open/create affordances.
+- GREEN / verification evidence:
+  - `npm test -- src/main/agentWorkspaceService.test.ts src/preload/index.test.ts src/main/ipc/index.test.ts src/renderer/materialDesign.test.ts` -> 4 files / 58 tests passed.
+  - `npm run build` -> passed.
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> 168 files / 1145 tests passed, 26/26 agent evals passed, 2/2 memory evals passed.
+  - `BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='打开|新建' npm run smoke:prod` -> passed; renderer rendered agent chat UI with workspace open/create affordances. Note: local `node_modules` emitted the existing better-sqlite3 ABI warning and fell back to JSON storage during smoke.
+  - `npm run dist:mac` -> passed; regenerated `release/Zerox Agent-2.7.0-arm64.dmg` and `release/Zerox Agent-2.7.0-arm64-mac.zip`.
+  - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='打开|新建' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed; packaged app rendered the workspace open/create affordances.
+
+## 2026-06-25 - Workspace Picker Lightweight Menu Follow-Up
+
+- Request:
+  - Remove the heavy right-side workspace action buttons.
+  - Make the current workspace pill open a drawer-style dropdown menu with historical project folders, default workspace, open existing directory, and new workspace actions.
+  - Rebuild packages, commit, and push after the fix.
+- Changed files:
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/styles/composer.css`
+  - `src/renderer/materialDesign.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts` -> failed as expected while `workspace-menu` did not exist and the old `workspace-action-buttons` structure was still present.
+- GREEN / verification evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts` -> 44 tests passed.
+  - In-app Browser QA on `http://127.0.0.1:5173/#chat` -> passed: one `选择工作区` button, one `工作区菜单`, no standalone workspace action buttons, menu includes `历史工作区`, `默认工作区`, `打开已有目录`, and `新建工作区`; console warn/error count 0.
+  - `npm run build` -> passed.
+  - `npm run verify` -> 168 files / 1145 tests passed, 26/26 agent evals passed, 2/2 memory evals passed.
+  - `BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='工作区|默认工作区' npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `node_modules` emitted the existing better-sqlite3 ABI warning and fell back to JSON storage during smoke.
+  - `npm run harness:check` -> passed.
+  - `npm run dist:mac` -> passed; regenerated `release/Zerox Agent-2.7.0-arm64.dmg` and `release/Zerox Agent-2.7.0-arm64-mac.zip`.
+  - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='工作区|默认工作区' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed; packaged app rendered the workspace entry.
+
+## 2026-06-25 - Workspace Menu Responsive Layout Fix
+
+- Request:
+  - Fix the workspace dropdown display logic so all options remain reachable regardless of window resizing.
+  - Convert the composer workspace menu layout into a responsive structure instead of a fixed downward menu.
+- Changed files:
+  - `src/renderer/styles/composer.css`
+  - `src/renderer/styles/responsive.css`
+  - `src/renderer/materialDesign.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts` -> failed as expected while the menu still opened downward and lacked responsive max-height/internal-scroll rules.
+- GREEN / verification evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts` -> 44 tests passed.
+  - In-app Browser QA on `http://127.0.0.1:5173/#chat` -> passed at `1280x720`, `1280x520`, and `390x844`: workspace menu and action area stayed fully within the viewport, all options (`历史工作区`, `默认工作区`, `打开已有目录`, `新建工作区`) were present, horizontal overflow was false, console warn/error count 0.
+  - `npm run verify` -> 168 files / 1145 tests passed, 26/26 agent evals passed, 2/2 memory evals passed.
+  - `BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='工作区|默认工作区' npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `node_modules` emitted the existing better-sqlite3 ABI warning and fell back to JSON storage during smoke.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run dist:mac` -> passed; regenerated `release/Zerox Agent-2.7.0-arm64.dmg` and `release/Zerox Agent-2.7.0-arm64-mac.zip`.
+  - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='工作区|默认工作区' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed; packaged app rendered the workspace entry.
+
+## 2026-06-25 - Chat Runtime Surface and Workspace Popover Responsive Fix
+
+- Request:
+  - Fix the workspace dropdown so all options remain reachable under window resizing.
+  - Make the chat interaction layout responsive end-to-end so execution process, thinking, tool calls, tool approval, guided skill input, the message reading area, and composer no longer squeeze each other out.
+- Changed files:
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/styles/base.css`
+  - `src/renderer/styles/app-shell.css`
+  - `src/renderer/styles/chat.css`
+  - `src/renderer/styles/composer.css`
+  - `src/renderer/styles/responsive.css`
+  - `src/renderer/materialDesign.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- --run src/renderer/materialDesign.test.ts` -> failed as expected on the new assertions for viewport-anchored workspace menus and bounded `runtime-surface-stack` layout.
+- GREEN / verification evidence:
+  - `npm test -- --run src/renderer/materialDesign.test.ts` -> 46 tests passed.
+  - In-app Browser QA on `http://127.0.0.1:5173/#chat` -> passed for open workspace menu at `1440x900`, `1280x560`, `900x700`, `640x760`, and `390x844`: menu stayed fully inside the viewport, composer stayed visible, `chat-scroll-region` retained `overflow-y: auto`, and horizontal overflow was false.
+  - `npm run verify` -> 168 files / 1147 tests passed, 26/26 agent evals passed, 2/2 memory evals passed.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `node_modules` emitted the existing better-sqlite3 ABI warning and fell back to JSON storage during smoke.
+  - `git diff --check` -> passed.
+  - `npm run dist:mac` -> passed; regenerated `release/Zerox Agent-2.7.0-arm64.dmg` and `release/Zerox Agent-2.7.0-arm64-mac.zip`.
+  - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='工作区|默认工作区' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed; packaged app rendered the workspace entry.
+
+## 2026-06-25 - Runtime Thinking and Tool Preview Collapse Fix
+
+- Request:
+  - Keep both thinking and tool stream preview modules collapsed by default.
+  - Show only the latest one-line summary when collapsed.
+  - Prevent tool previews from stacking multiple cards unless the user explicitly expands the tool module.
+  - Keep expanded details scrollable and collapsible.
+- Changed files:
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/styles/chat.css`
+  - `src/renderer/materialDesign.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- --run src/renderer/materialDesign.test.ts` -> failed as expected while `RuntimeTextDisclosure`, `ToolCallPreviewDisclosure`, latest-line summaries, and bounded disclosure-body styles were missing.
+- GREEN / verification evidence:
+  - `npm test -- --run src/renderer/materialDesign.test.ts` -> 47 tests passed.
+  - `npm run build` -> passed.
+  - In-app Browser QA on `http://127.0.0.1:5173/#chat` -> passed: page identity correct, chat UI not blank, no framework overlay, workspace interaction responded, composer stayed visible, horizontal overflow was false, console warn/error count 0.
+  - `git diff --check` -> passed.
+  - `npm run verify` -> 168 files / 1148 tests passed, 26/26 agent evals passed, 2/2 memory evals passed.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `node_modules` emitted the existing better-sqlite3 ABI warning and fell back to JSON storage during smoke.
+  - `npm run dist:mac` -> passed; regenerated `release/Zerox Agent-2.7.0-arm64.dmg` and `release/Zerox Agent-2.7.0-arm64-mac.zip`.
+  - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='工作区|默认工作区' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed; packaged app rendered the workspace entry.
+
+## 2026-06-25 - Zerox Agent 2.8.0 Runtime Orchestration and Memory
+
+- Request:
+  - Implement the full 2.8.0 iteration in one release, referencing MiMo-Code while preserving Zerox Agent's local-first permissions, workspace sandbox, reviewed learning, and observable/recoverable runtime model.
+  - Unify skill invocation, tool invocation, project/delegation evidence, long-task goal gates, context rebuild, and cross-session memory/history.
+- Changed areas:
+  - Version and release ledger: `package.json`, `package-lock.json`, `.zerox/feature_list.json`, `src/shared/packageScripts.test.ts`.
+  - Shared contracts: execution context packages, tool invocation ledger, run graph/workspace ledger, chat/task events, permissions, raw history, and goal gates.
+  - Main runtime: dynamic registry health/validation, skill lazy-load tools, agent/chat/goal/scheduled tool invocation ledgers, scoped raw history tools, checkpoint boundary rebuild, IPC/preload wiring, and explicit packaged-app userData override for isolated acceptance.
+  - Renderer: Memory raw history scoped search UI, tool defaults, task activity states, material layout coverage.
+- Review evidence:
+  - Independent MiMo/QA review found blockers in skill binding, ledger wiring, raw history scope, checkpoint refs/pairing, and UI layout; fixes were applied.
+  - Re-review found remaining blockers in history scope precedence, deterministic goal ledger evidence, and production compaction pairing; fixes were applied.
+- Focused verification evidence:
+  - `npm test -- src/main/agentToolExecutor.test.ts -t "raw history"` -> passed.
+  - `npm test -- src/main/goalRuntimeEngine.test.ts -t "deterministic contracts"` -> passed.
+  - `npm test -- src/main/kernel/compactionStrategy.test.ts -t "tool-call pairs"` -> passed.
+  - `npm test -- src/renderer/materialDesign.test.ts -t "raw history"` -> passed.
+  - `npm test -- src/main/userDataDirOverride.test.ts src/shared/packageScripts.test.ts` -> passed.
+- Full verification evidence:
+  - `npm test` -> 175 files / 1179 tests passed.
+  - `npm run build` -> passed; Vite emitted the existing large chunk warning.
+  - `npm run verify` -> passed; 175 files / 1179 tests passed, 26/26 agent evals passed, 2/2 memory evals passed.
+  - `npm run smoke:prod` -> passed; local `better-sqlite3` ABI mismatch warning triggered the existing JSON fallback, and production smoke completed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+- Computer-use acceptance evidence:
+  - `npm run dist:mac` -> passed; generated `release/Zerox Agent-2.8.0-arm64.dmg` and `release/Zerox Agent-2.8.0-arm64-mac.zip`.
+  - Launched `release/mac-arm64/Zerox Agent.app` with `BUILDING_AGENT_USER_DATA_DIR=/tmp/zerox-agent-2-8-acceptance-userdata`.
+  - Verified packaged Chat renders, sidebar shows `v 2.8.0`, and the workspace dropdown exposes default workspace, open existing directory, and new workspace actions.
+  - Verified Settings reports user data and config paths under `/tmp/zerox-agent-2-8-acceptance-userdata`.
+  - Verified Memory renders Raw History with Workspace Scope, Session Scope, query input, and a visible `检索历史` button after the responsive layout fix.
+  - Clicked `一键准备`; the UI changed tasks from 0 to 1 and wrote `/tmp/zerox-agent-2-8-acceptance-userdata/config/scheduled-tasks.json` with the default manual task and explicit file permissions.
+  - Acceptance was non-destructive: no real workspace files, private memory records, model keys, or external API calls were used.
+
+## 2026-06-26 - Zerox Agent 2.8.1 Runtime Surface Polish Release
+
+- Request:
+  - Assign this iteration version `2.8.1`.
+  - Update README and process/progress evidence.
+  - Package, release, and push.
+- Changed areas:
+  - Release metadata: `package.json`, `package-lock.json`, `.zerox/feature_list.json`.
+  - Documentation and process evidence: `README.md`, `.zerox/progress.md`.
+  - Release guard tests: `src/shared/packageScripts.test.ts`, `src/shared/readme.test.ts`, `src/renderer/materialDesign.test.ts`.
+  - Scoped UI fix: `src/renderer/components/AgentChatPanel.tsx`, `src/renderer/styles/chat.css`, `src/renderer/styles/composer.css`.
+- Scope correction:
+  - The selected `@skill` capsule remains in the composer bottom area and now aligns with the right-side composer action buttons.
+  - The new icon-only disclosure treatment is scoped to real-time thinking/tool preview rows only.
+  - Main transcript collapse controls and right-side evidence rail collapse/progress controls were restored to their prior behavior.
+- Verification evidence:
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts src/renderer/materialDesign.test.ts` -> 3 files / 59 tests passed.
+  - `npm test` -> 175 files / 1179 tests passed.
+  - `npm run build` -> passed; Vite emitted the existing large chunk warning.
+  - `npm run verify` -> passed; 175 files / 1179 tests passed, 26/26 agent evals passed, 2/2 memory evals passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `node_modules` emitted the existing better-sqlite3 ABI warning and fell back to JSON storage during smoke.
+  - `npm run harness:check` -> passed.
+  - `npm run dist:mac` -> passed; generated `release/Zerox Agent-2.8.1-arm64.dmg` and `release/Zerox Agent-2.8.1-arm64-mac.zip`.
+  - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v2.8.1' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+  - Package metadata: `release/mac-arm64/Zerox Agent.app/Contents/Info.plist` reports `CFBundleShortVersionString=2.8.1` and `CFBundleVersion=2.8.1`.
+  - `release/Zerox Agent-2.8.1-arm64.dmg` (122M, sha256 `00075beb2a94b764d999cec4fee787807da4c5651bc09bacac5fa357c7b97151`)
+  - `release/Zerox Agent-2.8.1-arm64-mac.zip` (333M, sha256 `2beb99b5c0c3f24c40765d5a23f349c2e7022cae9966f845c828812e04d18248`)
+  - `release/Zerox Agent-2.8.1-arm64.dmg.blockmap` (132K, sha256 `3748492b87a01a7d433c3725b3cf5a76a8949c8fcd482b2d4548a4d2644f8610`)
+  - `release/Zerox Agent-2.8.1-arm64-mac.zip.blockmap` (335K, sha256 `afd1a68dac0c635dff4aa2f1ae399af9a3a5a0397d57ab219dd2eafd0370a38e`)
+  - `git push -u origin codex/v2.8.0-runtime-orchestration-memory && git push origin v2.8.1` -> pushed branch and tag.
+  - `gh release create v2.8.1 ...` -> created GitHub Release `https://github.com/ZeroxZhang/zerox-agent/releases/tag/v2.8.1`.
+  - `gh release view v2.8.1 --json tagName,url,isDraft,isPrerelease,assets` -> release is not draft/prerelease; uploaded `Zerox.Agent-2.8.1-arm64.dmg`, `Zerox.Agent-2.8.1-arm64-mac.zip`, both blockmaps, and `latest-mac.yml` with matching sha256 digests.

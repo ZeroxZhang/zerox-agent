@@ -170,6 +170,136 @@ describe("OpenAI-compatible chat client", () => {
     });
   });
 
+  it("streams provider reasoning deltas from SSE chunks", async () => {
+    const encoder = new TextEncoder();
+    const client = createOpenAiCompatibleClient({
+      fetch: async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "plan " } }] })}\n\n`));
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: "answer" } }] })}\n\n`));
+              controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+              controller.close();
+            },
+          }),
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        ),
+    });
+
+    const events = [];
+    for await (const event of client.streamComplete({
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "secret-key",
+      model: "agent-model",
+      temperature: 0.2,
+      maxTokens: 8192,
+      messages: [{ role: "user", content: "Run" }],
+    })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: "reasoning_delta", text: "plan " },
+      { type: "content_delta", text: "answer" },
+      { type: "done", finishReason: "stop" },
+    ]);
+  });
+
+  it("streams tool call indexes from SSE chunks", async () => {
+    const encoder = new TextEncoder();
+    const client = createOpenAiCompatibleClient({
+      fetch: async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                choices: [
+                  {
+                    delta: {
+                      tool_calls: [
+                        {
+                          index: 0,
+                          id: "call_0",
+                          type: "function",
+                          function: { name: "file_list", arguments: '{"path":"/a' },
+                        },
+                        {
+                          index: 1,
+                          id: "call_1",
+                          type: "function",
+                          function: { name: "file_list", arguments: '{"path":"/b' },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              })}\n\n`));
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                choices: [
+                  {
+                    delta: {
+                      tool_calls: [
+                        { index: 0, function: { arguments: '"}' } },
+                        { index: 1, function: { arguments: '"}' } },
+                      ],
+                    },
+                  },
+                ],
+              })}\n\n`));
+              controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+              controller.close();
+            },
+          }),
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        ),
+    });
+
+    const events = [];
+    for await (const event of client.streamComplete({
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "secret-key",
+      model: "agent-model",
+      temperature: 0.2,
+      maxTokens: 8192,
+      messages: [{ role: "user", content: "Run" }],
+    })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      {
+        type: "tool_call_delta",
+        index: 0,
+        id: "call_0",
+        name: "file_list",
+        arguments: '{"path":"/a',
+      },
+      {
+        type: "tool_call_delta",
+        index: 1,
+        id: "call_1",
+        name: "file_list",
+        arguments: '{"path":"/b',
+      },
+      {
+        type: "tool_call_delta",
+        index: 0,
+        id: "",
+        name: "",
+        arguments: '"}',
+      },
+      {
+        type: "tool_call_delta",
+        index: 1,
+        id: "",
+        name: "",
+        arguments: '"}',
+      },
+      { type: "done", finishReason: "stop" },
+    ]);
+  });
+
   it("returns provider token usage when present", async () => {
     const client = createOpenAiCompatibleClient({
       fetch: async () =>

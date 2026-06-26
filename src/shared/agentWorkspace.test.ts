@@ -4,6 +4,8 @@ import {
   buildDefaultSandboxPolicy,
   buildPrimaryRunContext,
   isPathInsideRunContext,
+  toWorkspaceContract,
+  type AgentWorkspace,
 } from "./agentWorkspace";
 
 describe("agent workspace model", () => {
@@ -98,6 +100,32 @@ describe("agent workspace model", () => {
         "write",
       ),
     ).toBe(false);
+  });
+
+  it("does not expose writable roots for read-only run contexts", () => {
+    const context = buildPrimaryRunContext({
+      workspaceId: "workspace_default",
+      workspaceRoot: "/tmp/work",
+      sandbox: {
+        ...buildDefaultSandboxPolicy(),
+        mode: "read_only",
+      },
+    });
+    const workspace: AgentWorkspace = {
+      id: "workspace_default",
+      name: "Default",
+      rootPath: "/tmp/work",
+      kind: "default",
+      createdAt: "2026-06-21T00:00:00.000Z",
+      updatedAt: "2026-06-21T00:00:00.000Z",
+      lastUsedAt: null,
+      cleanup: "keep",
+    };
+
+    expect(isPathInsideRunContext("/tmp/work/report.md", context, "write")).toBe(
+      false,
+    );
+    expect(toWorkspaceContract(workspace, context).writableRoots).toEqual([]);
   });
 
   it("canonicalizes primary run context extra write roots with injected home", () => {

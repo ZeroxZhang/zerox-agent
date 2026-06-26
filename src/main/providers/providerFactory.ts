@@ -32,6 +32,7 @@ export function createProvider(
     case "anthropic":
       return createAnthropicProvider({
         ...(deps.fetch ? { fetch: deps.fetch } : {}),
+        ...(deps.timeoutMs ? { timeoutMs: deps.timeoutMs } : {}),
         ...(settings.baseUrl ? { baseUrl: settings.baseUrl } : {}),
         apiKey: settings.apiKey,
         model: settings.chatModel,
@@ -39,6 +40,7 @@ export function createProvider(
     case "gemini":
       return createGeminiProvider({
         ...(deps.fetch ? { fetch: deps.fetch } : {}),
+        ...(deps.timeoutMs ? { timeoutMs: deps.timeoutMs } : {}),
         ...(settings.baseUrl ? { baseUrl: settings.baseUrl } : {}),
         apiKey: settings.apiKey,
         model: settings.chatModel,

@@ -9,6 +9,7 @@ import {
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { Goal, GoalStatus, ProgressLedgerEvent } from "../shared/agentGoal";
+import { readRecoverableJsonl } from "./jsonlRecovery";
 
 export type { ProgressLedgerEvent } from "../shared/agentGoal";
 
@@ -123,19 +124,7 @@ export function createAgentGoalStore(options: {
     },
 
     async readLedger(goalId) {
-      try {
-        const raw = await readFile(ledgerPath(goalId), "utf8");
-        return raw
-          .split("\n")
-          .filter(Boolean)
-          .map((line) => JSON.parse(line) as ProgressLedgerEvent);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-          return [];
-        }
-
-        throw error;
-      }
+      return readRecoverableJsonl<ProgressLedgerEvent>(ledgerPath(goalId));
     },
 
     async delete(goalId) {

@@ -52,8 +52,19 @@ describe("Design System — Notion-inspired app shell", () => {
     path.join(process.cwd(), "src/renderer/components/RunsPanel.tsx"),
     "utf8",
   );
+  const memoryPanelSource = readFileSync(
+    path.join(process.cwd(), "src/renderer/components/MemoryPanel.tsx"),
+    "utf8",
+  );
   const runTrajectoryPanelSource = readFileSync(
     path.join(process.cwd(), "src/renderer/components/RunTrajectoryPanel.tsx"),
+    "utf8",
+  );
+  const designArtifactSource = readFileSync(
+    path.join(
+      process.cwd(),
+      "docs/design/zerox-agent-2-7-0-ui-artifact.html",
+    ),
     "utf8",
   );
   const evalReviewPanelPath = path.join(
@@ -133,9 +144,121 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".sidebar-session-item");
   });
 
+  it("supports @skill selection from the chat composer", () => {
+    expect(chatPanelSource).toContain("extractActiveSkillMention");
+    expect(chatPanelSource).toContain("matchSkillMentionCandidates");
+    expect(chatPanelSource).toContain("selectedSkillName");
+    expect(chatPanelSource).toContain("skill-mention-menu");
+    expect(chatPanelSource).toContain("selected-skill-chip");
+    expect(chatPanelSource.indexOf("selected-skill-chip")).toBeGreaterThan(
+      chatPanelSource.indexOf("workspace-context-path"),
+    );
+    expect(chatPanelSource.indexOf("selected-skill-chip")).toBeLessThan(
+      chatPanelSource.indexOf("skill-mention-menu"),
+    );
+    expect(styles).toContain(".skill-mention-menu");
+    expect(styles).toContain(".selected-skill-chip");
+    expect(styles).toContain("height: var(--composer-action-size);");
+    expect(styles).toContain("bottom: var(--composer-action-inset);");
+  });
+
+  it("surfaces workspace selection in the chat composer", () => {
+    expect(chatPanelSource).toContain("listAgentWorkspaces");
+    expect(chatPanelSource).toContain("selectedWorkspaceId");
+    expect(chatPanelSource).toContain("workspaceId: selectedWorkspaceId");
+    expect(chatPanelSource).toContain("openProjectAgentWorkspace");
+    expect(chatPanelSource).toContain("createTemporaryAgentWorkspace");
+    expect(chatPanelSource).toContain("workspace-menu");
+    expect(chatPanelSource).toContain("workspaceSearch");
+    expect(chatPanelSource).toContain("历史工作区");
+    expect(chatPanelSource).toContain("打开已有目录");
+    expect(chatPanelSource).toContain("新建工作区");
+    expect(chatPanelSource).toContain("默认工作区");
+    expect(chatPanelSource).toContain("composer-context-row");
+    expect(chatPanelSource).toContain("workspace-picker");
+    expect(chatPanelSource).not.toContain("workspace-action-buttons");
+    expect(chatPanelSource).not.toContain("workspace-action-button");
+    expect(styles).toContain(".composer-context-row");
+    expect(styles).toContain(".workspace-picker");
+    expect(styles).toContain(".workspace-menu");
+    expect(styles).toContain("grid-template-rows: auto minmax(0, 1fr) auto;");
+    expect(styles).toContain("--workspace-menu-safe-width");
+    expect(styles).toContain("--workspace-menu-safe-height");
+    expect(styles).toContain("max-height: var(--workspace-menu-safe-height);");
+    expect(styles).toContain("overflow: hidden;");
+    expect(styles).toContain("min-height: 0;");
+    expect(styles).toContain(".composer-context-row");
+    expect(styles).toContain("flex-wrap: wrap;");
+    expect(styles).toContain("padding-top: 78px;");
+    expect(styles).not.toContain(".workspace-action-buttons");
+  });
+
+  it("keeps workspace menus viewport anchored and internally scrollable", () => {
+    expect(chatPanelSource).toContain("workspaceMenuPosition");
+    expect(chatPanelSource).toContain("measureWorkspaceMenuPosition");
+    expect(chatPanelSource).toContain("workspaceMenuStyle");
+    expect(chatPanelSource).toContain(
+      "data-placement={workspaceMenuPosition.placement}",
+    );
+    expect(styles).toContain("position: fixed;");
+    expect(styles).toContain("top: clamp(");
+    expect(styles).toContain("left: clamp(");
+    expect(styles).toContain("max-height: var(--workspace-menu-safe-height);");
+    expect(styles).toContain("overscroll-behavior: contain;");
+    expect(styles).toContain("@media (max-height: 720px)");
+  });
+
+  it("keeps runtime process surfaces in a responsive scroll region above a pinned composer", () => {
+    expect(chatPanelSource).toContain("chat-scroll-region");
+    expect(chatPanelSource).toContain("runtime-surface-stack");
+    expect(chatPanelSource.indexOf("chat-scroll-region")).toBeLessThan(
+      chatPanelSource.indexOf("runtime-surface-stack"),
+    );
+    expect(chatPanelSource.indexOf("runtime-surface-stack")).toBeLessThan(
+      chatPanelSource.indexOf("className=\"composer\""),
+    );
+    expect(styles).toContain(".chat-scroll-region");
+    expect(styles).toContain(".runtime-surface-stack");
+    expect(styles).toContain("flex: 0 0 auto;");
+    expect(styles).toContain("min-height: clamp(104px, 18dvh, 148px);");
+    expect(styles).toContain("max-height: min(34vh, 260px);");
+  });
+
+  it("uses the shared local Icon component for primary controls", () => {
+    const iconSource = readFileSync(
+      path.join(process.cwd(), "src/renderer/components/Icon.tsx"),
+      "utf8",
+    );
+    expect(iconSource).toContain("export function Icon");
+    expect(chatPanelSource).toContain("<Icon name=\"send\"");
+    expect(chatPanelSource).toContain("<Icon name=\"stop\"");
+    expect(chatPanelSource).toContain("<Icon name=\"command\"");
+    expect(chatPanelSource).toContain("<Icon name=\"close\"");
+    expect(appSource).toContain("<Icon name=\"plus\"");
+    expect(appSource).toContain("<Icon name=\"more\"");
+    expect(appSource).not.toContain("＋");
+    expect(chatPanelSource).not.toContain("×");
+  });
+
+  it("presents the local icon system in the 2.7.0 design artifact", () => {
+    expect(designArtifactSource).toContain("class=\"artifact-icon sidebar-button-icon\"");
+    expect(designArtifactSource).toContain("class=\"artifact-icon icon-button-icon\"");
+    expect(designArtifactSource).toContain("stroke=\"currentColor\"");
+    expect(designArtifactSource).not.toContain("+ New Chat");
+    expect(designArtifactSource).not.toContain(">Cmd<");
+    expect(designArtifactSource).not.toContain(">Stop<");
+    expect(designArtifactSource).not.toContain(">Send<");
+  });
+
   it("surfaces managed chat history with archive, delete, time and token metadata", () => {
     expect(appSource).toContain("archiveChatSession");
     expect(appSource).toContain("restoreChatSession");
+    expect(appSource).toContain("renameChatSession");
+    expect(appSource).toContain("重命名");
+    expect(appSource).toContain("RenameChatSessionDialog");
+    expect(appSource).toContain("session-rename-dialog");
+    expect(appSource).not.toContain("window.prompt");
+    expect(appSource).toContain("activeChatSessionTitle");
     expect(appSource).toContain("deleteChatSession");
     expect(appSource).toContain("sidebar-archive-group");
     expect(appSource).toContain("sidebar-session-actions");
@@ -145,7 +268,29 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".sidebar-archive-group");
     expect(styles).toContain(".sidebar-session-actions");
     expect(styles).toContain(".sidebar-session-menu");
+    expect(styles).toContain(".session-rename-backdrop");
+    expect(styles).toContain(".session-rename-dialog");
     expect(styles).toContain(".sidebar-session-token");
+  });
+
+  it("renders chat messages with structured readable metadata and polished markdown blocks", () => {
+    expect(chatPanelSource).toContain("formatChatMessageTime");
+    expect(chatPanelSource).toContain("messageTimeTick");
+    expect(chatPanelSource).toContain("dateTime={message.createdAt}");
+    expect(chatPanelSource).not.toContain('createdAt: "刚刚"');
+    expect(chatPanelSource).toContain("chat-message-meta");
+    expect(chatPanelSource).toContain("markdown-code-block");
+    expect(chatPanelSource).toContain("markdown-code-header");
+    expect(chatPanelSource).toContain("target=\"_blank\"");
+    expect(styles).toContain(".chat-message-meta");
+    expect(styles).toContain(".chat-message-meta span");
+    expect(styles).toContain(".markdown-code-block");
+    expect(styles).toContain(".markdown-code-header");
+    expect(styles).toContain(".markdown-message span");
+    expect(styles).toContain(".markdown-message strong");
+    expect(styles).toContain(".markdown-message a");
+    expect(styles).toContain("font-size: var(--text-lg);");
+    expect(styles).toContain("background: #f3f4f6;");
   });
 
   it("keeps a draggable window strip visible on the chat-first desktop shell", () => {
@@ -200,6 +345,18 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".kernel-event-card");
   });
 
+  it("refreshes Runs from run lifecycle events instead of relying only on kernel details", () => {
+    expect(preloadSource).toContain("onAgentRunsChanged");
+    expect(runsPanelSource).toContain("refreshRunsSnapshot");
+    expect(runsPanelSource).toContain("onAgentRunsChanged");
+    expect(runsPanelSource).toContain("window.buildingAgent.listAgentRuns()");
+    expect(runsPanelSource).toContain(
+      "window.buildingAgent.listActiveAgentExecutions()",
+    );
+    expect(runsPanelSource).toContain("onKernelEvent");
+    expect(runsPanelSource).toContain("appendKernelEvent");
+  });
+
   it("surfaces evidence-backed Run Graph gates in Runs", () => {
     expect(runsPanelSource).toContain("projectRunGraph");
     expect(runsPanelSource).toContain("Run Graph");
@@ -213,6 +370,18 @@ describe("Design System — Notion-inspired app shell", () => {
   it("surfaces eval candidate generation from terminal Runs", () => {
     expect(runsPanelSource).toContain("Eval Candidate");
     expect(runsPanelSource).toContain("generateEvalCandidateForRun");
+  });
+
+  it("surfaces curated memory and raw history as distinct memory surfaces", () => {
+    expect(preloadSource).toContain("searchRawHistory");
+    expect(preloadSource).toContain("readRawHistoryAround");
+    expect(memoryPanelSource).toContain("raw-history-panel");
+    expect(memoryPanelSource).toContain("raw-history-action-row");
+    expect(memoryPanelSource).toContain("searchRawHistory");
+    expect(memoryPanelSource).toContain("Raw History");
+    expect(styles).toContain(".raw-history-panel");
+    expect(styles).toContain("repeat(auto-fit, minmax(min(100%, 160px), 1fr))");
+    expect(styles).toContain(".raw-history-action-row");
   });
 
   it("surfaces eval candidate review and promotion controls", () => {
@@ -239,6 +408,13 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".settings-section-body");
   });
 
+  it("moves Overview diagnostics into the Settings system section", () => {
+    expect(appSource).toMatch(
+      /props\.activeSectionId === "system-overview"[\s\S]*<OverviewPanel onNavigate={navigateTo} \/>/,
+    );
+    expect(appSource).not.toContain("activeSection.id === \"overview\"");
+  });
+
   it("keeps composer command actions inside the chat input", () => {
     expect(chatPanelSource).not.toContain("onClick={() => onNavigate(\"tools\")}");
     expect(chatPanelSource).toContain("aria-label=\"打开命令菜单\"");
@@ -249,8 +425,8 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(chatPanelSource).toContain("handleOpenCommandMenu");
     expect(chatPanelSource).toContain("handleSelectComposerCommand(command.id)");
     expect(chatPanelSource).toContain("createGoalCommandDraft(draft)");
-    expect(styles).toContain(".composer-icon-command");
-    expect(styles).toContain("content: \"⌘\";");
+    expect(styles).toContain(".composer-icon");
+    expect(styles).toContain(".composer-icon path");
     expect(styles).toContain("--composer-action-inset: 14px;");
     expect(styles).toContain("right: var(--composer-action-inset);");
     expect(styles).toContain("bottom: var(--composer-action-inset);");
@@ -297,6 +473,20 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(chatPanelSource).toContain("void refreshActiveGoalDetail(event.goalId)");
   });
 
+  it("accepts empty desktop chat session lists as real state", () => {
+    const refreshSessionsSource = getFunctionSource(
+      chatPanelSource,
+      "refreshSessions",
+    );
+
+    expect(refreshSessionsSource).toContain(
+      "const nextSessions = loadedSessions.map(toSessionRailItem);",
+    );
+    expect(refreshSessionsSource).toContain("setSessions(nextSessions);");
+    expect(refreshSessionsSource).toContain("onChatSessionsChange?.(nextSessions);");
+    expect(refreshSessionsSource).not.toContain("if (loadedSessions.length)");
+  });
+
   it("reloads the active chat transcript when a background goal reaches a terminal state", () => {
     expect(chatPanelSource).toContain("function isTerminalGoalStatus");
     expect(chatPanelSource).toContain("async function refreshCurrentSessionMessages");
@@ -337,7 +527,9 @@ describe("Design System — Notion-inspired app shell", () => {
   });
 
   it("contains long chat titles and live status text inside the hero header", () => {
-    expect(chatPanelSource).toContain("const chatTitle = activeSession?.title ?? \"新会话\";");
+    expect(chatPanelSource).toContain(
+      "const chatTitle = activeChatSessionTitle ?? activeSession?.title ?? \"新会话\";",
+    );
     expect(chatPanelSource).toContain("title={chatTitle}");
     expect(chatPanelSource).toContain("title={status.message}");
     expect(chatPanelSource).toContain("const chatStatusIsLong");
@@ -415,7 +607,7 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".composer-input-shell");
     expect(styles).toContain(".composer-floating-actions");
     expect(styles).toContain(".composer-icon-button");
-    expect(styles).toContain(".composer-icon-stop");
+    expect(styles).toContain(".composer-icon");
     expect(styles).toContain("--composer-action-size: 32px;");
     expect(styles).toContain("width: var(--composer-action-size); height: var(--composer-action-size);");
     expect(styles).toContain(".chat-hero {");
@@ -474,6 +666,88 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain("-webkit-line-clamp: 2;");
     expect(styles).toContain(".agent-work-steps { min-width: 0;");
   });
+
+  it("subscribes to chat stream events and renders separated streaming transcript state", () => {
+    expect(chatPanelSource).toContain("onChatStreamEvent");
+    expect(chatPanelSource).toContain("applyChatStreamEvent");
+    expect(chatPanelSource).toContain("finalizeChatStreamResult");
+    expect(chatPanelSource).toContain("thinking-process-block");
+    expect(chatPanelSource).toContain("tool-call-preview-block");
+    expect(styles).toContain(".thinking-process-block");
+    expect(styles).toContain(".tool-call-preview-block");
+  });
+
+  it("keeps thinking and tool stream previews collapsed to one latest row by default", () => {
+    expect(chatPanelSource).toContain("RuntimeTextDisclosure");
+    expect(chatPanelSource).toContain("ToolCallPreviewDisclosure");
+    expect(chatPanelSource).toContain("latestToolCallPreview");
+    expect(chatPanelSource).toContain("getLatestRuntimeLine");
+    expect(chatPanelSource).toContain("runtime-disclosure-summary");
+    expect(chatPanelSource).toContain("runtime-disclosure-label");
+    expect(chatPanelSource).toContain("runtime-disclosure-toggle");
+    expect(chatPanelSource).toContain("aria-label={expanded ? `收起${label}` : `展开${label}`}");
+    expect(chatPanelSource).toContain('Icon name={expanded ? "collapse" : "expand"}');
+    expect(chatPanelSource).not.toMatch(
+      /chatStreamState\.toolCallPreviews\.map[\s\S]*<CollapsibleTextBlock/,
+    );
+    expect(styles).toContain(".runtime-disclosure.is-collapsed");
+    expect(styles).toContain(".runtime-disclosure-label::before");
+    expect(styles).toContain(".runtime-disclosure-toggle");
+    expect(styles).toContain("border-radius: var(--radius-full);");
+    expect(styles).toContain(".runtime-disclosure-summary");
+    expect(styles).toContain(".runtime-disclosure-body");
+    expect(styles).toContain(".tool-call-preview-list");
+    expect(styles).toContain("white-space: nowrap;");
+    expect(styles).toContain("max-height: min(32vh, 240px);");
+  });
+
+  it("renders guided skill input in the main chat surface with all required controls", () => {
+    expect(chatPanelSource).toContain("guided-skill-input-form");
+    expect(chatPanelSource).toContain("pendingInputRequest");
+    expect(chatPanelSource).toContain("respondSkillInput");
+    expect(chatPanelSource).toContain("renderGuidedSkillInputControl");
+    expect(chatPanelSource).toContain('field.type === "string"');
+    expect(chatPanelSource).toContain('field.type === "path"');
+    expect(chatPanelSource).toContain('field.type === "number"');
+    expect(chatPanelSource).toContain('field.type === "boolean"');
+    expect(chatPanelSource).toContain('field.type === "choice"');
+    expect(styles).toContain(".guided-skill-input-form");
+    expect(styles).toContain(".guided-skill-input-grid");
+  });
+
+  it("provides accessible collapse affordances for long message and process surfaces", () => {
+    expect(chatPanelSource).toContain("chat-message-collapse");
+    expect(chatPanelSource).toContain("aria-expanded={expanded}");
+    expect(chatPanelSource).toContain("shouldCollapseMarkdownBlock");
+    expect(styles).toContain(".chat-message-collapse");
+    expect(styles).toContain("overflow-wrap: anywhere;");
+  });
+
+  it("keeps guided input reachable when the right context rail is hidden", () => {
+    expect(chatPanelSource).toContain("GuidedSkillInputForm");
+    expect(chatPanelSource).toMatch(
+      /<GuidedSkillInputForm[\s\S]*pendingInputRequest/,
+    );
+    expect(styles).toContain("@media (max-width: 1180px)");
+    expect(styles).toContain(".agent-context-panel { display: none; }");
+    expect(styles).toContain(".guided-skill-input-form");
+  });
+
+  it("clears all active stream refs during new chat reset so stale events cannot repopulate the transcript", () => {
+    const newChatResetSource = getUseEffectSource(
+      chatPanelSource,
+      "newChatRequestKey",
+    );
+
+    expect(newChatResetSource).toContain("resetActiveChatRefs()");
+    expect(newChatResetSource).toContain(
+      "setChatStreamState(createChatStreamState(initialMessages))",
+    );
+    expect(chatPanelSource).toContain("function resetActiveChatRefs");
+    expect(chatPanelSource).toContain("activeStatusSessionIdRef.current = null");
+    expect(chatPanelSource).toContain("activeChatRequestIdRef.current = null");
+    expect(chatPanelSource).toContain("pendingInputRequestRef.current = null");
+  });
 });
 
 function getFunctionSource(source: string, functionName: string): string {
@@ -508,4 +782,20 @@ function getFunctionSource(source: string, functionName: string): string {
   }
 
   return source.slice(startIndex);
+}
+
+function getUseEffectSource(source: string, dependencyName: string): string {
+  const dependencyMarker = `}, [${dependencyName}]);`;
+  const endIndex = source.indexOf(dependencyMarker);
+  if (endIndex === -1) {
+    return "";
+  }
+
+  const searchStart = Math.max(0, endIndex - 900);
+  const effectStartIndex = source.lastIndexOf("useEffect(() => {", endIndex);
+  if (effectStartIndex === -1 || effectStartIndex < searchStart) {
+    return "";
+  }
+
+  return source.slice(effectStartIndex, endIndex + dependencyMarker.length);
 }

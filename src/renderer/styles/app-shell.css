@@ -1,7 +1,7 @@
 .app-shell {
   display: grid;
   grid-template-columns: var(--nav-rail-width) minmax(0, 1fr);
-  min-height: 100vh;
+  min-height: 100dvh;
   background: var(--bg-page);
   -webkit-app-region: no-drag;
 }

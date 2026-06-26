@@ -1,8 +1,11 @@
 import {
+  useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 import type {
@@ -20,19 +23,30 @@ import {
 } from "../../shared/firstRunGuide";
 import { buildAgentReadinessChecklist } from "../../shared/agentReadiness";
 import type { AgentRunEvent, AgentRunRecord } from "../../shared/agentRuns";
+import type { AgentWorkspace } from "../../shared/agentWorkspace";
 import type {
   ChatAgentStatus,
   ChatHistoryMessage,
   ChatSessionGoalSummary,
   ChatSessionListItem,
   ChatSessionRecord,
+  ChatStreamEvent,
   ChatTaskStatusEvent,
+  SendChatMessageResult,
+  SkillInputField,
+  SkillUserInputRequest,
 } from "../../shared/chat";
 import type { Goal } from "../../shared/agentGoal";
 import type { MemoryRecord } from "../../shared/memory";
 import type { PublicModelSettings } from "../../shared/modelSettings";
 import type { NavigationSectionId } from "../../shared/navigation";
 import type { ScheduledTask } from "../../shared/scheduledTasks";
+import {
+  extractActiveSkillMention,
+  matchSkillMentionCandidates,
+  replaceActiveSkillMention,
+  type SkillMentionCandidate,
+} from "../../shared/skillMentions";
 import {
   createDemoValidationSnapshot,
   demoMemories,
@@ -57,14 +71,27 @@ import {
 import {
   buildTaskProcessItems,
   buildTaskActivityDetail,
+  buildTaskActivityFromStatusEvent,
   buildGoalTaskActivity,
   createTaskActivity,
+  getChatStatusKindFromStatusEvent,
   getGoalUiSyncState,
+  getWorkPhaseFromChatStatusEvent,
   idleTaskActivity,
+  restoreChatTaskActivity,
   type TaskActivityState,
 } from "../chatTaskActivity";
+import {
+  applyChatStreamEvent,
+  createChatStreamState,
+  finalizeChatStreamResult,
+  type ChatToolCallPreview,
+  type ChatStreamMessage,
+} from "../chatStreamReducer";
+import { formatChatMessageTime } from "../chatMessageTime";
 import { GoalDetailDrawer } from "./GoalDetailDrawer";
 import { GoalStatusStrip } from "./GoalStatusStrip";
+import { Icon } from "./Icon";
 import type {
   ToolApprovalDecisionPayload,
   ToolApprovalRequestPayload,
@@ -73,17 +100,15 @@ import type {
 type AgentChatPanelProps = {
   newChatRequestKey?: number;
   requestedSessionId?: string | null;
+  activeChatSessionTitle?: string | null;
   onActiveSessionChange?: (sessionId: string | null) => void;
   onChatSessionsChange?: (sessions: ChatSidebarSession[]) => void;
   onNavigate: (sectionId: NavigationSectionId) => void;
 };
 
-type ChatMessage = {
-  id: string;
-  role: "assistant" | "user";
-  content: string;
-  createdAt: string;
-};
+type ChatMessage = ChatStreamMessage;
+
+type SuccessfulChatResult = Extract<SendChatMessageResult, { ok: true }>;
 
 type ChatStatus = {
   kind: "ready" | "working" | "paused" | "error";
@@ -98,7 +123,12 @@ type ChatSession = {
   messageCount?: number;
 } & Pick<
   ChatSessionListItem,
-  "updatedAt" | "archivedAt" | "lastAssistantMessageAt" | "tokenUsage"
+  | "updatedAt"
+  | "archivedAt"
+  | "lastAssistantMessageAt"
+  | "tokenUsage"
+  | "workspaceId"
+  | "workspaceSummary"
 >;
 
 export type ChatSidebarSession = ChatSession;
@@ -111,6 +141,14 @@ type ComposerCommandItem = {
   label: string;
   description: string;
   comingSoon?: boolean;
+};
+
+type WorkspaceMenuPosition = {
+  top: number;
+  left: number;
+  width: number;
+  maxHeight: number;
+  placement: "above" | "below";
 };
 
 const fallbackSessions: ChatSession[] = [
@@ -166,6 +204,7 @@ const initialMessages: ChatMessage[] = [];
 export function AgentChatPanel({
   newChatRequestKey = 0,
   requestedSessionId = null,
+  activeChatSessionTitle = null,
   onActiveSessionChange,
   onChatSessionsChange,
   onNavigate,
@@ -173,17 +212,41 @@ export function AgentChatPanel({
   const dataBoundary = buildAgentDataBoundary(
     window.buildingAgent ? "desktop" : "preview",
   );
-  const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
+  const [chatStreamState, setChatStreamState] = useState(() =>
+    createChatStreamState(initialMessages),
+  );
+  const messages = chatStreamState.messages;
+  const pendingInputRequest = chatStreamState.pendingInputRequest;
   const [draft, setDraft] = useState("");
+  const [draftCursor, setDraftCursor] = useState(0);
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
   const [sessions, setSessions] = useState<ChatSession[]>(fallbackSessions);
   const [tasks, setTasks] = useState<ScheduledTask[]>(demoTasks);
   const [runs, setRuns] = useState<AgentRunRecord[]>(demoRuns);
   const [memories, setMemories] = useState<MemoryRecord[]>(demoMemories);
+  const [workspaces, setWorkspaces] = useState<AgentWorkspace[]>([]);
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(
+    null,
+  );
+  const [workspaceActionPending, setWorkspaceActionPending] = useState<
+    "open" | "create" | null
+  >(null);
+  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
+  const [workspaceSearch, setWorkspaceSearch] = useState("");
+  const [workspaceMenuPosition, setWorkspaceMenuPosition] =
+    useState<WorkspaceMenuPosition>({
+      top: 0,
+      left: 0,
+      width: 420,
+      maxHeight: 360,
+      placement: "above",
+    });
   const [modelSettings, setModelSettings] =
     useState<PublicModelSettings>(demoModelSettings);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [skillCount, setSkillCount] = useState(1);
+  const [skillOptions, setSkillOptions] = useState<SkillMentionCandidate[]>([]);
+  const [selectedSkillName, setSelectedSkillName] = useState<string | null>(null);
   const [lastValidationSnapshot, setLastValidationSnapshot] =
     useState<AgentBootstrapValidationSnapshot | null>(null);
   const [workPhase, setWorkPhase] = useState<AgentWorkPhase>("idle");
@@ -208,21 +271,89 @@ export function AgentChatPanel({
   const [activeChatRequestId, setActiveChatRequestId] = useState<string | null>(
     null,
   );
+  const [guidedInputValues, setGuidedInputValues] = useState<
+    Record<string, string | number | boolean>
+  >({});
   const [chatStatusExpanded, setChatStatusExpanded] = useState(false);
   const [activityTick, setActivityTick] = useState(Date.now());
+  const [messageTimeTick, setMessageTimeTick] = useState(Date.now());
   const messageListRef = useRef<HTMLDivElement>(null);
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const sessionIdRef = useRef<string | null>(sessionId);
   const activeStatusSessionIdRef = useRef<string | null>(null);
   const activeChatRequestIdRef = useRef<string | null>(null);
+  const pendingInputRequestRef = useRef<SkillUserInputRequest | null>(null);
   const activeGoalRef = useRef<ChatSessionGoalSummary | null>(null);
+  const workspaceMenuRef = useRef<HTMLDivElement>(null);
+  const measureWorkspaceMenuPosition = useCallback(() => {
+    const trigger = workspaceMenuRef.current;
+    if (!trigger) {
+      return;
+    }
+
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const viewportMargin = 16;
+    const triggerRect = trigger.getBoundingClientRect();
+    const availableWidth = Math.max(240, viewportWidth - viewportMargin * 2);
+    const width = clampNumber(
+      Math.max(triggerRect.width, Math.min(420, availableWidth)),
+      Math.min(280, availableWidth),
+      availableWidth,
+    );
+    const left = clampNumber(
+      triggerRect.left,
+      viewportMargin,
+      Math.max(viewportMargin, viewportWidth - width - viewportMargin),
+    );
+    const spaceAbove = triggerRect.top - viewportMargin;
+    const spaceBelow = viewportHeight - triggerRect.bottom - viewportMargin;
+    const placement = spaceBelow >= 300 || spaceBelow > spaceAbove
+      ? "below"
+      : "above";
+    const availableHeight =
+      (placement === "below" ? spaceBelow : spaceAbove) - 8;
+    const minimumHeight = Math.min(
+      180,
+      Math.max(120, viewportHeight - viewportMargin * 2),
+    );
+    const maximumHeight = Math.max(
+      minimumHeight,
+      Math.min(440, viewportHeight - viewportMargin * 2),
+    );
+    const maxHeight = clampNumber(availableHeight, minimumHeight, maximumHeight);
+    const rawTop =
+      placement === "below"
+        ? triggerRect.bottom + 8
+        : triggerRect.top - maxHeight - 8;
+    const top = clampNumber(
+      rawTop,
+      viewportMargin,
+      Math.max(viewportMargin, viewportHeight - maxHeight - viewportMargin),
+    );
+
+    setWorkspaceMenuPosition({
+      top,
+      left,
+      width,
+      maxHeight,
+      placement,
+    });
+  }, []);
 
   // Auto-scroll to latest message
   useEffect(() => {
     if (messageListRef.current) {
       messageListRef.current.scrollTop = messageListRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [
+    chatStreamState.thinkingText,
+    chatStreamState.toolCallPreviews.length,
+    goalRunEvents.length,
+    messages,
+    pendingInputRequest,
+    pendingToolApproval,
+  ]);
 
   useEffect(() => {
     sessionIdRef.current = sessionId;
@@ -230,17 +361,81 @@ export function AgentChatPanel({
   }, [onActiveSessionChange, sessionId]);
 
   useEffect(() => {
+    const previousInputRequest = pendingInputRequestRef.current;
+    pendingInputRequestRef.current = pendingInputRequest;
+    setGuidedInputValues((current) => {
+      if (!pendingInputRequest) {
+        return {};
+      }
+      return {
+        ...createGuidedInputInitialValues(pendingInputRequest.fields),
+        ...(previousInputRequest?.id === pendingInputRequest.id ? current : {}),
+      };
+    });
+  }, [pendingInputRequest]);
+
+  useEffect(() => {
     setChatStatusExpanded(false);
   }, [status.message]);
 
   useEffect(() => {
+    if (!workspaceMenuOpen) {
+      return;
+    }
+
+    function handleDocumentMouseDown(event: MouseEvent) {
+      const target = event.target;
+      if (
+        target instanceof Node &&
+        workspaceMenuRef.current?.contains(target)
+      ) {
+        return;
+      }
+
+      setWorkspaceMenuOpen(false);
+    }
+
+    document.addEventListener("mousedown", handleDocumentMouseDown);
+    return () => {
+      document.removeEventListener("mousedown", handleDocumentMouseDown);
+    };
+  }, [workspaceMenuOpen]);
+
+  useLayoutEffect(() => {
+    if (!workspaceMenuOpen) {
+      return;
+    }
+
+    measureWorkspaceMenuPosition();
+    window.addEventListener("resize", measureWorkspaceMenuPosition);
+    window.addEventListener("scroll", measureWorkspaceMenuPosition, true);
+    window.visualViewport?.addEventListener(
+      "resize",
+      measureWorkspaceMenuPosition,
+    );
+    return () => {
+      window.removeEventListener("resize", measureWorkspaceMenuPosition);
+      window.removeEventListener("scroll", measureWorkspaceMenuPosition, true);
+      window.visualViewport?.removeEventListener(
+        "resize",
+        measureWorkspaceMenuPosition,
+      );
+    };
+  }, [measureWorkspaceMenuPosition, workspaceMenuOpen]);
+
+  useEffect(() => {
+    resetActiveChatRefs();
     setSessionId(null);
-    setMessages(initialMessages);
+    setChatStreamState(createChatStreamState(initialMessages));
     setStatus({ kind: "ready", message: "会话已就绪" });
     setWorkPhase("idle");
     setTaskActivity(idleTaskActivity);
     setTaskProcessEvents([]);
     setGoalRunEvents([]);
+    setSelectedSkillName(null);
+    setSelectedWorkspaceId(null);
+    setWorkspaceMenuOpen(false);
+    setWorkspaceSearch("");
     setActiveGoalDetail(null);
     setGoalDrawerOpen(false);
   }, [newChatRequestKey]);
@@ -255,6 +450,7 @@ export function AgentChatPanel({
       return;
     }
 
+    resetActiveChatRefs();
     setSessionId(requestedSessionId);
     setMessages(initialMessages);
   }, [requestedSessionId, sessionId]);
@@ -364,6 +560,71 @@ export function AgentChatPanel({
       return;
     }
 
+    return window.buildingAgent.onChatStreamEvent((event) => {
+      if (event.type === "status") {
+        return;
+      }
+
+      const activeStream = {
+        activeSessionId: activeStatusSessionIdRef.current ?? sessionIdRef.current,
+        activeRequestId:
+          activeChatRequestIdRef.current ??
+          pendingInputRequestRef.current?.requestId ??
+          null,
+      };
+      if (!chatStreamEventMatchesActive(event, activeStream)) {
+        return;
+      }
+
+      activeStatusSessionIdRef.current = event.sessionId;
+      setSessionId((current) => current ?? event.sessionId);
+      setChatStreamState((current) =>
+        applyChatStreamEvent(current, event, activeStream),
+      );
+
+      if (
+        event.type === "answer_delta" ||
+        event.type === "thinking_delta" ||
+        event.type === "tool_call_preview"
+      ) {
+        setStatus({ kind: "working", message: "正在输出回复" });
+        setWorkPhase("model");
+        setTaskActivity(
+          createTaskActivity({
+            kind: "working",
+            title: "正在输出回复",
+            detail: "正在输出回复",
+          }),
+        );
+      }
+
+      if (event.type === "waiting_for_input") {
+        setStatus({
+          kind: "paused",
+          message: event.inputRequest.reason || "等待技能输入",
+        });
+        setWorkPhase("paused");
+        setTaskActivity(
+          createTaskActivity({
+            kind: "paused",
+            title: "等待技能输入",
+            detail: event.inputRequest.reason || "等待技能输入",
+          }),
+        );
+        setActiveChatRequest(null);
+      }
+
+      if (event.type === "failed" || event.type === "canceled") {
+        setActiveChatRequest(null);
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!window.buildingAgent) {
+      return;
+    }
+
     return window.buildingAgent.onChatTaskStatusEvent((event) => {
       const activeSessionId = activeStatusSessionIdRef.current;
       const currentSessionId = sessionIdRef.current;
@@ -379,12 +640,16 @@ export function AgentChatPanel({
       setTaskProcessEvents((current) => [...current, event]);
       setTaskActivity(buildTaskActivityFromStatusEvent(event));
       setStatus({
-        kind: getChatStatusKindFromEvent(event),
+        kind: getChatStatusKindFromStatusEvent(event),
         message: event.message,
       });
-      setWorkPhase(getWorkPhaseFromStatusEvent(event));
+      setWorkPhase(getWorkPhaseFromChatStatusEvent(event));
+      if (event.state === "waiting_for_input" && event.inputRequest) {
+        setPendingInputRequest(event.inputRequest);
+      }
       if (
         event.state === "paused" ||
+        event.state === "waiting_for_input" ||
         event.state === "canceled" ||
         event.state === "completed" ||
         event.state === "failed"
@@ -410,6 +675,21 @@ export function AgentChatPanel({
   }, [taskActivity.kind, taskActivity.startedAt]);
 
   useEffect(() => {
+    if (messages.length === 0) {
+      return;
+    }
+
+    setMessageTimeTick(Date.now());
+    const intervalId = window.setInterval(() => {
+      setMessageTimeTick(Date.now());
+    }, 30_000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [messages.length]);
+
+  useEffect(() => {
     if (!window.buildingAgent) {
       const snapshot = loadPreviewValidationSnapshot(window.localStorage);
       if (snapshot) {
@@ -428,6 +708,7 @@ export function AgentChatPanel({
       window.buildingAgent.listAgentRuns(),
       window.buildingAgent.listMemories({ limit: 6 }),
       window.buildingAgent.listSkills(),
+      window.buildingAgent.listAgentWorkspaces(),
       window.buildingAgent.listChatSessions(),
       window.buildingAgent.loadAgentValidation(),
     ])
@@ -438,6 +719,7 @@ export function AgentChatPanel({
           loadedRuns,
           loadedMemories,
           skills,
+          loadedWorkspaces,
           loadedSessions,
           validation,
         ]) => {
@@ -446,14 +728,14 @@ export function AgentChatPanel({
         setRuns(loadedRuns);
         setMemories(loadedMemories);
         setSkillCount(skills.skills.length);
+        setSkillOptions(skills.skills.map(toSkillMentionCandidate));
+        setWorkspaces(loadedWorkspaces);
         if (validation.ok && validation.snapshot) {
           setLastValidationSnapshot(validation.snapshot);
         }
-        if (loadedSessions.length) {
-          const nextSessions = loadedSessions.map(toSessionRailItem);
-          setSessions(nextSessions);
-          onChatSessionsChange?.(nextSessions);
-        }
+        const nextSessions = loadedSessions.map(toSessionRailItem);
+        setSessions(nextSessions);
+        onChatSessionsChange?.(nextSessions);
         setStatus({
           kind: "ready",
           message: settings.hasApiKey ? "模型已配置" : "还需要配置模型密钥",
@@ -473,16 +755,31 @@ export function AgentChatPanel({
       return;
     }
 
+    resetActiveChatRefs();
     const loadedSession = await window.buildingAgent.getChatSession(sessionIdToLoad);
     if (!loadedSession) {
       return;
     }
 
     setSessionId(loadedSession.id);
-    setMessages(loadedSession.messages.map(toChatMessage));
-    setWorkPhase("idle");
-    setTaskActivity(idleTaskActivity);
-    setTaskProcessEvents([]);
+    setSelectedWorkspaceId(loadedSession.workspaceId ?? null);
+    const restoredActivity = restoreChatTaskActivity(loadedSession.activity);
+    setChatStreamState({
+      ...createChatStreamState(loadedSession.messages.map(toChatMessage)),
+      pendingInputRequest: restoredActivity?.pendingInputRequest ?? null,
+    });
+    if (restoredActivity) {
+      setWorkPhase(restoredActivity.workPhase);
+      setStatus(restoredActivity.status);
+      setTaskActivity(restoredActivity.taskActivity);
+      setTaskProcessEvents(restoredActivity.taskProcessEvents);
+      activeStatusSessionIdRef.current = loadedSession.id;
+    } else {
+      setWorkPhase("idle");
+      setTaskActivity(idleTaskActivity);
+      setTaskProcessEvents([]);
+      activeStatusSessionIdRef.current = null;
+    }
     setGoalRunEvents([]);
     if (loadedSession.activeGoalId) {
       setActiveGoalDetail(await window.buildingAgent.getGoal(loadedSession.activeGoalId));
@@ -499,13 +796,16 @@ export function AgentChatPanel({
     }
 
     const loadedSessions = await window.buildingAgent.listChatSessions();
-    if (loadedSessions.length) {
-      const nextSessions = loadedSessions.map(toSessionRailItem);
-      setSessions(nextSessions);
-      onChatSessionsChange?.(nextSessions);
-    }
+    const nextSessions = loadedSessions.map(toSessionRailItem);
+    setSessions(nextSessions);
+    onChatSessionsChange?.(nextSessions);
     if (nextActiveSessionId) {
       setSessionId(nextActiveSessionId);
+    } else if (
+      sessionIdRef.current &&
+      !nextSessions.some((session) => session.id === sessionIdRef.current)
+    ) {
+      setSessionId(null);
     }
   }
 
@@ -551,7 +851,7 @@ export function AgentChatPanel({
 
   const latestRun = runs[0];
   const activeSession = sessions.find((session) => session.id === sessionId) ?? null;
-  const chatTitle = activeSession?.title ?? "新会话";
+  const chatTitle = activeChatSessionTitle ?? activeSession?.title ?? "新会话";
   const chatStatusIsLong = status.message.length > 64;
   const chatStateClassName = [
     "chat-state",
@@ -578,8 +878,70 @@ export function AgentChatPanel({
       activeChatRequestId !== null);
   const canInterruptCurrentWork =
     canCancelChatTask || Boolean(activeGoal?.status === "executing");
+  const workspaceActionsDisabled =
+    !window.buildingAgent ||
+    Boolean(workspaceActionPending) ||
+    status.kind === "working";
   const composerCommandMenuVisible =
     commandMenuOpen || shouldShowComposerCommandMenu(draft);
+  const activeSkillMention = useMemo(
+    () => extractActiveSkillMention(draft, draftCursor),
+    [draft, draftCursor],
+  );
+  const skillMentionMatches = useMemo(
+    () =>
+      activeSkillMention
+        ? matchSkillMentionCandidates(skillOptions, activeSkillMention.query)
+        : [],
+    [activeSkillMention, skillOptions],
+  );
+  const selectedSkill = selectedSkillName
+    ? skillOptions.find((skill) => skill.name === selectedSkillName) ?? null
+    : null;
+  const selectedWorkspace = selectedWorkspaceId
+    ? workspaces.find((workspace) => workspace.id === selectedWorkspaceId) ?? null
+    : null;
+  const activeWorkspaceLabel =
+    selectedWorkspace?.name ??
+    activeSession?.workspaceSummary?.name ??
+    "默认工作区";
+  const activeWorkspacePath =
+    selectedWorkspace?.rootPath ?? activeSession?.workspaceSummary?.rootPath ?? "";
+  const visibleWorkspaces = useMemo(() => {
+    const query = workspaceSearch.trim().toLowerCase();
+    if (!query) {
+      return workspaces;
+    }
+
+    return workspaces.filter((workspace) =>
+      [workspace.name, workspace.rootPath, workspace.kind]
+        .join(" ")
+        .toLowerCase()
+        .includes(query),
+    );
+  }, [workspaceSearch, workspaces]);
+  const workspaceMenuStyle = {
+    "--workspace-menu-top": `${workspaceMenuPosition.top}px`,
+    "--workspace-menu-left": `${workspaceMenuPosition.left}px`,
+    "--workspace-menu-width": `${workspaceMenuPosition.width}px`,
+    "--workspace-menu-max-height": `${workspaceMenuPosition.maxHeight}px`,
+  } as CSSProperties;
+  const hasRuntimeSurfaces =
+    Boolean(chatStreamState.thinkingText) ||
+    chatStreamState.toolCallPreviews.length > 0 ||
+    Boolean(activeGoal) ||
+    goalRunEvents.length > 0 ||
+    (Boolean(pendingToolApproval) && !autoApprovalEnabled) ||
+    Boolean(pendingInputRequest);
+  const latestToolCallPreview =
+    chatStreamState.toolCallPreviews.at(-1) ?? null;
+  const skillMentionMenuVisible =
+    Boolean(activeSkillMention) &&
+    skillMentionMatches.length > 0 &&
+    !(
+      selectedSkillName &&
+      activeSkillMention?.query.toLowerCase() === selectedSkillName
+    );
 
   const contextCards = useMemo(
     () => [
@@ -617,9 +979,7 @@ export function AgentChatPanel({
     memories,
     activeGoal,
   });
-  const shouldShowActivityCard =
-    taskActivity.kind !== "idle" &&
-    (taskActivity.kind !== "done" || Boolean(activeGoal));
+  const shouldShowActivityCard = taskActivity.kind !== "idle";
   const readinessChecklist = useMemo(
     () =>
       buildAgentReadinessChecklist({
@@ -657,17 +1017,132 @@ export function AgentChatPanel({
     return {
       ...message,
       id: `${message.role}-${Date.now()}-${index}`,
-      createdAt: "刚刚",
+      createdAt: new Date().toISOString(),
     };
+  }
+
+  function setMessages(
+    updater: ChatMessage[] | ((current: ChatMessage[]) => ChatMessage[]),
+  ) {
+    setChatStreamState((current) => ({
+      ...current,
+      messages:
+        typeof updater === "function" ? updater(current.messages) : updater,
+    }));
+  }
+
+  function setPendingInputRequest(request: SkillUserInputRequest | null) {
+    setChatStreamState((current) => ({
+      ...current,
+      pendingInputRequest: request,
+    }));
+  }
+
+  function resetStreamProcessState() {
+    setChatStreamState((current) => ({
+      ...current,
+      thinkingText: "",
+      toolCallPreviews: [],
+      pendingInputRequest: null,
+    }));
   }
 
   function appendMessage(message: Omit<ChatMessage, "id" | "createdAt">) {
     setMessages((current) => [...current, createMessage(message, current.length)]);
   }
 
+  function resetActiveChatRefs() {
+    activeStatusSessionIdRef.current = null;
+    activeChatRequestIdRef.current = null;
+    pendingInputRequestRef.current = null;
+    setActiveChatRequestId(null);
+  }
+
   function setActiveChatRequest(requestId: string | null) {
     activeChatRequestIdRef.current = requestId;
     setActiveChatRequestId(requestId);
+  }
+
+  async function refreshWorkspaces(nextSelectedWorkspaceId?: string | null) {
+    if (!window.buildingAgent) {
+      return;
+    }
+
+    const loadedWorkspaces = await window.buildingAgent.listAgentWorkspaces();
+    setWorkspaces(loadedWorkspaces);
+    if (nextSelectedWorkspaceId !== undefined) {
+      setSelectedWorkspaceId(nextSelectedWorkspaceId);
+    }
+  }
+
+  function selectWorkspace(workspace: AgentWorkspace) {
+    setWorkspaces((current) => [
+      workspace,
+      ...current.filter((item) => item.id !== workspace.id),
+    ]);
+    setSelectedWorkspaceId(workspace.id);
+    setWorkspaceMenuOpen(false);
+    setWorkspaceSearch("");
+  }
+
+  function handleSelectDefaultWorkspace() {
+    setSelectedWorkspaceId(null);
+    setWorkspaceMenuOpen(false);
+    setWorkspaceSearch("");
+  }
+
+  async function handleOpenProjectWorkspace() {
+    if (!window.buildingAgent || workspaceActionsDisabled) {
+      return;
+    }
+
+    setWorkspaceMenuOpen(false);
+    setWorkspaceActionPending("open");
+    try {
+      const workspace = await window.buildingAgent.openProjectAgentWorkspace();
+      if (!workspace) {
+        setStatus({ kind: "ready", message: "已取消打开工作区" });
+        return;
+      }
+
+      selectWorkspace(workspace);
+      setStatus({ kind: "ready", message: `已打开工作区：${workspace.name}` });
+      void refreshWorkspaces(workspace.id);
+    } catch (error) {
+      setStatus({
+        kind: "error",
+        message:
+          error instanceof Error ? error.message : "打开工作区失败，请稍后重试。",
+      });
+    } finally {
+      setWorkspaceActionPending(null);
+    }
+  }
+
+  async function handleCreateWorkspace() {
+    if (!window.buildingAgent || workspaceActionsDisabled) {
+      return;
+    }
+
+    setWorkspaceMenuOpen(false);
+    setWorkspaceActionPending("create");
+    try {
+      const workspace = await window.buildingAgent.createTemporaryAgentWorkspace({
+        name: "新建工作区",
+        cleanup: "keep",
+      });
+      selectWorkspace(workspace);
+      setStatus({ kind: "ready", message: `已新建工作区：${workspace.name}` });
+      void refreshWorkspaces(workspace.id);
+    } catch (error) {
+      setStatus({
+        kind: "error",
+        message:
+          error instanceof Error ? error.message : "新建工作区失败，请稍后重试。",
+      });
+    } finally {
+      setWorkspaceActionPending(null);
+    }
   }
 
   function handleOpenCommandMenu() {
@@ -691,8 +1166,31 @@ export function AgentChatPanel({
 
   function handlePickPrompt(prompt: string) {
     setDraft(prompt);
+    setDraftCursor(prompt.length);
+    setSelectedSkillName(null);
     window.requestAnimationFrame(() => {
       messageInputRef.current?.focus();
+    });
+  }
+
+  function updateDraftCursor() {
+    const input = messageInputRef.current;
+    if (input) {
+      setDraftCursor(input.selectionStart ?? input.value.length);
+    }
+  }
+
+  function handleSelectSkillMention(skill: SkillMentionCandidate) {
+    const mention = activeSkillMention;
+    const nextDraft = mention
+      ? replaceActiveSkillMention(draft, mention, skill.name)
+      : `${draft.trimEnd()} @${skill.name} `;
+    setDraft(nextDraft);
+    setDraftCursor(nextDraft.length);
+    setSelectedSkillName(skill.name);
+    window.requestAnimationFrame(() => {
+      messageInputRef.current?.focus();
+      messageInputRef.current?.setSelectionRange(nextDraft.length, nextDraft.length);
     });
   }
 
@@ -851,6 +1349,63 @@ export function AgentChatPanel({
     }
   }
 
+  function applySuccessfulChatResult(
+    result: SuccessfulChatResult,
+    requestId: string,
+  ) {
+    setSessionId(result.sessionId);
+    if (result.executedRun) {
+      setRuns((currentRuns) => [result.executedRun!, ...currentRuns]);
+    }
+    if (result.createdTask) {
+      setTasks((currentTasks) => [result.createdTask!, ...currentTasks]);
+    }
+    if (result.activeGoal) {
+      void refreshActiveGoalDetail(result.activeGoal.id);
+    }
+    setSelectedSkillName(null);
+    const isPaused = result.agentStatus?.state === "paused";
+    const isGoalExecuting = result.activeGoal?.status === "executing";
+    setStatus({
+      kind: isGoalExecuting ? "working" : isPaused ? "paused" : "ready",
+      message: isGoalExecuting
+        ? "目标正在后台执行"
+        : isPaused
+        ? "等待你确认是否继续"
+        : result.createdTask
+          ? "任务已创建"
+          : result.executedRun
+            ? `任务已运行：${translateRunStatus(result.executedRun.status)}`
+            : result.relatedMemories.length
+              ? `已参考 ${result.relatedMemories.length} 条记忆`
+              : "模型已回复",
+    });
+    setWorkPhase(isGoalExecuting ? "tool" : isPaused ? "paused" : "done");
+    setTaskActivity(
+      isGoalExecuting && result.activeGoal
+        ? buildGoalTaskActivity({
+            status: result.activeGoal.status,
+            description: result.activeGoal.description,
+          })
+        : buildTaskActivityFromAgentStatus({
+            agentStatus: result.agentStatus,
+            relatedMemoryCount: result.relatedMemories.length,
+            fallbackDetail: isPaused ? "等待确认" : "回复已写入会话",
+          }),
+    );
+    activeStatusSessionIdRef.current =
+      isPaused || isGoalExecuting ? result.sessionId : null;
+    setChatStreamState((current) =>
+      finalizeChatStreamResult(current, {
+        requestId,
+        sessionId: result.sessionId,
+        reply: result.reply,
+        createdAt: new Date().toISOString(),
+      }),
+    );
+    void refreshSessions(result.sessionId);
+  }
+
   async function submitUserMessage(rawContent: string) {
     const content = rawContent.trim();
     if (!content) {
@@ -867,6 +1422,7 @@ export function AgentChatPanel({
     );
 
     setMessages((current) => [...current, userMessage]);
+    resetStreamProcessState();
     setDraft("");
     setWorkPhase("planning");
     activeStatusSessionIdRef.current = sessionId;
@@ -922,6 +1478,8 @@ export function AgentChatPanel({
         ...(sessionId ? { sessionId } : {}),
         requestId,
         message: content,
+        ...(selectedSkillName ? { selectedSkillName } : {}),
+        ...(selectedWorkspaceId ? { workspaceId: selectedWorkspaceId } : {}),
         history,
       })
       .catch((error) => ({
@@ -934,6 +1492,23 @@ export function AgentChatPanel({
     }
 
     if (!result.ok) {
+      if (isSkillInputRequiredMessage(result.message)) {
+        setStatus({
+          kind: "paused",
+          message:
+            pendingInputRequestRef.current?.reason || "等待技能输入",
+        });
+        setWorkPhase("paused");
+        setTaskActivity(
+          createTaskActivity({
+            kind: "paused",
+            title: "等待技能输入",
+            detail:
+              pendingInputRequestRef.current?.reason || "等待技能输入",
+          }),
+        );
+        return;
+      }
       activeStatusSessionIdRef.current = null;
       const wasCanceled = isCanceledMessage(result.message);
       setStatus({
@@ -957,58 +1532,96 @@ export function AgentChatPanel({
       return;
     }
 
-    setSessionId(result.sessionId);
-    if (result.executedRun) {
-      setRuns((currentRuns) => [result.executedRun!, ...currentRuns]);
+    applySuccessfulChatResult(result, requestId);
+  }
+
+  async function handleSubmitGuidedSkillInput(
+    event: React.FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
+    if (!window.buildingAgent || !pendingInputRequest) {
+      return;
     }
-    if (result.createdTask) {
-      setTasks((currentTasks) => [result.createdTask!, ...currentTasks]);
-    }
-    if (result.activeGoal) {
-      void refreshActiveGoalDetail(result.activeGoal.id);
-    }
-    const isPaused = result.agentStatus?.state === "paused";
-    const isGoalExecuting = result.activeGoal?.status === "executing";
-    setStatus({
-      kind: isGoalExecuting ? "working" : isPaused ? "paused" : "ready",
-      message: isGoalExecuting
-        ? "目标正在后台执行"
-        : isPaused
-        ? "等待你确认是否继续"
-        : result.createdTask
-          ? "任务已创建"
-          : result.executedRun
-            ? `任务已运行：${translateRunStatus(result.executedRun.status)}`
-            : result.relatedMemories.length
-              ? `已参考 ${result.relatedMemories.length} 条记忆`
-              : "模型已回复",
-    });
-    setWorkPhase(isGoalExecuting ? "tool" : isPaused ? "paused" : "done");
+
+    const inputRequest = pendingInputRequest;
+    const requestId = inputRequest.requestId;
+    setStatus({ kind: "working", message: "正在继续技能" });
+    setWorkPhase("model");
     setTaskActivity(
-      isGoalExecuting && result.activeGoal
-        ? buildGoalTaskActivity({
-            status: result.activeGoal.status,
-            description: result.activeGoal.description,
-          })
-        : buildTaskActivityFromAgentStatus({
-            agentStatus: result.agentStatus,
-            relatedMemoryCount: result.relatedMemories.length,
-            fallbackDetail: isPaused ? "等待确认" : "回复已写入会话",
-          }),
+      createTaskActivity({
+        kind: "working",
+        title: "正在继续技能",
+        detail: inputRequest.skillName,
+      }),
     );
-    activeStatusSessionIdRef.current =
-      isPaused || isGoalExecuting ? result.sessionId : null;
-    appendMessage({
-      role: "assistant",
-      content: result.reply,
-    });
-    void refreshSessions(result.sessionId);
+    activeStatusSessionIdRef.current = inputRequest.sessionId;
+    setActiveChatRequest(requestId);
+
+    const result = await window.buildingAgent
+      .respondSkillInput({
+        inputRequestId: inputRequest.id,
+        values: buildSkillInputResponseValues(
+          inputRequest.fields,
+          guidedInputValues,
+        ),
+      })
+      .catch((error) => ({
+        ok: false as const,
+        message:
+          error instanceof Error ? error.message : "技能输入提交失败，请稍后重试。",
+      }));
+
+    if (activeChatRequestIdRef.current === requestId) {
+      setActiveChatRequest(null);
+    }
+
+    if (!result.ok) {
+      if (isSkillInputRequiredMessage(result.message)) {
+        setStatus({
+          kind: "paused",
+          message:
+            pendingInputRequestRef.current?.reason || "等待技能输入",
+        });
+        setWorkPhase("paused");
+        setTaskActivity(
+          createTaskActivity({
+            kind: "paused",
+            title: "等待技能输入",
+            detail:
+              pendingInputRequestRef.current?.reason || "等待技能输入",
+          }),
+        );
+        return;
+      }
+
+      setStatus({ kind: "error", message: result.message });
+      setWorkPhase("error");
+      setTaskActivity(
+        createTaskActivity({
+          kind: "error",
+          title: "技能输入失败",
+          detail: result.message,
+        }),
+      );
+      appendMessage({
+        role: "assistant",
+        content: result.message,
+      });
+      return;
+    }
+
+    setPendingInputRequest(null);
+    applySuccessfulChatResult(result, requestId);
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (composerCommandMenuVisible) {
       handleSelectComposerCommand("goal");
+      return;
+    }
+    if (skillMentionMenuVisible && skillMentionMatches[0]) {
+      handleSelectSkillMention(skillMentionMatches[0]);
       return;
     }
     await submitUserMessage(draft);
@@ -1320,6 +1933,7 @@ export function AgentChatPanel({
       data-testid="agent-chat-panel"
     >
       <section className="chat-workspace" aria-label="会话窗口">
+        <div className="chat-scroll-region" ref={messageListRef}>
         <div className="chat-hero">
           <div className="chat-hero-main">
             <h2 title={chatTitle}>{chatTitle}</h2>
@@ -1379,106 +1993,297 @@ export function AgentChatPanel({
             onPickPrompt={handlePickPrompt}
           />
         ) : (
-          <div className="message-list" aria-label="消息列表" ref={messageListRef}>
+          <div className="message-list" aria-label="消息列表">
             {messages.map((message) => (
               <article
-                className={`chat-message is-${message.role}`}
+                className={`chat-message is-${message.role}${
+                  message.isStreaming ? " is-streaming" : ""
+                }`}
                 key={message.id}
               >
-                <span>{message.role === "assistant" ? "智能体" : "你"}</span>
+                <header className="chat-message-meta">
+                  <span>{message.role === "assistant" ? "智能体" : "你"}</span>
+                  <time dateTime={message.createdAt}>
+                    {formatChatMessageTime({
+                      role: message.role,
+                      createdAt: message.createdAt,
+                      now: new Date(messageTimeTick),
+                    })}
+                  </time>
+                </header>
                 <MarkdownMessage content={message.content} />
-                <small>{message.createdAt}</small>
               </article>
             ))}
           </div>
         )}
 
-        {activeGoal ? (
-          <GoalStatusStrip
-            goal={activeGoal}
-            detail={activeGoalDetail}
-            onViewDetail={handleViewGoalProgress}
-            {...(activeGoal.status === "planning" ||
-              activeGoal.status === "canceled"
-              ? { onStart: handleStartGoal }
-              : {})}
-            {...(activeGoal.status === "executing"
-              ? { onPause: () => void submitUserMessage("暂停这个目标") }
-              : {})}
-            onResolveReview={handleResolveGoalReview}
-            onReplan={handleReplanGoal}
-            onRetry={handleRetryGoal}
-            onCancel={handleCancelGoal}
-          />
-        ) : null}
-
-        {activeGoal && goalRunEvents.length > 0 ? (
-          <details
-            className="goal-run-process"
-            open={activeGoal.status === "executing"}
-          >
-            <summary>
-              <span>里程碑运行过程</span>
-              <small>{goalRunEvents.length} 个事件</small>
-            </summary>
-            <ol className="task-process-list" aria-label="里程碑运行过程">
-              {goalRunEvents.map((event, index) => (
-                <li
-                  key={`${event.createdAt}-${index}`}
-                  className={event.phase === "reflecting" ? "is-reasoning" : ""}
-                >
-                  <time>
-                    {new Date(event.createdAt).toLocaleTimeString("zh-CN", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      second: "2-digit",
-                    })}
-                  </time>
-                  <strong>{getGoalRunEventLabel(event)}</strong>
-                  <span>{event.message}</span>
-                </li>
-              ))}
-            </ol>
-            {toolApprovalEvents.length > 0 ? (
-              <ol className="task-process-list" aria-label="工具授权监控">
-                {toolApprovalEvents.map((event) => (
-                  <li
-                    key={`${event.id}-${event.createdAt}`}
-                    className={
-                      event.risk.level === "critical" ? "is-critical-risk" : ""
-                    }
-                  >
-                    <time>
-                      {new Date(event.createdAt).toLocaleTimeString("zh-CN", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                        second: "2-digit",
-                      })}
-                    </time>
-                    <strong>{event.automatic ? "自动授权" : "授权处理"}</strong>
-                    <span>
-                      {event.approved ? "已同意" : "已拒绝"} {event.toolName} ·{" "}
-                      {event.risk.reason}
-                    </span>
-                  </li>
-                ))}
-              </ol>
+        {hasRuntimeSurfaces ? (
+          <div className="runtime-surface-stack" aria-label="执行过程">
+            {chatStreamState.thinkingText ? (
+              <RuntimeTextDisclosure
+                className="thinking-process-block"
+                label="思考"
+                text={chatStreamState.thinkingText}
+              />
             ) : null}
-          </details>
-        ) : null}
 
-        {pendingToolApproval && !autoApprovalEnabled ? (
-          <ToolApprovalPanel
-            request={pendingToolApproval}
-            onResolve={(approved) => {
-              void handleResolveToolApproval(approved);
-            }}
-          />
+            {chatStreamState.toolCallPreviews.length > 0 ? (
+              <ToolCallPreviewDisclosure
+                latestToolCallPreview={latestToolCallPreview}
+                previews={chatStreamState.toolCallPreviews}
+              />
+            ) : null}
+
+            {activeGoal ? (
+              <GoalStatusStrip
+                goal={activeGoal}
+                detail={activeGoalDetail}
+                onViewDetail={handleViewGoalProgress}
+                {...(activeGoal.status === "planning" ||
+                  activeGoal.status === "canceled"
+                  ? { onStart: handleStartGoal }
+                  : {})}
+                {...(activeGoal.status === "executing"
+                  ? { onPause: () => void submitUserMessage("暂停这个目标") }
+                  : {})}
+                onResolveReview={handleResolveGoalReview}
+                onReplan={handleReplanGoal}
+                onRetry={handleRetryGoal}
+                onCancel={handleCancelGoal}
+              />
+            ) : null}
+
+            {activeGoal && goalRunEvents.length > 0 ? (
+              <details
+                className="goal-run-process"
+                open={activeGoal.status === "executing"}
+              >
+                <summary>
+                  <span>里程碑运行过程</span>
+                  <small>{goalRunEvents.length} 个事件</small>
+                </summary>
+                <ol className="task-process-list" aria-label="里程碑运行过程">
+                  {goalRunEvents.map((event, index) => (
+                    <li
+                      key={`${event.createdAt}-${index}`}
+                      className={event.phase === "reflecting" ? "is-reasoning" : ""}
+                    >
+                      <time>
+                        {new Date(event.createdAt).toLocaleTimeString("zh-CN", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          second: "2-digit",
+                        })}
+                      </time>
+                      <strong>{getGoalRunEventLabel(event)}</strong>
+                      <span>{event.message}</span>
+                    </li>
+                  ))}
+                </ol>
+                {toolApprovalEvents.length > 0 ? (
+                  <ol className="task-process-list" aria-label="工具授权监控">
+                    {toolApprovalEvents.map((event) => (
+                      <li
+                        key={`${event.id}-${event.createdAt}`}
+                        className={
+                          event.risk.level === "critical" ? "is-critical-risk" : ""
+                        }
+                      >
+                        <time>
+                          {new Date(event.createdAt).toLocaleTimeString("zh-CN", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            second: "2-digit",
+                          })}
+                        </time>
+                        <strong>{event.automatic ? "自动授权" : "授权处理"}</strong>
+                        <span>
+                          {event.approved ? "已同意" : "已拒绝"} {event.toolName} ·{" "}
+                          {event.risk.reason}
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                ) : null}
+              </details>
+            ) : null}
+
+            {pendingToolApproval && !autoApprovalEnabled ? (
+              <ToolApprovalPanel
+                request={pendingToolApproval}
+                onResolve={(approved) => {
+                  void handleResolveToolApproval(approved);
+                }}
+              />
+            ) : null}
+
+            {pendingInputRequest ? (
+              <GuidedSkillInputForm
+                inputRequest={pendingInputRequest}
+                values={guidedInputValues}
+                onChange={(name, value) =>
+                  setGuidedInputValues((current) => ({
+                    ...current,
+                    [name]: value,
+                  }))
+                }
+                onSubmit={(event) => {
+                  void handleSubmitGuidedSkillInput(event);
+                }}
+              />
+            ) : null}
+          </div>
         ) : null}
+        </div>
 
         <form className="composer" onSubmit={handleSubmit}>
           <div className="composer-inner">
             <div className="composer-input-shell">
+              <div className="composer-context-row" aria-label="会话上下文">
+                <div className="workspace-picker" ref={workspaceMenuRef}>
+                  <button
+                    aria-expanded={workspaceMenuOpen}
+                    aria-haspopup="menu"
+                    aria-label="选择工作区"
+                    className="workspace-picker-trigger"
+                    disabled={status.kind === "working"}
+                    onClick={() => setWorkspaceMenuOpen((open) => !open)}
+                    type="button"
+                  >
+                    <Icon name="folder" className="workspace-picker-icon" />
+                    <span>工作区</span>
+                    <strong>{activeWorkspaceLabel}</strong>
+                    <Icon
+                      name={workspaceMenuOpen ? "collapse" : "expand"}
+                      className="workspace-picker-chevron"
+                    />
+                  </button>
+                  {workspaceMenuOpen ? (
+                    <div
+                      aria-label="工作区菜单"
+                      className="workspace-menu"
+                      data-placement={workspaceMenuPosition.placement}
+                      role="menu"
+                      style={workspaceMenuStyle}
+                    >
+                      <label className="workspace-menu-search">
+                        <span>搜索项目</span>
+                        <input
+                          autoFocus
+                          placeholder="搜索项目"
+                          value={workspaceSearch}
+                          onChange={(event) =>
+                            setWorkspaceSearch(event.currentTarget.value)
+                          }
+                        />
+                      </label>
+                      <div className="workspace-menu-section">
+                        <span>历史工作区</span>
+                        <button
+                          className="workspace-menu-item"
+                          onClick={handleSelectDefaultWorkspace}
+                          role="menuitem"
+                          type="button"
+                        >
+                          <Icon
+                            name="folder"
+                            className="workspace-menu-item-icon"
+                          />
+                          <span>
+                            <strong>默认工作区</strong>
+                            <small>不指定项目目录</small>
+                          </span>
+                          {!selectedWorkspaceId ? (
+                            <Icon
+                              name="approval"
+                              className="workspace-menu-check"
+                            />
+                          ) : null}
+                        </button>
+                        {visibleWorkspaces.map((workspace) => (
+                          <button
+                            className="workspace-menu-item"
+                            key={workspace.id}
+                            onClick={() => selectWorkspace(workspace)}
+                            role="menuitem"
+                            type="button"
+                          >
+                            <Icon
+                              name="folder"
+                              className="workspace-menu-item-icon"
+                            />
+                            <span>
+                              <strong>{workspace.name}</strong>
+                              <small>{workspace.rootPath}</small>
+                            </span>
+                            {selectedWorkspaceId === workspace.id ? (
+                              <Icon
+                                name="approval"
+                                className="workspace-menu-check"
+                              />
+                            ) : null}
+                          </button>
+                        ))}
+                        {visibleWorkspaces.length === 0 ? (
+                          <p className="workspace-menu-empty">
+                            没有匹配的历史工作区
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="workspace-menu-actions">
+                        <button
+                          disabled={workspaceActionsDisabled}
+                          onClick={() => {
+                            void handleOpenProjectWorkspace();
+                          }}
+                          role="menuitem"
+                          type="button"
+                        >
+                          <Icon
+                            name="folder"
+                            className="workspace-menu-item-icon"
+                          />
+                          <span>
+                            <strong>
+                              {workspaceActionPending === "open"
+                                ? "打开中"
+                                : "打开已有目录"}
+                            </strong>
+                            <small>选择本地项目文件夹</small>
+                          </span>
+                        </button>
+                        <button
+                          disabled={workspaceActionsDisabled}
+                          onClick={() => {
+                            void handleCreateWorkspace();
+                          }}
+                          role="menuitem"
+                          type="button"
+                        >
+                          <Icon
+                            name="plus"
+                            className="workspace-menu-item-icon"
+                          />
+                          <span>
+                            <strong>
+                              {workspaceActionPending === "create"
+                                ? "新建中"
+                                : "新建工作区"}
+                            </strong>
+                            <small>创建新的本地临时空间</small>
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+                <span
+                  className="workspace-context-path"
+                  title={activeWorkspacePath || activeWorkspaceLabel}
+                >
+                  {activeWorkspacePath || activeWorkspaceLabel}
+                </span>
+              </div>
               {composerCommandMenuVisible ? (
                 <div
                   aria-label="命令菜单"
@@ -1507,18 +2312,66 @@ export function AgentChatPanel({
                   ))}
                 </div>
               ) : null}
+              {selectedSkill ? (
+                <div className="selected-skill-chip" aria-label="已选择技能">
+                  <span>@{selectedSkill.name}</span>
+                  <button
+                    type="button"
+                    aria-label={`取消选择技能 ${selectedSkill.name}`}
+                    onClick={() => setSelectedSkillName(null)}
+                  >
+                    <Icon name="close" size={14} />
+                  </button>
+                </div>
+              ) : null}
+              {skillMentionMenuVisible ? (
+                <div
+                  aria-label="选择技能"
+                  className="skill-mention-menu"
+                  role="listbox"
+                >
+                  {skillMentionMatches.map((skill) => (
+                    <button
+                      key={skill.name}
+                      type="button"
+                      role="option"
+                      onClick={() => handleSelectSkillMention(skill)}
+                      onMouseDown={(event) => event.preventDefault()}
+                    >
+                      <span>@{skill.name}</span>
+                      <div>
+                        <strong>{skill.displayName}</strong>
+                        <small>{skill.description}</small>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
               <textarea
                 data-testid="agent-message-input"
                 id="agent-message"
                 ref={messageInputRef}
                 value={draft}
                 onChange={(event) => {
-                  setDraft(event.currentTarget.value);
+                  const nextDraft = event.currentTarget.value;
+                  setDraft(nextDraft);
+                  setDraftCursor(event.currentTarget.selectionStart ?? nextDraft.length);
+                  if (
+                    selectedSkillName &&
+                    !nextDraft.includes(`@${selectedSkillName}`)
+                  ) {
+                    setSelectedSkillName(null);
+                  }
                   setCommandMenuOpen(false);
                 }}
+                onClick={updateDraftCursor}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
+                    if (skillMentionMenuVisible && skillMentionMatches[0]) {
+                      handleSelectSkillMention(skillMentionMatches[0]);
+                      return;
+                    }
                     if (composerCommandMenuVisible) {
                       handleSelectComposerCommand("goal");
                       return;
@@ -1535,6 +2388,7 @@ export function AgentChatPanel({
                     }
                   }
                 }}
+                onKeyUp={updateDraftCursor}
                 placeholder={
                   activeGoal?.status === "executing"
                     ? "继续你的任务…"
@@ -1566,7 +2420,7 @@ export function AgentChatPanel({
                   title="打开命令菜单"
                   type="button"
                 >
-                  <span className="composer-icon composer-icon-command" aria-hidden="true" />
+                  <Icon name="command" className="composer-icon" />
                   <span className="sr-only">打开命令菜单</span>
                 </button>
                 <button
@@ -1580,7 +2434,7 @@ export function AgentChatPanel({
                   title="中断当前任务"
                   type="button"
                 >
-                  <span className="composer-icon composer-icon-stop" aria-hidden="true" />
+                  <Icon name="stop" className="composer-icon" />
                   <span className="sr-only">中断当前任务</span>
                 </button>
                 <button
@@ -1591,7 +2445,7 @@ export function AgentChatPanel({
                   title="发送消息"
                   type="submit"
                 >
-                  <span className="composer-icon composer-icon-send" aria-hidden="true" />
+                  <Icon name="send" className="composer-icon" />
                   <span className="sr-only">发送消息</span>
                 </button>
               </div>
@@ -2015,6 +2869,231 @@ function ToolApprovalPanel({
   );
 }
 
+function GuidedSkillInputForm({
+  inputRequest,
+  values,
+  onChange,
+  onSubmit,
+}: {
+  inputRequest: SkillUserInputRequest;
+  values: Record<string, string | number | boolean>;
+  onChange: (name: string, value: string | number | boolean) => void;
+  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <form
+      className="guided-skill-input-form"
+      aria-label="技能输入"
+      onSubmit={onSubmit}
+    >
+      <header>
+        <span>@{inputRequest.skillName}</span>
+        <strong>输入</strong>
+        <small>{inputRequest.reason}</small>
+      </header>
+      <div className="guided-skill-input-grid">
+        {inputRequest.fields.map((field) => (
+          <label key={field.name} className={`guided-skill-field is-${field.type}`}>
+            <span>
+              {field.label}
+              {field.required ? " *" : ""}
+            </span>
+            {renderGuidedSkillInputControl(field, values[field.name], (value) =>
+              onChange(field.name, value),
+            )}
+          </label>
+        ))}
+      </div>
+      <div className="guided-skill-input-actions">
+        <button type="submit">继续</button>
+      </div>
+    </form>
+  );
+}
+
+function renderGuidedSkillInputControl(
+  field: SkillInputField,
+  value: string | number | boolean | undefined,
+  onChange: (value: string | number | boolean) => void,
+) {
+  if (field.type === "boolean") {
+    return (
+      <input
+        checked={value === true}
+        onChange={(event) => onChange(event.currentTarget.checked)}
+        type="checkbox"
+      />
+    );
+  }
+
+  if (field.type === "choice") {
+    return (
+      <select
+        required={field.required}
+        value={typeof value === "string" ? value : ""}
+        onChange={(event) => onChange(event.currentTarget.value)}
+      >
+        <option value="">-</option>
+        {(field.choices ?? []).map((choice) => (
+          <option key={choice} value={choice}>
+            {choice}
+          </option>
+        ))}
+      </select>
+    );
+  }
+
+  if (field.type === "number") {
+    return (
+      <input
+        inputMode="decimal"
+        required={field.required}
+        type="number"
+        value={typeof value === "number" || typeof value === "string" ? value : ""}
+        onChange={(event) => onChange(event.currentTarget.value)}
+      />
+    );
+  }
+
+  if (field.type === "path") {
+    return (
+      <input
+        required={field.required}
+        type="text"
+        value={typeof value === "string" ? value : ""}
+        onChange={(event) => onChange(event.currentTarget.value)}
+      />
+    );
+  }
+
+  if (field.type === "string") {
+    return (
+      <input
+        required={field.required}
+        type="text"
+        value={typeof value === "string" ? value : ""}
+        onChange={(event) => onChange(event.currentTarget.value)}
+      />
+    );
+  }
+
+  return null;
+}
+
+function RuntimeTextDisclosure({
+  className,
+  label,
+  text,
+}: {
+  className: string;
+  label: string;
+  text: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const summary = getLatestRuntimeLine(text);
+
+  return (
+    <section
+      className={`${className} runtime-disclosure ${
+        expanded ? "is-expanded" : "is-collapsed"
+      }`}
+    >
+      <header>
+        <strong className="runtime-disclosure-label">{label}</strong>
+        <p className="runtime-disclosure-summary" title={summary}>
+          {summary}
+        </p>
+        <button
+          className="runtime-disclosure-toggle"
+          type="button"
+          aria-label={expanded ? `收起${label}` : `展开${label}`}
+          aria-expanded={expanded}
+          title={expanded ? "收起" : "展开"}
+          onClick={() => setExpanded((current) => !current)}
+        >
+          <Icon name={expanded ? "collapse" : "expand"} size={16} />
+          <span className="sr-only">{expanded ? "收起" : "展开"}</span>
+        </button>
+      </header>
+      {expanded ? (
+        <div className="runtime-disclosure-body">
+          <pre>{text}</pre>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function ToolCallPreviewDisclosure({
+  latestToolCallPreview,
+  previews,
+}: {
+  latestToolCallPreview: ChatToolCallPreview | null;
+  previews: ChatToolCallPreview[];
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const latestToolName = latestToolCallPreview?.toolName ?? "工具";
+  const latestToolArguments = latestToolCallPreview?.argumentsText ?? "{}";
+  const summary = `${latestToolName} · ${getLatestRuntimeLine(
+    latestToolArguments,
+  )}`;
+
+  return (
+    <section
+      className={`tool-call-preview-block runtime-disclosure ${
+        expanded ? "is-expanded" : "is-collapsed"
+      }`}
+      aria-label="工具预览"
+    >
+      <header>
+        <strong className="runtime-disclosure-label">工具</strong>
+        <p className="runtime-disclosure-summary" title={summary}>
+          {summary}
+        </p>
+        <button
+          className="runtime-disclosure-toggle"
+          type="button"
+          aria-label={expanded ? "收起工具" : "展开工具"}
+          aria-expanded={expanded}
+          title={expanded ? "收起" : "展开"}
+          onClick={() => setExpanded((current) => !current)}
+        >
+          <Icon name={expanded ? "collapse" : "expand"} size={16} />
+          <span className="sr-only">{expanded ? "收起" : "展开"}</span>
+        </button>
+      </header>
+      {expanded ? (
+        <div className="runtime-disclosure-body tool-call-preview-list">
+          {previews.map((preview) => (
+            <article className="tool-call-preview-item" key={preview.toolCallId}>
+              <header>
+                <strong>{preview.toolName ?? "工具"}</strong>
+                {typeof preview.index === "number" ? (
+                  <small>#{preview.index + 1}</small>
+                ) : null}
+              </header>
+              <pre>{preview.argumentsText || "{}"}</pre>
+            </article>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function getLatestRuntimeLine(text: string): string {
+  const latestLine =
+    text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .at(-1) ?? "";
+  const compactLine = latestLine || text.trim() || "{}";
+  return compactLine.length > 180
+    ? `${compactLine.slice(0, 177)}...`
+    : compactLine;
+}
+
 function TaskProcessItem({
   item,
 }: {
@@ -2026,14 +3105,22 @@ function TaskProcessItem({
     expanded || !shouldCollapse ? item.message : `${item.message.slice(0, 157)}...`;
 
   return (
-    <li className={item.label === "思考" ? "is-reasoning" : ""}>
+    <li
+      className={[
+        item.label === "思考" ? "is-reasoning" : "",
+        shouldCollapse ? "chat-message-collapse" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
       <time>{item.time}</time>
       <strong>{item.label}</strong>
       <span>{displayMessage}</span>
       {shouldCollapse && (
         <button
           type="button"
-          className="task-process-item-toggle"
+          aria-expanded={expanded}
+          className="task-process-item-toggle chat-message-collapse-button"
           onClick={() => setExpanded((value) => !value)}
         >
           {expanded ? "收起" : "展开"}
@@ -2094,68 +3181,6 @@ function buildTaskActivityFromAgentStatus(options: {
   });
 }
 
-function buildTaskActivityFromStatusEvent(
-  event: ChatTaskStatusEvent,
-): TaskActivityState {
-  const eventTime = parseEventTime(event.createdAt);
-  const startedAt = eventTime - event.elapsedMs;
-  const kind =
-    event.state === "paused"
-      ? "paused"
-      : event.state === "completed" || event.state === "canceled"
-        ? "done"
-        : event.state === "failed"
-          ? "error"
-          : "working";
-
-  return createTaskActivity({
-    kind,
-    title: getTaskActivityTitleFromStatusEvent(event),
-    detail: event.message,
-    now: eventTime,
-    startedAt,
-    lastEventAt: eventTime,
-    toolCallsExecuted: event.toolCallsExecuted,
-    maxTurns: event.maxTurns,
-  });
-}
-
-function getTaskActivityTitleFromStatusEvent(event: ChatTaskStatusEvent): string {
-  if (event.state === "started") return "正在启动任务";
-  if (event.state === "memory") return "正在检索记忆";
-  if (event.state === "model") return "正在调用模型";
-  if (event.state === "reasoning") return "模型思考";
-  if (event.state === "tool_call") return "正在执行工具";
-  if (event.state === "tool_result") return "工具结果已返回";
-  if (event.state === "paused") return "长任务等待确认";
-  if (event.state === "canceled") return "任务已中断";
-  if (event.state === "completed") return "本轮已完成";
-  return "执行遇到问题";
-}
-
-function getChatStatusKindFromEvent(event: ChatTaskStatusEvent): ChatStatus["kind"] {
-  if (event.state === "paused") return "paused";
-  if (event.state === "failed") return "error";
-  if (event.state === "canceled") return "ready";
-  if (event.state === "completed") return "ready";
-  return "working";
-}
-
-function getWorkPhaseFromStatusEvent(event: ChatTaskStatusEvent): AgentWorkPhase {
-  if (event.state === "started") return "planning";
-  if (event.state === "memory") return "memory";
-  if (event.state === "model" || event.state === "reasoning") return "model";
-  if (event.state === "tool_call" || event.state === "tool_result") return "tool";
-  if (event.state === "paused") return "paused";
-  if (event.state === "failed") return "error";
-  return "done";
-}
-
-function parseEventTime(value: string): number {
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : Date.now();
-}
-
 function getGoalRunEventLabel(event: AgentRunEvent): string {
   if (event.phase === "reflecting") return "思考";
   if (event.phase === "executing") return "执行";
@@ -2173,8 +3198,92 @@ function createClientRequestId(): string {
   );
 }
 
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function chatStreamEventMatchesActive(
+  event: ChatStreamEvent,
+  activeStream: {
+    activeSessionId: string | null;
+    activeRequestId: string | null;
+  },
+): boolean {
+  if (!activeStream.activeRequestId) {
+    return false;
+  }
+  if (event.requestId !== activeStream.activeRequestId) {
+    return false;
+  }
+  if (
+    activeStream.activeSessionId &&
+    event.sessionId !== activeStream.activeSessionId
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function createGuidedInputInitialValues(
+  fields: SkillInputField[],
+): Record<string, string | number | boolean> {
+  return fields.reduce<Record<string, string | number | boolean>>(
+    (values, field) => {
+      if (field.defaultValue !== undefined) {
+        values[field.name] = field.defaultValue;
+        return values;
+      }
+      if (field.type === "boolean") {
+        values[field.name] = false;
+        return values;
+      }
+      values[field.name] = "";
+      return values;
+    },
+    {},
+  );
+}
+
+function buildSkillInputResponseValues(
+  fields: SkillInputField[],
+  values: Record<string, string | number | boolean>,
+): Record<string, string | number | boolean> {
+  return fields.reduce<Record<string, string | number | boolean>>(
+    (resolvedValues, field) => {
+      const value = values[field.name];
+      if (field.type === "boolean") {
+        resolvedValues[field.name] = value === true;
+        return resolvedValues;
+      }
+
+      if (field.type === "number") {
+        if (value === "" || value === undefined) {
+          return resolvedValues;
+        }
+        const numberValue =
+          typeof value === "number" ? value : Number.parseFloat(String(value));
+        if (Number.isFinite(numberValue)) {
+          resolvedValues[field.name] = numberValue;
+        }
+        return resolvedValues;
+      }
+
+      if (value === undefined || value === "") {
+        return resolvedValues;
+      }
+      resolvedValues[field.name] = String(value);
+      return resolvedValues;
+    },
+    {},
+  );
+}
+
 function isCanceledMessage(message: string): boolean {
   return /中断|取消|cancel|canceled|cancelled|abort|aborted/i.test(message);
+}
+
+function isSkillInputRequiredMessage(message: string): boolean {
+  return /skill input required|input required|等待技能输入/i.test(message);
 }
 
 function shouldShowComposerCommandMenu(draft: string): boolean {
@@ -2212,6 +3321,10 @@ function MarkdownMessage({ content }: { content: string }) {
 }
 
 function MarkdownBlockView({ block }: { block: MarkdownBlock }) {
+  const [expanded, setExpanded] = useState(false);
+  const shouldCollapse = shouldCollapseMarkdownBlock(block);
+  const showFullBlock = expanded || !shouldCollapse;
+
   if (block.type === "heading") {
     const HeadingTag = `h${Math.min(block.depth + 2, 5)}` as
       | "h3"
@@ -2224,10 +3337,36 @@ function MarkdownBlockView({ block }: { block: MarkdownBlock }) {
     );
   }
 
+  return (
+    <div
+      className={`markdown-block${
+        shouldCollapse ? " chat-message-collapse" : ""
+      }${shouldCollapse && !expanded ? " is-collapsed" : ""}`}
+    >
+      {renderMarkdownBlockContent(block, showFullBlock)}
+      {shouldCollapse ? (
+        <button
+          type="button"
+          aria-expanded={expanded}
+          className="chat-message-collapse-button"
+          onClick={() => setExpanded((current) => !current)}
+        >
+          {expanded ? "收起" : "展开"}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function renderMarkdownBlockContent(
+  block: MarkdownBlock,
+  showFullBlock: boolean,
+): ReactNode {
   if (block.type === "unorderedList") {
+    const items = showFullBlock ? block.items : block.items.slice(0, 4);
     return (
       <ul>
-        {block.items.map((item, index) => (
+        {items.map((item, index) => (
           <li key={`${item}-${index}`}>
             <InlineMarkdown text={item} />
           </li>
@@ -2237,9 +3376,10 @@ function MarkdownBlockView({ block }: { block: MarkdownBlock }) {
   }
 
   if (block.type === "orderedList") {
+    const items = showFullBlock ? block.items : block.items.slice(0, 4);
     return (
       <ol>
-        {block.items.map((item, index) => (
+        {items.map((item, index) => (
           <li key={`${item}-${index}`}>
             <InlineMarkdown text={item} />
           </li>
@@ -2250,17 +3390,36 @@ function MarkdownBlockView({ block }: { block: MarkdownBlock }) {
 
   if (block.type === "code") {
     return (
-      <pre>
-        <code>{block.code}</code>
-      </pre>
+      <div className="markdown-code-block">
+        <div className="markdown-code-header">
+          <span>{block.language ?? "text"}</span>
+        </div>
+        <pre>
+          <code>{showFullBlock ? block.code : `${block.code.slice(0, 800)}...`}</code>
+        </pre>
+      </div>
     );
   }
 
+  const text = showFullBlock ? block.text : `${block.text.slice(0, 360)}...`;
   return (
     <p>
-      <InlineMarkdown text={block.text} />
+      <InlineMarkdown text={text} />
     </p>
   );
+}
+
+function shouldCollapseMarkdownBlock(block: MarkdownBlock): boolean {
+  if (block.type === "code") {
+    return block.code.length > 800 || block.code.split("\n").length > 16;
+  }
+  if (block.type === "orderedList" || block.type === "unorderedList") {
+    return block.items.length > 4 || block.items.join("\n").length > 520;
+  }
+  if (block.type === "paragraph") {
+    return block.text.length > 420;
+  }
+  return false;
 }
 
 function InlineMarkdown({ text }: { text: string }): ReactNode {
@@ -2270,6 +3429,18 @@ function InlineMarkdown({ text }: { text: string }): ReactNode {
     }
     if (segment.type === "code") {
       return <code key={`${segment.type}-${index}`}>{segment.text}</code>;
+    }
+    if (segment.type === "link") {
+      return (
+        <a
+          href={segment.href}
+          key={`${segment.type}-${index}`}
+          rel="noreferrer"
+          target="_blank"
+        >
+          {segment.text}
+        </a>
+      );
     }
     return <span key={`${segment.type}-${index}`}>{segment.text}</span>;
   });
@@ -2294,7 +3465,25 @@ function toSessionRailItem(session: ChatSessionListItem): ChatSession {
       ? { lastAssistantMessageAt: session.lastAssistantMessageAt }
       : {}),
     ...(session.tokenUsage ? { tokenUsage: session.tokenUsage } : {}),
+    ...(session.workspaceId ? { workspaceId: session.workspaceId } : {}),
+    ...(session.workspaceSummary
+      ? { workspaceSummary: session.workspaceSummary }
+      : {}),
     updatedAt: session.updatedAt,
+  };
+}
+
+function toSkillMentionCandidate(skill: {
+  manifest: {
+    name: string;
+    displayName: string;
+    description: string;
+  };
+}): SkillMentionCandidate {
+  return {
+    name: skill.manifest.name,
+    displayName: skill.manifest.displayName,
+    description: skill.manifest.description,
   };
 }
 
@@ -2303,15 +3492,8 @@ function toChatMessage(message: ChatSessionRecord["messages"][number]): ChatMess
     id: message.id,
     role: message.role,
     content: message.content,
-    createdAt: formatMessageTime(message.createdAt),
+    createdAt: message.createdAt,
   };
-}
-
-function formatMessageTime(value: string): string {
-  return new Intl.DateTimeFormat("zh-CN", {
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
 }
 
 function translateRunStatus(status: AgentRunRecord["status"]): string {

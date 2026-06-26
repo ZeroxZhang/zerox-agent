@@ -105,11 +105,79 @@ const counts = {};
   counts.sessions = out.length;
 }
 
+// multi-agent sessions
+{
+  const sessions = sessRepo.createSessionRepository(storage).listSessions({ kind: "multi_agent" });
+  const out = sessions.map((s) => s.payload ?? {});
+  if (out.length) { freeze(path.join(configDir, "multi-agent-sessions.json")); writeJson(path.join(configDir, "multi-agent-sessions.json"), { schemaVersion: 1, sessions: out }); }
+  counts.sessions_multi = out.length;
+}
+
+// workspaces
+{
+  const workspaces = repos.createWorkspaceRepository(storage).list();
+  if (workspaces.length) { freeze(path.join(configDir, "agent-workspaces.json")); writeJson(path.join(configDir, "agent-workspaces.json"), { schemaVersion: 1, workspaces }); }
+  counts.workspaces = workspaces.length;
+}
+
+// scheduled tasks
+{
+  const tasks = repos.createTaskRepository(storage).list();
+  if (tasks.length) { freeze(path.join(configDir, "scheduled-tasks.json")); writeJson(path.join(configDir, "scheduled-tasks.json"), { schemaVersion: 1, tasks }); }
+  counts.tasks = tasks.length;
+}
+
 // tool_audit
 {
   const rows = db.prepare("SELECT payload FROM tool_audit ORDER BY created_at ASC").all().map((r) => JSON.parse(r.payload));
   if (rows.length) { freeze(path.join(configDir, "tool-audit.jsonl")); writeJsonl(path.join(configDir, "tool-audit.jsonl"), rows); }
   counts.tool_audit = rows.length;
+}
+
+// tool_results
+{
+  const rows = db.prepare("SELECT ref_key, blob FROM tool_results ORDER BY created_at ASC").all();
+  const dir = path.join(configDir, "tool-result-refs");
+  if (rows.length) mkdirSync(dir, { recursive: true });
+  for (const row of rows) {
+    const file = path.join(dir, `${row.ref_key}.json`);
+    freeze(file);
+    writeFileSync(file, row.blob, "utf8");
+  }
+  counts.tool_results = rows.length;
+}
+
+// learning_candidates
+{
+  const candidates = db.prepare("SELECT payload FROM learning_candidates ORDER BY created_at ASC").all().map((r) => JSON.parse(r.payload));
+  if (candidates.length) { freeze(path.join(configDir, "agent-learning-candidates.json")); writeJson(path.join(configDir, "agent-learning-candidates.json"), { schemaVersion: 1, candidates }); }
+  counts.learning_candidates = candidates.length;
+}
+
+// eval_candidates
+{
+  const candidates = db.prepare("SELECT payload FROM eval_candidates ORDER BY created_at ASC").all().map((r) => JSON.parse(r.payload));
+  if (candidates.length) { freeze(path.join(configDir, "agent-eval-candidates.json")); writeJson(path.join(configDir, "agent-eval-candidates.json"), { schemaVersion: 1, candidates }); }
+  counts.eval_candidates = candidates.length;
+}
+
+// promoted_eval_fixtures
+{
+  const fixtures = db.prepare("SELECT payload FROM promoted_eval_fixtures ORDER BY created_at ASC").all().map((r) => JSON.parse(r.payload));
+  if (fixtures.length) { freeze(path.join(configDir, "agent-promoted-eval-fixtures.json")); writeJson(path.join(configDir, "agent-promoted-eval-fixtures.json"), { schemaVersion: 1, fixtures }); }
+  counts.promoted_eval_fixtures = fixtures.length;
+}
+
+// artifacts (provenance sidecars)
+{
+  const manifests = db.prepare("SELECT payload FROM artifacts ORDER BY created_at ASC").all().map((r) => JSON.parse(r.payload));
+  for (const manifest of manifests) {
+    if (!manifest.destination?.path) continue;
+    const file = `${manifest.destination.path}.provenance.json`;
+    freeze(file);
+    writeJson(file, manifest);
+  }
+  counts.artifacts = manifests.length;
 }
 
 // validation

@@ -12,6 +12,15 @@ describe("analyzeShell", () => {
     expect(plan.networkAccess).toBe(false);
   });
 
+  it.each(["cat ..", "ls ..", "cat '..'", 'cat ".."'])(
+    "surfaces bare parent directory args as touched paths: %s",
+    (command) => {
+      const plan = analyzeShell(command, { cwd: CWD });
+
+      expect(plan.touchedPaths).toContain(path(".."));
+    },
+  );
+
   it("detects control operators ; && || |", () => {
     const plan = analyzeShell("echo a && echo b ; echo c | grep d", { cwd: CWD });
     expect(plan.controlOperators.sort()).toEqual(["&&", ";", "|"]);

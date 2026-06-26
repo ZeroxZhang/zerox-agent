@@ -8,7 +8,7 @@ type PackageJson = {
 };
 
 describe("package scripts", () => {
-  it("sets release metadata to v2.4.1", () => {
+  it("sets release metadata to v2.8.5", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -16,12 +16,12 @@ describe("package scripts", () => {
       readFileSync(path.join(process.cwd(), "package-lock.json"), "utf8"),
     ) as { version?: string; packages?: Record<string, { version?: string }> };
 
-    expect(packageJson.version).toBe("2.4.5");
-    expect(packageLock.version).toBe("2.4.5");
-    expect(packageLock.packages?.[""]?.version).toBe("2.4.5");
+    expect(packageJson.version).toBe("2.8.5");
+    expect(packageLock.version).toBe("2.8.5");
+    expect(packageLock.packages?.[""]?.version).toBe("2.8.5");
   });
 
-  it("marks the v2.4.1 system prompt architecture refactoring release done", () => {
+  it("keeps release gates done through v2.8.5", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -35,7 +35,106 @@ describe("package scripts", () => {
       }>;
     };
 
-    expect(packageJson.version).toBe("2.4.5");
+    expect(packageJson.version).toBe("2.8.5");
+    expect(featureList.features.filter((feature) => feature.status !== "done")).toEqual([]);
+    expect(featureList.features).toContainEqual(
+      expect.objectContaining({
+        id: "P22-v2.8.5-reasoning-finalization-hotfix",
+        status: "done",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("non-empty reasoningContent"),
+          expect.stringContaining("persisted into the assistant message history"),
+          expect.stringContaining("package metadata reports version 2.8.5"),
+        ]),
+      }),
+    );
+    expect(featureList.features).toContainEqual(
+      expect.objectContaining({
+        id: "P21-v2.8.4-empty-response-hotfix",
+        status: "done",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("agent loop remembers the latest tool failure"),
+          expect.stringContaining("empty model follow-up responses"),
+          expect.stringContaining("package metadata reports version 2.8.4"),
+        ]),
+      }),
+    );
+    expect(featureList.features).toContainEqual(
+      expect.objectContaining({
+        id: "P20-v2.8.3-time-semantics-hotfix",
+        status: "done",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("protected local date context"),
+          expect.stringContaining("web_search tool descriptions require date-sensitive queries"),
+          expect.stringContaining("package metadata reports version 2.8.3"),
+        ]),
+      }),
+    );
+    expect(featureList.features).toContainEqual(
+      expect.objectContaining({
+        id: "P19-v2.8.2-chat-rename-message-skill-polish",
+        status: "done",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("session more menu exposes rename"),
+          expect.stringContaining("explicitly selected skills are preloaded"),
+          expect.stringContaining("package metadata reports version 2.8.2"),
+        ]),
+      }),
+    );
+    expect(featureList.features).toContainEqual(
+      expect.objectContaining({
+        id: "P18-v2.8.1-runtime-surface-polish-release",
+        status: "done",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("package metadata reports version 2.8.1"),
+          expect.stringContaining("real-time thinking and tool preview"),
+          expect.stringContaining("@skill capsule remains in the lower composer"),
+        ]),
+      }),
+    );
+    expect(featureList.features).toContainEqual(
+      expect.objectContaining({
+        id: "P17-v2.8.0-runtime-orchestration-memory",
+        status: "done",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("ExecutionContextPackage"),
+          expect.stringContaining("skill_load"),
+          expect.stringContaining("tool invocation ledger"),
+          expect.stringContaining("raw history"),
+          expect.stringContaining("computer-use black-box acceptance"),
+        ]),
+      }),
+    );
+    expect(featureList.features).toContainEqual(
+      expect.objectContaining({
+        id: "P16-v2.7.0-ui-interaction",
+        status: "done",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("Chat supports first-class streamed answer output"),
+          expect.stringContaining("Focused tests, full verification, production smoke, packaged smoke, black-box QA, and independent acceptance pass"),
+        ]),
+      }),
+    );
+    expect(featureList.features).toContainEqual(
+      expect.objectContaining({
+        id: "P15-hardening-release-2.6.0",
+        status: "done",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("sandbox escape paths hardened"),
+          expect.stringContaining("package version bumped to 2.6.0"),
+        ]),
+      }),
+    );
+    expect(featureList.features).toContainEqual(
+      expect.objectContaining({
+        id: "P14-workspace-skill-execution-2.5.0",
+        status: "done",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("first-class workspace selection"),
+          expect.stringContaining("package version bumped to 2.5.0"),
+        ]),
+      }),
+    );
     expect(featureList.features).toContainEqual(
       expect.objectContaining({
         id: "P12.1-session-history-management-2.4.1",
@@ -105,6 +204,26 @@ describe("package scripts", () => {
 
     expect(packageJson.scripts).toMatchObject({
       "eval:memory": "npm run build && node scripts/run-memory-evals.mjs",
+    });
+  });
+
+  it("exposes built-artifact variants for post-build verification workflows", () => {
+    const packageJson = JSON.parse(
+      readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
+    ) as PackageJson;
+
+    expect(packageJson.scripts).toMatchObject({
+      "eval:agent": "npm run build && node scripts/run-agent-evals.mjs",
+      "eval:agent:built": "node scripts/run-agent-evals.mjs",
+      "eval:memory": "npm run build && node scripts/run-memory-evals.mjs",
+      "eval:memory:built": "node scripts/run-memory-evals.mjs",
+      "harness:score": "npm run build && node scripts/run-harness-score.mjs",
+      "harness:score:built": "node scripts/run-harness-score.mjs",
+      "episode:export":
+        "npm run build && node scripts/export-agent-episode.mjs",
+      "episode:export:built": "node scripts/export-agent-episode.mjs",
+      "smoke:prod": "npm run build && BUILDING_AGENT_SMOKE=1 electron .",
+      "smoke:prod:built": "BUILDING_AGENT_SMOKE=1 electron .",
     });
   });
 

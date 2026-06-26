@@ -54,14 +54,22 @@ export function createProviderChatClient(
         return;
       }
       const req = toCompleteRequest(request);
+      if (shouldUseCompleteForProviderToolStreaming(provider, req)) {
+        const response = await provider.complete(req);
+        yield* completeResponseToStreamEvents(response);
+        return;
+      }
       let finishReason = "stop";
       for await (const ev of provider.stream(req)) {
         if (ev.type === "text_delta") {
           yield { type: "content_delta", text: ev.text };
+        } else if (ev.type === "thinking_delta") {
+          yield { type: "reasoning_delta", text: ev.text };
         } else if (ev.type === "tool_call_delta") {
           yield {
             type: "tool_call_delta",
             id: ev.toolCallId,
+            ...(ev.index !== undefined ? { index: ev.index } : {}),
             name: ev.name ?? "",
             arguments: ev.argumentsDelta ?? "",
           };
@@ -72,6 +80,33 @@ export function createProviderChatClient(
       }
     },
   };
+}
+
+function shouldUseCompleteForProviderToolStreaming(
+  provider: LLMProvider,
+  request: CompleteRequest,
+): boolean {
+  return provider.id !== "openai-compatible" && Boolean(request.tools?.length);
+}
+
+async function* completeResponseToStreamEvents(
+  response: Awaited<ReturnType<LLMProvider["complete"]>>,
+): AsyncIterable<LowLevelStreamEvent> {
+  if (response.reasoningContent) {
+    yield { type: "reasoning_delta", text: response.reasoningContent };
+  }
+  if (response.content) {
+    yield { type: "content_delta", text: response.content };
+  }
+  for (const toolCall of response.toolCalls) {
+    yield {
+      type: "tool_call_delta",
+      id: toolCall.id,
+      name: toolCall.function.name,
+      arguments: toolCall.function.arguments,
+    };
+  }
+  yield { type: "done", finishReason: response.finishReason };
 }
 
 // Re-export normalize helpers for consumers that build CompleteRequest directly.
