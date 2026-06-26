@@ -8,7 +8,7 @@ type PackageJson = {
 };
 
 describe("package scripts", () => {
-  it("sets release metadata to v2.8.4", () => {
+  it("sets release metadata to v2.8.5", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -16,12 +16,12 @@ describe("package scripts", () => {
       readFileSync(path.join(process.cwd(), "package-lock.json"), "utf8"),
     ) as { version?: string; packages?: Record<string, { version?: string }> };
 
-    expect(packageJson.version).toBe("2.8.4");
-    expect(packageLock.version).toBe("2.8.4");
-    expect(packageLock.packages?.[""]?.version).toBe("2.8.4");
+    expect(packageJson.version).toBe("2.8.5");
+    expect(packageLock.version).toBe("2.8.5");
+    expect(packageLock.packages?.[""]?.version).toBe("2.8.5");
   });
 
-  it("keeps release gates done through v2.8.4", () => {
+  it("keeps release gates done through v2.8.5", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -35,8 +35,19 @@ describe("package scripts", () => {
       }>;
     };
 
-    expect(packageJson.version).toBe("2.8.4");
+    expect(packageJson.version).toBe("2.8.5");
     expect(featureList.features.filter((feature) => feature.status !== "done")).toEqual([]);
+    expect(featureList.features).toContainEqual(
+      expect.objectContaining({
+        id: "P22-v2.8.5-reasoning-finalization-hotfix",
+        status: "done",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("non-empty reasoningContent"),
+          expect.stringContaining("persisted into the assistant message history"),
+          expect.stringContaining("package metadata reports version 2.8.5"),
+        ]),
+      }),
+    );
     expect(featureList.features).toContainEqual(
       expect.objectContaining({
         id: "P21-v2.8.4-empty-response-hotfix",

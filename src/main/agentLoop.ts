@@ -452,6 +452,16 @@ export async function runAgentLoop(
         break;
       }
 
+      if (!response.toolCalls.length && response.reasoningContent?.trim()) {
+        summary = buildFinalReplyFromReasoningContent(response.reasoningContent);
+        status = "succeeded";
+        messages.push({
+          role: "assistant",
+          content: summary,
+        });
+        break;
+      }
+
       // Tool calls present
       if (response.toolCalls.length > 0) {
         const preparedToolCalls = response.toolCalls.map((toolCall) => {
@@ -1128,6 +1138,10 @@ function buildEmptyModelResponseAfterToolFailureSummary(options: {
     ...(options.args ? [`最近参数：${formatToolArgsForPrompt(options.args)}`] : []),
     "这通常表示模型在工具失败后没有给出最终总结。你可以直接重试，或补充一个更明确的数据来源/链接后继续。",
   ].join("\n");
+}
+
+function buildFinalReplyFromReasoningContent(reasoningContent: string): string {
+  return reasoningContent.trim();
 }
 
 function buildStrategyGuardPauseSummary(

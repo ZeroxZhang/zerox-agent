@@ -1155,6 +1155,42 @@ describe("agent loop", () => {
     expect(result.summary).not.toContain("Agent did not produce a response.");
   });
 
+  it("uses reasoning content as the final reply when the model omits formal content after tool success", async () => {
+    const chatClient: ChatClient = {
+      async complete(request) {
+        if (request.messages.some((message) => message.role === "tool")) {
+          return {
+            content: null,
+            reasoningContent:
+              "## 🏆 一等奖（6+1）\n- 中奖注数：4注\n- 单注奖金：8,287,457元\n- 地区分布：浙江、广东、山东、湖南各1注",
+            finishReason: "stop",
+            toolCalls: [],
+          };
+        }
+        return toolCallResponse("tool_call_search", "/search-result");
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "查一下昨天双色球开奖结果" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(),
+        maxTurns: 3,
+        tools: testTools,
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: "succeeded",
+      toolCallsExecuted: 1,
+    });
+    expect(result.summary).toContain("一等奖（6+1）");
+    expect(result.summary).toContain("中奖注数：4注");
+    expect(result.summary).not.toContain("模型没有返回可用回复");
+  });
+
   it("asks the model to recover once from repeated tool failures before pausing", async () => {
     const requests: ChatCompletionRequest[] = [];
     const chatClient: ChatClient = {
