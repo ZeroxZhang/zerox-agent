@@ -298,7 +298,7 @@
 .chat-message p,
 .markdown-message {
   color: var(--text-primary);
-  font-size: var(--text-base);
+  font-size: var(--chat-output-font-size);
   line-height: 1.72;
 }
 
@@ -318,10 +318,19 @@
 .markdown-message p,
 .markdown-message ul,
 .markdown-message ol,
+.markdown-message li,
+.markdown-message blockquote,
 .markdown-message h3,
 .markdown-message h4,
 .markdown-message h5 {
   margin: 0;
+}
+
+.markdown-message p,
+.markdown-message li,
+.markdown-message blockquote {
+  font-size: inherit;
+  line-height: inherit;
 }
 
 .markdown-message h3,
@@ -333,12 +342,12 @@
 }
 
 .markdown-message h3 {
-  font-size: var(--text-lg);
+  font-size: var(--chat-output-heading-size);
 }
 
 .markdown-message h4,
 .markdown-message h5 {
-  font-size: var(--text-base);
+  font-size: inherit;
 }
 
 .markdown-message span,
@@ -348,6 +357,7 @@
 }
 
 .markdown-message strong {
+  font-size: inherit;
   font-weight: var(--font-semibold);
 }
 
@@ -374,12 +384,14 @@
 }
 
 .markdown-message :not(pre) > code {
-  padding: 2px 6px;
+  padding: 0 4px;
   border-radius: 6px;
   color: var(--text-primary);
   background: #f3f4f6;
   font-family: var(--font-mono);
-  font-size: 0.94em;
+  font-size: inherit;
+  font-weight: var(--font-medium);
+  line-height: inherit;
 }
 
 .markdown-code-block {
@@ -412,8 +424,8 @@
   padding: 14px 16px;
   color: #1f2937;
   background: #ffffff;
-  font-size: var(--text-sm);
-  line-height: 1.7;
+  font-size: var(--chat-output-font-size);
+  line-height: 1.62;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
   word-break: break-word;
@@ -425,6 +437,8 @@
 }
 
 .chat-answer-block {
+  --chat-output-font-size: var(--text-base);
+  --chat-output-heading-size: var(--text-md);
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   align-items: start;
@@ -470,8 +484,11 @@
 .chat-output-text p,
 .chat-output-text ul,
 .chat-output-text ol,
+.chat-output-text li,
 .chat-output-text blockquote {
   margin: 0;
+  font-size: inherit;
+  line-height: inherit;
 }
 
 .chat-evidence-inline,
@@ -489,7 +506,7 @@
   border: 1px solid var(--border-default);
   border-radius: var(--radius-sm);
   background: var(--bg-surface-raised);
-  font-size: var(--text-xs);
+  font-size: var(--chat-output-font-size);
   line-height: var(--leading-normal);
 }
 
@@ -509,7 +526,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--text-primary);
-  font-size: var(--text-sm);
+  font-size: inherit;
   font-weight: var(--font-semibold);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -556,7 +573,8 @@
   min-width: 0;
   border-collapse: collapse;
   color: var(--text-primary);
-  font-size: var(--text-sm);
+  font-size: var(--chat-output-font-size);
+  line-height: 1.62;
   table-layout: fixed;
 }
 
@@ -573,6 +591,8 @@
 .chat-data-table td {
   padding: 9px 10px;
   border-bottom: 1px solid var(--border-default);
+  font-size: inherit;
+  line-height: inherit;
   text-align: left;
   vertical-align: top;
   overflow-wrap: anywhere;
@@ -583,8 +603,7 @@
   color: var(--text-tertiary);
   background: var(--bg-inset);
   font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  font-weight: var(--font-semibold);
+  font-weight: var(--font-medium);
 }
 
 .chat-data-table tr:last-child td {
@@ -642,8 +661,8 @@
   padding: var(--space-3);
   color: #1f2937;
   font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  line-height: 1.7;
+  font-size: var(--chat-output-font-size);
+  line-height: 1.62;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
   word-break: break-word;
@@ -668,6 +687,8 @@
 .chat-code-block code span {
   display: block;
   min-width: 0;
+  font-size: inherit;
+  line-height: inherit;
   white-space: pre-wrap;
 }
 
@@ -1199,6 +1220,26 @@
   max-height: min(220px, 34vh);
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+
+.agent-context-panel .task-process-list {
+  margin: 0;
+  padding: 0;
+  border-top: 0;
+}
+
+.agent-context-panel .task-process-list li {
+  grid-template-columns: 48px 36px minmax(0, 1fr) auto;
+  gap: 6px;
+}
+
+.agent-context-panel .task-process-list span {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.agent-context-panel .task-process-list li.is-reasoning span {
+  white-space: normal;
 }
 
 .goal-run-process {

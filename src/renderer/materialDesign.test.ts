@@ -476,6 +476,36 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".chat-ledger-row.has-detail.has-tool");
   });
 
+  it("keeps main transcript typography on one content scale", () => {
+    expect(styles).toMatch(
+      /\.chat-answer-block\s*{[\s\S]*--chat-output-font-size: var\(--text-base\);/,
+    );
+    expect(styles).toMatch(
+      /\.chat-message p,[\s\S]*\.markdown-message\s*{[\s\S]*font-size: var\(--chat-output-font-size\);/,
+    );
+    expect(styles).toMatch(
+      /\.markdown-message p,[\s\S]*\.markdown-message blockquote\s*{[\s\S]*font-size: inherit;[\s\S]*line-height: inherit;/,
+    );
+    expect(styles).toMatch(
+      /\.markdown-message strong\s*{[\s\S]*font-size: inherit;/,
+    );
+    expect(styles).toMatch(
+      /\.markdown-message :not\(pre\) > code\s*{[\s\S]*font-size: inherit;[\s\S]*line-height: inherit;/,
+    );
+    expect(styles).toMatch(
+      /\.chat-data-table\s*{[\s\S]*font-size: var\(--chat-output-font-size\);/,
+    );
+    expect(styles).toMatch(
+      /\.chat-data-table th,[\s\S]*\.chat-data-table td\s*{[\s\S]*font-size: inherit;[\s\S]*line-height: inherit;/,
+    );
+    expect(styles).toMatch(
+      /\.chat-code-block pre,[\s\S]*\.chat-json-preview pre\s*{[\s\S]*font-size: var\(--chat-output-font-size\);/,
+    );
+    expect(styles).toMatch(
+      /\.agent-context-panel \.task-process-list li\s*{[\s\S]*grid-template-columns: 48px 36px minmax\(0, 1fr\) auto;/,
+    );
+  });
+
   it("commits the v2.9 output rendering design artifact with acceptance states", () => {
     expect(existsSync(outputRenderingArtifactPath)).toBe(true);
 

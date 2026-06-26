@@ -5134,3 +5134,32 @@
   - `release/Zerox Agent-2.9.0-arm64.dmg` sha256 `4cc4bf70dd34282e1a73d59638b4991ddc01a58c2aebe2f3a47d81930fbd706e`
   - `release/Zerox Agent-2.9.0-arm64-mac.zip` sha256 `5d5a40ca6ea87cc0e44b48890d986935b4932088e519f7c5f8105f7e5ed48661`
   - Normal packaged app launched for user testing from `release/mac-arm64/Zerox Agent.app`, PID `90345`.
+
+## 2026-06-26 - Main Transcript Typography Scale Hotfix
+
+- Request:
+  - Fix the remaining v2.9.0 visual issue where assistant output still showed inconsistent text sizing across prose, bold text, inline code, tables, code blocks, and right-side process rows.
+- Root cause:
+  - The previous fix set the `.markdown-message` root font size, but child elements still used independent sizes: table content used `--text-sm`, table headers used `--text-xs`, code blocks used `--text-sm`, inline code used `0.94em` plus extra padding, and side process rows inherited legacy grid sizing that squeezed reasoning text into a very narrow column.
+- Changed areas:
+  - `src/renderer/styles/chat.css`
+  - `src/renderer/materialDesign.test.ts`
+  - `docs/design/zerox-agent-2-9-0-output-rendering-artifact.html`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts -t "main transcript typography"` -> failed as expected because no shared `--chat-output-font-size` contract existed and tables/code/inline code were not inheriting the transcript content scale.
+- GREEN / verification evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts -t "main transcript typography"` -> 1 focused test passed.
+  - `npm test -- src/renderer/materialDesign.test.ts src/renderer/chatMarkdown.test.ts src/renderer/chatOutputModel.test.ts src/renderer/chatStreamReducer.test.ts` -> 4 files / 78 tests passed.
+  - `npm test` -> 179 files / 1234 tests passed.
+  - `npm run build` -> passed; Vite emitted the existing large chunk warning.
+  - `npm run verify` -> 179 files / 1234 tests passed, build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `better-sqlite3` ABI mismatch triggered the existing JSON fallback during smoke.
+  - `git diff --check` -> passed.
+  - `npm run dist:mac` -> passed; regenerated unsigned macOS arm64 DMG, ZIP, blockmaps, and `latest-mac.yml` for v2.9.0.
+  - Packaged app smoke: `BUILDING_AGENT_SMOKE=1 "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+  - `release/Zerox Agent-2.9.0-arm64.dmg` sha256 `65501e0bf295ab91ad25383a5ead79ca2d01a9b50cafcfde0d343964eca85051`
+  - `release/Zerox Agent-2.9.0-arm64-mac.zip` sha256 `1cef619578dc5816890c9a65b3ccc90583841a3f4cf04a235bd29d9cd9d9a1e7`
+  - Normal packaged app launched for user testing from `release/mac-arm64/Zerox Agent.app`, PID `14125`.
+  - Local screenshot attempt: `screencapture -x /tmp/zerox-agent-typography-hotfix.png` failed with `could not create image from display`; visual confirmation should be done in the launched packaged app.

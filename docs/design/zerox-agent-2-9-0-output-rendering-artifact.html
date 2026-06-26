@@ -82,6 +82,8 @@
       text-transform: uppercase;
     }
     .chat-answer-block {
+      --chat-output-font-size: 13px;
+      --chat-output-heading-size: 14px;
       display: grid;
       grid-template-columns: minmax(0, 1fr);
       gap: var(--space-3);
@@ -101,8 +103,8 @@
       min-width: 0;
       max-width: 100%;
     }
-    .chat-output-part h3 { font-size: 18px; }
-    .chat-output-part p, .chat-output-part li { color: var(--text-secondary); font-size: 13px; }
+    .chat-output-part h3 { font-size: var(--chat-output-heading-size); }
+    .chat-output-part p, .chat-output-part li { color: var(--text-secondary); font-size: var(--chat-output-font-size); }
     .chat-evidence-inline,
     .chat-artifact-card,
     .chat-citation-chip,
@@ -122,7 +124,7 @@
       display: grid;
       gap: 3px;
       padding: var(--space-2);
-      font-size: 12px;
+      font-size: var(--chat-output-font-size);
     }
     .chat-evidence-inline span,
     .chat-json-preview-label,
@@ -156,13 +158,16 @@
       width: 100%;
       min-width: 0;
       border-collapse: collapse;
-      font-size: 12px;
+      font-size: var(--chat-output-font-size);
+      line-height: 1.62;
       table-layout: fixed;
     }
     .chat-data-table th,
     .chat-data-table td {
       padding: 8px 10px;
       border-bottom: 1px solid var(--border-default);
+      font-size: inherit;
+      line-height: inherit;
       text-align: left;
       vertical-align: top;
       overflow-wrap: anywhere;
@@ -204,8 +209,8 @@
       padding: 12px;
       color: #1f2937;
       font-family: var(--font-mono);
-      font-size: 12px;
-      line-height: 1.65;
+      font-size: var(--chat-output-font-size);
+      line-height: 1.62;
       overflow-wrap: anywhere;
       white-space: pre-wrap;
       word-break: break-word;
