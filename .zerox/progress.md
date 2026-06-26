@@ -1,5 +1,29 @@
 # Zerox Harness Progress
 
+## 2026-06-26 - v2.9.0 Task 4 Closure Blocker Circular Preview Stringify
+
+- Request: fix the remaining Task 4 closure blocker where masked circular preview values could still crash `outputPartsToPlainText()` and chat-service running ledger details via direct `JSON.stringify`.
+- Changed files:
+  - `src/shared/chatOutput.ts`
+  - `src/shared/chatOutput.test.ts`
+  - `src/renderer/components/chat/JsonPreview.tsx`
+  - `src/main/chatService.ts`
+  - `.superpowers/sdd/2026-06-26-v290-task-4-report.md`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/shared/chatOutput.test.ts` -> failed as expected with `TypeError: Converting circular structure to JSON` at `src/shared/chatOutput.ts`.
+- GREEN evidence:
+  - `npm test -- src/shared/chatOutput.test.ts` -> 1 file / 7 tests passed.
+  - `npm test -- src/shared/chatOutput.test.ts src/renderer/materialDesign.test.ts src/renderer/chatOutputModel.test.ts src/renderer/chatMarkdown.test.ts src/renderer/chatStreamReducer.test.ts src/main/chatService.test.ts src/main/agentLoop.test.ts` -> 7 files / 167 tests passed.
+  - `npm run build` -> passed, with the existing Vite chunk-size warning.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+- Implementation evidence:
+  - Added shared `stringifyMaskedPreview()` in `src/shared/chatOutput.ts` for secret-masked, circular-safe preview JSON.
+  - `outputPartsToPlainText()` now uses the helper for tool call, tool result, and approval request previews.
+  - `src/main/chatService.ts` now uses the helper for running ledger detail.
+  - `JsonPreview` now delegates to the shared helper instead of carrying a renderer-only copy.
+
 ## 2026-06-26 - v2.9.0 Task 4 Format-Specific React Renderers
 
 - Request: implement Task 4 for v2.9.0 output rendering by replacing assistant-message markdown flattening with dedicated React renderers for every typed `ChatOutputPart`, while preserving user/legacy fallback rendering and following TDD.

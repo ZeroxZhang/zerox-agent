@@ -183,4 +183,58 @@ describe("chat output parts", () => {
     expect(masked).toBeInstanceOf(Set);
     expect(Array.from(masked)).toEqual([{ authorization: "****", count: 3 }]);
   });
+
+  it("serializes circular preview values in plain text fallbacks while masking secrets", () => {
+    const argsPreview: Record<string, unknown> = {
+      command: "npm test",
+      apiKey: "sk-local-secret",
+    };
+    argsPreview.self = argsPreview;
+    const resultPreview: Record<string, unknown> = {
+      ok: true,
+      authorization: "Bearer local-secret",
+    };
+    resultPreview.self = resultPreview;
+    const approvalArgsPreview: Record<string, unknown> = {
+      command: "deploy",
+      password: "local-secret",
+    };
+    approvalArgsPreview.self = approvalArgsPreview;
+
+    const plainText = outputPartsToPlainText([
+      {
+        id: "tc-circular",
+        type: "tool_call",
+        toolCallId: "call_circular",
+        toolName: "shell_exec",
+        argsPreview,
+      },
+      {
+        id: "tr-circular",
+        type: "tool_result",
+        toolCallId: "call_circular",
+        ok: true,
+        resultPreview,
+      },
+      {
+        id: "ap-circular",
+        type: "approval_request",
+        approvalId: "approval_circular",
+        toolName: "shell_exec",
+        riskLevel: "high",
+        argsPreview: approvalArgsPreview,
+      },
+    ]);
+
+    expect(plainText).toContain("Tool call: shell_exec");
+    expect(plainText).toContain("Tool result: success");
+    expect(plainText).toContain("Approval requested: shell_exec");
+    expect(plainText).toContain('"apiKey": "****"');
+    expect(plainText).toContain('"authorization": "****"');
+    expect(plainText).toContain('"password": "****"');
+    expect(plainText).toContain('"self": "[Circular]"');
+    expect(plainText).not.toContain("sk-local-secret");
+    expect(plainText).not.toContain("Bearer local-secret");
+    expect(plainText).not.toContain("local-secret");
+  });
 });

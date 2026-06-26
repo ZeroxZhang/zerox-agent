@@ -145,6 +145,43 @@ export function maskPreviewSecrets(value: unknown): unknown {
   return maskPreviewSecretsValue(value, new WeakMap<object, unknown>());
 }
 
+export function stringifyMaskedPreview(value: unknown): string {
+  const seen = new WeakSet<object>();
+  try {
+    const maskedValue = maskPreviewSecrets(value);
+    const json = JSON.stringify(
+      maskedValue,
+      (_key, item: unknown) => {
+        if (typeof item === "bigint") {
+          return item.toString();
+        }
+        if (item && typeof item === "object") {
+          if (seen.has(item)) {
+            return "[Circular]";
+          }
+          seen.add(item);
+          if (item instanceof Error) {
+            return { name: item.name, message: item.message };
+          }
+          if (item instanceof Map) {
+            return Object.fromEntries(item);
+          }
+          if (item instanceof Set) {
+            return Array.from(item);
+          }
+        }
+        return item;
+      },
+      2,
+    );
+    return json ?? String(maskedValue);
+  } catch (error) {
+    return error instanceof Error
+      ? `[Unserializable preview: ${error.message}]`
+      : "[Unserializable preview]";
+  }
+}
+
 function maskPreviewSecretsValue(value: unknown, seen: WeakMap<object, unknown>): unknown {
   if (Array.isArray(value)) {
     const existing = seen.get(value);
@@ -232,7 +269,7 @@ export function outputPartsToPlainText(parts: ChatOutputPart[]): string {
             part.toolSource ? `Source: ${part.toolSource}` : undefined,
             part.argsPreview === undefined
               ? undefined
-              : `Args: ${JSON.stringify(maskPreviewSecrets(part.argsPreview), null, 2)}`,
+              : `Args: ${stringifyMaskedPreview(part.argsPreview)}`,
           ]
             .filter(Boolean)
             .join("\n");
@@ -242,7 +279,7 @@ export function outputPartsToPlainText(parts: ChatOutputPart[]): string {
             part.error,
             part.resultPreview === undefined
               ? undefined
-              : `Result: ${JSON.stringify(maskPreviewSecrets(part.resultPreview), null, 2)}`,
+              : `Result: ${stringifyMaskedPreview(part.resultPreview)}`,
           ]
             .filter(Boolean)
             .join("\n");
@@ -264,7 +301,7 @@ export function outputPartsToPlainText(parts: ChatOutputPart[]): string {
             `Risk: ${part.riskLevel}`,
             part.argsPreview === undefined
               ? undefined
-              : `Args: ${JSON.stringify(maskPreviewSecrets(part.argsPreview), null, 2)}`,
+              : `Args: ${stringifyMaskedPreview(part.argsPreview)}`,
           ]
             .filter(Boolean)
             .join("\n");
