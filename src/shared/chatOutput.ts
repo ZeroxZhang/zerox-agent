@@ -137,6 +137,9 @@ export function maskPreviewSecrets(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map((item) => maskPreviewSecrets(item));
   }
+  if (value instanceof Date || value instanceof Error || value instanceof Map || value instanceof Set) {
+    return value;
+  }
   if (value && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>).map(([key, item]) => [
@@ -169,8 +172,56 @@ export function outputPartsToPlainText(parts: ChatOutputPart[]): string {
           return `\`\`\`diff\n${part.patch}\n\`\`\``;
         case "command_output":
           return [`$ ${part.command}`, part.stdout, part.stderr].filter(Boolean).join("\n");
+        case "tool_call":
+          return [
+            `Tool call: ${part.toolName}`,
+            part.toolSource ? `Source: ${part.toolSource}` : undefined,
+            part.argsPreview === undefined
+              ? undefined
+              : `Args: ${JSON.stringify(maskPreviewSecrets(part.argsPreview), null, 2)}`,
+          ]
+            .filter(Boolean)
+            .join("\n");
+        case "tool_result":
+          return [
+            `Tool result: ${part.ok ? "success" : "error"}`,
+            part.error,
+            part.resultPreview === undefined
+              ? undefined
+              : `Result: ${JSON.stringify(maskPreviewSecrets(part.resultPreview), null, 2)}`,
+          ]
+            .filter(Boolean)
+            .join("\n");
+        case "file_ref":
+          return `File ${part.action}: ${part.label ?? part.path}`;
+        case "artifact":
+          return [
+            `Artifact: ${part.title}`,
+            part.path,
+            part.mediaType,
+          ]
+            .filter(Boolean)
+            .join("\n");
         case "citation":
           return `[${part.citationId}] ${part.sourceTitle}`;
+        case "approval_request":
+          return [
+            `Approval requested: ${part.toolName}`,
+            `Risk: ${part.riskLevel}`,
+            part.argsPreview === undefined
+              ? undefined
+              : `Args: ${JSON.stringify(maskPreviewSecrets(part.argsPreview), null, 2)}`,
+          ]
+            .filter(Boolean)
+            .join("\n");
+        case "input_request":
+          return [
+            `Input requested: ${part.skillName}`,
+            part.reason,
+            ...part.fields.map(
+              (field) => `- ${field.label} (${field.type}, ${field.required ? "required" : "optional"})`,
+            ),
+          ].join("\n");
         case "diagnostic":
           return `${part.title}\n${part.message}`;
         case "ledger_event":

@@ -154,6 +154,11 @@ type ChatStreamEventBase = {
   createdAt: string;
 };
 
+export type ChatOutputStreamEvent = ChatStreamEventBase & {
+  type: "output_part";
+  part: ChatOutputPart;
+};
+
 export type ChatStreamEvent =
   | (ChatStreamEventBase & {
       type: "answer_delta";
@@ -170,10 +175,7 @@ export type ChatStreamEvent =
       toolName?: string;
       argumentsDelta?: string;
     })
-  | (ChatStreamEventBase & {
-      type: "output_part";
-      part: ChatOutputPart;
-    })
+  | ChatOutputStreamEvent
   | (ChatStreamEventBase & {
       type: "status";
       status: ChatTaskStatusEvent;
