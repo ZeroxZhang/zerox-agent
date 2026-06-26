@@ -96,7 +96,15 @@ export type ChatInputRequestPart = ChatOutputPartBase & {
   inputRequestId: string;
   skillName: string;
   reason: string;
-  fields: Array<{ name: string; label: string; required: boolean; type: string }>;
+  fields: Array<{
+    name: string;
+    label: string;
+    required: boolean;
+    type: string;
+    description?: string;
+    defaultValue?: string | number | boolean;
+    choices?: string[];
+  }>;
 };
 
 export type ChatDiagnosticPart = ChatOutputPartBase & {

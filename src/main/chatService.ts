@@ -68,7 +68,7 @@ import {
   type AgentIntentRoute,
 } from "../shared/agentIntent";
 import { formatDateInTimeZone, getSystemTimeZone } from "../shared/dateContext";
-import type { ChatOutputPart } from "../shared/chatOutput";
+import { maskPreviewSecrets, type ChatOutputPart } from "../shared/chatOutput";
 import {
   extractRequestedSkillQuery,
   matchSkillMentionCandidates,
@@ -893,7 +893,7 @@ export function createChatService(options: {
                   outputAssembler.appendLedgerEvent({
                     status: "running",
                     title: `正在调用工具：${toolName}`,
-                    detail: JSON.stringify(args),
+                    detail: JSON.stringify(maskPreviewSecrets(args)),
                     toolName,
                   }),
                 );

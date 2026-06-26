@@ -87,16 +87,29 @@ export function createChatOutputAssembler(
         return undefined;
       }
 
-      const textPart: ChatTextPart = {
-        id: `text_${parts.filter((part) => part.type === "text").length + 1}`,
-        type: "text",
-        text,
-        format: "markdown",
-        createdAt: now(),
-      };
-      const nonTextParts = parts.filter((part) => part.type !== "text");
-      parts.splice(0, parts.length, ...nonTextParts, textPart);
-      return clonePart(textPart);
+      const firstTextIndex = parts.findIndex((part) => part.type === "text");
+      if (firstTextIndex === -1) {
+        return pushPart({
+          id: `text_${parts.length + 1}`,
+          type: "text",
+          text,
+          format: "markdown",
+          createdAt: now(),
+        });
+      }
+
+      const firstTextPart = parts[firstTextIndex];
+      if (firstTextPart?.type !== "text") {
+        return undefined;
+      }
+
+      firstTextPart.text = text;
+      for (let index = parts.length - 1; index > firstTextIndex; index -= 1) {
+        if (parts[index]?.type === "text") {
+          parts.splice(index, 1);
+        }
+      }
+      return clonePart(firstTextPart);
     },
 
     appendToolCall(input) {
@@ -175,6 +188,11 @@ export function createChatOutputAssembler(
           label: field.label,
           required: field.required,
           type: field.type,
+          ...(field.description ? { description: field.description } : {}),
+          ...(field.defaultValue !== undefined
+            ? { defaultValue: field.defaultValue }
+            : {}),
+          ...(field.choices?.length ? { choices: [...field.choices] } : {}),
         })),
         createdAt: now(),
       });
