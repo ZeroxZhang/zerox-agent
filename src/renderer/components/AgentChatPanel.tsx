@@ -88,8 +88,9 @@ import {
   type ChatToolCallPreview,
   type ChatStreamMessage,
 } from "../chatStreamReducer";
-import { outputMarkdownFromMessage } from "../chatOutputModel";
+import { outputPartsFromMessage } from "../chatOutputModel";
 import { formatChatMessageTime } from "../chatMessageTime";
+import { AnswerBlock } from "./chat/AnswerBlock";
 import { GoalDetailDrawer } from "./GoalDetailDrawer";
 import { GoalStatusStrip } from "./GoalStatusStrip";
 import { Icon } from "./Icon";
@@ -2012,7 +2013,11 @@ export function AgentChatPanel({
                     })}
                   </time>
                 </header>
-                <MarkdownMessage content={getMessageMarkdownContent(message)} />
+                {message.role === "assistant" ? (
+                  <AnswerBlock parts={outputPartsFromMessage(message)} />
+                ) : (
+                  <MarkdownMessage content={message.content} />
+                )}
               </article>
             ))}
           </div>
@@ -3516,12 +3521,6 @@ function toChatHistory(messages: ChatMessage[]): ChatHistoryMessage[] {
     role: message.role,
     content: message.content,
   }));
-}
-
-function getMessageMarkdownContent(message: ChatMessage): string {
-  return message.role === "assistant"
-    ? outputMarkdownFromMessage(message)
-    : message.content;
 }
 
 function toSessionRailItem(session: ChatSessionListItem): ChatSession {

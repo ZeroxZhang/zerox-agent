@@ -74,6 +74,14 @@ describe("Design System — Notion-inspired app shell", () => {
   const evalReviewPanelSource = existsSync(evalReviewPanelPath)
     ? readFileSync(evalReviewPanelPath, "utf8")
     : "";
+  const chatOutputComponentDir = path.join(
+    process.cwd(),
+    "src/renderer/components/chat",
+  );
+  const readChatOutputComponent = (fileName: string) => {
+    const filePath = path.join(chatOutputComponentDir, fileName);
+    return existsSync(filePath) ? readFileSync(filePath, "utf8") : "";
+  };
 
   it("defines comprehensive CSS custom property design tokens", () => {
     expect(rootStyles).toContain("@import \"./styles/tokens.css\";");
@@ -291,6 +299,87 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".markdown-message a");
     expect(styles).toContain("font-size: var(--text-lg);");
     expect(styles).toContain("background: #f3f4f6;");
+  });
+
+  it("renders v2.9.0 structured assistant output through dedicated React components", () => {
+    const requiredComponentFiles = [
+      "AnswerBlock.tsx",
+      "OutputPartRenderer.tsx",
+      "CodeBlockView.tsx",
+      "DataTableView.tsx",
+      "CommandOutputView.tsx",
+      "JsonPreview.tsx",
+      "RunLedgerView.tsx",
+      "EvidenceRail.tsx",
+    ];
+
+    for (const fileName of requiredComponentFiles) {
+      expect(existsSync(path.join(chatOutputComponentDir, fileName))).toBe(true);
+    }
+
+    const answerBlockSource = readChatOutputComponent("AnswerBlock.tsx");
+    const outputPartRendererSource = readChatOutputComponent(
+      "OutputPartRenderer.tsx",
+    );
+    const rendererCases = [
+      "text",
+      "table",
+      "code",
+      "file_diff",
+      "command_output",
+      "tool_call",
+      "tool_result",
+      "file_ref",
+      "artifact",
+      "citation",
+      "approval_request",
+      "input_request",
+      "diagnostic",
+      "ledger_event",
+    ];
+
+    expect(chatPanelSource).toContain("import { AnswerBlock }");
+    expect(chatPanelSource).toContain("outputPartsFromMessage");
+    expect(chatPanelSource).toContain(
+      "<AnswerBlock parts={outputPartsFromMessage(message)} />",
+    );
+    expect(chatPanelSource).not.toContain("outputMarkdownFromMessage");
+    expect(answerBlockSource).toContain("OutputPartRenderer");
+    expect(answerBlockSource).toContain("EvidenceRail");
+    expect(answerBlockSource).toContain("RenderedOutputPart");
+
+    for (const rendererCase of rendererCases) {
+      expect(outputPartRendererSource).toContain(`case "${rendererCase}"`);
+    }
+  });
+
+  it("keeps structured output renderer class hooks stable for Task 5 visual polish", () => {
+    const componentSources = [
+      readChatOutputComponent("AnswerBlock.tsx"),
+      readChatOutputComponent("CodeBlockView.tsx"),
+      readChatOutputComponent("DataTableView.tsx"),
+      readChatOutputComponent("CommandOutputView.tsx"),
+      readChatOutputComponent("JsonPreview.tsx"),
+      readChatOutputComponent("RunLedgerView.tsx"),
+      readChatOutputComponent("EvidenceRail.tsx"),
+    ].join("\n");
+
+    for (const className of [
+      "chat-answer-block",
+      "chat-output-part",
+      "chat-code-block",
+      "chat-code-header",
+      "chat-data-table-wrap",
+      "chat-data-table",
+      "chat-command-output",
+      "chat-command-stream",
+      "chat-json-preview",
+      "chat-run-ledger",
+      "chat-evidence-rail",
+      "chat-evidence-item",
+    ]) {
+      expect(componentSources).toContain(className);
+    }
   });
 
   it("keeps a draggable window strip visible on the chat-first desktop shell", () => {

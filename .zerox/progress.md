@@ -1,5 +1,34 @@
 # Zerox Harness Progress
 
+## 2026-06-26 - v2.9.0 Task 4 Format-Specific React Renderers
+
+- Request: implement Task 4 for v2.9.0 output rendering by replacing assistant-message markdown flattening with dedicated React renderers for every typed `ChatOutputPart`, while preserving user/legacy fallback rendering and following TDD.
+- Changed files:
+  - `src/renderer/components/chat/AnswerBlock.tsx`
+  - `src/renderer/components/chat/OutputPartRenderer.tsx`
+  - `src/renderer/components/chat/CodeBlockView.tsx`
+  - `src/renderer/components/chat/DataTableView.tsx`
+  - `src/renderer/components/chat/CommandOutputView.tsx`
+  - `src/renderer/components/chat/JsonPreview.tsx`
+  - `src/renderer/components/chat/RunLedgerView.tsx`
+  - `src/renderer/components/chat/EvidenceRail.tsx`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/materialDesign.test.ts`
+  - `.superpowers/sdd/2026-06-26-v290-task-4-report.md`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts` -> failed as expected before implementation with missing `src/renderer/components/chat/*.tsx` renderer files and missing structured-output class hooks.
+- GREEN evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts` -> 1 file / 51 tests passed.
+  - `npm test -- src/renderer/materialDesign.test.ts src/renderer/chatOutputModel.test.ts src/renderer/chatMarkdown.test.ts src/renderer/chatStreamReducer.test.ts` -> 4 files / 72 tests passed.
+  - `npm run build` -> passed, with the existing Vite chunk-size warning.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+- Implementation evidence:
+  - `AgentChatPanel` now renders assistant messages with `<AnswerBlock parts={outputPartsFromMessage(message)} />` and leaves user messages on `MarkdownMessage`.
+  - `OutputPartRenderer` covers text, table, code, file_diff, command_output, tool_call, tool_result, file_ref, artifact, citation, approval_request, input_request, diagnostic, and ledger_event.
+  - Added semantic table, code/diff, command output, masked JSON/tool preview, ledger, and evidence rail components without raw HTML or new dependencies.
+
 ## 2026-06-26 - v2.9.0 Task 1 Shared Output Contract
 
 - Request: implement Task 1 from the approved 2.9.0 output rendering plan by adding the shared typed output contract and updating chat stream contract tests, while keeping `ChatMessageRecord.content` backward compatible and scoping production changes to shared contracts/helpers only.
