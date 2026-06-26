@@ -537,6 +537,7 @@ describe("chat service", () => {
             type: "text",
             text:
               "已设置并开始执行目标：发布 v1.8.0，直到 GitHub Release 完成才算结束。",
+            createdAt: "2026-06-12T08:00:00.000Z",
           }),
         ],
       }),
@@ -1858,6 +1859,96 @@ describe("chat service", () => {
     expect(serializedOutput).toContain('"authorization":"****"');
     expect(serializedOutput).toContain('"token":"****"');
     expect(serializedOutput).toContain('"password":"****"');
+  });
+
+  it("emits and persists approval request output parts for tool invocations waiting on approval", async () => {
+    const streamEvents: ChatStreamEvent[] = [];
+    const chatSessionStore = createChatSessionStore([]);
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore,
+      toolExecutor: createToolExecutor(),
+      async runAgentLoop(messages, _profile, options) {
+        options.onToolInvocation?.({
+          id: "approval_1",
+          runId: "run_1",
+          toolCallId: "tool_approval_1",
+          toolName: "shell_exec",
+          source: "native",
+          args: {
+            command: "npm test",
+            apiKey: "secret-value",
+            nested: { password: "secret-password" },
+          },
+          status: "waiting_approval",
+          createdAt: "2026-06-23T08:00:00.000Z",
+          updatedAt: "2026-06-23T08:00:00.000Z",
+          history: [
+            {
+              status: "waiting_approval",
+              at: "2026-06-23T08:00:00.000Z",
+              reason: "requires approval",
+            },
+          ],
+        });
+        return {
+          status: "succeeded" as const,
+          summary: "Approval requested.",
+          turns: 1,
+          messages,
+          toolCallsExecuted: 0,
+        };
+      },
+      createId: () => "chat_approval_parts",
+      now: () => new Date("2026-06-23T08:00:00.000Z"),
+    });
+
+    await service.sendMessage(
+      {
+        requestId: "request_approval_parts",
+        message: "run approval tool",
+      },
+      {
+        onStreamEvent(event) {
+          streamEvents.push(event);
+        },
+      },
+    );
+
+    const approvalStreamPart = streamEvents.find(
+      (event): event is Extract<ChatStreamEvent, { type: "output_part" }> =>
+        event.type === "output_part" &&
+        event.part.type === "approval_request",
+    )?.part;
+    const persistedAssistant = (await chatSessionStore.get("persisted_session"))?.messages.at(-1);
+    const persistedApprovalPart = persistedAssistant?.outputParts?.find(
+      (part) => part.type === "approval_request",
+    );
+
+    expect(approvalStreamPart).toMatchObject({
+      type: "approval_request",
+      approvalId: "approval_1",
+      toolName: "shell_exec",
+      riskLevel: "high",
+      argsPreview: {
+        command: "npm test",
+        apiKey: "****",
+        nested: { password: "****" },
+      },
+    });
+    expect(persistedApprovalPart).toEqual(approvalStreamPart);
+    expect(JSON.stringify([approvalStreamPart, persistedApprovalPart])).not.toContain(
+      "secret-value",
+    );
+    expect(JSON.stringify([approvalStreamPart, persistedApprovalPart])).not.toContain(
+      "secret-password",
+    );
   });
 
   it("redacts chunked tool-call argument previews until they become valid JSON", async () => {
@@ -3233,6 +3324,111 @@ describe("chat service", () => {
       ]),
     );
     expect(activityEvents.filter((event) => event.state === "waiting_for_input")).toHaveLength(2);
+  });
+
+  it("emits diagnostic output and a failed terminal event when guided input follow-up wait persistence fails", async () => {
+    const initialStreamEvents: ChatStreamEvent[] = [];
+    const responseStreamEvents: ChatStreamEvent[] = [];
+    const baseStore = createChatSessionStore([]);
+    let pendingPersistWrites = 0;
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: {
+        ...baseStore,
+        async appendActivityEvent(sessionId, event) {
+          if (event.pendingSkillInput?.status === "pending") {
+            pendingPersistWrites += 1;
+            if (pendingPersistWrites > 1) {
+              throw new Error("follow-up wait write failed");
+            }
+          }
+          return baseStore.appendActivityEvent(sessionId, event);
+        },
+      },
+      discoverSkills: async () => ({
+        skills: [
+          createSkillRecord({
+            name: "local-file-organizer",
+            manifest: {
+              inputs: [
+                {
+                  name: "targetDir",
+                  label: "Target directory",
+                  type: "path",
+                  required: true,
+                },
+                {
+                  name: "format",
+                  label: "Format",
+                  type: "choice",
+                  required: true,
+                  choices: ["markdown", "html"],
+                },
+              ],
+            },
+          }),
+        ],
+        errors: [],
+      }),
+      createId: createSequentialId("guided_followup_fail"),
+      now: () => new Date("2026-06-23T08:00:00.000Z"),
+    });
+
+    await service.sendMessage(
+      {
+        sessionId: "session_1",
+        requestId: "request_1",
+        message: "organize files",
+        selectedSkillName: "local-file-organizer",
+      },
+      { onStreamEvent: (event) => initialStreamEvents.push(event) },
+    );
+    const inputRequest = initialStreamEvents.find(
+      (event): event is Extract<ChatStreamEvent, { type: "waiting_for_input" }> =>
+        event.type === "waiting_for_input",
+    )?.inputRequest;
+
+    const result = await service.respondSkillInput(
+      {
+        inputRequestId: inputRequest?.id ?? "",
+        values: { targetDir: "/workspace/project/docs" },
+      },
+      {
+        onStreamEvent(event) {
+          responseStreamEvents.push(event);
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      message: "Failed to persist skill input request.",
+    });
+    expect(responseStreamEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "output_part",
+          part: expect.objectContaining({
+            type: "diagnostic",
+            severity: "error",
+            message: "Failed to persist skill input request.",
+          }),
+        }),
+        expect.objectContaining({
+          type: "failed",
+          message: "Failed to persist skill input request.",
+        }),
+      ]),
+    );
+    expect(responseStreamEvents.some((event) => event.type === "waiting_for_input")).toBe(
+      false,
+    );
   });
 
   it("does not return an invalid guided input response before the next pending request is persisted", async () => {

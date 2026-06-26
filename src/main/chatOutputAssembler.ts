@@ -1,5 +1,6 @@
 import {
   maskPreviewSecrets,
+  type ChatApprovalPart,
   type ChatArtifactPart,
   type ChatCitationPart,
   type ChatCommandOutputPart,
@@ -37,6 +38,12 @@ export type ChatOutputAssembler = {
     detail?: string;
     toolName?: string;
   }): ChatLedgerEventPart;
+  appendApprovalRequest(input: {
+    approvalId: string;
+    toolName: string;
+    riskLevel: ChatApprovalPart["riskLevel"];
+    argsPreview?: unknown;
+  }): ChatApprovalPart;
   appendInputRequest(inputRequest: SkillUserInputRequest): ChatInputRequestPart;
   appendDiagnostic(input: {
     severity: ChatDiagnosticPart["severity"];
@@ -199,6 +206,20 @@ export function createChatOutputAssembler(
         title: input.title,
         ...(input.detail ? { detail: input.detail } : {}),
         ...(input.toolName ? { toolName: input.toolName } : {}),
+        createdAt: now(),
+      });
+    },
+
+    appendApprovalRequest(input) {
+      return pushPart({
+        id: `approval_${input.approvalId}`,
+        type: "approval_request",
+        approvalId: input.approvalId,
+        toolName: input.toolName,
+        riskLevel: input.riskLevel,
+        ...(input.argsPreview !== undefined
+          ? { argsPreview: maskPreviewSecrets(input.argsPreview) }
+          : {}),
         createdAt: now(),
       });
     },

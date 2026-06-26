@@ -560,6 +560,7 @@ export function createChatService(options: {
           originMessageId: userMessageId,
           sessionId,
           emitStatus,
+          now: options.now,
           signal: runtimeOptions.signal,
         });
 
@@ -923,6 +924,19 @@ export function createChatService(options: {
                   ...(typeof record.ok === "boolean" ? { ok: record.ok } : {}),
                   toolCallsExecuted: observedToolCallsExecuted,
                 });
+                if (record.status === "waiting_approval") {
+                  emitOutputPart(
+                    outputAssembler.appendApprovalRequest({
+                      approvalId: record.id,
+                      toolName: record.toolName,
+                      riskLevel: inferApprovalRiskLevel({
+                        toolName: record.toolName,
+                        source: record.source,
+                      }),
+                      argsPreview: record.args,
+                    }),
+                  );
+                }
               },
               onToolResult(toolName, ok, result, event) {
                 observedToolCallsExecuted += 1;
@@ -1309,6 +1323,21 @@ export function createChatService(options: {
           ).appendInputRequest(inputRequest),
         });
       } catch {
+        const outputAssembler = createChatOutputAssembler(() =>
+          new Date(getNowMs(options.now)).toISOString(),
+        );
+        emitStatus.sendStreamEvent({
+          type: "output_part",
+          part: outputAssembler.appendDiagnostic({
+            severity: "error",
+            title: "请求失败",
+            message: "Failed to persist skill input request.",
+          }),
+        });
+        emitStatus.sendTerminalEvent({
+          type: "failed",
+          message: "Failed to persist skill input request.",
+        });
         return {
           ok: false,
           message: "Failed to persist skill input request.",
@@ -1600,6 +1629,22 @@ function normalizeToolCallPreviewIndex(value: unknown): number | undefined {
 
 function getNowMs(now: (() => Date) | undefined): number {
   return now ? now().getTime() : Date.now();
+}
+
+function inferApprovalRiskLevel(input: {
+  toolName: string;
+  source?: string;
+}): "medium" | "high" {
+  const normalized = `${input.toolName} ${input.source ?? ""}`.toLowerCase();
+  if (
+    normalized.includes("shell") ||
+    normalized.includes("file_write") ||
+    normalized.includes("markdown_report_write") ||
+    (normalized.includes("markdown") && normalized.includes("write"))
+  ) {
+    return "high";
+  }
+  return "medium";
 }
 
 type ChatWorkspaceRunRecorder = {
@@ -2157,6 +2202,7 @@ async function tryRouteGoalIntent(options: {
   originMessageId: string | null;
   sessionId: string;
   emitStatus?: ReturnType<typeof createChatStatusEmitter>;
+  now?: () => Date;
   signal?: AbortSignal;
 }): Promise<{ result: SendChatMessageResult } | null> {
   async function appendGoalReply(input: {
@@ -2164,7 +2210,9 @@ async function tryRouteGoalIntent(options: {
     goalId: string;
     goalEventRef: string;
   }) {
-    const goalOutputAssembler = createChatOutputAssembler();
+    const goalOutputAssembler = createChatOutputAssembler(() =>
+      new Date(getNowMs(options.now)).toISOString(),
+    );
     goalOutputAssembler.setFinalText(input.content);
     const assistantMessageId = await appendAssistantMessage({
       chatSessionStore: options.chatSessionStore,
