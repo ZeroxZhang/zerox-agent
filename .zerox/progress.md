@@ -5163,3 +5163,32 @@
   - `release/Zerox Agent-2.9.0-arm64-mac.zip` sha256 `1cef619578dc5816890c9a65b3ccc90583841a3f4cf04a235bd29d9cd9d9a1e7`
   - Normal packaged app launched for user testing from `release/mac-arm64/Zerox Agent.app`, PID `14125`.
   - Local screenshot attempt: `screencapture -x /tmp/zerox-agent-typography-hotfix.png` failed with `could not create image from display`; visual confirmation should be done in the launched packaged app.
+
+## 2026-06-26 - Markdown Typography and Context Summary Hotfix
+
+- Request:
+  - Fix the remaining v2.9.0 display issues where file names/table content still looked larger than body text, some emphasized body text appeared to jump in size, and the right-side process row showed a nonfunctional `展开` action with wrapped long reasoning text.
+- Root cause:
+  - The legacy `MarkdownMessage` path in `AgentChatPanel.tsx` rendered raw `<table>` elements instead of the shared `chat-data-table` surface, so persisted/legacy messages did not inherit the same typography and wrapping contract as the new answer renderer.
+  - Markdown `strong` content used weight-only emphasis with no explicit visual treatment, making dense Chinese/English text read like a size jump in the transcript.
+  - `TaskProcessItem` reused the expandable transcript behavior inside the narrow context panel, even though the card already shows `最新思考` above and the process list only needs one-line scan summaries.
+- Changed areas:
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/styles/chat.css`
+  - `src/renderer/materialDesign.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts -t "typography|context process"` -> failed as expected because `.markdown-message strong` lacked the shared emphasis background and `TaskProcessItem` did not expose compact one-line context behavior.
+- GREEN / verification evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts -t "typography|context process"` -> 2 focused tests passed.
+  - `npm test -- src/renderer/materialDesign.test.ts src/renderer/chatMarkdown.test.ts src/renderer/chatOutputModel.test.ts src/renderer/chatStreamReducer.test.ts` -> 4 files / 79 tests passed.
+  - `npm test` -> 179 files / 1235 tests passed.
+  - `npm run build` -> passed; Vite emitted the existing large chunk warning.
+  - `npm run verify` -> 179 files / 1235 tests passed, build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `better-sqlite3` ABI mismatch triggered the existing JSON fallback during smoke.
+  - `git diff --check` -> passed.
+  - `npm run dist:mac` -> passed; regenerated unsigned macOS arm64 DMG, ZIP, blockmaps, and `latest-mac.yml` for v2.9.0.
+  - Packaged app smoke: `BUILDING_AGENT_SMOKE=1 "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+  - `release/Zerox Agent-2.9.0-arm64.dmg` sha256 `19d60c3d17725ce55971e353c0b91960e236a7f7e26a403892cd9887bcdf6f37`
+  - `release/Zerox Agent-2.9.0-arm64-mac.zip` sha256 `f49f76354367cf165cec763104c22c33b071558d1aa66a2683a344f2bd7ed549`

@@ -245,6 +245,9 @@
 }
 
 .chat-message {
+  --chat-output-font-size: var(--text-base);
+  --chat-output-heading-size: var(--text-md);
+  --chat-output-emphasis-bg: rgba(37, 99, 235, 0.08);
   display: grid;
   gap: 8px;
   width: min(960px, 100%);
@@ -357,8 +360,12 @@
 }
 
 .markdown-message strong {
+  display: inline;
+  padding: 0 3px;
+  border-radius: 5px;
+  background: var(--chat-output-emphasis-bg);
   font-size: inherit;
-  font-weight: var(--font-semibold);
+  font-weight: var(--font-medium);
 }
 
 .markdown-message a {
@@ -439,6 +446,7 @@
 .chat-answer-block {
   --chat-output-font-size: var(--text-base);
   --chat-output-heading-size: var(--text-md);
+  --chat-output-emphasis-bg: rgba(37, 99, 235, 0.08);
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   align-items: start;
@@ -559,7 +567,8 @@
   background: var(--status-warning-bg);
 }
 
-.chat-data-table-wrap {
+.chat-data-table-wrap,
+.markdown-table-wrap {
   min-width: 0;
   max-width: 100%;
   overflow-x: hidden;
@@ -568,6 +577,7 @@
   background: var(--bg-surface-raised);
 }
 
+.markdown-message table,
 .chat-data-table {
   width: 100%;
   min-width: 0;
@@ -578,6 +588,7 @@
   table-layout: fixed;
 }
 
+.markdown-message table caption,
 .chat-data-table caption {
   padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--border-default);
@@ -587,6 +598,8 @@
   text-align: left;
 }
 
+.markdown-message table th,
+.markdown-message table td,
 .chat-data-table th,
 .chat-data-table td {
   padding: 9px 10px;
@@ -599,6 +612,7 @@
   word-break: break-word;
 }
 
+.markdown-message table th,
 .chat-data-table th {
   color: var(--text-tertiary);
   background: var(--bg-inset);
@@ -606,6 +620,7 @@
   font-weight: var(--font-medium);
 }
 
+.markdown-message table tr:last-child td,
 .chat-data-table tr:last-child td {
   border-bottom: 0;
 }
@@ -1234,12 +1249,19 @@
 }
 
 .agent-context-panel .task-process-list span {
-  overflow-wrap: anywhere;
-  white-space: normal;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: normal;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .agent-context-panel .task-process-list li.is-reasoning span {
-  white-space: normal;
+  white-space: nowrap;
+}
+
+.agent-context-panel .task-process-item-toggle {
+  display: none;
 }
 
 .goal-run-process {

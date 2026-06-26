@@ -2842,7 +2842,7 @@ function ContextActivityCard({
       {recentItems.length > 0 && (
         <ol className="task-process-list" aria-label="最近执行过程">
           {recentItems.map((item) => (
-            <TaskProcessItem key={item.id} item={item} />
+            <TaskProcessItem compact={true} key={item.id} item={item} />
           ))}
         </ol>
       )}
@@ -3133,14 +3133,17 @@ function getLatestRuntimeLine(text: string): string {
     : compactLine;
 }
 
-function TaskProcessItem({
-  item,
-}: {
+type TaskProcessItemProps = {
+  compact?: boolean;
   item: ReturnType<typeof buildTaskProcessItems>[number];
-}) {
+};
+
+function TaskProcessItem(props: TaskProcessItemProps) {
+  const { compact = false, item } = props;
   const [expanded, setExpanded] = useState(false);
-  const shouldCollapse = item.message.length > 160;
+  const shouldCollapse = !compact && item.message.length > 160;
   const displayMessage =
+    compact ? getLatestRuntimeLine(item.message) :
     expanded || !shouldCollapse ? item.message : `${item.message.slice(0, 157)}...`;
 
   return (
@@ -3457,29 +3460,31 @@ function renderMarkdownBlockContent(
   if (block.type === "table") {
     const rows = showFullBlock ? block.rows : block.rows.slice(0, 8);
     return (
-      <table>
-        {block.caption ? <caption>{block.caption}</caption> : null}
-        <thead>
-          <tr>
-            {block.columns.map((column, index) => (
-              <th key={`${column}-${index}`}>
-                <InlineMarkdown text={column} />
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, rowIndex) => (
-            <tr key={`${row.join("|")}-${rowIndex}`}>
-              {row.map((cell, cellIndex) => (
-                <td key={`${cell}-${cellIndex}`}>
-                  <InlineMarkdown text={cell} />
-                </td>
+      <div className="chat-data-table-wrap markdown-table-wrap">
+        <table className="chat-data-table markdown-table">
+          {block.caption ? <caption>{block.caption}</caption> : null}
+          <thead>
+            <tr>
+              {block.columns.map((column, index) => (
+                <th key={`${column}-${index}`}>
+                  <InlineMarkdown text={column} />
+                </th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map((row, rowIndex) => (
+              <tr key={`${row.join("|")}-${rowIndex}`}>
+                {row.map((cell, cellIndex) => (
+                  <td key={`${cell}-${cellIndex}`}>
+                    <InlineMarkdown text={cell} />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     );
   }
 

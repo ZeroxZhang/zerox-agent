@@ -490,7 +490,15 @@ describe("Design System — Notion-inspired app shell", () => {
       /\.markdown-message strong\s*{[\s\S]*font-size: inherit;/,
     );
     expect(styles).toMatch(
+      /\.markdown-message strong\s*{[\s\S]*background: var\(--chat-output-emphasis-bg\);/,
+    );
+    expect(styles).toMatch(
       /\.markdown-message :not\(pre\) > code\s*{[\s\S]*font-size: inherit;[\s\S]*line-height: inherit;/,
+    );
+    expect(chatPanelSource).toContain("markdown-table-wrap");
+    expect(chatPanelSource).toContain("markdown-table");
+    expect(styles).toMatch(
+      /\.markdown-message table,[\s\S]*\.chat-data-table\s*{[\s\S]*font-size: var\(--chat-output-font-size\);/,
     );
     expect(styles).toMatch(
       /\.chat-data-table\s*{[\s\S]*font-size: var\(--chat-output-font-size\);/,
@@ -503,6 +511,28 @@ describe("Design System — Notion-inspired app shell", () => {
     );
     expect(styles).toMatch(
       /\.agent-context-panel \.task-process-list li\s*{[\s\S]*grid-template-columns: 48px 36px minmax\(0, 1fr\) auto;/,
+    );
+  });
+
+  it("keeps context process rows as one-line summaries without expand buttons", () => {
+    const taskProcessItemSource = getFunctionSource(
+      chatPanelSource,
+      "TaskProcessItem",
+    );
+
+    expect(chatPanelSource).toContain("compact?: boolean");
+    expect(chatPanelSource).toContain("compact={true}");
+    expect(taskProcessItemSource).toContain(
+      "const shouldCollapse = !compact && item.message.length > 160;",
+    );
+    expect(taskProcessItemSource).toContain(
+      "compact ? getLatestRuntimeLine(item.message) :",
+    );
+    expect(styles).toMatch(
+      /\.agent-context-panel \.task-process-list span\s*{[\s\S]*white-space: nowrap;[\s\S]*text-overflow: ellipsis;/,
+    );
+    expect(styles).toMatch(
+      /\.agent-context-panel \.task-process-item-toggle\s*{[\s\S]*display: none;/,
     );
   });
 
