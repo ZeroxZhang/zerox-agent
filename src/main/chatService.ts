@@ -313,10 +313,16 @@ export function createChatService(options: {
       );
       let terminalStreamEventSent = false;
 
-      function getAssistantOutputParts(content: string): ChatOutputPart[] | undefined {
-        outputAssembler.setFinalText(content);
-        const textOnlyParts = outputAssembler.parts();
-        return textOnlyParts.length > 0 ? textOnlyParts : undefined;
+      function finalizeAssistantOutput(content: string): {
+        outputParts?: ChatOutputPart[];
+        finalTextPart?: ChatOutputPart;
+      } {
+        const finalTextPart = outputAssembler.setFinalText(content);
+        const outputParts = outputAssembler.parts();
+        return {
+          ...(outputParts.length > 0 ? { outputParts } : {}),
+          ...(finalTextPart ? { finalTextPart } : {}),
+        };
       }
 
       function emitOutputPart(part: ChatOutputPart) {
@@ -357,11 +363,12 @@ export function createChatService(options: {
         goalId?: string;
         goalEventRef?: string;
       }): Promise<string | null> {
+        const finalizedOutput = finalizeAssistantOutput(input.content);
         const assistantMessageId = await appendAssistantMessage({
           chatSessionStore: options.chatSessionStore,
           sessionId,
           content: input.content,
-          outputParts: getAssistantOutputParts(input.content),
+          outputParts: finalizedOutput.outputParts,
           ...(input.relatedMemoryIds?.length
             ? { relatedMemoryIds: input.relatedMemoryIds }
             : {}),
@@ -370,6 +377,9 @@ export function createChatService(options: {
           ...(input.goalEventRef ? { goalEventRef: input.goalEventRef } : {}),
         });
         emitStatus.setAssistantMessageId(assistantMessageId);
+        if (finalizedOutput.finalTextPart) {
+          emitOutputPart(finalizedOutput.finalTextPart);
+        }
         emitTerminalStreamEvent({
           type: "completed",
           message: input.content,
@@ -934,6 +944,14 @@ export function createChatService(options: {
                         source: record.source,
                       }),
                       argsPreview: record.args,
+                    }),
+                  );
+                  emitOutputPart(
+                    outputAssembler.appendLedgerEvent({
+                      status: "waiting",
+                      title: `Waiting for approval: ${record.toolName}`,
+                      detail: `Tool ${record.toolName} is waiting for approval.`,
+                      toolName: record.toolName,
                     }),
                   );
                 }
@@ -2213,7 +2231,7 @@ async function tryRouteGoalIntent(options: {
     const goalOutputAssembler = createChatOutputAssembler(() =>
       new Date(getNowMs(options.now)).toISOString(),
     );
-    goalOutputAssembler.setFinalText(input.content);
+    const finalTextPart = goalOutputAssembler.setFinalText(input.content);
     const assistantMessageId = await appendAssistantMessage({
       chatSessionStore: options.chatSessionStore,
       sessionId: options.sessionId,
@@ -2223,6 +2241,12 @@ async function tryRouteGoalIntent(options: {
       goalEventRef: input.goalEventRef,
     });
     options.emitStatus?.setAssistantMessageId(assistantMessageId);
+    if (finalTextPart) {
+      options.emitStatus?.sendStreamEvent({
+        type: "output_part",
+        part: finalTextPart,
+      });
+    }
     options.emitStatus?.sendTerminalEvent({
       type: "completed",
       message: input.content,

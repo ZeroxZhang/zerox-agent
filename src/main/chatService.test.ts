@@ -473,6 +473,7 @@ describe("chat service", () => {
   });
 
   it("creates and immediately starts a session goal from an explicit goal-setting message", async () => {
+    const streamEvents: ChatStreamEvent[] = [];
     let completeCalled = false;
     const chatMessages: AppendChatMessageInput[] = [];
     const goalCreates: unknown[] = [];
@@ -493,9 +494,17 @@ describe("chat service", () => {
       now: () => new Date("2026-06-12T08:00:00.000Z"),
     });
 
-    const result = await service.sendMessage({
-      message: "把这轮设为目标：发布 v1.8.0，直到 GitHub Release 完成才算结束",
-    });
+    const result = await service.sendMessage(
+      {
+        requestId: "request_goal_start",
+        message: "把这轮设为目标：发布 v1.8.0，直到 GitHub Release 完成才算结束",
+      },
+      {
+        onStreamEvent(event) {
+          streamEvents.push(event);
+        },
+      },
+    );
 
     expect(result).toMatchObject({
       ok: true,
@@ -542,6 +551,18 @@ describe("chat service", () => {
         ],
       }),
     ]);
+    const completedIndex = streamEvents.findIndex(
+      (event) => event.type === "completed",
+    );
+    const finalTextPartIndex = streamEvents.findIndex(
+      (event) =>
+        event.type === "output_part" &&
+        event.part.type === "text" &&
+        event.part.text ===
+          "已设置并开始执行目标：发布 v1.8.0，直到 GitHub Release 完成才算结束。",
+    );
+    expect(finalTextPartIndex).toBeGreaterThanOrEqual(0);
+    expect(completedIndex).toBeGreaterThan(finalTextPartIndex);
     expect(completeCalled).toBe(false);
   });
 
@@ -1741,6 +1762,15 @@ describe("chat service", () => {
       reply: "🔧 使用了 1 个工具\n\nFinal reply.",
     });
     const persistedAssistant = (await chatSessionStore.get("persisted_session"))?.messages.at(-1);
+    const completedIndex = streamEvents.findIndex(
+      (event) => event.type === "completed",
+    );
+    const finalTextPartIndex = streamEvents.findIndex(
+      (event) =>
+        event.type === "output_part" &&
+        event.part.type === "text" &&
+        event.part.text === persistedAssistant?.content,
+    );
     expect(persistedAssistant).toMatchObject({
       role: "assistant",
       content: "🔧 使用了 1 个工具\n\nFinal reply.",
@@ -1760,6 +1790,8 @@ describe("chat service", () => {
         }),
       ]),
     });
+    expect(finalTextPartIndex).toBeGreaterThanOrEqual(0);
+    expect(completedIndex).toBeGreaterThan(finalTextPartIndex);
     expect(streamEvents).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1930,6 +1962,15 @@ describe("chat service", () => {
     const persistedApprovalPart = persistedAssistant?.outputParts?.find(
       (part) => part.type === "approval_request",
     );
+    const ledgerStreamPart = streamEvents.find(
+      (event): event is Extract<ChatStreamEvent, { type: "output_part" }> =>
+        event.type === "output_part" &&
+        event.part.type === "ledger_event" &&
+        event.part.status === "waiting",
+    )?.part;
+    const persistedLedgerPart = persistedAssistant?.outputParts?.find(
+      (part) => part.type === "ledger_event" && part.status === "waiting",
+    );
 
     expect(approvalStreamPart).toMatchObject({
       type: "approval_request",
@@ -1949,6 +1990,14 @@ describe("chat service", () => {
     expect(JSON.stringify([approvalStreamPart, persistedApprovalPart])).not.toContain(
       "secret-password",
     );
+    expect(ledgerStreamPart).toMatchObject({
+      type: "ledger_event",
+      status: "waiting",
+      title: expect.stringContaining("shell_exec"),
+      detail: expect.stringContaining("approval"),
+      toolName: "shell_exec",
+    });
+    expect(persistedLedgerPart).toEqual(ledgerStreamPart);
   });
 
   it("redacts chunked tool-call argument previews until they become valid JSON", async () => {
