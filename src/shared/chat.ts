@@ -2,6 +2,7 @@ import type { MemoryKind } from "./memory";
 import type { AgentRunRecord } from "./agentRuns";
 import type { ScheduledTask } from "./scheduledTasks";
 import type { GoalStatus } from "./agentGoal";
+import type { ChatOutputPart } from "./chatOutput";
 
 export type ChatHistoryMessage = {
   role: "assistant" | "user";
@@ -11,6 +12,7 @@ export type ChatHistoryMessage = {
 export type ChatMessageRecord = ChatHistoryMessage & {
   id: string;
   createdAt: string;
+  outputParts?: ChatOutputPart[];
   relatedMemoryIds?: string[];
   executedRunId?: string;
   goalId?: string;
@@ -146,6 +148,9 @@ export type SkillInputResponseResult = SendChatMessageResult;
 type ChatStreamEventBase = {
   sessionId: string;
   requestId: string;
+  sequence: number;
+  turnId: string;
+  assistantMessageId?: string;
   createdAt: string;
 };
 
@@ -166,6 +171,10 @@ export type ChatStreamEvent =
       argumentsDelta?: string;
     })
   | (ChatStreamEventBase & {
+      type: "output_part";
+      part: ChatOutputPart;
+    })
+  | (ChatStreamEventBase & {
       type: "status";
       status: ChatTaskStatusEvent;
     })
@@ -175,6 +184,7 @@ export type ChatStreamEvent =
     })
   | (ChatStreamEventBase & {
       type: "completed" | "failed" | "canceled";
+      finalMessageId?: string;
       message?: string;
     });
 

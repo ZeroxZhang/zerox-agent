@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type {
+  ChatMessageRecord,
   ChatStreamEvent,
   ChatTaskStatusEvent,
   SkillInputResponse,
   SkillInputResponseResult,
   SkillUserInputRequest,
 } from "./chat";
+import type { ChatOutputPart } from "./chatOutput";
 
 describe("chat stream contract", () => {
   it("accepts answer and thinking text chat-layer stream events", () => {
@@ -13,6 +15,8 @@ describe("chat stream contract", () => {
       type: "answer_delta",
       sessionId: "session_1",
       requestId: "request_1",
+      sequence: 1,
+      turnId: "turn_1",
       text: "I can do that.",
       createdAt: "2026-06-23T08:00:00.000Z",
     } satisfies ChatStreamEvent;
@@ -20,6 +24,8 @@ describe("chat stream contract", () => {
       type: "thinking_delta",
       sessionId: "session_1",
       requestId: "request_1",
+      sequence: 2,
+      turnId: "turn_1",
       text: "Checking the skill contract.",
       createdAt: "2026-06-23T08:00:01.000Z",
     } satisfies ChatStreamEvent;
@@ -27,6 +33,8 @@ describe("chat stream contract", () => {
       type: "tool_call_preview",
       sessionId: "session_1",
       requestId: "request_1",
+      sequence: 3,
+      turnId: "turn_1",
       toolCallId: "tool_call_1",
       index: 0,
       toolName: "file_read",
@@ -45,6 +53,37 @@ describe("chat stream contract", () => {
     });
     expect(answerEvent).not.toHaveProperty("delta");
     expect(thinkingEvent).not.toHaveProperty("delta");
+  });
+
+  it("accepts output parts on chat records and as stream events", () => {
+    const part = {
+      id: "part_1",
+      type: "ledger_event",
+      status: "running",
+      title: "Tool started",
+      detail: "rg --files",
+    } satisfies ChatOutputPart;
+    const message = {
+      id: "message_1",
+      role: "assistant",
+      content: "Working through the repo",
+      outputParts: [part],
+      createdAt: "2026-06-23T08:00:01.000Z",
+    } satisfies ChatMessageRecord;
+    const event = {
+      type: "output_part",
+      sessionId: "session_1",
+      requestId: "request_1",
+      sequence: 4,
+      turnId: "turn_1",
+      assistantMessageId: "message_1",
+      part,
+      createdAt: "2026-06-23T08:00:02.000Z",
+    } satisfies ChatStreamEvent;
+
+    expect(message.outputParts?.[0]).toBe(part);
+    expect(event.part).toBe(part);
+    expect(event.assistantMessageId).toBe("message_1");
   });
 
   it("accepts waiting input stream events with plan-shaped guided skill fields", () => {
@@ -86,6 +125,8 @@ describe("chat stream contract", () => {
       type: "waiting_for_input",
       sessionId: "session_1",
       requestId: "request_1",
+      sequence: 5,
+      turnId: "turn_2",
       inputRequest,
       createdAt: "2026-06-23T08:00:02.000Z",
     } satisfies ChatStreamEvent;
@@ -179,6 +220,8 @@ describe("chat stream contract", () => {
       type: "status",
       sessionId: "session_2",
       requestId: "request_2",
+      sequence: 6,
+      turnId: "turn_3",
       status: streamingStatus,
       createdAt: "2026-06-23T08:00:04.000Z",
     } satisfies ChatStreamEvent;
@@ -197,18 +240,25 @@ describe("chat stream contract", () => {
         type: "completed",
         sessionId: "session_3",
         requestId: "request_3",
+        sequence: 7,
+        turnId: "turn_4",
+        finalMessageId: "message_3",
         createdAt: "2026-06-23T08:00:06.000Z",
       },
       {
         type: "failed",
         sessionId: "session_3",
         requestId: "request_3",
+        sequence: 8,
+        turnId: "turn_4",
         createdAt: "2026-06-23T08:00:07.000Z",
       },
       {
         type: "canceled",
         sessionId: "session_3",
         requestId: "request_3",
+        sequence: 9,
+        turnId: "turn_4",
         createdAt: "2026-06-23T08:00:08.000Z",
       },
     ] satisfies ChatStreamEvent[];

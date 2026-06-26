@@ -1,5 +1,27 @@
 # Zerox Harness Progress
 
+## 2026-06-26 - v2.9.0 Task 1 Shared Output Contract
+
+- Request: implement Task 1 from the approved 2.9.0 output rendering plan by adding the shared typed output contract and updating chat stream contract tests, while keeping `ChatMessageRecord.content` backward compatible and scoping production changes to shared contracts/helpers only.
+- Changed files:
+  - `src/shared/chat.ts`
+  - `src/shared/chatStream.test.ts`
+  - `src/shared/chatOutput.ts`
+  - `src/shared/chatOutput.test.ts`
+  - `.superpowers/sdd/task-1-report.md`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/shared/chatOutput.test.ts src/shared/chatStream.test.ts` -> failed as expected before implementation because `src/shared/chatOutput.ts` did not exist (`Cannot find module './chatOutput'`), proving the new contract test was exercising the missing shared output module first.
+- GREEN evidence:
+  - `npm test -- src/shared/chatOutput.test.ts src/shared/chatStream.test.ts` -> 2 files / 8 tests passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+- Implementation evidence:
+  - Added `ChatOutputPart` union coverage for text, tables, code, diffs, command output, tool previews/results, file refs, artifacts, citations, approvals, guided input, diagnostics, and ledger rows.
+  - Added `maskPreviewSecrets()` using the required ASCII mask string `****`.
+  - Added `outputPartsToPlainText()` fallback rendering for plain transcript compatibility.
+  - Extended `ChatMessageRecord` with optional `outputParts` and extended `ChatStreamEvent` with `sequence`, `turnId`, optional `assistantMessageId`, typed `output_part` events, and terminal `finalMessageId`.
+
 ## 2026-06-26 - v2.9.0 Output Rendering Planning And Approved Visual Direction
 
 - Request: begin the v2.9.0 major iteration to improve output result display and rendering, first study the current rendering model, research mainstream agent/chatbox rendering patterns, produce visual drafts for confirmation before development, and ensure later changes include frontend and backend adaptation.
