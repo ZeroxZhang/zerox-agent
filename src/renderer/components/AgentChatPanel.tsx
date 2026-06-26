@@ -3388,6 +3388,20 @@ function renderMarkdownBlockContent(
     );
   }
 
+  if (block.type === "taskList") {
+    const items = showFullBlock ? block.items : block.items.slice(0, 4);
+    return (
+      <ul>
+        {items.map((item, index) => (
+          <li key={`${item.checked}-${item.text}-${index}`}>
+            <input checked={item.checked} readOnly type="checkbox" />{" "}
+            <InlineMarkdown text={item.text} />
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
   if (block.type === "code") {
     return (
       <div className="markdown-code-block">
@@ -3398,6 +3412,44 @@ function renderMarkdownBlockContent(
           <code>{showFullBlock ? block.code : `${block.code.slice(0, 800)}...`}</code>
         </pre>
       </div>
+    );
+  }
+
+  if (block.type === "table") {
+    const rows = showFullBlock ? block.rows : block.rows.slice(0, 8);
+    return (
+      <table>
+        {block.caption ? <caption>{block.caption}</caption> : null}
+        <thead>
+          <tr>
+            {block.columns.map((column, index) => (
+              <th key={`${column}-${index}`}>
+                <InlineMarkdown text={column} />
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, rowIndex) => (
+            <tr key={`${row.join("|")}-${rowIndex}`}>
+              {row.map((cell, cellIndex) => (
+                <td key={`${cell}-${cellIndex}`}>
+                  <InlineMarkdown text={cell} />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+  }
+
+  if (block.type === "blockquote") {
+    const text = showFullBlock ? block.text : `${block.text.slice(0, 360)}...`;
+    return (
+      <blockquote>
+        <InlineMarkdown text={text} />
+      </blockquote>
     );
   }
 
@@ -3416,7 +3468,19 @@ function shouldCollapseMarkdownBlock(block: MarkdownBlock): boolean {
   if (block.type === "orderedList" || block.type === "unorderedList") {
     return block.items.length > 4 || block.items.join("\n").length > 520;
   }
+  if (block.type === "taskList") {
+    return (
+      block.items.length > 4 ||
+      block.items.map((item) => item.text).join("\n").length > 520
+    );
+  }
+  if (block.type === "table") {
+    return block.rows.length > 8 || block.rows.flat().join("\n").length > 700;
+  }
   if (block.type === "paragraph") {
+    return block.text.length > 420;
+  }
+  if (block.type === "blockquote") {
     return block.text.length > 420;
   }
   return false;

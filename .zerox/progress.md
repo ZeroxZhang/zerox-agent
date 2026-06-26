@@ -4813,3 +4813,26 @@
   - `npm run harness:check` -> passed.
   - `git diff --check` -> passed.
   - Full `npm run verify` and `npm run smoke:prod` remain deferred to later P23 release/renderer tasks while the v2.9.0 feature remains intentionally planned.
+
+## 2026-06-26 - Zerox Agent 2.9.0 Output Rendering Task 3
+
+- Request:
+  - Implement markdown table, blockquote, task-list, fenced diff metadata coverage, and renderer output-model normalization for persisted and live output parts.
+- Changed areas:
+  - `src/renderer/chatMarkdown.ts`
+  - `src/renderer/chatMarkdown.test.ts`
+  - `src/renderer/chatOutputModel.ts`
+  - `src/renderer/chatOutputModel.test.ts`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `.superpowers/sdd/2026-06-26-v290-task-3-report.md`
+- RED evidence:
+  - `npm test -- src/renderer/chatMarkdown.test.ts src/renderer/chatOutputModel.test.ts` -> failed as expected: missing `chatOutputModel`, markdown tables parsed as paragraphs, blockquotes parsed as paragraphs, and task lists parsed as unordered lists.
+- GREEN / verification evidence:
+  - `npm test -- src/renderer/chatMarkdown.test.ts src/renderer/chatOutputModel.test.ts` -> 2 files / 11 tests passed.
+  - Refactor re-run: `npm test -- src/renderer/chatMarkdown.test.ts src/renderer/chatOutputModel.test.ts` -> 2 files / 11 tests passed.
+  - `npm test -- src/renderer/chatMarkdown.test.ts src/renderer/chatOutputModel.test.ts src/renderer/chatStreamReducer.test.ts` -> 3 files / 18 tests passed.
+  - `npm run build` -> passed; Vite emitted the existing large chunk warning.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `better-sqlite3` ABI mismatch triggered the existing JSON fallback during smoke.
+  - `npm run verify` -> still fails in `src/shared/packageScripts.test.ts` because the repo-level `v2.8.5` release gate expects no non-`done` features while `P23-v2.9.0-output-rendering` is intentionally still `planned`.
