@@ -1847,7 +1847,7 @@
         "renderer uses dedicated output components for tables, code blocks, diffs, terminal output, JSON, artifacts, citations, approvals, guided input, diagnostics, and run ledger rows",
         "tool authorization and workspace sandbox checks remain centralized in existing backend services",
         "restored sessions render rich output structure consistently with live sessions",
-        "package metadata reports version 2.9.0 in package.json and package-lock.json",
+        "package metadata reports version 2.9.2 in package.json and package-lock.json",
         "focused output-contract, main-process, renderer, material design, full verification, smoke, harness, and rendered QA gates pass"
       ],
       "verification": [

@@ -8,7 +8,7 @@ type PackageJson = {
 };
 
 describe("package scripts", () => {
-  it("sets release metadata to v2.9.0", () => {
+  it("sets release metadata to v2.9.2", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -16,12 +16,12 @@ describe("package scripts", () => {
       readFileSync(path.join(process.cwd(), "package-lock.json"), "utf8"),
     ) as { version?: string; packages?: Record<string, { version?: string }> };
 
-    expect(packageJson.version).toBe("2.9.0");
-    expect(packageLock.version).toBe("2.9.0");
-    expect(packageLock.packages?.[""]?.version).toBe("2.9.0");
+    expect(packageJson.version).toBe("2.9.2");
+    expect(packageLock.version).toBe("2.9.2");
+    expect(packageLock.packages?.[""]?.version).toBe("2.9.2");
   });
 
-  it("keeps release gates done through v2.9.0", () => {
+  it("keeps release gates done through v2.9.2", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -35,7 +35,7 @@ describe("package scripts", () => {
       }>;
     };
 
-    expect(packageJson.version).toBe("2.9.0");
+    expect(packageJson.version).toBe("2.9.2");
     expect(featureList.features.filter((feature) => feature.status !== "done")).toEqual([]);
     expect(featureList.features).toContainEqual(
       expect.objectContaining({
@@ -45,7 +45,7 @@ describe("package scripts", () => {
           expect.stringContaining("approved Evidence-Linked Answer plus Run Ledger"),
           expect.stringContaining("typed shared output parts cover text, tables, code blocks"),
           expect.stringContaining("restored sessions render rich output structure"),
-          expect.stringContaining("package metadata reports version 2.9.0"),
+          expect.stringContaining("package metadata reports version 2.9.2"),
         ]),
       }),
     );

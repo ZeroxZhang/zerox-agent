@@ -5192,3 +5192,31 @@
   - Packaged app smoke: `BUILDING_AGENT_SMOKE=1 "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
   - `release/Zerox Agent-2.9.0-arm64.dmg` sha256 `19d60c3d17725ce55971e353c0b91960e236a7f7e26a403892cd9887bcdf6f37`
   - `release/Zerox Agent-2.9.0-arm64-mac.zip` sha256 `f49f76354367cf165cec763104c22c33b071558d1aa66a2683a344f2bd7ed549`
+
+## 2026-06-26 - Zerox Agent v2.9.2 Release Packaging
+
+- Request:
+  - Ship the current v2.9 output-rendering hotfix line as version `2.9.2`, package macOS artifacts, publish the release, and push source metadata.
+- Changed areas:
+  - `package.json`
+  - `package-lock.json`
+  - `README.md`
+  - `.zerox/feature_list.json`
+  - `src/shared/packageScripts.test.ts`
+  - `src/shared/readme.test.ts`
+  - `.zerox/progress.md`
+- Verification evidence:
+  - `npm version 2.9.2 --no-git-tag-version` -> updated root package metadata and lockfile metadata.
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 2 files / 11 tests passed.
+  - `npm run verify` -> 179 files / 1235 tests passed, build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `better-sqlite3` ABI mismatch triggered the existing JSON fallback during smoke.
+  - `npm run dist:mac` -> passed; generated unsigned macOS arm64 DMG, ZIP, blockmaps, and `latest-mac.yml` for v2.9.2.
+  - Packaged app smoke: `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v2.9.2' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+  - `release/latest-mac.yml` reports `version: 2.9.2`.
+  - `release/Zerox Agent-2.9.2-arm64.dmg` (122M, sha256 `4257919ad890c259275c90c47d3a7f6ec3a318c930393fa7c7c347e2435d817a`)
+  - `release/Zerox Agent-2.9.2-arm64-mac.zip` (333M, sha256 `67c3f6a873918c4a69df34b9b1cccc52e6b6da50e8436c766d3e14cf4b96fcc4`)
+  - `release/Zerox Agent-2.9.2-arm64.dmg.blockmap` (133K, sha256 `550a5d2280f89db1063e44eedcccd1c21340224719e04259e1e170f74b61f557`)
+  - `release/Zerox Agent-2.9.2-arm64-mac.zip.blockmap` (335K, sha256 `498d439413111fbda896f9a1520f519d2a147ecd61b96d60862e0b78fb2ebcb2`)
+  - `release/latest-mac.yml` sha256 `c5f36a9179f51b5d726efc32b068d606ea40a0af394729f1d59862d762d177d9`.
