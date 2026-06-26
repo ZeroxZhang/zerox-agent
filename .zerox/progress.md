@@ -4887,3 +4887,21 @@
   - `npm run build` -> passed; Vite emitted the existing large chunk warning.
   - `npm run harness:check` -> passed.
   - `git diff --check` -> passed.
+
+## 2026-06-26 - Zerox Agent 2.9.0 Output Rendering Task 4 Review Blocker
+
+- Request:
+  - Fix `JsonPreview` secret leakage by making `maskPreviewSecrets()` recursively sanitize `Map` entries and `Set` values before renderer serialization.
+- Changed areas:
+  - `src/shared/chatOutput.ts`
+  - `src/shared/chatOutput.test.ts`
+  - `.superpowers/sdd/2026-06-26-v290-task-4-report.md`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/shared/chatOutput.test.ts` -> failed as expected: `Map` secret key values and nested `Set` object secrets remained unmasked.
+- GREEN / verification evidence:
+  - `npm test -- src/shared/chatOutput.test.ts` -> 1 file / 6 tests passed.
+  - `npm test -- src/shared/chatOutput.test.ts src/renderer/materialDesign.test.ts src/renderer/chatOutputModel.test.ts src/renderer/chatMarkdown.test.ts src/renderer/chatStreamReducer.test.ts` -> 5 files / 78 tests passed.
+  - `npm run build` -> passed; Vite emitted the existing large chunk warning.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.

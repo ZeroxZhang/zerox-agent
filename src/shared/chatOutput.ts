@@ -142,19 +142,65 @@ export type ChatOutputPart =
 const SECRET_FIELD_PATTERN = /(token|key|secret|password|authorization)/i;
 
 export function maskPreviewSecrets(value: unknown): unknown {
+  return maskPreviewSecretsValue(value, new WeakMap<object, unknown>());
+}
+
+function maskPreviewSecretsValue(value: unknown, seen: WeakMap<object, unknown>): unknown {
   if (Array.isArray(value)) {
-    return value.map((item) => maskPreviewSecrets(item));
+    const existing = seen.get(value);
+    if (existing) {
+      return existing;
+    }
+    const masked: unknown[] = [];
+    seen.set(value, masked);
+    for (const item of value) {
+      masked.push(maskPreviewSecretsValue(item, seen));
+    }
+    return masked;
   }
-  if (value instanceof Date || value instanceof Error || value instanceof Map || value instanceof Set) {
+  if (value instanceof Date || value instanceof Error) {
     return value;
   }
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+  if (value instanceof Map) {
+    const existing = seen.get(value);
+    if (existing) {
+      return existing;
+    }
+    const masked = new Map<unknown, unknown>();
+    seen.set(value, masked);
+    for (const [key, item] of value) {
+      masked.set(
         key,
-        SECRET_FIELD_PATTERN.test(key) ? "****" : maskPreviewSecrets(item),
-      ]),
-    );
+        typeof key === "string" && SECRET_FIELD_PATTERN.test(key)
+          ? "****"
+          : maskPreviewSecretsValue(item, seen),
+      );
+    }
+    return masked;
+  }
+  if (value instanceof Set) {
+    const existing = seen.get(value);
+    if (existing) {
+      return existing;
+    }
+    const masked = new Set<unknown>();
+    seen.set(value, masked);
+    for (const item of value) {
+      masked.add(maskPreviewSecretsValue(item, seen));
+    }
+    return masked;
+  }
+  if (value && typeof value === "object") {
+    const existing = seen.get(value);
+    if (existing) {
+      return existing;
+    }
+    const masked: Record<string, unknown> = {};
+    seen.set(value, masked);
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      masked[key] = SECRET_FIELD_PATTERN.test(key) ? "****" : maskPreviewSecretsValue(item, seen);
+    }
+    return masked;
   }
   return value;
 }

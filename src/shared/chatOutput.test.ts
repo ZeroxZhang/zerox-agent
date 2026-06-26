@@ -161,4 +161,26 @@ describe("chat output parts", () => {
     expect(masked.failure).toBe(failure);
     expect(masked.nested.password).toBe("****");
   });
+
+  it("masks secret-like Map entries and nested Map values", () => {
+    const masked = maskPreviewSecrets(
+      new Map<string, unknown>([
+        ["apiKey", "sk-local-secret"],
+        ["nested", { password: "super-secret", count: 3 }],
+      ]),
+    ) as Map<string, unknown>;
+
+    expect(masked).toBeInstanceOf(Map);
+    expect(masked.get("apiKey")).toBe("****");
+    expect(masked.get("nested")).toEqual({ password: "****", count: 3 });
+  });
+
+  it("masks secret-like values inside Sets", () => {
+    const masked = maskPreviewSecrets(
+      new Set<unknown>([{ authorization: "Bearer local-secret", count: 3 }]),
+    ) as Set<unknown>;
+
+    expect(masked).toBeInstanceOf(Set);
+    expect(Array.from(masked)).toEqual([{ authorization: "****", count: 3 }]);
+  });
 });
