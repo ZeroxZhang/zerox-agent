@@ -1,5 +1,34 @@
 # Zerox Harness Progress
 
+## 2026-06-26 - v2.9.0 Output Rendering Planning And Approved Visual Direction
+
+- Request: begin the v2.9.0 major iteration to improve output result display and rendering, first study the current rendering model, research mainstream agent/chatbox rendering patterns, produce visual drafts for confirmation before development, and ensure later changes include frontend and backend adaptation.
+- Approved direction:
+  - Default output experience uses Evidence-Linked Answer fused with Run Ledger Answer.
+  - Document Report Answer remains a mode for research/report outputs.
+  - Output formats explicitly covered by the plan include markdown text, tables, code blocks, diffs, terminal output, JSON/tool previews, file references, artifacts, citations, approvals, guided input, diagnostics, and run ledger rows.
+- Changed files:
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+  - `docs/superpowers/specs/2026-06-26-zerox-agent-2-9-0-output-rendering-design.md`
+  - `docs/superpowers/plans/2026-06-26-zerox-agent-2-9-0-output-rendering.md`
+- Design artifact:
+  - `/Users/zerox/.gstack/projects/ZeroxZhang-zerox-agent/designs/zerox-agent-2-9-output-rendering-20260626-123139/output-rendering-board.html`
+- Planning evidence:
+  - `./init.sh` -> initialized the Zerox harness, ran `npm run harness:check`, and ran `npm test -- src/shared/packageScripts.test.ts`; both passed.
+  - `.zerox/feature_list.json` initially had no unfinished features, so feature `P23-v2.9.0-output-rendering` was added as the single planned 2.9.0 feature.
+  - Current renderer study identified `AgentChatPanel`, `chatMarkdown`, `chatStreamReducer`, and `chatTaskActivity` as the live transcript/runtime rendering boundary.
+  - Backend/shared study identified `ChatMessageRecord.content: string`, `ChatStreamEvent`, `ChatTaskStatusEvent`, `chatService`, and `agentLoop` as the contract gap that must be adapted with typed output parts.
+  - Market research covered ChatGPT Canvas, Claude Artifacts/Citations, Perplexity, VS Code/GitHub Copilot agent mode, Cursor-style action chips, and Devin/Cascade-style checkpoints.
+- Verification evidence:
+  - `node -e "const f=require('./.zerox/feature_list.json'); const unfinished=f.features.filter(x=>x.status!=='done'); if (unfinished.length!==1 || unfinished[0].id!=='P23-v2.9.0-output-rendering' || unfinished[0].status!=='planned') { console.error(JSON.stringify(unfinished,null,2)); process.exit(1); } console.log('feature_list ok:', unfinished[0].id, unfinished[0].status);"` -> `feature_list ok: P23-v2.9.0-output-rendering planned`.
+  - `rg -n "TODO|TBD|FIXME|PLACEHOLDER|\\[[^\\]]*(list|commands|scenario|focused|full|fill|paste|TODO)[^\\]]*\\]|If .*differ|If .*does not|optional" docs/superpowers/specs/2026-06-26-zerox-agent-2-9-0-output-rendering-design.md docs/superpowers/plans/2026-06-26-zerox-agent-2-9-0-output-rendering.md` -> no matches.
+  - `git diff --check` -> passed.
+  - `npm run harness:check` -> passed.
+- Development status:
+  - No product implementation code was changed during this planning step.
+  - The implementation plan requires shared/backend contract work before renderer polish, so the iteration will not be a frontend-only change.
+
 ## 2026-06-26 - v2.8.2 Chat Rename, Message Rendering, Time, And Skill Strictness
 
 - Request: ship the 2.8.2 iteration with sidebar chat-session rename, cleaner main chat rendering, auto-updating/readable message times, and a root-cause fix for selected skills not being followed strictly in auto mode.

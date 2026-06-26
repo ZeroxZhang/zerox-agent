@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-06-26T04:07:28.000Z",
+  "updatedAt": "2026-06-26T04:49:15.000Z",
   "features": [
     {
       "id": "P0-repo-local-harness",
@@ -1794,6 +1794,71 @@
         "npm run dist:mac",
         "git diff --check",
         "gh release view v2.8.5"
+      ]
+    },
+    {
+      "id": "P23-v2.9.0-output-rendering",
+      "priority": 53,
+      "status": "planned",
+      "title": "v2.9.0 output rendering and evidence-bound answers",
+      "files": [
+        "README.md",
+        "package.json",
+        "package-lock.json",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md",
+        "docs/superpowers/specs/2026-06-26-zerox-agent-2-9-0-output-rendering-design.md",
+        "docs/superpowers/plans/2026-06-26-zerox-agent-2-9-0-output-rendering.md",
+        "docs/design/zerox-agent-2-9-0-output-rendering-artifact.html",
+        "src/shared/chat.ts",
+        "src/shared/chatOutput.ts",
+        "src/shared/chatOutput.test.ts",
+        "src/shared/chatStream.test.ts",
+        "src/main/chatOutputAssembler.ts",
+        "src/main/chatService.ts",
+        "src/main/chatSessionStore.ts",
+        "src/main/agentLoop.ts",
+        "src/main/chatService.test.ts",
+        "src/main/agentLoop.test.ts",
+        "src/renderer/chatMarkdown.ts",
+        "src/renderer/chatMarkdown.test.ts",
+        "src/renderer/chatOutputModel.ts",
+        "src/renderer/chatOutputModel.test.ts",
+        "src/renderer/components/AgentChatPanel.tsx",
+        "src/renderer/components/chat/AnswerBlock.tsx",
+        "src/renderer/components/chat/OutputPartRenderer.tsx",
+        "src/renderer/components/chat/CodeBlockView.tsx",
+        "src/renderer/components/chat/DataTableView.tsx",
+        "src/renderer/components/chat/CommandOutputView.tsx",
+        "src/renderer/components/chat/JsonPreview.tsx",
+        "src/renderer/components/chat/RunLedgerView.tsx",
+        "src/renderer/components/chat/EvidenceRail.tsx",
+        "src/renderer/styles/chat.css",
+        "src/renderer/styles/tokens.css",
+        "src/renderer/materialDesign.test.ts",
+        "src/shared/packageScripts.test.ts",
+        "src/shared/readme.test.ts"
+      ],
+      "definitionOfDone": [
+        "approved Evidence-Linked Answer plus Run Ledger visual direction is implemented as the default chat output experience",
+        "typed shared output parts cover text, tables, code blocks, diffs, terminal output, JSON/tool previews, file references, artifacts, citations, approvals, guided input, diagnostics, and ledger events",
+        "main process emits sequence-stable output stream events and exactly one terminal event per chat request",
+        "assistant messages persist backward-compatible plain text content plus structured outputParts for restored-session fidelity",
+        "renderer uses dedicated output components for tables, code blocks, diffs, terminal output, JSON, artifacts, citations, approvals, guided input, diagnostics, and run ledger rows",
+        "tool authorization and workspace sandbox checks remain centralized in existing backend services",
+        "restored sessions render rich output structure consistently with live sessions",
+        "package metadata reports version 2.9.0 in package.json and package-lock.json",
+        "focused output-contract, main-process, renderer, material design, full verification, smoke, harness, and rendered QA gates pass"
+      ],
+      "verification": [
+        "npm test -- src/shared/chatOutput.test.ts src/shared/chatStream.test.ts src/main/chatService.test.ts src/main/agentLoop.test.ts src/renderer/chatMarkdown.test.ts src/renderer/chatOutputModel.test.ts src/renderer/materialDesign.test.ts src/shared/packageScripts.test.ts src/shared/readme.test.ts",
+        "npm test",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "git diff --check",
+        "rendered frontend QA for desktop and narrow chat output states"
       ]
     }
   ]
