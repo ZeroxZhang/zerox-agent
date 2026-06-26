@@ -139,16 +139,8 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .chat-answer-block.has-evidence {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
   .chat-answer-body {
-    padding-left: var(--space-2);
-  }
-
-  .chat-evidence-rail {
-    grid-template-columns: minmax(0, 1fr);
+    padding-left: 0;
   }
 
   .chat-data-table-wrap,
@@ -156,7 +148,7 @@
   .chat-command-output,
   .chat-json-preview {
     max-width: 100%;
-    overflow-x: auto;
+    overflow-x: hidden;
   }
 
   .chat-ledger-row,

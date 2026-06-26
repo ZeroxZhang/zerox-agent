@@ -15,6 +15,7 @@ export function isMainConversationOutputPart(part: ChatOutputPart): boolean {
   return !(
     part.type === "approval_request" ||
     part.type === "command_output" ||
+    part.type === "file_ref" ||
     part.type === "input_request" ||
     part.type === "ledger_event" ||
     part.type === "tool_call" ||

@@ -307,7 +307,7 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".markdown-message span");
     expect(styles).toContain(".markdown-message strong");
     expect(styles).toContain(".markdown-message a");
-    expect(styles).toContain("font-size: var(--text-lg);");
+    expect(styles).toContain("font-size: var(--text-base);");
     expect(styles).toContain("background: #f3f4f6;");
   });
 
@@ -320,7 +320,6 @@ describe("Design System — Notion-inspired app shell", () => {
       "CommandOutputView.tsx",
       "JsonPreview.tsx",
       "RunLedgerView.tsx",
-      "EvidenceRail.tsx",
     ];
 
     for (const fileName of requiredComponentFiles) {
@@ -357,7 +356,7 @@ describe("Design System — Notion-inspired app shell", () => {
     );
     expect(chatPanelSource).not.toContain("outputMarkdownFromMessage");
     expect(answerBlockSource).toContain("OutputPartRenderer");
-    expect(answerBlockSource).toContain("EvidenceRail");
+    expect(answerBlockSource).not.toContain("EvidenceRail");
     expect(answerBlockSource).toContain("RenderedOutputPart");
 
     for (const rendererCase of rendererCases) {
@@ -373,7 +372,6 @@ describe("Design System — Notion-inspired app shell", () => {
       readChatOutputComponent("CommandOutputView.tsx"),
       readChatOutputComponent("JsonPreview.tsx"),
       readChatOutputComponent("RunLedgerView.tsx"),
-      readChatOutputComponent("EvidenceRail.tsx"),
     ].join("\n");
 
     for (const className of [
@@ -387,8 +385,6 @@ describe("Design System — Notion-inspired app shell", () => {
       "chat-command-stream",
       "chat-json-preview",
       "chat-run-ledger",
-      "chat-evidence-rail",
-      "chat-evidence-item",
     ]) {
       expect(componentSources).toContain(className);
     }
@@ -402,7 +398,6 @@ describe("Design System — Notion-inspired app shell", () => {
       readChatOutputComponent("CommandOutputView.tsx"),
       readChatOutputComponent("JsonPreview.tsx"),
       readChatOutputComponent("RunLedgerView.tsx"),
-      readChatOutputComponent("EvidenceRail.tsx"),
       readChatOutputComponent("OutputPartRenderer.tsx"),
     ].join("\n");
 
@@ -411,8 +406,7 @@ describe("Design System — Notion-inspired app shell", () => {
       "chat-answer-body",
       "chat-output-part-list",
       "chat-output-part",
-      "chat-evidence-rail",
-      "chat-evidence-item",
+      "chat-evidence-inline",
       "chat-data-table-wrap",
       "chat-data-table",
       "chat-code-block",
@@ -439,26 +433,34 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toMatch(
       /@media \(max-width: 640px\)[\s\S]*\.chat-answer-block/,
     );
-    expect(styles).toMatch(
-      /@media \(max-width: 640px\)[\s\S]*\.chat-answer-block\.has-evidence\s*{[\s\S]*grid-template-columns: minmax\(0, 1fr\);/,
-    );
     expect(styles).toContain("grid-template-columns: minmax(0, 1fr);");
-    expect(styles).toContain("overflow-x: auto;");
+    expect(styles).toContain("overflow-wrap: anywhere;");
     expect(styles).toContain("max-width: 100%;");
   });
 
-  it("avoids empty structured output columns when optional rails and ledger fields are absent", () => {
+  it("keeps assistant answers single-column with readable content widths", () => {
     const answerBlockSource = readChatOutputComponent("AnswerBlock.tsx");
     const runLedgerSource = readChatOutputComponent("RunLedgerView.tsx");
 
-    expect(answerBlockSource).toContain("hasEvidence");
-    expect(answerBlockSource).toContain("has-evidence");
+    expect(answerBlockSource).not.toContain("hasEvidence");
+    expect(answerBlockSource).not.toContain("has-evidence");
+    expect(answerBlockSource).not.toContain("isEvidencePart");
     expect(answerBlockSource).toContain("is-body-only");
     expect(styles).toMatch(
       /\.chat-answer-block\s*{[\s\S]*grid-template-columns: minmax\(0, 1fr\);/,
     );
+    expect(styles).not.toMatch(/\.chat-answer-block\.has-evidence/);
     expect(styles).toMatch(
-      /\.chat-answer-block\.has-evidence\s*{[\s\S]*grid-template-columns: minmax\(0, 1fr\) minmax\(176px, 240px\);/,
+      /\.chat-message\s*{[\s\S]*width: min\(960px, 100%\);/,
+    );
+    expect(styles).toMatch(
+      /\.chat-answer-body\s*{[\s\S]*border-left: 0;/,
+    );
+    expect(styles).toMatch(
+      /\.chat-data-table\s*{[\s\S]*table-layout: fixed;/,
+    );
+    expect(styles).toMatch(
+      /\.chat-code-block pre,[\s\S]*\.chat-json-preview pre\s*{[\s\S]*white-space: pre-wrap;/,
     );
 
     expect(runLedgerSource).toContain("hasDetail");
@@ -478,7 +480,7 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(existsSync(outputRenderingArtifactPath)).toBe(true);
 
     for (const requiredState of [
-      "evidence-linked answer",
+      "single-column answer",
       "run ledger",
       "table",
       "code/diff",
@@ -495,7 +497,8 @@ describe("Design System — Notion-inspired app shell", () => {
     }
 
     expect(outputRenderingArtifactSource).toContain("chat-answer-block");
-    expect(outputRenderingArtifactSource).toContain("chat-evidence-rail");
+    expect(outputRenderingArtifactSource).not.toContain("chat-evidence-rail");
+    expect(outputRenderingArtifactSource).not.toContain("has-evidence");
     expect(outputRenderingArtifactSource).toContain("chat-run-ledger");
     expect(outputRenderingArtifactSource).toContain("@media (max-width: 640px)");
   });

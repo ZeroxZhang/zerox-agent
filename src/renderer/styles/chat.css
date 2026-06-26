@@ -247,7 +247,8 @@
 .chat-message {
   display: grid;
   gap: 8px;
-  max-width: min(820px, 88%);
+  width: min(960px, 100%);
+  max-width: min(960px, 100%);
   min-width: 0;
   padding: 0;
   border: 0;
@@ -259,6 +260,7 @@
 
 .chat-message.is-user {
   justify-self: end;
+  width: auto;
   max-width: min(680px, 78%);
   padding: 12px 16px;
   border-radius: 16px;
@@ -296,8 +298,8 @@
 .chat-message p,
 .markdown-message {
   color: var(--text-primary);
-  font-size: var(--text-lg);
-  line-height: 1.76;
+  font-size: var(--text-base);
+  line-height: 1.72;
 }
 
 .markdown-message {
@@ -326,9 +328,17 @@
 .markdown-message h4,
 .markdown-message h5 {
   color: var(--text-primary);
-  font-size: var(--text-xl);
   font-weight: var(--font-semibold);
   line-height: var(--leading-tight);
+}
+
+.markdown-message h3 {
+  font-size: var(--text-lg);
+}
+
+.markdown-message h4,
+.markdown-message h5 {
+  font-size: var(--text-base);
 }
 
 .markdown-message span,
@@ -398,13 +408,15 @@
 .markdown-code-block pre {
   max-width: 100%;
   margin: 0;
-  overflow: auto;
+  overflow: hidden;
   padding: 14px 16px;
   color: #1f2937;
   background: #ffffff;
   font-size: var(--text-sm);
   line-height: 1.7;
-  white-space: pre;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .markdown-message code {
@@ -424,10 +436,6 @@
   color: var(--text-primary);
 }
 
-.chat-answer-block.has-evidence {
-  grid-template-columns: minmax(0, 1fr) minmax(176px, 240px);
-}
-
 .chat-answer-body,
 .chat-output-part-list,
 .chat-output-part {
@@ -438,8 +446,8 @@
 .chat-answer-body {
   display: grid;
   gap: var(--space-3);
-  padding-left: var(--space-3);
-  border-left: 3px solid var(--border-strong);
+  padding-left: 0;
+  border-left: 0;
 }
 
 .chat-output-part-list {
@@ -456,6 +464,7 @@
 .chat-output-text {
   min-width: 0;
   max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .chat-output-text p,
@@ -465,19 +474,6 @@
   margin: 0;
 }
 
-.chat-evidence-rail {
-  display: grid;
-  align-content: start;
-  gap: var(--space-2);
-  min-width: 0;
-  max-width: 100%;
-  padding: var(--space-2);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.56);
-}
-
-.chat-evidence-item,
 .chat-evidence-inline,
 .chat-artifact-card,
 .chat-citation-chip,
@@ -486,7 +482,6 @@
   max-width: 100%;
 }
 
-.chat-evidence-item,
 .chat-evidence-inline {
   display: grid;
   gap: 3px;
@@ -498,7 +493,6 @@
   line-height: var(--leading-normal);
 }
 
-.chat-evidence-item > span,
 .chat-evidence-inline > span,
 .chat-json-preview-label,
 .chat-command-stream > span,
@@ -510,8 +504,6 @@
   text-transform: uppercase;
 }
 
-.chat-evidence-item strong,
-.chat-evidence-item a,
 .chat-evidence-inline strong,
 .chat-evidence-inline a {
   min-width: 0;
@@ -523,12 +515,10 @@
   white-space: nowrap;
 }
 
-.chat-evidence-item a,
 .chat-evidence-inline a {
   color: var(--text-accent);
 }
 
-.chat-evidence-item small,
 .chat-evidence-inline small {
   min-width: 0;
   overflow: hidden;
@@ -555,7 +545,7 @@
 .chat-data-table-wrap {
   min-width: 0;
   max-width: 100%;
-  overflow-x: auto;
+  overflow-x: hidden;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
   background: var(--bg-surface-raised);
@@ -563,10 +553,11 @@
 
 .chat-data-table {
   width: 100%;
-  min-width: 520px;
+  min-width: 0;
   border-collapse: collapse;
   color: var(--text-primary);
   font-size: var(--text-sm);
+  table-layout: fixed;
 }
 
 .chat-data-table caption {
@@ -584,6 +575,8 @@
   border-bottom: 1px solid var(--border-default);
   text-align: left;
   vertical-align: top;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .chat-data-table th {
@@ -645,13 +638,15 @@
 .chat-json-preview pre {
   max-width: 100%;
   margin: 0;
-  overflow-x: auto;
+  overflow-x: hidden;
   padding: var(--space-3);
   color: #1f2937;
   font-family: var(--font-mono);
   font-size: var(--text-sm);
   line-height: 1.7;
-  white-space: pre;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .chat-code-block.is-diff {
@@ -672,7 +667,8 @@
 
 .chat-code-block code span {
   display: block;
-  min-width: max-content;
+  min-width: 0;
+  white-space: pre-wrap;
 }
 
 .chat-diff-line-added {
@@ -789,8 +785,7 @@
 }
 
 .chat-tool-card.is-tool-result.is-error,
-.chat-evidence-inline.is-diagnostic.is-error,
-.chat-evidence-item.is-diagnostic.is-error {
+.chat-evidence-inline.is-diagnostic.is-error {
   border-color: var(--status-error-border);
   background: var(--status-error-bg);
 }

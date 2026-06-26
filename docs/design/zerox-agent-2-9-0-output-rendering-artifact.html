@@ -88,15 +88,12 @@
       min-width: 0;
       max-width: 100%;
     }
-    .chat-answer-block.has-evidence {
-      grid-template-columns: minmax(0, 1fr) minmax(160px, 220px);
-    }
     .chat-answer-body {
       display: grid;
       gap: var(--space-3);
       min-width: 0;
-      padding-left: var(--space-3);
-      border-left: 3px solid var(--border-strong);
+      padding-left: 0;
+      border-left: 0;
     }
     .chat-output-part-list, .chat-output-part {
       display: grid;
@@ -106,17 +103,7 @@
     }
     .chat-output-part h3 { font-size: 18px; }
     .chat-output-part p, .chat-output-part li { color: var(--text-secondary); font-size: 13px; }
-    .chat-evidence-rail {
-      display: grid;
-      align-content: start;
-      gap: var(--space-2);
-      min-width: 0;
-      padding: var(--space-2);
-      border: 1px solid var(--border-default);
-      border-radius: var(--radius-md);
-      background: rgba(255, 255, 255, 0.58);
-    }
-    .chat-evidence-item,
+    .chat-evidence-inline,
     .chat-artifact-card,
     .chat-citation-chip,
     .chat-approval-block,
@@ -128,7 +115,7 @@
       border-radius: var(--radius-sm);
       background: var(--bg-surface-raised);
     }
-    .chat-evidence-item,
+    .chat-evidence-inline,
     .chat-artifact-card,
     .chat-citation-chip,
     .chat-approval-block {
@@ -137,7 +124,7 @@
       padding: var(--space-2);
       font-size: 12px;
     }
-    .chat-evidence-item span,
+    .chat-evidence-inline span,
     .chat-json-preview-label,
     .chat-command-stream span {
       color: var(--text-tertiary);
@@ -146,7 +133,7 @@
       font-weight: 700;
       text-transform: uppercase;
     }
-    .chat-evidence-item small,
+    .chat-evidence-inline small,
     .chat-artifact-card small {
       overflow: hidden;
       color: var(--text-tertiary);
@@ -160,16 +147,17 @@
     .chat-data-table-wrap {
       min-width: 0;
       max-width: 100%;
-      overflow-x: auto;
+      overflow-x: hidden;
       border: 1px solid var(--border-default);
       border-radius: var(--radius-md);
       background: var(--bg-surface-raised);
     }
     .chat-data-table {
       width: 100%;
-      min-width: 520px;
+      min-width: 0;
       border-collapse: collapse;
       font-size: 12px;
+      table-layout: fixed;
     }
     .chat-data-table th,
     .chat-data-table td {
@@ -177,6 +165,8 @@
       border-bottom: 1px solid var(--border-default);
       text-align: left;
       vertical-align: top;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
     .chat-data-table th {
       color: var(--text-tertiary);
@@ -210,13 +200,15 @@
     pre {
       max-width: 100%;
       margin: 0;
-      overflow-x: auto;
+      overflow-x: hidden;
       padding: 12px;
       color: #1f2937;
       font-family: var(--font-mono);
       font-size: 12px;
       line-height: 1.65;
-      white-space: pre;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+      word-break: break-word;
     }
     .chat-code-block.is-diff { border-color: #374151; background: #111827; }
     .chat-code-block.is-diff .chat-code-header { border-color: #374151; color: #d1d5db; background: #1f2937; }
@@ -298,11 +290,10 @@
       .artifact-board { width: min(100% - 20px, 1160px); padding-top: 16px; }
       .state-grid { grid-template-columns: minmax(0, 1fr); }
       .chat-answer-block { grid-template-columns: minmax(0, 1fr); }
-      .chat-answer-block.has-evidence { grid-template-columns: minmax(0, 1fr); }
       .chat-data-table-wrap,
       .chat-code-block,
       .chat-command-output,
-      .chat-json-preview { max-width: 100%; overflow-x: auto; }
+      .chat-json-preview { max-width: 100%; overflow-x: hidden; }
       .chat-ledger-row,
       .chat-input-request-block li { grid-template-columns: minmax(0, 1fr); }
     }
@@ -312,18 +303,18 @@
   <main class="artifact-board">
     <header>
       <h1>Zerox Agent 2.9.0 Output Rendering Artifact</h1>
-      <p>Approved A+B direction: answer-led content with evidence-linked rails and compact run ledger rows. Static acceptance states only; model output remains rendered by typed React components, not raw HTML.</p>
+      <p>Approved corrective direction: answer-led single-column content with compact run ledger rows. Tool and file-read traces stay in the dedicated process disclosures, while model output remains rendered by typed React components, not raw HTML.</p>
     </header>
 
     <section class="state-grid">
       <article class="state-card">
-        <h2>evidence-linked answer</h2>
-        <div class="chat-answer-block has-evidence">
+        <h2>single-column answer</h2>
+        <div class="chat-answer-block is-body-only">
           <div class="chat-answer-body">
             <div class="chat-output-part-list">
               <section class="chat-output-part">
                 <h3>Renderer contract is ready for compact output.</h3>
-                <p>The answer leads with the conclusion, then keeps files, citations, approvals, and diagnostics attached as inspectable evidence.</p>
+                <p>The answer leads with the conclusion and keeps its readable content in one uninterrupted column.</p>
               </section>
               <section class="chat-output-part chat-artifact-card">
                 <strong>output-rendering-board.html</strong>
@@ -331,10 +322,6 @@
               </section>
             </div>
           </div>
-          <aside class="chat-evidence-rail" aria-label="Evidence">
-            <div class="chat-evidence-item chat-citation-chip"><span>Citation</span><strong>design artifact</strong><small>approved external board</small></div>
-            <div class="chat-evidence-item chat-artifact-card"><span>Artifact</span><strong>local CSS fixture</strong><small>repo committed</small></div>
-          </aside>
         </div>
       </article>
 
@@ -397,14 +384,14 @@ package scripts ok</pre></div>
 
       <article class="state-card report-mode">
         <h2>document report</h2>
-        <div class="chat-answer-block has-evidence">
+        <div class="chat-answer-block is-body-only">
           <div class="chat-answer-body">
             <section class="chat-output-part">
               <h3>Output Rendering Research Summary</h3>
-              <p>Document report mode supports prose, tables, citations, and local artifacts while preserving the same evidence rail.</p>
+              <p>Document report mode supports prose, tables, citations, and local artifacts without splitting the main reading column.</p>
+              <section class="chat-evidence-inline chat-citation-chip"><span>Source</span><strong>3 citations</strong><small>coverage complete</small></section>
             </section>
           </div>
-          <aside class="chat-evidence-rail"><div class="chat-evidence-item chat-citation-chip"><span>Source</span><strong>3 citations</strong><small>coverage complete</small></div></aside>
         </div>
       </article>
 
@@ -432,7 +419,7 @@ package scripts ok</pre></div>
 
       <article class="state-card">
         <h2>error diagnostic</h2>
-        <section class="chat-evidence-item is-error-diagnostic">
+        <section class="chat-evidence-inline is-error-diagnostic">
           <span>error</span>
           <strong>Verification failed</strong>
           <small>The command exited with code 1. Keep the failing output linked to the answer.</small>
@@ -441,7 +428,7 @@ package scripts ok</pre></div>
 
       <article class="state-card">
         <h2>narrow layout</h2>
-        <p class="state-note">At 640px and below, .chat-answer-block stays one column, and tables/code/terminal previews use overflow-x: auto.</p>
+        <p class="state-note">At 640px and below, .chat-answer-block stays one column, and tables/code/terminal previews wrap long content inside the available width.</p>
         <div class="chat-answer-block is-body-only">
           <div class="chat-answer-body"><section class="chat-output-part"><p>Single-column answer content with no text overlap.</p></section></div>
         </div>

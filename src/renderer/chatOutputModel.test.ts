@@ -156,6 +156,13 @@ describe("chat output model", () => {
           resultPreview: { content: "large file contents" },
         },
         {
+          id: "file_ref_1",
+          type: "file_ref",
+          action: "read",
+          path: "/Volumes/Out/codex_projects/building agent/src/app.ts",
+          label: "src/app.ts",
+        },
+        {
           id: "command_output_1",
           type: "command_output",
           command: "npm test",

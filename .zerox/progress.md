@@ -5099,3 +5099,38 @@
   - `release/latest-mac.yml` sha256 `76a34e01d39deb428fe14be050e5954241f94cd0846ee54a3b80cf1befbc6f9d`.
 - Browser QA note:
   - Browser plugin setup completed and listed an in-app browser plus Chrome backend, but both tab navigation attempts failed with a stale session error (`Tab 1 is not part of browser session ...`). No external browser fallback was used; coverage rests on renderer unit/source regression tests, full verify, build, harness, and production smoke.
+
+## 2026-06-26 - Main Transcript Evidence Rail Regression Hotfix
+
+- Request:
+  - Fix the remaining v2.9.0 display regression where file read references were rendered as a second column in the main chat transcript, shrinking the answer body and causing tables/code blocks to require horizontal dragging. Keep tool/file-read traces in process disclosures, make assistant answers single-column, and normalize typography for prose/code/table content.
+- Root cause:
+  - `AnswerBlock` still used the v2.9.0 `EvidenceRail` design to split answer content and evidence parts into two columns.
+  - `file_ref` output parts were still treated as main conversation content, so `file_read` traces produced `READ` cards in the answer area even though the lower tool disclosure already owned that information.
+  - Table/code CSS forced minimum widths and `white-space: pre`, creating avoidable horizontal scroll inside an already narrowed column.
+- Changed areas:
+  - `src/renderer/chatOutputModel.ts`
+  - `src/renderer/chatOutputModel.test.ts`
+  - `src/renderer/components/chat/AnswerBlock.tsx`
+  - `src/renderer/components/chat/EvidenceRail.tsx` (removed)
+  - `src/renderer/materialDesign.test.ts`
+  - `src/renderer/styles/chat.css`
+  - `src/renderer/styles/responsive.css`
+  - `docs/design/zerox-agent-2-9-0-output-rendering-artifact.html`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/renderer/chatOutputModel.test.ts src/renderer/materialDesign.test.ts` -> failed as expected because `file_ref` still appeared in `outputPartsFromMessage()`, `AnswerBlock` still imported `EvidenceRail`, and chat CSS still lacked the single-column/full-width wrapping contract.
+- GREEN / verification evidence:
+  - `npm test -- src/renderer/chatOutputModel.test.ts src/renderer/materialDesign.test.ts` -> 2 files / 63 tests passed.
+  - `npm test -- src/renderer/chatMarkdown.test.ts src/renderer/chatStreamReducer.test.ts src/renderer/chatOutputModel.test.ts src/renderer/materialDesign.test.ts` -> 4 files / 77 tests passed.
+  - `npm test` -> 179 files / 1233 tests passed.
+  - `npm run build` -> passed; Vite emitted the existing large chunk warning.
+  - `npm run verify` -> 179 files / 1233 tests passed, build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `better-sqlite3` ABI mismatch triggered the existing JSON fallback during smoke.
+  - `git diff --check` -> passed.
+  - `npm run dist:mac` -> passed; regenerated unsigned macOS arm64 DMG, ZIP, blockmaps, and `latest-mac.yml` for v2.9.0.
+  - Packaged app smoke: `BUILDING_AGENT_SMOKE=1 "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+  - `release/Zerox Agent-2.9.0-arm64.dmg` sha256 `4cc4bf70dd34282e1a73d59638b4991ddc01a58c2aebe2f3a47d81930fbd706e`
+  - `release/Zerox Agent-2.9.0-arm64-mac.zip` sha256 `5d5a40ca6ea87cc0e44b48890d986935b4932088e519f7c5f8105f7e5ed48661`
+  - Normal packaged app launched for user testing from `release/mac-arm64/Zerox Agent.app`, PID `90345`.
