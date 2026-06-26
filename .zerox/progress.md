@@ -1,5 +1,36 @@
 # Zerox Harness Progress
 
+## 2026-06-26 - v2.9.0 Task 5 Review Blocker Fixes
+
+- Request: address Task 5 review blockers where body-only assistant answers reserved an empty evidence column and title-only run ledger events were compressed by unused optional columns.
+- Changed files:
+  - `src/renderer/materialDesign.test.ts`
+  - `src/renderer/components/chat/AnswerBlock.tsx`
+  - `src/renderer/components/chat/RunLedgerView.tsx`
+  - `src/renderer/styles/chat.css`
+  - `src/renderer/styles/responsive.css`
+  - `docs/design/zerox-agent-2-9-0-output-rendering-artifact.html`
+  - `.superpowers/sdd/2026-06-26-v290-task-5-report.md`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts -t "avoids empty structured output columns"` -> failed as expected before the fix because `AnswerBlock` had no evidence/body-only state classes.
+  - `npm test -- src/renderer/materialDesign.test.ts -t "covers v2.9 output rendering CSS hooks"` -> failed as expected after the first fix because mobile `.chat-answer-block.has-evidence` still overrode the narrow single-column rule.
+- GREEN / verification evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts -t "avoids empty structured output columns"` -> 1 selected test passed.
+  - `npm test -- src/renderer/materialDesign.test.ts -t "covers v2.9 output rendering CSS hooks"` -> 1 selected test passed.
+  - `npm test -- src/renderer/materialDesign.test.ts src/renderer/chatOutputModel.test.ts src/renderer/chatMarkdown.test.ts src/renderer/chatStreamReducer.test.ts src/shared/chatOutput.test.ts` -> 5 files / 82 tests passed.
+  - `npm run build` -> passed, with the existing Vite chunk-size warning.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Existing better-sqlite3 ABI mismatch fell back to JSON.
+  - `git diff --check` -> passed.
+- Browser QA evidence:
+  - Static artifact desktop 1280x900 -> body-only answer used one 542px column, evidence-linked answers used `310px 220px` columns, title-only ledger used `61.3516px 450.648px`, no page-level horizontal overflow, no overflowing cards, console warn/error logs empty.
+  - Static artifact mobile 390x844 -> body-only and evidence-linked answers used one 325px column, title-only ledger used one 303px column, no page-level horizontal overflow, no overflowing cards, one expected internally scrolling table, console warn/error logs empty.
+- Implementation evidence:
+  - `AnswerBlock` now marks `has-evidence` only when an evidence rail is actually rendered and uses `is-body-only` otherwise.
+  - `RunLedgerView` now marks `has-detail`, `has-tool`, and `is-title-only` so CSS does not reserve absent optional columns.
+  - Desktop and mobile CSS now use matching specificity for evidence-linked answers, keeping mobile output single-column.
+
 ## 2026-06-26 - v2.9.0 Task 5 Approved Visual Styling And Responsive Safety
 
 - Request: implement Task 5 for v2.9.0 output rendering by translating the approved Evidence-Linked Answer plus Run Ledger direction into repo-local CSS, stable responsive-safe class hooks, and a committed design artifact.
@@ -25,6 +56,10 @@
   - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Existing better-sqlite3 ABI mismatch fell back to JSON.
   - `npm run verify` -> failed in pre-existing release-gate coverage: `src/shared/packageScripts.test.ts` expects no unfinished features through v2.8.5, but `.zerox/feature_list.json` still has `P23-v2.9.0-output-rendering` marked `planned`.
   - `git diff --check` -> passed.
+- Browser QA evidence:
+  - Static artifact at `http://127.0.0.1:4177/docs/design/zerox-agent-2-9-0-output-rendering-artifact.html` desktop 1280x900 -> title matched, console logs empty, 10 acceptance states rendered, 3 answer blocks present, no page-level horizontal overflow, no overflowing cards or blocks, screenshot captured.
+  - Static artifact mobile 390x844 -> console logs empty, answer blocks stacked to one column, no page-level horizontal overflow, no overflowing cards or blocks; the data table used one expected internal horizontal scroll container.
+  - Renderer dev app at `http://127.0.0.1:5173/#chat` desktop 1280x900 -> no Vite overlay, console logs empty, chat panel and composer present, and clicking a prompt suggestion populated the focused textarea.
 - Implementation evidence:
   - Added `.chat-answer-body`, `.chat-ledger-row`, diff-line, artifact, citation, approval, and guided-input hooks to the dedicated chat output components.
   - Added compact answer-led styling for evidence rails, data tables, code/diff blocks, command output, JSON previews, run ledger rows, artifacts, citations, approval waiting, guided input, and diagnostics.

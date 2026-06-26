@@ -83,10 +83,13 @@
     }
     .chat-answer-block {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(160px, 220px);
+      grid-template-columns: minmax(0, 1fr);
       gap: var(--space-3);
       min-width: 0;
       max-width: 100%;
+    }
+    .chat-answer-block.has-evidence {
+      grid-template-columns: minmax(0, 1fr) minmax(160px, 220px);
     }
     .chat-answer-body {
       display: grid;
@@ -226,11 +229,20 @@
     .chat-run-ledger { overflow: hidden; }
     .chat-ledger-row {
       display: grid;
-      grid-template-columns: auto minmax(88px, 0.35fr) minmax(0, 1fr) auto;
+      grid-template-columns: auto minmax(0, 1fr);
       gap: 8px;
       align-items: center;
       padding: 8px 10px;
       font-size: 12px;
+    }
+    .chat-ledger-row.has-detail:not(.has-tool) {
+      grid-template-columns: auto minmax(88px, 0.35fr) minmax(0, 1fr);
+    }
+    .chat-ledger-row.has-tool:not(.has-detail) {
+      grid-template-columns: auto minmax(0, 1fr) auto;
+    }
+    .chat-ledger-row.has-detail.has-tool {
+      grid-template-columns: auto minmax(88px, 0.35fr) minmax(0, 1fr) auto;
     }
     .chat-run-ledger-status {
       min-height: 22px;
@@ -241,7 +253,7 @@
       background: var(--status-success-bg);
       font-family: var(--font-mono);
     }
-    .chat-ledger-row p, .chat-ledger-row small {
+    .chat-ledger-row strong, .chat-ledger-row p, .chat-ledger-row small {
       overflow: hidden;
       color: var(--text-secondary);
       text-overflow: ellipsis;
@@ -286,6 +298,7 @@
       .artifact-board { width: min(100% - 20px, 1160px); padding-top: 16px; }
       .state-grid { grid-template-columns: minmax(0, 1fr); }
       .chat-answer-block { grid-template-columns: minmax(0, 1fr); }
+      .chat-answer-block.has-evidence { grid-template-columns: minmax(0, 1fr); }
       .chat-data-table-wrap,
       .chat-code-block,
       .chat-command-output,
@@ -305,7 +318,7 @@
     <section class="state-grid">
       <article class="state-card">
         <h2>evidence-linked answer</h2>
-        <div class="chat-answer-block">
+        <div class="chat-answer-block has-evidence">
           <div class="chat-answer-body">
             <div class="chat-output-part-list">
               <section class="chat-output-part">
@@ -328,7 +341,7 @@
       <article class="state-card">
         <h2>run ledger</h2>
         <section class="chat-run-ledger is-completed">
-          <div class="chat-ledger-row">
+          <div class="chat-ledger-row has-detail has-tool">
             <span class="chat-run-ledger-status">completed</span>
             <strong>verification</strong>
             <p>Focused tests passed, then build and harness checks ran.</p>
@@ -336,11 +349,17 @@
           </div>
         </section>
         <section class="chat-run-ledger">
-          <div class="chat-ledger-row">
+          <div class="chat-ledger-row has-detail has-tool">
             <span class="chat-run-ledger-status">running</span>
             <strong>renderer</strong>
             <p>Streaming output remains observable without taking over the answer.</p>
             <small>chat</small>
+          </div>
+        </section>
+        <section class="chat-run-ledger">
+          <div class="chat-ledger-row is-title-only">
+            <span class="chat-run-ledger-status">queued</span>
+            <strong>Title-only ledger event keeps its title in the full available row.</strong>
           </div>
         </section>
       </article>
@@ -378,7 +397,7 @@ package scripts ok</pre></div>
 
       <article class="state-card report-mode">
         <h2>document report</h2>
-        <div class="chat-answer-block">
+        <div class="chat-answer-block has-evidence">
           <div class="chat-answer-body">
             <section class="chat-output-part">
               <h3>Output Rendering Research Summary</h3>
@@ -422,10 +441,9 @@ package scripts ok</pre></div>
 
       <article class="state-card">
         <h2>narrow layout</h2>
-        <p class="state-note">At 640px and below, .chat-answer-block becomes one column, the evidence rail stacks below the answer, and tables/code/terminal previews use overflow-x: auto.</p>
-        <div class="chat-answer-block">
+        <p class="state-note">At 640px and below, .chat-answer-block stays one column, and tables/code/terminal previews use overflow-x: auto.</p>
+        <div class="chat-answer-block is-body-only">
           <div class="chat-answer-body"><section class="chat-output-part"><p>Single-column answer content with no text overlap.</p></section></div>
-          <aside class="chat-evidence-rail"><div class="chat-evidence-item"><span>Evidence</span><strong>stacked rail</strong><small>responsive-safe</small></div></aside>
         </div>
       </article>
     </section>

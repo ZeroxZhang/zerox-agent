@@ -139,6 +139,10 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .chat-answer-block.has-evidence {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .chat-answer-body {
     padding-left: var(--space-2);
   }

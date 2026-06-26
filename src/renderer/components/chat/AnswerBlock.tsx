@@ -7,11 +7,17 @@ type AnswerBlockProps = {
 };
 
 export function AnswerBlock({ parts }: AnswerBlockProps) {
+  const evidenceParts = parts.filter(isEvidencePart);
   const bodyParts = parts.filter((part) => !isEvidencePart(part));
   const renderParts = bodyParts.length > 0 ? bodyParts : parts;
+  const hasEvidence = evidenceParts.length > 0;
+  const showEvidenceRail = hasEvidence && bodyParts.length > 0;
+  const blockClassName = `chat-answer-block ${
+    showEvidenceRail ? "has-evidence" : "is-body-only"
+  }`;
 
   return (
-    <div className="chat-answer-block">
+    <div className={blockClassName}>
       <div className="chat-answer-body">
         <div className="chat-output-part-list">
           {renderParts.map((part) => (
@@ -19,7 +25,7 @@ export function AnswerBlock({ parts }: AnswerBlockProps) {
           ))}
         </div>
       </div>
-      <EvidenceRail parts={parts} />
+      {showEvidenceRail ? <EvidenceRail parts={evidenceParts} /> : null}
     </div>
   );
 }

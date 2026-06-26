@@ -414,7 +414,7 @@
 
 .chat-answer-block {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(176px, 240px);
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
   gap: var(--space-3);
   width: 100%;
@@ -422,6 +422,10 @@
   min-width: 0;
   padding: 0;
   color: var(--text-primary);
+}
+
+.chat-answer-block.has-evidence {
+  grid-template-columns: minmax(0, 1fr) minmax(176px, 240px);
 }
 
 .chat-answer-body,
@@ -843,12 +847,24 @@
 
 .chat-ledger-row {
   display: grid;
-  grid-template-columns: auto minmax(96px, 0.35fr) minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: var(--space-2);
   align-items: center;
   min-width: 0;
   padding: var(--space-2) var(--space-3);
   font-size: var(--text-xs);
+}
+
+.chat-ledger-row.has-detail:not(.has-tool) {
+  grid-template-columns: auto minmax(96px, 0.35fr) minmax(0, 1fr);
+}
+
+.chat-ledger-row.has-tool:not(.has-detail) {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.chat-ledger-row.has-detail.has-tool {
+  grid-template-columns: auto minmax(96px, 0.35fr) minmax(0, 1fr) auto;
 }
 
 .chat-run-ledger-status {

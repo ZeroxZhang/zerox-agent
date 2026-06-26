@@ -434,9 +434,39 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toMatch(
       /@media \(max-width: 640px\)[\s\S]*\.chat-answer-block/,
     );
+    expect(styles).toMatch(
+      /@media \(max-width: 640px\)[\s\S]*\.chat-answer-block\.has-evidence\s*{[\s\S]*grid-template-columns: minmax\(0, 1fr\);/,
+    );
     expect(styles).toContain("grid-template-columns: minmax(0, 1fr);");
     expect(styles).toContain("overflow-x: auto;");
     expect(styles).toContain("max-width: 100%;");
+  });
+
+  it("avoids empty structured output columns when optional rails and ledger fields are absent", () => {
+    const answerBlockSource = readChatOutputComponent("AnswerBlock.tsx");
+    const runLedgerSource = readChatOutputComponent("RunLedgerView.tsx");
+
+    expect(answerBlockSource).toContain("hasEvidence");
+    expect(answerBlockSource).toContain("has-evidence");
+    expect(answerBlockSource).toContain("is-body-only");
+    expect(styles).toMatch(
+      /\.chat-answer-block\s*{[\s\S]*grid-template-columns: minmax\(0, 1fr\);/,
+    );
+    expect(styles).toMatch(
+      /\.chat-answer-block\.has-evidence\s*{[\s\S]*grid-template-columns: minmax\(0, 1fr\) minmax\(176px, 240px\);/,
+    );
+
+    expect(runLedgerSource).toContain("hasDetail");
+    expect(runLedgerSource).toContain("hasTool");
+    expect(runLedgerSource).toContain("is-title-only");
+    expect(runLedgerSource).toContain("has-detail");
+    expect(runLedgerSource).toContain("has-tool");
+    expect(styles).toMatch(
+      /\.chat-ledger-row\s*{[\s\S]*grid-template-columns: auto minmax\(0, 1fr\);/,
+    );
+    expect(styles).toContain(".chat-ledger-row.has-detail:not(.has-tool)");
+    expect(styles).toContain(".chat-ledger-row.has-tool:not(.has-detail)");
+    expect(styles).toContain(".chat-ledger-row.has-detail.has-tool");
   });
 
   it("commits the v2.9 output rendering design artifact with acceptance states", () => {
