@@ -4775,3 +4775,20 @@
   - `npm run build` -> passed.
   - `npm run harness:check` -> passed.
   - `git diff --check` -> passed.
+
+## 2026-06-26 - Zerox Agent 2.9.0 Output Rendering Task 2 Final Handoff Fixes
+
+- Request:
+  - Complete the partial Task 2 fix for chunked tool-call secret redaction and backend structured-part extraction.
+- Changed areas:
+  - `src/main/chatOutputAssembler.ts`
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+- RED evidence:
+  - `npm test -- src/main/chatService.test.ts -t "redacts chunked tool-call argument previews until they become valid JSON|extracts typed structured parts from representative tool result payloads"` -> failed on stale chunked preview redaction after valid JSON and missing `command_output` extraction for empty `stderr`.
+- GREEN / verification evidence:
+  - `npm test -- src/main/chatService.test.ts -t "redacts chunked tool-call argument previews until they become valid JSON|extracts typed structured parts from representative tool result payloads"` -> 2 focused tests passed.
+  - `npm test -- src/main/chatService.test.ts src/main/agentLoop.test.ts` -> 2 files / 85 tests passed.
+  - `npm run build` -> passed; Vite emitted the existing large chunk warning.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.

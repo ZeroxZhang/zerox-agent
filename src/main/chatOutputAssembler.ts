@@ -1,6 +1,11 @@
 import {
   maskPreviewSecrets,
+  type ChatArtifactPart,
+  type ChatCitationPart,
+  type ChatCommandOutputPart,
   type ChatDiagnosticPart,
+  type ChatDiffPart,
+  type ChatFileRefPart,
   type ChatInputRequestPart,
   type ChatLedgerEventPart,
   type ChatOutputPart,
@@ -21,10 +26,11 @@ export type ChatOutputAssembler = {
   }): ChatToolCallPart;
   appendToolResult(input: {
     toolCallId: string;
+    toolName?: string;
     ok: boolean;
     resultPreview?: unknown;
     error?: string;
-  }): ChatToolResultPart;
+  }): ChatOutputPart[];
   appendLedgerEvent(input: {
     status: ChatLedgerEventPart["status"];
     title: string;
@@ -114,7 +120,15 @@ export function createChatOutputAssembler(
 
     appendToolCall(input) {
       const toolCallId = input.toolCallId || `tool_call_${toolCalls.size + 1}`;
-      const existing = toolCalls.get(toolCallId);
+      let existing = toolCalls.get(toolCallId);
+      if (
+        existing &&
+        isValidJson(existing.argumentsText) &&
+        startsFreshJsonValue(input.argumentsText)
+      ) {
+        existing = undefined;
+        toolCalls.delete(toolCallId);
+      }
       const accumulatedArguments = `${existing?.argumentsText ?? ""}${input.argumentsText ?? ""}`;
       const argsPreview = normalizeArgsPreview(accumulatedArguments);
 
@@ -146,7 +160,9 @@ export function createChatOutputAssembler(
     },
 
     appendToolResult(input) {
-      return pushPart({
+      const emitted: ChatOutputPart[] = [];
+      toolCalls.delete(input.toolCallId);
+      emitted.push(pushPart({
         id: `tool_result_${input.toolCallId}_${parts.length + 1}`,
         type: "tool_result",
         toolCallId: input.toolCallId,
@@ -161,7 +177,18 @@ export function createChatOutputAssembler(
           ? { resultPreview: maskPreviewSecrets(input.resultPreview) }
           : {}),
         createdAt: now(),
-      });
+      }));
+
+      for (const derivedPart of deriveStructuredToolParts({
+        toolCallId: input.toolCallId,
+        toolName: input.toolName,
+        resultPreview: input.resultPreview,
+        now,
+      })) {
+        emitted.push(pushPart(derivedPart));
+      }
+
+      return emitted;
     },
 
     appendLedgerEvent(input) {
@@ -226,10 +253,174 @@ function normalizeArgsPreview(argumentsText: string): unknown {
   try {
     return JSON.parse(argumentsText) as unknown;
   } catch {
-    return argumentsText;
+    return "[partial arguments redacted until valid JSON]";
   }
+}
+
+function isValidJson(argumentsText: string): boolean {
+  if (!argumentsText) {
+    return false;
+  }
+
+  try {
+    JSON.parse(argumentsText);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function startsFreshJsonValue(argumentsText: string | undefined): boolean {
+  const trimmed = argumentsText?.trimStart();
+  return trimmed?.startsWith("{") === true || trimmed?.startsWith("[") === true;
 }
 
 function clonePart<T extends ChatOutputPart>(part: T): T {
   return structuredClone(part);
+}
+
+function deriveStructuredToolParts(options: {
+  toolCallId: string;
+  toolName?: string;
+  resultPreview?: unknown;
+  now: () => string;
+}): ChatOutputPart[] {
+  const payload = toRecord(options.resultPreview);
+  if (!payload) {
+    return [];
+  }
+
+  const derivedParts: ChatOutputPart[] = [];
+  const createdAt = options.now();
+  const toolName = options.toolName ?? "";
+
+  const command = toStringValue(payload.command);
+  const stdout = toOptionalStringValue(payload.stdout);
+  const stderr = toOptionalStringValue(payload.stderr);
+  if (command && stdout !== undefined && stderr !== undefined) {
+    const commandOutput: ChatCommandOutputPart = {
+      id: `command_output_${options.toolCallId}`,
+      type: "command_output",
+      command,
+      stdout,
+      stderr,
+      ...(toStringValue(payload.cwd) ? { cwd: String(payload.cwd) } : {}),
+      ...(toFiniteNumber(payload.exitCode) !== undefined
+        ? { exitCode: toFiniteNumber(payload.exitCode) }
+        : {}),
+      ...(toFiniteNumber(payload.elapsedMs) !== undefined
+        ? { elapsedMs: toFiniteNumber(payload.elapsedMs) }
+        : {}),
+      createdAt,
+    };
+    derivedParts.push(commandOutput);
+  }
+
+  const patch = toStringValue(payload.patch) ?? toStringValue(payload.diff);
+  const diffPath = toStringValue(payload.filePath) ?? toStringValue(payload.path);
+  if (patch) {
+    const diffPart: ChatDiffPart = {
+      id: `file_diff_${options.toolCallId}`,
+      type: "file_diff",
+      patch,
+      ...(diffPath ? { filePath: diffPath } : {}),
+      ...(toFiniteNumber(payload.additions) !== undefined
+        ? { additions: toFiniteNumber(payload.additions) }
+        : toFiniteNumber(payload.added) !== undefined
+          ? { additions: toFiniteNumber(payload.added) }
+          : {}),
+      ...(toFiniteNumber(payload.deletions) !== undefined
+        ? { deletions: toFiniteNumber(payload.deletions) }
+        : toFiniteNumber(payload.deleted) !== undefined
+          ? { deletions: toFiniteNumber(payload.deleted) }
+          : {}),
+      createdAt,
+    };
+    derivedParts.push(diffPart);
+  }
+
+  const filePath = toStringValue(payload.path);
+  const fileRefAction =
+    toolName === "file_read"
+      ? "read"
+      : toolName === "file_write" || toolName === "markdown_report_write"
+        ? "wrote"
+        : toolName === "git_diff"
+          ? "changed"
+          : undefined;
+  if (filePath && fileRefAction) {
+    const fileRef: ChatFileRefPart = {
+      id: `file_ref_${options.toolCallId}_${fileRefAction}`,
+      type: "file_ref",
+      path: filePath,
+      action: fileRefAction,
+      createdAt,
+    };
+    derivedParts.push(fileRef);
+  }
+
+  const artifactId = toStringValue(payload.artifactId);
+  const artifactTitle = toStringValue(payload.title);
+  const artifactPath = toStringValue(payload.path);
+  const mediaType = toStringValue(payload.mediaType);
+  const sizeBytes = toFiniteNumber(payload.sizeBytes);
+  if (artifactId || artifactTitle || (artifactPath && mediaType)) {
+    const artifactPart: ChatArtifactPart = {
+      id: `artifact_${options.toolCallId}`,
+      type: "artifact",
+      artifactId: artifactId ?? `derived_${options.toolCallId}`,
+      title: artifactTitle ?? artifactPath ?? "Artifact",
+      ...(artifactPath ? { path: artifactPath } : {}),
+      ...(mediaType ? { mediaType } : {}),
+      ...(sizeBytes !== undefined ? { sizeBytes } : {}),
+      createdAt,
+    };
+    derivedParts.push(artifactPart);
+  }
+
+  if (Array.isArray(payload.citations)) {
+    payload.citations.forEach((citation, index) => {
+      const citationRecord = toRecord(citation);
+      if (!citationRecord) {
+        return;
+      }
+      const citationId = toStringValue(citationRecord.id);
+      const label = toStringValue(citationRecord.label);
+      const sourceTitle = toStringValue(citationRecord.sourceTitle);
+      if (!citationId || !label || !sourceTitle) {
+        return;
+      }
+      const citationPart: ChatCitationPart = {
+        id: `citation_${options.toolCallId}_${index + 1}`,
+        type: "citation",
+        citationId,
+        label,
+        sourceTitle,
+        ...(toStringValue(citationRecord.uri) ? { uri: String(citationRecord.uri) } : {}),
+        ...(toStringValue(citationRecord.path) ? { path: String(citationRecord.path) } : {}),
+        createdAt,
+      };
+      derivedParts.push(citationPart);
+    });
+  }
+
+  return derivedParts;
+}
+
+function toFiniteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function toStringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function toOptionalStringValue(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function toRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
 }

@@ -1860,6 +1860,74 @@ describe("chat service", () => {
     expect(serializedOutput).toContain('"password":"****"');
   });
 
+  it("redacts chunked tool-call argument previews until they become valid JSON", async () => {
+    const streamEvents: ChatStreamEvent[] = [];
+    const chatClient: ChatClient & StreamingChatClient = {
+      async complete() {
+        throw new Error("non-streaming complete should not be used");
+      },
+      async *streamComplete() {
+        yield {
+          type: "tool_call_delta",
+          id: "chunked_secret_1",
+          name: "shell_exec",
+          arguments: '{"apiKey":"secret-value","authorization":"Bearer secret-auth"',
+        };
+        yield {
+          type: "tool_call_delta",
+          id: "chunked_secret_1",
+          name: "shell_exec",
+          arguments: ',"token":"secret-token","password":"secret-password"}',
+        };
+        yield { type: "done", finishReason: "tool_calls" };
+      },
+    };
+    const service = createChatService({
+      chatClient,
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([]),
+      toolExecutor: createToolExecutor(),
+      createId: () => "chat_chunked_secret",
+      now: () => new Date("2026-06-23T08:00:00.000Z"),
+    });
+
+    await service.sendMessage(
+      {
+        requestId: "request_chunked_secret",
+        message: "stream chunked secret args",
+      },
+      {
+        onStreamEvent(event) {
+          streamEvents.push(event);
+        },
+      },
+    );
+
+    const toolCallParts = streamEvents.filter(
+      (event): event is Extract<ChatStreamEvent, { type: "output_part" }> =>
+        event.type === "output_part" && event.part.type === "tool_call",
+    );
+    expect(toolCallParts[0]?.part).toMatchObject({
+      type: "tool_call",
+      toolCallId: "chunked_secret_1",
+      argsPreview: "[partial arguments redacted until valid JSON]",
+    });
+    expect(JSON.stringify(toolCallParts)).not.toContain("secret-value");
+    expect(JSON.stringify(toolCallParts)).not.toContain("secret-auth");
+    expect(JSON.stringify(toolCallParts)).not.toContain("secret-token");
+    expect(JSON.stringify(toolCallParts)).not.toContain("secret-password");
+    expect(toolCallParts.at(-1)?.part).toMatchObject({
+      type: "tool_call",
+      argsPreview: {
+        apiKey: "****",
+        authorization: "****",
+        token: "****",
+        password: "****",
+      },
+    });
+  });
+
   it("preserves streamed output part order when finalizing assistant text", async () => {
     const chatMessages: AppendChatMessageInput[] = [];
     const chatSessionStore = createChatSessionStore(chatMessages);
@@ -1920,6 +1988,187 @@ describe("chat service", () => {
       type: "text",
       text: "🔧 使用了 1 个工具\n\nFinal combined reply.",
     });
+  });
+
+  it("extracts typed structured parts from representative tool result payloads", async () => {
+    const streamEvents: ChatStreamEvent[] = [];
+    const chatMessages: AppendChatMessageInput[] = [];
+    const chatSessionStore = createChatSessionStore(chatMessages);
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore,
+      toolExecutor: createToolExecutor(),
+      async runAgentLoop(messages, _profile, options) {
+        options.onToolResult?.(
+          "shell_exec",
+          true,
+          {
+            ok: true,
+            result: {
+              command: "npm test",
+              cwd: "/workspace/project",
+              exitCode: 0,
+              stdout: "ok",
+              stderr: "",
+              elapsedMs: 1234,
+            },
+          },
+          { toolCallId: "tool_cmd_1" },
+        );
+        options.onToolResult?.(
+          "git_diff",
+          true,
+          {
+            ok: true,
+            result: {
+              patch: "@@ -1 +1 @@\n-old\n+new",
+              filePath: "src/app.ts",
+              additions: 1,
+              deletions: 1,
+            },
+          },
+          { toolCallId: "tool_diff_1" },
+        );
+        options.onToolResult?.(
+          "file_read",
+          true,
+          {
+            ok: true,
+            result: {
+              path: "/workspace/project/README.md",
+              content: "# hi",
+            },
+          },
+          { toolCallId: "tool_read_1" },
+        );
+        options.onToolResult?.(
+          "markdown_report_write",
+          true,
+          {
+            ok: true,
+            result: {
+              path: "/workspace/project/report.md",
+              title: "Task report",
+              mediaType: "text/markdown",
+              sizeBytes: 512,
+              artifactId: "artifact_report_1",
+            },
+          },
+          { toolCallId: "tool_write_1" },
+        );
+        options.onToolResult?.(
+          "citation_record",
+          true,
+          {
+            ok: true,
+            result: {
+              citations: [
+                {
+                  id: "c1",
+                  label: "[1]",
+                  sourceTitle: "Spec",
+                  uri: "https://example.com/spec",
+                },
+              ],
+            },
+          },
+          { toolCallId: "tool_cite_1" },
+        );
+        return {
+          status: "succeeded" as const,
+          summary: "Done.",
+          turns: 1,
+          messages,
+          toolCallsExecuted: 5,
+        };
+      },
+      createId: () => "chat_result_extract",
+      now: () => new Date("2026-06-23T08:00:00.000Z"),
+    });
+
+    await service.sendMessage(
+      {
+        requestId: "request_result_extract",
+        message: "extract result parts",
+      },
+      { onStreamEvent: (event) => streamEvents.push(event) },
+    );
+
+    const outputParts =
+      (await chatSessionStore.get("persisted_session"))?.messages.at(-1)?.outputParts ?? [];
+    const allSerialized = JSON.stringify([
+      ...streamEvents
+        .filter(
+          (event): event is Extract<ChatStreamEvent, { type: "output_part" }> =>
+            event.type === "output_part",
+        )
+        .map((event) => event.part),
+      ...outputParts,
+    ]);
+
+    expect(outputParts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "command_output",
+          command: "npm test",
+          cwd: "/workspace/project",
+          exitCode: 0,
+          stdout: "ok",
+          stderr: "",
+          elapsedMs: 1234,
+        }),
+        expect.objectContaining({
+          type: "file_diff",
+          filePath: "src/app.ts",
+          patch: "@@ -1 +1 @@\n-old\n+new",
+          additions: 1,
+          deletions: 1,
+        }),
+        expect.objectContaining({
+          type: "file_ref",
+          path: "/workspace/project/README.md",
+          action: "read",
+        }),
+        expect.objectContaining({
+          type: "file_ref",
+          path: "/workspace/project/report.md",
+          action: "wrote",
+        }),
+        expect.objectContaining({
+          type: "artifact",
+          artifactId: "artifact_report_1",
+          title: "Task report",
+          path: "/workspace/project/report.md",
+          mediaType: "text/markdown",
+          sizeBytes: 512,
+        }),
+        expect.objectContaining({
+          type: "citation",
+          citationId: "c1",
+          label: "[1]",
+          sourceTitle: "Spec",
+          uri: "https://example.com/spec",
+        }),
+        expect.objectContaining({
+          type: "tool_result",
+          toolCallId: "tool_cmd_1",
+          ok: true,
+        }),
+        expect.objectContaining({
+          type: "ledger_event",
+        }),
+      ]),
+    );
+    expect(allSerialized).toContain("\"command_output\"");
+    expect(allSerialized).toContain("\"file_diff\"");
+    expect(allSerialized).toContain("\"artifact\"");
+    expect(allSerialized).toContain("\"citation\"");
   });
 
   it("preserves input request field metadata in streamed and persisted output parts", async () => {

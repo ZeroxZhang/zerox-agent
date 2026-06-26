@@ -968,35 +968,36 @@ export function createChatService(options: {
                   ok,
                   toolCallsExecuted: observedToolCallsExecuted,
                 });
-                emitOutputPart(
-                  outputAssembler.appendToolResult({
-                    toolCallId: event.toolCallId,
-                    ok,
-                    ...(ok && result && typeof result === "object" && "result" in result
-                      ? {
-                          resultPreview: (
-                            result as { result: Record<string, unknown> }
-                          ).result,
-                        }
-                      : {}),
-                    ...(!ok && result && typeof result === "object" && "error" in result
-                      ? {
-                          error: (result as { error: string }).error,
-                          ...("errorDetails" in result &&
-                          (result as { errorDetails?: Record<string, unknown> })
-                            .errorDetails
-                            ? {
-                                resultPreview: (
-                                  result as {
-                                    errorDetails: Record<string, unknown>;
-                                  }
-                                ).errorDetails,
-                              }
-                            : {}),
-                        }
-                      : {}),
-                  }),
-                );
+                for (const part of outputAssembler.appendToolResult({
+                  toolCallId: event.toolCallId,
+                  toolName,
+                  ok,
+                  ...(ok && result && typeof result === "object" && "result" in result
+                    ? {
+                        resultPreview: (
+                          result as { result: Record<string, unknown> }
+                        ).result,
+                      }
+                    : {}),
+                  ...(!ok && result && typeof result === "object" && "error" in result
+                    ? {
+                        error: (result as { error: string }).error,
+                        ...("errorDetails" in result &&
+                        (result as { errorDetails?: Record<string, unknown> })
+                          .errorDetails
+                          ? {
+                              resultPreview: (
+                                result as {
+                                  errorDetails: Record<string, unknown>;
+                                }
+                              ).errorDetails,
+                            }
+                          : {}),
+                      }
+                    : {}),
+                })) {
+                  emitOutputPart(part);
+                }
                 emitOutputPart(
                   outputAssembler.appendLedgerEvent({
                     status: ok ? "completed" : "failed",
