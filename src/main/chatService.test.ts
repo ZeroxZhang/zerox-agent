@@ -1812,23 +1812,15 @@ describe("chat service", () => {
     );
   });
 
-  it("normalizes the final assistant reply across persisted content and terminal stream text", async () => {
+  it("preserves final assistant reply whitespace across persisted content and terminal stream text", async () => {
     const streamEvents: ChatStreamEvent[] = [];
     const chatMessages: AppendChatMessageInput[] = [];
-    const baseChatSessionStore = createChatSessionStore(chatMessages);
-    const chatSessionStore = {
-      ...baseChatSessionStore,
-      async appendMessage(input: AppendChatMessageInput) {
-        return baseChatSessionStore.appendMessage({
-          ...input,
-          content: input.content.trim(),
-        });
-      },
-    };
+    const chatSessionStore = createChatSessionStore(chatMessages);
+    const exactReply = "  Normalized reply.   \n";
     const service = createChatService({
       chatClient: {
         async complete() {
-          return chatReply("Normalized reply.   ");
+          return chatReply(exactReply);
         },
       },
       getModelProfile: createCompleteProfile,
@@ -1852,7 +1844,7 @@ describe("chat service", () => {
 
     expect(result).toMatchObject({
       ok: true,
-      reply: "Normalized reply.   ",
+      reply: exactReply,
     });
     const persistedAssistant = (await chatSessionStore.get("persisted_session"))?.messages.at(-1);
     const finalTextPart = streamEvents.findLast(
@@ -1862,17 +1854,17 @@ describe("chat service", () => {
       (event) => event.type === "completed",
     );
 
-    expect(persistedAssistant?.content).toBe("Normalized reply.");
+    expect(persistedAssistant?.content).toBe(exactReply);
     expect(finalTextPart).toMatchObject({
       type: "output_part",
       part: expect.objectContaining({
         type: "text",
-        text: "Normalized reply.",
+        text: exactReply,
       }),
     });
     expect(completedEvent).toMatchObject({
       type: "completed",
-      message: "Normalized reply.",
+      message: exactReply,
     });
   });
 

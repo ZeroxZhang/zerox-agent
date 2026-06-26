@@ -102,13 +102,15 @@ export function createChatOutputAssembler(
 
       const firstTextIndex = parts.findIndex((part) => part.type === "text");
       if (firstTextIndex === -1) {
-        return pushPart({
-          id: `text_${parts.length + 1}`,
+        const part: ChatTextPart = {
+          id: "text_1",
           type: "text",
           text,
           format: "markdown",
           createdAt: now(),
-        });
+        };
+        parts.unshift(part);
+        return clonePart(part);
       }
 
       const firstTextPart = parts[firstTextIndex];

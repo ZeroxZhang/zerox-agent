@@ -158,7 +158,8 @@ export function createChatSessionStore(options: {
       return serializeMutation(mutationQueue, (nextQueue) => {
         mutationQueue = nextQueue;
       }, async () => {
-        const content = input.content.trim();
+        const content = input.content;
+        const summaryContent = content.trim();
         const timestamp = now().toISOString();
         const stored = await readStoredSessions();
         const existingSession = input.sessionId
@@ -186,7 +187,7 @@ export function createChatSessionStore(options: {
         const session = existingSession
           ? {
               ...existingSession,
-              summary: content || existingSession.summary,
+              summary: summaryContent || existingSession.summary,
               messages: [...existingSession.messages, message],
               ...(workspaceId ? { workspaceId } : {}),
               ...(workspaceSummary ? { workspaceSummary } : {}),
@@ -194,7 +195,7 @@ export function createChatSessionStore(options: {
             }
           : createSession({
               sessionId: newSessionId ?? createId(),
-              content,
+              content: summaryContent,
               message,
               timestamp,
               ...(workspaceId ? { workspaceId } : {}),

@@ -4792,3 +4792,24 @@
   - `npm run build` -> passed; Vite emitted the existing large chunk warning.
   - `npm run harness:check` -> passed.
   - `git diff --check` -> passed.
+
+## 2026-06-26 - Zerox Agent 2.9.0 Output Rendering Task 2 Closure Blocker Fixes
+
+- Request:
+  - Address Task 2 reviewer blockers: preserve exact legacy assistant `content` while keeping terminal completed messages backward-compatible, and make tool-first structured output answer-led.
+- Changed areas:
+  - `src/main/chatOutputAssembler.ts`
+  - `src/main/chatOutputAssembler.test.ts`
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+  - `src/main/chatSessionStore.ts`
+  - `src/main/chatSessionStore.test.ts`
+- RED evidence:
+  - `npm test -- src/main/chatService.test.ts src/main/chatOutputAssembler.test.ts src/main/chatSessionStore.test.ts -t "preserves final assistant reply whitespace|inserts final text before tool evidence|preserves message content exactly"` -> failed as expected on trimmed assistant content, tool-first part order, and store-level Markdown whitespace trimming.
+- GREEN / verification evidence:
+  - `npm test -- src/main/chatService.test.ts src/main/chatOutputAssembler.test.ts src/main/chatSessionStore.test.ts -t "preserves final assistant reply whitespace|inserts final text before tool evidence|preserves message content exactly"` -> 3 focused tests passed.
+  - `npm test -- src/main/chatService.test.ts src/main/agentLoop.test.ts src/main/chatOutputAssembler.test.ts src/main/chatSessionStore.test.ts` -> 4 files / 108 tests passed.
+  - `npm run build` -> passed; Vite emitted the existing large chunk warning.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - Full `npm run verify` and `npm run smoke:prod` remain deferred to later P23 release/renderer tasks while the v2.9.0 feature remains intentionally planned.

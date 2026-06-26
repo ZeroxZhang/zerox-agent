@@ -113,6 +113,30 @@ describe("chat session store", () => {
     await expect(reloaded.get("chat_1")).resolves.toEqual(assistantAppend.session);
   });
 
+  it("preserves message content exactly when persisting markdown output", async () => {
+    const store = createChatSessionStore({
+      configDir,
+      createId: createSequentialId("chat"),
+      now: createSteppedClock("2026-06-26T08:00:00.000Z"),
+    });
+    const exactContent = "  # Report\n\nResult stays spaced.  \n";
+
+    const appended = await store.appendMessage({
+      role: "assistant",
+      content: exactContent,
+    });
+
+    expect(appended.message.content).toBe(exactContent);
+    await expect(store.get(appended.session.id)).resolves.toMatchObject({
+      messages: [expect.objectContaining({ content: exactContent })],
+    });
+
+    const raw = await readFile(path.join(configDir, "chat-sessions.json"), {
+      encoding: "utf8",
+    });
+    expect(JSON.parse(raw).sessions[0].messages[0].content).toBe(exactContent);
+  });
+
   it("persists workspace identity and summary on chat sessions", async () => {
     const store = createChatSessionStore({
       configDir,
