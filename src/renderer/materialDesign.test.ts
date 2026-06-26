@@ -67,6 +67,13 @@ describe("Design System — Notion-inspired app shell", () => {
     ),
     "utf8",
   );
+  const outputRenderingArtifactPath = path.join(
+    process.cwd(),
+    "docs/design/zerox-agent-2-9-0-output-rendering-artifact.html",
+  );
+  const outputRenderingArtifactSource = existsSync(outputRenderingArtifactPath)
+    ? readFileSync(outputRenderingArtifactPath, "utf8")
+    : "";
   const evalReviewPanelPath = path.join(
     process.cwd(),
     "src/renderer/components/EvalReviewPanel.tsx",
@@ -380,6 +387,82 @@ describe("Design System — Notion-inspired app shell", () => {
     ]) {
       expect(componentSources).toContain(className);
     }
+  });
+
+  it("covers v2.9 output rendering CSS hooks for approved visual styling", () => {
+    const componentSources = [
+      readChatOutputComponent("AnswerBlock.tsx"),
+      readChatOutputComponent("CodeBlockView.tsx"),
+      readChatOutputComponent("DataTableView.tsx"),
+      readChatOutputComponent("CommandOutputView.tsx"),
+      readChatOutputComponent("JsonPreview.tsx"),
+      readChatOutputComponent("RunLedgerView.tsx"),
+      readChatOutputComponent("EvidenceRail.tsx"),
+      readChatOutputComponent("OutputPartRenderer.tsx"),
+    ].join("\n");
+
+    const requiredClassHooks = [
+      "chat-answer-block",
+      "chat-answer-body",
+      "chat-output-part-list",
+      "chat-output-part",
+      "chat-evidence-rail",
+      "chat-evidence-item",
+      "chat-data-table-wrap",
+      "chat-data-table",
+      "chat-code-block",
+      "chat-code-header",
+      "chat-diff-line-added",
+      "chat-diff-line-removed",
+      "chat-command-output",
+      "chat-command-stream",
+      "chat-json-preview",
+      "chat-run-ledger",
+      "chat-ledger-row",
+      "chat-artifact-card",
+      "chat-citation-chip",
+      "chat-approval-block",
+      "chat-input-request-block",
+    ];
+
+    for (const className of requiredClassHooks) {
+      expect(componentSources).toContain(className);
+      expect(styles).toContain(`.${className}`);
+    }
+
+    expect(styles).toContain("@media (max-width: 640px)");
+    expect(styles).toMatch(
+      /@media \(max-width: 640px\)[\s\S]*\.chat-answer-block/,
+    );
+    expect(styles).toContain("grid-template-columns: minmax(0, 1fr);");
+    expect(styles).toContain("overflow-x: auto;");
+    expect(styles).toContain("max-width: 100%;");
+  });
+
+  it("commits the v2.9 output rendering design artifact with acceptance states", () => {
+    expect(existsSync(outputRenderingArtifactPath)).toBe(true);
+
+    for (const requiredState of [
+      "evidence-linked answer",
+      "run ledger",
+      "table",
+      "code/diff",
+      "terminal output",
+      "document report",
+      "approval waiting",
+      "guided input",
+      "error diagnostic",
+      "narrow layout",
+    ]) {
+      expect(outputRenderingArtifactSource.toLowerCase()).toContain(
+        requiredState,
+      );
+    }
+
+    expect(outputRenderingArtifactSource).toContain("chat-answer-block");
+    expect(outputRenderingArtifactSource).toContain("chat-evidence-rail");
+    expect(outputRenderingArtifactSource).toContain("chat-run-ledger");
+    expect(outputRenderingArtifactSource).toContain("@media (max-width: 640px)");
   });
 
   it("keeps a draggable window strip visible on the chat-first desktop shell", () => {

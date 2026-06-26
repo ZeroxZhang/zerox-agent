@@ -12,10 +12,12 @@ export function AnswerBlock({ parts }: AnswerBlockProps) {
 
   return (
     <div className="chat-answer-block">
-      <div className="chat-output-part-list">
-        {renderParts.map((part) => (
-          <OutputPartRenderer key={part.renderKey} part={part} />
-        ))}
+      <div className="chat-answer-body">
+        <div className="chat-output-part-list">
+          {renderParts.map((part) => (
+            <OutputPartRenderer key={part.renderKey} part={part} />
+          ))}
+        </div>
       </div>
       <EvidenceRail parts={parts} />
     </div>

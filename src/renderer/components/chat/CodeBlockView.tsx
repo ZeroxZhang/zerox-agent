@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { RenderedOutputPart } from "../../chatOutputModel";
 
 type CodeBlockPart = Extract<
@@ -32,9 +33,25 @@ export function CodeBlockView({ part }: CodeBlockViewProps) {
       </figcaption>
       <pre>
         <code data-language={language ?? "text"}>
-          {isDiff ? part.patch : part.code}
+          {isDiff ? renderDiffLines(part.patch) : part.code}
         </code>
       </pre>
     </figure>
   );
+}
+
+function renderDiffLines(patch: string): ReactNode[] {
+  return patch.split("\n").map((line, index) => {
+    const className = line.startsWith("+")
+      ? "chat-diff-line-added"
+      : line.startsWith("-")
+        ? "chat-diff-line-removed"
+        : "chat-diff-line-context";
+
+    return (
+      <span className={className} key={`${className}-${index}`}>
+        {line || " "}
+      </span>
+    );
+  });
 }

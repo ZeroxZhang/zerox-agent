@@ -43,7 +43,7 @@ function EvidenceItem({ part }: { part: EvidencePart }) {
   if (part.type === "citation") {
     const label = part.label || part.citationId;
     return (
-      <div className="chat-evidence-item is-citation">
+      <div className="chat-evidence-item chat-citation-chip is-citation">
         <span>Citation</span>
         {part.uri ? (
           <a href={part.uri} rel="noreferrer" target="_blank">
@@ -59,7 +59,7 @@ function EvidenceItem({ part }: { part: EvidencePart }) {
 
   if (part.type === "artifact") {
     return (
-      <div className="chat-evidence-item is-artifact">
+      <div className="chat-evidence-item chat-artifact-card is-artifact">
         <span>Artifact</span>
         <strong>{part.title}</strong>
         {part.path ? <small>{part.path}</small> : null}
@@ -80,7 +80,9 @@ function EvidenceItem({ part }: { part: EvidencePart }) {
 
   if (part.type === "approval_request") {
     return (
-      <div className={`chat-evidence-item is-approval is-${part.riskLevel}`}>
+      <div
+        className={`chat-evidence-item chat-approval-block is-approval is-${part.riskLevel}`}
+      >
         <span>Approval</span>
         <strong>{part.toolName}</strong>
         <small>{part.riskLevel} risk</small>

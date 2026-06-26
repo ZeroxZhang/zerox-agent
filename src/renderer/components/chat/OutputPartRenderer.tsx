@@ -83,7 +83,7 @@ export function OutputPartRenderer({ part }: OutputPartRendererProps) {
       );
     case "artifact":
       return (
-        <section className="chat-output-part chat-evidence-inline is-artifact">
+        <section className="chat-output-part chat-evidence-inline chat-artifact-card is-artifact">
           <span>Artifact</span>
           <strong>{part.title}</strong>
           {part.path ? <small>{part.path}</small> : null}
@@ -91,7 +91,7 @@ export function OutputPartRenderer({ part }: OutputPartRendererProps) {
       );
     case "citation":
       return (
-        <section className="chat-output-part chat-evidence-inline is-citation">
+        <section className="chat-output-part chat-evidence-inline chat-citation-chip is-citation">
           <span>{part.label}</span>
           {part.uri ? (
             <a href={part.uri} rel="noreferrer" target="_blank">
@@ -104,7 +104,7 @@ export function OutputPartRenderer({ part }: OutputPartRendererProps) {
       );
     case "approval_request":
       return (
-        <section className="chat-output-part chat-evidence-inline is-approval">
+        <section className="chat-output-part chat-evidence-inline chat-approval-block is-approval">
           <span>Approval requested</span>
           <strong>{part.toolName}</strong>
           <small>{part.riskLevel} risk</small>
@@ -113,7 +113,7 @@ export function OutputPartRenderer({ part }: OutputPartRendererProps) {
       );
     case "input_request":
       return (
-        <section className="chat-output-part chat-input-request">
+        <section className="chat-output-part chat-input-request-block">
           <header>
             <span>Input requested</span>
             <strong>{part.skillName}</strong>

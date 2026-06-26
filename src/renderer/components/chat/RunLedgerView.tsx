@@ -9,8 +9,8 @@ type RunLedgerViewProps = {
 export function RunLedgerView({ part }: RunLedgerViewProps) {
   return (
     <section className={`chat-run-ledger is-${part.status}`}>
-      <span className="chat-run-ledger-status">{part.status}</span>
-      <div>
+      <div className="chat-ledger-row">
+        <span className="chat-run-ledger-status">{part.status}</span>
         <strong>{part.title}</strong>
         {part.detail ? <p>{part.detail}</p> : null}
         {part.toolName ? <small>{part.toolName}</small> : null}

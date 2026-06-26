@@ -1,5 +1,36 @@
 # Zerox Harness Progress
 
+## 2026-06-26 - v2.9.0 Task 5 Approved Visual Styling And Responsive Safety
+
+- Request: implement Task 5 for v2.9.0 output rendering by translating the approved Evidence-Linked Answer plus Run Ledger direction into repo-local CSS, stable responsive-safe class hooks, and a committed design artifact.
+- Changed files:
+  - `src/renderer/materialDesign.test.ts`
+  - `src/renderer/components/chat/AnswerBlock.tsx`
+  - `src/renderer/components/chat/CodeBlockView.tsx`
+  - `src/renderer/components/chat/OutputPartRenderer.tsx`
+  - `src/renderer/components/chat/EvidenceRail.tsx`
+  - `src/renderer/components/chat/RunLedgerView.tsx`
+  - `src/renderer/styles/chat.css`
+  - `src/renderer/styles/responsive.css`
+  - `docs/design/zerox-agent-2-9-0-output-rendering-artifact.html`
+  - `.superpowers/sdd/2026-06-26-v290-task-5-report.md`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts -t "v2.9 output rendering"` -> failed as expected before implementation because structured output CSS hooks were missing from the stylesheet bundle and `docs/design/zerox-agent-2-9-0-output-rendering-artifact.html` did not exist.
+- GREEN evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts -t "v2.9 output rendering"` -> 1 file / 2 selected tests passed.
+  - `npm test -- src/renderer/materialDesign.test.ts src/renderer/chatOutputModel.test.ts src/renderer/chatMarkdown.test.ts src/renderer/chatStreamReducer.test.ts src/shared/chatOutput.test.ts` -> 5 files / 81 tests passed.
+  - `npm run build` -> passed, with the existing Vite chunk-size warning.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Existing better-sqlite3 ABI mismatch fell back to JSON.
+  - `npm run verify` -> failed in pre-existing release-gate coverage: `src/shared/packageScripts.test.ts` expects no unfinished features through v2.8.5, but `.zerox/feature_list.json` still has `P23-v2.9.0-output-rendering` marked `planned`.
+  - `git diff --check` -> passed.
+- Implementation evidence:
+  - Added `.chat-answer-body`, `.chat-ledger-row`, diff-line, artifact, citation, approval, and guided-input hooks to the dedicated chat output components.
+  - Added compact answer-led styling for evidence rails, data tables, code/diff blocks, command output, JSON previews, run ledger rows, artifacts, citations, approval waiting, guided input, and diagnostics.
+  - Added narrow-width rules so answer blocks stack and table/code/terminal/JSON surfaces remain horizontally scroll-safe.
+  - Added the repo-local static design artifact covering evidence-linked answer, run ledger, table, code/diff, terminal output, document report, approval waiting, guided input, error diagnostic, and narrow layout states.
+
 ## 2026-06-26 - v2.9.0 Task 4 Closure Blocker Circular Preview Stringify
 
 - Request: fix the remaining Task 4 closure blocker where masked circular preview values could still crash `outputPartsToPlainText()` and chat-service running ledger details via direct `JSON.stringify`.
