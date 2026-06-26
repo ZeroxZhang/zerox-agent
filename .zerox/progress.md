@@ -4792,6 +4792,8 @@
   - `npm run build` -> passed; Vite emitted the existing large chunk warning.
   - `npm run harness:check` -> passed.
   - `git diff --check` -> passed.
+  - `npm run verify` -> still fails in `src/shared/packageScripts.test.ts` because the repo-level `v2.8.5` release gate expects no non-`done` features while `P23-v2.9.0-output-rendering` is intentionally still `planned`.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `better-sqlite3` ABI mismatch triggered the existing JSON fallback during smoke.
 
 ## 2026-06-26 - Zerox Agent 2.9.0 Output Rendering Task 2 Closure Blocker Fixes
 
@@ -4836,3 +4838,23 @@
   - `git diff --check` -> passed.
   - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `better-sqlite3` ABI mismatch triggered the existing JSON fallback during smoke.
   - `npm run verify` -> still fails in `src/shared/packageScripts.test.ts` because the repo-level `v2.8.5` release gate expects no non-`done` features while `P23-v2.9.0-output-rendering` is intentionally still `planned`.
+
+## 2026-06-26 - Zerox Agent 2.9.0 Output Rendering Task 3 Review Blockers
+
+- Request:
+  - Address Task 3 review blockers: render assistant `outputParts` in `AgentChatPanel`, preserve legacy content fallback when parts lack text, and make live output-part render keys stable across repeated updates.
+- Changed areas:
+  - `src/renderer/chatOutputModel.ts`
+  - `src/renderer/chatOutputModel.test.ts`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `.superpowers/sdd/2026-06-26-v290-task-3-report.md`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/renderer/chatOutputModel.test.ts src/renderer/chatMarkdown.test.ts` -> failed as expected: legacy content fallback missing for non-text `outputParts`, `outputMarkdownFromMessage` missing, and live render keys still included stream sequence.
+- GREEN / verification evidence:
+  - `npm test -- src/renderer/chatOutputModel.test.ts src/renderer/chatMarkdown.test.ts` -> 2 files / 14 tests passed.
+  - Refactor re-run: `npm test -- src/renderer/chatOutputModel.test.ts src/renderer/chatMarkdown.test.ts` -> 2 files / 14 tests passed.
+  - `npm test -- src/renderer/chatMarkdown.test.ts src/renderer/chatOutputModel.test.ts src/renderer/chatStreamReducer.test.ts` -> 3 files / 21 tests passed.
+  - `npm run build` -> passed; Vite emitted the existing large chunk warning.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.

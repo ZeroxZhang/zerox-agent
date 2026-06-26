@@ -1,5 +1,8 @@
 import type { ChatMessageRecord, ChatStreamEvent } from "../shared/chat";
-import type { ChatOutputPart } from "../shared/chatOutput";
+import {
+  outputPartsToPlainText,
+  type ChatOutputPart,
+} from "../shared/chatOutput";
 
 export type RenderedOutputPartSource = "persisted" | "stream";
 
@@ -12,11 +15,27 @@ export function outputPartsFromMessage(
   message: ChatMessageRecord,
 ): RenderedOutputPart[] {
   if (message.outputParts?.length) {
-    return message.outputParts.map((part) => ({
+    const parts = message.outputParts.map((part) => ({
       ...part,
       renderKey: `${message.id}:${part.id}`,
       source: "persisted",
-    }));
+    })) satisfies RenderedOutputPart[];
+    const hasTextPart = parts.some((part) => part.type === "text");
+    if (hasTextPart || !message.content) {
+      return parts;
+    }
+
+    return [
+      {
+        id: `${message.id}:text`,
+        type: "text",
+        text: message.content,
+        format: "markdown",
+        renderKey: `${message.id}:text`,
+        source: "persisted",
+      },
+      ...parts,
+    ];
   }
 
   return [
@@ -40,7 +59,15 @@ export function outputPartFromStreamEvent(
 
   return {
     ...event.part,
-    renderKey: `${event.requestId}:${event.sequence}:${event.part.id}`,
+    renderKey: `${event.requestId}:${event.part.id}`,
     source: "stream",
   };
+}
+
+export function outputMarkdownFromMessage(message: ChatMessageRecord): string {
+  if (message.role !== "assistant") {
+    return message.content;
+  }
+
+  return outputPartsToPlainText(outputPartsFromMessage(message));
 }
