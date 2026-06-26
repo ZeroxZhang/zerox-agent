@@ -132,6 +132,10 @@ export type GoalOperationResult = {
   message?: string;
 };
 
+export type OpenProjectAgentWorkspaceInput = {
+  mode?: "open" | "create";
+};
+
 const buildingAgent = {
   getAppMeta: (): Promise<AppMeta> => ipcRenderer.invoke("app:getMeta"),
   getRuntimeInfo: (): Promise<DesktopRuntimeInfo> =>
@@ -229,8 +233,10 @@ const buildingAgent = {
     cleanup?: AgentWorkspaceCleanup;
   }): Promise<AgentWorkspace> =>
     ipcRenderer.invoke("agentWorkspaces:createTemporary", input),
-  openProjectAgentWorkspace: (): Promise<AgentWorkspace | null> =>
-    ipcRenderer.invoke("agentWorkspaces:openProject"),
+  openProjectAgentWorkspace: (
+    input?: OpenProjectAgentWorkspaceInput,
+  ): Promise<AgentWorkspace | null> =>
+    ipcRenderer.invoke("agentWorkspaces:openProject", input),
   createGitWorktreeAgentWorkspace: (input: {
     name: string;
     repositoryRoot: string;

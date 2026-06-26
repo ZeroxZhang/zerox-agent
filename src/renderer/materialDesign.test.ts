@@ -182,12 +182,15 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(chatPanelSource).toContain("selectedWorkspaceId");
     expect(chatPanelSource).toContain("workspaceId: selectedWorkspaceId");
     expect(chatPanelSource).toContain("openProjectAgentWorkspace");
-    expect(chatPanelSource).toContain("createTemporaryAgentWorkspace");
+    expect(chatPanelSource).toContain("openProjectAgentWorkspace({");
+    expect(chatPanelSource).toContain('mode: "create"');
+    expect(chatPanelSource).not.toContain("createTemporaryAgentWorkspace({");
     expect(chatPanelSource).toContain("workspace-menu");
     expect(chatPanelSource).toContain("workspaceSearch");
     expect(chatPanelSource).toContain("历史工作区");
     expect(chatPanelSource).toContain("打开已有目录");
     expect(chatPanelSource).toContain("新建工作区");
+    expect(chatPanelSource).toContain("选择或新建本地项目文件夹");
     expect(chatPanelSource).toContain("默认工作区");
     expect(chatPanelSource).toContain("composer-context-row");
     expect(chatPanelSource).toContain("workspace-picker");

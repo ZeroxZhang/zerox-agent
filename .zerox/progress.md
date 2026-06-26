@@ -5046,3 +5046,26 @@
   - `npm run build` -> passed; Vite emitted the existing large chunk warning.
   - `npm run harness:check` -> passed.
   - `git diff --check` -> passed.
+
+## 2026-06-26 - Workspace Create Directory Picker Hotfix
+
+- Request:
+  - Fix the workspace menu "新建工作区" action so it opens the native directory manager and lets the user choose or create the target folder instead of silently creating a default temporary workspace.
+- Changed areas:
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/materialDesign.test.ts`
+  - `src/preload/index.ts`
+  - `src/preload/index.test.ts`
+  - `src/main/ipc/index.ts`
+  - `src/main/ipc/index.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts src/preload/index.test.ts src/main/ipc/index.test.ts -t "workspace|openProject|工作区"` -> failed as expected because the renderer still called `createTemporaryAgentWorkspace`, preload did not pass input to `agentWorkspaces:openProject`, and the main IPC handler had no create-mode dialog.
+- GREEN / verification evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts src/preload/index.test.ts src/main/ipc/index.test.ts -t "workspace|openProject|工作区"` -> 3 files / 5 focused tests passed.
+  - `npm test -- src/renderer/materialDesign.test.ts src/preload/index.test.ts src/main/ipc/index.test.ts` -> 3 files / 63 tests passed.
+  - `npm run build` -> passed after correcting the Electron open-dialog property to `promptToCreate`; Vite emitted the existing large chunk warning.
+  - `npm run verify` -> 179 files / 1232 tests passed, build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `better-sqlite3` ABI mismatch triggered the existing JSON fallback during smoke.
+  - `git diff --check` -> passed.

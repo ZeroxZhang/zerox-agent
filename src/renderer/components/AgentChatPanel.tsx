@@ -1129,12 +1129,16 @@ export function AgentChatPanel({
     setWorkspaceMenuOpen(false);
     setWorkspaceActionPending("create");
     try {
-      const workspace = await window.buildingAgent.createTemporaryAgentWorkspace({
-        name: "新建工作区",
-        cleanup: "keep",
+      const workspace = await window.buildingAgent.openProjectAgentWorkspace({
+        mode: "create",
       });
+      if (!workspace) {
+        setStatus({ kind: "ready", message: "已取消新建工作区" });
+        return;
+      }
+
       selectWorkspace(workspace);
-      setStatus({ kind: "ready", message: `已新建工作区：${workspace.name}` });
+      setStatus({ kind: "ready", message: `已选择工作区：${workspace.name}` });
       void refreshWorkspaces(workspace.id);
     } catch (error) {
       setStatus({
@@ -2273,10 +2277,10 @@ export function AgentChatPanel({
                           <span>
                             <strong>
                               {workspaceActionPending === "create"
-                                ? "新建中"
+                                ? "选择中"
                                 : "新建工作区"}
                             </strong>
-                            <small>创建新的本地临时空间</small>
+                            <small>选择或新建本地项目文件夹</small>
                           </span>
                         </button>
                       </div>

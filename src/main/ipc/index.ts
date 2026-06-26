@@ -67,6 +67,10 @@ import { ModelSettingsValidationError } from "../modelSettingsStore";
 import { ScheduledTaskValidationError } from "../taskStore";
 import { toChatSendMessageFailure } from "./chatSendMessageError";
 
+type OpenProjectAgentWorkspaceInput = {
+  mode?: "open" | "create";
+};
+
 export function registerAllIpcHandlers(container: AppContainer): void {
   registerAppIpcHandlers(container);
   registerTasksIpcHandlers(container);
@@ -364,19 +368,29 @@ function registerWorkspacesIpcHandlers(container: AppContainer): void {
   ipcMain.handle("agentWorkspaces:createTemporary", (_event, input) =>
     container.agentWorkspaceService().createTemporaryWorkspace(input),
   );
-  ipcMain.handle("agentWorkspaces:openProject", async () => {
-    const result = await dialog.showOpenDialog({
-      title: "打开工作区",
-      buttonLabel: "打开工作区",
-      properties: ["openDirectory", "createDirectory"],
-    });
-    const rootPath = result.filePaths[0];
-    if (result.canceled || !rootPath) {
-      return null;
-    }
+  ipcMain.handle(
+    "agentWorkspaces:openProject",
+    async (_event, input?: OpenProjectAgentWorkspaceInput) => {
+      const isCreateMode = input?.mode === "create";
+      const result = await dialog.showOpenDialog({
+        title: isCreateMode ? "新建工作区" : "打开工作区",
+        buttonLabel: isCreateMode ? "选择工作区" : "打开工作区",
+        properties: [
+          "openDirectory",
+          "createDirectory",
+          "promptToCreate",
+        ],
+      });
+      const rootPath = result.filePaths[0];
+      if (result.canceled || !rootPath) {
+        return null;
+      }
 
-    return container.agentWorkspaceService().createProjectWorkspace({ rootPath });
-  });
+      return container.agentWorkspaceService().createProjectWorkspace({
+        rootPath,
+      });
+    },
+  );
   ipcMain.handle("agentWorkspaces:requestGitWorktree", (_event, input) =>
     container.requestGitWorktreeAgentWorkspace(input),
   );
