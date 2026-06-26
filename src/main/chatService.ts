@@ -314,13 +314,16 @@ export function createChatService(options: {
       let terminalStreamEventSent = false;
 
       function getAssistantOutputParts(content: string): ChatOutputPart[] | undefined {
-        const assembledParts = outputAssembler.parts();
-        if (assembledParts.length > 0) {
-          return assembledParts;
-        }
-        outputAssembler.appendText(content);
+        outputAssembler.setFinalText(content);
         const textOnlyParts = outputAssembler.parts();
         return textOnlyParts.length > 0 ? textOnlyParts : undefined;
+      }
+
+      function emitOutputPart(part: ChatOutputPart) {
+        emitStatus.sendStreamEvent({
+          type: "output_part",
+          part,
+        });
       }
 
       function emitTerminalStreamEvent(event: {
@@ -330,6 +333,18 @@ export function createChatService(options: {
       }) {
         if (terminalStreamEventSent) {
           return;
+        }
+        if (
+          event.message &&
+          (event.type === "failed" || event.type === "canceled")
+        ) {
+          emitOutputPart(
+            outputAssembler.appendDiagnostic({
+              severity: event.type === "failed" ? "error" : "warning",
+              title: event.type === "failed" ? "请求失败" : "请求已取消",
+              message: event.message,
+            }),
+          );
         }
         terminalStreamEventSent = true;
         emitStatus.sendTerminalEvent(event);
@@ -510,6 +525,7 @@ export function createChatService(options: {
               "Skill input required.",
               persisted,
             );
+            emitOutputPart(outputAssembler.appendInputRequest(inputRequest));
           } catch {
             emitTerminalStreamEvent({
               type: "failed",
@@ -873,6 +889,14 @@ export function createChatService(options: {
                   toolCallId: event.toolCallId,
                   toolCallsExecuted: observedToolCallsExecuted,
                 });
+                emitOutputPart(
+                  outputAssembler.appendLedgerEvent({
+                    status: "running",
+                    title: `正在调用工具：${toolName}`,
+                    detail: JSON.stringify(args),
+                    toolName,
+                  }),
+                );
               },
               onToolInvocation(record) {
                 void evidence.append("tool_invocation", {
@@ -944,6 +968,42 @@ export function createChatService(options: {
                   ok,
                   toolCallsExecuted: observedToolCallsExecuted,
                 });
+                emitOutputPart(
+                  outputAssembler.appendToolResult({
+                    toolCallId: event.toolCallId,
+                    ok,
+                    ...(ok && result && typeof result === "object" && "result" in result
+                      ? {
+                          resultPreview: (
+                            result as { result: Record<string, unknown> }
+                          ).result,
+                        }
+                      : {}),
+                    ...(!ok && result && typeof result === "object" && "error" in result
+                      ? {
+                          error: (result as { error: string }).error,
+                          ...("errorDetails" in result &&
+                          (result as { errorDetails?: Record<string, unknown> })
+                            .errorDetails
+                            ? {
+                                resultPreview: (
+                                  result as {
+                                    errorDetails: Record<string, unknown>;
+                                  }
+                                ).errorDetails,
+                              }
+                            : {}),
+                        }
+                      : {}),
+                  }),
+                );
+                emitOutputPart(
+                  outputAssembler.appendLedgerEvent({
+                    status: ok ? "completed" : "failed",
+                    title: buildToolResultStatusMessage(toolName, result),
+                    ...(toolName ? { toolName } : {}),
+                  }),
+                );
               },
             },
           );
@@ -1241,6 +1301,12 @@ export function createChatService(options: {
           "Skill input required.",
           persisted,
         );
+        emitStatus.sendStreamEvent({
+          type: "output_part",
+          part: createChatOutputAssembler(() =>
+            new Date(getNowMs(options.now)).toISOString(),
+          ).appendInputRequest(inputRequest),
+        });
       } catch {
         return {
           ok: false,
@@ -1432,7 +1498,7 @@ function createChatStatusEmitter(options: {
       const nowMs = getNowMs(options.now);
       try {
         options.onStreamEvent?.({
-          ...event,
+          ...cloneChatModelStreamEventInput(event),
           ...createStreamBase(new Date(nowMs).toISOString()),
         });
       } catch {
@@ -1470,6 +1536,19 @@ type ChatModelStreamEventInput =
       toolName?: string;
       argumentsDelta?: string;
     };
+
+function cloneChatModelStreamEventInput(
+  event: ChatModelStreamEventInput,
+): ChatModelStreamEventInput {
+  if (event.type !== "output_part") {
+    return event;
+  }
+
+  return {
+    ...event,
+    part: structuredClone(event.part),
+  };
+}
 
 function emitModelStreamEvent(
   emitter: ReturnType<typeof createChatStatusEmitter>,
@@ -2084,10 +2163,13 @@ async function tryRouteGoalIntent(options: {
     goalId: string;
     goalEventRef: string;
   }) {
+    const goalOutputAssembler = createChatOutputAssembler();
+    goalOutputAssembler.setFinalText(input.content);
     const assistantMessageId = await appendAssistantMessage({
       chatSessionStore: options.chatSessionStore,
       sessionId: options.sessionId,
       content: input.content,
+      outputParts: goalOutputAssembler.parts(),
       goalId: input.goalId,
       goalEventRef: input.goalEventRef,
     });

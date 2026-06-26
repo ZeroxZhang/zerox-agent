@@ -20,6 +20,7 @@ import type {
   ChatStreamEvent,
   ChatTaskStatusEvent,
 } from "../shared/chat";
+import type { ChatOutputPart } from "../shared/chatOutput";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
 import { buildPrimaryRunContext } from "../shared/agentWorkspace";
 import { defineNativeToolDescriptor } from "../shared/nativeCapabilities";
@@ -524,14 +525,21 @@ describe("chat service", () => {
         role: "user",
         content: "把这轮设为目标：发布 v1.8.0，直到 GitHub Release 完成才算结束",
       },
-      {
+      expect.objectContaining({
         sessionId: "persisted_session",
         role: "assistant",
         content:
           "已设置并开始执行目标：发布 v1.8.0，直到 GitHub Release 完成才算结束。",
         goalId: "goal_release",
         goalEventRef: "goal_started",
-      },
+        outputParts: [
+          expect.objectContaining({
+            type: "text",
+            text:
+              "已设置并开始执行目标：发布 v1.8.0，直到 GitHub Release 完成才算结束。",
+          }),
+        ],
+      }),
     ]);
     expect(completeCalled).toBe(false);
   });
@@ -1674,6 +1682,163 @@ describe("chat service", () => {
     ]);
   });
 
+  it("persists final assistant text and lifecycle output parts for tool-using turns", async () => {
+    const streamEvents: ChatStreamEvent[] = [];
+    const chatMessages: AppendChatMessageInput[] = [];
+    const chatSessionStore = createChatSessionStore(chatMessages);
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore,
+      toolExecutor: createToolExecutor(),
+      async runAgentLoop(messages, _profile, options) {
+        options.onModelStreamEvent?.(
+          { type: "content_delta", text: "Streaming draft." },
+          1,
+        );
+        options.onToolCall?.("file_list", { path: "/tmp" }, { toolCallId: "tool_1" });
+        options.onToolResult?.(
+          "file_list",
+          true,
+          {
+            ok: true,
+            result: { files: ["a.txt", "b.txt"] },
+          },
+          { toolCallId: "tool_1", resultBytes: 24 },
+        );
+        return {
+          status: "succeeded" as const,
+          summary: "Final reply.",
+          turns: 1,
+          messages,
+          toolCallsExecuted: 1,
+        };
+      },
+      createId: () => "chat_tool_parts",
+      now: () => new Date("2026-06-23T08:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage(
+      {
+        requestId: "request_tool_parts_1",
+        message: "run one tool",
+      },
+      {
+        onStreamEvent(event) {
+          streamEvents.push(event);
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      reply: "🔧 使用了 1 个工具\n\nFinal reply.",
+    });
+    const persistedAssistant = (await chatSessionStore.get("persisted_session"))?.messages.at(-1);
+    expect(persistedAssistant).toMatchObject({
+      role: "assistant",
+      content: "🔧 使用了 1 个工具\n\nFinal reply.",
+      outputParts: expect.arrayContaining([
+        expect.objectContaining({
+          type: "text",
+          text: "🔧 使用了 1 个工具\n\nFinal reply.",
+        }),
+        expect.objectContaining({
+          type: "tool_result",
+          toolCallId: "tool_1",
+          ok: true,
+          resultPreview: { files: ["a.txt", "b.txt"] },
+        }),
+        expect.objectContaining({
+          type: "ledger_event",
+        }),
+      ]),
+    });
+    expect(streamEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "output_part",
+          part: expect.objectContaining({
+            type: "tool_result",
+            toolCallId: "tool_1",
+            ok: true,
+          }),
+        }),
+        expect.objectContaining({
+          type: "output_part",
+          part: expect.objectContaining({
+            type: "ledger_event",
+          }),
+        }),
+      ]),
+    );
+  });
+
+  it("emits immutable output part snapshots for repeated text deltas", async () => {
+    const streamEvents: ChatStreamEvent[] = [];
+    let retainedFirstTextPart:
+      | Extract<ChatOutputPart, { type: "text" }>
+      | undefined;
+    const chatClient: ChatClient & StreamingChatClient = {
+      async complete() {
+        throw new Error("non-streaming complete should not be used");
+      },
+      async *streamComplete() {
+        yield { type: "content_delta", text: "Hello " };
+        yield { type: "content_delta", text: "world" };
+        yield { type: "done", finishReason: "stop" };
+      },
+    };
+    const service = createChatService({
+      chatClient,
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([]),
+      toolExecutor: createToolExecutor(),
+      createId: () => "chat_output_snapshot",
+      now: () => new Date("2026-06-23T08:00:00.000Z"),
+    });
+
+    await service.sendMessage(
+      {
+        requestId: "request_output_snapshot",
+        message: "snapshot text deltas",
+      },
+      {
+        onStreamEvent(event) {
+          streamEvents.push(event);
+          if (
+            event.type === "output_part" &&
+            event.part.type === "text" &&
+            !retainedFirstTextPart
+          ) {
+            retainedFirstTextPart = event.part;
+          }
+        },
+      },
+    );
+
+    const latestTextPart = streamEvents
+      .filter(
+        (event): event is Extract<ChatStreamEvent, { type: "output_part" }> =>
+          event.type === "output_part" && event.part.type === "text",
+      )
+      .at(-1)?.part;
+    expect(retainedFirstTextPart).toMatchObject({
+      type: "text",
+      text: "Hello ",
+    });
+    expect(latestTextPart).toMatchObject({
+      type: "text",
+      text: "Hello world",
+    });
+  });
+
   it("emits sequence-stable output parts and completes with the persisted assistant message id", async () => {
     const streamEvents: ChatStreamEvent[] = [];
     const chatMessages: AppendChatMessageInput[] = [];
@@ -2279,6 +2444,13 @@ describe("chat service", () => {
     expect(streamEvents).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
+          type: "output_part",
+          part: expect.objectContaining({
+            type: "input_request",
+            skillName: "local-file-organizer",
+          }),
+        }),
+        expect.objectContaining({
           type: "waiting_for_input",
           sessionId: "session_1",
           requestId: "request_1",
@@ -2449,6 +2621,18 @@ describe("chat service", () => {
       ok: false,
       message: "Failed to persist skill input request.",
     });
+    expect(streamEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "output_part",
+          part: expect.objectContaining({
+            type: "diagnostic",
+            severity: "error",
+            message: "Failed to persist skill input request.",
+          }),
+        }),
+      ]),
+    );
     expect(streamEvents.some((event) => event.type === "waiting_for_input")).toBe(
       false,
     );
@@ -3827,6 +4011,7 @@ describe("chat service", () => {
   it("cancels an active chat request through the runtime abort signal", async () => {
     const controller = new AbortController();
     const statusEvents: ChatTaskStatusEvent[] = [];
+    const streamEvents: ChatStreamEvent[] = [];
     let observedAbort = false;
     const service = createChatService({
       chatClient: {
@@ -3857,6 +4042,7 @@ describe("chat service", () => {
       {
         signal: controller.signal,
         onStatusEvent: (event) => statusEvents.push(event),
+        onStreamEvent: (event) => streamEvents.push(event),
       },
     );
 
@@ -3871,6 +4057,18 @@ describe("chat service", () => {
           sessionId: "chat_cancel",
           state: "canceled",
           message: "任务已中断",
+        }),
+      ]),
+    );
+    expect(streamEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "output_part",
+          part: expect.objectContaining({
+            type: "diagnostic",
+            severity: "warning",
+            message: "已中断任务。",
+          }),
         }),
       ]),
     );

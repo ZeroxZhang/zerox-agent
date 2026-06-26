@@ -4758,3 +4758,20 @@
   - `npm run build` -> passed.
   - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: the existing local `better-sqlite3` ABI mismatch warning still triggered the JSON fallback during smoke.
   - `npm run verify` -> still fails in `src/shared/packageScripts.test.ts` because the repo-level `v2.8.5` release gate expects no non-`done` features while `P23-v2.9.0-output-rendering` is intentionally still `planned`.
+
+## 2026-06-26 - Zerox Agent 2.9.0 Output Rendering Task 2 Review Fixes
+
+- Request:
+  - Address Task 2 review findings around structured output drift, missing lifecycle part coverage, goal reply `outputParts`, and mutable streamed `output_part` snapshots.
+- Changed areas:
+  - `src/main/chatOutputAssembler.ts`
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+- RED evidence:
+  - `npm test -- src/main/chatService.test.ts -t "persists final assistant text and lifecycle output parts for tool-using turns|emits immutable output part snapshots for repeated text deltas|creates and immediately starts a session goal from an explicit goal-setting message|returns failure and leaves no answerable pending request when durable skill wait persistence fails|cancels an active chat request through the runtime abort signal|persists selected guided skill input requests durably before returning them"` -> failed on missing goal reply `outputParts`, stale persisted tool-use text, mutable text snapshots, and missing diagnostic parts.
+- GREEN / verification evidence:
+  - `npm test -- src/main/chatService.test.ts -t "persists final assistant text and lifecycle output parts for tool-using turns|emits immutable output part snapshots for repeated text deltas|creates and immediately starts a session goal from an explicit goal-setting message|returns failure and leaves no answerable pending request when durable skill wait persistence fails|cancels an active chat request through the runtime abort signal|persists selected guided skill input requests durably before returning them"` -> passed.
+  - `npm test -- src/main/chatService.test.ts src/main/agentLoop.test.ts` -> 2 files / 80 tests passed.
+  - `npm run build` -> passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
