@@ -14,6 +14,10 @@
 - Verification evidence:
   - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v2.9.0' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed; renderer rendered agent chat UI.
   - `npm run harness:check` -> passed.
+- GitHub release evidence:
+  - `git push -u origin codex/2.9.0 && git push origin v2.9.0` -> pushed branch and release tag.
+  - `gh release create v2.9.0 ... --latest` -> published `https://github.com/ZeroxZhang/zerox-agent/releases/tag/v2.9.0`.
+  - `gh release view v2.9.0 --json tagName,url,isDraft,isPrerelease,assets` -> release is not draft/prerelease and includes `latest-mac.yml`, `Zerox.Agent-2.9.0-arm64.dmg`, `Zerox.Agent-2.9.0-arm64.dmg.blockmap`, `Zerox.Agent-2.9.0-arm64-mac.zip`, and `Zerox.Agent-2.9.0-arm64-mac.zip.blockmap`.
 
 ## 2026-06-26 - v2.9.0 Task 6 Restore Fidelity And Release Gates
 
