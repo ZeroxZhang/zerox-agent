@@ -305,6 +305,41 @@ describe("chat session store", () => {
     });
   });
 
+  it("renames a session title without changing message timestamps or summary", async () => {
+    const store = createChatSessionStore({
+      configDir,
+      createId: createSequentialId("chat"),
+      now: createSteppedClock("2026-06-20T08:00:00.000Z"),
+    });
+    const created = await store.appendMessage({
+      role: "user",
+      content: "帮我做 2.8.2 版本迭代",
+    });
+    await store.appendMessage({
+      sessionId: created.session.id,
+      role: "assistant",
+      content: "我会先写红测。",
+    });
+
+    const renamed = await store.rename(created.session.id, "2.8.2 迭代");
+
+    expect(renamed).toMatchObject({
+      id: created.session.id,
+      title: "2.8.2 迭代",
+      summary: "我会先写红测。",
+      updatedAt: "2026-06-20T08:01:00.000Z",
+    });
+    await expect(store.list()).resolves.toEqual([
+      expect.objectContaining({
+        id: created.session.id,
+        title: "2.8.2 迭代",
+        summary: "我会先写红测。",
+        updatedAt: "2026-06-20T08:01:00.000Z",
+        lastAssistantMessageAt: "2026-06-20T08:01:00.000Z",
+      }),
+    ]);
+  });
+
   it("normalizes legacy sessions without archive or token metadata", async () => {
     await writeFile(
       path.join(configDir, "chat-sessions.json"),

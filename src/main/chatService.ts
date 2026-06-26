@@ -2563,18 +2563,11 @@ function buildSelectedSkillInstruction(
   inputResolution?: SkillInputResolution,
 ): string {
   const lines = [
-    "本轮用户显式选择了一个 Agent Skill。你必须把它当作本轮任务的执行规范，而不是普通参考资料。",
+    "本轮用户显式选择了一个 Agent Skill。主进程已预加载技能正文，你必须把它当作本轮任务的执行规范，而不是普通参考资料。",
     `技能名称：${skill.manifest.name}`,
     `技能显示名：${skill.manifest.displayName}`,
     `技能描述：${skill.manifest.description}`,
     `技能位置：${skill.skillFile}`,
-    "",
-    "执行要求：",
-    "- 不要凭空补全技能细节；必须先调用 skill_resource_list 查看资源清单，再调用 skill_load 加载技能正文。",
-    `- 调用 skill_load 时使用参数：{"skillName":"${skill.manifest.name}"}`,
-    "- skill_load 返回的技能正文才是本轮任务的执行规范。",
-    "- 如果技能要求渐进式交互、配置菜单、质量检查或特定输出格式，不得跳过。",
-    "- 最终回复需要说明已使用该技能。",
   ];
 
   if (inputResolution?.status === "complete") {
@@ -2586,6 +2579,20 @@ function buildSelectedSkillInstruction(
       JSON.stringify(inputResolution.values, null, 2),
     );
   }
+
+  lines.push(
+    "",
+    "执行要求：",
+    "- 必须按技能正文执行；不要把技能正文当作可选参考。",
+    "- 如果技能要求渐进式交互、配置菜单、质量检查、验证命令或特定输出格式，不得跳过。",
+    "- 如果技能正文指向额外文件，必须按正文中的路由说明读取相关文件后再行动。",
+    "- 最终回复需要说明已使用该技能。",
+    "",
+    "技能正文：",
+    "```markdown",
+    skill.body.trim() || "(技能正文为空)",
+    "```",
+  );
 
   return lines.join("\n");
 }

@@ -31,6 +31,7 @@ describe("chat stream reducer", () => {
       requestId: "request_1",
       sessionId: "session_1",
       reply: "Drafting now.",
+      createdAt: "2026-06-23T08:00:05.000Z",
     });
 
     expect(state.messages).toHaveLength(2);
@@ -43,6 +44,22 @@ describe("chat stream reducer", () => {
     expect(
       state.messages.filter((message) => message.role === "assistant"),
     ).toHaveLength(1);
+  });
+
+  it("uses an ISO timestamp instead of a hardcoded relative label when finalizing non-streamed replies", () => {
+    const state = finalizeChatStreamResult(createChatStreamState([]), {
+      requestId: "request_1",
+      sessionId: "session_1",
+      reply: "Done.",
+      createdAt: "2026-06-23T08:00:05.000Z",
+    });
+
+    expect(state.messages[0]).toMatchObject({
+      role: "assistant",
+      content: "Done.",
+      createdAt: "2026-06-23T08:00:05.000Z",
+    });
+    expect(state.messages[0]?.createdAt).not.toBe("刚刚");
   });
 
   it("keeps thinking deltas and tool call previews separate from answer text", () => {

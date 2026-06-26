@@ -1,5 +1,44 @@
 # Zerox Harness Progress
 
+## 2026-06-26 - v2.8.2 Chat Rename, Message Rendering, Time, And Skill Strictness
+
+- Request: ship the 2.8.2 iteration with sidebar chat-session rename, cleaner main chat rendering, auto-updating/readable message times, and a root-cause fix for selected skills not being followed strictly in auto mode.
+- Root causes fixed:
+  - Rename existed only as archive/delete menu actions, so chat titles could not be changed from the sidebar or reflected in the active chat header.
+  - Chat messages used legacy inline `span` styling and raw timestamp strings, which kept user messages at `刚刚` and allowed old blue accent styles to leak into normal assistant text.
+  - Selected skills were only described as instructions to call skill-loading tools; with `tool_choice: "auto"`, the model could still decide whether to load/follow the skill body. The selected skill body is now preloaded into the chat instruction and framed as mandatory execution requirements.
+- Changed files:
+  - `package.json`, `package-lock.json`, `README.md`
+  - `.zerox/feature_list.json`, `.zerox/progress.md`
+  - `src/main/chatService.ts`, `src/main/chatSessionStore.ts`, `src/main/container.ts`, `src/main/ipc/index.ts`
+  - `src/preload/index.ts`
+  - `src/renderer/App.tsx`, `src/renderer/components/AgentChatPanel.tsx`, `src/renderer/chatMarkdown.ts`, `src/renderer/chatMessageTime.ts`, `src/renderer/chatStreamReducer.ts`
+  - `src/renderer/styles/chat.css`, `src/renderer/styles/sidebar.css`
+  - Updated/added focused tests under `src/main`, `src/preload`, `src/renderer`, and `src/shared`.
+- RED evidence:
+  - Focused TDD tests initially failed for the missing session rename path, hardcoded `刚刚` timestamps, assistant-result created-at propagation, preload/IPC rename exposure, and selected-skill instruction behavior.
+  - Browser QA also exposed that `window.prompt` is unsupported in the browser preview runtime, so the initial rename menu needed a real in-app dialog rather than native prompt.
+- GREEN evidence:
+  - `npm test -- src/renderer/chatMarkdown.test.ts src/renderer/materialDesign.test.ts src/renderer/chatMessageTime.test.ts` -> 3 files / 54 tests passed.
+  - `npm test` -> 176 files / 1186 tests passed.
+  - `npm run verify` -> tests passed; build passed; agent eval 26/26; memory eval 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. The existing better-sqlite3 ABI mismatch fell back to JSON as designed.
+  - `npm run harness:check` -> passed.
+- Browser/IAB rendered QA:
+  - Target flow: `http://127.0.0.1:5173/#chat` -> open sidebar session menu -> rename existing session -> submit a chat message -> verify rendered title, timestamps, markdown styling, and console health.
+  - Verified the in-app rename dialog updates both the sidebar row and active chat header.
+  - Verified user message time moves from `刚刚` to relative time on the interval, while assistant replies render as local readable time such as `今天 10:48`.
+  - Verified color semantics after follow-up feedback: normal markdown `span`, `strong`, and list text compute to `rgb(37, 35, 31)`; metadata is neutral gray; only real `a` links compute to blue `rgb(29, 78, 216)`.
+  - Desktop screenshot: `/tmp/zerox-v282-color-desktop.png`; mobile screenshot: `/tmp/zerox-v282-color-mobile.png`; mobile probe reported no horizontal overflow at 390px.
+- Packaging evidence:
+  - `npm run dist:mac` -> generated `release/Zerox Agent-2.8.2-arm64.dmg`, `release/Zerox Agent-2.8.2-arm64-mac.zip`, and blockmaps.
+  - Package metadata: `release/mac-arm64/Zerox Agent.app/Contents/Info.plist` reports `CFBundleShortVersionString=2.8.2` and `CFBundleVersion=2.8.2`.
+  - `release/Zerox Agent-2.8.2-arm64.dmg` (122M, sha256 `a113cf0cdc59f97a16d3eea982b901c27b6d515ef74519cbab4d6b0fa1744cfe`)
+  - `release/Zerox Agent-2.8.2-arm64-mac.zip` (333M, sha256 `8e598f8b5a889815b1f1ec17790aa32d7d61dee30aa5c7faf201797c58b58fa9`)
+  - `release/Zerox Agent-2.8.2-arm64.dmg.blockmap` (132K, sha256 `c203c0bf9eb1dbacf701d826efb62b90519842c991cc00e704aa31c711d703aa`)
+  - `release/Zerox Agent-2.8.2-arm64-mac.zip.blockmap` (335K, sha256 `2ea8ba930bc3dc8c031b821ef6e0c13efc67cf078c44b944040f412c2ec18e5a`)
+  - `BUILDING_AGENT_SMOKE=1 "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+
 ## 2026-06-25 - v2.7.0 Workspace Skill Sandbox Fix
 
 - Request: fix the case where a user selects a project workspace and invokes an installed skill such as `@onepager`, but the agent reports that the skill files cannot be reached from the current workspace sandbox.

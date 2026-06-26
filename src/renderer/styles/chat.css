@@ -237,17 +237,17 @@
   flex: 1 0 auto;
   display: grid;
   align-content: start;
-  gap: 20px;
+  gap: 24px;
   min-height: 0;
   overflow: visible;
-  padding: 16px 4px 24px;
+  padding: 18px 4px 28px;
   border: none; background: transparent;
 }
 
 .chat-message {
   display: grid;
-  gap: var(--space-1);
-  max-width: min(760px, 86%);
+  gap: 8px;
+  max-width: min(820px, 88%);
   min-width: 0;
   padding: 0;
   border: 0;
@@ -261,35 +261,50 @@
   justify-self: end;
   max-width: min(680px, 78%);
   padding: 12px 16px;
-  border-radius: 18px;
+  border-radius: 16px;
   color: var(--chat-user-bubble-text);
   background: var(--chat-user-bubble-bg);
 }
 
-.chat-message > span {
-  margin-bottom: 4px;
+.chat-message-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
   color: var(--text-tertiary);
   font-size: var(--text-xs);
   font-weight: var(--font-medium);
 }
 
+.chat-message-meta span,
+.chat-message-meta time {
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-message-meta time {
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-message.is-user .chat-message-meta {
+  justify-content: flex-end;
+}
+
 .chat-message p,
 .markdown-message {
   color: var(--text-primary);
-  font-size: var(--text-md);
-  line-height: var(--leading-relaxed);
-}
-
-.chat-message small {
-  margin-top: 4px;
-  color: var(--text-tertiary);
-  font-size: var(--text-xs);
+  font-size: var(--text-lg);
+  line-height: 1.76;
 }
 
 .markdown-message {
   display: grid;
-  gap: var(--space-2);
+  gap: 12px;
   min-width: 0;
+  color: var(--text-primary);
   overflow-wrap: anywhere;
 }
 
@@ -298,18 +313,103 @@
   overflow-wrap: anywhere;
 }
 
-.markdown-message pre {
+.markdown-message p,
+.markdown-message ul,
+.markdown-message ol,
+.markdown-message h3,
+.markdown-message h4,
+.markdown-message h5 {
+  margin: 0;
+}
+
+.markdown-message h3,
+.markdown-message h4,
+.markdown-message h5 {
+  color: var(--text-primary);
+  font-size: var(--text-xl);
+  font-weight: var(--font-semibold);
+  line-height: var(--leading-tight);
+}
+
+.markdown-message span,
+.markdown-message strong,
+.markdown-message li {
+  color: var(--text-primary);
+}
+
+.markdown-message strong {
+  font-weight: var(--font-semibold);
+}
+
+.markdown-message a {
+  color: var(--text-accent);
+  font-weight: var(--font-medium);
+  text-decoration: none;
+}
+
+.markdown-message a:hover,
+.markdown-message a:focus-visible {
+  text-decoration: underline;
+}
+
+.markdown-message ul,
+.markdown-message ol {
+  display: grid;
+  gap: 8px;
+  padding-left: 1.35em;
+}
+
+.markdown-message li::marker {
+  color: var(--text-secondary);
+}
+
+.markdown-message :not(pre) > code {
+  padding: 2px 6px;
+  border-radius: 6px;
+  color: var(--text-primary);
+  background: #f3f4f6;
+  font-family: var(--font-mono);
+  font-size: 0.94em;
+}
+
+.markdown-code-block {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #d7dce3;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.markdown-code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 32px;
+  padding: 0 12px;
+  border-bottom: 1px solid #e5e7eb;
+  color: #6b7280;
+  background: #f3f4f6;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  text-transform: uppercase;
+}
+
+.markdown-code-block pre {
   max-width: 100%;
+  margin: 0;
   overflow: auto;
-  padding: var(--space-3);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  background: var(--bg-surface);
-  white-space: pre-wrap;
+  padding: 14px 16px;
+  color: #1f2937;
+  background: #ffffff;
+  font-size: var(--text-sm);
+  line-height: 1.7;
+  white-space: pre;
 }
 
 .markdown-message code {
   overflow-wrap: anywhere;
+  font-family: var(--font-mono);
 }
 
 .chat-message-collapse {

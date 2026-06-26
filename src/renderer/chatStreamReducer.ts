@@ -97,6 +97,7 @@ export function finalizeChatStreamResult(
     requestId: string;
     sessionId: string;
     reply: string;
+    createdAt: string;
   },
 ): ChatStreamState {
   const existingIndex = state.messages.findIndex(
@@ -113,7 +114,7 @@ export function finalizeChatStreamResult(
           id: createStreamMessageId(result.requestId),
           role: "assistant",
           content: result.reply,
-          createdAt: "刚刚",
+          createdAt: result.createdAt,
           streamRequestId: result.requestId,
           isStreaming: false,
         },

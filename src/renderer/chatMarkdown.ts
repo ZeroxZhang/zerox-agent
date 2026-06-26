@@ -1,7 +1,8 @@
 export type MarkdownInlineSegment =
   | { type: "text"; text: string }
   | { type: "strong"; text: string }
-  | { type: "code"; text: string };
+  | { type: "code"; text: string }
+  | { type: "link"; href: string; text: string };
 
 export type MarkdownBlock =
   | { type: "heading"; depth: 1 | 2 | 3; text: string }
@@ -90,7 +91,8 @@ export function parseMarkdownBlocks(markdown: string): MarkdownBlock[] {
 
 export function parseInlineMarkdown(text: string): MarkdownInlineSegment[] {
   const segments: MarkdownInlineSegment[] = [];
-  const tokenPattern = /(\*\*[^*]+\*\*|`[^`]+`)/g;
+  const tokenPattern =
+    /(\[[^\]\n]+\]\(https?:\/\/[^\s)]+\)|\*\*[^*]+\*\*|`[^`]+`|https?:\/\/[^\s<)]+)/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
@@ -100,7 +102,16 @@ export function parseInlineMarkdown(text: string): MarkdownInlineSegment[] {
     }
 
     const token = match[0];
-    if (token.startsWith("**")) {
+    if (token.startsWith("[") && token.includes("](")) {
+      const linkMatch = /^\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)$/.exec(token);
+      if (linkMatch) {
+        segments.push({ type: "link", text: linkMatch[1], href: linkMatch[2] });
+      } else {
+        segments.push({ type: "text", text: token });
+      }
+    } else if (token.startsWith("http://") || token.startsWith("https://")) {
+      segments.push({ type: "link", text: token, href: token });
+    } else if (token.startsWith("**")) {
       segments.push({ type: "strong", text: token.slice(2, -2) });
     } else {
       segments.push({ type: "code", text: token.slice(1, -1) });

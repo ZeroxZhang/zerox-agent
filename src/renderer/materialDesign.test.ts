@@ -253,6 +253,12 @@ describe("Design System — Notion-inspired app shell", () => {
   it("surfaces managed chat history with archive, delete, time and token metadata", () => {
     expect(appSource).toContain("archiveChatSession");
     expect(appSource).toContain("restoreChatSession");
+    expect(appSource).toContain("renameChatSession");
+    expect(appSource).toContain("重命名");
+    expect(appSource).toContain("RenameChatSessionDialog");
+    expect(appSource).toContain("session-rename-dialog");
+    expect(appSource).not.toContain("window.prompt");
+    expect(appSource).toContain("activeChatSessionTitle");
     expect(appSource).toContain("deleteChatSession");
     expect(appSource).toContain("sidebar-archive-group");
     expect(appSource).toContain("sidebar-session-actions");
@@ -262,7 +268,29 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".sidebar-archive-group");
     expect(styles).toContain(".sidebar-session-actions");
     expect(styles).toContain(".sidebar-session-menu");
+    expect(styles).toContain(".session-rename-backdrop");
+    expect(styles).toContain(".session-rename-dialog");
     expect(styles).toContain(".sidebar-session-token");
+  });
+
+  it("renders chat messages with structured readable metadata and polished markdown blocks", () => {
+    expect(chatPanelSource).toContain("formatChatMessageTime");
+    expect(chatPanelSource).toContain("messageTimeTick");
+    expect(chatPanelSource).toContain("dateTime={message.createdAt}");
+    expect(chatPanelSource).not.toContain('createdAt: "刚刚"');
+    expect(chatPanelSource).toContain("chat-message-meta");
+    expect(chatPanelSource).toContain("markdown-code-block");
+    expect(chatPanelSource).toContain("markdown-code-header");
+    expect(chatPanelSource).toContain("target=\"_blank\"");
+    expect(styles).toContain(".chat-message-meta");
+    expect(styles).toContain(".chat-message-meta span");
+    expect(styles).toContain(".markdown-code-block");
+    expect(styles).toContain(".markdown-code-header");
+    expect(styles).toContain(".markdown-message span");
+    expect(styles).toContain(".markdown-message strong");
+    expect(styles).toContain(".markdown-message a");
+    expect(styles).toContain("font-size: var(--text-lg);");
+    expect(styles).toContain("background: #f3f4f6;");
   });
 
   it("keeps a draggable window strip visible on the chat-first desktop shell", () => {
@@ -499,7 +527,9 @@ describe("Design System — Notion-inspired app shell", () => {
   });
 
   it("contains long chat titles and live status text inside the hero header", () => {
-    expect(chatPanelSource).toContain("const chatTitle = activeSession?.title ?? \"新会话\";");
+    expect(chatPanelSource).toContain(
+      "const chatTitle = activeChatSessionTitle ?? activeSession?.title ?? \"新会话\";",
+    );
     expect(chatPanelSource).toContain("title={chatTitle}");
     expect(chatPanelSource).toContain("title={status.message}");
     expect(chatPanelSource).toContain("const chatStatusIsLong");

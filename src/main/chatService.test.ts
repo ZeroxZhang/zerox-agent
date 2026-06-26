@@ -1766,9 +1766,10 @@ describe("chat service", () => {
       },
     });
     const selectedSkillPrompt = capturedMessages.at(-1)?.map((message) => message.content).join("\n") ?? "";
-    expect(selectedSkillPrompt).toContain("skill_load");
-    expect(selectedSkillPrompt).toContain("skill_resource_list");
-    expect(selectedSkillPrompt).not.toContain("Onepager 技能流程：必须先做内容架构分析。");
+    expect(selectedSkillPrompt).toContain("主进程已预加载技能正文");
+    expect(selectedSkillPrompt).toContain("Onepager 技能流程：必须先做内容架构分析。");
+    expect(selectedSkillPrompt).toContain("必须按技能正文执行");
+    expect(selectedSkillPrompt).not.toContain("必须先调用 skill_resource_list");
     expect(statusEvents).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1867,8 +1868,8 @@ describe("chat service", () => {
       selectedSkill: { name: "onepager" },
     });
     const selectedSkillPrompt = capturedMessages.at(-1)?.map((message) => message.content).join("\n") ?? "";
-    expect(selectedSkillPrompt).toContain("skill_load");
-    expect(selectedSkillPrompt).not.toContain("Onepager 技能正文");
+    expect(selectedSkillPrompt).toContain("主进程已预加载技能正文");
+    expect(selectedSkillPrompt).toContain("Onepager 技能正文");
   });
 
   it("extends the active workspace sandbox with the selected skill read root", async () => {

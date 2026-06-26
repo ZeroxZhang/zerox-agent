@@ -44,6 +44,7 @@ export type ChatSessionStore = {
   list(): Promise<ChatSessionListItem[]>;
   get(sessionId: string): Promise<ChatSessionRecord | null>;
   appendMessage(input: AppendChatMessageInput): Promise<AppendChatMessageResult>;
+  rename(sessionId: string, title: string): Promise<ChatSessionRecord | null>;
   archive(sessionId: string): Promise<ChatSessionRecord | null>;
   restore(sessionId: string): Promise<ChatSessionRecord | null>;
   delete(sessionId: string): Promise<boolean>;
@@ -209,6 +210,18 @@ export function createChatSessionStore(options: {
 
         return { session, message };
       });
+    },
+
+    async rename(sessionId, title) {
+      const normalizedTitle = normalizeSessionTitle(title);
+      if (!normalizedTitle) {
+        throw new Error("Session title is required.");
+      }
+
+      return updateSessionById(sessionId, (session) => ({
+        ...session,
+        title: normalizedTitle,
+      }));
     },
 
     async archive(sessionId) {
@@ -868,6 +881,10 @@ function createSessionTitle(content: string): string {
   }
 
   return normalized.length > 16 ? `${normalized.slice(0, 15)}…` : normalized;
+}
+
+function normalizeSessionTitle(title: string): string {
+  return title.trim().replace(/\s+/g, " ").slice(0, 80);
 }
 
 function normalizeSessionTitleText(content: string): string {

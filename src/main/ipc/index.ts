@@ -801,6 +801,11 @@ function registerChatIpcHandlers(container: AppContainer): void {
       container.restoreChatSession(sessionId),
   );
   ipcMain.handle(
+    "chatSessions:rename",
+    (_event, sessionId: string, title: string): Promise<ChatSessionOperationResult> =>
+      container.renameChatSession(sessionId, title),
+  );
+  ipcMain.handle(
     "chatSessions:delete",
     (_event, sessionId: string): Promise<ChatSessionOperationResult> =>
       container.deleteChatSession(sessionId),

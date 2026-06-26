@@ -433,6 +433,11 @@ const buildingAgent = {
     sessionId: string,
   ): Promise<ChatSessionOperationResult> =>
     ipcRenderer.invoke("chatSessions:restore", sessionId),
+  renameChatSession: (
+    sessionId: string,
+    title: string,
+  ): Promise<ChatSessionOperationResult> =>
+    ipcRenderer.invoke("chatSessions:rename", sessionId, title),
   deleteChatSession: (
     sessionId: string,
   ): Promise<ChatSessionOperationResult> =>

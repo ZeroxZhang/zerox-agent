@@ -88,6 +88,7 @@ import {
   type ChatToolCallPreview,
   type ChatStreamMessage,
 } from "../chatStreamReducer";
+import { formatChatMessageTime } from "../chatMessageTime";
 import { GoalDetailDrawer } from "./GoalDetailDrawer";
 import { GoalStatusStrip } from "./GoalStatusStrip";
 import { Icon } from "./Icon";
@@ -99,6 +100,7 @@ import type {
 type AgentChatPanelProps = {
   newChatRequestKey?: number;
   requestedSessionId?: string | null;
+  activeChatSessionTitle?: string | null;
   onActiveSessionChange?: (sessionId: string | null) => void;
   onChatSessionsChange?: (sessions: ChatSidebarSession[]) => void;
   onNavigate: (sectionId: NavigationSectionId) => void;
@@ -202,6 +204,7 @@ const initialMessages: ChatMessage[] = [];
 export function AgentChatPanel({
   newChatRequestKey = 0,
   requestedSessionId = null,
+  activeChatSessionTitle = null,
   onActiveSessionChange,
   onChatSessionsChange,
   onNavigate,
@@ -273,6 +276,7 @@ export function AgentChatPanel({
   >({});
   const [chatStatusExpanded, setChatStatusExpanded] = useState(false);
   const [activityTick, setActivityTick] = useState(Date.now());
+  const [messageTimeTick, setMessageTimeTick] = useState(Date.now());
   const messageListRef = useRef<HTMLDivElement>(null);
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const sessionIdRef = useRef<string | null>(sessionId);
@@ -671,6 +675,21 @@ export function AgentChatPanel({
   }, [taskActivity.kind, taskActivity.startedAt]);
 
   useEffect(() => {
+    if (messages.length === 0) {
+      return;
+    }
+
+    setMessageTimeTick(Date.now());
+    const intervalId = window.setInterval(() => {
+      setMessageTimeTick(Date.now());
+    }, 30_000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [messages.length]);
+
+  useEffect(() => {
     if (!window.buildingAgent) {
       const snapshot = loadPreviewValidationSnapshot(window.localStorage);
       if (snapshot) {
@@ -832,7 +851,7 @@ export function AgentChatPanel({
 
   const latestRun = runs[0];
   const activeSession = sessions.find((session) => session.id === sessionId) ?? null;
-  const chatTitle = activeSession?.title ?? "新会话";
+  const chatTitle = activeChatSessionTitle ?? activeSession?.title ?? "新会话";
   const chatStatusIsLong = status.message.length > 64;
   const chatStateClassName = [
     "chat-state",
@@ -998,7 +1017,7 @@ export function AgentChatPanel({
     return {
       ...message,
       id: `${message.role}-${Date.now()}-${index}`,
-      createdAt: "刚刚",
+      createdAt: new Date().toISOString(),
     };
   }
 
@@ -1381,6 +1400,7 @@ export function AgentChatPanel({
         requestId,
         sessionId: result.sessionId,
         reply: result.reply,
+        createdAt: new Date().toISOString(),
       }),
     );
     void refreshSessions(result.sessionId);
@@ -1981,9 +2001,17 @@ export function AgentChatPanel({
                 }`}
                 key={message.id}
               >
-                <span>{message.role === "assistant" ? "智能体" : "你"}</span>
+                <header className="chat-message-meta">
+                  <span>{message.role === "assistant" ? "智能体" : "你"}</span>
+                  <time dateTime={message.createdAt}>
+                    {formatChatMessageTime({
+                      role: message.role,
+                      createdAt: message.createdAt,
+                      now: new Date(messageTimeTick),
+                    })}
+                  </time>
+                </header>
                 <MarkdownMessage content={message.content} />
-                <small>{message.createdAt}</small>
               </article>
             ))}
           </div>
@@ -3362,9 +3390,14 @@ function renderMarkdownBlockContent(
 
   if (block.type === "code") {
     return (
-      <pre>
-        <code>{showFullBlock ? block.code : `${block.code.slice(0, 800)}...`}</code>
-      </pre>
+      <div className="markdown-code-block">
+        <div className="markdown-code-header">
+          <span>{block.language ?? "text"}</span>
+        </div>
+        <pre>
+          <code>{showFullBlock ? block.code : `${block.code.slice(0, 800)}...`}</code>
+        </pre>
+      </div>
     );
   }
 
@@ -3396,6 +3429,18 @@ function InlineMarkdown({ text }: { text: string }): ReactNode {
     }
     if (segment.type === "code") {
       return <code key={`${segment.type}-${index}`}>{segment.text}</code>;
+    }
+    if (segment.type === "link") {
+      return (
+        <a
+          href={segment.href}
+          key={`${segment.type}-${index}`}
+          rel="noreferrer"
+          target="_blank"
+        >
+          {segment.text}
+        </a>
+      );
     }
     return <span key={`${segment.type}-${index}`}>{segment.text}</span>;
   });
@@ -3447,15 +3492,8 @@ function toChatMessage(message: ChatSessionRecord["messages"][number]): ChatMess
     id: message.id,
     role: message.role,
     content: message.content,
-    createdAt: formatMessageTime(message.createdAt),
+    createdAt: message.createdAt,
   };
-}
-
-function formatMessageTime(value: string): string {
-  return new Intl.DateTimeFormat("zh-CN", {
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
 }
 
 function translateRunStatus(status: AgentRunRecord["status"]): string {

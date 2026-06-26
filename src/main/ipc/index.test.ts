@@ -109,6 +109,12 @@ describe("chat IPC handlers", () => {
     expect(sender.send).toHaveBeenCalledWith("chat:statusEvent", statusEvent);
     expect(sender.send).toHaveBeenCalledWith("chat:streamEvent", streamEvent);
   });
+
+  it("registers a stable chat session rename IPC handler", () => {
+    const renameSource = getHandlerSource(ipcSource, '"chatSessions:rename"');
+
+    expect(renameSource).toContain("container.renameChatSession(sessionId, title)");
+  });
 });
 
 function getHandlerSource(source: string, channel: string): string {

@@ -1634,6 +1634,62 @@
         "git diff --check",
         "gh release view v2.8.1"
       ]
+    },
+    {
+      "id": "P19-v2.8.2-chat-rename-message-skill-polish",
+      "priority": 49,
+      "status": "done",
+      "title": "v2.8.2 chat rename, transcript polish, message time, and strict skill execution",
+      "files": [
+        "README.md",
+        "package.json",
+        "package-lock.json",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md",
+        "src/main/chatSessionStore.ts",
+        "src/main/container.ts",
+        "src/main/ipc/index.ts",
+        "src/main/chatService.ts",
+        "src/preload/index.ts",
+        "src/renderer/App.tsx",
+        "src/renderer/components/AgentChatPanel.tsx",
+        "src/renderer/chatMarkdown.ts",
+        "src/renderer/chatMessageTime.ts",
+        "src/renderer/chatStreamReducer.ts",
+        "src/renderer/styles/chat.css",
+        "src/renderer/styles/sidebar.css",
+        "src/main/chatSessionStore.test.ts",
+        "src/main/ipc/index.test.ts",
+        "src/main/chatService.test.ts",
+        "src/preload/index.test.ts",
+        "src/renderer/chatMarkdown.test.ts",
+        "src/renderer/chatMessageTime.test.ts",
+        "src/renderer/chatStreamReducer.test.ts",
+        "src/renderer/materialDesign.test.ts",
+        "src/shared/packageScripts.test.ts",
+        "src/shared/readme.test.ts"
+      ],
+      "definitionOfDone": [
+        "session more menu exposes rename and updates both the sidebar title and active chat header",
+        "chat message timestamps store ISO values; user message relative time updates automatically and assistant replies render in the user's local timezone",
+        "main transcript markdown, inline code, fenced code, headings, lists, and metadata use a cleaner unified display system",
+        "only real markdown links use blue accent text; ordinary emphasis uses bold or code styling",
+        "explicitly selected skills are preloaded by the main process and injected as mandatory execution instructions instead of relying on the model to decide whether to call skill_load",
+        "package metadata reports version 2.8.2 in package.json and package-lock.json",
+        "focused tests, full verification, smoke, harness check, rendered QA, and macOS distribution packaging pass"
+      ],
+      "verification": [
+        "npm test -- src/main/chatSessionStore.test.ts src/renderer/chatMessageTime.test.ts src/renderer/chatStreamReducer.test.ts src/preload/index.test.ts src/main/ipc/index.test.ts src/renderer/materialDesign.test.ts src/main/chatService.test.ts",
+        "npm test",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run dist:mac",
+        "BUILDING_AGENT_SMOKE=1 \"release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent\"",
+        "npm run harness:check",
+        "git diff --check",
+        "rendered frontend QA against the supplied chat transcript reference"
+      ]
     }
   ]
 }

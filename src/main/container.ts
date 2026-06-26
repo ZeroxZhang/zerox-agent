@@ -511,6 +511,28 @@ export function createAppContainer(options: {
     }
   }
 
+  async function renameChatSession(
+    sessionId: string,
+    title: string,
+  ): Promise<ChatSessionOperationResult> {
+    try {
+      const session = await chatSessionStore().rename(sessionId, title);
+      if (!session) {
+        return {
+          ok: false,
+          message: "会话不存在。",
+        };
+      }
+      return { ok: true, session };
+    } catch (error) {
+      return {
+        ok: false,
+        message:
+          error instanceof Error ? error.message : "无法重命名会话。",
+      };
+    }
+  }
+
   async function deleteChatSession(
     sessionId: string,
   ): Promise<ChatSessionOperationResult> {
@@ -1684,6 +1706,7 @@ export function createAppContainer(options: {
     getChatSession,
     archiveChatSession,
     restoreChatSession,
+    renameChatSession,
     deleteChatSession,
     chatService,
     taskSchedulerService,

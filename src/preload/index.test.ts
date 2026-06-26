@@ -30,6 +30,8 @@ describe("preload bridge", () => {
     expect(preloadSource).toContain('ipcRenderer.invoke("chatSessions:archive"');
     expect(preloadSource).toContain("restoreChatSession");
     expect(preloadSource).toContain('ipcRenderer.invoke("chatSessions:restore"');
+    expect(preloadSource).toContain("renameChatSession");
+    expect(preloadSource).toContain('ipcRenderer.invoke("chatSessions:rename"');
     expect(preloadSource).toContain("deleteChatSession");
     expect(preloadSource).toContain('ipcRenderer.invoke("chatSessions:delete"');
   });
