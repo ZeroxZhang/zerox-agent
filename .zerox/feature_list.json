@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-06-26T04:49:15.000Z",
+  "updatedAt": "2026-06-26T10:15:00.000Z",
   "features": [
     {
       "id": "P0-repo-local-harness",
@@ -1799,7 +1799,7 @@
     {
       "id": "P23-v2.9.0-output-rendering",
       "priority": 53,
-      "status": "planned",
+      "status": "done",
       "title": "v2.9.0 output rendering and evidence-bound answers",
       "files": [
         "README.md",

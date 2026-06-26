@@ -77,6 +77,34 @@ describe("chat output model", () => {
     ]);
   });
 
+  it("restores mixed output formats from persisted assistant messages", () => {
+    const parts = outputPartsFromMessage({
+      id: "m2",
+      role: "assistant",
+      content: "summary",
+      createdAt: "2026-06-26T00:00:00.000Z",
+      outputParts: [
+        { id: "text-1", type: "text", text: "summary", format: "markdown" },
+        { id: "table-1", type: "table", columns: ["A"], rows: [["1"]] },
+        { id: "code-1", type: "code", language: "ts", code: "const x = 1;" },
+        {
+          id: "ledger-1",
+          type: "ledger_event",
+          status: "completed",
+          title: "Verified",
+        },
+      ],
+    });
+
+    expect(parts.map((part) => part.type)).toEqual([
+      "text",
+      "table",
+      "code",
+      "ledger_event",
+    ]);
+    expect(parts.every((part) => part.source === "persisted")).toBe(true);
+  });
+
   it("preserves legacy content when persisted output parts do not include text", () => {
     const message: ChatMessageRecord = {
       id: "m3",

@@ -1,5 +1,37 @@
 # Zerox Harness Progress
 
+## 2026-06-26 - v2.9.0 Task 6 Restore Fidelity And Release Gates
+
+- Request: complete Task 6 by proving restored rich output fidelity, bumping release metadata to v2.9.0, marking P23 done, updating README release documentation, and running final verification gates.
+- Changed files:
+  - `src/renderer/chatOutputModel.test.ts`
+  - `src/shared/packageScripts.test.ts`
+  - `src/shared/readme.test.ts`
+  - `README.md`
+  - `package.json`
+  - `package-lock.json`
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> failed as expected after tests were updated for v2.9.0 while package metadata, README, and P23 status still reported v2.8.5/planned.
+- GREEN / verification evidence:
+  - `npm test -- src/renderer/chatOutputModel.test.ts src/main/chatService.test.ts` -> 2 files / 71 tests passed, including persisted mixed text/table/code/ledger output restore fidelity.
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 2 files / 11 tests passed after v2.9.0 metadata and README updates.
+  - `npm test -- src/shared/chatOutput.test.ts src/shared/chatStream.test.ts src/main/chatService.test.ts src/main/agentLoop.test.ts src/renderer/chatMarkdown.test.ts src/renderer/chatOutputModel.test.ts src/renderer/materialDesign.test.ts src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 9 files / 182 tests passed.
+  - `npm test` -> 179 files / 1232 tests passed.
+  - `npm run build` -> passed, with the existing Vite chunk-size warning.
+  - `npm run verify` -> passed: 179 files / 1232 tests, agent eval 26/26, memory eval 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Existing better-sqlite3 ABI mismatch fell back to JSON.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+- Rendered QA carried into release gate:
+  - Task 5 browser QA covered the repo-local output rendering artifact at desktop 1280x900 and mobile 390x844 with no page-level horizontal overflow, no console warn/error logs, answer/evidence responsive states, table/code/terminal/JSON surfaces, approval/guided-input/diagnostic states, and title-only ledger safety.
+  - Renderer dev app at `http://127.0.0.1:5173/#chat` rendered the chat panel and composer without Vite overlay or console logs, and prompt suggestion interaction populated the textarea.
+- Implementation evidence:
+  - Package metadata now reports v2.9.0 in `package.json` and `package-lock.json`.
+  - `.zerox/feature_list.json` marks `P23-v2.9.0-output-rendering` as `done`.
+  - README current release, quarantine examples, testing counts, English/Chinese release notes, and roadmap now describe v2.9.0 output rendering and evidence-bound answers.
+
 ## 2026-06-26 - v2.9.0 Task 5 Review Blocker Fixes
 
 - Request: address Task 5 review blockers where body-only assistant answers reserved an empty evidence column and title-only run ledger events were compressed by unused optional columns.

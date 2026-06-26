@@ -14,7 +14,7 @@ describe("README", () => {
     expect(readme).toContain("npm run pack:mac");
     expect(readme).toContain("npm run dist:mac");
     expect(readme).toContain("xattr -dr com.apple.quarantine");
-    expect(readme).toContain("Zerox.Agent-2.8.5-arm64.dmg");
+    expect(readme).toContain("Zerox.Agent-2.9.0-arm64.dmg");
     expect(readme).toContain("npm run harness:check");
     expect(readme).toContain("npm run harness:score");
     expect(readme).toContain("npm run episode:export");
@@ -52,8 +52,8 @@ describe("README", () => {
     expect(positioning).toContain("Zerox does not run unbounded autonomous loops");
     expect(readme).toContain("session-native Goal Mode");
     expect(readme).toContain("Chat Session mode");
-    expect(readme).toContain("current release is **v2.8.5**");
-    expect(readme).toContain("当前版本是 **v2.8.5**");
+    expect(readme).toContain("current release is **v2.9.0**");
+    expect(readme).toContain("当前版本是 **v2.9.0**");
   });
 
   it("documents Goal Mode architecture, eval coverage, and feature-list status", () => {
@@ -93,11 +93,14 @@ describe("README", () => {
     expect(readme).toContain("Goal Mode 架构");
     expect(readme).toContain("artifact evidence contract");
     expect(readme).toContain("artifact evidence files");
-    expect(readme).toContain("1191 tests");
-    expect(readme).toContain("1191 个测试");
-    expect(readme).toContain("Current version: v2.8.5.");
-    expect(readme).toContain("当前版本：v2.8.5。");
-    expect(readme).toContain("v2.8.5");
+    expect(readme).toContain("1232 tests");
+    expect(readme).toContain("1232 个测试");
+    expect(readme).toContain("Current version: v2.9.0.");
+    expect(readme).toContain("当前版本：v2.9.0。");
+    expect(readme).toContain("v2.9.0");
+    expect(readme).toContain("Output Rendering And Evidence-Bound Answers");
+    expect(readme).toContain("typed output rendering for tables, code blocks, diffs, terminal output");
+    expect(readme).toContain("plain text chat content backward compatible");
     expect(readme).toContain("ExecutionContextPackage");
     expect(readme).toContain("skill_load");
     expect(readme).toContain("tool invocation ledgers");
@@ -130,12 +133,16 @@ describe("README", () => {
     expect(readme).toContain(
       "[x] v2.8.5 reasoning-only final answer hotfix",
     );
+    expect(readme).toContain(
+      "[x] v2.9.0 output rendering and evidence-bound answers",
+    );
     expect(readme).toContain("[x] v2.8.0 运行编排与记忆大版本");
     expect(readme).toContain("[x] v2.8.1 实时运行区域视觉修正");
     expect(readme).toContain("[x] v2.8.2 会话重命名");
     expect(readme).toContain("[x] v2.8.3 本地时区与相对日期热修");
     expect(readme).toContain("[x] v2.8.4 工具失败后模型空响应热修");
     expect(readme).toContain("[x] v2.8.5 reasoning-only 最终回答热修");
+    expect(readme).toContain("[x] v2.9.0 输出渲染与证据绑定回答");
     expect(readme).toContain("independent packaged-app acceptance");
     expect(readme).toContain("独立 packaged-app 验收");
     expect(readme).not.toContain("pending final independent acceptance");
