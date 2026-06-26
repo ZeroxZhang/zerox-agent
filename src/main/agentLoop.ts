@@ -208,6 +208,11 @@ export async function runAgentLoop(
   let status: AgentLoopResult["status"] = "failed";
   let turns = 0;
   let toolCallsExecuted = Math.max(0, Math.floor(initialToolCallsExecuted));
+  let lastToolFailure: {
+    toolName: string;
+    error: string;
+    args?: Record<string, unknown>;
+  } | null = null;
   let continuation: AgentLoopContinuation | undefined;
   let lastExecutedToolSignature: string | null =
     findLastExecutedToolSignature(messages);
@@ -289,6 +294,18 @@ export async function runAgentLoop(
       }
       messages.splice(lastUserIdx + 1, 0, { role: "user", content: reminder });
     }
+  }
+
+  function rememberToolFailure(
+    toolName: string,
+    error: string,
+    args?: Record<string, unknown>,
+  ): void {
+    lastToolFailure = {
+      toolName,
+      error,
+      ...(args ? { args } : {}),
+    };
   }
 
   async function finalizeWithoutTools(options: {
@@ -510,6 +527,7 @@ export async function runAgentLoop(
               }),
             });
             processedToolCalls.push(toolCall);
+            rememberToolFailure(toolName, "参数 JSON 解析失败");
             onToolResult?.(toolName, false, {
               ok: false,
               error: "参数 JSON 解析失败",
@@ -573,6 +591,7 @@ export async function runAgentLoop(
               }),
             });
             processedToolCalls.push(toolCall);
+            rememberToolFailure(toolName, nativeFallbackRejection, args);
             onToolResult?.(toolName, false, rejectedResult, toolEventBase);
             continue;
           }
@@ -620,6 +639,11 @@ export async function runAgentLoop(
                 }),
               });
               processedToolCalls.push(toolCall);
+              rememberToolFailure(
+                toolName,
+                auth.ok ? auth.decision.reason : auth.message,
+                args,
+              );
               onToolResult?.(toolName, false, {
                 ok: false,
                 error: auth.ok ? auth.decision.reason : auth.message,
@@ -662,6 +686,8 @@ export async function runAgentLoop(
           lastExecutedToolSignature = signature;
           if (result.ok) {
             successfulToolNames.add(toolName);
+          } else {
+            rememberToolFailure(toolName, result.error, args);
           }
           const failureLoop = updateToolFailureStreak(
             toolFailureStreak,
@@ -822,7 +848,9 @@ export async function runAgentLoop(
       }
 
       // No content and no tool calls
-      summary = "Agent did not produce a response.";
+      summary = lastToolFailure
+        ? buildEmptyModelResponseAfterToolFailureSummary(lastToolFailure)
+        : "模型没有返回可用回复。请稍后重试，或换一个更明确的问题。";
       break;
     }
 
@@ -1085,6 +1113,20 @@ function buildToolFailureLoopRecoveryPrompt(options: {
     "- 如果是路径不存在、文件名不确定或目录结构不清，先用 file_search 或列出已知父目录确认真实路径。",
     "- 如果已有成功工具结果足以回答用户，就停止继续探索，直接基于已有证据完成或给出阶段性结论。",
     "- 如果必须继续使用同类工具，先改变策略并说明依据。",
+  ].join("\n");
+}
+
+function buildEmptyModelResponseAfterToolFailureSummary(options: {
+  toolName: string;
+  error: string;
+  args?: Record<string, unknown>;
+}): string {
+  return [
+    "模型没有返回可用回复，已停止本轮执行。",
+    `最近失败工具：${options.toolName}`,
+    `失败原因：${truncateForPrompt(options.error, 240)}`,
+    ...(options.args ? [`最近参数：${formatToolArgsForPrompt(options.args)}`] : []),
+    "这通常表示模型在工具失败后没有给出最终总结。你可以直接重试，或补充一个更明确的数据来源/链接后继续。",
   ].join("\n");
 }
 

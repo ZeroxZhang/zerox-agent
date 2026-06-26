@@ -1117,6 +1117,44 @@ describe("agent loop", () => {
     expect(result.summary).toContain("file_list");
   });
 
+  it("reports the last tool failure when the model returns an empty follow-up response", async () => {
+    const chatClient: ChatClient = {
+      async complete(request) {
+        if (request.messages.some((message) => message.role === "tool")) {
+          return {
+            content: null,
+            finishReason: "stop",
+            toolCalls: [],
+          };
+        }
+        return toolCallResponse("tool_call_missing_url", "/missing-url");
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "查一下昨天双色球开奖结果" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(undefined, undefined, {
+          ok: false,
+          error: "web_fetch URL must be a valid http(s) URL.",
+        }),
+        maxTurns: 3,
+        tools: testTools,
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: "failed",
+      toolCallsExecuted: 1,
+    });
+    expect(result.summary).toContain("模型没有返回可用回复");
+    expect(result.summary).toContain("file_list");
+    expect(result.summary).toContain("web_fetch URL must be a valid http(s) URL.");
+    expect(result.summary).not.toContain("Agent did not produce a response.");
+  });
+
   it("asks the model to recover once from repeated tool failures before pausing", async () => {
     const requests: ChatCompletionRequest[] = [];
     const chatClient: ChatClient = {
