@@ -816,7 +816,8 @@ function registerBuiltinTools(
       type: "function",
       function: {
         name: "web_search",
-        description: "使用 DuckDuckGo 搜索网页并返回结果列表。",
+        description:
+          "使用 DuckDuckGo 搜索网页并返回结果列表。日期敏感查询必须先解析相对日期，并在 query 中包含绝对日期。",
         parameters: {
           type: "object",
           properties: {

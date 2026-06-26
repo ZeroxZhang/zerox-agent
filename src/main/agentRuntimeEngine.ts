@@ -36,6 +36,7 @@ import {
   buildTaskPrompt,
   buildToolDefinitions,
 } from "../shared/agentProtocol";
+import { formatDateInTimeZone, getSystemTimeZone } from "../shared/dateContext";
 import {
   createToolFailureReflection,
   type AgentReflectionDecision,
@@ -771,6 +772,7 @@ export function createAgentRuntimeEngine(options: {
       const events = [createEvent("info", "Agent runtime started.")];
       const runContext = await options.workspaceService?.resolveRunContext();
       const initialProfile = await options.getModelProfile();
+      const systemTimeZone = getSystemTimeZone();
       const proceduralMemoryContext =
         await buildProceduralMemoryPromptContext({
           memoryStore: options.memoryStore,
@@ -798,7 +800,8 @@ export function createAgentRuntimeEngine(options: {
             role: "system",
             content: buildAgentSystemPrompt({
               modelId: initialProfile.model,
-              currentDate: startedAt.split("T")[0],
+              currentDate: formatDateInTimeZone(new Date(startedAt), systemTimeZone),
+              timeZone: systemTimeZone,
             }),
           },
           {

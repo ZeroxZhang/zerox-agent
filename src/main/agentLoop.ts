@@ -27,6 +27,7 @@ import {
   buildToolDefinitions,
   serializeToolObservation,
 } from "../shared/agentProtocol";
+import { formatDateInTimeZone, getSystemTimeZone } from "../shared/dateContext";
 import { serializeToolObservationWithOffload } from "./toolObservationOffload";
 import type { ToolResultOffloadStore } from "./toolResultOffloadStore";
 import { getToolCapability } from "../shared/agentToolCapabilities";
@@ -182,9 +183,9 @@ export async function runAgentLoop(
 
   const toolDefinitions = customTools ?? buildToolDefinitions();
   const messages: ChatMessage[] = resumeMessages ? [...resumeMessages] : [];
-  // Anchor date to loop creation so the system prompt stays byte-identical
-  // across turns — critical for Anthropic prompt cache hit rate.
-  const loopDate = new Date().toISOString().split("T")[0];
+  // Anchor date to loop creation, interpreted in the user's system timezone.
+  const loopTimeZone = getSystemTimeZone();
+  const loopDate = formatDateInTimeZone(new Date(), loopTimeZone);
 
   if (!resumeMessages) {
     if (systemPrompt) {
@@ -195,6 +196,7 @@ export async function runAgentLoop(
         content: buildAgentSystemPrompt({
           modelId: modelProfile.model,
           currentDate: loopDate,
+          timeZone: loopTimeZone,
         }),
       });
     }

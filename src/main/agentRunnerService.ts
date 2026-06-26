@@ -31,6 +31,7 @@ import {
   parsePlanFromResponse,
   parseReflectionFromResponse,
 } from "../shared/agentProtocol";
+import { formatDateInTimeZone, getSystemTimeZone } from "../shared/dateContext";
 import { serializeToolObservationWithOffload } from "./toolObservationOffload";
 import type { ToolResultOffloadStore } from "./toolResultOffloadStore";
 import type {
@@ -319,9 +320,11 @@ export function createAgentRunnerService(options: {
         }`,
       };
     }
+    const systemTimeZone = getSystemTimeZone();
     const systemPrompt = buildAgentSystemPrompt({
       modelId: profile.model,
-      currentDate: startedAt.split("T")[0],
+      currentDate: formatDateInTimeZone(new Date(startedAt), systemTimeZone),
+      timeZone: systemTimeZone,
     });
     const proceduralMemoryContext =
       await buildProceduralMemoryPromptContext({

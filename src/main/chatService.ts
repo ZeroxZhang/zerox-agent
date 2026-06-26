@@ -66,6 +66,7 @@ import {
   matchTaskFromMessage,
   type AgentIntentRoute,
 } from "../shared/agentIntent";
+import { formatDateInTimeZone, getSystemTimeZone } from "../shared/dateContext";
 import {
   extractRequestedSkillQuery,
   matchSkillMentionCandidates,
@@ -170,6 +171,7 @@ export function createChatService(options: {
   runAgentLoop?: typeof runAgentLoop;
   createId?: () => string;
   now?: () => Date;
+  systemTimeZone?: string;
   memoryLimit?: number;
   historyLimit?: number;
   agentLoopMaxTurns?: number;
@@ -272,8 +274,9 @@ export function createChatService(options: {
       const startedAtMs = getNowMs(options.now);
       const requestId = input.requestId ?? `request_${startedAtMs}`;
       let workspaceRunRecorder: ChatWorkspaceRunRecorder | null = null;
-      // Anchor the system prompt date to session start for cache stability.
-      const chatDate = new Date(startedAtMs).toISOString().split("T")[0];
+      const chatTimeZone = options.systemTimeZone ?? getSystemTimeZone();
+      // Anchor date to turn start, interpreted in the user's system timezone.
+      const chatDate = formatDateInTimeZone(new Date(startedAtMs), chatTimeZone);
       const emitStatus = createChatStatusEmitter({
         sessionId,
         requestId,
@@ -697,7 +700,7 @@ export function createChatService(options: {
               ...(chatRuntimeTask
                 ? { runtimeTask: chatRuntimeTask.runtimeTask }
                 : {}),
-              systemPrompt: buildChatSystemPrompt(chatDate),
+              systemPrompt: buildChatSystemPrompt(chatDate, chatTimeZone),
               maxTurns: loopMaxTurns,
               signal: runtimeOptions.signal,
               tools: toolExecutor.getRegistry().getDefinitions(),
@@ -950,7 +953,7 @@ export function createChatService(options: {
         // Fallback: simple LLM chat (no tools)
         try {
           const messages: ChatMessage[] = [
-            { role: "system", content: buildChatSystemPrompt(chatDate) },
+            { role: "system", content: buildChatSystemPrompt(chatDate, chatTimeZone) },
             ...chatMessages,
           ];
           const response = await options.chatClient.complete({
@@ -1037,7 +1040,7 @@ export function createChatService(options: {
         usage:
           accumulatedUsage ??
           estimateChatTurnUsage([
-            { role: "system", content: buildChatSystemPrompt(chatDate) },
+            { role: "system", content: buildChatSystemPrompt(chatDate, chatTimeZone) },
             ...chatMessages,
             { role: "assistant", content: reply },
           ]),
@@ -2475,10 +2478,11 @@ async function persistRequiredChatActivityEvent(
   }
 }
 
-function buildChatSystemPrompt(currentDate?: string): string {
+function buildChatSystemPrompt(currentDate?: string, timeZone?: string): string {
   return getSystemPromptAssembler().assemble({
     mode: "chat",
     currentDate,
+    timeZone,
   }).prompt;
 }
 

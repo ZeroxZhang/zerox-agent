@@ -40,6 +40,7 @@ export type AgentSystemPromptOptions = {
   modelId?: string;
   workspaceRoot?: string;
   currentDate?: string;
+  timeZone?: string;
 };
 
 const supportedTools = new Set<AgentToolName>([
@@ -466,7 +467,7 @@ export function buildToolDefinitions(): ToolDefinition[] {
       function: {
         name: "web_search",
         description:
-          "使用 DuckDuckGo 搜索网页并返回结果列表（标题、URL、摘要）。需要任务授权 web.search 权限。",
+          "使用 DuckDuckGo 搜索网页并返回结果列表（标题、URL、摘要）。需要任务授权 web.search 权限。日期敏感查询必须先解析相对日期，并在 query 中包含绝对日期。",
         parameters: {
           type: "object",
           properties: {
@@ -631,6 +632,7 @@ export function buildAgentSystemPrompt(
     modelId: options.modelId,
     workspaceRoot: options.workspaceRoot,
     currentDate: options.currentDate,
+    timeZone: options.timeZone,
     mode: "agent",
   }).prompt;
 }

@@ -353,6 +353,38 @@ describe("chat service", () => {
     ]);
   });
 
+  it("anchors chat prompt dates in the configured system timezone", async () => {
+    const capturedMessages: ChatMessage[][] = [];
+    const service = createChatService({
+      chatClient: {
+        async complete(request) {
+          capturedMessages.push(request.messages);
+          return chatReply("我会先按 2026-06-25 查询昨天的开奖结果。");
+        },
+      },
+      getModelProfile: async () => ({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret",
+        model: "agent-model",
+        temperature: 0.2,
+        maxTokens: 8192,
+      }),
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([]),
+      createId: () => "chat_session_timezone",
+      now: () => new Date("2026-06-25T16:30:00.000Z"),
+      systemTimeZone: "Asia/Shanghai",
+    });
+
+    await service.sendMessage({
+      message: "帮我查一下昨天双色球的开奖结果",
+    });
+
+    const systemPrompt = capturedMessages[0]?.[0]?.content ?? "";
+    expect(systemPrompt).toContain("今天 / today: 2026-06-26");
+    expect(systemPrompt).toContain("昨天 / yesterday: 2026-06-25");
+  });
+
   it("records provider token usage for a successful model reply", async () => {
     const chatMessages: AppendChatMessageInput[] = [];
     const tokenUsageWrites: Array<{

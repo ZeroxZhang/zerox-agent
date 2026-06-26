@@ -1,6 +1,7 @@
 import type { AssembleOptions, LayerProvider, SystemPromptLayer } from "./systemPromptLayer";
 import type { AgentPromptProfile } from "./agentProtocol";
 import { selectAgentPromptProfile } from "./agentProtocol";
+import { buildDateContextPrompt } from "./dateContext";
 import { buildMemoryInstructions } from "./memorySystemInstructions";
 
 // --- Helpers ---
@@ -97,7 +98,16 @@ const envRuntimeProvider: LayerProvider = {
   id: "env.runtime",
   order: 2,
   build(options: AssembleOptions): SystemPromptLayer | null {
-    if (options.mode === "chat") return null;
+    if (options.mode === "chat") {
+      if (!options.currentDate) return null;
+      return {
+        id: "env.runtime",
+        label: "Local date context",
+        content: buildDateContextPrompt(options.currentDate, options.timeZone),
+        order: 2,
+        protected: true,
+      };
+    }
     const profile = selectAgentPromptProfile(options.modelId);
     const lines = [
       "运行环境：",
@@ -105,7 +115,10 @@ const envRuntimeProvider: LayerProvider = {
     ];
     if (options.modelId) lines.push(`- Model ID: ${options.modelId}`);
     if (options.workspaceRoot) lines.push(`- Workspace root: ${options.workspaceRoot}`);
-    if (options.currentDate) lines.push(`- Current date: ${options.currentDate}`);
+    if (options.currentDate) {
+      lines.push(`- Current date: ${options.currentDate}`);
+      lines.push(buildDateContextPrompt(options.currentDate, options.timeZone));
+    }
     return {
       id: "env.runtime",
       label: "Environment context",

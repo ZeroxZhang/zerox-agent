@@ -208,6 +208,10 @@ describe("agent JSON protocol", () => {
       definitions.find((definition) => definition.function.name === "chrome_bookmarks_read")
         ?.function.description,
     ).toContain("不要用 file_read 或 shell_exec");
+    expect(
+      definitions.find((definition) => definition.function.name === "web_search")
+        ?.function.description,
+    ).toContain("日期敏感");
 
     for (const def of definitions) {
       expect(def.type).toBe("function");

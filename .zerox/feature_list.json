@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-06-25T16:51:27.000Z",
+  "updatedAt": "2026-06-26T03:26:03.000Z",
   "features": [
     {
       "id": "P0-repo-local-harness",
@@ -1689,6 +1689,49 @@
         "npm run harness:check",
         "git diff --check",
         "rendered frontend QA against the supplied chat transcript reference"
+      ]
+    },
+    {
+      "id": "P20-v2.8.3-time-semantics-hotfix",
+      "priority": 50,
+      "status": "done",
+      "title": "v2.8.3 hotfix for local timezone and relative date semantics",
+      "files": [
+        "README.md",
+        "package.json",
+        "package-lock.json",
+        ".zerox/feature_list.json",
+        "src/shared/dateContext.ts",
+        "src/shared/systemPromptLayer.ts",
+        "src/shared/systemPromptLayerProviders.ts",
+        "src/shared/agentProtocol.ts",
+        "src/main/chatService.ts",
+        "src/main/agentLoop.ts",
+        "src/main/agentRuntimeEngine.ts",
+        "src/main/agentRunnerService.ts",
+        "src/main/agentToolExecutor.ts",
+        "src/shared/systemPromptAssembler.test.ts",
+        "src/shared/agentProtocol.test.ts",
+        "src/main/chatService.test.ts",
+        "src/main/agentToolExecutor.test.ts",
+        "src/shared/packageScripts.test.ts",
+        "src/shared/readme.test.ts"
+      ],
+      "definitionOfDone": [
+        "chat mode receives a protected local date context before memory guidance",
+        "relative dates such as 今天, 昨天, 前天, 明天, today, and yesterday resolve against the user's system timezone",
+        "web_search tool descriptions require date-sensitive queries to include the resolved absolute date",
+        "agent loop, runtime engine, and runner service stop deriving dates from UTC ISO truncation",
+        "package metadata reports version 2.8.3 in package.json and package-lock.json",
+        "focused date-semantics tests, full test suite, production build, macOS packaging, release creation, and push complete"
+      ],
+      "verification": [
+        "npm test -- src/main/chatService.test.ts src/shared/systemPromptAssembler.test.ts src/shared/agentProtocol.test.ts src/main/agentToolExecutor.test.ts",
+        "npm test",
+        "npm run build",
+        "npm run dist:mac",
+        "git diff --check",
+        "gh release view v2.8.3"
       ]
     }
   ]

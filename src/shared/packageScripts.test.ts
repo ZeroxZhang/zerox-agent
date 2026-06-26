@@ -8,7 +8,7 @@ type PackageJson = {
 };
 
 describe("package scripts", () => {
-  it("sets release metadata to v2.8.2", () => {
+  it("sets release metadata to v2.8.3", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -16,12 +16,12 @@ describe("package scripts", () => {
       readFileSync(path.join(process.cwd(), "package-lock.json"), "utf8"),
     ) as { version?: string; packages?: Record<string, { version?: string }> };
 
-    expect(packageJson.version).toBe("2.8.2");
-    expect(packageLock.version).toBe("2.8.2");
-    expect(packageLock.packages?.[""]?.version).toBe("2.8.2");
+    expect(packageJson.version).toBe("2.8.3");
+    expect(packageLock.version).toBe("2.8.3");
+    expect(packageLock.packages?.[""]?.version).toBe("2.8.3");
   });
 
-  it("keeps release gates done through v2.8.2", () => {
+  it("keeps release gates done through v2.8.3", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -35,8 +35,19 @@ describe("package scripts", () => {
       }>;
     };
 
-    expect(packageJson.version).toBe("2.8.2");
+    expect(packageJson.version).toBe("2.8.3");
     expect(featureList.features.filter((feature) => feature.status !== "done")).toEqual([]);
+    expect(featureList.features).toContainEqual(
+      expect.objectContaining({
+        id: "P20-v2.8.3-time-semantics-hotfix",
+        status: "done",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("protected local date context"),
+          expect.stringContaining("web_search tool descriptions require date-sensitive queries"),
+          expect.stringContaining("package metadata reports version 2.8.3"),
+        ]),
+      }),
+    );
     expect(featureList.features).toContainEqual(
       expect.objectContaining({
         id: "P19-v2.8.2-chat-rename-message-skill-polish",

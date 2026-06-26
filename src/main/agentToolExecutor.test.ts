@@ -1404,6 +1404,17 @@ describe("agent tool executor", () => {
     ]);
   });
 
+  it("describes web_search as requiring absolute dates for date-sensitive queries", () => {
+    const executor = createAgentToolExecutor();
+    const definition = executor
+      .getRegistry()
+      .getDefinitions()
+      .find((item) => item.function.name === "web_search");
+
+    expect(definition?.function.description).toContain("日期敏感");
+    expect(definition?.function.description).toContain("绝对日期");
+  });
+
   it("executes native research writing tools through the registry", async () => {
     const reportPath = path.join(tempDir, "research.md");
     const executor = createAgentToolExecutor({
