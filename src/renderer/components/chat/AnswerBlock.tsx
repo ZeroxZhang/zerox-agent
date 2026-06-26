@@ -1,4 +1,5 @@
 import type { RenderedOutputPart } from "../../chatOutputModel";
+import { isMainConversationOutputPart } from "../../chatOutputModel";
 import { EvidenceRail, isEvidencePart } from "./EvidenceRail";
 import { OutputPartRenderer } from "./OutputPartRenderer";
 
@@ -7,9 +8,14 @@ type AnswerBlockProps = {
 };
 
 export function AnswerBlock({ parts }: AnswerBlockProps) {
-  const evidenceParts = parts.filter(isEvidencePart);
-  const bodyParts = parts.filter((part) => !isEvidencePart(part));
-  const renderParts = bodyParts.length > 0 ? bodyParts : parts;
+  const mainParts = parts.filter(isMainConversationOutputPart);
+  if (mainParts.length === 0) {
+    return null;
+  }
+
+  const evidenceParts = mainParts.filter(isEvidencePart);
+  const bodyParts = mainParts.filter((part) => !isEvidencePart(part));
+  const renderParts = bodyParts.length > 0 ? bodyParts : mainParts;
   const hasEvidence = evidenceParts.length > 0;
   const showEvidenceRail = hasEvidence && bodyParts.length > 0;
   const blockClassName = `chat-answer-block ${

@@ -11,6 +11,17 @@ export type RenderedOutputPart = ChatOutputPart & {
   source: RenderedOutputPartSource;
 };
 
+export function isMainConversationOutputPart(part: ChatOutputPart): boolean {
+  return !(
+    part.type === "approval_request" ||
+    part.type === "command_output" ||
+    part.type === "input_request" ||
+    part.type === "ledger_event" ||
+    part.type === "tool_call" ||
+    part.type === "tool_result"
+  );
+}
+
 export function outputPartsFromMessage(
   message: ChatMessageRecord,
 ): RenderedOutputPart[] {
@@ -22,20 +33,19 @@ export function outputPartsFromMessage(
     })) satisfies RenderedOutputPart[];
     const hasTextPart = parts.some((part) => part.type === "text");
     if (hasTextPart || !message.content) {
-      return parts;
+      return parts.filter(isMainConversationOutputPart);
     }
 
-    return [
-      {
-        id: `${message.id}:text`,
-        type: "text",
-        text: message.content,
-        format: "markdown",
-        renderKey: `${message.id}:text`,
-        source: "persisted",
-      },
-      ...parts,
-    ];
+    const legacyTextPart: RenderedOutputPart = {
+      id: `${message.id}:text`,
+      type: "text",
+      text: message.content,
+      format: "markdown",
+      renderKey: `${message.id}:text`,
+      source: "persisted",
+    };
+
+    return [legacyTextPart, ...parts].filter(isMainConversationOutputPart);
   }
 
   return [

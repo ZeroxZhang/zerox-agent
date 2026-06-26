@@ -350,8 +350,10 @@ describe("Design System — Notion-inspired app shell", () => {
 
     expect(chatPanelSource).toContain("import { AnswerBlock }");
     expect(chatPanelSource).toContain("outputPartsFromMessage");
+    expect(chatPanelSource).toContain("visibleChatMessages");
+    expect(chatPanelSource).toContain("outputParts.length > 0");
     expect(chatPanelSource).toContain(
-      "<AnswerBlock parts={outputPartsFromMessage(message)} />",
+      "<AnswerBlock parts={message.outputParts} />",
     );
     expect(chatPanelSource).not.toContain("outputMarkdownFromMessage");
     expect(answerBlockSource).toContain("OutputPartRenderer");

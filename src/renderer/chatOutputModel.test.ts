@@ -100,12 +100,12 @@ describe("chat output model", () => {
       "text",
       "table",
       "code",
-      "ledger_event",
     ]);
+    expect(parts.map((part) => part.type)).not.toContain("ledger_event");
     expect(parts.every((part) => part.source === "persisted")).toBe(true);
   });
 
-  it("preserves legacy content when persisted output parts do not include text", () => {
+  it("preserves legacy content without leaking tool parts into the main transcript", () => {
     const message: ChatMessageRecord = {
       id: "m3",
       role: "assistant",
@@ -131,16 +131,63 @@ describe("chat output model", () => {
         renderKey: "m3:text",
         source: "persisted",
       },
-      {
-        id: "tool_1",
-        type: "tool_call",
-        toolCallId: "call_1",
-        toolName: "read_file",
-        argsPreview: { path: "notes.md" },
-        renderKey: "m3:tool_1",
-        source: "persisted",
-      },
     ]);
+  });
+
+  it("keeps tool and runtime process parts out of the main transcript", () => {
+    const message: ChatMessageRecord = {
+      id: "m-process",
+      role: "assistant",
+      content: "",
+      createdAt: "2026-06-26T00:00:00.000Z",
+      outputParts: [
+        {
+          id: "tool_call_1",
+          type: "tool_call",
+          toolCallId: "call_1",
+          toolName: "file_read",
+          argsPreview: { path: "src/app.ts" },
+        },
+        {
+          id: "tool_result_1",
+          type: "tool_result",
+          toolCallId: "call_1",
+          ok: true,
+          resultPreview: { content: "large file contents" },
+        },
+        {
+          id: "command_output_1",
+          type: "command_output",
+          command: "npm test",
+          stdout: "very long output",
+          stderr: "",
+        },
+        {
+          id: "ledger_1",
+          type: "ledger_event",
+          status: "running",
+          title: "正在调用工具",
+          toolName: "file_read",
+        },
+        {
+          id: "approval_1",
+          type: "approval_request",
+          approvalId: "approval_1",
+          toolName: "shell_exec",
+          riskLevel: "high",
+        },
+        {
+          id: "input_1",
+          type: "input_request",
+          inputRequestId: "input_1",
+          skillName: "report",
+          reason: "Need target file",
+          fields: [],
+        },
+      ],
+    };
+
+    expect(outputPartsFromMessage(message)).toEqual([]);
   });
 
   it("builds markdown for assistant messages from text and evidence parts", () => {
@@ -183,7 +230,8 @@ describe("chat output model", () => {
     expect(markdown).toContain("Rendered summary");
     expect(markdown).toContain("| Name | Score |");
     expect(markdown).toContain("```diff");
-    expect(markdown).toContain("Tool call: read_file");
+    expect(markdown).not.toContain("Tool call: read_file");
+    expect(markdown).not.toContain("notes.md");
     expect(markdown).not.toContain("Legacy summary");
   });
 

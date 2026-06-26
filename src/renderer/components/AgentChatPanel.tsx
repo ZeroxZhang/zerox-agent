@@ -88,7 +88,10 @@ import {
   type ChatToolCallPreview,
   type ChatStreamMessage,
 } from "../chatStreamReducer";
-import { outputPartsFromMessage } from "../chatOutputModel";
+import {
+  outputPartsFromMessage,
+  type RenderedOutputPart,
+} from "../chatOutputModel";
 import { formatChatMessageTime } from "../chatMessageTime";
 import { AnswerBlock } from "./chat/AnswerBlock";
 import { GoalDetailDrawer } from "./GoalDetailDrawer";
@@ -109,6 +112,13 @@ type AgentChatPanelProps = {
 };
 
 type ChatMessage = ChatStreamMessage;
+
+type VisibleChatMessage =
+  | (ChatMessage & { role: "user" })
+  | (Omit<ChatMessage, "outputParts"> & {
+      role: "assistant";
+      outputParts: RenderedOutputPart[];
+    });
 
 type SuccessfulChatResult = Extract<SendChatMessageResult, { ok: true }>;
 
@@ -218,6 +228,25 @@ export function AgentChatPanel({
     createChatStreamState(initialMessages),
   );
   const messages = chatStreamState.messages;
+  const visibleChatMessages = useMemo<VisibleChatMessage[]>(
+    () => {
+      const visibleMessages: VisibleChatMessage[] = [];
+      for (const message of messages) {
+        if (message.role === "assistant") {
+          const outputParts = outputPartsFromMessage(message);
+          if (outputParts.length > 0) {
+            visibleMessages.push({ ...message, role: "assistant", outputParts });
+          }
+          continue;
+        }
+
+        visibleMessages.push({ ...message, role: "user" });
+      }
+
+      return visibleMessages;
+    },
+    [messages],
+  );
   const pendingInputRequest = chatStreamState.pendingInputRequest;
   const [draft, setDraft] = useState("");
   const [draftCursor, setDraftCursor] = useState(0);
@@ -2000,7 +2029,7 @@ export function AgentChatPanel({
           />
         ) : (
           <div className="message-list" aria-label="消息列表">
-            {messages.map((message) => (
+            {visibleChatMessages.map((message) => (
               <article
                 className={`chat-message is-${message.role}${
                   message.isStreaming ? " is-streaming" : ""
@@ -2018,7 +2047,7 @@ export function AgentChatPanel({
                   </time>
                 </header>
                 {message.role === "assistant" ? (
-                  <AnswerBlock parts={outputPartsFromMessage(message)} />
+                  <AnswerBlock parts={message.outputParts} />
                 ) : (
                   <MarkdownMessage content={message.content} />
                 )}

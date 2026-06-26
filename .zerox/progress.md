@@ -5069,3 +5069,26 @@
   - `npm run harness:check` -> passed.
   - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `better-sqlite3` ABI mismatch triggered the existing JSON fallback during smoke.
   - `git diff --check` -> passed.
+
+## 2026-06-26 - Main Transcript Runtime Output Regression Hotfix
+
+- Request:
+  - Fix a severe v2.9.0 display regression where model reasoning, tool calls, tool results, command output, and run ledger events appeared in the main chat transcript, inflated scroll height with large JSON/file reads, and could destabilize the app. These process surfaces must stay in the thinking/tool disclosure areas instead of the primary conversation.
+- Changed areas:
+  - `src/renderer/chatOutputModel.ts`
+  - `src/renderer/chatOutputModel.test.ts`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/components/chat/AnswerBlock.tsx`
+  - `src/renderer/materialDesign.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/renderer/chatOutputModel.test.ts src/renderer/materialDesign.test.ts -t "tool|runtime|structured assistant output|legacy content"` -> failed as expected because `outputPartsFromMessage()` still returned `tool_call`, `tool_result`, `command_output`, `ledger_event`, `approval_request`, and `input_request` parts to the main transcript, and `AgentChatPanel` had no filtered `visibleChatMessages` path.
+- GREEN / verification evidence:
+  - `npm test -- src/renderer/chatOutputModel.test.ts src/renderer/materialDesign.test.ts -t "tool|runtime|structured assistant output|legacy content"` -> 2 files / 8 focused tests passed.
+  - `npm test -- src/renderer/chatOutputModel.test.ts src/renderer/materialDesign.test.ts src/renderer/chatStreamReducer.test.ts` -> 3 files / 70 tests passed.
+  - `npm run build` -> passed; Vite emitted the existing large chunk warning.
+  - `npm run verify` -> 179 files / 1233 tests passed, build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `better-sqlite3` ABI mismatch triggered the existing JSON fallback during smoke.
+- Browser QA note:
+  - Browser plugin setup completed and listed an in-app browser plus Chrome backend, but both tab navigation attempts failed with a stale session error (`Tab 1 is not part of browser session ...`). No external browser fallback was used; coverage rests on renderer unit/source regression tests, full verify, build, harness, and production smoke.
