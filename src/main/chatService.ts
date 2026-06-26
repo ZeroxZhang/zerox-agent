@@ -363,11 +363,12 @@ export function createChatService(options: {
         goalId?: string;
         goalEventRef?: string;
       }): Promise<string | null> {
-        const finalizedOutput = finalizeAssistantOutput(input.content);
+        const normalizedContent = input.content.trim();
+        const finalizedOutput = finalizeAssistantOutput(normalizedContent);
         const assistantMessageId = await appendAssistantMessage({
           chatSessionStore: options.chatSessionStore,
           sessionId,
-          content: input.content,
+          content: normalizedContent,
           outputParts: finalizedOutput.outputParts,
           ...(input.relatedMemoryIds?.length
             ? { relatedMemoryIds: input.relatedMemoryIds }
@@ -382,7 +383,7 @@ export function createChatService(options: {
         }
         emitTerminalStreamEvent({
           type: "completed",
-          message: input.content,
+          message: normalizedContent,
           ...(assistantMessageId ? { finalMessageId: assistantMessageId } : {}),
         });
         return assistantMessageId;
@@ -2228,14 +2229,15 @@ async function tryRouteGoalIntent(options: {
     goalId: string;
     goalEventRef: string;
   }) {
+    const normalizedContent = input.content.trim();
     const goalOutputAssembler = createChatOutputAssembler(() =>
       new Date(getNowMs(options.now)).toISOString(),
     );
-    const finalTextPart = goalOutputAssembler.setFinalText(input.content);
+    const finalTextPart = goalOutputAssembler.setFinalText(normalizedContent);
     const assistantMessageId = await appendAssistantMessage({
       chatSessionStore: options.chatSessionStore,
       sessionId: options.sessionId,
-      content: input.content,
+      content: normalizedContent,
       outputParts: goalOutputAssembler.parts(),
       goalId: input.goalId,
       goalEventRef: input.goalEventRef,
@@ -2249,7 +2251,7 @@ async function tryRouteGoalIntent(options: {
     }
     options.emitStatus?.sendTerminalEvent({
       type: "completed",
-      message: input.content,
+      message: normalizedContent,
       ...(assistantMessageId ? { finalMessageId: assistantMessageId } : {}),
     });
   }

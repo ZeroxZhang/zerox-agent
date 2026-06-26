@@ -1812,6 +1812,70 @@ describe("chat service", () => {
     );
   });
 
+  it("normalizes the final assistant reply across persisted content and terminal stream text", async () => {
+    const streamEvents: ChatStreamEvent[] = [];
+    const chatMessages: AppendChatMessageInput[] = [];
+    const baseChatSessionStore = createChatSessionStore(chatMessages);
+    const chatSessionStore = {
+      ...baseChatSessionStore,
+      async appendMessage(input: AppendChatMessageInput) {
+        return baseChatSessionStore.appendMessage({
+          ...input,
+          content: input.content.trim(),
+        });
+      },
+    };
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("Normalized reply.   ");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore,
+      createId: () => "chat_trimmed_reply",
+      now: () => new Date("2026-06-26T08:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage(
+      {
+        requestId: "request_trimmed_reply_1",
+        message: "say hi",
+      },
+      {
+        onStreamEvent(event) {
+          streamEvents.push(event);
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      reply: "Normalized reply.   ",
+    });
+    const persistedAssistant = (await chatSessionStore.get("persisted_session"))?.messages.at(-1);
+    const finalTextPart = streamEvents.findLast(
+      (event) => event.type === "output_part" && event.part.type === "text",
+    );
+    const completedEvent = streamEvents.findLast(
+      (event) => event.type === "completed",
+    );
+
+    expect(persistedAssistant?.content).toBe("Normalized reply.");
+    expect(finalTextPart).toMatchObject({
+      type: "output_part",
+      part: expect.objectContaining({
+        type: "text",
+        text: "Normalized reply.",
+      }),
+    });
+    expect(completedEvent).toMatchObject({
+      type: "completed",
+      message: "Normalized reply.",
+    });
+  });
+
   it("masks secrets in ledger events and other output parts for tool starts", async () => {
     const streamEvents: ChatStreamEvent[] = [];
     const chatMessages: AppendChatMessageInput[] = [];
