@@ -1,5 +1,20 @@
 # Zerox Harness Progress
 
+## 2026-06-26 - v2.9.0 Packaged Distribution And Push
+
+- Request: package the v2.9.0 macOS release, validate the packaged app, publish release artifacts, and push the branch/tag.
+- Packaging evidence:
+  - `npm run dist:mac` -> passed; generated unsigned macOS arm64 DMG, ZIP, blockmaps, and `latest-mac.yml` for v2.9.0.
+  - `release/mac-arm64/Zerox Agent.app/Contents/Info.plist` reports `CFBundleShortVersionString=2.9.0` and `CFBundleVersion=2.9.0`.
+  - `release/Zerox Agent-2.9.0-arm64.dmg` (122M, sha256 `f2951bdfaa091a583d7da1712912e0bb3380710b107e58b07b37f629a9ba9731`)
+  - `release/Zerox Agent-2.9.0-arm64-mac.zip` (333M, sha256 `166bf8c1295c0f27273bcc842dbbbbb2f83dcec857f082e14cfbca497942e80b`)
+  - `release/Zerox Agent-2.9.0-arm64.dmg.blockmap` (133K, sha256 `c9609ff77ed16e6aad3ef609af067daa8f51b1b88290b89323561861a52beea0`)
+  - `release/Zerox Agent-2.9.0-arm64-mac.zip.blockmap` (335K, sha256 `1fcddfb8754c293ab463f60a5fddad5b5f6e5e680dd1933a0eb7696049c87642`)
+  - `release/latest-mac.yml` (517B, sha256 `3015cec61af260e468cf4174f8b4d414642d7d1b9f548bbf85a01d7236bc4d33`)
+- Verification evidence:
+  - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v2.9.0' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed; renderer rendered agent chat UI.
+  - `npm run harness:check` -> passed.
+
 ## 2026-06-26 - v2.9.0 Task 6 Restore Fidelity And Release Gates
 
 - Request: complete Task 6 by proving restored rich output fidelity, bumping release metadata to v2.9.0, marking P23 done, updating README release documentation, and running final verification gates.
