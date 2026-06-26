@@ -17,6 +17,7 @@ import type {
   SkillPendingInputState,
   SkillUserInputRequest,
 } from "../shared/chat";
+import type { ChatOutputPart } from "../shared/chatOutput";
 
 type StoredChatSessions = {
   schemaVersion: 1;
@@ -27,6 +28,7 @@ export type AppendChatMessageInput = {
   sessionId?: string;
   role: ChatMessageRecord["role"];
   content: string;
+  outputParts?: ChatOutputPart[];
   relatedMemoryIds?: string[];
   executedRunId?: string;
   goalId?: string;
@@ -172,6 +174,7 @@ export function createChatSessionStore(options: {
           id: createId(),
           role: input.role,
           content,
+          ...(input.outputParts?.length ? { outputParts: input.outputParts } : {}),
           ...(input.relatedMemoryIds?.length
             ? { relatedMemoryIds: input.relatedMemoryIds }
             : {}),
@@ -700,10 +703,12 @@ function normalizeSkillInputValue(
 
 function normalizeStoredMessage(message: ChatMessageRecord): ChatMessageRecord {
   const role = message.role === "user" ? "user" : "assistant";
+  const outputParts = normalizeOutputParts(message.outputParts);
   return {
     id: String(message.id ?? ""),
     role,
     content: String(message.content ?? ""),
+    ...(outputParts?.length ? { outputParts } : {}),
     ...(message.relatedMemoryIds?.length
       ? { relatedMemoryIds: message.relatedMemoryIds.map(String) }
       : {}),
@@ -712,6 +717,16 @@ function normalizeStoredMessage(message: ChatMessageRecord): ChatMessageRecord {
     ...(message.goalEventRef ? { goalEventRef: String(message.goalEventRef) } : {}),
     createdAt: String(message.createdAt ?? new Date(0).toISOString()),
   };
+}
+
+function normalizeOutputParts(
+  value: unknown,
+): ChatOutputPart[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value as ChatOutputPart[];
 }
 
 function normalizeGoalSummary(goal: ChatSessionGoalSummary): ChatSessionGoalSummary {

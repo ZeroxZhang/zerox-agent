@@ -1,63 +1,80 @@
-# Task 2 Report: SQLite, Migration, And JSONL Recovery Integrity
+# Task 2 Report: Main-Process Assembly, Streaming, And Persistence
 
 ## Status
 
-DONE
+DONE_WITH_CONCERNS
 
-## Changed Files
+## Scope
 
-- `src/main/taskStore.ts`
-- `src/main/toolAuditLog.ts`
-- `src/main/jsonlRecovery.ts`
-- `src/main/storage/repositories/index.ts`
-- `src/main/storage/repositories/sessionRepository.ts`
-- `src/main/workspaceRunStore.ts`
-- `src/main/agentRunStore.ts`
-- `src/main/agentTrajectoryStore.ts`
-- `src/main/agentGoalStore.ts`
-- `scripts/migrate-to-sqlite.mjs`
-- `scripts/rollback-sqlite-to-json.mjs`
-- `src/main/storage/storeProxy.test.ts`
-- `src/main/toolAuditLog.test.ts`
-- `src/main/storage/migrateRoundTrip.test.ts`
-- `src/main/storage/repositories/repositories.test.ts`
-- `src/main/workspaceRunStore.test.ts`
-- `src/main/agentRunStore.test.ts`
-- `src/main/agentTrajectoryStore.test.ts`
-- `src/main/agentGoalStore.test.ts`
-- `.zerox/progress.md`
+- Created `src/main/chatOutputAssembler.ts`.
+- Updated `src/main/chatService.ts` to assemble streamed output parts, emit sequence-stable renderer stream events, and emit one terminal stream event per completed/failed/canceled request path touched by this task.
+- Updated `src/main/chatSessionStore.ts` to accept and reload persisted assistant `outputParts`.
+- Updated `src/main/chatService.test.ts` for RED/GREEN coverage around `output_part`, terminal `finalMessageId`, and persisted `outputParts`.
+- Updated adjacent compile-only test `src/renderer/chatStreamReducer.test.ts` because the required `ChatStreamEvent` metadata now includes `sequence` and `turnId`.
 
 ## RED Evidence
 
-- `npm test -- src/main/storage/storeProxy.test.ts src/main/toolAuditLog.test.ts` failed: returned audit events did not match persisted SQLite/dual events; disabled daily tasks reloaded with new timestamps and non-null `nextRunAt`.
-- `npm test -- src/main/storage/repositories/repositories.test.ts src/main/chatSessionStore.test.ts` failed: SQLite chat search returned no result for `报告 markdown`.
-- `npm test -- src/main/workspaceRunStore.test.ts src/main/agentRunStore.test.ts src/main/agentTrajectoryStore.test.ts src/main/agentGoalStore.test.ts` failed: malformed JSONL lines threw `SyntaxError`.
-- `npm test -- src/main/storage/migrateRoundTrip.test.ts` failed: migrated learning candidates regenerated `id`, reset `status` to `pending_review`, and rewrote timestamps.
-
-## GREEN Evidence
-
-- `npm test -- src/main/storage/storeProxy.test.ts src/main/toolAuditLog.test.ts` -> 2 files / 21 tests passed.
-- `npm test -- src/main/storage/repositories/repositories.test.ts src/main/chatSessionStore.test.ts` -> 2 files / 31 tests passed.
-- `npm test -- src/main/workspaceRunStore.test.ts src/main/agentRunStore.test.ts src/main/agentTrajectoryStore.test.ts src/main/agentGoalStore.test.ts` -> 4 files / 25 tests passed.
-- `npm run build` -> passed, producing fresh `dist-electron` for migration script tests.
-- `npm test -- src/main/storage/migrateRoundTrip.test.ts` -> 1 file / 1 test passed.
-- `npm test -- src/main/storage/storeProxy.test.ts src/main/toolAuditLog.test.ts src/main/storage/migrateRoundTrip.test.ts src/main/storage/repositories/repositories.test.ts src/main/storage/repositories/runRepository.test.ts src/main/chatSessionStore.test.ts src/main/workspaceRunStore.test.ts src/main/agentRunStore.test.ts src/main/agentTrajectoryStore.test.ts src/main/agentGoalStore.test.ts` -> 10 files / 86 tests passed.
-- `npm test` -> 164 files / 1046 tests passed.
-- `npm run verify` -> 164 files / 1046 tests passed; build passed; agent eval 26/26; memory eval 2/2.
-- `npm run smoke:prod` -> passed; renderer rendered agent chat UI, with designed JSON fallback for the local better-sqlite3 ABI mismatch.
-- `npm run harness:check` -> passed.
-- `git diff --check` -> passed.
+- `npm test -- src/main/chatService.test.ts src/main/agentLoop.test.ts`
+  - Failed in `chat service > emits sequence-stable output parts and completes with the persisted assistant message id`.
+  - Failure: streamed events had `sequence === undefined` instead of stable incrementing values, confirming the main-process metadata/output-part wiring was missing.
 
 ## Implementation Notes
 
-- SQLite task creation now persists the JSON-built task record, preserving `id`, timestamps, enabled state, `lastRunAt`, and `nextRunAt`; repository `recordRun` and `setEnabled` keep disabled tasks unscheduled.
-- Tool audit SQLite/dual mode now persists the exact event returned from `append()`, including caller-supplied id/timestamp generation from the store.
-- Learning repository creation preserves existing reviewed-learning identity, status, timestamps, claim, evidence ids, and recommended action when migrating legacy candidates.
-- Added `readRecoverableJsonl()` and reused it in append-only run, trajectory, workspace-run, and goal-ledger readers. Bad lines are skipped and written to `*.corrupt-lines-<timestamp>.jsonl` evidence files.
-- SQLite chat search now tokenizes/scores like the JSON store and returns the original payload message id when present.
-- Migration now skips malformed JSONL lines individually and preserves full learning candidates; rollback now exports imported workspaces, tasks, tool results, learning candidates, eval candidates, promoted fixtures, artifact provenance sidecars, and multi-agent sessions.
+- Added a small main-process output assembler that:
+  - accumulates contiguous streamed text into `text` parts;
+  - accumulates tool preview argument chunks per `toolCallId`;
+  - masks preview secrets through `maskPreviewSecrets`.
+- Extended the chat status emitter so every renderer-facing stream event now carries:
+  - `sessionId`
+  - `requestId`
+  - `sequence`
+  - `turnId`
+  - `createdAt`
+  - `assistantMessageId` when known
+- Preserved legacy renderer events:
+  - `answer_delta`
+  - `thinking_delta`
+  - `tool_call_preview`
+- Added new renderer-facing `output_part` events alongside the legacy deltas.
+- Persisted assistant `outputParts` while keeping legacy `content` unchanged.
+- Added terminal `completed` / `failed` / `canceled` events with `finalMessageId` when an assistant message was persisted.
+- Kept authorization and workspace sandbox behavior unchanged.
 
-## Residual Risk
+## GREEN Evidence
 
-- Rollback reconstructs artifact provenance sidecars from `manifest.destination.path`; the migration schema does not retain the original sidecar file path separately.
-- JSONL corrupt-line evidence is best-effort: evidence write failures are intentionally swallowed so recovery reads remain available.
+- `npm test -- src/main/chatService.test.ts src/main/agentLoop.test.ts`
+  - 2 files / 78 tests passed.
+- `npm test -- src/main/chatService.test.ts -t "emits sequence-stable output parts and completes with the persisted assistant message id"`
+  - 1 test passed.
+- `npm test -- src/renderer/chatStreamReducer.test.ts`
+  - 1 file / 5 tests passed.
+
+## Verification Evidence
+
+- `npm run harness:check`
+  - passed.
+- `git diff --check`
+  - passed.
+- `npm run build`
+  - passed.
+- `npm run smoke:prod`
+  - passed; production renderer rendered agent chat UI.
+  - Existing local `better-sqlite3` ABI mismatch warning appeared and the app fell back to JSON storage during smoke, but startup verification still passed.
+- `npm run verify`
+  - failed in `src/shared/packageScripts.test.ts > keeps release gates done through v2.8.5`.
+  - Cause: repo release metadata still expects every feature to be `done` for `2.8.5`, while `P23-v2.9.0-output-rendering` is intentionally present and still `planned`.
+  - This blocker is outside Task 2’s write scope and not caused by the main-process streaming/persistence changes.
+
+## Changed Files
+
+- `src/main/chatOutputAssembler.ts`
+- `src/main/chatService.ts`
+- `src/main/chatSessionStore.ts`
+- `src/main/chatService.test.ts`
+- `src/renderer/chatStreamReducer.test.ts`
+- `.zerox/progress.md`
+
+## Concerns
+
+- Full `npm run verify` remains red because of the repo-level `v2.8.5` package/feature-list gate, not because of Task 2 behavior.
+- The user task asked not to edit renderer runtime files; only the adjacent renderer test helper was adjusted so the required shared stream metadata compiles under `build` / `smoke:prod`.

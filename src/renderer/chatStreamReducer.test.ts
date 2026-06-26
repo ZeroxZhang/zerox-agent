@@ -164,15 +164,17 @@ const activeStream = {
 
 function createStreamEvent(
   event:
-    | Omit<Extract<ChatStreamEvent, { type: "answer_delta" }>, "sessionId" | "requestId" | "createdAt">
-    | Omit<Extract<ChatStreamEvent, { type: "thinking_delta" }>, "sessionId" | "requestId" | "createdAt">
-    | Omit<Extract<ChatStreamEvent, { type: "tool_call_preview" }>, "sessionId" | "requestId" | "createdAt">
-    | Omit<Extract<ChatStreamEvent, { type: "waiting_for_input" }>, "sessionId" | "requestId" | "createdAt">,
+    | Omit<Extract<ChatStreamEvent, { type: "answer_delta" }>, "sessionId" | "requestId" | "createdAt" | "sequence" | "turnId">
+    | Omit<Extract<ChatStreamEvent, { type: "thinking_delta" }>, "sessionId" | "requestId" | "createdAt" | "sequence" | "turnId">
+    | Omit<Extract<ChatStreamEvent, { type: "tool_call_preview" }>, "sessionId" | "requestId" | "createdAt" | "sequence" | "turnId">
+    | Omit<Extract<ChatStreamEvent, { type: "waiting_for_input" }>, "sessionId" | "requestId" | "createdAt" | "sequence" | "turnId">,
 ): ChatStreamEvent {
   return {
     ...event,
     sessionId: "session_1",
     requestId: "request_1",
+    sequence: 1,
+    turnId: "turn-request_1",
     createdAt: "2026-06-23T08:00:00.000Z",
   } as ChatStreamEvent;
 }

@@ -4738,3 +4738,23 @@
   - `git push -u origin codex/v2.8.0-runtime-orchestration-memory && git push origin v2.8.1` -> pushed branch and tag.
   - `gh release create v2.8.1 ...` -> created GitHub Release `https://github.com/ZeroxZhang/zerox-agent/releases/tag/v2.8.1`.
   - `gh release view v2.8.1 --json tagName,url,isDraft,isPrerelease,assets` -> release is not draft/prerelease; uploaded `Zerox.Agent-2.8.1-arm64.dmg`, `Zerox.Agent-2.8.1-arm64-mac.zip`, both blockmaps, and `latest-mac.yml` with matching sha256 digests.
+
+## 2026-06-26 - Zerox Agent 2.9.0 Output Rendering Task 2
+
+- Request:
+  - Implement Task 2 main-process output assembly, streaming metadata, terminal events, and assistant `outputParts` persistence for the 2.9.0 output-rendering iteration.
+- Changed areas:
+  - Main process: `src/main/chatOutputAssembler.ts`, `src/main/chatService.ts`, `src/main/chatSessionStore.ts`.
+  - Focused tests: `src/main/chatService.test.ts`.
+  - Adjacent compile-only test update required by the new shared stream metadata: `src/renderer/chatStreamReducer.test.ts`.
+- RED evidence:
+  - `npm test -- src/main/chatService.test.ts src/main/agentLoop.test.ts` -> failed as expected in `emits sequence-stable output parts and completes with the persisted assistant message id` because streamed events still lacked `sequence`.
+- GREEN / verification evidence:
+  - `npm test -- src/main/chatService.test.ts src/main/agentLoop.test.ts` -> 2 files / 78 tests passed.
+  - `npm test -- src/main/chatService.test.ts -t "emits sequence-stable output parts and completes with the persisted assistant message id"` -> passed.
+  - `npm test -- src/renderer/chatStreamReducer.test.ts` -> 1 file / 5 tests passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run build` -> passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: the existing local `better-sqlite3` ABI mismatch warning still triggered the JSON fallback during smoke.
+  - `npm run verify` -> still fails in `src/shared/packageScripts.test.ts` because the repo-level `v2.8.5` release gate expects no non-`done` features while `P23-v2.9.0-output-rendering` is intentionally still `planned`.

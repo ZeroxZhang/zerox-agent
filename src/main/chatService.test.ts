@@ -167,13 +167,15 @@ describe("chat service", () => {
     );
     expect(streamEvents).toEqual(
       expect.arrayContaining([
-        {
+        expect.objectContaining({
           type: "status",
           sessionId: "chat_stream_status",
           requestId: "request_stream_1",
           status: statusEvents[0],
           createdAt: statusEvents[0].createdAt,
-        },
+          sequence: 1,
+          turnId: "turn-request_stream_1",
+        }),
       ]),
     );
   });
@@ -344,12 +346,18 @@ describe("chat service", () => {
         role: "user",
         content: "帮我整理下载文件夹",
       },
-      {
+      expect.objectContaining({
         sessionId: "persisted_session",
         role: "assistant",
         content: "我可以先检查任务和工具权限，然后运行文件整理 skill。",
         relatedMemoryIds: ["mem_downloads"],
-      },
+        outputParts: expect.arrayContaining([
+          expect.objectContaining({
+            type: "text",
+            text: "我可以先检查任务和工具权限，然后运行文件整理 skill。",
+          }),
+        ]),
+      }),
     ]);
   });
 
@@ -1623,21 +1631,23 @@ describe("chat service", () => {
     });
     expect(streamEvents).toEqual(
       expect.arrayContaining([
-        {
+        expect.objectContaining({
           type: "answer_delta",
           text: "I will inspect. ",
           sessionId: "persisted_session",
           requestId: "request_model_stream_1",
           createdAt: "2026-06-23T08:00:00.000Z",
-        },
-        {
+          turnId: "turn-request_model_stream_1",
+        }),
+        expect.objectContaining({
           type: "thinking_delta",
           text: "Checking available tools.",
           sessionId: "persisted_session",
           requestId: "request_model_stream_1",
           createdAt: "2026-06-23T08:00:00.000Z",
-        },
-        {
+          turnId: "turn-request_model_stream_1",
+        }),
+        expect.objectContaining({
           type: "tool_call_preview",
           toolCallId: "preview_call_1",
           toolName: "file_list",
@@ -1645,15 +1655,143 @@ describe("chat service", () => {
           sessionId: "persisted_session",
           requestId: "request_model_stream_1",
           createdAt: "2026-06-23T08:00:00.000Z",
-        },
+          turnId: "turn-request_model_stream_1",
+        }),
       ]),
     );
     expect(chatMessages.filter((message) => message.role === "assistant")).toEqual([
       expect.objectContaining({
         role: "assistant",
         content: expect.stringContaining("Final reply."),
+        outputParts: expect.arrayContaining([
+          expect.objectContaining({ type: "text" }),
+          expect.objectContaining({
+            type: "tool_call",
+            toolCallId: "preview_call_1",
+          }),
+        ]),
       }),
     ]);
+  });
+
+  it("emits sequence-stable output parts and completes with the persisted assistant message id", async () => {
+    const streamEvents: ChatStreamEvent[] = [];
+    const chatMessages: AppendChatMessageInput[] = [];
+    const chatSessionStore = createChatSessionStore(chatMessages);
+    let streamCalls = 0;
+    const chatClient: ChatClient & StreamingChatClient = {
+      async complete() {
+        throw new Error("non-streaming complete should not be used");
+      },
+      async *streamComplete() {
+        streamCalls += 1;
+        if (streamCalls === 1) {
+          yield { type: "content_delta", text: "I will inspect. " };
+          yield {
+            type: "tool_call_delta",
+            id: "preview_call_1",
+            name: "shell_exec",
+            arguments: '{"command":"npm test","apiKey":"secret"}',
+          };
+          yield { type: "done", finishReason: "tool_calls" };
+          return;
+        }
+
+        yield { type: "content_delta", text: "Final reply." };
+        yield { type: "done", finishReason: "stop" };
+      },
+    };
+    const service = createChatService({
+      chatClient,
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore,
+      toolExecutor: createToolExecutor(),
+      createId: () => "chat_stream_parts",
+      now: () => new Date("2026-06-23T08:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage(
+      {
+        requestId: "request_output_parts_1",
+        message: "stream output parts",
+      },
+      {
+        onStreamEvent(event) {
+          streamEvents.push(event);
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      sessionId: "persisted_session",
+      reply: expect.stringContaining("Final reply."),
+    });
+    expect(streamEvents.map((event) => event.sequence)).toEqual(
+      streamEvents.map((_, index) => index + 1),
+    );
+    expect(new Set(streamEvents.map((event) => event.turnId))).toEqual(
+      new Set(["turn-request_output_parts_1"]),
+    );
+    expect(
+      streamEvents.filter(
+        (event): event is Extract<ChatStreamEvent, { type: "output_part" }> =>
+          event.type === "output_part",
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "output_part",
+          part: expect.objectContaining({
+            type: "text",
+          }),
+        }),
+        expect.objectContaining({
+          type: "output_part",
+          part: expect.objectContaining({
+            type: "tool_call",
+            toolCallId: "preview_call_1",
+            toolName: "shell_exec",
+            argsPreview: {
+              command: "npm test",
+              apiKey: "****",
+            },
+          }),
+        }),
+      ]),
+    );
+    const terminalEvents = streamEvents.filter((event) =>
+      ["completed", "failed", "canceled"].includes(event.type),
+    );
+    expect(terminalEvents).toEqual([
+      expect.objectContaining({
+        type: "completed",
+        finalMessageId: "message_2",
+        assistantMessageId: "message_2",
+      }),
+    ]);
+
+    const persistedSession = await chatSessionStore.get("persisted_session");
+    expect(persistedSession?.messages.at(-1)).toEqual(
+      expect.objectContaining({
+        id: "message_2",
+        role: "assistant",
+        content: expect.stringContaining("Final reply."),
+        outputParts: expect.arrayContaining([
+          expect.objectContaining({ type: "text" }),
+          expect.objectContaining({
+            type: "tool_call",
+            toolCallId: "preview_call_1",
+            toolName: "shell_exec",
+            argsPreview: {
+              command: "npm test",
+              apiKey: "****",
+            },
+          }),
+        ]),
+      }),
+    );
   });
 
   it("emits indexed tool previews with a usable fallback id for idless chunks", async () => {
@@ -1697,7 +1835,7 @@ describe("chat service", () => {
 
     expect(streamEvents).toEqual(
       expect.arrayContaining([
-        {
+        expect.objectContaining({
           type: "tool_call_preview",
           toolCallId: "index:1",
           index: 1,
@@ -1705,7 +1843,8 @@ describe("chat service", () => {
           sessionId: "persisted_session",
           requestId: "request_indexed_preview",
           createdAt: "2026-06-23T08:00:00.000Z",
-        },
+          turnId: "turn-request_indexed_preview",
+        }),
       ]),
     );
     const preview = streamEvents.find((event) => event.type === "tool_call_preview");
@@ -3898,12 +4037,19 @@ describe("chat service", () => {
         role: "user",
         content: "每天 9 点整理文件",
       },
-      {
+      expect.objectContaining({
         sessionId: "persisted_session",
         role: "assistant",
         content:
           "我可以创建这个定时任务。你想让我整理哪个文件夹？例如：下载、桌面、文档或项目。",
-      },
+        outputParts: expect.arrayContaining([
+          expect.objectContaining({
+            type: "text",
+            text:
+              "我可以创建这个定时任务。你想让我整理哪个文件夹？例如：下载、桌面、文档或项目。",
+          }),
+        ]),
+      }),
     ]);
   });
 });
@@ -4002,10 +4148,16 @@ function createChatSessionStore(
     async appendMessage(input: AppendChatMessageInput) {
       messages.push(input);
       const sessionId = input.sessionId ?? "persisted_session";
+      const inputWithOutputParts = input as AppendChatMessageInput & {
+        outputParts?: ChatSessionRecord["messages"][number]["outputParts"];
+      };
       const message = {
         id: `message_${messages.length}`,
         role: input.role,
         content: input.content,
+        ...(inputWithOutputParts.outputParts
+          ? { outputParts: inputWithOutputParts.outputParts }
+          : {}),
         createdAt: "2026-06-06T08:00:00.000Z",
       } as const;
       const session = buildSession(sessionId, input.content, {
