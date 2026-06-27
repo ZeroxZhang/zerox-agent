@@ -1948,6 +1948,43 @@
         "BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v2.9.3' \"release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent\"",
         "git diff --check"
       ]
+    },
+    {
+      "id": "P26-v2.9.4-scheduled-task-automation-release",
+      "priority": 56,
+      "status": "done",
+      "title": "v2.9.4 Scheduled task automation semantics release",
+      "files": [
+        "package.json",
+        "package-lock.json",
+        "README.md",
+        "src/shared/packageScripts.test.ts",
+        "src/shared/readme.test.ts",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md",
+        "src/shared/scheduledTasks.ts",
+        "src/main/agentRuntimeEngine.ts",
+        "src/main/agentRunnerService.ts",
+        "src/renderer/components/ScheduledTasksPanel.tsx"
+      ],
+      "definitionOfDone": [
+        "package metadata reports version 2.9.4 in package.json and package-lock.json",
+        "README documents v2.9.4 scheduled task automation semantics in English and Chinese",
+        "Scheduled task creation supports prompt-only automation without requiring a skill selector",
+        "daily, workday, weekly, and interval schedules are available while legacy manual and cron records stay readable",
+        "macOS DMG, ZIP, blockmap, and latest-mac.yml artifacts are regenerated for v2.9.4",
+        "GitHub Release v2.9.4 is published with the regenerated macOS assets",
+        "main branch and v2.9.4 tag are pushed to GitHub"
+      ],
+      "verification": [
+        "npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts src/shared/scheduledTasks.test.ts src/shared/agentIntent.test.ts src/main/agentRunnerService.test.ts src/main/agentRuntimeEngine.test.ts src/renderer/demoAgentData.test.ts src/shared/navigation.test.ts",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "npm run dist:mac",
+        "BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v2.9.4' \"release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent\"",
+        "git diff --check"
+      ]
     }
   ]
 }

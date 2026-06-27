@@ -5511,3 +5511,27 @@
   - `release/Zerox Agent-2.9.3-arm64.dmg.blockmap` (132K, sha256 `3db5ff44fd56c401b42b53660c7925fccfda3223ada1e963acd05293f529bdcf`)
   - `release/Zerox Agent-2.9.3-arm64-mac.zip.blockmap` (335K, sha256 `26f3c92374b8eb20a11be677004f30363553abe9f24671456052d644c2f94f33`)
   - `release/latest-mac.yml` (517B, sha256 `621ca054b4ec0ed21c7a2a0617975f818da9bd12f5d871edbb751fd6d54ca886`)
+
+## 2026-06-27 - Zerox Agent v2.9.4 Scheduled Task Automation Release
+
+- Request:
+  - Repackage the confirmed scheduled task automation semantics work as `v2.9.4`, push it, and publish a fresh GitHub Release so the release timestamp reflects the new version instead of editing the older `v2.9.3` release.
+- Release/version work:
+  - Version bumped to `2.9.4` in `package.json` and `package-lock.json`.
+  - README now documents v2.9.4 in English and Chinese, including prompt-first scheduled tasks, optional skills, daily/workday/weekly/interval scheduling, legacy manual/Cron readability, empty default permissions, and automatic-execution risk copy.
+  - `.zerox/feature_list.json` includes `P26-v2.9.4-scheduled-task-automation-release` as done.
+- Verification evidence:
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts src/shared/scheduledTasks.test.ts src/shared/agentIntent.test.ts src/main/agentRunnerService.test.ts src/main/agentRuntimeEngine.test.ts src/renderer/demoAgentData.test.ts src/shared/navigation.test.ts` -> 8 files / 83 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> 183 files / 1268 tests passed, build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `better-sqlite3` ABI mismatch triggered the existing JSON fallback during this un-packaged smoke.
+  - `npm run dist:mac` -> passed; generated unsigned macOS arm64 DMG, ZIP, blockmaps, and `latest-mac.yml` for v2.9.4.
+  - Packaged app smoke: `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v2.9.4' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+  - `git diff --check` -> passed.
+- Release artifact evidence:
+  - `release/latest-mac.yml` reports `version: 2.9.4` and update URLs `Zerox-Agent-2.9.4-arm64-mac.zip` / `Zerox-Agent-2.9.4-arm64.dmg`.
+  - `release/Zerox Agent-2.9.4-arm64.dmg` (122M, sha256 `15fb1f1539ee370bd17c1b8806494dd5fdf7af3fa95f0a28eafe384f2945cae1`)
+  - `release/Zerox Agent-2.9.4-arm64-mac.zip` (333M, sha256 `6840f7167a6fbed5700d9de59eafb176ec90b197498654b805b27aaca0abc86c`)
+  - `release/Zerox Agent-2.9.4-arm64.dmg.blockmap` (132K, sha256 `95f2e797cb2e57897daff3a252e0f2294b37f42bb691da9025d1526f08eef8ed`)
+  - `release/Zerox Agent-2.9.4-arm64-mac.zip.blockmap` (335K, sha256 `763f6ae815797b9589882f1682c28fa5d98180c2b646d94e7500f3c1102d3b4f`)
+  - `release/latest-mac.yml` (517B, sha256 `913412773ec4c6458687fb6218aef4cdec07c0d41e7adef2516164916ac8aff4`)
