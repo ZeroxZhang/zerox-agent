@@ -35,13 +35,19 @@ type RunsStatus =
   | { kind: "error"; message: string }
   | { kind: "loading"; message: string };
 
+type SelectedRunSelection = {
+  id: string;
+  source: "active" | "history";
+};
+
 export function RunsPanel() {
   const [runs, setRuns] = useState<AgentRunRecord[]>([]);
   const [activeExecutions, setActiveExecutions] = useState<
     AgentExecutionCheckpoint[]
   >([]);
   const [evalCandidates, setEvalCandidates] = useState<AgentEvalCandidate[]>([]);
-  const [selectedRunId, setSelectedRunId] = useState("");
+  const [selectedRunSelection, setSelectedRunSelection] =
+    useState<SelectedRunSelection | null>(null);
   const [selectedEventId, setSelectedEventId] = useState("");
   const [activeRunsTab, setActiveRunsTab] = useState<
     "action" | "history" | "details"
@@ -59,10 +65,10 @@ export function RunsPanel() {
       setRuns(demoRuns);
       setEvalCandidates([]);
       setKernelEvents(createDemoKernelEvents());
-      setSelectedRunId((currentRunId) =>
-        !selectFirstRun && demoRuns.some((run) => run.id === currentRunId)
-          ? currentRunId
-          : "",
+      setSelectedRunSelection((currentSelection) =>
+        selectFirstRun
+          ? null
+          : resolveSelectedRunSelection(currentSelection, demoRuns, []),
       );
       setStatus({
         kind: "idle",
@@ -80,19 +86,15 @@ export function RunsPanel() {
         setRuns(loadedRuns);
         setActiveExecutions(loadedExecutions);
         setEvalCandidates(loadedEvalCandidates);
-        setSelectedRunId((currentRunId) => {
-          if (
-            !selectFirstRun &&
-            currentRunId &&
-            (loadedRuns.some((run) => run.id === currentRunId) ||
-              loadedExecutions.some(
-                (execution) => execution.runId === currentRunId,
-              ))
-          ) {
-            return currentRunId;
-          }
-          return "";
-        });
+        setSelectedRunSelection((currentSelection) =>
+          selectFirstRun
+            ? null
+            : resolveSelectedRunSelection(
+                currentSelection,
+                loadedRuns,
+                loadedExecutions,
+              ),
+        );
         setStatus({
           kind: "idle",
           message:
@@ -154,13 +156,19 @@ export function RunsPanel() {
   );
   const selectedActiveExecution = useMemo(
     () =>
-      activeExecutions.find((execution) => execution.runId === selectedRunId) ??
-      null,
-    [activeExecutions, selectedRunId],
+      selectedRunSelection?.source === "active"
+        ? activeExecutions.find(
+            (execution) => execution.runId === selectedRunSelection.id,
+          ) ?? null
+        : null,
+    [activeExecutions, selectedRunSelection],
   );
   const selectedPersistedRun = useMemo(
-    () => runs.find((run) => run.id === selectedRunId) ?? null,
-    [runs, selectedRunId],
+    () =>
+      selectedRunSelection?.source === "history"
+        ? runs.find((run) => run.id === selectedRunSelection.id) ?? null
+        : null,
+    [runs, selectedRunSelection],
   );
   const selectedRunRecord =
     selectedActiveExecution ??
@@ -191,8 +199,8 @@ export function RunsPanel() {
     [sortedRuns],
   );
   const activeExecutionItems = useMemo(
-    () => activeExecutions.slice(0, 4).map(toRunRecordListItem),
-    [activeExecutions],
+    () => sortedActiveExecutions.slice(0, 4).map(toRunRecordListItem),
+    [sortedActiveExecutions],
   );
   const timeline = useMemo(
     () => (selectedRun ? buildRunTimeline(selectedRun) : []),
@@ -267,7 +275,7 @@ export function RunsPanel() {
     }
 
     setRuns((currentRuns) => [result.run, ...currentRuns]);
-    setSelectedRunId(result.run.id);
+    setSelectedRunSelection({ id: result.run.id, source: "history" });
     setStatus({
       kind: result.run.status === "succeeded" ? "idle" : "error",
       message: `重试完成：${translateRunStatus(result.run.status)}。`,
@@ -301,7 +309,7 @@ export function RunsPanel() {
     setActiveExecutions((currentExecutions) =>
       currentExecutions.filter((item) => item.runId !== execution.runId),
     );
-    setSelectedRunId(result.run.id);
+    setSelectedRunSelection({ id: result.run.id, source: "history" });
     setStatus({
       kind: result.run.status === "succeeded" ? "idle" : "error",
       message: `恢复完成：${translateRunStatus(result.run.status)}。`,
@@ -590,10 +598,19 @@ export function RunsPanel() {
                   {activeExecutionItems.map((item) => (
                     <button
                       className={`task-record-row is-active-execution ${
-                        item.id === selectedRecordId ? "is-selected" : ""
+                        selectedRunRecord &&
+                        !isPersistedRunRecord(selectedRunRecord) &&
+                        item.id === selectedRecordId
+                          ? "is-selected"
+                          : ""
                       }`}
                       key={`active-${item.id}`}
-                      onClick={() => setSelectedRunId(item.id)}
+                      onClick={() =>
+                        setSelectedRunSelection({
+                          id: item.id,
+                          source: "active",
+                        })
+                      }
                       type="button"
                     >
                       <span className={`task-record-status is-${item.status.tone}`}>
@@ -609,10 +626,19 @@ export function RunsPanel() {
                 {recentRunItems.map((item) => (
                   <button
                     className={`task-record-row ${
-                      item.id === selectedRecordId ? "is-selected" : ""
+                      selectedRunRecord &&
+                      isPersistedRunRecord(selectedRunRecord) &&
+                      item.id === selectedRecordId
+                        ? "is-selected"
+                        : ""
                     }`}
                     key={item.id}
-                    onClick={() => setSelectedRunId(item.id)}
+                    onClick={() =>
+                      setSelectedRunSelection({
+                        id: item.id,
+                        source: "history",
+                      })
+                    }
                     type="button"
                   >
                     <span className={`task-record-status is-${item.status.tone}`}>
@@ -732,6 +758,35 @@ function navigateToHash(sectionId: "chat" | "scheduled-tasks" | "settings") {
   }
 
   window.location.hash = nextHash;
+}
+
+function resolveSelectedRunSelection(
+  selection: SelectedRunSelection | null,
+  runs: AgentRunRecord[],
+  activeExecutions: AgentExecutionCheckpoint[],
+): SelectedRunSelection | null {
+  if (!selection) {
+    return null;
+  }
+
+  const activeExists = activeExecutions.some(
+    (execution) => execution.runId === selection.id,
+  );
+  const historyExists = runs.some((run) => run.id === selection.id);
+
+  if (selection.source === "active") {
+    if (activeExists) {
+      return selection;
+    }
+
+    return historyExists ? { id: selection.id, source: "history" } : null;
+  }
+
+  if (historyExists) {
+    return selection;
+  }
+
+  return activeExists ? { id: selection.id, source: "active" } : null;
 }
 
 function isPersistedRunRecord(
