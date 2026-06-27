@@ -51,34 +51,44 @@ export function RunTrajectoryPanel(props: {
 
   if (!props.events.length) {
     return (
-      <section className="trajectory-panel" aria-label="运行轨迹">
-        <span className="inspector-label">轨迹</span>
-        <p>这条运行还没有可查看的轨迹事件。</p>
+      <section className="trajectory-panel" aria-label="证据事件">
+        <span className="inspector-label">证据事件</span>
+        <p>这次任务没有可查看的详细证据，可能来自旧版本或预览数据。</p>
       </section>
     );
   }
 
   return (
-    <section className="trajectory-panel" aria-label="运行轨迹">
+    <section className="trajectory-panel" aria-label="证据事件">
       <div className="section-heading">
-        <span>轨迹</span>
+        <span>证据事件</span>
         <small>{props.events.length} 个事件</small>
       </div>
       {insights.length ? (
-        <div className="trajectory-insight-list">
-          {insights.map((insight) => (
-            <button
-              className={`trajectory-insight is-${insight.tone}`}
-              key={insight.eventId}
-              onClick={() => setSelectedEventId(insight.eventId)}
-              type="button"
-            >
-              <strong>{insight.title}</strong>
-              <span>{insight.detail}</span>
-            </button>
-          ))}
-        </div>
+        <>
+          <div className="section-heading">
+            <span>证据摘要</span>
+            <small>{insights.length} 条摘要</small>
+          </div>
+          <div className="trajectory-insight-list">
+            {insights.map((insight) => (
+              <button
+                className={`trajectory-insight is-${insight.tone}`}
+                key={insight.eventId}
+                onClick={() => setSelectedEventId(insight.eventId)}
+                type="button"
+              >
+                <strong>{insight.title}</strong>
+                <span>{insight.detail}</span>
+              </button>
+            ))}
+          </div>
+        </>
       ) : null}
+      <div className="section-heading">
+        <span>原始证据</span>
+        <small>{props.events.length} 条记录</small>
+      </div>
       <div className="trajectory-event-list">
         {props.events.map((event) => (
           <button
@@ -111,7 +121,7 @@ export function RunTrajectoryPanel(props: {
           {resultRef ? (
             <div className="tool-result-ref-viewer">
               <div className="section-heading">
-                <span>工具结果引用</span>
+                <span>完整工具结果</span>
                 <small>{resultRef}</small>
               </div>
               <button
@@ -120,7 +130,7 @@ export function RunTrajectoryPanel(props: {
                 onClick={() => void handleLoadRef()}
                 type="button"
               >
-                {loadingRef ? "正在加载..." : "加载完整结果"}
+                {loadingRef ? "正在加载..." : "查看完整结果"}
               </button>
               {loadedRef ? (
                 loadedRef.ok ? (
@@ -132,15 +142,15 @@ export function RunTrajectoryPanel(props: {
                       </div>
                       <div>
                         <dt>状态</dt>
-                        <dd>{String(loadedRef.summary.ok)}</dd>
+                        <dd>{loadedRef.summary.ok ? "成功" : "失败"}</dd>
                       </div>
                       <div>
-                        <dt>字符</dt>
+                        <dt>字符数</dt>
                         <dd>{loadedRef.summary.originalChars}</dd>
                       </div>
                       <div>
                         <dt>字段</dt>
-                        <dd>{loadedRef.summary.resultKeys.join(", ") || "none"}</dd>
+                        <dd>{loadedRef.summary.resultKeys.join(", ") || "无"}</dd>
                       </div>
                     </dl>
                     <pre className="payload-preview">{loadedRef.content}</pre>

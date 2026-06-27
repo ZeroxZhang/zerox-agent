@@ -10,11 +10,17 @@ import {
 import { getDefaultTaskPermissionPolicy } from "./toolPermissions";
 
 describe("scheduled task schedules", () => {
-  it("describes manual, daily, interval, and cron schedules", () => {
+  it("describes automatic schedules while keeping legacy schedules readable", () => {
     expect(describeSchedule({ kind: "manual" })).toBe("手动运行");
     expect(describeSchedule({ kind: "daily", time: "09:30" })).toBe(
       "每天 09:30",
     );
+    expect(describeSchedule({ kind: "weekdays", time: "09:30" })).toBe(
+      "工作日 09:30",
+    );
+    expect(
+      describeSchedule({ kind: "weekly", weekday: 1, time: "09:30" }),
+    ).toBe("每周一 09:30");
     expect(
       describeSchedule({ kind: "interval", every: 45, unit: "minutes" }),
     ).toBe("每 45 分钟");
@@ -42,6 +48,31 @@ describe("scheduled task schedules", () => {
     expect(computeNextRunAt({ kind: "daily", time: "09:00" }, noon)).toBe(
       new Date(2026, 5, 6, 9, 0, 0).toISOString(),
     );
+  });
+
+  it("computes the next workday run", () => {
+    expect(
+      computeNextRunAt(
+        { kind: "weekdays", time: "09:00" },
+        new Date(2026, 5, 5, 12, 0, 0),
+      ),
+    ).toBe(new Date(2026, 5, 8, 9, 0, 0).toISOString());
+  });
+
+  it("computes the next weekly run", () => {
+    expect(
+      computeNextRunAt(
+        { kind: "weekly", weekday: 1, time: "09:00" },
+        new Date(2026, 5, 5, 12, 0, 0),
+      ),
+    ).toBe(new Date(2026, 5, 8, 9, 0, 0).toISOString());
+
+    expect(
+      computeNextRunAt(
+        { kind: "weekly", weekday: 5, time: "18:00" },
+        new Date(2026, 5, 5, 12, 0, 0),
+      ),
+    ).toBe(new Date(2026, 5, 5, 18, 0, 0).toISOString());
   });
 
   it("computes the next cron run", () => {
@@ -76,18 +107,18 @@ describe("scheduled task validation", () => {
     });
   });
 
-  it("normalizes names, skill names, cron expressions, and input objects", () => {
+  it("normalizes names, optional skill names, cron expressions, and input objects", () => {
     expect(
       normalizeScheduledTaskInput({
         ...validInput,
         name: "  Organize downloads  ",
-        skillName: "  local-file-organizer  ",
+        skillName: "   ",
         schedule: { kind: "cron", expression: "  */30 * * * *  " },
         input: null as unknown as Record<string, unknown>,
       }),
     ).toEqual({
       name: "Organize downloads",
-      skillName: "local-file-organizer",
+      skillName: "",
       enabled: true,
       schedule: { kind: "cron", expression: "*/30 * * * *" },
       input: {},
@@ -108,6 +139,20 @@ describe("scheduled task validation", () => {
         schedule: { kind: "daily", time: "25:99" },
       }).errors.schedule,
     ).toContain("HH:mm");
+
+    expect(
+      validateScheduledTaskInput({
+        ...validInput,
+        schedule: { kind: "weekdays", time: "25:99" },
+      }).errors.schedule,
+    ).toContain("HH:mm");
+
+    expect(
+      validateScheduledTaskInput({
+        ...validInput,
+        schedule: { kind: "weekly", weekday: 8, time: "09:00" },
+      }).errors.schedule,
+    ).toContain("周一到周日");
 
     expect(
       validateScheduledTaskInput({
@@ -139,7 +184,7 @@ describe("scheduled task validation", () => {
 });
 
 describe("natural language schedule drafts", () => {
-  it("drafts interval, daily, and cron schedules from simple text", () => {
+  it("drafts interval, daily, workday, and weekly schedules from simple text", () => {
     expect(draftScheduleFromText("every 30 minutes")).toEqual({
       kind: "interval",
       every: 30,
@@ -149,9 +194,14 @@ describe("natural language schedule drafts", () => {
       kind: "daily",
       time: "18:45",
     });
-    expect(draftScheduleFromText("cron: 0 9 * * 1-5")).toEqual({
-      kind: "cron",
-      expression: "0 9 * * 1-5",
+    expect(draftScheduleFromText("weekdays at 09:15")).toEqual({
+      kind: "weekdays",
+      time: "09:15",
+    });
+    expect(draftScheduleFromText("weekly on monday at 10:30")).toEqual({
+      kind: "weekly",
+      weekday: 1,
+      time: "10:30",
     });
   });
 
@@ -163,6 +213,15 @@ describe("natural language schedule drafts", () => {
     expect(draftScheduleFromText("每日 09:30 运行一次")).toEqual({
       kind: "daily",
       time: "09:30",
+    });
+    expect(draftScheduleFromText("工作日 09:30 运行一次")).toEqual({
+      kind: "weekdays",
+      time: "09:30",
+    });
+    expect(draftScheduleFromText("每周一 10:30 汇总一次")).toEqual({
+      kind: "weekly",
+      weekday: 1,
+      time: "10:30",
     });
     expect(draftScheduleFromText("每 30 分钟检查一次")).toEqual({
       kind: "interval",

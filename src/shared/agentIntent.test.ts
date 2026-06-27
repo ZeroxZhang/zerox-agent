@@ -108,7 +108,7 @@ describe("agent intent router", () => {
 
     expect(input).toEqual({
       name: "整理桌面文件夹",
-      skillName: "local-file-organizer",
+      skillName: "",
       enabled: true,
       schedule: { kind: "daily", time: "09:00" },
       input: { targetDir: "~/Desktop", reportName: "agent-report.md" },

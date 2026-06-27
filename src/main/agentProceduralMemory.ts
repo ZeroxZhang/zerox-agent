@@ -9,8 +9,8 @@ export type ProceduralMemoryStore = Partial<Pick<MemoryStore, "search">>;
 export async function buildProceduralMemoryPromptContext(options: {
   memoryStore?: ProceduralMemoryStore;
   taskName: string;
-  skillName: string;
-  skillDescription: string;
+  skillName?: string;
+  skillDescription?: string;
   limit?: number;
 }): Promise<string | null> {
   const memoryStore = options.memoryStore;

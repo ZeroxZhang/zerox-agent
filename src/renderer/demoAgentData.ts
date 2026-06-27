@@ -143,9 +143,9 @@ export const demoTasks: ScheduledTask[] = [
   {
     id: "demo_task_1",
     name: "整理下载文件夹",
-    skillName: "local-file-organizer",
+    skillName: "",
     enabled: true,
-    schedule: { kind: "manual" },
+    schedule: { kind: "daily", time: "09:00" },
     input: { targetDir: "~/Downloads", reportName: "agent-report.md" },
     permissions: {
       files: { read: ["~/Downloads"], write: ["~/Downloads"] },
@@ -156,7 +156,7 @@ export const demoTasks: ScheduledTask[] = [
     createdAt: "2026-06-05T08:00:00.000Z",
     updatedAt: "2026-06-05T08:00:00.000Z",
     lastRunAt: "2026-06-05T08:00:00.000Z",
-    nextRunAt: null,
+    nextRunAt: "2026-06-06T09:00:00.000Z",
   },
 ];
 

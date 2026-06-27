@@ -5001,18 +5001,18 @@ describe("chat service", () => {
     expect(result).toMatchObject({
       ok: true,
       reply:
-        "已创建任务“整理下载文件夹”，调度：每天 09:00。你可以在“任务”页检查权限后运行。",
+        "已创建任务“整理下载文件夹”，调度：每天 09:00。保存后会按计划自动运行；你可以在“任务”页暂停或调整权限。",
       createdTask: {
         id: "created_task",
         name: "整理下载文件夹",
-        skillName: "local-file-organizer",
+        skillName: "",
         schedule: { kind: "daily", time: "09:00" },
       },
     });
     expect(createdInputs).toEqual([
       {
         name: "整理下载文件夹",
-        skillName: "local-file-organizer",
+        skillName: "",
         enabled: true,
         schedule: { kind: "daily", time: "09:00" },
         input: { targetDir: "~/Downloads", reportName: "agent-report.md" },

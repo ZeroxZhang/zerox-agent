@@ -85,6 +85,52 @@ describe("agent runner service", () => {
     )).toBe(true);
   });
 
+  it("runs a prompt-only scheduled task without resolving a skill", async () => {
+    let resolveSkillCalled = false;
+    let completionCalls = 0;
+    const service = createAgentRunnerService({
+      taskStore: createTaskStore(
+        createTask({
+          skillName: "",
+          input: {
+            request: "每天检查下载目录，把结果写入本地报告；权限不足时跳过。",
+          },
+        }),
+      ),
+      runStore: createMemoryRunStore(),
+      resolveSkill: async () => {
+        resolveSkillCalled = true;
+        return null;
+      },
+      chatClient: {
+        async complete() {
+          completionCalls += 1;
+          return completionCalls === 1
+            ? finalResponse("no explicit plan")
+            : finalResponse("Prompt task complete");
+        },
+      },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      createId: () => "run_prompt_task",
+      now: () => new Date("2026-06-05T08:00:00.000Z"),
+    });
+
+    const result = await service.runTask("task_123");
+
+    expect(resolveSkillCalled).toBe(false);
+    expect(result).toMatchObject({
+      ok: true,
+      run: {
+        id: "run_prompt_task",
+        skillName: "prompt-task",
+        status: "succeeded",
+        summary: "Prompt task complete",
+      },
+    });
+  });
+
   it("writes episodic memory after a successful run", async () => {
     const memoryWrites: MemoryInput[] = [];
     const service = createAgentRunnerService({
@@ -561,7 +607,7 @@ describe("agent runner service", () => {
   });
 });
 
-function createTask(): ScheduledTask {
+function createTask(partial: Partial<ScheduledTask> = {}): ScheduledTask {
   return {
     id: "task_123",
     name: "Organize Downloads",
@@ -574,6 +620,7 @@ function createTask(): ScheduledTask {
     updatedAt: "2026-06-05T08:00:00.000Z",
     lastRunAt: null,
     nextRunAt: null,
+    ...partial,
   };
 }
 

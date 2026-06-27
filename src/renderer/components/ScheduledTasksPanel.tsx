@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentRunRecord } from "../../shared/agentRuns";
 import {
   describeSchedule,
@@ -8,7 +8,6 @@ import {
   type ScheduledTaskValidationErrors,
   type TaskSchedule,
 } from "../../shared/scheduledTasks";
-import type { SkillDiscoveryResult } from "../../shared/skills";
 import { buildToolSafetySummary } from "../../shared/toolSafetySummary";
 import type { TaskPermissionPolicy } from "../../shared/toolPermissions";
 import { demoRuns, demoTasks } from "../demoAgentData";
@@ -20,19 +19,12 @@ type TaskStatus =
   | { kind: "saved"; message: string }
   | { kind: "error"; message: string };
 
-const emptySkillResult: SkillDiscoveryResult = {
-  skills: [],
-  errors: [],
-};
-
-const defaultInputJson = `{
-  "targetDir": "~/Downloads"
-}`;
+const defaultInputJson = "{}";
 
 const defaultPermissionPolicy: TaskPermissionPolicy = {
   files: {
-    read: ["~/Downloads"],
-    write: ["~/Downloads"],
+    read: [],
+    write: [],
   },
   web: {
     search: false,
@@ -48,13 +40,16 @@ const defaultPermissionPolicy: TaskPermissionPolicy = {
 };
 
 export function ScheduledTasksPanel() {
-  const [skills, setSkills] = useState<SkillDiscoveryResult>(emptySkillResult);
   const [tasks, setTasks] = useState<ScheduledTask[]>([]);
   const [runs, setRuns] = useState<AgentRunRecord[]>([]);
   const [runningTaskId, setRunningTaskId] = useState<string | null>(null);
   const [updatingTaskId, setUpdatingTaskId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [createMenuOpen, setCreateMenuOpen] = useState(true);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [isSubmittingCreateTask, setIsSubmittingCreateTask] = useState(false);
   const [draftText, setDraftText] = useState("");
+  const [scheduleDraftText, setScheduleDraftText] = useState("");
   const [inputJson, setInputJson] = useState(defaultInputJson);
   const [permissionPolicy, setPermissionPolicy] =
     useState<TaskPermissionPolicy>(defaultPermissionPolicy);
@@ -63,11 +58,18 @@ export function ScheduledTasksPanel() {
     kind: "idle",
     message: "还没有保存定时任务。",
   });
+  const [createStatus, setCreateStatus] = useState<TaskStatus>({
+    kind: "idle",
+    message: "",
+  });
+  const createDialogRef = useRef<HTMLElement>(null);
+  const createDialogHeadingRef = useRef<HTMLHeadingElement>(null);
+  const isSubmittingCreateTaskRef = useRef(false);
   const [form, setForm] = useState<ScheduledTaskInput>({
     name: "整理下载文件夹",
     skillName: "",
     enabled: true,
-    schedule: { kind: "manual" },
+    schedule: { kind: "daily", time: "09:00" },
     input: {},
   });
 
@@ -84,19 +86,12 @@ export function ScheduledTasksPanel() {
     }
 
     Promise.all([
-      window.buildingAgent.listSkills(),
       window.buildingAgent.listScheduledTasks(),
       window.buildingAgent.listAgentRuns(),
     ])
-      .then(([skillResult, loadedTasks, loadedRuns]) => {
-        setSkills(skillResult);
+      .then(([loadedTasks, loadedRuns]) => {
         setTasks(loadedTasks);
         setRuns(loadedRuns);
-        setForm((current) => ({
-          ...current,
-          skillName:
-            current.skillName || skillResult.skills[0]?.manifest.name || "",
-        }));
         setStatus({
           kind: "idle",
           message: loadedTasks.length
@@ -118,6 +113,87 @@ export function ScheduledTasksPanel() {
       });
   }, []);
 
+  useEffect(() => {
+    isSubmittingCreateTaskRef.current = isSubmittingCreateTask;
+  }, [isSubmittingCreateTask]);
+
+  useEffect(() => {
+    if (!createDialogOpen) {
+      return;
+    }
+
+    const previouslyFocused =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+
+    createDialogHeadingRef.current?.focus();
+
+    function handleDialogKeyDown(event: KeyboardEvent) {
+      const dialog = createDialogRef.current;
+      if (!dialog) {
+        return;
+      }
+
+      if (event.key === "Escape") {
+        if (!isSubmittingCreateTaskRef.current) {
+          event.preventDefault();
+          setCreateDialogOpen(false);
+        }
+        return;
+      }
+
+      if (event.key !== "Tab") {
+        return;
+      }
+
+      const focusableElements = Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          [
+            "button:not([disabled])",
+            "input:not([disabled])",
+            "select:not([disabled])",
+            "textarea:not([disabled])",
+            "summary",
+            "[href]",
+            '[tabindex]:not([tabindex="-1"])',
+          ].join(","),
+        ),
+      ).filter((element) => element.offsetParent !== null);
+
+      if (!focusableElements.length) {
+        return;
+      }
+
+      const firstFocusable = focusableElements[0];
+      const lastFocusable = focusableElements[focusableElements.length - 1];
+      const activeElement =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null;
+
+      if (event.shiftKey) {
+        if (!activeElement || activeElement === firstFocusable) {
+          event.preventDefault();
+          lastFocusable.focus();
+        }
+        return;
+      }
+
+      if (activeElement === lastFocusable) {
+        event.preventDefault();
+        firstFocusable.focus();
+      }
+    }
+
+    document.addEventListener("keydown", handleDialogKeyDown);
+
+    return () => {
+      document.removeEventListener("keydown", handleDialogKeyDown);
+      previouslyFocused?.focus();
+    };
+  }, [createDialogOpen]);
+
   async function refreshTaskList() {
     if (!window.buildingAgent) {
       return;
@@ -132,8 +208,10 @@ export function ScheduledTasksPanel() {
       return "正在加载";
     }
 
-    return `${tasks.length} 个任务`;
-  }, [loading, tasks.length]);
+    const enabledCount = tasks.filter((task) => task.enabled).length;
+
+    return `${tasks.length} 个任务 · ${enabledCount} 个启用`;
+  }, [loading, tasks]);
   const draftSafetySummary = useMemo(
     () => buildToolSafetySummary(permissionPolicy),
     [permissionPolicy],
@@ -141,38 +219,51 @@ export function ScheduledTasksPanel() {
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setStatus({ kind: "saving", message: "正在创建任务..." });
+    setIsSubmittingCreateTask(true);
+    setCreateStatus({ kind: "saving", message: "正在创建任务..." });
     setErrors({});
 
-    if (!window.buildingAgent) {
-      setStatus({
-        kind: "error",
-        message: "浏览器预览模式无法管理桌面任务。",
+    try {
+      if (!window.buildingAgent) {
+        const message = "浏览器预览模式无法管理桌面任务。";
+        setCreateStatus({ kind: "error", message });
+        setStatus({ kind: "error", message });
+        return;
+      }
+
+      if (!draftText.trim()) {
+        const message = "请先写清楚任务描述，包括要做什么、结果放在哪里、什么情况跳过。";
+        setCreateStatus({ kind: "error", message });
+        return;
+      }
+
+      const parsedInput = parseTaskInputJson(inputJson);
+      if (!parsedInput.ok) {
+        setErrors({ input: parsedInput.message });
+        setCreateStatus({ kind: "error", message: parsedInput.message });
+        return;
+      }
+
+      const result = await window.buildingAgent.createScheduledTask({
+        ...form,
+        input: mergeDraftRequestIntoTaskInput(parsedInput.value, draftText),
+        permissions: permissionPolicy,
       });
-      return;
+
+      if (!result.ok) {
+        setErrors(result.errors);
+        setCreateStatus({ kind: "error", message: result.message });
+        return;
+      }
+
+      setTasks((currentTasks) => [...currentTasks, result.task]);
+      setStatus({ kind: "saved", message: "任务已创建。" });
+      setCreateStatus({ kind: "saved", message: "任务已创建。" });
+      setCreateDialogOpen(false);
+      setCreateMenuOpen(false);
+    } finally {
+      setIsSubmittingCreateTask(false);
     }
-
-    const parsedInput = parseTaskInputJson(inputJson);
-    if (!parsedInput.ok) {
-      setErrors({ input: parsedInput.message });
-      setStatus({ kind: "error", message: parsedInput.message });
-      return;
-    }
-
-    const result = await window.buildingAgent.createScheduledTask({
-      ...form,
-      input: parsedInput.value,
-      permissions: permissionPolicy,
-    });
-
-    if (!result.ok) {
-      setErrors(result.errors);
-      setStatus({ kind: "error", message: result.message });
-      return;
-    }
-
-    setTasks((currentTasks) => [...currentTasks, result.task]);
-    setStatus({ kind: "saved", message: "任务已创建。" });
   }
 
   async function handleRunTask(taskId: string) {
@@ -307,374 +398,555 @@ export function ScheduledTasksPanel() {
   }
 
   function handleDraftSchedule() {
-    const draft = draftScheduleFromText(draftText);
+    const draft = draftScheduleFromText(scheduleDraftText);
 
     if (!draft) {
-      setStatus({
+      setCreateStatus({
         kind: "error",
-        message: "可以试试：每 30 分钟、每天 09:00，或 cron: */15 * * * *。",
+        message: "可以试试：每天 09:00、工作日 09:00、每周一 10:00，或每 30 分钟。",
       });
       return;
     }
 
     setForm({ ...form, schedule: draft });
-    setStatus({ kind: "idle", message: `已生成草稿：${describeSchedule(draft)}。` });
+    setCreateStatus({
+      kind: "idle",
+      message: `已生成草稿：${describeSchedule(draft)}。`,
+    });
+  }
+
+  function handleOpenCreateDialog() {
+    setErrors({});
+    setCreateStatus({ kind: "idle", message: "" });
+    setScheduleDraftText("");
+    setCreateDialogOpen(true);
+    setCreateMenuOpen(false);
+  }
+
+  function handleCloseCreateDialog() {
+    if (!isSubmittingCreateTask) {
+      setCreateDialogOpen(false);
+    }
+  }
+
+  function handleCreateFromChat() {
+    window.location.hash = "chat";
   }
 
   return (
-    <section className="task-panel">
-      <div className="settings-header">
+    <section className="task-panel scheduled-tasks-panel">
+      <div className="settings-header scheduled-tasks-heading">
         <div>
-          <p className="kicker">本地调度器</p>
-          <h3>定时任务</h3>
+          <p className="kicker">自动任务</p>
+          <h3>让 Zerox 按计划替你执行</h3>
+          <p>
+            用一句话交代要做什么、什么时候做；权限和高级输入在保存前再确认。
+          </p>
         </div>
         <span className={`settings-state is-${status.kind}`}>
           {taskCountLabel}
         </span>
       </div>
 
-      <div className="task-layout">
-        <form className="task-form" onSubmit={handleSubmit}>
-          <label className="field">
-            <span>
-              任务名称 <em>必填</em>
-            </span>
-            <input
-              value={form.name}
-              onChange={(event) =>
-                setForm({ ...form, name: event.currentTarget.value })
-              }
-            />
-            {errors.name ? <small>{errors.name}</small> : null}
-          </label>
-
-          <label className="field">
-            <span>
-              技能 <em>必填</em>
-            </span>
-            <select
-              value={form.skillName}
-              onChange={(event) =>
-                setForm({ ...form, skillName: event.currentTarget.value })
-              }
-            >
-              <option value="">选择一个技能</option>
-              {skills.skills.map((skill) => (
-                <option key={skill.manifest.name} value={skill.manifest.name}>
-                  {skill.manifest.displayName}
-                </option>
-              ))}
-            </select>
-            {errors.skillName ? <small>{errors.skillName}</small> : null}
-          </label>
-
-          <label className="field checkbox-field">
-            <input
-              checked={form.enabled}
-              onChange={(event) =>
-                setForm({ ...form, enabled: event.currentTarget.checked })
-              }
-              type="checkbox"
-            />
-            <span>启用</span>
-          </label>
-
-          <div className="field-grid">
-            <label className="field">
-              <span>
-                调度方式 <em>必填</em>
-              </span>
-              <select
-                value={form.schedule.kind}
-                onChange={(event) =>
-                  setForm({
-                    ...form,
-                    schedule: createDefaultSchedule(
-                      event.currentTarget.value as TaskSchedule["kind"],
-                    ),
-                  })
-                }
-              >
-                <option value="manual">手动</option>
-                <option value="daily">每天</option>
-                <option value="interval">间隔</option>
-                <option value="cron">Cron</option>
-              </select>
-            </label>
-
-            <ScheduleFields
-              schedule={form.schedule}
-              onChange={(schedule) => setForm({ ...form, schedule })}
-            />
-          </div>
-          {errors.schedule ? <small>{errors.schedule}</small> : null}
-
-          <div className="draft-row">
-            <label className="field">
-              <span>
-                自然语言草稿 <em>选填</em>
-              </span>
-              <input
-                value={draftText}
-                onChange={(event) => setDraftText(event.currentTarget.value)}
-                placeholder="每 30 分钟"
-              />
-            </label>
-            <button className="secondary-action" onClick={handleDraftSchedule} type="button">
-              生成草稿
-            </button>
-          </div>
-
-          <label className="field">
-            <span>
-              任务输入 JSON <em>必填</em>
-            </span>
-            <textarea
-              value={inputJson}
-              onChange={(event) => setInputJson(event.currentTarget.value)}
-              rows={5}
-            />
-            {errors.input ? <small>{errors.input}</small> : null}
-          </label>
-
-          <section className="permission-editor" aria-label="任务权限">
-            <div className="section-heading">
-              <span>任务权限</span>
-              <small>默认拒绝，只允许这里列出的范围</small>
-            </div>
-            <div className="field-grid">
-              <label className="field">
-                <span>
-                  可读目录 <em>每行一个</em>
-                </span>
-                <textarea
-                  onChange={(event) =>
-                    setPermissionPolicy({
-                      ...permissionPolicy,
-                      files: {
-                        ...permissionPolicy.files,
-                        read: parseLines(event.currentTarget.value),
-                      },
-                    })
-                  }
-                  rows={3}
-                  value={formatLines(permissionPolicy.files.read)}
-                />
-              </label>
-              <label className="field">
-                <span>
-                  可写目录 <em>每行一个</em>
-                </span>
-                <textarea
-                  onChange={(event) =>
-                    setPermissionPolicy({
-                      ...permissionPolicy,
-                      files: {
-                        ...permissionPolicy.files,
-                        write: parseLines(event.currentTarget.value),
-                      },
-                    })
-                  }
-                  rows={3}
-                  value={formatLines(permissionPolicy.files.write)}
-                />
-              </label>
-            </div>
-            <div className="field-grid">
-              <label className="field checkbox-field">
-                <input
-                  checked={Boolean(permissionPolicy.memory?.read)}
-                  onChange={(event) =>
-                    setPermissionPolicy({
-                      ...permissionPolicy,
-                      memory: {
-                        read: event.currentTarget.checked,
-                        write: Boolean(permissionPolicy.memory?.write),
-                      },
-                    })
-                  }
-                  type="checkbox"
-                />
-                <span>允许读取本地记忆</span>
-              </label>
-              <label className="field checkbox-field">
-                <input
-                  checked={Boolean(permissionPolicy.memory?.write)}
-                  onChange={(event) =>
-                    setPermissionPolicy({
-                      ...permissionPolicy,
-                      memory: {
-                        read: Boolean(permissionPolicy.memory?.read),
-                        write: event.currentTarget.checked,
-                      },
-                    })
-                  }
-                  type="checkbox"
-                />
-                <span>允许写入本地记忆</span>
-              </label>
-            </div>
-            <label className="field checkbox-field">
-              <input
-                checked={permissionPolicy.web.search}
-                onChange={(event) =>
-                  setPermissionPolicy({
-                    ...permissionPolicy,
-                    web: {
-                      ...permissionPolicy.web,
-                      search: event.currentTarget.checked,
-                    },
-                  })
-                }
-                type="checkbox"
-              />
-              <span>允许 web_search</span>
-            </label>
-            <label className="field">
-              <span>
-                可抓取网页域名 <em>每行一个</em>
-              </span>
-              <textarea
-                onChange={(event) =>
-                  setPermissionPolicy({
-                    ...permissionPolicy,
-                    web: {
-                      ...permissionPolicy.web,
-                      fetchDomains: parseLines(event.currentTarget.value),
-                    },
-                  })
-                }
-                rows={3}
-                placeholder="example.com"
-                value={formatLines(permissionPolicy.web.fetchDomains)}
-              />
-            </label>
-            <label className="field">
-              <span>
-                命令行模板 <em>每行一个</em>
-              </span>
-              <textarea
-                onChange={(event) =>
-                  setPermissionPolicy({
-                    ...permissionPolicy,
-                    shell: {
-                      commands: parseLines(event.currentTarget.value),
-                    },
-                  })
-                }
-                rows={3}
-                placeholder="find {{targetDir}} -maxdepth 1 -type f"
-                value={formatLines(permissionPolicy.shell.commands)}
-              />
-            </label>
-            {errors.permissions ? <small>{errors.permissions}</small> : null}
-          </section>
-
-          <ToolSafetySummaryCard summary={draftSafetySummary} />
-
-          <div className="settings-actions">
-            <button
-              className="primary-action"
-              disabled={status.kind === "saving"}
-            >
-              创建任务
-            </button>
-            <p className={`settings-message is-${status.kind}`}>
-              {status.message}
-            </p>
-          </div>
-        </form>
-
-        <section className="task-list" aria-label="已保存的定时任务">
+      <div className="scheduled-tasks-shell">
+        <section className="scheduled-task-grid" aria-label="已保存的定时任务">
           {tasks.length ? (
-            tasks.map((task) => (
-              <article className="task-row" key={task.id}>
-                <div>
-                  <span>{task.enabled ? "已启用" : "已暂停"}</span>
-                  <h4>{task.name}</h4>
-                  <p>{task.skillName}</p>
-                </div>
-                <dl>
-                  <div>
-                    <dt>调度</dt>
-                    <dd>{describeSchedule(task.schedule)}</dd>
-                  </div>
-                  <div>
-                    <dt>下次运行</dt>
-                    <dd>{formatNextRun(task.nextRunAt)}</dd>
-                  </div>
-                  <div>
-                    <dt>权限</dt>
-                    <dd>{summarizePermissions(task.permissions)}</dd>
-                  </div>
-                </dl>
-                <ToolSafetySummaryCard summary={buildToolSafetySummary(task.permissions)} />
-                {runningTaskId === task.id ? (
-                  <button
-                    className="danger-action"
-                    onClick={() => void handleCancelRunTask(task.id)}
-                    type="button"
-                  >
-                    停止运行
-                  </button>
-                ) : (
-                  <button
-                    className="secondary-action"
-                    disabled={updatingTaskId === task.id}
-                    onClick={() => void handleRunTask(task.id)}
-                    type="button"
-                  >
-                    立即运行
-                  </button>
-                )}
-                <div className="task-row-actions">
-                  <button
-                    className="secondary-action"
-                    disabled={runningTaskId === task.id || updatingTaskId === task.id}
-                    onClick={() => void handleSetTaskEnabled(task, !task.enabled)}
-                    type="button"
-                  >
-                    {task.enabled ? "暂停" : "恢复"}
-                  </button>
-                  <button
-                    className="danger-action"
-                    disabled={runningTaskId === task.id || updatingTaskId === task.id}
-                    onClick={() => void handleDeleteTask(task)}
-                    type="button"
-                  >
-                    删除
-                  </button>
-                </div>
-              </article>
-            ))
-          ) : (
-            <div className="empty-state">还没有定时任务。</div>
-          )}
+            tasks.map((task) => {
+              const taskIsBusy =
+                runningTaskId === task.id || updatingTaskId === task.id;
 
-          <section className="run-log" aria-label="智能体运行日志">
-            <div className="section-heading">
-              <span>智能体运行</span>
-              <small>最近 {runs.length} 条</small>
-            </div>
-            {runs.length ? (
-              runs.slice(0, 5).map((run) => (
-                <article className={`run-row is-${run.status}`} key={run.id}>
-                  <span>{translateRunStatus(run.status)}</span>
-                  <div>
-                    <strong>{run.taskName}</strong>
-                    <p>{run.summary}</p>
-                    <small>{new Date(run.finishedAt).toLocaleString()}</small>
+              return (
+                <article
+                  className={`scheduled-task-card ${
+                    task.enabled ? "is-enabled" : "is-paused"
+                  }`}
+                  key={task.id}
+                >
+                  <div className="scheduled-task-card-header">
+                    <div className="scheduled-task-title-block">
+                      <div className="scheduled-task-title-line">
+                        <span
+                          className={`scheduled-task-status ${
+                            task.enabled ? "is-enabled" : "is-paused"
+                          }`}
+                        >
+                          {task.enabled ? "已启用" : "已暂停"}
+                        </span>
+                        <h4>{task.name}</h4>
+                      </div>
+                      <p>{summarizeTaskIntent(task)}</p>
+                    </div>
+                    <button
+                      aria-label={`${task.enabled ? "暂停" : "恢复"}${task.name}`}
+                      aria-pressed={task.enabled}
+                      className={`scheduled-task-switch ${
+                        task.enabled ? "is-on" : ""
+                      }`}
+                      disabled={taskIsBusy}
+                      onClick={() =>
+                        void handleSetTaskEnabled(task, !task.enabled)
+                      }
+                      type="button"
+                    />
+                  </div>
+
+                  <dl className="scheduled-task-meta">
+                    <div>
+                      <dt>频率</dt>
+                      <dd>{describeSchedule(task.schedule)}</dd>
+                    </div>
+                    <div>
+                      <dt>下一次</dt>
+                      <dd>{formatNextRun(task.nextRunAt)}</dd>
+                    </div>
+                  </dl>
+
+                  <div className="scheduled-task-card-actions">
+                    <button
+                      className="secondary-action"
+                      onClick={() => navigateToHash("runs")}
+                      type="button"
+                    >
+                      查看记录
+                    </button>
+                    {runningTaskId === task.id ? (
+                      <button
+                        className="danger-action"
+                        onClick={() => void handleCancelRunTask(task.id)}
+                        type="button"
+                      >
+                        停止运行
+                      </button>
+                    ) : (
+                      <button
+                        className="secondary-action"
+                        disabled={updatingTaskId === task.id}
+                        onClick={() => void handleRunTask(task.id)}
+                        type="button"
+                      >
+                        立即运行
+                      </button>
+                    )}
+                    <details className="scheduled-task-more">
+                      <summary>更多</summary>
+                      <div>
+                        <p>{summarizePermissions(task.permissions)}</p>
+                        <ToolSafetySummaryCard
+                          summary={buildToolSafetySummary(task.permissions)}
+                        />
+                        <button
+                          className="secondary-action"
+                          disabled={taskIsBusy}
+                          onClick={() =>
+                            void handleSetTaskEnabled(task, !task.enabled)
+                          }
+                          type="button"
+                        >
+                          {task.enabled ? "暂停" : "恢复"}
+                        </button>
+                        <button
+                          className="danger-action"
+                          disabled={taskIsBusy}
+                          onClick={() => void handleDeleteTask(task)}
+                          type="button"
+                        >
+                          删除
+                        </button>
+                      </div>
+                    </details>
                   </div>
                 </article>
-              ))
-            ) : (
-              <div className="empty-state">还没有智能体运行记录。</div>
-            )}
-          </section>
+              );
+            })
+          ) : (
+            <div className="scheduled-task-empty-state">
+              <div>
+                <h4>还没有自动任务</h4>
+                <p>创建一个任务后，Zerox 会按计划在本地调度器里执行。</p>
+              </div>
+              <button
+                className="primary-action"
+                onClick={handleOpenCreateDialog}
+                type="button"
+              >
+                新建任务
+              </button>
+            </div>
+          )}
         </section>
+
+        <aside className={`scheduled-task-create ${createMenuOpen ? "is-open" : ""}`}>
+          <button
+            className="primary-action"
+            onClick={() => setCreateMenuOpen((open) => !open)}
+            type="button"
+          >
+            新建任务
+          </button>
+          <div className="scheduled-task-create-menu" aria-label="新建任务菜单">
+            <button onClick={handleOpenCreateDialog} type="button">
+              <span>✎</span>
+              <span>手动创建</span>
+            </button>
+            <button onClick={handleCreateFromChat} type="button">
+              <span>▰</span>
+              <span>从会话生成</span>
+            </button>
+          </div>
+        </aside>
       </div>
+
+      <p className={`settings-message is-${status.kind}`}>
+        {status.message}
+        {runs.length ? ` 最近有 ${runs.length} 条运行记录。` : ""}
+      </p>
+
+      {createDialogOpen ? (
+        <div
+          className="scheduled-task-dialog-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              handleCloseCreateDialog();
+            }
+          }}
+        >
+          <section
+            aria-label="新建任务"
+            aria-modal="true"
+            className="scheduled-task-dialog"
+            ref={createDialogRef}
+            role="dialog"
+          >
+            <header className="scheduled-task-dialog-header">
+              <div>
+                <h2 ref={createDialogHeadingRef} tabIndex={-1}>新建任务</h2>
+                <p>描述任务目标和执行时间，Zerox 会按计划自动执行。</p>
+              </div>
+              <button
+                aria-label="关闭"
+                className="secondary-action scheduled-task-dialog-close"
+                disabled={isSubmittingCreateTask}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  handleCloseCreateDialog();
+                }}
+                onMouseDown={(event) => {
+                  event.stopPropagation();
+                }}
+                onPointerDown={(event) => {
+                  event.stopPropagation();
+                }}
+                type="button"
+              >
+                ×
+              </button>
+            </header>
+
+            <form className="scheduled-task-form" onSubmit={handleSubmit}>
+              <label className="field">
+                <span>
+                  任务名称 <em>必填</em>
+                </span>
+                <input
+                  value={form.name}
+                  onChange={(event) =>
+                    setForm({ ...form, name: event.currentTarget.value })
+                  }
+                  placeholder="例如：尾盘选股策略检查"
+                />
+                {errors.name ? <small>{errors.name}</small> : null}
+              </label>
+
+              <label className="field">
+                <span>
+                  任务描述 <em>必填</em>
+                </span>
+                <textarea
+                  onChange={(event) => setDraftText(event.currentTarget.value)}
+                  placeholder="写清楚要做什么、用什么方式或资料、结果放在哪里、什么情况跳过。"
+                  value={draftText}
+                />
+              </label>
+
+              <div className="field-grid">
+                <label className="field">
+                  <span>
+                    调度方式 <em>必填</em>
+                  </span>
+                  <select
+                    value={form.schedule.kind}
+                    onChange={(event) =>
+                      setForm({
+                        ...form,
+                        schedule: createDefaultSchedule(
+                          event.currentTarget.value as TaskSchedule["kind"],
+                        ),
+                      })
+                    }
+                  >
+                    <option value="daily">每天</option>
+                    <option value="weekdays">工作日</option>
+                    <option value="weekly">每周</option>
+                    <option value="interval">间隔</option>
+                  </select>
+                </label>
+
+                <ScheduleFields
+                  schedule={form.schedule}
+                  onChange={(schedule) => setForm({ ...form, schedule })}
+                />
+              </div>
+              {errors.schedule ? <small>{errors.schedule}</small> : null}
+
+              <div className="draft-row">
+                <label className="field">
+                  <span>
+                    从说明生成时间 <em>选填</em>
+                  </span>
+                  <input
+                    value={scheduleDraftText}
+                    onChange={(event) =>
+                      setScheduleDraftText(event.currentTarget.value)
+                    }
+                    placeholder="例如：每天 14:35"
+                  />
+                </label>
+                <button
+                  className="secondary-action"
+                  onClick={handleDraftSchedule}
+                  type="button"
+                >
+                  生成
+                </button>
+              </div>
+
+              <details className="scheduled-task-advanced">
+                <summary>高级输入与权限</summary>
+                <label className="field">
+                  <span>
+                    任务输入 JSON <em>必填</em>
+                  </span>
+                  <textarea
+                    value={inputJson}
+                    onChange={(event) => setInputJson(event.currentTarget.value)}
+                    rows={5}
+                  />
+                  {errors.input ? <small>{errors.input}</small> : null}
+                </label>
+
+                <section className="permission-editor" aria-label="任务权限">
+                  <div className="section-heading">
+                    <span>任务权限</span>
+                    <small>默认拒绝，只允许这里列出的范围</small>
+                  </div>
+                  <div className="field-grid">
+                    <label className="field">
+                      <span>
+                        可读目录 <em>每行一个</em>
+                      </span>
+                      <textarea
+                        onChange={(event) =>
+                          setPermissionPolicy({
+                            ...permissionPolicy,
+                            files: {
+                              ...permissionPolicy.files,
+                              read: parseLines(event.currentTarget.value),
+                            },
+                          })
+                        }
+                        rows={3}
+                        value={formatLines(permissionPolicy.files.read)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>
+                        可写目录 <em>每行一个</em>
+                      </span>
+                      <textarea
+                        onChange={(event) =>
+                          setPermissionPolicy({
+                            ...permissionPolicy,
+                            files: {
+                              ...permissionPolicy.files,
+                              write: parseLines(event.currentTarget.value),
+                            },
+                          })
+                        }
+                        rows={3}
+                        value={formatLines(permissionPolicy.files.write)}
+                      />
+                    </label>
+                  </div>
+                  <div className="field-grid">
+                    <label className="field checkbox-field">
+                      <input
+                        checked={Boolean(permissionPolicy.memory?.read)}
+                        onChange={(event) =>
+                          setPermissionPolicy({
+                            ...permissionPolicy,
+                            memory: {
+                              read: event.currentTarget.checked,
+                              write: Boolean(permissionPolicy.memory?.write),
+                            },
+                          })
+                        }
+                        type="checkbox"
+                      />
+                      <span>允许读取本地记忆</span>
+                    </label>
+                    <label className="field checkbox-field">
+                      <input
+                        checked={Boolean(permissionPolicy.memory?.write)}
+                        onChange={(event) =>
+                          setPermissionPolicy({
+                            ...permissionPolicy,
+                            memory: {
+                              read: Boolean(permissionPolicy.memory?.read),
+                              write: event.currentTarget.checked,
+                            },
+                          })
+                        }
+                        type="checkbox"
+                      />
+                      <span>允许写入本地记忆</span>
+                    </label>
+                  </div>
+                  <label className="field checkbox-field">
+                    <input
+                      checked={permissionPolicy.web.search}
+                      onChange={(event) =>
+                        setPermissionPolicy({
+                          ...permissionPolicy,
+                          web: {
+                            ...permissionPolicy.web,
+                            search: event.currentTarget.checked,
+                          },
+                        })
+                      }
+                      type="checkbox"
+                    />
+                    <span>允许 web_search</span>
+                  </label>
+                  <label className="field">
+                    <span>
+                      可抓取网页域名 <em>每行一个</em>
+                    </span>
+                    <textarea
+                      onChange={(event) =>
+                        setPermissionPolicy({
+                          ...permissionPolicy,
+                          web: {
+                            ...permissionPolicy.web,
+                            fetchDomains: parseLines(event.currentTarget.value),
+                          },
+                        })
+                      }
+                      rows={3}
+                      placeholder="example.com"
+                      value={formatLines(permissionPolicy.web.fetchDomains)}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>
+                      命令行模板 <em>每行一个</em>
+                    </span>
+                    <textarea
+                      onChange={(event) =>
+                        setPermissionPolicy({
+                          ...permissionPolicy,
+                          shell: {
+                            commands: parseLines(event.currentTarget.value),
+                          },
+                        })
+                      }
+                      rows={3}
+                      placeholder="find {{targetDir}} -maxdepth 1 -type f"
+                      value={formatLines(permissionPolicy.shell.commands)}
+                    />
+                  </label>
+                  {errors.permissions ? <small>{errors.permissions}</small> : null}
+                </section>
+
+                <ToolSafetySummaryCard summary={draftSafetySummary} />
+              </details>
+
+              <p className="scheduled-task-dialog-note">
+                保存后任务会按计划自动运行。请确认描述、模型、工具、文件和记忆权限足够明确；不确定或权限不足时，Zerox 应停止并写入运行记录。
+              </p>
+
+              {createStatus.message ? (
+                <p
+                  className={`settings-message scheduled-task-dialog-message is-${createStatus.kind}`}
+                  role={createStatus.kind === "error" ? "alert" : "status"}
+                >
+                  {createStatus.message}
+                </p>
+              ) : null}
+
+              <div className="scheduled-task-dialog-actions">
+                <button
+                  className="secondary-action"
+                  disabled={isSubmittingCreateTask}
+                  onClick={handleCloseCreateDialog}
+                  type="button"
+                >
+                  取消
+                </button>
+                <button
+                  className="primary-action"
+                  disabled={isSubmittingCreateTask}
+                  type="submit"
+                >
+                  保存任务
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
     </section>
   );
+}
+
+function mergeDraftRequestIntoTaskInput(
+  input: Record<string, unknown>,
+  draftText: string,
+): Record<string, unknown> {
+  const request = draftText.trim();
+
+  if (!request) {
+    return input;
+  }
+
+  return {
+    ...input,
+    request,
+  };
+}
+
+function summarizeTaskIntent(task: ScheduledTask): string {
+  const request = task.input.request;
+
+  if (typeof request === "string" && request.trim()) {
+    return request.trim();
+  }
+
+  const targetDir = task.input.targetDir;
+
+  if (typeof targetDir === "string" && targetDir.trim()) {
+    return `处理 ${targetDir.trim()}，并按任务配置保存执行结果。`;
+  }
+
+  if (task.skillName.trim()) {
+    return `使用 ${task.skillName} 执行本地任务，运行前会遵守已配置的权限范围。`;
+  }
+
+  return "根据任务描述自动规划并执行；运行前会遵守已配置的权限范围。";
+}
+
+function navigateToHash(sectionId: "runs" | "chat"): void {
+  window.location.hash = sectionId;
 }
 
 function ScheduleFields(props: {
@@ -683,7 +955,14 @@ function ScheduleFields(props: {
 }) {
   switch (props.schedule.kind) {
     case "manual":
-      return <div className="schedule-placeholder">仅手动运行</div>;
+      return (
+        <label className="field">
+          <span>
+            执行时间 <em>历史任务</em>
+          </span>
+          <div className="schedule-placeholder">手动任务</div>
+        </label>
+      );
     case "daily":
       return (
         <label className="field">
@@ -702,6 +981,71 @@ function ScheduleFields(props: {
           />
         </label>
       );
+    case "weekdays":
+      return (
+        <label className="field">
+          <span>
+            时间 <em>HH:mm</em>
+          </span>
+          <input
+            onChange={(event) =>
+              props.onChange({
+                kind: "weekdays",
+                time: event.currentTarget.value,
+              })
+            }
+            type="time"
+            value={props.schedule.time}
+          />
+        </label>
+      );
+    case "weekly": {
+      const schedule = props.schedule;
+
+      return (
+        <div className="weekly-fields">
+          <label className="field">
+            <span>
+              星期 <em>必填</em>
+            </span>
+            <select
+              onChange={(event) =>
+                props.onChange({
+                  kind: "weekly",
+                  weekday: Number(event.currentTarget.value),
+                  time: schedule.time,
+                })
+              }
+              value={schedule.weekday}
+            >
+              <option value={1}>周一</option>
+              <option value={2}>周二</option>
+              <option value={3}>周三</option>
+              <option value={4}>周四</option>
+              <option value={5}>周五</option>
+              <option value={6}>周六</option>
+              <option value={7}>周日</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>
+              时间 <em>HH:mm</em>
+            </span>
+            <input
+              onChange={(event) =>
+                props.onChange({
+                  kind: "weekly",
+                  weekday: schedule.weekday,
+                  time: event.currentTarget.value,
+                })
+              }
+              type="time"
+              value={schedule.time}
+            />
+          </label>
+        </div>
+      );
+    }
     case "interval": {
       const schedule = props.schedule;
 
@@ -772,6 +1116,10 @@ function createDefaultSchedule(kind: TaskSchedule["kind"]): TaskSchedule {
       return { kind: "manual" };
     case "daily":
       return { kind: "daily", time: "09:00" };
+    case "weekdays":
+      return { kind: "weekdays", time: "09:00" };
+    case "weekly":
+      return { kind: "weekly", weekday: 1, time: "09:00" };
     case "interval":
       return { kind: "interval", every: 30, unit: "minutes" };
     case "cron":

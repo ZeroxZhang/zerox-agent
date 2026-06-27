@@ -6,13 +6,21 @@ import {
   type TaskPermissionPolicy,
 } from "./toolPermissions";
 
-export type ScheduleKind = "manual" | "daily" | "interval" | "cron";
+export type ScheduleKind =
+  | "manual"
+  | "daily"
+  | "weekdays"
+  | "weekly"
+  | "interval"
+  | "cron";
 
 export type IntervalScheduleUnit = "minutes" | "hours";
 
 export type TaskSchedule =
   | { kind: "manual" }
   | { kind: "daily"; time: string }
+  | { kind: "weekdays"; time: string }
+  | { kind: "weekly"; weekday: number; time: string }
   | { kind: "interval"; every: number; unit: IntervalScheduleUnit }
   | { kind: "cron"; expression: string };
 
@@ -69,6 +77,7 @@ export type DeleteScheduledTaskResult =
   | { ok: false; message: string };
 
 const dailyTimePattern = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const weeklyDayLabels = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 
 export function describeSchedule(schedule: TaskSchedule): string {
   switch (schedule.kind) {
@@ -76,6 +85,10 @@ export function describeSchedule(schedule: TaskSchedule): string {
       return "手动运行";
     case "daily":
       return `每天 ${schedule.time}`;
+    case "weekdays":
+      return `工作日 ${schedule.time}`;
+    case "weekly":
+      return `每${formatWeeklyDay(schedule.weekday)} ${schedule.time}`;
     case "interval":
       return `每 ${schedule.every} ${schedule.unit === "hours" ? "小时" : "分钟"}`;
     case "cron":
@@ -94,6 +107,14 @@ export function computeNextRunAt(
       return null;
     case "daily":
       return computeNextDailyRunAt(normalized.time, from).toISOString();
+    case "weekdays":
+      return computeNextWeekdayRunAt(normalized.time, from).toISOString();
+    case "weekly":
+      return computeNextWeeklyRunAt(
+        normalized.weekday,
+        normalized.time,
+        from,
+      ).toISOString();
     case "interval": {
       const milliseconds =
         normalized.every * (normalized.unit === "hours" ? 60 : 1) * 60 * 1000;
@@ -134,10 +155,6 @@ export function validateScheduledTaskInput(
     errors.name = "任务名称必填。";
   }
 
-  if (!normalized.skillName) {
-    errors.skillName = "技能必填。";
-  }
-
   const scheduleError = validateSchedule(normalized.schedule);
   if (scheduleError) {
     errors.schedule = scheduleError;
@@ -165,9 +182,56 @@ export function draftScheduleFromText(text: string): TaskSchedule | null {
   const trimmed = text.trim();
   const lower = trimmed.toLowerCase();
 
-  const cronMatch = trimmed.match(/^cron:\s*(.+)$/i);
-  if (cronMatch?.[1]) {
-    return { kind: "cron", expression: cronMatch[1].trim() };
+  const englishWeekdayMatch = lower.match(
+    /\b(?:weekdays|workdays|business days)\s+(?:at\s+)?([0-2]?\d:[0-5]\d)\b/,
+  );
+  if (englishWeekdayMatch?.[1]) {
+    const time = normalizeClockText(englishWeekdayMatch[1]);
+    if (time) {
+      return { kind: "weekdays", time };
+    }
+  }
+
+  const chineseWeekdayMatch = trimmed.match(
+    /(?:工作日|每个工作日|每個工作日|每工作日).{0,8}?(\d{1,2})\s*(?::|：|点|點)\s*(\d{1,2})?/,
+  );
+  if (chineseWeekdayMatch?.[1]) {
+    const time = formatDailyTime(
+      Number(chineseWeekdayMatch[1]),
+      chineseWeekdayMatch[2] ? Number(chineseWeekdayMatch[2]) : 0,
+    );
+    if (time) {
+      return { kind: "weekdays", time };
+    }
+  }
+
+  const englishWeeklyMatch = lower.match(
+    /\b(?:weekly\s+on\s+|every\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s+(?:at\s+)?([0-2]?\d:[0-5]\d)\b/,
+  );
+  if (englishWeeklyMatch?.[1] && englishWeeklyMatch[2]) {
+    const weekday = parseEnglishWeekday(englishWeeklyMatch[1]);
+    const time = normalizeClockText(englishWeeklyMatch[2]);
+    if (weekday && time) {
+      return { kind: "weekly", weekday, time };
+    }
+  }
+
+  const chineseWeeklyMatch = trimmed.match(
+    /(?:每周|每週|每星期|每礼拜|每禮拜|周|週)([一二三四五六日天1-7]).{0,8}?(\d{1,2})\s*(?::|：|点|點)\s*(\d{1,2})?/,
+  );
+  if (
+    chineseWeeklyMatch?.[1] &&
+    chineseWeeklyMatch[2] &&
+    !trimmed.includes("工作日")
+  ) {
+    const weekday = parseChineseWeekday(chineseWeeklyMatch[1]);
+    const time = formatDailyTime(
+      Number(chineseWeeklyMatch[2]),
+      chineseWeeklyMatch[3] ? Number(chineseWeeklyMatch[3]) : 0,
+    );
+    if (weekday && time) {
+      return { kind: "weekly", weekday, time };
+    }
   }
 
   const dailyMatch = lower.match(/\bdaily\s+at\s+([0-2]\d:[0-5]\d)\b/);
@@ -228,12 +292,25 @@ function formatDailyTime(hour: number, minute: number): string | null {
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
+function normalizeClockText(value: string): string | null {
+  const [hourText, minuteText] = value.split(":");
+  return formatDailyTime(Number(hourText), Number(minuteText));
+}
+
 function normalizeSchedule(schedule: TaskSchedule): TaskSchedule {
   switch (schedule.kind) {
     case "manual":
       return { kind: "manual" };
     case "daily":
       return { kind: "daily", time: String(schedule.time ?? "").trim() };
+    case "weekdays":
+      return { kind: "weekdays", time: String(schedule.time ?? "").trim() };
+    case "weekly":
+      return {
+        kind: "weekly",
+        weekday: Number(schedule.weekday),
+        time: String(schedule.time ?? "").trim(),
+      };
     case "interval":
       return {
         kind: "interval",
@@ -257,6 +334,17 @@ function validateSchedule(schedule: TaskSchedule): string | null {
         return validateDailyTime(schedule.time)
           ? null
           : "每天调度必须使用 HH:mm 时间。";
+      case "weekdays":
+        return validateDailyTime(schedule.time)
+          ? null
+          : "工作日调度必须使用 HH:mm 时间。";
+      case "weekly":
+        if (!isValidWeeklyDay(schedule.weekday)) {
+          return "每周调度必须选择周一到周日。";
+        }
+        return validateDailyTime(schedule.time)
+          ? null
+          : "每周调度必须使用 HH:mm 时间。";
       case "interval":
         if (!Number.isInteger(schedule.every) || schedule.every <= 0) {
           return "间隔调度必须使用正整数。";
@@ -287,8 +375,99 @@ function computeNextDailyRunAt(time: string, from: Date): Date {
   return next;
 }
 
+function computeNextWeekdayRunAt(time: string, from: Date): Date {
+  const next = computeNextDailyRunAt(time, from);
+
+  while (!isWorkday(next)) {
+    next.setDate(next.getDate() + 1);
+  }
+
+  return next;
+}
+
+function computeNextWeeklyRunAt(
+  weekday: number,
+  time: string,
+  from: Date,
+): Date {
+  const match = time.match(dailyTimePattern);
+  if (!match) {
+    throw new Error("Weekly schedule time must use HH:mm.");
+  }
+
+  if (!isValidWeeklyDay(weekday)) {
+    throw new Error("Weekly schedule day must be 1-7.");
+  }
+
+  const targetDay = weekday === 7 ? 0 : weekday;
+  const next = new Date(from);
+  next.setHours(Number(match[1]), Number(match[2]), 0, 0);
+
+  const currentDay = next.getDay();
+  let daysUntilTarget = (targetDay - currentDay + 7) % 7;
+  if (daysUntilTarget === 0 && next.getTime() <= from.getTime()) {
+    daysUntilTarget = 7;
+  }
+
+  next.setDate(next.getDate() + daysUntilTarget);
+  return next;
+}
+
 function validateDailyTime(time: string): boolean {
   return dailyTimePattern.test(time);
+}
+
+function isWorkday(date: Date): boolean {
+  const day = date.getDay();
+  return day >= 1 && day <= 5;
+}
+
+function isValidWeeklyDay(weekday: number): boolean {
+  return Number.isInteger(weekday) && weekday >= 1 && weekday <= 7;
+}
+
+function formatWeeklyDay(weekday: number): string {
+  if (!isValidWeeklyDay(weekday)) {
+    return "未设置";
+  }
+
+  return weeklyDayLabels[weekday === 7 ? 0 : weekday] ?? "未设置";
+}
+
+function parseEnglishWeekday(value: string): number | null {
+  const weekdays: Record<string, number> = {
+    monday: 1,
+    tuesday: 2,
+    wednesday: 3,
+    thursday: 4,
+    friday: 5,
+    saturday: 6,
+    sunday: 7,
+  };
+
+  return weekdays[value] ?? null;
+}
+
+function parseChineseWeekday(value: string): number | null {
+  const weekdays: Record<string, number> = {
+    一: 1,
+    二: 2,
+    三: 3,
+    四: 4,
+    五: 5,
+    六: 6,
+    日: 7,
+    天: 7,
+    "1": 1,
+    "2": 2,
+    "3": 3,
+    "4": 4,
+    "5": 5,
+    "6": 6,
+    "7": 7,
+  };
+
+  return weekdays[value] ?? null;
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {

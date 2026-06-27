@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   buildRunTimeline,
   getRunGuidance,
-  summarizeRunEventKinds,
   type RunTimelineItem,
 } from "../../shared/agentRunInsights";
 import { summarizeHandoffReviewCards } from "../../shared/agentHandoff";
@@ -19,7 +18,16 @@ import {
   projectRunGraph,
   type RunGraphGate,
 } from "../../shared/runGraph";
+import {
+  buildRunRecordSummary,
+  compareRunRecordPriority,
+  getRunRecordAction,
+  getRunRecordStatus,
+  toRunRecordListItem,
+  type RunRecordAction,
+} from "../../shared/runRecordViewModel";
 import { demoRuns } from "../demoAgentData";
+import { Icon } from "./Icon";
 import { RunTrajectoryPanel } from "./RunTrajectoryPanel";
 
 type RunsStatus =
@@ -27,14 +35,24 @@ type RunsStatus =
   | { kind: "error"; message: string }
   | { kind: "loading"; message: string };
 
+type SelectedRunSelection = {
+  id: string;
+  source: "active" | "history";
+};
+
 export function RunsPanel() {
   const [runs, setRuns] = useState<AgentRunRecord[]>([]);
   const [activeExecutions, setActiveExecutions] = useState<
     AgentExecutionCheckpoint[]
   >([]);
   const [evalCandidates, setEvalCandidates] = useState<AgentEvalCandidate[]>([]);
-  const [selectedRunId, setSelectedRunId] = useState("");
+  const [selectedRunSelection, setSelectedRunSelection] =
+    useState<SelectedRunSelection | null>(null);
   const [selectedEventId, setSelectedEventId] = useState("");
+  const [activeRunsTab, setActiveRunsTab] = useState<
+    "action" | "history" | "details"
+  >("action");
+  const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
   const [trajectoryEvents, setTrajectoryEvents] = useState<AgentTrajectoryEvent[]>([]);
   const [kernelEvents, setKernelEvents] = useState<KernelEvent[]>([]);
   const [status, setStatus] = useState<RunsStatus>({
@@ -47,7 +65,11 @@ export function RunsPanel() {
       setRuns(demoRuns);
       setEvalCandidates([]);
       setKernelEvents(createDemoKernelEvents());
-      setSelectedRunId(demoRuns[0]?.id ?? "");
+      setSelectedRunSelection((currentSelection) =>
+        selectFirstRun
+          ? null
+          : resolveSelectedRunSelection(currentSelection, demoRuns, []),
+      );
       setStatus({
         kind: "idle",
         message: "浏览器预览模式，正在展示演示运行数据。",
@@ -64,16 +86,15 @@ export function RunsPanel() {
         setRuns(loadedRuns);
         setActiveExecutions(loadedExecutions);
         setEvalCandidates(loadedEvalCandidates);
-        setSelectedRunId((currentRunId) => {
-          if (
-            !selectFirstRun &&
-            currentRunId &&
-            loadedRuns.some((run) => run.id === currentRunId)
-          ) {
-            return currentRunId;
-          }
-          return loadedRuns[0]?.id ?? "";
-        });
+        setSelectedRunSelection((currentSelection) =>
+          selectFirstRun
+            ? null
+            : resolveSelectedRunSelection(
+                currentSelection,
+                loadedRuns,
+                loadedExecutions,
+              ),
+        );
         setStatus({
           kind: "idle",
           message:
@@ -125,9 +146,61 @@ export function RunsPanel() {
     });
   }, []);
 
-  const selectedRun = useMemo(
-    () => runs.find((run) => run.id === selectedRunId) ?? runs[0] ?? null,
-    [runs, selectedRunId],
+  const sortedRuns = useMemo(
+    () => [...runs].sort(compareRunRecordPriority),
+    [runs],
+  );
+  const sortedActiveExecutions = useMemo(
+    () => [...activeExecutions].sort(compareRunRecordPriority),
+    [activeExecutions],
+  );
+  const selectedActiveExecution = useMemo(
+    () =>
+      selectedRunSelection?.source === "active"
+        ? activeExecutions.find(
+            (execution) => execution.runId === selectedRunSelection.id,
+          ) ?? null
+        : null,
+    [activeExecutions, selectedRunSelection],
+  );
+  const selectedPersistedRun = useMemo(
+    () =>
+      selectedRunSelection?.source === "history"
+        ? runs.find((run) => run.id === selectedRunSelection.id) ?? null
+        : null,
+    [runs, selectedRunSelection],
+  );
+  const selectedRunRecord =
+    selectedActiveExecution ??
+    selectedPersistedRun ??
+    sortedActiveExecutions[0] ??
+    sortedRuns[0] ??
+    null;
+  const selectedRecordId = selectedRunRecord
+    ? getRunRecordStableId(selectedRunRecord)
+    : "";
+  const selectedRun =
+    selectedRunRecord && isPersistedRunRecord(selectedRunRecord)
+      ? selectedRunRecord
+      : selectedPersistedRun;
+  const selectedRunAction = selectedRunRecord
+    ? getRunRecordAction(selectedRunRecord)
+    : null;
+  const selectedRunStatus = selectedRunRecord
+    ? getRunRecordStatus(selectedRunRecord)
+    : null;
+  const selectedRunSummary = selectedRunRecord
+    ? isPersistedRunRecord(selectedRunRecord)
+      ? buildRunRecordSummary(selectedRunRecord, trajectoryEvents)
+      : buildActiveRunRecordSummary(selectedRunRecord, selectedRunAction)
+    : null;
+  const recentRunItems = useMemo(
+    () => sortedRuns.slice(0, 8).map(toRunRecordListItem),
+    [sortedRuns],
+  );
+  const activeExecutionItems = useMemo(
+    () => sortedActiveExecutions.slice(0, 4).map(toRunRecordListItem),
+    [sortedActiveExecutions],
   );
   const timeline = useMemo(
     () => (selectedRun ? buildRunTimeline(selectedRun) : []),
@@ -136,7 +209,6 @@ export function RunsPanel() {
   const selectedEvent =
     timeline.find((item) => item.id === selectedEventId) ?? timeline[0] ?? null;
   const guidance = selectedRun ? getRunGuidance(selectedRun) : null;
-  const summary = selectedRun ? summarizeRunEventKinds(selectedRun) : null;
   const selectedEvalCandidate = useMemo(
     () =>
       selectedRun
@@ -156,7 +228,7 @@ export function RunsPanel() {
 
   useEffect(() => {
     setSelectedEventId("");
-  }, [selectedRunId]);
+  }, [selectedRecordId]);
 
   useEffect(() => {
     if (!selectedRun) {
@@ -203,7 +275,7 @@ export function RunsPanel() {
     }
 
     setRuns((currentRuns) => [result.run, ...currentRuns]);
-    setSelectedRunId(result.run.id);
+    setSelectedRunSelection({ id: result.run.id, source: "history" });
     setStatus({
       kind: result.run.status === "succeeded" ? "idle" : "error",
       message: `重试完成：${translateRunStatus(result.run.status)}。`,
@@ -237,7 +309,7 @@ export function RunsPanel() {
     setActiveExecutions((currentExecutions) =>
       currentExecutions.filter((item) => item.runId !== execution.runId),
     );
-    setSelectedRunId(result.run.id);
+    setSelectedRunSelection({ id: result.run.id, source: "history" });
     setStatus({
       kind: result.run.status === "succeeded" ? "idle" : "error",
       message: `恢复完成：${translateRunStatus(result.run.status)}。`,
@@ -292,14 +364,14 @@ export function RunsPanel() {
     if (!window.buildingAgent) {
       setStatus({
         kind: "idle",
-        message: "浏览器预览模式无法生成真实评测候选。",
+        message: "浏览器预览模式无法生成真实回归样例。",
       });
       return;
     }
 
     setStatus({
       kind: "loading",
-      message: `正在生成评测候选：${selectedRun.taskName}`,
+      message: `正在生成回归样例：${selectedRun.taskName}`,
     });
     try {
       const result = await window.buildingAgent.generateEvalCandidateForRun(
@@ -331,195 +403,485 @@ export function RunsPanel() {
       setStatus({
         kind: "idle",
         message: result.existing
-          ? "已加载这条运行的现有评测候选。"
-          : "评测候选已生成，等待审核。",
+          ? "已加载这次任务的现有回归样例。"
+          : "回归样例已生成，等待审核。",
       });
     } catch (error) {
       setStatus({
         kind: "error",
-        message:
-          error instanceof Error ? error.message : "无法生成评测候选。",
+        message: error instanceof Error ? error.message : "无法生成回归样例。",
       });
     }
   }
 
+  async function handleRunRecordAction(action: RunRecordAction) {
+    if (!selectedRunRecord) {
+      return;
+    }
+
+    if (action.kind === "retry") {
+      if (!selectedRun) {
+        setStatus({
+          kind: "error",
+          message: "这条任务还没有完成记录，暂时不能重新运行。",
+        });
+        return;
+      }
+      await handleRetrySelectedRun();
+      return;
+    }
+
+    if (action.kind === "continue") {
+      const checkpoint = activeExecutions.find(
+        (execution) => execution.runId === selectedRecordId,
+      );
+      if (checkpoint) {
+        await handleResumeExecution(checkpoint);
+      } else {
+        setStatus({
+          kind: "error",
+          message: "没有找到可恢复检查点，请重新运行任务。",
+        });
+      }
+      return;
+    }
+
+    if (action.kind === "stop") {
+      const checkpoint = activeExecutions.find(
+        (execution) => execution.runId === selectedRecordId,
+      );
+      if (checkpoint) {
+        await handlePauseExecution(checkpoint);
+      } else {
+        setStatus({
+          kind: "idle",
+          message: "这条任务当前没有运行中的检查点。",
+        });
+      }
+      return;
+    }
+
+    if (action.kind === "view_details" || action.kind === "view_result") {
+      setActiveRunsTab("details");
+      setShowTechnicalDetails(action.kind === "view_details" && Boolean(selectedRun));
+      if (action.kind === "view_details" && !selectedRun) {
+        setStatus({
+          kind: "idle",
+          message: "任务完成后会显示技术详情。",
+        });
+      }
+      return;
+    }
+
+    if (action.kind === "open_chat") {
+      navigateToHash("chat");
+      return;
+    }
+
+    if (action.kind === "review_permission") {
+      navigateToHash("chat");
+      return;
+    }
+
+    if (action.kind === "open_settings") {
+      navigateToHash("settings");
+    }
+  }
+
   return (
-    <section className="runs-panel">
-      <div className="panel-heading">
+    <section className="runs-panel task-records-panel">
+      <div className="panel-heading task-records-heading">
         <div>
-          <h2>运行</h2>
-          <p>按顺序回放模型、权限、工具和记忆事件。</p>
+          <h2>任务概览</h2>
+          <p>看任务是否完成。需要处理时，直接给你下一步。</p>
         </div>
-        <span className={`settings-state is-${status.kind}`}>
-          {runs.length} 条最近记录
-        </span>
+        <div className="task-records-heading-actions">
+          <button
+            className="secondary-action"
+            onClick={() => navigateToHash("chat")}
+            type="button"
+          >
+            打开会话
+          </button>
+          <button
+            className="primary-action"
+            onClick={() => navigateToHash("scheduled-tasks")}
+            type="button"
+          >
+            新任务
+          </button>
+        </div>
       </div>
 
-      <div className="runs-layout">
-        <section className="run-list-panel" aria-label="运行历史">
-          {activeExecutions.length ? (
-            <div className="active-run-list" aria-label="可恢复运行">
-              {activeExecutions.map((execution) => (
-                <article
-                  className={`run-list-item is-${execution.status}`}
-                  key={execution.runId}
-                >
-                  <span>{translateRunStatus(execution.status)}</span>
-                  <strong>{execution.runId}</strong>
-                  <small>
-                    {execution.currentStepId
-                      ? `步骤 ${execution.currentStepId}`
-                      : "等待恢复"}
-                  </small>
-                  {execution.runContext ? (
-                    <small>
-                      {formatAgentRole(execution.runContext.agentRole)} /{" "}
-                      {formatWorkspaceLabel(execution.runContext.workspaceRoot)}
-                    </small>
-                  ) : null}
-                  <div className="run-list-actions">
-                    {execution.status === "paused" ? (
-                      <button
-                        className="secondary-action"
-                        disabled={status.kind === "loading"}
-                        onClick={() => void handleResumeExecution(execution)}
-                        type="button"
-                      >
-                        恢复
-                      </button>
-                    ) : (
-                      <button
-                        className="secondary-action"
-                        disabled={status.kind === "loading"}
-                        onClick={() => void handlePauseExecution(execution)}
-                        type="button"
-                      >
-                        暂停
-                      </button>
-                    )}
-                  </div>
-                </article>
-              ))}
+      {selectedRunRecord &&
+      selectedRunStatus &&
+      selectedRunAction &&
+      selectedRunSummary ? (
+        <>
+          <article className={`task-record-focus is-${selectedRunStatus.tone}`}>
+            <div className="task-record-focus-main">
+              <span className={`task-record-status is-${selectedRunStatus.tone}`}>
+                {selectedRunStatus.label}
+              </span>
+              <h3>{selectedRunSummary.title}</h3>
+              <p>{selectedRunSummary.outcome}</p>
             </div>
-          ) : null}
-
-          {runs.length ? (
-            runs.map((run) => (
+            <div className="task-record-next">
+              <span>下一步</span>
+              <strong>{selectedRunSummary.nextStep}</strong>
               <button
-                className={`run-list-item ${
-                  run.id === selectedRun?.id ? "is-selected" : ""
-                } is-${run.status}`}
-                key={run.id}
-                onClick={() => setSelectedRunId(run.id)}
+                className="primary-action"
+                disabled={status.kind === "loading"}
+                onClick={() => void handleRunRecordAction(selectedRunAction.primary)}
                 type="button"
               >
-                <span>{translateRunStatus(run.status)}</span>
-                <strong>{run.taskName}</strong>
-                <small>
-                  {run.runContext
-                    ? `${formatAgentRole(run.runContext.agentRole)} / ${formatWorkspaceLabel(
-                        run.runContext.workspaceRoot,
-                      )}`
-                    : formatDate(run.finishedAt)}
-                </small>
+                {selectedRunAction.primary.label}
               </button>
-            ))
-          ) : (
-            <div className="empty-state">还没有运行记录。</div>
-          )}
-        </section>
-
-        <section className="timeline-panel" aria-label="运行时间线">
-          {selectedRun ? (
-            <>
-              <div className="run-summary-card">
-                <span className={`run-status is-${selectedRun.status}`}>
-                  {translateRunStatus(selectedRun.status)}
-                </span>
-                <div>
-                  <h3>{selectedRun.taskName}</h3>
-                  <p>{selectedRun.summary}</p>
-                </div>
-                <button
-                  className="secondary-action"
-                  disabled={status.kind === "loading"}
-                  onClick={() => void handleRetrySelectedRun()}
-                  type="button"
-                >
-                  重新运行任务
-                </button>
-              </div>
-
-              {summary ? (
-                <dl className="run-metrics">
-                  <div>
-                    <dt>模型</dt>
-                    <dd>{summary.model}</dd>
-                  </div>
-                  <div>
-                    <dt>权限</dt>
-                    <dd>{summary.permission}</dd>
-                  </div>
-                  <div>
-                    <dt>工具</dt>
-                    <dd>{summary.tool}</dd>
-                  </div>
-                  <div>
-                    <dt>记忆</dt>
-                    <dd>{summary.memory}</dd>
-                  </div>
-                  <div>
-                    <dt>错误</dt>
-                    <dd>{summary.error}</dd>
-                  </div>
-                </dl>
-              ) : null}
-
-              <div className="timeline-list">
-                {timeline.map((item) => (
+              <div className="task-record-secondary-actions">
+                {selectedRunAction.secondary.map((action) => (
                   <button
-                    className={`timeline-event is-${item.kind} ${
-                      item.id === selectedEvent?.id ? "is-selected" : ""
-                    }`}
-                    key={item.id}
-                    onClick={() => setSelectedEventId(item.id)}
+                    className="secondary-action"
+                    disabled={status.kind === "loading"}
+                    key={action.kind}
+                    onClick={() => void handleRunRecordAction(action)}
                     type="button"
                   >
-                    <span aria-hidden="true" />
-                    <div>
-                      <strong>{item.title}</strong>
-                      <small>
-                        {item.detail ? `${item.detail} / ` : ""}
-                        {formatTime(item.createdAt)}
-                      </small>
-                    </div>
+                    {action.label}
                   </button>
                 ))}
               </div>
-            </>
-          ) : (
-            <div className="empty-state">运行一个任务后，这里会生成时间线。</div>
-          )}
-        </section>
+            </div>
+          </article>
 
-        <RunInspector
-          canGenerateEvalCandidate={Boolean(
-            selectedRun && isTerminalRun(selectedRun),
-          )}
-          evalCandidate={selectedEvalCandidate}
-          event={selectedEvent}
-          guidance={guidance}
-          isBusy={status.kind === "loading"}
-          kernelEvents={selectedKernelEvents}
-          onGenerateEvalCandidate={handleGenerateEvalCandidateForSelectedRun}
-          run={selectedRun}
-          trajectoryEvents={trajectoryEvents}
-        />
-      </div>
+          <div
+            className="task-record-mobile-tabs"
+            role="tablist"
+            aria-label="任务记录视图"
+          >
+            <button
+              className={activeRunsTab === "action" ? "is-active" : ""}
+              onClick={() => setActiveRunsTab("action")}
+              type="button"
+            >
+              处理
+            </button>
+            <button
+              className={activeRunsTab === "history" ? "is-active" : ""}
+              onClick={() => setActiveRunsTab("history")}
+              type="button"
+            >
+              历史
+            </button>
+            <button
+              className={activeRunsTab === "details" ? "is-active" : ""}
+              onClick={() => setActiveRunsTab("details")}
+              type="button"
+            >
+              详情
+            </button>
+          </div>
+
+          <div className="task-records-content">
+            <section
+              className={`task-record-card task-record-history ${
+                activeRunsTab === "history" ? "is-active-mobile" : ""
+              }`}
+              aria-label="最近任务"
+            >
+              <div className="task-record-card-header">
+                <h3>最近任务</h3>
+                <span>{recentRunItems.length} 次</span>
+              </div>
+              {activeExecutionItems.length ? (
+                <div className="task-record-active-list" aria-label="正在进行">
+                  {activeExecutionItems.map((item) => (
+                    <button
+                      className={`task-record-row is-active-execution ${
+                        selectedRunRecord &&
+                        !isPersistedRunRecord(selectedRunRecord) &&
+                        item.id === selectedRecordId
+                          ? "is-selected"
+                          : ""
+                      }`}
+                      key={`active-${item.id}`}
+                      onClick={() =>
+                        setSelectedRunSelection({
+                          id: item.id,
+                          source: "active",
+                        })
+                      }
+                      type="button"
+                    >
+                      <span className={`task-record-status is-${item.status.tone}`}>
+                        {item.status.label}
+                      </span>
+                      <strong>{item.title}</strong>
+                      <small>{item.subtitle}</small>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              <div className="task-record-list">
+                {recentRunItems.map((item) => (
+                  <button
+                    className={`task-record-row ${
+                      selectedRunRecord &&
+                      isPersistedRunRecord(selectedRunRecord) &&
+                      item.id === selectedRecordId
+                        ? "is-selected"
+                        : ""
+                    }`}
+                    key={item.id}
+                    onClick={() =>
+                      setSelectedRunSelection({
+                        id: item.id,
+                        source: "history",
+                      })
+                    }
+                    type="button"
+                  >
+                    <span className={`task-record-status is-${item.status.tone}`}>
+                      {item.status.label}
+                    </span>
+                    <strong>{item.title}</strong>
+                    <small>{item.subtitle}</small>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section
+              className={`task-record-card task-record-details ${
+                activeRunsTab === "details" || activeRunsTab === "action"
+                  ? "is-active-mobile"
+                  : ""
+              }`}
+              aria-label="任务详情"
+            >
+              <div className="task-record-card-header">
+                <h3>这次发生了什么</h3>
+                <span>简版详情</span>
+              </div>
+              <div className="task-record-step-list">
+                {selectedRunSummary.simpleSteps.length ? (
+                  selectedRunSummary.simpleSteps.map((step, index) => (
+                    <article
+                      className={`task-record-step is-${step.tone}`}
+                      key={`${step.createdAt}-${index}`}
+                    >
+                      <span>{index + 1}</span>
+                      <div>
+                        <strong>{step.title}</strong>
+                        <p>{step.detail}</p>
+                      </div>
+                      <time>{formatTime(step.createdAt)}</time>
+                    </article>
+                  ))
+                ) : (
+                  <p className="task-record-empty-copy">
+                    这次任务没有可查看的步骤。
+                  </p>
+                )}
+              </div>
+
+              <div className="task-record-facts">
+                <span>
+                  {selectedRunSummary.producedArtifacts
+                    ? "已生成产物"
+                    : "未生成产物"}
+                </span>
+                <span>
+                  {selectedRunSummary.wroteMemory ? "已写入记忆" : "未写入记忆"}
+                </span>
+                <span>{selectedRunSummary.technicalEventCount} 条技术事件</span>
+                <span>{selectedRunSummary.trajectoryEventCount} 条证据事件</span>
+              </div>
+
+              <details
+                className="task-record-technical-details"
+                open={showTechnicalDetails}
+                onToggle={(event) =>
+                  setShowTechnicalDetails(event.currentTarget.open)
+                }
+              >
+                <summary>技术详情</summary>
+                {selectedRun ? (
+                  <RunInspector
+                    canGenerateEvalCandidate={Boolean(isTerminalRun(selectedRun))}
+                    evalCandidate={selectedEvalCandidate}
+                    event={selectedEvent}
+                    guidance={guidance}
+                    isBusy={status.kind === "loading"}
+                    kernelEvents={selectedKernelEvents}
+                    onGenerateEvalCandidate={
+                      handleGenerateEvalCandidateForSelectedRun
+                    }
+                    run={selectedRun}
+                    trajectoryEvents={trajectoryEvents}
+                  />
+                ) : (
+                  <p className="task-record-empty-copy">
+                    这次任务还没有可查看的技术详情，完成后会在这里出现。
+                  </p>
+                )}
+              </details>
+            </section>
+          </div>
+        </>
+      ) : (
+        <section className="task-record-empty-state">
+          <Icon name="task" size={28} />
+          <h3>还没有任务记录</h3>
+          <p>从会话里发起一个任务，完成后会在这里看到结果和步骤。</p>
+          <button
+            className="primary-action"
+            onClick={() => navigateToHash("chat")}
+            type="button"
+          >
+            打开会话
+          </button>
+        </section>
+      )}
 
       <p className={`settings-message is-${status.kind}`}>{status.message}</p>
     </section>
   );
+}
+
+function navigateToHash(sectionId: "chat" | "scheduled-tasks" | "settings") {
+  const nextHash = `#${sectionId}`;
+
+  if (window.location.hash === nextHash) {
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+    return;
+  }
+
+  window.location.hash = nextHash;
+}
+
+function resolveSelectedRunSelection(
+  selection: SelectedRunSelection | null,
+  runs: AgentRunRecord[],
+  activeExecutions: AgentExecutionCheckpoint[],
+): SelectedRunSelection | null {
+  if (!selection) {
+    return null;
+  }
+
+  const activeExists = activeExecutions.some(
+    (execution) => execution.runId === selection.id,
+  );
+  const historyExists = runs.some((run) => run.id === selection.id);
+
+  if (selection.source === "active") {
+    if (activeExists) {
+      return selection;
+    }
+
+    return historyExists ? { id: selection.id, source: "history" } : null;
+  }
+
+  if (historyExists) {
+    return selection;
+  }
+
+  return activeExists ? { id: selection.id, source: "active" } : null;
+}
+
+function isPersistedRunRecord(
+  record: AgentRunRecord | AgentExecutionCheckpoint,
+): record is AgentRunRecord {
+  return "taskName" in record;
+}
+
+function getRunRecordStableId(
+  record: AgentRunRecord | AgentExecutionCheckpoint,
+): string {
+  return isPersistedRunRecord(record) ? record.id : record.runId;
+}
+
+function buildActiveRunRecordSummary(
+  execution: AgentExecutionCheckpoint,
+  action: ReturnType<typeof getRunRecordAction> | null,
+): ReturnType<typeof buildRunRecordSummary> {
+  const status = getRunRecordStatus(execution);
+  const simpleSteps = execution.steps.length
+    ? execution.steps.map((step) => ({
+        title: step.description || `步骤 ${step.id}`,
+        detail: buildActiveExecutionStepDetail(step),
+        tone: getActiveExecutionStepTone(step),
+        createdAt: step.startedAt ?? step.finishedAt ?? execution.updatedAt,
+      }))
+    : [
+        {
+          title: "等待记录步骤",
+          detail: "任务正在准备或运行，完成后会同步步骤记录。",
+          tone: status.tone,
+          createdAt: execution.updatedAt,
+        },
+      ];
+
+  return {
+    title: execution.taskId ? `任务 ${execution.taskId}` : `运行 ${execution.runId}`,
+    outcome: status.description,
+    nextStep: action ? `可以选择「${action.primary.label}」。` : "查看任务详情。",
+    producedArtifacts: false,
+    wroteMemory: false,
+    simpleSteps,
+    technicalEventCount: execution.steps.length,
+    trajectoryEventCount: 0,
+  };
+}
+
+function buildActiveExecutionStepDetail(
+  step: AgentExecutionCheckpoint["steps"][number],
+): string {
+  if (step.failureMessage) {
+    return step.failureMessage;
+  }
+
+  if (step.expectedTool) {
+    return `工具：${step.expectedTool}`;
+  }
+
+  return step.expectedOutcome || formatExecutionStepState(step.state);
+}
+
+function getActiveExecutionStepTone(
+  step: AgentExecutionCheckpoint["steps"][number],
+): ReturnType<typeof getRunRecordStatus>["tone"] {
+  if (step.state === "failed") {
+    return "danger";
+  }
+
+  if (step.state === "waiting_for_approval") {
+    return "attention";
+  }
+
+  if (step.state === "completed") {
+    return "success";
+  }
+
+  return "info";
+}
+
+function formatExecutionStepState(
+  state: AgentExecutionCheckpoint["steps"][number]["state"],
+): string {
+  const labels: Record<
+    AgentExecutionCheckpoint["steps"][number]["state"],
+    string
+  > = {
+    completed: "已完成",
+    failed: "需要处理",
+    pending: "等待开始",
+    running: "正在执行",
+    skipped: "已跳过",
+    waiting_for_approval: "等待授权",
+    waiting_for_tool: "等待工具",
+  };
+
+  return labels[state];
 }
 
 function RunInspector(props: {
@@ -567,21 +929,21 @@ function RunInspector(props: {
   );
 
   return (
-    <aside className="run-inspector" aria-label="运行检查器">
+    <aside className="run-inspector" aria-label="任务详情">
       <div className="inspector-section">
-        <span className="inspector-label">处理建议</span>
+        <span className="inspector-label">下一步</span>
         {props.guidance ? (
           <article className={`guidance-card is-${props.guidance.tone}`}>
             <strong>{props.guidance.title}</strong>
             <p>{props.guidance.action}</p>
           </article>
         ) : (
-          <p>还没有选中运行。</p>
+          <p>还没有选中任务。</p>
         )}
       </div>
 
       <div className="inspector-section">
-        <span className="inspector-label">选中事件</span>
+        <span className="inspector-label">步骤详情</span>
         {props.event ? (
           <>
             <h3>{props.event.title}</h3>
@@ -604,25 +966,29 @@ function RunInspector(props: {
             </pre>
           </>
         ) : (
-          <p>选择一个事件后，可以查看 payload 详情。</p>
+          <p>选择一个步骤后，可以查看原始详情。</p>
         )}
       </div>
 
-      <div className="inspector-section" aria-label="Run Graph">
-        <span className="inspector-label">Run Graph</span>
+      <div
+        className="inspector-section"
+        aria-label="证据链"
+        data-technical-surface="Run Graph"
+      >
+        <span className="inspector-label">证据链</span>
         {runGraph ? (
           <>
             <dl className="run-graph-summary">
               <div>
-                <dt>节点</dt>
+                <dt>证据点</dt>
                 <dd>{runGraph.nodes.length}</dd>
               </div>
               <div>
-                <dt>边</dt>
+                <dt>关联</dt>
                 <dd>{runGraph.edges.length}</dd>
               </div>
               <div>
-                <dt>Gate</dt>
+                <dt>审核点</dt>
                 <dd>{runGraph.gates.length}</dd>
               </div>
               <div>
@@ -647,16 +1013,20 @@ function RunInspector(props: {
                 ))}
               </div>
             ) : (
-              <p>尚未记录 Gate。</p>
+              <p>尚未记录审核点。</p>
             )}
           </>
         ) : (
-          <p>选择一条运行后，可以查看证据合成图。</p>
+          <p>选择一条任务记录后，可以查看证据链。</p>
         )}
       </div>
 
-      <div className="inspector-section" aria-label="Kernel Events">
-        <span className="inspector-label">Kernel Events</span>
+      <div
+        className="inspector-section"
+        aria-label="高级日志"
+        data-technical-surface="Kernel Events"
+      >
+        <span className="inspector-label">高级日志</span>
         {kernelTimelineCards.length ? (
           <>
             {kernelRunView ? (
@@ -666,7 +1036,7 @@ function RunInspector(props: {
                   <dd>{translateRunStatus(kernelRunView.status)}</dd>
                 </div>
                 <div>
-                  <dt>Turn</dt>
+                  <dt>轮次</dt>
                   <dd>
                     {kernelRunView.turn}/{kernelRunView.maxTurns || "?"}
                   </dd>
@@ -692,7 +1062,7 @@ function RunInspector(props: {
             </div>
           </>
         ) : (
-          <p>No kernel events recorded for this run.</p>
+          <p>这次任务没有记录高级日志。</p>
         )}
       </div>
 
@@ -751,8 +1121,12 @@ function RunInspector(props: {
       ) : null}
 
       {props.run ? (
-        <div className="inspector-section" aria-label="Eval Candidate">
-          <span className="inspector-label">Eval Candidate</span>
+        <div
+          className="inspector-section"
+          aria-label="回归样例"
+          data-technical-surface="Eval Candidate"
+        >
+          <span className="inspector-label">回归样例</span>
           {props.evalCandidate ? (
             <dl className="inspector-dl">
               <div>
@@ -760,31 +1134,35 @@ function RunInspector(props: {
                 <dd>{translateEvalCandidateStatus(props.evalCandidate.status)}</dd>
               </div>
               <div>
-                <dt>Fixture</dt>
+                <dt>样例</dt>
                 <dd>{props.evalCandidate.fixture.id}</dd>
               </div>
             </dl>
           ) : props.canGenerateEvalCandidate ? (
             <>
-              <p>这条运行还没有评测候选。</p>
+              <p>这次任务还没有回归样例。</p>
               <button
                 className="primary-action"
                 disabled={props.isBusy}
                 onClick={() => props.onGenerateEvalCandidate()}
                 type="button"
               >
-                生成评测候选
+                生成回归样例
               </button>
             </>
           ) : (
-            <p>运行结束后可生成评测候选。</p>
+            <p>任务结束后可生成回归样例。</p>
           )}
         </div>
       ) : null}
 
       {handoffCards.length ? (
-        <div className="inspector-section" aria-label="Handoff Review">
-          <span className="inspector-label">Handoff Review</span>
+        <div
+          className="inspector-section"
+          aria-label="协作审核"
+          data-technical-surface="Handoff Review"
+        >
+          <span className="inspector-label">协作审核</span>
           {handoffCards.map((card) => (
             <article
               className={`handoff-review-card is-${card.status}`}
