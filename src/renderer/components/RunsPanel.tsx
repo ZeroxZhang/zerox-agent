@@ -463,41 +463,18 @@ export function RunsPanel() {
     }
 
     if (action.kind === "open_chat") {
-      setStatus({
-        kind: "idle",
-        message: "可以从左侧会话列表打开原会话；后续版本会直接跳转到关联会话。",
-      });
+      navigateToHash("chat");
       return;
     }
 
     if (action.kind === "review_permission") {
-      setStatus({
-        kind: "idle",
-        message: "请到设置或工具权限中查看这次任务需要的授权。",
-      });
+      navigateToHash("settings");
       return;
     }
 
     if (action.kind === "open_settings") {
-      setStatus({
-        kind: "idle",
-        message: "请打开设置检查模型配置。",
-      });
+      navigateToHash("settings");
     }
-  }
-
-  function handleOpenChatMessage() {
-    setStatus({
-      kind: "idle",
-      message: "可以从左侧会话列表打开原会话；后续版本会直接跳转到关联会话。",
-    });
-  }
-
-  function handleNewTaskMessage() {
-    setStatus({
-      kind: "idle",
-      message: "可以回到会话输入新任务；后续版本会直接打开新任务入口。",
-    });
   }
 
   return (
@@ -510,14 +487,14 @@ export function RunsPanel() {
         <div className="task-records-heading-actions">
           <button
             className="secondary-action"
-            onClick={handleOpenChatMessage}
+            onClick={() => navigateToHash("chat")}
             type="button"
           >
             打开会话
           </button>
           <button
             className="primary-action"
-            onClick={handleNewTaskMessage}
+            onClick={() => navigateToHash("scheduled-tasks")}
             type="button"
           >
             新任务
@@ -729,7 +706,7 @@ export function RunsPanel() {
           <p>从会话里发起一个任务，完成后会在这里看到结果和步骤。</p>
           <button
             className="primary-action"
-            onClick={handleOpenChatMessage}
+            onClick={() => navigateToHash("chat")}
             type="button"
           >
             打开会话
@@ -740,6 +717,17 @@ export function RunsPanel() {
       <p className={`settings-message is-${status.kind}`}>{status.message}</p>
     </section>
   );
+}
+
+function navigateToHash(sectionId: "chat" | "scheduled-tasks" | "settings") {
+  const nextHash = `#${sectionId}`;
+
+  if (window.location.hash === nextHash) {
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+    return;
+  }
+
+  window.location.hash = nextHash;
 }
 
 function isPersistedRunRecord(
