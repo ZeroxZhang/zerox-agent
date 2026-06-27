@@ -148,10 +148,9 @@ export function RunsPanel() {
     () => [...runs].sort(compareRunRecordPriority),
     [runs],
   );
-  const sortedRunRecords = useMemo(
-    () =>
-      [...activeExecutions, ...sortedRuns].sort(compareTaskRecordPriority),
-    [activeExecutions, sortedRuns],
+  const sortedActiveExecutions = useMemo(
+    () => [...activeExecutions].sort(compareRunRecordPriority),
+    [activeExecutions],
   );
   const selectedActiveExecution = useMemo(
     () =>
@@ -166,7 +165,8 @@ export function RunsPanel() {
   const selectedRunRecord =
     selectedActiveExecution ??
     selectedPersistedRun ??
-    sortedRunRecords[0] ??
+    sortedActiveExecutions[0] ??
+    sortedRuns[0] ??
     null;
   const selectedRecordId = selectedRunRecord
     ? getRunRecordStableId(selectedRunRecord)
@@ -732,26 +732,6 @@ function navigateToHash(sectionId: "chat" | "scheduled-tasks" | "settings") {
   }
 
   window.location.hash = nextHash;
-}
-
-function compareTaskRecordPriority(
-  left: AgentRunRecord | AgentExecutionCheckpoint,
-  right: AgentRunRecord | AgentExecutionCheckpoint,
-): number {
-  if (left.status === right.status) {
-    const leftIsActive = !isPersistedRunRecord(left);
-    const rightIsActive = !isPersistedRunRecord(right);
-
-    if (leftIsActive && !rightIsActive) {
-      return -1;
-    }
-
-    if (!leftIsActive && rightIsActive) {
-      return 1;
-    }
-  }
-
-  return compareRunRecordPriority(left, right);
 }
 
 function isPersistedRunRecord(
