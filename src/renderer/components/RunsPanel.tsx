@@ -84,7 +84,10 @@ export function RunsPanel() {
           if (
             !selectFirstRun &&
             currentRunId &&
-            loadedRuns.some((run) => run.id === currentRunId)
+            (loadedRuns.some((run) => run.id === currentRunId) ||
+              loadedExecutions.some(
+                (execution) => execution.runId === currentRunId,
+              ))
           ) {
             return currentRunId;
           }
@@ -145,22 +148,39 @@ export function RunsPanel() {
     () => [...runs].sort(compareRunRecordPriority),
     [runs],
   );
-  const selectedRun = useMemo(
+  const selectedActiveExecution = useMemo(
     () =>
-      runs.find((run) => run.id === selectedRunId) ?? sortedRuns[0] ?? null,
-    [runs, selectedRunId, sortedRuns],
+      activeExecutions.find((execution) => execution.runId === selectedRunId) ??
+      null,
+    [activeExecutions, selectedRunId],
   );
-  const timeline = useMemo(
-    () => (selectedRun ? buildRunTimeline(selectedRun) : []),
-    [selectedRun],
+  const selectedPersistedRun = useMemo(
+    () => runs.find((run) => run.id === selectedRunId) ?? null,
+    [runs, selectedRunId],
   );
-  const selectedEvent =
-    timeline.find((item) => item.id === selectedEventId) ?? timeline[0] ?? null;
-  const guidance = selectedRun ? getRunGuidance(selectedRun) : null;
-  const selectedRunStatus = selectedRun ? getRunRecordStatus(selectedRun) : null;
-  const selectedRunAction = selectedRun ? getRunRecordAction(selectedRun) : null;
-  const selectedRunSummary = selectedRun
-    ? buildRunRecordSummary(selectedRun, trajectoryEvents)
+  const selectedRunRecord =
+    selectedActiveExecution ??
+    selectedPersistedRun ??
+    sortedRuns[0] ??
+    activeExecutions[0] ??
+    null;
+  const selectedRecordId = selectedRunRecord
+    ? getRunRecordStableId(selectedRunRecord)
+    : "";
+  const selectedRun =
+    selectedRunRecord && isPersistedRunRecord(selectedRunRecord)
+      ? selectedRunRecord
+      : selectedPersistedRun;
+  const selectedRunAction = selectedRunRecord
+    ? getRunRecordAction(selectedRunRecord)
+    : null;
+  const selectedRunStatus = selectedRunRecord
+    ? getRunRecordStatus(selectedRunRecord)
+    : null;
+  const selectedRunSummary = selectedRunRecord
+    ? isPersistedRunRecord(selectedRunRecord)
+      ? buildRunRecordSummary(selectedRunRecord, trajectoryEvents)
+      : buildActiveRunRecordSummary(selectedRunRecord, selectedRunAction)
     : null;
   const recentRunItems = useMemo(
     () => sortedRuns.slice(0, 8).map(toRunRecordListItem),
@@ -170,6 +190,13 @@ export function RunsPanel() {
     () => activeExecutions.slice(0, 4).map(toRunRecordListItem),
     [activeExecutions],
   );
+  const timeline = useMemo(
+    () => (selectedRun ? buildRunTimeline(selectedRun) : []),
+    [selectedRun],
+  );
+  const selectedEvent =
+    timeline.find((item) => item.id === selectedEventId) ?? timeline[0] ?? null;
+  const guidance = selectedRun ? getRunGuidance(selectedRun) : null;
   const selectedEvalCandidate = useMemo(
     () =>
       selectedRun
@@ -189,7 +216,7 @@ export function RunsPanel() {
 
   useEffect(() => {
     setSelectedEventId("");
-  }, [selectedRunId]);
+  }, [selectedRecordId]);
 
   useEffect(() => {
     if (!selectedRun) {
@@ -377,18 +404,25 @@ export function RunsPanel() {
   }
 
   async function handleRunRecordAction(action: RunRecordAction) {
-    if (!selectedRun) {
+    if (!selectedRunRecord) {
       return;
     }
 
     if (action.kind === "retry") {
+      if (!selectedRun) {
+        setStatus({
+          kind: "error",
+          message: "这条任务还没有完成记录，暂时不能重新运行。",
+        });
+        return;
+      }
       await handleRetrySelectedRun();
       return;
     }
 
     if (action.kind === "continue") {
       const checkpoint = activeExecutions.find(
-        (execution) => execution.runId === selectedRun.id,
+        (execution) => execution.runId === selectedRecordId,
       );
       if (checkpoint) {
         await handleResumeExecution(checkpoint);
@@ -403,7 +437,7 @@ export function RunsPanel() {
 
     if (action.kind === "stop") {
       const checkpoint = activeExecutions.find(
-        (execution) => execution.runId === selectedRun.id,
+        (execution) => execution.runId === selectedRecordId,
       );
       if (checkpoint) {
         await handlePauseExecution(checkpoint);
@@ -418,7 +452,13 @@ export function RunsPanel() {
 
     if (action.kind === "view_details" || action.kind === "view_result") {
       setActiveRunsTab("details");
-      setShowTechnicalDetails(action.kind === "view_details");
+      setShowTechnicalDetails(action.kind === "view_details" && Boolean(selectedRun));
+      if (action.kind === "view_details" && !selectedRun) {
+        setStatus({
+          kind: "idle",
+          message: "任务完成后会显示技术详情。",
+        });
+      }
       return;
     }
 
@@ -446,6 +486,20 @@ export function RunsPanel() {
     }
   }
 
+  function handleOpenChatMessage() {
+    setStatus({
+      kind: "idle",
+      message: "可以从左侧会话列表打开原会话；后续版本会直接跳转到关联会话。",
+    });
+  }
+
+  function handleNewTaskMessage() {
+    setStatus({
+      kind: "idle",
+      message: "可以回到会话输入新任务；后续版本会直接打开新任务入口。",
+    });
+  }
+
   return (
     <section className="runs-panel task-records-panel">
       <div className="panel-heading task-records-heading">
@@ -454,16 +508,27 @@ export function RunsPanel() {
           <p>看任务是否完成。需要处理时，直接给你下一步。</p>
         </div>
         <div className="task-records-heading-actions">
-          <button className="secondary-action" type="button">
+          <button
+            className="secondary-action"
+            onClick={handleOpenChatMessage}
+            type="button"
+          >
             打开会话
           </button>
-          <button className="primary-action" type="button">
+          <button
+            className="primary-action"
+            onClick={handleNewTaskMessage}
+            type="button"
+          >
             新任务
           </button>
         </div>
       </div>
 
-      {selectedRun && selectedRunStatus && selectedRunAction && selectedRunSummary ? (
+      {selectedRunRecord &&
+      selectedRunStatus &&
+      selectedRunAction &&
+      selectedRunSummary ? (
         <>
           <article className={`task-record-focus is-${selectedRunStatus.tone}`}>
             <div className="task-record-focus-main">
@@ -543,7 +608,9 @@ export function RunsPanel() {
                 <div className="task-record-active-list" aria-label="正在进行">
                   {activeExecutionItems.map((item) => (
                     <button
-                      className="task-record-row is-active-execution"
+                      className={`task-record-row is-active-execution ${
+                        item.id === selectedRecordId ? "is-selected" : ""
+                      }`}
                       key={`active-${item.id}`}
                       onClick={() => setSelectedRunId(item.id)}
                       type="button"
@@ -561,7 +628,7 @@ export function RunsPanel() {
                 {recentRunItems.map((item) => (
                   <button
                     className={`task-record-row ${
-                      item.id === selectedRun.id ? "is-selected" : ""
+                      item.id === selectedRecordId ? "is-selected" : ""
                     }`}
                     key={item.id}
                     onClick={() => setSelectedRunId(item.id)}
@@ -632,19 +699,25 @@ export function RunsPanel() {
                 }
               >
                 <summary>技术详情</summary>
-                <RunInspector
-                  canGenerateEvalCandidate={Boolean(
-                    selectedRun && isTerminalRun(selectedRun),
-                  )}
-                  evalCandidate={selectedEvalCandidate}
-                  event={selectedEvent}
-                  guidance={guidance}
-                  isBusy={status.kind === "loading"}
-                  kernelEvents={selectedKernelEvents}
-                  onGenerateEvalCandidate={handleGenerateEvalCandidateForSelectedRun}
-                  run={selectedRun}
-                  trajectoryEvents={trajectoryEvents}
-                />
+                {selectedRun ? (
+                  <RunInspector
+                    canGenerateEvalCandidate={Boolean(isTerminalRun(selectedRun))}
+                    evalCandidate={selectedEvalCandidate}
+                    event={selectedEvent}
+                    guidance={guidance}
+                    isBusy={status.kind === "loading"}
+                    kernelEvents={selectedKernelEvents}
+                    onGenerateEvalCandidate={
+                      handleGenerateEvalCandidateForSelectedRun
+                    }
+                    run={selectedRun}
+                    trajectoryEvents={trajectoryEvents}
+                  />
+                ) : (
+                  <p className="task-record-empty-copy">
+                    这次任务还没有可查看的技术详情，完成后会在这里出现。
+                  </p>
+                )}
               </details>
             </section>
           </div>
@@ -654,7 +727,11 @@ export function RunsPanel() {
           <Icon name="task" size={28} />
           <h3>还没有任务记录</h3>
           <p>从会话里发起一个任务，完成后会在这里看到结果和步骤。</p>
-          <button className="primary-action" type="button">
+          <button
+            className="primary-action"
+            onClick={handleOpenChatMessage}
+            type="button"
+          >
             打开会话
           </button>
         </section>
@@ -663,6 +740,102 @@ export function RunsPanel() {
       <p className={`settings-message is-${status.kind}`}>{status.message}</p>
     </section>
   );
+}
+
+function isPersistedRunRecord(
+  record: AgentRunRecord | AgentExecutionCheckpoint,
+): record is AgentRunRecord {
+  return "taskName" in record;
+}
+
+function getRunRecordStableId(
+  record: AgentRunRecord | AgentExecutionCheckpoint,
+): string {
+  return isPersistedRunRecord(record) ? record.id : record.runId;
+}
+
+function buildActiveRunRecordSummary(
+  execution: AgentExecutionCheckpoint,
+  action: ReturnType<typeof getRunRecordAction> | null,
+): ReturnType<typeof buildRunRecordSummary> {
+  const status = getRunRecordStatus(execution);
+  const simpleSteps = execution.steps.length
+    ? execution.steps.map((step) => ({
+        title: step.description || `步骤 ${step.id}`,
+        detail: buildActiveExecutionStepDetail(step),
+        tone: getActiveExecutionStepTone(step),
+        createdAt: step.startedAt ?? step.finishedAt ?? execution.updatedAt,
+      }))
+    : [
+        {
+          title: "等待记录步骤",
+          detail: "任务正在准备或运行，完成后会同步步骤记录。",
+          tone: status.tone,
+          createdAt: execution.updatedAt,
+        },
+      ];
+
+  return {
+    title: execution.taskId ? `任务 ${execution.taskId}` : `运行 ${execution.runId}`,
+    outcome: status.description,
+    nextStep: action ? `可以选择「${action.primary.label}」。` : "查看任务详情。",
+    producedArtifacts: false,
+    wroteMemory: false,
+    simpleSteps,
+    technicalEventCount: execution.steps.length,
+    trajectoryEventCount: 0,
+  };
+}
+
+function buildActiveExecutionStepDetail(
+  step: AgentExecutionCheckpoint["steps"][number],
+): string {
+  if (step.failureMessage) {
+    return step.failureMessage;
+  }
+
+  if (step.expectedTool) {
+    return `工具：${step.expectedTool}`;
+  }
+
+  return step.expectedOutcome || formatExecutionStepState(step.state);
+}
+
+function getActiveExecutionStepTone(
+  step: AgentExecutionCheckpoint["steps"][number],
+): ReturnType<typeof getRunRecordStatus>["tone"] {
+  if (step.state === "failed") {
+    return "danger";
+  }
+
+  if (step.state === "waiting_for_approval") {
+    return "attention";
+  }
+
+  if (step.state === "completed") {
+    return "success";
+  }
+
+  return "info";
+}
+
+function formatExecutionStepState(
+  state: AgentExecutionCheckpoint["steps"][number]["state"],
+): string {
+  const labels: Record<
+    AgentExecutionCheckpoint["steps"][number]["state"],
+    string
+  > = {
+    completed: "已完成",
+    failed: "需要处理",
+    pending: "等待开始",
+    running: "正在执行",
+    skipped: "已跳过",
+    waiting_for_approval: "等待授权",
+    waiting_for_tool: "等待工具",
+  };
+
+  return labels[state];
 }
 
 function RunInspector(props: {
