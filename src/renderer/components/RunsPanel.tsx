@@ -492,7 +492,7 @@ export function RunsPanel() {
     <section className="runs-panel task-records-panel">
       <div className="panel-heading task-records-heading">
         <div>
-          <h2>任务记录</h2>
+          <h2>任务概览</h2>
           <p>看任务是否完成。需要处理时，直接给你下一步。</p>
         </div>
         <div className="task-records-heading-actions">

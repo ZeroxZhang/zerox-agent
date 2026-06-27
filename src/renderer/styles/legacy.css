@@ -3007,8 +3007,7 @@ nav {
 }
 
 .task-record-history {
-  max-height: min(680px, calc(100vh - 280px));
-  overflow: hidden;
+  overflow: visible;
 }
 
 .task-record-active-list,
