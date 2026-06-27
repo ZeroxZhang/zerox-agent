@@ -3,11 +3,11 @@ import { createDemoValidationSnapshot, demoRuns, demoTasks } from "./demoAgentDa
 import { buildToolSafetySummary } from "../shared/toolSafetySummary";
 
 describe("demo agent data", () => {
-  it("mirrors the built-in local file organizer default task permissions", () => {
+  it("mirrors a prompt-based automatic task with explicit demo permissions", () => {
     expect(demoTasks[0]).toMatchObject({
       name: "整理下载文件夹",
-      skillName: "local-file-organizer",
-      schedule: { kind: "manual" },
+      skillName: "",
+      schedule: { kind: "daily", time: "09:00" },
       input: { targetDir: "~/Downloads", reportName: "agent-report.md" },
       permissions: {
         files: { read: ["~/Downloads"], write: ["~/Downloads"] },

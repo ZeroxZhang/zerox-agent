@@ -2596,7 +2596,7 @@ async function tryCreateTaskFromIntent(options: {
       ok: true,
       result: {
         ok: true,
-        reply: `已创建任务“${task.name}”，调度：${describeSchedule(task.schedule)}。你可以在“任务”页检查权限后运行。`,
+        reply: `已创建任务“${task.name}”，调度：${describeSchedule(task.schedule)}。保存后会按计划自动运行；你可以在“任务”页暂停或调整权限。`,
         sessionId: "",
         relatedMemories: [],
         memoryId: null,

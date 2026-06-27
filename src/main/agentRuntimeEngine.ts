@@ -296,7 +296,7 @@ export function createAgentRuntimeEngine(options: {
   async function runFromCheckpoint(
     checkpoint: AgentExecutionCheckpoint,
     task: { id: string; name: string; skillName: string },
-    skill: SkillRecord,
+    skill: SkillRecord | null,
     signal: AbortSignal | undefined,
     events: AgentRunEvent[],
     startedAt: string,
@@ -312,7 +312,7 @@ export function createAgentRuntimeEngine(options: {
     let toolCallCount = current.toolCallCount;
     const reflectionDecisions: AgentReflectionDecision[] = [];
     const profile = await options.getModelProfile();
-    const maxTurns = skill.manifest.execution.maxTurns ?? 10;
+    const maxTurns = skill?.manifest.execution.maxTurns ?? 10;
     const toolDefinitions = getToolDefinitions(options.toolExecutor);
     const contextTokenBudget = Math.max(1, Math.floor(profile.maxTokens * 0.7));
 
@@ -492,7 +492,7 @@ export function createAgentRuntimeEngine(options: {
           checkpoint: current,
           taskId: task.id,
           taskName: task.name,
-          skillName: task.skillName,
+          skillName: getRunSkillName(task),
           status: "succeeded",
           summary: response.content,
           events,
@@ -762,8 +762,9 @@ export function createAgentRuntimeEngine(options: {
         return { ok: false, message: "Scheduled task was not found." };
       }
 
-      const skill = await options.resolveSkill(task.skillName);
-      if (!skill) {
+      const taskSkillName = task.skillName.trim();
+      const skill = taskSkillName ? await options.resolveSkill(taskSkillName) : null;
+      if (taskSkillName && !skill) {
         return { ok: false, message: "Task skill was not found." };
       }
 
@@ -777,8 +778,8 @@ export function createAgentRuntimeEngine(options: {
         await buildProceduralMemoryPromptContext({
           memoryStore: options.memoryStore,
           taskName: task.name,
-          skillName: task.skillName,
-          skillDescription: skill.manifest.description,
+          skillName: taskSkillName || "prompt-task",
+          skillDescription: skill?.manifest.description,
         });
       const step: AgentExecutionStep = {
         id: createId(),
@@ -855,7 +856,7 @@ export function createAgentRuntimeEngine(options: {
             checkpoint: latestCheckpoint,
             taskId: task.id,
             taskName: task.name,
-            skillName: task.skillName,
+            skillName: getRunSkillName(task),
             status: "paused",
             summary: "运行已暂停。",
             events: [...events, createEvent("warn", "Agent run paused.")],
@@ -870,7 +871,7 @@ export function createAgentRuntimeEngine(options: {
             checkpoint: latestCheckpoint,
             taskId: task.id,
             taskName: task.name,
-            skillName: task.skillName,
+            skillName: getRunSkillName(task),
             status: "canceled",
             summary: "运行已取消。",
             events: [...events, createEvent("warn", "Agent run canceled.")],
@@ -883,7 +884,7 @@ export function createAgentRuntimeEngine(options: {
           checkpoint,
           taskId: task.id,
           taskName: task.name,
-          skillName: task.skillName,
+          skillName: getRunSkillName(task),
           status: "failed",
           summary: error instanceof Error ? error.message : "Agent run failed.",
           events: [...events, createEvent("error", formatFailureMessage(error))],
@@ -904,8 +905,9 @@ export function createAgentRuntimeEngine(options: {
         return { ok: false, message: "Scheduled task was not found." };
       }
 
-      const skill = await options.resolveSkill(task.skillName);
-      if (!skill) {
+      const taskSkillName = task.skillName.trim();
+      const skill = taskSkillName ? await options.resolveSkill(taskSkillName) : null;
+      if (taskSkillName && !skill) {
         return { ok: false, message: "Task skill was not found." };
       }
 
@@ -926,7 +928,7 @@ export function createAgentRuntimeEngine(options: {
             checkpoint: latestCheckpoint,
             taskId: task.id,
             taskName: task.name,
-            skillName: task.skillName,
+            skillName: getRunSkillName(task),
             status: "paused",
             summary: "运行已暂停。",
             events: [createEvent("warn", "Agent run paused.")],
@@ -940,7 +942,7 @@ export function createAgentRuntimeEngine(options: {
           checkpoint: latestCheckpoint,
           taskId: task.id,
           taskName: task.name,
-          skillName: task.skillName,
+          skillName: getRunSkillName(task),
           status: isCancellationError(error, runOptions?.signal)
             ? "canceled"
             : "failed",
@@ -1096,6 +1098,10 @@ function toChatMessage(message: AgentExecutionMessage): ChatMessage {
     ...(message.tool_call_id ? { tool_call_id: message.tool_call_id } : {}),
     ...(message.tool_calls ? { tool_calls: message.tool_calls as ChatMessage["tool_calls"] } : {}),
   };
+}
+
+function getRunSkillName(task: { skillName: string }): string {
+  return task.skillName.trim() || "prompt-task";
 }
 
 function markCurrentStepRunning(

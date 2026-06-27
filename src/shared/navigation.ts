@@ -62,10 +62,10 @@ const navigationSections: NavigationSection[] = [
     id: "scheduled-tasks",
     label: "任务",
     module: "第 4 模块",
-    summary: "手动运行、每日计划、间隔计划和 cron。",
+    summary: "每日、工作日、每周和间隔自动任务。",
     details: [
       "把调度规则保存成本地结构化数据。",
-      "让手动运行和自动运行走同一条执行路径。",
+      "让自然语言任务描述成为自动执行的主要入口。",
       "记录应用不可用时错过的运行。",
     ],
   },

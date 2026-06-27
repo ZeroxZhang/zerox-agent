@@ -35,6 +35,47 @@ import { defineNativeToolDescriptor } from "../shared/nativeCapabilities";
 import { getDefaultTaskPermissionPolicy } from "../shared/toolPermissions";
 
 describe("agent runtime engine", () => {
+  it("starts a prompt-only scheduled task without resolving a skill", async () => {
+    let resolveSkillCalled = false;
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore({
+        ...createTask(),
+        skillName: "",
+        input: {
+          request: "每天整理下载文件夹，把报告写到桌面；权限不足时停止。",
+        },
+      }),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore([]),
+      resolveSkill: async () => {
+        resolveSkillCalled = true;
+        return null;
+      },
+      chatClient: {
+        async complete() {
+          return finalResponse("Prompt task complete");
+        },
+      },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      createId: createSequentialId("runtime_prompt"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+
+    const result = await engine.startTask("task_123");
+
+    expect(resolveSkillCalled).toBe(false);
+    expect(result).toMatchObject({
+      ok: true,
+      run: {
+        skillName: "prompt-task",
+        status: "succeeded",
+        summary: "Prompt task complete",
+      },
+    });
+  });
+
   it("offloads oversized tool results in checkpoints and trajectory metadata", async () => {
     const largeContent = "x".repeat(1000);
     const capturedMessages: ChatMessage[][] = [];

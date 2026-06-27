@@ -905,8 +905,26 @@ export function serializeToolObservation(
 
 export function buildTaskPrompt(
   task: { name: string; input: Record<string, unknown> },
-  skill: { manifest: { displayName: string; description: string }; body: string },
+  skill?: { manifest: { displayName: string; description: string }; body: string } | null,
 ): string {
+  const basePrompt = [
+    `任务名称：${task.name}`,
+    "",
+    "任务输入：",
+    JSON.stringify(task.input, null, 2),
+  ];
+
+  if (!skill) {
+    return [
+      ...basePrompt,
+      "",
+      "执行要求：",
+      "请根据任务名称和任务输入中的自然语言描述，自行制定可检查的执行计划。",
+      "只有在必要且权限允许时才调用工具；如果任务描述要求使用某个技能，请先通过可用工具加载或参考该技能。",
+      "遇到不明确、风险过高或权限不足的情况，应停止并说明原因，不要猜测执行。",
+    ].join("\n");
+  }
+
   return [
     `任务名称：${task.name}`,
     `技能：${skill.manifest.displayName}`,

@@ -86,7 +86,7 @@ export function buildScheduledTaskInputFromIntent(
 
   return {
     name: taskName ?? detectTaskName("", targetDir),
-    skillName: "local-file-organizer",
+    skillName: "",
     enabled: true,
     schedule,
     input: { targetDir, reportName: "agent-report.md" },

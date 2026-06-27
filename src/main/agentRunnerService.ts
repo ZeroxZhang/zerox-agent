@@ -287,8 +287,9 @@ export function createAgentRunnerService(options: {
       return { ok: false, message: "Scheduled task was not found." };
     }
 
-    const skill = await options.resolveSkill(task.skillName);
-    if (!skill) {
+    const taskSkillName = task.skillName.trim();
+    const skill = taskSkillName ? await options.resolveSkill(taskSkillName) : null;
+    if (taskSkillName && !skill) {
       return { ok: false, message: "Task skill was not found." };
     }
 
@@ -330,8 +331,8 @@ export function createAgentRunnerService(options: {
       await buildProceduralMemoryPromptContext({
         memoryStore: options.memoryStore,
         taskName: task.name,
-        skillName: task.skillName,
-        skillDescription: skill.manifest.description,
+        skillName: taskSkillName || "prompt-task",
+        skillDescription: skill?.manifest.description,
       });
 
     let messages: ChatMessage[] = [
@@ -351,7 +352,7 @@ export function createAgentRunnerService(options: {
 
     // Determine if planning is needed
     const needsPlanning =
-      skill.manifest.execution?.maxTurns !== undefined
+      skill?.manifest.execution?.maxTurns !== undefined
         ? (skill.manifest.execution.maxTurns ?? 10) > 3
         : true;
 
@@ -413,8 +414,8 @@ export function createAgentRunnerService(options: {
             content: appendProceduralMemoryContext(
               buildPlanningPrompt(
                 task.name,
-                skill.manifest.description,
-                skill.body,
+                skill?.manifest.description ?? "任务未绑定技能，依据任务描述直接规划。",
+                skill?.body ?? buildTaskPrompt(task, null),
                 toolNames,
               ),
               proceduralMemoryContext,
@@ -451,7 +452,7 @@ export function createAgentRunnerService(options: {
       // ── PHASE 2: EXECUTE ──
       currentPhase = "executing";
       const maxTurns =
-        skill.manifest.execution?.maxTurns ??
+        skill?.manifest.execution?.maxTurns ??
         (planSteps.length > 0 ? planSteps.length * 2 + 3 : 10);
       let turn = 0;
 
@@ -733,7 +734,7 @@ export function createAgentRunnerService(options: {
       id: createId(),
       taskId: task.id,
       taskName: task.name,
-      skillName: task.skillName,
+      skillName: getRunSkillName(task),
       status,
       summary,
       events,
@@ -747,7 +748,7 @@ export function createAgentRunnerService(options: {
           kind: "episodic",
           title: `Run: ${task.name}`,
           content: run.summary,
-          tags: ["agent-run", task.skillName],
+          tags: ["agent-run", getRunSkillName(task)],
           source: { type: "agent_run", refId: run.id },
           importance: 3,
         });
@@ -848,4 +849,8 @@ export function createAgentRunnerService(options: {
       }
     },
   };
+}
+
+function getRunSkillName(task: { skillName: string }): string {
+  return task.skillName.trim() || "prompt-task";
 }

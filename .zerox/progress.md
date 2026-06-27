@@ -5432,3 +5432,82 @@
   - `release/Zerox Agent-2.9.3-arm64.dmg.blockmap` (131K, sha256 `7a5971ef3e7d0408b6453938854e5b88f5bc0ad09836666ca76ba49294a46bb8`)
   - `release/Zerox Agent-2.9.3-arm64-mac.zip.blockmap` (335K, sha256 `3e35520f9b210a897a09741930cf8dbfc72648852a91c3aef4fd20c2fc813fac`)
   - `release/latest-mac.yml` sha256 `2952710b429e2ea04597de4c94f09fee758f80966c76f438542079371e094280`.
+
+## 2026-06-27 - Tasks Module Simplified Grid Redesign
+
+- Request:
+  - User approved the simplified "任务" module direction after visual mockup review and asked to implement it in the formal app.
+  - The design goal was to follow the reference product's simple structure without copying its visual style, while preserving Zerox Agent's own local-first Material surface language.
+- Changed areas:
+  - `src/renderer/components/ScheduledTasksPanel.tsx`
+  - `src/renderer/styles/legacy.css`
+  - `.zerox/progress.md`
+- Implementation evidence:
+  - Replaced the old always-visible task creation/configuration form with a simplified task overview.
+  - Scheduled tasks now render as compact grid cards with status, schedule, next run, quick run, record navigation, and a scoped "more" area.
+  - Moved task creation into a lightweight dialog with basic fields first and advanced JSON/permission controls behind a disclosure.
+  - Kept explicit local permission review by preserving `ToolSafetySummaryCard` in the saved-task details and in the creation advanced section.
+  - Split create-task submission state from global task/run status so an ongoing run does not trap users inside the creation dialog.
+  - Added dialog focus management, Escape close, focus restoration, and in-dialog create error/status feedback.
+  - Follow-up visual correction tightened the new-task dialog into a compact desktop-app modal: labels and required/optional hints now share the same baseline, manual schedule uses the same field-cell structure as timed schedules, narrow viewports keep action buttons inside the dialog, and modal padding/header/form proportions are aligned.
+- Review evidence:
+  - Subagent review `019f0931-787f-7483-baf9-710c0f7bc8b1` identified four issues: run-status/modal trap, modal accessibility, hidden create errors, and reduced permission visibility.
+  - All four issues were addressed before final verification.
+  - Manual in-app browser visual QA after the follow-up fix:
+    - Desktop viewport `1440x900` showed the dialog centered with aligned two-column schedule fields and visible footer actions.
+    - Narrow viewport `599x877` measured dialog bounds `top=13/bottom=864`, footer action bounds `top=809/bottom=849`, keeping all primary actions inside the viewport.
+- Verification evidence:
+  - `npm test -- src/shared/scheduledTasks.test.ts` -> 1 file / 13 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> passed after rerun: 183 files / 1264 tests passed, build passed, agent evals 26/26 passed, memory evals 2/2 passed. The first attempt hit a transient `ENOTEMPTY` temp-directory cleanup error in `storeProxy.test.ts`; the rerun passed without code changes.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `better-sqlite3` ABI mismatch triggered the existing JSON fallback during smoke.
+  - `git diff --check` -> passed.
+- Packaging evidence:
+  - `npm run dist:mac` -> passed after the follow-up dialog alignment fix; generated unsigned macOS arm64 DMG, ZIP, blockmaps, and `latest-mac.yml` for v2.9.3.
+  - Packaged app smoke: `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v2.9.3' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+  - `release/Zerox Agent-2.9.3-arm64.dmg` (122M, sha256 `84c51b835c31d7d00a18724f531654465489d17e82b2d19550a90022bdff14f4`)
+  - `release/Zerox Agent-2.9.3-arm64-mac.zip` (333M, sha256 `f7b5967046870666d960d90541c47a937be263b86ab1b4c41365c4ad0b9f3a5e`)
+  - `release/Zerox Agent-2.9.3-arm64.dmg.blockmap` (131K, sha256 `5adc762f4b945ce25e46e146c50a0fe5a3dd830053c120d91040efdf16097cb3`)
+  - `release/Zerox Agent-2.9.3-arm64-mac.zip.blockmap` (335K, sha256 `605dc1aafddfe13afbf00237bf79a56e0f7db4cb86532d8156b2f36f936d5f89`)
+  - `release/latest-mac.yml` (517B, sha256 `c308ef0dd395b1584565d57a5edae5efaca00d182ce2a2b1b72ba119e18c0d67`)
+
+## 2026-06-27 - Scheduled Task Automation Semantics Correction
+
+- Request:
+  - User identified four issues in the new task dialog: the close button did not reliably close, manual/Cron scheduling did not match consumer-facing automatic tasks, "运行范围" should not be a required skill picker, and automatic execution risk needed clearer placement.
+  - Follow-up correction: scheduled tasks must be able to run from prompt-only task descriptions; a skill is optional and should not be a required ability entry.
+- Changed areas:
+  - `src/shared/scheduledTasks.ts`
+  - `src/shared/agentProtocol.ts`
+  - `src/shared/agentIntent.ts`
+  - `src/main/agentRuntimeEngine.ts`
+  - `src/main/agentRunnerService.ts`
+  - `src/main/chatService.ts`
+  - `src/renderer/components/ScheduledTasksPanel.tsx`
+  - `src/renderer/styles/legacy.css`
+  - related tests and demo/navigation data
+- Implementation evidence:
+  - New task creation no longer displays or requires "运行范围"; `skillName` may be empty and prompt-only tasks run as `prompt-task`.
+  - Runtime and fallback runner now resolve a skill only when a task explicitly has one; prompt-only tasks use the task description/input to build the execution prompt.
+  - The create dialog schedule options are now `每天`, `工作日`, `每周`, and `间隔`; `manual`/`cron` remain only as legacy persisted-data compatibility.
+  - Added `weekdays` and `weekly` schedule models, validation, descriptions, next-run calculation, and natural-language drafting.
+  - New tasks default to automatic execution (`enabled: true`) without a visible "保存后立即启用" checkbox.
+  - Default create permissions now start empty instead of silently granting `~/Downloads`.
+  - Close button now closes on button click without pointer-down closing, preventing the follow-up click from hitting the underlying page.
+  - Dialog risk copy now states that saved tasks run automatically and should stop/write a run record when description, model, tools, files, memory, or permissions are unclear.
+- Browser QA evidence:
+  - In-app browser at `http://127.0.0.1:5173/#scheduled-tasks` showed the create dialog without "运行范围", without "仅手动" or "Cron", and with schedule options exactly `["每天","工作日","每周","间隔"]`.
+  - Clicking the dialog close button reduced dialog count to `0` and kept URL at `http://127.0.0.1:5173/#scheduled-tasks`.
+- Verification evidence:
+  - `npm test -- src/shared/scheduledTasks.test.ts src/shared/agentIntent.test.ts src/main/agentRunnerService.test.ts src/main/agentRuntimeEngine.test.ts src/renderer/demoAgentData.test.ts src/shared/navigation.test.ts` -> 6 files / 72 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> 183 files / 1268 tests passed, build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `better-sqlite3` ABI mismatch triggered the existing JSON fallback during smoke.
+  - `npm run dist:mac` -> passed after the automation semantics correction; generated unsigned macOS arm64 DMG, ZIP, blockmaps, and `latest-mac.yml` for v2.9.3.
+  - Packaged app smoke: `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v2.9.3' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+- Release artifact evidence:
+  - `release/Zerox Agent-2.9.3-arm64.dmg` (122M, sha256 `d6e29931be43ec7e4982581fec64d50570d5e1bb9d61a8c60af64913115609c8`)
+  - `release/Zerox Agent-2.9.3-arm64-mac.zip` (333M, sha256 `8ad961840def45a18d7c33c568b9f1f2e9c51333d54ef185ccb0ca6c1fd99f1c`)
+  - `release/Zerox Agent-2.9.3-arm64.dmg.blockmap` (132K, sha256 `3db5ff44fd56c401b42b53660c7925fccfda3223ada1e963acd05293f529bdcf`)
+  - `release/Zerox Agent-2.9.3-arm64-mac.zip.blockmap` (335K, sha256 `26f3c92374b8eb20a11be677004f30363553abe9f24671456052d644c2f94f33`)
+  - `release/latest-mac.yml` (517B, sha256 `621ca054b4ec0ed21c7a2a0617975f818da9bd12f5d871edbb751fd6d54ca886`)
