@@ -26,6 +26,15 @@ describe("navigation", () => {
     ]);
   });
 
+  it("uses simplified task record copy for runs navigation", () => {
+    expect(getNavigationSection("runs")).toMatchObject({
+      id: "runs",
+      label: "任务记录",
+      module: "活动",
+      summary: "查看每次任务是否完成，以及下一步怎么处理。",
+    });
+  });
+
   it("nests technical control surfaces under Settings", () => {
     expect(getDefaultSettingsNavigationSection()).toMatchObject({
       id: "system-overview",

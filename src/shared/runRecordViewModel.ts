@@ -72,6 +72,34 @@ const statusPriority: Record<AgentExecutionStatus, number> = {
 };
 
 const maxSubtitleLength = 72;
+const technicalEventFallback = "已记录技术事件";
+const eventTitleTranslations: Record<string, string> = {
+  "agent loop canceled": "任务已停止",
+  "agent loop canceled.": "任务已停止",
+  "agent run canceled": "任务已停止",
+  "agent run canceled.": "任务已停止",
+  "agent run finished": "任务结束",
+  "agent run finished.": "任务结束",
+  "agent run paused": "任务已暂停",
+  "agent run paused.": "任务已暂停",
+  "agent run started": "任务开始",
+  "agent run started.": "任务开始",
+  "agent runtime started": "任务运行环境已启动",
+  "agent runtime started.": "任务运行环境已启动",
+  "checkpoint written": "已保存恢复点",
+  "context compacted": "已整理上下文",
+  "episodic memory written": "已写入任务记忆",
+  "episodic memory written.": "已写入任务记忆",
+  "unable to write episodic memory": "未能写入任务记忆",
+  "unable to write episodic memory.": "未能写入任务记忆",
+};
+const successfulMemoryWriteMessages = new Set([
+  "episodic memory written",
+  "episodic memory written.",
+]);
+const successfulMemoryWriteTrajectoryTypes = new Set<AgentTrajectoryEvent["type"]>([
+  "dream_memory_written",
+]);
 
 export function getRunRecordStatus(
   record: AgentRunRecord | AgentExecutionCheckpoint,
@@ -244,17 +272,10 @@ export function buildRunRecordSummary(
 export function translateRunRecordEventTitle(message: string): string {
   const trimmed = message.trim();
   const normalized = trimmed.toLowerCase();
+  const directTranslation = eventTitleTranslations[normalized];
 
-  if (normalized === "agent loop canceled.") {
-    return "任务已停止";
-  }
-
-  if (normalized === "agent run started.") {
-    return "任务开始";
-  }
-
-  if (normalized === "agent run finished.") {
-    return "任务结束";
+  if (directTranslation) {
+    return directTranslation;
   }
 
   if (normalized.startsWith("goal milestone started")) {
@@ -269,20 +290,16 @@ export function translateRunRecordEventTitle(message: string): string {
     return "生成执行计划";
   }
 
-  if (normalized === "checkpoint written") {
-    return "已保存恢复点";
-  }
-
-  if (normalized === "context compacted") {
-    return "已整理上下文";
-  }
-
   if (normalized.includes("tool call denied") || normalized.includes("工具调用被拒绝")) {
     return "工具权限被拒绝";
   }
 
   if (normalized.includes("model response") || normalized.includes("模型响应")) {
     return "收到模型回复";
+  }
+
+  if (looksLikeEnglishTechnicalText(trimmed)) {
+    return technicalEventFallback;
   }
 
   return trimmed.replace(/\.$/, "");
@@ -415,8 +432,10 @@ function didWriteMemory(
   trajectoryEvents: AgentTrajectoryEvent[],
 ): boolean {
   return (
-    runEvents.some((event) => event.message.toLowerCase().includes("memory")) ||
-    trajectoryEvents.some((event) => event.type.includes("memory"))
+    runEvents.some((event) => isSuccessfulMemoryWriteMessage(event.message)) ||
+    trajectoryEvents.some((event) =>
+      successfulMemoryWriteTrajectoryTypes.has(event.type),
+    )
   );
 }
 
@@ -440,4 +459,23 @@ function truncateSubtitle(message: string): string {
   }
 
   return `${message.slice(0, maxSubtitleLength - 1)}…`;
+}
+
+function isSuccessfulMemoryWriteMessage(message: string): boolean {
+  const normalized = message.trim().toLowerCase();
+
+  return (
+    successfulMemoryWriteMessages.has(normalized) ||
+    /^已写入.*记忆[。.]?$/.test(message.trim())
+  );
+}
+
+function looksLikeEnglishTechnicalText(message: string): boolean {
+  const withoutWhitespace = message.replace(/\s/g, "");
+
+  if (!/[A-Za-z]/.test(message) || /[\u3400-\u9fff]/.test(message)) {
+    return false;
+  }
+
+  return /^[A-Za-z0-9._:/()[\],'"!?-]+$/.test(withoutWhitespace);
 }

@@ -6,8 +6,10 @@ import {
   compareRunRecordPriority,
   getRunRecordAction,
   getRunRecordStatus,
+  toRunRecordListItem,
   translateRunRecordEventTitle,
 } from "./runRecordViewModel";
+import type { AgentTrajectoryEvent } from "./agentTrajectory";
 
 const baseRun: AgentRunRecord = {
   id: "run_1",
@@ -58,6 +60,24 @@ function checkpointWithStatus(
     toolCallCount: 0,
     createdAt: "2026-06-27T10:18:30.000Z",
     updatedAt: "2026-06-27T10:18:48.000Z",
+  };
+}
+
+function trajectoryEvent(
+  type: AgentTrajectoryEvent["type"],
+): AgentTrajectoryEvent {
+  return {
+    id: `trajectory_${type}`,
+    runId: "run_1",
+    type,
+    sequence: 1,
+    payload: {},
+    redaction: {
+      containsApiKey: false,
+      containsFileContent: false,
+      containsUserText: false,
+    },
+    createdAt: "2026-06-27T10:18:48.000Z",
   };
 }
 
@@ -119,11 +139,28 @@ describe("runRecordViewModel", () => {
 
   it("translates common internal event messages into readable Chinese", () => {
     expect(translateRunRecordEventTitle("Agent loop canceled.")).toBe("任务已停止");
+    expect(translateRunRecordEventTitle("Agent runtime started.")).toBe(
+      "任务运行环境已启动",
+    );
+    expect(translateRunRecordEventTitle("Agent run canceled.")).toBe("任务已停止");
+    expect(translateRunRecordEventTitle("Agent run paused.")).toBe("任务已暂停");
+    expect(translateRunRecordEventTitle("Episodic memory written.")).toBe(
+      "已写入任务记忆",
+    );
+    expect(translateRunRecordEventTitle("Unable to write episodic memory.")).toBe(
+      "未能写入任务记忆",
+    );
     expect(
       translateRunRecordEventTitle(
         "Goal milestone started: List current desktop contents to identify files and folders.",
       ),
     ).toBe("开始步骤：检查桌面内容");
+  });
+
+  it("uses a safe fallback for unknown English-looking technical messages", () => {
+    expect(translateRunRecordEventTitle("Kernel supervisor flushed event queue.")).toBe(
+      "已记录技术事件",
+    );
   });
 
   it("summarizes a stopped run without exposing raw English by default", () => {
@@ -137,5 +174,81 @@ describe("runRecordViewModel", () => {
     expect(JSON.stringify(summary)).not.toContain("Agent loop canceled");
     expect(JSON.stringify(summary)).not.toContain("Goal milestone started");
     expect(summary.technicalEventCount).toBe(2);
+  });
+
+  it("only marks summaries as memory-writing when memory was written successfully", () => {
+    const failedMemoryRun = runWithStatus("succeeded", {
+      events: [
+        {
+          level: "warn",
+          message: "Unable to write episodic memory.",
+          createdAt: "2026-06-27T10:18:48.000Z",
+        },
+      ],
+      summary: "Agent run finished.",
+    });
+
+    expect(
+      buildRunRecordSummary(failedMemoryRun, [
+        trajectoryEvent("memory_scope_recalled"),
+      ]).wroteMemory,
+    ).toBe(false);
+
+    expect(
+      buildRunRecordSummary(
+        runWithStatus("succeeded", {
+          events: [
+            {
+              level: "info",
+              message: "Episodic memory written.",
+              createdAt: "2026-06-27T10:18:48.000Z",
+            },
+          ],
+        }),
+        [],
+      ).wroteMemory,
+    ).toBe(true);
+
+    expect(
+      buildRunRecordSummary(runWithStatus("succeeded"), [
+        trajectoryEvent("dream_memory_written"),
+      ]).wroteMemory,
+    ).toBe(true);
+  });
+
+  it("creates list items without exposing raw English summaries", () => {
+    const item = toRunRecordListItem(
+      runWithStatus("canceled", { summary: "Agent run canceled." }),
+    );
+
+    expect(item).toMatchObject({
+      id: "run_canceled",
+      title: "整理桌面，新建 ba'k 文件夹",
+      subtitle: "已停止 · 任务已停止",
+      updatedAt: "2026-06-27T10:18:48.000Z",
+      source: "history",
+      status: {
+        label: "已停止",
+      },
+    });
+    expect(item.subtitle).not.toContain("Agent run canceled");
+  });
+
+  it("creates active checkpoint list items", () => {
+    const item = toRunRecordListItem({
+      ...checkpointWithStatus("running"),
+      currentStepId: "step_1",
+    });
+
+    expect(item).toMatchObject({
+      id: "run_running",
+      title: "任务 task_1",
+      subtitle: "正在运行 · 步骤 step_1",
+      updatedAt: "2026-06-27T10:18:48.000Z",
+      source: "active",
+      status: {
+        label: "正在运行",
+      },
+    });
   });
 });
