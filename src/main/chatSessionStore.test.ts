@@ -113,6 +113,30 @@ describe("chat session store", () => {
     await expect(reloaded.get("chat_1")).resolves.toEqual(assistantAppend.session);
   });
 
+  it("preserves message content exactly when persisting markdown output", async () => {
+    const store = createChatSessionStore({
+      configDir,
+      createId: createSequentialId("chat"),
+      now: createSteppedClock("2026-06-26T08:00:00.000Z"),
+    });
+    const exactContent = "  # Report\n\nResult stays spaced.  \n";
+
+    const appended = await store.appendMessage({
+      role: "assistant",
+      content: exactContent,
+    });
+
+    expect(appended.message.content).toBe(exactContent);
+    await expect(store.get(appended.session.id)).resolves.toMatchObject({
+      messages: [expect.objectContaining({ content: exactContent })],
+    });
+
+    const raw = await readFile(path.join(configDir, "chat-sessions.json"), {
+      encoding: "utf8",
+    });
+    expect(JSON.parse(raw).sessions[0].messages[0].content).toBe(exactContent);
+  });
+
   it("persists workspace identity and summary on chat sessions", async () => {
     const store = createChatSessionStore({
       configDir,
@@ -219,6 +243,38 @@ describe("chat session store", () => {
         },
       }),
     ]);
+  });
+
+  it("bounds session summaries used by the sidebar list", async () => {
+    const store = createChatSessionStore({
+      configDir,
+      createId: createSequentialId("chat"),
+      now: createSteppedClock("2026-06-20T08:00:00.000Z"),
+    });
+
+    const first = await store.appendMessage({
+      role: "user",
+      content: "分析项目",
+    });
+    const longAssistantSummary = [
+      "🔧 使用了 70 个工具",
+      "项目分析报告已生成完毕，保存在 /Volumes/Out/codex_projects/building-agent/report.md。",
+      "以下是非常长的正文摘要。",
+      "x".repeat(600),
+    ].join("\n\n");
+    await store.appendMessage({
+      sessionId: first.session.id,
+      role: "assistant",
+      content: longAssistantSummary,
+    });
+
+    const [listedSession] = await store.list();
+    const storedSession = await store.get(first.session.id);
+
+    expect(listedSession.summary).toHaveLength(160);
+    expect(listedSession.summary).toMatch(/\.\.\.$/);
+    expect(listedSession.summary).not.toContain("\n");
+    expect(storedSession?.summary).toBe(listedSession.summary);
   });
 
   it("persists rebuildable chat activity snapshots with a bounded event history", async () => {

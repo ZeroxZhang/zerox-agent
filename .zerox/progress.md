@@ -1,5 +1,269 @@
 # Zerox Harness Progress
 
+## 2026-06-26 - v2.9.2 Goal Skill Routing And Long-Task Chat Stability Hotfix
+
+- Request: root-cause and fix three v2.9.2 issues from a long Goal Mode run: `/目标` plus `@skill` delivered only Markdown instead of enforcing the selected report skill, active streaming forced the transcript back to the bottom while the user tried to scroll up, and the app became sluggish after the first long run.
+- Root causes fixed:
+  - `ChatService` resolved an explicitly selected skill before Goal intent routing and only routed Goal commands when no skill was selected, so `/目标 ... @huashu-design` was downgraded to ordinary chat skill execution instead of creating a Goal with a durable skill contract.
+  - Goal planning/runtime had no selected-skill field, so even true Goal runs could not preserve skill body, skill roots, skill dynamic-tool allowlists, or skill output requirements through planning, runtime authorization, or context compaction.
+  - `AgentChatPanel` unconditionally set `scrollTop = scrollHeight` whenever messages/thinking/tool/goal state changed, fighting manual scroll. Long task status and milestone event arrays were also unbounded in renderer state, causing repeated heavy re-renders after long runs.
+- Changed files:
+  - `src/shared/agentGoal.ts`
+  - `src/shared/agentGoalContinuity.ts`
+  - `src/main/chatService.ts`
+  - `src/main/goalChatService.ts`
+  - `src/main/agentGoalPlanner.ts`
+  - `src/main/goalRuntimeEngine.ts`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/main/chatService.test.ts`
+  - `src/main/goalChatService.test.ts`
+  - `src/main/goalRuntimeEngine.test.ts`
+  - `src/renderer/materialDesign.test.ts`
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/main/chatService.test.ts -t "keeps explicit slash goal routing"` -> failed as expected because the result was a normal selected-skill chat reply without `activeGoal`.
+  - `npm test -- src/main/goalChatService.test.ts -t "stores the selected skill snapshot"` -> failed as expected because the planner received no selected skill.
+  - `npm test -- src/main/goalRuntimeEngine.test.ts -t "injects selected skill instructions"` -> failed as expected because milestone prompts lacked the selected skill contract and permissions.
+  - `npm test -- src/renderer/materialDesign.test.ts -t "keeps transcript history readable"` -> failed as expected because the chat panel had no sticky-bottom scroll guard or bounded runtime event helper.
+- GREEN / verification evidence:
+  - `npm test -- src/main/chatService.test.ts -t "keeps explicit slash goal routing"` -> passed.
+  - `npm test -- src/main/goalChatService.test.ts -t "stores the selected skill snapshot"` -> passed.
+  - `npm test -- src/main/goalRuntimeEngine.test.ts -t "injects selected skill instructions"` -> passed.
+  - `npm test -- src/renderer/materialDesign.test.ts -t "keeps transcript history readable"` -> passed.
+  - `npm test -- src/main/chatService.test.ts src/main/goalChatService.test.ts src/main/goalRuntimeEngine.test.ts src/shared/agentGoalContinuity.test.ts src/renderer/materialDesign.test.ts` -> 5 files / 148 tests passed.
+  - `npm run build` -> passed, with the existing Vite chunk-size warning.
+  - `npm run verify` -> passed: 179 files / 1239 tests, agent eval 26/26, memory eval 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Existing better-sqlite3 ABI mismatch fell back to JSON.
+  - `npm run harness:check` -> passed.
+  - Browser QA at `http://127.0.0.1:5173/#chat` -> title `Zerox Agent`, nonblank chat panel and composer rendered, console warn/error logs empty, composer interaction filled `/目标 使用 @onepager 生成 HTML 报告` successfully.
+- Implementation evidence:
+  - `Goal` now stores `selectedSkill` and optional `selectedSkillInputValues`.
+  - `/目标` routing now runs after selected-skill input preflight and passes selected skill snapshots into Goal creation.
+  - Goal planner, continuity checkpoints, milestone prompts, run context, and runtime authorization policy now carry selected skill requirements without bypassing `ToolAuthorizationService`.
+  - Chat auto-scroll now follows output only while the transcript is near the bottom, and renderer runtime event lists keep a bounded recent window.
+
+## 2026-06-26 - v2.9.0 Packaged Distribution And Push
+
+- Request: package the v2.9.0 macOS release, validate the packaged app, publish release artifacts, and push the branch/tag.
+- Packaging evidence:
+  - `npm run dist:mac` -> passed; generated unsigned macOS arm64 DMG, ZIP, blockmaps, and `latest-mac.yml` for v2.9.0.
+  - `release/mac-arm64/Zerox Agent.app/Contents/Info.plist` reports `CFBundleShortVersionString=2.9.0` and `CFBundleVersion=2.9.0`.
+  - `release/Zerox Agent-2.9.0-arm64.dmg` (122M, sha256 `f2951bdfaa091a583d7da1712912e0bb3380710b107e58b07b37f629a9ba9731`)
+  - `release/Zerox Agent-2.9.0-arm64-mac.zip` (333M, sha256 `166bf8c1295c0f27273bcc842dbbbbb2f83dcec857f082e14cfbca497942e80b`)
+  - `release/Zerox Agent-2.9.0-arm64.dmg.blockmap` (133K, sha256 `c9609ff77ed16e6aad3ef609af067daa8f51b1b88290b89323561861a52beea0`)
+  - `release/Zerox Agent-2.9.0-arm64-mac.zip.blockmap` (335K, sha256 `1fcddfb8754c293ab463f60a5fddad5b5f6e5e680dd1933a0eb7696049c87642`)
+  - `release/latest-mac.yml` (517B, sha256 `3015cec61af260e468cf4174f8b4d414642d7d1b9f548bbf85a01d7236bc4d33`)
+- Verification evidence:
+  - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v2.9.0' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed; renderer rendered agent chat UI.
+  - `npm run harness:check` -> passed.
+- GitHub release evidence:
+  - `git push -u origin codex/2.9.0 && git push origin v2.9.0` -> pushed branch and release tag.
+  - `gh release create v2.9.0 ... --latest` -> published `https://github.com/ZeroxZhang/zerox-agent/releases/tag/v2.9.0`.
+  - `gh release view v2.9.0 --json tagName,url,isDraft,isPrerelease,assets` -> release is not draft/prerelease and includes `latest-mac.yml`, `Zerox.Agent-2.9.0-arm64.dmg`, `Zerox.Agent-2.9.0-arm64.dmg.blockmap`, `Zerox.Agent-2.9.0-arm64-mac.zip`, and `Zerox.Agent-2.9.0-arm64-mac.zip.blockmap`.
+
+## 2026-06-26 - v2.9.0 Task 6 Restore Fidelity And Release Gates
+
+- Request: complete Task 6 by proving restored rich output fidelity, bumping release metadata to v2.9.0, marking P23 done, updating README release documentation, and running final verification gates.
+- Changed files:
+  - `src/renderer/chatOutputModel.test.ts`
+  - `src/shared/packageScripts.test.ts`
+  - `src/shared/readme.test.ts`
+  - `README.md`
+  - `package.json`
+  - `package-lock.json`
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> failed as expected after tests were updated for v2.9.0 while package metadata, README, and P23 status still reported v2.8.5/planned.
+- GREEN / verification evidence:
+  - `npm test -- src/renderer/chatOutputModel.test.ts src/main/chatService.test.ts` -> 2 files / 71 tests passed, including persisted mixed text/table/code/ledger output restore fidelity.
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 2 files / 11 tests passed after v2.9.0 metadata and README updates.
+  - `npm test -- src/shared/chatOutput.test.ts src/shared/chatStream.test.ts src/main/chatService.test.ts src/main/agentLoop.test.ts src/renderer/chatMarkdown.test.ts src/renderer/chatOutputModel.test.ts src/renderer/materialDesign.test.ts src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 9 files / 182 tests passed.
+  - `npm test` -> 179 files / 1232 tests passed.
+  - `npm run build` -> passed, with the existing Vite chunk-size warning.
+  - `npm run verify` -> passed: 179 files / 1232 tests, agent eval 26/26, memory eval 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Existing better-sqlite3 ABI mismatch fell back to JSON.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+- Rendered QA carried into release gate:
+  - Task 5 browser QA covered the repo-local output rendering artifact at desktop 1280x900 and mobile 390x844 with no page-level horizontal overflow, no console warn/error logs, answer/evidence responsive states, table/code/terminal/JSON surfaces, approval/guided-input/diagnostic states, and title-only ledger safety.
+  - Renderer dev app at `http://127.0.0.1:5173/#chat` rendered the chat panel and composer without Vite overlay or console logs, and prompt suggestion interaction populated the textarea.
+- Implementation evidence:
+  - Package metadata now reports v2.9.0 in `package.json` and `package-lock.json`.
+  - `.zerox/feature_list.json` marks `P23-v2.9.0-output-rendering` as `done`.
+  - README current release, quarantine examples, testing counts, English/Chinese release notes, and roadmap now describe v2.9.0 output rendering and evidence-bound answers.
+
+## 2026-06-26 - v2.9.0 Task 5 Review Blocker Fixes
+
+- Request: address Task 5 review blockers where body-only assistant answers reserved an empty evidence column and title-only run ledger events were compressed by unused optional columns.
+- Changed files:
+  - `src/renderer/materialDesign.test.ts`
+  - `src/renderer/components/chat/AnswerBlock.tsx`
+  - `src/renderer/components/chat/RunLedgerView.tsx`
+  - `src/renderer/styles/chat.css`
+  - `src/renderer/styles/responsive.css`
+  - `docs/design/zerox-agent-2-9-0-output-rendering-artifact.html`
+  - `.superpowers/sdd/2026-06-26-v290-task-5-report.md`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts -t "avoids empty structured output columns"` -> failed as expected before the fix because `AnswerBlock` had no evidence/body-only state classes.
+  - `npm test -- src/renderer/materialDesign.test.ts -t "covers v2.9 output rendering CSS hooks"` -> failed as expected after the first fix because mobile `.chat-answer-block.has-evidence` still overrode the narrow single-column rule.
+- GREEN / verification evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts -t "avoids empty structured output columns"` -> 1 selected test passed.
+  - `npm test -- src/renderer/materialDesign.test.ts -t "covers v2.9 output rendering CSS hooks"` -> 1 selected test passed.
+  - `npm test -- src/renderer/materialDesign.test.ts src/renderer/chatOutputModel.test.ts src/renderer/chatMarkdown.test.ts src/renderer/chatStreamReducer.test.ts src/shared/chatOutput.test.ts` -> 5 files / 82 tests passed.
+  - `npm run build` -> passed, with the existing Vite chunk-size warning.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Existing better-sqlite3 ABI mismatch fell back to JSON.
+  - `git diff --check` -> passed.
+- Browser QA evidence:
+  - Static artifact desktop 1280x900 -> body-only answer used one 542px column, evidence-linked answers used `310px 220px` columns, title-only ledger used `61.3516px 450.648px`, no page-level horizontal overflow, no overflowing cards, console warn/error logs empty.
+  - Static artifact mobile 390x844 -> body-only and evidence-linked answers used one 325px column, title-only ledger used one 303px column, no page-level horizontal overflow, no overflowing cards, one expected internally scrolling table, console warn/error logs empty.
+- Implementation evidence:
+  - `AnswerBlock` now marks `has-evidence` only when an evidence rail is actually rendered and uses `is-body-only` otherwise.
+  - `RunLedgerView` now marks `has-detail`, `has-tool`, and `is-title-only` so CSS does not reserve absent optional columns.
+  - Desktop and mobile CSS now use matching specificity for evidence-linked answers, keeping mobile output single-column.
+
+## 2026-06-26 - v2.9.0 Task 5 Approved Visual Styling And Responsive Safety
+
+- Request: implement Task 5 for v2.9.0 output rendering by translating the approved Evidence-Linked Answer plus Run Ledger direction into repo-local CSS, stable responsive-safe class hooks, and a committed design artifact.
+- Changed files:
+  - `src/renderer/materialDesign.test.ts`
+  - `src/renderer/components/chat/AnswerBlock.tsx`
+  - `src/renderer/components/chat/CodeBlockView.tsx`
+  - `src/renderer/components/chat/OutputPartRenderer.tsx`
+  - `src/renderer/components/chat/EvidenceRail.tsx`
+  - `src/renderer/components/chat/RunLedgerView.tsx`
+  - `src/renderer/styles/chat.css`
+  - `src/renderer/styles/responsive.css`
+  - `docs/design/zerox-agent-2-9-0-output-rendering-artifact.html`
+  - `.superpowers/sdd/2026-06-26-v290-task-5-report.md`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts -t "v2.9 output rendering"` -> failed as expected before implementation because structured output CSS hooks were missing from the stylesheet bundle and `docs/design/zerox-agent-2-9-0-output-rendering-artifact.html` did not exist.
+- GREEN evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts -t "v2.9 output rendering"` -> 1 file / 2 selected tests passed.
+  - `npm test -- src/renderer/materialDesign.test.ts src/renderer/chatOutputModel.test.ts src/renderer/chatMarkdown.test.ts src/renderer/chatStreamReducer.test.ts src/shared/chatOutput.test.ts` -> 5 files / 81 tests passed.
+  - `npm run build` -> passed, with the existing Vite chunk-size warning.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Existing better-sqlite3 ABI mismatch fell back to JSON.
+  - `npm run verify` -> failed in pre-existing release-gate coverage: `src/shared/packageScripts.test.ts` expects no unfinished features through v2.8.5, but `.zerox/feature_list.json` still has `P23-v2.9.0-output-rendering` marked `planned`.
+  - `git diff --check` -> passed.
+- Browser QA evidence:
+  - Static artifact at `http://127.0.0.1:4177/docs/design/zerox-agent-2-9-0-output-rendering-artifact.html` desktop 1280x900 -> title matched, console logs empty, 10 acceptance states rendered, 3 answer blocks present, no page-level horizontal overflow, no overflowing cards or blocks, screenshot captured.
+  - Static artifact mobile 390x844 -> console logs empty, answer blocks stacked to one column, no page-level horizontal overflow, no overflowing cards or blocks; the data table used one expected internal horizontal scroll container.
+  - Renderer dev app at `http://127.0.0.1:5173/#chat` desktop 1280x900 -> no Vite overlay, console logs empty, chat panel and composer present, and clicking a prompt suggestion populated the focused textarea.
+- Implementation evidence:
+  - Added `.chat-answer-body`, `.chat-ledger-row`, diff-line, artifact, citation, approval, and guided-input hooks to the dedicated chat output components.
+  - Added compact answer-led styling for evidence rails, data tables, code/diff blocks, command output, JSON previews, run ledger rows, artifacts, citations, approval waiting, guided input, and diagnostics.
+  - Added narrow-width rules so answer blocks stack and table/code/terminal/JSON surfaces remain horizontally scroll-safe.
+  - Added the repo-local static design artifact covering evidence-linked answer, run ledger, table, code/diff, terminal output, document report, approval waiting, guided input, error diagnostic, and narrow layout states.
+
+## 2026-06-26 - v2.9.0 Task 4 Closure Blocker Circular Preview Stringify
+
+- Request: fix the remaining Task 4 closure blocker where masked circular preview values could still crash `outputPartsToPlainText()` and chat-service running ledger details via direct `JSON.stringify`.
+- Changed files:
+  - `src/shared/chatOutput.ts`
+  - `src/shared/chatOutput.test.ts`
+  - `src/renderer/components/chat/JsonPreview.tsx`
+  - `src/main/chatService.ts`
+  - `.superpowers/sdd/2026-06-26-v290-task-4-report.md`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/shared/chatOutput.test.ts` -> failed as expected with `TypeError: Converting circular structure to JSON` at `src/shared/chatOutput.ts`.
+- GREEN evidence:
+  - `npm test -- src/shared/chatOutput.test.ts` -> 1 file / 7 tests passed.
+  - `npm test -- src/shared/chatOutput.test.ts src/renderer/materialDesign.test.ts src/renderer/chatOutputModel.test.ts src/renderer/chatMarkdown.test.ts src/renderer/chatStreamReducer.test.ts src/main/chatService.test.ts src/main/agentLoop.test.ts` -> 7 files / 167 tests passed.
+  - `npm run build` -> passed, with the existing Vite chunk-size warning.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+- Implementation evidence:
+  - Added shared `stringifyMaskedPreview()` in `src/shared/chatOutput.ts` for secret-masked, circular-safe preview JSON.
+  - `outputPartsToPlainText()` now uses the helper for tool call, tool result, and approval request previews.
+  - `src/main/chatService.ts` now uses the helper for running ledger detail.
+  - `JsonPreview` now delegates to the shared helper instead of carrying a renderer-only copy.
+
+## 2026-06-26 - v2.9.0 Task 4 Format-Specific React Renderers
+
+- Request: implement Task 4 for v2.9.0 output rendering by replacing assistant-message markdown flattening with dedicated React renderers for every typed `ChatOutputPart`, while preserving user/legacy fallback rendering and following TDD.
+- Changed files:
+  - `src/renderer/components/chat/AnswerBlock.tsx`
+  - `src/renderer/components/chat/OutputPartRenderer.tsx`
+  - `src/renderer/components/chat/CodeBlockView.tsx`
+  - `src/renderer/components/chat/DataTableView.tsx`
+  - `src/renderer/components/chat/CommandOutputView.tsx`
+  - `src/renderer/components/chat/JsonPreview.tsx`
+  - `src/renderer/components/chat/RunLedgerView.tsx`
+  - `src/renderer/components/chat/EvidenceRail.tsx`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/materialDesign.test.ts`
+  - `.superpowers/sdd/2026-06-26-v290-task-4-report.md`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts` -> failed as expected before implementation with missing `src/renderer/components/chat/*.tsx` renderer files and missing structured-output class hooks.
+- GREEN evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts` -> 1 file / 51 tests passed.
+  - `npm test -- src/renderer/materialDesign.test.ts src/renderer/chatOutputModel.test.ts src/renderer/chatMarkdown.test.ts src/renderer/chatStreamReducer.test.ts` -> 4 files / 72 tests passed.
+  - `npm run build` -> passed, with the existing Vite chunk-size warning.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+- Implementation evidence:
+  - `AgentChatPanel` now renders assistant messages with `<AnswerBlock parts={outputPartsFromMessage(message)} />` and leaves user messages on `MarkdownMessage`.
+  - `OutputPartRenderer` covers text, table, code, file_diff, command_output, tool_call, tool_result, file_ref, artifact, citation, approval_request, input_request, diagnostic, and ledger_event.
+  - Added semantic table, code/diff, command output, masked JSON/tool preview, ledger, and evidence rail components without raw HTML or new dependencies.
+
+## 2026-06-26 - v2.9.0 Task 1 Shared Output Contract
+
+- Request: implement Task 1 from the approved 2.9.0 output rendering plan by adding the shared typed output contract and updating chat stream contract tests, while keeping `ChatMessageRecord.content` backward compatible and scoping production changes to shared contracts/helpers only.
+- Changed files:
+  - `src/shared/chat.ts`
+  - `src/shared/chatStream.test.ts`
+  - `src/shared/chatOutput.ts`
+  - `src/shared/chatOutput.test.ts`
+  - `.superpowers/sdd/task-1-report.md`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/shared/chatOutput.test.ts src/shared/chatStream.test.ts` -> failed as expected before implementation because `src/shared/chatOutput.ts` did not exist (`Cannot find module './chatOutput'`), proving the new contract test was exercising the missing shared output module first.
+- GREEN evidence:
+  - `npm test -- src/shared/chatOutput.test.ts src/shared/chatStream.test.ts` -> 2 files / 8 tests passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+- Implementation evidence:
+  - Added `ChatOutputPart` union coverage for text, tables, code, diffs, command output, tool previews/results, file refs, artifacts, citations, approvals, guided input, diagnostics, and ledger rows.
+  - Added `maskPreviewSecrets()` using the required ASCII mask string `****`.
+  - Added `outputPartsToPlainText()` fallback rendering for plain transcript compatibility.
+  - Extended `ChatMessageRecord` with optional `outputParts` and extended `ChatStreamEvent` with `sequence`, `turnId`, optional `assistantMessageId`, typed `output_part` events, and terminal `finalMessageId`.
+
+## 2026-06-26 - v2.9.0 Output Rendering Planning And Approved Visual Direction
+
+- Request: begin the v2.9.0 major iteration to improve output result display and rendering, first study the current rendering model, research mainstream agent/chatbox rendering patterns, produce visual drafts for confirmation before development, and ensure later changes include frontend and backend adaptation.
+- Approved direction:
+  - Default output experience uses Evidence-Linked Answer fused with Run Ledger Answer.
+  - Document Report Answer remains a mode for research/report outputs.
+  - Output formats explicitly covered by the plan include markdown text, tables, code blocks, diffs, terminal output, JSON/tool previews, file references, artifacts, citations, approvals, guided input, diagnostics, and run ledger rows.
+- Changed files:
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+  - `docs/superpowers/specs/2026-06-26-zerox-agent-2-9-0-output-rendering-design.md`
+  - `docs/superpowers/plans/2026-06-26-zerox-agent-2-9-0-output-rendering.md`
+- Design artifact:
+  - `/Users/zerox/.gstack/projects/ZeroxZhang-zerox-agent/designs/zerox-agent-2-9-output-rendering-20260626-123139/output-rendering-board.html`
+- Planning evidence:
+  - `./init.sh` -> initialized the Zerox harness, ran `npm run harness:check`, and ran `npm test -- src/shared/packageScripts.test.ts`; both passed.
+  - `.zerox/feature_list.json` initially had no unfinished features, so feature `P23-v2.9.0-output-rendering` was added as the single planned 2.9.0 feature.
+  - Current renderer study identified `AgentChatPanel`, `chatMarkdown`, `chatStreamReducer`, and `chatTaskActivity` as the live transcript/runtime rendering boundary.
+  - Backend/shared study identified `ChatMessageRecord.content: string`, `ChatStreamEvent`, `ChatTaskStatusEvent`, `chatService`, and `agentLoop` as the contract gap that must be adapted with typed output parts.
+  - Market research covered ChatGPT Canvas, Claude Artifacts/Citations, Perplexity, VS Code/GitHub Copilot agent mode, Cursor-style action chips, and Devin/Cascade-style checkpoints.
+- Verification evidence:
+  - `node -e "const f=require('./.zerox/feature_list.json'); const unfinished=f.features.filter(x=>x.status!=='done'); if (unfinished.length!==1 || unfinished[0].id!=='P23-v2.9.0-output-rendering' || unfinished[0].status!=='planned') { console.error(JSON.stringify(unfinished,null,2)); process.exit(1); } console.log('feature_list ok:', unfinished[0].id, unfinished[0].status);"` -> `feature_list ok: P23-v2.9.0-output-rendering planned`.
+  - `rg -n "TODO|TBD|FIXME|PLACEHOLDER|\\[[^\\]]*(list|commands|scenario|focused|full|fill|paste|TODO)[^\\]]*\\]|If .*differ|If .*does not|optional" docs/superpowers/specs/2026-06-26-zerox-agent-2-9-0-output-rendering-design.md docs/superpowers/plans/2026-06-26-zerox-agent-2-9-0-output-rendering.md` -> no matches.
+  - `git diff --check` -> passed.
+  - `npm run harness:check` -> passed.
+- Development status:
+  - No product implementation code was changed during this planning step.
+  - The implementation plan requires shared/backend contract work before renderer polish, so the iteration will not be a frontend-only change.
+
 ## 2026-06-26 - v2.8.2 Chat Rename, Message Rendering, Time, And Skill Strictness
 
 - Request: ship the 2.8.2 iteration with sidebar chat-session rename, cleaner main chat rendering, auto-updating/readable message times, and a root-cause fix for selected skills not being followed strictly in auto mode.
@@ -4687,3 +4951,428 @@
   - `git push -u origin codex/v2.8.0-runtime-orchestration-memory && git push origin v2.8.1` -> pushed branch and tag.
   - `gh release create v2.8.1 ...` -> created GitHub Release `https://github.com/ZeroxZhang/zerox-agent/releases/tag/v2.8.1`.
   - `gh release view v2.8.1 --json tagName,url,isDraft,isPrerelease,assets` -> release is not draft/prerelease; uploaded `Zerox.Agent-2.8.1-arm64.dmg`, `Zerox.Agent-2.8.1-arm64-mac.zip`, both blockmaps, and `latest-mac.yml` with matching sha256 digests.
+
+## 2026-06-26 - Zerox Agent 2.9.0 Output Rendering Task 2
+
+- Request:
+  - Implement Task 2 main-process output assembly, streaming metadata, terminal events, and assistant `outputParts` persistence for the 2.9.0 output-rendering iteration.
+- Changed areas:
+  - Main process: `src/main/chatOutputAssembler.ts`, `src/main/chatService.ts`, `src/main/chatSessionStore.ts`.
+  - Focused tests: `src/main/chatService.test.ts`.
+  - Adjacent compile-only test update required by the new shared stream metadata: `src/renderer/chatStreamReducer.test.ts`.
+- RED evidence:
+  - `npm test -- src/main/chatService.test.ts src/main/agentLoop.test.ts` -> failed as expected in `emits sequence-stable output parts and completes with the persisted assistant message id` because streamed events still lacked `sequence`.
+- GREEN / verification evidence:
+  - `npm test -- src/main/chatService.test.ts src/main/agentLoop.test.ts` -> 2 files / 78 tests passed.
+  - `npm test -- src/main/chatService.test.ts -t "emits sequence-stable output parts and completes with the persisted assistant message id"` -> passed.
+  - `npm test -- src/renderer/chatStreamReducer.test.ts` -> 1 file / 5 tests passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run build` -> passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: the existing local `better-sqlite3` ABI mismatch warning still triggered the JSON fallback during smoke.
+  - `npm run verify` -> still fails in `src/shared/packageScripts.test.ts` because the repo-level `v2.8.5` release gate expects no non-`done` features while `P23-v2.9.0-output-rendering` is intentionally still `planned`.
+
+## 2026-06-26 - Zerox Agent 2.9.0 Output Rendering Task 2 Review Fixes
+
+- Request:
+  - Address Task 2 review findings around structured output drift, missing lifecycle part coverage, goal reply `outputParts`, and mutable streamed `output_part` snapshots.
+- Changed areas:
+  - `src/main/chatOutputAssembler.ts`
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+- RED evidence:
+  - `npm test -- src/main/chatService.test.ts -t "persists final assistant text and lifecycle output parts for tool-using turns|emits immutable output part snapshots for repeated text deltas|creates and immediately starts a session goal from an explicit goal-setting message|returns failure and leaves no answerable pending request when durable skill wait persistence fails|cancels an active chat request through the runtime abort signal|persists selected guided skill input requests durably before returning them"` -> failed on missing goal reply `outputParts`, stale persisted tool-use text, mutable text snapshots, and missing diagnostic parts.
+- GREEN / verification evidence:
+  - `npm test -- src/main/chatService.test.ts -t "persists final assistant text and lifecycle output parts for tool-using turns|emits immutable output part snapshots for repeated text deltas|creates and immediately starts a session goal from an explicit goal-setting message|returns failure and leaves no answerable pending request when durable skill wait persistence fails|cancels an active chat request through the runtime abort signal|persists selected guided skill input requests durably before returning them"` -> passed.
+  - `npm test -- src/main/chatService.test.ts src/main/agentLoop.test.ts` -> 2 files / 80 tests passed.
+  - `npm run build` -> passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+
+## 2026-06-26 - Zerox Agent 2.9.0 Output Rendering Task 2 Final Handoff Fixes
+
+- Request:
+  - Complete the partial Task 2 fix for chunked tool-call secret redaction and backend structured-part extraction.
+- Changed areas:
+  - `src/main/chatOutputAssembler.ts`
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+- RED evidence:
+  - `npm test -- src/main/chatService.test.ts -t "redacts chunked tool-call argument previews until they become valid JSON|extracts typed structured parts from representative tool result payloads"` -> failed on stale chunked preview redaction after valid JSON and missing `command_output` extraction for empty `stderr`.
+- GREEN / verification evidence:
+  - `npm test -- src/main/chatService.test.ts -t "redacts chunked tool-call argument previews until they become valid JSON|extracts typed structured parts from representative tool result payloads"` -> 2 focused tests passed.
+  - `npm test -- src/main/chatService.test.ts src/main/agentLoop.test.ts` -> 2 files / 85 tests passed.
+  - `npm run build` -> passed; Vite emitted the existing large chunk warning.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run verify` -> still fails in `src/shared/packageScripts.test.ts` because the repo-level `v2.8.5` release gate expects no non-`done` features while `P23-v2.9.0-output-rendering` is intentionally still `planned`.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `better-sqlite3` ABI mismatch triggered the existing JSON fallback during smoke.
+
+## 2026-06-26 - Zerox Agent 2.9.0 Output Rendering Task 2 Closure Blocker Fixes
+
+- Request:
+  - Address Task 2 reviewer blockers: preserve exact legacy assistant `content` while keeping terminal completed messages backward-compatible, and make tool-first structured output answer-led.
+- Changed areas:
+  - `src/main/chatOutputAssembler.ts`
+  - `src/main/chatOutputAssembler.test.ts`
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+  - `src/main/chatSessionStore.ts`
+  - `src/main/chatSessionStore.test.ts`
+- RED evidence:
+  - `npm test -- src/main/chatService.test.ts src/main/chatOutputAssembler.test.ts src/main/chatSessionStore.test.ts -t "preserves final assistant reply whitespace|inserts final text before tool evidence|preserves message content exactly"` -> failed as expected on trimmed assistant content, tool-first part order, and store-level Markdown whitespace trimming.
+- GREEN / verification evidence:
+  - `npm test -- src/main/chatService.test.ts src/main/chatOutputAssembler.test.ts src/main/chatSessionStore.test.ts -t "preserves final assistant reply whitespace|inserts final text before tool evidence|preserves message content exactly"` -> 3 focused tests passed.
+  - `npm test -- src/main/chatService.test.ts src/main/agentLoop.test.ts src/main/chatOutputAssembler.test.ts src/main/chatSessionStore.test.ts` -> 4 files / 108 tests passed.
+  - `npm run build` -> passed; Vite emitted the existing large chunk warning.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - Full `npm run verify` and `npm run smoke:prod` remain deferred to later P23 release/renderer tasks while the v2.9.0 feature remains intentionally planned.
+
+## 2026-06-26 - Zerox Agent 2.9.0 Output Rendering Task 3
+
+- Request:
+  - Implement markdown table, blockquote, task-list, fenced diff metadata coverage, and renderer output-model normalization for persisted and live output parts.
+- Changed areas:
+  - `src/renderer/chatMarkdown.ts`
+  - `src/renderer/chatMarkdown.test.ts`
+  - `src/renderer/chatOutputModel.ts`
+  - `src/renderer/chatOutputModel.test.ts`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `.superpowers/sdd/2026-06-26-v290-task-3-report.md`
+- RED evidence:
+  - `npm test -- src/renderer/chatMarkdown.test.ts src/renderer/chatOutputModel.test.ts` -> failed as expected: missing `chatOutputModel`, markdown tables parsed as paragraphs, blockquotes parsed as paragraphs, and task lists parsed as unordered lists.
+- GREEN / verification evidence:
+  - `npm test -- src/renderer/chatMarkdown.test.ts src/renderer/chatOutputModel.test.ts` -> 2 files / 11 tests passed.
+  - Refactor re-run: `npm test -- src/renderer/chatMarkdown.test.ts src/renderer/chatOutputModel.test.ts` -> 2 files / 11 tests passed.
+  - `npm test -- src/renderer/chatMarkdown.test.ts src/renderer/chatOutputModel.test.ts src/renderer/chatStreamReducer.test.ts` -> 3 files / 18 tests passed.
+  - `npm run build` -> passed; Vite emitted the existing large chunk warning.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `better-sqlite3` ABI mismatch triggered the existing JSON fallback during smoke.
+  - `npm run verify` -> still fails in `src/shared/packageScripts.test.ts` because the repo-level `v2.8.5` release gate expects no non-`done` features while `P23-v2.9.0-output-rendering` is intentionally still `planned`.
+
+## 2026-06-26 - Zerox Agent 2.9.0 Output Rendering Task 3 Review Blockers
+
+- Request:
+  - Address Task 3 review blockers: render assistant `outputParts` in `AgentChatPanel`, preserve legacy content fallback when parts lack text, and make live output-part render keys stable across repeated updates.
+- Changed areas:
+  - `src/renderer/chatOutputModel.ts`
+  - `src/renderer/chatOutputModel.test.ts`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `.superpowers/sdd/2026-06-26-v290-task-3-report.md`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/renderer/chatOutputModel.test.ts src/renderer/chatMarkdown.test.ts` -> failed as expected: legacy content fallback missing for non-text `outputParts`, `outputMarkdownFromMessage` missing, and live render keys still included stream sequence.
+- GREEN / verification evidence:
+  - `npm test -- src/renderer/chatOutputModel.test.ts src/renderer/chatMarkdown.test.ts` -> 2 files / 14 tests passed.
+  - Refactor re-run: `npm test -- src/renderer/chatOutputModel.test.ts src/renderer/chatMarkdown.test.ts` -> 2 files / 14 tests passed.
+  - `npm test -- src/renderer/chatMarkdown.test.ts src/renderer/chatOutputModel.test.ts src/renderer/chatStreamReducer.test.ts` -> 3 files / 21 tests passed.
+  - `npm run build` -> passed; Vite emitted the existing large chunk warning.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+
+## 2026-06-26 - Zerox Agent 2.9.0 Output Rendering Task 4 Review Blocker
+
+- Request:
+  - Fix `JsonPreview` secret leakage by making `maskPreviewSecrets()` recursively sanitize `Map` entries and `Set` values before renderer serialization.
+- Changed areas:
+  - `src/shared/chatOutput.ts`
+  - `src/shared/chatOutput.test.ts`
+  - `.superpowers/sdd/2026-06-26-v290-task-4-report.md`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/shared/chatOutput.test.ts` -> failed as expected: `Map` secret key values and nested `Set` object secrets remained unmasked.
+- GREEN / verification evidence:
+  - `npm test -- src/shared/chatOutput.test.ts` -> 1 file / 6 tests passed.
+  - `npm test -- src/shared/chatOutput.test.ts src/renderer/materialDesign.test.ts src/renderer/chatOutputModel.test.ts src/renderer/chatMarkdown.test.ts src/renderer/chatStreamReducer.test.ts` -> 5 files / 78 tests passed.
+  - `npm run build` -> passed; Vite emitted the existing large chunk warning.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+
+## 2026-06-26 - Workspace Create Directory Picker Hotfix
+
+- Request:
+  - Fix the workspace menu "新建工作区" action so it opens the native directory manager and lets the user choose or create the target folder instead of silently creating a default temporary workspace.
+- Changed areas:
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/materialDesign.test.ts`
+  - `src/preload/index.ts`
+  - `src/preload/index.test.ts`
+  - `src/main/ipc/index.ts`
+  - `src/main/ipc/index.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts src/preload/index.test.ts src/main/ipc/index.test.ts -t "workspace|openProject|工作区"` -> failed as expected because the renderer still called `createTemporaryAgentWorkspace`, preload did not pass input to `agentWorkspaces:openProject`, and the main IPC handler had no create-mode dialog.
+- GREEN / verification evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts src/preload/index.test.ts src/main/ipc/index.test.ts -t "workspace|openProject|工作区"` -> 3 files / 5 focused tests passed.
+  - `npm test -- src/renderer/materialDesign.test.ts src/preload/index.test.ts src/main/ipc/index.test.ts` -> 3 files / 63 tests passed.
+  - `npm run build` -> passed after correcting the Electron open-dialog property to `promptToCreate`; Vite emitted the existing large chunk warning.
+  - `npm run verify` -> 179 files / 1232 tests passed, build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `better-sqlite3` ABI mismatch triggered the existing JSON fallback during smoke.
+  - `git diff --check` -> passed.
+
+## 2026-06-26 - Main Transcript Runtime Output Regression Hotfix
+
+- Request:
+  - Fix a severe v2.9.0 display regression where model reasoning, tool calls, tool results, command output, and run ledger events appeared in the main chat transcript, inflated scroll height with large JSON/file reads, and could destabilize the app. These process surfaces must stay in the thinking/tool disclosure areas instead of the primary conversation.
+- Changed areas:
+  - `src/renderer/chatOutputModel.ts`
+  - `src/renderer/chatOutputModel.test.ts`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/components/chat/AnswerBlock.tsx`
+  - `src/renderer/materialDesign.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/renderer/chatOutputModel.test.ts src/renderer/materialDesign.test.ts -t "tool|runtime|structured assistant output|legacy content"` -> failed as expected because `outputPartsFromMessage()` still returned `tool_call`, `tool_result`, `command_output`, `ledger_event`, `approval_request`, and `input_request` parts to the main transcript, and `AgentChatPanel` had no filtered `visibleChatMessages` path.
+- GREEN / verification evidence:
+  - `npm test -- src/renderer/chatOutputModel.test.ts src/renderer/materialDesign.test.ts -t "tool|runtime|structured assistant output|legacy content"` -> 2 files / 8 focused tests passed.
+  - `npm test -- src/renderer/chatOutputModel.test.ts src/renderer/materialDesign.test.ts src/renderer/chatStreamReducer.test.ts` -> 3 files / 70 tests passed.
+  - `npm run build` -> passed; Vite emitted the existing large chunk warning.
+  - `npm run verify` -> 179 files / 1233 tests passed, build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `better-sqlite3` ABI mismatch triggered the existing JSON fallback during smoke.
+  - `npm run dist:mac` -> passed; regenerated unsigned macOS arm64 DMG, ZIP, blockmaps, and `latest-mac.yml` for v2.9.0 with this hotfix.
+  - Packaged app smoke: `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v2.9.0' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+  - `release/Zerox Agent-2.9.0-arm64.dmg` (122M, sha256 `fbbbeaf395c0d9aae65ee712e27609f909d7c6b3ec6173de5bce38f299bbdbaa`)
+  - `release/Zerox Agent-2.9.0-arm64-mac.zip` (333M, sha256 `7a0024babd450dbc0a775fbd106f1fcc0f2f3b088a2b7d5ad0ea82565ed8a82c`)
+  - `release/Zerox Agent-2.9.0-arm64.dmg.blockmap` (133K, sha256 `d0a1ee4a1dffc5ffb5d929cc335cd32f6cab7c5752f46904d4b9c74019ddaf99`)
+  - `release/Zerox Agent-2.9.0-arm64-mac.zip.blockmap` (335K, sha256 `2ec57a1d6ecc1b968ccdf943dab1e18e4689ead17dd9e95f3b36df218d37d93a`)
+  - `release/latest-mac.yml` sha256 `76a34e01d39deb428fe14be050e5954241f94cd0846ee54a3b80cf1befbc6f9d`.
+- Browser QA note:
+  - Browser plugin setup completed and listed an in-app browser plus Chrome backend, but both tab navigation attempts failed with a stale session error (`Tab 1 is not part of browser session ...`). No external browser fallback was used; coverage rests on renderer unit/source regression tests, full verify, build, harness, and production smoke.
+
+## 2026-06-26 - Main Transcript Evidence Rail Regression Hotfix
+
+- Request:
+  - Fix the remaining v2.9.0 display regression where file read references were rendered as a second column in the main chat transcript, shrinking the answer body and causing tables/code blocks to require horizontal dragging. Keep tool/file-read traces in process disclosures, make assistant answers single-column, and normalize typography for prose/code/table content.
+- Root cause:
+  - `AnswerBlock` still used the v2.9.0 `EvidenceRail` design to split answer content and evidence parts into two columns.
+  - `file_ref` output parts were still treated as main conversation content, so `file_read` traces produced `READ` cards in the answer area even though the lower tool disclosure already owned that information.
+  - Table/code CSS forced minimum widths and `white-space: pre`, creating avoidable horizontal scroll inside an already narrowed column.
+- Changed areas:
+  - `src/renderer/chatOutputModel.ts`
+  - `src/renderer/chatOutputModel.test.ts`
+  - `src/renderer/components/chat/AnswerBlock.tsx`
+  - `src/renderer/components/chat/EvidenceRail.tsx` (removed)
+  - `src/renderer/materialDesign.test.ts`
+  - `src/renderer/styles/chat.css`
+  - `src/renderer/styles/responsive.css`
+  - `docs/design/zerox-agent-2-9-0-output-rendering-artifact.html`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/renderer/chatOutputModel.test.ts src/renderer/materialDesign.test.ts` -> failed as expected because `file_ref` still appeared in `outputPartsFromMessage()`, `AnswerBlock` still imported `EvidenceRail`, and chat CSS still lacked the single-column/full-width wrapping contract.
+- GREEN / verification evidence:
+  - `npm test -- src/renderer/chatOutputModel.test.ts src/renderer/materialDesign.test.ts` -> 2 files / 63 tests passed.
+  - `npm test -- src/renderer/chatMarkdown.test.ts src/renderer/chatStreamReducer.test.ts src/renderer/chatOutputModel.test.ts src/renderer/materialDesign.test.ts` -> 4 files / 77 tests passed.
+  - `npm test` -> 179 files / 1233 tests passed.
+  - `npm run build` -> passed; Vite emitted the existing large chunk warning.
+  - `npm run verify` -> 179 files / 1233 tests passed, build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `better-sqlite3` ABI mismatch triggered the existing JSON fallback during smoke.
+  - `git diff --check` -> passed.
+  - `npm run dist:mac` -> passed; regenerated unsigned macOS arm64 DMG, ZIP, blockmaps, and `latest-mac.yml` for v2.9.0.
+  - Packaged app smoke: `BUILDING_AGENT_SMOKE=1 "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+  - `release/Zerox Agent-2.9.0-arm64.dmg` sha256 `4cc4bf70dd34282e1a73d59638b4991ddc01a58c2aebe2f3a47d81930fbd706e`
+  - `release/Zerox Agent-2.9.0-arm64-mac.zip` sha256 `5d5a40ca6ea87cc0e44b48890d986935b4932088e519f7c5f8105f7e5ed48661`
+  - Normal packaged app launched for user testing from `release/mac-arm64/Zerox Agent.app`, PID `90345`.
+
+## 2026-06-26 - Main Transcript Typography Scale Hotfix
+
+- Request:
+  - Fix the remaining v2.9.0 visual issue where assistant output still showed inconsistent text sizing across prose, bold text, inline code, tables, code blocks, and right-side process rows.
+- Root cause:
+  - The previous fix set the `.markdown-message` root font size, but child elements still used independent sizes: table content used `--text-sm`, table headers used `--text-xs`, code blocks used `--text-sm`, inline code used `0.94em` plus extra padding, and side process rows inherited legacy grid sizing that squeezed reasoning text into a very narrow column.
+- Changed areas:
+  - `src/renderer/styles/chat.css`
+  - `src/renderer/materialDesign.test.ts`
+  - `docs/design/zerox-agent-2-9-0-output-rendering-artifact.html`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts -t "main transcript typography"` -> failed as expected because no shared `--chat-output-font-size` contract existed and tables/code/inline code were not inheriting the transcript content scale.
+- GREEN / verification evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts -t "main transcript typography"` -> 1 focused test passed.
+  - `npm test -- src/renderer/materialDesign.test.ts src/renderer/chatMarkdown.test.ts src/renderer/chatOutputModel.test.ts src/renderer/chatStreamReducer.test.ts` -> 4 files / 78 tests passed.
+  - `npm test` -> 179 files / 1234 tests passed.
+  - `npm run build` -> passed; Vite emitted the existing large chunk warning.
+  - `npm run verify` -> 179 files / 1234 tests passed, build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `better-sqlite3` ABI mismatch triggered the existing JSON fallback during smoke.
+  - `git diff --check` -> passed.
+  - `npm run dist:mac` -> passed; regenerated unsigned macOS arm64 DMG, ZIP, blockmaps, and `latest-mac.yml` for v2.9.0.
+  - Packaged app smoke: `BUILDING_AGENT_SMOKE=1 "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+  - `release/Zerox Agent-2.9.0-arm64.dmg` sha256 `65501e0bf295ab91ad25383a5ead79ca2d01a9b50cafcfde0d343964eca85051`
+  - `release/Zerox Agent-2.9.0-arm64-mac.zip` sha256 `1cef619578dc5816890c9a65b3ccc90583841a3f4cf04a235bd29d9cd9d9a1e7`
+  - Normal packaged app launched for user testing from `release/mac-arm64/Zerox Agent.app`, PID `14125`.
+  - Local screenshot attempt: `screencapture -x /tmp/zerox-agent-typography-hotfix.png` failed with `could not create image from display`; visual confirmation should be done in the launched packaged app.
+
+## 2026-06-26 - Markdown Typography and Context Summary Hotfix
+
+- Request:
+  - Fix the remaining v2.9.0 display issues where file names/table content still looked larger than body text, some emphasized body text appeared to jump in size, and the right-side process row showed a nonfunctional `展开` action with wrapped long reasoning text.
+- Root cause:
+  - The legacy `MarkdownMessage` path in `AgentChatPanel.tsx` rendered raw `<table>` elements instead of the shared `chat-data-table` surface, so persisted/legacy messages did not inherit the same typography and wrapping contract as the new answer renderer.
+  - Markdown `strong` content used weight-only emphasis with no explicit visual treatment, making dense Chinese/English text read like a size jump in the transcript.
+  - `TaskProcessItem` reused the expandable transcript behavior inside the narrow context panel, even though the card already shows `最新思考` above and the process list only needs one-line scan summaries.
+- Changed areas:
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/styles/chat.css`
+  - `src/renderer/materialDesign.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts -t "typography|context process"` -> failed as expected because `.markdown-message strong` lacked the shared emphasis background and `TaskProcessItem` did not expose compact one-line context behavior.
+- GREEN / verification evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts -t "typography|context process"` -> 2 focused tests passed.
+  - `npm test -- src/renderer/materialDesign.test.ts src/renderer/chatMarkdown.test.ts src/renderer/chatOutputModel.test.ts src/renderer/chatStreamReducer.test.ts` -> 4 files / 79 tests passed.
+  - `npm test` -> 179 files / 1235 tests passed.
+  - `npm run build` -> passed; Vite emitted the existing large chunk warning.
+  - `npm run verify` -> 179 files / 1235 tests passed, build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `better-sqlite3` ABI mismatch triggered the existing JSON fallback during smoke.
+  - `git diff --check` -> passed.
+  - `npm run dist:mac` -> passed; regenerated unsigned macOS arm64 DMG, ZIP, blockmaps, and `latest-mac.yml` for v2.9.0.
+  - Packaged app smoke: `BUILDING_AGENT_SMOKE=1 "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+  - `release/Zerox Agent-2.9.0-arm64.dmg` sha256 `19d60c3d17725ce55971e353c0b91960e236a7f7e26a403892cd9887bcdf6f37`
+  - `release/Zerox Agent-2.9.0-arm64-mac.zip` sha256 `f49f76354367cf165cec763104c22c33b071558d1aa66a2683a344f2bd7ed549`
+
+## 2026-06-26 - Zerox Agent v2.9.2 Release Packaging
+
+- Request:
+  - Ship the current v2.9 output-rendering hotfix line as version `2.9.2`, package macOS artifacts, publish the release, and push source metadata.
+- Changed areas:
+  - `package.json`
+  - `package-lock.json`
+  - `README.md`
+  - `.zerox/feature_list.json`
+  - `src/shared/packageScripts.test.ts`
+  - `src/shared/readme.test.ts`
+  - `.zerox/progress.md`
+- Verification evidence:
+  - `npm version 2.9.2 --no-git-tag-version` -> updated root package metadata and lockfile metadata.
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 2 files / 11 tests passed.
+  - `npm run verify` -> 179 files / 1235 tests passed, build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `better-sqlite3` ABI mismatch triggered the existing JSON fallback during smoke.
+  - `npm run dist:mac` -> passed; generated unsigned macOS arm64 DMG, ZIP, blockmaps, and `latest-mac.yml` for v2.9.2.
+  - Packaged app smoke: `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v2.9.2' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+  - `release/latest-mac.yml` reports `version: 2.9.2`.
+  - `release/Zerox Agent-2.9.2-arm64.dmg` (122M, sha256 `4257919ad890c259275c90c47d3a7f6ec3a318c930393fa7c7c347e2435d817a`)
+  - `release/Zerox Agent-2.9.2-arm64-mac.zip` (333M, sha256 `67c3f6a873918c4a69df34b9b1cccc52e6b6da50e8436c766d3e14cf4b96fcc4`)
+  - `release/Zerox Agent-2.9.2-arm64.dmg.blockmap` (133K, sha256 `550a5d2280f89db1063e44eedcccd1c21340224719e04259e1e170f74b61f557`)
+  - `release/Zerox Agent-2.9.2-arm64-mac.zip.blockmap` (335K, sha256 `498d439413111fbda896f9a1520f519d2a147ecd61b96d60862e0b78fb2ebcb2`)
+  - `release/latest-mac.yml` sha256 `c5f36a9179f51b5d726efc32b068d606ea40a0af394729f1d59862d762d177d9`.
+
+## 2026-06-26 - v2.9.2 Goal Mode Long Transcript Performance Follow-up
+
+- Request:
+  - User retested the previous v2.9.2 hotfix and still saw severe lag while typing and switching chat sessions after a long goal-mode run.
+- Root cause:
+  - The first hotfix bounded runtime event lists and stopped forced auto-scroll, but it did not measure the production IPC/session-hydration path with the user's real long-run data.
+  - Real app data showed `chat-sessions.json` was about 6.8 MB, and the heaviest visible session `398fc1c4-9365-488f-8749-01a59091ee7c` serialized to about 5.0 MB. The largest assistant message only had about 642 chars of visible content, but carried about 4.9 MB of `outputParts`, mostly invisible `tool_result` and `command_output` payloads.
+  - Session switching called `getChatSession` with the full stored record, so React and Electron IPC were repeatedly moving/parsing data the transcript did not render. Composer typing also still touched more transcript state than needed.
+- Changed areas:
+  - `src/shared/chatSessionProjection.ts`
+  - `src/shared/chatSessionProjection.test.ts`
+  - `src/main/chatSessionStore.ts`
+  - `src/main/container.ts`
+  - `src/main/container.test.ts`
+  - `src/main/smokeMode.ts`
+  - `src/main/smokeMode.test.ts`
+  - `src/main/main.ts`
+  - `src/renderer/App.tsx`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/components/chat/AnswerBlock.tsx`
+  - `src/renderer/components/chat/OutputPartRenderer.tsx`
+  - `src/renderer/chatMarkdownPreview.ts`
+  - `src/renderer/chatMarkdownPreview.test.ts`
+  - `src/renderer/styles/chat.css`
+  - `src/renderer/materialDesign.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts src/renderer/chatMarkdownPreview.test.ts` -> failed as expected because transcript rendering was not memoized and `chatMarkdownPreview` did not exist.
+  - Production performance smoke on the user's real session data timed out before transcript projection/input fixes, reproducing the reported hang instead of relying on synthetic unit tests.
+  - Local data inspection showed the worst stored session payload was about 5.0 MB while its renderer-visible content was tiny, proving the lag was dominated by hidden tool output hydration.
+- GREEN / verification evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts src/renderer/chatMarkdownPreview.test.ts` -> 2 files / 61 tests passed.
+  - `npm test -- src/renderer/chatMarkdown.test.ts src/renderer/chatMarkdownPreview.test.ts src/renderer/materialDesign.test.ts` -> 3 files / 68 tests passed.
+  - `npm test -- src/renderer/materialDesign.test.ts src/renderer/chatMarkdownPreview.test.ts src/shared/chatSessionProjection.test.ts src/main/container.test.ts src/main/smokeMode.test.ts` -> 5 files / 88 tests passed.
+  - `npm run build` -> passed; Vite emitted the existing large chunk warning.
+  - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_PERF_SMOKE=1 BUILDING_AGENT_SMOKE_TIMEOUT_MS=30000 npm run smoke:prod:built` -> passed on 24 real sessions. Main run metrics: selected session `398fc1c4-9365-488f-8749-01a59091ee7c`, selected session payload 30,498 bytes, output part payload 3,619 bytes, `sessionSwitchMs` 992.8, `alternateSessionSwitchMs` 549.2, `inputP95FrameMs` 0.1, `inputMaxFrameMs` 0.9, `maxGetSessionMs` 0.4.
+  - Independent validation agent `019f04b9-448a-7ac2-beca-c7a4a60ecc5a` ran production validation without editing files. It passed build, production performance smoke, normal production smoke, harness check, and focused tests. Its metrics: selected session `398fc1c4-9365-488f-8749-01a59091ee7c`, selected session payload 30,498 bytes, output part payload 3,619 bytes, `sessionSwitchMs` 695.5, `alternateSessionSwitchMs` 562.8, `inputP95FrameMs` 0.1, `inputMaxFrameMs` 0.8, `maxGetSessionMs` 0.5.
+  - `npm run verify` -> 181 files / 1250 tests passed, build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `better-sqlite3` ABI mismatch triggered the existing JSON fallback during smoke.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+- Implementation evidence:
+  - Full persisted chat records still retain audit `outputParts`; only `container.getChatSession()` now returns a transcript projection that keeps visible text/artifact/table/code/citation/diagnostic/file-diff parts and drops invisible large tool payloads from renderer hydration.
+  - `chatSessionStore` now caches parsed JSON sessions in-process to avoid reparsing the same large file on repeated reads.
+  - The composer uses a ref-backed uncontrolled textarea so typing no longer re-renders the transcript on every keystroke.
+  - Production smoke mode now has a performance path that scans real sessions, switches between real sidebar rows using `data-session-id`, waits for expected `data-message-id`, and measures composer input latency with explicit thresholds.
+
+## 2026-06-27 - v2.9.2 Long Transcript Performance Retest Correction
+
+- Request:
+  - User retested the previous hotfix and still saw severe lag while typing and switching sessions. The earlier completion call was incorrect because the smoke check covered only two visible non-archived sessions and missed the expanded archive plus long-transcript layout path.
+- Root cause:
+  - After renderer hydration was projected down to small payloads, the remaining freeze came from layout, not IPC. Real-window DevTools measurement showed session switches spending hundreds to thousands of milliseconds in `Document::UpdateStyleAndLayout`.
+  - Hiding the transcript eliminated the long tasks, and then changing the transcript markdown/output wrappers from nested CSS grid containers to block flow reduced the same real-session switches to roughly 11-16 ms with zero long tasks.
+  - Sidebar session summaries were also unbounded for old records, increasing text/layout work after expanding archived sessions.
+  - The performance smoke itself was under-scoped: it did not fail when only two active sessions were tested while 22 archived sessions existed.
+- Changed areas:
+  - `src/main/chatSessionStore.ts`
+  - `src/main/chatSessionStore.test.ts`
+  - `src/main/smokeMode.ts`
+  - `src/main/smokeMode.test.ts`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/components/chat/OutputPartRenderer.tsx`
+  - `src/renderer/chatMarkdownPreview.ts`
+  - `src/renderer/chatMarkdownPreview.test.ts`
+  - `src/renderer/styles/chat.css`
+  - `src/renderer/materialDesign.test.ts`
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+- RED evidence:
+  - Manual DevTools profile on the user's real data reproduced long layout tasks on expanded archive session switching even after payload projection. Example slow path before the layout fix included `activeMs` around 536-1900 ms and long tasks up to roughly 1855 ms.
+  - The existing production performance smoke reported success while `testedSwitchCount` was only 2, proving the automated gate did not cover the user's path.
+- GREEN / verification evidence:
+  - Manual real-window DevTools retest after the layout fix across six real sessions: switch `activeMs` roughly 10.8-16.3 ms, two-frame settle roughly 16.8-31.8 ms, `totalLongTasks` 0, `longTaskMax` 0, input `p95` 0.1 ms, input max 1.8 ms.
+  - `npm test -- src/main/smokeMode.test.ts src/renderer/chatMarkdownPreview.test.ts src/renderer/materialDesign.test.ts src/main/chatSessionStore.test.ts` -> 4 files / 96 tests passed.
+  - `npm run build` -> passed; Vite emitted the existing large chunk warning.
+  - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_PERF_SMOKE=1 npm run smoke:prod:built` -> passed on 24 real sessions with 22 archived sessions expanded, `visibleSessionCount` 24, `testedSwitchCount` 6, `sessionSwitchMs` 74.7, `inputP95FrameMs` 0.1, `inputMaxFrameMs` 2.1, `longTaskCount` 0, `longTaskMaxMs` 0.
+  - `npm run verify` -> 181 files / 1251 tests passed, build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `better-sqlite3` ABI mismatch triggered the existing JSON fallback during smoke.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+- Implementation evidence:
+  - Sidebar summaries are normalized and capped to 160 characters for both new and legacy list items.
+  - Collapsed markdown previews render plain text without parsing all markdown blocks until expanded.
+  - Loading a persisted session no longer immediately refreshes the sidebar list again, and historical session loads do not force scroll-to-bottom.
+  - Transcript markdown and structured output wrappers now use block flow with explicit spacing instead of nested grid containers, avoiding the min-content layout blowup.
+  - Performance smoke now expands `.sidebar-archive-toggle`, records `archivedSessionCount`, `archiveExpanded`, and `visibleSessionCount`, and fails when it does not switch the expected number of real sessions.
+
+## 2026-06-27 - Zerox Agent v2.9.3 Release Packaging
+
+- Request:
+  - Repackage, release, and push the confirmed Goal Mode selected-skill and long transcript performance fixes after user retest confirmed the app no longer lagged.
+- Release/version work:
+  - Version bumped to `2.9.3` in `package.json` and `package-lock.json`.
+  - README now documents v2.9.3 in English and Chinese, including the Goal Mode selected-skill routing fix, long transcript performance fix, and updated quarantine examples.
+  - `.zerox/feature_list.json` includes `P25-v2.9.3-goal-performance-release` as done.
+- Verification evidence:
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts src/main/smokeMode.test.ts src/renderer/chatMarkdownPreview.test.ts src/renderer/materialDesign.test.ts src/main/chatSessionStore.test.ts` -> 6 files / 107 tests passed.
+  - `npm run verify` -> 181 files / 1251 tests passed, build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_PERF_SMOKE=1 npm run smoke:prod:built` -> passed on 24 real sessions with 22 archived sessions expanded, `visibleSessionCount` 24, `testedSwitchCount` 6, `sessionSwitchMs` 75.2, `inputP95FrameMs` 0.1, `inputMaxFrameMs` 1.3, `longTaskCount` 0, `longTaskMaxMs` 0.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `better-sqlite3` ABI mismatch triggered the existing JSON fallback during this un-packaged smoke.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run dist:mac` -> passed; generated unsigned macOS arm64 DMG, ZIP, blockmaps, and `latest-mac.yml` for v2.9.3.
+  - Packaged app smoke: `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v2.9.3' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+- Release artifact evidence:
+  - `release/latest-mac.yml` reports `version: 2.9.3`.
+  - `release/Zerox Agent-2.9.3-arm64.dmg` (122M, sha256 `5aaf962e94ca50bb6c77432b8b2f2d3c967d9736e55ae81470df2788f68f93fd`)
+  - `release/Zerox Agent-2.9.3-arm64-mac.zip` (333M, sha256 `5067d706f74751bd9091c839abea93e5900cc0e1da35fca42ba87a0160955fd1`)
+  - `release/Zerox Agent-2.9.3-arm64.dmg.blockmap` (131K, sha256 `7a5971ef3e7d0408b6453938854e5b88f5bc0ad09836666ca76ba49294a46bb8`)
+  - `release/Zerox Agent-2.9.3-arm64-mac.zip.blockmap` (335K, sha256 `3e35520f9b210a897a09741930cf8dbfc72648852a91c3aef4fd20c2fc813fac`)
+  - `release/latest-mac.yml` sha256 `2952710b429e2ea04597de4c94f09fee758f80966c76f438542079371e094280`.

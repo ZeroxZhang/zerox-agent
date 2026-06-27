@@ -25,6 +25,75 @@ describe("chat markdown", () => {
     ]);
   });
 
+  it("parses markdown tables into table blocks", () => {
+    expect(
+      parseMarkdownBlocks(
+        [
+          "| Name | Score |",
+          "| --- | --- |",
+          "| A | 9 |",
+          "| B | 8 |",
+        ].join("\n"),
+      ),
+    ).toEqual([
+      {
+        type: "table",
+        columns: ["Name", "Score"],
+        rows: [
+          ["A", "9"],
+          ["B", "8"],
+        ],
+      },
+    ]);
+  });
+
+  it("preserves diff language metadata for fenced blocks", () => {
+    expect(
+      parseMarkdownBlocks(
+        [
+          "```diff",
+          "+added",
+          "-removed",
+          "```",
+        ].join("\n"),
+      ),
+    ).toEqual([
+      { type: "code", language: "diff", code: "+added\n-removed" },
+    ]);
+  });
+
+  it("parses blockquotes into blockquote blocks without raw HTML", () => {
+    expect(
+      parseMarkdownBlocks(
+        [
+          "> note",
+          "> more detail",
+        ].join("\n"),
+      ),
+    ).toEqual([
+      { type: "blockquote", text: "note more detail" },
+    ]);
+  });
+
+  it("parses task list items with checked metadata", () => {
+    expect(
+      parseMarkdownBlocks(
+        [
+          "- [x] done",
+          "- [ ] next",
+        ].join("\n"),
+      ),
+    ).toEqual([
+      {
+        type: "taskList",
+        items: [
+          { text: "done", checked: true },
+          { text: "next", checked: false },
+        ],
+      },
+    ]);
+  });
+
   it("parses inline emphasis and code spans without using raw HTML", () => {
     expect(
       parseInlineMarkdown(

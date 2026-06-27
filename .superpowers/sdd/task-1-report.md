@@ -1,33 +1,62 @@
-# Task 1 Report: Workspace Sandbox And Tool Permission Hardening
+# Task 1 Report: Shared Output Contract for Zerox Agent 2.9.0 Output Rendering
 
 Status: DONE
 
+Scope:
+- Implemented only the shared output contract and chat stream contract updates required by Task 1.
+- Kept production changes limited to shared contracts/helpers.
+- Preserved `ChatMessageRecord.content` as the backward-compatible plain-text field.
+
 Changed files:
-- `src/shared/locationResource.ts`
-- `src/shared/agentWorkspace.ts`
-- `src/shared/toolPermissions.ts`
-- `src/main/agentToolExecutor.ts`
-- `src/main/localFileOrganizer.ts`
-- `src/main/nativeResearchTools.ts`
-- `src/shared/agentWorkspace.test.ts`
-- `src/shared/toolPermissions.test.ts`
-- `src/main/agentToolExecutor.test.ts`
-- `src/main/localFileOrganizer.test.ts`
-- `src/main/nativeResearchTools.test.ts`
+- `src/shared/chat.ts`
+- `src/shared/chatStream.test.ts`
+- `src/shared/chatOutput.ts`
+- `src/shared/chatOutput.test.ts`
+- `.zerox/progress.md`
 
 RED evidence:
-- `npm test -- src/main/agentToolExecutor.test.ts src/shared/toolPermissions.test.ts src/main/nativeResearchTools.test.ts` -> failed before implementation: symlink escapes were authorized/executed and `markdown_report_write` wrote through a symlinked parent.
-- `npm test -- src/main/agentToolExecutor.test.ts src/main/localFileOrganizer.test.ts src/shared/toolPermissions.test.ts` -> failed before implementation: crafted apply/rollback move objects were accepted and renamed outside-root files.
-- `npm test -- src/shared/agentWorkspace.test.ts src/shared/toolPermissions.test.ts src/main/chatService.test.ts src/main/agentToolExecutor.test.ts` -> failed before implementation: read-only contexts still modeled workspace write access, approved shell templates allowed outside absolute paths, and `chrome_bookmarks_read` was allowed in read-only runs.
+- `npm test -- src/shared/chatOutput.test.ts src/shared/chatStream.test.ts` -> failed before implementation because `src/shared/chatOutput.ts` did not exist (`Cannot find module './chatOutput'`), while the updated stream contract test already compiled against the stricter metadata shape.
 
 GREEN evidence:
-- `npm test -- src/shared/agentWorkspace.test.ts src/shared/toolPermissions.test.ts src/main/agentToolExecutor.test.ts src/main/localFileOrganizer.test.ts src/main/nativeResearchTools.test.ts src/main/chatService.test.ts` -> 6 files / 112 tests passed.
-- `npm test` -> 164 files / 1028 tests passed.
-- `npm run build` -> passed.
+- `npm test -- src/shared/chatOutput.test.ts src/shared/chatStream.test.ts` -> 2 files / 8 tests passed.
 - `npm run harness:check` -> passed.
+- `git diff --check` -> passed.
 
 Implementation notes:
-- Added a shared path-boundary primitive that normalizes location aliases, rejects existing symlink path segments, resolves real targets when available, and verifies resolved paths remain inside allowed roots.
-- Wired the primitive into run-context path checks, task authorization, executor-side guards, organizer move validation, and native Markdown report writes.
-- Treats generated move plans/transactions as capabilities by validating `root`, `moves[].from`, `moves[].to`, and transaction logs before rename.
-- Denies writable tools, including Chrome bookmark artifact writes, in read-only run contexts.
+- Added the shared `ChatOutputPart` union for evidence-linked answer and run-ledger answer rendering primitives, including tables, code, diffs, terminal output, tool previews/results, citations, file references, artifacts, approvals, guided input, diagnostics, and ledger rows.
+- Added `maskPreviewSecrets(value: unknown): unknown` with the required ASCII secret mask string `****`.
+- Added `outputPartsToPlainText(parts)` so structured parts still have a plain-text fallback for existing transcript surfaces.
+- Extended `ChatMessageRecord` with optional `outputParts` while keeping `content: string` intact.
+- Extended `ChatStreamEvent` with `sequence`, `turnId`, optional `assistantMessageId`, a typed `output_part` event, and terminal `finalMessageId`.
+
+Self-review:
+- Confirmed the diff stayed within shared contracts/tests plus required reporting files.
+- Did not modify or stage unrelated untracked root reference files.
+
+Deferred by task scope:
+- `npm run verify` and `npm run smoke:prod` were not run in this task slice because the brief requires focused verification plus `npm run harness:check` for the implementation slice, and reserves full verify/smoke for release claims.
+
+## 2026-06-26 Fix Round After Review
+
+Status: DONE
+
+Reviewer findings addressed:
+- Critical: extended `outputPartsToPlainText()` fallback coverage to include tool call/result JSON previews, file refs, artifacts, approvals, and guided input, alongside the existing diff/diagnostic coverage.
+- Important: added a named shared `ChatOutputStreamEvent` type while keeping `ChatStreamEvent` as the broader union.
+- Important: expanded contract tests to assert fallback coverage for diffs, tool previews/results, file refs, artifacts, approvals, guided input, and diagnostics.
+- Minor: kept `maskPreviewSecrets()` scoped by preserving `Date`, `Error`, `Map`, and `Set` instances instead of flattening them.
+
+RED evidence:
+- `npm test -- src/shared/chatOutput.test.ts src/shared/chatStream.test.ts` -> failed as expected before the fix:
+  - fallback output omitted tool/file/artifact/approval/input parts (`expected ... to contain "Tool call: file_read"`),
+  - `maskPreviewSecrets()` flattened `Date` objects to `{}` (`expected {} to be 2026-06-26T00:00:00.000Z`).
+
+GREEN evidence:
+- `npm test -- src/shared/chatOutput.test.ts src/shared/chatStream.test.ts` -> 2 files / 11 tests passed.
+- `npm run harness:check` -> passed.
+- `git diff --check` -> passed.
+
+Fix notes:
+- Added human-readable fallback text for `tool_call`, `tool_result`, `file_ref`, `artifact`, `approval_request`, and `input_request`.
+- Reused `maskPreviewSecrets()` in fallback JSON rendering so previews keep the required ASCII `****` masking.
+- Exported `ChatOutputStreamEvent` and reused it inside `ChatStreamEvent`.

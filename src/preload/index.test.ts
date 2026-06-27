@@ -48,8 +48,10 @@ describe("preload bridge", () => {
 
   it("exposes workspace open and scratch creation through stable IPC channels", () => {
     expect(preloadSource).toContain("openProjectAgentWorkspace");
+    expect(preloadSource).toContain("OpenProjectAgentWorkspaceInput");
+    expect(preloadSource).toContain("input?: OpenProjectAgentWorkspaceInput");
     expect(preloadSource).toContain(
-      'ipcRenderer.invoke("agentWorkspaces:openProject"',
+      'ipcRenderer.invoke("agentWorkspaces:openProject", input)',
     );
     expect(preloadSource).toContain("createTemporaryAgentWorkspace");
     expect(preloadSource).toContain(

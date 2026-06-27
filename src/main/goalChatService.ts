@@ -19,6 +19,8 @@ import {
   createQuickActionPlan,
   type QuickActionPlan,
 } from "../shared/agentQuickAction";
+import type { SkillInputValue } from "../shared/skillExecutionContract";
+import type { SkillRecord } from "../shared/skills";
 import type { AgentGoalController } from "./agentGoalController";
 import type { AgentGoalPlanner } from "./agentGoalPlanner";
 import type { AgentGoalStore } from "./agentGoalStore";
@@ -28,6 +30,8 @@ export type GoalChatService = {
     sessionId: string;
     originMessageId: string | null;
     description: string;
+    selectedSkill?: SkillRecord;
+    selectedSkillInputValues?: Record<string, SkillInputValue>;
   }): Promise<ChatSessionGoalSummary>;
   start(
     goalId: string,
@@ -166,7 +170,12 @@ export function createGoalChatService(options: {
               quickActionReviewPlan,
             ),
           ]
-        : await planGoalMilestones(description, goalCriterion, taskContract);
+        : await planGoalMilestones(
+            description,
+            goalCriterion,
+            taskContract,
+            input.selectedSkill,
+          );
 
       const goal: Goal = {
         id: goalId,
@@ -176,6 +185,12 @@ export function createGoalChatService(options: {
           : {}),
         description,
         ...(taskContract ? { taskContract } : {}),
+        ...(input.selectedSkill
+          ? { selectedSkill: snapshotSelectedSkill(input.selectedSkill) }
+          : {}),
+        ...(input.selectedSkillInputValues
+          ? { selectedSkillInputValues: input.selectedSkillInputValues }
+          : {}),
         successCriteria: [goalCriterion],
         milestones,
         status: quickActionReviewPlan ? "waiting_for_review" : "planning",
@@ -394,6 +409,7 @@ export function createGoalChatService(options: {
     description: string,
     goalCriterion: SuccessCriterion,
     taskContract: AgentTaskContract | undefined,
+    selectedSkill: SkillRecord | undefined,
   ): Promise<Milestone[]> {
     try {
       return await options.planner.plan(description, {
@@ -401,6 +417,7 @@ export function createGoalChatService(options: {
         availableTools: options.getAvailableTools?.() ?? [],
         availableSkills: options.getAvailableSkills?.() ?? [],
         ...(taskContract ? { taskContract } : {}),
+        ...(selectedSkill ? { selectedSkill: snapshotSelectedSkill(selectedSkill) } : {}),
       });
     } catch {
       // Fallback: create a single achievable milestone that produces the artifact.
@@ -417,6 +434,15 @@ export function createGoalChatService(options: {
       ];
     }
   }
+}
+
+function snapshotSelectedSkill(skill: SkillRecord): SkillRecord {
+  return {
+    rootDir: skill.rootDir,
+    skillFile: skill.skillFile,
+    body: skill.body,
+    manifest: JSON.parse(JSON.stringify(skill.manifest)) as SkillRecord["manifest"],
+  };
 }
 
 function createGoalSuccessCriterion(

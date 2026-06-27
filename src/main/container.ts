@@ -128,6 +128,7 @@ import {
   summarizeToolResultContent,
   type ReadToolResultRefResult,
 } from "../shared/toolResultRefs";
+import { projectChatSessionForTranscript } from "../shared/chatSessionProjection";
 import type { PermissionRule } from "../shared/kernelContract";
 
 export type AppContainer = ReturnType<typeof createAppContainer>;
@@ -458,7 +459,7 @@ export function createAppContainer(options: {
   ): Promise<ChatSessionRecord | null> {
     const session = await chatSessionStore().get(sessionId);
     if (!session?.activeGoalId) {
-      return session;
+      return session ? projectChatSessionForTranscript(session) : session;
     }
 
     const activeGoal = session.goalSummaries?.find(
@@ -469,10 +470,16 @@ export function createAppContainer(options: {
       activeGoal,
     );
     if (!reconciledGoal) {
-      return chatSessionStore().get(sessionId);
+      const repairedSession = await chatSessionStore().get(sessionId);
+      return repairedSession
+        ? projectChatSessionForTranscript(repairedSession)
+        : repairedSession;
     }
 
-    return chatSessionStore().get(sessionId);
+    const repairedSession = await chatSessionStore().get(sessionId);
+    return repairedSession
+      ? projectChatSessionForTranscript(repairedSession)
+      : repairedSession;
   }
 
   async function archiveChatSession(

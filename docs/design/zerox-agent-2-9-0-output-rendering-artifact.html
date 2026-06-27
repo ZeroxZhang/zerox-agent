@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Zerox Agent 2.9.0 Output Rendering Artifact</title>
+  <style>
+    :root {
+      --bg-page: #f6f4ef;
+      --bg-surface: #efede6;
+      --bg-surface-raised: #ffffff;
+      --bg-inset: #f2f0ea;
+      --border-default: #e6e0d6;
+      --border-strong: #d3cabb;
+      --border-accent: #adc7f5;
+      --text-primary: #25231f;
+      --text-secondary: #6f6a60;
+      --text-tertiary: #9a9488;
+      --text-accent: #1d4ed8;
+      --status-success-text: #18713a;
+      --status-success-bg: #edf8ef;
+      --status-success-border: #badfc2;
+      --status-error-text: #b83232;
+      --status-error-bg: #fff0f0;
+      --status-error-border: #f1c8c8;
+      --status-warning-bg: #fff8df;
+      --status-warning-border: #ecd894;
+      --status-info-bg: #eef4ff;
+      --status-info-border: #adc7f5;
+      --font-sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --font-mono: "SF Mono", "JetBrains Mono", Consolas, monospace;
+      --space-2: 0.5rem;
+      --space-3: 0.75rem;
+      --space-4: 1rem;
+      --radius-sm: 0.5rem;
+      --radius-md: 0.75rem;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--text-primary);
+      background: var(--bg-page);
+      font-family: var(--font-sans);
+      line-height: 1.5;
+    }
+    .artifact-board {
+      display: grid;
+      gap: 18px;
+      width: min(1160px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 28px 0 48px;
+    }
+    header {
+      display: grid;
+      gap: 8px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border-default);
+    }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: 28px; letter-spacing: 0; }
+    header p, .state-note { color: var(--text-secondary); font-size: 13px; }
+    .state-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+    .state-card {
+      display: grid;
+      gap: 12px;
+      min-width: 0;
+      padding: 14px;
+      border: 1px solid var(--border-default);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.68);
+    }
+    .state-card h2 {
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+    .chat-answer-block {
+      --chat-output-font-size: 13px;
+      --chat-output-heading-size: 14px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: var(--space-3);
+      min-width: 0;
+      max-width: 100%;
+    }
+    .chat-answer-body {
+      display: grid;
+      gap: var(--space-3);
+      min-width: 0;
+      padding-left: 0;
+      border-left: 0;
+    }
+    .chat-output-part-list, .chat-output-part {
+      display: grid;
+      gap: var(--space-2);
+      min-width: 0;
+      max-width: 100%;
+    }
+    .chat-output-part h3 { font-size: var(--chat-output-heading-size); }
+    .chat-output-part p, .chat-output-part li { color: var(--text-secondary); font-size: var(--chat-output-font-size); }
+    .chat-evidence-inline,
+    .chat-artifact-card,
+    .chat-citation-chip,
+    .chat-approval-block,
+    .chat-input-request-block,
+    .chat-run-ledger {
+      min-width: 0;
+      max-width: 100%;
+      border: 1px solid var(--border-default);
+      border-radius: var(--radius-sm);
+      background: var(--bg-surface-raised);
+    }
+    .chat-evidence-inline,
+    .chat-artifact-card,
+    .chat-citation-chip,
+    .chat-approval-block {
+      display: grid;
+      gap: 3px;
+      padding: var(--space-2);
+      font-size: var(--chat-output-font-size);
+    }
+    .chat-evidence-inline span,
+    .chat-json-preview-label,
+    .chat-command-stream span {
+      color: var(--text-tertiary);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .chat-evidence-inline small,
+    .chat-artifact-card small {
+      overflow: hidden;
+      color: var(--text-tertiary);
+      font-family: var(--font-mono);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .chat-artifact-card { border-color: var(--status-info-border); background: var(--status-info-bg); }
+    .chat-citation-chip { border-color: var(--border-accent); }
+    .chat-approval-block { border-color: var(--status-warning-border); background: var(--status-warning-bg); }
+    .chat-data-table-wrap {
+      min-width: 0;
+      max-width: 100%;
+      overflow-x: hidden;
+      border: 1px solid var(--border-default);
+      border-radius: var(--radius-md);
+      background: var(--bg-surface-raised);
+    }
+    .chat-data-table {
+      width: 100%;
+      min-width: 0;
+      border-collapse: collapse;
+      font-size: var(--chat-output-font-size);
+      line-height: 1.62;
+      table-layout: fixed;
+    }
+    .chat-data-table th,
+    .chat-data-table td {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border-default);
+      font-size: inherit;
+      line-height: inherit;
+      text-align: left;
+      vertical-align: top;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    .chat-data-table th {
+      color: var(--text-tertiary);
+      background: var(--bg-inset);
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+    .chat-code-block,
+    .chat-command-output,
+    .chat-json-preview {
+      min-width: 0;
+      max-width: 100%;
+      overflow: hidden;
+      border: 1px solid #d7dce3;
+      border-radius: var(--radius-md);
+      background: var(--bg-surface-raised);
+    }
+    .chat-code-header,
+    .chat-command-header {
+      display: flex;
+      justify-content: space-between;
+      min-height: 34px;
+      padding: 8px 12px;
+      border-bottom: 1px solid #e5e7eb;
+      color: #6b7280;
+      background: #f3f4f6;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+    }
+    pre {
+      max-width: 100%;
+      margin: 0;
+      overflow-x: hidden;
+      padding: 12px;
+      color: #1f2937;
+      font-family: var(--font-mono);
+      font-size: var(--chat-output-font-size);
+      line-height: 1.62;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .chat-code-block.is-diff { border-color: #374151; background: #111827; }
+    .chat-code-block.is-diff .chat-code-header { border-color: #374151; color: #d1d5db; background: #1f2937; }
+    .chat-code-block.is-diff pre { color: #e5e7eb; background: #111827; }
+    .chat-diff-line-added { display: block; color: #86efac; }
+    .chat-diff-line-removed { display: block; color: #fca5a5; }
+    .chat-command-stream { display: grid; border-top: 1px solid var(--border-default); }
+    .chat-command-stream span, .chat-json-preview-label { padding: 8px 12px 0; }
+    .chat-command-stream.is-error pre { color: var(--status-error-text); background: var(--status-error-bg); }
+    .chat-run-ledger { overflow: hidden; }
+    .chat-ledger-row {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 8px;
+      align-items: center;
+      padding: 8px 10px;
+      font-size: 12px;
+    }
+    .chat-ledger-row.has-detail:not(.has-tool) {
+      grid-template-columns: auto minmax(88px, 0.35fr) minmax(0, 1fr);
+    }
+    .chat-ledger-row.has-tool:not(.has-detail) {
+      grid-template-columns: auto minmax(0, 1fr) auto;
+    }
+    .chat-ledger-row.has-detail.has-tool {
+      grid-template-columns: auto minmax(88px, 0.35fr) minmax(0, 1fr) auto;
+    }
+    .chat-run-ledger-status {
+      min-height: 22px;
+      padding: 2px 8px;
+      border: 1px solid var(--status-success-border);
+      border-radius: 999px;
+      color: var(--status-success-text);
+      background: var(--status-success-bg);
+      font-family: var(--font-mono);
+    }
+    .chat-ledger-row strong, .chat-ledger-row p, .chat-ledger-row small {
+      overflow: hidden;
+      color: var(--text-secondary);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .chat-input-request-block {
+      display: grid;
+      gap: 10px;
+      padding: 12px;
+      border-color: var(--status-info-border);
+      background: var(--status-info-bg);
+    }
+    .chat-input-request-block ul {
+      display: grid;
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .chat-input-request-block li {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      gap: 8px;
+      padding: 8px;
+      border: 1px solid var(--border-default);
+      border-radius: var(--radius-sm);
+      background: var(--bg-surface-raised);
+      font-size: 12px;
+    }
+    .is-error-diagnostic {
+      border-color: var(--status-error-border);
+      background: var(--status-error-bg);
+    }
+    .report-mode .chat-answer-body {
+      padding: 16px;
+      border-left: 0;
+      border-radius: 8px;
+      background: var(--bg-surface-raised);
+      box-shadow: inset 0 0 0 1px var(--border-default);
+    }
+    @media (max-width: 640px) {
+      .artifact-board { width: min(100% - 20px, 1160px); padding-top: 16px; }
+      .state-grid { grid-template-columns: minmax(0, 1fr); }
+      .chat-answer-block { grid-template-columns: minmax(0, 1fr); }
+      .chat-data-table-wrap,
+      .chat-code-block,
+      .chat-command-output,
+      .chat-json-preview { max-width: 100%; overflow-x: hidden; }
+      .chat-ledger-row,
+      .chat-input-request-block li { grid-template-columns: minmax(0, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <main class="artifact-board">
+    <header>
+      <h1>Zerox Agent 2.9.0 Output Rendering Artifact</h1>
+      <p>Approved corrective direction: answer-led single-column content with compact run ledger rows. Tool and file-read traces stay in the dedicated process disclosures, while model output remains rendered by typed React components, not raw HTML.</p>
+    </header>
+
+    <section class="state-grid">
+      <article class="state-card">
+        <h2>single-column answer</h2>
+        <div class="chat-answer-block is-body-only">
+          <div class="chat-answer-body">
+            <div class="chat-output-part-list">
+              <section class="chat-output-part">
+                <h3>Renderer contract is ready for compact output.</h3>
+                <p>The answer leads with the conclusion and keeps its readable content in one uninterrupted column.</p>
+              </section>
+              <section class="chat-output-part chat-artifact-card">
+                <strong>output-rendering-board.html</strong>
+                <small>docs/design/zerox-agent-2-9-0-output-rendering-artifact.html</small>
+              </section>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="state-card">
+        <h2>run ledger</h2>
+        <section class="chat-run-ledger is-completed">
+          <div class="chat-ledger-row has-detail has-tool">
+            <span class="chat-run-ledger-status">completed</span>
+            <strong>verification</strong>
+            <p>Focused tests passed, then build and harness checks ran.</p>
+            <small>npm</small>
+          </div>
+        </section>
+        <section class="chat-run-ledger">
+          <div class="chat-ledger-row has-detail has-tool">
+            <span class="chat-run-ledger-status">running</span>
+            <strong>renderer</strong>
+            <p>Streaming output remains observable without taking over the answer.</p>
+            <small>chat</small>
+          </div>
+        </section>
+        <section class="chat-run-ledger">
+          <div class="chat-ledger-row is-title-only">
+            <span class="chat-run-ledger-status">queued</span>
+            <strong>Title-only ledger event keeps its title in the full available row.</strong>
+          </div>
+        </section>
+      </article>
+
+      <article class="state-card">
+        <h2>table</h2>
+        <div class="chat-data-table-wrap">
+          <table class="chat-data-table">
+            <thead><tr><th>Format</th><th>Renderer</th><th>Safety</th></tr></thead>
+            <tbody>
+              <tr><td>Markdown table</td><td>DataTableView</td><td>Horizontal scroll on narrow widths</td></tr>
+              <tr><td>Tool result rows</td><td>Typed table part</td><td>No raw HTML injection</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="state-card">
+        <h2>code/diff</h2>
+        <figure class="chat-code-block is-diff">
+          <figcaption class="chat-code-header"><span>src/shared/chat.ts</span><small>+2 -1</small></figcaption>
+          <pre><code><span class="chat-diff-line-removed">- content: string</span><span class="chat-diff-line-added">+ content: string</span><span class="chat-diff-line-added">+ outputParts?: ChatOutputPart[]</span></code></pre>
+        </figure>
+      </article>
+
+      <article class="state-card">
+        <h2>terminal output</h2>
+        <section class="chat-command-output" aria-label="Command output">
+          <header class="chat-command-header"><code>npm run harness:check</code><span>exit 0</span></header>
+          <div class="chat-command-stream"><span>stdout</span><pre>harness contract ok
+package scripts ok</pre></div>
+          <div class="chat-json-preview"><span class="chat-json-preview-label">Result</span><pre>{ "ok": true, "durationMs": 1842 }</pre></div>
+        </section>
+      </article>
+
+      <article class="state-card report-mode">
+        <h2>document report</h2>
+        <div class="chat-answer-block is-body-only">
+          <div class="chat-answer-body">
+            <section class="chat-output-part">
+              <h3>Output Rendering Research Summary</h3>
+              <p>Document report mode supports prose, tables, citations, and local artifacts without splitting the main reading column.</p>
+              <section class="chat-evidence-inline chat-citation-chip"><span>Source</span><strong>3 citations</strong><small>coverage complete</small></section>
+            </section>
+          </div>
+        </div>
+      </article>
+
+      <article class="state-card">
+        <h2>approval waiting</h2>
+        <section class="chat-approval-block">
+          <span>Approval requested</span>
+          <strong>shell_command</strong>
+          <small>workspace_write risk</small>
+          <div class="chat-json-preview"><span class="chat-json-preview-label">Arguments</span><pre>{ "cmd": "npm run build" }</pre></div>
+        </section>
+      </article>
+
+      <article class="state-card">
+        <h2>guided input</h2>
+        <section class="chat-input-request-block">
+          <header><span>Input requested</span><strong>release-notes</strong></header>
+          <p>Choose the target audience before drafting.</p>
+          <ul>
+            <li><strong>Audience</strong><span>select</span><small>required</small></li>
+            <li><strong>Tone</strong><span>text</span><small>optional</small></li>
+          </ul>
+        </section>
+      </article>
+
+      <article class="state-card">
+        <h2>error diagnostic</h2>
+        <section class="chat-evidence-inline is-error-diagnostic">
+          <span>error</span>
+          <strong>Verification failed</strong>
+          <small>The command exited with code 1. Keep the failing output linked to the answer.</small>
+        </section>
+      </article>
+
+      <article class="state-card">
+        <h2>narrow layout</h2>
+        <p class="state-note">At 640px and below, .chat-answer-block stays one column, and tables/code/terminal previews wrap long content inside the available width.</p>
+        <div class="chat-answer-block is-body-only">
+          <div class="chat-answer-body"><section class="chat-output-part"><p>Single-column answer content with no text overlap.</p></section></div>
+        </div>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

@@ -5,6 +5,7 @@ import type { AgentModelProfile } from "./agentRunnerService";
 import type { AgentToolExecutor } from "./agentToolExecutor";
 import type { AgentWorkspaceService } from "./agentWorkspaceService";
 import { createChatAgentEvidenceRecorder } from "./chatAgentEvidence";
+import { createChatOutputAssembler } from "./chatOutputAssembler";
 import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
 import { runAgentLoop } from "./agentLoop";
 import { estimateMessageTokens } from "./contextManager";
@@ -68,6 +69,11 @@ import {
 } from "../shared/agentIntent";
 import { formatDateInTimeZone, getSystemTimeZone } from "../shared/dateContext";
 import {
+  maskPreviewSecrets,
+  stringifyMaskedPreview,
+  type ChatOutputPart,
+} from "../shared/chatOutput";
+import {
   extractRequestedSkillQuery,
   matchSkillMentionCandidates,
 } from "../shared/skillMentions";
@@ -130,6 +136,8 @@ type ChatGoalService = {
     sessionId: string;
     originMessageId: string | null;
     description: string;
+    selectedSkill?: SkillRecord;
+    selectedSkillInputValues?: Record<string, SkillInputValue>;
   }): Promise<ChatSessionGoalSummary>;
   resume(
     goalId: string,
@@ -306,6 +314,86 @@ export function createChatService(options: {
           await persistRequiredChatActivityEvent(options.chatSessionStore, event);
         },
       });
+      const outputAssembler = createChatOutputAssembler(() =>
+        new Date(getNowMs(options.now)).toISOString(),
+      );
+      let terminalStreamEventSent = false;
+
+      function finalizeAssistantOutput(content: string): {
+        outputParts?: ChatOutputPart[];
+        finalTextPart?: ChatOutputPart;
+      } {
+        const finalTextPart = outputAssembler.setFinalText(content);
+        const outputParts = outputAssembler.parts();
+        return {
+          ...(outputParts.length > 0 ? { outputParts } : {}),
+          ...(finalTextPart ? { finalTextPart } : {}),
+        };
+      }
+
+      function emitOutputPart(part: ChatOutputPart) {
+        emitStatus.sendStreamEvent({
+          type: "output_part",
+          part,
+        });
+      }
+
+      function emitTerminalStreamEvent(event: {
+        type: "completed" | "failed" | "canceled";
+        message?: string;
+        finalMessageId?: string;
+      }) {
+        if (terminalStreamEventSent) {
+          return;
+        }
+        if (
+          event.message &&
+          (event.type === "failed" || event.type === "canceled")
+        ) {
+          emitOutputPart(
+            outputAssembler.appendDiagnostic({
+              severity: event.type === "failed" ? "error" : "warning",
+              title: event.type === "failed" ? "请求失败" : "请求已取消",
+              message: event.message,
+            }),
+          );
+        }
+        terminalStreamEventSent = true;
+        emitStatus.sendTerminalEvent(event);
+      }
+
+      async function persistAssistantReply(input: {
+        content: string;
+        relatedMemoryIds?: string[];
+        executedRunId?: string;
+        goalId?: string;
+        goalEventRef?: string;
+      }): Promise<string | null> {
+        const finalizedOutput = finalizeAssistantOutput(input.content);
+        const assistantMessageId = await appendAssistantMessage({
+          chatSessionStore: options.chatSessionStore,
+          sessionId,
+          content: input.content,
+          outputParts: finalizedOutput.outputParts,
+          ...(input.relatedMemoryIds?.length
+            ? { relatedMemoryIds: input.relatedMemoryIds }
+            : {}),
+          ...(input.executedRunId ? { executedRunId: input.executedRunId } : {}),
+          ...(input.goalId ? { goalId: input.goalId } : {}),
+          ...(input.goalEventRef ? { goalEventRef: input.goalEventRef } : {}),
+        });
+        emitStatus.setAssistantMessageId(assistantMessageId);
+        if (finalizedOutput.finalTextPart) {
+          emitOutputPart(finalizedOutput.finalTextPart);
+        }
+        emitTerminalStreamEvent({
+          type: "completed",
+          message: input.content,
+          ...(assistantMessageId ? { finalMessageId: assistantMessageId } : {}),
+        });
+        return assistantMessageId;
+      }
+
       const workspaceResolution = internalOptions.preResolvedRunContext
         ? { ok: true as const, runContext: internalOptions.preResolvedRunContext }
         : await resolveChatWorkspace({
@@ -313,6 +401,10 @@ export function createChatService(options: {
             workspaceId: input.workspaceId,
           });
       if (!workspaceResolution.ok) {
+        emitTerminalStreamEvent({
+          type: "failed",
+          message: workspaceResolution.message,
+        });
         return {
           ok: false,
           message: workspaceResolution.message,
@@ -394,6 +486,10 @@ export function createChatService(options: {
             })
           : null;
       if (requestedSkill?.kind === "missing") {
+        emitTerminalStreamEvent({
+          type: "failed",
+          message: requestedSkill.message,
+        });
         return {
           ok: false,
           message: requestedSkill.message,
@@ -445,7 +541,12 @@ export function createChatService(options: {
               "Skill input required.",
               persisted,
             );
+            emitOutputPart(outputAssembler.appendInputRequest(inputRequest));
           } catch {
+            emitTerminalStreamEvent({
+              type: "failed",
+              message: "Failed to persist skill input request.",
+            });
             return {
               ok: false,
               message: "Failed to persist skill input request.",
@@ -466,21 +567,28 @@ export function createChatService(options: {
         resolvedSkillInput = inputResolution;
       }
 
-      if (!requestedSkill) {
-        const goalRoute = await tryRouteGoalIntent({
-          route: detectGoalIntent(userMessage),
-          activeGoal,
-          chatSessionStore: options.chatSessionStore,
-          goalService: options.goalService,
-          originMessageId: userMessageId,
-          sessionId,
-          emitStatus,
-          signal: runtimeOptions.signal,
-        });
+      const selectedSkillForGoal =
+        requestedSkill?.kind === "matched" ? requestedSkill.skill : undefined;
+      const selectedSkillInputValuesForGoal =
+        resolvedSkillInput?.status === "complete"
+          ? resolvedSkillInput.values
+          : undefined;
+      const goalRoute = await tryRouteGoalIntent({
+        route: detectGoalIntent(userMessage),
+        activeGoal,
+        chatSessionStore: options.chatSessionStore,
+        goalService: options.goalService,
+        originMessageId: userMessageId,
+        sessionId,
+        emitStatus,
+        now: options.now,
+        signal: runtimeOptions.signal,
+        selectedSkill: selectedSkillForGoal,
+        selectedSkillInputValues: selectedSkillInputValuesForGoal,
+      });
 
-        if (goalRoute) {
-          return goalRoute.result;
-        }
+      if (goalRoute) {
+        return goalRoute.result;
       }
 
       if (!continuationToResume) {
@@ -494,12 +602,14 @@ export function createChatService(options: {
 
         if (taskCreationResult) {
           if (!taskCreationResult.ok) {
+            emitTerminalStreamEvent({
+              type: "failed",
+              message: taskCreationResult.result.message,
+            });
             return taskCreationResult.result;
           }
 
-          const assistantMessageId = await appendAssistantMessage({
-            chatSessionStore: options.chatSessionStore,
-            sessionId,
+          const assistantMessageId = await persistAssistantReply({
             content: taskCreationResult.result.reply,
           });
           const memoryId = await writeSessionMemory({
@@ -537,12 +647,14 @@ export function createChatService(options: {
 
         if (taskRunResult) {
           if (!taskRunResult.ok) {
+            emitTerminalStreamEvent({
+              type: "failed",
+              message: taskRunResult.result.message,
+            });
             return taskRunResult.result;
           }
 
-          const assistantMessageId = await appendAssistantMessage({
-            chatSessionStore: options.chatSessionStore,
-            sessionId,
+          const assistantMessageId = await persistAssistantReply({
             content: taskRunResult.result.reply,
             executedRunId: taskRunResult.result.executedRun?.id,
           });
@@ -589,6 +701,11 @@ export function createChatService(options: {
           error instanceof Error &&
           error.message.includes("Model profile is incomplete")
         ) {
+          emitTerminalStreamEvent({
+            type: "failed",
+            message:
+              "模型配置不完整：请先在设置中保存 base URL、对话模型和 API Key。",
+          });
           return {
             ok: false,
             message:
@@ -596,6 +713,10 @@ export function createChatService(options: {
           };
         }
 
+        emitTerminalStreamEvent({
+          type: "failed",
+          message: error instanceof Error ? error.message : "无法读取模型配置。",
+        });
         return {
           ok: false,
           message:
@@ -756,7 +877,7 @@ export function createChatService(options: {
                 });
               },
               onModelStreamEvent(event) {
-                emitModelStreamEvent(emitStatus, event);
+                emitModelStreamEvent(emitStatus, outputAssembler, event);
               },
               onToolCall(toolName, args, event) {
                 void evidence.append("tool_call", {
@@ -791,6 +912,14 @@ export function createChatService(options: {
                   toolCallId: event.toolCallId,
                   toolCallsExecuted: observedToolCallsExecuted,
                 });
+                emitOutputPart(
+                  outputAssembler.appendLedgerEvent({
+                    status: "running",
+                    title: `正在调用工具：${toolName}`,
+                    detail: stringifyMaskedPreview(args),
+                    toolName,
+                  }),
+                );
               },
               onToolInvocation(record) {
                 void evidence.append("tool_invocation", {
@@ -817,6 +946,27 @@ export function createChatService(options: {
                   ...(typeof record.ok === "boolean" ? { ok: record.ok } : {}),
                   toolCallsExecuted: observedToolCallsExecuted,
                 });
+                if (record.status === "waiting_approval") {
+                  emitOutputPart(
+                    outputAssembler.appendApprovalRequest({
+                      approvalId: record.id,
+                      toolName: record.toolName,
+                      riskLevel: inferApprovalRiskLevel({
+                        toolName: record.toolName,
+                        source: record.source,
+                      }),
+                      argsPreview: record.args,
+                    }),
+                  );
+                  emitOutputPart(
+                    outputAssembler.appendLedgerEvent({
+                      status: "waiting",
+                      title: `Waiting for approval: ${record.toolName}`,
+                      detail: `Tool ${record.toolName} is waiting for approval.`,
+                      toolName: record.toolName,
+                    }),
+                  );
+                }
               },
               onToolResult(toolName, ok, result, event) {
                 observedToolCallsExecuted += 1;
@@ -862,6 +1012,43 @@ export function createChatService(options: {
                   ok,
                   toolCallsExecuted: observedToolCallsExecuted,
                 });
+                for (const part of outputAssembler.appendToolResult({
+                  toolCallId: event.toolCallId,
+                  toolName,
+                  ok,
+                  ...(ok && result && typeof result === "object" && "result" in result
+                    ? {
+                        resultPreview: (
+                          result as { result: Record<string, unknown> }
+                        ).result,
+                      }
+                    : {}),
+                  ...(!ok && result && typeof result === "object" && "error" in result
+                    ? {
+                        error: (result as { error: string }).error,
+                        ...("errorDetails" in result &&
+                        (result as { errorDetails?: Record<string, unknown> })
+                          .errorDetails
+                          ? {
+                              resultPreview: (
+                                result as {
+                                  errorDetails: Record<string, unknown>;
+                                }
+                              ).errorDetails,
+                            }
+                          : {}),
+                      }
+                    : {}),
+                })) {
+                  emitOutputPart(part);
+                }
+                emitOutputPart(
+                  outputAssembler.appendLedgerEvent({
+                    status: ok ? "completed" : "failed",
+                    title: buildToolResultStatusMessage(toolName, result),
+                    ...(toolName ? { toolName } : {}),
+                  }),
+                );
               },
             },
           );
@@ -877,6 +1064,10 @@ export function createChatService(options: {
               state: "canceled",
               message: "任务已中断",
               toolCallsExecuted: loopResult.toolCallsExecuted,
+            });
+            emitTerminalStreamEvent({
+              type: "canceled",
+              message: "已中断任务。",
             });
             return {
               ok: false,
@@ -933,6 +1124,10 @@ export function createChatService(options: {
               state: "canceled",
               message: "任务已中断",
             });
+            emitTerminalStreamEvent({
+              type: "canceled",
+              message: "已中断任务。",
+            });
             return {
               ok: false,
               message: "已中断任务。",
@@ -940,6 +1135,11 @@ export function createChatService(options: {
           }
           emitStatus.send({
             state: "failed",
+            message:
+              error instanceof Error ? `Agent 执行失败：${error.message}` : "Agent 执行失败。",
+          });
+          emitTerminalStreamEvent({
+            type: "failed",
             message:
               error instanceof Error ? `Agent 执行失败：${error.message}` : "Agent 执行失败。",
           });
@@ -984,6 +1184,10 @@ export function createChatService(options: {
               state: "canceled",
               message: "任务已中断",
             });
+            emitTerminalStreamEvent({
+              type: "canceled",
+              message: "已中断任务。",
+            });
             return {
               ok: false,
               message: "已中断任务。",
@@ -991,6 +1195,11 @@ export function createChatService(options: {
           }
           emitStatus.send({
             state: "failed",
+            message:
+              error instanceof Error ? `模型调用失败：${error.message}` : "模型调用失败。",
+          });
+          emitTerminalStreamEvent({
+            type: "failed",
             message:
               error instanceof Error ? `模型调用失败：${error.message}` : "模型调用失败。",
           });
@@ -1002,9 +1211,7 @@ export function createChatService(options: {
         }
       }
 
-      const assistantMessageId = await appendAssistantMessage({
-        chatSessionStore: options.chatSessionStore,
-        sessionId,
+      const assistantMessageId = await persistAssistantReply({
         content: reply,
         relatedMemoryIds: relatedMemoryResults.map((result) => result.record.id),
       });
@@ -1139,7 +1346,28 @@ export function createChatService(options: {
           "Skill input required.",
           persisted,
         );
+        emitStatus.sendStreamEvent({
+          type: "output_part",
+          part: createChatOutputAssembler(() =>
+            new Date(getNowMs(options.now)).toISOString(),
+          ).appendInputRequest(inputRequest),
+        });
       } catch {
+        const outputAssembler = createChatOutputAssembler(() =>
+          new Date(getNowMs(options.now)).toISOString(),
+        );
+        emitStatus.sendStreamEvent({
+          type: "output_part",
+          part: outputAssembler.appendDiagnostic({
+            severity: "error",
+            title: "请求失败",
+            message: "Failed to persist skill input request.",
+          }),
+        });
+        emitStatus.sendTerminalEvent({
+          type: "failed",
+          message: "Failed to persist skill input request.",
+        });
         return {
           ok: false,
           message: "Failed to persist skill input request.",
@@ -1234,6 +1462,20 @@ function createChatStatusEmitter(options: {
   onRequiredPersistEvent?: (event: ChatTaskStatusEvent) => Promise<void>;
 }) {
   let sessionId = options.sessionId;
+  let assistantMessageId: string | undefined;
+  let sequence = 0;
+  const turnId = `turn-${options.requestId}`;
+
+  function createStreamBase(createdAt: string) {
+    return {
+      sessionId,
+      requestId: options.requestId,
+      sequence: ++sequence,
+      turnId,
+      ...(assistantMessageId ? { assistantMessageId } : {}),
+      createdAt,
+    };
+  }
 
   function createStatusEvent(
     event: Omit<ChatTaskStatusEvent, "sessionId" | "createdAt" | "elapsedMs">,
@@ -1266,10 +1508,8 @@ function createChatStatusEmitter(options: {
     try {
       options.onStreamEvent?.({
         type: "status",
-        sessionId: statusEvent.sessionId,
-        requestId: options.requestId,
         status: statusEvent,
-        createdAt: statusEvent.createdAt,
+        ...createStreamBase(statusEvent.createdAt),
       });
     } catch {
       // Renderer observers are best-effort.
@@ -1304,23 +1544,40 @@ function createChatStatusEmitter(options: {
       try {
         options.onStreamEvent?.({
           type: "waiting_for_input",
-          sessionId,
-          requestId: options.requestId,
           inputRequest,
-          createdAt: new Date(nowMs).toISOString(),
+          ...createStreamBase(new Date(nowMs).toISOString()),
         });
       } catch {
         // Renderer observers are best-effort.
       }
     },
+    setAssistantMessageId(nextAssistantMessageId: string | null | undefined) {
+      assistantMessageId = nextAssistantMessageId ?? undefined;
+    },
     sendStreamEvent(event: ChatModelStreamEventInput) {
       const nowMs = getNowMs(options.now);
       try {
         options.onStreamEvent?.({
+          ...cloneChatModelStreamEventInput(event),
+          ...createStreamBase(new Date(nowMs).toISOString()),
+        });
+      } catch {
+        // Renderer observers are best-effort.
+      }
+    },
+    sendTerminalEvent(event: {
+      type: "completed" | "failed" | "canceled";
+      message?: string;
+      finalMessageId?: string;
+    }) {
+      if (event.finalMessageId) {
+        assistantMessageId = event.finalMessageId;
+      }
+      const nowMs = getNowMs(options.now);
+      try {
+        options.onStreamEvent?.({
           ...event,
-          sessionId,
-          requestId: options.requestId,
-          createdAt: new Date(nowMs).toISOString(),
+          ...createStreamBase(new Date(nowMs).toISOString()),
         });
       } catch {
         // Renderer observers are best-effort.
@@ -1332,6 +1589,7 @@ function createChatStatusEmitter(options: {
 type ChatModelStreamEventInput =
   | { type: "answer_delta"; text: string }
   | { type: "thinking_delta"; text: string }
+  | { type: "output_part"; part: ChatOutputPart }
   | {
       type: "tool_call_preview";
       toolCallId: string;
@@ -1339,12 +1597,30 @@ type ChatModelStreamEventInput =
       argumentsDelta?: string;
     };
 
+function cloneChatModelStreamEventInput(
+  event: ChatModelStreamEventInput,
+): ChatModelStreamEventInput {
+  if (event.type !== "output_part") {
+    return event;
+  }
+
+  return {
+    ...event,
+    part: structuredClone(event.part),
+  };
+}
+
 function emitModelStreamEvent(
   emitter: ReturnType<typeof createChatStatusEmitter>,
+  outputAssembler: ReturnType<typeof createChatOutputAssembler>,
   event: ModelStreamEvent,
 ) {
   if (event.type === "content_delta") {
     emitter.sendStreamEvent({ type: "answer_delta", text: event.text });
+    const textPart = outputAssembler.appendText(event.text);
+    if (textPart) {
+      emitter.sendStreamEvent({ type: "output_part", part: textPart });
+    }
     return;
   }
 
@@ -1355,12 +1631,21 @@ function emitModelStreamEvent(
 
   if (event.type === "tool_call_delta") {
     const index = normalizeToolCallPreviewIndex(event.index);
+    const toolCallId = event.id || (index !== undefined ? `index:${index}` : "");
     emitter.sendStreamEvent({
       type: "tool_call_preview",
-      toolCallId: event.id || (index !== undefined ? `index:${index}` : ""),
+      toolCallId,
       ...(index !== undefined ? { index } : {}),
       ...(event.name ? { toolName: event.name } : {}),
       ...(event.arguments ? { argumentsDelta: event.arguments } : {}),
+    });
+    emitter.sendStreamEvent({
+      type: "output_part",
+      part: outputAssembler.appendToolCall({
+        toolCallId,
+        ...(event.name ? { toolName: event.name } : {}),
+        ...(event.arguments ? { argumentsText: event.arguments } : {}),
+      }),
     });
   }
 }
@@ -1374,6 +1659,22 @@ function normalizeToolCallPreviewIndex(value: unknown): number | undefined {
 
 function getNowMs(now: (() => Date) | undefined): number {
   return now ? now().getTime() : Date.now();
+}
+
+function inferApprovalRiskLevel(input: {
+  toolName: string;
+  source?: string;
+}): "medium" | "high" {
+  const normalized = `${input.toolName} ${input.source ?? ""}`.toLowerCase();
+  if (
+    normalized.includes("shell") ||
+    normalized.includes("file_write") ||
+    normalized.includes("markdown_report_write") ||
+    (normalized.includes("markdown") && normalized.includes("write"))
+  ) {
+    return "high";
+  }
+  return "medium";
 }
 
 type ChatWorkspaceRunRecorder = {
@@ -1931,8 +2232,42 @@ async function tryRouteGoalIntent(options: {
   originMessageId: string | null;
   sessionId: string;
   emitStatus?: ReturnType<typeof createChatStatusEmitter>;
+  now?: () => Date;
   signal?: AbortSignal;
+  selectedSkill?: SkillRecord;
+  selectedSkillInputValues?: Record<string, SkillInputValue>;
 }): Promise<{ result: SendChatMessageResult } | null> {
+  async function appendGoalReply(input: {
+    content: string;
+    goalId: string;
+    goalEventRef: string;
+  }) {
+    const goalOutputAssembler = createChatOutputAssembler(() =>
+      new Date(getNowMs(options.now)).toISOString(),
+    );
+    const finalTextPart = goalOutputAssembler.setFinalText(input.content);
+    const assistantMessageId = await appendAssistantMessage({
+      chatSessionStore: options.chatSessionStore,
+      sessionId: options.sessionId,
+      content: input.content,
+      outputParts: goalOutputAssembler.parts(),
+      goalId: input.goalId,
+      goalEventRef: input.goalEventRef,
+    });
+    options.emitStatus?.setAssistantMessageId(assistantMessageId);
+    if (finalTextPart) {
+      options.emitStatus?.sendStreamEvent({
+        type: "output_part",
+        part: finalTextPart,
+      });
+    }
+    options.emitStatus?.sendTerminalEvent({
+      type: "completed",
+      message: input.content,
+      ...(assistantMessageId ? { finalMessageId: assistantMessageId } : {}),
+    });
+  }
+
   if (options.route.kind === "none" || !options.goalService) {
     return null;
   }
@@ -1942,6 +2277,10 @@ async function tryRouteGoalIntent(options: {
       sessionId: options.sessionId,
       originMessageId: options.originMessageId,
       description: options.route.description,
+      ...(options.selectedSkill ? { selectedSkill: options.selectedSkill } : {}),
+      ...(options.selectedSkillInputValues
+        ? { selectedSkillInputValues: options.selectedSkillInputValues }
+        : {}),
     });
     const activeGoal = await options.goalService.resume(createdGoal.id, {
       ...(options.signal ? { signal: options.signal } : {}),
@@ -1957,9 +2296,7 @@ async function tryRouteGoalIntent(options: {
       message: "目标已开始执行",
       toolCallsExecuted: 0,
     });
-    await appendAssistantMessage({
-      chatSessionStore: options.chatSessionStore,
-      sessionId: options.sessionId,
+    await appendGoalReply({
       content: reply,
       goalId: activeGoal.id,
       goalEventRef: "goal_started",
@@ -1972,6 +2309,14 @@ async function tryRouteGoalIntent(options: {
         relatedMemories: [],
         memoryId: null,
         activeGoal,
+        ...(options.selectedSkill
+          ? {
+              selectedSkill: {
+                name: options.selectedSkill.manifest.name,
+                displayName: options.selectedSkill.manifest.displayName,
+              },
+            }
+          : {}),
       },
     };
   }
@@ -2014,9 +2359,7 @@ async function tryRouteGoalIntent(options: {
         : "目标执行已更新",
       toolCallsExecuted: 0,
     });
-    await appendAssistantMessage({
-      chatSessionStore: options.chatSessionStore,
-      sessionId: options.sessionId,
+    await appendGoalReply({
       content: reply,
       goalId: activeGoal.id,
       goalEventRef: "goal_resumed",
@@ -2041,9 +2384,7 @@ async function tryRouteGoalIntent(options: {
       activeGoal,
     );
     const reply = `已暂停目标：${activeGoal.description}。`;
-    await appendAssistantMessage({
-      chatSessionStore: options.chatSessionStore,
-      sessionId: options.sessionId,
+    await appendGoalReply({
       content: reply,
       goalId: activeGoal.id,
       goalEventRef: "goal_paused",
@@ -2068,9 +2409,7 @@ async function tryRouteGoalIntent(options: {
       activeGoal,
     );
     const reply = `已结束目标：${activeGoal.description}。`;
-    await appendAssistantMessage({
-      chatSessionStore: options.chatSessionStore,
-      sessionId: options.sessionId,
+    await appendGoalReply({
       content: reply,
       goalId: activeGoal.id,
       goalEventRef: "goal_canceled",
@@ -2097,9 +2436,7 @@ async function tryRouteGoalIntent(options: {
     activeGoal,
   );
   const reply = `已记录目标调整：${options.route.instructions}`;
-  await appendAssistantMessage({
-    chatSessionStore: options.chatSessionStore,
-    sessionId: options.sessionId,
+  await appendGoalReply({
     content: reply,
     goalId: activeGoal.id,
     goalEventRef: "goal_modified",
@@ -2177,6 +2514,7 @@ async function appendAssistantMessage(options: {
   chatSessionStore: Pick<ChatSessionStore, "appendMessage"> | undefined;
   sessionId: string;
   content: string;
+  outputParts?: ChatOutputPart[];
   relatedMemoryIds?: string[];
   executedRunId?: string;
   goalId?: string;
@@ -2191,6 +2529,7 @@ async function appendAssistantMessage(options: {
       sessionId: options.sessionId,
       role: "assistant",
       content: options.content,
+      ...(options.outputParts?.length ? { outputParts: options.outputParts } : {}),
       ...(options.relatedMemoryIds?.length
         ? { relatedMemoryIds: options.relatedMemoryIds }
         : {}),

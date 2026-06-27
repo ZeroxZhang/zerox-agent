@@ -17,16 +17,20 @@ import type {
   SkillPendingInputState,
   SkillUserInputRequest,
 } from "../shared/chat";
+import type { ChatOutputPart } from "../shared/chatOutput";
 
 type StoredChatSessions = {
   schemaVersion: 1;
   sessions: ChatSessionRecord[];
 };
 
+const SESSION_SUMMARY_PREVIEW_MAX_CHARS = 160;
+
 export type AppendChatMessageInput = {
   sessionId?: string;
   role: ChatMessageRecord["role"];
   content: string;
+  outputParts?: ChatOutputPart[];
   relatedMemoryIds?: string[];
   executedRunId?: string;
   goalId?: string;
@@ -79,24 +83,32 @@ export function createChatSessionStore(options: {
   const createId = options.createId ?? randomUUID;
   const now = options.now ?? (() => new Date());
   let mutationQueue = Promise.resolve();
+  let storedSessionsCache: StoredChatSessions | null = null;
 
   async function readStoredSessions(): Promise<StoredChatSessions> {
+    if (storedSessionsCache) {
+      return storedSessionsCache;
+    }
+
     try {
       const raw = await readFile(sessionsPath, { encoding: "utf8" });
       const stored = JSON.parse(raw) as StoredChatSessions;
-      return {
+      storedSessionsCache = {
         schemaVersion: 1,
         sessions: Array.isArray(stored.sessions)
           ? stored.sessions.map(normalizeStoredSession)
           : [],
       };
+      return storedSessionsCache;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        return { schemaVersion: 1, sessions: [] };
+        storedSessionsCache = { schemaVersion: 1, sessions: [] };
+        return storedSessionsCache;
       }
       if (error instanceof SyntaxError) {
         await quarantineCorruptJsonFile(sessionsPath);
-        return { schemaVersion: 1, sessions: [] };
+        storedSessionsCache = { schemaVersion: 1, sessions: [] };
+        return storedSessionsCache;
       }
 
       throw error;
@@ -109,6 +121,7 @@ export function createChatSessionStore(options: {
       sessionsPath,
       `${JSON.stringify(stored, null, 2)}\n`,
     );
+    storedSessionsCache = stored;
   }
 
   async function updateSessionById(
@@ -156,7 +169,8 @@ export function createChatSessionStore(options: {
       return serializeMutation(mutationQueue, (nextQueue) => {
         mutationQueue = nextQueue;
       }, async () => {
-        const content = input.content.trim();
+        const content = input.content;
+        const summaryContent = summarizeSessionContent(content);
         const timestamp = now().toISOString();
         const stored = await readStoredSessions();
         const existingSession = input.sessionId
@@ -172,6 +186,7 @@ export function createChatSessionStore(options: {
           id: createId(),
           role: input.role,
           content,
+          ...(input.outputParts?.length ? { outputParts: input.outputParts } : {}),
           ...(input.relatedMemoryIds?.length
             ? { relatedMemoryIds: input.relatedMemoryIds }
             : {}),
@@ -183,7 +198,7 @@ export function createChatSessionStore(options: {
         const session = existingSession
           ? {
               ...existingSession,
-              summary: content || existingSession.summary,
+              summary: summaryContent || existingSession.summary,
               messages: [...existingSession.messages, message],
               ...(workspaceId ? { workspaceId } : {}),
               ...(workspaceSummary ? { workspaceSummary } : {}),
@@ -191,7 +206,7 @@ export function createChatSessionStore(options: {
             }
           : createSession({
               sessionId: newSessionId ?? createId(),
-              content,
+              content: summaryContent,
               message,
               timestamp,
               ...(workspaceId ? { workspaceId } : {}),
@@ -434,7 +449,7 @@ function toListItem(session: ChatSessionRecord): ChatSessionListItem {
   return {
     id: session.id,
     title: session.title,
-    summary: session.summary,
+    summary: summarizeSessionContent(session.summary),
     messageCount: session.messages.length,
     ...(session.workspaceId ? { workspaceId: session.workspaceId } : {}),
     ...(session.workspaceSummary
@@ -446,6 +461,15 @@ function toListItem(session: ChatSessionRecord): ChatSessionListItem {
     ...(session.tokenUsage ? { tokenUsage: session.tokenUsage } : {}),
     updatedAt: session.updatedAt,
   };
+}
+
+function summarizeSessionContent(content: string): string {
+  const normalized = content.replace(/\s+/g, " ").trim();
+  if (normalized.length <= SESSION_SUMMARY_PREVIEW_MAX_CHARS) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, SESSION_SUMMARY_PREVIEW_MAX_CHARS - 3)}...`;
 }
 
 async function quarantineCorruptJsonFile(filePath: string): Promise<void> {
@@ -700,10 +724,12 @@ function normalizeSkillInputValue(
 
 function normalizeStoredMessage(message: ChatMessageRecord): ChatMessageRecord {
   const role = message.role === "user" ? "user" : "assistant";
+  const outputParts = normalizeOutputParts(message.outputParts);
   return {
     id: String(message.id ?? ""),
     role,
     content: String(message.content ?? ""),
+    ...(outputParts?.length ? { outputParts } : {}),
     ...(message.relatedMemoryIds?.length
       ? { relatedMemoryIds: message.relatedMemoryIds.map(String) }
       : {}),
@@ -712,6 +738,16 @@ function normalizeStoredMessage(message: ChatMessageRecord): ChatMessageRecord {
     ...(message.goalEventRef ? { goalEventRef: String(message.goalEventRef) } : {}),
     createdAt: String(message.createdAt ?? new Date(0).toISOString()),
   };
+}
+
+function normalizeOutputParts(
+  value: unknown,
+): ChatOutputPart[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value as ChatOutputPart[];
 }
 
 function normalizeGoalSummary(goal: ChatSessionGoalSummary): ChatSessionGoalSummary {

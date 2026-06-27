@@ -1,5 +1,6 @@
 import type { GoalReviewPolicy } from "./agentGoalReview";
 import type { AgentTaskContract } from "./agentTaskContract";
+import type { SkillRecord } from "./skills";
 
 export type GoalStatus =
   | "planning"
@@ -78,6 +79,11 @@ export type GoalBudgetUsage = {
   replans: number;
 };
 
+export type GoalSelectedSkill = Pick<
+  SkillRecord,
+  "manifest" | "body" | "rootDir" | "skillFile"
+>;
+
 export type Goal = {
   id: string;
   chatSessionId?: string;
@@ -93,6 +99,8 @@ export type Goal = {
   planVersion: number;
   workspaceId?: string;
   taskContract?: AgentTaskContract;
+  selectedSkill?: GoalSelectedSkill;
+  selectedSkillInputValues?: Record<string, string | number | boolean>;
   createdAt: string;
   updatedAt: string;
 };

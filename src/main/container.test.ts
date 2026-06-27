@@ -10,6 +10,7 @@ import { createToolApprovalCoordinator } from "./toolApprovalCoordinator";
 import { issueToolResultRefReadCapability } from "./toolResultOffloadStore";
 import type { Goal } from "../shared/agentGoal";
 import type { GoalProgressEvent } from "../shared/chat";
+import type { ChatOutputPart } from "../shared/chatOutput";
 
 const execFileAsync = promisify(execFileCallback);
 
@@ -485,6 +486,51 @@ describe("app container goal drafts", () => {
       id: goal.id,
       status: "achieved",
     });
+  });
+
+  it("projects chat session details for the renderer without dropping stored audit output", async () => {
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const outputParts: ChatOutputPart[] = [
+      {
+        id: "text_1",
+        type: "text",
+        text: "Readable answer",
+        format: "markdown",
+      },
+      {
+        id: "tool_result_1",
+        type: "tool_result",
+        toolCallId: "call_1",
+        ok: true,
+        resultPreview: { payload: "x".repeat(120_000) },
+      },
+      {
+        id: "command_output_1",
+        type: "command_output",
+        command: "cat huge.json",
+        stdout: "x".repeat(80_000),
+        stderr: "",
+        exitCode: 0,
+      },
+    ];
+    const appended = await container.chatSessionStore().appendMessage({
+      role: "assistant",
+      content: "Readable answer",
+      outputParts,
+    });
+
+    const rendererSession = await container.getChatSession(appended.session.id);
+    const storedSession = await container.chatSessionStore().get(appended.session.id);
+
+    expect(rendererSession?.messages[0].outputParts).toEqual([outputParts[0]]);
+    expect(storedSession?.messages[0].outputParts).toEqual(outputParts);
+    expect(JSON.stringify(rendererSession).length).toBeLessThan(
+      JSON.stringify(storedSession).length / 20,
+    );
   });
 });
 

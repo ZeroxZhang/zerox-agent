@@ -67,6 +67,13 @@ describe("Design System — Notion-inspired app shell", () => {
     ),
     "utf8",
   );
+  const outputRenderingArtifactPath = path.join(
+    process.cwd(),
+    "docs/design/zerox-agent-2-9-0-output-rendering-artifact.html",
+  );
+  const outputRenderingArtifactSource = existsSync(outputRenderingArtifactPath)
+    ? readFileSync(outputRenderingArtifactPath, "utf8")
+    : "";
   const evalReviewPanelPath = path.join(
     process.cwd(),
     "src/renderer/components/EvalReviewPanel.tsx",
@@ -74,6 +81,14 @@ describe("Design System — Notion-inspired app shell", () => {
   const evalReviewPanelSource = existsSync(evalReviewPanelPath)
     ? readFileSync(evalReviewPanelPath, "utf8")
     : "";
+  const chatOutputComponentDir = path.join(
+    process.cwd(),
+    "src/renderer/components/chat",
+  );
+  const readChatOutputComponent = (fileName: string) => {
+    const filePath = path.join(chatOutputComponentDir, fileName);
+    return existsSync(filePath) ? readFileSync(filePath, "utf8") : "";
+  };
 
   it("defines comprehensive CSS custom property design tokens", () => {
     expect(rootStyles).toContain("@import \"./styles/tokens.css\";");
@@ -167,12 +182,15 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(chatPanelSource).toContain("selectedWorkspaceId");
     expect(chatPanelSource).toContain("workspaceId: selectedWorkspaceId");
     expect(chatPanelSource).toContain("openProjectAgentWorkspace");
-    expect(chatPanelSource).toContain("createTemporaryAgentWorkspace");
+    expect(chatPanelSource).toContain("openProjectAgentWorkspace({");
+    expect(chatPanelSource).toContain('mode: "create"');
+    expect(chatPanelSource).not.toContain("createTemporaryAgentWorkspace({");
     expect(chatPanelSource).toContain("workspace-menu");
     expect(chatPanelSource).toContain("workspaceSearch");
     expect(chatPanelSource).toContain("历史工作区");
     expect(chatPanelSource).toContain("打开已有目录");
     expect(chatPanelSource).toContain("新建工作区");
+    expect(chatPanelSource).toContain("选择或新建本地项目文件夹");
     expect(chatPanelSource).toContain("默认工作区");
     expect(chatPanelSource).toContain("composer-context-row");
     expect(chatPanelSource).toContain("workspace-picker");
@@ -222,6 +240,15 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain("flex: 0 0 auto;");
     expect(styles).toContain("min-height: clamp(104px, 18dvh, 148px);");
     expect(styles).toContain("max-height: min(34vh, 260px);");
+  });
+
+  it("keeps transcript history readable during active streaming", () => {
+    expect(chatPanelSource).toContain("shouldStickToLatestMessageRef");
+    expect(chatPanelSource).toContain("handleMessageListScroll");
+    expect(chatPanelSource).toContain("isNearMessageListBottom");
+    expect(chatPanelSource).toContain("onScroll={handleMessageListScroll}");
+    expect(chatPanelSource).toContain("appendBoundedRuntimeEvent");
+    expect(chatPanelSource).toContain("MAX_RENDERED_RUNTIME_EVENTS");
   });
 
   it("uses the shared local Icon component for primary controls", () => {
@@ -289,8 +316,260 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".markdown-message span");
     expect(styles).toContain(".markdown-message strong");
     expect(styles).toContain(".markdown-message a");
-    expect(styles).toContain("font-size: var(--text-lg);");
+    expect(styles).toContain("font-size: var(--text-base);");
     expect(styles).toContain("background: #f3f4f6;");
+  });
+
+  it("renders v2.9.0 structured assistant output through dedicated React components", () => {
+    const requiredComponentFiles = [
+      "AnswerBlock.tsx",
+      "OutputPartRenderer.tsx",
+      "CodeBlockView.tsx",
+      "DataTableView.tsx",
+      "CommandOutputView.tsx",
+      "JsonPreview.tsx",
+      "RunLedgerView.tsx",
+    ];
+
+    for (const fileName of requiredComponentFiles) {
+      expect(existsSync(path.join(chatOutputComponentDir, fileName))).toBe(true);
+    }
+
+    const answerBlockSource = readChatOutputComponent("AnswerBlock.tsx");
+    const outputPartRendererSource = readChatOutputComponent(
+      "OutputPartRenderer.tsx",
+    );
+    const rendererCases = [
+      "text",
+      "table",
+      "code",
+      "file_diff",
+      "command_output",
+      "tool_call",
+      "tool_result",
+      "file_ref",
+      "artifact",
+      "citation",
+      "approval_request",
+      "input_request",
+      "diagnostic",
+      "ledger_event",
+    ];
+
+    expect(chatPanelSource).toContain("import { AnswerBlock }");
+    expect(chatPanelSource).toContain("outputPartsFromMessage");
+    expect(chatPanelSource).toContain("visibleChatMessages");
+    expect(chatPanelSource).toContain("outputParts.length > 0");
+    expect(chatPanelSource).toContain(
+      "<AnswerBlock parts={message.outputParts} />",
+    );
+    expect(chatPanelSource).not.toContain("outputMarkdownFromMessage");
+    expect(answerBlockSource).toContain("OutputPartRenderer");
+    expect(answerBlockSource).not.toContain("EvidenceRail");
+    expect(answerBlockSource).toContain("RenderedOutputPart");
+
+    for (const rendererCase of rendererCases) {
+      expect(outputPartRendererSource).toContain(`case "${rendererCase}"`);
+    }
+  });
+
+  it("keeps structured output renderer class hooks stable for Task 5 visual polish", () => {
+    const componentSources = [
+      readChatOutputComponent("AnswerBlock.tsx"),
+      readChatOutputComponent("CodeBlockView.tsx"),
+      readChatOutputComponent("DataTableView.tsx"),
+      readChatOutputComponent("CommandOutputView.tsx"),
+      readChatOutputComponent("JsonPreview.tsx"),
+      readChatOutputComponent("RunLedgerView.tsx"),
+    ].join("\n");
+
+    for (const className of [
+      "chat-answer-block",
+      "chat-output-part",
+      "chat-code-block",
+      "chat-code-header",
+      "chat-data-table-wrap",
+      "chat-data-table",
+      "chat-command-output",
+      "chat-command-stream",
+      "chat-json-preview",
+      "chat-run-ledger",
+    ]) {
+      expect(componentSources).toContain(className);
+    }
+  });
+
+  it("covers v2.9 output rendering CSS hooks for approved visual styling", () => {
+    const componentSources = [
+      readChatOutputComponent("AnswerBlock.tsx"),
+      readChatOutputComponent("CodeBlockView.tsx"),
+      readChatOutputComponent("DataTableView.tsx"),
+      readChatOutputComponent("CommandOutputView.tsx"),
+      readChatOutputComponent("JsonPreview.tsx"),
+      readChatOutputComponent("RunLedgerView.tsx"),
+      readChatOutputComponent("OutputPartRenderer.tsx"),
+    ].join("\n");
+
+    const requiredClassHooks = [
+      "chat-answer-block",
+      "chat-answer-body",
+      "chat-output-part-list",
+      "chat-output-part",
+      "chat-evidence-inline",
+      "chat-data-table-wrap",
+      "chat-data-table",
+      "chat-code-block",
+      "chat-code-header",
+      "chat-diff-line-added",
+      "chat-diff-line-removed",
+      "chat-command-output",
+      "chat-command-stream",
+      "chat-json-preview",
+      "chat-run-ledger",
+      "chat-ledger-row",
+      "chat-artifact-card",
+      "chat-citation-chip",
+      "chat-approval-block",
+      "chat-input-request-block",
+    ];
+
+    for (const className of requiredClassHooks) {
+      expect(componentSources).toContain(className);
+      expect(styles).toContain(`.${className}`);
+    }
+
+    expect(styles).toContain("@media (max-width: 640px)");
+    expect(styles).toMatch(
+      /@media \(max-width: 640px\)[\s\S]*\.chat-answer-block/,
+    );
+    expect(styles).toContain("grid-template-columns: minmax(0, 1fr);");
+    expect(styles).toContain("overflow-wrap: anywhere;");
+    expect(styles).toContain("max-width: 100%;");
+  });
+
+  it("keeps assistant answers single-column with readable content widths", () => {
+    const answerBlockSource = readChatOutputComponent("AnswerBlock.tsx");
+    const runLedgerSource = readChatOutputComponent("RunLedgerView.tsx");
+
+    expect(answerBlockSource).not.toContain("hasEvidence");
+    expect(answerBlockSource).not.toContain("has-evidence");
+    expect(answerBlockSource).not.toContain("isEvidencePart");
+    expect(answerBlockSource).toContain("is-body-only");
+    expect(styles).toMatch(
+      /\.chat-answer-block\s*{[\s\S]*grid-template-columns: minmax\(0, 1fr\);/,
+    );
+    expect(styles).not.toMatch(/\.chat-answer-block\.has-evidence/);
+    expect(styles).toMatch(
+      /\.chat-message\s*{[\s\S]*width: min\(960px, 100%\);/,
+    );
+    expect(styles).toMatch(
+      /\.chat-answer-body\s*{[\s\S]*border-left: 0;/,
+    );
+    expect(styles).toMatch(
+      /\.chat-data-table\s*{[\s\S]*table-layout: fixed;/,
+    );
+    expect(styles).toMatch(
+      /\.chat-code-block pre,[\s\S]*\.chat-json-preview pre\s*{[\s\S]*white-space: pre-wrap;/,
+    );
+
+    expect(runLedgerSource).toContain("hasDetail");
+    expect(runLedgerSource).toContain("hasTool");
+    expect(runLedgerSource).toContain("is-title-only");
+    expect(runLedgerSource).toContain("has-detail");
+    expect(runLedgerSource).toContain("has-tool");
+    expect(styles).toMatch(
+      /\.chat-ledger-row\s*{[\s\S]*grid-template-columns: auto minmax\(0, 1fr\);/,
+    );
+    expect(styles).toContain(".chat-ledger-row.has-detail:not(.has-tool)");
+    expect(styles).toContain(".chat-ledger-row.has-tool:not(.has-detail)");
+    expect(styles).toContain(".chat-ledger-row.has-detail.has-tool");
+  });
+
+  it("keeps main transcript typography on one content scale", () => {
+    expect(styles).toMatch(
+      /\.chat-answer-block\s*{[\s\S]*--chat-output-font-size: var\(--text-base\);/,
+    );
+    expect(styles).toMatch(
+      /\.chat-message p,[\s\S]*\.markdown-message\s*{[\s\S]*font-size: var\(--chat-output-font-size\);/,
+    );
+    expect(styles).toMatch(
+      /\.markdown-message p,[\s\S]*\.markdown-message blockquote\s*{[\s\S]*font-size: inherit;[\s\S]*line-height: inherit;/,
+    );
+    expect(styles).toMatch(
+      /\.markdown-message strong\s*{[\s\S]*font-size: inherit;/,
+    );
+    expect(styles).toMatch(
+      /\.markdown-message strong\s*{[\s\S]*background: var\(--chat-output-emphasis-bg\);/,
+    );
+    expect(styles).toMatch(
+      /\.markdown-message :not\(pre\) > code\s*{[\s\S]*font-size: inherit;[\s\S]*line-height: inherit;/,
+    );
+    expect(chatPanelSource).toContain("markdown-table-wrap");
+    expect(chatPanelSource).toContain("markdown-table");
+    expect(styles).toMatch(
+      /\.markdown-message table,[\s\S]*\.chat-data-table\s*{[\s\S]*font-size: var\(--chat-output-font-size\);/,
+    );
+    expect(styles).toMatch(
+      /\.chat-data-table\s*{[\s\S]*font-size: var\(--chat-output-font-size\);/,
+    );
+    expect(styles).toMatch(
+      /\.chat-data-table th,[\s\S]*\.chat-data-table td\s*{[\s\S]*font-size: inherit;[\s\S]*line-height: inherit;/,
+    );
+    expect(styles).toMatch(
+      /\.chat-code-block pre,[\s\S]*\.chat-json-preview pre\s*{[\s\S]*font-size: var\(--chat-output-font-size\);/,
+    );
+    expect(styles).toMatch(
+      /\.agent-context-panel \.task-process-list li\s*{[\s\S]*grid-template-columns: 48px 36px minmax\(0, 1fr\) auto;/,
+    );
+  });
+
+  it("keeps context process rows as one-line summaries without expand buttons", () => {
+    const taskProcessItemSource = getFunctionSource(
+      chatPanelSource,
+      "TaskProcessItem",
+    );
+
+    expect(chatPanelSource).toContain("compact?: boolean");
+    expect(chatPanelSource).toContain("compact={true}");
+    expect(taskProcessItemSource).toContain(
+      "const shouldCollapse = !compact && item.message.length > 160;",
+    );
+    expect(taskProcessItemSource).toContain(
+      "compact ? getLatestRuntimeLine(item.message) :",
+    );
+    expect(styles).toMatch(
+      /\.agent-context-panel \.task-process-list span\s*{[\s\S]*white-space: nowrap;[\s\S]*text-overflow: ellipsis;/,
+    );
+    expect(styles).toMatch(
+      /\.agent-context-panel \.task-process-item-toggle\s*{[\s\S]*display: none;/,
+    );
+  });
+
+  it("commits the v2.9 output rendering design artifact with acceptance states", () => {
+    expect(existsSync(outputRenderingArtifactPath)).toBe(true);
+
+    for (const requiredState of [
+      "single-column answer",
+      "run ledger",
+      "table",
+      "code/diff",
+      "terminal output",
+      "document report",
+      "approval waiting",
+      "guided input",
+      "error diagnostic",
+      "narrow layout",
+    ]) {
+      expect(outputRenderingArtifactSource.toLowerCase()).toContain(
+        requiredState,
+      );
+    }
+
+    expect(outputRenderingArtifactSource).toContain("chat-answer-block");
+    expect(outputRenderingArtifactSource).not.toContain("chat-evidence-rail");
+    expect(outputRenderingArtifactSource).not.toContain("has-evidence");
+    expect(outputRenderingArtifactSource).toContain("chat-run-ledger");
+    expect(outputRenderingArtifactSource).toContain("@media (max-width: 640px)");
   });
 
   it("keeps a draggable window strip visible on the chat-first desktop shell", () => {
@@ -424,7 +703,7 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(chatPanelSource).toContain("comingSoon: true");
     expect(chatPanelSource).toContain("handleOpenCommandMenu");
     expect(chatPanelSource).toContain("handleSelectComposerCommand(command.id)");
-    expect(chatPanelSource).toContain("createGoalCommandDraft(draft)");
+    expect(chatPanelSource).toContain("createGoalCommandDraft(draftRef.current)");
     expect(styles).toContain(".composer-icon");
     expect(styles).toContain(".composer-icon path");
     expect(styles).toContain("--composer-action-inset: 14px;");
@@ -448,7 +727,7 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(chatPanelSource).toContain("GoalDetailDrawer");
     expect(chatPanelSource).toContain("handleViewGoalProgress");
     expect(chatPanelSource).toContain("handleStartGoal");
-    expect(chatPanelSource).toContain("refreshSessions(sessionIdToLoad)");
+    expect(chatPanelSource).not.toContain("refreshSessions(sessionIdToLoad)");
     expect(chatPanelSource).toContain("slash-command-menu");
     expect(chatPanelSource).toContain("handleSelectComposerCommand(\"goal\")");
     expect(goalStatusStripSource).toContain("buildGoalProgressViewModel");
@@ -721,6 +1000,45 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(chatPanelSource).toContain("shouldCollapseMarkdownBlock");
     expect(styles).toContain(".chat-message-collapse");
     expect(styles).toContain("overflow-wrap: anywhere;");
+  });
+
+  it("keeps long transcript rendering isolated from composer input and session switching", () => {
+    const answerBlockSource = readChatOutputComponent("AnswerBlock.tsx");
+    const outputPartRendererSource = readChatOutputComponent(
+      "OutputPartRenderer.tsx",
+    );
+
+    expect(chatPanelSource).toContain(
+      "const ChatMessageList = memo(function ChatMessageList",
+    );
+    expect(chatPanelSource).toContain(
+      "const MarkdownMessage = memo(function MarkdownMessage",
+    );
+    expect(chatPanelSource).toContain("draftRef.current = nextDraft");
+    expect(chatPanelSource).not.toContain("value={draft}");
+    expect(chatPanelSource).toContain("shouldRenderMarkdownPreview(content)");
+    expect(chatPanelSource).toContain("createMarkdownPreview(content)");
+    expect(chatPanelSource).toContain("markdown-plain-preview");
+    expect(chatPanelSource).toContain(
+      "shouldPreview && !expanded ? [] : parseMarkdownBlocks(content)",
+    );
+    expect(answerBlockSource).toContain("memo(function AnswerBlock");
+    expect(outputPartRendererSource).toContain(
+      "memo(function OutputPartRenderer",
+    );
+    expect(outputPartRendererSource).toContain(
+      "const TextPartView = memo(function TextPartView",
+    );
+    expect(outputPartRendererSource).toContain(
+      "shouldPreview && !expanded ? [] : parseMarkdownBlocks(text)",
+    );
+    expect(styles).toContain(".markdown-plain-preview");
+    expect(chatPanelSource).not.toContain("refreshSessions(sessionIdToLoad)");
+  });
+
+  it("exposes stable DOM hooks for production transcript performance smoke checks", () => {
+    expect(appSource).toContain("data-session-id={session.id}");
+    expect(chatPanelSource).toContain("data-message-id={message.id}");
   });
 
   it("keeps guided input reachable when the right context rail is hidden", () => {

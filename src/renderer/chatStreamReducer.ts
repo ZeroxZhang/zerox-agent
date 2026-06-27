@@ -1,4 +1,5 @@
 import type { ChatStreamEvent, SkillUserInputRequest } from "../shared/chat";
+import type { ChatOutputPart } from "../shared/chatOutput";
 
 export type ChatStreamMessage = {
   id: string;
@@ -7,6 +8,7 @@ export type ChatStreamMessage = {
   createdAt: string;
   streamRequestId?: string;
   isStreaming?: boolean;
+  outputParts?: ChatOutputPart[];
 };
 
 export type ChatToolCallPreview = {
@@ -50,6 +52,10 @@ export function applyChatStreamEvent(
 
   if (event.type === "answer_delta") {
     return upsertAssistantStreamMessage(state, event);
+  }
+
+  if (event.type === "output_part") {
+    return upsertAssistantOutputPart(state, event);
   }
 
   if (event.type === "thinking_delta") {
@@ -164,6 +170,75 @@ function isActiveStreamEvent(
   }
 
   return true;
+}
+
+function upsertAssistantOutputPart(
+  state: ChatStreamState,
+  event: Extract<ChatStreamEvent, { type: "output_part" }>,
+): ChatStreamState {
+  let didUpdate = false;
+  const messages = state.messages.map((message) => {
+    if (
+      message.role !== "assistant" ||
+      message.streamRequestId !== event.requestId
+    ) {
+      return message;
+    }
+
+    didUpdate = true;
+    return {
+      ...message,
+      content: event.part.type === "text" ? event.part.text : message.content,
+      isStreaming: true,
+      outputParts: orderOutputParts(
+        upsertOutputPart(message.outputParts ?? [], event.part),
+      ),
+    };
+  });
+
+  if (didUpdate) {
+    return { ...state, messages };
+  }
+
+  return {
+    ...state,
+    messages: [
+      ...state.messages,
+      {
+        id: createStreamMessageId(event.requestId),
+        role: "assistant",
+        content: event.part.type === "text" ? event.part.text : "",
+        createdAt: event.createdAt,
+        streamRequestId: event.requestId,
+        isStreaming: true,
+        outputParts: orderOutputParts(upsertOutputPart([], event.part)),
+      },
+    ],
+  };
+}
+
+function upsertOutputPart(
+  outputParts: ChatOutputPart[],
+  part: ChatOutputPart,
+): ChatOutputPart[] {
+  let didUpdate = false;
+  const nextParts = outputParts.map((existingPart) => {
+    if (existingPart.id !== part.id) {
+      return existingPart;
+    }
+
+    didUpdate = true;
+    return part;
+  });
+
+  return didUpdate ? nextParts : [...nextParts, part];
+}
+
+function orderOutputParts(outputParts: ChatOutputPart[]): ChatOutputPart[] {
+  return [
+    ...outputParts.filter((part) => part.type === "text"),
+    ...outputParts.filter((part) => part.type !== "text"),
+  ];
 }
 
 function upsertAssistantStreamMessage(

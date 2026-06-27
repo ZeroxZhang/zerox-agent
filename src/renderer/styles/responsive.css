@@ -134,6 +134,28 @@
   .guided-skill-input-grid {
     grid-template-columns: minmax(0, 1fr);
   }
+
+  .chat-answer-block {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .chat-answer-body {
+    padding-left: 0;
+  }
+
+  .chat-data-table-wrap,
+  .chat-code-block,
+  .chat-command-output,
+  .chat-json-preview {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  .chat-ledger-row,
+  .chat-input-request-block li {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
 }
 
 @media (max-height: 720px) {

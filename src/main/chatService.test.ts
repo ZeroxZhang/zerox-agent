@@ -20,6 +20,7 @@ import type {
   ChatStreamEvent,
   ChatTaskStatusEvent,
 } from "../shared/chat";
+import type { ChatOutputPart } from "../shared/chatOutput";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
 import { buildPrimaryRunContext } from "../shared/agentWorkspace";
 import { defineNativeToolDescriptor } from "../shared/nativeCapabilities";
@@ -167,13 +168,15 @@ describe("chat service", () => {
     );
     expect(streamEvents).toEqual(
       expect.arrayContaining([
-        {
+        expect.objectContaining({
           type: "status",
           sessionId: "chat_stream_status",
           requestId: "request_stream_1",
           status: statusEvents[0],
           createdAt: statusEvents[0].createdAt,
-        },
+          sequence: 1,
+          turnId: "turn-request_stream_1",
+        }),
       ]),
     );
   });
@@ -344,12 +347,18 @@ describe("chat service", () => {
         role: "user",
         content: "帮我整理下载文件夹",
       },
-      {
+      expect.objectContaining({
         sessionId: "persisted_session",
         role: "assistant",
         content: "我可以先检查任务和工具权限，然后运行文件整理 skill。",
         relatedMemoryIds: ["mem_downloads"],
-      },
+        outputParts: expect.arrayContaining([
+          expect.objectContaining({
+            type: "text",
+            text: "我可以先检查任务和工具权限，然后运行文件整理 skill。",
+          }),
+        ]),
+      }),
     ]);
   });
 
@@ -464,6 +473,7 @@ describe("chat service", () => {
   });
 
   it("creates and immediately starts a session goal from an explicit goal-setting message", async () => {
+    const streamEvents: ChatStreamEvent[] = [];
     let completeCalled = false;
     const chatMessages: AppendChatMessageInput[] = [];
     const goalCreates: unknown[] = [];
@@ -484,9 +494,17 @@ describe("chat service", () => {
       now: () => new Date("2026-06-12T08:00:00.000Z"),
     });
 
-    const result = await service.sendMessage({
-      message: "把这轮设为目标：发布 v1.8.0，直到 GitHub Release 完成才算结束",
-    });
+    const result = await service.sendMessage(
+      {
+        requestId: "request_goal_start",
+        message: "把这轮设为目标：发布 v1.8.0，直到 GitHub Release 完成才算结束",
+      },
+      {
+        onStreamEvent(event) {
+          streamEvents.push(event);
+        },
+      },
+    );
 
     expect(result).toMatchObject({
       ok: true,
@@ -516,15 +534,35 @@ describe("chat service", () => {
         role: "user",
         content: "把这轮设为目标：发布 v1.8.0，直到 GitHub Release 完成才算结束",
       },
-      {
+      expect.objectContaining({
         sessionId: "persisted_session",
         role: "assistant",
         content:
           "已设置并开始执行目标：发布 v1.8.0，直到 GitHub Release 完成才算结束。",
         goalId: "goal_release",
         goalEventRef: "goal_started",
-      },
+        outputParts: [
+          expect.objectContaining({
+            type: "text",
+            text:
+              "已设置并开始执行目标：发布 v1.8.0，直到 GitHub Release 完成才算结束。",
+            createdAt: "2026-06-12T08:00:00.000Z",
+          }),
+        ],
+      }),
     ]);
+    const completedIndex = streamEvents.findIndex(
+      (event) => event.type === "completed",
+    );
+    const finalTextPartIndex = streamEvents.findIndex(
+      (event) =>
+        event.type === "output_part" &&
+        event.part.type === "text" &&
+        event.part.text ===
+          "已设置并开始执行目标：发布 v1.8.0，直到 GitHub Release 完成才算结束。",
+    );
+    expect(finalTextPartIndex).toBeGreaterThanOrEqual(0);
+    expect(completedIndex).toBeGreaterThan(finalTextPartIndex);
     expect(completeCalled).toBe(false);
   });
 
@@ -565,6 +603,66 @@ describe("chat service", () => {
         originMessageId: "message_1",
         description: "发布 v1.8.0，直到 GitHub Release 完成才算结束",
       },
+    ]);
+    expect(resumes).toEqual(["goal_release"]);
+    expect(completeCalled).toBe(false);
+  });
+
+  it("keeps explicit slash goal routing when an agent skill is selected", async () => {
+    let completeCalled = false;
+    const goalCreates: unknown[] = [];
+    const resumes: string[] = [];
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          completeCalled = true;
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([]),
+      goalService: createGoalService({ goalCreates, resumes }),
+      discoverSkills: async () => ({
+        skills: [
+          createSkillRecord({
+            name: "onepager",
+            body: "Onepager 技能流程：必须先做内容架构分析。",
+          }),
+        ],
+        errors: [],
+      }),
+      createId: () => "chat_goal_skill",
+      now: () => new Date("2026-06-12T08:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage({
+      message: "/目标 给这个项目生成一份可阅读 HTML 报告",
+      selectedSkillName: "onepager",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      activeGoal: {
+        id: "goal_release",
+        description: "给这个项目生成一份可阅读 HTML 报告",
+        status: "executing",
+      },
+      selectedSkill: {
+        name: "onepager",
+        displayName: "onepager",
+      },
+    });
+    expect(goalCreates).toEqual([
+      expect.objectContaining({
+        sessionId: "persisted_session",
+        originMessageId: "message_1",
+        description: "给这个项目生成一份可阅读 HTML 报告",
+        selectedSkill: expect.objectContaining({
+          body: "Onepager 技能流程：必须先做内容架构分析。",
+          manifest: expect.objectContaining({ name: "onepager" }),
+        }),
+      }),
     ]);
     expect(resumes).toEqual(["goal_release"]);
     expect(completeCalled).toBe(false);
@@ -1623,21 +1721,23 @@ describe("chat service", () => {
     });
     expect(streamEvents).toEqual(
       expect.arrayContaining([
-        {
+        expect.objectContaining({
           type: "answer_delta",
           text: "I will inspect. ",
           sessionId: "persisted_session",
           requestId: "request_model_stream_1",
           createdAt: "2026-06-23T08:00:00.000Z",
-        },
-        {
+          turnId: "turn-request_model_stream_1",
+        }),
+        expect.objectContaining({
           type: "thinking_delta",
           text: "Checking available tools.",
           sessionId: "persisted_session",
           requestId: "request_model_stream_1",
           createdAt: "2026-06-23T08:00:00.000Z",
-        },
-        {
+          turnId: "turn-request_model_stream_1",
+        }),
+        expect.objectContaining({
           type: "tool_call_preview",
           toolCallId: "preview_call_1",
           toolName: "file_list",
@@ -1645,15 +1745,947 @@ describe("chat service", () => {
           sessionId: "persisted_session",
           requestId: "request_model_stream_1",
           createdAt: "2026-06-23T08:00:00.000Z",
-        },
+          turnId: "turn-request_model_stream_1",
+        }),
       ]),
     );
     expect(chatMessages.filter((message) => message.role === "assistant")).toEqual([
       expect.objectContaining({
         role: "assistant",
         content: expect.stringContaining("Final reply."),
+        outputParts: expect.arrayContaining([
+          expect.objectContaining({ type: "text" }),
+          expect.objectContaining({
+            type: "tool_call",
+            toolCallId: "preview_call_1",
+          }),
+        ]),
       }),
     ]);
+  });
+
+  it("persists final assistant text and lifecycle output parts for tool-using turns", async () => {
+    const streamEvents: ChatStreamEvent[] = [];
+    const chatMessages: AppendChatMessageInput[] = [];
+    const chatSessionStore = createChatSessionStore(chatMessages);
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore,
+      toolExecutor: createToolExecutor(),
+      async runAgentLoop(messages, _profile, options) {
+        options.onModelStreamEvent?.(
+          { type: "content_delta", text: "Streaming draft." },
+          1,
+        );
+        options.onToolCall?.("file_list", { path: "/tmp" }, { toolCallId: "tool_1" });
+        options.onToolResult?.(
+          "file_list",
+          true,
+          {
+            ok: true,
+            result: { files: ["a.txt", "b.txt"] },
+          },
+          { toolCallId: "tool_1", resultBytes: 24 },
+        );
+        return {
+          status: "succeeded" as const,
+          summary: "Final reply.",
+          turns: 1,
+          messages,
+          toolCallsExecuted: 1,
+        };
+      },
+      createId: () => "chat_tool_parts",
+      now: () => new Date("2026-06-23T08:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage(
+      {
+        requestId: "request_tool_parts_1",
+        message: "run one tool",
+      },
+      {
+        onStreamEvent(event) {
+          streamEvents.push(event);
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      reply: "🔧 使用了 1 个工具\n\nFinal reply.",
+    });
+    const persistedAssistant = (await chatSessionStore.get("persisted_session"))?.messages.at(-1);
+    const completedIndex = streamEvents.findIndex(
+      (event) => event.type === "completed",
+    );
+    const finalTextPartIndex = streamEvents.findIndex(
+      (event) =>
+        event.type === "output_part" &&
+        event.part.type === "text" &&
+        event.part.text === persistedAssistant?.content,
+    );
+    expect(persistedAssistant).toMatchObject({
+      role: "assistant",
+      content: "🔧 使用了 1 个工具\n\nFinal reply.",
+      outputParts: expect.arrayContaining([
+        expect.objectContaining({
+          type: "text",
+          text: "🔧 使用了 1 个工具\n\nFinal reply.",
+        }),
+        expect.objectContaining({
+          type: "tool_result",
+          toolCallId: "tool_1",
+          ok: true,
+          resultPreview: { files: ["a.txt", "b.txt"] },
+        }),
+        expect.objectContaining({
+          type: "ledger_event",
+        }),
+      ]),
+    });
+    expect(finalTextPartIndex).toBeGreaterThanOrEqual(0);
+    expect(completedIndex).toBeGreaterThan(finalTextPartIndex);
+    expect(streamEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "output_part",
+          part: expect.objectContaining({
+            type: "tool_result",
+            toolCallId: "tool_1",
+            ok: true,
+          }),
+        }),
+        expect.objectContaining({
+          type: "output_part",
+          part: expect.objectContaining({
+            type: "ledger_event",
+          }),
+        }),
+      ]),
+    );
+  });
+
+  it("preserves final assistant reply whitespace across persisted content and terminal stream text", async () => {
+    const streamEvents: ChatStreamEvent[] = [];
+    const chatMessages: AppendChatMessageInput[] = [];
+    const chatSessionStore = createChatSessionStore(chatMessages);
+    const exactReply = "  Normalized reply.   \n";
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply(exactReply);
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore,
+      createId: () => "chat_trimmed_reply",
+      now: () => new Date("2026-06-26T08:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage(
+      {
+        requestId: "request_trimmed_reply_1",
+        message: "say hi",
+      },
+      {
+        onStreamEvent(event) {
+          streamEvents.push(event);
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      reply: exactReply,
+    });
+    const persistedAssistant = (await chatSessionStore.get("persisted_session"))?.messages.at(-1);
+    const finalTextPart = streamEvents.findLast(
+      (event) => event.type === "output_part" && event.part.type === "text",
+    );
+    const completedEvent = streamEvents.findLast(
+      (event) => event.type === "completed",
+    );
+
+    expect(persistedAssistant?.content).toBe(exactReply);
+    expect(finalTextPart).toMatchObject({
+      type: "output_part",
+      part: expect.objectContaining({
+        type: "text",
+        text: exactReply,
+      }),
+    });
+    expect(completedEvent).toMatchObject({
+      type: "completed",
+      message: exactReply,
+    });
+  });
+
+  it("masks secrets in ledger events and other output parts for tool starts", async () => {
+    const streamEvents: ChatStreamEvent[] = [];
+    const chatMessages: AppendChatMessageInput[] = [];
+    const chatSessionStore = createChatSessionStore(chatMessages);
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore,
+      toolExecutor: createToolExecutor(),
+      async runAgentLoop(messages, _profile, options) {
+        options.onModelStreamEvent?.(
+          {
+            type: "tool_call_delta",
+            id: "tool_secret_1",
+            name: "shell_exec",
+            arguments:
+              '{"command":"npm test","apiKey":"secret-value","authorization":"Bearer secret-auth","token":"secret-token","password":"secret-password"}',
+          },
+          1,
+        );
+        options.onToolCall?.(
+          "shell_exec",
+          {
+            command: "npm test",
+            apiKey: "secret-value",
+            authorization: "Bearer secret-auth",
+            token: "secret-token",
+            password: "secret-password",
+          },
+          { toolCallId: "tool_secret_1" },
+        );
+        return {
+          status: "succeeded" as const,
+          summary: "Done.",
+          turns: 1,
+          messages,
+          toolCallsExecuted: 1,
+        };
+      },
+      createId: () => "chat_masked_ledger",
+      now: () => new Date("2026-06-23T08:00:00.000Z"),
+    });
+
+    await service.sendMessage(
+      {
+        requestId: "request_masked_ledger",
+        message: "run secret tool",
+      },
+      {
+        onStreamEvent(event) {
+          streamEvents.push(event);
+        },
+      },
+    );
+
+    const persistedAssistant = (await chatSessionStore.get("persisted_session"))?.messages.at(-1);
+    const serializedOutput = JSON.stringify([
+      ...streamEvents
+        .filter(
+          (event): event is Extract<ChatStreamEvent, { type: "output_part" }> =>
+            event.type === "output_part",
+        )
+        .map((event) => event.part),
+      ...(persistedAssistant?.outputParts ?? []),
+    ]);
+
+    expect(serializedOutput).not.toContain("secret-value");
+    expect(serializedOutput).not.toContain("secret-auth");
+    expect(serializedOutput).not.toContain("secret-token");
+    expect(serializedOutput).not.toContain("secret-password");
+    expect(serializedOutput).toContain('"apiKey":"****"');
+    expect(serializedOutput).toContain('"authorization":"****"');
+    expect(serializedOutput).toContain('"token":"****"');
+    expect(serializedOutput).toContain('"password":"****"');
+  });
+
+  it("emits and persists approval request output parts for tool invocations waiting on approval", async () => {
+    const streamEvents: ChatStreamEvent[] = [];
+    const chatSessionStore = createChatSessionStore([]);
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore,
+      toolExecutor: createToolExecutor(),
+      async runAgentLoop(messages, _profile, options) {
+        options.onToolInvocation?.({
+          id: "approval_1",
+          runId: "run_1",
+          toolCallId: "tool_approval_1",
+          toolName: "shell_exec",
+          source: "native",
+          args: {
+            command: "npm test",
+            apiKey: "secret-value",
+            nested: { password: "secret-password" },
+          },
+          status: "waiting_approval",
+          createdAt: "2026-06-23T08:00:00.000Z",
+          updatedAt: "2026-06-23T08:00:00.000Z",
+          history: [
+            {
+              status: "waiting_approval",
+              at: "2026-06-23T08:00:00.000Z",
+              reason: "requires approval",
+            },
+          ],
+        });
+        return {
+          status: "succeeded" as const,
+          summary: "Approval requested.",
+          turns: 1,
+          messages,
+          toolCallsExecuted: 0,
+        };
+      },
+      createId: () => "chat_approval_parts",
+      now: () => new Date("2026-06-23T08:00:00.000Z"),
+    });
+
+    await service.sendMessage(
+      {
+        requestId: "request_approval_parts",
+        message: "run approval tool",
+      },
+      {
+        onStreamEvent(event) {
+          streamEvents.push(event);
+        },
+      },
+    );
+
+    const approvalStreamPart = streamEvents.find(
+      (event): event is Extract<ChatStreamEvent, { type: "output_part" }> =>
+        event.type === "output_part" &&
+        event.part.type === "approval_request",
+    )?.part;
+    const persistedAssistant = (await chatSessionStore.get("persisted_session"))?.messages.at(-1);
+    const persistedApprovalPart = persistedAssistant?.outputParts?.find(
+      (part) => part.type === "approval_request",
+    );
+    const ledgerStreamPart = streamEvents.find(
+      (event): event is Extract<ChatStreamEvent, { type: "output_part" }> =>
+        event.type === "output_part" &&
+        event.part.type === "ledger_event" &&
+        event.part.status === "waiting",
+    )?.part;
+    const persistedLedgerPart = persistedAssistant?.outputParts?.find(
+      (part) => part.type === "ledger_event" && part.status === "waiting",
+    );
+
+    expect(approvalStreamPart).toMatchObject({
+      type: "approval_request",
+      approvalId: "approval_1",
+      toolName: "shell_exec",
+      riskLevel: "high",
+      argsPreview: {
+        command: "npm test",
+        apiKey: "****",
+        nested: { password: "****" },
+      },
+    });
+    expect(persistedApprovalPart).toEqual(approvalStreamPart);
+    expect(JSON.stringify([approvalStreamPart, persistedApprovalPart])).not.toContain(
+      "secret-value",
+    );
+    expect(JSON.stringify([approvalStreamPart, persistedApprovalPart])).not.toContain(
+      "secret-password",
+    );
+    expect(ledgerStreamPart).toMatchObject({
+      type: "ledger_event",
+      status: "waiting",
+      title: expect.stringContaining("shell_exec"),
+      detail: expect.stringContaining("approval"),
+      toolName: "shell_exec",
+    });
+    expect(persistedLedgerPart).toEqual(ledgerStreamPart);
+  });
+
+  it("redacts chunked tool-call argument previews until they become valid JSON", async () => {
+    const streamEvents: ChatStreamEvent[] = [];
+    const chatClient: ChatClient & StreamingChatClient = {
+      async complete() {
+        throw new Error("non-streaming complete should not be used");
+      },
+      async *streamComplete() {
+        yield {
+          type: "tool_call_delta",
+          id: "chunked_secret_1",
+          name: "shell_exec",
+          arguments: '{"apiKey":"secret-value","authorization":"Bearer secret-auth"',
+        };
+        yield {
+          type: "tool_call_delta",
+          id: "chunked_secret_1",
+          name: "shell_exec",
+          arguments: ',"token":"secret-token","password":"secret-password"}',
+        };
+        yield { type: "done", finishReason: "tool_calls" };
+      },
+    };
+    const service = createChatService({
+      chatClient,
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([]),
+      toolExecutor: createToolExecutor(),
+      createId: () => "chat_chunked_secret",
+      now: () => new Date("2026-06-23T08:00:00.000Z"),
+    });
+
+    await service.sendMessage(
+      {
+        requestId: "request_chunked_secret",
+        message: "stream chunked secret args",
+      },
+      {
+        onStreamEvent(event) {
+          streamEvents.push(event);
+        },
+      },
+    );
+
+    const toolCallParts = streamEvents.filter(
+      (event): event is Extract<ChatStreamEvent, { type: "output_part" }> =>
+        event.type === "output_part" && event.part.type === "tool_call",
+    );
+    expect(toolCallParts[0]?.part).toMatchObject({
+      type: "tool_call",
+      toolCallId: "chunked_secret_1",
+      argsPreview: "[partial arguments redacted until valid JSON]",
+    });
+    expect(JSON.stringify(toolCallParts)).not.toContain("secret-value");
+    expect(JSON.stringify(toolCallParts)).not.toContain("secret-auth");
+    expect(JSON.stringify(toolCallParts)).not.toContain("secret-token");
+    expect(JSON.stringify(toolCallParts)).not.toContain("secret-password");
+    expect(toolCallParts.at(-1)?.part).toMatchObject({
+      type: "tool_call",
+      argsPreview: {
+        apiKey: "****",
+        authorization: "****",
+        token: "****",
+        password: "****",
+      },
+    });
+  });
+
+  it("preserves streamed output part order when finalizing assistant text", async () => {
+    const chatMessages: AppendChatMessageInput[] = [];
+    const chatSessionStore = createChatSessionStore(chatMessages);
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore,
+      toolExecutor: createToolExecutor(),
+      async runAgentLoop(messages, _profile, options) {
+        options.onModelStreamEvent?.({ type: "content_delta", text: "Start. " }, 1);
+        options.onModelStreamEvent?.(
+          {
+            type: "tool_call_delta",
+            id: "tool_order_1",
+            name: "file_list",
+            arguments: '{"path":"/tmp"}',
+          },
+          1,
+        );
+        options.onToolResult?.(
+          "file_list",
+          true,
+          { ok: true, result: { files: ["a.txt"] } },
+          { toolCallId: "tool_order_1" },
+        );
+        options.onModelStreamEvent?.({ type: "content_delta", text: "Finish." }, 1);
+        return {
+          status: "succeeded" as const,
+          summary: "Final combined reply.",
+          turns: 1,
+          messages,
+          toolCallsExecuted: 1,
+        };
+      },
+      createId: () => "chat_ordered_parts",
+      now: () => new Date("2026-06-23T08:00:00.000Z"),
+    });
+
+    await service.sendMessage({
+      requestId: "request_ordered_parts",
+      message: "preserve part order",
+    });
+
+    const outputParts =
+      (await chatSessionStore.get("persisted_session"))?.messages.at(-1)?.outputParts ?? [];
+    expect(outputParts.map((part) => part.type)).toEqual([
+      "text",
+      "tool_call",
+      "tool_result",
+      "ledger_event",
+    ]);
+    expect(outputParts[0]).toMatchObject({
+      type: "text",
+      text: "🔧 使用了 1 个工具\n\nFinal combined reply.",
+    });
+  });
+
+  it("extracts typed structured parts from representative tool result payloads", async () => {
+    const streamEvents: ChatStreamEvent[] = [];
+    const chatMessages: AppendChatMessageInput[] = [];
+    const chatSessionStore = createChatSessionStore(chatMessages);
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore,
+      toolExecutor: createToolExecutor(),
+      async runAgentLoop(messages, _profile, options) {
+        options.onToolResult?.(
+          "shell_exec",
+          true,
+          {
+            ok: true,
+            result: {
+              command: "npm test",
+              cwd: "/workspace/project",
+              exitCode: 0,
+              stdout: "ok",
+              stderr: "",
+              elapsedMs: 1234,
+            },
+          },
+          { toolCallId: "tool_cmd_1" },
+        );
+        options.onToolResult?.(
+          "git_diff",
+          true,
+          {
+            ok: true,
+            result: {
+              patch: "@@ -1 +1 @@\n-old\n+new",
+              filePath: "src/app.ts",
+              additions: 1,
+              deletions: 1,
+            },
+          },
+          { toolCallId: "tool_diff_1" },
+        );
+        options.onToolResult?.(
+          "file_read",
+          true,
+          {
+            ok: true,
+            result: {
+              path: "/workspace/project/README.md",
+              content: "# hi",
+            },
+          },
+          { toolCallId: "tool_read_1" },
+        );
+        options.onToolResult?.(
+          "markdown_report_write",
+          true,
+          {
+            ok: true,
+            result: {
+              path: "/workspace/project/report.md",
+              title: "Task report",
+              mediaType: "text/markdown",
+              sizeBytes: 512,
+              artifactId: "artifact_report_1",
+            },
+          },
+          { toolCallId: "tool_write_1" },
+        );
+        options.onToolResult?.(
+          "citation_record",
+          true,
+          {
+            ok: true,
+            result: {
+              citations: [
+                {
+                  id: "c1",
+                  label: "[1]",
+                  sourceTitle: "Spec",
+                  uri: "https://example.com/spec",
+                },
+              ],
+            },
+          },
+          { toolCallId: "tool_cite_1" },
+        );
+        return {
+          status: "succeeded" as const,
+          summary: "Done.",
+          turns: 1,
+          messages,
+          toolCallsExecuted: 5,
+        };
+      },
+      createId: () => "chat_result_extract",
+      now: () => new Date("2026-06-23T08:00:00.000Z"),
+    });
+
+    await service.sendMessage(
+      {
+        requestId: "request_result_extract",
+        message: "extract result parts",
+      },
+      { onStreamEvent: (event) => streamEvents.push(event) },
+    );
+
+    const outputParts =
+      (await chatSessionStore.get("persisted_session"))?.messages.at(-1)?.outputParts ?? [];
+    const allSerialized = JSON.stringify([
+      ...streamEvents
+        .filter(
+          (event): event is Extract<ChatStreamEvent, { type: "output_part" }> =>
+            event.type === "output_part",
+        )
+        .map((event) => event.part),
+      ...outputParts,
+    ]);
+
+    expect(outputParts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "command_output",
+          command: "npm test",
+          cwd: "/workspace/project",
+          exitCode: 0,
+          stdout: "ok",
+          stderr: "",
+          elapsedMs: 1234,
+        }),
+        expect.objectContaining({
+          type: "file_diff",
+          filePath: "src/app.ts",
+          patch: "@@ -1 +1 @@\n-old\n+new",
+          additions: 1,
+          deletions: 1,
+        }),
+        expect.objectContaining({
+          type: "file_ref",
+          path: "/workspace/project/README.md",
+          action: "read",
+        }),
+        expect.objectContaining({
+          type: "file_ref",
+          path: "/workspace/project/report.md",
+          action: "wrote",
+        }),
+        expect.objectContaining({
+          type: "artifact",
+          artifactId: "artifact_report_1",
+          title: "Task report",
+          path: "/workspace/project/report.md",
+          mediaType: "text/markdown",
+          sizeBytes: 512,
+        }),
+        expect.objectContaining({
+          type: "citation",
+          citationId: "c1",
+          label: "[1]",
+          sourceTitle: "Spec",
+          uri: "https://example.com/spec",
+        }),
+        expect.objectContaining({
+          type: "tool_result",
+          toolCallId: "tool_cmd_1",
+          ok: true,
+        }),
+        expect.objectContaining({
+          type: "ledger_event",
+        }),
+      ]),
+    );
+    expect(allSerialized).toContain("\"command_output\"");
+    expect(allSerialized).toContain("\"file_diff\"");
+    expect(allSerialized).toContain("\"artifact\"");
+    expect(allSerialized).toContain("\"citation\"");
+  });
+
+  it("preserves input request field metadata in streamed and persisted output parts", async () => {
+    const activityEvents: ChatTaskStatusEvent[] = [];
+    const streamEvents: ChatStreamEvent[] = [];
+    const chatMessages: AppendChatMessageInput[] = [];
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore(chatMessages, { activityEvents }),
+      workspaceService: {
+        async resolveRunContext() {
+          return buildPrimaryRunContext({
+            workspaceId: "workspace_project",
+            workspaceRoot: "/workspace/project",
+          });
+        },
+      },
+      discoverSkills: async () => ({
+        skills: [
+          createSkillRecord({
+            name: "publisher",
+            manifest: {
+              inputs: [
+                {
+                  name: "format",
+                  label: "Format",
+                  type: "choice",
+                  required: true,
+                  description: "Choose the output format.",
+                  defaultValue: "pdf",
+                  choices: ["markdown", "html"],
+                },
+              ],
+            },
+          }),
+        ],
+        errors: [],
+      }),
+      createId: createSequentialId("input_request_metadata"),
+      now: () => new Date("2026-06-23T08:00:00.000Z"),
+    });
+
+    await service.sendMessage(
+      {
+        sessionId: "session_1",
+        requestId: "request_1",
+        message: "publish this",
+        selectedSkillName: "publisher",
+        workspaceId: "workspace_project",
+      },
+      {
+        onStreamEvent(event) {
+          streamEvents.push(event);
+        },
+      },
+    );
+
+    const inputRequestPart = streamEvents.find(
+      (event): event is Extract<ChatStreamEvent, { type: "output_part" }> =>
+        event.type === "output_part" && event.part.type === "input_request",
+    )?.part;
+    expect(inputRequestPart).toMatchObject({
+      type: "input_request",
+      fields: [
+        {
+          name: "format",
+          label: "Format",
+          type: "choice",
+          required: true,
+          description: "Choose the output format.",
+          defaultValue: "pdf",
+          choices: ["markdown", "html"],
+        },
+      ],
+    });
+  });
+
+  it("emits immutable output part snapshots for repeated text deltas", async () => {
+    const streamEvents: ChatStreamEvent[] = [];
+    let retainedFirstTextPart:
+      | Extract<ChatOutputPart, { type: "text" }>
+      | undefined;
+    const chatClient: ChatClient & StreamingChatClient = {
+      async complete() {
+        throw new Error("non-streaming complete should not be used");
+      },
+      async *streamComplete() {
+        yield { type: "content_delta", text: "Hello " };
+        yield { type: "content_delta", text: "world" };
+        yield { type: "done", finishReason: "stop" };
+      },
+    };
+    const service = createChatService({
+      chatClient,
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([]),
+      toolExecutor: createToolExecutor(),
+      createId: () => "chat_output_snapshot",
+      now: () => new Date("2026-06-23T08:00:00.000Z"),
+    });
+
+    await service.sendMessage(
+      {
+        requestId: "request_output_snapshot",
+        message: "snapshot text deltas",
+      },
+      {
+        onStreamEvent(event) {
+          streamEvents.push(event);
+          if (
+            event.type === "output_part" &&
+            event.part.type === "text" &&
+            !retainedFirstTextPart
+          ) {
+            retainedFirstTextPart = event.part;
+          }
+        },
+      },
+    );
+
+    const latestTextPart = streamEvents
+      .filter(
+        (event): event is Extract<ChatStreamEvent, { type: "output_part" }> =>
+          event.type === "output_part" && event.part.type === "text",
+      )
+      .at(-1)?.part;
+    expect(retainedFirstTextPart).toMatchObject({
+      type: "text",
+      text: "Hello ",
+    });
+    expect(latestTextPart).toMatchObject({
+      type: "text",
+      text: "Hello world",
+    });
+  });
+
+  it("emits sequence-stable output parts and completes with the persisted assistant message id", async () => {
+    const streamEvents: ChatStreamEvent[] = [];
+    const chatMessages: AppendChatMessageInput[] = [];
+    const chatSessionStore = createChatSessionStore(chatMessages);
+    let streamCalls = 0;
+    const chatClient: ChatClient & StreamingChatClient = {
+      async complete() {
+        throw new Error("non-streaming complete should not be used");
+      },
+      async *streamComplete() {
+        streamCalls += 1;
+        if (streamCalls === 1) {
+          yield { type: "content_delta", text: "I will inspect. " };
+          yield {
+            type: "tool_call_delta",
+            id: "preview_call_1",
+            name: "shell_exec",
+            arguments: '{"command":"npm test","apiKey":"secret"}',
+          };
+          yield { type: "done", finishReason: "tool_calls" };
+          return;
+        }
+
+        yield { type: "content_delta", text: "Final reply." };
+        yield { type: "done", finishReason: "stop" };
+      },
+    };
+    const service = createChatService({
+      chatClient,
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore,
+      toolExecutor: createToolExecutor(),
+      createId: () => "chat_stream_parts",
+      now: () => new Date("2026-06-23T08:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage(
+      {
+        requestId: "request_output_parts_1",
+        message: "stream output parts",
+      },
+      {
+        onStreamEvent(event) {
+          streamEvents.push(event);
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      sessionId: "persisted_session",
+      reply: expect.stringContaining("Final reply."),
+    });
+    expect(streamEvents.map((event) => event.sequence)).toEqual(
+      streamEvents.map((_, index) => index + 1),
+    );
+    expect(new Set(streamEvents.map((event) => event.turnId))).toEqual(
+      new Set(["turn-request_output_parts_1"]),
+    );
+    expect(
+      streamEvents.filter(
+        (event): event is Extract<ChatStreamEvent, { type: "output_part" }> =>
+          event.type === "output_part",
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "output_part",
+          part: expect.objectContaining({
+            type: "text",
+          }),
+        }),
+        expect.objectContaining({
+          type: "output_part",
+          part: expect.objectContaining({
+            type: "tool_call",
+            toolCallId: "preview_call_1",
+            toolName: "shell_exec",
+            argsPreview: {
+              command: "npm test",
+              apiKey: "****",
+            },
+          }),
+        }),
+      ]),
+    );
+    const terminalEvents = streamEvents.filter((event) =>
+      ["completed", "failed", "canceled"].includes(event.type),
+    );
+    expect(terminalEvents).toEqual([
+      expect.objectContaining({
+        type: "completed",
+        finalMessageId: "message_2",
+        assistantMessageId: "message_2",
+      }),
+    ]);
+
+    const persistedSession = await chatSessionStore.get("persisted_session");
+    expect(persistedSession?.messages.at(-1)).toEqual(
+      expect.objectContaining({
+        id: "message_2",
+        role: "assistant",
+        content: expect.stringContaining("Final reply."),
+        outputParts: expect.arrayContaining([
+          expect.objectContaining({ type: "text" }),
+          expect.objectContaining({
+            type: "tool_call",
+            toolCallId: "preview_call_1",
+            toolName: "shell_exec",
+            argsPreview: {
+              command: "npm test",
+              apiKey: "****",
+            },
+          }),
+        ]),
+      }),
+    );
   });
 
   it("emits indexed tool previews with a usable fallback id for idless chunks", async () => {
@@ -1697,7 +2729,7 @@ describe("chat service", () => {
 
     expect(streamEvents).toEqual(
       expect.arrayContaining([
-        {
+        expect.objectContaining({
           type: "tool_call_preview",
           toolCallId: "index:1",
           index: 1,
@@ -1705,7 +2737,8 @@ describe("chat service", () => {
           sessionId: "persisted_session",
           requestId: "request_indexed_preview",
           createdAt: "2026-06-23T08:00:00.000Z",
-        },
+          turnId: "turn-request_indexed_preview",
+        }),
       ]),
     );
     const preview = streamEvents.find((event) => event.type === "tool_call_preview");
@@ -2140,6 +3173,13 @@ describe("chat service", () => {
     expect(streamEvents).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
+          type: "output_part",
+          part: expect.objectContaining({
+            type: "input_request",
+            skillName: "local-file-organizer",
+          }),
+        }),
+        expect.objectContaining({
           type: "waiting_for_input",
           sessionId: "session_1",
           requestId: "request_1",
@@ -2310,6 +3350,18 @@ describe("chat service", () => {
       ok: false,
       message: "Failed to persist skill input request.",
     });
+    expect(streamEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "output_part",
+          part: expect.objectContaining({
+            type: "diagnostic",
+            severity: "error",
+            message: "Failed to persist skill input request.",
+          }),
+        }),
+      ]),
+    );
     expect(streamEvents.some((event) => event.type === "waiting_for_input")).toBe(
       false,
     );
@@ -2437,6 +3489,111 @@ describe("chat service", () => {
       ]),
     );
     expect(activityEvents.filter((event) => event.state === "waiting_for_input")).toHaveLength(2);
+  });
+
+  it("emits diagnostic output and a failed terminal event when guided input follow-up wait persistence fails", async () => {
+    const initialStreamEvents: ChatStreamEvent[] = [];
+    const responseStreamEvents: ChatStreamEvent[] = [];
+    const baseStore = createChatSessionStore([]);
+    let pendingPersistWrites = 0;
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: {
+        ...baseStore,
+        async appendActivityEvent(sessionId, event) {
+          if (event.pendingSkillInput?.status === "pending") {
+            pendingPersistWrites += 1;
+            if (pendingPersistWrites > 1) {
+              throw new Error("follow-up wait write failed");
+            }
+          }
+          return baseStore.appendActivityEvent(sessionId, event);
+        },
+      },
+      discoverSkills: async () => ({
+        skills: [
+          createSkillRecord({
+            name: "local-file-organizer",
+            manifest: {
+              inputs: [
+                {
+                  name: "targetDir",
+                  label: "Target directory",
+                  type: "path",
+                  required: true,
+                },
+                {
+                  name: "format",
+                  label: "Format",
+                  type: "choice",
+                  required: true,
+                  choices: ["markdown", "html"],
+                },
+              ],
+            },
+          }),
+        ],
+        errors: [],
+      }),
+      createId: createSequentialId("guided_followup_fail"),
+      now: () => new Date("2026-06-23T08:00:00.000Z"),
+    });
+
+    await service.sendMessage(
+      {
+        sessionId: "session_1",
+        requestId: "request_1",
+        message: "organize files",
+        selectedSkillName: "local-file-organizer",
+      },
+      { onStreamEvent: (event) => initialStreamEvents.push(event) },
+    );
+    const inputRequest = initialStreamEvents.find(
+      (event): event is Extract<ChatStreamEvent, { type: "waiting_for_input" }> =>
+        event.type === "waiting_for_input",
+    )?.inputRequest;
+
+    const result = await service.respondSkillInput(
+      {
+        inputRequestId: inputRequest?.id ?? "",
+        values: { targetDir: "/workspace/project/docs" },
+      },
+      {
+        onStreamEvent(event) {
+          responseStreamEvents.push(event);
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      message: "Failed to persist skill input request.",
+    });
+    expect(responseStreamEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "output_part",
+          part: expect.objectContaining({
+            type: "diagnostic",
+            severity: "error",
+            message: "Failed to persist skill input request.",
+          }),
+        }),
+        expect.objectContaining({
+          type: "failed",
+          message: "Failed to persist skill input request.",
+        }),
+      ]),
+    );
+    expect(responseStreamEvents.some((event) => event.type === "waiting_for_input")).toBe(
+      false,
+    );
   });
 
   it("does not return an invalid guided input response before the next pending request is persisted", async () => {
@@ -3688,6 +4845,7 @@ describe("chat service", () => {
   it("cancels an active chat request through the runtime abort signal", async () => {
     const controller = new AbortController();
     const statusEvents: ChatTaskStatusEvent[] = [];
+    const streamEvents: ChatStreamEvent[] = [];
     let observedAbort = false;
     const service = createChatService({
       chatClient: {
@@ -3718,6 +4876,7 @@ describe("chat service", () => {
       {
         signal: controller.signal,
         onStatusEvent: (event) => statusEvents.push(event),
+        onStreamEvent: (event) => streamEvents.push(event),
       },
     );
 
@@ -3732,6 +4891,18 @@ describe("chat service", () => {
           sessionId: "chat_cancel",
           state: "canceled",
           message: "任务已中断",
+        }),
+      ]),
+    );
+    expect(streamEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "output_part",
+          part: expect.objectContaining({
+            type: "diagnostic",
+            severity: "warning",
+            message: "已中断任务。",
+          }),
         }),
       ]),
     );
@@ -3898,12 +5069,19 @@ describe("chat service", () => {
         role: "user",
         content: "每天 9 点整理文件",
       },
-      {
+      expect.objectContaining({
         sessionId: "persisted_session",
         role: "assistant",
         content:
           "我可以创建这个定时任务。你想让我整理哪个文件夹？例如：下载、桌面、文档或项目。",
-      },
+        outputParts: expect.arrayContaining([
+          expect.objectContaining({
+            type: "text",
+            text:
+              "我可以创建这个定时任务。你想让我整理哪个文件夹？例如：下载、桌面、文档或项目。",
+          }),
+        ]),
+      }),
     ]);
   });
 });
@@ -4002,10 +5180,16 @@ function createChatSessionStore(
     async appendMessage(input: AppendChatMessageInput) {
       messages.push(input);
       const sessionId = input.sessionId ?? "persisted_session";
+      const inputWithOutputParts = input as AppendChatMessageInput & {
+        outputParts?: ChatSessionRecord["messages"][number]["outputParts"];
+      };
       const message = {
         id: `message_${messages.length}`,
         role: input.role,
         content: input.content,
+        ...(inputWithOutputParts.outputParts
+          ? { outputParts: inputWithOutputParts.outputParts }
+          : {}),
         createdAt: "2026-06-06T08:00:00.000Z",
       } as const;
       const session = buildSession(sessionId, input.content, {
@@ -4078,6 +5262,8 @@ function createGoalService(options: {
       sessionId: string;
       originMessageId: string | null;
       description: string;
+      selectedSkill?: SkillRecord;
+      selectedSkillInputValues?: Record<string, string | number | boolean>;
     }): Promise<ChatSessionGoalSummary> {
       options.goalCreates?.push(input);
       goalDescriptions.set("goal_release", input.description);

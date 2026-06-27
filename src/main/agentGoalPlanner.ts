@@ -6,6 +6,7 @@ import {
   validateGoalDraft,
   type AcceptanceCheck,
   type AcceptanceCheckKind,
+  type GoalSelectedSkill,
   type Goal,
   type Milestone,
   type SuccessCriterion,
@@ -25,6 +26,7 @@ type AgentGoalPlanOptions = {
   availableTools: string[];
   availableSkills: string[];
   taskContract?: AgentTaskContract;
+  selectedSkill?: GoalSelectedSkill;
 };
 
 export type AgentGoalPlanner = {
@@ -283,6 +285,7 @@ function buildPlanPrompt(
     successCriteria: SuccessCriterion[];
     availableTools: string[];
     availableSkills: string[];
+    selectedSkill?: GoalSelectedSkill;
   },
 ): string {
   const taskFrame = classifyTaskFrame(goalDescription);
@@ -298,6 +301,7 @@ function buildPlanPrompt(
     "If the recommendedRuntime is quick_action, produce the smallest evidence-bearing milestone and avoid fragmented tool-heavy plans.",
     "Do not create clarification-only milestones that merely ask the user what they meant. If the user already named a concrete target, execute read-only inspection directly.",
     ...buildDomainToolGuidance(goalDescription, options.availableTools),
+    ...buildSelectedSkillPlanningGuidance(options.selectedSkill),
     "",
     `Goal success criteria: ${JSON.stringify(options.successCriteria)}`,
     `Available tools: ${options.availableTools.join(", ") || "none"}`,
@@ -308,6 +312,24 @@ function buildPlanPrompt(
     "",
     "Every milestone must include at least one success criterion with at least one acceptance check.",
   ].join("\n");
+}
+
+function buildSelectedSkillPlanningGuidance(
+  selectedSkill: GoalSelectedSkill | undefined,
+): string[] {
+  if (!selectedSkill) {
+    return [];
+  }
+
+  return [
+    "",
+    "Selected skill contract:",
+    `Skill: ${selectedSkill.manifest.name} (${selectedSkill.manifest.displayName})`,
+    `Description: ${selectedSkill.manifest.description}`,
+    "The generated milestones must require execution according to this selected skill. Do not treat it as optional.",
+    "Selected skill body:",
+    selectedSkill.body.trim() || "(empty skill body)",
+  ];
 }
 
 function buildDomainToolGuidance(

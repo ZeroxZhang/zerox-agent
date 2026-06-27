@@ -5,6 +5,7 @@ import {
   finalizeChatStreamResult,
 } from "./chatStreamReducer";
 import type { ChatStreamEvent, SkillUserInputRequest } from "../shared/chat";
+import type { ChatOutputPart } from "../shared/chatOutput";
 
 describe("chat stream reducer", () => {
   it("streams answer deltas into one assistant placeholder and finalizes without a duplicate reply", () => {
@@ -155,6 +156,104 @@ describe("chat stream reducer", () => {
 
     expect(state.pendingInputRequest).toBe(inputRequest);
   });
+
+  it("stores live output parts in answer-led order when evidence arrives before text", () => {
+    let state = createChatStreamState([]);
+
+    state = applyChatStreamEvent(
+      state,
+      createStreamEvent({
+        type: "output_part",
+        part: {
+          id: "tool_1",
+          type: "tool_call",
+          toolCallId: "call_1",
+          toolName: "read_file",
+          argsPreview: { path: "notes.md" },
+          createdAt: "2026-06-23T08:00:01.000Z",
+        } satisfies ChatOutputPart,
+      }),
+      activeStream,
+    );
+    state = applyChatStreamEvent(
+      state,
+      createStreamEvent({
+        type: "output_part",
+        part: {
+          id: "tool_result_1",
+          type: "tool_result",
+          toolCallId: "call_1",
+          ok: true,
+          resultPreview: "notes",
+          createdAt: "2026-06-23T08:00:02.000Z",
+        } satisfies ChatOutputPart,
+      }),
+      activeStream,
+    );
+    state = applyChatStreamEvent(
+      state,
+      createStreamEvent({
+        type: "output_part",
+        part: {
+          id: "answer_1",
+          type: "text",
+          text: "Answer first.\nDo not trim.  ",
+          format: "markdown",
+          createdAt: "2026-06-23T08:00:03.000Z",
+        } satisfies ChatOutputPart,
+      }),
+      activeStream,
+    );
+
+    expect(state.messages[0]?.content).toBe("Answer first.\nDo not trim.  ");
+    expect(state.messages[0]?.outputParts?.map((part) => part.type)).toEqual([
+      "text",
+      "tool_call",
+      "tool_result",
+    ]);
+  });
+
+  it("upserts live output parts by id", () => {
+    let state = createChatStreamState([]);
+
+    state = applyChatStreamEvent(
+      state,
+      createStreamEvent({
+        type: "output_part",
+        part: {
+          id: "ledger_1",
+          type: "ledger_event",
+          status: "running",
+          title: "Checking files",
+        } satisfies ChatOutputPart,
+      }),
+      activeStream,
+    );
+    state = applyChatStreamEvent(
+      state,
+      createStreamEvent({
+        type: "output_part",
+        part: {
+          id: "ledger_1",
+          type: "ledger_event",
+          status: "completed",
+          title: "Checked files",
+          detail: "2 files read",
+        } satisfies ChatOutputPart,
+      }),
+      activeStream,
+    );
+
+    expect(state.messages[0]?.outputParts).toEqual([
+      {
+        id: "ledger_1",
+        type: "ledger_event",
+        status: "completed",
+        title: "Checked files",
+        detail: "2 files read",
+      },
+    ]);
+  });
 });
 
 const activeStream = {
@@ -164,15 +263,18 @@ const activeStream = {
 
 function createStreamEvent(
   event:
-    | Omit<Extract<ChatStreamEvent, { type: "answer_delta" }>, "sessionId" | "requestId" | "createdAt">
-    | Omit<Extract<ChatStreamEvent, { type: "thinking_delta" }>, "sessionId" | "requestId" | "createdAt">
-    | Omit<Extract<ChatStreamEvent, { type: "tool_call_preview" }>, "sessionId" | "requestId" | "createdAt">
-    | Omit<Extract<ChatStreamEvent, { type: "waiting_for_input" }>, "sessionId" | "requestId" | "createdAt">,
+    | Omit<Extract<ChatStreamEvent, { type: "answer_delta" }>, "sessionId" | "requestId" | "createdAt" | "sequence" | "turnId">
+    | Omit<Extract<ChatStreamEvent, { type: "thinking_delta" }>, "sessionId" | "requestId" | "createdAt" | "sequence" | "turnId">
+    | Omit<Extract<ChatStreamEvent, { type: "tool_call_preview" }>, "sessionId" | "requestId" | "createdAt" | "sequence" | "turnId">
+    | Omit<Extract<ChatStreamEvent, { type: "output_part" }>, "sessionId" | "requestId" | "createdAt" | "sequence" | "turnId">
+    | Omit<Extract<ChatStreamEvent, { type: "waiting_for_input" }>, "sessionId" | "requestId" | "createdAt" | "sequence" | "turnId">,
 ): ChatStreamEvent {
   return {
     ...event,
     sessionId: "session_1",
     requestId: "request_1",
+    sequence: 1,
+    turnId: "turn-request_1",
     createdAt: "2026-06-23T08:00:00.000Z",
   } as ChatStreamEvent;
 }

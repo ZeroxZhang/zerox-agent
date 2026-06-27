@@ -9,7 +9,12 @@ export type MarkdownBlock =
   | { type: "paragraph"; text: string }
   | { type: "unorderedList"; items: string[] }
   | { type: "orderedList"; items: string[] }
-  | { type: "code"; language?: string; code: string };
+  | { type: "taskList"; items: Array<{ text: string; checked: boolean }> }
+  | { type: "code"; language?: string; code: string }
+  | { type: "table"; columns: string[]; rows: string[][]; caption?: string }
+  | { type: "blockquote"; text: string };
+
+export type ChatMarkdownBlock = MarkdownBlock;
 
 export function parseMarkdownBlocks(markdown: string): MarkdownBlock[] {
   const lines = markdown.replace(/\r\n/g, "\n").split("\n");
@@ -50,6 +55,39 @@ export function parseMarkdownBlocks(markdown: string): MarkdownBlock[] {
         text: headingMatch[2].trim(),
       });
       index += 1;
+      continue;
+    }
+
+    const table = parseTable(lines, index);
+    if (table) {
+      blocks.push(table.block);
+      index = table.nextIndex;
+      continue;
+    }
+
+    if (trimmed.startsWith(">")) {
+      const quoteLines: string[] = [];
+      while (index < lines.length && lines[index].trim().startsWith(">")) {
+        quoteLines.push(lines[index].trim().replace(/^>\s?/, ""));
+        index += 1;
+      }
+      blocks.push({ type: "blockquote", text: quoteLines.join(" ").trim() });
+      continue;
+    }
+
+    if (isTaskListLine(trimmed)) {
+      const items: Array<{ text: string; checked: boolean }> = [];
+      while (index < lines.length && isTaskListLine(lines[index].trim())) {
+        const itemMatch = /^[-*]\s+\[([ xX])\]\s+(.*)$/.exec(lines[index].trim());
+        if (itemMatch) {
+          items.push({
+            checked: itemMatch[1].toLowerCase() === "x",
+            text: itemMatch[2].trim(),
+          });
+        }
+        index += 1;
+      }
+      blocks.push({ type: "taskList", items });
       continue;
     }
 
@@ -126,10 +164,62 @@ export function parseInlineMarkdown(text: string): MarkdownInlineSegment[] {
   return segments.length ? segments : [{ type: "text", text }];
 }
 
+export const parseChatMarkdown = parseMarkdownBlocks;
+
+function parseTable(
+  lines: string[],
+  startIndex: number,
+): { block: MarkdownBlock; nextIndex: number } | undefined {
+  const header = lines[startIndex];
+  const divider = lines[startIndex + 1];
+  if (!isTableRow(header) || !isTableDivider(divider)) {
+    return undefined;
+  }
+
+  const columns = splitTableRow(header);
+  const rows: string[][] = [];
+  let index = startIndex + 2;
+  while (index < lines.length && isTableRow(lines[index])) {
+    rows.push(splitTableRow(lines[index]));
+    index += 1;
+  }
+
+  return {
+    block: { type: "table", columns, rows },
+    nextIndex: index,
+  };
+}
+
+function splitTableRow(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => cell.trim());
+}
+
+function isTableRow(line: string | undefined): line is string {
+  return Boolean(line?.trim().includes("|"));
+}
+
+function isTableDivider(line: string | undefined): boolean {
+  if (!isTableRow(line)) {
+    return false;
+  }
+  return splitTableRow(line).every((cell) => /^:?-{3,}:?$/.test(cell));
+}
+
+function isTaskListLine(trimmedLine: string): boolean {
+  return /^[-*]\s+\[[ xX]\]\s+/.test(trimmedLine);
+}
+
 function isBlockStart(trimmedLine: string): boolean {
   return (
     trimmedLine.startsWith("```") ||
     /^(#{1,3})\s+/.test(trimmedLine) ||
+    trimmedLine.startsWith(">") ||
+    isTaskListLine(trimmedLine) ||
     /^[-*]\s+/.test(trimmedLine) ||
     /^\d+\.\s+/.test(trimmedLine)
   );

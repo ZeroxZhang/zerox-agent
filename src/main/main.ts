@@ -26,8 +26,11 @@ import type { ResolveToolApprovalInput } from "../shared/toolApproval";
 import { KERNEL_IPC, type PermissionRule } from "../shared/kernelContract";
 import {
   getSmokeModeOptions,
+  getSmokeRendererPerformanceMessage,
+  getSmokeRendererPerformanceScript,
   getSmokeRendererCheckScript,
   getSmokeRendererFailureMessage,
+  isSmokeRendererPerformanceResult,
   isSmokeRendererCheckResult,
 } from "./smokeMode";
 import { setPromptBaseDir, loadModelPromptFile } from "./promptFileLoader";
@@ -215,9 +218,16 @@ function attachSmokeModeLifecycle(windowInstance: BrowserWindow) {
   timeout.unref?.();
 
   windowInstance.webContents.once("did-finish-load", () => {
+    const script = smokeMode.performanceEnabled
+      ? getSmokeRendererPerformanceScript(smokeMode)
+      : getSmokeRendererCheckScript(smokeMode);
     void windowInstance.webContents
-      .executeJavaScript(getSmokeRendererCheckScript(smokeMode), true)
+      .executeJavaScript(script, true)
       .then((result: unknown) => {
+        if (isSmokeRendererPerformanceResult(result)) {
+          exit(result.ok ? 0 : 1, getSmokeRendererPerformanceMessage(result));
+          return;
+        }
         if (isSmokeRendererCheckResult(result) && result.ok) {
           exit(0, "Smoke startup passed: renderer rendered agent chat UI.");
           return;

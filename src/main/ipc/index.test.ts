@@ -51,6 +51,9 @@ describe("chat IPC handlers", () => {
     expect(openProjectSource).toContain("dialog.showOpenDialog");
     expect(openProjectSource).toContain('"openDirectory"');
     expect(openProjectSource).toContain("createProjectWorkspace");
+    expect(openProjectSource).toContain('mode === "create"');
+    expect(openProjectSource).toContain("新建工作区");
+    expect(openProjectSource).toContain("promptToCreate");
     expect(openProjectSource).toContain("return null");
   });
 

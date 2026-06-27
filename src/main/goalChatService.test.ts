@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Goal, Milestone } from "../shared/agentGoal";
 import type { GoalReviewDecision } from "../shared/agentGoalReview";
+import type { SkillRecord } from "../shared/skills";
 import { createGoalChatService } from "./goalChatService";
 import type { ProgressLedgerEvent } from "./agentGoalStore";
 
@@ -163,6 +164,63 @@ describe("goal chat service", () => {
     });
 
     expect(plannedTools).toEqual(["chrome_bookmarks_read", "file_read"]);
+  });
+
+  it("stores the selected skill snapshot and passes it into goal planning", async () => {
+    const savedGoals: Goal[] = [];
+    const ledgerEvents: ProgressLedgerEvent[] = [];
+    let plannedSkillName: string | undefined;
+    let plannedSkillBody: string | undefined;
+    const service = createGoalChatService({
+      controller: createController(),
+      goalStore: createGoalStore({ savedGoals, ledgerEvents }),
+      planner: {
+        async plan(description, planOptions) {
+          plannedSkillName = planOptions.selectedSkill?.manifest.name;
+          plannedSkillBody = planOptions.selectedSkill?.body;
+          return [
+            {
+              id: "milestone_skill_report",
+              description,
+              dependsOn: [],
+              successCriteria: planOptions.successCriteria,
+              state: "ready",
+              runIds: [],
+              attempts: 0,
+            },
+          ];
+        },
+        async replan() {
+          throw new Error("Unexpected replan.");
+        },
+      },
+      getAvailableTools: () => ["shell_exec"],
+      createId: () => "goal_skill_report",
+      now: () => "2026-06-12T08:00:00.000Z",
+    });
+
+    await service.createFromChat({
+      sessionId: "chat_1",
+      originMessageId: "message_1",
+      description: "生成一份可阅读 HTML 报告",
+      selectedSkill: createSkillRecord({
+        name: "onepager",
+        body: "Onepager 技能流程：必须先做内容架构分析。",
+      }),
+    });
+
+    expect(plannedSkillName).toBe("onepager");
+    expect(plannedSkillBody).toBe("Onepager 技能流程：必须先做内容架构分析。");
+    expect(savedGoals[0]).toMatchObject({
+      id: "goal_skill_report",
+      selectedSkill: {
+        body: "Onepager 技能流程：必须先做内容架构分析。",
+        manifest: {
+          name: "onepager",
+          displayName: "onepager",
+        },
+      },
+    });
   });
 
   it("saves and passes task contracts for deterministic bookmark goals", async () => {
@@ -599,6 +657,38 @@ function createGoalStore(options: {
     },
     async appendLedger(_goalId: string, event: ProgressLedgerEvent) {
       options.ledgerEvents?.push(event);
+    },
+  };
+}
+
+function createSkillRecord(
+  partial: Partial<SkillRecord> & Pick<SkillRecord["manifest"], "name"> & { body?: string },
+): SkillRecord {
+  const name = partial.name;
+  return {
+    rootDir: `/tmp/skills/${name}`,
+    skillFile: `/tmp/skills/${name}/SKILL.md`,
+    body: partial.body ?? "Skill body",
+    manifest: {
+      name,
+      displayName: partial.manifest?.displayName ?? name,
+      description: partial.manifest?.description ?? `${name} description`,
+      version: partial.manifest?.version ?? "0.1.0",
+      execution: partial.manifest?.execution ?? {
+        mode: "agent",
+        entrypoint: null,
+      },
+      inputs: partial.manifest?.inputs ?? [],
+      permissions: partial.manifest?.permissions ?? {
+        files: { read: [], write: [] },
+        shell: { commands: [] },
+        web: { search: false, fetchDomains: [] },
+        memory: { read: false, write: false },
+      },
+      ...(partial.manifest?.planning ? { planning: partial.manifest.planning } : {}),
+      ...(partial.manifest?.tools ? { tools: partial.manifest.tools } : {}),
+      ...(partial.manifest?.mcpServers ? { mcpServers: partial.manifest.mcpServers } : {}),
+      ...(partial.manifest?.dependencies ? { dependencies: partial.manifest.dependencies } : {}),
     },
   };
 }
