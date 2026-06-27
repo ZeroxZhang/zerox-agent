@@ -3,7 +3,7 @@ import { toNormalized, fromNormalized } from "./normalize";
 import { buildCachePrefix, serializeCachePrefix } from "./cachePrefix";
 import { createProvider } from "./providerFactory";
 import { createProviderChatClient, createSettingsBackedChatClient } from "./providerChatClient";
-import { createOpenAICompatibleProvider } from "./openAICompatibleProvider";
+import { createOpenAICompatibleProvider } from "./openAiCompatibleProvider";
 import type { ChatMessage, ChatCompletionRequest } from "../openAiCompatibleClient";
 import type { CompleteRequest, LLMProvider, NormalizedMessage, StreamEvent } from "./provider";
 import type { PublicModelSettings } from "../../shared/modelSettings";
