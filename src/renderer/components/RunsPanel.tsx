@@ -364,14 +364,14 @@ export function RunsPanel() {
     if (!window.buildingAgent) {
       setStatus({
         kind: "idle",
-        message: "浏览器预览模式无法生成真实评测候选。",
+        message: "浏览器预览模式无法生成真实回归样例。",
       });
       return;
     }
 
     setStatus({
       kind: "loading",
-      message: `正在生成评测候选：${selectedRun.taskName}`,
+      message: `正在生成回归样例：${selectedRun.taskName}`,
     });
     try {
       const result = await window.buildingAgent.generateEvalCandidateForRun(
@@ -403,14 +403,13 @@ export function RunsPanel() {
       setStatus({
         kind: "idle",
         message: result.existing
-          ? "已加载这条运行的现有评测候选。"
-          : "评测候选已生成，等待审核。",
+          ? "已加载这次任务的现有回归样例。"
+          : "回归样例已生成，等待审核。",
       });
     } catch (error) {
       setStatus({
         kind: "error",
-        message:
-          error instanceof Error ? error.message : "无法生成评测候选。",
+        message: error instanceof Error ? error.message : "无法生成回归样例。",
       });
     }
   }
@@ -930,21 +929,21 @@ function RunInspector(props: {
   );
 
   return (
-    <aside className="run-inspector" aria-label="运行检查器">
+    <aside className="run-inspector" aria-label="任务详情">
       <div className="inspector-section">
-        <span className="inspector-label">处理建议</span>
+        <span className="inspector-label">下一步</span>
         {props.guidance ? (
           <article className={`guidance-card is-${props.guidance.tone}`}>
             <strong>{props.guidance.title}</strong>
             <p>{props.guidance.action}</p>
           </article>
         ) : (
-          <p>还没有选中运行。</p>
+          <p>还没有选中任务。</p>
         )}
       </div>
 
       <div className="inspector-section">
-        <span className="inspector-label">选中事件</span>
+        <span className="inspector-label">步骤详情</span>
         {props.event ? (
           <>
             <h3>{props.event.title}</h3>
@@ -967,25 +966,29 @@ function RunInspector(props: {
             </pre>
           </>
         ) : (
-          <p>选择一个事件后，可以查看 payload 详情。</p>
+          <p>选择一个步骤后，可以查看原始详情。</p>
         )}
       </div>
 
-      <div className="inspector-section" aria-label="Run Graph">
-        <span className="inspector-label">Run Graph</span>
+      <div
+        className="inspector-section"
+        aria-label="证据链"
+        data-technical-surface="Run Graph"
+      >
+        <span className="inspector-label">证据链</span>
         {runGraph ? (
           <>
             <dl className="run-graph-summary">
               <div>
-                <dt>节点</dt>
+                <dt>证据点</dt>
                 <dd>{runGraph.nodes.length}</dd>
               </div>
               <div>
-                <dt>边</dt>
+                <dt>关联</dt>
                 <dd>{runGraph.edges.length}</dd>
               </div>
               <div>
-                <dt>Gate</dt>
+                <dt>审核点</dt>
                 <dd>{runGraph.gates.length}</dd>
               </div>
               <div>
@@ -1010,16 +1013,20 @@ function RunInspector(props: {
                 ))}
               </div>
             ) : (
-              <p>尚未记录 Gate。</p>
+              <p>尚未记录审核点。</p>
             )}
           </>
         ) : (
-          <p>选择一条运行后，可以查看证据合成图。</p>
+          <p>选择一条任务记录后，可以查看证据链。</p>
         )}
       </div>
 
-      <div className="inspector-section" aria-label="Kernel Events">
-        <span className="inspector-label">Kernel Events</span>
+      <div
+        className="inspector-section"
+        aria-label="高级日志"
+        data-technical-surface="Kernel Events"
+      >
+        <span className="inspector-label">高级日志</span>
         {kernelTimelineCards.length ? (
           <>
             {kernelRunView ? (
@@ -1029,7 +1036,7 @@ function RunInspector(props: {
                   <dd>{translateRunStatus(kernelRunView.status)}</dd>
                 </div>
                 <div>
-                  <dt>Turn</dt>
+                  <dt>轮次</dt>
                   <dd>
                     {kernelRunView.turn}/{kernelRunView.maxTurns || "?"}
                   </dd>
@@ -1055,7 +1062,7 @@ function RunInspector(props: {
             </div>
           </>
         ) : (
-          <p>No kernel events recorded for this run.</p>
+          <p>这次任务没有记录高级日志。</p>
         )}
       </div>
 
@@ -1114,8 +1121,12 @@ function RunInspector(props: {
       ) : null}
 
       {props.run ? (
-        <div className="inspector-section" aria-label="Eval Candidate">
-          <span className="inspector-label">Eval Candidate</span>
+        <div
+          className="inspector-section"
+          aria-label="回归样例"
+          data-technical-surface="Eval Candidate"
+        >
+          <span className="inspector-label">回归样例</span>
           {props.evalCandidate ? (
             <dl className="inspector-dl">
               <div>
@@ -1123,31 +1134,35 @@ function RunInspector(props: {
                 <dd>{translateEvalCandidateStatus(props.evalCandidate.status)}</dd>
               </div>
               <div>
-                <dt>Fixture</dt>
+                <dt>样例</dt>
                 <dd>{props.evalCandidate.fixture.id}</dd>
               </div>
             </dl>
           ) : props.canGenerateEvalCandidate ? (
             <>
-              <p>这条运行还没有评测候选。</p>
+              <p>这次任务还没有回归样例。</p>
               <button
                 className="primary-action"
                 disabled={props.isBusy}
                 onClick={() => props.onGenerateEvalCandidate()}
                 type="button"
               >
-                生成评测候选
+                生成回归样例
               </button>
             </>
           ) : (
-            <p>运行结束后可生成评测候选。</p>
+            <p>任务结束后可生成回归样例。</p>
           )}
         </div>
       ) : null}
 
       {handoffCards.length ? (
-        <div className="inspector-section" aria-label="Handoff Review">
-          <span className="inspector-label">Handoff Review</span>
+        <div
+          className="inspector-section"
+          aria-label="协作审核"
+          data-technical-surface="Handoff Review"
+        >
+          <span className="inspector-label">协作审核</span>
           {handoffCards.map((card) => (
             <article
               className={`handoff-review-card is-${card.status}`}
