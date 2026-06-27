@@ -245,6 +245,38 @@ describe("chat session store", () => {
     ]);
   });
 
+  it("bounds session summaries used by the sidebar list", async () => {
+    const store = createChatSessionStore({
+      configDir,
+      createId: createSequentialId("chat"),
+      now: createSteppedClock("2026-06-20T08:00:00.000Z"),
+    });
+
+    const first = await store.appendMessage({
+      role: "user",
+      content: "分析项目",
+    });
+    const longAssistantSummary = [
+      "🔧 使用了 70 个工具",
+      "项目分析报告已生成完毕，保存在 /Volumes/Out/codex_projects/building-agent/report.md。",
+      "以下是非常长的正文摘要。",
+      "x".repeat(600),
+    ].join("\n\n");
+    await store.appendMessage({
+      sessionId: first.session.id,
+      role: "assistant",
+      content: longAssistantSummary,
+    });
+
+    const [listedSession] = await store.list();
+    const storedSession = await store.get(first.session.id);
+
+    expect(listedSession.summary).toHaveLength(160);
+    expect(listedSession.summary).toMatch(/\.\.\.$/);
+    expect(listedSession.summary).not.toContain("\n");
+    expect(storedSession?.summary).toBe(listedSession.summary);
+  });
+
   it("persists rebuildable chat activity snapshots with a bounded event history", async () => {
     const store = createChatSessionStore({
       configDir,

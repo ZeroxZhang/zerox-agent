@@ -37,6 +37,7 @@ export function buildGoalContinuityCheckpoint(
     "",
     "## §3 Directives",
     "- local-first; permissioned tools; evidence-backed acceptance.",
+    ...selectedSkillDirective(input.goal),
     "Success criteria:",
     ...input.goal.successCriteria.map(
       (criterion) =>
@@ -86,6 +87,7 @@ function buildCompactGoalContinuityCheckpoint(
     "## §2 Next concrete action",
     nextConcreteAction(goal),
     "## §3 Directives",
+    ...selectedSkillDirective(goal),
     `Success criteria: ${goal.successCriteria.map((criterion) => criterion.description).join("; ") || "none"}`,
     "## §4 Task tree",
     compactTaskTree(goal.milestones),
@@ -104,6 +106,16 @@ function buildCompactGoalContinuityCheckpoint(
     "## §11 Open notes",
     `accepted=${goal.milestones.filter((milestone) => milestone.state === "accepted").length}/${goal.milestones.length}`,
   ].join("\n");
+}
+
+function selectedSkillDirective(goal: Goal): string[] {
+  if (!goal.selectedSkill) {
+    return [];
+  }
+
+  return [
+    `- selectedSkill=${goal.selectedSkill.manifest.name}; must follow selected skill body and output requirements.`,
+  ];
 }
 
 function nextConcreteAction(goal: Goal): string {

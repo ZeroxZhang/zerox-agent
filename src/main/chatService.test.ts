@@ -608,6 +608,66 @@ describe("chat service", () => {
     expect(completeCalled).toBe(false);
   });
 
+  it("keeps explicit slash goal routing when an agent skill is selected", async () => {
+    let completeCalled = false;
+    const goalCreates: unknown[] = [];
+    const resumes: string[] = [];
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          completeCalled = true;
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([]),
+      goalService: createGoalService({ goalCreates, resumes }),
+      discoverSkills: async () => ({
+        skills: [
+          createSkillRecord({
+            name: "onepager",
+            body: "Onepager 技能流程：必须先做内容架构分析。",
+          }),
+        ],
+        errors: [],
+      }),
+      createId: () => "chat_goal_skill",
+      now: () => new Date("2026-06-12T08:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage({
+      message: "/目标 给这个项目生成一份可阅读 HTML 报告",
+      selectedSkillName: "onepager",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      activeGoal: {
+        id: "goal_release",
+        description: "给这个项目生成一份可阅读 HTML 报告",
+        status: "executing",
+      },
+      selectedSkill: {
+        name: "onepager",
+        displayName: "onepager",
+      },
+    });
+    expect(goalCreates).toEqual([
+      expect.objectContaining({
+        sessionId: "persisted_session",
+        originMessageId: "message_1",
+        description: "给这个项目生成一份可阅读 HTML 报告",
+        selectedSkill: expect.objectContaining({
+          body: "Onepager 技能流程：必须先做内容架构分析。",
+          manifest: expect.objectContaining({ name: "onepager" }),
+        }),
+      }),
+    ]);
+    expect(resumes).toEqual(["goal_release"]);
+    expect(completeCalled).toBe(false);
+  });
+
   it("continues the active session goal before ordinary chat continuation", async () => {
     let completeCalled = false;
     const resumes: string[] = [];
@@ -5202,6 +5262,8 @@ function createGoalService(options: {
       sessionId: string;
       originMessageId: string | null;
       description: string;
+      selectedSkill?: SkillRecord;
+      selectedSkillInputValues?: Record<string, string | number | boolean>;
     }): Promise<ChatSessionGoalSummary> {
       options.goalCreates?.push(input);
       goalDescriptions.set("goal_release", input.description);

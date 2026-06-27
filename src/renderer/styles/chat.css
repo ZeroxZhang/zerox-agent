@@ -306,11 +306,19 @@
 }
 
 .markdown-message {
-  display: grid;
-  gap: 12px;
+  display: block;
   min-width: 0;
   color: var(--text-primary);
   overflow-wrap: anywhere;
+}
+
+.markdown-message > * + * {
+  margin-top: 12px;
+}
+
+.markdown-plain-preview {
+  margin: 0;
+  white-space: pre-wrap;
 }
 
 .markdown-block {
@@ -447,10 +455,7 @@
   --chat-output-font-size: var(--text-base);
   --chat-output-heading-size: var(--text-md);
   --chat-output-emphasis-bg: rgba(37, 99, 235, 0.08);
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  align-items: start;
-  gap: var(--space-3);
+  display: block;
   width: 100%;
   max-width: 100%;
   min-width: 0;
@@ -466,21 +471,26 @@
 }
 
 .chat-answer-body {
-  display: grid;
-  gap: var(--space-3);
+  display: block;
   padding-left: 0;
   border-left: 0;
 }
 
 .chat-output-part-list {
-  display: grid;
-  gap: var(--space-3);
+  display: block;
+}
+
+.chat-output-part + .chat-output-part {
+  margin-top: var(--space-3);
 }
 
 .chat-output-part {
-  display: grid;
-  gap: var(--space-2);
+  display: block;
   overflow-wrap: anywhere;
+}
+
+.chat-output-part > * + * {
+  margin-top: var(--space-2);
 }
 
 .chat-output-text {

@@ -167,11 +167,14 @@ export function createGoalRuntimeEngine(options: {
       const startedAt = now();
       const runId = createId();
       const taskId = `goal:${goal.id}`;
-      const runContext = withGoalRunIdentity(
-        await resolveRunContext(goal),
-        runId,
-        goal.id,
-        milestone.id,
+      const runContext = extendRunContextForSelectedSkill(
+        withGoalRunIdentity(
+          await resolveRunContext(goal),
+          runId,
+          goal.id,
+          milestone.id,
+        ),
+        goal,
       );
       const payload = {
         goalId: goal.id,
@@ -620,6 +623,62 @@ function withGoalRunIdentity(
   };
 }
 
+function extendRunContextForSelectedSkill(
+  runContext: AgentRunContext,
+  goal: Goal,
+): AgentRunContext {
+  const skill = goal.selectedSkill;
+  if (!skill) {
+    return runContext;
+  }
+
+  return {
+    ...runContext,
+    sandbox: {
+      ...runContext.sandbox,
+      extraReadRoots: uniqueStrings([
+        ...runContext.sandbox.extraReadRoots,
+        skill.rootDir,
+        ...skill.manifest.permissions.files.read.map((permissionPath) =>
+          resolveSelectedSkillPermissionPath(
+            permissionPath,
+            skill,
+            goal.selectedSkillInputValues,
+          ),
+        ),
+      ]),
+      extraWriteRoots: uniqueStrings([
+        ...runContext.sandbox.extraWriteRoots,
+        ...skill.manifest.permissions.files.write.map((permissionPath) =>
+          resolveSelectedSkillPermissionPath(
+            permissionPath,
+            skill,
+            goal.selectedSkillInputValues,
+          ),
+        ),
+      ]),
+    },
+  };
+}
+
+function resolveSelectedSkillPermissionPath(
+  permissionPath: string,
+  skill: NonNullable<Goal["selectedSkill"]>,
+  values?: Goal["selectedSkillInputValues"],
+): string {
+  const withSkillPaths = permissionPath
+    .replaceAll("{{skillRoot}}", skill.rootDir)
+    .replaceAll("{{skillDir}}", skill.rootDir);
+  return withSkillPaths.replace(/\{\{([a-zA-Z][a-zA-Z0-9_]*)\}\}/g, (match, name) => {
+    const value = values?.[name];
+    return value === undefined ? match : String(value);
+  });
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))];
+}
+
 function extractArtifactEvidence(
   result: Awaited<ReturnType<AgentToolExecutor["execute"]>>,
 ): {
@@ -724,6 +783,7 @@ function buildGoalMilestonePermissionPolicy(
   goal: Goal,
   runContext: AgentRunContext,
 ): TaskPermissionPolicy {
+  const selectedSkill = goal.selectedSkill;
   const readRoots = [
     runContext.workspaceRoot,
     ...runContext.sandbox.extraReadRoots,
@@ -739,15 +799,15 @@ function buildGoalMilestonePermissionPolicy(
 
   return {
     files: {
-      read: readRoots,
-      write: writeRoots,
+      read: uniqueStrings(readRoots),
+      write: uniqueStrings(writeRoots),
     },
     web: {
       search: runContext.sandbox.network !== "none",
-      fetchDomains: [],
+      fetchDomains: selectedSkill?.manifest.permissions.web.fetchDomains ?? [],
     },
     shell: {
-      commands: [
+      commands: uniqueStrings([
         "npm test",
         "npm test -- *",
         "npm run build",
@@ -759,12 +819,33 @@ function buildGoalMilestonePermissionPolicy(
         "git status",
         "git diff",
         "git diff -- *",
-      ],
+        ...(selectedSkill?.manifest.permissions.shell.commands ?? []),
+      ]),
     },
     memory: {
       read: true,
       write: false,
     },
+    ...(selectedSkill
+      ? {
+          tools: {
+            allowedNames: uniqueStrings([
+              "skill_resource_list",
+              "skill_load",
+              ...(selectedSkill.manifest.tools?.map((tool) => tool.name) ?? []),
+            ]),
+            allowedSkillNames: [selectedSkill.manifest.name],
+            allowedSources: [
+              ...(selectedSkill.manifest.tools?.length
+                ? [`skill:${selectedSkill.manifest.name}`]
+                : []),
+              ...(selectedSkill.manifest.mcpServers?.map(
+                (server) => `mcp:${selectedSkill.manifest.name}:${server.name}`,
+              ) ?? []),
+            ],
+          },
+        }
+      : {}),
   };
 }
 
@@ -805,10 +886,31 @@ function buildMilestoneInstruction(
     "",
     "本里程碑的验收标准如下，你必须确保每一项验收检查最终通过：",
     ...criteriaLines,
+    ...buildSelectedSkillExecutionContract(goal),
     ...artifactContractLines,
     "",
     "请执行这个里程碑。优先产出可追溯证据和阶段性结论。如果验收标准涉及文件路径，请准确创建对应文件。",
   ].join("\n");
+}
+
+function buildSelectedSkillExecutionContract(goal: Goal): string[] {
+  const skill = goal.selectedSkill;
+  if (!skill) {
+    return [];
+  }
+
+  return [
+    "",
+    "Selected skill execution contract:",
+    `Skill: ${skill.manifest.name} (${skill.manifest.displayName})`,
+    `Description: ${skill.manifest.description}`,
+    `Skill file: ${skill.skillFile}`,
+    "你必须按这个 selected skill 的正文执行；不得把技能正文当作可选参考，也不得在最终交付前跳过技能要求的验证或输出格式。",
+    "Selected skill body:",
+    "```markdown",
+    skill.body.trim() || "(技能正文为空)",
+    "```",
+  ];
 }
 
 function buildArtifactEvidenceContract(

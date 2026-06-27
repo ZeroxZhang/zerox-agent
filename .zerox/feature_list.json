@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-06-26T10:15:00.000Z",
+  "updatedAt": "2026-06-27T12:08:00.000+08:00",
   "features": [
     {
       "id": "P0-repo-local-harness",
@@ -1859,6 +1859,94 @@
         "npm run harness:check",
         "git diff --check",
         "rendered frontend QA for desktop and narrow chat output states"
+      ]
+    },
+    {
+      "id": "P24-v2.9.2-goal-skill-scroll-hotfix",
+      "priority": 54,
+      "status": "done",
+      "title": "v2.9.2 Goal selected-skill routing and long-task chat stability hotfix",
+      "files": [
+        "src/shared/agentGoal.ts",
+        "src/shared/agentGoalContinuity.ts",
+        "src/main/chatService.ts",
+        "src/main/goalChatService.ts",
+        "src/main/agentGoalPlanner.ts",
+        "src/main/goalRuntimeEngine.ts",
+        "src/main/chatSessionStore.ts",
+        "src/main/container.ts",
+        "src/main/smokeMode.ts",
+        "src/shared/chatSessionProjection.ts",
+        "src/renderer/components/AgentChatPanel.tsx",
+        "src/renderer/components/chat/AnswerBlock.tsx",
+        "src/renderer/components/chat/OutputPartRenderer.tsx",
+        "src/renderer/chatMarkdownPreview.ts",
+        "src/renderer/App.tsx",
+        "src/main/chatService.test.ts",
+        "src/main/goalChatService.test.ts",
+        "src/main/goalRuntimeEngine.test.ts",
+        "src/main/container.test.ts",
+        "src/main/chatSessionStore.test.ts",
+        "src/main/smokeMode.test.ts",
+        "src/shared/chatSessionProjection.test.ts",
+        "src/renderer/chatMarkdownPreview.test.ts",
+        "src/renderer/materialDesign.test.ts",
+        "src/renderer/styles/chat.css",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md"
+      ],
+      "definitionOfDone": [
+        "Slash Goal commands preserve explicitly selected skill contracts instead of falling back to ordinary chat skill execution",
+        "Goal records store selected skill snapshots and planner/runtime prompts carry the mandatory skill body through compaction-safe goal continuity",
+        "Goal runtime authorization policies include selected skill read roots and dynamic skill tool allowlists without bypassing ToolAuthorizationService",
+        "Chat transcript auto-scroll follows new output only while the user remains near the bottom",
+        "Long-running task and goal event lists are bounded in the renderer to avoid post-run input and navigation jank",
+        "Renderer chat-session hydration excludes invisible large tool result payloads while preserving full stored audit records",
+        "Long transcript markdown/output containers avoid nested grid min-content layout that blocks the renderer during session switching",
+        "Production performance smoke expands archived sessions, requires broad real-session switching coverage, and measures long tasks plus composer input latency"
+      ],
+      "verification": [
+        "npm test -- src/main/chatService.test.ts src/main/goalChatService.test.ts src/main/goalRuntimeEngine.test.ts src/shared/agentGoalContinuity.test.ts src/renderer/materialDesign.test.ts",
+        "npm test -- src/main/smokeMode.test.ts src/renderer/chatMarkdownPreview.test.ts src/renderer/materialDesign.test.ts src/main/chatSessionStore.test.ts",
+        "npm run build",
+        "BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_PERF_SMOKE=1 npm run smoke:prod:built",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "git diff --check"
+      ]
+    },
+    {
+      "id": "P25-v2.9.3-goal-performance-release",
+      "priority": 55,
+      "status": "done",
+      "title": "v2.9.3 Goal skill routing and long transcript performance release",
+      "files": [
+        "package.json",
+        "package-lock.json",
+        "README.md",
+        "src/shared/packageScripts.test.ts",
+        "src/shared/readme.test.ts",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md"
+      ],
+      "definitionOfDone": [
+        "package metadata reports version 2.9.3 in package.json and package-lock.json",
+        "README documents v2.9.3 Goal skill routing and long transcript performance hotfix in English and Chinese",
+        "Production performance smoke expands archived sessions, requires broad real-session switching coverage, and checks renderer long tasks",
+        "macOS DMG, ZIP, blockmap, and latest-mac.yml artifacts are regenerated for v2.9.3",
+        "GitHub Release v2.9.3 is published with the regenerated macOS assets",
+        "release branch and v2.9.3 tag are pushed to GitHub"
+      ],
+      "verification": [
+        "npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts src/main/smokeMode.test.ts src/renderer/chatMarkdownPreview.test.ts src/renderer/materialDesign.test.ts src/main/chatSessionStore.test.ts",
+        "npm run verify",
+        "BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_PERF_SMOKE=1 npm run smoke:prod:built",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "npm run dist:mac",
+        "BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v2.9.3' \"release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent\"",
+        "git diff --check"
       ]
     }
   ]

@@ -1,9 +1,13 @@
-import type { ReactNode } from "react";
+import { memo, useMemo, useState, type ReactNode } from "react";
 import {
   parseInlineMarkdown,
   parseMarkdownBlocks,
   type MarkdownBlock,
 } from "../../chatMarkdown";
+import {
+  createMarkdownPreview,
+  shouldRenderMarkdownPreview,
+} from "../../chatMarkdownPreview";
 import type { RenderedOutputPart } from "../../chatOutputModel";
 import { CodeBlockView } from "./CodeBlockView";
 import { CommandOutputView } from "./CommandOutputView";
@@ -15,7 +19,9 @@ type OutputPartRendererProps = {
   part: RenderedOutputPart;
 };
 
-export function OutputPartRenderer({ part }: OutputPartRendererProps) {
+export const OutputPartRenderer = memo(function OutputPartRenderer({
+  part,
+}: OutputPartRendererProps) {
   switch (part.type) {
     case "text":
       return (
@@ -151,9 +157,9 @@ export function OutputPartRenderer({ part }: OutputPartRendererProps) {
       return exhaustivePart;
     }
   }
-}
+});
 
-function TextPartView({
+const TextPartView = memo(function TextPartView({
   part,
 }: {
   part: Extract<RenderedOutputPart, { type: "text" }>;
@@ -162,15 +168,44 @@ function TextPartView({
     return <p className="chat-output-text">{part.text}</p>;
   }
 
-  const blocks = parseMarkdownBlocks(part.text);
+  return <MarkdownTextView text={part.text} />;
+});
+
+const MarkdownTextView = memo(function MarkdownTextView({
+  text,
+}: {
+  text: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const shouldPreview = shouldRenderMarkdownPreview(text);
+  const previewText = useMemo(() => createMarkdownPreview(text), [text]);
+  const blocks = useMemo(
+    () => (shouldPreview && !expanded ? [] : parseMarkdownBlocks(text)),
+    [expanded, shouldPreview, text],
+  );
+
   return (
     <div className="chat-output-text markdown-message">
-      {blocks.map((block, index) => (
-        <MarkdownBlockView block={block} key={`${block.type}-${index}`} />
-      ))}
+      {shouldPreview && !expanded ? (
+        <p className="markdown-plain-preview">{previewText}</p>
+      ) : (
+        blocks.map((block, index) => (
+          <MarkdownBlockView block={block} key={`${block.type}-${index}`} />
+        ))
+      )}
+      {shouldPreview ? (
+        <button
+          type="button"
+          aria-expanded={expanded}
+          className="chat-message-collapse-button markdown-preview-toggle"
+          onClick={() => setExpanded((current) => !current)}
+        >
+          {expanded ? "收起完整内容" : "展开完整内容"}
+        </button>
+      ) : null}
     </div>
   );
-}
+});
 
 function MarkdownBlockView({ block }: { block: MarkdownBlock }) {
   if (block.type === "heading") {

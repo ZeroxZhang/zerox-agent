@@ -136,6 +136,8 @@ type ChatGoalService = {
     sessionId: string;
     originMessageId: string | null;
     description: string;
+    selectedSkill?: SkillRecord;
+    selectedSkillInputValues?: Record<string, SkillInputValue>;
   }): Promise<ChatSessionGoalSummary>;
   resume(
     goalId: string,
@@ -565,22 +567,28 @@ export function createChatService(options: {
         resolvedSkillInput = inputResolution;
       }
 
-      if (!requestedSkill) {
-        const goalRoute = await tryRouteGoalIntent({
-          route: detectGoalIntent(userMessage),
-          activeGoal,
-          chatSessionStore: options.chatSessionStore,
-          goalService: options.goalService,
-          originMessageId: userMessageId,
-          sessionId,
-          emitStatus,
-          now: options.now,
-          signal: runtimeOptions.signal,
-        });
+      const selectedSkillForGoal =
+        requestedSkill?.kind === "matched" ? requestedSkill.skill : undefined;
+      const selectedSkillInputValuesForGoal =
+        resolvedSkillInput?.status === "complete"
+          ? resolvedSkillInput.values
+          : undefined;
+      const goalRoute = await tryRouteGoalIntent({
+        route: detectGoalIntent(userMessage),
+        activeGoal,
+        chatSessionStore: options.chatSessionStore,
+        goalService: options.goalService,
+        originMessageId: userMessageId,
+        sessionId,
+        emitStatus,
+        now: options.now,
+        signal: runtimeOptions.signal,
+        selectedSkill: selectedSkillForGoal,
+        selectedSkillInputValues: selectedSkillInputValuesForGoal,
+      });
 
-        if (goalRoute) {
-          return goalRoute.result;
-        }
+      if (goalRoute) {
+        return goalRoute.result;
       }
 
       if (!continuationToResume) {
@@ -2226,6 +2234,8 @@ async function tryRouteGoalIntent(options: {
   emitStatus?: ReturnType<typeof createChatStatusEmitter>;
   now?: () => Date;
   signal?: AbortSignal;
+  selectedSkill?: SkillRecord;
+  selectedSkillInputValues?: Record<string, SkillInputValue>;
 }): Promise<{ result: SendChatMessageResult } | null> {
   async function appendGoalReply(input: {
     content: string;
@@ -2267,6 +2277,10 @@ async function tryRouteGoalIntent(options: {
       sessionId: options.sessionId,
       originMessageId: options.originMessageId,
       description: options.route.description,
+      ...(options.selectedSkill ? { selectedSkill: options.selectedSkill } : {}),
+      ...(options.selectedSkillInputValues
+        ? { selectedSkillInputValues: options.selectedSkillInputValues }
+        : {}),
     });
     const activeGoal = await options.goalService.resume(createdGoal.id, {
       ...(options.signal ? { signal: options.signal } : {}),
@@ -2295,6 +2309,14 @@ async function tryRouteGoalIntent(options: {
         relatedMemories: [],
         memoryId: null,
         activeGoal,
+        ...(options.selectedSkill
+          ? {
+              selectedSkill: {
+                name: options.selectedSkill.manifest.name,
+                displayName: options.selectedSkill.manifest.displayName,
+              },
+            }
+          : {}),
       },
     };
   }

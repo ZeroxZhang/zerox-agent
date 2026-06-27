@@ -1,5 +1,48 @@
 # Zerox Harness Progress
 
+## 2026-06-26 - v2.9.2 Goal Skill Routing And Long-Task Chat Stability Hotfix
+
+- Request: root-cause and fix three v2.9.2 issues from a long Goal Mode run: `/目标` plus `@skill` delivered only Markdown instead of enforcing the selected report skill, active streaming forced the transcript back to the bottom while the user tried to scroll up, and the app became sluggish after the first long run.
+- Root causes fixed:
+  - `ChatService` resolved an explicitly selected skill before Goal intent routing and only routed Goal commands when no skill was selected, so `/目标 ... @huashu-design` was downgraded to ordinary chat skill execution instead of creating a Goal with a durable skill contract.
+  - Goal planning/runtime had no selected-skill field, so even true Goal runs could not preserve skill body, skill roots, skill dynamic-tool allowlists, or skill output requirements through planning, runtime authorization, or context compaction.
+  - `AgentChatPanel` unconditionally set `scrollTop = scrollHeight` whenever messages/thinking/tool/goal state changed, fighting manual scroll. Long task status and milestone event arrays were also unbounded in renderer state, causing repeated heavy re-renders after long runs.
+- Changed files:
+  - `src/shared/agentGoal.ts`
+  - `src/shared/agentGoalContinuity.ts`
+  - `src/main/chatService.ts`
+  - `src/main/goalChatService.ts`
+  - `src/main/agentGoalPlanner.ts`
+  - `src/main/goalRuntimeEngine.ts`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/main/chatService.test.ts`
+  - `src/main/goalChatService.test.ts`
+  - `src/main/goalRuntimeEngine.test.ts`
+  - `src/renderer/materialDesign.test.ts`
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/main/chatService.test.ts -t "keeps explicit slash goal routing"` -> failed as expected because the result was a normal selected-skill chat reply without `activeGoal`.
+  - `npm test -- src/main/goalChatService.test.ts -t "stores the selected skill snapshot"` -> failed as expected because the planner received no selected skill.
+  - `npm test -- src/main/goalRuntimeEngine.test.ts -t "injects selected skill instructions"` -> failed as expected because milestone prompts lacked the selected skill contract and permissions.
+  - `npm test -- src/renderer/materialDesign.test.ts -t "keeps transcript history readable"` -> failed as expected because the chat panel had no sticky-bottom scroll guard or bounded runtime event helper.
+- GREEN / verification evidence:
+  - `npm test -- src/main/chatService.test.ts -t "keeps explicit slash goal routing"` -> passed.
+  - `npm test -- src/main/goalChatService.test.ts -t "stores the selected skill snapshot"` -> passed.
+  - `npm test -- src/main/goalRuntimeEngine.test.ts -t "injects selected skill instructions"` -> passed.
+  - `npm test -- src/renderer/materialDesign.test.ts -t "keeps transcript history readable"` -> passed.
+  - `npm test -- src/main/chatService.test.ts src/main/goalChatService.test.ts src/main/goalRuntimeEngine.test.ts src/shared/agentGoalContinuity.test.ts src/renderer/materialDesign.test.ts` -> 5 files / 148 tests passed.
+  - `npm run build` -> passed, with the existing Vite chunk-size warning.
+  - `npm run verify` -> passed: 179 files / 1239 tests, agent eval 26/26, memory eval 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Existing better-sqlite3 ABI mismatch fell back to JSON.
+  - `npm run harness:check` -> passed.
+  - Browser QA at `http://127.0.0.1:5173/#chat` -> title `Zerox Agent`, nonblank chat panel and composer rendered, console warn/error logs empty, composer interaction filled `/目标 使用 @onepager 生成 HTML 报告` successfully.
+- Implementation evidence:
+  - `Goal` now stores `selectedSkill` and optional `selectedSkillInputValues`.
+  - `/目标` routing now runs after selected-skill input preflight and passes selected skill snapshots into Goal creation.
+  - Goal planner, continuity checkpoints, milestone prompts, run context, and runtime authorization policy now carry selected skill requirements without bypassing `ToolAuthorizationService`.
+  - Chat auto-scroll now follows output only while the transcript is near the bottom, and renderer runtime event lists keep a bounded recent window.
+
 ## 2026-06-26 - v2.9.0 Packaged Distribution And Push
 
 - Request: package the v2.9.0 macOS release, validate the packaged app, publish release artifacts, and push the branch/tag.
@@ -5220,3 +5263,116 @@
   - `release/Zerox Agent-2.9.2-arm64.dmg.blockmap` (133K, sha256 `550a5d2280f89db1063e44eedcccd1c21340224719e04259e1e170f74b61f557`)
   - `release/Zerox Agent-2.9.2-arm64-mac.zip.blockmap` (335K, sha256 `498d439413111fbda896f9a1520f519d2a147ecd61b96d60862e0b78fb2ebcb2`)
   - `release/latest-mac.yml` sha256 `c5f36a9179f51b5d726efc32b068d606ea40a0af394729f1d59862d762d177d9`.
+
+## 2026-06-26 - v2.9.2 Goal Mode Long Transcript Performance Follow-up
+
+- Request:
+  - User retested the previous v2.9.2 hotfix and still saw severe lag while typing and switching chat sessions after a long goal-mode run.
+- Root cause:
+  - The first hotfix bounded runtime event lists and stopped forced auto-scroll, but it did not measure the production IPC/session-hydration path with the user's real long-run data.
+  - Real app data showed `chat-sessions.json` was about 6.8 MB, and the heaviest visible session `398fc1c4-9365-488f-8749-01a59091ee7c` serialized to about 5.0 MB. The largest assistant message only had about 642 chars of visible content, but carried about 4.9 MB of `outputParts`, mostly invisible `tool_result` and `command_output` payloads.
+  - Session switching called `getChatSession` with the full stored record, so React and Electron IPC were repeatedly moving/parsing data the transcript did not render. Composer typing also still touched more transcript state than needed.
+- Changed areas:
+  - `src/shared/chatSessionProjection.ts`
+  - `src/shared/chatSessionProjection.test.ts`
+  - `src/main/chatSessionStore.ts`
+  - `src/main/container.ts`
+  - `src/main/container.test.ts`
+  - `src/main/smokeMode.ts`
+  - `src/main/smokeMode.test.ts`
+  - `src/main/main.ts`
+  - `src/renderer/App.tsx`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/components/chat/AnswerBlock.tsx`
+  - `src/renderer/components/chat/OutputPartRenderer.tsx`
+  - `src/renderer/chatMarkdownPreview.ts`
+  - `src/renderer/chatMarkdownPreview.test.ts`
+  - `src/renderer/styles/chat.css`
+  - `src/renderer/materialDesign.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts src/renderer/chatMarkdownPreview.test.ts` -> failed as expected because transcript rendering was not memoized and `chatMarkdownPreview` did not exist.
+  - Production performance smoke on the user's real session data timed out before transcript projection/input fixes, reproducing the reported hang instead of relying on synthetic unit tests.
+  - Local data inspection showed the worst stored session payload was about 5.0 MB while its renderer-visible content was tiny, proving the lag was dominated by hidden tool output hydration.
+- GREEN / verification evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts src/renderer/chatMarkdownPreview.test.ts` -> 2 files / 61 tests passed.
+  - `npm test -- src/renderer/chatMarkdown.test.ts src/renderer/chatMarkdownPreview.test.ts src/renderer/materialDesign.test.ts` -> 3 files / 68 tests passed.
+  - `npm test -- src/renderer/materialDesign.test.ts src/renderer/chatMarkdownPreview.test.ts src/shared/chatSessionProjection.test.ts src/main/container.test.ts src/main/smokeMode.test.ts` -> 5 files / 88 tests passed.
+  - `npm run build` -> passed; Vite emitted the existing large chunk warning.
+  - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_PERF_SMOKE=1 BUILDING_AGENT_SMOKE_TIMEOUT_MS=30000 npm run smoke:prod:built` -> passed on 24 real sessions. Main run metrics: selected session `398fc1c4-9365-488f-8749-01a59091ee7c`, selected session payload 30,498 bytes, output part payload 3,619 bytes, `sessionSwitchMs` 992.8, `alternateSessionSwitchMs` 549.2, `inputP95FrameMs` 0.1, `inputMaxFrameMs` 0.9, `maxGetSessionMs` 0.4.
+  - Independent validation agent `019f04b9-448a-7ac2-beca-c7a4a60ecc5a` ran production validation without editing files. It passed build, production performance smoke, normal production smoke, harness check, and focused tests. Its metrics: selected session `398fc1c4-9365-488f-8749-01a59091ee7c`, selected session payload 30,498 bytes, output part payload 3,619 bytes, `sessionSwitchMs` 695.5, `alternateSessionSwitchMs` 562.8, `inputP95FrameMs` 0.1, `inputMaxFrameMs` 0.8, `maxGetSessionMs` 0.5.
+  - `npm run verify` -> 181 files / 1250 tests passed, build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `better-sqlite3` ABI mismatch triggered the existing JSON fallback during smoke.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+- Implementation evidence:
+  - Full persisted chat records still retain audit `outputParts`; only `container.getChatSession()` now returns a transcript projection that keeps visible text/artifact/table/code/citation/diagnostic/file-diff parts and drops invisible large tool payloads from renderer hydration.
+  - `chatSessionStore` now caches parsed JSON sessions in-process to avoid reparsing the same large file on repeated reads.
+  - The composer uses a ref-backed uncontrolled textarea so typing no longer re-renders the transcript on every keystroke.
+  - Production smoke mode now has a performance path that scans real sessions, switches between real sidebar rows using `data-session-id`, waits for expected `data-message-id`, and measures composer input latency with explicit thresholds.
+
+## 2026-06-27 - v2.9.2 Long Transcript Performance Retest Correction
+
+- Request:
+  - User retested the previous hotfix and still saw severe lag while typing and switching sessions. The earlier completion call was incorrect because the smoke check covered only two visible non-archived sessions and missed the expanded archive plus long-transcript layout path.
+- Root cause:
+  - After renderer hydration was projected down to small payloads, the remaining freeze came from layout, not IPC. Real-window DevTools measurement showed session switches spending hundreds to thousands of milliseconds in `Document::UpdateStyleAndLayout`.
+  - Hiding the transcript eliminated the long tasks, and then changing the transcript markdown/output wrappers from nested CSS grid containers to block flow reduced the same real-session switches to roughly 11-16 ms with zero long tasks.
+  - Sidebar session summaries were also unbounded for old records, increasing text/layout work after expanding archived sessions.
+  - The performance smoke itself was under-scoped: it did not fail when only two active sessions were tested while 22 archived sessions existed.
+- Changed areas:
+  - `src/main/chatSessionStore.ts`
+  - `src/main/chatSessionStore.test.ts`
+  - `src/main/smokeMode.ts`
+  - `src/main/smokeMode.test.ts`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/components/chat/OutputPartRenderer.tsx`
+  - `src/renderer/chatMarkdownPreview.ts`
+  - `src/renderer/chatMarkdownPreview.test.ts`
+  - `src/renderer/styles/chat.css`
+  - `src/renderer/materialDesign.test.ts`
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+- RED evidence:
+  - Manual DevTools profile on the user's real data reproduced long layout tasks on expanded archive session switching even after payload projection. Example slow path before the layout fix included `activeMs` around 536-1900 ms and long tasks up to roughly 1855 ms.
+  - The existing production performance smoke reported success while `testedSwitchCount` was only 2, proving the automated gate did not cover the user's path.
+- GREEN / verification evidence:
+  - Manual real-window DevTools retest after the layout fix across six real sessions: switch `activeMs` roughly 10.8-16.3 ms, two-frame settle roughly 16.8-31.8 ms, `totalLongTasks` 0, `longTaskMax` 0, input `p95` 0.1 ms, input max 1.8 ms.
+  - `npm test -- src/main/smokeMode.test.ts src/renderer/chatMarkdownPreview.test.ts src/renderer/materialDesign.test.ts src/main/chatSessionStore.test.ts` -> 4 files / 96 tests passed.
+  - `npm run build` -> passed; Vite emitted the existing large chunk warning.
+  - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_PERF_SMOKE=1 npm run smoke:prod:built` -> passed on 24 real sessions with 22 archived sessions expanded, `visibleSessionCount` 24, `testedSwitchCount` 6, `sessionSwitchMs` 74.7, `inputP95FrameMs` 0.1, `inputMaxFrameMs` 2.1, `longTaskCount` 0, `longTaskMaxMs` 0.
+  - `npm run verify` -> 181 files / 1251 tests passed, build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `better-sqlite3` ABI mismatch triggered the existing JSON fallback during smoke.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+- Implementation evidence:
+  - Sidebar summaries are normalized and capped to 160 characters for both new and legacy list items.
+  - Collapsed markdown previews render plain text without parsing all markdown blocks until expanded.
+  - Loading a persisted session no longer immediately refreshes the sidebar list again, and historical session loads do not force scroll-to-bottom.
+  - Transcript markdown and structured output wrappers now use block flow with explicit spacing instead of nested grid containers, avoiding the min-content layout blowup.
+  - Performance smoke now expands `.sidebar-archive-toggle`, records `archivedSessionCount`, `archiveExpanded`, and `visibleSessionCount`, and fails when it does not switch the expected number of real sessions.
+
+## 2026-06-27 - Zerox Agent v2.9.3 Release Packaging
+
+- Request:
+  - Repackage, release, and push the confirmed Goal Mode selected-skill and long transcript performance fixes after user retest confirmed the app no longer lagged.
+- Release/version work:
+  - Version bumped to `2.9.3` in `package.json` and `package-lock.json`.
+  - README now documents v2.9.3 in English and Chinese, including the Goal Mode selected-skill routing fix, long transcript performance fix, and updated quarantine examples.
+  - `.zerox/feature_list.json` includes `P25-v2.9.3-goal-performance-release` as done.
+- Verification evidence:
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts src/main/smokeMode.test.ts src/renderer/chatMarkdownPreview.test.ts src/renderer/materialDesign.test.ts src/main/chatSessionStore.test.ts` -> 6 files / 107 tests passed.
+  - `npm run verify` -> 181 files / 1251 tests passed, build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_PERF_SMOKE=1 npm run smoke:prod:built` -> passed on 24 real sessions with 22 archived sessions expanded, `visibleSessionCount` 24, `testedSwitchCount` 6, `sessionSwitchMs` 75.2, `inputP95FrameMs` 0.1, `inputMaxFrameMs` 1.3, `longTaskCount` 0, `longTaskMaxMs` 0.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `better-sqlite3` ABI mismatch triggered the existing JSON fallback during this un-packaged smoke.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run dist:mac` -> passed; generated unsigned macOS arm64 DMG, ZIP, blockmaps, and `latest-mac.yml` for v2.9.3.
+  - Packaged app smoke: `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v2.9.3' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+- Release artifact evidence:
+  - `release/latest-mac.yml` reports `version: 2.9.3`.
+  - `release/Zerox Agent-2.9.3-arm64.dmg` (122M, sha256 `5aaf962e94ca50bb6c77432b8b2f2d3c967d9736e55ae81470df2788f68f93fd`)
+  - `release/Zerox Agent-2.9.3-arm64-mac.zip` (333M, sha256 `5067d706f74751bd9091c839abea93e5900cc0e1da35fca42ba87a0160955fd1`)
+  - `release/Zerox Agent-2.9.3-arm64.dmg.blockmap` (131K, sha256 `7a5971ef3e7d0408b6453938854e5b88f5bc0ad09836666ca76ba49294a46bb8`)
+  - `release/Zerox Agent-2.9.3-arm64-mac.zip.blockmap` (335K, sha256 `3e35520f9b210a897a09741930cf8dbfc72648852a91c3aef4fd20c2fc813fac`)
+  - `release/latest-mac.yml` sha256 `2952710b429e2ea04597de4c94f09fee758f80966c76f438542079371e094280`.

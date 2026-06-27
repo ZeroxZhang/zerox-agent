@@ -1,3 +1,4 @@
+import { memo, useMemo } from "react";
 import type { RenderedOutputPart } from "../../chatOutputModel";
 import { isMainConversationOutputPart } from "../../chatOutputModel";
 import { OutputPartRenderer } from "./OutputPartRenderer";
@@ -6,8 +7,11 @@ type AnswerBlockProps = {
   parts: RenderedOutputPart[];
 };
 
-export function AnswerBlock({ parts }: AnswerBlockProps) {
-  const mainParts = parts.filter(isMainConversationOutputPart);
+export const AnswerBlock = memo(function AnswerBlock({ parts }: AnswerBlockProps) {
+  const mainParts = useMemo(
+    () => parts.filter(isMainConversationOutputPart),
+    [parts],
+  );
   if (mainParts.length === 0) {
     return null;
   }
@@ -23,4 +27,4 @@ export function AnswerBlock({ parts }: AnswerBlockProps) {
       </div>
     </div>
   );
-}
+});

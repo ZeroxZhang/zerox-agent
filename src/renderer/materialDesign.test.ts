@@ -242,6 +242,15 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain("max-height: min(34vh, 260px);");
   });
 
+  it("keeps transcript history readable during active streaming", () => {
+    expect(chatPanelSource).toContain("shouldStickToLatestMessageRef");
+    expect(chatPanelSource).toContain("handleMessageListScroll");
+    expect(chatPanelSource).toContain("isNearMessageListBottom");
+    expect(chatPanelSource).toContain("onScroll={handleMessageListScroll}");
+    expect(chatPanelSource).toContain("appendBoundedRuntimeEvent");
+    expect(chatPanelSource).toContain("MAX_RENDERED_RUNTIME_EVENTS");
+  });
+
   it("uses the shared local Icon component for primary controls", () => {
     const iconSource = readFileSync(
       path.join(process.cwd(), "src/renderer/components/Icon.tsx"),
@@ -694,7 +703,7 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(chatPanelSource).toContain("comingSoon: true");
     expect(chatPanelSource).toContain("handleOpenCommandMenu");
     expect(chatPanelSource).toContain("handleSelectComposerCommand(command.id)");
-    expect(chatPanelSource).toContain("createGoalCommandDraft(draft)");
+    expect(chatPanelSource).toContain("createGoalCommandDraft(draftRef.current)");
     expect(styles).toContain(".composer-icon");
     expect(styles).toContain(".composer-icon path");
     expect(styles).toContain("--composer-action-inset: 14px;");
@@ -718,7 +727,7 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(chatPanelSource).toContain("GoalDetailDrawer");
     expect(chatPanelSource).toContain("handleViewGoalProgress");
     expect(chatPanelSource).toContain("handleStartGoal");
-    expect(chatPanelSource).toContain("refreshSessions(sessionIdToLoad)");
+    expect(chatPanelSource).not.toContain("refreshSessions(sessionIdToLoad)");
     expect(chatPanelSource).toContain("slash-command-menu");
     expect(chatPanelSource).toContain("handleSelectComposerCommand(\"goal\")");
     expect(goalStatusStripSource).toContain("buildGoalProgressViewModel");
@@ -991,6 +1000,45 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(chatPanelSource).toContain("shouldCollapseMarkdownBlock");
     expect(styles).toContain(".chat-message-collapse");
     expect(styles).toContain("overflow-wrap: anywhere;");
+  });
+
+  it("keeps long transcript rendering isolated from composer input and session switching", () => {
+    const answerBlockSource = readChatOutputComponent("AnswerBlock.tsx");
+    const outputPartRendererSource = readChatOutputComponent(
+      "OutputPartRenderer.tsx",
+    );
+
+    expect(chatPanelSource).toContain(
+      "const ChatMessageList = memo(function ChatMessageList",
+    );
+    expect(chatPanelSource).toContain(
+      "const MarkdownMessage = memo(function MarkdownMessage",
+    );
+    expect(chatPanelSource).toContain("draftRef.current = nextDraft");
+    expect(chatPanelSource).not.toContain("value={draft}");
+    expect(chatPanelSource).toContain("shouldRenderMarkdownPreview(content)");
+    expect(chatPanelSource).toContain("createMarkdownPreview(content)");
+    expect(chatPanelSource).toContain("markdown-plain-preview");
+    expect(chatPanelSource).toContain(
+      "shouldPreview && !expanded ? [] : parseMarkdownBlocks(content)",
+    );
+    expect(answerBlockSource).toContain("memo(function AnswerBlock");
+    expect(outputPartRendererSource).toContain(
+      "memo(function OutputPartRenderer",
+    );
+    expect(outputPartRendererSource).toContain(
+      "const TextPartView = memo(function TextPartView",
+    );
+    expect(outputPartRendererSource).toContain(
+      "shouldPreview && !expanded ? [] : parseMarkdownBlocks(text)",
+    );
+    expect(styles).toContain(".markdown-plain-preview");
+    expect(chatPanelSource).not.toContain("refreshSessions(sessionIdToLoad)");
+  });
+
+  it("exposes stable DOM hooks for production transcript performance smoke checks", () => {
+    expect(appSource).toContain("data-session-id={session.id}");
+    expect(chatPanelSource).toContain("data-message-id={message.id}");
   });
 
   it("keeps guided input reachable when the right context rail is hidden", () => {

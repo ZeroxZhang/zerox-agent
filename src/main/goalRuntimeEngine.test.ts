@@ -6,6 +6,7 @@ import type { Goal, Milestone } from "../shared/agentGoal";
 import type { AgentRunRecord } from "../shared/agentRuns";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
 import type { AgentTaskContract } from "../shared/agentTaskContract";
+import type { SkillRecord } from "../shared/skills";
 import { getArtifactProvenancePath } from "../shared/agentArtifactProvenance";
 import { buildPrimaryRunContext } from "../shared/agentWorkspace";
 import type { AgentToolExecutor } from "./agentToolExecutor";
@@ -293,6 +294,102 @@ describe("goal runtime engine", () => {
       await rm(homeDir, { recursive: true, force: true });
       await rm(workspaceRoot, { recursive: true, force: true });
     }
+  });
+
+  it("injects selected skill instructions and permissions into goal milestones", async () => {
+    const runs: AgentRunRecord[] = [];
+    const trajectoryEvents: AgentTrajectoryEvent[] = [];
+    let capturedMessages: ChatMessage[] = [];
+    let capturedRuntimeTask: unknown;
+    const selectedSkill = createSkillRecord({
+      name: "onepager",
+      body: "Onepager 技能流程：必须先做内容架构分析。",
+    });
+    const goal = createGoal({ selectedSkill });
+    const milestone = goal.milestones[0]!;
+    const engine = createGoalRuntimeEngine({
+      workspaceRoot: "/Users/demo/project",
+      chatClient: {
+        async complete() {
+          throw new Error("runAgentLoop stub handles model execution");
+        },
+      },
+      getModelProfile: async () => ({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret",
+        model: "agent-model",
+        temperature: 0.2,
+        maxTokens: 8192,
+      }),
+      toolExecutor: {
+        async execute() {
+          return { ok: true, result: {} };
+        },
+        getRegistry() {
+          return createDynamicToolRegistry();
+        },
+        hasTool() {
+          return true;
+        },
+      },
+      runStore: {
+        async append(run) {
+          runs.push(run);
+          return run;
+        },
+      },
+      trajectoryStore: {
+        async append(_runId, event) {
+          trajectoryEvents.push(event);
+          return event;
+        },
+      },
+      goalContext: createAgentGoalContext(),
+      createId: () => "goal_run_skill",
+      now: () => "2026-06-13T10:00:00.000Z",
+      runAgentLoop: async (messages, _profile, options): Promise<AgentLoopResult> => {
+        capturedMessages = messages;
+        capturedRuntimeTask = options.runtimeTask;
+        return {
+          status: "succeeded",
+          summary: "skill report complete",
+          turns: 1,
+          messages,
+          toolCallsExecuted: 0,
+        };
+      },
+    });
+
+    const result = await engine.runMilestone(goal, milestone);
+
+    expect(result).toMatchObject({
+      status: "succeeded",
+      summary: "skill report complete",
+    });
+    const prompt = capturedMessages.map((message) => message.content).join("\n");
+    expect(prompt).toContain("Selected skill execution contract");
+    expect(prompt).toContain("Onepager 技能流程：必须先做内容架构分析。");
+    expect(capturedRuntimeTask).toMatchObject({
+      permissions: {
+        files: {
+          read: expect.arrayContaining([
+            "/Users/demo/project",
+            "/tmp/skills/onepager",
+          ]),
+        },
+        tools: {
+          allowedNames: expect.arrayContaining([
+            "skill_load",
+            "skill_resource_list",
+          ]),
+          allowedSkillNames: ["onepager"],
+        },
+      },
+    });
+    expect(runs[0]).toMatchObject({
+      skillName: "goal-milestone",
+      status: "succeeded",
+    });
   });
 
   it("executes a typed JSON deterministic contract with real file tools and provenance", async () => {
@@ -1322,6 +1419,7 @@ function createGoal(overrides: {
   successCriteria?: Goal["successCriteria"];
   milestoneSuccessCriteria?: Milestone["successCriteria"];
   taskContract?: Goal["taskContract"];
+  selectedSkill?: Goal["selectedSkill"];
 } = {}): Goal {
   const milestone: Milestone = {
     id: "milestone_1",
@@ -1356,8 +1454,41 @@ function createGoal(overrides: {
     reviewPolicy: "review_each_milestone",
     planVersion: 1,
     ...(overrides.taskContract ? { taskContract: overrides.taskContract } : {}),
+    ...(overrides.selectedSkill ? { selectedSkill: overrides.selectedSkill } : {}),
     createdAt: "2026-06-13T10:00:00.000Z",
     updatedAt: "2026-06-13T10:00:00.000Z",
+  };
+}
+
+function createSkillRecord(
+  partial: Partial<SkillRecord> & Pick<SkillRecord["manifest"], "name"> & { body?: string },
+): SkillRecord {
+  const name = partial.name;
+  return {
+    rootDir: `/tmp/skills/${name}`,
+    skillFile: `/tmp/skills/${name}/SKILL.md`,
+    body: partial.body ?? "Skill body",
+    manifest: {
+      name,
+      displayName: partial.manifest?.displayName ?? name,
+      description: partial.manifest?.description ?? `${name} description`,
+      version: partial.manifest?.version ?? "0.1.0",
+      execution: partial.manifest?.execution ?? {
+        mode: "agent",
+        entrypoint: null,
+      },
+      inputs: partial.manifest?.inputs ?? [],
+      permissions: partial.manifest?.permissions ?? {
+        files: { read: [], write: [] },
+        shell: { commands: [] },
+        web: { search: false, fetchDomains: [] },
+        memory: { read: false, write: false },
+      },
+      ...(partial.manifest?.planning ? { planning: partial.manifest.planning } : {}),
+      ...(partial.manifest?.tools ? { tools: partial.manifest.tools } : {}),
+      ...(partial.manifest?.mcpServers ? { mcpServers: partial.manifest.mcpServers } : {}),
+      ...(partial.manifest?.dependencies ? { dependencies: partial.manifest.dependencies } : {}),
+    },
   };
 }
 

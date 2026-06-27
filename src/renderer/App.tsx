@@ -639,6 +639,7 @@ function SidebarSessionRow(props: {
     >
       <button
         className={`sidebar-session-item ${props.isActive ? "is-active" : ""}`}
+        data-session-id={session.id}
         type="button"
         onClick={() => props.onSelect(session.id)}
       >

@@ -1,4 +1,5 @@
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -68,6 +69,10 @@ import {
   parseMarkdownBlocks,
   type MarkdownBlock,
 } from "../chatMarkdown";
+import {
+  createMarkdownPreview,
+  shouldRenderMarkdownPreview,
+} from "../chatMarkdownPreview";
 import {
   buildTaskProcessItems,
   buildTaskActivityDetail,
@@ -212,6 +217,8 @@ const composerCommandItems: ComposerCommandItem[] = [
 ];
 
 const initialMessages: ChatMessage[] = [];
+const MAX_RENDERED_RUNTIME_EVENTS = 80;
+const MESSAGE_LIST_BOTTOM_THRESHOLD_PX = 96;
 
 export function AgentChatPanel({
   newChatRequestKey = 0,
@@ -250,6 +257,8 @@ export function AgentChatPanel({
   const pendingInputRequest = chatStreamState.pendingInputRequest;
   const [draft, setDraft] = useState("");
   const [draftCursor, setDraftCursor] = useState(0);
+  const draftRef = useRef("");
+  const draftCursorRef = useRef(0);
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
   const [sessions, setSessions] = useState<ChatSession[]>(fallbackSessions);
   const [tasks, setTasks] = useState<ScheduledTask[]>(demoTasks);
@@ -309,6 +318,7 @@ export function AgentChatPanel({
   const [activityTick, setActivityTick] = useState(Date.now());
   const [messageTimeTick, setMessageTimeTick] = useState(Date.now());
   const messageListRef = useRef<HTMLDivElement>(null);
+  const shouldStickToLatestMessageRef = useRef(true);
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const sessionIdRef = useRef<string | null>(sessionId);
   const activeStatusSessionIdRef = useRef<string | null>(null);
@@ -372,11 +382,28 @@ export function AgentChatPanel({
     });
   }, []);
 
-  // Auto-scroll to latest message
-  useEffect(() => {
-    if (messageListRef.current) {
-      messageListRef.current.scrollTop = messageListRef.current.scrollHeight;
+  const scrollMessageListToBottom = useCallback(() => {
+    const messageList = messageListRef.current;
+    if (!messageList) {
+      return;
     }
+    messageList.scrollTop = messageList.scrollHeight;
+    shouldStickToLatestMessageRef.current = true;
+  }, []);
+
+  const handleMessageListScroll = useCallback(() => {
+    const messageList = messageListRef.current;
+    if (!messageList) {
+      return;
+    }
+    shouldStickToLatestMessageRef.current = isNearMessageListBottom(messageList);
+  }, []);
+
+  useEffect(() => {
+    if (!shouldStickToLatestMessageRef.current) {
+      return;
+    }
+    scrollMessageListToBottom();
   }, [
     chatStreamState.thinkingText,
     chatStreamState.toolCallPreviews.length,
@@ -384,6 +411,7 @@ export function AgentChatPanel({
     messages,
     pendingInputRequest,
     pendingToolApproval,
+    scrollMessageListToBottom,
   ]);
 
   useEffect(() => {
@@ -582,7 +610,7 @@ export function AgentChatPanel({
     }
 
     return window.buildingAgent.onGoalMilestoneRunEvent((event) => {
-      setGoalRunEvents((current) => [...current, event]);
+      setGoalRunEvents((current) => appendBoundedRuntimeEvent(current, event));
     });
   }, []);
 
@@ -668,7 +696,7 @@ export function AgentChatPanel({
 
       activeStatusSessionIdRef.current = event.sessionId;
       setSessionId((current) => current ?? event.sessionId);
-      setTaskProcessEvents((current) => [...current, event]);
+      setTaskProcessEvents((current) => appendBoundedRuntimeEvent(current, event));
       setTaskActivity(buildTaskActivityFromStatusEvent(event));
       setStatus({
         kind: getChatStatusKindFromStatusEvent(event),
@@ -787,6 +815,7 @@ export function AgentChatPanel({
     }
 
     resetActiveChatRefs();
+    shouldStickToLatestMessageRef.current = false;
     const loadedSession = await window.buildingAgent.getChatSession(sessionIdToLoad);
     if (!loadedSession) {
       return;
@@ -803,7 +832,9 @@ export function AgentChatPanel({
       setWorkPhase(restoredActivity.workPhase);
       setStatus(restoredActivity.status);
       setTaskActivity(restoredActivity.taskActivity);
-      setTaskProcessEvents(restoredActivity.taskProcessEvents);
+      setTaskProcessEvents(
+        restoredActivity.taskProcessEvents.slice(-MAX_RENDERED_RUNTIME_EVENTS),
+      );
       activeStatusSessionIdRef.current = loadedSession.id;
     } else {
       setWorkPhase("idle");
@@ -818,7 +849,6 @@ export function AgentChatPanel({
       setActiveGoalDetail(null);
       setGoalDrawerOpen(false);
     }
-    void refreshSessions(sessionIdToLoad);
   }
 
   async function refreshSessions(nextActiveSessionId?: string) {
@@ -1181,9 +1211,25 @@ export function AgentChatPanel({
   }
 
   function handleOpenCommandMenu() {
+    setDraft(draftRef.current);
+    setDraftCursor(draftCursorRef.current);
     setCommandMenuOpen(true);
     window.requestAnimationFrame(() => {
       messageInputRef.current?.focus();
+    });
+  }
+
+  function setComposerDraft(nextDraft: string, cursor = nextDraft.length) {
+    draftRef.current = nextDraft;
+    draftCursorRef.current = cursor;
+    setDraft(nextDraft);
+    setDraftCursor(cursor);
+    const input = messageInputRef.current;
+    if (input && input.value !== nextDraft) {
+      input.value = nextDraft;
+    }
+    window.requestAnimationFrame(() => {
+      messageInputRef.current?.setSelectionRange(cursor, cursor);
     });
   }
 
@@ -1192,7 +1238,7 @@ export function AgentChatPanel({
       return;
     }
 
-    setDraft(createGoalCommandDraft(draft));
+    setComposerDraft(createGoalCommandDraft(draftRef.current));
     setCommandMenuOpen(false);
     window.requestAnimationFrame(() => {
       messageInputRef.current?.focus();
@@ -1200,8 +1246,7 @@ export function AgentChatPanel({
   }
 
   function handlePickPrompt(prompt: string) {
-    setDraft(prompt);
-    setDraftCursor(prompt.length);
+    setComposerDraft(prompt);
     setSelectedSkillName(null);
     window.requestAnimationFrame(() => {
       messageInputRef.current?.focus();
@@ -1211,17 +1256,20 @@ export function AgentChatPanel({
   function updateDraftCursor() {
     const input = messageInputRef.current;
     if (input) {
-      setDraftCursor(input.selectionStart ?? input.value.length);
+      draftCursorRef.current = input.selectionStart ?? input.value.length;
+      if (draft || commandMenuOpen) {
+        setDraftCursor(draftCursorRef.current);
+      }
     }
   }
 
   function handleSelectSkillMention(skill: SkillMentionCandidate) {
     const mention = activeSkillMention;
+    const currentDraft = draftRef.current;
     const nextDraft = mention
-      ? replaceActiveSkillMention(draft, mention, skill.name)
-      : `${draft.trimEnd()} @${skill.name} `;
-    setDraft(nextDraft);
-    setDraftCursor(nextDraft.length);
+      ? replaceActiveSkillMention(currentDraft, mention, skill.name)
+      : `${currentDraft.trimEnd()} @${skill.name} `;
+    setComposerDraft(nextDraft);
     setSelectedSkillName(skill.name);
     window.requestAnimationFrame(() => {
       messageInputRef.current?.focus();
@@ -1284,7 +1332,7 @@ export function AgentChatPanel({
       return;
     }
 
-    setDraft("修改计划：");
+    setComposerDraft("修改计划：");
   }
 
   async function handleReplanGoal() {
@@ -1456,9 +1504,10 @@ export function AgentChatPanel({
       messages.length,
     );
 
+    shouldStickToLatestMessageRef.current = true;
     setMessages((current) => [...current, userMessage]);
     resetStreamProcessState();
-    setDraft("");
+    setComposerDraft("", 0);
     setWorkPhase("planning");
     activeStatusSessionIdRef.current = sessionId;
     setTaskProcessEvents([]);
@@ -1659,7 +1708,7 @@ export function AgentChatPanel({
       handleSelectSkillMention(skillMentionMatches[0]);
       return;
     }
-    await submitUserMessage(draft);
+    await submitUserMessage(draftRef.current);
   }
 
   async function handleInterruptCurrentWork() {
@@ -1968,7 +2017,11 @@ export function AgentChatPanel({
       data-testid="agent-chat-panel"
     >
       <section className="chat-workspace" aria-label="会话窗口">
-        <div className="chat-scroll-region" ref={messageListRef}>
+        <div
+          className="chat-scroll-region"
+          onScroll={handleMessageListScroll}
+          ref={messageListRef}
+        >
         <div className="chat-hero">
           <div className="chat-hero-main">
             <h2 title={chatTitle}>{chatTitle}</h2>
@@ -2028,32 +2081,10 @@ export function AgentChatPanel({
             onPickPrompt={handlePickPrompt}
           />
         ) : (
-          <div className="message-list" aria-label="消息列表">
-            {visibleChatMessages.map((message) => (
-              <article
-                className={`chat-message is-${message.role}${
-                  message.isStreaming ? " is-streaming" : ""
-                }`}
-                key={message.id}
-              >
-                <header className="chat-message-meta">
-                  <span>{message.role === "assistant" ? "智能体" : "你"}</span>
-                  <time dateTime={message.createdAt}>
-                    {formatChatMessageTime({
-                      role: message.role,
-                      createdAt: message.createdAt,
-                      now: new Date(messageTimeTick),
-                    })}
-                  </time>
-                </header>
-                {message.role === "assistant" ? (
-                  <AnswerBlock parts={message.outputParts} />
-                ) : (
-                  <MarkdownMessage content={message.content} />
-                )}
-              </article>
-            ))}
-          </div>
+          <ChatMessageList
+            messageTimeTick={messageTimeTick}
+            messages={visibleChatMessages}
+          />
         )}
 
         {hasRuntimeSurfaces ? (
@@ -2390,11 +2421,29 @@ export function AgentChatPanel({
                 data-testid="agent-message-input"
                 id="agent-message"
                 ref={messageInputRef}
-                value={draft}
                 onChange={(event) => {
                   const nextDraft = event.currentTarget.value;
-                  setDraft(nextDraft);
-                  setDraftCursor(event.currentTarget.selectionStart ?? nextDraft.length);
+                  const nextCursor =
+                    event.currentTarget.selectionStart ?? nextDraft.length;
+                  draftRef.current = nextDraft;
+                  draftCursorRef.current = nextCursor;
+                  const nextMention = extractActiveSkillMention(
+                    nextDraft,
+                    nextCursor,
+                  );
+                  const shouldSyncComposerState =
+                    commandMenuOpen ||
+                    composerCommandMenuVisible ||
+                    shouldShowComposerCommandMenu(nextDraft) ||
+                    Boolean(nextMention) ||
+                    Boolean(activeSkillMention);
+                  if (shouldSyncComposerState) {
+                    setDraft(nextDraft);
+                    setDraftCursor(nextCursor);
+                  } else if (draft) {
+                    setDraft("");
+                    setDraftCursor(0);
+                  }
                   if (
                     selectedSkillName &&
                     !nextDraft.includes(`@${selectedSkillName}`)
@@ -2422,8 +2471,8 @@ export function AgentChatPanel({
                   if (event.key === "Escape" && composerCommandMenuVisible) {
                     event.preventDefault();
                     setCommandMenuOpen(false);
-                    if (shouldShowComposerCommandMenu(draft)) {
-                      setDraft("");
+                    if (shouldShowComposerCommandMenu(draftRef.current)) {
+                      setComposerDraft("", 0);
                     }
                   }
                 }}
@@ -2480,7 +2529,7 @@ export function AgentChatPanel({
                   aria-label="发送消息"
                   className="composer-icon-button composer-send-button"
                   data-testid="agent-send-button"
-                  disabled={status.kind === "working" || !draft.trim()}
+                  disabled={status.kind === "working"}
                   title="发送消息"
                   type="submit"
                 >
@@ -3244,6 +3293,16 @@ function clampNumber(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
+function isNearMessageListBottom(messageList: HTMLDivElement): boolean {
+  const distanceToBottom =
+    messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight;
+  return distanceToBottom <= MESSAGE_LIST_BOTTOM_THRESHOLD_PX;
+}
+
+function appendBoundedRuntimeEvent<T>(events: T[], event: T): T[] {
+  return [...events.slice(-(MAX_RENDERED_RUNTIME_EVENTS - 1)), event];
+}
+
 function chatStreamEventMatchesActive(
   event: ChatStreamEvent,
   activeStream: {
@@ -3350,17 +3409,81 @@ function createGoalCommandDraft(draft: string): string {
   return `/目标 ${trimmed}`;
 }
 
-function MarkdownMessage({ content }: { content: string }) {
-  const blocks = parseMarkdownBlocks(content);
+const ChatMessageList = memo(function ChatMessageList({
+  messageTimeTick,
+  messages,
+}: {
+  messageTimeTick: number;
+  messages: VisibleChatMessage[];
+}) {
+  const now = useMemo(() => new Date(messageTimeTick), [messageTimeTick]);
 
   return (
-    <div className="markdown-message">
-      {blocks.map((block, index) => (
-        <MarkdownBlockView block={block} key={`${block.type}-${index}`} />
+    <div className="message-list" aria-label="消息列表">
+      {messages.map((message) => (
+        <article
+          className={`chat-message is-${message.role}${
+            message.isStreaming ? " is-streaming" : ""
+          }`}
+          data-message-id={message.id}
+          key={message.id}
+        >
+          <header className="chat-message-meta">
+            <span>{message.role === "assistant" ? "智能体" : "你"}</span>
+            <time dateTime={message.createdAt}>
+              {formatChatMessageTime({
+                role: message.role,
+                createdAt: message.createdAt,
+                now,
+              })}
+            </time>
+          </header>
+          {message.role === "assistant" ? (
+            <AnswerBlock parts={message.outputParts} />
+          ) : (
+            <MarkdownMessage content={message.content} />
+          )}
+        </article>
       ))}
     </div>
   );
-}
+});
+
+const MarkdownMessage = memo(function MarkdownMessage({
+  content,
+}: {
+  content: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const shouldPreview = shouldRenderMarkdownPreview(content);
+  const previewContent = useMemo(() => createMarkdownPreview(content), [content]);
+  const blocks = useMemo(
+    () => (shouldPreview && !expanded ? [] : parseMarkdownBlocks(content)),
+    [content, expanded, shouldPreview],
+  );
+
+  return (
+    <div className="markdown-message">
+      {shouldPreview && !expanded ? (
+        <p className="markdown-plain-preview">{previewContent}</p>
+      ) : (
+        blocks.map((block, index) => (
+          <MarkdownBlockView block={block} key={`${block.type}-${index}`} />
+        ))
+      )}
+      {shouldPreview ? (
+        <button
+          type="button"
+          aria-expanded={expanded}
+          className="chat-message-collapse-button markdown-preview-toggle"
+          onClick={() => setExpanded((current) => !current)}
+        >
+          {expanded ? "收起完整内容" : "展开完整内容"}
+        </button>
+      ) : null}
+    </div>
+  );
+});
 
 function MarkdownBlockView({ block }: { block: MarkdownBlock }) {
   const [expanded, setExpanded] = useState(false);
