@@ -176,6 +176,18 @@ describe("runRecordViewModel", () => {
     expect(summary.technicalEventCount).toBe(2);
   });
 
+  it("preserves legitimate English success summaries in run outcomes", () => {
+    const summary = buildRunRecordSummary(
+      runWithStatus("succeeded", {
+        events: [],
+        summary: "Created README.",
+      }),
+      [],
+    );
+
+    expect(summary.outcome).toBe("Created README.");
+  });
+
   it("only marks summaries as memory-writing when memory was written successfully", () => {
     const failedMemoryRun = runWithStatus("succeeded", {
       events: [
@@ -232,6 +244,17 @@ describe("runRecordViewModel", () => {
       },
     });
     expect(item.subtitle).not.toContain("Agent run canceled");
+  });
+
+  it("preserves legitimate English success summaries in list subtitles", () => {
+    const item = toRunRecordListItem(
+      runWithStatus("succeeded", {
+        events: [],
+        summary: "Created README.",
+      }),
+    );
+
+    expect(item.subtitle).toBe("已完成 · Created README.");
   });
 
   it("creates active checkpoint list items", () => {

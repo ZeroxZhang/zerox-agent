@@ -93,6 +93,11 @@ const eventTitleTranslations: Record<string, string> = {
   "unable to write episodic memory": "未能写入任务记忆",
   "unable to write episodic memory.": "未能写入任务记忆",
 };
+const exactTechnicalMessageTranslations: Record<string, string> = {
+  ...eventTitleTranslations,
+  "goal milestone started: list current desktop contents to identify files and folders.":
+    "开始步骤：检查桌面内容",
+};
 const successfulMemoryWriteMessages = new Set([
   "episodic memory written",
   "episodic memory written.",
@@ -272,7 +277,7 @@ export function buildRunRecordSummary(
 export function translateRunRecordEventTitle(message: string): string {
   const trimmed = message.trim();
   const normalized = trimmed.toLowerCase();
-  const directTranslation = eventTitleTranslations[normalized];
+  const directTranslation = getExactTechnicalMessageTranslation(trimmed);
 
   if (directTranslation) {
     return directTranslation;
@@ -444,13 +449,7 @@ function translateDefaultText(message?: string): string {
     return "";
   }
 
-  const translated = translateRunRecordEventTitle(message);
-
-  if (translated !== message.trim().replace(/\.$/, "")) {
-    return translated;
-  }
-
-  return message.trim();
+  return getExactTechnicalMessageTranslation(message) || message.trim();
 }
 
 function truncateSubtitle(message: string): string {
@@ -468,6 +467,10 @@ function isSuccessfulMemoryWriteMessage(message: string): boolean {
     successfulMemoryWriteMessages.has(normalized) ||
     /^已写入.*记忆[。.]?$/.test(message.trim())
   );
+}
+
+function getExactTechnicalMessageTranslation(message: string): string {
+  return exactTechnicalMessageTranslations[message.trim().toLowerCase()] ?? "";
 }
 
 function looksLikeEnglishTechnicalText(message: string): boolean {
