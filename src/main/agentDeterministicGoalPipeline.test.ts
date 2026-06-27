@@ -14,6 +14,7 @@ describe("agent deterministic goal pipeline", () => {
       milestoneId: "milestone_1",
       locationEnv: {
         homeDir: "/Users/demo",
+        platform: "darwin",
         workspaceRoot: "/Users/demo/project",
       },
       sandbox: {
@@ -82,6 +83,11 @@ describe("agent deterministic goal pipeline", () => {
       runId: "goal_run_1",
       goalId: "goal_1",
       milestoneId: "milestone_1",
+      locationEnv: {
+        homeDir: "/Users/demo",
+        platform: "darwin",
+        workspaceRoot: "/Users/demo/project",
+      },
       sandbox: {
         mode: "workspace_write",
         network: "task_policy",

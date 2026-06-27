@@ -1,5 +1,30 @@
 # Zerox Harness Progress
 
+## 2026-06-27 - Verify CI Linux Runner Hotfix
+
+- Request: inspect the online GitHub repository prompts, identify what still needs action, and directly fix the failing GitHub Actions `verify` workflow on `main`.
+- Root causes fixed:
+  - `src/main/providers/providers.test.ts` imported `./openAICompatibleProvider` while the real file is `openAiCompatibleProvider.ts`; macOS tolerated the case mismatch, but the Ubuntu CI runner failed module resolution.
+  - Chrome deterministic goal tests relied on `process.platform` implicitly while building macOS-style test fixtures, so the Ubuntu runner resolved `/Users/demo/.config/google-chrome` instead of the fixture path under `Library/Application Support/Google/Chrome`.
+- Changed files:
+  - `src/main/providers/providers.test.ts`
+  - `src/main/agentDeterministicGoalPipeline.test.ts`
+  - `src/main/goalRuntimeEngine.test.ts`
+  - `src/shared/sourceImportCasing.test.ts`
+  - `.zerox/progress.md`
+- RED evidence:
+  - GitHub Actions run `28279566974` failed `npm run verify` on Ubuntu with `Cannot find module './openAICompatibleProvider'`, one Chrome path assertion mismatch, and one deterministic Chrome milestone failure before `npm run harness:check` could run.
+  - `npm test -- src/shared/sourceImportCasing.test.ts` -> failed as expected with `main/providers/providers.test.ts imports ./openAICompatibleProvider, but the case-exact path is openAiCompatibleProvider.ts`.
+- GREEN / verification evidence:
+  - `npm test -- src/shared/sourceImportCasing.test.ts src/main/providers/providers.test.ts` -> 2 files / 24 tests passed.
+  - `npm test -- src/main/agentDeterministicGoalPipeline.test.ts src/main/goalRuntimeEngine.test.ts` -> 2 files / 18 tests passed.
+  - `npm run verify` -> passed: 182 files / 1252 tests, build passed, agent evals 26/26, memory evals 2/2.
+  - `npm run harness:check` -> passed.
+- Implementation evidence:
+  - Added a source import casing regression test that checks relative source imports against exact filesystem casing, preventing macOS-only false greens for Linux CI.
+  - Corrected the OpenAI-compatible provider test import casing.
+  - Made Chrome deterministic tests explicitly model a Darwin location environment when asserting macOS Chrome fixture paths.
+
 ## 2026-06-26 - v2.9.2 Goal Skill Routing And Long-Task Chat Stability Hotfix
 
 - Request: root-cause and fix three v2.9.2 issues from a long Goal Mode run: `/目标` plus `@skill` delivered only Markdown instead of enforcing the selected report skill, active streaming forced the transcript back to the bottom while the user tried to scroll up, and the app became sluggish after the first long run.

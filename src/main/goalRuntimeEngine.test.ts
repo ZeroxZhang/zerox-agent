@@ -208,7 +208,7 @@ describe("goal runtime engine", () => {
             return buildPrimaryRunContext({
               workspaceId: "workspace_1",
               workspaceRoot,
-              locationEnv: { homeDir, workspaceRoot },
+              locationEnv: { homeDir, platform: "darwin", workspaceRoot },
               sandbox: {
                 mode: "workspace_write",
                 network: "task_policy",
