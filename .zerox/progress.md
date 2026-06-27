@@ -1,5 +1,36 @@
 # Zerox Harness Progress
 
+## 2026-06-27 - Runs Module Consumer Task Records Redesign
+
+- Request: redesign the confusing `运行` module as a simpler C-end `任务记录` experience, show browser mockups before implementation, then implement the approved simplified version with subagent review and strong layout QA.
+- Changed files:
+  - `src/shared/navigation.ts`
+  - `src/shared/runRecordViewModel.ts`
+  - `src/shared/runRecordViewModel.test.ts`
+  - `src/shared/navigation.test.ts`
+  - `src/renderer/components/RunsPanel.tsx`
+  - `src/renderer/components/RunTrajectoryPanel.tsx`
+  - `src/renderer/styles/legacy.css`
+  - `docs/superpowers/plans/2026-06-27-runs-module-simplified-redesign.md`
+  - `.zerox/progress.md`
+- Design and review evidence:
+  - Browser mockup v2 approved by the user before implementation.
+  - Subagent reviews cleared Task 2 selection/action behavior, Task 3 evidence labels, and Task 4 layout/responsive CSS.
+  - Browser QA at `http://127.0.0.1:5173/#runs` covered desktop `1440x900`, tablet `900x800`, mobile `390x844`, mobile `历史/详情` tabs, and expanded `技术详情`.
+  - Browser QA checks reported no horizontal overflow, no card overlap, no framework overlay, and no console warn/error logs.
+- GREEN / verification evidence:
+  - `npm test -- src/shared/runRecordViewModel.test.ts src/shared/navigation.test.ts src/renderer/chatOutputModel.test.ts src/shared/agentRunInsights.test.ts` -> 4 files / 31 tests passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run verify` -> passed on rerun: 183 files / 1264 tests, build passed, agent evals 26/26, memory evals 2/2. The first attempt hit a transient 5s timeout in `src/shared/sourceImportCasing.test.ts`; the test passed alone and in the rerun.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Existing better-sqlite3 ABI mismatch fell back to JSON.
+- Implementation evidence:
+  - Navigation now labels the module `任务记录`.
+  - Added a shared run-record view model for status labels, primary actions, attention sorting, list items, and readable summaries.
+  - `RunsPanel` now presents a focus card, next action, recent task list, simplified steps, source-aware active/history selection, real retry/resume/pause/navigation actions, and collapsed technical details.
+  - `RunTrajectoryPanel` and `RunInspector` now use consumer-facing evidence labels such as `证据事件`, `证据链`, `高级日志`, `回归样例`, and `协作审核`.
+  - Task record CSS now constrains payloads and technical evidence, supports mobile tabs, and avoids desktop history clipping.
+
 ## 2026-06-27 - Verify CI Linux Runner Hotfix
 
 - Request: inspect the online GitHub repository prompts, identify what still needs action, and directly fix the failing GitHub Actions `verify` workflow on `main`.
