@@ -76,6 +76,44 @@ describe("agent runtime engine", () => {
     });
   });
 
+  it("does not expose shell_exec to prompt-only scheduled tasks without shell templates", async () => {
+    const visibleToolNames: string[][] = [];
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore({
+        ...createTask(),
+        skillName: "",
+        input: { request: "每天汇报天气" },
+        permissions: getDefaultTaskPermissionPolicy(),
+      }),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore([]),
+      resolveSkill: async () => null,
+      chatClient: {
+        async complete(request) {
+          visibleToolNames.push(
+            request.tools?.map((tool) => tool.function.name) ?? [],
+          );
+          return finalResponse("Weather task complete");
+        },
+      },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      createId: createSequentialId("runtime_tools"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+
+    const result = await engine.startTask("task_123");
+
+    expect(result).toMatchObject({
+      ok: true,
+      run: { status: "succeeded" },
+    });
+    expect(visibleToolNames[0]).toContain("web_search");
+    expect(visibleToolNames[0]).not.toContain("shell_exec");
+    expect(visibleToolNames[0]).not.toContain("test_run");
+  });
+
   it("offloads oversized tool results in checkpoints and trajectory metadata", async () => {
     const largeContent = "x".repeat(1000);
     const capturedMessages: ChatMessage[][] = [];
@@ -1220,6 +1258,46 @@ describe("agent runtime engine", () => {
     expect(toolContexts).toEqual([runContext]);
   });
 
+  it("binds scheduled task runs to the requested chat session context", async () => {
+    const resolveInputs: Array<{ sessionId?: string } | undefined> = [];
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore([]),
+      workspaceService: {
+        async resolveRunContext(input?: { sessionId?: string }) {
+          resolveInputs.push(input);
+          return buildPrimaryRunContext({
+            workspaceId: "workspace_1",
+            workspaceRoot: "/tmp/zerox/workspace",
+            ...(input?.sessionId ? { sessionId: input.sessionId } : {}),
+          });
+        },
+      },
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: createChatClient([finalResponse("Report complete")]),
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor([]),
+      createId: createSequentialId("session_run"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+
+    const result = await engine.startTask("task_123", {
+      sessionId: "session_daily_weather",
+    });
+
+    expect(resolveInputs).toEqual([{ sessionId: "session_daily_weather" }]);
+    expect(result).toMatchObject({
+      ok: true,
+      run: {
+        runContext: {
+          sessionId: "session_daily_weather",
+        },
+      },
+    });
+  });
+
   it("passes the abort signal to runtime tool execution", async () => {
     const controller = new AbortController();
     let receivedSignal: AbortSignal | undefined;
@@ -1498,8 +1576,17 @@ function createTaskStore(task: ScheduledTask | null): ScheduledTaskStore {
     async create() {
       throw new Error("Not needed in this test.");
     },
+    async update() {
+      throw new Error("Not needed in this test.");
+    },
     async recordRun() {
       return task;
+    },
+    async setEnabled() {
+      return task;
+    },
+    async delete() {
+      return false;
     },
   };
 }

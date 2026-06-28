@@ -86,6 +86,26 @@ export function createTaskRepository(storage: Storage): TaskRepository {
       persist(task);
       return task;
     },
+    update(taskId: string, input: ScheduledTaskInput, changedAt?: Date): ScheduledTask | null {
+      const existing = this.get(taskId);
+      if (!existing) return null;
+      const at = changedAt ?? new Date();
+      const atIso = at.toISOString();
+      const normalized = normalizeScheduledTaskInput(input);
+      const updated: ScheduledTask = {
+        ...existing,
+        ...normalized,
+        id: existing.id,
+        createdAt: existing.createdAt,
+        lastRunAt: existing.lastRunAt,
+        nextRunAt: normalized.enabled
+          ? computeNextRunAt(normalized.schedule, at)
+          : null,
+        updatedAt: atIso,
+      };
+      persist(updated);
+      return updated;
+    },
     recordRun(taskId: string, completedAt: Date): ScheduledTask | null {
       const existing = this.get(taskId);
       if (!existing) return null;

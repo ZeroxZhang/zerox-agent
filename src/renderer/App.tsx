@@ -205,6 +205,12 @@ export function App() {
     navigateTo("chat");
   }
 
+  function handleOpenChatSession(sessionId: string) {
+    setOpenChatSessionMenuId(null);
+    setSelectedChatSessionId(sessionId);
+    navigateTo("chat");
+  }
+
   const handleChatSessionsChange = useCallback((sessions: ChatSidebarSession[]) => {
     setChatSessions(sessions.map(toChatSessionListItem));
   }, []);
@@ -546,7 +552,9 @@ export function App() {
             onNavigate={navigateTo}
           />
         ) : null}
-        {activeSection.id === "runs" ? <RunsPanel /> : null}
+        {activeSection.id === "runs" ? (
+          <RunsPanel onOpenChatSession={handleOpenChatSession} />
+        ) : null}
         {activeSection.id === "scheduled-tasks" ? (
           <ScheduledTasksPanel />
         ) : null}

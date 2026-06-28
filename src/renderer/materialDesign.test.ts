@@ -52,6 +52,10 @@ describe("Design System — Notion-inspired app shell", () => {
     path.join(process.cwd(), "src/renderer/components/RunsPanel.tsx"),
     "utf8",
   );
+  const scheduledTasksPanelSource = readFileSync(
+    path.join(process.cwd(), "src/renderer/components/ScheduledTasksPanel.tsx"),
+    "utf8",
+  );
   const memoryPanelSource = readFileSync(
     path.join(process.cwd(), "src/renderer/components/MemoryPanel.tsx"),
     "utf8",
@@ -928,6 +932,22 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".auto-approval-toggle");
     expect(styles).toContain(".is-critical-risk");
     expect(styles).toContain("var(--status-error-text)");
+  });
+
+  it("routes run-record chat actions to the run session instead of the chat home", () => {
+    expect(appSource).toContain("handleOpenChatSession");
+    expect(appSource).toContain("<RunsPanel onOpenChatSession={handleOpenChatSession}");
+    expect(preloadSource).toContain("openAgentRunSession");
+    expect(runsPanelSource).toContain("openAgentRunSession(");
+    expect(runsPanelSource).toContain("props.onOpenChatSession(result.sessionId)");
+    expect(runsPanelSource).not.toContain("if (action.kind === \"review_permission\") {\n      navigateToHash(\"chat\")");
+  });
+
+  it("keeps scheduled tasks editable from the saved task card", () => {
+    expect(preloadSource).toContain("updateScheduledTask");
+    expect(scheduledTasksPanelSource).toContain("handleOpenEditDialog");
+    expect(scheduledTasksPanelSource).toContain("编辑任务");
+    expect(scheduledTasksPanelSource).toContain("updateScheduledTask(editingTaskId");
   });
 
   it("keeps goal execution UI compact when long milestone text is active", () => {

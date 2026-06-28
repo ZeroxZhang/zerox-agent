@@ -9,6 +9,7 @@ import { registerAllIpcHandlers } from "./ipc";
 import { createToolApprovalCoordinator } from "./toolApprovalCoordinator";
 import { issueToolResultRefReadCapability } from "./toolResultOffloadStore";
 import type { Goal } from "../shared/agentGoal";
+import type { AgentExecutionCheckpoint } from "../shared/agentExecution";
 import type { GoalProgressEvent } from "../shared/chat";
 import type { ChatOutputPart } from "../shared/chatOutput";
 
@@ -252,6 +253,70 @@ describe("app container goal drafts", () => {
         },
       }),
     ).resolves.toMatchObject({ ok: false });
+  });
+
+  it("creates a chat session for legacy active runs that were not bound to one", async () => {
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const task = await container.scheduledTaskStore().create({
+      name: "每天汇报天气",
+      skillName: "",
+      enabled: true,
+      schedule: { kind: "daily", time: "12:33" },
+      input: { request: "查询上海此刻的天气" },
+    });
+    const checkpoint: AgentExecutionCheckpoint = {
+      id: "checkpoint_legacy",
+      runId: "run_legacy_without_session",
+      taskId: task.id,
+      status: "waiting_for_approval",
+      currentStepId: "step_1",
+      steps: [
+        {
+          id: "step_1",
+          description: task.name,
+          expectedOutcome: "Task completes with a final summary.",
+          state: "waiting_for_approval",
+          attempts: 1,
+        },
+      ],
+      messages: [
+        {
+          role: "user",
+          content: "定时任务：每天汇报天气\n\n查询上海此刻的天气",
+        },
+      ],
+      toolCallCount: 0,
+      createdAt: "2026-06-28T04:33:00.000Z",
+      updatedAt: "2026-06-28T04:33:35.632Z",
+    };
+    await container.agentExecutionStore().save(checkpoint);
+
+    const result = await container.openAgentRunSession(
+      "run_legacy_without_session",
+    );
+
+    expect(result).toMatchObject({ ok: true, sessionId: expect.any(String) });
+    if (!result.ok) {
+      throw new Error(result.message);
+    }
+    const session = await container.chatSessionStore().get(result.sessionId);
+    expect(session?.messages.map((message) => message.content).join("\n")).toContain(
+      "定时任务：每天汇报天气",
+    );
+    expect(session?.messages.map((message) => message.content).join("\n")).toContain(
+      "等待授权",
+    );
+    await expect(
+      container.agentExecutionStore().get("run_legacy_without_session"),
+    ).resolves.toMatchObject({
+      runContext: {
+        sessionId: result.sessionId,
+      },
+    });
   });
 
   it("rejects globally automatic approval for untrusted git worktree creation", async () => {

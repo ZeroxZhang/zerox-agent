@@ -8,7 +8,7 @@ type PackageJson = {
 };
 
 describe("package scripts", () => {
-  it("sets release metadata to v2.9.4", () => {
+  it("sets release metadata to v2.9.5", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -16,12 +16,12 @@ describe("package scripts", () => {
       readFileSync(path.join(process.cwd(), "package-lock.json"), "utf8"),
     ) as { version?: string; packages?: Record<string, { version?: string }> };
 
-    expect(packageJson.version).toBe("2.9.4");
-    expect(packageLock.version).toBe("2.9.4");
-    expect(packageLock.packages?.[""]?.version).toBe("2.9.4");
+    expect(packageJson.version).toBe("2.9.5");
+    expect(packageLock.version).toBe("2.9.5");
+    expect(packageLock.packages?.[""]?.version).toBe("2.9.5");
   });
 
-  it("keeps release gates done through v2.9.4", () => {
+  it("keeps release gates done through v2.9.5", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -35,8 +35,19 @@ describe("package scripts", () => {
       }>;
     };
 
-    expect(packageJson.version).toBe("2.9.4");
+    expect(packageJson.version).toBe("2.9.5");
     expect(featureList.features.filter((feature) => feature.status !== "done")).toEqual([]);
+    expect(featureList.features).toContainEqual(
+      expect.objectContaining({
+        id: "P27-v2.9.5-scheduled-task-session-recovery-release",
+        status: "done",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("package metadata reports version 2.9.5"),
+          expect.stringContaining("GitHub Release v2.9.5"),
+          expect.stringContaining("Saved scheduled tasks can be edited"),
+        ]),
+      }),
+    );
     expect(featureList.features).toContainEqual(
       expect.objectContaining({
         id: "P26-v2.9.4-scheduled-task-automation-release",

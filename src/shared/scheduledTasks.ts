@@ -68,6 +68,17 @@ export type CreateScheduledTaskResult =
       message: string;
     };
 
+export type UpdateScheduledTaskResult =
+  | {
+      ok: true;
+      task: ScheduledTask | null;
+    }
+  | {
+      ok: false;
+      errors: ScheduledTaskValidationErrors;
+      message: string;
+    };
+
 export type UpdateScheduledTaskEnabledResult =
   | { ok: true; task: ScheduledTask | null }
   | { ok: false; message: string };

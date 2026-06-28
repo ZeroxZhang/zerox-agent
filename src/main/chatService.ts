@@ -171,7 +171,10 @@ export function createChatService(options: {
     Partial<Pick<ChatSessionStore, "appendActivityEvent" | "get" | "list">>;
   goalService?: ChatGoalService;
   taskStore?: Pick<ScheduledTaskStore, "create" | "list">;
-  runScheduledTask?: (taskId: string) => Promise<RunScheduledTaskResult>;
+  runScheduledTask?: (
+    taskId: string,
+    options?: { sessionId?: string },
+  ) => Promise<RunScheduledTaskResult>;
   discoverSkills?: () => Promise<SkillDiscoveryResult>;
   workspaceService?: Pick<AgentWorkspaceService, "resolveRunContext">;
   toolExecutor?: AgentToolExecutor;
@@ -641,6 +644,7 @@ export function createChatService(options: {
           : await tryRunTaskFromIntent({
               route: intentRoute,
               message: userMessage,
+              sessionId,
               taskStore: options.taskStore,
               runScheduledTask: options.runScheduledTask,
             });
@@ -2618,8 +2622,11 @@ async function tryCreateTaskFromIntent(options: {
 async function tryRunTaskFromIntent(options: {
   route: AgentIntentRoute;
   message: string;
+  sessionId: string;
   taskStore: Pick<ScheduledTaskStore, "list"> | undefined;
-  runScheduledTask: ((taskId: string) => Promise<RunScheduledTaskResult>) | undefined;
+  runScheduledTask:
+    | ((taskId: string, options?: { sessionId?: string }) => Promise<RunScheduledTaskResult>)
+    | undefined;
 }): Promise<TaskRunDetection | null> {
   if (options.route.kind !== "run_task") {
     return null;
@@ -2642,7 +2649,9 @@ async function tryRunTaskFromIntent(options: {
     };
   }
 
-  const runResult = await options.runScheduledTask(matchedTask.id);
+  const runResult = await options.runScheduledTask(matchedTask.id, {
+    sessionId: options.sessionId,
+  });
   if (!runResult.ok) {
     return {
       ok: false,

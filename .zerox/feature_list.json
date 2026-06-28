@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-06-27T12:08:00.000+08:00",
+  "updatedAt": "2026-06-28T17:25:00.000+08:00",
   "features": [
     {
       "id": "P0-repo-local-harness",
@@ -1983,6 +1983,54 @@
         "npm run harness:check",
         "npm run dist:mac",
         "BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v2.9.4' \"release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent\"",
+        "git diff --check"
+      ]
+    },
+    {
+      "id": "P27-v2.9.5-scheduled-task-session-recovery-release",
+      "priority": 57,
+      "status": "done",
+      "title": "v2.9.5 Scheduled task editing and run session recovery release",
+      "files": [
+        "package.json",
+        "package-lock.json",
+        "README.md",
+        "src/shared/packageScripts.test.ts",
+        "src/shared/readme.test.ts",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md",
+        "src/shared/scheduledTasks.ts",
+        "src/shared/storageContract.ts",
+        "src/shared/agentRuns.ts",
+        "src/main/taskStore.ts",
+        "src/main/storage/repositories/index.ts",
+        "src/main/scheduledTaskToolVisibility.ts",
+        "src/main/agentRuntimeEngine.ts",
+        "src/main/agentRunnerService.ts",
+        "src/main/container.ts",
+        "src/main/ipc/index.ts",
+        "src/preload/index.ts",
+        "src/renderer/components/ScheduledTasksPanel.tsx",
+        "src/renderer/components/RunsPanel.tsx"
+      ],
+      "definitionOfDone": [
+        "package metadata reports version 2.9.5 in package.json and package-lock.json",
+        "README documents v2.9.5 scheduled task editing and run session recovery in English and Chinese",
+        "Saved scheduled tasks can be edited without losing run history and next-run calculation is recomputed",
+        "Run-record open-session and review-permission actions recover legacy checkpoints without a session binding",
+        "Prompt-only scheduled tasks hide shell_exec and test_run unless explicit shell command templates are configured",
+        "macOS DMG, ZIP, blockmap, and latest-mac.yml artifacts are regenerated for v2.9.5",
+        "GitHub Release v2.9.5 is published with the regenerated macOS assets",
+        "main branch and v2.9.5 tag are pushed to GitHub"
+      ],
+      "verification": [
+        "npm test -- src/main/taskStore.test.ts src/main/agentRuntimeEngine.test.ts src/main/container.test.ts src/main/storage/storeProxy.test.ts",
+        "npm test -- src/renderer/materialDesign.test.ts src/main/ipc/index.test.ts src/shared/readme.test.ts src/shared/packageScripts.test.ts",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "npm run dist:mac",
+        "BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v2.9.5' \"release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent\"",
         "git diff --check"
       ]
     }

@@ -132,6 +132,17 @@ export function createToolAuthorizationService(options: {
       }
       if (
         !decision.allowed &&
+        task &&
+        shouldAutoApproveScheduledTask(task, request, decision.reason)
+      ) {
+        decision = {
+          allowed: true,
+          reason: `自动任务全自动模式已放行 ${request.toolName}。原始策略：${decision.reason}`,
+        };
+      }
+      if (
+        !decision.allowed &&
+        shouldRequestInteractiveApproval(task) &&
         options.requestUserApproval &&
         shouldRequestUserApproval(decision.reason)
       ) {
@@ -172,6 +183,28 @@ export function createToolAuthorizationService(options: {
       };
     },
   };
+}
+
+function shouldRequestInteractiveApproval(
+  task: { schedule: { kind: string } } | null,
+): boolean {
+  return !task || task.schedule.kind === "manual";
+}
+
+function shouldAutoApproveScheduledTask(
+  task: { schedule: { kind: string } },
+  request: ToolCallRequest,
+  reason: string,
+): boolean {
+  if (task.schedule.kind === "manual") {
+    return false;
+  }
+
+  if (request.toolName === "shell_exec" || request.toolName === "test_run") {
+    return false;
+  }
+
+  return shouldRequestUserApproval(reason);
 }
 
 function resolvePermissionRules(

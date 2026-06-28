@@ -68,6 +68,7 @@ import type {
   AgentRunEvent,
   AgentRunRecord,
   CancelScheduledTaskRunResult,
+  OpenAgentRunSessionResult,
   PauseAgentRunResult,
   RunScheduledTaskResult,
 } from "../shared/agentRuns";
@@ -88,6 +89,7 @@ import type {
   DeleteScheduledTaskResult,
   ScheduledTask,
   ScheduledTaskInput,
+  UpdateScheduledTaskResult,
   UpdateScheduledTaskEnabledResult,
 } from "../shared/scheduledTasks";
 import type { SkillDiscoveryResult } from "../shared/skills";
@@ -164,6 +166,11 @@ const buildingAgent = {
     input: ScheduledTaskInput,
   ): Promise<CreateScheduledTaskResult> =>
     ipcRenderer.invoke("scheduledTasks:create", input),
+  updateScheduledTask: (
+    taskId: string,
+    input: ScheduledTaskInput,
+  ): Promise<UpdateScheduledTaskResult> =>
+    ipcRenderer.invoke("scheduledTasks:update", taskId, input),
   setScheduledTaskEnabled: (
     taskId: string,
     enabled: boolean,
@@ -247,6 +254,10 @@ const buildingAgent = {
     ipcRenderer.invoke("multiAgentSessions:list"),
   listAgentRunTrajectory: (runId: string): Promise<AgentTrajectoryEvent[]> =>
     ipcRenderer.invoke("agentRuns:listTrajectory", runId),
+  openAgentRunSession: (
+    runId: string,
+  ): Promise<OpenAgentRunSessionResult> =>
+    ipcRenderer.invoke("agentRuns:openSession", runId),
   createGoal: (input: CreateGoalInput): Promise<GoalOperationResult> =>
     ipcRenderer.invoke("goal:create", input),
   startGoal: (goalId: string): Promise<GoalOperationResult> =>

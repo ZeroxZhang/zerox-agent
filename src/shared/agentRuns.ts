@@ -70,3 +70,13 @@ export type CancelScheduledTaskRunResult =
     };
 
 export type PauseAgentRunResult = CancelScheduledTaskRunResult;
+
+export type OpenAgentRunSessionResult =
+  | {
+      ok: true;
+      sessionId: string;
+    }
+  | {
+      ok: false;
+      message: string;
+    };

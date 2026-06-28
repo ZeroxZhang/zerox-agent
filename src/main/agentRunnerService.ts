@@ -41,6 +41,7 @@ import type {
   RunScheduledTaskResult,
 } from "../shared/agentRuns";
 import type { SkillRecord } from "../shared/skills";
+import { filterToolDefinitionsForScheduledTask } from "./scheduledTaskToolVisibility";
 
 export type AgentModelProfile = {
   baseUrl: string;
@@ -54,7 +55,7 @@ export type AgentModelProfile = {
 export type AgentRunnerService = {
   runTask(
     taskId: string,
-    options?: { signal?: AbortSignal },
+    options?: { signal?: AbortSignal; sessionId?: string },
   ): Promise<RunScheduledTaskResult>;
   resumeRun(
     runId: string,
@@ -302,10 +303,12 @@ export function createAgentRunnerService(options: {
 
     emit(createEvent("info", "Agent run started.", "planning"));
 
-    const toolDefinitions =
+    const toolDefinitions = filterToolDefinitionsForScheduledTask(
       "getRegistry" in options.toolExecutor
         ? (options.toolExecutor as AgentToolExecutor & { getRegistry(): { getDefinitions(): ToolDefinition[] } }).getRegistry().getDefinitions()
-        : buildToolDefinitions();
+        : buildToolDefinitions(),
+      task,
+    );
     const toolNames = toolDefinitions.map((td) => td.function.name);
 
     // Fetch model profile early so we can pass modelId to the system prompt builder.

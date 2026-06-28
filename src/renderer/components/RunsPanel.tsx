@@ -40,7 +40,9 @@ type SelectedRunSelection = {
   source: "active" | "history";
 };
 
-export function RunsPanel() {
+export function RunsPanel(props: {
+  onOpenChatSession: (sessionId: string) => void;
+}) {
   const [runs, setRuns] = useState<AgentRunRecord[]>([]);
   const [activeExecutions, setActiveExecutions] = useState<
     AgentExecutionCheckpoint[]
@@ -474,12 +476,12 @@ export function RunsPanel() {
     }
 
     if (action.kind === "open_chat") {
-      navigateToHash("chat");
+      await openChatSessionForRecord(selectedRunRecord);
       return;
     }
 
     if (action.kind === "review_permission") {
-      navigateToHash("chat");
+      await openChatSessionForRecord(selectedRunRecord);
       return;
     }
 
@@ -498,7 +500,7 @@ export function RunsPanel() {
         <div className="task-records-heading-actions">
           <button
             className="secondary-action"
-            onClick={() => navigateToHash("chat")}
+            onClick={() => void openChatSessionForRecord(selectedRunRecord)}
             type="button"
           >
             打开会话
@@ -746,6 +748,50 @@ export function RunsPanel() {
       <p className={`settings-message is-${status.kind}`}>{status.message}</p>
     </section>
   );
+
+  async function openChatSessionForRecord(
+    record: AgentRunRecord | AgentExecutionCheckpoint | null,
+  ): Promise<void> {
+    if (!record) {
+      setStatus({
+        kind: "error",
+        message: "还没有选中可打开的任务记录。",
+      });
+      return;
+    }
+
+    if (!window.buildingAgent) {
+      const sessionId = record.runContext?.sessionId;
+      if (sessionId) {
+        props.onOpenChatSession(sessionId);
+        return;
+      }
+      setStatus({
+        kind: "error",
+        message: "浏览器预览模式无法打开真实任务会话。",
+      });
+      return;
+    }
+
+    setStatus({
+      kind: "loading",
+      message: "正在打开任务会话...",
+    });
+
+    const result = await window.buildingAgent.openAgentRunSession(
+      getRunRecordStableId(record),
+    );
+    if (!result.ok) {
+      setStatus({ kind: "error", message: result.message });
+      return;
+    }
+
+    props.onOpenChatSession(result.sessionId);
+    setStatus({
+      kind: "idle",
+      message: "已打开任务会话。",
+    });
+  }
 }
 
 function navigateToHash(sectionId: "chat" | "scheduled-tasks" | "settings") {

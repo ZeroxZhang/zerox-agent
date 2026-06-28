@@ -156,6 +156,15 @@ describe.each(["sqlite", "dual"] as StorageBackend[])(
         const store = createScheduledTaskStore({ configDir: dir, backend, storage });
         const task = await store.create({ name: "Daily", skillName: "noop", enabled: true, schedule: { kind: "manual" }, input: {} });
         expect((await store.get(task.id))?.name).toBe("Daily");
+        await store.update(task.id, {
+          name: "Daily weather",
+          skillName: "noop",
+          enabled: true,
+          schedule: { kind: "daily", time: "12:30" },
+          input: { request: "weather" },
+        });
+        expect((await store.get(task.id))?.name).toBe("Daily weather");
+        expect((await store.get(task.id))?.nextRunAt).toBeTruthy();
         await store.setEnabled(task.id, false);
         expect((await store.get(task.id))?.enabled).toBe(false);
         await store.recordRun(task.id, new Date("2026-06-19T01:00:00.000Z"));

@@ -47,6 +47,7 @@ export function ScheduledTasksPanel() {
   const [loading, setLoading] = useState(true);
   const [createMenuOpen, setCreateMenuOpen] = useState(true);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [isSubmittingCreateTask, setIsSubmittingCreateTask] = useState(false);
   const [draftText, setDraftText] = useState("");
   const [scheduleDraftText, setScheduleDraftText] = useState("");
@@ -220,7 +221,10 @@ export function ScheduledTasksPanel() {
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsSubmittingCreateTask(true);
-    setCreateStatus({ kind: "saving", message: "正在创建任务..." });
+    setCreateStatus({
+      kind: "saving",
+      message: editingTaskId ? "正在保存修改..." : "正在创建任务...",
+    });
     setErrors({});
 
     try {
@@ -244,11 +248,14 @@ export function ScheduledTasksPanel() {
         return;
       }
 
-      const result = await window.buildingAgent.createScheduledTask({
+      const taskInput: ScheduledTaskInput = {
         ...form,
         input: mergeDraftRequestIntoTaskInput(parsedInput.value, draftText),
         permissions: permissionPolicy,
-      });
+      };
+      const result = editingTaskId
+        ? await window.buildingAgent.updateScheduledTask(editingTaskId, taskInput)
+        : await window.buildingAgent.createScheduledTask(taskInput);
 
       if (!result.ok) {
         setErrors(result.errors);
@@ -256,11 +263,31 @@ export function ScheduledTasksPanel() {
         return;
       }
 
-      setTasks((currentTasks) => [...currentTasks, result.task]);
-      setStatus({ kind: "saved", message: "任务已创建。" });
-      setCreateStatus({ kind: "saved", message: "任务已创建。" });
+      if (!result.task) {
+        const message = "没有找到这个任务。";
+        setCreateStatus({ kind: "error", message });
+        setStatus({ kind: "error", message });
+        return;
+      }
+
+      setTasks((currentTasks) =>
+        editingTaskId
+          ? currentTasks.map((currentTask) =>
+              currentTask.id === result.task!.id ? result.task! : currentTask,
+            )
+          : [...currentTasks, result.task!],
+      );
+      setStatus({
+        kind: "saved",
+        message: editingTaskId ? "任务已更新。" : "任务已创建。",
+      });
+      setCreateStatus({
+        kind: "saved",
+        message: editingTaskId ? "任务已更新。" : "任务已创建。",
+      });
       setCreateDialogOpen(false);
       setCreateMenuOpen(false);
+      setEditingTaskId(null);
     } finally {
       setIsSubmittingCreateTask(false);
     }
@@ -419,6 +446,39 @@ export function ScheduledTasksPanel() {
     setErrors({});
     setCreateStatus({ kind: "idle", message: "" });
     setScheduleDraftText("");
+    setEditingTaskId(null);
+    setDraftText("");
+    setInputJson(defaultInputJson);
+    setPermissionPolicy(defaultPermissionPolicy);
+    setForm({
+      name: "整理下载文件夹",
+      skillName: "",
+      enabled: true,
+      schedule: { kind: "daily", time: "09:00" },
+      input: {},
+    });
+    setCreateDialogOpen(true);
+    setCreateMenuOpen(false);
+  }
+
+  function handleOpenEditDialog(task: ScheduledTask) {
+    setErrors({});
+    setCreateStatus({ kind: "idle", message: "" });
+    setScheduleDraftText("");
+    setEditingTaskId(task.id);
+    setDraftText(
+      typeof task.input.request === "string" ? task.input.request : "",
+    );
+    setInputJson(formatTaskInputJsonForEdit(task.input));
+    setPermissionPolicy(task.permissions);
+    setForm({
+      name: task.name,
+      skillName: task.skillName,
+      enabled: task.enabled,
+      schedule: task.schedule,
+      input: task.input,
+      permissions: task.permissions,
+    });
     setCreateDialogOpen(true);
     setCreateMenuOpen(false);
   }
@@ -426,6 +486,7 @@ export function ScheduledTasksPanel() {
   function handleCloseCreateDialog() {
     if (!isSubmittingCreateTask) {
       setCreateDialogOpen(false);
+      setEditingTaskId(null);
     }
   }
 
@@ -537,6 +598,14 @@ export function ScheduledTasksPanel() {
                         <button
                           className="secondary-action"
                           disabled={taskIsBusy}
+                          onClick={() => handleOpenEditDialog(task)}
+                          type="button"
+                        >
+                          编辑
+                        </button>
+                        <button
+                          className="secondary-action"
+                          disabled={taskIsBusy}
                           onClick={() =>
                             void handleSetTaskEnabled(task, !task.enabled)
                           }
@@ -611,7 +680,7 @@ export function ScheduledTasksPanel() {
           }}
         >
           <section
-            aria-label="新建任务"
+            aria-label={editingTaskId ? "编辑任务" : "新建任务"}
             aria-modal="true"
             className="scheduled-task-dialog"
             ref={createDialogRef}
@@ -619,8 +688,14 @@ export function ScheduledTasksPanel() {
           >
             <header className="scheduled-task-dialog-header">
               <div>
-                <h2 ref={createDialogHeadingRef} tabIndex={-1}>新建任务</h2>
-                <p>描述任务目标和执行时间，Zerox 会按计划自动执行。</p>
+                <h2 ref={createDialogHeadingRef} tabIndex={-1}>
+                  {editingTaskId ? "编辑任务" : "新建任务"}
+                </h2>
+                <p>
+                  {editingTaskId
+                    ? "调整任务目标、执行时间和权限，保存后从下一次调度生效。"
+                    : "描述任务目标和执行时间，Zerox 会按计划自动执行。"}
+                </p>
               </div>
               <button
                 aria-label="关闭"
@@ -898,7 +973,7 @@ export function ScheduledTasksPanel() {
                   disabled={isSubmittingCreateTask}
                   type="submit"
                 >
-                  保存任务
+                  {editingTaskId ? "保存修改" : "保存任务"}
                 </button>
               </div>
             </form>
@@ -923,6 +998,15 @@ function mergeDraftRequestIntoTaskInput(
     ...input,
     request,
   };
+}
+
+function formatTaskInputJsonForEdit(input: Record<string, unknown>): string {
+  const editableInput = { ...input };
+  if (typeof editableInput.request === "string") {
+    delete editableInput.request;
+  }
+
+  return JSON.stringify(editableInput, null, 2);
 }
 
 function summarizeTaskIntent(task: ScheduledTask): string {

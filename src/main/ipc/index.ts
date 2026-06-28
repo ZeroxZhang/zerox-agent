@@ -18,6 +18,7 @@ import type {
 } from "../../shared/chat";
 import type {
   CancelScheduledTaskRunResult,
+  OpenAgentRunSessionResult,
   PauseAgentRunResult,
   RunScheduledTaskResult,
 } from "../../shared/agentRuns";
@@ -25,6 +26,7 @@ import type {
   CreateScheduledTaskResult,
   DeleteScheduledTaskResult,
   ScheduledTaskInput,
+  UpdateScheduledTaskResult,
   UpdateScheduledTaskEnabledResult,
 } from "../../shared/scheduledTasks";
 import type { ToolCallRequest } from "../../shared/toolPermissions";
@@ -225,6 +227,35 @@ function registerTasksIpcHandlers(container: AppContainer): void {
     },
   );
   ipcMain.handle(
+    "scheduledTasks:update",
+    async (
+      _event,
+      taskId: string,
+      input: ScheduledTaskInput,
+    ): Promise<UpdateScheduledTaskResult> => {
+      try {
+        return {
+          ok: true,
+          task: await container.scheduledTaskStore().update(taskId, input),
+        };
+      } catch (error) {
+        if (error instanceof ScheduledTaskValidationError) {
+          return {
+            ok: false,
+            errors: error.errors,
+            message: error.message,
+          };
+        }
+
+        return {
+          ok: false,
+          errors: {},
+          message: error instanceof Error ? error.message : "无法更新任务。",
+        };
+      }
+    },
+  );
+  ipcMain.handle(
     "scheduledTasks:delete",
     async (_event, taskId: string): Promise<DeleteScheduledTaskResult> => {
       try {
@@ -287,6 +318,11 @@ function registerRunsIpcHandlers(container: AppContainer): void {
   ipcMain.handle(
     "agentRuns:listTrajectory",
     (_event, runId: string) => container.agentTrajectoryStore().list(runId),
+  );
+  ipcMain.handle(
+    "agentRuns:openSession",
+    async (_event, runId: string): Promise<OpenAgentRunSessionResult> =>
+      container.openAgentRunSession(runId),
   );
   ipcMain.handle(
     "agentRuns:runTask",

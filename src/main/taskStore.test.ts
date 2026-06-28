@@ -6,6 +6,7 @@ import {
   ScheduledTaskValidationError,
   createScheduledTaskStore,
 } from "./taskStore";
+import { computeNextRunAt } from "../shared/scheduledTasks";
 import { getDefaultTaskPermissionPolicy } from "../shared/toolPermissions";
 
 describe("scheduled task store", () => {
@@ -87,6 +88,52 @@ describe("scheduled task store", () => {
 
     const reloaded = createScheduledTaskStore({ configDir });
     await expect(reloaded.get("task_interval")).resolves.toEqual(updated);
+  });
+
+  it("updates a task draft and recomputes the next run without losing run history", async () => {
+    const store = createScheduledTaskStore({
+      configDir,
+      createId: () => "task_update",
+      now: () => new Date("2026-06-05T08:00:00.000Z"),
+    });
+    await store.create({
+      name: "Daily weather",
+      skillName: "",
+      enabled: true,
+      schedule: { kind: "daily", time: "09:00" },
+      input: { request: "查询当地天气" },
+    });
+    await store.recordRun(
+      "task_update",
+      new Date("2026-06-05T08:10:00.000Z"),
+    );
+
+    const updated = await store.update(
+      "task_update",
+      {
+        name: "Daily Shanghai weather",
+        skillName: "",
+        enabled: true,
+        schedule: { kind: "daily", time: "12:30" },
+        input: { request: "查询上海此刻天气" },
+      },
+      new Date("2026-06-05T08:20:00.000Z"),
+    );
+
+    expect(updated).toMatchObject({
+      id: "task_update",
+      name: "Daily Shanghai weather",
+      input: { request: "查询上海此刻天气" },
+      lastRunAt: "2026-06-05T08:10:00.000Z",
+      nextRunAt: computeNextRunAt(
+        { kind: "daily", time: "12:30" },
+        new Date("2026-06-05T08:20:00.000Z"),
+      ),
+      updatedAt: "2026-06-05T08:20:00.000Z",
+    });
+
+    const reloaded = createScheduledTaskStore({ configDir });
+    await expect(reloaded.get("task_update")).resolves.toEqual(updated);
   });
 
   it("pauses and resumes a task while recomputing the next run", async () => {

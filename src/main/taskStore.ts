@@ -21,6 +21,11 @@ export type ScheduledTaskStore = {
   list(): Promise<ScheduledTask[]>;
   get(taskId: string): Promise<ScheduledTask | null>;
   create(input: ScheduledTaskInput): Promise<ScheduledTask>;
+  update(
+    taskId: string,
+    input: ScheduledTaskInput,
+    changedAt?: Date,
+  ): Promise<ScheduledTask | null>;
   recordRun(taskId: string, completedAt: Date): Promise<ScheduledTask | null>;
   setEnabled(
     taskId: string,
@@ -122,6 +127,48 @@ export function createScheduledTaskStore(options: ScheduledTaskStoreOptions): Sc
       await writeStoredTasks(nextStored);
 
       return task;
+    },
+
+    async update(taskId, input, changedAt = now()) {
+      const normalized = normalizeScheduledTaskInput(input);
+      const validation = validateScheduledTaskInput(normalized);
+
+      if (!validation.valid) {
+        throw new ScheduledTaskValidationError(validation.errors);
+      }
+
+      const stored = await readStoredTasks();
+      const timestamp = changedAt.toISOString();
+      let updatedTask: ScheduledTask | null = null;
+      const nextTasks = stored.tasks.map((task) => {
+        if (task.id !== taskId) {
+          return task;
+        }
+
+        updatedTask = {
+          ...task,
+          ...normalized,
+          id: task.id,
+          createdAt: task.createdAt,
+          lastRunAt: task.lastRunAt,
+          updatedAt: timestamp,
+          nextRunAt: normalized.enabled
+            ? computeNextRunAt(normalized.schedule, changedAt)
+            : null,
+        };
+        return updatedTask;
+      });
+
+      if (!updatedTask) {
+        return null;
+      }
+
+      await writeStoredTasks({
+        schemaVersion: 1,
+        tasks: nextTasks,
+      });
+
+      return updatedTask;
     },
 
     async recordRun(taskId, completedAt) {
@@ -229,6 +276,12 @@ export function createScheduledTaskStore(options: ScheduledTaskStoreOptions): Sc
       const task = await jsonCreate(input); // validates + normalizes + writes JSON
       repo.create(task);
       return task;
+    },
+    async update(taskId, input, changedAt) {
+      const effectiveChangedAt = changedAt ?? now();
+      const updated = await jsonImpl.update(taskId, input, effectiveChangedAt);
+      if (updated) repo.update(taskId, input, effectiveChangedAt);
+      return updated;
     },
     async recordRun(taskId, completedAt) {
       const updated = await jsonImpl.recordRun(taskId, completedAt);

@@ -395,6 +395,173 @@ describe("tool authorization service", () => {
     ]);
   });
 
+  it("auto-approves eligible policy denials for scheduled tasks without opening user approval", async () => {
+    const approvalRequests: unknown[] = [];
+    const lifecycleEvents: string[] = [];
+    const taskStore = createScheduledTaskStore({
+      configDir,
+      createId: () => "task_daily_auto",
+      now: () => new Date("2026-06-05T08:00:00.000Z"),
+    });
+    const auditLog = createToolAuditLog({
+      configDir,
+      createId: () => "audit_daily_auto",
+      now: () => new Date("2026-06-05T08:01:00.000Z"),
+    });
+    const service = createToolAuthorizationService({
+      taskStore,
+      auditLog,
+      requestUserApproval: async (request) => {
+        approvalRequests.push(request);
+        return {
+          approved: false,
+          reason: "should not ask",
+        };
+      },
+    });
+    await taskStore.create({
+      name: "Daily weather",
+      skillName: "",
+      enabled: true,
+      schedule: { kind: "daily", time: "09:00" },
+      input: { request: "每天汇报天气" },
+      permissions: {
+        files: { read: [], write: [] },
+        web: { search: false, fetchDomains: [] },
+        shell: { commands: [] },
+      },
+    });
+
+    const result = await service.authorize(
+      "task_daily_auto",
+      {
+        toolName: "web_search",
+        args: { query: "上海天气" },
+      },
+      {
+        onApprovalRequested: async () => {
+          lifecycleEvents.push("requested");
+        },
+        onApprovalResolved: async () => {
+          lifecycleEvents.push("resolved");
+        },
+      },
+    );
+
+    expect(approvalRequests).toEqual([]);
+    expect(lifecycleEvents).toEqual([]);
+    expect(result).toMatchObject({
+      ok: true,
+      decision: {
+        allowed: true,
+        reason: "自动任务全自动模式已放行 web_search。原始策略：这个任务未允许 web_search。",
+      },
+      auditEvent: {
+        id: "audit_daily_auto",
+        decision: {
+          allowed: true,
+          reason: "自动任务全自动模式已放行 web_search。原始策略：这个任务未允许 web_search。",
+        },
+      },
+    });
+  });
+
+  it("does not auto-approve scheduled task requests blocked by the run sandbox", async () => {
+    let approvalCount = 0;
+    const taskStore = createScheduledTaskStore({
+      configDir,
+      createId: () => "task_daily_workspace",
+    });
+    const auditLog = createToolAuditLog({ configDir });
+    const service = createToolAuthorizationService({
+      taskStore,
+      auditLog,
+      requestUserApproval: async () => {
+        approvalCount += 1;
+        return { approved: true };
+      },
+    });
+    await taskStore.create({
+      name: "Daily report",
+      skillName: "",
+      enabled: true,
+      schedule: { kind: "daily", time: "09:00" },
+      input: { request: "每天写报告" },
+      permissions: {
+        files: { read: ["/Users/demo"], write: ["/Users/demo"] },
+        web: { search: false, fetchDomains: [] },
+        shell: { commands: [] },
+      },
+    });
+
+    await expect(
+      service.authorize(
+        "task_daily_workspace",
+        {
+          toolName: "file_write",
+          args: { path: "/Users/demo/Desktop/report.md", content: "done" },
+        },
+        {
+          runContext: buildPrimaryRunContext({
+            workspaceId: "workspace_1",
+            workspaceRoot: "/Users/demo/project",
+          }),
+        },
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      decision: {
+        allowed: false,
+        reason:
+          "file_write 被运行沙箱阻止：路径不在工作区或额外可写目录内。",
+      },
+    });
+    expect(approvalCount).toBe(0);
+  });
+
+  it("does not auto-approve scheduled task shell commands outside the task policy", async () => {
+    let approvalCount = 0;
+    const taskStore = createScheduledTaskStore({
+      configDir,
+      createId: () => "task_daily_shell",
+    });
+    const auditLog = createToolAuditLog({ configDir });
+    const service = createToolAuthorizationService({
+      taskStore,
+      auditLog,
+      requestUserApproval: async () => {
+        approvalCount += 1;
+        return { approved: true };
+      },
+    });
+    await taskStore.create({
+      name: "Daily shell",
+      skillName: "",
+      enabled: true,
+      schedule: { kind: "daily", time: "09:00" },
+      input: { request: "每天运行本地命令" },
+      permissions: {
+        files: { read: [], write: [] },
+        web: { search: false, fetchDomains: [] },
+        shell: { commands: [] },
+      },
+    });
+
+    await expect(
+      service.authorize("task_daily_shell", {
+        toolName: "shell_exec",
+        args: { command: "rm -rf /tmp/cache" },
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      decision: {
+        allowed: false,
+        reason: "shell_exec command 不匹配已授权模板。",
+      },
+    });
+    expect(approvalCount).toBe(0);
+  });
+
   it("notifies callers when user approval is requested and resolved", async () => {
     const lifecycleEvents: string[] = [];
     const taskStore = createScheduledTaskStore({

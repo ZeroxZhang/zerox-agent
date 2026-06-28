@@ -14,7 +14,7 @@ describe("README", () => {
     expect(readme).toContain("npm run pack:mac");
     expect(readme).toContain("npm run dist:mac");
     expect(readme).toContain("xattr -dr com.apple.quarantine");
-    expect(readme).toContain("Zerox-Agent-2.9.4-arm64.dmg");
+    expect(readme).toContain("Zerox-Agent-2.9.5-arm64.dmg");
     expect(readme).toContain("npm run harness:check");
     expect(readme).toContain("npm run harness:score");
     expect(readme).toContain("npm run episode:export");
@@ -52,8 +52,8 @@ describe("README", () => {
     expect(positioning).toContain("Zerox does not run unbounded autonomous loops");
     expect(readme).toContain("session-native Goal Mode");
     expect(readme).toContain("Chat Session mode");
-    expect(readme).toContain("current release is **v2.9.4**");
-    expect(readme).toContain("当前版本是 **v2.9.4**");
+    expect(readme).toContain("current release is **v2.9.5**");
+    expect(readme).toContain("当前版本是 **v2.9.5**");
   });
 
   it("documents Goal Mode architecture, eval coverage, and feature-list status", () => {
@@ -93,10 +93,15 @@ describe("README", () => {
     expect(readme).toContain("Goal Mode 架构");
     expect(readme).toContain("artifact evidence contract");
     expect(readme).toContain("artifact evidence files");
-    expect(readme).toContain("1268 tests");
-    expect(readme).toContain("1268 个测试");
-    expect(readme).toContain("Current version: v2.9.4.");
-    expect(readme).toContain("当前版本：v2.9.4。");
+    expect(readme).toContain("1277 tests");
+    expect(readme).toContain("1277 个测试");
+    expect(readme).toContain("Current version: v2.9.5.");
+    expect(readme).toContain("当前版本：v2.9.5。");
+    expect(readme).toContain("v2.9.5");
+    expect(readme).toContain("Scheduled Task Editing And Run Session Recovery");
+    expect(readme).toContain("定时任务编辑与运行会话恢复");
+    expect(readme).toContain("[x] v2.9.5 scheduled task editing and run session recovery");
+    expect(readme).toContain("[x] v2.9.5 定时任务编辑与运行会话恢复");
     expect(readme).toContain("v2.9.4");
     expect(readme).toContain("Scheduled Task Automation Semantics");
     expect(readme).toContain("定时任务自动化语义修正");

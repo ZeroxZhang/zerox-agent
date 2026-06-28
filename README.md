@@ -50,15 +50,19 @@
 
 <h2 id="overview-en">Overview</h2>
 
-**Zerox Agent** is a local-first desktop control plane for personal AI agents. The current release is **v2.9.4**. The name derives from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
+**Zerox Agent** is a local-first desktop control plane for personal AI agents. The current release is **v2.9.5**. The name derives from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
 
 It is not a chat wrapper or a generic hosted agent surface. It runs locally, configures OpenAI-compatible models, scans local `SKILL.md` skill files, executes recoverable agent runs, invokes permission-controlled tools, tracks parent/child multi-agent sessions, persists experiential knowledge into local long-term memory, and keeps learning user-reviewed before it changes future behavior.
 
 The product boundary is documented in [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md): Zerox optimizes for trusted local control, recoverable agent runs, explicit permissions, workspace-scoped runs, observable trajectories, parent/child multi-agent sessions, and user-reviewed learning. Runtime, workspace, and learning details live in [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md), [`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md), and [`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md).
 
+## v2.9.5 - Scheduled Task Editing And Run Session Recovery
+
+Zerox Agent v2.9.5 completes the scheduled task workflow after real packaged-app testing. Saved tasks can now be edited from the task card, preserving run history while recomputing the next schedule. Task-record actions open the actual run session through a main-process `openAgentRunSession` bridge; legacy active checkpoints without a session are repaired by creating a chat transcript and writing the new `sessionId` back to the checkpoint. Prompt-only scheduled runs also hide `shell_exec` and `test_run` unless explicit shell templates are configured, so ordinary full-auto tasks such as weather summaries can use web tools without accidentally failing on shell policy.
+
 ## v2.9.4 - Scheduled Task Automation Semantics
 
-Zerox Agent v2.9.4 formalizes the simplified task module as an automatic scheduling surface. New tasks are prompt-first instead of skill-required: users describe what should happen, when it should run, where results should go, and when the task should stop. The scheduler now supports daily, workday, weekly, and interval rules in the consumer-facing dialog while keeping legacy manual/Cron records readable. Prompt-only tasks run as `prompt-task`, skills remain optional, default permissions start empty, and the create dialog warns that saved tasks run automatically and should stop with a run record when instructions or permissions are unclear.
+Zerox Agent v2.9.4 formalizes the simplified task module as an automatic scheduling surface. New tasks are prompt-first instead of skill-required: users describe what should happen, when it should run, where results should go, and when the task should stop. The scheduler now supports daily, workday, weekly, and interval rules in the consumer-facing dialog while keeping legacy manual/Cron records readable. Prompt-only tasks run as `prompt-task`, skills remain optional, scheduled runs default to full automatic execution without surfacing approval waits, and the authorization service still enforces malformed-request and workspace/sandbox denials. Each automatic run is linked to a real chat session so task records can open the run context directly.
 
 ## v2.9.3 - Goal Skill Routing And Long Transcript Performance Hotfix
 
@@ -642,7 +646,7 @@ can't be opened." The image is usually valid; remove the quarantine attribute
 before opening:
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-2.9.4-arm64.dmg"
+xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-2.9.5-arm64.dmg"
 ```
 
 If you already dragged the app into Applications, run:
@@ -673,7 +677,7 @@ npm run episode:export -- --config-dir <userData/config> --latest-validation
 npm run verify        # Tests + build + deterministic eval
 ```
 
-As of v2.9.4, `npm run verify` covers the Vitest suite, the production build, agent evals, and memory evals. The suite currently includes 183 Vitest files / 1268 tests, 26 deterministic agent eval fixtures, and 2 memory eval fixtures. Agent evals include native code engineering, research writing, reflection-after-test-failure, retry-budget exhaustion, context compaction, tool-call checkpointing, model retry, strategy-guard fragmentation recovery, episode eval-candidate, child handoff review-gate, goal-mode recovery/control, bounded-autonomy golden paths, Agent Runtime Kernel event replay, permission-rule behavior, deterministic local artifact provenance acceptance, 2.8 execution-context/tool-ledger/history contracts, memory-history scope checks, and 2.9 output rendering restore fidelity. session-native Goal Mode architecture is documented in `docs/architecture/agent-goal-mode.md`, including the artifact evidence contract, and Agent Runtime Kernel architecture is documented in `docs/architecture/agent-runtime.md`, including the Kernel Event Bridge, checkpointed compaction, retry evidence, judge verdicts, event replay, and rule-based permission evidence. Set `BUILDING_AGENT_CONFIG_DIR=/path/to/config` when running `npm run eval:agent` or `npm run harness:score` to include local promoted fixtures and pending eval candidates from that config directory. `npm run episode:export` writes local evidence packages with `run-graph.json`, `eval-candidate.json`, `trajectory.jsonl`, and verification metadata; `--latest-validation` exports the run captured by `agent-validation.json`. `npm run harness:score` emits the seven-category ETCLOVG score used by Overview as a local quality signal and now includes adversarial eval, goal-mode pass rate, goal-judge pass rate, plus the ACI/context report; Overview also displays the native Agent Capability score.
+As of v2.9.5, `npm run verify` covers the Vitest suite, the production build, agent evals, and memory evals. The suite currently includes 183 Vitest files / 1277 tests, 26 deterministic agent eval fixtures, and 2 memory eval fixtures. Agent evals include native code engineering, research writing, reflection-after-test-failure, retry-budget exhaustion, context compaction, tool-call checkpointing, model retry, strategy-guard fragmentation recovery, episode eval-candidate, child handoff review-gate, goal-mode recovery/control, bounded-autonomy golden paths, Agent Runtime Kernel event replay, permission-rule behavior, deterministic local artifact provenance acceptance, 2.8 execution-context/tool-ledger/history contracts, memory-history scope checks, and 2.9 output rendering restore fidelity. session-native Goal Mode architecture is documented in `docs/architecture/agent-goal-mode.md`, including the artifact evidence contract, and Agent Runtime Kernel architecture is documented in `docs/architecture/agent-runtime.md`, including the Kernel Event Bridge, checkpointed compaction, retry evidence, judge verdicts, event replay, and rule-based permission evidence. Set `BUILDING_AGENT_CONFIG_DIR=/path/to/config` when running `npm run eval:agent` or `npm run harness:score` to include local promoted fixtures and pending eval candidates from that config directory. `npm run episode:export` writes local evidence packages with `run-graph.json`, `eval-candidate.json`, `trajectory.jsonl`, and verification metadata; `--latest-validation` exports the run captured by `agent-validation.json`. `npm run harness:score` emits the seven-category ETCLOVG score used by Overview as a local quality signal and now includes adversarial eval, goal-mode pass rate, goal-judge pass rate, plus the ACI/context report; Overview also displays the native Agent Capability score.
 
 Deterministic local artifact goals are accepted only when the task contract, canonical destination, generated artifact, and provenance evidence agree. Location/resource canonicalization normalizes home-relative, workspace-relative, Desktop, Downloads, and absolute roots before sandbox and acceptance checks. Provenance-backed acceptance requires the artifact sidecar to match the run, goal, artifact id, canonical destination, and content hash. v2.4.1 passed the command-line verification gate, production smoke, and harness check for the managed chat-history release; release metadata now matches the v2.4.1 app version.
 
@@ -687,7 +691,7 @@ Deterministic local artifact goals are accepted only when the task contract, can
 
 <h2 id="roadmap">Roadmap</h2>
 
-Current version: v2.9.4.
+Current version: v2.9.5.
 
 Recently shipped:
 
@@ -726,6 +730,7 @@ Recently shipped:
 - [x] v2.9.0 output rendering and evidence-bound answers
 - [x] v2.9.3 Goal Mode selected-skill routing and long-transcript performance hotfix
 - [x] v2.9.4 scheduled task automation semantics
+- [x] v2.9.5 scheduled task editing and run session recovery
 
 Planned:
 
@@ -762,15 +767,19 @@ Planned:
 
 ## 项目概述
 
-**Zerox Agent** 是一个本地优先的桌面智能体控制台，当前版本是 **v2.9.4**。名字取自 **Zero + X**——从留白开始，把未知的本地工作流转成可观察、受权限管控、可恢复的 Agent 运行。
+**Zerox Agent** 是一个本地优先的桌面智能体控制台，当前版本是 **v2.9.5**。名字取自 **Zero + X**——从留白开始，把未知的本地工作流转成可观察、受权限管控、可恢复的 Agent 运行。
 
 它不是聊天壳，也不是泛用云端 Agent 入口。它运行在本机：配置 OpenAI‑compatible 模型、扫描本地 `SKILL.md` 技能文件、执行可恢复的 Agent 运行、调用受权限管控的工具、跟踪父子多 Agent 会话、把经验和知识写入本地长期记忆，并且在改变未来行为前保留用户审核。
 
 产品边界写在 [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md)：Zerox 优先建设可信的本地控制、可恢复运行、显式权限、workspace 作用域、可观察轨迹、父子多 Agent 会话和用户审核后的学习。运行时、workspace 与学习机制分别见 [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md)、[`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md)、[`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md)。
 
+## v2.9.5 - 定时任务编辑与运行会话恢复
+
+Zerox Agent v2.9.5 补齐真实测试包中暴露出的定时任务闭环问题。已保存任务现在可以从任务卡片进入编辑，保存时保留历史运行记录并重算下一次调度；任务记录里的「打开会话 / 查看授权」会通过主进程 `openAgentRunSession` 打开真实运行会话，老的 active checkpoint 如果没有 session，会自动补建聊天记录并把 `sessionId` 写回检查点。prompt-only 定时任务在没有显式命令模板时也不再向模型暴露 `shell_exec` 和 `test_run`，天气汇报这类全自动任务可以继续使用网页工具，不会误选 shell 后被安全策略拒绝。
+
 ## v2.9.4 - 定时任务自动化语义修正
 
-Zerox Agent v2.9.4 将简化后的「任务」模块正式定义为自动调度入口。新任务以 prompt 描述为主，不再强制绑定 skill：用户只需要写清楚要做什么、何时运行、结果放在哪里、什么情况停止。创建弹窗面向 C 端用户保留每天、工作日、每周和间隔规则，同时兼容历史 manual/Cron 记录；prompt-only 任务会以 `prompt-task` 运行，skill 只作为可选增强；默认权限从空权限开始；保存前会明确提示任务会自动执行，并在描述或权限不清楚时停止并写入运行记录。
+Zerox Agent v2.9.4 将简化后的「任务」模块正式定义为自动调度入口。新任务以 prompt 描述为主，不再强制绑定 skill：用户只需要写清楚要做什么、何时运行、结果放在哪里、什么情况停止。创建弹窗面向 C 端用户保留每天、工作日、每周和间隔规则，同时兼容历史 manual/Cron 记录；prompt-only 任务会以 `prompt-task` 运行，skill 只作为可选增强；定时运行默认全自动执行，不再把可自动处理的工具请求暴露成授权等待，同时授权服务仍会拦截坏参数和 workspace/sandbox 越界；每次自动运行都会绑定真实会话，任务记录可以直接打开对应上下文。
 
 ## v2.9.3 - 目标模式技能路由与长会话性能热修
 
@@ -1448,7 +1457,7 @@ Gatekeeper 可能提示「Zerox Agent 已损坏，无法打开」。这通常不
 而是下载隔离属性导致的拦截。打开前在终端执行：
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-2.9.4-arm64.dmg"
+xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-2.9.5-arm64.dmg"
 ```
 
 如果已经把应用拖进 Applications，则执行：
@@ -1475,7 +1484,7 @@ mac:
 
 ## 测试
 
-截至 v2.9.4，`npm run verify` 覆盖 Vitest 测试、生产构建、Agent 评测和记忆检索评测；当前包含 183 个 Vitest 文件 / 1268 个测试、26 个确定性 Agent eval fixture 和 2 个 memory eval fixture。Agent eval 覆盖原生代码工程、研究写作、测试失败反思、retry budget exhaustion、上下文压缩、tool-call checkpoint、模型重试、strategy guard 碎片化恢复、episode eval candidate、child handoff review gate、goal-mode recovery/control、bounded-autonomy 黄金路径、Agent Runtime Kernel kernel event replay、permission-rule behavior、deterministic local artifact provenance acceptance、2.8 execution-context/tool-ledger/history contracts、memory-history scope checks 和 2.9 output rendering restore fidelity。session-native Goal Mode 架构记录在 `docs/architecture/agent-goal-mode.md`；Agent Runtime Kernel 架构记录在 `docs/architecture/agent-runtime.md`，包含 Kernel Event Bridge、checkpointed compaction、retry evidence、judge verdict、event replay 和规则化权限证据：
+截至 v2.9.5，`npm run verify` 覆盖 Vitest 测试、生产构建、Agent 评测和记忆检索评测；当前包含 183 个 Vitest 文件 / 1277 个测试、26 个确定性 Agent eval fixture 和 2 个 memory eval fixture。Agent eval 覆盖原生代码工程、研究写作、测试失败反思、retry budget exhaustion、上下文压缩、tool-call checkpoint、模型重试、strategy guard 碎片化恢复、episode eval candidate、child handoff review gate、goal-mode recovery/control、bounded-autonomy 黄金路径、Agent Runtime Kernel kernel event replay、permission-rule behavior、deterministic local artifact provenance acceptance、2.8 execution-context/tool-ledger/history contracts、memory-history scope checks 和 2.9 output rendering restore fidelity。session-native Goal Mode 架构记录在 `docs/architecture/agent-goal-mode.md`；Agent Runtime Kernel 架构记录在 `docs/architecture/agent-runtime.md`，包含 Kernel Event Bridge、checkpointed compaction、retry evidence、judge verdict、event replay 和规则化权限证据：
 
 ```bash
 npm test              # 运行全部测试
@@ -1505,7 +1514,7 @@ npm run verify        # 测试 + 构建 + 确定性评测
 
 ## 路线图
 
-当前版本：v2.9.4。
+当前版本：v2.9.5。
 
 近期已完成：
 
@@ -1544,6 +1553,7 @@ npm run verify        # 测试 + 构建 + 确定性评测
 - [x] v2.9.0 输出渲染与证据绑定回答
 - [x] v2.9.3 目标模式显式技能路由与长会话性能热修
 - [x] v2.9.4 定时任务自动化语义修正
+- [x] v2.9.5 定时任务编辑与运行会话恢复
 
 后续计划：
 

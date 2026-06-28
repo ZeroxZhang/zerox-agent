@@ -310,6 +310,11 @@ export interface TaskRepository {
   list(): ScheduledTask[];
   get(taskId: string): ScheduledTask | null;
   create(input: ScheduledTaskInput & { id?: string }): ScheduledTask;
+  update(
+    taskId: string,
+    input: ScheduledTaskInput,
+    changedAt?: Date,
+  ): ScheduledTask | null;
   recordRun(taskId: string, completedAt: Date): ScheduledTask | null;
   setEnabled(
     taskId: string,

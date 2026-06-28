@@ -5535,3 +5535,105 @@
   - `release/Zerox Agent-2.9.4-arm64.dmg.blockmap` (132K, sha256 `95f2e797cb2e57897daff3a252e0f2294b37f42bb691da9025d1526f08eef8ed`)
   - `release/Zerox Agent-2.9.4-arm64-mac.zip.blockmap` (335K, sha256 `763f6ae815797b9589882f1682c28fa5d98180c2b646d94e7500f3c1102d3b4f`)
   - `release/latest-mac.yml` (517B, sha256 `913412773ec4c6458687fb6218aef4cdec07c0d41e7adef2516164916ac8aff4`)
+
+## 2026-06-28 - Scheduled Task Session And Full-Auto Runtime Fix
+
+- Request:
+  - User reported that task-record actions "打开会话" and "查看授权" returned to the chat home instead of the scheduled task's run session.
+  - User reiterated that scheduled tasks must default to full automatic execution and should not surface approval waits for ordinary tool requests.
+- Changed areas:
+  - `src/main/toolAuthorizationService.ts`
+  - `src/main/agentRuntimeEngine.ts`
+  - `src/main/agentRunnerService.ts`
+  - `src/main/container.ts`
+  - `src/main/chatService.ts`
+  - `src/main/toolAuthorizationService.test.ts`
+  - `src/main/agentRuntimeEngine.test.ts`
+  - `src/renderer/App.tsx`
+  - `src/renderer/components/RunsPanel.tsx`
+  - `src/renderer/materialDesign.test.ts`
+  - `README.md`
+  - `src/shared/readme.test.ts`
+  - `.zerox/progress.md`
+- Implementation evidence:
+  - Scheduled tasks with non-manual schedules now auto-approve eligible non-shell policy denials inside `ToolAuthorizationService`, without opening user approval or checkpointing `waiting_for_approval`.
+  - Auto mode still does not approve malformed requests or workspace/sandbox denials; those remain hard stops.
+  - Shell execution and test-run commands remain explicit-policy-only for scheduled tasks: they fail with audit evidence instead of auto-approving or asking for interactive authorization.
+  - Task runs can receive a `sessionId`; runtime attaches it to `runContext`, trajectory, tool result scopes, and final run records.
+  - Background scheduled runs and task-page manual runs create a real chat session before execution and append the terminal result to that session.
+  - Chat-triggered task runs reuse the current chat session and avoid writing a duplicate transcript from the container.
+  - Runs panel actions now open the run's bound session via App state instead of navigating generically to `#chat`; old records without session context stay on Runs and show an actionable error.
+  - README now documents that scheduled runs default to full automatic execution while preserving malformed-request, shell, and workspace/sandbox enforcement; test count updated to 1273.
+- Verification evidence:
+  - `npm test -- src/main/toolAuthorizationService.test.ts src/main/agentRuntimeEngine.test.ts src/renderer/materialDesign.test.ts` -> 3 files / 101 tests passed.
+  - `npm test -- src/shared/readme.test.ts` -> 1 file / 3 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> 183 files / 1273 tests passed, build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `better-sqlite3` ABI mismatch triggered the existing JSON fallback during smoke.
+
+## 2026-06-28 - Scheduled Task Editing, Legacy Run Sessions, And Tool Visibility Fix
+
+- Request:
+  - User reported that saved scheduled tasks had no edit action, so small task adjustments were impossible.
+  - User reported that "查看授权" and "打开会话" appeared inert for a waiting-approval run.
+  - User reported a scheduled weather task unexpectedly failed because the model chose `shell_exec`, which was denied by shell safety policy.
+- Changed areas:
+  - `src/shared/scheduledTasks.ts`
+  - `src/shared/storageContract.ts`
+  - `src/shared/agentRuns.ts`
+  - `src/main/taskStore.ts`
+  - `src/main/storage/repositories/index.ts`
+  - `src/main/scheduledTaskToolVisibility.ts`
+  - `src/main/agentRuntimeEngine.ts`
+  - `src/main/agentRunnerService.ts`
+  - `src/main/container.ts`
+  - `src/main/ipc/index.ts`
+  - `src/preload/index.ts`
+  - `src/renderer/components/ScheduledTasksPanel.tsx`
+  - `src/renderer/components/RunsPanel.tsx`
+  - `src/main/taskStore.test.ts`
+  - `src/main/agentRuntimeEngine.test.ts`
+  - `src/main/container.test.ts`
+  - `src/main/storage/storeProxy.test.ts`
+  - `src/renderer/materialDesign.test.ts`
+  - `.zerox/progress.md`
+- Implementation evidence:
+  - Scheduled tasks now support `update` through JSON, SQLite, dual-write repositories, IPC, preload, and the task card UI.
+  - The task card "更多" menu now includes "编辑"; the existing task dialog opens prefilled and saves changes without losing `lastRunAt`.
+  - Runs panel actions now call `openAgentRunSession(runId)` so old active checkpoints without `runContext.sessionId` get a real chat session instead of silently failing or navigating to the chat home.
+  - The container creates a fallback chat transcript for legacy active runs and writes the created `sessionId` back to the checkpoint run context.
+  - Scheduled task model requests no longer expose `shell_exec` or `test_run` unless the task has explicit shell command templates; ordinary tools like `web_search` remain visible for full-auto scheduled tasks.
+- Verification evidence:
+  - `npm test -- src/main/taskStore.test.ts src/main/agentRuntimeEngine.test.ts src/main/container.test.ts src/main/storage/storeProxy.test.ts` -> 4 files / 65 tests passed.
+  - `npm test -- src/renderer/materialDesign.test.ts src/main/ipc/index.test.ts src/shared/readme.test.ts` -> 3 files / 68 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> 183 files / 1277 tests passed, build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `better-sqlite3` ABI mismatch triggered the existing JSON fallback during smoke.
+  - `npm run dist:mac` -> passed; regenerated unsigned macOS arm64 DMG, ZIP, blockmaps, and `latest-mac.yml` for v2.9.4.
+  - Packaged app smoke: `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v2.9.4' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+  - `open -n "release/mac-arm64/Zerox Agent.app"` -> launched the refreshed test package.
+  - `git diff --check` -> passed.
+
+## 2026-06-28 - Zerox Agent v2.9.5 Scheduled Task Session Recovery Release
+
+- Request:
+  - After packaged-app testing confirmed the scheduled task behavior, publish the fixes as v2.9.5, push the code, and create a fresh GitHub Release.
+- Release/version work:
+  - Version bumped to `2.9.5` in `package.json` and `package-lock.json`.
+  - README now documents v2.9.5 in English and Chinese, including scheduled task editing, legacy run-session repair, and hiding shell-backed tools for prompt-only scheduled tasks without shell templates.
+  - `.zerox/feature_list.json` includes `P27-v2.9.5-scheduled-task-session-recovery-release` as done.
+- Verification evidence:
+  - `./init.sh` -> passed `npm run harness:check` and `npm test -- src/shared/packageScripts.test.ts`.
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 2 files / 11 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm run verify` -> 183 files / 1277 tests passed, build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local `better-sqlite3` ABI mismatch triggered the existing JSON fallback during this un-packaged smoke.
+  - `npm run dist:mac` -> passed; generated unsigned macOS arm64 DMG, ZIP, blockmaps, and `latest-mac.yml` for v2.9.5.
+  - Packaged app smoke: `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v2.9.5' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+- Release artifact evidence:
+  - `release/latest-mac.yml` reports `version: 2.9.5` and update URLs `Zerox-Agent-2.9.5-arm64-mac.zip` / `Zerox-Agent-2.9.5-arm64.dmg`.
+  - `release/Zerox Agent-2.9.5-arm64.dmg` (122M, sha256 `dd11e6891c7ae8ba054d3a5f3438992ab54e658eb861774912ffe3f0a010c16b`)
+  - `release/Zerox Agent-2.9.5-arm64-mac.zip` (333M, sha256 `b655c08817a9f7657f73dba6f10591e4ef7ecf12b6e329cb3b5ecd8bdebddf0b`)
+  - `release/Zerox Agent-2.9.5-arm64.dmg.blockmap` (131K, sha256 `70bf5d0c26df460b69b4b0dcf643108aa9ade92edd210479e9d13abd0134a891`)
+  - `release/Zerox Agent-2.9.5-arm64-mac.zip.blockmap` (335K, sha256 `e89cde7d17295e5da242ab10baf32f9118952261ff8b5bfdaf543cab6923ad82`)
+  - `release/latest-mac.yml` (517B, sha256 `142b0f8372c94374328d191d2e61c0cde2801ab2b81da8557e704200f16726b5`)

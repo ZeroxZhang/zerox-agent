@@ -61,6 +61,8 @@ import type {
 } from "../shared/agentRuns";
 import type { SkillRecord } from "../shared/skills";
 import type { AgentToolName } from "../shared/toolPermissions";
+import type { ScheduledTask } from "../shared/scheduledTasks";
+import { filterToolDefinitionsForScheduledTask } from "./scheduledTaskToolVisibility";
 import {
   createToolInvocation,
   transitionToolInvocation,
@@ -79,7 +81,7 @@ export type AgentRuntimeModelProfile = {
 export type AgentRuntimeEngine = {
   startTask(
     taskId: string,
-    options?: { signal?: AbortSignal },
+    options?: { signal?: AbortSignal; sessionId?: string },
   ): Promise<RunScheduledTaskResult>;
   resumeRun(
     runId: string,
@@ -295,7 +297,7 @@ export function createAgentRuntimeEngine(options: {
 
   async function runFromCheckpoint(
     checkpoint: AgentExecutionCheckpoint,
-    task: { id: string; name: string; skillName: string },
+    task: ScheduledTask,
     skill: SkillRecord | null,
     signal: AbortSignal | undefined,
     events: AgentRunEvent[],
@@ -313,7 +315,10 @@ export function createAgentRuntimeEngine(options: {
     const reflectionDecisions: AgentReflectionDecision[] = [];
     const profile = await options.getModelProfile();
     const maxTurns = skill?.manifest.execution.maxTurns ?? 10;
-    const toolDefinitions = getToolDefinitions(options.toolExecutor);
+    const toolDefinitions = filterToolDefinitionsForScheduledTask(
+      getToolDefinitions(options.toolExecutor),
+      task,
+    );
     const contextTokenBudget = Math.max(1, Math.floor(profile.maxTokens * 0.7));
 
     async function compactMessagesBeforeModelRequest() {
@@ -771,7 +776,9 @@ export function createAgentRuntimeEngine(options: {
       const startedAt = now().toISOString();
       const runId = createId();
       const events = [createEvent("info", "Agent runtime started.")];
-      const runContext = await options.workspaceService?.resolveRunContext();
+      const runContext = await options.workspaceService?.resolveRunContext(
+        runOptions?.sessionId ? { sessionId: runOptions.sessionId } : undefined,
+      );
       const initialProfile = await options.getModelProfile();
       const systemTimeZone = getSystemTimeZone();
       const proceduralMemoryContext =

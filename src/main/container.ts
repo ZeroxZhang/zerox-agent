@@ -111,11 +111,18 @@ import type {
   GoalProgressEvent,
 } from "../shared/chat";
 import type {
+  AgentRunRecord,
+  AgentRunStatus,
   CancelScheduledTaskRunResult,
+  OpenAgentRunSessionResult,
   PauseAgentRunResult,
   RunScheduledTaskResult,
 } from "../shared/agentRuns";
-import { isTerminalExecutionStatus } from "../shared/agentExecution";
+import { describeSchedule, type ScheduledTask } from "../shared/scheduledTasks";
+import {
+  isTerminalExecutionStatus,
+  type AgentExecutionCheckpoint,
+} from "../shared/agentExecution";
 import {
   createDefaultMemoryEvalCases,
   runMemoryEvals as evaluateMemory,
@@ -1024,7 +1031,8 @@ export function createAppContainer(options: {
         taskStore: scheduledTaskStore(),
         discoverSkills: () => discoverSkills({ skillsDir }),
         testModelConnection: () => modelConnectionService().testConnection(),
-        runScheduledTask: (taskId: string) => runAgentTask(taskId),
+        runScheduledTask: (taskId: string) =>
+          runAgentTask(taskId, { writeChatTranscript: false }),
         validationStore: agentValidationStore(),
       }),
     );
@@ -1263,7 +1271,11 @@ export function createAppContainer(options: {
         chatSessionStore: chatSessionStore(),
         goalService: goalChatService(),
         taskStore: scheduledTaskStore(),
-        runScheduledTask: (taskId: string) => runAgentTask(taskId),
+        runScheduledTask: (taskId: string, taskRunOptions) =>
+          runAgentTask(taskId, {
+            ...taskRunOptions,
+            writeChatTranscript: false,
+          }),
         discoverSkills: () => discoverSkills({ skillsDir }),
         workspaceService: agentWorkspaceService(),
         toolExecutor: createToolExecutor(),
@@ -1383,7 +1395,15 @@ export function createAppContainer(options: {
     }
   }
 
-  async function runAgentTask(taskId: string): Promise<RunScheduledTaskResult> {
+  type RunAgentTaskOptions = {
+    sessionId?: string;
+    writeChatTranscript?: boolean;
+  };
+
+  async function runAgentTask(
+    taskId: string,
+    runOptions?: RunAgentTaskOptions,
+  ): Promise<RunScheduledTaskResult> {
     if (activeTaskRunControllers.has(taskId)) {
       return {
         ok: false,
@@ -1391,6 +1411,15 @@ export function createAppContainer(options: {
       };
     }
 
+    const task = await scheduledTaskStore().get(taskId);
+    if (!task) {
+      return {
+        ok: false,
+        message: "Scheduled task was not found.",
+      };
+    }
+
+    const sessionId = await resolveTaskRunSessionId(task, runOptions);
     const controller = new AbortController();
     activeTaskRunControllers.set(taskId, controller);
     emitAgentRunsChanged({ reason: "active_execution_changed", taskId });
@@ -1398,7 +1427,11 @@ export function createAppContainer(options: {
     try {
       const result = await agentRunnerService().runTask(taskId, {
         signal: controller.signal,
+        ...(sessionId ? { sessionId } : {}),
       });
+      if (sessionId && shouldWriteTaskRunTranscript(runOptions)) {
+        await appendTaskRunChatResult(sessionId, result);
+      }
       emitAgentRunsChanged({
         reason: "run_updated",
         taskId,
@@ -1411,6 +1444,43 @@ export function createAppContainer(options: {
       }
       emitAgentRunsChanged({ reason: "active_execution_changed", taskId });
     }
+  }
+
+  async function resolveTaskRunSessionId(
+    task: ScheduledTask,
+    runOptions: RunAgentTaskOptions | undefined,
+  ): Promise<string | undefined> {
+    if (runOptions?.sessionId) {
+      return runOptions.sessionId;
+    }
+
+    if (!shouldWriteTaskRunTranscript(runOptions)) {
+      return undefined;
+    }
+
+    const created = await chatSessionStore().appendMessage({
+      role: "user",
+      content: formatScheduledTaskRunPrompt(task),
+    });
+    return created.session.id;
+  }
+
+  function shouldWriteTaskRunTranscript(
+    runOptions: RunAgentTaskOptions | undefined,
+  ): boolean {
+    return runOptions?.writeChatTranscript ?? !runOptions?.sessionId;
+  }
+
+  async function appendTaskRunChatResult(
+    sessionId: string,
+    result: RunScheduledTaskResult,
+  ): Promise<void> {
+    await chatSessionStore().appendMessage({
+      sessionId,
+      role: "assistant",
+      content: formatScheduledTaskRunResult(result),
+      ...(result.ok ? { executedRunId: result.run.id } : {}),
+    });
   }
 
   async function resumeAgentRun(runId: string): Promise<RunScheduledTaskResult> {
@@ -1501,6 +1571,64 @@ export function createAppContainer(options: {
       ok: true,
       message: "运行已标记为可恢复。",
     };
+  }
+
+  async function openAgentRunSession(
+    runId: string,
+  ): Promise<OpenAgentRunSessionResult> {
+    const [run, checkpoint] = await Promise.all([
+      agentRunStore().get(runId),
+      agentExecutionStore().get(runId),
+    ]);
+
+    if (!run && !checkpoint) {
+      return {
+        ok: false,
+        message: "运行记录不存在，无法打开会话。",
+      };
+    }
+
+    const existingSessionId =
+      run?.runContext?.sessionId ?? checkpoint?.runContext?.sessionId;
+    if (existingSessionId) {
+      const session = await chatSessionStore().get(existingSessionId);
+      if (session) {
+        return { ok: true, sessionId: existingSessionId };
+      }
+    }
+
+    const taskId = checkpoint?.taskId ?? run?.taskId;
+    const task = taskId ? await scheduledTaskStore().get(taskId) : null;
+    const created = await chatSessionStore().appendMessage({
+      role: "user",
+      content: formatAgentRunSessionPrompt(task, run, checkpoint),
+    });
+    await chatSessionStore().appendMessage({
+      sessionId: created.session.id,
+      role: "assistant",
+      content: formatAgentRunSessionStatus(task, run, checkpoint),
+      ...(run ? { executedRunId: run.id } : {}),
+    });
+
+    if (checkpoint) {
+      const runContext = checkpoint.runContext
+        ? { ...checkpoint.runContext, sessionId: created.session.id }
+        : await agentWorkspaceService().resolveRunContext({
+            sessionId: created.session.id,
+          });
+      await agentExecutionStore().save({
+        ...checkpoint,
+        runContext,
+        updatedAt: new Date().toISOString(),
+      });
+      emitAgentRunsChanged({
+        reason: "active_execution_changed",
+        runId: checkpoint.runId,
+        taskId: checkpoint.taskId,
+      });
+    }
+
+    return { ok: true, sessionId: created.session.id };
   }
 
   function createGoalDraft(input: {
@@ -1718,6 +1846,7 @@ export function createAppContainer(options: {
     chatService,
     taskSchedulerService,
     runAgentTask,
+    openAgentRunSession,
     resumeAgentRun,
     pauseAgentRun,
     createGoalDraft,
@@ -1739,4 +1868,141 @@ export function createAppContainer(options: {
     onGoalProgressEvent,
     onAgentRunsChanged,
   };
+}
+
+function formatScheduledTaskRunPrompt(task: ScheduledTask): string {
+  const request =
+    typeof task.input.request === "string" ? task.input.request.trim() : "";
+  const lines = [
+    `定时任务：${task.name}`,
+    "",
+    request || `执行本地任务“${task.name}”。`,
+    "",
+    `调度：${describeSchedule(task.schedule)}`,
+  ];
+
+  return lines.join("\n");
+}
+
+function formatAgentRunSessionPrompt(
+  task: ScheduledTask | null,
+  run: AgentRunRecord | null,
+  checkpoint: AgentExecutionCheckpoint | null,
+): string {
+  if (task) {
+    return formatScheduledTaskRunPrompt(task);
+  }
+
+  const title = run?.taskName ?? checkpoint?.taskId ?? "未知任务";
+  return [
+    `任务运行：${title}`,
+    "",
+    "打开这次任务的执行上下文。",
+  ].join("\n");
+}
+
+function formatAgentRunSessionStatus(
+  task: ScheduledTask | null,
+  run: AgentRunRecord | null,
+  checkpoint: AgentExecutionCheckpoint | null,
+): string {
+  const title = task?.name ?? run?.taskName ?? checkpoint?.taskId ?? "未知任务";
+
+  if (checkpoint) {
+    const lines = [
+      `已打开任务运行：${title}`,
+      `状态：${translateExecutionStatus(checkpoint.status)}`,
+    ];
+    const currentStep =
+      checkpoint.steps.find((step) => step.id === checkpoint.currentStepId) ??
+      checkpoint.steps[0];
+    if (currentStep) {
+      lines.push(
+        `当前步骤：${currentStep.description || currentStep.id}`,
+        `步骤状态：${translateExecutionStepState(currentStep.state)}`,
+      );
+      if (currentStep.failureMessage) {
+        lines.push(`失败原因：${currentStep.failureMessage}`);
+      }
+    }
+    lines.push("", "你可以在这里继续查看这次定时任务的上下文。");
+    return lines.join("\n");
+  }
+
+  if (run) {
+    return [
+      `已打开任务运行：${title}`,
+      `状态：${formatRunStatusForChat(run.status)}`,
+      "",
+      run.summary || "这次运行没有摘要。",
+    ].join("\n");
+  }
+
+  return `已打开任务运行：${title}`;
+}
+
+function translateExecutionStatus(
+  status: AgentExecutionCheckpoint["status"],
+): string {
+  const labels: Record<AgentExecutionCheckpoint["status"], string> = {
+    canceled: "已取消",
+    failed: "失败",
+    paused: "已暂停",
+    queued: "排队中",
+    running: "运行中",
+    succeeded: "成功",
+    waiting_for_approval: "等待授权",
+  };
+
+  return labels[status];
+}
+
+function translateExecutionStepState(
+  state: AgentExecutionCheckpoint["steps"][number]["state"],
+): string {
+  const labels: Record<
+    AgentExecutionCheckpoint["steps"][number]["state"],
+    string
+  > = {
+    completed: "已完成",
+    failed: "失败",
+    pending: "等待开始",
+    running: "运行中",
+    skipped: "已跳过",
+    waiting_for_approval: "等待授权",
+    waiting_for_tool: "等待工具",
+  };
+
+  return labels[state];
+}
+
+function formatScheduledTaskRunResult(result: RunScheduledTaskResult): string {
+  if (!result.ok) {
+    return `定时任务没有启动：${result.message}`;
+  }
+
+  return [
+    `定时任务运行完成：${formatRunStatusForChat(result.run.status)}。`,
+    "",
+    result.run.summary || "没有生成摘要。",
+  ].join("\n");
+}
+
+function formatRunStatusForChat(status: AgentRunStatus): string {
+  switch (status) {
+    case "succeeded":
+      return "成功";
+    case "failed":
+      return "失败";
+    case "canceled":
+      return "已取消";
+    case "paused":
+      return "已暂停";
+    case "waiting_for_approval":
+      return "等待授权";
+    case "running":
+      return "正在运行";
+    case "queued":
+      return "排队中";
+  }
 }
