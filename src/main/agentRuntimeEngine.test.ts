@@ -1214,8 +1214,30 @@ describe("agent runtime engine", () => {
         workspaceId: "workspace_1",
         workspaceRoot: "/tmp/zerox/workspace",
         agentRole: "primary",
+        runtimeContextSnapshot: expect.objectContaining({
+          surface: "scheduled_task",
+          model: expect.objectContaining({
+            modelId: "agent-model",
+          }),
+          workspace: expect.objectContaining({
+            workspaceId: "workspace_1",
+            workspaceRoot: "/tmp/zerox/workspace",
+            sandboxMode: "workspace_write",
+          }),
+          permissions: expect.objectContaining({
+            taskId: "task_123",
+            runtimeTaskId: "scheduled:task_123",
+            approvalMode: "scheduled",
+          }),
+        }),
+        runtimeContextSnapshotSummary: expect.objectContaining({
+          surface: "scheduled_task",
+          workspaceId: "workspace_1",
+          permissionTaskId: "task_123",
+        }),
       },
     });
+    expect(JSON.stringify(trajectoryEvents[0].payload)).not.toContain("secret");
   });
 
   it("passes run context to authorization and tool execution", async () => {

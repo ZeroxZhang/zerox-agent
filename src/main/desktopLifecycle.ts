@@ -30,3 +30,7 @@ export function shouldApplyLoginStartup(
 ): boolean {
   return isPackaged || env.BUILDING_AGENT_ENABLE_LOGIN_STARTUP === "1";
 }
+
+export function shouldRestoreMainWindowOnActivate(smokeModeEnabled: boolean): boolean {
+  return !smokeModeEnabled;
+}

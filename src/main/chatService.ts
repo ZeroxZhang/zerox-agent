@@ -53,6 +53,7 @@ import type {
 import { getSystemPromptAssembler } from "../shared/agentProtocol";
 import type { GoalReviewDecision } from "../shared/agentGoalReview";
 import type { AgentRunRecord, RunScheduledTaskResult } from "../shared/agentRuns";
+import type { ExecutionContextMemoryScope } from "../shared/executionContextPackage";
 import type { MemoryRecord, MemorySearchResult } from "../shared/memory";
 import type { NativeToolDescriptor } from "../shared/nativeCapabilities";
 import type { SkillDiscoveryResult, SkillRecord } from "../shared/skills";
@@ -74,6 +75,9 @@ import {
   type ChatOutputPart,
 } from "../shared/chatOutput";
 import {
+  summarizeAgentRuntimeContextSnapshot,
+} from "../shared/agentRuntimeContext";
+import {
   extractRequestedSkillQuery,
   matchSkillMentionCandidates,
 } from "../shared/skillMentions";
@@ -84,6 +88,7 @@ import type {
   SkillInputResolution,
   SkillInputValue,
 } from "../shared/skillExecutionContract";
+import { createRuntimeContextSnapshotForRun } from "./runtimeContextFactory";
 
 export type ChatService = {
   sendMessage(
@@ -803,8 +808,75 @@ export function createChatService(options: {
           const evidence = createChatAgentEvidenceRecorder({
             trajectoryStore: options.trajectoryStore,
             runId: continuationToResume?.evidenceRunId,
+            ...(agentRunContext ? { runContext: agentRunContext } : {}),
             createId,
             now: options.now,
+          });
+          const toolDefinitions = toolExecutor.getRegistry().getDefinitions();
+          const runtimeContextSnapshot = createRuntimeContextSnapshotForRun({
+            surface: "chat",
+            runId: evidence.runId,
+            ...(agentRunContext ? { runContext: agentRunContext } : {}),
+            modelProfile: profile,
+            tools: toolDefinitions,
+            getToolSource: (toolName) =>
+              getToolRegistrySource(toolExecutor, toolName),
+            ...(selectedSkill ? { selectedSkill } : {}),
+            permission: {
+              taskId:
+                chatRuntimeTask?.taskId ?? `chat:${sessionId}:${requestId}`,
+              runtimeTaskId:
+                chatRuntimeTask?.taskId ?? `chat:${sessionId}:${requestId}`,
+              approvalMode: "manual",
+              policyLabel:
+                chatRuntimeTask?.runtimeTask.policyLabel ??
+                "chat workspace contract",
+            },
+            memory: {
+              scopes: buildRuntimeContextMemoryScopes({
+                sessionId,
+                runContext: agentRunContext,
+                selectedSkill,
+              }),
+              recallBudgetTokens: memoryLimit,
+              rawHistoryEnabled: Boolean(options.historyIndexStore),
+            },
+            checkpoint: {
+              strategy: options.compactionStrategy ? "rebuild" : "summarize",
+              preserveToolPairs: true,
+              protectSkillLoads: true,
+            },
+            trajectory: {
+              ...(workspaceRunRecorder?.workspaceRunId
+                ? { workspaceRunId: workspaceRunRecorder.workspaceRunId }
+                : {}),
+              sessionId,
+              requestId,
+            },
+            createId: () => `runtime_snapshot_${evidence.runId}`,
+            now: () => new Date(startedAtMs).toISOString(),
+            systemTimeZone: chatTimeZone,
+          });
+          const runtimeContextSnapshotSummary =
+            summarizeAgentRuntimeContextSnapshot(runtimeContextSnapshot);
+          await evidence.append(
+            "run_context_created",
+            {
+              runtimeContextSnapshot,
+              runtimeContextSnapshotSummary,
+            },
+            {
+              containsApiKey: false,
+              containsFileContent: false,
+              containsUserText: false,
+            },
+          );
+          emitStatus.send({
+            state: "started",
+            message: "Runtime context snapshot recorded.",
+            payload: {
+              runtimeContextSnapshotSummary,
+            },
           });
           if (requestedSkill?.kind === "matched") {
             void evidence.append("skill_invoked", {
@@ -828,7 +900,7 @@ export function createChatService(options: {
               systemPrompt: buildChatSystemPrompt(chatDate, chatTimeZone),
               maxTurns: loopMaxTurns,
               signal: runtimeOptions.signal,
-              tools: toolExecutor.getRegistry().getDefinitions(),
+              tools: toolDefinitions,
               toolResultOffloadStore: options.toolResultOffloadStore,
               toolResultOffloadThreshold: options.toolResultOffloadThreshold,
               requestId,
@@ -1753,6 +1825,7 @@ function toWorkspaceRunEventInput(
   event: ChatTaskStatusEvent,
 ): WorkspaceRunEventInput | null {
   const payload = {
+    ...(event.payload ?? {}),
     chatState: event.state,
     ...(typeof event.turn === "number" ? { turn: event.turn } : {}),
     ...(event.toolCallId ? { toolCallId: event.toolCallId } : {}),
@@ -1913,6 +1986,22 @@ function buildChatWorkspaceSummary(
     kind: "project",
     sandboxMode: runContext.sandbox.mode,
   };
+}
+
+function buildRuntimeContextMemoryScopes(options: {
+  sessionId: string;
+  runContext?: AgentRunContext;
+  selectedSkill?: SkillRecord;
+}): ExecutionContextMemoryScope[] {
+  return [
+    { kind: "session", id: options.sessionId },
+    ...(options.runContext?.workspaceId
+      ? [{ kind: "workspace" as const, id: options.runContext.workspaceId }]
+      : []),
+    ...(options.selectedSkill?.manifest.name
+      ? [{ kind: "skill" as const, id: options.selectedSkill.manifest.name }]
+      : []),
+  ];
 }
 
 function createChatRuntimeTask(options: {
@@ -3206,6 +3295,20 @@ function getNativeToolDescriptor(
   }
 
   return registry.getNativeDescriptor(toolName);
+}
+
+function getToolRegistrySource(
+  toolExecutor: AgentToolExecutor,
+  toolName: string,
+): string | null {
+  const registry = toolExecutor.getRegistry() as {
+    getSource?: (toolName: string) => string | null;
+  };
+  if (typeof registry.getSource !== "function") {
+    return null;
+  }
+
+  return registry.getSource(toolName);
 }
 
 function buildNativeToolEvidencePayload(

@@ -1,18 +1,24 @@
 import { randomUUID } from "node:crypto";
 import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
-import type { AgentTrajectoryEventType } from "../shared/agentTrajectory";
+import type {
+  AgentTrajectoryEvent,
+  AgentTrajectoryEventType,
+} from "../shared/agentTrajectory";
+import type { AgentRunContext } from "../shared/agentWorkspace";
 
 export type ChatAgentEvidenceRecorder = {
   runId: string;
   append(
     type: AgentTrajectoryEventType,
     payload: Record<string, unknown>,
+    redaction?: AgentTrajectoryEvent["redaction"],
   ): Promise<void>;
 };
 
 export function createChatAgentEvidenceRecorder(options: {
   trajectoryStore?: AgentTrajectoryStore;
   runId?: string;
+  runContext?: AgentRunContext;
   createId?: () => string;
   now?: () => Date;
 }): ChatAgentEvidenceRecorder {
@@ -23,7 +29,7 @@ export function createChatAgentEvidenceRecorder(options: {
 
   return {
     runId,
-    async append(type, payload) {
+    async append(type, payload, redaction) {
       if (!options.trajectoryStore) {
         return;
       }
@@ -34,13 +40,16 @@ export function createChatAgentEvidenceRecorder(options: {
         runId,
         type,
         sequence,
+        ...(options.runContext ? { runContext: options.runContext } : {}),
         payload,
-        redaction: {
-          containsApiKey: false,
-          containsFileContent: type === "tool_result",
-          containsUserText:
-            type === "model_request" || type === "model_response",
-        },
+        redaction:
+          redaction ??
+          {
+            containsApiKey: false,
+            containsFileContent: type === "tool_result",
+            containsUserText:
+              type === "model_request" || type === "model_response",
+          },
         createdAt: now().toISOString(),
       });
     },

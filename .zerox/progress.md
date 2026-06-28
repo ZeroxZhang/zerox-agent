@@ -5637,3 +5637,82 @@
   - `release/Zerox Agent-2.9.5-arm64.dmg.blockmap` (131K, sha256 `70bf5d0c26df460b69b4b0dcf643108aa9ade92edd210479e9d13abd0134a891`)
   - `release/Zerox Agent-2.9.5-arm64-mac.zip.blockmap` (335K, sha256 `e89cde7d17295e5da242ab10baf32f9118952261ff8b5bfdaf543cab6923ad82`)
   - `release/latest-mac.yml` (517B, sha256 `142b0f8372c94374328d191d2e61c0cde2801ab2b81da8557e704200f16726b5`)
+
+## 2026-06-28 - Zerox Agent v3.0.0 Execution Context Spine Release
+
+- Request:
+  - Start the 3.0.0 major iteration from `research/zerox-mimo-agent-audit-2026-06-28`.
+  - Coordinate product, architecture, development, test, frontend/backend, independent QA, and independent user acceptance roles.
+  - Preserve durable evidence across the long development run, then package, push, and publish a v3.0.0 release only after review and packaged-app acceptance.
+- Team and scope evidence:
+  - Product manager subagent selected exactly one first 3.0.0 feature: `AgentRuntimeContextSnapshot` as the execution context spine.
+  - System architect subagent mapped the additive integration to existing `run_context_created` trajectory evidence and chat workspace-run status payloads.
+  - Test engineer subagent mapped focused shared/runtime/docs tests plus full verify, smoke, packaging, and acceptance gates.
+  - Plan file: `docs/superpowers/plans/2026-06-28-v3-0-0-execution-context-spine.md`.
+  - Feature tracking: `.zerox/feature_list.json` includes `P28-v3.0.0-execution-context-spine` as `in_progress`; it will be marked done only after independent review, full gates, packaged acceptance, push, and GitHub Release complete.
+- Changed areas so far:
+  - `src/shared/agentRuntimeContext.ts`
+  - `src/shared/agentRuntimeContext.test.ts`
+  - `src/shared/chat.ts`
+  - `src/main/runtimeContextFactory.ts`
+  - `src/main/runtimeContextFactory.test.ts`
+  - `src/main/chatAgentEvidence.ts`
+  - `src/main/chatAgentEvidence.test.ts`
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+  - `src/main/goalRuntimeEngine.ts`
+  - `src/main/goalRuntimeEngine.test.ts`
+  - `src/main/agentRuntimeEngine.ts`
+  - `src/main/agentRuntimeEngine.test.ts`
+  - `src/shared/packageScripts.test.ts`
+  - `src/shared/readme.test.ts`
+  - `package.json`
+  - `package-lock.json`
+  - `README.md`
+  - `.zerox/feature_list.json`
+  - `.superpowers/sdd/progress.md`
+  - `.zerox/progress.md`
+- Implementation evidence:
+  - Shared `AgentRuntimeContextSnapshot` captures run surface, model identity, anchored time, workspace roots, permission/runtime task ids, visible tool schema hash, memory scopes, optional skill metadata, checkpoint metadata, and trajectory identity.
+  - Snapshot summaries expose stable, small evidence for workspace-run status payloads.
+  - Runtime snapshots are JSON round-trip safe and tests assert secrets such as API keys are not copied.
+  - Chat agent-loop runs append `run_context_created` with `runtimeContextSnapshot` and a workspace-run status event with `runtimeContextSnapshotSummary` before model/tool evidence.
+  - Goal milestone runs append snapshot evidence for both deterministic native-pipeline milestones and model-loop milestones.
+  - Recoverable scheduled task runs append snapshot evidence before the first model request using filtered scheduled-task tool visibility.
+  - No authorization behavior, provider request format, tool capability, checkpoint rebuild behavior, actor surface, or memory automation was intentionally changed.
+  - README now describes v3.0.0 as a local-first runtime context spine release; it is not used as a process log.
+- Verification evidence so far:
+  - `./init.sh` -> passed `npm run harness:check` and `npm test -- src/shared/packageScripts.test.ts` before implementation.
+  - RED: `npm test -- src/shared/agentRuntimeContext.test.ts` failed before `src/shared/agentRuntimeContext.ts` existed.
+  - `npm test -- src/shared/agentRuntimeContext.test.ts` -> 1 file / 2 tests passed.
+  - `npm test -- src/main/runtimeContextFactory.test.ts src/main/chatAgentEvidence.test.ts` -> 2 files / 4 tests passed.
+  - `npm test -- src/main/chatService.test.ts` -> 1 file / 64 tests passed.
+  - `npm test -- src/shared/agentRuntimeContext.test.ts src/main/runtimeContextFactory.test.ts src/main/chatAgentEvidence.test.ts src/main/chatService.test.ts src/main/goalRuntimeEngine.test.ts src/main/agentRuntimeEngine.test.ts` -> 6 files / 110 tests passed.
+  - `npm run harness:check` -> passed.
+  - `npm run build` -> passed; Vite reported the existing large-chunk warning.
+  - RED: `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` failed while package metadata and README still reported v2.9.5.
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 2 files / 11 tests passed after the 3.0.0 metadata and README updates.
+  - Independent code review (Cicero) found no Critical issues and two Important issues before packaging: P28 was marked done before Task 5 release gates, and `projectSnapshotToExecutionContextPackage` dropped workspace/sandbox data. A Minor issue noted that the schema hash was labeled `sha256:` while using FNV-1a.
+  - Review fixes: P28 remains `in_progress` until Task 5 completion; release tracking tests allow only P28 to be open during the release gate; snapshot projection now reconstructs workspace/sandbox into `ExecutionContextPackage`; tool schema hashes now produce `sha256:` plus 64 lowercase hex characters.
+  - `npm test -- src/shared/agentRuntimeContext.test.ts src/shared/packageScripts.test.ts` -> 2 files / 10 tests passed after review fixes.
+  - Independent user acceptance with `@电脑` opened the packaged v3.0.0 app in `/tmp/zerox-v300-acceptance.QUaRw6`, verified the real UI showed `v 3.0.0`, empty temporary data, local skills, and the expected "model not configured" cold-start state.
+  - Acceptance found a real interaction regression before approval: when the packaged app window was hidden, app activation/Dock reopen did not restore it because hidden windows still counted in `BrowserWindow.getAllWindows()`. The iteration was returned to development.
+  - Fix: app activation now calls `createMainWindow()` outside smoke mode so hidden windows are shown/focused; `src/main/desktopLifecycle.test.ts` covers the activation policy.
+  - `npm test -- src/main/desktopLifecycle.test.ts src/shared/agentRuntimeContext.test.ts src/main/runtimeContextFactory.test.ts src/main/chatAgentEvidence.test.ts src/main/chatService.test.ts src/main/goalRuntimeEngine.test.ts src/main/agentRuntimeEngine.test.ts src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 9 files / 126 tests passed.
+  - Independent code review re-check after the acceptance-driven activation fix -> clean; no Critical or Important findings.
+  - `npm run verify` -> 186 files / 1284 tests passed, build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local un-packaged smoke used existing JSON fallback after better-sqlite3 ABI mismatch.
+  - `git diff --check` -> passed.
+  - `npm run dist:mac` -> passed; regenerated unsigned macOS arm64 DMG, ZIP, blockmaps, and `latest-mac.yml` for v3.0.0.
+  - Packaged app smoke: `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v3.0.0' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+  - Strict packaged acceptance proxy with isolated userData and JSON backend: `ZEROX_AGENT_USER_DATA_DIR=/tmp/zerox-v300-acceptance-smoke.XgSB89 ZEROX_STORAGE_BACKEND=json BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_TIMEOUT_MS=30000 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v3.0.0|今天想让智能体做什么？|未配置|123 个|0 个启用|0 条' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+  - Limitation: after the acceptance-driven fix, the `@电脑` MCP transport became unavailable for a second screenshot-tree pass (`Transport closed`). The earlier `@电脑` pass did inspect the real packaged UI and found the activation issue; the fixed package was validated with packaged smoke/strict acceptance.
+- Release artifact evidence:
+  - `release/latest-mac.yml` reports `version: 3.0.0` and update URLs `Zerox-Agent-3.0.0-arm64-mac.zip` / `Zerox-Agent-3.0.0-arm64.dmg`.
+  - `release/Zerox Agent-3.0.0-arm64.dmg` (122M, sha256 `8fb9bf173f217e78f8dac1d9eddf2e204a016c9e72fa31f9c3026e564c756add`)
+  - `release/Zerox Agent-3.0.0-arm64-mac.zip` (333M, sha256 `8e650b1a2caf6ec86aafa2c00ee6a2e425ee4a81b418502ec2bd5e8aab1ab6cb`)
+  - `release/Zerox Agent-3.0.0-arm64.dmg.blockmap` (132K, sha256 `ee18f8f40211733f97a5571ea378a227f2c46fa90f91b243dbe953b45e2b282a`)
+  - `release/Zerox Agent-3.0.0-arm64-mac.zip.blockmap` (335K, sha256 `3e5f06719887da4b6a7899ff469126373a9f43d6d8fc21ceb8ddff2a7026e15c`)
+  - `release/latest-mac.yml` (517B, sha256 `b7ef235f607d8d2efe7935bc451fff792e5d3650b1601b18b4374bca3b4f6dd7`)
+  - P28 is marked done after independent review, full gates, packaged smoke, strict packaged acceptance, and release artifact regeneration. Branch/tag push and GitHub Release publication are the final remote commands for this release.

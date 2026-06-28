@@ -256,6 +256,7 @@ export type ChatTaskStatusEvent = {
   inputRequest?: SkillUserInputRequest;
   pendingSkillInput?: SkillPendingInputState;
   ok?: boolean;
+  payload?: Record<string, unknown>;
 };
 
 export type ChatSessionActivitySnapshot = {

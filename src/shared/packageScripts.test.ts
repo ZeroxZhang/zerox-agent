@@ -8,7 +8,7 @@ type PackageJson = {
 };
 
 describe("package scripts", () => {
-  it("sets release metadata to v2.9.5", () => {
+  it("sets release metadata to v3.0.0", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -16,12 +16,12 @@ describe("package scripts", () => {
       readFileSync(path.join(process.cwd(), "package-lock.json"), "utf8"),
     ) as { version?: string; packages?: Record<string, { version?: string }> };
 
-    expect(packageJson.version).toBe("2.9.5");
-    expect(packageLock.version).toBe("2.9.5");
-    expect(packageLock.packages?.[""]?.version).toBe("2.9.5");
+    expect(packageJson.version).toBe("3.0.0");
+    expect(packageLock.version).toBe("3.0.0");
+    expect(packageLock.packages?.[""]?.version).toBe("3.0.0");
   });
 
-  it("keeps release gates done through v2.9.5", () => {
+  it("keeps release gates tracked through v3.0.0", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -35,8 +35,32 @@ describe("package scripts", () => {
       }>;
     };
 
-    expect(packageJson.version).toBe("2.9.5");
-    expect(featureList.features.filter((feature) => feature.status !== "done")).toEqual([]);
+    const openFeatureIds = featureList.features
+      .filter((feature) => feature.status !== "done")
+      .map((feature) => feature.id);
+    const p28 = featureList.features.find(
+      (feature) => feature.id === "P28-v3.0.0-execution-context-spine",
+    );
+
+    expect(packageJson.version).toBe("3.0.0");
+    expect(openFeatureIds.filter((id) => id !== "P28-v3.0.0-execution-context-spine")).toEqual(
+      [],
+    );
+    expect(openFeatureIds.length).toBeLessThanOrEqual(1);
+    expect(p28?.status === "in_progress" || p28?.status === "done").toBe(true);
+    expect(p28).toEqual(
+      expect.objectContaining({
+        id: "P28-v3.0.0-execution-context-spine",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("AgentRuntimeContextSnapshot"),
+          expect.stringContaining("Chat agent-loop runs append"),
+          expect.stringContaining("Goal milestone runs append"),
+          expect.stringContaining("Recoverable scheduled task runs append"),
+          expect.stringContaining("package metadata reports version 3.0.0"),
+          expect.stringContaining("GitHub Release v3.0.0"),
+        ]),
+      }),
+    );
     expect(featureList.features).toContainEqual(
       expect.objectContaining({
         id: "P27-v2.9.5-scheduled-task-session-recovery-release",

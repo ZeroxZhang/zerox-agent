@@ -33,7 +33,7 @@
 
 ## Overview
 
-**Zerox Agent** is a local-first desktop control plane for personal AI agents (current release: v2.9.5). The name comes from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
+**Zerox Agent** is a local-first desktop control plane for personal AI agents (current release: v3.0.0). The name comes from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
 
 It is not a chat wrapper or a generic hosted agent surface. It runs entirely on your machine: it configures OpenAI-compatible / Anthropic / Gemini models, scans local `SKILL.md` skill files, executes recoverable agent runs, invokes permission-controlled tools, tracks parent/child multi-agent sessions, persists experiential knowledge into local long-term memory, and keeps learning user-reviewed before it changes future behavior.
 
@@ -119,7 +119,7 @@ Zerox Agent is a layered Electron application. An Electron shell wraps a depende
 
 Three production loops, all delegating to `runAgentLoop` (`src/main/agentLoop.ts`), the heart of the system. Per turn: inject system reminders → compact oversized history → request the model (streaming or with retry) → terminate, or authorize + execute tools → serialize observations → checkpoint. Loop guards detect repeated tool calls, fragmented tool-call patterns, and tool-failure streaks.
 
-Every run is governed by an immutable `ExecutionContextPackage` — a frozen snapshot of the workspace sandbox, the selected skill, visible tools, permissions, memory scopes, and the checkpoint strategy. Skills are loaded on demand through permissioned `skill_load` / `skill_resource_list` tools rather than eagerly. Each tool call is recorded in a durable tool invocation ledger (full status-transition history per call), and a separate raw history search store keeps pre-compaction message evidence queryable via `history_search` / `history_around`.
+Every run is governed by an immutable `ExecutionContextPackage` — a frozen snapshot of the workspace sandbox, the selected skill, visible tools, permissions, memory scopes, and the checkpoint strategy. In v3.0.0, chat, goal milestone, and scheduled-task runs also emit a secret-safe `AgentRuntimeContextSnapshot` as the runtime context spine: it records the run surface, model identity, anchored time, sandbox roots, visible tool schema hash, memory scopes, checkpoint metadata, and trajectory identity before model/tool events. Skills are loaded on demand through permissioned `skill_load` / `skill_resource_list` tools rather than eagerly. Each tool call is recorded in a durable tool invocation ledger (full status-transition history per call), and a separate raw history search store keeps pre-compaction message evidence queryable via `history_search` / `history_around`.
 
 - **Chat loop** (`chatService.ts`) — interactive chat with streaming deltas, tool-call previews, output parts, status events, and continuation resume.
 - **Recoverable runtime engine** (`agentRuntimeEngine.ts`) — scheduled/manual task execution with a persistent `AgentExecutionCheckpoint` written after every tool call, enabling true pause/resume across app restarts. Optional **max-mode** (best-of-N: 3 propose-only candidates, a judge picks the winner, the winner's tool calls replay via an ephemeral actor).
@@ -508,7 +508,7 @@ npm run dist:mac      # .dmg + .zip → release/          (distribution)
 Current local builds are unsigned and not notarized. Each release passes an independent packaged-app acceptance gate (a computer-use run against the local macOS package) before handoff. After downloading a `.dmg` from GitHub Releases, macOS Gatekeeper may show "Zerox Agent is damaged and can't be opened." The image is usually valid; remove the quarantine attribute before opening:
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-2.9.5-arm64.dmg"
+xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-3.0.0-arm64.dmg"
 # or, if already dragged into Applications:
 xattr -dr com.apple.quarantine "/Applications/Zerox Agent.app"
 ```
@@ -994,7 +994,7 @@ mcpServers:               # 可选 MCP 服务器
 
 ## Agent 运行生命周期
 
-手动/定时任务默认走可恢复 runtime。每次运行写 checkpoint、追加 trajectory event、保存终态 run record，并可从完成轨迹生成学习候选：
+手动/定时任务默认走可恢复 runtime。每次运行写 checkpoint、追加 trajectory event、保存终态 run record，并可从完成轨迹生成学习候选。v3.0.0 增加了 `AgentRuntimeContextSnapshot` 作为 runtime context spine，在模型/工具事件前记录运行表面、模型身份、时间锚点、workspace sandbox、可见工具 schema、记忆范围、checkpoint 与 trajectory identity，且不包含 API key 或大块原始工具输出：
 
 ```
 startedAt

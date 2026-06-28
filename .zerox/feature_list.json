@@ -2033,6 +2033,64 @@
         "BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v2.9.5' \"release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent\"",
         "git diff --check"
       ]
+    },
+    {
+      "id": "P28-v3.0.0-execution-context-spine",
+      "priority": 58,
+      "status": "done",
+      "title": "v3.0.0 Execution Context Spine runtime snapshot release",
+      "files": [
+        "docs/superpowers/plans/2026-06-28-v3-0-0-execution-context-spine.md",
+        "src/shared/agentRuntimeContext.ts",
+        "src/shared/agentRuntimeContext.test.ts",
+        "src/shared/agentTrajectory.ts",
+        "src/shared/workspaceRunLedger.ts",
+        "src/main/runtimeContextFactory.ts",
+        "src/main/runtimeContextFactory.test.ts",
+        "src/main/chatAgentEvidence.ts",
+        "src/main/chatService.ts",
+        "src/main/chatService.test.ts",
+        "src/main/desktopLifecycle.ts",
+        "src/main/desktopLifecycle.test.ts",
+        "src/main/main.ts",
+        "src/main/goalRuntimeEngine.ts",
+        "src/main/goalRuntimeEngine.test.ts",
+        "src/main/agentRuntimeEngine.ts",
+        "src/main/agentRuntimeEngine.test.ts",
+        "src/shared/packageScripts.test.ts",
+        "src/shared/readme.test.ts",
+        "package.json",
+        "package-lock.json",
+        "README.md",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md",
+        ".superpowers/sdd/progress.md"
+      ],
+      "definitionOfDone": [
+        "AgentRuntimeContextSnapshot captures chat, goal, and scheduled-task run surface, model identity, anchored time, workspace sandbox roots, permission task ids, visible tool schema hash, memory scopes, optional skill metadata, checkpoint metadata, and trajectory identity",
+        "Runtime snapshots are JSON round-trip safe and do not contain API keys, secrets, or large raw tool outputs",
+        "Chat agent-loop runs append run_context_created trajectory evidence with runtimeContextSnapshot and workspace run ledger evidence before model/tool events",
+        "Goal milestone runs append run_context_created trajectory evidence with runtimeContextSnapshot for both deterministic native pipeline and model-loop execution paths",
+        "Recoverable scheduled task runs append run_context_created trajectory evidence with runtimeContextSnapshot before the first model request",
+        "No authorization behavior, provider request format, tool capability, checkpoint rebuild, actor surface, or memory automation changes are introduced",
+        "package metadata reports version 3.0.0 in package.json and package-lock.json",
+        "README describes v3.0.0 as a local-first runtime context spine release without using README as a process log",
+        "Independent code review, full verification gates, packaged smoke, and independent user acceptance pass",
+        "GitHub Release v3.0.0 is published with regenerated macOS assets and the release branch/tag are pushed"
+      ],
+      "verification": [
+        "npm test -- src/shared/agentRuntimeContext.test.ts",
+        "npm test -- src/main/runtimeContextFactory.test.ts src/main/chatAgentEvidence.test.ts",
+        "npm test -- src/main/chatService.test.ts src/main/goalRuntimeEngine.test.ts src/main/agentRuntimeEngine.test.ts",
+        "npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts",
+        "npm test",
+        "npm run verify",
+        "npm run harness:check",
+        "npm run smoke:prod",
+        "npm run dist:mac",
+        "BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v3.0.0' \"release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent\"",
+        "git diff --check"
+      ]
     }
   ]
 }

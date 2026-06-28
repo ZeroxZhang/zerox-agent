@@ -126,6 +126,33 @@ describe("goal runtime engine", () => {
     expect(trajectoryEvents.map((event) => event.type)).not.toContain(
       "model_request",
     );
+    expect(trajectoryEvents).toContainEqual(
+      expect.objectContaining({
+        type: "run_context_created",
+        payload: expect.objectContaining({
+          runtimeContextSnapshot: expect.objectContaining({
+            surface: "goal",
+            model: expect.objectContaining({
+              providerId: "native",
+              modelId: "deterministic",
+            }),
+            permissions: expect.objectContaining({
+              taskId: "goal:goal_1",
+              approvalMode: "scheduled",
+            }),
+            trajectory: expect.objectContaining({
+              runId: "goal_run_1",
+            }),
+          }),
+          runtimeContextSnapshotSummary: expect.objectContaining({
+            surface: "goal",
+            permissionTaskId: "goal:goal_1",
+          }),
+          goalId: "goal_1",
+          milestoneId: "milestone_1",
+        }),
+      }),
+    );
     expect(trajectoryEvents).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -793,6 +820,30 @@ describe("goal runtime engine", () => {
     );
     expect(runs[0]?.events.map((event) => event.message)).toContain(
       "Goal milestone agent loop completed.",
+    );
+    expect(trajectoryEvents).toContainEqual(
+      expect.objectContaining({
+        type: "run_context_created",
+        payload: expect.objectContaining({
+          runtimeContextSnapshot: expect.objectContaining({
+            surface: "goal",
+            model: expect.objectContaining({
+              modelId: "agent-model",
+            }),
+            workspace: expect.objectContaining({
+              workspaceRoot: "/Users/example",
+            }),
+            permissions: expect.objectContaining({
+              taskId: "goal:goal_1",
+              approvalMode: "scheduled",
+            }),
+          }),
+          runtimeContextSnapshotSummary: expect.objectContaining({
+            surface: "goal",
+            workspaceRoot: "/Users/example",
+          }),
+        }),
+      }),
     );
     expect(trajectoryEvents.map((event) => event.type)).toContain("final_summary");
     expect(trajectoryEvents.map((event) => event.type)).toContain("checkpoint_written");

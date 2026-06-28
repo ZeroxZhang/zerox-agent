@@ -1,0 +1,60 @@
+import { describe, expect, it } from "vitest";
+import { buildPrimaryRunContext } from "../shared/agentWorkspace";
+import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
+import { createChatAgentEvidenceRecorder } from "./chatAgentEvidence";
+
+describe("chat agent evidence recorder", () => {
+  it("can attach run context and redaction overrides to snapshot evidence", async () => {
+    const events: AgentTrajectoryEvent[] = [];
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: "/repo",
+      runId: "run_1",
+      sessionId: "session_1",
+    });
+    const recorder = createChatAgentEvidenceRecorder({
+      trajectoryStore: {
+        async append(_runId, event) {
+          events.push(event);
+          return event;
+        },
+        async list() {
+          return events;
+        },
+        async flushShadowWrites() {
+          return;
+        },
+      },
+      runId: "run_1",
+      runContext,
+      createId: () => `event_${events.length + 1}`,
+      now: () => new Date("2026-06-28T14:00:00.000Z"),
+    });
+
+    await recorder.append(
+      "run_context_created",
+      {
+        runtimeContextSnapshotSummary: {
+          snapshotId: "runtime_snapshot_1",
+        },
+      },
+      {
+        containsApiKey: false,
+        containsFileContent: false,
+        containsUserText: false,
+      },
+    );
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: "run_context_created",
+        runContext,
+        redaction: {
+          containsApiKey: false,
+          containsFileContent: false,
+          containsUserText: false,
+        },
+      }),
+    ]);
+  });
+});

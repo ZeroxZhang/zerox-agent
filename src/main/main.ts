@@ -17,6 +17,7 @@ import {
   getMainWindowOptions,
   getTrayTooltip,
   shouldApplyLoginStartup,
+  shouldRestoreMainWindowOnActivate,
 } from "./desktopLifecycle";
 import { runDesktopAgentValidation } from "./desktopAgentValidator";
 import { applyUserDataDirOverride } from "./userDataDirOverride";
@@ -337,11 +338,7 @@ app.whenReady().then(() => {
   }
 
   app.on("activate", () => {
-    if (smokeMode.enabled) {
-      return;
-    }
-
-    if (BrowserWindow.getAllWindows().length === 0) {
+    if (shouldRestoreMainWindowOnActivate(smokeMode.enabled)) {
       createMainWindow();
     }
   });

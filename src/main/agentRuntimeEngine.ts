@@ -54,6 +54,7 @@ import type {
   AgentTrajectoryEventType,
 } from "../shared/agentTrajectory";
 import type { NativeToolDescriptor } from "../shared/nativeCapabilities";
+import type { AgentRunContext } from "../shared/agentWorkspace";
 import type {
   AgentRunEvent,
   AgentRunRecord,
@@ -69,6 +70,9 @@ import {
   type ToolInvocationRecord,
   type ToolInvocationTransition,
 } from "../shared/toolInvocationLedger";
+import { createRuntimeContextSnapshotForRun } from "./runtimeContextFactory";
+import { summarizeAgentRuntimeContextSnapshot } from "../shared/agentRuntimeContext";
+import type { ExecutionContextMemoryScope } from "../shared/executionContextPackage";
 
 export type AgentRuntimeModelProfile = {
   baseUrl: string;
@@ -780,6 +784,10 @@ export function createAgentRuntimeEngine(options: {
         runOptions?.sessionId ? { sessionId: runOptions.sessionId } : undefined,
       );
       const initialProfile = await options.getModelProfile();
+      const initialToolDefinitions = filterToolDefinitionsForScheduledTask(
+        getToolDefinitions(options.toolExecutor),
+        task,
+      );
       const systemTimeZone = getSystemTimeZone();
       const proceduralMemoryContext =
         await buildProceduralMemoryPromptContext({
@@ -827,6 +835,42 @@ export function createAgentRuntimeEngine(options: {
 
       await options.executionStore.save(checkpoint);
       if (runContext) {
+        const runtimeContextSnapshot = createRuntimeContextSnapshotForRun({
+          surface: "scheduled_task",
+          runId,
+          runContext,
+          modelProfile: initialProfile,
+          tools: initialToolDefinitions,
+          getToolSource: (toolName) =>
+            getToolSource(options.toolExecutor, toolName),
+          ...(skill ? { selectedSkill: skill } : {}),
+          permission: {
+            taskId: task.id,
+            runtimeTaskId: `scheduled:${task.id}`,
+            approvalMode: "scheduled",
+          },
+          memory: {
+            scopes: buildScheduledRuntimeMemoryScopes({
+              task,
+              runContext,
+              skill,
+            }),
+            recallBudgetTokens: 0,
+            rawHistoryEnabled: false,
+          },
+          checkpoint: {
+            strategy: "boundary",
+            preserveToolPairs: true,
+            protectSkillLoads: true,
+            checkpointId: checkpoint.id,
+          },
+          trajectory: {
+            ...(runContext.sessionId ? { sessionId: runContext.sessionId } : {}),
+          },
+          createId: () => `runtime_snapshot_${runId}`,
+          now: () => startedAt,
+          systemTimeZone,
+        });
         await appendTrajectory(runId, "run_context_created", {
           workspaceId: runContext.workspaceId,
           workspaceRoot: runContext.workspaceRoot,
@@ -834,6 +878,9 @@ export function createAgentRuntimeEngine(options: {
           depth: runContext.depth,
           ...(runContext.parentRunId ? { parentRunId: runContext.parentRunId } : {}),
           ...(runContext.sessionId ? { sessionId: runContext.sessionId } : {}),
+          runtimeContextSnapshot,
+          runtimeContextSnapshotSummary:
+            summarizeAgentRuntimeContextSnapshot(runtimeContextSnapshot),
         }, undefined, runContext);
       }
       await appendTrajectory(runId, "state_transition", {
@@ -1109,6 +1156,25 @@ function toChatMessage(message: AgentExecutionMessage): ChatMessage {
 
 function getRunSkillName(task: { skillName: string }): string {
   return task.skillName.trim() || "prompt-task";
+}
+
+function buildScheduledRuntimeMemoryScopes(input: {
+  task: ScheduledTask;
+  runContext: AgentRunContext;
+  skill: SkillRecord | null;
+}): ExecutionContextMemoryScope[] {
+  return [
+    { kind: "project", id: input.task.id },
+    ...(input.runContext.workspaceId
+      ? [{ kind: "workspace" as const, id: input.runContext.workspaceId }]
+      : []),
+    ...(input.runContext.sessionId
+      ? [{ kind: "session" as const, id: input.runContext.sessionId }]
+      : []),
+    ...(input.skill?.manifest.name
+      ? [{ kind: "skill" as const, id: input.skill.manifest.name }]
+      : []),
+  ];
 }
 
 function markCurrentStepRunning(

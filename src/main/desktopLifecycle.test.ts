@@ -4,6 +4,7 @@ import {
   getMainWindowOptions,
   getTrayTooltip,
   shouldApplyLoginStartup,
+  shouldRestoreMainWindowOnActivate,
 } from "./desktopLifecycle";
 
 describe("desktop lifecycle helpers", () => {
@@ -39,5 +40,10 @@ describe("desktop lifecycle helpers", () => {
         BUILDING_AGENT_ENABLE_LOGIN_STARTUP: "1",
       }),
     ).toBe(true);
+  });
+
+  it("restores the main window on app activation outside smoke mode", () => {
+    expect(shouldRestoreMainWindowOnActivate(false)).toBe(true);
+    expect(shouldRestoreMainWindowOnActivate(true)).toBe(false);
   });
 });

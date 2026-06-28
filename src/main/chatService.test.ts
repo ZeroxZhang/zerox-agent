@@ -1244,6 +1244,7 @@ describe("chat service", () => {
       },
     });
     expect(trajectoryEvents.map((event) => event.type)).toEqual([
+      "run_context_created",
       "model_request",
       "model_response",
       "tool_invocation",
@@ -1257,6 +1258,26 @@ describe("chat service", () => {
       "model_response",
       "final_summary",
     ]);
+    expect(trajectoryEvents[0]).toMatchObject({
+      type: "run_context_created",
+      payload: {
+        runtimeContextSnapshot: expect.objectContaining({
+          surface: "chat",
+          model: expect.objectContaining({
+            modelId: "agent-model",
+          }),
+          permissions: expect.objectContaining({
+            taskId: expect.stringContaining("chat:"),
+            approvalMode: "manual",
+          }),
+        }),
+        runtimeContextSnapshotSummary: expect.objectContaining({
+          surface: "chat",
+          visibleToolCount: expect.any(Number),
+        }),
+      },
+    });
+    expect(JSON.stringify(trajectoryEvents[0].payload)).not.toContain("secret");
     expect(
       trajectoryEvents
         .filter((event) => event.type === "tool_invocation")
@@ -1396,6 +1417,17 @@ describe("chat service", () => {
           type: "status",
           status: "running",
           message: "工作区：project",
+        }),
+        expect.objectContaining({
+          type: "status",
+          message: "Runtime context snapshot recorded.",
+          payload: expect.objectContaining({
+            runtimeContextSnapshotSummary: expect.objectContaining({
+              surface: "chat",
+              workspaceId: "workspace_project",
+              workspaceRoot: "/workspace/project",
+            }),
+          }),
         }),
         expect.objectContaining({
           type: "status",
@@ -1581,6 +1613,7 @@ describe("chat service", () => {
     });
 
     expect(trajectoryEvents.map((event) => event.type)).toEqual([
+      "run_context_created",
       "model_request",
       "model_response",
       "tool_invocation",

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { Goal, Milestone } from "../shared/agentGoal";
 import type { AgentRunEvent, AgentRunRecord } from "../shared/agentRuns";
+import type { ExecutionContextMemoryScope } from "../shared/executionContextPackage";
 import {
   buildPrimaryRunContext,
   type AgentRunContext,
@@ -40,6 +41,8 @@ import {
   type ToolInvocationRecord,
   type ToolInvocationTransition,
 } from "../shared/toolInvocationLedger";
+import { createRuntimeContextSnapshotForRun } from "./runtimeContextFactory";
+import { summarizeAgentRuntimeContextSnapshot } from "../shared/agentRuntimeContext";
 
 export type GoalRuntimeModelProfile = {
   baseUrl: string;
@@ -191,13 +194,51 @@ export function createGoalRuntimeEngine(options: {
       ];
       let observedToolCalls = 0;
 
-      await appendTrajectory(runId, "run_context_created", {
-        ...payload,
-        runContext,
-      });
-
       const taskContract = goal.taskContract;
       if (isDeterministicGoalPipelineSupported(taskContract)) {
+        const runtimeContextSnapshot = createRuntimeContextSnapshotForRun({
+          surface: "goal",
+          runId,
+          runContext,
+          modelProfile: {
+            providerId: "native",
+            model: "deterministic",
+            profile: "goal",
+            capabilities: ["native_pipeline"],
+          },
+          tools: options.toolExecutor.getRegistry().getDefinitions(),
+          getToolSource: (toolName) =>
+            options.toolExecutor.getRegistry().getSource(toolName),
+          ...(goal.selectedSkill ? { selectedSkill: goal.selectedSkill } : {}),
+          permission: {
+            taskId,
+            runtimeTaskId: `${taskId}:${milestone.id}`,
+            approvalMode: "scheduled",
+            policyLabel: "goal milestone runtime policy",
+          },
+          memory: {
+            scopes: buildGoalRuntimeMemoryScopes(goal, runContext),
+            recallBudgetTokens: 0,
+            rawHistoryEnabled: false,
+          },
+          checkpoint: {
+            strategy: "boundary",
+            preserveToolPairs: true,
+            protectSkillLoads: true,
+          },
+          trajectory: {
+            ...(goal.chatSessionId ? { sessionId: goal.chatSessionId } : {}),
+          },
+          createId: () => `runtime_snapshot_${runId}`,
+          now,
+        });
+        await appendTrajectory(runId, "run_context_created", {
+          ...payload,
+          runContext,
+          runtimeContextSnapshot,
+          runtimeContextSnapshotSummary:
+            summarizeAgentRuntimeContextSnapshot(runtimeContextSnapshot),
+        }, false);
         const pipelineResult = await executeDeterministicGoalPipeline({
           contract: taskContract,
           runContext,
@@ -408,6 +449,44 @@ export function createGoalRuntimeEngine(options: {
       }
 
       const modelProfile = await options.getModelProfile();
+      const runtimeContextSnapshot = createRuntimeContextSnapshotForRun({
+        surface: "goal",
+        runId,
+        runContext,
+        modelProfile,
+        tools: options.toolExecutor.getRegistry().getDefinitions(),
+        getToolSource: (toolName) =>
+          options.toolExecutor.getRegistry().getSource(toolName),
+        ...(goal.selectedSkill ? { selectedSkill: goal.selectedSkill } : {}),
+        permission: {
+          taskId,
+          runtimeTaskId: `${taskId}:${milestone.id}`,
+          approvalMode: "scheduled",
+          policyLabel: "goal milestone runtime policy",
+        },
+        memory: {
+          scopes: buildGoalRuntimeMemoryScopes(goal, runContext),
+          recallBudgetTokens: 0,
+          rawHistoryEnabled: false,
+        },
+        checkpoint: {
+          strategy: "boundary",
+          preserveToolPairs: true,
+          protectSkillLoads: true,
+        },
+        trajectory: {
+          ...(goal.chatSessionId ? { sessionId: goal.chatSessionId } : {}),
+        },
+        createId: () => `runtime_snapshot_${runId}`,
+        now,
+      });
+      await appendTrajectory(runId, "run_context_created", {
+        ...payload,
+        runContext,
+        runtimeContextSnapshot,
+        runtimeContextSnapshotSummary:
+          summarizeAgentRuntimeContextSnapshot(runtimeContextSnapshot),
+      }, false);
       const tokenBudget =
         options.tokenBudget ??
         goal.budget.maxTokens ??
@@ -621,6 +700,24 @@ function withGoalRunIdentity(
     goalId,
     milestoneId,
   };
+}
+
+function buildGoalRuntimeMemoryScopes(
+  goal: Goal,
+  runContext: AgentRunContext,
+): ExecutionContextMemoryScope[] {
+  return [
+    { kind: "goal", id: goal.id },
+    ...(runContext.workspaceId
+      ? [{ kind: "workspace" as const, id: runContext.workspaceId }]
+      : []),
+    ...(goal.chatSessionId
+      ? [{ kind: "session" as const, id: goal.chatSessionId }]
+      : []),
+    ...(goal.selectedSkill?.manifest.name
+      ? [{ kind: "skill" as const, id: goal.selectedSkill.manifest.name }]
+      : []),
+  ];
 }
 
 function extendRunContextForSelectedSkill(
