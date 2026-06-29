@@ -5786,3 +5786,12 @@
   - `release/Zerox Agent-3.1.0-arm64-mac.zip.blockmap` (335K, sha256 `01b3babd000ada80c2a5b4627a21c8cd3f0e519c2c24ad116f99527918d8b253`)
   - `release/latest-mac.yml` (517B, sha256 `0b95e901076538d6b80f300aa1819d532ca5438b1821d66d1a077ac3696115e0`)
   - P29 is marked done after independent adversarial review, full verify, harness, production smoke, dist packaging, and packaged-app smoke. Branch push, tag push, and GitHub Release v3.1.0 publication are the final remote commands for this release.
+  - Branch `codex/3.1.0` pushed to GitHub.
+  - Tag `v3.1.0` pushed to GitHub.
+  - GitHub Release `v3.1.0` published: https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.1.0
+  - GitHub Release assets uploaded and verified with matching digests:
+    - `Zerox.Agent-3.1.0-arm64.dmg` sha256 `e403a8babd0ca823e8f16be41dc9fe2fc7b1109f0fce3bc414f1b4a94a01b35a`
+    - `Zerox.Agent-3.1.0-arm64-mac.zip` sha256 `528ea062c572851036a7b20d5c64e72e181871eee15915ab5ebe606b457f6e96`
+    - `Zerox.Agent-3.1.0-arm64.dmg.blockmap` sha256 `0d93b04909cbc6f27766d29078059402f76127e26e46c8386ec9b4d1d28fdaa7`
+    - `Zerox.Agent-3.1.0-arm64-mac.zip.blockmap` sha256 `01b3babd000ada80c2a5b4627a21c8cd3f0e519c2c24ad116f99527918d8b253`
+    - `latest-mac.yml` sha256 `0b95e901076538d6b80f300aa1819d532ca5438b1821d66d1a077ac3696115e0`
