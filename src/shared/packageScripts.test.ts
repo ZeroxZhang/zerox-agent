@@ -8,7 +8,7 @@ type PackageJson = {
 };
 
 describe("package scripts", () => {
-  it("sets release metadata to v3.0.0", () => {
+  it("sets release metadata to v3.1.0", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -16,12 +16,12 @@ describe("package scripts", () => {
       readFileSync(path.join(process.cwd(), "package-lock.json"), "utf8"),
     ) as { version?: string; packages?: Record<string, { version?: string }> };
 
-    expect(packageJson.version).toBe("3.0.0");
-    expect(packageLock.version).toBe("3.0.0");
-    expect(packageLock.packages?.[""]?.version).toBe("3.0.0");
+    expect(packageJson.version).toBe("3.1.0");
+    expect(packageLock.version).toBe("3.1.0");
+    expect(packageLock.packages?.[""]?.version).toBe("3.1.0");
   });
 
-  it("keeps release gates tracked through v3.0.0", () => {
+  it("keeps release gates tracked through v3.1.0", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -38,19 +38,37 @@ describe("package scripts", () => {
     const openFeatureIds = featureList.features
       .filter((feature) => feature.status !== "done")
       .map((feature) => feature.id);
+    const p29 = featureList.features.find(
+      (feature) => feature.id === "P29-v3.1.0-goal-acceptance-subagent-runtime",
+    );
     const p28 = featureList.features.find(
       (feature) => feature.id === "P28-v3.0.0-execution-context-spine",
     );
 
-    expect(packageJson.version).toBe("3.0.0");
-    expect(openFeatureIds.filter((id) => id !== "P28-v3.0.0-execution-context-spine")).toEqual(
-      [],
-    );
+    expect(packageJson.version).toBe("3.1.0");
+    expect(
+      openFeatureIds.filter((id) => id !== "P29-v3.1.0-goal-acceptance-subagent-runtime"),
+    ).toEqual([]);
     expect(openFeatureIds.length).toBeLessThanOrEqual(1);
+    expect(p29?.status === "in_progress" || p29?.status === "done").toBe(true);
+    expect(p29).toEqual(
+      expect.objectContaining({
+        id: "P29-v3.1.0-goal-acceptance-subagent-runtime",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("Slash Goal commands with selected skills persist"),
+          expect.stringContaining("right-side context rail shows decomposed task progress"),
+          expect.stringContaining("actor tool launches real subagent work with parent run context"),
+          expect.stringContaining("Independent adversarial review subagent"),
+          expect.stringContaining("package metadata reports version 3.1.0"),
+          expect.stringContaining("GitHub Release v3.1.0"),
+        ]),
+      }),
+    );
     expect(p28?.status === "in_progress" || p28?.status === "done").toBe(true);
     expect(p28).toEqual(
       expect.objectContaining({
         id: "P28-v3.0.0-execution-context-spine",
+        status: "done",
         definitionOfDone: expect.arrayContaining([
           expect.stringContaining("AgentRuntimeContextSnapshot"),
           expect.stringContaining("Chat agent-loop runs append"),

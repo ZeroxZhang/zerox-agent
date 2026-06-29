@@ -59,6 +59,28 @@ describe("ActorRuntime v0", () => {
     expect(outcome.summary).toBe("did work");
   });
 
+  it("updates status after terminal outcomes resolve", async () => {
+    const runtime = createActorRuntime({
+      deps: {
+        runActor: async () => ({
+          status: "done",
+          summary: "finished",
+          filesTouched: [],
+        }),
+      },
+    });
+    const handle = runtime.spawn({
+      contextMode: "state",
+      lifecycle: "ephemeral",
+      task: "short task",
+      parentRunId: "run-parent",
+    });
+
+    await runtime.wait(handle.actorId);
+
+    expect(runtime.status(handle.actorId)).toBe("done");
+  });
+
   it("cancel aborts the actor and resolves canceled", async () => {
     let aborted = false;
     const runtime = createActorRuntime({
@@ -75,6 +97,30 @@ describe("ActorRuntime v0", () => {
     const outcome = await runtime.wait(handle.actorId);
     expect(aborted).toBe(true);
     expect(outcome.status).toBe("canceled");
+  });
+
+  it("keeps abort rejections classified as canceled", async () => {
+    const runtime = createActorRuntime({
+      deps: {
+        runActor: async (_input, _ctx, cancel) =>
+          new Promise<ActorOutcome>((_resolve, reject) => {
+            cancel.addEventListener("abort", () => {
+              reject(new Error("operation aborted"));
+            });
+          }),
+      },
+    });
+    const handle = runtime.spawn({
+      contextMode: "state",
+      lifecycle: "ephemeral",
+      task: "cancel me",
+    });
+
+    runtime.cancel(handle.actorId, "user canceled");
+    const outcome = await runtime.wait(handle.actorId);
+
+    expect(outcome.status).toBe("canceled");
+    expect(runtime.status(handle.actorId)).toBe("canceled");
   });
 
   it("runActor errors become error outcomes (never throw to caller)", async () => {

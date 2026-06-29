@@ -5719,3 +5719,70 @@
   - Branch `codex/3.0.0` pushed to GitHub.
   - Tag `v3.0.0` pushed to GitHub.
   - GitHub Release `v3.0.0` published: https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.0.0
+
+## 2026-06-30 - Zerox Agent v3.1.0 Goal Acceptance And Subagent Observability Release
+
+- Request:
+  - Start a v3.1.0 iteration based on the long-task postmortem.
+  - Fix the root causes behind partial intent capture, selected-skill noncompliance, failed/hidden subagent execution, and weak right-rail progress observability.
+  - Use standard phased development, independent adversarial subagent review, full verification, packaging, release, push, and release evidence.
+- Feature tracking:
+  - Added exactly one active feature: `P29-v3.1.0-goal-acceptance-subagent-runtime`.
+  - Plan file: `docs/superpowers/plans/2026-06-30-v3-1-0-goal-acceptance-subagent-runtime.md`.
+- Changed areas:
+  - `src/main/actors/actorRuntime.ts`
+  - `src/main/actors/actorTool.ts`
+  - `src/main/agentLoop.ts`
+  - `src/main/agentToolExecutor.ts`
+  - `src/main/chatService.ts`
+  - `src/main/dynamicToolRegistry.ts`
+  - `src/shared/chat.ts`
+  - `src/renderer/chatTaskActivity.ts`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/styles/chat.css`
+  - focused tests in actor, chat, renderer, README, and package metadata suites
+  - `package.json`, `package-lock.json`, `README.md`, `.zerox/feature_list.json`, `.zerox/progress.md`
+- Implementation evidence:
+  - Slash Goal routing with explicitly selected skills now has regression coverage for the `@huashu-design` postmortem shape and persists the selected skill into durable Goal Mode with an attached active goal summary.
+  - Goal routing now emits deterministic `requirement` status events from the actual `set_goal` production path, so explicit user requirements can appear as right-rail subtask rows instead of a single vague running state.
+  - The actor tool now propagates parent run context into spawned actors, emits a runtime `actor_spawned` event immediately after `runtime.spawn()`, and maps terminal non-`done` outcomes (`error` and `canceled`) to tool-level failures with actor id, status, summary, and files touched.
+  - Actor runtime now updates in-memory terminal status after successful, failed, and canceled outcomes; abort rejections stay classified as `canceled`.
+  - AgentLoop forwards tool runtime events through typed execution options; ChatService listens for actor runtime events before tool results and de-duplicates spawned events by actor id.
+  - Chat status events now expose actor/subagent spawned, done, error, and canceled states with actor ids, task labels, and summaries.
+  - Renderer status projection builds requirement rows and subagent rows; the right context rail switches from the default context list to active subagent execution status whenever any subagent is still running.
+  - README and package metadata report v3.1.0.
+- Red/green TDD evidence:
+  - RED: `npm test -- src/main/actors/actorRuntime.test.ts src/main/actors/actorTool.test.ts` failed before actor terminal status, parentRunId propagation, and tool-level actor errors were implemented.
+  - `npm test -- src/main/actors/actorRuntime.test.ts src/main/actors/actorTool.test.ts` -> passed after actor runtime/tool fixes.
+  - RED: `npm test -- src/renderer/chatTaskActivity.test.ts` failed before requirement/subagent projection helpers existed.
+  - `npm test -- src/renderer/chatTaskActivity.test.ts` -> passed after projection helpers.
+  - RED: `npm test -- src/main/chatService.test.ts -t "actor status events"` failed before structured actor status emission.
+  - `npm test -- src/main/chatService.test.ts -t "actor status events"` -> passed after actor status emission.
+  - RED: `npm test -- src/renderer/materialDesign.test.ts -t "subagent status"` failed before right-rail subagent UI wiring.
+  - `npm test -- src/renderer/materialDesign.test.ts -t "subagent status"` -> passed after right-rail wiring.
+  - RED: `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` failed while metadata and README still reported v3.0.0.
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 2 files / 11 tests passed after v3.1.0 metadata/docs updates.
+  - RED: `npm test -- src/main/actors/actorRuntime.test.ts -t "abort rejections"` failed before abort rejections were preserved as canceled.
+  - `npm test -- src/main/actors/actorRuntime.test.ts -t "abort rejections"` -> passed after cancellation classification fix.
+  - Independent adversarial review (Lorentz) rejected the first implementation: actor spawned events were emitted only after terminal tool results, canceled actors were still `ok:true`, and `requirement` events had no production emitter.
+  - RED: `npm test -- src/main/actors/actorTool.test.ts src/main/chatService.test.ts -t "runtime event|canceled|huashu-design slash goals|actor spawned status"` failed on all four review-blocker cases.
+  - `npm test -- src/main/actors/actorTool.test.ts src/main/chatService.test.ts -t "runtime event|canceled|huashu-design slash goals|actor spawned status"` -> 2 files / 4 targeted tests passed after review-blocker fixes.
+- Verification evidence:
+  - `./init.sh` -> passed initial harness check and packageScripts focused test before implementation.
+  - `npm test -- src/main/actors/actorRuntime.test.ts src/main/actors/actorTool.test.ts src/main/chatService.test.ts src/renderer/chatTaskActivity.test.ts src/renderer/materialDesign.test.ts src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 7 files / 173 tests passed.
+  - Independent adversarial re-review (Bacon) -> ACCEPTED; no blocking findings. It verified actor spawned event timing, non-`done` actor failures, production requirement emission, right-rail projections, and v3.1.0 metadata.
+  - `npm test` -> 186 files / 1296 tests passed.
+  - `npm run verify` -> 186 files / 1296 tests passed, build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local un-packaged smoke used existing JSON fallback after better-sqlite3 ABI mismatch.
+  - `npm run dist:mac` -> passed; regenerated unsigned macOS arm64 DMG, ZIP, blockmaps, and `latest-mac.yml` for v3.1.0.
+  - Packaged app smoke: `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v3.1.0' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+- Release artifact evidence:
+  - `release/latest-mac.yml` reports `version: 3.1.0` and update URLs `Zerox-Agent-3.1.0-arm64-mac.zip` / `Zerox-Agent-3.1.0-arm64.dmg`.
+  - `release/Zerox Agent-3.1.0-arm64.dmg` (122M, sha256 `e403a8babd0ca823e8f16be41dc9fe2fc7b1109f0fce3bc414f1b4a94a01b35a`)
+  - `release/Zerox Agent-3.1.0-arm64-mac.zip` (333M, sha256 `528ea062c572851036a7b20d5c64e72e181871eee15915ab5ebe606b457f6e96`)
+  - `release/Zerox Agent-3.1.0-arm64.dmg.blockmap` (131K, sha256 `0d93b04909cbc6f27766d29078059402f76127e26e46c8386ec9b4d1d28fdaa7`)
+  - `release/Zerox Agent-3.1.0-arm64-mac.zip.blockmap` (335K, sha256 `01b3babd000ada80c2a5b4627a21c8cd3f0e519c2c24ad116f99527918d8b253`)
+  - `release/latest-mac.yml` (517B, sha256 `0b95e901076538d6b80f300aa1819d532ca5438b1821d66d1a077ac3696115e0`)
+  - P29 is marked done after independent adversarial review, full verify, harness, production smoke, dist packaging, and packaged-app smoke. Branch push, tag push, and GitHub Release v3.1.0 publication are the final remote commands for this release.

@@ -2091,6 +2091,53 @@
         "BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v3.0.0' \"release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent\"",
         "git diff --check"
       ]
+    },
+    {
+      "id": "P29-v3.1.0-goal-acceptance-subagent-runtime",
+      "priority": 59,
+      "status": "done",
+      "title": "v3.1.0 Goal acceptance, subagent runtime, and context rail fidelity",
+      "files": [
+        "docs/superpowers/plans/2026-06-30-v3-1-0-goal-acceptance-subagent-runtime.md",
+        "src/shared/chat.ts",
+        "src/main/actors/actorRuntime.ts",
+        "src/main/actors/actorRuntime.test.ts",
+        "src/main/actors/actorTool.ts",
+        "src/main/actors/actorTool.test.ts",
+        "src/main/chatService.ts",
+        "src/main/chatService.test.ts",
+        "src/renderer/chatTaskActivity.ts",
+        "src/renderer/chatTaskActivity.test.ts",
+        "src/renderer/components/AgentChatPanel.tsx",
+        "src/renderer/materialDesign.test.ts",
+        "package.json",
+        "package-lock.json",
+        "README.md",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md"
+      ],
+      "definitionOfDone": [
+        "Slash Goal commands with selected skills persist as durable Goal runs with active goal summaries and mandatory skill contracts",
+        "Explicit user requirements are projected into subtask acceptance/status items instead of a single vague running state",
+        "The actor tool launches real subagent work with parent run context and returns tool-level failures for terminal actor errors",
+        "Actor runtime status reflects terminal outcomes after wait/run completion instead of stale in-memory running state",
+        "Chat status events expose actor/subagent spawned, running, done, and error states with actor ids and summaries",
+        "The right-side context rail shows decomposed task progress and replaces the default context list with active subagent status whenever subagents are running",
+        "Independent adversarial review subagent validates the iteration before package, release, push, and release notes updates",
+        "package metadata reports version 3.1.0 in package.json and package-lock.json and release documentation reflects v3.1.0",
+        "GitHub Release v3.1.0 is published with regenerated macOS assets and the release branch/tag are pushed"
+      ],
+      "verification": [
+        "npm test -- src/main/actors/actorRuntime.test.ts src/main/actors/actorTool.test.ts",
+        "npm test -- src/main/chatService.test.ts src/renderer/chatTaskActivity.test.ts src/renderer/materialDesign.test.ts",
+        "npm test",
+        "npm run verify",
+        "npm run harness:check",
+        "npm run smoke:prod",
+        "npm run dist:mac",
+        "Independent adversarial review subagent returns ACCEPTED with evidence",
+        "git diff --check"
+      ]
     }
   ]
 }

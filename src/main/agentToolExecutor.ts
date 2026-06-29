@@ -5,7 +5,11 @@ import path from "node:path";
 import { promisify } from "node:util";
 import type { ChatSessionStore } from "./chatSessionStore";
 import { createWebTools, type WebTools } from "./webTools";
-import { createDynamicToolRegistry, type DynamicToolRegistry } from "./dynamicToolRegistry";
+import {
+  createDynamicToolRegistry,
+  type DynamicToolRegistry,
+  type ToolRuntimeEvent,
+} from "./dynamicToolRegistry";
 import { registerSkillLoadTools } from "./skillLoadTools";
 import type { HistoryIndexStore } from "./historyIndexStore";
 import { searchCode } from "./nativeCodeTools";
@@ -57,6 +61,7 @@ export type AgentToolExecutionOptions = {
   signal?: AbortSignal;
   artifactWrite?: TrustedArtifactWriteMetadata;
   toolResultReadScope?: ToolResultOffloadReadScope;
+  onRuntimeEvent?: (event: ToolRuntimeEvent) => void;
 };
 
 export type TrustedArtifactWriteMetadata = {

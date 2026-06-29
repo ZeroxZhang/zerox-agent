@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   buildGoalTaskActivity,
+  buildRequirementProcessItems,
+  buildSubagentProcessItems,
   buildTaskActivityFromStatusEvent,
   buildTaskActivityDetail,
   buildTaskProcessItems,
@@ -251,6 +253,143 @@ describe("chat task activity", () => {
       detail: "正在输出回复",
     });
     expect(buildTaskProcessItems([streamingEvent])[0]?.label).toBe("输出");
+  });
+
+  it("projects requirement progress as stable subtask rows", () => {
+    const events: ChatTaskStatusEvent[] = [
+      createStatusEvent({
+        state: "requirement",
+        message: "识别全部用户要求",
+        createdAt: "2026-06-30T00:00:00.000Z",
+        elapsedMs: 100,
+        payload: {
+          requirementId: "intent",
+          label: "识别全部用户要求",
+          status: "done",
+        },
+      }),
+      createStatusEvent({
+        state: "requirement",
+        message: "启动仿写专家 subagent",
+        createdAt: "2026-06-30T00:00:01.000Z",
+        elapsedMs: 200,
+        payload: {
+          requirementId: "subagent",
+          label: "启动仿写专家 subagent",
+          status: "active",
+        },
+      }),
+      createStatusEvent({
+        state: "requirement",
+        message: "调用 huashu-design",
+        createdAt: "2026-06-30T00:00:02.000Z",
+        elapsedMs: 300,
+        payload: {
+          requirementId: "skill",
+          label: "调用 huashu-design",
+          status: "pending",
+        },
+      }),
+      createStatusEvent({
+        state: "requirement",
+        message: "subagent 已完成",
+        createdAt: "2026-06-30T00:00:03.000Z",
+        elapsedMs: 400,
+        payload: {
+          requirementId: "subagent",
+          label: "启动仿写专家 subagent",
+          status: "done",
+        },
+      }),
+    ];
+
+    expect(buildRequirementProcessItems(events)).toEqual([
+      {
+        id: "intent",
+        label: "识别全部用户要求",
+        message: "识别全部用户要求",
+        status: "done",
+        time: "08:00:00",
+      },
+      {
+        id: "subagent",
+        label: "启动仿写专家 subagent",
+        message: "subagent 已完成",
+        status: "done",
+        time: "08:00:03",
+      },
+      {
+        id: "skill",
+        label: "调用 huashu-design",
+        message: "调用 huashu-design",
+        status: "pending",
+        time: "08:00:02",
+      },
+    ]);
+  });
+
+  it("projects subagent status from actor lifecycle events", () => {
+    const events: ChatTaskStatusEvent[] = [
+      createStatusEvent({
+        state: "actor_spawned",
+        message: "仿写专家 subagent 已启动",
+        createdAt: "2026-06-30T00:01:00.000Z",
+        elapsedMs: 100,
+        payload: {
+          actorId: "actor_1",
+          task: "分析长文风格",
+        },
+      }),
+      createStatusEvent({
+        state: "actor_spawned",
+        message: "对抗审查 subagent 已启动",
+        createdAt: "2026-06-30T00:01:01.000Z",
+        elapsedMs: 200,
+        payload: {
+          actorId: "actor_2",
+          task: "审查最终 diff",
+        },
+      }),
+      createStatusEvent({
+        state: "actor_done",
+        message: "仿写专家 subagent 完成",
+        createdAt: "2026-06-30T00:01:02.000Z",
+        elapsedMs: 300,
+        payload: {
+          actorId: "actor_1",
+          actorStatus: "done",
+          summary: "已完成风格分析",
+        },
+      }),
+      createStatusEvent({
+        state: "actor_done",
+        message: "对抗审查 subagent 失败",
+        createdAt: "2026-06-30T00:01:03.000Z",
+        elapsedMs: 400,
+        payload: {
+          actorId: "actor_2",
+          actorStatus: "error",
+          summary: "发现关键问题",
+        },
+      }),
+    ];
+
+    expect(buildSubagentProcessItems(events)).toEqual([
+      {
+        id: "actor_1",
+        label: "分析长文风格",
+        message: "已完成风格分析",
+        status: "done",
+        time: "08:01:02",
+      },
+      {
+        id: "actor_2",
+        label: "审查最终 diff",
+        message: "发现关键问题",
+        status: "error",
+        time: "08:01:03",
+      },
+    ]);
   });
 });
 

@@ -74,6 +74,8 @@ import {
   shouldRenderMarkdownPreview,
 } from "../chatMarkdownPreview";
 import {
+  buildRequirementProcessItems,
+  buildSubagentProcessItems,
   buildTaskProcessItems,
   buildTaskActivityDetail,
   buildTaskActivityFromStatusEvent,
@@ -84,7 +86,9 @@ import {
   getWorkPhaseFromChatStatusEvent,
   idleTaskActivity,
   restoreChatTaskActivity,
+  type RequirementProcessItem,
   type TaskActivityState,
+  type SubagentProcessItem,
 } from "../chatTaskActivity";
 import {
   applyChatStreamEvent,
@@ -932,6 +936,15 @@ export function AgentChatPanel({
     () => buildTaskProcessItems(taskProcessEvents),
     [taskProcessEvents],
   );
+  const requirementProcessItems = useMemo(
+    () => buildRequirementProcessItems(taskProcessEvents),
+    [taskProcessEvents],
+  );
+  const subagentProcessItems = useMemo(
+    () => buildSubagentProcessItems(taskProcessEvents),
+    [taskProcessEvents],
+  );
+  const hasActiveSubagents = subagentProcessItems.some((item) => item.status === "running");
   const canCancelChatTask =
     Boolean(window.buildingAgent) &&
     (status.kind === "working" ||
@@ -1031,6 +1044,7 @@ export function AgentChatPanel({
   );
   const progressPanelItems = buildContextProgressItems({
     activeGoalDetail,
+    requirementProcessItems,
     taskProcessItems,
     workSteps,
     status,
@@ -2588,23 +2602,27 @@ export function AgentChatPanel({
         </section>
         <section className="kimi-side-card">
           <header>
-            <strong>上下文</strong>
+            <strong>{hasActiveSubagents ? "子代理" : "上下文"}</strong>
           </header>
-          <div className="kimi-context-list">
-            {contextPanelItems.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                disabled
-              >
-                <span aria-hidden="true">{item.icon}</span>
-                <div>
-                  <strong>{item.label}</strong>
-                  <small>{item.detail}</small>
-                </div>
-              </button>
-            ))}
-          </div>
+          {hasActiveSubagents ? (
+            <SubagentStatusList items={subagentProcessItems} />
+          ) : (
+            <div className="kimi-context-list">
+              {contextPanelItems.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  disabled
+                >
+                  <span aria-hidden="true">{item.icon}</span>
+                  <div>
+                    <strong>{item.label}</strong>
+                    <small>{item.detail}</small>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
         </section>
       </aside>
       ) : null}
@@ -2720,6 +2738,7 @@ type ContextProgressItem = {
 
 function buildContextProgressItems(options: {
   activeGoalDetail: Goal | null;
+  requirementProcessItems: RequirementProcessItem[];
   taskProcessItems: ReturnType<typeof buildTaskProcessItems>;
   workSteps: AgentWorkStep[];
   status: ChatStatus;
@@ -2729,6 +2748,14 @@ function buildContextProgressItems(options: {
       id: milestone.id,
       label: `${String(index + 1).padStart(2, "0")} ${milestone.description}`,
       status: mapMilestoneStatusToContextStatus(milestone.state),
+    }));
+  }
+
+  if (options.requirementProcessItems.length) {
+    return options.requirementProcessItems.slice(0, 8).map((item) => ({
+      id: item.id,
+      label: item.label,
+      status: mapRequirementStatusToContextStatus(item.status),
     }));
   }
 
@@ -2750,6 +2777,15 @@ function buildContextProgressItems(options: {
           ? "active"
           : step.status,
   }));
+}
+
+function mapRequirementStatusToContextStatus(
+  status: RequirementProcessItem["status"],
+): ContextProgressItem["status"] {
+  if (status === "done") return "done";
+  if (status === "active") return "active";
+  if (status === "error") return "error";
+  return "pending";
 }
 
 function mapMilestoneStatusToContextStatus(
@@ -2896,6 +2932,27 @@ function ContextActivityCard({
         </ol>
       )}
     </section>
+  );
+}
+
+function SubagentStatusList({
+  items,
+}: {
+  items: SubagentProcessItem[];
+}) {
+  return (
+    <ol className="subagent-status-list" aria-label="子代理执行状态">
+      {items.map((item) => (
+        <li className={`subagent-status-item is-${item.status}`} key={item.id}>
+          <span aria-hidden="true" />
+          <div>
+            <strong>{item.label}</strong>
+            <small>{item.message}</small>
+          </div>
+          <time>{item.time}</time>
+        </li>
+      ))}
+    </ol>
   );
 }
 

@@ -549,6 +549,21 @@ describe("Design System — Notion-inspired app shell", () => {
     );
   });
 
+  it("uses active subagent status as the right context rail primary content", () => {
+    expect(chatPanelSource).toContain("buildRequirementProcessItems");
+    expect(chatPanelSource).toContain("requirementProcessItems");
+    expect(chatPanelSource).toContain("buildSubagentProcessItems");
+    expect(chatPanelSource).toContain("subagentProcessItems");
+    expect(chatPanelSource).toContain(
+      "subagentProcessItems.some((item) => item.status === \"running\")",
+    );
+    expect(chatPanelSource).toContain("aria-label=\"子代理执行状态\"");
+    expect(chatPanelSource).toContain("SubagentStatusList");
+    expect(styles).toContain(".subagent-status-list");
+    expect(styles).toContain(".subagent-status-item.is-running");
+    expect(styles).toContain(".subagent-status-item.is-error");
+  });
+
   it("commits the v2.9 output rendering design artifact with acceptance states", () => {
     expect(existsSync(outputRenderingArtifactPath)).toBe(true);
 

@@ -117,12 +117,31 @@ export function createActorRuntime(
           if (entry && entry.inbox.pending(actorId) > 0) {
             entry.inbox.markUndelivered(actorId, now);
           }
+          if (entry) {
+            entry.record = {
+              ...entry.record,
+              status: validated.status,
+              updatedAt: now(),
+            };
+          }
           repo?.updateStatus(actorId, validated.status);
           return validated;
         })
         .catch((error) => {
-          repo?.updateStatus(actorId, "error");
-          return { status: "error" as const, summary: String(error), filesTouched: [] };
+          const status: ActorOutcome["status"] = cancel.signal.aborted ? "canceled" : "error";
+          const summary = cancel.signal.aborted
+            ? String(cancel.signal.reason ?? error)
+            : String(error);
+          const entry = actors.get(actorId);
+          if (entry) {
+            entry.record = {
+              ...entry.record,
+              status,
+              updatedAt: now(),
+            };
+          }
+          repo?.updateStatus(actorId, status);
+          return { status, summary, filesTouched: [] };
         });
 
       const handle: ActorHandle = { actorId, outcome };
@@ -146,6 +165,11 @@ export function createActorRuntime(
       const entry = actors.get(actorId);
       if (!entry) return;
       entry.cancel.abort(new Error(reason ?? "canceled"));
+      entry.record = {
+        ...entry.record,
+        status: "canceled",
+        updatedAt: now(),
+      };
       repo?.updateStatus(actorId, "canceled");
     },
 

@@ -11,7 +11,16 @@ export type ToolExecutionOptions = {
   runContext?: AgentRunContext;
   signal?: AbortSignal;
   toolResultReadScope?: ToolResultOffloadReadScope;
+  onRuntimeEvent?: (event: ToolRuntimeEvent) => void;
 };
+
+export type ToolRuntimeEvent =
+  | {
+      type: "actor_spawned";
+      actorId: string;
+      task: string;
+      status: "running";
+    };
 
 export type ToolHandler = (
   args: Record<string, unknown>,

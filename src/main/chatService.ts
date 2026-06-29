@@ -805,6 +805,8 @@ export function createChatService(options: {
             : null;
           let observedToolCallsExecuted =
             continuationToResume?.toolCallsExecuted ?? 0;
+          const actorToolTasks = new Map<string, string>();
+          const emittedActorSpawnIds = new Set<string>();
           const evidence = createChatAgentEvidenceRecorder({
             trajectoryStore: options.trajectoryStore,
             runId: continuationToResume?.evidenceRunId,
@@ -956,6 +958,12 @@ export function createChatService(options: {
                 emitModelStreamEvent(emitStatus, outputAssembler, event);
               },
               onToolCall(toolName, args, event) {
+                if (toolName === "actor") {
+                  actorToolTasks.set(
+                    event.toolCallId,
+                    readToolArgString(args, "task") || "subagent",
+                  );
+                }
                 void evidence.append("tool_call", {
                   toolName,
                   args,
@@ -1044,6 +1052,22 @@ export function createChatService(options: {
                   );
                 }
               },
+              onToolRuntimeEvent(toolName, runtimeEvent, event) {
+                if (toolName !== "actor") {
+                  return;
+                }
+                if (runtimeEvent.type === "actor_spawned") {
+                  actorToolTasks.set(event.toolCallId, runtimeEvent.task);
+                  emitActorSpawnedStatusEvent({
+                    emitStatus,
+                    actorId: runtimeEvent.actorId,
+                    task: runtimeEvent.task,
+                    toolCallId: event.toolCallId,
+                    toolCallsExecuted: observedToolCallsExecuted,
+                    emittedActorSpawnIds,
+                  });
+                }
+              },
               onToolResult(toolName, ok, result, event) {
                 observedToolCallsExecuted += 1;
                 appendRawHistoryEntry({
@@ -1088,6 +1112,17 @@ export function createChatService(options: {
                   ok,
                   toolCallsExecuted: observedToolCallsExecuted,
                 });
+                if (toolName === "actor") {
+                  emitActorToolStatusEvents({
+                    emitStatus,
+                    result,
+                    toolCallId: event.toolCallId,
+                    task:
+                      actorToolTasks.get(event.toolCallId) ?? "subagent",
+                    toolCallsExecuted: observedToolCallsExecuted,
+                    emittedActorSpawnIds,
+                  });
+                }
                 for (const part of outputAssembler.appendToolResult({
                   toolCallId: event.toolCallId,
                   toolName,
@@ -2227,6 +2262,110 @@ function buildToolResultStatusMessage(
   return `工具失败：${toolName}（${summarizeToolError(result.error)}）`;
 }
 
+function emitActorToolStatusEvents(options: {
+  emitStatus: ReturnType<typeof createChatStatusEmitter>;
+  result: Awaited<ReturnType<AgentToolExecutor["execute"]>>;
+  toolCallId: string;
+  task: string;
+  toolCallsExecuted: number;
+  emittedActorSpawnIds: Set<string>;
+}): void {
+  const payload = getActorToolResultPayload(options.result);
+  const actorId = readToolArgString(payload, "actorId");
+  if (!actorId) {
+    return;
+  }
+
+  const actorStatus =
+    readToolArgString(payload, "status") ||
+    readToolArgString(payload, "actorStatus");
+  const summary =
+    readToolArgString(payload, "summary") ||
+    readToolArgString(payload, "error") ||
+    "";
+
+  emitActorSpawnedStatusEvent({
+    emitStatus: options.emitStatus,
+    actorId,
+    task: options.task,
+    toolCallId: options.toolCallId,
+    toolCallsExecuted: options.toolCallsExecuted,
+    emittedActorSpawnIds: options.emittedActorSpawnIds,
+  });
+
+  if (!actorStatus || actorStatus === "running") {
+    return;
+  }
+
+  options.emitStatus.send({
+    state: "actor_done",
+    message: buildActorDoneStatusMessage(actorStatus, summary || actorId),
+    toolCallId: options.toolCallId,
+    toolName: "actor",
+    toolCallsExecuted: options.toolCallsExecuted,
+    ok: actorStatus === "done",
+    payload: {
+      actorId,
+      actorStatus,
+      summary,
+      task: options.task,
+    },
+  });
+}
+
+function emitActorSpawnedStatusEvent(options: {
+  emitStatus: ReturnType<typeof createChatStatusEmitter>;
+  actorId: string;
+  task: string;
+  toolCallId: string;
+  toolCallsExecuted: number;
+  emittedActorSpawnIds: Set<string>;
+}): void {
+  if (options.emittedActorSpawnIds.has(options.actorId)) {
+    return;
+  }
+  options.emittedActorSpawnIds.add(options.actorId);
+
+  options.emitStatus.send({
+    state: "actor_spawned",
+    message: `子代理已启动：${options.task}`,
+    toolCallId: options.toolCallId,
+    toolName: "actor",
+    toolCallsExecuted: options.toolCallsExecuted,
+    payload: {
+      actorId: options.actorId,
+      task: options.task,
+    },
+  });
+}
+
+function buildActorDoneStatusMessage(status: string, summary: string): string {
+  if (status === "done") {
+    return `子代理已完成：${summary}`;
+  }
+  if (status === "canceled") {
+    return `子代理已取消：${summary}`;
+  }
+  return `子代理失败：${summary}`;
+}
+
+function getActorToolResultPayload(
+  result: Awaited<ReturnType<AgentToolExecutor["execute"]>>,
+): Record<string, unknown> {
+  if (result.ok) {
+    return result.result;
+  }
+  return result.errorDetails ?? {};
+}
+
+function readToolArgString(
+  args: Record<string, unknown>,
+  key: string,
+): string {
+  const value = args[key];
+  return typeof value === "string" ? value : "";
+}
+
 function summarizeToolError(error: string): string {
   const normalized = error.replace(/\s+/g, " ").trim();
   if (normalized.length <= 180) {
@@ -2315,6 +2454,50 @@ function getActiveGoalSummary(
   );
 }
 
+function emitGoalRequirementStatusEvents(options: {
+  emitStatus?: ReturnType<typeof createChatStatusEmitter>;
+  description: string;
+}): void {
+  if (!options.emitStatus) {
+    return;
+  }
+
+  const labels = deriveGoalRequirementLabels(options.description);
+  labels.forEach((label, index) => {
+    options.emitStatus?.send({
+      state: "requirement",
+      message: `子任务：${label}`,
+      toolCallsExecuted: 0,
+      payload: {
+        requirementId: `goal-requirement-${index + 1}`,
+        label,
+        status: index === 0 ? "active" : "pending",
+      },
+    });
+  });
+}
+
+function deriveGoalRequirementLabels(description: string): string[] {
+  const normalized = description
+    .replace(/\r\n/g, "\n")
+    .replace(/[；;。]/g, "\n")
+    .replace(/[，,]\s*(然后|最后|再|并且|同时)/g, "\n")
+    .replace(/\n\s*\d+[.、)]\s*/g, "\n")
+    .replace(/^\s*\d+[.、)]\s*/, "")
+    .trim();
+  const labels = normalized
+    .split(/\n+/)
+    .map((item) =>
+      item
+        .replace(/^(然后|最后|再|并且|同时)\s*/i, "")
+        .replace(/\s+/g, " ")
+        .trim(),
+    )
+    .filter(Boolean);
+  const uniqueLabels = [...new Set(labels)];
+  return uniqueLabels.length ? uniqueLabels.slice(0, 12) : [description.trim()];
+}
+
 async function tryRouteGoalIntent(options: {
   route: GoalIntentRoute;
   activeGoal: ChatSessionGoalSummary | null;
@@ -2383,6 +2566,10 @@ async function tryRouteGoalIntent(options: {
       options.sessionId,
       activeGoal,
     );
+    emitGoalRequirementStatusEvents({
+      emitStatus: options.emitStatus,
+      description: options.route.description,
+    });
     const reply = `已设置并开始执行目标：${activeGoal.description}。`;
     options.emitStatus?.send({
       state: "completed",

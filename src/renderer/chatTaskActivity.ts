@@ -34,6 +34,22 @@ export type TaskProcessItem = {
   meta?: string;
 };
 
+export type RequirementProcessItem = {
+  id: string;
+  label: string;
+  message: string;
+  status: "pending" | "active" | "done" | "error";
+  time: string;
+};
+
+export type SubagentProcessItem = {
+  id: string;
+  label: string;
+  message: string;
+  status: "running" | "done" | "error";
+  time: string;
+};
+
 export type RestoredChatTaskActivity = {
   status: {
     kind: GoalUiStatusKind;
@@ -237,6 +253,65 @@ export function buildTaskProcessItems(
   }));
 }
 
+export function buildRequirementProcessItems(
+  events: ChatTaskStatusEvent[],
+): RequirementProcessItem[] {
+  const byId = new Map<string, RequirementProcessItem>();
+
+  for (const event of events) {
+    if (event.state !== "requirement") continue;
+    const payload = event.payload ?? {};
+    const id = readPayloadString(payload, "requirementId");
+    if (!id) continue;
+    const label = readPayloadString(payload, "label") || event.message;
+    byId.set(id, {
+      id,
+      label,
+      message: event.message,
+      status: readRequirementStatus(payload),
+      time: formatEventTime(event.createdAt),
+    });
+  }
+
+  return [...byId.values()];
+}
+
+export function buildSubagentProcessItems(
+  events: ChatTaskStatusEvent[],
+): SubagentProcessItem[] {
+  const byId = new Map<string, SubagentProcessItem>();
+
+  for (const event of events) {
+    if (event.state !== "actor_spawned" && event.state !== "actor_done") {
+      continue;
+    }
+    const payload = event.payload ?? {};
+    const id = readPayloadString(payload, "actorId");
+    if (!id) continue;
+    const previous = byId.get(id);
+    const label =
+      previous?.label ||
+      readPayloadString(payload, "task") ||
+      readPayloadString(payload, "label") ||
+      id;
+    const summary = readPayloadString(payload, "summary");
+    byId.set(id, {
+      id,
+      label,
+      message: summary || event.message,
+      status:
+        event.state === "actor_spawned"
+          ? "running"
+          : readPayloadString(payload, "actorStatus") === "done"
+            ? "done"
+            : "error",
+      time: formatEventTime(event.createdAt),
+    });
+  }
+
+  return [...byId.values()];
+}
+
 export function restoreChatTaskActivity(
   snapshot: ChatSessionActivitySnapshot | undefined,
 ): RestoredChatTaskActivity | null {
@@ -319,6 +394,9 @@ export function getWorkPhaseFromChatStatusEvent(
     return "model";
   }
   if (
+    event.state === "requirement" ||
+    event.state === "actor_spawned" ||
+    event.state === "actor_done" ||
     event.state === "tool_call" ||
     event.state === "tool_result" ||
     event.state === "tool_invocation"
@@ -341,6 +419,10 @@ function getProcessLabel(event: ChatTaskStatusEvent): string {
   if (event.state === "model") return "模型";
   if (event.state === "reasoning") return "思考";
   if (event.state === "streaming") return "输出";
+  if (event.state === "requirement") return "子任务";
+  if (event.state === "actor_spawned" || event.state === "actor_done") {
+    return "子代理";
+  }
   if (
     event.state === "tool_call" ||
     event.state === "tool_result" ||
@@ -388,6 +470,9 @@ function getTaskActivityTitleFromStatusEvent(event: ChatTaskStatusEvent): string
   if (event.state === "model") return "正在调用模型";
   if (event.state === "reasoning") return "模型思考";
   if (event.state === "streaming") return "正在输出回复";
+  if (event.state === "requirement") return "目标子任务";
+  if (event.state === "actor_spawned") return "子代理执行中";
+  if (event.state === "actor_done") return "子代理已返回";
   if (event.state === "tool_call") return "正在执行工具";
   if (event.state === "tool_invocation") return "工具调用状态";
   if (event.state === "tool_result") return "工具结果已返回";
@@ -402,4 +487,27 @@ function getTaskActivityTitleFromStatusEvent(event: ChatTaskStatusEvent): string
 function parseEventTime(value: string): number {
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? parsed : Date.now();
+}
+
+function readPayloadString(
+  payload: Record<string, unknown>,
+  key: string,
+): string {
+  const value = payload[key];
+  return typeof value === "string" ? value : "";
+}
+
+function readRequirementStatus(
+  payload: Record<string, unknown>,
+): RequirementProcessItem["status"] {
+  const value = readPayloadString(payload, "status");
+  if (
+    value === "pending" ||
+    value === "active" ||
+    value === "done" ||
+    value === "error"
+  ) {
+    return value;
+  }
+  return "pending";
 }

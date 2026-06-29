@@ -3,6 +3,8 @@ import { createDynamicToolRegistry } from "../dynamicToolRegistry";
 import { registerActorTool, ACTOR_TOOL_NAME } from "./actorTool";
 import { registerWorkflowTool, WORKFLOW_TOOL_NAME } from "../workflow/workflowTool";
 import { createActorRuntime } from "./actorRuntime";
+import type { SpawnInput } from "./actorRuntime";
+import type { AgentRunContext } from "../../shared/agentWorkspace";
 import { createWorkflowRuntime } from "../workflow/workflowRuntime";
 import { registerDeepResearchWorkflow } from "../workflow/deepResearchWorkflow";
 
@@ -31,6 +33,114 @@ describe("actor tool registration + execution (P6 activation)", () => {
     expect((res as { result: { actorId: string } }).result.actorId).toBeTruthy();
   });
 
+  it("passes run context parentRunId into spawned actors", async () => {
+    const registry = createDynamicToolRegistry();
+    let receivedInput: SpawnInput | null = null;
+    const runtime = createActorRuntime({
+      deps: {
+        runActor: async (input) => {
+          receivedInput = input;
+          return { status: "done", summary: "ok", filesTouched: [] };
+        },
+      },
+    });
+    registerActorTool(registry, { actorRuntime: runtime });
+
+    const res = await registry.execute(
+      ACTOR_TOOL_NAME,
+      { op: "run", task: "review the final diff", contextMode: "state" },
+      { runContext: createRunContext("run_parent") },
+    );
+
+    expect(res.ok).toBe(true);
+    expect(receivedInput?.parentRunId).toBe("run_parent");
+  });
+
+  it("emits a runtime event as soon as an actor is spawned", async () => {
+    const registry = createDynamicToolRegistry();
+    const runtimeEvents: unknown[] = [];
+    const runtime = createActorRuntime({
+      deps: {
+        runActor: async () => ({
+          status: "done",
+          summary: "ok",
+          filesTouched: [],
+        }),
+      },
+    });
+    registerActorTool(registry, { actorRuntime: runtime });
+
+    const res = await registry.execute(
+      ACTOR_TOOL_NAME,
+      { op: "run", task: "review the launch", contextMode: "state" },
+      {
+        runContext: createRunContext("run_parent"),
+        onRuntimeEvent(event) {
+          runtimeEvents.push(event);
+        },
+      },
+    );
+
+    expect(res.ok).toBe(true);
+    expect(runtimeEvents).toEqual([
+      expect.objectContaining({
+        type: "actor_spawned",
+        actorId: expect.any(String),
+        task: "review the launch",
+        status: "running",
+      }),
+    ]);
+  });
+
+  it("returns a tool failure when the actor outcome is error", async () => {
+    const registry = createDynamicToolRegistry();
+    const runtime = createActorRuntime({
+      deps: {
+        runActor: async () => ({
+          status: "error",
+          summary: "no parentRunId",
+          filesTouched: [],
+        }),
+      },
+    });
+    registerActorTool(registry, { actorRuntime: runtime });
+
+    const res = await registry.execute(ACTOR_TOOL_NAME, {
+      op: "run",
+      task: "launch subagent without context",
+      contextMode: "state",
+    });
+
+    expect(res.ok).toBe(false);
+    expect((res as { error: string }).error).toContain("no parentRunId");
+  });
+
+  it("returns a tool failure when the actor outcome is canceled", async () => {
+    const registry = createDynamicToolRegistry();
+    const runtime = createActorRuntime({
+      deps: {
+        runActor: async () => ({
+          status: "canceled",
+          summary: "user canceled",
+          filesTouched: [],
+        }),
+      },
+    });
+    registerActorTool(registry, { actorRuntime: runtime });
+
+    const res = await registry.execute(ACTOR_TOOL_NAME, {
+      op: "run",
+      task: "review then cancel",
+      contextMode: "state",
+    });
+
+    expect(res.ok).toBe(false);
+    expect((res as { error: string }).error).toContain("user canceled");
+    expect((res as { errorDetails: { status: string } }).errorDetails.status).toBe(
+      "canceled",
+    );
+  });
+
   it("rejects unknown op", async () => {
     const registry = createDynamicToolRegistry();
     registerActorTool(registry, { actorRuntime: createActorRuntime({ deps: { runActor: async () => ({ status: "done", summary: "", filesTouched: [] }) } }) });
@@ -38,6 +148,24 @@ describe("actor tool registration + execution (P6 activation)", () => {
     expect(res.ok).toBe(false);
   });
 });
+
+function createRunContext(runId: string): AgentRunContext {
+  return {
+    workspaceId: "workspace_1",
+    workspaceRoot: "/tmp/workspace",
+    runId,
+    agentRole: "primary",
+    depth: 0,
+    sandbox: {
+      mode: "workspace_write",
+      network: "none",
+      shell: "workspace_only",
+      allowWorkspaceEscape: false,
+      extraReadRoots: [],
+      extraWriteRoots: [],
+    },
+  };
+}
 
 describe("workflow tool registration + execution (P6 activation)", () => {
   it("registers the workflow tool; op:list returns registered workflows incl deep-research", async () => {

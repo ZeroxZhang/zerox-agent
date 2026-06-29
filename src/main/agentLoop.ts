@@ -22,6 +22,7 @@ import type {
   RuntimeToolAuthorizationTask,
   ToolAuthorizationService,
 } from "./toolAuthorizationService";
+import type { ToolRuntimeEvent } from "./dynamicToolRegistry";
 import {
   buildAgentSystemPrompt,
   buildToolDefinitions,
@@ -77,6 +78,11 @@ export type AgentLoopOptions = {
     toolName: string,
     ok: boolean,
     result: Awaited<ReturnType<AgentToolExecutor["execute"]>>,
+    event: AgentLoopToolEvent,
+  ) => void;
+  onToolRuntimeEvent?: (
+    toolName: string,
+    runtimeEvent: ToolRuntimeEvent,
     event: AgentLoopToolEvent,
   ) => void;
   onToolInvocation?: (record: ToolInvocationRecord) => void;
@@ -171,6 +177,7 @@ export async function runAgentLoop(
     modelRetry,
     onToolCall,
     onToolResult,
+    onToolRuntimeEvent,
     onToolInvocation,
     onTurn,
     onReasoning,
@@ -683,6 +690,9 @@ export async function runAgentLoop(
           }, {
             ...(signal ? { signal } : {}),
             ...(runContext ? { runContext } : {}),
+            onRuntimeEvent(runtimeEvent) {
+              onToolRuntimeEvent?.(toolName, runtimeEvent, toolEventBase);
+            },
             toolResultReadScope: {
               ...(taskId ? { runId: taskId } : {}),
               ...(runContext?.sessionId ? { sessionId: runContext.sessionId } : {}),

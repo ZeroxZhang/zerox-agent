@@ -72,6 +72,26 @@ function shellToolCallResponse(
   };
 }
 
+function actorToolCallResponse(
+  id: string,
+  task = "review the final diff",
+): ChatCompletionResponse {
+  return {
+    content: null,
+    finishReason: "tool_calls",
+    toolCalls: [
+      {
+        id,
+        type: "function",
+        function: {
+          name: "actor",
+          arguments: JSON.stringify({ op: "run", task, contextMode: "state" }),
+        },
+      },
+    ],
+  };
+}
+
 describe("chat service", () => {
   it("returns a structured result for unknown guided skill input responses", async () => {
     const service = createChatService({
@@ -661,6 +681,100 @@ describe("chat service", () => {
         selectedSkill: expect.objectContaining({
           body: "Onepager 技能流程：必须先做内容架构分析。",
           manifest: expect.objectContaining({ name: "onepager" }),
+        }),
+      }),
+    ]);
+    expect(resumes).toEqual(["goal_release"]);
+    expect(completeCalled).toBe(false);
+  });
+
+  it("routes huashu-design slash goals into durable Goal Mode with attached active summary", async () => {
+    let completeCalled = false;
+    const goalCreates: unknown[] = [];
+    const resumes: string[] = [];
+    const attachedGoals: ChatSessionGoalSummary[] = [];
+    const statusEvents: ChatTaskStatusEvent[] = [];
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          completeCalled = true;
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([], { attachedGoals }),
+      goalService: createGoalService({ goalCreates, resumes }),
+      discoverSkills: async () => ({
+        skills: [
+          createSkillRecord({
+            name: "huashu-design",
+            body: "Huashu Design 技能流程：必须先做设计假设、三版方向、截图验收。",
+          }),
+        ],
+        errors: [],
+      }),
+      createId: () => "chat_goal_huashu_design",
+      now: () => new Date("2026-06-30T08:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage(
+      {
+        message:
+          "/目标 派出仿写专家 subagent 分析长文，最后调用 @huashu-design 生成 HTML 仿写学习指南",
+        selectedSkillName: "huashu-design",
+      },
+      { onStatusEvent: (event) => statusEvents.push(event) },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      activeGoal: {
+        id: "goal_release",
+        description:
+          "派出仿写专家 subagent 分析长文，最后调用 @huashu-design 生成 HTML 仿写学习指南",
+        status: "executing",
+      },
+      selectedSkill: {
+        name: "huashu-design",
+        displayName: "huashu-design",
+      },
+    });
+    expect(goalCreates).toEqual([
+      expect.objectContaining({
+        sessionId: "persisted_session",
+        originMessageId: "message_1",
+        description:
+          "派出仿写专家 subagent 分析长文，最后调用 @huashu-design 生成 HTML 仿写学习指南",
+        selectedSkill: expect.objectContaining({
+          body: "Huashu Design 技能流程：必须先做设计假设、三版方向、截图验收。",
+          manifest: expect.objectContaining({ name: "huashu-design" }),
+        }),
+      }),
+    ]);
+    expect(attachedGoals.at(-1)).toEqual({
+      id: "goal_release",
+      description:
+        "派出仿写专家 subagent 分析长文，最后调用 @huashu-design 生成 HTML 仿写学习指南",
+      status: "executing",
+    });
+    expect(
+      statusEvents.filter((event) => event.state === "requirement"),
+    ).toEqual([
+      expect.objectContaining({
+        message: "子任务：派出仿写专家 subagent 分析长文",
+        payload: expect.objectContaining({
+          requirementId: "goal-requirement-1",
+          label: "派出仿写专家 subagent 分析长文",
+          status: "active",
+        }),
+      }),
+      expect.objectContaining({
+        message: "子任务：调用 @huashu-design 生成 HTML 仿写学习指南",
+        payload: expect.objectContaining({
+          requirementId: "goal-requirement-2",
+          label: "调用 @huashu-design 生成 HTML 仿写学习指南",
+          status: "pending",
         }),
       }),
     ]);
@@ -4873,6 +4987,128 @@ describe("chat service", () => {
         }),
       ]),
     );
+  });
+
+  it("emits structured actor status events from actor tool results", async () => {
+    const statusEvents: ChatTaskStatusEvent[] = [];
+    const service = createChatService({
+      chatClient: {
+        async complete(request) {
+          if (!request.messages.some((message) => message.role === "tool")) {
+            return actorToolCallResponse("actor_call_1", "审查最终 diff");
+          }
+
+          return chatReply("子代理审查完成。");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      toolExecutor: createToolExecutor({
+        ok: true,
+        result: {
+          actorId: "actor_1",
+          status: "done",
+          summary: "ACCEPTED with evidence",
+          filesTouched: [],
+        },
+      }),
+      createId: () => "chat_actor_status",
+      now: () => new Date("2026-06-30T08:00:00.000Z"),
+    });
+
+    await service.sendMessage(
+      { message: "派出独立对抗性审查 subagent" },
+      { onStatusEvent: (event) => statusEvents.push(event) },
+    );
+
+    expect(statusEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sessionId: "chat_actor_status",
+          state: "actor_spawned",
+          message: "子代理已启动：审查最终 diff",
+          payload: expect.objectContaining({
+            actorId: "actor_1",
+            task: "审查最终 diff",
+          }),
+        }),
+        expect.objectContaining({
+          sessionId: "chat_actor_status",
+          state: "actor_done",
+          message: "子代理已完成：ACCEPTED with evidence",
+          payload: expect.objectContaining({
+            actorId: "actor_1",
+            actorStatus: "done",
+            summary: "ACCEPTED with evidence",
+          }),
+        }),
+      ]),
+    );
+  });
+
+  it("emits actor spawned status before the actor tool result when runtime starts the subagent", async () => {
+    const statusEvents: ChatTaskStatusEvent[] = [];
+    const service = createChatService({
+      chatClient: {
+        async complete(request) {
+          if (!request.messages.some((message) => message.role === "tool")) {
+            return actorToolCallResponse("actor_call_live", "审查运行时状态");
+          }
+
+          return chatReply("子代理审查完成。");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      toolExecutor: {
+        async execute(_request, options) {
+          options?.onRuntimeEvent?.({
+            type: "actor_spawned",
+            actorId: "actor_live",
+            task: "审查运行时状态",
+            status: "running",
+          });
+          return {
+            ok: true as const,
+            result: {
+              actorId: "actor_live",
+              status: "done",
+              summary: "ACCEPTED live",
+              filesTouched: [],
+            },
+          };
+        },
+        getRegistry() {
+          return createToolExecutor().getRegistry();
+        },
+        hasTool() {
+          return true;
+        },
+      },
+      createId: () => "chat_actor_live_status",
+      now: () => new Date("2026-06-30T08:00:00.000Z"),
+    });
+
+    await service.sendMessage(
+      { message: "派出独立对抗性审查 subagent" },
+      { onStatusEvent: (event) => statusEvents.push(event) },
+    );
+
+    const firstActorSpawnedIndex = statusEvents.findIndex(
+      (event) => event.state === "actor_spawned",
+    );
+    const toolResultIndex = statusEvents.findIndex(
+      (event) => event.state === "tool_result" && event.toolName === "actor",
+    );
+    const actorDoneIndex = statusEvents.findIndex(
+      (event) => event.state === "actor_done",
+    );
+
+    expect(firstActorSpawnedIndex).toBeGreaterThanOrEqual(0);
+    expect(toolResultIndex).toBeGreaterThanOrEqual(0);
+    expect(firstActorSpawnedIndex).toBeLessThan(toolResultIndex);
+    expect(actorDoneIndex).toBeGreaterThan(toolResultIndex);
+    expect(statusEvents.filter((event) => event.state === "actor_spawned")).toHaveLength(1);
   });
 
   it("cancels an active chat request through the runtime abort signal", async () => {

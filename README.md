@@ -33,7 +33,7 @@
 
 ## Overview
 
-**Zerox Agent** is a local-first desktop control plane for personal AI agents (current release: v3.0.0). The name comes from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
+**Zerox Agent** is a local-first desktop control plane for personal AI agents (current release: v3.1.0). The name comes from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
 
 It is not a chat wrapper or a generic hosted agent surface. It runs entirely on your machine: it configures OpenAI-compatible / Anthropic / Gemini models, scans local `SKILL.md` skill files, executes recoverable agent runs, invokes permission-controlled tools, tracks parent/child multi-agent sessions, persists experiential knowledge into local long-term memory, and keeps learning user-reviewed before it changes future behavior.
 
@@ -119,7 +119,7 @@ Zerox Agent is a layered Electron application. An Electron shell wraps a depende
 
 Three production loops, all delegating to `runAgentLoop` (`src/main/agentLoop.ts`), the heart of the system. Per turn: inject system reminders → compact oversized history → request the model (streaming or with retry) → terminate, or authorize + execute tools → serialize observations → checkpoint. Loop guards detect repeated tool calls, fragmented tool-call patterns, and tool-failure streaks.
 
-Every run is governed by an immutable `ExecutionContextPackage` — a frozen snapshot of the workspace sandbox, the selected skill, visible tools, permissions, memory scopes, and the checkpoint strategy. In v3.0.0, chat, goal milestone, and scheduled-task runs also emit a secret-safe `AgentRuntimeContextSnapshot` as the runtime context spine: it records the run surface, model identity, anchored time, sandbox roots, visible tool schema hash, memory scopes, checkpoint metadata, and trajectory identity before model/tool events. Skills are loaded on demand through permissioned `skill_load` / `skill_resource_list` tools rather than eagerly. Each tool call is recorded in a durable tool invocation ledger (full status-transition history per call), and a separate raw history search store keeps pre-compaction message evidence queryable via `history_search` / `history_around`.
+Every run is governed by an immutable `ExecutionContextPackage` — a frozen snapshot of the workspace sandbox, the selected skill, visible tools, permissions, memory scopes, and the checkpoint strategy. In v3.0.0, chat, goal milestone, and scheduled-task runs also emit a secret-safe `AgentRuntimeContextSnapshot` as the runtime context spine: it records the run surface, model identity, anchored time, sandbox roots, visible tool schema hash, memory scopes, checkpoint metadata, and trajectory identity before model/tool events. In v3.1.0, Goal commands with selected skills keep durable goal acceptance status, requirement-level subtasks, and attached active-goal summaries so complex requests do not collapse into one vague running state. Skills are loaded on demand through permissioned `skill_load` / `skill_resource_list` tools rather than eagerly. Each tool call is recorded in a durable tool invocation ledger (full status-transition history per call), and a separate raw history search store keeps pre-compaction message evidence queryable via `history_search` / `history_around`.
 
 - **Chat loop** (`chatService.ts`) — interactive chat with streaming deltas, tool-call previews, output parts, status events, and continuation resume.
 - **Recoverable runtime engine** (`agentRuntimeEngine.ts`) — scheduled/manual task execution with a persistent `AgentExecutionCheckpoint` written after every tool call, enabling true pause/resume across app restarts. Optional **max-mode** (best-of-N: 3 propose-only candidates, a judge picks the winner, the winner's tool calls replay via an ephemeral actor).
@@ -127,7 +127,7 @@ Every run is governed by an immutable `ExecutionContextPackage` — a frozen sna
 
 ### Actors & Multi-Agent
 
-`src/main/actors/` implements an actor model so the model itself can spawn sub-agents via the `actor` tool (`run`/`spawn`/`status`/`wait`/`cancel`/`send`). Actors have a `contextMode` (`none`/`state`/`full`), a lifecycle (`persistent`/`ephemeral`), an optional `toolWhitelist`, an `outputSchema` for outcome validation, and a per-actor inbox enabling peer-to-peer messaging. Child run contexts inherit and **narrow** the parent sandbox (network/shell can only restrict, `read_only` is sticky, extra roots must stay inside parent roots, single-level handoff enforced by `depth`).
+`src/main/actors/` implements an actor model so the model itself can spawn sub-agents via the `actor` tool (`run`/`spawn`/`status`/`wait`/`cancel`/`send`). Actors have a `contextMode` (`none`/`state`/`full`), a lifecycle (`persistent`/`ephemeral`), an optional `toolWhitelist`, an `outputSchema` for outcome validation, and a per-actor inbox enabling peer-to-peer messaging. Child run contexts inherit and **narrow** the parent sandbox (network/shell can only restrict, `read_only` is sticky, extra roots must stay inside parent roots, single-level handoff enforced by `depth`). The actor tool parent run context is propagated into spawned actors, terminal actor failures become tool-level failures, and chat status events expose subagent spawned/done/error summaries for the subagent context rail.
 
 The flagship actor is the **checkpoint-writer fork**: it cold-reads the parent run's trajectory and distills an 11-section markdown continuity checkpoint (active intent, next action, directives, task tree, current work, files, learnings, errors, live resources, design decisions, open notes), preferring LLM distillation and falling back to a rule-based builder so it never fails.
 
@@ -166,7 +166,7 @@ The app explicitly indicates the current data mode:
 
 The chat window is the primary entry point — a command-first, chat-first interaction surface. Users describe needs in natural language; the Agent selects the appropriate skill, decomposes the task, invokes tools, and returns results. The session displays model, skill, task, memory, and tool status in real time.
 
-Chat UX includes: session-native Goal Mode in Chat Session mode (`/目标 ...`, composer command menu, inline review gates, goal progress from the same conversation); a compact real-time activity strip; expandable task-activity timeline (newest first); provider-returned public reasoning fields; user-controlled long-task continuation at checkpoints or repeated tool failures; and an always-available interrupt that cancels the active request and propagates cancellation into running tools.
+Chat UX includes: session-native Goal Mode in Chat Session mode (`/目标 ...`, composer command menu, inline review gates, goal progress from the same conversation); a right context rail that shows decomposed task progress and automatically switches to active subagent execution status while subagents run; a compact real-time activity strip; expandable task-activity timeline (newest first); provider-returned public reasoning fields; user-controlled long-task continuation at checkpoints or repeated tool failures; and an always-available interrupt that cancels the active request and propagates cancellation into running tools.
 
 ### 2. Model Settings
 
@@ -201,7 +201,7 @@ For long-running objectives, Goal Mode plans milestones with success criteria an
 
 ### 7. Multi-Agent & Workflows
 
-Parent/child multi-agent sessions are recorded as lineage metadata on top of the recoverable runtime. Child runs inherit and narrow the workspace sandbox, making multi-agent activity inspectable in the Runs panel instead of becoming an opaque execution path. The model can spawn actors (`actor` tool) and invoke workflows (`workflow` tool); the built-in `deep-research` workflow orchestrates search → extract → adversarial verify → report.
+Parent/child multi-agent sessions are recorded as lineage metadata on top of the recoverable runtime. Child runs inherit and narrow the workspace sandbox, making multi-agent activity inspectable in the Runs panel instead of becoming an opaque execution path. The model can spawn actors (`actor` tool) and invoke workflows (`workflow` tool); the built-in `deep-research` workflow orchestrates search → extract → adversarial verify → report. Actor lifecycle events are mirrored back into chat so the right rail can show each subagent's current state instead of hiding parallel work behind a generic context list.
 
 ### 8. Tool System
 
@@ -508,7 +508,7 @@ npm run dist:mac      # .dmg + .zip → release/          (distribution)
 Current local builds are unsigned and not notarized. Each release passes an independent packaged-app acceptance gate (a computer-use run against the local macOS package) before handoff. After downloading a `.dmg` from GitHub Releases, macOS Gatekeeper may show "Zerox Agent is damaged and can't be opened." The image is usually valid; remove the quarantine attribute before opening:
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-3.0.0-arm64.dmg"
+xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-3.1.0-arm64.dmg"
 # or, if already dragged into Applications:
 xattr -dr com.apple.quarantine "/Applications/Zerox Agent.app"
 ```
@@ -994,7 +994,7 @@ mcpServers:               # 可选 MCP 服务器
 
 ## Agent 运行生命周期
 
-手动/定时任务默认走可恢复 runtime。每次运行写 checkpoint、追加 trajectory event、保存终态 run record，并可从完成轨迹生成学习候选。v3.0.0 增加了 `AgentRuntimeContextSnapshot` 作为 runtime context spine，在模型/工具事件前记录运行表面、模型身份、时间锚点、workspace sandbox、可见工具 schema、记忆范围、checkpoint 与 trajectory identity，且不包含 API key 或大块原始工具输出：
+手动/定时任务默认走可恢复 runtime。每次运行写 checkpoint、追加 trajectory event、保存终态 run record，并可从完成轨迹生成学习候选。v3.0.0 增加了 `AgentRuntimeContextSnapshot` 作为 runtime context spine，在模型/工具事件前记录运行表面、模型身份、时间锚点、workspace sandbox、可见工具 schema、记忆范围、checkpoint 与 trajectory identity，且不包含 API key 或大块原始工具输出。v3.1.0 继续补强 Goal 命令、选中技能、子任务验收和子代理执行的可观测链路：
 
 ```
 startedAt
