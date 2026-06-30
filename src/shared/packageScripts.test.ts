@@ -8,7 +8,7 @@ type PackageJson = {
 };
 
 describe("package scripts", () => {
-  it("sets release metadata to v3.1.0", () => {
+  it("sets release metadata to v3.1.1", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -16,12 +16,12 @@ describe("package scripts", () => {
       readFileSync(path.join(process.cwd(), "package-lock.json"), "utf8"),
     ) as { version?: string; packages?: Record<string, { version?: string }> };
 
-    expect(packageJson.version).toBe("3.1.0");
-    expect(packageLock.version).toBe("3.1.0");
-    expect(packageLock.packages?.[""]?.version).toBe("3.1.0");
+    expect(packageJson.version).toBe("3.1.1");
+    expect(packageLock.version).toBe("3.1.1");
+    expect(packageLock.packages?.[""]?.version).toBe("3.1.1");
   });
 
-  it("keeps release gates tracked through v3.1.0", () => {
+  it("keeps release gates tracked through v3.1.1", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -38,6 +38,9 @@ describe("package scripts", () => {
     const openFeatureIds = featureList.features
       .filter((feature) => feature.status !== "done")
       .map((feature) => feature.id);
+    const p30 = featureList.features.find(
+      (feature) => feature.id === "P30-v3.1.1-composer-multiline-hotfix",
+    );
     const p29 = featureList.features.find(
       (feature) => feature.id === "P29-v3.1.0-goal-acceptance-subagent-runtime",
     );
@@ -45,12 +48,24 @@ describe("package scripts", () => {
       (feature) => feature.id === "P28-v3.0.0-execution-context-spine",
     );
 
-    expect(packageJson.version).toBe("3.1.0");
+    expect(packageJson.version).toBe("3.1.1");
     expect(
-      openFeatureIds.filter((id) => id !== "P29-v3.1.0-goal-acceptance-subagent-runtime"),
+      openFeatureIds.filter((id) => id !== "P30-v3.1.1-composer-multiline-hotfix"),
     ).toEqual([]);
     expect(openFeatureIds.length).toBeLessThanOrEqual(1);
-    expect(p29?.status === "in_progress" || p29?.status === "done").toBe(true);
+    expect(p30?.status === "in_progress" || p30?.status === "done").toBe(true);
+    expect(p30).toEqual(
+      expect.objectContaining({
+        id: "P30-v3.1.1-composer-multiline-hotfix",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("Chat composer inserts line breaks with Shift+Enter and Option+Enter"),
+          expect.stringContaining("authored newlines are preserved"),
+          expect.stringContaining("package metadata reports version 3.1.1"),
+          expect.stringContaining("macOS DMG, ZIP, blockmaps, and latest-mac.yml artifacts are regenerated for v3.1.1"),
+        ]),
+      }),
+    );
+    expect(p29?.status).toBe("done");
     expect(p29).toEqual(
       expect.objectContaining({
         id: "P29-v3.1.0-goal-acceptance-subagent-runtime",

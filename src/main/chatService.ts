@@ -281,8 +281,8 @@ export function createChatService(options: {
     runtimeOptions: SendChatMessageRuntimeOptions = {},
     internalOptions: ChatTurnInternalOptions = {},
   ): Promise<SendChatMessageResult> {
-      const userMessage = input.message.trim();
-      if (!userMessage) {
+      const userMessage = input.message;
+      if (!userMessage.trim()) {
         return { ok: false, message: "消息不能为空。" };
       }
 

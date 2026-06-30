@@ -1504,8 +1504,8 @@ export function AgentChatPanel({
   }
 
   async function submitUserMessage(rawContent: string) {
-    const content = rawContent.trim();
-    if (!content) {
+    const content = rawContent;
+    if (!content.trim()) {
       return;
     }
     if (status.kind === "working") {
@@ -2468,7 +2468,7 @@ export function AgentChatPanel({
                 }}
                 onClick={updateDraftCursor}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
+                  if (event.key === "Enter" && !event.shiftKey && !event.altKey) {
                     event.preventDefault();
                     if (skillMentionMenuVisible && skillMentionMatches[0]) {
                       handleSelectSkillMention(skillMentionMatches[0]);
@@ -2494,7 +2494,7 @@ export function AgentChatPanel({
                 placeholder={
                   activeGoal?.status === "executing"
                     ? "继续你的任务…"
-                    : "输入消息，/ 选择命令，Enter 发送"
+                    : "输入消息，/ 选择命令，Enter 发送，Shift+Enter 或 Option+Enter 换行"
                 }
                 rows={2}
               />

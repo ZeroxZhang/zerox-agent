@@ -2138,6 +2138,39 @@
         "Independent adversarial review subagent returns ACCEPTED with evidence",
         "git diff --check"
       ]
+    },
+    {
+      "id": "P30-v3.1.1-composer-multiline-hotfix",
+      "priority": 60,
+      "status": "done",
+      "title": "v3.1.1 Composer multiline input hotfix",
+      "files": [
+        "src/renderer/components/AgentChatPanel.tsx",
+        "src/renderer/materialDesign.test.ts",
+        "src/main/chatService.ts",
+        "src/main/chatService.test.ts",
+        "src/shared/packageScripts.test.ts",
+        "package.json",
+        "package-lock.json",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md"
+      ],
+      "definitionOfDone": [
+        "Chat composer inserts line breaks with Shift+Enter and Option+Enter while bare Enter still submits",
+        "Renderer submits non-empty drafts without trimming authored newlines or surrounding whitespace",
+        "authored newlines are preserved in ChatService persisted and model-bound user messages while whitespace-only messages are rejected",
+        "package metadata reports version 3.1.1 in package.json and package-lock.json",
+        "macOS DMG, ZIP, blockmaps, and latest-mac.yml artifacts are regenerated for v3.1.1"
+      ],
+      "verification": [
+        "npm test -- src/renderer/materialDesign.test.ts src/main/chatService.test.ts src/shared/packageScripts.test.ts",
+        "npm run verify",
+        "npm run harness:check",
+        "npm run smoke:prod",
+        "npm run dist:mac",
+        "BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v3.1.1' \"release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent\"",
+        "git diff --check"
+      ]
     }
   ]
 }

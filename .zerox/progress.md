@@ -5795,3 +5795,45 @@
     - `Zerox.Agent-3.1.0-arm64.dmg.blockmap` sha256 `0d93b04909cbc6f27766d29078059402f76127e26e46c8386ec9b4d1d28fdaa7`
     - `Zerox.Agent-3.1.0-arm64-mac.zip.blockmap` sha256 `01b3babd000ada80c2a5b4627a21c8cd3f0e519c2c24ad116f99527918d8b253`
     - `latest-mac.yml` sha256 `0b95e901076538d6b80f300aa1819d532ca5438b1821d66d1a077ac3696115e0`
+
+## 2026-06-30 - Zerox Agent v3.1.1 Composer Multiline Input Hotfix
+
+- Request:
+  - Allow multiline chat input using Shift+Enter or Option+Enter.
+  - Preserve authored newline structure in the content sent to the agent/LLM.
+  - Package the optimized build as version 3.1.1.
+- Feature tracking:
+  - Added and completed exactly one feature: `P30-v3.1.1-composer-multiline-hotfix`.
+- Changed areas:
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/materialDesign.test.ts`
+  - `src/main/chatService.ts`
+  - `src/main/chatService.test.ts`
+  - `src/shared/packageScripts.test.ts`
+  - `package.json`, `package-lock.json`, `.zerox/feature_list.json`, `.zerox/progress.md`
+- Implementation evidence:
+  - Chat composer now lets Shift+Enter and Option+Enter fall through to the textarea newline behavior while bare Enter still submits.
+  - Renderer keeps non-empty draft text unchanged instead of trimming it before display, local preview, or IPC submission.
+  - ChatService still rejects whitespace-only messages but now persists and sends the original user-authored string, including leading, trailing, and blank-line newlines.
+  - Package metadata reports v3.1.1.
+- Red/green TDD evidence:
+  - RED: `npm test -- src/renderer/materialDesign.test.ts src/main/chatService.test.ts -t "modifier Enter|preserves authored"` failed because `altKey` was not allowed and ChatService trimmed the raw message.
+  - GREEN: `npm test -- src/renderer/materialDesign.test.ts src/main/chatService.test.ts -t "modifier Enter|preserves authored"` -> 2 files / 2 targeted tests passed after the composer and ChatService fixes.
+  - RED: `npm test -- src/shared/packageScripts.test.ts` failed after the v3.1.1 metadata test required `P30-v3.1.1-composer-multiline-hotfix` in the feature list.
+  - GREEN: `npm test -- src/shared/packageScripts.test.ts` -> 1 file / 8 tests passed after adding the P30 release gate.
+- Verification evidence:
+  - `./init.sh` -> passed initial harness check and packageScripts focused test before implementation.
+  - `npm test -- src/renderer/materialDesign.test.ts src/main/chatService.test.ts src/shared/packageScripts.test.ts` -> 3 files / 139 tests passed.
+  - `npm run verify` -> 186 files / 1298 tests passed, build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local un-packaged smoke used JSON fallback after better-sqlite3 ABI mismatch.
+  - `npm run dist:mac` -> passed; regenerated unsigned macOS arm64 DMG, ZIP, blockmaps, and `latest-mac.yml` for v3.1.1.
+  - Packaged app smoke: `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v3.1.1' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+  - `git diff --check` -> passed.
+- Release artifact evidence:
+  - `release/latest-mac.yml` reports `version: 3.1.1` and update URLs `Zerox-Agent-3.1.1-arm64-mac.zip` / `Zerox-Agent-3.1.1-arm64.dmg`.
+  - `release/Zerox Agent-3.1.1-arm64.dmg` (122M, sha256 `ab581c048a16931834855c8b906a7528f75635cd06415e55f2528eab6d18b645`)
+  - `release/Zerox Agent-3.1.1-arm64-mac.zip` (333M, sha256 `2ee05e4f54bf8290393ce139c22daaa769b844518eb69246023299257808a685`)
+  - `release/Zerox Agent-3.1.1-arm64.dmg.blockmap` (131K, sha256 `e89b40431d7e38495942f9b29c95195cbd91eb23cc692fc5ff7242bb4e26651d`)
+  - `release/Zerox Agent-3.1.1-arm64-mac.zip.blockmap` (335K, sha256 `cd2e8d3dbcce7ab6f696e9167bb83e5b5fed3a100bf47fc939e3d06d1d5b90e0`)
+  - `release/latest-mac.yml` (517B, sha256 `ac59a3726cad76d2a310cbbdf1f0e3316201881feef0ed3a2e1b35c9cd456fa6`)

@@ -181,6 +181,17 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain("bottom: var(--composer-action-inset);");
   });
 
+  it("lets modifier Enter insert composer newlines while bare Enter submits", () => {
+    expect(chatPanelSource).toContain(
+      'event.key === "Enter" && !event.shiftKey && !event.altKey',
+    );
+    expect(chatPanelSource).toContain(
+      "Shift+Enter 或 Option+Enter 换行",
+    );
+    expect(chatPanelSource).toContain("const content = rawContent;");
+    expect(chatPanelSource).toContain("if (!content.trim())");
+  });
+
   it("surfaces workspace selection in the chat composer", () => {
     expect(chatPanelSource).toContain("listAgentWorkspaces");
     expect(chatPanelSource).toContain("selectedWorkspaceId");

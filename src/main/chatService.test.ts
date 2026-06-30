@@ -414,6 +414,41 @@ describe("chat service", () => {
     expect(systemPrompt).toContain("昨天 / yesterday: 2026-06-25");
   });
 
+  it("preserves authored newlines in the user message sent to the model", async () => {
+    const capturedMessages: ChatMessage[][] = [];
+    const chatMessages: AppendChatMessageInput[] = [];
+    const rawMessage = "\n请比较两段内容：\n第一段\n\n第二段\n";
+    const service = createChatService({
+      chatClient: {
+        async complete(request) {
+          capturedMessages.push(request.messages);
+          return chatReply("收到换行内容。");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore(chatMessages),
+      createId: () => "chat_newline_message",
+      now: () => new Date("2026-06-06T08:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage({ message: rawMessage });
+
+    expect(result).toMatchObject({
+      ok: true,
+      sessionId: "persisted_session",
+      reply: "收到换行内容。",
+    });
+    expect(chatMessages[0]).toMatchObject({
+      role: "user",
+      content: rawMessage,
+    });
+    expect(capturedMessages[0]?.at(-1)).toEqual({
+      role: "user",
+      content: rawMessage,
+    });
+  });
+
   it("records provider token usage for a successful model reply", async () => {
     const chatMessages: AppendChatMessageInput[] = [];
     const tokenUsageWrites: Array<{
