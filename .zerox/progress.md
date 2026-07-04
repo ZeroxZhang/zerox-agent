@@ -5837,3 +5837,50 @@
   - `release/Zerox Agent-3.1.1-arm64.dmg.blockmap` (131K, sha256 `e89b40431d7e38495942f9b29c95195cbd91eb23cc692fc5ff7242bb4e26651d`)
   - `release/Zerox Agent-3.1.1-arm64-mac.zip.blockmap` (335K, sha256 `cd2e8d3dbcce7ab6f696e9167bb83e5b5fed3a100bf47fc939e3d06d1d5b90e0`)
   - `release/latest-mac.yml` (517B, sha256 `ac59a3726cad76d2a310cbbdf1f0e3316201881feef0ed3a2e1b35c9cd456fa6`)
+
+## 2026-07-04 - Zerox Agent v3.1.2 Window Controls And Settings Icon Polish
+
+- Request:
+  - Prevent macOS red/yellow/green window controls from visually overlapping scrolled sidebar content.
+  - Fix the primary navigation Settings gear icon so it renders completely.
+  - Prepare version 3.1.2, open the local test package for user acceptance, and wait for confirmation before formal release packaging.
+- Feature tracking:
+  - Added exactly one active feature: `P31-v3.1.2-window-controls-and-settings-icon`.
+  - Status remains `in_progress` until user acceptance and release packaging are complete.
+- Changed areas:
+  - `src/renderer/App.tsx`
+  - `src/renderer/styles/sidebar.css`
+  - `src/renderer/styles/responsive.css`
+  - `src/shared/materialNavigation.ts`
+  - `src/renderer/materialDesign.test.ts`
+  - `src/shared/packageScripts.test.ts`
+  - `src/shared/readme.test.ts`
+  - `package.json`, `package-lock.json`, `README.md`, `.zerox/feature_list.json`, `.zerox/progress.md`
+- Implementation evidence:
+  - Sidebar now reserves a sticky macOS window-control safe area with `--window-control-safe-area: 64px`, an opaque nav background, and an 8px same-color mask so scrolled content cannot show under the traffic-light controls.
+  - Settings primary navigation now uses a bounded gear SVG path, `fillRule="evenodd"`, `clipRule="evenodd"`, and explicit 22px SVG sizing with `overflow: visible`.
+  - Package metadata reports v3.1.2.
+  - README current-release and download quarantine example now report v3.1.2.
+- Verification evidence:
+  - `./init.sh` -> passed harness check and packageScripts focused test before implementation.
+  - `npm test -- src/renderer/materialDesign.test.ts src/shared/packageScripts.test.ts` -> 2 files / 72 tests passed before README metadata sync.
+  - `npm test -- src/renderer/materialDesign.test.ts src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 3 files / 75 tests passed.
+  - `npm run verify` -> 186 files / 1299 tests passed, build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local un-packaged smoke used JSON fallback after better-sqlite3 ABI mismatch.
+  - `npm run pack:mac` -> passed before user acceptance; regenerated local directory package at `release/mac-arm64/Zerox Agent.app` without creating DMG/ZIP release artifacts.
+  - Opened local test package with `open -n "release/mac-arm64/Zerox Agent.app"` for user acceptance.
+  - Browser-rendered QA at `http://127.0.0.1:5173/#settings` -> page title `Zerox Agent`, console errors/warnings `[]`, sidebar safe area computed as 64px with same-color mask, settings icon SVG computed as 22px with visible overflow and evenodd fill/clip rules.
+  - User accepted the local test package visual fix.
+  - `npm run dist:mac` -> passed; regenerated unsigned macOS arm64 DMG, ZIP, blockmaps, and `latest-mac.yml` for v3.1.2.
+  - Packaged app smoke: `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v3.1.2' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+  - `git diff --check` -> passed.
+- Release artifact evidence:
+  - `release/latest-mac.yml` reports `version: 3.1.2` and update URLs `Zerox-Agent-3.1.2-arm64-mac.zip` / `Zerox-Agent-3.1.2-arm64.dmg`.
+  - `release/Zerox Agent-3.1.2-arm64.dmg` (122M, sha256 `a5044d0e9caf772ee08f65e442abffe84ddfecc3313e182507ff7908d7567677`)
+  - `release/Zerox Agent-3.1.2-arm64-mac.zip` (333M, sha256 `7cc558fddb4e22506663fb51c112a6356857fcffc9c91ed39770acfaba1bad90`)
+  - `release/Zerox Agent-3.1.2-arm64.dmg.blockmap` (131K, sha256 `5914df1178610c999af0498ad17a13f5060ee8aa847b7a01a16e909f05673631`)
+  - `release/Zerox Agent-3.1.2-arm64-mac.zip.blockmap` (335K, sha256 `a43f75c314811a373f4a17dc9b3c9167c1548177371a3e1853eba0c1f18f2466`)
+  - `release/latest-mac.yml` (517B, sha256 `baf0e26390bd1a9a94f36dc1a4872bd7de238b2eecb33edb656129d14b1cf12c`)
+  - P31 is marked done after user acceptance, full verify, harness, production smoke, dist packaging, packaged-app smoke, and whitespace checks.
+  - Branch `codex/3.1.2`, tag `v3.1.2`, and GitHub Release `v3.1.2` are published at https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.1.2 with the regenerated macOS assets.

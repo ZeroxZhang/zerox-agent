@@ -23,6 +23,8 @@
   }
 
   .workspace-sidebar {
+    --sidebar-x-padding: var(--space-3);
+    --sidebar-bottom-padding: var(--space-3);
     position: static;
     width: 100%;
     height: auto;
@@ -52,7 +54,9 @@
 
 @media (max-width: 640px) {
   .workspace-sidebar {
-    padding: var(--space-3);
+    --sidebar-x-padding: var(--space-3);
+    --sidebar-bottom-padding: var(--space-3);
+    --window-control-safe-area: 56px;
   }
 
   .workspace-sidebar .material-brand-copy,

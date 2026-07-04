@@ -410,7 +410,12 @@ export function App() {
               >
                 <span className="material-nav-icon" aria-hidden="true">
                   <svg viewBox="0 0 24 24" width="24" height="24" focusable="false">
-                    <path d={icon.path} fill="currentColor" />
+                    <path
+                      d={icon.path}
+                      fill="currentColor"
+                      fillRule="evenodd"
+                      clipRule="evenodd"
+                    />
                   </svg>
                 </span>
                 <span className="material-nav-label">{section.label}</span>

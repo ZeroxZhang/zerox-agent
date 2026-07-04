@@ -8,7 +8,7 @@ type PackageJson = {
 };
 
 describe("package scripts", () => {
-  it("sets release metadata to v3.1.1", () => {
+  it("sets release metadata to v3.1.2", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -16,12 +16,12 @@ describe("package scripts", () => {
       readFileSync(path.join(process.cwd(), "package-lock.json"), "utf8"),
     ) as { version?: string; packages?: Record<string, { version?: string }> };
 
-    expect(packageJson.version).toBe("3.1.1");
-    expect(packageLock.version).toBe("3.1.1");
-    expect(packageLock.packages?.[""]?.version).toBe("3.1.1");
+    expect(packageJson.version).toBe("3.1.2");
+    expect(packageLock.version).toBe("3.1.2");
+    expect(packageLock.packages?.[""]?.version).toBe("3.1.2");
   });
 
-  it("keeps release gates tracked through v3.1.1", () => {
+  it("keeps release gates tracked through v3.1.2", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -38,6 +38,9 @@ describe("package scripts", () => {
     const openFeatureIds = featureList.features
       .filter((feature) => feature.status !== "done")
       .map((feature) => feature.id);
+    const p31 = featureList.features.find(
+      (feature) => feature.id === "P31-v3.1.2-window-controls-and-settings-icon",
+    );
     const p30 = featureList.features.find(
       (feature) => feature.id === "P30-v3.1.1-composer-multiline-hotfix",
     );
@@ -48,15 +51,28 @@ describe("package scripts", () => {
       (feature) => feature.id === "P28-v3.0.0-execution-context-spine",
     );
 
-    expect(packageJson.version).toBe("3.1.1");
+    expect(packageJson.version).toBe("3.1.2");
     expect(
-      openFeatureIds.filter((id) => id !== "P30-v3.1.1-composer-multiline-hotfix"),
+      openFeatureIds.filter((id) => id !== "P31-v3.1.2-window-controls-and-settings-icon"),
     ).toEqual([]);
     expect(openFeatureIds.length).toBeLessThanOrEqual(1);
-    expect(p30?.status === "in_progress" || p30?.status === "done").toBe(true);
+    expect(p31?.status === "in_progress" || p31?.status === "done").toBe(true);
+    expect(p31).toEqual(
+      expect.objectContaining({
+        id: "P31-v3.1.2-window-controls-and-settings-icon",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("sidebar reserves a sticky macOS window-control safe area"),
+          expect.stringContaining("Settings primary navigation gear renders from a bounded SVG path"),
+          expect.stringContaining("package metadata reports version 3.1.2"),
+          expect.stringContaining("local test package is opened for user acceptance before the release build"),
+        ]),
+      }),
+    );
+    expect(p30?.status).toBe("done");
     expect(p30).toEqual(
       expect.objectContaining({
         id: "P30-v3.1.1-composer-multiline-hotfix",
+        status: "done",
         definitionOfDone: expect.arrayContaining([
           expect.stringContaining("Chat composer inserts line breaks with Shift+Enter and Option+Enter"),
           expect.stringContaining("authored newlines are preserved"),

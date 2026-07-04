@@ -608,6 +608,24 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain("-webkit-app-region: drag");
     expect(styles).toContain(".window-drag-strip button");
     expect(styles).toContain("-webkit-app-region: no-drag");
+    expect(styles).toContain("--window-control-safe-area");
+    expect(styles).toContain(".workspace-sidebar::before");
+    expect(styles).toContain("flex: 0 0 var(--window-control-safe-area);");
+    expect(styles).toContain("overscroll-behavior: contain;");
+  });
+
+  it("keeps the Settings navigation icon inside a non-clipped SVG viewport", () => {
+    const materialNavigationSource = readFileSync(
+      path.join(process.cwd(), "src/shared/materialNavigation.ts"),
+      "utf8",
+    );
+
+    expect(appSource).toContain('fillRule="evenodd"');
+    expect(appSource).toContain('clipRule="evenodd"');
+    expect(styles).toContain(".material-nav-icon svg");
+    expect(styles).toContain("overflow: visible;");
+    expect(materialNavigationSource).toContain("M19.43 12.98");
+    expect(materialNavigationSource).not.toContain("M19.4 13a7.8");
   });
 
   it("renders the sidebar version from runtime metadata instead of a hardcoded value", () => {

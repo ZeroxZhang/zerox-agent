@@ -2171,6 +2171,45 @@
         "BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v3.1.1' \"release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent\"",
         "git diff --check"
       ]
+    },
+    {
+      "id": "P31-v3.1.2-window-controls-and-settings-icon",
+      "priority": 61,
+      "status": "done",
+      "title": "v3.1.2 Window controls and Settings icon polish",
+      "files": [
+        "src/renderer/App.tsx",
+        "src/renderer/styles/sidebar.css",
+        "src/renderer/styles/responsive.css",
+        "src/shared/materialNavigation.ts",
+        "src/renderer/materialDesign.test.ts",
+        "src/shared/packageScripts.test.ts",
+        "src/shared/readme.test.ts",
+        "README.md",
+        "package.json",
+        "package-lock.json",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md"
+      ],
+      "definitionOfDone": [
+        "The sidebar reserves a sticky macOS window-control safe area so scrolled content cannot render under the red/yellow/green controls",
+        "Settings primary navigation gear renders from a bounded SVG path with non-clipped viewport styling",
+        "package metadata reports version 3.1.2 in package.json and package-lock.json",
+        "README current release and download example reflect v3.1.2",
+        "local test package is opened for user acceptance before the release build",
+        "macOS DMG, ZIP, blockmaps, and latest-mac.yml artifacts are regenerated for v3.1.2 after user acceptance",
+        "GitHub Release v3.1.2 is published with regenerated macOS assets and the release branch/tag are pushed"
+      ],
+      "verification": [
+        "npm test -- src/renderer/materialDesign.test.ts src/shared/packageScripts.test.ts src/shared/readme.test.ts",
+        "npm run verify",
+        "npm run harness:check",
+        "npm run smoke:prod",
+        "npm run dist:mac",
+        "BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v3.1.2' \"release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent\"",
+        "open local test package for user acceptance",
+        "git diff --check"
+      ]
     }
   ]
 }

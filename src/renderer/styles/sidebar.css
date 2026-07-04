@@ -1,4 +1,7 @@
 .workspace-sidebar {
+  --sidebar-x-padding: 16px;
+  --sidebar-bottom-padding: 18px;
+  --window-control-safe-area: 64px;
   grid-column: 1;
   position: sticky;
   top: 0;
@@ -8,10 +11,25 @@
   gap: var(--space-4);
   width: var(--nav-rail-width);
   height: 100vh;
-  padding: 52px 16px 18px;
+  padding: 0 var(--sidebar-x-padding) var(--sidebar-bottom-padding);
   border-right: 1px solid var(--border-default);
   background: var(--nav-bg);
+  overscroll-behavior: contain;
   overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.workspace-sidebar::before {
+  content: "";
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  flex: 0 0 var(--window-control-safe-area);
+  height: var(--window-control-safe-area);
+  margin-inline: calc(var(--sidebar-x-padding) * -1);
+  background: var(--nav-bg);
+  box-shadow: 0 8px 0 var(--nav-bg);
+  -webkit-app-region: drag;
 }
 
 .workspace-sidebar .brand {
@@ -122,6 +140,13 @@
   border-radius: 0;
   color: currentColor;
   background: transparent !important;
+}
+
+.material-nav-icon svg {
+  display: block;
+  width: 22px;
+  height: 22px;
+  overflow: visible;
 }
 
 .material-nav-label {
