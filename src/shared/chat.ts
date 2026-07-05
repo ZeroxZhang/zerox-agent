@@ -3,6 +3,7 @@ import type { AgentRunRecord } from "./agentRuns";
 import type { ScheduledTask } from "./scheduledTasks";
 import type { GoalStatus } from "./agentGoal";
 import type { ChatOutputPart } from "./chatOutput";
+import type { GoalDraft } from "./goalTranslation";
 
 export type ChatHistoryMessage = {
   role: "assistant" | "user";
@@ -96,6 +97,7 @@ export type SendChatMessageInput = {
   sessionId?: string;
   requestId?: string;
   message: string;
+  mode?: "chat" | "goal_draft";
   selectedSkillName?: string;
   workspaceId?: string;
   workspaceSummary?: ChatWorkspaceSummary;
@@ -300,6 +302,7 @@ export type SendChatMessageResult =
       createdTask?: ScheduledTask;
       agentStatus?: ChatAgentStatus;
       activeGoal?: ChatSessionGoalSummary;
+      goalDraft?: GoalDraft;
       selectedSkill?: {
         name: string;
         displayName: string;

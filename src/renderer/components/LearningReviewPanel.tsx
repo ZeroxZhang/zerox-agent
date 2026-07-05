@@ -91,6 +91,9 @@ export function LearningReviewPanel() {
   const accepted = candidates.filter(
     (candidate) => candidate.status === "accepted",
   );
+  const reviewed = candidates.filter(
+    (candidate) => candidate.status !== "pending_review",
+  );
 
   return (
     <section className="memory-panel">
@@ -109,10 +112,16 @@ export function LearningReviewPanel() {
         </button>
       </div>
 
+      <section className="settings-action-band">
+        <div>
+          <strong>{pending.length} 个待审核</strong>
+          <span>{status.message}</span>
+        </div>
+        <span>{accepted.length} 个已接受</span>
+      </section>
+
       <div className="memory-grid">
-        {[...pending, ...accepted, ...candidates.filter((candidate) =>
-          candidate.status !== "pending_review" && candidate.status !== "accepted"
-        )].map((candidate) => (
+        {pending.map((candidate) => (
           <article className="memory-card" key={candidate.id}>
             <div className="memory-card-heading">
               <span>{translateCandidateType(candidate.type)}</span>
@@ -154,8 +163,31 @@ export function LearningReviewPanel() {
         ))}
       </div>
 
-      {!candidates.length ? (
-        <div className="empty-state">暂无学习候选。</div>
+      {!pending.length ? (
+        <div className="empty-state">
+          {candidates.length ? "当前没有待审核学习候选。" : "暂无学习候选。"}
+        </div>
+      ) : null}
+
+      {reviewed.length ? (
+        <details className="settings-advanced-section">
+          <summary>
+            <span>历史候选</span>
+            <small>{reviewed.length} 条</small>
+          </summary>
+          <div className="memory-grid">
+            {reviewed.map((candidate) => (
+              <article className="memory-card" key={candidate.id}>
+                <div className="memory-card-heading">
+                  <span>{translateCandidateType(candidate.type)}</span>
+                  <strong>{translateCandidateStatus(candidate.status)}</strong>
+                </div>
+                <h3>{candidate.claim}</h3>
+                <p>{candidate.recommendedAction}</p>
+              </article>
+            ))}
+          </div>
+        </details>
       ) : null}
 
       {lastApplyReport ? (

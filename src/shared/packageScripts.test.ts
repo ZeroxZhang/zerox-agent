@@ -8,7 +8,7 @@ type PackageJson = {
 };
 
 describe("package scripts", () => {
-  it("sets release metadata to v3.1.2", () => {
+  it("sets release metadata to v3.2.0", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -16,12 +16,12 @@ describe("package scripts", () => {
       readFileSync(path.join(process.cwd(), "package-lock.json"), "utf8"),
     ) as { version?: string; packages?: Record<string, { version?: string }> };
 
-    expect(packageJson.version).toBe("3.1.2");
-    expect(packageLock.version).toBe("3.1.2");
-    expect(packageLock.packages?.[""]?.version).toBe("3.1.2");
+    expect(packageJson.version).toBe("3.2.0");
+    expect(packageLock.version).toBe("3.2.0");
+    expect(packageLock.packages?.[""]?.version).toBe("3.2.0");
   });
 
-  it("keeps release gates tracked through v3.1.2", () => {
+  it("keeps release gates tracked through v3.2.0", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -38,6 +38,9 @@ describe("package scripts", () => {
     const openFeatureIds = featureList.features
       .filter((feature) => feature.status !== "done")
       .map((feature) => feature.id);
+    const p32 = featureList.features.find(
+      (feature) => feature.id === "P32-v3.2.0-goal-mode-memory-ingestion-settings-glass",
+    );
     const p31 = featureList.features.find(
       (feature) => feature.id === "P31-v3.1.2-window-controls-and-settings-icon",
     );
@@ -51,12 +54,26 @@ describe("package scripts", () => {
       (feature) => feature.id === "P28-v3.0.0-execution-context-spine",
     );
 
-    expect(packageJson.version).toBe("3.1.2");
+    expect(packageJson.version).toBe("3.2.0");
     expect(
-      openFeatureIds.filter((id) => id !== "P31-v3.1.2-window-controls-and-settings-icon"),
+      openFeatureIds.filter((id) => id !== "P32-v3.2.0-goal-mode-memory-ingestion-settings-glass"),
     ).toEqual([]);
     expect(openFeatureIds.length).toBeLessThanOrEqual(1);
-    expect(p31?.status === "in_progress" || p31?.status === "done").toBe(true);
+    expect(p32?.status === "in_progress" || p32?.status === "done").toBe(true);
+    expect(p32).toEqual(
+      expect.objectContaining({
+        id: "P32-v3.2.0-goal-mode-memory-ingestion-settings-glass",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("Composer shows the four bottom controls"),
+          expect.stringContaining("Goal Mode and legacy /目标 create a typed GoalDraft"),
+          expect.stringContaining("Memory records support manual_required"),
+          expect.stringContaining("Memory ingestion scans recent reviewed local history"),
+          expect.stringContaining("Visual tokens cool the app away from beige/yellow"),
+          expect.stringContaining("package metadata reports version 3.2.0"),
+        ]),
+      }),
+    );
+    expect(p31?.status).toBe("done");
     expect(p31).toEqual(
       expect.objectContaining({
         id: "P31-v3.1.2-window-controls-and-settings-icon",

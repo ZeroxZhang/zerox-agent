@@ -49,6 +49,14 @@ import type {
   RawHistoryAroundOptions,
   RawHistorySearchOptions,
 } from "../../shared/rawHistory";
+import type {
+  AcceptMemoryIngestionCandidateResult,
+  GetMemoryIngestionStatusResult,
+  IngestRecentMemoryResult,
+  ListMemoryIngestionCandidatesResult,
+  MemoryIngestionScope,
+  RejectMemoryIngestionCandidateResult,
+} from "../../shared/memoryIngestion";
 import type { AgentLearningListOptions } from "../../shared/agentLearning";
 import type {
   AgentEvalCandidate,
@@ -58,6 +66,11 @@ import type {
 } from "../../shared/agentEvalCandidate";
 import type { Goal, GoalBudget } from "../../shared/agentGoal";
 import type { GoalReviewDecision, GoalReviewPolicy } from "../../shared/agentGoalReview";
+import type {
+  GoalDraftConfirmResult,
+  GoalDraftDiscardResult,
+  GoalDraftEdit,
+} from "../../shared/goalTranslation";
 import type {
   LoadAgentValidationResult,
   PrepareAgentResult,
@@ -472,6 +485,20 @@ function registerGoalsIpcHandlers(container: AppContainer): void {
   ipcMain.handle("goal:start", async (_event, goalId: string) =>
     container.runGoalOperation(() => container.goalChatService().start(goalId)),
   );
+  ipcMain.handle(
+    "goalDraft:confirm",
+    async (
+      _event,
+      draftId: string,
+      edit?: GoalDraftEdit,
+    ): Promise<GoalDraftConfirmResult> =>
+      container.confirmGoalDraft(draftId, edit),
+  );
+  ipcMain.handle(
+    "goalDraft:discard",
+    async (_event, draftId: string): Promise<GoalDraftDiscardResult> =>
+      container.discardGoalDraft(draftId),
+  );
   ipcMain.handle("goal:pause", async (_event, goalId: string) =>
     container.runGoalOperation(() => container.goalChatService().pause(goalId)),
   );
@@ -558,6 +585,37 @@ function registerMemoryIpcHandlers(container: AppContainer): void {
   );
   ipcMain.handle("memory:search", (_event, options: MemorySearchOptions) =>
     container.memoryStore().search(options),
+  );
+  ipcMain.handle(
+    "memory:ingestRecent",
+    (_event, scope?: MemoryIngestionScope): Promise<IngestRecentMemoryResult> =>
+      container.memoryIngestionService().ingestRecent(scope),
+  );
+  ipcMain.handle(
+    "memory:getIngestionStatus",
+    (): Promise<GetMemoryIngestionStatusResult> =>
+      container.memoryIngestionService().getStatus(),
+  );
+  ipcMain.handle(
+    "memory:listIngestionCandidates",
+    (): Promise<ListMemoryIngestionCandidatesResult> =>
+      container.memoryIngestionService().listCandidates(),
+  );
+  ipcMain.handle(
+    "memory:acceptIngestionCandidate",
+    (
+      _event,
+      candidateId: string,
+    ): Promise<AcceptMemoryIngestionCandidateResult> =>
+      container.memoryIngestionService().acceptCandidate(candidateId),
+  );
+  ipcMain.handle(
+    "memory:rejectIngestionCandidate",
+    (
+      _event,
+      candidateId: string,
+    ): Promise<RejectMemoryIngestionCandidateResult> =>
+      container.memoryIngestionService().rejectCandidate(candidateId),
   );
   ipcMain.handle("history:search", (_event, options: RawHistorySearchOptions) =>
     hasRawHistoryScope(options)

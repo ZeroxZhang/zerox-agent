@@ -142,7 +142,20 @@ export function ToolsPanel() {
         </span>
       </div>
 
+      <section className="settings-action-band">
+        <div>
+          <strong>工具权限状态</strong>
+          <span>{status.message}</span>
+        </div>
+        <span>{selectedTask ? selectedTask.name : "尚未选择任务"}</span>
+      </section>
+
       <div className="tools-layout">
+        <details className="settings-advanced-section tools-advanced-section">
+          <summary>
+            <span>JSON 授权模拟</span>
+            <small>高级调试入口</small>
+          </summary>
         <form className="tool-checker" onSubmit={handleAuthorize}>
           <label className="field">
             <span>
@@ -216,6 +229,7 @@ export function ToolsPanel() {
             </p>
           </div>
         </form>
+        </details>
 
         <section className="audit-panel" aria-label="工具审计日志">
           {decision ? (

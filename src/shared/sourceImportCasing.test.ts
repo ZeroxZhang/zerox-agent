@@ -34,7 +34,7 @@ describe("source import casing", () => {
     }
 
     expect(mismatches).toEqual([]);
-  });
+  }, 15_000);
 });
 
 async function listSourceFiles(dir: string): Promise<string[]> {

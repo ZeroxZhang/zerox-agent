@@ -53,6 +53,14 @@ import type {
   RawHistorySearchResult,
 } from "../shared/rawHistory";
 import type {
+  AcceptMemoryIngestionCandidateResult,
+  GetMemoryIngestionStatusResult,
+  IngestRecentMemoryResult,
+  ListMemoryIngestionCandidatesResult,
+  MemoryIngestionScope,
+  RejectMemoryIngestionCandidateResult,
+} from "../shared/memoryIngestion";
+import type {
   AgentLearningCandidate,
   AgentLearningListOptions,
   ApplyAcceptedLearningReport,
@@ -79,6 +87,11 @@ import type {
   GoalReviewDecision,
   GoalReviewPolicy,
 } from "../shared/agentGoalReview";
+import type {
+  GoalDraftConfirmResult,
+  GoalDraftDiscardResult,
+  GoalDraftEdit,
+} from "../shared/goalTranslation";
 import type {
   AgentWorkspace,
   AgentWorkspaceCleanup,
@@ -285,6 +298,15 @@ const buildingAgent = {
     ipcRenderer.invoke("goal:replan", goalId, instructions),
   retryGoal: (goalId: string): Promise<GoalOperationResult> =>
     ipcRenderer.invoke("goal:retry", goalId),
+  confirmGoalDraft: (
+    draftId: string,
+    edit?: GoalDraftEdit,
+  ): Promise<GoalDraftConfirmResult> =>
+    ipcRenderer.invoke("goalDraft:confirm", draftId, edit),
+  discardGoalDraft: (
+    draftId: string,
+  ): Promise<GoalDraftDiscardResult> =>
+    ipcRenderer.invoke("goalDraft:discard", draftId),
   getGoal: (goalId: string): Promise<Goal | null> =>
     ipcRenderer.invoke("goal:get", goalId),
   listActiveGoals: (): Promise<Goal[]> => ipcRenderer.invoke("goal:listActive"),
@@ -464,6 +486,22 @@ const buildingAgent = {
   searchMemories: (
     options: MemorySearchOptions,
   ): Promise<MemorySearchResult[]> => ipcRenderer.invoke("memory:search", options),
+  ingestRecentMemories: (
+    scope?: MemoryIngestionScope,
+  ): Promise<IngestRecentMemoryResult> =>
+    ipcRenderer.invoke("memory:ingestRecent", scope),
+  getMemoryIngestionStatus: (): Promise<GetMemoryIngestionStatusResult> =>
+    ipcRenderer.invoke("memory:getIngestionStatus"),
+  listMemoryIngestionCandidates: (): Promise<ListMemoryIngestionCandidatesResult> =>
+    ipcRenderer.invoke("memory:listIngestionCandidates"),
+  acceptMemoryIngestionCandidate: (
+    candidateId: string,
+  ): Promise<AcceptMemoryIngestionCandidateResult> =>
+    ipcRenderer.invoke("memory:acceptIngestionCandidate", candidateId),
+  rejectMemoryIngestionCandidate: (
+    candidateId: string,
+  ): Promise<RejectMemoryIngestionCandidateResult> =>
+    ipcRenderer.invoke("memory:rejectIngestionCandidate", candidateId),
   searchRawHistory: (
     options: RawHistorySearchOptions,
   ): Promise<RawHistorySearchResult[]> => ipcRenderer.invoke("history:search", options),

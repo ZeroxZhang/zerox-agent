@@ -48,6 +48,7 @@ describe("memory store", () => {
       tags: ["agent", "memory"],
       importance: 4,
       source: { type: "manual" },
+      layer: "manual_required",
       createdAt: "2026-06-05T08:00:00.000Z",
       updatedAt: "2026-06-05T08:00:00.000Z",
     });
@@ -336,6 +337,7 @@ describe("memory store", () => {
               content: "Memory stays on this machine.",
               tags: [],
               source: { type: "manual" },
+              layer: "manual_required",
               importance: 3,
               createdAt: "2026-06-05T08:00:00.000Z",
               updatedAt: "2026-06-05T08:00:00.000Z",

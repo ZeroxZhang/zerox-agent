@@ -11,8 +11,19 @@ export type MemorySource =
   | { type: "chat_session"; sessionId: string; messageIds: string[] }
   | { type: "skill"; refId: string }
   | { type: "system" }
+  | {
+      type: "memory_ingestion";
+      candidateId: string;
+      sessionIds: string[];
+      messageIds: string[];
+    }
   | { type: "dream"; runId: string } // P7 (Patch 23)
   | { type: "distill"; runId: string }; // P7 (Patch 23)
+
+export type MemoryLayer =
+  | "manual_required"
+  | "system_long_term"
+  | "ingested_habit";
 
 export type MemoryEmbedding = {
   model: string;
@@ -35,6 +46,7 @@ export type MemoryInput = {
   content: string;
   tags?: string[];
   source?: MemorySource;
+  layer?: MemoryLayer;
   importance?: number;
   embedding?: MemoryEmbedding;
   consolidation?: MemoryConsolidation;
@@ -46,6 +58,7 @@ export type NormalizedMemoryInput = {
   content: string;
   tags: string[];
   source: MemorySource;
+  layer?: MemoryLayer;
   importance: number;
   embedding?: MemoryEmbedding;
   consolidation?: MemoryConsolidation;
@@ -141,6 +154,7 @@ export function normalizeMemoryInput(input: MemoryInput): NormalizedMemoryInput 
     content: String(input.content ?? "").trim(),
     tags: normalizeTags(input.tags ?? []),
     source: input.source ?? { type: "manual" },
+    layer: normalizeMemoryLayer(input.layer, input.source),
     importance: normalizeImportance(input.importance),
     ...(embedding ? { embedding } : {}),
     ...(consolidation ? { consolidation } : {}),
@@ -196,6 +210,14 @@ export function getMemoryKindLabel(kind: MemoryKind): string {
 
 export function getMemoryKinds(): MemoryKind[] {
   return memoryKinds;
+}
+
+export function getMemoryLayerLabel(layer: MemoryLayer): string {
+  return {
+    manual_required: "强制记忆",
+    system_long_term: "长期记忆",
+    ingested_habit: "习惯摄取",
+  }[layer];
 }
 
 export function searchMemoryRecords(
@@ -434,6 +456,29 @@ function normalizeConsolidation(
   };
 }
 
+function normalizeMemoryLayer(
+  layer: unknown,
+  source: MemorySource | undefined,
+): MemoryLayer {
+  if (
+    layer === "manual_required" ||
+    layer === "system_long_term" ||
+    layer === "ingested_habit"
+  ) {
+    return layer;
+  }
+
+  if (!source || source.type === "manual") {
+    return "manual_required";
+  }
+
+  if (source.type === "memory_ingestion") {
+    return "ingested_habit";
+  }
+
+  return "system_long_term";
+}
+
 function normalizeVector(vector: unknown): number[] {
   if (!Array.isArray(vector)) {
     return [];
@@ -473,7 +518,24 @@ function sortRecordsByImportanceAndDate(
 
   return (
     archivedDelta ||
+    memoryLayerRank(resolveRecordLayer(left)) -
+      memoryLayerRank(resolveRecordLayer(right)) ||
     right.importance - left.importance ||
     right.updatedAt.localeCompare(left.updatedAt)
   );
+}
+
+function resolveRecordLayer(record: MemoryRecord): MemoryLayer {
+  return normalizeMemoryLayer(record.layer, record.source);
+}
+
+function memoryLayerRank(layer: MemoryLayer): number {
+  switch (layer) {
+    case "manual_required":
+      return 0;
+    case "ingested_habit":
+      return 1;
+    case "system_long_term":
+      return 2;
+  }
 }

@@ -14,7 +14,7 @@ describe("README", () => {
     expect(readme).toContain("npm run pack:mac");
     expect(readme).toContain("npm run dist:mac");
     expect(readme).toContain("xattr -dr com.apple.quarantine");
-    expect(readme).toContain("Zerox-Agent-3.1.2-arm64.dmg");
+    expect(readme).toContain("Zerox-Agent-3.2.0-arm64.dmg");
     expect(readme).toContain("npm run harness:check");
     expect(readme).toContain("npm run harness:score");
     expect(readme).toContain("npm run episode:export");
@@ -51,7 +51,7 @@ describe("README", () => {
     expect(positioning).toContain("Zerox does not run unbounded autonomous loops");
     expect(readme).toContain("session-native Goal Mode");
     expect(readme).toContain("Chat Session mode");
-    expect(readme).toContain("v3.1.2");
+    expect(readme).toContain("v3.2.0");
   });
 
   it("documents Goal Mode architecture and eval coverage", () => {
@@ -97,7 +97,7 @@ describe("README", () => {
     expect(readme).not.toContain("待最终独立验收");
     expect(readme).toContain("transcript-backed goal judge");
     expect(readme).toContain("goal-judge pass rate");
-    expect(readme).toContain("command-first");
+    expect(readme).toContain("goal-mode-first");
     expect(readme).toContain("ExecutionContextPackage");
     expect(readme).toContain("AgentRuntimeContextSnapshot");
     expect(readme).toContain("runtime context spine");

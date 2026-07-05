@@ -615,7 +615,9 @@ function SettingsSectionShell(props: {
           </button>
         ))}
       </aside>
-      <section className="settings-section-body">
+      <section
+        className={`settings-section-body is-${props.activeSectionId}`}
+      >
         {props.activeSectionId === "system-overview" ? (
           <OverviewPanel onNavigate={navigateTo} />
         ) : null}

@@ -23,8 +23,41 @@ describe("memory model", () => {
       content: "Store durable facts.",
       tags: ["agent", "memory"],
       source: { type: "manual" },
+      layer: "manual_required",
       importance: 3,
     });
+  });
+
+  it("derives memory layers from legacy sources", () => {
+    expect(
+      normalizeMemoryInput({
+        kind: "semantic",
+        title: "Preference",
+        content: "Manual memories are required.",
+        source: { type: "manual" },
+      }).layer,
+    ).toBe("manual_required");
+    expect(
+      normalizeMemoryInput({
+        kind: "semantic",
+        title: "Ingested habit",
+        content: "Accepted from recent chats.",
+        source: {
+          type: "memory_ingestion",
+          candidateId: "candidate_1",
+          sessionIds: ["session_1"],
+          messageIds: ["message_1"],
+        },
+      }).layer,
+    ).toBe("ingested_habit");
+    expect(
+      normalizeMemoryInput({
+        kind: "semantic",
+        title: "System memory",
+        content: "Created by the system.",
+        source: { type: "chat_session", sessionId: "session_1", messageIds: [] },
+      }).layer,
+    ).toBe("system_long_term");
   });
 
   it("validates required title, content, kind, and importance", () => {
@@ -259,6 +292,47 @@ describe("memory retrieval and export", () => {
       }).map((result) => result.record.id),
     ).toEqual(["mem_active", "mem_archived"]);
   });
+
+  it("ranks manual memories ahead of equal-score ingested and system memories", () => {
+    const system = createRecord({
+      id: "mem_system",
+      kind: "semantic",
+      title: "Agent preference",
+      content: "Use concise summaries.",
+      tags: ["agent"],
+      importance: 3,
+      source: { type: "chat_session", sessionId: "session_1", messageIds: [] },
+    });
+    const ingested = createRecord({
+      id: "mem_ingested",
+      kind: "semantic",
+      title: "Agent preference",
+      content: "Use concise summaries.",
+      tags: ["agent"],
+      importance: 3,
+      source: {
+        type: "memory_ingestion",
+        candidateId: "candidate_1",
+        sessionIds: ["session_1"],
+        messageIds: ["message_1"],
+      },
+    });
+    const manual = createRecord({
+      id: "mem_manual",
+      kind: "semantic",
+      title: "Agent preference",
+      content: "Use concise summaries.",
+      tags: ["agent"],
+      importance: 3,
+      source: { type: "manual" },
+    });
+
+    expect(
+      searchMemoryRecords([system, ingested, manual], {
+        query: "agent preference summaries",
+      }).map((result) => result.record.id),
+    ).toEqual(["mem_manual", "mem_ingested", "mem_system"]);
+  });
 });
 
 function createRecord(
@@ -269,13 +343,25 @@ function createRecord(
     Partial<
       Pick<
         MemoryRecord,
-        "archiveReason" | "archivedAt" | "consolidatedInto" | "embedding"
+        | "archiveReason"
+        | "archivedAt"
+        | "consolidatedInto"
+        | "embedding"
+        | "source"
+        | "layer"
       >
     >,
 ): MemoryRecord {
   return {
     ...partial,
-    source: { type: "manual" },
+    source: partial.source ?? { type: "manual" },
+    layer:
+      partial.layer ??
+      (partial.source?.type === "memory_ingestion"
+        ? "ingested_habit"
+        : partial.source?.type === "manual" || !partial.source
+          ? "manual_required"
+          : "system_long_term"),
     createdAt: "2026-06-05T08:00:00.000Z",
     updatedAt: "2026-06-05T08:00:00.000Z",
   };

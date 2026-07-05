@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   getMemoryKindLabel,
+  getMemoryLayerLabel,
   getMemoryKinds,
   type MemoryInput,
   type MemoryKind,
+  type MemoryLayer,
   type MemoryMaintenanceReport,
   type MemoryRecord,
   type MemorySearchResult,
   type MemoryValidationErrors,
 } from "../../shared/memory";
+import type { MemoryIngestionCandidate } from "../../shared/memoryIngestion";
 import type { MemoryEvalReport } from "../../shared/memoryEval";
 import type { MemoryGovernanceReport } from "../../shared/memoryGovernance";
 import type {
@@ -54,6 +57,10 @@ export function MemoryPanel() {
     useState<MemoryGovernanceReport | null>(null);
   const [maintenanceReport, setMaintenanceReport] =
     useState<MemoryMaintenanceReport | null>(null);
+  const [ingestionCandidates, setIngestionCandidates] = useState<
+    MemoryIngestionCandidate[]
+  >([]);
+  const [ingestionRunning, setIngestionRunning] = useState(false);
   const [status, setStatus] = useState<MemoryStatus>({
     kind: "idle",
     message: "记忆系统已就绪。",
@@ -62,7 +69,20 @@ export function MemoryPanel() {
   useEffect(() => {
     void loadMemories();
     void loadMemoryProfile();
+    void loadIngestionCandidates();
+    void loadIngestionStatus();
   }, []);
+
+  useEffect(() => {
+    if (!ingestionRunning || !window.buildingAgent) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void loadIngestionStatus();
+    }, 1000);
+    return () => window.clearInterval(intervalId);
+  }, [ingestionRunning]);
 
   const displayedMemories = useMemo(() => {
     if (query.trim()) {
@@ -71,6 +91,13 @@ export function MemoryPanel() {
 
     return memories;
   }, [memories, query, searchResults]);
+  const memoryLanes = useMemo(
+    () => buildMemoryLanes(memories),
+    [memories],
+  );
+  const pendingIngestionCandidates = ingestionCandidates.filter(
+    (candidate) => candidate.status === "pending",
+  );
 
   async function loadMemories() {
     if (!window.buildingAgent) {
@@ -109,6 +136,54 @@ export function MemoryPanel() {
     if (result.ok) {
       setProfileContent(result.profile.content);
       setProfileUpdatedAt(result.profile.updatedAt);
+    }
+  }
+
+  async function loadIngestionCandidates() {
+    if (!window.buildingAgent) {
+      return;
+    }
+
+    const result = await window.buildingAgent.listMemoryIngestionCandidates();
+    if (result.ok) {
+      setIngestionCandidates(result.candidates);
+    }
+  }
+
+  async function loadIngestionStatus() {
+    if (!window.buildingAgent) {
+      return;
+    }
+
+    const result = await window.buildingAgent.getMemoryIngestionStatus();
+    if (!result.ok) {
+      setStatus({ kind: "error", message: result.message });
+      return;
+    }
+
+    setIngestionRunning(result.status.running);
+    if (result.status.running) {
+      setStatus({
+        kind: "saving",
+        message: result.status.message,
+      });
+      return;
+    }
+
+    if (result.status.error) {
+      setStatus({
+        kind: "error",
+        message: result.status.error,
+      });
+      return;
+    }
+
+    if (result.status.report) {
+      await loadIngestionCandidates();
+      setStatus({
+        kind: "saved",
+        message: result.status.message,
+      });
     }
   }
 
@@ -380,6 +455,64 @@ export function MemoryPanel() {
     setStatus({ kind: "saved", message: "记忆画像已保存。" });
   }
 
+  async function handleIngestRecentMemories() {
+    setIngestionRunning(true);
+    setStatus({ kind: "saving", message: "正在摄取最近会话..." });
+
+    if (!window.buildingAgent) {
+      setStatus({
+        kind: "error",
+        message: "浏览器预览模式无法摄取桌面会话。",
+      });
+      setIngestionRunning(false);
+      return;
+    }
+
+    const result = await window.buildingAgent.ingestRecentMemories();
+    setIngestionRunning(false);
+    if (!result.ok) {
+      setStatus({ kind: "error", message: result.message });
+      return;
+    }
+
+    await loadIngestionCandidates();
+    setStatus({
+      kind: "saved",
+      message: `摄取完成：新增 ${result.report.createdCandidates} 个候选。`,
+    });
+  }
+
+  async function handleAcceptIngestionCandidate(candidateId: string) {
+    if (!window.buildingAgent) {
+      return;
+    }
+    setStatus({ kind: "saving", message: "正在写入习惯记忆..." });
+    const result = await window.buildingAgent.acceptMemoryIngestionCandidate(
+      candidateId,
+    );
+    if (!result.ok) {
+      setStatus({ kind: "error", message: result.message });
+      return;
+    }
+    await Promise.all([loadIngestionCandidates(), handleSearch(query, kindFilter)]);
+    setStatus({ kind: "saved", message: "习惯记忆已写入。" });
+  }
+
+  async function handleRejectIngestionCandidate(candidateId: string) {
+    if (!window.buildingAgent) {
+      return;
+    }
+    const result = await window.buildingAgent.rejectMemoryIngestionCandidate(
+      candidateId,
+    );
+    if (!result.ok) {
+      setStatus({ kind: "error", message: result.message });
+      return;
+    }
+    await loadIngestionCandidates();
+    setStatus({ kind: "saved", message: "摄取候选已拒绝。" });
+  }
+
   return (
     <section className="memory-panel">
       <div className="settings-header">
@@ -391,6 +524,82 @@ export function MemoryPanel() {
           {memories.length} 条已保存
         </span>
       </div>
+
+      <section className="settings-action-band memory-action-band">
+        <div>
+          <strong>三层记忆</strong>
+          <span>{status.message}</span>
+        </div>
+        <button
+          className="primary-action"
+          disabled={ingestionRunning || status.kind === "saving"}
+          onClick={() => void handleIngestRecentMemories()}
+          type="button"
+        >
+          {ingestionRunning ? "摄取中" : "摄取记忆"}
+        </button>
+      </section>
+
+      <section className="memory-layer-lanes" aria-label="记忆层级">
+        {memoryLanes.map((lane) => (
+          <article className="memory-layer-lane" key={lane.layer}>
+            <header>
+              <span>{lane.label}</span>
+              <strong>{lane.count}</strong>
+            </header>
+            <p>{lane.description}</p>
+            {lane.latest ? <small>{lane.latest.title}</small> : <small>暂无记录</small>}
+          </article>
+        ))}
+      </section>
+
+      <section className="memory-ingestion-inbox" aria-label="习惯摄取候选">
+        <div className="section-heading">
+          <span>习惯摄取</span>
+          <small>{pendingIngestionCandidates.length} 个待审核</small>
+        </div>
+        {pendingIngestionCandidates.length ? (
+          <div className="memory-ingestion-list">
+            {pendingIngestionCandidates.map((candidate) => (
+              <article className="memory-card memory-ingestion-card" key={candidate.id}>
+                <div className="memory-card-header">
+                  <span>{Math.round(candidate.confidence * 100)}% 置信度</span>
+                  <div className="memory-card-actions">
+                    <button
+                      className="secondary-action"
+                      disabled={status.kind === "saving"}
+                      onClick={() => void handleRejectIngestionCandidate(candidate.id)}
+                      type="button"
+                    >
+                      拒绝
+                    </button>
+                    <button
+                      className="primary-action"
+                      disabled={status.kind === "saving"}
+                      onClick={() => void handleAcceptIngestionCandidate(candidate.id)}
+                      type="button"
+                    >
+                      接受
+                    </button>
+                  </div>
+                </div>
+                <h4>{candidate.title}</h4>
+                <p>{candidate.draftMemory.content}</p>
+                <small>{candidate.rationale}</small>
+                <div className="memory-tags">
+                  {candidate.evidence.slice(0, 3).map((evidence) => (
+                    <span key={evidence.messageId}>
+                      {new Date(evidence.createdAt).toLocaleDateString()}
+                    </span>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="empty-state">暂无待审核的摄取候选。</div>
+        )}
+      </section>
 
       <div className="memory-toolbar">
         <label className="field">
@@ -418,35 +627,43 @@ export function MemoryPanel() {
             ))}
           </select>
         </label>
-
-        <button className="secondary-action" onClick={handleExport} type="button">
-          导出
-        </button>
-        <button
-          className="secondary-action"
-          disabled={status.kind === "saving"}
-          onClick={handleRunMaintenance}
-          type="button"
-        >
-          整理
-        </button>
-        <button
-          className="secondary-action"
-          disabled={status.kind === "saving"}
-          onClick={handleReviewGovernance}
-          type="button"
-        >
-          治理
-        </button>
-        <button
-          className="secondary-action"
-          disabled={status.kind === "saving"}
-          onClick={handleRunMemoryEval}
-          type="button"
-        >
-          评估
-        </button>
       </div>
+
+      <details className="settings-advanced-section memory-advanced-section">
+        <summary>
+          <span>高级与审计</span>
+          <small>导出、整理、治理、评估、Raw History、画像</small>
+        </summary>
+        <div className="settings-advanced-content">
+          <div className="settings-actions">
+            <button className="secondary-action" onClick={handleExport} type="button">
+              导出
+            </button>
+            <button
+              className="secondary-action"
+              disabled={status.kind === "saving"}
+              onClick={handleRunMaintenance}
+              type="button"
+            >
+              整理
+            </button>
+            <button
+              className="secondary-action"
+              disabled={status.kind === "saving"}
+              onClick={handleReviewGovernance}
+              type="button"
+            >
+              治理
+            </button>
+            <button
+              className="secondary-action"
+              disabled={status.kind === "saving"}
+              onClick={handleRunMemoryEval}
+              type="button"
+            >
+              评估
+            </button>
+          </div>
 
       {maintenanceReport ? (
         <section className="maintenance-report" aria-label="记忆维护报告">
@@ -659,6 +876,15 @@ export function MemoryPanel() {
         </div>
       </section>
 
+      {exportedJson ? (
+        <label className="field export-preview">
+          <span>导出 JSON</span>
+          <textarea readOnly rows={8} value={exportedJson} />
+        </label>
+      ) : null}
+        </div>
+      </details>
+
       <div className="memory-layout">
         <form className="memory-form" onSubmit={handleSubmit}>
           <label className="field">
@@ -761,7 +987,10 @@ export function MemoryPanel() {
               return (
                 <article className="memory-card" key={memory.id}>
                   <div className="memory-card-header">
-                    <span>{getMemoryKindLabel(memory.kind)}</span>
+                    <span>
+                      {getMemoryKindLabel(memory.kind)} ·{" "}
+                      {getMemoryLayerLabel(resolveMemoryLayer(memory))}
+                    </span>
                     <button
                       className="danger-action"
                       onClick={() => void handleDelete(memory.id)}
@@ -816,12 +1045,6 @@ export function MemoryPanel() {
         </section>
       </div>
 
-      {exportedJson ? (
-        <label className="field export-preview">
-          <span>导出 JSON</span>
-          <textarea readOnly rows={8} value={exportedJson} />
-        </label>
-      ) : null}
     </section>
   );
 }
@@ -839,4 +1062,56 @@ function formatSource(memory: MemoryRecord): string {
   }
 
   return memory.source.type;
+}
+
+function buildMemoryLanes(memories: MemoryRecord[]): Array<{
+  layer: MemoryLayer;
+  label: string;
+  description: string;
+  count: number;
+  latest?: MemoryRecord;
+}> {
+  const lanes: Array<{
+    layer: MemoryLayer;
+    label: string;
+    description: string;
+  }> = [
+    {
+      layer: "manual_required",
+      label: "强制记忆",
+      description: "用户主动写入、需要优先遵守的记忆。",
+    },
+    {
+      layer: "system_long_term",
+      label: "长期记忆",
+      description: "系统判断重要且可复用后沉淀的记忆。",
+    },
+    {
+      layer: "ingested_habit",
+      label: "习惯摄取",
+      description: "从近期会话中审核后写入的用户习惯。",
+    },
+  ];
+
+  return lanes.map((lane) => {
+    const records = memories.filter((memory) => resolveMemoryLayer(memory) === lane.layer);
+    return {
+      ...lane,
+      count: records.length,
+      ...(records[0] ? { latest: records[0] } : {}),
+    };
+  });
+}
+
+function resolveMemoryLayer(memory: MemoryRecord): MemoryLayer {
+  if (memory.layer) {
+    return memory.layer;
+  }
+  if (memory.source.type === "manual") {
+    return "manual_required";
+  }
+  if (memory.source.type === "memory_ingestion") {
+    return "ingested_habit";
+  }
+  return "system_long_term";
 }

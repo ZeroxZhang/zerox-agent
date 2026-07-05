@@ -34,7 +34,7 @@
 .app-shell.is-agent-chat .workspace {
   min-height: 100vh;
   padding: 0;
-  background: var(--bg-page);
+  background: linear-gradient(180deg, var(--bg-root), var(--bg-page));
 }
 
 .app-shell.is-agent-chat .topbar { display: none; }
@@ -101,4 +101,17 @@
 }
 
 .settings-section-nav,
-.settings-section-body { min-width: 0; }
+.settings-section-body {
+  min-width: 0;
+}
+
+.settings-section-nav,
+.settings-section-body {
+  border-color: var(--glass-border);
+}
+
+.settings-section-body {
+  background: var(--glass-surface);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+}

@@ -39,6 +39,20 @@ export function EvalReviewPanel() {
       }),
     [candidates],
   );
+  const primaryCandidates = sortedCandidates.filter(
+    (candidate) =>
+      candidate.status === "pending_review" || candidate.status === "accepted",
+  );
+  const archivedCandidates = sortedCandidates.filter(
+    (candidate) =>
+      candidate.status !== "pending_review" && candidate.status !== "accepted",
+  );
+  const pendingCount = candidates.filter(
+    (candidate) => candidate.status === "pending_review",
+  ).length;
+  const acceptedCount = candidates.filter(
+    (candidate) => candidate.status === "accepted",
+  ).length;
 
   async function loadCandidates() {
     if (!window.buildingAgent) {
@@ -156,8 +170,16 @@ export function EvalReviewPanel() {
         </span>
       </div>
 
+      <section className="settings-action-band">
+        <div>
+          <strong>{pendingCount} 个待审核</strong>
+          <span>{status.message}</span>
+        </div>
+        <span>{acceptedCount} 个待提升</span>
+      </section>
+
       <div className="memory-grid">
-        {sortedCandidates.map((candidate) => (
+        {primaryCandidates.map((candidate) => (
           <article className="memory-card" key={candidate.id}>
             <div className="memory-card-header">
               <span>{translateCandidateStatus(candidate.status)}</span>
@@ -219,8 +241,31 @@ export function EvalReviewPanel() {
         ))}
       </div>
 
-      {!candidates.length ? (
-        <div className="empty-state">暂无评测候选。</div>
+      {!primaryCandidates.length ? (
+        <div className="empty-state">
+          {candidates.length ? "当前没有待处理评测候选。" : "暂无评测候选。"}
+        </div>
+      ) : null}
+
+      {archivedCandidates.length ? (
+        <details className="settings-advanced-section">
+          <summary>
+            <span>历史评测候选</span>
+            <small>{archivedCandidates.length} 个</small>
+          </summary>
+          <div className="memory-grid">
+            {archivedCandidates.map((candidate) => (
+              <article className="memory-card" key={candidate.id}>
+                <div className="memory-card-header">
+                  <span>{translateCandidateStatus(candidate.status)}</span>
+                  <strong>{candidate.fixture.id}</strong>
+                </div>
+                <h3>{candidate.fixture.description}</h3>
+                <p>{candidate.rationale}</p>
+              </article>
+            ))}
+          </div>
+        </details>
       ) : null}
 
       <p className={`settings-message is-${status.kind}`}>{status.message}</p>

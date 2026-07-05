@@ -278,7 +278,9 @@
   border: 1px solid var(--border-default);
   border-radius: 24px;
   color: var(--text-primary);
-  background: var(--bg-surface-raised);
+  background: var(--glass-surface-strong);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
   font: inherit;
   font-size: 15px;
   line-height: 1.6;
@@ -338,6 +340,38 @@
 }
 
 .composer .composer-stop-button { color: var(--text-danger); }
+
+.composer .composer-goal-mode-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  height: var(--composer-action-size);
+  min-width: 40px;
+  min-height: var(--composer-action-size);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-full);
+  color: var(--text-secondary);
+  background: var(--bg-surface);
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.composer .composer-goal-mode-button:hover {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+  background: var(--bg-surface-hover);
+}
+
+.composer .composer-goal-mode-button.is-enabled {
+  border-color: var(--status-warning-border);
+  color: var(--status-warning-text);
+  background: var(--status-warning-bg);
+}
 
 .composer-icon {
   display: grid;
@@ -492,6 +526,7 @@
 }
 
 .auto-approval-toggle {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -504,6 +539,55 @@
   background: var(--bg-surface);
   font-size: var(--text-xs);
   font-weight: var(--font-semibold);
+}
+
+.composer .auto-approval-toggle.is-enabled,
+.composer .composer-goal-mode-button.is-enabled {
+  border-color: var(--status-warning-border);
+  color: var(--status-warning-text);
+  background: var(--status-warning-bg);
+}
+
+.composer .auto-approval-toggle.is-enabled:hover,
+.composer .composer-goal-mode-button.is-enabled:hover {
+  border-color: var(--status-warning-text);
+  background: color-mix(in srgb, var(--status-warning-bg) 82%, #ffffff);
+}
+
+.composer-risk-tooltip {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 10px);
+  z-index: 30;
+  width: min(320px, calc(100vw - 48px));
+  padding: 10px 12px;
+  border: 1px solid var(--status-warning-border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  background: var(--glass-surface-strong);
+  box-shadow: var(--shadow-md);
+  font-size: var(--text-xs);
+  font-weight: var(--font-medium);
+  line-height: var(--leading-normal);
+  text-align: left;
+  white-space: normal;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition:
+    opacity var(--transition-fast),
+    transform var(--transition-fast);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+}
+
+.composer .auto-approval-toggle:hover .composer-risk-tooltip,
+.composer .auto-approval-toggle:focus-within .composer-risk-tooltip,
+.composer .composer-goal-mode-button:hover .composer-risk-tooltip,
+.composer .composer-goal-mode-button:focus .composer-risk-tooltip,
+.composer .composer-goal-mode-button:focus-visible .composer-risk-tooltip {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .auto-approval-toggle input {

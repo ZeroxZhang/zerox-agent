@@ -107,6 +107,10 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain("--bg-root");
     expect(styles).toContain("--bg-page");
     expect(styles).toContain("--bg-surface");
+    expect(styles).toContain("--glass-surface");
+    expect(styles).toContain("--glass-surface-strong");
+    expect(styles).toContain("--glass-sidebar");
+    expect(styles).toContain("--glass-blur");
     expect(styles).toContain("--text-primary");
     expect(styles).toContain("--text-secondary");
     expect(styles).toContain("--border-default");
@@ -274,7 +278,6 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(iconSource).toContain("export function Icon");
     expect(chatPanelSource).toContain("<Icon name=\"send\"");
     expect(chatPanelSource).toContain("<Icon name=\"stop\"");
-    expect(chatPanelSource).toContain("<Icon name=\"command\"");
     expect(chatPanelSource).toContain("<Icon name=\"close\"");
     expect(appSource).toContain("<Icon name=\"plus\"");
     expect(appSource).toContain("<Icon name=\"more\"");
@@ -699,9 +702,17 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(runsPanelSource).toContain("generateEvalCandidateForRun");
   });
 
-  it("surfaces curated memory and raw history as distinct memory surfaces", () => {
+  it("surfaces layered memory, ingestion review, and raw history as distinct memory surfaces", () => {
     expect(preloadSource).toContain("searchRawHistory");
     expect(preloadSource).toContain("readRawHistoryAround");
+    expect(preloadSource).toContain("ingestRecentMemories");
+    expect(preloadSource).toContain("getMemoryIngestionStatus");
+    expect(preloadSource).toContain("acceptMemoryIngestionCandidate");
+    expect(memoryPanelSource).toContain("memory-layer-lanes");
+    expect(memoryPanelSource).toContain("memory-ingestion-inbox");
+    expect(memoryPanelSource).toContain("handleIngestRecentMemories");
+    expect(memoryPanelSource).toContain("loadIngestionStatus");
+    expect(memoryPanelSource).toContain("window.setInterval");
     expect(memoryPanelSource).toContain("raw-history-panel");
     expect(memoryPanelSource).toContain("raw-history-action-row");
     expect(memoryPanelSource).toContain("searchRawHistory");
@@ -733,6 +744,22 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".settings-section-shell");
     expect(styles).toContain(".settings-section-nav");
     expect(styles).toContain(".settings-section-body");
+    expect(styles).toContain("overflow-x: clip");
+    expect(styles).toContain("repeat(auto-fit, minmax(min(100%, 240px), 1fr))");
+    expect(styles).toContain("repeat(auto-fit, minmax(min(100%, 220px), 1fr))");
+    expect(styles).toContain(".data-boundary-panel");
+    expect(styles).toContain("word-break: keep-all");
+    expect(styles).toContain("text-wrap: balance");
+    expect(styles).toContain("repeat(auto-fit, minmax(min(100%, 180px), 1fr))");
+    expect(styles).toContain("--glass-panel-muted");
+    expect(styles).toContain("--glass-panel-muted-strong");
+    expect(styles).toContain("--glass-panel-inset");
+    expect(styles).toContain("--glass-system-body");
+    expect(appSource).toContain("settings-section-body is-");
+    expect(styles).toContain(".overview-panel .data-boundary-panel");
+    expect(styles).toContain(".settings-section-body.is-system-overview");
+    expect(styles).toContain("background: var(--glass-panel-muted);");
+    expect(styles).toContain("background: var(--glass-panel-muted-strong);");
   });
 
   it("moves Overview diagnostics into the Settings system section", () => {
@@ -742,18 +769,30 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(appSource).not.toContain("activeSection.id === \"overview\"");
   });
 
-  it("keeps composer command actions inside the chat input", () => {
+  it("keeps the four composer controls as auto, goal, stop, and send", () => {
     expect(chatPanelSource).not.toContain("onClick={() => onNavigate(\"tools\")}");
-    expect(chatPanelSource).toContain("aria-label=\"打开命令菜单\"");
-    expect(chatPanelSource).toContain("className=\"composer-icon-button composer-command-button\"");
-    expect(chatPanelSource).toContain("const composerCommandItems");
-    expect(chatPanelSource).toContain("id: \"goal\"");
-    expect(chatPanelSource).toContain("comingSoon: true");
-    expect(chatPanelSource).toContain("handleOpenCommandMenu");
-    expect(chatPanelSource).toContain("handleSelectComposerCommand(command.id)");
-    expect(chatPanelSource).toContain("createGoalCommandDraft(draftRef.current)");
+    expect(chatPanelSource).toContain("goalModeEnabled");
+    expect(chatPanelSource).toContain("composer-goal-mode-button");
+    expect(chatPanelSource).toContain("<span>目标</span>");
+    expect(chatPanelSource).toContain("auto-approval-toggle");
+    expect(chatPanelSource).toContain("data-risk-tooltip");
+    expect(chatPanelSource).toContain("composerRiskTooltips");
+    expect(chatPanelSource).toContain("composer-risk-tooltip");
+    expect(chatPanelSource).toContain("自动授权：智能体可在本次会话中自动批准工具请求");
+    expect(chatPanelSource).toContain("目标模式：发送内容会被翻译为可执行目标草案");
+    expect(chatPanelSource).toContain("composer-stop-button");
+    expect(chatPanelSource).toContain("composer-send-button");
+    expect(chatPanelSource).not.toContain("slash-command-menu");
+    expect(chatPanelSource).not.toContain("composerCommandItems");
     expect(styles).toContain(".composer-icon");
     expect(styles).toContain(".composer-icon path");
+    expect(styles).toContain(".composer-goal-mode-button");
+    expect(styles).toContain(".composer .composer-goal-mode-button");
+    expect(styles).toContain("min-height: var(--composer-action-size);");
+    expect(styles).toContain("min-width: 40px;");
+    expect(styles).toContain(".composer .auto-approval-toggle.is-enabled");
+    expect(styles).toContain(".composer .composer-goal-mode-button.is-enabled");
+    expect(styles).toContain(".composer-risk-tooltip");
     expect(styles).toContain("--composer-action-inset: 14px;");
     expect(styles).toContain("right: var(--composer-action-inset);");
     expect(styles).toContain("bottom: var(--composer-action-inset);");
@@ -776,8 +815,11 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(chatPanelSource).toContain("handleViewGoalProgress");
     expect(chatPanelSource).toContain("handleStartGoal");
     expect(chatPanelSource).not.toContain("refreshSessions(sessionIdToLoad)");
-    expect(chatPanelSource).toContain("slash-command-menu");
-    expect(chatPanelSource).toContain("handleSelectComposerCommand(\"goal\")");
+    expect(chatPanelSource).toContain("GoalDraftCard");
+    expect(chatPanelSource).toContain("handleConfirmGoalDraft");
+    expect(chatPanelSource).toContain("confirmGoalDraft");
+    expect(chatPanelSource).toContain("mode: \"goal_draft\"");
+    expect(chatPanelSource).toContain("isLegacyGoalCommand");
     expect(goalStatusStripSource).toContain("buildGoalProgressViewModel");
     expect(goalStatusStripSource).toContain("progress.statusLabel");
     expect(goalStatusStripSource).toContain("onResolveReview");
@@ -791,7 +833,7 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".goal-progress-status");
     expect(styles).toContain(".goal-progress-next");
     expect(styles).toContain(".goal-progress-metrics");
-    expect(styles).toContain(".slash-command-menu");
+    expect(styles).toContain(".goal-draft-card");
   });
 
   it("keeps goal progress synced even before the active goal summary refreshes", () => {
@@ -822,7 +864,7 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(chatPanelSource).toContain("event.sessionId ?? activeSessionId ?? undefined");
   });
 
-  it("starts Chat in a command-first empty home state", () => {
+  it("starts Chat in a goal-mode-ready empty home state", () => {
     expect(chatPanelSource).toContain("const initialMessages: ChatMessage[] = [];");
     expect(chatPanelSource).toContain("function AgentHomeHero");
     expect(chatPanelSource).toContain("messages.length === 0");
@@ -934,6 +976,7 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".composer-input-shell");
     expect(styles).toContain(".composer-floating-actions");
     expect(styles).toContain(".composer-icon-button");
+    expect(styles).toContain(".composer-goal-mode-button");
     expect(styles).toContain(".composer-icon");
     expect(styles).toContain("--composer-action-size: 32px;");
     expect(styles).toContain("width: var(--composer-action-size); height: var(--composer-action-size);");
@@ -948,7 +991,8 @@ describe("Design System — Notion-inspired app shell", () => {
   });
 
   it("keeps chatbox actions icon-only and stop available while work is running", () => {
-    expect(chatPanelSource).toContain("aria-label=\"打开命令菜单\"");
+    expect(chatPanelSource).toContain("composer-goal-mode-button");
+    expect(chatPanelSource).toContain("aria-pressed={goalModeEnabled}");
     expect(chatPanelSource).toContain("aria-label=\"中断当前任务\"");
     expect(chatPanelSource).toContain("aria-label=\"发送消息\"");
     expect(chatPanelSource).toContain("className=\"composer-floating-actions\"");

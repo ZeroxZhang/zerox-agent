@@ -37,7 +37,8 @@ import type {
   SkillInputField,
   SkillUserInputRequest,
 } from "../../shared/chat";
-import type { Goal } from "../../shared/agentGoal";
+import type { Goal, SuccessCriterion } from "../../shared/agentGoal";
+import type { GoalDraft } from "../../shared/goalTranslation";
 import type { MemoryRecord } from "../../shared/memory";
 import type { PublicModelSettings } from "../../shared/modelSettings";
 import type { NavigationSectionId } from "../../shared/navigation";
@@ -154,16 +155,6 @@ type ChatSession = {
 
 export type ChatSidebarSession = ChatSession;
 
-type ComposerCommandId = "goal" | "tool" | "permission";
-
-type ComposerCommandItem = {
-  id: ComposerCommandId;
-  shortcut: string;
-  label: string;
-  description: string;
-  comingSoon?: boolean;
-};
-
 type WorkspaceMenuPosition = {
   top: number;
   left: number;
@@ -197,32 +188,15 @@ const fallbackSessions: ChatSession[] = [
     tokenUsage: { totalTokens: 2430, estimated: true },
   },
 ];
-const composerCommandItems: ComposerCommandItem[] = [
-  {
-    id: "goal",
-    shortcut: "/目标",
-    label: "目标",
-    description: "把输入设为这轮会话的目标",
-  },
-  {
-    id: "tool",
-    shortcut: "/工具",
-    label: "工具",
-    description: "预留给后续工具指令",
-    comingSoon: true,
-  },
-  {
-    id: "permission",
-    shortcut: "/权限",
-    label: "权限",
-    description: "预留给运行授权入口",
-    comingSoon: true,
-  },
-];
-
 const initialMessages: ChatMessage[] = [];
 const MAX_RENDERED_RUNTIME_EVENTS = 80;
 const MESSAGE_LIST_BOTTOM_THRESHOLD_PX = 96;
+const composerRiskTooltips = {
+  auto:
+    "自动授权：智能体可在本次会话中自动批准工具请求。风险：可能执行文件、shell 或网络操作，请仅在任务和工作区可信时开启。",
+  goal:
+    "目标模式：发送内容会被翻译为可执行目标草案，确认后智能体可连续规划和执行。风险：可能触发多步工具调用，请先检查目标草案和验收标准。",
+} as const;
 
 export function AgentChatPanel({
   newChatRequestKey = 0,
@@ -263,7 +237,15 @@ export function AgentChatPanel({
   const [draftCursor, setDraftCursor] = useState(0);
   const draftRef = useRef("");
   const draftCursorRef = useRef(0);
-  const [commandMenuOpen, setCommandMenuOpen] = useState(false);
+  const [goalModeEnabled, setGoalModeEnabled] = useState(false);
+  const [pendingGoalDraft, setPendingGoalDraft] = useState<GoalDraft | null>(
+    null,
+  );
+  const [goalDraftDescription, setGoalDraftDescription] = useState("");
+  const [goalDraftCriteriaText, setGoalDraftCriteriaText] = useState("");
+  const [goalDraftActionPending, setGoalDraftActionPending] = useState<
+    "confirm" | "discard" | null
+  >(null);
   const [sessions, setSessions] = useState<ChatSession[]>(fallbackSessions);
   const [tasks, setTasks] = useState<ScheduledTask[]>(demoTasks);
   const [runs, setRuns] = useState<AgentRunRecord[]>(demoRuns);
@@ -496,6 +478,11 @@ export function AgentChatPanel({
     setTaskProcessEvents([]);
     setGoalRunEvents([]);
     setSelectedSkillName(null);
+    setGoalModeEnabled(false);
+    setPendingGoalDraft(null);
+    setGoalDraftDescription("");
+    setGoalDraftCriteriaText("");
+    setGoalDraftActionPending(null);
     setSelectedWorkspaceId(null);
     setWorkspaceMenuOpen(false);
     setWorkspaceSearch("");
@@ -956,8 +943,6 @@ export function AgentChatPanel({
     !window.buildingAgent ||
     Boolean(workspaceActionPending) ||
     status.kind === "working";
-  const composerCommandMenuVisible =
-    commandMenuOpen || shouldShowComposerCommandMenu(draft);
   const activeSkillMention = useMemo(
     () => extractActiveSkillMention(draft, draftCursor),
     [draft, draftCursor],
@@ -1003,6 +988,7 @@ export function AgentChatPanel({
   const hasRuntimeSurfaces =
     Boolean(chatStreamState.thinkingText) ||
     chatStreamState.toolCallPreviews.length > 0 ||
+    Boolean(pendingGoalDraft) ||
     Boolean(activeGoal) ||
     goalRunEvents.length > 0 ||
     (Boolean(pendingToolApproval) && !autoApprovalEnabled) ||
@@ -1224,15 +1210,6 @@ export function AgentChatPanel({
     }
   }
 
-  function handleOpenCommandMenu() {
-    setDraft(draftRef.current);
-    setDraftCursor(draftCursorRef.current);
-    setCommandMenuOpen(true);
-    window.requestAnimationFrame(() => {
-      messageInputRef.current?.focus();
-    });
-  }
-
   function setComposerDraft(nextDraft: string, cursor = nextDraft.length) {
     draftRef.current = nextDraft;
     draftCursorRef.current = cursor;
@@ -1244,18 +1221,6 @@ export function AgentChatPanel({
     }
     window.requestAnimationFrame(() => {
       messageInputRef.current?.setSelectionRange(cursor, cursor);
-    });
-  }
-
-  function handleSelectComposerCommand(commandId: ComposerCommandId) {
-    if (commandId !== "goal") {
-      return;
-    }
-
-    setComposerDraft(createGoalCommandDraft(draftRef.current));
-    setCommandMenuOpen(false);
-    window.requestAnimationFrame(() => {
-      messageInputRef.current?.focus();
     });
   }
 
@@ -1271,7 +1236,7 @@ export function AgentChatPanel({
     const input = messageInputRef.current;
     if (input) {
       draftCursorRef.current = input.selectionStart ?? input.value.length;
-      if (draft || commandMenuOpen) {
+      if (draft) {
         setDraftCursor(draftCursorRef.current);
       }
     }
@@ -1451,6 +1416,12 @@ export function AgentChatPanel({
     requestId: string,
   ) {
     setSessionId(result.sessionId);
+    if (result.goalDraft) {
+      setPendingGoalDraft(result.goalDraft);
+      setGoalDraftDescription(result.goalDraft.normalizedDescription);
+      setGoalDraftCriteriaText(formatGoalDraftCriteria(result.goalDraft));
+      setGoalModeEnabled(false);
+    }
     if (result.executedRun) {
       setRuns((currentRuns) => [result.executedRun!, ...currentRuns]);
     }
@@ -1463,9 +1434,12 @@ export function AgentChatPanel({
     setSelectedSkillName(null);
     const isPaused = result.agentStatus?.state === "paused";
     const isGoalExecuting = result.activeGoal?.status === "executing";
+    const isGoalDraft = Boolean(result.goalDraft);
     setStatus({
       kind: isGoalExecuting ? "working" : isPaused ? "paused" : "ready",
-      message: isGoalExecuting
+      message: isGoalDraft
+        ? "目标草案已生成，等待确认"
+        : isGoalExecuting
         ? "目标正在后台执行"
         : isPaused
         ? "等待你确认是否继续"
@@ -1479,7 +1453,13 @@ export function AgentChatPanel({
     });
     setWorkPhase(isGoalExecuting ? "tool" : isPaused ? "paused" : "done");
     setTaskActivity(
-      isGoalExecuting && result.activeGoal
+      isGoalDraft && result.goalDraft
+        ? createTaskActivity({
+            kind: "paused",
+            title: "等待确认目标草案",
+            detail: result.goalDraft.normalizedDescription,
+          })
+        : isGoalExecuting && result.activeGoal
         ? buildGoalTaskActivity({
             status: result.activeGoal.status,
             description: result.activeGoal.description,
@@ -1491,7 +1471,7 @@ export function AgentChatPanel({
           }),
     );
     activeStatusSessionIdRef.current =
-      isPaused || isGoalExecuting ? result.sessionId : null;
+      isPaused || isGoalExecuting || isGoalDraft ? result.sessionId : null;
     setChatStreamState((current) =>
       finalizeChatStreamResult(current, {
         requestId,
@@ -1501,6 +1481,100 @@ export function AgentChatPanel({
       }),
     );
     void refreshSessions(result.sessionId);
+  }
+
+  async function handleConfirmGoalDraft() {
+    if (!window.buildingAgent || !pendingGoalDraft) {
+      return;
+    }
+
+    const draftToConfirm = pendingGoalDraft;
+    setGoalDraftActionPending("confirm");
+    setStatus({ kind: "working", message: "正在确认并启动目标..." });
+    try {
+      const result = await window.buildingAgent.confirmGoalDraft(
+        draftToConfirm.id,
+        {
+          normalizedDescription: goalDraftDescription,
+          successCriteria: buildEditedGoalDraftCriteria(
+            goalDraftCriteriaText,
+            draftToConfirm,
+          ),
+        },
+      );
+      if (!result.ok) {
+        setStatus({ kind: "error", message: result.message });
+        return;
+      }
+
+      setPendingGoalDraft(null);
+      setGoalDraftDescription("");
+      setGoalDraftCriteriaText("");
+      setSessions((currentSessions) => {
+        const nextSessions = currentSessions.map((session) =>
+          session.id === draftToConfirm.sessionId
+            ? { ...session, activeGoal: result.activeGoal }
+            : session,
+        );
+        onChatSessionsChange?.(nextSessions);
+        return nextSessions;
+      });
+      activeStatusSessionIdRef.current = draftToConfirm.sessionId;
+      setStatus({
+        kind: result.activeGoal.status === "executing" ? "working" : "ready",
+        message:
+          result.activeGoal.status === "executing"
+            ? "目标正在后台执行"
+            : "目标已确认",
+      });
+      setWorkPhase(result.activeGoal.status === "executing" ? "tool" : "done");
+      setTaskActivity(
+        buildGoalTaskActivity({
+          status: result.activeGoal.status,
+          description: result.activeGoal.description,
+        }),
+      );
+      void refreshActiveGoalDetail(result.activeGoal.id);
+      void refreshSessions(draftToConfirm.sessionId);
+      void refreshCurrentSessionMessages(draftToConfirm.sessionId);
+    } catch (error) {
+      setStatus({
+        kind: "error",
+        message:
+          error instanceof Error ? error.message : "确认目标草案失败。",
+      });
+    } finally {
+      setGoalDraftActionPending(null);
+    }
+  }
+
+  async function handleDiscardGoalDraft() {
+    if (!pendingGoalDraft) {
+      return;
+    }
+
+    const draftToDiscard = pendingGoalDraft;
+    setGoalDraftActionPending("discard");
+    try {
+      const result = await window.buildingAgent?.discardGoalDraft(
+        draftToDiscard.id,
+      );
+      if (result && !result.ok) {
+        setStatus({ kind: "error", message: result.message });
+        return;
+      }
+      setPendingGoalDraft(null);
+      setGoalDraftDescription("");
+      setGoalDraftCriteriaText("");
+      setStatus({ kind: "ready", message: "目标草案已丢弃" });
+      setTaskActivity(idleTaskActivity);
+      appendMessage({
+        role: "assistant",
+        content: "已丢弃目标草案，未创建目标。",
+      });
+    } finally {
+      setGoalDraftActionPending(null);
+    }
   }
 
   async function submitUserMessage(rawContent: string) {
@@ -1567,6 +1641,8 @@ export function AgentChatPanel({
       return;
     }
 
+    const shouldCreateGoalDraft =
+      goalModeEnabled || isLegacyGoalCommand(content);
     setStatus({ kind: "working", message: "正在检索记忆并调用模型..." });
     setWorkPhase("model");
     const requestId = createClientRequestId();
@@ -1576,6 +1652,7 @@ export function AgentChatPanel({
         ...(sessionId ? { sessionId } : {}),
         requestId,
         message: content,
+        ...(shouldCreateGoalDraft ? { mode: "goal_draft" as const } : {}),
         ...(selectedSkillName ? { selectedSkillName } : {}),
         ...(selectedWorkspaceId ? { workspaceId: selectedWorkspaceId } : {}),
         history,
@@ -1714,10 +1791,6 @@ export function AgentChatPanel({
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (composerCommandMenuVisible) {
-      handleSelectComposerCommand("goal");
-      return;
-    }
     if (skillMentionMenuVisible && skillMentionMatches[0]) {
       handleSelectSkillMention(skillMentionMatches[0]);
       return;
@@ -2118,6 +2191,23 @@ export function AgentChatPanel({
               />
             ) : null}
 
+            {pendingGoalDraft ? (
+              <GoalDraftCard
+                draft={pendingGoalDraft}
+                description={goalDraftDescription}
+                criteriaText={goalDraftCriteriaText}
+                pendingAction={goalDraftActionPending}
+                onDescriptionChange={setGoalDraftDescription}
+                onCriteriaTextChange={setGoalDraftCriteriaText}
+                onConfirm={() => {
+                  void handleConfirmGoalDraft();
+                }}
+                onDiscard={() => {
+                  void handleDiscardGoalDraft();
+                }}
+              />
+            ) : null}
+
             {activeGoal ? (
               <GoalStatusStrip
                 goal={activeGoal}
@@ -2368,34 +2458,6 @@ export function AgentChatPanel({
                   {activeWorkspacePath || activeWorkspaceLabel}
                 </span>
               </div>
-              {composerCommandMenuVisible ? (
-                <div
-                  aria-label="命令菜单"
-                  className="slash-command-menu"
-                  role="listbox"
-                >
-                  {composerCommandItems.map((command) => (
-                    <button
-                      aria-disabled={command.comingSoon ? "true" : undefined}
-                      className={`slash-command-item${
-                        command.comingSoon ? " is-coming-soon" : ""
-                      }`}
-                      disabled={command.comingSoon}
-                      key={command.id}
-                      onClick={() => handleSelectComposerCommand(command.id)}
-                      onMouseDown={(event) => event.preventDefault()}
-                      role="option"
-                      type="button"
-                    >
-                      <span>{command.shortcut}</span>
-                      <div>
-                        <strong>{command.label}</strong>
-                        <small>{command.description}</small>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
               {selectedSkill ? (
                 <div className="selected-skill-chip" aria-label="已选择技能">
                   <span>@{selectedSkill.name}</span>
@@ -2446,9 +2508,6 @@ export function AgentChatPanel({
                     nextCursor,
                   );
                   const shouldSyncComposerState =
-                    commandMenuOpen ||
-                    composerCommandMenuVisible ||
-                    shouldShowComposerCommandMenu(nextDraft) ||
                     Boolean(nextMention) ||
                     Boolean(activeSkillMention);
                   if (shouldSyncComposerState) {
@@ -2464,7 +2523,6 @@ export function AgentChatPanel({
                   ) {
                     setSelectedSkillName(null);
                   }
-                  setCommandMenuOpen(false);
                 }}
                 onClick={updateDraftCursor}
                 onKeyDown={(event) => {
@@ -2474,36 +2532,28 @@ export function AgentChatPanel({
                       handleSelectSkillMention(skillMentionMatches[0]);
                       return;
                     }
-                    if (composerCommandMenuVisible) {
-                      handleSelectComposerCommand("goal");
-                      return;
-                    }
                     const form = event.currentTarget.closest("form");
                     form?.requestSubmit();
                     return;
-                  }
-                  if (event.key === "Escape" && composerCommandMenuVisible) {
-                    event.preventDefault();
-                    setCommandMenuOpen(false);
-                    if (shouldShowComposerCommandMenu(draftRef.current)) {
-                      setComposerDraft("", 0);
-                    }
                   }
                 }}
                 onKeyUp={updateDraftCursor}
                 placeholder={
                   activeGoal?.status === "executing"
                     ? "继续你的任务…"
-                    : "输入消息，/ 选择命令，Enter 发送，Shift+Enter 或 Option+Enter 换行"
+                    : goalModeEnabled
+                      ? "描述目标，发送后先生成可确认的目标草案"
+                      : "输入消息，Enter 发送，Shift+Enter 或 Option+Enter 换行"
                 }
                 rows={2}
               />
               <div className="composer-floating-actions" aria-label="对话操作">
                 <label
+                  data-risk-tooltip={composerRiskTooltips.auto}
                   className={`auto-approval-toggle${
                     autoApprovalEnabled ? " is-enabled" : ""
                   }`}
-                  title="自动授权工具请求"
+                  title={composerRiskTooltips.auto}
                 >
                   <input
                     aria-label="自动授权工具请求"
@@ -2514,16 +2564,33 @@ export function AgentChatPanel({
                     type="checkbox"
                   />
                   <span>自动</span>
+                  <span
+                    aria-hidden="true"
+                    className="composer-risk-tooltip"
+                    role="tooltip"
+                  >
+                    {composerRiskTooltips.auto}
+                  </span>
                 </label>
                 <button
-                  aria-label="打开命令菜单"
-                  className="composer-icon-button composer-command-button"
-                  onClick={handleOpenCommandMenu}
-                  title="打开命令菜单"
+                  aria-label="目标模式"
+                  aria-pressed={goalModeEnabled}
+                  className={`composer-goal-mode-button${
+                    goalModeEnabled ? " is-enabled" : ""
+                  }`}
+                  data-risk-tooltip={composerRiskTooltips.goal}
+                  onClick={() => setGoalModeEnabled((enabled) => !enabled)}
+                  title={composerRiskTooltips.goal}
                   type="button"
                 >
-                  <Icon name="command" className="composer-icon" />
-                  <span className="sr-only">打开命令菜单</span>
+                  <span>目标</span>
+                  <span
+                    aria-hidden="true"
+                    className="composer-risk-tooltip"
+                    role="tooltip"
+                  >
+                    {composerRiskTooltips.goal}
+                  </span>
                 </button>
                 <button
                   aria-label="中断当前任务"
@@ -2671,6 +2738,150 @@ function AgentHomeHero(props: {
       </div>
     </section>
   );
+}
+
+function GoalDraftCard(props: {
+  draft: GoalDraft;
+  description: string;
+  criteriaText: string;
+  pendingAction: "confirm" | "discard" | null;
+  onDescriptionChange: (value: string) => void;
+  onCriteriaTextChange: (value: string) => void;
+  onConfirm: () => void;
+  onDiscard: () => void;
+}) {
+  const checks = props.draft.successCriteria.flatMap((criterion) =>
+    criterion.acceptanceChecks.map((check) => ({
+      ...check,
+      criterionDescription: criterion.description,
+    })),
+  );
+  const hasWarnings = props.draft.warnings.length > 0;
+
+  return (
+    <section className="goal-draft-card" aria-label="目标草案确认">
+      <header>
+        <div>
+          <span>目标草案</span>
+          <strong>确认后开始执行</strong>
+        </div>
+        <small>
+          {props.draft.acceptanceCoverage.deterministicChecks} 个确定性检查 ·{" "}
+          {props.draft.acceptanceCoverage.modelReviewChecks} 个证据复核
+        </small>
+      </header>
+      <label className="goal-draft-field">
+        <span>目标</span>
+        <textarea
+          value={props.description}
+          onChange={(event) => props.onDescriptionChange(event.currentTarget.value)}
+          rows={2}
+        />
+      </label>
+      <label className="goal-draft-field">
+        <span>成功标准</span>
+        <textarea
+          value={props.criteriaText}
+          onChange={(event) => props.onCriteriaTextChange(event.currentTarget.value)}
+          rows={Math.max(2, props.criteriaText.split(/\n/).length)}
+        />
+      </label>
+      <div className="goal-draft-checks" aria-label="验收检查">
+        {checks.map((check) => (
+          <span key={check.id} title={check.criterionDescription}>
+            {getAcceptanceCheckLabel(check.kind)}
+          </span>
+        ))}
+      </div>
+      {hasWarnings ? (
+        <ul className="goal-draft-warnings" aria-label="目标草案警告">
+          {props.draft.warnings.map((warning) => (
+            <li key={`${warning.code}-${warning.checkId ?? warning.message}`}>
+              {warning.message}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <div className="goal-draft-actions">
+        <button
+          type="button"
+          className="secondary-action"
+          disabled={Boolean(props.pendingAction)}
+          onClick={props.onDiscard}
+        >
+          {props.pendingAction === "discard" ? "丢弃中" : "丢弃"}
+        </button>
+        <button
+          type="button"
+          disabled={Boolean(props.pendingAction) || !props.description.trim()}
+          onClick={props.onConfirm}
+        >
+          {props.pendingAction === "confirm" ? "确认中" : "确认并开始"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function formatGoalDraftCriteria(draft: GoalDraft): string {
+  return draft.successCriteria
+    .map((criterion) => criterion.description.trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
+function buildEditedGoalDraftCriteria(
+  criteriaText: string,
+  draft: GoalDraft,
+): SuccessCriterion[] {
+  const lines = criteriaText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (!lines.length) {
+    return draft.successCriteria;
+  }
+
+  return lines.map((description, index) => {
+    const existing = draft.successCriteria[index];
+    if (existing) {
+      return {
+        ...existing,
+        description,
+      };
+    }
+    return {
+      id: `criterion_${index + 1}`,
+      description,
+      acceptanceChecks: [
+        {
+          id: `criterion_${index + 1}_review`,
+          kind: "model_review",
+          description: "Evidence-backed review is required.",
+          params: {
+            condition: description,
+            evidenceRefs: ["artifact:goalEvidence"],
+          },
+          requiresEvidence: true,
+        },
+      ],
+    };
+  });
+}
+
+function getAcceptanceCheckLabel(kind: string): string {
+  const labels: Record<string, string> = {
+    file_exists: "文件",
+    command_exit_code: "命令",
+    test_passes: "测试",
+    assertion: "断言",
+    model_review: "证据复核",
+  };
+  return labels[kind] ?? kind;
+}
+
+function isLegacyGoalCommand(message: string): boolean {
+  return /^\/(?:目标|goal)(?:\s+|$)/i.test(message.trim());
 }
 
 function buildLocalAgentReply(options: {
@@ -3442,28 +3653,6 @@ function isCanceledMessage(message: string): boolean {
 
 function isSkillInputRequiredMessage(message: string): boolean {
   return /skill input required|input required|等待技能输入/i.test(message);
-}
-
-function shouldShowComposerCommandMenu(draft: string): boolean {
-  const commandDraft = draft.trimStart();
-  if (!commandDraft.startsWith("/") || commandDraft.includes("\n")) {
-    return false;
-  }
-  if (/^\/(?:目标|goal)\s+/i.test(commandDraft)) {
-    return false;
-  }
-
-  const query = commandDraft.slice(1).trim().toLowerCase();
-  return query.length === 0 || "目标".includes(query) || "goal".startsWith(query);
-}
-
-function createGoalCommandDraft(draft: string): string {
-  const trimmed = draft.trim();
-  if (!trimmed || trimmed.startsWith("/")) {
-    return "/目标 ";
-  }
-
-  return `/目标 ${trimmed}`;
 }
 
 const ChatMessageList = memo(function ChatMessageList({

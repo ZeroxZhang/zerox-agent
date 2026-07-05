@@ -30,6 +30,7 @@ import type {
   WorkspaceRunEventInput,
   WorkspaceRunTerminalStatus,
 } from "../shared/workspaceRunLedger";
+import type { GoalDraft } from "../shared/goalTranslation";
 
 function chatReply(content: string): ChatCompletionResponse {
   return { content, toolCalls: [], finishReason: "stop" };
@@ -618,6 +619,76 @@ describe("chat service", () => {
     );
     expect(finalTextPartIndex).toBeGreaterThanOrEqual(0);
     expect(completedIndex).toBeGreaterThan(finalTextPartIndex);
+    expect(completeCalled).toBe(false);
+  });
+
+  it("creates a goal draft without starting execution when Goal Mode is enabled", async () => {
+    let completeCalled = false;
+    const chatMessages: AppendChatMessageInput[] = [];
+    const draftCreates: unknown[] = [];
+    const resumes: string[] = [];
+    const goalDraft = createGoalDraftFixture({
+      id: "goal_draft_release",
+      sessionId: "persisted_session",
+      originMessageId: "message_1",
+      sourceMessage: "发布 v1.8.0，直到 GitHub Release 完成才算结束",
+      normalizedDescription: "发布 v1.8.0 并完成 GitHub Release",
+    });
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          completeCalled = true;
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore(chatMessages),
+      goalService: createGoalService({ resumes }),
+      goalDraftService: {
+        async createFromChat(input) {
+          draftCreates.push(input);
+          return goalDraft;
+        },
+      },
+      createId: () => "chat_goal_draft",
+      now: () => new Date("2026-07-05T08:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage({
+      requestId: "request_goal_draft",
+      mode: "goal_draft",
+      message: "发布 v1.8.0，直到 GitHub Release 完成才算结束",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      goalDraft: {
+        id: "goal_draft_release",
+        normalizedDescription: "发布 v1.8.0 并完成 GitHub Release",
+      },
+    });
+    expect(draftCreates).toEqual([
+      {
+        sessionId: "persisted_session",
+        originMessageId: "message_1",
+        message: "发布 v1.8.0，直到 GitHub Release 完成才算结束",
+      },
+    ]);
+    expect(resumes).toEqual([]);
+    expect(chatMessages).toEqual([
+      {
+        role: "user",
+        content: "发布 v1.8.0，直到 GitHub Release 完成才算结束",
+      },
+      expect.objectContaining({
+        sessionId: "persisted_session",
+        role: "assistant",
+        content:
+          "已生成目标草案：发布 v1.8.0 并完成 GitHub Release。请确认或编辑后再开始执行。",
+        goalEventRef: "goal_draft_created",
+      }),
+    ]);
     expect(completeCalled).toBe(false);
   });
 
@@ -5607,6 +5678,55 @@ function createGoalService(options: {
         status: options.resolveStatus ?? "executing",
       };
     },
+  };
+}
+
+function createGoalDraftFixture(
+  partial: Pick<
+    GoalDraft,
+    | "id"
+    | "sessionId"
+    | "originMessageId"
+    | "sourceMessage"
+    | "normalizedDescription"
+  >,
+): GoalDraft {
+  return {
+    ...partial,
+    successCriteria: [
+      {
+        id: "criterion_1",
+        description: "GitHub Release is complete.",
+        acceptanceChecks: [
+          {
+            id: "criterion_1_review",
+            kind: "model_review",
+            description: "Evidence-backed release review passes.",
+            params: {
+              evidenceRefs: ["artifact:goalEvidence"],
+            },
+            requiresEvidence: true,
+          },
+        ],
+      },
+    ],
+    acceptanceCoverage: {
+      deterministicChecks: 0,
+      modelReviewChecks: 1,
+      totalChecks: 1,
+      hasDeterministicCoverage: false,
+      hasModelReviewCoverage: true,
+    },
+    warnings: [
+      {
+        code: "model_only_acceptance",
+        severity: "warning",
+        message: "当前验收主要依赖模型复核。",
+      },
+    ],
+    status: "draft",
+    createdAt: "2026-07-05T08:00:00.000Z",
+    updatedAt: "2026-07-05T08:00:00.000Z",
   };
 }
 

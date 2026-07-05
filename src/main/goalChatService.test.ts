@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Goal, Milestone } from "../shared/agentGoal";
 import type { GoalReviewDecision } from "../shared/agentGoalReview";
+import type { GoalDraft } from "../shared/goalTranslation";
 import type { SkillRecord } from "../shared/skills";
 import { createGoalChatService } from "./goalChatService";
 import type { ProgressLedgerEvent } from "./agentGoalStore";
@@ -221,6 +222,77 @@ describe("goal chat service", () => {
         },
       },
     });
+  });
+
+  it("creates a real goal from a confirmed draft without losing criteria or skill snapshots", async () => {
+    const savedGoals: Goal[] = [];
+    const ledgerEvents: ProgressLedgerEvent[] = [];
+    let plannedCriteriaCount = 0;
+    const service = createGoalChatService({
+      controller: createController(),
+      goalStore: createGoalStore({ savedGoals, ledgerEvents }),
+      planner: {
+        async plan(description, planOptions) {
+          plannedCriteriaCount = planOptions.successCriteria.length;
+          return [
+            {
+              id: "milestone_from_draft",
+              description,
+              dependsOn: [],
+              successCriteria: planOptions.successCriteria,
+              state: "ready",
+              runIds: [],
+              attempts: 0,
+            },
+          ];
+        },
+        async replan() {
+          throw new Error("Unexpected replan.");
+        },
+      },
+      createId: () => "goal_from_draft",
+      now: () => "2026-07-05T08:00:00.000Z",
+    });
+
+    const summary = await service.createFromDraft({
+      draft: createGoalDraft({
+        selectedSkill: createSkillRecord({
+          name: "onepager",
+          body: "Onepager body.",
+        }),
+      }),
+    });
+
+    expect(summary).toEqual({
+      id: "goal_from_draft",
+      description: "发布 v3.2.0 并完成验收",
+      status: "planning",
+    });
+    expect(plannedCriteriaCount).toBe(2);
+    expect(savedGoals[0]).toMatchObject({
+      id: "goal_from_draft",
+      chatSessionId: "chat_1",
+      originMessageId: "message_1",
+      description: "发布 v3.2.0 并完成验收",
+      selectedSkill: {
+        manifest: { name: "onepager" },
+        body: "Onepager body.",
+      },
+      selectedSkillInputValues: {
+        format: "html",
+      },
+      successCriteria: [
+        { id: "criterion_build", description: "npm run build passes" },
+        { id: "criterion_smoke", description: "smoke run passes" },
+      ],
+    });
+    expect(ledgerEvents).toEqual([
+      {
+        at: "2026-07-05T08:00:00.000Z",
+        kind: "goal_planned",
+        summary: "Goal created from confirmed draft goal_draft_1.",
+      },
+    ]);
   });
 
   it("saves and passes task contracts for deterministic bookmark goals", async () => {
@@ -690,6 +762,59 @@ function createSkillRecord(
       ...(partial.manifest?.mcpServers ? { mcpServers: partial.manifest.mcpServers } : {}),
       ...(partial.manifest?.dependencies ? { dependencies: partial.manifest.dependencies } : {}),
     },
+  };
+}
+
+function createGoalDraft(partial: Partial<GoalDraft> = {}): GoalDraft {
+  return {
+    id: "goal_draft_1",
+    sessionId: "chat_1",
+    originMessageId: "message_1",
+    sourceMessage: "请发布 v3.2.0",
+    normalizedDescription: "发布 v3.2.0 并完成验收",
+    successCriteria: [
+      {
+        id: "criterion_build",
+        description: "npm run build passes",
+        acceptanceChecks: [
+          {
+            id: "check_build",
+            kind: "command_exit_code",
+            description: "npm run build exits 0",
+            params: { command: "npm run build", expectedExitCode: 0 },
+            requiresEvidence: true,
+          },
+        ],
+      },
+      {
+        id: "criterion_smoke",
+        description: "smoke run passes",
+        acceptanceChecks: [
+          {
+            id: "check_smoke",
+            kind: "test_passes",
+            description: "npm run smoke:prod passes",
+            params: { command: "npm run smoke:prod" },
+            requiresEvidence: true,
+          },
+        ],
+      },
+    ],
+    acceptanceCoverage: {
+      deterministicChecks: 2,
+      modelReviewChecks: 0,
+      totalChecks: 2,
+      hasDeterministicCoverage: true,
+      hasModelReviewCoverage: false,
+    },
+    warnings: [],
+    selectedSkillInputValues: {
+      format: "html",
+    },
+    status: "draft",
+    createdAt: "2026-07-05T08:00:00.000Z",
+    updatedAt: "2026-07-05T08:00:00.000Z",
+    ...partial,
   };
 }
 

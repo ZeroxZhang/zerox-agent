@@ -52,6 +52,7 @@ import type {
 } from "../shared/chat";
 import { getSystemPromptAssembler } from "../shared/agentProtocol";
 import type { GoalReviewDecision } from "../shared/agentGoalReview";
+import type { GoalDraft } from "../shared/goalTranslation";
 import type { AgentRunRecord, RunScheduledTaskResult } from "../shared/agentRuns";
 import type { ExecutionContextMemoryScope } from "../shared/executionContextPackage";
 import type { MemoryRecord, MemorySearchResult } from "../shared/memory";
@@ -156,6 +157,17 @@ type ChatGoalService = {
   ): Promise<ChatSessionGoalSummary>;
 };
 
+type ChatGoalDraftService = {
+  createFromChat(input: {
+    sessionId: string;
+    originMessageId: string | null;
+    message: string;
+    selectedSkill?: SkillRecord;
+    selectedSkillInputValues?: Record<string, SkillInputValue>;
+    signal?: AbortSignal;
+  }): Promise<GoalDraft>;
+};
+
 type GoalIntentRoute =
   | { kind: "set_goal"; description: string }
   | { kind: "continue_goal" }
@@ -175,6 +187,7 @@ export function createChatService(options: {
   > &
     Partial<Pick<ChatSessionStore, "appendActivityEvent" | "get" | "list">>;
   goalService?: ChatGoalService;
+  goalDraftService?: ChatGoalDraftService;
   taskStore?: Pick<ScheduledTaskStore, "create" | "list">;
   runScheduledTask?: (
     taskId: string,
@@ -582,10 +595,14 @@ export function createChatService(options: {
           ? resolvedSkillInput.values
           : undefined;
       const goalRoute = await tryRouteGoalIntent({
-        route: detectGoalIntent(userMessage),
+        route:
+          input.mode === "goal_draft"
+            ? { kind: "set_goal", description: extractGoalDescription(userMessage) }
+            : detectGoalIntent(userMessage),
         activeGoal,
         chatSessionStore: options.chatSessionStore,
         goalService: options.goalService,
+        goalDraftService: options.goalDraftService,
         originMessageId: userMessageId,
         sessionId,
         emitStatus,
@@ -2505,6 +2522,7 @@ async function tryRouteGoalIntent(options: {
     | Pick<ChatSessionStore, "appendMessage" | "attachGoal" | "clearActiveGoal">
     | undefined;
   goalService: ChatGoalService | undefined;
+  goalDraftService: ChatGoalDraftService | undefined;
   originMessageId: string | null;
   sessionId: string;
   emitStatus?: ReturnType<typeof createChatStatusEmitter>;
@@ -2515,8 +2533,8 @@ async function tryRouteGoalIntent(options: {
 }): Promise<{ result: SendChatMessageResult } | null> {
   async function appendGoalReply(input: {
     content: string;
-    goalId: string;
-    goalEventRef: string;
+    goalId?: string;
+    goalEventRef?: string;
   }) {
     const goalOutputAssembler = createChatOutputAssembler(() =>
       new Date(getNowMs(options.now)).toISOString(),
@@ -2527,8 +2545,8 @@ async function tryRouteGoalIntent(options: {
       sessionId: options.sessionId,
       content: input.content,
       outputParts: goalOutputAssembler.parts(),
-      goalId: input.goalId,
-      goalEventRef: input.goalEventRef,
+      ...(input.goalId ? { goalId: input.goalId } : {}),
+      ...(input.goalEventRef ? { goalEventRef: input.goalEventRef } : {}),
     });
     options.emitStatus?.setAssistantMessageId(assistantMessageId);
     if (finalTextPart) {
@@ -2544,11 +2562,56 @@ async function tryRouteGoalIntent(options: {
     });
   }
 
-  if (options.route.kind === "none" || !options.goalService) {
+  if (options.route.kind === "none") {
     return null;
   }
 
   if (options.route.kind === "set_goal") {
+    if (options.goalDraftService) {
+      const goalDraft = await options.goalDraftService.createFromChat({
+        sessionId: options.sessionId,
+        originMessageId: options.originMessageId,
+        message: options.route.description,
+        ...(options.selectedSkill ? { selectedSkill: options.selectedSkill } : {}),
+        ...(options.selectedSkillInputValues
+          ? { selectedSkillInputValues: options.selectedSkillInputValues }
+          : {}),
+        ...(options.signal ? { signal: options.signal } : {}),
+      });
+      const reply = `已生成目标草案：${goalDraft.normalizedDescription}。请确认或编辑后再开始执行。`;
+      options.emitStatus?.send({
+        state: "completed",
+        message: "目标草案已生成，等待确认",
+        toolCallsExecuted: 0,
+      });
+      await appendGoalReply({
+        content: reply,
+        goalEventRef: "goal_draft_created",
+      });
+      return {
+        result: {
+          ok: true,
+          reply,
+          sessionId: options.sessionId,
+          relatedMemories: [],
+          memoryId: null,
+          goalDraft,
+          ...(options.selectedSkill
+            ? {
+                selectedSkill: {
+                  name: options.selectedSkill.manifest.name,
+                  displayName: options.selectedSkill.manifest.displayName,
+                },
+              }
+            : {}),
+        },
+      };
+    }
+
+    if (!options.goalService) {
+      return null;
+    }
+
     const createdGoal = await options.goalService.createFromChat({
       sessionId: options.sessionId,
       originMessageId: options.originMessageId,
@@ -2599,6 +2662,10 @@ async function tryRouteGoalIntent(options: {
           : {}),
       },
     };
+  }
+
+  if (!options.goalService) {
+    return null;
   }
 
   if (!options.activeGoal) {

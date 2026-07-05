@@ -3,6 +3,7 @@ import {
   assertGoalTransition,
   type Goal,
   type GoalBudget,
+  type GoalSelectedSkill,
   type Milestone,
   type SuccessCriterion,
 } from "../shared/agentGoal";
@@ -24,6 +25,11 @@ import type { SkillRecord } from "../shared/skills";
 import type { AgentGoalController } from "./agentGoalController";
 import type { AgentGoalPlanner } from "./agentGoalPlanner";
 import type { AgentGoalStore } from "./agentGoalStore";
+import {
+  normalizeGoalDraftCriteria,
+  type GoalDraft,
+  type GoalDraftEdit,
+} from "../shared/goalTranslation";
 
 export type GoalChatService = {
   createFromChat(input: {
@@ -32,6 +38,10 @@ export type GoalChatService = {
     description: string;
     selectedSkill?: SkillRecord;
     selectedSkillInputValues?: Record<string, SkillInputValue>;
+  }): Promise<ChatSessionGoalSummary>;
+  createFromDraft(input: {
+    draft: GoalDraft;
+    edit?: GoalDraftEdit;
   }): Promise<ChatSessionGoalSummary>;
   start(
     goalId: string,
@@ -231,6 +241,108 @@ export function createGoalChatService(options: {
       return toGoalSummary(goal);
     },
 
+    async createFromDraft(input) {
+      const goalId = createId();
+      const description =
+        input.edit?.normalizedDescription?.trim() ||
+        input.draft.normalizedDescription.trim() ||
+        "Chat goal";
+      const normalizedCriteria = normalizeGoalDraftCriteria(
+        input.edit?.successCriteria ?? input.draft.successCriteria,
+      );
+      const successCriteria = normalizedCriteria.successCriteria;
+      const taskContract = compileAgentTaskContract({
+        description,
+        chatSessionId: input.draft.sessionId,
+        ...(input.draft.originMessageId
+          ? { originMessageId: input.draft.originMessageId }
+          : {}),
+      });
+      const taskFrame = classifyTaskFrame(description);
+      const quickActionPlan = createQuickActionPlan(description, taskFrame);
+      const quickActionReviewPlan =
+        !taskContract && shouldRouteToQuickActionReview(taskFrame, quickActionPlan)
+          ? quickActionPlan
+          : null;
+      const editedMilestones = input.edit?.milestones?.length
+        ? input.edit.milestones
+        : undefined;
+      const draftMilestones = input.draft.milestones?.length
+        ? input.draft.milestones
+        : undefined;
+      const milestones = editedMilestones
+        ? normalizeDraftMilestones(editedMilestones, successCriteria)
+        : draftMilestones
+          ? normalizeDraftMilestones(draftMilestones, successCriteria)
+          : quickActionReviewPlan
+            ? [
+                createQuickActionReviewMilestone(
+                  description,
+                  successCriteria[0],
+                  quickActionReviewPlan,
+                ),
+              ]
+            : await planGoalMilestones(
+                description,
+                successCriteria,
+                taskContract,
+                input.draft.selectedSkill,
+              );
+
+      const goal: Goal = {
+        id: goalId,
+        chatSessionId: input.draft.sessionId,
+        ...(input.draft.originMessageId
+          ? { originMessageId: input.draft.originMessageId }
+          : {}),
+        description,
+        ...(taskContract ? { taskContract } : {}),
+        ...(input.draft.selectedSkill
+          ? { selectedSkill: snapshotSelectedSkill(input.draft.selectedSkill) }
+          : {}),
+        ...(input.draft.selectedSkillInputValues
+          ? { selectedSkillInputValues: input.draft.selectedSkillInputValues }
+          : {}),
+        successCriteria,
+        milestones,
+        status: quickActionReviewPlan ? "waiting_for_review" : "planning",
+        budget: createDefaultChatGoalBudget(),
+        budgetUsage: {
+          iterations: 0,
+          toolCalls: 0,
+          wallClockMs: 0,
+          tokens: 0,
+          replans: 0,
+        },
+        reviewPolicy: "review_high_risk_only",
+        planVersion: 1,
+        createdAt: now(),
+        updatedAt: now(),
+      };
+
+      await options.goalStore.save(goal);
+      if (quickActionReviewPlan) {
+        await options.goalStore.appendLedger(goal.id, {
+          at: goal.createdAt,
+          kind: "review_requested",
+          summary: buildQuickActionReviewSummary(taskFrame, quickActionReviewPlan),
+        });
+        notifyProgress(
+          "review_requested",
+          goal,
+          "该目标更适合快速动作，已暂停等待审核。",
+        );
+      } else {
+        await options.goalStore.appendLedger(goal.id, {
+          at: goal.createdAt,
+          kind: "goal_planned",
+          summary: `Goal created from confirmed draft ${input.draft.id}.`,
+        });
+        notifyProgress("started", goal, "目标草案已确认，等待启动。");
+      }
+      return toGoalSummary(goal);
+    },
+
     async start(goalId, runOptions) {
       const goal = await options.goalStore.get(goalId);
       if (!goal) {
@@ -407,13 +519,16 @@ export function createGoalChatService(options: {
 
   async function planGoalMilestones(
     description: string,
-    goalCriterion: SuccessCriterion,
+    successCriteria: SuccessCriterion[] | SuccessCriterion,
     taskContract: AgentTaskContract | undefined,
-    selectedSkill: SkillRecord | undefined,
+    selectedSkill: SkillRecord | GoalSelectedSkill | undefined,
   ): Promise<Milestone[]> {
+    const criteria = Array.isArray(successCriteria)
+      ? successCriteria
+      : [successCriteria];
     try {
       return await options.planner.plan(description, {
-        successCriteria: [goalCriterion],
+        successCriteria: criteria,
         availableTools: options.getAvailableTools?.() ?? [],
         availableSkills: options.getAvailableSkills?.() ?? [],
         ...(taskContract ? { taskContract } : {}),
@@ -426,7 +541,7 @@ export function createGoalChatService(options: {
           id: "milestone_1",
           description,
           dependsOn: [],
-          successCriteria: [goalCriterion],
+          successCriteria: criteria,
           state: "ready",
           runIds: [],
           attempts: 0,
@@ -436,13 +551,30 @@ export function createGoalChatService(options: {
   }
 }
 
-function snapshotSelectedSkill(skill: SkillRecord): SkillRecord {
+function snapshotSelectedSkill(skill: SkillRecord | GoalSelectedSkill): GoalSelectedSkill {
   return {
     rootDir: skill.rootDir,
     skillFile: skill.skillFile,
     body: skill.body,
     manifest: JSON.parse(JSON.stringify(skill.manifest)) as SkillRecord["manifest"],
   };
+}
+
+function normalizeDraftMilestones(
+  milestones: Milestone[],
+  successCriteria: SuccessCriterion[],
+): Milestone[] {
+  return milestones.map((milestone, index) => ({
+    ...milestone,
+    id: milestone.id.trim() || `milestone_${index + 1}`,
+    description: milestone.description.trim(),
+    successCriteria: milestone.successCriteria.length
+      ? milestone.successCriteria
+      : successCriteria,
+    state: index === 0 && milestone.state === "pending" ? "ready" : milestone.state,
+    runIds: milestone.runIds ?? [],
+    attempts: milestone.attempts ?? 0,
+  }));
 }
 
 function createGoalSuccessCriterion(

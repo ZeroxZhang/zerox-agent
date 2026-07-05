@@ -33,7 +33,7 @@
 
 ## Overview
 
-**Zerox Agent** is a local-first desktop control plane for personal AI agents (current release: v3.1.2). The name comes from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
+**Zerox Agent** is a local-first desktop control plane for personal AI agents (current release: v3.2.0). The name comes from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
 
 It is not a chat wrapper or a generic hosted agent surface. It runs entirely on your machine: it configures OpenAI-compatible / Anthropic / Gemini models, scans local `SKILL.md` skill files, executes recoverable agent runs, invokes permission-controlled tools, tracks parent/child multi-agent sessions, persists experiential knowledge into local long-term memory, and keeps learning user-reviewed before it changes future behavior.
 
@@ -164,9 +164,9 @@ The app explicitly indicates the current data mode:
 
 ### 1. Agent Chat
 
-The chat window is the primary entry point — a command-first, chat-first interaction surface. Users describe needs in natural language; the Agent selects the appropriate skill, decomposes the task, invokes tools, and returns results. The session displays model, skill, task, memory, and tool status in real time.
+The chat window is the primary entry point — a goal-mode-first, chat-first interaction surface. Users describe needs in natural language; the Agent selects the appropriate skill, decomposes the task, invokes tools, and returns results. The session displays model, skill, task, memory, and tool status in real time.
 
-Chat UX includes: session-native Goal Mode in Chat Session mode (`/目标 ...`, composer command menu, inline review gates, goal progress from the same conversation); a right context rail that shows decomposed task progress and automatically switches to active subagent execution status while subagents run; a compact real-time activity strip; expandable task-activity timeline (newest first); provider-returned public reasoning fields; user-controlled long-task continuation at checkpoints or repeated tool failures; and an always-available interrupt that cancels the active request and propagates cancellation into running tools.
+Chat UX includes: session-native Goal Mode in Chat Session mode (a persistent 目标 composer control, typed goal-draft confirmation before execution, legacy `/目标 ...` compatibility, inline review gates, goal progress from the same conversation); a right context rail that shows decomposed task progress and automatically switches to active subagent execution status while subagents run; a compact real-time activity strip; expandable task-activity timeline (newest first); provider-returned public reasoning fields; user-controlled long-task continuation at checkpoints or repeated tool failures; and an always-available interrupt that cancels the active request and propagates cancellation into running tools.
 
 ### 2. Model Settings
 
@@ -508,7 +508,7 @@ npm run dist:mac      # .dmg + .zip → release/          (distribution)
 Current local builds are unsigned and not notarized. Each release passes an independent packaged-app acceptance gate (a computer-use run against the local macOS package) before handoff. After downloading a `.dmg` from GitHub Releases, macOS Gatekeeper may show "Zerox Agent is damaged and can't be opened." The image is usually valid; remove the quarantine attribute before opening:
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-3.1.2-arm64.dmg"
+xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-3.2.0-arm64.dmg"
 # or, if already dragged into Applications:
 xattr -dr com.apple.quarantine "/Applications/Zerox Agent.app"
 ```
@@ -695,7 +695,7 @@ Zerox Agent 是分层 Electron 应用。Electron 壳包裹一个依赖注入 **c
 
 对话窗口是第一入口。用户从自然语言描述需求，Agent 选择技能、分解任务、调用工具、返回结果，会话中实时展示模型、技能、任务、记忆和工具状态。
 
-对话体验包括：会话原生 **Goal Mode**（`/目标 ...`、输入框命令菜单、内联审核门、从同一会话查看目标进度）；输入框上方紧凑实时状态栏；可展开的任务过程时间线（最新在前）；模型/API 返回的公开 reasoning 字段；长任务到检查点或连续工具失败时暂停让用户决定；以及始终可用的中断，可取消当前请求并把取消信号传给正在运行的工具。
+对话体验包括：会话原生 **Goal Mode**（固定的“目标”输入控制、执行前的结构化目标草案确认、兼容旧 `/目标 ...`、内联审核门、从同一会话查看目标进度）；输入框上方紧凑实时状态栏；可展开的任务过程时间线（最新在前）；模型/API 返回的公开 reasoning 字段；长任务到检查点或连续工具失败时暂停让用户决定；以及始终可用的中断，可取消当前请求并把取消信号传给正在运行的工具。
 
 ### 2. 模型配置 (Model Settings)
 

@@ -5884,3 +5884,86 @@
   - `release/latest-mac.yml` (517B, sha256 `baf0e26390bd1a9a94f36dc1a4872bd7de238b2eecb33edb656129d14b1cf12c`)
   - P31 is marked done after user acceptance, full verify, harness, production smoke, dist packaging, packaged-app smoke, and whitespace checks.
   - Branch `codex/3.1.2`, tag `v3.1.2`, and GitHub Release `v3.1.2` are published at https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.1.2 with the regenerated macOS assets.
+
+## 2026-07-05 - Zerox Agent v3.2.0 Goal Mode, Memory Ingestion, Settings Simplification, And Glass UI
+
+- Request:
+  - Replace the visible Slash flow with explicit Goal Mode controls: `自动`, `目标`, `终止`, `发送`.
+  - Add a typed goal-translation draft step that requires user confirmation or edits before goal execution.
+  - Redesign Memory around manual required memory, system long-term memory, and user-reviewed ingested habits.
+  - Add recent-conversation memory ingestion with review-first accept/reject behavior.
+  - Simplify Tools, Memory, Learning, and Evals settings pages around primary actions and collapsed advanced details.
+  - Cool the app color temperature and add subtle translucent/glass surfaces.
+- Feature tracking:
+  - Added feature `P32-v3.2.0-goal-mode-memory-ingestion-settings-glass`.
+  - P32 is marked `done` after focused tests, full tests, build, verify, production smoke, harness check, and whitespace check passed.
+- Changed areas:
+  - `.zerox/feature_list.json`, `.zerox/progress.md`, `package.json`, `package-lock.json`, `README.md`
+  - `src/shared/chat.ts`, `src/shared/goalTranslation.ts`, `src/shared/memory.ts`, `src/shared/memoryIngestion.ts`
+  - `src/main/agentGoalTranslator.ts`, `src/main/goalDraftService.ts`, `src/main/memoryIngestionService.ts`, `src/main/chatService.ts`, `src/main/goalChatService.ts`, `src/main/container.ts`, `src/main/ipc/index.ts`
+  - `src/preload/index.ts`
+  - `src/renderer/components/AgentChatPanel.tsx`, `src/renderer/components/MemoryPanel.tsx`, `src/renderer/components/ToolsPanel.tsx`, `src/renderer/components/LearningReviewPanel.tsx`, `src/renderer/components/EvalReviewPanel.tsx`
+  - `src/renderer/styles/tokens.css`, `src/renderer/styles/app-shell.css`, `src/renderer/styles/sidebar.css`, `src/renderer/styles/chat.css`, `src/renderer/styles/composer.css`, `src/renderer/styles/cards.css`, `src/renderer/styles/legacy.css`
+  - Focused tests in `src/shared/goalTranslation.test.ts`, `src/shared/memory.test.ts`, `src/shared/packageScripts.test.ts`, `src/shared/readme.test.ts`, `src/main/memoryIngestionService.test.ts`, `src/main/chatService.test.ts`, `src/main/goalChatService.test.ts`, `src/main/memoryStore.test.ts`, and `src/renderer/materialDesign.test.ts`
+- Implementation evidence:
+  - Package metadata and README now report v3.2.0.
+  - Chat composer renders the four persistent controls and no visible slash command menu; legacy `/目标 ...` still routes through the new draft-confirm flow.
+  - `SendChatMessageInput.mode: "goal_draft"` creates a `GoalDraft` only; real goal execution starts only through `goalDraft:confirm`.
+  - `AgentGoalTranslator` produces structured drafts, normalizes measurable criteria, clamps invalid check kinds, warns on weak coverage, and keeps selected skill snapshots/input values available for confirmed goals.
+  - `GoalChatService.createFromDraft(...)` starts confirmed drafts through the existing goal store/controller path while preserving normalized description, success criteria, checks, milestones, and skill data.
+  - Memory records now normalize into `manual_required`, `system_long_term`, or `ingested_habit`; equal-score recall ranking prefers manual required memories first, then ingested habits, then system long-term memories.
+  - `MemoryIngestionService` scopes recent raw history to non-archived sessions, asks the configured LLM for durable habit candidates, filters missing evidence and duplicate titles, and writes memory only after user acceptance.
+  - Memory UI now has three lanes plus a Memory Inbox; Tools, Learning, and Evals place primary review/action queues first and move lower-priority details into collapsed advanced sections.
+  - CSS tokens are cooled away from beige/yellow surfaces and add `rgba(...)` glass tokens plus `backdrop-filter` on shell/sidebar/composer/settings surfaces while keeping dark-mode tokens.
+  - The untracked `.zerox/product-design-audit-2026-07-05/` input evidence directory was left untouched.
+- User acceptance fix evidence:
+  - Root cause: legacy `.composer button` had higher specificity than the new goal mode button selector, forcing `目标` to render as a 72px by 40px rounded rectangle. Fixed with scoped `.composer .composer-goal-mode-button`, 32px height, 40px minimum width, full-radius shape, and matching bottom-control spacing.
+  - Root cause: memory ingestion running state lived only in `MemoryPanel` local React state, so switching Settings subpages unmounted the panel and lost visible progress. Fixed by moving ingestion runtime status into `MemoryIngestionService`, adding `memory:getIngestionStatus`, and polling/restoring status from `MemoryPanel`.
+  - Root cause: memory ingestion asked the LLM in English and trusted English candidate text. Fixed by detecting the dominant language of user messages, instructing the model to use that language, and localizing English model/stored candidates to Simplified Chinese when the evidence is Chinese.
+  - Root cause: Settings still had legacy fixed desktop grids such as `overview-layout` and broad memory/tool grids that could force `settings-section-body` wider than its viewport. Fixed with shrinkable settings bodies, auto-fit grids, wrapped action/header rows, clipped horizontal overflow, and long-text wrapping.
+  - Second acceptance pass root cause: Settings System still had legacy internal cards (`data-boundary-panel`, readiness/runtime grids) that did not adapt inside the narrower settings body. Fixed by making Overview diagnostics, data-boundary actions, readiness items, and runtime grids shrinkable and auto-fit, with balanced non-vertical headings.
+  - Second acceptance pass root cause: `自动` and `目标` represented similar high-permission modes but used different enabled colors and only terse native titles. Fixed by unifying both enabled states to warning/risk colors and adding risk-aware hover/focus tooltip content for automatic tool authorization and goal-mode execution.
+  - Third acceptance pass root cause: Settings System still used `--bg-surface-raised`/white-like glass for the content body and large overview cards, creating hard white blocks. Fixed by adding muted glass tokens and applying them only to the System settings body and Overview cards/insets.
+- Verification evidence:
+  - `npm test -- src/shared/goalTranslation.test.ts src/shared/memory.test.ts src/main/memoryIngestionService.test.ts src/main/chatService.test.ts src/main/goalChatService.test.ts src/renderer/materialDesign.test.ts src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 8 files / 172 tests passed.
+  - `npm test` -> 188 files / 1307 tests passed.
+  - `npm run build` -> passed. Vite reported the existing large chunk size warning only.
+  - `npm run verify` -> passed; tests/build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local un-packaged smoke used JSON fallback after better-sqlite3 ABI mismatch.
+  - `npm run harness:check` -> passed.
+  - `npm run pack:mac` -> passed; regenerated local directory package at `release/mac-arm64/Zerox Agent.app` for v3.2.0 without creating DMG/ZIP release artifacts.
+  - Opened local test package with `open -n "release/mac-arm64/Zerox Agent.app"` for user acceptance.
+  - Acceptance-fix focused test: `npm test -- src/main/memoryIngestionService.test.ts src/renderer/materialDesign.test.ts` -> 2 files / 68 tests passed.
+  - Acceptance-fix full test: `npm test` -> 188 files / 1309 tests passed.
+  - Acceptance-fix `npm run verify` -> passed; tests/build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - Acceptance-fix `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local un-packaged smoke used JSON fallback after better-sqlite3 ABI mismatch.
+  - Acceptance-fix `npm run harness:check` -> passed.
+  - Acceptance-fix `npm run pack:mac` -> passed; regenerated local directory package at `release/mac-arm64/Zerox Agent.app` for v3.2.0 without creating DMG/ZIP release artifacts.
+  - Reopened local test package with `open -n "release/mac-arm64/Zerox Agent.app"` for user acceptance.
+  - Browser QA at `http://127.0.0.1:5173/`: after fix, `目标` button measured 40x32 with full-radius styling; `自动` measured 40x32; `终止` and `发送` measured 32x32. Settings Overview and Memory at 1280px reported `scrollWidth == clientWidth` with no overflowing nodes. Memory at 980px also reported `scrollWidth == clientWidth` with no overflowing nodes.
+  - Second acceptance-fix focused test: `npm test -- src/renderer/materialDesign.test.ts` -> 1 file / 64 tests passed.
+  - Second acceptance-fix full test: `npm test` -> 188 files / 1309 tests passed.
+  - Second acceptance-fix `npm run verify` -> passed; tests/build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - Second acceptance-fix `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local un-packaged smoke used JSON fallback after better-sqlite3 ABI mismatch.
+  - Second acceptance-fix `npm run harness:check` -> passed.
+  - Second acceptance-fix `npm run pack:mac` -> passed; regenerated local directory package at `release/mac-arm64/Zerox Agent.app` for v3.2.0 without creating DMG/ZIP release artifacts.
+  - Reopened local test package with `open -n "release/mac-arm64/Zerox Agent.app"` for user acceptance.
+  - Second Browser QA at `http://127.0.0.1:5173/`: Settings System reported `scrollWidth == clientWidth`, `data-boundary-panel` displayed as grid with `scrollWidth == clientWidth`, and the data-boundary heading measured 586px wide instead of being squeezed into a narrow vertical stack. Chat controls showed `自动` and `目标` enabled with matching warning colors (`rgb(255, 248, 223)` background, `rgb(236, 216, 148)` border, `rgb(134, 98, 10)` text) and both controls carried risk tooltip content.
+  - Third acceptance-fix focused test: `npm test -- src/renderer/materialDesign.test.ts` -> 1 file / 64 tests passed.
+  - Third acceptance-fix full test: `npm test` -> 188 files / 1309 tests passed.
+  - Third acceptance-fix `npm run verify` -> passed; tests/build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - Third acceptance-fix `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local un-packaged smoke used JSON fallback after better-sqlite3 ABI mismatch.
+  - Third acceptance-fix `npm run harness:check` -> passed.
+  - Third acceptance-fix `npm run pack:mac` -> passed; regenerated and reopened local directory package at `release/mac-arm64/Zerox Agent.app` for v3.2.0 without creating DMG/ZIP release artifacts.
+  - Third Browser QA at `http://127.0.0.1:5173/`: System settings body computed background `rgba(238, 245, 252, 0.34)`, data-boundary/readiness panels `rgba(238, 245, 252, 0.58)`, health cards `rgba(248, 251, 255, 0.66)`, all with glass borders/blur and `scrollWidth == clientWidth`.
+  - `git diff --check` -> passed.
+- Release packaging evidence:
+  - `npm run dist:mac` -> passed; regenerated unsigned macOS arm64 DMG, ZIP, blockmaps, `latest-mac.yml`, and `release/mac-arm64/Zerox Agent.app` for v3.2.0.
+  - `release/latest-mac.yml` reports `version: 3.2.0` and update URLs `Zerox-Agent-3.2.0-arm64-mac.zip` / `Zerox-Agent-3.2.0-arm64.dmg`.
+  - Copied formal upload assets to the `Zerox-Agent-3.2.0-*` names referenced by `latest-mac.yml`.
+  - `BUILDING_AGENT_SMOKE_REQUIRED_TEXTS=v3.2.0 npm run smoke:prod:built` -> passed; renderer rendered agent chat UI. Note: local un-packaged smoke used JSON fallback after better-sqlite3 ABI mismatch.
+  - `release/Zerox-Agent-3.2.0-arm64.dmg` (122M, sha256 `7cdee02c09b40d53424e10e68c5d5e046767639f7e64ce1be8104b7fbe796a64`)
+  - `release/Zerox-Agent-3.2.0-arm64-mac.zip` (333M, sha256 `21bb901591c99e94f4f6ca7bba03f6c21d6ca8f04b4583f01ea42bb0859ebdad`)
+  - `release/Zerox-Agent-3.2.0-arm64.dmg.blockmap` (133K, sha256 `fad093824b2fa30c87353ea3e253a77443b8d14afaebdb77cc9a38d74259cf18`)
+  - `release/Zerox-Agent-3.2.0-arm64-mac.zip.blockmap` (335K, sha256 `a92a8c9d974f03f352c0a7ad3a6ecd29e1bfc6e756b7073289d47fc05827d146`)
+  - `release/latest-mac.yml` (517B, sha256 `9d6279c29e900c3fa4e161fc63ab76d3438485ae9c9224c54937774f10e36265`)

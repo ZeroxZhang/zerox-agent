@@ -17,6 +17,8 @@ import { createAgentGoalPlanner } from "./agentGoalPlanner";
 import { createGoalRuntimeEngine } from "./goalRuntimeEngine";
 import { applyGoalOutputRootsToRunContext } from "./goalOutputRoots";
 import { createGoalChatService } from "./goalChatService";
+import { createAgentGoalTranslator } from "./agentGoalTranslator";
+import { createGoalDraftService } from "./goalDraftService";
 import {
   createAgentWorkspaceService,
   type CreateGitWorktreeWorkspaceInput,
@@ -44,6 +46,7 @@ import { createModelConnectionService } from "./modelConnectionService";
 import { createMemoryStore } from "./memoryStore";
 import { createMemoryProfileStore } from "./memoryProfileStore";
 import { createHistoryIndexStore } from "./historyIndexStore";
+import { createMemoryIngestionService } from "./memoryIngestionService";
 import {
   createToolResultOffloadStore,
   type ToolResultOffloadReadScope,
@@ -103,6 +106,11 @@ import { getAppMeta } from "../shared/appMeta";
 import { getNavigationSections } from "../shared/navigation";
 import type { Goal, GoalBudget, SuccessCriterion } from "../shared/agentGoal";
 import type { GoalReviewPolicy } from "../shared/agentGoalReview";
+import type {
+  GoalDraftConfirmResult,
+  GoalDraftDiscardResult,
+  GoalDraftEdit,
+} from "../shared/goalTranslation";
 import type {
   ChatSessionGoalSummary,
   ChatSessionListItem,
@@ -1250,6 +1258,23 @@ export function createAppContainer(options: {
     );
   }
 
+  function agentGoalTranslator() {
+    return lazy("agentGoalTranslator", () =>
+      createAgentGoalTranslator({
+        chatClient: chatClient(),
+        getModelProfile,
+      }),
+    );
+  }
+
+  function goalDraftService() {
+    return lazy("goalDraftService", () =>
+      createGoalDraftService({
+        translator: agentGoalTranslator(),
+      }),
+    );
+  }
+
   function getAvailableToolNames(): string[] {
     return createToolExecutor()
       .getRegistry()
@@ -1270,6 +1295,7 @@ export function createAppContainer(options: {
         memoryProfileStore: memoryProfileStore(),
         chatSessionStore: chatSessionStore(),
         goalService: goalChatService(),
+        goalDraftService: goalDraftService(),
         taskStore: scheduledTaskStore(),
         runScheduledTask: (taskId: string, taskRunOptions) =>
           runAgentTask(taskId, {
@@ -1285,6 +1311,19 @@ export function createAppContainer(options: {
         historyIndexStore: historyIndexStore(),
         toolResultOffloadStore: toolResultOffloadStore(),
         compactionStrategy: compactionStrategy(),
+      }),
+    );
+  }
+
+  function memoryIngestionService() {
+    return lazy("memoryIngestionService", () =>
+      createMemoryIngestionService({
+        configDir,
+        historyIndexStore: historyIndexStore(),
+        memoryStore: memoryStore(),
+        chatSessionStore: chatSessionStore(),
+        chatClient: chatClient(),
+        getModelProfile,
       }),
     );
   }
@@ -1698,6 +1737,45 @@ export function createAppContainer(options: {
     };
   }
 
+  async function confirmGoalDraft(
+    draftId: string,
+    edit?: GoalDraftEdit,
+  ): Promise<GoalDraftConfirmResult> {
+    try {
+      const draft = goalDraftService().markConfirmed(draftId, edit);
+      if (!draft) {
+        return { ok: false, message: "目标草案不存在或已处理。" };
+      }
+
+      const createdGoal = await goalChatService().createFromDraft({ draft });
+      const activeGoal = await goalChatService().resume(createdGoal.id);
+      await chatSessionStore().attachGoal(draft.sessionId, activeGoal);
+      await chatSessionStore().appendMessage({
+        sessionId: draft.sessionId,
+        role: "assistant",
+        content: `已确认并开始执行目标：${activeGoal.description}。`,
+        goalId: activeGoal.id,
+        goalEventRef: "goal_started",
+      });
+
+      return {
+        ok: true,
+        draft,
+        activeGoal,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        message:
+          error instanceof Error ? error.message : "无法确认目标草案。",
+      };
+    }
+  }
+
+  function discardGoalDraft(draftId: string): GoalDraftDiscardResult {
+    return goalDraftService().discard(draftId);
+  }
+
   async function runGoalOperation(
     operation: () => Promise<ChatSessionGoalSummary>,
   ): Promise<{ ok: boolean; goal?: Goal; message?: string }> {
@@ -1828,6 +1906,7 @@ export function createAppContainer(options: {
     multiAgentCoordinator,
     memoryStore,
     memoryProfileStore,
+    memoryIngestionService,
     historyIndexStore,
     toolResultOffloadStore,
     agentLearningStore,
@@ -1850,6 +1929,9 @@ export function createAppContainer(options: {
     resumeAgentRun,
     pauseAgentRun,
     createGoalDraft,
+    goalDraftService,
+    confirmGoalDraft,
+    discardGoalDraft,
     runGoalOperation,
     runGoalBudgetOperation,
     increaseGoalBudget: (goalId: string, delta: Partial<GoalBudget>) =>

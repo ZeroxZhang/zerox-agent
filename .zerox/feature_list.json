@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-06-28T17:25:00.000+08:00",
+  "updatedAt": "2026-07-05T00:00:00.000+08:00",
   "features": [
     {
       "id": "P0-repo-local-harness",
@@ -2208,6 +2208,66 @@
         "npm run dist:mac",
         "BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v3.1.2' \"release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent\"",
         "open local test package for user acceptance",
+        "git diff --check"
+      ]
+    },
+    {
+      "id": "P32-v3.2.0-goal-mode-memory-ingestion-settings-glass",
+      "priority": 62,
+      "status": "done",
+      "title": "v3.2.0 Goal Mode, memory ingestion, settings simplification, and glass polish",
+      "files": [
+        "src/shared/goalTranslation.ts",
+        "src/main/agentGoalTranslator.ts",
+        "src/main/goalDraftService.ts",
+        "src/main/goalChatService.ts",
+        "src/main/chatService.ts",
+        "src/shared/chat.ts",
+        "src/shared/memory.ts",
+        "src/shared/memoryIngestion.ts",
+        "src/main/memoryIngestionService.ts",
+        "src/main/container.ts",
+        "src/main/ipc/index.ts",
+        "src/preload/index.ts",
+        "src/renderer/components/AgentChatPanel.tsx",
+        "src/renderer/components/MemoryPanel.tsx",
+        "src/renderer/components/ToolsPanel.tsx",
+        "src/renderer/components/LearningReviewPanel.tsx",
+        "src/renderer/components/EvalReviewPanel.tsx",
+        "src/renderer/styles/tokens.css",
+        "src/renderer/styles/app-shell.css",
+        "src/renderer/styles/sidebar.css",
+        "src/renderer/styles/chat.css",
+        "src/renderer/styles/composer.css",
+        "src/renderer/styles/legacy.css",
+        "src/renderer/materialDesign.test.ts",
+        "src/shared/packageScripts.test.ts",
+        "src/shared/readme.test.ts",
+        "README.md",
+        "package.json",
+        "package-lock.json",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md"
+      ],
+      "definitionOfDone": [
+        "Composer shows the four bottom controls as 自动, 目标, 终止, 发送 and no visible slash command menu",
+        "Goal Mode and legacy /目标 create a typed GoalDraft that must be confirmed, edited, or discarded before execution",
+        "Goal draft confirmation preserves selected skill snapshots and starts the real goal through the existing goal controller",
+        "Memory records support manual_required, system_long_term, and ingested_habit layers while legacy records normalize safely",
+        "Memory ingestion scans recent reviewed local history into evidence-backed candidates and only writes memories after user acceptance",
+        "Memory recall ranks manual_required ahead of equal-score ingested_habit and system_long_term records",
+        "Tools, Memory, Learning, and Evals settings pages prioritize primary actions and collapse advanced details",
+        "Visual tokens cool the app away from beige/yellow surfaces and add subtle translucent glass surfaces with dark-mode contrast",
+        "package metadata reports version 3.2.0 in package.json and package-lock.json",
+        "README current release and download example reflect v3.2.0"
+      ],
+      "verification": [
+        "npm test -- src/shared/goalTranslation.test.ts src/shared/memory.test.ts src/main/memoryIngestionService.test.ts src/main/chatService.test.ts src/main/goalChatService.test.ts src/renderer/materialDesign.test.ts src/shared/packageScripts.test.ts src/shared/readme.test.ts",
+        "npm test",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check",
         "git diff --check"
       ]
     }
