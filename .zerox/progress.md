@@ -5967,3 +5967,7 @@
   - `release/Zerox-Agent-3.2.0-arm64.dmg.blockmap` (133K, sha256 `fad093824b2fa30c87353ea3e253a77443b8d14afaebdb77cc9a38d74259cf18`)
   - `release/Zerox-Agent-3.2.0-arm64-mac.zip.blockmap` (335K, sha256 `a92a8c9d974f03f352c0a7ad3a6ecd29e1bfc6e756b7073289d47fc05827d146`)
   - `release/latest-mac.yml` (517B, sha256 `9d6279c29e900c3fa4e161fc63ab76d3438485ae9c9224c54937774f10e36265`)
+  - Branch `codex/3.2.0` pushed to origin at commit `f9339dd8f4d8bbb18e36c070b7274e8fbdfb861c`.
+  - Annotated tag `v3.2.0` pushed to origin.
+  - GitHub Release `v3.2.0` is published as Latest at https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.2.0 with five uploaded assets: DMG, ZIP, two blockmaps, and `latest-mac.yml`.
+  - Remote release asset digests match the local SHA256 values above.
