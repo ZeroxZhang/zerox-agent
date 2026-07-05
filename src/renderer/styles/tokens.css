@@ -15,6 +15,10 @@
   --glass-sidebar: rgba(239, 245, 252, 0.78);
   --glass-border: rgba(148, 163, 184, 0.26);
   --glass-blur: 18px;
+  --brand-primary: #223044;
+  --brand-accent: #2563eb;
+  --brand-cyan: #0891b2;
+  --focus-ring: rgba(37, 99, 235, 0.34);
   --bg-overlay: rgba(37, 99, 235, 0.08);
   --bg-accent: #223044;
   --bg-accent-hover: #111827;
@@ -110,6 +114,7 @@
   --transition-normal: 200ms ease;
   --transition-slow: 280ms ease;
   --nav-rail-width: 280px;
+  --settings-nav-width: 288px;
   --context-panel-width: 320px;
   --topbar-height: 64px;
 }
@@ -130,6 +135,10 @@
     --glass-system-body: rgba(24, 34, 49, 0.34);
     --glass-sidebar: rgba(16, 25, 35, 0.78);
     --glass-border: rgba(148, 163, 184, 0.2);
+    --brand-primary: #edf3fa;
+    --brand-accent: #adc7f5;
+    --brand-cyan: #67e8f9;
+    --focus-ring: rgba(173, 199, 245, 0.34);
     --border-default: #263345;
     --border-strong: #3b4a5f;
     --text-primary: #edf3fa;

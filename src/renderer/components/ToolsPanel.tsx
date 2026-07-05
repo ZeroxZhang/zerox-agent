@@ -224,7 +224,11 @@ export function ToolsPanel() {
             >
             检查并请求授权
             </button>
-            <p className={`settings-message is-${status.kind}`}>
+            <p
+              aria-live={status.kind === "error" ? "assertive" : "polite"}
+              className={`settings-message is-${status.kind}`}
+              role={status.kind === "error" ? "alert" : "status"}
+            >
               {status.message}
             </p>
           </div>

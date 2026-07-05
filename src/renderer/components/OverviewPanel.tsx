@@ -22,7 +22,7 @@ import type {
 } from "../../shared/agentBootstrap";
 import type { MemoryRecord } from "../../shared/memory";
 import type { PublicModelSettings } from "../../shared/modelSettings";
-import type { NavigationSectionId } from "../../shared/navigation";
+import type { NavigationTargetId } from "../../shared/navigation";
 import type { ScheduledTask } from "../../shared/scheduledTasks";
 import {
   buildDesktopRuntimeInfo,
@@ -59,13 +59,13 @@ type OverviewData = {
 
 type AttentionItem = {
   action: string;
-  target: NavigationSectionId;
+  target: NavigationTargetId;
   title: string;
   tone: "error" | "warn";
 };
 
 export function OverviewPanel(props: {
-  onNavigate: (sectionId: NavigationSectionId) => void;
+  onNavigate: (sectionId: NavigationTargetId) => void;
 }) {
   const dataBoundary = buildAgentDataBoundary(
     window.buildingAgent ? "desktop" : "preview",
@@ -374,23 +374,23 @@ export function OverviewPanel(props: {
           value={data ? `${data.evalReport.passed}/${data.evalReport.total}` : "待加载"}
         />
         <HealthCard
-          label="Harness"
+          label="本地基线分"
           status={harnessScore ? `${harnessScore.overall}/10` : "待加载"}
           tone={harnessScore?.tone ?? "warn"}
           value={harnessScore?.summary ?? "ETCLOVG 七类"}
         />
         <HealthCard
-          label="Agent Capability"
+          label="智能体能力分"
           status={
             agentCapabilityScore
               ? `${agentCapabilityScore.overall}/10`
               : "待加载"
           }
           tone={agentCapabilityScore?.tone ?? "warn"}
-          value={agentCapabilityScore?.summary ?? "native tools"}
+          value={agentCapabilityScore?.summary ?? "本地工具"}
         />
         <HealthCard
-          label="Goals"
+          label="目标"
           status={`${data?.activeGoals.length ?? 0} 个活跃`}
           tone={goalsWaitingForReview ? "warn" : "good"}
           value={
@@ -520,7 +520,7 @@ export function OverviewPanel(props: {
             <small>操作流程</small>
           </div>
           {[
-            ["settings", "配置模型"],
+            ["model-settings", "配置模型"],
             ["scheduled-tasks", "创建或运行任务"],
             ["tools", "检查工具权限"],
             ["memory", "查看记忆"],
@@ -528,7 +528,7 @@ export function OverviewPanel(props: {
             <button
               className="quick-action"
               key={target}
-              onClick={() => props.onNavigate(target as NavigationSectionId)}
+              onClick={() => props.onNavigate(target as NavigationTargetId)}
               type="button"
             >
               {label}
@@ -605,7 +605,13 @@ export function OverviewPanel(props: {
         </section>
       ) : null}
 
-      <p className={`settings-message is-${status.kind}`}>{status.message}</p>
+      <p
+        aria-live={status.kind === "error" ? "assertive" : "polite"}
+        className={`settings-message is-${status.kind}`}
+        role={status.kind === "error" ? "alert" : "status"}
+      >
+        {status.message}
+      </p>
     </section>
   );
 
@@ -839,7 +845,7 @@ function buildAttentionItems(data: OverviewData): AttentionItem[] {
       tone: "error",
       title: "模型配置不完整",
       action: "打开“设置”，保存对话模型和 API Key。",
-      target: "settings",
+      target: "model-settings",
     });
   }
 

@@ -120,9 +120,15 @@ function createMainWindow(): BrowserWindow {
   }
 
   if (rendererUrl) {
-    void windowInstance.loadURL(rendererUrl);
+    const url = new URL(rendererUrl);
+    if (smokeMode.targetHash) {
+      url.hash = smokeMode.targetHash;
+    }
+    void windowInstance.loadURL(url.toString());
   } else {
-    void windowInstance.loadFile(path.join(__dirname, "../../dist/index.html"));
+    void windowInstance.loadFile(path.join(__dirname, "../../dist/index.html"), {
+      hash: smokeMode.targetHash?.replace(/^#/, ""),
+    });
   }
 
   return windowInstance;

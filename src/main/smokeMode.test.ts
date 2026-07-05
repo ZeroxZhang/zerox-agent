@@ -11,11 +11,13 @@ describe("smoke mode", () => {
   it("is disabled by default", () => {
     expect(getSmokeModeOptions({})).toEqual({
       enabled: false,
+      expectedHash: null,
       performanceEnabled: false,
       timeoutMs: 10_000,
       readySelector: '[data-testid="agent-chat-panel"]',
       requiredTexts: [],
       requireDesktopApi: true,
+      targetHash: null,
       viewport: null,
       performanceThresholds: {
         inputP95FrameMs: 50,
@@ -35,11 +37,13 @@ describe("smoke mode", () => {
       }),
     ).toEqual({
       enabled: true,
+      expectedHash: null,
       performanceEnabled: false,
       timeoutMs: 2_500,
       readySelector: '[data-testid="agent-chat-panel"]',
       requiredTexts: [],
       requireDesktopApi: true,
+      targetHash: null,
       viewport: null,
       performanceThresholds: {
         inputP95FrameMs: 50,
@@ -59,11 +63,13 @@ describe("smoke mode", () => {
       }),
     ).toEqual({
       enabled: true,
+      expectedHash: null,
       performanceEnabled: false,
       timeoutMs: 10_000,
       readySelector: '[data-testid="agent-chat-panel"]',
       requiredTexts: [],
       requireDesktopApi: true,
+      targetHash: null,
       viewport: null,
       performanceThresholds: {
         inputP95FrameMs: 50,
@@ -81,16 +87,20 @@ describe("smoke mode", () => {
         BUILDING_AGENT_SMOKE: "1",
         BUILDING_AGENT_SMOKE_READY_SELECTOR: ".overview-panel",
         BUILDING_AGENT_SMOKE_REQUIRED_TEXTS:
-          "Harness|Agent Capability|native tools",
+          "本地基线分|智能体能力分|本地工具",
+        BUILDING_AGENT_SMOKE_HASH: "overview",
+        BUILDING_AGENT_SMOKE_EXPECTED_HASH: "system-overview",
         BUILDING_AGENT_SMOKE_VIEWPORT: "390x844",
       }),
     ).toEqual({
       enabled: true,
+      expectedHash: "#system-overview",
       performanceEnabled: false,
       timeoutMs: 10_000,
       readySelector: ".overview-panel",
-      requiredTexts: ["Harness", "Agent Capability", "native tools"],
+      requiredTexts: ["本地基线分", "智能体能力分", "本地工具"],
       requireDesktopApi: true,
+      targetHash: "#overview",
       viewport: { width: 390, height: 844 },
       performanceThresholds: {
         inputP95FrameMs: 50,
@@ -107,12 +117,12 @@ describe("smoke mode", () => {
       getSmokeModeOptions({
         BUILDING_AGENT_SMOKE_READY_SELECTOR: ".overview-panel",
         BUILDING_AGENT_SMOKE_REQUIRED_TEXTS:
-          "Harness|Agent Capability|native tools",
+          "本地基线分|智能体能力分|本地工具",
       }),
     );
 
     expect(script).toContain(".overview-panel");
-    expect(script).toContain("Agent Capability");
+    expect(script).toContain("智能体能力分");
     expect(script).toContain("hasDesktopApi");
     expect(script).toContain("hasHorizontalOverflow");
     expect(script).toContain("rootTextLength");
@@ -194,6 +204,8 @@ describe("smoke mode", () => {
         hasRoot: true,
         hasDesktopApi: false,
         hasHorizontalOverflow: false,
+        hash: "",
+        hashMatches: true,
         scrollWidth: 1200,
         clientWidth: 1200,
         rootTextLength: 0,
@@ -212,6 +224,8 @@ describe("smoke mode", () => {
         hasRoot: true,
         hasDesktopApi: true,
         hasHorizontalOverflow: false,
+        hash: "#overview",
+        hashMatches: true,
         scrollWidth: 390,
         clientWidth: 390,
         rootTextLength: 200,
@@ -220,6 +234,29 @@ describe("smoke mode", () => {
         locationHref: "http://127.0.0.1:5173/#overview",
       }),
     ).toContain("missingTexts=Agent Capability");
+  });
+
+  it("requires targeted smoke hashes to survive renderer startup", () => {
+    const script = getSmokeRendererCheckScript(
+      getSmokeModeOptions({
+        BUILDING_AGENT_SMOKE_HASH: "tools",
+      }),
+    );
+
+    expect(script).toContain('const expectedHash = "#tools";');
+    expect(script).toContain("hashMatches");
+  });
+
+  it("can load a compatibility hash and require a canonical hash", () => {
+    const script = getSmokeRendererCheckScript(
+      getSmokeModeOptions({
+        BUILDING_AGENT_SMOKE_HASH: "overview",
+        BUILDING_AGENT_SMOKE_EXPECTED_HASH: "system-overview",
+      }),
+    );
+
+    expect(script).toContain('const expectedHash = "#system-overview";');
+    expect(script).toContain("hashMatches");
   });
 
   it("reports production performance smoke metrics", () => {
@@ -273,6 +310,8 @@ describe("smoke mode", () => {
         hasRoot: true,
         hasDesktopApi: true,
         hasHorizontalOverflow: true,
+        hash: "#overview",
+        hashMatches: true,
         scrollWidth: 420,
         clientWidth: 390,
         rootTextLength: 200,
@@ -291,6 +330,8 @@ describe("smoke mode", () => {
         hasRoot: true,
         hasDesktopApi: false,
         hasHorizontalOverflow: false,
+        hash: "#chat",
+        hashMatches: true,
         scrollWidth: 1120,
         clientWidth: 1120,
         rootTextLength: 347,

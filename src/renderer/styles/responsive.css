@@ -50,6 +50,15 @@
     height: calc(100dvh - 190px);
     min-height: 0;
   }
+
+  .settings-section-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-section-nav {
+    position: static;
+    max-height: none;
+  }
 }
 
 @media (max-width: 640px) {
@@ -159,6 +168,23 @@
   .chat-input-request-block li {
     grid-template-columns: minmax(0, 1fr);
     align-items: start;
+  }
+
+  .settings-section-nav {
+    padding: var(--space-3);
+  }
+
+  .settings-section-nav button {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .settings-section-body {
+    padding: var(--space-3);
+  }
+
+  .settings-section-body-header {
+    padding: var(--space-3);
   }
 }
 

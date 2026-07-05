@@ -78,6 +78,13 @@ describe("Design System — Notion-inspired app shell", () => {
   const outputRenderingArtifactSource = existsSync(outputRenderingArtifactPath)
     ? readFileSync(outputRenderingArtifactPath, "utf8")
     : "";
+  const uiUxDesignSystemPath = path.join(
+    process.cwd(),
+    "docs/design/zerox-agent-3-2-1-ui-ux-design-system.md",
+  );
+  const uiUxDesignSystemSource = existsSync(uiUxDesignSystemPath)
+    ? readFileSync(uiUxDesignSystemPath, "utf8")
+    : "";
   const evalReviewPanelPath = path.join(
     process.cwd(),
     "src/renderer/components/EvalReviewPanel.tsx",
@@ -111,6 +118,9 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain("--glass-surface-strong");
     expect(styles).toContain("--glass-sidebar");
     expect(styles).toContain("--glass-blur");
+    expect(styles).toContain("--brand-primary");
+    expect(styles).toContain("--brand-accent");
+    expect(styles).toContain("--focus-ring");
     expect(styles).toContain("--text-primary");
     expect(styles).toContain("--text-secondary");
     expect(styles).toContain("--border-default");
@@ -639,14 +649,33 @@ describe("Design System — Notion-inspired app shell", () => {
 
   it("surfaces the local harness score in Overview", () => {
     expect(overviewPanelSource).toContain("computeHarnessScore");
-    expect(overviewPanelSource).toContain("Harness");
+    expect(overviewPanelSource).toContain("本地基线分");
     expect(overviewPanelSource).toContain("ETCLOVG 七类");
   });
 
   it("surfaces the agent capability score in Overview", () => {
     expect(overviewPanelSource).toContain("computeAgentCapabilityScore");
-    expect(overviewPanelSource).toContain("Agent Capability");
-    expect(overviewPanelSource).toContain("native tools");
+    expect(overviewPanelSource).toContain("智能体能力分");
+    expect(overviewPanelSource).toContain("本地工具");
+  });
+
+  it("routes Overview settings shortcuts to precise Settings subsections", () => {
+    expect(overviewPanelSource).toContain("NavigationTargetId");
+    expect(overviewPanelSource).toContain('["model-settings", "配置模型"]');
+    expect(overviewPanelSource).toContain('target: "model-settings"');
+    expect(overviewPanelSource).not.toContain('target: "settings"');
+  });
+
+  it("announces Settings status changes and confirms destructive memory deletes", () => {
+    expect(overviewPanelSource).toContain(
+      'role={status.kind === "error" ? "alert" : "status"}',
+    );
+    expect(memoryPanelSource).toContain(
+      'role={status.kind === "error" ? "alert" : "status"}',
+    );
+    expect(memoryPanelSource).toContain("window.confirm");
+    expect(memoryPanelSource).toContain("此操作不可撤销");
+    expect(memoryPanelSource).toContain("删除本地长期记忆，不可撤销");
   });
 
   it("surfaces child handoff review gates in Runs", () => {
@@ -716,7 +745,8 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(memoryPanelSource).toContain("raw-history-panel");
     expect(memoryPanelSource).toContain("raw-history-action-row");
     expect(memoryPanelSource).toContain("searchRawHistory");
-    expect(memoryPanelSource).toContain("Raw History");
+    expect(memoryPanelSource).toContain("原始历史");
+    expect(memoryPanelSource).toContain("工作区范围");
     expect(styles).toContain(".raw-history-panel");
     expect(styles).toContain("repeat(auto-fit, minmax(min(100%, 160px), 1fr))");
     expect(styles).toContain(".raw-history-action-row");
@@ -732,6 +762,10 @@ describe("Design System — Notion-inspired app shell", () => {
   it("renders technical surfaces as collapsed Settings secondary sections", () => {
     expect(appSource).toContain("SettingsSectionShell");
     expect(appSource).toContain("getSettingsNavigationSections");
+    expect(appSource).toContain("getSettingsNavigationGroups");
+    expect(appSource).toContain("getSettingsNavigationSection");
+    expect(appSource).toContain("getStartupNavigationTarget");
+    expect(appSource).toContain("getStartupSettingsNavigationSection");
     expect(appSource).toContain("ToolsPanel");
     expect(appSource).toContain("MemoryPanel");
     expect(appSource).toContain("LearningReviewPanel");
@@ -743,6 +777,11 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(appSource).not.toContain("activeSection.id === \"evals\"");
     expect(styles).toContain(".settings-section-shell");
     expect(styles).toContain(".settings-section-nav");
+    expect(styles).toContain(".settings-section-nav-heading");
+    expect(styles).toContain(".settings-section-group");
+    expect(styles).toContain(".settings-section-intent");
+    expect(styles).toContain(".settings-section-priority");
+    expect(styles).toContain(".settings-section-body-header");
     expect(styles).toContain(".settings-section-body");
     expect(styles).toContain("overflow-x: clip");
     expect(styles).toContain("repeat(auto-fit, minmax(min(100%, 240px), 1fr))");
@@ -760,6 +799,34 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".settings-section-body.is-system-overview");
     expect(styles).toContain("background: var(--glass-panel-muted);");
     expect(styles).toContain("background: var(--glass-panel-muted-strong);");
+  });
+
+  it("keeps Settings subpage navigation deep-linkable and intent grouped", () => {
+    expect(appSource).toContain("type NavigationTargetId");
+    expect(appSource).toContain("onClick={() => navigateTo(section.id)}");
+    expect(appSource).toContain(
+      "navigateTo(getStartupNavigationTarget(window.location.hash))",
+    );
+    expect(appSource).not.toContain("onSelect={setActiveSettingsSectionId}");
+    expect(appSource).toContain("设置路径");
+    expect(appSource).toContain("按意图分组");
+    expect(appSource).toContain("formatSettingsPriority");
+    expect(appSource).toContain("高频路径");
+    expect(appSource).toContain("安全路径");
+    expect(appSource).toContain("审查路径");
+    expect(appSource).toContain("aria-current");
+  });
+
+  it("commits the v3.2.1 integrated UI/UX design system", () => {
+    expect(existsSync(uiUxDesignSystemPath)).toBe(true);
+    expect(uiUxDesignSystemSource).toContain("v3.2.1");
+    expect(uiUxDesignSystemSource).toContain("统一体验系统");
+    expect(uiUxDesignSystemSource).toContain("Settings 治理中心");
+    expect(uiUxDesignSystemSource).toContain("设计语言");
+    expect(uiUxDesignSystemSource).toContain("配色系统");
+    expect(uiUxDesignSystemSource).toContain("图标系统");
+    expect(uiUxDesignSystemSource).toContain("VI 规范");
+    expect(uiUxDesignSystemSource).toContain("95 分");
   });
 
   it("moves Overview diagnostics into the Settings system section", () => {

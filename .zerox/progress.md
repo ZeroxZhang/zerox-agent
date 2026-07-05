@@ -5971,3 +5971,78 @@
   - Annotated tag `v3.2.0` pushed to origin.
   - GitHub Release `v3.2.0` is published as Latest at https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.2.0 with five uploaded assets: DMG, ZIP, two blockmaps, and `latest-mac.yml`.
   - Remote release asset digests match the local SHA256 values above.
+
+## 2026-07-06 - Zerox Agent v3.2.1 Unified UI/UX Design System And Settings IA
+
+- Request:
+  - Launch the v3.2.1 iteration focused on interface design and user interaction experience.
+  - Dispatch product, interaction, and UX designers independently, then have the design director integrate a unified language, design specs, color system, icon/text system, and VI standards.
+  - Prioritize visual consistency and Settings information hierarchy by user path, priority, and intent.
+  - Require design director and UX expert review scores above 95 before marking the goal complete.
+  - After acceptance, review, package, release, push, and update the v3.2.1 release.
+- Feature tracking:
+  - Added one active feature: `P33-v3.2.1-ui-ux-design-system-settings-ia`.
+  - P33 is marked `done` after focused tests, full verify, production smoke, harness check, multi-viewport targeted smoke, design director score 96/100, UX expert score 96/100, release packaging, and packaged-app smoke.
+- Changed areas:
+  - `.zerox/feature_list.json`, `.zerox/progress.md`, `package.json`, `package-lock.json`, `README.md`
+  - `docs/design/zerox-agent-3-2-1-ui-ux-design-system.md`
+  - `docs/superpowers/plans/2026-07-06-v3-2-1-ui-ux-design-system-settings-ia.md`
+  - `src/shared/navigation.ts`, `src/shared/navigation.test.ts`
+  - `src/main/main.ts`, `src/main/smokeMode.ts`, `src/main/smokeMode.test.ts`
+  - `src/renderer/App.tsx`, `src/renderer/components/OverviewPanel.tsx`, `src/renderer/components/MemoryPanel.tsx`, `src/renderer/components/ToolsPanel.tsx`
+  - `src/renderer/styles/tokens.css`, `src/renderer/styles/app-shell.css`, `src/renderer/styles/cards.css`, `src/renderer/styles/responsive.css`
+  - `src/renderer/materialDesign.test.ts`, `src/shared/packageScripts.test.ts`, `src/shared/readme.test.ts`
+- Design and planning evidence:
+  - Product designer, interaction designer, and UX designer completed independent read-only planning.
+  - Design director integrated the direction as: "安静的本地玻璃控制台" with cool color, low noise, explicit permissions, inspectable trajectories, recoverable failures, and reviewed learning.
+  - Published the canonical design-system file covering design language, color system, typography, icon system, VI rules, Settings IA, interaction patterns, accessibility, responsive QA, and 95-point release rubric.
+  - Published the development plan with workstreams, scope boundaries, implementation order, and release acceptance commands.
+- Implementation evidence:
+  - Settings IA now groups navigation by user intent: `启动配置` -> 模型, `能力与边界` -> 工具/记忆/技能, `审核与质量` -> 学习/评测/系统.
+  - Default `#settings` opens `model-settings`; `#overview` canonicalizes to `#system-overview`; `#tools`, `#memory`, `#learning`, and `#evals` preserve deep links through startup/refresh.
+  - Settings secondary navigation clicks now update the hash instead of local state only.
+  - Settings body has a consistent shell header, intent tags, priority tags, grouped nav, cool glass styling, and responsive single-column behavior.
+  - Overview shortcuts and missing-model attention items target `model-settings` directly.
+  - Main and Settings navigation expose `aria-current`; Overview, Tools, and Memory status messages expose `role=status/alert` with `aria-live`.
+  - Memory deletion now asks for explicit confirmation and states the local long-term memory deletion is irreversible.
+  - User-visible English technical labels in Overview and Memory were localized: `Harness` -> `本地基线分`, `Agent Capability` -> `智能体能力分`, `Raw History` -> `原始历史`, and `Workspace Scope` -> `工作区范围`.
+  - Smoke mode supports `BUILDING_AGENT_SMOKE_HASH` and `BUILDING_AGENT_SMOKE_EXPECTED_HASH` so targeted production smoke can assert final route hashes and horizontal overflow.
+- Initial review evidence:
+  - Design director first review: `CHANGES_REQUIRED`, 92/100, blocked on Settings deep links and refresh preservation.
+  - UX expert first review: `CHANGES_REQUIRED`, 91/100, blocked on Settings deep links, Overview shortcut targets, `aria-current`/live regions, and memory delete risk closure.
+  - All blockers were fixed before final review.
+- Final review evidence:
+  - Design director final review: `ACCEPTED`, 96/100, >=95.
+  - UX expert final review: `ACCEPTED`, 96/100, >=95.
+- Code review evidence:
+  - Ran the local `/review` checklist against the v3.2.1 diff, focusing on Settings routing, smoke hash behavior, permission/sandbox boundaries, destructive actions, accessibility semantics, and release metadata.
+  - Auto-fixed one informational item: removed an unused generated `targetHash` constant from the smoke renderer check script and updated `src/main/smokeMode.test.ts` to assert the behavior through `expectedHash` and `hashMatches`.
+  - No remaining critical or informational code review findings after the fix.
+  - Attempted to persist the local gstack review log, but `gstack-review-log` requires `bun` for JSON validation and `bun` is not installed in this shell; this progress entry is the durable review evidence.
+- Verification evidence:
+  - `./init.sh` -> passed harness check and packageScripts focused test before implementation.
+  - Focused test after implementation: `npm test -- src/shared/navigation.test.ts src/renderer/materialDesign.test.ts src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 4 files / 84 tests passed.
+  - Focused test after smoke hash and deep-link fixes: `npm test -- src/main/smokeMode.test.ts src/shared/navigation.test.ts src/renderer/materialDesign.test.ts` -> 3 files / 92 tests passed.
+  - Post-review focused test: `npm test -- src/shared/navigation.test.ts src/renderer/materialDesign.test.ts src/shared/packageScripts.test.ts src/shared/readme.test.ts src/main/smokeMode.test.ts` -> 5 files / 103 tests passed.
+  - `npm test` -> 188 files / 1317 tests passed.
+  - `npm run build` -> passed. Vite reported the existing large chunk warning only.
+  - `npm run verify` -> passed: tests/build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local un-packaged smoke used JSON fallback after the existing better-sqlite3 ABI mismatch.
+  - `npm run harness:check` -> passed.
+  - Targeted Electron smoke:
+    - `#settings` 1280x720 -> passed.
+    - `#settings` 1440x900 -> passed.
+    - `#memory` 390x844 with final hash assertion -> passed.
+    - `#tools` 640x844 with final hash assertion -> passed.
+    - `#overview` 980x800 with expected canonical hash `#system-overview` -> passed.
+  - `git diff --check` -> passed.
+- Release packaging evidence:
+  - `npm run dist:mac` -> passed; regenerated unsigned macOS arm64 DMG, ZIP, blockmaps, `latest-mac.yml`, and `release/mac-arm64/Zerox Agent.app` for v3.2.1.
+  - `release/latest-mac.yml` reports `version: 3.2.1` and update URLs `Zerox-Agent-3.2.1-arm64-mac.zip` / `Zerox-Agent-3.2.1-arm64.dmg`.
+  - Copied formal upload assets to the `Zerox-Agent-3.2.1-*` names referenced by `latest-mac.yml`.
+  - `BUILDING_AGENT_SMOKE_REQUIRED_TEXTS=v3.2.1 npm run smoke:prod:built` -> passed; renderer rendered agent chat UI. Note: local built smoke used JSON fallback after the existing better-sqlite3 ABI mismatch.
+  - `release/Zerox-Agent-3.2.1-arm64.dmg` (122M, sha256 `34a23a9886b0dc0fdb80cd99ecac01b87ac79877b0d29a1a2017942d8951f8b7`)
+  - `release/Zerox-Agent-3.2.1-arm64-mac.zip` (333M, sha256 `2064f20cbfb55d2e95f64353ea0a42207b6b9c241e6bcaa3296944119f9c8eae`)
+  - `release/Zerox-Agent-3.2.1-arm64.dmg.blockmap` (132K, sha256 `2d4eb91bf898a932f297b8b595bf13045fc9c84b2ddc82266b9f9734d586cbe8`)
+  - `release/Zerox-Agent-3.2.1-arm64-mac.zip.blockmap` (335K, sha256 `5590d717657d0674d652b82c68e2d78d5cb0b3e96b2ca4a815be301a7dc381b8`)
+  - `release/latest-mac.yml` (517B, sha256 `8eb1693b47c31e841962557936cbd4bd151499619a410744e4564490f120a272`)

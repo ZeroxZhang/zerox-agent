@@ -8,7 +8,7 @@ type PackageJson = {
 };
 
 describe("package scripts", () => {
-  it("sets release metadata to v3.2.0", () => {
+  it("sets release metadata to v3.2.1", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -16,12 +16,12 @@ describe("package scripts", () => {
       readFileSync(path.join(process.cwd(), "package-lock.json"), "utf8"),
     ) as { version?: string; packages?: Record<string, { version?: string }> };
 
-    expect(packageJson.version).toBe("3.2.0");
-    expect(packageLock.version).toBe("3.2.0");
-    expect(packageLock.packages?.[""]?.version).toBe("3.2.0");
+    expect(packageJson.version).toBe("3.2.1");
+    expect(packageLock.version).toBe("3.2.1");
+    expect(packageLock.packages?.[""]?.version).toBe("3.2.1");
   });
 
-  it("keeps release gates tracked through v3.2.0", () => {
+  it("keeps release gates tracked through v3.2.1", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -41,6 +41,9 @@ describe("package scripts", () => {
     const p32 = featureList.features.find(
       (feature) => feature.id === "P32-v3.2.0-goal-mode-memory-ingestion-settings-glass",
     );
+    const p33 = featureList.features.find(
+      (feature) => feature.id === "P33-v3.2.1-ui-ux-design-system-settings-ia",
+    );
     const p31 = featureList.features.find(
       (feature) => feature.id === "P31-v3.1.2-window-controls-and-settings-icon",
     );
@@ -54,12 +57,25 @@ describe("package scripts", () => {
       (feature) => feature.id === "P28-v3.0.0-execution-context-spine",
     );
 
-    expect(packageJson.version).toBe("3.2.0");
+    expect(packageJson.version).toBe("3.2.1");
     expect(
-      openFeatureIds.filter((id) => id !== "P32-v3.2.0-goal-mode-memory-ingestion-settings-glass"),
+      openFeatureIds.filter((id) => id !== "P33-v3.2.1-ui-ux-design-system-settings-ia"),
     ).toEqual([]);
     expect(openFeatureIds.length).toBeLessThanOrEqual(1);
-    expect(p32?.status === "in_progress" || p32?.status === "done").toBe(true);
+    expect(p33?.status === "in_progress" || p33?.status === "done").toBe(true);
+    expect(p33).toEqual(
+      expect.objectContaining({
+        id: "P33-v3.2.1-ui-ux-design-system-settings-ia",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("Product designer, interaction designer, and UX designer"),
+          expect.stringContaining("comprehensive UI/UX design-system file"),
+          expect.stringContaining("Settings information architecture is reordered"),
+          expect.stringContaining("Design director and UX expert review"),
+          expect.stringContaining("package metadata reports version 3.2.1"),
+        ]),
+      }),
+    );
+    expect(p32?.status).toBe("done");
     expect(p32).toEqual(
       expect.objectContaining({
         id: "P32-v3.2.0-goal-mode-memory-ingestion-settings-glass",

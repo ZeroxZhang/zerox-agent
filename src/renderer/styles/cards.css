@@ -56,6 +56,12 @@
   max-width: 100%;
   min-width: 0;
   overflow-x: clip;
+  border-color: var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: var(--glass-panel-muted-strong);
+  box-shadow: 0 14px 42px rgba(31, 41, 55, 0.045);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
 }
 
 .overview-layout {
@@ -261,7 +267,7 @@
   padding: var(--space-3);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-sm);
-  background: var(--glass-surface);
+  background: var(--glass-panel-inset);
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
 }
@@ -303,7 +309,7 @@
   border: 1px solid var(--border-default);
   border-radius: var(--radius-sm);
   padding: var(--space-3);
-  background: var(--glass-surface);
+  background: var(--glass-panel-inset);
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
 }

@@ -27,10 +27,15 @@ import {
   getDefaultSettingsNavigationSection,
   getNavigationSection,
   getNavigationSections,
+  getSettingsNavigationGroups,
+  getSettingsNavigationSection,
   getSettingsNavigationSections,
+  getStartupNavigationTarget,
+  getStartupSettingsNavigationSection,
   getStartupNavigationSection,
   type NavigationSection,
   type NavigationSectionId,
+  type NavigationTargetId,
   type SettingsNavigationSectionId,
 } from "../shared/navigation";
 
@@ -80,10 +85,7 @@ function getStartupSectionId(): NavigationSectionId {
 }
 
 function getStartupSettingsSectionId(): SettingsNavigationSectionId {
-  const hash = window.location.hash.replace(/^#/, "");
-  return getSettingsNavigationSections().some((section) => section.id === hash)
-    ? (hash as SettingsNavigationSectionId)
-    : getDefaultSettingsNavigationSection().id;
+  return getStartupSettingsNavigationSection(window.location.hash).id;
 }
 
 export function App() {
@@ -109,7 +111,7 @@ export function App() {
   const [renameSessionDraft, setRenameSessionDraft] =
     useState<RenameSessionDraft | null>(null);
 
-  function navigateTo(sectionId: NavigationSectionId) {
+  function navigateTo(sectionId: NavigationTargetId) {
     const settingsSection = getSettingsNavigationSections().find(
       (section) => section.id === sectionId,
     );
@@ -150,7 +152,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    navigateTo(getStartupSectionId());
+    navigateTo(getStartupNavigationTarget(window.location.hash));
   }, []);
 
   useEffect(() => {
@@ -405,6 +407,7 @@ export function App() {
                   section.id === activeSection.id ? "is-active" : ""
                 }`}
                 aria-label={icon.label}
+                aria-current={section.id === activeSection.id ? "page" : undefined}
                 title={section.summary}
                 onClick={() => navigateTo(section.id)}
               >
@@ -567,7 +570,6 @@ export function App() {
           <SettingsSectionShell
             activeSectionId={activeSettingsSectionId}
             onNavigate={navigateTo}
-            onSelect={setActiveSettingsSectionId}
           />
         ) : null}
       </section>
@@ -595,29 +597,70 @@ export function App() {
 
 function SettingsSectionShell(props: {
   activeSectionId: SettingsNavigationSectionId;
-  onNavigate: (sectionId: NavigationSectionId) => void;
-  onSelect: (sectionId: SettingsNavigationSectionId) => void;
+  onNavigate: (sectionId: NavigationTargetId) => void;
 }) {
   const navigateTo = props.onNavigate;
+  const activeSettingsSection = getSettingsNavigationSection(
+    props.activeSectionId,
+  );
 
   return (
     <section className="settings-section-shell" aria-label="设置分区">
       <aside className="settings-section-nav" aria-label="设置菜单">
-        {getSettingsNavigationSections().map((section) => (
-          <button
-            key={section.id}
-            className={section.id === props.activeSectionId ? "is-active" : ""}
-            type="button"
-            onClick={() => props.onSelect(section.id)}
-          >
-            <strong>{section.label}</strong>
-            <span>{section.summary}</span>
-          </button>
+        <div className="settings-section-nav-heading">
+          <span>设置路径</span>
+          <strong>按意图分组</strong>
+        </div>
+        {getSettingsNavigationGroups().map((group) => (
+          <div className="settings-section-group" key={group.id}>
+            <div className="settings-section-group-heading">
+              <strong>{group.label}</strong>
+              <span>{group.summary}</span>
+            </div>
+            {group.sectionIds.map((sectionId) => {
+              const section = getSettingsNavigationSection(sectionId);
+              return (
+                <button
+                  key={section.id}
+                  className={
+                    section.id === props.activeSectionId ? "is-active" : ""
+                  }
+                  aria-current={
+                    section.id === props.activeSectionId ? "page" : undefined
+                  }
+                  type="button"
+                  onClick={() => navigateTo(section.id)}
+                >
+                  <span className="settings-section-item-main">
+                    <strong>{section.label}</strong>
+                    <span>{section.summary}</span>
+                  </span>
+                  <span
+                    className={`settings-section-intent is-${section.priority}`}
+                  >
+                    {section.intent}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         ))}
       </aside>
       <section
         className={`settings-section-body is-${props.activeSectionId}`}
       >
+        <header className="settings-section-body-header">
+          <div>
+            <p className="kicker">{activeSettingsSection.module}</p>
+            <h2>{activeSettingsSection.label}</h2>
+            <span>{activeSettingsSection.summary}</span>
+          </div>
+          <span
+            className={`settings-section-priority is-${activeSettingsSection.priority}`}
+          >
+            {formatSettingsPriority(activeSettingsSection.priority)}
+          </span>
+        </header>
         {props.activeSectionId === "system-overview" ? (
           <OverviewPanel onNavigate={navigateTo} />
         ) : null}
@@ -630,6 +673,14 @@ function SettingsSectionShell(props: {
       </section>
     </section>
   );
+}
+
+function formatSettingsPriority(
+  priority: ReturnType<typeof getSettingsNavigationSection>["priority"],
+): string {
+  if (priority === "primary") return "高频路径";
+  if (priority === "safety") return "安全路径";
+  return "审查路径";
 }
 
 function SidebarSessionRow(props: {

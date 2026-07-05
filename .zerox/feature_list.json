@@ -2270,6 +2270,56 @@
         "npm run harness:check",
         "git diff --check"
       ]
+    },
+    {
+      "id": "P33-v3.2.1-ui-ux-design-system-settings-ia",
+      "priority": 63,
+      "status": "done",
+      "title": "v3.2.1 Unified UI/UX design system and Settings information architecture",
+      "files": [
+        "docs/design/zerox-agent-3-2-1-ui-ux-design-system.md",
+        "docs/superpowers/plans/2026-07-06-v3-2-1-ui-ux-design-system-settings-ia.md",
+        "src/shared/navigation.ts",
+        "src/shared/navigation.test.ts",
+        "src/renderer/App.tsx",
+        "src/main/main.ts",
+        "src/main/smokeMode.ts",
+        "src/main/smokeMode.test.ts",
+        "src/renderer/styles/tokens.css",
+        "src/renderer/styles/app-shell.css",
+        "src/renderer/styles/cards.css",
+        "src/renderer/styles/responsive.css",
+        "src/renderer/materialDesign.test.ts",
+        "src/shared/packageScripts.test.ts",
+        "src/shared/readme.test.ts",
+        "README.md",
+        "package.json",
+        "package-lock.json",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md"
+      ],
+      "definitionOfDone": [
+        "Product designer, interaction designer, and UX designer produce independent v3.2.1 goals and plans; the design director integrates them into a single design-system artifact",
+        "A comprehensive UI/UX design-system file defines design language, color system, typography, iconography, copy tone, VI rules, interaction patterns, accessibility, responsive behavior, and release QA rubric",
+        "Settings information architecture is reordered by user intent and operation priority with grouped navigation, page-level context, and consistent section metadata",
+        "Renderer styling applies a unified cool glass language to Settings navigation, body headers, action bands, advanced sections, and responsive layouts without introducing page overflow",
+        "Design director and UX expert review the implementation with a score of at least 95 before release packaging",
+        "package metadata reports version 3.2.1 in package.json and package-lock.json",
+        "README current release and download example reflect v3.2.1",
+        "GitHub Release v3.2.1 is published with regenerated macOS assets and the release branch/tag are pushed"
+      ],
+      "verification": [
+        "npm test -- src/shared/navigation.test.ts src/renderer/materialDesign.test.ts src/shared/packageScripts.test.ts src/shared/readme.test.ts",
+        "npm test",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "npm run dist:mac",
+        "BUILDING_AGENT_SMOKE_REQUIRED_TEXTS=v3.2.1 npm run smoke:prod:built",
+        "Design director and UX expert review score >= 95",
+        "git diff --check"
+      ]
     }
   ]
 }

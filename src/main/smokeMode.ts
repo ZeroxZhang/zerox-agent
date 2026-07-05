@@ -1,9 +1,11 @@
 export type SmokeModeOptions = {
   enabled: boolean;
+  expectedHash: string | null;
   performanceEnabled: boolean;
   readySelector: string;
   requiredTexts: string[];
   requireDesktopApi: boolean;
+  targetHash: string | null;
   timeoutMs: number;
   viewport: { width: number; height: number } | null;
   performanceThresholds: SmokePerformanceThresholds;
@@ -15,6 +17,8 @@ export type SmokeRendererCheckResult = {
   hasRoot: boolean;
   hasDesktopApi: boolean;
   hasHorizontalOverflow: boolean;
+  hash: string;
+  hashMatches: boolean;
   missingTexts: string[];
   scrollWidth: number;
   clientWidth: number;
@@ -81,12 +85,14 @@ export function getSmokeModeOptions(
 
   return {
     enabled: env.BUILDING_AGENT_SMOKE === "1",
+    expectedHash: parseTargetHash(env.BUILDING_AGENT_SMOKE_EXPECTED_HASH),
     performanceEnabled: env.BUILDING_AGENT_PERF_SMOKE === "1",
     readySelector:
       env.BUILDING_AGENT_SMOKE_READY_SELECTOR?.trim() ||
       smokeRendererReadySelector,
     requiredTexts: parseRequiredTexts(env.BUILDING_AGENT_SMOKE_REQUIRED_TEXTS),
     requireDesktopApi: env.BUILDING_AGENT_SMOKE_REQUIRE_DESKTOP_API !== "0",
+    targetHash: parseTargetHash(env.BUILDING_AGENT_SMOKE_HASH),
     timeoutMs:
       Number.isFinite(timeoutMs) && timeoutMs > 0
         ? timeoutMs
@@ -121,6 +127,8 @@ export function getSmokeRendererCheckScript(
   options: Pick<
     SmokeModeOptions,
     "readySelector" | "requiredTexts" | "requireDesktopApi" | "timeoutMs"
+    | "targetHash"
+    | "expectedHash"
   > =
     getSmokeModeOptions({}),
 ): string {
@@ -128,6 +136,7 @@ export function getSmokeRendererCheckScript(
     const readySelector = ${JSON.stringify(options.readySelector)};
     const requiredTexts = ${JSON.stringify(options.requiredTexts)};
     const requireDesktopApi = ${JSON.stringify(options.requireDesktopApi)};
+    const expectedHash = ${JSON.stringify(options.expectedHash ?? options.targetHash)};
     const startedAt = Date.now();
     const timeoutMs = ${JSON.stringify(options.timeoutMs)};
 
@@ -140,13 +149,17 @@ export function getSmokeRendererCheckScript(
       const scrollWidth = document.documentElement.scrollWidth;
       const clientWidth = document.documentElement.clientWidth;
       const hasHorizontalOverflow = scrollWidth > clientWidth;
+      const hash = window.location.hash;
+      const hashMatches = !expectedHash || hash === expectedHash;
 
       return {
-        ok: Boolean(readyElement) && missingTexts.length === 0 && (!requireDesktopApi || hasDesktopApi) && !hasHorizontalOverflow,
+        ok: Boolean(readyElement) && missingTexts.length === 0 && (!requireDesktopApi || hasDesktopApi) && !hasHorizontalOverflow && hashMatches,
         hasReadyElement: Boolean(readyElement),
         hasRoot: Boolean(root),
         hasDesktopApi,
         hasHorizontalOverflow,
+        hash,
+        hashMatches,
         missingTexts,
         scrollWidth,
         clientWidth,
@@ -189,7 +202,9 @@ export function isSmokeRendererCheckResult(
     typeof result.clientWidth === "number" &&
     typeof result.rootTextLength === "number" &&
     typeof result.title === "string" &&
-    typeof result.locationHref === "string"
+    typeof result.locationHref === "string" &&
+    typeof result.hash === "string" &&
+    typeof result.hashMatches === "boolean"
   );
 }
 
@@ -632,6 +647,7 @@ export function getSmokeRendererFailureMessage(result: unknown): string {
     `desktopApi=${result.hasDesktopApi ? "present" : "missing"}`,
     `missingTexts=${result.missingTexts.join(",") || "none"}`,
     `horizontalOverflow=${result.hasHorizontalOverflow} scrollWidth=${result.scrollWidth} clientWidth=${result.clientWidth}`,
+    `hash=${result.hash || "none"} hashMatches=${result.hashMatches}`,
     `rootTextLength=${result.rootTextLength}`,
     `title=${result.title}`,
     `url=${result.locationHref}`,
@@ -671,6 +687,15 @@ function parseViewport(
   }
 
   return { width, height };
+}
+
+function parseTargetHash(value: string | undefined): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  return trimmed.startsWith("#") ? trimmed : `#${trimmed}`;
 }
 
 function parsePositiveNumber(value: string | undefined, fallback: number): number {

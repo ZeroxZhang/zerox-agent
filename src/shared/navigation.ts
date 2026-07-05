@@ -20,6 +20,12 @@ export type SettingsNavigationSectionId =
   | "learning"
   | "evals";
 
+export type NavigationTargetId =
+  | NavigationSectionId
+  | SettingsNavigationSectionId;
+
+export type SettingsNavigationPriority = "primary" | "safety" | "review";
+
 export type NavigationSection = {
   id: NavigationSectionId;
   label: string;
@@ -30,9 +36,18 @@ export type NavigationSection = {
 
 export type SettingsNavigationSection = {
   id: SettingsNavigationSectionId;
+  intent: string;
   label: string;
   module: string;
+  priority: SettingsNavigationPriority;
   summary: string;
+};
+
+export type SettingsNavigationGroup = {
+  id: string;
+  label: string;
+  summary: string;
+  sectionIds: SettingsNavigationSectionId[];
 };
 
 const navigationSections: NavigationSection[] = [
@@ -73,57 +88,92 @@ const navigationSections: NavigationSection[] = [
     id: "settings",
     label: "设置",
     module: "配置",
-    summary: "OpenAI-compatible 对话、embedding、密钥和运行默认值。",
+    summary: "按模型连接、权限、记忆、审核和系统健康组织本地配置。",
     details: [
-      "保存 base URL、模型名和运行默认值。",
-      "用本地桌面存储加密 API Key。",
-      "把对话和 embedding 设置放在同一个操作界面。",
+      "先完成模型连接，再进入权限和本地记忆配置。",
+      "把高风险工具、可学习内容和评测样例放入可审计路径。",
+      "系统健康保留为状态面板，不打断首次配置。",
     ],
   },
 ];
 
 const settingsNavigationSections: SettingsNavigationSection[] = [
   {
-    id: "system-overview",
-    label: "系统",
-    module: "系统",
-    summary: "系统健康、最近运行、待处理问题和下一步动作。",
-  },
-  {
     id: "model-settings",
+    intent: "首次配置",
     label: "模型",
-    module: "配置",
-    summary: "OpenAI-compatible 对话、embedding、密钥和运行默认值。",
-  },
-  {
-    id: "skills",
-    label: "技能",
-    module: "本地能力",
-    summary: "本地 SKILL.md 发现与执行元数据。",
+    module: "连接",
+    priority: "primary",
+    summary: "API Key、模型、embedding 和生成默认值。",
   },
   {
     id: "tools",
+    intent: "安全边界",
     label: "工具",
     module: "权限",
-    summary: "文件、shell、web_search 和 web_fetch 权限。",
+    priority: "safety",
+    summary: "文件、shell、web 和动态工具授权审计。",
   },
   {
     id: "memory",
+    intent: "长期上下文",
     label: "记忆",
     module: "本地记忆",
-    summary: "支持 embedding 和导出的本地长期记忆。",
+    priority: "primary",
+    summary: "必需记忆、系统长期记忆和待审核习惯。",
+  },
+  {
+    id: "skills",
+    intent: "扩展能力",
+    label: "技能",
+    module: "本地能力",
+    priority: "primary",
+    summary: "本地 SKILL.md 发现与执行元数据。",
   },
   {
     id: "learning",
+    intent: "人工审核",
     label: "学习",
     module: "审核",
-    summary: "从运行轨迹提取候选经验，并由用户审核后写入记忆。",
+    priority: "review",
+    summary: "从运行轨迹提取候选经验并等待用户确认。",
   },
   {
     id: "evals",
+    intent: "回归质量",
     label: "评测",
     module: "审核",
-    summary: "审核运行轨迹生成的评测候选，并提升为固定回归样例。",
+    priority: "review",
+    summary: "把已确认轨迹提升为固定回归样例。",
+  },
+  {
+    id: "system-overview",
+    intent: "系统状态",
+    label: "系统",
+    module: "状态",
+    priority: "review",
+    summary: "系统健康、最近运行、待处理问题和下一步动作。",
+  },
+];
+
+const settingsNavigationGroups: SettingsNavigationGroup[] = [
+  {
+    id: "setup",
+    label: "启动配置",
+    summary: "先让智能体能稳定连接和执行。",
+    sectionIds: ["model-settings"],
+  },
+  {
+    id: "capability",
+    label: "能力与边界",
+    summary: "管理本地能力、权限和长期上下文。",
+    sectionIds: ["tools", "memory", "skills"],
+  },
+  {
+    id: "review",
+    label: "审核与质量",
+    summary: "保留用户确认和回归证据。",
+    sectionIds: ["learning", "evals", "system-overview"],
   },
 ];
 
@@ -147,12 +197,40 @@ export function getStartupNavigationSection(hash: string): NavigationSection {
   return getNavigationSection(hash.replace(/^#/, ""));
 }
 
+export function getStartupNavigationTarget(hash: string): NavigationTargetId {
+  const rawId = hash.replace(/^#/, "");
+  const settingsId = resolveSettingsNavigationId(rawId);
+  return settingsId ?? getStartupNavigationSection(hash).id;
+}
+
 export function getSettingsNavigationSections(): SettingsNavigationSection[] {
   return settingsNavigationSections;
 }
 
 export function getDefaultSettingsNavigationSection(): SettingsNavigationSection {
   return settingsNavigationSections[0];
+}
+
+export function getStartupSettingsNavigationSection(
+  hash: string,
+): SettingsNavigationSection {
+  const settingsId = resolveSettingsNavigationId(hash.replace(/^#/, ""));
+  return settingsId
+    ? getSettingsNavigationSection(settingsId)
+    : getDefaultSettingsNavigationSection();
+}
+
+export function getSettingsNavigationSection(
+  id: SettingsNavigationSectionId,
+): SettingsNavigationSection {
+  return (
+    settingsNavigationSections.find((section) => section.id === id) ??
+    getDefaultSettingsNavigationSection()
+  );
+}
+
+export function getSettingsNavigationGroups(): SettingsNavigationGroup[] {
+  return settingsNavigationGroups;
 }
 
 function resolvePrimaryNavigationId(id: string): NavigationSectionId {
@@ -171,4 +249,16 @@ function resolvePrimaryNavigationId(id: string): NavigationSectionId {
   }
 
   return id as NavigationSectionId;
+}
+
+function resolveSettingsNavigationId(
+  id: string,
+): SettingsNavigationSectionId | null {
+  if (id === "overview") {
+    return "system-overview";
+  }
+
+  return settingsNavigationSections.some((section) => section.id === id)
+    ? (id as SettingsNavigationSectionId)
+    : null;
 }

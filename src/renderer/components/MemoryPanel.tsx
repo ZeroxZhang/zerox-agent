@@ -267,6 +267,15 @@ export function MemoryPanel() {
       return;
     }
 
+    if (
+      !window.confirm(
+        "删除这条本地长期记忆？此操作不可撤销，未来规划将不再召回这条记忆。",
+      )
+    ) {
+      setStatus({ kind: "idle", message: "已取消删除记忆。" });
+      return;
+    }
+
     const result = await window.buildingAgent.deleteMemory(memoryId);
 
     if (!result.ok) {
@@ -353,7 +362,7 @@ export function MemoryPanel() {
     if (!window.buildingAgent) {
       setStatus({
         kind: "error",
-        message: "浏览器预览模式无法检索 raw history。",
+        message: "浏览器预览模式无法检索原始历史。",
       });
       return;
     }
@@ -371,7 +380,7 @@ export function MemoryPanel() {
       setRawHistoryAround(null);
       setStatus({
         kind: "error",
-        message: "Raw History 需要 workspaceId 或 sessionId 范围。",
+        message: "原始历史需要 workspaceId 或 sessionId 范围。",
       });
       return;
     }
@@ -386,7 +395,7 @@ export function MemoryPanel() {
     setRawHistoryAround(null);
     setStatus({
       kind: "idle",
-      message: `Raw History ${results.length} 条结果。`,
+      message: `原始历史 ${results.length} 条结果。`,
     });
   }
 
@@ -632,7 +641,7 @@ export function MemoryPanel() {
       <details className="settings-advanced-section memory-advanced-section">
         <summary>
           <span>高级与审计</span>
-          <small>导出、整理、治理、评估、Raw History、画像</small>
+          <small>导出、整理、治理、评估、原始历史、画像</small>
         </summary>
         <div className="settings-advanced-content">
           <div className="settings-actions">
@@ -748,14 +757,14 @@ export function MemoryPanel() {
         </section>
       ) : null}
 
-      <section className="raw-history-panel" aria-label="Raw History">
+      <section className="raw-history-panel" aria-label="原始历史">
         <div className="section-heading">
-          <span>Raw History</span>
+          <span>原始历史</span>
           <small>{rawHistoryResults.length} 条命中</small>
         </div>
         <div className="memory-toolbar raw-history-toolbar">
           <label className="field">
-            <span>Workspace Scope</span>
+            <span>工作区范围</span>
             <input
               onChange={(event) => setRawHistoryWorkspaceId(event.currentTarget.value)}
               placeholder="workspace id"
@@ -763,7 +772,7 @@ export function MemoryPanel() {
             />
           </label>
           <label className="field">
-            <span>Session Scope</span>
+            <span>会话范围</span>
             <input
               onChange={(event) => setRawHistorySessionId(event.currentTarget.value)}
               placeholder="session id"
@@ -971,7 +980,11 @@ export function MemoryPanel() {
             <button className="primary-action" disabled={status.kind === "saving"}>
               保存记忆
             </button>
-            <p className={`settings-message is-${status.kind}`}>
+            <p
+              aria-live={status.kind === "error" ? "assertive" : "polite"}
+              className={`settings-message is-${status.kind}`}
+              role={status.kind === "error" ? "alert" : "status"}
+            >
               {status.message}
             </p>
           </div>
@@ -994,6 +1007,7 @@ export function MemoryPanel() {
                     <button
                       className="danger-action"
                       onClick={() => void handleDelete(memory.id)}
+                      title="删除本地长期记忆，不可撤销"
                       type="button"
                     >
                       删除
