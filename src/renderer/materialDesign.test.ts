@@ -951,9 +951,52 @@ describe("Design System — Soft Blue desktop control surface", () => {
     expect(chatPanelSource).toContain("messages.length === 0");
     expect(chatPanelSource).toContain("agent-home-hero");
     expect(chatPanelSource).toContain("onPickPrompt");
-    expect(chatPanelSource).toContain("今天想让智能体做什么？");
+    expect(chatPanelSource).toContain("让Zerox-Agent帮你做什么？");
     expect(styles).toContain(".agent-home-hero");
     expect(styles).toContain(".home-suggestions");
+  });
+
+  it("keeps the v3.2.3 root background softer and slightly transparent", () => {
+    expect(styles).toContain("--z-app-blue-base: #f8fbfd;");
+    expect(styles).toContain("--z-app-blue: rgb(248 251 253 / 0.96);");
+    expect(styles).toContain("--color-app-bg: var(--z-app-blue);");
+  });
+
+  it("keeps composer mode enabled states on the deep-blue theme color", () => {
+    expect(styles).toContain(
+      ".composer .auto-approval-toggle.is-enabled,\n.composer .composer-goal-mode-button.is-enabled {\n  border-color: var(--color-action-primary);\n  color: var(--text-on-accent);\n  background: var(--color-action-primary);",
+    );
+    expect(styles).toContain(
+      ".composer .auto-approval-toggle.is-enabled:hover,\n.composer .composer-goal-mode-button.is-enabled:hover {\n  border-color: var(--color-action-primary-hover);\n  background: var(--color-action-primary-hover);",
+    );
+  });
+
+  it("uses a unified secondary-page list style for settings and task surfaces", () => {
+    expect(styles).toContain("--secondary-page-outline: #e4edf5;");
+    expect(styles).toContain(
+      "--secondary-page-accent: var(--color-action-primary);",
+    );
+    expect(styles).toContain(
+      ".settings-section-body {\n  display: grid;\n  gap: var(--space-5);\n  width: min(100%, 920px);",
+    );
+    expect(styles).toContain(
+      ".settings-panel,\n.skill-library,\n.task-panel,\n.tools-panel,\n.memory-panel,\n.task-records-panel {",
+    );
+    expect(styles).toContain(
+      ".field-grid,\n.tools-layout,\n.memory-layout,\n.scheduled-tasks-shell,\n.scheduled-task-grid,\n.task-record-focus,\n.task-records-content",
+    );
+    expect(styles).toContain(
+      ".task-record-row.is-selected,\n.timeline-event.is-selected,\n.run-list-item.is-selected,\n.recommendation.is-selected,\n.module-card.is-selected {\n  border-color: var(--secondary-page-accent);",
+    );
+    expect(styles).toContain(
+      ".settings-section-intent.is-safety,\n.settings-section-priority.is-safety {\n  color: var(--text-accent);",
+    );
+    expect(styles).toContain(
+      ".status-pill.is-preview {\n  color: var(--text-accent);",
+    );
+    expect(styles).toContain(
+      ".scheduled-task-meta div + div {\n  border-top: 1px solid var(--secondary-page-outline);",
+    );
   });
 
   it("shows the right context panel only when active work needs it", () => {

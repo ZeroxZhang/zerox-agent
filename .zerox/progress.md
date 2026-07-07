@@ -1,5 +1,79 @@
 # Zerox Harness Progress
 
+## 2026-07-07 - v3.2.3 Home Background and Prompt Polish Release
+
+- Request:
+  - User asked for frontend polish under version `3.2.3`: soften the overall background to `F3F9FE` with some transparency, change the home prompt to `今天让Zerox Agent帮你做什么？`, then package, release, push, and update the GitHub Release.
+  - User then interrupted the first release upload before publication and changed the requested background color to `F8FBFD`; the unpublished draft Release was deleted and the build/release flow restarted.
+  - User then identified two more pre-release UI issues: the home title wrapped awkwardly and should read `让Zerox-Agent帮你做什么？`; composer `自动` and `目标` enabled states were yellow and should use the deep-blue theme highlight.
+  - User then asked for task, task settings, Settings, and similar secondary pages to use the supplied reference style: unified light outline color, a single accent color, and vertical single-column section presentation.
+- Scope:
+  - Surface-only renderer styling and copy change.
+  - No product flow, runtime, backend, provider, tool authorization, workspace sandbox, memory, or goal-mode behavior changes.
+- Changed files:
+  - `src/renderer/styles/tokens.css`
+  - `src/renderer/styles/app-shell.css`
+  - `src/renderer/styles/cards.css`
+  - `src/renderer/styles/composer.css`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/materialDesign.test.ts`
+  - `src/shared/packageScripts.test.ts`
+  - `src/shared/readme.test.ts`
+  - `scripts/capture-visual-qa.mjs`
+  - `docs/design/zerox-agent-3-2-2-qa/01-chat-desktop.png`
+  - `docs/design/zerox-agent-3-2-2-qa/02-runs-desktop.png`
+  - `docs/design/zerox-agent-3-2-2-qa/03-settings-desktop.png`
+  - `docs/design/zerox-agent-3-2-2-qa/04-chat-narrow.png`
+  - `docs/design/zerox-agent-3-2-2-qa/05-settings-narrow.png`
+  - `docs/design/zerox-agent-3-2-2-qa/06-tasks-desktop.png`
+  - `docs/design/zerox-agent-3-2-2-qa/07-tools-settings-desktop.png`
+  - `docs/design/zerox-agent-3-2-2-qa/capture-metrics.json`
+  - `README.md`
+  - `package.json`
+  - `package-lock.json`
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+- Implementation evidence:
+  - Added P35 `v3.2.3 Home background and prompt polish release` to `.zerox/feature_list.json` and marked it `done`.
+  - Updated package metadata and README release/download references from `3.2.2` to `3.2.3`.
+  - Changed the app background primitive to `--z-app-blue-base: #f8fbfd` and the active app background token to `rgb(248 251 253 / 0.96)`.
+  - Changed the empty Chat home hero prompt to `让Zerox-Agent帮你做什么？`.
+  - Changed composer `自动` and `目标` enabled states from warning yellow tokens to the deep-blue action token with white text and deep-blue hover.
+  - Added secondary-page tokens for light outlines, light rows, translucent surfaces, and the single deep-blue accent.
+  - Restyled Settings, Tools, Memory, Scheduled Tasks, and Runs/Task Records shared surfaces toward the reference pattern: centered 920px content, no heavy outer card on the Settings body, light outlined sections, no card shadows, and vertical single-column content grids.
+  - Changed secondary-page safety/review labels and the preview status pill from warning yellow decoration to the same deep-blue accent family.
+  - Extended visual QA capture coverage to Scheduled Tasks and Tools Settings desktop views.
+- Visual QA evidence:
+  - `ELECTRON_DISABLE_SECURITY_WARNINGS=1 ./node_modules/.bin/electron scripts/capture-visual-qa.mjs` -> passed.
+  - Captured Chat desktop `1440x900`, Runs desktop `1440x900`, Settings desktop `1440x900`, Tasks desktop `1440x900`, Tools Settings desktop `1440x900`, Chat narrow `390x844`, and Settings narrow `390x844`.
+  - `capture-metrics.json` shows all 7 views with `overflow=false` and `clipped=0`.
+  - Metrics confirm `colorAppBg=#f8fbfdf5`, `surface=#fff`, and `action=#166bb7`; Chat desktop and Chat narrow include the new home prompt.
+- GREEN / verification evidence:
+  - `./init.sh` -> passed; ran `npm run harness:check` and `npm test -- src/shared/packageScripts.test.ts` successfully.
+  - `npm test -- src/renderer/materialDesign.test.ts src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 3 files / 82 tests passed.
+  - `npm run verify` -> passed: 188 files / 1320 tests, production build, Agent evals 26/26, memory evals 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered the agent chat UI. Existing better-sqlite3 ABI mismatch warning fell back to JSON storage.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+- Packaging evidence:
+  - `npm run dist:mac` -> passed.
+  - Generated distribution assets:
+    - `release/Zerox-Agent-3.2.3-arm64.dmg`
+    - `release/Zerox-Agent-3.2.3-arm64.dmg.blockmap`
+    - `release/Zerox-Agent-3.2.3-arm64-mac.zip`
+    - `release/Zerox-Agent-3.2.3-arm64-mac.zip.blockmap`
+    - `release/latest-mac.yml`
+  - `plutil -p "release/mac-arm64/Zerox Agent.app/Contents/Info.plist" | rg "CFBundleShortVersionString|CFBundleVersion|CFBundleName"` -> confirmed `Zerox Agent`, `3.2.3`, `3.2.3`.
+  - SHA256:
+    - DMG: `f221258de5b0d493242d38f60d1ef9b1109cf33f492dacb0616787b659c0fa34`
+    - DMG blockmap: `745365e0d987baafa1acf34f7e601b8855eba75627a4cc24f419d506b0049061`
+    - ZIP: `a4447a02b2796d4d13797e3b87e80e771fd0c8c8ff7534f4f802c7de9e6df2e7`
+    - ZIP blockmap: `24a142d6494c3c4b8feab40048e2d8f626f682a2cab5bffc307eb9996e478052`
+    - latest-mac.yml: `b08efb577cdb1873732e93f341ccca92866f166b856e06bd938be4fc93972ff9`
+  - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v3.2.3' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+- Final status:
+  - P35 `v3.2.3 Home background and prompt polish release` marked `done`.
+
 ## 2026-07-07 - v3.2.2 Soft Blue Visual System Phase 4 Implementation
 
 - Request:

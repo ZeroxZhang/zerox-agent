@@ -365,9 +365,10 @@
 }
 
 .composer .composer-goal-mode-button.is-enabled {
-  border-color: var(--status-warning-border);
-  color: var(--status-warning-text);
-  background: var(--status-warning-bg);
+  border-color: var(--color-action-primary);
+  color: var(--text-on-accent);
+  background: var(--color-action-primary);
+  box-shadow: var(--shadow-sm);
 }
 
 .composer-icon {
@@ -540,15 +541,16 @@
 
 .composer .auto-approval-toggle.is-enabled,
 .composer .composer-goal-mode-button.is-enabled {
-  border-color: var(--status-warning-border);
-  color: var(--status-warning-text);
-  background: var(--status-warning-bg);
+  border-color: var(--color-action-primary);
+  color: var(--text-on-accent);
+  background: var(--color-action-primary);
+  box-shadow: var(--shadow-sm);
 }
 
 .composer .auto-approval-toggle.is-enabled:hover,
 .composer .composer-goal-mode-button.is-enabled:hover {
-  border-color: var(--status-warning-text);
-  background: color-mix(in srgb, var(--status-warning-bg) 82%, var(--color-surface-primary));
+  border-color: var(--color-action-primary-hover);
+  background: var(--color-action-primary-hover);
 }
 
 .composer-risk-tooltip {

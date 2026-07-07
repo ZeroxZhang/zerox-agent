@@ -226,26 +226,34 @@
 
 .settings-section-intent.is-safety,
 .settings-section-priority.is-safety {
-  color: var(--status-warning-text);
-  background: var(--status-warning-bg);
-  border-color: var(--status-warning-border);
+  color: var(--text-accent);
+  background: var(--secondary-page-row);
+  border-color: var(--secondary-page-outline-strong);
 }
 
 .settings-section-intent.is-review,
 .settings-section-priority.is-review {
-  color: var(--text-secondary);
-  background: var(--bg-inset);
-  border-color: var(--border-default);
+  color: var(--text-accent);
+  background: var(--color-surface-hover);
+  border-color: var(--secondary-page-outline);
+}
+
+.status-pill.is-preview {
+  color: var(--text-accent);
+  background: var(--secondary-page-row);
+  border-color: var(--secondary-page-outline-strong);
 }
 
 .settings-section-body {
   display: grid;
   gap: var(--space-5);
-  padding: var(--space-5);
-  background: var(--color-surface-primary);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-18);
-  box-shadow: var(--shadow-sm);
+  width: min(100%, 920px);
+  margin: 0 auto;
+  padding: var(--space-2) 0 var(--space-8);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .settings-section-body-header {
@@ -255,10 +263,11 @@
   justify-content: space-between;
   gap: var(--space-3);
   min-width: 0;
-  padding: var(--space-4);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-12);
-  background: var(--color-surface-muted);
+  padding: 0 0 var(--space-4);
+  border: 0;
+  border-bottom: 1px solid var(--secondary-page-outline);
+  border-radius: 0;
+  background: transparent;
 }
 
 .settings-section-body-header > div {

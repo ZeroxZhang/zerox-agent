@@ -386,3 +386,177 @@
   min-width: 0;
   grid-template-columns: minmax(0, 1fr) minmax(120px, 180px);
 }
+
+/* v3.2.3 secondary page form/list system: light outline, one accent, one column. */
+.settings-panel,
+.skill-library,
+.task-panel,
+.tools-panel,
+.memory-panel,
+.task-records-panel {
+  width: min(100%, 920px);
+  max-width: 920px;
+  margin: 0 auto;
+  padding: var(--space-5);
+  border: 1px solid var(--secondary-page-outline);
+  border-radius: var(--radius-12);
+  background: var(--secondary-page-surface);
+  box-shadow: none;
+}
+
+.settings-panel,
+.task-panel,
+.tools-panel,
+.memory-panel {
+  gap: var(--space-4);
+}
+
+.settings-header {
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--secondary-page-outline);
+}
+
+.settings-header h3 {
+  font-size: var(--text-xl);
+  font-weight: var(--font-semibold);
+}
+
+.settings-action-band,
+.settings-advanced-section,
+.recommendations,
+.memory-layer-lane,
+.memory-profile-editor,
+.raw-history-panel,
+.maintenance-report,
+.tool-checker,
+.audit-panel,
+.decision-card,
+.task-record-focus,
+.task-record-card,
+.task-record-next,
+.task-record-technical-details,
+.task-record-empty-state,
+.scheduled-task-card {
+  border-color: var(--secondary-page-outline);
+  border-radius: var(--radius-12);
+  background: var(--secondary-page-row);
+  box-shadow: none;
+}
+
+.settings-action-band {
+  align-items: flex-start;
+  padding: var(--space-3) var(--space-4);
+}
+
+.settings-advanced-section {
+  padding: var(--space-4);
+}
+
+.settings-advanced-section[open] > summary {
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--secondary-page-outline);
+}
+
+.field-grid,
+.tools-layout,
+.memory-layout,
+.scheduled-tasks-shell,
+.scheduled-task-grid,
+.task-record-focus,
+.task-records-content,
+.memory-layer-lanes,
+.memory-ingestion-list,
+.recommendation-list,
+.memory-toolbar,
+.maintenance-report dl,
+.run-metrics,
+.run-graph-summary,
+.runtime-grid,
+.runtime-files,
+.runtime-commands {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.scheduled-tasks-panel,
+.task-records-panel {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.scheduled-task-card {
+  grid-template-rows: auto;
+  min-height: 0;
+  padding: var(--space-4);
+}
+
+.scheduled-task-meta {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--secondary-page-outline);
+  border-radius: var(--radius-10);
+  background: var(--secondary-page-surface);
+}
+
+.scheduled-task-meta div {
+  min-width: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.scheduled-task-meta div + div {
+  border-top: 1px solid var(--secondary-page-outline);
+}
+
+.task-row dl div,
+.skill-meta div,
+.memory-card dl div,
+.maintenance-report dl div,
+.connection-result dl div,
+.run-metrics div,
+.inspector-dl div,
+.run-graph-summary div {
+  border-color: var(--secondary-page-outline);
+  background: var(--secondary-page-surface);
+  box-shadow: none;
+}
+
+.task-record-focus {
+  padding: var(--space-4);
+}
+
+.task-record-row,
+.task-record-step,
+.timeline-event,
+.run-list-item,
+.run-summary-card,
+.trajectory-insight,
+.run-graph-gate,
+.kernel-event-card,
+.memory-card,
+.recommendation {
+  border-color: var(--secondary-page-outline);
+  background: var(--secondary-page-row);
+}
+
+.task-record-row.is-selected,
+.timeline-event.is-selected,
+.run-list-item.is-selected,
+.recommendation.is-selected,
+.module-card.is-selected {
+  border-color: var(--secondary-page-accent);
+  background: var(--color-surface-hover);
+}
+
+.scheduled-task-switch.is-on,
+.readiness-progress span {
+  border-color: var(--secondary-page-accent);
+  background: var(--secondary-page-accent);
+}
+
+.task-record-mobile-tabs button.is-active {
+  color: var(--text-on-accent);
+  background: var(--secondary-page-accent);
+}

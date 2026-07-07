@@ -2371,6 +2371,50 @@
         "Independent Principal Design Architect adversarial review accepted",
         "git diff --check"
       ]
+    },
+    {
+      "id": "P35-v3.2.3-home-style-release",
+      "priority": 65,
+      "status": "done",
+      "title": "v3.2.3 Home background and prompt polish release",
+      "files": [
+        "src/renderer/styles/tokens.css",
+        "src/renderer/styles/app-shell.css",
+        "src/renderer/styles/cards.css",
+        "src/renderer/styles/composer.css",
+        "src/renderer/components/AgentChatPanel.tsx",
+        "src/renderer/materialDesign.test.ts",
+        "src/shared/packageScripts.test.ts",
+        "src/shared/readme.test.ts",
+        "scripts/capture-visual-qa.mjs",
+        "docs/design/zerox-agent-3-2-2-qa/",
+        "README.md",
+        "package.json",
+        "package-lock.json",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md"
+      ],
+      "definitionOfDone": [
+        "root app background uses F8FBFD through a slightly transparent app background token",
+        "home prompt reads 让Zerox-Agent帮你做什么？",
+        "composer 自动 and 目标 enabled states use the deep-blue theme color instead of warning yellow",
+        "secondary task, task settings, and Settings subpages use a unified light-outline, single-accent, vertical single-column layout",
+        "secondary-page safety, review, and preview badges use the deep-blue accent family instead of warning yellow decoration",
+        "package metadata reports version 3.2.3 in package.json and package-lock.json",
+        "README current release and download example reflect v3.2.3",
+        "macOS DMG, ZIP, blockmaps, and latest-mac.yml artifacts are regenerated for v3.2.3",
+        "GitHub Release v3.2.3 is published with regenerated macOS assets and the release branch/tag are pushed"
+      ],
+      "verification": [
+        "npm test -- src/renderer/materialDesign.test.ts src/shared/packageScripts.test.ts src/shared/readme.test.ts",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "ELECTRON_DISABLE_SECURITY_WARNINGS=1 ./node_modules/.bin/electron scripts/capture-visual-qa.mjs",
+        "npm run dist:mac",
+        "BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v3.2.3' \"release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent\"",
+        "git diff --check"
+      ]
     }
   ]
 }

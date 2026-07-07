@@ -34,6 +34,20 @@ const views = [
     width: 1440,
   },
   {
+    fileName: "06-tasks-desktop.png",
+    hash: "scheduled-tasks",
+    height: 900,
+    name: "Tasks desktop",
+    width: 1440,
+  },
+  {
+    fileName: "07-tools-settings-desktop.png",
+    hash: "tools",
+    height: 900,
+    name: "Tools settings desktop",
+    width: 1440,
+  },
+  {
     fileName: "04-chat-narrow.png",
     hash: "chat",
     height: 844,

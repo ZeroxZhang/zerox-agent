@@ -2711,7 +2711,7 @@ function AgentHomeHero(props: {
   return (
     <section className="agent-home-hero" aria-label="智能体首页">
       <img src="./logo.png" alt="" aria-hidden="true" />
-      <h2>今天想让智能体做什么？</h2>
+      <h2>让Zerox-Agent帮你做什么？</h2>
       <p>让 Zerox 帮你规划、执行、检查和沉淀本地工作流。</p>
       <div
         className={`home-status-chips ${

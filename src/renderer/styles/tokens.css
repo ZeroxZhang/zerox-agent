@@ -18,7 +18,8 @@
   --z-neutral-500: #667085;
   --z-neutral-600: #475467;
   --z-neutral-900: #101828;
-  --z-app-blue: #eaf4fc;
+  --z-app-blue-base: #f8fbfd;
+  --z-app-blue: rgb(248 251 253 / 0.96);
   --z-app-blue-raised: #f4f9fe;
   --z-green-600: #2e9e6f;
   --z-green-50: #e8f7ef;
@@ -157,6 +158,11 @@
   --card-bg: var(--color-surface-raised);
   --card-border: var(--color-border-subtle);
   --card-radius: 12px;
+  --secondary-page-outline: #e4edf5;
+  --secondary-page-outline-strong: #cfe1ef;
+  --secondary-page-surface: rgb(255 255 255 / 0.82);
+  --secondary-page-row: rgb(248 251 253 / 0.72);
+  --secondary-page-accent: var(--color-action-primary);
   --composer-bg: #ffffff;
   --composer-border: var(--color-border-subtle);
   --composer-radius: 14px;
@@ -288,6 +294,10 @@
     --text-on-accent: #071522;
     --nav-item-bg-active: #102b45;
     --nav-icon-active-text: #071522;
+    --secondary-page-outline: #29445d;
+    --secondary-page-outline-strong: #3a5872;
+    --secondary-page-surface: rgb(15 34 52 / 0.86);
+    --secondary-page-row: rgb(19 40 60 / 0.72);
     --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.22);
     --shadow-sm: 0 8px 20px rgba(0, 0, 0, 0.24);
     --shadow-md: 0 14px 34px rgba(0, 0, 0, 0.28);
