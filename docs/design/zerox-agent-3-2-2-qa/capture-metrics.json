@@ -1,0 +1,126 @@
+{
+  "capturedAt": "2026-07-06T16:27:42.082Z",
+  "source": "scripts/capture-visual-qa.mjs",
+  "views": [
+    {
+      "fileName": "01-chat-desktop.png",
+      "hash": "chat",
+      "height": 900,
+      "name": "Chat desktop",
+      "width": 1440,
+      "metrics": {
+        "activeNavLabel": "会话智能体工作台",
+        "appShellRendered": true,
+        "bodyScrollWidth": 1440,
+        "clippedElementSamples": [],
+        "colorAppBg": "#eaf4fc",
+        "colorSurfacePrimary": "#fff",
+        "colorActionPrimary": "#166bb7",
+        "hash": "#chat",
+        "hasPageHorizontalOverflow": false,
+        "height": 900,
+        "mainText": "Zerox Agent 本地桌面智能体 新会话 会话 任务记录 任务 设置 Pinned 自动任务 调度与本地执行 本地配置 模型、权限与记忆 Recents 当前会话 刚刚 直接发指令给本地智能体 0 条消息 0 tok 文件整理会话 刚刚 整理下载目录并写报告 2 条消息 ~1.3k tok 资料调研会话 刚刚 搜索、抓取、总结网页 2 条消息 ~2.4k tok vpreview by Zerox 新会话 浏览器预览模式，正在展示演示会话 今天想让智能体做什么？ 让 Zerox 帮你规划、执行、检查和沉淀本地工作流。 模型：已配置 技能：1 个 任务：1 个启用 记忆：1 条 分析最近一次失败任务，并告诉我怎么修 整理下载目录，生成一份 Markdown 报告 把这个目标拆成可执行计划 工作区 默认工作区 默认工作区 自动 自动授权：智能体可在本次会话中自动批准工具请求。风险：可能执行文件、shell 或网络操作，请仅在任务和工作区可信时开启。 目标 目标模式：发送内容会被翻译为可执行目标草案，确认后智能体可连续规划和执行。风险：可能触发多步工具调用，请先检查目标草案和验收标准。 中断当前任务 发送消息",
+        "rootScrollHeight": 900,
+        "rootScrollWidth": 1440,
+        "settingsShellRendered": false,
+        "width": 1440
+      }
+    },
+    {
+      "fileName": "02-runs-desktop.png",
+      "hash": "runs",
+      "height": 900,
+      "name": "Runs desktop",
+      "width": 1440,
+      "metrics": {
+        "activeNavLabel": "任务记录活动",
+        "appShellRendered": true,
+        "bodyScrollWidth": 1440,
+        "clippedElementSamples": [],
+        "colorAppBg": "#eaf4fc",
+        "colorSurfacePrimary": "#fff",
+        "colorActionPrimary": "#166bb7",
+        "hash": "#runs",
+        "hasPageHorizontalOverflow": false,
+        "height": 900,
+        "mainText": "Zerox Agent 本地桌面智能体 新会话 会话 任务记录 任务 设置 Pinned 自动任务 调度与本地执行 本地配置 模型、权限与记忆 Recents 当前会话 刚刚 直接发指令给本地智能体 0 条消息 0 tok 文件整理会话 刚刚 整理下载目录并写报告 2 条消息 ~1.3k tok 资料调研会话 刚刚 搜索、抓取、总结网页 2 条消息 ~2.4k tok vpreview by Zerox 活动 任务记录 打开会话窗口 演示数据预览 任务概览 看任务是否完成。需要处理时，直接给你下一步。 打开会话 新任务 需要处理 抓取市场笔记 工具调用被拒绝：web_fetch 的域名不在允许列表中。 下一步 修正问题后重试。 修正后重试 打开会话 查看详情 最近任务 3 次 需要处理 抓取市场笔记 需要处理 · 工具调用被拒绝：web_fetch 的域名不在允许列表中。 已完成 整理下载文件夹 已完成 · 已生成 Markdown 报告，并写入一条情景记忆。 已完成 整理下载文件夹 / executor 已完成 · 子运行完成文件读取，并把结果交还给主运行。 这次发生了什么 简版详情 1 智能体运行开始 已记录这个步骤。 15:30:00 2 收到模型回复 已记录这个步骤。 15:30:02 3 工具权限被拒绝 工具：web_fetch 15:30:03 未生成产物 未写入记忆 ",
+        "rootScrollHeight": 900,
+        "rootScrollWidth": 1440,
+        "settingsShellRendered": false,
+        "width": 1440
+      }
+    },
+    {
+      "fileName": "03-settings-desktop.png",
+      "hash": "model-settings",
+      "height": 900,
+      "name": "Settings desktop",
+      "width": 1440,
+      "metrics": {
+        "activeNavLabel": "设置配置",
+        "appShellRendered": true,
+        "bodyScrollWidth": 1434,
+        "clippedElementSamples": [],
+        "colorAppBg": "#eaf4fc",
+        "colorSurfacePrimary": "#fff",
+        "colorActionPrimary": "#166bb7",
+        "hash": "#model-settings",
+        "hasPageHorizontalOverflow": false,
+        "height": 900,
+        "mainText": "Zerox Agent 本地桌面智能体 新会话 会话 任务记录 任务 设置 Pinned 自动任务 调度与本地执行 本地配置 模型、权限与记忆 Recents 当前会话 刚刚 直接发指令给本地智能体 0 条消息 0 tok 文件整理会话 刚刚 整理下载目录并写报告 2 条消息 ~1.3k tok 资料调研会话 刚刚 搜索、抓取、总结网页 2 条消息 ~2.4k tok vpreview by Zerox 配置 设置 打开会话窗口 演示数据预览 设置路径 按意图分组 启动配置 先让智能体能稳定连接和执行。 模型 API Key、模型、embedding 和生成默认值。 首次配置 能力与边界 管理本地能力、权限和长期上下文。 工具 文件、shell、web 和动态工具授权审计。 安全边界 记忆 必需记忆、系统长期记忆和待审核习惯。 长期上下文 技能 本地 SKILL.md 发现与执行元数据。 扩展能力 审核与质量 保留用户确认和回归证据。 学习 从运行轨迹提取候选经验并等待用户确认。 人工审核 评测 把已确认轨迹提升为固定回归样例。 回归质量 系统 系统健康、最近运行、待处理问题和下一步动作。 系统状态 连接 模型 API Key、模型、embedding 和生成默认值。 高频路径 兼容 OpenAI 接口 模型配置 未保存密钥 接口地址（Base URL） 必填 填写兼容 OpenA",
+        "rootScrollHeight": 1230,
+        "rootScrollWidth": 1434,
+        "settingsShellRendered": true,
+        "width": 1440
+      }
+    },
+    {
+      "fileName": "04-chat-narrow.png",
+      "hash": "chat",
+      "height": 844,
+      "name": "Chat narrow",
+      "width": 390,
+      "metrics": {
+        "activeNavLabel": "会话智能体工作台",
+        "appShellRendered": true,
+        "bodyScrollWidth": 390,
+        "clippedElementSamples": [],
+        "colorAppBg": "#eaf4fc",
+        "colorSurfacePrimary": "#fff",
+        "colorActionPrimary": "#166bb7",
+        "hash": "#chat",
+        "hasPageHorizontalOverflow": false,
+        "height": 844,
+        "mainText": "今天想让智能体做什么？ 让 Zerox 帮你规划、执行、检查和沉淀本地工作流。 模型：已配置 技能：1 个 任务：1 个启用 记忆：1 条 分析最近一次失败任务，并告诉我怎么修 整理下载目录，生成一份 Markdown 报告 把这个目标拆成可执行计划 工作区 默认工作区 默认工作区 自动 自动授权：智能体可在本次会话中自动批准工具请求。风险：可能执行文件、shell 或网络操作，请仅在任务和工作区可信时开启。 目标 目标模式：发送内容会被翻译为可执行目标草案，确认后智能体可连续规划和执行。风险：可能触发多步工具调用，请先检查目标草案和验收标准。 中断当前任务 发送消息",
+        "rootScrollHeight": 844,
+        "rootScrollWidth": 390,
+        "settingsShellRendered": false,
+        "width": 390
+      }
+    },
+    {
+      "fileName": "05-settings-narrow.png",
+      "hash": "model-settings",
+      "height": 844,
+      "name": "Settings narrow",
+      "width": 390,
+      "metrics": {
+        "activeNavLabel": "设置配置",
+        "appShellRendered": true,
+        "bodyScrollWidth": 384,
+        "clippedElementSamples": [],
+        "colorAppBg": "#eaf4fc",
+        "colorSurfacePrimary": "#fff",
+        "colorActionPrimary": "#166bb7",
+        "hash": "#model-settings",
+        "hasPageHorizontalOverflow": false,
+        "height": 844,
+        "mainText": "会话 任务记录 任务 设置 vpreview by Zerox 配置 设置 打开会话窗口 演示数据预览 设置路径 按意图分组 启动配置 先让智能体能稳定连接和执行。 模型 API Key、模型、embedding 和生成默认值。 首次配置 能力与边界 管理本地能力、权限和长期上下文。 工具 文件、shell、web 和动态工具授权审计。 安全边界 记忆 必需记忆、系统长期记忆和待审核习惯。 长期上下文 技能 本地 SKILL.md 发现与执行元数据。 扩展能力 审核与质量 保留用户确认和回归证据。 学习 从运行轨迹提取候选经验并等待用户确认。 人工审核 评测 把已确认轨迹提升为固定回归样例。 回归质量 系统 系统健康、最近运行、待处理问题和下一步动作。 系统状态 连接 模型 API Key、模型、embedding 和生成默认值。 高频路径 兼容 OpenAI 接口 模型配置 未保存密钥 接口地址（Base URL） 必填 填写兼容 OpenAI 的接口根地址，通常以 /v1 结尾。 对话模型 必填 必填。用于会话、任务规划和工具调用。 向量模型（embedding，可选） 选填 不填也能先用关键词和全文检索记忆；以后配置向量模型后再开启语义记忆。 模型密钥（API Key） 首次保存必填 密钥只保存在本机安全存储里，不会回显到界面。 推荐值 第一版建议先用“智能体 / 编程”。只",
+        "rootScrollHeight": 2912,
+        "rootScrollWidth": 384,
+        "settingsShellRendered": true,
+        "width": 390
+      }
+    }
+  ]
+}

@@ -1,0 +1,1119 @@
+{
+  "capturedAt": "2026-07-06T15:23:15.374Z",
+  "results": [
+    {
+      "fileName": "01-chat-empty-desktop.png",
+      "url": "http://127.0.0.1:5173/#chat",
+      "metrics": {
+        "clientWidth": 1440,
+        "focusableCount": 22,
+        "hasHorizontalOverflow": false,
+        "hash": "#chat",
+        "mainText": "Zerox Agent本地桌面智能体新会话会话智能体工作台任务记录活动任务第 4 模块设置配置Pinned自动任务调度与本地执行本地配置模型、权限与记忆Recents当前会话刚刚直接发指令给本地智能体0 条消息0 tok文件整理会话刚刚整理下载目录并写报告2 条消息~1.3k tok资料调研会话刚刚搜索、抓取、总结网页2 条消息~2.4k tokvpreviewby Zerox智能体工作台会话演示数据预览新会话模型：已配置技能：1 个任务：1 个启用记忆：1 条浏览器预览模式",
+        "overflowing": [],
+        "scrollWidth": 1440,
+        "title": "Zerox Agent",
+        "viewport": {
+          "height": 900,
+          "width": 1440
+        },
+        "visibleButtonCount": 20
+      }
+    },
+    {
+      "fileName": "02-runs-desktop.png",
+      "url": "http://127.0.0.1:5173/#runs",
+      "metrics": {
+        "clientWidth": 1440,
+        "focusableCount": 23,
+        "hasHorizontalOverflow": false,
+        "hash": "#runs",
+        "mainText": "Zerox Agent本地桌面智能体新会话会话智能体工作台任务记录活动任务第 4 模块设置配置Pinned自动任务调度与本地执行本地配置模型、权限与记忆Recents当前会话刚刚直接发指令给本地智能体0 条消息0 tok文件整理会话刚刚整理下载目录并写报告2 条消息~1.3k tok资料调研会话刚刚搜索、抓取、总结网页2 条消息~2.4k tokvpreviewby Zerox活动任务记录打开会话窗口演示数据预览任务概览看任务是否完成。需要处理时，直接给你下一步。打开会话新任",
+        "overflowing": [],
+        "scrollWidth": 1440,
+        "title": "Zerox Agent",
+        "viewport": {
+          "height": 900,
+          "width": 1440
+        },
+        "visibleButtonCount": 23
+      }
+    },
+    {
+      "fileName": "03-settings-model-desktop.png",
+      "url": "http://127.0.0.1:5173/#model-settings",
+      "metrics": {
+        "clientWidth": 1434,
+        "focusableCount": 33,
+        "hasHorizontalOverflow": false,
+        "hash": "#model-settings",
+        "mainText": "Zerox Agent本地桌面智能体新会话会话智能体工作台任务记录活动任务第 4 模块设置配置Pinned自动任务调度与本地执行本地配置模型、权限与记忆Recents当前会话刚刚直接发指令给本地智能体0 条消息0 tok文件整理会话刚刚整理下载目录并写报告2 条消息~1.3k tok资料调研会话刚刚搜索、抓取、总结网页2 条消息~2.4k tokvpreviewby Zerox配置设置打开会话窗口演示数据预览设置路径按意图分组启动配置先让智能体能稳定连接和执行。模型API K",
+        "overflowing": [],
+        "scrollWidth": 1434,
+        "title": "Zerox Agent",
+        "viewport": {
+          "height": 900,
+          "width": 1440
+        },
+        "visibleButtonCount": 26
+      }
+    },
+    {
+      "fileName": "04-settings-tools-desktop.png",
+      "url": "http://127.0.0.1:5173/#tools",
+      "metrics": {
+        "clientWidth": 1434,
+        "focusableCount": 26,
+        "hasHorizontalOverflow": false,
+        "hash": "#tools",
+        "mainText": "Zerox Agent本地桌面智能体新会话会话智能体工作台任务记录活动任务第 4 模块设置配置Pinned自动任务调度与本地执行本地配置模型、权限与记忆Recents当前会话刚刚直接发指令给本地智能体0 条消息0 tok文件整理会话刚刚整理下载目录并写报告2 条消息~1.3k tok资料调研会话刚刚搜索、抓取、总结网页2 条消息~2.4k tokvpreviewby Zerox配置设置打开会话窗口演示数据预览设置路径按意图分组启动配置先让智能体能稳定连接和执行。模型API K",
+        "overflowing": [],
+        "scrollWidth": 1434,
+        "title": "Zerox Agent",
+        "viewport": {
+          "height": 900,
+          "width": 1440
+        },
+        "visibleButtonCount": 23
+      }
+    },
+    {
+      "fileName": "05-settings-memory-desktop.png",
+      "url": "http://127.0.0.1:5173/#memory",
+      "metrics": {
+        "clientWidth": 1434,
+        "focusableCount": 41,
+        "hasHorizontalOverflow": false,
+        "hash": "#memory",
+        "mainText": "Zerox Agent本地桌面智能体新会话会话智能体工作台任务记录活动任务第 4 模块设置配置Pinned自动任务调度与本地执行本地配置模型、权限与记忆Recents当前会话刚刚直接发指令给本地智能体0 条消息0 tok文件整理会话刚刚整理下载目录并写报告2 条消息~1.3k tok资料调研会话刚刚搜索、抓取、总结网页2 条消息~2.4k tokvpreviewby Zerox配置设置打开会话窗口演示数据预览设置路径按意图分组启动配置先让智能体能稳定连接和执行。模型API K",
+        "overflowing": [],
+        "scrollWidth": 1434,
+        "title": "Zerox Agent",
+        "viewport": {
+          "height": 900,
+          "width": 1440
+        },
+        "visibleButtonCount": 30
+      }
+    },
+    {
+      "fileName": "06-settings-system-desktop.png",
+      "url": "http://127.0.0.1:5173/#system-overview",
+      "metrics": {
+        "clientWidth": 1434,
+        "focusableCount": 39,
+        "hasHorizontalOverflow": false,
+        "hash": "#system-overview",
+        "mainText": "Zerox Agent本地桌面智能体新会话会话智能体工作台任务记录活动任务第 4 模块设置配置Pinned自动任务调度与本地执行本地配置模型、权限与记忆Recents当前会话刚刚直接发指令给本地智能体0 条消息0 tok文件整理会话刚刚整理下载目录并写报告2 条消息~1.3k tok资料调研会话刚刚搜索、抓取、总结网页2 条消息~2.4k tokvpreviewby Zerox配置设置打开会话窗口演示数据预览设置路径按意图分组启动配置先让智能体能稳定连接和执行。模型API K",
+        "overflowing": [],
+        "scrollWidth": 1434,
+        "title": "Zerox Agent",
+        "viewport": {
+          "height": 900,
+          "width": 1440
+        },
+        "visibleButtonCount": 39
+      }
+    }
+  ],
+  "logs": [],
+  "interactions": {
+    "composerText": "/goal 审计 Agent 状态与工具调用体验",
+    "focusableCount": 26,
+    "hasSkillMenu": false,
+    "hasWorkspaceMenu": true,
+    "hash": "#chat",
+    "horizontalOverflow": false
+  },
+  "viewportCaptures": [
+    {
+      "fileName": "10-chat-empty-viewport.png",
+      "url": "http://127.0.0.1:5173/#chat",
+      "metrics": {
+        "bodyTextLength": 588,
+        "composerRect": {
+          "bottom": 872.5,
+          "height": 166,
+          "left": 370,
+          "right": 1350,
+          "top": 706.5,
+          "width": 980,
+          "x": 370,
+          "y": 706.5
+        },
+        "hash": "#chat",
+        "mainRect": {
+          "bottom": 900,
+          "height": 900,
+          "left": 0,
+          "right": 1440,
+          "top": 0,
+          "width": 1440,
+          "x": 0,
+          "y": 0
+        },
+        "navRect": {
+          "bottom": 900,
+          "height": 900,
+          "left": 0,
+          "right": 280,
+          "top": 0,
+          "width": 280,
+          "x": 0,
+          "y": 0
+        },
+        "shellRect": {
+          "bottom": 900,
+          "height": 900,
+          "left": 0,
+          "right": 1440,
+          "top": 0,
+          "width": 1440,
+          "x": 0,
+          "y": 0
+        },
+        "visibleRects": [
+          {
+            "cls": "window-drag-strip",
+            "h": 28,
+            "text": "",
+            "w": 1440,
+            "x": 0,
+            "y": 0
+          },
+          {
+            "cls": "sidebar workspace-sidebar material-navigation-rail",
+            "h": 900,
+            "text": "Zerox Agent本地桌面智能体新会话会话智能体工作台任务记录活动任务第 4 模块设置配置Pin",
+            "w": 280,
+            "x": 0,
+            "y": 0
+          },
+          {
+            "cls": "brand material-brand",
+            "h": 39,
+            "text": "Zerox Agent本地桌面智能体",
+            "w": 241,
+            "x": 16,
+            "y": 80
+          },
+          {
+            "cls": "brand-mark",
+            "h": 34,
+            "text": "",
+            "w": 34,
+            "x": 16,
+            "y": 82
+          },
+          {
+            "cls": "material-brand-copy",
+            "h": 39,
+            "text": "Zerox Agent本地桌面智能体",
+            "w": 82,
+            "x": 62,
+            "y": 80
+          },
+          {
+            "cls": "strong",
+            "h": 21,
+            "text": "Zerox Agent",
+            "w": 82,
+            "x": 62,
+            "y": 80
+          },
+          {
+            "cls": "small",
+            "h": 17,
+            "text": "本地桌面智能体",
+            "w": 82,
+            "x": 62,
+            "y": 102
+          },
+          {
+            "cls": "new-chat-button",
+            "h": 42,
+            "text": "新会话",
+            "w": 241,
+            "x": 16,
+            "y": 135
+          },
+          {
+            "cls": "svg",
+            "h": 16,
+            "text": "",
+            "w": 16,
+            "x": 107,
+            "y": 148
+          },
+          {
+            "cls": "path",
+            "h": 9,
+            "text": "",
+            "w": 9,
+            "x": 110,
+            "y": 151
+          },
+          {
+            "cls": "primary-nav",
+            "h": 161,
+            "text": "会话智能体工作台任务记录活动任务第 4 模块设置配置",
+            "w": 241,
+            "x": 16,
+            "y": 193
+          },
+          {
+            "cls": "nav-item material-navigation-rail-item is-active",
+            "h": 38,
+            "text": "会话智能体工作台",
+            "w": 241,
+            "x": 16,
+            "y": 193
+          },
+          {
+            "cls": "material-nav-icon",
+            "h": 24,
+            "text": "",
+            "w": 24,
+            "x": 26,
+            "y": 200
+          },
+          {
+            "cls": "svg",
+            "h": 22,
+            "text": "",
+            "w": 22,
+            "x": 27,
+            "y": 201
+          },
+          {
+            "cls": "path",
+            "h": 16,
+            "text": "",
+            "w": 16,
+            "x": 31,
+            "y": 204
+          },
+          {
+            "cls": "material-nav-label",
+            "h": 14,
+            "text": "会话",
+            "w": 24,
+            "x": 58,
+            "y": 204
+          },
+          {
+            "cls": "nav-item material-navigation-rail-item ",
+            "h": 38,
+            "text": "任务记录活动",
+            "w": 241,
+            "x": 16,
+            "y": 234
+          },
+          {
+            "cls": "material-nav-icon",
+            "h": 24,
+            "text": "",
+            "w": 24,
+            "x": 26,
+            "y": 241
+          },
+          {
+            "cls": "svg",
+            "h": 22,
+            "text": "",
+            "w": 22,
+            "x": 27,
+            "y": 242
+          },
+          {
+            "cls": "path",
+            "h": 17,
+            "text": "",
+            "w": 16,
+            "x": 31,
+            "y": 244
+          },
+          {
+            "cls": "material-nav-label",
+            "h": 14,
+            "text": "任务记录",
+            "w": 48,
+            "x": 58,
+            "y": 245
+          },
+          {
+            "cls": "nav-item material-navigation-rail-item ",
+            "h": 38,
+            "text": "任务第 4 模块",
+            "w": 241,
+            "x": 16,
+            "y": 275
+          },
+          {
+            "cls": "material-nav-icon",
+            "h": 24,
+            "text": "",
+            "w": 24,
+            "x": 26,
+            "y": 282
+          },
+          {
+            "cls": "svg",
+            "h": 22,
+            "text": "",
+            "w": 22,
+            "x": 27,
+            "y": 283
+          },
+          {
+            "cls": "path",
+            "h": 18,
+            "text": "",
+            "w": 18,
+            "x": 29,
+            "y": 284
+          },
+          {
+            "cls": "material-nav-label",
+            "h": 14,
+            "text": "任务",
+            "w": 24,
+            "x": 58,
+            "y": 286
+          },
+          {
+            "cls": "nav-item material-navigation-rail-item ",
+            "h": 38,
+            "text": "设置配置",
+            "w": 241,
+            "x": 16,
+            "y": 316
+          },
+          {
+            "cls": "material-nav-icon",
+            "h": 24,
+            "text": "",
+            "w": 24,
+            "x": 26,
+            "y": 323
+          },
+          {
+            "cls": "svg",
+            "h": 22,
+            "text": "",
+            "w": 22,
+            "x": 27,
+            "y": 324
+          },
+          {
+            "cls": "path",
+            "h": 18,
+            "text": "",
+            "w": 18,
+            "x": 29,
+            "y": 325
+          }
+        ]
+      }
+    },
+    {
+      "fileName": "11-runs-viewport.png",
+      "url": "http://127.0.0.1:5173/#runs",
+      "metrics": {
+        "bodyTextLength": 813,
+        "composerRect": null,
+        "hash": "#runs",
+        "mainRect": {
+          "bottom": 900,
+          "height": 900,
+          "left": 0,
+          "right": 1440,
+          "top": 0,
+          "width": 1440,
+          "x": 0,
+          "y": 0
+        },
+        "navRect": {
+          "bottom": 900,
+          "height": 900,
+          "left": 0,
+          "right": 280,
+          "top": 0,
+          "width": 280,
+          "x": 0,
+          "y": 0
+        },
+        "shellRect": {
+          "bottom": 900,
+          "height": 900,
+          "left": 0,
+          "right": 1440,
+          "top": 0,
+          "width": 1440,
+          "x": 0,
+          "y": 0
+        },
+        "visibleRects": [
+          {
+            "cls": "window-drag-strip",
+            "h": 28,
+            "text": "",
+            "w": 1440,
+            "x": 0,
+            "y": 0
+          },
+          {
+            "cls": "sidebar workspace-sidebar material-navigation-rail",
+            "h": 900,
+            "text": "Zerox Agent本地桌面智能体新会话会话智能体工作台任务记录活动任务第 4 模块设置配置Pin",
+            "w": 280,
+            "x": 0,
+            "y": 0
+          },
+          {
+            "cls": "brand material-brand",
+            "h": 39,
+            "text": "Zerox Agent本地桌面智能体",
+            "w": 241,
+            "x": 16,
+            "y": 80
+          },
+          {
+            "cls": "brand-mark",
+            "h": 34,
+            "text": "",
+            "w": 34,
+            "x": 16,
+            "y": 82
+          },
+          {
+            "cls": "material-brand-copy",
+            "h": 39,
+            "text": "Zerox Agent本地桌面智能体",
+            "w": 82,
+            "x": 62,
+            "y": 80
+          },
+          {
+            "cls": "strong",
+            "h": 21,
+            "text": "Zerox Agent",
+            "w": 82,
+            "x": 62,
+            "y": 80
+          },
+          {
+            "cls": "small",
+            "h": 17,
+            "text": "本地桌面智能体",
+            "w": 82,
+            "x": 62,
+            "y": 102
+          },
+          {
+            "cls": "new-chat-button",
+            "h": 42,
+            "text": "新会话",
+            "w": 241,
+            "x": 16,
+            "y": 135
+          },
+          {
+            "cls": "svg",
+            "h": 16,
+            "text": "",
+            "w": 16,
+            "x": 107,
+            "y": 148
+          },
+          {
+            "cls": "path",
+            "h": 9,
+            "text": "",
+            "w": 9,
+            "x": 110,
+            "y": 151
+          },
+          {
+            "cls": "primary-nav",
+            "h": 161,
+            "text": "会话智能体工作台任务记录活动任务第 4 模块设置配置",
+            "w": 241,
+            "x": 16,
+            "y": 193
+          },
+          {
+            "cls": "nav-item material-navigation-rail-item ",
+            "h": 38,
+            "text": "会话智能体工作台",
+            "w": 241,
+            "x": 16,
+            "y": 193
+          },
+          {
+            "cls": "material-nav-icon",
+            "h": 24,
+            "text": "",
+            "w": 24,
+            "x": 26,
+            "y": 200
+          },
+          {
+            "cls": "svg",
+            "h": 22,
+            "text": "",
+            "w": 22,
+            "x": 27,
+            "y": 201
+          },
+          {
+            "cls": "path",
+            "h": 16,
+            "text": "",
+            "w": 16,
+            "x": 31,
+            "y": 204
+          },
+          {
+            "cls": "material-nav-label",
+            "h": 14,
+            "text": "会话",
+            "w": 24,
+            "x": 58,
+            "y": 204
+          },
+          {
+            "cls": "nav-item material-navigation-rail-item is-active",
+            "h": 38,
+            "text": "任务记录活动",
+            "w": 241,
+            "x": 16,
+            "y": 234
+          },
+          {
+            "cls": "material-nav-icon",
+            "h": 24,
+            "text": "",
+            "w": 24,
+            "x": 26,
+            "y": 241
+          },
+          {
+            "cls": "svg",
+            "h": 22,
+            "text": "",
+            "w": 22,
+            "x": 27,
+            "y": 242
+          },
+          {
+            "cls": "path",
+            "h": 17,
+            "text": "",
+            "w": 16,
+            "x": 31,
+            "y": 244
+          },
+          {
+            "cls": "material-nav-label",
+            "h": 14,
+            "text": "任务记录",
+            "w": 48,
+            "x": 58,
+            "y": 245
+          },
+          {
+            "cls": "nav-item material-navigation-rail-item ",
+            "h": 38,
+            "text": "任务第 4 模块",
+            "w": 241,
+            "x": 16,
+            "y": 275
+          },
+          {
+            "cls": "material-nav-icon",
+            "h": 24,
+            "text": "",
+            "w": 24,
+            "x": 26,
+            "y": 282
+          },
+          {
+            "cls": "svg",
+            "h": 22,
+            "text": "",
+            "w": 22,
+            "x": 27,
+            "y": 283
+          },
+          {
+            "cls": "path",
+            "h": 18,
+            "text": "",
+            "w": 18,
+            "x": 29,
+            "y": 284
+          },
+          {
+            "cls": "material-nav-label",
+            "h": 14,
+            "text": "任务",
+            "w": 24,
+            "x": 58,
+            "y": 286
+          },
+          {
+            "cls": "nav-item material-navigation-rail-item ",
+            "h": 38,
+            "text": "设置配置",
+            "w": 241,
+            "x": 16,
+            "y": 316
+          },
+          {
+            "cls": "material-nav-icon",
+            "h": 24,
+            "text": "",
+            "w": 24,
+            "x": 26,
+            "y": 323
+          },
+          {
+            "cls": "svg",
+            "h": 22,
+            "text": "",
+            "w": 22,
+            "x": 27,
+            "y": 324
+          },
+          {
+            "cls": "path",
+            "h": 18,
+            "text": "",
+            "w": 18,
+            "x": 29,
+            "y": 325
+          }
+        ]
+      }
+    },
+    {
+      "fileName": "12-settings-model-viewport.png",
+      "url": "http://127.0.0.1:5173/#model-settings",
+      "metrics": {
+        "bodyTextLength": 1080,
+        "composerRect": null,
+        "hash": "#model-settings",
+        "mainRect": {
+          "bottom": 1220.8828125,
+          "height": 1220.8828125,
+          "left": 0,
+          "right": 1434,
+          "top": 0,
+          "width": 1434,
+          "x": 0,
+          "y": 0
+        },
+        "navRect": {
+          "bottom": 900,
+          "height": 900,
+          "left": 0,
+          "right": 280,
+          "top": 0,
+          "width": 280,
+          "x": 0,
+          "y": 0
+        },
+        "shellRect": {
+          "bottom": 1220.8828125,
+          "height": 1220.8828125,
+          "left": 0,
+          "right": 1434,
+          "top": 0,
+          "width": 1434,
+          "x": 0,
+          "y": 0
+        },
+        "visibleRects": [
+          {
+            "cls": "window-drag-strip",
+            "h": 28,
+            "text": "",
+            "w": 1434,
+            "x": 0,
+            "y": 0
+          },
+          {
+            "cls": "sidebar workspace-sidebar material-navigation-rail",
+            "h": 900,
+            "text": "Zerox Agent本地桌面智能体新会话会话智能体工作台任务记录活动任务第 4 模块设置配置Pin",
+            "w": 280,
+            "x": 0,
+            "y": 0
+          },
+          {
+            "cls": "brand material-brand",
+            "h": 39,
+            "text": "Zerox Agent本地桌面智能体",
+            "w": 241,
+            "x": 16,
+            "y": 80
+          },
+          {
+            "cls": "brand-mark",
+            "h": 34,
+            "text": "",
+            "w": 34,
+            "x": 16,
+            "y": 82
+          },
+          {
+            "cls": "material-brand-copy",
+            "h": 39,
+            "text": "Zerox Agent本地桌面智能体",
+            "w": 82,
+            "x": 62,
+            "y": 80
+          },
+          {
+            "cls": "strong",
+            "h": 21,
+            "text": "Zerox Agent",
+            "w": 82,
+            "x": 62,
+            "y": 80
+          },
+          {
+            "cls": "small",
+            "h": 17,
+            "text": "本地桌面智能体",
+            "w": 82,
+            "x": 62,
+            "y": 102
+          },
+          {
+            "cls": "new-chat-button",
+            "h": 42,
+            "text": "新会话",
+            "w": 241,
+            "x": 16,
+            "y": 135
+          },
+          {
+            "cls": "svg",
+            "h": 16,
+            "text": "",
+            "w": 16,
+            "x": 107,
+            "y": 148
+          },
+          {
+            "cls": "path",
+            "h": 9,
+            "text": "",
+            "w": 9,
+            "x": 110,
+            "y": 151
+          },
+          {
+            "cls": "primary-nav",
+            "h": 161,
+            "text": "会话智能体工作台任务记录活动任务第 4 模块设置配置",
+            "w": 241,
+            "x": 16,
+            "y": 193
+          },
+          {
+            "cls": "nav-item material-navigation-rail-item ",
+            "h": 38,
+            "text": "会话智能体工作台",
+            "w": 241,
+            "x": 16,
+            "y": 193
+          },
+          {
+            "cls": "material-nav-icon",
+            "h": 24,
+            "text": "",
+            "w": 24,
+            "x": 26,
+            "y": 200
+          },
+          {
+            "cls": "svg",
+            "h": 22,
+            "text": "",
+            "w": 22,
+            "x": 27,
+            "y": 201
+          },
+          {
+            "cls": "path",
+            "h": 16,
+            "text": "",
+            "w": 16,
+            "x": 31,
+            "y": 204
+          },
+          {
+            "cls": "material-nav-label",
+            "h": 14,
+            "text": "会话",
+            "w": 24,
+            "x": 58,
+            "y": 204
+          },
+          {
+            "cls": "nav-item material-navigation-rail-item ",
+            "h": 38,
+            "text": "任务记录活动",
+            "w": 241,
+            "x": 16,
+            "y": 234
+          },
+          {
+            "cls": "material-nav-icon",
+            "h": 24,
+            "text": "",
+            "w": 24,
+            "x": 26,
+            "y": 241
+          },
+          {
+            "cls": "svg",
+            "h": 22,
+            "text": "",
+            "w": 22,
+            "x": 27,
+            "y": 242
+          },
+          {
+            "cls": "path",
+            "h": 17,
+            "text": "",
+            "w": 16,
+            "x": 31,
+            "y": 244
+          },
+          {
+            "cls": "material-nav-label",
+            "h": 14,
+            "text": "任务记录",
+            "w": 48,
+            "x": 58,
+            "y": 245
+          },
+          {
+            "cls": "nav-item material-navigation-rail-item ",
+            "h": 38,
+            "text": "任务第 4 模块",
+            "w": 241,
+            "x": 16,
+            "y": 275
+          },
+          {
+            "cls": "material-nav-icon",
+            "h": 24,
+            "text": "",
+            "w": 24,
+            "x": 26,
+            "y": 282
+          },
+          {
+            "cls": "svg",
+            "h": 22,
+            "text": "",
+            "w": 22,
+            "x": 27,
+            "y": 283
+          },
+          {
+            "cls": "path",
+            "h": 18,
+            "text": "",
+            "w": 18,
+            "x": 29,
+            "y": 284
+          },
+          {
+            "cls": "material-nav-label",
+            "h": 14,
+            "text": "任务",
+            "w": 24,
+            "x": 58,
+            "y": 286
+          },
+          {
+            "cls": "nav-item material-navigation-rail-item is-active",
+            "h": 38,
+            "text": "设置配置",
+            "w": 241,
+            "x": 16,
+            "y": 316
+          },
+          {
+            "cls": "material-nav-icon",
+            "h": 24,
+            "text": "",
+            "w": 24,
+            "x": 26,
+            "y": 323
+          },
+          {
+            "cls": "svg",
+            "h": 22,
+            "text": "",
+            "w": 22,
+            "x": 27,
+            "y": 324
+          },
+          {
+            "cls": "path",
+            "h": 18,
+            "text": "",
+            "w": 18,
+            "x": 29,
+            "y": 325
+          }
+        ]
+      }
+    }
+  ],
+  "responsiveCaptures": [
+    {
+      "fileName": "13-chat-tablet-900.png",
+      "metrics": {
+        "clientWidth": 894,
+        "composer": {
+          "height": 166,
+          "width": 894,
+          "x": 0,
+          "y": 707
+        },
+        "hasHorizontalOverflow": false,
+        "hash": "#chat",
+        "nav": {
+          "height": 290,
+          "width": 894,
+          "x": 0,
+          "y": 0
+        },
+        "overflowing": [],
+        "scrollWidth": 894,
+        "viewport": {
+          "height": 800,
+          "width": 900
+        },
+        "visibleButtonCount": 12
+      }
+    },
+    {
+      "fileName": "14-settings-model-tablet-900.png",
+      "metrics": {
+        "clientWidth": 894,
+        "composer": null,
+        "hasHorizontalOverflow": false,
+        "hash": "#model-settings",
+        "nav": {
+          "height": 290,
+          "width": 894,
+          "x": 0,
+          "y": 0
+        },
+        "overflowing": [],
+        "scrollWidth": 894,
+        "viewport": {
+          "height": 800,
+          "width": 900
+        },
+        "visibleButtonCount": 18
+      }
+    },
+    {
+      "fileName": "15-chat-mobile-390.png",
+      "metrics": {
+        "clientWidth": 390,
+        "composer": {
+          "height": 186,
+          "width": 366,
+          "x": 12,
+          "y": 541
+        },
+        "hasHorizontalOverflow": false,
+        "hash": "#chat",
+        "nav": {
+          "height": 0,
+          "width": 0,
+          "x": 0,
+          "y": 0
+        },
+        "overflowing": [
+          {
+            "cls": "composer-risk-tooltip",
+            "right": 235,
+            "text": "自动授权：智能体可在本次会话中自动批准工具请求。风险：可能执行文件、shell 或网络操作，请仅在任务和工作区可信时开启",
+            "width": 320,
+            "x": -85
+          },
+          {
+            "cls": "composer-risk-tooltip",
+            "right": 283,
+            "text": "目标模式：发送内容会被翻译为可执行目标草案，确认后智能体可连续规划和执行。风险：可能触发多步工具调用，请先检查目标草案和",
+            "width": 320,
+            "x": -37
+          }
+        ],
+        "scrollWidth": 390,
+        "viewport": {
+          "height": 844,
+          "width": 390
+        },
+        "visibleButtonCount": 7
+      }
+    },
+    {
+      "fileName": "16-runs-mobile-390.png",
+      "metrics": {
+        "clientWidth": 384,
+        "composer": null,
+        "hasHorizontalOverflow": false,
+        "hash": "#runs",
+        "nav": {
+          "height": 241,
+          "width": 384,
+          "x": 0,
+          "y": 0
+        },
+        "overflowing": [],
+        "scrollWidth": 384,
+        "viewport": {
+          "height": 844,
+          "width": 390
+        },
+        "visibleButtonCount": 14
+      }
+    },
+    {
+      "fileName": "17-settings-model-mobile-390.png",
+      "metrics": {
+        "clientWidth": 384,
+        "composer": null,
+        "hasHorizontalOverflow": false,
+        "hash": "#model-settings",
+        "nav": {
+          "height": 241,
+          "width": 384,
+          "x": 0,
+          "y": 0
+        },
+        "overflowing": [],
+        "scrollWidth": 384,
+        "viewport": {
+          "height": 844,
+          "width": 390
+        },
+        "visibleButtonCount": 17
+      }
+    }
+  ]
+}

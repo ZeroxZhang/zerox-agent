@@ -415,9 +415,12 @@ export function App() {
                   <svg viewBox="0 0 24 24" width="24" height="24" focusable="false">
                     <path
                       d={icon.path}
-                      fill="currentColor"
-                      fillRule="evenodd"
-                      clipRule="evenodd"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="1.75"
+                      vectorEffect="non-scaling-stroke"
                     />
                   </svg>
                 </span>

@@ -2,7 +2,7 @@
   display: grid;
   grid-template-columns: var(--nav-rail-width) minmax(0, 1fr);
   min-height: 100dvh;
-  background: var(--bg-page);
+  background: var(--shell-bg);
   -webkit-app-region: no-drag;
 }
 
@@ -29,12 +29,13 @@
   grid-column: 2;
   min-width: 0;
   padding: 28px 32px 32px;
+  background: var(--color-app-bg-raised);
 }
 
 .app-shell.is-agent-chat .workspace {
   min-height: 100vh;
   padding: 0;
-  background: linear-gradient(180deg, var(--bg-root), var(--bg-page));
+  background: var(--color-app-bg);
 }
 
 .app-shell.is-agent-chat .topbar { display: none; }
@@ -77,7 +78,7 @@
   min-height: 36px;
   padding: 0 var(--space-4);
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-full);
+  border-radius: var(--radius-10);
   color: var(--text-primary);
   background: var(--bg-surface-raised);
   font-size: var(--text-sm);
@@ -114,11 +115,9 @@
   overflow: auto;
   padding: var(--space-4);
   border: 1px solid var(--glass-border);
-  border-radius: var(--radius-lg);
-  background: var(--glass-surface);
-  box-shadow: var(--shadow-xs);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border-radius: var(--radius-14);
+  background: var(--color-surface-primary);
+  box-shadow: var(--shadow-sm);
 }
 
 .settings-section-nav-heading,
@@ -174,15 +173,15 @@
 
 .settings-section-nav button:hover {
   color: var(--text-primary);
-  background: var(--glass-panel-inset);
-  border-color: var(--glass-border);
+  background: var(--color-surface-hover);
+  border-color: var(--border-accent);
 }
 
 .settings-section-nav button.is-active {
-  color: var(--text-primary);
-  background: var(--glass-surface-strong);
-  border-color: var(--glass-border);
-  box-shadow: inset 3px 0 0 var(--brand-accent), var(--shadow-xs);
+  color: var(--text-accent);
+  background: var(--color-surface-primary);
+  border-color: var(--border-accent);
+  box-shadow: inset 3px 0 0 var(--brand-accent), var(--shadow-sm);
 }
 
 .settings-section-nav button:focus-visible {
@@ -243,12 +242,10 @@
   display: grid;
   gap: var(--space-5);
   padding: var(--space-5);
-  background: var(--glass-surface);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
+  background: var(--color-surface-primary);
   border: 1px solid var(--glass-border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-xs);
+  border-radius: var(--radius-18);
+  box-shadow: var(--shadow-sm);
 }
 
 .settings-section-body-header {
@@ -260,8 +257,8 @@
   min-width: 0;
   padding: var(--space-4);
   border: 1px solid var(--glass-border);
-  border-radius: var(--radius-md);
-  background: var(--glass-panel-inset);
+  border-radius: var(--radius-12);
+  background: var(--color-surface-muted);
 }
 
 .settings-section-body-header > div {

@@ -1,21 +1,22 @@
 .primary-action, .secondary-action, .danger-action {
   min-height: 36px;
   padding: 0 var(--space-4);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-10);
   font-size: var(--text-sm);
   font-weight: var(--font-medium);
 }
 
 .module-card, .health-card, .skill-card {
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-12);
   background: var(--bg-surface-raised);
+  box-shadow: var(--shadow-sm);
 }
 
 .field input, .field select, .field textarea {
   min-width: 0;
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-10);
   background: var(--bg-surface-raised);
 }
 
@@ -44,8 +45,8 @@
 }
 
 .settings-section-body.is-system-overview {
-  background: var(--glass-system-body);
-  box-shadow: none;
+  background: var(--color-surface-primary);
+  box-shadow: var(--shadow-sm);
 }
 
 .settings-panel,
@@ -57,11 +58,9 @@
   min-width: 0;
   overflow-x: clip;
   border-color: var(--glass-border);
-  border-radius: var(--radius-sm);
-  background: var(--glass-panel-muted-strong);
-  box-shadow: 0 14px 42px rgba(31, 41, 55, 0.045);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border-radius: var(--radius-14);
+  background: var(--color-surface-primary);
+  box-shadow: var(--shadow-sm);
 }
 
 .overview-layout {
@@ -161,17 +160,15 @@
 .overview-panel .readiness-panel,
 .overview-panel .runtime-panel {
   border-color: var(--glass-border);
-  background: var(--glass-panel-muted);
-  box-shadow: 0 14px 42px rgba(31, 41, 55, 0.045);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
+  background: var(--color-surface-primary);
+  box-shadow: var(--shadow-sm);
 }
 
 .overview-panel .health-card,
 .overview-panel .latest-run-card,
 .overview-panel .attention-panel,
 .overview-panel .quick-actions {
-  background: var(--glass-panel-muted-strong);
+  background: var(--color-surface-raised);
 }
 
 .overview-panel .readiness-item,
@@ -182,20 +179,20 @@
 .overview-panel .runtime-files article,
 .overview-panel .runtime-commands article {
   border-color: var(--glass-border);
-  background: var(--glass-panel-inset);
+  background: var(--color-surface-muted);
 }
 
 .overview-panel .data-boundary-note,
 .overview-panel .readiness-item.is-ready {
-  background: rgba(237, 248, 239, 0.62);
+  background: var(--status-success-bg);
 }
 
 .overview-panel .readiness-item.is-pending {
-  background: rgba(255, 248, 223, 0.58);
+  background: var(--status-warning-bg);
 }
 
 .overview-panel .readiness-item.is-needs_action {
-  background: rgba(255, 240, 240, 0.58);
+  background: var(--status-error-bg);
 }
 
 .handoff-review-card,
@@ -247,7 +244,7 @@
   gap: var(--space-2);
   padding: var(--space-3);
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-12);
   background: var(--bg-inset);
 }
 

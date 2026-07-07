@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-describe("Design System — Notion-inspired app shell", () => {
+describe("Design System — Soft Blue desktop control surface", () => {
   const rootStyles = readFileSync(
     path.join(process.cwd(), "src/renderer/styles.css"),
     "utf8",
@@ -84,6 +84,13 @@ describe("Design System — Notion-inspired app shell", () => {
   );
   const uiUxDesignSystemSource = existsSync(uiUxDesignSystemPath)
     ? readFileSync(uiUxDesignSystemPath, "utf8")
+    : "";
+  const visualSystemSpecPath = path.join(
+    process.cwd(),
+    "docs/design/zerox-agent-3-2-2-design-system-spec.md",
+  );
+  const visualSystemSpecSource = existsSync(visualSystemSpecPath)
+    ? readFileSync(visualSystemSpecPath, "utf8")
     : "";
   const evalReviewPanelPath = path.join(
     process.cwd(),
@@ -345,7 +352,8 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain(".markdown-message strong");
     expect(styles).toContain(".markdown-message a");
     expect(styles).toContain("font-size: var(--text-base);");
-    expect(styles).toContain("background: #f3f4f6;");
+    expect(styles).toContain("background: var(--code-bg);");
+    expect(styles).toContain("border: 1px solid var(--code-border);");
   });
 
   it("renders v2.9.0 structured assistant output through dedicated React components", () => {
@@ -627,17 +635,24 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain("overscroll-behavior: contain;");
   });
 
-  it("keeps the Settings navigation icon inside a non-clipped SVG viewport", () => {
+  it("keeps navigation icons as rounded non-clipped stroke SVGs", () => {
     const materialNavigationSource = readFileSync(
       path.join(process.cwd(), "src/shared/materialNavigation.ts"),
       "utf8",
     );
 
-    expect(appSource).toContain('fillRule="evenodd"');
-    expect(appSource).toContain('clipRule="evenodd"');
+    expect(appSource).toContain('fill="none"');
+    expect(appSource).toContain('stroke="currentColor"');
+    expect(appSource).toContain('strokeLinecap="round"');
+    expect(appSource).toContain('strokeLinejoin="round"');
+    expect(appSource).toContain('strokeWidth="1.75"');
+    expect(appSource).toContain('vectorEffect="non-scaling-stroke"');
     expect(styles).toContain(".material-nav-icon svg");
     expect(styles).toContain("overflow: visible;");
-    expect(materialNavigationSource).toContain("M19.43 12.98");
+    expect(styles).toContain(".nav-item.is-active .material-nav-icon path");
+    expect(styles).toContain("stroke-width: 2;");
+    expect(materialNavigationSource).toContain("Rounded stroke SVG path");
+    expect(materialNavigationSource).toContain("M12 15.5a3.5");
     expect(materialNavigationSource).not.toContain("M19.4 13a7.8");
   });
 
@@ -790,15 +805,15 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(styles).toContain("word-break: keep-all");
     expect(styles).toContain("text-wrap: balance");
     expect(styles).toContain("repeat(auto-fit, minmax(min(100%, 180px), 1fr))");
-    expect(styles).toContain("--glass-panel-muted");
-    expect(styles).toContain("--glass-panel-muted-strong");
-    expect(styles).toContain("--glass-panel-inset");
-    expect(styles).toContain("--glass-system-body");
+    expect(styles).toContain("--color-app-bg");
+    expect(styles).toContain("--color-surface-primary");
+    expect(styles).toContain("--color-surface-muted");
+    expect(styles).toContain("--shadow-sm");
     expect(appSource).toContain("settings-section-body is-");
     expect(styles).toContain(".overview-panel .data-boundary-panel");
     expect(styles).toContain(".settings-section-body.is-system-overview");
-    expect(styles).toContain("background: var(--glass-panel-muted);");
-    expect(styles).toContain("background: var(--glass-panel-muted-strong);");
+    expect(styles).toContain("background: var(--color-surface-primary);");
+    expect(styles).toContain("background: var(--color-surface-muted);");
   });
 
   it("keeps Settings subpage navigation deep-linkable and intent grouped", () => {
@@ -817,16 +832,15 @@ describe("Design System — Notion-inspired app shell", () => {
     expect(appSource).toContain("aria-current");
   });
 
-  it("commits the v3.2.1 integrated UI/UX design system", () => {
+  it("commits the v3.2.2 Soft Blue design system specification", () => {
     expect(existsSync(uiUxDesignSystemPath)).toBe(true);
     expect(uiUxDesignSystemSource).toContain("v3.2.1");
-    expect(uiUxDesignSystemSource).toContain("统一体验系统");
-    expect(uiUxDesignSystemSource).toContain("Settings 治理中心");
-    expect(uiUxDesignSystemSource).toContain("设计语言");
-    expect(uiUxDesignSystemSource).toContain("配色系统");
-    expect(uiUxDesignSystemSource).toContain("图标系统");
-    expect(uiUxDesignSystemSource).toContain("VI 规范");
-    expect(uiUxDesignSystemSource).toContain("95 分");
+    expect(existsSync(visualSystemSpecPath)).toBe(true);
+    expect(visualSystemSpecSource).toContain("v3.2.2");
+    expect(visualSystemSpecSource).toContain("Soft Blue Desktop Control Surface");
+    expect(visualSystemSpecSource).toContain("Not Allowed");
+    expect(visualSystemSpecSource).toContain("Token Architecture");
+    expect(visualSystemSpecSource).toContain("Phase 4 Entry Gate");
   });
 
   it("moves Overview diagnostics into the Settings system section", () => {

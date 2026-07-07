@@ -4,7 +4,7 @@ export type MaterialNavigationIcon = {
   label: string;
   /** Legacy Unicode glyph kept as an accessibility/text fallback. */
   glyph: string;
-  /** Material Symbols style SVG path data rendered in a 24x24 viewBox. */
+  /** Rounded stroke SVG path data rendered in a 24x24 viewBox. */
   path: string;
 };
 
@@ -12,69 +12,60 @@ const materialNavigationIcons: Record<
   NavigationSectionId,
   MaterialNavigationIcon
 > = {
-  // chat bubble
   chat: {
     label: "会话",
     glyph: "⌂",
-    path: "M4 4h16a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H8l-4 4V5a1 1 0 0 1 1-1Zm3 5h10v-2H7v2Zm0 4h7v-2H7v2Z",
+    path: "M5 6.5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2H9l-4 3v-12.5Zm4 3.5h6M9 13h4",
   },
-  // dashboard grid
   overview: {
     label: "总览",
     glyph: "◇",
-    path: "M3 3h8v8H3V3Zm10 0h8v5h-8V3ZM3 13h8v8H3v-8Zm10 3h8v5h-8v-5Z",
+    path: "M4.5 5.5a1 1 0 0 1 1-1h4.5v5.5H4.5V5.5Zm9.5-1h4.5a1 1 0 0 1 1 1v4H14v-5ZM4.5 14h5.5v5.5H5.5a1 1 0 0 1-1-1V14Zm9.5 0h5.5v4.5a1 1 0 0 1-1 1H14V14Z",
   },
   goals: {
     label: "目标",
     glyph: "◎",
-    path: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 4a6 6 0 1 0 0 12 6 6 0 0 0 0-12Zm0 4a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z",
+    path: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0-4.5a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9Zm0-2a2.5 2.5 0 0 0 2.5-2.5",
   },
-  // play / runs history
   runs: {
     label: "运行",
     glyph: "▶",
-    path: "M13 3a9 9 0 1 0 8.94 10H19.9A7 7 0 1 1 13 5V3Zm2 0v6h6a9.02 9.02 0 0 0-6-6Zm-4 5v6l5-3-5-3Z",
+    path: "M5 12a7 7 0 1 0 2-4.9M5 5.5v4h4M11 9l5 3-5 3V9Z",
   },
-  // schedule clock
   "scheduled-tasks": {
     label: "任务",
     glyph: "◷",
-    path: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16Zm.5-13h-1.5v6l5.25 3.15.75-1.23-4.5-2.67V7Z",
+    path: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM12 7v5l3.5 2",
   },
   skills: {
     label: "技能",
     glyph: "✦",
-    path: "M12 2 9.2 8.6 2 9.2l5.5 4.7L5.8 21 12 17l6.2 4-1.7-7.1L22 9.2l-7.2-.6L12 2Z",
+    path: "M12 3.5 13.9 8l4.9.4-3.7 3.1 1.1 4.8-4.2-2.5-4.2 2.5 1.1-4.8-3.7-3.1L10.1 8 12 3.5Z",
   },
-  // tune / settings sliders for tools
   tools: {
     label: "工具",
     glyph: "⌘",
-    path: "M3 17v2h6v-2H3Zm0-6v2h10v-2H3Zm0-6v2h14V5H3Zm12 12v2h6v-2h-6Zm-4-6v2h10v-2H11Zm6-6v2h4V5h-4Z",
+    path: "M4 7h16M4 12h16M4 17h16M8 5v4M15 10v4M11 15v4",
   },
-  // memory chip
   memory: {
     label: "记忆",
     glyph: "◌",
-    path: "M8 8h8v8H8V8Zm-3 1h2v6H5V9Zm12 0h2v6h-2V9ZM9 2h2v3H9V2Zm4 0h2v3h-2V2ZM9 19h2v3H9v-3Zm4 0h2v3h-2v-3ZM6 6h12v12H6V6Z",
+    path: "M8 8h8v8H8V8ZM5 10h3M5 14h3M16 10h3M16 14h3M10 5v3M14 5v3M10 16v3M14 16v3",
   },
-  // school / learning
   learning: {
     label: "学习",
     glyph: "✓",
-    path: "M12 3 1 9l11 6 9-4.91V17h2V9L12 3Zm0 13.2L5 12.4v2.4l7 3.8 7-3.8v-2.4l-7 3.8Z",
+    path: "M12 5 3 9.5l9 4.5 9-4.5L12 5ZM7 12.5V16l5 3 5-3v-3.5",
   },
-  // assessment chart
   evals: {
     label: "评测",
     glyph: "▣",
-    path: "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm2 14h2v-5H7v5Zm4 0h2V7h-2v10Zm4 0h2v-8h-2v8Z",
+    path: "M6 4.5h12a1.5 1.5 0 0 1 1.5 1.5v12a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 18V6A1.5 1.5 0 0 1 6 4.5ZM8.5 16v-4M12 16V8M15.5 16v-6",
   },
-  // gear
   settings: {
     label: "设置",
     glyph: "⚙",
-    path: "M19.43 12.98c.04-.32.07-.65.07-.98s-.02-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.37-.31-.6-.22l-2.49 1a7.4 7.4 0 0 0-1.69-.98l-.38-2.65A.5.5 0 0 0 14 2h-4a.5.5 0 0 0-.5.42l-.38 2.65c-.61.25-1.18.58-1.69.98l-2.49-1a.5.5 0 0 0-.6.22l-2 3.46a.5.5 0 0 0 .12.64l2.11 1.65a7.93 7.93 0 0 0-.07.98c0 .33.02.66.07.98l-2.11 1.65a.5.5 0 0 0-.12.64l2 3.46c.12.22.37.31.6.22l2.49-1c.51.4 1.08.73 1.69.98l.38 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.38-2.65c.61-.25 1.18-.58 1.69-.98l2.49 1c.23.09.48 0 .6-.22l2-3.46a.5.5 0 0 0-.12-.64l-2.11-1.65ZM12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z",
+    path: "M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM4 12h2M18 12h2M12 4v2M12 18v2M6.6 6.6 8 8M16 16l1.4 1.4M17.4 6.6 16 8M8 16l-1.4 1.4",
   },
 };
 

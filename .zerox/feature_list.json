@@ -2320,6 +2320,57 @@
         "Design director and UX expert review score >= 95",
         "git diff --check"
       ]
+    },
+    {
+      "id": "P34-v3.2.2-soft-blue-visual-system",
+      "priority": 64,
+      "status": "done",
+      "title": "v3.2.2 Soft Blue desktop visual system migration",
+      "files": [
+        "docs/design/zerox-agent-3-2-2-audit.md",
+        "docs/design/zerox-agent-3-2-2-directions.md",
+        "docs/design/zerox-agent-3-2-2-design-system-spec.md",
+        "docs/design/zerox-agent-3-2-2-migration-plan.md",
+        "docs/design/zerox-agent-3-2-2-qa/",
+        "src/renderer/styles/tokens.css",
+        "src/renderer/styles/base.css",
+        "src/renderer/styles/app-shell.css",
+        "src/renderer/styles/sidebar.css",
+        "src/renderer/styles/chat.css",
+        "src/renderer/styles/composer.css",
+        "src/renderer/styles/cards.css",
+        "src/renderer/styles/responsive.css",
+        "src/renderer/styles/legacy.css",
+        "src/renderer/components/Icon.tsx",
+        "src/shared/materialNavigation.ts",
+        "src/renderer/materialDesign.test.ts",
+        "README.md",
+        "package.json",
+        "package-lock.json",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md"
+      ],
+      "definitionOfDone": [
+        "Phase 4 migration plan is documented before code implementation",
+        "Renderer visual tokens implement the Soft Blue Desktop Control Surface specification with primitive, semantic, status, Agent-state, component, motion, radius, shadow, and dark-mode parity tokens",
+        "Core shell, sidebar, Chat, Runs, Tasks, Settings, composer, cards, menus, drawers, code/output, status pills, and forms are restyled to the Figma-inspired light blue/white system without product behavior changes",
+        "Legacy Material/glass styling is quarantined or mapped to the canonical token system, and newly migrated component CSS does not keep raw visual magic values outside tokens",
+        "Responsive visual QA covers desktop and 390px narrow states with no page-level horizontal overflow or obvious clipped safety controls",
+        "Independent Principal Design Architect adversarial review accepts the implementation before completion",
+        "package metadata reports version 3.2.2 in package.json and package-lock.json",
+        "README current release and download example reflect v3.2.2"
+      ],
+      "verification": [
+        "npm test -- src/renderer/materialDesign.test.ts src/shared/packageScripts.test.ts src/shared/readme.test.ts",
+        "npm test",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "Browser visual QA screenshots for Chat, Runs, Settings desktop and narrow states",
+        "Independent Principal Design Architect adversarial review accepted",
+        "git diff --check"
+      ]
     }
   ]
 }

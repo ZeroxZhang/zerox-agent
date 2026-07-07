@@ -1,5 +1,217 @@
 # Zerox Harness Progress
 
+## 2026-07-07 - v3.2.2 Soft Blue Visual System Phase 4 Implementation
+
+- Request:
+  - User removed phase gates and asked to continue through all stages until the v3.2.2 version development is complete.
+  - User explicitly required an independent adversarial design/code review and acceptance before the goal can be considered complete.
+- Scope:
+  - Surface-only visual-system migration based on the approved `Soft Blue Desktop Control Surface` direction.
+  - Preserved existing product flows, IA, runtime behavior, backend capabilities, Agent loop, permissions, sandbox checks, model/provider logic, memory, and goal mode.
+  - TypeScript changes were limited to visual SVG/icon rendering, tests, metadata, and QA tooling.
+- Changed files:
+  - `docs/design/zerox-agent-3-2-2-migration-plan.md`
+  - `docs/design/zerox-agent-3-2-2-qa/design-qa.md`
+  - `docs/design/zerox-agent-3-2-2-qa/capture-metrics.json`
+  - `docs/design/zerox-agent-3-2-2-qa/01-chat-desktop.png`
+  - `docs/design/zerox-agent-3-2-2-qa/02-runs-desktop.png`
+  - `docs/design/zerox-agent-3-2-2-qa/03-settings-desktop.png`
+  - `docs/design/zerox-agent-3-2-2-qa/04-chat-narrow.png`
+  - `docs/design/zerox-agent-3-2-2-qa/05-settings-narrow.png`
+  - `scripts/capture-visual-qa.mjs`
+  - `src/renderer/styles/tokens.css`
+  - `src/renderer/styles/base.css`
+  - `src/renderer/styles/app-shell.css`
+  - `src/renderer/styles/sidebar.css`
+  - `src/renderer/styles/chat.css`
+  - `src/renderer/styles/composer.css`
+  - `src/renderer/styles/cards.css`
+  - `src/renderer/styles/responsive.css`
+  - `src/renderer/styles/legacy.css`
+  - `src/renderer/App.tsx`
+  - `src/shared/materialNavigation.ts`
+  - `src/renderer/materialDesign.test.ts`
+  - `src/shared/materialNavigation.test.ts`
+  - `src/shared/packageScripts.test.ts`
+  - `src/shared/readme.test.ts`
+  - `README.md`
+  - `package.json`
+  - `package-lock.json`
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+- Implementation evidence:
+  - Added the P34 v3.2.2 feature gate to `.zerox/feature_list.json`.
+  - Updated package metadata and README release references from `3.2.1` to `3.2.2`.
+  - Rebuilt `src/renderer/styles/tokens.css` around primitive, semantic, Agent-state, component, shadow, radius, motion, and dark-mode parity tokens for the soft-blue desktop system.
+  - Restyled shell, sidebar, Chat, composer, Runs/Settings shared cards, forms, menus, code/output blocks, status pills, and responsive states onto the token system.
+  - Removed the legacy top-level Material/glass token source from `legacy.css` and kept remaining legacy CSS as structural compatibility mapped through canonical tokens.
+  - Migrated navigation SVGs from filled Material-like paths to rounded stroke icons with `1.75px` default stroke and `2px` active stroke.
+  - Fixed narrow Chat visual QA by hiding the empty-session micro hero on 390px states and preventing top status chrome from clipping.
+  - Added `scripts/capture-visual-qa.mjs` to produce repeatable Electron-rendered QA screenshots and layout metrics from the built renderer.
+- Visual QA evidence:
+  - `ELECTRON_DISABLE_SECURITY_WARNINGS=1 ./node_modules/.bin/electron scripts/capture-visual-qa.mjs` -> passed.
+  - Captured Chat desktop `1440x900`, Runs desktop `1440x900`, Settings desktop `1440x900`, Chat narrow `390x844`, and Settings narrow `390x844`.
+  - `capture-metrics.json` shows all 5 views with `overflow=false` and `clipped=0`.
+  - Metrics confirm `appBg=#eaf4fc`, `surface=#fff`, and `action=#166bb7` in every captured state.
+  - `docs/design/zerox-agent-3-2-2-qa/design-qa.md` final result -> passed.
+- GREEN / verification evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts src/shared/materialNavigation.test.ts src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 4 files / 81 tests passed.
+  - `npm test` -> 188 files / 1317 tests passed.
+  - `npm run build` -> passed; existing Vite chunk-size warning remained.
+  - `npm run verify` -> passed: 188 files / 1317 tests, production build, Agent evals 26/26, memory evals 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered the agent chat UI. Existing better-sqlite3 ABI mismatch warning fell back to JSON storage.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+  - `rg -n "#[0-9a-fA-F]{3,8}|rgba\(|hsla?\(" src/renderer/styles --glob '!tokens.css'` -> no matches; migrated component CSS has no raw visual color values outside `tokens.css`.
+- Independent review evidence:
+  - Independent review agent `Hooke` first pass -> BLOCKED only because this Phase 4 evidence was missing from `.zerox/progress.md`.
+  - Hooke separately confirmed the visual/CSS implementation matched the Soft Blue direction, tokenization was sound, no behavior/backend boundary changes were observed, focused tests passed, `git diff --check` passed, and QA metrics were clean.
+  - Remediation: this section records Phase 4 changed files, implementation evidence, visual QA, verification command results, and the first-pass independent review finding before requesting re-review.
+  - Hooke re-review -> ACCEPTED.
+  - Hooke confirmed `.zerox/progress.md` now records Phase 4 evidence, focused tests pass, `git diff --check` passes, `npm run harness:check` passes, no raw visual color values exist outside `tokens.css`, QA metrics remain clean, and no backend/runtime boundary changes were observed.
+- Final status:
+  - P34 `v3.2.2 Soft Blue desktop visual system migration` marked `done`.
+  - v3.2.2 design-system iteration is complete.
+
+## 2026-07-07 - v3.2.2 macOS Release Packaging
+
+- Request:
+  - User approved the opened test package and asked to package, push, and publish a new release.
+- Packaging evidence:
+  - Closed the running local test instance before packaging.
+  - `npm run dist:mac` -> passed.
+  - Generated distribution assets:
+    - `release/Zerox-Agent-3.2.2-arm64.dmg`
+    - `release/Zerox-Agent-3.2.2-arm64.dmg.blockmap`
+    - `release/Zerox-Agent-3.2.2-arm64-mac.zip`
+    - `release/Zerox-Agent-3.2.2-arm64-mac.zip.blockmap`
+    - `release/latest-mac.yml`
+  - Added hyphenated local asset aliases to match the `latest-mac.yml` URLs and the previous GitHub Release asset naming convention.
+  - `plutil -p "release/mac-arm64/Zerox Agent.app/Contents/Info.plist" | rg "CFBundleShortVersionString|CFBundleVersion|CFBundleName"` -> confirmed `Zerox Agent`, `3.2.2`, `3.2.2`.
+  - SHA256:
+    - DMG: `06090417f7e2a9d7e4df3f7e9bd727948a4167671dd32fe1f8038b5801ba8d46`
+    - ZIP: `8a12e68a8a16d7342bfe8fd9dc797eaa1b5c98ad7011dc3c6c6c5d3a98d4a748`
+- Packaged smoke evidence:
+  - `BUILDING_AGENT_SMOKE=1 "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+  - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v3.2.2' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+- Next gate:
+  - Commit 3.2.2 changes.
+  - Push branch and tag `v3.2.2`.
+  - Publish GitHub Release `v3.2.2` with macOS assets.
+
+## 2026-07-06 - v3.2.2 Design System Rebuild Phase 3 Specification
+
+- Request:
+  - User confirmed the corrected Phase 2 surface-style direction and asked to proceed.
+  - Produced the canonical Phase 3 design-system specification for `Soft Blue Desktop Control Surface` / `柔和浅蓝桌面控制面`.
+- Scope:
+  - No UI/runtime behavior changes in this phase.
+  - No product feature, backend capability, Agent behavior, permission, sandbox, memory, goal mode, route, or IA changes.
+  - Specification translates the Figma dashboard style into exact visual tokens, component styling rules, icon language, layout rhythm, motion values, accessibility contracts, dark-mode token parity, and Phase 4 migration boundaries.
+- Changed files:
+  - `docs/design/zerox-agent-3-2-2-design-system-spec.md`
+  - `docs/design/zerox-agent-3-2-2-directions.md`
+  - `.zerox/progress.md`
+- Canonical specification:
+  - `docs/design/zerox-agent-3-2-2-design-system-spec.md` is now the Phase 4 source of truth.
+  - It defines primitive colors, semantic colors, Agent visual state tokens, typography scale, spacing grid, radius scale, shadow/elevation system, motion tokens, icon geometry, app shell/sidebar/main layout rules, component specs, accessibility rules, and CSS migration constraints.
+  - It explicitly requires `src/renderer/styles/tokens.css` to become the canonical token source in Phase 4 and prevents component CSS from keeping raw hex/rgb visual values outside token declarations.
+  - It marks `legacy.css` as a migration/quarantine target rather than an active design-system foundation.
+- Direction correction:
+  - `docs/design/zerox-agent-3-2-2-directions.md` now records that Phase 2 is confirmed and superseded by the Phase 3 spec for implementation decisions.
+  - The earlier three generated product-direction images remain discarded exploration artifacts only.
+- GREEN / verification evidence:
+  - Phase 3 artifact presence check -> passed.
+  - Canonical direction grep confirmed `Soft Blue Desktop Control Surface`, `Not Allowed`, and `Phase 4 Entry Gate` are present in the spec.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+- Next gate:
+  - Stop and wait before Phase 4.
+  - Phase 4 must start with a migration plan listing token changes first, component batches, files touched per batch, unchanged behavior guarantees, verification commands, and screenshot states.
+
+## 2026-07-06 - v3.2.2 Design System Rebuild Phase 2 Direction Proposal
+
+- Request:
+  - User clarified that the supplied Figma dashboard is a visual-style reference, not a request for broad product-direction exploration.
+  - Corrected Phase 2 to describe a single surface-level design language, design framework, element treatment, icon language, layout rhythm, and design-system direction inspired by the Figma reference.
+- Scope:
+  - No UI/runtime behavior changes in this phase.
+  - No product feature, backend capability, Agent behavior, permission, sandbox, memory, route, or IA changes are allowed by this corrected direction.
+  - Used the Phase 1 audit, current app screenshots, v3.2.1 design-system doc, and supplied Figma dashboard reference as design grounding.
+  - Product Design saved context preflight returned no saved user context, so the current workspace and provided Figma reference are the authoritative inputs.
+- Changed files:
+  - `docs/design/zerox-agent-3-2-2-directions.md`
+  - `docs/design/zerox-agent-3-2-2-directions/01-quiet-operations-room.png`
+  - `docs/design/zerox-agent-3-2-2-directions/02-agent-flight-deck.png`
+  - `docs/design/zerox-agent-3-2-2-directions/03-soft-local-workspace.png`
+  - `.zerox/progress.md`
+- Direction outputs:
+  - Corrected direction: `Soft Blue Desktop Control Surface` / `柔和浅蓝桌面控制面`.
+  - Visual source: pale blue application environment, large white rounded workspace surface, blue vertical icon language, white cards, soft blue-tinted shadows, simple progress/chart styling, high-contrast black text, and friendly dashboard-like spacing.
+  - Zerox translation: apply this style to existing shell/sidebar/cards/composer/chat output/settings/runs surfaces without changing product semantics.
+  - The three earlier generated product-direction images remain as superseded exploration artifacts only; they must not be used as Phase 3 source of truth.
+- Recommendation:
+  - Proceed to Phase 3 by converting the corrected visual direction into exact tokens and component rules.
+  - Keep all later implementation constrained to visible styling, token consolidation, icon normalization, responsive collision fixes, and visual accessibility.
+- GREEN / verification evidence:
+  - Phase 2 artifact presence check -> passed.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+- Next gate:
+  - Stop and wait for user confirmation before Phase 3 design-system specification based on `Soft Blue Desktop Control Surface`.
+
+## 2026-07-06 - v3.2.2 Design System Rebuild Phase 1 Audit
+
+- Request: start the v3.2.2 iteration as Principal Design Architect, proceed in phases, and begin with a full design-system/product-experience audit before direction proposals, specs, and implementation.
+- Scope:
+  - No UI/runtime behavior changes in this phase.
+  - Audited the current React/Electron renderer, CSS token structure, shell/navigation, Chat Agent states, composer authority controls, Runs, Settings, brand assets, icon system, accessibility risks, responsive behavior, and the supplied Figma dashboard reference.
+  - `.zerox/feature_list.json` currently has no unfinished feature; the audit is recorded as the new v3.2.2 phase output without adding a planned feature before direction approval.
+- Changed files:
+  - `docs/design/zerox-agent-3-2-2-audit.md`
+  - `docs/design/zerox-agent-3-2-2-audit/01-chat-empty-desktop.png`
+  - `docs/design/zerox-agent-3-2-2-audit/02-runs-desktop.png`
+  - `docs/design/zerox-agent-3-2-2-audit/03-settings-model-desktop.png`
+  - `docs/design/zerox-agent-3-2-2-audit/04-settings-tools-desktop.png`
+  - `docs/design/zerox-agent-3-2-2-audit/05-settings-memory-desktop.png`
+  - `docs/design/zerox-agent-3-2-2-audit/06-settings-system-desktop.png`
+  - `docs/design/zerox-agent-3-2-2-audit/07-chat-skill-menu-desktop.png`
+  - `docs/design/zerox-agent-3-2-2-audit/08-chat-goal-mode-desktop.png`
+  - `docs/design/zerox-agent-3-2-2-audit/09-chat-workspace-menu-desktop.png`
+  - `docs/design/zerox-agent-3-2-2-audit/10-chat-empty-viewport.png`
+  - `docs/design/zerox-agent-3-2-2-audit/11-runs-viewport.png`
+  - `docs/design/zerox-agent-3-2-2-audit/12-settings-model-viewport.png`
+  - `docs/design/zerox-agent-3-2-2-audit/13-chat-tablet-900.png`
+  - `docs/design/zerox-agent-3-2-2-audit/14-settings-model-tablet-900.png`
+  - `docs/design/zerox-agent-3-2-2-audit/15-chat-mobile-390.png`
+  - `docs/design/zerox-agent-3-2-2-audit/16-runs-mobile-390.png`
+  - `docs/design/zerox-agent-3-2-2-audit/17-settings-model-mobile-390.png`
+  - `docs/design/zerox-agent-3-2-2-audit/capture-metrics.json`
+  - `docs/design/zerox-agent-3-2-2-audit/figma-reference-dashboard.png`
+  - `.zerox/progress.md`
+- Audit findings:
+  - `styles.css` still imports a 4199-line `legacy.css` before the new token/component CSS, leaving two competing design foundations.
+  - `tokens.css` is useful but too flat: it lacks Agent-specific semantic tokens for planning, executing, reflecting, approval, evidence, memory writes, recovery, and review.
+  - Core Agent output surfaces still contain hard-coded hex/rgba values in code, command, JSON, diff, goal process, and context cards.
+  - Chat already has the right primitives for workspace, skill, goal mode, tool approval, streaming state, and guided input, but these do not yet form one execution timeline language.
+  - Composer authority controls (`自动`, `目标`) are visually small relative to risk, and 390px tooltip metrics show off-left placement.
+  - Runs is currently the clearest surface; Chat home and Settings use different density models.
+  - Brand assets use cream/black/cyan while app UI uses cool blue-gray glass and dark navy, and icons are split between inline filled navigation paths and a local stroke icon set.
+- Screenshot evidence:
+  - Browser preview ran at `http://127.0.0.1:5173/`.
+  - Desktop 1440x900 captures showed no page-level horizontal overflow in Chat, Runs, Model Settings, Tools, Memory, or System.
+  - 900x800 and 390x844 responsive captures showed no page-level horizontal overflow; narrow Chat still has tooltip collision and hidden navigation context risks.
+  - Console warn/error logs were empty during capture.
+  - Figma reference node `1:2` from file `arvYBBKuq7mmWeEPLDRQ62` was inspected and saved locally as `figma-reference-dashboard.png`.
+- GREEN / verification evidence:
+  - `./init.sh` -> passed; ran `npm run harness:check` and `npm test -- src/shared/packageScripts.test.ts` successfully.
+  - `npm test -- src/renderer/materialDesign.test.ts` -> 1 file / 68 tests passed.
+  - `npm run verify` -> passed: 188 files / 1317 tests, build passed, agent evals 26/26, memory evals 2/2. Existing Vite chunk-size warning remained.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+- Next gate:
+  - Stop and wait for user confirmation before Phase 2 direction proposal with 2-3 visual directions and ImageGen references.
+
 ## 2026-06-27 - Runs Module Consumer Task Records Redesign
 
 - Request: redesign the confusing `运行` module as a simpler C-end `任务记录` experience, show browser mockups before implementation, then implement the approved simplified version with subagent review and strong layout QA.

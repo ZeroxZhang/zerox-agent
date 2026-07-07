@@ -14,7 +14,7 @@ describe("README", () => {
     expect(readme).toContain("npm run pack:mac");
     expect(readme).toContain("npm run dist:mac");
     expect(readme).toContain("xattr -dr com.apple.quarantine");
-    expect(readme).toContain("Zerox-Agent-3.2.1-arm64.dmg");
+    expect(readme).toContain("Zerox-Agent-3.2.2-arm64.dmg");
     expect(readme).toContain("npm run harness:check");
     expect(readme).toContain("npm run harness:score");
     expect(readme).toContain("npm run episode:export");
@@ -51,9 +51,15 @@ describe("README", () => {
     expect(positioning).toContain("Zerox does not run unbounded autonomous loops");
     expect(readme).toContain("session-native Goal Mode");
     expect(readme).toContain("Chat Session mode");
-    expect(readme).toContain("v3.2.1");
-    expect(readme).toContain("docs/design/zerox-agent-3-2-1-ui-ux-design-system.md");
-    expect(readme).toContain("Settings is organized as a governance center");
+    expect(readme).toContain("v3.2.2");
+    expect(readme).toContain("docs/design/zerox-agent-3-2-2-design-system-spec.md");
+    expect(readme).toContain("Soft Blue Desktop Control Surface");
+    expect(readme).toContain(
+      "The primary app flow is Chat, Runs, Tasks, and Settings",
+    );
+    expect(readme).toContain(
+      "diagnostics, skills, tools, memory, learning, and evals live under Settings",
+    );
   });
 
   it("documents Goal Mode architecture and eval coverage", () => {

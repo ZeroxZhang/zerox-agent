@@ -8,7 +8,7 @@ type PackageJson = {
 };
 
 describe("package scripts", () => {
-  it("sets release metadata to v3.2.1", () => {
+  it("sets release metadata to v3.2.2", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -16,12 +16,12 @@ describe("package scripts", () => {
       readFileSync(path.join(process.cwd(), "package-lock.json"), "utf8"),
     ) as { version?: string; packages?: Record<string, { version?: string }> };
 
-    expect(packageJson.version).toBe("3.2.1");
-    expect(packageLock.version).toBe("3.2.1");
-    expect(packageLock.packages?.[""]?.version).toBe("3.2.1");
+    expect(packageJson.version).toBe("3.2.2");
+    expect(packageLock.version).toBe("3.2.2");
+    expect(packageLock.packages?.[""]?.version).toBe("3.2.2");
   });
 
-  it("keeps release gates tracked through v3.2.1", () => {
+  it("keeps release gates tracked through v3.2.2", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -44,6 +44,9 @@ describe("package scripts", () => {
     const p33 = featureList.features.find(
       (feature) => feature.id === "P33-v3.2.1-ui-ux-design-system-settings-ia",
     );
+    const p34 = featureList.features.find(
+      (feature) => feature.id === "P34-v3.2.2-soft-blue-visual-system",
+    );
     const p31 = featureList.features.find(
       (feature) => feature.id === "P31-v3.1.2-window-controls-and-settings-icon",
     );
@@ -57,15 +60,30 @@ describe("package scripts", () => {
       (feature) => feature.id === "P28-v3.0.0-execution-context-spine",
     );
 
-    expect(packageJson.version).toBe("3.2.1");
+    expect(packageJson.version).toBe("3.2.2");
     expect(
-      openFeatureIds.filter((id) => id !== "P33-v3.2.1-ui-ux-design-system-settings-ia"),
+      openFeatureIds.filter((id) => id !== "P34-v3.2.2-soft-blue-visual-system"),
     ).toEqual([]);
     expect(openFeatureIds.length).toBeLessThanOrEqual(1);
-    expect(p33?.status === "in_progress" || p33?.status === "done").toBe(true);
+    expect(p34?.status === "in_progress" || p34?.status === "done").toBe(true);
+    expect(p34).toEqual(
+      expect.objectContaining({
+        id: "P34-v3.2.2-soft-blue-visual-system",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("Soft Blue Desktop Control Surface"),
+          expect.stringContaining("Renderer visual tokens implement"),
+          expect.stringContaining("Figma-inspired light blue/white system"),
+          expect.stringContaining("raw visual magic values outside tokens"),
+          expect.stringContaining("Independent Principal Design Architect adversarial review"),
+          expect.stringContaining("package metadata reports version 3.2.2"),
+        ]),
+      }),
+    );
+    expect(p33?.status).toBe("done");
     expect(p33).toEqual(
       expect.objectContaining({
         id: "P33-v3.2.1-ui-ux-design-system-settings-ia",
+        status: "done",
         definitionOfDone: expect.arrayContaining([
           expect.stringContaining("Product designer, interaction designer, and UX designer"),
           expect.stringContaining("comprehensive UI/UX design-system file"),
