@@ -94,10 +94,16 @@
 - Packaged smoke evidence:
   - `BUILDING_AGENT_SMOKE=1 "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
   - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v3.2.2' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
-- Next gate:
-  - Commit 3.2.2 changes.
-  - Push branch and tag `v3.2.2`.
-  - Publish GitHub Release `v3.2.2` with macOS assets.
+- Publication evidence:
+  - Release commit `f3d7ea5509bed2879fd5839457e0af985dee1c5c` pushed on branch `codex/3.2.2`.
+  - Annotated tag `v3.2.2` pushed to origin; `refs/tags/v3.2.2^{}` resolves to `f3d7ea5509bed2879fd5839457e0af985dee1c5c`.
+  - GitHub Release `v3.2.2` is published at https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.2.2, non-draft and non-prerelease, with five uploaded assets.
+  - `gh release view v3.2.2 --json tagName,url,isDraft,isPrerelease,publishedAt,targetCommitish,assets` confirmed remote asset digests match local SHA256 values:
+    - `latest-mac.yml`: `cd74ac26edc30e914160e83c6ae580dca6ce356477c5c8dea5c70033b36319ce`
+    - `Zerox-Agent-3.2.2-arm64.dmg`: `06090417f7e2a9d7e4df3f7e9bd727948a4167671dd32fe1f8038b5801ba8d46`
+    - `Zerox-Agent-3.2.2-arm64.dmg.blockmap`: `57074d65669431e991767d2ee6ffc84cfb61f43b44f4f645e4f660b335ae57ad`
+    - `Zerox-Agent-3.2.2-arm64-mac.zip`: `8a12e68a8a16d7342bfe8fd9dc797eaa1b5c98ad7011dc3c6c6c5d3a98d4a748`
+    - `Zerox-Agent-3.2.2-arm64-mac.zip.blockmap`: `bd5b22af556335de8788e09c5b0b8a92fc75545625d60d2778298f69f5640c7b`
 
 ## 2026-07-06 - v3.2.2 Design System Rebuild Phase 3 Specification
 
