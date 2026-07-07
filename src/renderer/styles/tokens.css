@@ -142,8 +142,8 @@
   --nav-item-bg-hover: var(--z-blue-50);
   --nav-item-text-active: var(--color-action-primary);
   --nav-item-bg-active: #ffffff;
-  --nav-icon-active-bg: var(--color-action-primary);
-  --nav-icon-active-text: #ffffff;
+  --nav-icon-active-bg: var(--color-action-soft);
+  --nav-icon-active-text: var(--color-action-primary);
   --chat-user-bubble-bg: var(--z-blue-50);
   --chat-user-bubble-text: var(--color-text-primary);
   --chat-assistant-bubble-bg: transparent;
@@ -154,10 +154,10 @@
   --shell-bg: var(--color-app-bg);
   --shell-workspace-bg: var(--color-surface-primary);
   --shell-workspace-border: var(--color-border-subtle);
-  --shell-workspace-radius: 18px;
+  --shell-workspace-radius: 14px;
   --card-bg: var(--color-surface-raised);
   --card-border: var(--color-border-subtle);
-  --card-radius: 12px;
+  --card-radius: 10px;
   --secondary-page-outline: #e4edf5;
   --secondary-page-outline-strong: #cfe1ef;
   --secondary-page-surface: rgb(255 255 255 / 0.82);
@@ -165,15 +165,15 @@
   --secondary-page-accent: var(--color-action-primary);
   --composer-bg: #ffffff;
   --composer-border: var(--color-border-subtle);
-  --composer-radius: 14px;
+  --composer-radius: 12px;
   --popover-bg: #ffffff;
   --popover-border: var(--color-border-subtle);
   --code-bg: var(--color-surface-muted);
   --code-border: var(--color-border-subtle);
 
   /* Typography. */
-  --font-sans: Inter, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
-  --font-display: Inter, "SF Pro Display", "PingFang SC", system-ui, sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Inter, system-ui, sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", Inter, system-ui, sans-serif;
   --font-mono: "SF Mono", "JetBrains Mono", ui-monospace, Menlo, Monaco, Consolas, monospace;
   --font-size-11: 11px;
   --font-size-12: 12px;
@@ -230,9 +230,9 @@
   /* Elevation and motion. */
   --shadow-none: 0 0 0 transparent;
   --shadow-xs: 0 1px 2px rgba(22, 107, 183, 0.05);
-  --shadow-sm: 0 8px 20px rgba(22, 107, 183, 0.08);
-  --shadow-md: 0 14px 34px rgba(22, 107, 183, 0.12);
-  --shadow-lg: 0 18px 46px rgba(22, 107, 183, 0.16);
+  --shadow-sm: 0 4px 12px rgba(22, 107, 183, 0.07);
+  --shadow-md: 0 10px 24px rgba(22, 107, 183, 0.1);
+  --shadow-lg: 0 14px 34px rgba(22, 107, 183, 0.14);
   --shadow-low: var(--shadow-sm);
   --shadow-medium: var(--shadow-md);
   --shadow-floating: var(--shadow-lg);
@@ -249,8 +249,8 @@
   --transition-slow: var(--duration-slow) var(--ease-emphasized);
 
   /* Layout. */
-  --nav-rail-width: 280px;
-  --settings-nav-width: 288px;
+  --nav-rail-width: 260px;
+  --settings-nav-width: 264px;
   --context-panel-width: 320px;
   --topbar-height: 64px;
 }
@@ -293,7 +293,7 @@
     --glass-blur: 0px;
     --text-on-accent: #071522;
     --nav-item-bg-active: #102b45;
-    --nav-icon-active-text: #071522;
+    --nav-icon-active-text: #83bdf6;
     --secondary-page-outline: #29445d;
     --secondary-page-outline-strong: #3a5872;
     --secondary-page-surface: rgb(15 34 52 / 0.86);

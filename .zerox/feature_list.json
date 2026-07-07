@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-07-05T00:00:00.000+08:00",
+  "updatedAt": "2026-07-08T00:00:00.000+08:00",
   "features": [
     {
       "id": "P0-repo-local-harness",
@@ -2413,6 +2413,68 @@
         "ELECTRON_DISABLE_SECURITY_WARNINGS=1 ./node_modules/.bin/electron scripts/capture-visual-qa.mjs",
         "npm run dist:mac",
         "BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v3.2.3' \"release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent\"",
+        "git diff --check"
+      ]
+    },
+    {
+      "id": "P36-v3.3.0-macos-ui-release-polish",
+      "priority": 66,
+      "status": "done",
+      "title": "v3.3.0 macOS UI release polish",
+      "files": [
+        "UI_AUDIT.md",
+        "UI_ACCEPTANCE.md",
+        "src/main/main.ts",
+        "src/main/desktopLifecycle.ts",
+        "src/renderer/App.tsx",
+        "src/renderer/components/AgentChatPanel.tsx",
+        "src/renderer/components/ConfirmDialog.tsx",
+        "src/renderer/components/GoalDetailDrawer.tsx",
+        "src/renderer/components/useDialogFocusTrap.ts",
+        "src/renderer/components/MemoryPanel.tsx",
+        "src/renderer/components/ModelSettingsPanel.tsx",
+        "src/renderer/components/ScheduledTasksPanel.tsx",
+        "src/renderer/styles/tokens.css",
+        "src/renderer/styles/app-shell.css",
+        "src/renderer/styles/sidebar.css",
+        "src/renderer/styles/chat.css",
+        "src/renderer/styles/composer.css",
+        "src/renderer/styles/cards.css",
+        "src/renderer/styles/responsive.css",
+        "src/renderer/styles/legacy.css",
+        "src/renderer/materialDesign.test.ts",
+        "src/shared/navigation.ts",
+        "src/shared/packageScripts.test.ts",
+        "src/shared/readme.test.ts",
+        "docs/design/zerox-agent-3-2-2-qa/",
+        "README.md",
+        "package.json",
+        "package-lock.json",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md"
+      ],
+      "definitionOfDone": [
+        "UI_AUDIT.md records the macOS HIG audit, interface inventory, severity-ranked findings, and implementation statuses",
+        "4 P0 safety and modal-contract findings are completed: tool approval, auto-approval/goal-mode risk copy, destructive confirmations, and goal detail drawer",
+        "macOS application menu, Tray quick links, sidebar density, settings flattening, typography, icons, compact layouts, and technical-output scrolling are polished without business logic changes",
+        "independent adversarial UI acceptance PASS is recorded in UI_ACCEPTANCE.md",
+        "visual QA screenshots and capture metrics are regenerated for Chat, Runs, Settings, Tasks, Tools, desktop, and narrow states",
+        "package metadata reports version 3.3.0 in package.json and package-lock.json",
+        "README current release and download example reflect v3.3.0",
+        "macOS DMG, ZIP, blockmaps, and latest-mac.yml artifacts are regenerated for v3.3.0",
+        "GitHub Release v3.3.0 is published with regenerated macOS assets and the release branch/tag are pushed"
+      ],
+      "verification": [
+        "npm test -- src/renderer/materialDesign.test.ts src/shared/packageScripts.test.ts src/shared/readme.test.ts src/main/desktopLifecycle.test.ts",
+        "npm test",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "./node_modules/.bin/electron scripts/capture-visual-qa.mjs",
+        "independent adversarial UI acceptance PASS",
+        "npm run dist:mac",
+        "BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v3.3.0' \"release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent\"",
         "git diff --check"
       ]
     }

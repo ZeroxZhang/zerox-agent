@@ -1,5 +1,7 @@
 /* Legacy structural compatibility only.
-   v3.2.2 canonical design tokens live in tokens.css. */
+   v3.3.0 keeps this file as an override quarantine for old shell selectors.
+   New UI work should live in tokens.css, app-shell.css, sidebar.css, chat.css,
+   composer.css, cards.css, or responsive.css, then retire matching rules here. */
 
 /* ═══════════════════════════════════════════════════════════════════════════
    RESET & BASE

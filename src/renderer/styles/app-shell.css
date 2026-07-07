@@ -113,11 +113,11 @@
   gap: var(--space-4);
   max-height: calc(100dvh - 56px);
   overflow: auto;
-  padding: var(--space-4);
+  padding: var(--space-3);
   border: 1px solid var(--glass-border);
-  border-radius: var(--radius-14);
-  background: var(--color-surface-primary);
-  box-shadow: var(--shadow-sm);
+  border-radius: var(--radius-12);
+  background: var(--secondary-page-surface);
+  box-shadow: none;
 }
 
 .settings-section-nav-heading,
@@ -158,7 +158,7 @@
   gap: var(--space-3);
   width: 100%;
   min-width: 0;
-  padding: var(--space-3);
+  padding: 10px;
   border: 1px solid transparent;
   border-radius: var(--radius-md);
   color: var(--text-secondary);
@@ -181,7 +181,7 @@
   color: var(--text-accent);
   background: var(--color-surface-primary);
   border-color: var(--border-accent);
-  box-shadow: inset 3px 0 0 var(--brand-accent), var(--shadow-sm);
+  box-shadow: inset 3px 0 0 var(--brand-accent);
 }
 
 .settings-section-nav button:focus-visible {
@@ -213,12 +213,12 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 24px;
-  padding: 0 var(--space-2);
-  border: 1px solid var(--status-info-border);
-  border-radius: var(--radius-full);
-  color: var(--status-info-text);
-  background: var(--status-info-bg);
+  min-height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: var(--text-tertiary);
+  background: transparent;
   font-size: var(--text-xs);
   font-weight: var(--font-semibold);
   white-space: nowrap;
@@ -226,16 +226,16 @@
 
 .settings-section-intent.is-safety,
 .settings-section-priority.is-safety {
-  color: var(--text-accent);
-  background: var(--secondary-page-row);
-  border-color: var(--secondary-page-outline-strong);
+  color: var(--status-warning-text);
+  background: transparent;
+  border-color: transparent;
 }
 
 .settings-section-intent.is-review,
 .settings-section-priority.is-review {
-  color: var(--text-accent);
-  background: var(--color-surface-hover);
-  border-color: var(--secondary-page-outline);
+  color: var(--text-tertiary);
+  background: transparent;
+  border-color: transparent;
 }
 
 .status-pill.is-preview {
@@ -290,4 +290,96 @@
   font-size: var(--text-sm);
   line-height: var(--leading-normal);
   overflow-wrap: anywhere;
+}
+
+.app-confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  padding: var(--space-6);
+  background: var(--color-overlay);
+}
+
+.app-confirm-dialog {
+  display: grid;
+  gap: var(--space-5);
+  width: min(100%, 420px);
+  padding: var(--space-5);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-14);
+  color: var(--text-primary);
+  background: var(--popover-bg);
+  box-shadow: var(--shadow-floating);
+}
+
+.app-confirm-dialog.is-danger {
+  border-color: var(--status-error-border);
+}
+
+.app-confirm-copy {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.app-confirm-copy span {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+}
+
+.app-confirm-copy h2 {
+  margin: 0;
+  font-size: var(--text-xl);
+  line-height: var(--leading-tight);
+}
+
+.app-confirm-copy p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.app-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.app-confirm-actions button {
+  min-height: 36px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-10);
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+}
+
+.app-confirm-secondary {
+  border: 1px solid var(--border-default);
+  color: var(--text-primary);
+  background: var(--color-surface-muted);
+}
+
+.app-confirm-secondary:hover {
+  border-color: var(--border-strong);
+  background: var(--color-surface-hover);
+}
+
+.app-confirm-primary {
+  border: 1px solid var(--bg-accent);
+  color: var(--text-on-accent);
+  background: var(--bg-accent);
+}
+
+.app-confirm-dialog.is-danger .app-confirm-primary {
+  border-color: var(--bg-danger);
+  color: var(--text-on-danger);
+  background: var(--bg-danger);
+}
+
+.app-confirm-primary:disabled,
+.app-confirm-secondary:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
 }

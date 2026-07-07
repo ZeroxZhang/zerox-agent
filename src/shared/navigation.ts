@@ -76,7 +76,7 @@ const navigationSections: NavigationSection[] = [
   {
     id: "scheduled-tasks",
     label: "任务",
-    module: "第 4 模块",
+    module: "自动任务",
     summary: "每日、工作日、每周和间隔自动任务。",
     details: [
       "把调度规则保存成本地结构化数据。",

@@ -18,6 +18,7 @@ import type {
   RawHistoryAroundResult,
   RawHistorySearchResult,
 } from "../../shared/rawHistory";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 type MemoryStatus =
   | { kind: "idle"; message: string }
@@ -61,6 +62,8 @@ export function MemoryPanel() {
     MemoryIngestionCandidate[]
   >([]);
   const [ingestionRunning, setIngestionRunning] = useState(false);
+  const [pendingDeleteMemoryId, setPendingDeleteMemoryId] =
+    useState<string | null>(null);
   const [status, setStatus] = useState<MemoryStatus>({
     kind: "idle",
     message: "记忆系统已就绪。",
@@ -267,12 +270,15 @@ export function MemoryPanel() {
       return;
     }
 
-    if (
-      !window.confirm(
-        "删除这条本地长期记忆？此操作不可撤销，未来规划将不再召回这条记忆。",
-      )
-    ) {
-      setStatus({ kind: "idle", message: "已取消删除记忆。" });
+    setPendingDeleteMemoryId(memoryId);
+  }
+
+  async function performDelete(memoryId: string) {
+    if (!window.buildingAgent) {
+      setStatus({
+        kind: "error",
+        message: "浏览器预览模式无法删除桌面记忆。",
+      });
       return;
     }
 
@@ -1059,6 +1065,26 @@ export function MemoryPanel() {
         </section>
       </div>
 
+      {pendingDeleteMemoryId ? (
+        <ConfirmDialog
+          confirmLabel="删除"
+          message={`删除“${
+            memories.find((memory) => memory.id === pendingDeleteMemoryId)
+              ?.title ?? "这条本地长期记忆"
+          }”？此操作不可撤销，未来规划将不再召回这条记忆。`}
+          onCancel={() => {
+            setPendingDeleteMemoryId(null);
+            setStatus({ kind: "idle", message: "已取消删除记忆。" });
+          }}
+          onConfirm={async () => {
+            const memoryId = pendingDeleteMemoryId;
+            setPendingDeleteMemoryId(null);
+            await performDelete(memoryId);
+          }}
+          title="删除本地记忆"
+          variant="danger"
+        />
+      ) : null}
     </section>
   );
 }

@@ -106,7 +106,8 @@ import { formatChatMessageTime } from "../chatMessageTime";
 import { AnswerBlock } from "./chat/AnswerBlock";
 import { GoalDetailDrawer } from "./GoalDetailDrawer";
 import { GoalStatusStrip } from "./GoalStatusStrip";
-import { Icon } from "./Icon";
+import { Icon, type IconName } from "./Icon";
+import { useDialogFocusTrap } from "./useDialogFocusTrap";
 import type {
   ToolApprovalDecisionPayload,
   ToolApprovalRequestPayload,
@@ -1002,6 +1003,28 @@ export function AgentChatPanel({
       selectedSkillName &&
       activeSkillMention?.query.toLowerCase() === selectedSkillName
     );
+
+  useEffect(() => {
+    if (!workspaceMenuOpen && !skillMentionMenuVisible) {
+      return;
+    }
+
+    function handleMenuKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") {
+        return;
+      }
+      setWorkspaceMenuOpen(false);
+      if (skillMentionMenuVisible) {
+        setDraft("");
+        setDraftCursor(0);
+      }
+    }
+
+    document.addEventListener("keydown", handleMenuKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleMenuKeyDown);
+    };
+  }, [skillMentionMenuVisible, workspaceMenuOpen]);
 
   const contextCards = useMemo(
     () => [
@@ -2563,7 +2586,7 @@ export function AgentChatPanel({
                     }}
                     type="checkbox"
                   />
-                  <span>自动</span>
+                  <span>自动授权</span>
                   <span
                     aria-hidden="true"
                     className="composer-risk-tooltip"
@@ -2583,7 +2606,7 @@ export function AgentChatPanel({
                   title={composerRiskTooltips.goal}
                   type="button"
                 >
-                  <span>目标</span>
+                  <span>目标模式</span>
                   <span
                     aria-hidden="true"
                     className="composer-risk-tooltip"
@@ -2619,6 +2642,20 @@ export function AgentChatPanel({
                 </button>
               </div>
             </div>
+            {autoApprovalEnabled || goalModeEnabled ? (
+              <div className="composer-mode-risk-summary" role="status">
+                <strong>高权限模式已开启</strong>
+                <span>
+                  {autoApprovalEnabled
+                    ? "自动授权会在本次会话中批准工具请求。"
+                    : ""}
+                  {autoApprovalEnabled && goalModeEnabled ? " " : ""}
+                  {goalModeEnabled
+                    ? "目标模式会先生成目标草案，确认后连续执行。"
+                    : ""}
+                </span>
+              </div>
+            ) : null}
           </div>
         </form>
         <GoalDetailDrawer
@@ -2681,7 +2718,9 @@ export function AgentChatPanel({
                   type="button"
                   disabled
                 >
-                  <span aria-hidden="true">{item.icon}</span>
+                  <span aria-hidden="true">
+                    <Icon name={item.icon} size={15} />
+                  </span>
                   <div>
                     <strong>{item.label}</strong>
                     <small>{item.detail}</small>
@@ -3021,7 +3060,7 @@ function buildContextPanelItems(options: {
 }) {
   const baseItems = options.contextCards.map((card) => ({
     id: `card-${card.label}`,
-    icon: "◷",
+    icon: "run" as IconName,
     label: `${card.label} · ${card.value}`,
     detail: card.detail,
   }));
@@ -3029,7 +3068,7 @@ function buildContextPanelItems(options: {
     ? [
         {
           id: `goal-${options.activeGoal.id}`,
-          icon: "◎",
+          icon: "goal" as IconName,
           label: "当前目标",
           detail: `${translateGoalStatus(options.activeGoal.status)} · ${options.activeGoal.description}`,
         },
@@ -3037,7 +3076,7 @@ function buildContextPanelItems(options: {
     : [];
   const memoryItems = options.memories.slice(0, 3).map((memory) => ({
     id: `memory-${memory.id}`,
-    icon: "□",
+    icon: "memory" as IconName,
     label: memory.title,
     detail: memory.content,
   }));
@@ -3183,45 +3222,72 @@ function ToolApprovalPanel({
   onResolve: (approved: boolean) => void;
 }) {
   const isCritical = request.risk.level === "critical";
+  const dialogRef = useRef<HTMLElement>(null);
+  const denyButtonRef = useRef<HTMLButtonElement>(null);
+  const handleDeny = useCallback(() => onResolve(false), [onResolve]);
+
+  useDialogFocusTrap({
+    dialogRef,
+    initialFocusRef: denyButtonRef,
+    onEscape: handleDeny,
+    open: true,
+  });
 
   return (
-    <section
-      aria-label="工具授权请求"
-      className={`tool-approval-panel${
-        isCritical ? " is-critical-risk" : ""
-      }`}
-      role="dialog"
-    >
-      <div>
-        <span>{isCritical ? "高危授权" : "工具授权"}</span>
-        <strong>{request.request.toolName}</strong>
-        <p>{request.deniedReason}</p>
-      </div>
-      <dl>
-        <div>
-          <dt>任务</dt>
-          <dd>{request.taskName}</dd>
+    <div className="tool-approval-backdrop" role="presentation">
+      <section
+        aria-describedby="tool-approval-description"
+        aria-labelledby="tool-approval-title"
+        aria-modal="true"
+        className={`tool-approval-panel${
+          isCritical ? " is-critical-risk" : ""
+        }`}
+        ref={dialogRef}
+        role="alertdialog"
+        tabIndex={-1}
+      >
+        <div className="tool-approval-copy">
+          <span>{isCritical ? "高危授权" : "工具授权"}</span>
+          <strong id="tool-approval-title">{request.request.toolName}</strong>
+          <p id="tool-approval-description">
+            {request.deniedReason} 请确认任务、风险和参数后再授权。
+          </p>
         </div>
-        <div>
-          <dt>风险</dt>
-          <dd>{request.risk.reason}</dd>
-        </div>
-        {Object.entries(request.argsSummary).map(([key, value]) => (
-          <div key={key}>
-            <dt>{key}</dt>
-            <dd>{String(value)}</dd>
+        <dl>
+          <div>
+            <dt>任务</dt>
+            <dd>{request.taskName}</dd>
           </div>
-        ))}
-      </dl>
-      <div className="tool-approval-actions">
-        <button type="button" onClick={() => onResolve(true)}>
-          授权本次
-        </button>
-        <button type="button" onClick={() => onResolve(false)}>
-          拒绝
-        </button>
-      </div>
-    </section>
+          <div>
+            <dt>风险</dt>
+            <dd>{request.risk.reason}</dd>
+          </div>
+          {Object.entries(request.argsSummary).map(([key, value]) => (
+            <div key={key}>
+              <dt>{key}</dt>
+              <dd>{String(value)}</dd>
+            </div>
+          ))}
+        </dl>
+        <div className="tool-approval-actions">
+          <button
+            className="tool-approval-deny"
+            ref={denyButtonRef}
+            type="button"
+            onClick={handleDeny}
+          >
+            拒绝
+          </button>
+          <button
+            className="tool-approval-approve"
+            type="button"
+            onClick={() => onResolve(true)}
+          >
+            授权本次
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
 

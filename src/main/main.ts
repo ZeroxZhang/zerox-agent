@@ -7,6 +7,7 @@ import {
   nativeImage,
   Tray,
 } from "electron";
+import type { MenuItemConstructorOptions } from "electron";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { getAgentValidationModeOptions } from "./agentValidationMode";
@@ -157,11 +158,29 @@ function createTray(): Tray {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       {
+        label: "后台运行中",
+        enabled: false,
+      },
+      {
         label: `显示 ${appMeta.productName}`,
         click: () => {
           createMainWindow();
         },
       },
+      { type: "separator" },
+      {
+        label: "打开任务记录",
+        click: () => navigateRendererTo("runs"),
+      },
+      {
+        label: "打开自动任务",
+        click: () => navigateRendererTo("scheduled-tasks"),
+      },
+      {
+        label: "打开设置",
+        click: () => navigateRendererTo("model-settings"),
+      },
+      { type: "separator" },
       {
         label: "关于 Zerox Agent",
         click: () => {
@@ -170,7 +189,7 @@ function createTray(): Tray {
             title: appMeta.productName,
             message: "Zerox Agent 正在本地运行。",
             detail:
-              "它会在后台保留定时任务、运行日志、工具权限和本地记忆。",
+              `版本 ${app.getVersion()}。它会在后台保留定时任务、运行日志、工具权限和本地记忆。`,
           });
         },
       },
@@ -189,6 +208,136 @@ function createTray(): Tray {
   });
 
   return tray;
+}
+
+function installApplicationMenu() {
+  const appMenu: MenuItemConstructorOptions[] =
+    process.platform === "darwin"
+      ? [
+          {
+            label: appMeta.productName,
+            submenu: [
+              { role: "about" },
+              { type: "separator" },
+              {
+                label: "设置...",
+                accelerator: "Command+,",
+                click: () => navigateRendererTo("model-settings"),
+              },
+              { type: "separator" },
+              { role: "services" },
+              { type: "separator" },
+              { role: "hide" },
+              { role: "hideOthers" },
+              { role: "unhide" },
+              { type: "separator" },
+              { role: "quit" },
+            ],
+          },
+        ]
+      : [];
+
+  const template: MenuItemConstructorOptions[] = [
+    ...appMenu,
+    {
+      label: "文件",
+      submenu: [
+        {
+          label: "打开会话",
+          accelerator: "CmdOrCtrl+1",
+          click: () => navigateRendererTo("chat"),
+        },
+        {
+          label: "打开任务记录",
+          accelerator: "CmdOrCtrl+2",
+          click: () => navigateRendererTo("runs"),
+        },
+        {
+          label: "打开自动任务",
+          accelerator: "CmdOrCtrl+3",
+          click: () => navigateRendererTo("scheduled-tasks"),
+        },
+        { type: "separator" },
+        { role: "close" },
+      ],
+    },
+    {
+      label: "编辑",
+      submenu: [
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        { role: "selectAll" },
+      ],
+    },
+    {
+      label: "视图",
+      submenu: [
+        {
+          label: "会话",
+          click: () => navigateRendererTo("chat"),
+        },
+        {
+          label: "任务记录",
+          click: () => navigateRendererTo("runs"),
+        },
+        {
+          label: "设置",
+          click: () => navigateRendererTo("model-settings"),
+        },
+        { type: "separator" },
+        ...(app.isPackaged
+          ? []
+          : ([
+              { role: "reload" },
+              { role: "toggleDevTools" },
+              { type: "separator" },
+            ] satisfies MenuItemConstructorOptions[])),
+        { role: "togglefullscreen" },
+      ],
+    },
+    {
+      label: "窗口",
+      submenu: [
+        { role: "minimize" },
+        { role: "zoom" },
+        ...(process.platform === "darwin"
+          ? ([{ type: "separator" }, { role: "front" }] satisfies MenuItemConstructorOptions[])
+          : ([{ role: "close" }] satisfies MenuItemConstructorOptions[])),
+      ],
+    },
+    {
+      label: "帮助",
+      submenu: [
+        {
+          label: "显示 Zerox Agent",
+          click: () => createMainWindow(),
+        },
+      ],
+    },
+  ];
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+function navigateRendererTo(hash: string) {
+  const windowInstance = createMainWindow();
+  const nextHash = hash.startsWith("#") ? hash : `#${hash}`;
+  const script = `window.location.hash = ${JSON.stringify(nextHash)}`;
+  const applyHash = () => {
+    void windowInstance.webContents.executeJavaScript(script, true).catch(() => {
+      // Navigation is best-effort; the visible app can still be used manually.
+    });
+  };
+
+  if (windowInstance.webContents.isLoading()) {
+    windowInstance.webContents.once("did-finish-load", applyHash);
+  } else {
+    applyHash();
+  }
 }
 
 function createTrayIconDataUrl(): string {
@@ -314,6 +463,7 @@ app.whenReady().then(() => {
   registerAllIpcHandlers(container);
   registerToolApprovalIpcHandlers();
   registerKernelIpcHandlers();
+  installApplicationMenu();
 
   if (validationMode.enabled) {
     void runValidationModeAndExit();

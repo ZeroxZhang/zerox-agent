@@ -8,6 +8,7 @@ import {
   AgentChatPanel,
   type ChatSidebarSession,
 } from "./components/AgentChatPanel";
+import { ConfirmDialog, type ConfirmDialogVariant } from "./components/ConfirmDialog";
 import { Icon } from "./components/Icon";
 import { EvalReviewPanel } from "./components/EvalReviewPanel";
 import { LearningReviewPanel } from "./components/LearningReviewPanel";
@@ -76,6 +77,15 @@ type RenameSessionDraft = {
   title: string;
 };
 
+type AppDialog = {
+  cancelLabel?: string;
+  confirmLabel: string;
+  message: string;
+  onConfirm: () => Promise<void> | void;
+  title: string;
+  variant?: ConfirmDialogVariant;
+};
+
 function getSectionFromHash(): NavigationSectionId {
   return getNavigationSection(window.location.hash.replace(/^#/, "")).id;
 }
@@ -110,6 +120,7 @@ export function App() {
   const [archiveGroupOpen, setArchiveGroupOpen] = useState(false);
   const [renameSessionDraft, setRenameSessionDraft] =
     useState<RenameSessionDraft | null>(null);
+  const [appDialog, setAppDialog] = useState<AppDialog | null>(null);
 
   function navigateTo(sectionId: NavigationTargetId) {
     const settingsSection = getSettingsNavigationSections().find(
@@ -243,7 +254,7 @@ export function App() {
 
     const result = await window.buildingAgent.archiveChatSession(session.id);
     if (!result.ok) {
-      window.alert(result.message);
+      showAppMessage("归档失败", result.message);
       return;
     }
     setArchiveGroupOpen(true);
@@ -267,7 +278,7 @@ export function App() {
 
     const result = await window.buildingAgent.restoreChatSession(session.id);
     if (!result.ok) {
-      window.alert(result.message);
+      showAppMessage("恢复失败", result.message);
       return;
     }
     await refreshChatSessions();
@@ -339,10 +350,19 @@ export function App() {
 
   async function handleDeleteChatSession(session: ChatSessionListItem) {
     setOpenChatSessionMenuId(null);
-    if (!window.confirm(`删除会话“${session.title}”？这不会删除已产生的运行日志。`)) {
-      return;
-    }
+    setAppDialog({
+      title: "删除会话",
+      message: `删除“${session.title}”？这不会删除已产生的运行日志。`,
+      confirmLabel: "删除",
+      variant: "danger",
+      onConfirm: async () => {
+        setAppDialog(null);
+        await performDeleteChatSession(session);
+      },
+    });
+  }
 
+  async function performDeleteChatSession(session: ChatSessionListItem) {
     if (!window.buildingAgent) {
       setChatSessions((currentSessions) =>
         currentSessions.filter((currentSession) => currentSession.id !== session.id),
@@ -356,7 +376,7 @@ export function App() {
 
     const result = await window.buildingAgent.deleteChatSession(session.id);
     if (!result.ok) {
-      window.alert(result.message);
+      showAppMessage("删除失败", result.message);
       return;
     }
     if (selectedChatSessionId === session.id) {
@@ -364,6 +384,16 @@ export function App() {
       setNewChatRequestKey((current) => current + 1);
     }
     await refreshChatSessions();
+  }
+
+  function showAppMessage(title: string, message: string) {
+    setAppDialog({
+      title,
+      message,
+      confirmLabel: "好",
+      variant: "info",
+      onConfirm: () => setAppDialog(null),
+    });
   }
 
   const activeChatSessions = chatSessions.filter((session) => !session.archivedAt);
@@ -433,7 +463,7 @@ export function App() {
           })}
         </nav>
         <section className="sidebar-section sidebar-pinned" aria-label="固定入口">
-          <p className="sidebar-section-title">Pinned</p>
+          <p className="sidebar-section-title">固定入口</p>
           <button type="button" onClick={() => navigateTo("scheduled-tasks")}>
             <strong>自动任务</strong>
             <small>调度与本地执行</small>
@@ -444,7 +474,7 @@ export function App() {
           </button>
         </section>
         <section className="sidebar-section sidebar-recents" aria-label="最近会话">
-          <p className="sidebar-section-title">Recents</p>
+          <p className="sidebar-section-title">最近会话</p>
           <div className="sidebar-session-list">
             {activeChatSessions.length ? (
               activeChatSessions.map((session) => (
@@ -592,6 +622,21 @@ export function App() {
                 : current,
             )
           }
+        />
+      ) : null}
+      {appDialog ? (
+        <ConfirmDialog
+          cancelLabel={appDialog.cancelLabel}
+          confirmLabel={appDialog.confirmLabel}
+          message={appDialog.message}
+          onCancel={
+            appDialog.cancelLabel === undefined && appDialog.variant === "info"
+              ? undefined
+              : () => setAppDialog(null)
+          }
+          onConfirm={appDialog.onConfirm}
+          title={appDialog.title}
+          variant={appDialog.variant}
         />
       ) : null}
     </main>

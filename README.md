@@ -33,13 +33,15 @@
 
 ## Overview
 
-**Zerox Agent** is a local-first desktop control plane for personal AI agents (current release: v3.2.3). The name comes from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
+**Zerox Agent** is a local-first desktop control plane for personal AI agents (current release: v3.3.0). The name comes from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
 
 It is not a chat wrapper or a generic hosted agent surface. It runs entirely on your machine: it configures OpenAI-compatible / Anthropic / Gemini models, scans local `SKILL.md` skill files, executes recoverable agent runs, invokes permission-controlled tools, tracks parent/child multi-agent sessions, persists experiential knowledge into local long-term memory, and keeps learning user-reviewed before it changes future behavior.
 
 The product boundary is documented in [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md). Runtime, workspace, and learning details live in [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md), [`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md), [`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md), and [`docs/architecture/agent-goal-mode.md`](docs/architecture/agent-goal-mode.md).
 
 The v3.2.2 interface system is documented in [`docs/design/zerox-agent-3-2-2-design-system-spec.md`](docs/design/zerox-agent-3-2-2-design-system-spec.md): the app keeps the existing local-first workflows while moving the visible design language to a Figma-inspired Soft Blue Desktop Control Surface.
+
+The v3.3.0 release is a macOS UI polish pass documented in [`UI_AUDIT.md`](UI_AUDIT.md) and accepted in [`UI_ACCEPTANCE.md`](UI_ACCEPTANCE.md). It tightens modal safety contracts, macOS menus, sidebar/settings density, typography, compact layouts, and release-ready visual QA without changing product behavior.
 
 ### Design Principles
 
@@ -510,7 +512,7 @@ npm run dist:mac      # .dmg + .zip → release/          (distribution)
 Current local builds are unsigned and not notarized. Each release passes an independent packaged-app acceptance gate (a computer-use run against the local macOS package) before handoff. After downloading a `.dmg` from GitHub Releases, macOS Gatekeeper may show "Zerox Agent is damaged and can't be opened." The image is usually valid; remove the quarantine attribute before opening:
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-3.2.3-arm64.dmg"
+xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-3.3.0-arm64.dmg"
 # or, if already dragged into Applications:
 xattr -dr com.apple.quarantine "/Applications/Zerox Agent.app"
 ```
@@ -571,6 +573,8 @@ Planned:
 它不是聊天壳，也不是泛用云端 Agent 入口。它运行在本机：配置 OpenAI-compatible / Anthropic / Gemini 模型、扫描本地 `SKILL.md` 技能文件、执行可恢复的 Agent 运行、调用受权限管控的工具、跟踪父子多 Agent 会话、把经验和知识写入本地长期记忆，并且在改变未来行为前保留用户审核。
 
 产品边界写在 [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md)。运行时、workspace、学习机制和目标模式分别见 [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md)、[`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md)、[`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md) 与 [`docs/architecture/agent-goal-mode.md`](docs/architecture/agent-goal-mode.md)。
+
+当前版本是 **v3.3.0**。本次发布是正式发布前的 macOS 界面与交互优化，审计记录见 [`UI_AUDIT.md`](UI_AUDIT.md)，验收记录见 [`UI_ACCEPTANCE.md`](UI_ACCEPTANCE.md)；主要收敛工具授权、破坏性确认、目标详情、macOS 菜单、侧边栏、设置页密度、排版和紧凑布局，不改变业务逻辑。
 
 ### 设计原则
 

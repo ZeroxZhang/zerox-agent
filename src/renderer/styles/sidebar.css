@@ -134,7 +134,7 @@
 .nav-item.is-active {
   color: var(--nav-item-text-active);
   background: var(--nav-item-bg-active);
-  box-shadow: var(--shadow-xs);
+  box-shadow: none;
 }
 
 .material-nav-icon {
@@ -160,7 +160,7 @@
 }
 
 .nav-item.is-active .material-nav-icon path {
-  stroke-width: 2;
+  stroke-width: 1.9;
 }
 
 .material-nav-label {

@@ -13,7 +13,11 @@ export type IconName =
   | "approval"
   | "settings"
   | "run"
-  | "task";
+  | "task"
+  | "memory"
+  | "goal"
+  | "edit"
+  | "chat";
 
 const iconPaths: Record<IconName, string> = {
   plus: "M12 5v14M5 12h14",
@@ -33,6 +37,10 @@ const iconPaths: Record<IconName, string> = {
   settings: "M12 8a4 4 0 1 1 0 8 4 4 0 0 1 0-8ZM4 12h2M18 12h2M12 4v2M12 18v2",
   run: "M8 5v14l11-7L8 5Z",
   task: "M5 6h14M5 12h14M5 18h10",
+  memory: "M6 5h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Zm2 4h8M8 13h5",
+  goal: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0-4a5 5 0 1 0 0-10 5 5 0 0 0 0 10Zm0-3a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z",
+  edit: "M4 20h4l10-10a2.8 2.8 0 0 0-4-4L4 16v4Zm10-14 4 4",
+  chat: "M5 6h14v9H9l-4 4V6Z",
 };
 
 export function Icon({

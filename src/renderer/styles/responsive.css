@@ -24,17 +24,30 @@
 
   .workspace-sidebar {
     --sidebar-x-padding: var(--space-3);
-    --sidebar-bottom-padding: var(--space-3);
+    --sidebar-bottom-padding: var(--space-2);
+    --window-control-safe-area: 28px;
     position: static;
     width: 100%;
     height: auto;
     max-height: none;
+    gap: var(--space-2);
     border-right: 0;
     border-bottom: 1px solid var(--border-default);
   }
 
+  .workspace-sidebar::before {
+    box-shadow: none;
+  }
+
+  .workspace-sidebar .brand,
+  .nav-footer {
+    display: none;
+  }
+
   .primary-nav {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    display: flex;
+    gap: var(--space-1);
+    overflow-x: auto;
   }
 
   .sidebar-pinned,
@@ -47,7 +60,7 @@
   }
 
   .agent-chat-panel {
-    height: calc(100dvh - 190px);
+    height: calc(100dvh - 92px);
     min-height: 0;
   }
 
@@ -57,15 +70,76 @@
 
   .settings-section-nav {
     position: static;
+    display: flex;
+    gap: var(--space-2);
     max-height: none;
+    overflow-x: auto;
+    padding: 0 0 var(--space-1);
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .settings-section-nav-heading,
+  .settings-section-group-heading {
+    display: none;
+  }
+
+  .settings-section-group {
+    display: flex;
+    flex: 0 0 auto;
+    gap: var(--space-2);
+  }
+
+  .settings-section-nav button {
+    flex: 0 0 auto;
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 44px;
+    min-width: 108px;
+    max-width: 148px;
+    padding: 8px 10px;
+    border-color: var(--secondary-page-outline);
+    background: var(--secondary-page-surface);
+  }
+
+  .settings-section-item-main span {
+    display: none;
+  }
+
+  .settings-section-intent,
+  .settings-section-priority {
+    display: none;
+  }
+
+  .topbar {
+    align-items: flex-start;
+    min-height: auto;
+    margin-bottom: var(--space-4);
+  }
+
+  .topbar h1 {
+    font-size: var(--text-3xl);
+  }
+
+  .topbar-actions {
+    justify-content: flex-start;
   }
 }
 
 @media (max-width: 640px) {
+  .workspace {
+    padding: var(--space-4);
+  }
+
   .workspace-sidebar {
     --sidebar-x-padding: var(--space-3);
-    --sidebar-bottom-padding: var(--space-3);
-    --window-control-safe-area: 56px;
+    --sidebar-bottom-padding: var(--space-2);
+    --window-control-safe-area: 24px;
+    gap: var(--space-2);
+  }
+
+  .workspace-sidebar::before {
+    box-shadow: none;
   }
 
   .workspace-sidebar .material-brand-copy,
@@ -73,16 +147,12 @@
     display: none;
   }
 
-  .primary-nav {
-    display: flex;
-    gap: var(--space-1);
-    overflow-x: auto;
-  }
-
   .nav-item {
-    min-width: 64px;
+    min-width: 60px;
+    min-height: 52px;
     grid-template-columns: 1fr;
     justify-items: center;
+    padding: 6px 8px;
     text-align: center;
   }
 
@@ -114,11 +184,12 @@
   }
 
   .agent-home-hero {
-    padding: var(--space-6) 0;
+    min-height: min(360px, 42dvh);
+    padding: var(--space-4) 0;
   }
 
   .agent-home-hero h2 {
-    font-size: 2rem;
+    font-size: var(--text-2xl);
   }
 
   .home-suggestions button {
@@ -153,7 +224,23 @@
   .composer textarea {
     min-height: clamp(104px, 20dvh, 132px);
     padding-top: 78px;
-    padding-right: 132px;
+    padding-right: 24px;
+    padding-bottom: 96px;
+  }
+
+  .composer-floating-actions {
+    left: var(--composer-action-inset);
+    flex-wrap: wrap;
+  }
+
+  .tool-approval-backdrop,
+  .app-confirm-backdrop {
+    padding: var(--space-3);
+  }
+
+  .tool-approval-panel dl div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-1);
   }
 
   .guided-skill-input-grid {
@@ -173,7 +260,7 @@
   .chat-command-output,
   .chat-json-preview {
     max-width: 100%;
-    overflow-x: hidden;
+    overflow-x: auto;
   }
 
   .chat-ledger-row,
@@ -183,20 +270,28 @@
   }
 
   .settings-section-nav {
-    padding: var(--space-3);
+    padding: 0;
   }
 
   .settings-section-nav button {
-    grid-template-columns: minmax(0, 1fr);
-    align-items: start;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .settings-section-nav-heading strong {
+    font-size: var(--text-base);
+  }
+
+  .settings-section-item-main strong {
+    font-size: var(--text-sm);
   }
 
   .settings-section-body {
-    padding: var(--space-3);
+    padding: 0 0 var(--space-5);
   }
 
   .settings-section-body-header {
-    padding: var(--space-3);
+    padding: 0;
   }
 }
 

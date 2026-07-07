@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type { Goal } from "../../shared/agentGoal";
 import type { ChatSessionGoalSummary } from "../../shared/chat";
 import { buildGoalProgressViewModel } from "../goalProgressViewModel";
+import { useDialogFocusTrap } from "./useDialogFocusTrap";
 
 type GoalDetailDrawerProps = {
   goal: Goal | null;
@@ -16,10 +17,21 @@ type GoalDetailDrawerProps = {
 };
 
 export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
+  const drawerRef = useRef<HTMLElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const milestonesRef = useRef<HTMLDivElement>(null);
   const progress = props.summary
     ? buildGoalProgressViewModel(props.summary, props.goal)
     : null;
+  const dialogOpen = props.open && Boolean(props.summary && progress);
+
+  useDialogFocusTrap({
+    dialogRef: drawerRef,
+    initialFocusRef: closeButtonRef,
+    onEscape: props.onClose,
+    open: dialogOpen,
+  });
 
   useEffect(() => {
     const element = milestonesRef.current;
@@ -32,26 +44,40 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
     return null;
   }
 
+  const hasGuardedActions =
+    props.summary.status === "waiting_for_review" ||
+    isRecoverableStatus(props.summary.status);
+
   return (
     <div
       className="goal-detail-drawer-backdrop"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
+        if (event.target === event.currentTarget && !hasGuardedActions) {
           props.onClose();
         }
       }}
     >
       <aside
+        aria-describedby="goal-detail-description"
+        aria-labelledby="goal-detail-title"
+        aria-modal="true"
         className="goal-detail-drawer"
-        aria-label="目标详情"
+        ref={drawerRef}
+        role="dialog"
+        tabIndex={-1}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <header>
           <div>
-            <span>Goal detail</span>
-            <h3>{props.summary.description}</h3>
+            <span>目标详情</span>
+            <h3 id="goal-detail-title" ref={headingRef} tabIndex={-1}>
+              {props.summary.description}
+            </h3>
+            <p id="goal-detail-description" className="sr-only">
+              查看目标进度、审核门、恢复路径和里程碑证据。
+            </p>
           </div>
-          <button type="button" onClick={props.onClose}>
+          <button type="button" ref={closeButtonRef} onClick={props.onClose}>
             关闭
           </button>
         </header>

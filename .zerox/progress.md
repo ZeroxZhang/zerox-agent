@@ -6343,3 +6343,45 @@
   - Annotated tag `v3.2.1` pushed to origin; `refs/tags/v3.2.1^{}` resolves to `0ec5177e1283fcb7d94388d5b514ea0df97e52a5`.
   - GitHub Release `v3.2.1` is published at https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.2.1, non-draft and non-prerelease, with five uploaded assets.
   - `gh release view v3.2.1 --json tagName,url,isDraft,isPrerelease,publishedAt,targetCommitish,assets` confirmed all remote asset digests match the local SHA256 values above.
+
+## 2026-07-08 - Zerox Agent v3.3.0 macOS UI Release Polish
+
+- Request:
+  - Start the v3.3.0 major iteration as a pre-release frontend/macOS UI optimization pass.
+  - First dispatch an independent senior macOS UI/front-end subagent to audit the repository against Apple HIG and write `UI_AUDIT.md`.
+  - Implement the audit in P0 -> P1 -> P2 order without changing business logic.
+  - Dispatch a second adversarial subagent for product acceptance, repeat if needed, then package, push, and publish the release.
+- Feature tracking:
+  - Added `P36-v3.3.0-macos-ui-release-polish` and marked it `done` after independent audit, implementation, adversarial PASS, verification, packaging, and packaged-app smoke.
+- Audit and acceptance evidence:
+  - First independent audit subagent wrote `UI_AUDIT.md` with interface inventory, HIG baseline, P0/P1/P2 findings, and implementation statuses.
+  - Completed all four P0 findings: tool approval modal contract, persistent auto-approval/goal-mode risk copy, shared destructive confirmation dialog, and Goal Detail drawer dialog/focus semantics.
+  - Implemented the 3.3.0 UI polish set across macOS app menu, Tray quick links, window background/minimum size, sidebar density, settings flattening, typography, icon/glyph cleanup, compact settings navigation, technical output scrolling, and focus trap reuse.
+  - Second independent adversarial UI acceptance subagent wrote `UI_ACCEPTANCE.md` and returned PASS.
+  - Visual QA screenshots and metrics were regenerated in `docs/design/zerox-agent-3-2-2-qa/`; `design-qa.md` now records the v3.3.0 surface check and the intentional 390px settings navigation scroll strip.
+- Changed areas:
+  - `UI_AUDIT.md`, `UI_ACCEPTANCE.md`, `.zerox/feature_list.json`, `.zerox/progress.md`, `README.md`, `package.json`, `package-lock.json`
+  - `src/main/main.ts`, `src/main/desktopLifecycle.ts`, `src/main/desktopLifecycle.test.ts`
+  - `src/renderer/App.tsx`, `src/renderer/components/AgentChatPanel.tsx`, `src/renderer/components/ConfirmDialog.tsx`, `src/renderer/components/GoalDetailDrawer.tsx`, `src/renderer/components/Icon.tsx`, `src/renderer/components/MemoryPanel.tsx`, `src/renderer/components/ModelSettingsPanel.tsx`, `src/renderer/components/ScheduledTasksPanel.tsx`, `src/renderer/components/useDialogFocusTrap.ts`
+  - `src/renderer/styles/tokens.css`, `src/renderer/styles/app-shell.css`, `src/renderer/styles/sidebar.css`, `src/renderer/styles/chat.css`, `src/renderer/styles/composer.css`, `src/renderer/styles/cards.css`, `src/renderer/styles/responsive.css`, `src/renderer/styles/legacy.css`
+  - `src/renderer/materialDesign.test.ts`, `src/shared/navigation.ts`, `src/shared/packageScripts.test.ts`, `src/shared/readme.test.ts`
+  - `docs/design/zerox-agent-3-2-2-qa/`
+- Verification evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts src/shared/packageScripts.test.ts src/main/desktopLifecycle.test.ts` -> passed, 3 files / 84 tests.
+  - `npm test -- src/renderer/materialDesign.test.ts src/main/desktopLifecycle.test.ts` -> passed, 2 files / 76 tests.
+  - `npm test -- src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> passed, 2 files / 11 tests.
+  - `npm test` -> passed, 188 files / 1320 tests.
+  - `npm run verify` -> passed: tests/build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local un-packaged smoke used JSON fallback after the existing better-sqlite3 ABI mismatch.
+  - `npm run harness:check` -> passed.
+  - `./node_modules/.bin/electron scripts/capture-visual-qa.mjs` -> passed; captured 7 visual QA views.
+- Release packaging evidence:
+  - `npm run dist:mac` -> passed; regenerated unsigned macOS arm64 DMG, ZIP, blockmaps, `latest-mac.yml`, and `release/mac-arm64/Zerox Agent.app` for v3.3.0.
+  - `release/latest-mac.yml` reports `version: 3.3.0` and update URLs `Zerox-Agent-3.3.0-arm64-mac.zip` / `Zerox-Agent-3.3.0-arm64.dmg`.
+  - Copied formal upload assets to the `Zerox-Agent-3.3.0-*` names referenced by `latest-mac.yml`.
+  - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v3.3.0' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed; renderer rendered agent chat UI.
+  - `release/Zerox-Agent-3.3.0-arm64.dmg` (122M, sha256 `ef6e1419d07cac45b25455ec62dbddc67447c46fd3815d71c9999cd06fd54d8b`)
+  - `release/Zerox-Agent-3.3.0-arm64-mac.zip` (333M, sha256 `bb2834a534ccbafb2e49572526c262f6c7f325b7c4d7de629612c4d0b4116f6b`)
+  - `release/Zerox-Agent-3.3.0-arm64.dmg.blockmap` (132K, sha256 `4ac9f4d5ad29a71d86081a58ce9b42990663a8040f1ac11c1bffecd6c52b64da`)
+  - `release/Zerox-Agent-3.3.0-arm64-mac.zip.blockmap` (335K, sha256 `130a137ef4cd1112681f6ee3a1c404141da8da92631e4b1b85bf5ed00e01763b`)
+  - `release/latest-mac.yml` (517B, sha256 `1f2b2cf95067788209484e2814f29890b05d0629b2e84a2d076cb0e1aef522b2`)

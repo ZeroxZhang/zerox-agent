@@ -178,7 +178,7 @@ describe("Design System — Soft Blue desktop control surface", () => {
     expect(appSource).toContain("newChatRequestKey");
     expect(appSource).toContain("onChatSessionsChange");
     expect(appSource).toContain("onSelectChatSession");
-    expect(styles).toContain("--nav-rail-width: 280px;");
+    expect(styles).toContain("--nav-rail-width: 260px;");
     expect(styles).toContain(".workspace-sidebar");
     expect(styles).toContain(".new-chat-button");
     expect(styles).toContain(".sidebar-session-item");
@@ -650,7 +650,7 @@ describe("Design System — Soft Blue desktop control surface", () => {
     expect(styles).toContain(".material-nav-icon svg");
     expect(styles).toContain("overflow: visible;");
     expect(styles).toContain(".nav-item.is-active .material-nav-icon path");
-    expect(styles).toContain("stroke-width: 2;");
+    expect(styles).toContain("stroke-width: 1.9;");
     expect(materialNavigationSource).toContain("Rounded stroke SVG path");
     expect(materialNavigationSource).toContain("M12 15.5a3.5");
     expect(materialNavigationSource).not.toContain("M19.4 13a7.8");
@@ -688,7 +688,7 @@ describe("Design System — Soft Blue desktop control surface", () => {
     expect(memoryPanelSource).toContain(
       'role={status.kind === "error" ? "alert" : "status"}',
     );
-    expect(memoryPanelSource).toContain("window.confirm");
+    expect(memoryPanelSource).toContain("ConfirmDialog");
     expect(memoryPanelSource).toContain("此操作不可撤销");
     expect(memoryPanelSource).toContain("删除本地长期记忆，不可撤销");
   });
@@ -956,7 +956,7 @@ describe("Design System — Soft Blue desktop control surface", () => {
     expect(styles).toContain(".home-suggestions");
   });
 
-  it("keeps the v3.2.3 root background softer and slightly transparent", () => {
+  it("keeps the v3.3.0 root background softer and slightly transparent", () => {
     expect(styles).toContain("--z-app-blue-base: #f8fbfd;");
     expect(styles).toContain("--z-app-blue: rgb(248 251 253 / 0.96);");
     expect(styles).toContain("--color-app-bg: var(--z-app-blue);");
@@ -989,7 +989,7 @@ describe("Design System — Soft Blue desktop control surface", () => {
       ".task-record-row.is-selected,\n.timeline-event.is-selected,\n.run-list-item.is-selected,\n.recommendation.is-selected,\n.module-card.is-selected {\n  border-color: var(--secondary-page-accent);",
     );
     expect(styles).toContain(
-      ".settings-section-intent.is-safety,\n.settings-section-priority.is-safety {\n  color: var(--text-accent);",
+      ".settings-section-intent.is-safety,\n.settings-section-priority.is-safety {\n  color: var(--status-warning-text);",
     );
     expect(styles).toContain(
       ".status-pill.is-preview {\n  color: var(--text-accent);",
@@ -1137,7 +1137,10 @@ describe("Design System — Soft Blue desktop control surface", () => {
     expect(chatPanelSource).toContain("setToolAutoApprovalEnabled");
     expect(chatPanelSource).toContain("onToolApprovalRequest");
     expect(chatPanelSource).toContain("tool-approval-panel");
+    expect(chatPanelSource).toContain('role="alertdialog"');
+    expect(chatPanelSource).toContain('aria-modal="true"');
     expect(chatPanelSource).toContain("aria-label=\"自动授权工具请求\"");
+    expect(chatPanelSource).toContain("composer-mode-risk-summary");
     expect(chatPanelSource).toContain("resolveToolApproval");
     expect(chatPanelSource).toContain("is-critical-risk");
     expect(styles).toContain(".tool-approval-panel");

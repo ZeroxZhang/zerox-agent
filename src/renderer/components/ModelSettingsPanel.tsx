@@ -240,19 +240,22 @@ export function ModelSettingsPanel() {
           <span>
             {fieldGuidance.temperature.label} <em>选填</em>
           </span>
-          <input
-            max="2"
-            min="0"
-            onChange={(event) =>
-              setForm({
-                ...form,
-                temperature: Number(event.currentTarget.value),
-              })
-            }
-            step="0.01"
-            type="number"
-            value={form.temperature}
-          />
+          <div className="range-field">
+            <input
+              max="2"
+              min="0"
+              onChange={(event) =>
+                setForm({
+                  ...form,
+                  temperature: Number(event.currentTarget.value),
+                })
+              }
+              step="0.01"
+              type="range"
+              value={form.temperature}
+            />
+            <output>{form.temperature.toFixed(2)}</output>
+          </div>
           <strong className="field-hint">{fieldGuidance.temperature.hint}</strong>
           {errors.temperature ? <small>{errors.temperature}</small> : null}
         </label>
@@ -262,6 +265,7 @@ export function ModelSettingsPanel() {
             {fieldGuidance.maxTokens.label} <em>选填</em>
           </span>
           <input
+            inputMode="numeric"
             min="1"
             onChange={(event) =>
               setForm({

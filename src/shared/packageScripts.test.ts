@@ -8,7 +8,7 @@ type PackageJson = {
 };
 
 describe("package scripts", () => {
-  it("sets release metadata to v3.2.3", () => {
+  it("sets release metadata to v3.3.0", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -16,12 +16,12 @@ describe("package scripts", () => {
       readFileSync(path.join(process.cwd(), "package-lock.json"), "utf8"),
     ) as { version?: string; packages?: Record<string, { version?: string }> };
 
-    expect(packageJson.version).toBe("3.2.3");
-    expect(packageLock.version).toBe("3.2.3");
-    expect(packageLock.packages?.[""]?.version).toBe("3.2.3");
+    expect(packageJson.version).toBe("3.3.0");
+    expect(packageLock.version).toBe("3.3.0");
+    expect(packageLock.packages?.[""]?.version).toBe("3.3.0");
   });
 
-  it("keeps release gates tracked through v3.2.3", () => {
+  it("keeps release gates tracked through v3.3.0", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -50,6 +50,9 @@ describe("package scripts", () => {
     const p35 = featureList.features.find(
       (feature) => feature.id === "P35-v3.2.3-home-style-release",
     );
+    const p36 = featureList.features.find(
+      (feature) => feature.id === "P36-v3.3.0-macos-ui-release-polish",
+    );
     const p31 = featureList.features.find(
       (feature) => feature.id === "P31-v3.1.2-window-controls-and-settings-icon",
     );
@@ -63,11 +66,21 @@ describe("package scripts", () => {
       (feature) => feature.id === "P28-v3.0.0-execution-context-spine",
     );
 
-    expect(packageJson.version).toBe("3.2.3");
-    expect(
-      openFeatureIds.filter((id) => id !== "P35-v3.2.3-home-style-release"),
-    ).toEqual([]);
-    expect(openFeatureIds.length).toBeLessThanOrEqual(1);
+    expect(packageJson.version).toBe("3.3.0");
+    expect(openFeatureIds).toEqual([]);
+    expect(p36).toEqual(
+      expect.objectContaining({
+        id: "P36-v3.3.0-macos-ui-release-polish",
+        status: "done",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("UI_AUDIT.md records the macOS HIG audit"),
+          expect.stringContaining("4 P0 safety and modal-contract findings are completed"),
+          expect.stringContaining("independent adversarial UI acceptance PASS"),
+          expect.stringContaining("package metadata reports version 3.3.0"),
+          expect.stringContaining("GitHub Release v3.3.0"),
+        ]),
+      }),
+    );
     expect(p35?.status === "in_progress" || p35?.status === "done").toBe(true);
     expect(p35).toEqual(
       expect.objectContaining({

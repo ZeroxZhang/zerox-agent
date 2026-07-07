@@ -4,10 +4,10 @@ export function getMainWindowOptions(): BrowserWindowConstructorOptions {
   return {
     width: 1120,
     height: 760,
-    minWidth: 960,
-    minHeight: 640,
+    minWidth: 640,
+    minHeight: 560,
     title: "Zerox Agent",
-    backgroundColor: "#f5f1ea",
+    backgroundColor: "#f8fbfd",
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 18, y: 18 },
   };

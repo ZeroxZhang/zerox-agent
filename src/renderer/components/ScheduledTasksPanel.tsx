@@ -11,6 +11,8 @@ import {
 import { buildToolSafetySummary } from "../../shared/toolSafetySummary";
 import type { TaskPermissionPolicy } from "../../shared/toolPermissions";
 import { demoRuns, demoTasks } from "../demoAgentData";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { Icon } from "./Icon";
 import { ToolSafetySummaryCard } from "./ToolSafetySummaryCard";
 
 type TaskStatus =
@@ -47,6 +49,8 @@ export function ScheduledTasksPanel() {
   const [loading, setLoading] = useState(true);
   const [createMenuOpen, setCreateMenuOpen] = useState(true);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [pendingDeleteTask, setPendingDeleteTask] =
+    useState<ScheduledTask | null>(null);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [isSubmittingCreateTask, setIsSubmittingCreateTask] = useState(false);
   const [draftText, setDraftText] = useState("");
@@ -389,10 +393,10 @@ export function ScheduledTasksPanel() {
   }
 
   async function handleDeleteTask(task: ScheduledTask) {
-    if (!window.confirm(`删除任务“${task.name}”？这不会删除已有运行日志。`)) {
-      return;
-    }
+    setPendingDeleteTask(task);
+  }
 
+  async function performDeleteTask(task: ScheduledTask) {
     setUpdatingTaskId(task.id);
     setStatus({ kind: "saving", message: "正在删除任务..." });
 
@@ -654,11 +658,11 @@ export function ScheduledTasksPanel() {
           </button>
           <div className="scheduled-task-create-menu" aria-label="新建任务菜单">
             <button onClick={handleOpenCreateDialog} type="button">
-              <span>✎</span>
+              <Icon name="edit" size={16} />
               <span>手动创建</span>
             </button>
             <button onClick={handleCreateFromChat} type="button">
-              <span>▰</span>
+              <Icon name="chat" size={16} />
               <span>从会话生成</span>
             </button>
           </div>
@@ -979,6 +983,20 @@ export function ScheduledTasksPanel() {
             </form>
           </section>
         </div>
+      ) : null}
+      {pendingDeleteTask ? (
+        <ConfirmDialog
+          confirmLabel="删除"
+          message={`删除“${pendingDeleteTask.name}”？这不会删除已有运行日志。`}
+          onCancel={() => setPendingDeleteTask(null)}
+          onConfirm={async () => {
+            const task = pendingDeleteTask;
+            setPendingDeleteTask(null);
+            await performDeleteTask(task);
+          }}
+          title="删除自动任务"
+          variant="danger"
+        />
       ) : null}
     </section>
   );
