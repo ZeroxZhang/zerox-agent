@@ -6441,3 +6441,8 @@
   - `release/Zerox-Agent-3.4.0-arm64.dmg.blockmap` (132K, sha256 `f0c9356a3644728b557af3d3806462adc2a66a2968b17970d34b7e2c1c22730e`)
   - `release/Zerox-Agent-3.4.0-arm64-mac.zip.blockmap` (336K, sha256 `9ba2a5dc1ea5eba7b63164ca1e5c2120772b15d7cfda7f1d1975fc7c6c5f824f`)
   - `release/latest-mac.yml` (4.0K, sha256 `b1ea844404a9973c8e80377caeac7f708888d4940740b84bc930980cd62a1c84`)
+- Publication evidence:
+  - Release commit `8b6cb33305182e3ee4390a176545577b3fdc857d` pushed on branch `codex/3.4.0`.
+  - Annotated tag `v3.4.0` pushed to origin; `refs/tags/v3.4.0^{}` resolves to `8b6cb33305182e3ee4390a176545577b3fdc857d`.
+  - GitHub Release `v3.4.0` is published at https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.4.0, non-draft and non-prerelease, with five uploaded assets.
+  - `gh release view v3.4.0 --json tagName,url,isDraft,isPrerelease,publishedAt,targetCommitish,assets` confirmed all remote asset digests match the local SHA256 values above.
