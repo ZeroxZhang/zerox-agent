@@ -1,5 +1,5 @@
 @media (max-width: 1180px) {
-  :root { --nav-rail-width: 248px; --context-panel-width: 300px; }
+  :root { --nav-rail-width: 224px; --context-panel-width: 300px; }
   .agent-chat-panel.has-context-panel { grid-template-columns: minmax(0, 1fr); }
   .agent-context-panel { display: none; }
   .agent-chat-panel.has-context-panel .chat-workspace {
@@ -70,14 +70,15 @@
 
   .settings-section-nav {
     position: static;
-    display: flex;
-    gap: var(--space-2);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-3);
     max-height: none;
-    overflow-x: auto;
-    padding: 0 0 var(--space-1);
-    border: 0;
-    border-radius: 0;
-    background: transparent;
+    overflow: visible;
+    padding: var(--space-3);
+    border: 1px solid var(--secondary-page-outline);
+    border-radius: var(--radius-12);
+    background: var(--secondary-page-surface);
   }
 
   .settings-section-nav-heading,
@@ -86,17 +87,21 @@
   }
 
   .settings-section-group {
-    display: flex;
-    flex: 0 0 auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 132px), 1fr));
+    width: 100%;
+    min-width: 0;
+    flex: none;
     gap: var(--space-2);
   }
 
   .settings-section-nav button {
-    flex: 0 0 auto;
+    flex: none;
     grid-template-columns: minmax(0, 1fr);
+    width: 100%;
     min-height: 44px;
-    min-width: 108px;
-    max-width: 148px;
+    min-width: 0;
+    max-width: none;
     padding: 8px 10px;
     border-color: var(--secondary-page-outline);
     background: var(--secondary-page-surface);

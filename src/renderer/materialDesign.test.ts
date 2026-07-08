@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-describe("Design System — Soft Blue desktop control surface", () => {
+describe("Design System — Obsidian desktop control surface", () => {
   const rootStyles = readFileSync(
     path.join(process.cwd(), "src/renderer/styles.css"),
     "utf8",
@@ -92,6 +92,13 @@ describe("Design System — Soft Blue desktop control surface", () => {
   const visualSystemSpecSource = existsSync(visualSystemSpecPath)
     ? readFileSync(visualSystemSpecPath, "utf8")
     : "";
+  const guideline0708Path = path.join(
+    process.cwd(),
+    "docs/design/guidelines_0708.html",
+  );
+  const guideline0708Source = existsSync(guideline0708Path)
+    ? readFileSync(guideline0708Path, "utf8")
+    : "";
   const evalReviewPanelPath = path.join(
     process.cwd(),
     "src/renderer/components/EvalReviewPanel.tsx",
@@ -178,7 +185,7 @@ describe("Design System — Soft Blue desktop control surface", () => {
     expect(appSource).toContain("newChatRequestKey");
     expect(appSource).toContain("onChatSessionsChange");
     expect(appSource).toContain("onSelectChatSession");
-    expect(styles).toContain("--nav-rail-width: 260px;");
+    expect(styles).toContain("--nav-rail-width: 232px;");
     expect(styles).toContain(".workspace-sidebar");
     expect(styles).toContain(".new-chat-button");
     expect(styles).toContain(".sidebar-session-item");
@@ -843,6 +850,25 @@ describe("Design System — Soft Blue desktop control surface", () => {
     expect(visualSystemSpecSource).toContain("Phase 4 Entry Gate");
   });
 
+  it("commits the v3.4.0 Obsidian design guideline and plan", () => {
+    const obsidianPlanPath = path.join(
+      process.cwd(),
+      "docs/design/zerox-agent-3-4-0-obsidian-plan.md",
+    );
+    const obsidianPlanSource = existsSync(obsidianPlanPath)
+      ? readFileSync(obsidianPlanPath, "utf8")
+      : "";
+
+    expect(existsSync(guideline0708Path)).toBe(true);
+    expect(guideline0708Source).toContain("B · 曜石 Obsidian");
+    expect(guideline0708Source).toContain("[data-accent=\"mono\"]");
+    expect(guideline0708Source).toContain("--color-accent:#26262A");
+    expect(guideline0708Source).toContain("曜石方案在 Dark 下整体反转");
+    expect(existsSync(obsidianPlanPath)).toBe(true);
+    expect(obsidianPlanSource).toContain("Zerox Agent 3.4.0 Obsidian");
+    expect(obsidianPlanSource).toContain("Frontend and interaction updates only");
+  });
+
   it("moves Overview diagnostics into the Settings system section", () => {
     expect(appSource).toMatch(
       /props\.activeSectionId === "system-overview"[\s\S]*<OverviewPanel onNavigate={navigateTo} \/>/,
@@ -956,13 +982,19 @@ describe("Design System — Soft Blue desktop control surface", () => {
     expect(styles).toContain(".home-suggestions");
   });
 
-  it("keeps the v3.3.0 root background softer and slightly transparent", () => {
-    expect(styles).toContain("--z-app-blue-base: #f8fbfd;");
-    expect(styles).toContain("--z-app-blue: rgb(248 251 253 / 0.96);");
-    expect(styles).toContain("--color-app-bg: var(--z-app-blue);");
+  it("uses the v3.4.0 Obsidian root background and accent tokens", () => {
+    expect(styles).toContain("--z-gray-50: #f3f3f3;");
+    expect(styles).toContain("--z-obsidian-500: #26262a;");
+    expect(styles).toContain("--color-app-bg: var(--z-gray-50);");
+    expect(styles).toContain("--color-action-primary: var(--z-obsidian-500);");
+    expect(styles).toContain("--color-action-primary-hover: var(--z-obsidian-600);");
+    expect(styles).toContain("--color-action-primary-pressed: var(--z-obsidian-700);");
+    expect(styles).toContain("--color-action-primary: #f2f2f4;");
+    expect(styles).toContain("--color-on-accent: #141416;");
+    expect(styles).toContain("--nav-rail-width: 232px;");
   });
 
-  it("keeps composer mode enabled states on the deep-blue theme color", () => {
+  it("keeps composer mode enabled states on the Obsidian theme color", () => {
     expect(styles).toContain(
       ".composer .auto-approval-toggle.is-enabled,\n.composer .composer-goal-mode-button.is-enabled {\n  border-color: var(--color-action-primary);\n  color: var(--text-on-accent);\n  background: var(--color-action-primary);",
     );
@@ -972,7 +1004,7 @@ describe("Design System — Soft Blue desktop control surface", () => {
   });
 
   it("uses a unified secondary-page list style for settings and task surfaces", () => {
-    expect(styles).toContain("--secondary-page-outline: #e4edf5;");
+    expect(styles).toContain("--secondary-page-outline: var(--color-border-subtle);");
     expect(styles).toContain(
       "--secondary-page-accent: var(--color-action-primary);",
     );

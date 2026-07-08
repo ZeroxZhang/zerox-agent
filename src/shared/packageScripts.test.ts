@@ -8,7 +8,7 @@ type PackageJson = {
 };
 
 describe("package scripts", () => {
-  it("sets release metadata to v3.3.0", () => {
+  it("sets release metadata to v3.4.0", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -16,12 +16,12 @@ describe("package scripts", () => {
       readFileSync(path.join(process.cwd(), "package-lock.json"), "utf8"),
     ) as { version?: string; packages?: Record<string, { version?: string }> };
 
-    expect(packageJson.version).toBe("3.3.0");
-    expect(packageLock.version).toBe("3.3.0");
-    expect(packageLock.packages?.[""]?.version).toBe("3.3.0");
+    expect(packageJson.version).toBe("3.4.0");
+    expect(packageLock.version).toBe("3.4.0");
+    expect(packageLock.packages?.[""]?.version).toBe("3.4.0");
   });
 
-  it("keeps release gates tracked through v3.3.0", () => {
+  it("keeps release gates tracked through v3.4.0", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -53,6 +53,9 @@ describe("package scripts", () => {
     const p36 = featureList.features.find(
       (feature) => feature.id === "P36-v3.3.0-macos-ui-release-polish",
     );
+    const p37 = featureList.features.find(
+      (feature) => feature.id === "P37-v3.4.0-obsidian-frontend-interaction",
+    );
     const p31 = featureList.features.find(
       (feature) => feature.id === "P31-v3.1.2-window-controls-and-settings-icon",
     );
@@ -66,8 +69,26 @@ describe("package scripts", () => {
       (feature) => feature.id === "P28-v3.0.0-execution-context-spine",
     );
 
-    expect(packageJson.version).toBe("3.3.0");
-    expect(openFeatureIds).toEqual([]);
+    expect(packageJson.version).toBe("3.4.0");
+    expect(
+      openFeatureIds.every(
+        (featureId) => featureId === "P37-v3.4.0-obsidian-frontend-interaction",
+      ),
+    ).toBe(true);
+    expect(openFeatureIds.length).toBeLessThanOrEqual(1);
+    expect(p37?.status === "in_progress" || p37?.status === "done").toBe(true);
+    expect(p37).toEqual(
+      expect.objectContaining({
+        id: "P37-v3.4.0-obsidian-frontend-interaction",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("0708 design guideline"),
+          expect.stringContaining("B · 曜石 Obsidian"),
+          expect.stringContaining("Renderer visual tokens implement the Obsidian"),
+          expect.stringContaining("package metadata reports version 3.4.0"),
+          expect.stringContaining("README current release and download example reflect v3.4.0"),
+        ]),
+      }),
+    );
     expect(p36).toEqual(
       expect.objectContaining({
         id: "P36-v3.3.0-macos-ui-release-polish",

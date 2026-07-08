@@ -6390,3 +6390,54 @@
   - Annotated tag `v3.3.0` pushed to origin; `refs/tags/v3.3.0^{}` resolves to `76d89fbe9fcee5a237dbeb0eb60876cb7c4ef685`.
   - GitHub Release `v3.3.0` is published at https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.3.0, non-draft and non-prerelease, with five uploaded assets.
   - `gh release view v3.3.0 --json tagName,url,isDraft,isPrerelease,publishedAt,targetCommitish,assets` confirmed all remote asset digests match the local SHA256 values above.
+
+## 2026-07-09 - Zerox Agent v3.4.0 Obsidian Frontend Interaction
+
+- Request:
+  - Start the v3.4.0 major iteration for frontend and interaction optimization only.
+  - Treat `docs/design/guidelines_0708.html` as the core design specification.
+  - Select the guideline's `B · 曜石 Obsidian` palette and prefer it over the current UI where it does not affect core behavior.
+  - Follow the staged workflow: inspect, plan, develop, test, accept, package/release, push.
+- Feature tracking:
+  - Added `P37-v3.4.0-obsidian-frontend-interaction` and marked it `done` after design acceptance, implementation, focused/full verification, visual QA, macOS packaging, and packaged-app smoke.
+- Design and planning evidence:
+  - Published `docs/design/zerox-agent-3-4-0-obsidian-plan.md` with the 0708 guideline reading, Obsidian token translation, scoped development batches, and acceptance evidence.
+  - Confirmed scope is limited to frontend visuals and interaction states; no ToolAuthorizationService, workspace sandbox, runtime, or core product behavior changes were made.
+  - Implemented the Obsidian light/dark inversion: light action accent `#26262a`, dark accent `#f2f2f4`, neutral app background `#f3f3f3`, raised surface `#ffffff`, guideline-aligned focus ring, radius, shadow, and motion tokens.
+- Changed areas:
+  - `.zerox/feature_list.json`, `.zerox/progress.md`, `README.md`, `package.json`, `package-lock.json`
+  - `docs/design/guidelines_0708.html`, `docs/design/zerox-agent-3-4-0-obsidian-plan.md`, `docs/design/zerox-agent-3-4-0-qa/`
+  - `scripts/capture-visual-qa.mjs`
+  - `src/renderer/styles/tokens.css`, `src/renderer/styles/base.css`, `src/renderer/styles/app-shell.css`, `src/renderer/styles/sidebar.css`, `src/renderer/styles/chat.css`, `src/renderer/styles/composer.css`, `src/renderer/styles/cards.css`, `src/renderer/styles/responsive.css`
+  - `src/renderer/materialDesign.test.ts`, `src/shared/packageScripts.test.ts`, `src/shared/readme.test.ts`
+- Implementation evidence:
+  - Rebuilt renderer tokens around the 0708 Obsidian palette while preserving compatibility aliases for existing style imports.
+  - Updated shell, sidebar, settings navigation, chat empty state, composer, cards, hover, active, disabled, and focus-visible states to use Obsidian tokens.
+  - Removed glass/backdrop treatment from content cards and kept glass only on shell/sidebar chrome, matching the guideline.
+  - Reworked narrow settings navigation from a horizontal strip into a wrapping grid so QA sees no clipped elements on 390px width.
+  - Updated README current-release copy and package metadata to v3.4.0.
+- Visual QA evidence:
+  - `ELECTRON_DISABLE_SECURITY_WARNINGS=1 ./node_modules/.bin/electron scripts/capture-visual-qa.mjs` -> passed; captured 7 views in `docs/design/zerox-agent-3-4-0-qa/`.
+  - Captured Chat, Runs, Settings, Tasks, Tools, desktop, and narrow states.
+  - `capture-metrics.json` reports no horizontal page overflow and no clipped element samples in all 7 views.
+  - Captured core colors match Obsidian light tokens: app background `#f3f3f3`, raised surface `#fff`, primary action `#26262a`.
+- Verification evidence:
+  - `./init.sh` -> passed harness check and packageScripts focused test before implementation.
+  - Focused test after implementation: `npm test -- src/renderer/materialDesign.test.ts src/shared/packageScripts.test.ts src/shared/readme.test.ts` -> 3 files / 83 tests passed.
+  - `npm test` -> passed, 188 files / 1321 tests.
+  - `npm run build` -> passed. Vite reported the existing large chunk warning only.
+  - `npm run verify` -> passed: tests/build passed, agent evals 26/26 passed, memory evals 2/2 passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local un-packaged smoke used JSON fallback after the existing better-sqlite3 ABI mismatch.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+- Release packaging evidence:
+  - `npm run dist:mac` -> passed; regenerated unsigned macOS arm64 DMG, ZIP, blockmaps, `latest-mac.yml`, and `release/mac-arm64/Zerox Agent.app` for v3.4.0.
+  - `release/latest-mac.yml` reports `version: 3.4.0` and update URLs `Zerox-Agent-3.4.0-arm64-mac.zip` / `Zerox-Agent-3.4.0-arm64.dmg`.
+  - Copied formal upload assets to the `Zerox-Agent-3.4.0-*` names referenced by `latest-mac.yml`.
+  - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v3.4.0' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed; renderer rendered agent chat UI.
+  - `release/mac-arm64/Zerox Agent.app/Contents/Info.plist` reports `CFBundleShortVersionString` as `3.4.0`.
+  - `release/Zerox-Agent-3.4.0-arm64.dmg` (122M, sha256 `002e785a595ffe164a6ab6b39963957cd5fe36c54b7b45f67393fa87f0a04d0a`)
+  - `release/Zerox-Agent-3.4.0-arm64-mac.zip` (333M, sha256 `961deae1b6be48d3f1fea2724740c33956cda434133e1a2beb57cd80a4655ce4`)
+  - `release/Zerox-Agent-3.4.0-arm64.dmg.blockmap` (132K, sha256 `f0c9356a3644728b557af3d3806462adc2a66a2968b17970d34b7e2c1c22730e`)
+  - `release/Zerox-Agent-3.4.0-arm64-mac.zip.blockmap` (336K, sha256 `9ba2a5dc1ea5eba7b63164ca1e5c2120772b15d7cfda7f1d1975fc7c6c5f824f`)
+  - `release/latest-mac.yml` (4.0K, sha256 `b1ea844404a9973c8e80377caeac7f708888d4940740b84bc930980cd62a1c84`)

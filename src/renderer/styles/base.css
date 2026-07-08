@@ -38,6 +38,26 @@ button:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+button,
+[role="button"],
+a,
+input,
+textarea,
+select {
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    color var(--transition-fast),
+    opacity var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+button:active:not(:disabled),
+[role="button"]:active {
+  transform: translateY(1px);
 }

@@ -1,0 +1,1332 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light" data-accent="blue">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zerox Agent · macOS 设计规范 v1.2</title>
+<style>
+/* ============================================================
+   Zerox Agent Design Tokens —— 可直接复制到工程使用
+   ============================================================ */
+:root{
+  color-scheme:light;
+  /* 字体族 */
+  --font-sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Helvetica Neue","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  /* 间距 · 4pt 网格 */
+  --sp-1:4px;--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:20px;--sp-6:24px;--sp-8:32px;--sp-10:40px;--sp-12:48px;--sp-16:64px;
+  /* 圆角 */
+  --r-xs:4px;--r-sm:6px;--r-md:8px;--r-lg:10px;--r-xl:12px;--r-full:999px;
+  /* 控件高度 */
+  --ctl-sm:24px;--ctl-md:28px;--ctl-lg:36px;
+  /* 动效 */
+  --dur-1:100ms;--dur-2:150ms;--dur-3:250ms;--dur-4:400ms;
+  --ease-standard:cubic-bezier(.4,0,.2,1);
+  --ease-out:cubic-bezier(0,0,.2,1);
+  --ease-in:cubic-bezier(.4,0,1,1);
+  --ease-spring:cubic-bezier(.34,1.4,.64,1);
+  /* z-index */
+  --z-sticky:100;--z-dropdown:1000;--z-tooltip:1100;--z-toast:1200;--z-modal:1300;
+  /* 语义色（填充，两主题共用） */
+  --color-danger-fill:#CC4139;--color-danger-fill-hover:#B7382F;--color-danger-fill-active:#9E2F28;
+  /* 语义色（文本/图标） */
+  --color-success:#2E8F55;--color-warning:#A96F0C;--color-danger:#C13A32;--color-info:#3474BE;
+  --color-success-bg:color-mix(in srgb,var(--color-success) 13%,transparent);
+  --color-warning-bg:color-mix(in srgb,var(--color-warning) 13%,transparent);
+  --color-danger-bg:color-mix(in srgb,var(--color-danger) 12%,transparent);
+  --color-info-bg:color-mix(in srgb,var(--color-info) 12%,transparent);
+  /* 派生 Accent */
+  --color-accent-soft:color-mix(in srgb,var(--color-accent) 11%,transparent);
+  --color-accent-ring:color-mix(in srgb,var(--color-accent) 35%,transparent);
+  --color-on-accent:#FFFFFF;
+  /* ---------- Light 主题 ---------- */
+  --color-bg-base:#F3F3F3;
+  --color-bg-raised:#FFFFFF;
+  --color-bg-sunken:#EAEAEA;
+  --color-bg-overlay:rgba(246,246,246,.72);
+  --color-bg-hover:rgba(0,0,0,.045);
+  --color-bg-active:rgba(0,0,0,.08);
+  --color-text-primary:rgba(0,0,0,.86);
+  --color-text-secondary:rgba(0,0,0,.55);
+  --color-text-tertiary:rgba(0,0,0,.36);
+  --color-text-disabled:rgba(0,0,0,.25);
+  --color-border-strong:rgba(0,0,0,.16);
+  --color-border:rgba(0,0,0,.10);
+  --color-border-subtle:rgba(0,0,0,.06);
+  --color-track:rgba(0,0,0,.13);
+  --shadow-1:0 1px 2px rgba(0,0,0,.06);
+  --shadow-2:0 2px 6px rgba(0,0,0,.06),0 8px 20px rgba(0,0,0,.07);
+  --shadow-3:0 4px 10px rgba(0,0,0,.08),0 12px 32px rgba(0,0,0,.12);
+  --shadow-4:0 8px 20px rgba(0,0,0,.10),0 28px 72px rgba(0,0,0,.22);
+  --glass-blur:saturate(180%) blur(20px);
+}
+[data-theme="dark"]{
+  color-scheme:dark;
+  --color-bg-base:#1E1E20;
+  --color-bg-raised:#2A2A2E;
+  --color-bg-sunken:#161618;
+  --color-bg-overlay:rgba(32,32,36,.72);
+  --color-bg-hover:rgba(255,255,255,.06);
+  --color-bg-active:rgba(255,255,255,.10);
+  --color-text-primary:rgba(255,255,255,.90);
+  --color-text-secondary:rgba(255,255,255,.60);
+  --color-text-tertiary:rgba(255,255,255,.40);
+  --color-text-disabled:rgba(255,255,255,.26);
+  --color-border-strong:rgba(255,255,255,.22);
+  --color-border:rgba(255,255,255,.12);
+  --color-border-subtle:rgba(255,255,255,.07);
+  --color-track:rgba(255,255,255,.18);
+  --color-success:#41B370;--color-warning:#D5983F;--color-danger:#E5645C;--color-info:#66A3DE;
+  --shadow-1:0 1px 2px rgba(0,0,0,.35);
+  --shadow-2:0 2px 6px rgba(0,0,0,.35),0 8px 20px rgba(0,0,0,.40);
+  --shadow-3:0 4px 10px rgba(0,0,0,.40),0 12px 32px rgba(0,0,0,.50);
+  --shadow-4:0 8px 20px rgba(0,0,0,.45),0 28px 72px rgba(0,0,0,.60);
+}
+/* ---------- Accent 六套方案 ----------
+   A blue     石墨蓝 · ZEROX 原生（蓝色系唯一保留）
+   B mono     曜石   · 参考 OpenAI / Notion / Vercel 无彩路线
+   C ember    熔岩橙 · 参考 Alibaba / Xiaomi / Reddit（加深至 AA）
+   D clay     陶土   · 参考 Anthropic Claude / MS PowerPoint
+   E magenta  品红   · 参考 T-Mobile / Dribbble
+   F crimson  信号红 · 参考 Netflix / Pinterest / YouTube（注意与危险色同族） */
+[data-accent="blue"]{--color-accent:#3A6BD0;--color-accent-hover:#2F58AE;--color-accent-active:#26478C;--color-accent-text:#3A6BD0;}
+[data-accent="mono"]{--color-accent:#26262A;--color-accent-hover:#3B3B41;--color-accent-active:#101013;--color-accent-text:#26262A;}
+[data-accent="ember"]{--color-accent:#C2410C;--color-accent-hover:#A83709;--color-accent-active:#8C2D07;--color-accent-text:#C2410C;}
+[data-accent="clay"]{--color-accent:#B25430;--color-accent-hover:#9A4526;--color-accent-active:#7F3820;--color-accent-text:#B25430;}
+[data-accent="magenta"]{--color-accent:#E20074;--color-accent-hover:#C40064;--color-accent-active:#A30053;--color-accent-text:#C40064;}
+[data-accent="crimson"]{--color-accent:#D6212B;--color-accent-hover:#B81B24;--color-accent-active:#99161E;--color-accent-text:#D6212B;}
+[data-theme="dark"][data-accent="blue"]{--color-accent-text:#7DA2EC;}
+[data-theme="dark"][data-accent="ember"]{--color-accent-text:#F49B62;}
+[data-theme="dark"][data-accent="clay"]{--color-accent-text:#E39A76;}
+[data-theme="dark"][data-accent="magenta"]{--color-accent-text:#FF7AB8;}
+[data-theme="dark"][data-accent="crimson"]{--color-accent-text:#F5898E;}
+/* 曜石方案在 Dark 下整体反转：浅色填充 + 深色文字 */
+[data-theme="dark"][data-accent="mono"]{--color-accent:#F2F2F4;--color-accent-hover:#DFDFE3;--color-accent-active:#C9C9CE;--color-on-accent:#141416;--color-accent-text:#E9E9EC;}
+
+/* ============================================================ 基础 */
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{font:400 13px/1.55 var(--font-sans);color:var(--color-text-primary);background:var(--color-bg-base);-webkit-font-smoothing:antialiased;transition:background var(--dur-3) var(--ease-standard),color var(--dur-3) var(--ease-standard)}
+::selection{background:var(--color-accent-ring)}
+a{color:var(--color-accent-text);text-decoration:none}
+a:hover{text-decoration:underline}
+svg.ic{width:16px;height:16px;flex:none;stroke:currentColor;fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.ic-20{width:20px;height:20px}.ic-24{width:24px;height:24px}
+button{font-family:inherit}
+a:focus-visible,button:focus-visible,[tabindex]:focus-visible{outline:none;box-shadow:0 0 0 3px var(--color-accent-ring),0 0 0 1px var(--color-accent)}
+
+/* ---------- 字体层级 ---------- */
+.t-lt{font-size:26px;line-height:32px;font-weight:700;letter-spacing:-.4px}
+.t-t1{font-size:22px;line-height:28px;font-weight:700;letter-spacing:-.3px}
+.t-t2{font-size:17px;line-height:24px;font-weight:600;letter-spacing:-.2px}
+.t-t3{font-size:15px;line-height:20px;font-weight:600;letter-spacing:-.1px}
+.t-hl{font-size:13px;line-height:18px;font-weight:600}
+.t-body{font-size:13px;line-height:20px;font-weight:400}
+.t-co{font-size:12px;line-height:16px;font-weight:400}
+.t-cap{font-size:11px;line-height:14px;font-weight:400;letter-spacing:.1px}
+.mono{font-family:var(--font-mono)}
+.sec2{color:var(--color-text-secondary)}.sec3{color:var(--color-text-tertiary)}
+
+/* ============================================================ 页面骨架 */
+.nav{position:fixed;inset:0 auto 0 0;width:232px;padding:var(--sp-4) var(--sp-3);background:var(--color-bg-overlay);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);border-right:1px solid var(--color-border-subtle);overflow-y:auto;z-index:var(--z-sticky)}
+.nav-head{display:flex;gap:10px;align-items:center;padding:var(--sp-1) var(--sp-2) var(--sp-4)}
+.logo{width:28px;height:28px;border-radius:7px;background:linear-gradient(135deg,var(--color-accent),var(--color-accent-active));color:var(--color-on-accent);display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow-1)}
+.nav-label{padding:var(--sp-4) var(--sp-2) var(--sp-1);font-size:11px;font-weight:600;color:var(--color-text-tertiary)}
+.nav-item{display:flex;align-items:center;gap:8px;height:28px;padding:0 var(--sp-2);border-radius:var(--r-sm);color:var(--color-text-primary);font-size:13px;transition:background var(--dur-2) var(--ease-out)}
+.nav-item svg{color:var(--color-text-secondary)}
+.nav-item:hover{background:var(--color-bg-hover);text-decoration:none}
+.nav-item.on{background:var(--color-accent);color:var(--color-on-accent)}
+.nav-item.on svg{color:var(--color-on-accent)}
+.topbar{position:fixed;top:0;left:232px;right:0;height:52px;display:flex;align-items:center;gap:var(--sp-3);padding:0 var(--sp-6);background:var(--color-bg-overlay);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);border-bottom:1px solid var(--color-border-subtle);z-index:var(--z-sticky)}
+.crumb{font-size:13px;color:var(--color-text-secondary)}
+.crumb b{color:var(--color-text-primary);font-weight:600}
+.topbar .sp{flex:1}
+.dot-btn{width:22px;height:22px;border-radius:var(--r-full);border:1px solid var(--color-border);cursor:pointer;padding:0;transition:transform var(--dur-2) var(--ease-out),box-shadow var(--dur-2)}
+.dot-btn:hover{transform:scale(1.12)}
+.dot-btn.on{box-shadow:0 0 0 2px var(--color-bg-base),0 0 0 4px var(--color-accent)}
+.vr{width:1px;height:20px;background:var(--color-border)}
+.main{margin-left:232px;padding:calc(52px + var(--sp-10)) var(--sp-12) var(--sp-16)}
+.wrap{max-width:920px;margin:0 auto}
+.sec{scroll-margin-top:76px;margin-bottom:var(--sp-16)}
+.eyebrow{font-family:var(--font-mono);font-size:11px;letter-spacing:1px;color:var(--color-accent-text);margin-bottom:var(--sp-2)}
+.lead{margin-top:var(--sp-2);max-width:640px;color:var(--color-text-secondary)}
+h3.sub{margin:var(--sp-8) 0 var(--sp-3)}
+h3.sub:first-of-type{margin-top:var(--sp-5)}
+
+/* ---------- 通用卡片 / 演示画布 / 参数行 ---------- */
+.card{background:var(--color-bg-raised);border:1px solid var(--color-border-subtle);border-radius:var(--r-lg);box-shadow:var(--shadow-1);padding:var(--sp-5)}
+.canvas{background:var(--color-bg-base);border:1px solid var(--color-border-subtle);border-radius:var(--r-md);padding:var(--sp-6);display:flex;flex-wrap:wrap;gap:var(--sp-4);align-items:center}
+.spec{display:flex;flex-wrap:wrap;gap:var(--sp-2) var(--sp-3);margin-top:var(--sp-3);padding-top:var(--sp-3);border-top:1px solid var(--color-border-subtle);font-family:var(--font-mono);font-size:11px;color:var(--color-text-secondary)}
+.k{font-family:var(--font-mono);font-size:11px;background:var(--color-bg-sunken);border:1px solid var(--color-border-subtle);border-radius:var(--r-xs);padding:1px 6px;cursor:pointer;color:var(--color-text-primary)}
+.k:hover{border-color:var(--color-accent);color:var(--color-accent-text)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-4)}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--sp-4)}
+.stack{display:flex;flex-direction:column;gap:var(--sp-3)}
+.row{display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap}
+.tbl{width:100%;border-collapse:collapse;font-size:12px}
+.tbl th{text-align:left;font-size:11px;font-weight:600;color:var(--color-text-tertiary);padding:0 var(--sp-3) var(--sp-2);letter-spacing:.3px}
+.tbl td{padding:var(--sp-2) var(--sp-3);border-top:1px solid var(--color-border-subtle);vertical-align:middle}
+.tbl .mono{font-size:11px;color:var(--color-text-secondary)}
+
+/* ============================================================ 01 原则 */
+.pcard{display:flex;gap:var(--sp-3)}
+.pcard .pi{width:32px;height:32px;flex:none;border-radius:var(--r-md);background:var(--color-accent-soft);color:var(--color-accent-text);display:flex;align-items:center;justify-content:center}
+.pcard h4{font-size:14px;font-weight:600;margin-bottom:2px}
+.pcard p{font-size:12px;line-height:18px;color:var(--color-text-secondary)}
+.pcard .num{font-family:var(--font-mono);font-size:11px;color:var(--color-text-tertiary)}
+
+/* ============================================================ 02 色彩 */
+.scheme{position:relative;display:flex;flex-direction:column}
+.scheme.cur{border-color:var(--color-accent);box-shadow:0 0 0 1px var(--color-accent),var(--shadow-1)}
+.scheme .cur-badge{display:none;position:absolute;top:14px;right:14px;font-size:11px;color:var(--color-accent-text);font-weight:600;align-items:center;gap:4px}
+.scheme.cur .cur-badge{display:inline-flex}
+.scheme .src{font-size:10px;font-family:var(--font-mono);color:var(--color-text-tertiary);margin-top:2px;letter-spacing:.2px}
+.scheme p{flex:1}
+.ramp{display:flex;border-radius:var(--r-sm);overflow:hidden;border:1px solid var(--color-border-subtle);margin:var(--sp-3) 0}
+.ramp b{flex:1;height:44px;position:relative}
+.ramp b i{position:absolute;left:6px;bottom:4px;font:500 9px/1 var(--font-mono);font-style:normal;letter-spacing:.2px}
+.sw-strip{display:grid;grid-template-columns:repeat(6,1fr);gap:var(--sp-2)}
+.swb{border:1px solid var(--color-border-subtle);border-radius:var(--r-sm);overflow:hidden}
+.swb b{display:block;height:40px}
+.swb .swm{padding:5px 7px;background:var(--color-bg-raised)}
+.swb .swm div{font:500 10px/1.5 var(--font-mono)}
+.swb .swm div+div{color:var(--color-text-tertiary)}
+.sem{display:flex;gap:var(--sp-3);align-items:center;border:1px solid var(--color-border-subtle);border-radius:var(--r-md);padding:var(--sp-3)}
+.sem .swd{width:34px;height:34px;border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;color:#fff}
+.ratio{display:flex;height:44px;border-radius:var(--r-sm);overflow:hidden;border:1px solid var(--color-border);font-size:11px;font-weight:600}
+.ratio>div{display:flex;align-items:center;justify-content:center}
+.mini{border-radius:var(--r-md);overflow:hidden;border:1px solid var(--color-border);background:var(--color-bg-raised)}
+.mini .mtb{height:22px;display:flex;align-items:center;gap:4px;padding:0 8px;border-bottom:1px solid var(--color-border-subtle);background:var(--color-bg-base)}
+.mini .mtb i{width:7px;height:7px;border-radius:50%;background:var(--color-track)}
+.mini .mbody{padding:10px;display:flex;flex-direction:column;gap:6px}
+.mini .ln{height:6px;border-radius:3px;background:var(--color-bg-sunken)}
+.mini .btnrow{display:flex;gap:6px;margin-top:2px}
+.mini .mb{height:16px;padding:0 8px;border-radius:4px;font-size:9px;font-weight:600;display:inline-flex;align-items:center;border:none}
+.verdict{display:inline-flex;align-items:center;gap:6px;font-weight:600;font-size:12px;margin-bottom:var(--sp-2)}
+.verdict.ok{color:var(--color-success)}.verdict.no{color:var(--color-danger)}
+.warnline{display:flex;gap:6px;align-items:flex-start;font-size:11px;color:var(--color-warning);margin-top:6px}
+.warnline svg{width:13px;height:13px;margin-top:1px}
+
+/* ============================================================ 03 字体 */
+.type-row{display:flex;align-items:baseline;justify-content:space-between;gap:var(--sp-4);padding:var(--sp-3) 0;border-top:1px solid var(--color-border-subtle)}
+.type-row:first-child{border-top:none}
+.type-row .tspec{font-family:var(--font-mono);font-size:11px;color:var(--color-text-tertiary);white-space:nowrap;text-align:right}
+.type-row .tname{font-size:11px;color:var(--color-text-tertiary);width:88px;flex:none}
+.codeblock{background:var(--color-bg-sunken);border:1px solid var(--color-border-subtle);border-radius:var(--r-md);padding:var(--sp-4);font-family:var(--font-mono);font-size:12px;line-height:1.7;overflow-x:auto}
+.codeblock .c1{color:var(--color-accent-text)}.codeblock .c2{color:var(--color-success)}.codeblock .c3{color:var(--color-text-tertiary)}
+
+/* ============================================================ 04 布局（抽象骨架） */
+.win{border-radius:var(--r-xl);overflow:hidden;border:1px solid var(--color-border);box-shadow:var(--shadow-3);background:var(--color-bg-raised);min-width:720px}
+.win-scroll{overflow-x:auto}
+.wtb{height:52px;display:flex;align-items:center;gap:var(--sp-3);padding:0 var(--sp-4);background:var(--color-bg-overlay);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);border-bottom:1px solid var(--color-border-subtle)}
+.tl{display:flex;gap:8px}
+.tl i{width:12px;height:12px;border-radius:50%}
+.tl i:nth-child(1){background:#FF5F57}.tl i:nth-child(2){background:#FEBC2E}.tl i:nth-child(3){background:#28C840}
+.wtitle{font-size:13px;font-weight:600}
+.wbody{display:flex;min-height:320px}
+.wside{width:220px;flex:none;background:var(--color-bg-base);border-right:1px solid var(--color-border-subtle);padding:var(--sp-3) var(--sp-2);display:flex;flex-direction:column;gap:6px}
+.wmain{flex:1;background:var(--color-bg-raised);padding:var(--sp-4);display:flex;flex-direction:column;gap:var(--sp-3)}
+.winsp{width:220px;flex:none;background:var(--color-bg-base);border-left:1px solid var(--color-border-subtle);padding:var(--sp-3);display:flex;flex-direction:column;gap:10px}
+.wsb{height:28px;display:flex;align-items:center;gap:var(--sp-3);padding:0 var(--sp-4);border-top:1px solid var(--color-border-subtle);background:var(--color-bg-overlay);font-size:11px;color:var(--color-text-secondary)}
+/* 抽象占位元素 */
+.ph{height:8px;border-radius:4px;background:var(--color-track)}
+.wmain .ph{background:var(--color-bg-sunken)}
+.ph-block{border-radius:var(--r-md);border:1.5px dashed var(--color-border);background:var(--color-bg-base);min-height:88px;display:flex;align-items:center;justify-content:center;text-align:center;font-size:11px;color:var(--color-text-tertiary);line-height:1.6}
+.prow{display:flex;align-items:center;gap:8px;height:26px;padding:0 8px;border-radius:5px}
+.prow i{width:12px;height:12px;border-radius:4px;background:var(--color-track);flex:none}
+.prow .ph{flex:1;max-width:70%}
+.prow.on{background:var(--color-accent)}
+.prow.on i,.prow.on .ph{background:color-mix(in srgb,var(--color-on-accent) 60%,transparent)}
+.pglabel{height:6px;width:40%;border-radius:3px;background:var(--color-track);opacity:.6;margin:8px 8px 2px}
+.dot-st{display:inline-flex;align-items:center;gap:6px;font-size:12px}
+.dot-st i{width:7px;height:7px;border-radius:50%}
+.dim{position:absolute;font:600 9px/1 var(--font-mono);background:var(--color-accent);color:var(--color-on-accent);padding:3px 6px;border-radius:4px;letter-spacing:.3px}
+.sp-scale{display:flex;align-items:flex-end;gap:var(--sp-4)}
+.sp-scale .b{background:var(--color-accent);border-radius:2px;width:28px}
+.sp-scale .cell{display:flex;flex-direction:column;align-items:center;gap:6px;font:500 10px var(--font-mono);color:var(--color-text-secondary)}
+.rbox{background:var(--color-bg-raised);border:1px solid var(--color-border);box-shadow:var(--shadow-1);width:72px;height:56px;display:flex;align-items:center;justify-content:center;font:500 10px var(--font-mono);color:var(--color-text-secondary)}
+
+/* ============================================================ 05 层级 */
+.elev{position:relative;height:230px;border-radius:var(--r-md);background:var(--color-bg-base);border:1px solid var(--color-border-subtle);overflow:hidden}
+.elev .lv{position:absolute;border-radius:var(--r-md);padding:10px 12px;font-size:11px}
+.elev .lv .tk{font-family:var(--font-mono);color:var(--color-text-tertiary);font-size:10px}
+.shadow-demo{width:120px;height:80px;background:var(--color-bg-raised);border-radius:var(--r-md);border:1px solid var(--color-border-subtle);display:flex;align-items:center;justify-content:center;font:600 11px var(--font-mono);color:var(--color-text-secondary)}
+.glass-stage{position:relative;height:190px;border-radius:var(--r-md);overflow:hidden;border:1px solid var(--color-border)}
+.glass-stage .bgart{position:absolute;inset:0;background:linear-gradient(120deg,color-mix(in srgb,var(--color-accent) 55%,transparent),transparent 60%),radial-gradient(circle at 75% 30%,color-mix(in srgb,var(--color-accent) 70%,#000 10%),transparent 55%),repeating-linear-gradient(45deg,var(--color-bg-sunken) 0 14px,var(--color-bg-base) 14px 28px)}
+.glass-bar{position:absolute;left:0;right:0;top:0;height:52px;background:var(--color-bg-overlay);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);border-bottom:1px solid var(--color-border-subtle);display:flex;align-items:center;gap:10px;padding:0 14px;font-size:12px;font-weight:600}
+
+/* ============================================================ 06 组件 */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:var(--ctl-md);padding:0 var(--sp-3);border-radius:var(--r-sm);border:1px solid transparent;font:500 13px/1 var(--font-sans);cursor:pointer;user-select:none;transition:background var(--dur-2) var(--ease-out),border-color var(--dur-2),box-shadow var(--dur-2),color var(--dur-2)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn-pri{background:var(--color-accent);color:var(--color-on-accent);box-shadow:inset 0 1px 0 rgba(255,255,255,.12),var(--shadow-1)}
+.btn-pri:hover:not(:disabled),.btn-pri.s-hover{background:var(--color-accent-hover)}
+.btn-pri:active:not(:disabled),.btn-pri.s-active{background:var(--color-accent-active);box-shadow:none}
+.btn-sec{background:var(--color-bg-raised);border-color:var(--color-border-strong);color:var(--color-text-primary);box-shadow:var(--shadow-1)}
+.btn-sec:hover:not(:disabled),.btn-sec.s-hover{background:var(--color-bg-hover)}
+.btn-sec:active:not(:disabled),.btn-sec.s-active{background:var(--color-bg-active);box-shadow:none}
+.btn-dng{background:var(--color-danger-fill);color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.12),var(--shadow-1)}
+.btn-dng:hover:not(:disabled),.btn-dng.s-hover{background:var(--color-danger-fill-hover)}
+.btn-dng:active:not(:disabled),.btn-dng.s-active{background:var(--color-danger-fill-active)}
+.btn-gho{background:transparent;color:var(--color-accent-text)}
+.btn-gho:hover:not(:disabled),.btn-gho.s-hover{background:var(--color-accent-soft)}
+.btn-gho:active:not(:disabled),.btn-gho.s-active{background:color-mix(in srgb,var(--color-accent) 18%,transparent)}
+.btn-ico{width:var(--ctl-md);padding:0;background:transparent;color:var(--color-text-secondary)}
+.btn-ico:hover:not(:disabled),.btn-ico.s-hover{background:var(--color-bg-hover);color:var(--color-text-primary)}
+.btn-ico:active:not(:disabled),.btn-ico.s-active{background:var(--color-bg-active)}
+.btn.s-focus{box-shadow:0 0 0 3px var(--color-accent-ring),0 0 0 1px var(--color-accent)}
+.btn.sm{height:var(--ctl-sm);padding:0 var(--sp-2);font-size:12px;border-radius:var(--r-xs)}
+.btn.lg{height:var(--ctl-lg);padding:0 var(--sp-4);font-size:14px;border-radius:var(--r-md)}
+.stlab{font:500 10px var(--font-mono);color:var(--color-text-tertiary);width:64px;flex:none}
+.matrix{display:flex;flex-direction:column;gap:var(--sp-3)}
+.matrix .row{gap:var(--sp-3)}
+
+.field{display:flex;flex-direction:column;gap:5px;min-width:200px}
+.field label{font-size:12px;font-weight:500}
+.input{height:var(--ctl-md);padding:0 var(--sp-2);border-radius:var(--r-sm);border:1px solid var(--color-border-strong);background:var(--color-bg-raised);color:var(--color-text-primary);font:400 13px var(--font-sans);box-shadow:inset 0 1px 1px rgba(0,0,0,.03);transition:border-color var(--dur-2),box-shadow var(--dur-2)}
+.input::placeholder{color:var(--color-text-tertiary)}
+.input:hover:not(:disabled){border-color:color-mix(in srgb,var(--color-border-strong) 70%,var(--color-text-primary))}
+.input:focus{outline:none;border-color:var(--color-accent);box-shadow:0 0 0 3px var(--color-accent-ring)}
+.input:disabled{background:var(--color-bg-sunken);color:var(--color-text-disabled);cursor:not-allowed}
+.input.err{border-color:var(--color-danger)}
+.input.err:focus{box-shadow:0 0 0 3px color-mix(in srgb,var(--color-danger) 30%,transparent)}
+.hint{font-size:11px;color:var(--color-text-tertiary)}
+.hint.err{color:var(--color-danger)}
+
+.select{position:relative;width:220px}
+.select-trigger{width:100%;height:var(--ctl-md);display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 var(--sp-2);border-radius:var(--r-sm);border:1px solid var(--color-border-strong);background:var(--color-bg-raised);font:400 13px var(--font-sans);color:var(--color-text-primary);cursor:pointer;box-shadow:var(--shadow-1)}
+.select-trigger svg{color:var(--color-text-tertiary);transition:transform var(--dur-2) var(--ease-out)}
+.select.open .select-trigger{border-color:var(--color-accent);box-shadow:0 0 0 3px var(--color-accent-ring)}
+.select.open .select-trigger svg{transform:rotate(180deg)}
+.select-menu{position:absolute;top:calc(100% + 4px);left:0;right:0;background:var(--color-bg-raised);border:1px solid var(--color-border-subtle);border-radius:var(--r-md);box-shadow:var(--shadow-2);padding:var(--sp-1);z-index:var(--z-dropdown);opacity:0;visibility:hidden;transform:translateY(-4px) scale(.98);transform-origin:top;transition:all var(--dur-2) var(--ease-out)}
+.select.open .select-menu{opacity:1;visibility:visible;transform:none}
+.select-menu button{width:100%;display:flex;align-items:center;gap:8px;height:26px;padding:0 var(--sp-2);border:none;border-radius:var(--r-xs);background:none;font:400 13px var(--font-sans);color:var(--color-text-primary);cursor:pointer;text-align:left}
+.select-menu button:hover{background:var(--color-accent);color:var(--color-on-accent)}
+.select-menu button .chk-mark{width:14px;visibility:hidden}
+.select-menu button.on .chk-mark{visibility:visible}
+.select-menu hr{border:none;border-top:1px solid var(--color-border-subtle);margin:var(--sp-1) var(--sp-2)}
+
+.sw{position:relative;display:inline-block;width:30px;height:18px;border-radius:var(--r-full);background:var(--color-track);cursor:pointer;transition:background var(--dur-3) var(--ease-standard);flex:none}
+.sw input{position:absolute;opacity:0;width:100%;height:100%;margin:0;cursor:pointer}
+.sw .knob{position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.3);transition:transform var(--dur-3) var(--ease-spring);pointer-events:none}
+.sw:has(input:checked){background:var(--color-accent)}
+.sw:has(input:checked) .knob{transform:translateX(12px)}
+.sw:has(input:focus-visible){box-shadow:0 0 0 3px var(--color-accent-ring)}
+.sw:has(input:disabled){opacity:.45;cursor:not-allowed}
+.ctl-line{display:inline-flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;user-select:none}
+.chk{appearance:none;-webkit-appearance:none;width:14px;height:14px;border-radius:3.5px;border:1px solid var(--color-border-strong);background:var(--color-bg-raised);cursor:pointer;position:relative;flex:none;transition:background var(--dur-2),border-color var(--dur-2);margin:0}
+.chk::after{content:"";position:absolute;inset:0;background:center/9px no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.5l2.5 2.5 4.5-5.5' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");opacity:0;transform:scale(.5);transition:all var(--dur-2) var(--ease-spring)}
+.chk:checked{background:var(--color-accent);border-color:var(--color-accent)}
+.chk:checked::after{opacity:1;transform:scale(1)}
+.chk.ind{background:var(--color-accent);border-color:var(--color-accent)}
+.chk.ind::after{opacity:1;transform:none;background:center/8px no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6h7' stroke='%23fff' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E")}
+.chk:focus-visible{outline:none;box-shadow:0 0 0 3px var(--color-accent-ring)}
+.chk:disabled{opacity:.45;cursor:not-allowed}
+.rdo{appearance:none;-webkit-appearance:none;width:14px;height:14px;border-radius:50%;border:1px solid var(--color-border-strong);background:var(--color-bg-raised);cursor:pointer;flex:none;transition:all var(--dur-2);margin:0}
+.rdo:checked{background:var(--color-accent);border-color:var(--color-accent);box-shadow:inset 0 0 0 3px var(--color-bg-raised)}
+.rdo:focus-visible{outline:none;box-shadow:inset 0 0 0 3px var(--color-bg-raised),0 0 0 3px var(--color-accent-ring)}
+.rdo:disabled{opacity:.45;cursor:not-allowed}
+
+.slider{-webkit-appearance:none;appearance:none;width:220px;height:4px;border-radius:2px;background:linear-gradient(to right,var(--color-accent) var(--p,60%),var(--color-track) var(--p,60%));outline:none;cursor:pointer}
+.slider::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:#fff;border:.5px solid rgba(0,0,0,.08);box-shadow:0 1px 3px rgba(0,0,0,.3);transition:transform var(--dur-2) var(--ease-out)}
+.slider::-webkit-slider-thumb:hover{transform:scale(1.12)}
+.slider::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:#fff;border:.5px solid rgba(0,0,0,.08);box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.slider:focus-visible{box-shadow:0 0 0 3px var(--color-accent-ring)}
+
+.seg{position:relative;display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:0;padding:2px;background:var(--color-bg-sunken);border:1px solid var(--color-border-subtle);border-radius:7px;width:max-content}
+.seg::before{content:"";position:absolute;top:2px;bottom:2px;left:2px;width:calc((100% - 4px)/var(--n,3));border-radius:5px;background:var(--color-bg-raised);box-shadow:var(--shadow-1);transform:translateX(calc(var(--i,0)*100%));transition:transform var(--dur-3) var(--ease-standard)}
+.seg button{position:relative;z-index:1;height:24px;padding:0 var(--sp-3);border:none;background:none;font:500 12px var(--font-sans);color:var(--color-text-secondary);cursor:pointer;border-radius:5px;transition:color var(--dur-2)}
+.seg button[aria-selected="true"]{color:var(--color-text-primary)}
+
+.tabs-bar{display:flex;gap:var(--sp-4);border-bottom:1px solid var(--color-border-subtle)}
+.tabs-bar [role=tab]{position:relative;height:34px;padding:0 2px;border:none;background:none;font:500 13px var(--font-sans);color:var(--color-text-secondary);cursor:pointer}
+.tabs-bar [role=tab]:hover{color:var(--color-text-primary)}
+.tabs-bar [role=tab].on{color:var(--color-accent-text)}
+.tabs-bar [role=tab].on::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;border-radius:1px;background:var(--color-accent)}
+[role=tabpanel]{padding:var(--sp-4) 2px;font-size:12px;color:var(--color-text-secondary)}
+
+.list{width:260px;background:var(--color-bg-raised);border:1px solid var(--color-border-subtle);border-radius:var(--r-md);padding:var(--sp-1);box-shadow:var(--shadow-1)}
+.list .li{display:flex;align-items:center;gap:8px;height:28px;padding:0 var(--sp-2);border-radius:var(--r-sm);font-size:13px;cursor:default;transition:background var(--dur-2)}
+.list .li svg{color:var(--color-text-secondary)}
+.list .li:hover{background:var(--color-bg-hover)}
+.list .li.on{background:var(--color-accent);color:var(--color-on-accent)}
+.list .li.on svg{color:var(--color-on-accent)}
+.list .li .cnt{margin-left:auto;font:500 11px var(--font-mono);color:var(--color-text-tertiary)}
+.list .li.on .cnt{color:color-mix(in srgb,var(--color-on-accent) 80%,transparent)}
+
+.table{width:100%;border-collapse:collapse;font-size:12px;background:var(--color-bg-raised);border-radius:var(--r-md);overflow:hidden;border:1px solid var(--color-border-subtle);box-shadow:var(--shadow-1)}
+.table th{text-align:left;font-size:11px;font-weight:600;color:var(--color-text-tertiary);padding:var(--sp-2) var(--sp-3);background:var(--color-bg-base);border-bottom:1px solid var(--color-border-subtle)}
+.table td{padding:var(--sp-2) var(--sp-3);border-bottom:1px solid var(--color-border-subtle)}
+.table tr:last-child td{border-bottom:none}
+.table tbody tr{transition:background var(--dur-1)}
+.table tbody tr:hover{background:var(--color-bg-hover)}
+.table .num{text-align:right;font-family:var(--font-mono);font-size:11px}
+
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:var(--r-full);font-size:11px;font-weight:500;background:var(--color-bg-sunken);border:1px solid var(--color-border-subtle);color:var(--color-text-secondary)}
+.tag.acc{background:var(--color-accent-soft);border-color:color-mix(in srgb,var(--color-accent) 25%,transparent);color:var(--color-accent-text)}
+.tag.ok{background:var(--color-success-bg);border-color:color-mix(in srgb,var(--color-success) 30%,transparent);color:var(--color-success)}
+.tag.warn{background:var(--color-warning-bg);border-color:color-mix(in srgb,var(--color-warning) 30%,transparent);color:var(--color-warning)}
+.tag.err{background:var(--color-danger-bg);border-color:color-mix(in srgb,var(--color-danger) 30%,transparent);color:var(--color-danger)}
+.tag .x{display:flex;border:none;background:none;padding:0;cursor:pointer;color:inherit;opacity:.6}
+.tag .x:hover{opacity:1}
+.badge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 5px;border-radius:var(--r-full);background:var(--color-danger-fill);color:#fff;font:600 10px var(--font-mono)}
+.badge.n{background:var(--color-text-tertiary)}
+
+[data-tip]{position:relative}
+[data-tip]::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 7px);left:50%;transform:translateX(-50%) translateY(2px);background:rgba(30,30,32,.95);color:rgba(255,255,255,.95);font:400 11px/1 var(--font-sans);padding:5px 8px;border-radius:5px;white-space:nowrap;opacity:0;visibility:hidden;pointer-events:none;transition:opacity var(--dur-2) var(--ease-out) 0ms,transform var(--dur-2) var(--ease-out) 0ms,visibility 0s var(--dur-2);z-index:var(--z-tooltip);box-shadow:var(--shadow-2)}
+[data-theme="dark"] [data-tip]::after{background:rgba(58,58,62,.98)}
+[data-tip]:hover::after,[data-tip]:focus-visible::after{opacity:1;visibility:visible;transform:translateX(-50%);transition-delay:400ms,400ms,400ms}
+
+#toasts{position:fixed;right:var(--sp-5);bottom:var(--sp-5);display:flex;flex-direction:column;gap:var(--sp-2);z-index:var(--z-toast)}
+.toast{display:flex;align-items:center;gap:10px;min-width:260px;max-width:340px;padding:10px 12px;background:var(--color-bg-raised);border:1px solid var(--color-border-subtle);border-radius:var(--r-md);box-shadow:var(--shadow-3);font-size:12px;animation:t-in var(--dur-3) var(--ease-spring)}
+.toast.out{animation:t-out var(--dur-2) var(--ease-in) forwards}
+.toast b{display:block;font-size:12px}
+.toast .tmsg{color:var(--color-text-secondary);font-size:11px}
+.toast .tic{flex:none}
+@keyframes t-in{from{opacity:0;transform:translateY(12px) scale(.96)}}
+@keyframes t-out{to{opacity:0;transform:translateY(8px) scale(.97)}}
+
+.modal-bd{position:fixed;inset:0;background:rgba(0,0,0,.28);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);z-index:var(--z-modal);display:flex;align-items:center;justify-content:center;opacity:0;visibility:hidden;transition:opacity var(--dur-3) var(--ease-out),visibility 0s var(--dur-3)}
+.modal-bd.open{opacity:1;visibility:visible;transition:opacity var(--dur-3) var(--ease-out)}
+.modal{width:400px;max-width:calc(100vw - 32px);background:var(--color-bg-raised);border:1px solid var(--color-border-subtle);border-radius:var(--r-xl);box-shadow:var(--shadow-4);transform:scale(.95) translateY(10px);transition:transform var(--dur-3) var(--ease-spring)}
+.modal-bd.open .modal{transform:none}
+.modal-h{display:flex;align-items:center;gap:8px;padding:var(--sp-4) var(--sp-5) 0}
+.modal-b{padding:var(--sp-2) var(--sp-5) var(--sp-4);color:var(--color-text-secondary);font-size:13px}
+.modal-f{display:flex;justify-content:flex-end;gap:var(--sp-2);padding:var(--sp-3) var(--sp-5);border-top:1px solid var(--color-border-subtle);background:var(--color-bg-base);border-radius:0 0 var(--r-xl) var(--r-xl)}
+
+.bar{width:220px;height:5px;border-radius:3px;background:var(--color-track);overflow:hidden}
+.bar>i{display:block;height:100%;border-radius:3px;background:var(--color-accent);transition:width var(--dur-4) var(--ease-standard)}
+.bar.indet>i{width:36%;animation:indet 1.2s var(--ease-standard) infinite}
+@keyframes indet{from{transform:translateX(-120%)}to{transform:translateX(340%)}}
+.spin{animation:rot .9s linear infinite}
+.spin circle{stroke:var(--color-accent);stroke-dasharray:42 18;stroke-width:2.5;fill:none;stroke-linecap:round}
+@keyframes rot{to{transform:rotate(360deg)}}
+
+/* ============================================================ 07 图标 */
+.icon-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:var(--sp-2)}
+.icon-cell{display:flex;flex-direction:column;align-items:center;gap:8px;padding:var(--sp-3) var(--sp-1);border:1px solid var(--color-border-subtle);border-radius:var(--r-md);background:var(--color-bg-raised);font-size:10px;color:var(--color-text-tertiary);font-family:var(--font-mono);transition:all var(--dur-2)}
+.icon-cell:hover{border-color:var(--color-accent);color:var(--color-accent-text);box-shadow:var(--shadow-1)}
+.icon-cell svg{color:var(--color-text-primary)}
+.icon-cell:hover svg{color:var(--color-accent-text)}
+
+/* ============================================================ 08 动效 */
+.lane{position:relative;height:26px;background:var(--color-bg-sunken);border-radius:var(--r-full);flex:1}
+.lane .dotb{position:absolute;top:1px;left:1px;width:24px;height:24px;border-radius:50%;background:var(--color-accent);transition:left var(--d,var(--dur-4)) var(--e,var(--ease-standard))}
+.lanes.run .dotb{left:calc(100% - 25px)}
+.lanerow{display:flex;align-items:center;gap:var(--sp-3)}
+.lanerow .llab{width:150px;flex:none;font:500 11px var(--font-mono);color:var(--color-text-secondary)}
+.demo-enter{opacity:0;transform:translateY(12px) scale(.97)}
+.demo-enter.in{opacity:1;transform:none;transition:opacity var(--dur-3) var(--ease-out),transform var(--dur-3) var(--ease-out)}
+.hoverlift{transition:transform var(--dur-2) var(--ease-out),box-shadow var(--dur-2) var(--ease-out)}
+.hoverlift:hover{transform:translateY(-2px);box-shadow:var(--shadow-2)}
+#dragZone{position:relative;height:120px;border:1.5px dashed var(--color-border);border-radius:var(--r-md);background:var(--color-bg-base)}
+#dragChip{position:absolute;left:12px;top:12px;display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:var(--color-bg-raised);border:1px solid var(--color-border);border-radius:var(--r-sm);font-size:12px;font-weight:500;cursor:grab;box-shadow:var(--shadow-1);user-select:none;touch-action:none;transition:box-shadow var(--dur-2),transform var(--dur-2)}
+#dragChip.dragging{cursor:grabbing;box-shadow:var(--shadow-3);transform:scale(1.04)}
+
+/* ============================================================ 09 无障碍 */
+.hit{position:relative;display:inline-flex}
+.hit::after{content:"";position:absolute;inset:0;border:1.5px dashed var(--color-danger);border-radius:var(--r-sm);pointer-events:none}
+.ratio-chip{display:inline-flex;align-items:center;height:26px;padding:0 10px;border-radius:var(--r-sm);font-size:12px;font-weight:500}
+.pass{color:var(--color-success);font-weight:600}
+.fail{color:var(--color-danger);font-weight:600}
+
+footer{margin-top:var(--sp-16);padding-top:var(--sp-5);border-top:1px solid var(--color-border-subtle);font-size:11px;color:var(--color-text-tertiary);display:flex;justify-content:space-between}
+@media (max-width:960px){
+  .nav{display:none}
+  .topbar{left:0}
+  .main{margin-left:0;padding-left:var(--sp-4);padding-right:var(--sp-4)}
+  .grid2,.grid3,.icon-grid{grid-template-columns:1fr 1fr}
+  .sw-strip{grid-template-columns:repeat(3,1fr)}
+}
+@media (max-width:560px){.grid2,.grid3{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+</style>
+</head>
+<body>
+
+<!-- ============ SF-style 图标库（内联 SVG Symbol） ============ -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M12 3.5l1.9 5.1 5.1 1.9-5.1 1.9L12 17.5l-1.9-5.1L5 10.5l5.1-1.9L12 3.5Z"/><path d="M18.5 16v4M16.5 18h4"/></symbol>
+<symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M7 9.5l3 2.5-3 2.5M12.5 15H17"/></symbol>
+<symbol id="i-chat" viewBox="0 0 24 24"><path d="M4.5 7A2.5 2.5 0 0 1 7 4.5h10A2.5 2.5 0 0 1 19.5 7v6a2.5 2.5 0 0 1-2.5 2.5H9.5L5.5 19v-3.6A2.5 2.5 0 0 1 4.5 13V7Z"/></symbol>
+<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 7a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V7Z"/></symbol>
+<symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/><circle cx="9" cy="7" r="2.2" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="2.2" fill="currentColor" stroke="none"/><circle cx="8" cy="17" r="2.2" fill="currentColor" stroke="none"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="i-sidebar" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2.5"/><path d="M9.5 5v14"/></symbol>
+<symbol id="i-play" viewBox="0 0 24 24"><path d="M8.5 6.3v11.4l9.2-5.7-9.2-5.7Z"/></symbol>
+<symbol id="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+<symbol id="i-check-c" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.4l2.4 2.4 4.6-5.2"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></symbol>
+<symbol id="i-chev-d" viewBox="0 0 24 24"><path d="M6.5 9.5l5.5 5.5 5.5-5.5"/></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V7a2 2 0 0 1 2-2h8"/></symbol>
+<symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V6M6.5 11.5L12 6l5.5 5.5"/></symbol>
+<symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 4.5L20.6 19H3.4L12 4.5Z"/><path d="M12 10.5v3.5M12 16.8v.1"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 11.5V16M12 8.2v.1"/></symbol>
+<symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2M6 6l1.4 1.4M16.6 16.6L18 18M18 6l-1.4 1.4M7.4 16.6L6 18"/></symbol>
+<symbol id="i-moon" viewBox="0 0 24 24"><path d="M19.5 13.5A7.5 7.5 0 0 1 10.5 4.5 7 7 0 1 0 19.5 13.5Z"/></symbol>
+<symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3.8L20 8.2 12 12.6 4 8.2 12 3.8Z"/><path d="M4.5 12.3L12 16.4l7.5-4.1M4.5 16L12 20l7.5-4"/></symbol>
+<symbol id="i-layout" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M3.5 9.5h17M9.5 9.5v10"/></symbol>
+<symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="13" width="7" height="7" rx="2"/></symbol>
+<symbol id="i-person" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5.5 19.5c.8-3.4 3.4-5 6.5-5s5.7 1.6 6.5 5"/></symbol>
+<symbol id="i-drop" viewBox="0 0 24 24"><path d="M12 3.8c3.5 4 6 6.9 6 9.9a6 6 0 0 1-12 0c0-3 2.5-5.9 6-9.9Z"/></symbol>
+<symbol id="i-doc" viewBox="0 0 24 24"><path d="M7 3.5h6.5L18 8v12.5H7V3.5Z"/><path d="M13.5 3.5V8H18M9.8 12.5h4.4M9.8 15.8h4.4"/></symbol>
+<symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 3.5L5.5 13.5h5L11 20.5l7.5-10h-5L13 3.5Z"/></symbol>
+<symbol id="i-star" viewBox="0 0 24 24"><path d="M12 4.2l2.3 4.8 5.2.7-3.8 3.6.9 5.2L12 16l-4.6 2.5.9-5.2L4.5 9.7l5.2-.7L12 4.2Z"/></symbol>
+</defs></svg>
+
+<!-- ============ 左侧导航 ============ -->
+<nav class="nav">
+  <div class="nav-head">
+    <div class="logo"><svg class="ic"><use href="#i-sparkle"/></svg></div>
+    <div><div style="font-weight:600;font-size:13px">Zerox Agent</div><div class="t-cap sec3">设计规范 v1.2</div></div>
+  </div>
+  <div class="nav-label">基础 Foundation</div>
+  <a class="nav-item" href="#principles" data-nav="principles"><svg class="ic"><use href="#i-star"/></svg>设计原则</a>
+  <a class="nav-item" href="#colors" data-nav="colors"><svg class="ic"><use href="#i-drop"/></svg>色彩系统</a>
+  <a class="nav-item" href="#typography" data-nav="typography"><svg class="ic"><use href="#i-doc"/></svg>字体排印</a>
+  <a class="nav-item" href="#layout" data-nav="layout"><svg class="ic"><use href="#i-layout"/></svg>布局与结构</a>
+  <a class="nav-item" href="#elevation" data-nav="elevation"><svg class="ic"><use href="#i-layers"/></svg>层级与材质</a>
+  <div class="nav-label">组件 Components</div>
+  <a class="nav-item" href="#components" data-nav="components"><svg class="ic"><use href="#i-grid"/></svg>组件库</a>
+  <a class="nav-item" href="#icons" data-nav="icons"><svg class="ic"><use href="#i-sparkle"/></svg>图标系统</a>
+  <div class="nav-label">体验 Experience</div>
+  <a class="nav-item" href="#motion" data-nav="motion"><svg class="ic"><use href="#i-zap"/></svg>交互与动效</a>
+  <a class="nav-item" href="#a11y" data-nav="a11y"><svg class="ic"><use href="#i-person"/></svg>可访问性</a>
+</nav>
+
+<!-- ============ 顶部工具栏 ============ -->
+<header class="topbar">
+  <div class="crumb"><b>Zerox Agent</b> · macOS Design System</div>
+  <div class="sp"></div>
+  <span class="t-cap sec2">主色方案</span>
+  <button class="dot-btn js-accent on" data-accent="blue" style="background:#3A6BD0" data-tip="A · 石墨蓝" aria-label="石墨蓝"></button>
+  <button class="dot-btn js-accent" data-accent="mono" style="background:linear-gradient(135deg,#26262A 50%,#F2F2F4 50%)" data-tip="B · 曜石 (OpenAI/Notion)" aria-label="曜石"></button>
+  <button class="dot-btn js-accent" data-accent="ember" style="background:#C2410C" data-tip="C · 熔岩橙 (Alibaba/Reddit)" aria-label="熔岩橙"></button>
+  <button class="dot-btn js-accent" data-accent="clay" style="background:#B25430" data-tip="D · 陶土 (Anthropic)" aria-label="陶土"></button>
+  <button class="dot-btn js-accent" data-accent="magenta" style="background:#E20074" data-tip="E · 品红 (T-Mobile)" aria-label="品红"></button>
+  <button class="dot-btn js-accent" data-accent="crimson" style="background:#D6212B" data-tip="F · 信号红 (Netflix)" aria-label="信号红"></button>
+  <div class="vr"></div>
+  <svg class="ic sec2"><use href="#i-sun"/></svg>
+  <label class="sw" data-tip="切换 Light / Dark"><input type="checkbox" id="themeSwitch"><span class="knob"></span></label>
+  <svg class="ic sec2"><use href="#i-moon"/></svg>
+</header>
+
+<main class="main"><div class="wrap">
+
+<!-- ==================== 01 设计原则 ==================== -->
+<section id="principles" class="sec">
+  <div class="eyebrow">01 / PRINCIPLES</div>
+  <h2 class="t-lt">设计原则</h2>
+  <p class="lead t-body">Zerox Agent 是一款面向专业开发者的通用 AI Agent。界面必须像一位可靠的同事：<b>专业、克制、简洁</b>。以下四条原则是所有设计与实现决策的最高依据。</p>
+  <div class="grid2" style="margin-top:var(--sp-6)">
+    <div class="card pcard"><div class="pi"><svg class="ic"><use href="#i-drop"/></svg></div><div><div class="num">P1</div><h4>克制的色彩</h4><p>界面 95% 以上由中性灰阶构成。彩色只承担两种职责：标记关键操作（Accent）与传达状态（语义色）。永远不用颜色做装饰。</p></div></div>
+    <div class="card pcard"><div class="pi"><svg class="ic"><use href="#i-chat"/></svg></div><div><div class="num">P2</div><h4>内容优先</h4><p>用户的工作内容是主角，界面容器退居幕后——1px 细边框、低饱和背景、轻量阴影，绝不与内容争夺注意力。</p></div></div>
+    <div class="card pcard"><div class="pi"><svg class="ic"><use href="#i-grid"/></svg></div><div><div class="num">P3</div><h4>秩序的网格</h4><p>所有尺寸取自同一数值体系：4pt 间距网格、8 级字号、5 档圆角、4 级阴影。不存在"看起来差不多"的随意取值。</p></div></div>
+    <div class="card pcard"><div class="pi"><svg class="ic"><use href="#i-zap"/></svg></div><div><div class="num">P4</div><h4>原生的手感</h4><p>遵循 macOS 惯例：系统字体栈、毛玻璃材质、标准控件尺寸与焦点环。任何操作在 150ms 内给出可感知反馈，动效解释因果而非炫技。</p></div></div>
+  </div>
+</section>
+
+<!-- ==================== 02 色彩系统 ==================== -->
+<section id="colors" class="sec">
+  <div class="eyebrow">02 / COLOR</div>
+  <h2 class="t-lt">色彩系统</h2>
+  <p class="lead t-body">基础背景锁定 <span class="k" data-copy="#F3F3F3">#F3F3F3</span>。主色六套候选，本轮按<b>色相拉开</b>重选：蓝色仅保留石墨蓝一套，其余参照 Alibaba、Anthropic、T-Mobile、Netflix、OpenAI 等非蓝品牌；绿与紫按反馈整体排除。所有方案 500 填充 × 白字对比度 ≥ 4.5:1，点击「应用此方案」全文档实时预览，建议配合 Dark 模式对比。</p>
+
+  <h3 class="sub t-t2">2.1 主色方案（六选一）</h3>
+  <div class="grid3">
+    <div class="card scheme" data-scheme="blue">
+      <span class="cur-badge"><svg class="ic" style="width:12px;height:12px"><use href="#i-check"/></svg>使用中</span>
+      <div class="t-hl">A · 石墨蓝 Graphite</div>
+      <div class="src">ZEROX ORIGINAL · 蓝色系唯一保留</div>
+      <p class="t-co sec2" style="margin-top:6px">灰调钴蓝，内敛理性。开发工具的"安全答案"，也是当前默认值。</p>
+      <div class="ramp">
+        <b style="background:#F0F4FC"><i style="color:#3A6BD0">50</i></b>
+        <b style="background:#DCE6F9"><i style="color:#3A6BD0">100</i></b>
+        <b style="background:#8AACE9"><i style="color:#fff">300</i></b>
+        <b style="background:#3A6BD0"><i style="color:#fff">500</i></b>
+        <b style="background:#2F58AE"><i style="color:#fff">600</i></b>
+        <b style="background:#26478C"><i style="color:#fff">700</i></b>
+      </div>
+      <div class="t-cap mono sec3">500 #3A6BD0 · 600 #2F58AE · 700 #26478C</div>
+      <button class="btn btn-sec js-accent" data-accent="blue" style="width:100%;margin-top:10px">应用此方案</button>
+    </div>
+    <div class="card scheme" data-scheme="mono">
+      <span class="cur-badge"><svg class="ic" style="width:12px;height:12px"><use href="#i-check"/></svg>使用中</span>
+      <div class="t-hl">B · 曜石 Obsidian</div>
+      <div class="src">REF · OPENAI / NOTION / VERCEL</div>
+      <p class="t-co sec2" style="margin-top:6px">零彩色的终极克制，与"类 Codex 客户端"定位天然契合。Dark 下自动反转为浅色填充 + 深色文字。</p>
+      <div class="ramp">
+        <b style="background:#F5F5F6"><i style="color:#26262A">50</i></b>
+        <b style="background:#E8E8EA"><i style="color:#26262A">100</i></b>
+        <b style="background:#A9A9AF"><i style="color:#fff">300</i></b>
+        <b style="background:#6B6B72"><i style="color:#fff">400</i></b>
+        <b style="background:#26262A"><i style="color:#fff">500</i></b>
+        <b style="background:#101013"><i style="color:#fff">700</i></b>
+      </div>
+      <div class="t-cap mono sec3">fill #26262A · hover #3B3B41 · active #101013</div>
+      <button class="btn btn-sec js-accent" data-accent="mono" style="width:100%;margin-top:10px">应用此方案</button>
+    </div>
+    <div class="card scheme" data-scheme="ember">
+      <span class="cur-badge"><svg class="ic" style="width:12px;height:12px"><use href="#i-check"/></svg>使用中</span>
+      <div class="t-hl">C · 熔岩橙 Ember</div>
+      <div class="src">REF · ALIBABA / XIAOMI / REDDIT</div>
+      <p class="t-co sec2" style="margin-top:6px">取阿里/小米/Reddit 一族的品牌橙，明度加深至 AA。能量感强、动作指向明确，在工程工具里辨识度极高；比危险红明显偏黄，语义不冲突。</p>
+      <div class="ramp">
+        <b style="background:#FDF1E8"><i style="color:#C2410C">50</i></b>
+        <b style="background:#FBE0CE"><i style="color:#C2410C">100</i></b>
+        <b style="background:#F19A66"><i style="color:#fff">300</i></b>
+        <b style="background:#C2410C"><i style="color:#fff">500</i></b>
+        <b style="background:#A83709"><i style="color:#fff">600</i></b>
+        <b style="background:#8C2D07"><i style="color:#fff">700</i></b>
+      </div>
+      <div class="t-cap mono sec3">500 #C2410C · 600 #A83709 · 700 #8C2D07</div>
+      <button class="btn btn-sec js-accent" data-accent="ember" style="width:100%;margin-top:10px">应用此方案</button>
+    </div>
+    <div class="card scheme" data-scheme="clay">
+      <span class="cur-badge"><svg class="ic" style="width:12px;height:12px"><use href="#i-check"/></svg>使用中</span>
+      <div class="t-hl">D · 陶土 Clay</div>
+      <div class="src">REF · ANTHROPIC CLAUDE / MS POWERPOINT</div>
+      <p class="t-co sec2" style="margin-top:6px">参考 Anthropic Claude 的暖陶土色（原色 #D97757 加深至 AA）。温和耐看、书卷气——AI 产品的新审美，也最容易在一片蓝色工具中建立记忆点。</p>
+      <div class="ramp">
+        <b style="background:#FAF0E9"><i style="color:#B25430">50</i></b>
+        <b style="background:#F4DFD3"><i style="color:#B25430">100</i></b>
+        <b style="background:#DC9873"><i style="color:#fff">300</i></b>
+        <b style="background:#B25430"><i style="color:#fff">500</i></b>
+        <b style="background:#9A4526"><i style="color:#fff">600</i></b>
+        <b style="background:#7F3820"><i style="color:#fff">700</i></b>
+      </div>
+      <div class="t-cap mono sec3">500 #B25430 · 600 #9A4526 · 700 #7F3820</div>
+      <button class="btn btn-sec js-accent" data-accent="clay" style="width:100%;margin-top:10px">应用此方案</button>
+    </div>
+    <div class="card scheme" data-scheme="magenta">
+      <span class="cur-badge"><svg class="ic" style="width:12px;height:12px"><use href="#i-check"/></svg>使用中</span>
+      <div class="t-hl">E · 品红 Magenta</div>
+      <div class="src">REF · T-MOBILE / DRIBBBLE</div>
+      <p class="t-co sec2" style="margin-top:6px">T-Mobile 标志性 Magenta（#E20074 原色即过 AA）。六套中性格最外放，消费级气质；小面积点缀极亮眼，与红、紫、蓝均可清晰区分。</p>
+      <div class="ramp">
+        <b style="background:#FDEFF6"><i style="color:#C40064">50</i></b>
+        <b style="background:#FBD5E9"><i style="color:#C40064">100</i></b>
+        <b style="background:#F272B4"><i style="color:#fff">300</i></b>
+        <b style="background:#E20074"><i style="color:#fff">500</i></b>
+        <b style="background:#C40064"><i style="color:#fff">600</i></b>
+        <b style="background:#A30053"><i style="color:#fff">700</i></b>
+      </div>
+      <div class="t-cap mono sec3">500 #E20074 · 600 #C40064 · 700 #A30053</div>
+      <button class="btn btn-sec js-accent" data-accent="magenta" style="width:100%;margin-top:10px">应用此方案</button>
+    </div>
+    <div class="card scheme" data-scheme="crimson">
+      <span class="cur-badge"><svg class="ic" style="width:12px;height:12px"><use href="#i-check"/></svg>使用中</span>
+      <div class="t-hl">F · 信号红 Crimson</div>
+      <div class="src">REF · NETFLIX / PINTEREST / YOUTUBE</div>
+      <p class="t-co sec2" style="margin-top:6px">内容平台一族的品牌红，冲击力最强。</p>
+      <div class="warnline"><svg class="ic"><use href="#i-warn"/></svg><span>与 Error 语义色同族：主按钮与"删除"类按钮外观趋同（切此方案看 6.1 按钮矩阵即可直观对比），选用时危险操作必须依赖图标与文案区分。列出仅为完整比较。</span></div>
+      <div class="ramp">
+        <b style="background:#FDEFEF"><i style="color:#D6212B">50</i></b>
+        <b style="background:#FAD9DA"><i style="color:#D6212B">100</i></b>
+        <b style="background:#EE8A8F"><i style="color:#fff">300</i></b>
+        <b style="background:#D6212B"><i style="color:#fff">500</i></b>
+        <b style="background:#B81B24"><i style="color:#fff">600</i></b>
+        <b style="background:#99161E"><i style="color:#fff">700</i></b>
+      </div>
+      <div class="t-cap mono sec3">500 #D6212B · 600 #B81B24 · 700 #99161E</div>
+      <button class="btn btn-sec js-accent" data-accent="crimson" style="width:100%;margin-top:10px">应用此方案</button>
+    </div>
+  </div>
+  <div class="card" style="margin-top:var(--sp-4)">
+    <div class="t-hl" style="margin-bottom:var(--sp-3)">当前方案的派生 Token（随上方选择实时变化）</div>
+    <div class="row">
+      <span class="tag acc">accent-soft 选中底</span>
+      <button class="btn btn-pri">accent · 填充</button>
+      <button class="btn btn-pri s-hover">hover</button>
+      <button class="btn btn-pri s-active">active</button>
+      <a href="javascript:void(0)">accent-text 链接色</a>
+    </div>
+    <div class="spec"><span class="k">--color-accent</span><span class="k">--color-accent-hover</span><span class="k">--color-accent-active</span><span class="k">--color-accent-soft</span><span class="k">--color-accent-ring</span><span class="k">--color-accent-text</span><span class="k">--color-on-accent</span><span>六套方案的填充 × on-accent 对比度均 ≥ 4.5:1（AA）</span></div>
+  </div>
+
+  <h3 class="sub t-t2">2.2 中性灰阶</h3>
+  <p class="t-body sec2" style="margin-bottom:var(--sp-3)">以 #F3F3F3 为锚点构建 12 级灰阶，覆盖 Light / Dark 全部背景、文字与描边需求。</p>
+  <div class="card">
+    <div class="sw-strip">
+      <div class="swb"><b style="background:#FFFFFF"></b><div class="swm"><div>gray-0</div><div>#FFFFFF</div></div></div>
+      <div class="swb"><b style="background:#F3F3F3"></b><div class="swm"><div>gray-50 ★</div><div>#F3F3F3</div></div></div>
+      <div class="swb"><b style="background:#EAEAEA"></b><div class="swm"><div>gray-100</div><div>#EAEAEA</div></div></div>
+      <div class="swb"><b style="background:#D9D9D9"></b><div class="swm"><div>gray-200</div><div>#D9D9D9</div></div></div>
+      <div class="swb"><b style="background:#B4B4B4"></b><div class="swm"><div>gray-300</div><div>#B4B4B4</div></div></div>
+      <div class="swb"><b style="background:#8E8E8E"></b><div class="swm"><div>gray-400</div><div>#8E8E8E</div></div></div>
+      <div class="swb"><b style="background:#6B6B6B"></b><div class="swm"><div>gray-500</div><div>#6B6B6B</div></div></div>
+      <div class="swb"><b style="background:#4A4A4A"></b><div class="swm"><div>gray-600</div><div>#4A4A4A</div></div></div>
+      <div class="swb"><b style="background:#333333"></b><div class="swm"><div>gray-700</div><div>#333333</div></div></div>
+      <div class="swb"><b style="background:#2A2A2E"></b><div class="swm"><div>gray-800</div><div>#2A2A2E</div></div></div>
+      <div class="swb"><b style="background:#1E1E20"></b><div class="swm"><div>gray-850</div><div>#1E1E20</div></div></div>
+      <div class="swb"><b style="background:#161618"></b><div class="swm"><div>gray-900</div><div>#161618</div></div></div>
+    </div>
+    <div class="spec"><span>★ = 品牌基础背景色</span><span>文字类 Token 使用带透明度的黑/白，可自然叠加在任何层级上</span></div>
+  </div>
+
+  <h3 class="sub t-t2">2.3 语义色</h3>
+  <div class="grid2">
+    <div class="sem" style="background:var(--color-success-bg)"><div class="swd" style="background:var(--color-success)"><svg class="ic"><use href="#i-check"/></svg></div><div><div class="t-hl">Success 成功</div><div class="t-cap mono sec2">L #2E8F55 / D #41B370 · 任务完成、测试通过</div></div></div>
+    <div class="sem" style="background:var(--color-warning-bg)"><div class="swd" style="background:var(--color-warning)"><svg class="ic"><use href="#i-warn"/></svg></div><div><div class="t-hl">Warning 警告</div><div class="t-cap mono sec2">L #A96F0C / D #D5983F · 权限确认、可恢复风险</div></div></div>
+    <div class="sem" style="background:var(--color-danger-bg)"><div class="swd" style="background:var(--color-danger)"><svg class="ic"><use href="#i-x"/></svg></div><div><div class="t-hl">Error 错误</div><div class="t-cap mono sec2">L #C13A32 / D #E5645C · 失败、破坏性操作 (fill #CC4139)</div></div></div>
+    <div class="sem" style="background:var(--color-info-bg)"><div class="swd" style="background:var(--color-info)"><svg class="ic"><use href="#i-info"/></svg></div><div><div class="t-hl">Info 信息</div><div class="t-cap mono sec2">L #3474BE / D #66A3DE · 中性提示、版本说明</div></div></div>
+  </div>
+
+  <h3 class="sub t-t2">2.4 语义化 Token 对照表（Light / Dark）</h3>
+  <div class="card" style="overflow-x:auto">
+    <table class="tbl">
+      <tr><th>Token</th><th>Light</th><th>Dark</th><th>用途</th></tr>
+      <tr><td><span class="k">--color-bg-base</span></td><td class="mono">#F3F3F3</td><td class="mono">#1E1E20</td><td>窗口 / 页面基底、侧边栏</td></tr>
+      <tr><td><span class="k">--color-bg-raised</span></td><td class="mono">#FFFFFF</td><td class="mono">#2A2A2E</td><td>卡片、内容面板、弹出层</td></tr>
+      <tr><td><span class="k">--color-bg-sunken</span></td><td class="mono">#EAEAEA</td><td class="mono">#161618</td><td>输入槽、代码块、分段控件底</td></tr>
+      <tr><td><span class="k">--color-bg-overlay</span></td><td class="mono">rgba(246,246,246,.72)</td><td class="mono">rgba(32,32,36,.72)</td><td>毛玻璃材质（工具栏/标题栏）</td></tr>
+      <tr><td><span class="k">--color-bg-hover</span></td><td class="mono">rgba(0,0,0,.045)</td><td class="mono">rgba(255,255,255,.06)</td><td>悬停底色</td></tr>
+      <tr><td><span class="k">--color-bg-active</span></td><td class="mono">rgba(0,0,0,.08)</td><td class="mono">rgba(255,255,255,.10)</td><td>按压底色</td></tr>
+      <tr><td><span class="k">--color-text-primary</span></td><td class="mono">rgba(0,0,0,.86)</td><td class="mono">rgba(255,255,255,.90)</td><td>一级文本</td></tr>
+      <tr><td><span class="k">--color-text-secondary</span></td><td class="mono">rgba(0,0,0,.55)</td><td class="mono">rgba(255,255,255,.60)</td><td>二级文本、说明</td></tr>
+      <tr><td><span class="k">--color-text-tertiary</span></td><td class="mono">rgba(0,0,0,.36)</td><td class="mono">rgba(255,255,255,.40)</td><td>占位符、次要标注（仅装饰级）</td></tr>
+      <tr><td><span class="k">--color-text-disabled</span></td><td class="mono">rgba(0,0,0,.25)</td><td class="mono">rgba(255,255,255,.26)</td><td>禁用文本</td></tr>
+      <tr><td><span class="k">--color-border-strong</span></td><td class="mono">rgba(0,0,0,.16)</td><td class="mono">rgba(255,255,255,.22)</td><td>控件描边（输入框/按钮）</td></tr>
+      <tr><td><span class="k">--color-border</span></td><td class="mono">rgba(0,0,0,.10)</td><td class="mono">rgba(255,255,255,.12)</td><td>常规分割线、窗口描边</td></tr>
+      <tr><td><span class="k">--color-border-subtle</span></td><td class="mono">rgba(0,0,0,.06)</td><td class="mono">rgba(255,255,255,.07)</td><td>卡片内分割、弱分区</td></tr>
+      <tr><td><span class="k">--color-accent</span></td><td class="mono" colspan="2" style="text-align:center">随方案 A–F（曜石方案 Dark 下反转为 #F2F2F4）</td><td>主操作、选中态填充</td></tr>
+      <tr><td><span class="k">--color-on-accent</span></td><td class="mono">#FFFFFF</td><td class="mono">#FFFFFF（曜石 Dark → #141416）</td><td>Accent 填充上的文字</td></tr>
+    </table>
+  </div>
+
+  <h3 class="sub t-t2">2.5 使用比例与正误示例</h3>
+  <div class="card">
+    <div class="ratio" style="margin-bottom:var(--sp-2)">
+      <div style="flex:70;background:var(--color-bg-base);color:var(--color-text-secondary)">中性背景 ~70%</div>
+      <div style="flex:25;background:var(--color-bg-raised);color:var(--color-text-secondary);border-left:1px solid var(--color-border)">结构与文字 ~25%</div>
+      <div style="flex:5;background:var(--color-accent);color:var(--color-on-accent)">5%</div>
+    </div>
+    <p class="t-co sec2">Accent 在任一屏幕中的面积占比不应超过 5%——通常只出现在：一个主按钮、当前选中项、少量链接与焦点环。暖色系方案（C/D/E/F）视觉重量更大，实际占比建议压得更低。</p>
+    <div class="grid2" style="margin-top:var(--sp-4)">
+      <div>
+        <div class="verdict ok"><svg class="ic"><use href="#i-check-c"/></svg>正确 · 单一视觉焦点</div>
+        <div class="mini" style="border-color:color-mix(in srgb,var(--color-success) 40%,transparent)">
+          <div class="mtb"><i></i><i></i><i></i></div>
+          <div class="mbody">
+            <div class="ln" style="width:55%"></div><div class="ln" style="width:80%"></div><div class="ln" style="width:65%"></div>
+            <div class="btnrow"><span class="mb" style="background:var(--color-accent);color:var(--color-on-accent)">确认</span><span class="mb" style="background:var(--color-bg-raised);border:1px solid var(--color-border-strong);color:var(--color-text-primary)">取消</span></div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="verdict no"><svg class="ic"><use href="#i-x"/></svg>错误 · 彩色泛滥，焦点失效</div>
+        <div class="mini" style="border-color:color-mix(in srgb,var(--color-danger) 45%,transparent)">
+          <div class="mtb" style="background:#6E56C8"><i style="background:rgba(255,255,255,.5)"></i><i style="background:rgba(255,255,255,.5)"></i><i style="background:rgba(255,255,255,.5)"></i></div>
+          <div class="mbody">
+            <div class="ln" style="width:55%;background:#F4B23E"></div><div class="ln" style="width:80%;background:#59B8E8"></div><div class="ln" style="width:65%;background:#E8739B"></div>
+            <div class="btnrow"><span class="mb" style="background:#2FA84F;color:#fff">确认</span><span class="mb" style="background:#E0443A;color:#fff">取消</span><span class="mb" style="background:#8A5CE0;color:#fff">更多</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== 03 字体排印 ==================== -->
+<section id="typography" class="sec">
+  <div class="eyebrow">03 / TYPOGRAPHY</div>
+  <h2 class="t-lt">字体排印</h2>
+  <p class="lead t-body">全部使用系统字体栈，零下载成本并与 macOS 完全一致。正文基准 13px——这是 macOS 桌面应用的原生正文尺寸。等宽字体用于代码、Token 与数值。</p>
+  <div class="card" style="margin-top:var(--sp-5)">
+    <div class="spec" style="margin:0 0 var(--sp-2);padding:0 0 var(--sp-3);border-top:none;border-bottom:1px solid var(--color-border-subtle)">
+      <span class="k" data-copy='-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "PingFang SC", sans-serif'>--font-sans</span>
+      <span class="k" data-copy='ui-monospace, "SF Mono", Menlo, monospace'>--font-mono</span>
+      <span>点击任意 Token 可复制</span>
+    </div>
+    <div class="type-row"><span class="tname">Large Title</span><span class="t-lt" style="flex:1">构建可靠的智能体 Agent</span><span class="tspec">26/32 · 700 · -0.4px</span></div>
+    <div class="type-row"><span class="tname">Title 1</span><span class="t-t1" style="flex:1">会话与任务 Sessions</span><span class="tspec">22/28 · 700 · -0.3px</span></div>
+    <div class="type-row"><span class="tname">Title 2</span><span class="t-t2" style="flex:1">运行环境配置 Runtime</span><span class="tspec">17/24 · 600 · -0.2px</span></div>
+    <div class="type-row"><span class="tname">Title 3</span><span class="t-t3" style="flex:1">模型参数 Parameters</span><span class="tspec">15/20 · 600 · -0.1px</span></div>
+    <div class="type-row"><span class="tname">Headline</span><span class="t-hl" style="flex:1">工具调用已获批准 Approved</span><span class="tspec">13/18 · 600 · 0</span></div>
+    <div class="type-row"><span class="tname">Body</span><span class="t-body" style="flex:1">Agent 将在沙盒中执行命令，并在每一步请求确认。</span><span class="tspec">13/20 · 400 · 0</span></div>
+    <div class="type-row"><span class="tname">Callout</span><span class="t-co" style="flex:1">上次同步于 2 分钟前 · 共 128 个文件</span><span class="tspec">12/16 · 400 · 0</span></div>
+    <div class="type-row"><span class="tname">Caption</span><span class="t-cap sec2" style="flex:1">TOKENS 12,431 · CONTEXT 84%</span><span class="tspec">11/14 · 400 · +0.1px</span></div>
+    <div class="type-row"><span class="tname">Mono</span><span class="mono" style="flex:1;font-size:12px">zerox run --model gpt-5-codex</span><span class="tspec">12/18 · 400 · mono</span></div>
+  </div>
+  <div class="grid2" style="margin-top:var(--sp-4)">
+    <div class="card">
+      <div class="t-t3" style="margin-bottom:var(--sp-2)">排版组合示例</div>
+      <div class="t-hl">重构 auth 模块</div>
+      <p class="t-body sec2" style="margin:4px 0 var(--sp-3)">Agent 已分析 14 个相关文件，计划分 3 步执行迁移。所有改动将在你确认后写入工作区。</p>
+      <div class="row"><span class="tag acc">计划中</span><span class="t-cap sec3">段落间距 = 字号 × 1.0～1.5，取 4pt 网格值</span></div>
+    </div>
+    <div class="card">
+      <div class="t-t3" style="margin-bottom:var(--sp-2)">代码块</div>
+      <div class="codeblock"><span class="c3"># 应用当前 Accent</span><br><span class="c1">const</span> theme = {<br>&nbsp;&nbsp;accent: <span class="c2">'var(--color-accent)'</span>,<br>&nbsp;&nbsp;radius: <span class="c2">'var(--r-sm)'</span><br>}</div>
+      <div class="spec"><span class="k">--font-mono</span><span>bg: --color-bg-sunken</span><span>r: --r-md</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== 04 布局与结构 ==================== -->
+<section id="layout" class="sec">
+  <div class="eyebrow">04 / LAYOUT</div>
+  <h2 class="t-lt">布局与区域结构</h2>
+  <p class="lead t-body">采用 macOS 经典三栏窗口结构。下方为<b>抽象结构模型</b>——本规范只约束区域划分、尺寸、内边距与背景层级；各区域内部的信息架构与内容形态由产品设计自行决定，不在约束范围内。侧边栏与检查器均为可选区域。</p>
+
+  <div class="win-scroll" style="margin-top:var(--sp-5)"><div class="win">
+    <div class="wtb" style="position:relative">
+      <div class="tl"><i></i><i></i><i></i></div>
+      <span class="wtitle">窗口标题</span>
+      <div style="flex:1"></div>
+      <div class="ph" style="width:72px;height:16px;border-radius:5px"></div>
+      <div class="ph" style="width:16px;height:16px;border-radius:5px"></div>
+      <div class="ph" style="width:16px;height:16px;border-radius:5px"></div>
+      <span class="dim" style="right:10px;top:8px">标题栏+工具栏 H 52</span>
+    </div>
+    <div class="wbody">
+      <div class="wside" style="position:relative">
+        <span class="dim" style="left:10px;top:10px">侧边栏 W 220 · bg-base</span>
+        <div style="height:24px"></div>
+        <div class="pglabel"></div>
+        <div class="prow"><i></i><div class="ph"></div></div>
+        <div class="prow on"><i></i><div class="ph"></div></div>
+        <div class="prow"><i></i><div class="ph" style="max-width:55%"></div></div>
+        <div class="pglabel"></div>
+        <div class="prow"><i></i><div class="ph" style="max-width:60%"></div></div>
+        <div class="prow"><i></i><div class="ph" style="max-width:45%"></div></div>
+        <div style="flex:1"></div>
+        <div class="t-cap sec3" style="padding:0 8px">导航行 H 26 · 选中态填充 accent<br>分组与条目由产品定义</div>
+      </div>
+      <div class="wmain" style="position:relative">
+        <span class="dim" style="right:10px;top:10px">内容区 bg-raised · p 16 · 弹性</span>
+        <div style="height:20px"></div>
+        <div class="ph" style="width:38%;height:10px"></div>
+        <div class="ph" style="width:72%"></div>
+        <div class="ph" style="width:58%"></div>
+        <div class="ph-block" style="flex:1">主工作区<br>内容组织形式（对话流 / 编辑器 / 画布…）由产品形态决定<br>本规范不做约束</div>
+        <div class="ph" style="width:47%"></div>
+      </div>
+      <div class="winsp" style="position:relative">
+        <span class="dim" style="right:10px;top:10px">检查器 W 220 · 可选</span>
+        <div style="height:24px"></div>
+        <div class="ph" style="width:45%;height:6px;opacity:.6"></div>
+        <div class="ph" style="width:85%"></div>
+        <div class="ph" style="width:70%"></div>
+        <div class="ph" style="width:78%"></div>
+        <div style="border-top:1px solid var(--color-border-subtle);margin:2px 0"></div>
+        <div class="ph" style="width:45%;height:6px;opacity:.6"></div>
+        <div class="ph" style="width:64%"></div>
+        <div style="flex:1"></div>
+        <div class="t-cap sec3">承载上下文详情 · 可折叠</div>
+      </div>
+    </div>
+    <div class="wsb" style="position:relative">
+      <span class="dot-st"><i style="background:var(--color-success)"></i></span>
+      <div class="ph" style="width:80px;height:6px"></div>
+      <div style="flex:1"></div>
+      <div class="ph" style="width:56px;height:6px"></div>
+      <span class="dim" style="right:10px;top:5px">状态栏 H 28 · 可选</span>
+    </div>
+  </div></div>
+
+  <div class="card" style="margin-top:var(--sp-4);overflow-x:auto">
+    <table class="tbl">
+      <tr><th>区域</th><th>尺寸</th><th>内边距</th><th>背景层级</th><th>规范约束 / 备注</th></tr>
+      <tr><td>标题栏 + 工具栏（统一）</td><td class="mono">H 52</td><td class="mono">px 16</td><td class="mono">bg-overlay + blur</td><td>红绿灯 ⌀12 · 间距 8 · 距左 16；工具项内容由产品定义</td></tr>
+      <tr><td>侧边栏 Sidebar（可选）</td><td class="mono">W 220（180–320 可拖拽）</td><td class="mono">12 / 8</td><td class="mono">bg-base</td><td>导航行 H 26 · r 5 · 选中填充 accent；信息架构由产品定义</td></tr>
+      <tr><td>内容区 Content</td><td class="mono">弹性 ≥ 420</td><td class="mono">16</td><td class="mono">bg-raised</td><td>唯一主工作区；形态不作约束，长文本阅读建议列宽 ≤ 720</td></tr>
+      <tr><td>检查器 Inspector（可选）</td><td class="mono">W 220–280</td><td class="mono">12</td><td class="mono">bg-base</td><td>承载上下文详情，可折叠</td></tr>
+      <tr><td>状态栏 Status（可选）</td><td class="mono">H 28</td><td class="mono">px 16</td><td class="mono">bg-overlay</td><td>Caption 11px · 仅放次级信息</td></tr>
+      <tr><td>窗口 Window</td><td class="mono">min 900×600</td><td class="mono">—</td><td class="mono">r-12 · border 1px</td><td>默认尺寸由产品定义</td></tr>
+    </table>
+  </div>
+
+  <h3 class="sub t-t2">4.1 间距系统 · 4pt 网格</h3>
+  <div class="card">
+    <div class="sp-scale">
+      <div class="cell"><div class="b" style="height:4px"></div>4</div>
+      <div class="cell"><div class="b" style="height:8px"></div>8</div>
+      <div class="cell"><div class="b" style="height:12px"></div>12</div>
+      <div class="cell"><div class="b" style="height:16px"></div>16</div>
+      <div class="cell"><div class="b" style="height:20px"></div>20</div>
+      <div class="cell"><div class="b" style="height:24px"></div>24</div>
+      <div class="cell"><div class="b" style="height:32px"></div>32</div>
+      <div class="cell"><div class="b" style="height:40px"></div>40</div>
+      <div class="cell"><div class="b" style="height:48px"></div>48</div>
+      <div class="cell"><div class="b" style="height:64px"></div>64</div>
+    </div>
+    <div class="spec"><span class="k">--sp-1…16</span><span>控件内间距 4/8/12 · 组件间 16/24 · 区块间 32/48 · 章节间 64</span></div>
+  </div>
+
+  <h3 class="sub t-t2">4.2 圆角规范</h3>
+  <div class="card"><div class="canvas" style="background:transparent;border:none;padding:0">
+    <div class="rbox" style="border-radius:4px">r-xs 4</div>
+    <div class="rbox" style="border-radius:6px">r-sm 6</div>
+    <div class="rbox" style="border-radius:8px">r-md 8</div>
+    <div class="rbox" style="border-radius:10px">r-lg 10</div>
+    <div class="rbox" style="border-radius:12px">r-xl 12</div>
+    <div class="rbox" style="border-radius:999px;width:56px;height:56px">full</div>
+  </div>
+  <div class="spec"><span>4 小控件/标签</span><span>6 按钮/输入框</span><span>8 卡片内块/菜单</span><span>10 卡片</span><span>12 窗口/模态</span><span>full 徽章/开关</span></div></div>
+</section>
+
+<!-- ==================== 05 层级与材质 ==================== -->
+<section id="elevation" class="sec">
+  <div class="eyebrow">05 / ELEVATION</div>
+  <h2 class="t-lt">层级与材质</h2>
+  <p class="lead t-body">三层背景体系 + 四级阴影 + 一种毛玻璃材质，即可表达全部空间关系。层级越高，离用户越"近"。</p>
+
+  <h3 class="sub t-t2">5.1 背景三层体系</h3>
+  <div class="card"><div class="elev">
+    <div class="lv" style="inset:14px;background:var(--color-bg-base);border:1px solid var(--color-border-subtle)"><b>Base</b> 窗口基底 <span class="tk">--color-bg-base · z 0</span></div>
+    <div class="lv" style="left:34px;top:52px;right:34px;bottom:34px;background:var(--color-bg-raised);border:1px solid var(--color-border-subtle);box-shadow:var(--shadow-1)"><b>Raised</b> 卡片 / 面板 <span class="tk">--color-bg-raised · shadow-1</span></div>
+    <div class="lv" style="left:58%;top:96px;right:52px;bottom:52px;background:var(--color-bg-raised);box-shadow:var(--shadow-3);border:1px solid var(--color-border-subtle)"><b>Overlay</b> 菜单 / 弹层 <span class="tk">shadow-2~3 · z 1000+</span></div>
+  </div></div>
+
+  <h3 class="sub t-t2">5.2 阴影四级</h3>
+  <div class="card"><div class="canvas">
+    <div class="stack" style="align-items:center"><div class="shadow-demo" style="box-shadow:var(--shadow-1)">shadow-1</div><span class="t-cap mono sec3">卡片静置</span></div>
+    <div class="stack" style="align-items:center"><div class="shadow-demo" style="box-shadow:var(--shadow-2)">shadow-2</div><span class="t-cap mono sec3">下拉/悬浮</span></div>
+    <div class="stack" style="align-items:center"><div class="shadow-demo" style="box-shadow:var(--shadow-3)">shadow-3</div><span class="t-cap mono sec3">Popover/Toast</span></div>
+    <div class="stack" style="align-items:center"><div class="shadow-demo" style="box-shadow:var(--shadow-4)">shadow-4</div><span class="t-cap mono sec3">模态/独立窗</span></div>
+  </div>
+  <div class="spec">
+    <span class="k">--shadow-1: 0 1px 2px rgba(0,0,0,.06)</span>
+    <span class="k">--shadow-2: 0 2px 6px .06 + 0 8px 20px .07</span>
+    <span class="k">--shadow-3: 0 4px 10px .08 + 0 12px 32px .12</span>
+    <span class="k">--shadow-4: 0 8px 20px .10 + 0 28px 72px .22</span>
+  </div></div>
+
+  <h3 class="sub t-t2">5.3 z-index 管理表</h3>
+  <div class="card" style="overflow-x:auto"><table class="tbl">
+    <tr><th>层</th><th>Token</th><th>值</th><th>元素</th></tr>
+    <tr><td>基底</td><td class="mono">—</td><td class="mono">0 / 1</td><td>内容、卡片</td></tr>
+    <tr><td>吸附</td><td><span class="k">--z-sticky</span></td><td class="mono">100</td><td>工具栏、侧边栏、粘性表头</td></tr>
+    <tr><td>下拉</td><td><span class="k">--z-dropdown</span></td><td class="mono">1000</td><td>菜单、Select、Popover</td></tr>
+    <tr><td>提示</td><td><span class="k">--z-tooltip</span></td><td class="mono">1100</td><td>Tooltip</td></tr>
+    <tr><td>通知</td><td><span class="k">--z-toast</span></td><td class="mono">1200</td><td>Toast 堆栈</td></tr>
+    <tr><td>模态</td><td><span class="k">--z-modal</span></td><td class="mono">1300</td><td>Dialog、Sheet 及遮罩</td></tr>
+  </table></div>
+
+  <h3 class="sub t-t2">5.4 毛玻璃材质</h3>
+  <div class="card">
+    <div class="glass-stage">
+      <div class="bgart"></div>
+      <div class="glass-bar"><div class="tl"><i></i><i></i><i></i></div>工具栏悬浮于滚动内容之上<span style="margin-left:auto" class="t-cap mono sec2">blur 20 · saturate 180%</span></div>
+      <div style="position:absolute;left:14px;bottom:14px;right:14px" class="t-cap">
+        <span class="k">backdrop-filter: saturate(180%) blur(20px)</span>
+        <span class="k">background: var(--color-bg-overlay)</span>
+        <span class="k">border-bottom: 1px --color-border-subtle</span>
+      </div>
+    </div>
+    <div class="spec"><span>使用场景：标题栏/工具栏、侧边栏、状态栏——仅限"内容会从其下方滚过"的界面镶边</span><span>禁止：卡片、按钮、大面积内容底</span></div>
+  </div>
+</section>
+
+<!-- ==================== 06 组件库 ==================== -->
+<section id="components" class="sec">
+  <div class="eyebrow">06 / COMPONENTS</div>
+  <h2 class="t-lt">组件库</h2>
+  <p class="lead t-body">全部组件真实可交互。每个示例底部标注尺寸与颜色 Token；状态矩阵中的 hover/active/focus 为强制展示态，与真实交互样式完全一致。</p>
+
+  <h3 class="sub t-t2">6.1 按钮 Button</h3>
+  <div class="card">
+    <div class="canvas"><div class="matrix" style="width:100%">
+      <div class="row"><span class="stlab"></span><span class="stlab">default</span><span class="stlab">hover</span><span class="stlab">active</span><span class="stlab">focus</span><span class="stlab">disabled</span></div>
+      <div class="row"><span class="stlab">主要</span><button class="btn btn-pri">运行</button><button class="btn btn-pri s-hover">运行</button><button class="btn btn-pri s-active">运行</button><button class="btn btn-pri s-focus">运行</button><button class="btn btn-pri" disabled>运行</button></div>
+      <div class="row"><span class="stlab">次要</span><button class="btn btn-sec">取消</button><button class="btn btn-sec s-hover">取消</button><button class="btn btn-sec s-active">取消</button><button class="btn btn-sec s-focus">取消</button><button class="btn btn-sec" disabled>取消</button></div>
+      <div class="row"><span class="stlab">危险</span><button class="btn btn-dng">删除</button><button class="btn btn-dng s-hover">删除</button><button class="btn btn-dng s-active">删除</button><button class="btn btn-dng s-focus">删除</button><button class="btn btn-dng" disabled>删除</button></div>
+      <div class="row"><span class="stlab">幽灵</span><button class="btn btn-gho">查看日志</button><button class="btn btn-gho s-hover">查看日志</button><button class="btn btn-gho s-active">查看日志</button><button class="btn btn-gho s-focus">查看日志</button><button class="btn btn-gho" disabled>查看日志</button></div>
+      <div class="row"><span class="stlab">图标</span><button class="btn btn-ico" aria-label="复制"><svg class="ic"><use href="#i-copy"/></svg></button><button class="btn btn-ico s-hover" aria-label="复制"><svg class="ic"><use href="#i-copy"/></svg></button><button class="btn btn-ico s-active" aria-label="复制"><svg class="ic"><use href="#i-copy"/></svg></button><button class="btn btn-ico s-focus" aria-label="复制"><svg class="ic"><use href="#i-copy"/></svg></button><button class="btn btn-ico" disabled aria-label="复制"><svg class="ic"><use href="#i-copy"/></svg></button></div>
+    </div></div>
+    <div class="canvas" style="margin-top:var(--sp-3)">
+      <button class="btn btn-pri sm">小 24</button>
+      <button class="btn btn-pri">中 28（默认）</button>
+      <button class="btn btn-pri lg">大 36</button>
+      <button class="btn btn-sec"><svg class="ic"><use href="#i-play"/></svg>带图标</button>
+    </div>
+    <div class="spec"><span>H 24/28/36 · px 8/12/16 · r 4/6/8</span><span class="k">--color-accent</span><span class="k">--color-danger-fill</span><span>focus 环: 0 0 0 3px --color-accent-ring</span><span>disabled: opacity .45</span></div>
+  </div>
+
+  <h3 class="sub t-t2">6.2 输入框 Text Field</h3>
+  <div class="card"><div class="canvas">
+    <div class="field"><label>会话名称</label><input class="input" placeholder="例如：重构 auth 模块"><span class="hint">支持中英文，最长 64 字符</span></div>
+    <div class="field"><label>API 地址</label><input class="input err" value="http//api.zerox" aria-invalid="true"><span class="hint err">URL 格式不正确</span></div>
+    <div class="field"><label>只读密钥</label><input class="input" value="sk-••••••••" disabled><span class="hint">由管理员配置</span></div>
+  </div>
+  <div class="spec"><span>H 28 · px 8 · r 6 · border 1px --color-border-strong</span><span>focus: border --color-accent + ring 3px</span><span>error: --color-danger</span></div></div>
+
+  <h3 class="sub t-t2">6.3 下拉选择 Select</h3>
+  <div class="card"><div class="canvas" style="min-height:180px;align-items:flex-start">
+    <div class="select" id="demoSelect">
+      <button class="select-trigger" aria-haspopup="listbox"><span id="selLabel">gpt-5-codex</span><svg class="ic"><use href="#i-chev-d"/></svg></button>
+      <div class="select-menu" role="listbox">
+        <button class="on" role="option"><span class="chk-mark"><svg class="ic" style="width:12px;height:12px"><use href="#i-check"/></svg></span>gpt-5-codex</button>
+        <button role="option"><span class="chk-mark"><svg class="ic" style="width:12px;height:12px"><use href="#i-check"/></svg></span>gpt-5</button>
+        <button role="option"><span class="chk-mark"><svg class="ic" style="width:12px;height:12px"><use href="#i-check"/></svg></span>o4-mini</button>
+        <button role="option"><span class="chk-mark"><svg class="ic" style="width:12px;height:12px"><use href="#i-check"/></svg></span>本地 · llama-8b</button>
+        <hr>
+        <button role="option"><span class="chk-mark"></span>管理模型…</button>
+      </div>
+    </div>
+    <span class="t-cap sec3" style="margin-top:6px">点击展开 · 菜单 shadow-2 · 选项高 26 · 悬停填充 accent</span>
+  </div>
+  <div class="spec"><span>触发器同输入框规格</span><span>菜单 r-8 · p-4 · offset 4</span><span class="k">--z-dropdown 1000</span></div></div>
+
+  <h3 class="sub t-t2">6.4 选择控件 · 开关 / 复选 / 单选</h3>
+  <div class="card"><div class="canvas" style="gap:var(--sp-8)">
+    <div class="stack">
+      <span class="t-cap sec3 mono">Switch 30×18</span>
+      <label class="ctl-line"><span class="sw"><input type="checkbox" checked><span class="knob"></span></span>自动批准只读命令</label>
+      <label class="ctl-line"><span class="sw"><input type="checkbox"><span class="knob"></span></span>联网搜索</label>
+      <label class="ctl-line" style="opacity:.5"><span class="sw"><input type="checkbox" disabled><span class="knob"></span></span>企业策略锁定</label>
+    </div>
+    <div class="stack">
+      <span class="t-cap sec3 mono">Checkbox 14 · r 3.5</span>
+      <label class="ctl-line"><input type="checkbox" class="chk" checked>写入工作区</label>
+      <label class="ctl-line"><input type="checkbox" class="chk">执行网络请求</label>
+      <label class="ctl-line"><input type="checkbox" class="chk ind" aria-checked="mixed">部分选中（indeterminate）</label>
+      <label class="ctl-line" style="opacity:.6"><input type="checkbox" class="chk" disabled>已禁用</label>
+    </div>
+    <div class="stack">
+      <span class="t-cap sec3 mono">Radio 14</span>
+      <label class="ctl-line"><input type="radio" name="sbx" class="rdo" checked>沙盒：工作区</label>
+      <label class="ctl-line"><input type="radio" name="sbx" class="rdo">沙盒：只读</label>
+      <label class="ctl-line"><input type="radio" name="sbx" class="rdo">完全访问</label>
+    </div>
+  </div>
+  <div class="spec"><span>选中填充 --color-accent · 图形留白用 bg-raised</span><span>knob 位移 12px · --ease-spring</span><span>标签与控件间距 8</span></div></div>
+
+  <h3 class="sub t-t2">6.5 滑块 Slider</h3>
+  <div class="card"><div class="canvas">
+    <div class="stack" style="min-width:260px">
+      <div class="row" style="justify-content:space-between"><label class="t-co">温度 Temperature</label><span class="mono t-cap" id="sliderVal">0.60</span></div>
+      <input type="range" class="slider" id="demoSlider" min="0" max="100" value="60">
+    </div>
+  </div>
+  <div class="spec"><span>轨道 H 4 · r 2 · --color-track</span><span>已填充段 --color-accent</span><span>拇指 ⌀16 白色 + shadow · hover scale 1.12</span></div></div>
+
+  <h3 class="sub t-t2">6.6 分段控件 Segmented Control</h3>
+  <div class="card"><div class="canvas">
+    <div class="seg" style="--n:3" data-seg><button aria-selected="true">选项一</button><button>选项二</button><button>选项三</button></div>
+    <div class="seg" style="--n:4" data-seg><button aria-selected="true">全部</button><button>运行中</button><button>成功</button><button>失败</button></div>
+  </div>
+  <div class="spec"><span>容器 bg-sunken · r 7 · p 2</span><span>选中片 bg-raised + shadow-1 · r 5 · H 24</span><span>滑动 250ms --ease-standard</span></div></div>
+
+  <h3 class="sub t-t2">6.7 标签页 Tabs</h3>
+  <div class="card" data-tabs>
+    <div class="tabs-bar">
+      <button role="tab" class="on">输出</button>
+      <button role="tab">计划</button>
+      <button role="tab">变更文件 <span class="badge n" style="margin-left:4px">4</span></button>
+    </div>
+    <div role="tabpanel">Agent 输出流在此逐 token 渲染，支持代码高亮与折叠。</div>
+    <div role="tabpanel" hidden>三步计划：① 扫描依赖 → ② 迁移 token → ③ 回归测试。</div>
+    <div role="tabpanel" hidden>src/auth/token.ts · src/auth/session.ts · tests/auth.spec.ts …</div>
+    <div class="spec"><span>Tab H 34 · 间距 16</span><span>指示线 H 2 · --color-accent</span><span>选中文字 --color-accent-text</span></div>
+  </div>
+
+  <h3 class="sub t-t2">6.8 列表与表格 List / Table</h3>
+  <div class="card"><div class="canvas" style="align-items:flex-start">
+    <div class="list">
+      <div class="li"><svg class="ic"><use href="#i-chat"/></svg>快速问答<span class="cnt">12</span></div>
+      <div class="li on"><svg class="ic"><use href="#i-terminal"/></svg>重构 auth 模块<span class="cnt">运行中</span></div>
+      <div class="li"><svg class="ic"><use href="#i-folder"/></svg>依赖升级评估<span class="cnt">8</span></div>
+      <div class="li"><svg class="ic"><use href="#i-doc"/></svg>发布说明草稿<span class="cnt">3</span></div>
+    </div>
+    <table class="table" style="flex:1;min-width:340px">
+      <thead><tr><th>任务</th><th>状态</th><th style="text-align:right">耗时</th><th></th></tr></thead>
+      <tbody>
+        <tr><td>pnpm test --filter auth</td><td><span class="tag ok">成功</span></td><td class="num">2.4s</td><td><button class="btn btn-ico sm" data-tip="复制命令"><svg class="ic"><use href="#i-copy"/></svg></button></td></tr>
+        <tr><td>codemod tokens.ts</td><td><span class="tag acc">运行中</span></td><td class="num">18s</td><td><button class="btn btn-ico sm" data-tip="停止"><svg class="ic"><use href="#i-stop"/></svg></button></td></tr>
+        <tr><td>eslint --fix src/</td><td><span class="tag warn">待确认</span></td><td class="num">—</td><td><button class="btn btn-ico sm" data-tip="批准运行"><svg class="ic"><use href="#i-play"/></svg></button></td></tr>
+        <tr><td>rm -rf node_modules</td><td><span class="tag err">已拦截</span></td><td class="num">—</td><td><button class="btn btn-ico sm" data-tip="查看原因"><svg class="ic"><use href="#i-info"/></svg></button></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="spec"><span>列表行 H 28 · r 6 · 选中填充 accent</span><span>表头 Caption 11 · bg-base</span><span>行分割 --color-border-subtle · hover --color-bg-hover</span></div></div>
+
+  <h3 class="sub t-t2">6.9 卡片 Card</h3>
+  <div class="card"><div class="canvas">
+    <div class="card hoverlift" style="width:250px;cursor:default">
+      <div class="row" style="justify-content:space-between"><span class="t-hl">工作区快照</span><span class="tag">自动</span></div>
+      <p class="t-co sec2" style="margin:6px 0 12px">在执行破坏性操作前自动创建，可一键回滚。</p>
+      <div class="row" style="justify-content:space-between;border-top:1px solid var(--color-border-subtle);padding-top:10px"><span class="t-cap mono sec3">snap_0142 · 2m ago</span><button class="btn btn-gho sm">回滚</button></div>
+    </div>
+    <span class="t-cap sec3">悬停体验 -2px 升起 + shadow-2</span>
+  </div>
+  <div class="spec"><span>bg-raised · r 10 · p 20 · border subtle · shadow-1</span><span>内部分割线 subtle · 区块间距 12</span></div></div>
+
+  <h3 class="sub t-t2">6.10 标签与徽章 Tag / Badge</h3>
+  <div class="card"><div class="canvas">
+    <span class="tag">默认</span>
+    <span class="tag acc">Accent</span>
+    <span class="tag ok">成功</span>
+    <span class="tag warn">警告</span>
+    <span class="tag err">错误</span>
+    <span class="tag">可移除<button class="x" aria-label="移除"><svg class="ic" style="width:11px;height:11px"><use href="#i-x"/></svg></button></span>
+    <span class="row" style="gap:6px">未读<span class="badge">3</span></span>
+    <span class="row" style="gap:6px">计数<span class="badge n">128</span></span>
+  </div>
+  <div class="spec"><span>Tag H 20 · px 8 · r-full · 字号 11/500</span><span>底色 = 语义色 13% 混合</span><span>Badge min-W 16 · H 16 · mono 10</span></div></div>
+
+  <h3 class="sub t-t2">6.11 工具提示 Tooltip</h3>
+  <div class="card"><div class="canvas">
+    <button class="btn btn-sec" data-tip="重新生成回复 ⌘R">悬停 400ms 显示</button>
+    <button class="btn btn-ico" data-tip="停止生成 ⌘."><svg class="ic"><use href="#i-stop"/></svg></button>
+    <button class="btn btn-ico" data-tip="复制为 Markdown"><svg class="ic"><use href="#i-copy"/></svg></button>
+  </div>
+  <div class="spec"><span>延迟 400ms · 消失即时</span><span>深底 rgba(30,30,32,.95) · 白字 11 · r 5 · py 5 px 8</span><span class="k">--z-tooltip 1100</span></div></div>
+
+  <h3 class="sub t-t2">6.12 通知 Toast</h3>
+  <div class="card"><div class="canvas">
+    <button class="btn btn-sec" data-toast="success">成功</button>
+    <button class="btn btn-sec" data-toast="info">信息</button>
+    <button class="btn btn-sec" data-toast="warning">警告</button>
+    <button class="btn btn-sec" data-toast="error">错误</button>
+    <span class="t-cap sec3">出现于右下角，3.2s 后自动消退，可手动关闭</span>
+  </div>
+  <div class="spec"><span>W 260–340 · r 8 · shadow-3</span><span>入场 250ms spring · 出场 150ms ease-in</span><span class="k">--z-toast 1200</span></div></div>
+
+  <h3 class="sub t-t2">6.13 模态对话框 Modal</h3>
+  <div class="card"><div class="canvas">
+    <button class="btn btn-dng" id="openModal">删除当前会话…</button>
+    <span class="t-cap sec3">遮罩 rgba(0,0,0,.28)+blur 4 · Esc / 点击遮罩关闭 · 打开时焦点移入</span>
+  </div>
+  <div class="spec"><span>W 400 · r 12 · shadow-4</span><span>入场 250ms spring（scale .95→1）</span><span>页脚 bg-base 分层承载操作</span></div></div>
+
+  <h3 class="sub t-t2">6.14 进度指示 Progress</h3>
+  <div class="card"><div class="canvas" style="gap:var(--sp-8)">
+    <div class="stack"><span class="t-cap sec3 mono">确定进度 64%</span><div class="bar"><i style="width:64%"></i></div></div>
+    <div class="stack"><span class="t-cap sec3 mono">不确定 indeterminate</span><div class="bar indet"><i></i></div></div>
+    <div class="stack" style="align-items:center"><span class="t-cap sec3 mono">Spinner ⌀20</span><svg class="spin" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8"/></svg></div>
+    <div class="stack"><span class="t-cap sec3 mono">生成中（文本态）</span><span class="row" style="gap:8px"><svg class="spin" width="14" height="14" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8"/></svg><span class="t-co sec2">Zerox 正在思考…</span></span></div>
+  </div>
+  <div class="spec"><span>条 H 5 · r 3 · 轨道 --color-track</span><span>indet 周期 1.2s</span><span>spinner 0.9s linear</span></div></div>
+</section>
+
+<!-- ==================== 07 图标系统 ==================== -->
+<section id="icons" class="sec">
+  <div class="eyebrow">07 / ICONS</div>
+  <h2 class="t-lt">图标系统</h2>
+  <p class="lead t-body">对齐 SF Symbols 的线性风格：24×24 栅格、1.5px 描边、圆头端点与圆角折点、几何优先。图标继承文字颜色（currentColor），与文本天然同色。</p>
+  <div class="card" style="margin-top:var(--sp-5)">
+    <div class="icon-grid">
+      <div class="icon-cell"><svg class="ic ic-24"><use href="#i-sparkle"/></svg>sparkle</div>
+      <div class="icon-cell"><svg class="ic ic-24"><use href="#i-terminal"/></svg>terminal</div>
+      <div class="icon-cell"><svg class="ic ic-24"><use href="#i-chat"/></svg>chat</div>
+      <div class="icon-cell"><svg class="ic ic-24"><use href="#i-folder"/></svg>folder</div>
+      <div class="icon-cell"><svg class="ic ic-24"><use href="#i-search"/></svg>search</div>
+      <div class="icon-cell"><svg class="ic ic-24"><use href="#i-sliders"/></svg>sliders</div>
+      <div class="icon-cell"><svg class="ic ic-24"><use href="#i-sidebar"/></svg>sidebar</div>
+      <div class="icon-cell"><svg class="ic ic-24"><use href="#i-copy"/></svg>copy</div>
+      <div class="icon-cell"><svg class="ic ic-24"><use href="#i-send"/></svg>send</div>
+      <div class="icon-cell"><svg class="ic ic-24"><use href="#i-layers"/></svg>layers</div>
+      <div class="icon-cell"><svg class="ic ic-24"><use href="#i-zap"/></svg>zap</div>
+      <div class="icon-cell"><svg class="ic ic-24"><use href="#i-check-c"/></svg>check</div>
+    </div>
+  </div>
+  <div class="grid2" style="margin-top:var(--sp-4)">
+    <div class="card">
+      <div class="t-t3" style="margin-bottom:var(--sp-3)">标准尺寸</div>
+      <div class="canvas" style="gap:var(--sp-6)">
+        <div class="stack" style="align-items:center"><svg class="ic"><use href="#i-sparkle"/></svg><span class="t-cap mono sec3">16</span></div>
+        <div class="stack" style="align-items:center"><svg class="ic ic-20"><use href="#i-sparkle"/></svg><span class="t-cap mono sec3">20</span></div>
+        <div class="stack" style="align-items:center"><svg class="ic ic-24"><use href="#i-sparkle"/></svg><span class="t-cap mono sec3">24</span></div>
+      </div>
+      <div class="spec"><span>16 → 行内/13px 文字</span><span>20 → 工具栏/15px</span><span>24 → 空状态/标题</span></div>
+    </div>
+    <div class="card">
+      <div class="t-t3" style="margin-bottom:var(--sp-3)">与文字的对齐</div>
+      <div class="canvas" style="flex-direction:column;align-items:flex-start;gap:var(--sp-3)">
+        <span class="row" style="gap:6px"><svg class="ic"><use href="#i-folder"/></svg><span class="t-body">与 13px 文本垂直居中，间距 6px</span></span>
+        <button class="btn btn-sec"><svg class="ic"><use href="#i-play"/></svg>按钮内间距 6px</button>
+        <span class="row" style="gap:6px"><svg class="ic ic-20" style="color:var(--color-accent-text)"><use href="#i-sparkle"/></svg><span class="t-t3">20px 图标配 Title 3</span></span>
+      </div>
+      <div class="spec"><span>对齐方式：与行盒垂直居中（非基线）</span><span>描边 1.5 @24 栅格，缩放后光学 ≈1px@16</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== 08 交互与动效 ==================== -->
+<section id="motion" class="sec">
+  <div class="eyebrow">08 / MOTION</div>
+  <h2 class="t-lt">交互与动效</h2>
+  <p class="lead t-body">动效只做三件事：确认输入、表达层级出入、引导注意力。默认短促、克制；spring 曲线仅用于小元素的确认反馈。</p>
+
+  <div class="card" style="margin-top:var(--sp-5);overflow-x:auto"><table class="tbl">
+    <tr><th>Token</th><th>时长</th><th>用途</th></tr>
+    <tr><td><span class="k">--dur-1</span></td><td class="mono">100ms</td><td>按压反馈、颜色微变</td></tr>
+    <tr><td><span class="k">--dur-2</span></td><td class="mono">150ms</td><td>hover、小元素出入（Tooltip 隐藏、Toast 退场）</td></tr>
+    <tr><td><span class="k">--dur-3</span></td><td class="mono">250ms</td><td>菜单/弹层出入、分段滑动、主题切换</td></tr>
+    <tr><td><span class="k">--dur-4</span></td><td class="mono">400ms</td><td>大面板展开、页面级过渡（慎用）</td></tr>
+  </table></div>
+
+  <h3 class="sub t-t2">8.1 缓动曲线（点击播放对比）</h3>
+  <div class="card">
+    <div class="lanes stack" id="easeLanes">
+      <div class="lanerow"><span class="llab">standard .4,0,.2,1</span><div class="lane"><div class="dotb" style="--e:var(--ease-standard)"></div></div></div>
+      <div class="lanerow"><span class="llab">out 0,0,.2,1 · 入场</span><div class="lane"><div class="dotb" style="--e:var(--ease-out)"></div></div></div>
+      <div class="lanerow"><span class="llab">in .4,0,1,1 · 退场</span><div class="lane"><div class="dotb" style="--e:var(--ease-in)"></div></div></div>
+      <div class="lanerow"><span class="llab">spring .34,1.4,.64,1</span><div class="lane"><div class="dotb" style="--e:var(--ease-spring)"></div></div></div>
+      <div class="lanerow"><span class="llab">时长对比 150ms</span><div class="lane"><div class="dotb" style="--d:var(--dur-2);--e:var(--ease-standard);background:var(--color-text-tertiary)"></div></div></div>
+      <div class="lanerow"><span class="llab">时长对比 400ms</span><div class="lane"><div class="dotb" style="--d:var(--dur-4);--e:var(--ease-standard);background:var(--color-text-tertiary)"></div></div></div>
+    </div>
+    <div class="row" style="margin-top:var(--sp-3)"><button class="btn btn-pri sm" id="playEase"><svg class="ic"><use href="#i-play"/></svg>播放</button><span class="t-cap sec3">同距离下曲线与时长的差异</span></div>
+  </div>
+
+  <div class="grid2" style="margin-top:var(--sp-4)">
+    <div class="card">
+      <div class="t-t3" style="margin-bottom:var(--sp-2)">出入场 · 弹层范式</div>
+      <div class="canvas" style="min-height:120px">
+        <div class="demo-enter in card" id="enterCard" style="box-shadow:var(--shadow-2);padding:12px 14px"><span class="row" style="gap:8px"><svg class="ic" style="color:var(--color-success)"><use href="#i-check-c"/></svg><span class="t-co">迁移完成，4 个文件已更新</span></span></div>
+      </div>
+      <div class="row" style="margin-top:var(--sp-3)"><button class="btn btn-sec sm" id="replayEnter">重播入场</button><span class="t-cap mono sec3">opacity 0→1 · y +12→0 · scale .97→1 · 250ms out</span></div>
+    </div>
+    <div class="card">
+      <div class="t-t3" style="margin-bottom:var(--sp-2)">拖拽反馈（按住拖动）</div>
+      <div id="dragZone">
+        <div id="dragChip"><svg class="ic"><use href="#i-doc"/></svg>token.ts</div>
+      </div>
+      <div class="spec" style="border:none;padding:0;margin-top:var(--sp-2)"><span>拖起: cursor grabbing · scale 1.04 · shadow-3</span><span>释放: 150ms 落回</span></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:var(--sp-4)"><div class="canvas">
+    <button class="btn btn-pri">悬停/按压试试</button>
+    <button class="btn btn-sec">键盘 Tab 聚焦</button>
+    <span class="t-cap sec3">hover 150ms 变色 · press 即时(≤100ms) · 焦点环仅键盘触发（:focus-visible）</span>
+  </div></div>
+</section>
+
+<!-- ==================== 09 可访问性 ==================== -->
+<section id="a11y" class="sec">
+  <div class="eyebrow">09 / ACCESSIBILITY</div>
+  <h2 class="t-lt">可访问性</h2>
+  <p class="lead t-body">克制不等于低对比。所有正文级文字满足 WCAG 2.1 AA（≥4.5:1），控件图形满足非文本对比（≥3:1）。</p>
+  <div class="card" style="margin-top:var(--sp-5);overflow-x:auto"><table class="tbl">
+    <tr><th>组合（Light）</th><th>示例</th><th>对比度</th><th>判定</th></tr>
+    <tr><td>text-primary / bg-base</td><td><span class="ratio-chip" style="background:#F3F3F3;color:rgba(0,0,0,.86)">正文文本 Aa</span></td><td class="mono">≈13.1:1</td><td class="pass">AAA ✓</td></tr>
+    <tr><td>text-secondary / bg-base</td><td><span class="ratio-chip" style="background:#F3F3F3;color:rgba(0,0,0,.55)">次级说明 Aa</span></td><td class="mono">≈4.9:1</td><td class="pass">AA ✓</td></tr>
+    <tr><td>text-tertiary / bg-base</td><td><span class="ratio-chip" style="background:#F3F3F3;color:rgba(0,0,0,.36)">占位/装饰 Aa</span></td><td class="mono">≈2.9:1</td><td class="fail">仅装饰 ✕</td></tr>
+    <tr><td>on-accent / accent-500（当前方案）</td><td><span class="ratio-chip" style="background:var(--color-accent);color:var(--color-on-accent)">主按钮 Aa</span></td><td class="mono">≥4.5:1</td><td class="pass">AA ✓ 六套均校验</td></tr>
+    <tr><td>#fff / danger-fill</td><td><span class="ratio-chip" style="background:#CC4139;color:#fff">危险按钮 Aa</span></td><td class="mono">≈4.8:1</td><td class="pass">AA ✓</td></tr>
+  </table>
+  <div class="spec"><span>text-tertiary 禁止用于承载必读信息</span><span>品红 #E20074 为 4.7:1 恰过线（其链接色已加深为 #C40064）；曜石 Light ≈15:1</span><span>Dark 模式各组合同样通过 AA 校验</span></div></div>
+
+  <div class="grid2" style="margin-top:var(--sp-4)">
+    <div class="card">
+      <div class="t-t3" style="margin-bottom:var(--sp-2)">键盘焦点可见性</div>
+      <div class="canvas"><button class="btn btn-sec">按 Tab</button><button class="btn btn-sec">依次聚焦</button><input class="input" placeholder="输入框同样有焦点环" style="width:180px"></div>
+      <div class="spec"><span>焦点环: 3px --color-accent-ring + 1px accent 描边</span><span>仅 :focus-visible 触发，鼠标点击不显示</span><span>Tab 顺序 = 视觉阅读顺序</span></div>
+    </div>
+    <div class="card">
+      <div class="t-t3" style="margin-bottom:var(--sp-2)">最小可点击区域</div>
+      <div class="canvas" style="gap:var(--sp-6)">
+        <div class="stack" style="align-items:center"><span class="hit"><button class="btn btn-ico" aria-label="示例"><svg class="ic"><use href="#i-x"/></svg></button></span><span class="t-cap mono sec3">28×28 ✓</span></div>
+        <p class="t-co sec2" style="max-width:260px">图形可小至 16px，但命中区域不得小于 <b>28×28</b>（鼠标）/ <b>44×44</b>（触控板手势目标建议）。虚线即不可见的扩展命中区。</p>
+      </div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:var(--sp-4)">
+    <div class="t-t3" style="margin-bottom:var(--sp-2)">其他约定</div>
+    <p class="t-body sec2">状态从不只靠颜色传达——始终伴随图标或文字（如"已拦截"标签同时具备色彩与文案）；全站尊重 <span class="k">prefers-reduced-motion</span>，命中时所有动效压缩至 0.01ms；模态打开时焦点移入并循环，Esc 恒可关闭；所有图标按钮提供 aria-label；长任务进度对屏幕阅读器以 aria-live 通告。</p>
+  </div>
+</section>
+
+<footer>
+  <span>Zerox Agent Design System v1.2 · 2026</span>
+  <span class="mono">用本系统构建本文档 · Tokens ready to ship</span>
+</footer>
+
+</div></main>
+
+<div id="toasts" aria-live="polite"></div>
+
+<!-- 模态 -->
+<div class="modal-bd" id="modalBd">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="mTitle">
+    <div class="modal-h"><svg class="ic ic-20" style="color:var(--color-danger)"><use href="#i-warn"/></svg><span class="t-t3" id="mTitle">删除会话"重构 auth 模块"？</span></div>
+    <div class="modal-b">该会话包含 23 条消息与 4 个工作区快照。删除后无法恢复。</div>
+    <div class="modal-f"><button class="btn btn-sec" id="mCancel">取消</button><button class="btn btn-dng" id="mConfirm">删除</button></div>
+  </div>
+</div>
+
+<script>
+const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
+const html=document.documentElement;
+
+/* 主题切换 */
+$('#themeSwitch').addEventListener('change',e=>{html.dataset.theme=e.target.checked?'dark':'light';});
+
+/* Accent 方案切换 */
+function syncAccent(){const a=html.dataset.accent;
+  $$('.dot-btn.js-accent').forEach(b=>b.classList.toggle('on',b.dataset.accent===a));
+  $$('.scheme').forEach(c=>c.classList.toggle('cur',c.dataset.scheme===a));
+  $$('.scheme .js-accent').forEach(b=>{const on=b.dataset.accent===a;b.textContent=on?'✓ 使用中':'应用此方案';});}
+$$('.js-accent').forEach(b=>b.addEventListener('click',()=>{html.dataset.accent=b.dataset.accent;syncAccent();}));
+syncAccent();
+
+/* 导航 scroll-spy */
+const links=$$('[data-nav]');
+const io=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){links.forEach(l=>l.classList.toggle('on',l.dataset.nav===e.target.id));}})},{rootMargin:'-20% 0px -70% 0px'});
+$$('.sec').forEach(s=>io.observe(s));
+
+/* 分段控件 */
+$$('[data-seg]').forEach(seg=>{const bs=[...seg.querySelectorAll('button')];
+  bs.forEach((b,i)=>b.addEventListener('click',()=>{seg.style.setProperty('--i',i);bs.forEach((x,j)=>x.setAttribute('aria-selected',j===i));}));});
+
+/* Tabs */
+$$('[data-tabs]').forEach(w=>{const ts=[...w.querySelectorAll('[role=tab]')],ps=[...w.querySelectorAll('[role=tabpanel]')];
+  ts.forEach((t,i)=>t.addEventListener('click',()=>{ts.forEach((x,j)=>x.classList.toggle('on',i===j));ps.forEach((p,j)=>p.hidden=i!==j);}));});
+
+/* Select */
+const sel=$('#demoSelect');
+sel.querySelector('.select-trigger').addEventListener('click',e=>{e.stopPropagation();sel.classList.toggle('open');});
+sel.querySelectorAll('.select-menu [role=option]').forEach(o=>o.addEventListener('click',()=>{
+  sel.querySelectorAll('[role=option]').forEach(x=>x.classList.remove('on'));o.classList.add('on');
+  $('#selLabel').textContent=o.textContent.trim();sel.classList.remove('open');}));
+document.addEventListener('click',()=>sel.classList.remove('open'));
+
+/* Slider */
+const sl=$('#demoSlider');
+const upSl=()=>{sl.style.setProperty('--p',sl.value+'%');$('#sliderVal').textContent=(sl.value/100).toFixed(2);};
+sl.addEventListener('input',upSl);upSl();
+
+/* Toast */
+const T={success:['i-check-c','已完成','操作成功执行','--color-success'],info:['i-info','提示','模型已切换为 gpt-5','--color-info'],warning:['i-warn','需要确认','命令将修改工作区文件','--color-warning'],error:['i-x','执行失败','沙盒拒绝了该网络请求','--color-danger']};
+function toast(type,msgOverride){const[ic,tt,ms,cv]=T[type]||T.info;const el=document.createElement('div');el.className='toast';
+  el.innerHTML=`<svg class="ic ic-20 tic" style="color:var(${cv})"><use href="#${ic}"/></svg><div style="flex:1"><b>${tt}</b><div class="tmsg">${msgOverride||ms}</div></div><button class="btn btn-ico sm" aria-label="关闭"><svg class="ic" style="width:12px;height:12px"><use href="#i-x"/></svg></button>`;
+  el.querySelector('button').onclick=()=>kill();$('#toasts').appendChild(el);
+  const kill=()=>{el.classList.add('out');setTimeout(()=>el.remove(),160)};setTimeout(kill,3200);}
+$$('[data-toast]').forEach(b=>b.addEventListener('click',()=>toast(b.dataset.toast)));
+
+/* Token 点击复制 */
+document.addEventListener('click',e=>{const k=e.target.closest('.k');if(!k)return;
+  const txt=k.dataset.copy||k.textContent.trim();
+  const done=()=>toast('success',`已复制 ${txt}`);
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(txt).then(done).catch(done);}else done();});
+
+/* Modal */
+const bd=$('#modalBd');
+$('#openModal').addEventListener('click',()=>{bd.classList.add('open');$('#mCancel').focus();});
+const closeM=()=>bd.classList.remove('open');
+$('#mCancel').addEventListener('click',closeM);
+$('#mConfirm').addEventListener('click',()=>{closeM();toast('success','会话已删除');});
+bd.addEventListener('click',e=>{if(e.target===bd)closeM();});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeM();sel.classList.remove('open');}});
+
+/* 动效演示 */
+$('#playEase').addEventListener('click',()=>{const l=$('#easeLanes');l.classList.remove('run');void l.offsetWidth;l.classList.add('run');});
+$('#replayEnter').addEventListener('click',()=>{const c=$('#enterCard');c.classList.remove('in');void c.offsetWidth;c.classList.add('in');});
+
+/* 拖拽演示 */
+const chip=$('#dragChip'),zone=$('#dragZone');let sx,sy,ox,oy,drag=false;
+chip.addEventListener('pointerdown',e=>{drag=true;chip.setPointerCapture(e.pointerId);chip.classList.add('dragging');
+  sx=e.clientX;sy=e.clientY;ox=chip.offsetLeft;oy=chip.offsetTop;});
+chip.addEventListener('pointermove',e=>{if(!drag)return;
+  const zr=zone.getBoundingClientRect(),cr=chip.getBoundingClientRect();
+  let nx=Math.min(Math.max(ox+e.clientX-sx,4),zr.width-cr.width-4);
+  let ny=Math.min(Math.max(oy+e.clientY-sy,4),zr.height-cr.height-4);
+  chip.style.left=nx+'px';chip.style.top=ny+'px';});
+chip.addEventListener('pointerup',()=>{drag=false;chip.classList.remove('dragging');});
+</script>
+</body>
+</html>

@@ -14,6 +14,8 @@
   padding: 0 var(--sidebar-x-padding) var(--sidebar-bottom-padding);
   border-right: 1px solid var(--border-default);
   background: var(--glass-sidebar);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
   overscroll-behavior: contain;
   overflow-y: auto;
   scrollbar-gutter: stable;
@@ -29,6 +31,8 @@
   margin-inline: calc(var(--sidebar-x-padding) * -1);
   background: var(--glass-sidebar);
   box-shadow: 0 8px 0 var(--glass-sidebar);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
   -webkit-app-region: drag;
 }
 
@@ -107,6 +111,10 @@
   background: var(--bg-accent-hover);
 }
 
+.new-chat-button:active {
+  background: var(--color-action-primary-pressed);
+}
+
 .primary-nav {
   display: grid;
   gap: 3px;
@@ -131,10 +139,12 @@
 
 .nav-item:hover { background: var(--nav-item-bg-hover); }
 
+.nav-item:active { transform: translateY(1px); }
+
 .nav-item.is-active {
-  color: var(--nav-item-text-active);
-  background: var(--nav-item-bg-active);
-  box-shadow: none;
+  color: var(--color-on-accent);
+  background: var(--color-action-primary);
+  box-shadow: var(--shadow-xs);
 }
 
 .material-nav-icon {
@@ -148,8 +158,8 @@
 }
 
 .nav-item.is-active .material-nav-icon {
-  color: var(--nav-icon-active-text);
-  background: var(--nav-icon-active-bg);
+  color: currentColor;
+  background: rgb(255 255 255 / 0.14);
 }
 
 .material-nav-icon svg {
@@ -210,6 +220,10 @@
   color: var(--text-primary);
   background: var(--bg-surface-raised);
   box-shadow: var(--shadow-xs);
+}
+
+.sidebar-session-item.is-active {
+  border-color: var(--border-accent);
 }
 
 .sidebar-section strong,

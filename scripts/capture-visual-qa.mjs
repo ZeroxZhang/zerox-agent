@@ -8,7 +8,7 @@ const outputDir = path.join(
   projectRoot,
   "docs",
   "design",
-  "zerox-agent-3-2-2-qa",
+  "zerox-agent-3-4-0-qa",
 );
 
 const views = [

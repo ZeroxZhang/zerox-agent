@@ -14,7 +14,7 @@ describe("README", () => {
     expect(readme).toContain("npm run pack:mac");
     expect(readme).toContain("npm run dist:mac");
     expect(readme).toContain("xattr -dr com.apple.quarantine");
-    expect(readme).toContain("Zerox-Agent-3.3.0-arm64.dmg");
+    expect(readme).toContain("Zerox-Agent-3.4.0-arm64.dmg");
     expect(readme).toContain("npm run harness:check");
     expect(readme).toContain("npm run harness:score");
     expect(readme).toContain("npm run episode:export");
@@ -51,10 +51,13 @@ describe("README", () => {
     expect(positioning).toContain("Zerox does not run unbounded autonomous loops");
     expect(readme).toContain("session-native Goal Mode");
     expect(readme).toContain("Chat Session mode");
-    expect(readme).toContain("v3.3.0");
+    expect(readme).toContain("v3.4.0");
     expect(readme).toContain("v3.2.2 interface system");
     expect(readme).toContain("docs/design/zerox-agent-3-2-2-design-system-spec.md");
     expect(readme).toContain("Soft Blue Desktop Control Surface");
+    expect(readme).toContain("docs/design/guidelines_0708.html");
+    expect(readme).toContain("B · Obsidian");
+    expect(readme).toContain("B · 曜石 Obsidian");
     expect(readme).toContain(
       "The primary app flow is Chat, Runs, Tasks, and Settings",
     );

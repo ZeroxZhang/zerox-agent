@@ -83,6 +83,12 @@
   background: var(--bg-surface-raised);
   font-size: var(--text-sm);
   font-weight: var(--font-medium);
+  box-shadow: var(--shadow-xs);
+}
+
+.topbar-chat-action:hover {
+  border-color: var(--border-strong);
+  background: var(--color-surface-hover);
 }
 
 .eyebrow, .kicker {
@@ -178,15 +184,25 @@
 }
 
 .settings-section-nav button.is-active {
-  color: var(--text-accent);
-  background: var(--color-surface-primary);
-  border-color: var(--border-accent);
-  box-shadow: inset 3px 0 0 var(--brand-accent);
+  color: var(--color-on-accent);
+  background: var(--color-action-primary);
+  border-color: var(--color-action-primary);
+  box-shadow: var(--shadow-xs);
+}
+
+.settings-section-nav button.is-active .settings-section-item-main strong {
+  color: var(--color-on-accent);
+}
+
+.settings-section-nav button.is-active .settings-section-item-main span,
+.settings-section-nav button.is-active .settings-section-intent,
+.settings-section-nav button.is-active .settings-section-priority {
+  color: color-mix(in srgb, var(--color-on-accent) 74%, transparent);
 }
 
 .settings-section-nav button:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: var(--shadow-focus);
 }
 
 .settings-section-item-main {
@@ -370,6 +386,11 @@
   border: 1px solid var(--bg-accent);
   color: var(--text-on-accent);
   background: var(--bg-accent);
+}
+
+.app-confirm-primary:hover {
+  border-color: var(--bg-accent-hover);
+  background: var(--bg-accent-hover);
 }
 
 .app-confirm-dialog.is-danger .app-confirm-primary {

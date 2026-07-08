@@ -204,7 +204,7 @@
   border: 1px solid var(--border-default);
   border-radius: var(--radius-full);
   color: var(--text-secondary);
-  background: var(--color-surface-primary);
+  background: var(--secondary-page-surface);
   font-size: var(--text-xs);
   font-weight: var(--font-medium);
 }
@@ -231,6 +231,10 @@
 .home-suggestions button:hover {
   border-color: var(--border-strong);
   background: var(--color-surface-hover);
+}
+
+.home-suggestions button:active {
+  transform: translateY(1px);
 }
 
 .message-list {
@@ -266,7 +270,8 @@
   width: auto;
   max-width: min(680px, 78%);
   padding: 12px 16px;
-  border-radius: 16px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
   color: var(--chat-user-bubble-text);
   background: var(--chat-user-bubble-bg);
 }

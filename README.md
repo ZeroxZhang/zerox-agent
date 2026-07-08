@@ -33,7 +33,7 @@
 
 ## Overview
 
-**Zerox Agent** is a local-first desktop control plane for personal AI agents (current release: v3.3.0). The name comes from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
+**Zerox Agent** is a local-first desktop control plane for personal AI agents (current release: v3.4.0). The name comes from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
 
 It is not a chat wrapper or a generic hosted agent surface. It runs entirely on your machine: it configures OpenAI-compatible / Anthropic / Gemini models, scans local `SKILL.md` skill files, executes recoverable agent runs, invokes permission-controlled tools, tracks parent/child multi-agent sessions, persists experiential knowledge into local long-term memory, and keeps learning user-reviewed before it changes future behavior.
 
@@ -42,6 +42,8 @@ The product boundary is documented in [`docs/product/zerox-positioning.md`](docs
 The v3.2.2 interface system is documented in [`docs/design/zerox-agent-3-2-2-design-system-spec.md`](docs/design/zerox-agent-3-2-2-design-system-spec.md): the app keeps the existing local-first workflows while moving the visible design language to a Figma-inspired Soft Blue Desktop Control Surface.
 
 The v3.3.0 release is a macOS UI polish pass documented in [`UI_AUDIT.md`](UI_AUDIT.md) and accepted in [`UI_ACCEPTANCE.md`](UI_ACCEPTANCE.md). It tightens modal safety contracts, macOS menus, sidebar/settings density, typography, compact layouts, and release-ready visual QA without changing product behavior.
+
+The v3.4.0 release uses [`docs/design/guidelines_0708.html`](docs/design/guidelines_0708.html) as the active frontend specification and selects **B · Obsidian** as the app theme. It moves the renderer from the older Soft Blue look to a neutral grayscale macOS control surface with a restrained near-black accent, dark-mode accent inversion, tighter focus/press feedback, and no product behavior changes.
 
 ### Design Principles
 
@@ -512,7 +514,7 @@ npm run dist:mac      # .dmg + .zip → release/          (distribution)
 Current local builds are unsigned and not notarized. Each release passes an independent packaged-app acceptance gate (a computer-use run against the local macOS package) before handoff. After downloading a `.dmg` from GitHub Releases, macOS Gatekeeper may show "Zerox Agent is damaged and can't be opened." The image is usually valid; remove the quarantine attribute before opening:
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-3.3.0-arm64.dmg"
+xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-3.4.0-arm64.dmg"
 # or, if already dragged into Applications:
 xattr -dr com.apple.quarantine "/Applications/Zerox Agent.app"
 ```
@@ -574,7 +576,7 @@ Planned:
 
 产品边界写在 [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md)。运行时、workspace、学习机制和目标模式分别见 [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md)、[`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md)、[`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md) 与 [`docs/architecture/agent-goal-mode.md`](docs/architecture/agent-goal-mode.md)。
 
-当前版本是 **v3.3.0**。本次发布是正式发布前的 macOS 界面与交互优化，审计记录见 [`UI_AUDIT.md`](UI_AUDIT.md)，验收记录见 [`UI_ACCEPTANCE.md`](UI_ACCEPTANCE.md)；主要收敛工具授权、破坏性确认、目标详情、macOS 菜单、侧边栏、设置页密度、排版和紧凑布局，不改变业务逻辑。
+当前版本是 **v3.4.0**。本次发布以 [`docs/design/guidelines_0708.html`](docs/design/guidelines_0708.html) 为前端规范，并选择 **B · 曜石 Obsidian** 作为主色方案；界面从旧的 Soft Blue 迁移到中性灰阶 macOS 控制面、近黑主操作色、暗色模式反转主色、明确焦点与按压反馈，不改变产品核心功能。
 
 ### 设计原则
 

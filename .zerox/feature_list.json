@@ -2477,6 +2477,58 @@
         "BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v3.3.0' \"release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent\"",
         "git diff --check"
       ]
+    },
+    {
+      "id": "P37-v3.4.0-obsidian-frontend-interaction",
+      "priority": 67,
+      "status": "done",
+      "title": "v3.4.0 Obsidian frontend and interaction system",
+      "files": [
+        "docs/design/guidelines_0708.html",
+        "docs/design/zerox-agent-3-4-0-obsidian-plan.md",
+        "src/renderer/styles/tokens.css",
+        "src/renderer/styles/base.css",
+        "src/renderer/styles/app-shell.css",
+        "src/renderer/styles/sidebar.css",
+        "src/renderer/styles/chat.css",
+        "src/renderer/styles/composer.css",
+        "src/renderer/styles/cards.css",
+        "src/renderer/styles/responsive.css",
+        "src/renderer/materialDesign.test.ts",
+        "src/shared/packageScripts.test.ts",
+        "src/shared/readme.test.ts",
+        "scripts/capture-visual-qa.mjs",
+        "docs/design/zerox-agent-3-4-0-qa/",
+        "README.md",
+        "package.json",
+        "package-lock.json",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md"
+      ],
+      "definitionOfDone": [
+        "0708 design guideline is treated as the source of truth and B · 曜石 Obsidian is the selected accent system",
+        "Renderer visual tokens implement the Obsidian grayscale, neutral surface, accent inversion, focus, shadow, radius, typography, and motion system",
+        "Shell, sidebar, Chat, composer, secondary settings/task surfaces, code blocks, tables, cards, menus, and status elements use the Obsidian tokens without changing product behavior",
+        "Interactive states cover hover, active, focus-visible, disabled, loading/empty/error/status surfaces, and reduced-motion behavior",
+        "Visual QA screenshots and capture metrics are regenerated for Chat, Runs, Settings, Tasks, Tools, desktop, and narrow states",
+        "package metadata reports version 3.4.0 in package.json and package-lock.json",
+        "README current release and download example reflect v3.4.0",
+        "macOS DMG, ZIP, blockmaps, and latest-mac.yml artifacts are regenerated for v3.4.0",
+        "release branch/tag are pushed after successful verification and packaging"
+      ],
+      "verification": [
+        "./init.sh",
+        "npm test -- src/renderer/materialDesign.test.ts src/shared/packageScripts.test.ts src/shared/readme.test.ts",
+        "npm test",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "ELECTRON_DISABLE_SECURITY_WARNINGS=1 ./node_modules/.bin/electron scripts/capture-visual-qa.mjs",
+        "npm run dist:mac",
+        "BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v3.4.0' \"release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent\"",
+        "git diff --check"
+      ]
     }
   ]
 }
