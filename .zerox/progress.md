@@ -1,5 +1,83 @@
 # Zerox Harness Progress
 
+## 2026-07-10 - v3.4.0 Goal Mode Runtime State and Workspace Repair
+
+- Request:
+  - User reported Goal Mode still failed on the same code-research task: the confirmed target folder was repeatedly treated as missing, pause/continue produced a second confirmation gate, clicking confirm had no visible effect, and the UI later said the goal was canceled while the agent still appeared to run.
+  - User explicitly asked for a bottom-to-front inspection using the task execution logs and a full fix.
+- Log evidence inspected:
+  - Current app data under `~/Library/Application Support/Zerox Agent/config`.
+  - `goal_d946f829-f5e9-498a-b676-d145b11417a9` ledger: created from confirmed draft at `2026-07-09T15:45:48Z`, paused at `15:49:33Z`, review resolved at `15:50:01Z`, then stale run wrote `goal_stopped canceled` at `15:51:04Z`.
+  - `goal_run_59b63dbf-fba4-4214-b8dc-d79b052ab732` trajectory: run context used `/Users/zerox/Library/Application Support/Zerox Agent/workspaces/default` as workspace root and added truncated `/Volumes/Out/codex_projects/building` as extra roots; the real `/Volumes/Out/codex_projects/building agent` workspace was lost.
+  - Trajectory also showed avoidable `web_search` and fallback file reads after the incorrect workspace/root caused the project to look empty or inaccessible.
+- Root causes:
+  - `GoalDraft` did not carry `workspaceId`; confirming a draft created a `Goal` without the selected workspace, so Goal Mode fell back to the default workspace.
+  - Quoted absolute paths containing spaces were truncated by goal root extraction, turning `building agent` into `building`.
+  - `pause` reused `waiting_for_review` without abort-safe continuation semantics; the old controller run could keep running and later write `canceled`.
+  - `resolveReview` awaited the full run loop and could return the stale active run, making the Confirm/Continue button appear unresponsive.
+  - Pausing while a milestone was `running` left no ready milestone for clean continuation.
+- Changed files:
+  - `src/shared/goalTranslation.ts`
+  - `src/main/agentGoalTranslator.ts`
+  - `src/main/goalDraftService.ts`
+  - `src/main/goalChatService.ts`
+  - `src/main/agentGoalController.ts`
+  - `src/main/chatService.ts`
+  - `src/main/container.ts`
+  - `src/main/goalOutputRoots.ts`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/components/GoalStatusStrip.tsx`
+  - `src/renderer/components/GoalDetailDrawer.tsx`
+  - `src/renderer/styles/chat.css`
+  - `src/renderer/styles/legacy.css`
+  - `src/main/goalChatService.test.ts`
+  - `src/main/agentGoalController.test.ts`
+  - `src/main/goalOutputRoots.test.ts`
+  - `src/main/container.test.ts`
+  - `src/shared/packageScripts.test.ts`
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+- Implementation evidence:
+  - Added P39 `v3.4.0 Goal Mode runtime state and workspace repair` to `.zerox/feature_list.json` and marked it `done`.
+  - Goal draft creation now preserves `workspaceId`; draft confirmation backfills the session workspace when needed; created goals retain the intended workspace for runtime context resolution.
+  - Goal output root extraction now preserves quoted absolute paths containing spaces.
+  - Manual pause now aborts the active background run and resets `running` milestones to `ready`.
+  - Controller active run tracking now distinguishes aborted active runs, allows approved continuations to start fresh, and prevents stale aborted runs from writing canceled/replanned terminal state over newer state.
+  - `resolveReview` now records approval, saves `executing`, returns immediately, and resumes the run loop in the background.
+  - The Goal Status actions now use clearer `继续 / 调整 / 终止` labels and Obsidian primary/danger styling; approve immediately syncs session goal state and task activity.
+- GREEN / verification evidence:
+  - `npm test -- --run src/main/goalChatService.test.ts src/main/agentGoalController.test.ts src/main/goalOutputRoots.test.ts src/main/container.test.ts src/main/goalRuntimeEngine.test.ts` -> 5 files / 71 tests passed.
+  - `npm test -- --run src/main/chatService.test.ts src/shared/packageScripts.test.ts src/shared/agentGoal.test.ts src/shared/goalTranslation.test.ts src/shared/agentWorkspace.test.ts src/shared/toolPermissions.test.ts` -> 6 files / 129 tests passed.
+  - `npm test` -> 188 files / 1325 tests passed.
+  - `npm run build` -> passed; existing Vite chunk-size warning remains.
+  - `npm run verify` -> passed: 188 files / 1325 tests, production build, Agent evals 26/26, memory evals 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered the agent chat UI. Existing better-sqlite3 ABI mismatch warning fell back to JSON storage.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+- Visual QA evidence:
+  - `ELECTRON_DISABLE_SECURITY_WARNINGS=1 ./node_modules/.bin/electron scripts/capture-visual-qa.mjs` -> passed.
+  - Captured Chat desktop `1440x900`, Runs desktop `1440x900`, Settings desktop `1440x900`, Tasks desktop `1440x900`, Tools Settings desktop `1440x900`, Chat narrow `390x844`, and Settings narrow `390x844`.
+  - `docs/design/zerox-agent-3-4-0-qa/capture-metrics.json` shows all 7 views with `hasPageHorizontalOverflow=false` and `clippedElementSamples=[]`.
+  - Metrics confirm the selected Obsidian primary action color `#26262a`, neutral app background `#f3f3f3`, and primary surface `#fff`.
+- Packaging evidence:
+  - `npm run dist:mac` -> passed.
+  - Generated distribution assets:
+    - `release/Zerox Agent-3.4.0-arm64.dmg`
+    - `release/Zerox Agent-3.4.0-arm64.dmg.blockmap`
+    - `release/Zerox Agent-3.4.0-arm64-mac.zip`
+    - `release/Zerox Agent-3.4.0-arm64-mac.zip.blockmap`
+    - `release/latest-mac.yml`
+  - `plutil -p "release/mac-arm64/Zerox Agent.app/Contents/Info.plist" | rg "CFBundleShortVersionString|CFBundleVersion|CFBundleName"` -> confirmed `Zerox Agent`, `3.4.0`, `3.4.0`.
+  - `BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v3.4.0' "release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent"` -> passed.
+  - SHA256:
+    - DMG: `74528f54cefd460977f589b12a48234435bb49b887bbd5857ac62f59fc51a692`
+    - DMG blockmap: `2019df2bb83f089e97f316df9168970f84b6f6539d057efb7e60009a6ee356b9`
+    - ZIP: `12ef427dadfe414d4cea3e6e49758252e0fda9e273790aa4ed345bc996e6407c`
+    - ZIP blockmap: `60ad1d265823f042f9829a94a18c3ad47b1460522a1a402eea1a17fef08cbbfc`
+    - latest-mac.yml: `9f22e24e1f531b2cac3ac0921736f289e38496c1ebe0b1ba8b5f00bf4c6e4cc0`
+- Final status:
+  - P39 `v3.4.0 Goal Mode runtime state and workspace repair` marked `done`.
+
 ## 2026-07-07 - v3.2.3 Home Background and Prompt Polish Release
 
 - Request:

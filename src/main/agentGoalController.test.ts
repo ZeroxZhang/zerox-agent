@@ -323,8 +323,10 @@ describe("agent goal controller", () => {
     const afterApproval = await controller.resolveReview("goal_1", {
       kind: "approve_continue",
     });
+    expect(afterApproval.status).toBe("executing");
 
-    expect(afterApproval.status).toBe("waiting_for_review");
+    const resumed = await waitForGoalStatus("waiting_for_review");
+    expect(resumed.status).toBe("waiting_for_review");
     expect(runtime.runMilestoneIds).toEqual(["milestone_1", "milestone_2"]);
     expect(trajectoryEvents.map((event) => event.type)).toContain(
       "goal_review_requested",
@@ -358,10 +360,68 @@ describe("agent goal controller", () => {
     const afterApproval = await controller.resolveReview("goal_1", {
       kind: "approve_continue",
     });
+    expect(afterApproval.status).toBe("executing");
 
-    expect(afterApproval.status).toBe("achieved");
-    expect(afterApproval.stopReason).toBe("goal_accepted");
+    const achieved = await waitForGoalStatus("achieved");
+    expect(achieved.status).toBe("achieved");
+    expect(achieved.stopReason).toBe("goal_accepted");
     expect(runtime.runMilestoneIds).toEqual(["milestone_1", "milestone_2"]);
+  });
+
+  it("replaces aborted active runs when a paused goal is approved", async () => {
+    await store.save(
+      createGoal([milestone("milestone_1")], {
+        status: "executing",
+      }),
+    );
+    const abortController = new AbortController();
+    const runtime = createDeferredRuntime();
+    const controller = createController({
+      runtime,
+      acceptance: createAcceptance({
+        milestoneAccepted: [true],
+        goalAccepted: [true],
+      }),
+    });
+
+    const staleRun = controller.resume("goal_1", {
+      signal: abortController.signal,
+    });
+    await waitFor(() => runtime.calls.length === 1);
+
+    const paused = await store.get("goal_1");
+    await store.save({
+      ...paused!,
+      status: "waiting_for_review",
+      milestones: paused!.milestones.map((item) =>
+        item.state === "running" ? { ...item, state: "ready" } : item,
+      ),
+    });
+    abortController.abort();
+
+    const approved = await controller.resolveReview("goal_1", {
+      kind: "approve_continue",
+    });
+    expect(approved.status).toBe("executing");
+
+    await waitFor(() => runtime.calls.length === 2);
+
+    runtime.calls[0]!.resolve({
+      runId: "run_stale",
+      toolCallCount: 1,
+      status: "canceled",
+    });
+    runtime.calls[1]!.resolve({
+      runId: "run_fresh",
+      toolCallCount: 1,
+      status: "succeeded",
+    });
+    await staleRun;
+    const finalGoal = await waitForGoalStatus("achieved");
+    const ledger = await store.readLedger("goal_1");
+
+    expect(finalGoal.status).toBe("achieved");
+    expect(ledger.map((event) => event.summary)).not.toContain("Goal canceled.");
   });
 
   it("resumes without re-dispatching accepted milestones", async () => {
@@ -454,6 +514,26 @@ describe("agent goal controller", () => {
       },
       now: () => "2026-06-12T00:00:00.000Z",
     });
+  }
+
+  async function waitForGoalStatus(status: Goal["status"]): Promise<Goal> {
+    return waitFor(async () => {
+      const goal = await store.get("goal_1");
+      return goal?.status === status ? goal : null;
+    });
+  }
+
+  async function waitFor<T>(
+    predicate: () => T | null | false | Promise<T | null | false>,
+  ): Promise<T> {
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const value = await predicate();
+      if (value) {
+        return value;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    throw new Error("Timed out waiting for goal controller test condition.");
   }
 });
 
@@ -562,6 +642,26 @@ function createRuntime(): GoalRuntimeEngine & { runMilestoneIds: string[] } {
         wallClockMs: 100,
         tokens: 10,
       };
+    },
+  };
+}
+
+function createDeferredRuntime(): GoalRuntimeEngine & {
+  calls: Array<{
+    milestoneId: string;
+    resolve: (result: Awaited<ReturnType<GoalRuntimeEngine["runMilestone"]>>) => void;
+  }>;
+} {
+  const calls: Array<{
+    milestoneId: string;
+    resolve: (result: Awaited<ReturnType<GoalRuntimeEngine["runMilestone"]>>) => void;
+  }> = [];
+  return {
+    calls,
+    async runMilestone(_goal, milestone) {
+      return new Promise((resolve) => {
+        calls.push({ milestoneId: milestone.id, resolve });
+      });
     },
   };
 }

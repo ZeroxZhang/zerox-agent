@@ -23,6 +23,7 @@ type ParsedGoalDraft = {
 export type AgentGoalTranslator = {
   translate(input: {
     sessionId: string;
+    workspaceId?: string;
     originMessageId: string | null;
     message: string;
     selectedSkill?: GoalSelectedSkill;
@@ -63,6 +64,7 @@ export function createAgentGoalTranslator(options: {
       return {
         id: createId(),
         sessionId: input.sessionId,
+        ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
         ...(input.originMessageId ? { originMessageId: input.originMessageId } : {}),
         sourceMessage,
         normalizedDescription,

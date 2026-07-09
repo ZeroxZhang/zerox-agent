@@ -482,7 +482,7 @@ describe("app container goal drafts", () => {
     const result = await container.goalChatService().resolveReview(goal.id, {
       kind: "approve_continue",
     });
-    expect(result.status).toBe("achieved");
+    expect(result.status).toBe("executing");
     await progress;
 
     const loadedSession = await container.chatSessionStore().get(session.session.id);

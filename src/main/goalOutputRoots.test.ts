@@ -21,6 +21,16 @@ describe("goal output roots", () => {
     ]);
   });
 
+  it("keeps quoted absolute paths that contain spaces intact", () => {
+    const goal = createGoal(
+      "项目路径：{'/Volumes/Out/codex_projects/building agent'}，报告写入 docs/tech_report.md",
+    );
+
+    expect(extractGoalOutputRoots(goal)).toEqual([
+      "/Volumes/Out/codex_projects/building agent",
+    ]);
+  });
+
   it("canonicalizes home Desktop output roots from goal text", () => {
     const goal = createGoal("请把 Chrome 书签清单保存到 ~/Desktop/bookmark_list.md");
 

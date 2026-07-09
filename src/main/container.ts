@@ -1747,7 +1747,14 @@ export function createAppContainer(options: {
         return { ok: false, message: "目标草案不存在或已处理。" };
       }
 
-      const createdGoal = await goalChatService().createFromDraft({ draft });
+      const draftSession = await chatSessionStore().get(draft.sessionId);
+      const draftWithWorkspace =
+        !draft.workspaceId && draftSession?.workspaceId
+          ? { ...draft, workspaceId: draftSession.workspaceId }
+          : draft;
+      const createdGoal = await goalChatService().createFromDraft({
+        draft: draftWithWorkspace,
+      });
       const activeGoal = await goalChatService().resume(createdGoal.id);
       await chatSessionStore().attachGoal(draft.sessionId, activeGoal);
       await chatSessionStore().appendMessage({

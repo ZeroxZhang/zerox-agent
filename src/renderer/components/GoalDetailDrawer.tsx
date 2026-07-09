@@ -99,7 +99,7 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
           props.onResolveReview ? (
             <section className="goal-review-gate">
               <span>审核门</span>
-              <p>里程碑已完成，需要你基于运行证据决定是否继续。</p>
+              <p>目标已暂停或到达审核门，需要你基于当前证据决定是否继续。</p>
               {props.goal ? renderEvidenceList(props.goal) : null}
               <div className="goal-review-actions">
                 <button
@@ -107,13 +107,13 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
                   className="goal-primary-action"
                   onClick={() => props.onResolveReview!("approve")}
                 >
-                  通过并继续
+                  继续执行
                 </button>
                 <button
                   type="button"
                   onClick={() => props.onResolveReview!("reject")}
                 >
-                  拒绝并重新规划
+                  填写调整意见
                 </button>
                 <button
                   type="button"

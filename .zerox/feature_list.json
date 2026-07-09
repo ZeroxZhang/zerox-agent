@@ -2563,6 +2563,56 @@
         "ELECTRON_DISABLE_SECURITY_WARNINGS=1 ./node_modules/.bin/electron scripts/capture-visual-qa.mjs",
         "git diff --check"
       ]
+    },
+    {
+      "id": "P39-v3.4.0-goal-mode-runtime-state-repair",
+      "priority": 69,
+      "status": "done",
+      "title": "v3.4.0 Goal Mode runtime state and workspace repair",
+      "files": [
+        "src/shared/goalTranslation.ts",
+        "src/main/agentGoalTranslator.ts",
+        "src/main/goalDraftService.ts",
+        "src/main/goalChatService.ts",
+        "src/main/agentGoalController.ts",
+        "src/main/chatService.ts",
+        "src/main/container.ts",
+        "src/main/goalOutputRoots.ts",
+        "src/renderer/components/AgentChatPanel.tsx",
+        "src/renderer/components/GoalStatusStrip.tsx",
+        "src/renderer/components/GoalDetailDrawer.tsx",
+        "src/renderer/styles/chat.css",
+        "src/renderer/styles/legacy.css",
+        "src/main/goalChatService.test.ts",
+        "src/main/agentGoalController.test.ts",
+        "src/main/goalOutputRoots.test.ts",
+        "src/main/container.test.ts",
+        "src/shared/packageScripts.test.ts",
+        "docs/design/zerox-agent-3-4-0-qa/capture-metrics.json",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md"
+      ],
+      "definitionOfDone": [
+        "Goal drafts preserve the selected workspace through confirmation so Goal Mode runs in the intended project root",
+        "Quoted absolute paths with spaces are preserved when extracting goal output roots",
+        "Manual pause aborts the active background run and resets running milestones to ready for continuation",
+        "Approving a paused or review-gated goal returns immediately and resumes execution in the background",
+        "Aborted stale runs cannot overwrite an approved continuation or canceled terminal state",
+        "Goal review actions use clear Continue, Adjust, and Terminate labels with Obsidian action styling"
+      ],
+      "verification": [
+        "npm test -- --run src/main/goalChatService.test.ts src/main/agentGoalController.test.ts src/main/goalOutputRoots.test.ts src/main/container.test.ts src/main/goalRuntimeEngine.test.ts",
+        "npm test -- --run src/main/chatService.test.ts src/shared/packageScripts.test.ts src/shared/agentGoal.test.ts src/shared/goalTranslation.test.ts src/shared/agentWorkspace.test.ts src/shared/toolPermissions.test.ts",
+        "npm test",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "ELECTRON_DISABLE_SECURITY_WARNINGS=1 ./node_modules/.bin/electron scripts/capture-visual-qa.mjs",
+        "npm run dist:mac",
+        "BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v3.4.0' \"release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent\"",
+        "git diff --check"
+      ]
     }
   ]
 }

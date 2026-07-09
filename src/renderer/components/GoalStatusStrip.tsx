@@ -67,15 +67,23 @@ function renderStatusAction(
         <>
           <button
             type="button"
+            className="goal-primary-action"
             onClick={() => props.onResolveReview!("approve")}
           >
-            通过
+            继续
           </button>
           <button
             type="button"
             onClick={() => props.onResolveReview!("reject")}
           >
-            拒绝
+            调整
+          </button>
+          <button
+            type="button"
+            className="goal-danger-action"
+            onClick={() => props.onResolveReview!("terminate")}
+          >
+            终止
           </button>
         </>
       ) : null;

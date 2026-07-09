@@ -34,6 +34,7 @@ import {
 export type GoalChatService = {
   createFromChat(input: {
     sessionId: string;
+    workspaceId?: string;
     originMessageId: string | null;
     description: string;
     selectedSkill?: SkillRecord;
@@ -190,6 +191,7 @@ export function createGoalChatService(options: {
       const goal: Goal = {
         id: goalId,
         chatSessionId: input.sessionId,
+        ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
         ...(input.originMessageId
           ? { originMessageId: input.originMessageId }
           : {}),
@@ -292,6 +294,7 @@ export function createGoalChatService(options: {
       const goal: Goal = {
         id: goalId,
         chatSessionId: input.draft.sessionId,
+        ...(input.draft.workspaceId ? { workspaceId: input.draft.workspaceId } : {}),
         ...(input.draft.originMessageId
           ? { originMessageId: input.draft.originMessageId }
           : {}),
@@ -385,6 +388,11 @@ export function createGoalChatService(options: {
         abortBackgroundGoalRun(goalId);
         assertGoalTransition(goal.status, "waiting_for_review");
         goal.status = "waiting_for_review";
+        goal.milestones = goal.milestones.map((milestone) =>
+          milestone.state === "running"
+            ? { ...milestone, state: "ready" }
+            : milestone,
+        );
         goal.updatedAt = now();
         await options.goalStore.save(goal);
         await options.goalStore.appendLedger(goal.id, {

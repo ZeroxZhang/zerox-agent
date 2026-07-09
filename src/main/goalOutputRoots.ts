@@ -9,7 +9,9 @@ import {
 } from "../shared/locationResource";
 
 const explicitAbsolutePathPattern =
-  /(?<path>~\/[^\s"'<>，。；；、,，）)]+|\/(?:Volumes|Users|tmp|var|private|opt|home|mnt|media)\/[^\s"'<>，。；；、,，）)]+)/g;
+  /(?<!["'`])(?<path>~\/[^\s"'<>，。；；、,，）)]+|\/(?:Volumes|Users|tmp|var|private|opt|home|mnt|media)\/[^\s"'<>，。；；、,，）)]+)/g;
+const explicitQuotedPathPattern =
+  /["'`](?<path>~\/[^"'`<>]+|\/(?:Volumes|Users|tmp|var|private|opt|home|mnt|media)\/[^"'`<>]+)["'`]/g;
 const explicitBareAliasPathPattern =
   /(?<![A-Za-z0-9_/.-])(?<path>(?:Desktop|Downloads|桌面|下载)\/[^\s"'<>，。；；、,，）)]+)/g;
 const englishStandaloneDestinationPattern =
@@ -132,6 +134,7 @@ function extractOutputRootsFromText(
   locationEnv: LocationResourceEnvironment,
 ): string[] {
   const explicitRoots = [
+    ...text.matchAll(explicitQuotedPathPattern),
     ...text.matchAll(explicitAbsolutePathPattern),
     ...text.matchAll(explicitBareAliasPathPattern),
   ]

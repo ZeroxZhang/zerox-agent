@@ -140,6 +140,7 @@ type ChatTurnInternalOptions = {
 type ChatGoalService = {
   createFromChat(input: {
     sessionId: string;
+    workspaceId?: string;
     originMessageId: string | null;
     description: string;
     selectedSkill?: SkillRecord;
@@ -160,6 +161,7 @@ type ChatGoalService = {
 type ChatGoalDraftService = {
   createFromChat(input: {
     sessionId: string;
+    workspaceId?: string;
     originMessageId: string | null;
     message: string;
     selectedSkill?: SkillRecord;
@@ -608,6 +610,7 @@ export function createChatService(options: {
         emitStatus,
         now: options.now,
         signal: runtimeOptions.signal,
+        workspaceId: chatRunContext?.workspaceId ?? input.workspaceId,
         selectedSkill: selectedSkillForGoal,
         selectedSkillInputValues: selectedSkillInputValuesForGoal,
       });
@@ -2528,6 +2531,7 @@ async function tryRouteGoalIntent(options: {
   emitStatus?: ReturnType<typeof createChatStatusEmitter>;
   now?: () => Date;
   signal?: AbortSignal;
+  workspaceId?: string;
   selectedSkill?: SkillRecord;
   selectedSkillInputValues?: Record<string, SkillInputValue>;
 }): Promise<{ result: SendChatMessageResult } | null> {
@@ -2570,6 +2574,7 @@ async function tryRouteGoalIntent(options: {
     if (options.goalDraftService) {
       const goalDraft = await options.goalDraftService.createFromChat({
         sessionId: options.sessionId,
+        ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
         originMessageId: options.originMessageId,
         message: options.route.description,
         ...(options.selectedSkill ? { selectedSkill: options.selectedSkill } : {}),
@@ -2614,6 +2619,7 @@ async function tryRouteGoalIntent(options: {
 
     const createdGoal = await options.goalService.createFromChat({
       sessionId: options.sessionId,
+      ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
       originMessageId: options.originMessageId,
       description: options.route.description,
       ...(options.selectedSkill ? { selectedSkill: options.selectedSkill } : {}),
@@ -2677,6 +2683,7 @@ async function tryRouteGoalIntent(options: {
     const goalToContinue = restartingTerminalGoal
       ? await options.goalService.createFromChat({
           sessionId: options.sessionId,
+          ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
           originMessageId: options.originMessageId,
           description: options.activeGoal.description,
         })

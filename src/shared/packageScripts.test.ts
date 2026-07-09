@@ -59,6 +59,9 @@ describe("package scripts", () => {
     const p38 = featureList.features.find(
       (feature) => feature.id === "P38-v3.4.0-goal-mode-obsidian-regression-fixes",
     );
+    const p39 = featureList.features.find(
+      (feature) => feature.id === "P39-v3.4.0-goal-mode-runtime-state-repair",
+    );
     const p31 = featureList.features.find(
       (feature) => feature.id === "P31-v3.1.2-window-controls-and-settings-icon",
     );
@@ -77,10 +80,22 @@ describe("package scripts", () => {
       openFeatureIds.every(
         (featureId) =>
           featureId === "P37-v3.4.0-obsidian-frontend-interaction" ||
-          featureId === "P38-v3.4.0-goal-mode-obsidian-regression-fixes",
+          featureId === "P38-v3.4.0-goal-mode-obsidian-regression-fixes" ||
+          featureId === "P39-v3.4.0-goal-mode-runtime-state-repair",
       ),
     ).toBe(true);
     expect(openFeatureIds.length).toBeLessThanOrEqual(1);
+    expect(p39?.status === "in_progress" || p39?.status === "done").toBe(true);
+    expect(p39).toEqual(
+      expect.objectContaining({
+        id: "P39-v3.4.0-goal-mode-runtime-state-repair",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("Goal drafts preserve the selected workspace"),
+          expect.stringContaining("Aborted stale runs cannot overwrite"),
+          expect.stringContaining("Goal review actions use clear Continue"),
+        ]),
+      }),
+    );
     expect(p38?.status === "in_progress" || p38?.status === "done").toBe(true);
     expect(p38).toEqual(
       expect.objectContaining({

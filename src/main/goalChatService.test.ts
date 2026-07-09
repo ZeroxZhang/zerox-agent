@@ -256,6 +256,7 @@ describe("goal chat service", () => {
 
     const summary = await service.createFromDraft({
       draft: createGoalDraft({
+        workspaceId: "workspace_project",
         selectedSkill: createSkillRecord({
           name: "onepager",
           body: "Onepager body.",
@@ -272,6 +273,7 @@ describe("goal chat service", () => {
     expect(savedGoals[0]).toMatchObject({
       id: "goal_from_draft",
       chatSessionId: "chat_1",
+      workspaceId: "workspace_project",
       originMessageId: "message_1",
       description: "发布 v3.2.0 并完成验收",
       selectedSkill: {
@@ -573,10 +575,15 @@ describe("goal chat service", () => {
   it("pauses an active chat goal at a review gate", async () => {
     const savedGoals: Goal[] = [];
     const ledgerEvents: ProgressLedgerEvent[] = [];
+    const runningGoal = createGoal({ status: "executing" });
+    runningGoal.milestones[0] = {
+      ...runningGoal.milestones[0]!,
+      state: "running",
+    };
     const service = createGoalChatService({
       controller: createController(),
       goalStore: createGoalStore({
-        existingGoal: createGoal({ status: "executing" }),
+        existingGoal: runningGoal,
         savedGoals,
         ledgerEvents,
       }),
@@ -595,6 +602,7 @@ describe("goal chat service", () => {
     expect(savedGoals.at(-1)).toMatchObject({
       id: "goal_release",
       status: "waiting_for_review",
+      milestones: [{ state: "ready" }],
     });
     expect(ledgerEvents.at(-1)).toEqual({
       at: "2026-06-12T08:00:00.000Z",
@@ -624,6 +632,30 @@ describe("goal chat service", () => {
     expect(startedSignal?.aborted).toBe(false);
 
     await service.cancel("goal_release");
+    expect(startedSignal?.aborted).toBe(true);
+  });
+
+  it("aborts a background controller run when pausing the goal", async () => {
+    let startedSignal: AbortSignal | undefined;
+    const service = createGoalChatService({
+      controller: createController({
+        async start(_goalId, options) {
+          startedSignal = options?.signal;
+          return new Promise<Goal>(() => undefined);
+        },
+      }),
+      goalStore: createGoalStore({
+        existingGoal: createGoal({ status: "planning" }),
+      }),
+      planner: createFakePlanner(),
+      createId: () => "goal_release",
+      now: () => "2026-06-12T08:00:00.000Z",
+    });
+
+    await service.start("goal_release");
+    expect(startedSignal?.aborted).toBe(false);
+
+    await service.pause("goal_release");
     expect(startedSignal?.aborted).toBe(true);
   });
 

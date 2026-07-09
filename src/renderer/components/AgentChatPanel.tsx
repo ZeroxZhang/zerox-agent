@@ -1303,11 +1303,21 @@ export function AgentChatPanel({
         kind: "approve_continue",
       });
       if (result.ok && result.goal) {
+        applyGoalSummaryToSessions(result.goal);
+        setStatus({ kind: "working", message: "目标继续执行" });
+        setWorkPhase("tool");
+        setTaskActivity(
+          buildGoalTaskActivity({
+            status: result.goal.status,
+            description: result.goal.description,
+          }),
+        );
         void refreshActiveGoalDetail(goalId);
+        void refreshSessions(sessionId ?? undefined);
       }
       appendMessage({
         role: "assistant",
-        content: result.ok ? "已审核通过，继续执行目标。" : `审核处理失败：${result.message}`,
+        content: result.ok ? "目标已继续执行。" : `目标继续失败：${result.message}`,
       });
       return;
     }
@@ -1335,7 +1345,10 @@ export function AgentChatPanel({
       return;
     }
 
-    setComposerDraft("修改计划：");
+    setComposerDraft("调整目标计划：");
+    window.requestAnimationFrame(() => {
+      messageInputRef.current?.focus();
+    });
   }
 
   async function handleReplanGoal() {

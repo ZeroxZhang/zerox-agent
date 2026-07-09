@@ -2343,6 +2343,20 @@ nav {
   border-color: var(--border-strong);
   background: var(--bg-surface-hover);
 }
+.goal-status-strip-actions .goal-primary-action {
+  border-color: var(--color-action-primary, var(--text-primary));
+  color: var(--color-action-primary-text, var(--bg-surface));
+  background: var(--color-action-primary, var(--text-primary));
+}
+.goal-status-strip-actions .goal-primary-action:hover {
+  border-color: var(--color-action-primary-hover, var(--text-primary));
+  background: var(--color-action-primary-hover, var(--text-primary));
+}
+.goal-status-strip-actions .goal-danger-action {
+  color: var(--status-error-text);
+  border-color: var(--status-error-border);
+  background: var(--status-error-bg);
+}
 .goal-status-strip.is-executing .goal-status-strip-dot {
   background: var(--status-info-text);
   animation: goal-status-pulse 1.5s infinite;

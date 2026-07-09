@@ -35,6 +35,7 @@ export type GoalAcceptanceCoverage = {
 export type GoalDraft = {
   id: string;
   sessionId: string;
+  workspaceId?: string;
   originMessageId?: string;
   sourceMessage: string;
   normalizedDescription: string;

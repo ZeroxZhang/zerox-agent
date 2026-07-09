@@ -11,6 +11,7 @@ import type { AgentGoalTranslator } from "./agentGoalTranslator";
 export type GoalDraftService = {
   createFromChat(input: {
     sessionId: string;
+    workspaceId?: string;
     originMessageId: string | null;
     message: string;
     selectedSkill?: GoalSelectedSkill;

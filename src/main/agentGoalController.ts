@@ -60,7 +60,11 @@ export function createAgentGoalController(options: {
   onProgress?: (event: GoalProgressEvent) => void;
 }): AgentGoalController {
   const stallThreshold = options.stallThreshold ?? 3;
-  const activeRuns = new Map<string, Promise<Goal>>();
+  type ActiveRunEntry = {
+    promise: Promise<Goal>;
+    signal?: AbortSignal;
+  };
+  const activeRuns = new Map<string, ActiveRunEntry>();
 
   function notifyProgress(
     event: GoalProgressEvent["event"],
@@ -89,15 +93,32 @@ export function createAgentGoalController(options: {
   }
 
   async function runLoop(goal: Goal, runOptions?: { signal?: AbortSignal }) {
-    if (activeRuns.has(goal.id)) {
-      return activeRuns.get(goal.id)!;
+    const existing = activeRuns.get(goal.id);
+    if (existing && !existing.signal?.aborted) {
+      return existing.promise;
     }
 
-    const runPromise = runLoopInternal(goal, runOptions).finally(() => {
-      activeRuns.delete(goal.id);
+    const entry: ActiveRunEntry = {
+      signal: runOptions?.signal,
+      promise: Promise.resolve(goal),
+    };
+    entry.promise = runLoopInternal(goal, runOptions).finally(() => {
+      if (activeRuns.get(goal.id) === entry) {
+        activeRuns.delete(goal.id);
+      }
     });
-    activeRuns.set(goal.id, runPromise);
-    return runPromise;
+    activeRuns.set(goal.id, entry);
+    return entry.promise;
+  }
+
+  async function latestGoalAfterAbort(
+    goal: Goal,
+    runOptions?: { signal?: AbortSignal },
+  ): Promise<Goal | null> {
+    if (!runOptions?.signal?.aborted) {
+      return null;
+    }
+    return (await options.goalStore.get(goal.id)) ?? goal;
   }
 
   async function runLoopInternal(
@@ -108,8 +129,9 @@ export function createAgentGoalController(options: {
 
     try {
       while (goal.status === "executing") {
-        if (runOptions?.signal?.aborted) {
-          return stopGoal(goal, "canceled", "user_canceled", "Goal canceled.");
+        const abortedGoal = await latestGoalAfterAbort(goal, runOptions);
+        if (abortedGoal) {
+          return abortedGoal;
         }
 
         const nextMilestone = pickNextReadyMilestone(goal);
@@ -128,6 +150,13 @@ export function createAgentGoalController(options: {
               goal,
               (await options.createAcceptanceContext?.(goal)) as never,
             );
+            const abortedAfterGoalReview = await latestGoalAfterAbort(
+              goal,
+              runOptions,
+            );
+            if (abortedAfterGoalReview) {
+              return abortedAfterGoalReview;
+            }
             if (result.accepted) {
               return stopGoal(
                 goal,
@@ -179,12 +208,16 @@ export function createAgentGoalController(options: {
           runOptions,
         );
         if (shouldSuspend) {
-          return goal;
+          return (await options.goalStore.get(goal.id)) ?? goal;
         }
       }
 
       return goal;
     } catch (error) {
+      const abortedGoal = await latestGoalAfterAbort(goal, runOptions);
+      if (abortedGoal) {
+        return abortedGoal;
+      }
       const summary = error instanceof Error ? error.message : "目标运行时发生未知错误。";
       notifyProgress("stopped", goal, summary);
       return stopGoal(goal, "failed", "unrecoverable_failure", summary);
@@ -222,6 +255,9 @@ export function createAgentGoalController(options: {
       milestone,
       runOptions,
     );
+    if (await latestGoalAfterAbort(goal, runOptions)) {
+      return true;
+    }
     milestone.runIds.push(runResult.runId);
     milestone.lastRunStatus = runResult.status ?? "succeeded";
     if (runResult.summary) {
@@ -238,6 +274,9 @@ export function createAgentGoalController(options: {
       milestone,
       (await options.createAcceptanceContext?.(goal, milestone, runResult)) as never,
     );
+    if (await latestGoalAfterAbort(goal, runOptions)) {
+      return true;
+    }
 
     if (acceptance.accepted) {
       milestone.state = "accepted";
@@ -465,7 +504,9 @@ export function createAgentGoalController(options: {
 
       touch(goal);
       await options.goalStore.save(goal);
-      return runLoop(goal);
+      notifyProgress("started", goal, "审核已通过，目标继续执行。");
+      void runLoop(goal).catch(() => undefined);
+      return goal;
     },
   };
 }

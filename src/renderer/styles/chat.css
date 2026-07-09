@@ -1301,6 +1301,23 @@
   background: var(--color-surface-hover);
 }
 
+.goal-status-strip-actions .goal-primary-action {
+  border-color: var(--color-action-primary);
+  color: var(--color-action-primary-text);
+  background: var(--color-action-primary);
+}
+
+.goal-status-strip-actions .goal-primary-action:hover {
+  border-color: var(--color-action-primary-hover);
+  background: var(--color-action-primary-hover);
+}
+
+.goal-status-strip-actions .goal-danger-action {
+  color: var(--status-error-text);
+  border-color: var(--status-error-border);
+  background: var(--status-error-bg);
+}
+
 .task-process-list {
   max-height: min(220px, 34vh);
   overflow-y: auto;
