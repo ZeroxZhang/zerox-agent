@@ -930,6 +930,13 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(goalStatusStripSource).toContain("buildGoalProgressViewModel");
     expect(goalStatusStripSource).toContain("progress.statusLabel");
     expect(goalStatusStripSource).toContain("onResolveReview");
+    expect(chatPanelSource).toContain("async function handlePauseGoal");
+    expect(chatPanelSource).toContain("pauseGoal(activeGoal.id)");
+    expect(chatPanelSource).toContain("? { onPause: () => void handlePauseGoal() }");
+    expect(chatPanelSource).not.toContain('submitUserMessage("暂停这个目标")');
+    expect(chatPanelSource).toContain("const goalModeVisuallyEnabled = goalModeEnabled || Boolean(activeGoal);");
+    expect(chatPanelSource).toContain("aria-pressed={goalModeVisuallyEnabled}");
+    expect(chatPanelSource).toContain('className="primary-action"');
     expect(goalDetailDrawerSource).toContain("goal-progress-status");
     expect(goalDetailDrawerSource).toContain("goal-progress-next");
     expect(goalDetailDrawerSource).toContain("goal-progress-metrics");
@@ -941,6 +948,25 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(styles).toContain(".goal-progress-next");
     expect(styles).toContain(".goal-progress-metrics");
     expect(styles).toContain(".goal-draft-card");
+  });
+
+  it("uses Obsidian styling for Goal Mode draft and execution surfaces", () => {
+    expect(styles).toContain(
+      ".runtime-surface-stack {\n  flex: 0 0 auto;\n  display: grid;",
+    );
+    expect(styles).toContain("background: transparent;");
+    expect(styles).toContain(
+      ".goal-draft-card {\n  display: grid;\n  gap: var(--space-3);",
+    );
+    expect(styles).toContain("border-radius: var(--radius-10);");
+    expect(styles).toContain("background: var(--color-surface-primary);");
+    expect(styles).toContain(".goal-draft-field textarea:focus");
+    expect(styles).toContain(
+      ".goal-run-process {\n  display: grid;\n  gap: var(--space-2);",
+    );
+    expect(styles).toContain(".goal-run-process summary {\n  display: flex;");
+    expect(styles).toContain("background: transparent;");
+    expect(styles).toContain(".goal-status-strip-actions button");
   });
 
   it("keeps goal progress synced even before the active goal summary refreshes", () => {
@@ -1148,7 +1174,7 @@ describe("Design System — Obsidian desktop control surface", () => {
 
   it("keeps chatbox actions icon-only and stop available while work is running", () => {
     expect(chatPanelSource).toContain("composer-goal-mode-button");
-    expect(chatPanelSource).toContain("aria-pressed={goalModeEnabled}");
+    expect(chatPanelSource).toContain("aria-pressed={goalModeVisuallyEnabled}");
     expect(chatPanelSource).toContain("aria-label=\"中断当前任务\"");
     expect(chatPanelSource).toContain("aria-label=\"发送消息\"");
     expect(chatPanelSource).toContain("className=\"composer-floating-actions\"");

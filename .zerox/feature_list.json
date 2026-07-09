@@ -2529,6 +2529,40 @@
         "BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v3.4.0' \"release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent\"",
         "git diff --check"
       ]
+    },
+    {
+      "id": "P38-v3.4.0-goal-mode-obsidian-regression-fixes",
+      "priority": 68,
+      "status": "done",
+      "title": "v3.4.0 Goal Mode Obsidian regression fixes",
+      "files": [
+        "src/renderer/components/AgentChatPanel.tsx",
+        "src/renderer/styles/chat.css",
+        "src/renderer/styles/composer.css",
+        "src/main/goalRuntimeEngine.ts",
+        "src/main/goalRuntimeEngine.test.ts",
+        "src/renderer/materialDesign.test.ts",
+        "docs/design/zerox-agent-3-4-0-qa/capture-metrics.json",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md"
+      ],
+      "definitionOfDone": [
+        "Goal draft confirmation UI uses Obsidian surfaces, radius, fields, and primary/secondary action styling",
+        "Goal execution and milestone process cards no longer render large white or rectangular legacy blocks",
+        "Composer Goal Mode shows enabled Obsidian state while a chat goal is active, without changing draft generation semantics",
+        "Composer focus treatment avoids the heavy black container outline while preserving visible focus feedback",
+        "Goal Status pause button calls the pauseGoal IPC flow instead of sending chat text",
+        "Goal milestone instructions reduce avoidable Tool failed loops by binding native tools to the current workspace root and discouraging shell fallback"
+      ],
+      "verification": [
+        "npm test -- src/renderer/materialDesign.test.ts src/main/goalRuntimeEngine.test.ts src/shared/packageScripts.test.ts",
+        "npm test",
+        "npm run build",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "ELECTRON_DISABLE_SECURITY_WARNINGS=1 ./node_modules/.bin/electron scripts/capture-visual-qa.mjs",
+        "git diff --check"
+      ]
     }
   ]
 }

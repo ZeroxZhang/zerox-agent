@@ -795,6 +795,15 @@ describe("goal runtime engine", () => {
       role: "user",
       content: expect.stringContaining("Milestone: 调研 Serenity 投资方法论"),
     });
+    expect(loopInputs[0]?.messages.at(-1)?.content).toContain(
+      "Workspace root: /Users/example",
+    );
+    expect(loopInputs[0]?.messages.at(-1)?.content).toContain(
+      "所有 file_list/file_read/file_search/code_search/git_status/git_diff/test_run 调用都必须使用上述 workspace root",
+    );
+    expect(loopInputs[0]?.messages.at(-1)?.content).toContain(
+      "只有这些工具无法完成时才申请 shell_exec",
+    );
     expect(loopInputs[0]?.messages.some((message) =>
       message.content.includes("[Goal continuity checkpoint - never compact]")
     )).toBe(true);

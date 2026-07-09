@@ -1248,6 +1248,59 @@
   border-color: var(--border-default);
 }
 
+.goal-status-strip {
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--secondary-page-outline);
+  border-radius: var(--radius-10);
+  color: var(--text-primary);
+  background: var(--color-surface-primary);
+  box-shadow: none;
+}
+
+.goal-status-strip-dot {
+  background: var(--color-action-primary);
+}
+
+.goal-status-strip.is-executing .goal-status-strip-dot {
+  background: var(--color-action-primary);
+}
+
+.goal-status-strip.is-waiting_for_review,
+.goal-status-strip.is-stopped_budget,
+.goal-status-strip.is-stopped_stalled,
+.goal-status-strip.is-achieved,
+.goal-status-strip.is-failed,
+.goal-status-strip.is-canceled {
+  border-color: var(--secondary-page-outline);
+  background: var(--color-surface-primary);
+}
+
+.goal-status-strip.is-waiting_for_review .goal-status-strip-dot,
+.goal-status-strip.is-stopped_budget .goal-status-strip-dot,
+.goal-status-strip.is-stopped_stalled .goal-status-strip-dot,
+.goal-status-strip.is-achieved .goal-status-strip-dot,
+.goal-status-strip.is-failed .goal-status-strip-dot,
+.goal-status-strip.is-canceled .goal-status-strip-dot {
+  background: var(--color-action-primary);
+}
+
+.goal-status-strip-actions button {
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-8);
+  color: var(--text-primary);
+  background: var(--color-surface-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+}
+
+.goal-status-strip-actions button:hover {
+  border-color: var(--border-strong);
+  background: var(--color-surface-hover);
+}
+
 .task-process-list {
   max-height: min(220px, 34vh);
   overflow-y: auto;
@@ -1286,9 +1339,10 @@
   gap: var(--space-2);
   min-width: 0;
   padding: var(--space-3);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
+  border: 1px solid var(--secondary-page-outline);
+  border-radius: var(--radius-10);
   background: var(--color-surface-primary);
+  box-shadow: none;
 }
 
 .goal-run-process summary {
@@ -1296,14 +1350,33 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
   color: var(--text-primary);
   font-size: var(--text-sm);
   font-weight: var(--font-semibold);
+  background: transparent;
   cursor: pointer;
 }
 
 .goal-run-process summary::-webkit-details-marker {
   display: none;
+}
+
+.goal-run-process summary span {
+  color: var(--text-primary);
+}
+
+.goal-run-process summary small {
+  color: var(--text-tertiary);
+}
+
+.goal-run-process .task-process-list {
+  margin: 0;
+  padding: var(--space-2) 0 0;
+  border-top: 1px solid var(--secondary-page-outline);
+  background: transparent;
 }
 
 .task-activity-reasoning-preview {
@@ -1342,8 +1415,8 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: var(--space-2) 4px 4px;
-  border-top: 1px solid var(--glass-border);
-  background: color-mix(in srgb, var(--color-surface-primary) 72%, transparent);
+  border-top: 1px solid var(--secondary-page-outline);
+  background: transparent;
   scrollbar-gutter: stable;
 }
 
@@ -1351,10 +1424,10 @@
   display: grid;
   gap: var(--space-3);
   padding: var(--space-3);
-  border: 1px solid var(--border-accent);
-  border-radius: var(--radius-sm);
-  background: var(--glass-surface-strong);
-  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--secondary-page-outline);
+  border-radius: var(--radius-10);
+  background: var(--color-surface-primary);
+  box-shadow: none;
 }
 
 .goal-draft-card header,
@@ -1379,15 +1452,32 @@
   font-weight: var(--font-semibold);
 }
 
+.goal-draft-card header strong {
+  color: var(--text-primary);
+  font-size: var(--text-base);
+  font-weight: var(--font-semibold);
+}
+
+.goal-draft-card header small {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
 .goal-draft-field textarea {
   width: 100%;
   resize: vertical;
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-10);
   padding: var(--space-2);
   color: var(--text-primary);
-  background: var(--bg-surface-raised);
+  background: var(--color-surface-muted);
   font: inherit;
+}
+
+.goal-draft-field textarea:focus {
+  outline: none;
+  border-color: var(--border-strong);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-action-primary) 24%, transparent);
 }
 
 .goal-draft-checks,
@@ -1401,10 +1491,10 @@
 .goal-draft-checks span {
   min-height: 24px;
   padding: 2px var(--space-2);
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--secondary-page-outline);
   border-radius: var(--radius-full);
-  color: var(--text-accent);
-  background: var(--bg-accent-muted);
+  color: var(--text-secondary);
+  background: var(--color-surface-muted);
   font-size: var(--text-xs);
   font-weight: var(--font-semibold);
 }
@@ -1418,10 +1508,10 @@
 .goal-draft-warnings li {
   flex: 1 1 240px;
   padding: var(--space-2);
-  border: 1px solid var(--status-warning-border);
-  border-radius: var(--radius-sm);
-  color: var(--status-warning-text);
-  background: var(--status-warning-bg);
+  border: 1px solid var(--secondary-page-outline);
+  border-radius: var(--radius-10);
+  color: var(--text-secondary);
+  background: var(--color-surface-muted);
   font-size: var(--text-sm);
 }
 

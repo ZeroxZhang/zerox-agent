@@ -6446,3 +6446,40 @@
   - Annotated tag `v3.4.0` pushed to origin; `refs/tags/v3.4.0^{}` resolves to `8b6cb33305182e3ee4390a176545577b3fdc857d`.
   - GitHub Release `v3.4.0` is published at https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.4.0, non-draft and non-prerelease, with five uploaded assets.
   - `gh release view v3.4.0 --json tagName,url,isDraft,isPrerelease,publishedAt,targetCommitish,assets` confirmed all remote asset digests match the local SHA256 values above.
+
+## 2026-07-09 - Zerox Agent v3.4.0 Goal Mode Obsidian Regression Fixes
+
+- Request:
+  - Fix Goal Mode screens reported from screenshots after the v3.4.0 Obsidian release.
+  - Keep the 0708 `B · 曜石 Obsidian` design language and do not change core product capability.
+- Feature tracking:
+  - Added `P38-v3.4.0-goal-mode-obsidian-regression-fixes` and marked it `done` after focused tests, full tests, build, smoke, harness, visual QA metrics, and diff check.
+- Root causes:
+  - Goal draft and goal runtime surfaces were still styled by legacy `goal-draft-card`, `goal-status-strip`, `goal-run-process`, and `runtime-surface-stack` rules, producing non-Obsidian cards, heavy white blocks, and a legacy confirmation button.
+  - The composer Goal Mode button used only `goalModeEnabled`; after a goal was confirmed, the draft-mode flag could be false even though the chat still had an active goal.
+  - The composer textarea used the global focus ring on the whole large input shell, creating a heavy black outline on mouse focus.
+  - The Goal Status Strip pause action submitted chat text (`暂停这个目标`) instead of calling the existing `pauseGoal` IPC path.
+  - Goal milestone instructions did not explicitly bind file/code tools to the exact workspace root, so models could drift into shell fallback or malformed paths, especially with workspace paths containing spaces.
+- Changed areas:
+  - `.zerox/feature_list.json`, `.zerox/progress.md`
+  - `src/renderer/components/AgentChatPanel.tsx`
+  - `src/renderer/styles/chat.css`, `src/renderer/styles/composer.css`
+  - `src/main/goalRuntimeEngine.ts`, `src/main/goalRuntimeEngine.test.ts`
+  - `src/renderer/materialDesign.test.ts`, `src/shared/packageScripts.test.ts`
+  - `docs/design/zerox-agent-3-4-0-qa/capture-metrics.json`
+- Implementation evidence:
+  - Goal draft confirmation now uses Obsidian white raised surfaces, 10px radius, neutral check/warning chips, focused textareas, and a `primary-action` confirm button.
+  - Runtime stack now acts as transparent layout only; goal status and milestone process cards own their Obsidian borders and radius, avoiding large rectangular white backing blocks.
+  - Composer Goal Mode visual state now stays enabled when there is an active goal, while draft-generation semantics still depend on `goalModeEnabled`.
+  - Composer focus now uses a light inset focus treatment instead of the heavy global black ring on the large textarea.
+  - Goal Status Strip pause calls `window.buildingAgent.pauseGoal(activeGoal.id)`, updates local status to paused, refreshes goal detail and sessions, and records a chat acknowledgement.
+  - Goal milestone instructions now include `Workspace root: ...`, require file/code tools to use that exact root or paths inside it, and tell the model to prefer typed native tools before requesting `shell_exec`.
+- Verification evidence:
+  - `npm test -- src/renderer/materialDesign.test.ts src/main/goalRuntimeEngine.test.ts src/shared/packageScripts.test.ts` -> passed, 3 files / 94 tests.
+  - `npm test` -> passed, 188 files / 1322 tests.
+  - `npm run build` -> passed. Vite reported the existing large chunk warning only.
+  - `ELECTRON_DISABLE_SECURITY_WARNINGS=1 ./node_modules/.bin/electron scripts/capture-visual-qa.mjs` -> passed; regenerated 7-view visual metrics.
+  - Visual QA metrics: all 7 captured views report no horizontal page overflow and 0 clipped element samples; core colors remain app background `#f3f3f3` and action `#26262a`.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local un-packaged smoke used JSON fallback after the existing better-sqlite3 ABI mismatch.
+  - `git diff --check` -> passed.

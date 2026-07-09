@@ -56,6 +56,9 @@ describe("package scripts", () => {
     const p37 = featureList.features.find(
       (feature) => feature.id === "P37-v3.4.0-obsidian-frontend-interaction",
     );
+    const p38 = featureList.features.find(
+      (feature) => feature.id === "P38-v3.4.0-goal-mode-obsidian-regression-fixes",
+    );
     const p31 = featureList.features.find(
       (feature) => feature.id === "P31-v3.1.2-window-controls-and-settings-icon",
     );
@@ -72,10 +75,23 @@ describe("package scripts", () => {
     expect(packageJson.version).toBe("3.4.0");
     expect(
       openFeatureIds.every(
-        (featureId) => featureId === "P37-v3.4.0-obsidian-frontend-interaction",
+        (featureId) =>
+          featureId === "P37-v3.4.0-obsidian-frontend-interaction" ||
+          featureId === "P38-v3.4.0-goal-mode-obsidian-regression-fixes",
       ),
     ).toBe(true);
     expect(openFeatureIds.length).toBeLessThanOrEqual(1);
+    expect(p38?.status === "in_progress" || p38?.status === "done").toBe(true);
+    expect(p38).toEqual(
+      expect.objectContaining({
+        id: "P38-v3.4.0-goal-mode-obsidian-regression-fixes",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("Goal draft confirmation UI uses Obsidian"),
+          expect.stringContaining("Goal Status pause button calls the pauseGoal IPC flow"),
+          expect.stringContaining("Goal milestone instructions reduce avoidable Tool failed loops"),
+        ]),
+      }),
+    );
     expect(p37?.status === "in_progress" || p37?.status === "done").toBe(true);
     expect(p37).toEqual(
       expect.objectContaining({

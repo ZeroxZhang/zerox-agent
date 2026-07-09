@@ -980,6 +980,9 @@ function buildMilestoneInstruction(
   return [
     "[Goal milestone execution instruction]",
     `Milestone: ${milestone.description}`,
+    `Workspace root: ${runContext.workspaceRoot}`,
+    "工具使用约束：所有 file_list/file_read/file_search/code_search/git_status/git_diff/test_run 调用都必须使用上述 workspace root 或其内部路径；不要猜测、改写或省略工作区路径。",
+    "优先使用 file_list、file_search、file_read、code_search、git_status、git_diff、test_run 等 typed native tools 观察和验证项目；只有这些工具无法完成时才申请 shell_exec。",
     "",
     "本里程碑的验收标准如下，你必须确保每一项验收检查最终通过：",
     ...criteriaLines,

@@ -914,6 +914,7 @@ export function AgentChatPanel({
   ].filter(Boolean).join(" ");
   const activeGoal = activeSession?.activeGoal ?? null;
   activeGoalRef.current = activeGoal;
+  const goalModeVisuallyEnabled = goalModeEnabled || Boolean(activeGoal);
   const activeTasks = tasks.filter((task) => task.enabled);
   const workSteps = useMemo(() => buildAgentWorkSteps(workPhase), [workPhase]);
   const taskActivityDetail = useMemo(
@@ -1376,6 +1377,37 @@ export function AgentChatPanel({
     });
     if (result.ok && result.goal) {
       void refreshActiveGoalDetail(result.goal.id);
+    }
+  }
+
+  async function handlePauseGoal() {
+    if (!window.buildingAgent || !activeGoal?.id) {
+      return;
+    }
+
+    const result = await window.buildingAgent.pauseGoal(activeGoal.id);
+    if (result.ok && result.goal) {
+      applyGoalSummaryToSessions(result.goal);
+      setStatus({ kind: "paused", message: "目标已暂停，等待确认" });
+      setWorkPhase("paused");
+      setTaskActivity(
+        createTaskActivity({
+          kind: "paused",
+          title: "目标已暂停",
+          detail: "可在目标卡片中通过或调整后继续",
+          startedAt: taskActivity.startedAt,
+        }),
+      );
+    }
+    appendMessage({
+      role: "assistant",
+      content: result.ok
+        ? "已暂停目标，等待你的确认。"
+        : `暂停目标失败：${result.message}`,
+    });
+    if (result.ok && result.goal) {
+      void refreshActiveGoalDetail(result.goal.id);
+      void refreshSessions(sessionId ?? undefined);
     }
   }
 
@@ -2241,7 +2273,7 @@ export function AgentChatPanel({
                   ? { onStart: handleStartGoal }
                   : {})}
                 {...(activeGoal.status === "executing"
-                  ? { onPause: () => void submitUserMessage("暂停这个目标") }
+                  ? { onPause: () => void handlePauseGoal() }
                   : {})}
                 onResolveReview={handleResolveGoalReview}
                 onReplan={handleReplanGoal}
@@ -2597,9 +2629,9 @@ export function AgentChatPanel({
                 </label>
                 <button
                   aria-label="目标模式"
-                  aria-pressed={goalModeEnabled}
+                  aria-pressed={goalModeVisuallyEnabled}
                   className={`composer-goal-mode-button${
-                    goalModeEnabled ? " is-enabled" : ""
+                    goalModeVisuallyEnabled ? " is-enabled" : ""
                   }`}
                   data-risk-tooltip={composerRiskTooltips.goal}
                   onClick={() => setGoalModeEnabled((enabled) => !enabled)}
@@ -2852,6 +2884,7 @@ function GoalDraftCard(props: {
         </button>
         <button
           type="button"
+          className="primary-action"
           disabled={Boolean(props.pendingAction) || !props.description.trim()}
           onClick={props.onConfirm}
         >

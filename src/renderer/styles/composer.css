@@ -289,8 +289,10 @@
 .composer textarea::placeholder { color: var(--text-tertiary); }
 
 .composer textarea:focus {
-  border-color: var(--color-action-primary);
-  box-shadow: var(--shadow-medium), var(--shadow-focus);
+  border-color: var(--border-strong);
+  box-shadow:
+    var(--shadow-md),
+    inset 0 0 0 1px color-mix(in srgb, var(--color-action-primary) 26%, transparent);
 }
 
 .composer-floating-actions {
