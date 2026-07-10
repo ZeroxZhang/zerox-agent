@@ -1,14 +1,53 @@
 import { createHash } from "node:crypto";
+import { isProxy } from "node:util/types";
 import type {
+  AcceptanceCheck,
   AcceptanceCheckKind,
   Goal,
   GoalAcceptanceCertificate,
   GoalAcceptanceCheckResult,
   GoalEvidenceManifest,
+  SuccessCriterion,
 } from "../shared/agentGoal";
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
-const REDACTED_SECRET = "[REDACTED]";
+const MAX_CANONICAL_DEPTH = 64;
+const MAX_CANONICAL_NODES = 20_000;
+const MAX_CANONICAL_ARRAY_LENGTH = 10_000;
+const MAX_CANONICAL_STRING_LENGTH = 262_144;
+const MAX_CANONICAL_BYTES = 1_048_576;
+const MAX_SYNTHESIZED_EVIDENCE_ENTRIES = 1_000;
+
+const SECRET_PARAM_KEYS = new Set([
+  "apikey",
+  "accesskey",
+  "accesstoken",
+  "authorization",
+  "bearer",
+  "bearertoken",
+  "clientsecret",
+  "cookie",
+  "credential",
+  "credentials",
+  "password",
+  "passwd",
+  "privatekey",
+  "refreshtoken",
+  "secret",
+  "sessionkey",
+  "token",
+]);
+const SECRET_PARAM_SUFFIXES = [
+  "apikey",
+  "accesskey",
+  "accesstoken",
+  "bearertoken",
+  "clientsecret",
+  "privatekey",
+  "refreshtoken",
+  "sessionkey",
+] as const;
+
 const BUILTIN_CHECK_KINDS = new Set<AcceptanceCheckKind>([
   "file_exists",
   "command_exit_code",
@@ -16,6 +55,14 @@ const BUILTIN_CHECK_KINDS = new Set<AcceptanceCheckKind>([
   "assertion",
   "model_review",
 ]);
+
+type CanonicalState = {
+  ancestors: WeakSet<object>;
+  nodes: number;
+  rejectSecretKeys: boolean;
+};
+
+type CertificateEvidence = GoalAcceptanceCertificate["evidence"][number];
 
 export type CreateGoalAcceptanceCertificateInput = {
   goal: Pick<Goal, "id" | "planVersion" | "successCriteria">;
@@ -36,10 +83,52 @@ export type GoalAcceptanceCertificateVerification =
   | { ok: true }
   | { ok: false; reason: string };
 
+export class GoalAcceptanceCertificateInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "GoalAcceptanceCertificateInputError";
+  }
+}
+
 export function createGoalCriteriaHash(
   goal: Pick<Goal, "successCriteria">,
 ): string {
-  const criteria = goal.successCriteria
+  return protectCreation("Goal criteria are not certificate-safe.", () =>
+    createGoalCriteriaHashInternal(goal),
+  );
+}
+
+export function createGoalAcceptanceCertificate(
+  input: CreateGoalAcceptanceCertificateInput,
+): GoalAcceptanceCertificate {
+  return protectCreation("Certificate input is not certificate-safe.", () =>
+    createGoalAcceptanceCertificateInternal(input),
+  );
+}
+
+export function verifyGoalAcceptanceCertificate(
+  goal: Goal,
+): GoalAcceptanceCertificateVerification {
+  try {
+    return verifyGoalAcceptanceCertificateInternal(goal);
+  } catch (error) {
+    const inputError = toInputError(
+      error,
+      "Certificate data is not plain bounded JSON.",
+    );
+    return failure(`Certificate input is invalid: ${inputError.message}`);
+  }
+}
+
+function createGoalCriteriaHashInternal(
+  goal: Pick<Goal, "successCriteria">,
+): string {
+  const criteria = cloneCanonical(
+    goal.successCriteria,
+    "goal success criteria",
+    true,
+  ) as SuccessCriterion[];
+  const identity = criteria
     .map((criterion) => ({
       id: criterion.id,
       description: criterion.description,
@@ -55,66 +144,82 @@ export function createGoalCriteriaHash(
     }))
     .sort(compareStableDefinitions);
 
-  return sha256(stableJson(criteria));
+  return sha256(stableJson(identity));
 }
 
-export function createGoalAcceptanceCertificate(
+function createGoalAcceptanceCertificateInternal(
   input: CreateGoalAcceptanceCertificateInput,
 ): GoalAcceptanceCertificate {
+  const runIds = normalizeStringSet(input.runIds, "run id", 1);
+  const criteriaHash = createGoalCriteriaHashInternal(input.goal);
+  const goalChecks = getGoalChecks(input.goal);
+  const semantic = goalChecks.some((check) => check.kind === "model_review");
+
+  const rawResults = cloneCanonical(
+    input.checkResults,
+    "certificate check results",
+  ) as GoalAcceptanceCheckResult[];
   const checkResults = dedupeStableEntries(
-    input.checkResults.map((result) => ({
+    rawResults.map((result) => ({
       checkId: result.checkId,
       kind: result.kind,
       passed: result.passed,
       code: result.code,
       ...(result.failureClass ? { failureClass: result.failureClass } : {}),
-      evidenceRefs: uniqueSortedStrings(result.evidenceRefs),
+      evidenceRefs: normalizeStringSet(
+        result.evidenceRefs,
+        `check evidence ref for ${result.checkId}`,
+      ),
       detail: result.detail,
     })),
     (result) => stableJson([result.checkId, result.kind]),
     "check result",
   ).sort(compareCheckResults);
 
-  const evidence = dedupeStableEntries(
-    input.evidenceManifest.artifacts.map((artifact) => ({
+  const provenanceMap = input.provenanceRefs
+    ? cloneCanonical(
+        input.provenanceRefs,
+        "certificate provenance map",
+      ) as Record<string, string[]>
+    : {};
+  const artifacts = cloneCanonical(
+    input.evidenceManifest.artifacts,
+    "certificate evidence manifest artifacts",
+  ) as GoalEvidenceManifest["artifacts"];
+  let evidence = dedupeStableEntries(
+    artifacts.map((artifact) => ({
       ref: artifact.ref,
       ...(artifact.path !== undefined ? { path: artifact.path } : {}),
       ...(artifact.sha256 !== undefined ? { sha256: artifact.sha256 } : {}),
       ...(artifact.sizeBytes !== undefined
         ? { sizeBytes: artifact.sizeBytes }
         : {}),
-      provenanceRefs: uniqueSortedStrings(
-        input.provenanceRefs?.[artifact.ref] ?? [],
+      provenanceRefs: normalizeStringSet(
+        provenanceMap[artifact.ref] ?? [],
+        `provenance ref for ${artifact.ref}`,
       ),
     })),
-    (entry) => stableJson([entry.ref, entry.path ?? null]),
+    evidenceIdentity,
     "evidence entry",
-  ).sort(compareEvidence);
+  );
+  evidence = synthesizeMissingEvidence(checkResults, evidence, provenanceMap);
+  evidence.sort(compareEvidence);
 
+  const judge = normalizeJudge(input.judge, semantic);
   const unsigned: Omit<GoalAcceptanceCertificate, "certificateHash"> = {
     version: 1,
-    goalId: input.goal.id,
-    acceptedAt: input.acceptedAt,
+    goalId: requireNonemptyString(input.goal.id, "goal id"),
+    acceptedAt: requireNonemptyString(input.acceptedAt, "accepted timestamp"),
     protocolVersion: 2,
-    criteriaHash: createGoalCriteriaHash(input.goal),
-    planVersion: input.goal.planVersion,
-    runIds: uniqueSortedStrings(input.runIds),
+    criteriaHash,
+    planVersion: requireSafeNonnegativeInteger(
+      input.goal.planVersion,
+      "plan version",
+    ),
+    runIds,
     checkResults,
     evidence,
-    ...(input.judge
-      ? {
-          judge: {
-            ...(input.judge.providerId !== undefined
-              ? { providerId: input.judge.providerId }
-              : {}),
-            model: input.judge.model,
-            promptVersion: input.judge.promptVersion,
-            evaluatedMessageIds: uniqueSortedStrings(
-              input.judge.evaluatedMessageIds,
-            ),
-          },
-        }
-      : {}),
+    ...(judge ? { judge } : {}),
   };
 
   return {
@@ -123,17 +228,21 @@ export function createGoalAcceptanceCertificate(
   };
 }
 
-export function verifyGoalAcceptanceCertificate(
+function verifyGoalAcceptanceCertificateInternal(
   goal: Goal,
 ): GoalAcceptanceCertificateVerification {
   if (goal.acceptanceProtocolVersion !== 2) {
     return failure("Goal acceptance protocol mismatch; protocol v2 is required.");
   }
 
-  const certificate = goal.acceptanceCertificate;
-  if (!certificate || !isRecord(certificate)) {
+  const rawCertificate = goal.acceptanceCertificate;
+  if (!rawCertificate || !isRecord(rawCertificate)) {
     return failure("Protocol v2 achieved goal requires a certificate.");
   }
+  const certificate = cloneCanonical(
+    rawCertificate,
+    "acceptance certificate",
+  ) as GoalAcceptanceCertificate;
   if (!isSha256(certificate.certificateHash)) {
     return failure("Certificate hash must be a lowercase SHA256 digest.");
   }
@@ -162,14 +271,22 @@ export function verifyGoalAcceptanceCertificate(
   if (!isSha256(certificate.criteriaHash)) {
     return failure("Certificate criteria hash must be a lowercase SHA256 digest.");
   }
-  if (certificate.criteriaHash !== createGoalCriteriaHash(goal)) {
+  if (certificate.criteriaHash !== createGoalCriteriaHashInternal(goal)) {
     return failure("Certificate criteria hash mismatch.");
   }
-  if (!isNonemptyString(certificate.acceptedAt) || !isValidDate(certificate.acceptedAt)) {
+  if (
+    !isNonemptyString(certificate.acceptedAt) ||
+    !isValidDate(certificate.acceptedAt)
+  ) {
     return failure("Certificate accepted timestamp is malformed.");
   }
 
-  const runVerification = verifyStringSet(certificate.runIds, "run id");
+  const runVerification = verifyStringSet(
+    certificate.runIds,
+    "run id",
+    1,
+    "Certificate requires nonempty run identity.",
+  );
   if (!runVerification.ok) return runVerification;
 
   const checkVerification = verifyCheckCoverage(goal, certificate.checkResults);
@@ -178,15 +295,85 @@ export function verifyGoalAcceptanceCertificate(
   const evidenceVerification = verifyEvidence(certificate.evidence);
   if (!evidenceVerification.ok) return evidenceVerification;
 
-  const judgeVerification = verifyJudge(
-    certificate.judge,
-    goal.successCriteria.some((criterion) =>
-      criterion.acceptanceChecks.some((check) => check.kind === "model_review"),
-    ),
+  const referenceVerification = verifyEvidenceReferences(
+    goal,
+    certificate.checkResults,
+    certificate.evidence,
   );
+  if (!referenceVerification.ok) return referenceVerification;
+
+  const semantic = getGoalChecks(goal).some(
+    (check) => check.kind === "model_review",
+  );
+  const judgeVerification = verifyJudge(certificate.judge, semantic);
   if (!judgeVerification.ok) return judgeVerification;
 
   return { ok: true };
+}
+
+function synthesizeMissingEvidence(
+  checkResults: GoalAcceptanceCheckResult[],
+  evidence: CertificateEvidence[],
+  provenanceMap: Record<string, string[]>,
+): CertificateEvidence[] {
+  const result = [...evidence];
+  let synthesized = 0;
+  const refs = normalizeStringSet(
+    checkResults.flatMap((checkResult) => checkResult.evidenceRefs),
+    "result evidence ref",
+  );
+
+  for (const ref of refs) {
+    const matches = result.filter(
+      (entry) => entry.ref === ref || entry.provenanceRefs.includes(ref),
+    );
+    if (matches.length > 0) continue;
+    synthesized += 1;
+    if (synthesized > MAX_SYNTHESIZED_EVIDENCE_ENTRIES) {
+      throw new GoalAcceptanceCertificateInputError(
+        "Synthesized evidence entry bound exceeded.",
+      );
+    }
+    result.push({
+      ref,
+      provenanceRefs: normalizeStringSet(
+        provenanceMap[ref] ?? [],
+        `provenance ref for ${ref}`,
+      ),
+    });
+  }
+  return dedupeStableEntries(result, evidenceIdentity, "evidence entry");
+}
+
+function normalizeJudge(
+  judge: CreateGoalAcceptanceCertificateInput["judge"],
+  required: boolean,
+): GoalAcceptanceCertificate["judge"] | undefined {
+  if (!judge) {
+    if (required) {
+      throw new GoalAcceptanceCertificateInputError(
+        "Semantic model_review certificates require judge metadata.",
+      );
+    }
+    return undefined;
+  }
+
+  const normalized = {
+    ...(judge.providerId !== undefined
+      ? { providerId: requireNonemptyString(judge.providerId, "judge provider id") }
+      : {}),
+    model: requireNonemptyString(judge.model, "judge model"),
+    promptVersion: requireNonemptyString(
+      judge.promptVersion,
+      "judge prompt version",
+    ),
+    evaluatedMessageIds: normalizeStringSet(
+      judge.evaluatedMessageIds,
+      "judge evaluated message id",
+      required ? 1 : 0,
+    ),
+  };
+  return cloneCanonical(normalized, "judge metadata") as typeof normalized;
 }
 
 function verifyCheckCoverage(
@@ -197,10 +384,8 @@ function verifyCheckCoverage(
     return failure("Certificate check results are malformed.");
   }
 
-  const expectedChecks = goal.successCriteria.flatMap(
-    (criterion) => criterion.acceptanceChecks,
-  );
-  const expectedById = new Map<string, (typeof expectedChecks)[number]>();
+  const expectedChecks = getGoalChecks(goal);
+  const expectedById = new Map<string, AcceptanceCheck>();
   for (const check of expectedChecks) {
     if (!isNonemptyString(check.id)) {
       return failure("Goal contains a malformed check id.");
@@ -243,7 +428,9 @@ function verifyCheckCoverage(
       result.failureClass !== undefined &&
       !isNonemptyString(result.failureClass)
     ) {
-      return failure(`Certificate check failure class is malformed for ${result.checkId}.`);
+      return failure(
+        `Certificate check failure class is malformed for ${result.checkId}.`,
+      );
     }
     const refsVerification = verifyStringSet(
       result.evidenceRefs,
@@ -254,7 +441,9 @@ function verifyCheckCoverage(
 
   const missing = [...expectedById.keys()].filter((checkId) => !seenIds.has(checkId));
   if (missing.length > 0) {
-    return failure(`Certificate is missing check coverage: ${missing.sort().join(", ")}.`);
+    return failure(
+      `Certificate is missing check coverage: ${missing.sort(compareCodeUnits).join(", ")}.`,
+    );
   }
   return { ok: true };
 }
@@ -298,6 +487,45 @@ function verifyEvidence(evidence: unknown): GoalAcceptanceCertificateVerificatio
   return { ok: true };
 }
 
+function verifyEvidenceReferences(
+  goal: Goal,
+  checkResults: GoalAcceptanceCheckResult[],
+  evidence: GoalAcceptanceCertificate["evidence"],
+): GoalAcceptanceCertificateVerification {
+  const resolutionCounts = new Map<string, number>();
+  for (const entry of evidence) {
+    for (const ref of new Set([entry.ref, ...entry.provenanceRefs])) {
+      resolutionCounts.set(ref, (resolutionCounts.get(ref) ?? 0) + 1);
+    }
+  }
+
+  const expectedById = new Map(
+    getGoalChecks(goal).map((check) => [check.id, check]),
+  );
+  for (const result of checkResults) {
+    const expected = expectedById.get(result.checkId);
+    if (expected?.requiresEvidence && result.evidenceRefs.length === 0) {
+      return failure(
+        `Check ${result.checkId} requires evidence but has missing evidence refs.`,
+      );
+    }
+    for (const ref of result.evidenceRefs) {
+      const matches = resolutionCounts.get(ref) ?? 0;
+      if (matches === 0) {
+        return failure(
+          `Check ${result.checkId} evidence ref ${ref} does not resolve to certificate evidence.`,
+        );
+      }
+      if (matches > 1) {
+        return failure(
+          `Check ${result.checkId} evidence ref ${ref} is ambiguous across certificate evidence.`,
+        );
+      }
+    }
+  }
+  return { ok: true };
+}
+
 function verifyJudge(
   judge: unknown,
   required: boolean,
@@ -315,15 +543,25 @@ function verifyJudge(
   ) {
     return failure("Certificate judge metadata is malformed.");
   }
-  return verifyStringSet(judge.evaluatedMessageIds, "judge evaluated message id");
+  return verifyStringSet(
+    judge.evaluatedMessageIds,
+    "judge evaluated message id",
+    required ? 1 : 0,
+    "Semantic certificate requires nonempty judge evaluated message identity.",
+  );
 }
 
 function verifyStringSet(
   value: unknown,
   label: string,
+  minimum = 0,
+  minimumReason = `Certificate requires a nonempty ${label} set.`,
 ): GoalAcceptanceCertificateVerification {
   if (!Array.isArray(value)) {
     return failure(`Certificate ${label} set is malformed.`);
+  }
+  if (value.length < minimum) {
+    return failure(minimumReason);
   }
   const seen = new Set<string>();
   for (const entry of value) {
@@ -344,6 +582,42 @@ function createCertificateDigest(
   return sha256(stableJson(certificate));
 }
 
+function getGoalChecks(
+  goal: Pick<Goal, "successCriteria">,
+): AcceptanceCheck[] {
+  const criteria = cloneCanonical(
+    goal.successCriteria,
+    "goal success criteria",
+    true,
+  ) as SuccessCriterion[];
+  return criteria.flatMap((criterion) => criterion.acceptanceChecks);
+}
+
+function normalizeStringSet(
+  value: readonly string[],
+  label: string,
+  minimum = 0,
+): string[] {
+  const cloned = cloneCanonical(value, `${label} set`) as unknown;
+  if (!Array.isArray(cloned)) {
+    throw new GoalAcceptanceCertificateInputError(`${label} set is malformed.`);
+  }
+  const result: string[] = [];
+  for (const entry of cloned) {
+    if (!isNonemptyString(entry)) {
+      throw new GoalAcceptanceCertificateInputError(`${label} is malformed.`);
+    }
+    result.push(entry);
+  }
+  const unique = [...new Set(result)].sort(compareCodeUnits);
+  if (unique.length < minimum) {
+    throw new GoalAcceptanceCertificateInputError(
+      `Certificate requires nonempty ${label} identity.`,
+    );
+  }
+  return unique;
+}
+
 function dedupeStableEntries<T>(
   entries: T[],
   identity: (entry: T) => string,
@@ -354,20 +628,26 @@ function dedupeStableEntries<T>(
     const key = identity(entry);
     const existing = unique.get(key);
     if (existing && stableJson(existing) !== stableJson(entry)) {
-      throw new Error(`Conflicting ${label} entries share one stable identity.`);
+      throw new GoalAcceptanceCertificateInputError(
+        `Conflicting ${label} entries share one stable identity.`,
+      );
     }
     unique.set(key, entry);
   }
   return [...unique.values()];
 }
 
+function evidenceIdentity(entry: CertificateEvidence): string {
+  return stableJson([entry.ref, entry.path ?? null]);
+}
+
 function compareStableDefinitions(left: unknown, right: unknown): number {
   const leftRecord = isRecord(left) ? left : {};
   const rightRecord = isRecord(right) ? right : {};
-  const idOrder = String(leftRecord.id ?? "").localeCompare(
-    String(rightRecord.id ?? ""),
+  return (
+    compareCodeUnits(String(leftRecord.id ?? ""), String(rightRecord.id ?? "")) ||
+    compareCodeUnits(stableJson(left), stableJson(right))
   );
-  return idOrder || stableJson(left).localeCompare(stableJson(right));
 }
 
 function compareCheckResults(
@@ -375,87 +655,261 @@ function compareCheckResults(
   right: GoalAcceptanceCheckResult,
 ): number {
   return (
-    left.checkId.localeCompare(right.checkId) ||
-    left.kind.localeCompare(right.kind) ||
-    stableJson(left).localeCompare(stableJson(right))
+    compareCodeUnits(left.checkId, right.checkId) ||
+    compareCodeUnits(left.kind, right.kind) ||
+    compareCodeUnits(stableJson(left), stableJson(right))
   );
 }
 
-function compareEvidence(
-  left: GoalAcceptanceCertificate["evidence"][number],
-  right: GoalAcceptanceCertificate["evidence"][number],
-): number {
+function compareEvidence(left: CertificateEvidence, right: CertificateEvidence): number {
   return (
-    left.ref.localeCompare(right.ref) ||
-    (left.path ?? "").localeCompare(right.path ?? "") ||
-    stableJson(left).localeCompare(stableJson(right))
+    compareCodeUnits(left.ref, right.ref) ||
+    compareCodeUnits(left.path ?? "", right.path ?? "") ||
+    compareCodeUnits(stableJson(left), stableJson(right))
   );
 }
 
-function uniqueSortedStrings(values: readonly string[]): string[] {
-  return [...new Set(values)].sort();
+function compareCodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function stableJson(value: unknown): string {
-  return JSON.stringify(canonicalize(value, new WeakSet<object>()));
+  const canonical = canonicalizeRoot(value, false);
+  const serialized = JSON.stringify(canonical);
+  if (Buffer.byteLength(serialized, "utf8") > MAX_CANONICAL_BYTES) {
+    throw new GoalAcceptanceCertificateInputError(
+      "Canonical byte bound exceeded.",
+    );
+  }
+  return serialized;
 }
 
-function canonicalize(value: unknown, ancestors: WeakSet<object>): unknown {
-  if (value === null || typeof value === "string" || typeof value === "boolean") {
+function cloneCanonical(
+  value: unknown,
+  label: string,
+  rejectSecretKeys = false,
+): unknown {
+  return protectCreation(`${label} is not plain bounded JSON.`, () => {
+    const canonical = canonicalizeRoot(value, rejectSecretKeys);
+    const serialized = JSON.stringify(canonical);
+    if (Buffer.byteLength(serialized, "utf8") > MAX_CANONICAL_BYTES) {
+      throw new GoalAcceptanceCertificateInputError(
+        "Canonical byte bound exceeded.",
+      );
+    }
+    return canonical;
+  });
+}
+
+function canonicalizeRoot(value: unknown, rejectSecretKeys: boolean): unknown {
+  return canonicalize(value, 0, {
+    ancestors: new WeakSet<object>(),
+    nodes: 0,
+    rejectSecretKeys,
+  });
+}
+
+function canonicalize(
+  value: unknown,
+  depth: number,
+  state: CanonicalState,
+): unknown {
+  state.nodes += 1;
+  if (state.nodes > MAX_CANONICAL_NODES) {
+    throw new GoalAcceptanceCertificateInputError("Canonical node bound exceeded.");
+  }
+  if (depth > MAX_CANONICAL_DEPTH) {
+    throw new GoalAcceptanceCertificateInputError("Canonical depth bound exceeded.");
+  }
+  if (value === null || typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    if (value.length > MAX_CANONICAL_STRING_LENGTH) {
+      throw new GoalAcceptanceCertificateInputError(
+        "Canonical string bound exceeded.",
+      );
+    }
     return value;
   }
   if (typeof value === "number") {
     if (!Number.isFinite(value)) {
-      throw new TypeError("Certificate hashing requires finite numbers.");
+      throw new GoalAcceptanceCertificateInputError(
+        "Certificate hashing requires finite numbers.",
+      );
     }
     return Object.is(value, -0) ? 0 : value;
   }
+  if (typeof value !== "object") {
+    throw new GoalAcceptanceCertificateInputError(
+      "Certificate hashing accepts only JSON scalars, arrays, and records.",
+    );
+  }
+  if (isProxy(value)) {
+    throw new GoalAcceptanceCertificateInputError(
+      "Certificate hashing rejects proxy values.",
+    );
+  }
+  if (state.ancestors.has(value)) {
+    throw new GoalAcceptanceCertificateInputError(
+      "Certificate hashing rejects circular values.",
+    );
+  }
+
+  const prototype = Object.getPrototypeOf(value);
   if (Array.isArray(value)) {
-    if (ancestors.has(value)) throw new TypeError("Cannot hash circular arrays.");
-    ancestors.add(value);
-    try {
-      return value.map((entry) => canonicalize(entry, ancestors));
-    } finally {
-      ancestors.delete(value);
+    if (prototype !== Array.prototype) {
+      throw new GoalAcceptanceCertificateInputError(
+        "Certificate hashing requires plain JSON arrays.",
+      );
+    }
+    return canonicalizeArray(value, depth, state);
+  }
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new GoalAcceptanceCertificateInputError(
+      "Certificate hashing requires plain JSON records.",
+    );
+  }
+  return canonicalizeRecord(value, depth, state);
+}
+
+function canonicalizeArray(
+  value: unknown[],
+  depth: number,
+  state: CanonicalState,
+): unknown[] {
+  if (value.length > MAX_CANONICAL_ARRAY_LENGTH) {
+    throw new GoalAcceptanceCertificateInputError(
+      "Canonical array bound exceeded.",
+    );
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const keys = Reflect.ownKeys(descriptors);
+  if (keys.some((key) => typeof key === "symbol")) {
+    throw new GoalAcceptanceCertificateInputError(
+      "Certificate hashing rejects symbol array properties.",
+    );
+  }
+  for (const key of keys as string[]) {
+    if (key === "length") continue;
+    if (!/^(0|[1-9][0-9]*)$/.test(key) || Number(key) >= value.length) {
+      throw new GoalAcceptanceCertificateInputError(
+        "Certificate hashing rejects custom array properties.",
+      );
     }
   }
-  if (!isRecord(value)) {
-    throw new TypeError("Certificate hashing requires JSON-compatible values.");
-  }
-  if (ancestors.has(value)) throw new TypeError("Cannot hash circular objects.");
-  ancestors.add(value);
+
+  state.ancestors.add(value);
   try {
-    return Object.fromEntries(
-      Object.keys(value)
-        .sort()
-        .map((key) => [
-          key,
-          isSecretLikeKey(key)
-            ? REDACTED_SECRET
-            : canonicalize(value[key], ancestors),
-        ]),
-    );
+    return Array.from({ length: value.length }, (_, index) => {
+      const descriptor = descriptors[String(index)];
+      if (!descriptor || !("value" in descriptor) || !descriptor.enumerable) {
+        throw new GoalAcceptanceCertificateInputError(
+          "Certificate hashing rejects sparse or accessor arrays.",
+        );
+      }
+      return canonicalize(descriptor.value, depth + 1, state);
+    });
   } finally {
-    ancestors.delete(value);
+    state.ancestors.delete(value);
   }
 }
 
-function isSecretLikeKey(key: string): boolean {
+function canonicalizeRecord(
+  value: object,
+  depth: number,
+  state: CanonicalState,
+): Record<string, unknown> {
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const ownKeys = Reflect.ownKeys(descriptors);
+  if (ownKeys.some((key) => typeof key === "symbol")) {
+    throw new GoalAcceptanceCertificateInputError(
+      "Certificate hashing rejects symbol record properties.",
+    );
+  }
+  const keys = (ownKeys as string[]).sort(compareCodeUnits);
+  const result: Record<string, unknown> = Object.create(null);
+
+  state.ancestors.add(value);
+  try {
+    for (const key of keys) {
+      if (key.length > MAX_CANONICAL_STRING_LENGTH) {
+        throw new GoalAcceptanceCertificateInputError(
+          "Canonical string bound exceeded for an object key.",
+        );
+      }
+      if (state.rejectSecretKeys && isSecretParamKey(key)) {
+        throw new GoalAcceptanceCertificateInputError(
+          `Goal acceptance criteria params contain forbidden secret key "${key}".`,
+        );
+      }
+      const descriptor = descriptors[key];
+      if (!descriptor || !("value" in descriptor) || !descriptor.enumerable) {
+        throw new GoalAcceptanceCertificateInputError(
+          "Certificate hashing rejects accessor or non-enumerable record properties.",
+        );
+      }
+      result[key] = canonicalize(descriptor.value, depth + 1, state);
+    }
+    return result;
+  } finally {
+    state.ancestors.delete(value);
+  }
+}
+
+function isSecretParamKey(key: string): boolean {
   const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
-  return [
-    "apikey",
-    "authorization",
-    "bearer",
-    "token",
-    "password",
-    "passwd",
-    "secret",
-    "cookie",
-    "credential",
-    "privatekey",
-    "accesskey",
-    "sessionkey",
-  ].some((secretKey) => normalized.includes(secretKey));
+  if (
+    SECRET_PARAM_KEYS.has(normalized) ||
+    SECRET_PARAM_SUFFIXES.some((suffix) => normalized.endsWith(suffix))
+  ) {
+    return true;
+  }
+
+  const words = key
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .split(/[^a-zA-Z0-9]+/)
+    .filter(Boolean)
+    .map((word) => word.toLowerCase());
+  const last = words.at(-1) ?? "";
+  const lastPair = words.slice(-2).join("");
+  return SECRET_PARAM_KEYS.has(last) ||
+    SECRET_PARAM_SUFFIXES.some((suffix) => lastPair === suffix);
+}
+
+function protectCreation<T>(fallback: string, operation: () => T): T {
+  try {
+    return operation();
+  } catch (error) {
+    throw toInputError(error, fallback);
+  }
+}
+
+function toInputError(
+  error: unknown,
+  fallback: string,
+): GoalAcceptanceCertificateInputError {
+  return error instanceof GoalAcceptanceCertificateInputError
+    ? error
+    : new GoalAcceptanceCertificateInputError(fallback);
+}
+
+function requireNonemptyString(value: unknown, label: string): string {
+  if (!isNonemptyString(value)) {
+    throw new GoalAcceptanceCertificateInputError(`${label} is malformed.`);
+  }
+  if (value.length > MAX_CANONICAL_STRING_LENGTH) {
+    throw new GoalAcceptanceCertificateInputError(
+      `Canonical string bound exceeded for ${label}.`,
+    );
+  }
+  return value;
+}
+
+function requireSafeNonnegativeInteger(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new GoalAcceptanceCertificateInputError(`${label} is malformed.`);
+  }
+  return value;
 }
 
 function isAcceptanceCheckKind(value: unknown): value is AcceptanceCheckKind {

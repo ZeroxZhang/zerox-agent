@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type {
   Goal,
@@ -8,6 +9,7 @@ import type {
 import {
   createGoalAcceptanceCertificate,
   createGoalCriteriaHash,
+  GoalAcceptanceCertificateInputError,
   verifyGoalAcceptanceCertificate,
 } from "./agentGoalAcceptanceCertificate";
 
@@ -53,17 +55,55 @@ describe("goal acceptance certificate", () => {
     }
   });
 
-  it("redacts secret-like criterion settings before hashing", () => {
+  it("keeps legitimate tokenBudget params meaningful in the criteria hash", () => {
     const left = withCheckMutation(createGoal(), (check) => ({
       ...check,
-      params: { ...check.params, apiKey: "provider-secret-left" },
+      params: { ...check.params, tokenBudget: 1_000 },
     }));
     const right = withCheckMutation(createGoal(), (check) => ({
       ...check,
-      params: { ...check.params, apiKey: "provider-secret-right" },
+      params: { ...check.params, tokenBudget: 2_000 },
     }));
 
-    expect(createGoalCriteriaHash(left)).toBe(createGoalCriteriaHash(right));
+    expect(createGoalCriteriaHash(left)).not.toBe(createGoalCriteriaHash(right));
+  });
+
+  it.each([
+    "apiKey",
+    "accessToken",
+    "authorization",
+    "password",
+    "secret",
+    "cookie",
+    "credential",
+    "privateKey",
+    "providerApiKey",
+    "openai_access_token",
+    "clientSecret",
+  ])("rejects raw secret-bearing criterion param key %s", (secretKey) => {
+    const goal = createGoal();
+    goal.successCriteria[0]!.acceptanceChecks[0]!.params = {
+      safe: true,
+      nested: { [secretKey]: "must-not-be-hashed" },
+    };
+
+    expect(() => createGoalCriteriaHash(goal)).toThrowError(
+      GoalAcceptanceCertificateInputError,
+    );
+    expect(() => createGoalCriteriaHash(goal)).toThrow(secretKey);
+  });
+
+  it("turns secret-bearing criteria into a typed verification failure", () => {
+    const goal = certifiedGoal();
+    goal.successCriteria[0]!.acceptanceChecks[0]!.params = {
+      apiKey: "must-not-be-hashed",
+    };
+
+    expect(() => verifyGoalAcceptanceCertificate(goal)).not.toThrow();
+    expect(verifyGoalAcceptanceCertificate(goal)).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining("apiKey"),
+    });
   });
 
   it("creates a deterministic sorted certificate without mutating its input", () => {
@@ -143,6 +183,132 @@ describe("goal acceptance certificate", () => {
 
   it("verifies a valid complete protocol-v2 certificate", () => {
     expect(verifyGoalAcceptanceCertificate(certifiedGoal())).toEqual({ ok: true });
+  });
+
+  it("synthesizes bounded metadata-only evidence for non-manifest result refs", () => {
+    const input = validInput();
+    input.evidenceManifest.artifacts = input.evidenceManifest.artifacts.filter(
+      (artifact) => artifact.ref !== "artifact:semantic",
+    );
+    delete input.provenanceRefs["artifact:semantic"];
+
+    const certificate = createGoalAcceptanceCertificate(input);
+    const synthesized = certificate.evidence.find(
+      (entry) => entry.ref === "artifact:semantic",
+    );
+
+    expect(synthesized).toEqual({
+      ref: "artifact:semantic",
+      provenanceRefs: [],
+    });
+    expect(verifyGoalAcceptanceCertificate(
+      goalWithCertificate(input.goal, certificate),
+    )).toEqual({ ok: true });
+  });
+
+  it("resolves result evidence through the owning entry provenance refs", () => {
+    const input = validInput();
+    input.checkResults[1]!.evidenceRefs = ["trajectory_z"];
+
+    const certificate = createGoalAcceptanceCertificate(input);
+
+    expect(certificate.evidence).not.toContainEqual(
+      expect.objectContaining({ ref: "trajectory_z" }),
+    );
+    expect(verifyGoalAcceptanceCertificate(
+      goalWithCertificate(input.goal, certificate),
+    )).toEqual({ ok: true });
+  });
+
+  it("rejects a required-evidence check with no result evidence refs", () => {
+    const input = validInput();
+    input.checkResults[0]!.evidenceRefs = [];
+    const certificate = createGoalAcceptanceCertificate(input);
+
+    expect(verifyGoalAcceptanceCertificate(
+      goalWithCertificate(input.goal, certificate),
+    )).toMatchObject({
+      ok: false,
+      reason: expect.stringMatching(/requires evidence|missing evidence/i),
+    });
+  });
+
+  it("rejects an evidence ref that ambiguously resolves to multiple entries", () => {
+    const input = validInput();
+    input.checkResults[1]!.evidenceRefs = ["trajectory_shared"];
+    input.provenanceRefs["artifact:report"] = ["trajectory_shared"];
+    input.provenanceRefs["artifact:semantic"] = ["trajectory_shared"];
+    const certificate = createGoalAcceptanceCertificate(input);
+
+    expect(verifyGoalAcceptanceCertificate(
+      goalWithCertificate(input.goal, certificate),
+    )).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining("ambiguous"),
+    });
+  });
+
+  it("rejects a dangling result evidence ref even with a matching digest", () => {
+    const goal = certifiedGoal();
+    goal.acceptanceCertificate!.checkResults[1]!.evidenceRefs = [
+      "trajectory_dangling",
+    ];
+    resignCertificate(goal);
+
+    expect(verifyGoalAcceptanceCertificate(goal)).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining("does not resolve"),
+    });
+  });
+
+  it("requires nonempty run identity at certificate creation and verification", () => {
+    const input = validInput();
+    input.runIds = [];
+
+    expect(() => createGoalAcceptanceCertificate(input)).toThrowError(
+      GoalAcceptanceCertificateInputError,
+    );
+    expect(() => createGoalAcceptanceCertificate(input)).toThrow(/run id/i);
+
+    const goal = certifiedGoal();
+    goal.acceptanceCertificate!.runIds = [];
+    resignCertificate(goal);
+    expect(verifyGoalAcceptanceCertificate(goal)).toMatchObject({
+      ok: false,
+      reason: expect.stringMatching(/nonempty run|run identity/i),
+    });
+  });
+
+  it("requires semantic judge metadata with evaluated message identity", () => {
+    const missingJudge = validInput();
+    delete (missingJudge as Partial<typeof missingJudge>).judge;
+    expect(() => createGoalAcceptanceCertificate(missingJudge)).toThrowError(
+      GoalAcceptanceCertificateInputError,
+    );
+
+    const noMessages = validInput();
+    noMessages.judge!.evaluatedMessageIds = [];
+    expect(() => createGoalAcceptanceCertificate(noMessages)).toThrowError(
+      GoalAcceptanceCertificateInputError,
+    );
+    expect(() => createGoalAcceptanceCertificate(noMessages)).toThrow(
+      /evaluated message/i,
+    );
+  });
+
+  it("allows a deterministic-only certificate without judge metadata", () => {
+    const input = validInput();
+    input.goal.successCriteria = input.goal.successCriteria.slice(0, 1);
+    input.checkResults = input.checkResults.slice(0, 1);
+    input.evidenceManifest.artifacts = input.evidenceManifest.artifacts.slice(0, 1);
+    delete (input as Partial<typeof input>).judge;
+
+    const certificate = createGoalAcceptanceCertificate(input);
+
+    expect(certificate.judge).toBeUndefined();
+    expect(verifyGoalAcceptanceCertificate(
+      goalWithCertificate(input.goal, certificate),
+    )).toEqual({ ok: true });
   });
 
   it.each([
@@ -260,35 +426,124 @@ describe("goal acceptance certificate", () => {
   });
 
   it.each([
-    ["run id", (input: ReturnType<typeof validInput>) => {
-      input.runIds = [""];
+    ["run id", (goal: Goal) => {
+      goal.acceptanceCertificate!.runIds = [""];
     }],
-    ["evidence ref", (input: ReturnType<typeof validInput>) => {
-      input.evidenceManifest.artifacts[0]!.ref = "";
+    ["evidence ref", (goal: Goal) => {
+      goal.acceptanceCertificate!.evidence[0]!.ref = "";
     }],
-    ["evidence hash", (input: ReturnType<typeof validInput>) => {
-      input.evidenceManifest.artifacts[0]!.sha256 = "not-sha256";
+    ["evidence hash", (goal: Goal) => {
+      goal.acceptanceCertificate!.evidence[0]!.sha256 = "not-sha256";
     }],
-    ["evidence size", (input: ReturnType<typeof validInput>) => {
-      input.evidenceManifest.artifacts[0]!.sizeBytes = -1;
+    ["evidence size", (goal: Goal) => {
+      goal.acceptanceCertificate!.evidence[0]!.sizeBytes = -1;
     }],
-    ["provenance", (input: ReturnType<typeof validInput>) => {
-      input.provenanceRefs["artifact:report"] = [""];
+    ["provenance", (goal: Goal) => {
+      goal.acceptanceCertificate!.evidence[0]!.provenanceRefs = [""];
     }],
-    ["judge", (input: ReturnType<typeof validInput>) => {
-      input.judge!.model = "";
+    ["judge", (goal: Goal) => {
+      goal.acceptanceCertificate!.judge!.model = "";
     }],
   ] as const)("rejects malformed %s structure", (reason, mutate) => {
-    const input = validInput();
-    mutate(input);
-    const goal = goalWithCertificate(
-      input.goal,
-      createGoalAcceptanceCertificate(input),
-    );
+    const goal = certifiedGoal();
+    mutate(goal);
+    resignCertificate(goal);
 
     expect(verifyGoalAcceptanceCertificate(goal)).toMatchObject({
       ok: false,
       reason: expect.stringContaining(reason),
+    });
+  });
+
+  it.each([
+    ["Date", () => new Date("2026-07-11T00:00:00.000Z")],
+    ["class instance", () => new (class CriterionParam { value = 1; })()],
+    ["getter", () => {
+      const value = {};
+      Object.defineProperty(value, "unsafe", {
+        enumerable: true,
+        get() {
+          throw new Error("RAW_GETTER_ERROR");
+        },
+      });
+      return value;
+    }],
+    ["function", () => (() => true)],
+    ["symbol", () => Symbol("unsafe")],
+    ["undefined", () => undefined],
+    ["nonfinite", () => Number.POSITIVE_INFINITY],
+    ["cycle", () => {
+      const value: Record<string, unknown> = {};
+      value.self = value;
+      return value;
+    }],
+    ["proxy", () => new Proxy({ safe: true }, {
+      ownKeys() {
+        throw new Error("RAW_PROXY_ERROR");
+      },
+    })],
+  ] as Array<[string, () => unknown]>)(
+    "rejects non-JSON-safe %s values with a typed error",
+    (_name, value) => {
+      const goal = createGoal();
+      goal.successCriteria[0]!.acceptanceChecks[0]!.params = {
+        unsafe: value(),
+      };
+
+      expect(() => createGoalCriteriaHash(goal)).toThrowError(
+        GoalAcceptanceCertificateInputError,
+      );
+    },
+  );
+
+  it.each([
+    ["depth", () => nestedValue(80)],
+    ["node", () => Object.fromEntries(
+      Array.from({ length: 20_100 }, (_, index) => [`key_${index}`, index]),
+    )],
+    ["array", () => Array.from({ length: 10_100 }, (_, index) => index)],
+    ["string", () => "x".repeat(300_000)],
+    ["byte", () => Array.from({ length: 5_000 }, () => "x".repeat(256))],
+  ] as const)("enforces the canonical %s bound", (bound, value) => {
+    const goal = createGoal();
+    goal.successCriteria[0]!.acceptanceChecks[0]!.params = {
+      bounded: value(),
+    };
+
+    expect(() => createGoalCriteriaHash(goal)).toThrowError(
+      GoalAcceptanceCertificateInputError,
+    );
+    expect(() => createGoalCriteriaHash(goal)).toThrow(bound);
+  });
+
+  it("turns hostile certificate proxies into typed verification failures", () => {
+    const goal = certifiedGoal();
+    goal.acceptanceCertificate = new Proxy(goal.acceptanceCertificate!, {
+      ownKeys() {
+        throw new Error("RAW_PROXY_ERROR");
+      },
+    });
+
+    expect(() => verifyGoalAcceptanceCertificate(goal)).not.toThrow();
+    expect(verifyGoalAcceptanceCertificate(goal)).toMatchObject({
+      ok: false,
+      reason: expect.not.stringContaining("RAW_PROXY_ERROR"),
+    });
+  });
+
+  it("rejects certificate accessors even when JSON rest syntax would ignore them", () => {
+    const goal = certifiedGoal();
+    Object.defineProperty(goal.acceptanceCertificate!, "ignoredAccessor", {
+      enumerable: false,
+      get() {
+        throw new Error("RAW_CERTIFICATE_GETTER_ERROR");
+      },
+    });
+
+    expect(() => verifyGoalAcceptanceCertificate(goal)).not.toThrow();
+    expect(verifyGoalAcceptanceCertificate(goal)).toMatchObject({
+      ok: false,
+      reason: expect.not.stringContaining("RAW_CERTIFICATE_GETTER_ERROR"),
     });
   });
 });
@@ -488,4 +743,39 @@ function withCheckMutation(
     clone.successCriteria[0]!.acceptanceChecks[0]!,
   );
   return clone;
+}
+
+function resignCertificate(goal: Goal): void {
+  const certificate = goal.acceptanceCertificate!;
+  const { certificateHash: _certificateHash, ...unsigned } = certificate;
+  certificate.certificateHash = createHash("sha256")
+    .update(stableJsonForTest(unsigned))
+    .digest("hex");
+}
+
+function stableJsonForTest(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableJsonForTest).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value)
+      .sort(compareCodeUnitsForTest)
+      .map((key) => `${JSON.stringify(key)}:${stableJsonForTest(
+        (value as Record<string, unknown>)[key],
+      )}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function compareCodeUnitsForTest(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function nestedValue(depth: number): Record<string, unknown> {
+  let value: Record<string, unknown> = { leaf: true };
+  for (let index = 0; index < depth; index += 1) {
+    value = { child: value };
+  }
+  return value;
 }
