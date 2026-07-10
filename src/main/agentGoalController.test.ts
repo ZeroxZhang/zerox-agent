@@ -280,11 +280,7 @@ describe("agent goal controller", () => {
       acceptance: {
         async evaluate() {
           acceptanceCalls += 1;
-          return {
-            accepted: false,
-            inferentialUsed: false,
-            checkResults: [],
-          };
+          return rejectedResult("turn_limit_repairable");
         },
         async evaluateGoal() {
           throw new Error("unexpected goal acceptance");
@@ -308,8 +304,94 @@ describe("agent goal controller", () => {
     });
     expect(acceptanceCalls).toBe(1);
     expect(plannerCalls).toBe(0);
+    expect(result.acceptanceState?.recentFailures).toHaveLength(1);
+    expect(result.acceptanceState?.lastDecision).toMatchObject({
+      action: "repair_same_milestone",
+      occurrence: 1,
+    });
     expect(ledger.at(-1)?.kind).toBe("review_requested");
     expect(ledger.at(-1)?.summary).toContain("turn limit");
+  });
+
+  it.each([
+    ["blocked_external", "external_dependency_missing", "external_blocked"],
+    ["impossible", "goal_impossible", "goal_impossible"],
+    ["acceptance_unavailable", "judge_unavailable", "acceptance_unavailable"],
+  ] as const)(
+    "maps paused %s acceptance through the typed blocked policy",
+    async (verdict, failureClass, stopReason) => {
+      await store.save(createProtocolV2Goal([milestone("milestone_1")]));
+      const controller = createController({
+        runtime: {
+          async runMilestone() {
+            return {
+              runId: "run_paused",
+              toolCallCount: 1,
+              status: "paused",
+              summary: "Turn limit reached.",
+            };
+          },
+        },
+        acceptance: createAcceptanceResults({
+          milestones: [
+            rejectedResult(`${verdict}_paused`, { verdict, failureClass }),
+          ],
+        }),
+      });
+
+      const result = await controller.start("goal_1");
+
+      expect(result.status).toBe("stopped_blocked");
+      expect(result.stopReason).toBe(stopReason);
+      expect(result.milestones[0]?.lastRunStatus).toBe("paused");
+      expect(result.acceptanceState?.recentFailures.at(-1)).toMatchObject({
+        verdict,
+        failureClass,
+      });
+    },
+  );
+
+  it("routes a paused structural rejection through the one replan policy", async () => {
+    await store.save(createProtocolV2Goal([milestone("milestone_original")]));
+    let runtimeCalls = 0;
+    let plannerCalls = 0;
+    const controller = createController({
+      runtime: {
+        async runMilestone(_goal, currentMilestone) {
+          runtimeCalls += 1;
+          return {
+            runId: `run_${currentMilestone.id}`,
+            toolCallCount: 1,
+            status: runtimeCalls === 1 ? "paused" : "succeeded",
+          };
+        },
+      },
+      acceptance: createAcceptanceResults({
+        milestones: [
+          rejectedResult("plan_invalid", {
+            verdict: "replan_required",
+            failureClass: "plan_structure_invalid",
+          }),
+          acceptedResult("check_done"),
+        ],
+        goals: [acceptedResult("check_done", { evidenceManifest: emptyManifest })],
+      }),
+      planner: {
+        async replan(goal) {
+          plannerCalls += 1;
+          goal.planVersion += 1;
+          goal.budgetUsage.replans += 1;
+          return [milestone("milestone_replanned")];
+        },
+      },
+    });
+
+    const result = await controller.start("goal_1");
+
+    expect(result.status).toBe("achieved");
+    expect(plannerCalls).toBe(1);
+    expect(runtimeCalls).toBe(2);
+    expect(result.budgetUsage.replans).toBe(1);
   });
 
   it("keeps a turn-limited milestone ready when the same run exhausts its budget", async () => {
@@ -343,7 +425,7 @@ describe("agent goal controller", () => {
     const controller = createController({
       runtime,
       acceptance: createAcceptance({
-        milestoneAccepted: [false, true],
+        milestoneAccepted: [true],
         goalAccepted: [true],
       }),
       planner: {
@@ -364,7 +446,7 @@ describe("agent goal controller", () => {
       ...stopped,
       status: "executing",
       stopReason: undefined,
-      budget: { ...stopped.budget, maxIterations: 2 },
+      budget: { ...stopped.budget, maxIterations: 3 },
     });
     const recovered = await controller.resume("goal_1");
 
@@ -1062,18 +1144,26 @@ describe("agent goal controller", () => {
         },
       }),
     );
+    let acceptanceCalls = 0;
     const controller = createController({
       runtime: createRuntime(),
-      acceptance: createAcceptanceResults({
-        milestones: [rejectedResult("assertion_mismatch")],
-      }),
+      acceptance: {
+        async evaluate() {
+          acceptanceCalls += 1;
+          return rejectedResult("assertion_mismatch");
+        },
+        async evaluateGoal() {
+          throw new Error("budget stop must not reach final acceptance");
+        },
+      },
     });
 
     const result = await controller.start("goal_1");
 
     expect(result.status).toBe("stopped_budget");
+    expect(acceptanceCalls).toBe(0);
     expect(result.acceptanceState?.lastDecision).toBeUndefined();
-    expect(result.acceptanceState?.recentFailures).toHaveLength(1);
+    expect(result.acceptanceState?.recentFailures).toHaveLength(0);
     expect(trajectoryEvents.map((event) => event.type)).not.toContain(
       "acceptance_repair_scheduled",
     );
@@ -1113,6 +1203,89 @@ describe("agent goal controller", () => {
     expect(repairMilestones[0]?.dependsOn).toContain("milestone_initial");
     expect(repairMilestones[0]?.successCriteria).toEqual(result.successCriteria);
     expect(runtime.runMilestoneIds.filter((id) => id.startsWith("repair_"))).toHaveLength(2);
+  });
+
+  it.each([
+    ["iterations", { maxIterations: 1 }, { iterations: 1 }],
+    ["tool calls", { maxToolCalls: 2 }, { toolCalls: 2 }],
+    ["wall clock", { maxWallClockMs: 50 }, { wallClockMs: 50 }],
+    ["tokens", { maxTokens: 10 }, { tokens: 10 }],
+  ] as const)(
+    "enforces the final %s hard budget before evaluateGoal",
+    async (_label, budgetOverride, usageOverride) => {
+      const base = createProtocolV2Goal(
+        [
+          {
+            ...milestone("milestone_done"),
+            state: "accepted",
+            runIds: ["run_done"],
+            attempts: 1,
+          },
+        ],
+        { status: "executing" },
+      );
+      await store.save({
+        ...base,
+        budget: { ...base.budget, ...budgetOverride },
+        budgetUsage: { ...base.budgetUsage, ...usageOverride },
+      });
+      let goalAcceptanceCalls = 0;
+      const controller = createController({
+        runtime: {
+          async runMilestone() {
+            throw new Error("final budget must stop before runtime");
+          },
+        },
+        acceptance: {
+          async evaluate() {
+            throw new Error("final budget must stop before milestone acceptance");
+          },
+          async evaluateGoal() {
+            goalAcceptanceCalls += 1;
+            return acceptedResult("check_done", { evidenceManifest: emptyManifest });
+          },
+        },
+      });
+
+      const result = await controller.resume("goal_1");
+
+      expect(result.status).toBe("stopped_budget");
+      expect(result.stopReason).toBe("budget_exhausted");
+      expect(goalAcceptanceCalls).toBe(0);
+    },
+  );
+
+  it("runs a pending final repair whose predecessor was skipped", async () => {
+    const skipped = {
+      ...milestone("milestone_skipped"),
+      state: "skipped" as const,
+    };
+    const accepted = {
+      ...milestone("milestone_accepted"),
+      state: "accepted" as const,
+      runIds: ["run_accepted"],
+      attempts: 1,
+    };
+    const repair = {
+      ...milestone("repair_abcdef123456", [skipped.id, accepted.id]),
+      state: "pending" as const,
+    };
+    await store.save(
+      createProtocolV2Goal([skipped, accepted, repair], { status: "executing" }),
+    );
+    const runtime = createRuntime();
+    const controller = createController({
+      runtime,
+      acceptance: createAcceptanceResults({
+        milestones: [acceptedResult("check_done")],
+        goals: [acceptedResult("check_done", { evidenceManifest: emptyManifest })],
+      }),
+    });
+
+    const result = await controller.resume("goal_1");
+
+    expect(runtime.runMilestoneIds).toEqual(["repair_abcdef123456"]);
+    expect(result.status).toBe("achieved");
   });
 
   it("always performs fresh final goal acceptance instead of using covered milestone checks", async () => {
@@ -1456,6 +1629,123 @@ describe("agent goal controller", () => {
     const certifiedLedger = await store.readLedger("goal_2");
     const ledgerKinds = [...blockedLedger, ...certifiedLedger].map((event) => event.kind);
     expect(ledgerKinds).toEqual(expect.arrayContaining(expectedKinds));
+  });
+
+  it("clears recent runtime action signatures when a run suspends for review", async () => {
+    await store.save(
+      createProtocolV2Goal([milestone("milestone_1")], {
+        reviewPolicy: "review_final_only",
+      }),
+    );
+    const controller = createController({
+      runtime: {
+        async runMilestone() {
+          return {
+            runId: "run_with_actions",
+            toolCallCount: 1,
+            status: "succeeded",
+            actionSignatures: ["file_write:stale-cross-run-signature"],
+          };
+        },
+      },
+      acceptance: createAcceptanceResults({
+        milestones: [acceptedResult("check_done")],
+        goals: [
+          rejectedResult("external_missing", {
+            verdict: "blocked_external",
+            failureClass: "external_dependency_missing",
+          }),
+        ],
+      }),
+    });
+
+    const waiting = await controller.start("goal_1");
+    expect(waiting.status).toBe("waiting_for_review");
+    await controller.resolveReview("goal_1", { kind: "approve_continue" });
+    const blocked = await waitForGoalStatus("stopped_blocked");
+
+    expect(blocked.acceptanceState?.recentFailures.at(-1)?.actionSignatures).toEqual([]);
+  });
+
+  it("persists only byte-bounded redacted action signatures from a hostile runtime", async () => {
+    const rawSecret = "RAW_PRIVATE_ACTION".repeat(4_000);
+    await store.save(createProtocolV2Goal([milestone("milestone_1")]));
+    const controller = createController({
+      runtime: {
+        async runMilestone() {
+          return {
+            runId: "run_hostile_actions",
+            toolCallCount: 2,
+            status: "succeeded",
+            actionSignatures: [
+              `file_write:${rawSecret}`,
+              "shell_exec:curl https://secret.invalid/run?api_key=query-secret -H 'Authorization: Bearer bearer-secret'",
+            ],
+          };
+        },
+      },
+      acceptance: createAcceptanceResults({
+        milestones: [
+          rejectedResult("external_missing", {
+            verdict: "blocked_external",
+            failureClass: "external_dependency_missing",
+          }),
+        ],
+      }),
+    });
+
+    const result = await controller.start("goal_1");
+    const persisted = result.acceptanceState?.recentFailures.at(-1)?.actionSignatures ?? [];
+    const serialized = JSON.stringify(persisted);
+
+    expect(Buffer.byteLength(serialized)).toBeLessThanOrEqual(8_192);
+    expect(serialized).not.toContain("RAW_PRIVATE_ACTION");
+    expect(serialized).not.toContain("secret.invalid");
+    expect(serialized).not.toContain("query-secret");
+    expect(serialized).not.toContain("bearer-secret");
+  });
+
+  it("clears terminal publication keys between completed runs of the same goal", async () => {
+    await store.save(createProtocolV2Goal([milestone("milestone_1")]));
+    let acceptanceCalls = 0;
+    const controller = createController({
+      runtime: createRuntime(),
+      acceptance: {
+        async evaluate() {
+          acceptanceCalls += 1;
+          const canonical = await store.get("goal_1");
+          await store.save({
+            ...canonical!,
+            status: "stopped_blocked",
+            stopReason: "external_blocked",
+          });
+          return acceptedResult("check_done");
+        },
+        async evaluateGoal() {
+          throw new Error("interrupted milestone must not reach final acceptance");
+        },
+      },
+    });
+
+    const first = await controller.start("goal_1");
+    expect(first.status).toBe("stopped_blocked");
+    await store.save({
+      ...first,
+      status: "executing",
+      stopReason: undefined,
+      milestones: first.milestones.map((item) => ({ ...item, state: "ready" })),
+    });
+    const second = await controller.resume("goal_1");
+
+    expect(second.status).toBe("stopped_blocked");
+    expect(acceptanceCalls).toBe(2);
+    expect(
+      trajectoryEvents.filter(
+        (event) =>
+          event.type === "goal_stopped" &&
+          event.payload.status === "stopped_blocked",
+      ),
+    ).toHaveLength(2);
   });
 
   function createController(options: {

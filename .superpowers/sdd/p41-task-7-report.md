@@ -81,3 +81,63 @@ exit 0
 ## Worktree Preservation
 
 Pre-existing `.gitignore` and unrelated untracked files were not edited or staged.
+
+## Review Fix — Bounded Acceptance Invariants
+
+### Status
+
+DONE
+
+### RED Evidence
+
+The review regressions were added before production changes and witnessed failing:
+
+```text
+npm test -- --run src/main/agentGoalController.test.ts src/main/goalRuntimeEngine.test.ts src/main/agentGoalFailureFingerprint.test.ts
+Test Files 3 failed (3)
+Tests 16 failed | 65 passed (81)
+```
+
+The failures covered:
+
+- paused blocked/impossible/unavailable/structural results bypassing the typed decision path;
+- repairable pauses lacking durable failure/directive state;
+- final hard budgets still calling `evaluateGoal`;
+- pending repair milestones blocked by skipped dependencies;
+- cross-run action-signature and terminal-publication cache retention;
+- unbounded/raw file content, commands, URLs, query credentials, and bearer tokens in action signatures.
+
+### GREEN Evidence
+
+```text
+npm test -- --run src/main/agentGoalController.test.ts src/main/goalRuntimeEngine.test.ts src/main/agentGoalAcceptanceCertificate.test.ts src/main/agentGoalFailureFingerprint.test.ts
+Test Files 4 passed (4)
+Tests 151 passed (151)
+
+npx tsc -p tsconfig.electron.json --noEmit
+exit 0
+
+npm run harness:check
+Harness check passed.
+
+git diff --check
+exit 0
+```
+
+### Fix Summary
+
+- Every nonaccepted milestone result, including paused runs, now enters `applyAcceptanceDecision`; repairable turn-limit pauses retain review compatibility after durable policy application.
+- Operational hard caps stop before both milestone acceptance validators and final goal cold judgment.
+- Repair dependency readiness treats accepted and skipped predecessors as satisfied.
+- Tool action signatures use stable private-value SHA-256/byte-length markers, redact secret-named fields and credential tokens, cap each signature at 2 KiB, and cap persisted arrays at 8 KiB.
+- Per-goal terminal publication keys and recent action signatures are cleared on owned run cleanup and direct terminal paths without clearing replacement-run state.
+
+### Review Fix Files
+
+- `src/main/agentGoalController.ts`
+- `src/main/agentGoalController.test.ts`
+- `src/main/goalRuntimeEngine.ts`
+- `src/main/goalRuntimeEngine.test.ts`
+- `src/main/agentGoalFailureFingerprint.ts`
+- `src/main/agentGoalFailureFingerprint.test.ts`
+- `.superpowers/sdd/p41-task-7-report.md`

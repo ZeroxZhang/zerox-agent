@@ -6,6 +6,13 @@ import type {
 } from "../shared/agentGoal";
 
 const UNREADABLE_MARKER = "[UNREADABLE]";
+export const MAX_TOOL_ACTION_SIGNATURE_BYTES = 2_048;
+export const MAX_PERSISTED_ACTION_SIGNATURE_BYTES = 8_192;
+const MAX_CANONICAL_DEPTH = 16;
+const MAX_CANONICAL_NODES = 512;
+const MAX_CANONICAL_ARRAY_LENGTH = 32;
+const MAX_CANONICAL_OBJECT_KEYS = 64;
+const MAX_CANONICAL_STRING_BYTES = 512;
 
 type CanonicalValue =
   | ["null"]
@@ -22,8 +29,16 @@ type CanonicalValue =
   | ["unserializable"]
   | ["redacted"]
   | ["array_hole"]
+  | ["truncated"]
+  | ["string_digest", string, number]
+  | ["private_digest", string, number]
   | ["array", CanonicalValue[]]
   | ["object", Array<[string, CanonicalValue]>];
+
+type CanonicalState = {
+  ancestors: WeakSet<object>;
+  nodes: number;
+};
 
 export type AcceptanceFailureTarget = Pick<
   GoalAcceptanceFailureRecord,
@@ -93,7 +108,37 @@ export function createToolActionSignature(
   toolName: string,
   args: unknown,
 ): string {
-  return `${safeString(toolName)}:${canonicalJson(args)}`;
+  const safeToolName = normalizeToolName(toolName);
+  const canonicalArgs = canonicalJson(args);
+  const signature = `${safeToolName}:${canonicalArgs}`;
+  if (Buffer.byteLength(signature) <= MAX_TOOL_ACTION_SIGNATURE_BYTES) {
+    return signature;
+  }
+  return `${safeToolName}:${JSON.stringify([
+    "bounded_digest",
+    createHash("sha256").update(canonicalArgs).digest("hex"),
+  ])}`;
+}
+
+export function sanitizeActionSignaturesForPersistence(
+  signatures: readonly unknown[],
+): string[] {
+  const sanitized: string[] = [];
+  const seen = new Set<string>();
+  for (const value of signatures.slice(0, 32)) {
+    const candidate = sanitizeOpaqueActionSignature(value);
+    if (seen.has(candidate)) continue;
+    const next = [...sanitized, candidate];
+    if (
+      Buffer.byteLength(JSON.stringify(next)) >
+      MAX_PERSISTED_ACTION_SIGNATURE_BYTES
+    ) {
+      break;
+    }
+    seen.add(candidate);
+    sanitized.push(candidate);
+  }
+  return sanitized;
 }
 
 export function countConsecutiveFingerprint(
@@ -123,18 +168,31 @@ export function countConsecutiveFingerprint(
 
 function canonicalJson(value: unknown): string {
   try {
-    return JSON.stringify(canonicalize(value, new WeakSet<object>()));
+    return JSON.stringify(
+      canonicalize(value, {
+        ancestors: new WeakSet<object>(),
+        nodes: 0,
+      }, 0),
+    );
   } catch {
     return JSON.stringify(special("unserializable"));
   }
 }
 
-function canonicalize(value: unknown, ancestors: WeakSet<object>): CanonicalValue {
+function canonicalize(
+  value: unknown,
+  state: CanonicalState,
+  depth: number,
+): CanonicalValue {
+  state.nodes += 1;
+  if (state.nodes > MAX_CANONICAL_NODES || depth > MAX_CANONICAL_DEPTH) {
+    return special("truncated");
+  }
   if (value === null) {
     return ["null"];
   }
   if (typeof value === "string") {
-    return ["string", value];
+    return canonicalizeString(value);
   }
   if (typeof value === "boolean") {
     return ["boolean", value];
@@ -166,24 +224,25 @@ function canonicalize(value: unknown, ancestors: WeakSet<object>): CanonicalValu
   if (typeof value !== "object") {
     return special("unserializable");
   }
-  if (ancestors.has(value)) {
+  if (state.ancestors.has(value)) {
     return special("circular");
   }
 
-  ancestors.add(value);
+  state.ancestors.add(value);
   try {
     if (Array.isArray(value)) {
       return [
         "array",
-        Array.from({ length: value.length }, (_, index) =>
-          canonicalizeArrayValue(value, index, ancestors),
+        Array.from(
+          { length: Math.min(value.length, MAX_CANONICAL_ARRAY_LENGTH) },
+          (_, index) => canonicalizeArrayValue(value, index, state, depth + 1),
         ),
       ];
     }
 
     let keys: string[];
     try {
-      keys = Object.keys(value).sort();
+      keys = Object.keys(value).sort().slice(0, MAX_CANONICAL_OBJECT_KEYS);
     } catch {
       return special("unserializable");
     }
@@ -194,24 +253,27 @@ function canonicalize(value: unknown, ancestors: WeakSet<object>): CanonicalValu
         key,
         isSecretLikeKey(key)
           ? special("redacted")
-          : canonicalizeObjectValue(value, key, ancestors),
+          : isPrivateValueKey(key)
+            ? canonicalizePrivateObjectValue(value, key)
+            : canonicalizeObjectValue(value, key, state, depth + 1),
       ]),
     ];
   } finally {
-    ancestors.delete(value);
+    state.ancestors.delete(value);
   }
 }
 
 function canonicalizeArrayValue(
   value: unknown[],
   index: number,
-  ancestors: WeakSet<object>,
+  state: CanonicalState,
+  depth: number,
 ): CanonicalValue {
   try {
     if (!(index in value)) {
       return special("array_hole");
     }
-    return canonicalize(value[index], ancestors);
+    return canonicalize(value[index], state, depth);
   } catch {
     return special("unreadable");
   }
@@ -220,10 +282,11 @@ function canonicalizeArrayValue(
 function canonicalizeObjectValue(
   value: object,
   key: string,
-  ancestors: WeakSet<object>,
+  state: CanonicalState,
+  depth: number,
 ): CanonicalValue {
   try {
-    return canonicalize((value as Record<string, unknown>)[key], ancestors);
+    return canonicalize((value as Record<string, unknown>)[key], state, depth);
   } catch {
     return special("unreadable");
   }
@@ -238,9 +301,131 @@ function special(
     | "unreadable"
     | "unserializable"
     | "redacted"
-    | "array_hole",
+    | "array_hole"
+    | "truncated",
 ): CanonicalValue {
   return [tag];
+}
+
+function canonicalizeString(value: string): CanonicalValue {
+  if (containsPrivateString(value)) {
+    return privateDigest(value);
+  }
+  if (containsSecretString(value)) {
+    return special("redacted");
+  }
+  const size = Buffer.byteLength(value);
+  if (size > MAX_CANONICAL_STRING_BYTES) {
+    return [
+      "string_digest",
+      createHash("sha256").update(value).digest("hex"),
+      size,
+    ];
+  }
+  return ["string", value];
+}
+
+function isPrivateValueKey(key: string): boolean {
+  const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return [
+    "body",
+    "callbackurl",
+    "cmd",
+    "code",
+    "command",
+    "content",
+    "document",
+    "endpoint",
+    "filecontent",
+    "href",
+    "payload",
+    "prompt",
+    "script",
+    "shell",
+    "text",
+    "uri",
+    "url",
+  ].some((sensitiveKey) => normalized === sensitiveKey || normalized.endsWith(sensitiveKey));
+}
+
+function containsSecretString(value: string): boolean {
+  return (
+    /\bbearer\s+[a-z0-9._~+\/-]+/i.test(value) ||
+    /(?:^|[?&\s])(?:api[_-]?key|access[_-]?token|authorization|password|secret|token)=/i.test(
+      value,
+    )
+  );
+}
+
+function containsPrivateString(value: string): boolean {
+  return (
+    /https?:\/\//i.test(value) ||
+    /^\s*(?:sudo\s+)?(?:bash|sh|zsh|curl|wget|npm|npx|node|python|git|rm|cp|mv|echo)\b/i.test(
+      value,
+    )
+  );
+}
+
+function canonicalizePrivateObjectValue(
+  value: object,
+  key: string,
+): CanonicalValue {
+  try {
+    return privateDigest((value as Record<string, unknown>)[key]);
+  } catch {
+    return special("unreadable");
+  }
+}
+
+function privateDigest(value: unknown): CanonicalValue {
+  const raw =
+    typeof value === "string" ? value : canonicalJson(value);
+  const scrubbed = scrubSecretsBeforeDigest(raw);
+  return [
+    "private_digest",
+    createHash("sha256").update(scrubbed).digest("hex"),
+    Buffer.byteLength(raw),
+  ];
+}
+
+function scrubSecretsBeforeDigest(value: string): string {
+  return value
+    .replace(/\bbearer\s+[a-z0-9._~+\/-]+/gi, "Bearer [redacted]")
+    .replace(
+      /([?&](?:api[_-]?key|access[_-]?token|authorization|password|secret|token)=)[^&#\s]*/gi,
+      "$1[redacted]",
+    )
+    .replace(/(https?:\/\/)[^/@\s]+:[^/@\s]+@/gi, "$1[redacted]@")
+    .replace(
+      /((?:api[_-]?key|access[_-]?token|authorization|password|secret|token)=)[^&\s]+/gi,
+      "$1[redacted]",
+    );
+}
+
+function normalizeToolName(value: unknown): string {
+  const raw = safeString(value).slice(0, 128);
+  const normalized = raw.replace(/[^A-Za-z0-9_.-]/g, "_");
+  return normalized || "tool";
+}
+
+function sanitizeOpaqueActionSignature(value: unknown): string {
+  const raw = safeString(value);
+  const separator = raw.indexOf(":");
+  const toolName = normalizeToolName(separator >= 0 ? raw.slice(0, separator) : raw);
+  const looksCanonical =
+    separator >= 0 && /^\s*\[/.test(raw.slice(separator + 1));
+  if (
+    !looksCanonical ||
+    Buffer.byteLength(raw) > MAX_TOOL_ACTION_SIGNATURE_BYTES ||
+    containsSecretString(raw) ||
+    containsPrivateString(raw) ||
+    /\["(?:body|callbackUrl|cmd|code|command|content|document|endpoint|filecontent|href|payload|prompt|script|shell|text|uri|url)",\["string"/i.test(
+      raw,
+    )
+  ) {
+    return `${toolName}:${JSON.stringify(["redacted"])}`;
+  }
+  return raw;
 }
 
 function isSecretLikeKey(key: string): boolean {

@@ -47,7 +47,10 @@ import {
 } from "../shared/toolInvocationLedger";
 import { createRuntimeContextSnapshotForRun } from "./runtimeContextFactory";
 import { summarizeAgentRuntimeContextSnapshot } from "../shared/agentRuntimeContext";
-import { createToolActionSignature } from "./agentGoalFailureFingerprint";
+import {
+  createToolActionSignature,
+  sanitizeActionSignaturesForPersistence,
+} from "./agentGoalFailureFingerprint";
 
 export type GoalRuntimeModelProfile = {
   baseUrl: string;
@@ -458,7 +461,9 @@ export function createGoalRuntimeEngine(options: {
           transcriptMessages: [
             { role: "assistant", content: pipelineResult.summary },
           ],
-          actionSignatures: [...actionSignatures],
+          actionSignatures: sanitizeActionSignaturesForPersistence([
+            ...actionSignatures,
+          ]),
         };
       }
 
@@ -704,7 +709,9 @@ export function createGoalRuntimeEngine(options: {
           loopResult.messages,
           loopResult.summary,
         ),
-        actionSignatures: [...actionSignatures],
+        actionSignatures: sanitizeActionSignaturesForPersistence([
+          ...actionSignatures,
+        ]),
       };
     },
   };

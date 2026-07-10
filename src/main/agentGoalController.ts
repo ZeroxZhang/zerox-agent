@@ -24,6 +24,7 @@ import type { ChatMessage } from "./openAiCompatibleClient";
 import {
   countConsecutiveFingerprint,
   createAcceptanceFailureFingerprint,
+  sanitizeActionSignaturesForPersistence,
 } from "./agentGoalFailureFingerprint";
 import {
   appendAcceptanceFailure,
@@ -125,6 +126,7 @@ export function createAgentGoalController(options: {
     entry.promise = runLoopInternal(goal, runOptions).finally(() => {
       if (activeRuns.get(goal.id) === entry) {
         activeRuns.delete(goal.id);
+        clearGoalRuntimeState(goal.id);
       }
     });
     activeRuns.set(goal.id, entry);
@@ -176,6 +178,16 @@ export function createAgentGoalController(options: {
       summary: terminalStatusMessage(goal),
     });
     notifyProgress("stopped", goal, terminalStatusMessage(goal));
+    recentActionSignatures.delete(goal.id);
+  }
+
+  function clearGoalRuntimeState(goalId: string): void {
+    recentActionSignatures.delete(goalId);
+    for (const key of publishedTerminalKeys) {
+      if (key.startsWith(`${goalId}:`)) {
+        publishedTerminalKeys.delete(key);
+      }
+    }
   }
 
   async function runLoopInternal(
@@ -194,6 +206,13 @@ export function createAgentGoalController(options: {
         const nextMilestone = pickNextReadyMilestone(goal);
         if (!nextMilestone) {
           if (allMilestonesAccepted(goal)) {
+            const finalBudgetExhaustion = describeGoalBudgetExhaustion(
+              goal,
+              false,
+            );
+            if (finalBudgetExhaustion) {
+              return stopForBudgetExhaustion(goal, finalBudgetExhaustion);
+            }
             const validatingGoal = await persistAcceptancePhase(
               goal,
               "validating",
@@ -326,7 +345,7 @@ export function createAgentGoalController(options: {
     );
     recentActionSignatures.set(
       goal.id,
-      [...new Set(runResult.actionSignatures ?? [])].slice(0, 32),
+      sanitizeActionSignaturesForPersistence(runResult.actionSignatures ?? []),
     );
     const abortedAfterRuntime = await latestGoalAfterAbort(goal, runOptions);
     if (abortedAfterRuntime) {
@@ -346,6 +365,24 @@ export function createAgentGoalController(options: {
     if (usageGoal.status !== goal.status) {
       notifyProgress("stopped", usageGoal, terminalStatusMessage(usageGoal));
       return { goal: usageGoal, suspend: true };
+    }
+    if (runResult.status === "paused") {
+      milestone.state = "ready";
+      touch(goal);
+    }
+
+    const acceptanceBudgetExhaustion = describeGoalBudgetExhaustion(
+      usageGoal,
+      false,
+    );
+    if (acceptanceBudgetExhaustion) {
+      return {
+        goal: await stopForBudgetExhaustion(
+          usageGoal,
+          acceptanceBudgetExhaustion,
+        ),
+        suspend: true,
+      };
     }
 
     const validatingGoal = await persistAcceptancePhase(
@@ -444,60 +481,16 @@ export function createAgentGoalController(options: {
       milestone.id,
     );
 
-    if (runResult.status === "paused") {
-      milestone.state = "ready";
-      touch(goal);
-    }
-
-    const operationalBudgetExhaustion = describeGoalBudgetExhaustion(goal, false);
-    if (operationalBudgetExhaustion && runResult.status === "paused") {
-      return {
-        goal: await stopForBudgetExhaustion(goal, operationalBudgetExhaustion),
-        suspend: true,
-      };
-    }
-
-    if (runResult.status === "paused") {
-      assertGoalTransition(goal.status, "waiting_for_review");
-      goal.status = "waiting_for_review";
-      touch(goal);
-      const pauseSummary = [
-        "Milestone paused at its turn limit and is waiting for review.",
-        runResult.summary,
-      ]
-        .filter(Boolean)
-        .join(" ");
-      const pausedGoal = await options.goalStore.save(goal);
-      if (pausedGoal.status !== goal.status) {
-        notifyProgress("stopped", pausedGoal, terminalStatusMessage(pausedGoal));
-        return { goal: pausedGoal, suspend: true };
-      }
-      await options.goalStore.appendLedger(goal.id, {
-        at: currentTime(),
-        kind: "review_requested",
-        milestoneId: milestone.id,
-        summary: pauseSummary,
-      });
-      await emit(goal.id, "goal_review_requested", {
-        goalId: goal.id,
-        milestoneId: milestone.id,
-        reason: "turn_limit",
-      });
-      notifyProgress(
-        "review_requested",
-        pausedGoal,
-        "里程碑达到本轮执行上限，目标已暂停；请审核后继续或调整计划。",
-        milestone.id,
-      );
-      return { goal: pausedGoal, suspend: true };
-    }
-
     const decisionResult = await applyAcceptanceDecision(
       goal,
       milestone,
       acceptance,
       runResult.actionSignatures ?? [],
       runOptions,
+      {
+        pauseAfterRepair: runResult.status === "paused",
+        ...(runResult.summary ? { pauseSummary: runResult.summary } : {}),
+      },
     );
     return decisionResult;
   }
@@ -508,7 +501,14 @@ export function createAgentGoalController(options: {
     result: AcceptanceResult,
     actionSignatures: string[],
     runOptions?: { signal?: AbortSignal },
+    decisionOptions: {
+      pauseAfterRepair?: boolean;
+      pauseSummary?: string;
+    } = {},
   ): Promise<{ goal: Goal; suspend: boolean }> {
+    const safeActionSignatures = sanitizeActionSignaturesForPersistence(
+      actionSignatures,
+    );
     const targetIdentity = {
       targetKind: target ? ("milestone" as const) : ("goal" as const),
       targetId: target?.id ?? goal.id,
@@ -522,7 +522,7 @@ export function createAgentGoalController(options: {
         ? { evidenceManifest: result.evidenceManifest }
         : {}),
       evidenceRefs,
-      actionSignatures,
+      actionSignatures: safeActionSignatures,
       protocolVersion: goal.acceptanceProtocolVersion ?? 1,
       validatorVersions: { acceptance: "goal-acceptance-v2" },
     });
@@ -543,7 +543,7 @@ export function createAgentGoalController(options: {
       failureClass,
       failedCheckIds: failedCheckIds(result),
       evidenceRefs,
-      actionSignatures: [...new Set(actionSignatures)].slice(0, 32),
+      actionSignatures: safeActionSignatures,
     });
     touch(goal);
     let persisted = await options.goalStore.save(goal);
@@ -621,9 +621,46 @@ export function createAgentGoalController(options: {
         persisted,
         runOptions,
       );
-      return interruptedAfterRepair
-        ? { goal: interruptedAfterRepair, suspend: true }
-        : { goal: persisted, suspend: false };
+      if (interruptedAfterRepair) {
+        return { goal: interruptedAfterRepair, suspend: true };
+      }
+      if (decisionOptions.pauseAfterRepair && target) {
+        assertGoalTransition(persisted.status, "waiting_for_review");
+        persisted.status = "waiting_for_review";
+        touch(persisted);
+        const pausedGoal = await options.goalStore.save(persisted);
+        if (pausedGoal.status !== "waiting_for_review") {
+          await publishCanonicalTerminal(pausedGoal);
+          return { goal: pausedGoal, suspend: true };
+        }
+        const pauseSummary = [
+          "Milestone paused at its turn limit after acceptance classification and is waiting for review.",
+          decisionOptions.pauseSummary,
+        ]
+          .filter(Boolean)
+          .join(" ");
+        await options.goalStore.appendLedger(pausedGoal.id, {
+          at: currentTime(),
+          kind: "review_requested",
+          milestoneId: target.id,
+          summary: pauseSummary,
+        });
+        await emit(pausedGoal.id, "goal_review_requested", {
+          goalId: pausedGoal.id,
+          milestoneId: target.id,
+          reason: "turn_limit",
+          fingerprint: decision.fingerprint,
+          occurrence: decision.occurrence,
+        });
+        notifyProgress(
+          "review_requested",
+          pausedGoal,
+          "里程碑达到本轮执行上限，验收问题已记录；请审核后继续或调整计划。",
+          target.id,
+        );
+        return { goal: pausedGoal, suspend: true };
+      }
+      return { goal: persisted, suspend: false };
     }
 
     if (decision.action === "stop_stalled") {
@@ -1028,6 +1065,9 @@ export function createAgentGoalController(options: {
     const persisted = await options.goalStore.save(goal);
     if (persisted.status !== status) {
       notifyProgress("stopped", persisted, terminalStatusMessage(persisted));
+      if (persisted.status !== "executing" && persisted.status !== "planning") {
+        clearGoalRuntimeState(persisted.id);
+      }
       return persisted;
     }
     await options.goalStore.appendLedger(goal.id, {
@@ -1042,6 +1082,7 @@ export function createAgentGoalController(options: {
       summary,
     });
     notifyProgress("stopped", persisted, summary);
+    clearGoalRuntimeState(persisted.id);
     return persisted;
   }
 
@@ -1186,7 +1227,8 @@ function pickNextReadyMilestone(goal: Goal): Milestone | null {
       milestone.dependsOn.every((dependencyId) =>
         goal.milestones.some(
           (candidate) =>
-            candidate.id === dependencyId && candidate.state === "accepted",
+            candidate.id === dependencyId &&
+            (candidate.state === "accepted" || candidate.state === "skipped"),
         ),
       )
     ) {

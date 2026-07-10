@@ -1541,6 +1541,17 @@ describe("goal runtime engine", () => {
           apiKey: "raw-secret-two",
           options: { a: 2, z: 1 },
         });
+        options.onToolCall?.("file_write", {
+          path: "report.md",
+          content: "PRIVATE_FILE_CONTENT".repeat(2_000),
+        });
+        options.onToolCall?.("shell_exec", {
+          command: "curl https://secret.invalid/run?api_key=query-secret -H 'Authorization: Bearer shell-secret'",
+        });
+        options.onToolCall?.("web_fetch", {
+          url: "https://user:password@secret.invalid/report?access_token=url-secret",
+          headers: { custom: "Bearer header-secret" },
+        });
         return {
           summary: "Repair attempted.",
           status: "succeeded",
@@ -1561,9 +1572,12 @@ describe("goal runtime engine", () => {
     expect(instruction).toContain("Fingerprint: abcdef123456");
     expect(instruction).toContain("materially different strategy");
     expect(instruction).toContain("do not repeat the prior failed approach");
-    expect(result.actionSignatures).toHaveLength(1);
+    expect(result.actionSignatures).toHaveLength(4);
     expect(result.actionSignatures?.[0]).toContain("web_fetch:");
-    expect(JSON.stringify(result.actionSignatures)).not.toContain("raw-secret");
+    expect(Buffer.byteLength(JSON.stringify(result.actionSignatures))).toBeLessThanOrEqual(8_192);
+    expect(JSON.stringify(result.actionSignatures)).not.toMatch(
+      /raw-secret|PRIVATE_FILE_CONTENT|curl https|secret\.invalid|query-secret|shell-secret|url-secret|header-secret/,
+    );
   });
 });
 

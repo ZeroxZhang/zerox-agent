@@ -217,6 +217,97 @@ describe("goal acceptance failure fingerprints", () => {
     expect(JSON.stringify({ left, right })).not.toContain("sk-live-secret");
   });
 
+  it("redacts hostile content, commands, URLs, query credentials, and bearer tokens", () => {
+    const privateContent = "PRIVATE_REPORT_CONTENT".repeat(2_000);
+    const shellCommand = "curl -H 'Authorization: Bearer shell-token' https://secret.invalid/run?api_key=query-secret";
+    const hostileUrl = "https://user:password@secret.invalid/report?access_token=url-secret&safe=1";
+    const signatures = [
+      createToolActionSignature("file_write", {
+        path: "report.md",
+        content: privateContent,
+      }),
+      createToolActionSignature("shell_exec", {
+        command: shellCommand,
+        cwd: "/workspace",
+      }),
+      createToolActionSignature("web_fetch", {
+        url: hostileUrl,
+        headers: { accept: "application/json", custom: "Bearer header-token" },
+      }),
+    ];
+    const serialized = JSON.stringify(signatures);
+
+    expect(signatures.every((signature) => Buffer.byteLength(signature) <= 2_048)).toBe(true);
+    expect(serialized).toContain("redacted");
+    expect(serialized).not.toContain("PRIVATE_REPORT_CONTENT");
+    expect(serialized).not.toContain("curl -H");
+    expect(serialized).not.toContain("secret.invalid");
+    expect(serialized).not.toContain("query-secret");
+    expect(serialized).not.toContain("shell-token");
+    expect(serialized).not.toContain("header-token");
+    expect(serialized).not.toContain("url-secret");
+  });
+
+  it("keeps private values differentiated by bounded digests without persisting raw text", () => {
+    const left = createToolActionSignature("file_write", {
+      path: "report.md",
+      content: "first private body",
+      callbackUrl: "https://first.invalid/hook?token=first-token",
+      command: "echo first-private-command",
+    });
+    const right = createToolActionSignature("file_write", {
+      command: "echo second-private-command",
+      callbackUrl: "https://second.invalid/hook?token=second-token",
+      content: "second private body",
+      path: "report.md",
+    });
+
+    expect(left).not.toBe(right);
+    expect(left).toContain("private_digest");
+    expect(right).toContain("private_digest");
+    expect(`${left}${right}`).not.toMatch(
+      /first private body|second private body|echo first|echo second|first\.invalid|second\.invalid/,
+    );
+  });
+
+  it("differentiates large contents and commands using only digest markers", () => {
+    const contentA = `PRIVATE_ALPHA_${"a".repeat(20_000)}`;
+    const contentB = `PRIVATE_BRAVO_${"b".repeat(20_000)}`;
+    const writeA = createToolActionSignature("file_write", {
+      path: "report.md",
+      content: contentA,
+    });
+    const writeB = createToolActionSignature("file_write", {
+      path: "report.md",
+      content: contentB,
+    });
+    const shellA = createToolActionSignature("shell_exec", {
+      command: "npm test -- alpha-private-suite",
+    });
+    const shellB = createToolActionSignature("shell_exec", {
+      command: "npm test -- bravo-private-suite",
+    });
+
+    expect(writeA).not.toBe(writeB);
+    expect(shellA).not.toBe(shellB);
+    expect(`${writeA}${writeB}${shellA}${shellB}`).not.toMatch(
+      /PRIVATE_ALPHA|PRIVATE_BRAVO|alpha-private-suite|bravo-private-suite/,
+    );
+    expect([writeA, writeB, shellA, shellB].every((value) => value.includes("private_digest"))).toBe(true);
+  });
+
+  it("does not let URL credential changes alter the scrubbed private digest", () => {
+    const left = createToolActionSignature("web_fetch", {
+      url: "https://user:first-password@example.test/report?api_key=first-key",
+    });
+    const right = createToolActionSignature("web_fetch", {
+      url: "https://user:other-password@example.test/report?api_key=other-key",
+    });
+
+    expect(left).toBe(right);
+    expect(`${left}${right}`).not.toMatch(/first|other|api_key/);
+  });
+
   it("handles undefined, non-finite numbers, sparse arrays, bigint, getters, and cycles safely", () => {
     const cyclic: Record<string, unknown> = {
       missing: undefined,
