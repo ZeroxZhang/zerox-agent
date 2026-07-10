@@ -97,6 +97,43 @@ const MAX_CODE_LENGTH = 120;
 const MAX_REF_LENGTH = 240;
 const MAX_PATH_LENGTH = 500;
 const MAX_METADATA_LENGTH = 160;
+// Mirrors the local certificate, fingerprint, and evidence secret-key
+// vocabularies without importing main-process Node modules into the renderer.
+const SECRET_METADATA_KEYS = new Set([
+  "apikey",
+  "accesskey",
+  "accesstoken",
+  "authorization",
+  "bearer",
+  "bearertoken",
+  "clientsecret",
+  "cookie",
+  "credential",
+  "credentials",
+  "password",
+  "passwd",
+  "passphrase",
+  "privatekey",
+  "pwd",
+  "refreshtoken",
+  "secret",
+  "secretkey",
+  "sessionkey",
+  "token",
+]);
+const SECRET_METADATA_SUFFIXES = [
+  "apikey",
+  "accesskey",
+  "accesstoken",
+  "bearertoken",
+  "clientsecret",
+  "passphrase",
+  "privatekey",
+  "refreshtoken",
+  "secret",
+  "secretkey",
+  "sessionkey",
+] as const;
 
 export function buildGoalBudgetIncreaseDelta(
   goal: Goal | null,
@@ -730,19 +767,31 @@ function safeArtifactPath(value: unknown): string | undefined {
 
 function redactSensitiveText(value: string): string {
   return value
+    .replace(
+      /(\b[a-z][a-z\d+.-]*:\/\/)[^\/@\s]+@/gi,
+      "$1[REDACTED]@",
+    )
     .replace(/\bBearer\s+[^\s,;]+/gi, "Bearer [REDACTED]")
     .replace(
-      /(["']?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|passwd|pwd|secret|authorization)["']?\s*:\s*)["'][^"']*["']/gi,
-      "$1\"[REDACTED]\"",
+      /(["'])([a-z][a-z\d_.-]*)\1\s*:\s*(["'])[^"']*\3/gi,
+      (match, _keyQuote: string, key: string) =>
+        isSecretMetadataKey(key) ? "[REDACTED]" : match,
     )
     .replace(
-      /(?:[?&]|\b)(?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|passwd|pwd|secret|authorization)\s*(?:=|:|%3d)\s*[^&#\s,;]+/gi,
-      "[REDACTED]",
+      /(?:[?&]|\b)([a-z][a-z\d_.-]*)\s*(?:=|:|%3d)\s*[^?&#\s,;\/\\]+/gi,
+      (match, key: string) =>
+        isSecretMetadataKey(key) ? "[REDACTED]" : match,
     )
     .replace(
       /\b(?:sk-(?:proj-)?[a-z\d_-]{6,}|gh[pousr]_[a-z\d_]{8,}|github_pat_[a-z\d_]{8,}|AKIA[A-Z\d]{16}|AIza[A-Za-z\d_-]{20,}|xox[baprs]-[A-Za-z\d-]{8,}|eyJ[A-Za-z\d_-]{8,}\.[A-Za-z\d_-]{8,}\.[A-Za-z\d_-]{8,})\b/g,
       "[REDACTED]",
     );
+}
+
+function isSecretMetadataKey(key: string): boolean {
+  const normalized = key.toLowerCase().replace(/[^a-z\d]/g, "");
+  return SECRET_METADATA_KEYS.has(normalized) ||
+    SECRET_METADATA_SUFFIXES.some((suffix) => normalized.endsWith(suffix));
 }
 
 function safePositiveInteger(value: unknown): number | undefined {

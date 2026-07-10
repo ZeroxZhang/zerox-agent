@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { Goal, Milestone, SuccessCriterion } from "../shared/agentGoal";
 import type { ChatSessionGoalSummary } from "../shared/chat";
 import {
+  createGoalAcceptanceCertificate,
+  verifyGoalAcceptanceCertificate,
+} from "../main/agentGoalAcceptanceCertificate";
+import {
   buildGoalBudgetIncreaseDelta,
   buildGoalProgressViewModel,
   buildGoalStatusPresentation,
@@ -389,6 +393,97 @@ describe("goal progress view model", () => {
     for (const secret of secretValues) {
       expect(serialized).not.toContain(secret);
     }
+    expect(serialized).not.toContain("/Users/alice");
+  });
+
+  it("redacts credential vocabulary and URL userinfo from a cryptographically valid certificate", () => {
+    const secrets = {
+      credential: "credential-value-9e31",
+      credentials: "credentials-value-4af2",
+      clientSecret: "client-secret-value-7bc3",
+      userinfo: "userinfo-password-5dd4",
+      pathCredential: "path-credential-value-6ee5",
+      pwd: "pwd-value-11f6",
+      passphrase: "passphrase-value-22a7",
+      secretKey: "secret-key-value-33b8",
+      compactSecretKey: "secretkey-value-44c9",
+      webhookSecret: "webhook-secret-value-55da",
+      awsSecretAccessKey: "aws-secret-access-key-value-66eb",
+    };
+    const artifactRef =
+      `https://leaky-user:${secrets.userinfo}@evidence.local/report` +
+      `?credential=${secrets.credential}` +
+      `&secret_key=${secrets.secretKey}` +
+      `&webhook_secret=${secrets.webhookSecret}`;
+    const goal = createGoal({
+      status: "executing",
+      planVersion: 2,
+      acceptanceProtocolVersion: 2,
+    });
+    const acceptanceCertificate = createGoalAcceptanceCertificate({
+      goal,
+      acceptedAt: "2026-07-11T05:00:00.000Z",
+      runIds: ["run_credential_redaction"],
+      checkResults: [{
+        checkId: "criterion_1_review",
+        kind: "model_review",
+        passed: true,
+        code:
+          `pwd=${secrets.pwd}; passphrase=${secrets.passphrase}; ` +
+          "monkey=banana",
+        evidenceRefs: [artifactRef],
+        detail: "accepted",
+      }],
+      evidenceManifest: {
+        version: 1,
+        generatedAt: "2026-07-11T04:59:59.000Z",
+        totalRenderedChars: 0,
+        truncated: false,
+        artifacts: [{
+          ref: artifactRef,
+          path:
+            `/Users/alice/client_secret=${secrets.clientSecret}/` +
+            `credential=${secrets.pathCredential}/` +
+            `secretkey=${secrets.compactSecretKey}/` +
+            `aws_secret_access_key=${secrets.awsSecretAccessKey}/report.md`,
+          mediaType: "text/markdown",
+          sizeBytes: 128,
+          sha256: "a".repeat(64),
+          excerpts: [],
+        }],
+      },
+      judge: {
+        model:
+          `https://model-user:${secrets.userinfo}@model.local/v1 ` +
+          `credential=${secrets.credential}`,
+        promptVersion: `goal-v2?credentials=${secrets.credentials}`,
+        evaluatedMessageIds: ["message_credential_redaction"],
+      },
+    });
+    const certified = {
+      ...goal,
+      status: "achieved" as const,
+      stopReason: "goal_accepted" as const,
+      acceptanceState: certifiedAcceptanceState(),
+      acceptanceCertificate,
+    };
+
+    expect(verifyGoalAcceptanceCertificate(certified)).toEqual({ ok: true });
+    const projected = buildGoalStatusPresentation(
+      certified.status,
+      certified,
+    ).certificate;
+    const serialized = JSON.stringify(projected);
+
+    expect(projected).toBeDefined();
+    expect(serialized).toContain("[REDACTED]");
+    expect(serialized).toContain("monkey=banana");
+    expect(projected?.artifacts[0]?.path).toContain("report.md");
+    for (const secret of Object.values(secrets)) {
+      expect(serialized).not.toContain(secret);
+    }
+    expect(serialized).not.toContain("leaky-user:");
+    expect(serialized).not.toContain("model-user:");
     expect(serialized).not.toContain("/Users/alice");
   });
 
