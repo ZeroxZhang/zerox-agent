@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { Goal, Milestone, SuccessCriterion } from "../shared/agentGoal";
 import type { ChatSessionGoalSummary } from "../shared/chat";
-import { buildGoalProgressViewModel } from "./goalProgressViewModel";
+import {
+  buildGoalBudgetIncreaseDelta,
+  buildGoalProgressViewModel,
+} from "./goalProgressViewModel";
 
 describe("goal progress view model", () => {
   it("explains a planned chat goal as waiting to start", () => {
@@ -60,7 +63,7 @@ describe("goal progress view model", () => {
     );
   });
 
-  it("treats legacy budget-stopped goals as directly recoverable", () => {
+  it("makes budget-stopped goals visibly terminal until the user resumes them", () => {
     const goal = createGoal({
       status: "stopped_budget",
       stopReason: "budget_exhausted",
@@ -75,9 +78,9 @@ describe("goal progress view model", () => {
 
     const viewModel = buildGoalProgressViewModel(toSummary(goal), goal);
 
-    expect(viewModel.statusLabel).toBe("可继续");
-    expect(viewModel.statusDetail).toContain("旧版本预算停止");
-    expect(viewModel.nextActionLabel).toBe("继续执行");
+    expect(viewModel.statusLabel).toBe("预算已用尽");
+    expect(viewModel.statusDetail).toContain("不会在后台继续");
+    expect(viewModel.nextActionLabel).toBe("需要你处理");
     expect(viewModel.metricCards.map((card) => card.label)).not.toContain("预算");
     expect(viewModel.metricCards.map((card) => card.value)).not.toContain("8/8");
   });
@@ -95,6 +98,26 @@ describe("goal progress view model", () => {
     expect(viewModel.statusLabel).toBe("失败");
     expect(viewModel.nextActionLabel).toBe("恢复路径");
     expect(viewModel.nextActionDetail).toContain("重试目标");
+  });
+
+  it("increases an overrun historical goal beyond its accumulated usage", () => {
+    const goal = createGoal({
+      status: "stopped_budget",
+      budgetUsage: {
+        iterations: 322,
+        toolCalls: 2_105,
+        wallClockMs: 53_905_191,
+        tokens: 609_456,
+        replans: 320,
+      },
+    });
+
+    expect(buildGoalBudgetIncreaseDelta(goal)).toEqual({
+      maxIterations: 322,
+      maxToolCalls: 2_105,
+      maxWallClockMs: 53_905_191,
+      maxReplans: 320,
+    });
   });
 });
 

@@ -4,7 +4,10 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createAppContainer } from "./container";
+import {
+  createAppContainer,
+  reconcileIrreversibleGoalProgressEvent,
+} from "./container";
 import { registerAllIpcHandlers } from "./ipc";
 import { createToolApprovalCoordinator } from "./toolApprovalCoordinator";
 import { issueToolResultRefReadCapability } from "./toolResultOffloadStore";
@@ -393,6 +396,113 @@ describe("app container goal drafts", () => {
       id: goal.id,
       status: "canceled",
     });
+  });
+
+  it("reconciles stale progress events against irreversible persisted goal status", () => {
+    const staleEvent: GoalProgressEvent = {
+      kind: "goal_progress",
+      goalId: "goal_race",
+      sessionId: "chat_race",
+      status: "waiting_for_review",
+      event: "review_requested",
+      message: "里程碑完成，等待你审核。",
+      timestamp: "2026-06-12T08:00:00.000Z",
+    };
+
+    expect(
+      reconcileIrreversibleGoalProgressEvent(
+        staleEvent,
+        createStoredGoal({
+          id: "goal_race",
+          status: "canceled",
+          stopReason: "user_canceled",
+        }),
+      ),
+    ).toMatchObject({
+      status: "canceled",
+      event: "stopped",
+      message: "目标已取消。",
+    });
+  });
+
+  it("keeps the chat session terminal when a stale budget event arrives after cancellation", async () => {
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const session = await container.chatSessionStore().appendMessage({
+      role: "user",
+      content: "/目标 验证取消竞态",
+    });
+    const goal = createStoredGoal({
+      id: "goal_progress_race",
+      chatSessionId: session.session.id,
+      status: "stopped_budget",
+      stopReason: "budget_exhausted",
+    });
+    const store = container.agentGoalStore();
+    await store.save(goal);
+    await container.chatSessionStore().attachGoal(session.session.id, {
+      id: goal.id,
+      description: goal.description,
+      status: goal.status,
+    });
+
+    let releaseBudgetLedger: (() => void) | undefined;
+    const budgetLedgerGate = new Promise<void>((resolve) => {
+      releaseBudgetLedger = resolve;
+    });
+    let budgetLedgerEnteredResolve: (() => void) | undefined;
+    const budgetLedgerEntered = new Promise<void>((resolve) => {
+      budgetLedgerEnteredResolve = resolve;
+    });
+    const appendLedger = store.appendLedger.bind(store);
+    store.appendLedger = async (goalId, event) => {
+      if (event.kind === "goal_replanned") {
+        budgetLedgerEnteredResolve?.();
+        await budgetLedgerGate;
+      }
+      await appendLedger(goalId, event);
+    };
+
+    const progressEvents: GoalProgressEvent[] = [];
+    let deliveredResolve: (() => void) | undefined;
+    const delivered = new Promise<void>((resolve) => {
+      deliveredResolve = resolve;
+    });
+    const unsubscribe = container.onGoalProgressEvent((event) => {
+      if (event.goalId !== goal.id) {
+        return;
+      }
+      progressEvents.push(event);
+      if (progressEvents.length >= 2) {
+        deliveredResolve?.();
+      }
+    });
+
+    const increasing = container.goalChatService().increaseBudget(goal.id, {
+      maxIterations: 1,
+    });
+    await budgetLedgerEntered;
+    await container.goalChatService().cancel(goal.id);
+    releaseBudgetLedger?.();
+    await increasing;
+    await delivered;
+    unsubscribe();
+
+    expect(progressEvents).toHaveLength(2);
+    expect(progressEvents.every((event) => event.status === "canceled")).toBe(true);
+    expect(progressEvents.at(-1)).toMatchObject({
+      status: "canceled",
+      event: "stopped",
+      message: "目标已取消。",
+    });
+    expect(
+      (await container.chatSessionStore().get(session.session.id))?.goalSummaries?.find(
+        (summary) => summary.id === goal.id,
+      ),
+    ).toMatchObject({ status: "canceled" });
   });
 
   it("appends a final assistant result when a background goal is achieved", async () => {

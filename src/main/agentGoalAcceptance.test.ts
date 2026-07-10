@@ -1,4 +1,11 @@
-import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+  copyFile,
+  mkdir,
+  mkdtemp,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -999,6 +1006,145 @@ describe("agent goal acceptance", () => {
       expect(capturedPrompts[0]).not.toContain("artifact:research_notes: missing");
     } finally {
       await rm(outputRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves an absolute artifact file reference inside the workspace", async () => {
+    const capturedPrompts: string[] = [];
+    const reportPath = path.join(workspacePath, "docs", "tech_report.md");
+    await mkdir(path.dirname(reportPath), { recursive: true });
+    await writeFile(
+      reportPath,
+      "# 技术调研报告\n\n报告包含十个一级章节和代码级分析。",
+      "utf8",
+    );
+    const acceptance = createAgentGoalAcceptance();
+
+    const result = await acceptance.evaluate(
+      createMilestone([
+        check(
+          "check_absolute_artifact",
+          "model_review",
+          {
+            condition: "技术调研报告已经生成",
+            evidenceRefs: [`artifact:${reportPath}`],
+          },
+          true,
+        ),
+      ]),
+      createContext({
+        chatClient: {
+          async complete(request) {
+            capturedPrompts.push(request.messages.at(-1)?.content ?? "");
+            return {
+              content: '{"accepted":true,"detail":"report evidence is present"}',
+              toolCalls: [],
+              finishReason: "stop",
+            };
+          },
+        },
+      }),
+    );
+
+    expect(result.accepted).toBe(true);
+    expect(capturedPrompts[0]).toContain(`artifact:${reportPath}`);
+    expect(capturedPrompts[0]).toContain("技术调研报告");
+    expect(capturedPrompts[0]).not.toContain("missing");
+  });
+
+  it("does not resolve an absolute artifact file reference outside authorized roots", async () => {
+    const outsideRoot = await mkdtemp(path.join(os.tmpdir(), "goal-artifact-outside-"));
+    let modelCalls = 0;
+
+    try {
+      const reportPath = path.join(outsideRoot, "tech_report.md");
+      await writeFile(reportPath, "# Outside report", "utf8");
+      const acceptance = createAgentGoalAcceptance();
+
+      const result = await acceptance.evaluate(
+        createMilestone([
+          check(
+            "check_outside_artifact",
+            "model_review",
+            {
+              condition: "技术调研报告已经生成",
+              evidenceRefs: [`artifact:${reportPath}`],
+            },
+            true,
+          ),
+        ]),
+        createContext({
+          chatClient: {
+            async complete() {
+              modelCalls += 1;
+              return {
+                content: '{"accepted":true,"detail":"unexpected"}',
+                toolCalls: [],
+                finishReason: "stop",
+              };
+            },
+          },
+        }),
+      );
+
+      expect(result.accepted).toBe(false);
+      expect(result.checkResults[0]?.detail).toBe(
+        `Missing required artifact evidence: artifact:${reportPath}.`,
+      );
+      expect(modelCalls).toBe(0);
+    } finally {
+      await rm(outsideRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("does not follow artifact symlinks from an authorized root to outside files", async () => {
+    const outsideRoot = await mkdtemp(path.join(os.tmpdir(), "goal-artifact-secret-"));
+    let modelCalls = 0;
+
+    try {
+      const outsidePath = path.join(outsideRoot, "secret.md");
+      const leafLink = path.join(workspacePath, "linked-secret.md");
+      const parentLink = path.join(workspacePath, "linked-output");
+      await writeFile(outsidePath, "outside secret", "utf8");
+      await symlink(outsidePath, leafLink);
+      await symlink(outsideRoot, parentLink, "dir");
+      const acceptance = createAgentGoalAcceptance();
+
+      for (const artifactPath of [leafLink, path.join(parentLink, "secret.md")]) {
+        const result = await acceptance.evaluate(
+          createMilestone([
+            check(
+              "check_symlink_artifact",
+              "model_review",
+              {
+                condition: "artifact is safely inside the workspace",
+                evidenceRefs: [`artifact:${artifactPath}`],
+              },
+              true,
+            ),
+          ]),
+          createContext({
+            chatClient: {
+              async complete() {
+                modelCalls += 1;
+                return {
+                  content: '{"accepted":true,"detail":"unexpected"}',
+                  toolCalls: [],
+                  finishReason: "stop",
+                };
+              },
+            },
+          }),
+        );
+
+        expect(result.accepted).toBe(false);
+        expect(result.checkResults[0]?.detail).toBe(
+          `Missing required artifact evidence: artifact:${artifactPath}.`,
+        );
+      }
+      expect(modelCalls).toBe(0);
+    } finally {
+      await rm(outsideRoot, { recursive: true, force: true });
     }
   });
 

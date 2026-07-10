@@ -288,6 +288,7 @@ export function createAppContainer(options: {
 
   const goalProgressListeners = new Set<(event: GoalProgressEvent) => void>();
   const agentRunsChangedListeners = new Set<(event: AgentRunsChangedEvent) => void>();
+  let goalProgressDeliveryQueue = Promise.resolve();
 
   function onGoalProgressEvent(callback: (event: GoalProgressEvent) => void) {
     goalProgressListeners.add(callback);
@@ -297,11 +298,37 @@ export function createAppContainer(options: {
   }
 
   function emitGoalProgressEvent(event: GoalProgressEvent) {
-    void syncGoalProgressToChatSession(event)
-      .catch(() => undefined)
-      .finally(() => {
-        notifyGoalProgressListeners(event);
-      });
+    const delivery = goalProgressDeliveryQueue.then(
+      () => deliverGoalProgressEvent(event),
+      () => deliverGoalProgressEvent(event),
+    );
+    goalProgressDeliveryQueue = delivery.then(
+      () => undefined,
+      () => undefined,
+    );
+  }
+
+  async function deliverGoalProgressEvent(event: GoalProgressEvent) {
+    let canonicalEvent = await reconcileGoalProgressEventFromStore(event);
+    await syncGoalProgressToChatSession(canonicalEvent).catch(() => undefined);
+
+    const latestEvent = await reconcileGoalProgressEventFromStore(canonicalEvent);
+    if (
+      latestEvent.status !== canonicalEvent.status ||
+      latestEvent.event !== canonicalEvent.event ||
+      latestEvent.message !== canonicalEvent.message
+    ) {
+      canonicalEvent = latestEvent;
+      await syncGoalProgressToChatSession(canonicalEvent).catch(() => undefined);
+    }
+    notifyGoalProgressListeners(canonicalEvent);
+  }
+
+  async function reconcileGoalProgressEventFromStore(
+    event: GoalProgressEvent,
+  ): Promise<GoalProgressEvent> {
+    const goal = await agentGoalStore().get(event.goalId).catch(() => null);
+    return reconcileIrreversibleGoalProgressEvent(event, goal);
   }
 
   function notifyGoalProgressListeners(event: GoalProgressEvent) {
@@ -347,13 +374,20 @@ export function createAppContainer(options: {
       return;
     }
 
+    const reconciledEvent = reconcileIrreversibleGoalProgressEvent(event, goal);
     const syncedGoal =
-      goal.status === event.status ? goal : { ...goal, status: event.status };
+      goal.status === reconciledEvent.status
+        ? goal
+        : { ...goal, status: reconciledEvent.status };
     await attachGoalSummaryIfChanged(
-      event.sessionId,
+      reconciledEvent.sessionId!,
       toChatGoalSummary(syncedGoal),
     );
-    await appendGoalTerminalMessageIfNeeded(event.sessionId, syncedGoal, event);
+    await appendGoalTerminalMessageIfNeeded(
+      reconciledEvent.sessionId!,
+      syncedGoal,
+      reconciledEvent,
+    );
   }
 
   async function attachGoalSummaryIfChanged(
@@ -1956,6 +1990,26 @@ export function createAppContainer(options: {
     selfImprovementService,
     onGoalProgressEvent,
     onAgentRunsChanged,
+  };
+}
+
+export function reconcileIrreversibleGoalProgressEvent(
+  event: GoalProgressEvent,
+  goal: Goal | null,
+): GoalProgressEvent {
+  if (
+    !goal ||
+    goal.status === event.status ||
+    (goal.status !== "achieved" && goal.status !== "canceled")
+  ) {
+    return event;
+  }
+
+  return {
+    ...event,
+    status: goal.status,
+    event: "stopped",
+    message: goal.status === "achieved" ? "目标已达成。" : "目标已取消。",
   };
 }
 

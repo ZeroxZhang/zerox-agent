@@ -167,7 +167,20 @@ export function createAgentGoalController(options: {
             }
 
             const reason = summarizeAcceptanceFailure(result);
-            goal.milestones = await options.planner.replan(goal, reason);
+            const budgetExhaustion = describeGoalBudgetExhaustion(goal, true);
+            if (budgetExhaustion) {
+              return stopForBudgetExhaustion(goal, budgetExhaustion);
+            }
+
+            const replannedMilestones = await options.planner.replan(goal, reason);
+            const abortedAfterReplan = await latestGoalAfterAbort(
+              goal,
+              runOptions,
+            );
+            if (abortedAfterReplan) {
+              return abortedAfterReplan;
+            }
+            goal.milestones = replannedMilestones;
             touch(goal);
             await options.goalStore.appendLedger(goal.id, {
               at: currentTime(),
@@ -185,8 +198,19 @@ export function createAgentGoalController(options: {
               goal,
               "目标验收证据不足，已重新规划继续推进。",
             );
-            await writeGoalCheckpoint(goal, "goal_acceptance_replanned");
+            const checkpoint = await writeGoalCheckpoint(
+              goal,
+              "goal_acceptance_replanned",
+            );
+            if (checkpoint.status !== goal.status) {
+              return checkpoint;
+            }
             continue;
+          }
+
+          const budgetExhaustion = describeGoalBudgetExhaustion(goal, false);
+          if (budgetExhaustion) {
+            return stopForBudgetExhaustion(goal, budgetExhaustion);
           }
 
           stalledIterations += 1;
@@ -199,6 +223,11 @@ export function createAgentGoalController(options: {
             );
           }
           continue;
+        }
+
+        const budgetExhaustion = describeGoalBudgetExhaustion(goal, false);
+        if (budgetExhaustion) {
+          return stopForBudgetExhaustion(goal, budgetExhaustion);
         }
 
         stalledIterations = 0;
@@ -232,7 +261,11 @@ export function createAgentGoalController(options: {
     milestone.state = "running";
     milestone.attempts += 1;
     touch(goal);
-    await options.goalStore.save(goal);
+    const startedGoal = await options.goalStore.save(goal);
+    if (startedGoal.status !== goal.status) {
+      notifyProgress("stopped", startedGoal, terminalStatusMessage(startedGoal));
+      return true;
+    }
     await options.goalStore.appendLedger(goal.id, {
       at: currentTime(),
       kind: "milestone_started",
@@ -268,7 +301,11 @@ export function createAgentGoalController(options: {
     goal.budgetUsage.wallClockMs += runResult.wallClockMs ?? 0;
     goal.budgetUsage.tokens += runResult.tokens ?? 0;
     touch(goal);
-    await options.goalStore.save(goal);
+    const usageGoal = await options.goalStore.save(goal);
+    if (usageGoal.status !== goal.status) {
+      notifyProgress("stopped", usageGoal, terminalStatusMessage(usageGoal));
+      return true;
+    }
 
     const acceptance = await options.acceptance.evaluate(
       milestone,
@@ -288,10 +325,13 @@ export function createAgentGoalController(options: {
         milestoneId: milestone.id,
         summary: milestone.lastAcceptanceSummary,
       });
-      await writeGoalCheckpoint(goal, "milestone_accepted");
+      const checkpoint = await writeGoalCheckpoint(goal, "milestone_accepted");
+      if (checkpoint.status !== goal.status) {
+        return true;
+      }
       notifyProgress(
         "milestone_accepted",
-        goal,
+        checkpoint,
         milestone.lastAcceptanceSummary ?? `里程碑已完成：${milestone.description}`,
         milestone.id,
       );
@@ -299,6 +339,11 @@ export function createAgentGoalController(options: {
       if (shouldRequestReview(goal, milestone)) {
         goal.status = "waiting_for_review";
         touch(goal);
+        const reviewGoal = await options.goalStore.save(goal);
+        if (reviewGoal.status !== goal.status) {
+          notifyProgress("stopped", reviewGoal, terminalStatusMessage(reviewGoal));
+          return true;
+        }
         await options.goalStore.appendLedger(goal.id, {
           at: currentTime(),
           kind: "review_requested",
@@ -311,11 +356,10 @@ export function createAgentGoalController(options: {
         });
         notifyProgress(
           "review_requested",
-          goal,
+          reviewGoal,
           "里程碑完成，等待你审核。",
           milestone.id,
         );
-        await options.goalStore.save(goal);
         return true;
       }
 
@@ -338,10 +382,66 @@ export function createAgentGoalController(options: {
       milestone.id,
     );
 
-    goal.milestones = await options.planner.replan(
+    if (runResult.status === "paused") {
+      milestone.state = "ready";
+      touch(goal);
+    }
+
+    const operationalBudgetExhaustion = describeGoalBudgetExhaustion(goal, false);
+    if (operationalBudgetExhaustion) {
+      await stopForBudgetExhaustion(goal, operationalBudgetExhaustion);
+      return true;
+    }
+
+    if (runResult.status === "paused") {
+      assertGoalTransition(goal.status, "waiting_for_review");
+      goal.status = "waiting_for_review";
+      touch(goal);
+      const pauseSummary = [
+        "Milestone paused at its turn limit and is waiting for review.",
+        runResult.summary,
+      ]
+        .filter(Boolean)
+        .join(" ");
+      const pausedGoal = await options.goalStore.save(goal);
+      if (pausedGoal.status !== goal.status) {
+        notifyProgress("stopped", pausedGoal, terminalStatusMessage(pausedGoal));
+        return true;
+      }
+      await options.goalStore.appendLedger(goal.id, {
+        at: currentTime(),
+        kind: "review_requested",
+        milestoneId: milestone.id,
+        summary: pauseSummary,
+      });
+      await emit(goal.id, "goal_review_requested", {
+        goalId: goal.id,
+        milestoneId: milestone.id,
+        reason: "turn_limit",
+      });
+      notifyProgress(
+        "review_requested",
+        pausedGoal,
+        "里程碑达到本轮执行上限，目标已暂停；请审核后继续或调整计划。",
+        milestone.id,
+      );
+      return true;
+    }
+
+    const replanBudgetExhaustion = describeGoalBudgetExhaustion(goal, true);
+    if (replanBudgetExhaustion) {
+      await stopForBudgetExhaustion(goal, replanBudgetExhaustion);
+      return true;
+    }
+
+    const replannedMilestones = await options.planner.replan(
       goal,
       milestone.lastAcceptanceSummary,
     );
+    if (await latestGoalAfterAbort(goal, runOptions)) {
+      return true;
+    }
+    goal.milestones = replannedMilestones;
     touch(goal);
     await options.goalStore.appendLedger(goal.id, {
       at: currentTime(),
@@ -361,8 +461,20 @@ export function createAgentGoalController(options: {
       "里程碑未通过，已重新规划。",
       milestone.id,
     );
-    await writeGoalCheckpoint(goal, "goal_replanned");
-    return false;
+    const replannedGoal = await writeGoalCheckpoint(goal, "goal_replanned");
+    return replannedGoal.status !== goal.status;
+  }
+
+  async function stopForBudgetExhaustion(
+    goal: Goal,
+    detail: string,
+  ): Promise<Goal> {
+    return stopGoal(
+      goal,
+      "stopped_budget",
+      "budget_exhausted",
+      `Goal budget exhausted: ${detail}.`,
+    );
   }
 
   async function stopGoal(
@@ -375,6 +487,11 @@ export function createAgentGoalController(options: {
     goal.status = status;
     goal.stopReason = stopReason;
     touch(goal);
+    const persisted = await options.goalStore.save(goal);
+    if (persisted.status !== status) {
+      notifyProgress("stopped", persisted, terminalStatusMessage(persisted));
+      return persisted;
+    }
     await options.goalStore.appendLedger(goal.id, {
       at: currentTime(),
       kind: "goal_stopped",
@@ -386,25 +503,28 @@ export function createAgentGoalController(options: {
       stopReason,
       summary,
     });
-    await options.goalStore.save(goal);
-    notifyProgress("stopped", goal, summary);
-    return goal;
+    notifyProgress("stopped", persisted, summary);
+    return persisted;
   }
 
   async function writeGoalCheckpoint(
     goal: Goal,
     reason: string,
-  ): Promise<void> {
+  ): Promise<Goal> {
     touch(goal);
-    await options.goalStore.save(goal);
+    const saved = await options.goalStore.save(goal);
     await emit(goal.id, "checkpoint_written", {
       goalId: goal.id,
-      status: goal.status,
+      status: saved.status,
       reason,
-      planVersion: goal.planVersion,
-      budgetUsage: goal.budgetUsage,
+      planVersion: saved.planVersion,
+      budgetUsage: saved.budgetUsage,
     });
-    notifyProgress("checkpoint", goal, `目标状态已保存：${reason}`);
+    const latest = await options.goalStore.get(goal.id);
+    const persisted =
+      latest && isIrreversibleGoalStatus(latest.status) ? latest : saved;
+    notifyProgress("checkpoint", persisted, `目标状态已保存：${reason}`);
+    return persisted;
   }
 
   async function emit(
@@ -443,14 +563,17 @@ export function createAgentGoalController(options: {
         assertGoalTransition(goal.status, "executing");
         goal.status = "executing";
         touch(goal);
+        const persisted = await options.goalStore.save(goal);
+        if (persisted.status !== goal.status) {
+          return persisted;
+        }
         await options.goalStore.appendLedger(goal.id, {
           at: currentTime(),
           kind: "goal_planned",
           summary: "Goal execution started.",
         });
         await emit(goal.id, "goal_planned", { goalId: goal.id });
-        notifyProgress("started", goal, "目标已开始执行。");
-        await options.goalStore.save(goal);
+        notifyProgress("started", persisted, "目标已开始执行。");
       }
       return runLoop(goal, runOptions);
     },
@@ -495,18 +618,25 @@ export function createAgentGoalController(options: {
           goal,
           decision.instructions,
         );
-        await emit(goal.id, "goal_replanned", {
-          goalId: goal.id,
-          planVersion: goal.planVersion,
-          replans: goal.budgetUsage.replans,
-        });
       }
 
       touch(goal);
-      await options.goalStore.save(goal);
-      notifyProgress("started", goal, "审核已通过，目标继续执行。");
-      void runLoop(goal).catch(() => undefined);
-      return goal;
+      const persisted = await options.goalStore.save(goal);
+      if (persisted.status !== goal.status) {
+        return persisted;
+      }
+
+      if (decision.kind === "modify_plan") {
+        await emit(goal.id, "goal_replanned", {
+          goalId: goal.id,
+          planVersion: persisted.planVersion,
+          replans: persisted.budgetUsage.replans,
+        });
+      }
+
+      notifyProgress("started", persisted, "审核已通过，目标继续执行。");
+      void runLoop(persisted).catch(() => undefined);
+      return persisted;
     },
   };
 }
@@ -541,6 +671,45 @@ function allMilestonesAccepted(goal: Goal): boolean {
         milestone.state === "accepted" || milestone.state === "skipped",
     )
   );
+}
+
+function describeGoalBudgetExhaustion(
+  goal: Goal,
+  includeReplans: boolean,
+): string | null {
+  if (goal.budgetUsage.iterations >= goal.budget.maxIterations) {
+    return `iterations ${goal.budgetUsage.iterations}/${goal.budget.maxIterations}`;
+  }
+  if (goal.budgetUsage.toolCalls >= goal.budget.maxToolCalls) {
+    return `tool calls ${goal.budgetUsage.toolCalls}/${goal.budget.maxToolCalls}`;
+  }
+  if (goal.budgetUsage.wallClockMs >= goal.budget.maxWallClockMs) {
+    return `wall clock ${goal.budgetUsage.wallClockMs}/${goal.budget.maxWallClockMs}ms`;
+  }
+  if (
+    goal.budget.maxTokens !== undefined &&
+    goal.budgetUsage.tokens >= goal.budget.maxTokens
+  ) {
+    return `tokens ${goal.budgetUsage.tokens}/${goal.budget.maxTokens}`;
+  }
+  if (includeReplans && goal.budgetUsage.replans >= goal.budget.maxReplans) {
+    return `replans ${goal.budgetUsage.replans}/${goal.budget.maxReplans}`;
+  }
+  return null;
+}
+
+function isIrreversibleGoalStatus(status: GoalStatus): boolean {
+  return status === "achieved" || status === "canceled";
+}
+
+function terminalStatusMessage(goal: Goal): string {
+  if (goal.status === "achieved") {
+    return "目标已达成。";
+  }
+  if (goal.status === "canceled") {
+    return "目标已取消。";
+  }
+  return "目标已停止。";
 }
 
 function canAcceptCoveredGoal(goal: Goal): boolean {

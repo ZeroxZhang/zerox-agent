@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Goal, Milestone, SuccessCriterion } from "../shared/agentGoal";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
+import type { GoalProgressEvent } from "../shared/chat";
 import { createAgentGoalStore, type AgentGoalStore } from "./agentGoalStore";
 import {
   createAgentGoalController,
@@ -63,7 +64,7 @@ describe("agent goal controller", () => {
     ).toHaveLength(3);
   });
 
-  it("continues dispatching milestones instead of stopping on internal budget counters", async () => {
+  it("stops before dispatching another milestone when the iteration budget is exhausted", async () => {
     await store.save(
       createGoal(
         [milestone("milestone_1"), milestone("milestone_2", ["milestone_1"])],
@@ -88,9 +89,56 @@ describe("agent goal controller", () => {
 
     const result = await controller.start("goal_1");
 
-    expect(result.status).toBe("achieved");
-    expect(result.stopReason).toBe("goal_accepted");
-    expect(runtime.runMilestoneIds).toEqual(["milestone_1", "milestone_2"]);
+    expect(result.status).toBe("stopped_budget");
+    expect(result.stopReason).toBe("budget_exhausted");
+    expect(runtime.runMilestoneIds).toEqual(["milestone_1"]);
+    const ledger = await store.readLedger("goal_1");
+    expect(ledger.at(-1)?.summary).toContain("iterations 1/1");
+  });
+
+  it.each([
+    {
+      label: "tool calls",
+      budget: { maxToolCalls: 4 },
+      budgetUsage: { toolCalls: 4 },
+      expected: "tool calls 4/4",
+    },
+    {
+      label: "wall clock",
+      budget: { maxWallClockMs: 2_000 },
+      budgetUsage: { wallClockMs: 2_000 },
+      expected: "wall clock 2000/2000ms",
+    },
+    {
+      label: "tokens",
+      budget: { maxTokens: 50 },
+      budgetUsage: { tokens: 50 },
+      expected: "tokens 50/50",
+    },
+  ])("stops before dispatch when the $label budget is exhausted", async ({
+    budget,
+    budgetUsage,
+    expected,
+  }) => {
+    const base = createGoal([milestone("milestone_1")], { status: "executing" });
+    await store.save({
+      ...base,
+      budget: { ...base.budget, ...budget },
+      budgetUsage: { ...base.budgetUsage, ...budgetUsage },
+    });
+    const runtime = createRuntime();
+    const controller = createController({
+      runtime,
+      acceptance: createAcceptance({ milestoneAccepted: [true] }),
+    });
+
+    const result = await controller.resume("goal_1");
+    const ledger = await store.readLedger("goal_1");
+
+    expect(result.status).toBe("stopped_budget");
+    expect(result.stopReason).toBe("budget_exhausted");
+    expect(runtime.runMilestoneIds).toEqual([]);
+    expect(ledger.at(-1)?.summary).toContain(expected);
   });
 
   it("stops stalled goals after consecutive iterations without ledger progress", async () => {
@@ -141,6 +189,300 @@ describe("agent goal controller", () => {
       "milestone_replanned",
     ]);
     expect(trajectoryEvents.map((event) => event.type)).toContain("goal_replanned");
+  });
+
+  it("stops after the configured replan limit instead of replanning forever", async () => {
+    await store.save(
+      createGoal([milestone("milestone_original")], {
+        budget: {
+          maxIterations: 8,
+          maxToolCalls: 99,
+          maxWallClockMs: 600_000,
+          maxReplans: 1,
+        },
+      }),
+    );
+    const runtime = createRuntime();
+    let plannerCalls = 0;
+    const controller = createController({
+      runtime,
+      acceptance: createAcceptance({ milestoneAccepted: [false, false] }),
+      planner: {
+        async replan(goal) {
+          plannerCalls += 1;
+          if (plannerCalls > 1) {
+            throw new Error("unexpected second replan");
+          }
+          goal.planVersion += 1;
+          goal.budgetUsage.replans += 1;
+          return [milestone("milestone_replanned")];
+        },
+      },
+    });
+
+    const result = await controller.start("goal_1");
+    const ledger = await store.readLedger("goal_1");
+
+    expect(result.status).toBe("stopped_budget");
+    expect(result.stopReason).toBe("budget_exhausted");
+    expect(result.budgetUsage.replans).toBe(1);
+    expect(plannerCalls).toBe(1);
+    expect(runtime.runMilestoneIds).toEqual([
+      "milestone_original",
+      "milestone_replanned",
+    ]);
+    expect(ledger.at(-1)?.summary).toContain("replans 1/1");
+  });
+
+  it("pauses for review instead of replanning a turn-limited milestone", async () => {
+    await store.save(createGoal([milestone("milestone_1")]));
+    let acceptanceCalls = 0;
+    let plannerCalls = 0;
+    const runtime: GoalRuntimeEngine = {
+      async runMilestone() {
+        return {
+          runId: "run_turn_limit",
+          toolCallCount: 8,
+          status: "paused",
+          summary: "工具调用轮次已达到上限（8 轮）。",
+          wallClockMs: 1_000,
+          tokens: 20,
+        };
+      },
+    };
+    const controller = createController({
+      runtime,
+      acceptance: {
+        async evaluate() {
+          acceptanceCalls += 1;
+          return {
+            accepted: false,
+            inferentialUsed: false,
+            checkResults: [],
+          };
+        },
+        async evaluateGoal() {
+          throw new Error("unexpected goal acceptance");
+        },
+      },
+      planner: {
+        async replan() {
+          plannerCalls += 1;
+          throw new Error("unexpected replan");
+        },
+      },
+    });
+
+    const result = await controller.start("goal_1");
+    const ledger = await store.readLedger("goal_1");
+
+    expect(result.status).toBe("waiting_for_review");
+    expect(result.milestones[0]).toMatchObject({
+      state: "ready",
+      lastRunStatus: "paused",
+    });
+    expect(acceptanceCalls).toBe(1);
+    expect(plannerCalls).toBe(0);
+    expect(ledger.at(-1)?.kind).toBe("review_requested");
+    expect(ledger.at(-1)?.summary).toContain("turn limit");
+  });
+
+  it("keeps a turn-limited milestone ready when the same run exhausts its budget", async () => {
+    await store.save(
+      createGoal([milestone("milestone_1")], {
+        budget: {
+          maxIterations: 1,
+          maxToolCalls: 99,
+          maxWallClockMs: 600_000,
+          maxReplans: 2,
+        },
+      }),
+    );
+    const runMilestoneIds: string[] = [];
+    const runtime: GoalRuntimeEngine = {
+      async runMilestone(_goal, currentMilestone) {
+        runMilestoneIds.push(currentMilestone.id);
+        return {
+          runId: `run_${runMilestoneIds.length}`,
+          toolCallCount: 1,
+          status: runMilestoneIds.length === 1 ? "paused" : "succeeded",
+          summary:
+            runMilestoneIds.length === 1
+              ? "工具调用轮次已达到上限（8 轮）。"
+              : "里程碑已完成。",
+          wallClockMs: 100,
+          tokens: 10,
+        };
+      },
+    };
+    const controller = createController({
+      runtime,
+      acceptance: createAcceptance({
+        milestoneAccepted: [false, true],
+        goalAccepted: [true],
+      }),
+      planner: {
+        async replan() {
+          throw new Error("unexpected replan");
+        },
+      },
+    });
+
+    const stopped = await controller.start("goal_1");
+    expect(stopped.status).toBe("stopped_budget");
+    expect(stopped.milestones[0]).toMatchObject({
+      state: "ready",
+      lastRunStatus: "paused",
+    });
+
+    await store.save({
+      ...stopped,
+      status: "executing",
+      stopReason: undefined,
+      budget: { ...stopped.budget, maxIterations: 2 },
+    });
+    const recovered = await controller.resume("goal_1");
+
+    expect(recovered.status).toBe("achieved");
+    expect(runMilestoneIds).toEqual(["milestone_1", "milestone_1"]);
+  });
+
+  it("does not let a replan that resolves after cancellation overwrite the terminal goal", async () => {
+    await store.save(createGoal([milestone("milestone_1")]));
+    const abortController = new AbortController();
+    let deferredResolve: ((milestones: Milestone[]) => void) | undefined;
+    const plannerPromise = new Promise<Milestone[]>((resolve) => {
+      deferredResolve = resolve;
+    });
+    let plannerEnteredResolve: (() => void) | undefined;
+    const plannerEntered = new Promise<void>((resolve) => {
+      plannerEnteredResolve = resolve;
+    });
+    const controller = createController({
+      runtime: createRuntime(),
+      acceptance: createAcceptance({ milestoneAccepted: [false] }),
+      planner: {
+        async replan(goal) {
+          plannerEnteredResolve?.();
+          const milestones = await plannerPromise;
+          goal.planVersion += 1;
+          goal.budgetUsage.replans += 1;
+          return milestones;
+        },
+      },
+    });
+
+    const running = controller.start("goal_1", {
+      signal: abortController.signal,
+    });
+    await plannerEntered;
+    const persisted = await store.get("goal_1");
+    await store.save({
+      ...persisted!,
+      status: "canceled",
+      stopReason: "user_canceled",
+    });
+    await store.appendLedger("goal_1", {
+      at: "2026-06-12T00:00:00.000Z",
+      kind: "goal_stopped",
+      summary: "Goal canceled from test.",
+    });
+    abortController.abort();
+    deferredResolve?.([milestone("milestone_replanned")]);
+
+    const result = await running;
+    const ledger = await store.readLedger("goal_1");
+
+    expect(result.status).toBe("canceled");
+    expect(result.stopReason).toBe("user_canceled");
+    expect(ledger.at(-1)?.summary).toBe("Goal canceled from test.");
+    expect(ledger.map((event) => event.kind)).not.toContain("goal_replanned");
+  });
+
+  it("publishes the persisted canceled status when cancellation lands during replan bookkeeping", async () => {
+    await store.save(createGoal([milestone("milestone_1")]));
+    const abortController = new AbortController();
+    const progressEvents: GoalProgressEvent[] = [];
+    let canceled = false;
+    const controller = createController({
+      runtime: createRuntime(),
+      acceptance: createAcceptance({ milestoneAccepted: [false] }),
+      planner: {
+        async replan(goal) {
+          goal.planVersion += 1;
+          goal.budgetUsage.replans += 1;
+          return [milestone("milestone_replanned")];
+        },
+      },
+      async onTrajectoryAppend(event) {
+        if (event.type !== "goal_replanned" || canceled) {
+          return;
+        }
+        canceled = true;
+        const persisted = await store.get("goal_1");
+        await store.save({
+          ...persisted!,
+          status: "canceled",
+          stopReason: "user_canceled",
+        });
+        abortController.abort();
+      },
+      onProgress(event) {
+        progressEvents.push(event);
+      },
+    });
+
+    const result = await controller.start("goal_1", {
+      signal: abortController.signal,
+    });
+
+    expect(result.status).toBe("canceled");
+    await expect(store.get("goal_1")).resolves.toMatchObject({
+      status: "canceled",
+      stopReason: "user_canceled",
+    });
+    expect(progressEvents.at(-1)?.status).toBe("canceled");
+  });
+
+  it("does not publish stale review progress when cancellation lands during milestone acceptance", async () => {
+    await store.save(
+      createGoal([milestone("milestone_1")], {
+        reviewPolicy: "review_each_milestone",
+      }),
+    );
+    const progressEvents: GoalProgressEvent[] = [];
+    let canceled = false;
+    const controller = createController({
+      runtime: createRuntime(),
+      acceptance: createAcceptance({ milestoneAccepted: [true] }),
+      async onTrajectoryAppend(event) {
+        if (event.type !== "checkpoint_written" || canceled) {
+          return;
+        }
+        canceled = true;
+        const persisted = await store.get("goal_1");
+        await store.save({
+          ...persisted!,
+          status: "canceled",
+          stopReason: "user_canceled",
+        });
+      },
+      onProgress(event) {
+        progressEvents.push(event);
+      },
+    });
+
+    const result = await controller.start("goal_1");
+
+    expect(result.status).toBe("canceled");
+    expect(progressEvents.at(-1)).toMatchObject({ status: "canceled" });
+    expect(
+      progressEvents.some(
+        (event) =>
+          event.event === "review_requested" &&
+          event.status === "waiting_for_review",
+      ),
+    ).toBe(false);
   });
 
   it("continues with replanned work when final goal acceptance needs more evidence", async () => {
@@ -424,6 +766,41 @@ describe("agent goal controller", () => {
     expect(ledger.map((event) => event.summary)).not.toContain("Goal canceled.");
   });
 
+  it("does not resume when cancellation wins a modify-plan review race", async () => {
+    await store.save(
+      createGoal([milestone("milestone_1")], {
+        status: "waiting_for_review",
+      }),
+    );
+    const runtime = createRuntime();
+    const controller = createController({
+      runtime,
+      acceptance: createAcceptance({ milestoneAccepted: [true] }),
+      planner: {
+        async replan(goal) {
+          const persisted = await store.get(goal.id);
+          await store.save({
+            ...persisted!,
+            status: "canceled",
+            stopReason: "user_canceled",
+          });
+          goal.planVersion += 1;
+          goal.budgetUsage.replans += 1;
+          return [milestone("milestone_replanned")];
+        },
+      },
+    });
+
+    const result = await controller.resolveReview("goal_1", {
+      kind: "modify_plan",
+      instructions: "调整剩余计划",
+    });
+
+    expect(result.status).toBe("canceled");
+    expect(result.stopReason).toBe("user_canceled");
+    expect(runtime.runMilestoneIds).toEqual([]);
+  });
+
   it("resumes without re-dispatching accepted milestones", async () => {
     await store.save(
       createGoal([
@@ -487,6 +864,8 @@ describe("agent goal controller", () => {
     acceptance: ReturnType<typeof createAcceptance>;
     planner?: { replan(goal: Goal, reason: string): Promise<Milestone[]> };
     stallThreshold?: number;
+    onProgress?: (event: GoalProgressEvent) => void;
+    onTrajectoryAppend?: (event: AgentTrajectoryEvent) => Promise<void> | void;
   }) {
     return createAgentGoalController({
       goalStore: store,
@@ -502,10 +881,12 @@ describe("agent goal controller", () => {
         },
       trajectoryStore: {
         async append(_runId, event) {
+          await options.onTrajectoryAppend?.(event);
           trajectoryEvents.push(event);
           return event;
         },
       },
+      onProgress: options.onProgress,
       stallThreshold: options.stallThreshold,
       createId: () => `goal_event_${trajectoryEvents.length + 1}`,
       nextSequence: () => {

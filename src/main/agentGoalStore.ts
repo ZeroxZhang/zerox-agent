@@ -30,6 +30,7 @@ const terminalGoalStatuses = new Set<GoalStatus>([
   "failed",
   "canceled",
 ]);
+const irreversibleGoalStatuses = new Set<GoalStatus>(["achieved", "canceled"]);
 
 export function createAgentGoalStore(options: {
   configDir: string;
@@ -89,6 +90,14 @@ export function createAgentGoalStore(options: {
       return serializeMutation(mutationQueue, (nextQueue) => {
         mutationQueue = nextQueue;
       }, async () => {
+        const existing = await readGoal(goal.id);
+        if (
+          existing &&
+          irreversibleGoalStatuses.has(existing.status) &&
+          goal.status !== existing.status
+        ) {
+          return existing;
+        }
         await writeJsonFileAtomically(
           goalsDir,
           goalPath(goal.id),

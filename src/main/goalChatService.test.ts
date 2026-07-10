@@ -498,6 +498,70 @@ describe("goal chat service", () => {
     });
   });
 
+  it("counts a manual replan exactly once when the planner updates usage", async () => {
+    const savedGoals: Goal[] = [];
+    const existingGoal = createGoal({ status: "stopped_budget" });
+    const service = createGoalChatService({
+      controller: createController(),
+      goalStore: createGoalStore({ existingGoal, savedGoals }),
+      planner: {
+        async plan() {
+          throw new Error("unexpected plan");
+        },
+        async replan(goal) {
+          goal.planVersion += 1;
+          goal.budgetUsage.replans += 1;
+          return goal.milestones;
+        },
+      },
+      now: () => "2026-06-12T08:00:00.000Z",
+    });
+
+    await service.replan("goal_release", "只调整剩余步骤");
+
+    expect(savedGoals.at(-1)?.planVersion).toBe(2);
+    expect(savedGoals.at(-1)?.budgetUsage.replans).toBe(1);
+  });
+
+  it("returns a concurrently canceled goal instead of publishing a stale manual replan", async () => {
+    const existingGoal = createGoal({ status: "stopped_budget" });
+    const canceledGoal = createGoal({
+      status: "canceled",
+      stopReason: "user_canceled",
+    });
+    const ledgerEvents: ProgressLedgerEvent[] = [];
+    const service = createGoalChatService({
+      controller: createController(),
+      goalStore: {
+        async get() {
+          return existingGoal;
+        },
+        async save() {
+          return canceledGoal;
+        },
+        async appendLedger(_goalId, event) {
+          ledgerEvents.push(event);
+        },
+      },
+      planner: {
+        async plan() {
+          throw new Error("unexpected plan");
+        },
+        async replan(goal) {
+          goal.planVersion += 1;
+          goal.budgetUsage.replans += 1;
+          return goal.milestones;
+        },
+      },
+      now: () => "2026-06-12T08:00:00.000Z",
+    });
+
+    const summary = await service.replan("goal_release", "调整剩余步骤");
+
+    expect(summary.status).toBe("canceled");
+    expect(ledgerEvents).toEqual([]);
+  });
+
   it("marks a planning goal executing before the background controller run settles", async () => {
     const savedGoals: Goal[] = [];
     const ledgerEvents: ProgressLedgerEvent[] = [];
@@ -570,6 +634,43 @@ describe("goal chat service", () => {
       kind: "goal_stopped",
       summary: "Goal canceled from chat.",
     });
+  });
+
+  it("returns achieved when achievement wins a concurrent cancel", async () => {
+    const progressEvents: import("../shared/chat").GoalProgressEvent[] = [];
+    const ledgerEvents: ProgressLedgerEvent[] = [];
+    const runningGoal = createGoal({ status: "executing" });
+    const achievedGoal = createGoal({
+      status: "achieved",
+      stopReason: "goal_accepted",
+    });
+    let persistedGoal = runningGoal;
+    const service = createGoalChatService({
+      controller: createController(),
+      goalStore: {
+        async get() {
+          return persistedGoal;
+        },
+        async save(nextGoal) {
+          persistedGoal = nextGoal.status === "canceled" ? achievedGoal : nextGoal;
+          return persistedGoal;
+        },
+        async appendLedger(_goalId, event) {
+          ledgerEvents.push(event);
+        },
+      },
+      planner: createFakePlanner(),
+      onProgress(event) {
+        progressEvents.push(event);
+      },
+      now: () => "2026-06-12T08:00:00.000Z",
+    });
+
+    const summary = await service.cancel("goal_release");
+
+    expect(summary.status).toBe("achieved");
+    expect(ledgerEvents).toEqual([]);
+    expect(progressEvents).toEqual([]);
   });
 
   it("pauses an active chat goal at a review gate", async () => {
@@ -701,6 +802,53 @@ describe("goal chat service", () => {
       kind: "goal_planned",
       summary: "Goal retried from chat recovery UI.",
     });
+  });
+
+  it("does not restart when cancellation wins a concurrent retry", async () => {
+    const progressEvents: import("../shared/chat").GoalProgressEvent[] = [];
+    const ledgerEvents: ProgressLedgerEvent[] = [];
+    const resumed: string[] = [];
+    const stoppedGoal = createGoal({
+      status: "stopped_budget",
+      stopReason: "budget_exhausted",
+    });
+    const canceledGoal = createGoal({
+      status: "canceled",
+      stopReason: "user_canceled",
+    });
+    let persistedGoal = stoppedGoal;
+    const service = createGoalChatService({
+      controller: createController({
+        async resume(goalId) {
+          resumed.push(goalId);
+          return createGoal({ id: goalId, status: "executing" });
+        },
+      }),
+      goalStore: {
+        async get() {
+          return persistedGoal;
+        },
+        async save(nextGoal) {
+          persistedGoal = nextGoal.status === "executing" ? canceledGoal : nextGoal;
+          return persistedGoal;
+        },
+        async appendLedger(_goalId, event) {
+          ledgerEvents.push(event);
+        },
+      },
+      planner: createFakePlanner(),
+      onProgress(event) {
+        progressEvents.push(event);
+      },
+      now: () => "2026-06-12T08:00:00.000Z",
+    });
+
+    const summary = await service.retry("goal_release");
+
+    expect(summary.status).toBe("canceled");
+    expect(resumed).toEqual([]);
+    expect(ledgerEvents).toEqual([]);
+    expect(progressEvents).toEqual([]);
   });
 });
 

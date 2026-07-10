@@ -518,6 +518,7 @@ export function createGoalRuntimeEngine(options: {
           toolResultOffloadThreshold: options.toolResultOffloadThreshold,
           pauseOnFailureLoop: true,
           pauseOnStrategyGuard: true,
+          pauseOnTurnLimit: true,
           ...(runOptions?.signal ? { signal: runOptions.signal } : {}),
           onTurn(turn, phase) {
             void appendTrajectory(runId, "model_request", {

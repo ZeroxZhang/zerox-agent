@@ -9,6 +9,7 @@ type GoalStatusStripProps = {
   onStart?: () => void;
   onPause?: () => void;
   onResolveReview?: (decision: "approve" | "reject" | "terminate") => void;
+  onIncreaseBudget?: () => void;
   onReplan?: () => void;
   onRetry?: () => void;
   onCancel?: () => void;
@@ -88,9 +89,9 @@ function renderStatusAction(
         </>
       ) : null;
     case "stopped_budget":
-      return props.onRetry ? (
-        <button type="button" onClick={props.onRetry}>
-          继续执行
+      return props.onIncreaseBudget ? (
+        <button type="button" onClick={props.onIncreaseBudget}>
+          增加预算并继续
         </button>
       ) : null;
     case "stopped_stalled":

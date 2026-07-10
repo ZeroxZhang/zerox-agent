@@ -20,6 +20,7 @@ import {
   normalizeLocationBoundaryPath,
   normalizeLocationEnvironment,
   normalizeLocationPath,
+  validatePathInsideLocationRoots,
   type LocationResourceEnvironment,
 } from "../shared/locationResource";
 import { verifyArtifactProvenance } from "../shared/agentArtifactProvenance";
@@ -728,7 +729,7 @@ async function resolveArtifactEvidenceFile(
   artifactName: string,
   ctx: AcceptanceContext,
 ): Promise<Record<string, unknown> | null> {
-  if (!isSafeArtifactName(artifactName)) {
+  if (!artifactName.trim() || artifactName.includes("\0")) {
     return null;
   }
 
@@ -760,16 +761,27 @@ function getArtifactEvidenceCandidatePaths(
   artifactName: string,
   ctx: AcceptanceContext,
 ): string[] {
-  const fileNames = getArtifactEvidenceFileNames(artifactName);
   const env = getAcceptanceLocationEnv(ctx);
   const roots = dedupePaths([ctx.workspacePath, ...getAllowedExtraRoots(ctx)], env);
   const candidates: string[] = [];
 
+  if (path.isAbsolute(artifactName)) {
+    const candidatePath = path.resolve(artifactName);
+    const boundary = validatePathInsideLocationRoots(candidatePath, roots, env);
+    if (boundary.ok) {
+      candidates.push(boundary.path);
+    }
+    return candidates;
+  }
+
+  const fileNames = getArtifactEvidenceFileNames(artifactName);
+
   for (const root of roots) {
     for (const fileName of fileNames) {
       const candidatePath = path.resolve(root, fileName);
-      if (isPathInsideLocationRoot(candidatePath, root, env)) {
-        candidates.push(candidatePath);
+      const boundary = validatePathInsideLocationRoots(candidatePath, [root], env);
+      if (boundary.ok) {
+        candidates.push(boundary.path);
       }
     }
   }
@@ -778,6 +790,11 @@ function getArtifactEvidenceCandidatePaths(
 }
 
 function getArtifactEvidenceFileNames(artifactName: string): string[] {
+  const isRelativePathRef = artifactName.includes("/") || artifactName.includes("\\");
+  if (!isRelativePathRef && !isSafeArtifactName(artifactName)) {
+    return [];
+  }
+
   if (path.extname(artifactName)) {
     return [artifactName];
   }

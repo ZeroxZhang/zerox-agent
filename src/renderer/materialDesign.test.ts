@@ -930,10 +930,13 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(goalStatusStripSource).toContain("buildGoalProgressViewModel");
     expect(goalStatusStripSource).toContain("progress.statusLabel");
     expect(goalStatusStripSource).toContain("onResolveReview");
+    expect(goalStatusStripSource).toContain("onIncreaseBudget");
     expect(chatPanelSource).toContain("async function handlePauseGoal");
     expect(chatPanelSource).toContain("pauseGoal(activeGoal.id)");
     expect(chatPanelSource).toContain("? { onPause: () => void handlePauseGoal() }");
     expect(chatPanelSource).not.toContain('submitUserMessage("暂停这个目标")');
+    expect(chatPanelSource).toContain("window.buildingAgent.increaseGoalBudget(");
+    expect(chatPanelSource).toContain("onIncreaseBudget={handleIncreaseGoalBudget}");
     expect(chatPanelSource).toContain("const goalModeVisuallyEnabled = goalModeEnabled || Boolean(activeGoal);");
     expect(chatPanelSource).toContain("aria-pressed={goalModeVisuallyEnabled}");
     expect(chatPanelSource).toContain('className="primary-action"');

@@ -127,7 +127,7 @@ export function buildGoalTaskActivity(options: {
   if (options.status === "stopped_budget") {
     return createTaskActivity({
       kind: "paused",
-      title: "目标可继续",
+      title: "目标预算已用尽",
       detail: options.description,
       now: options.now,
     });

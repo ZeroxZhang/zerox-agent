@@ -1,5 +1,6 @@
 import type {
   Goal,
+  GoalBudget,
   GoalStatus,
   Milestone,
   MilestoneState,
@@ -31,6 +32,64 @@ export type GoalProgressViewModel = {
   metricCards: GoalProgressMetricCard[];
   milestoneRows: GoalProgressMilestoneRow[];
 };
+
+export function buildGoalBudgetIncreaseDelta(
+  goal: Goal | null,
+): Partial<GoalBudget> {
+  if (!goal) {
+    return {
+      maxIterations: 8,
+      maxToolCalls: 64,
+      maxWallClockMs: 45 * 60 * 1000,
+      maxReplans: 3,
+    };
+  }
+
+  const delta: Partial<GoalBudget> = {};
+  if (goal.budgetUsage.iterations >= goal.budget.maxIterations) {
+    delta.maxIterations = Math.max(
+      1,
+      goal.budget.maxIterations,
+      goal.budgetUsage.iterations,
+    );
+  }
+  if (goal.budgetUsage.toolCalls >= goal.budget.maxToolCalls) {
+    delta.maxToolCalls = Math.max(
+      1,
+      goal.budget.maxToolCalls,
+      goal.budgetUsage.toolCalls,
+    );
+  }
+  if (goal.budgetUsage.wallClockMs >= goal.budget.maxWallClockMs) {
+    delta.maxWallClockMs = Math.max(
+      60_000,
+      goal.budget.maxWallClockMs,
+      goal.budgetUsage.wallClockMs,
+    );
+  }
+  if (goal.budgetUsage.replans >= goal.budget.maxReplans) {
+    delta.maxReplans = Math.max(
+      1,
+      goal.budget.maxReplans,
+      goal.budgetUsage.replans,
+    );
+  }
+  if (
+    goal.budget.maxTokens !== undefined &&
+    goal.budgetUsage.tokens >= goal.budget.maxTokens
+  ) {
+    delta.maxTokens = Math.max(
+      1,
+      goal.budget.maxTokens,
+      goal.budgetUsage.tokens,
+    );
+  }
+
+  if (Object.keys(delta).length === 0) {
+    delta.maxIterations = Math.max(1, goal.budget.maxIterations);
+  }
+  return delta;
+}
 
 export function buildGoalProgressViewModel(
   summary: ChatSessionGoalSummary,
@@ -98,11 +157,11 @@ function describeGoalStatus(
       };
     case "stopped_budget":
       return {
-        statusLabel: "可继续",
+        statusLabel: "预算已用尽",
         statusDetail:
-          "这是旧版本预算停止状态；当前版本不会再用系统预算拦截目标推进，可以直接继续执行。",
-        nextActionLabel: "继续执行",
-        nextActionDetail: milestoneDetail,
+          "目标已达到执行预算上限并停止，不会在后台继续。你可以查看证据，或明确增加预算后继续。",
+        nextActionLabel: "需要你处理",
+        nextActionDetail: `查看证据或增加预算继续。${milestoneDetail}`,
       };
     case "stopped_stalled":
       return {

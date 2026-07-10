@@ -141,14 +141,17 @@ export function createGoalChatService(options: {
     assertGoalTransition(goal.status, "executing");
     goal.status = "executing";
     goal.updatedAt = now();
-    await options.goalStore.save(goal);
+    const persisted = await options.goalStore.save(goal);
+    if (persisted.status !== goal.status) {
+      return persisted;
+    }
     await options.goalStore.appendLedger(goal.id, {
       at: goal.updatedAt,
       kind: "goal_planned",
       summary: "Goal execution queued from chat.",
     });
-    notifyProgress("started", goal, "目标已开始执行。");
-    return goal;
+    notifyProgress("started", persisted, "目标已开始执行。");
+    return persisted;
   }
 
   return {
@@ -368,7 +371,7 @@ export function createGoalChatService(options: {
         throw new Error(`Goal "${goalId}" was not found.`);
       }
       const queuedGoal = await queueGoalExecution(goal);
-      if (queuedGoal.status !== "waiting_for_review") {
+      if (queuedGoal.status === "executing") {
         startBackgroundGoalRun(goalId, runOptions, (id, runnerOptions) =>
           options.controller.resume(id, runnerOptions),
         );
@@ -394,13 +397,17 @@ export function createGoalChatService(options: {
             : milestone,
         );
         goal.updatedAt = now();
-        await options.goalStore.save(goal);
+        const persisted = await options.goalStore.save(goal);
+        if (persisted.status !== goal.status) {
+          return toGoalSummary(persisted);
+        }
         await options.goalStore.appendLedger(goal.id, {
           at: goal.updatedAt,
           kind: "review_requested",
           summary: "Goal paused from chat and is waiting for review.",
         });
-        notifyProgress("review_requested", goal, "目标已暂停，等待审核。");
+        notifyProgress("review_requested", persisted, "目标已暂停，等待审核。");
+        return toGoalSummary(persisted);
       }
 
       return toGoalSummary(goal);
@@ -419,14 +426,17 @@ export function createGoalChatService(options: {
       goal.status = "canceled";
       goal.stopReason = "user_canceled";
       goal.updatedAt = now();
-      await options.goalStore.save(goal);
+      const persisted = await options.goalStore.save(goal);
+      if (persisted.status !== goal.status) {
+        return toGoalSummary(persisted);
+      }
       await options.goalStore.appendLedger(goal.id, {
         at: goal.updatedAt,
         kind: "goal_stopped",
         summary: "Goal canceled from chat.",
       });
-      notifyProgress("stopped", goal, "目标已取消。");
-      return toGoalSummary(goal);
+      notifyProgress("stopped", persisted, "目标已取消。");
+      return toGoalSummary(persisted);
     },
 
     async resolveReview(goalId, decision) {
@@ -468,14 +478,17 @@ export function createGoalChatService(options: {
           : {}),
       };
       goal.updatedAt = now();
-      await options.goalStore.save(goal);
+      const persisted = await options.goalStore.save(goal);
+      if (persisted.status !== goal.status) {
+        return toGoalSummary(persisted);
+      }
       await options.goalStore.appendLedger(goal.id, {
         at: goal.updatedAt,
         kind: "goal_replanned",
         summary: "Budget increased from chat recovery UI.",
       });
-      notifyProgress("replanned", goal, "预算已增加，可以继续执行。");
-      return toGoalSummary(goal);
+      notifyProgress("replanned", persisted, "预算已增加，可以继续执行。");
+      return toGoalSummary(persisted);
     },
 
     async replan(goalId, instructions) {
@@ -485,16 +498,18 @@ export function createGoalChatService(options: {
       }
 
       goal.milestones = await options.planner.replan(goal, instructions);
-      goal.budgetUsage.replans += 1;
       goal.updatedAt = now();
-      await options.goalStore.save(goal);
+      const persisted = await options.goalStore.save(goal);
+      if (persisted.status !== goal.status) {
+        return toGoalSummary(persisted);
+      }
       await options.goalStore.appendLedger(goal.id, {
         at: goal.updatedAt,
         kind: "goal_replanned",
         summary: `Replanned from chat recovery UI: ${instructions}`,
       });
-      notifyProgress("replanned", goal, "目标已重新规划。");
-      return toGoalSummary(goal);
+      notifyProgress("replanned", persisted, "目标已重新规划。");
+      return toGoalSummary(persisted);
     },
 
     async retry(goalId) {
@@ -509,18 +524,21 @@ export function createGoalChatService(options: {
       goal.status = "executing";
       goal.stopReason = undefined;
       goal.updatedAt = now();
-      await options.goalStore.save(goal);
+      const persisted = await options.goalStore.save(goal);
+      if (persisted.status !== goal.status) {
+        return toGoalSummary(persisted);
+      }
       await options.goalStore.appendLedger(goal.id, {
         at: goal.updatedAt,
         kind: "goal_planned",
         summary: "Goal retried from chat recovery UI.",
       });
-      notifyProgress("started", goal, "目标已恢复执行。");
+      notifyProgress("started", persisted, "目标已恢复执行。");
       startBackgroundGoalRun(goalId, { signal: undefined }, (id, runnerOptions) =>
         options.controller.resume(id, runnerOptions),
       );
       return toGoalSummary(
-        (await options.goalStore.get(goalId)) ?? goal,
+        (await options.goalStore.get(goalId)) ?? persisted,
       );
     },
   };

@@ -62,6 +62,14 @@ describe("package scripts", () => {
     const p39 = featureList.features.find(
       (feature) => feature.id === "P39-v3.4.0-goal-mode-runtime-state-repair",
     );
+    const p40 = featureList.features.find(
+      (feature) =>
+        feature.id === "P40-v3.4.0-goal-mode-bounded-termination",
+    );
+    const p41 = featureList.features.find(
+      (feature) =>
+        feature.id === "P41-v3.4.0-goal-acceptance-policy-engine",
+    );
     const p31 = featureList.features.find(
       (feature) => feature.id === "P31-v3.1.2-window-controls-and-settings-icon",
     );
@@ -81,10 +89,34 @@ describe("package scripts", () => {
         (featureId) =>
           featureId === "P37-v3.4.0-obsidian-frontend-interaction" ||
           featureId === "P38-v3.4.0-goal-mode-obsidian-regression-fixes" ||
-          featureId === "P39-v3.4.0-goal-mode-runtime-state-repair",
+          featureId === "P39-v3.4.0-goal-mode-runtime-state-repair" ||
+          featureId === "P40-v3.4.0-goal-mode-bounded-termination" ||
+          featureId === "P41-v3.4.0-goal-acceptance-policy-engine",
       ),
     ).toBe(true);
     expect(openFeatureIds.length).toBeLessThanOrEqual(1);
+    expect(p41?.status === "in_progress" || p41?.status === "done").toBe(true);
+    expect(p41).toEqual(
+      expect.objectContaining({
+        id: "P41-v3.4.0-goal-acceptance-policy-engine",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("Historical Goal JSON remains readable"),
+          expect.stringContaining("stable failure fingerprint"),
+          expect.stringContaining("durable acceptance certificate"),
+        ]),
+      }),
+    );
+    expect(p40?.status === "in_progress" || p40?.status === "done").toBe(true);
+    expect(p40).toEqual(
+      expect.objectContaining({
+        id: "P40-v3.4.0-goal-mode-bounded-termination",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("artifact evidence references resolve"),
+          expect.stringContaining("budgets are enforced"),
+          expect.stringContaining("cannot be overwritten by stale background work"),
+        ]),
+      }),
+    );
     expect(p39?.status === "in_progress" || p39?.status === "done").toBe(true);
     expect(p39).toEqual(
       expect.objectContaining({

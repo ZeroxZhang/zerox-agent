@@ -716,6 +716,7 @@ describe("goal runtime engine", () => {
       taskId: string | undefined;
       systemPrompt: string | undefined;
       pauseOnStrategyGuard: boolean | undefined;
+      pauseOnTurnLimit: boolean | undefined;
     }> = [];
     const goal = createGoal();
     const milestone = goal.milestones[0]!;
@@ -766,6 +767,7 @@ describe("goal runtime engine", () => {
           taskId: options.taskId,
           systemPrompt: options.systemPrompt,
           pauseOnStrategyGuard: options.pauseOnStrategyGuard,
+          pauseOnTurnLimit: options.pauseOnTurnLimit,
         });
         return {
           summary: "已完成 Serenity 投资方法论调研摘要。",
@@ -789,6 +791,7 @@ describe("goal runtime engine", () => {
     expect(loopInputs).toHaveLength(1);
     expect(loopInputs[0]?.taskId).toBe("goal:goal_1");
     expect(loopInputs[0]?.pauseOnStrategyGuard).toBe(true);
+    expect(loopInputs[0]?.pauseOnTurnLimit).toBe(true);
     expect(loopInputs[0]?.systemPrompt).toContain("长期目标执行");
     expect(loopInputs[0]?.systemPrompt).toContain("Model profile: default");
     expect(loopInputs[0]?.messages.at(-1)).toEqual({

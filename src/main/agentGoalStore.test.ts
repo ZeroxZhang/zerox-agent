@@ -97,6 +97,46 @@ describe("agent goal store", () => {
     expect(() => JSON.parse(raw)).not.toThrow();
   });
 
+  it.each(["canceled", "achieved"] as const)(
+    "does not let a stale executing save overwrite an irreversible %s goal",
+    async (terminalStatus) => {
+      const store = createAgentGoalStore({ configDir });
+      const executing = createGoal("goal_terminal", "executing");
+      const terminal: Goal = {
+        ...executing,
+        status: terminalStatus,
+        stopReason:
+          terminalStatus === "canceled" ? "user_canceled" : "goal_accepted",
+        updatedAt: "2026-06-12T00:02:00.000Z",
+      };
+      const stale: Goal = {
+        ...executing,
+        planVersion: 9,
+        updatedAt: "2026-06-12T00:03:00.000Z",
+      };
+
+      await store.save(executing);
+      await store.save(terminal);
+      await expect(store.save(stale)).resolves.toEqual(terminal);
+      await expect(store.get("goal_terminal")).resolves.toEqual(terminal);
+    },
+  );
+
+  it("still allows a budget-stopped goal to resume after an explicit recovery action", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const stopped = createGoal("goal_recoverable", "stopped_budget");
+    const resumed: Goal = {
+      ...stopped,
+      status: "executing",
+      stopReason: undefined,
+      updatedAt: "2026-06-12T00:03:00.000Z",
+    };
+
+    await store.save(stopped);
+    await expect(store.save(resumed)).resolves.toEqual(resumed);
+    await expect(store.get("goal_recoverable")).resolves.toEqual(resumed);
+  });
+
   it("lists active goals and excludes terminal statuses", async () => {
     const store = createAgentGoalStore({ configDir });
     const planning = createGoal("goal_planning", "planning", "2026-06-12T00:00:00.000Z");

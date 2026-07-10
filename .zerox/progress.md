@@ -6561,3 +6561,44 @@
   - `npm run harness:check` -> passed.
   - `npm run smoke:prod` -> passed; renderer rendered agent chat UI. Note: local un-packaged smoke used JSON fallback after the existing better-sqlite3 ABI mismatch.
   - `git diff --check` -> passed.
+
+## 2026-07-10 - Goal Mode Bounded Termination and Truthful Final State
+
+- Request:
+  - Deeply inspect the Goal Mode task that appeared to run for almost a day, determine whether it had ended, locate the infinite-loop cause, and fix the behavior end to end.
+- Incident evidence:
+  - The reported goal was `goal_3866edd8-fe18-4892-90bc-61d26a61a305` in the packaged app user-data store.
+  - Its durable state is `canceled` with `stopReason: user_canceled`; the ledger stopped changing at 2026-07-10 22:46 local time, so it was not still running in the background.
+  - The goal configured only 8 iterations and 3 replans but accumulated 322 iterations, 2,105 tool calls, 53,905,191 ms wall time, 609,456 tokens, and 320 replans.
+  - The ledger contained 320 `milestone_rejected` and 320 `goal_replanned` events. Acceptance repeatedly rejected the real report as `Missing required artifact evidence` because the criterion used an absolute path-shaped artifact reference that alias-only resolution could not recognize.
+  - The requested report did exist at `docs/tech_report.md` with 806 lines and all ten requested top-level sections, confirming that artifact detection—not report production—drove the loop.
+  - The still-open desktop process was the 00:13 packaged build whose `app.asar` predated the earlier runtime fixes; a resident desktop process alone was not evidence of an active goal.
+- Root causes:
+  - Goal budgets were represented in types and UI but not enforced by the controller before dispatch or automatic replan.
+  - Absolute/relative path-shaped artifact references were rejected instead of being resolved within authorized workspace roots.
+  - The milestone runtime converted its eight-turn ceiling to `succeeded`, allowing rejected acceptance to trigger another automatic replan.
+  - Manual replan usage was incremented twice, stale background saves could overwrite cancellation, and progress listeners could receive old nonterminal events after a durable terminal save.
+  - Budget exhaustion copy incorrectly said that system budgets were no longer enforced, leaving the end state and recovery action ambiguous.
+- Implementation evidence:
+  - Added symlink-aware artifact path resolution that accepts workspace-contained absolute and relative paths and rejects outside-root, leaf-symlink, and parent-symlink escapes.
+  - Enforced iteration, tool-call, wall-clock, token, and replan limits before another run or automatic replan; exhaustion now persists `stopped_budget / budget_exhausted`.
+  - Goal milestone runs use `pauseOnTurnLimit`; incomplete paused milestones return to `ready` and wait for review instead of automatically replanning.
+  - Removed duplicate manual-replan accounting and made `achieved`/`canceled` store states monotonic against stale nonterminal saves.
+  - All controller and chat recovery paths now continue, publish, and start background work only from the state returned by the durable save.
+  - Progress delivery is serialized and reconciled against irreversible persisted state before chat-session sync and renderer notification, preventing the visible status from regressing after cancellation or achievement.
+  - Replaced legacy budget copy with `预算已用尽` and added `增加预算并继续`; historical overrun recovery first covers accumulated usage and then adds real headroom.
+- Test and review evidence:
+  - TDD red phase reproduced artifact-path rejection, unenforced budgets, automatic turn-limit replanning, duplicate replan counting, symlink escape, terminal overwrite, paused-milestone rejection, and cancel/accept/retry/progress races.
+  - Focused regression suite -> 10 files / 215 tests passed.
+  - Independent code review found no remaining Critical or Important issues after two correction rounds.
+  - `npm run verify` -> passed: 188 test files / 1,348 tests, TypeScript and Vite build, agent evals 26/26, memory evals 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered the agent chat UI. The unpackaged smoke used the existing JSON fallback because the local better-sqlite3 binary targets a different Node ABI.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+- Packaging and live replacement evidence:
+  - Gracefully stopped old packaged process PID 16542, whose `app.asar` timestamp was 2026-07-10 00:08:51.
+  - `npm run dist:mac` -> passed; regenerated unsigned macOS arm64 App, DMG, and ZIP.
+  - New `app.asar` timestamp is 2026-07-10 23:31:56 and contains both `Goal budget exhausted` and `预算已用尽`.
+  - Packaged-app smoke with required text `v3.4.0` -> passed.
+  - Generated package SHA256: DMG `a7e11c8cb8211d981dcce89b9048b06f2d657a14826195bb92e821c8c4eefc4d`; ZIP `6b2d3e38427f90ec989ffa39abe87d832915e745bf7144b3f134371b0380592e`.
+  - Relaunched the rebuilt app as PID 93800 at 2026-07-10 23:33:25 local time.

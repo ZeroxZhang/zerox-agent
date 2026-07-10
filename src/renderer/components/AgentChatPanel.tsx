@@ -91,6 +91,7 @@ import {
   type TaskActivityState,
   type SubagentProcessItem,
 } from "../chatTaskActivity";
+import { buildGoalBudgetIncreaseDelta } from "../goalProgressViewModel";
 import {
   applyChatStreamEvent,
   createChatStreamState,
@@ -1393,6 +1394,46 @@ export function AgentChatPanel({
     }
   }
 
+  async function handleIncreaseGoalBudget() {
+    if (!window.buildingAgent || !activeGoal?.id) {
+      return;
+    }
+
+    const delta = buildGoalBudgetIncreaseDelta(activeGoalDetail);
+    const increased = await window.buildingAgent.increaseGoalBudget(
+      activeGoal.id,
+      delta,
+    );
+    if (!increased.ok) {
+      appendMessage({
+        role: "assistant",
+        content: `增加目标预算失败：${increased.message}`,
+      });
+      return;
+    }
+
+    const result = await window.buildingAgent.retryGoal(activeGoal.id);
+    if (result.ok && result.goal) {
+      applyGoalSummaryToSessions(result.goal);
+      setStatus({ kind: "working", message: "预算已增加，目标继续执行" });
+      setWorkPhase("tool");
+      setTaskActivity(
+        buildGoalTaskActivity({
+          status: result.goal.status,
+          description: result.goal.description,
+        }),
+      );
+      void refreshActiveGoalDetail(result.goal.id);
+      void refreshSessions(sessionId ?? undefined);
+    }
+    appendMessage({
+      role: "assistant",
+      content: result.ok
+        ? "已增加耗尽的目标预算并继续执行。"
+        : `继续目标失败：${result.message}`,
+    });
+  }
+
   async function handlePauseGoal() {
     if (!window.buildingAgent || !activeGoal?.id) {
       return;
@@ -2289,6 +2330,7 @@ export function AgentChatPanel({
                   ? { onPause: () => void handlePauseGoal() }
                   : {})}
                 onResolveReview={handleResolveGoalReview}
+                onIncreaseBudget={handleIncreaseGoalBudget}
                 onReplan={handleReplanGoal}
                 onRetry={handleRetryGoal}
                 onCancel={handleCancelGoal}
@@ -2714,6 +2756,7 @@ export function AgentChatPanel({
           }
           onClose={() => setGoalDrawerOpen(false)}
           onResolveReview={handleResolveGoalReview}
+          onIncreaseBudget={handleIncreaseGoalBudget}
           onReplan={handleReplanGoal}
           onRetry={handleRetryGoal}
           onCancel={handleCancelGoal}
@@ -4098,7 +4141,7 @@ function translateGoalStatus(status: ChatSessionGoalSummary["status"]): string {
     executing: "执行中",
     waiting_for_review: "等待审核",
     achieved: "已达成",
-    stopped_budget: "可继续",
+    stopped_budget: "预算已用尽",
     stopped_stalled: "停滞停止",
     failed: "失败",
     canceled: "已取消",
