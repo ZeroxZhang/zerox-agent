@@ -363,3 +363,66 @@ exit 0
 - `src/main/agentGoalFailureFingerprint.ts`
 - `src/main/agentGoalFailureFingerprint.test.ts`
 - `.superpowers/sdd/p41-task-7-report.md`
+
+## Depth Boundary Fix — Deterministic Iterative Deep-Graph Digests
+
+### Status
+
+DONE
+
+### RED Evidence
+
+The exact depth-16 mixed object/array late-value regression was added first and witnessed colliding on the former fixed truncation marker:
+
+```text
+npm test -- --run src/main/agentGoalFailureFingerprint.test.ts -t "depth-16 boundary"
+Test Files 1 failed (1)
+Tests 1 failed | 31 skipped (32)
+```
+
+The remaining adversarial matrix was then added before production edits. It covered depths 15/16/32/1000, visible and complete sparse-tail placements, reordered keys, shared references/cycles, hostile getters, and secret-key reads:
+
+```text
+npm test -- --run src/main/agentGoalFailureFingerprint.test.ts
+Test Files 1 failed (1)
+Tests 4 failed | 33 passed (37)
+```
+
+Failures proved fixed depth truncation collided at the boundary, in visible/tail placements, and across meaningful shared-reference graph changes.
+
+### GREEN Evidence
+
+```text
+npm test -- --run src/main/agentGoalFailureFingerprint.test.ts
+Test Files 1 passed (1)
+Tests 37 passed (37)
+
+npm test -- --run src/main/agentGoalController.test.ts src/main/goalRuntimeEngine.test.ts src/main/agentGoalAcceptanceCertificate.test.ts src/main/agentGoalFailureFingerprint.test.ts
+Test Files 4 passed (4)
+Tests 174 passed (174)
+
+npx tsc -p tsconfig.electron.json --noEmit
+exit 0
+
+npm run harness:check
+Harness check passed.
+
+git diff --check
+exit 0
+```
+
+### Fix Summary
+
+- Reaching canonical depth 16 now emits a private `deep_digest` marker instead of a fixed truncation marker; the ordinary canonical depth constant was not raised.
+- The fallback performs a nonrecursive deterministic DFS using explicit value/container cursor tasks, so a depth-1000 mixed graph neither constructs nor traverses through recursive test/production calls.
+- Objects hash sorted own enumerable keys. Arrays hash declared length, actual enumerable-key count, numeric indices in numeric order, and non-index properties in lexical order; sparse arrays never iterate declared holes.
+- A per-traversal `WeakMap` assigns deterministic IDs to first-seen objects and frames subsequent references, preserving shared-reference topology and cycles in O(actual visited nodes and edges), aside from required key sorting.
+- Length-framed hash updates distinguish types, keys, indices, values, references, unreadable getters/containers, and user strings that resemble markers.
+- Secret-like keys hash a redacted marker without reading their value. Private strings, commands, and URLs feed only the SHA-256 input after credential scrubbing and never appear in signatures.
+- The fixed-size marker contains only the SHA-256 digest plus node/edge counts; the existing final 2 KiB action-signature bound and complete streaming tail digest remain intact.
+
+### Depth Boundary Files
+
+- `src/main/agentGoalFailureFingerprint.ts`
+- `src/main/agentGoalFailureFingerprint.test.ts`
+- `.superpowers/sdd/p41-task-7-report.md`

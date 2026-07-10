@@ -742,6 +742,236 @@ describe("goal acceptance failure fingerprints", () => {
     }
   });
 
+  it("digests a mixed action graph difference at the depth-16 boundary", () => {
+    const makeDeepGraph = (lateValue: string): unknown => {
+      let graph: unknown = { late: lateValue };
+      for (let depth = 0; depth < 16; depth += 1) {
+        graph = depth % 2 === 0 ? [graph] : { next: graph };
+      }
+      return graph;
+    };
+    const leftAction = createToolActionSignature(
+      "depth_boundary",
+      makeDeepGraph("DEEP_BOUNDARY_ALPHA"),
+    );
+    const rightAction = createToolActionSignature(
+      "depth_boundary",
+      makeDeepGraph("DEEP_BOUNDARY_BRAVO"),
+    );
+
+    expect(leftAction).not.toBe(rightAction);
+    expect(Buffer.byteLength(leftAction)).toBeLessThanOrEqual(2_048);
+    expect(Buffer.byteLength(rightAction)).toBeLessThanOrEqual(2_048);
+    expect(`${leftAction}${rightAction}`).not.toMatch(/DEEP_BOUNDARY_(?:ALPHA|BRAVO)/);
+  });
+
+  it("digests late mixed-graph differences at depths 15, 16, 32, and 1000", () => {
+    for (const depth of [15, 16, 32, 1_000]) {
+      const leftAction = createToolActionSignature(
+        "deep_graph_matrix",
+        wrapMixedGraph(
+          { late: `https://depth-${depth}-alpha.invalid/private` },
+          depth,
+        ),
+      );
+      const rightAction = createToolActionSignature(
+        "deep_graph_matrix",
+        wrapMixedGraph(
+          { late: `https://depth-${depth}-bravo.invalid/private` },
+          depth,
+        ),
+      );
+
+      expect(leftAction, `depth ${depth}`).not.toBe(rightAction);
+      expect(leftAction, `marker depth ${depth}`).toContain("deep_digest");
+      expect(Buffer.byteLength(leftAction), `left depth ${depth}`).toBeLessThanOrEqual(2_048);
+      expect(Buffer.byteLength(rightAction), `right depth ${depth}`).toBeLessThanOrEqual(2_048);
+      expect(`${leftAction}${rightAction}`, `raw depth ${depth}`).not.toMatch(
+        /depth-\d+-(?:alpha|bravo)\.invalid/,
+      );
+    }
+  });
+
+  it("digests deep differences in visible entries and complete sparse tails", () => {
+    const visibleLeft = createToolActionSignature("deep_visible", {
+      value: wrapMixedGraph(
+        { late: "https://visible-alpha.invalid/private" },
+        32,
+      ),
+    });
+    const visibleRight = createToolActionSignature("deep_visible", {
+      value: wrapMixedGraph(
+        { late: "https://visible-bravo.invalid/private" },
+        32,
+      ),
+    });
+    const makeObjectTail = (lateValue: string) =>
+      Object.fromEntries(
+        Array.from({ length: 65 }, (_, index) => [
+          `key_${String(index).padStart(3, "0")}`,
+          index === 64
+            ? wrapMixedGraph({ late: lateValue }, 32)
+            : index,
+        ]),
+      );
+    const objectTailLeft = createToolActionSignature(
+      "deep_object_tail",
+      makeObjectTail("https://object-tail-alpha.invalid/private"),
+    );
+    const objectTailRight = createToolActionSignature(
+      "deep_object_tail",
+      makeObjectTail("https://object-tail-bravo.invalid/private"),
+    );
+    const makeArrayTail = (lateValue: string) => {
+      const value: unknown[] = [];
+      value.length = 100_000;
+      value[97] = wrapMixedGraph({ late: lateValue }, 32);
+      return value;
+    };
+    const arrayTailLeft = createToolActionSignature(
+      "deep_array_tail",
+      makeArrayTail("https://array-tail-alpha.invalid/private"),
+    );
+    const arrayTailRight = createToolActionSignature(
+      "deep_array_tail",
+      makeArrayTail("https://array-tail-bravo.invalid/private"),
+    );
+    const signatures = [
+      visibleLeft,
+      visibleRight,
+      objectTailLeft,
+      objectTailRight,
+      arrayTailLeft,
+      arrayTailRight,
+    ];
+
+    expect(visibleLeft).not.toBe(visibleRight);
+    expect(objectTailLeft).not.toBe(objectTailRight);
+    expect(arrayTailLeft).not.toBe(arrayTailRight);
+    expect(signatures.every((signature) => Buffer.byteLength(signature) <= 2_048)).toBe(true);
+    expect(signatures.join("")).not.toMatch(
+      /(?:visible|object-tail|array-tail)-(?:alpha|bravo)\.invalid/,
+    );
+  });
+
+  it("keeps deep digests stable across equivalent object key insertion order", () => {
+    const leftBoundary = {
+      z: { beta: 2, alpha: 1 },
+      a: [3, 2, 1],
+    };
+    const rightBoundary = {
+      a: [3, 2, 1],
+      z: { alpha: 1, beta: 2 },
+    };
+
+    expect(
+      createToolActionSignature(
+        "deep_key_order",
+        wrapMixedGraph(leftBoundary, 16),
+      ),
+    ).toBe(
+      createToolActionSignature(
+        "deep_key_order",
+        wrapMixedGraph(rightBoundary, 16),
+      ),
+    );
+  });
+
+  it("frames shared references and cycles deterministically in deep digests", () => {
+    const makeBoundary = (lateValue: string, shareNode: boolean) => {
+      const first = { late: lateValue };
+      const boundary: Record<string, unknown> = {
+        first,
+        second: shareNode ? first : { late: lateValue },
+      };
+      boundary.self = boundary;
+      return boundary;
+    };
+    const baseline = createToolActionSignature(
+      "deep_graph_refs",
+      wrapMixedGraph(
+        makeBoundary("https://shared-alpha.invalid/private", true),
+        16,
+      ),
+    );
+    const equivalent = createToolActionSignature(
+      "deep_graph_refs",
+      wrapMixedGraph(
+        makeBoundary("https://shared-alpha.invalid/private", true),
+        16,
+      ),
+    );
+    const changed = createToolActionSignature(
+      "deep_graph_refs",
+      wrapMixedGraph(
+        makeBoundary("https://shared-bravo.invalid/private", true),
+        16,
+      ),
+    );
+    const duplicated = createToolActionSignature(
+      "deep_graph_refs",
+      wrapMixedGraph(
+        makeBoundary("https://shared-alpha.invalid/private", false),
+        16,
+      ),
+    );
+
+    expect(baseline).toBe(equivalent);
+    expect(baseline).not.toBe(changed);
+    expect(baseline).not.toBe(duplicated);
+    expect(`${baseline}${equivalent}${changed}${duplicated}`).not.toMatch(
+      /shared-(?:alpha|bravo)\.invalid/,
+    );
+  });
+
+  it("redacts deep secret keys and safely frames hostile getters", () => {
+    let secretReads = 0;
+    const makeBoundary = (secretValue: string, getterMessage: string) => {
+      const boundary: Record<string, unknown> = { password: secretValue };
+      Object.defineProperty(boundary, "apiKey", {
+        enumerable: true,
+        get() {
+          secretReads += 1;
+          throw new Error(`SECRET_GETTER_${getterMessage}`);
+        },
+      });
+      Object.defineProperty(boundary, "broken", {
+        enumerable: true,
+        get() {
+          throw new Error(`PRIVATE_DEEP_GETTER_${getterMessage}`);
+        },
+      });
+      return boundary;
+    };
+    const left = createToolActionSignature(
+      "deep_hostile",
+      wrapMixedGraph(makeBoundary("DEEP_SECRET_ALPHA", "ALPHA"), 16),
+    );
+    const right = createToolActionSignature(
+      "deep_hostile",
+      wrapMixedGraph(makeBoundary("DEEP_SECRET_BRAVO", "BRAVO"), 16),
+    );
+    const spoof = createToolActionSignature(
+      "deep_hostile",
+      wrapMixedGraph(
+        {
+          apiKey: "DEEP_SECRET_CHARLIE",
+          broken: "[UNREADABLE]",
+          password: "DEEP_SECRET_DELTA",
+        },
+        16,
+      ),
+    );
+
+    expect(left).toBe(right);
+    expect(left).not.toBe(spoof);
+    expect(secretReads).toBe(0);
+    expect(Buffer.byteLength(left)).toBeLessThanOrEqual(2_048);
+    expect(`${left}${right}${spoof}`).not.toMatch(
+      /DEEP_SECRET|SECRET_GETTER|PRIVATE_DEEP_GETTER/,
+    );
+  });
+
   it("handles undefined, non-finite numbers, sparse arrays, bigint, getters, and cycles safely", () => {
     const cyclic: Record<string, unknown> = {
       missing: undefined,
@@ -856,4 +1086,12 @@ function failureRecord(
     evidenceRefs: [],
     actionSignatures: [],
   };
+}
+
+function wrapMixedGraph(value: unknown, depth: number): unknown {
+  let graph = value;
+  for (let level = 0; level < depth; level += 1) {
+    graph = level % 2 === 0 ? [graph] : { next: graph };
+  }
+  return graph;
 }

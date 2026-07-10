@@ -32,6 +32,7 @@ type CanonicalValue =
   | ["truncated"]
   | ["string_digest", string, number]
   | ["private_digest", string, number]
+  | ["deep_digest", string, number, number]
   | ["tail_digest", number, string]
   | ["array", number, CanonicalValue[], CanonicalValue]
   | ["object", number, Array<[string, CanonicalValue]>, CanonicalValue];
@@ -40,6 +41,16 @@ type CanonicalState = {
   ancestors: WeakSet<object>;
   nodes: number;
 };
+
+type DeepTraversalTask =
+  | { kind: "value"; value: unknown }
+  | {
+      kind: "container";
+      value: object;
+      keys: string[];
+      index: number;
+      containerKind: "array" | "object";
+    };
 
 export type AcceptanceFailureTarget = Pick<
   GoalAcceptanceFailureRecord,
@@ -186,8 +197,11 @@ function canonicalize(
   depth: number,
 ): CanonicalValue {
   state.nodes += 1;
-  if (state.nodes > MAX_CANONICAL_NODES || depth > MAX_CANONICAL_DEPTH) {
+  if (state.nodes > MAX_CANONICAL_NODES) {
     return special("truncated");
+  }
+  if (depth >= MAX_CANONICAL_DEPTH) {
+    return deepGraphDigest(value);
   }
   if (value === null) {
     return ["null"];
@@ -345,6 +359,171 @@ function createTailEntryState(parent: object): CanonicalState {
 
 function createVisibleEntryState(state: CanonicalState): CanonicalState {
   return { ancestors: state.ancestors, nodes: 0 };
+}
+
+function deepGraphDigest(root: unknown): CanonicalValue {
+  const hash = createHash("sha256");
+  const traversalIds = new WeakMap<object, number>();
+  const tasks: DeepTraversalTask[] = [{ kind: "value", value: root }];
+  let nextTraversalId = 1;
+  let nodeCount = 0;
+  let edgeCount = 0;
+
+  while (tasks.length > 0) {
+    const task = tasks.pop()!;
+    if (task.kind === "container") {
+      if (task.index >= task.keys.length) {
+        updateDeepHash(hash, `${task.containerKind}_end`);
+        continue;
+      }
+
+      const key = task.keys[task.index]!;
+      task.index += 1;
+      tasks.push(task);
+      edgeCount += 1;
+      const arrayIndex =
+        task.containerKind === "array" ? parseCanonicalArrayIndex(key) : null;
+      updateDeepHash(
+        hash,
+        arrayIndex === null
+          ? `${task.containerKind}_key`
+          : "array_index",
+        key,
+      );
+      if (isSecretLikeKey(key)) {
+        updateDeepHash(hash, "redacted");
+        continue;
+      }
+      try {
+        tasks.push({
+          kind: "value",
+          value: (task.value as Record<string, unknown>)[key],
+        });
+      } catch {
+        updateDeepHash(hash, "unreadable");
+      }
+      continue;
+    }
+
+    const value = task.value;
+    if (value === null) {
+      updateDeepHash(hash, "null");
+      continue;
+    }
+    if (typeof value === "string") {
+      if (containsPrivateString(value)) {
+        updateDeepHash(hash, "private_string", scrubSecretsBeforeDigest(value));
+      } else if (containsSecretString(value)) {
+        updateDeepHash(hash, "redacted_string");
+      } else {
+        updateDeepHash(hash, "string", value);
+      }
+      continue;
+    }
+    if (typeof value === "boolean") {
+      updateDeepHash(hash, "boolean", value ? "true" : "false");
+      continue;
+    }
+    if (typeof value === "number") {
+      updateDeepHash(hash, "number", normalizeDeepNumber(value));
+      continue;
+    }
+    if (typeof value === "undefined") {
+      updateDeepHash(hash, "undefined");
+      continue;
+    }
+    if (typeof value === "bigint") {
+      updateDeepHash(hash, "bigint", value.toString());
+      continue;
+    }
+    if (typeof value === "symbol") {
+      updateDeepHash(hash, "symbol");
+      continue;
+    }
+    if (typeof value === "function") {
+      updateDeepHash(hash, "function");
+      continue;
+    }
+    if (typeof value !== "object") {
+      updateDeepHash(hash, "unserializable");
+      continue;
+    }
+
+    const existingId = traversalIds.get(value);
+    if (existingId !== undefined) {
+      updateDeepHash(hash, "reference", String(existingId));
+      continue;
+    }
+    const traversalId = nextTraversalId;
+    nextTraversalId += 1;
+    traversalIds.set(value, traversalId);
+    nodeCount += 1;
+
+    let isArray: boolean;
+    try {
+      isArray = Array.isArray(value);
+    } catch {
+      updateDeepHash(hash, "unreadable_container", String(traversalId));
+      continue;
+    }
+    let keys: string[];
+    try {
+      keys = Object.keys(value);
+    } catch {
+      updateDeepHash(hash, "unreadable_container", String(traversalId));
+      continue;
+    }
+    if (isArray) {
+      keys.sort(compareDeepArrayKeys);
+      updateDeepHash(hash, "array_start", String(traversalId));
+      updateDeepHash(hash, "array_length", String(readArrayLength(value as unknown[])));
+      updateDeepHash(hash, "array_keys", String(keys.length));
+    } else {
+      keys.sort();
+      updateDeepHash(hash, "object_start", String(traversalId));
+      updateDeepHash(hash, "object_keys", String(keys.length));
+    }
+    tasks.push({
+      kind: "container",
+      value,
+      keys,
+      index: 0,
+      containerKind: isArray ? "array" : "object",
+    });
+  }
+
+  return ["deep_digest", hash.digest("hex"), nodeCount, edgeCount];
+}
+
+function updateDeepHash(
+  hash: ReturnType<typeof createHash>,
+  tag: string,
+  payload = "",
+): void {
+  hash.update(String(Buffer.byteLength(tag)));
+  hash.update(":");
+  hash.update(tag);
+  hash.update(":");
+  hash.update(String(Buffer.byteLength(payload)));
+  hash.update(":");
+  hash.update(payload);
+  hash.update(";");
+}
+
+function normalizeDeepNumber(value: number): string {
+  if (Number.isNaN(value)) return "nan";
+  if (value === Number.POSITIVE_INFINITY) return "positive_infinity";
+  if (value === Number.NEGATIVE_INFINITY) return "negative_infinity";
+  return String(value);
+}
+
+function compareDeepArrayKeys(left: string, right: string): number {
+  const leftIndex = parseCanonicalArrayIndex(left);
+  const rightIndex = parseCanonicalArrayIndex(right);
+  if (leftIndex !== null && rightIndex !== null) return leftIndex - rightIndex;
+  if (leftIndex !== null) return -1;
+  if (rightIndex !== null) return 1;
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function updateTailHash(
