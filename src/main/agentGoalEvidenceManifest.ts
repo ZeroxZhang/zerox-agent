@@ -44,6 +44,7 @@ export type BuildGoalEvidenceManifestInput = {
   maxRenderedChars?: number;
   maxReadBytes?: number;
   provenance?: GoalEvidenceProvenanceRequirement;
+  afterProvenanceVerified?: (artifactPath: string) => Promise<void>;
 };
 
 type NumberedLine = { number: number; text: string };
@@ -54,6 +55,7 @@ type StreamTextScan = {
   tailLines: NumberedLine[];
   criterionLines: Array<NumberedLine & { term: string }>;
   headings: NonNullable<GoalEvidenceArtifact["headings"]>;
+  headingCount: number;
 };
 
 type StreamTableScan = {
@@ -108,10 +110,9 @@ export function renderGoalEvidenceManifest(
   maxChars = defaultMaxRenderedChars,
 ): string {
   const requestedCap = normalizeBudget(maxChars, defaultMaxRenderedChars);
-  const intrinsicCap =
-    manifest.truncated && manifest.totalRenderedChars > 0
-      ? manifest.totalRenderedChars
-      : requestedCap;
+  const intrinsicCap = manifest.truncated
+    ? manifest.totalRenderedChars
+    : requestedCap;
   return renderManifest(manifest, Math.min(requestedCap, intrinsicCap)).text;
 }
 
@@ -154,6 +155,9 @@ async function buildArtifact(
     const boundary = validatePathInsideLocationRoots(candidate, roots, env);
     if (!boundary.ok) continue;
 
+    let verifiedDestination:
+      | { sha256: string; sizeBytes: number }
+      | undefined;
     if (input.provenance?.required) {
       const verification = await verifyArtifactProvenance({
         artifactPath: boundary.path,
@@ -166,6 +170,8 @@ async function buildArtifact(
           : {}),
       });
       if (!verification.ok) continue;
+      verifiedDestination = verification.manifest.destination;
+      await input.afterProvenanceVerified?.(boundary.path);
     }
 
     const artifact = await buildFileArtifact(
@@ -176,7 +182,14 @@ async function buildArtifact(
       input.criterionText,
       normalizeBudget(input.maxReadBytes, defaultMaxReadBytes),
     );
-    if (artifact) return artifact;
+    if (
+      artifact &&
+      (!verifiedDestination ||
+        (artifact.sha256 === verifiedDestination.sha256 &&
+          artifact.sizeBytes === verifiedDestination.sizeBytes))
+    ) {
+      return artifact;
+    }
   }
   return null;
 }
@@ -379,13 +392,22 @@ function adaptSnapshot(
   criterionText: string,
 ): GoalEvidenceArtifact {
   if (mediaType === "text/markdown") {
+    const excerpts = buildTextExcerpts(snapshot);
+    const headingCount = snapshot.text?.headingCount ?? 0;
+    const retainedHeadings = snapshot.text?.headings.length ?? 0;
+    if (headingCount > retainedHeadings) {
+      excerpts.push({
+        label: "heading_scan_status",
+        text: `total=${headingCount}; retained=${retainedHeadings}; truncated=true`,
+      });
+    }
     return {
       ...baseArtifact(
         ref,
         artifactPath,
         mediaType,
         snapshot,
-        buildTextExcerpts(snapshot),
+        excerpts,
       ),
       headings: snapshot.text?.headings ?? [],
     };
@@ -569,7 +591,9 @@ class TextScanner {
   private readonly headLines: NumberedLine[] = [];
   private readonly tailLines: NumberedLine[] = [];
   private readonly criterionLines: Array<NumberedLine & { term: string }> = [];
-  private readonly headings: NonNullable<GoalEvidenceArtifact["headings"]> = [];
+  private readonly firstHeadings: NonNullable<GoalEvidenceArtifact["headings"]> = [];
+  private readonly lastHeadings: NonNullable<GoalEvidenceArtifact["headings"]> = [];
+  private headingCount = 0;
   private lineNumber = 1;
   private prefix = "";
   private tail = "";
@@ -577,39 +601,29 @@ class TextScanner {
   private sawContent = false;
   private endedWithNewline = false;
   private readonly matchedTerms = new Set<string>();
+  private readonly searchOverlapChars: number;
 
   constructor(criterionText: string) {
     this.terms = getCriterionTerms(criterionText);
+    this.searchOverlapChars = Math.max(0, ...this.terms.map((term) => term.length - 1));
   }
 
   push(value: string): void {
-    for (const character of value) {
-      this.sawContent = true;
-      if (character === "\n") {
-        this.finishLine();
-        this.endedWithNewline = true;
-        continue;
+    if (!value) return;
+    this.sawContent = true;
+    let start = 0;
+    while (start <= value.length) {
+      const newline = value.indexOf("\n", start);
+      const end = newline === -1 ? value.length : newline;
+      this.processSegment(value.slice(start, end).replace(/\r/g, ""));
+      if (newline === -1) {
+        this.endedWithNewline = false;
+        break;
       }
-      this.endedWithNewline = false;
-      if (character === "\r") continue;
-      this.lineLength += 1;
-      if (this.prefix.length < 4_096) this.prefix += character;
-      this.tail = `${this.tail}${character}`.slice(-512);
-      const searchable = this.tail.toLocaleLowerCase();
-      for (const term of this.terms) {
-        if (
-          this.criterionLines.length < 8 &&
-          !this.matchedTerms.has(term) &&
-          searchable.includes(term)
-        ) {
-          this.matchedTerms.add(term);
-          this.criterionLines.push({
-            number: this.lineNumber,
-            term,
-            text: truncate(this.tail, 700),
-          });
-        }
-      }
+      this.finishLine();
+      this.endedWithNewline = true;
+      start = newline + 1;
+      if (start === value.length) break;
     }
   }
 
@@ -620,8 +634,39 @@ class TextScanner {
       headLines: this.headLines,
       tailLines: this.tailLines,
       criterionLines: this.criterionLines,
-      headings: this.headings,
+      headings: [...this.firstHeadings, ...this.lastHeadings],
+      headingCount: this.headingCount,
     };
+  }
+
+  private processSegment(segment: string): void {
+    if (!segment) return;
+    const previousTail = this.tail;
+    this.lineLength += segment.length;
+    if (this.prefix.length < 4_096) {
+      this.prefix += segment.slice(0, 4_096 - this.prefix.length);
+    }
+    this.tail = `${previousTail}${segment}`.slice(-512);
+    if (this.criterionLines.length >= 8 || this.terms.length === 0) return;
+
+    const overlap = previousTail.slice(-this.searchOverlapChars);
+    const searchable = `${overlap}${segment}`;
+    const lowered = searchable.toLocaleLowerCase();
+    for (const term of this.terms) {
+      if (this.matchedTerms.has(term)) continue;
+      const matchIndex = lowered.indexOf(term);
+      if (matchIndex === -1) continue;
+      this.matchedTerms.add(term);
+      this.criterionLines.push({
+        number: this.lineNumber,
+        term,
+        text: truncate(
+          searchable.slice(Math.max(0, matchIndex - 200), matchIndex + term.length + 300),
+          700,
+        ),
+      });
+      if (this.criterionLines.length >= 8) break;
+    }
   }
 
   private finishLine(): void {
@@ -637,14 +682,21 @@ class TextScanner {
         match.text = text;
       }
     }
-    if (this.headings.length < maximumHeadings) {
-      const heading = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(this.prefix);
-      if (heading) {
-        this.headings.push({
-          depth: heading[1].length,
-          text: truncate(heading[2], 500),
-          line: this.lineNumber,
-        });
+    const heading = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(this.prefix);
+    if (heading) {
+      this.headingCount += 1;
+      const entry = {
+        depth: heading[1].length,
+        text: truncate(heading[2], 500),
+        line: this.lineNumber,
+      };
+      const firstBudget = Math.floor(maximumHeadings / 2);
+      const lastBudget = maximumHeadings - firstBudget;
+      if (this.firstHeadings.length < firstBudget) {
+        this.firstHeadings.push(entry);
+      } else {
+        this.lastHeadings.push(entry);
+        if (this.lastHeadings.length > lastBudget) this.lastHeadings.shift();
       }
     }
     this.lineNumber += 1;
@@ -715,7 +767,9 @@ class DelimitedTableScanner {
   private skipLf = false;
   private field = "";
   private row: string[] = [];
+  private fieldCount = 0;
   private headers: string[] = [];
+  private seenHeader = false;
   private rows = 0;
   private columns = 0;
   private readonly headRows: string[][] = [];
@@ -785,14 +839,18 @@ class DelimitedTableScanner {
   }
 
   private finishField(): void {
+    this.fieldCount += 1;
     if (this.row.length < 100) this.row.push(this.field);
     this.field = "";
   }
 
   private finishRow(): void {
-    this.columns = Math.max(this.columns, this.row.length);
-    if (this.headers.length === 0) {
-      this.headers = this.row;
+    this.columns = Math.max(this.columns, this.fieldCount);
+    if (!this.seenHeader) {
+      this.seenHeader = true;
+      this.headers = this.fieldCount > this.row.length
+        ? [...this.row, `... [${this.fieldCount - this.row.length} columns omitted]`]
+        : this.row;
     } else {
       this.rows += 1;
       if (this.headRows.length < 5) this.headRows.push(this.row);
@@ -800,6 +858,7 @@ class DelimitedTableScanner {
       if (this.tailRows.length > 5) this.tailRows.shift();
     }
     this.row = [];
+    this.fieldCount = 0;
   }
 }
 
@@ -807,62 +866,22 @@ function renderManifest(
   manifest: GoalEvidenceManifest,
   maxChars: number,
 ): { text: string; truncated: boolean } {
-  if (maxChars === 0) return { text: "", truncated: manifest.artifacts.length > 0 };
-  const prefix = [
+  if (maxChars === 0) return { text: "", truncated: true };
+  const safeHeader = [
     `Goal Evidence Manifest v${manifest.version}`,
     `Generated at: ${manifest.generatedAt}`,
     `Artifact count: ${manifest.artifacts.length}`,
-    quotedDataStart,
   ].join("\n");
+  const prefix = `${safeHeader}\n${quotedDataStart}`;
   const footer = `\n${quotedDataEnd}`;
-  const metadata: string[] = [];
-  const criterionExcerpts: string[] = [];
-  const genericExcerpts: string[] = [];
-
-  manifest.artifacts.forEach((artifact, index) => {
-    metadata.push(
-      quoteLine(`Artifact ${index + 1}: ${artifact.ref}`),
-      ...(artifact.path ? [quoteLine(`  Path: ${artifact.path}`)] : []),
-      quoteLine(`  Media type: ${artifact.mediaType}`),
-      ...(artifact.sizeBytes !== undefined ? [quoteLine(`  Size bytes: ${artifact.sizeBytes}`)] : []),
-      ...(artifact.modifiedAt ? [quoteLine(`  Modified at: ${artifact.modifiedAt}`)] : []),
-      ...(artifact.sha256 ? [quoteLine(`  SHA256: ${artifact.sha256}`)] : []),
-      ...(artifact.lineCount !== undefined ? [quoteLine(`  Line count: ${artifact.lineCount}`)] : []),
-      ...(artifact.jsonKeys ? [quoteLine(`  JSON keys: ${artifact.jsonKeys.join(", ")}`)] : []),
-      ...(artifact.tableShape
-        ? [
-            quoteLine(`  Table shape: ${artifact.tableShape.rows} rows x ${artifact.tableShape.columns} columns`),
-            quoteLine(`  Headers: ${artifact.tableShape.headers.join(" | ")}`),
-          ]
-        : []),
-      ...(artifact.imageSize
-        ? [quoteLine(`  Image size: ${artifact.imageSize.width} x ${artifact.imageSize.height}`)]
-        : []),
-    );
-    for (const heading of artifact.headings ?? []) {
-      metadata.push(quoteLine(`  Heading L${heading.line} H${heading.depth}: ${heading.text}`));
-    }
-    for (const excerpt of artifact.excerpts) {
-      const renderedExcerpt = [
-        quoteLine(`Excerpt ${artifact.ref} [${excerpt.label}]${formatLineRange(excerpt)}:`),
-        ...excerpt.text.split("\n").map((line) => quoteLine(line)),
-      ];
-      if (excerpt.label.startsWith("criterion:") || excerpt.label.startsWith("json_scalar:")) {
-        criterionExcerpts.push(...renderedExcerpt);
-      } else {
-        genericExcerpts.push(...renderedExcerpt);
-      }
-    }
-  });
-
-  const tokens = [...metadata, ...criterionExcerpts, ...genericExcerpts];
   const minimalSuffix = `${footer}\n${truncationMarker}`;
-  if (prefix.length + footer.length > maxChars) {
-    return { text: truncateExact(prefix, maxChars), truncated: true };
+  if (prefix.length + minimalSuffix.length > maxChars) {
+    const omission = `${safeHeader}\nArtifact data omitted: render budget too small.`;
+    return { text: truncateExact(omission, maxChars), truncated: true };
   }
   const parts = [prefix];
   let length = prefix.length;
-  for (const token of tokens) {
+  for (const token of iterateManifestTokens(manifest)) {
     const addition = `\n${token}`;
     if (length + addition.length + minimalSuffix.length <= maxChars) {
       parts.push(addition);
@@ -879,6 +898,76 @@ function renderManifest(
   }
   parts.push(footer);
   return { text: parts.join(""), truncated: false };
+}
+
+function* iterateManifestTokens(
+  manifest: GoalEvidenceManifest,
+): Generator<string> {
+  for (const [index, artifact] of manifest.artifacts.entries()) {
+    yield quoteLine(`Artifact ${index + 1}: ${artifact.ref}`);
+    if (artifact.path) yield quoteLine(`  Path: ${artifact.path}`);
+    yield quoteLine(`  Media type: ${artifact.mediaType}`);
+    if (artifact.sizeBytes !== undefined) yield quoteLine(`  Size bytes: ${artifact.sizeBytes}`);
+    if (artifact.modifiedAt) yield quoteLine(`  Modified at: ${artifact.modifiedAt}`);
+    if (artifact.sha256) yield quoteLine(`  SHA256: ${artifact.sha256}`);
+    if (artifact.lineCount !== undefined) yield quoteLine(`  Line count: ${artifact.lineCount}`);
+    if (artifact.jsonKeys) yield quoteLine(`  JSON keys: ${artifact.jsonKeys.join(", ")}`);
+    if (artifact.tableShape) {
+      yield quoteLine(
+        `  Table shape: ${artifact.tableShape.rows} rows x ${artifact.tableShape.columns} columns`,
+      );
+      yield quoteLine(`  Headers: ${artifact.tableShape.headers.join(" | ")}`);
+    }
+    if (artifact.imageSize) {
+      yield quoteLine(`  Image size: ${artifact.imageSize.width} x ${artifact.imageSize.height}`);
+    }
+    const headingStatus = artifact.excerpts.find(
+      (excerpt) => excerpt.label === "heading_scan_status",
+    );
+    if (headingStatus) {
+      yield quoteLine(`  Heading scan: ${headingStatus.text}`);
+    }
+    for (const heading of iterateHeadingsForRender(artifact.headings ?? [])) {
+      yield quoteLine(`  Heading L${heading.line} H${heading.depth}: ${heading.text}`);
+    }
+  }
+
+  for (const artifact of manifest.artifacts) {
+    for (const excerpt of artifact.excerpts) {
+      if (isCriterionExcerpt(excerpt.label)) {
+        yield* iterateExcerptTokens(artifact.ref, excerpt);
+      }
+    }
+  }
+  for (const artifact of manifest.artifacts) {
+    for (const excerpt of artifact.excerpts) {
+      if (!isCriterionExcerpt(excerpt.label) && excerpt.label !== "heading_scan_status") {
+        yield* iterateExcerptTokens(artifact.ref, excerpt);
+      }
+    }
+  }
+}
+
+function* iterateHeadingsForRender(
+  headings: NonNullable<GoalEvidenceArtifact["headings"]>,
+): Generator<NonNullable<GoalEvidenceArtifact["headings"]>[number]> {
+  const edgeCount = Math.min(20, Math.ceil(headings.length / 2));
+  for (let index = 0; index < edgeCount; index += 1) yield headings[index];
+  const tailStart = Math.max(edgeCount, headings.length - edgeCount);
+  for (let index = tailStart; index < headings.length; index += 1) yield headings[index];
+  for (let index = edgeCount; index < tailStart; index += 1) yield headings[index];
+}
+
+function* iterateExcerptTokens(
+  ref: string,
+  excerpt: GoalEvidenceArtifact["excerpts"][number],
+): Generator<string> {
+  yield quoteLine(`Excerpt ${ref} [${excerpt.label}]${formatLineRange(excerpt)}:`);
+  for (const line of excerpt.text.split("\n")) yield quoteLine(line);
+}
+
+function isCriterionExcerpt(label: string): boolean {
+  return label.startsWith("criterion:") || label.startsWith("json_scalar:");
 }
 
 function quoteLine(value: string): string {
@@ -1024,11 +1113,39 @@ function sanitizeMemoryValue(value: unknown, maxReadBytes: number): unknown {
     if (Array.isArray(current)) {
       return current.slice(0, state.maxNodes).map((entry) => visit(entry, "", depth + 1));
     }
-    return Object.fromEntries(
-      Object.entries(current)
-        .slice(0, state.maxNodes)
-        .map(([entryKey, entry]) => [entryKey, visit(entry, entryKey, depth + 1)]),
-    );
+    const result: Record<string, unknown> = {};
+    let propertyCount = 0;
+    try {
+      for (const entryKey in current as Record<string, unknown>) {
+        if (propertyCount >= state.maxNodes || state.nodes >= state.maxNodes) break;
+        let own = false;
+        try {
+          own = Object.prototype.hasOwnProperty.call(current, entryKey);
+        } catch {
+          result[entryKey] = "[UNAVAILABLE]";
+          propertyCount += 1;
+          continue;
+        }
+        if (!own) continue;
+        propertyCount += 1;
+        if (isSecretLikeKey(entryKey)) {
+          result[entryKey] = redactedMarker;
+          continue;
+        }
+        try {
+          result[entryKey] = visit(
+            (current as Record<string, unknown>)[entryKey],
+            entryKey,
+            depth + 1,
+          );
+        } catch {
+          result[entryKey] = "[UNAVAILABLE]";
+        }
+      }
+    } catch {
+      return "[UNAVAILABLE]";
+    }
+    return result;
   };
   return visit(value, "", 0);
 }

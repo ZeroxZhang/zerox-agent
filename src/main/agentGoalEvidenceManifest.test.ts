@@ -451,6 +451,142 @@ describe("goal evidence manifest", () => {
     await expect(buildGoalEvidenceManifest(requiredInput)).resolves.toMatchObject({ artifacts: [] });
   });
 
+  it("rejects bytes replaced after provenance verification but before snapshot streaming", async () => {
+    const artifactPath = path.join(workspacePath, "toctou.md");
+    await writeFile(artifactPath, "# trusted bytes", "utf8");
+    await writeArtifactProvenance({
+      artifactPath,
+      artifactId: "toctou",
+      artifactRef: "artifact:toctou",
+      runId: "run_manifest",
+      source: { type: "test" },
+      generatedAt: "2026-07-11T00:00:00.000Z",
+    });
+
+    const manifest = await buildGoalEvidenceManifest({
+      ...input({
+        evidenceRefs: ["artifact:toctou"],
+        provenance: { required: true, runId: "run_manifest" },
+      }),
+      async afterProvenanceVerified() {
+        await writeFile(artifactPath, "# altered bytes", "utf8");
+      },
+    });
+
+    expect(manifest.artifacts).toEqual([]);
+  });
+
+  it("scans large multi-term text within a bounded performance ceiling", async () => {
+    const stressPath = path.join(workspacePath, "scanner-stress.txt");
+    await writeFile(stressPath, `${"ordinary scanner material ".repeat(360_000)}\nrelease-final-marker`, "utf8");
+    const startedAt = performance.now();
+
+    const manifest = await buildGoalEvidenceManifest(input({
+      evidenceRefs: [`artifact:${stressPath}`],
+      criterionText: "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima release-final-marker",
+      maxReadBytes: 1_024,
+    }));
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(manifest.artifacts[0]?.excerpts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ text: expect.stringContaining("release-final-marker") }),
+    ]));
+    expect(elapsedMs).toBeLessThan(2_500);
+  }, 5_000);
+
+  it("stops traversing huge memory objects at the property cap", async () => {
+    let descriptorReads = 0;
+    const keys = Array.from({ length: 20_000 }, (_, index) => `key_${index}`);
+    const hugeObject = new Proxy<Record<string, string>>({}, {
+      ownKeys: () => keys,
+      getOwnPropertyDescriptor: (_target, key) => {
+        descriptorReads += 1;
+        return { configurable: true, enumerable: true, value: String(key) };
+      },
+      get: (_target, key) => `value_${String(key)}`,
+    });
+
+    const manifest = await buildGoalEvidenceManifest(input({
+      evidenceRefs: ["artifact:hugeObject"],
+      artifacts: { hugeObject },
+      maxReadBytes: 1_024,
+    }));
+
+    expect(manifest.artifacts).toHaveLength(1);
+    expect(descriptorReads).toBeLessThanOrEqual(140);
+  });
+
+  it("sanitizes throwing getters and hostile proxies without leaking or throwing", async () => {
+    const throwingObject: Record<string, unknown> = { safe: "visible" };
+    Object.defineProperty(throwingObject, "secretGetter", {
+      enumerable: true,
+      get() {
+        throw new Error("raw getter secret");
+      },
+    });
+    const hostileProxy = new Proxy({}, {
+      ownKeys() {
+        throw new Error("raw proxy secret");
+      },
+    });
+
+    const manifest = await buildGoalEvidenceManifest(input({
+      evidenceRefs: ["artifact:throwing", "artifact:hostile"],
+      artifacts: { throwing: throwingObject, hostile: hostileProxy },
+      maxReadBytes: 1_024,
+    }));
+    const rendered = renderGoalEvidenceManifest(manifest);
+
+    expect(manifest.artifacts).toHaveLength(2);
+    expect(rendered).toContain("[UNAVAILABLE]");
+    expect(rendered).not.toContain("raw getter secret");
+    expect(rendered).not.toContain("raw proxy secret");
+  });
+
+  it.each([
+    { extension: "csv", delimiter: "," },
+    { extension: "tsv", delimiter: "\t" },
+  ])("reports true width and bounded headers for wide $extension files", async ({ extension, delimiter }) => {
+    const tablePath = path.join(workspacePath, `wide.${extension}`);
+    const headers = Array.from({ length: 150 }, (_, index) => `column_${index}`);
+    const values = Array.from({ length: 150 }, (_, index) => `value_${index}`);
+    await writeFile(tablePath, `${headers.join(delimiter)}\n${values.join(delimiter)}`, "utf8");
+
+    const manifest = await buildGoalEvidenceManifest(input({
+      evidenceRefs: [`artifact:${tablePath}`],
+    }));
+    const shape = manifest.artifacts[0]?.tableShape;
+
+    expect(shape?.rows).toBe(1);
+    expect(shape?.columns).toBe(150);
+    expect(shape?.headers.length).toBeLessThanOrEqual(101);
+    expect(shape?.headers.at(-1)).toMatch(/50 columns omitted/);
+  });
+
+  it("retains first and last headings and reports explicit heading overflow", async () => {
+    const reportPath = path.join(workspacePath, "heading-overflow.md");
+    await writeFile(
+      reportPath,
+      Array.from({ length: 2_505 }, (_, index) => `# Heading ${index + 1}\nbody`).join("\n"),
+      "utf8",
+    );
+
+    const manifest = await buildGoalEvidenceManifest(input({
+      evidenceRefs: [`artifact:${reportPath}`],
+    }));
+    const artifact = manifest.artifacts[0];
+
+    expect(artifact?.headings?.length).toBeLessThanOrEqual(2_000);
+    expect(artifact?.headings?.[0]).toMatchObject({ text: "Heading 1", line: 1 });
+    expect(artifact?.headings?.at(-1)).toMatchObject({ text: "Heading 2505", line: 5009 });
+    expect(artifact?.excerpts).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        label: "heading_scan_status",
+        text: expect.stringMatching(/total=2505.*retained=2000.*truncated=true/),
+      }),
+    ]));
+  });
+
   it("rejects parent and leaf symlinks before reading", async () => {
     const realDirectory = path.join(workspacePath, "real");
     await mkdir(realDirectory);
@@ -587,6 +723,63 @@ describe("goal evidence manifest", () => {
     expect(alternateRender).toHaveLength(700);
   });
 
+  it("keeps a zero build budget at zero on later larger renders", async () => {
+    const reportPath = path.join(workspacePath, "zero-budget.md");
+    await writeFile(reportPath, "# Must remain omitted", "utf8");
+    const manifest = await buildGoalEvidenceManifest(input({
+      evidenceRefs: [`artifact:${reportPath}`],
+      maxRenderedChars: 0,
+    }));
+
+    expect(manifest.totalRenderedChars).toBe(0);
+    expect(manifest.truncated).toBe(true);
+    expect(renderGoalEvidenceManifest(manifest, 12_000)).toBe("");
+  });
+
+  it("omits artifact-derived data when a tiny cap cannot close quoted framing", async () => {
+    const reportPath = path.join(workspacePath, "tiny-budget.md");
+    await writeFile(reportPath, "# malicious tiny evidence", "utf8");
+    const manifest = await buildGoalEvidenceManifest(input({
+      evidenceRefs: [`artifact:${reportPath}`],
+      maxRenderedChars: 120,
+    }));
+    const rendered = renderGoalEvidenceManifest(manifest, 12_000);
+
+    expect(rendered.length).toBeLessThanOrEqual(120);
+    expect(rendered).not.toContain(quotedDataStartForTest);
+    expect(rendered).not.toContain("malicious tiny evidence");
+  });
+
+  it("stops reading heading entries once the render cap is full", () => {
+    let headingReads = 0;
+    const headings = new Array<{ depth: number; text: string; line: number }>(5_000);
+    for (let index = 0; index < headings.length; index += 1) {
+      Object.defineProperty(headings, index, {
+        configurable: true,
+        enumerable: true,
+        get() {
+          headingReads += 1;
+          return { depth: 1, text: `Heading ${index}`, line: index + 1 };
+        },
+      });
+    }
+    const manifest: GoalEvidenceManifest = {
+      version: 1,
+      generatedAt: "2026-07-11T00:00:00.000Z",
+      totalRenderedChars: 0,
+      truncated: false,
+      artifacts: [{
+        ref: "artifact:lazy",
+        mediaType: "text/markdown",
+        headings,
+        excerpts: [],
+      }],
+    };
+
+    expect(renderGoalEvidenceManifest(manifest, 700).length).toBeLessThanOrEqual(700);
+    expect(headingReads).toBeLessThan(100);
+  });
+
   function input(overrides: {
     evidenceRefs?: string[];
     criterionText?: string;
@@ -599,6 +792,7 @@ describe("goal evidence manifest", () => {
       goalId?: string;
       milestoneId?: string;
     };
+    afterProvenanceVerified?: (artifactPath: string) => Promise<void>;
   } = {}) {
     return {
       evidenceRefs: overrides.evidenceRefs ?? [],
@@ -611,6 +805,9 @@ describe("goal evidence manifest", () => {
       maxRenderedChars: overrides.maxRenderedChars,
       maxReadBytes: overrides.maxReadBytes,
       provenance: overrides.provenance,
+      afterProvenanceVerified: overrides.afterProvenanceVerified,
     };
   }
 });
+
+const quotedDataStartForTest = "BEGIN QUOTED ARTIFACT DATA";
