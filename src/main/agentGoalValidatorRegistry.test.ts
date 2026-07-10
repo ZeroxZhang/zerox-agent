@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { performance } from "node:perf_hooks";
 import type {
   AcceptanceCheck,
   AcceptanceCheckKind,
@@ -8,6 +9,7 @@ import type { AcceptanceContext } from "./agentGoalAcceptance";
 import {
   createAgentGoalValidatorRegistry,
   type AcceptanceValidator,
+  type AcceptanceValidatorContext,
 } from "./agentGoalValidatorRegistry";
 
 describe("agent goal validator registry", () => {
@@ -35,9 +37,9 @@ describe("agent goal validator registry", () => {
     expect(actual).toBe(expected);
   });
 
-  it("passes the exact governed context object to the validator", async () => {
+  it("passes governed capability and boundary references through a restricted view", async () => {
     const governedContext = context();
-    let receivedContext: AcceptanceContext | undefined;
+    let receivedContext: AcceptanceValidatorContext | undefined;
     const validator: AcceptanceValidator = {
       kind: "file_exists",
       async evaluate(input) {
@@ -51,7 +53,60 @@ describe("agent goal validator registry", () => {
 
     await registry.evaluate(check("file_exists"), governedContext);
 
-    expect(receivedContext).toBe(governedContext);
+    expect(receivedContext).not.toBe(governedContext);
+    expect(receivedContext).toMatchObject({
+      runId: governedContext.runId,
+      goalId: governedContext.goalId,
+      workspacePath: governedContext.workspacePath,
+    });
+    expect(receivedContext?.toolExecutor).toBe(governedContext.toolExecutor);
+    expect(receivedContext?.trajectoryStore).toBe(
+      governedContext.trajectoryStore,
+    );
+    expect(receivedContext?.extraReadRoots).toBe(governedContext.extraReadRoots);
+    expect(receivedContext?.extraWriteRoots).toBe(
+      governedContext.extraWriteRoots,
+    );
+    expect(receivedContext?.locationEnv).toBe(governedContext.locationEnv);
+    expect(receivedContext?.artifacts).toBe(governedContext.artifacts);
+    expect(receivedContext?.transcriptMessages).toBe(
+      governedContext.transcriptMessages,
+    );
+  });
+
+  it("does not expose model credentials or chat capabilities to validators", async () => {
+    const sentinelApiKey = "sentinel-api-key-must-not-reach-validator";
+    const fullContext = context();
+    fullContext.modelProfile = {
+      baseUrl: "https://example.invalid",
+      apiKey: sentinelApiKey,
+      model: "secret-model",
+      temperature: 0,
+      maxTokens: 100,
+    };
+    fullContext.chatClient = {
+      async complete() {
+        throw new Error("Chat access is not expected in registry tests.");
+      },
+    };
+    let receivedContext: AcceptanceValidatorContext | undefined;
+    const registry = createAgentGoalValidatorRegistry({
+      validators: [
+        {
+          kind: "assertion",
+          async evaluate(input) {
+            receivedContext = input.context;
+            return passedResult(input.check);
+          },
+        },
+      ],
+    });
+
+    await registry.evaluate(check("assertion"), fullContext);
+
+    expect(receivedContext).not.toHaveProperty("modelProfile");
+    expect(receivedContext).not.toHaveProperty("chatClient");
+    expect(JSON.stringify(receivedContext)).not.toContain(sentinelApiKey);
   });
 
   it("dispatches a namespaced custom validator", async () => {
@@ -140,6 +195,31 @@ describe("agent goal validator registry", () => {
     });
   });
 
+  it("times out when a synchronous validator blocks past its deadline", async () => {
+    const slowValidator: AcceptanceValidator = {
+      kind: "validator:local/blocking",
+      async evaluate({ check: selectedCheck }) {
+        const deadline = performance.now() + 20;
+        while (performance.now() < deadline) {
+          // Intentionally block to prove elapsed-deadline enforcement.
+        }
+        return passedResult(selectedCheck);
+      },
+    };
+    const registry = createAgentGoalValidatorRegistry({
+      validators: [slowValidator],
+      timeoutMs: 5,
+    });
+
+    await expect(
+      registry.evaluate(check(slowValidator.kind), context()),
+    ).resolves.toMatchObject({
+      passed: false,
+      code: "validator_timeout",
+      failureClass: "validator_unavailable",
+    });
+  });
+
   it.each([
     ["a synchronous throw", () => {
       throw new Error("secret synchronous payload");
@@ -211,6 +291,14 @@ function context(): AcceptanceContext {
     runId: "run_registry",
     goalId: "goal_registry",
     workspacePath: "/tmp/registry-workspace",
+    extraReadRoots: ["/tmp/registry-read"],
+    extraWriteRoots: ["/tmp/registry-write"],
+    locationEnv: {
+      homeDir: "/tmp/registry-home",
+      platform: "linux",
+    },
+    artifacts: { report: { status: "ready" } },
+    transcriptMessages: [{ role: "user", content: "Validate the report." }],
     toolExecutor: {
       async execute() {
         throw new Error("Tool execution is not expected in registry tests.");

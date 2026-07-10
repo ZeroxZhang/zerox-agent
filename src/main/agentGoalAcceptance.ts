@@ -154,6 +154,13 @@ async function evaluateDeterministicCheck(
       return evaluateAssertion(check, ctx);
     case "model_review":
       throw new Error("model_review is not deterministic.");
+    default:
+      return checkResult(
+        check,
+        false,
+        [],
+        "Custom acceptance validator is not available.",
+      );
   }
 }
 

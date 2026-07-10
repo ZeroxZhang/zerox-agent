@@ -1226,6 +1226,31 @@ describe("agent goal acceptance", () => {
     expect(modelCalls).toBe(0);
   });
 
+  it("fails closed for a custom check until registry wiring is available", async () => {
+    const acceptance = createAgentGoalAcceptance();
+
+    await expect(
+      acceptance.evaluate(
+        createMilestone([
+          check("check_custom", "validator:local/report", {}),
+        ]),
+        createContext(),
+      ),
+    ).resolves.toMatchObject({
+      accepted: false,
+      inferentialUsed: false,
+      checkResults: [
+        {
+          checkId: "check_custom",
+          kind: "validator:local/report",
+          passed: false,
+          evidenceRefs: [],
+          detail: "Custom acceptance validator is not available.",
+        },
+      ],
+    });
+  });
+
   it("evaluates goal-level success criteria and emits acceptance_checked trajectory details", async () => {
     const acceptance = createAgentGoalAcceptance();
     const goal = createGoal([
