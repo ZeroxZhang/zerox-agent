@@ -584,6 +584,164 @@ describe("goal acceptance failure fingerprints", () => {
     expect(`${leftAction}${rightAction}`).not.toMatch(/LATE_VISIBLE_(?:ALPHA|BRAVO)/);
   });
 
+  it("isolates sibling budgets inside an exact nested config object", () => {
+    const makeNestedValue = (seed: string): unknown => {
+      let value: unknown = seed;
+      for (let depth = 0; depth < 10; depth += 1) {
+        value = { next: value };
+      }
+      return value;
+    };
+    const wide = Object.fromEntries(
+      Array.from({ length: 64 }, (_, index) => [
+        `field_${String(index).padStart(2, "0")}`,
+        makeNestedValue(`shared_${index}`),
+      ]),
+    );
+    const leftAction = createToolActionSignature("nested_config_object", {
+      config: { a: wide, z: "NESTED_CONFIG_ALPHA" },
+    });
+    const rightAction = createToolActionSignature("nested_config_object", {
+      config: { a: wide, z: "NESTED_CONFIG_BRAVO" },
+    });
+    const leftFingerprint = createAcceptanceFailureFingerprint(
+      fingerprintInput({ actionSignatures: [leftAction] }),
+    );
+    const rightFingerprint = createAcceptanceFailureFingerprint(
+      fingerprintInput({ actionSignatures: [rightAction] }),
+    );
+
+    expect(leftAction).not.toBe(rightAction);
+    expect(leftFingerprint).not.toBe(rightFingerprint);
+    expect(Buffer.byteLength(leftAction)).toBeLessThanOrEqual(2_048);
+    expect(Buffer.byteLength(rightAction)).toBeLessThanOrEqual(2_048);
+    expect(`${leftAction}${rightAction}`).not.toMatch(/NESTED_CONFIG_(?:ALPHA|BRAVO)/);
+    expect(
+      countConsecutiveFingerprint(
+        [failureRecord("milestone", "milestone_1", leftFingerprint)],
+        { targetKind: "milestone", targetId: "milestone_1" },
+        rightFingerprint,
+      ),
+    ).toBe(0);
+  });
+
+  it("isolates visible elements inside a nested array", () => {
+    const makeNestedValue = (seed: string): unknown => {
+      let value: unknown = seed;
+      for (let depth = 0; depth < 10; depth += 1) {
+        value = { next: value };
+      }
+      return value;
+    };
+    const wide = Object.fromEntries(
+      Array.from({ length: 64 }, (_, index) => [
+        `field_${String(index).padStart(2, "0")}`,
+        makeNestedValue(`shared_${index}`),
+      ]),
+    );
+    const leftAction = createToolActionSignature("nested_config_array", {
+      config: [wide, "NESTED_ARRAY_ALPHA"],
+    });
+    const rightAction = createToolActionSignature("nested_config_array", {
+      config: [wide, "NESTED_ARRAY_BRAVO"],
+    });
+
+    expect(leftAction).not.toBe(rightAction);
+    expect(Buffer.byteLength(leftAction)).toBeLessThanOrEqual(2_048);
+    expect(Buffer.byteLength(rightAction)).toBeLessThanOrEqual(2_048);
+    expect(`${leftAction}${rightAction}`).not.toMatch(/NESTED_ARRAY_(?:ALPHA|BRAVO)/);
+  });
+
+  it("keeps nested array-object sibling budgets cycle- and getter-safe", () => {
+    const makePayload = (lateValue: string, getterMessage: string) => {
+      const makeNestedValue = (seed: string): unknown => {
+        let value: unknown = seed;
+        for (let depth = 0; depth < 10; depth += 1) {
+          value = { next: value };
+        }
+        return value;
+      };
+      const entry: Record<string, unknown> = {
+        a: Object.fromEntries(
+          Array.from({ length: 64 }, (_, index) => [
+            `field_${String(index).padStart(2, "0")}`,
+            makeNestedValue(`shared_${index}`),
+          ]),
+        ),
+        z: lateValue,
+      };
+      entry.self = entry;
+      Object.defineProperty(entry, "broken", {
+        enumerable: true,
+        get() {
+          throw new Error(getterMessage);
+        },
+      });
+      return { config: [entry] };
+    };
+
+    const leftAction = createToolActionSignature(
+      "nested_array_object",
+      makePayload("NESTED_HOSTILE_ALPHA", "PRIVATE_NESTED_GETTER_ALPHA"),
+    );
+    const rightAction = createToolActionSignature(
+      "nested_array_object",
+      makePayload("NESTED_HOSTILE_BRAVO", "PRIVATE_NESTED_GETTER_BRAVO"),
+    );
+
+    expect(leftAction).not.toBe(rightAction);
+    expect(Buffer.byteLength(leftAction)).toBeLessThanOrEqual(2_048);
+    expect(Buffer.byteLength(rightAction)).toBeLessThanOrEqual(2_048);
+    expect(`${leftAction}${rightAction}`).not.toMatch(
+      /NESTED_HOSTILE_(?:ALPHA|BRAVO)|PRIVATE_NESTED_GETTER/,
+    );
+  });
+
+  it("sweeps nested sibling isolation across alternating object and array depths", () => {
+    const wide = Object.fromEntries(
+      Array.from({ length: 64 }, (_, branch) => [
+        `branch_${String(branch).padStart(2, "0")}`,
+        Object.fromEntries(
+          Array.from({ length: 64 }, (_, leaf) => [
+            `leaf_${String(leaf).padStart(2, "0")}`,
+            `shared_${branch}_${leaf}`,
+          ]),
+        ),
+      ]),
+    );
+    const wrapToDepth = (value: unknown, depth: number): unknown => {
+      let wrapped = value;
+      for (let level = 0; level < depth; level += 1) {
+        wrapped = level % 2 === 0 ? [wrapped] : { layer: wrapped };
+      }
+      return wrapped;
+    };
+
+    for (let depth = 1; depth <= 14; depth += 1) {
+      const leftAction = createToolActionSignature(
+        "nested_depth_sweep",
+        wrapToDepth(
+          { a: wide, z: `DEPTH_SWEEP_ALPHA_${depth}` },
+          depth,
+        ),
+      );
+      const rightAction = createToolActionSignature(
+        "nested_depth_sweep",
+        wrapToDepth(
+          { a: wide, z: `DEPTH_SWEEP_BRAVO_${depth}` },
+          depth,
+        ),
+      );
+
+      expect(leftAction, `depth ${depth}`).not.toBe(rightAction);
+      expect(Buffer.byteLength(leftAction), `left depth ${depth}`).toBeLessThanOrEqual(2_048);
+      expect(Buffer.byteLength(rightAction), `right depth ${depth}`).toBeLessThanOrEqual(2_048);
+      expect(`${leftAction}${rightAction}`, `raw depth ${depth}`).not.toMatch(
+        /DEPTH_SWEEP_(?:ALPHA|BRAVO)/,
+      );
+    }
+  });
+
   it("handles undefined, non-finite numbers, sparse arrays, bigint, getters, and cycles safely", () => {
     const cyclic: Record<string, unknown> = {
       missing: undefined,

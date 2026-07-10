@@ -39,7 +39,6 @@ type CanonicalValue =
 type CanonicalState = {
   ancestors: WeakSet<object>;
   nodes: number;
-  isolateVisibleEntries: boolean;
 };
 
 export type AcceptanceFailureTarget = Pick<
@@ -174,7 +173,6 @@ function canonicalJson(value: unknown): string {
       canonicalize(value, {
         ancestors: new WeakSet<object>(),
         nodes: 0,
-        isolateVisibleEntries: true,
       }, 0),
     );
   } catch {
@@ -245,7 +243,7 @@ function canonicalize(
             canonicalizeArrayValue(
               value,
               index,
-              createVisibleEntryState(value, state),
+              createVisibleEntryState(state),
               depth + 1,
             ),
         ),
@@ -270,7 +268,7 @@ function canonicalize(
         canonicalizeObjectEntry(
           value,
           key,
-          createVisibleEntryState(value, state),
+          createVisibleEntryState(state),
           depth + 1,
         ),
       ]),
@@ -342,14 +340,11 @@ function summarizeObjectTail(
 function createTailEntryState(parent: object): CanonicalState {
   const ancestors = new WeakSet<object>();
   ancestors.add(parent);
-  return { ancestors, nodes: 0, isolateVisibleEntries: false };
+  return { ancestors, nodes: 0 };
 }
 
-function createVisibleEntryState(
-  parent: object,
-  state: CanonicalState,
-): CanonicalState {
-  return state.isolateVisibleEntries ? createTailEntryState(parent) : state;
+function createVisibleEntryState(state: CanonicalState): CanonicalState {
+  return { ancestors: state.ancestors, nodes: 0 };
 }
 
 function updateTailHash(

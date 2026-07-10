@@ -302,3 +302,64 @@ exit 0
 - `src/main/agentGoalFailureFingerprint.ts`
 - `src/main/agentGoalFailureFingerprint.test.ts`
 - `.superpowers/sdd/p41-task-7-report.md`
+
+## Nested Entry Budget Fix — Universal Sibling Isolation
+
+### Status
+
+DONE
+
+### RED Evidence
+
+The exact nested config-object, nested array-sibling, and hostile nested array/object regressions were added before the production change and witnessed failing under root-only isolation:
+
+```text
+npm test -- --run src/main/agentGoalFailureFingerprint.test.ts
+Test Files 1 failed (1)
+Tests 3 failed | 27 passed (30)
+```
+
+After the initial universal fix passed those probes, a second strict-TDD cycle added an alternating object/array property-style depth sweep. The old root-only behavior was restored for the RED witness:
+
+```text
+npm test -- --run src/main/agentGoalFailureFingerprint.test.ts -t "sweeps nested sibling isolation"
+Test Files 1 failed (1)
+Tests 1 failed | 30 skipped (31)
+```
+
+The depth-1 case retained identical bounded signatures after an early 64×64 wide sibling exhausted the nested shared node budget.
+
+### GREEN Evidence
+
+```text
+npm test -- --run src/main/agentGoalFailureFingerprint.test.ts
+Test Files 1 passed (1)
+Tests 31 passed (31)
+
+npm test -- --run src/main/agentGoalController.test.ts src/main/goalRuntimeEngine.test.ts src/main/agentGoalAcceptanceCertificate.test.ts src/main/agentGoalFailureFingerprint.test.ts
+Test Files 4 passed (4)
+Tests 168 passed (168)
+
+npx tsc -p tsconfig.electron.json --noEmit
+exit 0
+
+npm run harness:check
+Harness check passed.
+
+git diff --check
+exit 0
+```
+
+### Fix Summary
+
+- Every visible object field and array element at every nesting level receives a fresh zeroed 512-node counter while sharing the active ancestor `WeakSet`.
+- Sharing the ancestor guard preserves self/ancestor cycle detection without cloning or iterating weak references; hostile getters remain converted to unreadable markers.
+- The exact `{ config: { a: wide, z: alpha/bravo } }` probe, nested arrays, nested array/object cycles, and alternating depths 1–14 now preserve late-sibling identity, reset fingerprint occurrence counting, remain at or below 2 KiB, and expose no raw probe/getter text.
+- Traversal stays proportional to actually expanded enumerable input: arrays inspect at most 32 visible indices, objects at most 64 visible keys, sparse tails enumerate actual own keys, every path stops at depth 16, and strings/private values remain bounded digests.
+- Cross-sibling memoization was intentionally not added because canonical cycle results depend on the active ancestor context and hostile getters may not be stable across reads; per-reference traversal remains bounded and does not collapse later siblings.
+
+### Nested Entry Budget Files
+
+- `src/main/agentGoalFailureFingerprint.ts`
+- `src/main/agentGoalFailureFingerprint.test.ts`
+- `.superpowers/sdd/p41-task-7-report.md`
