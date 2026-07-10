@@ -5,12 +5,25 @@ import type {
   GoalEvidenceManifest,
 } from "../shared/agentGoal";
 
-const REDACTED_MARKER = "[REDACTED]";
-const CIRCULAR_MARKER = "[CIRCULAR]";
-const UNDEFINED_MARKER = "[UNDEFINED]";
-const NON_FINITE_MARKER = "[NON_FINITE]";
 const UNREADABLE_MARKER = "[UNREADABLE]";
-const UNSERIALIZABLE_MARKER = "[UNSERIALIZABLE]";
+
+type CanonicalValue =
+  | ["null"]
+  | ["string", string]
+  | ["boolean", boolean]
+  | ["number", number]
+  | ["non_finite", "nan" | "positive_infinity" | "negative_infinity"]
+  | ["undefined"]
+  | ["bigint", string]
+  | ["symbol"]
+  | ["function"]
+  | ["circular"]
+  | ["unreadable"]
+  | ["unserializable"]
+  | ["redacted"]
+  | ["array_hole"]
+  | ["array", CanonicalValue[]]
+  | ["object", Array<[string, CanonicalValue]>];
 
 export type AcceptanceFailureTarget = Pick<
   GoalAcceptanceFailureRecord,
@@ -70,7 +83,7 @@ export function createAcceptanceFailureFingerprint(
       validatorVersions: input.validatorVersions,
     };
   } catch {
-    identity = { malformedInput: UNSERIALIZABLE_MARKER };
+    identity = { malformedInput: UNREADABLE_MARKER };
   }
 
   return createHash("sha256").update(canonicalJson(identity)).digest("hex");
@@ -112,80 +125,122 @@ function canonicalJson(value: unknown): string {
   try {
     return JSON.stringify(canonicalize(value, new WeakSet<object>()));
   } catch {
-    return JSON.stringify(UNSERIALIZABLE_MARKER);
+    return JSON.stringify(special("unserializable"));
   }
 }
 
-function canonicalize(value: unknown, ancestors: WeakSet<object>): unknown {
-  if (value === null || typeof value === "string" || typeof value === "boolean") {
-    return value;
+function canonicalize(value: unknown, ancestors: WeakSet<object>): CanonicalValue {
+  if (value === null) {
+    return ["null"];
+  }
+  if (typeof value === "string") {
+    return ["string", value];
+  }
+  if (typeof value === "boolean") {
+    return ["boolean", value];
   }
   if (typeof value === "number") {
-    return Number.isFinite(value) ? value : NON_FINITE_MARKER;
+    if (Number.isNaN(value)) {
+      return ["non_finite", "nan"];
+    }
+    if (value === Number.POSITIVE_INFINITY) {
+      return ["non_finite", "positive_infinity"];
+    }
+    if (value === Number.NEGATIVE_INFINITY) {
+      return ["non_finite", "negative_infinity"];
+    }
+    return ["number", value];
   }
   if (typeof value === "undefined") {
-    return UNDEFINED_MARKER;
+    return special("undefined");
   }
   if (typeof value === "bigint") {
-    return `[BIGINT:${value.toString()}]`;
+    return ["bigint", value.toString()];
   }
   if (typeof value === "symbol") {
-    return "[SYMBOL]";
+    return special("symbol");
   }
   if (typeof value === "function") {
-    return "[FUNCTION]";
+    return special("function");
   }
   if (typeof value !== "object") {
-    return UNSERIALIZABLE_MARKER;
+    return special("unserializable");
   }
   if (ancestors.has(value)) {
-    return CIRCULAR_MARKER;
+    return special("circular");
   }
 
   ancestors.add(value);
   try {
     if (Array.isArray(value)) {
-      return Array.from({ length: value.length }, (_, index) =>
-        canonicalize(readArrayValue(value, index), ancestors),
-      );
+      return [
+        "array",
+        Array.from({ length: value.length }, (_, index) =>
+          canonicalizeArrayValue(value, index, ancestors),
+        ),
+      ];
     }
 
     let keys: string[];
     try {
       keys = Object.keys(value).sort();
     } catch {
-      return UNSERIALIZABLE_MARKER;
+      return special("unserializable");
     }
 
-    const normalized: Record<string, unknown> = {};
-    for (const key of keys) {
-      normalized[key] = isSecretLikeKey(key)
-        ? REDACTED_MARKER
-        : canonicalize(readObjectValue(value, key), ancestors);
-    }
-    return normalized;
+    return [
+      "object",
+      keys.map((key): [string, CanonicalValue] => [
+        key,
+        isSecretLikeKey(key)
+          ? special("redacted")
+          : canonicalizeObjectValue(value, key, ancestors),
+      ]),
+    ];
   } finally {
     ancestors.delete(value);
   }
 }
 
-function readArrayValue(value: unknown[], index: number): unknown {
-  if (!(index in value)) {
-    return UNDEFINED_MARKER;
-  }
+function canonicalizeArrayValue(
+  value: unknown[],
+  index: number,
+  ancestors: WeakSet<object>,
+): CanonicalValue {
   try {
-    return value[index];
+    if (!(index in value)) {
+      return special("array_hole");
+    }
+    return canonicalize(value[index], ancestors);
   } catch {
-    return UNREADABLE_MARKER;
+    return special("unreadable");
   }
 }
 
-function readObjectValue(value: object, key: string): unknown {
+function canonicalizeObjectValue(
+  value: object,
+  key: string,
+  ancestors: WeakSet<object>,
+): CanonicalValue {
   try {
-    return (value as Record<string, unknown>)[key];
+    return canonicalize((value as Record<string, unknown>)[key], ancestors);
   } catch {
-    return UNREADABLE_MARKER;
+    return special("unreadable");
   }
+}
+
+function special(
+  tag:
+    | "undefined"
+    | "symbol"
+    | "function"
+    | "circular"
+    | "unreadable"
+    | "unserializable"
+    | "redacted"
+    | "array_hole",
+): CanonicalValue {
+  return [tag];
 }
 
 function isSecretLikeKey(key: string): boolean {
@@ -234,7 +289,12 @@ function sortedStringSet(values: string[]): string[] {
   return [...new Set(values)].sort();
 }
 
-function sortedCanonicalSet(values: unknown[]): unknown[] {
-  const canonicalValues = values.map(canonicalJson);
-  return [...new Set(canonicalValues)].sort().map((value) => JSON.parse(value));
+function sortedCanonicalSet<T>(values: T[]): T[] {
+  const uniqueValues = new Map<string, T>();
+  for (const value of values) {
+    uniqueValues.set(canonicalJson(value), value);
+  }
+  return [...uniqueValues.entries()]
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+    .map(([, value]) => value);
 }

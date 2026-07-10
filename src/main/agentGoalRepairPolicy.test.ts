@@ -101,6 +101,18 @@ describe("goal acceptance repair policy", () => {
     );
   });
 
+  it("does not echo raw validator result codes into repair instructions", () => {
+    const secret = "sk-live-validator-secret";
+    const decision = decideAcceptanceRepair(
+      policyInput("rejected_repairable", 1, [
+        checkResult({ code: `token_failure_${secret}` }),
+      ]),
+    );
+
+    expect(JSON.stringify(decision)).not.toContain(secret);
+    expect(decision.instructions.join("\n")).toContain("check_tests");
+  });
+
   it("replans only for the structural replan verdict", () => {
     expect(
       decideAcceptanceRepair(

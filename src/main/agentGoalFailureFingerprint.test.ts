@@ -71,9 +71,29 @@ describe("goal acceptance failure fingerprints", () => {
     });
 
     expect(left).toBe(right);
-    expect(left).toBe(
-      'test_run:{"options":{"a":2,"nested":{"alpha":1,"beta":2},"z":1},"path":"package.json"}',
+    expect(left).toMatch(/^test_run:/);
+    expect(left.indexOf("alpha")).toBeLessThan(left.indexOf("beta"));
+    expect(left.indexOf("nested")).toBeLessThan(left.indexOf("z"));
+    expect(left.indexOf("options")).toBeLessThan(left.indexOf("path"));
+  });
+
+  it("preserves dangerous own keys as sorted data without prototype setter effects", () => {
+    const left = JSON.parse(
+      '{"prototype":"proto","z":1,"__proto__":{"value":"left"},"constructor":"ctor","a":2}',
     );
+    const reordered = JSON.parse(
+      '{"a":2,"constructor":"ctor","__proto__":{"value":"left"},"z":1,"prototype":"proto"}',
+    );
+    const changed = JSON.parse(
+      '{"prototype":"proto","z":1,"__proto__":{"value":"right"},"constructor":"ctor","a":2}',
+    );
+
+    const signature = createToolActionSignature("unsafe_keys", left);
+    expect(signature).toBe(createToolActionSignature("unsafe_keys", reordered));
+    expect(signature).not.toBe(createToolActionSignature("unsafe_keys", changed));
+    expect(signature).toContain("__proto__");
+    expect(signature.indexOf("__proto__")).toBeLessThan(signature.indexOf("constructor"));
+    expect(signature.indexOf("constructor")).toBeLessThan(signature.indexOf("prototype"));
   });
 
   it("excludes prose, timestamps, plan versions, counters, and retry wording", () => {
@@ -191,7 +211,7 @@ describe("goal acceptance failure fingerprints", () => {
     });
 
     expect(left).toBe(right);
-    expect(left).toContain("[REDACTED]");
+    expect(left).toContain("redacted");
     expect(left).not.toContain(secretA);
     expect(left).not.toContain(secretB);
     expect(JSON.stringify({ left, right })).not.toContain("sk-live-secret");
@@ -212,10 +232,54 @@ describe("goal acceptance failure fingerprints", () => {
 
     expect(() => createToolActionSignature("unsafe_tool", cyclic)).not.toThrow();
     const signature = createToolActionSignature("unsafe_tool", cyclic);
-    expect(signature).toContain("[CIRCULAR]");
-    expect(signature).toContain("[UNDEFINED]");
-    expect(signature).toContain("[NON_FINITE]");
+    expect(signature).toContain("circular");
+    expect(signature).toContain("undefined");
+    expect(signature).toContain("nan");
     expect(signature).not.toContain("getter payload");
+  });
+
+  it("keeps exceptional values distinct from spoofing literal strings", () => {
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    const unreadable: Record<string, unknown> = {};
+    Object.defineProperty(unreadable, "value", {
+      enumerable: true,
+      get() {
+        throw new Error("private getter failure");
+      },
+    });
+    const revoked = Proxy.revocable({}, {});
+    revoked.revoke();
+
+    const collisionPairs: Array<[string, unknown, unknown]> = [
+      ["undefined", undefined, "[UNDEFINED]"],
+      ["cycle", cyclic, { self: "[CIRCULAR]" }],
+      ["NaN", Number.NaN, "[NON_FINITE]"],
+      ["positive infinity", Number.POSITIVE_INFINITY, "[NON_FINITE]"],
+      ["negative infinity", Number.NEGATIVE_INFINITY, "[NON_FINITE]"],
+      ["unreadable property", unreadable, { value: "[UNREADABLE]" }],
+      ["function", () => undefined, "[FUNCTION]"],
+      ["symbol", Symbol("private symbol description"), "[SYMBOL]"],
+      ["bigint", 17n, "[BIGINT:17]"],
+      ["unserializable value", revoked.proxy, "[UNSERIALIZABLE]"],
+    ];
+
+    for (const [label, exceptional, spoof] of collisionPairs) {
+      expect(
+        createToolActionSignature("collision", exceptional),
+        `${label} must not collide with a user string/object`,
+      ).not.toBe(createToolActionSignature("collision", spoof));
+    }
+  });
+
+  it("distinguishes non-finite number classes from one another", () => {
+    const signatures = [
+      createToolActionSignature("number", Number.NaN),
+      createToolActionSignature("number", Number.POSITIVE_INFINITY),
+      createToolActionSignature("number", Number.NEGATIVE_INFINITY),
+    ];
+
+    expect(new Set(signatures)).toHaveLength(3);
   });
 
   it("counts consecutive matching fingerprints within one target and resets on change", () => {

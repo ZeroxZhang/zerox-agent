@@ -197,7 +197,7 @@ function repairInstructions(results: GoalAcceptanceCheckResult[]): string[] {
   }
   return results.map(
     (result) =>
-      `Resolve failed acceptance check "${result.checkId}" (${result.kind}, code: ${result.code}) and provide evidence for re-evaluation.`,
+      `Resolve failed acceptance check "${result.checkId}" (${result.kind}) and provide evidence for re-evaluation.`,
   );
 }
 
