@@ -9,6 +9,7 @@ export type GoalStatus =
   | "achieved"
   | "stopped_budget"
   | "stopped_stalled"
+  | "stopped_blocked"
   | "failed"
   | "canceled";
 
@@ -18,14 +19,150 @@ export type StopReason =
   | "progress_stalled"
   | "review_rejected"
   | "user_canceled"
-  | "unrecoverable_failure";
+  | "unrecoverable_failure"
+  | "external_blocked"
+  | "goal_impossible"
+  | "acceptance_unavailable";
 
-export type AcceptanceCheckKind =
+export type BuiltinAcceptanceCheckKind =
   | "file_exists"
   | "command_exit_code"
   | "test_passes"
   | "assertion"
   | "model_review";
+
+export type AcceptanceCheckKind =
+  | BuiltinAcceptanceCheckKind
+  | `validator:${string}`;
+
+export type GoalAcceptanceProtocolVersion = 1 | 2;
+
+export type AcceptanceVerdict =
+  | "accepted"
+  | "rejected_repairable"
+  | "replan_required"
+  | "blocked_external"
+  | "impossible"
+  | "acceptance_unavailable";
+
+export type AcceptanceFailureClass =
+  | "artifact_missing"
+  | "artifact_invalid"
+  | "artifact_outside_boundary"
+  | "command_failed"
+  | "test_failed"
+  | "assertion_failed"
+  | "semantic_evidence_insufficient"
+  | "plan_structure_invalid"
+  | "external_dependency_missing"
+  | "goal_impossible"
+  | "validator_unavailable"
+  | "judge_unavailable"
+  | "unknown";
+
+export type GoalAcceptanceCheckResult = {
+  checkId: string;
+  kind: AcceptanceCheckKind;
+  passed: boolean;
+  code: string;
+  failureClass?: AcceptanceFailureClass;
+  evidenceRefs: string[];
+  detail: string;
+};
+
+export type AcceptanceRepairDirective = {
+  action:
+    | "repair_same_milestone"
+    | "retry_alternate_strategy"
+    | "replan"
+    | "stop_stalled"
+    | "stop_blocked";
+  summary: string;
+  failedCheckIds: string[];
+  fingerprint: string;
+  occurrence: number;
+  instructions: string[];
+};
+
+export type GoalAcceptanceFailureRecord = {
+  at: string;
+  targetKind: "milestone" | "goal";
+  targetId: string;
+  fingerprint: string;
+  occurrence: number;
+  verdict: Exclude<AcceptanceVerdict, "accepted">;
+  failureClass: AcceptanceFailureClass;
+  failedCheckIds: string[];
+  evidenceRefs: string[];
+  actionSignatures: string[];
+};
+
+export type GoalAcceptanceState = {
+  protocolVersion: 2;
+  phase:
+    | "idle"
+    | "validating"
+    | "repairing"
+    | "judging"
+    | "blocked"
+    | "certified";
+  attempt: number;
+  recentFailures: GoalAcceptanceFailureRecord[];
+  lastDecision?: AcceptanceRepairDirective;
+};
+
+export type GoalEvidenceArtifact = {
+  ref: string;
+  path?: string;
+  mediaType: string;
+  sizeBytes?: number;
+  modifiedAt?: string;
+  sha256?: string;
+  lineCount?: number;
+  headings?: Array<{ depth: number; text: string; line: number }>;
+  jsonKeys?: string[];
+  tableShape?: { rows: number; columns: number; headers: string[] };
+  imageSize?: { width: number; height: number };
+  excerpts: Array<{
+    label: string;
+    startLine?: number;
+    endLine?: number;
+    text: string;
+  }>;
+};
+
+export type GoalEvidenceManifest = {
+  version: 1;
+  generatedAt: string;
+  artifacts: GoalEvidenceArtifact[];
+  totalRenderedChars: number;
+  truncated: boolean;
+};
+
+export type GoalAcceptanceCertificate = {
+  version: 1;
+  goalId: string;
+  acceptedAt: string;
+  protocolVersion: 2;
+  criteriaHash: string;
+  planVersion: number;
+  runIds: string[];
+  checkResults: GoalAcceptanceCheckResult[];
+  evidence: Array<{
+    ref: string;
+    path?: string;
+    sha256?: string;
+    sizeBytes?: number;
+    provenanceRefs: string[];
+  }>;
+  judge?: {
+    providerId?: string;
+    model: string;
+    promptVersion: string;
+    evaluatedMessageIds: string[];
+  };
+  certificateHash: string;
+};
 
 export type AcceptanceCheck = {
   id: string;
@@ -101,9 +238,29 @@ export type Goal = {
   taskContract?: AgentTaskContract;
   selectedSkill?: GoalSelectedSkill;
   selectedSkillInputValues?: Record<string, string | number | boolean>;
+  acceptanceProtocolVersion?: GoalAcceptanceProtocolVersion;
+  acceptanceState?: GoalAcceptanceState;
+  acceptanceCertificate?: GoalAcceptanceCertificate;
   createdAt: string;
   updatedAt: string;
 };
+
+export function upgradeGoalAcceptanceProtocol(goal: Goal): Goal {
+  if (goal.acceptanceProtocolVersion === 2 && goal.acceptanceState) {
+    return goal;
+  }
+
+  return {
+    ...goal,
+    acceptanceProtocolVersion: 2,
+    acceptanceState: {
+      protocolVersion: 2,
+      phase: "idle",
+      attempt: 0,
+      recentFailures: [],
+    },
+  };
+}
 
 const allowedTransitions: Record<GoalStatus, GoalStatus[]> = {
   planning: ["executing", "canceled"],
@@ -119,6 +276,7 @@ const allowedTransitions: Record<GoalStatus, GoalStatus[]> = {
   achieved: [],
   stopped_budget: ["executing", "canceled"],
   stopped_stalled: [],
+  stopped_blocked: ["executing", "canceled"],
   failed: [],
   canceled: [],
 };
@@ -161,6 +319,20 @@ export function validateGoalDraft(
     for (const criterion of milestone.successCriteria) {
       validateSuccessCriterion(criterion);
     }
+  }
+}
+
+export function validateGoal(goal: Goal): void {
+  validateGoalDraft(goal);
+
+  if (
+    goal.acceptanceProtocolVersion === 2 &&
+    goal.status === "achieved" &&
+    !goal.acceptanceCertificate
+  ) {
+    throw new Error(
+      "Protocol-v2 achieved goals require an acceptance certificate.",
+    );
   }
 }
 

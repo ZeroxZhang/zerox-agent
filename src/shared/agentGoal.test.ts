@@ -2,8 +2,18 @@ import { describe, expect, it } from "vitest";
 import {
   assertGoalTransition,
   canTransitionGoalStatus,
+  upgradeGoalAcceptanceProtocol,
+  validateGoal,
   validateGoalDraft,
+  type AcceptanceFailureClass,
+  type AcceptanceRepairDirective,
+  type AcceptanceVerdict,
   type Goal,
+  type GoalAcceptanceCertificate,
+  type GoalAcceptanceCheckResult,
+  type GoalAcceptanceFailureRecord,
+  type GoalAcceptanceState,
+  type GoalEvidenceManifest,
   type SuccessCriterion,
 } from "./agentGoal";
 
@@ -71,6 +81,149 @@ describe("agent goal model", () => {
     expect(canTransitionGoalStatus("executing", "canceled")).toBe(true);
     expect(canTransitionGoalStatus("waiting_for_review", "canceled")).toBe(true);
     expect(canTransitionGoalStatus("stopped_budget", "executing")).toBe(true);
+    expect(canTransitionGoalStatus("stopped_blocked", "executing")).toBe(true);
+    expect(canTransitionGoalStatus("stopped_blocked", "canceled")).toBe(true);
+  });
+
+  it("upgrades a legacy nonterminal goal without mutating the stored input", () => {
+    const legacy = createGoal({ status: "executing" });
+
+    const upgraded = upgradeGoalAcceptanceProtocol(legacy);
+
+    expect(legacy.acceptanceProtocolVersion).toBeUndefined();
+    expect(legacy.acceptanceState).toBeUndefined();
+    expect(upgraded).not.toBe(legacy);
+    expect(upgraded.acceptanceProtocolVersion).toBe(2);
+    expect(upgraded.acceptanceState).toEqual({
+      protocolVersion: 2,
+      phase: "idle",
+      attempt: 0,
+      recentFailures: [],
+    });
+  });
+
+  it("preserves a goal that already has protocol-v2 acceptance state", () => {
+    const state: GoalAcceptanceState = {
+      protocolVersion: 2,
+      phase: "repairing",
+      attempt: 2,
+      recentFailures: [],
+    };
+    const current = createGoal({
+      status: "executing",
+      acceptanceProtocolVersion: 2,
+      acceptanceState: state,
+    });
+
+    expect(upgradeGoalAcceptanceProtocol(current)).toBe(current);
+  });
+
+  it("requires a certificate for a protocol-v2 achieved goal", () => {
+    expect(() =>
+      validateGoal(
+        createGoal({ status: "achieved", acceptanceProtocolVersion: 2 }),
+      ),
+    ).toThrow(/certificate/i);
+  });
+
+  it("accepts a structurally certified protocol-v2 achieved goal", () => {
+    const certificate: GoalAcceptanceCertificate = {
+      version: 1,
+      goalId: "goal_1",
+      acceptedAt: "2026-06-12T00:00:00.000Z",
+      protocolVersion: 2,
+      criteriaHash: "criteria_sha256",
+      planVersion: 1,
+      runIds: ["run_1"],
+      checkResults: [],
+      evidence: [],
+      certificateHash: "certificate_sha256",
+    };
+
+    expect(() =>
+      validateGoal(
+        createGoal({
+          status: "achieved",
+          acceptanceProtocolVersion: 2,
+          acceptanceCertificate: certificate,
+        }),
+      ),
+    ).not.toThrow();
+  });
+
+  it("exposes the exact protocol-v2 shared result discriminants", () => {
+    const verdicts: AcceptanceVerdict[] = [
+      "accepted",
+      "rejected_repairable",
+      "replan_required",
+      "blocked_external",
+      "impossible",
+      "acceptance_unavailable",
+    ];
+    const failureClasses: AcceptanceFailureClass[] = [
+      "artifact_missing",
+      "artifact_invalid",
+      "artifact_outside_boundary",
+      "command_failed",
+      "test_failed",
+      "assertion_failed",
+      "semantic_evidence_insufficient",
+      "plan_structure_invalid",
+      "external_dependency_missing",
+      "goal_impossible",
+      "validator_unavailable",
+      "judge_unavailable",
+      "unknown",
+    ];
+    const checkResult: GoalAcceptanceCheckResult = {
+      checkId: "custom_check",
+      kind: "validator:local/schema",
+      passed: false,
+      code: "schema_mismatch",
+      failureClass: "artifact_invalid",
+      evidenceRefs: ["artifact:report.json"],
+      detail: "The report does not match the schema.",
+    };
+    const directive: AcceptanceRepairDirective = {
+      action: "repair_same_milestone",
+      summary: "Repair the report schema.",
+      failedCheckIds: [checkResult.checkId],
+      fingerprint: "failure_sha256",
+      occurrence: 1,
+      instructions: ["Add the required field."],
+    };
+    const failure: GoalAcceptanceFailureRecord = {
+      at: "2026-06-12T00:00:00.000Z",
+      targetKind: "goal",
+      targetId: "goal_1",
+      fingerprint: directive.fingerprint,
+      occurrence: directive.occurrence,
+      verdict: "rejected_repairable",
+      failureClass: "artifact_invalid",
+      failedCheckIds: directive.failedCheckIds,
+      evidenceRefs: checkResult.evidenceRefs,
+      actionSignatures: ["markdown_report_write:{}"],
+    };
+    const manifest: GoalEvidenceManifest = {
+      version: 1,
+      generatedAt: "2026-06-12T00:00:00.000Z",
+      artifacts: [
+        {
+          ref: "artifact:report.json",
+          mediaType: "application/json",
+          jsonKeys: ["summary"],
+          excerpts: [{ label: "tail", text: '{"summary":"draft"}' }],
+        },
+      ],
+      totalRenderedChars: 19,
+      truncated: false,
+    };
+
+    expect(verdicts).toHaveLength(6);
+    expect(failureClasses).toHaveLength(13);
+    expect(checkResult.kind).toBe("validator:local/schema");
+    expect(failure.verdict).not.toBe("accepted");
+    expect(manifest.artifacts[0]?.jsonKeys).toEqual(["summary"]);
   });
 
   it("rejects transitions out of completed terminal goal states", () => {
