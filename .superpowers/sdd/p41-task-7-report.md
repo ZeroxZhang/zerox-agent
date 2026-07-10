@@ -426,3 +426,66 @@ exit 0
 - `src/main/agentGoalFailureFingerprint.ts`
 - `src/main/agentGoalFailureFingerprint.test.ts`
 - `.superpowers/sdd/p41-task-7-report.md`
+
+## Hostile Graph Bound Fix — Deterministic Traversal Caps
+
+### Status
+
+DONE
+
+### RED Evidence
+
+The consolidated hostile-graph, tail-order, and deep-array regressions were added before production edits and witnessed failing:
+
+```text
+npm test -- --run src/main/agentGoalFailureFingerprint.test.ts
+Test Files 1 failed (1)
+Tests 4 failed | 38 passed (42)
+```
+
+The failures proved:
+
+- a semantically endless fresh-`next` getter ran until the test-only 10,001-read fuse and returned no truthful truncation status;
+- a lazy finite generator traversed all 250,000 nodes;
+- shallow array tail identity depended on named-property insertion order;
+- nonenumerable numeric own array indices were absent from deep identity.
+
+The RED suite completed in 773 ms, so the endless source could not hang the test process.
+
+### GREEN Evidence
+
+```text
+npm test -- --run src/main/agentGoalFailureFingerprint.test.ts
+Test Files 1 passed (1)
+Tests 42 passed (42)
+
+npm test -- --run src/main/agentGoalController.test.ts src/main/goalRuntimeEngine.test.ts src/main/agentGoalAcceptanceCertificate.test.ts src/main/agentGoalFailureFingerprint.test.ts
+Test Files 4 passed (4)
+Tests 179 passed (179)
+
+npx tsc -p tsconfig.electron.json --noEmit
+exit 0
+
+npm run harness:check
+Harness check passed.
+
+git diff --check
+exit 0
+```
+
+### Fix Summary
+
+- Iterative deep-graph traversal now has deterministic hard caps of 8,192 unique nodes and 32,768 own-property inspections.
+- Once either cap is reached, traversal stops before the next property descriptor/getter/value read, hashes explicit `graph_truncated` node/edge/inspection counts, and emits a truthful `truncated` marker status.
+- Exact deep-graph differentiation is guaranteed only within those documented safety budgets; inputs beyond them terminate synchronously with deterministic bounded identity.
+- Hash payload frames larger than 512 bytes are replaced by length-plus-SHA-256 frames, so huge keys and strings never enlarge the persisted marker or expose raw private text.
+- Shallow array tail keys are sorted numeric-first and then lexical before length-framed streaming hash updates.
+- Deep arrays use safe own-property-name/descriptor inspection: every actual numeric own index participates regardless of enumerability, named properties participate only when enumerable, symbols and nonenumerable named properties are excluded, and accessor/descriptor failures become typed hash markers.
+- Sparse arrays hash declared length plus actual discovered own indices without iterating declared holes. Secret-like properties still skip their values/getters.
+- The endless fresh-getter signatures repeat deterministically, invoke no more than the node budget, finish within the test performance bound, remain at or below 2 KiB, and expose no fuse/private text.
+
+### Hostile Graph Bound Files
+
+- `src/main/agentGoalFailureFingerprint.ts`
+- `src/main/agentGoalFailureFingerprint.test.ts`
+- `.superpowers/sdd/p41-task-7-report.md`

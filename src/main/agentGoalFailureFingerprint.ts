@@ -13,6 +13,9 @@ const MAX_CANONICAL_NODES = 512;
 const MAX_CANONICAL_ARRAY_LENGTH = 32;
 const MAX_CANONICAL_OBJECT_KEYS = 64;
 const MAX_CANONICAL_STRING_BYTES = 512;
+const MAX_DEEP_GRAPH_NODES = 8_192;
+const MAX_DEEP_GRAPH_EDGES = 32_768;
+const MAX_DEEP_GRAPH_FRAME_BYTES = 512;
 
 type CanonicalValue =
   | ["null"]
@@ -32,7 +35,7 @@ type CanonicalValue =
   | ["truncated"]
   | ["string_digest", string, number]
   | ["private_digest", string, number]
-  | ["deep_digest", string, number, number]
+  | ["deep_digest", string, number, number, "complete" | "truncated"]
   | ["tail_digest", number, string]
   | ["array", number, CanonicalValue[], CanonicalValue]
   | ["object", number, Array<[string, CanonicalValue]>, CanonicalValue];
@@ -316,6 +319,7 @@ function summarizeArrayTail(
   } catch {
     return special("unserializable");
   }
+  keys.sort(compareDeepArrayKeys);
   const hash = createHash("sha256");
   let cardinality = 0;
   for (const key of keys) {
@@ -368,6 +372,18 @@ function deepGraphDigest(root: unknown): CanonicalValue {
   let nextTraversalId = 1;
   let nodeCount = 0;
   let edgeCount = 0;
+  let propertyInspectionCount = 0;
+  let truncated = false;
+  const markTruncated = () => {
+    truncated = true;
+    updateDeepHash(hash, "graph_truncated", String(nodeCount));
+    updateDeepHash(hash, "graph_truncated_edges", String(edgeCount));
+    updateDeepHash(
+      hash,
+      "graph_truncated_inspections",
+      String(propertyInspectionCount),
+    );
+  };
 
   while (tasks.length > 0) {
     const task = tasks.pop()!;
@@ -377,12 +393,42 @@ function deepGraphDigest(root: unknown): CanonicalValue {
         continue;
       }
 
+      if (
+        nodeCount >= MAX_DEEP_GRAPH_NODES ||
+        propertyInspectionCount >= MAX_DEEP_GRAPH_EDGES
+      ) {
+        markTruncated();
+        break;
+      }
+
       const key = task.keys[task.index]!;
       task.index += 1;
       tasks.push(task);
-      edgeCount += 1;
+      propertyInspectionCount += 1;
       const arrayIndex =
         task.containerKind === "array" ? parseCanonicalArrayIndex(key) : null;
+      let descriptor: PropertyDescriptor | undefined;
+      try {
+        descriptor = Object.getOwnPropertyDescriptor(task.value, key);
+      } catch {
+        edgeCount += 1;
+        updateDeepHash(
+          hash,
+          arrayIndex === null ? `${task.containerKind}_key` : "array_index",
+          key,
+        );
+        updateDeepHash(hash, "unreadable_descriptor");
+        continue;
+      }
+      if (
+        descriptor !== undefined &&
+        arrayIndex === null &&
+        descriptor.enumerable !== true
+      ) {
+        continue;
+      }
+
+      edgeCount += 1;
       updateDeepHash(
         hash,
         arrayIndex === null
@@ -394,10 +440,17 @@ function deepGraphDigest(root: unknown): CanonicalValue {
         updateDeepHash(hash, "redacted");
         continue;
       }
+      if (descriptor === undefined) {
+        updateDeepHash(hash, "missing_property");
+        continue;
+      }
       try {
         tasks.push({
           kind: "value",
-          value: (task.value as Record<string, unknown>)[key],
+          value:
+            "value" in descriptor
+              ? descriptor.value
+              : descriptor.get?.call(task.value),
         });
       } catch {
         updateDeepHash(hash, "unreadable");
@@ -454,6 +507,10 @@ function deepGraphDigest(root: unknown): CanonicalValue {
       updateDeepHash(hash, "reference", String(existingId));
       continue;
     }
+    if (nodeCount >= MAX_DEEP_GRAPH_NODES) {
+      markTruncated();
+      break;
+    }
     const traversalId = nextTraversalId;
     nextTraversalId += 1;
     traversalIds.set(value, traversalId);
@@ -468,20 +525,19 @@ function deepGraphDigest(root: unknown): CanonicalValue {
     }
     let keys: string[];
     try {
-      keys = Object.keys(value);
+      keys = Object.getOwnPropertyNames(value);
     } catch {
       updateDeepHash(hash, "unreadable_container", String(traversalId));
       continue;
     }
     if (isArray) {
+      keys = keys.filter((key) => key !== "length");
       keys.sort(compareDeepArrayKeys);
       updateDeepHash(hash, "array_start", String(traversalId));
-      updateDeepHash(hash, "array_length", String(readArrayLength(value as unknown[])));
-      updateDeepHash(hash, "array_keys", String(keys.length));
+      updateDeepHash(hash, "array_length", String(readDeepArrayLength(value)));
     } else {
       keys.sort();
       updateDeepHash(hash, "object_start", String(traversalId));
-      updateDeepHash(hash, "object_keys", String(keys.length));
     }
     tasks.push({
       kind: "container",
@@ -492,7 +548,23 @@ function deepGraphDigest(root: unknown): CanonicalValue {
     });
   }
 
-  return ["deep_digest", hash.digest("hex"), nodeCount, edgeCount];
+  return [
+    "deep_digest",
+    hash.digest("hex"),
+    nodeCount,
+    edgeCount,
+    truncated ? "truncated" : "complete",
+  ];
+}
+
+function readDeepArrayLength(value: object): number {
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(value, "length");
+    const length = descriptor && "value" in descriptor ? descriptor.value : 0;
+    return Number.isSafeInteger(length) && length >= 0 ? length : 0;
+  } catch {
+    return 0;
+  }
 }
 
 function updateDeepHash(
@@ -504,9 +576,18 @@ function updateDeepHash(
   hash.update(":");
   hash.update(tag);
   hash.update(":");
-  hash.update(String(Buffer.byteLength(payload)));
-  hash.update(":");
-  hash.update(payload);
+  const payloadBytes = Buffer.byteLength(payload);
+  if (payloadBytes <= MAX_DEEP_GRAPH_FRAME_BYTES) {
+    hash.update("raw:");
+    hash.update(String(payloadBytes));
+    hash.update(":");
+    hash.update(payload);
+  } else {
+    hash.update("digest:");
+    hash.update(String(payloadBytes));
+    hash.update(":");
+    hash.update(createHash("sha256").update(payload).digest("hex"));
+  }
   hash.update(";");
 }
 

@@ -972,6 +972,206 @@ describe("goal acceptance failure fingerprints", () => {
     );
   });
 
+  it("bounds an infinite fresh-next getter graph deterministically", () => {
+    const makeFreshChain = () => {
+      let getterReads = 0;
+      const makeNode = (): Record<string, unknown> => {
+        const node: Record<string, unknown> = {};
+        Object.defineProperty(node, "next", {
+          enumerable: true,
+          get() {
+            getterReads += 1;
+            if (getterReads > 10_000) {
+              throw new Error("PRIVATE_INFINITE_GETTER_TEST_FUSE");
+            }
+            return makeNode();
+          },
+        });
+        return node;
+      };
+      return { root: makeNode(), getReads: () => getterReads };
+    };
+    const leftGraph = makeFreshChain();
+    const rightGraph = makeFreshChain();
+    const startedAt = Date.now();
+    const left = createToolActionSignature(
+      "deep_infinite_getter",
+      wrapMixedGraph(leftGraph.root, 16),
+    );
+    const right = createToolActionSignature(
+      "deep_infinite_getter",
+      wrapMixedGraph(rightGraph.root, 16),
+    );
+
+    expect(left).toBe(right);
+    expect(left).toContain("truncated");
+    expect(leftGraph.getReads()).toBeLessThanOrEqual(8_192);
+    expect(rightGraph.getReads()).toBeLessThanOrEqual(8_192);
+    expect(Date.now() - startedAt).toBeLessThan(2_000);
+    expect(Buffer.byteLength(left)).toBeLessThanOrEqual(2_048);
+    expect(`${left}${right}`).not.toContain("PRIVATE_INFINITE_GETTER_TEST_FUSE");
+  });
+
+  it("bounds a lazy finite 250k-node deep graph", () => {
+    let getterReads = 0;
+    const makeNode = (index: number): Record<string, unknown> => {
+      const node: Record<string, unknown> = {};
+      Object.defineProperty(node, "next", {
+        enumerable: true,
+        get() {
+          getterReads += 1;
+          return index + 1 < 250_000 ? makeNode(index + 1) : null;
+        },
+      });
+      return node;
+    };
+    const signature = createToolActionSignature(
+      "deep_finite_generator",
+      wrapMixedGraph(makeNode(0), 16),
+    );
+
+    expect(getterReads).toBeLessThanOrEqual(8_192);
+    expect(signature).toContain("truncated");
+    expect(Buffer.byteLength(signature)).toBeLessThanOrEqual(2_048);
+  });
+
+  it("sorts shallow array tail keys numeric-then-lexical", () => {
+    const makeArray = (namedOrder: string[]) => {
+      const value: unknown[] & Record<string, unknown> = [];
+      value.length = 100;
+      value[97] = "late";
+      value[33] = "early";
+      for (const key of namedOrder) {
+        value[key] = key === "alpha" ? 1 : 2;
+      }
+      return value;
+    };
+    const left = createToolActionSignature(
+      "ordered_array_tail",
+      makeArray(["zeta", "alpha"]),
+    );
+    const right = createToolActionSignature(
+      "ordered_array_tail",
+      makeArray(["alpha", "zeta"]),
+    );
+
+    expect(left).toBe(right);
+    expect(Buffer.byteLength(left)).toBeLessThanOrEqual(2_048);
+  });
+
+  it("includes nonenumerable numeric own array indices in deep digests only", () => {
+    const makeArray = (numericValue: unknown, hiddenValue: string, symbolValue: string) => {
+      const value: unknown[] & Record<string | symbol, unknown> = [];
+      value.length = 128;
+      Object.defineProperty(value, "97", {
+        configurable: true,
+        enumerable: false,
+        value: numericValue,
+      });
+      Object.defineProperty(value, "hidden", {
+        configurable: true,
+        enumerable: false,
+        value: hiddenValue,
+      });
+      value[Symbol("ignored")] = symbolValue;
+      return value;
+    };
+    const numericLeft = createToolActionSignature(
+      "deep_numeric_own_index",
+      wrapMixedGraph(
+        makeArray(
+          "https://numeric-own-alpha.invalid/private",
+          "HIDDEN_ALPHA",
+          "SYMBOL_ALPHA",
+        ),
+        16,
+      ),
+    );
+    const numericRight = createToolActionSignature(
+      "deep_numeric_own_index",
+      wrapMixedGraph(
+        makeArray(
+          "https://numeric-own-bravo.invalid/private",
+          "HIDDEN_BRAVO",
+          "SYMBOL_BRAVO",
+        ),
+        16,
+      ),
+    );
+    const stableNumericLeft = createToolActionSignature(
+      "deep_numeric_hidden",
+      wrapMixedGraph(makeArray(7, "HIDDEN_ALPHA", "SYMBOL_ALPHA"), 16),
+    );
+    const stableNumericRight = createToolActionSignature(
+      "deep_numeric_hidden",
+      wrapMixedGraph(makeArray(7, "HIDDEN_BRAVO", "SYMBOL_BRAVO"), 16),
+    );
+    const getterArray: unknown[] = [];
+    getterArray.length = 128;
+    Object.defineProperty(getterArray, "97", {
+      enumerable: false,
+      get() {
+        throw new Error("PRIVATE_NUMERIC_GETTER_ALPHA");
+      },
+    });
+    const equivalentGetterArray: unknown[] = [];
+    equivalentGetterArray.length = 128;
+    Object.defineProperty(equivalentGetterArray, "97", {
+      enumerable: false,
+      get() {
+        throw new Error("PRIVATE_NUMERIC_GETTER_BRAVO");
+      },
+    });
+    const holeArray: unknown[] = [];
+    holeArray.length = 128;
+    const getterSignature = createToolActionSignature(
+      "deep_numeric_getter",
+      wrapMixedGraph(getterArray, 16),
+    );
+    const equivalentGetterSignature = createToolActionSignature(
+      "deep_numeric_getter",
+      wrapMixedGraph(equivalentGetterArray, 16),
+    );
+    const holeSignature = createToolActionSignature(
+      "deep_numeric_getter",
+      wrapMixedGraph(holeArray, 16),
+    );
+
+    expect(numericLeft).not.toBe(numericRight);
+    expect(stableNumericLeft).toBe(stableNumericRight);
+    expect(getterSignature).toBe(equivalentGetterSignature);
+    expect(getterSignature).not.toBe(holeSignature);
+    expect(
+      [numericLeft, numericRight, getterSignature].every(
+        (signature) => Buffer.byteLength(signature) <= 2_048,
+      ),
+    ).toBe(true);
+    expect(`${numericLeft}${numericRight}${getterSignature}`).not.toMatch(
+      /numeric-own-(?:alpha|bravo)\.invalid|PRIVATE_NUMERIC_GETTER|HIDDEN_|SYMBOL_/,
+    );
+  });
+
+  it("bounds deep key and string hash frames without leaking raw values", () => {
+    const hugeKey = `PRIVATE_DEEP_KEY_${"k".repeat(50_000)}`;
+    const left = createToolActionSignature(
+      "deep_large_frames",
+      wrapMixedGraph({ [hugeKey]: `PRIVATE_ALPHA_${"a".repeat(50_000)}` }, 16),
+    );
+    const repeated = createToolActionSignature(
+      "deep_large_frames",
+      wrapMixedGraph({ [hugeKey]: `PRIVATE_ALPHA_${"a".repeat(50_000)}` }, 16),
+    );
+    const changed = createToolActionSignature(
+      "deep_large_frames",
+      wrapMixedGraph({ [hugeKey]: `PRIVATE_BRAVO_${"b".repeat(50_000)}` }, 16),
+    );
+
+    expect(left).toBe(repeated);
+    expect(left).not.toBe(changed);
+    expect(Buffer.byteLength(left)).toBeLessThanOrEqual(2_048);
+    expect(`${left}${repeated}${changed}`).not.toMatch(/PRIVATE_(?:DEEP_KEY|ALPHA|BRAVO)/);
+  });
+
   it("handles undefined, non-finite numbers, sparse arrays, bigint, getters, and cycles safely", () => {
     const cyclic: Record<string, unknown> = {
       missing: undefined,
