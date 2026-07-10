@@ -953,6 +953,44 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(styles).toContain(".goal-draft-card");
   });
 
+  it("wires blocked acceptance recovery and safe certificate disclosure", () => {
+    expect(goalDetailDrawerSource).toContain("重试验收");
+    expect(goalDetailDrawerSource).toContain("调整计划");
+    expect(goalDetailDrawerSource).toContain("终止目标");
+    expect(goalDetailDrawerSource).toContain("查看验收证书");
+    expect(goalDetailDrawerSource).toContain("progress.certificate");
+    expect(goalDetailDrawerSource).toContain("shortCertificateHash");
+    expect(goalDetailDrawerSource).toContain("goal-certificate-hash");
+    expect(goalDetailDrawerSource).toContain("<code>{artifact.path}</code>");
+    expect(goalDetailDrawerSource).not.toContain('href={artifact.path}');
+    expect(goalStatusStripSource).toContain('case "stopped_blocked"');
+    expect(goalStatusStripSource).toContain("progress.acceptance");
+    expect(chatPanelSource).toContain("retryGoal(activeGoal.id)");
+    expect(chatPanelSource).toContain("replanGoal(");
+    expect(chatPanelSource).toContain("cancelGoal(activeGoal.id)");
+    expect(chatPanelSource).toContain("void refreshSessions(sessionId ?? undefined)");
+  });
+
+  it("keeps blocked and certificate surfaces bounded, focusable, and Obsidian-styled", () => {
+    expect(styles).toContain(".goal-acceptance-evidence");
+    expect(styles).toContain(".goal-certificate-details");
+    expect(styles).toContain(".goal-certificate-list");
+    expect(styles).toContain("max-height:");
+    expect(styles).toContain("overflow-y: auto;");
+    expect(styles).toContain("font-family: var(--font-mono);");
+    expect(styles).toContain(".goal-detail-drawer button:focus-visible");
+    expect(styles).toContain("var(--color-surface-primary)");
+    expect(styles).toContain("var(--border-default)");
+  });
+
+  it("maps stopped_blocked exhaustively across renderer goal surfaces", () => {
+    expect(appSource).toContain('stopped_blocked: "目标受阻"');
+    expect(chatPanelSource).toContain('stopped_blocked: "目标受阻"');
+    expect(chatPanelSource).toContain('status === "stopped_blocked"');
+    expect(goalStatusStripSource).toContain('case "stopped_blocked"');
+    expect(goalDetailDrawerSource).toContain('status === "stopped_blocked"');
+  });
+
   it("uses Obsidian styling for Goal Mode draft and execution surfaces", () => {
     expect(styles).toContain(
       ".runtime-surface-stack {\n  flex: 0 0 auto;\n  display: grid;",

@@ -518,7 +518,13 @@ export function AgentChatPanel({
       const eventBelongsToActiveGoal =
         event.goalId === activeGoalId || event.sessionId === activeSessionId;
       if (eventBelongsToActiveGoal) {
-        const goalUiState = getGoalUiSyncState(event.status);
+        const goalUiState = event.status === "stopped_blocked"
+          ? {
+              statusKind: "paused" as const,
+              workPhase: "paused" as const,
+              shouldClearActiveRequest: true,
+            }
+          : getGoalUiSyncState(event.status);
         const description =
           activeGoalRef.current?.id === event.goalId
             ? activeGoalRef.current.description
@@ -527,10 +533,16 @@ export function AgentChatPanel({
         setStatus({ kind: goalUiState.statusKind, message: event.message });
         setWorkPhase(goalUiState.workPhase);
         setTaskActivity(
-          buildGoalTaskActivity({
-            status: event.status,
-            description,
-          }),
+          event.status === "stopped_blocked"
+            ? createTaskActivity({
+                kind: "paused",
+                title: "目标受阻",
+                detail: description,
+              })
+            : buildGoalTaskActivity({
+                status: event.status,
+                description,
+              }),
         );
         setSessions((currentSessions) =>
           currentSessions.map((session) => {
@@ -1368,7 +1380,11 @@ export function AgentChatPanel({
         : `重新规划失败：${result.message}`,
     });
     if (result.ok && result.goal) {
+      applyGoalSummaryToSessions(result.goal);
+      setStatus({ kind: "working", message: "目标计划已调整" });
+      setWorkPhase("tool");
       void refreshActiveGoalDetail(result.goal.id);
+      void refreshSessions(sessionId ?? undefined);
     }
   }
 
@@ -1391,6 +1407,7 @@ export function AgentChatPanel({
     });
     if (result.ok && result.goal) {
       void refreshActiveGoalDetail(result.goal.id);
+      void refreshSessions(sessionId ?? undefined);
     }
   }
 
@@ -1489,6 +1506,7 @@ export function AgentChatPanel({
     });
     if (result.ok && result.goal) {
       void refreshActiveGoalDetail(result.goal.id);
+      void refreshSessions(sessionId ?? undefined);
     }
   }
 
@@ -4143,6 +4161,7 @@ function translateGoalStatus(status: ChatSessionGoalSummary["status"]): string {
     achieved: "已达成",
     stopped_budget: "预算已用尽",
     stopped_stalled: "停滞停止",
+    stopped_blocked: "目标受阻",
     failed: "失败",
     canceled: "已取消",
   };
@@ -4154,6 +4173,7 @@ function isTerminalGoalStatus(status: ChatSessionGoalSummary["status"]): boolean
     status === "achieved" ||
     status === "stopped_budget" ||
     status === "stopped_stalled" ||
+    status === "stopped_blocked" ||
     status === "failed" ||
     status === "canceled"
   );

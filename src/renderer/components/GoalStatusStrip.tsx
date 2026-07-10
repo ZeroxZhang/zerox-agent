@@ -28,7 +28,13 @@ export function GoalStatusStrip(props: GoalStatusStripProps) {
         <div className="goal-status-strip-text">
           <strong>{progress.statusLabel}</strong>
           <small>
-            {currentMilestone
+            {progress.acceptance
+              ? `${progress.acceptance.phaseLabel}${
+                  progress.acceptance.lastDirective
+                    ? ` · ${progress.acceptance.lastDirective.label}`
+                    : ""
+                }`
+              : currentMilestone
               ? `${currentMilestone.stateLabel} · ${currentMilestone.description}`
               : progress.statusDetail}
             {" "}· {progress.progressText}
@@ -98,6 +104,17 @@ function renderStatusAction(
       return props.onReplan ? (
         <button type="button" onClick={props.onReplan}>
           重新规划
+        </button>
+      ) : null;
+    case "stopped_blocked":
+      return props.onRetry ? (
+        <button
+          type="button"
+          className="goal-primary-action"
+          aria-label="重试验收"
+          onClick={props.onRetry}
+        >
+          重试验收
         </button>
       ) : null;
     case "failed":

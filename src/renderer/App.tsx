@@ -1003,6 +1003,7 @@ function translateSidebarGoalStatus(
     achieved: "已达成",
     stopped_budget: "预算已用尽",
     stopped_stalled: "停滞停止",
+    stopped_blocked: "目标受阻",
     failed: "失败",
     canceled: "已取消",
   };

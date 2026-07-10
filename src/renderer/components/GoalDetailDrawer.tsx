@@ -47,7 +47,8 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
 
   const hasGuardedActions =
     props.summary.status === "waiting_for_review" ||
-    isRecoverableStatus(props.summary.status);
+    isRecoverableStatus(props.summary.status) ||
+    progress.recoveryActions.length > 0;
 
   return (
     <div
@@ -132,6 +133,25 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
               <span>恢复路径</span>
               <p>{getRecoveryHint(props.summary.status)}</p>
               <div className="goal-review-actions">
+                {props.summary.status === "stopped_blocked" && props.onRetry ? (
+                  <button
+                    type="button"
+                    className="goal-primary-action"
+                    aria-label="重试验收"
+                    onClick={props.onRetry}
+                  >
+                    重试验收
+                  </button>
+                ) : null}
+                {props.summary.status === "stopped_blocked" && props.onReplan ? (
+                  <button
+                    type="button"
+                    aria-label="调整计划"
+                    onClick={props.onReplan}
+                  >
+                    调整计划
+                  </button>
+                ) : null}
                 {props.summary.status === "stopped_budget" &&
                 props.onIncreaseBudget ? (
                   <button
@@ -168,11 +188,133 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
                     className="goal-danger-action"
                     onClick={props.onCancel}
                   >
-                    结束目标
+                    {props.summary.status === "stopped_blocked"
+                      ? "终止目标"
+                      : "结束目标"}
                   </button>
                 ) : null}
               </div>
             </section>
+          ) : null}
+
+          {progress.acceptance ? (
+            <section className="goal-acceptance-details">
+              <div className="goal-detail-section-header">
+                <span>验收决策</span>
+                <small>{progress.acceptance.phaseLabel}</small>
+              </div>
+              {progress.acceptance.lastDirective ? (
+                <p>
+                  最后确定性决策：{progress.acceptance.lastDirective.label}
+                  {progress.acceptance.occurrence
+                    ? ` · 第 ${progress.acceptance.occurrence} 次`
+                    : ""}
+                </p>
+              ) : (
+                <p>尚无修复或停止决策。</p>
+              )}
+              {progress.acceptance.failedCheckIds.length > 0 ||
+              progress.acceptance.evidenceRefs.length > 0 ? (
+                <div className="goal-acceptance-evidence">
+                  {progress.acceptance.failedCheckIds.length > 0 ? (
+                    <div>
+                      <strong>失败检查</strong>
+                      <ul>
+                        {progress.acceptance.failedCheckIds.map((checkId) => (
+                          <li key={checkId}><code>{checkId}</code></li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  {progress.acceptance.evidenceRefs.length > 0 ? (
+                    <div>
+                      <strong>证据引用</strong>
+                      <ul>
+                        {progress.acceptance.evidenceRefs.map((reference) => (
+                          <li key={reference}><code>{reference}</code></li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </section>
+          ) : null}
+
+          {progress.certificate ? (
+            <details className="goal-certificate-details">
+              <summary>查看验收证书</summary>
+              <dl className="goal-certificate-metadata">
+                <div>
+                  <dt>验收时间</dt>
+                  <dd>{progress.certificate.acceptedAt}</dd>
+                </div>
+                <div>
+                  <dt>计划版本</dt>
+                  <dd>{progress.certificate.planVersion}</dd>
+                </div>
+                <div>
+                  <dt>证书哈希</dt>
+                  <dd className="goal-certificate-hash">
+                    <code>{progress.certificate.shortCertificateHash}</code>
+                  </dd>
+                </div>
+                {progress.certificate.judge ? (
+                  <>
+                    <div>
+                      <dt>评审模型</dt>
+                      <dd>{progress.certificate.judge.model}</dd>
+                    </div>
+                    <div>
+                      <dt>提示版本</dt>
+                      <dd>{progress.certificate.judge.promptVersion}</dd>
+                    </div>
+                  </>
+                ) : null}
+              </dl>
+              <div className="goal-certificate-list">
+                <strong>验收检查</strong>
+                {progress.certificate.checks.length > 0 ? (
+                  <ul>
+                    {progress.certificate.checks.map((check) => (
+                      <li key={`${check.id}-${check.kind}`}>
+                        <span>{check.passed ? "通过" : "未通过"}</span>
+                        <code>{check.id}</code>
+                        <small>
+                          {check.mode === "inferential" ? "推断性" : "确定性"}
+                          {" · "}{check.kind} · {check.code}
+                        </small>
+                        {check.evidenceRefs.length > 0 ? (
+                          <small>{check.evidenceRefs.join(" · ")}</small>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p>证书未包含可展示的检查元数据。</p>
+                )}
+              </div>
+              <div className="goal-certificate-list">
+                <strong>产物元数据</strong>
+                {progress.certificate.artifacts.length > 0 ? (
+                  <ul>
+                    {progress.certificate.artifacts.map((artifact, index) => (
+                      <li key={`${artifact.path ?? "artifact"}-${index}`}>
+                        {artifact.path ? <code>{artifact.path}</code> : null}
+                        {artifact.sizeBytes !== undefined ? (
+                          <small>{artifact.sizeBytes} bytes</small>
+                        ) : null}
+                        {artifact.shortSha256 ? (
+                          <small>SHA256 <code>{artifact.shortSha256}</code></small>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p>证书未包含可展示的产物元数据。</p>
+                )}
+              </div>
+            </details>
           ) : null}
 
           <section className="goal-progress-next">
@@ -237,7 +379,8 @@ function isRecoverableStatus(status: ChatSessionGoalSummary["status"]): boolean 
   return (
     status === "failed" ||
     status === "stopped_budget" ||
-    status === "stopped_stalled"
+    status === "stopped_stalled" ||
+    status === "stopped_blocked"
   );
 }
 
@@ -249,6 +392,8 @@ function getRecoveryHint(status: ChatSessionGoalSummary["status"]): string {
       return "目标没有可推进的里程碑。你可以重新规划、重试或结束目标。";
     case "failed":
       return "目标执行失败。你可以重试或结束目标。";
+    case "stopped_blocked":
+      return "目标尚未完成。你可以重试验收、调整计划或终止目标。";
     default:
       return "";
   }

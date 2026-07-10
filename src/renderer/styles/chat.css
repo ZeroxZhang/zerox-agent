@@ -1269,6 +1269,7 @@
 .goal-status-strip.is-waiting_for_review,
 .goal-status-strip.is-stopped_budget,
 .goal-status-strip.is-stopped_stalled,
+.goal-status-strip.is-stopped_blocked,
 .goal-status-strip.is-achieved,
 .goal-status-strip.is-failed,
 .goal-status-strip.is-canceled {
@@ -1279,6 +1280,7 @@
 .goal-status-strip.is-waiting_for_review .goal-status-strip-dot,
 .goal-status-strip.is-stopped_budget .goal-status-strip-dot,
 .goal-status-strip.is-stopped_stalled .goal-status-strip-dot,
+.goal-status-strip.is-stopped_blocked .goal-status-strip-dot,
 .goal-status-strip.is-achieved .goal-status-strip-dot,
 .goal-status-strip.is-failed .goal-status-strip-dot,
 .goal-status-strip.is-canceled .goal-status-strip-dot {
@@ -1316,6 +1318,72 @@
   color: var(--status-error-text);
   border-color: var(--status-error-border);
   background: var(--status-error-bg);
+}
+
+.goal-detail-drawer button:focus-visible,
+.goal-certificate-details summary:focus-visible {
+  outline: 2px solid var(--color-action-primary);
+  outline-offset: 2px;
+}
+
+.goal-acceptance-details,
+.goal-certificate-details {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-10);
+  background: var(--color-surface-primary);
+}
+
+.goal-certificate-details > summary {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  cursor: pointer;
+}
+
+.goal-acceptance-evidence,
+.goal-certificate-list {
+  display: grid;
+  gap: var(--space-2);
+  max-height: min(220px, 34vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.goal-acceptance-evidence > div,
+.goal-certificate-list > ul {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.goal-acceptance-evidence ul,
+.goal-certificate-list ul {
+  margin: 0;
+  padding-left: var(--space-4);
+}
+
+.goal-certificate-list li {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-8);
+  background: var(--color-surface-muted);
+}
+
+.goal-acceptance-evidence code,
+.goal-certificate-details code,
+.goal-certificate-hash {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.goal-certificate-metadata {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .task-process-list {
