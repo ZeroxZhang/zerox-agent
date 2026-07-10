@@ -250,3 +250,55 @@ exit 0
 - `src/main/agentGoalFailureFingerprint.ts`
 - `src/main/agentGoalFailureFingerprint.test.ts`
 - `.superpowers/sdd/p41-task-7-report.md`
+
+## Visible Entry Budget Fix — Isolated Bounded Action Entries
+
+### Status
+
+DONE
+
+### RED Evidence
+
+The wide visible-object and visible-array regressions were added before production changes and witnessed failing because an early `a` entry exhausted the shared 512-node budget before a later visible `z` field:
+
+```text
+npm test -- --run src/main/agentGoalFailureFingerprint.test.ts
+Test Files 1 failed (1)
+Tests 2 failed | 25 passed (27)
+```
+
+Both failing probes produced identical bounded action signatures when only the late `z` value changed.
+
+### GREEN Evidence
+
+```text
+npm test -- --run src/main/agentGoalFailureFingerprint.test.ts
+Test Files 1 passed (1)
+Tests 27 passed (27)
+
+npm test -- --run src/main/agentGoalController.test.ts src/main/goalRuntimeEngine.test.ts src/main/agentGoalAcceptanceCertificate.test.ts src/main/agentGoalFailureFingerprint.test.ts
+Test Files 4 passed (4)
+Tests 164 passed (164)
+
+npx tsc -p tsconfig.electron.json --noEmit
+exit 0
+
+npm run harness:check
+Harness check passed.
+
+git diff --check
+exit 0
+```
+
+### Fix Summary
+
+- Each top-level visible object field or array element receives a fresh 512-node canonical state with the root container retained in its ancestor guard.
+- Nested recursion shares that entry state, so every top-level entry remains bounded by one node/depth budget rather than multiplying work at each nested sibling level.
+- Existing 64-key and 32-element visibility caps, complete streaming tail digests, cycle detection, hostile-getter containment, private-value handling, and 2 KiB signature cap remain intact.
+- Wide-object and wide-array probes now distinguish late `z` alpha/bravo changes, produce distinct failure fingerprints, reset consecutive occurrence counting, and persist neither raw probe value.
+
+### Visible Entry Budget Files
+
+- `src/main/agentGoalFailureFingerprint.ts`
+- `src/main/agentGoalFailureFingerprint.test.ts`
+- `.superpowers/sdd/p41-task-7-report.md`

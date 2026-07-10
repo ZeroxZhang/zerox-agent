@@ -510,6 +510,80 @@ describe("goal acceptance failure fingerprints", () => {
     ).toBe(0);
   });
 
+  it("isolates a late visible field from an earlier wide object node budget", () => {
+    const makeNestedValue = (seed: string): unknown => {
+      let value: unknown = seed;
+      for (let depth = 0; depth < 10; depth += 1) {
+        value = { next: value };
+      }
+      return value;
+    };
+    const wideObject = Object.fromEntries(
+      Array.from({ length: 64 }, (_, index) => [
+        `field_${String(index).padStart(2, "0")}`,
+        makeNestedValue(`shared_${index}`),
+      ]),
+    );
+    const leftAction = createToolActionSignature("wide_visible_object", {
+      a: wideObject,
+      z: "LATE_VISIBLE_ALPHA",
+    });
+    const rightAction = createToolActionSignature("wide_visible_object", {
+      a: wideObject,
+      z: "LATE_VISIBLE_BRAVO",
+    });
+    const leftFingerprint = createAcceptanceFailureFingerprint(
+      fingerprintInput({ actionSignatures: [leftAction] }),
+    );
+    const rightFingerprint = createAcceptanceFailureFingerprint(
+      fingerprintInput({ actionSignatures: [rightAction] }),
+    );
+
+    expect(leftAction).not.toBe(rightAction);
+    expect(leftFingerprint).not.toBe(rightFingerprint);
+    expect(Buffer.byteLength(leftAction)).toBeLessThanOrEqual(2_048);
+    expect(Buffer.byteLength(rightAction)).toBeLessThanOrEqual(2_048);
+    expect(`${leftAction}${rightAction}`).not.toMatch(/LATE_VISIBLE_(?:ALPHA|BRAVO)/);
+    expect(
+      countConsecutiveFingerprint(
+        [failureRecord("milestone", "milestone_1", leftFingerprint)],
+        { targetKind: "milestone", targetId: "milestone_1" },
+        rightFingerprint,
+      ),
+    ).toBe(0);
+  });
+
+  it("isolates a late visible field from an earlier wide array node budget", () => {
+    const makeNestedValue = (seed: string): unknown => {
+      let value: unknown = seed;
+      for (let depth = 0; depth < 8; depth += 1) {
+        value = { next: value };
+      }
+      return value;
+    };
+    const wideArray = Array.from({ length: 32 }, (_, index) =>
+      Object.fromEntries(
+        Array.from({ length: 8 }, (_, branch) => [
+          `branch_${branch}`,
+          makeNestedValue(`shared_${index}_${branch}`),
+        ]),
+      ),
+    );
+    const leftAction = createToolActionSignature("wide_visible_array", {
+      a: wideArray,
+      z: "LATE_VISIBLE_ALPHA",
+    });
+    const rightAction = createToolActionSignature("wide_visible_array", {
+      a: wideArray,
+      z: "LATE_VISIBLE_BRAVO",
+    });
+
+    expect(leftAction).not.toBe(rightAction);
+    expect(Buffer.byteLength(leftAction)).toBeLessThanOrEqual(2_048);
+    expect(Buffer.byteLength(rightAction)).toBeLessThanOrEqual(2_048);
+    expect(`${leftAction}${rightAction}`).not.toMatch(/LATE_VISIBLE_(?:ALPHA|BRAVO)/);
+  });
+
   it("handles undefined, non-finite numbers, sparse arrays, bigint, getters, and cycles safely", () => {
     const cyclic: Record<string, unknown> = {
       missing: undefined,
