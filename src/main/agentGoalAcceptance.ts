@@ -471,7 +471,12 @@ async function evaluateModelReview(
     };
   }
 
-  const evidence = await formatEvidenceForPrompt(evidenceRefs, criterionText, ctx);
+  const evidence = await formatEvidenceForPrompt(
+    evidenceRefs,
+    criterionText,
+    check.params.requireProvenance === true,
+    ctx,
+  );
   if (evidence.missingArtifactRefs.length > 0) {
     return {
       checkResult: checkResult(
@@ -720,6 +725,7 @@ function parseEvidenceRefs(value: unknown): string[] {
 async function formatEvidenceForPrompt(
   evidenceRefs: string[],
   criterionText: string,
+  requireProvenance: boolean,
   ctx: AcceptanceContext,
 ): Promise<{ lines: string[]; missingArtifactRefs: string[] }> {
   const manifest = await buildGoalEvidenceManifest({
@@ -730,6 +736,16 @@ async function formatEvidenceForPrompt(
     locationEnv: getAcceptanceLocationEnv(ctx),
     artifacts: ctx.artifacts,
     now: ctx.now ?? (() => new Date().toISOString()),
+    ...(requireProvenance
+      ? {
+          provenance: {
+            required: true,
+            runId: ctx.runId,
+            ...(ctx.goalId ? { goalId: ctx.goalId } : {}),
+            ...(ctx.milestoneId ? { milestoneId: ctx.milestoneId } : {}),
+          },
+        }
+      : {}),
   });
   const includedRefs = new Set(manifest.artifacts.map((artifact) => artifact.ref));
   const missingArtifactRefs = evidenceRefs.filter(

@@ -1,6 +1,7 @@
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { createHash } from "node:crypto";
+import { StringDecoder } from "node:string_decoder";
 import path from "node:path";
 import type {
   GoalEvidenceArtifact,
@@ -12,11 +13,24 @@ import {
   validatePathInsideLocationRoots,
   type LocationResourceEnvironment,
 } from "../shared/locationResource";
+import { verifyArtifactProvenance } from "../shared/agentArtifactProvenance";
 
 const defaultMaxRenderedChars = 12_000;
 const defaultMaxReadBytes = 2 * 1024 * 1024;
 const maximumExcerptChars = 1_200;
-const truncationMarker = "\n... [truncated]";
+const maximumHeadings = 2_000;
+const maximumJsonKeys = 100;
+const redactedMarker = "[REDACTED]";
+const truncationMarker = "... [truncated]";
+const quotedDataStart = "BEGIN QUOTED ARTIFACT DATA";
+const quotedDataEnd = "END QUOTED ARTIFACT DATA";
+
+export type GoalEvidenceProvenanceRequirement = {
+  required: boolean;
+  runId: string;
+  goalId?: string;
+  milestoneId?: string;
+};
 
 export type BuildGoalEvidenceManifestInput = {
   evidenceRefs?: string[];
@@ -29,18 +43,37 @@ export type BuildGoalEvidenceManifestInput = {
   now: () => string;
   maxRenderedChars?: number;
   maxReadBytes?: number;
+  provenance?: GoalEvidenceProvenanceRequirement;
+};
+
+type NumberedLine = { number: number; text: string };
+
+type StreamTextScan = {
+  lineCount: number;
+  headLines: NumberedLine[];
+  tailLines: NumberedLine[];
+  criterionLines: Array<NumberedLine & { term: string }>;
+  headings: NonNullable<GoalEvidenceArtifact["headings"]>;
+};
+
+type StreamTableScan = {
+  rows: number;
+  columns: number;
+  headers: string[];
+  headRows: string[][];
+  tailRows: string[][];
 };
 
 type FileSnapshot = {
   sizeBytes: number;
   modifiedAt: string;
   sha256: string;
-  lineCount: number;
   head: Buffer;
   tail: Buffer;
+  text?: StreamTextScan;
+  jsonKeys?: string[];
+  table?: StreamTableScan;
 };
-
-type NumberedLine = { number: number; text: string };
 
 export async function buildGoalEvidenceManifest(
   input: BuildGoalEvidenceManifestInput,
@@ -49,14 +82,9 @@ export async function buildGoalEvidenceManifest(
   const refs = dedupeStrings(input.evidenceRefs ?? input.refs ?? []);
 
   for (const ref of refs) {
-    if (!ref.startsWith("artifact:")) {
-      continue;
-    }
-
+    if (!ref.startsWith("artifact:")) continue;
     const artifact = await buildArtifact(ref, input);
-    if (artifact) {
-      artifacts.push(artifact);
-    }
+    if (artifact) artifacts.push(artifact);
   }
 
   const manifest: GoalEvidenceManifest = {
@@ -66,12 +94,12 @@ export async function buildGoalEvidenceManifest(
     totalRenderedChars: 0,
     truncated: false,
   };
-  const renderResult = renderManifest(
+  const result = renderManifest(
     manifest,
     normalizeBudget(input.maxRenderedChars, defaultMaxRenderedChars),
   );
-  manifest.totalRenderedChars = renderResult.text.length;
-  manifest.truncated = renderResult.truncated;
+  manifest.totalRenderedChars = result.text.length;
+  manifest.truncated = result.truncated;
   return manifest;
 }
 
@@ -79,7 +107,12 @@ export function renderGoalEvidenceManifest(
   manifest: GoalEvidenceManifest,
   maxChars = defaultMaxRenderedChars,
 ): string {
-  return renderManifest(manifest, normalizeBudget(maxChars, defaultMaxRenderedChars)).text;
+  const requestedCap = normalizeBudget(maxChars, defaultMaxRenderedChars);
+  const intrinsicCap =
+    manifest.truncated && manifest.totalRenderedChars > 0
+      ? manifest.totalRenderedChars
+      : requestedCap;
+  return renderManifest(manifest, Math.min(requestedCap, intrinsicCap)).text;
 }
 
 async function buildArtifact(
@@ -87,17 +120,23 @@ async function buildArtifact(
   input: BuildGoalEvidenceManifestInput,
 ): Promise<GoalEvidenceArtifact | null> {
   const artifactName = ref.slice("artifact:".length);
-  if (!isSafeArtifactReference(artifactName)) {
-    return null;
-  }
+  if (!isSafeArtifactReference(artifactName)) return null;
 
-  const memoryKey = Object.prototype.hasOwnProperty.call(input.artifacts, artifactName)
+  const artifacts = input.artifacts;
+  const memoryKey = artifacts && Object.prototype.hasOwnProperty.call(artifacts, artifactName)
     ? artifactName
-    : Object.prototype.hasOwnProperty.call(input.artifacts, ref)
+    : artifacts && Object.prototype.hasOwnProperty.call(artifacts, ref)
       ? ref
       : null;
   if (memoryKey) {
-    return buildMemoryArtifact(ref, input.artifacts?.[memoryKey], input.criterionText);
+    const value = artifacts?.[memoryKey];
+    if (value === undefined || input.provenance?.required) return null;
+    return buildMemoryArtifact(
+      ref,
+      value,
+      input.criterionText,
+      normalizeBudget(input.maxReadBytes, defaultMaxReadBytes),
+    );
   }
 
   const env = normalizeLocationEnvironment({
@@ -113,8 +152,20 @@ async function buildArtifact(
 
   for (const candidate of getCandidatePaths(artifactName, roots)) {
     const boundary = validatePathInsideLocationRoots(candidate, roots, env);
-    if (!boundary.ok) {
-      continue;
+    if (!boundary.ok) continue;
+
+    if (input.provenance?.required) {
+      const verification = await verifyArtifactProvenance({
+        artifactPath: boundary.path,
+        artifactRef: ref,
+        artifactId: artifactName,
+        runId: input.provenance.runId,
+        ...(input.provenance.goalId ? { goalId: input.provenance.goalId } : {}),
+        ...(input.provenance.milestoneId
+          ? { milestoneId: input.provenance.milestoneId }
+          : {}),
+      });
+      if (!verification.ok) continue;
     }
 
     const artifact = await buildFileArtifact(
@@ -125,11 +176,8 @@ async function buildArtifact(
       input.criterionText,
       normalizeBudget(input.maxReadBytes, defaultMaxReadBytes),
     );
-    if (artifact) {
-      return artifact;
-    }
+    if (artifact) return artifact;
   }
-
   return null;
 }
 
@@ -137,21 +185,33 @@ function buildMemoryArtifact(
   ref: string,
   value: unknown,
   criterionText: string,
+  maxReadBytes: number,
 ): GoalEvidenceArtifact {
+  const binary = getBinaryView(value);
+  if (binary) {
+    return {
+      ref,
+      mediaType: "application/octet-stream",
+      sizeBytes: binary.byteLength,
+      sha256: createHash("sha256").update(binary).digest("hex"),
+      excerpts: [],
+    };
+  }
+
   if (typeof value === "string") {
-    const content = Buffer.from(value, "utf8");
-    const snapshot = createMemorySnapshot(content);
+    const snapshot = createStringSnapshot(value, criterionText, maxReadBytes);
     return buildTextArtifact(ref, undefined, "text/plain", snapshot, criterionText);
   }
 
-  const serialized = safeSerialize(value);
-  const content = Buffer.from(serialized, "utf8");
+  const sanitized = sanitizeMemoryValue(value, maxReadBytes);
+  const serialized = JSON.stringify(sanitized) ?? "null";
+  const content = truncateUtf8Buffer(serialized, maxReadBytes);
   return buildJsonArtifact(
     ref,
     undefined,
-    createMemorySnapshot(content),
+    createBufferSnapshot(content, criterionText, "application/json"),
     criterionText,
-    value,
+    sanitized,
   );
 }
 
@@ -164,27 +224,27 @@ async function buildFileArtifact(
   maxReadBytes: number,
 ): Promise<GoalEvidenceArtifact | null> {
   const boundary = validatePathInsideLocationRoots(candidatePath, roots, env);
-  if (!boundary.ok) {
-    return null;
-  }
+  if (!boundary.ok) return null;
 
-  let handle;
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
     handle = await open(
       boundary.path,
       constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
     );
     const stats = await handle.stat();
-    if (!stats.isFile()) {
-      return null;
-    }
-    const snapshot = await readSnapshot(handle, stats.mtime.toISOString(), maxReadBytes);
+    if (!stats.isFile()) return null;
     const mediaType = detectMediaType(boundary.path);
+    const snapshot = await readSnapshot(
+      handle,
+      stats.mtime.toISOString(),
+      maxReadBytes,
+      mediaType,
+      criterionText,
+    );
     return adaptSnapshot(ref, boundary.path, mediaType, snapshot, criterionText);
   } catch (error) {
-    if (isUnresolvableFileError(error)) {
-      return null;
-    }
+    if (isUnresolvableFileError(error)) return null;
     throw error;
   } finally {
     await handle?.close();
@@ -195,6 +255,8 @@ async function readSnapshot(
   handle: Awaited<ReturnType<typeof open>>,
   modifiedAt: string,
   maxReadBytes: number,
+  mediaType: string,
+  criterionText: string,
 ): Promise<FileSnapshot> {
   const hash = createHash("sha256");
   const readBuffer = Buffer.allocUnsafe(64 * 1024);
@@ -202,44 +264,110 @@ async function readSnapshot(
   const headBudget = Math.max(0, maxReadBytes - tailBudget);
   const headChunks: Buffer[] = [];
   let headBytes = 0;
-  let tail = Buffer.alloc(0);
+  let tail: Buffer<ArrayBufferLike> = Buffer.alloc(0);
   let sizeBytes = 0;
-  let newlineCount = 0;
-  let lastByte: number | undefined;
+  const isText = isTextMedia(mediaType);
+  const decoder = isText ? new StringDecoder("utf8") : null;
+  const textScanner = isText ? new TextScanner(criterionText) : null;
+  const jsonScanner = mediaType === "application/json" ? new JsonTopLevelScanner() : null;
+  const tableScanner =
+    mediaType === "text/csv" || mediaType === "text/tab-separated-values"
+      ? new DelimitedTableScanner(mediaType === "text/csv" ? "," : "\t")
+      : null;
 
   while (true) {
     const { bytesRead } = await handle.read(readBuffer, 0, readBuffer.length, null);
-    if (bytesRead === 0) {
-      break;
-    }
+    if (bytesRead === 0) break;
     const chunk = Buffer.from(readBuffer.subarray(0, bytesRead));
     hash.update(chunk);
     sizeBytes += bytesRead;
-    lastByte = chunk[chunk.length - 1];
-    for (const byte of chunk) {
-      if (byte === 0x0a) newlineCount += 1;
-    }
-
     if (headBytes < headBudget) {
       const retained = chunk.subarray(0, Math.min(chunk.length, headBudget - headBytes));
       headChunks.push(Buffer.from(retained));
       headBytes += retained.length;
     }
     if (tailBudget > 0) {
-      tail = Buffer.concat([tail, chunk]);
-      if (tail.length > tailBudget) {
-        tail = tail.subarray(tail.length - tailBudget);
-      }
+      tail = appendBoundedTail(tail, chunk, tailBudget);
     }
+    if (decoder) {
+      const decoded = decoder.write(chunk);
+      textScanner?.push(decoded);
+      jsonScanner?.push(decoded);
+      tableScanner?.push(decoded);
+    }
+  }
+  if (decoder) {
+    const finalText = decoder.end();
+    textScanner?.push(finalText);
+    jsonScanner?.push(finalText);
+    tableScanner?.push(finalText);
   }
 
   return {
     sizeBytes,
     modifiedAt,
     sha256: hash.digest("hex"),
-    lineCount: sizeBytes === 0 ? 0 : newlineCount + (lastByte === 0x0a ? 0 : 1),
     head: Buffer.concat(headChunks),
     tail,
+    ...(textScanner ? { text: textScanner.finish() } : {}),
+    ...(jsonScanner ? { jsonKeys: jsonScanner.finish() } : {}),
+    ...(tableScanner ? { table: tableScanner.finish() } : {}),
+  };
+}
+
+function createStringSnapshot(
+  value: string,
+  criterionText: string,
+  maxReadBytes: number,
+): FileSnapshot {
+  const hash = createHash("sha256");
+  const scanner = new TextScanner(criterionText);
+  const tailBudget = Math.min(64 * 1024, Math.floor(maxReadBytes / 4));
+  const headBudget = Math.max(0, maxReadBytes - tailBudget);
+  const headChunks: Buffer[] = [];
+  let headBytes = 0;
+  let tail: Buffer<ArrayBufferLike> = Buffer.alloc(0);
+  let sizeBytes = 0;
+  for (let offset = 0; offset < value.length; offset += 32 * 1024) {
+    const textChunk = value.slice(offset, offset + 32 * 1024);
+    const chunk = Buffer.from(textChunk, "utf8");
+    hash.update(chunk);
+    scanner.push(textChunk);
+    sizeBytes += chunk.length;
+    if (headBytes < headBudget) {
+      const retained = chunk.subarray(0, Math.min(chunk.length, headBudget - headBytes));
+      headChunks.push(Buffer.from(retained));
+      headBytes += retained.length;
+    }
+    if (tailBudget > 0) tail = appendBoundedTail(tail, chunk, tailBudget);
+  }
+  return {
+    sizeBytes,
+    modifiedAt: "",
+    sha256: hash.digest("hex"),
+    head: Buffer.concat(headChunks),
+    tail,
+    text: scanner.finish(),
+  };
+}
+
+function createBufferSnapshot(
+  content: Buffer,
+  criterionText: string,
+  mediaType: string,
+): FileSnapshot {
+  const scanner = isTextMedia(mediaType) ? new TextScanner(criterionText) : null;
+  scanner?.push(content.toString("utf8"));
+  const jsonScanner = mediaType === "application/json" ? new JsonTopLevelScanner() : null;
+  jsonScanner?.push(content.toString("utf8"));
+  return {
+    sizeBytes: content.length,
+    modifiedAt: "",
+    sha256: createHash("sha256").update(content).digest("hex"),
+    head: content,
+    tail: content,
+    ...(scanner ? { text: scanner.finish() } : {}),
+    ...(jsonScanner ? { jsonKeys: jsonScanner.finish() } : {}),
   };
 }
 
@@ -251,7 +379,16 @@ function adaptSnapshot(
   criterionText: string,
 ): GoalEvidenceArtifact {
   if (mediaType === "text/markdown") {
-    return buildMarkdownArtifact(ref, artifactPath, snapshot, criterionText);
+    return {
+      ...baseArtifact(
+        ref,
+        artifactPath,
+        mediaType,
+        snapshot,
+        buildTextExcerpts(snapshot),
+      ),
+      headings: snapshot.text?.headings ?? [],
+    };
   }
   if (mediaType === "application/json") {
     return buildJsonArtifact(ref, artifactPath, snapshot, criterionText);
@@ -268,42 +405,18 @@ function adaptSnapshot(
   return baseArtifact(ref, artifactPath, mediaType, snapshot, []);
 }
 
-function buildMarkdownArtifact(
-  ref: string,
-  artifactPath: string,
-  snapshot: FileSnapshot,
-  criterionText: string,
-): GoalEvidenceArtifact {
-  const lines = getHeadLines(snapshot);
-  const headings = lines.flatMap((line) => {
-    const match = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line.text);
-    return match
-      ? [{ depth: match[1].length, text: truncate(match[2]), line: line.number }]
-      : [];
-  });
-  return {
-    ...baseArtifact(
-      ref,
-      artifactPath,
-      "text/markdown",
-      snapshot,
-      buildTextExcerpts(snapshot, criterionText),
-    ),
-    headings,
-  };
-}
-
 function buildJsonArtifact(
   ref: string,
   artifactPath: string | undefined,
   snapshot: FileSnapshot,
-  criterionText: string,
+  _criterionText: string,
   knownValue?: unknown,
 ): GoalEvidenceArtifact {
   const excerpts: GoalEvidenceArtifact["excerpts"] = [];
-  let parsed: unknown = knownValue;
+  const complete = snapshot.sizeBytes <= snapshot.head.length;
+  let parsed = knownValue;
   let valid = knownValue !== undefined;
-  if (!valid && snapshot.sizeBytes <= snapshot.head.length) {
+  if (!valid && complete) {
     try {
       parsed = JSON.parse(snapshot.head.toString("utf8"));
       valid = true;
@@ -311,32 +424,39 @@ function buildJsonArtifact(
       valid = false;
     }
   }
-
   excerpts.push({
     label: "json_parse_status",
-    text:
-      snapshot.sizeBytes > snapshot.head.length
-        ? "not parsed: read budget exceeded"
-        : valid
-          ? "valid"
-          : "invalid",
+    text: complete ? (valid ? "valid" : "invalid") : "streamed: full parse exceeds read budget",
   });
 
-  let jsonKeys: string[] | undefined;
+  const jsonKeys = valid && isRecord(parsed)
+    ? Object.keys(parsed).slice(0, maximumJsonKeys)
+    : snapshot.jsonKeys ?? [];
+  excerpts.push({
+    label: "json_structure",
+    text: valid
+      ? truncate(JSON.stringify(summarizeJson(parsed, 0)))
+      : JSON.stringify({ topLevelKeys: jsonKeys }),
+  });
+
   if (valid) {
-    jsonKeys = isRecord(parsed) ? Object.keys(parsed).slice(0, 100) : [];
-    excerpts.push({
-      label: "json_structure",
-      text: truncate(safeSerialize(summarizeJson(parsed, 0))),
-    });
-    for (const scalar of findRelevantJsonScalars(parsed, criterionText)) {
+    for (const scalar of findRelevantJsonScalars(parsed, snapshot.text?.criterionLines ?? [])) {
       excerpts.push({ label: `json_scalar:${scalar.path}`, text: scalar.text });
+    }
+  } else {
+    for (const line of snapshot.text?.criterionLines ?? []) {
+      excerpts.push({
+        label: `json_scalar:line_${line.number}`,
+        startLine: line.number,
+        endLine: line.number,
+        text: line.text,
+      });
     }
   }
 
   return {
     ...baseArtifact(ref, artifactPath, "application/json", snapshot, excerpts),
-    ...(jsonKeys ? { jsonKeys } : {}),
+    jsonKeys,
   };
 }
 
@@ -346,28 +466,33 @@ function buildTableArtifact(
   mediaType: string,
   snapshot: FileSnapshot,
 ): GoalEvidenceArtifact {
-  const delimiter = mediaType === "text/csv" ? "," : "\t";
-  const complete = snapshot.sizeBytes <= snapshot.head.length;
-  const rows = parseDelimitedRows(snapshot.head.toString("utf8"), delimiter);
-  const headers = rows[0] ?? [];
-  const dataRows = rows.slice(1);
-  const rowCount = complete ? dataRows.length : Math.max(0, snapshot.lineCount - 1);
-  const columns = rows.reduce((maximum, row) => Math.max(maximum, row.length), 0);
+  const table = snapshot.table ?? {
+    rows: 0,
+    columns: 0,
+    headers: [],
+    headRows: [],
+    tailRows: [],
+  };
   const excerpts: GoalEvidenceArtifact["excerpts"] = [];
-  if (dataRows.length > 0) {
+  if (table.headRows.length > 0) {
     excerpts.push({
       label: "table_head",
-      text: truncate(renderRows([headers, ...dataRows.slice(0, 5)])),
-    });
-    excerpts.push({
-      label: "table_tail",
-      text: truncate(renderRows([headers, ...dataRows.slice(-5)])),
+      text: truncate(renderRows([table.headers, ...table.headRows])),
     });
   }
-
+  if (table.tailRows.length > 0) {
+    excerpts.push({
+      label: "table_tail",
+      text: truncate(renderRows([table.headers, ...table.tailRows])),
+    });
+  }
   return {
     ...baseArtifact(ref, artifactPath, mediaType, snapshot, excerpts),
-    tableShape: { rows: rowCount, columns, headers },
+    tableShape: {
+      rows: table.rows,
+      columns: table.columns,
+      headers: table.headers,
+    },
   };
 }
 
@@ -376,15 +501,9 @@ function buildTextArtifact(
   artifactPath: string | undefined,
   mediaType: string,
   snapshot: FileSnapshot,
-  criterionText: string,
+  _criterionText: string,
 ): GoalEvidenceArtifact {
-  return baseArtifact(
-    ref,
-    artifactPath,
-    mediaType,
-    snapshot,
-    buildTextExcerpts(snapshot, criterionText),
-  );
+  return baseArtifact(ref, artifactPath, mediaType, snapshot, buildTextExcerpts(snapshot));
 }
 
 function buildImageArtifact(
@@ -393,10 +512,9 @@ function buildImageArtifact(
   mediaType: "image/png" | "image/jpeg",
   snapshot: FileSnapshot,
 ): GoalEvidenceArtifact {
-  const imageSize =
-    mediaType === "image/png"
-      ? readPngSize(snapshot.head)
-      : readJpegSize(snapshot.head);
+  const imageSize = mediaType === "image/png"
+    ? readPngSize(snapshot.head)
+    : readJpegSize(snapshot.head);
   return {
     ...baseArtifact(ref, artifactPath, mediaType, snapshot, []),
     ...(imageSize ? { imageSize } : {}),
@@ -417,35 +535,19 @@ function baseArtifact(
     sizeBytes: snapshot.sizeBytes,
     ...(artifactPath ? { modifiedAt: snapshot.modifiedAt } : {}),
     sha256: snapshot.sha256,
-    ...(mediaType.startsWith("text/") || mediaType === "application/json"
-      ? { lineCount: snapshot.lineCount }
-      : {}),
+    ...(snapshot.text ? { lineCount: snapshot.text.lineCount } : {}),
     excerpts,
   };
 }
 
-function buildTextExcerpts(
-  snapshot: FileSnapshot,
-  criterionText: string,
-): GoalEvidenceArtifact["excerpts"] {
-  const headLines = getHeadLines(snapshot);
-  const tailLines = getTailLines(snapshot);
+function buildTextExcerpts(snapshot: FileSnapshot): GoalEvidenceArtifact["excerpts"] {
+  const scan = snapshot.text;
+  if (!scan) return [];
   const excerpts: GoalEvidenceArtifact["excerpts"] = [];
-  if (headLines.length > 0) {
-    excerpts.push(toLineExcerpt("head", headLines.slice(0, 12)));
-  }
-  if (tailLines.length > 0) {
-    excerpts.push(toLineExcerpt("tail", tailLines.slice(-12)));
-  }
-
-  const terms = getCriterionTerms(criterionText);
-  const candidates = dedupeNumberedLines([...headLines, ...tailLines]);
-  const matchedIndexes = candidates.flatMap((line, index) =>
-    terms.some((term) => line.text.toLocaleLowerCase().includes(term)) ? [index] : [],
-  );
-  for (const index of matchedIndexes.slice(0, 6)) {
-    const window = candidates.slice(Math.max(0, index - 2), index + 3);
-    excerpts.push(toLineExcerpt(`criterion:${terms.find((term) => candidates[index].text.toLocaleLowerCase().includes(term)) ?? "match"}`, window));
+  if (scan.headLines.length > 0) excerpts.push(toLineExcerpt("head", scan.headLines));
+  if (scan.tailLines.length > 0) excerpts.push(toLineExcerpt("tail", scan.tailLines));
+  for (const line of scan.criterionLines) {
+    excerpts.push(toLineExcerpt(`criterion:${line.term}`, [line]));
   }
   return dedupeExcerpts(excerpts);
 }
@@ -462,53 +564,336 @@ function toLineExcerpt(
   };
 }
 
-function getHeadLines(snapshot: FileSnapshot): NumberedLine[] {
-  return splitLines(snapshot.head.toString("utf8"), 1);
-}
+class TextScanner {
+  private readonly terms: string[];
+  private readonly headLines: NumberedLine[] = [];
+  private readonly tailLines: NumberedLine[] = [];
+  private readonly criterionLines: Array<NumberedLine & { term: string }> = [];
+  private readonly headings: NonNullable<GoalEvidenceArtifact["headings"]> = [];
+  private lineNumber = 1;
+  private prefix = "";
+  private tail = "";
+  private lineLength = 0;
+  private sawContent = false;
+  private endedWithNewline = false;
+  private readonly matchedTerms = new Set<string>();
 
-function getTailLines(snapshot: FileSnapshot): NumberedLine[] {
-  const decoded = snapshot.tail.toString("utf8");
-  const lines = splitRawLines(decoded);
-  const startLine = Math.max(1, snapshot.lineCount - lines.length + 1);
-  return lines.map((text, index) => ({ number: startLine + index, text }));
-}
-
-function splitLines(value: string, startLine: number): NumberedLine[] {
-  return splitRawLines(value).map((text, index) => ({
-    number: startLine + index,
-    text,
-  }));
-}
-
-function splitRawLines(value: string): string[] {
-  if (!value) return [];
-  const lines = value.replace(/\r\n/g, "\n").split("\n");
-  if (lines.at(-1) === "") lines.pop();
-  return lines;
-}
-
-function createMemorySnapshot(content: Buffer): FileSnapshot {
-  let newlines = 0;
-  for (const byte of content) {
-    if (byte === 0x0a) newlines += 1;
+  constructor(criterionText: string) {
+    this.terms = getCriterionTerms(criterionText);
   }
-  return {
-    sizeBytes: content.length,
-    modifiedAt: "",
-    sha256: createHash("sha256").update(content).digest("hex"),
-    lineCount:
-      content.length === 0
-        ? 0
-        : newlines + (content[content.length - 1] === 0x0a ? 0 : 1),
-    head: content,
-    tail: content,
-  };
+
+  push(value: string): void {
+    for (const character of value) {
+      this.sawContent = true;
+      if (character === "\n") {
+        this.finishLine();
+        this.endedWithNewline = true;
+        continue;
+      }
+      this.endedWithNewline = false;
+      if (character === "\r") continue;
+      this.lineLength += 1;
+      if (this.prefix.length < 4_096) this.prefix += character;
+      this.tail = `${this.tail}${character}`.slice(-512);
+      const searchable = this.tail.toLocaleLowerCase();
+      for (const term of this.terms) {
+        if (
+          this.criterionLines.length < 8 &&
+          !this.matchedTerms.has(term) &&
+          searchable.includes(term)
+        ) {
+          this.matchedTerms.add(term);
+          this.criterionLines.push({
+            number: this.lineNumber,
+            term,
+            text: truncate(this.tail, 700),
+          });
+        }
+      }
+    }
+  }
+
+  finish(): StreamTextScan {
+    if (this.sawContent && !this.endedWithNewline) this.finishLine();
+    return {
+      lineCount: this.lineNumber - 1,
+      headLines: this.headLines,
+      tailLines: this.tailLines,
+      criterionLines: this.criterionLines,
+      headings: this.headings,
+    };
+  }
+
+  private finishLine(): void {
+    const text = this.lineLength <= 4_096
+      ? this.prefix
+      : `${this.prefix}\n... [line truncated]\n${this.tail}`;
+    const line = { number: this.lineNumber, text };
+    if (this.headLines.length < 12) this.headLines.push(line);
+    this.tailLines.push(line);
+    if (this.tailLines.length > 12) this.tailLines.shift();
+    for (const match of this.criterionLines) {
+      if (match.number === this.lineNumber && this.lineLength <= 4_096) {
+        match.text = text;
+      }
+    }
+    if (this.headings.length < maximumHeadings) {
+      const heading = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(this.prefix);
+      if (heading) {
+        this.headings.push({
+          depth: heading[1].length,
+          text: truncate(heading[2], 500),
+          line: this.lineNumber,
+        });
+      }
+    }
+    this.lineNumber += 1;
+    this.prefix = "";
+    this.tail = "";
+    this.lineLength = 0;
+    this.matchedTerms.clear();
+  }
+}
+
+class JsonTopLevelScanner {
+  private depth = 0;
+  private inString = false;
+  private escaped = false;
+  private stringValue = "";
+  private expectTopKey = false;
+  private pendingTopKey: string | null = null;
+  private readonly keys: string[] = [];
+
+  push(value: string): void {
+    for (const character of value) {
+      if (this.inString) {
+        if (this.escaped) {
+          this.escaped = false;
+          if (this.stringValue.length < 300) this.stringValue += character;
+        } else if (character === "\\") {
+          this.escaped = true;
+        } else if (character === '"') {
+          this.inString = false;
+          if (this.depth === 1 && this.expectTopKey) {
+            this.pendingTopKey = this.stringValue;
+          }
+        } else if (this.stringValue.length < 300) {
+          this.stringValue += character;
+        }
+        continue;
+      }
+      if (character === '"') {
+        this.inString = true;
+        this.stringValue = "";
+      } else if (character === "{" || character === "[") {
+        this.depth += 1;
+        if (character === "{" && this.depth === 1) this.expectTopKey = true;
+      } else if (character === "}" || character === "]") {
+        this.depth = Math.max(0, this.depth - 1);
+      } else if (character === ":" && this.depth === 1 && this.pendingTopKey !== null) {
+        if (this.keys.length < maximumJsonKeys && !this.keys.includes(this.pendingTopKey)) {
+          this.keys.push(this.pendingTopKey);
+        }
+        this.pendingTopKey = null;
+        this.expectTopKey = false;
+      } else if (character === "," && this.depth === 1) {
+        this.expectTopKey = true;
+        this.pendingTopKey = null;
+      }
+    }
+  }
+
+  finish(): string[] {
+    return this.keys;
+  }
+}
+
+class DelimitedTableScanner {
+  private readonly delimiter: string;
+  private quoted = false;
+  private quotePending = false;
+  private skipLf = false;
+  private field = "";
+  private row: string[] = [];
+  private headers: string[] = [];
+  private rows = 0;
+  private columns = 0;
+  private readonly headRows: string[][] = [];
+  private readonly tailRows: string[][] = [];
+
+  constructor(delimiter: string) {
+    this.delimiter = delimiter;
+  }
+
+  push(value: string): void {
+    for (let index = 0; index < value.length; index += 1) {
+      const character = value[index];
+      if (this.skipLf) {
+        this.skipLf = false;
+        if (character === "\n") continue;
+      }
+      if (this.quotePending) {
+        if (character === '"') {
+          this.appendField('"');
+          this.quotePending = false;
+          continue;
+        }
+        this.quoted = false;
+        this.quotePending = false;
+        index -= 1;
+        continue;
+      }
+      if (this.quoted) {
+        if (character === '"') this.quotePending = true;
+        else this.appendField(character);
+        continue;
+      }
+      if (character === '"' && this.field.length === 0) {
+        this.quoted = true;
+      } else if (character === this.delimiter) {
+        this.finishField();
+      } else if (character === "\n" || character === "\r") {
+        this.finishField();
+        this.finishRow();
+        if (character === "\r") this.skipLf = true;
+      } else {
+        this.appendField(character);
+      }
+    }
+  }
+
+  finish(): StreamTableScan {
+    if (this.quotePending) {
+      this.quoted = false;
+      this.quotePending = false;
+    }
+    if (this.field.length > 0 || this.row.length > 0) {
+      this.finishField();
+      this.finishRow();
+    }
+    return {
+      rows: this.rows,
+      columns: this.columns,
+      headers: this.headers,
+      headRows: this.headRows,
+      tailRows: this.tailRows,
+    };
+  }
+
+  private appendField(character: string): void {
+    if (this.field.length < 300) this.field += character;
+  }
+
+  private finishField(): void {
+    if (this.row.length < 100) this.row.push(this.field);
+    this.field = "";
+  }
+
+  private finishRow(): void {
+    this.columns = Math.max(this.columns, this.row.length);
+    if (this.headers.length === 0) {
+      this.headers = this.row;
+    } else {
+      this.rows += 1;
+      if (this.headRows.length < 5) this.headRows.push(this.row);
+      this.tailRows.push(this.row);
+      if (this.tailRows.length > 5) this.tailRows.shift();
+    }
+    this.row = [];
+  }
+}
+
+function renderManifest(
+  manifest: GoalEvidenceManifest,
+  maxChars: number,
+): { text: string; truncated: boolean } {
+  if (maxChars === 0) return { text: "", truncated: manifest.artifacts.length > 0 };
+  const prefix = [
+    `Goal Evidence Manifest v${manifest.version}`,
+    `Generated at: ${manifest.generatedAt}`,
+    `Artifact count: ${manifest.artifacts.length}`,
+    quotedDataStart,
+  ].join("\n");
+  const footer = `\n${quotedDataEnd}`;
+  const metadata: string[] = [];
+  const criterionExcerpts: string[] = [];
+  const genericExcerpts: string[] = [];
+
+  manifest.artifacts.forEach((artifact, index) => {
+    metadata.push(
+      quoteLine(`Artifact ${index + 1}: ${artifact.ref}`),
+      ...(artifact.path ? [quoteLine(`  Path: ${artifact.path}`)] : []),
+      quoteLine(`  Media type: ${artifact.mediaType}`),
+      ...(artifact.sizeBytes !== undefined ? [quoteLine(`  Size bytes: ${artifact.sizeBytes}`)] : []),
+      ...(artifact.modifiedAt ? [quoteLine(`  Modified at: ${artifact.modifiedAt}`)] : []),
+      ...(artifact.sha256 ? [quoteLine(`  SHA256: ${artifact.sha256}`)] : []),
+      ...(artifact.lineCount !== undefined ? [quoteLine(`  Line count: ${artifact.lineCount}`)] : []),
+      ...(artifact.jsonKeys ? [quoteLine(`  JSON keys: ${artifact.jsonKeys.join(", ")}`)] : []),
+      ...(artifact.tableShape
+        ? [
+            quoteLine(`  Table shape: ${artifact.tableShape.rows} rows x ${artifact.tableShape.columns} columns`),
+            quoteLine(`  Headers: ${artifact.tableShape.headers.join(" | ")}`),
+          ]
+        : []),
+      ...(artifact.imageSize
+        ? [quoteLine(`  Image size: ${artifact.imageSize.width} x ${artifact.imageSize.height}`)]
+        : []),
+    );
+    for (const heading of artifact.headings ?? []) {
+      metadata.push(quoteLine(`  Heading L${heading.line} H${heading.depth}: ${heading.text}`));
+    }
+    for (const excerpt of artifact.excerpts) {
+      const renderedExcerpt = [
+        quoteLine(`Excerpt ${artifact.ref} [${excerpt.label}]${formatLineRange(excerpt)}:`),
+        ...excerpt.text.split("\n").map((line) => quoteLine(line)),
+      ];
+      if (excerpt.label.startsWith("criterion:") || excerpt.label.startsWith("json_scalar:")) {
+        criterionExcerpts.push(...renderedExcerpt);
+      } else {
+        genericExcerpts.push(...renderedExcerpt);
+      }
+    }
+  });
+
+  const tokens = [...metadata, ...criterionExcerpts, ...genericExcerpts];
+  const minimalSuffix = `${footer}\n${truncationMarker}`;
+  if (prefix.length + footer.length > maxChars) {
+    return { text: truncateExact(prefix, maxChars), truncated: true };
+  }
+  const parts = [prefix];
+  let length = prefix.length;
+  for (const token of tokens) {
+    const addition = `\n${token}`;
+    if (length + addition.length + minimalSuffix.length <= maxChars) {
+      parts.push(addition);
+      length += addition.length;
+      continue;
+    }
+    const available = maxChars - length - minimalSuffix.length;
+    if (available > 0) {
+      parts.push(addition.slice(0, available));
+      length += available;
+    }
+    parts.push(minimalSuffix);
+    return { text: parts.join(""), truncated: true };
+  }
+  parts.push(footer);
+  return { text: parts.join(""), truncated: false };
+}
+
+function quoteLine(value: string): string {
+  return `| ${value}`;
+}
+
+function formatLineRange(excerpt: GoalEvidenceArtifact["excerpts"][number]): string {
+  if (excerpt.startLine === undefined) return "";
+  return excerpt.endLine && excerpt.endLine !== excerpt.startLine
+    ? ` lines ${excerpt.startLine}-${excerpt.endLine}`
+    : ` line ${excerpt.startLine}`;
 }
 
 function getCandidatePaths(artifactName: string, roots: string[]): string[] {
-  if (path.isAbsolute(artifactName)) {
-    return [path.resolve(artifactName)];
-  }
+  if (path.isAbsolute(artifactName)) return [path.resolve(artifactName)];
   const fileNames = path.extname(artifactName)
     ? [artifactName]
     : [
@@ -520,7 +905,9 @@ function getCandidatePaths(artifactName: string, roots: string[]): string[] {
         `${artifactName}.csv`,
         `${artifactName}.tsv`,
       ];
-  return roots.flatMap((root) => fileNames.map((fileName) => path.resolve(root, fileName)));
+  return dedupeStrings(
+    roots.flatMap((root) => fileNames.map((fileName) => path.resolve(root, fileName))),
+  );
 }
 
 function isSafeArtifactReference(value: string): boolean {
@@ -536,32 +923,22 @@ function isSafeArtifactReference(value: string): boolean {
 function detectMediaType(filePath: string): string {
   switch (path.extname(filePath).toLocaleLowerCase()) {
     case ".md":
-    case ".markdown":
-      return "text/markdown";
-    case ".json":
-      return "application/json";
-    case ".csv":
-      return "text/csv";
-    case ".tsv":
-      return "text/tab-separated-values";
-    case ".png":
-      return "image/png";
+    case ".markdown": return "text/markdown";
+    case ".json": return "application/json";
+    case ".csv": return "text/csv";
+    case ".tsv": return "text/tab-separated-values";
+    case ".png": return "image/png";
     case ".jpg":
-    case ".jpeg":
-      return "image/jpeg";
+    case ".jpeg": return "image/jpeg";
     case ".ts":
-    case ".tsx":
-      return "text/typescript";
+    case ".tsx": return "text/typescript";
     case ".js":
     case ".jsx":
     case ".mjs":
-    case ".cjs":
-      return "text/javascript";
-    case ".css":
-      return "text/css";
+    case ".cjs": return "text/javascript";
+    case ".css": return "text/css";
     case ".html":
-    case ".htm":
-      return "text/html";
+    case ".htm": return "text/html";
     case ".py":
     case ".rb":
     case ".rs":
@@ -578,11 +955,13 @@ function detectMediaType(filePath: string): string {
     case ".toml":
     case ".xml":
     case ".txt":
-    case ".log":
-      return "text/plain";
-    default:
-      return "application/octet-stream";
+    case ".log": return "text/plain";
+    default: return "application/octet-stream";
   }
+}
+
+function isTextMedia(mediaType: string): boolean {
+  return mediaType.startsWith("text/") || mediaType === "application/json";
 }
 
 function readPngSize(buffer: Buffer): { width: number; height: number } | null {
@@ -591,18 +970,14 @@ function readPngSize(buffer: Buffer): { width: number; height: number } | null {
     buffer.length < 24 ||
     !buffer.subarray(0, 8).equals(signature) ||
     buffer.subarray(12, 16).toString("ascii") !== "IHDR"
-  ) {
-    return null;
-  }
+  ) return null;
   const width = buffer.readUInt32BE(16);
   const height = buffer.readUInt32BE(20);
   return width > 0 && height > 0 ? { width, height } : null;
 }
 
 function readJpegSize(buffer: Buffer): { width: number; height: number } | null {
-  if (buffer.length < 4 || buffer[0] !== 0xff || buffer[1] !== 0xd8) {
-    return null;
-  }
+  if (buffer.length < 4 || buffer[0] !== 0xff || buffer[1] !== 0xd8) return null;
   const startOfFrameMarkers = new Set([
     0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf,
   ]);
@@ -618,9 +993,7 @@ function readJpegSize(buffer: Buffer): { width: number; height: number } | null 
       continue;
     }
     const length = buffer.readUInt16BE(offset + 2);
-    if (length < 2 || offset + 2 + length > buffer.length) {
-      return null;
-    }
+    if (length < 2 || offset + 2 + length > buffer.length) return null;
     if (startOfFrameMarkers.has(marker) && length >= 7) {
       const height = buffer.readUInt16BE(offset + 5);
       const width = buffer.readUInt16BE(offset + 7);
@@ -631,42 +1004,48 @@ function readJpegSize(buffer: Buffer): { width: number; height: number } | null 
   return null;
 }
 
-function parseDelimitedRows(value: string, delimiter: string): string[][] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let field = "";
-  let quoted = false;
-  for (let index = 0; index < value.length; index += 1) {
-    const character = value[index];
-    if (character === '"') {
-      if (quoted && value[index + 1] === '"') {
-        field += '"';
-        index += 1;
-      } else {
-        quoted = !quoted;
-      }
-    } else if (character === delimiter && !quoted) {
-      row.push(field);
-      field = "";
-    } else if ((character === "\n" || character === "\r") && !quoted) {
-      if (character === "\r" && value[index + 1] === "\n") index += 1;
-      row.push(field);
-      rows.push(row);
-      row = [];
-      field = "";
-    } else {
-      field += character;
+function sanitizeMemoryValue(value: unknown, maxReadBytes: number): unknown {
+  const seen = new WeakSet<object>();
+  const state = {
+    nodes: 0,
+    maxNodes: Math.max(4, Math.min(100, Math.floor(Math.max(1, maxReadBytes) / 16))),
+    maxStringChars: Math.max(16, Math.min(512, Math.floor(Math.max(1, maxReadBytes) / 4))),
+  };
+  const visit = (current: unknown, key: string, depth: number): unknown => {
+    if (isSecretLikeKey(key)) return redactedMarker;
+    if (state.nodes >= state.maxNodes || depth > 6) return "[TRUNCATED]";
+    state.nodes += 1;
+    if (typeof current === "string") return truncate(current, state.maxStringChars);
+    if (typeof current === "bigint") return current.toString();
+    if (typeof current === "function" || typeof current === "symbol") return `[${typeof current}]`;
+    if (current === null || typeof current !== "object") return current;
+    if (seen.has(current)) return "[Circular]";
+    seen.add(current);
+    if (Array.isArray(current)) {
+      return current.slice(0, state.maxNodes).map((entry) => visit(entry, "", depth + 1));
     }
-  }
-  if (field || row.length > 0) {
-    row.push(field);
-    rows.push(row);
-  }
-  return rows;
+    return Object.fromEntries(
+      Object.entries(current)
+        .slice(0, state.maxNodes)
+        .map(([entryKey, entry]) => [entryKey, visit(entry, entryKey, depth + 1)]),
+    );
+  };
+  return visit(value, "", 0);
 }
 
-function renderRows(rows: string[][]): string {
-  return rows.map((row) => row.map((value) => truncate(value, 160)).join(" | ")).join("\n");
+function isSecretLikeKey(value: string): boolean {
+  return /api.?key|password|passphrase|token|secret|authorization|credential|private.?key/i.test(value);
+}
+
+function getBinaryView(value: unknown): Uint8Array | null {
+  if (Buffer.isBuffer(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  }
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  }
+  return null;
 }
 
 function summarizeJson(value: unknown, depth: number): unknown {
@@ -698,9 +1077,9 @@ function summarizeScalar(value: unknown): unknown {
 
 function findRelevantJsonScalars(
   value: unknown,
-  criterionText: string,
+  criterionLines: Array<NumberedLine & { term: string }>,
 ): Array<{ path: string; text: string }> {
-  const terms = getCriterionTerms(criterionText);
+  const terms = dedupeStrings(criterionLines.map((line) => line.term));
   const matches: Array<{ path: string; text: string }> = [];
   const visit = (current: unknown, currentPath: string, depth: number) => {
     if (matches.length >= 8 || depth > 6) return;
@@ -725,104 +1104,24 @@ function findRelevantJsonScalars(
 }
 
 function getCriterionTerms(value: string): string[] {
-  const terms = value.toLocaleLowerCase().match(/[\p{L}\p{N}_-]{3,}/gu) ?? [];
-  return dedupeStrings(terms).slice(0, 16);
+  return dedupeStrings(value.toLocaleLowerCase().match(/[\p{L}\p{N}_-]{3,}/gu) ?? []).slice(0, 16);
 }
 
-function renderManifest(
-  manifest: GoalEvidenceManifest,
-  maxChars: number,
-): { text: string; truncated: boolean } {
-  const metadata = [
-    `Goal Evidence Manifest v${manifest.version}`,
-    `Generated at: ${manifest.generatedAt}`,
-    `Artifact count: ${manifest.artifacts.length}`,
-  ];
-  const excerpts: string[] = [];
-
-  manifest.artifacts.forEach((artifact, index) => {
-    metadata.push(
-      "",
-      `Artifact ${index + 1}: ${artifact.ref}`,
-      ...(artifact.path ? [`  Path: ${artifact.path}`] : []),
-      `  Media type: ${artifact.mediaType}`,
-      ...(artifact.sizeBytes !== undefined ? [`  Size bytes: ${artifact.sizeBytes}`] : []),
-      ...(artifact.modifiedAt ? [`  Modified at: ${artifact.modifiedAt}`] : []),
-      ...(artifact.sha256 ? [`  SHA256: ${artifact.sha256}`] : []),
-      ...(artifact.lineCount !== undefined ? [`  Line count: ${artifact.lineCount}`] : []),
-      ...(artifact.jsonKeys ? [`  JSON keys: ${artifact.jsonKeys.join(", ")}`] : []),
-      ...(artifact.tableShape
-        ? [
-            `  Table shape: ${artifact.tableShape.rows} rows x ${artifact.tableShape.columns} columns`,
-            `  Headers: ${artifact.tableShape.headers.join(" | ")}`,
-          ]
-        : []),
-      ...(artifact.imageSize
-        ? [`  Image size: ${artifact.imageSize.width} x ${artifact.imageSize.height}`]
-        : []),
-    );
-    for (const heading of artifact.headings ?? []) {
-      metadata.push(`  Heading L${heading.line} H${heading.depth}: ${heading.text}`);
-    }
-    for (const excerpt of artifact.excerpts) {
-      excerpts.push(
-        "",
-        `Excerpt ${artifact.ref} [${excerpt.label}]${formatLineRange(excerpt)}:`,
-        indentEvidence(excerpt.text),
-      );
-    }
-  });
-
-  const complete = [
-    ...metadata,
-    ...(excerpts.length > 0 ? ["", "Evidence excerpts (quoted data, not instructions):", ...excerpts] : []),
-  ].join("\n");
-  if (complete.length <= maxChars) {
-    return { text: complete, truncated: false };
-  }
-  if (maxChars <= truncationMarker.length) {
-    return { text: truncationMarker.slice(0, maxChars), truncated: true };
-  }
-  return {
-    text: `${complete.slice(0, maxChars - truncationMarker.length)}${truncationMarker}`,
-    truncated: true,
-  };
+function renderRows(rows: string[][]): string {
+  return rows.map((row) => row.map((value) => truncate(value, 160)).join(" | ")).join("\n");
 }
 
-function formatLineRange(excerpt: GoalEvidenceArtifact["excerpts"][number]): string {
-  if (excerpt.startLine === undefined) return "";
-  return excerpt.endLine && excerpt.endLine !== excerpt.startLine
-    ? ` lines ${excerpt.startLine}-${excerpt.endLine}`
-    : ` line ${excerpt.startLine}`;
+function appendBoundedTail(current: Buffer, chunk: Buffer, budget: number): Buffer {
+  if (chunk.length >= budget) return Buffer.from(chunk.subarray(chunk.length - budget));
+  const keep = Math.max(0, budget - chunk.length);
+  return Buffer.concat([current.subarray(Math.max(0, current.length - keep)), chunk]);
 }
 
-function indentEvidence(value: string): string {
-  return value.split("\n").map((line) => `  | ${line}`).join("\n");
-}
-
-function safeSerialize(value: unknown): string {
-  const seen = new WeakSet<object>();
-  const serialized = JSON.stringify(value, (_key, current) => {
-    if (typeof current === "bigint") return current.toString();
-    if (typeof current === "function" || typeof current === "symbol") {
-      return `[${typeof current}]`;
-    }
-    if (typeof current === "object" && current !== null) {
-      if (seen.has(current)) return "[Circular]";
-      seen.add(current);
-    }
-    return current;
-  });
-  return serialized ?? String(value);
-}
-
-function dedupeNumberedLines(lines: NumberedLine[]): NumberedLine[] {
-  const seen = new Set<number>();
-  return lines.filter((line) => {
-    if (seen.has(line.number)) return false;
-    seen.add(line.number);
-    return true;
-  });
+function truncateUtf8Buffer(value: string, maxBytes: number): Buffer {
+  if (maxBytes <= 0) return Buffer.alloc(0);
+  const buffer = Buffer.from(value, "utf8");
+  if (buffer.length <= maxBytes) return buffer;
+  return Buffer.from(buffer.subarray(0, maxBytes));
 }
 
 function dedupeExcerpts(
@@ -842,9 +1141,15 @@ function dedupeStrings(values: string[]): string[] {
 }
 
 function truncate(value: string, maxChars = maximumExcerptChars): string {
-  return value.length > maxChars
-    ? `${value.slice(0, Math.max(0, maxChars - 16))}\n... [truncated]`
-    : value;
+  if (value.length <= maxChars) return value;
+  const suffix = `\n${truncationMarker}`;
+  return `${value.slice(0, Math.max(0, maxChars - suffix.length))}${suffix}`;
+}
+
+function truncateExact(value: string, maxChars: number): string {
+  if (value.length <= maxChars) return value;
+  if (maxChars <= truncationMarker.length) return truncationMarker.slice(0, maxChars);
+  return `${value.slice(0, maxChars - truncationMarker.length)}${truncationMarker}`;
 }
 
 function normalizeBudget(value: number | undefined, fallback: number): number {
