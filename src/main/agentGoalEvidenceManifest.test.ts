@@ -543,6 +543,39 @@ describe("goal evidence manifest", () => {
     expect(rendered).not.toContain("raw proxy secret");
   });
 
+  it("contains hostile binary classification and array proxy traps", async () => {
+    const prototypeTrap = new Proxy({}, {
+      getPrototypeOf() {
+        throw new Error("raw prototype trap secret");
+      },
+    });
+    const sliceTrap = new Proxy(["safe", "value"], {
+      get(target, property, receiver) {
+        if (property === "slice") throw new Error("raw slice trap secret");
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const indexTrap = new Proxy(["safe", "hidden", "tail"], {
+      get(target, property, receiver) {
+        if (property === "1") throw new Error("raw index trap secret");
+        return Reflect.get(target, property, receiver);
+      },
+    });
+
+    const manifest = await buildGoalEvidenceManifest(input({
+      evidenceRefs: ["artifact:prototypeTrap", "artifact:sliceTrap", "artifact:indexTrap"],
+      artifacts: { prototypeTrap, sliceTrap, indexTrap },
+      maxReadBytes: 1_024,
+    }));
+    const rendered = renderGoalEvidenceManifest(manifest);
+
+    expect(manifest.artifacts).toHaveLength(3);
+    expect(rendered).toContain("[UNAVAILABLE]");
+    expect(rendered).not.toContain("raw prototype trap secret");
+    expect(rendered).not.toContain("raw slice trap secret");
+    expect(rendered).not.toContain("raw index trap secret");
+  });
+
   it.each([
     { extension: "csv", delimiter: "," },
     { extension: "tsv", delimiter: "\t" },

@@ -1111,7 +1111,24 @@ function sanitizeMemoryValue(value: unknown, maxReadBytes: number): unknown {
     if (seen.has(current)) return "[Circular]";
     seen.add(current);
     if (Array.isArray(current)) {
-      return current.slice(0, state.maxNodes).map((entry) => visit(entry, "", depth + 1));
+      let length: number;
+      try {
+        length = Math.min(
+          Number((current as unknown[]).length) || 0,
+          state.maxNodes,
+        );
+      } catch {
+        return ["[UNAVAILABLE]"];
+      }
+      const result: unknown[] = [];
+      for (let index = 0; index < length && state.nodes < state.maxNodes; index += 1) {
+        try {
+          result.push(visit((current as unknown[])[index], "", depth + 1));
+        } catch {
+          result.push("[UNAVAILABLE]");
+        }
+      }
+      return result;
     }
     const result: Record<string, unknown> = {};
     let propertyCount = 0;
@@ -1155,12 +1172,16 @@ function isSecretLikeKey(value: string): boolean {
 }
 
 function getBinaryView(value: unknown): Uint8Array | null {
-  if (Buffer.isBuffer(value)) {
-    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
-  }
-  if (value instanceof ArrayBuffer) return new Uint8Array(value);
-  if (ArrayBuffer.isView(value)) {
-    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  try {
+    if (Buffer.isBuffer(value)) {
+      return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+    }
+    if (value instanceof ArrayBuffer) return new Uint8Array(value);
+    if (ArrayBuffer.isView(value)) {
+      return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+    }
+  } catch {
+    return null;
   }
   return null;
 }
