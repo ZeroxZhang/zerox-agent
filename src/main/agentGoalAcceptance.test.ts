@@ -1052,6 +1052,51 @@ describe("agent goal acceptance", () => {
     expect(capturedPrompts[0]).not.toContain("missing");
   });
 
+  it("passes late structural evidence to model review without a legacy contentPreview dump", async () => {
+    const capturedPrompts: string[] = [];
+    const reportPath = path.join(workspacePath, "docs", "large-report.md");
+    await mkdir(path.dirname(reportPath), { recursive: true });
+    await writeFile(
+      reportPath,
+      `# Opening\n${"ordinary report body\n".repeat(500)}# Final verification\nnpm run verify passed and the release is accepted.\n`,
+      "utf8",
+    );
+    const acceptance = createAgentGoalAcceptance();
+
+    const result = await acceptance.evaluate(
+      createMilestone([
+        check(
+          "check_structural_artifact",
+          "model_review",
+          {
+            condition: "Final verification shows the release is accepted",
+            evidenceRefs: [`artifact:${reportPath}`, "tool:test_run_1"],
+          },
+          true,
+        ),
+      ]),
+      createContext({
+        chatClient: {
+          async complete(request) {
+            capturedPrompts.push(request.messages.at(-1)?.content ?? "");
+            return {
+              content: '{"accepted":true,"detail":"late verification evidence is present"}',
+              toolCalls: [],
+              finishReason: "stop",
+            };
+          },
+        },
+      }),
+    );
+
+    expect(result.accepted).toBe(true);
+    expect(capturedPrompts[0]).toContain("Final verification");
+    expect(capturedPrompts[0]).toContain("npm run verify passed");
+    expect(capturedPrompts[0]).toContain("Reference: tool:test_run_1");
+    expect(capturedPrompts[0]).not.toContain("contentPreview");
+    expect(capturedPrompts[0]?.length).toBeLessThan(13_000);
+  });
+
   it("does not resolve an absolute artifact file reference outside authorized roots", async () => {
     const outsideRoot = await mkdtemp(path.join(os.tmpdir(), "goal-artifact-outside-"));
     let modelCalls = 0;

@@ -1,4 +1,4 @@
-import { access, readFile, stat } from "node:fs/promises";
+import { access } from "node:fs/promises";
 import path from "node:path";
 import type { AgentToolExecutor, AgentToolExecutionResult } from "./agentToolExecutor";
 import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
@@ -20,10 +20,13 @@ import {
   normalizeLocationBoundaryPath,
   normalizeLocationEnvironment,
   normalizeLocationPath,
-  validatePathInsideLocationRoots,
   type LocationResourceEnvironment,
 } from "../shared/locationResource";
 import { verifyArtifactProvenance } from "../shared/agentArtifactProvenance";
+import {
+  buildGoalEvidenceManifest,
+  renderGoalEvidenceManifest,
+} from "./agentGoalEvidenceManifest";
 
 const shellRedirectionOperatorPattern = /[<>]/;
 
@@ -112,7 +115,20 @@ async function evaluateCriteria(
 ): Promise<AcceptanceResult> {
   const checks = criteria.flatMap((criterion) => criterion.acceptanceChecks);
   const deterministicChecks = checks.filter((check) => check.kind !== "model_review");
-  const modelReviewChecks = checks.filter((check) => check.kind === "model_review");
+  const modelReviewChecks = criteria.flatMap((criterion) =>
+    criterion.acceptanceChecks
+      .filter((check) => check.kind === "model_review")
+      .map((check) => ({
+        check,
+        criterionText: [
+          criterion.description,
+          String(check.params.condition ?? ""),
+          check.description,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      })),
+  );
   const checkResults: CheckResult[] = [];
 
   for (const check of deterministicChecks) {
@@ -123,8 +139,8 @@ async function evaluateCriteria(
   let inferentialUsed = false;
 
   if (deterministicPassed) {
-    for (const check of modelReviewChecks) {
-      const result = await evaluateModelReview(check, ctx);
+    for (const { check, criterionText } of modelReviewChecks) {
+      const result = await evaluateModelReview(check, criterionText, ctx);
       inferentialUsed = inferentialUsed || result.inferentialUsed;
       checkResults.push(result.checkResult);
     }
@@ -427,6 +443,7 @@ function evaluateAssertion(
 
 async function evaluateModelReview(
   check: AcceptanceCheck,
+  criterionText: string,
   ctx: AcceptanceContext,
 ): Promise<{ checkResult: CheckResult; inferentialUsed: boolean }> {
   const evidenceRefs = parseEvidenceRefs(check.params.evidenceRefs);
@@ -454,7 +471,7 @@ async function evaluateModelReview(
     };
   }
 
-  const evidence = await formatEvidenceForPrompt(evidenceRefs, ctx);
+  const evidence = await formatEvidenceForPrompt(evidenceRefs, criterionText, ctx);
   if (evidence.missingArtifactRefs.length > 0) {
     return {
       checkResult: checkResult(
@@ -702,135 +719,29 @@ function parseEvidenceRefs(value: unknown): string[] {
 
 async function formatEvidenceForPrompt(
   evidenceRefs: string[],
+  criterionText: string,
   ctx: AcceptanceContext,
 ): Promise<{ lines: string[]; missingArtifactRefs: string[] }> {
-  const lines: string[] = [];
-  const missingArtifactRefs: string[] = [];
-  for (const ref of evidenceRefs) {
-    if (!ref.startsWith("artifact:")) {
-      lines.push(`- ${ref}`);
-      continue;
-    }
-
-    const artifactName = ref.slice("artifact:".length);
-    const artifact = ctx.artifacts?.[artifactName];
-    if (artifact === undefined) {
-      const fileArtifact = await resolveArtifactEvidenceFile(artifactName, ctx);
-      if (!fileArtifact) {
-        missingArtifactRefs.push(ref);
-      }
-      lines.push(
-        fileArtifact
-          ? `- ${ref}: ${truncateEvidence(JSON.stringify(fileArtifact))}`
-          : `- ${ref}: missing`,
-      );
-      continue;
-    }
-
-    lines.push(`- ${ref}: ${truncateEvidence(JSON.stringify(artifact))}`);
+  const manifest = await buildGoalEvidenceManifest({
+    evidenceRefs,
+    criterionText,
+    workspacePath: ctx.workspacePath,
+    extraAuthorizedRoots: getAllowedExtraRoots(ctx),
+    locationEnv: getAcceptanceLocationEnv(ctx),
+    artifacts: ctx.artifacts,
+    now: ctx.now ?? (() => new Date().toISOString()),
+  });
+  const includedRefs = new Set(manifest.artifacts.map((artifact) => artifact.ref));
+  const missingArtifactRefs = evidenceRefs.filter(
+    (ref) => ref.startsWith("artifact:") && !includedRefs.has(ref),
+  );
+  const lines = evidenceRefs
+    .filter((ref) => !ref.startsWith("artifact:"))
+    .map((ref) => `- Reference: ${ref}`);
+  if (manifest.artifacts.length > 0) {
+    lines.push(renderGoalEvidenceManifest(manifest));
   }
   return { lines, missingArtifactRefs };
-}
-
-async function resolveArtifactEvidenceFile(
-  artifactName: string,
-  ctx: AcceptanceContext,
-): Promise<Record<string, unknown> | null> {
-  if (!artifactName.trim() || artifactName.includes("\0")) {
-    return null;
-  }
-
-  for (const candidatePath of getArtifactEvidenceCandidatePaths(artifactName, ctx)) {
-    try {
-      const stats = await stat(candidatePath);
-      if (!stats.isFile()) {
-        continue;
-      }
-
-      const content = await readFile(candidatePath, "utf8");
-      return {
-        path: candidatePath,
-        sizeBytes: stats.size,
-        contentPreview: truncateEvidence(content),
-      };
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        continue;
-      }
-      throw error;
-    }
-  }
-
-  return null;
-}
-
-function getArtifactEvidenceCandidatePaths(
-  artifactName: string,
-  ctx: AcceptanceContext,
-): string[] {
-  const env = getAcceptanceLocationEnv(ctx);
-  const roots = dedupePaths([ctx.workspacePath, ...getAllowedExtraRoots(ctx)], env);
-  const candidates: string[] = [];
-
-  if (path.isAbsolute(artifactName)) {
-    const candidatePath = path.resolve(artifactName);
-    const boundary = validatePathInsideLocationRoots(candidatePath, roots, env);
-    if (boundary.ok) {
-      candidates.push(boundary.path);
-    }
-    return candidates;
-  }
-
-  const fileNames = getArtifactEvidenceFileNames(artifactName);
-
-  for (const root of roots) {
-    for (const fileName of fileNames) {
-      const candidatePath = path.resolve(root, fileName);
-      const boundary = validatePathInsideLocationRoots(candidatePath, [root], env);
-      if (boundary.ok) {
-        candidates.push(boundary.path);
-      }
-    }
-  }
-
-  return candidates;
-}
-
-function getArtifactEvidenceFileNames(artifactName: string): string[] {
-  const isRelativePathRef = artifactName.includes("/") || artifactName.includes("\\");
-  if (!isRelativePathRef && !isSafeArtifactName(artifactName)) {
-    return [];
-  }
-
-  if (path.extname(artifactName)) {
-    return [artifactName];
-  }
-
-  return [
-    artifactName,
-    `${artifactName}.md`,
-    `${artifactName}.markdown`,
-    `${artifactName}.txt`,
-    `${artifactName}.json`,
-  ];
-}
-
-function isSafeArtifactName(value: string): boolean {
-  return /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value) && !value.includes("..");
-}
-
-function dedupePaths(
-  paths: string[],
-  locationEnv: LocationResourceEnvironment,
-): string[] {
-  const normalized: string[] = [];
-  for (const value of paths) {
-    const candidate = normalizeLocationBoundaryPath(value, locationEnv);
-    if (!normalized.includes(candidate)) {
-      normalized.push(candidate);
-    }
-  }
-  return normalized;
 }
 
 function truncateEvidence(value: string): string {
