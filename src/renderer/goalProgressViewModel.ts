@@ -119,7 +119,11 @@ const SECRET_METADATA_KEYS = new Set([
   "secret",
   "secretkey",
   "sessionkey",
+  "sessiontoken",
+  "securitytoken",
   "token",
+  "webhook",
+  "webhookurl",
 ]);
 const SECRET_METADATA_SUFFIXES = [
   "apikey",
@@ -133,6 +137,9 @@ const SECRET_METADATA_SUFFIXES = [
   "secret",
   "secretkey",
   "sessionkey",
+  "sessiontoken",
+  "securitytoken",
+  "webhookurl",
 ] as const;
 
 export function buildGoalBudgetIncreaseDelta(
@@ -767,6 +774,10 @@ function safeArtifactPath(value: unknown): string | undefined {
 
 function redactSensitiveText(value: string): string {
   return value
+    .replace(
+      /https:\/\/hooks\.slack(?:-gov)?\.com\/services\/[^\s"'?,;]+/gi,
+      "[REDACTED]",
+    )
     .replace(
       /(\b[a-z][a-z\d+.-]*:\/\/)[^\/@\s]+@/gi,
       "$1[REDACTED]@",

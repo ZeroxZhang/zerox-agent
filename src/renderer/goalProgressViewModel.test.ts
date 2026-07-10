@@ -487,6 +487,78 @@ describe("goal progress view model", () => {
     expect(serialized).not.toContain("/Users/alice");
   });
 
+  it("redacts webhook URLs and AWS session credentials from a valid certificate", () => {
+    const slackWebhookUrl =
+      "https://hooks.slack.com/services/T01234567/B01234567/SlackWebhookSecret99";
+    const awsSessionToken = "aws-session-token-value-77fc";
+    const awsSecurityToken = "aws-security-token-value-88ad";
+    const artifactRef =
+      `https://evidence.local/report?aws_session_token=${awsSessionToken}`;
+    const goal = createGoal({
+      status: "executing",
+      planVersion: 2,
+      acceptanceProtocolVersion: 2,
+    });
+    const acceptanceCertificate = createGoalAcceptanceCertificate({
+      goal,
+      acceptedAt: "2026-07-11T05:10:00.000Z",
+      runIds: ["run_webhook_redaction"],
+      checkResults: [{
+        checkId: "criterion_1_review",
+        kind: "model_review",
+        passed: true,
+        code:
+          `webhook=${slackWebhookUrl}; webhook delivery completed; ` +
+          "monkey=banana",
+        evidenceRefs: [artifactRef],
+        detail: "accepted",
+      }],
+      evidenceManifest: {
+        version: 1,
+        generatedAt: "2026-07-11T05:09:59.000Z",
+        totalRenderedChars: 0,
+        truncated: false,
+        artifacts: [{
+          ref: artifactRef,
+          path:
+            `/workspace/aws_security_token=${awsSecurityToken}/report.md`,
+          mediaType: "text/markdown",
+          sizeBytes: 256,
+          sha256: "b".repeat(64),
+          excerpts: [],
+        }],
+      },
+      judge: {
+        model: `judge ${slackWebhookUrl}`,
+        promptVersion: `goal-v2?webhook_url=${slackWebhookUrl}`,
+        evaluatedMessageIds: ["message_webhook_redaction"],
+      },
+    });
+    const certified = {
+      ...goal,
+      status: "achieved" as const,
+      stopReason: "goal_accepted" as const,
+      acceptanceState: certifiedAcceptanceState(),
+      acceptanceCertificate,
+    };
+
+    expect(verifyGoalAcceptanceCertificate(certified)).toEqual({ ok: true });
+    const projected = buildGoalStatusPresentation(
+      certified.status,
+      certified,
+    ).certificate;
+    const serialized = JSON.stringify(projected);
+
+    expect(projected).toBeDefined();
+    expect(projected?.checks[0]?.code).toContain("webhook delivery completed");
+    expect(projected?.checks[0]?.code).toContain("monkey=banana");
+    expect(serialized).toContain("[REDACTED]");
+    expect(serialized).not.toContain(slackWebhookUrl);
+    expect(serialized).not.toContain("SlackWebhookSecret99");
+    expect(serialized).not.toContain(awsSessionToken);
+    expect(serialized).not.toContain(awsSecurityToken);
+  });
+
   it("keeps legacy achieved goals truthful without fabricating a certificate", () => {
     const goal = createGoal({ status: "achieved", stopReason: "goal_accepted" });
 
