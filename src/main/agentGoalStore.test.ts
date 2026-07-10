@@ -15,6 +15,7 @@ import {
   createAgentGoalStore,
   type ProgressLedgerEvent,
 } from "./agentGoalStore";
+import { createGoalAcceptanceCertificate } from "./agentGoalAcceptanceCertificate";
 
 describe("agent goal store", () => {
   let configDir: string;
@@ -95,6 +96,159 @@ describe("agent goal store", () => {
       "utf8",
     );
     expect(() => JSON.parse(raw)).not.toThrow();
+  });
+
+  it.each(["missing", "invalid"] as const)(
+    "does not let a v2 achieved goal with a %s certificate replace executing state",
+    async (certificateState) => {
+      const store = createAgentGoalStore({ configDir });
+      const executing = createProtocolV2Goal("goal_guarded", "executing");
+      const achieved = createCertifiedGoal(executing);
+      if (certificateState === "missing") {
+        achieved.acceptanceCertificate = undefined;
+      } else {
+        achieved.acceptanceCertificate!.evidence[0]!.sha256 = "0".repeat(64);
+      }
+
+      await store.save(executing);
+
+      await expect(store.save(achieved)).resolves.toEqual(executing);
+      await expect(store.get(executing.id)).resolves.toEqual(executing);
+    },
+  );
+
+  it.each([
+    ["stop reason", (goal: Goal) => {
+      goal.stopReason = "progress_stalled";
+    }],
+    ["acceptance phase", (goal: Goal) => {
+      goal.acceptanceState!.phase = "judging";
+    }],
+  ] as const)(
+    "rejects a v2 achieved goal with an incoherent %s",
+    async (_field, mutate) => {
+      const store = createAgentGoalStore({ configDir });
+      const executing = createProtocolV2Goal("goal_incoherent", "executing");
+      const achieved = createCertifiedGoal(executing);
+      mutate(achieved);
+
+      await store.save(executing);
+
+      await expect(store.save(achieved)).resolves.toEqual(executing);
+      await expect(store.get(executing.id)).resolves.toEqual(executing);
+    },
+  );
+
+  it("rejects a new invalid v2 achievement instead of persisting it", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const invalid = createProtocolV2Goal("goal_invalid_new", "achieved");
+    invalid.stopReason = "goal_accepted";
+    invalid.acceptanceState!.phase = "certified";
+
+    await expect(store.save(invalid)).rejects.toThrow(/certificate/i);
+    await expect(store.get(invalid.id)).resolves.toBeNull();
+  });
+
+  it("atomically reloads a valid v2 achievement with its certificate", async () => {
+    const firstStore = createAgentGoalStore({ configDir });
+    const executing = createProtocolV2Goal("goal_atomic_certificate", "executing");
+    const achieved = createCertifiedGoal(executing);
+
+    await firstStore.save(executing);
+    await expect(firstStore.save(achieved)).resolves.toEqual(achieved);
+
+    const reloadedStore = createAgentGoalStore({ configDir });
+    await expect(reloadedStore.get(achieved.id)).resolves.toEqual(achieved);
+    const raw = JSON.parse(
+      await readFile(
+        path.join(configDir, "agent-goals", `${achieved.id}.json`),
+        "utf8",
+      ),
+    ) as Goal;
+    expect(raw).toMatchObject({
+      status: "achieved",
+      stopReason: "goal_accepted",
+      acceptanceState: { phase: "certified" },
+      acceptanceCertificate: {
+        certificateHash: achieved.acceptanceCertificate!.certificateHash,
+      },
+    });
+  });
+
+  it("keeps legacy achieved JSON without a protocol marker readable and save-compatible", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const legacy = createGoal("goal_legacy_achieved", "achieved");
+    legacy.stopReason = "goal_accepted";
+
+    await expect(store.save(legacy)).resolves.toEqual(legacy);
+    await expect(store.get(legacy.id)).resolves.toEqual(legacy);
+
+    const updatedLegacy = {
+      ...legacy,
+      updatedAt: "2026-06-12T00:05:00.000Z",
+    };
+    await expect(store.save(updatedLegacy)).resolves.toEqual(updatedLegacy);
+    await expect(store.get(legacy.id)).resolves.toEqual(updatedLegacy);
+  });
+
+  it("preserves a canonical certified achievement against stale and same-status saves", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const executing = createProtocolV2Goal("goal_certificate_monotonic", "executing");
+    const achieved = createCertifiedGoal(executing);
+    const staleExecuting = {
+      ...structuredClone(executing),
+      updatedAt: "2026-07-11T02:00:00.000Z",
+    };
+    const certificateRemoved = {
+      ...structuredClone(achieved),
+      acceptanceCertificate: undefined,
+      updatedAt: "2026-07-11T02:01:00.000Z",
+    };
+    const certificateTampered = structuredClone(achieved);
+    certificateTampered.acceptanceCertificate!.judge!.model = "tampered";
+    certificateTampered.updatedAt = "2026-07-11T02:02:00.000Z";
+
+    await store.save(executing);
+    await store.save(achieved);
+
+    await expect(store.save(staleExecuting)).resolves.toEqual(achieved);
+    await expect(store.save(certificateRemoved)).resolves.toEqual(achieved);
+    await expect(store.save(certificateTampered)).resolves.toEqual(achieved);
+    await expect(store.get(achieved.id)).resolves.toEqual(achieved);
+  });
+
+  it("deterministically arbitrates concurrent cancellation and certification by queue order", async () => {
+    const store = createAgentGoalStore({ configDir });
+
+    const cancelFirst = createProtocolV2Goal("goal_cancel_first", "executing");
+    await store.save(cancelFirst);
+    const canceled: Goal = {
+      ...structuredClone(cancelFirst),
+      status: "canceled",
+      stopReason: "user_canceled",
+    };
+    const achievedAfterCancel = createCertifiedGoal(cancelFirst);
+    const cancelResults = await Promise.all([
+      store.save(canceled),
+      store.save(achievedAfterCancel),
+    ]);
+    expect(cancelResults).toEqual([canceled, canceled]);
+    await expect(store.get(cancelFirst.id)).resolves.toEqual(canceled);
+
+    const achieveFirst = createProtocolV2Goal("goal_achieve_first", "executing");
+    await store.save(achieveFirst);
+    const achieved = createCertifiedGoal(achieveFirst);
+    const canceledAfterAchieve: Goal = {
+      ...structuredClone(achieveFirst),
+      status: "canceled",
+      stopReason: "user_canceled",
+    };
+    const achieveResults = await Promise.all([
+      store.save(achieved),
+      store.save(canceledAfterAchieve),
+    ]);
+    expect(achieveResults).toEqual([achieved, achieved]);
+    await expect(store.get(achieveFirst.id)).resolves.toEqual(achieved);
   });
 
   it.each(["canceled", "achieved"] as const)(
@@ -422,5 +576,75 @@ function createGoal(
     planVersion: 1,
     createdAt: "2026-06-12T00:00:00.000Z",
     updatedAt,
+  };
+}
+
+function createProtocolV2Goal(id: string, status: GoalStatus): Goal {
+  return {
+    ...createGoal(id, status),
+    acceptanceProtocolVersion: 2,
+    acceptanceState: {
+      protocolVersion: 2,
+      phase: status === "achieved" ? "certified" : "idle",
+      attempt: 0,
+      recentFailures: [],
+    },
+  };
+}
+
+function createCertifiedGoal(executing: Goal): Goal {
+  const checkResults = executing.successCriteria.flatMap((successCriterion) =>
+    successCriterion.acceptanceChecks.map((check) => ({
+      checkId: check.id,
+      kind: check.kind,
+      passed: true,
+      code: "accepted",
+      evidenceRefs: ["artifact:goal"],
+      detail: "Accepted by the focused store fixture.",
+    })),
+  );
+  const acceptanceCertificate = createGoalAcceptanceCertificate({
+    goal: executing,
+    acceptedAt: "2026-07-11T01:00:00.000Z",
+    runIds: ["run_certificate"],
+    checkResults,
+    evidenceManifest: {
+      version: 1,
+      generatedAt: "2026-07-11T00:59:00.000Z",
+      artifacts: [
+        {
+          ref: "artifact:goal",
+          path: "/workspace/artifact.md",
+          mediaType: "text/markdown",
+          sizeBytes: 12,
+          sha256: "a".repeat(64),
+          excerpts: [],
+        },
+      ],
+      totalRenderedChars: 10,
+      truncated: false,
+    },
+    provenanceRefs: {
+      "artifact:goal": ["trajectory_certificate"],
+    },
+    judge: {
+      model: "local-model",
+      promptVersion: "goal-acceptance-v2",
+      evaluatedMessageIds: ["message_certificate"],
+    },
+  });
+
+  return {
+    ...structuredClone(executing),
+    status: "achieved",
+    stopReason: "goal_accepted",
+    acceptanceState: {
+      protocolVersion: 2,
+      phase: "certified",
+      attempt: 1,
+      recentFailures: [],
+    },
+    acceptanceCertificate,
+    updatedAt: "2026-07-11T01:00:00.000Z",
   };
 }

@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { Goal, GoalStatus, ProgressLedgerEvent } from "../shared/agentGoal";
 import { readRecoverableJsonl } from "./jsonlRecovery";
+import { verifyGoalAcceptanceCertificate } from "./agentGoalAcceptanceCertificate";
 
 export type { ProgressLedgerEvent } from "../shared/agentGoal";
 
@@ -91,12 +92,24 @@ export function createAgentGoalStore(options: {
         mutationQueue = nextQueue;
       }, async () => {
         const existing = await readGoal(goal.id);
+        if (existing && isCanonicalCertifiedAchievement(existing)) {
+          return existing;
+        }
         if (
           existing &&
           irreversibleGoalStatuses.has(existing.status) &&
           goal.status !== existing.status
         ) {
           return existing;
+        }
+        if (goal.acceptanceProtocolVersion === 2 && goal.status === "achieved") {
+          const terminalVerification = verifyProtocolV2Achievement(goal);
+          if (!terminalVerification.ok) {
+            if (existing) return existing;
+            throw new Error(
+              `Cannot save protocol-v2 achieved goal: ${terminalVerification.reason}`,
+            );
+          }
         }
         await writeJsonFileAtomically(
           goalsDir,
@@ -216,4 +229,32 @@ function compareGoalsByUpdatedAtDesc(left: Goal, right: Goal): number {
     new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime() ||
     right.id.localeCompare(left.id)
   );
+}
+
+function isCanonicalCertifiedAchievement(goal: Goal): boolean {
+  return goal.status === "achieved" && verifyProtocolV2Achievement(goal).ok;
+}
+
+function verifyProtocolV2Achievement(
+  goal: Goal,
+): { ok: true } | { ok: false; reason: string } {
+  if (goal.acceptanceProtocolVersion !== 2) {
+    return { ok: false, reason: "Goal is not using acceptance protocol v2." };
+  }
+  if (goal.stopReason !== "goal_accepted") {
+    return {
+      ok: false,
+      reason: "Protocol-v2 achieved goal requires stopReason goal_accepted.",
+    };
+  }
+  if (
+    goal.acceptanceState?.protocolVersion !== 2 ||
+    goal.acceptanceState.phase !== "certified"
+  ) {
+    return {
+      ok: false,
+      reason: "Protocol-v2 achieved goal requires certified acceptance state.",
+    };
+  }
+  return verifyGoalAcceptanceCertificate(goal);
 }
