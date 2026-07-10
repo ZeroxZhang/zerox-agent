@@ -36,6 +36,13 @@ describe("goal chat service", () => {
         originMessageId: "message_1",
         description: "发布 v1.8.0",
         status: "planning",
+        acceptanceProtocolVersion: 2,
+        acceptanceState: {
+          protocolVersion: 2,
+          phase: "idle",
+          attempt: 0,
+          recentFailures: [],
+        },
         milestones: [
           {
             id: "milestone_1",
@@ -276,6 +283,13 @@ describe("goal chat service", () => {
       workspaceId: "workspace_project",
       originMessageId: "message_1",
       description: "发布 v3.2.0 并完成验收",
+      acceptanceProtocolVersion: 2,
+      acceptanceState: {
+        protocolVersion: 2,
+        phase: "idle",
+        attempt: 0,
+        recentFailures: [],
+      },
       selectedSkill: {
         manifest: { name: "onepager" },
         body: "Onepager body.",
@@ -496,6 +510,89 @@ describe("goal chat service", () => {
       description: "发布 v1.8.0",
       status: "executing",
     });
+  });
+
+  it.each([
+    ["start", "planning"],
+    ["resume", "executing"],
+  ] as const)(
+    "upgrades a legacy %s goal to protocol v2 in one canonical save before controller execution",
+    async (operation, status) => {
+      let persistedGoal = createGoal({ status });
+      const savedGoals: Goal[] = [];
+      const controllerCalls: string[] = [];
+      const service = createGoalChatService({
+        controller: createController({
+          async start(goalId) {
+            controllerCalls.push(`start:${goalId}`);
+            return persistedGoal;
+          },
+          async resume(goalId) {
+            controllerCalls.push(`resume:${goalId}`);
+            return persistedGoal;
+          },
+        }),
+        goalStore: {
+          async get(goalId) {
+            return persistedGoal.id === goalId
+              ? structuredClone(persistedGoal)
+              : null;
+          },
+          async save(goal) {
+            persistedGoal = structuredClone(goal);
+            savedGoals.push(structuredClone(goal));
+            return structuredClone(goal);
+          },
+          async appendLedger() {},
+        },
+        planner: createFakePlanner(),
+        now: () => "2026-07-11T08:00:00.000Z",
+      });
+
+      const summary = await service[operation](persistedGoal.id);
+      await Promise.resolve();
+
+      expect(savedGoals).toHaveLength(1);
+      expect(savedGoals[0]).toMatchObject({
+        status: "executing",
+        acceptanceProtocolVersion: 2,
+        acceptanceState: {
+          protocolVersion: 2,
+          phase: "idle",
+          attempt: 0,
+          recentFailures: [],
+        },
+      });
+      expect(summary.status).toBe("executing");
+      expect(controllerCalls).toEqual([`${operation}:goal_release`]);
+    },
+  );
+
+  it("does not upgrade or restart a terminal legacy achieved goal", async () => {
+    const achieved = createGoal({
+      status: "achieved",
+      stopReason: "goal_accepted",
+    });
+    const savedGoals: Goal[] = [];
+    const resumed: string[] = [];
+    const service = createGoalChatService({
+      controller: createController({
+        async resume(goalId) {
+          resumed.push(goalId);
+          return achieved;
+        },
+      }),
+      goalStore: createGoalStore({ existingGoal: achieved, savedGoals }),
+      planner: createFakePlanner(),
+    });
+
+    await expect(service.resume(achieved.id)).resolves.toMatchObject({
+      status: "achieved",
+    });
+    expect(savedGoals).toEqual([]);
+    expect(resumed).toEqual([]);
+    expect(achieved).not.toHaveProperty("acceptanceProtocolVersion");
+    expect(achieved).not.toHaveProperty("acceptanceCertificate");
   });
 
   it("counts a manual replan exactly once when the planner updates usage", async () => {
@@ -796,11 +893,133 @@ describe("goal chat service", () => {
       id: "goal_release",
       status: "executing",
       stopReason: undefined,
+      acceptanceProtocolVersion: 2,
+      acceptanceState: { protocolVersion: 2, phase: "idle" },
     });
     expect(ledgerEvents.at(-1)).toEqual({
       at: "2026-06-12T08:00:00.000Z",
       kind: "goal_planned",
       summary: "Goal retried from chat recovery UI.",
+    });
+  });
+
+  it.each([
+    ["external_blocked", "blocked_external"],
+    ["acceptance_unavailable", "acceptance_unavailable"],
+  ] as const)(
+    "retries %s goals once while retaining acceptance failure history",
+    async (stopReason, verdict) => {
+      const savedGoals: Goal[] = [];
+      const resumed: string[] = [];
+      const blocked = createBlockedGoal(stopReason, verdict);
+      const service = createGoalChatService({
+        controller: createController({
+          async resume(goalId) {
+            resumed.push(goalId);
+            return blocked;
+          },
+        }),
+        goalStore: createGoalStore({ existingGoal: blocked, savedGoals }),
+        planner: createFakePlanner(),
+        now: () => "2026-07-11T08:00:00.000Z",
+      });
+
+      const summary = await service.retry(blocked.id);
+      await Promise.resolve();
+
+      expect(summary.status).toBe("executing");
+      expect(resumed).toEqual([blocked.id]);
+      expect(savedGoals.at(-1)).toMatchObject({
+        status: "executing",
+        stopReason: undefined,
+        planVersion: 1,
+        budgetUsage: { replans: 0 },
+        acceptanceState: {
+          phase: "idle",
+          recentFailures: blocked.acceptanceState?.recentFailures,
+          lastDecision: blocked.acceptanceState?.lastDecision,
+        },
+      });
+    },
+  );
+
+  it("rejects an unchanged impossible retry without reviving or resuming it", async () => {
+    const blocked = createBlockedGoal("goal_impossible", "impossible");
+    const savedGoals: Goal[] = [];
+    const resumed: string[] = [];
+    const service = createGoalChatService({
+      controller: createController({
+        async resume(goalId) {
+          resumed.push(goalId);
+          return blocked;
+        },
+      }),
+      goalStore: createGoalStore({ existingGoal: blocked, savedGoals }),
+      planner: createFakePlanner(),
+    });
+
+    await expect(service.retry(blocked.id)).rejects.toThrow(
+      /adjust|replan|调整|重新规划/i,
+    );
+    expect(savedGoals).toEqual([]);
+    expect(resumed).toEqual([]);
+    expect(blocked.status).toBe("stopped_blocked");
+  });
+
+  it("allows impossible retry only after one successful explicit replan", async () => {
+    const blocked = createBlockedGoal("goal_impossible", "impossible");
+    const savedGoals: Goal[] = [];
+    const resumed: string[] = [];
+    const service = createGoalChatService({
+      controller: createController({
+        async resume(goalId) {
+          resumed.push(goalId);
+          return blocked;
+        },
+      }),
+      goalStore: createGoalStore({ existingGoal: blocked, savedGoals }),
+      planner: {
+        async plan() {
+          throw new Error("unexpected plan");
+        },
+        async replan(goal) {
+          goal.planVersion += 1;
+          goal.budgetUsage.replans += 1;
+          return goal.milestones.map((milestone) => ({
+            ...milestone,
+            description: "Use the adjusted feasible plan.",
+          }));
+        },
+      },
+      now: () => "2026-07-11T08:00:00.000Z",
+    });
+
+    await service.replan(blocked.id, "调整不可实现的条件");
+    const replanned = savedGoals.at(-1);
+    expect(replanned).toMatchObject({
+      status: "stopped_blocked",
+      stopReason: "goal_impossible",
+      planVersion: 2,
+      budgetUsage: { replans: 1 },
+      acceptanceState: {
+        phase: "idle",
+        recentFailures: blocked.acceptanceState?.recentFailures,
+      },
+    });
+
+    const summary = await service.retry(blocked.id);
+    await Promise.resolve();
+
+    expect(summary.status).toBe("executing");
+    expect(resumed).toEqual([blocked.id]);
+    expect(savedGoals.at(-1)).toMatchObject({
+      status: "executing",
+      planVersion: 2,
+      budgetUsage: { replans: 1 },
+      acceptanceState: {
+        phase: "idle",
+        recentFailures: blocked.acceptanceState?.recentFailures,
+      },
     });
   });
 
@@ -848,6 +1067,48 @@ describe("goal chat service", () => {
     expect(summary.status).toBe("canceled");
     expect(resumed).toEqual([]);
     expect(ledgerEvents).toEqual([]);
+    expect(progressEvents).toEqual([]);
+  });
+
+  it("does not restart when achievement wins a concurrent retry", async () => {
+    const progressEvents: import("../shared/chat").GoalProgressEvent[] = [];
+    const resumed: string[] = [];
+    const stoppedGoal = createGoal({
+      status: "stopped_budget",
+      stopReason: "budget_exhausted",
+    });
+    const achievedGoal = createGoal({
+      status: "achieved",
+      stopReason: "goal_accepted",
+    });
+    const service = createGoalChatService({
+      controller: createController({
+        async resume(goalId) {
+          resumed.push(goalId);
+          return achievedGoal;
+        },
+      }),
+      goalStore: {
+        async get() {
+          return stoppedGoal;
+        },
+        async save() {
+          return achievedGoal;
+        },
+        async appendLedger() {
+          throw new Error("A lost retry must not append ledger state.");
+        },
+      },
+      planner: createFakePlanner(),
+      onProgress(event) {
+        progressEvents.push(event);
+      },
+    });
+
+    await expect(service.retry(stoppedGoal.id)).resolves.toMatchObject({
+      status: "achieved",
+    });
+    expect(resumed).toEqual([]);
     expect(progressEvents).toEqual([]);
   });
 });
@@ -1048,4 +1309,50 @@ function createGoal(overrides: Partial<Goal> = {}): Goal {
     updatedAt: "2026-06-12T08:00:00.000Z",
     ...overrides,
   };
+}
+
+function createBlockedGoal(
+  stopReason:
+    | "external_blocked"
+    | "goal_impossible"
+    | "acceptance_unavailable",
+  verdict: "blocked_external" | "impossible" | "acceptance_unavailable",
+): Goal {
+  return createGoal({
+    status: "stopped_blocked",
+    stopReason,
+    acceptanceProtocolVersion: 2,
+    acceptanceState: {
+      protocolVersion: 2,
+      phase: "blocked",
+      attempt: 3,
+      recentFailures: [
+        {
+          at: "2026-07-11T07:59:00.000Z",
+          targetKind: "goal",
+          targetId: "goal_release",
+          fingerprint: "b".repeat(64),
+          occurrence: 1,
+          verdict,
+          failureClass:
+            stopReason === "goal_impossible"
+              ? "goal_impossible"
+              : stopReason === "acceptance_unavailable"
+                ? "validator_unavailable"
+                : "external_dependency_missing",
+          failedCheckIds: ["criterion_1_review"],
+          evidenceRefs: ["artifact:goalEvidence"],
+          actionSignatures: ["model_review:bounded"],
+        },
+      ],
+      lastDecision: {
+        action: "stop_blocked",
+        summary: "User action is required.",
+        failedCheckIds: ["criterion_1_review"],
+        fingerprint: "b".repeat(64),
+        occurrence: 1,
+        instructions: ["Adjust the condition or restore the dependency."],
+      },
+    },
+  });
 }

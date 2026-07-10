@@ -5,6 +5,7 @@ import {
   readFile,
   readdir,
   rm,
+  stat,
   writeFile,
 } from "node:fs/promises";
 import os from "node:os";
@@ -191,6 +192,76 @@ describe("agent goal store", () => {
     await expect(store.get(legacy.id)).resolves.toEqual(updatedLegacy);
   });
 
+  it("reads and lists serialized legacy goals without rewriting or fabricating acceptance state", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const goalsDir = path.join(configDir, "agent-goals");
+    const filePath = path.join(goalsDir, "goal_legacy_read.json");
+    const legacy = {
+      ...createGoal("goal_legacy_read", "executing"),
+      chatSessionId: "chat_legacy_read",
+    };
+    const raw = `${JSON.stringify(legacy, null, 4)}\n`;
+    await mkdir(goalsDir, { recursive: true });
+    await writeFile(filePath, raw, "utf8");
+    const before = await stat(filePath);
+
+    await expect(store.get(legacy.id)).resolves.toEqual(legacy);
+    await expect(store.listActive()).resolves.toEqual([legacy]);
+    await expect(store.listByChatSession("chat_legacy_read")).resolves.toEqual([
+      legacy,
+    ]);
+
+    expect(await readFile(filePath, "utf8")).toBe(raw);
+    expect((await stat(filePath)).mtimeMs).toBe(before.mtimeMs);
+    expect(await store.get(legacy.id)).not.toHaveProperty(
+      "acceptanceProtocolVersion",
+    );
+    expect(await store.get(legacy.id)).not.toHaveProperty("acceptanceState");
+  });
+
+  it("preserves canonical v2 acceptance state when a stale legacy save arrives", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const protocolV2 = createProtocolV2Goal("goal_upgrade_monotonic", "executing");
+    protocolV2.acceptanceState = {
+      protocolVersion: 2,
+      phase: "repairing",
+      attempt: 2,
+      recentFailures: [createFailureRecord()],
+      lastDecision: createRepairDirective(),
+    };
+    const staleLegacy = {
+      ...createGoal(protocolV2.id, "executing"),
+      planVersion: 2,
+      updatedAt: "2026-07-11T03:00:00.000Z",
+    };
+
+    await store.save(protocolV2);
+    const persisted = await store.save(staleLegacy);
+
+    expect(persisted).toMatchObject({
+      planVersion: 2,
+      acceptanceProtocolVersion: 2,
+      acceptanceState: protocolV2.acceptanceState,
+    });
+    const shallowV2 = {
+      ...createProtocolV2Goal(protocolV2.id, "executing"),
+      planVersion: 3,
+      updatedAt: "2026-07-11T03:01:00.000Z",
+    };
+    const merged = await store.save(shallowV2);
+    expect(merged).toMatchObject({
+      planVersion: 3,
+      acceptanceProtocolVersion: 2,
+      acceptanceState: {
+        phase: "idle",
+        attempt: 2,
+        recentFailures: protocolV2.acceptanceState.recentFailures,
+        lastDecision: protocolV2.acceptanceState.lastDecision,
+      },
+    });
+    await expect(store.get(protocolV2.id)).resolves.toEqual(merged);
+  });
+
   it("preserves a canonical certified achievement against stale and same-status saves", async () => {
     const store = createAgentGoalStore({ configDir });
     const executing = createProtocolV2Goal("goal_certificate_monotonic", "executing");
@@ -303,6 +374,8 @@ describe("agent goal store", () => {
     const achieved = createGoal("goal_achieved", "achieved");
     const stoppedBudget = createGoal("goal_stopped_budget", "stopped_budget");
     const stoppedStalled = createGoal("goal_stopped_stalled", "stopped_stalled");
+    const stoppedBlocked = createGoal("goal_stopped_blocked", "stopped_blocked");
+    stoppedBlocked.stopReason = "external_blocked";
     const failed = createGoal("goal_failed", "failed");
     const canceled = createGoal("goal_canceled", "canceled");
 
@@ -313,6 +386,7 @@ describe("agent goal store", () => {
       store.save(achieved),
       store.save(stoppedBudget),
       store.save(stoppedStalled),
+      store.save(stoppedBlocked),
       store.save(failed),
       store.save(canceled),
     ]);
@@ -589,6 +663,36 @@ function createProtocolV2Goal(id: string, status: GoalStatus): Goal {
       attempt: 0,
       recentFailures: [],
     },
+  };
+}
+
+function createFailureRecord(): NonNullable<
+  Goal["acceptanceState"]
+>["recentFailures"][number] {
+  return {
+    at: "2026-07-11T02:00:00.000Z",
+    targetKind: "goal",
+    targetId: "goal_upgrade_monotonic",
+    fingerprint: "f".repeat(64),
+    occurrence: 2,
+    verdict: "rejected_repairable",
+    failureClass: "artifact_missing",
+    failedCheckIds: ["check_file"],
+    evidenceRefs: ["artifact:report"],
+    actionSignatures: ["file_write:abc"],
+  };
+}
+
+function createRepairDirective(): NonNullable<
+  NonNullable<Goal["acceptanceState"]>["lastDecision"]
+> {
+  return {
+    action: "retry_alternate_strategy",
+    summary: "Try a different artifact strategy.",
+    failedCheckIds: ["check_file"],
+    fingerprint: "f".repeat(64),
+    occurrence: 2,
+    instructions: ["Create the missing artifact with different arguments."],
   };
 }
 

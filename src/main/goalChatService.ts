@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   assertGoalTransition,
+  upgradeGoalAcceptanceProtocol,
   type Goal,
   type GoalBudget,
   type GoalSelectedSkill,
@@ -134,23 +135,41 @@ export function createGoalChatService(options: {
   }
 
   async function queueGoalExecution(goal: Goal): Promise<Goal> {
-    if (goal.status !== "planning") {
+    if (
+      goal.status !== "planning" &&
+      goal.status !== "executing" &&
+      goal.status !== "waiting_for_review"
+    ) {
       return goal;
     }
 
-    assertGoalTransition(goal.status, "executing");
-    goal.status = "executing";
-    goal.updatedAt = now();
-    const persisted = await options.goalStore.save(goal);
-    if (persisted.status !== goal.status) {
+    let candidate = upgradeGoalAcceptanceProtocol(goal);
+    const startedFromPlanning = candidate.status === "planning";
+    if (startedFromPlanning) {
+      assertGoalTransition(candidate.status, "executing");
+      candidate = {
+        ...candidate,
+        status: "executing",
+        updatedAt: now(),
+      };
+    }
+
+    if (candidate === goal) {
+      return goal;
+    }
+
+    const persisted = await options.goalStore.save(candidate);
+    if (persisted.status !== candidate.status) {
       return persisted;
     }
-    await options.goalStore.appendLedger(goal.id, {
-      at: goal.updatedAt,
-      kind: "goal_planned",
-      summary: "Goal execution queued from chat.",
-    });
-    notifyProgress("started", persisted, "目标已开始执行。");
+    if (startedFromPlanning) {
+      await options.goalStore.appendLedger(candidate.id, {
+        at: candidate.updatedAt,
+        kind: "goal_planned",
+        summary: "Goal execution queued from chat.",
+      });
+      notifyProgress("started", persisted, "目标已开始执行。");
+    }
     return persisted;
   }
 
@@ -191,7 +210,7 @@ export function createGoalChatService(options: {
             input.selectedSkill,
           );
 
-      const goal: Goal = {
+      const goal: Goal = upgradeGoalAcceptanceProtocol({
         id: goalId,
         chatSessionId: input.sessionId,
         ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
@@ -221,7 +240,7 @@ export function createGoalChatService(options: {
         planVersion: 1,
         createdAt: now(),
         updatedAt: now(),
-      };
+      });
 
       await options.goalStore.save(goal);
       if (quickActionReviewPlan) {
@@ -294,7 +313,7 @@ export function createGoalChatService(options: {
                 input.draft.selectedSkill,
               );
 
-      const goal: Goal = {
+      const goal: Goal = upgradeGoalAcceptanceProtocol({
         id: goalId,
         chatSessionId: input.draft.sessionId,
         ...(input.draft.workspaceId ? { workspaceId: input.draft.workspaceId } : {}),
@@ -324,7 +343,7 @@ export function createGoalChatService(options: {
         planVersion: 1,
         createdAt: now(),
         updatedAt: now(),
-      };
+      });
 
       await options.goalStore.save(goal);
       if (quickActionReviewPlan) {
@@ -497,14 +516,35 @@ export function createGoalChatService(options: {
         throw new Error(`Goal "${goalId}" was not found.`);
       }
 
-      goal.milestones = await options.planner.replan(goal, instructions);
-      goal.updatedAt = now();
-      const persisted = await options.goalStore.save(goal);
-      if (persisted.status !== goal.status) {
+      if (goal.status === "achieved" || goal.status === "canceled") {
+        throw new Error(`Cannot replan a terminal ${goal.status} goal.`);
+      }
+
+      const replanningGoal = structuredClone(goal);
+      const milestones = await options.planner.replan(
+        replanningGoal,
+        instructions,
+      );
+      const candidate: Goal = {
+        ...replanningGoal,
+        milestones,
+        ...(replanningGoal.status === "stopped_blocked" &&
+        replanningGoal.acceptanceState
+          ? {
+              acceptanceState: {
+                ...replanningGoal.acceptanceState,
+                phase: "idle",
+              },
+            }
+          : {}),
+        updatedAt: now(),
+      };
+      const persisted = await options.goalStore.save(candidate);
+      if (persisted.status !== candidate.status) {
         return toGoalSummary(persisted);
       }
-      await options.goalStore.appendLedger(goal.id, {
-        at: goal.updatedAt,
+      await options.goalStore.appendLedger(candidate.id, {
+        at: candidate.updatedAt,
         kind: "goal_replanned",
         summary: `Replanned from chat recovery UI: ${instructions}`,
       });
@@ -518,18 +558,40 @@ export function createGoalChatService(options: {
         throw new Error(`Goal "${goalId}" was not found.`);
       }
 
+      if (
+        goal.status === "stopped_blocked" &&
+        goal.stopReason === "goal_impossible" &&
+        goal.acceptanceState?.phase !== "idle"
+      ) {
+        throw new Error(
+          "This goal is still impossible under the current plan. Adjust or replan it before retrying.",
+        );
+      }
+
       if (goal.status !== "failed" && goal.status !== "stopped_stalled") {
         assertGoalTransition(goal.status, "executing");
       }
-      goal.status = "executing";
-      goal.stopReason = undefined;
-      goal.updatedAt = now();
-      const persisted = await options.goalStore.save(goal);
-      if (persisted.status !== goal.status) {
+      const upgraded = upgradeGoalAcceptanceProtocol(goal);
+      const candidate: Goal = {
+        ...upgraded,
+        status: "executing",
+        stopReason: undefined,
+        ...(upgraded.acceptanceState?.phase === "blocked"
+          ? {
+              acceptanceState: {
+                ...upgraded.acceptanceState,
+                phase: "idle",
+              },
+            }
+          : {}),
+        updatedAt: now(),
+      };
+      const persisted = await options.goalStore.save(candidate);
+      if (persisted.status !== candidate.status) {
         return toGoalSummary(persisted);
       }
-      await options.goalStore.appendLedger(goal.id, {
-        at: goal.updatedAt,
+      await options.goalStore.appendLedger(candidate.id, {
+        at: candidate.updatedAt,
         kind: "goal_planned",
         summary: "Goal retried from chat recovery UI.",
       });

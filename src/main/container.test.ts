@@ -284,6 +284,15 @@ describe("app container goal drafts", () => {
         evidenceRefs: ["artifact:goalEvidence"],
       },
     });
+    expect(goal).toMatchObject({
+      acceptanceProtocolVersion: 2,
+      acceptanceState: {
+        protocolVersion: 2,
+        phase: "idle",
+        attempt: 0,
+        recentFailures: [],
+      },
+    });
   });
 
   it("creates evidence-backed fallback checks when manual goal criteria are blank", () => {
@@ -550,6 +559,91 @@ describe("app container goal drafts", () => {
       message: "目标已取消。",
     });
   });
+
+  it.each([
+    "acceptance_manifest_created",
+    "acceptance_failure_classified",
+    "acceptance_repair_scheduled",
+    "acceptance_strategy_changed",
+    "acceptance_blocked",
+    "acceptance_certified",
+  ] satisfies GoalProgressEvent["event"][])(
+    "canonically reconciles stale %s delivery before terminal notification",
+    (event) => {
+      const staleEvent: GoalProgressEvent = {
+        kind: "goal_progress",
+        goalId: `goal_${event}`,
+        sessionId: "chat_acceptance_race",
+        status: "executing",
+        event,
+        message: "Stale acceptance progress.",
+        timestamp: "2026-07-11T08:00:00.000Z",
+      };
+
+      expect(
+        reconcileIrreversibleGoalProgressEvent(
+          staleEvent,
+          createStoredGoal({
+            id: staleEvent.goalId,
+            status: event === "acceptance_certified" ? "canceled" : "achieved",
+            stopReason:
+              event === "acceptance_certified"
+                ? "user_canceled"
+                : "goal_accepted",
+          }),
+        ),
+      ).toMatchObject({
+        status: event === "acceptance_certified" ? "canceled" : "achieved",
+        event: "stopped",
+        message:
+          event === "acceptance_certified" ? "目标已取消。" : "目标已达成。",
+      });
+    },
+  );
+
+  it.each([
+    ["external_blocked", "外部依赖受阻"],
+    ["goal_impossible", "目标不可实现"],
+    ["acceptance_unavailable", "验收暂不可用"],
+  ] as const)(
+    "keeps %s blocked chat output reason-specific and recoverable",
+    async (stopReason, expectedText) => {
+      const container = createAppContainer({
+        async requestToolApproval() {
+          return { approved: false, reason: "test" };
+        },
+      });
+      const session = await container.chatSessionStore().appendMessage({
+        role: "user",
+        content: "/目标 验证阻塞状态",
+      });
+      const goal = createStoredGoal({
+        id: `goal_blocked_${stopReason}`,
+        chatSessionId: session.session.id,
+        status: "stopped_blocked",
+        stopReason,
+      });
+      await container.agentGoalStore().save(goal);
+      await container.chatSessionStore().attachGoal(session.session.id, {
+        id: goal.id,
+        description: goal.description,
+        status: goal.status,
+      });
+
+      const listed = (await container.listChatSessions()).find(
+        (item) => item.id === session.session.id,
+      );
+      const message = formatGoalTerminalHeading(goal);
+
+      expect(listed?.activeGoal).toMatchObject({
+        id: goal.id,
+        status: "stopped_blocked",
+      });
+      expect(message).toContain(expectedText);
+      expect(message).not.toContain("目标已达成");
+      expect(message).not.toContain("已完成");
+    },
+  );
 
   it("keeps the chat session terminal when a stale budget event arrives after cancellation", async () => {
     const container = createAppContainer({

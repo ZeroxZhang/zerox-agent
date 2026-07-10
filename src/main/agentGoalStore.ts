@@ -28,6 +28,7 @@ const terminalGoalStatuses = new Set<GoalStatus>([
   "achieved",
   "stopped_budget",
   "stopped_stalled",
+  "stopped_blocked",
   "failed",
   "canceled",
 ]);
@@ -95,15 +96,19 @@ export function createAgentGoalStore(options: {
         if (existing && isCanonicalCertifiedAchievement(existing)) {
           return existing;
         }
+        const candidate = preserveCanonicalAcceptance(existing, goal);
         if (
           existing &&
           irreversibleGoalStatuses.has(existing.status) &&
-          goal.status !== existing.status
+          candidate.status !== existing.status
         ) {
           return existing;
         }
-        if (goal.acceptanceProtocolVersion === 2 && goal.status === "achieved") {
-          const terminalVerification = verifyProtocolV2Achievement(goal);
+        if (
+          candidate.acceptanceProtocolVersion === 2 &&
+          candidate.status === "achieved"
+        ) {
+          const terminalVerification = verifyProtocolV2Achievement(candidate);
           if (!terminalVerification.ok) {
             if (existing) return existing;
             throw new Error(
@@ -113,10 +118,10 @@ export function createAgentGoalStore(options: {
         }
         await writeJsonFileAtomically(
           goalsDir,
-          goalPath(goal.id),
-          `${JSON.stringify(goal, null, 2)}\n`,
+          goalPath(candidate.id),
+          `${JSON.stringify(candidate, null, 2)}\n`,
         );
-        return goal;
+        return candidate;
       });
     },
 
@@ -233,6 +238,53 @@ function compareGoalsByUpdatedAtDesc(left: Goal, right: Goal): number {
 
 function isCanonicalCertifiedAchievement(goal: Goal): boolean {
   return goal.status === "achieved" && verifyProtocolV2Achievement(goal).ok;
+}
+
+function preserveCanonicalAcceptance(
+  existing: Goal | null,
+  incoming: Goal,
+): Goal {
+  if (existing?.acceptanceProtocolVersion !== 2) {
+    return incoming;
+  }
+
+  const acceptanceState = mergeAcceptanceState(
+    existing.acceptanceState,
+    incoming.acceptanceState,
+  );
+
+  return {
+    ...incoming,
+    acceptanceProtocolVersion: 2,
+    ...(acceptanceState ? { acceptanceState } : {}),
+    ...(incoming.acceptanceCertificate
+      ? { acceptanceCertificate: incoming.acceptanceCertificate }
+      : existing.acceptanceCertificate
+        ? { acceptanceCertificate: existing.acceptanceCertificate }
+        : {}),
+  };
+}
+
+function mergeAcceptanceState(
+  existing: Goal["acceptanceState"],
+  incoming: Goal["acceptanceState"],
+): Goal["acceptanceState"] {
+  if (!incoming) return existing;
+  if (!existing) return incoming;
+
+  return {
+    ...incoming,
+    attempt: Math.max(existing.attempt, incoming.attempt),
+    recentFailures:
+      incoming.recentFailures.length >= existing.recentFailures.length
+        ? incoming.recentFailures
+        : existing.recentFailures,
+    ...(incoming.lastDecision
+      ? { lastDecision: incoming.lastDecision }
+      : existing.lastDecision
+        ? { lastDecision: existing.lastDecision }
+        : {}),
+  };
 }
 
 function verifyProtocolV2Achievement(

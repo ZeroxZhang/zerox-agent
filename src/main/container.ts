@@ -111,7 +111,12 @@ import {
 } from "./toolAuthorizationService";
 import { getAppMeta } from "../shared/appMeta";
 import { getNavigationSections } from "../shared/navigation";
-import type { Goal, GoalBudget, SuccessCriterion } from "../shared/agentGoal";
+import {
+  upgradeGoalAcceptanceProtocol,
+  type Goal,
+  type GoalBudget,
+  type SuccessCriterion,
+} from "../shared/agentGoal";
 import type { GoalReviewPolicy } from "../shared/agentGoalReview";
 import type {
   GoalDraftConfirmResult,
@@ -1768,7 +1773,7 @@ export function createAppContainer(options: {
         ],
       }));
 
-    return {
+    return upgradeGoalAcceptanceProtocol({
       id: `goal_${randomUUID()}`,
       description: input.description.trim(),
       successCriteria: criteria.length
@@ -1805,7 +1810,7 @@ export function createAppContainer(options: {
       planVersion: 1,
       createdAt: now,
       updatedAt: now,
-    };
+    });
   }
 
   async function confirmGoalDraft(
@@ -2038,7 +2043,6 @@ export function reconcileIrreversibleGoalProgressEvent(
 ): GoalProgressEvent {
   if (
     !goal ||
-    goal.status === event.status ||
     (goal.status !== "achieved" && goal.status !== "canceled")
   ) {
     return event;

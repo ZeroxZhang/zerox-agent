@@ -276,7 +276,21 @@ export type GoalProgressEvent = {
   sessionId?: string;
   status: GoalStatus;
   milestoneId?: string;
-  event: "started" | "milestone_started" | "milestone_accepted" | "milestone_rejected" | "review_requested" | "replanned" | "stopped" | "checkpoint";
+  event:
+    | "started"
+    | "milestone_started"
+    | "milestone_accepted"
+    | "milestone_rejected"
+    | "review_requested"
+    | "replanned"
+    | "stopped"
+    | "checkpoint"
+    | "acceptance_manifest_created"
+    | "acceptance_failure_classified"
+    | "acceptance_repair_scheduled"
+    | "acceptance_strategy_changed"
+    | "acceptance_blocked"
+    | "acceptance_certified";
   message: string;
   timestamp: string;
 };
