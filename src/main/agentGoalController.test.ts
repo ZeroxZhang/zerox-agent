@@ -22,6 +22,7 @@ import {
   type AcceptanceContext,
 } from "./agentGoalAcceptance";
 import { verifyGoalAcceptanceCertificate } from "./agentGoalAcceptanceCertificate";
+import { createToolActionSignature } from "./agentGoalFailureFingerprint";
 
 describe("agent goal controller", () => {
   let configDir: string;
@@ -1290,6 +1291,68 @@ describe("agent goal controller", () => {
     );
   });
 
+  it("leaves a successful hard-cap milestone ready and schedules it after budget recovery", async () => {
+    await store.save(
+      createProtocolV2Goal([milestone("milestone_1")], {
+        budget: {
+          maxIterations: 1,
+          maxToolCalls: 99,
+          maxWallClockMs: 600_000,
+          maxReplans: 2,
+        },
+      }),
+    );
+    let runtimeCalls = 0;
+    let acceptanceCalls = 0;
+    const controller = createController({
+      runtime: {
+        async runMilestone(_goal, currentMilestone) {
+          runtimeCalls += 1;
+          return {
+            runId: `run_${currentMilestone.id}_${runtimeCalls}`,
+            toolCallCount: 1,
+            status: "succeeded",
+          };
+        },
+      },
+      acceptance: {
+        async evaluate() {
+          acceptanceCalls += 1;
+          return acceptedResult("check_done");
+        },
+        async evaluateGoal() {
+          return acceptedResult("check_done", { evidenceManifest: emptyManifest });
+        },
+      },
+    });
+
+    const stopped = await controller.start("goal_1");
+
+    expect(stopped.status).toBe("stopped_budget");
+    expect(stopped.milestones[0]).toMatchObject({
+      state: "ready",
+      lastRunStatus: "succeeded",
+      runIds: ["run_milestone_1_1"],
+    });
+    expect(acceptanceCalls).toBe(0);
+
+    await store.save({
+      ...stopped,
+      status: "executing",
+      stopReason: undefined,
+      budget: { ...stopped.budget, maxIterations: 3 },
+    });
+    const recovered = await controller.resume("goal_1");
+
+    expect(recovered.status).toBe("achieved");
+    expect(runtimeCalls).toBe(2);
+    expect(acceptanceCalls).toBe(1);
+    expect(recovered.milestones[0]?.runIds).toEqual([
+      "run_milestone_1_1",
+      "run_milestone_1_2",
+    ]);
+  });
+
   it("reuses one deterministic final repair milestone and never creates a repair chain", async () => {
     await store.save(createProtocolV2Goal([milestone("milestone_initial")]));
     const runtime = createRuntime();
@@ -1867,6 +1930,159 @@ describe("agent goal controller", () => {
           event.payload.status === "stopped_blocked",
       ),
     ).toHaveLength(2);
+  });
+
+  it("emits one achieved terminal event when a replacement run wins a stale acceptance race", async () => {
+    await store.save(
+      createProtocolV2Goal([milestone("milestone_1")], { status: "executing" }),
+    );
+    const staleAbort = new AbortController();
+    let runtimeCalls = 0;
+    let acceptanceCalls = 0;
+    let staleAcceptanceEnteredResolve: (() => void) | undefined;
+    const staleAcceptanceEntered = new Promise<void>((resolve) => {
+      staleAcceptanceEnteredResolve = resolve;
+    });
+    let resolveStaleAcceptance: ((result: AcceptanceResult) => void) | undefined;
+    const staleAcceptance = new Promise<AcceptanceResult>((resolve) => {
+      resolveStaleAcceptance = resolve;
+    });
+    const controller = createController({
+      runtime: {
+        async runMilestone(_goal, currentMilestone) {
+          runtimeCalls += 1;
+          return {
+            runId: `run_${currentMilestone.id}_${runtimeCalls}`,
+            toolCallCount: 1,
+            status: "succeeded",
+          };
+        },
+      },
+      acceptance: {
+        async evaluate() {
+          acceptanceCalls += 1;
+          if (acceptanceCalls === 1) {
+            staleAcceptanceEnteredResolve?.();
+            return staleAcceptance;
+          }
+          return acceptedResult("check_done");
+        },
+        async evaluateGoal() {
+          return acceptedResult("check_done", { evidenceManifest: emptyManifest });
+        },
+      },
+    });
+
+    const staleRun = controller.resume("goal_1", { signal: staleAbort.signal });
+    await staleAcceptanceEntered;
+    const inFlight = await store.get("goal_1");
+    await store.save({
+      ...inFlight!,
+      milestones: inFlight!.milestones.map((item) => ({
+        ...item,
+        state: item.id === "milestone_1" ? "ready" : item.state,
+      })),
+    });
+    staleAbort.abort();
+
+    const replacement = await controller.resume("goal_1");
+    expect(replacement.status).toBe("achieved");
+    resolveStaleAcceptance?.(acceptedResult("check_done"));
+    const staleResult = await staleRun;
+
+    expect(staleResult.status).toBe("achieved");
+    expect(runtimeCalls).toBe(2);
+    expect(
+      trajectoryEvents.filter(
+        (event) =>
+          event.type === "goal_stopped" && event.payload.status === "achieved",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("keeps replacement action signatures when the stale owner exits first", async () => {
+    await store.save(
+      createProtocolV2Goal([milestone("milestone_1")], { status: "executing" }),
+    );
+    const staleAbort = new AbortController();
+    const replacementSignature = createToolActionSignature("test_run", {
+      path: "replacement-suite",
+    });
+    let runtimeCalls = 0;
+    let acceptanceCalls = 0;
+    let staleAcceptanceEnteredResolve: (() => void) | undefined;
+    const staleAcceptanceEntered = new Promise<void>((resolve) => {
+      staleAcceptanceEnteredResolve = resolve;
+    });
+    let resolveStaleAcceptance: ((result: AcceptanceResult) => void) | undefined;
+    const staleAcceptance = new Promise<AcceptanceResult>((resolve) => {
+      resolveStaleAcceptance = resolve;
+    });
+    let finalAcceptanceEnteredResolve: (() => void) | undefined;
+    const finalAcceptanceEntered = new Promise<void>((resolve) => {
+      finalAcceptanceEnteredResolve = resolve;
+    });
+    let resolveFinalAcceptance: ((result: AcceptanceResult) => void) | undefined;
+    const finalAcceptance = new Promise<AcceptanceResult>((resolve) => {
+      resolveFinalAcceptance = resolve;
+    });
+    const controller = createController({
+      runtime: {
+        async runMilestone(_goal, currentMilestone) {
+          runtimeCalls += 1;
+          return {
+            runId: `run_${currentMilestone.id}_${runtimeCalls}`,
+            toolCallCount: 1,
+            status: "succeeded",
+            actionSignatures:
+              runtimeCalls === 2 ? [replacementSignature] : [],
+          };
+        },
+      },
+      acceptance: {
+        async evaluate() {
+          acceptanceCalls += 1;
+          if (acceptanceCalls === 1) {
+            staleAcceptanceEnteredResolve?.();
+            return staleAcceptance;
+          }
+          return acceptedResult("check_done");
+        },
+        async evaluateGoal() {
+          finalAcceptanceEnteredResolve?.();
+          return finalAcceptance;
+        },
+      },
+    });
+
+    const staleRun = controller.resume("goal_1", { signal: staleAbort.signal });
+    await staleAcceptanceEntered;
+    const inFlight = await store.get("goal_1");
+    await store.save({
+      ...inFlight!,
+      milestones: inFlight!.milestones.map((item) => ({
+        ...item,
+        state: item.id === "milestone_1" ? "ready" : item.state,
+      })),
+    });
+    staleAbort.abort();
+    const replacementRun = controller.resume("goal_1");
+    await finalAcceptanceEntered;
+
+    resolveStaleAcceptance?.(acceptedResult("check_done"));
+    await staleRun;
+    resolveFinalAcceptance?.(
+      rejectedResult("external_missing", {
+        verdict: "blocked_external",
+        failureClass: "external_dependency_missing",
+      }),
+    );
+    const replacementResult = await replacementRun;
+
+    expect(replacementResult.status).toBe("stopped_blocked");
+    expect(
+      replacementResult.acceptanceState?.recentFailures.at(-1)?.actionSignatures,
+    ).toEqual([replacementSignature]);
   });
 
   function createController(options: {

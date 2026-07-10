@@ -308,6 +308,112 @@ describe("goal acceptance failure fingerprints", () => {
     expect(`${left}${right}`).not.toMatch(/first|other|api_key/);
   });
 
+  it("includes array length and a digest of omitted elements in action identity", () => {
+    const left = Array.from({ length: 40 }, (_, index) =>
+      index === 32 ? "PRIVATE_TAIL_ALPHA" : `item_${index}`,
+    );
+    const right = Array.from({ length: 40 }, (_, index) =>
+      index === 32 ? "PRIVATE_TAIL_BRAVO" : `item_${index}`,
+    );
+    const longer = [...left, "item_40"];
+    const leftSignature = createToolActionSignature("tail_array", { values: left });
+    const rightSignature = createToolActionSignature("tail_array", { values: right });
+    const longerSignature = createToolActionSignature("tail_array", { values: longer });
+
+    expect(leftSignature).not.toBe(rightSignature);
+    expect(leftSignature).not.toBe(longerSignature);
+    expect(`${leftSignature}${rightSignature}${longerSignature}`).not.toMatch(
+      /PRIVATE_TAIL_ALPHA|PRIVATE_TAIL_BRAVO/,
+    );
+  });
+
+  it("includes object key count and a digest of omitted sorted key/value entries", () => {
+    const makeObject = (tailValue: string) =>
+      Object.fromEntries(
+        Array.from({ length: 70 }, (_, index) => [
+          `key_${String(index).padStart(3, "0")}`,
+          index === 64 ? tailValue : `value_${index}`,
+        ]),
+      );
+    const left = createToolActionSignature("tail_object", makeObject("PRIVATE_KEY_ALPHA"));
+    const right = createToolActionSignature("tail_object", makeObject("PRIVATE_KEY_BRAVO"));
+    const withExtraKey = createToolActionSignature("tail_object", {
+      ...makeObject("PRIVATE_KEY_ALPHA"),
+      key_070: "value_70",
+    });
+
+    expect(left).not.toBe(right);
+    expect(left).not.toBe(withExtraKey);
+    expect(`${left}${right}${withExtraKey}`).not.toMatch(
+      /PRIVATE_KEY_ALPHA|PRIVATE_KEY_BRAVO/,
+    );
+  });
+
+  it("bounds hostile omitted tails while preserving fingerprint occurrence identity", () => {
+    const leftTail: unknown[] = Array.from({ length: 100_000 });
+    const rightTail: unknown[] = Array.from({ length: 100_000 });
+    Object.defineProperty(leftTail, 32, {
+      enumerable: true,
+      get() {
+        throw new Error("PRIVATE_ARRAY_GETTER_ALPHA");
+      },
+    });
+    Object.defineProperty(rightTail, 32, {
+      enumerable: true,
+      get() {
+        throw new Error("PRIVATE_ARRAY_GETTER_BRAVO");
+      },
+    });
+    leftTail[33] = "tail_alpha";
+    rightTail[33] = "tail_bravo";
+
+    const objectLeft = Object.fromEntries(
+      Array.from({ length: 70 }, (_, index) => [`key_${String(index).padStart(3, "0")}`, index]),
+    );
+    const objectRight = { ...objectLeft };
+    Object.defineProperty(objectLeft, "key_064", {
+      enumerable: true,
+      get() {
+        throw new Error("PRIVATE_OBJECT_GETTER_ALPHA");
+      },
+    });
+    Object.defineProperty(objectRight, "key_064", {
+      enumerable: true,
+      get() {
+        throw new Error("PRIVATE_OBJECT_GETTER_BRAVO");
+      },
+    });
+    objectLeft.key_065 = 1;
+    objectRight.key_065 = 2;
+
+    const leftAction = createToolActionSignature("hostile_tail", {
+      array: leftTail,
+      object: objectLeft,
+    });
+    const rightAction = createToolActionSignature("hostile_tail", {
+      array: rightTail,
+      object: objectRight,
+    });
+    const leftFingerprint = createAcceptanceFailureFingerprint(
+      fingerprintInput({ actionSignatures: [leftAction] }),
+    );
+    const rightFingerprint = createAcceptanceFailureFingerprint(
+      fingerprintInput({ actionSignatures: [rightAction] }),
+    );
+
+    expect(leftAction).not.toBe(rightAction);
+    expect(leftFingerprint).not.toBe(rightFingerprint);
+    expect(Buffer.byteLength(leftAction)).toBeLessThanOrEqual(2_048);
+    expect(`${leftAction}${rightAction}`).not.toMatch(/PRIVATE_.*GETTER/);
+    expect(
+      countConsecutiveFingerprint(
+        [failureRecord("milestone", "milestone_1", leftFingerprint)],
+        { targetKind: "milestone", targetId: "milestone_1" },
+        rightFingerprint,
+      ),
+    ).toBe(0);
+  });
+
   it("handles undefined, non-finite numbers, sparse arrays, bigint, getters, and cycles safely", () => {
     const cyclic: Record<string, unknown> = {
       missing: undefined,

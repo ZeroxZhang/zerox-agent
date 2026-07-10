@@ -12,6 +12,7 @@ const MAX_CANONICAL_DEPTH = 16;
 const MAX_CANONICAL_NODES = 512;
 const MAX_CANONICAL_ARRAY_LENGTH = 32;
 const MAX_CANONICAL_OBJECT_KEYS = 64;
+const MAX_CANONICAL_TAIL_ITEMS = 64;
 const MAX_CANONICAL_STRING_BYTES = 512;
 
 type CanonicalValue =
@@ -32,8 +33,9 @@ type CanonicalValue =
   | ["truncated"]
   | ["string_digest", string, number]
   | ["private_digest", string, number]
-  | ["array", CanonicalValue[]]
-  | ["object", Array<[string, CanonicalValue]>];
+  | ["tail_digest", number, number, string]
+  | ["array", number, CanonicalValue[], CanonicalValue]
+  | ["object", number, Array<[string, CanonicalValue]>, CanonicalValue];
 
 type CanonicalState = {
   ancestors: WeakSet<object>;
@@ -231,36 +233,144 @@ function canonicalize(
   state.ancestors.add(value);
   try {
     if (Array.isArray(value)) {
+      const length = readArrayLength(value);
+      const visibleLength = Math.min(length, MAX_CANONICAL_ARRAY_LENGTH);
       return [
         "array",
+        length,
         Array.from(
-          { length: Math.min(value.length, MAX_CANONICAL_ARRAY_LENGTH) },
+          { length: visibleLength },
           (_, index) => canonicalizeArrayValue(value, index, state, depth + 1),
         ),
+        summarizeArrayTail(value, length, state, depth + 1),
       ];
     }
 
-    let keys: string[];
+    let allKeys: string[];
     try {
-      keys = Object.keys(value).sort().slice(0, MAX_CANONICAL_OBJECT_KEYS);
+      allKeys = Object.keys(value);
     } catch {
       return special("unserializable");
     }
 
+    const keys = selectSmallestSortedKeys(
+      allKeys,
+      MAX_CANONICAL_OBJECT_KEYS + MAX_CANONICAL_TAIL_ITEMS,
+    );
+    const visibleKeys = keys.slice(0, MAX_CANONICAL_OBJECT_KEYS);
     return [
       "object",
-      keys.map((key): [string, CanonicalValue] => [
+      allKeys.length,
+      visibleKeys.map((key): [string, CanonicalValue] => [
         key,
-        isSecretLikeKey(key)
-          ? special("redacted")
-          : isPrivateValueKey(key)
-            ? canonicalizePrivateObjectValue(value, key)
-            : canonicalizeObjectValue(value, key, state, depth + 1),
+        canonicalizeObjectEntry(value, key, state, depth + 1),
       ]),
+      summarizeObjectTail(value, keys, allKeys.length, state, depth + 1),
     ];
   } finally {
     state.ancestors.delete(value);
   }
+}
+
+function readArrayLength(value: unknown[]): number {
+  try {
+    return Number.isSafeInteger(value.length) && value.length >= 0
+      ? value.length
+      : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function summarizeArrayTail(
+  value: unknown[],
+  length: number,
+  state: CanonicalState,
+  depth: number,
+): CanonicalValue {
+  const omitted = Math.max(0, length - MAX_CANONICAL_ARRAY_LENGTH);
+  const inspected = Math.min(omitted, MAX_CANONICAL_TAIL_ITEMS);
+  const tailState: CanonicalState = {
+    ancestors: state.ancestors,
+    nodes: 0,
+  };
+  const entries = Array.from({ length: inspected }, (_, offset) =>
+    canonicalizeArrayValue(
+      value,
+      MAX_CANONICAL_ARRAY_LENGTH + offset,
+      tailState,
+      depth,
+    ),
+  );
+  return tailDigest(inspected, omitted - inspected, entries);
+}
+
+function summarizeObjectTail(
+  value: object,
+  sortedKeys: string[],
+  totalKeyCount: number,
+  state: CanonicalState,
+  depth: number,
+): CanonicalValue {
+  const omitted = Math.max(0, totalKeyCount - MAX_CANONICAL_OBJECT_KEYS);
+  const inspected = Math.min(omitted, MAX_CANONICAL_TAIL_ITEMS);
+  const tailState: CanonicalState = {
+    ancestors: state.ancestors,
+    nodes: 0,
+  };
+  const entries = sortedKeys
+    .slice(
+      MAX_CANONICAL_OBJECT_KEYS,
+      MAX_CANONICAL_OBJECT_KEYS + inspected,
+    )
+    .map((key): [string, CanonicalValue] => [
+      key,
+      canonicalizeObjectEntry(value, key, tailState, depth),
+    ]);
+  return tailDigest(inspected, omitted - inspected, entries);
+}
+
+function selectSmallestSortedKeys(keys: string[], limit: number): string[] {
+  const selected: string[] = [];
+  for (const key of keys) {
+    if (selected.length === limit && key >= selected[selected.length - 1]!) {
+      continue;
+    }
+    let low = 0;
+    let high = selected.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (selected[middle]! < key) low = middle + 1;
+      else high = middle;
+    }
+    selected.splice(low, 0, key);
+    if (selected.length > limit) selected.pop();
+  }
+  return selected;
+}
+
+function tailDigest(
+  inspected: number,
+  uninspected: number,
+  entries: unknown,
+): CanonicalValue {
+  return [
+    "tail_digest",
+    inspected,
+    uninspected,
+    createHash("sha256").update(JSON.stringify(entries)).digest("hex"),
+  ];
+}
+
+function canonicalizeObjectEntry(
+  value: object,
+  key: string,
+  state: CanonicalState,
+  depth: number,
+): CanonicalValue {
+  if (isSecretLikeKey(key)) return special("redacted");
+  if (isPrivateValueKey(key)) return canonicalizePrivateObjectValue(value, key);
+  return canonicalizeObjectValue(value, key, state, depth);
 }
 
 function canonicalizeArrayValue(

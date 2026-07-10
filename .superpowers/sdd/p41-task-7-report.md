@@ -141,3 +141,65 @@ exit 0
 - `src/main/agentGoalFailureFingerprint.ts`
 - `src/main/agentGoalFailureFingerprint.test.ts`
 - `.superpowers/sdd/p41-task-7-report.md`
+
+## Second Review Fix — Recoverability, Tail Identity, and Unique Termination
+
+### Status
+
+DONE
+
+### RED Evidence
+
+The three P1 regressions were added before production edits and witnessed failing:
+
+```text
+npm test -- --run src/main/agentGoalController.test.ts src/main/agentGoalFailureFingerprint.test.ts
+Test Files 2 failed (2)
+Tests 5 failed | 71 passed (76)
+```
+
+The owned-run signature cleanup race was then isolated with a second RED probe:
+
+```text
+npm test -- --run src/main/agentGoalController.test.ts -t 'keeps replacement action signatures'
+Test Files 1 failed (1)
+Tests 1 failed | 54 skipped (55)
+```
+
+The failures proved:
+
+- a successful runtime stopped at the hard cap left its milestone `running` and unschedulable after a budget raise;
+- array element 33, array length, object key/value 65, and object total-key count were absent from action identity;
+- a replacement run could achieve while a stale acceptance run later emitted a duplicate `goal_stopped` event.
+
+### GREEN Evidence
+
+```text
+npm test -- --run src/main/agentGoalController.test.ts src/main/goalRuntimeEngine.test.ts src/main/agentGoalAcceptanceCertificate.test.ts src/main/agentGoalFailureFingerprint.test.ts
+Test Files 4 passed (4)
+Tests 159 passed (159)
+
+npx tsc -p tsconfig.electron.json --noEmit
+exit 0
+
+npm run harness:check
+Harness check passed.
+
+git diff --check
+exit 0
+```
+
+### Fix Summary
+
+- A hard-cap stop after runtime completion resets a still-running milestone to `ready`; raising the budget and resuming schedules it again without running acceptance validators past the cap.
+- Canonical arrays now include total length plus a bounded omitted-tail digest. Canonical objects include total key count plus a bounded digest of globally sorted omitted key/value entries.
+- Tail inspection has fixed item/node limits, safely converts getters/cycles, emits no omitted raw values, and prevents repeated-failure occurrence collisions at element 33/key 65.
+- Terminal dedupe uses one canonical version per goal and tracks every owning run generation. Direct terminal writes register their version, and terminal/signature state is released only after all stale/replacement owners exit.
+
+### Second Review Files
+
+- `src/main/agentGoalController.ts`
+- `src/main/agentGoalController.test.ts`
+- `src/main/agentGoalFailureFingerprint.ts`
+- `src/main/agentGoalFailureFingerprint.test.ts`
+- `.superpowers/sdd/p41-task-7-report.md`

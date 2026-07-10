@@ -84,7 +84,8 @@ export function createAgentGoalController(options: {
     signal?: AbortSignal;
   };
   const activeRuns = new Map<string, ActiveRunEntry>();
-  const publishedTerminalKeys = new Set<string>();
+  const runOwnersByGoal = new Map<string, Set<ActiveRunEntry>>();
+  const publishedTerminalVersions = new Map<string, string>();
   const recentActionSignatures = new Map<string, string[]>();
 
   function notifyProgress(
@@ -126,9 +127,15 @@ export function createAgentGoalController(options: {
     entry.promise = runLoopInternal(goal, runOptions).finally(() => {
       if (activeRuns.get(goal.id) === entry) {
         activeRuns.delete(goal.id);
-        clearGoalRuntimeState(goal.id);
       }
+      const owners = runOwnersByGoal.get(goal.id);
+      owners?.delete(entry);
+      if (owners?.size === 0) runOwnersByGoal.delete(goal.id);
+      clearGoalRuntimeStateIfIdle(goal.id);
     });
+    const owners = runOwnersByGoal.get(goal.id) ?? new Set<ActiveRunEntry>();
+    owners.add(entry);
+    runOwnersByGoal.set(goal.id, owners);
     activeRuns.set(goal.id, entry);
     return entry.promise;
   }
@@ -166,11 +173,9 @@ export function createAgentGoalController(options: {
     if (goal.status === "executing" || goal.status === "planning") {
       return;
     }
-    const key = `${goal.id}:${goal.status}:${goal.updatedAt}`;
-    if (publishedTerminalKeys.has(key)) {
+    if (!registerTerminalPublication(goal)) {
       return;
     }
-    publishedTerminalKeys.add(key);
     await emit(goal.id, "goal_stopped", {
       goalId: goal.id,
       status: goal.status,
@@ -181,13 +186,17 @@ export function createAgentGoalController(options: {
     recentActionSignatures.delete(goal.id);
   }
 
-  function clearGoalRuntimeState(goalId: string): void {
+  function registerTerminalPublication(goal: Goal): boolean {
+    const version = `${goal.status}:${goal.updatedAt}`;
+    if (publishedTerminalVersions.get(goal.id) === version) return false;
+    publishedTerminalVersions.set(goal.id, version);
+    return true;
+  }
+
+  function clearGoalRuntimeStateIfIdle(goalId: string): void {
+    if ((runOwnersByGoal.get(goalId)?.size ?? 0) > 0) return;
     recentActionSignatures.delete(goalId);
-    for (const key of publishedTerminalKeys) {
-      if (key.startsWith(`${goalId}:`)) {
-        publishedTerminalKeys.delete(key);
-      }
-    }
+    publishedTerminalVersions.delete(goalId);
   }
 
   async function runLoopInternal(
@@ -343,14 +352,14 @@ export function createAgentGoalController(options: {
           : {}),
       },
     );
-    recentActionSignatures.set(
-      goal.id,
-      sanitizeActionSignaturesForPersistence(runResult.actionSignatures ?? []),
-    );
     const abortedAfterRuntime = await latestGoalAfterAbort(goal, runOptions);
     if (abortedAfterRuntime) {
       return { goal: abortedAfterRuntime, suspend: true };
     }
+    recentActionSignatures.set(
+      goal.id,
+      sanitizeActionSignaturesForPersistence(runResult.actionSignatures ?? []),
+    );
     milestone.runIds.push(runResult.runId);
     milestone.lastRunStatus = runResult.status ?? "succeeded";
     if (runResult.summary) {
@@ -376,6 +385,10 @@ export function createAgentGoalController(options: {
       false,
     );
     if (acceptanceBudgetExhaustion) {
+      if (milestone.state === "running") {
+        milestone.state = "ready";
+        touch(usageGoal);
+      }
       return {
         goal: await stopForBudgetExhaustion(
           usageGoal,
@@ -913,18 +926,21 @@ export function createAgentGoalController(options: {
       persisted,
       "目标已通过最终验收并生成证书。",
     );
-    await options.goalStore.appendLedger(persisted.id, {
-      at: currentTime(),
-      kind: "goal_stopped",
-      summary: "Goal acceptance passed.",
-    });
-    await emit(persisted.id, "goal_stopped", {
-      goalId: persisted.id,
-      status: persisted.status,
-      stopReason: persisted.stopReason,
-      summary: "Goal acceptance passed.",
-    });
-    notifyProgress("stopped", persisted, "Goal acceptance passed.");
+    if (registerTerminalPublication(persisted)) {
+      await options.goalStore.appendLedger(persisted.id, {
+        at: currentTime(),
+        kind: "goal_stopped",
+        summary: "Goal acceptance passed.",
+      });
+      await emit(persisted.id, "goal_stopped", {
+        goalId: persisted.id,
+        status: persisted.status,
+        stopReason: persisted.stopReason,
+        summary: "Goal acceptance passed.",
+      });
+      notifyProgress("stopped", persisted, "Goal acceptance passed.");
+    }
+    clearGoalRuntimeStateIfIdle(persisted.id);
     return persisted;
   }
 
@@ -1064,25 +1080,27 @@ export function createAgentGoalController(options: {
     touch(goal);
     const persisted = await options.goalStore.save(goal);
     if (persisted.status !== status) {
-      notifyProgress("stopped", persisted, terminalStatusMessage(persisted));
       if (persisted.status !== "executing" && persisted.status !== "planning") {
-        clearGoalRuntimeState(persisted.id);
+        await publishCanonicalTerminal(persisted);
       }
+      clearGoalRuntimeStateIfIdle(persisted.id);
       return persisted;
     }
-    await options.goalStore.appendLedger(goal.id, {
-      at: currentTime(),
-      kind: "goal_stopped",
-      summary,
-    });
-    await emit(goal.id, "goal_stopped", {
-      goalId: goal.id,
-      status,
-      stopReason,
-      summary,
-    });
-    notifyProgress("stopped", persisted, summary);
-    clearGoalRuntimeState(persisted.id);
+    if (registerTerminalPublication(persisted)) {
+      await options.goalStore.appendLedger(goal.id, {
+        at: currentTime(),
+        kind: "goal_stopped",
+        summary,
+      });
+      await emit(goal.id, "goal_stopped", {
+        goalId: goal.id,
+        status,
+        stopReason,
+        summary,
+      });
+      notifyProgress("stopped", persisted, summary);
+    }
+    clearGoalRuntimeStateIfIdle(persisted.id);
     return persisted;
   }
 
