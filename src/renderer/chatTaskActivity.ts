@@ -133,6 +133,15 @@ export function buildGoalTaskActivity(options: {
     });
   }
 
+  if (options.status === "stopped_blocked") {
+    return createTaskActivity({
+      kind: "paused",
+      title: "目标受阻",
+      detail: options.description,
+      now: options.now,
+    });
+  }
+
   if (options.status === "failed" || options.status === "stopped_stalled") {
     return createTaskActivity({
       kind: "error",
@@ -188,7 +197,7 @@ export function getGoalUiSyncState(status: GoalStatus): GoalUiSyncState {
     };
   }
 
-  if (status === "stopped_budget") {
+  if (status === "stopped_budget" || status === "stopped_blocked") {
     return {
       statusKind: "paused",
       workPhase: "paused",

@@ -1014,6 +1014,14 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource).toContain("const eventBelongsToActiveGoal");
     expect(chatPanelSource).toContain("event.sessionId === activeSessionId");
     expect(chatPanelSource).toContain("void refreshActiveGoalDetail(event.goalId)");
+    expect(chatPanelSource).toContain("setActiveGoalDetail((currentGoal) =>");
+    expect(chatPanelSource).toContain("status: event.status");
+    expect(chatPanelSource.indexOf("setActiveGoalDetail((currentGoal) =>")).toBeLessThan(
+      chatPanelSource.indexOf("void refreshActiveGoalDetail(event.goalId)"),
+    );
+    expect(chatPanelSource).not.toContain(
+      'const goalUiState = event.status === "stopped_blocked"',
+    );
   });
 
   it("accepts empty desktop chat session lists as real state", () => {

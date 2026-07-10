@@ -86,15 +86,18 @@ describe("goal progress view model", () => {
     expect(viewModel.metricCards.map((card) => card.value)).not.toContain("8/8");
   });
 
-  it("keeps a fresh blocked session status authoritative while detail refreshes", () => {
-    const staleDetail = createGoal({ status: "executing" });
-    const freshSummary: ChatSessionGoalSummary = {
-      id: staleDetail.id,
-      description: staleDetail.description,
+  it("keeps canonical blocked detail authoritative over a stale session summary", () => {
+    const canonicalDetail = createGoal({
       status: "stopped_blocked",
+      stopReason: "acceptance_unavailable",
+    });
+    const staleSummary: ChatSessionGoalSummary = {
+      id: canonicalDetail.id,
+      description: canonicalDetail.description,
+      status: "executing",
     };
 
-    const viewModel = buildGoalProgressViewModel(freshSummary, staleDetail);
+    const viewModel = buildGoalProgressViewModel(staleSummary, canonicalDetail);
 
     expect(viewModel.status).toBe("stopped_blocked");
     expect(viewModel.statusLabel).toBe("目标受阻");
@@ -233,18 +236,7 @@ describe("goal progress view model", () => {
   );
 
   it("projects a protocol-v2 certificate through an explicit safe allowlist", () => {
-    const goal = createGoal({
-      status: "achieved",
-      stopReason: "goal_accepted",
-      acceptanceProtocolVersion: 2,
-      acceptanceState: {
-        protocolVersion: 2,
-        phase: "certified",
-        attempt: 1,
-        recentFailures: [],
-      },
-      acceptanceCertificate: certificate(),
-    });
+    const goal = certifiedGoal();
 
     const presentation = buildGoalStatusPresentation(goal.status, goal);
 
@@ -257,16 +249,16 @@ describe("goal progress view model", () => {
         shortCertificateHash: "1234567890ab",
         checks: [
           {
-            id: "safe_check",
-            kind: "test_passes",
+            id: "criterion_1_review",
+            kind: "model_review",
             passed: true,
-            code: "tests_passed",
+            code: "accepted",
             evidenceRefs: ["artifact:report.md"],
           },
         ],
         artifacts: [
           {
-            path: "/workspace/report.md",
+            path: "…/workspace/report.md",
             sizeBytes: 512,
             shortSha256: "abcdefabcdef",
           },
@@ -282,6 +274,122 @@ describe("goal progress view model", () => {
     expect(serialized).not.toContain("provider-secret");
     expect(serialized).not.toContain("message-secret");
     expect(serialized).not.toContain("full artifact body secret");
+  });
+
+  it.each([
+    ["fake certificate hash", (goal: Goal) => {
+      goal.acceptanceCertificate!.certificateHash = "fake-hash";
+    }],
+    ["failed check", (goal: Goal) => {
+      goal.acceptanceCertificate!.checkResults[0]!.passed = false;
+    }],
+    ["unknown check", (goal: Goal) => {
+      goal.acceptanceCertificate!.checkResults[0]!.checkId = "unknown_check";
+    }],
+    ["kind mismatch", (goal: Goal) => {
+      goal.acceptanceCertificate!.checkResults[0]!.kind = "test_passes";
+    }],
+    ["missing check coverage", (goal: Goal) => {
+      goal.acceptanceCertificate!.checkResults = [];
+    }],
+    ["goal identity mismatch", (goal: Goal) => {
+      goal.acceptanceCertificate!.goalId = "other_goal";
+    }],
+    ["plan mismatch", (goal: Goal) => {
+      goal.acceptanceCertificate!.planVersion += 1;
+    }],
+    ["certificate version mismatch", (goal: Goal) => {
+      goal.acceptanceCertificate!.version = 2 as 1;
+    }],
+    ["certificate protocol mismatch", (goal: Goal) => {
+      goal.acceptanceCertificate!.protocolVersion = 1 as 2;
+    }],
+    ["malformed criteria hash", (goal: Goal) => {
+      goal.acceptanceCertificate!.criteriaHash = "short";
+    }],
+    ["malformed evidence hash", (goal: Goal) => {
+      goal.acceptanceCertificate!.evidence[0]!.sha256 = "short";
+    }],
+    ["malformed evidence size", (goal: Goal) => {
+      goal.acceptanceCertificate!.evidence[0]!.sizeBytes = -1;
+    }],
+    ["missing semantic judge", (goal: Goal) => {
+      goal.acceptanceCertificate!.judge = undefined;
+    }],
+    ["uncertified acceptance phase", (goal: Goal) => {
+      goal.acceptanceState!.phase = "validating";
+    }],
+    ["non-achieved goal", (goal: Goal) => {
+      goal.status = "executing";
+    }],
+  ] as const)("rejects certificate projection for %s", (_label, mutate) => {
+    const goal = certifiedGoal();
+    mutate(goal);
+
+    expect(buildGoalStatusPresentation(goal.status, goal).certificate).toBeUndefined();
+  });
+
+  it("redacts secrets from every projected certificate string and shortens home paths", () => {
+    const secretValues = [
+      "bearer-value-123",
+      "sk-proj-1234567890",
+      "ghp_1234567890abcdef",
+      "hunter2-value",
+      "query-secret-value",
+      "xoxb-1234567890-secret",
+      "json-password-value",
+    ];
+    const secretCheck = {
+      id: `check?token=${secretValues[4]}`,
+      kind: `validator:local/report?api_key=${secretValues[1]}` as const,
+      description: "secret-bearing check",
+      params: {},
+      requiresEvidence: true,
+    };
+    const goal = createGoal({
+      successCriteria: [{
+        id: "criterion_secret",
+        description: "redaction",
+        acceptanceChecks: [secretCheck],
+      }],
+      status: "achieved",
+      stopReason: "goal_accepted",
+      planVersion: 2,
+      acceptanceProtocolVersion: 2,
+      acceptanceState: certifiedAcceptanceState(),
+    });
+    goal.acceptanceCertificate = certificateForGoal(goal, {
+      checkResults: [{
+        checkId: secretCheck.id,
+        kind: secretCheck.kind,
+        passed: true,
+        code: `Bearer ${secretValues[0]} {"password":"${secretValues[6]}"} password=${secretValues[3]}`,
+        evidenceRefs: [`artifact:report.md?secret=${secretValues[4]}`],
+        detail: "raw secret detail",
+      }],
+      evidence: [{
+        ref: `artifact:report.md?secret=${secretValues[4]}`,
+        path: `/Users/alice/private/api_key=${secretValues[1]}/report.md?password=${secretValues[3]}`,
+        sha256: "a".repeat(64),
+        sizeBytes: 64,
+        provenanceRefs: [],
+      }],
+      judge: {
+        model: `model Bearer ${secretValues[0]} ${secretValues[2]}`,
+        promptVersion: `prompt?token=${secretValues[5]}`,
+        evaluatedMessageIds: ["message_1"],
+      },
+    });
+
+    const certificate = buildGoalStatusPresentation(goal.status, goal).certificate;
+    const serialized = JSON.stringify(certificate);
+
+    expect(certificate?.artifacts[0]?.path).toMatch(/^…\//);
+    expect(serialized).toContain("[REDACTED]");
+    for (const secret of secretValues) {
+      expect(serialized).not.toContain(secret);
+    }
+    expect(serialized).not.toContain("/Users/alice");
   });
 
   it("keeps legacy achieved goals truthful without fabricating a certificate", () => {
@@ -322,22 +430,6 @@ describe("goal progress view model", () => {
         failedCheckIds: oversized,
       },
     } as never;
-    unsafeGoal.acceptanceCertificate = {
-      ...certificate(),
-      checkResults: Array.from({ length: 30 }, (_, index) => ({
-        ...certificate().checkResults[0],
-        checkId: `check_${index}`,
-        evidenceRefs: Array.from({ length: 40 }, (_, ref) => `ref_${ref}`),
-      })),
-      evidence: Array.from({ length: 30 }, (_, index) => ({
-        ref: `artifact_${index}`,
-        path: `/workspace/${"p".repeat(800)}-${index}`,
-        sha256: "a".repeat(64),
-        sizeBytes: index,
-        provenanceRefs: [],
-      })),
-    } as never;
-
     expect(() => buildGoalStatusPresentation(unsafeGoal.status, unsafeGoal)).not.toThrow();
     const presentation = buildGoalStatusPresentation(unsafeGoal.status, unsafeGoal);
 
@@ -347,10 +439,51 @@ describe("goal progress view model", () => {
     );
     expect(presentation.acceptance?.evidenceRefs.length).toBeLessThanOrEqual(20);
     expect(presentation.acceptance?.evidenceRefs.every((ref) => ref.length <= 240)).toBe(true);
-    expect(presentation.certificate?.checks).toHaveLength(10);
-    expect(presentation.certificate?.artifacts).toHaveLength(10);
-    expect(presentation.certificate?.checks[0]?.evidenceRefs).toHaveLength(20);
-    expect(presentation.certificate?.artifacts[0]?.path?.length).toBeLessThanOrEqual(500);
+  });
+
+  it("bounds structurally valid oversized certificates", () => {
+    const checks = Array.from({ length: 30 }, (_, index) => ({
+      id: `check_${index}`,
+      kind: "assertion" as const,
+      description: `check ${index}`,
+      params: {},
+      requiresEvidence: false,
+    }));
+    const goal = createGoal({
+      successCriteria: [{
+        id: "criterion_many",
+        description: "many checks",
+        acceptanceChecks: checks,
+      }],
+      status: "achieved",
+      stopReason: "goal_accepted",
+      planVersion: 2,
+      acceptanceProtocolVersion: 2,
+      acceptanceState: certifiedAcceptanceState(),
+    });
+    goal.acceptanceCertificate = certificateForGoal(goal, {
+      checkResults: checks.map((check) => ({
+        checkId: check.id,
+        kind: check.kind,
+        passed: true,
+        code: "accepted",
+        evidenceRefs: [],
+        detail: "accepted",
+      })),
+      evidence: Array.from({ length: 30 }, (_, index) => ({
+        ref: `artifact_${index}`,
+        path: `/workspace/${"p".repeat(800)}-${index}`,
+        sha256: "a".repeat(64),
+        sizeBytes: index,
+        provenanceRefs: [],
+      })),
+    });
+
+    const certificate = buildGoalStatusPresentation(goal.status, goal).certificate;
+
+    expect(certificate?.checks).toHaveLength(10);
+    expect(certificate?.artifacts).toHaveLength(10);
+    expect(certificate?.artifacts[0]?.path?.length).toBeLessThanOrEqual(500);
   });
 });
 
@@ -386,29 +519,54 @@ function failureRecord(
   };
 }
 
-function certificate(): NonNullable<Goal["acceptanceCertificate"]> {
+function certifiedAcceptanceState(): NonNullable<Goal["acceptanceState"]> {
+  return {
+    protocolVersion: 2,
+    phase: "certified",
+    attempt: 1,
+    recentFailures: [],
+  };
+}
+
+function certifiedGoal(): Goal {
+  const goal = createGoal({
+    status: "achieved",
+    stopReason: "goal_accepted",
+    planVersion: 2,
+    acceptanceProtocolVersion: 2,
+    acceptanceState: certifiedAcceptanceState(),
+  });
+  goal.acceptanceCertificate = certificateForGoal(goal);
+  return goal;
+}
+
+function certificateForGoal(
+  goal: Goal,
+  overrides: Partial<NonNullable<Goal["acceptanceCertificate"]>> = {},
+): NonNullable<Goal["acceptanceCertificate"]> {
+  const checks = goal.successCriteria.flatMap((criterion) =>
+    criterion.acceptanceChecks,
+  );
   return {
     version: 1,
-    goalId: "goal_1",
+    goalId: goal.id,
     acceptedAt: "2026-07-11T05:00:00.000Z",
     protocolVersion: 2,
     criteriaHash: "c".repeat(64),
-    planVersion: 2,
+    planVersion: goal.planVersion,
     runIds: ["run-secret"],
-    checkResults: [
-      {
-        checkId: "safe_check",
-        kind: "test_passes",
+    checkResults: checks.map((check) => ({
+        checkId: check.id,
+        kind: check.kind,
         passed: true,
-        code: "tests_passed",
+        code: "accepted",
         evidenceRefs: ["artifact:report.md"],
         detail: "raw provider failure with sk-secret",
-      },
-    ],
+      })),
     evidence: [
       {
         ref: "artifact:report.md",
-        path: "/workspace/report.md",
+        path: "/Users/alice/workspace/report.md",
         sha256: `abcdefabcdef${"0".repeat(52)}`,
         sizeBytes: 512,
         provenanceRefs: ["full artifact body secret"],
@@ -421,6 +579,7 @@ function certificate(): NonNullable<Goal["acceptanceCertificate"]> {
       evaluatedMessageIds: ["message-secret"],
     },
     certificateHash: `1234567890ab${"0".repeat(52)}`,
+    ...overrides,
   };
 }
 

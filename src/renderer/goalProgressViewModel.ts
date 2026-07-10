@@ -160,7 +160,7 @@ export function buildGoalProgressViewModel(
   summary: ChatSessionGoalSummary,
   goal: Goal | null,
 ): GoalProgressViewModel {
-  const status = summary.status;
+  const status = goal?.status ?? summary.status;
   const milestones = goal?.milestones ?? [];
   const acceptedCount = milestones.filter((milestone) =>
     milestone.state === "accepted" || milestone.state === "skipped"
@@ -381,7 +381,7 @@ function projectAcceptance(goal: Goal | null): GoalAcceptancePresentation | unde
 
 function projectCertificate(goal: Goal | null): GoalCertificatePresentation | undefined {
   const rawCertificate = asRecord(goal?.acceptanceCertificate);
-  if (!rawCertificate) {
+  if (!goal || !rawCertificate || !isStructurallyProjectableCertificate(goal, rawCertificate)) {
     return undefined;
   }
 
@@ -429,7 +429,7 @@ function projectCertificate(goal: Goal | null): GoalCertificatePresentation | un
       if (!artifact) {
         return [];
       }
-      const path = safeString(artifact.path, MAX_PATH_LENGTH);
+      const path = safeArtifactPath(artifact.path);
       const sizeBytes = safeNonNegativeInteger(artifact.sizeBytes);
       const sha256 = safeHash(artifact.sha256);
       if (!path && sizeBytes === undefined && !sha256) {
@@ -454,6 +454,133 @@ function projectCertificate(goal: Goal | null): GoalCertificatePresentation | un
     ...(model && promptVersion ? { judge: { model, promptVersion } } : {}),
     shortCertificateHash: certificateHash.slice(0, 12),
   };
+}
+
+/**
+ * Trust boundary: the main-process Goal store verifies the certificate digest
+ * before returning Goal data. The renderer cannot safely import Node crypto, so
+ * it independently enforces the complete display contract and refuses any
+ * structurally inconsistent certificate instead of treating a hash-shaped value
+ * as cryptographic proof.
+ */
+function isStructurallyProjectableCertificate(
+  goal: Goal,
+  certificate: Record<string, unknown>,
+): boolean {
+  if (
+    goal.status !== "achieved" ||
+    goal.acceptanceProtocolVersion !== 2 ||
+    goal.acceptanceState?.protocolVersion !== 2 ||
+    goal.acceptanceState.phase !== "certified" ||
+    certificate.version !== 1 ||
+    certificate.protocolVersion !== 2 ||
+    certificate.goalId !== goal.id ||
+    certificate.planVersion !== goal.planVersion ||
+    !isFullSha256(certificate.criteriaHash) ||
+    !isFullSha256(certificate.certificateHash) ||
+    !isValidTimestamp(certificate.acceptedAt)
+  ) {
+    return false;
+  }
+
+  const expectedChecks = goal.successCriteria.flatMap((criterion) =>
+    criterion.acceptanceChecks,
+  );
+  const expectedById = new Map<string, AcceptanceCheckKind>();
+  for (const check of expectedChecks) {
+    if (
+      typeof check.id !== "string" ||
+      !check.id ||
+      typeof check.kind !== "string" ||
+      !check.kind ||
+      expectedById.has(check.id)
+    ) {
+      return false;
+    }
+    expectedById.set(check.id, check.kind);
+  }
+
+  if (
+    !Array.isArray(certificate.checkResults) ||
+    certificate.checkResults.length !== expectedById.size
+  ) {
+    return false;
+  }
+  const seenChecks = new Set<string>();
+  for (const value of certificate.checkResults) {
+    const result = asRecord(value);
+    if (
+      !result ||
+      typeof result.checkId !== "string" ||
+      seenChecks.has(result.checkId) ||
+      expectedById.get(result.checkId) !== result.kind ||
+      result.passed !== true ||
+      typeof result.code !== "string" ||
+      !result.code ||
+      !isStringArray(result.evidenceRefs)
+    ) {
+      return false;
+    }
+    seenChecks.add(result.checkId);
+  }
+  if ([...expectedById.keys()].some((checkId) => !seenChecks.has(checkId))) {
+    return false;
+  }
+
+  if (!Array.isArray(certificate.evidence)) {
+    return false;
+  }
+  for (const value of certificate.evidence) {
+    const evidence = asRecord(value);
+    if (
+      !evidence ||
+      typeof evidence.ref !== "string" ||
+      !evidence.ref ||
+      (evidence.path !== undefined &&
+        (typeof evidence.path !== "string" || !evidence.path)) ||
+      !isFullSha256(evidence.sha256) ||
+      safeNonNegativeInteger(evidence.sizeBytes) === undefined ||
+      !isStringArray(evidence.provenanceRefs)
+    ) {
+      return false;
+    }
+  }
+
+  const semantic = expectedChecks.some((check) => check.kind === "model_review");
+  const judge = asRecord(certificate.judge);
+  if (semantic && !isValidJudgeMetadata(judge, true)) {
+    return false;
+  }
+  if (!semantic && certificate.judge !== undefined && !isValidJudgeMetadata(judge, false)) {
+    return false;
+  }
+  return true;
+}
+
+function isValidJudgeMetadata(
+  judge: Record<string, unknown> | undefined,
+  requireMessages: boolean,
+): boolean {
+  return Boolean(
+    judge &&
+    typeof judge.model === "string" &&
+    judge.model &&
+    typeof judge.promptVersion === "string" &&
+    judge.promptVersion &&
+    isStringArray(judge.evaluatedMessageIds) &&
+    (!requireMessages || judge.evaluatedMessageIds.length > 0),
+  );
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) =>
+    typeof entry === "string" && entry.length > 0
+  );
+}
+
+function isValidTimestamp(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 &&
+    Number.isFinite(Date.parse(value));
 }
 
 function withAcceptance(
@@ -573,13 +700,49 @@ function safeString(value: unknown, maxLength: number): string | undefined {
   if (typeof value !== "string") {
     return undefined;
   }
-  const normalized = value.replace(/[\u0000-\u001f\u007f]/g, " ").trim();
+  const normalized = redactSensitiveText(
+    value.replace(/[\u0000-\u001f\u007f]/g, " ").trim(),
+  );
   return normalized ? normalized.slice(0, maxLength) : undefined;
 }
 
 function safeHash(value: unknown): string | undefined {
-  const hash = safeString(value, 64);
-  return hash && /^[a-f\d]{12,64}$/i.test(hash) ? hash : undefined;
+  return isFullSha256(value) ? value : undefined;
+}
+
+function isFullSha256(value: unknown): value is string {
+  return typeof value === "string" && /^[a-f\d]{64}$/i.test(value);
+}
+
+function safeArtifactPath(value: unknown): string | undefined {
+  const pathValue = safeString(value, 2_000);
+  if (!pathValue) {
+    return undefined;
+  }
+  const normalized = pathValue.replace(/\\/g, "/");
+  const absolute = normalized.startsWith("/") || /^[a-z]:\//i.test(normalized);
+  const segments = normalized.split("/").filter(Boolean);
+  const display = absolute
+    ? `…/${segments.slice(-2).join("/")}`
+    : normalized;
+  return display.slice(0, MAX_PATH_LENGTH);
+}
+
+function redactSensitiveText(value: string): string {
+  return value
+    .replace(/\bBearer\s+[^\s,;]+/gi, "Bearer [REDACTED]")
+    .replace(
+      /(["']?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|passwd|pwd|secret|authorization)["']?\s*:\s*)["'][^"']*["']/gi,
+      "$1\"[REDACTED]\"",
+    )
+    .replace(
+      /(?:[?&]|\b)(?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|passwd|pwd|secret|authorization)\s*(?:=|:|%3d)\s*[^&#\s,;]+/gi,
+      "[REDACTED]",
+    )
+    .replace(
+      /\b(?:sk-(?:proj-)?[a-z\d_-]{6,}|gh[pousr]_[a-z\d_]{8,}|github_pat_[a-z\d_]{8,}|AKIA[A-Z\d]{16}|AIza[A-Za-z\d_-]{20,}|xox[baprs]-[A-Za-z\d-]{8,}|eyJ[A-Za-z\d_-]{8,}\.[A-Za-z\d_-]{8,}\.[A-Za-z\d_-]{8,})\b/g,
+      "[REDACTED]",
+    );
 }
 
 function safePositiveInteger(value: unknown): number | undefined {

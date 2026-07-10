@@ -518,31 +518,24 @@ export function AgentChatPanel({
       const eventBelongsToActiveGoal =
         event.goalId === activeGoalId || event.sessionId === activeSessionId;
       if (eventBelongsToActiveGoal) {
-        const goalUiState = event.status === "stopped_blocked"
-          ? {
-              statusKind: "paused" as const,
-              workPhase: "paused" as const,
-              shouldClearActiveRequest: true,
-            }
-          : getGoalUiSyncState(event.status);
+        const goalUiState = getGoalUiSyncState(event.status);
         const description =
           activeGoalRef.current?.id === event.goalId
             ? activeGoalRef.current.description
             : event.message;
+        setActiveGoalDetail((currentGoal) =>
+          currentGoal?.id === event.goalId
+            ? { ...currentGoal, status: event.status }
+            : currentGoal,
+        );
         void refreshActiveGoalDetail(event.goalId);
         setStatus({ kind: goalUiState.statusKind, message: event.message });
         setWorkPhase(goalUiState.workPhase);
         setTaskActivity(
-          event.status === "stopped_blocked"
-            ? createTaskActivity({
-                kind: "paused",
-                title: "目标受阻",
-                detail: description,
-              })
-            : buildGoalTaskActivity({
-                status: event.status,
-                description,
-              }),
+          buildGoalTaskActivity({
+            status: event.status,
+            description,
+          }),
         );
         setSessions((currentSessions) =>
           currentSessions.map((session) => {

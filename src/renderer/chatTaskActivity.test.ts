@@ -146,6 +146,26 @@ describe("chat task activity", () => {
     });
   });
 
+  it("maps blocked goals to an explicit paused state, never completed or ready", () => {
+    const activity = buildGoalTaskActivity({
+      status: "stopped_blocked",
+      description: "等待外部依赖",
+      now: 4_000,
+    });
+
+    expect(activity).toMatchObject({
+      kind: "paused",
+      title: "目标受阻",
+      detail: "等待外部依赖",
+    });
+    expect(activity.kind).not.toBe("done");
+    expect(getGoalUiSyncState("stopped_blocked")).toEqual({
+      statusKind: "paused",
+      workPhase: "paused",
+      shouldClearActiveRequest: true,
+    });
+  });
+
   it("maps guided input waits to paused input state instead of an error fallback", () => {
     const waitingEvent = createStatusEvent({
       state: "waiting_for_input",
