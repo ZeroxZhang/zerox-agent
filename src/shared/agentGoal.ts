@@ -269,6 +269,7 @@ const allowedTransitions: Record<GoalStatus, GoalStatus[]> = {
     "achieved",
     "stopped_budget",
     "stopped_stalled",
+    "stopped_blocked",
     "failed",
     "canceled",
   ],

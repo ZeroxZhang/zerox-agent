@@ -77,6 +77,7 @@ describe("agent goal model", () => {
     expect(canTransitionGoalStatus("executing", "achieved")).toBe(true);
     expect(canTransitionGoalStatus("executing", "stopped_budget")).toBe(true);
     expect(canTransitionGoalStatus("executing", "stopped_stalled")).toBe(true);
+    expect(canTransitionGoalStatus("executing", "stopped_blocked")).toBe(true);
     expect(canTransitionGoalStatus("executing", "failed")).toBe(true);
     expect(canTransitionGoalStatus("executing", "canceled")).toBe(true);
     expect(canTransitionGoalStatus("waiting_for_review", "canceled")).toBe(true);
