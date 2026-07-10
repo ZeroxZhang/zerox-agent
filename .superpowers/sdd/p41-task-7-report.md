@@ -203,3 +203,50 @@ exit 0
 - `src/main/agentGoalFailureFingerprint.ts`
 - `src/main/agentGoalFailureFingerprint.test.ts`
 - `.superpowers/sdd/p41-task-7-report.md`
+
+## Final Fingerprint Fix — Complete Streaming Action Tails
+
+### Status
+
+DONE
+
+### RED Evidence
+
+```text
+npm test -- --run src/main/agentGoalFailureFingerprint.test.ts
+Test Files 1 failed (1)
+Tests 3 failed | 22 passed (25)
+```
+
+The failing probes changed array element 97 and the far sparse end, object sorted key 129 and the far end, and a late deeply nested tail value after the former shared node budget was exhausted. Each pair retained identical length/cardinality.
+
+### GREEN Evidence
+
+```text
+npm test -- --run src/main/agentGoalController.test.ts src/main/goalRuntimeEngine.test.ts src/main/agentGoalAcceptanceCertificate.test.ts src/main/agentGoalFailureFingerprint.test.ts
+Test Files 4 passed (4)
+Tests 162 passed (162)
+
+npx tsc -p tsconfig.electron.json --noEmit
+exit 0
+
+npm run harness:check
+Harness check passed.
+
+git diff --check
+exit 0
+```
+
+### Fix Summary
+
+- Sparse arrays retain declared length but enumerate and hash every actually enumerable omitted numeric index instead of looping declared holes.
+- Objects hash every omitted own enumerable key/value in sorted-key order.
+- Tail hashes use length-framed streaming SHA-256 updates and never build or persist raw tail-value arrays.
+- Every omitted entry receives a fresh bounded canonical state while retaining depth/string limits, secret/private handling, hostile getter containment, and parent-cycle detection.
+- Element 97/key 129 and arbitrarily later same-cardinality changes now alter both action signatures and failure fingerprints, protecting occurrence counting.
+
+### Final Fingerprint Files
+
+- `src/main/agentGoalFailureFingerprint.ts`
+- `src/main/agentGoalFailureFingerprint.test.ts`
+- `.superpowers/sdd/p41-task-7-report.md`

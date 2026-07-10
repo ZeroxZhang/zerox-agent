@@ -349,6 +349,102 @@ describe("goal acceptance failure fingerprints", () => {
     );
   });
 
+  it("digests complete sparse array tails at element 97 and the far end", () => {
+    const makeArray = (element97: string, finalElement: string) => {
+      const value: string[] = new Array(10_000);
+      for (let index = 0; index < 32; index += 1) value[index] = `head_${index}`;
+      value[96] = element97;
+      value[9_999] = finalElement;
+      return value;
+    };
+    const baseline = createToolActionSignature(
+      "complete_array_tail",
+      makeArray("PRIVATE_ELEMENT_97_ALPHA", "PRIVATE_FINAL_ALPHA"),
+    );
+    const changed97 = createToolActionSignature(
+      "complete_array_tail",
+      makeArray("PRIVATE_ELEMENT_97_BRAVO", "PRIVATE_FINAL_ALPHA"),
+    );
+    const changedFinal = createToolActionSignature(
+      "complete_array_tail",
+      makeArray("PRIVATE_ELEMENT_97_ALPHA", "PRIVATE_FINAL_BRAVO"),
+    );
+
+    expect(baseline).not.toBe(changed97);
+    expect(baseline).not.toBe(changedFinal);
+    expect(`${baseline}${changed97}${changedFinal}`).not.toMatch(
+      /PRIVATE_ELEMENT_97|PRIVATE_FINAL/,
+    );
+  });
+
+  it("digests complete object tails at sorted key 129 and the far end", () => {
+    const makeObject = (key129: string, finalValue: string) =>
+      Object.fromEntries(
+        Array.from({ length: 200 }, (_, index) => [
+          `key_${String(index).padStart(3, "0")}`,
+          index === 128
+            ? key129
+            : index === 199
+              ? finalValue
+              : `value_${index}`,
+        ]),
+      );
+    const baseline = createToolActionSignature(
+      "complete_object_tail",
+      makeObject("PRIVATE_KEY_129_ALPHA", "PRIVATE_KEY_FINAL_ALPHA"),
+    );
+    const changed129 = createToolActionSignature(
+      "complete_object_tail",
+      makeObject("PRIVATE_KEY_129_BRAVO", "PRIVATE_KEY_FINAL_ALPHA"),
+    );
+    const changedFinal = createToolActionSignature(
+      "complete_object_tail",
+      makeObject("PRIVATE_KEY_129_ALPHA", "PRIVATE_KEY_FINAL_BRAVO"),
+    );
+
+    expect(baseline).not.toBe(changed129);
+    expect(baseline).not.toBe(changedFinal);
+    expect(`${baseline}${changed129}${changedFinal}`).not.toMatch(
+      /PRIVATE_KEY_129|PRIVATE_KEY_FINAL/,
+    );
+  });
+
+  it("resets bounded canonical state for every omitted entry", () => {
+    const makeArray = (finalValue: string) =>
+      Array.from({ length: 200 }, (_, index) => ({
+        level1: {
+          level2: {
+            level3: index === 199 ? finalValue : `value_${index}`,
+          },
+        },
+      }));
+    const leftAction = createToolActionSignature(
+      "late_node_budget",
+      makeArray("PRIVATE_LATE_ALPHA"),
+    );
+    const rightAction = createToolActionSignature(
+      "late_node_budget",
+      makeArray("PRIVATE_LATE_BRAVO"),
+    );
+    const leftFingerprint = createAcceptanceFailureFingerprint(
+      fingerprintInput({ actionSignatures: [leftAction] }),
+    );
+    const rightFingerprint = createAcceptanceFailureFingerprint(
+      fingerprintInput({ actionSignatures: [rightAction] }),
+    );
+
+    expect(leftAction).not.toBe(rightAction);
+    expect(leftFingerprint).not.toBe(rightFingerprint);
+    expect(`${leftAction}${rightAction}`).not.toMatch(/PRIVATE_LATE/);
+    expect(
+      countConsecutiveFingerprint(
+        [failureRecord("milestone", "milestone_1", leftFingerprint)],
+        { targetKind: "milestone", targetId: "milestone_1" },
+        rightFingerprint,
+      ),
+    ).toBe(0);
+  });
+
   it("bounds hostile omitted tails while preserving fingerprint occurrence identity", () => {
     const leftTail: unknown[] = Array.from({ length: 100_000 });
     const rightTail: unknown[] = Array.from({ length: 100_000 });
