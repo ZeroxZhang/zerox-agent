@@ -1,10 +1,16 @@
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Goal, Milestone } from "../shared/agentGoal";
 import type { GoalReviewDecision } from "../shared/agentGoalReview";
 import type { GoalDraft } from "../shared/goalTranslation";
 import type { SkillRecord } from "../shared/skills";
 import { createGoalChatService } from "./goalChatService";
-import type { ProgressLedgerEvent } from "./agentGoalStore";
+import {
+  createAgentGoalStore,
+  type ProgressLedgerEvent,
+} from "./agentGoalStore";
 
 describe("goal chat service", () => {
   it("creates a chat-linked goal with a deterministic summary", async () => {
@@ -593,6 +599,99 @@ describe("goal chat service", () => {
     expect(resumed).toEqual([]);
     expect(achieved).not.toHaveProperty("acceptanceProtocolVersion");
     expect(achieved).not.toHaveProperty("acceptanceCertificate");
+  });
+
+  it.each([
+    ["resume", "executing", undefined],
+    ["retry", "stopped_budget", "budget_exhausted"],
+  ] as const)(
+    "upgrades a serialized legacy %s goal through the real store before controller execution",
+    async (operation, status, stopReason) => {
+      const configDir = await mkdtemp(path.join(os.tmpdir(), "goal-chat-legacy-"));
+      try {
+        const goalsDir = path.join(configDir, "agent-goals");
+        const goalPath = path.join(goalsDir, "goal_release.json");
+        await mkdir(goalsDir, { recursive: true });
+        const legacy = createGoal({
+          status,
+          ...(stopReason ? { stopReason } : {}),
+        });
+        const raw = `${JSON.stringify(legacy, null, 2)}\n`;
+        await writeFile(goalPath, raw, "utf8");
+        const realStore = createAgentGoalStore({ configDir });
+        const controllerCalls: string[] = [];
+        const service = createGoalChatService({
+          controller: createController({
+            async resume(goalId) {
+              controllerCalls.push(`resume:${goalId}`);
+              return (await realStore.get(goalId))!;
+            },
+          }),
+          goalStore: realStore,
+          planner: createFakePlanner(),
+          now: () => "2026-07-11T08:00:00.000Z",
+        });
+
+        const summary = await service[operation](legacy.id);
+        await Promise.resolve();
+        const persisted = await realStore.get(legacy.id);
+
+        expect(summary.status).toBe("executing");
+        expect(controllerCalls).toEqual([`resume:${legacy.id}`]);
+        expect(persisted).toMatchObject({
+          status: "executing",
+          acceptanceProtocolVersion: 2,
+          acceptanceState: {
+            protocolVersion: 2,
+            phase: "idle",
+            attempt: 0,
+            recentFailures: [],
+          },
+        });
+        expect(await readFile(goalPath, "utf8")).not.toBe(raw);
+      } finally {
+        await rm(configDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("reads a serialized terminal legacy goal through the real store without rewriting or restarting it", async () => {
+    const configDir = await mkdtemp(path.join(os.tmpdir(), "goal-chat-terminal-legacy-"));
+    try {
+      const goalsDir = path.join(configDir, "agent-goals");
+      const goalPath = path.join(goalsDir, "goal_release.json");
+      await mkdir(goalsDir, { recursive: true });
+      const legacy = createGoal({
+        status: "achieved",
+        stopReason: "goal_accepted",
+      });
+      const raw = `${JSON.stringify(legacy, null, 4)}\n`;
+      await writeFile(goalPath, raw, "utf8");
+      const realStore = createAgentGoalStore({ configDir });
+      const controllerCalls: string[] = [];
+      const service = createGoalChatService({
+        controller: createController({
+          async resume(goalId) {
+            controllerCalls.push(goalId);
+            return legacy;
+          },
+        }),
+        goalStore: realStore,
+        planner: createFakePlanner(),
+      });
+
+      await expect(service.resume(legacy.id)).resolves.toMatchObject({
+        status: "achieved",
+      });
+
+      expect(controllerCalls).toEqual([]);
+      expect(await readFile(goalPath, "utf8")).toBe(raw);
+      expect(await realStore.get(legacy.id)).not.toHaveProperty(
+        "acceptanceProtocolVersion",
+      );
+    } finally {
+      await rm(configDir, { recursive: true, force: true });
+    }
   });
 
   it("counts a manual replan exactly once when the planner updates usage", async () => {

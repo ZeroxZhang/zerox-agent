@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -17,6 +17,10 @@ import {
   type GoalRuntimeEngine,
 } from "./agentGoalController";
 import type { AcceptanceResult } from "./agentGoalAcceptance";
+import {
+  createAgentGoalAcceptance,
+  type AcceptanceContext,
+} from "./agentGoalAcceptance";
 import { verifyGoalAcceptanceCertificate } from "./agentGoalAcceptanceCertificate";
 
 describe("agent goal controller", () => {
@@ -1038,6 +1042,123 @@ describe("agent goal controller", () => {
     );
   });
 
+  it("reproduces the large-report incident and stops after three identical cold-judge rejections without replanning", async () => {
+    const workspacePath = path.join(configDir, "authorized-workspace");
+    const reportPath = path.join(workspacePath, "docs", "tech_report.md");
+    await mkdir(path.dirname(reportPath), { recursive: true });
+    const report = largeTenSectionReport();
+    expect(Buffer.byteLength(report)).toBeGreaterThan(4 * 1024 * 1024);
+    await writeFile(reportPath, report, "utf8");
+
+    const semanticCriterion = lateReportCriterion(reportPath);
+    await store.save(
+      createProtocolV2Goal(
+        [{ ...milestone("milestone_report"), successCriteria: [semanticCriterion] }],
+        {
+          description: "Produce a complete ten-section technical report.",
+          successCriteria: [semanticCriterion],
+        },
+      ),
+    );
+    const runtime = createRuntime();
+    const judgePrompts: string[] = [];
+    const acceptance = createRealAcceptance({
+      workspacePath,
+      complete(request) {
+        judgePrompts.push(
+          request.messages.map((message) => message.content).join("\n"),
+        );
+        if (judgePrompts.length > 3) {
+          throw new Error("controller repeated the incident after the stall threshold");
+        }
+        return {
+          content: JSON.stringify({
+            verdict: "rejected",
+            reason: "The report does not yet establish the requested conclusion.",
+            evidenceRefs: [`artifact:${reportPath}`],
+          }),
+          toolCalls: [],
+          finishReason: "stop",
+        };
+      },
+    });
+    let plannerCalls = 0;
+    const controller = createController({
+      runtime,
+      acceptance,
+      planner: {
+        async replan() {
+          plannerCalls += 1;
+          throw new Error("semantic rejection must use bounded repair, not replan");
+        },
+      },
+    });
+
+    const result = await controller.start("goal_1");
+
+    expect(result.status).toBe("stopped_stalled");
+    expect(result.planVersion).toBe(1);
+    expect(result.budgetUsage.replans).toBe(0);
+    expect(runtime.runMilestoneIds).toHaveLength(3);
+    expect(result.acceptanceState?.recentFailures.at(-1)?.occurrence).toBe(3);
+    expect(plannerCalls).toBe(0);
+    expect(judgePrompts).toHaveLength(3);
+    expect(judgePrompts.every((prompt) => prompt.includes("Section 10 Final Conclusion"))).toBe(
+      true,
+    );
+  });
+
+  it("certifies a large ten-section report when the late final heading passes both cold judges", async () => {
+    const workspacePath = path.join(configDir, "authorized-workspace");
+    const reportPath = path.join(workspacePath, "docs", "tech_report.md");
+    await mkdir(path.dirname(reportPath), { recursive: true });
+    const report = largeTenSectionReport();
+    expect(Buffer.byteLength(report)).toBeGreaterThan(4 * 1024 * 1024);
+    await writeFile(reportPath, report, "utf8");
+
+    const semanticCriterion = lateReportCriterion(reportPath);
+    await store.save(
+      createProtocolV2Goal(
+        [{ ...milestone("milestone_report"), successCriteria: [semanticCriterion] }],
+        {
+          description: "Produce a complete ten-section technical report.",
+          successCriteria: [semanticCriterion],
+        },
+      ),
+    );
+    const runtime = createRuntime();
+    const judgePrompts: string[] = [];
+    const acceptance = createRealAcceptance({
+      workspacePath,
+      complete(request) {
+        judgePrompts.push(
+          request.messages.map((message) => message.content).join("\n"),
+        );
+        return {
+          content: JSON.stringify({
+            verdict: "accepted",
+            reason: "The late tenth heading and report evidence prove completion.",
+            evidenceRefs: [`artifact:${reportPath}`],
+          }),
+          toolCalls: [],
+          finishReason: "stop",
+        };
+      },
+    });
+    const controller = createController({ runtime, acceptance });
+
+    const result = await controller.start("goal_1");
+
+    expect(result.status).toBe("achieved");
+    expect(runtime.runMilestoneIds).toEqual(["milestone_report"]);
+    expect(judgePrompts).toHaveLength(2);
+    expect(judgePrompts.every((prompt) => prompt.includes("Section 10 Final Conclusion"))).toBe(
+      true,
+    );
+    expect(result.acceptanceCertificate).toBeDefined();
+    expect(verifyGoalAcceptanceCertificate(result)).toEqual({ ok: true });
+  });
+
   it("resets the occurrence when the same target has a changed failure fingerprint", async () => {
     await store.save(createProtocolV2Goal([milestone("milestone_1")]));
     const controller = createController({
@@ -1787,6 +1908,68 @@ describe("agent goal controller", () => {
     });
   }
 
+  function createRealAcceptance(options: {
+    workspacePath: string;
+    complete: NonNullable<AcceptanceContext["chatClient"]>["complete"];
+  }) {
+    const acceptance = createAgentGoalAcceptance({ judgeProviderId: "test-provider" });
+    let acceptanceSequence = 0;
+    const context = (
+      runId: string,
+      milestoneId?: string,
+    ): AcceptanceContext => ({
+      runId,
+      goalId: "goal_1",
+      ...(milestoneId ? { milestoneId } : {}),
+      workspacePath: options.workspacePath,
+      extraReadRoots: [],
+      extraWriteRoots: [],
+      locationEnv: {
+        homeDir: configDir,
+        platform: "darwin",
+      },
+      artifacts: {},
+      modelProfile: {
+        baseUrl: "https://judge.invalid",
+        apiKey: "test-secret",
+        model: "cold-judge-test",
+        temperature: 0.7,
+        maxTokens: 512,
+      },
+      chatClient: { complete: options.complete },
+      toolExecutor: {
+        async execute(request) {
+          throw new Error(`unexpected acceptance tool call: ${request.toolName}`);
+        },
+      },
+      trajectoryStore: {
+        async append(_runId, event) {
+          trajectoryEvents.push(event);
+          return event;
+        },
+      },
+      createId: () => `acceptance_event_${acceptanceSequence + 1}`,
+      nextSequence: () => {
+        acceptanceSequence += 1;
+        return acceptanceSequence;
+      },
+      now: () => "2026-06-12T00:00:00.000Z",
+    });
+
+    return {
+      async evaluate(currentMilestone: Milestone) {
+        const runId = currentMilestone.runIds.at(-1) ?? "run_acceptance";
+        return acceptance.evaluate(
+          currentMilestone,
+          context(runId, currentMilestone.id),
+        );
+      },
+      async evaluateGoal(goal: Goal) {
+        return acceptance.evaluateGoal(goal, context("run_final_acceptance"));
+      },
+    };
+  }
+
   async function waitForGoalStatus(status: Goal["status"]): Promise<Goal> {
     return waitFor(async () => {
       const goal = await store.get("goal_1");
@@ -1838,6 +2021,38 @@ const modelReviewCriterion: SuccessCriterion = {
     },
   ],
 };
+
+function lateReportCriterion(reportPath: string): SuccessCriterion {
+  return {
+    id: "criterion_late_tenth_section",
+    description: "The technical report contains all ten required sections.",
+    acceptanceChecks: [
+      {
+        id: "check_late_tenth_section",
+        kind: "model_review",
+        description: "The late tenth section establishes the final conclusion.",
+        params: {
+          condition:
+            "Verify that Section 10 Final Conclusion is present and supports completion.",
+          evidenceRefs: [`artifact:${reportPath}`],
+        },
+        requiresEvidence: true,
+      },
+    ],
+  };
+}
+
+function largeTenSectionReport(): string {
+  return [
+    ...Array.from(
+      { length: 9 },
+      (_, index) => `# Section ${index + 1}\nEvidence for section ${index + 1}.\n`,
+    ),
+    "ordinary analysis before the final section\n".repeat(70_000),
+    "# Section 10 Final Conclusion\nAll ten required sections are present.\n",
+    "ordinary appendix after the final section\n".repeat(70_000),
+  ].join("");
+}
 
 const artifactCriterion: SuccessCriterion = {
   id: "criterion_chrome_bookmark_artifacts",
