@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import type { Goal, Milestone } from "../shared/agentGoal";
+import type {
+  AcceptanceRepairDirective,
+  Goal,
+  Milestone,
+} from "../shared/agentGoal";
 import type { AgentRunEvent, AgentRunRecord } from "../shared/agentRuns";
 import type { ExecutionContextMemoryScope } from "../shared/executionContextPackage";
 import {
@@ -43,6 +47,7 @@ import {
 } from "../shared/toolInvocationLedger";
 import { createRuntimeContextSnapshotForRun } from "./runtimeContextFactory";
 import { summarizeAgentRuntimeContextSnapshot } from "../shared/agentRuntimeContext";
+import { createToolActionSignature } from "./agentGoalFailureFingerprint";
 
 export type GoalRuntimeModelProfile = {
   baseUrl: string;
@@ -193,6 +198,13 @@ export function createGoalRuntimeEngine(options: {
         ),
       ];
       let observedToolCalls = 0;
+      const actionSignatures = new Set<string>();
+      const recordActionSignature = (toolName: string, args: unknown) => {
+        if (actionSignatures.size >= 32) {
+          return;
+        }
+        actionSignatures.add(createToolActionSignature(toolName, args));
+      };
 
       const taskContract = goal.taskContract;
       if (isDeterministicGoalPipelineSupported(taskContract)) {
@@ -247,6 +259,7 @@ export function createGoalRuntimeEngine(options: {
             args,
             deterministicOptions?: DeterministicToolExecutionOptions,
           ) {
+            recordActionSignature(toolName, args);
             let invocation = createToolInvocation({
               id: `tool_invocation_${createId()}`,
               runId,
@@ -445,6 +458,7 @@ export function createGoalRuntimeEngine(options: {
           transcriptMessages: [
             { role: "assistant", content: pipelineResult.summary },
           ],
+          actionSignatures: [...actionSignatures],
         };
       }
 
@@ -494,7 +508,12 @@ export function createGoalRuntimeEngine(options: {
       const assembled = options.goalContext.assemble(goal, [], tokenBudget);
       const milestoneInstruction: ChatMessage = {
         role: "user",
-        content: buildMilestoneInstruction(goal, milestone, runContext),
+        content: buildMilestoneInstruction(
+          goal,
+          milestone,
+          runContext,
+          runOptions?.repairDirective,
+        ),
       };
       const initialMessages: ChatMessage[] = [
         ...assembled.messages,
@@ -550,6 +569,7 @@ export function createGoalRuntimeEngine(options: {
             );
           },
           onToolCall(toolName, args) {
+            recordActionSignature(toolName, args);
             void appendTrajectory(runId, "tool_call", {
               ...payload,
               toolName,
@@ -684,6 +704,7 @@ export function createGoalRuntimeEngine(options: {
           loopResult.messages,
           loopResult.summary,
         ),
+        actionSignatures: [...actionSignatures],
       };
     },
   };
@@ -959,6 +980,7 @@ function buildMilestoneInstruction(
   goal: Goal,
   milestone: Milestone,
   runContext: AgentRunContext,
+  repairDirective?: AcceptanceRepairDirective,
 ): string {
   const criteriaLines = milestone.successCriteria.flatMap((criterion, index) => {
     const lines = [
@@ -989,9 +1011,33 @@ function buildMilestoneInstruction(
     ...criteriaLines,
     ...buildSelectedSkillExecutionContract(goal),
     ...artifactContractLines,
+    ...buildAcceptanceRepairContract(repairDirective),
     "",
     "请执行这个里程碑。优先产出可追溯证据和阶段性结论。如果验收标准涉及文件路径，请准确创建对应文件。",
   ].join("\n");
+}
+
+function buildAcceptanceRepairContract(
+  directive?: AcceptanceRepairDirective,
+): string[] {
+  if (!directive) {
+    return [];
+  }
+
+  return [
+    "",
+    "BEGIN ACCEPTANCE REPAIR DIRECTIVE",
+    `Failed check ids: ${directive.failedCheckIds.join(", ") || "none"}`,
+    `Occurrence: ${directive.occurrence}`,
+    `Fingerprint: ${directive.fingerprint.slice(0, 12)}`,
+    ...directive.instructions.map((instruction) => `- ${instruction}`),
+    ...(directive.occurrence === 2
+      ? [
+          "- Occurrence 2 requires a materially different strategy and materially different tool arguments; do not repeat the prior failed approach.",
+        ]
+      : []),
+    "END ACCEPTANCE REPAIR DIRECTIVE",
+  ];
 }
 
 function buildSelectedSkillExecutionContract(goal: Goal): string[] {

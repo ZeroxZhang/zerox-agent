@@ -361,6 +361,12 @@ export type ProgressLedgerEvent = {
     | "milestone_accepted"
     | "milestone_rejected"
     | "goal_replanned"
+    | "acceptance_manifest_created"
+    | "acceptance_failure_classified"
+    | "acceptance_repair_scheduled"
+    | "acceptance_strategy_changed"
+    | "acceptance_blocked"
+    | "acceptance_certified"
     | "review_requested"
     | "review_resolved"
     | "goal_stopped";

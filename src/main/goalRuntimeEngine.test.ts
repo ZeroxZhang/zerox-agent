@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import type { Goal, Milestone } from "../shared/agentGoal";
+import type { AcceptanceRepairDirective, Goal, Milestone } from "../shared/agentGoal";
 import type { AgentRunRecord } from "../shared/agentRuns";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
 import type { AgentTaskContract } from "../shared/agentTaskContract";
@@ -117,6 +117,9 @@ describe("goal runtime engine", () => {
     });
     expect(executedTools).toEqual(["chrome_bookmarks_read"]);
     expect(authorizedTools).toEqual(["chrome_bookmarks_read"]);
+    expect(result.actionSignatures).toEqual([
+      expect.stringMatching(/^chrome_bookmarks_read:/),
+    ]);
     expect(runs[0]).toMatchObject({
       id: "goal_run_1",
       skillName: "deterministic-goal-pipeline",
@@ -1474,6 +1477,93 @@ describe("goal runtime engine", () => {
       await rm(workspaceRoot, { recursive: true, force: true });
       await rm(outputRoot, { recursive: true, force: true });
     }
+  });
+
+  it("injects the exact repair directive and returns stable redacted model action signatures", async () => {
+    const goal = createGoal();
+    let instruction = "";
+    const directive: AcceptanceRepairDirective = {
+      action: "retry_alternate_strategy",
+      summary: "Acceptance failed again for checks: check_report.",
+      failedCheckIds: ["check_report"],
+      fingerprint: "abcdef1234567890".padEnd(64, "0"),
+      occurrence: 2,
+      instructions: [
+        'Resolve failed acceptance check "check_report" (assertion) and provide evidence for re-evaluation.',
+        "Use a materially different strategy and materially different tool arguments; do not repeat the prior failed approach.",
+      ],
+    };
+    const engine = createGoalRuntimeEngine({
+      workspaceRoot: "/Users/example",
+      chatClient: {
+        async complete() {
+          throw new Error("fake loop should be used");
+        },
+      },
+      getModelProfile: async () => ({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "provider-secret",
+        model: "agent-model",
+        temperature: 0.2,
+        maxTokens: 8192,
+      }),
+      toolExecutor: {
+        async execute() {
+          return { ok: true, result: {} };
+        },
+        getRegistry() {
+          return createDynamicToolRegistry();
+        },
+        hasTool() {
+          return true;
+        },
+      },
+      runStore: {
+        async append(run) {
+          return run;
+        },
+      },
+      trajectoryStore: {
+        async append(_runId, event) {
+          return event;
+        },
+      },
+      goalContext: createAgentGoalContext(),
+      createId: () => "goal_run_repair",
+      now: () => "2026-06-13T10:00:00.000Z",
+      runAgentLoop: async (messages, _profile, options): Promise<AgentLoopResult> => {
+        instruction = messages.at(-1)?.content ?? "";
+        options.onToolCall?.("web_fetch", {
+          options: { z: 1, a: 2 },
+          apiKey: "raw-secret-one",
+        });
+        options.onToolCall?.("web_fetch", {
+          apiKey: "raw-secret-two",
+          options: { a: 2, z: 1 },
+        });
+        return {
+          summary: "Repair attempted.",
+          status: "succeeded",
+          turns: 1,
+          messages,
+          toolCallsExecuted: 2,
+        };
+      },
+    });
+
+    const result = await engine.runMilestone(goal, goal.milestones[0]!, {
+      repairDirective: directive,
+    });
+
+    expect(instruction).toContain("BEGIN ACCEPTANCE REPAIR DIRECTIVE");
+    expect(instruction).toContain("Failed check ids: check_report");
+    expect(instruction).toContain("Occurrence: 2");
+    expect(instruction).toContain("Fingerprint: abcdef123456");
+    expect(instruction).toContain("materially different strategy");
+    expect(instruction).toContain("do not repeat the prior failed approach");
+    expect(result.actionSignatures).toHaveLength(1);
+    expect(result.actionSignatures?.[0]).toContain("web_fetch:");
+    expect(JSON.stringify(result.actionSignatures)).not.toContain("raw-secret");
   });
 });
 

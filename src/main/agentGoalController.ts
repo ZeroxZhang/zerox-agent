@@ -1,10 +1,14 @@
 import {
   assertGoalTransition,
+  type AcceptanceFailureClass,
+  type AcceptanceRepairDirective,
   type Goal,
+  type GoalAcceptanceState,
+  type GoalEvidenceManifest,
   type GoalStatus,
   type Milestone,
+  type ProgressLedgerEvent,
   type StopReason,
-  type SuccessCriterion,
 } from "../shared/agentGoal";
 import {
   shouldRequestReview as shouldRequestGoalReview,
@@ -17,6 +21,16 @@ import type { AgentGoalPlanner } from "./agentGoalPlanner";
 import type { AgentGoalStore } from "./agentGoalStore";
 import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
 import type { ChatMessage } from "./openAiCompatibleClient";
+import {
+  countConsecutiveFingerprint,
+  createAcceptanceFailureFingerprint,
+} from "./agentGoalFailureFingerprint";
+import {
+  appendAcceptanceFailure,
+  decideAcceptanceRepair,
+  type AcceptanceRepairDecision,
+} from "./agentGoalRepairPolicy";
+import { createGoalAcceptanceCertificate } from "./agentGoalAcceptanceCertificate";
 
 export type GoalRuntimeRunResult = {
   runId: string;
@@ -26,13 +40,17 @@ export type GoalRuntimeRunResult = {
   wallClockMs?: number;
   tokens?: number;
   transcriptMessages?: ChatMessage[];
+  actionSignatures?: string[];
 };
 
 export type GoalRuntimeEngine = {
   runMilestone(
     goal: Goal,
     milestone: Milestone,
-    options?: { signal?: AbortSignal },
+    options?: {
+      signal?: AbortSignal;
+      repairDirective?: AcceptanceRepairDirective;
+    },
   ): Promise<GoalRuntimeRunResult>;
 };
 
@@ -65,6 +83,8 @@ export function createAgentGoalController(options: {
     signal?: AbortSignal;
   };
   const activeRuns = new Map<string, ActiveRunEntry>();
+  const publishedTerminalKeys = new Set<string>();
+  const recentActionSignatures = new Map<string, string[]>();
 
   function notifyProgress(
     event: GoalProgressEvent["event"],
@@ -121,6 +141,43 @@ export function createAgentGoalController(options: {
     return (await options.goalStore.get(goal.id)) ?? goal;
   }
 
+  async function canonicalInterruption(
+    goal: Goal,
+    runOptions?: { signal?: AbortSignal },
+  ): Promise<Goal | null> {
+    const latest = await options.goalStore.get(goal.id);
+    if (!latest) {
+      return runOptions?.signal?.aborted ? goal : null;
+    }
+    if (
+      runOptions?.signal?.aborted ||
+      latest.status !== "executing" ||
+      isIrreversibleGoalStatus(latest.status)
+    ) {
+      await publishCanonicalTerminal(latest);
+      return latest;
+    }
+    return null;
+  }
+
+  async function publishCanonicalTerminal(goal: Goal): Promise<void> {
+    if (goal.status === "executing" || goal.status === "planning") {
+      return;
+    }
+    const key = `${goal.id}:${goal.status}:${goal.updatedAt}`;
+    if (publishedTerminalKeys.has(key)) {
+      return;
+    }
+    publishedTerminalKeys.add(key);
+    await emit(goal.id, "goal_stopped", {
+      goalId: goal.id,
+      status: goal.status,
+      stopReason: goal.stopReason,
+      summary: terminalStatusMessage(goal),
+    });
+    notifyProgress("stopped", goal, terminalStatusMessage(goal));
+  }
+
   async function runLoopInternal(
     goal: Goal,
     runOptions?: { signal?: AbortSignal },
@@ -137,74 +194,46 @@ export function createAgentGoalController(options: {
         const nextMilestone = pickNextReadyMilestone(goal);
         if (!nextMilestone) {
           if (allMilestonesAccepted(goal)) {
-            if (canAcceptCoveredGoal(goal)) {
-              return stopGoal(
-                goal,
-                "achieved",
-                "goal_accepted",
-                "Goal acceptance passed from accepted milestone evidence.",
-              );
+            const validatingGoal = await persistAcceptancePhase(
+              goal,
+              "validating",
+              true,
+            );
+            if (validatingGoal.status !== "executing") {
+              return validatingGoal;
             }
-
+            goal = validatingGoal;
             const result = await options.acceptance.evaluateGoal(
               goal,
               (await options.createAcceptanceContext?.(goal)) as never,
             );
-            const abortedAfterGoalReview = await latestGoalAfterAbort(
+            const interruptedAfterGoalReview = await canonicalInterruption(
               goal,
               runOptions,
             );
-            if (abortedAfterGoalReview) {
-              return abortedAfterGoalReview;
+            if (interruptedAfterGoalReview) {
+              return interruptedAfterGoalReview;
+            }
+            await recordAcceptanceManifest(goal, null, result);
+            const interruptedAfterManifest = await canonicalInterruption(
+              goal,
+              runOptions,
+            );
+            if (interruptedAfterManifest) {
+              return interruptedAfterManifest;
             }
             if (result.accepted) {
-              return stopGoal(
-                goal,
-                "achieved",
-                "goal_accepted",
-                "Goal acceptance passed.",
-              );
+              return certifyOrAchieveGoal(goal, result, runOptions);
             }
-
-            const reason = summarizeAcceptanceFailure(result);
-            const budgetExhaustion = describeGoalBudgetExhaustion(goal, true);
-            if (budgetExhaustion) {
-              return stopForBudgetExhaustion(goal, budgetExhaustion);
-            }
-
-            const replannedMilestones = await options.planner.replan(goal, reason);
-            const abortedAfterReplan = await latestGoalAfterAbort(
+            const decisionResult = await applyAcceptanceDecision(
               goal,
+              null,
+              result,
+              recentActionSignatures.get(goal.id) ?? [],
               runOptions,
             );
-            if (abortedAfterReplan) {
-              return abortedAfterReplan;
-            }
-            goal.milestones = replannedMilestones;
-            touch(goal);
-            await options.goalStore.appendLedger(goal.id, {
-              at: currentTime(),
-              kind: "goal_replanned",
-              summary: "Replanned after final goal acceptance needed more evidence.",
-            });
-            await emit(goal.id, "goal_replanned", {
-              goalId: goal.id,
-              planVersion: goal.planVersion,
-              replans: goal.budgetUsage.replans,
-              reason,
-            });
-            notifyProgress(
-              "replanned",
-              goal,
-              "目标验收证据不足，已重新规划继续推进。",
-            );
-            const checkpoint = await writeGoalCheckpoint(
-              goal,
-              "goal_acceptance_replanned",
-            );
-            if (checkpoint.status !== goal.status) {
-              return checkpoint;
-            }
+            goal = decisionResult.goal;
+            if (decisionResult.suspend) return goal;
             continue;
           }
 
@@ -231,12 +260,13 @@ export function createAgentGoalController(options: {
         }
 
         stalledIterations = 0;
-        const shouldSuspend = await runOneMilestone(
+        const milestoneResult = await runOneMilestone(
           goal,
           nextMilestone,
           runOptions,
         );
-        if (shouldSuspend) {
+        goal = milestoneResult.goal;
+        if (milestoneResult.suspend) {
           return (await options.goalStore.get(goal.id)) ?? goal;
         }
       }
@@ -257,14 +287,15 @@ export function createAgentGoalController(options: {
     goal: Goal,
     milestone: Milestone,
     runOptions?: { signal?: AbortSignal },
-  ): Promise<boolean> {
+  ): Promise<{ goal: Goal; suspend: boolean }> {
+    const repairDirective = repairDirectiveForMilestone(goal, milestone);
     milestone.state = "running";
     milestone.attempts += 1;
     touch(goal);
     const startedGoal = await options.goalStore.save(goal);
     if (startedGoal.status !== goal.status) {
       notifyProgress("stopped", startedGoal, terminalStatusMessage(startedGoal));
-      return true;
+      return { goal: startedGoal, suspend: true };
     }
     await options.goalStore.appendLedger(goal.id, {
       at: currentTime(),
@@ -286,10 +317,20 @@ export function createAgentGoalController(options: {
     const runResult = await options.runtimeEngine.runMilestone(
       goal,
       milestone,
-      runOptions,
+      {
+        ...(runOptions?.signal ? { signal: runOptions.signal } : {}),
+        ...(repairDirective
+          ? { repairDirective }
+          : {}),
+      },
     );
-    if (await latestGoalAfterAbort(goal, runOptions)) {
-      return true;
+    recentActionSignatures.set(
+      goal.id,
+      [...new Set(runResult.actionSignatures ?? [])].slice(0, 32),
+    );
+    const abortedAfterRuntime = await latestGoalAfterAbort(goal, runOptions);
+    if (abortedAfterRuntime) {
+      return { goal: abortedAfterRuntime, suspend: true };
     }
     milestone.runIds.push(runResult.runId);
     milestone.lastRunStatus = runResult.status ?? "succeeded";
@@ -304,20 +345,41 @@ export function createAgentGoalController(options: {
     const usageGoal = await options.goalStore.save(goal);
     if (usageGoal.status !== goal.status) {
       notifyProgress("stopped", usageGoal, terminalStatusMessage(usageGoal));
-      return true;
+      return { goal: usageGoal, suspend: true };
     }
 
+    const validatingGoal = await persistAcceptancePhase(
+      goal,
+      "validating",
+      true,
+    );
+    if (validatingGoal.status !== "executing") {
+      return { goal: validatingGoal, suspend: true };
+    }
     const acceptance = await options.acceptance.evaluate(
       milestone,
       (await options.createAcceptanceContext?.(goal, milestone, runResult)) as never,
     );
-    if (await latestGoalAfterAbort(goal, runOptions)) {
-      return true;
+    const interruptedAfterAcceptance = await canonicalInterruption(goal, runOptions);
+    if (interruptedAfterAcceptance) {
+      return { goal: interruptedAfterAcceptance, suspend: true };
+    }
+    await recordAcceptanceManifest(goal, milestone, acceptance);
+    const interruptedAfterManifest = await canonicalInterruption(goal, runOptions);
+    if (interruptedAfterManifest) {
+      return { goal: interruptedAfterManifest, suspend: true };
     }
 
     if (acceptance.accepted) {
       milestone.state = "accepted";
       milestone.lastAcceptanceSummary = summarizeAcceptanceSuccess(acceptance);
+      if (goal.acceptanceState) {
+        goal.acceptanceState = {
+          ...goal.acceptanceState,
+          phase: "idle",
+          lastDecision: undefined,
+        };
+      }
       touch(goal);
       await options.goalStore.appendLedger(goal.id, {
         at: currentTime(),
@@ -327,7 +389,7 @@ export function createAgentGoalController(options: {
       });
       const checkpoint = await writeGoalCheckpoint(goal, "milestone_accepted");
       if (checkpoint.status !== goal.status) {
-        return true;
+        return { goal: checkpoint, suspend: true };
       }
       notifyProgress(
         "milestone_accepted",
@@ -342,7 +404,7 @@ export function createAgentGoalController(options: {
         const reviewGoal = await options.goalStore.save(goal);
         if (reviewGoal.status !== goal.status) {
           notifyProgress("stopped", reviewGoal, terminalStatusMessage(reviewGoal));
-          return true;
+          return { goal: reviewGoal, suspend: true };
         }
         await options.goalStore.appendLedger(goal.id, {
           at: currentTime(),
@@ -360,10 +422,10 @@ export function createAgentGoalController(options: {
           "里程碑完成，等待你审核。",
           milestone.id,
         );
-        return true;
+        return { goal: reviewGoal, suspend: true };
       }
 
-      return false;
+      return { goal: checkpoint, suspend: false };
     }
 
     milestone.state = "rejected";
@@ -388,9 +450,11 @@ export function createAgentGoalController(options: {
     }
 
     const operationalBudgetExhaustion = describeGoalBudgetExhaustion(goal, false);
-    if (operationalBudgetExhaustion) {
-      await stopForBudgetExhaustion(goal, operationalBudgetExhaustion);
-      return true;
+    if (operationalBudgetExhaustion && runResult.status === "paused") {
+      return {
+        goal: await stopForBudgetExhaustion(goal, operationalBudgetExhaustion),
+        suspend: true,
+      };
     }
 
     if (runResult.status === "paused") {
@@ -406,7 +470,7 @@ export function createAgentGoalController(options: {
       const pausedGoal = await options.goalStore.save(goal);
       if (pausedGoal.status !== goal.status) {
         notifyProgress("stopped", pausedGoal, terminalStatusMessage(pausedGoal));
-        return true;
+        return { goal: pausedGoal, suspend: true };
       }
       await options.goalStore.appendLedger(goal.id, {
         at: currentTime(),
@@ -425,44 +489,518 @@ export function createAgentGoalController(options: {
         "里程碑达到本轮执行上限，目标已暂停；请审核后继续或调整计划。",
         milestone.id,
       );
-      return true;
+      return { goal: pausedGoal, suspend: true };
     }
 
-    const replanBudgetExhaustion = describeGoalBudgetExhaustion(goal, true);
-    if (replanBudgetExhaustion) {
-      await stopForBudgetExhaustion(goal, replanBudgetExhaustion);
-      return true;
-    }
-
-    const replannedMilestones = await options.planner.replan(
+    const decisionResult = await applyAcceptanceDecision(
       goal,
-      milestone.lastAcceptanceSummary,
+      milestone,
+      acceptance,
+      runResult.actionSignatures ?? [],
+      runOptions,
     );
-    if (await latestGoalAfterAbort(goal, runOptions)) {
-      return true;
-    }
-    goal.milestones = replannedMilestones;
+    return decisionResult;
+  }
+
+  async function applyAcceptanceDecision(
+    goal: Goal,
+    target: Milestone | null,
+    result: AcceptanceResult,
+    actionSignatures: string[],
+    runOptions?: { signal?: AbortSignal },
+  ): Promise<{ goal: Goal; suspend: boolean }> {
+    const targetIdentity = {
+      targetKind: target ? ("milestone" as const) : ("goal" as const),
+      targetId: target?.id ?? goal.id,
+    };
+    const state = ensureAcceptanceState(goal);
+    const evidenceRefs = safeAcceptanceEvidenceRefs(result);
+    const fingerprint = createAcceptanceFailureFingerprint({
+      target: targetIdentity,
+      failedChecks: result.checkResults,
+      ...(result.evidenceManifest
+        ? { evidenceManifest: result.evidenceManifest }
+        : {}),
+      evidenceRefs,
+      actionSignatures,
+      protocolVersion: goal.acceptanceProtocolVersion ?? 1,
+      validatorVersions: { acceptance: "goal-acceptance-v2" },
+    });
+    const occurrence =
+      countConsecutiveFingerprint(
+        state.recentFailures,
+        targetIdentity,
+        fingerprint,
+      ) + 1;
+    const verdict = result.verdict ?? "rejected_repairable";
+    const failureClass = acceptanceFailureClass(result);
+    goal.acceptanceState = appendAcceptanceFailure(state, {
+      at: currentTime(),
+      ...targetIdentity,
+      fingerprint,
+      occurrence,
+      verdict: verdict === "accepted" ? "rejected_repairable" : verdict,
+      failureClass,
+      failedCheckIds: failedCheckIds(result),
+      evidenceRefs,
+      actionSignatures: [...new Set(actionSignatures)].slice(0, 32),
+    });
     touch(goal);
-    await options.goalStore.appendLedger(goal.id, {
+    let persisted = await options.goalStore.save(goal);
+    if (persisted.status !== "executing") {
+      await publishCanonicalTerminal(persisted);
+      return { goal: persisted, suspend: true };
+    }
+
+    const decision = decideAcceptanceRepair({
+      verdict,
+      occurrence,
+      fingerprint,
+      checkResults: result.checkResults,
+    });
+    await appendAcceptanceEvent(
+      persisted,
+      "acceptance_failure_classified",
+      target,
+      decision,
+      evidenceRefs,
+    );
+    const interruptedAfterClassification = await canonicalInterruption(
+      persisted,
+      runOptions,
+    );
+    if (interruptedAfterClassification) {
+      return { goal: interruptedAfterClassification, suspend: true };
+    }
+
+    const operationalBudgetExhaustion = describeGoalBudgetExhaustion(
+      persisted,
+      false,
+    );
+    if (operationalBudgetExhaustion) {
+      return {
+        goal: await stopForBudgetExhaustion(
+          persisted,
+          operationalBudgetExhaustion,
+        ),
+        suspend: true,
+      };
+    }
+
+    if (decision.action === "repair_same_milestone" ||
+        decision.action === "retry_alternate_strategy") {
+      persisted.acceptanceState = {
+        ...ensureAcceptanceState(persisted),
+        phase: "repairing",
+        lastDecision: toRepairDirective(decision),
+      };
+      if (target) {
+        const currentTarget = persisted.milestones.find(
+          (milestone) => milestone.id === target.id,
+        );
+        if (currentTarget) currentTarget.state = "ready";
+      } else {
+        scheduleFinalRepairMilestone(persisted, decision);
+      }
+      touch(persisted);
+      persisted = await options.goalStore.save(persisted);
+      if (persisted.status !== "executing") {
+        await publishCanonicalTerminal(persisted);
+        return { goal: persisted, suspend: true };
+      }
+      await appendAcceptanceEvent(
+        persisted,
+        decision.action === "retry_alternate_strategy"
+          ? "acceptance_strategy_changed"
+          : "acceptance_repair_scheduled",
+        target,
+        decision,
+        evidenceRefs,
+      );
+      const interruptedAfterRepair = await canonicalInterruption(
+        persisted,
+        runOptions,
+      );
+      return interruptedAfterRepair
+        ? { goal: interruptedAfterRepair, suspend: true }
+        : { goal: persisted, suspend: false };
+    }
+
+    if (decision.action === "stop_stalled") {
+      persisted.acceptanceState = {
+        ...ensureAcceptanceState(persisted),
+        phase: "idle",
+        lastDecision: toRepairDirective(decision),
+      };
+      touch(persisted);
+      persisted = await options.goalStore.save(persisted);
+      return {
+        goal: await stopGoal(
+          persisted,
+          "stopped_stalled",
+          "progress_stalled",
+          decision.summary,
+        ),
+        suspend: true,
+      };
+    }
+
+    if (decision.action === "stop_blocked") {
+      if (!("blockedVerdict" in decision)) {
+        throw new Error("Blocked acceptance decision is missing its verdict.");
+      }
+      persisted.acceptanceState = {
+        ...ensureAcceptanceState(persisted),
+        phase: "blocked",
+        lastDecision: toRepairDirective(decision),
+      };
+      touch(persisted);
+      persisted = await options.goalStore.save(persisted);
+      if (persisted.status !== "executing") {
+        await publishCanonicalTerminal(persisted);
+        return { goal: persisted, suspend: true };
+      }
+      await appendAcceptanceEvent(
+        persisted,
+        "acceptance_blocked",
+        target,
+        decision,
+        evidenceRefs,
+      );
+      const interruptedAfterBlocked = await canonicalInterruption(
+        persisted,
+        runOptions,
+      );
+      if (interruptedAfterBlocked) {
+        return { goal: interruptedAfterBlocked, suspend: true };
+      }
+      return {
+        goal: await stopGoal(
+          persisted,
+          "stopped_blocked",
+          blockedStopReason(decision.blockedVerdict),
+          decision.summary,
+        ),
+        suspend: true,
+      };
+    }
+
+    const replanBudgetExhaustion = describeGoalBudgetExhaustion(persisted, true);
+    if (replanBudgetExhaustion) {
+      return {
+        goal: await stopForBudgetExhaustion(persisted, replanBudgetExhaustion),
+        suspend: true,
+      };
+    }
+    persisted.acceptanceState = {
+      ...ensureAcceptanceState(persisted),
+      phase: "repairing",
+      lastDecision: toRepairDirective(decision),
+    };
+    touch(persisted);
+    persisted = await options.goalStore.save(persisted);
+    if (persisted.status !== "executing") {
+      await publishCanonicalTerminal(persisted);
+      return { goal: persisted, suspend: true };
+    }
+    const replannedMilestones = await options.planner.replan(
+      persisted,
+      decision.summary,
+    );
+    const interruptedAfterReplan = await canonicalInterruption(
+      persisted,
+      runOptions,
+    );
+    if (interruptedAfterReplan) {
+      return { goal: interruptedAfterReplan, suspend: true };
+    }
+    persisted.milestones = replannedMilestones;
+    touch(persisted);
+    persisted = await options.goalStore.save(persisted);
+    if (persisted.status !== "executing") {
+      await publishCanonicalTerminal(persisted);
+      return { goal: persisted, suspend: true };
+    }
+    await options.goalStore.appendLedger(persisted.id, {
       at: currentTime(),
       kind: "goal_replanned",
-      milestoneId: milestone.id,
-      summary: `Replanned after milestone "${milestone.id}" was rejected.`,
+      ...(target ? { milestoneId: target.id } : {}),
+      summary: decision.summary,
+      evidenceRefs,
     });
-    await emit(goal.id, "goal_replanned", {
-      goalId: goal.id,
-      milestoneId: milestone.id,
-      planVersion: goal.planVersion,
-      replans: goal.budgetUsage.replans,
+    await emit(persisted.id, "goal_replanned", {
+      goalId: persisted.id,
+      targetId: target?.id ?? persisted.id,
+      fingerprint,
+      occurrence,
+      failedCheckIds: decision.failedCheckIds,
+      action: decision.action,
+      evidenceRefs,
+      planVersion: persisted.planVersion,
+      replans: persisted.budgetUsage.replans,
     });
+    const interruptedAfterReplanEvent = await canonicalInterruption(
+      persisted,
+      runOptions,
+    );
+    if (interruptedAfterReplanEvent) {
+      return { goal: interruptedAfterReplanEvent, suspend: true };
+    }
     notifyProgress(
       "replanned",
-      goal,
-      "里程碑未通过，已重新规划。",
-      milestone.id,
+      persisted,
+      "验收发现结构性问题，已重新规划。",
+      target?.id,
     );
-    const replannedGoal = await writeGoalCheckpoint(goal, "goal_replanned");
-    return replannedGoal.status !== goal.status;
+    return { goal: persisted, suspend: false };
+  }
+
+  async function certifyOrAchieveGoal(
+    goal: Goal,
+    result: AcceptanceResult,
+    runOptions?: { signal?: AbortSignal },
+  ): Promise<Goal> {
+    if (goal.acceptanceProtocolVersion !== 2) {
+      return stopGoal(
+        goal,
+        "achieved",
+        "goal_accepted",
+        "Goal acceptance passed.",
+      );
+    }
+
+    let certificate: Goal["acceptanceCertificate"];
+    try {
+      const runIds = [
+        ...goal.milestones.flatMap((milestone) => milestone.runIds),
+        ...(result.judge?.runIds ?? []),
+      ];
+      const evidenceManifest =
+        result.evidenceManifest ?? emptyEvidenceManifest();
+      const provenanceRefs = collectCertificateProvenanceRefs(
+        result,
+        evidenceManifest,
+      );
+      certificate = createGoalAcceptanceCertificate({
+        goal,
+        acceptedAt: currentTime(),
+        runIds,
+        checkResults: result.checkResults,
+        evidenceManifest,
+        ...(Object.keys(provenanceRefs).length > 0 ? { provenanceRefs } : {}),
+        ...(result.judge
+          ? {
+              judge: {
+                ...(result.judge.providerId
+                  ? { providerId: result.judge.providerId }
+                  : {}),
+                model: result.judge.model,
+                promptVersion: result.judge.promptVersion,
+                evaluatedMessageIds: result.judge.evaluatedMessageIds,
+              },
+            }
+          : {}),
+      });
+    } catch {
+      const unavailable: AcceptanceResult = {
+        accepted: false,
+        verdict: "acceptance_unavailable",
+        failureClass: "validator_unavailable",
+        inferentialUsed: result.inferentialUsed,
+        checkResults: [
+          {
+            checkId: result.checkResults[0]?.checkId ?? "certificate",
+            kind: result.checkResults[0]?.kind ?? "assertion",
+            passed: false,
+            code: "certificate_invalid",
+            failureClass: "validator_unavailable",
+            evidenceRefs: [],
+            detail: "Acceptance certificate could not be created from validated evidence.",
+          },
+        ],
+      };
+      return (
+        await applyAcceptanceDecision(
+          goal,
+          null,
+          unavailable,
+          recentActionSignatures.get(goal.id) ?? [],
+          runOptions,
+        )
+      ).goal;
+    }
+
+    const interruptedBeforeCertificate = await canonicalInterruption(
+      goal,
+      runOptions,
+    );
+    if (interruptedBeforeCertificate) {
+      return interruptedBeforeCertificate;
+    }
+    assertGoalTransition(goal.status, "achieved");
+    goal.status = "achieved";
+    goal.stopReason = "goal_accepted";
+    goal.acceptanceState = {
+      ...ensureAcceptanceState(goal),
+      phase: "certified",
+      lastDecision: undefined,
+    };
+    goal.acceptanceCertificate = certificate;
+    touch(goal);
+    const persisted = await options.goalStore.save(goal);
+    if (persisted.status !== "achieved") {
+      await publishCanonicalTerminal(persisted);
+      return persisted;
+    }
+    const certificatePayload = {
+      goalId: persisted.id,
+      targetId: persisted.id,
+      fingerprint: persisted.acceptanceCertificate?.certificateHash ?? "",
+      occurrence: 1,
+      failedCheckIds: [] as string[],
+      action: "certify",
+      evidenceRefs: persisted.acceptanceCertificate?.evidence.map(
+        (entry) => entry.ref,
+      ) ?? [],
+      certificateHash: persisted.acceptanceCertificate?.certificateHash,
+    };
+    await options.goalStore.appendLedger(persisted.id, {
+      at: currentTime(),
+      kind: "acceptance_certified",
+      summary: "Goal acceptance certificate created.",
+      evidenceRefs: certificatePayload.evidenceRefs,
+    });
+    await emit(persisted.id, "acceptance_certified", certificatePayload);
+    notifyProgress(
+      "acceptance_certified",
+      persisted,
+      "目标已通过最终验收并生成证书。",
+    );
+    await options.goalStore.appendLedger(persisted.id, {
+      at: currentTime(),
+      kind: "goal_stopped",
+      summary: "Goal acceptance passed.",
+    });
+    await emit(persisted.id, "goal_stopped", {
+      goalId: persisted.id,
+      status: persisted.status,
+      stopReason: persisted.stopReason,
+      summary: "Goal acceptance passed.",
+    });
+    notifyProgress("stopped", persisted, "Goal acceptance passed.");
+    return persisted;
+  }
+
+  async function persistAcceptancePhase(
+    goal: Goal,
+    phase: GoalAcceptanceState["phase"],
+    incrementAttempt: boolean,
+  ): Promise<Goal> {
+    if (goal.acceptanceProtocolVersion !== 2) {
+      return goal;
+    }
+    const state = ensureAcceptanceState(goal);
+    goal.acceptanceState = {
+      ...state,
+      phase,
+      attempt: state.attempt + (incrementAttempt ? 1 : 0),
+    };
+    touch(goal);
+    const persisted = await options.goalStore.save(goal);
+    if (persisted.status !== goal.status) {
+      await publishCanonicalTerminal(persisted);
+    }
+    return persisted;
+  }
+
+  async function recordAcceptanceManifest(
+    goal: Goal,
+    target: Milestone | null,
+    result: AcceptanceResult,
+  ): Promise<void> {
+    const evidenceRefs = safeAcceptanceEvidenceRefs(result);
+    const targetIdentity = {
+      targetKind: target ? ("milestone" as const) : ("goal" as const),
+      targetId: target?.id ?? goal.id,
+    };
+    const fingerprint = createAcceptanceFailureFingerprint({
+      target: targetIdentity,
+      failedChecks: result.checkResults,
+      ...(result.evidenceManifest
+        ? { evidenceManifest: result.evidenceManifest }
+        : {}),
+      evidenceRefs,
+      actionSignatures: recentActionSignatures.get(goal.id) ?? [],
+      protocolVersion: goal.acceptanceProtocolVersion ?? 1,
+      validatorVersions: { acceptance: "goal-acceptance-v2" },
+    });
+    const occurrence = result.accepted
+      ? 0
+      : countConsecutiveFingerprint(
+          ensureAcceptanceState(goal).recentFailures,
+          targetIdentity,
+          fingerprint,
+        ) + 1;
+    await options.goalStore.appendLedger(goal.id, {
+      at: currentTime(),
+      kind: "acceptance_manifest_created",
+      summary: "Acceptance evidence manifest created.",
+      evidenceRefs,
+    });
+    await emit(goal.id, "acceptance_manifest_created", {
+      goalId: goal.id,
+      targetId: targetIdentity.targetId,
+      fingerprint,
+      occurrence,
+      failedCheckIds: failedCheckIds(result),
+      action: "validate",
+      evidenceRefs,
+    });
+    notifyProgress(
+      "acceptance_manifest_created",
+      goal,
+      "验收证据清单已生成。",
+      target?.id,
+    );
+  }
+
+  async function appendAcceptanceEvent(
+    goal: Goal,
+    kind: Extract<
+      ProgressLedgerEvent["kind"],
+      | "acceptance_failure_classified"
+      | "acceptance_repair_scheduled"
+      | "acceptance_strategy_changed"
+      | "acceptance_blocked"
+    >,
+    target: Milestone | null,
+    decision: AcceptanceRepairDecision,
+    evidenceRefs: string[],
+  ): Promise<void> {
+    const payload = {
+      goalId: goal.id,
+      targetId: target?.id ?? goal.id,
+      fingerprint: decision.fingerprint,
+      occurrence: decision.occurrence,
+      failedCheckIds: decision.failedCheckIds,
+      action: decision.action,
+      evidenceRefs,
+    };
+    await options.goalStore.appendLedger(goal.id, {
+      at: currentTime(),
+      kind,
+      summary: decision.summary,
+      ...(target ? { milestoneId: target.id } : {}),
+      evidenceRefs,
+    });
+    await emit(goal.id, kind, payload);
+    const progressMessage = {
+      acceptance_failure_classified: `验收失败已分类，涉及 ${decision.failedCheckIds.length} 项检查。`,
+      acceptance_repair_scheduled: `已安排定向验收修复（${Math.min(decision.occurrence, 2)}/2）。`,
+      acceptance_strategy_changed: "验收修复已切换策略（2/2）。",
+      acceptance_blocked: "目标验收受阻，需要人工处理后再继续。",
+    }[kind];
+    notifyProgress(kind, goal, progressMessage, target?.id);
   }
 
   async function stopForBudgetExhaustion(
@@ -712,62 +1250,6 @@ function terminalStatusMessage(goal: Goal): string {
   return "目标已停止。";
 }
 
-function canAcceptCoveredGoal(goal: Goal): boolean {
-  const goalChecks = goal.successCriteria.flatMap(
-    (criterion) => criterion.acceptanceChecks,
-  );
-  if (goalChecks.length === 0) {
-    return false;
-  }
-  if (
-    !isEvidenceBackedModelReviewOnly(goalChecks) &&
-    !isProvenanceArtifactFileExistsOnly(goalChecks)
-  ) {
-    return false;
-  }
-
-  const acceptedMilestones = goal.milestones.filter(
-    (milestone) => milestone.state === "accepted" || milestone.state === "skipped",
-  );
-  const coveredCheckSignatures = new Set(
-    acceptedMilestones.flatMap((milestone) =>
-      milestone.successCriteria.flatMap((criterion) =>
-        criterion.acceptanceChecks.map(createAcceptanceCheckSignature),
-      ),
-    ),
-  );
-  const hasAcceptedRunEvidence = acceptedMilestones.some((milestone) =>
-    Boolean(milestone.lastRunSummary?.trim() || milestone.lastAcceptanceSummary?.trim()),
-  );
-
-  return (
-    hasAcceptedRunEvidence &&
-    goalChecks.every((check) =>
-      coveredCheckSignatures.has(createAcceptanceCheckSignature(check)),
-    )
-  );
-}
-
-function isEvidenceBackedModelReviewOnly(
-  checks: SuccessCriterion["acceptanceChecks"],
-): boolean {
-  return checks.every(
-    (check) => check.kind === "model_review" && check.requiresEvidence,
-  );
-}
-
-function isProvenanceArtifactFileExistsOnly(
-  checks: SuccessCriterion["acceptanceChecks"],
-): boolean {
-  return checks.every(
-    (check) =>
-      check.kind === "file_exists" &&
-      check.params.requireProvenance === true &&
-      typeof check.params.artifactRef === "string" &&
-      check.params.artifactRef.trim().length > 0,
-  );
-}
-
 function shouldRequestReview(goal: Goal, milestone: Milestone): boolean {
   return shouldRequestGoalReview(
     goal.reviewPolicy,
@@ -790,27 +1272,172 @@ function summarizeAcceptanceFailure(result: AcceptanceResult): string {
   );
 }
 
-function createAcceptanceCheckSignature(
-  check: SuccessCriterion["acceptanceChecks"][number],
-): string {
-  return JSON.stringify({
-    kind: check.kind,
-    description: check.description,
-    requiresEvidence: check.requiresEvidence,
-    params: stableJsonValue(check.params),
+function ensureAcceptanceState(goal: Goal): GoalAcceptanceState {
+  return (
+    goal.acceptanceState ?? {
+      protocolVersion: 2,
+      phase: "idle",
+      attempt: 0,
+      recentFailures: [],
+    }
+  );
+}
+
+function acceptanceFailureClass(result: AcceptanceResult): AcceptanceFailureClass {
+  return (
+    result.failureClass ??
+    result.checkResults.find((check) => !check.passed)?.failureClass ??
+    "unknown"
+  );
+}
+
+function failedCheckIds(result: AcceptanceResult): string[] {
+  return [
+    ...new Set(
+      result.checkResults
+        .filter((check) => !check.passed)
+        .map((check) => check.checkId),
+    ),
+  ].sort();
+}
+
+function safeAcceptanceEvidenceRefs(result: AcceptanceResult): string[] {
+  const refs = [
+    ...result.checkResults.flatMap((check) => check.evidenceRefs),
+    ...(result.evidenceManifest?.artifacts.map((artifact) => artifact.ref) ?? []),
+  ];
+  return [...new Set(refs.map(redactEvidenceRef).filter(Boolean))]
+    .sort()
+    .slice(0, 64);
+}
+
+function redactEvidenceRef(ref: string): string {
+  const bounded = String(ref).slice(0, 512);
+  return bounded.replace(
+    /((?:api[_-]?key|access[_-]?token|authorization|password|secret)=)[^&\s]+/gi,
+    "$1[redacted]",
+  );
+}
+
+function toRepairDirective(
+  decision: AcceptanceRepairDecision,
+): AcceptanceRepairDirective {
+  if (decision.action === "certify") {
+    throw new Error("Certification is not a repair directive.");
+  }
+  return {
+    action: decision.action,
+    summary: decision.summary,
+    failedCheckIds: [...decision.failedCheckIds],
+    fingerprint: decision.fingerprint,
+    occurrence: decision.occurrence,
+    instructions: [...decision.instructions],
+  };
+}
+
+function blockedStopReason(
+  verdict: "blocked_external" | "impossible" | "acceptance_unavailable",
+): StopReason {
+  return {
+    blocked_external: "external_blocked",
+    impossible: "goal_impossible",
+    acceptance_unavailable: "acceptance_unavailable",
+  }[verdict] as StopReason;
+}
+
+function scheduleFinalRepairMilestone(
+  goal: Goal,
+  decision: Exclude<AcceptanceRepairDecision, { action: "certify" }>,
+): void {
+  const repairId = `repair_${decision.fingerprint.slice(0, 12)}`;
+  const failedIds = new Set(decision.failedCheckIds);
+  const successCriteria = goal.successCriteria
+    .map((criterion) => ({
+      ...criterion,
+      acceptanceChecks: criterion.acceptanceChecks.filter((check) =>
+        failedIds.has(check.id),
+      ),
+    }))
+    .filter((criterion) => criterion.acceptanceChecks.length > 0);
+  const dependencies = goal.milestones
+    .filter(
+      (milestone) =>
+        milestone.id !== repairId &&
+        (milestone.state === "accepted" || milestone.state === "skipped"),
+    )
+    .map((milestone) => milestone.id);
+  const existing = goal.milestones.find((milestone) => milestone.id === repairId);
+  if (existing) {
+    existing.description = `Repair final acceptance checks: ${decision.failedCheckIds.join(", ")}`;
+    existing.dependsOn = dependencies;
+    existing.successCriteria = successCriteria;
+    existing.state = "ready";
+    return;
+  }
+  goal.milestones.push({
+    id: repairId,
+    description: `Repair final acceptance checks: ${decision.failedCheckIds.join(", ")}`,
+    dependsOn: dependencies,
+    successCriteria,
+    state: "ready",
+    runIds: [],
+    attempts: 0,
   });
 }
 
-function stableJsonValue(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(stableJsonValue);
+function repairDirectiveForMilestone(
+  goal: Goal,
+  milestone: Milestone,
+): AcceptanceRepairDirective | undefined {
+  const directive = goal.acceptanceState?.lastDecision;
+  const lastFailure = goal.acceptanceState?.recentFailures.at(-1);
+  if (!directive || !lastFailure) return undefined;
+  if (
+    lastFailure.targetId === milestone.id ||
+    (lastFailure.targetKind === "goal" &&
+      milestone.id === `repair_${lastFailure.fingerprint.slice(0, 12)}`)
+  ) {
+    return directive;
   }
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, entry]) => [key, stableJsonValue(entry)]),
+  return undefined;
+}
+
+function emptyEvidenceManifest() {
+  return {
+    version: 1 as const,
+    generatedAt: new Date(0).toISOString(),
+    artifacts: [],
+    totalRenderedChars: 0,
+    truncated: false,
+  };
+}
+
+function collectCertificateProvenanceRefs(
+  result: AcceptanceResult,
+  manifest: GoalEvidenceManifest,
+): Record<string, string[]> {
+  const manifestRefs = new Set(manifest.artifacts.map((artifact) => artifact.ref));
+  const collected = new Map<string, Set<string>>();
+  for (const check of result.checkResults) {
+    const artifactRefs = check.evidenceRefs.filter((ref) => manifestRefs.has(ref));
+    const provenanceRefs = check.evidenceRefs.filter(
+      (ref) => ref.startsWith("provenance:") || ref.startsWith("trajectory_"),
     );
+    const owners =
+      artifactRefs.length > 0
+        ? artifactRefs
+        : manifest.artifacts.length === 1
+          ? [manifest.artifacts[0]!.ref]
+          : [];
+    for (const owner of owners) {
+      const refs = collected.get(owner) ?? new Set<string>();
+      for (const ref of provenanceRefs) refs.add(ref);
+      if (refs.size > 0) collected.set(owner, refs);
+    }
   }
-  return value;
+  return Object.fromEntries(
+    [...collected.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([ref, refs]) => [ref, [...refs].sort()]),
+  );
 }
