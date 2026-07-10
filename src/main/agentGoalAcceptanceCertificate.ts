@@ -16,7 +16,21 @@ const MAX_CANONICAL_NODES = 20_000;
 const MAX_CANONICAL_ARRAY_LENGTH = 10_000;
 const MAX_CANONICAL_STRING_LENGTH = 262_144;
 const MAX_CANONICAL_BYTES = 1_048_576;
-const MAX_SYNTHESIZED_EVIDENCE_ENTRIES = 1_000;
+const CREATE_INPUT_KEYS = new Set([
+  "goal",
+  "acceptedAt",
+  "runIds",
+  "checkResults",
+  "evidenceManifest",
+  "provenanceRefs",
+  "judge",
+]);
+const JUDGE_INPUT_KEYS = new Set([
+  "providerId",
+  "model",
+  "promptVersion",
+  "evaluatedMessageIds",
+]);
 
 const SECRET_PARAM_KEYS = new Set([
   "apikey",
@@ -150,6 +164,11 @@ function createGoalCriteriaHashInternal(
 function createGoalAcceptanceCertificateInternal(
   input: CreateGoalAcceptanceCertificateInput,
 ): GoalAcceptanceCertificate {
+  assertExactDataEnvelope(
+    input,
+    "Certificate creation input",
+    CREATE_INPUT_KEYS,
+  );
   const runIds = normalizeStringSet(input.runIds, "run id", 1);
   const criteriaHash = createGoalCriteriaHashInternal(input.goal);
   const goalChecks = getGoalChecks(input.goal);
@@ -186,7 +205,7 @@ function createGoalAcceptanceCertificateInternal(
     input.evidenceManifest.artifacts,
     "certificate evidence manifest artifacts",
   ) as GoalEvidenceManifest["artifacts"];
-  let evidence = dedupeStableEntries(
+  const evidence = dedupeStableEntries(
     artifacts.map((artifact) => ({
       ref: artifact.ref,
       ...(artifact.path !== undefined ? { path: artifact.path } : {}),
@@ -202,10 +221,21 @@ function createGoalAcceptanceCertificateInternal(
     evidenceIdentity,
     "evidence entry",
   );
-  evidence = synthesizeMissingEvidence(checkResults, evidence, provenanceMap);
   evidence.sort(compareEvidence);
 
   const judge = normalizeJudge(input.judge, semantic);
+  const groundingVerification = verifyEvidenceReferences(
+    input.goal,
+    checkResults,
+    evidence,
+    judge,
+    runIds,
+  );
+  if (!groundingVerification.ok) {
+    throw new GoalAcceptanceCertificateInputError(
+      groundingVerification.reason,
+    );
+  }
   const unsigned: Omit<GoalAcceptanceCertificate, "certificateHash"> = {
     version: 1,
     goalId: requireNonemptyString(input.goal.id, "goal id"),
@@ -295,54 +325,22 @@ function verifyGoalAcceptanceCertificateInternal(
   const evidenceVerification = verifyEvidence(certificate.evidence);
   if (!evidenceVerification.ok) return evidenceVerification;
 
-  const referenceVerification = verifyEvidenceReferences(
-    goal,
-    certificate.checkResults,
-    certificate.evidence,
-  );
-  if (!referenceVerification.ok) return referenceVerification;
-
   const semantic = getGoalChecks(goal).some(
     (check) => check.kind === "model_review",
   );
   const judgeVerification = verifyJudge(certificate.judge, semantic);
   if (!judgeVerification.ok) return judgeVerification;
 
-  return { ok: true };
-}
-
-function synthesizeMissingEvidence(
-  checkResults: GoalAcceptanceCheckResult[],
-  evidence: CertificateEvidence[],
-  provenanceMap: Record<string, string[]>,
-): CertificateEvidence[] {
-  const result = [...evidence];
-  let synthesized = 0;
-  const refs = normalizeStringSet(
-    checkResults.flatMap((checkResult) => checkResult.evidenceRefs),
-    "result evidence ref",
+  const referenceVerification = verifyEvidenceReferences(
+    goal,
+    certificate.checkResults,
+    certificate.evidence,
+    certificate.judge,
+    certificate.runIds,
   );
+  if (!referenceVerification.ok) return referenceVerification;
 
-  for (const ref of refs) {
-    const matches = result.filter(
-      (entry) => entry.ref === ref || entry.provenanceRefs.includes(ref),
-    );
-    if (matches.length > 0) continue;
-    synthesized += 1;
-    if (synthesized > MAX_SYNTHESIZED_EVIDENCE_ENTRIES) {
-      throw new GoalAcceptanceCertificateInputError(
-        "Synthesized evidence entry bound exceeded.",
-      );
-    }
-    result.push({
-      ref,
-      provenanceRefs: normalizeStringSet(
-        provenanceMap[ref] ?? [],
-        `provenance ref for ${ref}`,
-      ),
-    });
-  }
-  return dedupeStableEntries(result, evidenceIdentity, "evidence entry");
+  return { ok: true };
 }
 
 function normalizeJudge(
@@ -357,6 +355,7 @@ function normalizeJudge(
     }
     return undefined;
   }
+  assertExactDataEnvelope(judge, "Certificate judge input", JUDGE_INPUT_KEYS);
 
   const normalized = {
     ...(judge.providerId !== undefined
@@ -488,9 +487,11 @@ function verifyEvidence(evidence: unknown): GoalAcceptanceCertificateVerificatio
 }
 
 function verifyEvidenceReferences(
-  goal: Goal,
+  goal: Pick<Goal, "successCriteria">,
   checkResults: GoalAcceptanceCheckResult[],
   evidence: GoalAcceptanceCertificate["evidence"],
+  judge: GoalAcceptanceCertificate["judge"],
+  runIds: string[],
 ): GoalAcceptanceCertificateVerification {
   const resolutionCounts = new Map<string, number>();
   for (const entry of evidence) {
@@ -498,6 +499,8 @@ function verifyEvidenceReferences(
       resolutionCounts.set(ref, (resolutionCounts.get(ref) ?? 0) + 1);
     }
   }
+  const judgeMessageIds = new Set(judge?.evaluatedMessageIds ?? []);
+  const runEvidenceRefs = new Set(runIds.map((runId) => `run:${runId}`));
 
   const expectedById = new Map(
     getGoalChecks(goal).map((check) => [check.id, check]),
@@ -510,10 +513,16 @@ function verifyEvidenceReferences(
       );
     }
     for (const ref of result.evidenceRefs) {
-      const matches = resolutionCounts.get(ref) ?? 0;
+      let matches = resolutionCounts.get(ref) ?? 0;
+      if (expected?.kind === "model_review" && judgeMessageIds.has(ref)) {
+        matches += 1;
+      }
+      if (runEvidenceRefs.has(ref)) {
+        matches += 1;
+      }
       if (matches === 0) {
         return failure(
-          `Check ${result.checkId} evidence ref ${ref} does not resolve to certificate evidence.`,
+          `Check ${result.checkId} evidence ref ${ref} is not grounded and does not resolve to certificate evidence, judge messages, or runs.`,
         );
       }
       if (matches > 1) {
@@ -874,6 +883,49 @@ function isSecretParamKey(key: string): boolean {
   const lastPair = words.slice(-2).join("");
   return SECRET_PARAM_KEYS.has(last) ||
     SECRET_PARAM_SUFFIXES.some((suffix) => lastPair === suffix);
+}
+
+function assertExactDataEnvelope(
+  value: unknown,
+  label: string,
+  allowedKeys: Set<string>,
+): asserts value is Record<string, unknown> {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    isProxy(value)
+  ) {
+    throw new GoalAcceptanceCertificateInputError(
+      `${label} must be a plain non-proxy record.`,
+    );
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new GoalAcceptanceCertificateInputError(
+      `${label} must be a plain record.`,
+    );
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const keys = Reflect.ownKeys(descriptors);
+  if (keys.some((key) => typeof key === "symbol")) {
+    throw new GoalAcceptanceCertificateInputError(
+      `${label} contains an undeclared symbol property.`,
+    );
+  }
+  for (const key of keys as string[]) {
+    const descriptor = descriptors[key];
+    if (!descriptor || !("value" in descriptor) || !descriptor.enumerable) {
+      throw new GoalAcceptanceCertificateInputError(
+        `${label} property "${key}" must be an enumerable data property.`,
+      );
+    }
+    if (!allowedKeys.has(key)) {
+      throw new GoalAcceptanceCertificateInputError(
+        `${label} contains undeclared property "${key}".`,
+      );
+    }
+  }
 }
 
 function protectCreation<T>(fallback: string, operation: () => T): T {

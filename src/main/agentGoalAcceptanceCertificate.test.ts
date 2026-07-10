@@ -164,43 +164,97 @@ describe("goal acceptance certificate", () => {
     expect(leftCertificate.certificateHash).toMatch(/^[a-f0-9]{64}$/);
   });
 
-  it("does not copy undeclared raw provider secrets into the certificate", () => {
-    const input = validInput() as ReturnType<typeof validInput> & {
-      providerApiKey: string;
-      judge: NonNullable<ReturnType<typeof validInput>["judge"]> & {
-        apiKey: string;
-      };
-    };
-    input.providerApiKey = "top-level-secret";
-    input.judge.apiKey = "judge-secret";
+  it.each(["providerApiKey", "unexpectedField"])(
+    "rejects undeclared top-level certificate input property %s",
+    (property) => {
+      const input = validInput() as ReturnType<typeof validInput> &
+        Record<string, unknown>;
+      input[property] = "must-not-be-accepted";
 
-    const serialized = JSON.stringify(createGoalAcceptanceCertificate(input));
+      expect(() => createGoalAcceptanceCertificate(input)).toThrowError(
+        GoalAcceptanceCertificateInputError,
+      );
+      expect(() => createGoalAcceptanceCertificate(input)).toThrow(property);
+    },
+  );
 
-    expect(serialized).not.toContain("top-level-secret");
-    expect(serialized).not.toContain("judge-secret");
-    expect(serialized).not.toContain("apiKey");
+  it.each(["apiKey", "unexpectedField"])(
+    "rejects undeclared judge property %s",
+    (property) => {
+      const input = validInput();
+      (input.judge as Record<string, unknown>)[property] =
+        "must-not-be-accepted";
+
+      expect(() => createGoalAcceptanceCertificate(input)).toThrowError(
+        GoalAcceptanceCertificateInputError,
+      );
+      expect(() => createGoalAcceptanceCertificate(input)).toThrow(property);
+    },
+  );
+
+  it("rejects proxy and getter certificate input envelopes without raw exceptions", () => {
+    const proxied = new Proxy(validInput(), {});
+    expect(() => createGoalAcceptanceCertificate(proxied)).toThrowError(
+      GoalAcceptanceCertificateInputError,
+    );
+
+    const getterInput = validInput();
+    Object.defineProperty(getterInput, "runIds", {
+      enumerable: true,
+      get() {
+        throw new Error("RAW_INPUT_GETTER_ERROR");
+      },
+    });
+    expect(() => createGoalAcceptanceCertificate(getterInput)).toThrowError(
+      GoalAcceptanceCertificateInputError,
+    );
+
+    const judgeGetter = validInput();
+    Object.defineProperty(judgeGetter.judge!, "model", {
+      enumerable: true,
+      get() {
+        throw new Error("RAW_JUDGE_GETTER_ERROR");
+      },
+    });
+    expect(() => createGoalAcceptanceCertificate(judgeGetter)).toThrowError(
+      GoalAcceptanceCertificateInputError,
+    );
+  });
+
+  it("accepts a normal full Goal inside the declared goal envelope", () => {
+    const input = validInput();
+
+    expect(input.goal).toHaveProperty("budget");
+    expect(() => createGoalAcceptanceCertificate(input)).not.toThrow();
   });
 
   it("verifies a valid complete protocol-v2 certificate", () => {
     expect(verifyGoalAcceptanceCertificate(certifiedGoal())).toEqual({ ok: true });
   });
 
-  it("synthesizes bounded metadata-only evidence for non-manifest result refs", () => {
+  it("rejects dangling non-manifest refs instead of synthesizing evidence", () => {
     const input = validInput();
     input.evidenceManifest.artifacts = input.evidenceManifest.artifacts.filter(
       (artifact) => artifact.ref !== "artifact:semantic",
     );
     delete input.provenanceRefs["artifact:semantic"];
 
-    const certificate = createGoalAcceptanceCertificate(input);
-    const synthesized = certificate.evidence.find(
-      (entry) => entry.ref === "artifact:semantic",
+    expect(() => createGoalAcceptanceCertificate(input)).toThrowError(
+      GoalAcceptanceCertificateInputError,
     );
+    expect(() => createGoalAcceptanceCertificate(input)).toThrow(
+      /not grounded|does not resolve/i,
+    );
+  });
 
-    expect(synthesized).toEqual({
-      ref: "artifact:semantic",
-      provenanceRefs: [],
-    });
+  it("keeps certificate evidence limited to actual manifest artifacts", () => {
+    const input = validInput();
+    const certificate = createGoalAcceptanceCertificate(input);
+
+    expect(certificate.evidence.map((entry) => entry.ref)).toEqual([
+      "artifact:report",
+      "artifact:semantic",
+    ]);
     expect(verifyGoalAcceptanceCertificate(
       goalWithCertificate(input.goal, certificate),
     )).toEqual({ ok: true });
@@ -220,14 +274,43 @@ describe("goal acceptance certificate", () => {
     )).toEqual({ ok: true });
   });
 
-  it("rejects a required-evidence check with no result evidence refs", () => {
+  it("grounds semantic result evidence in evaluated judge message identity", () => {
     const input = validInput();
-    input.checkResults[0]!.evidenceRefs = [];
+    input.checkResults[1]!.evidenceRefs = ["message_a"];
+
+    const certificate = createGoalAcceptanceCertificate(input);
+
+    expect(certificate.evidence.map((entry) => entry.ref)).toEqual([
+      "artifact:report",
+      "artifact:semantic",
+    ]);
+    expect(verifyGoalAcceptanceCertificate(
+      goalWithCertificate(input.goal, certificate),
+    )).toEqual({ ok: true });
+  });
+
+  it("grounds result evidence in an explicitly prefixed certificate run id", () => {
+    const input = validInput();
+    input.checkResults[0]!.evidenceRefs = ["run:run_a"];
+
     const certificate = createGoalAcceptanceCertificate(input);
 
     expect(verifyGoalAcceptanceCertificate(
       goalWithCertificate(input.goal, certificate),
-    )).toMatchObject({
+    )).toEqual({ ok: true });
+  });
+
+  it("rejects a required-evidence check with no result evidence refs", () => {
+    const input = validInput();
+    input.checkResults[0]!.evidenceRefs = [];
+    expect(() => createGoalAcceptanceCertificate(input)).toThrowError(
+      GoalAcceptanceCertificateInputError,
+    );
+
+    const goal = certifiedGoal();
+    goal.acceptanceCertificate!.checkResults[0]!.evidenceRefs = [];
+    resignCertificate(goal);
+    expect(verifyGoalAcceptanceCertificate(goal)).toMatchObject({
       ok: false,
       reason: expect.stringMatching(/requires evidence|missing evidence/i),
     });
@@ -238,11 +321,23 @@ describe("goal acceptance certificate", () => {
     input.checkResults[1]!.evidenceRefs = ["trajectory_shared"];
     input.provenanceRefs["artifact:report"] = ["trajectory_shared"];
     input.provenanceRefs["artifact:semantic"] = ["trajectory_shared"];
-    const certificate = createGoalAcceptanceCertificate(input);
+    expect(() => createGoalAcceptanceCertificate(input)).toThrowError(
+      GoalAcceptanceCertificateInputError,
+    );
+    expect(() => createGoalAcceptanceCertificate(input)).toThrow(/ambiguous/);
 
-    expect(verifyGoalAcceptanceCertificate(
-      goalWithCertificate(input.goal, certificate),
-    )).toMatchObject({
+    const goal = certifiedGoal();
+    goal.acceptanceCertificate!.checkResults[1]!.evidenceRefs = [
+      "trajectory_shared",
+    ];
+    goal.acceptanceCertificate!.evidence[0]!.provenanceRefs.push(
+      "trajectory_shared",
+    );
+    goal.acceptanceCertificate!.evidence[1]!.provenanceRefs.push(
+      "trajectory_shared",
+    );
+    resignCertificate(goal);
+    expect(verifyGoalAcceptanceCertificate(goal)).toMatchObject({
       ok: false,
       reason: expect.stringContaining("ambiguous"),
     });
