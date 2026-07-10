@@ -1104,9 +1104,9 @@ describe("agent goal controller", () => {
     expect(result.acceptanceState?.recentFailures.at(-1)?.occurrence).toBe(3);
     expect(plannerCalls).toBe(0);
     expect(judgePrompts).toHaveLength(3);
-    expect(judgePrompts.every((prompt) => prompt.includes("Section 10 Final Conclusion"))).toBe(
-      true,
-    );
+    for (const prompt of judgePrompts) {
+      expectLateHeadingInStructuralEvidence(prompt, reportPath, report);
+    }
   });
 
   it("certifies a large ten-section report when the late final heading passes both cold judges", async () => {
@@ -1153,9 +1153,9 @@ describe("agent goal controller", () => {
     expect(result.status).toBe("achieved");
     expect(runtime.runMilestoneIds).toEqual(["milestone_report"]);
     expect(judgePrompts).toHaveLength(2);
-    expect(judgePrompts.every((prompt) => prompt.includes("Section 10 Final Conclusion"))).toBe(
-      true,
-    );
+    for (const prompt of judgePrompts) {
+      expectLateHeadingInStructuralEvidence(prompt, reportPath, report);
+    }
     expect(result.acceptanceCertificate).toBeDefined();
     expect(verifyGoalAcceptanceCertificate(result)).toEqual({ ok: true });
   });
@@ -2268,6 +2268,40 @@ function largeTenSectionReport(): string {
     "# Section 10 Final Conclusion\nAll ten required sections are present.\n",
     "ordinary appendix after the final section\n".repeat(70_000),
   ].join("");
+}
+
+function expectLateHeadingInStructuralEvidence(
+  prompt: string,
+  reportPath: string,
+  report: string,
+): void {
+  const quotedBlock = extractStructuralEvidenceBlock(prompt);
+  const manifest = quotedBlock
+    .split("\n")
+    .map((line) => {
+      if (!line.startsWith("| ")) {
+        throw new Error("structural evidence line is not quoted data");
+      }
+      return line.slice(2);
+    })
+    .join("\n");
+  expect(manifest).toContain(`| Artifact 1: artifact:${reportPath}`);
+  expect(manifest).toContain(`|   Size bytes: ${Buffer.byteLength(report)}`);
+  const heading = manifest.match(
+    /^\|   Heading L(\d+) H1: Section 10 Final Conclusion$/m,
+  );
+  expect(heading).not.toBeNull();
+  expect(Number(heading?.[1])).toBeGreaterThan(70_000);
+}
+
+function extractStructuralEvidenceBlock(prompt: string): string {
+  const match = prompt.match(
+    /BEGIN QUOTED STRUCTURAL EVIDENCE DATA\n([\s\S]*?)\nEND QUOTED STRUCTURAL EVIDENCE DATA/,
+  );
+  if (!match?.[1]) {
+    throw new Error("cold-judge prompt is missing its structural evidence block");
+  }
+  return match[1];
 }
 
 const artifactCriterion: SuccessCriterion = {
