@@ -2048,6 +2048,14 @@ export function reconcileIrreversibleGoalProgressEvent(
     return event;
   }
 
+  if (
+    event.status === goal.status &&
+    (event.event === "stopped" ||
+      (goal.status === "achieved" && event.event === "acceptance_certified"))
+  ) {
+    return event;
+  }
+
   return {
     ...event,
     status: goal.status,

@@ -602,6 +602,73 @@ describe("app container goal drafts", () => {
   );
 
   it.each([
+    ["achieved", "acceptance_repair_scheduled"],
+    ["canceled", "replanned"],
+    ["achieved", "checkpoint"],
+  ] as const)(
+    "canonicalizes stale terminal %s/%s progress",
+    (status, event) => {
+      const stale: GoalProgressEvent = {
+        kind: "goal_progress",
+        goalId: "goal_stale_terminal",
+        sessionId: "chat_stale_terminal",
+        status: "executing",
+        event,
+        message: "Stale nonterminal progress.",
+        timestamp: "2026-07-11T08:00:00.000Z",
+      };
+
+      expect(
+        reconcileIrreversibleGoalProgressEvent(
+          stale,
+          createStoredGoal({
+            id: stale.goalId,
+            status,
+            stopReason: status === "achieved" ? "goal_accepted" : "user_canceled",
+          }),
+        ),
+      ).toMatchObject({
+        status,
+        event: "stopped",
+        message: status === "achieved" ? "目标已达成。" : "目标已取消。",
+      });
+    },
+  );
+
+  it.each([
+    ["achieved", "acceptance_certified"],
+    ["achieved", "stopped"],
+    ["canceled", "stopped"],
+  ] as const)(
+    "preserves current terminal %s/%s progress",
+    (status, event) => {
+      const current: GoalProgressEvent = {
+        kind: "goal_progress",
+        goalId: "goal_current_terminal",
+        sessionId: "chat_current_terminal",
+        status,
+        event,
+        message:
+          event === "acceptance_certified"
+            ? "目标已通过最终验收并生成证书。"
+            : "目标已停止。",
+        timestamp: "2026-07-11T08:00:00.000Z",
+      };
+
+      expect(
+        reconcileIrreversibleGoalProgressEvent(
+          current,
+          createStoredGoal({
+            id: current.goalId,
+            status,
+            stopReason: status === "achieved" ? "goal_accepted" : "user_canceled",
+          }),
+        ),
+      ).toEqual(current);
+    },
+  );
+
+  it.each([
     ["external_blocked", "外部依赖受阻"],
     ["goal_impossible", "目标不可实现"],
     ["acceptance_unavailable", "验收暂不可用"],
@@ -726,7 +793,21 @@ describe("app container goal drafts", () => {
   });
 
   it("appends a final assistant result when a background goal is achieved", async () => {
+    const deliveryValidator: AcceptanceValidator = {
+      kind: "validator:certified_delivery",
+      async evaluate({ check }) {
+        return {
+          checkId: check.id,
+          kind: check.kind,
+          passed: true,
+          code: "delivery_accepted",
+          evidenceRefs: [],
+          detail: "Delivery fixture accepted without external evidence.",
+        };
+      },
+    };
     const container = createAppContainer({
+      acceptanceValidators: [deliveryValidator],
       async requestToolApproval() {
         return { approved: false, reason: "test" };
       },
@@ -740,6 +821,13 @@ describe("app container goal drafts", () => {
       chatSessionId: session.session.id,
       status: "waiting_for_review",
       description: "帮我看一下我chrome浏览器的书签都有哪些",
+      acceptanceProtocolVersion: 2,
+      acceptanceState: {
+        protocolVersion: 2,
+        phase: "idle",
+        attempt: 0,
+        recentFailures: [],
+      },
       successCriteria: [
         {
           id: "criterion_goal_progress",
@@ -747,13 +835,9 @@ describe("app container goal drafts", () => {
           acceptanceChecks: [
             {
               id: "check_goal_progress",
-              kind: "assertion",
-              description: "Goal progress shows all milestones accepted.",
-              params: {
-                artifactRef: "goalProgress",
-                path: "allMilestonesAccepted",
-                equals: true,
-              },
+              kind: "validator:certified_delivery",
+              description: "Goal progress is accepted by the delivery fixture.",
+              params: {},
               requiresEvidence: false,
             },
           ],
@@ -800,9 +884,26 @@ describe("app container goal drafts", () => {
       status: "waiting_for_review",
     });
 
+    const achievedProgress: GoalProgressEvent[] = [];
+    const certifiedSessionChecks: Array<Promise<Goal["status"] | undefined>> = [];
     const progress = new Promise<GoalProgressEvent>((resolve) => {
       const unsubscribe = container.onGoalProgressEvent((event) => {
         if (event.goalId === goal.id && event.status === "achieved") {
+          achievedProgress.push(event);
+          if (event.event === "acceptance_certified") {
+            certifiedSessionChecks.push(
+              container.chatSessionStore().get(session.session.id).then(
+                (record) =>
+                  record?.goalSummaries?.find((summary) => summary.id === goal.id)
+                    ?.status,
+              ),
+            );
+          }
+          if (event.event === "stopped") {
+            unsubscribe();
+            resolve(event);
+          }
+        } else if (event.goalId === goal.id && event.event === "stopped") {
           unsubscribe();
           resolve(event);
         }
@@ -813,7 +914,20 @@ describe("app container goal drafts", () => {
       kind: "approve_continue",
     });
     expect(result.status).toBe("executing");
-    await progress;
+    const terminalProgress = await progress;
+
+    expect(terminalProgress).toMatchObject({
+      status: "achieved",
+      message: "Goal acceptance passed.",
+    });
+    expect(achievedProgress.map((event) => event.event)).toEqual([
+      "acceptance_certified",
+      "stopped",
+    ]);
+    expect(certifiedSessionChecks).toHaveLength(1);
+    await expect(Promise.all(certifiedSessionChecks)).resolves.toEqual([
+      "achieved",
+    ]);
 
     const loadedSession = await container.chatSessionStore().get(session.session.id);
     const terminalMessage = loadedSession?.messages.find(
@@ -1026,6 +1140,15 @@ function createStoredGoal(
     planVersion: overrides.planVersion ?? 1,
     ...(overrides.stopReason ? { stopReason: overrides.stopReason } : {}),
     ...(overrides.workspaceId ? { workspaceId: overrides.workspaceId } : {}),
+    ...(overrides.acceptanceProtocolVersion
+      ? { acceptanceProtocolVersion: overrides.acceptanceProtocolVersion }
+      : {}),
+    ...(overrides.acceptanceState
+      ? { acceptanceState: overrides.acceptanceState }
+      : {}),
+    ...(overrides.acceptanceCertificate
+      ? { acceptanceCertificate: overrides.acceptanceCertificate }
+      : {}),
     createdAt: timestamp,
     updatedAt: timestamp,
   };

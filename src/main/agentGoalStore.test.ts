@@ -176,6 +176,31 @@ describe("agent goal store", () => {
     });
   });
 
+  it("omits an invalid v2 achievement certificate on read without rewriting its raw file", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const goalsDir = path.join(configDir, "agent-goals");
+    const filePath = path.join(goalsDir, "goal_tampered_read.json");
+    const tampered = createCertifiedGoal(
+      createProtocolV2Goal("goal_tampered_read", "executing"),
+    );
+    tampered.acceptanceCertificate!.evidence[0]!.sha256 = "0".repeat(64);
+    const raw = `${JSON.stringify(tampered, null, 3)}\n`;
+    await mkdir(goalsDir, { recursive: true });
+    await writeFile(filePath, raw, "utf8");
+    const before = await stat(filePath);
+
+    const loaded = await store.get(tampered.id);
+
+    expect(loaded).toMatchObject({
+      id: tampered.id,
+      status: "achieved",
+      acceptanceProtocolVersion: 2,
+    });
+    expect(loaded).not.toHaveProperty("acceptanceCertificate");
+    expect(await readFile(filePath, "utf8")).toBe(raw);
+    expect((await stat(filePath)).mtimeMs).toBe(before.mtimeMs);
+  });
+
   it("keeps legacy achieved JSON without a protocol marker readable and save-compatible", async () => {
     const store = createAgentGoalStore({ configDir });
     const legacy = createGoal("goal_legacy_achieved", "achieved");
@@ -260,6 +285,83 @@ describe("agent goal store", () => {
       },
     });
     await expect(store.get(protocolV2.id)).resolves.toEqual(merged);
+  });
+
+  it("merges equal-length divergent acceptance histories without resetting occurrences", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const canonical = createProtocolV2Goal("goal_equal_window", "executing");
+    canonical.acceptanceState = {
+      protocolVersion: 2,
+      phase: "repairing",
+      attempt: 3,
+      recentFailures: [
+        createFailureRecord({ occurrence: 2, at: "2026-07-11T03:02:00.000Z" }),
+        createFailureRecord({ occurrence: 3, at: "2026-07-11T03:03:00.000Z" }),
+      ],
+      lastDecision: createRepairDirective({ occurrence: 3 }),
+    };
+    const stale = createProtocolV2Goal(canonical.id, "executing");
+    stale.acceptanceState = {
+      protocolVersion: 2,
+      phase: "idle",
+      attempt: 2,
+      recentFailures: [
+        createFailureRecord({ occurrence: 1, at: "2026-07-11T03:01:00.000Z" }),
+        createFailureRecord({ occurrence: 2, at: "2026-07-11T03:02:00.000Z" }),
+      ],
+      lastDecision: createRepairDirective({ occurrence: 2 }),
+    };
+
+    await store.save(canonical);
+    const merged = await store.save(stale);
+
+    expect(merged.acceptanceState?.recentFailures.map((entry) => entry.occurrence)).toEqual([
+      1,
+      2,
+      3,
+    ]);
+    expect(merged.acceptanceState?.attempt).toBe(3);
+    expect(merged.acceptanceState?.lastDecision?.occurrence).toBe(3);
+  });
+
+  it("keeps the newest canonical 20-record acceptance window against a stale capped window", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const canonical = createProtocolV2Goal("goal_capped_window", "executing");
+    canonical.acceptanceState = {
+      protocolVersion: 2,
+      phase: "repairing",
+      attempt: 40,
+      recentFailures: Array.from({ length: 20 }, (_, index) =>
+        createFailureRecord({
+          occurrence: index + 21,
+          at: `2026-07-11T04:${String(index + 20).padStart(2, "0")}:00.000Z`,
+        }),
+      ),
+      lastDecision: createRepairDirective({ occurrence: 40 }),
+    };
+    const stale = createProtocolV2Goal(canonical.id, "executing");
+    stale.acceptanceState = {
+      protocolVersion: 2,
+      phase: "idle",
+      attempt: 20,
+      recentFailures: Array.from({ length: 20 }, (_, index) =>
+        createFailureRecord({
+          occurrence: index + 1,
+          at: `2026-07-11T03:${String(index).padStart(2, "0")}:00.000Z`,
+        }),
+      ),
+      lastDecision: createRepairDirective({ occurrence: 20 }),
+    };
+
+    await store.save(canonical);
+    const merged = await store.save(stale);
+
+    expect(merged.acceptanceState?.recentFailures).toHaveLength(20);
+    expect(merged.acceptanceState?.recentFailures.map((entry) => entry.occurrence)).toEqual(
+      Array.from({ length: 20 }, (_, index) => index + 21),
+    );
+    expect(merged.acceptanceState?.attempt).toBe(40);
+    expect(merged.acceptanceState?.lastDecision?.occurrence).toBe(40);
   });
 
   it("preserves a canonical certified achievement against stale and same-status saves", async () => {
@@ -666,9 +768,11 @@ function createProtocolV2Goal(id: string, status: GoalStatus): Goal {
   };
 }
 
-function createFailureRecord(): NonNullable<
-  Goal["acceptanceState"]
->["recentFailures"][number] {
+function createFailureRecord(
+  overrides: Partial<
+    NonNullable<Goal["acceptanceState"]>["recentFailures"][number]
+  > = {},
+): NonNullable<Goal["acceptanceState"]>["recentFailures"][number] {
   return {
     at: "2026-07-11T02:00:00.000Z",
     targetKind: "goal",
@@ -680,12 +784,15 @@ function createFailureRecord(): NonNullable<
     failedCheckIds: ["check_file"],
     evidenceRefs: ["artifact:report"],
     actionSignatures: ["file_write:abc"],
+    ...overrides,
   };
 }
 
-function createRepairDirective(): NonNullable<
-  NonNullable<Goal["acceptanceState"]>["lastDecision"]
-> {
+function createRepairDirective(
+  overrides: Partial<
+    NonNullable<NonNullable<Goal["acceptanceState"]>["lastDecision"]>
+  > = {},
+): NonNullable<NonNullable<Goal["acceptanceState"]>["lastDecision"]> {
   return {
     action: "retry_alternate_strategy",
     summary: "Try a different artifact strategy.",
@@ -693,6 +800,7 @@ function createRepairDirective(): NonNullable<
     fingerprint: "f".repeat(64),
     occurrence: 2,
     instructions: ["Create the missing artifact with different arguments."],
+    ...overrides,
   };
 }
 

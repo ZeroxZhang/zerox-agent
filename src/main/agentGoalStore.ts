@@ -52,7 +52,7 @@ export function createAgentGoalStore(options: {
     try {
       const filePath = goalPath(goalId);
       const raw = await readFile(filePath, "utf8");
-      return normalizeGoal(JSON.parse(raw) as Goal);
+      return sanitizeGoalForRead(normalizeGoal(JSON.parse(raw) as Goal));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         return null;
@@ -229,6 +229,19 @@ function normalizeGoal(goal: Goal): Goal {
   };
 }
 
+function sanitizeGoalForRead(goal: Goal): Goal {
+  if (
+    goal.status !== "achieved" ||
+    goal.acceptanceProtocolVersion !== 2 ||
+    verifyProtocolV2Achievement(goal).ok
+  ) {
+    return goal;
+  }
+
+  const { acceptanceCertificate: _invalidCertificate, ...safeGoal } = goal;
+  return safeGoal;
+}
+
 function compareGoalsByUpdatedAtDesc(left: Goal, right: Goal): number {
   return (
     new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime() ||
@@ -272,19 +285,138 @@ function mergeAcceptanceState(
   if (!incoming) return existing;
   if (!existing) return incoming;
 
+  const recentFailures = mergeAcceptanceFailures(
+    existing.recentFailures,
+    incoming.recentFailures,
+  );
+  const lastDecision =
+    incoming.phase === "certified"
+      ? undefined
+      : chooseCanonicalLastDecision(
+          existing.lastDecision,
+          incoming.lastDecision,
+          recentFailures,
+        );
+
   return {
     ...incoming,
     attempt: Math.max(existing.attempt, incoming.attempt),
-    recentFailures:
-      incoming.recentFailures.length >= existing.recentFailures.length
-        ? incoming.recentFailures
-        : existing.recentFailures,
-    ...(incoming.lastDecision
-      ? { lastDecision: incoming.lastDecision }
-      : existing.lastDecision
-        ? { lastDecision: existing.lastDecision }
-        : {}),
+    recentFailures,
+    ...(lastDecision ? { lastDecision } : {}),
   };
+}
+
+type GoalAcceptanceFailure = NonNullable<
+  Goal["acceptanceState"]
+>["recentFailures"][number];
+type GoalAcceptanceDecision = NonNullable<
+  NonNullable<Goal["acceptanceState"]>["lastDecision"]
+>;
+
+function mergeAcceptanceFailures(
+  existing: GoalAcceptanceFailure[],
+  incoming: GoalAcceptanceFailure[],
+): GoalAcceptanceFailure[] {
+  const records = new Map<
+    string,
+    {
+      record: GoalAcceptanceFailure;
+      existingOrder?: number;
+      incomingOrder?: number;
+    }
+  >();
+
+  incoming.forEach((record, order) => {
+    records.set(acceptanceFailureIdentity(record), {
+      record,
+      incomingOrder: order,
+    });
+  });
+  existing.forEach((record, order) => {
+    const identity = acceptanceFailureIdentity(record);
+    const duplicate = records.get(identity);
+    records.set(identity, {
+      record,
+      existingOrder: order,
+      ...(duplicate?.incomingOrder !== undefined
+        ? { incomingOrder: duplicate.incomingOrder }
+        : {}),
+    });
+  });
+
+  return [...records.values()]
+    .sort((left, right) => {
+      const byTime = left.record.at.localeCompare(right.record.at);
+      if (byTime !== 0) return byTime;
+      if (
+        left.record.targetKind === right.record.targetKind &&
+        left.record.targetId === right.record.targetId &&
+        left.record.fingerprint === right.record.fingerprint &&
+        left.record.occurrence !== right.record.occurrence
+      ) {
+        return left.record.occurrence - right.record.occurrence;
+      }
+      if (
+        left.incomingOrder !== undefined &&
+        right.incomingOrder !== undefined
+      ) {
+        return left.incomingOrder - right.incomingOrder;
+      }
+      if (
+        left.existingOrder !== undefined &&
+        right.existingOrder !== undefined
+      ) {
+        return left.existingOrder - right.existingOrder;
+      }
+      return (
+        acceptanceFailureIdentity(left.record).localeCompare(
+          acceptanceFailureIdentity(right.record),
+        )
+      );
+    })
+    .slice(-20)
+    .map(({ record }) => record);
+}
+
+function acceptanceFailureIdentity(record: GoalAcceptanceFailure): string {
+  return [
+    record.at,
+    record.targetKind,
+    record.targetId,
+    record.fingerprint,
+    String(record.occurrence),
+  ].join("\u0000");
+}
+
+function chooseCanonicalLastDecision(
+  existing: GoalAcceptanceDecision | undefined,
+  incoming: GoalAcceptanceDecision | undefined,
+  failures: GoalAcceptanceFailure[],
+): GoalAcceptanceDecision | undefined {
+  if (!existing) return incoming;
+  if (!incoming) return existing;
+
+  const existingIndex = newestMatchingFailureIndex(existing, failures);
+  const incomingIndex = newestMatchingFailureIndex(incoming, failures);
+  return incomingIndex > existingIndex ? incoming : existing;
+}
+
+function newestMatchingFailureIndex(
+  decision: GoalAcceptanceDecision,
+  failures: GoalAcceptanceFailure[],
+): number {
+  const failedCheckIds = [...decision.failedCheckIds].sort().join("\u0000");
+  for (let index = failures.length - 1; index >= 0; index -= 1) {
+    const failure = failures[index]!;
+    if (
+      failure.fingerprint === decision.fingerprint &&
+      failure.occurrence === decision.occurrence &&
+      [...failure.failedCheckIds].sort().join("\u0000") === failedCheckIds
+    ) {
+      return index;
+    }
+  }
+  return -1;
 }
 
 function verifyProtocolV2Achievement(
