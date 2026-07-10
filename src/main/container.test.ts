@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createAppContainer,
+  formatGoalTerminalHeading,
   reconcileIrreversibleGoalProgressEvent,
 } from "./container";
 import { registerAllIpcHandlers } from "./ipc";
@@ -15,6 +16,7 @@ import type { Goal } from "../shared/agentGoal";
 import type { AgentExecutionCheckpoint } from "../shared/agentExecution";
 import type { GoalProgressEvent } from "../shared/chat";
 import type { ChatOutputPart } from "../shared/chatOutput";
+import type { AcceptanceValidator } from "./agentGoalValidatorRegistry";
 
 const execFileAsync = promisify(execFileCallback);
 
@@ -129,6 +131,130 @@ describe("app container goal drafts", () => {
     expect(toolWorkerMock.createToolWorker).toHaveBeenCalledWith(
       expect.objectContaining({ mode: "inproc" }),
     );
+  });
+
+  it("constructs one production acceptance registry with builtins and trusted custom validators", async () => {
+    let receivedContext: unknown;
+    const customKind = "validator:trusted/report" as const;
+    const customValidator: AcceptanceValidator = {
+      kind: customKind,
+      async evaluate(input) {
+        receivedContext = input.context;
+        return {
+          checkId: input.check.id,
+          kind: customKind,
+          passed: true,
+          code: "trusted_report_valid",
+          evidenceRefs: ["artifact:trusted-report"],
+          detail: "Trusted report is valid.",
+        };
+      },
+    };
+    const container = createAppContainer({
+      acceptanceValidators: [customValidator],
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const registry = container.agentGoalValidatorRegistry();
+    const acceptance = container.agentGoalAcceptance();
+    const sentinel = "container-secret-api-key";
+
+    expect(container.agentGoalValidatorRegistry()).toBe(registry);
+    expect(registry.listKinds()).toEqual([
+      "file_exists",
+      "command_exit_code",
+      "test_passes",
+      "assertion",
+      customKind,
+    ]);
+    const result = await acceptance.evaluate(
+      {
+        id: "milestone_custom",
+        description: "Validate trusted report.",
+        dependsOn: [],
+        successCriteria: [{
+          id: "criterion_custom",
+          description: "Trusted report is valid.",
+          acceptanceChecks: [{
+            id: "check_custom",
+            kind: customKind,
+            description: "Run trusted validator.",
+            params: {},
+            requiresEvidence: false,
+          }],
+        }],
+        state: "running",
+        runIds: ["run_custom"],
+        attempts: 1,
+      },
+      {
+        runId: "run_custom",
+        workspacePath: tempDir,
+        toolExecutor: {
+          async execute() {
+            throw new Error("Tool call is not expected.");
+          },
+        },
+        trajectoryStore: {
+          async append(_runId, event) {
+            return event;
+          },
+        },
+        modelProfile: {
+          baseUrl: "https://provider.invalid",
+          apiKey: sentinel,
+          model: "judge-model",
+          temperature: 0,
+          maxTokens: 100,
+        },
+      },
+    );
+
+    expect(result).toMatchObject({ accepted: true, verdict: "accepted" });
+    expect(receivedContext).not.toHaveProperty("modelProfile");
+    expect(JSON.stringify(receivedContext)).not.toContain(sentinel);
+  });
+
+  it("rejects trusted validator kinds that duplicate builtins or each other", () => {
+    const builtinDuplicate: AcceptanceValidator = {
+      kind: "assertion",
+      async evaluate({ check }) {
+        return {
+          checkId: check.id,
+          kind: check.kind,
+          passed: true,
+          code: "duplicate",
+          evidenceRefs: [],
+          detail: "Duplicate.",
+        };
+      },
+    };
+    const container = createAppContainer({
+      acceptanceValidators: [builtinDuplicate],
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+
+    expect(() => container.agentGoalValidatorRegistry()).toThrow(
+      "Acceptance validator already registered: assertion",
+    );
+  });
+
+  it.each([
+    ["external_blocked", "外部依赖受阻"],
+    ["goal_impossible", "目标不可实现"],
+    ["acceptance_unavailable", "验收暂不可用"],
+  ] as const)("formats stopped_blocked terminal status truthfully for %s", (stopReason, text) => {
+    const goal = createStoredGoal({
+      id: `goal_${stopReason}`,
+      status: "stopped_blocked",
+      stopReason,
+    });
+
+    expect(formatGoalTerminalHeading(goal)).toContain(text);
+    expect(formatGoalTerminalHeading(goal)).not.toContain("目标已达成");
   });
 
   it("creates evidence-backed model review checks for manual goals", () => {

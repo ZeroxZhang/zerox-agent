@@ -8,15 +8,21 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ChatClient } from "./openAiCompatibleClient";
 import type { AgentToolExecutionResult } from "./agentToolExecutor";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
 import type { AcceptanceCheck, Goal, Milestone, SuccessCriterion } from "../shared/agentGoal";
 import {
+  GOAL_JUDGE_PROMPT_VERSION,
   createAgentGoalAcceptance,
   type AcceptanceContext,
 } from "./agentGoalAcceptance";
+import {
+  createAgentGoalValidatorRegistry,
+  type AcceptanceValidator,
+} from "./agentGoalValidatorRegistry";
 import {
   getArtifactProvenancePath,
   writeArtifactProvenance,
@@ -1417,14 +1423,18 @@ describe("agent goal acceptance", () => {
       ),
     ).resolves.toMatchObject({
       accepted: false,
+      verdict: "acceptance_unavailable",
+      failureClass: "validator_unavailable",
       inferentialUsed: false,
       checkResults: [
         {
           checkId: "check_custom",
           kind: "validator:local/report",
           passed: false,
+          code: "validator_not_registered",
+          failureClass: "validator_unavailable",
           evidenceRefs: [],
-          detail: "Custom acceptance validator is not available.",
+          detail: "Acceptance validator is not registered.",
         },
       ],
     });
@@ -1460,6 +1470,481 @@ describe("agent goal acceptance", () => {
     });
   });
 
+  it("returns stable typed builtin results and preserves accepted/verdict equivalence", async () => {
+    const acceptance = createAgentGoalAcceptance();
+
+    const result = await acceptance.evaluate(
+      createMilestone([
+        check("missing_file", "file_exists", { path: "missing.md" }),
+        check("failed_command", "command_exit_code", {
+          command: "npm run verify",
+          expectedExitCode: 0,
+        }),
+        check("failed_test", "test_passes", { command: "npm test" }),
+        check("failed_assertion", "assertion", {
+          artifactRef: "summary",
+          path: "done",
+          equals: true,
+        }),
+      ]),
+      createContext({
+        artifacts: { summary: { done: false } },
+        toolResults: [
+          { ok: true, result: { exitCode: 2 } },
+          { ok: true, result: { exitCode: 1 } },
+        ],
+      }),
+    );
+
+    expect(result).toMatchObject({
+      accepted: false,
+      verdict: "rejected_repairable",
+      failureClass: "artifact_missing",
+      inferentialUsed: false,
+      checkResults: [
+        { checkId: "missing_file", code: "file_not_found", failureClass: "artifact_missing" },
+        { checkId: "failed_command", code: "command_exit_mismatch", failureClass: "command_failed" },
+        { checkId: "failed_test", code: "test_exit_nonzero", failureClass: "test_failed" },
+        { checkId: "failed_assertion", code: "assertion_mismatch", failureClass: "assertion_failed" },
+      ],
+    });
+    expect(result.accepted).toBe(result.verdict === "accepted");
+  });
+
+  it("aggregates typed failures using the fixed verdict precedence", async () => {
+    const failures: Array<{
+      kind: AcceptanceCheck["kind"];
+      failureClass: NonNullable<import("../shared/agentGoal").GoalAcceptanceCheckResult["failureClass"]>;
+    }> = [
+      { kind: "validator:test/repair", failureClass: "assertion_failed" },
+      { kind: "validator:test/replan", failureClass: "plan_structure_invalid" },
+      { kind: "validator:test/blocked", failureClass: "external_dependency_missing" },
+      { kind: "validator:test/impossible", failureClass: "goal_impossible" },
+      { kind: "validator:test/unavailable", failureClass: "validator_unavailable" },
+    ];
+    const registry = createAgentGoalValidatorRegistry({
+      validators: failures.map(({ kind, failureClass }): AcceptanceValidator => ({
+        kind,
+        async evaluate({ check: selectedCheck }) {
+          return {
+            checkId: selectedCheck.id,
+            kind,
+            passed: false,
+            code: `failed_${failureClass}`,
+            failureClass,
+            evidenceRefs: [],
+            detail: "Typed failure.",
+          };
+        },
+      })),
+    });
+
+    const result = await createAgentGoalAcceptance({ registry }).evaluate(
+      createMilestone(
+        failures.map(({ kind }, index) => check(`typed_${index}`, kind, {})),
+      ),
+      createContext(),
+    );
+
+    expect(result).toMatchObject({
+      accepted: false,
+      verdict: "acceptance_unavailable",
+      failureClass: "validator_unavailable",
+    });
+  });
+
+  it("maps missing semantic evidence to a repairable artifact failure before calling the judge", async () => {
+    let modelCalls = 0;
+    const result = await createAgentGoalAcceptance().evaluateGoal(
+      createGoal([
+        check(
+          "missing_semantic_evidence",
+          "model_review",
+          { evidenceRefs: ["artifact:absent"] },
+          true,
+        ),
+      ]),
+      createContext({
+        chatClient: {
+          async complete() {
+            modelCalls += 1;
+            throw new Error("must not be called");
+          },
+        },
+      }),
+    );
+
+    expect(result).toMatchObject({
+      verdict: "rejected_repairable",
+      failureClass: "artifact_missing",
+      checkResults: [{ code: "artifact_missing", failureClass: "artifact_missing" }],
+    });
+    expect(modelCalls).toBe(0);
+    expect(result.evidenceManifest).toMatchObject({ version: 1, artifacts: [] });
+  });
+
+  it("maps an unregistered custom validator to acceptance unavailable", async () => {
+    const result = await createAgentGoalAcceptance().evaluate(
+      createMilestone([check("missing_custom", "validator:local/missing", {})]),
+      createContext(),
+    );
+
+    expect(result).toMatchObject({
+      verdict: "acceptance_unavailable",
+      failureClass: "validator_unavailable",
+      checkResults: [{ code: "validator_not_registered" }],
+    });
+  });
+
+  it("dispatches custom validators through the governed registry without exposing judge secrets", async () => {
+    const sentinel = "sentinel-api-key";
+    let receivedContext: unknown;
+    const kind = "validator:local/report" as const;
+    const registry = createAgentGoalValidatorRegistry({
+      validators: [{
+        kind,
+        async evaluate(input) {
+          receivedContext = input.context;
+          return {
+            checkId: input.check.id,
+            kind,
+            passed: true,
+            code: "report_valid",
+            evidenceRefs: ["artifact:report"],
+            detail: "Report is valid.",
+          };
+        },
+      }],
+    });
+    const result = await createAgentGoalAcceptance({ registry }).evaluate(
+      createMilestone([check("custom_report", kind, {})]),
+      createContext({
+        modelProfile: {
+          baseUrl: "https://provider.invalid",
+          apiKey: sentinel,
+          model: "judge-secret-model",
+          temperature: 1,
+          maxTokens: 50,
+        },
+      }),
+    );
+
+    expect(result).toMatchObject({ accepted: true, verdict: "accepted" });
+    expect(receivedContext).not.toHaveProperty("modelProfile");
+    expect(JSON.stringify(receivedContext)).not.toContain(sentinel);
+  });
+
+  it("always makes a fresh final cold-judge call with late structural evidence and bounded goal history", async () => {
+    const reportPath = path.join(workspacePath, "final-report.md");
+    await writeFile(reportPath, "# Initial\n\n## Late Acceptance Evidence\ncomplete", "utf8");
+    const requests: Parameters<ChatClient["complete"]>[0][] = [];
+    const evidenceRef = `artifact:${reportPath}`;
+    const goal = createGoal([
+      check(
+        "final_semantic",
+        "model_review",
+        { condition: "The final report proves completion", evidenceRefs: [evidenceRef] },
+        true,
+      ),
+    ]);
+    goal.milestones = [
+      {
+        ...createMilestone([]),
+        id: "accepted_milestone",
+        state: "accepted",
+        runIds: ["run_milestone_1"],
+        lastAcceptanceSummary: "Milestone evidence accepted.",
+      },
+    ];
+    goal.acceptanceProtocolVersion = 2;
+    goal.acceptanceState = {
+      protocolVersion: 2,
+      phase: "judging",
+      attempt: 2,
+      recentFailures: [{
+        at: "2026-07-11T00:00:00.000Z",
+        targetKind: "goal",
+        targetId: goal.id,
+        fingerprint: "failure_1",
+        occurrence: 1,
+        verdict: "rejected_repairable",
+        failureClass: "semantic_evidence_insufficient",
+        failedCheckIds: ["final_semantic"],
+        evidenceRefs: [evidenceRef],
+        actionSignatures: ["dead_end:old_approach"],
+      }],
+    };
+
+    const result = await createAgentGoalAcceptance().evaluateGoal(
+      goal,
+      createContext({
+        transcriptMessages: [
+          { role: "user", content: "Produce the final report." },
+          { role: "assistant", content: "The report is complete." },
+        ],
+        modelProfile: {
+          baseUrl: "https://provider.invalid",
+          apiKey: "top-secret",
+          model: "cold-judge-v1",
+          temperature: 0.8,
+          maxTokens: 800,
+        },
+        chatClient: {
+          async complete(request) {
+            requests.push(request);
+            return {
+              content: JSON.stringify({
+                verdict: "accepted",
+                reason: "Late heading proves completion.",
+                evidenceRefs: [evidenceRef],
+              }),
+              toolCalls: [],
+              finishReason: "stop",
+            };
+          },
+        },
+      }),
+    );
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      model: "cold-judge-v1",
+      temperature: 0,
+      tool_choice: "none",
+    });
+    expect(requests[0]?.tools).toBeUndefined();
+    const prompt = requests[0]?.messages.map((message) => message.content).join("\n") ?? "";
+    expect(prompt).toContain("Late Acceptance Evidence");
+    expect(prompt).toContain("Milestone evidence accepted.");
+    expect(prompt).toContain("run_milestone_1");
+    expect(prompt).toContain("dead_end:old_approach");
+    expect(result).toMatchObject({
+      accepted: true,
+      verdict: "accepted",
+      inferentialUsed: true,
+      evidenceManifest: {
+        version: 1,
+        artifacts: [{ ref: evidenceRef, headings: expect.arrayContaining([
+          expect.objectContaining({ text: "Late Acceptance Evidence" }),
+        ]) }],
+      },
+      judge: {
+        model: "cold-judge-v1",
+        promptVersion: GOAL_JUDGE_PROMPT_VERSION,
+        evaluatedMessageIds: ["message:1", "message:2"],
+        runIds: expect.arrayContaining(["run_acceptance", "run_milestone_1"]),
+      },
+    });
+  });
+
+  it.each([
+    ["accepted", "accepted", undefined, "judge_accepted"],
+    ["rejected", "rejected_repairable", "semantic_evidence_insufficient", "semantic_evidence_insufficient"],
+    ["impossible", "impossible", "goal_impossible", "goal_impossible"],
+  ] as const)(
+    "strictly parses a final %s judge response",
+    async (judgeVerdict, verdict, failureClass, code) => {
+      const result = await evaluateFinalJudgeResponse({
+        verdict: judgeVerdict,
+        reason: `${judgeVerdict} because supplied evidence says so.`,
+        evidenceRefs: ["evidence:final"],
+      });
+
+      expect(result.verdict).toBe(verdict);
+      expect(result.accepted).toBe(verdict === "accepted");
+      expect(result.checkResults[0]).toMatchObject({ code });
+      if (failureClass) {
+        expect(result.failureClass).toBe(failureClass);
+      } else {
+        expect(result).not.toHaveProperty("failureClass");
+      }
+    },
+  );
+
+  it.each([
+    ["invalid JSON", "not-json"],
+    ["unknown verdict", JSON.stringify({ verdict: "maybe", reason: "No.", evidenceRefs: ["evidence:final"] })],
+    ["empty reason", JSON.stringify({ verdict: "accepted", reason: " ", evidenceRefs: ["evidence:final"] })],
+    ["invented evidence ref", JSON.stringify({ verdict: "accepted", reason: "Made up.", evidenceRefs: ["evidence:invented"] })],
+    ["unexpected schema", JSON.stringify({ verdict: "accepted", reason: "Okay.", evidenceRefs: ["evidence:final"], extra: true })],
+  ])("fails closed for a final judge response with %s", async (_label, content) => {
+    const result = await evaluateFinalJudgeContent(content);
+
+    expect(result).toMatchObject({
+      accepted: false,
+      verdict: "acceptance_unavailable",
+      failureClass: "judge_unavailable",
+      checkResults: [{ code: "judge_invalid_response" }],
+    });
+  });
+
+  it.each([
+    ["synchronous provider throw", () => {
+      throw new Error("secret provider error");
+    }],
+    ["provider rejection", async () => {
+      throw new Error("secret rejected provider error");
+    }],
+  ])("maps %s to sanitized judge unavailability", async (_label, complete) => {
+    const result = await createAgentGoalAcceptance({
+      chatClient: { complete } as ChatClient,
+    }).evaluateGoal(
+      createGoal([
+        check("final_provider", "model_review", { evidenceRefs: ["evidence:final"] }, true),
+      ]),
+      createContext(),
+    );
+
+    expect(result).toMatchObject({
+      verdict: "acceptance_unavailable",
+      failureClass: "judge_unavailable",
+      checkResults: [{ code: "judge_unavailable", detail: "Final judge is unavailable." }],
+    });
+    expect(JSON.stringify(result)).not.toContain("secret");
+  });
+
+  it("enforces an asynchronous final-judge timeout and handles the late rejection", async () => {
+    const result = await createAgentGoalAcceptance({
+      judgeTimeoutMs: 5,
+      chatClient: {
+        complete() {
+          return new Promise((_, reject) => {
+            setTimeout(() => reject(new Error("late secret rejection")), 20);
+          });
+        },
+      },
+    }).evaluateGoal(
+      createGoal([
+        check("final_timeout", "model_review", { evidenceRefs: ["evidence:final"] }, true),
+      ]),
+      createContext(),
+    );
+
+    expect(result).toMatchObject({
+      verdict: "acceptance_unavailable",
+      failureClass: "judge_unavailable",
+      checkResults: [{ code: "judge_timeout" }],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  });
+
+  it("rejects a synchronous/elapsed final-judge completion after its deadline", async () => {
+    const result = await createAgentGoalAcceptance({
+      judgeTimeoutMs: 5,
+      chatClient: {
+        async complete() {
+          const deadline = performance.now() + 20;
+          while (performance.now() < deadline) {
+            // Block intentionally to prove monotonic elapsed enforcement.
+          }
+          return {
+            content: JSON.stringify({
+              verdict: "accepted",
+              reason: "Too late.",
+              evidenceRefs: ["evidence:final"],
+            }),
+            toolCalls: [],
+            finishReason: "stop",
+          };
+        },
+      },
+    }).evaluateGoal(
+      createGoal([
+        check("final_elapsed", "model_review", { evidenceRefs: ["evidence:final"] }, true),
+      ]),
+      createContext(),
+    );
+
+    expect(result).toMatchObject({
+      verdict: "acceptance_unavailable",
+      checkResults: [{ code: "judge_timeout" }],
+    });
+  });
+
+  it("re-evaluates a pure deterministic final goal without a model call", async () => {
+    let modelCalls = 0;
+    const result = await createAgentGoalAcceptance().evaluateGoal(
+      createGoal([
+        check("deterministic_final", "assertion", {
+          artifactRef: "goalProgress",
+          path: "done",
+          equals: true,
+        }),
+      ]),
+      createContext({
+        artifacts: { goalProgress: { done: true } },
+        chatClient: {
+          async complete() {
+            modelCalls += 1;
+            throw new Error("must not be called");
+          },
+        },
+      }),
+    );
+
+    expect(result).toMatchObject({ accepted: true, verdict: "accepted", inferentialUsed: false });
+    expect(result).not.toHaveProperty("judge");
+    expect(modelCalls).toBe(0);
+  });
+
+  it("keeps judge metadata free of credentials and raw provider settings", async () => {
+    const secret = "metadata-secret-api-key";
+    const result = await createAgentGoalAcceptance().evaluateGoal(
+      createGoal([
+        check("metadata_final", "model_review", { evidenceRefs: ["evidence:final"] }, true),
+      ]),
+      createContext({
+        modelProfile: {
+          baseUrl: "https://provider-secret.invalid",
+          apiKey: secret,
+          model: "safe-model-name",
+          temperature: 1,
+          maxTokens: 500,
+        },
+        chatClient: {
+          async complete() {
+            return {
+              content: JSON.stringify({
+                verdict: "accepted",
+                reason: "Evidence is sufficient.",
+                evidenceRefs: ["evidence:final"],
+              }),
+              toolCalls: [],
+              finishReason: "stop",
+            };
+          },
+        },
+      }),
+    );
+
+    expect(result.judge).toMatchObject({ model: "safe-model-name" });
+    expect(JSON.stringify(result.judge)).not.toContain(secret);
+    expect(JSON.stringify(result.judge)).not.toContain("provider-secret.invalid");
+  });
+
+  async function evaluateFinalJudgeResponse(response: {
+    verdict: "accepted" | "rejected" | "impossible";
+    reason: string;
+    evidenceRefs: string[];
+  }) {
+    return evaluateFinalJudgeContent(JSON.stringify(response));
+  }
+
+  async function evaluateFinalJudgeContent(content: string) {
+    return createAgentGoalAcceptance({
+      chatClient: {
+        async complete() {
+          return { content, toolCalls: [], finishReason: "stop" };
+        },
+      },
+    }).evaluateGoal(
+      createGoal([
+        check("strict_final", "model_review", { evidenceRefs: ["evidence:final"] }, true),
+      ]),
+      createContext(),
+    );
+  }
+
   function createContext(options: {
     toolResults?: AgentToolExecutionResult[];
     artifacts?: Record<string, unknown>;
@@ -1468,6 +1953,7 @@ describe("agent goal acceptance", () => {
     extraWriteRoots?: string[];
     locationEnv?: AcceptanceContext["locationEnv"];
     transcriptMessages?: AcceptanceContext["transcriptMessages"];
+    modelProfile?: AcceptanceContext["modelProfile"];
   } = {}): AcceptanceContext {
     const queuedResults = [...(options.toolResults ?? [])];
     return {
@@ -1484,6 +1970,7 @@ describe("agent goal acceptance", () => {
       artifacts: options.artifacts ?? {},
       chatClient: options.chatClient,
       transcriptMessages: options.transcriptMessages,
+      modelProfile: options.modelProfile,
       toolExecutor: {
         async execute(request) {
           toolCalls.push({ toolName: request.toolName, args: request.args });

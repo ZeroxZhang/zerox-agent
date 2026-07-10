@@ -11,7 +11,14 @@ import { createAgentWorkspaceStore } from "./agentWorkspaceStore";
 import { createWorkspaceRunStore } from "./workspaceRunStore";
 import { createAgentGoalStore } from "./agentGoalStore";
 import { createAgentGoalController } from "./agentGoalController";
-import { createAgentGoalAcceptance } from "./agentGoalAcceptance";
+import {
+  createAgentGoalAcceptance,
+  createBuiltinGoalAcceptanceValidators,
+} from "./agentGoalAcceptance";
+import {
+  createAgentGoalValidatorRegistry,
+  type AcceptanceValidator,
+} from "./agentGoalValidatorRegistry";
 import { createAgentGoalContext } from "./agentGoalContext";
 import { createAgentGoalPlanner } from "./agentGoalPlanner";
 import { createGoalRuntimeEngine } from "./goalRuntimeEngine";
@@ -173,6 +180,7 @@ function isTerminalGoalStatus(status: Goal["status"]): boolean {
     status === "achieved" ||
     status === "stopped_budget" ||
     status === "stopped_stalled" ||
+    status === "stopped_blocked" ||
     status === "failed" ||
     status === "canceled"
   );
@@ -195,7 +203,7 @@ function formatGoalTerminalMessage(goal: Goal, eventMessage?: string): string {
   return lines.join("\n");
 }
 
-function formatGoalTerminalHeading(goal: Goal): string {
+export function formatGoalTerminalHeading(goal: Goal): string {
   switch (goal.status) {
     case "achieved":
       return `目标已达成：${goal.description}`;
@@ -207,6 +215,17 @@ function formatGoalTerminalHeading(goal: Goal): string {
       return `目标因预算停止：${goal.description}`;
     case "stopped_stalled":
       return `目标因进展停滞停止：${goal.description}`;
+    case "stopped_blocked":
+      switch (goal.stopReason) {
+        case "external_blocked":
+          return `目标因外部依赖受阻：${goal.description}`;
+        case "goal_impossible":
+          return `目标不可实现：${goal.description}`;
+        case "acceptance_unavailable":
+          return `目标验收暂不可用：${goal.description}`;
+        default:
+          return `目标已阻塞：${goal.description}`;
+      }
     case "planning":
     case "executing":
     case "waiting_for_review":
@@ -234,6 +253,7 @@ export function createAppContainer(options: {
   requestToolApproval: (
     request: ToolUserApprovalRequest,
   ) => Promise<ToolUserApprovalResult>;
+  acceptanceValidators?: AcceptanceValidator[];
 }) {
   const configDir = path.join(app.getPath("userData"), "config");
   const skillsDir = path.join(app.getAppPath(), "skills");
@@ -1115,6 +1135,23 @@ export function createAppContainer(options: {
     );
   }
 
+  function agentGoalValidatorRegistry() {
+    return lazy("agentGoalValidatorRegistry", () =>
+      createAgentGoalValidatorRegistry({
+        validators: [
+          ...createBuiltinGoalAcceptanceValidators(),
+          ...(options.acceptanceValidators ?? []),
+        ],
+      }),
+    );
+  }
+
+  function agentGoalAcceptance() {
+    return lazy("agentGoalAcceptance", () =>
+      createAgentGoalAcceptance({ registry: agentGoalValidatorRegistry() }),
+    );
+  }
+
   function agentGoalController() {
     return lazy("agentGoalController", () => {
       const toolExecutor = createToolExecutor();
@@ -1152,7 +1189,7 @@ export function createAppContainer(options: {
             }
           },
         }),
-        acceptance: createAgentGoalAcceptance(),
+        acceptance: agentGoalAcceptance(),
         onProgress: emitGoalProgressEvent,
         planner: {
           async replan(goal, reason) {
@@ -1937,6 +1974,8 @@ export function createAppContainer(options: {
     agentExecutionStore,
     agentTrajectoryStore,
     agentGoalStore,
+    agentGoalValidatorRegistry,
+    agentGoalAcceptance,
     goalChatService,
     agentGoalController,
     agentWorkspaceStore,
