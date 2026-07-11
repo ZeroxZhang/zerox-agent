@@ -9,3 +9,8 @@ npm-debug.log*
 *.local
 .api_info.md
 iteration-roadmap/
+docs/
+.tmp_*
+.zerox/product-design-audit-*/
+generate_report.py
+goalEvidence.md*
