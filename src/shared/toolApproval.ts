@@ -1,10 +1,18 @@
 import type { ToolCallRequest } from "./toolPermissions";
+import {
+  classifyExtremeRisk,
+  type ExtremeRiskShellPlan,
+  type ExtremeRiskCategory,
+} from "./extremeRiskPolicy";
 
 export type ToolApprovalRiskLevel = "normal" | "high" | "critical";
 
 export type ToolApprovalRisk = {
   level: ToolApprovalRiskLevel;
   reason: string;
+  category: ExtremeRiskCategory;
+  requiresConfirmation: boolean;
+  affectedTargets: string[];
 };
 
 export type ToolApprovalRequestPayload = {
@@ -31,6 +39,8 @@ export type ToolApprovalDecisionPayload = {
 
 export type ToolApprovalModeState = {
   autoApprovalEnabled: boolean;
+  goalModeEnabled: boolean;
+  autoApprovalLocked: boolean;
 };
 
 export type ResolveToolApprovalInput = {
@@ -42,45 +52,40 @@ export function classifyToolApprovalRisk(input: {
   taskName: string;
   deniedReason: string;
   request: ToolCallRequest;
+  shellPlan?: ExtremeRiskShellPlan;
 }): ToolApprovalRisk {
-  if (input.request.toolName === "shell_exec") {
+  const extremeRisk = classifyExtremeRisk(input.request, {
+    ...(input.shellPlan ? { shellPlan: input.shellPlan } : {}),
+  });
+  if (extremeRisk.requiresConfirmation) {
     return {
       level: "critical",
-      reason: "shell_exec can mutate the local machine outside normal app flows.",
+      reason: extremeRisk.reason,
+      category: extremeRisk.category,
+      requiresConfirmation: true,
+      affectedTargets: extremeRisk.affectedTargets,
     };
   }
 
   if (
-    input.request.toolName === "file_write" ||
-    input.request.toolName === "markdown_report_write"
+    input.request.toolName === "chrome_bookmarks_read"
   ) {
-    return {
-      level: "critical",
-      reason: "file writes can overwrite or create local artifacts.",
-    };
-  }
-
-  if (
-    input.request.toolName === "web_fetch" ||
-    input.request.toolName === "web_fetch_document"
-  ) {
-    return {
-      level: "high",
-      reason: "web_fetch can transmit browsing context to an external host.",
-    };
-  }
-
-  if (input.request.toolName === "chrome_bookmarks_read") {
     return {
       level: "high",
       reason:
         "chrome_bookmarks_read reads personal browser bookmark data and may write a local bookmark_list artifact.",
+      category: "none",
+      requiresConfirmation: false,
+      affectedTargets: [],
     };
   }
 
   return {
     level: "normal",
-    reason: "The request needs one-time permission outside the current policy.",
+    reason: extremeRisk.reason,
+    category: "none",
+    requiresConfirmation: false,
+    affectedTargets: [],
   };
 }
 

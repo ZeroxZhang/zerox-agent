@@ -10,6 +10,7 @@ import type {
 export type GoalDraftStatus = "draft" | "confirmed" | "discarded";
 
 export type GoalDraftWarningCode =
+  | "planning_model_unavailable"
   | "invalid_check_kind_clamped"
   | "model_review_requires_evidence"
   | "model_only_acceptance"

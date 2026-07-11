@@ -400,7 +400,14 @@ export function authorizeToolCallWithinRunContext(
   policy: TaskPermissionPolicy,
   request: ToolCallRequest,
   runContext?: AgentRunContext,
-  opts?: { shellPlan?: { touchedPaths: string[] } },
+  opts?: {
+    shellPlan?: {
+      touchedPaths: string[];
+      networkAccess?: boolean;
+      opaqueExecution?: boolean;
+      commands?: Array<{ writesPaths: string[] }>;
+    };
+  },
 ): ToolAuthorizationDecision {
   const taskDecision = authorizeToolCall(
     policy,
@@ -412,12 +419,28 @@ export function authorizeToolCallWithinRunContext(
         }
       : undefined,
   );
-  if (!taskDecision.allowed || !runContext) {
+  if (!runContext) {
     return taskDecision;
   }
 
   if (runContext.sandbox.network === "none" && request.toolName.startsWith("web_")) {
     return deny(`${request.toolName} 被运行沙箱阻止：网络访问已禁用。`);
+  }
+
+  if (
+    request.toolName === "shell_exec" &&
+    runContext.sandbox.network === "none" &&
+    opts?.shellPlan?.networkAccess
+  ) {
+    return deny("shell_exec 被运行沙箱阻止：网络访问已禁用。");
+  }
+
+  if (
+    runContext.sandbox.network === "none" &&
+    request.source &&
+    request.source !== "built-in"
+  ) {
+    return deny(`${request.toolName} 被运行沙箱阻止：动态工具网络访问已禁用。`);
   }
 
   if (
@@ -429,6 +452,21 @@ export function authorizeToolCallWithinRunContext(
     runContext.sandbox.mode === "read_only"
   ) {
     return deny(`${request.toolName} 被运行沙箱阻止：当前运行是只读沙箱。`);
+  }
+
+  if (
+    request.toolName === "shell_exec" &&
+    runContext.sandbox.mode === "read_only"
+  ) {
+    return deny("shell_exec 被运行沙箱阻止：当前运行是只读沙箱。");
+  }
+
+  if (
+    request.toolName === "shell_exec" &&
+    !runContext.sandbox.allowWorkspaceEscape &&
+    opts?.shellPlan?.opaqueExecution
+  ) {
+    return deny("shell_exec 被运行沙箱阻止：无法证明嵌套解释器命令位于工作区内。");
   }
 
   if (!runContext.sandbox.allowWorkspaceEscape) {

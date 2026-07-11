@@ -6648,3 +6648,63 @@
 - Historical-state integrity evidence:
   - After relaunch, incident goal JSON SHA256 remains `a26c49399cd7981983604c7bb2a86d839904ed6c442e0a66f361bce218ae7c5f` (14,290 bytes) and ledger SHA256 remains `8aff53a7a7856313ef2b95eb08f2426a48df4e3565ec6a5fea4a44de590fd131` (160,727 bytes).
   - Both files retain mtime `2026-07-10 22:46:28 +0800`, proving the new app startup did not mutate or resurrect the canceled historical run.
+
+## 2026-07-11 - P42 Autonomous Goal Runtime, Policy B Authorization, and Strict Goal UI
+
+- Request:
+  - Goal mode must automatically enable and lock automatic authorization.
+  - Every validated ordinary operation must run without user confirmation; only the approved Policy B extremely high-risk class may force a prompt.
+  - Replace the hard-coded eight-turn review loop with a stable, efficient, persistent goal runtime informed by the local MiMo-Code implementation.
+  - Strictly repair the unreadable Continue action and the unscrollable long-prompt goal detail drawer.
+- Root-cause evidence carried into the implementation:
+  - The reported goal spent four separate 300-second intervals in hidden approval waits; permission wait represented roughly 80–86% of each run.
+  - `goalRuntimeEngine` used `maxTurns: 8` plus `pauseOnTurnLimit: true`, and the controller converted the internal boundary into `waiting_for_review` even under `review_high_risk_only`.
+  - Resumed milestone runs assembled history from `[]`, so repeated Continue actions restarted repository discovery instead of resuming from the last tool result.
+  - Auto approval hid pending requests while only approving a read-only whitelist; cancellation did not reach the approval promise.
+  - The detail drawer rendered the full prompt as the non-scrollable heading and the Continue button referenced an undefined foreground token.
+- Policy B authorization implementation:
+  - Added a typed shared extreme-risk classifier with categories for irrecoverable data loss, privilege/security-boundary mutation, secret exfiltration, and irreversible external actions.
+  - Ordinary file writes, Shell pipelines, installs, builds, tests, web access, commits, non-forced pushes, and Git worktree creation are eligible for automatic authorization after normal policy and workspace validation.
+  - Destructive deletion/Git history changes, privilege/security changes, recognizable secret transmission, production publication/deletion, outbound messaging, and financial-style actions are forced asks that wildcard auto approval cannot bypass.
+  - Forced asks remain visible, accept the active run `AbortSignal`, default to a 60-second reject-with-safe-alternative result, and clean up pending timers/listeners exactly once.
+  - Goal mode and auto approval are now authoritative main-process state. Goal mode forces effective auto approval on and locks the standalone control until goal mode is disabled.
+- Persistent goal runtime implementation:
+  - Removed the literal eight-turn goal default and `pauseOnTurnLimit` review behavior. Internal segment limits are derived from configured goal tool budgets and do not create user review events.
+  - Acceptance rejection re-enters the same milestone automatically; turn, failure-loop, and strategy boundaries no longer become a Continue/Adjust Milestone gate.
+  - Added a backward-compatible `runtimeCheckpoint` to Goal state containing the active milestone, next action, and a bounded tail of real assistant/tool messages including tool-call identifiers.
+  - Subsequent segments and resumed application runs reconstruct context from that transcript, preserve recent tool pairs/result references, and inject an exact-seam instruction that forbids recap, repository rediscovery, or asking the user to continue.
+  - Goal-runtime trajectory writes now receive the run signal. A canceled run skips misleading final-summary/checkpoint publication while retaining a truthful `canceled` run-history record.
+- Planning and UI implementation:
+  - Translator aborts are rethrown instead of becoming fake plans. Provider/JSON failures emit diagnostics and a typed draft warning, preserve the full source instruction, derive a maximum-96-character description, and use a concise executable fallback milestone.
+  - Planner fallback no longer uses the full source prompt as the milestone heading.
+  - Policy B forced asks render even while auto approval is active; ordinary automatically approved actions do not open a prompt.
+  - Goal detail headings are Markdown-cleaned and clamped to 80 characters. The complete original instruction is inside an open, scrollable body disclosure.
+  - The whole drawer scrolls vertically with a sticky reachable header; long prose wraps and code can scroll horizontally.
+  - Replaced the undefined primary-action foreground token with `--color-on-accent`; mode copy now truthfully describes default allow and forced confirmation.
+- TDD and verification evidence:
+  - RED tests reproduced missing Policy B classification, read-only-only auto approval, non-abortable waits, renderer-local goal mode, empty resume history, turn-limit review routing, silent planning fallback, post-cancel writes, hidden forced asks, long heading overflow, and invalid button color.
+  - Exact focused suite -> 13 files / 327 tests passed.
+  - `npm run verify` -> passed: 197 test files / 1,787 tests, TypeScript/Vite build, Agent evals 26/26, Memory evals 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered the Agent chat UI. The unpackaged smoke used the existing JSON fallback because local `better-sqlite3` targets a different Node ABI.
+  - `npm run harness:check` -> passed before feature closure.
+  - `git diff --check` -> passed before feature closure.
+- Pre-main review hardening:
+  - Policy B classification now runs for every tool request, including calls already allowed by the base task policy; auto approval cannot override workspace-sandbox denial.
+  - Added adversarial coverage for command wrappers, long-form remove flags, Git global flags, production Kubernetes/Terraform actions, package publication, credential upload, and dynamic outbound-action tools.
+  - Running goals now hold a main-process authorization lease. Renderer state cannot unlock auto approval while a goal is active, and IPC failure re-reads or restores authoritative mode state.
+  - Confirmed drafts preserve the complete original instruction separately from the concise display description; planning, execution, output-root discovery, acceptance, and the detail drawer reuse the original text.
+  - Runtime checkpoints are persisted after each tool result with incremental usage, real assistant/tool pairs, and the next action. Executing goals resume automatically on app restart, including repair continuity across milestone ids.
+  - Context compaction preserves every assistant tool-call message with its matching tool result. Final acceptance falls back to the persisted transcript when no fresh run result exists.
+  - Default goal iteration budget is 64 rather than the former literal 8; per-segment turns and tokens are derived from remaining configured budget. Planner/translator failures receive a bounded retry before local fallback.
+  - Pending trajectory writes are drained before terminal return, and canceled runs remain observable in run history.
+  - Removed the separate quick-action/high-risk Goal Review gate. After draft confirmation, only Policy B extreme-risk tool operations can request confirmation; user-initiated Pause remains available.
+  - Policy B now consumes the structured ShellPlan, normalizes executable wrappers/paths, and protects authorization/sandbox source writes. Read-only and network-disabled shell restrictions are enforced both before authorization and again at execution.
+  - Restart recovery atomically converts a checkpointed `running` milestone back to `ready`; context trimming and checkpoints preserve complete assistant tool-call/result groups.
+  - Goal runs serialize trajectory appends, record deterministic-pipeline aborts, enforce the remaining tool-call count within multi-call responses, return actual provider token usage, and apply a remaining wall-clock deadline signal.
+  - Renderer approval requests are queued instead of overwritten, and both mode toggles recover authoritative main-process state after IPC failure.
+- Final pre-main verification evidence:
+  - `npm run verify` -> passed: 199 test files / 1,835 tests, TypeScript/Vite build, Agent evals 26/26, Memory evals 2/2.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> passed; renderer rendered the Agent chat UI. The known local `better-sqlite3` Node ABI mismatch fell back to JSON storage.
+  - `git diff --check` -> passed.
+  - Independent UI/integration, runtime, and security reviews completed after four correction rounds. Final reviewers reported no remaining Critical or Important blockers and approved the branch for `main` merge consideration.

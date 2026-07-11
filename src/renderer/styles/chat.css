@@ -1305,7 +1305,7 @@
 
 .goal-status-strip-actions .goal-primary-action {
   border-color: var(--color-action-primary);
-  color: var(--color-action-primary-text);
+  color: var(--color-on-accent);
   background: var(--color-action-primary);
 }
 
@@ -1324,6 +1324,67 @@
 .goal-certificate-details summary:focus-visible {
   outline: 2px solid var(--color-action-primary);
   outline-offset: 2px;
+}
+
+.goal-detail-drawer {
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.goal-detail-drawer > header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  flex: 0 0 auto;
+  padding-bottom: var(--space-2);
+  background: var(--bg-surface-raised);
+}
+
+.goal-detail-drawer h3 {
+  display: -webkit-box;
+  max-width: 32ch;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+
+.goal-detail-drawer-body {
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
+.goal-original-instructions {
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-10);
+  background: var(--color-surface-primary);
+}
+
+.goal-original-instructions > summary {
+  cursor: pointer;
+  padding: var(--space-3);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+}
+
+.goal-original-instructions-content {
+  padding: 0 var(--space-3) var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.goal-original-instructions-content code,
+.goal-original-instructions-content pre {
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre;
 }
 
 .goal-acceptance-details,

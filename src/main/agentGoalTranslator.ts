@@ -35,16 +35,25 @@ export type AgentGoalTranslator = {
 export function createAgentGoalTranslator(options: {
   chatClient: ChatClient;
   getModelProfile: () => Promise<AgentModelProfile>;
+  onDiagnostic?: (event: { message: string; error?: unknown }) => void;
   createId?: () => string;
   now?: () => string;
+  maxTranslationAttempts?: number;
+  retryDelayMs?: number;
 }): AgentGoalTranslator {
   const createId = options.createId ?? (() => `goal_draft_${randomUUID()}`);
   const now = options.now ?? (() => new Date().toISOString());
 
   return {
     async translate(input) {
+      throwIfAborted(input.signal);
       const sourceMessage = input.message.trim();
-      const parsed = await translateWithModel(options, sourceMessage, input.signal);
+      const translation = await translateWithModel(
+        options,
+        sourceMessage,
+        input.signal,
+      );
+      const parsed = translation.parsed;
       const normalizedDescription =
         readString(parsed?.normalizedDescription) ||
         normalizeGoalDescription(sourceMessage);
@@ -59,6 +68,19 @@ export function createAgentGoalTranslator(options: {
         parsed?.milestones,
         coverage.successCriteria,
       );
+      const resolvedMilestones = milestones.length
+        ? milestones
+        : [
+            {
+              id: "milestone_1",
+              description: "执行目标并产出可验收结果",
+              dependsOn: [],
+              successCriteria: coverage.successCriteria,
+              state: "ready" as const,
+              runIds: [],
+              attempts: 0,
+            },
+          ];
       const timestamp = now();
 
       return {
@@ -70,8 +92,11 @@ export function createAgentGoalTranslator(options: {
         normalizedDescription,
         successCriteria: coverage.successCriteria,
         acceptanceCoverage: coverage.acceptanceCoverage,
-        warnings: coverage.warnings,
-        ...(milestones.length ? { milestones } : {}),
+        warnings: [
+          ...coverage.warnings,
+          ...(translation.warning ? [translation.warning] : []),
+        ],
+        milestones: resolvedMilestones,
         ...(input.selectedSkill ? { selectedSkill: input.selectedSkill } : {}),
         ...(input.selectedSkillInputValues
           ? { selectedSkillInputValues: input.selectedSkillInputValues }
@@ -88,10 +113,21 @@ async function translateWithModel(
   options: {
     chatClient: ChatClient;
     getModelProfile: () => Promise<AgentModelProfile>;
+    onDiagnostic?: (event: { message: string; error?: unknown }) => void;
+    maxTranslationAttempts?: number;
+    retryDelayMs?: number;
   },
   message: string,
   signal: AbortSignal | undefined,
-): Promise<ParsedGoalDraft | null> {
+): Promise<{
+  parsed: ParsedGoalDraft | null;
+  warning?: {
+    code: "planning_model_unavailable";
+    severity: "warning";
+    message: string;
+  };
+}> {
+  throwIfAborted(signal);
   try {
     const profile = await options.getModelProfile();
     const messages: ChatMessage[] = [
@@ -109,17 +145,72 @@ async function translateWithModel(
         content: message,
       },
     ];
-    const response = await options.chatClient.complete({
-      ...profile,
-      messages,
-      temperature: Math.min(profile.temperature, 0.2),
-      maxTokens: Math.min(profile.maxTokens, 1200),
-      ...(signal ? { signal } : {}),
+    const maxAttempts = Math.max(1, options.maxTranslationAttempts ?? 2);
+    let lastError: unknown;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      throwIfAborted(signal);
+      try {
+        const response = await options.chatClient.complete({
+          ...profile,
+          messages,
+          temperature: Math.min(profile.temperature, 0.2),
+          maxTokens: Math.min(profile.maxTokens, 1200),
+          ...(signal ? { signal } : {}),
+        });
+        const parsed = parseDraftJson(response.content);
+        if (parsed) return { parsed };
+        lastError = new Error(
+          "Goal translation model returned an invalid goal draft.",
+        );
+      } catch (error) {
+        if (signal?.aborted || isAbortError(error)) {
+          throw signal?.reason ?? error;
+        }
+        lastError = error;
+      }
+      if (attempt < maxAttempts - 1) {
+        await abortableDelay(options.retryDelayMs ?? 25, signal);
+      }
+    }
+    const detail =
+      lastError instanceof Error ? lastError.message : String(lastError);
+    options.onDiagnostic?.({
+      message: `Goal translation model failed: ${detail}`,
+      error: lastError,
     });
-    return parseDraftJson(response.content);
-  } catch {
-    return null;
+    return {
+      parsed: null,
+      warning: planningFallbackWarning(),
+    };
+  } catch (error) {
+    if (signal?.aborted || isAbortError(error)) {
+      throw signal?.reason ?? error;
+    }
+    const detail = error instanceof Error ? error.message : String(error);
+    options.onDiagnostic?.({
+      message: `Goal translation model failed: ${detail}`,
+      error,
+    });
+    return {
+      parsed: null,
+      warning: planningFallbackWarning(),
+    };
   }
+}
+
+function abortableDelay(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason ?? new DOMException("Canceled", "AbortError"));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", abort, { once: true });
+  });
 }
 
 function parseDraftJson(content: string | null): ParsedGoalDraft | null {
@@ -331,11 +422,32 @@ function createModelReviewCriterion(description: string): SuccessCriterion {
 }
 
 function normalizeGoalDescription(message: string): string {
-  return message
+  const normalized = message
     .replace(/^\/(?:目标|goal)\s*/i, "")
     .replace(/^(把这轮设为目标|这轮目标是|接下来目标是|目标)\s*[:：]?\s*/i, "")
+    .replace(/^\s*#{1,6}\s*/gm, "")
     .replace(/\s+/g, " ")
     .trim();
+  return normalized.length > 96
+    ? `${normalized.slice(0, 95).trimEnd()}…`
+    : normalized;
+}
+
+function planningFallbackWarning() {
+  return {
+    code: "planning_model_unavailable" as const,
+    severity: "warning" as const,
+    message: "目标规划模型暂时不可用，已使用本地结构化降级方案。",
+  };
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return;
+  throw signal.reason ?? new DOMException("Canceled", "AbortError");
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
 }
 
 function readString(value: unknown): string {

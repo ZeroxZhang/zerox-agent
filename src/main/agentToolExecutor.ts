@@ -3,6 +3,7 @@ import { access, lstat, mkdir, readFile, readdir, stat, writeFile } from "node:f
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { analyzeShell } from "./tools/shell/shellAnalyzer";
 import type { ChatSessionStore } from "./chatSessionStore";
 import { createWebTools, type WebTools } from "./webTools";
 import {
@@ -36,7 +37,6 @@ import {
 import { getMemoryKinds, type MemoryKind } from "../shared/memory";
 import { defineNativeToolDescriptor } from "../shared/nativeCapabilities";
 import {
-  extractPathLikeShellTokens,
   type ToolCallRequest,
 } from "../shared/toolPermissions";
 import { isSafeToolResultRef } from "../shared/toolResultRefs";
@@ -171,13 +171,26 @@ function validateToolExecutionRequest(
   }
 
   if (request.toolName === "shell_exec") {
+    const shellPlan = analyzeShell(String(request.args.command ?? ""), {
+      cwd: runContext.workspaceRoot,
+    });
     if (runContext.sandbox.shell === "disabled") {
       return { ok: false, error: "shell_exec refused by disabled shell sandbox." };
     }
+    if (runContext.sandbox.mode === "read_only") {
+      return { ok: false, error: "shell_exec refused by read-only run sandbox." };
+    }
+    if (runContext.sandbox.network === "none" && shellPlan.networkAccess) {
+      return { ok: false, error: "shell_exec refused by network-disabled run sandbox." };
+    }
+    if (!runContext.sandbox.allowWorkspaceEscape && shellPlan.opaqueExecution) {
+      return {
+        ok: false,
+        error: "shell_exec refused opaque interpreter command in workspace-only sandbox.",
+      };
+    }
     if (!runContext.sandbox.allowWorkspaceEscape) {
-      const outsidePath = extractPathLikeShellTokens(
-        String(request.args.command ?? ""),
-      ).find(
+      const outsidePath = shellPlan.touchedPaths.find(
         (token) =>
           !validatePathInsideRunContext(token, runContext, "read").ok &&
           !validatePathInsideRunContext(token, runContext, "write").ok,
@@ -190,6 +203,17 @@ function validateToolExecutionRequest(
       }
     }
     return null;
+  }
+
+  if (
+    runContext.sandbox.network === "none" &&
+    request.source &&
+    request.source !== "built-in"
+  ) {
+    return {
+      ok: false,
+      error: `${request.toolName} refused by network-disabled run sandbox.`,
+    };
   }
 
   if (runContext.sandbox.allowWorkspaceEscape) {

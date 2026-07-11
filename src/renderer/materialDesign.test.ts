@@ -885,8 +885,8 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource).toContain("data-risk-tooltip");
     expect(chatPanelSource).toContain("composerRiskTooltips");
     expect(chatPanelSource).toContain("composer-risk-tooltip");
-    expect(chatPanelSource).toContain("自动授权：智能体可在本次会话中自动批准工具请求");
-    expect(chatPanelSource).toContain("目标模式：发送内容会被翻译为可执行目标草案");
+    expect(chatPanelSource).toContain("自动授权：普通文件、Shell 和网络操作默认放行");
+    expect(chatPanelSource).toContain("目标模式：自动开启并锁定自动授权");
     expect(chatPanelSource).toContain("composer-stop-button");
     expect(chatPanelSource).toContain("composer-send-button");
     expect(chatPanelSource).not.toContain("slash-command-menu");
@@ -937,7 +937,7 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource).not.toContain('submitUserMessage("暂停这个目标")');
     expect(chatPanelSource).toContain("window.buildingAgent.increaseGoalBudget(");
     expect(chatPanelSource).toContain("onIncreaseBudget={handleIncreaseGoalBudget}");
-    expect(chatPanelSource).toContain("const goalModeVisuallyEnabled = goalModeEnabled || Boolean(activeGoal);");
+    expect(chatPanelSource).toContain("const goalModeVisuallyEnabled = goalModeEnabled;");
     expect(chatPanelSource).toContain("aria-pressed={goalModeVisuallyEnabled}");
     expect(chatPanelSource).toContain('className="primary-action"');
     expect(goalDetailDrawerSource).toContain("goal-progress-status");
@@ -1259,6 +1259,8 @@ describe("Design System — Obsidian desktop control surface", () => {
 
   it("keeps tool approval inside chat with an auto-authorization toggle and critical risk styling", () => {
     expect(chatPanelSource).toContain("autoApprovalEnabled");
+    expect(chatPanelSource).toContain("autoApprovalLocked");
+    expect(chatPanelSource).toContain("setToolGoalModeEnabled");
     expect(chatPanelSource).toContain("setToolAutoApprovalEnabled");
     expect(chatPanelSource).toContain("onToolApprovalRequest");
     expect(chatPanelSource).toContain("tool-approval-panel");
@@ -1267,11 +1269,24 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource).toContain("aria-label=\"自动授权工具请求\"");
     expect(chatPanelSource).toContain("composer-mode-risk-summary");
     expect(chatPanelSource).toContain("resolveToolApproval");
+    expect(chatPanelSource).toContain("shouldShowToolApproval(");
+    expect(chatPanelSource).toContain("disabled={autoApprovalLocked}");
     expect(chatPanelSource).toContain("is-critical-risk");
     expect(styles).toContain(".tool-approval-panel");
     expect(styles).toContain(".auto-approval-toggle");
     expect(styles).toContain(".is-critical-risk");
     expect(styles).toContain("var(--status-error-text)");
+  });
+
+  it("keeps long goal instructions in a scrollable body with a short heading", () => {
+    expect(goalDetailDrawerSource).toContain("buildGoalDisplayTitle");
+    expect(goalDetailDrawerSource).toContain("goal-original-instructions");
+    expect(goalDetailDrawerSource).toContain("查看完整目标说明");
+    expect(goalDetailDrawerSource).toContain("props.summary.description");
+    expect(styles).toContain(".goal-original-instructions-content");
+    expect(styles).toContain("overflow-wrap: anywhere");
+    expect(styles).toContain("var(--color-on-accent)");
+    expect(styles).not.toContain("--color-action-primary-text");
   });
 
   it("routes run-record chat actions to the run session instead of the chat home", () => {

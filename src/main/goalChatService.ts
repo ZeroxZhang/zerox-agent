@@ -11,16 +11,11 @@ import {
 
 import type { GoalReviewDecision } from "../shared/agentGoalReview";
 import type { ChatSessionGoalSummary, GoalProgressEvent } from "../shared/chat";
-import { classifyTaskFrame, type TaskFrame } from "../shared/agentTaskStrategy";
 import {
   compileAgentTaskContract,
   type AgentTaskContract,
 } from "../shared/agentTaskContract";
 import { createTaskContractSuccessCriterion } from "../shared/agentTaskContractAcceptance";
-import {
-  createQuickActionPlan,
-  type QuickActionPlan,
-} from "../shared/agentQuickAction";
 import type { SkillInputValue } from "../shared/skillExecutionContract";
 import type { SkillRecord } from "../shared/skills";
 import type { AgentGoalController } from "./agentGoalController";
@@ -75,11 +70,20 @@ export function createGoalChatService(options: {
   getAvailableSkills?: () => string[];
   createId?: () => string;
   now?: () => string;
+  onDiagnostic?: (event: {
+    phase: "planning";
+    message: string;
+    error: unknown;
+  }) => void;
   onProgress?: (event: GoalProgressEvent) => void;
 }): GoalChatService {
   const createId = options.createId ?? (() => `goal_${randomUUID()}`);
   const now = options.now ?? (() => new Date().toISOString());
-  const activeGoalControllers = new Map<string, AbortController>();
+  const activeGoalRuns = new Map<
+    string,
+    { controller: AbortController; completion: Promise<unknown> }
+  >();
+  const pendingRestarts = new Set<string>();
 
   function notifyProgress(
     event: GoalProgressEvent["event"],
@@ -104,34 +108,40 @@ export function createGoalChatService(options: {
     runOptions: { signal?: AbortSignal } | undefined,
     runner: (goalId: string, options: { signal?: AbortSignal }) => Promise<Goal>,
   ) {
-    const existing = activeGoalControllers.get(goalId);
-    if (existing && !existing.signal.aborted) {
+    const existing = activeGoalRuns.get(goalId);
+    if (existing) {
+      if (existing.controller.signal.aborted && !pendingRestarts.has(goalId)) {
+        pendingRestarts.add(goalId);
+        void existing.completion.finally(() => {
+          pendingRestarts.delete(goalId);
+          startBackgroundGoalRun(goalId, runOptions, runner);
+        });
+      }
       return;
     }
 
     const controller = new AbortController();
-    activeGoalControllers.set(goalId, controller);
     const abortFromParent = () => controller.abort();
     runOptions?.signal?.addEventListener("abort", abortFromParent, { once: true });
 
-    void runner(goalId, { signal: controller.signal })
+    const completion = runner(goalId, { signal: controller.signal })
       .catch(() => {
         // Errors are captured by the controller and surfaced via progress events.
       })
       .finally(() => {
         runOptions?.signal?.removeEventListener("abort", abortFromParent);
-        if (activeGoalControllers.get(goalId) === controller) {
-          activeGoalControllers.delete(goalId);
+        if (activeGoalRuns.get(goalId)?.controller === controller) {
+          activeGoalRuns.delete(goalId);
         }
       });
+    activeGoalRuns.set(goalId, { controller, completion });
   }
 
   function abortBackgroundGoalRun(goalId: string) {
-    const controller = activeGoalControllers.get(goalId);
-    if (controller && !controller.signal.aborted) {
-      controller.abort();
+    const active = activeGoalRuns.get(goalId);
+    if (active && !active.controller.signal.aborted) {
+      active.controller.abort();
     }
-    activeGoalControllers.delete(goalId);
   }
 
   async function queueGoalExecution(goal: Goal): Promise<Goal> {
@@ -188,27 +198,12 @@ export function createGoalChatService(options: {
         description,
         taskContract,
       );
-      const taskFrame = classifyTaskFrame(description);
-      const quickActionPlan = createQuickActionPlan(description, taskFrame);
-      const quickActionReviewPlan =
-        !taskContract && shouldRouteToQuickActionReview(taskFrame, quickActionPlan)
-          ? quickActionPlan
-          : null;
-
-      const milestones = quickActionReviewPlan
-        ? [
-            createQuickActionReviewMilestone(
-              description,
-              goalCriterion,
-              quickActionReviewPlan,
-            ),
-          ]
-        : await planGoalMilestones(
-            description,
-            goalCriterion,
-            taskContract,
-            input.selectedSkill,
-          );
+      const milestones = await planGoalMilestones(
+        description,
+        goalCriterion,
+        taskContract,
+        input.selectedSkill,
+      );
 
       const goal: Goal = upgradeGoalAcceptanceProtocol({
         id: goalId,
@@ -227,7 +222,7 @@ export function createGoalChatService(options: {
           : {}),
         successCriteria: [goalCriterion],
         milestones,
-        status: quickActionReviewPlan ? "waiting_for_review" : "planning",
+        status: "planning",
         budget: createDefaultChatGoalBudget(),
         budgetUsage: {
           iterations: 0,
@@ -243,25 +238,12 @@ export function createGoalChatService(options: {
       });
 
       await options.goalStore.save(goal);
-      if (quickActionReviewPlan) {
-        await options.goalStore.appendLedger(goal.id, {
-          at: goal.createdAt,
-          kind: "review_requested",
-          summary: buildQuickActionReviewSummary(taskFrame, quickActionReviewPlan),
-        });
-        notifyProgress(
-          "review_requested",
-          goal,
-          "该目标更适合快速动作，已暂停等待审核。",
-        );
-      } else {
-        await options.goalStore.appendLedger(goal.id, {
-          at: goal.createdAt,
-          kind: "goal_planned",
-          summary: `Goal created from chat session ${input.sessionId}.`,
-        });
-        notifyProgress("started", goal, "目标已创建，等待启动。");
-      }
+      await options.goalStore.appendLedger(goal.id, {
+        at: goal.createdAt,
+        kind: "goal_planned",
+        summary: `Goal created from chat session ${input.sessionId}.`,
+      });
+      notifyProgress("started", goal, "目标已创建，等待启动。");
       return toGoalSummary(goal);
     },
 
@@ -271,23 +253,18 @@ export function createGoalChatService(options: {
         input.edit?.normalizedDescription?.trim() ||
         input.draft.normalizedDescription.trim() ||
         "Chat goal";
+      const originalDescription = input.draft.sourceMessage.trim() || description;
       const normalizedCriteria = normalizeGoalDraftCriteria(
         input.edit?.successCriteria ?? input.draft.successCriteria,
       );
       const successCriteria = normalizedCriteria.successCriteria;
       const taskContract = compileAgentTaskContract({
-        description,
+        description: originalDescription,
         chatSessionId: input.draft.sessionId,
         ...(input.draft.originMessageId
           ? { originMessageId: input.draft.originMessageId }
           : {}),
       });
-      const taskFrame = classifyTaskFrame(description);
-      const quickActionPlan = createQuickActionPlan(description, taskFrame);
-      const quickActionReviewPlan =
-        !taskContract && shouldRouteToQuickActionReview(taskFrame, quickActionPlan)
-          ? quickActionPlan
-          : null;
       const editedMilestones = input.edit?.milestones?.length
         ? input.edit.milestones
         : undefined;
@@ -298,16 +275,8 @@ export function createGoalChatService(options: {
         ? normalizeDraftMilestones(editedMilestones, successCriteria)
         : draftMilestones
           ? normalizeDraftMilestones(draftMilestones, successCriteria)
-          : quickActionReviewPlan
-            ? [
-                createQuickActionReviewMilestone(
-                  description,
-                  successCriteria[0],
-                  quickActionReviewPlan,
-                ),
-              ]
-            : await planGoalMilestones(
-                description,
+          : await planGoalMilestones(
+                originalDescription,
                 successCriteria,
                 taskContract,
                 input.draft.selectedSkill,
@@ -321,6 +290,7 @@ export function createGoalChatService(options: {
           ? { originMessageId: input.draft.originMessageId }
           : {}),
         description,
+        originalDescription,
         ...(taskContract ? { taskContract } : {}),
         ...(input.draft.selectedSkill
           ? { selectedSkill: snapshotSelectedSkill(input.draft.selectedSkill) }
@@ -330,7 +300,7 @@ export function createGoalChatService(options: {
           : {}),
         successCriteria,
         milestones,
-        status: quickActionReviewPlan ? "waiting_for_review" : "planning",
+        status: "planning",
         budget: createDefaultChatGoalBudget(),
         budgetUsage: {
           iterations: 0,
@@ -346,25 +316,12 @@ export function createGoalChatService(options: {
       });
 
       await options.goalStore.save(goal);
-      if (quickActionReviewPlan) {
-        await options.goalStore.appendLedger(goal.id, {
-          at: goal.createdAt,
-          kind: "review_requested",
-          summary: buildQuickActionReviewSummary(taskFrame, quickActionReviewPlan),
-        });
-        notifyProgress(
-          "review_requested",
-          goal,
-          "该目标更适合快速动作，已暂停等待审核。",
-        );
-      } else {
-        await options.goalStore.appendLedger(goal.id, {
-          at: goal.createdAt,
-          kind: "goal_planned",
-          summary: `Goal created from confirmed draft ${input.draft.id}.`,
-        });
-        notifyProgress("started", goal, "目标草案已确认，等待启动。");
-      }
+      await options.goalStore.appendLedger(goal.id, {
+        at: goal.createdAt,
+        kind: "goal_planned",
+        summary: `Goal created from confirmed draft ${input.draft.id}.`,
+      });
+      notifyProgress("started", goal, "目标草案已确认，等待启动。");
       return toGoalSummary(goal);
     },
 
@@ -639,12 +596,16 @@ export function createGoalChatService(options: {
         ...(taskContract ? { taskContract } : {}),
         ...(selectedSkill ? { selectedSkill: snapshotSelectedSkill(selectedSkill) } : {}),
       });
-    } catch {
-      // Fallback: create a single achievable milestone that produces the artifact.
+    } catch (error) {
+      options.onDiagnostic?.({
+        phase: "planning",
+        message: "Goal planner failed; using the local structured fallback.",
+        error,
+      });
       return [
         {
           id: "milestone_1",
-          description,
+          description: "执行目标并产出可验收结果",
           dependsOn: [],
           successCriteria: criteria,
           state: "ready",
@@ -712,47 +673,9 @@ function createGoalSuccessCriterion(
   };
 }
 
-function shouldRouteToQuickActionReview(
-  frame: TaskFrame,
-  quickActionPlan: QuickActionPlan | null,
-): quickActionPlan is QuickActionPlan {
-  return (
-    frame.recommendedRuntime === "quick_action" &&
-    frame.needsConfirmation &&
-    Boolean(quickActionPlan)
-  );
-}
-
-function createQuickActionReviewMilestone(
-  description: string,
-  goalCriterion: SuccessCriterion,
-  quickActionPlan: QuickActionPlan,
-): Milestone {
-  return {
-    id: "milestone_quick_action_review",
-    description: `Review ${quickActionPlan.workflowId} quick-action plan before executing: ${description}`,
-    dependsOn: [],
-    successCriteria: [goalCriterion],
-    state: "pending",
-    runIds: [],
-    attempts: 0,
-  };
-}
-
-function buildQuickActionReviewSummary(
-  frame: TaskFrame,
-  quickActionPlan: QuickActionPlan,
-): string {
-  const toolNames = quickActionPlan.steps
-    .map((step) => step.toolName)
-    .filter((toolName): toolName is string => Boolean(toolName));
-
-  return `Quick-action ${quickActionPlan.workflowId} recommended before Goal Mode execution: ${frame.domain}/${frame.mode}/${frame.risk} via ${toolNames.join(", ")}.`;
-}
-
 function createDefaultChatGoalBudget(): GoalBudget {
   return {
-    maxIterations: 8,
+    maxIterations: 64,
     maxToolCalls: 64,
     maxWallClockMs: 45 * 60 * 1000,
     maxReplans: 3,

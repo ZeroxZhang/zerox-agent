@@ -258,7 +258,9 @@ function collectGoalResultSummaries(goal: Goal): string[] {
 export function createAppContainer(options: {
   requestToolApproval: (
     request: ToolUserApprovalRequest,
+    options?: { signal?: AbortSignal },
   ) => Promise<ToolUserApprovalResult>;
+  setGoalActive?: (goalId: string, active: boolean) => void;
   acceptanceValidators?: AcceptanceValidator[];
 }) {
   const configDir = path.join(app.getPath("userData"), "config");
@@ -768,21 +770,20 @@ export function createAppContainer(options: {
       throw new Error(approval.reason ?? "Git worktree creation was not approved.");
     }
 
-    if (approval.automatic) {
-      throw new Error(
-        "Git worktree creation requires explicit user approval; global automatic approval is not sufficient.",
-      );
-    }
-
     return agentWorkspaceService().createGitWorktreeWorkspace({
       name: input.name,
       repositoryRoot: input.repositoryRoot,
       branch: input.branch,
-      approval: {
-        kind: "explicit_user_approval",
-        approvedAt: new Date().toISOString(),
-        approvedBy: "user",
-      },
+      approval: approval.automatic
+        ? {
+            kind: "session_auto_approval",
+            approvedAt: new Date().toISOString(),
+          }
+        : {
+            kind: "explicit_user_approval",
+            approvedAt: new Date().toISOString(),
+            approvedBy: "user",
+          },
     });
   }
 
@@ -1204,6 +1205,7 @@ export function createAppContainer(options: {
         }),
         acceptance: agentGoalAcceptance(),
         onProgress: emitGoalProgressEvent,
+        onActiveGoalChange: options.setGoalActive,
         planner: {
           async replan(goal, reason) {
             return createAgentGoalPlanner({
@@ -1269,7 +1271,9 @@ export function createAppContainer(options: {
                   modelProfile,
                 }
               : {}),
-            transcriptMessages: runResult?.transcriptMessages,
+            transcriptMessages:
+              runResult?.transcriptMessages ??
+              goal.runtimeCheckpoint?.transcriptMessages,
             artifacts: {
               goalEvidence: {
                 condition: goal.description,
@@ -1344,6 +1348,9 @@ export function createAppContainer(options: {
         },
         getAvailableTools: getAvailableToolNames,
         onProgress: emitGoalProgressEvent,
+        onDiagnostic(event) {
+          console.warn(`[goal:${event.phase}] ${event.message}`, event.error);
+        },
       }),
     );
   }
@@ -1353,6 +1360,9 @@ export function createAppContainer(options: {
       createAgentGoalTranslator({
         chatClient: chatClient(),
         getModelProfile,
+        onDiagnostic(event) {
+          console.warn(`[goal:translation] ${event.message}`, event.error);
+        },
       }),
     );
   }
@@ -2039,6 +2049,26 @@ export function createAppContainer(options: {
       runGoalOperation(() => goalChatService().replan(goalId, instructions)),
     retryGoal: (goalId: string) =>
       runGoalOperation(() => goalChatService().retry(goalId)),
+    async resumeInterruptedGoals() {
+      const activeGoals = await agentGoalStore().listActive();
+      const interrupted = activeGoals.filter(
+        (goal) => goal.status === "executing",
+      );
+      let resumed = 0;
+      for (const goal of interrupted) {
+        try {
+          const prepared = prepareInterruptedGoalForResume(goal);
+          if (prepared !== goal) {
+            await agentGoalStore().save(prepared);
+          }
+          await goalChatService().resume(goal.id);
+          resumed += 1;
+        } catch (error) {
+          console.error(`Failed to resume goal ${goal.id}:`, error);
+        }
+      }
+      return resumed;
+    },
     initializeMcpTools,
     getActiveMcpClients: () => activeMcpClients,
     getActiveTaskRunControllers: () => activeTaskRunControllers,
@@ -2049,6 +2079,18 @@ export function createAppContainer(options: {
     onGoalProgressEvent,
     onAgentRunsChanged,
   };
+}
+
+export function prepareInterruptedGoalForResume(goal: Goal): Goal {
+  let changed = false;
+  const milestones = goal.milestones.map((milestone) => {
+    if (milestone.state !== "running") {
+      return milestone;
+    }
+    changed = true;
+    return { ...milestone, state: "ready" as const };
+  });
+  return changed ? { ...goal, milestones } : goal;
 }
 
 export function reconcileIrreversibleGoalProgressEvent(

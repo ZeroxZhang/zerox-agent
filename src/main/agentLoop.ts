@@ -48,6 +48,8 @@ export type AgentLoopOptions = {
   runtimeTask?: RuntimeToolAuthorizationTask;
   systemPrompt?: string;
   maxTurns?: number;
+  maxToolCalls?: number;
+  maxWallClockMs?: number;
   signal?: AbortSignal;
   tools?: ReturnType<typeof buildToolDefinitions>;
   toolResultOffloadStore?: ToolResultOffloadStore;
@@ -97,6 +99,15 @@ export type AgentLoopOptions = {
   onContextCompacted?: (event: AgentLoopContextCompaction) => void;
   onModelRetry?: (event: ModelRetryEvent) => void;
   onStrategyGuard?: (event: AgentLoopStrategyGuardEvent) => void;
+  onCheckpoint?: (checkpoint: AgentLoopCheckpoint) => void | Promise<void>;
+};
+
+export type AgentLoopCheckpoint = {
+  messages: ChatMessage[];
+  turns: number;
+  toolCallsExecuted: number;
+  nextAction: string;
+  tokensConsumed: number;
 };
 
 export type AgentLoopContextCompaction = {
@@ -141,6 +152,7 @@ export type AgentLoopResult = {
   turns: number;
   messages: ChatMessage[];
   toolCallsExecuted: number;
+  tokensConsumed?: number;
   continuation?: AgentLoopContinuation;
 };
 
@@ -164,7 +176,7 @@ export async function runAgentLoop(
     runtimeTask,
     systemPrompt,
     maxTurns = 4,
-    signal,
+    signal: parentSignal,
     tools: customTools,
     toolResultOffloadStore,
     toolResultOffloadThreshold,
@@ -174,10 +186,13 @@ export async function runAgentLoop(
     pauseOnStrategyGuard = false,
     resumeMessages,
     initialToolCallsExecuted = 0,
+    maxToolCalls = Number.POSITIVE_INFINITY,
+    maxWallClockMs = 0,
     pauseOnFailureLoop = false,
     contextManager = createContextManager(),
     compactionStrategy,
     systemReminderRegistry,
+    onCheckpoint,
     tokenBudget = 0,
     modelRetry,
     onToolCall,
@@ -192,6 +207,23 @@ export async function runAgentLoop(
     onModelRetry,
     onStrategyGuard,
   } = options;
+  const deadline = createDeadline(maxWallClockMs);
+  const signal = combineAbortSignals(parentSignal, deadline?.signal);
+
+  async function emitCheckpoint(nextAction: string): Promise<void> {
+    await onCheckpoint?.({
+      messages: messages.map((message) => ({
+        ...message,
+        ...(message.tool_calls
+          ? { tool_calls: message.tool_calls.map((call) => ({ ...call, function: { ...call.function } })) }
+          : {}),
+      })),
+      turns: turns + 1,
+      toolCallsExecuted,
+      nextAction,
+      tokensConsumed: estimateConsumedTokens(),
+    });
+  }
 
   const toolDefinitions = customTools ?? buildToolDefinitions();
   const messages: ChatMessage[] = resumeMessages ? [...resumeMessages] : [];
@@ -241,6 +273,12 @@ export async function runAgentLoop(
   // v3.6.0: Cumulative token consumption tracking for budget enforcement (CORE-05).
   let cumulativeTokensConsumed = 0;
   const effectiveTokenBudget = tokenBudget > 0 ? tokenBudget : 0;
+
+  function estimateConsumedTokens(): number {
+    return cumulativeTokensConsumed > 0
+      ? cumulativeTokensConsumed
+      : Math.max(1, contextManager.estimateTokens(messages));
+  }
 
   async function compactMessagesBeforeModelRequest() {
     const estimatedTokens = contextManager.estimateTokens(messages);
@@ -552,6 +590,13 @@ export async function runAgentLoop(
             summary = "Agent loop canceled during tool execution.";
             break;
           }
+          if (
+            toolCallsExecuted - initialToolCallsExecuted >= maxToolCalls
+          ) {
+            status = "paused";
+            summary = `Tool-call budget reached after ${maxToolCalls} calls in this segment.`;
+            break;
+          }
 
           const { toolCall, toolName, signature } = preparedToolCall;
           const toolEventBase = buildToolEvent({
@@ -649,6 +694,7 @@ export async function runAgentLoop(
               ...(registeredToolSource ? { source: registeredToolSource } : {}),
               args,
             }, {
+              ...(signal ? { signal } : {}),
               ...(runContext ? { runContext } : {}),
               ...(runtimeTask ? { runtimeTask } : {}),
               onApprovalRequested: async (request) => {
@@ -715,6 +761,7 @@ export async function runAgentLoop(
           // Execute tool
           const result = await toolExecutor.execute({
             toolName: toolName as never,
+            ...(registeredToolSource ? { source: registeredToolSource } : {}),
             args,
           }, {
             ...(signal ? { signal } : {}),
@@ -885,6 +932,9 @@ export async function runAgentLoop(
         }
 
         trimUnansweredToolCalls(assistantToolMessage, processedToolCalls);
+        if (!signal?.aborted && processedToolCalls.length > 0) {
+          await emitCheckpoint("Continue from the completed tool-call batch.");
+        }
 
         if (status === "paused") {
           break;
@@ -931,14 +981,52 @@ export async function runAgentLoop(
     }
   }
 
+  if (deadline?.signal.aborted && !parentSignal?.aborted) {
+    status = "failed";
+    summary = `Wall-clock budget exceeded after ${maxWallClockMs}ms.`;
+  }
+  deadline?.dispose();
+
   return {
     summary,
     status,
     turns,
     messages,
     toolCallsExecuted,
+    tokensConsumed: estimateConsumedTokens(),
     ...(continuation ? { continuation } : {}),
   };
+}
+
+function createDeadline(maxWallClockMs: number): {
+  signal: AbortSignal;
+  dispose: () => void;
+} | null {
+  if (!Number.isFinite(maxWallClockMs) || maxWallClockMs <= 0) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(new DOMException("Wall-clock budget exceeded.", "TimeoutError")),
+    maxWallClockMs,
+  );
+  timer.unref?.();
+  return { signal: controller.signal, dispose: () => clearTimeout(timer) };
+}
+
+function combineAbortSignals(
+  first: AbortSignal | undefined,
+  second: AbortSignal | undefined,
+): AbortSignal | undefined {
+  if (!first) return second;
+  if (!second) return first;
+  const controller = new AbortController();
+  const abort = (signal: AbortSignal) => {
+    if (!controller.signal.aborted) controller.abort(signal.reason);
+  };
+  if (first.aborted) abort(first);
+  else first.addEventListener("abort", () => abort(first), { once: true });
+  if (second.aborted) abort(second);
+  else second.addEventListener("abort", () => abort(second), { once: true });
+  return controller.signal;
 }
 
 function isStreamingChatClient(

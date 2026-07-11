@@ -2,7 +2,8 @@ import path from "node:path";
 import os from "node:os";
 import type { ScheduledTaskStore } from "./taskStore";
 import type { ToolAuditLog } from "./toolAuditLog";
-import { evaluatePermission, isCommandDenyListed } from "./kernel/permissionEngine";
+import { evaluatePermission } from "./kernel/permissionEngine";
+import { classifyToolApprovalRisk, type ToolApprovalRisk } from "../shared/toolApproval";
 import {
   authorizeToolCallWithinRunContext,
   type AuthorizeTaskToolCallResult,
@@ -22,6 +23,7 @@ export type ToolAuthorizationService = {
 };
 
 export type ToolAuthorizationOptions = {
+  signal?: AbortSignal;
   runContext?: AgentRunContext;
   runtimeTask?: RuntimeToolAuthorizationTask;
   onApprovalRequested?: (request: ToolUserApprovalRequest) => Promise<void>;
@@ -39,6 +41,7 @@ export type ToolUserApprovalRequest = {
   taskName: string;
   request: ToolCallRequest;
   deniedReason: string;
+  risk?: ToolApprovalRisk;
 };
 
 export type ToolUserApprovalResult = {
@@ -54,6 +57,7 @@ export function createToolAuthorizationService(options: {
   permissionRules?: PermissionRule[] | (() => PermissionRule[]);
   requestUserApproval?: (
     request: ToolUserApprovalRequest,
+    options?: { signal?: AbortSignal },
   ) => Promise<ToolUserApprovalResult>;
 }): ToolAuthorizationService {
   const homeDir = options.homeDir ?? os.homedir();
@@ -85,33 +89,6 @@ export function createToolAuthorizationService(options: {
       }
 
       const runContext = authorizeOptions?.runContext;
-
-      // v3.6.0: Block deny-listed commands (osascript, security, etc.) before
-      // any other permission evaluation (S1-02, SEC-09).
-      if (request.toolName === "shell_exec") {
-        const deniedCommand = isCommandDenyListed(String(request.args.command ?? ""));
-        if (deniedCommand) {
-          const denyDecision = {
-            id: `deny_${Date.now()}`,
-            taskId: subject.id,
-            toolName: request.toolName,
-            allowed: false as const,
-            reason: `shell_exec blocked: "${deniedCommand}" is a deny-listed command. macOS-sensitive tools (osascript, security, shortcuts, automator, systemsetup, etc.) cannot be executed via agent.`,
-            automatic: true,
-            risk: { level: "critical" as const, reason: "deny-listed command" },
-          };
-          const auditEvent = await options.auditLog.append({
-            taskId: subject.id,
-            request,
-            decision: denyDecision,
-          });
-          return {
-            ok: true,
-            decision: denyDecision,
-            auditEvent,
-          };
-        }
-      }
 
       // P4: build a ShellPlan for shell_exec when a runContext is available,
       // feeding both permission layers as the single source of truth (Patch 4).
@@ -158,9 +135,16 @@ export function createToolAuthorizationService(options: {
           reason: `${decision.reason} (${subject.policyLabel})`,
         };
       }
+      const risk = classifyToolApprovalRisk({
+        taskName: subject.name,
+        deniedReason: decision.reason,
+        request,
+        ...(shellPlan ? { shellPlan } : {}),
+      });
       if (
         !decision.allowed &&
         task &&
+        !risk.requiresConfirmation &&
         shouldAutoApproveScheduledTask(task, request, decision.reason)
       ) {
         decision = {
@@ -169,8 +153,8 @@ export function createToolAuthorizationService(options: {
         };
       }
       if (
-        !decision.allowed &&
-        shouldRequestInteractiveApproval(task) &&
+        (risk.requiresConfirmation || !decision.allowed) &&
+        (risk.requiresConfirmation || shouldRequestInteractiveApproval(task)) &&
         options.requestUserApproval &&
         shouldRequestUserApproval(decision.reason)
       ) {
@@ -178,10 +162,20 @@ export function createToolAuthorizationService(options: {
           taskId: subject.id,
           taskName: subject.name,
           request,
-          deniedReason: decision.reason,
+          deniedReason: risk.requiresConfirmation
+            ? risk.reason
+            : decision.reason,
+          risk,
         };
+        throwIfAborted(authorizeOptions?.signal);
         await authorizeOptions?.onApprovalRequested?.(approvalRequest);
-        const approval = await options.requestUserApproval(approvalRequest);
+        throwIfAborted(authorizeOptions?.signal);
+        const approval = await options.requestUserApproval(approvalRequest, {
+          ...(authorizeOptions?.signal
+            ? { signal: authorizeOptions.signal }
+            : {}),
+        });
+        throwIfAborted(authorizeOptions?.signal);
         await authorizeOptions?.onApprovalResolved?.(approval);
 
         decision = approval.approved
@@ -198,6 +192,17 @@ export function createToolAuthorizationService(options: {
                 `用户拒绝授权本次操作。原始风险：${decision.reason}`,
             };
       }
+      if (
+        risk.requiresConfirmation &&
+        !options.requestUserApproval &&
+        decision.allowed
+      ) {
+        decision = {
+          allowed: false,
+          reason: `极高危操作需要用户确认：${risk.reason}`,
+        };
+      }
+      throwIfAborted(authorizeOptions?.signal);
       const auditEvent = await options.auditLog.append({
         taskId: subject.id,
         request,
@@ -211,6 +216,11 @@ export function createToolAuthorizationService(options: {
       };
     },
   };
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return;
+  throw signal.reason ?? new DOMException("Authorization canceled.", "AbortError");
 }
 
 function shouldRequestInteractiveApproval(

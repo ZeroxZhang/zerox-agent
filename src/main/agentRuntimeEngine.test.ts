@@ -775,6 +775,11 @@ describe("agent runtime engine", () => {
       source?: string;
       args: Record<string, unknown>;
     }> = [];
+    const executionRequests: Array<{
+      toolName: string;
+      source?: string;
+      args: Record<string, unknown>;
+    }> = [];
     const registry = createDynamicToolRegistry();
     registry.register(
       {
@@ -810,6 +815,7 @@ describe("agent runtime engine", () => {
       },
       toolExecutor: {
         async execute(request) {
+          executionRequests.push(request);
           return registry.execute(request.toolName, request.args);
         },
         getRegistry() {
@@ -836,6 +842,7 @@ describe("agent runtime engine", () => {
         args: { query: "agent eval" },
       },
     ]);
+    expect(executionRequests).toEqual(authorizationRequests);
   });
 
   it("feeds recoverable tool failures back to the model before retrying", async () => {
@@ -1373,10 +1380,10 @@ describe("agent runtime engine", () => {
         async authorize(_taskId, request, options) {
           const lifecycle = options as {
             onApprovalRequested?: () => Promise<void>;
-            onApprovalResolved?: () => Promise<void>;
+            onApprovalResolved?: (result: { approved: boolean }) => Promise<void>;
           } | undefined;
           await lifecycle?.onApprovalRequested?.();
-          await lifecycle?.onApprovalResolved?.();
+          await lifecycle?.onApprovalResolved?.({ approved: true });
           return {
             ok: true,
             decision: {

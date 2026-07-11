@@ -26,4 +26,44 @@ describe("context manager", () => {
     ]);
     expect(compressed.length).toBeLessThan(messages.length);
   });
+
+  it("preserves every assistant tool-call message with its matching tool result", () => {
+    const manager = createContextManager({ maxTokens: 40, recentTurnsToKeep: 3 });
+    const messages: ChatMessage[] = [
+      { role: "system", content: "System" },
+      { role: "user", content: "Inspect and then test the project" },
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [createToolCall("call_1", "file_read")],
+      },
+      { role: "tool", tool_call_id: "call_1", content: '{"ok":true}' },
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [createToolCall("call_2", "shell_exec")],
+      },
+      { role: "tool", tool_call_id: "call_2", content: '{"ok":true}' },
+      { role: "assistant", content: "Done" },
+    ];
+
+    const compressed = manager.compressMessages(messages, 40);
+
+    expect(compressed.filter((message) => message.role === "assistant")).toHaveLength(3);
+    for (const toolResult of compressed.filter((message) => message.role === "tool")) {
+      expect(
+        compressed.some((message) =>
+          message.tool_calls?.some((call) => call.id === toolResult.tool_call_id),
+        ),
+      ).toBe(true);
+    }
+  });
 });
+
+function createToolCall(id: string, name: string) {
+  return {
+    id,
+    type: "function" as const,
+    function: { name, arguments: "{}" },
+  };
+}

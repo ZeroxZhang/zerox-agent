@@ -579,13 +579,17 @@ export function createAgentRuntimeEngine(options: {
             args,
           },
           {
+            ...(signal ? { signal } : {}),
             runContext: current.runContext,
             onApprovalRequested: async () => {
               await transitionInvocation({ status: "waiting_approval" });
               current = await saveCheckpoint(current, "waiting_for_approval");
             },
-            onApprovalResolved: async () => {
+            onApprovalResolved: async (approval) => {
+              if (!approval.approved) return;
+              throwIfCanceled(signal);
               await transitionInvocation({ status: "authorized" });
+              throwIfCanceled(signal);
               current = await saveCheckpoint(current, "running");
             },
           },
@@ -637,7 +641,11 @@ export function createAgentRuntimeEngine(options: {
 
         await transitionInvocation({ status: "running" });
         const result = await options.toolExecutor.execute(
-          { toolName, args },
+          {
+            toolName,
+            ...(toolSource ? { source: toolSource } : {}),
+            args,
+          },
           {
             runContext: current.runContext,
             ...(signal ? { signal } : {}),

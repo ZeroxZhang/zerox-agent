@@ -34,6 +34,15 @@ describe("analyzeShell", () => {
     expect(analyzeShell("ls -la", { cwd: CWD }).networkAccess).toBe(false);
   });
 
+  it.each([
+    "python script.py",
+    "node script.js",
+    "bash script.sh",
+    "sh -c 'cat /etc/passwd'",
+  ])("marks unparsed interpreter execution opaque: %s", (command) => {
+    expect(analyzeShell(command, { cwd: CWD }).opaqueExecution).toBe(true);
+  });
+
   it("captures command substitution $() as an analyzed inner segment", () => {
     const plan = analyzeShell("echo $(rm -rf /tmp/cache)", { cwd: CWD });
     expect(plan.controlOperators).toContain("$(");

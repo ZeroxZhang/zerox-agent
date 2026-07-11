@@ -36,6 +36,7 @@ import {
   redactAndBoundAcceptanceSummary,
   redactAndBoundEvidenceRef,
 } from "./agentGoalRedaction";
+import { boundRuntimeTranscript } from "./runtimeTranscript";
 
 export type GoalRuntimeRunResult = {
   runId: string;
@@ -48,6 +49,14 @@ export type GoalRuntimeRunResult = {
   actionSignatures?: string[];
 };
 
+export type GoalRuntimeProgressCheckpoint = {
+  transcriptMessages: ChatMessage[];
+  toolCallCount: number;
+  wallClockMs: number;
+  tokens: number;
+  nextAction: string;
+};
+
 export type GoalRuntimeEngine = {
   runMilestone(
     goal: Goal,
@@ -55,6 +64,10 @@ export type GoalRuntimeEngine = {
     options?: {
       signal?: AbortSignal;
       repairDirective?: AcceptanceRepairDirective;
+      resumeMessages?: ChatMessage[];
+      onCheckpoint?: (
+        checkpoint: GoalRuntimeProgressCheckpoint,
+      ) => Promise<void>;
     },
   ): Promise<GoalRuntimeRunResult>;
 };
@@ -81,6 +94,7 @@ export function createAgentGoalController(options: {
   nextSequence?: () => number;
   now?: () => string;
   onProgress?: (event: GoalProgressEvent) => void;
+  onActiveGoalChange?: (goalId: string, active: boolean) => void;
 }): AgentGoalController {
   const stallThreshold = options.stallThreshold ?? 3;
   type ActiveRunEntry = {
@@ -164,11 +178,15 @@ export function createAgentGoalController(options: {
       owners?.delete(entry);
       if (owners?.size === 0) runOwnersByGoal.delete(goal.id);
       clearGoalRuntimeStateIfIdle(goal.id);
+      if (!activeRuns.has(goal.id)) {
+        options.onActiveGoalChange?.(goal.id, false);
+      }
     });
     const owners = runOwnersByGoal.get(goal.id) ?? new Set<ActiveRunEntry>();
     owners.add(entry);
     runOwnersByGoal.set(goal.id, owners);
     activeRuns.set(goal.id, entry);
+    options.onActiveGoalChange?.(goal.id, true);
     return entry.promise;
   }
 
@@ -490,14 +508,66 @@ export function createAgentGoalController(options: {
       };
     }
 
+    let checkpointedToolCalls = 0;
+    let checkpointedWallClockMs = 0;
+    let checkpointedTokens = 0;
+    const checkpoint = goal.runtimeCheckpoint;
+    const canResumeCheckpoint = Boolean(
+      checkpoint &&
+        (checkpoint.milestoneId === milestone.id || repairDirective),
+    );
     const runResult = await options.runtimeEngine.runMilestone(
       goal,
       milestone,
       {
         ...(runOptions?.signal ? { signal: runOptions.signal } : {}),
+        ...(canResumeCheckpoint && checkpoint
+          ? {
+              resumeMessages: checkpoint.transcriptMessages,
+            }
+          : {}),
         ...(repairDirective
           ? { repairDirective }
           : {}),
+        async onCheckpoint(runtimeCheckpoint) {
+          if (runOptions?.signal?.aborted) return;
+          const canonical = await options.goalStore.get(goal.id);
+          if (!canonical || canonical.status !== "executing") return;
+
+          goal.runtimeCheckpoint = {
+            milestoneId: milestone.id,
+            transcriptMessages: boundRuntimeCheckpointMessages(
+              runtimeCheckpoint.transcriptMessages,
+            ),
+            nextAction: runtimeCheckpoint.nextAction,
+            updatedAt: currentTime(),
+          };
+          goal.budgetUsage.toolCalls += Math.max(
+            0,
+            runtimeCheckpoint.toolCallCount - checkpointedToolCalls,
+          );
+          goal.budgetUsage.wallClockMs += Math.max(
+            0,
+            runtimeCheckpoint.wallClockMs - checkpointedWallClockMs,
+          );
+          goal.budgetUsage.tokens += Math.max(
+            0,
+            runtimeCheckpoint.tokens - checkpointedTokens,
+          );
+          checkpointedToolCalls = runtimeCheckpoint.toolCallCount;
+          checkpointedWallClockMs = runtimeCheckpoint.wallClockMs;
+          checkpointedTokens = runtimeCheckpoint.tokens;
+          touch(goal);
+          const saved = await options.goalStore.save(goal);
+          if (saved.status === "executing") {
+            notifyProgress(
+              "checkpoint",
+              saved,
+              `已保存里程碑运行检查点：${milestone.description}`,
+              milestone.id,
+            );
+          }
+        },
       },
     );
     const abortedAfterRuntime = await latestGoalAfterAbort(goal, runOptions);
@@ -513,10 +583,31 @@ export function createAgentGoalController(options: {
     if (runResult.summary) {
       milestone.lastRunSummary = runResult.summary;
     }
+    if (runResult.transcriptMessages?.length) {
+      goal.runtimeCheckpoint = {
+        milestoneId: milestone.id,
+        transcriptMessages: boundRuntimeCheckpointMessages(
+          runResult.transcriptMessages,
+        ),
+        nextAction:
+          repairDirective?.summary ??
+          `Continue milestone ${milestone.id} from the latest tool result.`,
+        updatedAt: currentTime(),
+      };
+    }
     goal.budgetUsage.iterations += 1;
-    goal.budgetUsage.toolCalls += runResult.toolCallCount;
-    goal.budgetUsage.wallClockMs += runResult.wallClockMs ?? 0;
-    goal.budgetUsage.tokens += runResult.tokens ?? 0;
+    goal.budgetUsage.toolCalls += Math.max(
+      0,
+      runResult.toolCallCount - checkpointedToolCalls,
+    );
+    goal.budgetUsage.wallClockMs += Math.max(
+      0,
+      (runResult.wallClockMs ?? 0) - checkpointedWallClockMs,
+    );
+    goal.budgetUsage.tokens += Math.max(
+      0,
+      (runResult.tokens ?? 0) - checkpointedTokens,
+    );
     touch(goal);
     const usageGoal = await options.goalStore.save(goal);
     if (usageGoal.status !== goal.status) {
@@ -851,55 +942,6 @@ export function createAgentGoalController(options: {
       );
       if (interruptedAfterRepair) {
         return { goal: interruptedAfterRepair, suspend: true };
-      }
-      if (decisionOptions.pauseAfterRepair && target) {
-        assertGoalTransition(persisted.status, "waiting_for_review");
-        persisted.status = "waiting_for_review";
-        touch(persisted);
-        const pausedGoal = await options.goalStore.save(persisted);
-        if (pausedGoal.status !== "waiting_for_review") {
-          await publishCanonicalTerminal(pausedGoal);
-          return { goal: pausedGoal, suspend: true };
-        }
-        const pauseSummary = [
-          "Milestone paused at its turn limit after acceptance classification and is waiting for review.",
-          decisionOptions.pauseSummary,
-        ]
-          .filter(Boolean)
-          .join(" ");
-        if (!(await publishNonterminalGoalEvent({
-          goal: pausedGoal,
-          allowedStatuses: ["waiting_for_review"],
-          ledger: {
-            at: currentTime(),
-            kind: "review_requested",
-            milestoneId: target.id,
-            summary: pauseSummary,
-          },
-          trajectory: {
-            type: "goal_review_requested",
-            payload: {
-              goalId: pausedGoal.id,
-              milestoneId: target.id,
-              reason: "turn_limit",
-              fingerprint: decision.fingerprint,
-              occurrence: decision.occurrence,
-            },
-          },
-          progress: {
-            event: "review_requested",
-            message:
-              "里程碑达到本轮执行上限，验收问题已记录；请审核后继续或调整计划。",
-            milestoneId: target.id,
-          },
-          signal: runOptions?.signal,
-        }))) {
-          return {
-            goal: await settleSuppressedPublication(pausedGoal),
-            suspend: true,
-          };
-        }
-        return { goal: pausedGoal, suspend: true };
       }
       return { goal: persisted, suspend: false };
     }
@@ -1844,6 +1886,23 @@ function repairDirectiveForMilestone(
     return directive;
   }
   return undefined;
+}
+
+function boundRuntimeCheckpointMessages(
+  messages: ChatMessage[],
+): NonNullable<Goal["runtimeCheckpoint"]>["transcriptMessages"] {
+  return boundRuntimeTranscript(messages).map((message) => ({
+    role: message.role,
+    content:
+      message.content.length > 4_000
+        ? `${message.content.slice(0, 4_000)}... [truncated]`
+        : message.content,
+    ...(message.tool_calls ? { tool_calls: message.tool_calls } : {}),
+    ...(message.tool_call_id
+      ? { tool_call_id: message.tool_call_id }
+      : {}),
+    ...(message.name ? { name: message.name } : {}),
+  }));
 }
 
 function emptyEvidenceManifest() {

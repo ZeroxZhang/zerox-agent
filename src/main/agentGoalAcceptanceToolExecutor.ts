@@ -26,6 +26,9 @@ export function createAuthorizedGoalAcceptanceToolExecutor(options: {
           args: request.args,
         },
         {
+          ...(executionOptions?.signal
+            ? { signal: executionOptions.signal }
+            : {}),
           runContext: options.runContext,
           runtimeTask,
         },

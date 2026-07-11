@@ -113,6 +113,7 @@ import type {
   ToolApprovalDecisionPayload,
   ToolApprovalRequestPayload,
 } from "../../shared/toolApproval";
+import { shouldShowToolApproval } from "../toolApprovalVisibility";
 
 type AgentChatPanelProps = {
   newChatRequestKey?: number;
@@ -195,9 +196,9 @@ const MAX_RENDERED_RUNTIME_EVENTS = 80;
 const MESSAGE_LIST_BOTTOM_THRESHOLD_PX = 96;
 const composerRiskTooltips = {
   auto:
-    "自动授权：智能体可在本次会话中自动批准工具请求。风险：可能执行文件、shell 或网络操作，请仅在任务和工作区可信时开启。",
+    "自动授权：普通文件、Shell 和网络操作默认放行；数据破坏、提权、密钥外传、生产发布和对外发送仍需确认。",
   goal:
-    "目标模式：发送内容会被翻译为可执行目标草案，确认后智能体可连续规划和执行。风险：可能触发多步工具调用，请先检查目标草案和验收标准。",
+    "目标模式：自动开启并锁定自动授权，智能体会持续执行和验收；仅 Policy B 极高危操作需要确认。",
 } as const;
 
 export function AgentChatPanel({
@@ -289,8 +290,11 @@ export function AgentChatPanel({
   );
   const [goalRunEvents, setGoalRunEvents] = useState<AgentRunEvent[]>([]);
   const [autoApprovalEnabled, setAutoApprovalEnabled] = useState(false);
-  const [pendingToolApproval, setPendingToolApproval] =
-    useState<ToolApprovalRequestPayload | null>(null);
+  const [autoApprovalLocked, setAutoApprovalLocked] = useState(false);
+  const [pendingToolApprovals, setPendingToolApprovals] = useState<
+    ToolApprovalRequestPayload[]
+  >([]);
+  const pendingToolApproval = pendingToolApprovals[0] ?? null;
   const [toolApprovalEvents, setToolApprovalEvents] = useState<
     ToolApprovalDecisionPayload[]
   >([]);
@@ -480,7 +484,6 @@ export function AgentChatPanel({
     setTaskProcessEvents([]);
     setGoalRunEvents([]);
     setSelectedSkillName(null);
-    setGoalModeEnabled(false);
     setPendingGoalDraft(null);
     setGoalDraftDescription("");
     setGoalDraftCriteriaText("");
@@ -574,17 +577,25 @@ export function AgentChatPanel({
 
     void window.buildingAgent
       .getToolApprovalMode()
-      .then((state) => setAutoApprovalEnabled(state.autoApprovalEnabled))
+      .then((state) => {
+        setAutoApprovalEnabled(state.autoApprovalEnabled);
+        setAutoApprovalLocked(state.autoApprovalLocked);
+        setGoalModeEnabled(state.goalModeEnabled);
+      })
       .catch(() => undefined);
     const unsubscribeRequest = window.buildingAgent.onToolApprovalRequest(
       (request) => {
-        setPendingToolApproval(request);
+        setPendingToolApprovals((current) =>
+          current.some((candidate) => candidate.id === request.id)
+            ? current
+            : [...current, request],
+        );
       },
     );
     const unsubscribeDecision = window.buildingAgent.onToolApprovalDecision(
       (decision) => {
-        setPendingToolApproval((current) =>
-          current?.id === decision.id ? null : current,
+        setPendingToolApprovals((current) =>
+          current.filter((candidate) => candidate.id !== decision.id),
         );
         setToolApprovalEvents((current) => [...current.slice(-9), decision]);
       },
@@ -592,6 +603,8 @@ export function AgentChatPanel({
     const unsubscribeMode = window.buildingAgent.onToolApprovalModeChanged(
       (state) => {
         setAutoApprovalEnabled(state.autoApprovalEnabled);
+        setAutoApprovalLocked(state.autoApprovalLocked);
+        setGoalModeEnabled(state.goalModeEnabled);
       },
     );
 
@@ -920,7 +933,7 @@ export function AgentChatPanel({
   ].filter(Boolean).join(" ");
   const activeGoal = activeSession?.activeGoal ?? null;
   activeGoalRef.current = activeGoal;
-  const goalModeVisuallyEnabled = goalModeEnabled || Boolean(activeGoal);
+  const goalModeVisuallyEnabled = goalModeEnabled;
   const activeTasks = tasks.filter((task) => task.enabled);
   const workSteps = useMemo(() => buildAgentWorkSteps(workPhase), [workPhase]);
   const taskActivityDetail = useMemo(
@@ -999,7 +1012,7 @@ export function AgentChatPanel({
     Boolean(pendingGoalDraft) ||
     Boolean(activeGoal) ||
     goalRunEvents.length > 0 ||
-    (Boolean(pendingToolApproval) && !autoApprovalEnabled) ||
+    shouldShowToolApproval(pendingToolApproval, autoApprovalEnabled) ||
     Boolean(pendingInputRequest);
   const latestToolCallPreview =
     chatStreamState.toolCallPreviews.at(-1) ?? null;
@@ -1532,12 +1545,46 @@ export function AgentChatPanel({
   }
 
   async function handleSetAutoApprovalEnabled(enabled: boolean) {
+    const previousState = {
+      autoApprovalEnabled,
+      goalModeEnabled,
+      autoApprovalLocked,
+    };
     setAutoApprovalEnabled(enabled);
-    const state = await window.buildingAgent
-      ?.setToolAutoApprovalEnabled(enabled)
-      .catch(() => ({ autoApprovalEnabled: !enabled }));
+    let state = null;
+    try {
+      state = await window.buildingAgent?.setToolAutoApprovalEnabled(enabled);
+    } catch {
+      state =
+        (await window.buildingAgent?.getToolApprovalMode().catch(() => null)) ??
+        previousState;
+    }
     if (state) {
       setAutoApprovalEnabled(state.autoApprovalEnabled);
+      setAutoApprovalLocked(state.autoApprovalLocked);
+      setGoalModeEnabled(state.goalModeEnabled);
+    }
+  }
+
+  async function handleSetGoalModeEnabled(enabled: boolean) {
+    const previousState = {
+      autoApprovalEnabled,
+      goalModeEnabled,
+      autoApprovalLocked,
+    };
+    setGoalModeEnabled(enabled);
+    let state = null;
+    try {
+      state = await window.buildingAgent?.setToolGoalModeEnabled(enabled);
+    } catch {
+      state =
+        (await window.buildingAgent?.getToolApprovalMode().catch(() => null)) ??
+        previousState;
+    }
+    if (state) {
+      setAutoApprovalEnabled(state.autoApprovalEnabled);
+      setAutoApprovalLocked(state.autoApprovalLocked);
+      setGoalModeEnabled(state.goalModeEnabled);
     }
   }
 
@@ -1547,7 +1594,9 @@ export function AgentChatPanel({
     }
 
     const id = pendingToolApproval.id;
-    setPendingToolApproval(null);
+    setPendingToolApprovals((current) =>
+      current.filter((candidate) => candidate.id !== id),
+    );
     const resolved = await window.buildingAgent
       .resolveToolApproval({ id, approved })
       .catch(() => false);
@@ -1568,7 +1617,6 @@ export function AgentChatPanel({
       setPendingGoalDraft(result.goalDraft);
       setGoalDraftDescription(result.goalDraft.normalizedDescription);
       setGoalDraftCriteriaText(formatGoalDraftCriteria(result.goalDraft));
-      setGoalModeEnabled(false);
     }
     if (result.executedRun) {
       setRuns((currentRuns) => [result.executedRun!, ...currentRuns]);
@@ -2431,7 +2479,10 @@ export function AgentChatPanel({
               </details>
             ) : null}
 
-            {pendingToolApproval && !autoApprovalEnabled ? (
+            {shouldShowToolApproval(
+              pendingToolApproval,
+              autoApprovalEnabled,
+            ) && pendingToolApproval ? (
               <ToolApprovalPanel
                 request={pendingToolApproval}
                 onResolve={(approved) => {
@@ -2701,12 +2752,13 @@ export function AgentChatPanel({
                   data-risk-tooltip={composerRiskTooltips.auto}
                   className={`auto-approval-toggle${
                     autoApprovalEnabled ? " is-enabled" : ""
-                  }`}
+                  }${autoApprovalLocked ? " is-locked" : ""}`}
                   title={composerRiskTooltips.auto}
                 >
                   <input
                     aria-label="自动授权工具请求"
                     checked={autoApprovalEnabled}
+                    disabled={autoApprovalLocked}
                     onChange={(event) => {
                       void handleSetAutoApprovalEnabled(event.currentTarget.checked);
                     }}
@@ -2728,7 +2780,9 @@ export function AgentChatPanel({
                     goalModeVisuallyEnabled ? " is-enabled" : ""
                   }`}
                   data-risk-tooltip={composerRiskTooltips.goal}
-                  onClick={() => setGoalModeEnabled((enabled) => !enabled)}
+                  onClick={() => {
+                    void handleSetGoalModeEnabled(!goalModeEnabled);
+                  }}
                   title={composerRiskTooltips.goal}
                   type="button"
                 >
@@ -2773,11 +2827,11 @@ export function AgentChatPanel({
                 <strong>高权限模式已开启</strong>
                 <span>
                   {autoApprovalEnabled
-                    ? "自动授权会在本次会话中批准工具请求。"
+                    ? "普通文件、Shell、网络、安装、构建和测试操作会自动放行；极高危操作仍需确认。"
                     : ""}
                   {autoApprovalEnabled && goalModeEnabled ? " " : ""}
                   {goalModeEnabled
-                    ? "目标模式会先生成目标草案，确认后连续执行。"
+                    ? "目标模式已锁定自动授权，并会从内部断点自动继续。"
                     : ""}
                 </span>
               </div>
@@ -3390,6 +3444,16 @@ function ToolApprovalPanel({
             <dt>风险</dt>
             <dd>{request.risk.reason}</dd>
           </div>
+          <div>
+            <dt>风险类别</dt>
+            <dd>{formatRiskCategory(request.risk.category)}</dd>
+          </div>
+          {request.risk.affectedTargets.length > 0 ? (
+            <div>
+              <dt>影响对象</dt>
+              <dd>{request.risk.affectedTargets.join("、")}</dd>
+            </div>
+          ) : null}
           {Object.entries(request.argsSummary).map(([key, value]) => (
             <div key={key}>
               <dt>{key}</dt>
@@ -3417,6 +3481,14 @@ function ToolApprovalPanel({
       </section>
     </div>
   );
+}
+
+function formatRiskCategory(category: ToolApprovalRequestPayload["risk"]["category"]): string {
+  if (category === "irrecoverable_data_loss") return "不可恢复的数据破坏";
+  if (category === "privilege_or_security_boundary") return "权限或安全边界";
+  if (category === "secret_exfiltration") return "密钥或凭据外传";
+  if (category === "irreversible_external_action") return "不可逆外部操作";
+  return "常规操作";
 }
 
 function GuidedSkillInputForm({

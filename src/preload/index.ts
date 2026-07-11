@@ -202,6 +202,10 @@ const buildingAgent = {
     enabled: boolean,
   ): Promise<ToolApprovalModeState> =>
     ipcRenderer.invoke("toolApproval:setAutoApprovalEnabled", enabled),
+  setToolGoalModeEnabled: (
+    enabled: boolean,
+  ): Promise<ToolApprovalModeState> =>
+    ipcRenderer.invoke("toolApproval:setGoalModeEnabled", enabled),
   resolveToolApproval: (input: ResolveToolApprovalInput): Promise<boolean> =>
     ipcRenderer.invoke("toolApproval:resolve", input),
   onToolApprovalRequest: (

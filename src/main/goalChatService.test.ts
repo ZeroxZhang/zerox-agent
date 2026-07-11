@@ -86,7 +86,37 @@ describe("goal chat service", () => {
     ]);
   });
 
-  it("routes small deterministic quick-action goals to review without planning milestones", async () => {
+  it("uses a concise milestone when the planner is unavailable", async () => {
+    const savedGoals: Goal[] = [];
+    const description = "分析并修复目标运行问题。".repeat(40);
+    const service = createGoalChatService({
+      controller: createController(),
+      goalStore: createGoalStore({ savedGoals, ledgerEvents: [] }),
+      planner: {
+        async plan() {
+          throw new Error("planner unavailable");
+        },
+        async replan() {
+          throw new Error("unused");
+        },
+      },
+      createId: () => "goal_fallback",
+      now: () => "2026-07-11T19:20:00.000Z",
+    });
+
+    await service.createFromChat({
+      sessionId: "chat_1",
+      originMessageId: "message_1",
+      description,
+    });
+
+    expect(savedGoals[0]?.description).toBe(description);
+    expect(savedGoals[0]?.milestones[0]?.description).toBe(
+      "执行目标并产出可验收结果",
+    );
+  });
+
+  it("does not create a second review gate for quick-action goals", async () => {
     const savedGoals: Goal[] = [];
     const ledgerEvents: ProgressLedgerEvent[] = [];
     let plannerCalls = 0;
@@ -94,9 +124,19 @@ describe("goal chat service", () => {
       controller: createController(),
       goalStore: createGoalStore({ savedGoals, ledgerEvents }),
       planner: {
-        async plan() {
+        async plan(description, planOptions) {
           plannerCalls += 1;
-          throw new Error("Planner should not be called for quick actions.");
+          return [
+            {
+              id: "milestone_1",
+              description,
+              dependsOn: [],
+              successCriteria: planOptions.successCriteria,
+              state: "ready",
+              runIds: [],
+              attempts: 0,
+            },
+          ];
         },
         async replan() {
           throw new Error("Unexpected replan.");
@@ -112,30 +152,28 @@ describe("goal chat service", () => {
       description: "整理 /Users/bytedance/Downloads 这个文件夹",
     });
 
-    expect(plannerCalls).toBe(0);
+    expect(plannerCalls).toBe(1);
     expect(summary).toEqual({
       id: "goal_quick_action",
       description: "整理 /Users/bytedance/Downloads 这个文件夹",
-      status: "waiting_for_review",
+      status: "planning",
     });
     expect(savedGoals[0]).toMatchObject({
       id: "goal_quick_action",
-      status: "waiting_for_review",
+      status: "planning",
       milestones: [
         {
-          id: "milestone_quick_action_review",
-          description:
-            "Review local_file_organize quick-action plan before executing: 整理 /Users/bytedance/Downloads 这个文件夹",
-          state: "pending",
+          id: "milestone_1",
+          description: "整理 /Users/bytedance/Downloads 这个文件夹",
+          state: "ready",
         },
       ],
     });
     expect(ledgerEvents).toEqual([
       {
         at: "2026-06-12T08:00:00.000Z",
-        kind: "review_requested",
-        summary:
-          "Quick-action local_file_organize recommended before Goal Mode execution: files/deterministic/moves_data via file_inventory, file_move_plan, file_apply_moves, file_verify_moves.",
+        kind: "goal_planned",
+        summary: "Goal created from chat session chat_1.",
       },
     ]);
   });
@@ -289,6 +327,7 @@ describe("goal chat service", () => {
       workspaceId: "workspace_project",
       originMessageId: "message_1",
       description: "发布 v3.2.0 并完成验收",
+      originalDescription: "请发布 v3.2.0",
       acceptanceProtocolVersion: 2,
       acceptanceState: {
         protocolVersion: 2,

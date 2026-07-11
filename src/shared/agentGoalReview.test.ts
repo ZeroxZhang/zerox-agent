@@ -27,7 +27,7 @@ describe("agent goal review policy", () => {
     expect(shouldRequestReview("review_final_only", milestone(), true)).toBe(true);
   });
 
-  it("requests high-risk reviews from milestone metadata", () => {
+  it("delegates high-risk confirmation to Policy B instead of goal review", () => {
     expect(shouldRequestReview("review_high_risk_only", milestone(), false)).toBe(false);
     expect(
       shouldRequestReview(
@@ -37,7 +37,7 @@ describe("agent goal review policy", () => {
         },
         false,
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 });
 

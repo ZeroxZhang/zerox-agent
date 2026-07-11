@@ -1,8 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createToolApprovalCoordinator } from "./toolApprovalCoordinator";
 import type { ToolUserApprovalRequest } from "./toolAuthorizationService";
 
 describe("tool approval coordinator", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("routes approval requests to the renderer instead of a native global dialog", async () => {
     const sent: Array<{ channel: string; payload: unknown }> = [];
     const coordinator = createToolApprovalCoordinator({
@@ -23,8 +27,12 @@ describe("tool approval coordinator", () => {
           taskName: "Goal milestone",
           deniedReason: "web_fetch URL 域名不在允许列表内。",
           risk: {
-            level: "high",
-            reason: "web_fetch can transmit browsing context to an external host.",
+            level: "normal",
+            reason:
+              "The operation is not in the Policy B forced-confirmation class.",
+            category: "none",
+            requiresConfirmation: false,
+            affectedTargets: [],
           },
           argsSummary: {
             url: "https://example.com/source",
@@ -45,10 +53,14 @@ describe("tool approval coordinator", () => {
     });
   });
 
-  it("auto-approves read-only tool requests and emits risk decisions for monitoring", async () => {
+  it.each([
+    ["file_write", { path: "/tmp/report.txt", content: "done" }],
+    ["shell_exec", { command: "npm test" }],
+    ["web_fetch", { url: "https://example.com/source" }],
+  ])("auto-approves ordinary %s requests", async (toolName, args) => {
     const sent: Array<{ channel: string; payload: unknown }> = [];
     const coordinator = createToolApprovalCoordinator({
-      createId: () => "approval_read",
+      createId: () => `approval_${toolName}`,
       now: () => "2026-06-14T12:00:00.000Z",
       sendToRenderers(channel, payload) {
         sent.push({ channel, payload });
@@ -59,29 +71,19 @@ describe("tool approval coordinator", () => {
     await expect(
       coordinator.requestUserApproval({
         ...createRequest(),
-        deniedReason: "file_read 路径不在允许列表内。",
-        request: {
-          toolName: "file_read",
-          args: { path: "/tmp/report.txt" },
-        },
+        request: { toolName, args },
       }),
     ).resolves.toEqual({
       approved: true,
-      reason: "自动授权已开启，已同意本次 file_read (只读工具)。",
+      reason: `自动授权已放行本次 ${toolName}。`,
       automatic: true,
     });
-
-    expect(sent).toContainEqual({
-      channel: "toolApproval:decision",
-      payload: expect.objectContaining({
-        id: "approval_read",
-        approved: true,
-        automatic: true,
-      }),
-    });
+    expect(sent).not.toContainEqual(
+      expect.objectContaining({ channel: "toolApproval:request" }),
+    );
   });
 
-  it("approves a pending read-only request when auto approval is enabled", async () => {
+  it("approves a pending ordinary write when auto approval is enabled", async () => {
     const sent: Array<{ channel: string; payload: unknown }> = [];
     const coordinator = createToolApprovalCoordinator({
       createId: () => "approval_waiting",
@@ -91,12 +93,11 @@ describe("tool approval coordinator", () => {
       },
     });
 
-    // Use a read-only tool so it gets auto-approved when auto-approval is enabled.
     const approval = coordinator.requestUserApproval({
       ...createRequest(),
       request: {
-        toolName: "file_list",
-        args: { path: "/tmp" },
+        toolName: "file_write",
+        args: { path: "/tmp/report.md", content: "done" },
       },
     });
 
@@ -109,7 +110,7 @@ describe("tool approval coordinator", () => {
 
     await expect(approval).resolves.toEqual({
       approved: true,
-      reason: "自动授权已开启，已同意本次 file_list (只读工具)。",
+      reason: "自动授权已放行本次 file_write。",
       automatic: true,
     });
     expect(sent).toContainEqual({
@@ -119,6 +120,129 @@ describe("tool approval coordinator", () => {
         approved: true,
         automatic: true,
       }),
+    });
+  });
+
+  it("keeps a Policy B forced ask pending while auto approval is enabled", async () => {
+    const sent: Array<{ channel: string; payload: unknown }> = [];
+    const coordinator = createToolApprovalCoordinator({
+      createId: () => "approval_publish",
+      sendToRenderers(channel, payload) {
+        sent.push({ channel, payload });
+      },
+    });
+    coordinator.setAutoApprovalEnabled(true);
+
+    const approval = coordinator.requestUserApproval({
+      ...createRequest(),
+      request: { toolName: "shell_exec", args: { command: "npm publish" } },
+    });
+
+    expect(sent).toContainEqual({
+      channel: "toolApproval:request",
+      payload: expect.objectContaining({
+        id: "approval_publish",
+        risk: expect.objectContaining({
+          requiresConfirmation: true,
+          category: "irreversible_external_action",
+        }),
+      }),
+    });
+    coordinator.resolveApproval({ id: "approval_publish", approved: false });
+    await expect(approval).resolves.toMatchObject({ approved: false });
+  });
+
+  it("settles and removes a pending approval when the run is aborted", async () => {
+    const controller = new AbortController();
+    const coordinator = createToolApprovalCoordinator({
+      createId: () => "approval_abort",
+      sendToRenderers() {},
+    });
+    const approval = coordinator.requestUserApproval(createRequest(), {
+      signal: controller.signal,
+    });
+
+    controller.abort();
+
+    await expect(approval).resolves.toEqual({
+      approved: false,
+      reason: "运行已取消，授权请求已关闭。",
+      automatic: true,
+    });
+    expect(
+      coordinator.resolveApproval({ id: "approval_abort", approved: true }),
+    ).toBe(false);
+  });
+
+  it("times out a forced ask after the configured bounded wait", async () => {
+    vi.useFakeTimers();
+    const coordinator = createToolApprovalCoordinator({
+      approvalTimeoutMs: 60_000,
+      createId: () => "approval_timeout",
+      sendToRenderers() {},
+    });
+    coordinator.setAutoApprovalEnabled(true);
+    const approval = coordinator.requestUserApproval({
+      ...createRequest(),
+      request: { toolName: "shell_exec", args: { command: "npm publish" } },
+    });
+
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    await expect(approval).resolves.toEqual({
+      approved: false,
+      reason: "授权等待已超过 60 秒，已拒绝本次 shell_exec；请改用安全替代方案。",
+      automatic: true,
+    });
+  });
+
+  it("forces and locks auto approval while goal mode is enabled", () => {
+    const coordinator = createToolApprovalCoordinator({
+      sendToRenderers() {},
+    });
+
+    coordinator.setGoalModeEnabled(true);
+    expect(coordinator.getAutoApprovalState()).toEqual({
+      autoApprovalEnabled: true,
+      goalModeEnabled: true,
+      autoApprovalLocked: true,
+    });
+
+    coordinator.setAutoApprovalEnabled(false);
+    expect(coordinator.getAutoApprovalState()).toEqual({
+      autoApprovalEnabled: true,
+      goalModeEnabled: true,
+      autoApprovalLocked: true,
+    });
+
+    coordinator.setGoalModeEnabled(false);
+    expect(coordinator.getAutoApprovalState()).toEqual({
+      autoApprovalEnabled: false,
+      goalModeEnabled: false,
+      autoApprovalLocked: false,
+    });
+  });
+
+  it("keeps auto approval locked while a goal is actively running", () => {
+    const coordinator = createToolApprovalCoordinator({
+      sendToRenderers() {},
+    });
+
+    coordinator.setGoalActive("goal_1", true);
+    coordinator.setGoalModeEnabled(false);
+    coordinator.setAutoApprovalEnabled(false);
+
+    expect(coordinator.getAutoApprovalState()).toEqual({
+      autoApprovalEnabled: true,
+      goalModeEnabled: true,
+      autoApprovalLocked: true,
+    });
+
+    coordinator.setGoalActive("goal_1", false);
+    expect(coordinator.getAutoApprovalState()).toEqual({
+      autoApprovalEnabled: false,
+      goalModeEnabled: false,
+      autoApprovalLocked: false,
     });
   });
 });

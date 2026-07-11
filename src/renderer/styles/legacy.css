@@ -2345,7 +2345,7 @@ nav {
 }
 .goal-status-strip-actions .goal-primary-action {
   border-color: var(--color-action-primary, var(--text-primary));
-  color: var(--color-action-primary-text, var(--bg-surface));
+  color: var(--color-on-accent, var(--bg-surface));
   background: var(--color-action-primary, var(--text-primary));
 }
 .goal-status-strip-actions .goal-primary-action:hover {

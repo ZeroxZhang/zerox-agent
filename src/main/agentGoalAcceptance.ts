@@ -1033,7 +1033,17 @@ function buildFinalJudgeMessages(input: {
       role: "user",
       content: [
         "BEGIN QUOTED GOAL DATA",
-        quoteData(JSON.stringify({ description: input.goal.description, criteria: criteriaData }, null, 2)),
+        quoteData(
+          JSON.stringify(
+            {
+              description:
+                input.goal.originalDescription ?? input.goal.description,
+              criteria: criteriaData,
+            },
+            null,
+            2,
+          ),
+        ),
         "END QUOTED GOAL DATA",
         "",
         "BEGIN QUOTED CURRENT CHECK DATA",

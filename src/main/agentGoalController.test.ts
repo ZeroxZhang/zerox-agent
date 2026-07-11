@@ -77,6 +77,95 @@ describe("agent goal controller", () => {
     ).toHaveLength(3);
   });
 
+  it("holds the authoritative active-goal lease for the full controller run", async () => {
+    await store.save(createGoal([milestone("milestone_1")]));
+    const changes: Array<[string, boolean]> = [];
+    const controller = createController({
+      runtime: createRuntime(),
+      acceptance: createAcceptance({
+        milestoneAccepted: [true],
+        goalAccepted: [true],
+      }),
+      onActiveGoalChange(goalId, active) {
+        changes.push([goalId, active]);
+      },
+    });
+
+    await controller.start("goal_1");
+
+    expect(changes).toEqual([
+      ["goal_1", true],
+      ["goal_1", false],
+    ]);
+  });
+
+  it("persists a resumable checkpoint and incremental usage before a milestone finishes", async () => {
+    await store.save(createGoal([milestone("milestone_1")]));
+    let releaseRun: (() => void) | undefined;
+    let checkpointSaved: (() => void) | undefined;
+    const checkpointReached = new Promise<void>((resolve) => {
+      checkpointSaved = resolve;
+    });
+    const runtime: GoalRuntimeEngine = {
+      async runMilestone(_goal, milestone, runOptions) {
+        await runOptions?.onCheckpoint?.({
+          transcriptMessages: [
+            { role: "assistant", content: "inspected repository" },
+          ],
+          toolCallCount: 2,
+          wallClockMs: 500,
+          tokens: 25,
+          nextAction: "Run the focused tests.",
+        });
+        checkpointSaved?.();
+        await new Promise<void>((resolve) => {
+          releaseRun = resolve;
+        });
+        return {
+          runId: `run_${milestone.id}`,
+          toolCallCount: 2,
+          wallClockMs: 500,
+          tokens: 25,
+          transcriptMessages: [
+            { role: "assistant", content: "inspected repository" },
+          ],
+        };
+      },
+    };
+    const controller = createController({
+      runtime,
+      acceptance: createAcceptance({
+        milestoneAccepted: [true],
+        goalAccepted: [true],
+      }),
+    });
+
+    const running = controller.start("goal_1");
+    await checkpointReached;
+    const checkpointed = await store.get("goal_1");
+
+    expect(checkpointed?.runtimeCheckpoint).toMatchObject({
+      milestoneId: "milestone_1",
+      nextAction: "Run the focused tests.",
+      transcriptMessages: [
+        { role: "assistant", content: "inspected repository" },
+      ],
+    });
+    expect(checkpointed?.budgetUsage).toMatchObject({
+      toolCalls: 2,
+      wallClockMs: 500,
+      tokens: 25,
+    });
+
+    releaseRun?.();
+    const result = await running;
+    expect(result.budgetUsage).toMatchObject({
+      toolCalls: 2,
+      wallClockMs: 500,
+      tokens: 25,
+    });
+  });
+
   it("stops before dispatching another milestone when the iteration budget is exhausted", async () => {
     await store.save(
       createGoal(
@@ -264,7 +353,7 @@ describe("agent goal controller", () => {
     expect(ledger.at(-1)?.summary).toContain("replans 1/1");
   });
 
-  it("pauses for review instead of replanning a turn-limited milestone", async () => {
+  it("continues internally instead of requesting review for a turn-limited milestone", async () => {
     await store.save(createGoal([milestone("milestone_1")]));
     let acceptanceCalls = 0;
     let plannerCalls = 0;
@@ -302,20 +391,10 @@ describe("agent goal controller", () => {
     const result = await controller.start("goal_1");
     const ledger = await store.readLedger("goal_1");
 
-    expect(result.status).toBe("waiting_for_review");
-    expect(result.milestones[0]).toMatchObject({
-      state: "ready",
-      lastRunStatus: "paused",
-    });
-    expect(acceptanceCalls).toBe(1);
+    expect(result.status).not.toBe("waiting_for_review");
+    expect(acceptanceCalls).toBeGreaterThan(1);
     expect(plannerCalls).toBe(0);
-    expect(result.acceptanceState?.recentFailures).toHaveLength(1);
-    expect(result.acceptanceState?.lastDecision).toMatchObject({
-      action: "repair_same_milestone",
-      occurrence: 1,
-    });
-    expect(ledger.at(-1)?.kind).toBe("review_requested");
-    expect(ledger.at(-1)?.summary).toContain("turn limit");
+    expect(ledger.some((event) => event.kind === "review_requested")).toBe(false);
   });
 
   it.each([
@@ -2603,6 +2682,7 @@ describe("agent goal controller", () => {
     planner?: { replan(goal: Goal, reason: string): Promise<Milestone[]> };
     stallThreshold?: number;
     onProgress?: (event: GoalProgressEvent) => void;
+    onActiveGoalChange?: (goalId: string, active: boolean) => void;
     onTrajectoryAppend?: (
       event: AgentTrajectoryEvent,
       options?: { signal?: AbortSignal },
@@ -2637,6 +2717,7 @@ describe("agent goal controller", () => {
         },
       },
       onProgress: options.onProgress,
+      onActiveGoalChange: options.onActiveGoalChange,
       stallThreshold: options.stallThreshold,
       createId: () => `goal_event_${trajectoryEvents.length + 1}`,
       nextSequence: () => {

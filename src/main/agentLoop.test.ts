@@ -1254,9 +1254,86 @@ describe("agent loop", () => {
     });
   });
 
+  it("enforces the remaining tool-call budget inside a multi-tool response", async () => {
+    const baseExecutor = createToolExecutor();
+    let executed = 0;
+    let checkpointToolResults = 0;
+    const result = await runAgentLoop(
+      [{ role: "user", content: "inspect two paths" }],
+      modelProfile,
+      {
+        chatClient: {
+          async complete() {
+            return {
+              content: null,
+              finishReason: "tool_calls",
+              toolCalls: [1, 2].map((index) => ({
+                id: `call_${index}`,
+                type: "function" as const,
+                function: {
+                  name: "file_list",
+                  arguments: JSON.stringify({ path: `/tmp/${index}` }),
+                },
+              })),
+            };
+          },
+        },
+        toolExecutor: {
+          ...baseExecutor,
+          async execute(request, options) {
+            executed += 1;
+            return baseExecutor.execute(request, options);
+          },
+        },
+        tools: testTools,
+        maxTurns: 2,
+        maxToolCalls: 1,
+        async onCheckpoint(checkpoint) {
+          checkpointToolResults = checkpoint.messages.filter(
+            (message) => message.role === "tool",
+          ).length;
+        },
+      },
+    );
+
+    expect(executed).toBe(1);
+    expect(result.toolCallsExecuted).toBe(1);
+    expect(checkpointToolResults).toBe(1);
+    const assistant = result.messages.find((message) => message.tool_calls?.length);
+    expect(assistant?.tool_calls).toHaveLength(1);
+  });
+
+  it("aborts a hung model request when the wall-clock budget expires", async () => {
+    const result = await runAgentLoop(
+      [{ role: "user", content: "wait forever" }],
+      modelProfile,
+      {
+        chatClient: {
+          async complete(request) {
+            return new Promise((_, reject) => {
+              request.signal?.addEventListener(
+                "abort",
+                () => reject(request.signal?.reason),
+                { once: true },
+              );
+            });
+          },
+        },
+        toolExecutor: createToolExecutor(),
+        tools: testTools,
+        maxTurns: 2,
+        maxWallClockMs: 10,
+      },
+    );
+
+    expect(result.status).toBe("failed");
+    expect(result.summary).toContain("Wall-clock budget exceeded");
+  });
+
   it("passes dynamic registry source to tool authorization", async () => {
     const requests: ChatCompletionRequest[] = [];
     const authorizationRequests: ToolCallRequest[] = [];
+    const executionRequests: ToolCallRequest[] = [];
     const chatClient: ChatClient = {
       async complete(request) {
         requests.push(request);
@@ -1295,6 +1372,7 @@ describe("agent loop", () => {
         chatClient,
         toolExecutor: createDynamicSourceToolExecutor(
           "mcp:research-writer:source-fetcher",
+          executionRequests,
         ),
         toolAuthorizationService,
         taskId: "task_1",
@@ -1320,6 +1398,9 @@ describe("agent loop", () => {
         args: { query: "agent eval" },
       },
     ]);
+    expect(executionRequests[0]?.source).toBe(
+      "mcp:research-writer:source-fetcher",
+    );
   });
 
   it("streams model deltas while aggregating the final tool call before authorization", async () => {
@@ -1742,7 +1823,10 @@ function createToolExecutor(
   };
 }
 
-function createDynamicSourceToolExecutor(source: string): AgentToolExecutor {
+function createDynamicSourceToolExecutor(
+  source: string,
+  requests: ToolCallRequest[] = [],
+): AgentToolExecutor {
   const registry = createDynamicToolRegistry();
   registry.register(
     {
@@ -1759,6 +1843,7 @@ function createDynamicSourceToolExecutor(source: string): AgentToolExecutor {
 
   return {
     async execute(request) {
+      requests.push(request);
       return registry.execute(request.toolName, request.args);
     },
     getRegistry() {

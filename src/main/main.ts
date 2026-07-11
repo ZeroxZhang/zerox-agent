@@ -75,6 +75,7 @@ const toolApprovalCoordinator = createToolApprovalCoordinator({
 
 const container = createAppContainer({
   requestToolApproval: toolApprovalCoordinator.requestUserApproval,
+  setGoalActive: toolApprovalCoordinator.setGoalActive,
 });
 
 function createMainWindow(): BrowserWindow {
@@ -485,6 +486,9 @@ app.whenReady().then(() => {
   createMainWindow();
 
   if (!smokeMode.enabled) {
+    void container.resumeInterruptedGoals().catch((error) => {
+      console.error("Failed to resume interrupted goals:", error);
+    });
     createTray();
     startTaskScheduler();
     startMemoryMaintenanceScheduler();
@@ -508,6 +512,11 @@ function registerToolApprovalIpcHandlers() {
     "toolApproval:setAutoApprovalEnabled",
     (_event, enabled: boolean) =>
       toolApprovalCoordinator.setAutoApprovalEnabled(Boolean(enabled)),
+  );
+  ipcMain.handle(
+    "toolApproval:setGoalModeEnabled",
+    (_event, enabled: boolean) =>
+      toolApprovalCoordinator.setGoalModeEnabled(Boolean(enabled)),
   );
   ipcMain.handle(
     "toolApproval:resolve",

@@ -217,6 +217,30 @@ export type GoalBudgetUsage = {
   replans: number;
 };
 
+export type GoalRuntimeToolCallSnapshot = {
+  id: string;
+  type: "function";
+  function: {
+    name: string;
+    arguments: string;
+  };
+};
+
+export type GoalRuntimeMessageSnapshot = {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string;
+  tool_calls?: GoalRuntimeToolCallSnapshot[];
+  tool_call_id?: string;
+  name?: string;
+};
+
+export type GoalRuntimeCheckpoint = {
+  milestoneId: string;
+  transcriptMessages: GoalRuntimeMessageSnapshot[];
+  nextAction: string;
+  updatedAt: string;
+};
+
 export type GoalSelectedSkill = Pick<
   SkillRecord,
   "manifest" | "body" | "rootDir" | "skillFile"
@@ -227,6 +251,7 @@ export type Goal = {
   chatSessionId?: string;
   originMessageId?: string;
   description: string;
+  originalDescription?: string;
   successCriteria: SuccessCriterion[];
   milestones: Milestone[];
   status: GoalStatus;
@@ -239,6 +264,7 @@ export type Goal = {
   taskContract?: AgentTaskContract;
   selectedSkill?: GoalSelectedSkill;
   selectedSkillInputValues?: Record<string, string | number | boolean>;
+  runtimeCheckpoint?: GoalRuntimeCheckpoint;
   acceptanceProtocolVersion?: GoalAcceptanceProtocolVersion;
   acceptanceState?: GoalAcceptanceState;
   acceptanceCertificate?: GoalAcceptanceCertificate;

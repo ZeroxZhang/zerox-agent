@@ -119,6 +119,22 @@ describe("agent goal model", () => {
     expect(upgradeGoalAcceptanceProtocol(current)).toBe(current);
   });
 
+  it("accepts a backward-compatible bounded runtime checkpoint", () => {
+    const goal = createGoal({
+      runtimeCheckpoint: {
+        milestoneId: "milestone_1",
+        transcriptMessages: [
+          { role: "assistant", content: "Continue from this action." },
+          { role: "tool", tool_call_id: "call_1", content: "result" },
+        ],
+        nextAction: "Run the focused test.",
+        updatedAt: "2026-07-11T19:20:00.000Z",
+      },
+    });
+
+    expect(() => validateGoal(goal)).not.toThrow();
+  });
+
   it("requires a certificate for a protocol-v2 achieved goal", () => {
     expect(() =>
       validateGoal(
