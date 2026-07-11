@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-07-11T19:08:00.000+08:00",
+  "updatedAt": "2026-07-11T19:29:00.000+08:00",
   "features": [
     {
       "id": "P42-v3.7.0-autonomous-goal-runtime",
       "priority": 72,
-      "status": "in_progress",
+      "status": "done",
       "title": "v3.7.0 autonomous goal runtime, Policy B authorization, and strict goal UI",
       "files": [
         "docs/superpowers/specs/2026-07-11-autonomous-goal-runtime-design.md",

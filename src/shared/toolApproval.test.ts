@@ -5,7 +5,7 @@ import {
 } from "./toolApproval";
 
 describe("tool approval risk classification", () => {
-  it("marks shell commands as critical for auto-approval monitoring", () => {
+  it("marks destructive shell commands as a Policy B forced ask", () => {
     const risk = classifyToolApprovalRisk({
       taskName: "Goal milestone",
       deniedReason: "shell_exec command 不匹配已授权模板。",
@@ -17,7 +17,11 @@ describe("tool approval risk classification", () => {
 
     expect(risk).toEqual({
       level: "critical",
-      reason: "shell_exec can mutate the local machine outside normal app flows.",
+      reason:
+        "The command can irreversibly delete data or destroy local version-control state.",
+      category: "irrecoverable_data_loss",
+      requiresConfirmation: true,
+      affectedTargets: ["rm -rf /tmp/report-cache"],
     });
   });
 

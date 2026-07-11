@@ -93,7 +93,8 @@ describe("package scripts", () => {
           featureId === "P38-v3.4.0-goal-mode-obsidian-regression-fixes" ||
           featureId === "P39-v3.4.0-goal-mode-runtime-state-repair" ||
           featureId === "P40-v3.4.0-goal-mode-bounded-termination" ||
-          featureId === "P41-v3.4.0-goal-acceptance-policy-engine",
+          featureId === "P41-v3.4.0-goal-acceptance-policy-engine" ||
+          featureId === "P42-v3.7.0-autonomous-goal-runtime",
       ),
     ).toBe(true);
     expect(openFeatureIds.length).toBeLessThanOrEqual(1);
