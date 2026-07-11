@@ -523,20 +523,15 @@ function deepGraphDigest(root: unknown): CanonicalValue {
       updateDeepHash(hash, "unreadable_container", String(traversalId));
       continue;
     }
-    let keys: string[];
-    try {
-      keys = Object.getOwnPropertyNames(value);
-    } catch {
+    const keys = readDeepContainerKeys(value, isArray);
+    if (!keys) {
       updateDeepHash(hash, "unreadable_container", String(traversalId));
       continue;
     }
     if (isArray) {
-      keys = keys.filter((key) => key !== "length");
-      keys.sort(compareDeepArrayKeys);
       updateDeepHash(hash, "array_start", String(traversalId));
       updateDeepHash(hash, "array_length", String(readDeepArrayLength(value)));
     } else {
-      keys.sort();
       updateDeepHash(hash, "object_start", String(traversalId));
     }
     tasks.push({
@@ -555,6 +550,29 @@ function deepGraphDigest(root: unknown): CanonicalValue {
     edgeCount,
     truncated ? "truncated" : "complete",
   ];
+}
+
+function readDeepContainerKeys(
+  value: object,
+  isArray: boolean,
+): string[] | null {
+  try {
+    if (!isArray) {
+      // Non-enumerable named metadata is outside the action-identity contract
+      // and must not consume the semantic traversal budget.
+      return Object.keys(value).sort();
+    }
+
+    const keys = new Set(Object.keys(value));
+    for (const key of Object.getOwnPropertyNames(value)) {
+      // JSON-style arrays include numeric own elements even when their
+      // descriptors are non-enumerable. Hidden named metadata remains ignored.
+      if (parseCanonicalArrayIndex(key) !== null) keys.add(key);
+    }
+    return [...keys].sort(compareDeepArrayKeys);
+  } catch {
+    return null;
+  }
 }
 
 function readDeepArrayLength(value: object): number {

@@ -489,3 +489,31 @@ exit 0
 - `src/main/agentGoalFailureFingerprint.ts`
 - `src/main/agentGoalFailureFingerprint.test.ts`
 - `.superpowers/sdd/p41-task-7-report.md`
+
+## Hidden Metadata Budget Consistency
+
+### Status
+
+DONE
+
+### RED / GREEN Evidence
+
+The final independent review showed that 32,768 ignored nonenumerable named
+properties could consume the semantic inspection budget. The added object and
+array regressions failed before the implementation change and now pass:
+
+```text
+npm test -- --run src/main/agentGoalFailureFingerprint.test.ts
+Test Files 1 passed (1)
+Tests 45 passed (45)
+
+npm test -- --run src/main/agentGoalController.test.ts src/main/goalRuntimeEngine.test.ts src/main/agentGoalAcceptanceCertificate.test.ts src/main/agentGoalFailureFingerprint.test.ts
+Test Files 4 passed (4)
+Tests 182 passed (182)
+```
+
+Objects now enumerate only own enumerable string keys. Arrays merge those keys
+with numeric own property names, preserving nonenumerable numeric elements while
+excluding `length`, symbols, and nonenumerable named metadata before the semantic
+inspection budget is consumed. Hostile object/array proxy enumeration remains
+contained as an unreadable-container marker.

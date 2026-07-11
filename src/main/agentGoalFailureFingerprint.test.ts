@@ -1172,6 +1172,155 @@ describe("goal acceptance failure fingerprints", () => {
     expect(`${left}${repeated}${changed}`).not.toMatch(/PRIVATE_(?:DEEP_KEY|ALPHA|BRAVO)/);
   });
 
+  it("excludes exactly 32768 hidden object properties from identity and budgets", () => {
+    const makeObject = (hiddenValue: string, lateValue: string) => {
+      const value: Record<string, unknown> = { late: lateValue };
+      for (let index = 0; index < 32_768; index += 1) {
+        Object.defineProperty(value, `hidden_${String(index).padStart(5, "0")}`, {
+          configurable: true,
+          enumerable: false,
+          value: hiddenValue,
+        });
+      }
+      return value;
+    };
+    const hiddenAlpha = makeObject(
+      "HIDDEN_OBJECT_ALPHA",
+      "https://hidden-object-stable.invalid/private",
+    );
+    const hiddenBravo = makeObject(
+      "HIDDEN_OBJECT_BRAVO",
+      "https://hidden-object-stable.invalid/private",
+    );
+    const clean = {
+      late: "https://hidden-object-stable.invalid/private",
+    };
+    const alphaIdentity = createToolActionSignature(
+      "deep_hidden_object",
+      wrapMixedGraph(hiddenAlpha, 16),
+    );
+    const bravoIdentity = createToolActionSignature(
+      "deep_hidden_object",
+      wrapMixedGraph(hiddenBravo, 16),
+    );
+    const cleanIdentity = createToolActionSignature(
+      "deep_hidden_object",
+      wrapMixedGraph(clean, 16),
+    );
+    hiddenAlpha.late = "https://hidden-object-alpha.invalid/private";
+    const visibleAlpha = createToolActionSignature(
+      "deep_hidden_object",
+      wrapMixedGraph(hiddenAlpha, 16),
+    );
+    hiddenAlpha.late = "https://hidden-object-bravo.invalid/private";
+    const visibleBravo = createToolActionSignature(
+      "deep_hidden_object",
+      wrapMixedGraph(hiddenAlpha, 16),
+    );
+
+    expect(alphaIdentity).toBe(bravoIdentity);
+    expect(alphaIdentity).toBe(cleanIdentity);
+    expect(visibleAlpha).not.toBe(visibleBravo);
+    expect(`${alphaIdentity}${bravoIdentity}${visibleAlpha}${visibleBravo}`).not.toMatch(
+      /HIDDEN_OBJECT|hidden-object-(?:stable|alpha|bravo)\.invalid/,
+    );
+  });
+
+  it("excludes exactly 32768 hidden array names without starving real entries", () => {
+    const makeArray = (lateValue: string, includeHidden: boolean) => {
+      const value: unknown[] & Record<string, unknown> = [];
+      value.length = 128;
+      Object.defineProperty(value, "97", {
+        enumerable: false,
+        value: 97,
+      });
+      value.z = lateValue;
+      if (includeHidden) {
+        for (let index = 0; index < 32_768; index += 1) {
+          Object.defineProperty(value, `hidden_${String(index).padStart(5, "0")}`, {
+            enumerable: false,
+            value: `HIDDEN_ARRAY_${index}`,
+          });
+        }
+      }
+      return value;
+    };
+    const stableHidden = createToolActionSignature(
+      "deep_hidden_array",
+      wrapMixedGraph(
+        makeArray("https://hidden-array-stable.invalid/private", true),
+        16,
+      ),
+    );
+    const stableClean = createToolActionSignature(
+      "deep_hidden_array",
+      wrapMixedGraph(
+        makeArray("https://hidden-array-stable.invalid/private", false),
+        16,
+      ),
+    );
+    const visibleAlpha = createToolActionSignature(
+      "deep_hidden_array",
+      wrapMixedGraph(
+        makeArray("https://hidden-array-alpha.invalid/private", true),
+        16,
+      ),
+    );
+    const visibleBravo = createToolActionSignature(
+      "deep_hidden_array",
+      wrapMixedGraph(
+        makeArray("https://hidden-array-bravo.invalid/private", true),
+        16,
+      ),
+    );
+
+    expect(stableHidden).toBe(stableClean);
+    expect(visibleAlpha).not.toBe(visibleBravo);
+    expect(`${stableHidden}${visibleAlpha}${visibleBravo}`).not.toMatch(
+      /HIDDEN_ARRAY|hidden-array-(?:stable|alpha|bravo)\.invalid/,
+    );
+  });
+
+  it("contains hostile object and array proxy enumeration failures", () => {
+    const hostileObject = (message: string) =>
+      new Proxy(
+        { visible: 1 },
+        {
+          ownKeys() {
+            throw new Error(message);
+          },
+        },
+      );
+    const hostileArray = (message: string) =>
+      new Proxy([], {
+        ownKeys() {
+          throw new Error(message);
+        },
+      });
+    const objectAlpha = createToolActionSignature(
+      "deep_hostile_object_proxy",
+      wrapMixedGraph(hostileObject("PRIVATE_OBJECT_PROXY_ALPHA"), 16),
+    );
+    const objectBravo = createToolActionSignature(
+      "deep_hostile_object_proxy",
+      wrapMixedGraph(hostileObject("PRIVATE_OBJECT_PROXY_BRAVO"), 16),
+    );
+    const arrayAlpha = createToolActionSignature(
+      "deep_hostile_array_proxy",
+      wrapMixedGraph(hostileArray("PRIVATE_ARRAY_PROXY_ALPHA"), 16),
+    );
+    const arrayBravo = createToolActionSignature(
+      "deep_hostile_array_proxy",
+      wrapMixedGraph(hostileArray("PRIVATE_ARRAY_PROXY_BRAVO"), 16),
+    );
+
+    expect(objectAlpha).toBe(objectBravo);
+    expect(arrayAlpha).toBe(arrayBravo);
+    expect(`${objectAlpha}${objectBravo}${arrayAlpha}${arrayBravo}`).not.toMatch(
+      /PRIVATE_(?:OBJECT|ARRAY)_PROXY/,
+    );
+  });
+
   it("handles undefined, non-finite numbers, sparse arrays, bigint, getters, and cycles safely", () => {
     const cyclic: Record<string, unknown> = {
       missing: undefined,
