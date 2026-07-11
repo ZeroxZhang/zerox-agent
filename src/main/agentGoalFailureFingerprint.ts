@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isProxy } from "node:util/types";
 import type {
   GoalAcceptanceCheckResult,
   GoalAcceptanceFailureRecord,
@@ -9,12 +10,12 @@ const UNREADABLE_MARKER = "[UNREADABLE]";
 export const MAX_TOOL_ACTION_SIGNATURE_BYTES = 2_048;
 export const MAX_PERSISTED_ACTION_SIGNATURE_BYTES = 8_192;
 const MAX_CANONICAL_DEPTH = 16;
-const MAX_CANONICAL_NODES = 512;
+const MAX_CANONICAL_NODES = 8_192;
+const MAX_CANONICAL_PROPERTY_INSPECTIONS = 32_768;
 const MAX_CANONICAL_ARRAY_LENGTH = 32;
 const MAX_CANONICAL_OBJECT_KEYS = 64;
 const MAX_CANONICAL_STRING_BYTES = 512;
 const MAX_DEEP_GRAPH_NODES = 8_192;
-const MAX_DEEP_GRAPH_EDGES = 32_768;
 const MAX_DEEP_GRAPH_FRAME_BYTES = 512;
 
 type CanonicalValue =
@@ -42,7 +43,13 @@ type CanonicalValue =
 
 type CanonicalState = {
   ancestors: WeakSet<object>;
+  budget: CanonicalBudget;
+};
+
+type CanonicalBudget = {
   nodes: number;
+  propertyInspections: number;
+  truncated: boolean;
 };
 
 type DeepTraversalTask =
@@ -73,6 +80,19 @@ export type AcceptanceFailureFingerprintInput = {
 
 export function createAcceptanceFailureFingerprint(
   input: AcceptanceFailureFingerprintInput,
+): string {
+  return createAcceptanceFailureFingerprintInternal(input, true);
+}
+
+export function createAcceptanceLogicalFailureFingerprint(
+  input: AcceptanceFailureFingerprintInput,
+): string {
+  return createAcceptanceFailureFingerprintInternal(input, false);
+}
+
+function createAcceptanceFailureFingerprintInternal(
+  input: AcceptanceFailureFingerprintInput,
+  includeActionSignatures: boolean,
 ): string {
   let identity: unknown;
   try {
@@ -106,9 +126,13 @@ export function createAcceptanceFailureFingerprint(
           artifact?.sha256 ? [safeString(artifact.sha256)] : [],
         ),
       ]),
-      actionSignatures: sortedStringSet(
-        safeArray(input.actionSignatures).map(safeString),
-      ),
+      ...(includeActionSignatures
+        ? {
+            actionSignatures: sortedStringSet(
+              safeArray(input.actionSignatures).map(safeString),
+            ),
+          }
+        : {}),
       protocolVersion: input.protocolVersion,
       validatorVersions: input.validatorVersions,
     };
@@ -124,7 +148,8 @@ export function createToolActionSignature(
   args: unknown,
 ): string {
   const safeToolName = normalizeToolName(toolName);
-  const canonicalArgs = canonicalJson(args);
+  const canonical = canonicalJsonWithMetadata(args);
+  const canonicalArgs = canonical.json;
   const signature = `${safeToolName}:${canonicalArgs}`;
   if (Buffer.byteLength(signature) <= MAX_TOOL_ACTION_SIGNATURE_BYTES) {
     return signature;
@@ -132,6 +157,7 @@ export function createToolActionSignature(
   return `${safeToolName}:${JSON.stringify([
     "bounded_digest",
     createHash("sha256").update(canonicalArgs).digest("hex"),
+    ...(canonical.truncated ? ["truncated"] : []),
   ])}`;
 }
 
@@ -182,15 +208,31 @@ export function countConsecutiveFingerprint(
 }
 
 function canonicalJson(value: unknown): string {
+  return canonicalJsonWithMetadata(value).json;
+}
+
+function canonicalJsonWithMetadata(value: unknown): {
+  json: string;
+  truncated: boolean;
+} {
+  const budget: CanonicalBudget = {
+    nodes: 0,
+    propertyInspections: 0,
+    truncated: false,
+  };
   try {
-    return JSON.stringify(
+    const json = JSON.stringify(
       canonicalize(value, {
         ancestors: new WeakSet<object>(),
-        nodes: 0,
+        budget,
       }, 0),
     );
+    return { json, truncated: budget.truncated };
   } catch {
-    return JSON.stringify(special("unserializable"));
+    return {
+      json: JSON.stringify(special("unserializable")),
+      truncated: budget.truncated,
+    };
   }
 }
 
@@ -199,12 +241,11 @@ function canonicalize(
   state: CanonicalState,
   depth: number,
 ): CanonicalValue {
-  state.nodes += 1;
-  if (state.nodes > MAX_CANONICAL_NODES) {
+  if (!consumeCanonicalNode(state.budget)) {
     return special("truncated");
   }
   if (depth >= MAX_CANONICAL_DEPTH) {
-    return deepGraphDigest(value);
+    return deepGraphDigest(value, state.budget, true);
   }
   if (value === null) {
     return ["null"];
@@ -242,6 +283,9 @@ function canonicalize(
   if (typeof value !== "object") {
     return special("unserializable");
   }
+  if (isProxy(value)) {
+    return special("unreadable");
+  }
   if (state.ancestors.has(value)) {
     return special("circular");
   }
@@ -249,7 +293,7 @@ function canonicalize(
   state.ancestors.add(value);
   try {
     if (Array.isArray(value)) {
-      const length = readArrayLength(value);
+      const length = readArrayLength(value, state.budget);
       const visibleLength = Math.min(length, MAX_CANONICAL_ARRAY_LENGTH);
       return [
         "array",
@@ -264,7 +308,7 @@ function canonicalize(
               depth + 1,
             ),
         ),
-        summarizeArrayTail(value, depth + 1),
+        summarizeArrayTail(value, state, depth + 1),
       ];
     }
 
@@ -289,17 +333,20 @@ function canonicalize(
           depth + 1,
         ),
       ]),
-      summarizeObjectTail(value, sortedKeys, depth + 1),
+      summarizeObjectTail(value, sortedKeys, state, depth + 1),
     ];
   } finally {
     state.ancestors.delete(value);
   }
 }
 
-function readArrayLength(value: unknown[]): number {
+function readArrayLength(value: unknown[], budget: CanonicalBudget): number {
+  if (!consumeCanonicalPropertyInspection(budget)) return 0;
   try {
-    return Number.isSafeInteger(value.length) && value.length >= 0
-      ? value.length
+    const descriptor = Object.getOwnPropertyDescriptor(value, "length");
+    const length = descriptor && "value" in descriptor ? descriptor.value : 0;
+    return Number.isSafeInteger(length) && length >= 0
+      ? length
       : 0;
   } catch {
     return 0;
@@ -308,14 +355,26 @@ function readArrayLength(value: unknown[]): number {
 
 function summarizeArrayTail(
   value: unknown[],
+  state: CanonicalState,
   depth: number,
 ): CanonicalValue {
   let keys: string[];
   try {
-    keys = Object.keys(value).filter((key) => {
+    const enumerableKeys = Object.keys(value);
+    const ownNames = Object.getOwnPropertyNames(value);
+    const selected = new Set(
+      enumerableKeys.filter((key) => {
+        const index = parseCanonicalArrayIndex(key);
+        return index === null || index >= MAX_CANONICAL_ARRAY_LENGTH;
+      }),
+    );
+    for (const key of ownNames) {
       const index = parseCanonicalArrayIndex(key);
-      return index === null || index >= MAX_CANONICAL_ARRAY_LENGTH;
-    });
+      if (index !== null && index >= MAX_CANONICAL_ARRAY_LENGTH) {
+        selected.add(key);
+      }
+    }
+    keys = [...selected];
   } catch {
     return special("unserializable");
   }
@@ -323,8 +382,13 @@ function summarizeArrayTail(
   const hash = createHash("sha256");
   let cardinality = 0;
   for (const key of keys) {
+    if (!canConsumeCanonicalNode(state.budget)) {
+      updateTailHash(hash, "[truncated]", special("truncated"));
+      state.budget.truncated = true;
+      break;
+    }
     const index = parseCanonicalArrayIndex(key);
-    const entryState = createTailEntryState(value);
+    const entryState = createTailEntryState(value, state.budget);
     const canonicalValue =
       index === null
         ? canonicalizeObjectEntry(value, key, entryState, depth)
@@ -338,15 +402,21 @@ function summarizeArrayTail(
 function summarizeObjectTail(
   value: object,
   sortedKeys: string[],
+  state: CanonicalState,
   depth: number,
 ): CanonicalValue {
   const hash = createHash("sha256");
   let cardinality = 0;
   for (const key of sortedKeys.slice(MAX_CANONICAL_OBJECT_KEYS)) {
+    if (!canConsumeCanonicalNode(state.budget)) {
+      updateTailHash(hash, "[truncated]", special("truncated"));
+      state.budget.truncated = true;
+      break;
+    }
     const canonicalValue = canonicalizeObjectEntry(
       value,
       key,
-      createTailEntryState(value),
+      createTailEntryState(value, state.budget),
       depth,
     );
     updateTailHash(hash, key, canonicalValue);
@@ -355,24 +425,30 @@ function summarizeObjectTail(
   return ["tail_digest", cardinality, hash.digest("hex")];
 }
 
-function createTailEntryState(parent: object): CanonicalState {
+function createTailEntryState(
+  parent: object,
+  budget: CanonicalBudget,
+): CanonicalState {
   const ancestors = new WeakSet<object>();
   ancestors.add(parent);
-  return { ancestors, nodes: 0 };
+  return { ancestors, budget };
 }
 
 function createVisibleEntryState(state: CanonicalState): CanonicalState {
-  return { ancestors: state.ancestors, nodes: 0 };
+  return { ancestors: state.ancestors, budget: state.budget };
 }
 
-function deepGraphDigest(root: unknown): CanonicalValue {
+function deepGraphDigest(
+  root: unknown,
+  budget: CanonicalBudget,
+  rootAlreadyCounted: boolean,
+): CanonicalValue {
   const hash = createHash("sha256");
   const traversalIds = new WeakMap<object, number>();
   const tasks: DeepTraversalTask[] = [{ kind: "value", value: root }];
   let nextTraversalId = 1;
   let nodeCount = 0;
   let edgeCount = 0;
-  let propertyInspectionCount = 0;
   let truncated = false;
   const markTruncated = () => {
     truncated = true;
@@ -381,7 +457,7 @@ function deepGraphDigest(root: unknown): CanonicalValue {
     updateDeepHash(
       hash,
       "graph_truncated_inspections",
-      String(propertyInspectionCount),
+      String(budget.propertyInspections),
     );
   };
 
@@ -395,7 +471,7 @@ function deepGraphDigest(root: unknown): CanonicalValue {
 
       if (
         nodeCount >= MAX_DEEP_GRAPH_NODES ||
-        propertyInspectionCount >= MAX_DEEP_GRAPH_EDGES
+        !canInspectCanonicalProperty(budget)
       ) {
         markTruncated();
         break;
@@ -404,7 +480,10 @@ function deepGraphDigest(root: unknown): CanonicalValue {
       const key = task.keys[task.index]!;
       task.index += 1;
       tasks.push(task);
-      propertyInspectionCount += 1;
+      if (!consumeCanonicalPropertyInspection(budget)) {
+        markTruncated();
+        break;
+      }
       const arrayIndex =
         task.containerKind === "array" ? parseCanonicalArrayIndex(key) : null;
       let descriptor: PropertyDescriptor | undefined;
@@ -445,6 +524,15 @@ function deepGraphDigest(root: unknown): CanonicalValue {
         continue;
       }
       try {
+        if (!("value" in descriptor)) {
+          if (
+            !reserveCanonicalChildNode(budget) ||
+            !consumeCanonicalPropertyInspection(budget)
+          ) {
+            markTruncated();
+            break;
+          }
+        }
         tasks.push({
           kind: "value",
           value:
@@ -459,6 +547,12 @@ function deepGraphDigest(root: unknown): CanonicalValue {
     }
 
     const value = task.value;
+    if (!(rootAlreadyCounted && nodeCount === 0)) {
+      if (!consumeCanonicalNode(budget)) {
+        markTruncated();
+        break;
+      }
+    }
     if (value === null) {
       updateDeepHash(hash, "null");
       continue;
@@ -499,6 +593,10 @@ function deepGraphDigest(root: unknown): CanonicalValue {
     }
     if (typeof value !== "object") {
       updateDeepHash(hash, "unserializable");
+      continue;
+    }
+    if (isProxy(value)) {
+      updateDeepHash(hash, "unreadable_proxy");
       continue;
     }
 
@@ -652,7 +750,9 @@ function canonicalizeObjectEntry(
   depth: number,
 ): CanonicalValue {
   if (isSecretLikeKey(key)) return special("redacted");
-  if (isPrivateValueKey(key)) return canonicalizePrivateObjectValue(value, key);
+  if (isPrivateValueKey(key)) {
+    return canonicalizePrivateObjectValue(value, key, state, depth);
+  }
   return canonicalizeObjectValue(value, key, state, depth);
 }
 
@@ -662,11 +762,24 @@ function canonicalizeArrayValue(
   state: CanonicalState,
   depth: number,
 ): CanonicalValue {
+  if (!consumeCanonicalPropertyInspection(state.budget)) {
+    return special("truncated");
+  }
   try {
-    if (!(index in value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+    if (!descriptor) {
       return special("array_hole");
     }
-    return canonicalize(value[index], state, depth);
+    if ("value" in descriptor) {
+      return canonicalize(descriptor.value, state, depth);
+    }
+    if (
+      !reserveCanonicalChildNode(state.budget) ||
+      !consumeCanonicalPropertyInspection(state.budget)
+    ) {
+      return special("truncated");
+    }
+    return canonicalize(descriptor.get?.call(value), state, depth);
   } catch {
     return special("unreadable");
   }
@@ -678,11 +791,57 @@ function canonicalizeObjectValue(
   state: CanonicalState,
   depth: number,
 ): CanonicalValue {
+  if (!consumeCanonicalPropertyInspection(state.budget)) {
+    return special("truncated");
+  }
   try {
-    return canonicalize((value as Record<string, unknown>)[key], state, depth);
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor) return special("unreadable");
+    if ("value" in descriptor) {
+      return canonicalize(descriptor.value, state, depth);
+    }
+    if (
+      !reserveCanonicalChildNode(state.budget) ||
+      !consumeCanonicalPropertyInspection(state.budget)
+    ) {
+      return special("truncated");
+    }
+    return canonicalize(descriptor.get?.call(value), state, depth);
   } catch {
     return special("unreadable");
   }
+}
+
+function canConsumeCanonicalNode(budget: CanonicalBudget): boolean {
+  return budget.nodes < MAX_CANONICAL_NODES;
+}
+
+function reserveCanonicalChildNode(budget: CanonicalBudget): boolean {
+  if (canConsumeCanonicalNode(budget)) return true;
+  budget.truncated = true;
+  return false;
+}
+
+function consumeCanonicalNode(budget: CanonicalBudget): boolean {
+  if (!canConsumeCanonicalNode(budget)) {
+    budget.truncated = true;
+    return false;
+  }
+  budget.nodes += 1;
+  return true;
+}
+
+function canInspectCanonicalProperty(budget: CanonicalBudget): boolean {
+  return budget.propertyInspections < MAX_CANONICAL_PROPERTY_INSPECTIONS;
+}
+
+function consumeCanonicalPropertyInspection(budget: CanonicalBudget): boolean {
+  if (!canInspectCanonicalProperty(budget)) {
+    budget.truncated = true;
+    return false;
+  }
+  budget.propertyInspections += 1;
+  return true;
 }
 
 function special(
@@ -762,17 +921,44 @@ function containsPrivateString(value: string): boolean {
 function canonicalizePrivateObjectValue(
   value: object,
   key: string,
+  state: CanonicalState,
+  depth: number,
 ): CanonicalValue {
+  if (!consumeCanonicalPropertyInspection(state.budget)) {
+    return special("truncated");
+  }
   try {
-    return privateDigest((value as Record<string, unknown>)[key]);
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor) return special("unreadable");
+    let privateValue: unknown;
+    if ("value" in descriptor) {
+      privateValue = descriptor.value;
+    } else {
+      if (
+        !reserveCanonicalChildNode(state.budget) ||
+        !consumeCanonicalPropertyInspection(state.budget)
+      ) {
+        return special("truncated");
+      }
+      privateValue = descriptor.get?.call(value);
+    }
+    return privateDigest(privateValue, state, depth);
   } catch {
     return special("unreadable");
   }
 }
 
-function privateDigest(value: unknown): CanonicalValue {
+function privateDigest(
+  value: unknown,
+  state?: CanonicalState,
+  depth = 0,
+): CanonicalValue {
   const raw =
-    typeof value === "string" ? value : canonicalJson(value);
+    typeof value === "string"
+      ? value
+      : state
+        ? JSON.stringify(canonicalize(value, state, depth))
+        : canonicalJson(value);
   const scrubbed = scrubSecretsBeforeDigest(raw);
   return [
     "private_digest",

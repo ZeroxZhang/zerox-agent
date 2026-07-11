@@ -23,7 +23,7 @@ import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
 import type { ChatMessage } from "./openAiCompatibleClient";
 import {
   countConsecutiveFingerprint,
-  createAcceptanceFailureFingerprint,
+  createAcceptanceLogicalFailureFingerprint,
   sanitizeActionSignaturesForPersistence,
 } from "./agentGoalFailureFingerprint";
 import {
@@ -32,6 +32,10 @@ import {
   type AcceptanceRepairDecision,
 } from "./agentGoalRepairPolicy";
 import { createGoalAcceptanceCertificate } from "./agentGoalAcceptanceCertificate";
+import {
+  redactAndBoundAcceptanceSummary,
+  redactAndBoundEvidenceRef,
+} from "./agentGoalRedaction";
 
 export type GoalRuntimeRunResult = {
   runId: string;
@@ -87,6 +91,7 @@ export function createAgentGoalController(options: {
   const runOwnersByGoal = new Map<string, Set<ActiveRunEntry>>();
   const publishedTerminalVersions = new Map<string, string>();
   const recentActionSignatures = new Map<string, string[]>();
+  const nonterminalPublications = new Map<string, Set<Promise<void>>>();
 
   function notifyProgress(
     event: GoalProgressEvent["event"],
@@ -112,6 +117,24 @@ export function createAgentGoalController(options: {
       throw new Error(`Goal "${goalId}" was not found.`);
     }
     return goal;
+  }
+
+  async function createRunAcceptanceContext(
+    goal: Goal,
+    runOptions?: { signal?: AbortSignal },
+    milestone?: Milestone,
+    runResult?: GoalRuntimeRunResult,
+  ): Promise<AcceptanceContext | undefined> {
+    const context = await options.createAcceptanceContext?.(
+      goal,
+      milestone,
+      runResult,
+    );
+    if (!context) return undefined;
+    return {
+      ...context,
+      ...(runOptions?.signal ? { signal: runOptions.signal } : {}),
+    };
   }
 
   async function runLoop(goal: Goal, runOptions?: { signal?: AbortSignal }) {
@@ -173,17 +196,60 @@ export function createAgentGoalController(options: {
     if (goal.status === "executing" || goal.status === "planning") {
       return;
     }
-    if (!registerTerminalPublication(goal)) {
+    await waitForNonterminalPublications(goal.id);
+    const canonical = (await options.goalStore.get(goal.id)) ?? goal;
+    if (canonical.status === "executing" || canonical.status === "planning") {
       return;
     }
-    await emit(goal.id, "goal_stopped", {
-      goalId: goal.id,
-      status: goal.status,
-      stopReason: goal.stopReason,
-      summary: terminalStatusMessage(goal),
+    if (!registerTerminalPublication(canonical)) {
+      return;
+    }
+    await emit(canonical.id, "goal_stopped", {
+      goalId: canonical.id,
+      status: canonical.status,
+      stopReason: canonical.stopReason,
+      summary: terminalStatusMessage(canonical),
     });
-    notifyProgress("stopped", goal, terminalStatusMessage(goal));
-    recentActionSignatures.delete(goal.id);
+    notifyProgress("stopped", canonical, terminalStatusMessage(canonical));
+    recentActionSignatures.delete(canonical.id);
+  }
+
+  function beginNonterminalPublication(goalId: string): () => void {
+    let releasePromise: (() => void) | undefined;
+    const publication = new Promise<void>((resolve) => {
+      releasePromise = resolve;
+    });
+    const active = nonterminalPublications.get(goalId) ?? new Set<Promise<void>>();
+    active.add(publication);
+    nonterminalPublications.set(goalId, active);
+    return () => {
+      releasePromise?.();
+      active.delete(publication);
+      if (active.size === 0 && nonterminalPublications.get(goalId) === active) {
+        nonterminalPublications.delete(goalId);
+      }
+    };
+  }
+
+  async function waitForNonterminalPublications(goalId: string): Promise<void> {
+    while (true) {
+      const active = nonterminalPublications.get(goalId);
+      if (!active || active.size === 0) return;
+      await Promise.allSettled([...active]);
+    }
+  }
+
+  async function canonicalExecutingGoal(goalId: string): Promise<Goal | null> {
+    const canonical = await options.goalStore.get(goalId);
+    return canonical?.status === "executing" ? canonical : null;
+  }
+
+  async function settleSuppressedPublication(goal: Goal): Promise<Goal> {
+    const canonical = (await options.goalStore.get(goal.id)) ?? goal;
+    if (canonical.status !== "executing" && canonical.status !== "planning") {
+      await publishCanonicalTerminal(canonical);
+    }
+    return canonical;
   }
 
   function registerTerminalPublication(goal: Goal): boolean {
@@ -233,7 +299,7 @@ export function createAgentGoalController(options: {
             goal = validatingGoal;
             const result = await options.acceptance.evaluateGoal(
               goal,
-              (await options.createAcceptanceContext?.(goal)) as never,
+              (await createRunAcceptanceContext(goal, runOptions)) as never,
             );
             const interruptedAfterGoalReview = await canonicalInterruption(
               goal,
@@ -242,7 +308,9 @@ export function createAgentGoalController(options: {
             if (interruptedAfterGoalReview) {
               return interruptedAfterGoalReview;
             }
-            await recordAcceptanceManifest(goal, null, result);
+            if (!(await recordAcceptanceManifest(goal, null, result))) {
+              return settleSuppressedPublication(goal);
+            }
             const interruptedAfterManifest = await canonicalInterruption(
               goal,
               runOptions,
@@ -408,13 +476,23 @@ export function createAgentGoalController(options: {
     }
     const acceptance = await options.acceptance.evaluate(
       milestone,
-      (await options.createAcceptanceContext?.(goal, milestone, runResult)) as never,
+      (await createRunAcceptanceContext(
+        goal,
+        runOptions,
+        milestone,
+        runResult,
+      )) as never,
     );
     const interruptedAfterAcceptance = await canonicalInterruption(goal, runOptions);
     if (interruptedAfterAcceptance) {
       return { goal: interruptedAfterAcceptance, suspend: true };
     }
-    await recordAcceptanceManifest(goal, milestone, acceptance);
+    if (!(await recordAcceptanceManifest(goal, milestone, acceptance))) {
+      return {
+        goal: await settleSuppressedPublication(goal),
+        suspend: true,
+      };
+    }
     const interruptedAfterManifest = await canonicalInterruption(goal, runOptions);
     if (interruptedAfterManifest) {
       return { goal: interruptedAfterManifest, suspend: true };
@@ -528,7 +606,7 @@ export function createAgentGoalController(options: {
     };
     const state = ensureAcceptanceState(goal);
     const evidenceRefs = safeAcceptanceEvidenceRefs(result);
-    const fingerprint = createAcceptanceFailureFingerprint({
+    const fingerprint = createAcceptanceLogicalFailureFingerprint({
       target: targetIdentity,
       failedChecks: result.checkResults,
       ...(result.evidenceManifest
@@ -571,13 +649,18 @@ export function createAgentGoalController(options: {
       fingerprint,
       checkResults: result.checkResults,
     });
-    await appendAcceptanceEvent(
+    if (!(await appendAcceptanceEvent(
       persisted,
       "acceptance_failure_classified",
       target,
       decision,
       evidenceRefs,
-    );
+    ))) {
+      return {
+        goal: await settleSuppressedPublication(persisted),
+        suspend: true,
+      };
+    }
     const interruptedAfterClassification = await canonicalInterruption(
       persisted,
       runOptions,
@@ -621,7 +704,7 @@ export function createAgentGoalController(options: {
         await publishCanonicalTerminal(persisted);
         return { goal: persisted, suspend: true };
       }
-      await appendAcceptanceEvent(
+      if (!(await appendAcceptanceEvent(
         persisted,
         decision.action === "retry_alternate_strategy"
           ? "acceptance_strategy_changed"
@@ -629,7 +712,12 @@ export function createAgentGoalController(options: {
         target,
         decision,
         evidenceRefs,
-      );
+      ))) {
+        return {
+          goal: await settleSuppressedPublication(persisted),
+          suspend: true,
+        };
+      }
       const interruptedAfterRepair = await canonicalInterruption(
         persisted,
         runOptions,
@@ -710,13 +798,18 @@ export function createAgentGoalController(options: {
         await publishCanonicalTerminal(persisted);
         return { goal: persisted, suspend: true };
       }
-      await appendAcceptanceEvent(
+      if (!(await appendAcceptanceEvent(
         persisted,
         "acceptance_blocked",
         target,
         decision,
         evidenceRefs,
-      );
+      ))) {
+        return {
+          goal: await settleSuppressedPublication(persisted),
+          suspend: true,
+        };
+      }
       const interruptedAfterBlocked = await canonicalInterruption(
         persisted,
         runOptions,
@@ -902,46 +995,52 @@ export function createAgentGoalController(options: {
       await publishCanonicalTerminal(persisted);
       return persisted;
     }
+    await waitForNonterminalPublications(persisted.id);
+    const certifiedGoal = (await options.goalStore.get(persisted.id)) ?? persisted;
+    if (certifiedGoal.status !== "achieved") {
+      await publishCanonicalTerminal(certifiedGoal);
+      return certifiedGoal;
+    }
     const certificatePayload = {
-      goalId: persisted.id,
-      targetId: persisted.id,
-      fingerprint: persisted.acceptanceCertificate?.certificateHash ?? "",
+      goalId: certifiedGoal.id,
+      targetId: certifiedGoal.id,
+      fingerprint: certifiedGoal.acceptanceCertificate?.certificateHash ?? "",
       occurrence: 1,
       failedCheckIds: [] as string[],
       action: "certify",
-      evidenceRefs: persisted.acceptanceCertificate?.evidence.map(
+      evidenceRefs: certifiedGoal.acceptanceCertificate?.evidence.map(
         (entry) => entry.ref,
       ) ?? [],
-      certificateHash: persisted.acceptanceCertificate?.certificateHash,
+      certificateHash: certifiedGoal.acceptanceCertificate?.certificateHash,
     };
-    await options.goalStore.appendLedger(persisted.id, {
+    await options.goalStore.appendLedger(certifiedGoal.id, {
       at: currentTime(),
       kind: "acceptance_certified",
       summary: "Goal acceptance certificate created.",
       evidenceRefs: certificatePayload.evidenceRefs,
     });
-    await emit(persisted.id, "acceptance_certified", certificatePayload);
+    await emit(certifiedGoal.id, "acceptance_certified", certificatePayload);
     notifyProgress(
       "acceptance_certified",
-      persisted,
+      certifiedGoal,
       "目标已通过最终验收并生成证书。",
     );
-    if (registerTerminalPublication(persisted)) {
-      await options.goalStore.appendLedger(persisted.id, {
+    if (registerTerminalPublication(certifiedGoal)) {
+      await options.goalStore.appendLedger(certifiedGoal.id, {
         at: currentTime(),
         kind: "goal_stopped",
         summary: "Goal acceptance passed.",
       });
-      await emit(persisted.id, "goal_stopped", {
-        goalId: persisted.id,
-        status: persisted.status,
-        stopReason: persisted.stopReason,
+      await emit(certifiedGoal.id, "goal_stopped", {
+        goalId: certifiedGoal.id,
+        status: certifiedGoal.status,
+        stopReason: certifiedGoal.stopReason,
         summary: "Goal acceptance passed.",
       });
-      notifyProgress("stopped", persisted, "Goal acceptance passed.");
+      notifyProgress("stopped", certifiedGoal, "Goal acceptance passed.");
     }
-    clearGoalRuntimeStateIfIdle(persisted.id);
-    return persisted;
+    clearGoalRuntimeStateIfIdle(certifiedGoal.id);
+    return certifiedGoal;
   }
 
   async function persistAcceptancePhase(
@@ -970,13 +1069,13 @@ export function createAgentGoalController(options: {
     goal: Goal,
     target: Milestone | null,
     result: AcceptanceResult,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const evidenceRefs = safeAcceptanceEvidenceRefs(result);
     const targetIdentity = {
       targetKind: target ? ("milestone" as const) : ("goal" as const),
       targetId: target?.id ?? goal.id,
     };
-    const fingerprint = createAcceptanceFailureFingerprint({
+    const fingerprint = createAcceptanceLogicalFailureFingerprint({
       target: targetIdentity,
       failedChecks: result.checkResults,
       ...(result.evidenceManifest
@@ -994,27 +1093,38 @@ export function createAgentGoalController(options: {
           targetIdentity,
           fingerprint,
         ) + 1;
-    await options.goalStore.appendLedger(goal.id, {
-      at: currentTime(),
-      kind: "acceptance_manifest_created",
-      summary: "Acceptance evidence manifest created.",
-      evidenceRefs,
-    });
-    await emit(goal.id, "acceptance_manifest_created", {
-      goalId: goal.id,
-      targetId: targetIdentity.targetId,
-      fingerprint,
-      occurrence,
-      failedCheckIds: failedCheckIds(result),
-      action: "validate",
-      evidenceRefs,
-    });
-    notifyProgress(
-      "acceptance_manifest_created",
-      goal,
-      "验收证据清单已生成。",
-      target?.id,
-    );
+    const release = beginNonterminalPublication(goal.id);
+    try {
+      if (!(await canonicalExecutingGoal(goal.id))) return false;
+      await options.goalStore.appendLedger(goal.id, {
+        at: currentTime(),
+        kind: "acceptance_manifest_created",
+        summary: "Acceptance evidence manifest created.",
+        evidenceRefs,
+      });
+      // This is both the post-ledger and immediate pre-trajectory guard.
+      if (!(await canonicalExecutingGoal(goal.id))) return false;
+      await emit(goal.id, "acceptance_manifest_created", {
+        goalId: goal.id,
+        targetId: targetIdentity.targetId,
+        fingerprint,
+        occurrence,
+        failedCheckIds: failedCheckIds(result),
+        action: "validate",
+        evidenceRefs,
+      });
+      const canonical = await canonicalExecutingGoal(goal.id);
+      if (!canonical) return false;
+      notifyProgress(
+        "acceptance_manifest_created",
+        canonical,
+        "验收证据清单已生成。",
+        target?.id,
+      );
+      return true;
+    } finally {
+      release();
+    }
   }
 
   async function appendAcceptanceEvent(
@@ -1029,7 +1139,7 @@ export function createAgentGoalController(options: {
     target: Milestone | null,
     decision: AcceptanceRepairDecision,
     evidenceRefs: string[],
-  ): Promise<void> {
+  ): Promise<boolean> {
     const payload = {
       goalId: goal.id,
       targetId: target?.id ?? goal.id,
@@ -1039,21 +1149,32 @@ export function createAgentGoalController(options: {
       action: decision.action,
       evidenceRefs,
     };
-    await options.goalStore.appendLedger(goal.id, {
-      at: currentTime(),
-      kind,
-      summary: decision.summary,
-      ...(target ? { milestoneId: target.id } : {}),
-      evidenceRefs,
-    });
-    await emit(goal.id, kind, payload);
-    const progressMessage = {
-      acceptance_failure_classified: `验收失败已分类，涉及 ${decision.failedCheckIds.length} 项检查。`,
-      acceptance_repair_scheduled: `已安排定向验收修复（${Math.min(decision.occurrence, 2)}/2）。`,
-      acceptance_strategy_changed: "验收修复已切换策略（2/2）。",
-      acceptance_blocked: "目标验收受阻，需要人工处理后再继续。",
-    }[kind];
-    notifyProgress(kind, goal, progressMessage, target?.id);
+    const release = beginNonterminalPublication(goal.id);
+    try {
+      if (!(await canonicalExecutingGoal(goal.id))) return false;
+      await options.goalStore.appendLedger(goal.id, {
+        at: currentTime(),
+        kind,
+        summary: decision.summary,
+        ...(target ? { milestoneId: target.id } : {}),
+        evidenceRefs,
+      });
+      // This is both the post-ledger and immediate pre-trajectory guard.
+      if (!(await canonicalExecutingGoal(goal.id))) return false;
+      await emit(goal.id, kind, payload);
+      const canonical = await canonicalExecutingGoal(goal.id);
+      if (!canonical) return false;
+      const progressMessage = {
+        acceptance_failure_classified: `验收失败已分类，涉及 ${decision.failedCheckIds.length} 项检查。`,
+        acceptance_repair_scheduled: `已安排定向验收修复（${Math.min(decision.occurrence, 2)}/2）。`,
+        acceptance_strategy_changed: "验收修复已切换策略（2/2）。",
+        acceptance_blocked: "目标验收受阻，需要人工处理后再继续。",
+      }[kind];
+      notifyProgress(kind, canonical, progressMessage, target?.id);
+      return true;
+    } finally {
+      release();
+    }
   }
 
   async function stopForBudgetExhaustion(
@@ -1086,22 +1207,31 @@ export function createAgentGoalController(options: {
       clearGoalRuntimeStateIfIdle(persisted.id);
       return persisted;
     }
-    if (registerTerminalPublication(persisted)) {
-      await options.goalStore.appendLedger(goal.id, {
+    await waitForNonterminalPublications(persisted.id);
+    const canonical = (await options.goalStore.get(persisted.id)) ?? persisted;
+    if (canonical.status === "executing" || canonical.status === "planning") {
+      clearGoalRuntimeStateIfIdle(canonical.id);
+      return canonical;
+    }
+    if (registerTerminalPublication(canonical)) {
+      const canonicalSummary = canonical.status === status
+        ? summary
+        : terminalStatusMessage(canonical);
+      await options.goalStore.appendLedger(canonical.id, {
         at: currentTime(),
         kind: "goal_stopped",
-        summary,
+        summary: canonicalSummary,
       });
-      await emit(goal.id, "goal_stopped", {
-        goalId: goal.id,
-        status,
-        stopReason,
-        summary,
+      await emit(canonical.id, "goal_stopped", {
+        goalId: canonical.id,
+        status: canonical.status,
+        stopReason: canonical.stopReason,
+        summary: canonicalSummary,
       });
-      notifyProgress("stopped", persisted, summary);
+      notifyProgress("stopped", canonical, canonicalSummary);
     }
-    clearGoalRuntimeStateIfIdle(persisted.id);
-    return persisted;
+    clearGoalRuntimeStateIfIdle(canonical.id);
+    return canonical;
   }
 
   async function writeGoalCheckpoint(
@@ -1319,17 +1449,15 @@ function shouldRequestReview(goal: Goal, milestone: Milestone): boolean {
 }
 
 function summarizeAcceptanceSuccess(result: AcceptanceResult): string {
-  return (
-    result.checkResults.find((checkResult) => checkResult.detail)?.detail ??
-    "Milestone accepted."
-  );
+  const detail = result.checkResults.find((checkResult) => checkResult.detail)?.detail;
+  return redactAndBoundAcceptanceSummary(detail ?? "Milestone accepted.") ||
+    "Milestone accepted.";
 }
 
 function summarizeAcceptanceFailure(result: AcceptanceResult): string {
-  return (
-    result.checkResults.find((checkResult) => !checkResult.passed)?.detail ??
-    "Acceptance rejected."
-  );
+  const detail = result.checkResults.find((checkResult) => !checkResult.passed)?.detail;
+  return redactAndBoundAcceptanceSummary(detail ?? "Acceptance rejected.") ||
+    "Acceptance rejected.";
 }
 
 function ensureAcceptanceState(goal: Goal): GoalAcceptanceState {
@@ -1366,17 +1494,9 @@ function safeAcceptanceEvidenceRefs(result: AcceptanceResult): string[] {
     ...result.checkResults.flatMap((check) => check.evidenceRefs),
     ...(result.evidenceManifest?.artifacts.map((artifact) => artifact.ref) ?? []),
   ];
-  return [...new Set(refs.map(redactEvidenceRef).filter(Boolean))]
+  return [...new Set(refs.map(redactAndBoundEvidenceRef).filter(Boolean))]
     .sort()
     .slice(0, 64);
-}
-
-function redactEvidenceRef(ref: string): string {
-  const bounded = String(ref).slice(0, 512);
-  return bounded.replace(
-    /((?:api[_-]?key|access[_-]?token|authorization|password|secret)=)[^&\s]+/gi,
-    "$1[redacted]",
-  );
 }
 
 function toRepairDirective(

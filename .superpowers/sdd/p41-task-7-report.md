@@ -517,3 +517,93 @@ with numeric own property names, preserving nonenumerable numeric elements while
 excluding `length`, symbols, and nonenumerable named metadata before the semantic
 inspection budget is consumed. Hostile object/array proxy enumeration remains
 contained as an unreadable-container marker.
+
+## Final Termination, Logical Identity, and Redaction Closure
+
+### Status
+
+DONE
+
+### RED Evidence
+
+The final consolidated regressions were written before production changes and
+witnessed failing. They proved that changing action signatures reset occurrence
+counting and final-repair IDs, a deferred stale trajectory append could land
+after the canonical terminal event, cold-judge details/evidence refs leaked
+credentials, shallow tails omitted nonenumerable numeric indices, and there was
+no global canonical work budget or controller-to-acceptance abort propagation.
+
+```text
+npx vitest run src/main/agentGoalFailureFingerprint.test.ts \
+  src/main/agentGoalRedaction.test.ts src/main/agentGoalController.test.ts
+agentGoalRedaction.test.ts: 0 tests (missing production module)
+agentGoalController.test.ts: 5 intended failures
+
+npx vitest run src/main/agentGoalFailureFingerprint.test.ts \
+  -t "proxy synthesize"
+expected 108191 descriptor inspections to be <= 32768
+
+npx vitest run src/main/agentGoalController.test.ts \
+  -t "propagates controller abort"
+Tests 2 failed (shared context was passed through without the run signal)
+```
+
+### GREEN Evidence
+
+```text
+npx vitest run src/renderer/goalProgressViewModel.test.ts \
+  src/main/agentGoalController.test.ts \
+  src/main/agentGoalFailureFingerprint.test.ts \
+  src/main/agentGoalRedaction.test.ts \
+  src/main/goalRuntimeEngine.test.ts \
+  src/main/agentGoalAcceptanceCertificate.test.ts
+Test Files 6 passed (6)
+Tests 237 passed (237)
+
+npx tsc --noEmit --pretty false -p tsconfig.electron.json
+exit 0
+
+npx tsc --noEmit --pretty false -p tsconfig.renderer.json
+exit 0
+```
+
+### Fix Summary
+
+- The action-inclusive fingerprint remains available for diagnostics, while the
+  controller now uses a separate action-excluding logical fingerprint for
+  occurrence counting, repair directives, and deterministic final-repair IDs.
+  Three realistic, distinct action strategies retain their signatures in
+  history yet deterministically progress 1/2/3 to one stalled outcome with no
+  replan or repair chain.
+- One action canonicalization now shares a global 8,192-node / 32,768-property
+  inspection budget across visible siblings, tails, private values, and deep
+  fallback traversals. Every accessor is checked before invocation, and bounded
+  signatures expose a deterministic `truncated` marker when the cap is reached.
+  Proxy containers are framed as unreadable before invoking synthetic own-key or
+  descriptor traps, preventing a proxy from manufacturing work outside the cap.
+- Shallow array tails include actual nonenumerable numeric own indices at and
+  beyond index 32, ignore nonenumerable named metadata, and enumerate own keys
+  rather than declared holes.
+- Acceptance manifest/classification/repair publications register as in-flight,
+  recheck canonical execution immediately before and after ledger/trajectory
+  awaits, and suppress late progress. Terminal publication waits for prior
+  nonterminal writes, so a stale aborted owner cannot place a nonterminal event
+  after the unique canonical terminal event.
+- Controller-created milestone and final acceptance contexts are cloned and
+  receive the current run `AbortSignal`; caller-owned context objects remain
+  unmodified, and aborted acceptance emits no late acceptance events.
+- Central main-process redaction covers generic/session/access/refresh/AWS
+  tokens, cookies, credentials, bearer values, client secrets, webhooks, URL
+  userinfo, JSON, query, assignment, and path forms. Evidence refs are capped at
+  512 bytes and accepted/rejected cold-judge summaries at 1,024 bytes before
+  persistence, ledger, trajectory, progress, and renderer projection.
+
+### Final Closure Files
+
+- `src/main/agentGoalController.ts`
+- `src/main/agentGoalController.test.ts`
+- `src/main/agentGoalFailureFingerprint.ts`
+- `src/main/agentGoalFailureFingerprint.test.ts`
+- `src/main/agentGoalRedaction.ts`
+- `src/main/agentGoalRedaction.test.ts`
+- `.superpowers/sdd/p41-task-7-report.md`

@@ -7,6 +7,7 @@ import type {
 import {
   countConsecutiveFingerprint,
   createAcceptanceFailureFingerprint,
+  createAcceptanceLogicalFailureFingerprint,
   createToolActionSignature,
 } from "./agentGoalFailureFingerprint";
 
@@ -155,6 +156,32 @@ describe("goal acceptance failure fingerprints", () => {
   ])("changes when the meaningful %s changes", (_label, override) => {
     expect(createAcceptanceFailureFingerprint(fingerprintInput())).not.toBe(
       createAcceptanceFailureFingerprint(fingerprintInput(override)),
+    );
+  });
+
+  it("keeps logical failure identity stable when only the attempted actions change", () => {
+    const firstAttempt = fingerprintInput({
+      actionSignatures: [
+        createToolActionSignature("test_run", {
+          command: "npm test -- --runInBand",
+          cwd: "/workspace",
+        }),
+      ],
+    });
+    const alternateAttempt = fingerprintInput({
+      actionSignatures: [
+        createToolActionSignature("test_run", {
+          command: "npm run verify -- --reporter=dot",
+          cwd: "/workspace",
+        }),
+      ],
+    });
+
+    expect(createAcceptanceFailureFingerprint(firstAttempt)).not.toBe(
+      createAcceptanceFailureFingerprint(alternateAttempt),
+    );
+    expect(createAcceptanceLogicalFailureFingerprint(firstAttempt)).toBe(
+      createAcceptanceLogicalFailureFingerprint(alternateAttempt),
     );
   });
 
@@ -1151,6 +1178,99 @@ describe("goal acceptance failure fingerprints", () => {
     );
   });
 
+  it("includes nonenumerable numeric shallow array tails without scanning declared holes", () => {
+    let getterReads = 0;
+    const makeArray = (lateValue: string, hiddenMetadata: string) => {
+      const value: unknown[] & Record<string, unknown> = [];
+      value.length = 1_000_000;
+      Object.defineProperty(value, "97", {
+        configurable: true,
+        enumerable: false,
+        get() {
+          getterReads += 1;
+          return lateValue;
+        },
+      });
+      Object.defineProperty(value, "hidden", {
+        configurable: true,
+        enumerable: false,
+        value: hiddenMetadata,
+      });
+      return value;
+    };
+
+    const left = createToolActionSignature(
+      "shallow_numeric_tail",
+      makeArray("late-alpha", "HIDDEN_ALPHA"),
+    );
+    const right = createToolActionSignature(
+      "shallow_numeric_tail",
+      makeArray("late-bravo", "HIDDEN_BRAVO"),
+    );
+    const stableHidden = createToolActionSignature(
+      "shallow_numeric_tail",
+      makeArray("late-alpha", "HIDDEN_BRAVO"),
+    );
+
+    expect(left).not.toBe(right);
+    expect(left).toBe(stableHidden);
+    expect(getterReads).toBe(3);
+    expect(`${left}${right}${stableHidden}`).not.toMatch(/HIDDEN_|late-(?:alpha|bravo)/);
+  });
+
+  it("applies one global work budget across branching fresh-getter graphs", () => {
+    const makeGraph = () => {
+      let getterReads = 0;
+      let inspections = 0;
+      const makeNode = (depth: number): Record<string, unknown> => {
+        const node: Record<string, unknown> = {};
+        for (let branch = 0; branch < 8; branch += 1) {
+          Object.defineProperty(node, `branch_${branch}`, {
+            enumerable: true,
+            get() {
+              inspections += 1;
+              getterReads += 1;
+              return depth < 12 ? makeNode(depth + 1) : `leaf_${branch}`;
+            },
+          });
+        }
+        return node;
+      };
+      return {
+        root: makeNode(0),
+        getterReads: () => getterReads,
+        inspections: () => inspections,
+      };
+    };
+    const first = makeGraph();
+    const second = makeGraph();
+
+    const firstSignature = createToolActionSignature("branching_budget", first.root);
+    const secondSignature = createToolActionSignature("branching_budget", second.root);
+
+    expect(firstSignature).toBe(secondSignature);
+    expect(firstSignature).toContain("truncated");
+    expect(first.getterReads()).toBeLessThanOrEqual(8_192);
+    expect(second.getterReads()).toBeLessThanOrEqual(8_192);
+    expect(first.inspections()).toBeLessThanOrEqual(32_768);
+    expect(second.inspections()).toBeLessThanOrEqual(32_768);
+  });
+
+  it("still differentiates a normal late sibling before the global cap", () => {
+    const makeGraph = (late: string) => ({
+      branches: Array.from({ length: 96 }, (_, index) => ({
+        left: index,
+        right: { value: `branch_${index}` },
+      })),
+      z_late: late,
+    });
+
+    const left = createToolActionSignature("late_under_global_cap", makeGraph("alpha"));
+    const right = createToolActionSignature("late_under_global_cap", makeGraph("bravo"));
+
+    expect(left).not.toBe(right);
+  });
+
   it("bounds deep key and string hash frames without leaking raw values", () => {
     const hugeKey = `PRIVATE_DEEP_KEY_${"k".repeat(50_000)}`;
     const left = createToolActionSignature(
@@ -1319,6 +1439,32 @@ describe("goal acceptance failure fingerprints", () => {
     expect(`${objectAlpha}${objectBravo}${arrayAlpha}${arrayBravo}`).not.toMatch(
       /PRIVATE_(?:OBJECT|ARRAY)_PROXY/,
     );
+  });
+
+  it("does not let a proxy synthesize unbounded shallow property inspections", () => {
+    let descriptorInspections = 0;
+    const syntheticKeys = Array.from(
+      { length: 100_000 },
+      (_, index) => `synthetic_${String(index).padStart(6, "0")}`,
+    );
+    const hostile = new Proxy<Record<string, unknown>>({}, {
+      ownKeys() {
+        return syntheticKeys;
+      },
+      getOwnPropertyDescriptor() {
+        descriptorInspections += 1;
+        return {
+          configurable: true,
+          enumerable: true,
+          value: "synthetic-value",
+        };
+      },
+    });
+
+    const signature = createToolActionSignature("hostile_proxy_budget", hostile);
+
+    expect(descriptorInspections).toBeLessThanOrEqual(32_768);
+    expect(Buffer.byteLength(signature)).toBeLessThanOrEqual(2_048);
   });
 
   it("handles undefined, non-finite numbers, sparse arrays, bigint, getters, and cycles safely", () => {
