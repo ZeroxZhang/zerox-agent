@@ -890,7 +890,10 @@ export function parseAgentModelResponse(
 export function serializeToolObservation(
   observation: ToolObservation,
 ): string {
-  return JSON.stringify({
+  // v3.6.0: Wrap all tool results in unambiguous XML fences to structurally
+  // separate external data from system instructions (SEC-12, SEC-11).
+  // The system prompt instructs the model that fenced content is untrusted data.
+  const inner = JSON.stringify({
     type: "tool_result",
     tool: observation.tool,
     ok: observation.ok,
@@ -901,6 +904,7 @@ export function serializeToolObservation(
       : {}),
     ...(observation.toolCallId ? { tool_call_id: observation.toolCallId } : {}),
   });
+  return `<tool_result tool="${observation.tool}" ok="${observation.ok}">\n${inner}\n</tool_result>`;
 }
 
 export function buildTaskPrompt(

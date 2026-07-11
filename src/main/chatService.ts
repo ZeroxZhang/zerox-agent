@@ -113,6 +113,8 @@ type ChatContinuationState = {
   maxTurns: number;
   toolCallsExecuted: number;
   evidenceRunId?: string;
+  /** v3.6.0: Creation timestamp for TTL-based eviction (CONC-08). */
+  createdAt: number;
 };
 
 type PendingSkillInputState = {
@@ -490,8 +492,19 @@ export function createChatService(options: {
       });
 
       const pendingContinuation = pendingContinuations.get(sessionId);
+      // v3.6.0: TTL-based eviction for stale continuations (CONC-08).
+      // If a continuation has been pending for > 1 hour, clean it up.
+      const continuationTtlMs = 60 * 60 * 1000; // 1 hour
+      const isContinuationStale =
+        pendingContinuation &&
+        Date.now() - pendingContinuation.createdAt > continuationTtlMs;
+      if (isContinuationStale) {
+        pendingContinuations.delete(sessionId);
+      }
       const continuationToResume =
-        pendingContinuation && isContinuationRequest(userMessage)
+        pendingContinuation &&
+        !isContinuationStale &&
+        isContinuationRequest(userMessage)
           ? pendingContinuation
           : null;
 
@@ -1212,6 +1225,7 @@ export function createChatService(options: {
               maxTurns: loopResult.continuation.maxTurns,
               toolCallsExecuted: loopResult.continuation.toolCallsExecuted,
               evidenceRunId: evidence.runId,
+              createdAt: Date.now(),
             });
             agentStatus = {
               state: "paused",
@@ -3251,10 +3265,14 @@ function injectSkillInvocationMessage(
   skill: SkillRecord,
   inputResolution?: SkillInputResolution,
 ): ChatMessage[] {
+  // v3.6.0: Inject skill instruction as user role (not system) wrapped in
+  // XML fences, matching the memory context pattern (SEC-14). User-installed
+  // skills can contain arbitrary markdown/instructions and must be treated
+  // as untrusted data.
   return [
     {
-      role: "system",
-      content: buildSelectedSkillInstruction(skill, inputResolution),
+      role: "user",
+      content: `<skill_context>\n${buildSelectedSkillInstruction(skill, inputResolution)}\n</skill_context>`,
     },
     ...messages,
   ];
@@ -3309,7 +3327,13 @@ function buildChatMessages(options: {
   const memoryContext = formatMemoryContext(options.relatedMemoryResults);
 
   if (memoryContext) {
-    messages.push({ role: "system", content: memoryContext });
+    // v3.6.0: Inject memory as user role (not system) wrapped in unambiguous
+    // XML fences to structurally separate external data from system instructions
+    // (SEC-13). The system prompt instructs the model that fenced content is
+    // untrusted data. Sanitize the content to prevent fence-breaking via
+    // injection of a closing tag inside stored memory text.
+    const safeMemoryContext = memoryContext.replace(/<\/memory_context>/gi, "<\\/memory_context>");
+    messages.push({ role: "user", content: `<memory_context>\n${safeMemoryContext}\n</memory_context>` });
   }
 
   for (const message of (options.history ?? []).slice(-options.historyLimit)) {
@@ -3473,6 +3497,15 @@ function appendRawHistoryEntry(options: {
     return;
   }
 
+  // v3.6.0: Mask secrets in raw history content before persisting (SEC-17).
+  let safeContent: string;
+  try {
+    const parsed = JSON.parse(options.content);
+    const masked = maskPreviewSecrets(parsed);
+    safeContent = truncateHistoryContent(typeof masked === "string" ? masked : JSON.stringify(masked));
+  } catch {
+    safeContent = truncateHistoryContent(options.content);
+  }
   void options.historyIndexStore
     .append({
       id: options.createId(),
@@ -3481,7 +3514,7 @@ function appendRawHistoryEntry(options: {
       ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
       role: options.role,
       ...(options.toolName ? { toolName: options.toolName } : {}),
-      content: truncateHistoryContent(options.content),
+      content: safeContent,
       createdAt: options.createdAt,
       source: options.role === "tool" ? "tool" : "chat",
     })

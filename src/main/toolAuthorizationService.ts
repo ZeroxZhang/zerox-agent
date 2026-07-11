@@ -2,7 +2,7 @@ import path from "node:path";
 import os from "node:os";
 import type { ScheduledTaskStore } from "./taskStore";
 import type { ToolAuditLog } from "./toolAuditLog";
-import { evaluatePermission } from "./kernel/permissionEngine";
+import { evaluatePermission, isCommandDenyListed } from "./kernel/permissionEngine";
 import {
   authorizeToolCallWithinRunContext,
   type AuthorizeTaskToolCallResult,
@@ -85,6 +85,34 @@ export function createToolAuthorizationService(options: {
       }
 
       const runContext = authorizeOptions?.runContext;
+
+      // v3.6.0: Block deny-listed commands (osascript, security, etc.) before
+      // any other permission evaluation (S1-02, SEC-09).
+      if (request.toolName === "shell_exec") {
+        const deniedCommand = isCommandDenyListed(String(request.args.command ?? ""));
+        if (deniedCommand) {
+          const denyDecision = {
+            id: `deny_${Date.now()}`,
+            taskId: subject.id,
+            toolName: request.toolName,
+            allowed: false as const,
+            reason: `shell_exec blocked: "${deniedCommand}" is a deny-listed command. macOS-sensitive tools (osascript, security, shortcuts, automator, systemsetup, etc.) cannot be executed via agent.`,
+            automatic: true,
+            risk: { level: "critical" as const, reason: "deny-listed command" },
+          };
+          const auditEvent = await options.auditLog.append({
+            taskId: subject.id,
+            request,
+            decision: denyDecision,
+          });
+          return {
+            ok: true,
+            decision: denyDecision,
+            auditEvent,
+          };
+        }
+      }
+
       // P4: build a ShellPlan for shell_exec when a runContext is available,
       // feeding both permission layers as the single source of truth (Patch 4).
       // Zero regression for non-shell tools / when no runContext is present.

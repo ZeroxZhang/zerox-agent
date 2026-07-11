@@ -60,6 +60,10 @@ export type AgentLoopOptions = {
   initialToolCallsExecuted?: number;
   pauseOnFailureLoop?: boolean;
   contextManager?: ContextManager;
+  /** v3.6.0: Maximum cumulative tokens to consume across the entire agent run.
+   *  When exceeded, the loop aborts cleanly with status "failed" and a budget-
+   *  exceeded summary. Undefined / 0 = no limit (CORE-05). */
+  tokenBudget?: number;
   /** P2: overflow compaction routes through this strategy when provided
    *  (auto→rebuild when a checkpoint exists, else summarize = current behavior).
    *  Absent → legacy compressMessages (zero regression). */
@@ -174,6 +178,7 @@ export async function runAgentLoop(
     contextManager = createContextManager(),
     compactionStrategy,
     systemReminderRegistry,
+    tokenBudget = 0,
     modelRetry,
     onToolCall,
     onToolResult,
@@ -233,6 +238,9 @@ export async function runAgentLoop(
   const emittedStrategyGuards = new Set<string>();
   const successfulToolNames = new Set<string>();
   const contextTokenBudget = Math.max(1, Math.floor(modelProfile.maxTokens * 0.7));
+  // v3.6.0: Cumulative token consumption tracking for budget enforcement (CORE-05).
+  let cumulativeTokensConsumed = 0;
+  const effectiveTokenBudget = tokenBudget > 0 ? tokenBudget : 0;
 
   async function compactMessagesBeforeModelRequest() {
     const estimatedTokens = contextManager.estimateTokens(messages);
@@ -452,6 +460,18 @@ export async function runAgentLoop(
         onReasoning?.(response.reasoningContent, turns + 1);
       }
 
+      // v3.6.0: Track cumulative token consumption (CORE-05).
+      if (effectiveTokenBudget > 0 && response.usage) {
+        const turnTokens =
+          (response.usage.inputTokens ?? 0) + (response.usage.outputTokens ?? 0);
+        cumulativeTokensConsumed += turnTokens;
+        if (cumulativeTokensConsumed >= effectiveTokenBudget) {
+          status = "failed";
+          summary = `Token budget exceeded: ${cumulativeTokensConsumed} tokens consumed (limit: ${effectiveTokenBudget}). The agent loop aborted to prevent cost overrun.`;
+          break;
+        }
+      }
+
       // No tool calls + content → final
       if (!response.toolCalls.length && response.content) {
         summary = response.content;
@@ -524,6 +544,15 @@ export async function runAgentLoop(
 
         // Process each tool call
         for (const preparedToolCall of preparedToolCalls) {
+          // v3.6.0: Check cancel signal inside inner tool-call iteration loop
+          // (CORE-06). Previously cancel only checked at turn boundaries,
+          // allowing the loop to continue processing tools after a cancel.
+          if (signal?.aborted) {
+            status = "canceled";
+            summary = "Agent loop canceled during tool execution.";
+            break;
+          }
+
           const { toolCall, toolName, signature } = preparedToolCall;
           const toolEventBase = buildToolEvent({
             toolCallId: toolCall.id,

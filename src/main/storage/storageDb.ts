@@ -79,6 +79,12 @@ export function createStorageImpl(opts: CreateStorageOptions): Storage {
     assertFts5Enabled(db);
   }
 
+  // v3.6.0: Periodic WAL checkpoint to prevent unbounded WAL growth (DATA-03).
+  // Runs every 60s in addition to the per-1000-writes counter and on-close flush.
+  const checkpointTimer = opts.dbPath !== ":memory:"
+    ? setInterval(() => { try { db.pragma("wal_checkpoint(PASSIVE)"); } catch { /* best-effort */ } }, 60_000)
+    : null;
+
   // Ensure the migrations ledger exists before any migration runs.
   db.exec(MIGRATIONS_TABLE);
 
@@ -131,6 +137,10 @@ export function createStorageImpl(opts: CreateStorageOptions): Storage {
       return backupPath;
     },
     close(): void {
+      // v3.6.0: Stop the periodic checkpoint timer and run a final
+      // TRUNCATE checkpoint to minimize WAL file size on disk (DATA-03).
+      if (checkpointTimer) clearInterval(checkpointTimer);
+      try { db.pragma("wal_checkpoint(TRUNCATE)"); } catch { /* best-effort */ }
       db.close();
     },
   };

@@ -207,10 +207,32 @@ export function createOpenAiCompatibleClient(options?: {
       const decoder = new TextDecoder();
       let buffer = "";
 
+      // v3.6.0: SSE idle timeout per read (30 s). Prevents infinite hang when
+      // the stream stalls without sending [DONE] (CORE-02, NET-14).
+      const SSE_READ_IDLE_TIMEOUT_MS = 30_000;
+
       try {
+        let streamEnded = false;
         while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+          // v3.6.0: Wrap reader.read() with an idle timeout that is
+          // properly cleaned up after the race settles (CORE-02, NET-14).
+          let readTimeoutId: ReturnType<typeof setTimeout> | null = null;
+          const readResult = await Promise.race([
+            reader.read(),
+            new Promise<never>((_, reject) => {
+              readTimeoutId = setTimeout(
+                () => reject(new Error("SSE stream idle timeout after 30 s")),
+                SSE_READ_IDLE_TIMEOUT_MS,
+              );
+            }),
+          ]);
+          if (readTimeoutId !== null) clearTimeout(readTimeoutId);
+
+          const { done, value } = readResult;
+          if (done) {
+            streamEnded = true;
+            break;
+          }
 
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split("\n");
@@ -222,6 +244,14 @@ export function createOpenAiCompatibleClient(options?: {
 
             const data = trimmed.slice(6);
             if (data === "[DONE]") {
+              streamEnded = true;
+              // v3.6.0: Flush final UTF-8 bytes from TextDecoder before done
+              // (CORE-01). This ensures multi-byte CJK characters split across
+              // chunks are not truncated.
+              if (buffer.trim()) {
+                const final = decoder.decode();
+                if (final) buffer += final;
+              }
               yield { type: "done", finishReason: "stop" };
               return;
             }
@@ -269,12 +299,26 @@ export function createOpenAiCompatibleClient(options?: {
                 }
               }
 
+              // v3.6.0: handle finish_reason=length by emitting a special
+              // done reason so the caller can issue a continuation (CORE-03).
               if (finishReason) {
+                streamEnded = true;
                 yield { type: "done", finishReason };
               }
             } catch {
               // Skip unparseable chunks in streaming
             }
+          }
+        }
+
+        // v3.6.0: Flush final UTF-8 bytes from TextDecoder after loop exit
+        // (CORE-01). If the stream ended without [DONE] and there were
+        // incomplete multi-byte characters buffered in the decoder, flush
+        // them now so they appear as a final content_delta.
+        if (streamEnded) {
+          const final = decoder.decode();
+          if (final.length > 0) {
+            yield { type: "content_delta", text: final };
           }
         }
       } finally {

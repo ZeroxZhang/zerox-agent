@@ -647,7 +647,14 @@ export function createAppContainer(options: {
       const registry = executor.getRegistry();
       registerActorTool(registry, { actorRuntime: actorRuntime() });
       registerWorkflowTool(registry, { workflowRuntime: workflowRuntime() });
-      void initializeMcpTools(executor);
+      // v3.6.0: Track MCP initialization promise so errors are surfaced
+      // instead of silently swallowed (CONC-01).
+      initializeMcpTools(executor).catch((error: unknown) => {
+        console.error(
+          "[mcp] Background MCP tool initialization failed:",
+          error instanceof Error ? error.message : String(error),
+        );
+      });
       return executor;
     });
   }

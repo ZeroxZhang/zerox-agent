@@ -76,7 +76,10 @@ function getRetryDelayMs(
     return Math.min(retryAfterMs, maxDelayMs);
   }
 
-  return Math.min(baseDelayMs * 2 ** attempt, maxDelayMs);
+  // v3.6.0: Add ±25% jitter to prevent thundering herd (NET-02).
+  const base = Math.min(baseDelayMs * 2 ** attempt, maxDelayMs);
+  const jitter = base * 0.25 * (Math.random() * 2 - 1); // random in [-25%, +25%]
+  return Math.max(0, Math.ceil(base + jitter));
 }
 
 function parseRetryAfterMs(error: unknown): number | null {

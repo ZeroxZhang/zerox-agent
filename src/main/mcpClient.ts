@@ -51,6 +51,9 @@ export function createMcpClient(config: McpServerConfig): McpClient {
     }
   >();
   let connected = false;
+  // v3.6.0: Auto-restart state (NET-21).
+  let restartAttempts = 0;
+  const MAX_RESTART_ATTEMPTS = 3;
 
   function getProcess(): ReturnType<typeof spawn> {
     if (!childProcess || !childProcess.stdin) {
@@ -111,93 +114,161 @@ export function createMcpClient(config: McpServerConfig): McpClient {
     childProcess.stdin.write(JSON.stringify(notification) + "\n");
   }
 
-  return {
-    async connect() {
-      if (connected) return;
+  // v3.6.0: Auto-restart with exponential backoff (NET-21).
+  // On unexpected exit, attempt up to 3 restarts with 1s/2s/4s backoff.
+  let manuallyDisconnected = false;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  // Guard against concurrent connect() calls (manual + auto-restart race).
+  let connectingPromise: Promise<void> | null = null;
 
-      const proc = spawn(config.command, config.args ?? [], {
-        stdio: ["pipe", "pipe", "pipe"],
-        env: { ...nodeEnv, ...(config.env ?? {}) },
-        shell: true,
+  function scheduleReconnect() {
+    if (manuallyDisconnected) return;
+    if (restartAttempts >= MAX_RESTART_ATTEMPTS) {
+      console.error(
+        `[mcp] MCP server "${config.name}" exceeded max restart attempts (${MAX_RESTART_ATTEMPTS}).`,
+      );
+      return;
+    }
+    const delay = Math.pow(2, restartAttempts) * 1000; // 1s, 2s, 4s
+    restartAttempts += 1;
+    console.warn(
+      `[mcp] MCP server "${config.name}" restarting in ${delay}ms (attempt ${restartAttempts}/${MAX_RESTART_ATTEMPTS})...`,
+    );
+    reconnectTimer = setTimeout(async () => {
+      reconnectTimer = null;
+      if (manuallyDisconnected || connectingPromise) return;
+      connectingPromise = connectInternal().then(() => {
+        restartAttempts = 0;
+        connectingPromise = null;
+        console.log(`[mcp] MCP server "${config.name}" reconnected.`);
       });
+      try {
+        await connectingPromise;
+      } catch {
+        connectingPromise = null;
+        // connectInternal already logs the error; scheduleReconnect
+        // will be triggered on next exit if under max attempts.
+      }
+    }, delay);
+  }
 
-      childProcess = proc;
+  async function connectInternal(): Promise<void> {
+    const proc = spawn(config.command, config.args ?? [], {
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { ...nodeEnv, ...(config.env ?? {}) },
+      shell: false,
+    });
 
-      const rl = createInterface({
-        input: proc.stdout!,
-        crlfDelay: Infinity,
-      });
+    childProcess = proc;
 
-      rl.on("line", (line: string) => {
-        const trimmed = line.trim();
-        if (!trimmed) return;
+    const rl = createInterface({
+      input: proc.stdout!,
+      crlfDelay: Infinity,
+    });
 
-        try {
-          const response = JSON.parse(trimmed) as JsonRpcResponse;
-          if (response.id !== undefined) {
-            const pending = pendingRequests.get(response.id);
-            if (pending) {
-              pendingRequests.delete(response.id);
-              pending.resolve(response);
-            }
+    rl.on("line", (line: string) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+
+      try {
+        const response = JSON.parse(trimmed) as JsonRpcResponse;
+        if (response.id !== undefined) {
+          const pending = pendingRequests.get(response.id);
+          if (pending) {
+            pendingRequests.delete(response.id);
+            pending.resolve(response);
           }
-        } catch {
-          // Skip non-JSON lines (stderr output, etc.)
         }
-      });
+      } catch {
+        // Skip non-JSON lines (stderr output, etc.)
+      }
+    });
 
-      proc.stderr?.on("data", (_data: Buffer) => {
-        // Stderr is for logging, not protocol messages
-      });
+    proc.stderr?.on("data", (_data: Buffer) => {
+      // Stderr is for logging, not protocol messages
+    });
 
-      proc.on("error", (error) => {
-        connected = false;
+    proc.on("error", (error) => {
+      connected = false;
+      for (const [, pending] of pendingRequests) {
+        pending.reject(
+          new Error(`MCP process error: ${error.message}`),
+        );
+      }
+      pendingRequests.clear();
+    });
+
+    proc.on("exit", (code) => {
+      const wasConnected = connected;
+      connected = false;
+      if (code !== 0 && code !== null) {
         for (const [, pending] of pendingRequests) {
           pending.reject(
-            new Error(`MCP process error: ${error.message}`),
+            new Error(`MCP process exited with code ${code}`),
           );
         }
         pendingRequests.clear();
+      }
+      // v3.6.0: Auto-restart on unexpected exit (when we were connected).
+      if (wasConnected && code !== 0 && code !== null) {
+        scheduleReconnect();
+      }
+    });
+
+    try {
+      const initResponse = await sendRequest("initialize", {
+        protocolVersion: "2024-11-05",
+        capabilities: {},
+        clientInfo: {
+          name: "zerox-agent",
+          version: "1.0.0",
+        },
       });
 
-      proc.on("exit", (code) => {
-        connected = false;
-        if (code !== 0 && code !== null) {
-          for (const [, pending] of pendingRequests) {
-            pending.reject(
-              new Error(`MCP process exited with code ${code}`),
-            );
-          }
-          pendingRequests.clear();
-        }
-      });
+      if (initResponse.error) {
+        throw new Error(
+          `MCP initialize failed: ${initResponse.error.message}`,
+        );
+      }
 
+      sendNotification("notifications/initialized");
+      connected = true;
+    } catch (error) {
+      proc.kill();
+      childProcess = null;
+      throw error;
+    }
+  }
+
+  return {
+    async connect() {
+      if (connected) return;
+      // v3.6.0: Guard against concurrent connect() calls (manual + auto-restart
+      // race). If a connection attempt is already in-flight, wait for it.
+      if (connectingPromise) {
+        await connectingPromise;
+        return;
+      }
+
+      manuallyDisconnected = false;
+      connectingPromise = connectInternal().then(() => {
+        restartAttempts = 0;
+        connectingPromise = null;
+      });
       try {
-        const initResponse = await sendRequest("initialize", {
-          protocolVersion: "2024-11-05",
-          capabilities: {},
-          clientInfo: {
-            name: "zerox-agent",
-            version: "1.0.0",
-          },
-        });
-
-        if (initResponse.error) {
-          throw new Error(
-            `MCP initialize failed: ${initResponse.error.message}`,
-          );
-        }
-
-        sendNotification("notifications/initialized");
-        connected = true;
-      } catch (error) {
-        proc.kill();
-        childProcess = null;
-        throw error;
+        await connectingPromise;
+      } catch {
+        connectingPromise = null;
+        throw new Error(`MCP server "${config.name}" failed to connect.`);
       }
     },
 
     disconnect() {
+      manuallyDisconnected = true;
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
       connected = false;
 
       for (const [, pending] of pendingRequests) {

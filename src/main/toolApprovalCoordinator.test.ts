@@ -45,10 +45,10 @@ describe("tool approval coordinator", () => {
     });
   });
 
-  it("auto-approves requests and emits critical risk decisions for monitoring", async () => {
+  it("auto-approves read-only tool requests and emits risk decisions for monitoring", async () => {
     const sent: Array<{ channel: string; payload: unknown }> = [];
     const coordinator = createToolApprovalCoordinator({
-      createId: () => "approval_shell",
+      createId: () => "approval_read",
       now: () => "2026-06-14T12:00:00.000Z",
       sendToRenderers(channel, payload) {
         sent.push({ channel, payload });
@@ -59,33 +59,29 @@ describe("tool approval coordinator", () => {
     await expect(
       coordinator.requestUserApproval({
         ...createRequest(),
-        deniedReason: "shell_exec command 不匹配已授权模板。",
+        deniedReason: "file_read 路径不在允许列表内。",
         request: {
-          toolName: "shell_exec",
-          args: { command: "rm -rf /tmp/report-cache" },
+          toolName: "file_read",
+          args: { path: "/tmp/report.txt" },
         },
       }),
     ).resolves.toEqual({
       approved: true,
-      reason: "自动授权已开启，已同意本次 shell_exec。",
+      reason: "自动授权已开启，已同意本次 file_read (只读工具)。",
       automatic: true,
     });
 
     expect(sent).toContainEqual({
       channel: "toolApproval:decision",
       payload: expect.objectContaining({
-        id: "approval_shell",
+        id: "approval_read",
         approved: true,
         automatic: true,
-        risk: {
-          level: "critical",
-          reason: "shell_exec can mutate the local machine outside normal app flows.",
-        },
       }),
     });
   });
 
-  it("approves a pending in-app request when auto approval is enabled", async () => {
+  it("approves a pending read-only request when auto approval is enabled", async () => {
     const sent: Array<{ channel: string; payload: unknown }> = [];
     const coordinator = createToolApprovalCoordinator({
       createId: () => "approval_waiting",
@@ -95,7 +91,14 @@ describe("tool approval coordinator", () => {
       },
     });
 
-    const approval = coordinator.requestUserApproval(createRequest());
+    // Use a read-only tool so it gets auto-approved when auto-approval is enabled.
+    const approval = coordinator.requestUserApproval({
+      ...createRequest(),
+      request: {
+        toolName: "file_list",
+        args: { path: "/tmp" },
+      },
+    });
 
     expect(sent).toContainEqual({
       channel: "toolApproval:request",
@@ -106,7 +109,7 @@ describe("tool approval coordinator", () => {
 
     await expect(approval).resolves.toEqual({
       approved: true,
-      reason: "自动授权已开启，已同意本次 web_fetch。",
+      reason: "自动授权已开启，已同意本次 file_list (只读工具)。",
       automatic: true,
     });
     expect(sent).toContainEqual({

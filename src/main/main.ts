@@ -417,12 +417,12 @@ function startTaskScheduler() {
     return;
   }
 
-  void container.taskSchedulerService().runDueTasks().catch(() => {
-    // Background task scheduling is best-effort; run logs surface failures.
+  void container.taskSchedulerService().runDueTasks().catch((error: unknown) => {
+    console.warn("[lifecycle] taskScheduler initial runDueTasks failed:", error);
   });
   taskSchedulerTimer = setInterval(() => {
-    void container.taskSchedulerService().runDueTasks().catch(() => {
-      // Background task scheduling is best-effort; run logs surface failures.
+    void container.taskSchedulerService().runDueTasks().catch((error: unknown) => {
+      console.warn("[lifecycle] taskScheduler runDueTasks failed:", error);
     });
   }, taskSchedulerIntervalMs);
   taskSchedulerTimer.unref?.();
@@ -443,8 +443,8 @@ function startMemoryMaintenanceScheduler() {
   }
 
   memoryMaintenanceTimer = setInterval(() => {
-    void container.memoryStore().runMaintenance().catch(() => {
-      // Background maintenance is best-effort; manual runs surface errors in UI.
+    void container.memoryStore().runMaintenance().catch((error: unknown) => {
+      console.warn("[lifecycle] memoryMaintenance failed:", error);
     });
   }, memoryMaintenanceIntervalMs);
   memoryMaintenanceTimer.unref?.();

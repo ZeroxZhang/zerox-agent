@@ -23,9 +23,20 @@ export interface ToolAuditLogOptions {
   storage?: Storage;
 }
 
+// v3.6.0: Shared shadowWriteError with failure counter (S2-22, QA-03).
+let shadowWriteFailureCount = 0;
 function shadowWriteError(error: unknown): void {
+  shadowWriteFailureCount += 1;
   // eslint-disable-next-line no-console
-  console.warn("[storage] dual-write JSON shadow write failed:", String(error));
+  console.warn(
+    `[storage] dual-write JSON shadow write failed (count=${shadowWriteFailureCount}):`,
+    String(error),
+  );
+}
+
+/** Return the total number of shadow write failures observed in this process. */
+export function getShadowWriteFailureCount(): number {
+  return shadowWriteFailureCount;
 }
 
 export function createToolAuditLog(options: ToolAuditLogOptions): ToolAuditLog {
@@ -34,8 +45,29 @@ export function createToolAuditLog(options: ToolAuditLogOptions): ToolAuditLog {
   const createId = options.createId ?? randomUUID;
   const now = options.now ?? (() => new Date());
 
+  // v3.6.0: Maximum length for sensitive fields in audit log (SEC-18).
+  const MAX_AUDIT_FIELD_LENGTH = 200;
+
   function buildEvent(input: ToolAuditEventInput): ToolAuditEvent {
-    return { ...input, id: createId(), createdAt: now().toISOString() };
+    // v3.6.0: Truncate sensitive fields (command, content, url) in tool
+    // audit log to prevent secrets or large payloads from being stored in
+    // plaintext audit trails (SEC-18).
+    const event = { ...input, id: createId(), createdAt: now().toISOString() };
+    if (event.request) {
+      const safeArgs: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(event.request.args ?? {})) {
+        if (key === "command" || key === "content" || key === "url") {
+          const str = String(value);
+          safeArgs[key] = str.length > MAX_AUDIT_FIELD_LENGTH
+            ? `${str.slice(0, MAX_AUDIT_FIELD_LENGTH)}...[truncated]`
+            : str;
+        } else {
+          safeArgs[key] = value;
+        }
+      }
+      event.request = { ...event.request, args: safeArgs };
+    }
+    return event;
   }
 
   // --- legacy JSON implementation (unchanged) ---

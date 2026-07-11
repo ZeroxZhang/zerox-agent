@@ -111,12 +111,32 @@ export function createAgentToolExecutor(options?: {
         return guard;
       }
 
+      // v3.6.0: Per-tool timeout wrapper (CORE-19, S2-20). Shell commands
+      // have their own timeout via executeShellCommand; all other tools
+      // default to 2 minutes.
+      const toolTimeoutMs = request.toolName === "shell_exec"
+        ? 0 // handled inside executeShellCommand
+        : 120_000;
+
       if (request.toolName === "shell_exec") {
         return executeShellCommand(
           request.args,
           executionOptions?.runContext,
           executionOptions?.signal,
         );
+      }
+
+      if (toolTimeoutMs > 0) {
+        const result = await Promise.race([
+          registry.execute(request.toolName, request.args, executionOptions),
+          new Promise<AgentToolExecutionResult>((_, reject) =>
+            setTimeout(
+              () => reject(new Error(`${request.toolName} timed out after ${toolTimeoutMs}ms.`)),
+              toolTimeoutMs,
+            ),
+          ),
+        ]);
+        return result;
       }
 
       return registry.execute(request.toolName, request.args, executionOptions);

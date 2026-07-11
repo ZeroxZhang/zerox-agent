@@ -101,29 +101,29 @@ describe("agent JSON protocol", () => {
     });
   });
 
-  it("serializes tool observations as JSON for the next model turn", () => {
-    expect(
-      serializeToolObservation({
-        tool: "file_read",
-        ok: true,
-        result: { content: "hello" },
-      }),
-    ).toBe(
-      `{"type":"tool_result","tool":"file_read","ok":true,"result":{"content":"hello"}}`,
-    );
+  it("serializes tool observations as JSON inside XML fences for the next model turn", () => {
+    const result = serializeToolObservation({
+      tool: "file_read",
+      ok: true,
+      result: { content: "hello" },
+    });
+    expect(result).toContain(`<tool_result tool="file_read" ok="true">`);
+    expect(result).toContain(`"type":"tool_result"`);
+    expect(result).toContain(`"content":"hello"`);
+    expect(result).toContain(`</tool_result>`);
   });
 
-  it("serializes tool observations with toolCallId", () => {
-    expect(
-      serializeToolObservation({
-        tool: "file_read",
-        ok: false,
-        error: "not found",
-        toolCallId: "call_abc",
-      }),
-    ).toBe(
-      `{"type":"tool_result","tool":"file_read","ok":false,"error":"not found","tool_call_id":"call_abc"}`,
-    );
+  it("serializes tool observations with toolCallId in XML fences", () => {
+    const result = serializeToolObservation({
+      tool: "file_read",
+      ok: false,
+      error: "not found",
+      toolCallId: "call_abc",
+    });
+    expect(result).toContain(`<tool_result tool="file_read" ok="false">`);
+    expect(result).toContain(`"error":"not found"`);
+    expect(result).toContain(`"tool_call_id":"call_abc"`);
+    expect(result).toContain(`</tool_result>`);
   });
 
   it("builds a system prompt that names the available tools and working principles", () => {

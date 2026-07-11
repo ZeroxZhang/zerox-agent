@@ -15,6 +15,21 @@ export type PermissionEvaluation = {
 // (`<>`) so it matches the shared toolPermissions regex.
 const LEGACY_SHELL_CONTROL_OPERATOR = /(;|&&|\|\||`|\$\(|\||[<>])/;
 
+// v3.6.0: macOS-sensitive commands that must never be executed via shell_exec.
+// These commands can bypass security controls, escalate privileges, or
+// automate system interactions beyond the agent's intended scope.
+const DENY_LISTED_COMMANDS = new Set([
+  "osascript",
+  "security",
+  "shortcuts",
+  "automator",
+  "systemsetup",
+  "tccutil",
+  "spctl",
+  "csrutil",
+  "nvram",
+]);
+
 const COMMAND_ARITY: Record<string, number> = {
   git: 2,
   npm: 2,
@@ -28,6 +43,27 @@ const COMMAND_ARITY: Record<string, number> = {
   "yarn run": 3,
   rm: 1,
 };
+
+/** Check whether a shell command references a deny-listed executable. */
+export function isCommandDenyListed(fullCommand: string): string | null {
+  // Normalize: if command is an array, join with space (handles array coercion).
+  const normalized = Array.isArray(fullCommand)
+    ? (fullCommand as unknown[]).map(String).join(" ")
+    : String(fullCommand);
+  const tokens = tokenizeShellCommand(normalized);
+  if (tokens.length === 0) return null;
+
+  // v3.6.0: Check ALL tokens, not just the first, to catch bypasses like
+  // `sudo osascript` or `/bin/sh -c osascript`. Also detect deny-listed
+  // base names within full paths (e.g. /usr/bin/osascript).
+  for (const token of tokens) {
+    const baseName = token.split("/").pop()?.toLowerCase() ?? "";
+    if (DENY_LISTED_COMMANDS.has(baseName)) {
+      return baseName;
+    }
+  }
+  return null;
+}
 
 export function evaluatePermission(
   request: ToolCallRequest,

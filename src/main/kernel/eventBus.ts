@@ -2,11 +2,18 @@ import type { KernelEvent } from "../../shared/kernelContract";
 
 export type KernelEventHandler = (event: KernelEvent) => void;
 
+// v3.6.0: Maximum number of events retained in the history buffer (DATA-20).
+const MAX_EVENT_HISTORY = 1000;
+
 export class KernelEventBus {
   private readonly handlers = new Set<KernelEventHandler>();
   private readonly events: KernelEvent[] = [];
 
   publish(event: KernelEvent): void {
+    // v3.6.0: Cap history to ring buffer; discard oldest when full (DATA-20, CONC-07).
+    if (this.events.length >= MAX_EVENT_HISTORY) {
+      this.events.shift();
+    }
     this.events.push(event);
 
     for (const handler of [...this.handlers]) {

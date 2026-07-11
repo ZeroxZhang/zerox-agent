@@ -6,6 +6,11 @@ import {
 } from "./toolObservationOffload";
 import type { ToolResultOffloadStore } from "./toolResultOffloadStore";
 
+/** v3.6.0: Extract JSON content from XML-fenced tool result wrapper. */
+function innerToolResultJson(content: string): string {
+  return content.replace(/^<tool_result[^>]*>\n?/, "").replace(/\n?<\/tool_result>\s*$/, "");
+}
+
 describe("tool observation offload serializer", () => {
   it("preserves small observations in the existing format", async () => {
     const observation = {
@@ -50,7 +55,7 @@ describe("tool observation offload serializer", () => {
       requestId: "request_1",
       workspaceRunId: "workspace_run_1",
     });
-    const compact = JSON.parse(serialized.content) as Record<string, unknown>;
+    const compact = JSON.parse(innerToolResultJson(serialized.content)) as Record<string, unknown>;
 
     expect(serialized.offloaded).toBe(true);
     expect(serialized.resultRef).toBe("tool-result-refs/ref_1.json");
@@ -117,7 +122,7 @@ describe("tool observation offload serializer", () => {
       thresholdChars: 120,
       runId: "run_chrome",
     });
-    const compact = JSON.parse(serialized.content) as {
+    const compact = JSON.parse(innerToolResultJson(serialized.content)) as {
       result_preview: { answerPreview?: string };
     };
 

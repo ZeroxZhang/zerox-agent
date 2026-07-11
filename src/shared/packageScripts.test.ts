@@ -8,7 +8,7 @@ type PackageJson = {
 };
 
 describe("package scripts", () => {
-  it("sets release metadata to v3.4.0", () => {
+  it("sets release metadata to v3.6.0", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -16,12 +16,14 @@ describe("package scripts", () => {
       readFileSync(path.join(process.cwd(), "package-lock.json"), "utf8"),
     ) as { version?: string; packages?: Record<string, { version?: string }> };
 
-    expect(packageJson.version).toBe("3.4.0");
-    expect(packageLock.version).toBe("3.4.0");
-    expect(packageLock.packages?.[""]?.version).toBe("3.4.0");
+    expect(packageJson.version).toBe("3.6.0");
+    // package-lock.json is updated by `npm install`; check it matches the
+    // declared package version once dependencies are installed.
+    expect(packageLock.version).toBe("3.6.0");
+    expect(packageLock.packages?.[""]?.version).toBe("3.6.0");
   });
 
-  it("keeps release gates tracked through v3.4.0", () => {
+  it("keeps release gates tracked through v3.6.0", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -83,7 +85,7 @@ describe("package scripts", () => {
       (feature) => feature.id === "P28-v3.0.0-execution-context-spine",
     );
 
-    expect(packageJson.version).toBe("3.4.0");
+    expect(packageJson.version).toBe("3.6.0");
     expect(
       openFeatureIds.every(
         (featureId) =>

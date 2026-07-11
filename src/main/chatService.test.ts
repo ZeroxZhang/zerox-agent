@@ -341,9 +341,8 @@ describe("chat service", () => {
         content: expect.stringContaining("你是一个本地优先的桌面 Agent"),
       }),
       {
-        role: "system",
-        content:
-          "相关记忆：\n- 下载目录整理偏好：用户希望下载目录报告保存为 Markdown。",
+        role: "user",
+        content: expect.stringContaining("<memory_context>"),
       },
       { role: "assistant", content: "我已准备好。" },
       { role: "user", content: "帮我整理下载文件夹" },

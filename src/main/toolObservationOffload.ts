@@ -81,7 +81,10 @@ function serializeCompactObservation(
   originalChars: number,
   ref: ToolResultOffloadRef,
 ): string {
-  return JSON.stringify({
+  // v3.6.0: Use the same XML-fence format as serializeToolObservation so the
+  // model sees consistent structural separation regardless of result size
+  // (SEC-12, SEC-11).
+  const inner = JSON.stringify({
     type: "tool_result",
     tool: observation.tool,
     ok: true,
@@ -92,6 +95,7 @@ function serializeCompactObservation(
     original_chars: originalChars,
     ...(observation.toolCallId ? { tool_call_id: observation.toolCallId } : {}),
   });
+  return `<tool_result tool="${observation.tool}" ok="true">\n${inner}\n</tool_result>`;
 }
 
 function summarizeResult(

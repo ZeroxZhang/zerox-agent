@@ -86,7 +86,10 @@ function shouldUseCompleteForProviderToolStreaming(
   provider: LLMProvider,
   request: CompleteRequest,
 ): boolean {
-  return provider.id !== "openai-compatible" && Boolean(request.tools?.length);
+  // v3.6.0: Use capabilities.streamingToolCalls instead of provider identity
+  // check (NET-08). Providers that don't support native streaming tool calls
+  // fall back to complete() when tools are present.
+  return !provider.capabilities.streamingToolCalls && Boolean(request.tools?.length);
 }
 
 async function* completeResponseToStreamEvents(

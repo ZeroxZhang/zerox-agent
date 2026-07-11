@@ -11,6 +11,11 @@ import type {
   ChatCompletionResponse,
   ChatMessage,
 } from "./openAiCompatibleClient";
+
+/** v3.6.0: Extract JSON content from XML-fenced tool result wrapper. */
+function innerToolResultJson(content: string): string {
+  return content.replace(/^<tool_result[^>]*>\n?/, "").replace(/\n?<\/tool_result>\s*$/, "");
+}
 import type { ScheduledTaskStore } from "./taskStore";
 import type {
   ToolResultOffloadStore,
@@ -157,7 +162,7 @@ describe("agent runtime engine", () => {
       (message) => message.role === "tool",
     );
     expect(toolMessage?.content).not.toContain(largeContent);
-    expect(JSON.parse(toolMessage?.content ?? "{}")).toEqual(
+    expect(JSON.parse(innerToolResultJson(toolMessage?.content ?? "{}"))).toEqual(
       expect.objectContaining({
         type: "tool_result",
         tool: "file_read",
@@ -260,7 +265,7 @@ describe("agent runtime engine", () => {
       (message) =>
         message.role === "tool" && message.tool_call_id === "call_ref",
     );
-    expect(JSON.parse(refReadToolMessage?.content ?? "{}")).toMatchObject({
+    expect(JSON.parse(innerToolResultJson(refReadToolMessage?.content ?? "{}"))).toMatchObject({
       tool: "tool_result_read",
       ok: true,
     });

@@ -457,7 +457,7 @@ describe("app container goal drafts", () => {
     });
   });
 
-  it("rejects globally automatic approval for untrusted git worktree creation", async () => {
+  it("requires explicit approval for git worktree creation even with auto-approval enabled", async () => {
     const coordinator = createToolApprovalCoordinator({
       sendToRenderers() {},
       createId: () => "approval_auto_worktree",
@@ -470,18 +470,23 @@ describe("app container goal drafts", () => {
     const repositoryRoot = path.join(tempDir, "untrusted-repo");
     await createSeedGitRepository(repositoryRoot);
 
-    await expect(
-      container.requestGitWorktreeAgentWorkspace({
-        name: "Auto-approved worktree",
-        repositoryRoot,
-        branch: "codex/auto-approved-worktree",
-      }),
-    ).rejects.toThrow(/explicit user approval/i);
+    // git_worktree_add is NOT in the read-only auto-approval whitelist,
+    // so it goes to pending state even with auto-approval enabled.
+    const worktreePromise = container.requestGitWorktreeAgentWorkspace({
+      name: "Auto-approved worktree",
+      repositoryRoot,
+      branch: "codex/auto-approved-worktree",
+    });
 
-    await expect(container.agentWorkspaceStore().list()).resolves.toEqual([]);
-    await expect(listGitBranches(repositoryRoot)).resolves.not.toContain(
-      "codex/auto-approved-worktree",
-    );
+    // Explicitly approve the pending request
+    const resolved = coordinator.resolveApproval({
+      id: "approval_auto_worktree",
+      approved: true,
+    });
+    expect(resolved).toBe(true);
+
+    // With explicit (non-automatic) approval, the worktree creation should succeed.
+    await expect(worktreePromise).resolves.toBeDefined();
   });
 
   it("syncs background goal status changes into chat session summaries before notifying listeners", async () => {

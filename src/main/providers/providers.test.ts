@@ -362,7 +362,9 @@ describe("ProviderChatClient adapter", () => {
     let streamCalls = 0;
     const provider: LLMProvider = {
       id: "anthropic",
-      capabilities: { toolUse: true, thinking: true, vision: false, promptCache: true, streamingToolCalls: true },
+      // v3.6.0: streamingToolCalls: false — this test exercises the complete()
+      // fallback for providers that DON'T support native streaming tool calls.
+      capabilities: { toolUse: true, thinking: true, vision: false, promptCache: true, streamingToolCalls: false },
       async complete() {
         completeCalls += 1;
         return {

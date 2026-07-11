@@ -13,6 +13,11 @@ import type {
   ToolResultOffloadStore,
   ToolResultOffloadWriteInput,
 } from "./toolResultOffloadStore";
+
+/** v3.6.0: Extract JSON content from XML-fenced tool result wrapper. */
+function innerToolResultJson(content: string): string {
+  return content.replace(/^<tool_result[^>]*>\n?/, "").replace(/\n?<\/tool_result>\s*$/, "");
+}
 import type { ToolAuthorizationService } from "./toolAuthorizationService";
 import { createDynamicToolRegistry } from "./dynamicToolRegistry";
 import type { ToolCallRequest } from "../shared/toolPermissions";
@@ -265,7 +270,9 @@ describe("agent loop", () => {
         );
         expect(toolMessage).toBeDefined();
         expect(toolMessage?.content).not.toContain(largeContent);
-        expect(JSON.parse(toolMessage?.content ?? "{}")).toEqual(
+        // v3.6.0: content is XML-fenced; extract inner JSON for assertion
+        const innerJson = innerToolResultJson(toolMessage?.content ?? "{}");
+        expect(JSON.parse(innerJson)).toEqual(
           expect.objectContaining({
             type: "tool_result",
             tool: "file_list",
