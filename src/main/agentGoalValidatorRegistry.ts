@@ -175,6 +175,9 @@ function validatorContext(
   context: AcceptanceContext,
   signal: AbortSignal,
 ): AcceptanceValidatorContext {
+  const throwIfAborted = () => {
+    if (signal.aborted) throw abortError(signal.reason);
+  };
   return {
     runId: context.runId,
     goalId: context.goalId,
@@ -183,8 +186,28 @@ function validatorContext(
     extraReadRoots: context.extraReadRoots,
     extraWriteRoots: context.extraWriteRoots,
     locationEnv: context.locationEnv,
-    toolExecutor: context.toolExecutor,
-    trajectoryStore: context.trajectoryStore,
+    toolExecutor: {
+      async execute(request, executionOptions) {
+        throwIfAborted();
+        const result = await context.toolExecutor.execute(request, {
+          ...executionOptions,
+          signal,
+        });
+        throwIfAborted();
+        return result;
+      },
+    },
+    trajectoryStore: {
+      async append(runId, event, appendOptions) {
+        throwIfAborted();
+        const result = await context.trajectoryStore.append(runId, event, {
+          ...appendOptions,
+          signal,
+        });
+        throwIfAborted();
+        return result;
+      },
+    },
     artifacts: context.artifacts,
     transcriptMessages: context.transcriptMessages,
     signal,

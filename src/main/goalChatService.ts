@@ -519,6 +519,14 @@ export function createGoalChatService(options: {
       if (goal.status === "achieved" || goal.status === "canceled") {
         throw new Error(`Cannot replan a terminal ${goal.status} goal.`);
       }
+      if (
+        goal.status === "stopped_blocked" &&
+        goal.stopReason === "acceptance_integrity_failed"
+      ) {
+        throw new Error(
+          "Cannot replan a goal whose acceptance certificate failed integrity verification.",
+        );
+      }
 
       const replanningGoal = structuredClone(goal);
       const milestones = await options.planner.replan(
@@ -556,6 +564,15 @@ export function createGoalChatService(options: {
       const goal = await options.goalStore.get(goalId);
       if (!goal) {
         throw new Error(`Goal "${goalId}" was not found.`);
+      }
+
+      if (
+        goal.status === "stopped_blocked" &&
+        goal.stopReason === "acceptance_integrity_failed"
+      ) {
+        throw new Error(
+          "Cannot retry a goal whose acceptance certificate failed integrity verification.",
+        );
       }
 
       if (

@@ -1042,6 +1042,49 @@ describe("goal chat service", () => {
     },
   );
 
+  it("rejects retry and replan for an acceptance-integrity failure", async () => {
+    const blocked = createGoal({
+      status: "stopped_blocked",
+      stopReason: "acceptance_integrity_failed",
+      acceptanceProtocolVersion: 2,
+      acceptanceState: {
+        protocolVersion: 2,
+        phase: "blocked",
+        attempt: 0,
+        recentFailures: [],
+      },
+    });
+    const savedGoals: Goal[] = [];
+    let plannerCalls = 0;
+    let resumeCalls = 0;
+    const service = createGoalChatService({
+      controller: createController({
+        async resume() {
+          resumeCalls += 1;
+          return blocked;
+        },
+      }),
+      goalStore: createGoalStore({ existingGoal: blocked, savedGoals }),
+      planner: {
+        async plan() {
+          throw new Error("unexpected plan");
+        },
+        async replan() {
+          plannerCalls += 1;
+          return [];
+        },
+      },
+    });
+
+    await expect(service.retry(blocked.id)).rejects.toThrow(/integrity/i);
+    await expect(service.replan(blocked.id, "try again")).rejects.toThrow(
+      /integrity/i,
+    );
+    expect(savedGoals).toEqual([]);
+    expect(resumeCalls).toBe(0);
+    expect(plannerCalls).toBe(0);
+  });
+
   it("rejects an unchanged impossible retry without reviving or resuming it", async () => {
     const blocked = createBlockedGoal("goal_impossible", "impossible");
     const savedGoals: Goal[] = [];

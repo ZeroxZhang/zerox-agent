@@ -133,7 +133,9 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
               <span>恢复路径</span>
               <p>{getRecoveryHint(props.summary.status)}</p>
               <div className="goal-review-actions">
-                {props.summary.status === "stopped_blocked" && props.onRetry ? (
+                {props.summary.status === "stopped_blocked" &&
+                progress.recoveryActions.includes("retry_acceptance") &&
+                props.onRetry ? (
                   <button
                     type="button"
                     className="goal-primary-action"
@@ -143,7 +145,9 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
                     重试验收
                   </button>
                 ) : null}
-                {props.summary.status === "stopped_blocked" && props.onReplan ? (
+                {props.summary.status === "stopped_blocked" &&
+                progress.recoveryActions.includes("adjust_plan") &&
+                props.onReplan ? (
                   <button
                     type="button"
                     aria-label="调整计划"
@@ -182,7 +186,9 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
                     重试目标
                   </button>
                 ) : null}
-                {props.onCancel ? (
+                {props.onCancel &&
+                (props.summary.status !== "stopped_blocked" ||
+                  progress.recoveryActions.includes("terminate")) ? (
                   <button
                     type="button"
                     className="goal-danger-action"

@@ -959,6 +959,12 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(goalDetailDrawerSource).toContain("终止目标");
     expect(goalDetailDrawerSource).toContain("查看验收证书");
     expect(goalDetailDrawerSource).toContain("progress.certificate");
+    expect(goalDetailDrawerSource).toContain(
+      'progress.recoveryActions.includes("retry_acceptance")',
+    );
+    expect(goalDetailDrawerSource).toContain(
+      'progress.recoveryActions.includes("adjust_plan")',
+    );
     expect(goalDetailDrawerSource).toContain("shortCertificateHash");
     expect(goalDetailDrawerSource).toContain("goal-certificate-hash");
     expect(goalDetailDrawerSource).toContain("<code>{artifact.path}</code>");
@@ -966,6 +972,10 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(goalStatusStripSource).toContain('case "stopped_blocked"');
     expect(goalStatusStripSource).toContain("progress.acceptance");
     expect(chatPanelSource).toContain("retryGoal(activeGoal.id)");
+    expect(chatPanelSource).toContain(
+      'const retryStarted = result.ok && result.goal?.status === "executing"',
+    );
+    expect(chatPanelSource).toContain("重试未启动；目标仍处于受阻状态");
     expect(chatPanelSource).toContain("replanGoal(");
     expect(chatPanelSource).toContain(
       'const remainsBlocked = result.ok && result.goal?.status === "stopped_blocked"',

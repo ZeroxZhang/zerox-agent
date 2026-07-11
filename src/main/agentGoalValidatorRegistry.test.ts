@@ -63,8 +63,8 @@ describe("agent goal validator registry", () => {
       goalId: governedContext.goalId,
       workspacePath: governedContext.workspacePath,
     });
-    expect(receivedContext?.toolExecutor).toBe(governedContext.toolExecutor);
-    expect(receivedContext?.trajectoryStore).toBe(
+    expect(receivedContext?.toolExecutor).not.toBe(governedContext.toolExecutor);
+    expect(receivedContext?.trajectoryStore).not.toBe(
       governedContext.trajectoryStore,
     );
     expect(receivedContext?.extraReadRoots).toBe(governedContext.extraReadRoots);
@@ -232,6 +232,82 @@ describe("agent goal validator registry", () => {
     finishLateWork?.();
     await Promise.resolve();
     expect(lateWrites).toBe(0);
+  });
+
+  it("binds custom-validator tool and trajectory side effects to its deadline", async () => {
+    vi.useFakeTimers();
+    const governed = context();
+    let toolSignal: AbortSignal | undefined;
+    let trajectorySignal: AbortSignal | undefined;
+    let finishTool: (() => void) | undefined;
+    let finishTrajectory: (() => void) | undefined;
+    let lateToolSideEffects = 0;
+    let lateTrajectoryEvents = 0;
+    governed.toolExecutor = {
+      execute(_request, options) {
+        toolSignal = options?.signal;
+        return new Promise((resolve, reject) => {
+          options?.signal?.addEventListener(
+            "abort",
+            () => reject(options.signal?.reason),
+            { once: true },
+          );
+          finishTool = () => {
+            if (!options?.signal?.aborted) lateToolSideEffects += 1;
+            resolve({ ok: true } as never);
+          };
+        });
+      },
+    };
+    governed.trajectoryStore = {
+      append(_runId, event, options) {
+        trajectorySignal = options?.signal;
+        return new Promise((resolve, reject) => {
+          options?.signal?.addEventListener(
+            "abort",
+            () => reject(options.signal?.reason),
+            { once: true },
+          );
+          finishTrajectory = () => {
+            if (!options?.signal?.aborted) lateTrajectoryEvents += 1;
+            resolve(event);
+          };
+        });
+      },
+    };
+    const selectedCheck = check("validator:local/side-effects");
+    const registry = createAgentGoalValidatorRegistry({
+      timeoutMs: 25,
+      validators: [{
+        kind: selectedCheck.kind,
+        async evaluate({ context: validatorContext }) {
+          await Promise.all([
+            validatorContext.toolExecutor.execute({
+              id: "call_validator_side_effect",
+              toolName: "validator_probe",
+              args: {},
+            } as never),
+            validatorContext.trajectoryStore.append(
+              validatorContext.runId,
+              { type: "acceptance_checked" } as never,
+            ),
+          ]);
+          return passedResult(selectedCheck);
+        },
+      }],
+    });
+
+    const evaluation = registry.evaluate(selectedCheck, governed);
+    await vi.advanceTimersByTimeAsync(25);
+
+    await expect(evaluation).resolves.toMatchObject({ code: "validator_timeout" });
+    expect(toolSignal?.aborted).toBe(true);
+    expect(trajectorySignal?.aborted).toBe(true);
+    finishTool?.();
+    finishTrajectory?.();
+    await Promise.resolve();
+    expect(lateToolSideEffects).toBe(0);
+    expect(lateTrajectoryEvents).toBe(0);
   });
 
   it("links parent cancellation into the restricted validator signal", async () => {

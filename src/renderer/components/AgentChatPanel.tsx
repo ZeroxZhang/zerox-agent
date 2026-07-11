@@ -1402,15 +1402,28 @@ export function AgentChatPanel({
     }
 
     const result = await window.buildingAgent.retryGoal(activeGoal.id);
+    const retryStarted = result.ok && result.goal?.status === "executing";
     if (result.ok && result.goal) {
       applyGoalSummaryToSessions(result.goal);
-      setStatus({ kind: "working", message: "目标已恢复执行" });
-      setWorkPhase("tool");
+      const goalUiState = getGoalUiSyncState(result.goal.status);
+      setStatus({
+        kind: goalUiState.statusKind,
+        message: retryStarted ? "目标已恢复执行" : "目标仍未恢复执行",
+      });
+      setWorkPhase(goalUiState.workPhase);
+      setTaskActivity(
+        buildGoalTaskActivity({
+          status: result.goal.status,
+          description: result.goal.description,
+        }),
+      );
     }
     appendMessage({
       role: "assistant",
       content: result.ok
-        ? "已重试目标，继续执行。"
+        ? retryStarted
+          ? "已重试目标，继续执行。"
+          : "重试未启动；目标仍处于受阻状态。"
         : `重试目标失败：${result.message}`,
     });
     if (result.ok && result.goal) {
