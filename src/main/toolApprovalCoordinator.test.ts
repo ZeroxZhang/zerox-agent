@@ -23,8 +23,12 @@ describe("tool approval coordinator", () => {
           taskName: "Goal milestone",
           deniedReason: "web_fetch URL 域名不在允许列表内。",
           risk: {
-            level: "high",
-            reason: "web_fetch can transmit browsing context to an external host.",
+            level: "normal",
+            reason:
+              "The operation is not in the Policy B forced-confirmation class.",
+            category: "none",
+            requiresConfirmation: false,
+            affectedTargets: [],
           },
           argsSummary: {
             url: "https://example.com/source",
