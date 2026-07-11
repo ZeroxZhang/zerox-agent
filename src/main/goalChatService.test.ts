@@ -116,7 +116,7 @@ describe("goal chat service", () => {
     );
   });
 
-  it("routes small deterministic quick-action goals to review without planning milestones", async () => {
+  it("does not create a second review gate for quick-action goals", async () => {
     const savedGoals: Goal[] = [];
     const ledgerEvents: ProgressLedgerEvent[] = [];
     let plannerCalls = 0;
@@ -124,9 +124,19 @@ describe("goal chat service", () => {
       controller: createController(),
       goalStore: createGoalStore({ savedGoals, ledgerEvents }),
       planner: {
-        async plan() {
+        async plan(description, planOptions) {
           plannerCalls += 1;
-          throw new Error("Planner should not be called for quick actions.");
+          return [
+            {
+              id: "milestone_1",
+              description,
+              dependsOn: [],
+              successCriteria: planOptions.successCriteria,
+              state: "ready",
+              runIds: [],
+              attempts: 0,
+            },
+          ];
         },
         async replan() {
           throw new Error("Unexpected replan.");
@@ -142,30 +152,28 @@ describe("goal chat service", () => {
       description: "整理 /Users/bytedance/Downloads 这个文件夹",
     });
 
-    expect(plannerCalls).toBe(0);
+    expect(plannerCalls).toBe(1);
     expect(summary).toEqual({
       id: "goal_quick_action",
       description: "整理 /Users/bytedance/Downloads 这个文件夹",
-      status: "waiting_for_review",
+      status: "planning",
     });
     expect(savedGoals[0]).toMatchObject({
       id: "goal_quick_action",
-      status: "waiting_for_review",
+      status: "planning",
       milestones: [
         {
-          id: "milestone_quick_action_review",
-          description:
-            "Review local_file_organize quick-action plan before executing: 整理 /Users/bytedance/Downloads 这个文件夹",
-          state: "pending",
+          id: "milestone_1",
+          description: "整理 /Users/bytedance/Downloads 这个文件夹",
+          state: "ready",
         },
       ],
     });
     expect(ledgerEvents).toEqual([
       {
         at: "2026-06-12T08:00:00.000Z",
-        kind: "review_requested",
-        summary:
-          "Quick-action local_file_organize recommended before Goal Mode execution: files/deterministic/moves_data via file_inventory, file_move_plan, file_apply_moves, file_verify_moves.",
+        kind: "goal_planned",
+        summary: "Goal created from chat session chat_1.",
       },
     ]);
   });
@@ -941,7 +949,6 @@ describe("goal chat service", () => {
 
   it("aborts a background controller run when canceling the goal", async () => {
     let startedSignal: AbortSignal | undefined;
-    const activeChanges: Array<[string, boolean]> = [];
     const service = createGoalChatService({
       controller: createController({
         async start(_goalId, options) {
@@ -955,18 +962,13 @@ describe("goal chat service", () => {
       planner: createFakePlanner(),
       createId: () => "goal_release",
       now: () => "2026-06-12T08:00:00.000Z",
-      onActiveGoalChange(goalId, active) {
-        activeChanges.push([goalId, active]);
-      },
     });
 
     await service.start("goal_release");
     expect(startedSignal?.aborted).toBe(false);
-    expect(activeChanges).toContainEqual(["goal_release", true]);
 
     await service.cancel("goal_release");
     expect(startedSignal?.aborted).toBe(true);
-    expect(activeChanges.at(-1)).toEqual(["goal_release", false]);
   });
 
   it("aborts a background controller run when pausing the goal", async () => {

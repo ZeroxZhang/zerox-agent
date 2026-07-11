@@ -1,6 +1,7 @@
 import type { ToolCallRequest } from "./toolPermissions";
 import {
   classifyExtremeRisk,
+  type ExtremeRiskShellPlan,
   type ExtremeRiskCategory,
 } from "./extremeRiskPolicy";
 
@@ -51,8 +52,11 @@ export function classifyToolApprovalRisk(input: {
   taskName: string;
   deniedReason: string;
   request: ToolCallRequest;
+  shellPlan?: ExtremeRiskShellPlan;
 }): ToolApprovalRisk {
-  const extremeRisk = classifyExtremeRisk(input.request);
+  const extremeRisk = classifyExtremeRisk(input.request, {
+    ...(input.shellPlan ? { shellPlan: input.shellPlan } : {}),
+  });
   if (extremeRisk.requiresConfirmation) {
     return {
       level: "critical",

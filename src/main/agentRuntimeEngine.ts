@@ -641,7 +641,11 @@ export function createAgentRuntimeEngine(options: {
 
         await transitionInvocation({ status: "running" });
         const result = await options.toolExecutor.execute(
-          { toolName, args },
+          {
+            toolName,
+            ...(toolSource ? { source: toolSource } : {}),
+            args,
+          },
           {
             runContext: current.runContext,
             ...(signal ? { signal } : {}),

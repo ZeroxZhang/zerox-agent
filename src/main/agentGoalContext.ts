@@ -3,10 +3,7 @@ import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
 import type { ChatMessage } from "./openAiCompatibleClient";
 import type { ProgressLedgerEvent } from "./agentGoalStore";
 import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
-import {
-  createContextManager,
-  estimateMessageTokens,
-} from "./contextManager";
+import { estimateMessageTokens } from "./contextManager";
 import { buildGoalContinuityCheckpoint } from "../shared/agentGoalContinuity";
 
 export type AgentGoalContext = {
@@ -29,20 +26,11 @@ export function createAgentGoalContext(options: {
   nextSequence?: () => number;
   now?: () => string;
 } = {}): AgentGoalContext {
-  const contextManager = createContextManager({ recentTurnsToKeep: 2 });
-
   return {
     assemble(goal, history, tokenBudget) {
       const anchors = buildAnchorMessages(goal, options.ledgerEvents ?? []);
       const normalizedHistory = normalizeHistory(history);
-      const toolRefMessages = normalizedHistory.messages.filter((message) =>
-        Boolean(extractToolResultRef(message.content)),
-      );
-      const compressibleHistory = normalizedHistory.messages.filter(
-        (message) => !extractToolResultRef(message.content),
-      );
-      const preservedAnchors = [...anchors, ...toolRefMessages];
-      const combined = [...preservedAnchors, ...compressibleHistory];
+      const combined = [...anchors, ...normalizedHistory.messages];
       const beforeTokens = estimateMessageTokens(combined);
 
       if (beforeTokens <= tokenBudget) {
@@ -53,16 +41,10 @@ export function createAgentGoalContext(options: {
         };
       }
 
-      const anchorTokens = estimateMessageTokens(preservedAnchors);
-      const historyBudget = Math.max(60, tokenBudget - anchorTokens);
-      const compressedHistory = contextManager.compressMessages(
-        compressibleHistory,
-        historyBudget,
-      );
       const droppedRefs: string[] = [];
-      const messages = fitWithinBudget(
-        preservedAnchors,
-        compressedHistory,
+      const messages = fitAtomicHistoryWithinBudget(
+        anchors,
+        normalizedHistory.messages,
         tokenBudget,
         droppedRefs,
       );
@@ -81,6 +63,54 @@ export function createAgentGoalContext(options: {
       };
     },
   };
+}
+
+function fitAtomicHistoryWithinBudget(
+  anchors: ChatMessage[],
+  history: ChatMessage[],
+  tokenBudget: number,
+  droppedRefs: string[],
+): ChatMessage[] {
+  const groups = groupAtomicHistory(history);
+  while (
+    estimateMessageTokens([...anchors, ...groups.flat()]) > tokenBudget &&
+    groups.length > 0
+  ) {
+    const dropIndex = groups.findIndex(
+      (group) => !group.some((message) => Boolean(extractToolResultRef(message.content))),
+    );
+    if (dropIndex < 0) break;
+    const [removed] = groups.splice(dropIndex, 1);
+    if (removed) {
+      droppedRefs.push(
+        removed.map((message) => `${message.role}:${message.content.slice(0, 40)}`).join(" | "),
+      );
+    }
+  }
+  return [...anchors, ...groups.flat()];
+}
+
+function groupAtomicHistory(history: ChatMessage[]): ChatMessage[][] {
+  const groups: ChatMessage[][] = [];
+  for (let index = 0; index < history.length; index += 1) {
+    const message = history[index]!;
+    if (message.role !== "assistant" || !message.tool_calls?.length) {
+      groups.push([message]);
+      continue;
+    }
+    const ids = new Set(message.tool_calls.map((call) => call.id));
+    const group = [message];
+    while (
+      index + 1 < history.length &&
+      history[index + 1]?.role === "tool" &&
+      ids.has(history[index + 1]?.tool_call_id ?? "")
+    ) {
+      index += 1;
+      group.push(history[index]!);
+    }
+    groups.push(group);
+  }
+  return groups;
 }
 
 function buildAnchorMessages(
@@ -124,33 +154,6 @@ function normalizeHistory(history: ChatMessage[]): {
   };
 }
 
-function fitWithinBudget(
-  anchors: ChatMessage[],
-  history: ChatMessage[],
-  tokenBudget: number,
-  droppedRefs: string[],
-): ChatMessage[] {
-  const keptHistory = [...history];
-  while (
-    estimateMessageTokens([...anchors, ...keptHistory]) > tokenBudget &&
-    keptHistory.length > 0
-  ) {
-    const dropIndex = keptHistory.findIndex(
-      (message) => !extractToolResultRef(message.content),
-    );
-    if (dropIndex === -1) {
-      break;
-    }
-
-    const [removed] = keptHistory.splice(dropIndex, 1);
-    if (removed) {
-      droppedRefs.push(describeDroppedMessage(removed));
-    }
-  }
-
-  return [...anchors, ...keptHistory];
-}
-
 function extractToolResultRef(content: string): string | null {
   try {
     const parsed = JSON.parse(content) as {
@@ -162,10 +165,6 @@ function extractToolResultRef(content: string): string | null {
   } catch {
     return null;
   }
-}
-
-function describeDroppedMessage(message: ChatMessage): string {
-  return `${message.role}:${message.content.slice(0, 40)}`;
 }
 
 function emitContextCompacted(

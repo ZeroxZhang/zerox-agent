@@ -77,6 +77,28 @@ describe("agent goal controller", () => {
     ).toHaveLength(3);
   });
 
+  it("holds the authoritative active-goal lease for the full controller run", async () => {
+    await store.save(createGoal([milestone("milestone_1")]));
+    const changes: Array<[string, boolean]> = [];
+    const controller = createController({
+      runtime: createRuntime(),
+      acceptance: createAcceptance({
+        milestoneAccepted: [true],
+        goalAccepted: [true],
+      }),
+      onActiveGoalChange(goalId, active) {
+        changes.push([goalId, active]);
+      },
+    });
+
+    await controller.start("goal_1");
+
+    expect(changes).toEqual([
+      ["goal_1", true],
+      ["goal_1", false],
+    ]);
+  });
+
   it("persists a resumable checkpoint and incremental usage before a milestone finishes", async () => {
     await store.save(createGoal([milestone("milestone_1")]));
     let releaseRun: (() => void) | undefined;
@@ -2660,6 +2682,7 @@ describe("agent goal controller", () => {
     planner?: { replan(goal: Goal, reason: string): Promise<Milestone[]> };
     stallThreshold?: number;
     onProgress?: (event: GoalProgressEvent) => void;
+    onActiveGoalChange?: (goalId: string, active: boolean) => void;
     onTrajectoryAppend?: (
       event: AgentTrajectoryEvent,
       options?: { signal?: AbortSignal },
@@ -2694,6 +2717,7 @@ describe("agent goal controller", () => {
         },
       },
       onProgress: options.onProgress,
+      onActiveGoalChange: options.onActiveGoalChange,
       stallThreshold: options.stallThreshold,
       createId: () => `goal_event_${trajectoryEvents.length + 1}`,
       nextSequence: () => {

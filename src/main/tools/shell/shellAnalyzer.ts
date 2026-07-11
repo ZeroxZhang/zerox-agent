@@ -28,6 +28,7 @@ export interface ShellPlan {
   touchedPaths: string[]; // union of all writes+reads (aggregate; per-command fields are authoritative)
   controlOperators: string[];
   networkAccess: boolean;
+  opaqueExecution: boolean;
   raw: string;
 }
 
@@ -80,17 +81,60 @@ export function analyzeShell(raw: string, opts: { cwd: string }): ShellPlan {
   }
 
   const networkAccess =
-    commands.some((c) => NETWORK_COMMANDS.has(c.name)) ||
+    commands.some((command) =>
+      NETWORK_COMMANDS.has(effectiveExecutableName(command)),
+    ) ||
     NETWORK_HINT_SUBSTRINGS.some((s) => raw.includes(s)) ||
-    controlOperators.includes("$(") && /curl|wget|ssh|scp|git\s+(fetch|pull|clone|push)/.test(raw);
+    (controlOperators.includes("$(") &&
+      /curl|wget|ssh|scp|git\s+(fetch|pull|clone|push)/.test(raw)) ||
+    /\b(?:curl|wget|scp|sftp|ssh|nc|netcat)\b|\brequests\.(?:get|post|put|delete)\s*\(|\b(?:fetch|axios)\s*\(|\b(?:urllib|http|https)\.(?:request|client)\b/i.test(raw);
+  const opaqueExecution = commands.some((command) => {
+    const name = effectiveExecutableName(command);
+    const interpreters = [
+      "sh",
+      "bash",
+      "zsh",
+      "fish",
+      "python",
+      "python3",
+      "node",
+      "ruby",
+      "perl",
+    ];
+    return (
+      (interpreters.includes(name) &&
+        !(
+          command.args.length > 0 &&
+          command.args.every((arg) =>
+            ["--version", "--help", "-V", "-v"].includes(arg),
+          )
+        )) ||
+      name === "xargs"
+    );
+  });
 
   return {
     commands,
     touchedPaths: [...touched],
     controlOperators,
     networkAccess,
+    opaqueExecution,
     raw,
   };
+}
+
+function effectiveExecutableName(command: ShellCommand): string {
+  let name = path.basename(command.name).toLowerCase();
+  let args = command.args;
+  while (name === "env" || name === "command") {
+    const index = args.findIndex(
+      (arg) => !arg.startsWith("-") && !isEnvAssignment(arg),
+    );
+    if (index < 0) break;
+    name = path.basename(args[index]!).toLowerCase();
+    args = args.slice(index + 1);
+  }
+  return name;
 }
 
 function detectControlOperators(raw: string): string[] {

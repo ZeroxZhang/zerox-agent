@@ -291,8 +291,10 @@ export function AgentChatPanel({
   const [goalRunEvents, setGoalRunEvents] = useState<AgentRunEvent[]>([]);
   const [autoApprovalEnabled, setAutoApprovalEnabled] = useState(false);
   const [autoApprovalLocked, setAutoApprovalLocked] = useState(false);
-  const [pendingToolApproval, setPendingToolApproval] =
-    useState<ToolApprovalRequestPayload | null>(null);
+  const [pendingToolApprovals, setPendingToolApprovals] = useState<
+    ToolApprovalRequestPayload[]
+  >([]);
+  const pendingToolApproval = pendingToolApprovals[0] ?? null;
   const [toolApprovalEvents, setToolApprovalEvents] = useState<
     ToolApprovalDecisionPayload[]
   >([]);
@@ -583,13 +585,17 @@ export function AgentChatPanel({
       .catch(() => undefined);
     const unsubscribeRequest = window.buildingAgent.onToolApprovalRequest(
       (request) => {
-        setPendingToolApproval(request);
+        setPendingToolApprovals((current) =>
+          current.some((candidate) => candidate.id === request.id)
+            ? current
+            : [...current, request],
+        );
       },
     );
     const unsubscribeDecision = window.buildingAgent.onToolApprovalDecision(
       (decision) => {
-        setPendingToolApproval((current) =>
-          current?.id === decision.id ? null : current,
+        setPendingToolApprovals((current) =>
+          current.filter((candidate) => candidate.id !== decision.id),
         );
         setToolApprovalEvents((current) => [...current.slice(-9), decision]);
       },
@@ -927,7 +933,7 @@ export function AgentChatPanel({
   ].filter(Boolean).join(" ");
   const activeGoal = activeSession?.activeGoal ?? null;
   activeGoalRef.current = activeGoal;
-  const goalModeVisuallyEnabled = goalModeEnabled || Boolean(activeGoal);
+  const goalModeVisuallyEnabled = goalModeEnabled;
   const activeTasks = tasks.filter((task) => task.enabled);
   const workSteps = useMemo(() => buildAgentWorkSteps(workPhase), [workPhase]);
   const taskActivityDetail = useMemo(
@@ -1539,14 +1545,20 @@ export function AgentChatPanel({
   }
 
   async function handleSetAutoApprovalEnabled(enabled: boolean) {
+    const previousState = {
+      autoApprovalEnabled,
+      goalModeEnabled,
+      autoApprovalLocked,
+    };
     setAutoApprovalEnabled(enabled);
-    const state = await window.buildingAgent
-      ?.setToolAutoApprovalEnabled(enabled)
-      .catch(() => ({
-        autoApprovalEnabled: !enabled,
-        goalModeEnabled,
-        autoApprovalLocked,
-      }));
+    let state = null;
+    try {
+      state = await window.buildingAgent?.setToolAutoApprovalEnabled(enabled);
+    } catch {
+      state =
+        (await window.buildingAgent?.getToolApprovalMode().catch(() => null)) ??
+        previousState;
+    }
     if (state) {
       setAutoApprovalEnabled(state.autoApprovalEnabled);
       setAutoApprovalLocked(state.autoApprovalLocked);
@@ -1582,7 +1594,9 @@ export function AgentChatPanel({
     }
 
     const id = pendingToolApproval.id;
-    setPendingToolApproval(null);
+    setPendingToolApprovals((current) =>
+      current.filter((candidate) => candidate.id !== id),
+    );
     const resolved = await window.buildingAgent
       .resolveToolApproval({ id, approved })
       .catch(() => false);

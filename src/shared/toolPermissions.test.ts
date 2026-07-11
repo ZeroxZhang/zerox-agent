@@ -13,6 +13,7 @@ import {
 } from "./toolPermissions";
 import { buildDefaultSandboxPolicy, buildPrimaryRunContext } from "./agentWorkspace";
 import type { SkillManifest } from "./skills";
+import { analyzeShell } from "../main/tools/shell/shellAnalyzer";
 
 describe("task permission policy", () => {
   it("defaults to denying every tool capability", () => {
@@ -1111,6 +1112,93 @@ describe("tool authorization", () => {
             bookmarksPath: `${chromeRoot}/Default/Bookmarks`,
           },
         },
+        runContext,
+      ),
+    ).toMatchObject({ allowed: false });
+  });
+
+  it("denies every shell command in a read-only run sandbox", () => {
+    const broadPolicy = getDefaultTaskPermissionPolicy();
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: "/Users/demo/project",
+      sandbox: { ...buildDefaultSandboxPolicy(), mode: "read_only" },
+    });
+    const command = "rm ./report.md";
+    expect(
+      authorizeToolCallWithinRunContext(
+        broadPolicy,
+        { toolName: "shell_exec", args: { command } },
+        runContext,
+        { shellPlan: analyzeShell(command, { cwd: runContext.workspaceRoot }) },
+      ),
+    ).toMatchObject({ allowed: false, reason: expect.stringContaining("只读沙箱") });
+  });
+
+  it("denies network shell commands when the run sandbox disables network", () => {
+    const broadPolicy = getDefaultTaskPermissionPolicy();
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: "/Users/demo/project",
+      sandbox: { ...buildDefaultSandboxPolicy(), network: "none" },
+    });
+    const command = "curl https://example.com";
+    expect(
+      authorizeToolCallWithinRunContext(
+        broadPolicy,
+        { toolName: "shell_exec", args: { command } },
+        runContext,
+        { shellPlan: analyzeShell(command, { cwd: runContext.workspaceRoot }) },
+      ),
+    ).toMatchObject({ allowed: false, reason: expect.stringContaining("网络访问已禁用") });
+  });
+
+  it.each([
+    "bash -c 'curl https://example.com'",
+    "python -c 'import requests; requests.get(\"https://example.com\")'",
+    "node -e 'fetch(\"https://example.com\")'",
+  ])("denies nested network command %s", (command) => {
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: "/Users/demo/project",
+      sandbox: { ...buildDefaultSandboxPolicy(), network: "none" },
+    });
+    expect(
+      authorizeToolCallWithinRunContext(
+        getDefaultTaskPermissionPolicy(),
+        { toolName: "shell_exec", args: { command } },
+        runContext,
+        { shellPlan: analyzeShell(command, { cwd: runContext.workspaceRoot }) },
+      ),
+    ).toMatchObject({ allowed: false });
+  });
+
+  it("denies opaque nested shell execution in workspace-only sandboxes", () => {
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: "/Users/demo/project",
+    });
+    const command = "sh -c 'cat /etc/passwd'";
+    expect(
+      authorizeToolCallWithinRunContext(
+        getDefaultTaskPermissionPolicy(),
+        { toolName: "shell_exec", args: { command } },
+        runContext,
+        { shellPlan: analyzeShell(command, { cwd: runContext.workspaceRoot }) },
+      ),
+    ).toMatchObject({ allowed: false, reason: expect.stringContaining("嵌套解释器") });
+  });
+
+  it("denies dynamic tools in network-disabled sandboxes", () => {
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: "/Users/demo/project",
+      sandbox: { ...buildDefaultSandboxPolicy(), network: "none" },
+    });
+    expect(
+      authorizeToolCallWithinRunContext(
+        getDefaultTaskPermissionPolicy(),
+        { toolName: "custom_fetch", source: "mcp:remote", args: {} },
         runContext,
       ),
     ).toMatchObject({ allowed: false });

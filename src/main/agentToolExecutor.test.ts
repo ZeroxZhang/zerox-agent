@@ -1280,10 +1280,34 @@ describe("agent tool executor", () => {
           }),
         },
       ),
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       ok: false,
-      error:
-        "shell_exec refused path outside the run sandbox: ../outside/secret.txt",
+      error: expect.stringContaining("shell_exec refused path outside the run sandbox:"),
+    });
+  });
+
+  it("enforces read-only and network-disabled shell sandboxes at execution time", async () => {
+    const executor = createAgentToolExecutor();
+    const base = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: tempDir,
+    });
+
+    await expect(
+      executor.execute(
+        { toolName: "shell_exec", args: { command: "rm ./report.md" } },
+        { runContext: { ...base, sandbox: { ...base.sandbox, mode: "read_only" } } },
+      ),
+    ).resolves.toMatchObject({ ok: false, error: expect.stringContaining("read-only") });
+
+    await expect(
+      executor.execute(
+        { toolName: "shell_exec", args: { command: "curl https://example.com" } },
+        { runContext: { ...base, sandbox: { ...base.sandbox, network: "none" } } },
+      ),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining("network-disabled"),
     });
   });
 

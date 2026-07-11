@@ -6673,7 +6673,7 @@
   - Acceptance rejection re-enters the same milestone automatically; turn, failure-loop, and strategy boundaries no longer become a Continue/Adjust Milestone gate.
   - Added a backward-compatible `runtimeCheckpoint` to Goal state containing the active milestone, next action, and a bounded tail of real assistant/tool messages including tool-call identifiers.
   - Subsequent segments and resumed application runs reconstruct context from that transcript, preserve recent tool pairs/result references, and inject an exact-seam instruction that forbids recap, repository rediscovery, or asking the user to continue.
-  - Goal-runtime trajectory writes now receive the run signal. A canceled run skips final summary, checkpoint, run-record, and progress publication writes.
+  - Goal-runtime trajectory writes now receive the run signal. A canceled run skips misleading final-summary/checkpoint publication while retaining a truthful `canceled` run-history record.
 - Planning and UI implementation:
   - Translator aborts are rethrown instead of becoming fake plans. Provider/JSON failures emit diagnostics and a typed draft warning, preserve the full source instruction, derive a maximum-96-character description, and use a concise executable fallback milestone.
   - Planner fallback no longer uses the full source prompt as the milestone heading.
@@ -6688,3 +6688,23 @@
   - `npm run smoke:prod` -> passed; renderer rendered the Agent chat UI. The unpackaged smoke used the existing JSON fallback because local `better-sqlite3` targets a different Node ABI.
   - `npm run harness:check` -> passed before feature closure.
   - `git diff --check` -> passed before feature closure.
+- Pre-main review hardening:
+  - Policy B classification now runs for every tool request, including calls already allowed by the base task policy; auto approval cannot override workspace-sandbox denial.
+  - Added adversarial coverage for command wrappers, long-form remove flags, Git global flags, production Kubernetes/Terraform actions, package publication, credential upload, and dynamic outbound-action tools.
+  - Running goals now hold a main-process authorization lease. Renderer state cannot unlock auto approval while a goal is active, and IPC failure re-reads or restores authoritative mode state.
+  - Confirmed drafts preserve the complete original instruction separately from the concise display description; planning, execution, output-root discovery, acceptance, and the detail drawer reuse the original text.
+  - Runtime checkpoints are persisted after each tool result with incremental usage, real assistant/tool pairs, and the next action. Executing goals resume automatically on app restart, including repair continuity across milestone ids.
+  - Context compaction preserves every assistant tool-call message with its matching tool result. Final acceptance falls back to the persisted transcript when no fresh run result exists.
+  - Default goal iteration budget is 64 rather than the former literal 8; per-segment turns and tokens are derived from remaining configured budget. Planner/translator failures receive a bounded retry before local fallback.
+  - Pending trajectory writes are drained before terminal return, and canceled runs remain observable in run history.
+  - Removed the separate quick-action/high-risk Goal Review gate. After draft confirmation, only Policy B extreme-risk tool operations can request confirmation; user-initiated Pause remains available.
+  - Policy B now consumes the structured ShellPlan, normalizes executable wrappers/paths, and protects authorization/sandbox source writes. Read-only and network-disabled shell restrictions are enforced both before authorization and again at execution.
+  - Restart recovery atomically converts a checkpointed `running` milestone back to `ready`; context trimming and checkpoints preserve complete assistant tool-call/result groups.
+  - Goal runs serialize trajectory appends, record deterministic-pipeline aborts, enforce the remaining tool-call count within multi-call responses, return actual provider token usage, and apply a remaining wall-clock deadline signal.
+  - Renderer approval requests are queued instead of overwritten, and both mode toggles recover authoritative main-process state after IPC failure.
+- Final pre-main verification evidence:
+  - `npm run verify` -> passed: 199 test files / 1,835 tests, TypeScript/Vite build, Agent evals 26/26, Memory evals 2/2.
+  - `npm run harness:check` -> passed.
+  - `npm run smoke:prod` -> passed; renderer rendered the Agent chat UI. The known local `better-sqlite3` Node ABI mismatch fell back to JSON storage.
+  - `git diff --check` -> passed.
+  - Independent UI/integration, runtime, and security reviews completed after four correction rounds. Final reviewers reported no remaining Critical or Important blockers and approved the branch for `main` merge consideration.

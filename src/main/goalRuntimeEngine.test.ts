@@ -979,6 +979,100 @@ describe("goal runtime engine", () => {
     expect(trajectoryTypes).not.toContain("checkpoint_written");
   });
 
+  it("records deterministic-pipeline cancellation when a tool aborts by throwing", async () => {
+    const controller = new AbortController();
+    const runs: AgentRunRecord[] = [];
+    const goal = createGoal({ taskContract: chromeBookmarkTaskContract });
+    const engine = createGoalRuntimeEngine({
+      workspaceRoot: "/Users/demo/project",
+      chatClient: { async complete() { throw new Error("unused"); } },
+      getModelProfile: async () => {
+        throw new Error("unused");
+      },
+      toolExecutor: {
+        async execute() {
+          controller.abort();
+          throw new DOMException("Canceled", "AbortError");
+        },
+        getRegistry() { return createDynamicToolRegistry(); },
+        hasTool() { return true; },
+      },
+      toolAuthorizationService: {
+        async authorize() {
+          return {
+            ok: true,
+            decision: { allowed: true, reason: "allowed" },
+            auditEvent: {} as never,
+          };
+        },
+      },
+      runStore: {
+        async append(run) {
+          runs.push(run);
+          return run;
+        },
+      },
+      trajectoryStore: {
+        async append(_runId, event) { return event; },
+      },
+      goalContext: createAgentGoalContext(),
+    });
+
+    const result = await engine.runMilestone(goal, goal.milestones[0]!, {
+      signal: controller.signal,
+    });
+
+    expect(result.status).toBe("canceled");
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.status).toBe("canceled");
+  });
+
+  it("applies the wall-clock deadline to deterministic pipeline tools", async () => {
+    const runs: AgentRunRecord[] = [];
+    const goal = createGoal({ taskContract: chromeBookmarkTaskContract });
+    goal.budget.maxWallClockMs = 10;
+    const engine = createGoalRuntimeEngine({
+      workspaceRoot: "/Users/demo/project",
+      chatClient: { async complete() { throw new Error("unused"); } },
+      getModelProfile: async () => { throw new Error("unused"); },
+      toolExecutor: {
+        async execute(_request, options) {
+          return new Promise((_, reject) => {
+            options?.signal?.addEventListener(
+              "abort",
+              () => reject(options.signal?.reason),
+              { once: true },
+            );
+          });
+        },
+        getRegistry() { return createDynamicToolRegistry(); },
+        hasTool() { return true; },
+      },
+      toolAuthorizationService: {
+        async authorize() {
+          return {
+            ok: true,
+            decision: { allowed: true, reason: "allowed" },
+            auditEvent: {} as never,
+          };
+        },
+      },
+      runStore: {
+        async append(run) { runs.push(run); return run; },
+      },
+      trajectoryStore: {
+        async append(_runId, event) { return event; },
+      },
+      goalContext: createAgentGoalContext(),
+    });
+
+    const result = await engine.runMilestone(goal, goal.milestones[0]!);
+
+    expect(result.status).toBe("failed");
+    expect(result.summary).toContain("wall-clock budget");
+    expect(runs.at(-1)?.status).toBe("failed");
+  });
+
   it("passes run-scoped identity into chrome bookmark provenance and projects artifact events", async () => {
     const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "goal-workspace-"));
     const outputRoot = await mkdtemp(path.join(os.tmpdir(), "goal-output-"));

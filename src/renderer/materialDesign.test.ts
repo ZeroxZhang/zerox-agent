@@ -937,7 +937,7 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource).not.toContain('submitUserMessage("暂停这个目标")');
     expect(chatPanelSource).toContain("window.buildingAgent.increaseGoalBudget(");
     expect(chatPanelSource).toContain("onIncreaseBudget={handleIncreaseGoalBudget}");
-    expect(chatPanelSource).toContain("const goalModeVisuallyEnabled = goalModeEnabled || Boolean(activeGoal);");
+    expect(chatPanelSource).toContain("const goalModeVisuallyEnabled = goalModeEnabled;");
     expect(chatPanelSource).toContain("aria-pressed={goalModeVisuallyEnabled}");
     expect(chatPanelSource).toContain('className="primary-action"');
     expect(goalDetailDrawerSource).toContain("goal-progress-status");

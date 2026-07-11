@@ -3,6 +3,93 @@ import { classifyExtremeRisk } from "./extremeRiskPolicy";
 
 describe("Policy B extreme-risk classification", () => {
   it.each([
+    ["/bin/rm", ["-rf", "/"], "irrecoverable_data_loss"],
+    ["env", ["sudo", "rm", "-rf", "/tmp/cache"], "privilege_or_security_boundary"],
+    ["npm", ["--registry", "https://registry.example", "publish"], "irreversible_external_action"],
+  ] as const)("classifies structured shell command %s", (name, args, category) => {
+    expect(
+      classifyExtremeRisk(
+        { toolName: "shell_exec", args: { command: [name, ...args].join(" ") } },
+        {
+          shellPlan: {
+            commands: [{ name, args: [...args], writesPaths: [], readsPaths: [] }],
+            networkAccess: false,
+          },
+        },
+      ),
+    ).toMatchObject({ requiresConfirmation: true, category });
+  });
+
+  it("forces confirmation for shell writes to authorization-boundary source", () => {
+    expect(
+      classifyExtremeRisk(
+        { toolName: "shell_exec", args: { command: "printf unsafe > src/shared/extremeRiskPolicy.ts" } },
+        {
+          shellPlan: {
+            commands: [{
+              name: "printf",
+              args: ["unsafe"],
+              writesPaths: ["/workspace/src/shared/extremeRiskPolicy.ts"],
+              readsPaths: [],
+            }],
+            networkAccess: false,
+          },
+        },
+      ),
+    ).toMatchObject({
+      requiresConfirmation: true,
+      category: "privilege_or_security_boundary",
+    });
+  });
+
+  it.each([
+    ["sed", ["-i", "s/a/b/", "src/shared/extremeRiskPolicy.ts"]],
+    ["perl", ["-pi", "-e", "s/a/b/", "src/shared/extremeRiskPolicy.ts"]],
+    ["mv", ["replacement", "src/main/toolAuthorizationService.ts"]],
+  ] as const)("protects authorization source from mutating %s", (name, args) => {
+    expect(
+      classifyExtremeRisk(
+        { toolName: "shell_exec", args: { command: [name, ...args].join(" ") } },
+        {
+          shellPlan: {
+            commands: [{
+              name,
+              args: [...args],
+              writesPaths: [],
+              readsPaths: [
+                name === "mv"
+                  ? "/workspace/src/main/toolAuthorizationService.ts"
+                  : "/workspace/src/shared/extremeRiskPolicy.ts",
+              ],
+            }],
+            networkAccess: false,
+          },
+        },
+      ),
+    ).toMatchObject({ requiresConfirmation: true, category: "privilege_or_security_boundary" });
+  });
+
+  it("protects authorization source from typed move tools", () => {
+    expect(
+      classifyExtremeRisk({
+        toolName: "file_apply_moves",
+        args: {
+          moves: [{ from: "/tmp/replacement", to: "/workspace/src/main/toolAuthorizationService.ts" }],
+        },
+      }),
+    ).toMatchObject({ requiresConfirmation: true, category: "privilege_or_security_boundary" });
+  });
+
+  it.each(["sh -c 'rm -rf /'", "xargs rm -rf"])(
+    "classifies nested destructive command %s",
+    (command) => {
+      expect(
+        classifyExtremeRisk({ toolName: "shell_exec", args: { command } }),
+      ).toMatchObject({ requiresConfirmation: true, category: "irrecoverable_data_loss" });
+    },
+  );
+
+  it.each([
     ["rm -rf /", "irrecoverable_data_loss"],
     ["git reset --hard HEAD~1", "irrecoverable_data_loss"],
     ["git clean -fdx", "irrecoverable_data_loss"],

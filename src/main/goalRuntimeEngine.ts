@@ -51,6 +51,7 @@ import {
   createToolActionSignature,
   sanitizeActionSignaturesForPersistence,
 } from "./agentGoalFailureFingerprint";
+import { boundRuntimeTranscript } from "./runtimeTranscript";
 
 export type GoalRuntimeModelProfile = {
   baseUrl: string;
@@ -188,30 +189,35 @@ export function createGoalRuntimeEngine(options: {
     async runMilestone(goal, milestone, runOptions) {
       const startedAt = now();
       const runId = createId();
-      const pendingTrajectoryWrites = new Set<Promise<void>>();
+      const remainingWallClockMs = Math.max(
+        1,
+        goal.budget.maxWallClockMs - goal.budgetUsage.wallClockMs,
+      );
+      const deadlineSignal = createBudgetDeadlineSignal(remainingWallClockMs);
+      const runSignal = combineRuntimeSignals(
+        runOptions?.signal,
+        deadlineSignal,
+      );
+      let trajectoryQueue: Promise<void> = Promise.resolve();
       const appendRunTrajectory = (
         type: Parameters<AgentTrajectoryStore["append"]>[1]["type"],
         payload: Record<string, unknown>,
         containsUserText = true,
       ) => {
-        const write = appendTrajectory(
-          runId,
-          type,
-          payload,
-          containsUserText,
-          runOptions?.signal,
+        const write = trajectoryQueue.then(() =>
+          appendTrajectory(
+            runId,
+            type,
+            payload,
+            containsUserText,
+            runSignal,
+          ),
         );
-        pendingTrajectoryWrites.add(write);
-        void write.then(
-          () => pendingTrajectoryWrites.delete(write),
-          () => pendingTrajectoryWrites.delete(write),
-        );
+        trajectoryQueue = write.catch(() => undefined);
         return write;
       };
       const flushTrajectoryWrites = async () => {
-        while (pendingTrajectoryWrites.size > 0) {
-          await Promise.allSettled([...pendingTrajectoryWrites]);
-        }
+        await trajectoryQueue;
       };
       const taskId = `goal:${goal.id}`;
       const runContext = extendRunContextForSelectedSkill(
@@ -243,6 +249,70 @@ export function createGoalRuntimeEngine(options: {
           return;
         }
         actionSignatures.add(createToolActionSignature(toolName, args));
+      };
+      const recordCanceledRun = async (
+        skillName: string,
+        transcriptMessages: ChatMessage[],
+        tokens: number,
+      ) => {
+        const finishedAt = now();
+        const canceledRun: AgentRunRecord = {
+          id: runId,
+          taskId,
+          taskName: goal.description,
+          skillName,
+          status: "canceled",
+          runContext,
+          summary: "Goal milestone canceled.",
+          events,
+          startedAt,
+          finishedAt,
+        };
+        await options.runStore.append(canceledRun);
+        await flushTrajectoryWrites();
+        return {
+          runId,
+          toolCallCount: observedToolCalls,
+          status: "canceled" as const,
+          summary: "Goal milestone canceled.",
+          wallClockMs:
+            new Date(finishedAt).getTime() - new Date(startedAt).getTime(),
+          tokens,
+          transcriptMessages,
+          actionSignatures: sanitizeActionSignaturesForPersistence([
+            ...actionSignatures,
+          ]),
+        };
+      };
+      const recordTimedOutRun = async (skillName: string) => {
+        const finishedAt = now();
+        const summary = `Goal milestone exceeded wall-clock budget after ${remainingWallClockMs}ms.`;
+        const failedRun: AgentRunRecord = {
+          id: runId,
+          taskId,
+          taskName: goal.description,
+          skillName,
+          status: "failed",
+          runContext,
+          summary,
+          events,
+          startedAt,
+          finishedAt,
+        };
+        await options.runStore.append(failedRun);
+        await flushTrajectoryWrites();
+        return {
+          runId,
+          toolCallCount: observedToolCalls,
+          status: "failed" as const,
+          summary,
+          wallClockMs: remainingWallClockMs,
+          tokens: 0,
+          transcriptMessages: [] as ChatMessage[],
+          actionSignatures: sanitizeActionSignaturesForPersistence([
+            ...actionSignatures,
+          ]),
+        };
       };
 
       const taskContract = goal.taskContract;
@@ -290,7 +360,11 @@ export function createGoalRuntimeEngine(options: {
           runtimeContextSnapshotSummary:
             summarizeAgentRuntimeContextSnapshot(runtimeContextSnapshot),
         }, false);
-        const pipelineResult = await executeDeterministicGoalPipeline({
+        let pipelineResult: Awaited<
+          ReturnType<typeof executeDeterministicGoalPipeline>
+        >;
+        try {
+          pipelineResult = await executeDeterministicGoalPipeline({
           contract: taskContract,
           runContext,
           async executeTool(
@@ -299,6 +373,8 @@ export function createGoalRuntimeEngine(options: {
             deterministicOptions?: DeterministicToolExecutionOptions,
           ) {
             recordActionSignature(toolName, args);
+            const registeredToolSource =
+              options.toolExecutor.getRegistry().getSource(toolName);
             let invocation = createToolInvocation({
               id: `tool_invocation_${createId()}`,
               runId,
@@ -340,10 +416,13 @@ export function createGoalRuntimeEngine(options: {
                 taskId,
                 {
                   toolName: toolName as never,
+                  ...(registeredToolSource
+                    ? { source: registeredToolSource }
+                    : {}),
                   args,
                 },
                 {
-                  ...(runOptions?.signal ? { signal: runOptions.signal } : {}),
+                  ...(runSignal ? { signal: runSignal } : {}),
                   runContext,
                   runtimeTask: buildGoalMilestoneRuntimeTask(goal, runContext),
                 },
@@ -392,10 +471,13 @@ export function createGoalRuntimeEngine(options: {
             const result = await options.toolExecutor.execute(
               {
                 toolName: toolName as never,
+                ...(registeredToolSource
+                  ? { source: registeredToolSource }
+                  : {}),
                 args,
               },
               {
-                ...(runOptions?.signal ? { signal: runOptions.signal } : {}),
+                ...(runSignal ? { signal: runSignal } : {}),
                 runContext,
                 ...(deterministicOptions?.artifactWrite
                   ? { artifactWrite: deterministicOptions.artifactWrite }
@@ -434,36 +516,26 @@ export function createGoalRuntimeEngine(options: {
             );
             return result;
           },
-        });
+          });
+        } catch (error) {
+          if (deadlineSignal.aborted && !runOptions?.signal?.aborted) {
+            return recordTimedOutRun("deterministic-goal-pipeline");
+          }
+          if (runOptions?.signal?.aborted || isAbortLike(error)) {
+            return recordCanceledRun(
+              "deterministic-goal-pipeline",
+              [],
+              0,
+            );
+          }
+          throw error;
+        }
         const finishedAt = now();
+        if (deadlineSignal.aborted && !runOptions?.signal?.aborted) {
+          return recordTimedOutRun("deterministic-goal-pipeline");
+        }
         if (runOptions?.signal?.aborted) {
-          const canceledRun: AgentRunRecord = {
-            id: runId,
-            taskId,
-            taskName: goal.description,
-            skillName: "deterministic-goal-pipeline",
-            status: "canceled",
-            runContext,
-            summary: "Goal milestone canceled.",
-            events,
-            startedAt,
-            finishedAt,
-          };
-          await options.runStore.append(canceledRun);
-          await flushTrajectoryWrites();
-          return {
-            runId,
-            toolCallCount: observedToolCalls,
-            status: "canceled",
-            summary: "Goal milestone canceled.",
-            wallClockMs:
-              new Date(finishedAt).getTime() - new Date(startedAt).getTime(),
-            tokens: 0,
-            transcriptMessages: [],
-            actionSignatures: sanitizeActionSignaturesForPersistence([
-              ...actionSignatures,
-            ]),
-          };
+          return recordCanceledRun("deterministic-goal-pipeline", [], 0);
         }
         const status = pipelineResult.status;
         events.push(
@@ -627,13 +699,21 @@ export function createGoalRuntimeEngine(options: {
                 goal.budget.maxToolCalls - goal.budgetUsage.toolCalls,
               ),
             ),
+          maxToolCalls: Math.max(
+            0,
+            goal.budget.maxToolCalls - goal.budgetUsage.toolCalls,
+          ),
+          maxWallClockMs: Math.max(
+            1,
+            goal.budget.maxWallClockMs - goal.budgetUsage.wallClockMs,
+          ),
           tools: options.toolExecutor.getRegistry().getDefinitions(),
           toolResultOffloadStore: options.toolResultOffloadStore,
           toolResultOffloadThreshold: options.toolResultOffloadThreshold,
           pauseOnFailureLoop: true,
           pauseOnStrategyGuard: true,
           pauseOnTurnLimit: false,
-          ...(runOptions?.signal ? { signal: runOptions.signal } : {}),
+          ...(runSignal ? { signal: runSignal } : {}),
           onTurn(turn, phase) {
             void appendRunTrajectory("model_request", {
               ...payload,
@@ -742,7 +822,7 @@ export function createGoalRuntimeEngine(options: {
               toolCallCount: checkpoint.toolCallsExecuted,
               wallClockMs:
                 new Date(now()).getTime() - new Date(startedAt).getTime(),
-              tokens: Math.max(1, estimateMessageTokens(checkpoint.messages)),
+              tokens: checkpoint.tokensConsumed,
               nextAction: checkpoint.nextAction,
             });
           },
@@ -866,6 +946,39 @@ function withGoalRunIdentity(
     goalId,
     milestoneId,
   };
+}
+
+function isAbortLike(error: unknown): boolean {
+  return (
+    (error instanceof DOMException && error.name === "AbortError") ||
+    (error instanceof Error && /abort|cancel/i.test(`${error.name} ${error.message}`))
+  );
+}
+
+function createBudgetDeadlineSignal(ms: number): AbortSignal {
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(new DOMException("Wall-clock budget exceeded.", "TimeoutError")),
+    ms,
+  );
+  timer.unref?.();
+  return controller.signal;
+}
+
+function combineRuntimeSignals(
+  first: AbortSignal | undefined,
+  second: AbortSignal,
+): AbortSignal {
+  if (!first) return second;
+  const controller = new AbortController();
+  const forward = (signal: AbortSignal) => {
+    if (!controller.signal.aborted) controller.abort(signal.reason);
+  };
+  if (first.aborted) forward(first);
+  else first.addEventListener("abort", () => forward(first), { once: true });
+  if (second.aborted) forward(second);
+  else second.addEventListener("abort", () => forward(second), { once: true });
+  return controller.signal;
 }
 
 function buildGoalRuntimeMemoryScopes(
@@ -1269,6 +1382,12 @@ function inferTokens(
   initialMessages: ChatMessage[],
 ): number {
   const loopResultWithTokens = loopResult as unknown as { tokens?: unknown };
+  if (
+    typeof loopResult.tokensConsumed === "number" &&
+    loopResult.tokensConsumed > 0
+  ) {
+    return loopResult.tokensConsumed;
+  }
   if (typeof loopResultWithTokens.tokens === "number") {
     return loopResultWithTokens.tokens;
   }
@@ -1280,16 +1399,8 @@ function toBoundedTranscriptMessages(
   messages: ChatMessage[],
   finalSummary?: string,
 ): ChatMessage[] {
-  const maxMessages = 24;
-  const maxChars = 4000;
   const transcriptMessages = finalSummary
     ? [...messages, { role: "assistant" as const, content: finalSummary }]
     : messages;
-  return transcriptMessages.slice(-maxMessages).map((message) => ({
-    ...message,
-    content:
-      message.content.length > maxChars
-        ? `${message.content.slice(0, maxChars)}... [truncated]`
-        : message.content,
-  }));
+  return boundRuntimeTranscript(transcriptMessages);
 }

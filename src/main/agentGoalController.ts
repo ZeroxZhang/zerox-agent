@@ -36,6 +36,7 @@ import {
   redactAndBoundAcceptanceSummary,
   redactAndBoundEvidenceRef,
 } from "./agentGoalRedaction";
+import { boundRuntimeTranscript } from "./runtimeTranscript";
 
 export type GoalRuntimeRunResult = {
   runId: string;
@@ -93,6 +94,7 @@ export function createAgentGoalController(options: {
   nextSequence?: () => number;
   now?: () => string;
   onProgress?: (event: GoalProgressEvent) => void;
+  onActiveGoalChange?: (goalId: string, active: boolean) => void;
 }): AgentGoalController {
   const stallThreshold = options.stallThreshold ?? 3;
   type ActiveRunEntry = {
@@ -176,11 +178,15 @@ export function createAgentGoalController(options: {
       owners?.delete(entry);
       if (owners?.size === 0) runOwnersByGoal.delete(goal.id);
       clearGoalRuntimeStateIfIdle(goal.id);
+      if (!activeRuns.has(goal.id)) {
+        options.onActiveGoalChange?.(goal.id, false);
+      }
     });
     const owners = runOwnersByGoal.get(goal.id) ?? new Set<ActiveRunEntry>();
     owners.add(entry);
     runOwnersByGoal.set(goal.id, owners);
     activeRuns.set(goal.id, entry);
+    options.onActiveGoalChange?.(goal.id, true);
     return entry.promise;
   }
 
@@ -1885,15 +1891,13 @@ function repairDirectiveForMilestone(
 function boundRuntimeCheckpointMessages(
   messages: ChatMessage[],
 ): NonNullable<Goal["runtimeCheckpoint"]>["transcriptMessages"] {
-  return messages.slice(-24).map((message) => ({
+  return boundRuntimeTranscript(messages).map((message) => ({
     role: message.role,
     content:
       message.content.length > 4_000
         ? `${message.content.slice(0, 4_000)}... [truncated]`
         : message.content,
-    ...(message.tool_calls
-      ? { tool_calls: message.tool_calls.slice(-16) }
-      : {}),
+    ...(message.tool_calls ? { tool_calls: message.tool_calls } : {}),
     ...(message.tool_call_id
       ? { tool_call_id: message.tool_call_id }
       : {}),

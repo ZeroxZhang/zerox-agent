@@ -139,6 +139,7 @@ export function createToolAuthorizationService(options: {
         taskName: subject.name,
         deniedReason: decision.reason,
         request,
+        ...(shellPlan ? { shellPlan } : {}),
       });
       if (
         !decision.allowed &&

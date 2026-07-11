@@ -28,7 +28,10 @@ export function shouldRequestReview(
     return isFinal || getMilestoneMetadataFlag(milestone, "reviewRequired") === true;
   }
 
-  return getMilestoneMetadataFlag(milestone, "riskLevel") === "high";
+  // Policy B tool authorization is the only automatic safety confirmation gate.
+  // Historical goals using review_high_risk_only must not create a second,
+  // milestone-level Continue/Adjust prompt.
+  return false;
 }
 
 function getMilestoneMetadataFlag(

@@ -1205,6 +1205,7 @@ export function createAppContainer(options: {
         }),
         acceptance: agentGoalAcceptance(),
         onProgress: emitGoalProgressEvent,
+        onActiveGoalChange: options.setGoalActive,
         planner: {
           async replan(goal, reason) {
             return createAgentGoalPlanner({
@@ -1347,7 +1348,6 @@ export function createAppContainer(options: {
         },
         getAvailableTools: getAvailableToolNames,
         onProgress: emitGoalProgressEvent,
-        onActiveGoalChange: options.setGoalActive,
         onDiagnostic(event) {
           console.warn(`[goal:${event.phase}] ${event.message}`, event.error);
         },
@@ -2054,11 +2054,20 @@ export function createAppContainer(options: {
       const interrupted = activeGoals.filter(
         (goal) => goal.status === "executing",
       );
+      let resumed = 0;
       for (const goal of interrupted) {
-        options.setGoalActive?.(goal.id, true);
-        await goalChatService().resume(goal.id);
+        try {
+          const prepared = prepareInterruptedGoalForResume(goal);
+          if (prepared !== goal) {
+            await agentGoalStore().save(prepared);
+          }
+          await goalChatService().resume(goal.id);
+          resumed += 1;
+        } catch (error) {
+          console.error(`Failed to resume goal ${goal.id}:`, error);
+        }
       }
-      return interrupted.length;
+      return resumed;
     },
     initializeMcpTools,
     getActiveMcpClients: () => activeMcpClients,
@@ -2070,6 +2079,18 @@ export function createAppContainer(options: {
     onGoalProgressEvent,
     onAgentRunsChanged,
   };
+}
+
+export function prepareInterruptedGoalForResume(goal: Goal): Goal {
+  let changed = false;
+  const milestones = goal.milestones.map((milestone) => {
+    if (milestone.state !== "running") {
+      return milestone;
+    }
+    changed = true;
+    return { ...milestone, state: "ready" as const };
+  });
+  return changed ? { ...goal, milestones } : goal;
 }
 
 export function reconcileIrreversibleGoalProgressEvent(

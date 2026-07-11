@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createAppContainer,
   formatGoalTerminalHeading,
+  prepareInterruptedGoalForResume,
   reconcileIrreversibleGoalProgressEvent,
 } from "./container";
 import { registerAllIpcHandlers } from "./ipc";
@@ -67,6 +68,54 @@ vi.mock("./tools/toolWorker", async (importOriginal) => ({
 }));
 
 describe("app container goal drafts", () => {
+  it("makes a checkpointed running milestone resumable after process restart", () => {
+    const baseGoal = createStoredGoal({
+      id: "goal_interrupted",
+      chatSessionId: "chat_1",
+      status: "executing",
+      milestones: [
+        {
+          id: "milestone_1",
+          description: "Continue work",
+          dependsOn: [],
+          successCriteria: [],
+          state: "running",
+          runIds: [],
+          attempts: 1,
+        },
+      ],
+    });
+    const goal: Goal = {
+      ...baseGoal,
+      runtimeCheckpoint: {
+        milestoneId: "milestone_1",
+        transcriptMessages: [{ role: "assistant", content: "checkpoint" }],
+        nextAction: "continue",
+        updatedAt: "2026-07-11T12:00:00.000Z",
+      },
+    };
+
+    expect(prepareInterruptedGoalForResume(goal).milestones[0]?.state).toBe("ready");
+  });
+
+  it("makes a running milestone resumable even before the first checkpoint", () => {
+    const goal = createStoredGoal({
+      id: "goal_interrupted_early",
+      chatSessionId: "chat_1",
+      status: "executing",
+      milestones: [{
+        id: "milestone_1",
+        description: "Continue work",
+        dependsOn: [],
+        successCriteria: [],
+        state: "running",
+        runIds: [],
+        attempts: 1,
+      }],
+    });
+    expect(prepareInterruptedGoalForResume(goal).milestones[0]?.state).toBe("ready");
+  });
+
   let tempDir: string;
   const originalToolWorkerEnv = process.env.ZEROX_TOOL_WORKER;
   const originalLegacyToolWorkerEnv = process.env.BUILDING_AGENT_TOOL_WORKER;
