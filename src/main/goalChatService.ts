@@ -75,6 +75,11 @@ export function createGoalChatService(options: {
   getAvailableSkills?: () => string[];
   createId?: () => string;
   now?: () => string;
+  onDiagnostic?: (event: {
+    phase: "planning";
+    message: string;
+    error: unknown;
+  }) => void;
   onProgress?: (event: GoalProgressEvent) => void;
 }): GoalChatService {
   const createId = options.createId ?? (() => `goal_${randomUUID()}`);
@@ -639,12 +644,16 @@ export function createGoalChatService(options: {
         ...(taskContract ? { taskContract } : {}),
         ...(selectedSkill ? { selectedSkill: snapshotSelectedSkill(selectedSkill) } : {}),
       });
-    } catch {
-      // Fallback: create a single achievable milestone that produces the artifact.
+    } catch (error) {
+      options.onDiagnostic?.({
+        phase: "planning",
+        message: "Goal planner failed; using the local structured fallback.",
+        error,
+      });
       return [
         {
           id: "milestone_1",
-          description,
+          description: "执行目标并产出可验收结果",
           dependsOn: [],
           successCriteria: criteria,
           state: "ready",

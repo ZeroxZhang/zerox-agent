@@ -86,6 +86,36 @@ describe("goal chat service", () => {
     ]);
   });
 
+  it("uses a concise milestone when the planner is unavailable", async () => {
+    const savedGoals: Goal[] = [];
+    const description = "分析并修复目标运行问题。".repeat(40);
+    const service = createGoalChatService({
+      controller: createController(),
+      goalStore: createGoalStore({ savedGoals, ledgerEvents: [] }),
+      planner: {
+        async plan() {
+          throw new Error("planner unavailable");
+        },
+        async replan() {
+          throw new Error("unused");
+        },
+      },
+      createId: () => "goal_fallback",
+      now: () => "2026-07-11T19:20:00.000Z",
+    });
+
+    await service.createFromChat({
+      sessionId: "chat_1",
+      originMessageId: "message_1",
+      description,
+    });
+
+    expect(savedGoals[0]?.description).toBe(description);
+    expect(savedGoals[0]?.milestones[0]?.description).toBe(
+      "执行目标并产出可验收结果",
+    );
+  });
+
   it("routes small deterministic quick-action goals to review without planning milestones", async () => {
     const savedGoals: Goal[] = [];
     const ledgerEvents: ProgressLedgerEvent[] = [];

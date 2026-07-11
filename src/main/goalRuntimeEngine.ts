@@ -132,20 +132,31 @@ export function createGoalRuntimeEngine(options: {
     type: Parameters<AgentTrajectoryStore["append"]>[1]["type"],
     payload: Record<string, unknown>,
     containsUserText = true,
+    signal?: AbortSignal,
   ) {
-    await options.trajectoryStore.append(runId, {
-      id: `trajectory_${randomUUID()}`,
-      runId,
-      type,
-      sequence: nextSequence(),
-      payload,
-      redaction: {
-        containsApiKey: false,
-        containsFileContent: false,
-        containsUserText,
-      },
-      createdAt: now(),
-    });
+    if (signal?.aborted) return;
+    try {
+      await options.trajectoryStore.append(
+        runId,
+        {
+          id: `trajectory_${randomUUID()}`,
+          runId,
+          type,
+          sequence: nextSequence(),
+          payload,
+          redaction: {
+            containsApiKey: false,
+            containsFileContent: false,
+            containsUserText,
+          },
+          createdAt: now(),
+        },
+        { ...(signal ? { signal } : {}) },
+      );
+    } catch (error) {
+      if (signal?.aborted) return;
+      throw error;
+    }
   }
 
   async function resolveRunContext(goal: Goal) {
@@ -177,6 +188,18 @@ export function createGoalRuntimeEngine(options: {
     async runMilestone(goal, milestone, runOptions) {
       const startedAt = now();
       const runId = createId();
+      const appendRunTrajectory = (
+        type: Parameters<AgentTrajectoryStore["append"]>[1]["type"],
+        payload: Record<string, unknown>,
+        containsUserText = true,
+      ) =>
+        appendTrajectory(
+          runId,
+          type,
+          payload,
+          containsUserText,
+          runOptions?.signal,
+        );
       const taskId = `goal:${goal.id}`;
       const runContext = extendRunContextForSelectedSkill(
         withGoalRunIdentity(
@@ -247,7 +270,7 @@ export function createGoalRuntimeEngine(options: {
           createId: () => `runtime_snapshot_${runId}`,
           now,
         });
-        await appendTrajectory(runId, "run_context_created", {
+        await appendRunTrajectory("run_context_created", {
           ...payload,
           runContext,
           runtimeContextSnapshot,
@@ -273,7 +296,7 @@ export function createGoalRuntimeEngine(options: {
               createdAt: now(),
             });
             const appendInvocation = async (record: ToolInvocationRecord) => {
-              await appendTrajectory(runId, "tool_invocation", {
+              await appendRunTrajectory("tool_invocation", {
                 ...payload,
                 toolInvocationId: record.id,
                 toolCallId: record.toolCallId,
@@ -322,7 +345,7 @@ export function createGoalRuntimeEngine(options: {
                   ok: false,
                   error: rejectedResult.error,
                 });
-                await appendTrajectory(runId, "tool_result", {
+                await appendRunTrajectory("tool_result", {
                   ...payload,
                   toolName,
                   ok: false,
@@ -341,7 +364,7 @@ export function createGoalRuntimeEngine(options: {
               });
             }
 
-            await appendTrajectory(runId, "tool_call", {
+            await appendRunTrajectory("tool_call", {
               ...payload,
               toolName,
               args,
@@ -373,14 +396,14 @@ export function createGoalRuntimeEngine(options: {
                 ? { status: "completed", ok: true }
                 : { status: "error", ok: false, error: result.error },
             );
-            await appendTrajectory(runId, "tool_result", {
+            await appendRunTrajectory("tool_result", {
               ...payload,
               toolName,
               ok: result.ok,
               ...artifactEvidence.toolResultPayload,
             });
             for (const artifact of artifactEvidence.artifacts ?? []) {
-              await appendTrajectory(runId, "artifact_created", {
+              await appendRunTrajectory("artifact_created", {
                 ...payload,
                 ...artifact,
                 toolName,
@@ -400,6 +423,21 @@ export function createGoalRuntimeEngine(options: {
           },
         });
         const finishedAt = now();
+        if (runOptions?.signal?.aborted) {
+          return {
+            runId,
+            toolCallCount: observedToolCalls,
+            status: "canceled",
+            summary: "Goal milestone canceled.",
+            wallClockMs:
+              new Date(finishedAt).getTime() - new Date(startedAt).getTime(),
+            tokens: 0,
+            transcriptMessages: [],
+            actionSignatures: sanitizeActionSignaturesForPersistence([
+              ...actionSignatures,
+            ]),
+          };
+        }
         const status = pipelineResult.status;
         events.push(
           createEvent(
@@ -415,7 +453,7 @@ export function createGoalRuntimeEngine(options: {
             },
           ),
         );
-        await appendTrajectory(runId, "final_summary", {
+        await appendRunTrajectory("final_summary", {
           ...payload,
           status,
           toolCallsExecuted: pipelineResult.toolNames.length,
@@ -442,7 +480,7 @@ export function createGoalRuntimeEngine(options: {
           milestone.id,
         );
         await options.runStore.append(run);
-        await appendTrajectory(runId, "checkpoint_written", {
+        await appendRunTrajectory("checkpoint_written", {
           ...payload,
           runId,
           status,
@@ -500,7 +538,7 @@ export function createGoalRuntimeEngine(options: {
         createId: () => `runtime_snapshot_${runId}`,
         now,
       });
-      await appendTrajectory(runId, "run_context_created", {
+      await appendRunTrajectory("run_context_created", {
         ...payload,
         runContext,
         runtimeContextSnapshot,
@@ -561,14 +599,14 @@ export function createGoalRuntimeEngine(options: {
           pauseOnTurnLimit: false,
           ...(runOptions?.signal ? { signal: runOptions.signal } : {}),
           onTurn(turn, phase) {
-            void appendTrajectory(runId, "model_request", {
+            void appendRunTrajectory("model_request", {
               ...payload,
               turn: turn + 1,
               phase,
             });
           },
           onModelResponse(response, turn) {
-            void appendTrajectory(runId, "model_response", {
+            void appendRunTrajectory("model_response", {
               ...payload,
               turn,
               hasContent: Boolean(response.content),
@@ -577,7 +615,7 @@ export function createGoalRuntimeEngine(options: {
             });
           },
           onReasoning(reasoningContent, turn) {
-            void appendTrajectory(runId, "model_reasoning", {
+            void appendRunTrajectory("model_reasoning", {
               ...payload,
               turn,
               reasoningContent,
@@ -591,7 +629,7 @@ export function createGoalRuntimeEngine(options: {
           },
           onToolCall(toolName, args) {
             recordActionSignature(toolName, args);
-            void appendTrajectory(runId, "tool_call", {
+            void appendRunTrajectory("tool_call", {
               ...payload,
               toolName,
               args,
@@ -604,7 +642,7 @@ export function createGoalRuntimeEngine(options: {
             );
           },
           onToolInvocation(record) {
-            void appendTrajectory(runId, "tool_invocation", {
+            void appendRunTrajectory("tool_invocation", {
               ...payload,
               toolInvocationId: record.id,
               toolCallId: record.toolCallId,
@@ -621,14 +659,14 @@ export function createGoalRuntimeEngine(options: {
           onToolResult(toolName, ok, result) {
             observedToolCalls += 1;
             const artifactEvidence = extractArtifactEvidence(result);
-            void appendTrajectory(runId, "tool_result", {
+            void appendRunTrajectory("tool_result", {
               ...payload,
               toolName,
               ok,
               ...artifactEvidence.toolResultPayload,
             });
             for (const artifact of artifactEvidence.artifacts ?? []) {
-              void appendTrajectory(runId, "artifact_created", {
+              void appendRunTrajectory("artifact_created", {
                 ...payload,
                 ...artifact,
                 toolName,
@@ -644,7 +682,7 @@ export function createGoalRuntimeEngine(options: {
             );
           },
           onStrategyGuard(event) {
-            void appendTrajectory(runId, "strategy_guard_triggered", {
+            void appendRunTrajectory("strategy_guard_triggered", {
               ...payload,
               ...event,
             }, false);
@@ -663,6 +701,26 @@ export function createGoalRuntimeEngine(options: {
         } satisfies AgentLoopOptions,
       );
       const finishedAt = now();
+      if (runOptions?.signal?.aborted) {
+        return {
+          runId,
+          toolCallCount: Math.max(
+            loopResult.toolCallsExecuted,
+            observedToolCalls,
+          ),
+          status: "canceled",
+          summary: "Goal milestone canceled.",
+          wallClockMs:
+            new Date(finishedAt).getTime() - new Date(startedAt).getTime(),
+          tokens: inferTokens(loopResult, initialMessages),
+          transcriptMessages: toBoundedTranscriptMessages(
+            loopResult.messages,
+          ),
+          actionSignatures: sanitizeActionSignaturesForPersistence([
+            ...actionSignatures,
+          ]),
+        };
+      }
       const status = toRunStatus(loopResult.status);
       events.push(
         createEvent(
@@ -678,7 +736,7 @@ export function createGoalRuntimeEngine(options: {
           },
         ),
       );
-      await appendTrajectory(runId, "final_summary", {
+      await appendRunTrajectory("final_summary", {
         ...payload,
         status: loopResult.status,
         toolCallsExecuted: loopResult.toolCallsExecuted,
@@ -705,7 +763,7 @@ export function createGoalRuntimeEngine(options: {
       );
       await options.runStore.append(run);
 
-      await appendTrajectory(runId, "checkpoint_written", {
+      await appendRunTrajectory("checkpoint_written", {
         ...payload,
         runId,
         status,

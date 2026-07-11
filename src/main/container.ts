@@ -1344,6 +1344,9 @@ export function createAppContainer(options: {
         },
         getAvailableTools: getAvailableToolNames,
         onProgress: emitGoalProgressEvent,
+        onDiagnostic(event) {
+          console.warn(`[goal:${event.phase}] ${event.message}`, event.error);
+        },
       }),
     );
   }
@@ -1353,6 +1356,9 @@ export function createAppContainer(options: {
       createAgentGoalTranslator({
         chatClient: chatClient(),
         getModelProfile,
+        onDiagnostic(event) {
+          console.warn(`[goal:translation] ${event.message}`, event.error);
+        },
       }),
     );
   }

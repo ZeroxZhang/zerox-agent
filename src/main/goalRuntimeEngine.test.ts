@@ -920,6 +920,61 @@ describe("goal runtime engine", () => {
       .toContain("Resume directly from the latest real message/tool result");
   });
 
+  it("suppresses final trajectory and run writes after cancellation", async () => {
+    const controller = new AbortController();
+    const trajectoryTypes: string[] = [];
+    const runs: AgentRunRecord[] = [];
+    const goal = createGoal();
+    const engine = createGoalRuntimeEngine({
+      workspaceRoot: "/Users/demo/project",
+      chatClient: { async complete() { throw new Error("unused"); } },
+      getModelProfile: async () => ({
+        baseUrl: "http://localhost",
+        apiKey: "test",
+        model: "test-model",
+        temperature: 0,
+        maxTokens: 4_000,
+      }),
+      toolExecutor: {
+        async execute() { return { ok: true, result: {} }; },
+        getRegistry() { return createDynamicToolRegistry(); },
+        hasTool() { return true; },
+      },
+      runStore: {
+        async append(run) {
+          runs.push(run);
+          return run;
+        },
+      },
+      trajectoryStore: {
+        async append(_runId, event) {
+          trajectoryTypes.push(event.type);
+          return event;
+        },
+      },
+      goalContext: createAgentGoalContext(),
+      runAgentLoop: async (messages) => {
+        controller.abort();
+        return {
+          summary: "canceled",
+          status: "canceled",
+          turns: 1,
+          messages,
+          toolCallsExecuted: 0,
+        };
+      },
+    });
+
+    const result = await engine.runMilestone(goal, goal.milestones[0]!, {
+      signal: controller.signal,
+    });
+
+    expect(result.status).toBe("canceled");
+    expect(runs).toEqual([]);
+    expect(trajectoryTypes).not.toContain("final_summary");
+    expect(trajectoryTypes).not.toContain("checkpoint_written");
+  });
+
   it("passes run-scoped identity into chrome bookmark provenance and projects artifact events", async () => {
     const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "goal-workspace-"));
     const outputRoot = await mkdtemp(path.join(os.tmpdir(), "goal-output-"));
