@@ -6602,3 +6602,49 @@
   - Packaged-app smoke with required text `v3.4.0` -> passed.
   - Generated package SHA256: DMG `a7e11c8cb8211d981dcce89b9048b06f2d657a14826195bb92e821c8c4eefc4d`; ZIP `6b2d3e38427f90ec989ffa39abe87d832915e745bf7144b3f134371b0380592e`.
   - Relaunched the rebuilt app as PID 93800 at 2026-07-10 23:33:25 local time.
+
+## 2026-07-11 - P41 Goal Acceptance Policy Engine, Targeted Repair, and Completion Certificates
+
+- Request:
+  - Upgrade Goal Mode from a loosely coupled “LLM says done” check into a typed, bounded, auditable acceptance protocol, informed by the MiMo-Code comparison and the 2026-07-10 infinite-replan incident.
+  - Make completion truthful: a protocol-v2 goal may become `achieved` only after validators, structural evidence, cold judges, and durable certificate persistence all succeed.
+- Incident and design diagnosis:
+  - The original incident produced a valid 806-line, ten-section report but acceptance repeatedly failed on artifact resolution; the controller then treated every rejection as a planning problem and accumulated 320 rejection/replan cycles.
+  - The previous system mixed evidence collection, semantic judging, retry/replan policy, and terminal publication. It lacked a stable failure identity, targeted-repair budget, certificate gate, and fail-closed integrity boundary.
+  - P41 separates these concerns into validator registry, bounded evidence manifests, failure fingerprinting/classification, repair policy, cold judging, certificate construction, authorized tool execution, durable storage, and renderer projection.
+- Changed areas:
+  - Shared goal/provenance/trajectory/chat contracts and protocol-v2 backward-compatible normalization.
+  - Acceptance validators, authorized tool executor, bounded evidence manifest, failure fingerprint, repair policy, certificate builder, redaction, controller, store/repository, runtime/chat/container wiring, trajectory persistence, renderer view model/activity/UI, and focused regression tests.
+  - Design and implementation records: `docs/superpowers/specs/2026-07-11-goal-acceptance-policy-engine-design.md`, `docs/superpowers/plans/2026-07-11-goal-acceptance-policy-engine.md`, and `.superpowers/sdd/p41-task-7-report.md`.
+- Definition-of-done evidence:
+  1. **Legacy compatibility:** historical JSON is normalized without manual migration; real store/service resume, retry, and terminal non-rewrite tests cover v1 data while new/resumed goals use protocol v2.
+  2. **Authorized typed validators:** built-in and custom validators use typed registry entries; `agentGoalAcceptanceToolExecutor` binds canonical run context and authorizes every tool invocation through `ToolAuthorizationService`, including real kernel-denial and context-override tests.
+  3. **Bounded large-artifact evidence:** manifest tests cover artifacts above 2 MiB, late headings beyond line 70,000, JSON/table structure, exact byte size, hashes, excerpt relevance, traversal bounds, symlink containment, and redaction.
+  4. **Stable actionable rejection:** canonical failure fingerprints, typed failure classes, occurrence counts, evidence references, and repair directives are deterministic and exclude volatile/secret metadata.
+  5. **Bounded targeted repair:** the controller reuses the same milestone, tracks identical occurrences, changes repair actions, respects repair/iteration/tool/time/token limits, and stops after the configured repeated-failure ceiling.
+  6. **Structural-only replanning:** only `structural_plan_failure` may automatically replan; unchanged evidence, validation, judge, blocked, unavailable, impossible, timeout, cancellation, and integrity failures cannot enter an unbounded replan loop.
+  7. **Cold semantic judging:** semantic goals require independent final cold judges; disagreement, timeout, abort, malformed output, or judge failure is fail-closed and cannot produce `achieved`.
+  8. **Atomic certificate gate:** protocol-v2 achievement requires a schema-valid, fingerprint-bound acceptance certificate persisted atomically with terminal state; invalid or mismatched certificates are quarantined and cannot be published as achieved.
+  9. **Truthful recoverable outcomes:** blocked, impossible, acceptance-unavailable, integrity-failed, budget-exhausted, canceled, and achieved remain distinct; retry/recovery is allowed only where safe, with stale writes/events unable to regress a terminal state.
+  10. **Observable UI:** goal detail/status/chat activity expose acceptance phase, repeated failure count, repair decision, evidence, certificate, blocked explanation, and recovery action; integrity-invalid certificates are not rendered as success.
+- TDD and review evidence:
+  - RED tests reproduced the reported large-report loop, late-section evidence loss, repeated identical cold-judge rejection, unsafe completion publication, cancellation races, timeout work continuing after return, nested action-budget escapes, secret-bearing metadata, and authorization bypass.
+  - GREEN incident tests prove the ten-section report can certify when the late final heading is present, and that three identical cold-judge rejections stop without automatic replanning.
+  - Multiple independent review/correction rounds covered controller termination, persistence/publication atomicity, abort propagation, path/provenance integrity, redaction, action traversal bounds, custom-validator deadlines, and tool authorization. Final exhaustive review reported no Critical, Important, or Minor findings and marked the change ready to merge.
+- Verification evidence:
+  - Exact P41 verification suite -> 14 files / 577 tests passed.
+  - Extended authorization, provenance, trajectory, repository, redaction, chat-activity, and runtime regression suite -> 68 tests passed.
+  - `npm run verify` -> passed: 195 test files / 1,751 tests, TypeScript/Vite build, agent evals 26/26, and memory evals 2/2.
+  - `npm run smoke:prod` -> passed; renderer rendered the agent chat UI. The unpackaged smoke retained the known local better-sqlite3 ABI fallback only.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed.
+- Packaging and live replacement evidence:
+  - Gracefully stopped old packaged PID 93800, then `npm run dist:mac` rebuilt the unsigned macOS arm64 App, DMG, ZIP, blockmaps, and update metadata.
+  - Packaged-app smoke with required text `v3.4.0` passed; `Info.plist` reports both short and bundle versions as `3.4.0`; `app.asar` contains the new `目标受阻` and `查看验收证书` UI text.
+  - Relaunched the rebuilt app as PID 85653 at 2026-07-11 12:28:36 +0800.
+  - `release/Zerox Agent-3.4.0-arm64.dmg` (123M, SHA256 `22052a7917c3cc5828103c7275c157c2624f915321392bdf38e508e812c46755`).
+  - `release/Zerox Agent-3.4.0-arm64-mac.zip` (333M, SHA256 `b1f1dc9fcd9d907ab84971e34d30934931159f15b856cfaee197bda12c50d6d9`).
+  - DMG blockmap SHA256 `d01793de97bc1d94845a8a3f8f6d74d8adc17f358515d4b356a2f91ef52c6b6e`; ZIP blockmap SHA256 `da80a4c656a4ced55e6c340d94bbc7e65ee905e5aafdab1d4e548623eb14e380`; `latest-mac.yml` SHA256 `bc3a0575e1bf0d13cb79cb76f56017373c1113f57b081db1bde99a6f8c681495`.
+- Historical-state integrity evidence:
+  - After relaunch, incident goal JSON SHA256 remains `a26c49399cd7981983604c7bb2a86d839904ed6c442e0a66f361bce218ae7c5f` (14,290 bytes) and ledger SHA256 remains `8aff53a7a7856313ef2b95eb08f2426a48df4e3565ec6a5fea4a44de590fd131` (160,727 bytes).
+  - Both files retain mtime `2026-07-10 22:46:28 +0800`, proving the new app startup did not mutate or resurrect the canceled historical run.

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-07-11T04:10:00.000+08:00",
+  "updatedAt": "2026-07-11T12:29:14.000+08:00",
   "features": [
     {
       "id": "P0-repo-local-harness",
@@ -2669,7 +2669,7 @@
     {
       "id": "P41-v3.4.0-goal-acceptance-policy-engine",
       "priority": 71,
-      "status": "in_progress",
+      "status": "done",
       "title": "v3.4.0 Goal acceptance policy engine, targeted repair, and completion certificates",
       "files": [
         "docs/superpowers/specs/2026-07-11-goal-acceptance-policy-engine-design.md",
@@ -2678,6 +2678,8 @@
         "src/shared/agentGoal.test.ts",
         "src/main/agentGoalValidatorRegistry.ts",
         "src/main/agentGoalValidatorRegistry.test.ts",
+        "src/main/agentGoalAcceptanceToolExecutor.ts",
+        "src/main/agentGoalAcceptanceToolExecutor.test.ts",
         "src/main/agentGoalEvidenceManifest.ts",
         "src/main/agentGoalEvidenceManifest.test.ts",
         "src/main/agentGoalFailureFingerprint.ts",
@@ -2694,6 +2696,8 @@
         "src/main/agentGoalStore.test.ts",
         "src/main/goalChatService.ts",
         "src/main/goalChatService.test.ts",
+        "src/main/goalRuntimeEngine.ts",
+        "src/main/goalRuntimeEngine.test.ts",
         "src/main/container.ts",
         "src/main/container.test.ts",
         "src/renderer/goalProgressViewModel.ts",
