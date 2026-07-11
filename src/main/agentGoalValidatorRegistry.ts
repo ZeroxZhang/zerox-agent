@@ -27,7 +27,7 @@ export type AcceptanceValidatorContext = Pick<
   | "trajectoryStore"
   | "artifacts"
   | "transcriptMessages"
->;
+> & { signal: AbortSignal };
 
 export type AcceptanceValidator = {
   kind: AcceptanceCheckKind;
@@ -84,7 +84,7 @@ export function createAgentGoalValidatorRegistry(
       const outcome = await evaluateWithTimeout(
         validator,
         check,
-        validatorContext(context),
+        context,
         timeoutMs,
       );
       if (outcome.status === "completed") {
@@ -117,38 +117,63 @@ type ValidatorOutcome =
 async function evaluateWithTimeout(
   validator: AcceptanceValidator,
   check: AcceptanceCheck,
-  context: AcceptanceValidatorContext,
+  context: AcceptanceContext,
   timeoutMs: number,
 ): Promise<ValidatorOutcome> {
   const startedAt = performance.now();
-  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const operation = createLinkedDeadline(context.signal, timeoutMs);
+  if (context.signal?.aborted) {
+    operation.dispose();
+    throw abortError(context.signal.reason);
+  }
   const evaluation: Promise<ValidatorOutcome> = Promise.resolve()
-    .then(() => validator.evaluate({ check, context }))
+    .then(() => validator.evaluate({
+      check,
+      context: validatorContext(context, operation.signal),
+    }))
     .then(
-      (result) =>
-        deadlinePassed(startedAt, timeoutMs)
-          ? { status: "timed_out" }
-          : { status: "completed", result },
-      () =>
-        deadlinePassed(startedAt, timeoutMs)
-          ? { status: "timed_out" }
-          : { status: "failed" },
+      (result) => {
+        if (deadlinePassed(startedAt, timeoutMs)) {
+          operation.abortForTimeout();
+          return { status: "timed_out" };
+        }
+        if (operation.signal.aborted) {
+          throw abortError(context.signal?.reason ?? operation.signal.reason);
+        }
+        return { status: "completed", result };
+      },
+      () => {
+        if (operation.timedOut()) return { status: "timed_out" };
+        if (operation.signal.aborted) {
+          throw abortError(context.signal?.reason ?? operation.signal.reason);
+        }
+        return { status: "failed" };
+      },
     );
-  const deadline = new Promise<ValidatorOutcome>((resolve) => {
-    timeout = setTimeout(() => resolve({ status: "timed_out" }), timeoutMs);
+  const canceled = new Promise<ValidatorOutcome>((resolve, reject) => {
+    const onAbort = () => {
+      if (operation.timedOut()) {
+        resolve({ status: "timed_out" });
+      } else {
+        reject(abortError(context.signal?.reason ?? operation.signal.reason));
+      }
+    };
+    operation.signal.addEventListener("abort", onAbort, { once: true });
+    operation.setAbortCleanup(() => {
+      operation.signal.removeEventListener("abort", onAbort);
+    });
   });
 
   try {
-    return await Promise.race([evaluation, deadline]);
+    return await Promise.race([evaluation, canceled]);
   } finally {
-    if (timeout !== undefined) {
-      clearTimeout(timeout);
-    }
+    operation.dispose();
   }
 }
 
 function validatorContext(
   context: AcceptanceContext,
+  signal: AbortSignal,
 ): AcceptanceValidatorContext {
   return {
     runId: context.runId,
@@ -162,7 +187,57 @@ function validatorContext(
     trajectoryStore: context.trajectoryStore,
     artifacts: context.artifacts,
     transcriptMessages: context.transcriptMessages,
+    signal,
   };
+}
+
+type LinkedDeadline = {
+  signal: AbortSignal;
+  timedOut(): boolean;
+  abortForTimeout(): void;
+  setAbortCleanup(cleanup: () => void): void;
+  dispose(): void;
+};
+
+function createLinkedDeadline(
+  parentSignal: AbortSignal | undefined,
+  timeoutMs: number,
+): LinkedDeadline {
+  const controller = new AbortController();
+  let didTimeOut = false;
+  let abortCleanup: (() => void) | undefined;
+  const onParentAbort = () => {
+    if (!controller.signal.aborted) controller.abort(parentSignal?.reason);
+  };
+  if (parentSignal?.aborted) {
+    onParentAbort();
+  } else {
+    parentSignal?.addEventListener("abort", onParentAbort, { once: true });
+  }
+  const abortForTimeout = () => {
+    if (controller.signal.aborted) return;
+    didTimeOut = true;
+    controller.abort(new DOMException("Acceptance validator timed out.", "TimeoutError"));
+  };
+  const timer = setTimeout(abortForTimeout, timeoutMs);
+  return {
+    signal: controller.signal,
+    timedOut: () => didTimeOut,
+    abortForTimeout,
+    setAbortCleanup(cleanup) {
+      abortCleanup = cleanup;
+    },
+    dispose() {
+      clearTimeout(timer);
+      parentSignal?.removeEventListener("abort", onParentAbort);
+      abortCleanup?.();
+    },
+  };
+}
+
+function abortError(reason: unknown): Error {
+  if (reason instanceof Error && reason.name === "AbortError") return reason;
+  return new DOMException("Goal acceptance was canceled.", "AbortError");
 }
 
 function deadlinePassed(startedAt: number, timeoutMs: number): boolean {

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { GoalEvidenceManifest } from "../shared/agentGoal";
 import {
   buildGoalEvidenceManifest,
+  GoalEvidenceManifestAbortError,
   renderGoalEvidenceManifest,
 } from "./agentGoalEvidenceManifest";
 import { writeArtifactProvenance } from "../shared/agentArtifactProvenance";
@@ -108,6 +109,47 @@ describe("goal evidence manifest", () => {
         text: expect.stringContaining("release-critical-evidence"),
       }),
     ]));
+  });
+
+  it("aborts a slow full-file scan between chunks and closes the file", async () => {
+    const reportPath = path.join(workspacePath, "abortable-report.md");
+    await writeFile(reportPath, `${"large evidence line\n".repeat(20_000)}# Late heading\n`, "utf8");
+    const controller = new AbortController();
+    let chunks = 0;
+    let closed = false;
+
+    const manifest = buildGoalEvidenceManifest(input({
+      evidenceRefs: [`artifact:${reportPath}`],
+      signal: controller.signal,
+      afterChunkProcessed: async () => {
+        chunks += 1;
+        if (chunks === 1) controller.abort();
+      },
+      afterFileClosed: async () => {
+        closed = true;
+      },
+    }));
+
+    await expect(manifest).rejects.toBeInstanceOf(GoalEvidenceManifestAbortError);
+    expect(chunks).toBe(1);
+    expect(closed).toBe(true);
+  });
+
+  it("rejects an already-aborted manifest build before opening an artifact", async () => {
+    const reportPath = path.join(workspacePath, "never-opened.md");
+    await writeFile(reportPath, "# Evidence", "utf8");
+    const controller = new AbortController();
+    controller.abort();
+    let chunks = 0;
+
+    await expect(buildGoalEvidenceManifest(input({
+      evidenceRefs: [`artifact:${reportPath}`],
+      signal: controller.signal,
+      afterChunkProcessed: async () => {
+        chunks += 1;
+      },
+    }))).rejects.toMatchObject({ name: "AbortError", code: "ABORT_ERR" });
+    expect(chunks).toBe(0);
   });
 
   it("preserves UTF-8 criterion matches split across stream chunk boundaries", async () => {
@@ -826,6 +868,9 @@ describe("goal evidence manifest", () => {
       milestoneId?: string;
     };
     afterProvenanceVerified?: (artifactPath: string) => Promise<void>;
+    signal?: AbortSignal;
+    afterChunkProcessed?: (artifactPath: string, bytesRead: number) => Promise<void>;
+    afterFileClosed?: (artifactPath: string) => Promise<void>;
   } = {}) {
     return {
       evidenceRefs: overrides.evidenceRefs ?? [],
@@ -839,6 +884,9 @@ describe("goal evidence manifest", () => {
       maxReadBytes: overrides.maxReadBytes,
       provenance: overrides.provenance,
       afterProvenanceVerified: overrides.afterProvenanceVerified,
+      signal: overrides.signal,
+      afterChunkProcessed: overrides.afterChunkProcessed,
+      afterFileClosed: overrides.afterFileClosed,
     };
   }
 });

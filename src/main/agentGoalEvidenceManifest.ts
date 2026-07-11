@@ -44,8 +44,20 @@ export type BuildGoalEvidenceManifestInput = {
   maxRenderedChars?: number;
   maxReadBytes?: number;
   provenance?: GoalEvidenceProvenanceRequirement;
+  signal?: AbortSignal;
   afterProvenanceVerified?: (artifactPath: string) => Promise<void>;
+  afterChunkProcessed?: (artifactPath: string, bytesRead: number) => Promise<void>;
+  afterFileClosed?: (artifactPath: string) => Promise<void>;
 };
+
+export class GoalEvidenceManifestAbortError extends Error {
+  readonly code = "ABORT_ERR";
+
+  constructor() {
+    super("Goal evidence manifest construction was aborted.");
+    this.name = "AbortError";
+  }
+}
 
 type NumberedLine = { number: number; text: string };
 
@@ -80,12 +92,15 @@ type FileSnapshot = {
 export async function buildGoalEvidenceManifest(
   input: BuildGoalEvidenceManifestInput,
 ): Promise<GoalEvidenceManifest> {
+  throwIfManifestAborted(input.signal);
   const artifacts: GoalEvidenceArtifact[] = [];
   const refs = dedupeStrings(input.evidenceRefs ?? input.refs ?? []);
 
   for (const ref of refs) {
+    throwIfManifestAborted(input.signal);
     if (!ref.startsWith("artifact:")) continue;
     const artifact = await buildArtifact(ref, input);
+    throwIfManifestAborted(input.signal);
     if (artifact) artifacts.push(artifact);
   }
 
@@ -100,6 +115,7 @@ export async function buildGoalEvidenceManifest(
     manifest,
     normalizeBudget(input.maxRenderedChars, defaultMaxRenderedChars),
   );
+  throwIfManifestAborted(input.signal);
   manifest.totalRenderedChars = result.text.length;
   manifest.truncated = result.truncated;
   return manifest;
@@ -120,6 +136,7 @@ async function buildArtifact(
   ref: string,
   input: BuildGoalEvidenceManifestInput,
 ): Promise<GoalEvidenceArtifact | null> {
+  throwIfManifestAborted(input.signal);
   const artifactName = ref.slice("artifact:".length);
   if (!isSafeArtifactReference(artifactName)) return null;
 
@@ -130,6 +147,7 @@ async function buildArtifact(
       ? ref
       : null;
   if (memoryKey) {
+    throwIfManifestAborted(input.signal);
     const value = artifacts?.[memoryKey];
     if (value === undefined || input.provenance?.required) return null;
     return buildMemoryArtifact(
@@ -137,6 +155,7 @@ async function buildArtifact(
       value,
       input.criterionText,
       normalizeBudget(input.maxReadBytes, defaultMaxReadBytes),
+      input.signal,
     );
   }
 
@@ -152,6 +171,7 @@ async function buildArtifact(
   ]);
 
   for (const candidate of getCandidatePaths(artifactName, roots)) {
+    throwIfManifestAborted(input.signal);
     const boundary = validatePathInsideLocationRoots(candidate, roots, env);
     if (!boundary.ok) continue;
 
@@ -159,6 +179,7 @@ async function buildArtifact(
       | { sha256: string; sizeBytes: number }
       | undefined;
     if (input.provenance?.required) {
+      throwIfManifestAborted(input.signal);
       const verification = await verifyArtifactProvenance({
         artifactPath: boundary.path,
         artifactRef: ref,
@@ -169,9 +190,11 @@ async function buildArtifact(
           ? { milestoneId: input.provenance.milestoneId }
           : {}),
       });
+      throwIfManifestAborted(input.signal);
       if (!verification.ok) continue;
       verifiedDestination = verification.manifest.destination;
       await input.afterProvenanceVerified?.(boundary.path);
+      throwIfManifestAborted(input.signal);
     }
 
     const artifact = await buildFileArtifact(
@@ -181,7 +204,9 @@ async function buildArtifact(
       env,
       input.criterionText,
       normalizeBudget(input.maxReadBytes, defaultMaxReadBytes),
+      input,
     );
+    throwIfManifestAborted(input.signal);
     if (
       artifact &&
       (!verifiedDestination ||
@@ -199,7 +224,9 @@ function buildMemoryArtifact(
   value: unknown,
   criterionText: string,
   maxReadBytes: number,
+  signal?: AbortSignal,
 ): GoalEvidenceArtifact {
+  throwIfManifestAborted(signal);
   const binary = getBinaryView(value);
   if (binary) {
     return {
@@ -212,11 +239,12 @@ function buildMemoryArtifact(
   }
 
   if (typeof value === "string") {
-    const snapshot = createStringSnapshot(value, criterionText, maxReadBytes);
+    const snapshot = createStringSnapshot(value, criterionText, maxReadBytes, signal);
     return buildTextArtifact(ref, undefined, "text/plain", snapshot, criterionText);
   }
 
   const sanitized = sanitizeMemoryValue(value, maxReadBytes);
+  throwIfManifestAborted(signal);
   const serialized = JSON.stringify(sanitized) ?? "null";
   const content = truncateUtf8Buffer(serialized, maxReadBytes);
   return buildJsonArtifact(
@@ -235,7 +263,9 @@ async function buildFileArtifact(
   env: Required<LocationResourceEnvironment>,
   criterionText: string,
   maxReadBytes: number,
+  input: BuildGoalEvidenceManifestInput,
 ): Promise<GoalEvidenceArtifact | null> {
+  throwIfManifestAborted(input.signal);
   const boundary = validatePathInsideLocationRoots(candidatePath, roots, env);
   if (!boundary.ok) return null;
 
@@ -245,7 +275,9 @@ async function buildFileArtifact(
       boundary.path,
       constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
     );
-    const stats = await handle.stat();
+    throwIfManifestAborted(input.signal);
+    const stats = await abortableManifestOperation(handle.stat(), input.signal);
+    throwIfManifestAborted(input.signal);
     if (!stats.isFile()) return null;
     const mediaType = detectMediaType(boundary.path);
     const snapshot = await readSnapshot(
@@ -254,13 +286,19 @@ async function buildFileArtifact(
       maxReadBytes,
       mediaType,
       criterionText,
+      boundary.path,
+      input,
     );
+    throwIfManifestAborted(input.signal);
     return adaptSnapshot(ref, boundary.path, mediaType, snapshot, criterionText);
   } catch (error) {
     if (isUnresolvableFileError(error)) return null;
     throw error;
   } finally {
-    await handle?.close();
+    if (handle) {
+      await handle.close();
+      await input.afterFileClosed?.(boundary.path);
+    }
   }
 }
 
@@ -270,7 +308,10 @@ async function readSnapshot(
   maxReadBytes: number,
   mediaType: string,
   criterionText: string,
+  artifactPath: string,
+  input: BuildGoalEvidenceManifestInput,
 ): Promise<FileSnapshot> {
+  throwIfManifestAborted(input.signal);
   const hash = createHash("sha256");
   const readBuffer = Buffer.allocUnsafe(64 * 1024);
   const tailBudget = Math.min(64 * 1024, Math.floor(maxReadBytes / 4));
@@ -289,7 +330,12 @@ async function readSnapshot(
       : null;
 
   while (true) {
-    const { bytesRead } = await handle.read(readBuffer, 0, readBuffer.length, null);
+    throwIfManifestAborted(input.signal);
+    const { bytesRead } = await abortableManifestOperation(
+      handle.read(readBuffer, 0, readBuffer.length, null),
+      input.signal,
+    );
+    throwIfManifestAborted(input.signal);
     if (bytesRead === 0) break;
     const chunk = Buffer.from(readBuffer.subarray(0, bytesRead));
     hash.update(chunk);
@@ -308,6 +354,8 @@ async function readSnapshot(
       jsonScanner?.push(decoded);
       tableScanner?.push(decoded);
     }
+    await input.afterChunkProcessed?.(artifactPath, bytesRead);
+    throwIfManifestAborted(input.signal);
   }
   if (decoder) {
     const finalText = decoder.end();
@@ -332,7 +380,9 @@ function createStringSnapshot(
   value: string,
   criterionText: string,
   maxReadBytes: number,
+  signal?: AbortSignal,
 ): FileSnapshot {
+  throwIfManifestAborted(signal);
   const hash = createHash("sha256");
   const scanner = new TextScanner(criterionText);
   const tailBudget = Math.min(64 * 1024, Math.floor(maxReadBytes / 4));
@@ -342,6 +392,7 @@ function createStringSnapshot(
   let tail: Buffer<ArrayBufferLike> = Buffer.alloc(0);
   let sizeBytes = 0;
   for (let offset = 0; offset < value.length; offset += 32 * 1024) {
+    throwIfManifestAborted(signal);
     const textChunk = value.slice(offset, offset + 32 * 1024);
     const chunk = Buffer.from(textChunk, "utf8");
     hash.update(chunk);
@@ -362,6 +413,36 @@ function createStringSnapshot(
     tail,
     text: scanner.finish(),
   };
+}
+
+function throwIfManifestAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw new GoalEvidenceManifestAbortError();
+}
+
+function abortableManifestOperation<T>(
+  operation: Promise<T>,
+  signal: AbortSignal | undefined,
+): Promise<T> {
+  if (!signal) return operation;
+  throwIfManifestAborted(signal);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      cleanup();
+      reject(new GoalEvidenceManifestAbortError());
+    };
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    signal.addEventListener("abort", onAbort, { once: true });
+    operation.then(
+      (value) => {
+        cleanup();
+        resolve(value);
+      },
+      (error) => {
+        cleanup();
+        reject(error);
+      },
+    );
+  });
 }
 
 function createBufferSnapshot(

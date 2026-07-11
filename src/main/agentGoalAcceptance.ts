@@ -100,6 +100,7 @@ export type AcceptanceContext = {
   createId?: () => string;
   nextSequence?: () => number;
   now?: () => string;
+  signal?: AbortSignal;
 };
 
 export type AgentGoalAcceptanceOptions = {
@@ -345,6 +346,7 @@ async function evaluateFileExists(
   check: AcceptanceCheck,
   ctx: AcceptanceContext,
 ): Promise<CheckResult> {
+  throwIfAcceptanceAborted(ctx.signal);
   const requestedPath = String(check.params.path ?? "");
   const destinationPath = getStructuredDestinationPath(check.params.destination);
   const resolutionPath = destinationPath ?? requestedPath;
@@ -384,6 +386,7 @@ async function evaluateFileExists(
 
   try {
     await access(boundary.path);
+    throwIfAcceptanceAborted(ctx.signal);
     if (shouldRequireArtifactProvenance(check)) {
       const artifactRef = getArtifactRef(check);
       const verification = await verifyArtifactProvenance({
@@ -393,6 +396,7 @@ async function evaluateFileExists(
         ...(ctx.goalId ? { goalId: ctx.goalId } : {}),
         ...(ctx.milestoneId ? { milestoneId: ctx.milestoneId } : {}),
       });
+      throwIfAcceptanceAborted(ctx.signal);
       const evidenceRefs = getArtifactProvenanceEvidenceRefs(artifactRef);
       if (!verification.ok) {
         return checkResult(
@@ -508,7 +512,8 @@ async function evaluateCommandExitCode(
   const result = await ctx.toolExecutor.execute({
     toolName: "shell_exec",
     args: { command },
-  });
+  }, { signal: ctx.signal });
+  throwIfAcceptanceAborted(ctx.signal);
   const exitCode = getExitCode(result);
   const passed = result.ok && exitCode === expectedExitCode;
 
@@ -568,7 +573,8 @@ async function evaluateTestPasses(
       command,
       workspaceRoot: resolvedWorkspaceRoot,
     },
-  });
+  }, { signal: ctx.signal });
+  throwIfAcceptanceAborted(ctx.signal);
   const exitCode = getExitCode(result);
   const passed = result.ok && exitCode === 0;
 
@@ -683,12 +689,17 @@ async function evaluateModelReview(
     };
   }
 
+  const operation = createLinkedJudgeDeadline(ctx.signal, timeoutMs);
+  try {
+
   const evidence = await formatEvidenceForPrompt(
     evidenceRefs,
     criterionText,
     check.params.requireProvenance === true,
     ctx,
+    operation.signal,
   );
+  throwIfJudgeDeadlinePassed(operation);
   if (evidence.missingArtifactRefs.length > 0) {
     return {
       checkResult: checkResult(
@@ -741,7 +752,7 @@ async function evaluateModelReview(
       }),
       tool_choice: "none",
     },
-    timeoutMs,
+    operation,
   );
   if (outcome.status !== "completed") {
     return {
@@ -773,6 +784,20 @@ async function evaluateModelReview(
     evidenceManifest: evidence.manifest,
     judge,
   };
+  } catch (error) {
+    if (operation.timedOut()) {
+      return {
+        checkResult: unavailableJudgeResult(check, evidenceRefs, "judge_timeout"),
+        inferentialUsed: true,
+      };
+    }
+    if (ctx.signal?.aborted || operation.signal.aborted) {
+      throw abortError(ctx.signal?.reason ?? operation.signal.reason);
+    }
+    throw error;
+  } finally {
+    operation.dispose();
+  }
 }
 
 function buildMilestoneJudgeMessages(input: {
@@ -840,12 +865,17 @@ async function evaluateFinalModelReview(
     };
   }
 
+  const operation = createLinkedJudgeDeadline(ctx.signal, timeoutMs);
+  try {
+
   const evidence = await formatEvidenceForPrompt(
     evidenceRefs,
     criterionText,
     check.params.requireProvenance === true,
     ctx,
+    operation.signal,
   );
+  throwIfJudgeDeadlinePassed(operation);
   if (evidence.missingArtifactRefs.length > 0) {
     return {
       checkResult: checkResult(
@@ -903,7 +933,7 @@ async function evaluateFinalModelReview(
     }),
     tool_choice: "none",
   };
-  const outcome = await completeJudgeWithDeadline(chatClient, request, timeoutMs);
+  const outcome = await completeJudgeWithDeadline(chatClient, request, operation);
   if (outcome.status !== "completed") {
     return {
       checkResult: unavailableJudgeResult(
@@ -934,6 +964,20 @@ async function evaluateFinalModelReview(
     evidenceManifest: evidence.manifest,
     judge,
   };
+  } catch (error) {
+    if (operation.timedOut()) {
+      return {
+        checkResult: unavailableJudgeResult(check, evidenceRefs, "judge_timeout"),
+        inferentialUsed: true,
+      };
+    }
+    if (ctx.signal?.aborted || operation.signal.aborted) {
+      throw abortError(ctx.signal?.reason ?? operation.signal.reason);
+    }
+    throw error;
+  } finally {
+    operation.dispose();
+  }
 }
 
 function buildFinalJudgeMessages(input: {
@@ -1177,6 +1221,7 @@ async function formatEvidenceForPrompt(
   criterionText: string,
   requireProvenance: boolean,
   ctx: AcceptanceContext,
+  signal: AbortSignal,
 ): Promise<{
   lines: string[];
   missingArtifactRefs: string[];
@@ -1190,6 +1235,7 @@ async function formatEvidenceForPrompt(
     locationEnv: getAcceptanceLocationEnv(ctx),
     artifacts: ctx.artifacts,
     now: ctx.now ?? (() => new Date().toISOString()),
+    signal,
     ...(requireProvenance
       ? {
           provenance: {
@@ -1201,6 +1247,7 @@ async function formatEvidenceForPrompt(
         }
       : {}),
   });
+  throwIfAcceptanceAborted(signal);
   const includedRefs = new Set(manifest.artifacts.map((artifact) => artifact.ref));
   const missingArtifactRefs = evidenceRefs.filter(
     (ref) => ref.startsWith("artifact:") && !includedRefs.has(ref),
@@ -1382,34 +1429,106 @@ type JudgeCompletionOutcome =
 async function completeJudgeWithDeadline(
   chatClient: ChatClient,
   request: ChatCompletionRequest,
-  timeoutMs: number,
+  operation: LinkedJudgeDeadline,
 ): Promise<JudgeCompletionOutcome> {
-  const startedAt = performance.now();
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const completion: Promise<JudgeCompletionOutcome> = Promise.resolve()
-    .then(() => chatClient.complete(request))
-    .then(
-      (response) =>
-        deadlinePassed(startedAt, timeoutMs)
-          ? { status: "timed_out" }
-          : { status: "completed", content: response.content ?? "" },
-      () =>
-        deadlinePassed(startedAt, timeoutMs)
-          ? { status: "timed_out" }
-          : { status: "failed" },
-    );
-  const deadline = new Promise<JudgeCompletionOutcome>((resolve) => {
-    timer = setTimeout(() => resolve({ status: "timed_out" }), timeoutMs);
-  });
-  try {
-    return await Promise.race([completion, deadline]);
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
+  if (operation.signal.aborted) {
+    if (operation.timedOut()) return { status: "timed_out" };
+    throw abortError(operation.signal.reason);
   }
+  if (operation.deadlinePassed()) {
+    operation.abortForTimeout();
+    return { status: "timed_out" };
+  }
+  const completion: Promise<JudgeCompletionOutcome> = Promise.resolve()
+    .then(() => chatClient.complete({ ...request, signal: operation.signal }))
+    .then(
+      (response) => {
+        if (operation.deadlinePassed()) {
+          operation.abortForTimeout();
+          return { status: "timed_out" };
+        }
+        if (operation.signal.aborted) throw abortError(operation.signal.reason);
+        return { status: "completed", content: response.content ?? "" };
+      },
+      () => {
+        if (operation.timedOut()) return { status: "timed_out" };
+        if (operation.signal.aborted) throw abortError(operation.signal.reason);
+        return { status: "failed" };
+      },
+    );
+  const canceled = new Promise<JudgeCompletionOutcome>((resolve, reject) => {
+    const onAbort = () => {
+      cleanup();
+      if (operation.timedOut()) {
+        resolve({ status: "timed_out" });
+      } else {
+        reject(abortError(operation.signal.reason));
+      }
+    };
+    const cleanup = () => operation.signal.removeEventListener("abort", onAbort);
+    operation.signal.addEventListener("abort", onAbort, { once: true });
+    operation.setAbortCleanup(cleanup);
+  });
+  return Promise.race([completion, canceled]);
 }
 
-function deadlinePassed(startedAt: number, timeoutMs: number): boolean {
-  return performance.now() - startedAt >= timeoutMs;
+type LinkedJudgeDeadline = {
+  signal: AbortSignal;
+  timedOut(): boolean;
+  deadlinePassed(): boolean;
+  abortForTimeout(): void;
+  setAbortCleanup(cleanup: () => void): void;
+  dispose(): void;
+};
+
+function createLinkedJudgeDeadline(
+  parentSignal: AbortSignal | undefined,
+  timeoutMs: number,
+): LinkedJudgeDeadline {
+  const controller = new AbortController();
+  const startedAt = performance.now();
+  let didTimeOut = false;
+  let abortCleanup: (() => void) | undefined;
+  const onParentAbort = () => {
+    if (!controller.signal.aborted) controller.abort(parentSignal?.reason);
+  };
+  if (parentSignal?.aborted) onParentAbort();
+  else parentSignal?.addEventListener("abort", onParentAbort, { once: true });
+  const abortForTimeout = () => {
+    if (controller.signal.aborted) return;
+    didTimeOut = true;
+    controller.abort(new DOMException("Final judge timed out.", "TimeoutError"));
+  };
+  const timer = setTimeout(abortForTimeout, timeoutMs);
+  return {
+    signal: controller.signal,
+    timedOut: () => didTimeOut,
+    deadlinePassed: () => performance.now() - startedAt >= timeoutMs,
+    abortForTimeout,
+    setAbortCleanup(cleanup) {
+      abortCleanup = cleanup;
+    },
+    dispose() {
+      clearTimeout(timer);
+      parentSignal?.removeEventListener("abort", onParentAbort);
+      abortCleanup?.();
+    },
+  };
+}
+
+function throwIfAcceptanceAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw abortError(signal.reason);
+}
+
+function throwIfJudgeDeadlinePassed(operation: LinkedJudgeDeadline): void {
+  if (!operation.deadlinePassed()) return;
+  operation.abortForTimeout();
+  throw operation.signal.reason;
+}
+
+function abortError(reason: unknown): Error {
+  if (reason instanceof Error && reason.name === "AbortError") return reason;
+  return new DOMException("Goal acceptance was canceled.", "AbortError");
 }
 
 function parseStrictGoalJudgeVerdict(

@@ -9,7 +9,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatClient } from "./openAiCompatibleClient";
 import type { AgentToolExecutionResult } from "./agentToolExecutor";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
@@ -17,6 +17,7 @@ import type { AcceptanceCheck, Goal, Milestone, SuccessCriterion } from "../shar
 import {
   GOAL_JUDGE_PROMPT_VERSION,
   createAgentGoalAcceptance,
+  createBuiltinGoalAcceptanceValidators,
   type AcceptanceContext,
 } from "./agentGoalAcceptance";
 import {
@@ -42,6 +43,7 @@ describe("agent goal acceptance", () => {
   });
 
   afterEach(async () => {
+    vi.useRealTimers();
     await rm(workspacePath, { recursive: true, force: true });
     await rm(homePath, { recursive: true, force: true });
   });
@@ -407,6 +409,54 @@ describe("agent goal acceptance", () => {
         args: { command: "npm test -- src/shared/agentGoal.test.ts" },
       },
     ]);
+  });
+
+  it("aborts a permissioned command tool when its validator deadline expires", async () => {
+    vi.useFakeTimers();
+    const context = createContext();
+    let toolSignal: AbortSignal | undefined;
+    let finishLateTool: (() => void) | undefined;
+    let lateWrites = 0;
+    context.toolExecutor = {
+      execute(_request, options) {
+        toolSignal = options?.signal;
+        return new Promise((resolve, reject) => {
+          options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), {
+            once: true,
+          });
+          finishLateTool = () => {
+            if (!options?.signal?.aborted) lateWrites += 1;
+            resolve({ ok: true, result: { exitCode: 0 } });
+          };
+        });
+      },
+    };
+    const acceptance = createAgentGoalAcceptance({
+      registry: createAgentGoalValidatorRegistry({
+        validators: createBuiltinGoalAcceptanceValidators(),
+        timeoutMs: 25,
+      }),
+    });
+
+    const evaluation = acceptance.evaluate(
+      createMilestone([
+        check("abort_command", "command_exit_code", {
+          command: "npm run verify",
+          expectedExitCode: 0,
+        }),
+      ]),
+      context,
+    );
+    await vi.advanceTimersByTimeAsync(25);
+
+    await expect(evaluation).resolves.toMatchObject({
+      accepted: false,
+      checkResults: [{ code: "validator_timeout" }],
+    });
+    expect(toolSignal?.aborted).toBe(true);
+    finishLateTool?.();
+    await Promise.resolve();
+    expect(lateWrites).toBe(0);
   });
 
   it.each([
@@ -1868,6 +1918,118 @@ describe("agent goal acceptance", () => {
       checkResults: [{ code: "judge_timeout" }],
     });
     await new Promise((resolve) => setTimeout(resolve, 25));
+  });
+
+  it("aborts the final judge transport at the deadline without a late judged event", async () => {
+    vi.useFakeTimers();
+    let observedSignal: AbortSignal | undefined;
+    let finishLateCompletion: (() => void) | undefined;
+    const context = createContext();
+    const resultPromise = createAgentGoalAcceptance({
+      judgeTimeoutMs: 25,
+      chatClient: {
+        complete(request) {
+          observedSignal = request.signal;
+          return new Promise((resolve, reject) => {
+            request.signal?.addEventListener("abort", () => reject(request.signal?.reason), {
+              once: true,
+            });
+            finishLateCompletion = () => resolve({
+              content: JSON.stringify({
+                verdict: "accepted",
+                reason: "This late result must be ignored.",
+                evidenceRefs: ["evidence:final"],
+              }),
+              toolCalls: [],
+              finishReason: "stop",
+            });
+          });
+        },
+      },
+    }).evaluateGoal(
+      createGoal([
+        check("final_abort", "model_review", { evidenceRefs: ["evidence:final"] }, true),
+      ]),
+      context,
+    );
+
+    await vi.advanceTimersByTimeAsync(25);
+    const result = await resultPromise;
+    expect(result.checkResults).toEqual([
+      expect.objectContaining({ code: "judge_timeout", passed: false }),
+    ]);
+    expect(observedSignal?.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    finishLateCompletion?.();
+    await Promise.resolve();
+    expect(trajectoryEvents.filter((event) => event.type === "goal_judged")).toHaveLength(0);
+  });
+
+  it("applies the final-judge deadline while structural evidence is still scanning", async () => {
+    vi.useFakeTimers();
+    const reportPath = path.join(workspacePath, "deadline-evidence.md");
+    await writeFile(
+      reportPath,
+      `${"structural evidence line\n".repeat(100_000)}# Late evidence\n`,
+      "utf8",
+    );
+    let modelCalls = 0;
+    const evaluation = createAgentGoalAcceptance({
+      judgeTimeoutMs: 25,
+      chatClient: {
+        async complete() {
+          modelCalls += 1;
+          throw new Error("The judge must not start after evidence timed out.");
+        },
+      },
+    }).evaluateGoal(
+      createGoal([
+        check("evidence_deadline", "model_review", {
+          evidenceRefs: [`artifact:${reportPath}`],
+        }, true),
+      ]),
+      createContext(),
+    );
+
+    await vi.advanceTimersByTimeAsync(25);
+
+    await expect(evaluation).resolves.toMatchObject({
+      accepted: false,
+      checkResults: [{ code: "judge_timeout" }],
+    });
+    expect(modelCalls).toBe(0);
+  });
+
+  it("propagates parent cancellation through evidence and the final judge", async () => {
+    const parent = new AbortController();
+    const context = createContext();
+    context.signal = parent.signal;
+    let observedSignal: AbortSignal | undefined;
+    const evaluation = createAgentGoalAcceptance({
+      chatClient: {
+        complete(request) {
+          observedSignal = request.signal;
+          return new Promise((_, reject) => {
+            request.signal?.addEventListener("abort", () => reject(request.signal?.reason), {
+              once: true,
+            });
+          });
+        },
+      },
+    }).evaluateGoal(
+      createGoal([
+        check("final_parent_abort", "model_review", { evidenceRefs: ["evidence:final"] }, true),
+      ]),
+      context,
+    );
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(observedSignal).toBeDefined();
+    parent.abort(new DOMException("Run canceled.", "AbortError"));
+
+    await expect(evaluation).rejects.toMatchObject({ name: "AbortError" });
+    expect(observedSignal?.aborted).toBe(true);
+    expect(trajectoryEvents).toHaveLength(0);
   });
 
   it("rejects a synchronous/elapsed final-judge completion after its deadline", async () => {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { performance } from "node:perf_hooks";
 import type {
   AcceptanceCheck,
@@ -13,6 +13,10 @@ import {
 } from "./agentGoalValidatorRegistry";
 
 describe("agent goal validator registry", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("dispatches a built-in check and preserves the validator result", async () => {
     const expected: GoalAcceptanceCheckResult = {
       checkId: "check_assertion",
@@ -193,6 +197,69 @@ describe("agent goal validator registry", () => {
       evidenceRefs: [],
       detail: "Acceptance validator timed out.",
     });
+  });
+
+  it("aborts the underlying validator at its deadline and ignores late work", async () => {
+    vi.useFakeTimers();
+    let validatorSignal: AbortSignal | undefined;
+    let finishLateWork: (() => void) | undefined;
+    let lateWrites = 0;
+    const registry = createAgentGoalValidatorRegistry({
+      timeoutMs: 25,
+      validators: [{
+        kind: "validator:local/abort-aware",
+        evaluate({ check: selectedCheck, context: validatorContext }) {
+          validatorSignal = validatorContext.signal;
+          return new Promise((resolve, reject) => {
+            validatorContext.signal?.addEventListener("abort", () => {
+              reject(validatorContext.signal?.reason);
+            }, { once: true });
+            finishLateWork = () => {
+              if (!validatorContext.signal?.aborted) lateWrites += 1;
+              resolve(passedResult(selectedCheck));
+            };
+          });
+        },
+      }],
+    });
+
+    const evaluation = registry.evaluate(check("validator:local/abort-aware"), context());
+    await vi.advanceTimersByTimeAsync(25);
+
+    await expect(evaluation).resolves.toMatchObject({ code: "validator_timeout" });
+    expect(validatorSignal?.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    finishLateWork?.();
+    await Promise.resolve();
+    expect(lateWrites).toBe(0);
+  });
+
+  it("links parent cancellation into the restricted validator signal", async () => {
+    const parent = new AbortController();
+    const removeParentListener = vi.spyOn(parent.signal, "removeEventListener");
+    const governedContext = context();
+    governedContext.signal = parent.signal;
+    let validatorSignal: AbortSignal | undefined;
+    const registry = createAgentGoalValidatorRegistry({
+      validators: [{
+        kind: "validator:local/parent-abort",
+        evaluate({ context: validatorContext }) {
+          validatorSignal = validatorContext.signal;
+          return new Promise((_, reject) => {
+            validatorContext.signal?.addEventListener("abort", () => {
+              reject(validatorContext.signal?.reason);
+            }, { once: true });
+          });
+        },
+      }],
+    });
+
+    const evaluation = registry.evaluate(check("validator:local/parent-abort"), governedContext);
+    parent.abort(new DOMException("Run canceled.", "AbortError"));
+
+    await expect(evaluation).rejects.toMatchObject({ name: "AbortError" });
+    expect(validatorSignal?.aborted).toBe(true);
+    expect(removeParentListener).toHaveBeenCalledWith("abort", expect.any(Function));
   });
 
   it("times out when a synchronous validator blocks past its deadline", async () => {
