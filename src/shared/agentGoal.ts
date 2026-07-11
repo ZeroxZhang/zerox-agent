@@ -22,7 +22,8 @@ export type StopReason =
   | "unrecoverable_failure"
   | "external_blocked"
   | "goal_impossible"
-  | "acceptance_unavailable";
+  | "acceptance_unavailable"
+  | "acceptance_integrity_failed";
 
 export type BuiltinAcceptanceCheckKind =
   | "file_exists"

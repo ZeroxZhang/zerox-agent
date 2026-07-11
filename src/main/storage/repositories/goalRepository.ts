@@ -13,6 +13,7 @@ const TERMINAL_GOAL_STATUSES = new Set<GoalStatus>([
   "achieved",
   "stopped_budget",
   "stopped_stalled",
+  "stopped_blocked",
   "failed",
   "canceled",
 ]);
@@ -51,7 +52,7 @@ export function createGoalRepository(storage: Storage): GoalRepository {
       return selectPayloadRows<Goal>(
         db,
         `SELECT payload FROM goals
-         WHERE status NOT IN ('achieved','stopped_budget','stopped_stalled','failed','canceled')
+         WHERE status NOT IN ('achieved','stopped_budget','stopped_stalled','stopped_blocked','failed','canceled')
          ORDER BY updated_at DESC`,
       ).filter((g) => isActive(g.status));
     },

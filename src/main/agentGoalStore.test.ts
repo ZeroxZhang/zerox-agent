@@ -176,7 +176,7 @@ describe("agent goal store", () => {
     });
   });
 
-  it("omits an invalid v2 achievement certificate on read without rewriting its raw file", async () => {
+  it("fails closed on an invalid v2 achievement without rewriting its raw file", async () => {
     const store = createAgentGoalStore({ configDir });
     const goalsDir = path.join(configDir, "agent-goals");
     const filePath = path.join(goalsDir, "goal_tampered_read.json");
@@ -193,10 +193,25 @@ describe("agent goal store", () => {
 
     expect(loaded).toMatchObject({
       id: tampered.id,
-      status: "achieved",
+      status: "stopped_blocked",
+      stopReason: "acceptance_integrity_failed",
       acceptanceProtocolVersion: 2,
+      acceptanceState: {
+        protocolVersion: 2,
+        phase: "blocked",
+      },
     });
     expect(loaded).not.toHaveProperty("acceptanceCertificate");
+    await expect(
+      store.save({
+        ...loaded!,
+        status: "executing",
+        stopReason: undefined,
+      }),
+    ).resolves.toMatchObject({
+      status: "stopped_blocked",
+      stopReason: "acceptance_integrity_failed",
+    });
     expect(await readFile(filePath, "utf8")).toBe(raw);
     expect((await stat(filePath)).mtimeMs).toBe(before.mtimeMs);
   });

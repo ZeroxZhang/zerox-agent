@@ -188,6 +188,31 @@ describe("goal progress view model", () => {
     },
   );
 
+  it("fails closed when a protocol-v2 completion certificate loses integrity", () => {
+    const goal = createGoal({
+      status: "stopped_blocked",
+      stopReason: "acceptance_integrity_failed",
+      acceptanceProtocolVersion: 2,
+      acceptanceState: {
+        protocolVersion: 2,
+        phase: "blocked",
+        attempt: 1,
+        recentFailures: [],
+      },
+    });
+
+    const presentation = buildGoalStatusPresentation(goal.status, goal);
+
+    expect(presentation).toMatchObject({
+      statusLabel: "目标受阻",
+      statusDetail: expect.stringContaining("证书校验失败"),
+      nextActionDetail: expect.stringContaining("不会把它当作已完成"),
+      recoveryActions: [],
+    });
+    expect(presentation.statusLabel).not.toContain("达成");
+    expect(presentation.certificate).toBeUndefined();
+  });
+
   it("explains a stalled goal as repeated acceptance failure, never completion", () => {
     const goal = createGoal({
       status: "stopped_stalled",

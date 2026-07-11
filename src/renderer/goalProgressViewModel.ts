@@ -349,10 +349,16 @@ export function buildGoalStatusPresentation(
         statusLabel: "目标受阻",
         statusDetail: describeBlockedReason(goal?.stopReason),
         nextActionLabel: "需要你处理",
-        nextActionDetail: acceptance
-          ? acceptanceDetail(acceptance)
-          : "可重试验收、调整计划或终止目标。",
-        recoveryActions: ["retry_acceptance", "adjust_plan", "terminate"],
+        nextActionDetail:
+          goal?.stopReason === "acceptance_integrity_failed"
+            ? "完成记录的验收证书校验失败。原始记录已保留，系统不会把它当作已完成或自动继续执行。"
+            : acceptance
+              ? acceptanceDetail(acceptance)
+              : "可重试验收、调整计划或终止目标。",
+        recoveryActions:
+          goal?.stopReason === "acceptance_integrity_failed"
+            ? []
+            : ["retry_acceptance", "adjust_plan", "terminate"],
       }, acceptance, certificate);
     case "failed":
       return {
@@ -649,6 +655,8 @@ function describeBlockedReason(reason: Goal["stopReason"]): string {
       return "当前条件被判定为无法实现，必须调整目标或计划后再继续。";
     case "acceptance_unavailable":
       return "验收服务暂时不可用，目标未被标记为完成。可稍后重试验收。";
+    case "acceptance_integrity_failed":
+      return "完成记录的验收证书校验失败；该目标不会被视为已达成，原始磁盘记录保持不变。";
     default:
       return "目标验收受阻，尚未完成。可重试验收、调整计划或终止目标。";
   }

@@ -967,6 +967,14 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(goalStatusStripSource).toContain("progress.acceptance");
     expect(chatPanelSource).toContain("retryGoal(activeGoal.id)");
     expect(chatPanelSource).toContain("replanGoal(");
+    expect(chatPanelSource).toContain(
+      'const remainsBlocked = result.ok && result.goal?.status === "stopped_blocked"',
+    );
+    expect(chatPanelSource).toContain(
+      "const goalUiState = getGoalUiSyncState(result.goal.status)",
+    );
+    expect(chatPanelSource).toContain("setWorkPhase(goalUiState.workPhase)");
+    expect(chatPanelSource).toContain("仍处于受阻状态");
     expect(chatPanelSource).toContain("cancelGoal(activeGoal.id)");
     expect(chatPanelSource).toContain("void refreshSessions(sessionId ?? undefined)");
   });

@@ -1366,16 +1366,31 @@ export function AgentChatPanel({
       activeGoal.id,
       "用户从恢复界面请求重新规划。",
     );
+    const remainsBlocked = result.ok && result.goal?.status === "stopped_blocked";
     appendMessage({
       role: "assistant",
       content: result.ok
-        ? "已重新规划目标，请查看新的里程碑。"
+        ? remainsBlocked
+          ? "目标计划已调整，但目标仍处于受阻状态；请确认条件已解决后再明确重试。"
+          : "已重新规划目标，请查看新的里程碑。"
         : `重新规划失败：${result.message}`,
     });
     if (result.ok && result.goal) {
       applyGoalSummaryToSessions(result.goal);
-      setStatus({ kind: "working", message: "目标计划已调整" });
-      setWorkPhase("tool");
+      const goalUiState = getGoalUiSyncState(result.goal.status);
+      setStatus({
+        kind: goalUiState.statusKind,
+        message: remainsBlocked
+          ? "目标计划已调整，仍需明确重试"
+          : "目标计划已调整",
+      });
+      setWorkPhase(goalUiState.workPhase);
+      setTaskActivity(
+        buildGoalTaskActivity({
+          status: result.goal.status,
+          description: result.goal.description,
+        }),
+      );
       void refreshActiveGoalDetail(result.goal.id);
       void refreshSessions(sessionId ?? undefined);
     }

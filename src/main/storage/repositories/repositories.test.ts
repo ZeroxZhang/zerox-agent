@@ -109,6 +109,13 @@ describe("GoalRepository", () => {
     expect(ledger[1].kind).toBe("milestone_started");
     goals.save({ ...g, status: "achieved" });
     expect(goals.listActive().length).toBe(0);
+    goals.save({
+      ...g,
+      id: "g-blocked",
+      status: "stopped_blocked",
+      stopReason: "external_blocked",
+    });
+    expect(goals.listActive()).toEqual([]);
     expect(goals.delete("g1")).toBe(true);
     storage.close();
   });

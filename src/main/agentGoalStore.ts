@@ -48,11 +48,11 @@ export function createAgentGoalStore(options: {
     return path.join(goalsDir, `${goalId}.ledger.jsonl`);
   }
 
-  async function readGoal(goalId: string): Promise<Goal | null> {
+  async function readRawGoal(goalId: string): Promise<Goal | null> {
     try {
       const filePath = goalPath(goalId);
       const raw = await readFile(filePath, "utf8");
-      return sanitizeGoalForRead(normalizeGoal(JSON.parse(raw) as Goal));
+      return normalizeGoal(JSON.parse(raw) as Goal);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         return null;
@@ -64,6 +64,11 @@ export function createAgentGoalStore(options: {
 
       throw error;
     }
+  }
+
+  async function readGoal(goalId: string): Promise<Goal | null> {
+    const goal = await readRawGoal(goalId);
+    return goal ? sanitizeGoalForRead(goal) : null;
   }
 
   async function readAllGoals(): Promise<Goal[]> {
@@ -92,7 +97,10 @@ export function createAgentGoalStore(options: {
       return serializeMutation(mutationQueue, (nextQueue) => {
         mutationQueue = nextQueue;
       }, async () => {
-        const existing = await readGoal(goal.id);
+        const existing = await readRawGoal(goal.id);
+        if (existing && hasInvalidProtocolV2Achievement(existing)) {
+          return sanitizeGoalForRead(existing);
+        }
         if (existing && isCanonicalCertifiedAchievement(existing)) {
           return existing;
         }
@@ -230,16 +238,33 @@ function normalizeGoal(goal: Goal): Goal {
 }
 
 function sanitizeGoalForRead(goal: Goal): Goal {
-  if (
-    goal.status !== "achieved" ||
-    goal.acceptanceProtocolVersion !== 2 ||
-    verifyProtocolV2Achievement(goal).ok
-  ) {
+  if (!hasInvalidProtocolV2Achievement(goal)) {
     return goal;
   }
 
   const { acceptanceCertificate: _invalidCertificate, ...safeGoal } = goal;
-  return safeGoal;
+  return {
+    ...safeGoal,
+    status: "stopped_blocked",
+    stopReason: "acceptance_integrity_failed",
+    acceptanceState: {
+      protocolVersion: 2,
+      phase: "blocked",
+      attempt: goal.acceptanceState?.attempt ?? 0,
+      recentFailures: goal.acceptanceState?.recentFailures ?? [],
+      ...(goal.acceptanceState?.lastDecision
+        ? { lastDecision: goal.acceptanceState.lastDecision }
+        : {}),
+    },
+  };
+}
+
+function hasInvalidProtocolV2Achievement(goal: Goal): boolean {
+  return (
+    goal.status === "achieved" &&
+    goal.acceptanceProtocolVersion === 2 &&
+    !verifyProtocolV2Achievement(goal).ok
+  );
 }
 
 function compareGoalsByUpdatedAtDesc(left: Goal, right: Goal): number {
