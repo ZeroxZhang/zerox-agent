@@ -1259,6 +1259,8 @@ describe("Design System — Obsidian desktop control surface", () => {
 
   it("keeps tool approval inside chat with an auto-authorization toggle and critical risk styling", () => {
     expect(chatPanelSource).toContain("autoApprovalEnabled");
+    expect(chatPanelSource).toContain("autoApprovalLocked");
+    expect(chatPanelSource).toContain("setToolGoalModeEnabled");
     expect(chatPanelSource).toContain("setToolAutoApprovalEnabled");
     expect(chatPanelSource).toContain("onToolApprovalRequest");
     expect(chatPanelSource).toContain("tool-approval-panel");

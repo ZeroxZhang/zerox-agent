@@ -195,6 +195,33 @@ describe("tool approval coordinator", () => {
       automatic: true,
     });
   });
+
+  it("forces and locks auto approval while goal mode is enabled", () => {
+    const coordinator = createToolApprovalCoordinator({
+      sendToRenderers() {},
+    });
+
+    coordinator.setGoalModeEnabled(true);
+    expect(coordinator.getAutoApprovalState()).toEqual({
+      autoApprovalEnabled: true,
+      goalModeEnabled: true,
+      autoApprovalLocked: true,
+    });
+
+    coordinator.setAutoApprovalEnabled(false);
+    expect(coordinator.getAutoApprovalState()).toEqual({
+      autoApprovalEnabled: true,
+      goalModeEnabled: true,
+      autoApprovalLocked: true,
+    });
+
+    coordinator.setGoalModeEnabled(false);
+    expect(coordinator.getAutoApprovalState()).toEqual({
+      autoApprovalEnabled: false,
+      goalModeEnabled: false,
+      autoApprovalLocked: false,
+    });
+  });
 });
 
 function createRequest(): ToolUserApprovalRequest {

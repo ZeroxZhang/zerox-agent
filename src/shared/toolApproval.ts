@@ -38,6 +38,8 @@ export type ToolApprovalDecisionPayload = {
 
 export type ToolApprovalModeState = {
   autoApprovalEnabled: boolean;
+  goalModeEnabled: boolean;
+  autoApprovalLocked: boolean;
 };
 
 export type ResolveToolApprovalInput = {

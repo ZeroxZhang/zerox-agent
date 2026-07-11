@@ -37,17 +37,32 @@ export function createToolApprovalCoordinator(options: {
   const approvalTimeoutMs =
     options.approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS;
   const pending = new Map<string, PendingApproval>();
-  let autoApprovalEnabled = false;
+  let standaloneAutoApprovalEnabled = false;
+  let goalModeEnabled = false;
 
   function getAutoApprovalState(): ToolApprovalModeState {
-    return { autoApprovalEnabled };
+    return {
+      autoApprovalEnabled:
+        goalModeEnabled || standaloneAutoApprovalEnabled,
+      goalModeEnabled,
+      autoApprovalLocked: goalModeEnabled,
+    };
   }
 
   function setAutoApprovalEnabled(enabled: boolean): ToolApprovalModeState {
-    autoApprovalEnabled = enabled;
+    standaloneAutoApprovalEnabled = enabled;
+    return publishModeState();
+  }
+
+  function setGoalModeEnabled(enabled: boolean): ToolApprovalModeState {
+    goalModeEnabled = enabled;
+    return publishModeState();
+  }
+
+  function publishModeState(): ToolApprovalModeState {
     const state = getAutoApprovalState();
     options.sendToRenderers("toolApproval:modeChanged", state);
-    if (enabled) {
+    if (state.autoApprovalEnabled) {
       for (const [id, entry] of [...pending]) {
         if (entry.request.risk.requiresConfirmation) continue;
         settlePending(
@@ -75,7 +90,7 @@ export function createToolApprovalCoordinator(options: {
       return rejectAborted(payload);
     }
 
-    if (autoApprovalEnabled && !payload.risk.requiresConfirmation) {
+    if (getAutoApprovalState().autoApprovalEnabled && !payload.risk.requiresConfirmation) {
       return approveAutomatically(
         payload,
         `自动授权已放行本次 ${toolName}。`,
@@ -217,6 +232,7 @@ export function createToolApprovalCoordinator(options: {
   return {
     getAutoApprovalState,
     setAutoApprovalEnabled,
+    setGoalModeEnabled,
     requestUserApproval,
     resolveApproval,
   };

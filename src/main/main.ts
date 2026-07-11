@@ -510,6 +510,11 @@ function registerToolApprovalIpcHandlers() {
       toolApprovalCoordinator.setAutoApprovalEnabled(Boolean(enabled)),
   );
   ipcMain.handle(
+    "toolApproval:setGoalModeEnabled",
+    (_event, enabled: boolean) =>
+      toolApprovalCoordinator.setGoalModeEnabled(Boolean(enabled)),
+  );
+  ipcMain.handle(
     "toolApproval:resolve",
     (_event, input: ResolveToolApprovalInput) =>
     toolApprovalCoordinator.resolveApproval(input),

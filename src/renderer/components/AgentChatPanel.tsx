@@ -289,6 +289,7 @@ export function AgentChatPanel({
   );
   const [goalRunEvents, setGoalRunEvents] = useState<AgentRunEvent[]>([]);
   const [autoApprovalEnabled, setAutoApprovalEnabled] = useState(false);
+  const [autoApprovalLocked, setAutoApprovalLocked] = useState(false);
   const [pendingToolApproval, setPendingToolApproval] =
     useState<ToolApprovalRequestPayload | null>(null);
   const [toolApprovalEvents, setToolApprovalEvents] = useState<
@@ -480,7 +481,6 @@ export function AgentChatPanel({
     setTaskProcessEvents([]);
     setGoalRunEvents([]);
     setSelectedSkillName(null);
-    setGoalModeEnabled(false);
     setPendingGoalDraft(null);
     setGoalDraftDescription("");
     setGoalDraftCriteriaText("");
@@ -574,7 +574,11 @@ export function AgentChatPanel({
 
     void window.buildingAgent
       .getToolApprovalMode()
-      .then((state) => setAutoApprovalEnabled(state.autoApprovalEnabled))
+      .then((state) => {
+        setAutoApprovalEnabled(state.autoApprovalEnabled);
+        setAutoApprovalLocked(state.autoApprovalLocked);
+        setGoalModeEnabled(state.goalModeEnabled);
+      })
       .catch(() => undefined);
     const unsubscribeRequest = window.buildingAgent.onToolApprovalRequest(
       (request) => {
@@ -592,6 +596,8 @@ export function AgentChatPanel({
     const unsubscribeMode = window.buildingAgent.onToolApprovalModeChanged(
       (state) => {
         setAutoApprovalEnabled(state.autoApprovalEnabled);
+        setAutoApprovalLocked(state.autoApprovalLocked);
+        setGoalModeEnabled(state.goalModeEnabled);
       },
     );
 
@@ -1535,9 +1541,31 @@ export function AgentChatPanel({
     setAutoApprovalEnabled(enabled);
     const state = await window.buildingAgent
       ?.setToolAutoApprovalEnabled(enabled)
-      .catch(() => ({ autoApprovalEnabled: !enabled }));
+      .catch(() => ({
+        autoApprovalEnabled: !enabled,
+        goalModeEnabled,
+        autoApprovalLocked,
+      }));
     if (state) {
       setAutoApprovalEnabled(state.autoApprovalEnabled);
+      setAutoApprovalLocked(state.autoApprovalLocked);
+      setGoalModeEnabled(state.goalModeEnabled);
+    }
+  }
+
+  async function handleSetGoalModeEnabled(enabled: boolean) {
+    setGoalModeEnabled(enabled);
+    const state = await window.buildingAgent
+      ?.setToolGoalModeEnabled(enabled)
+      .catch(() => ({
+        autoApprovalEnabled: enabled || autoApprovalEnabled,
+        goalModeEnabled: enabled,
+        autoApprovalLocked: enabled,
+      }));
+    if (state) {
+      setAutoApprovalEnabled(state.autoApprovalEnabled);
+      setAutoApprovalLocked(state.autoApprovalLocked);
+      setGoalModeEnabled(state.goalModeEnabled);
     }
   }
 
@@ -1568,7 +1596,6 @@ export function AgentChatPanel({
       setPendingGoalDraft(result.goalDraft);
       setGoalDraftDescription(result.goalDraft.normalizedDescription);
       setGoalDraftCriteriaText(formatGoalDraftCriteria(result.goalDraft));
-      setGoalModeEnabled(false);
     }
     if (result.executedRun) {
       setRuns((currentRuns) => [result.executedRun!, ...currentRuns]);
@@ -2707,6 +2734,7 @@ export function AgentChatPanel({
                   <input
                     aria-label="自动授权工具请求"
                     checked={autoApprovalEnabled}
+                    disabled={autoApprovalLocked}
                     onChange={(event) => {
                       void handleSetAutoApprovalEnabled(event.currentTarget.checked);
                     }}
@@ -2728,7 +2756,9 @@ export function AgentChatPanel({
                     goalModeVisuallyEnabled ? " is-enabled" : ""
                   }`}
                   data-risk-tooltip={composerRiskTooltips.goal}
-                  onClick={() => setGoalModeEnabled((enabled) => !enabled)}
+                  onClick={() => {
+                    void handleSetGoalModeEnabled(!goalModeEnabled);
+                  }}
                   title={composerRiskTooltips.goal}
                   type="button"
                 >
