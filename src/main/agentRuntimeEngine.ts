@@ -585,8 +585,11 @@ export function createAgentRuntimeEngine(options: {
               await transitionInvocation({ status: "waiting_approval" });
               current = await saveCheckpoint(current, "waiting_for_approval");
             },
-            onApprovalResolved: async () => {
+            onApprovalResolved: async (approval) => {
+              if (!approval.approved) return;
+              throwIfCanceled(signal);
               await transitionInvocation({ status: "authorized" });
+              throwIfCanceled(signal);
               current = await saveCheckpoint(current, "running");
             },
           },

@@ -34,6 +34,7 @@ const PRIVILEGE_OR_SECURITY = [
   /(?:^|[;&|]\s*)(?:sudo|doas|pkexec)\s+/i,
   /(?:^|[;&|]\s*)security\s+(?:add|delete|set|unlock|lock|import|export|find)-/i,
   /(?:^|[;&|]\s*)(?:systemsetup|spctl|csrutil|fdesetup)\s+/i,
+  /(?:^|[;&|]\s*)(?:osascript|shortcuts|automator|tccutil|nvram)\b/i,
   /(?:^|[;&|]\s*)launchctl\s+(?:load|unload|bootstrap|bootout|enable|disable|kickstart)\b/i,
   /(?:^|[;&|]\s*)(?:chmod|chown)\b[^\n;&|]*\s\/(?:System|Library|etc|usr|bin|sbin)\b/i,
 ];
@@ -48,9 +49,9 @@ const IRREVERSIBLE_EXTERNAL = [
   /(?:^|[;&|]\s*)(?:mail|mailx|sendmail)\s+/i,
 ];
 
-const EXTERNAL_TOOL_NAMES = /(?:^|_)(?:send|publish|deploy|release|purchase|payment|transfer|trade)(?:_|$)/i;
+const EXTERNAL_TOOL_NAMES = /(?:^|_)(?:send|publish|deploy|release|purchase|payment|transfer|trade|post_comment|create_issue)(?:_|$)/i;
 const AUTHORIZATION_SOURCE_PATH = /(?:toolApprovalCoordinator|toolAuthorizationService|extremeRiskPolicy|toolPermissions)\.(?:ts|tsx|js)$/i;
-const SECRET_WORDS = /(?:api[_-]?key|access[_-]?token|auth[_-]?token|password|passwd|secret|private[_-]?key|\.ssh\/id_|\.env\b|cookie)/i;
+const SECRET_WORDS = /(?:api[_-]?key|access[_-]?token|auth[_-]?token|password|passwd|secret|credentials?|private[_-]?key|\.ssh\/id_|\.aws\/|\.gnupg\/|\.env\b|cookie)/i;
 const NETWORK_TRANSMITTER = /(?:^|[;&|]\s*)(?:curl|wget|scp|sftp|rsync|nc|ncat|netcat)\b/i;
 
 export function classifyExtremeRisk(
@@ -92,6 +93,17 @@ export function classifyExtremeRisk(
     );
   }
 
+  if (
+    isRecursiveForcedRemove(command) ||
+    /\bgit\b[^\n;&|]*\sreset\b[^\n;&|]*\s--hard\b/i.test(command)
+  ) {
+    return forced(
+      "irrecoverable_data_loss",
+      "The command can irreversibly delete data or destroy local version-control state.",
+      [command],
+    );
+  }
+
   if (PRIVILEGE_OR_SECURITY.some((pattern) => pattern.test(command))) {
     return forced(
       "privilege_or_security_boundary",
@@ -116,7 +128,34 @@ export function classifyExtremeRisk(
     );
   }
 
+  if (
+    /(?:^|[;&|]\s*)kubectl\b[^\n;&|]*\sdelete\b/i.test(command) ||
+    /(?:^|[;&|]\s*)terraform\s+destroy\b/i.test(command) ||
+    /(?:^|[;&|]\s*)cargo\s+publish\b/i.test(command)
+  ) {
+    return forced(
+      "irreversible_external_action",
+      "The command performs an irreversible external, production, publication, or messaging action.",
+      [command],
+    );
+  }
+
   return safeAssessment();
+}
+
+function isRecursiveForcedRemove(command: string): boolean {
+  const invocation = command.match(
+    /(?:^|[;&|]\s*)(?:(?:command|env)\s+)?rm\s+([^\n;&|]+)/i,
+  );
+  const args = invocation?.[1] ?? "";
+  const flags = args.match(/(?:^|\s)(--[a-z-]+|-[a-z]+)(?=\s|$)/gi) ?? [];
+  const recursive = flags.some((flag) =>
+    flag.includes("--recursive") || /^\s*-[a-z]*r/i.test(flag),
+  );
+  const forced = flags.some((flag) =>
+    flag.includes("--force") || /^\s*-[a-z]*f/i.test(flag),
+  );
+  return recursive && forced;
 }
 
 function forced(

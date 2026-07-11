@@ -182,7 +182,7 @@ export function createToolApprovalCoordinator(options: {
       request: request.request,
       deniedReason: request.deniedReason,
       argsSummary: summarizeToolApprovalArgs(request.request),
-      risk: classifyToolApprovalRisk(request),
+      risk: request.risk ?? classifyToolApprovalRisk(request),
       createdAt: now(),
     };
   }

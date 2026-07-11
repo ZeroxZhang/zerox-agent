@@ -412,7 +412,7 @@ export function authorizeToolCallWithinRunContext(
         }
       : undefined,
   );
-  if (!taskDecision.allowed || !runContext) {
+  if (!runContext) {
     return taskDecision;
   }
 

@@ -4,7 +4,10 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createScheduledTaskStore } from "./taskStore";
 import { createToolAuditLog } from "./toolAuditLog";
-import { createToolAuthorizationService } from "./toolAuthorizationService";
+import {
+  createToolAuthorizationService,
+  type ToolUserApprovalRequest,
+} from "./toolAuthorizationService";
 import { buildPrimaryRunContext } from "../shared/agentWorkspace";
 import {
   authorizeToolCallWithinRunContext,
@@ -519,7 +522,7 @@ describe("tool authorization service", () => {
     expect(approvalCount).toBe(0);
   });
 
-  it("does not auto-approve scheduled task shell commands outside the task policy", async () => {
+  it("forces confirmation for scheduled Policy B shell commands", async () => {
     let approvalCount = 0;
     const taskStore = createScheduledTaskStore({
       configDir,
@@ -555,11 +558,10 @@ describe("tool authorization service", () => {
     ).resolves.toMatchObject({
       ok: true,
       decision: {
-        allowed: false,
-        reason: "shell_exec command 不匹配已授权模板。",
+        allowed: true,
       },
     });
-    expect(approvalCount).toBe(0);
+    expect(approvalCount).toBe(1);
   });
 
   it("notifies callers when user approval is requested and resolved", async () => {
@@ -650,6 +652,99 @@ describe("tool authorization service", () => {
     );
 
     expect(observedSignal).toBe(controller.signal);
+  });
+
+  it("forces Policy B approval even when the task policy already allows the command", async () => {
+    const approvalRequests: ToolUserApprovalRequest[] = [];
+    const taskStore = createScheduledTaskStore({
+      configDir,
+      createId: () => "task_publish",
+    });
+    const auditLog = createToolAuditLog({ configDir });
+    const service = createToolAuthorizationService({
+      taskStore,
+      auditLog,
+      requestUserApproval: async (request) => {
+        approvalRequests.push(request);
+        return { approved: false, reason: "publication rejected" };
+      },
+    });
+    await taskStore.create({
+      name: "Publish package",
+      skillName: "",
+      enabled: true,
+      schedule: { kind: "manual" },
+      input: {},
+      permissions: {
+        files: { read: [], write: [] },
+        web: { search: false, fetchDomains: [] },
+        shell: { commands: ["npm publish"] },
+      },
+    });
+
+    const result = await service.authorize("task_publish", {
+      toolName: "shell_exec",
+      args: { command: "npm publish" },
+    });
+
+    expect(approvalRequests).toHaveLength(1);
+    expect(approvalRequests[0]?.risk).toMatchObject({
+      requiresConfirmation: true,
+      category: "irreversible_external_action",
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      decision: { allowed: false, reason: "publication rejected" },
+    });
+  });
+
+  it("does not let approval override a shell workspace escape", async () => {
+    let approvalCount = 0;
+    const taskStore = createScheduledTaskStore({
+      configDir,
+      createId: () => "task_shell_escape",
+    });
+    const auditLog = createToolAuditLog({ configDir });
+    const service = createToolAuthorizationService({
+      taskStore,
+      auditLog,
+      requestUserApproval: async () => {
+        approvalCount += 1;
+        return { approved: true };
+      },
+    });
+    await taskStore.create({
+      name: "Shell escape",
+      skillName: "",
+      enabled: true,
+      schedule: { kind: "manual" },
+      input: {},
+      permissions: {
+        files: { read: [], write: [] },
+        web: { search: false, fetchDomains: [] },
+        shell: { commands: [] },
+      },
+    });
+
+    const result = await service.authorize(
+      "task_shell_escape",
+      { toolName: "shell_exec", args: { command: "cat /etc/passwd" } },
+      {
+        runContext: buildPrimaryRunContext({
+          workspaceId: "workspace_1",
+          workspaceRoot: "/Users/demo/project",
+        }),
+      },
+    );
+
+    expect(approvalCount).toBe(0);
+    expect(result).toMatchObject({
+      ok: true,
+      decision: {
+        allowed: false,
+        reason: expect.stringContaining("运行沙箱阻止"),
+      },
+    });
   });
 
   it("does not ask for approval when the tool request is malformed", async () => {

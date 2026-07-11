@@ -1373,10 +1373,10 @@ describe("agent runtime engine", () => {
         async authorize(_taskId, request, options) {
           const lifecycle = options as {
             onApprovalRequested?: () => Promise<void>;
-            onApprovalResolved?: () => Promise<void>;
+            onApprovalResolved?: (result: { approved: boolean }) => Promise<void>;
           } | undefined;
           await lifecycle?.onApprovalRequested?.();
-          await lifecycle?.onApprovalResolved?.();
+          await lifecycle?.onApprovalResolved?.({ approved: true });
           return {
             ok: true,
             decision: {
