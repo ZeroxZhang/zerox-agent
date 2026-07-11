@@ -2169,7 +2169,6 @@ describe("agent goal controller", () => {
 
     const staleRun = controller.resume("goal_1", { signal: staleAbort.signal });
     await staleAppendEntered;
-    staleAbort.abort();
     const canonical = await store.get("goal_1");
     await store.save({
       ...canonical!,
@@ -2178,6 +2177,7 @@ describe("agent goal controller", () => {
         state: item.id === "milestone_1" ? "ready" : item.state,
       })),
     });
+    staleAbort.abort();
     const replacementRun = controller.resume("goal_1");
     const stopped = await waitForGoalStatus("stopped_blocked");
     expect(stopped.stopReason).toBe("external_blocked");
@@ -2200,8 +2200,10 @@ describe("agent goal controller", () => {
       (event) => event.event === "stopped",
     );
 
-    expect(staleResult.status).toBe("stopped_blocked");
+    const finalCanonical = await store.get("goal_1");
+    expect(staleResult.status).toBe("executing");
     expect(replacementResult.status).toBe("stopped_blocked");
+    expect(finalCanonical?.status).toBe("stopped_blocked");
     expect(terminalTrajectoryEvents).toHaveLength(1);
     expect(terminalProgressEvents).toHaveLength(1);
     expect(terminalTrajectoryIndex).toBe(trajectoryEvents.length - 1);
@@ -2222,6 +2224,214 @@ describe("agent goal controller", () => {
         event.event.startsWith("acceptance_"),
       ),
     ).toEqual([]);
+  });
+
+  it("aborts a never-resolving stale acceptance append and lets replacement terminal publication finish", async () => {
+    await store.save(
+      createProtocolV2Goal([milestone("milestone_1")], { status: "executing" }),
+    );
+    const staleAbort = new AbortController();
+    const progressEvents: GoalProgressEvent[] = [];
+    let runtimeCalls = 0;
+    let acceptanceCalls = 0;
+    let staleAppendEnteredResolve: (() => void) | undefined;
+    const staleAppendEntered = new Promise<void>((resolve) => {
+      staleAppendEnteredResolve = resolve;
+    });
+    let trapped = false;
+    const controller = createController({
+      runtime: {
+        async runMilestone(_goal, currentMilestone) {
+          runtimeCalls += 1;
+          return {
+            runId: `run_${currentMilestone.id}_${runtimeCalls}`,
+            toolCallCount: 1,
+            status: "succeeded",
+          };
+        },
+      },
+      acceptance: {
+        async evaluate() {
+          acceptanceCalls += 1;
+          return acceptanceCalls === 1
+            ? rejectedResult("same_failure")
+            : rejectedResult("external_missing", {
+                verdict: "blocked_external",
+                failureClass: "external_dependency_missing",
+              });
+        },
+        async evaluateGoal() {
+          throw new Error("blocked replacement must not reach final acceptance");
+        },
+      },
+      onProgress(event) {
+        progressEvents.push(event);
+      },
+      onTrajectoryAppend(event, appendOptions) {
+        if (trapped || event.type !== "acceptance_failure_classified") return;
+        trapped = true;
+        staleAppendEnteredResolve?.();
+        return new Promise<void>((_resolve, reject) => {
+          appendOptions?.signal?.addEventListener(
+            "abort",
+            () => reject(appendOptions.signal?.reason),
+            { once: true },
+          );
+        });
+      },
+    });
+
+    const staleRun = controller.resume("goal_1", { signal: staleAbort.signal });
+    await staleAppendEntered;
+    const canonical = await store.get("goal_1");
+    await store.save({
+      ...canonical!,
+      milestones: canonical!.milestones.map((item) => ({
+        ...item,
+        state: item.id === "milestone_1" ? "ready" : item.state,
+      })),
+    });
+    staleAbort.abort(new DOMException("Stale run replaced", "AbortError"));
+    const replacementRun = controller.resume("goal_1");
+
+    const [staleResult, replacementResult] = await Promise.race([
+      Promise.all([staleRun, replacementRun]),
+      new Promise<never>((_resolve, reject) =>
+        setTimeout(() => reject(new Error("terminal publication deadlocked")), 500),
+      ),
+    ]);
+
+    const finalCanonical = await store.get("goal_1");
+    expect(staleResult.status).toBe("executing");
+    expect(replacementResult.status).toBe("stopped_blocked");
+    expect(finalCanonical?.status).toBe("stopped_blocked");
+    expect(trajectoryEvents.at(-1)?.type).toBe("goal_stopped");
+    expect(progressEvents.at(-1)?.event).toBe("stopped");
+    expect(
+      trajectoryEvents.filter((event) => event.type === "goal_stopped"),
+    ).toHaveLength(1);
+  });
+
+  it("publishes exactly one stopped progress event when the controller catches an exception", async () => {
+    const progressEvents: GoalProgressEvent[] = [];
+    await store.save(createProtocolV2Goal([milestone("milestone_1")]));
+    const controller = createController({
+      runtime: {
+        async runMilestone() {
+          throw new Error("runtime exploded");
+        },
+      },
+      acceptance: createAcceptanceResults({ milestones: [] }),
+      onProgress(event) {
+        progressEvents.push(event);
+      },
+    });
+
+    const result = await controller.start("goal_1");
+
+    expect(result.status).toBe("failed");
+    expect(progressEvents.filter((event) => event.event === "stopped")).toHaveLength(1);
+    expect(trajectoryEvents.filter((event) => event.type === "goal_stopped")).toHaveLength(1);
+  });
+
+  it.each([
+    "milestone_started",
+    "checkpoint_written",
+    "goal_review_requested",
+    "acceptance_certified",
+  ] as const)(
+    "cancels stale %s publication and keeps terminal ledger/trajectory/progress last",
+    async (targetType) => {
+      const abortController = new AbortController();
+      const progressEvents: GoalProgressEvent[] = [];
+      await store.save(
+        createProtocolV2Goal([milestone("milestone_1")], {
+          ...(targetType === "goal_review_requested"
+            ? { reviewPolicy: "review_each_milestone" as const }
+            : {}),
+        }),
+      );
+      let intercepted = false;
+      const controller = createController({
+        runtime: createRuntime(),
+        acceptance: createAcceptanceResults({
+          milestones: [acceptedResult("check_done")],
+          goals: [acceptedResult("check_done", { evidenceManifest: emptyManifest })],
+        }),
+        onProgress(event) {
+          progressEvents.push(event);
+        },
+        async onTrajectoryAppend(event) {
+          if (intercepted || event.type !== targetType) return;
+          intercepted = true;
+          if (targetType !== "acceptance_certified") {
+            const canonical = await store.get("goal_1");
+            await store.save({
+              ...canonical!,
+              status: "canceled",
+              stopReason: "user_canceled",
+            });
+          }
+          abortController.abort(new DOMException("Publication canceled", "AbortError"));
+        },
+      });
+
+      const result = await controller.start("goal_1", {
+        signal: abortController.signal,
+      });
+      const ledger = await store.readLedger("goal_1");
+
+      expect(intercepted).toBe(true);
+      expect(result.status).toBe(
+        targetType === "acceptance_certified" ? "achieved" : "canceled",
+      );
+      expect(trajectoryEvents.some((event) => event.type === targetType)).toBe(false);
+      expect(trajectoryEvents.at(-1)?.type).toBe("goal_stopped");
+      expect(progressEvents.at(-1)?.event).toBe("stopped");
+      expect(ledger.at(-1)?.kind).toBe("goal_stopped");
+    },
+  );
+
+  it("suppresses rejected milestone progress when terminal state wins during its ledger append", async () => {
+    const progressEvents: GoalProgressEvent[] = [];
+    await store.save(createProtocolV2Goal([milestone("milestone_1")]));
+    let injected = false;
+    const racingStore: AgentGoalStore = {
+      ...store,
+      async appendLedger(goalId, event) {
+        if (!injected && event.kind === "milestone_rejected") {
+          injected = true;
+          const canonical = await store.get(goalId);
+          await store.save({
+            ...canonical!,
+            status: "canceled",
+            stopReason: "user_canceled",
+          });
+        }
+        return store.appendLedger(goalId, event);
+      },
+    };
+    const controller = createController({
+      goalStore: racingStore,
+      runtime: createRuntime(),
+      acceptance: createAcceptanceResults({
+        milestones: [rejectedResult("assertion_mismatch")],
+      }),
+      onProgress(event) {
+        progressEvents.push(event);
+      },
+    });
+
+    const result = await controller.start("goal_1");
+    const ledger = await store.readLedger("goal_1");
+
+    expect(result.status).toBe("canceled");
+    expect(progressEvents.some((event) => event.event === "milestone_rejected")).toBe(false);
+    expect(progressEvents.at(-1)?.event).toBe("stopped");
+    expect(ledger.map((event) => event.kind).slice(-2)).toEqual([
+      "milestone_rejected",
+      "goal_stopped",
+    ]);
   });
 
   it.each(["milestone", "final"] as const)(
@@ -2393,7 +2603,10 @@ describe("agent goal controller", () => {
     planner?: { replan(goal: Goal, reason: string): Promise<Milestone[]> };
     stallThreshold?: number;
     onProgress?: (event: GoalProgressEvent) => void;
-    onTrajectoryAppend?: (event: AgentTrajectoryEvent) => Promise<void> | void;
+    onTrajectoryAppend?: (
+      event: AgentTrajectoryEvent,
+      options?: { signal?: AbortSignal },
+    ) => Promise<void> | void;
     createAcceptanceContext?: (
       goal: Goal,
       milestone?: Milestone,
@@ -2414,8 +2627,11 @@ describe("agent goal controller", () => {
           },
         },
       trajectoryStore: {
-        async append(_runId, event) {
-          await options.onTrajectoryAppend?.(event);
+        async append(_runId, event, appendOptions) {
+          await options.onTrajectoryAppend?.(event, appendOptions);
+          if (appendOptions?.signal?.aborted) {
+            throw appendOptions.signal.reason;
+          }
           trajectoryEvents.push(event);
           return event;
         },

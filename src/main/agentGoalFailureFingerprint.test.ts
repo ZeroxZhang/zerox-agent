@@ -1467,6 +1467,48 @@ describe("goal acceptance failure fingerprints", () => {
     expect(Buffer.byteLength(signature)).toBeLessThanOrEqual(2_048);
   });
 
+  it("truthfully truncates huge secret-like tails within the global work cap", () => {
+    const hugeSecretTail = Object.fromEntries(
+      Array.from({ length: 100_000 }, (_, index) => [
+        `session_token_${String(index).padStart(6, "0")}`,
+        `PRIVATE_SECRET_${index}`,
+      ]),
+    );
+    const startedAt = Date.now();
+
+    const signature = createToolActionSignature("huge_secret_tail", hugeSecretTail);
+
+    expect(signature).toContain("truncated");
+    expect(Buffer.byteLength(signature)).toBeLessThanOrEqual(2_048);
+    expect(signature).not.toContain("PRIVATE_SECRET");
+    expect(Date.now() - startedAt).toBeLessThan(2_000);
+  });
+
+  it("propagates private command graph truncation into a short outer signature", () => {
+    let getterReads = 0;
+    const makeNode = (): Record<string, unknown> => {
+      const node: Record<string, unknown> = {};
+      for (let branch = 0; branch < 8; branch += 1) {
+        Object.defineProperty(node, `branch_${branch}`, {
+          enumerable: true,
+          get() {
+            getterReads += 1;
+            return makeNode();
+          },
+        });
+      }
+      return node;
+    };
+
+    const signature = createToolActionSignature("shell_exec", {
+      command: makeNode(),
+    });
+
+    expect(signature).toContain("truncated");
+    expect(getterReads).toBeLessThanOrEqual(8_192);
+    expect(Buffer.byteLength(signature)).toBeLessThanOrEqual(2_048);
+  });
+
   it("handles undefined, non-finite numbers, sparse arrays, bigint, getters, and cycles safely", () => {
     const cyclic: Record<string, unknown> = {
       missing: undefined,

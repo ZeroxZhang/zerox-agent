@@ -147,7 +147,16 @@ export function createAgentGoalController(options: {
       signal: runOptions?.signal,
       promise: Promise.resolve(goal),
     };
-    entry.promise = runLoopInternal(goal, runOptions).finally(() => {
+    entry.promise = runLoopInternal(goal, runOptions).then(async (result) => {
+      const replacement = activeRuns.get(goal.id);
+      if (runOptions?.signal?.aborted && replacement && replacement !== entry) {
+        const canonical = await options.goalStore.get(goal.id);
+        if (canonical && isTerminalGoalStatus(canonical.status)) {
+          return canonical;
+        }
+      }
+      return result;
+    }).finally(() => {
       if (activeRuns.get(goal.id) === entry) {
         activeRuns.delete(goal.id);
       }
@@ -193,16 +202,24 @@ export function createAgentGoalController(options: {
   }
 
   async function publishCanonicalTerminal(goal: Goal): Promise<void> {
-    if (goal.status === "executing" || goal.status === "planning") {
+    if (!isTerminalGoalStatus(goal.status)) {
       return;
     }
     await waitForNonterminalPublications(goal.id);
     const canonical = (await options.goalStore.get(goal.id)) ?? goal;
-    if (canonical.status === "executing" || canonical.status === "planning") {
+    if (!isTerminalGoalStatus(canonical.status)) {
       return;
     }
     if (!registerTerminalPublication(canonical)) {
       return;
+    }
+    const ledger = await options.goalStore.readLedger(canonical.id);
+    if (ledger.at(-1)?.kind !== "goal_stopped") {
+      await options.goalStore.appendLedger(canonical.id, {
+        at: currentTime(),
+        kind: "goal_stopped",
+        summary: terminalStatusMessage(canonical),
+      });
     }
     await emit(canonical.id, "goal_stopped", {
       goalId: canonical.id,
@@ -239,17 +256,69 @@ export function createAgentGoalController(options: {
     }
   }
 
-  async function canonicalExecutingGoal(goalId: string): Promise<Goal | null> {
-    const canonical = await options.goalStore.get(goalId);
-    return canonical?.status === "executing" ? canonical : null;
-  }
-
   async function settleSuppressedPublication(goal: Goal): Promise<Goal> {
     const canonical = (await options.goalStore.get(goal.id)) ?? goal;
-    if (canonical.status !== "executing" && canonical.status !== "planning") {
+    if (isTerminalGoalStatus(canonical.status)) {
       await publishCanonicalTerminal(canonical);
     }
     return canonical;
+  }
+
+  async function publishNonterminalGoalEvent(input: {
+    goal: Goal;
+    allowedStatuses: GoalStatus[];
+    ledger?: ProgressLedgerEvent;
+    trajectory?: {
+      type: AgentTrajectoryEventType;
+      payload: Record<string, unknown>;
+    };
+    progress?: {
+      event: GoalProgressEvent["event"];
+      message: string;
+      milestoneId?: string;
+    };
+    signal?: AbortSignal;
+  }): Promise<Goal | null> {
+    const release = beginNonterminalPublication(input.goal.id);
+    const loadAllowed = async (): Promise<Goal | null> => {
+      throwIfPublicationAborted(input.signal);
+      const canonical = await options.goalStore.get(input.goal.id);
+      return canonical && input.allowedStatuses.includes(canonical.status)
+        ? canonical
+        : null;
+    };
+    try {
+      let canonical = await loadAllowed();
+      if (!canonical) return null;
+      if (input.ledger) {
+        await options.goalStore.appendLedger(input.goal.id, input.ledger);
+        canonical = await loadAllowed();
+        if (!canonical) return null;
+      }
+      if (input.trajectory) {
+        canonical = await loadAllowed();
+        if (!canonical) return null;
+        await emit(
+          input.goal.id,
+          input.trajectory.type,
+          input.trajectory.payload,
+          input.signal,
+        );
+        canonical = await loadAllowed();
+        if (!canonical) return null;
+      }
+      if (input.progress) {
+        notifyProgress(
+          input.progress.event,
+          canonical,
+          input.progress.message,
+          input.progress.milestoneId,
+        );
+      }
+      return canonical;
+    } finally {
+      release();
+    }
   }
 
   function registerTerminalPublication(goal: Goal): boolean {
@@ -308,7 +377,7 @@ export function createAgentGoalController(options: {
             if (interruptedAfterGoalReview) {
               return interruptedAfterGoalReview;
             }
-            if (!(await recordAcceptanceManifest(goal, null, result))) {
+            if (!(await recordAcceptanceManifest(goal, null, result, runOptions))) {
               return settleSuppressedPublication(goal);
             }
             const interruptedAfterManifest = await canonicalInterruption(
@@ -371,10 +440,12 @@ export function createAgentGoalController(options: {
     } catch (error) {
       const abortedGoal = await latestGoalAfterAbort(goal, runOptions);
       if (abortedGoal) {
+        if (isTerminalGoalStatus(abortedGoal.status)) {
+          await publishCanonicalTerminal(abortedGoal);
+        }
         return abortedGoal;
       }
       const summary = error instanceof Error ? error.message : "目标运行时发生未知错误。";
-      notifyProgress("stopped", goal, summary);
       return stopGoal(goal, "failed", "unrecoverable_failure", summary);
     }
   }
@@ -390,25 +461,34 @@ export function createAgentGoalController(options: {
     touch(goal);
     const startedGoal = await options.goalStore.save(goal);
     if (startedGoal.status !== goal.status) {
-      notifyProgress("stopped", startedGoal, terminalStatusMessage(startedGoal));
+      await publishCanonicalTerminal(startedGoal);
       return { goal: startedGoal, suspend: true };
     }
-    await options.goalStore.appendLedger(goal.id, {
-      at: currentTime(),
-      kind: "milestone_started",
-      milestoneId: milestone.id,
-      summary: `Started milestone "${milestone.id}".`,
-    });
-    await emit(goal.id, "milestone_started", {
-      goalId: goal.id,
-      milestoneId: milestone.id,
-    });
-    notifyProgress(
-      "milestone_started",
-      goal,
-      `里程碑开始：${milestone.description}`,
-      milestone.id,
-    );
+    if (!(await publishNonterminalGoalEvent({
+      goal: startedGoal,
+      allowedStatuses: ["executing"],
+      ledger: {
+        at: currentTime(),
+        kind: "milestone_started",
+        milestoneId: milestone.id,
+        summary: `Started milestone "${milestone.id}".`,
+      },
+      trajectory: {
+        type: "milestone_started",
+        payload: { goalId: goal.id, milestoneId: milestone.id },
+      },
+      progress: {
+        event: "milestone_started",
+        message: `里程碑开始：${milestone.description}`,
+        milestoneId: milestone.id,
+      },
+      signal: runOptions?.signal,
+    }))) {
+      return {
+        goal: await settleSuppressedPublication(startedGoal),
+        suspend: true,
+      };
+    }
 
     const runResult = await options.runtimeEngine.runMilestone(
       goal,
@@ -440,7 +520,7 @@ export function createAgentGoalController(options: {
     touch(goal);
     const usageGoal = await options.goalStore.save(goal);
     if (usageGoal.status !== goal.status) {
-      notifyProgress("stopped", usageGoal, terminalStatusMessage(usageGoal));
+      await publishCanonicalTerminal(usageGoal);
       return { goal: usageGoal, suspend: true };
     }
     if (runResult.status === "paused") {
@@ -487,7 +567,7 @@ export function createAgentGoalController(options: {
     if (interruptedAfterAcceptance) {
       return { goal: interruptedAfterAcceptance, suspend: true };
     }
-    if (!(await recordAcceptanceManifest(goal, milestone, acceptance))) {
+    if (!(await recordAcceptanceManifest(goal, milestone, acceptance, runOptions))) {
       return {
         goal: await settleSuppressedPublication(goal),
         suspend: true,
@@ -509,47 +589,81 @@ export function createAgentGoalController(options: {
         };
       }
       touch(goal);
-      await options.goalStore.appendLedger(goal.id, {
-        at: currentTime(),
-        kind: "milestone_accepted",
-        milestoneId: milestone.id,
-        summary: milestone.lastAcceptanceSummary,
-      });
-      const checkpoint = await writeGoalCheckpoint(goal, "milestone_accepted");
+      if (!(await publishNonterminalGoalEvent({
+        goal,
+        allowedStatuses: ["executing"],
+        ledger: {
+          at: currentTime(),
+          kind: "milestone_accepted",
+          milestoneId: milestone.id,
+          summary: milestone.lastAcceptanceSummary,
+        },
+        signal: runOptions?.signal,
+      }))) {
+        return {
+          goal: await settleSuppressedPublication(goal),
+          suspend: true,
+        };
+      }
+      const checkpoint = await writeGoalCheckpoint(
+        goal,
+        "milestone_accepted",
+        runOptions,
+      );
       if (checkpoint.status !== goal.status) {
         return { goal: checkpoint, suspend: true };
       }
-      notifyProgress(
-        "milestone_accepted",
-        checkpoint,
-        milestone.lastAcceptanceSummary ?? `里程碑已完成：${milestone.description}`,
-        milestone.id,
-      );
+      if (!(await publishNonterminalGoalEvent({
+        goal: checkpoint,
+        allowedStatuses: ["executing"],
+        progress: {
+          event: "milestone_accepted",
+          message:
+            milestone.lastAcceptanceSummary ??
+            `里程碑已完成：${milestone.description}`,
+          milestoneId: milestone.id,
+        },
+        signal: runOptions?.signal,
+      }))) {
+        return {
+          goal: await settleSuppressedPublication(checkpoint),
+          suspend: true,
+        };
+      }
 
       if (shouldRequestReview(goal, milestone)) {
         goal.status = "waiting_for_review";
         touch(goal);
         const reviewGoal = await options.goalStore.save(goal);
         if (reviewGoal.status !== goal.status) {
-          notifyProgress("stopped", reviewGoal, terminalStatusMessage(reviewGoal));
+          await publishCanonicalTerminal(reviewGoal);
           return { goal: reviewGoal, suspend: true };
         }
-        await options.goalStore.appendLedger(goal.id, {
-          at: currentTime(),
-          kind: "review_requested",
-          milestoneId: milestone.id,
-          summary: `Review requested after milestone "${milestone.id}".`,
-        });
-        await emit(goal.id, "goal_review_requested", {
-          goalId: goal.id,
-          milestoneId: milestone.id,
-        });
-        notifyProgress(
-          "review_requested",
-          reviewGoal,
-          "里程碑完成，等待你审核。",
-          milestone.id,
-        );
+        if (!(await publishNonterminalGoalEvent({
+          goal: reviewGoal,
+          allowedStatuses: ["waiting_for_review"],
+          ledger: {
+            at: currentTime(),
+            kind: "review_requested",
+            milestoneId: milestone.id,
+            summary: `Review requested after milestone "${milestone.id}".`,
+          },
+          trajectory: {
+            type: "goal_review_requested",
+            payload: { goalId: goal.id, milestoneId: milestone.id },
+          },
+          progress: {
+            event: "review_requested",
+            message: "里程碑完成，等待你审核。",
+            milestoneId: milestone.id,
+          },
+          signal: runOptions?.signal,
+        }))) {
+          return {
+            goal: await settleSuppressedPublication(reviewGoal),
+            suspend: true,
+          };
+        }
         return { goal: reviewGoal, suspend: true };
       }
 
@@ -559,18 +673,29 @@ export function createAgentGoalController(options: {
     milestone.state = "rejected";
     milestone.lastAcceptanceSummary = summarizeAcceptanceFailure(acceptance);
     touch(goal);
-    await options.goalStore.appendLedger(goal.id, {
-      at: currentTime(),
-      kind: "milestone_rejected",
-      milestoneId: milestone.id,
-      summary: milestone.lastAcceptanceSummary,
-    });
-    notifyProgress(
-      "milestone_rejected",
+    if (!(await publishNonterminalGoalEvent({
       goal,
-      milestone.lastAcceptanceSummary ?? `里程碑未通过：${milestone.description}`,
-      milestone.id,
-    );
+      allowedStatuses: ["executing"],
+      ledger: {
+        at: currentTime(),
+        kind: "milestone_rejected",
+        milestoneId: milestone.id,
+        summary: milestone.lastAcceptanceSummary,
+      },
+      progress: {
+        event: "milestone_rejected",
+        message:
+          milestone.lastAcceptanceSummary ??
+          `里程碑未通过：${milestone.description}`,
+        milestoneId: milestone.id,
+      },
+      signal: runOptions?.signal,
+    }))) {
+      return {
+        goal: await settleSuppressedPublication(goal),
+        suspend: true,
+      };
+    }
 
     const decisionResult = await applyAcceptanceDecision(
       goal,
@@ -655,6 +780,7 @@ export function createAgentGoalController(options: {
       target,
       decision,
       evidenceRefs,
+      runOptions,
     ))) {
       return {
         goal: await settleSuppressedPublication(persisted),
@@ -712,6 +838,7 @@ export function createAgentGoalController(options: {
         target,
         decision,
         evidenceRefs,
+        runOptions,
       ))) {
         return {
           goal: await settleSuppressedPublication(persisted),
@@ -740,25 +867,38 @@ export function createAgentGoalController(options: {
         ]
           .filter(Boolean)
           .join(" ");
-        await options.goalStore.appendLedger(pausedGoal.id, {
-          at: currentTime(),
-          kind: "review_requested",
-          milestoneId: target.id,
-          summary: pauseSummary,
-        });
-        await emit(pausedGoal.id, "goal_review_requested", {
-          goalId: pausedGoal.id,
-          milestoneId: target.id,
-          reason: "turn_limit",
-          fingerprint: decision.fingerprint,
-          occurrence: decision.occurrence,
-        });
-        notifyProgress(
-          "review_requested",
-          pausedGoal,
-          "里程碑达到本轮执行上限，验收问题已记录；请审核后继续或调整计划。",
-          target.id,
-        );
+        if (!(await publishNonterminalGoalEvent({
+          goal: pausedGoal,
+          allowedStatuses: ["waiting_for_review"],
+          ledger: {
+            at: currentTime(),
+            kind: "review_requested",
+            milestoneId: target.id,
+            summary: pauseSummary,
+          },
+          trajectory: {
+            type: "goal_review_requested",
+            payload: {
+              goalId: pausedGoal.id,
+              milestoneId: target.id,
+              reason: "turn_limit",
+              fingerprint: decision.fingerprint,
+              occurrence: decision.occurrence,
+            },
+          },
+          progress: {
+            event: "review_requested",
+            message:
+              "里程碑达到本轮执行上限，验收问题已记录；请审核后继续或调整计划。",
+            milestoneId: target.id,
+          },
+          signal: runOptions?.signal,
+        }))) {
+          return {
+            goal: await settleSuppressedPublication(pausedGoal),
+            suspend: true,
+          };
+        }
         return { goal: pausedGoal, suspend: true };
       }
       return { goal: persisted, suspend: false };
@@ -804,6 +944,7 @@ export function createAgentGoalController(options: {
         target,
         decision,
         evidenceRefs,
+        runOptions,
       ))) {
         return {
           goal: await settleSuppressedPublication(persisted),
@@ -864,24 +1005,42 @@ export function createAgentGoalController(options: {
       await publishCanonicalTerminal(persisted);
       return { goal: persisted, suspend: true };
     }
-    await options.goalStore.appendLedger(persisted.id, {
-      at: currentTime(),
-      kind: "goal_replanned",
-      ...(target ? { milestoneId: target.id } : {}),
-      summary: decision.summary,
-      evidenceRefs,
-    });
-    await emit(persisted.id, "goal_replanned", {
-      goalId: persisted.id,
-      targetId: target?.id ?? persisted.id,
-      fingerprint,
-      occurrence,
-      failedCheckIds: decision.failedCheckIds,
-      action: decision.action,
-      evidenceRefs,
-      planVersion: persisted.planVersion,
-      replans: persisted.budgetUsage.replans,
-    });
+    if (!(await publishNonterminalGoalEvent({
+      goal: persisted,
+      allowedStatuses: ["executing"],
+      ledger: {
+        at: currentTime(),
+        kind: "goal_replanned",
+        ...(target ? { milestoneId: target.id } : {}),
+        summary: decision.summary,
+        evidenceRefs,
+      },
+      trajectory: {
+        type: "goal_replanned",
+        payload: {
+          goalId: persisted.id,
+          targetId: target?.id ?? persisted.id,
+          fingerprint,
+          occurrence,
+          failedCheckIds: decision.failedCheckIds,
+          action: decision.action,
+          evidenceRefs,
+          planVersion: persisted.planVersion,
+          replans: persisted.budgetUsage.replans,
+        },
+      },
+      progress: {
+        event: "replanned",
+        message: "验收发现结构性问题，已重新规划。",
+        ...(target ? { milestoneId: target.id } : {}),
+      },
+      signal: runOptions?.signal,
+    }))) {
+      return {
+        goal: await settleSuppressedPublication(persisted),
+        suspend: true,
+      };
+    }
     const interruptedAfterReplanEvent = await canonicalInterruption(
       persisted,
       runOptions,
@@ -889,12 +1048,6 @@ export function createAgentGoalController(options: {
     if (interruptedAfterReplanEvent) {
       return { goal: interruptedAfterReplanEvent, suspend: true };
     }
-    notifyProgress(
-      "replanned",
-      persisted,
-      "验收发现结构性问题，已重新规划。",
-      target?.id,
-    );
     return { goal: persisted, suspend: false };
   }
 
@@ -995,12 +1148,10 @@ export function createAgentGoalController(options: {
       await publishCanonicalTerminal(persisted);
       return persisted;
     }
-    await waitForNonterminalPublications(persisted.id);
-    const certifiedGoal = (await options.goalStore.get(persisted.id)) ?? persisted;
-    if (certifiedGoal.status !== "achieved") {
-      await publishCanonicalTerminal(certifiedGoal);
-      return certifiedGoal;
-    }
+    const certifiedGoal = persisted;
+    const releaseCertificationPublication = beginNonterminalPublication(
+      certifiedGoal.id,
+    );
     const certificatePayload = {
       goalId: certifiedGoal.id,
       targetId: certifiedGoal.id,
@@ -1013,18 +1164,41 @@ export function createAgentGoalController(options: {
       ) ?? [],
       certificateHash: certifiedGoal.acceptanceCertificate?.certificateHash,
     };
-    await options.goalStore.appendLedger(certifiedGoal.id, {
-      at: currentTime(),
-      kind: "acceptance_certified",
-      summary: "Goal acceptance certificate created.",
-      evidenceRefs: certificatePayload.evidenceRefs,
-    });
-    await emit(certifiedGoal.id, "acceptance_certified", certificatePayload);
-    notifyProgress(
-      "acceptance_certified",
-      certifiedGoal,
-      "目标已通过最终验收并生成证书。",
-    );
+    let certificatePublished = false;
+    let certificatePublicationError: unknown;
+    try {
+      certificatePublished = Boolean(await publishNonterminalGoalEvent({
+        goal: certifiedGoal,
+        allowedStatuses: ["achieved"],
+        ledger: {
+          at: currentTime(),
+          kind: "acceptance_certified",
+          summary: "Goal acceptance certificate created.",
+          evidenceRefs: certificatePayload.evidenceRefs,
+        },
+        trajectory: {
+          type: "acceptance_certified",
+          payload: certificatePayload,
+        },
+        progress: {
+          event: "acceptance_certified",
+          message: "目标已通过最终验收并生成证书。",
+        },
+        signal: runOptions?.signal,
+      }));
+    } catch (error) {
+      certificatePublicationError = error;
+    } finally {
+      releaseCertificationPublication();
+    }
+    if (certificatePublicationError !== undefined) {
+      if (!runOptions?.signal?.aborted) throw certificatePublicationError;
+      await publishCanonicalTerminal(certifiedGoal);
+      return certifiedGoal;
+    }
+    if (!certificatePublished) {
+      return settleSuppressedPublication(certifiedGoal);
+    }
     if (registerTerminalPublication(certifiedGoal)) {
       await options.goalStore.appendLedger(certifiedGoal.id, {
         at: currentTime(),
@@ -1069,6 +1243,7 @@ export function createAgentGoalController(options: {
     goal: Goal,
     target: Milestone | null,
     result: AcceptanceResult,
+    runOptions?: { signal?: AbortSignal },
   ): Promise<boolean> {
     const evidenceRefs = safeAcceptanceEvidenceRefs(result);
     const targetIdentity = {
@@ -1093,38 +1268,34 @@ export function createAgentGoalController(options: {
           targetIdentity,
           fingerprint,
         ) + 1;
-    const release = beginNonterminalPublication(goal.id);
-    try {
-      if (!(await canonicalExecutingGoal(goal.id))) return false;
-      await options.goalStore.appendLedger(goal.id, {
+    return Boolean(await publishNonterminalGoalEvent({
+      goal,
+      allowedStatuses: ["executing"],
+      ledger: {
         at: currentTime(),
         kind: "acceptance_manifest_created",
         summary: "Acceptance evidence manifest created.",
         evidenceRefs,
-      });
-      // This is both the post-ledger and immediate pre-trajectory guard.
-      if (!(await canonicalExecutingGoal(goal.id))) return false;
-      await emit(goal.id, "acceptance_manifest_created", {
-        goalId: goal.id,
-        targetId: targetIdentity.targetId,
-        fingerprint,
-        occurrence,
-        failedCheckIds: failedCheckIds(result),
-        action: "validate",
-        evidenceRefs,
-      });
-      const canonical = await canonicalExecutingGoal(goal.id);
-      if (!canonical) return false;
-      notifyProgress(
-        "acceptance_manifest_created",
-        canonical,
-        "验收证据清单已生成。",
-        target?.id,
-      );
-      return true;
-    } finally {
-      release();
-    }
+      },
+      trajectory: {
+        type: "acceptance_manifest_created",
+        payload: {
+          goalId: goal.id,
+          targetId: targetIdentity.targetId,
+          fingerprint,
+          occurrence,
+          failedCheckIds: failedCheckIds(result),
+          action: "validate",
+          evidenceRefs,
+        },
+      },
+      progress: {
+        event: "acceptance_manifest_created",
+        message: "验收证据清单已生成。",
+        ...(target ? { milestoneId: target.id } : {}),
+      },
+      signal: runOptions?.signal,
+    }));
   }
 
   async function appendAcceptanceEvent(
@@ -1139,6 +1310,7 @@ export function createAgentGoalController(options: {
     target: Milestone | null,
     decision: AcceptanceRepairDecision,
     evidenceRefs: string[],
+    runOptions?: { signal?: AbortSignal },
   ): Promise<boolean> {
     const payload = {
       goalId: goal.id,
@@ -1149,32 +1321,30 @@ export function createAgentGoalController(options: {
       action: decision.action,
       evidenceRefs,
     };
-    const release = beginNonterminalPublication(goal.id);
-    try {
-      if (!(await canonicalExecutingGoal(goal.id))) return false;
-      await options.goalStore.appendLedger(goal.id, {
+    const progressMessage = {
+      acceptance_failure_classified: `验收失败已分类，涉及 ${decision.failedCheckIds.length} 项检查。`,
+      acceptance_repair_scheduled: `已安排定向验收修复（${Math.min(decision.occurrence, 2)}/2）。`,
+      acceptance_strategy_changed: "验收修复已切换策略（2/2）。",
+      acceptance_blocked: "目标验收受阻，需要人工处理后再继续。",
+    }[kind];
+    return Boolean(await publishNonterminalGoalEvent({
+      goal,
+      allowedStatuses: ["executing"],
+      ledger: {
         at: currentTime(),
         kind,
         summary: decision.summary,
         ...(target ? { milestoneId: target.id } : {}),
         evidenceRefs,
-      });
-      // This is both the post-ledger and immediate pre-trajectory guard.
-      if (!(await canonicalExecutingGoal(goal.id))) return false;
-      await emit(goal.id, kind, payload);
-      const canonical = await canonicalExecutingGoal(goal.id);
-      if (!canonical) return false;
-      const progressMessage = {
-        acceptance_failure_classified: `验收失败已分类，涉及 ${decision.failedCheckIds.length} 项检查。`,
-        acceptance_repair_scheduled: `已安排定向验收修复（${Math.min(decision.occurrence, 2)}/2）。`,
-        acceptance_strategy_changed: "验收修复已切换策略（2/2）。",
-        acceptance_blocked: "目标验收受阻，需要人工处理后再继续。",
-      }[kind];
-      notifyProgress(kind, canonical, progressMessage, target?.id);
-      return true;
-    } finally {
-      release();
-    }
+      },
+      trajectory: { type: kind, payload },
+      progress: {
+        event: kind,
+        message: progressMessage,
+        ...(target ? { milestoneId: target.id } : {}),
+      },
+      signal: runOptions?.signal,
+    }));
   }
 
   async function stopForBudgetExhaustion(
@@ -1237,20 +1407,33 @@ export function createAgentGoalController(options: {
   async function writeGoalCheckpoint(
     goal: Goal,
     reason: string,
+    runOptions?: { signal?: AbortSignal },
   ): Promise<Goal> {
     touch(goal);
     const saved = await options.goalStore.save(goal);
-    await emit(goal.id, "checkpoint_written", {
-      goalId: goal.id,
-      status: saved.status,
-      reason,
-      planVersion: saved.planVersion,
-      budgetUsage: saved.budgetUsage,
+    const published = await publishNonterminalGoalEvent({
+      goal: saved,
+      allowedStatuses: [saved.status],
+      trajectory: {
+        type: "checkpoint_written",
+        payload: {
+          goalId: goal.id,
+          status: saved.status,
+          reason,
+          planVersion: saved.planVersion,
+          budgetUsage: saved.budgetUsage,
+        },
+      },
+      progress: {
+        event: "checkpoint",
+        message: `目标状态已保存：${reason}`,
+      },
+      signal: runOptions?.signal,
     });
+    if (!published) return settleSuppressedPublication(saved);
     const latest = await options.goalStore.get(goal.id);
     const persisted =
       latest && isIrreversibleGoalStatus(latest.status) ? latest : saved;
-    notifyProgress("checkpoint", persisted, `目标状态已保存：${reason}`);
     return persisted;
   }
 
@@ -1258,6 +1441,7 @@ export function createAgentGoalController(options: {
     runId: string,
     type: AgentTrajectoryEventType,
     payload: Record<string, unknown>,
+    signal?: AbortSignal,
   ): Promise<void> {
     const event: AgentTrajectoryEvent = {
       id: options.createId?.() ?? `${type}_${Date.now()}`,
@@ -1272,7 +1456,44 @@ export function createAgentGoalController(options: {
       },
       createdAt: currentTime(),
     };
-    await options.trajectoryStore.append(runId, event);
+    throwIfPublicationAborted(signal);
+    const append = options.trajectoryStore.append(runId, event, { signal });
+    void append.catch(() => {
+      // A canceled append may reject after the controller has moved on.
+    });
+    await racePublicationWithAbort(append, signal);
+    throwIfPublicationAborted(signal);
+  }
+
+  function racePublicationWithAbort<T>(
+    operation: Promise<T>,
+    signal: AbortSignal | undefined,
+  ): Promise<T> {
+    if (!signal) return operation;
+    throwIfPublicationAborted(signal);
+    return new Promise<T>((resolve, reject) => {
+      const onAbort = () => {
+        cleanup();
+        reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+      };
+      const cleanup = () => signal.removeEventListener("abort", onAbort);
+      signal.addEventListener("abort", onAbort, { once: true });
+      operation.then(
+        (value) => {
+          cleanup();
+          resolve(value);
+        },
+        (error) => {
+          cleanup();
+          reject(error);
+        },
+      );
+    });
+  }
+
+  function throwIfPublicationAborted(signal: AbortSignal | undefined): void {
+    if (!signal?.aborted) return;
+    throw signal.reason ?? new DOMException("Aborted", "AbortError");
   }
 
   function currentTime(): string {
@@ -1294,13 +1515,26 @@ export function createAgentGoalController(options: {
         if (persisted.status !== goal.status) {
           return persisted;
         }
-        await options.goalStore.appendLedger(goal.id, {
-          at: currentTime(),
-          kind: "goal_planned",
-          summary: "Goal execution started.",
-        });
-        await emit(goal.id, "goal_planned", { goalId: goal.id });
-        notifyProgress("started", persisted, "目标已开始执行。");
+        if (!(await publishNonterminalGoalEvent({
+          goal: persisted,
+          allowedStatuses: ["executing"],
+          ledger: {
+            at: currentTime(),
+            kind: "goal_planned",
+            summary: "Goal execution started.",
+          },
+          trajectory: {
+            type: "goal_planned",
+            payload: { goalId: goal.id },
+          },
+          progress: {
+            event: "started",
+            message: "目标已开始执行。",
+          },
+          signal: runOptions?.signal,
+        }))) {
+          return settleSuppressedPublication(persisted);
+        }
       }
       return runLoop(goal, runOptions);
     },
@@ -1322,11 +1556,17 @@ export function createAgentGoalController(options: {
         return goal;
       }
 
-      await options.goalStore.appendLedger(goal.id, {
-        at: currentTime(),
-        kind: "review_resolved",
-        summary: `Review resolved with "${decision.kind}".`,
-      });
+      if (!(await publishNonterminalGoalEvent({
+        goal,
+        allowedStatuses: ["waiting_for_review"],
+        ledger: {
+          at: currentTime(),
+          kind: "review_resolved",
+          summary: `Review resolved with "${decision.kind}".`,
+        },
+      }))) {
+        return settleSuppressedPublication(goal);
+      }
 
       if (decision.kind === "terminate") {
         return stopGoal(
@@ -1353,15 +1593,28 @@ export function createAgentGoalController(options: {
         return persisted;
       }
 
-      if (decision.kind === "modify_plan") {
-        await emit(goal.id, "goal_replanned", {
-          goalId: goal.id,
-          planVersion: persisted.planVersion,
-          replans: persisted.budgetUsage.replans,
-        });
+      if (!(await publishNonterminalGoalEvent({
+        goal: persisted,
+        allowedStatuses: ["executing"],
+        ...(decision.kind === "modify_plan"
+          ? {
+              trajectory: {
+                type: "goal_replanned" as const,
+                payload: {
+                  goalId: goal.id,
+                  planVersion: persisted.planVersion,
+                  replans: persisted.budgetUsage.replans,
+                },
+              },
+            }
+          : {}),
+        progress: {
+          event: "started",
+          message: "审核已通过，目标继续执行。",
+        },
+      }))) {
+        return settleSuppressedPublication(persisted);
       }
-
-      notifyProgress("started", persisted, "审核已通过，目标继续执行。");
       void runLoop(persisted).catch(() => undefined);
       return persisted;
     },
@@ -1428,6 +1681,17 @@ function describeGoalBudgetExhaustion(
 
 function isIrreversibleGoalStatus(status: GoalStatus): boolean {
   return status === "achieved" || status === "canceled";
+}
+
+function isTerminalGoalStatus(status: GoalStatus): boolean {
+  return (
+    status === "achieved" ||
+    status === "stopped_budget" ||
+    status === "stopped_stalled" ||
+    status === "stopped_blocked" ||
+    status === "failed" ||
+    status === "canceled"
+  );
 }
 
 function terminalStatusMessage(goal: Goal): string {

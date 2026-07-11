@@ -151,7 +151,10 @@ export function createToolActionSignature(
   const canonical = canonicalJsonWithMetadata(args);
   const canonicalArgs = canonical.json;
   const signature = `${safeToolName}:${canonicalArgs}`;
-  if (Buffer.byteLength(signature) <= MAX_TOOL_ACTION_SIGNATURE_BYTES) {
+  if (
+    !canonical.truncated &&
+    Buffer.byteLength(signature) <= MAX_TOOL_ACTION_SIGNATURE_BYTES
+  ) {
     return signature;
   }
   return `${safeToolName}:${JSON.stringify([
@@ -319,7 +322,16 @@ function canonicalize(
       return special("unserializable");
     }
 
-    const sortedKeys = allKeys.sort();
+    const remainingKeyBudget = Math.max(
+      0,
+      MAX_CANONICAL_PROPERTY_INSPECTIONS - state.budget.propertyInspections,
+    );
+    const keysTruncated = allKeys.length > remainingKeyBudget;
+    const sortedKeys = (keysTruncated
+      ? allKeys.slice(0, remainingKeyBudget)
+      : allKeys
+    ).sort();
+    if (keysTruncated) state.budget.truncated = true;
     const visibleKeys = sortedKeys.slice(0, MAX_CANONICAL_OBJECT_KEYS);
     return [
       "object",
@@ -333,7 +345,13 @@ function canonicalize(
           depth + 1,
         ),
       ]),
-      summarizeObjectTail(value, sortedKeys, state, depth + 1),
+      summarizeObjectTail(
+        value,
+        sortedKeys,
+        state,
+        depth + 1,
+        keysTruncated,
+      ),
     ];
   } finally {
     state.ancestors.delete(value);
@@ -359,30 +377,52 @@ function summarizeArrayTail(
   depth: number,
 ): CanonicalValue {
   let keys: string[];
+  let keysTruncated = false;
   try {
     const enumerableKeys = Object.keys(value);
     const ownNames = Object.getOwnPropertyNames(value);
+    const remainingKeyBudget = Math.max(
+      0,
+      MAX_CANONICAL_PROPERTY_INSPECTIONS - state.budget.propertyInspections,
+    );
     const selected = new Set(
-      enumerableKeys.filter((key) => {
+      enumerableKeys.slice(0, remainingKeyBudget).filter((key) => {
         const index = parseCanonicalArrayIndex(key);
         return index === null || index >= MAX_CANONICAL_ARRAY_LENGTH;
       }),
     );
     for (const key of ownNames) {
+      if (selected.size >= remainingKeyBudget) {
+        keysTruncated = true;
+        break;
+      }
       const index = parseCanonicalArrayIndex(key);
       if (index !== null && index >= MAX_CANONICAL_ARRAY_LENGTH) {
         selected.add(key);
       }
     }
+    if (
+      enumerableKeys.length > remainingKeyBudget ||
+      ownNames.length > remainingKeyBudget
+    ) {
+      keysTruncated = true;
+    }
+    if (keysTruncated) state.budget.truncated = true;
     keys = [...selected];
   } catch {
     return special("unserializable");
   }
   keys.sort(compareDeepArrayKeys);
   const hash = createHash("sha256");
+  if (keysTruncated) {
+    updateTailHash(hash, "[truncated_keys]", special("truncated"));
+  }
   let cardinality = 0;
   for (const key of keys) {
-    if (!canConsumeCanonicalNode(state.budget)) {
+    if (
+      !canConsumeCanonicalNode(state.budget) ||
+      !canInspectCanonicalProperty(state.budget)
+    ) {
       updateTailHash(hash, "[truncated]", special("truncated"));
       state.budget.truncated = true;
       break;
@@ -404,11 +444,18 @@ function summarizeObjectTail(
   sortedKeys: string[],
   state: CanonicalState,
   depth: number,
+  keysTruncated: boolean,
 ): CanonicalValue {
   const hash = createHash("sha256");
+  if (keysTruncated) {
+    updateTailHash(hash, "[truncated_keys]", special("truncated"));
+  }
   let cardinality = 0;
   for (const key of sortedKeys.slice(MAX_CANONICAL_OBJECT_KEYS)) {
-    if (!canConsumeCanonicalNode(state.budget)) {
+    if (
+      !canConsumeCanonicalNode(state.budget) ||
+      !canInspectCanonicalProperty(state.budget)
+    ) {
       updateTailHash(hash, "[truncated]", special("truncated"));
       state.budget.truncated = true;
       break;
@@ -749,6 +796,9 @@ function canonicalizeObjectEntry(
   state: CanonicalState,
   depth: number,
 ): CanonicalValue {
+  if (!consumeCanonicalPropertyInspection(state.budget)) {
+    return special("truncated");
+  }
   if (isSecretLikeKey(key)) return special("redacted");
   if (isPrivateValueKey(key)) {
     return canonicalizePrivateObjectValue(value, key, state, depth);
@@ -791,9 +841,6 @@ function canonicalizeObjectValue(
   state: CanonicalState,
   depth: number,
 ): CanonicalValue {
-  if (!consumeCanonicalPropertyInspection(state.budget)) {
-    return special("truncated");
-  }
   try {
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
     if (!descriptor) return special("unreadable");
@@ -924,9 +971,6 @@ function canonicalizePrivateObjectValue(
   state: CanonicalState,
   depth: number,
 ): CanonicalValue {
-  if (!consumeCanonicalPropertyInspection(state.budget)) {
-    return special("truncated");
-  }
   try {
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
     if (!descriptor) return special("unreadable");

@@ -9,6 +9,10 @@ import type {
   GoalEvidenceManifest,
   SuccessCriterion,
 } from "../shared/agentGoal";
+import {
+  redactAndBoundAcceptanceSummary,
+  redactAndBoundEvidenceRef,
+} from "./agentGoalRedaction";
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const MAX_CANONICAL_DEPTH = 64;
@@ -185,11 +189,11 @@ function createGoalAcceptanceCertificateInternal(
       passed: result.passed,
       code: result.code,
       ...(result.failureClass ? { failureClass: result.failureClass } : {}),
-      evidenceRefs: normalizeStringSet(
+      evidenceRefs: normalizeRedactedStringSet(
         result.evidenceRefs,
         `check evidence ref for ${result.checkId}`,
       ),
-      detail: result.detail,
+      detail: redactAndBoundAcceptanceSummary(result.detail),
     })),
     (result) => stableJson([result.checkId, result.kind]),
     "check result",
@@ -207,13 +211,15 @@ function createGoalAcceptanceCertificateInternal(
   ) as GoalEvidenceManifest["artifacts"];
   const evidence = dedupeStableEntries(
     artifacts.map((artifact) => ({
-      ref: artifact.ref,
-      ...(artifact.path !== undefined ? { path: artifact.path } : {}),
+      ref: redactAndBoundEvidenceRef(artifact.ref),
+      ...(artifact.path !== undefined
+        ? { path: redactAndBoundEvidenceRef(artifact.path) }
+        : {}),
       ...(artifact.sha256 !== undefined ? { sha256: artifact.sha256 } : {}),
       ...(artifact.sizeBytes !== undefined
         ? { sizeBytes: artifact.sizeBytes }
         : {}),
-      provenanceRefs: normalizeStringSet(
+      provenanceRefs: normalizeRedactedStringSet(
         provenanceMap[artifact.ref] ?? [],
         `provenance ref for ${artifact.ref}`,
       ),
@@ -256,6 +262,18 @@ function createGoalAcceptanceCertificateInternal(
     ...unsigned,
     certificateHash: createCertificateDigest(unsigned),
   };
+}
+
+function normalizeRedactedStringSet(
+  values: readonly string[],
+  label: string,
+  minimumLength = 0,
+): string[] {
+  return normalizeStringSet(
+    values.map(redactAndBoundEvidenceRef),
+    label,
+    minimumLength,
+  );
 }
 
 function verifyGoalAcceptanceCertificateInternal(

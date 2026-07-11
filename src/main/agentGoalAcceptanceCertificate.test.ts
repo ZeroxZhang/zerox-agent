@@ -164,6 +164,74 @@ describe("goal acceptance certificate", () => {
     expect(leftCertificate.certificateHash).toMatch(/^[a-f0-9]{64}$/);
   });
 
+  it("sanitizes and bounds every persisted certificate text and reference", () => {
+    const input = validInput();
+    const rawReportRef =
+      "artifact:report?session_token=certificate-ref-secret&cookie=certificate-cookie-secret";
+    input.checkResults[0]!.detail =
+      `Accepted. Authorization: Basic dXNlcjpjZXJ0aWZpY2F0ZS1zZWNyZXQ= ${"x".repeat(4_000)}`;
+    input.checkResults[0]!.evidenceRefs = [rawReportRef];
+    input.evidenceManifest.artifacts[0]!.ref = rawReportRef;
+    input.evidenceManifest.artifacts[0]!.path =
+      "/workspace/client_secret/certificate-path-secret/report.md";
+    delete input.provenanceRefs["artifact:report"];
+    input.provenanceRefs[rawReportRef] = [
+      "trajectory_a?session_token=certificate-provenance-secret",
+    ];
+
+    const certificate = createGoalAcceptanceCertificate(input);
+    const serialized = JSON.stringify(certificate);
+    const goal = goalWithCertificate(input.goal, certificate);
+
+    expect(serialized).toContain("[redacted]");
+    expect(serialized).not.toMatch(
+      /certificate-ref-secret|certificate-cookie-secret|dXNlcjpjZXJ0aWZpY2F0ZS1zZWNyZXQ|certificate-path-secret|certificate-provenance-secret/,
+    );
+    expect(Buffer.byteLength(certificate.checkResults[0]!.detail)).toBeLessThanOrEqual(1_024);
+    expect(certificate.checkResults[0]!.evidenceRefs.every(
+      (ref) => Buffer.byteLength(ref) <= 512,
+    )).toBe(true);
+    expect(certificate.evidence.every((entry) =>
+      Buffer.byteLength(entry.ref) <= 512 &&
+      (!entry.path || Buffer.byteLength(entry.path) <= 512) &&
+      entry.provenanceRefs.every((ref) => Buffer.byteLength(ref) <= 512),
+    )).toBe(true);
+    expect(verifyGoalAcceptanceCertificate(goal)).toEqual({ ok: true });
+  });
+
+  it("deduplicates identical redacted evidence collisions and rejects conflicting ones", () => {
+    const makeCollisionInput = (conflictingHash: boolean) => {
+      const input = validInput();
+      const firstRef = "artifact:report?session_token=first-secret";
+      const secondRef = "artifact:report?session_token=second-secret";
+      input.checkResults[0]!.evidenceRefs = [firstRef];
+      const report = input.evidenceManifest.artifacts[0]!;
+      report.ref = firstRef;
+      input.evidenceManifest.artifacts.push({
+        ...structuredClone(report),
+        ref: secondRef,
+        ...(conflictingHash ? { sha256: "c".repeat(64) } : {}),
+      });
+      delete input.provenanceRefs["artifact:report"];
+      input.provenanceRefs[firstRef] = ["trajectory_a?token=first-secret"];
+      input.provenanceRefs[secondRef] = ["trajectory_a?token=second-secret"];
+      return input;
+    };
+
+    const identical = makeCollisionInput(false);
+    const certificate = createGoalAcceptanceCertificate(identical);
+    expect(
+      certificate.evidence.filter((entry) => entry.ref.startsWith("artifact:report")),
+    ).toHaveLength(1);
+    expect(
+      verifyGoalAcceptanceCertificate(goalWithCertificate(identical.goal, certificate)),
+    ).toEqual({ ok: true });
+
+    expect(() => createGoalAcceptanceCertificate(makeCollisionInput(true))).toThrow(
+      /Conflicting evidence entry/i,
+    );
+  });
+
   it.each(["providerApiKey", "unexpectedField"])(
     "rejects undeclared top-level certificate input property %s",
     (property) => {

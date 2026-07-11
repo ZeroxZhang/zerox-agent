@@ -13,13 +13,16 @@ describe("goal acceptance redaction", () => {
     "webhook=https://hooks.slack.com/services/T000/B000/SLACKSECRET",
     "webhook=https://example.invalid/hooks/generic-webhook-secret",
     "Authorization: Bearer bearer-secret",
+    "Authorization: Basic dXNlcjpiYXNpYy1jcmVkZW50aWFs",
+    "Set-Cookie: session=set-cookie-session-secret; Path=/; HttpOnly",
+    String.raw`{\"client_secret\":\"escaped-json-secret\",\"safe\":true}`,
     "aws_session_token=aws-secret&security_token=security-secret",
   ])("redacts credential-bearing evidence ref %s", (value) => {
     const redacted = redactAndBoundEvidenceRef(value);
 
     expect(redacted).toContain("[redacted]");
     expect(redacted).not.toMatch(
-      /session-secret|cookie-secret|password@example|refresh-secret|json-secret|credential-secret|SLACKSECRET|generic-webhook-secret|bearer-secret|aws-secret|security-secret/,
+      /session-secret|cookie-secret|password@example|refresh-secret|json-secret|credential-secret|SLACKSECRET|generic-webhook-secret|bearer-secret|dXNlcjpiYXNpYy1jcmVkZW50aWFs|set-cookie-session-secret|escaped-json-secret|aws-secret|security-secret/,
     );
     expect(Buffer.byteLength(redacted)).toBeLessThanOrEqual(512);
   });

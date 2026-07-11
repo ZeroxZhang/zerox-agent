@@ -607,3 +607,96 @@ exit 0
 - `src/main/agentGoalRedaction.ts`
 - `src/main/agentGoalRedaction.test.ts`
 - `.superpowers/sdd/p41-task-7-report.md`
+
+## Persistence and Publication Boundary Seal
+
+### Status
+
+DONE
+
+### RED Evidence
+
+The final independent-review regressions were witnessed failing before the
+corresponding production changes. They proved that Basic authorization,
+Set-Cookie values, and escaped JSON secrets escaped central redaction; real
+cold-judge trajectory payloads and on-disk certificates persisted raw detail,
+references, paths, and provenance; a never-settling stale append could deadlock
+replacement execution; exception handling emitted duplicate terminal progress;
+and milestone/checkpoint/review/certificate publications could cross the
+canonical terminal boundary.
+
+Additional fingerprint probes proved that large secret-like property sets could
+exhaust unaccounted work and that truncation of a private command graph was not
+truthfully represented when its final digest remained below 2 KiB.
+
+### GREEN Evidence
+
+```text
+npx vitest run src/main/agentGoalController.test.ts
+Test Files 1 passed (1)
+Tests 67 passed (67)
+
+npx vitest run src/main/agentGoalController.test.ts \
+  src/main/agentGoalAcceptance.test.ts \
+  src/main/agentGoalAcceptanceCertificate.test.ts \
+  src/main/agentGoalFailureFingerprint.test.ts \
+  src/main/agentGoalRedaction.test.ts \
+  src/main/agentTrajectoryStore.test.ts \
+  src/main/goalRuntimeEngine.test.ts
+Test Files 7 passed (7)
+Tests 306 passed (306)
+
+npx vitest run src/renderer/goalProgressViewModel.test.ts
+Test Files 1 passed (1)
+Tests 36 passed (36)
+
+npx tsc --noEmit --pretty false -p tsconfig.electron.json
+exit 0
+
+npx tsc --noEmit --pretty false -p tsconfig.renderer.json
+exit 0
+
+npm run harness:check
+Harness check passed.
+
+git diff --check
+exit 0
+```
+
+### Fix Summary
+
+- Goal-judgment reasons, acceptance-check details/references, certificate
+  evidence, artifact paths/references, and provenance are centrally redacted
+  and bounded before persistence. Certificate hashes cover the sanitized form;
+  sanitized identity collisions deduplicate identical evidence and reject
+  conflicting evidence.
+- Redaction now covers Basic authorization, Set-Cookie pairs, and escaped JSON
+  secret fields in addition to the existing credential forms.
+- Every nonterminal milestone, checkpoint, review, replan, acceptance, repair,
+  and certification publication uses one canonical-state fence. The fence
+  rechecks before and after durable/trajectory awaits and suppresses progress
+  once ownership or canonical execution is lost.
+- Trajectory append observes the run abort signal and races uncooperative stale
+  appends, so replacement runs cannot deadlock. A stale owner may return its
+  preterminal snapshot if it exits before the replacement wins; once the store
+  is terminal it returns the authoritative terminal state, and the final stored
+  state remains terminal with one terminal publication.
+- Terminal publication preserves an existing external terminal ledger event and
+  exception paths emit exactly one terminal progress notification.
+- Secret-like properties consume the global canonical inspection budget, huge
+  tails emit truthful truncation markers, and every truncated signature uses a
+  bounded digest marker even when the resulting text is below 2 KiB.
+
+### Boundary Seal Files
+
+- `src/main/agentGoalController.ts`
+- `src/main/agentGoalController.test.ts`
+- `src/main/agentGoalAcceptance.ts`
+- `src/main/agentGoalAcceptance.test.ts`
+- `src/main/agentGoalAcceptanceCertificate.ts`
+- `src/main/agentGoalAcceptanceCertificate.test.ts`
+- `src/main/agentGoalFailureFingerprint.ts`
+- `src/main/agentGoalFailureFingerprint.test.ts`
+- `src/main/agentGoalRedaction.ts`
+- `src/main/agentGoalRedaction.test.ts`
+- `.superpowers/sdd/p41-task-7-report.md`

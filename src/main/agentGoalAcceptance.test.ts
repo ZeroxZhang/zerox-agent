@@ -1853,6 +1853,50 @@ describe("agent goal acceptance", () => {
     },
   );
 
+  it.each(["accepted", "rejected"] as const)(
+    "redacts real %s cold-judge trajectory persistence",
+    async (verdict) => {
+      const evidenceRef =
+        "evidence:final?session_token=trajectory-ref-secret&cookie=trajectory-cookie-secret";
+      const reason =
+        `${verdict} reason Authorization: Basic dXNlcjpyZWFsLWp1ZGdlLXNlY3JldA== ` +
+        `Set-Cookie: session=real-judge-cookie-secret; Path=/ ${"x".repeat(4_000)}`;
+
+      const result = await createAgentGoalAcceptance({
+        chatClient: {
+          async complete() {
+            return {
+              content: JSON.stringify({ verdict, reason, evidenceRefs: [evidenceRef] }),
+              toolCalls: [],
+              finishReason: "stop",
+            };
+          },
+        },
+      }).evaluateGoal(
+        createGoal([
+          check("redacted_final", "model_review", { evidenceRefs: [evidenceRef] }, true),
+        ]),
+        createContext(),
+      );
+
+      const persisted = trajectoryEvents.filter((event) =>
+        event.type === "goal_judged" || event.type === "acceptance_checked",
+      );
+      const serialized = JSON.stringify(persisted);
+      expect(result.accepted).toBe(verdict === "accepted");
+      expect(persisted.map((event) => event.type)).toEqual([
+        "goal_judged",
+        "acceptance_checked",
+      ]);
+      expect(serialized).toContain("[redacted]");
+      expect(serialized).not.toMatch(
+        /trajectory-ref-secret|trajectory-cookie-secret|dXNlcjpyZWFsLWp1ZGdlLXNlY3JldA|real-judge-cookie-secret/,
+      );
+      const checked = persisted.find((event) => event.type === "acceptance_checked");
+      expect(Buffer.byteLength(JSON.stringify(checked?.payload))).toBeLessThan(4_096);
+    },
+  );
+
   it.each([
     ["invalid JSON", "not-json"],
     ["unknown verdict", JSON.stringify({ verdict: "maybe", reason: "No.", evidenceRefs: ["evidence:final"] })],

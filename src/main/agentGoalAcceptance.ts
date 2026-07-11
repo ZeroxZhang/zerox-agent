@@ -38,6 +38,10 @@ import {
   type AcceptanceValidator,
   type AgentGoalValidatorRegistry,
 } from "./agentGoalValidatorRegistry";
+import {
+  redactAndBoundAcceptanceSummary,
+  redactAndBoundEvidenceRef,
+} from "./agentGoalRedaction";
 
 const shellRedirectionOperatorPattern = /[<>]/;
 const defaultJudgeTimeoutMs = 30_000;
@@ -1090,7 +1094,7 @@ async function emitGoalJudged(
       checkId: check.id,
       ok: verdict.verdict === "accepted",
       impossible: verdict.verdict === "impossible",
-      reason: verdict.reason,
+      reason: redactAndBoundAcceptanceSummary(verdict.reason),
       transcriptMessageCount,
     },
     redaction: {
@@ -1121,7 +1125,7 @@ async function emitAcceptanceChecked(
     verdict: result.verdict,
     failureClass: result.failureClass,
     inferentialUsed: result.inferentialUsed,
-    checkResults: result.checkResults,
+    checkResults: result.checkResults.map(sanitizeCheckResultForPersistence),
   };
 
   if (target.targetKind === "milestone") {
@@ -1143,6 +1147,18 @@ async function emitAcceptanceChecked(
   };
 
   await appendTrajectoryWithAbort(ctx, event, ctx.signal);
+}
+
+function sanitizeCheckResultForPersistence(
+  result: GoalAcceptanceCheckResult,
+): GoalAcceptanceCheckResult {
+  return {
+    ...result,
+    evidenceRefs: [...new Set(
+      result.evidenceRefs.map(redactAndBoundEvidenceRef).filter(Boolean),
+    )].slice(0, maximumEvidenceRefs),
+    detail: redactAndBoundAcceptanceSummary(result.detail),
+  };
 }
 
 async function appendTrajectoryWithAbort(
