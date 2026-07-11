@@ -307,6 +307,7 @@ export function createGoalRuntimeEngine(options: {
                   args,
                 },
                 {
+                  ...(runOptions?.signal ? { signal: runOptions.signal } : {}),
                   runContext,
                   runtimeTask: buildGoalMilestoneRuntimeTask(goal, runContext),
                 },

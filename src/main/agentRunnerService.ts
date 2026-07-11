@@ -182,10 +182,14 @@ export function createAgentRunnerService(options: {
         }
 
         throwIfCanceled(signal);
-        const auth = await options.toolAuthorizationService.authorize(taskId, {
-          toolName: toolName as never,
-          args,
-        });
+        const auth = await options.toolAuthorizationService.authorize(
+          taskId,
+          {
+            toolName: toolName as never,
+            args,
+          },
+          { ...(signal ? { signal } : {}) },
+        );
 
         return {
           tc,

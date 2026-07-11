@@ -579,6 +579,7 @@ export function createAgentRuntimeEngine(options: {
             args,
           },
           {
+            ...(signal ? { signal } : {}),
             runContext: current.runContext,
             onApprovalRequested: async () => {
               await transitionInvocation({ status: "waiting_approval" });

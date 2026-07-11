@@ -614,6 +614,44 @@ describe("tool authorization service", () => {
     expect(lifecycleEvents).toEqual(["requested:task_lifecycle", "approved"]);
   });
 
+  it("propagates the active run signal to an interactive approval", async () => {
+    const controller = new AbortController();
+    let observedSignal: AbortSignal | undefined;
+    const taskStore = createScheduledTaskStore({
+      configDir,
+      createId: () => "task_signal",
+    });
+    const auditLog = createToolAuditLog({ configDir });
+    const service = createToolAuthorizationService({
+      taskStore,
+      auditLog,
+      requestUserApproval: async (_request, approvalOptions) => {
+        observedSignal = approvalOptions?.signal;
+        return { approved: false, reason: "canceled" };
+      },
+    });
+    await taskStore.create({
+      name: "Signal propagation",
+      skillName: "",
+      enabled: true,
+      schedule: { kind: "manual" },
+      input: {},
+      permissions: {
+        files: { read: [], write: [] },
+        web: { search: false, fetchDomains: [] },
+        shell: { commands: [] },
+      },
+    });
+
+    await service.authorize(
+      "task_signal",
+      { toolName: "web_fetch", args: { url: "https://example.com" } },
+      { signal: controller.signal },
+    );
+
+    expect(observedSignal).toBe(controller.signal);
+  });
+
   it("does not ask for approval when the tool request is malformed", async () => {
     let approvalCount = 0;
     const taskStore = createScheduledTaskStore({

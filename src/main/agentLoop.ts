@@ -649,6 +649,7 @@ export async function runAgentLoop(
               ...(registeredToolSource ? { source: registeredToolSource } : {}),
               args,
             }, {
+              ...(signal ? { signal } : {}),
               ...(runContext ? { runContext } : {}),
               ...(runtimeTask ? { runtimeTask } : {}),
               onApprovalRequested: async (request) => {

@@ -53,6 +53,10 @@ export type GitWorktreeCreationApproval =
   | {
       kind: "trusted_repository_policy";
       policyId: string;
+    }
+  | {
+      kind: "session_auto_approval";
+      approvedAt: string;
     };
 
 export type TrustedGitWorktreeRepositoryPolicy = {
@@ -233,7 +237,10 @@ function assertGitWorktreeCreationAllowed(
   approval: GitWorktreeCreationApproval | undefined,
   trustedPolicies: TrustedGitWorktreeRepositoryPolicy[] | undefined,
 ): void {
-  if (approval?.kind === "explicit_user_approval") {
+  if (
+    approval?.kind === "explicit_user_approval" ||
+    approval?.kind === "session_auto_approval"
+  ) {
     return;
   }
 

@@ -258,6 +258,7 @@ function collectGoalResultSummaries(goal: Goal): string[] {
 export function createAppContainer(options: {
   requestToolApproval: (
     request: ToolUserApprovalRequest,
+    options?: { signal?: AbortSignal },
   ) => Promise<ToolUserApprovalResult>;
   acceptanceValidators?: AcceptanceValidator[];
 }) {
@@ -768,21 +769,20 @@ export function createAppContainer(options: {
       throw new Error(approval.reason ?? "Git worktree creation was not approved.");
     }
 
-    if (approval.automatic) {
-      throw new Error(
-        "Git worktree creation requires explicit user approval; global automatic approval is not sufficient.",
-      );
-    }
-
     return agentWorkspaceService().createGitWorktreeWorkspace({
       name: input.name,
       repositoryRoot: input.repositoryRoot,
       branch: input.branch,
-      approval: {
-        kind: "explicit_user_approval",
-        approvedAt: new Date().toISOString(),
-        approvedBy: "user",
-      },
+      approval: approval.automatic
+        ? {
+            kind: "session_auto_approval",
+            approvedAt: new Date().toISOString(),
+          }
+        : {
+            kind: "explicit_user_approval",
+            approvedAt: new Date().toISOString(),
+            approvedBy: "user",
+          },
     });
   }
 

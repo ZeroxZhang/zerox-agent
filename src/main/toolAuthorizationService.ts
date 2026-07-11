@@ -22,6 +22,7 @@ export type ToolAuthorizationService = {
 };
 
 export type ToolAuthorizationOptions = {
+  signal?: AbortSignal;
   runContext?: AgentRunContext;
   runtimeTask?: RuntimeToolAuthorizationTask;
   onApprovalRequested?: (request: ToolUserApprovalRequest) => Promise<void>;
@@ -54,6 +55,7 @@ export function createToolAuthorizationService(options: {
   permissionRules?: PermissionRule[] | (() => PermissionRule[]);
   requestUserApproval?: (
     request: ToolUserApprovalRequest,
+    options?: { signal?: AbortSignal },
   ) => Promise<ToolUserApprovalResult>;
 }): ToolAuthorizationService {
   const homeDir = options.homeDir ?? os.homedir();
@@ -181,7 +183,11 @@ export function createToolAuthorizationService(options: {
           deniedReason: decision.reason,
         };
         await authorizeOptions?.onApprovalRequested?.(approvalRequest);
-        const approval = await options.requestUserApproval(approvalRequest);
+        const approval = await options.requestUserApproval(approvalRequest, {
+          ...(authorizeOptions?.signal
+            ? { signal: authorizeOptions.signal }
+            : {}),
+        });
         await authorizeOptions?.onApprovalResolved?.(approval);
 
         decision = approval.approved
