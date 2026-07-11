@@ -486,6 +486,9 @@ app.whenReady().then(() => {
   createMainWindow();
 
   if (!smokeMode.enabled) {
+    void container.resumeInterruptedGoals().catch((error) => {
+      console.error("Failed to resume interrupted goals:", error);
+    });
     createTray();
     startTaskScheduler();
     startMemoryMaintenanceScheduler();

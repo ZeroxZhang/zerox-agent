@@ -767,7 +767,7 @@ function buildQuickActionReviewSummary(
 
 function createDefaultChatGoalBudget(): GoalBudget {
   return {
-    maxIterations: 8,
+    maxIterations: 64,
     maxToolCalls: 64,
     maxWallClockMs: 45 * 60 * 1000,
     maxReplans: 3,

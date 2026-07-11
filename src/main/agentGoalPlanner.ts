@@ -56,19 +56,18 @@ export function createAgentGoalPlanner(options: {
     let rejectionReason: string | undefined;
 
     for (let attempt = 0; attempt < maxPlanAttempts; attempt += 1) {
-      const response = await options.chatClient.complete({
-        ...options.modelProfile,
-        temperature: Math.min(options.modelProfile.temperature, 0.2),
-        messages: [
-          {
-            role: "user",
-            content: buildPrompt(request.prompt, rejectionReason),
-          },
-        ],
-        tool_choice: "none",
-      });
-
       try {
+        const response = await options.chatClient.complete({
+          ...options.modelProfile,
+          temperature: Math.min(options.modelProfile.temperature, 0.2),
+          messages: [
+            {
+              role: "user",
+              content: buildPrompt(request.prompt, rejectionReason),
+            },
+          ],
+          tool_choice: "none",
+        });
         const milestones = parseMilestones(response.content ?? "");
         validateMilestonePlan(request.successCriteria, milestones);
         return milestones;

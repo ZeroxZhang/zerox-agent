@@ -2,6 +2,47 @@ import { describe, expect, it } from "vitest";
 import { createAgentGoalTranslator } from "./agentGoalTranslator";
 
 describe("agent goal translator degradation", () => {
+  it("retries one transient planning failure before falling back", async () => {
+    let attempts = 0;
+    const translator = createAgentGoalTranslator({
+      chatClient: {
+        async complete() {
+          attempts += 1;
+          if (attempts === 1) throw new Error("temporary outage");
+          return {
+            content: JSON.stringify({
+              normalizedDescription: "分析项目",
+              successCriteria: [],
+              milestones: [],
+            }),
+            reasoningContent: null,
+            toolCalls: [],
+            finishReason: "stop",
+          };
+        },
+      },
+      getModelProfile: async () => ({
+        baseUrl: "http://localhost",
+        apiKey: "test",
+        model: "test-model",
+        temperature: 0,
+        maxTokens: 2_000,
+      }),
+      retryDelayMs: 0,
+    });
+
+    const draft = await translator.translate({
+      sessionId: "session_1",
+      originMessageId: null,
+      message: "分析项目",
+    });
+
+    expect(attempts).toBe(2);
+    expect(draft.warnings).not.toContainEqual(
+      expect.objectContaining({ code: "planning_model_unavailable" }),
+    );
+  });
+
   it("surfaces provider failure and produces a concise local fallback", async () => {
     const diagnostics: string[] = [];
     const translator = createAgentGoalTranslator({

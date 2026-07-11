@@ -1270,7 +1270,9 @@ export function createAppContainer(options: {
                   modelProfile,
                 }
               : {}),
-            transcriptMessages: runResult?.transcriptMessages,
+            transcriptMessages:
+              runResult?.transcriptMessages ??
+              goal.runtimeCheckpoint?.transcriptMessages,
             artifacts: {
               goalEvidence: {
                 condition: goal.description,
@@ -2047,6 +2049,17 @@ export function createAppContainer(options: {
       runGoalOperation(() => goalChatService().replan(goalId, instructions)),
     retryGoal: (goalId: string) =>
       runGoalOperation(() => goalChatService().retry(goalId)),
+    async resumeInterruptedGoals() {
+      const activeGoals = await agentGoalStore().listActive();
+      const interrupted = activeGoals.filter(
+        (goal) => goal.status === "executing",
+      );
+      for (const goal of interrupted) {
+        options.setGoalActive?.(goal.id, true);
+        await goalChatService().resume(goal.id);
+      }
+      return interrupted.length;
+    },
     initializeMcpTools,
     getActiveMcpClients: () => activeMcpClients,
     getActiveTaskRunControllers: () => activeTaskRunControllers,

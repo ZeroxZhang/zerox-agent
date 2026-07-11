@@ -77,6 +77,73 @@ describe("agent goal controller", () => {
     ).toHaveLength(3);
   });
 
+  it("persists a resumable checkpoint and incremental usage before a milestone finishes", async () => {
+    await store.save(createGoal([milestone("milestone_1")]));
+    let releaseRun: (() => void) | undefined;
+    let checkpointSaved: (() => void) | undefined;
+    const checkpointReached = new Promise<void>((resolve) => {
+      checkpointSaved = resolve;
+    });
+    const runtime: GoalRuntimeEngine = {
+      async runMilestone(_goal, milestone, runOptions) {
+        await runOptions?.onCheckpoint?.({
+          transcriptMessages: [
+            { role: "assistant", content: "inspected repository" },
+          ],
+          toolCallCount: 2,
+          wallClockMs: 500,
+          tokens: 25,
+          nextAction: "Run the focused tests.",
+        });
+        checkpointSaved?.();
+        await new Promise<void>((resolve) => {
+          releaseRun = resolve;
+        });
+        return {
+          runId: `run_${milestone.id}`,
+          toolCallCount: 2,
+          wallClockMs: 500,
+          tokens: 25,
+          transcriptMessages: [
+            { role: "assistant", content: "inspected repository" },
+          ],
+        };
+      },
+    };
+    const controller = createController({
+      runtime,
+      acceptance: createAcceptance({
+        milestoneAccepted: [true],
+        goalAccepted: [true],
+      }),
+    });
+
+    const running = controller.start("goal_1");
+    await checkpointReached;
+    const checkpointed = await store.get("goal_1");
+
+    expect(checkpointed?.runtimeCheckpoint).toMatchObject({
+      milestoneId: "milestone_1",
+      nextAction: "Run the focused tests.",
+      transcriptMessages: [
+        { role: "assistant", content: "inspected repository" },
+      ],
+    });
+    expect(checkpointed?.budgetUsage).toMatchObject({
+      toolCalls: 2,
+      wallClockMs: 500,
+      tokens: 25,
+    });
+
+    releaseRun?.();
+    const result = await running;
+    expect(result.budgetUsage).toMatchObject({
+      toolCalls: 2,
+      wallClockMs: 500,
+      tokens: 25,
+    });
+  });
+
   it("stops before dispatching another milestone when the iteration budget is exhausted", async () => {
     await store.save(
       createGoal(

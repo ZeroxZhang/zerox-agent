@@ -97,6 +97,14 @@ export type AgentLoopOptions = {
   onContextCompacted?: (event: AgentLoopContextCompaction) => void;
   onModelRetry?: (event: ModelRetryEvent) => void;
   onStrategyGuard?: (event: AgentLoopStrategyGuardEvent) => void;
+  onCheckpoint?: (checkpoint: AgentLoopCheckpoint) => void | Promise<void>;
+};
+
+export type AgentLoopCheckpoint = {
+  messages: ChatMessage[];
+  turns: number;
+  toolCallsExecuted: number;
+  nextAction: string;
 };
 
 export type AgentLoopContextCompaction = {
@@ -178,6 +186,7 @@ export async function runAgentLoop(
     contextManager = createContextManager(),
     compactionStrategy,
     systemReminderRegistry,
+    onCheckpoint,
     tokenBudget = 0,
     modelRetry,
     onToolCall,
@@ -192,6 +201,20 @@ export async function runAgentLoop(
     onModelRetry,
     onStrategyGuard,
   } = options;
+
+  async function emitCheckpoint(nextAction: string): Promise<void> {
+    await onCheckpoint?.({
+      messages: messages.map((message) => ({
+        ...message,
+        ...(message.tool_calls
+          ? { tool_calls: message.tool_calls.map((call) => ({ ...call, function: { ...call.function } })) }
+          : {}),
+      })),
+      turns: turns + 1,
+      toolCallsExecuted,
+      nextAction,
+    });
+  }
 
   const toolDefinitions = customTools ?? buildToolDefinitions();
   const messages: ChatMessage[] = resumeMessages ? [...resumeMessages] : [];
@@ -578,6 +601,7 @@ export async function runAgentLoop(
               ok: false,
               error: "参数 JSON 解析失败",
             }, toolEventBase);
+            await emitCheckpoint(`Recover from invalid arguments for ${toolName}.`);
             continue;
           }
 
@@ -639,6 +663,7 @@ export async function runAgentLoop(
             processedToolCalls.push(toolCall);
             rememberToolFailure(toolName, nativeFallbackRejection, args);
             onToolResult?.(toolName, false, rejectedResult, toolEventBase);
+            await emitCheckpoint(`Choose a safe supported alternative to ${toolName}.`);
             continue;
           }
 
@@ -695,6 +720,7 @@ export async function runAgentLoop(
                 ok: false,
                 error: auth.ok ? auth.decision.reason : auth.message,
               }, toolEventBase);
+              await emitCheckpoint(`Continue after the authorization result for ${toolName}.`);
               continue;
             }
             if (toolInvocation.status !== "authorized") {
@@ -812,6 +838,7 @@ export async function runAgentLoop(
           });
           processedToolCalls.push(toolCall);
           onToolResult?.(toolName, result.ok, result, toolResultEvent);
+          await emitCheckpoint(`Continue from the latest ${toolName} result.`);
 
           const selfFinalizingSummary = buildSelfFinalizingToolSummary(
             toolName,

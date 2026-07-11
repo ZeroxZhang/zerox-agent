@@ -38,6 +38,8 @@ export function createAgentGoalTranslator(options: {
   onDiagnostic?: (event: { message: string; error?: unknown }) => void;
   createId?: () => string;
   now?: () => string;
+  maxTranslationAttempts?: number;
+  retryDelayMs?: number;
 }): AgentGoalTranslator {
   const createId = options.createId ?? (() => `goal_draft_${randomUUID()}`);
   const now = options.now ?? (() => new Date().toISOString());
@@ -112,6 +114,8 @@ async function translateWithModel(
     chatClient: ChatClient;
     getModelProfile: () => Promise<AgentModelProfile>;
     onDiagnostic?: (event: { message: string; error?: unknown }) => void;
+    maxTranslationAttempts?: number;
+    retryDelayMs?: number;
   },
   message: string,
   signal: AbortSignal | undefined,
@@ -141,18 +145,39 @@ async function translateWithModel(
         content: message,
       },
     ];
-    const response = await options.chatClient.complete({
-      ...profile,
-      messages,
-      temperature: Math.min(profile.temperature, 0.2),
-      maxTokens: Math.min(profile.maxTokens, 1200),
-      ...(signal ? { signal } : {}),
+    const maxAttempts = Math.max(1, options.maxTranslationAttempts ?? 2);
+    let lastError: unknown;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      throwIfAborted(signal);
+      try {
+        const response = await options.chatClient.complete({
+          ...profile,
+          messages,
+          temperature: Math.min(profile.temperature, 0.2),
+          maxTokens: Math.min(profile.maxTokens, 1200),
+          ...(signal ? { signal } : {}),
+        });
+        const parsed = parseDraftJson(response.content);
+        if (parsed) return { parsed };
+        lastError = new Error(
+          "Goal translation model returned an invalid goal draft.",
+        );
+      } catch (error) {
+        if (signal?.aborted || isAbortError(error)) {
+          throw signal?.reason ?? error;
+        }
+        lastError = error;
+      }
+      if (attempt < maxAttempts - 1) {
+        await abortableDelay(options.retryDelayMs ?? 25, signal);
+      }
+    }
+    const detail =
+      lastError instanceof Error ? lastError.message : String(lastError);
+    options.onDiagnostic?.({
+      message: `Goal translation model failed: ${detail}`,
+      error: lastError,
     });
-    const parsed = parseDraftJson(response.content);
-    if (parsed) return { parsed };
-    const diagnosticMessage =
-      "Goal translation model returned an invalid goal draft.";
-    options.onDiagnostic?.({ message: diagnosticMessage });
     return {
       parsed: null,
       warning: planningFallbackWarning(),
@@ -171,6 +196,21 @@ async function translateWithModel(
       warning: planningFallbackWarning(),
     };
   }
+}
+
+function abortableDelay(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason ?? new DOMException("Canceled", "AbortError"));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", abort, { once: true });
+  });
 }
 
 function parseDraftJson(content: string | null): ParsedGoalDraft | null {

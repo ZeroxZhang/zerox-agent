@@ -188,18 +188,31 @@ export function createGoalRuntimeEngine(options: {
     async runMilestone(goal, milestone, runOptions) {
       const startedAt = now();
       const runId = createId();
+      const pendingTrajectoryWrites = new Set<Promise<void>>();
       const appendRunTrajectory = (
         type: Parameters<AgentTrajectoryStore["append"]>[1]["type"],
         payload: Record<string, unknown>,
         containsUserText = true,
-      ) =>
-        appendTrajectory(
+      ) => {
+        const write = appendTrajectory(
           runId,
           type,
           payload,
           containsUserText,
           runOptions?.signal,
         );
+        pendingTrajectoryWrites.add(write);
+        void write.then(
+          () => pendingTrajectoryWrites.delete(write),
+          () => pendingTrajectoryWrites.delete(write),
+        );
+        return write;
+      };
+      const flushTrajectoryWrites = async () => {
+        while (pendingTrajectoryWrites.size > 0) {
+          await Promise.allSettled([...pendingTrajectoryWrites]);
+        }
+      };
       const taskId = `goal:${goal.id}`;
       const runContext = extendRunContextForSelectedSkill(
         withGoalRunIdentity(
@@ -424,6 +437,20 @@ export function createGoalRuntimeEngine(options: {
         });
         const finishedAt = now();
         if (runOptions?.signal?.aborted) {
+          const canceledRun: AgentRunRecord = {
+            id: runId,
+            taskId,
+            taskName: goal.description,
+            skillName: "deterministic-goal-pipeline",
+            status: "canceled",
+            runContext,
+            summary: "Goal milestone canceled.",
+            events,
+            startedAt,
+            finishedAt,
+          };
+          await options.runStore.append(canceledRun);
+          await flushTrajectoryWrites();
           return {
             runId,
             toolCallCount: observedToolCalls,
@@ -485,6 +512,7 @@ export function createGoalRuntimeEngine(options: {
           runId,
           status,
         });
+        await flushTrajectoryWrites();
 
         return {
           runId,
@@ -547,7 +575,9 @@ export function createGoalRuntimeEngine(options: {
       }, false);
       const tokenBudget =
         options.tokenBudget ??
-        goal.budget.maxTokens ??
+        (goal.budget.maxTokens
+          ? Math.max(1, goal.budget.maxTokens - goal.budgetUsage.tokens)
+          : undefined) ??
         modelProfile.maxTokens;
       const assembled = options.goalContext.assemble(
         goal,
@@ -590,7 +620,13 @@ export function createGoalRuntimeEngine(options: {
           systemPrompt: buildGoalSystemPrompt(modelProfile.model, startedAt.split("T")[0]),
           maxTurns:
             options.maxTurns ??
-            Math.max(16, Math.min(64, goal.budget.maxToolCalls)),
+            Math.max(
+              4,
+              Math.min(
+                32,
+                goal.budget.maxToolCalls - goal.budgetUsage.toolCalls,
+              ),
+            ),
           tools: options.toolExecutor.getRegistry().getDefinitions(),
           toolResultOffloadStore: options.toolResultOffloadStore,
           toolResultOffloadThreshold: options.toolResultOffloadThreshold,
@@ -698,10 +734,36 @@ export function createGoalRuntimeEngine(options: {
               ),
             );
           },
+          async onCheckpoint(checkpoint) {
+            await runOptions?.onCheckpoint?.({
+              transcriptMessages: toBoundedTranscriptMessages(
+                checkpoint.messages,
+              ),
+              toolCallCount: checkpoint.toolCallsExecuted,
+              wallClockMs:
+                new Date(now()).getTime() - new Date(startedAt).getTime(),
+              tokens: Math.max(1, estimateMessageTokens(checkpoint.messages)),
+              nextAction: checkpoint.nextAction,
+            });
+          },
         } satisfies AgentLoopOptions,
       );
       const finishedAt = now();
       if (runOptions?.signal?.aborted) {
+        const canceledRun: AgentRunRecord = {
+          id: runId,
+          taskId,
+          taskName: goal.description,
+          skillName: "goal-milestone",
+          status: "canceled",
+          runContext,
+          summary: "Goal milestone canceled.",
+          events,
+          startedAt,
+          finishedAt,
+        };
+        await options.runStore.append(canceledRun);
+        await flushTrajectoryWrites();
         return {
           runId,
           toolCallCount: Math.max(
@@ -768,6 +830,7 @@ export function createGoalRuntimeEngine(options: {
         runId,
         status,
       });
+      await flushTrajectoryWrites();
 
       return {
         runId,

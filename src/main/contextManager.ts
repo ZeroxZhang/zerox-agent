@@ -92,6 +92,9 @@ function compressMessagesInternal(
     } else if (message.role === "assistant") {
       if (!currentTurn) {
         currentTurn = { user: undefined, assistant: message, toolResults: [] };
+      } else if (currentTurn.assistant) {
+        conversationTurns.push(currentTurn);
+        currentTurn = { user: undefined, assistant: message, toolResults: [] };
       } else {
         currentTurn.assistant = message;
       }

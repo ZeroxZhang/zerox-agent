@@ -48,6 +48,14 @@ export type GoalRuntimeRunResult = {
   actionSignatures?: string[];
 };
 
+export type GoalRuntimeProgressCheckpoint = {
+  transcriptMessages: ChatMessage[];
+  toolCallCount: number;
+  wallClockMs: number;
+  tokens: number;
+  nextAction: string;
+};
+
 export type GoalRuntimeEngine = {
   runMilestone(
     goal: Goal,
@@ -56,6 +64,9 @@ export type GoalRuntimeEngine = {
       signal?: AbortSignal;
       repairDirective?: AcceptanceRepairDirective;
       resumeMessages?: ChatMessage[];
+      onCheckpoint?: (
+        checkpoint: GoalRuntimeProgressCheckpoint,
+      ) => Promise<void>;
     },
   ): Promise<GoalRuntimeRunResult>;
 };
@@ -491,19 +502,66 @@ export function createAgentGoalController(options: {
       };
     }
 
+    let checkpointedToolCalls = 0;
+    let checkpointedWallClockMs = 0;
+    let checkpointedTokens = 0;
+    const checkpoint = goal.runtimeCheckpoint;
+    const canResumeCheckpoint = Boolean(
+      checkpoint &&
+        (checkpoint.milestoneId === milestone.id || repairDirective),
+    );
     const runResult = await options.runtimeEngine.runMilestone(
       goal,
       milestone,
       {
         ...(runOptions?.signal ? { signal: runOptions.signal } : {}),
-        ...(goal.runtimeCheckpoint?.milestoneId === milestone.id
+        ...(canResumeCheckpoint && checkpoint
           ? {
-              resumeMessages: goal.runtimeCheckpoint.transcriptMessages,
+              resumeMessages: checkpoint.transcriptMessages,
             }
           : {}),
         ...(repairDirective
           ? { repairDirective }
           : {}),
+        async onCheckpoint(runtimeCheckpoint) {
+          if (runOptions?.signal?.aborted) return;
+          const canonical = await options.goalStore.get(goal.id);
+          if (!canonical || canonical.status !== "executing") return;
+
+          goal.runtimeCheckpoint = {
+            milestoneId: milestone.id,
+            transcriptMessages: boundRuntimeCheckpointMessages(
+              runtimeCheckpoint.transcriptMessages,
+            ),
+            nextAction: runtimeCheckpoint.nextAction,
+            updatedAt: currentTime(),
+          };
+          goal.budgetUsage.toolCalls += Math.max(
+            0,
+            runtimeCheckpoint.toolCallCount - checkpointedToolCalls,
+          );
+          goal.budgetUsage.wallClockMs += Math.max(
+            0,
+            runtimeCheckpoint.wallClockMs - checkpointedWallClockMs,
+          );
+          goal.budgetUsage.tokens += Math.max(
+            0,
+            runtimeCheckpoint.tokens - checkpointedTokens,
+          );
+          checkpointedToolCalls = runtimeCheckpoint.toolCallCount;
+          checkpointedWallClockMs = runtimeCheckpoint.wallClockMs;
+          checkpointedTokens = runtimeCheckpoint.tokens;
+          touch(goal);
+          const saved = await options.goalStore.save(goal);
+          if (saved.status === "executing") {
+            notifyProgress(
+              "checkpoint",
+              saved,
+              `已保存里程碑运行检查点：${milestone.description}`,
+              milestone.id,
+            );
+          }
+        },
       },
     );
     const abortedAfterRuntime = await latestGoalAfterAbort(goal, runOptions);
@@ -532,9 +590,18 @@ export function createAgentGoalController(options: {
       };
     }
     goal.budgetUsage.iterations += 1;
-    goal.budgetUsage.toolCalls += runResult.toolCallCount;
-    goal.budgetUsage.wallClockMs += runResult.wallClockMs ?? 0;
-    goal.budgetUsage.tokens += runResult.tokens ?? 0;
+    goal.budgetUsage.toolCalls += Math.max(
+      0,
+      runResult.toolCallCount - checkpointedToolCalls,
+    );
+    goal.budgetUsage.wallClockMs += Math.max(
+      0,
+      (runResult.wallClockMs ?? 0) - checkpointedWallClockMs,
+    );
+    goal.budgetUsage.tokens += Math.max(
+      0,
+      (runResult.tokens ?? 0) - checkpointedTokens,
+    );
     touch(goal);
     const usageGoal = await options.goalStore.save(goal);
     if (usageGoal.status !== goal.status) {

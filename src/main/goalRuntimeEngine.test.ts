@@ -920,7 +920,7 @@ describe("goal runtime engine", () => {
       .toContain("Resume directly from the latest real message/tool result");
   });
 
-  it("suppresses final trajectory and run writes after cancellation", async () => {
+  it("records cancellation without publishing a misleading final trajectory", async () => {
     const controller = new AbortController();
     const trajectoryTypes: string[] = [];
     const runs: AgentRunRecord[] = [];
@@ -970,7 +970,11 @@ describe("goal runtime engine", () => {
     });
 
     expect(result.status).toBe("canceled");
-    expect(runs).toEqual([]);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({
+      status: "canceled",
+      summary: "Goal milestone canceled.",
+    });
     expect(trajectoryTypes).not.toContain("final_summary");
     expect(trajectoryTypes).not.toContain("checkpoint_written");
   });
