@@ -2054,20 +2054,19 @@ export function createAppContainer(options: {
       const interrupted = activeGoals.filter(
         (goal) => goal.status === "executing",
       );
-      let resumed = 0;
+      let recovered = 0;
       for (const goal of interrupted) {
         try {
           const prepared = prepareInterruptedGoalForResume(goal);
           if (prepared !== goal) {
             await agentGoalStore().save(prepared);
+            recovered += 1;
           }
-          await goalChatService().resume(goal.id);
-          resumed += 1;
         } catch (error) {
-          console.error(`Failed to resume goal ${goal.id}:`, error);
+          console.error(`Failed to recover interrupted goal ${goal.id}:`, error);
         }
       }
-      return resumed;
+      return recovered;
     },
     initializeMcpTools,
     getActiveMcpClients: () => activeMcpClients,
@@ -2090,6 +2089,15 @@ export function prepareInterruptedGoalForResume(goal: Goal): Goal {
     changed = true;
     return { ...milestone, state: "ready" as const };
   });
+  if (goal.status === "executing") {
+    changed = true;
+    return {
+      ...goal,
+      milestones,
+      status: "stopped_blocked" as const,
+      stopReason: "external_blocked" as const,
+    };
+  }
   return changed ? { ...goal, milestones } : goal;
 }
 

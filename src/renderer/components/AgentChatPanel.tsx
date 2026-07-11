@@ -1585,6 +1585,9 @@ export function AgentChatPanel({
       setAutoApprovalEnabled(state.autoApprovalEnabled);
       setAutoApprovalLocked(state.autoApprovalLocked);
       setGoalModeEnabled(state.goalModeEnabled);
+      if (!enabled && state.goalModeEnabled && state.autoApprovalLocked) {
+        setGoalDrawerOpen(true);
+      }
     }
   }
 
