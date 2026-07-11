@@ -202,6 +202,9 @@ describe("agent goal store", () => {
       },
     });
     expect(loaded).not.toHaveProperty("acceptanceCertificate");
+    await expect(store.listActive()).resolves.not.toContainEqual(
+      expect.objectContaining({ id: tampered.id }),
+    );
     await expect(
       store.save({
         ...loaded!,
