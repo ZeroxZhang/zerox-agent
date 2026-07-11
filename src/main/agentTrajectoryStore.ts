@@ -9,6 +9,7 @@ export type AgentTrajectoryStore = {
   append(
     runId: string,
     event: AgentTrajectoryEvent,
+    options?: { signal?: AbortSignal },
   ): Promise<AgentTrajectoryEvent>;
   list(runId: string): Promise<AgentTrajectoryEvent[]>;
   flushShadowWrites(): Promise<void>;
@@ -43,12 +44,16 @@ export function createAgentTrajectoryStore(
 
   // --- legacy JSON implementation (unchanged) ---
   const jsonImpl: AgentTrajectoryStore = {
-    async append(runId, event) {
+    async append(runId, event, appendOptions) {
+      throwIfAborted(appendOptions?.signal);
       await mkdir(trajectoriesDir, { recursive: true });
+      throwIfAborted(appendOptions?.signal);
       await writeFile(trajectoryPath(runId), `${JSON.stringify(event)}\n`, {
         encoding: "utf8",
         flag: "a",
+        signal: appendOptions?.signal,
       });
+      throwIfAborted(appendOptions?.signal);
       return event;
     },
     async list(runId) {
@@ -77,9 +82,12 @@ export function createAgentTrajectoryStore(
   }
 
   return {
-    async append(runId, event) {
+    async append(runId, event, appendOptions) {
+      throwIfAborted(appendOptions?.signal);
       repo.appendTrajectory(runId, event); // sync hot path
-      if (backend === "dual") enqueueShadowWrite(jsonImpl.append(runId, event));
+      if (backend === "dual") {
+        enqueueShadowWrite(jsonImpl.append(runId, event, appendOptions));
+      }
       return event;
     },
     async list(runId) {
@@ -89,4 +97,12 @@ export function createAgentTrajectoryStore(
       await Promise.all([...shadowWrites]);
     },
   };
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return;
+  if (signal.reason instanceof Error && signal.reason.name === "AbortError") {
+    throw signal.reason;
+  }
+  throw new DOMException("Trajectory append was canceled.", "AbortError");
 }

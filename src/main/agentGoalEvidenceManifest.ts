@@ -189,6 +189,7 @@ async function buildArtifact(
         ...(input.provenance.milestoneId
           ? { milestoneId: input.provenance.milestoneId }
           : {}),
+        signal: input.signal,
       });
       throwIfManifestAborted(input.signal);
       if (!verification.ok) continue;
@@ -273,7 +274,9 @@ async function buildFileArtifact(
   try {
     handle = await open(
       boundary.path,
-      constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
+      constants.O_RDONLY |
+        (constants.O_NONBLOCK ?? 0) |
+        (constants.O_NOFOLLOW ?? 0),
     );
     throwIfManifestAborted(input.signal);
     const stats = await abortableManifestOperation(handle.stat(), input.signal);

@@ -395,6 +395,7 @@ async function evaluateFileExists(
         runId: ctx.runId,
         ...(ctx.goalId ? { goalId: ctx.goalId } : {}),
         ...(ctx.milestoneId ? { milestoneId: ctx.milestoneId } : {}),
+        signal: ctx.signal,
       });
       throwIfAcceptanceAborted(ctx.signal);
       const evidenceRefs = getArtifactProvenanceEvidenceRefs(artifactRef);
@@ -777,7 +778,13 @@ async function evaluateModelReview(
     };
   }
 
-  await emitGoalJudged(ctx, check, parsed, transcript.messageIds.length);
+  await emitGoalJudged(
+    ctx,
+    check,
+    parsed,
+    transcript.messageIds.length,
+    operation.signal,
+  );
   return {
     checkResult: judgeVerdictResult(check, parsed),
     inferentialUsed: true,
@@ -957,7 +964,13 @@ async function evaluateFinalModelReview(
     };
   }
 
-  await emitGoalJudged(ctx, check, parsed, transcript.messageIds.length);
+  await emitGoalJudged(
+    ctx,
+    check,
+    parsed,
+    transcript.messageIds.length,
+    operation.signal,
+  );
   return {
     checkResult: judgeVerdictResult(check, parsed),
     inferentialUsed: true,
@@ -1063,7 +1076,9 @@ async function emitGoalJudged(
   check: AcceptanceCheck,
   verdict: GoalJudgeVerdict,
   transcriptMessageCount: number,
+  signal: AbortSignal,
 ): Promise<void> {
+  throwIfAcceptanceAborted(signal);
   const event: AgentTrajectoryEvent = {
     id: ctx.createId?.() ?? `goal_judged_${Date.now()}`,
     runId: ctx.runId,
@@ -1086,7 +1101,7 @@ async function emitGoalJudged(
     createdAt: ctx.now?.() ?? new Date().toISOString(),
   };
 
-  await ctx.trajectoryStore.append(ctx.runId, event);
+  await appendTrajectoryWithAbort(ctx, event, signal);
 }
 
 async function emitAcceptanceChecked(
@@ -1098,6 +1113,7 @@ async function emitAcceptanceChecked(
     milestoneId?: string;
   },
 ): Promise<void> {
+  throwIfAcceptanceAborted(ctx.signal);
   const payload: Record<string, unknown> = {
     targetKind: target.targetKind,
     goalId: target.goalId ?? ctx.goalId,
@@ -1126,7 +1142,47 @@ async function emitAcceptanceChecked(
     createdAt: ctx.now?.() ?? new Date().toISOString(),
   };
 
-  await ctx.trajectoryStore.append(ctx.runId, event);
+  await appendTrajectoryWithAbort(ctx, event, ctx.signal);
+}
+
+async function appendTrajectoryWithAbort(
+  ctx: AcceptanceContext,
+  event: AgentTrajectoryEvent,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  throwIfAcceptanceAborted(signal);
+  const append = ctx.trajectoryStore.append(ctx.runId, event, { signal });
+  void append.catch(() => {
+    // The raced append may reject after cancellation; keep it observed.
+  });
+  await raceWithAcceptanceAbort(append, signal);
+  throwIfAcceptanceAborted(signal);
+}
+
+function raceWithAcceptanceAbort<T>(
+  operation: Promise<T>,
+  signal: AbortSignal | undefined,
+): Promise<T> {
+  if (!signal) return operation;
+  throwIfAcceptanceAborted(signal);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      cleanup();
+      reject(abortError(signal.reason));
+    };
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    signal.addEventListener("abort", onAbort, { once: true });
+    operation.then(
+      (value) => {
+        cleanup();
+        resolve(value);
+      },
+      (error) => {
+        cleanup();
+        reject(error);
+      },
+    );
+  });
 }
 
 function checkResult(

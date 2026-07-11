@@ -1,4 +1,7 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { mkdir, mkdtemp, open, rm, symlink, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -151,6 +154,33 @@ describe("goal evidence manifest", () => {
     }))).rejects.toMatchObject({ name: "AbortError", code: "ABORT_ERR" });
     expect(chunks).toBe(0);
   });
+
+  it.skipIf(process.platform === "win32")(
+    "rejects an authorized FIFO without blocking on open",
+    async () => {
+      const fifoPath = path.join(workspacePath, "report.pipe");
+      await promisify(execFile)("mkfifo", [fifoPath]);
+      const manifestPromise = buildGoalEvidenceManifest(input({
+        evidenceRefs: [`artifact:${fifoPath}`],
+      }));
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      const firstOutcome = await Promise.race([
+        manifestPromise.then(() => "settled" as const),
+        new Promise<"blocked">((resolve) => {
+          timeout = setTimeout(() => resolve("blocked"), 50);
+        }),
+      ]);
+
+      if (firstOutcome === "blocked") {
+        const writer = await open(fifoPath, constants.O_WRONLY | constants.O_NONBLOCK);
+        await writer.close();
+        await manifestPromise;
+      }
+      if (timeout) clearTimeout(timeout);
+
+      expect(firstOutcome).toBe("settled");
+    },
+  );
 
   it("preserves UTF-8 criterion matches split across stream chunk boundaries", async () => {
     const textPath = path.join(workspacePath, "chunk-boundary.txt");

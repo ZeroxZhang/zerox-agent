@@ -2000,6 +2000,105 @@ describe("agent goal acceptance", () => {
     expect(modelCalls).toBe(0);
   });
 
+  it("aborts a deferred goal_judged append and cannot return a late accepted verdict", async () => {
+    vi.useFakeTimers();
+    const context = createContext();
+    let finishLateAppend: (() => void) | undefined;
+    let appendSignal: AbortSignal | undefined;
+    context.trajectoryStore = {
+      append(_runId, event, options) {
+        if (event.type !== "goal_judged") {
+          trajectoryEvents.push(event);
+          return Promise.resolve(event);
+        }
+        appendSignal = options?.signal;
+        return new Promise((resolve, reject) => {
+          options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), {
+            once: true,
+          });
+          finishLateAppend = () => {
+            if (!options?.signal?.aborted) trajectoryEvents.push(event);
+            resolve(event);
+          };
+        });
+      },
+    };
+    const evaluation = createAgentGoalAcceptance({
+      judgeTimeoutMs: 25,
+      chatClient: {
+        async complete() {
+          return {
+            content: JSON.stringify({
+              verdict: "accepted",
+              reason: "Evidence passed before trajectory persistence.",
+              evidenceRefs: ["evidence:final"],
+            }),
+            toolCalls: [],
+            finishReason: "stop",
+          };
+        },
+      },
+    }).evaluateGoal(
+      createGoal([
+        check("deferred_judged_append", "model_review", {
+          evidenceRefs: ["evidence:final"],
+        }, true),
+      ]),
+      context,
+    );
+    await vi.advanceTimersByTimeAsync(25);
+    finishLateAppend?.();
+
+    await expect(evaluation).resolves.toMatchObject({
+      accepted: false,
+      checkResults: [{ code: "judge_timeout" }],
+    });
+    expect(appendSignal?.aborted).toBe(true);
+    expect(trajectoryEvents.some((event) => event.type === "goal_judged")).toBe(false);
+  });
+
+  it("aborts a deferred acceptance_checked append without returning accepted", async () => {
+    const parent = new AbortController();
+    const context = createContext({ artifacts: { summary: { done: true } } });
+    context.signal = parent.signal;
+    let finishLateAppend: (() => void) | undefined;
+    let appendStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      appendStarted = resolve;
+    });
+    context.trajectoryStore = {
+      append(_runId, event, options) {
+        expect(event.type).toBe("acceptance_checked");
+        return new Promise((resolve, reject) => {
+          appendStarted?.();
+          options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), {
+            once: true,
+          });
+          finishLateAppend = () => {
+            if (!options?.signal?.aborted) trajectoryEvents.push(event);
+            resolve(event);
+          };
+        });
+      },
+    };
+    const evaluation = createAgentGoalAcceptance().evaluateGoal(
+      createGoal([
+        check("deferred_acceptance_append", "assertion", {
+          artifactRef: "summary",
+          path: "done",
+          equals: true,
+        }),
+      ]),
+      context,
+    );
+    await started;
+    parent.abort(new DOMException("Run canceled.", "AbortError"));
+    finishLateAppend?.();
+
+    await expect(evaluation).rejects.toMatchObject({ name: "AbortError" });
+    expect(trajectoryEvents).toHaveLength(0);
+  });
+
   it("propagates parent cancellation through evidence and the final judge", async () => {
     const parent = new AbortController();
     const context = createContext();

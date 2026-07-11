@@ -47,6 +47,19 @@ describe("agent trajectory store", () => {
     await expect(store.list("run_2")).resolves.toEqual([runTwo]);
   });
 
+  it("does not append when the supplied signal is already aborted", async () => {
+    const store = createAgentTrajectoryStore({ configDir });
+    const controller = new AbortController();
+    controller.abort(new DOMException("Run canceled.", "AbortError"));
+
+    await expect(
+      store.append("run_1", createEvent("goal_judged", "event_1"), {
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    await expect(store.list("run_1")).resolves.toEqual([]);
+  });
+
   it("returns an empty list when a trajectory file is missing", async () => {
     const store = createAgentTrajectoryStore({ configDir });
 

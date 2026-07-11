@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
-import { lstat, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, open, realpath, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
+
+const maximumProvenanceSidecarBytes = 1024 * 1024;
 
 export type AgentArtifactProvenanceManifest = {
   schemaVersion: 1;
@@ -33,7 +36,17 @@ export type VerifyArtifactProvenanceInput = {
   runId?: string;
   goalId?: string;
   milestoneId?: string;
+  signal?: AbortSignal;
 };
+
+export class ArtifactProvenanceAbortError extends Error {
+  readonly code = "ABORT_ERR";
+
+  constructor() {
+    super("Artifact provenance operation was aborted.");
+    this.name = "AbortError";
+  }
+}
 
 export type ArtifactProvenanceVerification =
   | { ok: true; manifest: AgentArtifactProvenanceManifest; provenancePath: string }
@@ -89,20 +102,31 @@ export async function writeArtifactProvenance(
 export async function verifyArtifactProvenance(
   input: VerifyArtifactProvenanceInput,
 ): Promise<ArtifactProvenanceVerification> {
+  throwIfProvenanceAborted(input.signal);
   const provenancePath = getArtifactProvenancePath(input.artifactPath);
   const pathCheck = await verifyArtifactPathsHaveNoSymlinks(
     input.artifactPath,
     provenancePath,
   );
+  throwIfProvenanceAborted(input.signal);
   if (pathCheck) {
     return { ok: false, reason: pathCheck, provenancePath };
   }
   let manifest: unknown;
   try {
-    manifest = JSON.parse(await readFile(provenancePath, "utf8"));
+    manifest = JSON.parse(await readProvenanceSidecar(
+      provenancePath,
+      input.signal,
+    ));
   } catch (error) {
+    if (input.signal?.aborted || isAbortError(error)) {
+      throw new ArtifactProvenanceAbortError();
+    }
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return { ok: false, reason: "Artifact provenance sidecar is missing.", provenancePath };
+    }
+    if (error instanceof InvalidProvenanceSidecarError) {
+      return { ok: false, reason: error.message, provenancePath };
     }
     return {
       ok: false,
@@ -129,7 +153,18 @@ export async function verifyArtifactProvenance(
     return { ok: false, reason: mismatch, provenancePath };
   }
 
-  const destination = await describeArtifactDestination(input.artifactPath);
+  let destination: AgentArtifactProvenanceManifest["destination"];
+  try {
+    destination = await describeArtifactDestination(
+      input.artifactPath,
+      input.signal,
+    );
+  } catch (error) {
+    if (error instanceof NonRegularArtifactError) {
+      return { ok: false, reason: error.message, provenancePath };
+    }
+    throw error;
+  }
   if (
     manifest.destination.sha256 !== destination.sha256 ||
     manifest.destination.sizeBytes !== destination.sizeBytes
@@ -144,16 +179,126 @@ export async function verifyArtifactProvenance(
   return { ok: true, manifest, provenancePath };
 }
 
+async function readProvenanceSidecar(
+  provenancePath: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  throwIfProvenanceAborted(signal);
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    handle = await open(
+      provenancePath,
+      constants.O_RDONLY |
+        (constants.O_NONBLOCK ?? 0) |
+        (constants.O_NOFOLLOW ?? 0),
+    );
+    throwIfProvenanceAborted(signal);
+    const stats = await handle.stat();
+    throwIfProvenanceAborted(signal);
+    if (!stats.isFile()) {
+      throw new InvalidProvenanceSidecarError(
+        "Artifact provenance sidecar must be a regular file.",
+      );
+    }
+    if (stats.size > maximumProvenanceSidecarBytes) {
+      throw new InvalidProvenanceSidecarError(
+        "Artifact provenance sidecar exceeds the size limit.",
+      );
+    }
+
+    const chunks: Buffer[] = [];
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    let totalBytes = 0;
+    while (true) {
+      throwIfProvenanceAborted(signal);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
+      throwIfProvenanceAborted(signal);
+      if (bytesRead === 0) break;
+      totalBytes += bytesRead;
+      if (totalBytes > maximumProvenanceSidecarBytes) {
+        throw new InvalidProvenanceSidecarError(
+          "Artifact provenance sidecar exceeds the size limit.",
+        );
+      }
+      chunks.push(Buffer.from(buffer.subarray(0, bytesRead)));
+    }
+    return Buffer.concat(chunks, totalBytes).toString("utf8");
+  } catch (error) {
+    if (signal?.aborted || isAbortError(error)) {
+      throw new ArtifactProvenanceAbortError();
+    }
+    throw error;
+  } finally {
+    await handle?.close();
+  }
+}
+
 async function describeArtifactDestination(
   artifactPath: string,
+  signal?: AbortSignal,
 ): Promise<AgentArtifactProvenanceManifest["destination"]> {
-  const content = await readFile(artifactPath);
-  const stats = await stat(artifactPath);
-  return {
-    path: path.resolve(artifactPath),
-    sha256: sha256(content),
-    sizeBytes: stats.size,
-  };
+  throwIfProvenanceAborted(signal);
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    handle = await open(
+      artifactPath,
+      constants.O_RDONLY |
+        (constants.O_NONBLOCK ?? 0) |
+        (constants.O_NOFOLLOW ?? 0),
+    );
+    throwIfProvenanceAborted(signal);
+    const stats = await handle.stat();
+    throwIfProvenanceAborted(signal);
+    if (!stats.isFile()) {
+      throw new NonRegularArtifactError();
+    }
+
+    const hash = createHash("sha256");
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    let sizeBytes = 0;
+    while (true) {
+      throwIfProvenanceAborted(signal);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
+      throwIfProvenanceAborted(signal);
+      if (bytesRead === 0) break;
+      hash.update(buffer.subarray(0, bytesRead));
+      sizeBytes += bytesRead;
+    }
+    return {
+      path: path.resolve(artifactPath),
+      sha256: hash.digest("hex"),
+      sizeBytes,
+    };
+  } catch (error) {
+    if (signal?.aborted || isAbortError(error)) {
+      throw new ArtifactProvenanceAbortError();
+    }
+    throw error;
+  } finally {
+    await handle?.close();
+  }
+}
+
+class NonRegularArtifactError extends Error {
+  constructor() {
+    super("Artifact destination must be a regular file.");
+    this.name = "NonRegularArtifactError";
+  }
+}
+
+class InvalidProvenanceSidecarError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidProvenanceSidecarError";
+  }
+}
+
+function throwIfProvenanceAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw new ArtifactProvenanceAbortError();
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
 }
 
 async function safeWriteFile(
@@ -229,10 +374,6 @@ async function isAllowedSystemPathAlias(segmentPath: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-function sha256(content: Buffer): string {
-  return createHash("sha256").update(content).digest("hex");
 }
 
 function findIdentityMismatch(

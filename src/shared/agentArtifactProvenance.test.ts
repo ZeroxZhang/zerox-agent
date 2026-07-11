@@ -1,15 +1,75 @@
-import { copyFile, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { execFile } from "node:child_process";
+import { copyFile, mkdir, mkdtemp, open, readFile, symlink, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import {
+  ArtifactProvenanceAbortError,
   getArtifactProvenancePath,
   verifyArtifactProvenance,
   writeArtifactProvenance,
 } from "./agentArtifactProvenance";
 
 describe("agentArtifactProvenance", () => {
+  it("aborts a large destination hash while verification is in flight", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "artifact-provenance-abort-"));
+    const artifactPath = path.join(root, "large-report.bin");
+    await writeFile(artifactPath, Buffer.alloc(16 * 1024 * 1024, 0x61));
+    await writeArtifactProvenance({
+      artifactPath,
+      artifactId: "large-report",
+      artifactRef: "artifact:large-report",
+      runId: "run_abort",
+      source: { type: "test" },
+    });
+    const controller = new AbortController();
+
+    const verification = verifyArtifactProvenance({
+      artifactPath,
+      artifactId: "large-report",
+      artifactRef: "artifact:large-report",
+      runId: "run_abort",
+      signal: controller.signal,
+    });
+    setImmediate(() => controller.abort());
+
+    await expect(verification).rejects.toBeInstanceOf(ArtifactProvenanceAbortError);
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "rejects a FIFO provenance sidecar without blocking",
+    async () => {
+      const root = await mkdtemp(path.join(os.tmpdir(), "artifact-provenance-fifo-"));
+      const artifactPath = path.join(root, "report.md");
+      const provenancePath = getArtifactProvenancePath(artifactPath);
+      await writeFile(artifactPath, "# Report\n", "utf8");
+      await promisify(execFile)("mkfifo", [provenancePath]);
+
+      const verification = verifyArtifactProvenance({ artifactPath });
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      const firstOutcome = await Promise.race([
+        verification.then(() => "settled" as const),
+        new Promise<"blocked">((resolve) => {
+          timeout = setTimeout(() => resolve("blocked"), 50);
+        }),
+      ]);
+      if (firstOutcome === "blocked") {
+        const writer = await open(
+          provenancePath,
+          constants.O_WRONLY | constants.O_NONBLOCK,
+        );
+        await writer.close();
+        await verification;
+      }
+      if (timeout) clearTimeout(timeout);
+
+      expect(firstOutcome).toBe("settled");
+    },
+  );
+
   it("writes and verifies the artifact sidecar", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "artifact-provenance-"));
     const artifactPath = path.join(root, "bookmark_list.md");
