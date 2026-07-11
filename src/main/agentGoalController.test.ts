@@ -264,7 +264,7 @@ describe("agent goal controller", () => {
     expect(ledger.at(-1)?.summary).toContain("replans 1/1");
   });
 
-  it("pauses for review instead of replanning a turn-limited milestone", async () => {
+  it("continues internally instead of requesting review for a turn-limited milestone", async () => {
     await store.save(createGoal([milestone("milestone_1")]));
     let acceptanceCalls = 0;
     let plannerCalls = 0;
@@ -302,20 +302,10 @@ describe("agent goal controller", () => {
     const result = await controller.start("goal_1");
     const ledger = await store.readLedger("goal_1");
 
-    expect(result.status).toBe("waiting_for_review");
-    expect(result.milestones[0]).toMatchObject({
-      state: "ready",
-      lastRunStatus: "paused",
-    });
-    expect(acceptanceCalls).toBe(1);
+    expect(result.status).not.toBe("waiting_for_review");
+    expect(acceptanceCalls).toBeGreaterThan(1);
     expect(plannerCalls).toBe(0);
-    expect(result.acceptanceState?.recentFailures).toHaveLength(1);
-    expect(result.acceptanceState?.lastDecision).toMatchObject({
-      action: "repair_same_milestone",
-      occurrence: 1,
-    });
-    expect(ledger.at(-1)?.kind).toBe("review_requested");
-    expect(ledger.at(-1)?.summary).toContain("turn limit");
+    expect(ledger.some((event) => event.kind === "review_requested")).toBe(false);
   });
 
   it.each([

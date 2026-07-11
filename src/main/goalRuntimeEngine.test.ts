@@ -718,6 +718,7 @@ describe("goal runtime engine", () => {
       messages: ChatMessage[];
       taskId: string | undefined;
       systemPrompt: string | undefined;
+      maxTurns: number | undefined;
       pauseOnStrategyGuard: boolean | undefined;
       pauseOnTurnLimit: boolean | undefined;
     }> = [];
@@ -769,6 +770,7 @@ describe("goal runtime engine", () => {
           messages,
           taskId: options.taskId,
           systemPrompt: options.systemPrompt,
+          maxTurns: options.maxTurns,
           pauseOnStrategyGuard: options.pauseOnStrategyGuard,
           pauseOnTurnLimit: options.pauseOnTurnLimit,
         });
@@ -794,7 +796,8 @@ describe("goal runtime engine", () => {
     expect(loopInputs).toHaveLength(1);
     expect(loopInputs[0]?.taskId).toBe("goal:goal_1");
     expect(loopInputs[0]?.pauseOnStrategyGuard).toBe(true);
-    expect(loopInputs[0]?.pauseOnTurnLimit).toBe(true);
+    expect(loopInputs[0]?.pauseOnTurnLimit).toBe(false);
+    expect(loopInputs[0]?.maxTurns).toBeGreaterThan(8);
     expect(loopInputs[0]?.systemPrompt).toContain("长期目标执行");
     expect(loopInputs[0]?.systemPrompt).toContain("Model profile: default");
     expect(loopInputs[0]?.messages.at(-1)).toEqual({
@@ -862,6 +865,59 @@ describe("goal runtime engine", () => {
     );
     expect(trajectoryEvents.map((event) => event.type)).toContain("final_summary");
     expect(trajectoryEvents.map((event) => event.type)).toContain("checkpoint_written");
+  });
+
+  it("rebuilds a milestone run from the prior real transcript", async () => {
+    const goal = createGoal();
+    const milestone = goal.milestones[0]!;
+    let observedMessages: ChatMessage[] = [];
+    const engine = createGoalRuntimeEngine({
+      workspaceRoot: "/Users/demo/project",
+      chatClient: { async complete() { throw new Error("unused"); } },
+      getModelProfile: async () => ({
+        baseUrl: "http://localhost",
+        apiKey: "test",
+        model: "test-model",
+        temperature: 0,
+        maxTokens: 4_000,
+      }),
+      toolExecutor: {
+        async execute() { return { ok: true, result: {} }; },
+        getRegistry() { return createDynamicToolRegistry(); },
+        hasTool() { return true; },
+      },
+      runStore: { async append(run) { return run; } },
+      trajectoryStore: { async append(_runId, event) { return event; } },
+      goalContext: createAgentGoalContext(),
+      runAgentLoop: async (messages) => {
+        observedMessages = messages;
+        return {
+          summary: "continued",
+          status: "succeeded",
+          turns: 1,
+          messages,
+          toolCallsExecuted: 0,
+        };
+      },
+    });
+    const priorTranscript: ChatMessage[] = [
+      { role: "assistant", content: "I will inspect package.json." },
+      {
+        role: "tool",
+        tool_call_id: "call_read",
+        content: JSON.stringify({ ok: true, result: { name: "zerox-agent" } }),
+      },
+    ];
+
+    await engine.runMilestone(goal, milestone, {
+      resumeMessages: priorTranscript,
+    });
+
+    expect(observedMessages).toEqual(
+      expect.arrayContaining(priorTranscript),
+    );
+    expect(observedMessages.map((message) => message.content).join("\n"))
+      .toContain("Resume directly from the latest real message/tool result");
   });
 
   it("passes run-scoped identity into chrome bookmark provenance and projects artifact events", async () => {

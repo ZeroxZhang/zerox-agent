@@ -511,7 +511,11 @@ export function createGoalRuntimeEngine(options: {
         options.tokenBudget ??
         goal.budget.maxTokens ??
         modelProfile.maxTokens;
-      const assembled = options.goalContext.assemble(goal, [], tokenBudget);
+      const assembled = options.goalContext.assemble(
+        goal,
+        runOptions?.resumeMessages ?? [],
+        tokenBudget,
+      );
       const milestoneInstruction: ChatMessage = {
         role: "user",
         content: buildMilestoneInstruction(
@@ -523,6 +527,15 @@ export function createGoalRuntimeEngine(options: {
       };
       const initialMessages: ChatMessage[] = [
         ...assembled.messages,
+        ...(runOptions?.resumeMessages?.length
+          ? [
+              {
+                role: "system" as const,
+                content:
+                  "Resume directly from the latest real message/tool result. Do not recap, restart repository discovery, or ask the user to continue.",
+              },
+            ]
+          : []),
         milestoneInstruction,
       ];
 
@@ -537,13 +550,15 @@ export function createGoalRuntimeEngine(options: {
           runContext,
           runtimeTask: buildGoalMilestoneRuntimeTask(goal, runContext),
           systemPrompt: buildGoalSystemPrompt(modelProfile.model, startedAt.split("T")[0]),
-          maxTurns: options.maxTurns ?? 8,
+          maxTurns:
+            options.maxTurns ??
+            Math.max(16, Math.min(64, goal.budget.maxToolCalls)),
           tools: options.toolExecutor.getRegistry().getDefinitions(),
           toolResultOffloadStore: options.toolResultOffloadStore,
           toolResultOffloadThreshold: options.toolResultOffloadThreshold,
           pauseOnFailureLoop: true,
           pauseOnStrategyGuard: true,
-          pauseOnTurnLimit: true,
+          pauseOnTurnLimit: false,
           ...(runOptions?.signal ? { signal: runOptions.signal } : {}),
           onTurn(turn, phase) {
             void appendTrajectory(runId, "model_request", {

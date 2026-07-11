@@ -112,6 +112,25 @@ describe("agent goal context", () => {
     expect(combined).toContain("Goal-level success criterion");
     expect(combined).toContain("Report milestone started.");
   });
+
+  it("preserves the real assistant and tool seam for runtime continuation", () => {
+    const context = createAgentGoalContext();
+    const assembled = context.assemble(
+      createGoal([milestone("running_report", [], "running")]),
+      [
+        { role: "assistant", content: "Reading the current implementation." },
+        { role: "tool", tool_call_id: "call_1", content: "tool result" },
+      ],
+      600,
+    );
+
+    expect(assembled.messages).toEqual(
+      expect.arrayContaining([
+        { role: "assistant", content: "Reading the current implementation." },
+        { role: "tool", tool_call_id: "call_1", content: "tool result" },
+      ]),
+    );
+  });
 });
 
 const criterion: SuccessCriterion = {

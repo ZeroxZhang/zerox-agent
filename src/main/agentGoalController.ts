@@ -55,6 +55,7 @@ export type GoalRuntimeEngine = {
     options?: {
       signal?: AbortSignal;
       repairDirective?: AcceptanceRepairDirective;
+      resumeMessages?: ChatMessage[];
     },
   ): Promise<GoalRuntimeRunResult>;
 };
@@ -495,6 +496,11 @@ export function createAgentGoalController(options: {
       milestone,
       {
         ...(runOptions?.signal ? { signal: runOptions.signal } : {}),
+        ...(goal.runtimeCheckpoint?.milestoneId === milestone.id
+          ? {
+              resumeMessages: goal.runtimeCheckpoint.transcriptMessages,
+            }
+          : {}),
         ...(repairDirective
           ? { repairDirective }
           : {}),
@@ -512,6 +518,18 @@ export function createAgentGoalController(options: {
     milestone.lastRunStatus = runResult.status ?? "succeeded";
     if (runResult.summary) {
       milestone.lastRunSummary = runResult.summary;
+    }
+    if (runResult.transcriptMessages?.length) {
+      goal.runtimeCheckpoint = {
+        milestoneId: milestone.id,
+        transcriptMessages: boundRuntimeCheckpointMessages(
+          runResult.transcriptMessages,
+        ),
+        nextAction:
+          repairDirective?.summary ??
+          `Continue milestone ${milestone.id} from the latest tool result.`,
+        updatedAt: currentTime(),
+      };
     }
     goal.budgetUsage.iterations += 1;
     goal.budgetUsage.toolCalls += runResult.toolCallCount;
@@ -851,55 +869,6 @@ export function createAgentGoalController(options: {
       );
       if (interruptedAfterRepair) {
         return { goal: interruptedAfterRepair, suspend: true };
-      }
-      if (decisionOptions.pauseAfterRepair && target) {
-        assertGoalTransition(persisted.status, "waiting_for_review");
-        persisted.status = "waiting_for_review";
-        touch(persisted);
-        const pausedGoal = await options.goalStore.save(persisted);
-        if (pausedGoal.status !== "waiting_for_review") {
-          await publishCanonicalTerminal(pausedGoal);
-          return { goal: pausedGoal, suspend: true };
-        }
-        const pauseSummary = [
-          "Milestone paused at its turn limit after acceptance classification and is waiting for review.",
-          decisionOptions.pauseSummary,
-        ]
-          .filter(Boolean)
-          .join(" ");
-        if (!(await publishNonterminalGoalEvent({
-          goal: pausedGoal,
-          allowedStatuses: ["waiting_for_review"],
-          ledger: {
-            at: currentTime(),
-            kind: "review_requested",
-            milestoneId: target.id,
-            summary: pauseSummary,
-          },
-          trajectory: {
-            type: "goal_review_requested",
-            payload: {
-              goalId: pausedGoal.id,
-              milestoneId: target.id,
-              reason: "turn_limit",
-              fingerprint: decision.fingerprint,
-              occurrence: decision.occurrence,
-            },
-          },
-          progress: {
-            event: "review_requested",
-            message:
-              "里程碑达到本轮执行上限，验收问题已记录；请审核后继续或调整计划。",
-            milestoneId: target.id,
-          },
-          signal: runOptions?.signal,
-        }))) {
-          return {
-            goal: await settleSuppressedPublication(pausedGoal),
-            suspend: true,
-          };
-        }
-        return { goal: pausedGoal, suspend: true };
       }
       return { goal: persisted, suspend: false };
     }
@@ -1844,6 +1813,25 @@ function repairDirectiveForMilestone(
     return directive;
   }
   return undefined;
+}
+
+function boundRuntimeCheckpointMessages(
+  messages: ChatMessage[],
+): NonNullable<Goal["runtimeCheckpoint"]>["transcriptMessages"] {
+  return messages.slice(-24).map((message) => ({
+    role: message.role,
+    content:
+      message.content.length > 4_000
+        ? `${message.content.slice(0, 4_000)}... [truncated]`
+        : message.content,
+    ...(message.tool_calls
+      ? { tool_calls: message.tool_calls.slice(-16) }
+      : {}),
+    ...(message.tool_call_id
+      ? { tool_call_id: message.tool_call_id }
+      : {}),
+    ...(message.name ? { name: message.name } : {}),
+  }));
 }
 
 function emptyEvidenceManifest() {
