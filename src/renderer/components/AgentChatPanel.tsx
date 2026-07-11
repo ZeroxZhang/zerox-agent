@@ -195,9 +195,9 @@ const MAX_RENDERED_RUNTIME_EVENTS = 80;
 const MESSAGE_LIST_BOTTOM_THRESHOLD_PX = 96;
 const composerRiskTooltips = {
   auto:
-    "自动授权：智能体可在本次会话中自动批准工具请求。风险：可能执行文件、shell 或网络操作，请仅在任务和工作区可信时开启。",
+    "自动授权：普通文件、Shell 和网络操作默认放行；数据破坏、提权、密钥外传、生产发布和对外发送仍需确认。",
   goal:
-    "目标模式：发送内容会被翻译为可执行目标草案，确认后智能体可连续规划和执行。风险：可能触发多步工具调用，请先检查目标草案和验收标准。",
+    "目标模式：自动开启并锁定自动授权，智能体会持续执行和验收；仅 Policy B 极高危操作需要确认。",
 } as const;
 
 export function AgentChatPanel({
@@ -2458,7 +2458,9 @@ export function AgentChatPanel({
               </details>
             ) : null}
 
-            {pendingToolApproval && !autoApprovalEnabled ? (
+            {pendingToolApproval &&
+            (!autoApprovalEnabled ||
+              pendingToolApproval.risk.requiresConfirmation) ? (
               <ToolApprovalPanel
                 request={pendingToolApproval}
                 onResolve={(approved) => {
@@ -2803,11 +2805,11 @@ export function AgentChatPanel({
                 <strong>高权限模式已开启</strong>
                 <span>
                   {autoApprovalEnabled
-                    ? "自动授权会在本次会话中批准工具请求。"
+                    ? "普通文件、Shell、网络、安装、构建和测试操作会自动放行；极高危操作仍需确认。"
                     : ""}
                   {autoApprovalEnabled && goalModeEnabled ? " " : ""}
                   {goalModeEnabled
-                    ? "目标模式会先生成目标草案，确认后连续执行。"
+                    ? "目标模式已锁定自动授权，并会从内部断点自动继续。"
                     : ""}
                 </span>
               </div>

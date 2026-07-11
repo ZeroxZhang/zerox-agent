@@ -49,6 +49,7 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
     props.summary.status === "waiting_for_review" ||
     isRecoverableStatus(props.summary.status) ||
     progress.recoveryActions.length > 0;
+  const displayTitle = buildGoalDisplayTitle(props.summary.description);
 
   return (
     <div
@@ -73,7 +74,7 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
           <div>
             <span>目标详情</span>
             <h3 id="goal-detail-title" ref={headingRef} tabIndex={-1}>
-              {props.summary.description}
+              {displayTitle}
             </h3>
             <p id="goal-detail-description" className="sr-only">
               查看目标进度、审核门、恢复路径和里程碑证据。
@@ -85,6 +86,13 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
         </header>
 
         <div className="goal-detail-drawer-body">
+          <details className="goal-original-instructions" open>
+            <summary>查看完整目标说明</summary>
+            <div className="goal-original-instructions-content">
+              {props.summary.description}
+            </div>
+          </details>
+
           <section className="goal-progress-status">
             <div>
               <span>{progress.statusLabel}</span>
@@ -375,6 +383,19 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
       </aside>
     </div>
   );
+}
+
+export function buildGoalDisplayTitle(description: string): string {
+  const compact = description
+    .replace(/^\s*#{1,6}\s*/gm, "")
+    .replace(/^\s*[-*+]\s+/gm, "")
+    .replace(/[`*_~]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!compact) return "未命名目标";
+  return compact.length > 80
+    ? `${compact.slice(0, 79).trimEnd()}…`
+    : compact;
 }
 
 function canStartGoal(status: ChatSessionGoalSummary["status"]): boolean {
