@@ -260,6 +260,7 @@ export function createAppContainer(options: {
     request: ToolUserApprovalRequest,
     options?: { signal?: AbortSignal },
   ) => Promise<ToolUserApprovalResult>;
+  setGoalActive?: (goalId: string, active: boolean) => void;
   acceptanceValidators?: AcceptanceValidator[];
 }) {
   const configDir = path.join(app.getPath("userData"), "config");
@@ -1344,6 +1345,7 @@ export function createAppContainer(options: {
         },
         getAvailableTools: getAvailableToolNames,
         onProgress: emitGoalProgressEvent,
+        onActiveGoalChange: options.setGoalActive,
         onDiagnostic(event) {
           console.warn(`[goal:${event.phase}] ${event.message}`, event.error);
         },

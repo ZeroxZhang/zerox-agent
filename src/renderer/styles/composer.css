@@ -653,6 +653,19 @@
   font-weight: var(--font-semibold);
 }
 
+.auto-approval-toggle.is-locked {
+  cursor: not-allowed;
+  outline: 2px solid color-mix(in srgb, var(--status-warning-text) 36%, transparent);
+  outline-offset: 2px;
+}
+
+.auto-approval-toggle.is-locked::after {
+  content: "目标运行中";
+  margin-inline-start: 2px;
+  font-size: 10px;
+  opacity: 0.84;
+}
+
 .composer-mode-risk-summary {
   display: flex;
   flex-wrap: wrap;

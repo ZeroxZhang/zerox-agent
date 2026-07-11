@@ -1269,9 +1269,7 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource).toContain("aria-label=\"自动授权工具请求\"");
     expect(chatPanelSource).toContain("composer-mode-risk-summary");
     expect(chatPanelSource).toContain("resolveToolApproval");
-    expect(chatPanelSource).toContain(
-      "pendingToolApproval.risk.requiresConfirmation",
-    );
+    expect(chatPanelSource).toContain("shouldShowToolApproval(");
     expect(chatPanelSource).toContain("disabled={autoApprovalLocked}");
     expect(chatPanelSource).toContain("is-critical-risk");
     expect(styles).toContain(".tool-approval-panel");

@@ -38,9 +38,15 @@ export function createToolApprovalCoordinator(options: {
     options.approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS;
   const pending = new Map<string, PendingApproval>();
   let standaloneAutoApprovalEnabled = false;
-  let goalModeEnabled = false;
+  let goalModePreferenceEnabled = false;
+  const activeGoalIds = new Set<string>();
+
+  function isGoalModeEffective(): boolean {
+    return goalModePreferenceEnabled || activeGoalIds.size > 0;
+  }
 
   function getAutoApprovalState(): ToolApprovalModeState {
+    const goalModeEnabled = isGoalModeEffective();
     return {
       autoApprovalEnabled:
         goalModeEnabled || standaloneAutoApprovalEnabled,
@@ -55,7 +61,16 @@ export function createToolApprovalCoordinator(options: {
   }
 
   function setGoalModeEnabled(enabled: boolean): ToolApprovalModeState {
-    goalModeEnabled = enabled;
+    goalModePreferenceEnabled = enabled;
+    return publishModeState();
+  }
+
+  function setGoalActive(goalId: string, active: boolean): ToolApprovalModeState {
+    if (active) {
+      activeGoalIds.add(goalId);
+    } else {
+      activeGoalIds.delete(goalId);
+    }
     return publishModeState();
   }
 
@@ -233,6 +248,7 @@ export function createToolApprovalCoordinator(options: {
     getAutoApprovalState,
     setAutoApprovalEnabled,
     setGoalModeEnabled,
+    setGoalActive,
     requestUserApproval,
     resolveApproval,
   };

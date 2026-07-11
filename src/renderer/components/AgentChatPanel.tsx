@@ -113,6 +113,7 @@ import type {
   ToolApprovalDecisionPayload,
   ToolApprovalRequestPayload,
 } from "../../shared/toolApproval";
+import { shouldShowToolApproval } from "../toolApprovalVisibility";
 
 type AgentChatPanelProps = {
   newChatRequestKey?: number;
@@ -1005,7 +1006,7 @@ export function AgentChatPanel({
     Boolean(pendingGoalDraft) ||
     Boolean(activeGoal) ||
     goalRunEvents.length > 0 ||
-    (Boolean(pendingToolApproval) && !autoApprovalEnabled) ||
+    shouldShowToolApproval(pendingToolApproval, autoApprovalEnabled) ||
     Boolean(pendingInputRequest);
   const latestToolCallPreview =
     chatStreamState.toolCallPreviews.at(-1) ?? null;
@@ -1554,14 +1555,20 @@ export function AgentChatPanel({
   }
 
   async function handleSetGoalModeEnabled(enabled: boolean) {
+    const previousState = {
+      autoApprovalEnabled,
+      goalModeEnabled,
+      autoApprovalLocked,
+    };
     setGoalModeEnabled(enabled);
-    const state = await window.buildingAgent
-      ?.setToolGoalModeEnabled(enabled)
-      .catch(() => ({
-        autoApprovalEnabled: enabled || autoApprovalEnabled,
-        goalModeEnabled: enabled,
-        autoApprovalLocked: enabled,
-      }));
+    let state = null;
+    try {
+      state = await window.buildingAgent?.setToolGoalModeEnabled(enabled);
+    } catch {
+      state =
+        (await window.buildingAgent?.getToolApprovalMode().catch(() => null)) ??
+        previousState;
+    }
     if (state) {
       setAutoApprovalEnabled(state.autoApprovalEnabled);
       setAutoApprovalLocked(state.autoApprovalLocked);
@@ -2458,9 +2465,10 @@ export function AgentChatPanel({
               </details>
             ) : null}
 
-            {pendingToolApproval &&
-            (!autoApprovalEnabled ||
-              pendingToolApproval.risk.requiresConfirmation) ? (
+            {shouldShowToolApproval(
+              pendingToolApproval,
+              autoApprovalEnabled,
+            ) && pendingToolApproval ? (
               <ToolApprovalPanel
                 request={pendingToolApproval}
                 onResolve={(approved) => {
@@ -2730,7 +2738,7 @@ export function AgentChatPanel({
                   data-risk-tooltip={composerRiskTooltips.auto}
                   className={`auto-approval-toggle${
                     autoApprovalEnabled ? " is-enabled" : ""
-                  }`}
+                  }${autoApprovalLocked ? " is-locked" : ""}`}
                   title={composerRiskTooltips.auto}
                 >
                   <input
@@ -3422,6 +3430,16 @@ function ToolApprovalPanel({
             <dt>风险</dt>
             <dd>{request.risk.reason}</dd>
           </div>
+          <div>
+            <dt>风险类别</dt>
+            <dd>{formatRiskCategory(request.risk.category)}</dd>
+          </div>
+          {request.risk.affectedTargets.length > 0 ? (
+            <div>
+              <dt>影响对象</dt>
+              <dd>{request.risk.affectedTargets.join("、")}</dd>
+            </div>
+          ) : null}
           {Object.entries(request.argsSummary).map(([key, value]) => (
             <div key={key}>
               <dt>{key}</dt>
@@ -3449,6 +3467,14 @@ function ToolApprovalPanel({
       </section>
     </div>
   );
+}
+
+function formatRiskCategory(category: ToolApprovalRequestPayload["risk"]["category"]): string {
+  if (category === "irrecoverable_data_loss") return "不可恢复的数据破坏";
+  if (category === "privilege_or_security_boundary") return "权限或安全边界";
+  if (category === "secret_exfiltration") return "密钥或凭据外传";
+  if (category === "irreversible_external_action") return "不可逆外部操作";
+  return "常规操作";
 }
 
 function GuidedSkillInputForm({

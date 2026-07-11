@@ -51,7 +51,10 @@ export function extractGoalOutputRoots(
   return mergeRoots(
     [],
     [
-      ...extractOutputRootsFromText(goal.description, locationEnv),
+      ...extractOutputRootsFromText(
+        goal.originalDescription ?? goal.description,
+        locationEnv,
+      ),
       ...extractOutputRootsFromCriteria(goal.successCriteria, locationEnv),
       ...goal.milestones.flatMap((milestone) =>
         extractOutputRootsFromCriteria(milestone.successCriteria, locationEnv),

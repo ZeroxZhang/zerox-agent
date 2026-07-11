@@ -319,6 +319,7 @@ describe("goal chat service", () => {
       workspaceId: "workspace_project",
       originMessageId: "message_1",
       description: "发布 v3.2.0 并完成验收",
+      originalDescription: "请发布 v3.2.0",
       acceptanceProtocolVersion: 2,
       acceptanceState: {
         protocolVersion: 2,
@@ -940,6 +941,7 @@ describe("goal chat service", () => {
 
   it("aborts a background controller run when canceling the goal", async () => {
     let startedSignal: AbortSignal | undefined;
+    const activeChanges: Array<[string, boolean]> = [];
     const service = createGoalChatService({
       controller: createController({
         async start(_goalId, options) {
@@ -953,13 +955,18 @@ describe("goal chat service", () => {
       planner: createFakePlanner(),
       createId: () => "goal_release",
       now: () => "2026-06-12T08:00:00.000Z",
+      onActiveGoalChange(goalId, active) {
+        activeChanges.push([goalId, active]);
+      },
     });
 
     await service.start("goal_release");
     expect(startedSignal?.aborted).toBe(false);
+    expect(activeChanges).toContainEqual(["goal_release", true]);
 
     await service.cancel("goal_release");
     expect(startedSignal?.aborted).toBe(true);
+    expect(activeChanges.at(-1)).toEqual(["goal_release", false]);
   });
 
   it("aborts a background controller run when pausing the goal", async () => {

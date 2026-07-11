@@ -75,6 +75,7 @@ const toolApprovalCoordinator = createToolApprovalCoordinator({
 
 const container = createAppContainer({
   requestToolApproval: toolApprovalCoordinator.requestUserApproval,
+  setGoalActive: toolApprovalCoordinator.setGoalActive,
 });
 
 function createMainWindow(): BrowserWindow {

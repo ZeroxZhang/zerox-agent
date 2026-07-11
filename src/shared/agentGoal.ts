@@ -251,6 +251,7 @@ export type Goal = {
   chatSessionId?: string;
   originMessageId?: string;
   description: string;
+  originalDescription?: string;
   successCriteria: SuccessCriterion[];
   milestones: Milestone[];
   status: GoalStatus;

@@ -81,6 +81,7 @@ export function createGoalChatService(options: {
     error: unknown;
   }) => void;
   onProgress?: (event: GoalProgressEvent) => void;
+  onActiveGoalChange?: (goalId: string, active: boolean) => void;
 }): GoalChatService {
   const createId = options.createId ?? (() => `goal_${randomUUID()}`);
   const now = options.now ?? (() => new Date().toISOString());
@@ -116,6 +117,7 @@ export function createGoalChatService(options: {
 
     const controller = new AbortController();
     activeGoalControllers.set(goalId, controller);
+    options.onActiveGoalChange?.(goalId, true);
     const abortFromParent = () => controller.abort();
     runOptions?.signal?.addEventListener("abort", abortFromParent, { once: true });
 
@@ -127,6 +129,7 @@ export function createGoalChatService(options: {
         runOptions?.signal?.removeEventListener("abort", abortFromParent);
         if (activeGoalControllers.get(goalId) === controller) {
           activeGoalControllers.delete(goalId);
+          options.onActiveGoalChange?.(goalId, false);
         }
       });
   }
@@ -137,6 +140,7 @@ export function createGoalChatService(options: {
       controller.abort();
     }
     activeGoalControllers.delete(goalId);
+    options.onActiveGoalChange?.(goalId, false);
   }
 
   async function queueGoalExecution(goal: Goal): Promise<Goal> {
@@ -276,19 +280,20 @@ export function createGoalChatService(options: {
         input.edit?.normalizedDescription?.trim() ||
         input.draft.normalizedDescription.trim() ||
         "Chat goal";
+      const originalDescription = input.draft.sourceMessage.trim() || description;
       const normalizedCriteria = normalizeGoalDraftCriteria(
         input.edit?.successCriteria ?? input.draft.successCriteria,
       );
       const successCriteria = normalizedCriteria.successCriteria;
       const taskContract = compileAgentTaskContract({
-        description,
+        description: originalDescription,
         chatSessionId: input.draft.sessionId,
         ...(input.draft.originMessageId
           ? { originMessageId: input.draft.originMessageId }
           : {}),
       });
-      const taskFrame = classifyTaskFrame(description);
-      const quickActionPlan = createQuickActionPlan(description, taskFrame);
+      const taskFrame = classifyTaskFrame(originalDescription);
+      const quickActionPlan = createQuickActionPlan(originalDescription, taskFrame);
       const quickActionReviewPlan =
         !taskContract && shouldRouteToQuickActionReview(taskFrame, quickActionPlan)
           ? quickActionPlan
@@ -306,13 +311,13 @@ export function createGoalChatService(options: {
           : quickActionReviewPlan
             ? [
                 createQuickActionReviewMilestone(
-                  description,
+                  originalDescription,
                   successCriteria[0],
                   quickActionReviewPlan,
                 ),
               ]
             : await planGoalMilestones(
-                description,
+                originalDescription,
                 successCriteria,
                 taskContract,
                 input.draft.selectedSkill,
@@ -326,6 +331,7 @@ export function createGoalChatService(options: {
           ? { originMessageId: input.draft.originMessageId }
           : {}),
         description,
+        originalDescription,
         ...(taskContract ? { taskContract } : {}),
         ...(input.draft.selectedSkill
           ? { selectedSkill: snapshotSelectedSkill(input.draft.selectedSkill) }

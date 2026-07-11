@@ -351,7 +351,7 @@ function buildReplanPrompt(goal: Goal, reason: string): string {
   return [
     "Replan the remaining non-accepted milestones for this goal.",
     "",
-    `Goal: ${goal.description}`,
+    `Goal: ${goal.originalDescription ?? goal.description}`,
     `Reason: ${reason}`,
     `Accepted milestones to preserve: ${JSON.stringify(
       goal.milestones.filter((milestone) => milestone.state === "accepted"),

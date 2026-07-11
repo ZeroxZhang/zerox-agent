@@ -1160,7 +1160,7 @@ function buildArtifactEvidenceContract(
       const artifactPath = path.join(outputRoot, `${artifactName}.md`);
       return `  - artifact:${artifactName} -> ${artifactPath}`;
     }),
-    `目标：${goal.description}`,
+    `目标：${goal.originalDescription ?? goal.description}`,
     "如果你还需要生成更友好的展示文件名，可以额外生成；但上述 artifact alias 文件必须保留并包含可验收的完整内容或最终文件清单。",
   ];
 }

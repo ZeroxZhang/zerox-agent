@@ -89,7 +89,7 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
           <details className="goal-original-instructions" open>
             <summary>查看完整目标说明</summary>
             <div className="goal-original-instructions-content">
-              {props.summary.description}
+              {props.goal?.originalDescription ?? props.summary.description}
             </div>
           </details>
 
