@@ -22,6 +22,7 @@ import {
 import { createAgentGoalContext } from "./agentGoalContext";
 import { createAgentGoalPlanner } from "./agentGoalPlanner";
 import { createGoalRuntimeEngine } from "./goalRuntimeEngine";
+import { createAuthorizedGoalAcceptanceToolExecutor } from "./agentGoalAcceptanceToolExecutor";
 import { applyGoalOutputRootsToRunContext } from "./goalOutputRoots";
 import { createGoalChatService } from "./goalChatService";
 import { createAgentGoalTranslator } from "./agentGoalTranslator";
@@ -1247,7 +1248,13 @@ export function createAppContainer(options: {
             workspacePath: runContext.workspaceRoot,
             extraReadRoots: runContext.sandbox.extraReadRoots,
             extraWriteRoots: runContext.sandbox.extraWriteRoots,
-            toolExecutor,
+            toolExecutor: createAuthorizedGoalAcceptanceToolExecutor({
+              taskId: `goal_acceptance:${goal.id}:${milestone?.id ?? "final"}`,
+              goal,
+              runContext,
+              toolExecutor,
+              toolAuthorizationService: toolAuthorizationService(),
+            }),
             trajectoryStore: agentTrajectoryStore(),
             ...(modelProfile
               ? {

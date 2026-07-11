@@ -894,7 +894,7 @@ function readString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
 }
 
-function buildGoalMilestoneRuntimeTask(
+export function buildGoalMilestoneRuntimeTask(
   goal: Goal,
   runContext: AgentRunContext,
 ): RuntimeToolAuthorizationTask {
