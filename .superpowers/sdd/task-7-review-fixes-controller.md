@@ -50,3 +50,12 @@
 - Task budget already exhausted plus three transport failures: waiting, never `stopped_budget`.
 - Continue clicked while an older background run is cleaning up: exactly one continuation; canonical terminal winner: zero continuations.
 - Valid replay round-trip and oversized replay stripping in JSON and SQLite stores.
+
+## Fresh acceptance fixture repair
+
+- RED: `npm test -- --run src/main/container.test.ts -t "cancels a final-acceptance continuation started through the container wrapper"` timed out after the production controller correctly refused a legacy waiting fixture with no sealed replay bundle.
+- The container test now creates the seal through one real initial `evaluateGoal` call, then starts continuation with that persisted replay bundle.
+- Its deterministic validator records exactly one call during seal construction. Continuation blocks in the final model judge, cancellation aborts that judge signal, and both wrapper results resolve from the canonical canceled goal.
+- GREEN: the isolated regression passes (`1 passed`, `41 skipped`) and the full container suite passes (`42 passed`).
+- Expanded P43 focused suite: `13 passed`, `534 tests passed`.
+- Electron TypeScript no-emit, `npm run harness:check`, and `git diff --check` all passed after the fixture repair.

@@ -19,6 +19,7 @@ import type { AgentExecutionCheckpoint } from "../shared/agentExecution";
 import type { GoalProgressEvent } from "../shared/chat";
 import type { ChatOutputPart } from "../shared/chatOutput";
 import type { AcceptanceValidator } from "./agentGoalValidatorRegistry";
+import type { AcceptanceContext } from "./agentGoalAcceptance";
 
 const execFileAsync = promisify(execFileCallback);
 
@@ -1212,27 +1213,18 @@ describe("app container goal drafts", () => {
   });
 
   it("cancels a final-acceptance continuation started through the container wrapper", async () => {
-    let validatorSignal: AbortSignal | undefined;
-    let validatorEnteredResolve: (() => void) | undefined;
-    const validatorEntered = new Promise<void>((resolve) => {
-      validatorEnteredResolve = resolve;
-    });
-    let releaseValidator: (() => void) | undefined;
+    let deterministicCalls = 0;
     const validator: AcceptanceValidator = {
       kind: "validator:continuation_cancel_probe",
-      async evaluate({ check, context }) {
-        validatorSignal = context.signal;
-        validatorEnteredResolve?.();
-        await new Promise<void>((resolve) => {
-          releaseValidator = resolve;
-        });
+      async evaluate({ check }) {
+        deterministicCalls += 1;
         return {
           checkId: check.id,
           kind: check.kind,
           passed: true,
           code: "accepted",
           evidenceRefs: [],
-          detail: "Accepted after cancellation probe release.",
+          detail: "Deterministic probe accepted once.",
         };
       },
     };
@@ -1242,12 +1234,22 @@ describe("app container goal drafts", () => {
         return { approved: false, reason: "test" };
       },
     });
-    const check = {
+    const deterministicCheck = {
       id: "check_cancel_probe",
       kind: validator.kind,
-      description: "Wait until cancellation is observed.",
+      description: "Build deterministic sealed evidence once.",
       params: {},
       requiresEvidence: false,
+    } as const;
+    const modelReviewCheck = {
+      id: "check_cancel_final_judge",
+      kind: "model_review",
+      description: "Final judge reviews the sealed evidence.",
+      params: {
+        condition: "Confirm the sealed cancellation probe evidence.",
+        evidenceRefs: ["evidence:sealed-cancel-probe"],
+      },
+      requiresEvidence: true,
     } as const;
     const goal = createStoredGoal({
       id: "goal_continue_cancel",
@@ -1273,7 +1275,7 @@ describe("app container goal drafts", () => {
         {
           id: "criterion_cancel_probe",
           description: "Cancellation probe completes.",
-          acceptanceChecks: [check],
+          acceptanceChecks: [deterministicCheck, modelReviewCheck],
         },
       ],
       milestones: [
@@ -1288,17 +1290,98 @@ describe("app container goal drafts", () => {
         },
       ],
     });
+    const initialContext: AcceptanceContext = {
+      runId: "run_initial_final_judge",
+      goalId: goal.id,
+      workspacePath: tempDir,
+      toolExecutor: {
+        async execute() {
+          throw new Error("sealed replay fixture must not execute tools");
+        },
+      },
+      trajectoryStore: {
+        async append(_runId, event) {
+          return event;
+        },
+      },
+      chatClient: {
+        async complete() {
+          throw Object.assign(new Error("initial judge unavailable"), {
+            status: 503,
+          });
+        },
+      },
+      modelProfile: {
+        baseUrl: "https://judge.test/v1",
+        apiKey: "fixture-secret",
+        model: "sealed-judge",
+        temperature: 0,
+        maxTokens: 1024,
+      },
+      now: () => "2026-07-12T00:00:00.000Z",
+    };
+    const initial = await container.agentGoalAcceptance().evaluateGoal(
+      goal,
+      initialContext,
+    );
+    const sealedReplay = initial.finalJudgeReplay;
+    expect(sealedReplay).toBeDefined();
+    if (!sealedReplay) {
+      throw new Error("sealed replay fixture was not created");
+    }
+    goal.acceptanceRetryState = {
+      ...goal.acceptanceRetryState!,
+      finalJudgeReplay: sealedReplay,
+    };
+    await container.modelSettingsStore.save({
+      baseUrl: "https://judge.test/v1",
+      chatModel: "sealed-judge",
+      embeddingModel: "",
+      apiKey: "fixture-secret",
+      temperature: 0,
+      maxTokens: 1024,
+      thinkingEnabled: false,
+      thinkingBudgetTokens: 1024,
+    });
     await container.agentGoalStore().save(goal);
 
-    const continuing = container.continueGoalAcceptance(goal.id);
-    await validatorEntered;
-    const canceling = await container.runGoalOperation(() =>
-      container.goalChatService().cancel(goal.id),
+    let judgeSignal: AbortSignal | undefined;
+    let judgeEnteredResolve: (() => void) | undefined;
+    const judgeEntered = new Promise<void>((resolve) => {
+      judgeEnteredResolve = resolve;
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (_input, init) => {
+        judgeSignal = init?.signal ?? undefined;
+        judgeEnteredResolve?.();
+        return new Promise<Response>((_resolve, reject) => {
+          judgeSignal?.addEventListener(
+            "abort",
+            () =>
+              reject(
+                judgeSignal?.reason ??
+                  new DOMException("Aborted", "AbortError"),
+              ),
+            { once: true },
+          );
+        });
+      },
     );
-    releaseValidator?.();
-    const continued = await continuing;
+    const { canceling, continued } = await (async () => {
+      try {
+        const continuing = container.continueGoalAcceptance(goal.id);
+        await judgeEntered;
+        const canceling = await container.runGoalOperation(() =>
+          container.goalChatService().cancel(goal.id),
+        );
+        return { canceling, continued: await continuing };
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    })();
 
-    expect(validatorSignal?.aborted).toBe(true);
+    expect(deterministicCalls).toBe(1);
+    expect(judgeSignal?.aborted).toBe(true);
     expect(canceling).toMatchObject({ ok: true, goal: { status: "canceled" } });
     expect(continued).toMatchObject({ ok: true, goal: { status: "canceled" } });
     expect((await container.agentGoalStore().get(goal.id))?.status).toBe(
