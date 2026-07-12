@@ -279,6 +279,9 @@ function normalizeRedactedStringSet(
 function verifyGoalAcceptanceCertificateInternal(
   goal: Goal,
 ): GoalAcceptanceCertificateVerification {
+  if (goal.status !== "achieved") {
+    return failure("Only an achieved goal can be acceptance-certified.");
+  }
   if (goal.acceptanceProtocolVersion !== 2) {
     return failure("Goal acceptance protocol mismatch; protocol v2 is required.");
   }

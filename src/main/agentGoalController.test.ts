@@ -1765,6 +1765,232 @@ describe("agent goal controller", () => {
     ]);
   });
 
+  it("records manual completion without creating a certificate", async () => {
+    await store.save(
+      waitingForAcceptanceGoal({
+        acceptanceState: {
+          protocolVersion: 2,
+          phase: "awaiting_user",
+          attempt: 3,
+          recentFailures: [
+            {
+              at: "2026-06-12T00:00:00.000Z",
+              targetKind: "goal",
+              targetId: "goal_1",
+              fingerprint: "f".repeat(64),
+              occurrence: 1,
+              verdict: "acceptance_unavailable",
+              failureClass: "infrastructure",
+              failedCheckIds: ["check_done", "check_done"],
+              evidenceRefs: ["artifact:report", "artifact:report"],
+              actionSignatures: [],
+            },
+          ],
+        },
+      }),
+    );
+    const atomicSaveInputs: Goal[] = [];
+    const recordingStore: AgentGoalStore = {
+      ...store,
+      async save(goal) {
+        if (goal.status === "completed_unverified") {
+          atomicSaveInputs.push(structuredClone(goal));
+        }
+        return store.save(goal);
+      },
+    };
+    const controller = createController({
+      goalStore: recordingStore,
+      runtime: createRuntime(),
+      acceptance: createAcceptanceResults({ milestones: [], goals: [] }),
+    });
+
+    const result = await controller.markCompletedUnverified("goal_1");
+
+    expect(result).toMatchObject({
+      status: "completed_unverified",
+      stopReason: "user_marked_complete",
+      manualCompletionAttestation: {
+        version: 1,
+        goalId: "goal_1",
+        completedAt: "2026-06-12T00:00:00.000Z",
+        reason: "user_marked_complete",
+        failedCheckIds: ["check_done"],
+        evidenceRefs: ["artifact:report"],
+        lastFailureCode: "judge_timeout",
+        retryCycles: 1,
+      },
+    });
+    expect(result.manualCompletionAttestation?.evidenceFingerprint).toMatch(
+      /^[a-f0-9]{64}$/,
+    );
+    expect(result.acceptanceCertificate).toBeUndefined();
+    expect(atomicSaveInputs).toHaveLength(1);
+    expect(atomicSaveInputs[0]).toMatchObject({
+      status: "completed_unverified",
+      stopReason: "user_marked_complete",
+      manualCompletionAttestation: { reason: "user_marked_complete" },
+    });
+    expect(atomicSaveInputs[0]?.acceptanceCertificate).toBeUndefined();
+    expect(verifyGoalAcceptanceCertificate(result)).not.toEqual({ ok: true });
+    expect(
+      trajectoryEvents
+        .filter((event) => event.type.startsWith("acceptance_manual_completion"))
+        .map((event) => event.type),
+    ).toEqual([
+      "acceptance_manual_completion_requested",
+      "acceptance_manual_completion_recorded",
+    ]);
+    expect(
+      (await store.readLedger("goal_1"))
+        .filter((event) => event.kind.startsWith("acceptance_manual_completion"))
+        .map((event) => event.kind),
+    ).toEqual([
+      "acceptance_manual_completion_requested",
+      "acceptance_manual_completion_recorded",
+    ]);
+  });
+
+  it("rejects manual completion outside acceptance waiting", async () => {
+    await store.save(
+      createProtocolV2Goal([milestone("milestone_1")], {
+        status: "executing",
+      }),
+    );
+    const controller = createController({
+      runtime: createRuntime(),
+      acceptance: createAcceptanceResults({ milestones: [], goals: [] }),
+    });
+
+    await expect(controller.markCompletedUnverified("goal_1")).rejects.toThrow(
+      'Cannot manually complete goal from "executing".',
+    );
+  });
+
+  it.each([undefined, ""])(
+    "fails closed when the canonical evidence fingerprint is %s",
+    async (evidenceFingerprint) => {
+      await store.save(
+        waitingForAcceptanceGoal({
+          acceptanceRetryState: evidenceFingerprint === undefined
+            ? undefined
+            : {
+                cycle: 1,
+                attempt: 3,
+                maxAttempts: 3,
+                lastCode: "judge_timeout",
+                lastDetail: "Final judge timed out.",
+                evidenceFingerprint,
+                resumeFrom: "final_judge",
+              },
+        }),
+      );
+      const controller = createController({
+        runtime: createRuntime(),
+        acceptance: createAcceptanceResults({ milestones: [], goals: [] }),
+      });
+
+      await expect(
+        controller.markCompletedUnverified("goal_1"),
+      ).rejects.toThrow(/evidence fingerprint/i);
+      expect((await store.get("goal_1"))?.status).toBe(
+        "waiting_for_acceptance",
+      );
+      expect(trajectoryEvents).toEqual([]);
+    },
+  );
+
+  it("redacts and bounds manual completion attestation data", async () => {
+    const rawSecret = "sk-proj-super-secret-value";
+    const failedCheckIds = Array.from(
+      { length: 80 },
+      (_, index) => `check_${index}?api_key=${rawSecret}${"x".repeat(800)}`,
+    );
+    const evidenceRefs = Array.from(
+      { length: 80 },
+      (_, index) => `artifact:report_${index}?access_token=${rawSecret}${"y".repeat(800)}`,
+    );
+    await store.save(
+      waitingForAcceptanceGoal({
+        acceptanceState: {
+          protocolVersion: 2,
+          phase: "awaiting_user",
+          attempt: 3,
+          recentFailures: [
+            {
+              at: "2026-06-12T00:00:00.000Z",
+              targetKind: "goal",
+              targetId: "goal_1",
+              fingerprint: "f".repeat(64),
+              occurrence: 1,
+              verdict: "acceptance_unavailable",
+              failureClass: "infrastructure",
+              failedCheckIds,
+              evidenceRefs,
+              actionSignatures: [],
+            },
+          ],
+        },
+      }),
+    );
+    const controller = createController({
+      runtime: createRuntime(),
+      acceptance: createAcceptanceResults({ milestones: [], goals: [] }),
+    });
+
+    const result = await controller.markCompletedUnverified("goal_1");
+    const attestation = result.manualCompletionAttestation!;
+    const serialized = JSON.stringify(attestation);
+
+    expect(attestation.failedCheckIds).toHaveLength(64);
+    expect(attestation.evidenceRefs).toHaveLength(64);
+    expect(new Set(attestation.failedCheckIds).size).toBe(64);
+    expect(new Set(attestation.evidenceRefs).size).toBe(64);
+    expect(
+      [...attestation.failedCheckIds, ...attestation.evidenceRefs].every(
+        (value) => Buffer.byteLength(value) <= 512,
+      ),
+    ).toBe(true);
+    expect(serialized).toContain("[redacted]");
+    expect(serialized).not.toContain(rawSecret);
+    expect(JSON.stringify(trajectoryEvents)).not.toContain(rawSecret);
+    expect(JSON.stringify(await store.readLedger("goal_1"))).not.toContain(
+      rawSecret,
+    );
+  });
+
+  it("does not record manual completion when the atomic goal save fails", async () => {
+    await store.save(waitingForAcceptanceGoal());
+    const failingStore: AgentGoalStore = {
+      ...store,
+      async save(goal) {
+        if (goal.status === "completed_unverified") {
+          throw new Error("disk full");
+        }
+        return store.save(goal);
+      },
+    };
+    const controller = createController({
+      goalStore: failingStore,
+      runtime: createRuntime(),
+      acceptance: createAcceptanceResults({ milestones: [], goals: [] }),
+    });
+
+    await expect(
+      controller.markCompletedUnverified("goal_1"),
+    ).rejects.toThrow("disk full");
+    expect(
+      trajectoryEvents
+        .filter((event) => event.type.startsWith("acceptance_manual_completion"))
+        .map((event) => event.type),
+    ).toEqual(["acceptance_manual_completion_requested"]);
+    expect(
+      (await store.readLedger("goal_1"))
+        .filter((event) => event.kind.startsWith("acceptance_manual_completion"))
+        .map((event) => event.kind),
+    ).toEqual(["acceptance_manual_completion_requested"]);
+  });
+
   it("continues from the final judge without rerunning accepted milestones", async () => {
     await store.save(waitingForAcceptanceGoal());
     const runtime = createRuntime();

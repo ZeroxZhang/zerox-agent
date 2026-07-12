@@ -1,51 +1,73 @@
-# Task 5 Report - Renderer, IPC, And User-Visible State Coherence
+# Task 5A Report - Atomic Manual Completion Attestation
 
 ## Status
 
 DONE
 
+Base: `3fb3d1f13c7b11bbb773860e03ae46600b0b2598`
+
 ## Changed files
 
-- `src/main/agentWorkspaceService.ts`
-- `src/main/agentWorkspaceService.test.ts`
-- `src/main/chatService.ts`
-- `src/main/chatService.test.ts`
-- `src/main/container.ts`
-- `src/main/container.test.ts`
-- `src/main/ipc/index.ts`
-- `src/preload/index.ts`
-- `src/preload/index.test.ts`
-- `src/renderer/components/AgentChatPanel.tsx`
-- `src/renderer/components/RunsPanel.tsx`
-- `src/renderer/materialDesign.test.ts`
+- `src/main/agentGoalController.ts`
+- `src/main/agentGoalController.test.ts`
+- `src/main/agentGoalStore.test.ts`
+- `src/main/storage/repositories/repositories.test.ts`
+- `src/main/agentGoalAcceptanceCertificate.ts`
+- `src/main/agentGoalAcceptanceCertificate.test.ts`
+- `.superpowers/sdd/task-5-report.md`
 
 ## RED evidence
 
-- `npm test -- src/main/agentWorkspaceService.test.ts src/preload/index.test.ts` -> failed as expected: git worktree creation resolved without approval and preload still invoked `agentWorkspaces:createGitWorktree`.
-- `npm test -- src/main/chatService.test.ts src/main/goalChatService.test.ts src/renderer/chatTaskActivity.test.ts` -> failed as expected: review continuation could return `achieved` without clearing the active chat goal link.
-- `npm test -- src/renderer/materialDesign.test.ts` -> failed as expected: Runs panel had no run-lifecycle refresh subscription and empty chat session lists were still ignored.
+Command:
+
+```text
+npm test -- --run src/main/agentGoalController.test.ts src/main/storage/repositories/repositories.test.ts src/main/agentGoalAcceptanceCertificate.test.ts
+```
+
+Observed expected failures:
+
+- 6 controller tests failed with `controller.markCompletedUnverified is not a function`.
+- The certificate regression failed because `verifyGoalAcceptanceCertificate()` returned `{ ok: true }` for `completed_unverified` with a retained valid certificate.
+- SQLite same-status parity already passed through the existing irreversible terminal guard.
+- Overall RED result: 2 test files failed, 1 passed; 7 tests failed, 176 passed.
 
 ## GREEN evidence
 
-- `npm test -- src/main/agentWorkspaceService.test.ts src/preload/index.test.ts` -> 2 files / 7 tests passed.
-- `npm test -- src/main/chatService.test.ts src/main/goalChatService.test.ts src/renderer/chatTaskActivity.test.ts` -> 3 files / 46 tests passed.
-- `npm test -- src/renderer/materialDesign.test.ts` -> 1 file / 36 tests passed.
-- `npm test -- src/renderer/materialDesign.test.ts src/renderer/chatTaskActivityRestore.test.ts` -> 2 files / 37 tests passed.
-- `npm run harness:check` -> passed.
-- `npm test` -> 165 files / 1071 tests passed.
-- `npm run build` -> passed.
-- `npm run verify` -> 165 files / 1071 tests passed; build passed; agent eval 26/26; memory eval 2/2.
-- `npm run smoke:prod` -> passed; renderer rendered agent chat UI with expected SQLite ABI fallback to JSON.
-- `git diff --check` -> passed.
+```text
+npm test -- --run src/main/agentGoalController.test.ts src/main/agentGoalStore.test.ts src/main/storage/repositories/repositories.test.ts src/main/agentGoalAcceptanceCertificate.test.ts src/main/agentGoalRedaction.test.ts
+```
 
-## Implementation notes
+- 5 test files passed; 228 tests passed.
 
-- `createGitWorktreeWorkspace()` now refuses `git worktree add` unless the main process supplies explicit user approval or the repository root matches a trusted repository policy.
-- The preload worktree API now goes through `agentWorkspaces:requestGitWorktree`; IPC requests approval in the main process before adding an approval marker for the service.
-- Terminal chat-goal summaries are still stored, but `achieved`, `failed`, and `canceled` statuses clear `activeGoalId` through shared main-process helper paths used by chat commands and progress synchronization.
-- RunsPanel refreshes run and active execution lists from a new `agentRuns:changed` subscription and legacy stream events; kernel events remain detail input for the inspector.
-- Desktop `listChatSessions()` returning `[]` now replaces local chat sidebar state instead of preserving fallback/demo sessions.
+```text
+npx tsc -p tsconfig.electron.json --noEmit
+```
 
-## Residual risk
+- Passed with no diagnostics.
 
-- Worktree approval reuses the existing tool-approval coordinator with a synthetic `git_worktree_add` request. This preserves explicit main-process permissioning without adding a new dialog surface, but future UI polish could introduce a dedicated workspace approval copy.
+```text
+npm run harness:check
+```
+
+- Passed.
+
+```text
+git diff --check
+```
+
+- Passed.
+
+## Implementation and self-review
+
+- `markCompletedUnverified()` accepts only canonical `waiting_for_acceptance`; every other status throws the required status-specific error.
+- Attestation construction fails closed without a lowercase SHA-256 evidence fingerprint or valid retry cycle, takes failure code/cycle from canonical retry state, and takes bounded unique check/evidence references from the latest final-goal failure.
+- Check IDs, evidence refs, and the failure code use the existing acceptance redaction/bounding path; the audit payload excludes provider detail, prompts, artifact bodies, and certificate data.
+- A controller publication fence keeps the order `acceptance_manual_completion_requested` -> one atomic goal save -> `acceptance_manual_completion_recorded`; terminal publication waits until recorded is durable. Save failure leaves requested evidence but never recorded evidence.
+- The single save carries `completed_unverified`, `user_marked_complete`, the attestation, and an explicitly absent certificate.
+- File and SQLite store regressions prove same-status stale writes cannot remove the canonical attestation or restore a forged certificate. The pre-existing late-judge regression continues to prove terminal stale-write fencing.
+- Certificate verification now requires canonical status `achieved`, so manual completion cannot verify even if stale certificate bytes are present.
+- No service, container, IPC, preload, global, or UI files were changed.
+
+## Concerns
+
+- `./init.sh` has a pre-existing unrelated failure in `src/shared/packageScripts.test.ts` because the harness expects P42 to be the open release feature while P43 is now the sole in-progress feature. The required standalone `npm run harness:check` passes.

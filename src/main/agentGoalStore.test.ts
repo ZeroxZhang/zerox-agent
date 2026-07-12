@@ -503,6 +503,9 @@ describe("agent goal store", () => {
       store.save({
         ...completed,
         manualCompletionAttestation: undefined,
+        acceptanceCertificate: {
+          forged: true,
+        } as unknown as Goal["acceptanceCertificate"],
         updatedAt: "2026-07-11T05:02:00.000Z",
       }),
     ).resolves.toEqual(completed);

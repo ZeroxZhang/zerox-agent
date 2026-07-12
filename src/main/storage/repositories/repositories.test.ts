@@ -160,9 +160,10 @@ describe("GoalRepository", () => {
     expect(
       goals.save({
         ...completed,
-        status: "executing",
-        stopReason: undefined,
         manualCompletionAttestation: undefined,
+        acceptanceCertificate: {
+          forged: true,
+        } as unknown as Goal["acceptanceCertificate"],
       }),
     ).toEqual(completed);
     expect(goals.get(completed.id)).toEqual(completed);

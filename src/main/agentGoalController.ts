@@ -6,6 +6,7 @@ import {
   type Goal,
   type GoalAcceptanceState,
   type GoalEvidenceManifest,
+  type GoalManualCompletionAttestation,
   type GoalStatus,
   type Milestone,
   type ProgressLedgerEvent,
@@ -84,6 +85,7 @@ export type AgentGoalController = {
     goalId: string,
     options?: { signal?: AbortSignal },
   ): Promise<Goal>;
+  markCompletedUnverified(goalId: string): Promise<Goal>;
   resolveReview(goalId: string, decision: GoalReviewDecision): Promise<Goal>;
 };
 
@@ -1933,6 +1935,69 @@ export function createAgentGoalController(options: {
     goal.updatedAt = currentTime();
   }
 
+  function createManualCompletionAttestation(
+    goal: Goal,
+  ): GoalManualCompletionAttestation {
+    const retryState = goal.acceptanceRetryState;
+    if (!retryState || !/^[a-f0-9]{64}$/.test(retryState.evidenceFingerprint)) {
+      throw new Error(
+        "Cannot manually complete goal without a canonical evidence fingerprint.",
+      );
+    }
+    if (!Number.isSafeInteger(retryState.cycle) || retryState.cycle < 1) {
+      throw new Error(
+        "Cannot manually complete goal without a canonical retry cycle.",
+      );
+    }
+    const latestFinalFailure = goal.acceptanceState?.recentFailures
+      .filter(
+        (failure) =>
+          failure.targetKind === "goal" && failure.targetId === goal.id,
+      )
+      .at(-1);
+    const lastFailureCode = redactAndBoundEvidenceRef(retryState.lastCode);
+    if (!lastFailureCode) {
+      throw new Error(
+        "Cannot manually complete goal without a canonical failure code.",
+      );
+    }
+    return {
+      version: 1,
+      goalId: goal.id,
+      completedAt: currentTime(),
+      reason: "user_marked_complete",
+      failedCheckIds: boundManualCompletionStrings(
+        latestFinalFailure?.failedCheckIds,
+      ),
+      evidenceRefs: boundManualCompletionStrings(
+        latestFinalFailure?.evidenceRefs,
+      ),
+      evidenceFingerprint: retryState.evidenceFingerprint,
+      lastFailureCode,
+      retryCycles: retryState.cycle,
+    };
+  }
+
+  function manualCompletionPayload(
+    attestation: GoalManualCompletionAttestation,
+  ): Record<string, unknown> {
+    return {
+      goalId: attestation.goalId,
+      fingerprint: attestation.evidenceFingerprint,
+      failedCheckIds: attestation.failedCheckIds,
+      evidenceRefs: attestation.evidenceRefs,
+      code: attestation.lastFailureCode,
+      retryCycles: attestation.retryCycles,
+      reason: attestation.reason,
+    };
+  }
+
+  function assertManualCompletionStatus(goal: Goal): void {
+    if (goal.status !== "waiting_for_acceptance") {
+      throw new Error(`Cannot manually complete goal from "${goal.status}".`);
+    }
+  }
+
   return {
     async start(goalId, runOptions) {
       const goal = await loadGoal(goalId);
@@ -2038,6 +2103,97 @@ export function createAgentGoalController(options: {
         ...runOptions,
         finalAcceptanceContinuation: true,
       });
+    },
+
+    async markCompletedUnverified(goalId) {
+      const loaded = await loadGoal(goalId);
+      assertManualCompletionStatus(loaded);
+      createManualCompletionAttestation(loaded);
+
+      const release = beginNonterminalPublication(goalId);
+      let persisted: Goal | undefined;
+      try {
+        let canonical = await loadGoal(goalId);
+        assertManualCompletionStatus(canonical);
+        let attestation = createManualCompletionAttestation(canonical);
+        await options.goalStore.appendLedger(goalId, {
+          at: currentTime(),
+          kind: "acceptance_manual_completion_requested",
+          summary: "Manual completion requested.",
+          evidenceRefs: attestation.evidenceRefs,
+        });
+        canonical = await loadGoal(goalId);
+        assertManualCompletionStatus(canonical);
+        await emit(
+          goalId,
+          "acceptance_manual_completion_requested",
+          manualCompletionPayload(attestation),
+        );
+        notifyProgress(
+          "acceptance_manual_completion_requested",
+          canonical,
+          "已请求手动标记完成。",
+        );
+
+        canonical = await loadGoal(goalId);
+        assertManualCompletionStatus(canonical);
+        attestation = createManualCompletionAttestation(canonical);
+        const candidate: Goal = {
+          ...canonical,
+          status: "completed_unverified",
+          stopReason: "user_marked_complete",
+          acceptanceCertificate: undefined,
+          manualCompletionAttestation: attestation,
+          updatedAt: attestation.completedAt,
+        };
+        persisted = await options.goalStore.save(candidate);
+        if (
+          persisted.status === "completed_unverified" &&
+          persisted.stopReason === "user_marked_complete" &&
+          persisted.manualCompletionAttestation
+        ) {
+          const recordedAttestation = persisted.manualCompletionAttestation;
+          await options.goalStore.appendLedger(goalId, {
+            at: currentTime(),
+            kind: "acceptance_manual_completion_recorded",
+            summary: "Manual completion recorded without certification.",
+            evidenceRefs: recordedAttestation.evidenceRefs,
+          });
+          const recordedCanonical = await loadGoal(goalId);
+          if (
+            recordedCanonical.status === "completed_unverified" &&
+            recordedCanonical.manualCompletionAttestation
+          ) {
+            await emit(
+              goalId,
+              "acceptance_manual_completion_recorded",
+              manualCompletionPayload(
+                recordedCanonical.manualCompletionAttestation,
+              ),
+            );
+            notifyProgress(
+              "acceptance_manual_completion_recorded",
+              recordedCanonical,
+              "目标已手动标记为完成（未验证）。",
+            );
+          }
+          persisted = recordedCanonical;
+        }
+        if (
+          persisted.status !== "completed_unverified" ||
+          !persisted.manualCompletionAttestation
+        ) {
+          persisted = (await options.goalStore.get(goalId)) ?? persisted;
+        }
+      } finally {
+        release();
+      }
+
+      if (!persisted) {
+        return loadGoal(goalId);
+      }
+      await publishCanonicalTerminal(persisted);
+      return (await options.goalStore.get(goalId)) ?? persisted;
     },
 
     async resolveReview(goalId, decision) {
@@ -2257,6 +2413,19 @@ function safeAcceptanceEvidenceRefs(result: AcceptanceResult): string[] {
     ...(result.evidenceManifest?.artifacts.map((artifact) => artifact.ref) ?? []),
   ];
   return [...new Set(refs.map(redactAndBoundEvidenceRef).filter(Boolean))]
+    .sort()
+    .slice(0, 64);
+}
+
+function boundManualCompletionStrings(values: unknown): string[] {
+  if (!Array.isArray(values)) return [];
+  return [
+    ...new Set(
+      values
+        .map(redactAndBoundEvidenceRef)
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ]
     .sort()
     .slice(0, 64);
 }
