@@ -4,13 +4,13 @@
 // tool_use/tool_result content blocks, `thinking`, and prompt-cache
 // `cache_control` breakpoints. `countTokens` uses the native
 // `/v1/messages/count_tokens` endpoint (with the credentials captured at
-// construction). Errors are normalized at the boundary to `HTTP <status>: <body>`
-// so `modelRetry.isRetryableModelError` substring matching keeps working across
-// providers (Patch 6).
+// construction). HTTP failures expose only structured status and bounded retry
+// metadata; provider response bodies are not copied into errors.
 
 import { buildCachePrefix } from "./cachePrefix";
 import { estimateTextTokens } from "../contextManager";
 import { defaultRequestTimeoutMs, fetchWithTimeout } from "../fetchWithTimeout";
+import { providerHttpError } from "./providerHttpError";
 import type {
   CompleteRequest,
   CompleteResponse,
@@ -88,7 +88,7 @@ export function createAnthropicProvider(
       };
       const res = await anthropicFetchRaw(fetchImpl, baseUrl, "/v1/messages", req.apiKey, body, timeoutMs, req.signal);
       if (!res.ok) {
-        yield { type: "error", error: new Error(`HTTP ${res.status}: ${await res.text()}`) };
+        yield { type: "error", error: providerHttpError(res) };
         return;
       }
       yield* parseAnthropicStream(res);
@@ -225,7 +225,7 @@ async function anthropicFetch(
 ): Promise<Record<string, unknown>> {
   const res = await anthropicFetchRaw(fetchImpl, baseUrl, path, apiKey, body, timeoutMs, signal);
   const text = await res.text();
-  if (!res.ok) throw new Error(`HTTP ${res.status}: ${text}`);
+  if (!res.ok) throw providerHttpError(res);
   return JSON.parse(text) as Record<string, unknown>;
 }
 

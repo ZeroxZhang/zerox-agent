@@ -125,7 +125,7 @@ function asProviderError(error: unknown): ProviderError {
 function readStatus(error: ProviderError): number | undefined {
   const structuredStatus = parseStatus(error.status) ?? parseStatus(error.statusCode);
   if (structuredStatus !== undefined) return structuredStatus;
-  const match = readMessage(error).match(/\bstatus\s+(\d{3})\b/i);
+  const match = readMessage(error).match(/\b(?:status\s+|HTTP\s+)(\d{3})\b/i);
   return match?.[1] ? Number(match[1]) : undefined;
 }
 

@@ -66,6 +66,19 @@ describe("agent goal acceptance retry policy", () => {
     expect(classifyAcceptanceInfrastructureFailure(limited).code).toBe("rate_limited");
   });
 
+  it.each([
+    ["HTTP 429", "rate_limited", true],
+    ["HTTP 502", "provider_unavailable", true],
+    ["HTTP 400", "transport_failed", false],
+  ] as const)(
+    "classifies native provider message %s without making other 4xx retryable",
+    (message, code, retryable) => {
+      expect(
+        classifyAcceptanceInfrastructureFailure(new Error(`${message}: redacted`)),
+      ).toMatchObject({ code, retryable });
+    },
+  );
+
   it("ignores HTTP-date retry-after without reading the wall clock", () => {
     const now = vi.spyOn(Date, "now").mockImplementation(() => {
       throw new Error("classifier must not read the wall clock");

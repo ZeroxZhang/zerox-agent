@@ -15,6 +15,7 @@ import type { AgentToolExecutionResult } from "./agentToolExecutor";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
 import type { AcceptanceCheck, Goal, Milestone, SuccessCriterion } from "../shared/agentGoal";
 import {
+  FINAL_GOAL_JUDGE_MAX_PROMPT_BYTES,
   GOAL_JUDGE_PROMPT_VERSION,
   createAgentGoalAcceptance,
   createBuiltinGoalAcceptanceValidators,
@@ -1893,6 +1894,216 @@ describe("agent goal acceptance", () => {
     expect(request?.temperature).toBe(0);
     expect(JSON.stringify(request?.messages)).not.toContain("actionSignatures");
     expect(JSON.stringify(request?.messages).length).toBeLessThan(30_000);
+  });
+
+  it("bounds adversarial final judge inputs by UTF-8 bytes and keeps evidence identity", async () => {
+    let request: ChatCompletionRequest | undefined;
+    const evidenceRef = "artifact:goalEvidence";
+    const goal = createGoal([
+      check(
+        "bounded_final",
+        "model_review",
+        {
+          condition: `最终验收条件${"界".repeat(50_000)}`,
+          evidenceRefs: [evidenceRef],
+        },
+        true,
+      ),
+    ]);
+    goal.originalDescription = `目标${"好".repeat(100_000)}`;
+    goal.successCriteria.push(...Array.from({ length: 200 }, (_, index) => ({
+      id: `criterion_${index + 2}`,
+      description: `criterion-${index}-${"长".repeat(2_000)}`,
+      acceptanceChecks: [],
+    })));
+    goal.milestones = Array.from({ length: 200 }, (_, index) => ({
+      ...createMilestone([]),
+      id: `milestone_${index}`,
+      description: `milestone-${index}-${"程".repeat(2_000)}`,
+      state: "accepted" as const,
+      runIds: Array.from({ length: 100 }, (__, runIndex) =>
+        `run_${index}_${runIndex}_${"r".repeat(300)}`),
+      lastAcceptanceSummary: `summary-${"结".repeat(4_000)}`,
+    }));
+    goal.acceptanceProtocolVersion = 2;
+    goal.acceptanceState = {
+      protocolVersion: 2,
+      phase: "judging",
+      attempt: 3,
+      recentFailures: Array.from({ length: 100 }, (_, index) => ({
+        at: "2026-07-11T00:00:00.000Z",
+        targetKind: "goal" as const,
+        targetId: goal.id,
+        fingerprint: `failure_${index}_${"f".repeat(2_000)}`,
+        occurrence: index + 1,
+        verdict: "rejected_repairable" as const,
+        failureClass: "semantic_evidence_insufficient" as const,
+        failedCheckIds: Array.from({ length: 100 }, (__, id) => `check_${id}`),
+        evidenceRefs: Array.from({ length: 100 }, (__, id) => `evidence:${id}`),
+        actionSignatures: [],
+      })),
+    };
+
+    const result = await createAgentGoalAcceptance({
+      chatClient: {
+        async complete(input) {
+          request = input;
+          return {
+            content: JSON.stringify({
+              verdict: "accepted",
+              reason: "The supplied artifact identity proves completion.",
+              evidenceRefs: [evidenceRef],
+            }),
+            toolCalls: [],
+            finishReason: "stop",
+          };
+        },
+      },
+    }).evaluateGoal(goal, createContext({
+      artifacts: { goalEvidence: "verified final evidence" },
+      transcriptMessages: Array.from({ length: 100 }, () => ({
+        role: "assistant" as const,
+        content: "记".repeat(10_000),
+      })),
+    }));
+
+    const prompt = request?.messages.map((message) => message.content).join("\n") ?? "";
+    const artifactHash = result.evidenceManifest?.artifacts[0]?.sha256;
+    expect(result.accepted).toBe(true);
+    expect(Buffer.byteLength(prompt, "utf8")).toBeLessThanOrEqual(
+      FINAL_GOAL_JUDGE_MAX_PROMPT_BYTES,
+    );
+    expect(prompt).toContain('"verdict":"accepted"|"rejected"|"impossible"');
+    expect(prompt).toContain(evidenceRef);
+    expect(prompt).toContain(artifactHash);
+    expect(prompt).toContain("verified final evidence");
+    expect(prompt).toContain("omitted");
+  });
+
+  it("replays only the final model judge from sealed evidence", async () => {
+    let deterministicCalls = 0;
+    let replaying = false;
+    const kind = "validator:test/final-replay" as const;
+    const registry = createAgentGoalValidatorRegistry({
+      validators: [{
+        kind,
+        async evaluate({ check: selectedCheck }) {
+          deterministicCalls += 1;
+          if (replaying) throw new Error("deterministic validator replayed");
+          return {
+            checkId: selectedCheck.id,
+            kind,
+            passed: true,
+            code: "deterministic_passed",
+            evidenceRefs: ["evidence:deterministic"],
+            detail: "Deterministic evidence passed.",
+          };
+        },
+      }],
+    });
+    const acceptance = createAgentGoalAcceptance({
+      registry,
+      chatClient: {
+        async complete() {
+          throw Object.assign(new Error("busy"), { status: 503 });
+        },
+      },
+    });
+    const goal = createGoal([
+      check("deterministic", kind, {}),
+      check("semantic", "model_review", { evidenceRefs: ["evidence:final"] }, true),
+    ]);
+    const first = await acceptance.evaluateGoal(goal, createContext());
+    replaying = true;
+
+    const replay = await acceptance.replayFinalGoalJudge(
+      goal,
+      first.finalJudgeReplay!,
+      createContext({
+        chatClient: {
+          async complete() {
+            return {
+              content: JSON.stringify({
+                verdict: "accepted",
+                reason: "Sealed final evidence is sufficient.",
+                evidenceRefs: ["evidence:final"],
+              }),
+              toolCalls: [],
+              finishReason: "stop",
+            };
+          },
+        },
+      }),
+    );
+
+    expect(first.finalJudgeReplay?.evidenceFingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(deterministicCalls).toBe(1);
+    expect(toolCalls).toHaveLength(0);
+    expect(replay).toMatchObject({ accepted: true, verdict: "accepted" });
+    expect(replay.checkResults.map((result) => result.checkId)).toEqual([
+      "deterministic",
+      "semantic",
+    ]);
+  });
+
+  it("fails closed before the judge when sealed replay evidence is altered", async () => {
+    let modelCalls = 0;
+    const acceptance = createAgentGoalAcceptance({
+      chatClient: {
+        async complete() {
+          throw Object.assign(new Error("busy"), { status: 503 });
+        },
+      },
+    });
+    const goal = createGoal([
+      check("semantic", "model_review", { evidenceRefs: ["evidence:final"] }, true),
+    ]);
+    const first = await acceptance.evaluateGoal(goal, createContext());
+    const sealed = first.finalJudgeReplay!;
+
+    const replay = await acceptance.replayFinalGoalJudge(
+      goal,
+      { ...sealed, evidenceFingerprint: "0".repeat(64) },
+      createContext({
+        chatClient: {
+          async complete() {
+            modelCalls += 1;
+            throw new Error("must not be called");
+          },
+        },
+      }),
+    );
+
+    expect(replay).toMatchObject({
+      accepted: false,
+      verdict: "acceptance_unavailable",
+      retry: { code: "validator_failed", retryable: false },
+    });
+    expect(modelCalls).toBe(0);
+  });
+
+  it("fails closed when persisted replay evidence is malformed", async () => {
+    const acceptance = createAgentGoalAcceptance({
+      chatClient: {
+        async complete() {
+          throw Object.assign(new Error("busy"), { status: 503 });
+        },
+      },
+    });
+    const goal = createGoal([
+      check("semantic", "model_review", { evidenceRefs: ["evidence:final"] }, true),
+    ]);
+    const first = await acceptance.evaluateGoal(goal, createContext());
+
+    await expect(acceptance.replayFinalGoalJudge(
+      goal,
+      { ...first.finalJudgeReplay!, evidenceManifest: null as never },
+      createContext(),
+    )).resolves.toMatchObject({
+      accepted: false,
+      verdict: "acceptance_unavailable",
+      retry: { code: "validator_failed", retryable: false },
+    });
   });
 
   it.each([

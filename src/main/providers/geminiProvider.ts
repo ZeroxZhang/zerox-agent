@@ -2,12 +2,13 @@
 //
 // Native Gemini generateContent API: x-goog-api-key header, functionCall/
 // functionResponse parts, `thinkingConfig`, and `cachedContent` for prompt
-// cache. `countTokens` uses the native `:countTokens` endpoint. Errors are
-// normalized at the boundary to `HTTP <status>: <body>` (Patch 6).
+// cache. `countTokens` uses the native `:countTokens` endpoint. HTTP failures
+// expose only structured status and bounded retry metadata.
 
 import { buildCachePrefix } from "./cachePrefix";
 import { estimateTextTokens } from "../contextManager";
 import { defaultRequestTimeoutMs, fetchWithTimeout } from "../fetchWithTimeout";
+import { providerHttpError } from "./providerHttpError";
 import type {
   CompleteRequest,
   CompleteResponse,
@@ -70,7 +71,7 @@ export function createGeminiProvider(options: GeminiProviderOptions = {}): LLMPr
       };
       const res = await geminiFetchRaw(fetchImpl, baseUrl, `/v1beta/models/${req.model}:streamGenerateContent?alt=sse`, req.apiKey, body, timeoutMs, req.signal);
       if (!res.ok) {
-        yield { type: "error", error: new Error(`HTTP ${res.status}: ${await res.text()}`) };
+        yield { type: "error", error: providerHttpError(res) };
         return;
       }
       const reader = res.body?.getReader();
@@ -166,7 +167,7 @@ async function geminiFetch(
 ): Promise<Record<string, unknown>> {
   const res = await geminiFetchRaw(fetchImpl, baseUrl, path, apiKey, body, timeoutMs, signal);
   const text = await res.text();
-  if (!res.ok) throw new Error(`HTTP ${res.status}: ${text}`);
+  if (!res.ok) throw providerHttpError(res);
   return JSON.parse(text) as Record<string, unknown>;
 }
 
