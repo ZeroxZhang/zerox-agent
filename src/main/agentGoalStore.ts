@@ -130,9 +130,11 @@ export function createAgentGoalStore(options: {
         return { saved: false, goal: existing };
       }
       if (existing?.status === "completed_unverified") {
-        return { saved: false, goal: existing };
+        return { saved: false, goal: sanitizeGoalForRead(existing) };
       }
-      const candidate = preserveCanonicalAcceptance(existing, goal);
+      const candidate = stripUnverifiedCompletionCertificate(
+        preserveCanonicalAcceptance(existing, goal),
+      );
       if (
         existing &&
         irreversibleGoalStatuses.has(existing.status) &&
@@ -305,11 +307,12 @@ function normalizeGoal(goal: Goal): Goal {
 }
 
 function sanitizeGoalForRead(goal: Goal): Goal {
-  if (!hasInvalidProtocolV2Achievement(goal)) {
-    return goal;
+  const sanitized = stripUnverifiedCompletionCertificate(goal);
+  if (!hasInvalidProtocolV2Achievement(sanitized)) {
+    return sanitized;
   }
 
-  const { acceptanceCertificate: _invalidCertificate, ...safeGoal } = goal;
+  const { acceptanceCertificate: _invalidCertificate, ...safeGoal } = sanitized;
   return {
     ...safeGoal,
     status: "stopped_blocked",
@@ -317,10 +320,10 @@ function sanitizeGoalForRead(goal: Goal): Goal {
     acceptanceState: {
       protocolVersion: 2,
       phase: "blocked",
-      attempt: goal.acceptanceState?.attempt ?? 0,
-      recentFailures: goal.acceptanceState?.recentFailures ?? [],
-      ...(goal.acceptanceState?.lastDecision
-        ? { lastDecision: goal.acceptanceState.lastDecision }
+      attempt: sanitized.acceptanceState?.attempt ?? 0,
+      recentFailures: sanitized.acceptanceState?.recentFailures ?? [],
+      ...(sanitized.acceptanceState?.lastDecision
+        ? { lastDecision: sanitized.acceptanceState.lastDecision }
         : {}),
     },
   };
@@ -368,14 +371,15 @@ function preserveCanonicalAcceptance(
         ? { acceptanceCertificate: existing.acceptanceCertificate }
         : {}),
   };
-  if (
-    candidate.status === "completed_unverified" &&
-    candidate.stopReason === "user_marked_complete" &&
-    candidate.manualCompletionAttestation
-  ) {
-    candidate.acceptanceCertificate = undefined;
-  }
   return candidate;
+}
+
+function stripUnverifiedCompletionCertificate(goal: Goal): Goal {
+  if (goal.status !== "completed_unverified") {
+    return goal;
+  }
+  const { acceptanceCertificate: _certificate, ...safeGoal } = goal;
+  return safeGoal;
 }
 
 function mergeAcceptanceState(

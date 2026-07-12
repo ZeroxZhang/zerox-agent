@@ -33,11 +33,14 @@ export function createGoalRepository(storage: Storage): GoalRepository {
 
   return {
     save(goal: Goal): Goal {
-      const existing = getPayloadRow<Goal>(
+      const existingRaw = getPayloadRow<Goal>(
         db,
         "SELECT payload FROM goals WHERE id = ?",
         [goal.id],
       );
+      const existing = existingRaw
+        ? stripUnverifiedCompletionCertificate(existingRaw)
+        : null;
       if (existing?.status === "completed_unverified") {
         return existing;
       }
@@ -48,6 +51,7 @@ export function createGoalRepository(storage: Storage): GoalRepository {
       ) {
         return existing;
       }
+      const candidate = stripUnverifiedCompletionCertificate(goal);
       db.prepare(
         `INSERT INTO goals (id, chat_session_id, status, payload, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?)
@@ -55,18 +59,18 @@ export function createGoalRepository(storage: Storage): GoalRepository {
            chat_session_id=excluded.chat_session_id, status=excluded.status,
            payload=excluded.payload, updated_at=excluded.updated_at`,
       ).run(
-        goal.id,
-        goal.chatSessionId ?? null,
-        goal.status,
-        jsonify(goal),
-        goal.createdAt,
-        goal.updatedAt,
+        candidate.id,
+        candidate.chatSessionId ?? null,
+        candidate.status,
+        jsonify(candidate),
+        candidate.createdAt,
+        candidate.updatedAt,
       );
-      return goal;
+      return candidate;
     },
 
     saveIfStatus(goal: Goal, expectedStatus: GoalStatus) {
-      const candidate = clearManualCompletionCertificate(goal);
+      const candidate = stripUnverifiedCompletionCertificate(goal);
       const result = db.prepare(
         `UPDATE goals
          SET chat_session_id = ?, status = ?, payload = ?, updated_at = ?
@@ -84,16 +88,20 @@ export function createGoalRepository(storage: Storage): GoalRepository {
       }
       return {
         saved: false,
-        goal: getPayloadRow<Goal>(
-          db,
-          "SELECT payload FROM goals WHERE id = ?",
-          [goal.id],
+        goal: sanitizeStoredGoal(
+          getPayloadRow<Goal>(
+            db,
+            "SELECT payload FROM goals WHERE id = ?",
+            [goal.id],
+          ),
         ),
       };
     },
 
     get(goalId: string): Goal | null {
-      return getPayloadRow<Goal>(db, "SELECT payload FROM goals WHERE id = ?", [goalId]);
+      return sanitizeStoredGoal(
+        getPayloadRow<Goal>(db, "SELECT payload FROM goals WHERE id = ?", [goalId]),
+      );
     },
 
     listActive(): Goal[] {
@@ -102,7 +110,9 @@ export function createGoalRepository(storage: Storage): GoalRepository {
         `SELECT payload FROM goals
          WHERE status NOT IN ('achieved','completed_unverified','stopped_budget','stopped_stalled','stopped_blocked','failed','canceled')
          ORDER BY updated_at DESC`,
-      ).filter((g) => isActive(g.status));
+      )
+        .map(stripUnverifiedCompletionCertificate)
+        .filter((g) => isActive(g.status));
     },
 
     listByChatSession(chatSessionId: string): Goal[] {
@@ -110,7 +120,7 @@ export function createGoalRepository(storage: Storage): GoalRepository {
         db,
         "SELECT payload FROM goals WHERE chat_session_id = ? ORDER BY updated_at DESC",
         [chatSessionId],
-      );
+      ).map(stripUnverifiedCompletionCertificate);
     },
 
     delete(goalId: string): boolean {
@@ -162,13 +172,14 @@ export function createGoalRepository(storage: Storage): GoalRepository {
   };
 }
 
-function clearManualCompletionCertificate(goal: Goal): Goal {
-  if (
-    goal.status !== "completed_unverified" ||
-    goal.stopReason !== "user_marked_complete" ||
-    !goal.manualCompletionAttestation
-  ) {
+function stripUnverifiedCompletionCertificate(goal: Goal): Goal {
+  if (goal.status !== "completed_unverified") {
     return goal;
   }
-  return { ...goal, acceptanceCertificate: undefined };
+  const { acceptanceCertificate: _certificate, ...safeGoal } = goal;
+  return safeGoal;
+}
+
+function sanitizeStoredGoal(goal: Goal | null): Goal | null {
+  return goal ? stripUnverifiedCompletionCertificate(goal) : null;
 }

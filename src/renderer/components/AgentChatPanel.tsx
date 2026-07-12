@@ -98,6 +98,7 @@ import {
   getConfirmedManualCompletionGoalId,
   isGoalAcceptanceOperationCurrent,
   isGoalAcceptanceResultForOperation,
+  projectGoalAcceptanceOperationOutcome,
   type GoalAcceptanceOperationToken,
   type GoalAcceptanceUiContext,
   type ManualCompletionConfirmation,
@@ -1535,7 +1536,7 @@ export function AgentChatPanel({
       if (
         !result.ok ||
         !result.goal ||
-        !isGoalAcceptanceResultForOperation(operation, result.goal.id)
+        !isGoalAcceptanceResultForOperation(operation, result.goal)
       ) {
         const message = result.message ?? "继续最终验收失败，请稍后重试。";
         setStatus({ kind: "error", message });
@@ -1545,13 +1546,15 @@ export function AgentChatPanel({
 
       setActiveGoalDetail(result.goal);
       applyGoalSummaryToSessions(result.goal);
+      const outcome = projectGoalAcceptanceOperationOutcome(operation, result.goal);
+      if (!outcome) {
+        const message = "继续最终验收返回了无法确认的目标状态。";
+        setStatus({ kind: "error", message });
+        appendMessage({ role: "assistant", content: message });
+        return;
+      }
       const goalUiState = getGoalUiSyncState(result.goal.status);
-      const message = result.goal.status === "achieved"
-        ? "最终验收已通过"
-        : result.goal.status === "waiting_for_acceptance"
-          ? "最终验收仍暂不可用，进度已保留"
-          : "正在继续最终验收";
-      setStatus({ kind: goalUiState.statusKind, message });
+      setStatus({ kind: goalUiState.statusKind, message: outcome.statusMessage });
       setWorkPhase(goalUiState.workPhase);
       setTaskActivity(
         buildGoalTaskActivity({
@@ -1561,9 +1564,7 @@ export function AgentChatPanel({
       );
       appendMessage({
         role: "assistant",
-        content: result.goal.status === "waiting_for_acceptance"
-          ? "最终验收仍暂不可用；任务产物和当前进度已保留。"
-          : "已继续最终验收。",
+        content: outcome.assistantMessage,
       });
     } catch {
       if (
@@ -1635,7 +1636,7 @@ export function AgentChatPanel({
       if (
         !result.ok ||
         !result.goal ||
-        !isGoalAcceptanceResultForOperation(operation, result.goal.id)
+        !isGoalAcceptanceResultForOperation(operation, result.goal)
       ) {
         const message = result.message ?? "手动标记完成失败，请稍后重试。";
         setStatus({ kind: "error", message });
@@ -1643,10 +1644,18 @@ export function AgentChatPanel({
         return;
       }
 
+      const outcome = projectGoalAcceptanceOperationOutcome(operation, result.goal);
+      if (!outcome) {
+        const message = "手动标记完成返回了无法确认的目标状态。";
+        setStatus({ kind: "error", message });
+        appendMessage({ role: "assistant", content: message });
+        return;
+      }
       setActiveGoalDetail(result.goal);
       applyGoalSummaryToSessions(result.goal);
-      setStatus({ kind: "ready", message: "已手动完成 · 未经机器认证" });
-      setWorkPhase("done");
+      const goalUiState = getGoalUiSyncState(result.goal.status);
+      setStatus({ kind: goalUiState.statusKind, message: outcome.statusMessage });
+      setWorkPhase(goalUiState.workPhase);
       setTaskActivity(
         buildGoalTaskActivity({
           status: result.goal.status,
@@ -1655,7 +1664,7 @@ export function AgentChatPanel({
       );
       appendMessage({
         role: "assistant",
-        content: "已按你的确认手动标记完成；此状态未经机器认证，不会生成验收证书。",
+        content: outcome.assistantMessage,
       });
     } catch {
       if (

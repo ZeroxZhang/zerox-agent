@@ -260,7 +260,7 @@ export function buildGoalStatusPresentation(
   }
 
   if (status === "executing" && acceptance?.phase === "retrying") {
-    const retry = goal?.acceptanceRetryState;
+    const retry = acceptance.retry;
     const maxAttempts = clampRetryCount(retry?.maxAttempts, 3);
     const attempt = Math.min(clampRetryCount(retry?.attempt, 1), maxAttempts);
     return withAcceptance({
@@ -514,7 +514,7 @@ function projectAcceptanceRetry(
   }
   return {
     cycle,
-    attempt: Math.min(attempt, maxAttempts),
+    attempt: Math.min(nextRetryAt ? attempt + 1 : attempt, maxAttempts),
     maxAttempts,
     lastCode,
     ...(nextRetryAt ? { nextRetryAt } : {}),

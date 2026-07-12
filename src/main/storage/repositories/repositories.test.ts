@@ -207,6 +207,62 @@ describe("GoalRepository", () => {
     storage.close();
   });
 
+  it("strips certificates from every ordinary completed-unverified SQLite save", async () => {
+    const storage = await createInMemoryStorage();
+    const goals = createGoalRepository(storage);
+    const unsafe = baseGoal({
+      id: "g-manual-ordinary",
+      status: "completed_unverified",
+      stopReason: "user_marked_complete",
+      acceptanceCertificate: {
+        forged: true,
+      } as unknown as Goal["acceptanceCertificate"],
+    });
+
+    expect(goals.save(unsafe)).not.toHaveProperty("acceptanceCertificate");
+    expect(goals.get(unsafe.id)).not.toHaveProperty("acceptanceCertificate");
+    const row = storage.db
+      .prepare("SELECT payload FROM goals WHERE id = ?")
+      .get(unsafe.id) as { payload: string };
+    expect(JSON.parse(row.payload)).not.toHaveProperty("acceptanceCertificate");
+    storage.close();
+  });
+
+  it("canonically hides certificates on historical completed-unverified SQLite rows", async () => {
+    const storage = await createInMemoryStorage();
+    const goals = createGoalRepository(storage);
+    const historical = baseGoal({
+      id: "g-manual-historical",
+      chatSessionId: "chat-manual-historical",
+      status: "completed_unverified",
+      acceptanceCertificate: {
+        historical: true,
+      } as unknown as Goal["acceptanceCertificate"],
+    });
+    const raw = JSON.stringify(historical);
+    storage.db.prepare(
+      `INSERT INTO goals (id, chat_session_id, status, payload, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(
+      historical.id,
+      historical.chatSessionId,
+      historical.status,
+      raw,
+      historical.createdAt,
+      historical.updatedAt,
+    );
+
+    expect(goals.get(historical.id)).not.toHaveProperty("acceptanceCertificate");
+    expect(goals.listByChatSession("chat-manual-historical")).toEqual([
+      expect.not.objectContaining({ acceptanceCertificate: expect.anything() }),
+    ]);
+    const row = storage.db
+      .prepare("SELECT payload FROM goals WHERE id = ?")
+      .get(historical.id) as { payload: string };
+    expect(row.payload).toBe(raw);
+    storage.close();
+  });
+
   it.each(["executing", "canceled"] as const)(
     "loses the SQLite manual CAS when canonical %s wins",
     async (winnerStatus) => {

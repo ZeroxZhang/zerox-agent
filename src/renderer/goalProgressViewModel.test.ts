@@ -92,7 +92,7 @@ describe("goal progress view model", () => {
 
     const presentation = buildGoalStatusPresentation(goal.status, goal);
 
-    expect(presentation.statusLabel).toBe("正在重试最终验收（2/3）");
+    expect(presentation.statusLabel).toBe("正在重试最终验收（3/3）");
     expect(presentation.statusDetail).toContain("最终裁判");
     expect(presentation.statusDetail).toContain(
       "任务产物与已完成里程碑不会重新执行",
@@ -102,11 +102,67 @@ describe("goal progress view model", () => {
     expect(presentation.recoveryActions).toEqual([]);
     expect(presentation.acceptance?.retry).toEqual({
       cycle: 1,
-      attempt: 2,
+      attempt: 3,
       maxAttempts: 3,
       lastCode: "judge_timeout",
       nextRetryAt: "2026-07-12T04:05:06.000Z",
     });
+  });
+
+  it("shows the current retry attempt while the judge request is active", () => {
+    const goal = createGoal({
+      status: "executing",
+      acceptanceProtocolVersion: 2,
+      acceptanceState: {
+        protocolVersion: 2,
+        phase: "retrying",
+        attempt: 2,
+        recentFailures: [failureRecord()],
+      },
+      acceptanceRetryState: {
+        cycle: 1,
+        attempt: 2,
+        maxAttempts: 3,
+        lastCode: "judge_timeout",
+        lastDetail: "Final judge timed out.",
+        evidenceFingerprint: "a".repeat(64),
+        resumeFrom: "final_judge",
+      },
+    });
+
+    const presentation = buildGoalStatusPresentation(goal.status, goal);
+
+    expect(presentation.statusLabel).toBe("正在重试最终验收（2/3）");
+    expect(presentation.nextActionDetail).toBe("正在请求独立裁判。");
+    expect(presentation.acceptance?.retry?.attempt).toBe(2);
+  });
+
+  it("clamps the upcoming backoff attempt to the configured maximum", () => {
+    const goal = createGoal({
+      status: "executing",
+      acceptanceProtocolVersion: 2,
+      acceptanceState: {
+        protocolVersion: 2,
+        phase: "retrying",
+        attempt: 3,
+        recentFailures: [failureRecord()],
+      },
+      acceptanceRetryState: {
+        cycle: 1,
+        attempt: 3,
+        maxAttempts: 3,
+        lastCode: "judge_timeout",
+        lastDetail: "Final judge timed out.",
+        nextRetryAt: "2026-07-12T04:05:06.000Z",
+        evidenceFingerprint: "a".repeat(64),
+        resumeFrom: "final_judge",
+      },
+    });
+
+    const presentation = buildGoalStatusPresentation(goal.status, goal);
+
+    expect(presentation.statusLabel).toBe("正在重试最终验收（3/3）");
+    expect(presentation.acceptance?.retry?.attempt).toBe(3);
   });
 
   it.each([

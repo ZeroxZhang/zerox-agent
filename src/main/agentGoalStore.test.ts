@@ -511,6 +511,53 @@ describe("agent goal store", () => {
     ).resolves.toEqual(completed);
   });
 
+  it("strips certificates from every ordinary completed-unverified JSON save", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const unsafe = createGoal("goal_manual_ordinary", "completed_unverified");
+    unsafe.stopReason = "user_marked_complete";
+    unsafe.acceptanceCertificate = {
+      forged: true,
+    } as unknown as Goal["acceptanceCertificate"];
+
+    const saved = await store.save(unsafe);
+
+    expect(saved).not.toHaveProperty("acceptanceCertificate");
+    await expect(store.get(unsafe.id)).resolves.not.toHaveProperty(
+      "acceptanceCertificate",
+    );
+    const raw = JSON.parse(
+      await readFile(
+        path.join(configDir, "agent-goals", `${unsafe.id}.json`),
+        "utf8",
+      ),
+    ) as Goal;
+    expect(raw).not.toHaveProperty("acceptanceCertificate");
+  });
+
+  it("canonically hides certificates on historical completed-unverified JSON", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const goalsDir = path.join(configDir, "agent-goals");
+    const historical = {
+      ...createGoal("goal_manual_historical", "completed_unverified"),
+      chatSessionId: "chat_manual_historical",
+      acceptanceCertificate: { historical: true },
+    } as unknown as Goal;
+    const filePath = path.join(goalsDir, `${historical.id}.json`);
+    const raw = `${JSON.stringify(historical, null, 4)}\n`;
+    await mkdir(goalsDir, { recursive: true });
+    await writeFile(filePath, raw, "utf8");
+
+    await expect(store.get(historical.id)).resolves.toEqual(
+      expect.not.objectContaining({ acceptanceCertificate: expect.anything() }),
+    );
+    await expect(
+      store.listByChatSession("chat_manual_historical"),
+    ).resolves.toEqual([
+      expect.not.objectContaining({ acceptanceCertificate: expect.anything() }),
+    ]);
+    expect(await readFile(filePath, "utf8")).toBe(raw);
+  });
+
   it("conditionally completes only a canonical waiting goal and clears its stale certificate", async () => {
     const store = createAgentGoalStore({ configDir });
     const waiting = createProtocolV2Goal(

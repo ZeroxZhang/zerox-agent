@@ -1010,6 +1010,10 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource).toContain(
       "markGoalCompletedUnverified(\n        operation.goalId",
     );
+    expect(chatPanelSource).toContain("projectGoalAcceptanceOperationOutcome");
+    expect(chatPanelSource).toContain("outcome.statusMessage");
+    expect(chatPanelSource).toContain("outcome.assistantMessage");
+    expect(chatPanelSource).not.toContain('content: "已继续最终验收。"');
     expect(chatPanelSource).toContain("setActiveGoalDetail(result.goal)");
     expect(chatPanelSource).toContain("goalAcceptanceOperationPendingRef.current");
     expect(chatPanelSource).toContain("isGoalAcceptanceOperationCurrent");
