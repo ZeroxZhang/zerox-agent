@@ -6708,3 +6708,11 @@
   - `npm run smoke:prod` -> passed; renderer rendered the Agent chat UI. The known local `better-sqlite3` Node ABI mismatch fell back to JSON storage.
   - `git diff --check` -> passed.
   - Independent UI/integration, runtime, and security reviews completed after four correction rounds. Final reviewers reported no remaining Critical or Important blockers and approved the branch for `main` merge consideration.
+
+## 2026-07-12 - Goal Acceptance Recovery Design
+
+- Diagnosed the reported goal as a final cold-judge timeout rather than task or artifact failure: the report and evidence files were written, the milestone semantic judge accepted them, and the separate final judge ended at the fixed 30-second deadline with `judge_timeout`.
+- Read the relevant MiMo-Code goal gate, shared transient retry classifier, visible retry schedule, max-mode judge replay, provider timeout, and task-blocking implementations.
+- Adopted MiMo-Code's unified transient classification, visible retry state, fresh side-effect-free judge attempts, and durable resume contract while explicitly rejecting its fail-open goal-verifier behavior.
+- Added the approved design at `docs/superpowers/specs/2026-07-12-goal-acceptance-recovery-design.md`.
+- The design preserves fail-closed machine certification, adds bounded automatic final-judge retry, introduces durable `waiting_for_acceptance`, and defines `completed_unverified` plus a manual completion attestation that cannot masquerade as an acceptance certificate.
