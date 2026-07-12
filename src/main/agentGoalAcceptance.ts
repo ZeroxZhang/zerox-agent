@@ -42,9 +42,14 @@ import {
   redactAndBoundAcceptanceSummary,
   redactAndBoundEvidenceRef,
 } from "./agentGoalRedaction";
+import {
+  classifyAcceptanceInfrastructureFailure,
+  type AcceptanceInfrastructureFailure,
+} from "./agentGoalAcceptanceRetryPolicy";
 
 const shellRedirectionOperatorPattern = /[<>]/;
 const defaultJudgeTimeoutMs = 30_000;
+const defaultFinalJudgeTimeoutMs = 60_000;
 const maximumTimerDelayMs = 2_147_483_647;
 const maximumEvidenceRefs = 64;
 const maximumRawEvidenceRefs = 128;
@@ -82,6 +87,7 @@ export type AcceptanceResult = {
     evaluatedMessageIds: string[];
     runIds: string[];
   };
+  retry?: AcceptanceInfrastructureFailure;
 };
 
 export type AcceptanceContext = {
@@ -97,7 +103,7 @@ export type AcceptanceContext = {
   chatClient?: ChatClient;
   modelProfile?: Pick<
     ChatCompletionRequest,
-    "baseUrl" | "apiKey" | "model" | "temperature" | "maxTokens"
+    "baseUrl" | "apiKey" | "model" | "temperature" | "maxTokens" | "thinking"
   >;
   artifacts?: Record<string, unknown>;
   transcriptMessages?: ChatMessage[];
@@ -113,6 +119,7 @@ export type AgentGoalAcceptanceOptions = {
   modelProfile?: AcceptanceContext["modelProfile"];
   judgeProviderId?: string;
   judgeTimeoutMs?: number;
+  finalJudgeTimeoutMs?: number;
 };
 
 export type AgentGoalAcceptance = {
@@ -153,7 +160,9 @@ export function createAgentGoalAcceptance(
   options: AgentGoalAcceptanceOptions = {},
 ): AgentGoalAcceptance {
   const judgeTimeoutMs = options.judgeTimeoutMs ?? defaultJudgeTimeoutMs;
+  const finalJudgeTimeoutMs = options.finalJudgeTimeoutMs ?? defaultFinalJudgeTimeoutMs;
   validateJudgeTimeout(judgeTimeoutMs);
+  validateJudgeTimeout(finalJudgeTimeoutMs);
   const registry =
     options.registry ??
     createAgentGoalValidatorRegistry({
@@ -181,7 +190,7 @@ export function createAgentGoalAcceptance(
         mode: "goal",
         goal,
         options,
-        judgeTimeoutMs,
+        judgeTimeoutMs: finalJudgeTimeoutMs,
       });
       await emitAcceptanceChecked(ctx, result, {
         targetKind: "goal",
@@ -231,6 +240,7 @@ async function evaluateCriteria(
   let inferentialUsed = false;
   let evidenceManifest: GoalEvidenceManifest | undefined;
   let judge: AcceptanceResult["judge"];
+  let retry: AcceptanceResult["retry"];
 
   if (deterministicPassed) {
     for (const { check, criterionText } of modelReviewChecks) {
@@ -256,6 +266,7 @@ async function evaluateCriteria(
       checkResults.push(result.checkResult);
       evidenceManifest = mergeEvidenceManifests(evidenceManifest, result.evidenceManifest);
       judge = result.judge ?? judge;
+      retry = result.retry ?? retry;
     }
   }
 
@@ -269,6 +280,7 @@ async function evaluateCriteria(
     inferentialUsed,
     ...(evidenceManifest ? { evidenceManifest } : {}),
     ...(judge ? { judge } : {}),
+    ...(retry ? { retry } : {}),
   };
 }
 
@@ -678,6 +690,7 @@ async function evaluateModelReview(
   inferentialUsed: boolean;
   evidenceManifest?: GoalEvidenceManifest;
   judge?: AcceptanceResult["judge"];
+  retry?: AcceptanceInfrastructureFailure;
 }> {
   const evidenceRefs = parseEvidenceRefs(check.params.evidenceRefs);
   if (!check.requiresEvidence || evidenceRefs.length === 0) {
@@ -740,6 +753,7 @@ async function evaluateModelReview(
       inferentialUsed: false,
       evidenceManifest: evidence.manifest,
       judge,
+      retry: classifyAcceptanceInfrastructureFailure({ code: "transport_failed" }),
     };
   }
 
@@ -760,6 +774,9 @@ async function evaluateModelReview(
     operation,
   );
   if (outcome.status !== "completed") {
+    const retry = classifyAcceptanceInfrastructureFailure(
+      outcome.status === "timed_out" ? { code: "ETIMEDOUT" } : outcome.error,
+    );
     return {
       checkResult: unavailableJudgeResult(
         check,
@@ -769,6 +786,7 @@ async function evaluateModelReview(
       inferentialUsed: true,
       evidenceManifest: evidence.manifest,
       judge,
+      retry,
     };
   }
 
@@ -779,6 +797,7 @@ async function evaluateModelReview(
       inferentialUsed: true,
       evidenceManifest: evidence.manifest,
       judge,
+      retry: classifyAcceptanceInfrastructureFailure({ code: "judge_invalid_response" }),
     };
   }
 
@@ -800,6 +819,7 @@ async function evaluateModelReview(
       return {
         checkResult: unavailableJudgeResult(check, evidenceRefs, "judge_timeout"),
         inferentialUsed: true,
+        retry: classifyAcceptanceInfrastructureFailure({ code: "ETIMEDOUT" }),
       };
     }
     if (ctx.signal?.aborted || operation.signal.aborted) {
@@ -860,6 +880,7 @@ async function evaluateFinalModelReview(
   inferentialUsed: boolean;
   evidenceManifest?: GoalEvidenceManifest;
   judge?: AcceptanceResult["judge"];
+  retry?: AcceptanceInfrastructureFailure;
 }> {
   const evidenceRefs = parseEvidenceRefs(check.params.evidenceRefs);
   if (!check.requiresEvidence || evidenceRefs.length === 0) {
@@ -923,6 +944,7 @@ async function evaluateFinalModelReview(
       inferentialUsed: false,
       evidenceManifest: evidence.manifest,
       judge,
+      retry: classifyAcceptanceInfrastructureFailure({ code: "transport_failed" }),
     };
   }
 
@@ -934,6 +956,8 @@ async function evaluateFinalModelReview(
   const request: ChatCompletionRequest = {
     ...modelProfile,
     temperature: 0,
+    maxTokens: 1024,
+    thinking: { type: "disabled" },
     messages: buildFinalJudgeMessages({
       goal,
       criteria,
@@ -946,6 +970,9 @@ async function evaluateFinalModelReview(
   };
   const outcome = await completeJudgeWithDeadline(chatClient, request, operation);
   if (outcome.status !== "completed") {
+    const retry = classifyAcceptanceInfrastructureFailure(
+      outcome.status === "timed_out" ? { code: "ETIMEDOUT" } : outcome.error,
+    );
     return {
       checkResult: unavailableJudgeResult(
         check,
@@ -955,6 +982,7 @@ async function evaluateFinalModelReview(
       inferentialUsed: true,
       evidenceManifest: evidence.manifest,
       judge,
+      retry,
     };
   }
 
@@ -965,6 +993,7 @@ async function evaluateFinalModelReview(
       inferentialUsed: true,
       evidenceManifest: evidence.manifest,
       judge,
+      retry: classifyAcceptanceInfrastructureFailure({ code: "judge_invalid_response" }),
     };
   }
 
@@ -986,6 +1015,7 @@ async function evaluateFinalModelReview(
       return {
         checkResult: unavailableJudgeResult(check, evidenceRefs, "judge_timeout"),
         inferentialUsed: true,
+        retry: classifyAcceptanceInfrastructureFailure({ code: "ETIMEDOUT" }),
       };
     }
     if (ctx.signal?.aborted || operation.signal.aborted) {
@@ -1014,7 +1044,16 @@ function buildFinalJudgeMessages(input: {
       summary: milestone.lastAcceptanceSummary ?? milestone.lastRunSummary ?? null,
       runIds: milestone.runIds,
     }));
-  const priorFailures = input.goal.acceptanceState?.recentFailures ?? [];
+  const priorFailures = (input.goal.acceptanceState?.recentFailures ?? [])
+    .slice(-20)
+    .map((failure) => ({
+      target: { kind: failure.targetKind, id: failure.targetId },
+      failedCheckIds: failure.failedCheckIds,
+      codes: [failure.verdict, failure.failureClass],
+      evidenceRefs: failure.evidenceRefs,
+      fingerprint: failure.fingerprint,
+      occurrence: failure.occurrence,
+    }));
   const criteriaData = input.criteria.map((criterion) => ({
     id: criterion.id,
     description: criterion.description,
@@ -1374,7 +1413,7 @@ function getModelProfile(
   options: AgentGoalAcceptanceOptions = {},
 ): Pick<
   ChatCompletionRequest,
-  "baseUrl" | "apiKey" | "model" | "temperature" | "maxTokens"
+  "baseUrl" | "apiKey" | "model" | "temperature" | "maxTokens" | "thinking"
 > {
   return (
     ctx.modelProfile ?? options.modelProfile ?? {
@@ -1505,7 +1544,7 @@ function collectEvaluatedRunIds(goal: Goal, currentRunId: string): string[] {
 
 type JudgeCompletionOutcome =
   | { status: "completed"; content: string }
-  | { status: "failed" }
+  | { status: "failed"; error: unknown }
   | { status: "timed_out" };
 
 async function completeJudgeWithDeadline(
@@ -1532,10 +1571,10 @@ async function completeJudgeWithDeadline(
         if (operation.signal.aborted) throw abortError(operation.signal.reason);
         return { status: "completed", content: response.content ?? "" };
       },
-      () => {
+      (error) => {
         if (operation.timedOut()) return { status: "timed_out" };
         if (operation.signal.aborted) throw abortError(operation.signal.reason);
-        return { status: "failed" };
+        return { status: "failed", error };
       },
     );
   const canceled = new Promise<JudgeCompletionOutcome>((resolve, reject) => {

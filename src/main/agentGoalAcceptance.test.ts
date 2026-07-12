@@ -10,7 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ChatClient } from "./openAiCompatibleClient";
+import type { ChatClient, ChatCompletionRequest } from "./openAiCompatibleClient";
 import type { AgentToolExecutionResult } from "./agentToolExecutor";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
 import type { AcceptanceCheck, Goal, Milestone, SuccessCriterion } from "../shared/agentGoal";
@@ -1804,7 +1804,7 @@ describe("agent goal acceptance", () => {
     expect(prompt).toContain("Late Acceptance Evidence");
     expect(prompt).toContain("Milestone evidence accepted.");
     expect(prompt).toContain("run_milestone_1");
-    expect(prompt).toContain("dead_end:old_approach");
+    expect(prompt).not.toContain("actionSignatures");
     expect(result).toMatchObject({
       accepted: true,
       verdict: "accepted",
@@ -1827,6 +1827,72 @@ describe("agent goal acceptance", () => {
         runIds: expect.arrayContaining(["run_acceptance", "run_milestone_1"]),
       },
     });
+  });
+
+  it("uses a lean final judge profile and bounded prompt", async () => {
+    let request: ChatCompletionRequest | undefined;
+    const goal = createGoal([
+      check(
+        "lean_final",
+        "model_review",
+        { condition: "Goal evidence proves completion", evidenceRefs: ["evidence:goalEvidence"] },
+        true,
+      ),
+    ]);
+    goal.acceptanceProtocolVersion = 2;
+    goal.acceptanceState = {
+      protocolVersion: 2,
+      phase: "judging",
+      attempt: 2,
+      recentFailures: Array.from({ length: 100 }, (_, index) => ({
+        at: "2026-07-11T00:00:00.000Z",
+        targetKind: "goal" as const,
+        targetId: goal.id,
+        fingerprint: `failure_${index}`,
+        occurrence: index + 1,
+        verdict: "rejected_repairable" as const,
+        failureClass: "semantic_evidence_insufficient" as const,
+        failedCheckIds: ["lean_final"],
+        evidenceRefs: ["evidence:goalEvidence"],
+        actionSignatures: Array.from(
+          { length: 20 },
+          (_, signatureIndex) => `action:${index}:${signatureIndex}:${"x".repeat(200)}`,
+        ),
+      })),
+    };
+
+    const result = await createAgentGoalAcceptance({
+      chatClient: {
+        async complete(input) {
+          request = input;
+          return {
+            content: JSON.stringify({
+              verdict: "accepted",
+              reason: "Goal evidence proves completion.",
+              evidenceRefs: ["evidence:goalEvidence"],
+            }),
+            toolCalls: [],
+            finishReason: "stop",
+          };
+        },
+      },
+    }).evaluateGoal(goal, createContext({
+      modelProfile: {
+        baseUrl: "https://example.test/v1",
+        apiKey: "secret",
+        model: "qwen3.7-plus",
+        temperature: 0.2,
+        maxTokens: 32768,
+        thinking: { type: "enabled", budgetTokens: 8192 },
+      },
+    }));
+
+    expect(result.accepted).toBe(true);
+    expect(request?.thinking).toEqual({ type: "disabled" });
+    expect(request?.maxTokens).toBe(1024);
+    expect(request?.temperature).toBe(0);
+    expect(JSON.stringify(request?.messages)).not.toContain("actionSignatures");
+    expect(JSON.stringify(request?.messages).length).toBeLessThan(30_000);
   });
 
   it.each([
@@ -1939,9 +2005,35 @@ describe("agent goal acceptance", () => {
     expect(JSON.stringify(result)).not.toContain("secret");
   });
 
+  it("maps a structured provider failure to sanitized retry metadata", async () => {
+    const result = await createAgentGoalAcceptance({
+      chatClient: {
+        async complete() {
+          throw Object.assign(new Error("secret provider payload"), {
+            statusCode: 429,
+            responseHeaders: { "retry-after-ms": "1500" },
+          });
+        },
+      },
+    }).evaluateGoal(
+      createGoal([
+        check("final_rate_limit", "model_review", { evidenceRefs: ["evidence:final"] }, true),
+      ]),
+      createContext(),
+    );
+
+    expect(result.retry).toEqual({
+      code: "rate_limited",
+      retryable: true,
+      detail: "Final judge provider rate limited the request.",
+      retryAfterMs: 1500,
+    });
+    expect(JSON.stringify(result)).not.toContain("secret provider payload");
+  });
+
   it("enforces an asynchronous final-judge timeout and handles the late rejection", async () => {
     const result = await createAgentGoalAcceptance({
-      judgeTimeoutMs: 5,
+      finalJudgeTimeoutMs: 5,
       chatClient: {
         complete() {
           return new Promise((_, reject) => {
@@ -1970,7 +2062,7 @@ describe("agent goal acceptance", () => {
     let finishLateCompletion: (() => void) | undefined;
     const context = createContext();
     const resultPromise = createAgentGoalAcceptance({
-      judgeTimeoutMs: 25,
+      finalJudgeTimeoutMs: 25,
       chatClient: {
         complete(request) {
           observedSignal = request.signal;
@@ -2019,7 +2111,7 @@ describe("agent goal acceptance", () => {
     );
     let modelCalls = 0;
     const evaluation = createAgentGoalAcceptance({
-      judgeTimeoutMs: 25,
+      finalJudgeTimeoutMs: 25,
       chatClient: {
         async complete() {
           modelCalls += 1;
@@ -2068,7 +2160,7 @@ describe("agent goal acceptance", () => {
       },
     };
     const evaluation = createAgentGoalAcceptance({
-      judgeTimeoutMs: 25,
+      finalJudgeTimeoutMs: 25,
       chatClient: {
         async complete() {
           return {
@@ -2177,7 +2269,7 @@ describe("agent goal acceptance", () => {
 
   it("rejects a synchronous/elapsed final-judge completion after its deadline", async () => {
     const result = await createAgentGoalAcceptance({
-      judgeTimeoutMs: 5,
+      finalJudgeTimeoutMs: 5,
       chatClient: {
         async complete() {
           const deadline = performance.now() + 20;
