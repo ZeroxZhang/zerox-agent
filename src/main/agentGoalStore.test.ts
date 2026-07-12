@@ -467,6 +467,47 @@ describe("agent goal store", () => {
     },
   );
 
+  it("keeps completed-unverified goals terminal and preserves the canonical attestation", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const executing = createProtocolV2Goal("goal_manual_terminal", "executing");
+    const completed: Goal = {
+      ...executing,
+      status: "completed_unverified",
+      stopReason: "user_marked_complete",
+      manualCompletionAttestation: {
+        version: 1,
+        goalId: executing.id,
+        completedAt: "2026-07-11T05:00:00.000Z",
+        reason: "user_marked_complete",
+        failedCheckIds: ["check_file"],
+        evidenceRefs: ["artifact:report"],
+        evidenceFingerprint: "a".repeat(64),
+        lastFailureCode: "judge_timeout",
+        retryCycles: 2,
+      },
+      updatedAt: "2026-07-11T05:00:00.000Z",
+    };
+
+    await store.save(executing);
+    await store.save(completed);
+
+    await expect(store.listActive()).resolves.toEqual([]);
+    await expect(
+      store.save({
+        ...executing,
+        status: "executing",
+        updatedAt: "2026-07-11T05:01:00.000Z",
+      }),
+    ).resolves.toEqual(completed);
+    await expect(
+      store.save({
+        ...completed,
+        manualCompletionAttestation: undefined,
+        updatedAt: "2026-07-11T05:02:00.000Z",
+      }),
+    ).resolves.toEqual(completed);
+  });
+
   it("still allows a budget-stopped goal to resume after an explicit recovery action", async () => {
     const store = createAgentGoalStore({ configDir });
     const stopped = createGoal("goal_recoverable", "stopped_budget");
@@ -516,6 +557,57 @@ describe("agent goal store", () => {
       executing,
       planning,
     ]);
+  });
+
+  it("lists waiting-for-acceptance goals as active and preserves retry state", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const waiting = createProtocolV2Goal(
+      "goal_waiting_acceptance",
+      "waiting_for_acceptance",
+    );
+    waiting.milestones[0]!.state = "accepted";
+    waiting.acceptanceState = {
+      protocolVersion: 2,
+      phase: "awaiting_user",
+      attempt: 3,
+      recentFailures: [],
+    };
+    waiting.acceptanceRetryState = {
+      cycle: 1,
+      attempt: 3,
+      maxAttempts: 3,
+      lastCode: "judge_timeout",
+      lastDetail: "Final judge timed out.",
+      evidenceFingerprint: "a".repeat(64),
+      resumeFrom: "final_judge",
+    };
+
+    await store.save(waiting);
+
+    await expect(store.listActive()).resolves.toEqual([
+      expect.objectContaining({
+        id: waiting.id,
+        status: "waiting_for_acceptance",
+        acceptanceRetryState: expect.objectContaining({
+          lastCode: "judge_timeout",
+        }),
+      }),
+    ]);
+  });
+
+  it("keeps historical acceptance-unavailable JSON unchanged when optional recovery fields are absent", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const goalsDir = path.join(configDir, "agent-goals");
+    const legacy = createGoal("goal_legacy_acceptance", "stopped_blocked");
+    legacy.stopReason = "acceptance_unavailable";
+    const filePath = path.join(goalsDir, `${legacy.id}.json`);
+    const raw = `${JSON.stringify(legacy, null, 4)}\n`;
+    await mkdir(goalsDir, { recursive: true });
+    await writeFile(filePath, raw, "utf8");
+
+    await expect(store.get(legacy.id)).resolves.toEqual(legacy);
+    await expect(store.listActive()).resolves.toEqual([]);
+    expect(await readFile(filePath, "utf8")).toBe(raw);
   });
 
   it("appends and reads progress ledger events in order", async () => {

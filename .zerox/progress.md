@@ -6723,3 +6723,22 @@
 - Created isolated worktree `.worktrees/goal-acceptance-recovery` on branch `codex/goal-acceptance-recovery` for subagent-driven implementation.
 - Clean worktree baseline: `npm test` passed 199 test files / 1,835 tests before production changes.
 - Registered `P43-goal-acceptance-recovery` as the single in-progress feature.
+
+## 2026-07-12 - P43 Task 4A Durable Persistence and Restart Recovery
+
+- JSON and SQLite goal persistence now keep `waiting_for_acceptance` active
+  while treating `completed_unverified` as terminal and irreversible.
+- Canonical manual completion attestations survive stale and same-status
+  writes; optional retry/attestation fields round-trip without rewriting
+  historical acceptance-unavailable JSON.
+- Startup leaves persisted acceptance waiting untouched and converts an
+  interrupted `executing/retrying/final_judge` timer into durable
+  `waiting_for_acceptance/awaiting_user` without executing work.
+- TDD RED reproduced all three missing boundaries; focused GREEN passed 6/6.
+- Independent review caught and TDD coverage fixed stale progress delivery that
+  could regress a canonical manual completion in chat/session projections.
+- Final evidence: persistence/container suite 90/90 passed, Electron/main
+  TypeScript passed, `npm run harness:check` passed, and `git diff --check`
+  passed.
+- Task 4B (`continueAcceptance`, evidence-staleness guard, and legacy upgrade)
+  remains pending by explicit parent-agent scope split.

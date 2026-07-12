@@ -11,10 +11,16 @@ import { getPayloadRow, jsonify, parseJson, selectPayloadRows } from "../reposit
 
 const TERMINAL_GOAL_STATUSES = new Set<GoalStatus>([
   "achieved",
+  "completed_unverified",
   "stopped_budget",
   "stopped_stalled",
   "stopped_blocked",
   "failed",
+  "canceled",
+]);
+const IRREVERSIBLE_GOAL_STATUSES = new Set<GoalStatus>([
+  "achieved",
+  "completed_unverified",
   "canceled",
 ]);
 
@@ -27,6 +33,21 @@ export function createGoalRepository(storage: Storage): GoalRepository {
 
   return {
     save(goal: Goal): Goal {
+      const existing = getPayloadRow<Goal>(
+        db,
+        "SELECT payload FROM goals WHERE id = ?",
+        [goal.id],
+      );
+      if (existing?.status === "completed_unverified") {
+        return existing;
+      }
+      if (
+        existing &&
+        IRREVERSIBLE_GOAL_STATUSES.has(existing.status) &&
+        goal.status !== existing.status
+      ) {
+        return existing;
+      }
       db.prepare(
         `INSERT INTO goals (id, chat_session_id, status, payload, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?)
@@ -52,7 +73,7 @@ export function createGoalRepository(storage: Storage): GoalRepository {
       return selectPayloadRows<Goal>(
         db,
         `SELECT payload FROM goals
-         WHERE status NOT IN ('achieved','stopped_budget','stopped_stalled','stopped_blocked','failed','canceled')
+         WHERE status NOT IN ('achieved','completed_unverified','stopped_budget','stopped_stalled','stopped_blocked','failed','canceled')
          ORDER BY updated_at DESC`,
       ).filter((g) => isActive(g.status));
     },

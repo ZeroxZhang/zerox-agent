@@ -119,6 +119,55 @@ describe("GoalRepository", () => {
     expect(goals.delete("g1")).toBe(true);
     storage.close();
   });
+
+  it("keeps waiting acceptance active and completed-unverified terminal", async () => {
+    const storage = await createInMemoryStorage();
+    const goals = createGoalRepository(storage);
+    const waiting = baseGoal({
+      id: "g-waiting-acceptance",
+      status: "waiting_for_acceptance",
+      acceptanceRetryState: {
+        cycle: 1,
+        attempt: 3,
+        maxAttempts: 3,
+        lastCode: "judge_timeout",
+        lastDetail: "Final judge timed out.",
+        evidenceFingerprint: "a".repeat(64),
+        resumeFrom: "final_judge",
+      },
+    });
+    const completed = baseGoal({
+      id: "g-completed-unverified",
+      status: "completed_unverified",
+      stopReason: "user_marked_complete",
+      manualCompletionAttestation: {
+        version: 1,
+        goalId: "g-completed-unverified",
+        completedAt: "2026-07-11T05:00:00.000Z",
+        reason: "user_marked_complete",
+        failedCheckIds: ["check_done"],
+        evidenceRefs: [],
+        evidenceFingerprint: "b".repeat(64),
+        lastFailureCode: "judge_timeout",
+        retryCycles: 1,
+      },
+    });
+
+    goals.save(waiting);
+    goals.save(completed);
+
+    expect(goals.listActive()).toEqual([waiting]);
+    expect(
+      goals.save({
+        ...completed,
+        status: "executing",
+        stopReason: undefined,
+        manualCompletionAttestation: undefined,
+      }),
+    ).toEqual(completed);
+    expect(goals.get(completed.id)).toEqual(completed);
+    storage.close();
+  });
 });
 
 describe("SessionRepository + ActorRepository", () => {

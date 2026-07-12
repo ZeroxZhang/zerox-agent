@@ -117,6 +117,53 @@ describe("app container goal drafts", () => {
     expect(prepareInterruptedGoalForResume(goal).milestones[0]?.state).toBe("ready");
   });
 
+  it("recovers an interrupted final-acceptance retry as waiting instead of auto-running it", () => {
+    const goal = createStoredGoal({
+      id: "goal_interrupted_acceptance",
+      chatSessionId: "chat_1",
+      status: "executing",
+      milestones: [{
+        id: "milestone_1",
+        description: "Completed work",
+        dependsOn: [],
+        successCriteria: [],
+        state: "accepted",
+        runIds: ["run_1"],
+        attempts: 1,
+      }],
+      acceptanceProtocolVersion: 2,
+      acceptanceState: {
+        protocolVersion: 2,
+        phase: "retrying",
+        attempt: 2,
+        recentFailures: [],
+      },
+      acceptanceRetryState: {
+        cycle: 1,
+        attempt: 2,
+        maxAttempts: 3,
+        lastCode: "judge_timeout",
+        lastDetail: "Final judge timed out.",
+        nextRetryAt: "2026-07-11T05:00:02.000Z",
+        evidenceFingerprint: "a".repeat(64),
+        resumeFrom: "final_judge",
+      },
+    });
+
+    expect(prepareInterruptedGoalForResume(goal)).toMatchObject({
+      status: "waiting_for_acceptance",
+      stopReason: undefined,
+      acceptanceState: { phase: "awaiting_user" },
+      acceptanceRetryState: {
+        attempt: 2,
+        evidenceFingerprint: "a".repeat(64),
+      },
+    });
+    expect(
+      prepareInterruptedGoalForResume(goal).acceptanceRetryState,
+    ).not.toHaveProperty("nextRetryAt");
+  });
+
   let tempDir: string;
   const originalToolWorkerEnv = process.env.ZEROX_TOOL_WORKER;
   const originalLegacyToolWorkerEnv = process.env.BUILDING_AGENT_TOOL_WORKER;
@@ -310,6 +357,41 @@ describe("app container goal drafts", () => {
   it("classifies unverified completion as terminal while acceptance waiting stays active", () => {
     expect(isTerminalGoalStatus("completed_unverified")).toBe(true);
     expect(isTerminalGoalStatus("waiting_for_acceptance")).toBe(false);
+  });
+
+  it("does not auto-resume a persisted waiting acceptance on startup", async () => {
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const waiting = createStoredGoal({
+      id: "goal_waiting_startup",
+      status: "waiting_for_acceptance",
+      acceptanceProtocolVersion: 2,
+      acceptanceState: {
+        protocolVersion: 2,
+        phase: "awaiting_user",
+        attempt: 3,
+        recentFailures: [],
+      },
+      acceptanceRetryState: {
+        cycle: 1,
+        attempt: 3,
+        maxAttempts: 3,
+        lastCode: "judge_timeout",
+        lastDetail: "Final judge timed out.",
+        evidenceFingerprint: "a".repeat(64),
+        resumeFrom: "final_judge",
+      },
+    });
+    await container.agentGoalStore().save(waiting);
+
+    await expect(container.resumeInterruptedGoals()).resolves.toBe(0);
+    await expect(container.agentGoalStore().get(waiting.id)).resolves.toMatchObject({
+      status: "waiting_for_acceptance",
+      acceptanceState: { phase: "awaiting_user" },
+    });
   });
 
   it("formats unverified manual completion without claiming certification", () => {
@@ -675,6 +757,7 @@ describe("app container goal drafts", () => {
     ["achieved", "acceptance_repair_scheduled"],
     ["canceled", "replanned"],
     ["achieved", "checkpoint"],
+    ["completed_unverified", "checkpoint"],
   ] as const)(
     "canonicalizes stale terminal %s/%s progress",
     (status, event) => {
@@ -694,13 +777,23 @@ describe("app container goal drafts", () => {
           createStoredGoal({
             id: stale.goalId,
             status,
-            stopReason: status === "achieved" ? "goal_accepted" : "user_canceled",
+            stopReason:
+              status === "achieved"
+                ? "goal_accepted"
+                : status === "completed_unverified"
+                  ? "user_marked_complete"
+                  : "user_canceled",
           }),
         ),
       ).toMatchObject({
         status,
         event: "stopped",
-        message: status === "achieved" ? "目标已达成。" : "目标已取消。",
+        message:
+          status === "achieved"
+            ? "目标已达成。"
+            : status === "completed_unverified"
+              ? "目标已手动完成（未经机器认证）。"
+              : "目标已取消。",
       });
     },
   );
@@ -709,6 +802,7 @@ describe("app container goal drafts", () => {
     ["achieved", "acceptance_certified"],
     ["achieved", "stopped"],
     ["canceled", "stopped"],
+    ["completed_unverified", "stopped"],
   ] as const)(
     "preserves current terminal %s/%s progress",
     (status, event) => {
@@ -731,7 +825,12 @@ describe("app container goal drafts", () => {
           createStoredGoal({
             id: current.goalId,
             status,
-            stopReason: status === "achieved" ? "goal_accepted" : "user_canceled",
+            stopReason:
+              status === "achieved"
+                ? "goal_accepted"
+                : status === "completed_unverified"
+                  ? "user_marked_complete"
+                  : "user_canceled",
           }),
         ),
       ).toEqual(current);
@@ -1215,6 +1314,12 @@ function createStoredGoal(
       : {}),
     ...(overrides.acceptanceState
       ? { acceptanceState: overrides.acceptanceState }
+      : {}),
+    ...(overrides.acceptanceRetryState
+      ? { acceptanceRetryState: overrides.acceptanceRetryState }
+      : {}),
+    ...(overrides.manualCompletionAttestation
+      ? { manualCompletionAttestation: overrides.manualCompletionAttestation }
       : {}),
     ...(overrides.acceptanceCertificate
       ? { acceptanceCertificate: overrides.acceptanceCertificate }

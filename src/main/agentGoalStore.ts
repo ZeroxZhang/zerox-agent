@@ -26,13 +26,18 @@ export type AgentGoalStore = {
 
 const terminalGoalStatuses = new Set<GoalStatus>([
   "achieved",
+  "completed_unverified",
   "stopped_budget",
   "stopped_stalled",
   "stopped_blocked",
   "failed",
   "canceled",
 ]);
-const irreversibleGoalStatuses = new Set<GoalStatus>(["achieved", "canceled"]);
+const irreversibleGoalStatuses = new Set<GoalStatus>([
+  "achieved",
+  "completed_unverified",
+  "canceled",
+]);
 
 export function createAgentGoalStore(options: {
   configDir: string;
@@ -102,6 +107,9 @@ export function createAgentGoalStore(options: {
           return sanitizeGoalForRead(existing);
         }
         if (existing && isCanonicalCertifiedAchievement(existing)) {
+          return existing;
+        }
+        if (existing?.status === "completed_unverified") {
           return existing;
         }
         const candidate = preserveCanonicalAcceptance(existing, goal);
