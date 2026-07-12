@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { AcceptanceResult } from "./agentGoalAcceptance";
 import {
   FINAL_ACCEPTANCE_MAX_RETRY_AFTER_MS,
@@ -39,6 +39,11 @@ describe("agent goal acceptance retry policy", () => {
       delayMs: 1000,
       nextRetryAt: new Date(11_000).toISOString(),
     });
+    expect(decideFinalAcceptanceRetry(timeoutResult(), 2, 10_000)).toMatchObject({
+      action: "retry",
+      delayMs: 2000,
+      nextRetryAt: new Date(12_000).toISOString(),
+    });
     expect(decideFinalAcceptanceRetry(rateLimitedResult(1500), 1, 10_000)).toMatchObject({
       action: "retry",
       delayMs: 1500,
@@ -50,6 +55,38 @@ describe("agent goal acceptance retry policy", () => {
     const limited = Object.assign(new Error("upstream timeout text"), { status: 429 });
 
     expect(classifyAcceptanceInfrastructureFailure(limited).code).toBe("rate_limited");
+  });
+
+  it("falls back to a valid statusCode when status is malformed", () => {
+    const limited = Object.assign(new Error("limited"), {
+      status: "unknown",
+      statusCode: 429,
+    });
+
+    expect(classifyAcceptanceInfrastructureFailure(limited).code).toBe("rate_limited");
+  });
+
+  it("ignores HTTP-date retry-after without reading the wall clock", () => {
+    const now = vi.spyOn(Date, "now").mockImplementation(() => {
+      throw new Error("classifier must not read the wall clock");
+    });
+    let classified: AcceptanceInfrastructureFailure | undefined;
+    try {
+      classified = classifyAcceptanceInfrastructureFailure(
+        Object.assign(new Error("limited"), {
+          status: 429,
+          headers: { "retry-after": "Wed, 21 Oct 2037 07:28:00 GMT" },
+        }),
+      );
+    } finally {
+      now.mockRestore();
+    }
+
+    expect(classified).toMatchObject({
+      code: "rate_limited",
+      retryable: true,
+    });
+    expect(classified).not.toHaveProperty("retryAfterMs");
   });
 
   it("waits for the user after the third retryable failure", () => {

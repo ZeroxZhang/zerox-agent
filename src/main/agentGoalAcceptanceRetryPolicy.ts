@@ -123,11 +123,16 @@ function asProviderError(error: unknown): ProviderError {
 }
 
 function readStatus(error: ProviderError): number | undefined {
-  const value = error.status ?? error.statusCode;
-  if (typeof value === "number" && Number.isInteger(value)) return value;
-  if (typeof value === "string" && /^\d{3}$/.test(value)) return Number(value);
+  const structuredStatus = parseStatus(error.status) ?? parseStatus(error.statusCode);
+  if (structuredStatus !== undefined) return structuredStatus;
   const match = readMessage(error).match(/\bstatus\s+(\d{3})\b/i);
   return match?.[1] ? Number(match[1]) : undefined;
+}
+
+function parseStatus(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isInteger(value)) return value;
+  if (typeof value === "string" && /^\d{3}$/.test(value)) return Number(value);
+  return undefined;
 }
 
 function readProviderCode(error: ProviderError): string {
@@ -153,9 +158,7 @@ function readRetryAfterMs(error: ProviderError): number | undefined {
   if (Number.isFinite(seconds) && seconds >= 0) {
     return boundedDelay(seconds * 1000);
   }
-  const retryAtMs = Date.parse(retryAfter);
-  if (Number.isNaN(retryAtMs)) return undefined;
-  return boundedDelay(Math.max(0, retryAtMs - Date.now()));
+  return undefined;
 }
 
 function boundedDelay(delayMs: number): number {
