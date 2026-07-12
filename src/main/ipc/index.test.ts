@@ -118,6 +118,32 @@ describe("chat IPC handlers", () => {
 
     expect(renameSource).toContain("container.renameChatSession(sessionId, title)");
   });
+
+  it("registers distinct final-acceptance recovery handlers", async () => {
+    electronState.ipcHandlers.clear();
+    const { registerAllIpcHandlers } = await import("./index");
+    const continueGoalAcceptance = vi.fn(async () => ({ ok: true }));
+    const markGoalCompletedUnverified = vi.fn(async () => ({ ok: true }));
+    const container = {
+      onGoalProgressEvent: vi.fn(),
+      onAgentRunsChanged: vi.fn(),
+      continueGoalAcceptance,
+      markGoalCompletedUnverified,
+    } as unknown as Parameters<typeof registerAllIpcHandlers>[0];
+    registerAllIpcHandlers(container);
+
+    await expect(
+      electronState.ipcHandlers.get("goal:continueAcceptance")?.({}, "goal_1"),
+    ).resolves.toEqual({ ok: true });
+    await expect(
+      electronState.ipcHandlers.get("goal:markCompletedUnverified")?.(
+        {},
+        "goal_1",
+      ),
+    ).resolves.toEqual({ ok: true });
+    expect(continueGoalAcceptance).toHaveBeenCalledWith("goal_1");
+    expect(markGoalCompletedUnverified).toHaveBeenCalledWith("goal_1");
+  });
 });
 
 function getHandlerSource(source: string, channel: string): string {

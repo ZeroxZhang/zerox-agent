@@ -1292,6 +1292,59 @@ describe("goal chat service", () => {
     expect(resumed).toEqual([]);
     expect(progressEvents).toEqual([]);
   });
+
+  it("continues final acceptance explicitly and forwards the caller signal", async () => {
+    const signal = new AbortController().signal;
+    const continuedGoal = createGoal({
+      status: "waiting_for_acceptance",
+      acceptanceState: {
+        protocolVersion: 2,
+        phase: "awaiting_user",
+        attempt: 3,
+        recentFailures: [],
+      },
+    });
+    const continueAcceptance = async (
+      goalId: string,
+      options?: { signal?: AbortSignal },
+    ) => {
+      expect(goalId).toBe(continuedGoal.id);
+      expect(options?.signal).toBe(signal);
+      return createGoal({ id: goalId, status: "achieved" });
+    };
+    const service = createGoalChatService({
+      controller: createController({ continueAcceptance }),
+      goalStore: createGoalStore({ existingGoal: continuedGoal }),
+      planner: createFakePlanner(),
+    });
+
+    await expect(
+      service.continueAcceptance(continuedGoal.id, { signal }),
+    ).resolves.toEqual({
+      id: continuedGoal.id,
+      description: continuedGoal.description,
+      status: "achieved",
+    });
+  });
+
+  it("records explicit unverified completion through the controller", async () => {
+    const waitingGoal = createGoal({ status: "waiting_for_acceptance" });
+    const markCompletedUnverified = async (goalId: string) =>
+      createGoal({ id: goalId, status: "completed_unverified" });
+    const service = createGoalChatService({
+      controller: createController({ markCompletedUnverified }),
+      goalStore: createGoalStore({ existingGoal: waitingGoal }),
+      planner: createFakePlanner(),
+    });
+
+    await expect(
+      service.markCompletedUnverified(waitingGoal.id),
+    ).resolves.toEqual({
+      id: waitingGoal.id,
+      description: waitingGoal.description,
+      status: "completed_unverified",
+    });
+  });
 });
 
 function createFakePlanner(): Pick<
@@ -1319,6 +1372,11 @@ function createController(overrides: Partial<{
   start(goalId: string, options?: { signal?: AbortSignal }): Promise<Goal>;
   resume(goalId: string, options?: { signal?: AbortSignal }): Promise<Goal>;
   resolveReview(goalId: string, decision: GoalReviewDecision): Promise<Goal>;
+  continueAcceptance(
+    goalId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<Goal>;
+  markCompletedUnverified(goalId: string): Promise<Goal>;
 }> = {}) {
   return {
     async start(goalId: string) {
@@ -1329,6 +1387,12 @@ function createController(overrides: Partial<{
     },
     async resolveReview(goalId: string) {
       return createGoal({ id: goalId, status: "executing" });
+    },
+    async continueAcceptance(goalId: string) {
+      return createGoal({ id: goalId, status: "achieved" });
+    },
+    async markCompletedUnverified(goalId: string) {
+      return createGoal({ id: goalId, status: "completed_unverified" });
     },
     ...overrides,
   };

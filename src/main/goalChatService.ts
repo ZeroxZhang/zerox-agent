@@ -54,6 +54,11 @@ export type GoalChatService = {
     goalId: string,
     decision: GoalReviewDecision,
   ): Promise<ChatSessionGoalSummary>;
+  continueAcceptance(
+    goalId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<ChatSessionGoalSummary>;
+  markCompletedUnverified(goalId: string): Promise<ChatSessionGoalSummary>;
   increaseBudget(
     goalId: string,
     delta: Partial<GoalBudget>,
@@ -63,7 +68,14 @@ export type GoalChatService = {
 };
 
 export function createGoalChatService(options: {
-  controller: Pick<AgentGoalController, "start" | "resume" | "resolveReview">;
+  controller: Pick<
+    AgentGoalController,
+    | "start"
+    | "resume"
+    | "resolveReview"
+    | "continueAcceptance"
+    | "markCompletedUnverified"
+  >;
   goalStore: Pick<AgentGoalStore, "save" | "get" | "appendLedger">;
   planner: Pick<AgentGoalPlanner, "plan" | "replan">;
   getAvailableTools?: () => string[];
@@ -418,6 +430,18 @@ export function createGoalChatService(options: {
     async resolveReview(goalId, decision) {
       return toGoalSummary(
         await options.controller.resolveReview(goalId, decision),
+      );
+    },
+
+    async continueAcceptance(goalId, runOptions) {
+      return toGoalSummary(
+        await options.controller.continueAcceptance(goalId, runOptions),
+      );
+    },
+
+    async markCompletedUnverified(goalId) {
+      return toGoalSummary(
+        await options.controller.markCompletedUnverified(goalId),
       );
     },
 

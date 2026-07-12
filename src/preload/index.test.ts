@@ -68,4 +68,15 @@ describe("preload bridge", () => {
       'ipcRenderer.invoke("chat:respondSkillInput"',
     );
   });
+
+  it("exposes distinct final-acceptance recovery operations", () => {
+    expect(preloadSource).toContain("continueGoalAcceptance");
+    expect(preloadSource).toContain(
+      'ipcRenderer.invoke("goal:continueAcceptance", goalId)',
+    );
+    expect(preloadSource).toContain("markGoalCompletedUnverified");
+    expect(preloadSource).toContain(
+      'ipcRenderer.invoke("goal:markCompletedUnverified", goalId)',
+    );
+  });
 });

@@ -227,3 +227,66 @@ git diff --check
 - Trajectory publication uses a deterministic publication event ID. JSON trajectory stores share a path-keyed mutation queue; SQLite uses `INSERT OR IGNORE` and allocates the next durable sequence so restart collisions cannot suppress a missing publication.
 - Barrier regressions force two controllers/stores to reach all four absent-publication boundaries concurrently and prove exactly-once durable events in recorded-before-stopped order.
 - Recorded and stopped progress is emitted only by the caller that atomically appends the corresponding trajectory event, preventing duplicate recovery notifications.
+
+---
+
+# Task 5B Report - Explicit Service, IPC, And Preload Operations
+
+## Status
+
+DONE
+
+Base: `1d8d20de4b3a49e2f677365110d9d803bc3bd601`
+
+## Changed files
+
+- `src/main/goalChatService.ts`
+- `src/main/goalChatService.test.ts`
+- `src/main/container.ts`
+- `src/main/ipc/index.ts`
+- `src/main/ipc/index.test.ts`
+- `src/preload/index.ts`
+- `src/preload/index.test.ts`
+- `.superpowers/sdd/task-5-report.md`
+
+`src/renderer/global.d.ts` already exposes `BuildingAgentApi = typeof buildingAgent`; the two preload additions therefore flow into the renderer's exact `window.buildingAgent` type without a duplicate declaration.
+
+## RED evidence
+
+```text
+npm test -- --run src/main/goalChatService.test.ts src/main/ipc/index.test.ts src/preload/index.test.ts
+```
+
+- Expected RED: 3 test files failed; 4 tests failed and 40 passed.
+- Service failures proved `continueAcceptance` and `markCompletedUnverified` were absent.
+- IPC failure proved neither dedicated handler was registered.
+- Preload failure proved neither renderer-facing operation was exposed.
+
+## GREEN evidence
+
+```text
+npm test -- --run src/main/goalChatService.test.ts src/main/container.test.ts src/main/ipc/index.test.ts src/preload/index.test.ts
+```
+
+- 4 test files passed; 85 tests passed.
+
+```text
+npx tsc -p tsconfig.electron.json --noEmit --pretty false
+npm run harness:check
+git diff --check
+```
+
+- All passed.
+
+## Implementation and self-review
+
+- `GoalChatService.continueAcceptance(goalId, options?)` forwards the caller's abort signal to the controller and returns only the canonical chat goal summary.
+- `GoalChatService.markCompletedUnverified(goalId)` delegates exclusively to the controller, preserving Task 5A's atomic attestation, certificate clearing, and idempotent publication behavior.
+- Container operations are distinct wrappers through the existing `runGoalOperation` error/result boundary.
+- IPC channels are exactly `goal:continueAcceptance` and `goal:markCompletedUnverified`; runtime tests prove each handler calls only its matching container operation.
+- Preload operations are exactly `continueGoalAcceptance(goalId)` and `markGoalCompletedUnverified(goalId)` and return the existing typed `GoalOperationResult`.
+- Generic `retryGoal` and `goal:retry` are unchanged, so final-acceptance continuation cannot be confused with task execution retry.
+
+## Concerns
+
+- Renderer exhaustiveness updates for the new goal statuses and acceptance phases remain intentionally out of scope for Task 5B and are assigned to Task 6.

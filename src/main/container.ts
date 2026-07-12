@@ -2053,6 +2053,10 @@ export function createAppContainer(options: {
       runGoalOperation(() => goalChatService().replan(goalId, instructions)),
     retryGoal: (goalId: string) =>
       runGoalOperation(() => goalChatService().retry(goalId)),
+    continueGoalAcceptance: (goalId: string) =>
+      runGoalOperation(() => goalChatService().continueAcceptance(goalId)),
+    markGoalCompletedUnverified: (goalId: string) =>
+      runGoalOperation(() => goalChatService().markCompletedUnverified(goalId)),
     async resumeInterruptedGoals() {
       const activeGoals = await agentGoalStore().listActive();
       const interrupted = activeGoals.filter(

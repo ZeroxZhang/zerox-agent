@@ -546,6 +546,24 @@ function registerGoalsIpcHandlers(container: AppContainer): void {
       return container.retryGoal(goalId);
     },
   );
+  ipcMain.handle(
+    "goal:continueAcceptance",
+    async (
+      _event,
+      goalId: string,
+    ): Promise<{ ok: boolean; goal?: Goal; message?: string }> => {
+      return container.continueGoalAcceptance(goalId);
+    },
+  );
+  ipcMain.handle(
+    "goal:markCompletedUnverified",
+    async (
+      _event,
+      goalId: string,
+    ): Promise<{ ok: boolean; goal?: Goal; message?: string }> => {
+      return container.markGoalCompletedUnverified(goalId);
+    },
+  );
 }
 
 function registerEvalsIpcHandlers(container: AppContainer): void {
