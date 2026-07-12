@@ -160,6 +160,7 @@ describe("package scripts", () => {
           "src/renderer/goalProgressViewModel.ts",
           "src/renderer/materialDesign.test.ts",
           "src/renderer/styles/chat.css",
+          "src/shared/agentArtifactProvenance.test.ts",
           "src/shared/agentArtifactProvenance.ts",
           "src/shared/agentGoal.test.ts",
           "src/shared/agentGoal.ts",
@@ -167,6 +168,7 @@ describe("package scripts", () => {
           "src/shared/chat.ts",
           "src/shared/packageScripts.test.ts",
           "src/shared/storageContract.ts",
+          "src/shared/trustedFileSnapshot.ts",
         ],
         definitionOfDone: expect.arrayContaining([
           expect.stringContaining(

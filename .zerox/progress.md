@@ -6818,3 +6818,39 @@
 - These are preliminary correction and regression records only. Final
   independent reviewer approval and independent full test acceptance have not
   yet been claimed.
+
+## 2026-07-12 - P43 Final Independent Acceptance and Closure
+
+- Final review hardening:
+  - `ec6f8aa` moved the single final-judge deadline ahead of live evidence
+    revalidation so artifact/provenance hashing and the provider share one
+    non-resetting attempt budget. Deadline expiry is retryable
+    `judge_timeout` and cannot reach the provider.
+  - Artifact, destination, and provenance reads now share a descriptor-bound
+    snapshot primitive: no-follow open, post-open/post-hash containment and
+    symlink checks, regular-file validation, and descriptor/path device,
+    inode, type, and size binding. Hashes are computed from that same file
+    descriptor in abortable chunks.
+  - Provenance content anchors hash the original bytes before a separate UTF-8
+    decode, so distinct malformed byte sequences cannot collapse to one hash.
+- Independent code review of `79af895..ec6f8aa` approved the implementation
+  with zero Critical or Important findings. Targeted deadline,
+  descriptor-binding, and raw-byte regressions passed 4/4; the reviewer also
+  reconfirmed the earlier retry, persistence, cancellation, IPC, and renderer
+  fixes.
+- Independent test acceptance at `ec6f8aa` passed:
+  - P43 focused suite: 23 files / 777 tests.
+  - Full `npm run verify`: 201 files / 1,976 tests, TypeScript and Vite build,
+    Agent evals 26/26, and Memory evals 2/2.
+  - `npm run harness:check`, `npm run smoke:prod`, and
+    `git diff --check 79af895..HEAD` all passed. Production smoke rendered the
+    Agent chat UI; the known local `better-sqlite3` ABI mismatch safely used
+    the JSON fallback.
+  - Live sealed-evidence tests covered deleted, modified, symlink-escaped,
+    missing/tampered provenance, unchanged evidence, shared deadline, and
+    descriptor parent-swap paths. The sealed container-cancellation test also
+    passed without deterministic-validator replay.
+- Closed the final release-bookkeeping finding by registering
+  `src/shared/agentArtifactProvenance.test.ts` and
+  `src/shared/trustedFileSnapshot.ts`; P43 is now marked `done` only after both
+  independent review and test acceptance had no runtime blocker.

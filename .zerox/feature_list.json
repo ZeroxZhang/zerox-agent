@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-07-11T19:29:00.000+08:00",
+  "updatedAt": "2026-07-12T18:37:29.000+08:00",
   "features": [
     {
       "id": "P43-goal-acceptance-recovery",
       "priority": 73,
-      "status": "in_progress",
+      "status": "done",
       "title": "Recoverable final goal acceptance and audited manual completion",
       "files": [
         ".superpowers/sdd/task-4-report.md",
@@ -61,13 +61,15 @@
         "src/renderer/goalProgressViewModel.ts",
         "src/renderer/materialDesign.test.ts",
         "src/renderer/styles/chat.css",
+        "src/shared/agentArtifactProvenance.test.ts",
         "src/shared/agentArtifactProvenance.ts",
         "src/shared/agentGoal.test.ts",
         "src/shared/agentGoal.ts",
         "src/shared/agentTrajectory.ts",
         "src/shared/chat.ts",
         "src/shared/packageScripts.test.ts",
-        "src/shared/storageContract.ts"
+        "src/shared/storageContract.ts",
+        "src/shared/trustedFileSnapshot.ts"
       ],
       "definitionOfDone": [
         "Transient final-judge failures retry visibly without rerunning accepted task work",
