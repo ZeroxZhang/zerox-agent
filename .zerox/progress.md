@@ -6795,3 +6795,26 @@
 - GREEN: the same focused command passed 8/8 after explicitly allowing P43 and
   asserting all five approved recovery semantics. The maximum-one-open-feature
   assertion remains unchanged.
+
+## 2026-07-12 - P43 Task 7 Preliminary Review-Fix Evidence
+
+- `a65c5d6` made unverified completion certificate-free across JSON, SQLite,
+  migration, and renderer boundaries; it also fenced interaction results,
+  corrected retry-attempt copy, and introduced exact feature-manifest coverage.
+- `35a242c` added structured native provider HTTP metadata, deterministic
+  32 KiB final-judge prompt compaction, and a sealed final-model-judge-only
+  replay contract that does not rerun deterministic validators or task work.
+- `c5b2be9` persisted the bounded replay seal, preserved immutable evidence
+  anchors and an independent acceptance budget, and repaired continuation
+  handoff across background cleanup.
+- The first independent focused rerun exposed a stale container fixture: the
+  production controller correctly rejected its legacy waiting goal because it
+  lacked a sealed replay bundle. `72ad104` rebuilt the fixture through a real
+  initial acceptance evaluation and verified cancellation of the replay judge.
+- A subsequent Critical review finding showed that a valid persisted seal could
+  replay deleted, modified, symlink-replaced, or provenance-tampered live
+  artifacts. `5ff49dc` now revalidates live bytes, containment, provenance, and
+  hashes before any provider call and fails closed on mismatch.
+- These are preliminary correction and regression records only. Final
+  independent reviewer approval and independent full test acceptance have not
+  yet been claimed.
