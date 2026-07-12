@@ -1,5 +1,31 @@
 # Zerox Harness Progress
 
+## 2026-07-12 - WeChat Article Content Blueprint
+
+- Request:
+  - User requested a complete content-planning blueprint for the WeChat article `《Harness 做出桌面 Agent，我能去面 DeepSeek 产品经理吗？》`.
+  - User confirmed the recommended product-led direction and asked to emphasize product effects, the overall architecture, and the author's learning process.
+  - The requested `processs.md` does not exist in the repository; `.zerox/progress.md` was treated as the intended development-process source.
+- Scope and feature-list status:
+  - Documentation-only planning task; no runtime, UI, permissions, sandbox, provider, storage, or product behavior changed.
+  - `.zerox/feature_list.json` contained 84/84 completed features and no unfinished feature to select, so this user-directed editorial artifact was recorded outside the feature list.
+- Changed files:
+  - `docs/wx_mp/article-blueprint.md`
+  - `.zerox/progress.md`
+- Content evidence:
+  - Read both source reports in full: `docs/wx_mp/article-research.md` (1335 lines) and `docs/wx_mp/article-research_deepseek.md` (941 lines).
+  - Consulted `docs/product/zerox-positioning.md`, current README architecture/product sections, current UI QA images, and relevant rollback, black-box acceptance, design-review, and RED-to-GREEN entries in `.zerox/progress.md`.
+  - Blueprint includes three complete 200–400-character openings (376/396/361 characters), three propagation paths, one core memory point, a 5700-word article allocation, product/architecture/learning narrative sections, layered technical-reading transitions, ten inline figure slots, two share-task images, eight candidate quotes, three screenshot-worthy passages, and title/boasting/competitive-comparison risk controls.
+  - Rechecked current project scale locally: 143,790 TS/TSX lines, 199 test files, and 84/84 feature entries complete.
+- Verification evidence:
+  - Blueprint structure script -> passed; required sections found and unique figure slots were exactly 1 through 10.
+  - Opening-length script -> A 376, B 396, C 361 characters; all satisfy the requested 200–400 range.
+  - `npm run verify` -> passed: 199 files / 1835 tests, production build, Agent evals 26/26, memory evals 2/2; existing Vite chunk-size warning remains.
+  - `npm run harness:check` -> passed.
+  - `git diff --check` -> passed before the progress entry; rerun after the final documentation update.
+- Final status:
+  - `docs/wx_mp/article-blueprint.md` is ready for author review; factual items requiring author confirmation are collected in one pre-publication checklist.
+
 ## 2026-07-10 - v3.4.0 Goal Mode Runtime State and Workspace Repair
 
 - Request:
