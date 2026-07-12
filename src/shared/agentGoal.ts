@@ -6,7 +6,9 @@ export type GoalStatus =
   | "planning"
   | "executing"
   | "waiting_for_review"
+  | "waiting_for_acceptance"
   | "achieved"
+  | "completed_unverified"
   | "stopped_budget"
   | "stopped_stalled"
   | "stopped_blocked"
@@ -22,6 +24,7 @@ export type StopReason =
   | "unrecoverable_failure"
   | "external_blocked"
   | "goal_impossible"
+  | "user_marked_complete"
   | "acceptance_unavailable"
   | "acceptance_integrity_failed";
 
@@ -76,6 +79,7 @@ export type AcceptanceRepairDirective = {
     | "repair_same_milestone"
     | "retry_alternate_strategy"
     | "replan"
+    | "wait_for_acceptance"
     | "stop_stalled"
     | "stop_blocked";
   summary: string;
@@ -105,11 +109,36 @@ export type GoalAcceptanceState = {
     | "validating"
     | "repairing"
     | "judging"
+    | "retrying"
+    | "awaiting_user"
     | "blocked"
     | "certified";
   attempt: number;
   recentFailures: GoalAcceptanceFailureRecord[];
   lastDecision?: AcceptanceRepairDirective;
+};
+
+export type GoalAcceptanceRetryState = {
+  cycle: number;
+  attempt: number;
+  maxAttempts: number;
+  lastCode: string;
+  lastDetail: string;
+  nextRetryAt?: string;
+  evidenceFingerprint: string;
+  resumeFrom: "final_judge";
+};
+
+export type GoalManualCompletionAttestation = {
+  version: 1;
+  goalId: string;
+  completedAt: string;
+  reason: "user_marked_complete";
+  failedCheckIds: string[];
+  evidenceRefs: string[];
+  evidenceFingerprint: string;
+  lastFailureCode: string;
+  retryCycles: number;
 };
 
 export type GoalEvidenceArtifact = {
@@ -267,6 +296,8 @@ export type Goal = {
   runtimeCheckpoint?: GoalRuntimeCheckpoint;
   acceptanceProtocolVersion?: GoalAcceptanceProtocolVersion;
   acceptanceState?: GoalAcceptanceState;
+  acceptanceRetryState?: GoalAcceptanceRetryState;
+  manualCompletionAttestation?: GoalManualCompletionAttestation;
   acceptanceCertificate?: GoalAcceptanceCertificate;
   createdAt: string;
   updatedAt: string;
@@ -293,6 +324,7 @@ const allowedTransitions: Record<GoalStatus, GoalStatus[]> = {
   planning: ["executing", "canceled"],
   executing: [
     "waiting_for_review",
+    "waiting_for_acceptance",
     "achieved",
     "stopped_budget",
     "stopped_stalled",
@@ -301,7 +333,9 @@ const allowedTransitions: Record<GoalStatus, GoalStatus[]> = {
     "canceled",
   ],
   waiting_for_review: ["executing", "canceled"],
+  waiting_for_acceptance: ["executing", "completed_unverified", "canceled"],
   achieved: [],
+  completed_unverified: [],
   stopped_budget: ["executing", "canceled"],
   stopped_stalled: [],
   stopped_blocked: ["executing", "canceled"],
@@ -392,6 +426,12 @@ export type ProgressLedgerEvent = {
     | "acceptance_failure_classified"
     | "acceptance_repair_scheduled"
     | "acceptance_strategy_changed"
+    | "acceptance_retry_scheduled"
+    | "acceptance_retry_started"
+    | "acceptance_retry_exhausted"
+    | "acceptance_waiting_for_user"
+    | "acceptance_manual_completion_requested"
+    | "acceptance_manual_completion_recorded"
     | "acceptance_blocked"
     | "acceptance_certified"
     | "review_requested"
