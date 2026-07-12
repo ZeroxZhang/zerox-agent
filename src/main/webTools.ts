@@ -1,3 +1,6 @@
+import { fetchWithTimeout, readResponseTextWithLimit } from "./fetchWithTimeout";
+import { assertSafeOutboundUrl, safeOutboundFetch } from "./outboundUrlPolicy";
+
 export type WebSearchResultItem = {
   title: string;
   url: string;
@@ -9,8 +12,8 @@ export type WebToolResult =
   | { ok: false; error: string };
 
 export type WebTools = {
-  fetchPage(url: string): Promise<WebToolResult>;
-  search(query: string): Promise<WebToolResult>;
+  fetchPage(url: string, options?: { signal?: AbortSignal }): Promise<WebToolResult>;
+  search(query: string, options?: { signal?: AbortSignal }): Promise<WebToolResult>;
 };
 
 const duckDuckGoLiteUrl = "https://lite.duckduckgo.com/lite/";
@@ -21,63 +24,15 @@ const userAgent =
 // from malicious or excessively large responses.
 const MAX_RESPONSE_BODY_BYTES = 5 * 1024 * 1024;
 
-// v3.6.0: Private / internal / loopback / link-local IP blocks (SSRF protection).
-// These must never be accessible via web_fetch.
-const BLOCKED_IP_PATTERNS: ReadonlyArray<{
-  label: string;
-  test: (hostname: string) => boolean;
-}> = [
-  {
-    label: "loopback",
-    test: (h) => {
-      const lowered = h.toLowerCase();
-      return (
-        lowered === "localhost" ||
-        lowered === "127.0.0.1" ||
-        lowered === "::1" ||
-        lowered === "0.0.0.0"
-      );
-    },
-  },
-  {
-    label: "link-local",
-    test: (h) =>
-      /^169\.254\.\d{1,3}\.\d{1,3}$/.test(h) ||
-      /^fe80:/i.test(h),
-  },
-  {
-    label: "private-a",
-    test: (h) => /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h),
-  },
-  {
-    label: "private-b",
-    test: (h) => /^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(h),
-  },
-  {
-    label: "private-c",
-    test: (h) => /^192\.168\.\d{1,3}\.\d{1,3}$/.test(h),
-  },
-];
-
-function isBlockedHostname(hostname: string): string | null {
-  // Strip IPv6 brackets from hostname before checking (URL constructor
-  // preserves [brackets] for IPv6 addresses like [fe80::1]).
-  const normalized = hostname.startsWith("[") && hostname.endsWith("]")
-    ? hostname.slice(1, -1)
-    : hostname;
-  for (const pattern of BLOCKED_IP_PATTERNS) {
-    if (pattern.test(normalized)) {
-      return pattern.label;
-    }
-  }
-  return null;
-}
-
-export function createWebTools(options?: { fetch?: typeof fetch }): WebTools {
-  const fetchImpl = options?.fetch ?? fetch;
+export function createWebTools(options?: {
+  fetch?: typeof fetch;
+  resolveHostname?: (hostname: string) => Promise<string[]>;
+}): WebTools {
+  const fetchImpl = options?.fetch ?? safeOutboundFetch;
+  const resolveHostname = options?.resolveHostname;
 
   return {
-    async fetchPage(url) {
+    async fetchPage(url, executionOptions) {
       const parsedUrl = parseHttpUrl(url);
       if (!parsedUrl) {
         return {
@@ -86,21 +41,17 @@ export function createWebTools(options?: { fetch?: typeof fetch }): WebTools {
         };
       }
 
-      // v3.6.0: SSRF protection — block private/internal/loopback IPs
-      const blockedReason = isBlockedHostname(parsedUrl.hostname);
-      if (blockedReason) {
-        return {
-          ok: false,
-          error: `web_fetch blocked: ${parsedUrl.hostname} is a ${blockedReason} address. Internal network access is not permitted.`,
-        };
-      }
-
       try {
-        const response = await fetchImpl(parsedUrl.toString(), {
-          headers: { "User-Agent": userAgent },
+        await assertSafeOutboundUrl(parsedUrl.toString(), {
+          ...(resolveHostname ? { resolveHostname } : {}),
         });
+        const response = await fetchWithTimeout(fetchImpl, parsedUrl.toString(), {
+          headers: { "User-Agent": userAgent },
+          redirect: "error",
+        }, 60_000, "web_fetch", executionOptions?.signal);
 
         if (!response.ok) {
+          await response.body?.cancel("web_fetch returned a non-success status");
           return {
             ok: false,
             error: `web_fetch returned HTTP ${response.status}.`,
@@ -177,7 +128,7 @@ export function createWebTools(options?: { fetch?: typeof fetch }): WebTools {
       }
     },
 
-    async search(query) {
+    async search(query, executionOptions) {
       const normalizedQuery = query.trim();
       if (!normalizedQuery) {
         return { ok: false, error: "web_search query is required." };
@@ -187,18 +138,27 @@ export function createWebTools(options?: { fetch?: typeof fetch }): WebTools {
         const url = `${duckDuckGoLiteUrl}?q=${encodeURIComponent(
           normalizedQuery,
         )}`;
-        const response = await fetchImpl(url, {
-          headers: { "User-Agent": userAgent },
+        await assertSafeOutboundUrl(url, {
+          ...(resolveHostname ? { resolveHostname } : {}),
         });
+        const response = await fetchWithTimeout(fetchImpl, url, {
+          headers: { "User-Agent": userAgent },
+          redirect: "error",
+        }, 60_000, "web_search", executionOptions?.signal);
 
         if (!response.ok) {
+          await response.body?.cancel("web_search returned a non-success status");
           return {
             ok: false,
             error: `web_search returned HTTP ${response.status}.`,
           };
         }
 
-        const html = await response.text();
+        const html = await readResponseTextWithLimit(
+          response,
+          MAX_RESPONSE_BODY_BYTES,
+          "web_search",
+        );
 
         return {
           ok: true,

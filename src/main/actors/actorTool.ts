@@ -42,12 +42,24 @@ export function createActorToolHandler(deps: ActorToolDeps): ToolHandler {
   return async (args, options) => {
     const op = String(args.op ?? "");
     const runtime = deps.actorRuntime;
+    const parentRunId = deriveParentRunId(options);
     switch (op) {
       case "run":
       case "spawn": {
         const task = String(args.task ?? "");
         if (!task) return { ok: false, error: "task required for run/spawn" };
-        const parentRunId = deriveParentRunId(options);
+        if (!parentRunId) {
+          return { ok: false, error: "actor operations require a parent run context" };
+        }
+        // A pre-aborted request must fail before ActorRuntime synchronously
+        // enters runActor; otherwise even a canceled call can execute a
+        // side-effecting synchronous prefix.
+        const lifecycleSignal = op === "spawn"
+          ? (options?.parentSignal ?? options?.signal)
+          : options?.signal;
+        if (lifecycleSignal?.aborted) {
+          return { ok: false, error: "actor operation aborted before spawn" };
+        }
         const handle = runtime.spawn({
           contextMode: (args.contextMode as ActorContextMode) ?? "state",
           lifecycle: "ephemeral",
@@ -55,6 +67,20 @@ export function createActorToolHandler(deps: ActorToolDeps): ToolHandler {
           ...(parentRunId ? { parentRunId } : {}),
           ...(args.background !== undefined ? { background: Boolean(args.background) } : {}),
           ...(Array.isArray(args.toolWhitelist) ? { toolWhitelist: args.toolWhitelist as string[] } : {}),
+        });
+        // A spawned actor outlives this tool invocation, so bind it to the
+        // parent run. Foreground `run` must instead honor the executor's
+        // combined signal, which includes both parent cancellation and the
+        // per-tool deadline.
+        const cancelFromParent = () =>
+          runtime.cancel(handle.actorId, "parent tool execution aborted");
+        if (lifecycleSignal?.aborted) {
+          cancelFromParent();
+        } else {
+          lifecycleSignal?.addEventListener("abort", cancelFromParent, { once: true });
+        }
+        void handle.outcome.finally(() => {
+          lifecycleSignal?.removeEventListener("abort", cancelFromParent);
         });
         options?.onRuntimeEvent?.({
           type: "actor_spawned",
@@ -74,12 +100,26 @@ export function createActorToolHandler(deps: ActorToolDeps): ToolHandler {
       case "status": {
         const actorId = String(args.actorId ?? "");
         if (!actorId) return { ok: false, error: "actorId required" };
+        if (!runtime.isOwnedBy(actorId, parentRunId)) return actorOwnershipFailure();
         return { ok: true, result: { actorId, status: runtime.status(actorId) } };
       }
       case "wait": {
         const actorId = String(args.actorId ?? "");
         if (!actorId) return { ok: false, error: "actorId required" };
-        const outcome = await runtime.wait(actorId);
+        if (!runtime.isOwnedBy(actorId, parentRunId)) return actorOwnershipFailure();
+        // Waiting is a foreground tool operation and must stop on its own
+        // timeout as well as on parent-run cancellation.
+        const lifecycleSignal = options?.signal;
+        const cancelFromParent = () =>
+          runtime.cancel(actorId, "parent tool execution aborted while waiting");
+        if (lifecycleSignal?.aborted) {
+          cancelFromParent();
+        } else {
+          lifecycleSignal?.addEventListener("abort", cancelFromParent, { once: true });
+        }
+        const outcome = await runtime.wait(actorId).finally(() => {
+          lifecycleSignal?.removeEventListener("abort", cancelFromParent);
+        });
         if (outcome.status !== "done") {
           return actorTerminalFailureResult(actorId, outcome);
         }
@@ -88,6 +128,7 @@ export function createActorToolHandler(deps: ActorToolDeps): ToolHandler {
       case "cancel": {
         const actorId = String(args.actorId ?? "");
         if (!actorId) return { ok: false, error: "actorId required" };
+        if (!runtime.isOwnedBy(actorId, parentRunId)) return actorOwnershipFailure();
         const reason = String(args.reason ?? "canceled by model");
         runtime.cancel(actorId, reason);
         return actorTerminalFailureResult(actorId, {
@@ -99,12 +140,20 @@ export function createActorToolHandler(deps: ActorToolDeps): ToolHandler {
       case "send": {
         const actorId = String(args.actorId ?? "");
         if (!actorId) return { ok: false, error: "actorId required" };
+        if (!runtime.isOwnedBy(actorId, parentRunId)) return actorOwnershipFailure();
         runtime.send?.(actorId, args.message, undefined);
         return { ok: true, result: { actorId, sent: true } };
       }
       default:
         return { ok: false, error: `unknown op "${op}"` };
     }
+  };
+}
+
+function actorOwnershipFailure() {
+  return {
+    ok: false as const,
+    error: "actor handle is unknown or not owned by the current run",
   };
 }
 

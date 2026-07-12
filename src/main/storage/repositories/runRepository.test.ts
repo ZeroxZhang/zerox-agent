@@ -95,6 +95,20 @@ describe("RunRepository", () => {
     expect(runs.getTrajectory("run-1").length).toBe(1);
     storage.close();
   });
+
+  it("fails loudly instead of silently dropping a sequence collision", async () => {
+    const storage = await createInMemoryStorage();
+    const runs = createRunRepository(storage);
+    runs.appendTrajectory("run-1", makeEvent(1));
+
+    expect(() =>
+      runs.appendTrajectory(
+        "run-1",
+        makeEvent(1, { id: "evt-conflict", payload: { different: true } }),
+      ),
+    ).toThrow("Trajectory sequence collision for run run-1 at 1");
+    storage.close();
+  });
 });
 
 describe("TrajectoryRepository", () => {

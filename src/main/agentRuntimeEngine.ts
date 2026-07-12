@@ -52,6 +52,7 @@ import type {
 import type {
   AgentTrajectoryEvent,
   AgentTrajectoryEventType,
+  AgentTrajectoryRedaction,
 } from "../shared/agentTrajectory";
 import type { NativeToolDescriptor } from "../shared/nativeCapabilities";
 import type { AgentRunContext } from "../shared/agentWorkspace";
@@ -73,6 +74,7 @@ import {
 import { createRuntimeContextSnapshotForRun } from "./runtimeContextFactory";
 import { summarizeAgentRuntimeContextSnapshot } from "../shared/agentRuntimeContext";
 import type { ExecutionContextMemoryScope } from "../shared/executionContextPackage";
+import { runAgentLoop as runSharedAgentLoop } from "./agentLoop";
 
 export type AgentRuntimeModelProfile = {
   baseUrl: string;
@@ -120,13 +122,16 @@ export function createAgentRuntimeEngine(options: {
   /** P8: actor runtime for max-mode winner replay. */
   actorRuntimeForMaxMode?: ActorRuntime;
   modelRetry?: ModelRetryOptions;
+  /** Shared production turn loop. Omitted only by legacy compatibility tests. */
+  runLoop?: typeof runSharedAgentLoop;
   createId?: () => string;
   now?: () => Date;
 }): AgentRuntimeEngine {
   const createId = options.createId ?? randomUUID;
   const now = options.now ?? (() => new Date());
   const contextManager = options.contextManager ?? createContextManager();
-  let trajectorySequence = 0;
+  const trajectorySequences = new Map<string, number>();
+  const trajectoryAppendQueues = new Map<string, Promise<void>>();
 
   function createEvent(
     level: AgentRunEvent["level"],
@@ -181,21 +186,42 @@ export function createAgentRuntimeEngine(options: {
   ) {
     if (!options.trajectoryStore) return;
 
-    trajectorySequence += 1;
-    await options.trajectoryStore.append(runId, {
-      id: createId(),
-      runId,
-      type,
-      sequence: trajectorySequence,
-      ...(runContext ? { runContext } : {}),
-      payload,
-      redaction: redaction ?? {
-        containsApiKey: false,
-        containsFileContent: false,
-        containsUserText: false,
-      },
-      createdAt: now().toISOString(),
+    const previous = trajectoryAppendQueues.get(runId) ?? Promise.resolve();
+    const append = previous.catch(() => undefined).then(async () => {
+      let sequence = trajectorySequences.get(runId);
+      if (sequence === undefined) {
+        const persisted = await options.trajectoryStore!.list(runId);
+        sequence = Math.max(0, ...persisted.map((event) => event.sequence));
+      }
+      sequence += 1;
+      trajectorySequences.set(runId, sequence);
+      await options.trajectoryStore!.append(runId, {
+        id: createId(),
+        runId,
+        type,
+        sequence,
+        ...(runContext ? { runContext } : {}),
+        payload,
+        redaction: redaction ?? {
+          containsApiKey: false,
+          containsFileContent: false,
+          containsUserText: false,
+        },
+        createdAt: now().toISOString(),
+      });
     });
+    const settled = append.then(
+      () => undefined,
+      () => undefined,
+    );
+    trajectoryAppendQueues.set(runId, settled);
+    try {
+      await append;
+    } finally {
+      if (trajectoryAppendQueues.get(runId) === settled) {
+        trajectoryAppendQueues.delete(runId);
+      }
+    }
   }
 
   async function finishRun(input: {
@@ -299,6 +325,250 @@ export function createAgentRuntimeEngine(options: {
     }
   }
 
+  async function runFromCheckpointWithSharedLoop(
+    checkpoint: AgentExecutionCheckpoint,
+    task: ScheduledTask,
+    skill: SkillRecord | null,
+    signal: AbortSignal | undefined,
+    events: AgentRunEvent[],
+    startedAt: string,
+  ): Promise<RunScheduledTaskResult> {
+    let current = await saveCheckpoint(checkpoint, "running", {
+      steps: markCurrentStepRunning(
+        checkpoint.steps,
+        checkpoint.currentStepId,
+        now().toISOString(),
+      ),
+    });
+    const profile = await options.getModelProfile();
+    const maxTurns = skill?.manifest.execution.maxTurns ?? 10;
+    const toolDefinitions = filterToolDefinitionsForScheduledTask(
+      getToolDefinitions(options.toolExecutor),
+      task,
+    );
+    let observationTail = Promise.resolve();
+    const observe = (operation: () => Promise<void>) => {
+      observationTail = observationTail.then(operation, operation);
+    };
+    const appendObserved = (
+      type: AgentTrajectoryEventType,
+      payload: Record<string, unknown>,
+      redaction: AgentTrajectoryRedaction = {
+        containsApiKey: false,
+        containsFileContent: false,
+        containsUserText: false,
+      },
+    ) => {
+      observe(() => appendTrajectory(
+        current.runId,
+        type,
+        payload,
+        redaction,
+        current.runContext,
+      ));
+    };
+
+    const loopResult = await options.runLoop!(
+      [],
+      profile,
+      {
+        chatClient: options.chatClient,
+        toolExecutor: options.toolExecutor,
+        toolAuthorizationService: options.toolAuthorizationService,
+        taskId: task.id,
+        runId: current.runId,
+        ...(current.runContext ? { runContext: current.runContext } : {}),
+        resumeMessages: current.messages.map(toChatMessage),
+        initialToolCallsExecuted: current.toolCallCount,
+        tools: toolDefinitions,
+        maxTurns,
+        maxToolCalls: Math.max(1, maxTurns * 4),
+        tokenBudget: Math.max(
+          profile.maxTokens,
+          profile.maxTokens * Math.min(maxTurns, 8),
+        ),
+        maxWallClockMs: 30 * 60 * 1000,
+        pauseOnTurnLimit: true,
+        pauseOnFailureLoop: true,
+        ...(signal ? { signal } : {}),
+        ...(options.toolResultOffloadStore
+          ? { toolResultOffloadStore: options.toolResultOffloadStore }
+          : {}),
+        ...(options.toolResultOffloadThreshold !== undefined
+          ? { toolResultOffloadThreshold: options.toolResultOffloadThreshold }
+          : {}),
+        ...(options.compactionStrategy
+          ? { compactionStrategy: options.compactionStrategy }
+          : {}),
+        ...(options.modelRetry ? { modelRetry: options.modelRetry } : {}),
+        ...(options.maxMode && isMaxModeEnabled()
+          ? {
+              modelRequestExecutor: async (request: ChatCompletionRequest) => {
+                try {
+                  const result = await options.maxMode!.runStep(
+                    toCompleteRequest(request),
+                    {
+                      candidates: 3,
+                      judgeModel: profile.model,
+                      ...(options.actorRuntimeForMaxMode
+                        ? { actorRuntime: options.actorRuntimeForMaxMode }
+                        : {}),
+                      parentRunId: current.runId,
+                      ...(signal ? { signal } : {}),
+                    },
+                  );
+                  const winner = result.winner;
+                  return {
+                    content: winner.content,
+                    toolCalls: winner.toolCalls,
+                    finishReason: winner.finishReason,
+                    ...(winner.reasoningContent
+                      ? { reasoningContent: winner.reasoningContent }
+                      : {}),
+                    ...(winner.usage ? { usage: winner.usage } : {}),
+                    ...(winner.cacheReadTokens !== undefined
+                      ? { cacheReadTokens: winner.cacheReadTokens }
+                      : {}),
+                    ...(winner.cacheWriteTokens !== undefined
+                      ? { cacheWriteTokens: winner.cacheWriteTokens }
+                      : {}),
+                  };
+                } catch {
+                  return completeWithModelRetry(
+                    options.chatClient,
+                    request,
+                    options.modelRetry,
+                    (event) => appendObserved("model_retry", event),
+                  );
+                }
+              },
+            }
+          : {}),
+        onTurn(turn, phase) {
+          appendObserved("model_request", {
+            turn,
+            phase,
+          }, {
+            containsApiKey: false,
+            containsFileContent: false,
+            containsUserText: true,
+          });
+        },
+        onModelResponse(response, turn) {
+          appendObserved("model_response", {
+            turn,
+            hasContent: Boolean(response.content),
+            toolCallCount: response.toolCalls.length,
+            finishReason: response.finishReason,
+            ...(response.usage ? { usage: response.usage } : {}),
+          }, {
+            containsApiKey: false,
+            containsFileContent: false,
+            containsUserText: Boolean(response.content),
+          });
+        },
+        onModelRetry(event) {
+          appendObserved("model_retry", event);
+        },
+        onContextCompacted(event) {
+          appendObserved("context_compacted", event);
+        },
+        onToolCall(toolName, args, event) {
+          appendObserved("tool_call", {
+            toolCallId: event.toolCallId,
+            toolName,
+            args,
+          }, {
+            containsApiKey: false,
+            containsFileContent: false,
+            containsUserText: true,
+          });
+        },
+        onToolResult(toolName, ok, result, event) {
+          appendObserved("tool_result", {
+            toolCallId: event.toolCallId,
+            toolName,
+            ok,
+            ...(result.ok ? {} : { error: result.error }),
+            ...(event.resultRef ? { resultRef: event.resultRef } : {}),
+            ...(event.resultBytes !== undefined
+              ? { originalChars: event.resultBytes }
+              : {}),
+          });
+        },
+        onToolInvocation(record) {
+          appendObserved("tool_invocation", {
+            toolInvocationId: record.id,
+            toolCallId: record.toolCallId,
+            toolName: record.toolName,
+            toolSource: record.source,
+            invocationStatus: record.status,
+            args: record.args,
+            ...(typeof record.ok === "boolean" ? { ok: record.ok } : {}),
+            ...(record.resultRef ? { resultRef: record.resultRef } : {}),
+            ...(record.error ? { error: record.error } : {}),
+            history: record.history,
+          });
+        },
+        async onCheckpoint(loopCheckpoint) {
+          await observationTail;
+          current = await saveCheckpoint(current, "running", {
+            messages: loopCheckpoint.messages.map(toExecutionMessage),
+            toolCallCount: loopCheckpoint.toolCallsExecuted,
+          });
+        },
+      },
+    );
+    await observationTail;
+
+    current = await saveCheckpoint(current, loopResult.status === "paused" ? "paused" : "running", {
+      messages: loopResult.messages.map(toExecutionMessage),
+      toolCallCount: loopResult.toolCallsExecuted,
+      ...(loopResult.status === "succeeded"
+        ? {
+            steps: markCurrentStepCompleted(
+              current.steps,
+              current.currentStepId,
+              now().toISOString(),
+            ),
+          }
+        : {}),
+    });
+    if (loopResult.status === "succeeded") {
+      await appendTrajectory(current.runId, "final_summary", {
+        status: "succeeded",
+        summaryLength: loopResult.summary.length,
+        tokensConsumed: loopResult.tokensConsumed ?? 0,
+      }, {
+        containsApiKey: false,
+        containsFileContent: false,
+        containsUserText: true,
+      }, current.runContext);
+    }
+
+    const status = loopResult.status;
+    return finishRun({
+      checkpoint: current,
+      taskId: task.id,
+      taskName: task.name,
+      skillName: getRunSkillName(task),
+      status,
+      summary: loopResult.summary,
+      events: [
+        ...events,
+        createEvent(
+          status === "succeeded" ? "info" : status === "paused" ? "warn" : "error",
+          `Shared agent loop ${status}.`,
+          { tokensConsumed: loopResult.tokensConsumed ?? 0 },
+        ),
+      ],
+      startedAt,
+      ...(status === "failed" || status === "canceled"
+        ? { failure: new Error(loopResult.summary) }
+        : {}),
+    });
+  }
+
   async function runFromCheckpoint(
     checkpoint: AgentExecutionCheckpoint,
     task: ScheduledTask,
@@ -307,6 +577,16 @@ export function createAgentRuntimeEngine(options: {
     events: AgentRunEvent[],
     startedAt: string,
   ): Promise<RunScheduledTaskResult> {
+    if (options.runLoop) {
+      return runFromCheckpointWithSharedLoop(
+        checkpoint,
+        task,
+        skill,
+        signal,
+        events,
+        startedAt,
+      );
+    }
     let current = await saveCheckpoint(checkpoint, "running", {
       steps: markCurrentStepRunning(
         checkpoint.steps,
@@ -942,8 +1222,10 @@ export function createAgentRuntimeEngine(options: {
           });
         }
 
+        const latestCheckpoint =
+          (await options.executionStore.get(runId)) ?? checkpoint;
         return finishRun({
-          checkpoint,
+          checkpoint: latestCheckpoint,
           taskId: task.id,
           taskName: task.name,
           skillName: getRunSkillName(task),

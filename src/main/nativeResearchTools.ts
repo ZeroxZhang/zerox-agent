@@ -15,7 +15,10 @@ import {
 import { validatePathInsideLocationRoots } from "../shared/locationResource";
 
 export type NativeResearchTools = {
-  webFetchDocument(args: Record<string, unknown>): Promise<AgentToolExecutionResult>;
+  webFetchDocument(
+    args: Record<string, unknown>,
+    options?: { signal?: AbortSignal },
+  ): Promise<AgentToolExecutionResult>;
   citationRecord(args: Record<string, unknown>): Promise<AgentToolExecutionResult>;
   citationCoverageCheck(
     args: Record<string, unknown>,
@@ -32,13 +35,13 @@ export function createNativeResearchTools(options: {
   const now = options.now ?? (() => new Date());
 
   return {
-    async webFetchDocument(args) {
+    async webFetchDocument(args, executionOptions) {
       const url = String(args.url ?? "").trim();
       if (!url) {
         return { ok: false, error: "web_fetch_document requires a url." };
       }
 
-      const fetched = await options.webTools.fetchPage(url);
+      const fetched = await options.webTools.fetchPage(url, executionOptions);
       if (!fetched.ok) {
         return fetched;
       }

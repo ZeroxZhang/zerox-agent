@@ -226,6 +226,7 @@ export function createChatService(options: {
   const pendingContinuations = new Map<string, ChatContinuationState>();
   const pendingSkillInputRequests = new Map<string, PendingSkillInputState>();
   const inFlightSkillInputResponses = new Set<string>();
+  const sessionRequestTails = new Map<string, Promise<void>>();
 
   async function recoverPendingSkillInputState(
     inputRequestId: string,
@@ -293,11 +294,14 @@ export function createChatService(options: {
     }
   }
 
-  async function sendMessageInternal(
+  async function executeMessageInternal(
     input: SendChatMessageInput,
     runtimeOptions: SendChatMessageRuntimeOptions = {},
     internalOptions: ChatTurnInternalOptions = {},
   ): Promise<SendChatMessageResult> {
+      if (runtimeOptions.signal?.aborted) {
+        return { ok: false, message: "已中断任务。" };
+      }
       const userMessage = input.message;
       if (!userMessage.trim()) {
         return { ok: false, message: "消息不能为空。" };
@@ -928,6 +932,7 @@ export function createChatService(options: {
               toolExecutor,
               toolAuthorizationService: options.toolAuthorizationService,
               ...(chatRuntimeTask ? { taskId: chatRuntimeTask.taskId } : {}),
+              runId: evidence.runId,
               ...(agentRunContext ? { runContext: agentRunContext } : {}),
               ...(chatRuntimeTask
                 ? { runtimeTask: chatRuntimeTask.runtimeTask }
@@ -947,6 +952,11 @@ export function createChatService(options: {
                 : {}),
               pauseOnTurnLimit: true,
               pauseOnFailureLoop: true,
+              tokenBudget: Math.max(
+                profile.maxTokens,
+                profile.maxTokens * Math.min(loopMaxTurns, 8),
+              ),
+              maxWallClockMs: 30 * 60 * 1000,
               ...(continuationToResume
                 ? {
                     resumeMessages: chatMessages,
@@ -1414,6 +1424,39 @@ export function createChatService(options: {
             }
           : {}),
       };
+  }
+
+  async function sendMessageInternal(
+    input: SendChatMessageInput,
+    runtimeOptions: SendChatMessageRuntimeOptions = {},
+    internalOptions: ChatTurnInternalOptions = {},
+  ): Promise<SendChatMessageResult> {
+    const sessionKey = input.sessionId?.trim();
+    if (!sessionKey) {
+      return executeMessageInternal(input, runtimeOptions, internalOptions);
+    }
+
+    const previous = sessionRequestTails.get(sessionKey) ?? Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tail = previous.catch(() => undefined).then(() => gate);
+    sessionRequestTails.set(sessionKey, tail);
+    try {
+      const ready = await waitForTurnOrAbort(previous, runtimeOptions.signal);
+      if (!ready) {
+        return { ok: false, message: "已中断任务。" };
+      }
+      return await executeMessageInternal(input, runtimeOptions, internalOptions);
+    } finally {
+      release();
+      void tail.finally(() => {
+        if (sessionRequestTails.get(sessionKey) === tail) {
+          sessionRequestTails.delete(sessionKey);
+        }
+      });
+    }
   }
 
   async function respondSkillInputOnce(
@@ -2227,24 +2270,16 @@ function resolveSkillPermissionPath(
   });
 }
 
-function buildDefaultChatShellTemplates(): string[] {
+export function buildDefaultChatShellTemplates(): string[] {
   const commands = [
-    "bash",
     "cat",
     "file",
     "find",
     "git",
     "ls",
     "mkdir",
-    "node",
-    "npm",
-    "npx",
-    "open",
-    "python",
-    "python3",
     "rg",
     "sed",
-    "sh",
     "stat",
   ];
   const templates: string[] = [];
@@ -2414,6 +2449,30 @@ function isAbortError(error: unknown, signal: AbortSignal | undefined): boolean 
   }
 
   return error instanceof Error && /abort|aborted|cancel|canceled|cancelled|中断|取消/i.test(error.message);
+}
+
+async function waitForTurnOrAbort(
+  previous: Promise<unknown>,
+  signal: AbortSignal | undefined,
+): Promise<boolean> {
+  if (!signal) {
+    await previous.catch(() => undefined);
+    return true;
+  }
+  if (signal.aborted) return false;
+
+  let abortHandler: (() => void) | undefined;
+  try {
+    return await Promise.race([
+      previous.catch(() => undefined).then(() => true),
+      new Promise<false>((resolve) => {
+        abortHandler = () => resolve(false);
+        signal.addEventListener("abort", abortHandler, { once: true });
+      }),
+    ]);
+  } finally {
+    if (abortHandler) signal.removeEventListener("abort", abortHandler);
+  }
 }
 
 function isContinuationRequest(message: string): boolean {

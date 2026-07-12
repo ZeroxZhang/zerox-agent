@@ -168,6 +168,18 @@ export function createToolApprovalCoordinator(options: {
     return true;
   }
 
+  function rejectAllPending(reason = "应用正在退出，授权请求已关闭。"): number {
+    const ids = [...pending.keys()];
+    for (const id of ids) {
+      settlePending(
+        id,
+        { approved: false, reason, automatic: true },
+        true,
+      );
+    }
+    return ids.length;
+  }
+
   function settlePending(
     id: string,
     result: ToolUserApprovalResult,
@@ -251,5 +263,6 @@ export function createToolApprovalCoordinator(options: {
     setGoalActive,
     requestUserApproval,
     resolveApproval,
+    rejectAllPending,
   };
 }

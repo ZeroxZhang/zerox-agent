@@ -129,6 +129,7 @@ export type SkillUserInputRequest = {
 
 export type SkillInputResponse = {
   inputRequestId: string;
+  requestId?: string;
   values: Record<string, string | number | boolean>;
 };
 

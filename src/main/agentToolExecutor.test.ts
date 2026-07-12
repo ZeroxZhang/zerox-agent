@@ -11,6 +11,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createAgentToolExecutor, getShellExecShell } from "./agentToolExecutor";
+import { createDynamicToolRegistry } from "./dynamicToolRegistry";
 import { buildPrimaryRunContext } from "../shared/agentWorkspace";
 import { getArtifactProvenancePath } from "../shared/agentArtifactProvenance";
 import type { MemoryRecord } from "../shared/memory";
@@ -25,6 +26,39 @@ describe("agent tool executor", () => {
 
   afterEach(async () => {
     await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("aborts underlying non-shell work when its timeout expires", async () => {
+    const registry = createDynamicToolRegistry();
+    let observedAbort = false;
+    registry.register(
+      {
+        type: "function",
+        function: {
+          name: "slow_fixture",
+          description: "Slow fixture",
+          parameters: { type: "object", properties: {} },
+        },
+      },
+      async (_args, options) =>
+        new Promise((resolve) => {
+          options?.signal?.addEventListener(
+            "abort",
+            () => {
+              observedAbort = true;
+              resolve({ ok: false, error: "aborted" });
+            },
+            { once: true },
+          );
+        }),
+      "test",
+    );
+    const executor = createAgentToolExecutor({ registry, toolTimeoutMs: 10 });
+
+    await expect(
+      executor.execute({ toolName: "slow_fixture", args: {} }),
+    ).rejects.toThrow("slow_fixture timed out after 10ms");
+    expect(observedAbort).toBe(true);
   });
 
   it("reads a local text file", async () => {

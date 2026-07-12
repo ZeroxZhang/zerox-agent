@@ -13,7 +13,9 @@ import type { AgentToolExecutor } from "./agentToolExecutor";
 import { createAgentToolExecutor } from "./agentToolExecutor";
 import { createAgentGoalAcceptance } from "./agentGoalAcceptance";
 import { createDynamicToolRegistry } from "./dynamicToolRegistry";
-import { createGoalRuntimeEngine } from "./goalRuntimeEngine";
+import {
+  createGoalRuntimeEngine as createProductionGoalRuntimeEngine,
+} from "./goalRuntimeEngine";
 import { createAgentGoalContext } from "./agentGoalContext";
 import type { AgentLoopResult } from "./agentLoop";
 import type { ChatMessage } from "./openAiCompatibleClient";
@@ -21,6 +23,35 @@ import { createScheduledTaskStore } from "./taskStore";
 import { createToolAuditLog } from "./toolAuditLog";
 import { createToolAuthorizationService } from "./toolAuthorizationService";
 import { projectRunGraph } from "../shared/runGraph";
+
+function createGoalRuntimeEngine(
+  options: Parameters<typeof createProductionGoalRuntimeEngine>[0],
+) {
+  return createProductionGoalRuntimeEngine({
+    ...options,
+    toolAuthorizationService: options.toolAuthorizationService ?? {
+      async authorize(taskId, request) {
+        return {
+          ok: true as const,
+          decision: {
+            allowed: true,
+            reason: "allowed by goal runtime test fixture",
+          },
+          auditEvent: {
+            id: `audit_${request.toolName}`,
+            taskId,
+            request,
+            decision: {
+              allowed: true,
+              reason: "allowed by goal runtime test fixture",
+            },
+            createdAt: "2026-07-12T00:00:00.000Z",
+          },
+        };
+      },
+    },
+  });
+}
 
 describe("goal runtime engine", () => {
   it("routes supported deterministic contracts through the native pipeline without a model loop", async () => {
@@ -185,6 +216,58 @@ describe("goal runtime engine", () => {
         .filter((event) => event.type === "tool_invocation")
         .map((event) => event.payload.invocationStatus),
     ).toEqual(["proposed", "visible", "authorized", "running", "completed"]);
+  });
+
+  it("fails closed when the deterministic pipeline has no authorizer", async () => {
+    let executed = false;
+    const goal = createGoal({ taskContract: chromeBookmarkTaskContract });
+    const engine = createProductionGoalRuntimeEngine({
+      workspaceRoot: "/Users/demo/project",
+      chatClient: {
+        async complete() {
+          throw new Error("deterministic pipeline should not call the model");
+        },
+      },
+      getModelProfile: async () => {
+        throw new Error("deterministic pipeline should not load a model profile");
+      },
+      toolExecutor: {
+        async execute() {
+          executed = true;
+          return { ok: true, result: {} };
+        },
+        getRegistry() {
+          return createDynamicToolRegistry();
+        },
+        hasTool() {
+          return true;
+        },
+      },
+      runStore: {
+        async append(run) {
+          return run;
+        },
+      },
+      trajectoryStore: {
+        async append(_runId, event) {
+          return event;
+        },
+      },
+      goalContext: createAgentGoalContext(),
+      createId: () => "goal_run_fail_closed",
+      now: () => "2026-07-12T00:00:00.000Z",
+      runAgentLoop: async () => {
+        throw new Error("deterministic pipeline should not enter runAgentLoop");
+      },
+    });
+
+    const result = await engine.runMilestone(goal, goal.milestones[0]!);
+
+    expect(result).toMatchObject({
+      status: "failed",
+      summary: expect.stringContaining("工具授权服务未配置"),
+    });
+    expect(executed).toBe(false);
   });
 
   it("authorizes Chrome deterministic pipeline with the real goal policy and executes once", async () => {

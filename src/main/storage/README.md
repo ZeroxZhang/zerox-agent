@@ -24,11 +24,12 @@ interfaces, and a dual-write migration path off the legacy JSON/JSONL stores.
 
 | value    | writes            | reads   | use |
 |----------|-------------------|---------|-----|
-| `json`   | legacy JSON only  | JSON    | rollback / safe default |
+| `json`   | complete JSON/JSONL coverage | JSON | safe default |
 | `sqlite` | SQLite only       | SQLite  | cutover target |
-| `dual`   | SQLite + JSON shadow (fire-and-forget) | SQLite | transition (default) |
+| `dual`   | SQLite + JSON shadow for converted stores | SQLite | explicit transition mode |
 
-Invalid/unset values fall back to `dual` with a warning.
+Invalid/unset values fall back to `json` with a warning because it is the only
+backend covering every core domain store.
 
 The container's `storage()` singleton is fault-tolerant: if better-sqlite3
 fails to load (e.g. an Electron ABI mismatch before `@electron/rebuild` runs),
@@ -66,9 +67,13 @@ node scripts/migrate-to-sqlite.mjs --configDir <userData>/config --verify
 export ZEROX_STORAGE_BACKEND=sqlite   # or 'dual' for the transition period
 
 # 3. roll back to JSON if needed (freezes existing JSON as *.legacy.json)
-node scripts/rollback-sqlite-to-json.mjs --configDir <userData>/config
+node scripts/rollback-sqlite-to-json.mjs --configDir <userData>/config --confirmSqliteAuthoritative
 export ZEROX_STORAGE_BACKEND=json
 ```
+
+The confirmation flag is intentionally required: v3.7.0 defaults to JSON, so
+an unverified SQLite export could otherwise replace newer authoritative JSON.
+Existing JSON files are moved to unique `.legacy*` backups before export.
 
 Migration errors are appended to `<configDir>/migration-errors.jsonl` and do not
 abort the overall run.

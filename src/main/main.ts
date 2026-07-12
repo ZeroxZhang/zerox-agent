@@ -12,15 +12,18 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { getAgentValidationModeOptions } from "./agentValidationMode";
 import { createAppContainer } from "./container";
-import { registerAllIpcHandlers } from "./ipc";
+import { registerAllIpcHandlers, shutdownActiveChatMessages } from "./ipc";
 import {
   getDefaultLoginItemSettings,
+  getDisabledLoginItemSettings,
   getMainWindowOptions,
   getTrayTooltip,
   shouldApplyLoginStartup,
+  shouldCreateMainWindowAtStartup,
   shouldRestoreMainWindowOnActivate,
 } from "./desktopLifecycle";
 import { runDesktopAgentValidation } from "./desktopAgentValidator";
+import { settleShutdownWithDeadline } from "./shutdownDeadline";
 import { applyUserDataDirOverride } from "./userDataDirOverride";
 import { getAppMeta } from "../shared/appMeta";
 import { createToolApprovalCoordinator } from "./toolApprovalCoordinator";
@@ -471,8 +474,12 @@ app.whenReady().then(() => {
     return;
   }
 
-  if (shouldApplyLoginStartup(app.isPackaged, process.env)) {
-    app.setLoginItemSettings(getDefaultLoginItemSettings());
+  if (app.isPackaged) {
+    app.setLoginItemSettings(
+      shouldApplyLoginStartup(true, process.env)
+        ? getDefaultLoginItemSettings()
+        : getDisabledLoginItemSettings(),
+    );
   }
   try {
     const iconPath = path.resolve(app.getAppPath(), "logo.png");
@@ -483,7 +490,13 @@ app.whenReady().then(() => {
   } catch {
     // Icon is cosmetic; don't block startup on failure
   }
-  createMainWindow();
+  if (
+    shouldCreateMainWindowAtStartup(
+      Boolean(app.getLoginItemSettings().wasOpenedAsHidden),
+    )
+  ) {
+    createMainWindow();
+  }
 
   if (!smokeMode.enabled) {
     void container.resumeInterruptedGoals().catch((error) => {
@@ -615,20 +628,50 @@ function resolveKernelPermission(input: unknown): {
     : { ok: false, message: "No pending permission request matched." };
 }
 
-app.on("before-quit", () => {
+let shutdownStarted = false;
+let shutdownComplete = false;
+const shutdownDeadlineMs = 15_000;
+
+app.on("before-quit", (event) => {
   isQuitting = true;
+  if (shutdownComplete) {
+    return;
+  }
+  event.preventDefault();
+  if (shutdownStarted) {
+    return;
+  }
+  shutdownStarted = true;
   unsubscribeKernelEvents?.();
   unsubscribeKernelEvents = null;
   stopTaskScheduler();
   stopMemoryMaintenanceScheduler();
-  for (const client of container.getActiveMcpClients()) {
-    try {
-      client.disconnect();
-    } catch {
-      // Best-effort cleanup
+  toolApprovalCoordinator.rejectAllPending();
+  const drain = Promise.allSettled([
+    shutdownActiveChatMessages(),
+    container.shutdownRuntime(),
+  ]).then((results) => {
+    const failures = results.filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (failures.length > 0) {
+      throw new AggregateError(
+        failures.map((failure) => failure.reason),
+        "One or more shutdown resources failed.",
+      );
     }
-  }
-  container.getActiveMcpClients().length = 0;
+  });
+  void settleShutdownWithDeadline(drain, shutdownDeadlineMs).then((result) => {
+    if (result === "timed_out") {
+      console.error(
+        `[lifecycle] Shutdown drain exceeded ${shutdownDeadlineMs}ms; forcing application exit.`,
+      );
+    } else if (result === "failed") {
+      console.error("[lifecycle] Shutdown drain failed; forcing application exit.");
+    }
+    shutdownComplete = true;
+    app.quit();
+  });
 });
 
 app.on("window-all-closed", () => {

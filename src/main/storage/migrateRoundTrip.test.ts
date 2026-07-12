@@ -44,6 +44,21 @@ function createFreshMigrationScriptRoot(): string {
 }
 
 describe("P1 migration scripts round-trip", () => {
+  it("refuses to overwrite authoritative JSON without explicit SQLite confirmation", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "zerox-rollback-guard-"));
+    try {
+      expect(() =>
+        execFileSync(
+          process.execPath,
+          [path.join(root, "scripts", "rollback-sqlite-to-json.mjs"), "--configDir", dir],
+          { encoding: "utf8", cwd: root, stdio: "pipe" },
+        ),
+      ).toThrow(/refusing rollback export/);
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
   it("migrates legacy JSON→SQLite then rolls back SQLite→JSON, preserving data", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "zerox-mig-rt-"));
     let scriptRoot: string | undefined;
@@ -161,8 +176,15 @@ describe("P1 migration scripts round-trip", () => {
         db.close();
       }
 
+      // Simulate newer JSON that must be preserved even when the operator
+      // explicitly confirms SQLite as the rollback source.
+      writeFileSync(
+        path.join(goalsDir, "goal-manual-historical.json"),
+        JSON.stringify({ id: "goal-manual-historical", marker: "newer-json" }),
+      );
+
       // 2. Roll back SQLite → JSON.
-      execFileSync(process.execPath, [path.join(scriptRoot, "scripts", "rollback-sqlite-to-json.mjs"), "--configDir", dir], { encoding: "utf8", cwd: root });
+      execFileSync(process.execPath, [path.join(scriptRoot, "scripts", "rollback-sqlite-to-json.mjs"), "--configDir", dir, "--confirmSqliteAuthoritative"], { encoding: "utf8", cwd: root });
       // The rollback re-exports agent-runs.jsonl (freezing the original as .legacy).
       const rolledBackRuns = path.join(dir, "agent-runs.jsonl");
       expect(existsSync(rolledBackRuns)).toBe(true);
@@ -188,6 +210,12 @@ describe("P1 migration scripts round-trip", () => {
           "utf8",
         ),
       );
+      expect(
+        readFileSync(
+          path.join(goalsDir, "goal-manual-historical.legacy.json"),
+          "utf8",
+        ),
+      ).toContain("newer-json");
       expect(rolledBackGoal).not.toHaveProperty("acceptanceCertificate");
     } finally {
       rmSync(dir, { recursive: true, force: true });

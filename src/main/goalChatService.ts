@@ -65,6 +65,7 @@ export type GoalChatService = {
   ): Promise<ChatSessionGoalSummary>;
   replan(goalId: string, instructions: string): Promise<ChatSessionGoalSummary>;
   retry(goalId: string): Promise<ChatSessionGoalSummary>;
+  shutdown(): Promise<void>;
 };
 
 export function createGoalChatService(options: {
@@ -106,6 +107,7 @@ export function createGoalChatService(options: {
   >();
   const pendingGoalCancellations = new Map<string, Promise<void>>();
   const pendingRestarts = new Set<string>();
+  let shuttingDown = false;
 
   function notifyProgress(
     event: GoalProgressEvent["event"],
@@ -130,13 +132,16 @@ export function createGoalChatService(options: {
     runOptions: { signal?: AbortSignal } | undefined,
     runner: (goalId: string, options: { signal?: AbortSignal }) => Promise<Goal>,
   ) {
+    if (shuttingDown) return;
     const existing = activeGoalRuns.get(goalId);
     if (existing) {
       if (existing.controller.signal.aborted && !pendingRestarts.has(goalId)) {
         pendingRestarts.add(goalId);
         void existing.completion.finally(() => {
           pendingRestarts.delete(goalId);
-          startBackgroundGoalRun(goalId, runOptions, runner);
+          if (!shuttingDown) {
+            startBackgroundGoalRun(goalId, runOptions, runner);
+          }
         });
       }
       return;
@@ -717,6 +722,18 @@ export function createGoalChatService(options: {
       return toGoalSummary(
         (await options.goalStore.get(goalId)) ?? persisted,
       );
+    },
+
+    async shutdown() {
+      shuttingDown = true;
+      pendingRestarts.clear();
+      const active = [...activeGoalRuns.values()];
+      for (const run of active) {
+        if (!run.controller.signal.aborted) {
+          run.controller.abort("application_shutdown");
+        }
+      }
+      await Promise.allSettled(active.map((run) => run.completion));
     },
   };
 

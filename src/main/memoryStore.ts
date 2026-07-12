@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createMemoryMaintenancePlan, type MemoryMaintenanceOptions } from "../shared/memoryMaintenance";
 import {
@@ -65,6 +65,16 @@ export function createMemoryStore(options: {
   const chunkingService = options.chunkingService ?? createChunkingService();
   const reranker = options.reranker ?? createReranker();
   const maxContentLength = 8000;
+  let mutationQueue: Promise<void> = Promise.resolve();
+
+  async function withMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const current = mutationQueue.catch(() => undefined).then(operation);
+    mutationQueue = current.then(
+      () => undefined,
+      () => undefined,
+    );
+    return current;
+  }
 
   async function readStoredRecords(): Promise<StoredMemoryRecords> {
     try {
@@ -87,9 +97,16 @@ export function createMemoryStore(options: {
 
   async function writeStoredRecords(stored: StoredMemoryRecords) {
     await mkdir(options.configDir, { recursive: true });
-    await writeFile(memoryPath, `${JSON.stringify(stored, null, 2)}\n`, {
-      encoding: "utf8",
-    });
+    const temporary = `${memoryPath}.${process.pid}-${randomUUID()}.tmp`;
+    try {
+      await writeFile(temporary, `${JSON.stringify(stored, null, 2)}\n`, {
+        encoding: "utf8",
+      });
+      await rename(temporary, memoryPath);
+    } catch (error) {
+      await unlink(temporary).catch(() => undefined);
+      throw error;
+    }
   }
 
   return {
@@ -112,13 +129,15 @@ export function createMemoryStore(options: {
         createdAt: timestamp,
         updatedAt: timestamp,
       };
-      const stored = await readStoredRecords();
-      await writeStoredRecords({
-        schemaVersion: 1,
-        records: [...stored.records, record],
-      });
+      return withMutation(async () => {
+        const stored = await readStoredRecords();
+        await writeStoredRecords({
+          schemaVersion: 1,
+          records: [...stored.records, record],
+        });
 
-      return record;
+        return record;
+      });
     },
 
     async list(listOptions) {
@@ -159,18 +178,22 @@ export function createMemoryStore(options: {
     },
 
     async delete(memoryId) {
-      const stored = await readStoredRecords();
-      const nextRecords = stored.records.filter((record) => record.id !== memoryId);
+      return withMutation(async () => {
+        const stored = await readStoredRecords();
+        const nextRecords = stored.records.filter(
+          (record) => record.id !== memoryId,
+        );
 
-      if (nextRecords.length === stored.records.length) {
-        return false;
-      }
+        if (nextRecords.length === stored.records.length) {
+          return false;
+        }
 
-      await writeStoredRecords({
-        schemaVersion: 1,
-        records: nextRecords,
+        await writeStoredRecords({
+          schemaVersion: 1,
+          records: nextRecords,
+        });
+        return true;
       });
-      return true;
     },
 
     async export() {
@@ -179,79 +202,85 @@ export function createMemoryStore(options: {
     },
 
     async runMaintenance(maintenanceOptions) {
-      const stored = await readStoredRecords();
-      const createdAt =
-        maintenanceOptions?.createdAt ?? now().toISOString();
-      const plan = createMemoryMaintenancePlan(stored.records, {
-        ...maintenanceOptions,
-        createdAt,
-      });
-      const createdMemories: MemoryRecord[] = [];
-      const archivedSourceIds = new Set<string>();
-
-      for (const draft of plan.drafts) {
-        const normalized = normalizeMemoryInput(draft);
-        const validation = validateMemoryInput(draft);
-
-        if (!validation.valid) {
-          continue;
-        }
-
-        const embedding =
-          normalized.embedding ??
-          (await createEmbedding(normalized, createdAt, options.embeddingService));
-        const record: MemoryRecord = {
-          id: createId(),
-          ...normalized,
-          ...(embedding ? { embedding } : {}),
+      return withMutation(async () => {
+        const stored = await readStoredRecords();
+        const createdAt =
+          maintenanceOptions?.createdAt ?? now().toISOString();
+        const plan = createMemoryMaintenancePlan(stored.records, {
+          ...maintenanceOptions,
           createdAt,
-          updatedAt: createdAt,
-        };
+        });
+        const createdMemories: MemoryRecord[] = [];
+        const archivedSourceIds = new Set<string>();
 
-        createdMemories.push(record);
-        for (const sourceId of draft.sourceIds) {
-          archivedSourceIds.add(sourceId);
+        for (const draft of plan.drafts) {
+          const normalized = normalizeMemoryInput(draft);
+          const validation = validateMemoryInput(draft);
+
+          if (!validation.valid) {
+            continue;
+          }
+
+          const embedding =
+            normalized.embedding ??
+            (await createEmbedding(
+              normalized,
+              createdAt,
+              options.embeddingService,
+            ));
+          const record: MemoryRecord = {
+            id: createId(),
+            ...normalized,
+            ...(embedding ? { embedding } : {}),
+            createdAt,
+            updatedAt: createdAt,
+          };
+
+          createdMemories.push(record);
+          for (const sourceId of draft.sourceIds) {
+            archivedSourceIds.add(sourceId);
+          }
         }
-      }
 
-      const targetBySourceId = new Map<string, string>();
-      for (const memory of createdMemories) {
-        for (const sourceId of memory.consolidation?.sourceIds ?? []) {
-          targetBySourceId.set(sourceId, memory.id);
+        const targetBySourceId = new Map<string, string>();
+        for (const memory of createdMemories) {
+          for (const sourceId of memory.consolidation?.sourceIds ?? []) {
+            targetBySourceId.set(sourceId, memory.id);
+          }
         }
-      }
-      const archivedRecords = stored.records.map((record) => {
-        const consolidatedInto = targetBySourceId.get(record.id);
+        const archivedRecords = stored.records.map((record) => {
+          const consolidatedInto = targetBySourceId.get(record.id);
 
-        if (!consolidatedInto) {
-          return record;
+          if (!consolidatedInto) {
+            return record;
+          }
+
+          return {
+            ...record,
+            archivedAt: createdAt,
+            archiveReason: "consolidated" as const,
+            consolidatedInto,
+            updatedAt: createdAt,
+          };
+        });
+
+        if (createdMemories.length) {
+          await writeStoredRecords({
+            schemaVersion: 1,
+            records: [...archivedRecords, ...createdMemories],
+          });
         }
 
         return {
-          ...record,
-          archivedAt: createdAt,
-          archiveReason: "consolidated" as const,
-          consolidatedInto,
-          updatedAt: createdAt,
+          scanned: plan.scanned,
+          candidates: plan.candidates,
+          consolidated: createdMemories.length,
+          archived: archivedSourceIds.size,
+          skipped: plan.drafts.length - createdMemories.length,
+          createdAt,
+          createdMemories,
         };
       });
-
-      if (createdMemories.length) {
-        await writeStoredRecords({
-          schemaVersion: 1,
-          records: [...archivedRecords, ...createdMemories],
-        });
-      }
-
-      return {
-        scanned: plan.scanned,
-        candidates: plan.candidates,
-        consolidated: createdMemories.length,
-        archived: archivedSourceIds.size,
-        skipped: plan.drafts.length - createdMemories.length,
-        createdAt,
-        createdMemories,
-      };
     },
 
     async reviewGovernance(governanceOptions) {

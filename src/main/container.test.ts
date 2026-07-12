@@ -231,6 +231,143 @@ describe("app container goal drafts", () => {
     );
   });
 
+  it("defaults honestly to in-process worker infrastructure and drains it on shutdown", async () => {
+    const close = vi.fn(async () => undefined);
+    toolWorkerMock.createToolWorker.mockReturnValueOnce({
+      close,
+      execute: vi.fn(),
+    });
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const containerWithWorker = container as typeof container & {
+      toolWorker: () => unknown;
+    };
+
+    containerWithWorker.toolWorker();
+    await container.shutdownRuntime();
+
+    expect(toolWorkerMock.createToolWorker).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "inproc" }),
+    );
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("flushes durable stores even when one shutdown dependency rejects", async () => {
+    toolWorkerMock.createToolWorker.mockReturnValueOnce({
+      close: vi.fn(async () => {
+        throw new Error("worker close failed");
+      }),
+      execute: vi.fn(),
+    });
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    container.toolWorker();
+    const runStore = container.agentRunStore();
+    const flush = vi.spyOn(runStore, "flushShadowWrites");
+
+    await expect(container.shutdownRuntime()).rejects.toThrow("worker close failed");
+    expect(flush).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes task admission before shutdown can be escaped by a late lookup", async () => {
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const task = await container.scheduledTaskStore().create({
+      name: "Late task",
+      skillName: "",
+      enabled: true,
+      schedule: { kind: "daily", time: "12:33" },
+      input: { request: "must not start after shutdown" },
+    });
+    let releaseLookup!: (value: typeof task) => void;
+    vi.spyOn(container.scheduledTaskStore(), "get").mockImplementationOnce(
+      () => new Promise((resolve) => {
+        releaseLookup = resolve;
+      }),
+    );
+
+    const run = container.runAgentTask(task.id);
+    await Promise.resolve();
+    await expect(container.runAgentTask(task.id)).resolves.toEqual({
+      ok: false,
+      message: "这个任务已经在运行中。",
+    });
+    const shutdown = container.shutdownRuntime();
+    releaseLookup(task);
+
+    await expect(run).resolves.toEqual({
+      ok: false,
+      message: "应用正在退出，任务运行已取消。",
+    });
+    await expect(shutdown).resolves.toBeUndefined();
+  });
+
+  it("tracks resume admission before checkpoint lookup and drains it on shutdown", async () => {
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const checkpoint: AgentExecutionCheckpoint = {
+      id: "checkpoint_resume_shutdown",
+      runId: "run_resume_shutdown",
+      taskId: "task_resume_shutdown",
+      status: "paused",
+      currentStepId: "step_1",
+      steps: [{
+        id: "step_1",
+        description: "Resume safely",
+        expectedOutcome: "No late start",
+        state: "pending",
+        attempts: 1,
+      }],
+      messages: [],
+      toolCallCount: 0,
+      createdAt: "2026-07-12T00:00:00.000Z",
+      updatedAt: "2026-07-12T00:00:00.000Z",
+    };
+    let releaseLookup!: (value: AgentExecutionCheckpoint) => void;
+    vi.spyOn(container.agentExecutionStore(), "get").mockImplementationOnce(
+      () => new Promise((resolve) => {
+        releaseLookup = resolve;
+      }),
+    );
+
+    const resume = container.resumeAgentRun(checkpoint.runId);
+    await Promise.resolve();
+    await expect(container.resumeAgentRun(checkpoint.runId)).resolves.toEqual({
+      ok: false,
+      message: "这个运行已经在恢复中。",
+    });
+    const shutdown = container.shutdownRuntime();
+    releaseLookup(checkpoint);
+
+    await expect(resume).resolves.toEqual({
+      ok: false,
+      message: "应用正在退出，任务恢复已取消。",
+    });
+    await expect(shutdown).resolves.toBeUndefined();
+  });
+
+  it("does not instantiate unavailable workflow-backed self improvement by default", () => {
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+
+    expect(container.selfImprovementService()).toBeNull();
+  });
+
   it("constructs one production acceptance registry with builtins and trusted custom validators", async () => {
     let receivedContext: unknown;
     const customKind = "validator:trusted/report" as const;
@@ -1212,6 +1349,121 @@ describe("app container goal drafts", () => {
     );
   });
 
+  it("serializes non-preempting mutations for the same goal", async () => {
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const goal = createStoredGoal({
+      id: "goal_serial_mutations",
+      status: "waiting_for_review",
+    });
+    await container.agentGoalStore().save(goal);
+    const events: string[] = [];
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const toSummary = () => ({
+      id: goal.id,
+      description: goal.description,
+      status: goal.status,
+    });
+
+    const first = container.runGoalOperation(goal.id, async () => {
+      events.push("first:start");
+      await firstGate;
+      events.push("first:end");
+      return toSummary();
+    });
+    const second = container.runGoalOperation(goal.id, async () => {
+      events.push("second:start");
+      return toSummary();
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(events).toEqual(["first:start"]);
+    releaseFirst();
+    await expect(Promise.all([first, second])).resolves.toMatchObject([
+      { ok: true },
+      { ok: true },
+    ]);
+    expect(events).toEqual(["first:start", "first:end", "second:start"]);
+  });
+
+  it("makes a preempting cancellation invalidate old queued work and barrier new work", async () => {
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const goal = createStoredGoal({
+      id: "goal_preempt_barrier",
+      status: "waiting_for_review",
+    });
+    await container.agentGoalStore().save(goal);
+    const events: string[] = [];
+    let releaseFirst!: () => void;
+    let releaseCancel!: () => void;
+    let signalFirstStarted!: () => void;
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const cancelGate = new Promise<void>((resolve) => { releaseCancel = resolve; });
+    const firstStarted = new Promise<void>((resolve) => { signalFirstStarted = resolve; });
+    const toSummary = () => ({
+      id: goal.id,
+      description: goal.description,
+      status: goal.status,
+    });
+
+    const first = container.runGoalOperation(goal.id, async () => {
+      events.push("first:start");
+      signalFirstStarted();
+      await firstGate;
+      events.push("first:end");
+      return toSummary();
+    });
+    await firstStarted;
+    const staleQueued = container.runGoalOperation(goal.id, async () => {
+      events.push("stale:start");
+      return toSummary();
+    });
+    const cancel = container.runGoalOperation(
+      goal.id,
+      async () => {
+        events.push("cancel:start");
+        await cancelGate;
+        events.push("cancel:end");
+        return toSummary();
+      },
+      { preempt: true },
+    );
+    const afterCancel = container.runGoalOperation(goal.id, async () => {
+      events.push("after-cancel:start");
+      return toSummary();
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(events).toEqual(["first:start", "cancel:start"]);
+    releaseFirst();
+    await expect(first).resolves.toMatchObject({ ok: true });
+    await expect(staleQueued).resolves.toMatchObject({ ok: false });
+    expect(events).not.toContain("stale:start");
+    expect(events).not.toContain("after-cancel:start");
+    releaseCancel();
+    await expect(cancel).resolves.toMatchObject({ ok: true });
+    await expect(afterCancel).resolves.toMatchObject({ ok: true });
+    expect(events).toEqual([
+      "first:start",
+      "cancel:start",
+      "first:end",
+      "cancel:end",
+      "after-cancel:start",
+    ]);
+  });
+
   it("cancels a final-acceptance continuation started through the container wrapper", async () => {
     let deterministicCalls = 0;
     const validator: AcceptanceValidator = {
@@ -1371,8 +1623,10 @@ describe("app container goal drafts", () => {
       try {
         const continuing = container.continueGoalAcceptance(goal.id);
         await judgeEntered;
-        const canceling = await container.runGoalOperation(() =>
-          container.goalChatService().cancel(goal.id),
+        const canceling = await container.runGoalOperation(
+          goal.id,
+          () => container.goalChatService().cancel(goal.id),
+          { preempt: true },
         );
         return { canceling, continued: await continuing };
       } finally {

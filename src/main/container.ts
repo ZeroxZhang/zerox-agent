@@ -2,7 +2,10 @@ import { app, BrowserWindow, safeStorage } from "electron";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { createAgentExecutionStore } from "./agentExecutionStore";
-import { createAgentTrajectoryStore } from "./agentTrajectoryStore";
+import {
+  createAgentTrajectoryStore,
+  type AgentTrajectoryStore,
+} from "./agentTrajectoryStore";
 import { createAgentLearningStore } from "./agentLearningStore";
 import { createAgentLearningService } from "./agentLearningService";
 import { createAgentEvalCandidateStore } from "./agentEvalCandidateStore";
@@ -24,7 +27,10 @@ import { createAgentGoalPlanner } from "./agentGoalPlanner";
 import { createGoalRuntimeEngine } from "./goalRuntimeEngine";
 import { createAuthorizedGoalAcceptanceToolExecutor } from "./agentGoalAcceptanceToolExecutor";
 import { applyGoalOutputRootsToRunContext } from "./goalOutputRoots";
-import { createGoalChatService } from "./goalChatService";
+import {
+  createGoalChatService,
+  type GoalChatService,
+} from "./goalChatService";
 import { createAgentGoalTranslator } from "./agentGoalTranslator";
 import { createGoalDraftService } from "./goalDraftService";
 import {
@@ -39,8 +45,9 @@ import {
   createPromotedAgentEvalFixtureStore,
 } from "./eval/agentPromotedEvalFixtures";
 import { runAgentEvals } from "./eval/agentEvalRunner";
-import { createAgentRunStore } from "./agentRunStore";
+import { createAgentRunStore, type AgentRunStore } from "./agentRunStore";
 import { createAgentRunnerService } from "./agentRunnerService";
+import { runAgentLoop } from "./agentLoop";
 import { createAgentBootstrapService } from "./agentBootstrapService";
 import { createAgentValidationStore } from "./agentValidationStore";
 import { createAgentToolExecutor } from "./agentToolExecutor";
@@ -65,14 +72,13 @@ import {
 } from "./openAiCompatibleClient";
 import {
   discoverSkills,
-  buildSkillGraph,
   collectSkillMcpConfigs,
+  shouldAutoInitializeSkillMcp,
 } from "./skillRegistry";
 import { createMcpClient } from "./mcpClient";
 import { resolveTransportKind } from "./mcpTransport";
 import { createMcpTransportClient } from "./mcpTransportClient";
 import { createMaxMode } from "./providers/maxMode";
-import { createSkillExecutor } from "./skillExecutor";
 import { createScheduledTaskStore } from "./taskStore";
 import { createTaskSchedulerService } from "./taskSchedulerService";
 import { createToolAuditLog } from "./toolAuditLog";
@@ -96,7 +102,7 @@ import { runCheckpointWriterActor } from "./actors/checkpointWriterActor";
 import { createWorkflowRuntime } from "./workflow/workflowRuntime";
 import { registerDeepResearchWorkflow } from "./workflow/deepResearchWorkflow";
 import { registerActorTool } from "./actors/actorTool";
-import { registerWorkflowTool } from "./workflow/workflowTool";
+import { readFeatureFlags } from "../shared/featureFlags";
 import {
   createCheckpointRepository,
 } from "./storage/repositories/checkpointRepository";
@@ -281,12 +287,11 @@ export function createAppContainer(options: {
     if (storageBackendCache) return storageBackendCache;
     const resolved = resolveStorageBackend();
     if (resolved !== "json") {
-      try {
-        storage(); // ensure the native module loads + migrates
-      } catch (error) {
+      const opened = storage(); // ensure the native module loads + migrates
+      if (!opened) {
         // eslint-disable-next-line no-console
         console.warn(
-          `[storage] SQLite backend unavailable (${String(error)}); falling back to json.`,
+          "[storage] SQLite backend unavailable; falling back to json.",
         );
         storageBackendCache = "json";
         return "json";
@@ -310,6 +315,10 @@ export function createAppContainer(options: {
         return null;
       }
     });
+  }
+
+  function activeSqliteStorage(): Storage | null {
+    return storageBackend() === "json" ? null : storage();
   }
 
   const modelSettingsStore = createModelSettingsStore({
@@ -648,19 +657,31 @@ export function createAppContainer(options: {
         discoverSkills: () => discoverSkills({ skillsDir }),
         historyIndexStore: historyIndexStore(),
       });
-      // P6: register the actor + workflow tools on the dynamic registry so the
-      // model can spawn sub-agents and run workflows (e.g. deep-research).
+      // Actor execution depends on the SQLite checkpoint graph. Do not
+      // advertise a model-callable tool when the active JSON backend cannot
+      // execute it. Workflow networking remains disabled below until its
+      // permission path is complete.
       const registry = executor.getRegistry();
-      registerActorTool(registry, { actorRuntime: actorRuntime() });
-      registerWorkflowTool(registry, { workflowRuntime: workflowRuntime() });
+      if (activeSqliteStorage()) {
+        registerActorTool(registry, { actorRuntime: actorRuntime() });
+      }
       // v3.6.0: Track MCP initialization promise so errors are surfaced
       // instead of silently swallowed (CONC-01).
-      initializeMcpTools(executor).catch((error: unknown) => {
-        console.error(
-          "[mcp] Background MCP tool initialization failed:",
-          error instanceof Error ? error.message : String(error),
-        );
-      });
+      if (shouldAutoInitializeSkillMcp(process.env)) {
+        const initialization = initializeMcpTools(executor);
+        const trackedInitialization = initialization.finally(() => {
+          if (mcpInitializationPromise === trackedInitialization) {
+            mcpInitializationPromise = null;
+          }
+        });
+        mcpInitializationPromise = trackedInitialization;
+        mcpInitializationPromise.catch((error: unknown) => {
+          console.error(
+            "[mcp] Background MCP tool initialization failed:",
+            error instanceof Error ? error.message : String(error),
+          );
+        });
+      }
       return executor;
     });
   }
@@ -676,19 +697,19 @@ export function createAppContainer(options: {
 
   function agentValidationStore() {
     return lazy("agentValidationStore", () =>
-      createAgentValidationStore({ configDir, backend: storageBackend(), storage: storage() ?? undefined }),
+      createAgentValidationStore({ configDir, backend: storageBackend(), storage: activeSqliteStorage() ?? undefined }),
     );
   }
 
   function scheduledTaskStore() {
     return lazy("scheduledTaskStore", () =>
-      createScheduledTaskStore({ configDir, backend: storageBackend(), storage: storage() ?? undefined }),
+      createScheduledTaskStore({ configDir, backend: storageBackend(), storage: activeSqliteStorage() ?? undefined }),
     );
   }
 
   function toolAuditLog() {
     return lazy("toolAuditLog", () =>
-      createToolAuditLog({ configDir, backend: storageBackend(), storage: storage() ?? undefined }),
+      createToolAuditLog({ configDir, backend: storageBackend(), storage: activeSqliteStorage() ?? undefined }),
     );
   }
 
@@ -717,7 +738,7 @@ export function createAppContainer(options: {
 
   function agentRunStore() {
     return lazy("agentRunStore", () =>
-      createAgentRunStore({ configDir, backend: storageBackend(), storage: storage() ?? undefined }),
+      createAgentRunStore({ configDir, backend: storageBackend(), storage: activeSqliteStorage() ?? undefined }),
     );
   }
 
@@ -727,7 +748,7 @@ export function createAppContainer(options: {
 
   function agentTrajectoryStore() {
     return lazy("agentTrajectoryStore", () =>
-      createAgentTrajectoryStore({ configDir, backend: storageBackend(), storage: storage() ?? undefined }),
+      createAgentTrajectoryStore({ configDir, backend: storageBackend(), storage: activeSqliteStorage() ?? undefined }),
     );
   }
 
@@ -797,7 +818,7 @@ export function createAppContainer(options: {
 
   function memoryProfileStore() {
     return lazy("memoryProfileStore", () =>
-      createMemoryProfileStore({ configDir, backend: storageBackend(), storage: storage() ?? undefined }),
+      createMemoryProfileStore({ configDir, backend: storageBackend(), storage: activeSqliteStorage() ?? undefined }),
     );
   }
 
@@ -977,14 +998,14 @@ export function createAppContainer(options: {
   // behavior, so wiring is zero-regression).
   function checkpointRepository() {
     return lazy("checkpointRepository", () => {
-      const s = storage();
+      const s = activeSqliteStorage();
       return s ? createCheckpointRepository(s) : null;
     });
   }
 
   function memoryRepository() {
     return lazy("memoryRepository", () => {
-      const s = storage();
+      const s = activeSqliteStorage();
       return s ? createMemoryRepository(s) : null;
     });
   }
@@ -1022,7 +1043,7 @@ export function createAppContainer(options: {
   // cutover is incremental; default flag `p5-fork` is honored when triggered).
   function runRepository() {
     return lazy("runRepository", () => {
-      const s = storage();
+      const s = activeSqliteStorage();
       return s ? createRunRepository(s) : null;
     });
   }
@@ -1030,10 +1051,10 @@ export function createAppContainer(options: {
   function actorRuntime() {
     return lazy("actorRuntime", () =>
       createActorRuntime({
-        ...(storage() ? { storage: storage()! } : {}),
+        ...(activeSqliteStorage() ? { storage: activeSqliteStorage()! } : {}),
         deps: {
           runActor: async (input, forkContext, cancel) => {
-            const s = storage();
+            const s = activeSqliteStorage();
             if (!s) return { status: "error", summary: "no storage", filesTouched: [] };
             return runCheckpointWriterActor(input, forkContext, cancel, {
               runRepository: createRunRepository(s),
@@ -1047,7 +1068,7 @@ export function createAppContainer(options: {
 
   function checkpointWriterOrchestrator() {
     return lazy("checkpointWriterOrchestrator", () => {
-      const s = storage();
+      const s = activeSqliteStorage();
       if (!s) return null;
       return createCheckpointWriterOrchestrator({
         storage: s,
@@ -1057,12 +1078,16 @@ export function createAppContainer(options: {
     });
   }
 
-  // P6 workflow runtime. Host hooks delegate to the actor runtime + existing
-  // webfetch/websearch tool handlers (wired when those tools are registered).
-  // The built-in deep-research workflow is registered eagerly. P7 dream/distill
-  // consumes this for multi-source fact gathering.
+  // P6 workflow runtime. The built-in workflow is retained for explicit
+  // experiments, but network host hooks fail closed until they share the normal
+  // permission and outbound-policy path. The tool is therefore not registered.
   function workflowRuntime() {
     return lazy("workflowRuntime", () => {
+      if (readFeatureFlags().ZEROX_WORKFLOW_RUNTIME !== "on") {
+        throw new Error(
+          "Workflow runtime is disabled until permissioned network hooks are configured.",
+        );
+      }
       const rt = createWorkflowRuntime({
         async spawnActor(input) {
           // Delegate to the actor runtime; voters are ephemeral.
@@ -1070,8 +1095,12 @@ export function createAppContainer(options: {
           const handle = runtime.spawn(input);
           return runtime.wait(handle.actorId);
         },
-        async webfetch(url) { return `[webfetch not wired in container: ${url}]`; },
-        async websearch(q) { return [{ url: `https://example.com/${encodeURIComponent(q)}`, title: q, snippet: q }]; },
+        async webfetch() {
+          throw new Error("Workflow webfetch is unavailable until permission wiring is configured.");
+        },
+        async websearch() {
+          throw new Error("Workflow websearch is unavailable until permission wiring is configured.");
+        },
       });
       registerDeepResearchWorkflow(rt.register.bind(rt));
       return rt;
@@ -1083,14 +1112,21 @@ export function createAppContainer(options: {
   // alongside the memory-maintenance timer; runNow() supports /dream /distill.
   function sessionRepository() {
     return lazy("sessionRepository", () => {
-      const s = storage();
+      const s = activeSqliteStorage();
       return s ? createSessionRepository(s) : null;
     });
   }
 
   function selfImprovementService() {
     return lazy("selfImprovementService", () => {
-      const s = storage();
+      const flags = readFeatureFlags();
+      if (
+        flags.ZEROX_SELF_IMPROVEMENT !== "on" ||
+        flags.ZEROX_WORKFLOW_RUNTIME !== "on"
+      ) {
+        return null;
+      }
+      const s = activeSqliteStorage();
       if (!s) return null;
       return createSelfImprovementService({
         storage: s,
@@ -1119,8 +1155,9 @@ export function createAppContainer(options: {
   }
 
   function agentRunnerService() {
-    return lazy("agentRunnerService", () =>
-      createAgentRunnerService({
+    return lazy("agentRunnerService", () => {
+      const maxModeActorRuntime = activeSqliteStorage() ? actorRuntime() : undefined;
+      return createAgentRunnerService({
         taskStore: scheduledTaskStore(),
         runStore: agentRunStore(),
         resolveSkill: async (skillName: string) => {
@@ -1148,9 +1185,12 @@ export function createAppContainer(options: {
             return createMaxMode(provider).runStep(req, opts);
           },
         },
-        actorRuntimeForMaxMode: actorRuntime(),
-      }),
-    );
+        ...(maxModeActorRuntime
+          ? { actorRuntimeForMaxMode: maxModeActorRuntime }
+          : {}),
+        runAgentLoop,
+      });
+    });
   }
 
   function agentGoalValidatorRegistry() {
@@ -1433,22 +1473,40 @@ export function createAppContainer(options: {
   }
 
   let mcpInitialized = false;
+  let runtimeShuttingDown = false;
+  let mcpInitializationPromise: Promise<void> | null = null;
   const activeMcpClients: Awaited<ReturnType<typeof createMcpClient>>[] = [];
   const activeTaskRunControllers = new Map<string, AbortController>();
+  const activeTaskRunCompletions = new Map<string, Promise<void>>();
+  const activeRuntimeInvocationCompletions = new Set<Promise<unknown>>();
+  const executionReservations = new Set<string>();
+  const goalOperationStates = new Map<string, {
+    epoch: number;
+    pending: number;
+    tail: Promise<void>;
+  }>();
+
+  function trackRuntimeInvocation<T>(operation: () => Promise<T>): Promise<T> {
+    const invocation = operation();
+    activeRuntimeInvocationCompletions.add(invocation);
+    void invocation.then(
+      () => activeRuntimeInvocationCompletions.delete(invocation),
+      () => activeRuntimeInvocationCompletions.delete(invocation),
+    );
+    return invocation;
+  }
 
   async function initializeMcpTools(
     toolExecutor: ReturnType<typeof createAgentToolExecutor>,
   ): Promise<void> {
-    if (mcpInitialized) return;
+    if (mcpInitialized || runtimeShuttingDown) return;
     mcpInitialized = true;
 
-    const skillExecutor = createSkillExecutor();
-
     try {
-      const graph = await buildSkillGraph({ skillsDir });
       const mcpConfigs = await collectSkillMcpConfigs({ skillsDir });
 
       for (const config of mcpConfigs) {
+        if (runtimeShuttingDown) break;
         try {
           // P8: resolve the MCP transport kind (default stdio for backward
           // compat). http/sse configs route through the transport-backed
@@ -1472,16 +1530,26 @@ export function createAppContainer(options: {
                   headers: (config as { headers?: Record<string, string> }).headers,
                 });
 
-          await client.connect();
           activeMcpClients.push(client);
+          await client.connect();
+          if (runtimeShuttingDown) {
+            await client.disconnect();
+            continue;
+          }
 
           const mcpTools = await client.listTools();
           for (const tool of mcpTools) {
             try {
               toolExecutor.getRegistry().register(
                 tool,
-                async (args) => {
-                  const result = await client.callTool(tool.function.name, args);
+                async (args, executionOptions) => {
+                  const result = await client.callTool(
+                    tool.function.name,
+                    args,
+                    executionOptions?.signal
+                      ? { signal: executionOptions.signal }
+                      : undefined,
+                  );
                   if (result.ok) return result;
                   return { ok: false, error: result.error };
                 },
@@ -1504,31 +1572,10 @@ export function createAppContainer(options: {
         }
       }
 
-      for (const skillName of graph.order) {
-        const skill = graph.skills.find((s) => s.manifest.name === skillName);
-        if (!skill?.manifest.tools?.length) continue;
-
-        for (const toolDef of skill.manifest.tools) {
-          try {
-            const handler = skillExecutor.getToolHandler(skill, toolDef);
-
-            toolExecutor.getRegistry().register(
-              {
-                type: "function",
-                function: {
-                  name: toolDef.name,
-                  description: toolDef.description,
-                  parameters: toolDef.parameters,
-                },
-              },
-              handler,
-              `skill:${skill.manifest.name}`,
-            );
-          } catch {
-            // Skip tools that conflict
-          }
-        }
-      }
+      // Script-backed manifest tools are intentionally not registered here.
+      // A child process alone is not a filesystem/network sandbox; exposing
+      // arbitrary Node entrypoints would bypass the manifest permission model.
+      // They remain unavailable until an OS-enforced capability sandbox exists.
     } catch (error) {
       console.error(
         `MCP initialization failed: ${
@@ -1543,7 +1590,35 @@ export function createAppContainer(options: {
     writeChatTranscript?: boolean;
   };
 
-  async function runAgentTask(
+  function runAgentTask(
+    taskId: string,
+    runOptions?: RunAgentTaskOptions,
+  ): Promise<RunScheduledTaskResult> {
+    if (runtimeShuttingDown) {
+      return Promise.resolve({
+        ok: false,
+        message: "应用正在退出，未启动新的任务运行。",
+      });
+    }
+    const reservation = `task:${taskId}`;
+    if (executionReservations.has(reservation)) {
+      return Promise.resolve({
+        ok: false,
+        message: "这个任务已经在运行中。",
+      });
+    }
+    executionReservations.add(reservation);
+    const invocation = trackRuntimeInvocation(() =>
+      runAgentTaskAccepted(taskId, runOptions),
+    );
+    void invocation.then(
+      () => executionReservations.delete(reservation),
+      () => executionReservations.delete(reservation),
+    );
+    return invocation;
+  }
+
+  async function runAgentTaskAccepted(
     taskId: string,
     runOptions?: RunAgentTaskOptions,
   ): Promise<RunScheduledTaskResult> {
@@ -1555,6 +1630,9 @@ export function createAppContainer(options: {
     }
 
     const task = await scheduledTaskStore().get(taskId);
+    if (runtimeShuttingDown) {
+      return { ok: false, message: "应用正在退出，任务运行已取消。" };
+    }
     if (!task) {
       return {
         ok: false,
@@ -1563,8 +1641,16 @@ export function createAppContainer(options: {
     }
 
     const sessionId = await resolveTaskRunSessionId(task, runOptions);
+    if (runtimeShuttingDown) {
+      return { ok: false, message: "应用正在退出，任务运行已取消。" };
+    }
     const controller = new AbortController();
+    let settleCompletion: (() => void) | undefined;
+    const completion = new Promise<void>((resolve) => {
+      settleCompletion = resolve;
+    });
     activeTaskRunControllers.set(taskId, controller);
+    activeTaskRunCompletions.set(taskId, completion);
     emitAgentRunsChanged({ reason: "active_execution_changed", taskId });
 
     try {
@@ -1584,6 +1670,10 @@ export function createAppContainer(options: {
     } finally {
       if (activeTaskRunControllers.get(taskId) === controller) {
         activeTaskRunControllers.delete(taskId);
+      }
+      settleCompletion?.();
+      if (activeTaskRunCompletions.get(taskId) === completion) {
+        activeTaskRunCompletions.delete(taskId);
       }
       emitAgentRunsChanged({ reason: "active_execution_changed", taskId });
     }
@@ -1626,8 +1716,37 @@ export function createAppContainer(options: {
     });
   }
 
-  async function resumeAgentRun(runId: string): Promise<RunScheduledTaskResult> {
+  function resumeAgentRun(runId: string): Promise<RunScheduledTaskResult> {
+    if (runtimeShuttingDown) {
+      return Promise.resolve({
+        ok: false,
+        message: "应用正在退出，未恢复任务运行。",
+      });
+    }
+    const runReservation = `run:${runId}`;
+    if (executionReservations.has(runReservation)) {
+      return Promise.resolve({ ok: false, message: "这个运行已经在恢复中。" });
+    }
+    executionReservations.add(runReservation);
+    const reservations = [runReservation];
+    const invocation = trackRuntimeInvocation(() =>
+      resumeAgentRunAccepted(runId, reservations),
+    );
+    void invocation.then(
+      () => reservations.forEach((reservation) => executionReservations.delete(reservation)),
+      () => reservations.forEach((reservation) => executionReservations.delete(reservation)),
+    );
+    return invocation;
+  }
+
+  async function resumeAgentRunAccepted(
+    runId: string,
+    reservations: string[],
+  ): Promise<RunScheduledTaskResult> {
     const checkpoint = await agentExecutionStore().get(runId);
+    if (runtimeShuttingDown) {
+      return { ok: false, message: "应用正在退出，任务恢复已取消。" };
+    }
 
     if (!checkpoint) {
       return {
@@ -1636,15 +1755,26 @@ export function createAppContainer(options: {
       };
     }
 
-    if (activeTaskRunControllers.has(checkpoint.taskId)) {
+    const taskReservation = `task:${checkpoint.taskId}`;
+    if (
+      executionReservations.has(taskReservation) ||
+      activeTaskRunControllers.has(checkpoint.taskId)
+    ) {
       return {
         ok: false,
         message: "这个任务已经在运行中。",
       };
     }
+    executionReservations.add(taskReservation);
+    reservations.push(taskReservation);
 
     const controller = new AbortController();
+    let settleCompletion: (() => void) | undefined;
+    const completion = new Promise<void>((resolve) => {
+      settleCompletion = resolve;
+    });
     activeTaskRunControllers.set(checkpoint.taskId, controller);
+    activeTaskRunCompletions.set(checkpoint.taskId, completion);
     emitAgentRunsChanged({
       reason: "active_execution_changed",
       runId,
@@ -1664,6 +1794,10 @@ export function createAppContainer(options: {
     } finally {
       if (activeTaskRunControllers.get(checkpoint.taskId) === controller) {
         activeTaskRunControllers.delete(checkpoint.taskId);
+      }
+      settleCompletion?.();
+      if (activeTaskRunCompletions.get(checkpoint.taskId) === completion) {
+        activeTaskRunCompletions.delete(checkpoint.taskId);
       }
       emitAgentRunsChanged({
         reason: "active_execution_changed",
@@ -1841,7 +1975,17 @@ export function createAppContainer(options: {
     });
   }
 
-  async function confirmGoalDraft(
+  function confirmGoalDraft(
+    draftId: string,
+    edit?: GoalDraftEdit,
+  ): Promise<GoalDraftConfirmResult> {
+    if (runtimeShuttingDown) {
+      return Promise.resolve({ ok: false, message: "应用正在退出，未启动目标。" });
+    }
+    return trackRuntimeInvocation(() => confirmGoalDraftAccepted(draftId, edit));
+  }
+
+  async function confirmGoalDraftAccepted(
     draftId: string,
     edit?: GoalDraftEdit,
   ): Promise<GoalDraftConfirmResult> {
@@ -1887,7 +2031,77 @@ export function createAppContainer(options: {
     return goalDraftService().discard(draftId);
   }
 
-  async function runGoalOperation(
+  function runGoalOperation(
+    goalId: string,
+    operation: () => Promise<ChatSessionGoalSummary>,
+    options?: { preempt?: boolean },
+  ): Promise<{ ok: boolean; goal?: Goal; message?: string }> {
+    if (runtimeShuttingDown) {
+      return Promise.resolve({ ok: false, message: "应用正在退出，未启动目标操作。" });
+    }
+    const state = goalOperationStates.get(goalId) ?? {
+      epoch: 0,
+      pending: 0,
+      tail: Promise.resolve(),
+    };
+    if (!goalOperationStates.has(goalId)) {
+      goalOperationStates.set(goalId, state);
+    }
+    state.pending += 1;
+    if (options?.preempt) {
+      // A preempting cancel runs immediately, invalidates older queued work,
+      // and becomes the barrier that every later mutation must await.
+      state.epoch += 1;
+      const invocation = trackRuntimeInvocation(() =>
+        runGoalOperationAccepted(operation),
+      );
+      const tail = invocation.then(
+        () => undefined,
+        () => undefined,
+      );
+      state.tail = tail;
+      finishGoalOperationState(goalId, state, tail);
+      return invocation;
+    }
+
+    const operationEpoch = state.epoch;
+    const previous = state.tail;
+    const invocation = trackRuntimeInvocation(async () => {
+      await previous.catch(() => undefined);
+      if (runtimeShuttingDown) {
+        return { ok: false, message: "应用正在退出，目标操作已取消。" };
+      }
+      if (operationEpoch !== state.epoch) {
+        return { ok: false, message: "目标操作已被更高优先级的取消请求取代。" };
+      }
+      return runGoalOperationAccepted(operation);
+    });
+    const tail = invocation.then(
+      () => undefined,
+      () => undefined,
+    );
+    state.tail = tail;
+    finishGoalOperationState(goalId, state, tail);
+    return invocation;
+  }
+
+  function finishGoalOperationState(
+    goalId: string,
+    state: { epoch: number; pending: number; tail: Promise<void> },
+    completion: Promise<void>,
+  ): void {
+    void completion.finally(() => {
+      state.pending -= 1;
+      if (
+        state.pending === 0 &&
+        goalOperationStates.get(goalId) === state
+      ) {
+        goalOperationStates.delete(goalId);
+      }
+    });
+  }
+
+  async function runGoalOperationAccepted(
     operation: () => Promise<ChatSessionGoalSummary>,
   ): Promise<{ ok: boolean; goal?: Goal; message?: string }> {
     try {
@@ -1907,9 +2121,10 @@ export function createAppContainer(options: {
   }
 
   async function runGoalBudgetOperation(
+    goalId: string,
     operation: () => Promise<ChatSessionGoalSummary>,
   ): Promise<{ ok: boolean; goal?: Goal; message?: string }> {
-    return runGoalOperation(operation);
+    return runGoalOperation(goalId, operation);
   }
 
   async function readToolResultRef(
@@ -1980,6 +2195,63 @@ export function createAppContainer(options: {
     return lazyStore.get(key) as T;
   }
 
+  async function shutdownRuntime(): Promise<void> {
+    runtimeShuttingDown = true;
+    for (const controller of activeTaskRunControllers.values()) {
+      if (!controller.signal.aborted) {
+        controller.abort("application_shutdown");
+      }
+    }
+    const goalService = lazyStore.get("goalChatService") as
+      | GoalChatService
+      | undefined;
+    const goalClose = goalService?.shutdown() ?? Promise.resolve();
+
+    const initialMcpCloses = activeMcpClients
+      .splice(0)
+      .map((client) => client.disconnect());
+    (lazyStore.get("selfImprovementService") as
+      | ReturnType<typeof createSelfImprovementService>
+      | undefined)?.stop();
+    const workerClose = (lazyStore.get("toolWorker") as
+      | ReturnType<typeof createToolWorker>
+      | undefined)?.close() ?? Promise.resolve();
+    const actorClose = (lazyStore.get("actorRuntime") as
+      | ReturnType<typeof createActorRuntime>
+      | undefined)?.shutdown?.() ?? Promise.resolve();
+    const drainResults = await Promise.allSettled([
+      Promise.allSettled([...activeTaskRunCompletions.values()]),
+      Promise.allSettled([...activeRuntimeInvocationCompletions]),
+      goalClose,
+      Promise.allSettled(initialMcpCloses),
+      mcpInitializationPromise ?? Promise.resolve(),
+      workerClose,
+      actorClose,
+    ]);
+    const lateMcpCloses = activeMcpClients
+      .splice(0)
+      .map((client) => client.disconnect());
+    const lateMcpResults = await Promise.allSettled(lateMcpCloses);
+    const flushResults = await Promise.allSettled([
+      (lazyStore.get("agentRunStore") as AgentRunStore | undefined)
+        ?.flushShadowWrites() ?? Promise.resolve(),
+      (lazyStore.get("agentTrajectoryStore") as AgentTrajectoryStore | undefined)
+        ?.flushShadowWrites() ?? Promise.resolve(),
+    ]);
+    let storageCloseError: unknown;
+    try {
+      (lazyStore.get("storage") as Storage | null | undefined)?.close();
+    } catch (error) {
+      storageCloseError = error;
+    }
+    const failed = [...drainResults, ...lateMcpResults, ...flushResults].find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (failed || storageCloseError) {
+      throw failed?.reason ?? storageCloseError;
+    }
+  }
+
   return {
     appMeta,
     getNavigationSections,
@@ -2048,37 +2320,41 @@ export function createAppContainer(options: {
     runGoalOperation,
     runGoalBudgetOperation,
     increaseGoalBudget: (goalId: string, delta: Partial<GoalBudget>) =>
-      runGoalBudgetOperation(() => goalChatService().increaseBudget(goalId, delta)),
+      runGoalBudgetOperation(goalId, () => goalChatService().increaseBudget(goalId, delta)),
     replanGoal: (goalId: string, instructions: string) =>
-      runGoalOperation(() => goalChatService().replan(goalId, instructions)),
+      runGoalOperation(goalId, () => goalChatService().replan(goalId, instructions)),
     retryGoal: (goalId: string) =>
-      runGoalOperation(() => goalChatService().retry(goalId)),
+      runGoalOperation(goalId, () => goalChatService().retry(goalId)),
     continueGoalAcceptance: (goalId: string) =>
-      runGoalOperation(() => goalChatService().continueAcceptance(goalId)),
+      runGoalOperation(goalId, () => goalChatService().continueAcceptance(goalId)),
     markGoalCompletedUnverified: (goalId: string) =>
-      runGoalOperation(() => goalChatService().markCompletedUnverified(goalId)),
-    async resumeInterruptedGoals() {
-      const activeGoals = await agentGoalStore().listActive();
-      const interrupted = activeGoals.filter(
-        (goal) => goal.status === "executing",
-      );
-      let recovered = 0;
-      for (const goal of interrupted) {
-        try {
-          const prepared = prepareInterruptedGoalForResume(goal);
-          if (prepared !== goal) {
-            await agentGoalStore().save(prepared);
-            recovered += 1;
+      runGoalOperation(goalId, () => goalChatService().markCompletedUnverified(goalId)),
+    resumeInterruptedGoals() {
+      if (runtimeShuttingDown) return Promise.resolve(0);
+      return trackRuntimeInvocation(async () => {
+        const activeGoals = await agentGoalStore().listActive();
+        const interrupted = activeGoals.filter(
+          (goal) => goal.status === "executing",
+        );
+        let recovered = 0;
+        for (const goal of interrupted) {
+          try {
+            const prepared = prepareInterruptedGoalForResume(goal);
+            if (prepared !== goal) {
+              await agentGoalStore().save(prepared);
+              recovered += 1;
+            }
+          } catch (error) {
+            console.error(`Failed to recover interrupted goal ${goal.id}:`, error);
           }
-        } catch (error) {
-          console.error(`Failed to recover interrupted goal ${goal.id}:`, error);
         }
-      }
-      return recovered;
+        return recovered;
+      });
     },
     initializeMcpTools,
     getActiveMcpClients: () => activeMcpClients,
     getActiveTaskRunControllers: () => activeTaskRunControllers,
+    shutdownRuntime,
     readToolResultRef,
     runMemoryEvals,
     runAgentQualityEvals,

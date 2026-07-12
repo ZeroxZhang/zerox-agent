@@ -111,7 +111,7 @@ export type TaskPermissionPolicyValidationResult = {
 
 const destructiveShellPattern =
   /\b(rm\s+-[^\n]*(r|f)|git\s+reset\s+--hard|git\s+push\s+(-f|--force)|drop\s+(table|database)|truncate\s+table|kubectl\s+delete|docker\s+rm\s+-f)\b/i;
-const shellControlOperatorPattern = /(;|&&|\|\||`|\$\(|\||[<>])/;
+const shellControlOperatorPattern = /([\r\n]|;|&&|\|\||`|\$\(|\||[<>])/;
 
 export function getDefaultTaskPermissionPolicy(): TaskPermissionPolicy {
   return {

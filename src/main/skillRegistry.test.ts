@@ -2,7 +2,10 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { discoverSkills } from "./skillRegistry";
+import {
+  discoverSkills,
+  shouldAutoInitializeSkillMcp,
+} from "./skillRegistry";
 
 describe("skill registry", () => {
   let tempDir: string;
@@ -13,6 +16,16 @@ describe("skill registry", () => {
 
   afterEach(async () => {
     await rm(tempDir, { force: true, recursive: true });
+  });
+
+  it("requires explicit opt-in before skill MCP servers auto-start", () => {
+    expect(shouldAutoInitializeSkillMcp({})).toBe(false);
+    expect(shouldAutoInitializeSkillMcp({ ZEROX_ENABLE_SKILL_MCP: "0" })).toBe(
+      false,
+    );
+    expect(shouldAutoInitializeSkillMcp({ ZEROX_ENABLE_SKILL_MCP: "1" })).toBe(
+      true,
+    );
   });
 
   it("discovers valid skill folders and reports invalid ones", async () => {

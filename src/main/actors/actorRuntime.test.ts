@@ -81,6 +81,77 @@ describe("ActorRuntime v0", () => {
     expect(runtime.status(handle.actorId)).toBe("done");
   });
 
+  it("keeps terminal wait, status, and ownership semantics without active resources", async () => {
+    const runtime = createActorRuntime({
+      deps: {
+        runActor: async () => ({
+          status: "done",
+          summary: "cached outcome",
+          filesTouched: [],
+        }),
+      },
+    });
+    const handle = runtime.spawn({
+      contextMode: "state",
+      lifecycle: "ephemeral",
+      task: "finish and release",
+      parentRunId: "run-owner",
+    });
+
+    await handle.outcome;
+
+    await expect(runtime.wait(handle.actorId)).resolves.toMatchObject({
+      status: "done",
+      summary: "cached outcome",
+    });
+    expect(runtime.status(handle.actorId)).toBe("done");
+    expect(runtime.isOwnedBy(handle.actorId, "run-owner")).toBe(true);
+    expect(runtime.isOwnedBy(handle.actorId, "another-run")).toBe(false);
+  });
+
+  it("bounds terminal outcomes and evicts the oldest lightweight record", async () => {
+    const runtime = createActorRuntime({
+      terminalOutcomeCacheLimit: 2,
+      deps: {
+        runActor: async (input) => ({
+          status: "done",
+          summary: input.task,
+          filesTouched: [],
+        }),
+      },
+    });
+    const first = runtime.spawn({
+      contextMode: "state",
+      lifecycle: "ephemeral",
+      task: "first",
+      parentRunId: "run-owner",
+    });
+    await first.outcome;
+    const second = runtime.spawn({
+      contextMode: "state",
+      lifecycle: "ephemeral",
+      task: "second",
+      parentRunId: "run-owner",
+    });
+    await second.outcome;
+    const third = runtime.spawn({
+      contextMode: "state",
+      lifecycle: "ephemeral",
+      task: "third",
+      parentRunId: "run-owner",
+    });
+    await third.outcome;
+
+    await expect(runtime.wait(first.actorId)).rejects.toThrow("unknown actor");
+    await expect(runtime.wait(second.actorId)).resolves.toMatchObject({
+      summary: "second",
+    });
+    await expect(runtime.wait(third.actorId)).resolves.toMatchObject({
+      summary: "third",
+    });
+    expect(runtime.isOwnedBy(first.actorId, "run-owner")).toBe(false);
+  });
+
   it("cancel aborts the actor and resolves canceled", async () => {
     let aborted = false;
     const runtime = createActorRuntime({
@@ -121,6 +192,149 @@ describe("ActorRuntime v0", () => {
 
     expect(outcome.status).toBe("canceled");
     expect(runtime.status(handle.actorId)).toBe("canceled");
+  });
+
+  it("keeps a late successful resolution canceled after abort", async () => {
+    let resolveActor!: (outcome: ActorOutcome) => void;
+    const runtime = createActorRuntime({
+      deps: {
+        runActor: async () =>
+          new Promise<ActorOutcome>((resolve) => {
+            resolveActor = resolve;
+          }),
+      },
+    });
+    const handle = runtime.spawn({
+      contextMode: "state",
+      lifecycle: "ephemeral",
+      task: "ignore abort",
+    });
+
+    runtime.cancel(handle.actorId, "parent stopped");
+    resolveActor({ status: "done", summary: "late success", filesTouched: [] });
+
+    await expect(handle.outcome).resolves.toMatchObject({
+      status: "canceled",
+      summary: "Error: parent stopped",
+    });
+    expect(runtime.status(handle.actorId)).toBe("canceled");
+  });
+
+  it("aborts and drains every active actor during shutdown", async () => {
+    let abortCount = 0;
+    const runtime = createActorRuntime({
+      deps: {
+        runActor: async (_input, _ctx, cancel) =>
+          new Promise<ActorOutcome>((resolve) => {
+            cancel.addEventListener("abort", () => {
+              abortCount += 1;
+              resolve({
+                status: "canceled",
+                summary: "application shutdown",
+                filesTouched: [],
+              });
+            }, { once: true });
+          }),
+      },
+    });
+    const first = runtime.spawn({ contextMode: "state", lifecycle: "ephemeral", task: "one" });
+    const second = runtime.spawn({ contextMode: "state", lifecycle: "ephemeral", task: "two" });
+
+    await runtime.shutdown?.();
+
+    expect(abortCount).toBe(2);
+    await expect(first.outcome).resolves.toMatchObject({ status: "canceled" });
+    await expect(second.outcome).resolves.toMatchObject({ status: "canceled" });
+  });
+
+  it("closes spawn admission before taking the shutdown snapshot", async () => {
+    const runtime = createActorRuntime({
+      deps: {
+        runActor: async (_input, _ctx, cancel) =>
+          new Promise<ActorOutcome>((resolve) => {
+            cancel.addEventListener("abort", () => {
+              resolve({
+                status: "canceled",
+                summary: "application shutdown",
+                filesTouched: [],
+              });
+            }, { once: true });
+          }),
+      },
+    });
+    const active = runtime.spawn({
+      contextMode: "state",
+      lifecycle: "ephemeral",
+      task: "active before shutdown",
+    });
+
+    const shutdown = runtime.shutdown?.();
+
+    expect(() => runtime.spawn({
+      contextMode: "state",
+      lifecycle: "ephemeral",
+      task: "late actor",
+    })).toThrow("Actor runtime is shutting down");
+    await shutdown;
+    await expect(active.outcome).resolves.toMatchObject({ status: "canceled" });
+  });
+
+  it("clears cached terminal outcomes during shutdown", async () => {
+    const runtime = createActorRuntime({
+      deps: {
+        runActor: async () => ({
+          status: "done",
+          summary: "terminal",
+          filesTouched: [],
+        }),
+      },
+    });
+    const handle = runtime.spawn({
+      contextMode: "state",
+      lifecycle: "ephemeral",
+      task: "terminal before shutdown",
+      parentRunId: "run-owner",
+    });
+    await handle.outcome;
+
+    await runtime.shutdown?.();
+
+    await expect(runtime.wait(handle.actorId)).rejects.toThrow("unknown actor");
+    expect(runtime.isOwnedBy(handle.actorId, "run-owner")).toBe(false);
+  });
+
+  it("drains an already-canceled actor whose outcome has not settled yet", async () => {
+    let releaseActor!: () => void;
+    const runtime = createActorRuntime({
+      deps: {
+        runActor: async () =>
+          new Promise<ActorOutcome>((resolve) => {
+            releaseActor = () =>
+              resolve({
+                status: "canceled",
+                summary: "released after cancellation",
+                filesTouched: [],
+              });
+          }),
+      },
+    });
+    const handle = runtime.spawn({
+      contextMode: "state",
+      lifecycle: "ephemeral",
+      task: "cancel before shutdown",
+    });
+    runtime.cancel(handle.actorId, "cancel first");
+
+    let shutdownSettled = false;
+    const shutdown = runtime.shutdown?.().then(() => {
+      shutdownSettled = true;
+    });
+    await Promise.resolve();
+    expect(shutdownSettled).toBe(false);
+
+    releaseActor();
+    await shutdown;
+    expect(shutdownSettled).toBe(true);
   });
 
   it("runActor errors become error outcomes (never throw to caller)", async () => {
@@ -202,6 +416,30 @@ describe("checkpointWriterActor (rule-based fallback)", () => {
       { runRepository: createRunRepository(storage), checkpointRepository: createCheckpointRepository(storage) },
     );
     expect(outcome.status).toBe("error");
+    storage.close();
+  });
+
+  it("does not write a checkpoint after cancellation", async () => {
+    const storage = await createInMemoryStorage();
+    const runs = createRunRepository(storage);
+    const checkpoints = createCheckpointRepository(storage);
+    const controller = new AbortController();
+    controller.abort(new Error("stop checkpoint actor"));
+
+    const outcome = await runCheckpointWriterActor(
+      {
+        contextMode: "state",
+        lifecycle: "ephemeral",
+        task: "write checkpoint",
+        parentRunId: "run-canceled",
+      },
+      undefined,
+      controller.signal,
+      { runRepository: runs, checkpointRepository: checkpoints },
+    );
+
+    expect(outcome.status).toBe("canceled");
+    expect(checkpoints.latest("run-canceled", "markdown")).toBeNull();
     storage.close();
   });
 });

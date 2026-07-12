@@ -31,14 +31,39 @@ export type McpToolResult =
 
 export type McpClient = {
   connect(): Promise<void>;
-  disconnect(): void;
+  disconnect(): Promise<void>;
   listTools(): Promise<ToolDefinition[]>;
   callTool(
     name: string,
     args: Record<string, unknown>,
+    options?: { signal?: AbortSignal },
   ): Promise<McpToolResult>;
   isConnected(): boolean;
 };
+
+const MCP_CHILD_ENV_ALLOWLIST = [
+  "HOME",
+  "LANG",
+  "LC_ALL",
+  "PATH",
+  "SHELL",
+  "TMPDIR",
+  "USER",
+] as const;
+
+export function buildMcpChildEnv(
+  parentEnv: NodeJS.ProcessEnv,
+  configuredEnv: Record<string, string> = {},
+): NodeJS.ProcessEnv {
+  const childEnv: NodeJS.ProcessEnv = {};
+  for (const key of MCP_CHILD_ENV_ALLOWLIST) {
+    const value = parentEnv[key];
+    if (value !== undefined) {
+      childEnv[key] = value;
+    }
+  }
+  return { ...childEnv, ...configuredEnv };
+}
 
 export function createMcpClient(config: McpServerConfig): McpClient {
   let childProcess: ReturnType<typeof spawn> | null = null;
@@ -65,6 +90,7 @@ export function createMcpClient(config: McpServerConfig): McpClient {
   function sendRequest(
     method: string,
     params?: Record<string, unknown>,
+    signal?: AbortSignal,
   ): Promise<JsonRpcResponse> {
     const proc = getProcess();
     const id = nextId++;
@@ -78,23 +104,45 @@ export function createMcpClient(config: McpServerConfig): McpClient {
     return new Promise((resolve, reject) => {
       pendingRequests.set(id, { resolve, reject });
 
+      const abortHandler = () => {
+        const reason = signal?.reason;
+        sendNotification("notifications/cancelled", {
+          requestId: id,
+          reason: reason instanceof Error ? reason.message : String(reason ?? "aborted"),
+        });
+        void terminateActiveProcess(
+          reason instanceof Error ? reason : new Error("MCP request aborted."),
+        );
+      };
+
       const timeout = setTimeout(() => {
-        pendingRequests.delete(id);
-        reject(new Error(`MCP request "${method}" timed out.`));
+        const error = new Error(`MCP request "${method}" timed out.`);
+        sendNotification("notifications/cancelled", {
+          requestId: id,
+          reason: error.message,
+        });
+        void terminateActiveProcess(error);
       }, 30000);
 
       const originalResolve = resolve;
       pendingRequests.set(id, {
         resolve: (value) => {
           clearTimeout(timeout);
+          signal?.removeEventListener("abort", abortHandler);
           originalResolve(value);
         },
         reject: (error) => {
           clearTimeout(timeout);
+          signal?.removeEventListener("abort", abortHandler);
           reject(error);
         },
       });
 
+      if (signal?.aborted) {
+        abortHandler();
+        return;
+      }
+      signal?.addEventListener("abort", abortHandler, { once: true });
       proc.stdin!.write(JSON.stringify(request) + "\n");
     });
   }
@@ -118,11 +166,65 @@ export function createMcpClient(config: McpServerConfig): McpClient {
   // On unexpected exit, attempt up to 3 restarts with 1s/2s/4s backoff.
   let manuallyDisconnected = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  // Invalidates delayed/in-flight reconnect work when an eager connect or
+  // explicit disconnect takes ownership of the client lifecycle.
+  let reconnectGeneration = 0;
   // Guard against concurrent connect() calls (manual + auto-restart race).
   let connectingPromise: Promise<void> | null = null;
 
-  function scheduleReconnect() {
-    if (manuallyDisconnected) return;
+  async function terminateProcess(
+    proc: ReturnType<typeof spawn>,
+  ): Promise<void> {
+    if (proc.exitCode !== null || proc.signalCode !== null) return;
+
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      let forceKill: ReturnType<typeof setTimeout> | undefined;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        if (forceKill) clearTimeout(forceKill);
+        resolve();
+      };
+      proc.once("exit", finish);
+      const kill = (signal: NodeJS.Signals) => {
+        try {
+          if (process.platform !== "win32" && proc.pid) {
+            process.kill(-proc.pid, signal);
+          } else {
+            proc.kill(signal);
+          }
+        } catch {
+          finish();
+        }
+      };
+      forceKill = setTimeout(() => kill("SIGKILL"), 1_000);
+      forceKill.unref?.();
+      kill("SIGTERM");
+    });
+  }
+
+  async function terminateActiveProcess(reason: Error): Promise<void> {
+    manuallyDisconnected = true;
+    reconnectGeneration += 1;
+    connected = false;
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    const pendingToReject = [...pendingRequests.values()];
+    pendingRequests.clear();
+
+    const proc = childProcess;
+    if (proc) await terminateProcess(proc);
+    if (childProcess === proc) childProcess = null;
+    for (const pending of pendingToReject) {
+      pending.reject(reason);
+    }
+  }
+
+  function scheduleReconnect(generation = reconnectGeneration) {
+    if (manuallyDisconnected || generation !== reconnectGeneration) return;
     if (restartAttempts >= MAX_RESTART_ATTEMPTS) {
       console.error(
         `[mcp] MCP server "${config.name}" exceeded max restart attempts (${MAX_RESTART_ATTEMPTS}).`,
@@ -134,32 +236,47 @@ export function createMcpClient(config: McpServerConfig): McpClient {
     console.warn(
       `[mcp] MCP server "${config.name}" restarting in ${delay}ms (attempt ${restartAttempts}/${MAX_RESTART_ATTEMPTS})...`,
     );
-    reconnectTimer = setTimeout(async () => {
-      reconnectTimer = null;
-      if (manuallyDisconnected || connectingPromise) return;
-      connectingPromise = connectInternal().then(() => {
-        restartAttempts = 0;
-        connectingPromise = null;
-        console.log(`[mcp] MCP server "${config.name}" reconnected.`);
-      });
+    const timer = setTimeout(async () => {
+      if (reconnectTimer === timer) reconnectTimer = null;
+      if (
+        manuallyDisconnected ||
+        generation !== reconnectGeneration ||
+        connected ||
+        connectingPromise
+      ) return;
+      const attempt = connectInternal();
+      connectingPromise = attempt;
       try {
-        await connectingPromise;
+        await attempt;
+        if (generation !== reconnectGeneration || manuallyDisconnected) return;
+        restartAttempts = 0;
+        console.log(`[mcp] MCP server "${config.name}" reconnected.`);
       } catch {
-        connectingPromise = null;
-        // connectInternal already logs the error; scheduleReconnect
-        // will be triggered on next exit if under max attempts.
+        if (generation === reconnectGeneration && !manuallyDisconnected) {
+          scheduleReconnect(generation);
+        }
+      } finally {
+        if (connectingPromise === attempt) connectingPromise = null;
       }
     }, delay);
+    reconnectTimer = timer;
   }
 
   async function connectInternal(): Promise<void> {
     const proc = spawn(config.command, config.args ?? [], {
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...nodeEnv, ...(config.env ?? {}) },
+      env: buildMcpChildEnv(nodeEnv, config.env),
       shell: false,
+      detached: process.platform !== "win32",
     });
 
     childProcess = proc;
+    let reconnectScheduledForProcess = false;
+    const reconnectAfterUnexpectedFailure = () => {
+      if (reconnectScheduledForProcess || manuallyDisconnected) return;
+      reconnectScheduledForProcess = true;
+      scheduleReconnect();
+    };
 
     const rl = createInterface({
       input: proc.stdout!,
@@ -189,6 +306,8 @@ export function createMcpClient(config: McpServerConfig): McpClient {
     });
 
     proc.on("error", (error) => {
+      if (childProcess !== proc) return;
+      const wasConnected = connected;
       connected = false;
       for (const [, pending] of pendingRequests) {
         pending.reject(
@@ -196,22 +315,22 @@ export function createMcpClient(config: McpServerConfig): McpClient {
         );
       }
       pendingRequests.clear();
+      if (wasConnected) reconnectAfterUnexpectedFailure();
     });
 
     proc.on("exit", (code) => {
+      if (childProcess !== proc) return;
       const wasConnected = connected;
       connected = false;
-      if (code !== 0 && code !== null) {
-        for (const [, pending] of pendingRequests) {
-          pending.reject(
-            new Error(`MCP process exited with code ${code}`),
-          );
-        }
-        pendingRequests.clear();
+      for (const [, pending] of pendingRequests) {
+        pending.reject(
+          new Error(`MCP process exited with code ${code ?? "signal"}`),
+        );
       }
+      pendingRequests.clear();
       // v3.6.0: Auto-restart on unexpected exit (when we were connected).
-      if (wasConnected && code !== 0 && code !== null) {
-        scheduleReconnect();
+      if (wasConnected && !manuallyDisconnected) {
+        reconnectAfterUnexpectedFailure();
       }
     });
 
@@ -234,55 +353,54 @@ export function createMcpClient(config: McpServerConfig): McpClient {
       sendNotification("notifications/initialized");
       connected = true;
     } catch (error) {
-      proc.kill();
-      childProcess = null;
+      await terminateProcess(proc);
+      if (childProcess === proc) childProcess = null;
       throw error;
+    }
+  }
+
+  async function connectClient(): Promise<void> {
+    if (connected) return;
+    if (connectingPromise) {
+      await connectingPromise;
+      return;
+    }
+
+    manuallyDisconnected = false;
+    reconnectGeneration += 1;
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    const attempt = connectInternal();
+    connectingPromise = attempt;
+    try {
+      await attempt;
+      restartAttempts = 0;
+    } catch {
+      throw new Error(`MCP server "${config.name}" failed to connect.`);
+    } finally {
+      if (connectingPromise === attempt) connectingPromise = null;
     }
   }
 
   return {
     async connect() {
-      if (connected) return;
-      // v3.6.0: Guard against concurrent connect() calls (manual + auto-restart
-      // race). If a connection attempt is already in-flight, wait for it.
-      if (connectingPromise) {
-        await connectingPromise;
-        return;
-      }
-
-      manuallyDisconnected = false;
-      connectingPromise = connectInternal().then(() => {
-        restartAttempts = 0;
-        connectingPromise = null;
-      });
-      try {
-        await connectingPromise;
-      } catch {
-        connectingPromise = null;
-        throw new Error(`MCP server "${config.name}" failed to connect.`);
-      }
+      await connectClient();
     },
 
-    disconnect() {
+    async disconnect() {
       manuallyDisconnected = true;
+      reconnectGeneration += 1;
       if (reconnectTimer) {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
       }
-      connected = false;
-
-      for (const [, pending] of pendingRequests) {
-        pending.reject(new Error("MCP client disconnected."));
-      }
-      pendingRequests.clear();
-
-      if (childProcess) {
-        childProcess.kill();
-        childProcess = null;
-      }
+      await terminateActiveProcess(new Error("MCP client disconnected."));
     },
 
     async listTools() {
+      await connectClient();
       const response = await sendRequest("tools/list", {});
 
       if (response.error) {
@@ -314,11 +432,12 @@ export function createMcpClient(config: McpServerConfig): McpClient {
       }));
     },
 
-    async callTool(name, args) {
+    async callTool(name, args, options) {
+      await connectClient();
       const response = await sendRequest("tools/call", {
         name,
         arguments: args,
-      });
+      }, options?.signal);
 
       if (response.error) {
         return {

@@ -66,6 +66,8 @@ export interface CreateActorRuntimeOptions {
   storage?: Storage;
   actorRepository?: ActorRepository;
   deps: RunActorDeps;
+  /** Bounded in-memory cache for recently completed actor outcomes. */
+  terminalOutcomeCacheLimit?: number;
 }
 
 export interface ActorRuntime {
@@ -73,7 +75,9 @@ export interface ActorRuntime {
   wait(actorId: string): Promise<ActorOutcome>;
   cancel(actorId: string, reason?: string): void;
   status(actorId: string): ActorStatus;
+  isOwnedBy(actorId: string, parentRunId: string): boolean;
   send?(actorId: string, msg: unknown, fromActorId?: string): void; // P6 full
+  shutdown?(): Promise<void>;
 }
 
 export function createActorRuntime(
@@ -81,6 +85,18 @@ export function createActorRuntime(
 ): ActorRuntime {
   const repo = options.actorRepository ?? (options.storage ? createActorRepository(options.storage) : null);
   const actors = new Map<string, { handle: ActorHandle; cancel: AbortController; record: ActorRecord; inbox: ActorInbox; input: SpawnInput }>();
+  const terminalActors = new Map<string, {
+    outcome: ActorOutcome;
+    parentRunId?: string;
+  }>();
+  const requestedTerminalOutcomeCacheLimit =
+    options.terminalOutcomeCacheLimit ?? 256;
+  const terminalOutcomeCacheLimit =
+    Number.isFinite(requestedTerminalOutcomeCacheLimit) &&
+    requestedTerminalOutcomeCacheLimit > 0
+      ? Math.max(1, Math.floor(requestedTerminalOutcomeCacheLimit))
+      : 256;
+  let shuttingDown = false;
   const now = () => new Date().toISOString();
 
   function validateOutcome(input: SpawnInput, outcome: ActorOutcome): ActorOutcome {
@@ -91,8 +107,30 @@ export function createActorRuntime(
     return outcome;
   }
 
+  function rememberTerminal(actorId: string, outcome: ActorOutcome): void {
+    const entry = actors.get(actorId);
+    terminalActors.set(actorId, {
+      outcome,
+      ...(entry?.input.parentRunId
+        ? { parentRunId: entry.input.parentRunId }
+        : {}),
+    });
+    actors.delete(actorId);
+
+    while (terminalActors.size > terminalOutcomeCacheLimit) {
+      const oldestActorId = terminalActors.keys().next().value as
+        | string
+        | undefined;
+      if (!oldestActorId) break;
+      terminalActors.delete(oldestActorId);
+    }
+  }
+
   return {
     spawn(input: SpawnInput): ActorHandle {
+      if (shuttingDown) {
+        throw new Error("Actor runtime is shutting down; new actors are not accepted.");
+      }
       const actorId = randomUUID();
       const cancel = new AbortController();
       const record: Omit<ActorRecord, "id"> & { id: string } = {
@@ -111,7 +149,13 @@ export function createActorRuntime(
 
       const outcome = options.deps.runActor(input, input.forkContext, cancel.signal)
         .then((result) => {
-          const validated = validateOutcome(input, result);
+          const validated = cancel.signal.aborted
+            ? {
+                ...result,
+                status: "canceled" as const,
+                summary: String(cancel.signal.reason ?? "canceled"),
+              }
+            : validateOutcome(input, result);
           // Drain any undelivered inbox messages on terminal (post-stop re-entry cap).
           const entry = actors.get(actorId);
           if (entry && entry.inbox.pending(actorId) > 0) {
@@ -125,6 +169,7 @@ export function createActorRuntime(
             };
           }
           repo?.updateStatus(actorId, validated.status);
+          rememberTerminal(actorId, validated);
           return validated;
         })
         .catch((error) => {
@@ -141,7 +186,13 @@ export function createActorRuntime(
             };
           }
           repo?.updateStatus(actorId, status);
-          return { status, summary, filesTouched: [] };
+          const failedOutcome: ActorOutcome = {
+            status,
+            summary,
+            filesTouched: [],
+          };
+          rememberTerminal(actorId, failedOutcome);
+          return failedOutcome;
         });
 
       const handle: ActorHandle = { actorId, outcome };
@@ -151,8 +202,10 @@ export function createActorRuntime(
 
     wait(actorId: string): Promise<ActorOutcome> {
       const entry = actors.get(actorId);
-      if (!entry) return Promise.reject(new Error(`unknown actor ${actorId}`));
-      return entry.handle.outcome;
+      if (entry) return entry.handle.outcome;
+      const terminal = terminalActors.get(actorId);
+      if (terminal) return Promise.resolve(terminal.outcome);
+      return Promise.reject(new Error(`unknown actor ${actorId}`));
     },
 
     send(actorId: string, msg: unknown, fromActorId?: string): void {
@@ -175,11 +228,39 @@ export function createActorRuntime(
 
     status(actorId: string): ActorStatus {
       const entry = actors.get(actorId);
-      if (!entry) return "done";
+      if (!entry) return terminalActors.get(actorId)?.outcome.status ?? "done";
       // The in-memory record's status is updated lazily via the outcome chain;
       // for a synchronous snapshot, derive from the abort + outcome state.
       if (entry.cancel.signal.aborted) return "canceled";
       return entry.record.status;
+    },
+
+    isOwnedBy(actorId: string, parentRunId: string): boolean {
+      const entry = actors.get(actorId);
+      const terminal = terminalActors.get(actorId);
+      return Boolean(
+        parentRunId &&
+        (entry?.input.parentRunId === parentRunId ||
+          terminal?.parentRunId === parentRunId),
+      );
+    },
+
+    async shutdown() {
+      // Close admission before taking the active snapshot so work that was
+      // already accepted elsewhere cannot create an undrained late actor.
+      shuttingDown = true;
+      // Terminal actors are removed from `actors` immediately, so every
+      // remaining entry still owns unsettled work even if cancel() already
+      // changed its visible record status to "canceled".
+      const active = [...actors.values()];
+      for (const entry of active) {
+        if (!entry.cancel.signal.aborted) {
+          entry.cancel.abort("application_shutdown");
+        }
+      }
+      await Promise.allSettled(active.map((entry) => entry.handle.outcome));
+      actors.clear();
+      terminalActors.clear();
     },
   };
 }

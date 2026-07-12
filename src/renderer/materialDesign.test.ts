@@ -932,7 +932,10 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(goalStatusStripSource).toContain("onResolveReview");
     expect(goalStatusStripSource).toContain("onIncreaseBudget");
     expect(chatPanelSource).toContain("async function handlePauseGoal");
-    expect(chatPanelSource).toContain("pauseGoal(activeGoal.id)");
+    expect(chatPanelSource).toContain("pauseGoal(goalId)");
+    expect(chatPanelSource).toContain("isSessionSelectionCurrent(selection)");
+    expect(chatPanelSource).toContain("goalMutationSequenceRef");
+    expect(chatPanelSource).toContain("isGoalMutationCurrent(selection, mutationSequence)");
     expect(chatPanelSource).toContain("? { onPause: () => void handlePauseGoal() }");
     expect(chatPanelSource).not.toContain('submitUserMessage("暂停这个目标")');
     expect(chatPanelSource).toContain("window.buildingAgent.increaseGoalBudget(");
@@ -971,7 +974,7 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(goalDetailDrawerSource).not.toContain('href={artifact.path}');
     expect(goalStatusStripSource).toContain('case "stopped_blocked"');
     expect(goalStatusStripSource).toContain("progress.acceptance");
-    expect(chatPanelSource).toContain("retryGoal(activeGoal.id)");
+    expect(chatPanelSource).toContain("retryGoal(goalId)");
     expect(chatPanelSource).toContain(
       'const retryStarted = result.ok && result.goal?.status === "executing"',
     );
@@ -985,7 +988,7 @@ describe("Design System — Obsidian desktop control surface", () => {
     );
     expect(chatPanelSource).toContain("setWorkPhase(goalUiState.workPhase)");
     expect(chatPanelSource).toContain("仍处于受阻状态");
-    expect(chatPanelSource).toContain("cancelGoal(activeGoal.id)");
+    expect(chatPanelSource).toContain("cancelGoal(goalId)");
     expect(chatPanelSource).toContain("void refreshSessions(sessionId ?? undefined)");
   });
 
@@ -1103,6 +1106,46 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource).toContain("isTerminalGoalStatus(event.status)");
     expect(chatPanelSource).toContain("void refreshCurrentSessionMessages(");
     expect(chatPanelSource).toContain("event.sessionId ?? activeSessionId ?? undefined");
+  });
+
+  it("reconciles every successful chat completion from persisted session state", () => {
+    const successSource = getFunctionSource(
+      chatPanelSource,
+      "applySuccessfulChatResult",
+    );
+
+    expect(successSource).toContain("finalizeChatStreamResult");
+    expect(successSource).toContain(
+      "void refreshCurrentSessionMessages(result.sessionId);",
+    );
+  });
+
+  it("clears session-scoped Goal draft ownership before loading another transcript", () => {
+    const loadSessionSource = getFunctionSource(
+      chatPanelSource,
+      "loadPersistedSession",
+    );
+    const switchBoundary = loadSessionSource.indexOf(
+      "sessionIdRef.current = sessionIdToLoad",
+    );
+    const loadBoundary = loadSessionSource.indexOf(
+      "await window.buildingAgent.getChatSession",
+    );
+    const cleanupSource = loadSessionSource.slice(switchBoundary, loadBoundary);
+
+    expect(cleanupSource).toContain("setPendingGoalDraft(null)");
+    expect(cleanupSource).toContain("setGoalDraftDescription(\"\")");
+    expect(cleanupSource).toContain("setGoalDraftCriteriaText(\"\")");
+    expect(cleanupSource).toContain("goalDraftActionPendingRef.current = null");
+    expect(cleanupSource).toContain("setGoalDraftActionPending(null)");
+    expect(cleanupSource).toContain("setSelectedWorkspaceId(null)");
+    expect(cleanupSource).toContain("setChatStreamState(createChatStreamState([]))");
+    expect(loadSessionSource).toContain(
+      "sessionLoadPendingRef.current = loadGeneration",
+    );
+    expect(chatPanelSource).toContain(
+      'status.kind === "working" || sessionLoadPendingRef.current !== null',
+    );
   });
 
   it("starts Chat in a goal-mode-ready empty home state", () => {
@@ -1291,7 +1334,8 @@ describe("Design System — Obsidian desktop control surface", () => {
       "handleInterruptCurrentWork",
     );
     expect(chatPanelSource).toContain("activeGoal.status === \"executing\"");
-    expect(chatPanelSource).toContain("cancelGoal(activeGoal.id)");
+    expect(chatPanelSource).toContain("cancelGoal(goalId)");
+    expect(chatPanelSource).toContain("const selection = captureSessionSelection()");
     expect(chatPanelSource).toContain("applyGoalSummaryToSessions(result.goal)");
     expect(chatPanelSource).not.toContain(
       "disabled={status.kind !== \"working\" || !activeChatRequestId}",
@@ -1525,9 +1569,11 @@ function getUseEffectSource(source: string, dependencyName: string): string {
     return "";
   }
 
-  const searchStart = Math.max(0, endIndex - 900);
-  const effectStartIndex = source.lastIndexOf("useEffect(() => {", endIndex);
-  if (effectStartIndex === -1 || effectStartIndex < searchStart) {
+  const effectStartIndex = Math.max(
+    source.lastIndexOf("useEffect(() => {", endIndex),
+    source.lastIndexOf("useLayoutEffect(() => {", endIndex),
+  );
+  if (effectStartIndex === -1) {
     return "";
   }
 

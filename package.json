@@ -1,6 +1,6 @@
 {
   "name": "zerox-agent",
-  "version": "3.6.1",
+  "version": "3.7.0",
   "description": "Zerox Agent, a local-first desktop agent built module by module.",
   "main": "dist-electron/main/main.js",
   "scripts": {
@@ -39,19 +39,20 @@
     "better-sqlite3": "^12.11.1",
     "cron-parser": "^5.5.0",
     "drizzle-orm": "^0.45.2",
+    "ipaddr.js": "^2.4.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
+    "undici": "^7.28.0",
     "yaml": "^2.9.0"
   },
   "devDependencies": {
-    "@electron/rebuild": "^3.7.2",
+    "@electron/rebuild": "^4.2.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.9.1",
     "@types/react": "^19.2.16",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.2",
     "concurrently": "^10.0.3",
-    "drizzle-kit": "^0.30.6",
     "electron": "^42.3.3",
     "electron-builder": "^26.15.0",
     "typescript": "^6.0.3",

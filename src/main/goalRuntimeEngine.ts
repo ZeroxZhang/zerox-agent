@@ -451,9 +451,21 @@ export function createGoalRuntimeEngine(options: {
               });
             } else {
               await transitionInvocation({
-                status: "authorized",
-                reason: "tool authorization service not configured",
+                status: "error",
+                ok: false,
+                error: "工具授权服务未配置，已拒绝执行。",
               });
+              const rejectedResult = {
+                ok: false as const,
+                error: "工具授权服务未配置，已拒绝执行。",
+              };
+              await appendRunTrajectory("tool_result", {
+                ...payload,
+                toolName,
+                ok: false,
+                error: rejectedResult.error,
+              });
+              return rejectedResult;
             }
 
             await appendRunTrajectory("tool_call", {
@@ -687,6 +699,7 @@ export function createGoalRuntimeEngine(options: {
           toolExecutor: options.toolExecutor,
           toolAuthorizationService: options.toolAuthorizationService,
           taskId,
+          runId,
           runContext,
           runtimeTask: buildGoalMilestoneRuntimeTask(goal, runContext),
           systemPrompt: buildGoalSystemPrompt(modelProfile.model, startedAt.split("T")[0]),

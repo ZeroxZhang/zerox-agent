@@ -117,6 +117,52 @@ describe("compactKernelContext", () => {
     expect(result.messages).toEqual(messages);
     expect(bus.history()).toEqual([]);
   });
+
+  it("never leaves an orphan tool result when fitting a compacted history", async () => {
+    const configDir = await createTempDir();
+    const checkpointStore = createKernelCheckpointStore({
+      configDir,
+      createId: () => "checkpoint_pairing",
+    });
+
+    const result = await compactKernelContext(
+      {
+        runId: "run_pairing",
+        turn: 8,
+        messages: createLongMessages(),
+        checkpointStore,
+      },
+      {
+        budget: 28,
+        triggerRatio: 0.1,
+        tailTurns: 1,
+      },
+    );
+
+    const declaredToolCallIds = new Set(
+      result.messages.flatMap((message) =>
+        message.role === "assistant"
+          ? (message.tool_calls ?? []).map((call) => call.id)
+          : [],
+      ),
+    );
+    const toolResultIds = result.messages.flatMap((message) =>
+      message.role === "tool" && message.tool_call_id
+        ? [message.tool_call_id]
+        : [],
+    );
+
+    expect(toolResultIds.every((id) => declaredToolCallIds.has(id))).toBe(true);
+    expect(result.messages.some((message) => message.role === "tool")).toBe(false);
+    expect(result.messages).toContainEqual({
+      role: "user",
+      content: "Recent request",
+    });
+    expect(result.messages).toContainEqual({
+      role: "assistant",
+      content: "Recent answer",
+    });
+  });
 });
 
 async function createTempDir(): Promise<string> {

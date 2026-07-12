@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { runAgentLoop } from "./agentLoop";
+import { runAgentLoop as runProductionAgentLoop } from "./agentLoop";
 import type { AgentToolExecutor } from "./agentToolExecutor";
 import type {
   ChatClient,
@@ -108,7 +108,88 @@ const chromeBookmarkTools: ToolDefinition[] = [
   },
 ];
 
+function runAgentLoop(...args: Parameters<typeof runProductionAgentLoop>) {
+  const [messages, profile, options] = args;
+  const allowAllAuthorization: ToolAuthorizationService = {
+    async authorize(taskId, request) {
+      return {
+        ok: true,
+        decision: { allowed: true, reason: "allowed by agent loop test fixture" },
+        auditEvent: {
+          id: `audit_${request.toolName}`,
+          taskId,
+          request,
+          decision: {
+            allowed: true,
+            reason: "allowed by agent loop test fixture",
+          },
+          createdAt: "2026-07-12T00:00:00.000Z",
+        },
+      };
+    },
+  };
+  return runProductionAgentLoop(messages, profile, {
+    toolAuthorizationService: allowAllAuthorization,
+    taskId: "task_agent_loop_test",
+    ...options,
+  });
+}
+
 describe("agent loop", () => {
+  it("fails closed when a tool call has no authorization dependencies", async () => {
+    let executed = false;
+    let modelCalls = 0;
+    const chatClient: ChatClient = {
+      async complete(request) {
+        modelCalls += 1;
+        if (modelCalls === 1) {
+          return {
+            content: null,
+            finishReason: "tool_calls",
+            toolCalls: [
+              {
+                id: "call_unauthorized",
+                type: "function",
+                function: {
+                  name: "file_list",
+                  arguments: JSON.stringify({ path: "/tmp/workspace" }),
+                },
+              },
+            ],
+          };
+        }
+
+        expect(
+          request.messages.some(
+            (message) =>
+              message.role === "tool" &&
+              message.content.includes("工具授权服务未配置，已拒绝执行"),
+          ),
+        ).toBe(true);
+        return {
+          content: "工具未执行。",
+          finishReason: "stop",
+          toolCalls: [],
+        };
+      },
+    };
+
+    const result = await runProductionAgentLoop(
+      [{ role: "user", content: "list files" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(() => {
+          executed = true;
+        }),
+        tools: testTools,
+      },
+    );
+
+    expect(result.status).toBe("succeeded");
+    expect(executed).toBe(false);
+  });
+
   it("retries transient model request failures before failing the loop", async () => {
     let attempts = 0;
     const retryEvents: Array<{ attempt: number; delayMs: number; error: string }> = [];
@@ -211,11 +292,13 @@ describe("agent loop", () => {
       },
     };
     let strategyCalled = false;
+    let compactedRunId = "";
     const compactionStrategy = {
       id: "rebuild" as const,
       shouldCompact: () => true,
-      async compact() {
+      async compact(input: { runId: string }) {
         strategyCalled = true;
+        compactedRunId = input.runId;
         return {
           messages: [{ role: "system", content: "[Goal continuity checkpoint - never compact]\nrebuilt prefix" }, { role: "user", content: "current request" }],
           compacted: true,
@@ -241,6 +324,7 @@ describe("agent loop", () => {
         chatClient,
         toolExecutor: createToolExecutor(),
         tools: testTools,
+        runId: "run_compaction",
         compactionStrategy: compactionStrategy as never,
         contextManager: {
           estimateTokens: () => 500, // exceeds budget → triggers compaction
@@ -251,6 +335,7 @@ describe("agent loop", () => {
 
     expect(result.status).toBe("succeeded");
     expect(strategyCalled).toBe(true);
+    expect(compactedRunId).toBe("run_compaction");
     expect(requests[0].messages.some((m) => m.content.includes("rebuilt prefix"))).toBe(true);
   });
 
@@ -1328,6 +1413,32 @@ describe("agent loop", () => {
 
     expect(result.status).toBe("failed");
     expect(result.summary).toContain("Wall-clock budget exceeded");
+  });
+
+  it("enforces the token budget when a provider omits usage metadata", async () => {
+    const result = await runAgentLoop(
+      [{ role: "user", content: "produce a long answer" }],
+      modelProfile,
+      {
+        chatClient: {
+          async complete() {
+            return {
+              content: "budgeted ".repeat(200),
+              toolCalls: [],
+              finishReason: "stop",
+            };
+          },
+        },
+        toolExecutor: createToolExecutor(),
+        tools: testTools,
+        maxTurns: 2,
+        tokenBudget: 8,
+      },
+    );
+
+    expect(result.status).toBe("failed");
+    expect(result.summary).toContain("Token budget exceeded");
+    expect(result.tokensConsumed).toBeGreaterThanOrEqual(8);
   });
 
   it("passes dynamic registry source to tool authorization", async () => {
