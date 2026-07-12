@@ -181,9 +181,10 @@ function acceptanceContextNeedsModel(
   );
 }
 
-function isTerminalGoalStatus(status: Goal["status"]): boolean {
+export function isTerminalGoalStatus(status: Goal["status"]): boolean {
   return (
     status === "achieved" ||
+    status === "completed_unverified" ||
     status === "stopped_budget" ||
     status === "stopped_stalled" ||
     status === "stopped_blocked" ||
@@ -213,6 +214,8 @@ export function formatGoalTerminalHeading(goal: Goal): string {
   switch (goal.status) {
     case "achieved":
       return `目标已达成：${goal.description}`;
+    case "completed_unverified":
+      return `目标已手动完成（未经机器认证）：${goal.description}`;
     case "failed":
       return `目标执行失败：${goal.description}`;
     case "canceled":
@@ -235,6 +238,7 @@ export function formatGoalTerminalHeading(goal: Goal): string {
     case "planning":
     case "executing":
     case "waiting_for_review":
+    case "waiting_for_acceptance":
       return `目标状态更新：${goal.description}`;
   }
 }

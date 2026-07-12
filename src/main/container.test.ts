@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createAppContainer,
   formatGoalTerminalHeading,
+  isTerminalGoalStatus,
   prepareInterruptedGoalForResume,
   reconcileIrreversibleGoalProgressEvent,
 } from "./container";
@@ -304,6 +305,25 @@ describe("app container goal drafts", () => {
 
     expect(formatGoalTerminalHeading(goal)).toContain(text);
     expect(formatGoalTerminalHeading(goal)).not.toContain("目标已达成");
+  });
+
+  it("classifies unverified completion as terminal while acceptance waiting stays active", () => {
+    expect(isTerminalGoalStatus("completed_unverified")).toBe(true);
+    expect(isTerminalGoalStatus("waiting_for_acceptance")).toBe(false);
+  });
+
+  it("formats unverified manual completion without claiming certification", () => {
+    const heading = formatGoalTerminalHeading(
+      createStoredGoal({
+        id: "goal_completed_unverified",
+        status: "completed_unverified",
+        stopReason: "user_marked_complete",
+      }),
+    );
+
+    expect(heading).toContain("手动完成");
+    expect(heading).toContain("未经机器认证");
+    expect(heading).not.toContain("目标已达成");
   });
 
   it("creates evidence-backed model review checks for manual goals", () => {
