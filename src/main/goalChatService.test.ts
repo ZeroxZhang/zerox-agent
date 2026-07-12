@@ -1415,6 +1415,66 @@ describe("goal chat service", () => {
       status: "canceled",
     });
   });
+
+  it("keeps duplicate continuations registered through the final canonical read", async () => {
+    let persistedGoal = createGoal({ status: "waiting_for_acceptance" });
+    let continuationCalls = 0;
+    let runnerReturned = false;
+    let blockPostRunRead = true;
+    let postRunReadEnteredResolve: (() => void) | undefined;
+    const postRunReadEntered = new Promise<void>((resolve) => {
+      postRunReadEnteredResolve = resolve;
+    });
+    let releasePostRunRead: (() => void) | undefined;
+    const postRunReadReleased = new Promise<void>((resolve) => {
+      releasePostRunRead = resolve;
+    });
+    const service = createGoalChatService({
+      controller: createController({
+        async continueAcceptance(goalId) {
+          continuationCalls += 1;
+          runnerReturned = true;
+          return createGoal({
+            id: goalId,
+            status: "waiting_for_acceptance",
+          });
+        },
+      }),
+      goalStore: {
+        async get(goalId) {
+          const snapshot = structuredClone(persistedGoal);
+          if (runnerReturned && blockPostRunRead) {
+            blockPostRunRead = false;
+            postRunReadEnteredResolve?.();
+            await postRunReadReleased;
+          }
+          return snapshot.id === goalId ? snapshot : null;
+        },
+        async save(goal) {
+          persistedGoal = structuredClone(goal);
+          return persistedGoal;
+        },
+        async appendLedger() {},
+      },
+      planner: createFakePlanner(),
+    });
+
+    const first = service.continueAcceptance(persistedGoal.id);
+    await postRunReadEntered;
+    const second = service.continueAcceptance(persistedGoal.id);
+    expect(continuationCalls).toBe(1);
+
+    const canceled = await service.cancel(persistedGoal.id);
+    releasePostRunRead?.();
+
+    await expect(first).resolves.toMatchObject({ status: "canceled" });
+    await expect(second).resolves.toMatchObject({ status: "canceled" });
+    expect(canceled.status).toBe("canceled");
+    expect(continuationCalls).toBe(1);
+
+    await service.continueAcceptance(persistedGoal.id);
+    expect(continuationCalls).toBe(2);
+  });
 });
 
 function createFakePlanner(): Pick<

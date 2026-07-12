@@ -93,7 +93,16 @@ export function createGoalChatService(options: {
   const now = options.now ?? (() => new Date().toISOString());
   const activeGoalRuns = new Map<
     string,
-    { controller: AbortController; completion: Promise<unknown> }
+    | {
+        kind: "background";
+        controller: AbortController;
+        completion: Promise<void>;
+      }
+    | {
+        kind: "operation";
+        controller: AbortController;
+        completion: Promise<Goal>;
+      }
   >();
   const pendingGoalCancellations = new Map<string, Promise<void>>();
   const pendingRestarts = new Set<string>();
@@ -138,16 +147,23 @@ export function createGoalChatService(options: {
     runOptions?.signal?.addEventListener("abort", abortFromParent, { once: true });
 
     const completion = runner(goalId, { signal: controller.signal })
-      .catch(() => {
-        // Errors are captured by the controller and surfaced via progress events.
-      })
+      .then(
+        () => undefined,
+        () => {
+          // Errors are captured by the controller and surfaced via progress events.
+        },
+      )
       .finally(() => {
         runOptions?.signal?.removeEventListener("abort", abortFromParent);
         if (activeGoalRuns.get(goalId)?.controller === controller) {
           activeGoalRuns.delete(goalId);
         }
       });
-    activeGoalRuns.set(goalId, { controller, completion });
+    activeGoalRuns.set(goalId, {
+      kind: "background",
+      controller,
+      completion,
+    });
   }
 
   function abortBackgroundGoalRun(goalId: string) {
@@ -178,6 +194,9 @@ export function createGoalChatService(options: {
   ): Promise<Goal> {
     const existing = activeGoalRuns.get(goalId);
     if (existing) {
+      if (existing.kind === "operation") {
+        return existing.completion;
+      }
       try {
         await existing.completion;
       } catch (error) {
@@ -202,34 +221,40 @@ export function createGoalChatService(options: {
       abortFromParent();
     }
 
-    const completion = runner(goalId, { signal: controller.signal }).finally(
-      () => {
+    const completion = (async (): Promise<Goal> => {
+      try {
+        let result: Goal;
+        try {
+          result = await runner(goalId, { signal: controller.signal });
+        } catch (error) {
+          if (!controller.signal.aborted) {
+            throw error;
+          }
+          await pendingGoalCancellations.get(goalId);
+          const canonical = await options.goalStore.get(goalId);
+          if (canonical) {
+            return canonical;
+          }
+          throw error;
+        }
+        if (controller.signal.aborted) {
+          await pendingGoalCancellations.get(goalId);
+        }
+        let canonical = await options.goalStore.get(goalId);
+        if (controller.signal.aborted) {
+          await pendingGoalCancellations.get(goalId);
+          canonical = (await options.goalStore.get(goalId)) ?? canonical;
+        }
+        return canonical ?? result;
+      } finally {
         runOptions?.signal?.removeEventListener("abort", abortFromParent);
         if (activeGoalRuns.get(goalId)?.controller === controller) {
           activeGoalRuns.delete(goalId);
         }
-      },
-    );
-    activeGoalRuns.set(goalId, { controller, completion });
-
-    try {
-      const result = await completion;
-      if (controller.signal.aborted) {
-        await pendingGoalCancellations.get(goalId);
       }
-      return (await options.goalStore.get(goalId)) ?? result;
-    } catch (error) {
-      if (controller.signal.aborted) {
-        await pendingGoalCancellations.get(goalId);
-      }
-      const canonical = controller.signal.aborted
-        ? await options.goalStore.get(goalId)
-        : null;
-      if (canonical) {
-        return canonical;
-      }
-      throw error;
-    }
+    })();
+    activeGoalRuns.set(goalId, { kind: "operation", controller, completion });
+    return completion;
   }
 
   async function queueGoalExecution(goal: Goal): Promise<Goal> {

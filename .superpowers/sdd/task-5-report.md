@@ -334,3 +334,38 @@ git diff --check
 - Both new IPC handlers validate `goalId` before any container call. Accepted IDs are trimmed-exact strings of 1-128 characters, begin with an ASCII alphanumeric character, contain only ASCII alphanumerics plus `. _ : -`, and cannot contain `..`.
 - Invalid goal IDs return `{ ok: false, message: "目标 ID 无效。" }`; tests cover empty, whitespace, traversal, backslash, oversized, numeric, and null inputs on both channels.
 - Generic `retryGoal` remains unchanged.
+
+## Task 5B Third Independent Review Fix
+
+### Status
+
+DONE
+
+### RED evidence
+
+```text
+npm test -- --run src/main/goalChatService.test.ts -t "keeps duplicate continuations registered through the final canonical read"
+```
+
+- Expected RED: the second continuation entered the controller while the first operation was blocked in its post-run canonical store read (`continuationCalls` was 2 instead of 1).
+- After extending registry lifetime, the strengthened cancellation snapshot regression remained RED because a store read started before cancellation returned stale `waiting_for_acceptance` instead of canonical `canceled`.
+
+### GREEN evidence
+
+```text
+npm test -- --run src/main/agentGoalController.test.ts src/main/goalChatService.test.ts src/main/container.test.ts src/main/ipc/index.test.ts src/preload/index.test.ts src/main/agentGoalAcceptanceCertificate.test.ts
+npx tsc -p tsconfig.electron.json --noEmit --pretty false
+npm run harness:check
+git diff --check
+```
+
+- Final focused verification: 6 test files passed; 265 tests passed.
+- Electron TypeScript, harness, and diff checks all passed.
+
+### Fixes and self-review
+
+- Active runs now use a typed `background | operation` entry. An operation entry owns the complete continuation promise: controller runner, cancellation settlement, canonical store read, and cleanup.
+- Duplicate continuation callers return the same full operation completion and cannot start a second judge while canonical settlement is still in progress.
+- Registry deletion moved to the outer operation `finally`, after every canonical read or error path has settled.
+- The regression blocks the first post-run store read, starts a duplicate continuation, cancels concurrently, and returns the pre-cancel snapshot from that blocked read. The operation detects cancellation during the read, waits for cancellation settlement, rereads canonical state, and returns `canceled` to both callers.
+- A third continuation after both callers settle reaches the controller again, proving the registry entry clears without leaking.
