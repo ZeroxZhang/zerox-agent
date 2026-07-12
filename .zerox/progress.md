@@ -6778,3 +6778,20 @@
 - TDD RED reproduced all four review findings. GREEN passed controller,
   acceptance, and failure-fingerprint coverage (231/231), Electron/main
   TypeScript, harness, and diff checks.
+
+## 2026-07-12 - P43 Task 7 Preliminary Release Gate
+
+- Preliminary main-agent evidence reports the P43 focused regression suite at
+  16 files / 539 tests passed. This is implementation-stage evidence only; it
+  does not claim independent review, full `npm run verify`, or production smoke
+  acceptance.
+- Updated the P43 feature manifest to cover every source, test, documentation,
+  progress, and release-gate file in the feature change set while preserving
+  P43 as the sole `in_progress` feature and retaining the existing definition
+  of done and verification commands.
+- TDD RED: `npm test -- --run src/shared/packageScripts.test.ts` failed 1/8
+  because the v3.6.0 release gate rejected the newly registered P43 open
+  feature.
+- GREEN: the same focused command passed 8/8 after explicitly allowing P43 and
+  asserting all five approved recovery semantics. The maximum-one-open-feature
+  assertion remains unchanged.

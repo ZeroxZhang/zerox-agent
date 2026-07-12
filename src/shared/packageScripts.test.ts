@@ -72,6 +72,9 @@ describe("package scripts", () => {
       (feature) =>
         feature.id === "P41-v3.4.0-goal-acceptance-policy-engine",
     );
+    const p43 = featureList.features.find(
+      (feature) => feature.id === "P43-goal-acceptance-recovery",
+    );
     const p31 = featureList.features.find(
       (feature) => feature.id === "P31-v3.1.2-window-controls-and-settings-icon",
     );
@@ -94,10 +97,34 @@ describe("package scripts", () => {
           featureId === "P39-v3.4.0-goal-mode-runtime-state-repair" ||
           featureId === "P40-v3.4.0-goal-mode-bounded-termination" ||
           featureId === "P41-v3.4.0-goal-acceptance-policy-engine" ||
-          featureId === "P42-v3.7.0-autonomous-goal-runtime",
+          featureId === "P42-v3.7.0-autonomous-goal-runtime" ||
+          featureId === "P43-goal-acceptance-recovery",
       ),
     ).toBe(true);
     expect(openFeatureIds.length).toBeLessThanOrEqual(1);
+    expect(p43?.status === "in_progress" || p43?.status === "done").toBe(true);
+    expect(p43).toEqual(
+      expect.objectContaining({
+        id: "P43-goal-acceptance-recovery",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining(
+            "Transient final-judge failures retry visibly without rerunning accepted task work",
+          ),
+          expect.stringContaining(
+            "Exhausted retries preserve a durable waiting_for_acceptance state",
+          ),
+          expect.stringContaining(
+            "Users can continue final acceptance from persisted evidence",
+          ),
+          expect.stringContaining(
+            "Manual completion is terminal, audited, unverified, and never certificate-backed",
+          ),
+          expect.stringContaining(
+            "Restart, cancellation, stale writes, renderer copy, and historical goals remain safe",
+          ),
+        ]),
+      }),
+    );
     expect(p41?.status === "in_progress" || p41?.status === "done").toBe(true);
     expect(p41).toEqual(
       expect.objectContaining({
