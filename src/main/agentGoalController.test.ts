@@ -1663,6 +1663,92 @@ describe("agent goal controller", () => {
     );
   });
 
+  it("retries only the final judge and certifies on the second attempt", async () => {
+    await store.save(createProtocolV2Goal([milestone("milestone_1")]));
+    const runtime = createRuntime();
+    const acceptance = createAcceptanceResults({
+      milestones: [acceptedResult("check_done")],
+      goals: [
+        timeoutResult(),
+        acceptedResult("check_done", { evidenceManifest: emptyManifest }),
+      ],
+    });
+    const controller = createController({
+      runtime,
+      acceptance,
+      sleep: async () => undefined,
+    });
+
+    const result = await controller.start("goal_1");
+
+    expect(result.status).toBe("achieved");
+    expect(acceptance.goalCalls).toBe(2);
+    expect(runtime.runMilestoneIds).toEqual(["milestone_1"]);
+    expect(result.budgetUsage.toolCalls).toBe(1);
+    expect(trajectoryEvents.map((event) => event.type)).toContain(
+      "acceptance_retry_scheduled",
+    );
+  });
+
+  it("preserves a completed goal in acceptance waiting after three timeouts", async () => {
+    await store.save(createProtocolV2Goal([milestone("milestone_1")]));
+    const runtime = createRuntime();
+    const controller = createController({
+      runtime,
+      acceptance: createAcceptanceResults({
+        milestones: [acceptedResult("check_done")],
+        goals: [timeoutResult(), timeoutResult(), timeoutResult()],
+      }),
+      sleep: async () => undefined,
+    });
+
+    const result = await controller.start("goal_1");
+
+    expect(result.status).toBe("waiting_for_acceptance");
+    expect(result.stopReason).toBeUndefined();
+    expect(result.acceptanceState?.phase).toBe("awaiting_user");
+    expect(result.acceptanceRetryState).toMatchObject({
+      attempt: 3,
+      maxAttempts: 3,
+      lastCode: "judge_timeout",
+      resumeFrom: "final_judge",
+    });
+    expect(runtime.runMilestoneIds).toEqual(["milestone_1"]);
+    expect(result.acceptanceCertificate).toBeUndefined();
+    expect(trajectoryEvents.map((event) => event.type)).toEqual(
+      expect.arrayContaining([
+        "acceptance_retry_exhausted",
+        "acceptance_waiting_for_user",
+      ]),
+    );
+    expect(trajectoryEvents.map((event) => event.type)).not.toContain(
+      "goal_stopped",
+    );
+  });
+
+  it("keeps legacy final acceptance unavailable on the blocked path", async () => {
+    await store.save(createGoal([milestone("milestone_1")]));
+    let sleepCalls = 0;
+    const controller = createController({
+      runtime: createRuntime(),
+      acceptance: createAcceptanceResults({
+        milestones: [acceptedResult("check_done")],
+        goals: [timeoutResult()],
+      }),
+      sleep: async () => {
+        sleepCalls += 1;
+        throw new Error("legacy goals must not enter final acceptance retry");
+      },
+    });
+
+    const result = await controller.start("goal_1");
+
+    expect(result.status).toBe("stopped_blocked");
+    expect(result.stopReason).toBe("acceptance_unavailable");
+    expect(result.acceptanceRetryState).toBeUndefined();
+    expect(sleepCalls).toBe(0);
+  });
+
   it("never certifies when final acceptance is unavailable", async () => {
     await store.save(createProtocolV2Goal([milestone("milestone_1")]));
     const controller = createController({
@@ -1682,6 +1768,68 @@ describe("agent goal controller", () => {
 
     expect(result.status).toBe("stopped_blocked");
     expect(result.stopReason).toBe("acceptance_unavailable");
+    expect(result.acceptanceCertificate).toBeUndefined();
+  });
+
+  it.each([
+    ["blocked_external", "external_dependency_missing", "external_blocked"],
+    ["impossible", "goal_impossible", "goal_impossible"],
+  ] as const)(
+    "keeps final %s acceptance terminal instead of waiting",
+    async (verdict, failureClass, stopReason) => {
+      await store.save(createProtocolV2Goal([milestone("milestone_1")]));
+      const controller = createController({
+        runtime: createRuntime(),
+        acceptance: createAcceptanceResults({
+          milestones: [acceptedResult("check_done")],
+          goals: [
+            rejectedResult(`${verdict}_final`, { verdict, failureClass }),
+          ],
+        }),
+      });
+
+      const result = await controller.start("goal_1");
+
+      expect(result.status).toBe("stopped_blocked");
+      expect(result.stopReason).toBe(stopReason);
+      expect(result.acceptanceState?.phase).toBe("blocked");
+      expect(result.acceptanceRetryState).toBeUndefined();
+    },
+  );
+
+  it("keeps certificate construction failure terminal instead of waiting", async () => {
+    await store.save(
+      createProtocolV2Goal(
+        [
+          {
+            ...milestone("milestone_1"),
+            successCriteria: [modelReviewCriterion],
+          },
+        ],
+        { successCriteria: [modelReviewCriterion] },
+      ),
+    );
+    const controller = createController({
+      runtime: createRuntime(),
+      acceptance: createAcceptanceResults({
+        milestones: [
+          acceptedResult("check_goal_review", { kind: "model_review" }),
+        ],
+        goals: [
+          acceptedResult("check_goal_review", {
+            kind: "model_review",
+            evidenceManifest: emptyManifest,
+          }),
+        ],
+      }),
+    });
+
+    const result = await controller.start("goal_1");
+
+    expect(result.status).toBe("stopped_blocked");
+    expect(result.stopReason).toBe("acceptance_unavailable");
+    expect(result.acceptanceState?.phase).toBe("blocked");
+    expect(result.acceptanceRetryState).toBeUndefined();
     expect(result.acceptanceCertificate).toBeUndefined();
   });
 
@@ -1793,6 +1941,102 @@ describe("agent goal controller", () => {
       type: "goal_stopped",
       payload: expect.objectContaining({ status: "canceled" }),
     });
+  });
+
+  it("aborts a pending final judge without waiting for it to settle", async () => {
+    await store.save(createProtocolV2Goal([milestone("milestone_1")]));
+    const abortController = new AbortController();
+    let finalJudgeEnteredResolve: (() => void) | undefined;
+    const finalJudgeEntered = new Promise<void>((resolve) => {
+      finalJudgeEnteredResolve = resolve;
+    });
+    let observedSignal: AbortSignal | undefined;
+    const controller = createController({
+      runtime: createRuntime(),
+      acceptance: {
+        async evaluate() {
+          return acceptedResult("check_done");
+        },
+        async evaluateGoal(_goal, context) {
+          observedSignal = context.signal;
+          finalJudgeEnteredResolve?.();
+          return new Promise<AcceptanceResult>(() => undefined);
+        },
+      },
+      createAcceptanceContext() {
+        return {} as AcceptanceContext;
+      },
+    });
+
+    const running = controller.start("goal_1", {
+      signal: abortController.signal,
+    });
+    await finalJudgeEntered;
+    const canonical = await store.get("goal_1");
+    await store.save({
+      ...canonical!,
+      status: "canceled",
+      stopReason: "user_canceled",
+    });
+    abortController.abort();
+
+    const result = await Promise.race([
+      running,
+      new Promise<"timed_out">((resolve) => {
+        setTimeout(() => resolve("timed_out"), 50);
+      }),
+    ]);
+
+    expect(result).not.toBe("timed_out");
+    expect(result).toMatchObject({
+      status: "canceled",
+      stopReason: "user_canceled",
+    });
+    expect(observedSignal?.aborted).toBe(true);
+  });
+
+  it("aborts the final acceptance retry delay without another judge attempt", async () => {
+    await store.save(createProtocolV2Goal([milestone("milestone_1")]));
+    const abortController = new AbortController();
+    let delayEnteredResolve: (() => void) | undefined;
+    const delayEntered = new Promise<void>((resolve) => {
+      delayEnteredResolve = resolve;
+    });
+    let delaySignal: AbortSignal | undefined;
+    const acceptance = createAcceptanceResults({
+      milestones: [acceptedResult("check_done")],
+      goals: [timeoutResult(), acceptedResult("check_done")],
+    });
+    const runtime = createRuntime();
+    const controller = createController({
+      runtime,
+      acceptance,
+      sleep: async (_ms, signal) => {
+        delaySignal = signal;
+        delayEnteredResolve?.();
+        return new Promise<void>(() => undefined);
+      },
+    });
+
+    const running = controller.start("goal_1", {
+      signal: abortController.signal,
+    });
+    await delayEntered;
+    const canonical = await store.get("goal_1");
+    await store.save({
+      ...canonical!,
+      status: "canceled",
+      stopReason: "user_canceled",
+    });
+    abortController.abort();
+
+    const result = await running;
+
+    expect(result.status).toBe("canceled");
+    expect(acceptance.goalCalls).toBe(1);
+    expect(runtime.runMilestoneIds).toEqual(["milestone_1"]);
+    expect(delaySignal).toBe(abortController.signal);
+    expect(delaySignal?.aborted).toBe(true);
   });
 
   it("keeps cancellation canonical when it wins at the repair persistence boundary", async () => {
@@ -2683,6 +2927,7 @@ describe("agent goal controller", () => {
     stallThreshold?: number;
     onProgress?: (event: GoalProgressEvent) => void;
     onActiveGoalChange?: (goalId: string, active: boolean) => void;
+    sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
     onTrajectoryAppend?: (
       event: AgentTrajectoryEvent,
       options?: { signal?: AbortSignal },
@@ -2718,6 +2963,10 @@ describe("agent goal controller", () => {
       },
       onProgress: options.onProgress,
       onActiveGoalChange: options.onActiveGoalChange,
+      acceptanceRetry: {
+        sleep: options.sleep,
+        nowMs: () => Date.parse("2026-06-12T00:00:00.000Z"),
+      },
       stallThreshold: options.stallThreshold,
       createId: () => `goal_event_${trajectoryEvents.length + 1}`,
       nextSequence: () => {
@@ -2976,6 +3225,7 @@ function rejectedResult(
     failureClass?: NonNullable<AcceptanceResult["failureClass"]>;
     evidenceRefs?: string[];
     evidenceManifest?: GoalEvidenceManifest;
+    retry?: AcceptanceResult["retry"];
   } = {},
 ): AcceptanceResult {
   const failureClass = overrides.failureClass ?? "assertion_failed";
@@ -2998,7 +3248,20 @@ function rejectedResult(
     ...(overrides.evidenceManifest
       ? { evidenceManifest: overrides.evidenceManifest }
       : {}),
+    ...(overrides.retry ? { retry: overrides.retry } : {}),
   };
+}
+
+function timeoutResult(): AcceptanceResult {
+  return rejectedResult("judge_timeout", {
+    verdict: "acceptance_unavailable",
+    failureClass: "judge_unavailable",
+    retry: {
+      code: "judge_timeout",
+      retryable: true,
+      detail: "Final judge timed out.",
+    },
+  });
 }
 
 function createAcceptanceResults(options: {
@@ -3007,11 +3270,16 @@ function createAcceptanceResults(options: {
 }) {
   const milestones = [...options.milestones];
   const goals = [...(options.goals ?? [])];
+  let goalCalls = 0;
   return {
+    get goalCalls() {
+      return goalCalls;
+    },
     async evaluate() {
       return milestones.shift() ?? rejectedResult("missing_test_result");
     },
     async evaluateGoal() {
+      goalCalls += 1;
       return goals.shift() ?? rejectedResult("missing_goal_test_result");
     },
   };

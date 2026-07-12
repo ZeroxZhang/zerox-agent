@@ -36,6 +36,10 @@ import {
   redactAndBoundAcceptanceSummary,
   redactAndBoundEvidenceRef,
 } from "./agentGoalRedaction";
+import {
+  decideFinalAcceptanceRetry,
+  FINAL_ACCEPTANCE_MAX_ATTEMPTS,
+} from "./agentGoalAcceptanceRetryPolicy";
 import { boundRuntimeTranscript } from "./runtimeTranscript";
 
 export type GoalRuntimeRunResult = {
@@ -95,6 +99,10 @@ export function createAgentGoalController(options: {
   now?: () => string;
   onProgress?: (event: GoalProgressEvent) => void;
   onActiveGoalChange?: (goalId: string, active: boolean) => void;
+  acceptanceRetry?: {
+    sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+    nowMs?: () => number;
+  };
 }): AgentGoalController {
   const stallThreshold = options.stallThreshold ?? 3;
   type ActiveRunEntry = {
@@ -384,9 +392,12 @@ export function createAgentGoalController(options: {
               return validatingGoal;
             }
             goal = validatingGoal;
-            const result = await options.acceptance.evaluateGoal(
-              goal,
-              (await createRunAcceptanceContext(goal, runOptions)) as never,
+            const result = await racePublicationWithAbort(
+              options.acceptance.evaluateGoal(
+                goal,
+                (await createRunAcceptanceContext(goal, runOptions)) as never,
+              ),
+              runOptions?.signal,
             );
             const interruptedAfterGoalReview = await canonicalInterruption(
               goal,
@@ -407,6 +418,46 @@ export function createAgentGoalController(options: {
             }
             if (result.accepted) {
               return certifyOrAchieveGoal(goal, result, runOptions);
+            }
+            const retryDecision = goal.acceptanceProtocolVersion === 2
+              ? decideFinalAcceptanceRetry(
+                  result,
+                  ensureAcceptanceState(goal).attempt,
+                  options.acceptanceRetry?.nowMs?.() ?? Date.now(),
+                )
+              : { action: "not_applicable" as const };
+            if (retryDecision.action === "retry") {
+              const retryingGoal = await scheduleFinalAcceptanceRetry(
+                goal,
+                result,
+                retryDecision,
+                runOptions,
+              );
+              if (retryingGoal.status !== "executing") {
+                return retryingGoal;
+              }
+              goal = retryingGoal;
+              await acceptanceRetryDelay(
+                retryDecision.delayMs,
+                runOptions?.signal,
+              );
+              const interruptedAfterRetryDelay = await canonicalInterruption(
+                goal,
+                runOptions,
+              );
+              if (interruptedAfterRetryDelay) {
+                return interruptedAfterRetryDelay;
+              }
+              if (!(await appendFinalAcceptanceRetryEvent(
+                goal,
+                result,
+                "acceptance_retry_started",
+                retryDecision,
+                runOptions,
+              ))) {
+                return settleSuppressedPublication(goal);
+              }
+              continue;
             }
             const decisionResult = await applyAcceptanceDecision(
               goal,
@@ -864,6 +915,9 @@ export function createAgentGoalController(options: {
       occurrence,
       fingerprint,
       checkResults: result.checkResults,
+      targetKind: targetIdentity.targetKind,
+      infrastructureFailure:
+        goal.acceptanceProtocolVersion === 2 && Boolean(result.retry),
     });
     if (!(await appendAcceptanceEvent(
       persisted,
@@ -960,6 +1014,19 @@ export function createAgentGoalController(options: {
           "stopped_stalled",
           "progress_stalled",
           decision.summary,
+        ),
+        suspend: true,
+      };
+    }
+
+    if (decision.action === "wait_for_acceptance") {
+      return {
+        goal: await waitForFinalAcceptance(
+          persisted,
+          result,
+          decision,
+          fingerprint,
+          runOptions,
         ),
         suspend: true,
       };
@@ -1389,6 +1456,227 @@ export function createAgentGoalController(options: {
     }));
   }
 
+  async function scheduleFinalAcceptanceRetry(
+    goal: Goal,
+    result: AcceptanceResult,
+    decision: Extract<
+      ReturnType<typeof decideFinalAcceptanceRetry>,
+      { action: "retry" }
+    >,
+    runOptions?: { signal?: AbortSignal },
+  ): Promise<Goal> {
+    const attempt = ensureAcceptanceState(goal).attempt;
+    const maxAttempts = maxFinalAcceptanceAttempts(decision.code);
+    const evidenceFingerprint = acceptanceResultFingerprint(
+      goal,
+      null,
+      result,
+      recentActionSignatures.get(goal.id) ?? [],
+    );
+    goal.acceptanceState = {
+      ...ensureAcceptanceState(goal),
+      phase: "retrying",
+    };
+    goal.acceptanceRetryState = {
+      cycle: goal.acceptanceRetryState?.cycle ?? 1,
+      attempt,
+      maxAttempts,
+      lastCode: decision.code,
+      lastDetail: safeAcceptanceRetryDetail(result),
+      nextRetryAt: decision.nextRetryAt,
+      evidenceFingerprint,
+      resumeFrom: "final_judge",
+    };
+    touch(goal);
+    const persisted = await options.goalStore.save(goal);
+    if (persisted.status !== "executing") {
+      await publishCanonicalTerminal(persisted);
+      return persisted;
+    }
+    if (!(await appendFinalAcceptanceRetryEvent(
+      persisted,
+      result,
+      "acceptance_retry_scheduled",
+      decision,
+      runOptions,
+    ))) {
+      return settleSuppressedPublication(persisted);
+    }
+    return persisted;
+  }
+
+  async function waitForFinalAcceptance(
+    goal: Goal,
+    result: AcceptanceResult,
+    decision: Extract<
+      AcceptanceRepairDecision,
+      { action: "wait_for_acceptance" }
+    >,
+    evidenceFingerprint: string,
+    runOptions?: { signal?: AbortSignal },
+  ): Promise<Goal> {
+    const attempt = ensureAcceptanceState(goal).attempt;
+    const maxAttempts =
+      goal.acceptanceRetryState?.maxAttempts ??
+      maxFinalAcceptanceAttempts(result.retry?.code ?? "");
+    assertGoalTransition(goal.status, "waiting_for_acceptance");
+    goal.status = "waiting_for_acceptance";
+    goal.stopReason = undefined;
+    goal.acceptanceCertificate = undefined;
+    goal.acceptanceState = {
+      ...ensureAcceptanceState(goal),
+      phase: "awaiting_user",
+      lastDecision: toRepairDirective(decision),
+    };
+    goal.acceptanceRetryState = {
+      cycle: goal.acceptanceRetryState?.cycle ?? 1,
+      attempt,
+      maxAttempts,
+      lastCode: result.retry?.code ?? "acceptance_unavailable",
+      lastDetail: safeAcceptanceRetryDetail(result),
+      evidenceFingerprint,
+      resumeFrom: "final_judge",
+    };
+    touch(goal);
+    const persisted = await options.goalStore.save(goal);
+    if (persisted.status !== "waiting_for_acceptance") {
+      if (isTerminalGoalStatus(persisted.status)) {
+        await publishCanonicalTerminal(persisted);
+      }
+      return persisted;
+    }
+    if (!(await appendFinalAcceptanceWaitingEvent(
+      persisted,
+      result,
+      decision,
+      "acceptance_retry_exhausted",
+      runOptions,
+    ))) {
+      return settleSuppressedPublication(persisted);
+    }
+    if (!(await appendFinalAcceptanceWaitingEvent(
+      persisted,
+      result,
+      decision,
+      "acceptance_waiting_for_user",
+      runOptions,
+    ))) {
+      return settleSuppressedPublication(persisted);
+    }
+    return persisted;
+  }
+
+  async function appendFinalAcceptanceWaitingEvent(
+    goal: Goal,
+    result: AcceptanceResult,
+    decision: Extract<
+      AcceptanceRepairDecision,
+      { action: "wait_for_acceptance" }
+    >,
+    kind: "acceptance_retry_exhausted" | "acceptance_waiting_for_user",
+    runOptions?: { signal?: AbortSignal },
+  ): Promise<boolean> {
+    const retryState = goal.acceptanceRetryState;
+    const evidenceRefs = safeAcceptanceEvidenceRefs(result);
+    const summary = kind === "acceptance_retry_exhausted"
+      ? `Final acceptance retry attempts exhausted (${retryState?.attempt}/${retryState?.maxAttempts}).`
+      : decision.summary;
+    return Boolean(await publishNonterminalGoalEvent({
+      goal,
+      allowedStatuses: ["waiting_for_acceptance"],
+      ledger: {
+        at: currentTime(),
+        kind,
+        summary,
+        evidenceRefs,
+      },
+      trajectory: {
+        type: kind,
+        payload: {
+          goalId: goal.id,
+          targetId: goal.id,
+          fingerprint: retryState?.evidenceFingerprint ?? "",
+          occurrence: retryState?.attempt ?? 0,
+          failedCheckIds: decision.failedCheckIds,
+          action: decision.action,
+          evidenceRefs,
+          code: retryState?.lastCode,
+          attempt: retryState?.attempt,
+          maxAttempts: retryState?.maxAttempts,
+        },
+      },
+      progress: {
+        event: kind,
+        message: kind === "acceptance_retry_exhausted"
+          ? "最终验收自动重试已耗尽。"
+          : "任务工作已完成，等待你继续最终验收。",
+      },
+      signal: runOptions?.signal,
+    }));
+  }
+
+  async function appendFinalAcceptanceRetryEvent(
+    goal: Goal,
+    result: AcceptanceResult,
+    kind: "acceptance_retry_scheduled" | "acceptance_retry_started",
+    decision: Extract<
+      ReturnType<typeof decideFinalAcceptanceRetry>,
+      { action: "retry" }
+    >,
+    runOptions?: { signal?: AbortSignal },
+  ): Promise<boolean> {
+    const retryState = goal.acceptanceRetryState;
+    const nextAttempt = Math.min(
+      (retryState?.attempt ?? 0) + 1,
+      retryState?.maxAttempts ?? FINAL_ACCEPTANCE_MAX_ATTEMPTS,
+    );
+    const maxAttempts = retryState?.maxAttempts ?? FINAL_ACCEPTANCE_MAX_ATTEMPTS;
+    const evidenceRefs = safeAcceptanceEvidenceRefs(result);
+    const summary = kind === "acceptance_retry_scheduled"
+      ? `Final acceptance retry ${nextAttempt}/${maxAttempts} scheduled.`
+      : `Final acceptance retry ${nextAttempt}/${maxAttempts} started.`;
+    return Boolean(await publishNonterminalGoalEvent({
+      goal,
+      allowedStatuses: ["executing"],
+      ledger: {
+        at: currentTime(),
+        kind,
+        summary,
+        evidenceRefs,
+      },
+      trajectory: {
+        type: kind,
+        payload: {
+          goalId: goal.id,
+          targetId: goal.id,
+          fingerprint: retryState?.evidenceFingerprint ?? "",
+          occurrence: retryState?.attempt ?? 0,
+          failedCheckIds: failedCheckIds(result),
+          action: kind === "acceptance_retry_scheduled" ? "retry" : "retry_started",
+          evidenceRefs,
+          code: decision.code,
+          attempt: retryState?.attempt,
+          maxAttempts,
+          delayMs: decision.delayMs,
+          nextRetryAt: decision.nextRetryAt,
+        },
+      },
+      progress: {
+        event: kind,
+        message: `正在重试最终验收（${nextAttempt}/${maxAttempts}）`,
+      },
+      signal: runOptions?.signal,
+    }));
+  }
+
+  async function acceptanceRetryDelay(
+    delayMs: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const sleep = options.acceptanceRetry?.sleep ?? defaultAbortableSleep;
+    await racePublicationWithAbort(sleep(delayMs, signal), signal);
+  }
+
   async function stopForBudgetExhaustion(
     goal: Goal,
     detail: string,
@@ -1803,6 +2091,59 @@ function safeAcceptanceEvidenceRefs(result: AcceptanceResult): string[] {
   return [...new Set(refs.map(redactAndBoundEvidenceRef).filter(Boolean))]
     .sort()
     .slice(0, 64);
+}
+
+function acceptanceResultFingerprint(
+  goal: Goal,
+  target: Milestone | null,
+  result: AcceptanceResult,
+  actionSignatures: string[],
+): string {
+  const evidenceRefs = safeAcceptanceEvidenceRefs(result);
+  return createAcceptanceLogicalFailureFingerprint({
+    target: {
+      targetKind: target ? "milestone" : "goal",
+      targetId: target?.id ?? goal.id,
+    },
+    failedChecks: result.checkResults,
+    ...(result.evidenceManifest
+      ? { evidenceManifest: result.evidenceManifest }
+      : {}),
+    evidenceRefs,
+    actionSignatures: sanitizeActionSignaturesForPersistence(actionSignatures),
+    protocolVersion: goal.acceptanceProtocolVersion ?? 1,
+    validatorVersions: { acceptance: "goal-acceptance-v2" },
+  });
+}
+
+function safeAcceptanceRetryDetail(result: AcceptanceResult): string {
+  return redactAndBoundAcceptanceSummary(
+    result.retry?.detail ?? summarizeAcceptanceFailure(result),
+  ) || "Final acceptance is unavailable.";
+}
+
+function defaultAbortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason ?? new DOMException("Aborted", "AbortError"));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function maxFinalAcceptanceAttempts(code: string): number {
+  return code === "judge_invalid_response"
+    ? 2
+    : FINAL_ACCEPTANCE_MAX_ATTEMPTS;
 }
 
 function toRepairDirective(
