@@ -1210,6 +1210,101 @@ describe("app container goal drafts", () => {
       JSON.stringify(storedSession).length / 20,
     );
   });
+
+  it("cancels a final-acceptance continuation started through the container wrapper", async () => {
+    let validatorSignal: AbortSignal | undefined;
+    let validatorEnteredResolve: (() => void) | undefined;
+    const validatorEntered = new Promise<void>((resolve) => {
+      validatorEnteredResolve = resolve;
+    });
+    let releaseValidator: (() => void) | undefined;
+    const validator: AcceptanceValidator = {
+      kind: "validator:continuation_cancel_probe",
+      async evaluate({ check, context }) {
+        validatorSignal = context.signal;
+        validatorEnteredResolve?.();
+        await new Promise<void>((resolve) => {
+          releaseValidator = resolve;
+        });
+        return {
+          checkId: check.id,
+          kind: check.kind,
+          passed: true,
+          code: "accepted",
+          evidenceRefs: [],
+          detail: "Accepted after cancellation probe release.",
+        };
+      },
+    };
+    const container = createAppContainer({
+      acceptanceValidators: [validator],
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const check = {
+      id: "check_cancel_probe",
+      kind: validator.kind,
+      description: "Wait until cancellation is observed.",
+      params: {},
+      requiresEvidence: false,
+    } as const;
+    const goal = createStoredGoal({
+      id: "goal_continue_cancel",
+      chatSessionId: "chat_continue_cancel",
+      status: "waiting_for_acceptance",
+      acceptanceProtocolVersion: 2,
+      acceptanceState: {
+        protocolVersion: 2,
+        phase: "awaiting_user",
+        attempt: 3,
+        recentFailures: [],
+      },
+      acceptanceRetryState: {
+        cycle: 1,
+        attempt: 3,
+        maxAttempts: 3,
+        lastCode: "judge_timeout",
+        lastDetail: "Final judge timed out.",
+        evidenceFingerprint: "a".repeat(64),
+        resumeFrom: "final_judge",
+      },
+      successCriteria: [
+        {
+          id: "criterion_cancel_probe",
+          description: "Cancellation probe completes.",
+          acceptanceChecks: [check],
+        },
+      ],
+      milestones: [
+        {
+          id: "milestone_done",
+          description: "Work already completed.",
+          dependsOn: [],
+          successCriteria: [],
+          state: "accepted",
+          runIds: ["run_done"],
+          attempts: 1,
+        },
+      ],
+    });
+    await container.agentGoalStore().save(goal);
+
+    const continuing = container.continueGoalAcceptance(goal.id);
+    await validatorEntered;
+    const canceling = await container.runGoalOperation(() =>
+      container.goalChatService().cancel(goal.id),
+    );
+    releaseValidator?.();
+    const continued = await continuing;
+
+    expect(validatorSignal?.aborted).toBe(true);
+    expect(canceling).toMatchObject({ ok: true, goal: { status: "canceled" } });
+    expect(continued).toMatchObject({ ok: true, goal: { status: "canceled" } });
+    expect((await container.agentGoalStore().get(goal.id))?.status).toBe(
+      "canceled",
+    );
+  });
 });
 
 async function createSeedGitRepository(repositoryRoot: string): Promise<void> {

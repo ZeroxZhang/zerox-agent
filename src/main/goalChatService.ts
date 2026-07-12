@@ -95,6 +95,7 @@ export function createGoalChatService(options: {
     string,
     { controller: AbortController; completion: Promise<unknown> }
   >();
+  const pendingGoalCancellations = new Map<string, Promise<void>>();
   const pendingRestarts = new Set<string>();
 
   function notifyProgress(
@@ -153,6 +154,81 @@ export function createGoalChatService(options: {
     const active = activeGoalRuns.get(goalId);
     if (active && !active.controller.signal.aborted) {
       active.controller.abort();
+    }
+  }
+
+  function beginGoalCancellation(goalId: string): () => void {
+    let settle: (() => void) | undefined;
+    const completion = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    pendingGoalCancellations.set(goalId, completion);
+    return () => {
+      settle?.();
+      if (pendingGoalCancellations.get(goalId) === completion) {
+        pendingGoalCancellations.delete(goalId);
+      }
+    };
+  }
+
+  async function runAbortableGoalOperation(
+    goalId: string,
+    runOptions: { signal?: AbortSignal } | undefined,
+    runner: (goalId: string, options: { signal?: AbortSignal }) => Promise<Goal>,
+  ): Promise<Goal> {
+    const existing = activeGoalRuns.get(goalId);
+    if (existing) {
+      try {
+        await existing.completion;
+      } catch (error) {
+        if (!existing.controller.signal.aborted) {
+          throw error;
+        }
+      }
+      if (existing.controller.signal.aborted) {
+        await pendingGoalCancellations.get(goalId);
+      }
+      const canonical = await options.goalStore.get(goalId);
+      if (!canonical) {
+        throw new Error(`Goal "${goalId}" was not found.`);
+      }
+      return canonical;
+    }
+
+    const controller = new AbortController();
+    const abortFromParent = () => controller.abort(runOptions?.signal?.reason);
+    runOptions?.signal?.addEventListener("abort", abortFromParent, { once: true });
+    if (runOptions?.signal?.aborted) {
+      abortFromParent();
+    }
+
+    const completion = runner(goalId, { signal: controller.signal }).finally(
+      () => {
+        runOptions?.signal?.removeEventListener("abort", abortFromParent);
+        if (activeGoalRuns.get(goalId)?.controller === controller) {
+          activeGoalRuns.delete(goalId);
+        }
+      },
+    );
+    activeGoalRuns.set(goalId, { controller, completion });
+
+    try {
+      const result = await completion;
+      if (controller.signal.aborted) {
+        await pendingGoalCancellations.get(goalId);
+      }
+      return (await options.goalStore.get(goalId)) ?? result;
+    } catch (error) {
+      if (controller.signal.aborted) {
+        await pendingGoalCancellations.get(goalId);
+      }
+      const canonical = controller.signal.aborted
+        ? await options.goalStore.get(goalId)
+        : null;
+      if (canonical) {
+        return canonical;
+      }
+      throw error;
     }
   }
 
@@ -410,21 +486,26 @@ export function createGoalChatService(options: {
       if (goal.status !== "canceled") {
         assertGoalTransition(goal.status, "canceled");
       }
-      abortBackgroundGoalRun(goalId);
-      goal.status = "canceled";
-      goal.stopReason = "user_canceled";
-      goal.updatedAt = now();
-      const persisted = await options.goalStore.save(goal);
-      if (persisted.status !== goal.status) {
+      const finishCancellation = beginGoalCancellation(goalId);
+      try {
+        abortBackgroundGoalRun(goalId);
+        goal.status = "canceled";
+        goal.stopReason = "user_canceled";
+        goal.updatedAt = now();
+        const persisted = await options.goalStore.save(goal);
+        if (persisted.status !== goal.status) {
+          return toGoalSummary(persisted);
+        }
+        await options.goalStore.appendLedger(goal.id, {
+          at: goal.updatedAt,
+          kind: "goal_stopped",
+          summary: "Goal canceled from chat.",
+        });
+        notifyProgress("stopped", persisted, "目标已取消。");
         return toGoalSummary(persisted);
+      } finally {
+        finishCancellation();
       }
-      await options.goalStore.appendLedger(goal.id, {
-        at: goal.updatedAt,
-        kind: "goal_stopped",
-        summary: "Goal canceled from chat.",
-      });
-      notifyProgress("stopped", persisted, "目标已取消。");
-      return toGoalSummary(persisted);
     },
 
     async resolveReview(goalId, decision) {
@@ -435,7 +516,12 @@ export function createGoalChatService(options: {
 
     async continueAcceptance(goalId, runOptions) {
       return toGoalSummary(
-        await options.controller.continueAcceptance(goalId, runOptions),
+        await runAbortableGoalOperation(
+          goalId,
+          runOptions,
+          (id, controllerOptions) =>
+            options.controller.continueAcceptance(id, controllerOptions),
+        ),
       );
     },
 

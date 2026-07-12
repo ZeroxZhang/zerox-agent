@@ -290,3 +290,47 @@ git diff --check
 ## Concerns
 
 - Renderer exhaustiveness updates for the new goal statuses and acceptance phases remain intentionally out of scope for Task 5B and are assigned to Task 6.
+
+## Task 5B Independent Review Fixes
+
+### Status
+
+DONE
+
+### RED evidence
+
+```text
+npm test -- --run src/main/goalChatService.test.ts src/main/container.test.ts src/main/ipc/index.test.ts
+```
+
+- Expected RED: 3 test files failed; 4 tests failed and 79 passed.
+- The service and real production-container tests proved that a continuation started from the wrapper had no registered abort signal, so `cancel()` could not stop a validator/judge wait.
+- Both IPC negative tests proved unsafe, traversal-shaped, oversized, and non-string goal IDs reached the container operations.
+
+### GREEN evidence
+
+```text
+npm test -- --run src/main/goalChatService.test.ts src/main/container.test.ts src/main/ipc/index.test.ts src/preload/index.test.ts
+```
+
+- 4 test files passed; 89 tests passed.
+
+```text
+npm test -- --run src/main/agentGoalController.test.ts src/main/goalChatService.test.ts src/main/container.test.ts src/main/ipc/index.test.ts src/preload/index.test.ts src/main/agentGoalAcceptanceCertificate.test.ts
+npx tsc -p tsconfig.electron.json --noEmit --pretty false
+npm run harness:check
+git diff --check
+```
+
+- Final focused verification: 6 test files passed; 264 tests passed.
+- Electron TypeScript, harness, and diff checks all passed.
+
+### Fixes and self-review
+
+- Final-acceptance continuation now joins the existing per-goal active-run registry through a linked internal `AbortController`. Existing `cancel()` aborts that controller, including retry sleeps and the final judge/validator request.
+- Concurrent continuation requests share the registered operation and do not start a second judge cycle. Tests prove one controller call and canonical `canceled` summaries for both callers.
+- A short cancellation settlement fence makes an aborted continuation wait for the canonical cancel save and ledger publication before rereading the goal. A late `achieved` return from a dependency cannot escape through the service or container wrapper.
+- The production container regression uses an abort-observing acceptance validator and the real `continueGoalAcceptance` plus `runGoalOperation` cancellation path; it proves the validator signal is aborted and durable status remains `canceled`.
+- Both new IPC handlers validate `goalId` before any container call. Accepted IDs are trimmed-exact strings of 1-128 characters, begin with an ASCII alphanumeric character, contain only ASCII alphanumerics plus `. _ : -`, and cannot contain `..`.
+- Invalid goal IDs return `{ ok: false, message: "目标 ID 无效。" }`; tests cover empty, whitespace, traversal, backslash, oversized, numeric, and null inputs on both channels.
+- Generic `retryGoal` remains unchanged.

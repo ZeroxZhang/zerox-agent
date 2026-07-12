@@ -1294,7 +1294,8 @@ describe("goal chat service", () => {
   });
 
   it("continues final acceptance explicitly and forwards the caller signal", async () => {
-    const signal = new AbortController().signal;
+    const parentController = new AbortController();
+    const signal = parentController.signal;
     const continuedGoal = createGoal({
       status: "waiting_for_acceptance",
       acceptanceState: {
@@ -1309,12 +1310,27 @@ describe("goal chat service", () => {
       options?: { signal?: AbortSignal },
     ) => {
       expect(goalId).toBe(continuedGoal.id);
-      expect(options?.signal).toBe(signal);
-      return createGoal({ id: goalId, status: "achieved" });
+      expect(options?.signal).not.toBe(signal);
+      expect(options?.signal?.aborted).toBe(false);
+      parentController.abort();
+      expect(options?.signal?.aborted).toBe(true);
+      const achieved = createGoal({ id: goalId, status: "achieved" });
+      canonicalGoal = achieved;
+      return achieved;
     };
+    let canonicalGoal = continuedGoal;
     const service = createGoalChatService({
       controller: createController({ continueAcceptance }),
-      goalStore: createGoalStore({ existingGoal: continuedGoal }),
+      goalStore: {
+        async get(goalId) {
+          return canonicalGoal.id === goalId ? canonicalGoal : null;
+        },
+        async save(goal) {
+          canonicalGoal = goal;
+          return canonicalGoal;
+        },
+        async appendLedger() {},
+      },
       planner: createFakePlanner(),
     });
 
@@ -1343,6 +1359,60 @@ describe("goal chat service", () => {
       id: waitingGoal.id,
       description: waitingGoal.description,
       status: "completed_unverified",
+    });
+  });
+
+  it("aborts an active final-acceptance continuation when the goal is canceled", async () => {
+    let persistedGoal = createGoal({ status: "waiting_for_acceptance" });
+    let continuationSignal: AbortSignal | undefined;
+    let continuationEnteredResolve: (() => void) | undefined;
+    const continuationEntered = new Promise<void>((resolve) => {
+      continuationEnteredResolve = resolve;
+    });
+    let releaseContinuation: (() => void) | undefined;
+    let continuationCalls = 0;
+    const continueAcceptance = async (
+      goalId: string,
+      options?: { signal?: AbortSignal },
+    ) => {
+      continuationCalls += 1;
+      continuationSignal = options?.signal;
+      continuationEnteredResolve?.();
+      await new Promise<void>((resolve) => {
+        releaseContinuation = resolve;
+        options?.signal?.addEventListener("abort", () => resolve(), {
+          once: true,
+        });
+      });
+      return createGoal({ id: goalId, status: "achieved" });
+    };
+    const service = createGoalChatService({
+      controller: createController({ continueAcceptance }),
+      goalStore: {
+        async get(goalId) {
+          return persistedGoal.id === goalId ? persistedGoal : null;
+        },
+        async save(goal) {
+          persistedGoal = structuredClone(goal);
+          return persistedGoal;
+        },
+        async appendLedger() {},
+      },
+      planner: createFakePlanner(),
+    });
+
+    const continuing = service.continueAcceptance(persistedGoal.id);
+    await continuationEntered;
+    const duplicateContinuation = service.continueAcceptance(persistedGoal.id);
+    const canceled = await service.cancel(persistedGoal.id);
+    releaseContinuation?.();
+
+    expect(continuationSignal?.aborted).toBe(true);
+    expect(continuationCalls).toBe(1);
+    expect(canceled.status).toBe("canceled");
+    await expect(continuing).resolves.toMatchObject({ status: "canceled" });
+    await expect(duplicateContinuation).resolves.toMatchObject({
+      status: "canceled",
     });
   });
 });
