@@ -86,6 +86,46 @@ describe("agent goal model", () => {
     expect(canTransitionGoalStatus("stopped_blocked", "canceled")).toBe(true);
   });
 
+  it("supports recoverable acceptance waiting and unverified completion", () => {
+    expect(canTransitionGoalStatus("executing", "waiting_for_acceptance")).toBe(true);
+    expect(canTransitionGoalStatus("waiting_for_acceptance", "executing")).toBe(true);
+    expect(
+      canTransitionGoalStatus(
+        "waiting_for_acceptance",
+        "completed_unverified",
+      ),
+    ).toBe(true);
+    expect(canTransitionGoalStatus("waiting_for_acceptance", "canceled")).toBe(
+      true,
+    );
+    expect(canTransitionGoalStatus("completed_unverified", "executing")).toBe(
+      false,
+    );
+    expect(canTransitionGoalStatus("completed_unverified", "achieved")).toBe(
+      false,
+    );
+  });
+
+  it("preserves retry state and manual attestation during protocol upgrade", () => {
+    const upgraded = upgradeGoalAcceptanceProtocol(
+      createGoal({
+        status: "waiting_for_acceptance",
+        acceptanceRetryState: {
+          cycle: 2,
+          attempt: 3,
+          maxAttempts: 3,
+          lastCode: "judge_timeout",
+          lastDetail: "Final judge timed out.",
+          evidenceFingerprint: "a".repeat(64),
+          resumeFrom: "final_judge",
+        },
+      }),
+    );
+
+    expect(upgraded.acceptanceRetryState?.resumeFrom).toBe("final_judge");
+    expect(upgraded.acceptanceState?.phase).toBeDefined();
+  });
+
   it("upgrades a legacy nonterminal goal without mutating the stored input", () => {
     const legacy = createGoal({ status: "executing" });
 

@@ -112,6 +112,10 @@ export interface RunRepository {
     runId: string,
     event: AgentTrajectoryEvent,
   ): AgentTrajectoryEvent;
+  appendTrajectoryIfAbsent(
+    runId: string,
+    event: AgentTrajectoryEvent,
+  ): boolean;
   getTrajectory(
     runId: string,
     opts?: { fromSeq?: number },
@@ -185,11 +189,20 @@ export interface MemoryRepository {
 
 export interface GoalRepository {
   save(goal: Goal): Goal;
+  saveIfStatus(
+    goal: Goal,
+    expectedStatus: Goal["status"],
+  ): { saved: boolean; goal: Goal | null };
   get(goalId: string): Goal | null;
   listActive(): Goal[];
   listByChatSession(chatSessionId: string): Goal[];
   delete(goalId: string): boolean;
   appendLedger(goalId: string, event: ProgressLedgerEvent): void;
+  appendLedgerIfAbsent(
+    goalId: string,
+    publicationKey: string,
+    event: ProgressLedgerEvent,
+  ): boolean;
   readLedger(goalId: string): ProgressLedgerEvent[];
 }
 

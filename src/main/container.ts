@@ -181,9 +181,10 @@ function acceptanceContextNeedsModel(
   );
 }
 
-function isTerminalGoalStatus(status: Goal["status"]): boolean {
+export function isTerminalGoalStatus(status: Goal["status"]): boolean {
   return (
     status === "achieved" ||
+    status === "completed_unverified" ||
     status === "stopped_budget" ||
     status === "stopped_stalled" ||
     status === "stopped_blocked" ||
@@ -213,6 +214,8 @@ export function formatGoalTerminalHeading(goal: Goal): string {
   switch (goal.status) {
     case "achieved":
       return `目标已达成：${goal.description}`;
+    case "completed_unverified":
+      return `目标已手动完成（未经机器认证）：${goal.description}`;
     case "failed":
       return `目标执行失败：${goal.description}`;
     case "canceled":
@@ -235,6 +238,7 @@ export function formatGoalTerminalHeading(goal: Goal): string {
     case "planning":
     case "executing":
     case "waiting_for_review":
+    case "waiting_for_acceptance":
       return `目标状态更新：${goal.description}`;
   }
 }
@@ -2049,25 +2053,28 @@ export function createAppContainer(options: {
       runGoalOperation(() => goalChatService().replan(goalId, instructions)),
     retryGoal: (goalId: string) =>
       runGoalOperation(() => goalChatService().retry(goalId)),
+    continueGoalAcceptance: (goalId: string) =>
+      runGoalOperation(() => goalChatService().continueAcceptance(goalId)),
+    markGoalCompletedUnverified: (goalId: string) =>
+      runGoalOperation(() => goalChatService().markCompletedUnverified(goalId)),
     async resumeInterruptedGoals() {
       const activeGoals = await agentGoalStore().listActive();
       const interrupted = activeGoals.filter(
         (goal) => goal.status === "executing",
       );
-      let resumed = 0;
+      let recovered = 0;
       for (const goal of interrupted) {
         try {
           const prepared = prepareInterruptedGoalForResume(goal);
           if (prepared !== goal) {
             await agentGoalStore().save(prepared);
+            recovered += 1;
           }
-          await goalChatService().resume(goal.id);
-          resumed += 1;
         } catch (error) {
-          console.error(`Failed to resume goal ${goal.id}:`, error);
+          console.error(`Failed to recover interrupted goal ${goal.id}:`, error);
         }
       }
-      return resumed;
+      return recovered;
     },
     initializeMcpTools,
     getActiveMcpClients: () => activeMcpClients,
@@ -2082,6 +2089,25 @@ export function createAppContainer(options: {
 }
 
 export function prepareInterruptedGoalForResume(goal: Goal): Goal {
+  if (
+    goal.status === "executing" &&
+    goal.acceptanceState?.phase === "retrying" &&
+    goal.acceptanceRetryState?.resumeFrom === "final_judge"
+  ) {
+    const { nextRetryAt: _nextRetryAt, ...retryState } =
+      goal.acceptanceRetryState;
+    return {
+      ...goal,
+      status: "waiting_for_acceptance",
+      stopReason: undefined,
+      acceptanceState: {
+        ...goal.acceptanceState,
+        phase: "awaiting_user",
+      },
+      acceptanceRetryState: retryState,
+    };
+  }
+
   let changed = false;
   const milestones = goal.milestones.map((milestone) => {
     if (milestone.state !== "running") {
@@ -2090,6 +2116,15 @@ export function prepareInterruptedGoalForResume(goal: Goal): Goal {
     changed = true;
     return { ...milestone, state: "ready" as const };
   });
+  if (goal.status === "executing") {
+    changed = true;
+    return {
+      ...goal,
+      milestones,
+      status: "stopped_blocked" as const,
+      stopReason: "external_blocked" as const,
+    };
+  }
   return changed ? { ...goal, milestones } : goal;
 }
 
@@ -2099,7 +2134,9 @@ export function reconcileIrreversibleGoalProgressEvent(
 ): GoalProgressEvent {
   if (
     !goal ||
-    (goal.status !== "achieved" && goal.status !== "canceled")
+    (goal.status !== "achieved" &&
+      goal.status !== "completed_unverified" &&
+      goal.status !== "canceled")
   ) {
     return event;
   }
@@ -2116,7 +2153,12 @@ export function reconcileIrreversibleGoalProgressEvent(
     ...event,
     status: goal.status,
     event: "stopped",
-    message: goal.status === "achieved" ? "目标已达成。" : "目标已取消。",
+    message:
+      goal.status === "achieved"
+        ? "目标已达成。"
+        : goal.status === "completed_unverified"
+          ? "目标已手动完成（未经机器认证）。"
+          : "目标已取消。",
   };
 }
 

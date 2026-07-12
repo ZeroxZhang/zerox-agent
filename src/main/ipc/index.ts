@@ -86,6 +86,9 @@ type OpenProjectAgentWorkspaceInput = {
   mode?: "open" | "create";
 };
 
+const maximumGoalOperationIdChars = 128;
+const safeGoalOperationIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+
 export function registerAllIpcHandlers(container: AppContainer): void {
   registerAppIpcHandlers(container);
   registerTasksIpcHandlers(container);
@@ -546,6 +549,45 @@ function registerGoalsIpcHandlers(container: AppContainer): void {
       return container.retryGoal(goalId);
     },
   );
+  ipcMain.handle(
+    "goal:continueAcceptance",
+    async (
+      _event,
+      goalId: unknown,
+    ): Promise<{ ok: boolean; goal?: Goal; message?: string }> => {
+      if (!isSafeGoalOperationId(goalId)) {
+        return invalidGoalOperationIdResult();
+      }
+      return container.continueGoalAcceptance(goalId);
+    },
+  );
+  ipcMain.handle(
+    "goal:markCompletedUnverified",
+    async (
+      _event,
+      goalId: unknown,
+    ): Promise<{ ok: boolean; goal?: Goal; message?: string }> => {
+      if (!isSafeGoalOperationId(goalId)) {
+        return invalidGoalOperationIdResult();
+      }
+      return container.markGoalCompletedUnverified(goalId);
+    },
+  );
+}
+
+function isSafeGoalOperationId(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= maximumGoalOperationIdChars &&
+    value === value.trim() &&
+    !value.includes("..") &&
+    safeGoalOperationIdPattern.test(value)
+  );
+}
+
+function invalidGoalOperationIdResult(): { ok: false; message: string } {
+  return { ok: false, message: "目标 ID 无效。" };
 }
 
 function registerEvalsIpcHandlers(container: AppContainer): void {

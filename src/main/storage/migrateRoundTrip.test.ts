@@ -92,12 +92,32 @@ describe("P1 migration scripts round-trip", () => {
         `${artifactPath}.provenance.json`,
         JSON.stringify({ schemaVersion: 1, kind: "zerox.artifactProvenance", runId: "run-1", artifactId: "artifact_1", artifactRef: "artifact:artifact_1", source: { type: "tool" }, destination: { path: artifactPath, sha256: "sha", sizeBytes: 8 }, generatedAt: "2026-06-19T00:00:00.000Z" }),
       );
+      const goalsDir = path.join(dir, "agent-goals");
+      mkdirSync(goalsDir, { recursive: true });
+      writeFileSync(
+        path.join(goalsDir, "goal-manual-historical.json"),
+        JSON.stringify({
+          id: "goal-manual-historical",
+          description: "Historical manual completion",
+          successCriteria: [],
+          milestones: [],
+          status: "completed_unverified",
+          budget: {},
+          budgetUsage: {},
+          reviewPolicy: "review_final_only",
+          planVersion: 1,
+          acceptanceCertificate: { forged: true },
+          createdAt: "2026-06-19T00:00:00.000Z",
+          updatedAt: "2026-06-19T00:00:01.000Z",
+        }),
+      );
 
       // 1. Migrate JSON → SQLite (--verify asserts counts).
       const migrateOut = execFileSync(process.execPath, [path.join(scriptRoot, "scripts", "migrate-to-sqlite.mjs"), "--configDir", dir, "--verify"], { encoding: "utf8", cwd: root });
       expect(migrateOut).toContain('"runs": 1');
       expect(migrateOut).toContain('"memory_records": 1');
       expect(migrateOut).toContain('"learning_candidates": 2');
+      expect(migrateOut).toContain('"goals": 1');
       expect(existsSync(path.join(dir, "zerox.db"))).toBe(true);
       const db = new Database(path.join(dir, "zerox.db"), { readonly: true });
       try {
@@ -125,6 +145,18 @@ describe("P1 migration scripts round-trip", () => {
             recommendedAction: "Do not keep",
           }),
         ]);
+        const migratedGoal = JSON.parse(
+          (
+            db.prepare("SELECT payload FROM goals WHERE id = ?").get(
+              "goal-manual-historical",
+            ) as { payload: string }
+          ).payload,
+        );
+        expect(migratedGoal).toMatchObject({
+          id: "goal-manual-historical",
+          status: "completed_unverified",
+        });
+        expect(migratedGoal).not.toHaveProperty("acceptanceCertificate");
       } finally {
         db.close();
       }
@@ -150,6 +182,13 @@ describe("P1 migration scripts round-trip", () => {
       expect(readFileSync(path.join(dir, "agent-eval-candidates.json"), "utf8")).toContain("eval_1");
       expect(readFileSync(path.join(dir, "agent-promoted-eval-fixtures.json"), "utf8")).toContain("promoted_1");
       expect(readFileSync(`${artifactPath}.provenance.json`, "utf8")).toContain("artifact_1");
+      const rolledBackGoal = JSON.parse(
+        readFileSync(
+          path.join(goalsDir, "goal-manual-historical.json"),
+          "utf8",
+        ),
+      );
+      expect(rolledBackGoal).not.toHaveProperty("acceptanceCertificate");
     } finally {
       rmSync(dir, { recursive: true, force: true });
       if (scriptRoot) rmSync(scriptRoot, { recursive: true, force: true });

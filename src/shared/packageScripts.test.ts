@@ -72,6 +72,9 @@ describe("package scripts", () => {
       (feature) =>
         feature.id === "P41-v3.4.0-goal-acceptance-policy-engine",
     );
+    const p43 = featureList.features.find(
+      (feature) => feature.id === "P43-goal-acceptance-recovery",
+    );
     const p31 = featureList.features.find(
       (feature) => feature.id === "P31-v3.1.2-window-controls-and-settings-icon",
     );
@@ -94,10 +97,98 @@ describe("package scripts", () => {
           featureId === "P39-v3.4.0-goal-mode-runtime-state-repair" ||
           featureId === "P40-v3.4.0-goal-mode-bounded-termination" ||
           featureId === "P41-v3.4.0-goal-acceptance-policy-engine" ||
-          featureId === "P42-v3.7.0-autonomous-goal-runtime",
+          featureId === "P42-v3.7.0-autonomous-goal-runtime" ||
+          featureId === "P43-goal-acceptance-recovery",
       ),
     ).toBe(true);
     expect(openFeatureIds.length).toBeLessThanOrEqual(1);
+    expect(p43?.status === "in_progress" || p43?.status === "done").toBe(true);
+    expect(p43).toEqual(
+      expect.objectContaining({
+        id: "P43-goal-acceptance-recovery",
+        files: [
+          ".superpowers/sdd/task-4-report.md",
+          ".superpowers/sdd/task-5-report.md",
+          ".superpowers/sdd/task-6-report.md",
+          ".superpowers/sdd/task-7-review-fixes-acceptance.md",
+          ".superpowers/sdd/task-7-review-fixes-persistence-ui.md",
+          ".superpowers/sdd/task-7-review-fixes-controller.md",
+          ".zerox/feature_list.json",
+          ".zerox/progress.md",
+          "src/main/agentGoalAcceptance.test.ts",
+          "src/main/agentGoalAcceptance.ts",
+          "src/main/agentGoalAcceptanceCertificate.test.ts",
+          "src/main/agentGoalAcceptanceCertificate.ts",
+          "src/main/agentGoalAcceptanceRetryPolicy.test.ts",
+          "src/main/agentGoalAcceptanceRetryPolicy.ts",
+          "src/main/agentGoalController.test.ts",
+          "src/main/agentGoalController.ts",
+          "src/main/agentGoalEvidenceManifest.ts",
+          "src/main/agentGoalFailureFingerprint.test.ts",
+          "src/main/agentGoalFailureFingerprint.ts",
+          "src/main/agentGoalRepairPolicy.test.ts",
+          "src/main/agentGoalRepairPolicy.ts",
+          "src/main/agentGoalStore.test.ts",
+          "src/main/agentGoalStore.ts",
+          "src/main/agentTrajectoryStore.test.ts",
+          "src/main/agentTrajectoryStore.ts",
+          "src/main/container.test.ts",
+          "src/main/container.ts",
+          "src/main/goalChatService.test.ts",
+          "src/main/goalChatService.ts",
+          "src/main/ipc/index.test.ts",
+          "src/main/ipc/index.ts",
+          "src/main/providers/anthropicProvider.ts",
+          "src/main/providers/geminiProvider.ts",
+          "src/main/providers/providerHttpError.ts",
+          "src/main/providers/providers.test.ts",
+          "src/main/storage/migrateRoundTrip.test.ts",
+          "src/main/storage/repositories/goalRepository.ts",
+          "src/main/storage/repositories/repositories.test.ts",
+          "src/main/storage/repositories/runRepository.ts",
+          "src/preload/index.test.ts",
+          "src/preload/index.ts",
+          "src/renderer/App.tsx",
+          "src/renderer/chatTaskActivity.test.ts",
+          "src/renderer/chatTaskActivity.ts",
+          "src/renderer/components/AgentChatPanel.tsx",
+          "src/renderer/components/GoalDetailDrawer.tsx",
+          "src/renderer/components/GoalStatusStrip.tsx",
+          "src/renderer/goalAcceptanceInteraction.test.ts",
+          "src/renderer/goalAcceptanceInteraction.ts",
+          "src/renderer/goalProgressViewModel.test.ts",
+          "src/renderer/goalProgressViewModel.ts",
+          "src/renderer/materialDesign.test.ts",
+          "src/renderer/styles/chat.css",
+          "src/shared/agentArtifactProvenance.test.ts",
+          "src/shared/agentArtifactProvenance.ts",
+          "src/shared/agentGoal.test.ts",
+          "src/shared/agentGoal.ts",
+          "src/shared/agentTrajectory.ts",
+          "src/shared/chat.ts",
+          "src/shared/packageScripts.test.ts",
+          "src/shared/storageContract.ts",
+          "src/shared/trustedFileSnapshot.ts",
+        ],
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining(
+            "Transient final-judge failures retry visibly without rerunning accepted task work",
+          ),
+          expect.stringContaining(
+            "Exhausted retries preserve a durable waiting_for_acceptance state",
+          ),
+          expect.stringContaining(
+            "Users can continue final acceptance from persisted evidence",
+          ),
+          expect.stringContaining(
+            "Manual completion is terminal, audited, unverified, and never certificate-backed",
+          ),
+          expect.stringContaining(
+            "Restart, cancellation, stale writes, renderer copy, and historical goals remain safe",
+          ),
+        ]),
+      }),
+    );
     expect(p41?.status === "in_progress" || p41?.status === "done").toBe(true);
     expect(p41).toEqual(
       expect.objectContaining({

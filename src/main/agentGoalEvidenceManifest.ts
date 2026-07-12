@@ -1,5 +1,3 @@
-import { constants } from "node:fs";
-import { open } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 import path from "node:path";
@@ -10,10 +8,15 @@ import type {
 import {
   normalizeLocationBoundaryPath,
   normalizeLocationEnvironment,
+  normalizeLocationPath,
   validatePathInsideLocationRoots,
   type LocationResourceEnvironment,
 } from "../shared/locationResource";
 import { verifyArtifactProvenance } from "../shared/agentArtifactProvenance";
+import {
+  readTrustedRegularFile,
+  TrustedFileSnapshotValidationError,
+} from "../shared/trustedFileSnapshot";
 
 const defaultMaxRenderedChars = 12_000;
 const defaultMaxReadBytes = 2 * 1024 * 1024;
@@ -46,9 +49,40 @@ export type BuildGoalEvidenceManifestInput = {
   provenance?: GoalEvidenceProvenanceRequirement;
   signal?: AbortSignal;
   afterProvenanceVerified?: (artifactPath: string) => Promise<void>;
+  beforeTrustedFileOpen?: (artifactPath: string) => Promise<void>;
   afterChunkProcessed?: (artifactPath: string, bytesRead: number) => Promise<void>;
   afterFileClosed?: (artifactPath: string) => Promise<void>;
 };
+
+export type GoalEvidenceProvenanceAnchor = {
+  path: string;
+  sha256: string;
+  runId: string;
+  goalId?: string;
+  milestoneId?: string;
+  artifactId: string;
+  artifactRef: string;
+};
+
+type AnchoredGoalEvidenceArtifact = GoalEvidenceArtifact & {
+  provenance?: GoalEvidenceProvenanceAnchor;
+};
+
+export type RevalidateGoalEvidenceManifestInput = {
+  manifest: GoalEvidenceManifest;
+  workspacePath: string;
+  extraAuthorizedRoots?: string[];
+  locationEnv?: LocationResourceEnvironment;
+  artifacts?: Record<string, unknown>;
+  requiredProvenanceRefs?: string[];
+  beforeTrustedFileOpen?: (artifactPath: string) => Promise<void>;
+  afterChunkProcessed?: (artifactPath: string, bytesRead: number) => Promise<void>;
+  signal?: AbortSignal;
+};
+
+export type GoalEvidenceRevalidationResult =
+  | { ok: true }
+  | { ok: false; reason: "artifact_changed"; artifactRef: string };
 
 export class GoalEvidenceManifestAbortError extends Error {
   readonly code = "ABORT_ERR";
@@ -132,6 +166,81 @@ export function renderGoalEvidenceManifest(
   return renderManifest(manifest, Math.min(requestedCap, intrinsicCap)).text;
 }
 
+export async function revalidateGoalEvidenceManifest(
+  input: RevalidateGoalEvidenceManifestInput,
+): Promise<GoalEvidenceRevalidationResult> {
+  const requiredProvenanceRefs = new Set(input.requiredProvenanceRefs ?? []);
+  for (const sealedArtifact of input.manifest.artifacts) {
+    throwIfManifestAborted(input.signal);
+    const sealedProvenance = getProvenanceAnchor(sealedArtifact);
+    const requiresProvenance =
+      requiredProvenanceRefs.has(sealedArtifact.ref) || sealedProvenance !== undefined;
+    if (
+      typeof sealedArtifact.sha256 !== "string" ||
+      sealedArtifact.sha256.length !== 64 ||
+      typeof sealedArtifact.sizeBytes !== "number" ||
+      !Number.isFinite(sealedArtifact.sizeBytes) ||
+      (requiresProvenance && !sealedProvenance)
+    ) {
+      return changedArtifact(sealedArtifact.ref);
+    }
+
+    let currentManifest: GoalEvidenceManifest;
+    try {
+      currentManifest = await buildGoalEvidenceManifest({
+        evidenceRefs: [sealedArtifact.ref],
+        criterionText: "",
+        workspacePath: input.workspacePath,
+        extraAuthorizedRoots: input.extraAuthorizedRoots,
+        locationEnv: input.locationEnv,
+        artifacts: input.artifacts,
+        now: () => input.manifest.generatedAt,
+        maxRenderedChars: 0,
+        signal: input.signal,
+        beforeTrustedFileOpen: input.beforeTrustedFileOpen,
+        afterChunkProcessed: input.afterChunkProcessed,
+        ...(sealedProvenance
+          ? {
+              provenance: {
+                required: true,
+                runId: sealedProvenance.runId,
+                ...(sealedProvenance.goalId
+                  ? { goalId: sealedProvenance.goalId }
+                  : {}),
+                ...(sealedProvenance.milestoneId
+                  ? { milestoneId: sealedProvenance.milestoneId }
+                  : {}),
+              },
+            }
+          : {}),
+      });
+    } catch (error) {
+      if (input.signal?.aborted || error instanceof GoalEvidenceManifestAbortError) {
+        throw error;
+      }
+      return changedArtifact(sealedArtifact.ref);
+    }
+    throwIfManifestAborted(input.signal);
+
+    const currentArtifact = currentManifest.artifacts.find(
+      (candidate) => candidate.ref === sealedArtifact.ref,
+    );
+    if (
+      !currentArtifact ||
+      !sameArtifactLocation(sealedArtifact, currentArtifact, input.locationEnv) ||
+      currentArtifact.sha256 !== sealedArtifact.sha256 ||
+      currentArtifact.sizeBytes !== sealedArtifact.sizeBytes ||
+      !sameProvenanceAnchor(
+        sealedProvenance,
+        getProvenanceAnchor(currentArtifact),
+      )
+    ) {
+      return changedArtifact(sealedArtifact.ref);
+    }
+  }
+  return { ok: true };
+}
+
 async function buildArtifact(
   ref: string,
   input: BuildGoalEvidenceManifestInput,
@@ -178,6 +287,7 @@ async function buildArtifact(
     let verifiedDestination:
       | { sha256: string; sizeBytes: number }
       | undefined;
+    let verifiedProvenance: GoalEvidenceProvenanceAnchor | undefined;
     if (input.provenance?.required) {
       throwIfManifestAborted(input.signal);
       const verification = await verifyArtifactProvenance({
@@ -190,10 +300,36 @@ async function buildArtifact(
           ? { milestoneId: input.provenance.milestoneId }
           : {}),
         signal: input.signal,
+        trustedRoots: roots,
+        locationEnv: env,
+        trustedFileHooks: {
+          ...(input.beforeTrustedFileOpen
+            ? { afterPrecheck: input.beforeTrustedFileOpen }
+            : {}),
+          ...(input.afterChunkProcessed
+            ? {
+                afterChunk: async (artifactPath, chunk) =>
+                  input.afterChunkProcessed?.(artifactPath, chunk.length),
+              }
+            : {}),
+        },
       });
       throwIfManifestAborted(input.signal);
       if (!verification.ok) continue;
       verifiedDestination = verification.manifest.destination;
+      verifiedProvenance = {
+        path: verification.provenancePath,
+        sha256: verification.sidecarSha256,
+        runId: verification.manifest.runId,
+        ...(verification.manifest.goalId
+          ? { goalId: verification.manifest.goalId }
+          : {}),
+        ...(verification.manifest.milestoneId
+          ? { milestoneId: verification.manifest.milestoneId }
+          : {}),
+        artifactId: verification.manifest.artifactId,
+        artifactRef: verification.manifest.artifactRef,
+      };
       await input.afterProvenanceVerified?.(boundary.path);
       throwIfManifestAborted(input.signal);
     }
@@ -214,10 +350,64 @@ async function buildArtifact(
         (artifact.sha256 === verifiedDestination.sha256 &&
           artifact.sizeBytes === verifiedDestination.sizeBytes))
     ) {
+      if (verifiedProvenance) {
+        const anchoredArtifact: AnchoredGoalEvidenceArtifact = {
+          ...artifact,
+          provenance: verifiedProvenance,
+        };
+        return anchoredArtifact;
+      }
       return artifact;
     }
   }
   return null;
+}
+
+function changedArtifact(artifactRef: string): GoalEvidenceRevalidationResult {
+  return { ok: false, reason: "artifact_changed", artifactRef };
+}
+
+function getProvenanceAnchor(
+  artifact: GoalEvidenceArtifact,
+): GoalEvidenceProvenanceAnchor | undefined {
+  const value = (artifact as AnchoredGoalEvidenceArtifact).provenance;
+  if (
+    !value ||
+    typeof value.path !== "string" ||
+    !/^[a-f0-9]{64}$/.test(value.sha256) ||
+    typeof value.runId !== "string" ||
+    typeof value.artifactId !== "string" ||
+    typeof value.artifactRef !== "string"
+  ) {
+    return undefined;
+  }
+  return value;
+}
+
+function sameArtifactLocation(
+  sealedArtifact: GoalEvidenceArtifact,
+  currentArtifact: GoalEvidenceArtifact,
+  locationEnv: LocationResourceEnvironment | undefined,
+): boolean {
+  if (sealedArtifact.path === undefined || currentArtifact.path === undefined) {
+    return sealedArtifact.path === currentArtifact.path;
+  }
+  return normalizeLocationPath(sealedArtifact.path, locationEnv) ===
+    normalizeLocationPath(currentArtifact.path, locationEnv);
+}
+
+function sameProvenanceAnchor(
+  sealed: GoalEvidenceProvenanceAnchor | undefined,
+  current: GoalEvidenceProvenanceAnchor | undefined,
+): boolean {
+  if (!sealed || !current) return sealed === current;
+  return sealed.path === current.path &&
+    sealed.sha256 === current.sha256 &&
+    sealed.runId === current.runId &&
+    sealed.goalId === current.goalId &&
+    sealed.milestoneId === current.milestoneId &&
+    sealed.artifactId === current.artifactId &&
+    sealed.artifactRef === current.artifactRef;
 }
 
 function buildMemoryArtifact(
@@ -270,59 +460,46 @@ async function buildFileArtifact(
   const boundary = validatePathInsideLocationRoots(candidatePath, roots, env);
   if (!boundary.ok) return null;
 
-  let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
-    handle = await open(
-      boundary.path,
-      constants.O_RDONLY |
-        (constants.O_NONBLOCK ?? 0) |
-        (constants.O_NOFOLLOW ?? 0),
-    );
-    throwIfManifestAborted(input.signal);
-    const stats = await abortableManifestOperation(handle.stat(), input.signal);
-    throwIfManifestAborted(input.signal);
-    if (!stats.isFile()) return null;
     const mediaType = detectMediaType(boundary.path);
     const snapshot = await readSnapshot(
-      handle,
-      stats.mtime.toISOString(),
       maxReadBytes,
       mediaType,
       criterionText,
       boundary.path,
+      roots,
+      env,
       input,
     );
     throwIfManifestAborted(input.signal);
     return adaptSnapshot(ref, boundary.path, mediaType, snapshot, criterionText);
   } catch (error) {
-    if (isUnresolvableFileError(error)) return null;
-    throw error;
-  } finally {
-    if (handle) {
-      await handle.close();
-      await input.afterFileClosed?.(boundary.path);
+    if (input.signal?.aborted || isAbortError(error)) {
+      throw new GoalEvidenceManifestAbortError();
     }
+    if (
+      isUnresolvableFileError(error) ||
+      error instanceof TrustedFileSnapshotValidationError
+    ) return null;
+    throw error;
   }
 }
 
 async function readSnapshot(
-  handle: Awaited<ReturnType<typeof open>>,
-  modifiedAt: string,
   maxReadBytes: number,
   mediaType: string,
   criterionText: string,
   artifactPath: string,
+  roots: string[],
+  env: Required<LocationResourceEnvironment>,
   input: BuildGoalEvidenceManifestInput,
 ): Promise<FileSnapshot> {
   throwIfManifestAborted(input.signal);
-  const hash = createHash("sha256");
-  const readBuffer = Buffer.allocUnsafe(64 * 1024);
   const tailBudget = Math.min(64 * 1024, Math.floor(maxReadBytes / 4));
   const headBudget = Math.max(0, maxReadBytes - tailBudget);
   const headChunks: Buffer[] = [];
   let headBytes = 0;
   let tail: Buffer<ArrayBufferLike> = Buffer.alloc(0);
-  let sizeBytes = 0;
   const isText = isTextMedia(mediaType);
   const decoder = isText ? new StringDecoder("utf8") : null;
   const textScanner = isText ? new TextScanner(criterionText) : null;
@@ -332,34 +509,36 @@ async function readSnapshot(
       ? new DelimitedTableScanner(mediaType === "text/csv" ? "," : "\t")
       : null;
 
-  while (true) {
-    throwIfManifestAborted(input.signal);
-    const { bytesRead } = await abortableManifestOperation(
-      handle.read(readBuffer, 0, readBuffer.length, null),
-      input.signal,
-    );
-    throwIfManifestAborted(input.signal);
-    if (bytesRead === 0) break;
-    const chunk = Buffer.from(readBuffer.subarray(0, bytesRead));
-    hash.update(chunk);
-    sizeBytes += bytesRead;
-    if (headBytes < headBudget) {
-      const retained = chunk.subarray(0, Math.min(chunk.length, headBudget - headBytes));
-      headChunks.push(Buffer.from(retained));
-      headBytes += retained.length;
-    }
-    if (tailBudget > 0) {
-      tail = appendBoundedTail(tail, chunk, tailBudget);
-    }
-    if (decoder) {
-      const decoded = decoder.write(chunk);
-      textScanner?.push(decoded);
-      jsonScanner?.push(decoded);
-      tableScanner?.push(decoded);
-    }
-    await input.afterChunkProcessed?.(artifactPath, bytesRead);
-    throwIfManifestAborted(input.signal);
-  }
+  const trusted = await readTrustedRegularFile({
+    filePath: artifactPath,
+    trustedRoots: roots,
+    locationEnv: env,
+    signal: input.signal,
+    hooks: {
+      ...(input.beforeTrustedFileOpen
+        ? { afterPrecheck: input.beforeTrustedFileOpen }
+        : {}),
+      async afterChunk(_filePath, chunk) {
+        if (headBytes < headBudget) {
+          const retained = chunk.subarray(
+            0,
+            Math.min(chunk.length, headBudget - headBytes),
+          );
+          headChunks.push(Buffer.from(retained));
+          headBytes += retained.length;
+        }
+        if (tailBudget > 0) tail = appendBoundedTail(tail, chunk, tailBudget);
+        if (decoder) {
+          const decoded = decoder.write(chunk);
+          textScanner?.push(decoded);
+          jsonScanner?.push(decoded);
+          tableScanner?.push(decoded);
+        }
+        await input.afterChunkProcessed?.(artifactPath, chunk.length);
+      },
+    },
+    afterClose: input.afterFileClosed,
+  });
   if (decoder) {
     const finalText = decoder.end();
     textScanner?.push(finalText);
@@ -368,9 +547,9 @@ async function readSnapshot(
   }
 
   return {
-    sizeBytes,
-    modifiedAt,
-    sha256: hash.digest("hex"),
+    sizeBytes: trusted.sizeBytes,
+    modifiedAt: trusted.modifiedAt,
+    sha256: trusted.sha256,
     head: Buffer.concat(headChunks),
     tail,
     ...(textScanner ? { text: textScanner.finish() } : {}),
@@ -1386,4 +1565,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function isUnresolvableFileError(error: unknown): boolean {
   const code = (error as NodeJS.ErrnoException).code;
   return code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP" || code === "EACCES" || code === "EPERM";
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
 }

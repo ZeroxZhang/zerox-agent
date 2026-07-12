@@ -94,6 +94,21 @@ export function createRunRepository(storage: Storage): RunRepository {
       return event;
     },
 
+    appendTrajectoryIfAbsent(runId, event) {
+      const result = db.prepare(
+        `INSERT OR IGNORE INTO trajectory_events (id, run_id, seq, type, payload, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run(
+        event.id,
+        runId,
+        event.sequence,
+        event.type,
+        jsonify(event),
+        event.createdAt,
+      );
+      return result.changes === 1;
+    },
+
     getTrajectory(
       runId: string,
       opts?: { fromSeq?: number },

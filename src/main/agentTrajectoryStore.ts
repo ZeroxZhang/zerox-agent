@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
@@ -11,9 +12,17 @@ export type AgentTrajectoryStore = {
     event: AgentTrajectoryEvent,
     options?: { signal?: AbortSignal },
   ): Promise<AgentTrajectoryEvent>;
+  appendIfAbsent(
+    runId: string,
+    publicationKey: string,
+    event: AgentTrajectoryEvent,
+    options?: { signal?: AbortSignal },
+  ): Promise<{ appended: boolean; event: AgentTrajectoryEvent }>;
   list(runId: string): Promise<AgentTrajectoryEvent[]>;
   flushShadowWrites(): Promise<void>;
 };
+
+const trajectoryMutationQueues = new Map<string, Promise<void>>();
 
 export interface AgentTrajectoryStoreOptions {
   configDir: string;
@@ -56,6 +65,22 @@ export function createAgentTrajectoryStore(
       throwIfAborted(appendOptions?.signal);
       return event;
     },
+    async appendIfAbsent(runId, publicationKey, event, appendOptions) {
+      const filePath = trajectoryPath(runId);
+      return serializeTrajectoryMutation(filePath, async () => {
+        throwIfAborted(appendOptions?.signal);
+        const existing = (
+          await readRecoverableJsonl<AgentTrajectoryEvent>(filePath)
+        ).find(
+          (candidate) =>
+            candidate.payload.publicationKey === publicationKey,
+        );
+        if (existing) return { appended: false, event: existing };
+        const stored = createPublicationEvent(runId, publicationKey, event);
+        await jsonImpl.append(runId, stored, appendOptions);
+        return { appended: true, event: stored };
+      });
+    },
     async list(runId) {
       return readRecoverableJsonl<AgentTrajectoryEvent>(trajectoryPath(runId));
     },
@@ -90,6 +115,38 @@ export function createAgentTrajectoryStore(
       }
       return event;
     },
+    async appendIfAbsent(runId, publicationKey, event, appendOptions) {
+      throwIfAborted(appendOptions?.signal);
+      const trajectory = repo.getTrajectory(runId);
+      const existing = trajectory.find(
+        (candidate) =>
+          candidate.payload.publicationKey === publicationKey,
+      );
+      if (existing) return { appended: false, event: existing };
+      const stored = {
+        ...createPublicationEvent(runId, publicationKey, event),
+        sequence:
+          Math.max(0, ...trajectory.map((candidate) => candidate.sequence)) + 1,
+      };
+      const appended = repo.appendTrajectoryIfAbsent(runId, stored);
+      if (appended && backend === "dual") {
+        enqueueShadowWrite(
+          jsonImpl.appendIfAbsent(
+            runId,
+            publicationKey,
+            stored,
+            appendOptions,
+          ),
+        );
+      }
+      const canonical = appended
+        ? stored
+        : repo.getTrajectory(runId).find(
+            (candidate) =>
+              candidate.payload.publicationKey === publicationKey,
+          ) ?? stored;
+      return { appended, event: canonical };
+    },
     async list(runId) {
       return repo.getTrajectory(runId);
     },
@@ -97,6 +154,40 @@ export function createAgentTrajectoryStore(
       await Promise.all([...shadowWrites]);
     },
   };
+}
+
+function createPublicationEvent(
+  runId: string,
+  publicationKey: string,
+  event: AgentTrajectoryEvent,
+): AgentTrajectoryEvent {
+  return {
+    ...event,
+    id: `publication_${createHash("sha256")
+      .update(`${runId}\0${publicationKey}`)
+      .digest("hex")}`,
+    runId,
+    payload: { ...event.payload, publicationKey },
+  };
+}
+
+function serializeTrajectoryMutation<T>(
+  key: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const current = trajectoryMutationQueues.get(key) ?? Promise.resolve();
+  const result = current.then(operation, operation);
+  const next = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  trajectoryMutationQueues.set(key, next);
+  void next.finally(() => {
+    if (trajectoryMutationQueues.get(key) === next) {
+      trajectoryMutationQueues.delete(key);
+    }
+  });
+  return result;
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {

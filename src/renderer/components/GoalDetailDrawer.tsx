@@ -1,6 +1,12 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Goal } from "../../shared/agentGoal";
 import type { ChatSessionGoalSummary } from "../../shared/chat";
+import {
+  createManualCompletionConfirmation,
+  getConfirmedManualCompletionGoalId,
+  type GoalAcceptanceUiContext,
+  type ManualCompletionConfirmation,
+} from "../goalAcceptanceInteraction";
 import { buildGoalProgressViewModel } from "../goalProgressViewModel";
 import { useDialogFocusTrap } from "./useDialogFocusTrap";
 
@@ -14,6 +20,12 @@ type GoalDetailDrawerProps = {
   onIncreaseBudget?: () => void;
   onReplan?: () => void;
   onRetry?: () => void;
+  onContinueAcceptance?: () => void;
+  onMarkCompletedUnverified?: (
+    confirmation: ManualCompletionConfirmation,
+  ) => void;
+  goalAcceptanceContext: GoalAcceptanceUiContext;
+  goalAcceptanceOperationPending?: boolean;
   onCancel?: () => void;
 };
 
@@ -22,6 +34,8 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const milestonesRef = useRef<HTMLDivElement>(null);
+  const [manualCompletionConfirmation, setManualCompletionConfirmation] =
+    useState<ManualCompletionConfirmation | null>(null);
   const progress = props.summary
     ? buildGoalProgressViewModel(props.summary, props.goal)
     : null;
@@ -40,6 +54,24 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
       element.scrollTop = element.scrollHeight;
     }
   }, [progress?.milestoneRows.length, progress?.milestoneRows.at(-1)?.state]);
+
+  useEffect(() => {
+    if (
+      !props.open ||
+      props.summary?.status !== "waiting_for_acceptance" ||
+      !getConfirmedManualCompletionGoalId(
+        manualCompletionConfirmation,
+        props.goalAcceptanceContext,
+      )
+    ) {
+      setManualCompletionConfirmation(null);
+    }
+  }, [
+    manualCompletionConfirmation,
+    props.goalAcceptanceContext,
+    props.open,
+    props.summary?.status,
+  ]);
 
   if (!props.open || !props.summary || !progress) {
     return null;
@@ -141,6 +173,35 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
               <span>恢复路径</span>
               <p>{getRecoveryHint(props.summary.status)}</p>
               <div className="goal-review-actions">
+                {props.summary.status === "waiting_for_acceptance" &&
+                progress.recoveryActions.includes("continue_acceptance") &&
+                props.onContinueAcceptance ? (
+                  <button
+                    type="button"
+                    className="goal-primary-action"
+                    disabled={props.goalAcceptanceOperationPending}
+                    onClick={props.onContinueAcceptance}
+                  >
+                    继续验收
+                  </button>
+                ) : null}
+                {props.summary.status === "waiting_for_acceptance" &&
+                progress.recoveryActions.includes("mark_completed_unverified") &&
+                props.onMarkCompletedUnverified ? (
+                  <button
+                    type="button"
+                    disabled={props.goalAcceptanceOperationPending}
+                    onClick={() =>
+                      setManualCompletionConfirmation(
+                        createManualCompletionConfirmation(
+                          props.goalAcceptanceContext,
+                        ),
+                      )
+                    }
+                  >
+                    手动标记完成
+                  </button>
+                ) : null}
                 {props.summary.status === "stopped_blocked" &&
                 progress.recoveryActions.includes("retry_acceptance") &&
                 props.onRetry ? (
@@ -208,6 +269,48 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
                   </button>
                 ) : null}
               </div>
+              {props.summary.status === "waiting_for_acceptance" &&
+              manualCompletionConfirmation ? (
+                <div
+                  className="goal-manual-completion-confirmation"
+                  role="alert"
+                >
+                  <strong>确认手动标记完成？</strong>
+                  <p>
+                    此操作会保留任务产物和本地记录，但不会生成机器验收证书，
+                    也不表示最终裁判已经通过。
+                  </p>
+                  <div className="goal-review-actions">
+                    <button
+                      type="button"
+                      disabled={props.goalAcceptanceOperationPending}
+                      onClick={() => setManualCompletionConfirmation(null)}
+                    >
+                      取消
+                    </button>
+                    <button
+                      type="button"
+                      className="goal-manual-completion-action"
+                      disabled={props.goalAcceptanceOperationPending}
+                      onClick={() => {
+                        const goalId = getConfirmedManualCompletionGoalId(
+                          manualCompletionConfirmation,
+                          props.goalAcceptanceContext,
+                        );
+                        if (!goalId || goalId !== manualCompletionConfirmation.goalId) {
+                          setManualCompletionConfirmation(null);
+                          return;
+                        }
+                        props.onMarkCompletedUnverified?.(
+                          manualCompletionConfirmation,
+                        );
+                      }}
+                    >
+                      确认手动完成
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </section>
           ) : null}
 
@@ -249,6 +352,66 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
                         ))}
                       </ul>
                     </div>
+                  ) : null}
+                </div>
+              ) : null}
+              {progress.acceptance.retry ? (
+                <dl className="goal-acceptance-metadata">
+                  <div>
+                    <dt>重试周期</dt>
+                    <dd>{progress.acceptance.retry.cycle}</dd>
+                  </div>
+                  <div>
+                    <dt>本周期尝试</dt>
+                    <dd>
+                      {progress.acceptance.retry.attempt}/
+                      {progress.acceptance.retry.maxAttempts}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>最近故障代码</dt>
+                    <dd><code>{progress.acceptance.retry.lastCode}</code></dd>
+                  </div>
+                  {progress.acceptance.retry.nextRetryAt ? (
+                    <div>
+                      <dt>下次重试</dt>
+                      <dd>{progress.acceptance.retry.nextRetryAt}</dd>
+                    </div>
+                  ) : null}
+                </dl>
+              ) : null}
+              {progress.acceptance.manualCompletion ? (
+                <div className="goal-manual-completion-record">
+                  <strong>手动完成记录</strong>
+                  <dl className="goal-acceptance-metadata">
+                    <div>
+                      <dt>记录时间</dt>
+                      <dd>{progress.acceptance.manualCompletion.completedAt}</dd>
+                    </div>
+                    <div>
+                      <dt>最近故障代码</dt>
+                      <dd>
+                        <code>
+                          {progress.acceptance.manualCompletion.lastFailureCode}
+                        </code>
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>验收周期</dt>
+                      <dd>{progress.acceptance.manualCompletion.retryCycles}</dd>
+                    </div>
+                  </dl>
+                  {progress.acceptance.manualCompletion.failedCheckIds.length > 0 ? (
+                    <p>
+                      失败检查：
+                      {progress.acceptance.manualCompletion.failedCheckIds.join("、")}
+                    </p>
+                  ) : null}
+                  {progress.acceptance.manualCompletion.evidenceRefs.length > 0 ? (
+                    <p>
+                      证据引用：
+                      {progress.acceptance.manualCompletion.evidenceRefs.join("、")}
+                    </p>
                   ) : null}
                 </div>
               ) : null}
@@ -407,7 +570,8 @@ function isRecoverableStatus(status: ChatSessionGoalSummary["status"]): boolean 
     status === "failed" ||
     status === "stopped_budget" ||
     status === "stopped_stalled" ||
-    status === "stopped_blocked"
+    status === "stopped_blocked" ||
+    status === "waiting_for_acceptance"
   );
 }
 
@@ -421,6 +585,8 @@ function getRecoveryHint(status: ChatSessionGoalSummary["status"]): string {
       return "目标执行失败。你可以重试或结束目标。";
     case "stopped_blocked":
       return "目标尚未完成。你可以重试验收、调整计划或终止目标。";
+    case "waiting_for_acceptance":
+      return "任务产物与已完成里程碑不会重新执行。你可以继续验收、手动记录为未经机器认证的完成，或结束目标。";
     default:
       return "";
   }

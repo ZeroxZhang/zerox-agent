@@ -6,7 +6,9 @@ export type GoalStatus =
   | "planning"
   | "executing"
   | "waiting_for_review"
+  | "waiting_for_acceptance"
   | "achieved"
+  | "completed_unverified"
   | "stopped_budget"
   | "stopped_stalled"
   | "stopped_blocked"
@@ -22,6 +24,7 @@ export type StopReason =
   | "unrecoverable_failure"
   | "external_blocked"
   | "goal_impossible"
+  | "user_marked_complete"
   | "acceptance_unavailable"
   | "acceptance_integrity_failed";
 
@@ -76,6 +79,7 @@ export type AcceptanceRepairDirective = {
     | "repair_same_milestone"
     | "retry_alternate_strategy"
     | "replan"
+    | "wait_for_acceptance"
     | "stop_stalled"
     | "stop_blocked";
   summary: string;
@@ -105,11 +109,129 @@ export type GoalAcceptanceState = {
     | "validating"
     | "repairing"
     | "judging"
+    | "retrying"
+    | "awaiting_user"
     | "blocked"
     | "certified";
   attempt: number;
   recentFailures: GoalAcceptanceFailureRecord[];
   lastDecision?: AcceptanceRepairDirective;
+};
+
+export type GoalAcceptanceRetryState = {
+  cycle: number;
+  attempt: number;
+  maxAttempts: number;
+  lastCode: string;
+  lastDetail: string;
+  nextRetryAt?: string;
+  evidenceFingerprint: string;
+  finalJudgeReplay?: FinalGoalJudgeReplayEvidence;
+  resumeFrom: "final_judge";
+};
+
+export type FinalGoalJudgeReplayEvidence = {
+  version: 1;
+  goalId: string;
+  criteriaFingerprint: string;
+  evidenceFingerprint: string;
+  deterministicCheckResults: GoalAcceptanceCheckResult[];
+  evidenceManifest: GoalEvidenceManifest;
+};
+
+export const MAX_FINAL_JUDGE_REPLAY_BYTES = 256 * 1024;
+
+export function sanitizeFinalGoalJudgeReplayEvidence(
+  value: unknown,
+): FinalGoalJudgeReplayEvidence | undefined {
+  if (!isPlainRecord(value)) return undefined;
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(value);
+  } catch {
+    return undefined;
+  }
+  if (
+    new TextEncoder().encode(serialized).byteLength >
+      MAX_FINAL_JUDGE_REPLAY_BYTES
+  ) {
+    return undefined;
+  }
+  if (
+    value.version !== 1 ||
+    !isBoundedString(value.goalId, 512) ||
+    !isSha256(value.criteriaFingerprint) ||
+    !isSha256(value.evidenceFingerprint) ||
+    !Array.isArray(value.deterministicCheckResults) ||
+    value.deterministicCheckResults.length > 128 ||
+    !value.deterministicCheckResults.every(isReplayCheckResult) ||
+    !isReplayEvidenceManifest(value.evidenceManifest)
+  ) {
+    return undefined;
+  }
+  try {
+    return structuredClone(value) as FinalGoalJudgeReplayEvidence;
+  } catch {
+    return undefined;
+  }
+}
+
+function isReplayCheckResult(value: unknown): boolean {
+  return isPlainRecord(value) &&
+    isBoundedString(value.checkId, 512) &&
+    isBoundedString(value.kind, 512) &&
+    typeof value.passed === "boolean" &&
+    isBoundedString(value.code, 128) &&
+    isBoundedString(value.detail, 4_096) &&
+    Array.isArray(value.evidenceRefs) &&
+    value.evidenceRefs.length <= 64 &&
+    value.evidenceRefs.every((ref) => isBoundedString(ref, 512));
+}
+
+function isReplayEvidenceManifest(value: unknown): boolean {
+  if (!isPlainRecord(value)) return false;
+  return value.version === 1 &&
+    isBoundedString(value.generatedAt, 128) &&
+    Array.isArray(value.artifacts) &&
+    value.artifacts.length <= 128 &&
+    value.artifacts.every((artifact) => {
+      if (!isPlainRecord(artifact)) return false;
+      return isBoundedString(artifact.ref, 512) &&
+        isBoundedString(artifact.mediaType, 256) &&
+        Array.isArray(artifact.excerpts) &&
+        artifact.excerpts.length <= 64 &&
+        artifact.excerpts.every((excerpt) =>
+          isPlainRecord(excerpt) &&
+          isBoundedString(excerpt.label, 256) &&
+          isBoundedString(excerpt.text, 4_096));
+    }) &&
+    typeof value.totalRenderedChars === "number" &&
+    Number.isFinite(value.totalRenderedChars) &&
+    typeof value.truncated === "boolean";
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isBoundedString(value: unknown, maxLength: number): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= maxLength;
+}
+
+function isSha256(value: unknown): value is string {
+  return typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+}
+
+export type GoalManualCompletionAttestation = {
+  version: 1;
+  goalId: string;
+  completedAt: string;
+  reason: "user_marked_complete";
+  failedCheckIds: string[];
+  evidenceRefs: string[];
+  evidenceFingerprint: string;
+  lastFailureCode: string;
+  retryCycles: number;
 };
 
 export type GoalEvidenceArtifact = {
@@ -267,6 +389,8 @@ export type Goal = {
   runtimeCheckpoint?: GoalRuntimeCheckpoint;
   acceptanceProtocolVersion?: GoalAcceptanceProtocolVersion;
   acceptanceState?: GoalAcceptanceState;
+  acceptanceRetryState?: GoalAcceptanceRetryState;
+  manualCompletionAttestation?: GoalManualCompletionAttestation;
   acceptanceCertificate?: GoalAcceptanceCertificate;
   createdAt: string;
   updatedAt: string;
@@ -293,6 +417,7 @@ const allowedTransitions: Record<GoalStatus, GoalStatus[]> = {
   planning: ["executing", "canceled"],
   executing: [
     "waiting_for_review",
+    "waiting_for_acceptance",
     "achieved",
     "stopped_budget",
     "stopped_stalled",
@@ -301,7 +426,9 @@ const allowedTransitions: Record<GoalStatus, GoalStatus[]> = {
     "canceled",
   ],
   waiting_for_review: ["executing", "canceled"],
+  waiting_for_acceptance: ["executing", "completed_unverified", "canceled"],
   achieved: [],
+  completed_unverified: [],
   stopped_budget: ["executing", "canceled"],
   stopped_stalled: [],
   stopped_blocked: ["executing", "canceled"],
@@ -382,6 +509,7 @@ function validateSuccessCriterion(criterion: SuccessCriterion): void {
 // so the storage contract (src/shared/storageContract.ts) can reference it.
 export type ProgressLedgerEvent = {
   at: string;
+  publicationKey?: string;
   kind:
     | "goal_planned"
     | "milestone_started"
@@ -392,6 +520,12 @@ export type ProgressLedgerEvent = {
     | "acceptance_failure_classified"
     | "acceptance_repair_scheduled"
     | "acceptance_strategy_changed"
+    | "acceptance_retry_scheduled"
+    | "acceptance_retry_started"
+    | "acceptance_retry_exhausted"
+    | "acceptance_waiting_for_user"
+    | "acceptance_manual_completion_requested"
+    | "acceptance_manual_completion_recorded"
     | "acceptance_blocked"
     | "acceptance_certified"
     | "review_requested"

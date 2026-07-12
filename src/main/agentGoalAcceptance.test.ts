@@ -2,6 +2,8 @@ import {
   copyFile,
   mkdir,
   mkdtemp,
+  readFile,
+  rename,
   rm,
   symlink,
   writeFile,
@@ -10,11 +12,18 @@ import os from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ChatClient } from "./openAiCompatibleClient";
+import type { ChatClient, ChatCompletionRequest } from "./openAiCompatibleClient";
 import type { AgentToolExecutionResult } from "./agentToolExecutor";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
-import type { AcceptanceCheck, Goal, Milestone, SuccessCriterion } from "../shared/agentGoal";
 import {
+  sanitizeFinalGoalJudgeReplayEvidence,
+  type AcceptanceCheck,
+  type Goal,
+  type Milestone,
+  type SuccessCriterion,
+} from "../shared/agentGoal";
+import {
+  FINAL_GOAL_JUDGE_MAX_PROMPT_BYTES,
   GOAL_JUDGE_PROMPT_VERSION,
   createAgentGoalAcceptance,
   createBuiltinGoalAcceptanceValidators,
@@ -1804,7 +1813,7 @@ describe("agent goal acceptance", () => {
     expect(prompt).toContain("Late Acceptance Evidence");
     expect(prompt).toContain("Milestone evidence accepted.");
     expect(prompt).toContain("run_milestone_1");
-    expect(prompt).toContain("dead_end:old_approach");
+    expect(prompt).not.toContain("actionSignatures");
     expect(result).toMatchObject({
       accepted: true,
       verdict: "accepted",
@@ -1827,6 +1836,486 @@ describe("agent goal acceptance", () => {
         runIds: expect.arrayContaining(["run_acceptance", "run_milestone_1"]),
       },
     });
+  });
+
+  it("uses a lean final judge profile and bounded prompt", async () => {
+    let request: ChatCompletionRequest | undefined;
+    const goal = createGoal([
+      check(
+        "lean_final",
+        "model_review",
+        { condition: "Goal evidence proves completion", evidenceRefs: ["evidence:goalEvidence"] },
+        true,
+      ),
+    ]);
+    goal.acceptanceProtocolVersion = 2;
+    goal.acceptanceState = {
+      protocolVersion: 2,
+      phase: "judging",
+      attempt: 2,
+      recentFailures: Array.from({ length: 100 }, (_, index) => ({
+        at: "2026-07-11T00:00:00.000Z",
+        targetKind: "goal" as const,
+        targetId: goal.id,
+        fingerprint: `failure_${index}`,
+        occurrence: index + 1,
+        verdict: "rejected_repairable" as const,
+        failureClass: "semantic_evidence_insufficient" as const,
+        failedCheckIds: ["lean_final"],
+        evidenceRefs: ["evidence:goalEvidence"],
+        actionSignatures: Array.from(
+          { length: 20 },
+          (_, signatureIndex) => `action:${index}:${signatureIndex}:${"x".repeat(200)}`,
+        ),
+      })),
+    };
+
+    const result = await createAgentGoalAcceptance({
+      chatClient: {
+        async complete(input) {
+          request = input;
+          return {
+            content: JSON.stringify({
+              verdict: "accepted",
+              reason: "Goal evidence proves completion.",
+              evidenceRefs: ["evidence:goalEvidence"],
+            }),
+            toolCalls: [],
+            finishReason: "stop",
+          };
+        },
+      },
+    }).evaluateGoal(goal, createContext({
+      modelProfile: {
+        baseUrl: "https://example.test/v1",
+        apiKey: "secret",
+        model: "qwen3.7-plus",
+        temperature: 0.2,
+        maxTokens: 32768,
+        thinking: { type: "enabled", budgetTokens: 8192 },
+      },
+    }));
+
+    expect(result.accepted).toBe(true);
+    expect(request?.thinking).toEqual({ type: "disabled" });
+    expect(request?.maxTokens).toBe(1024);
+    expect(request?.temperature).toBe(0);
+    expect(JSON.stringify(request?.messages)).not.toContain("actionSignatures");
+    expect(JSON.stringify(request?.messages).length).toBeLessThan(30_000);
+  });
+
+  it("bounds adversarial final judge inputs by UTF-8 bytes and keeps evidence identity", async () => {
+    let request: ChatCompletionRequest | undefined;
+    const evidenceRef = "artifact:goalEvidence";
+    const goal = createGoal([
+      check(
+        "bounded_final",
+        "model_review",
+        {
+          condition: `最终验收条件${"界".repeat(50_000)}`,
+          evidenceRefs: [evidenceRef],
+        },
+        true,
+      ),
+    ]);
+    goal.originalDescription = `目标${"好".repeat(100_000)}`;
+    goal.successCriteria.push(...Array.from({ length: 200 }, (_, index) => ({
+      id: `criterion_${index + 2}`,
+      description: `criterion-${index}-${"长".repeat(2_000)}`,
+      acceptanceChecks: [],
+    })));
+    goal.milestones = Array.from({ length: 200 }, (_, index) => ({
+      ...createMilestone([]),
+      id: `milestone_${index}`,
+      description: `milestone-${index}-${"程".repeat(2_000)}`,
+      state: "accepted" as const,
+      runIds: Array.from({ length: 100 }, (__, runIndex) =>
+        `run_${index}_${runIndex}_${"r".repeat(300)}`),
+      lastAcceptanceSummary: `summary-${"结".repeat(4_000)}`,
+    }));
+    goal.acceptanceProtocolVersion = 2;
+    goal.acceptanceState = {
+      protocolVersion: 2,
+      phase: "judging",
+      attempt: 3,
+      recentFailures: Array.from({ length: 100 }, (_, index) => ({
+        at: "2026-07-11T00:00:00.000Z",
+        targetKind: "goal" as const,
+        targetId: goal.id,
+        fingerprint: `failure_${index}_${"f".repeat(2_000)}`,
+        occurrence: index + 1,
+        verdict: "rejected_repairable" as const,
+        failureClass: "semantic_evidence_insufficient" as const,
+        failedCheckIds: Array.from({ length: 100 }, (__, id) => `check_${id}`),
+        evidenceRefs: Array.from({ length: 100 }, (__, id) => `evidence:${id}`),
+        actionSignatures: [],
+      })),
+    };
+
+    const result = await createAgentGoalAcceptance({
+      chatClient: {
+        async complete(input) {
+          request = input;
+          return {
+            content: JSON.stringify({
+              verdict: "accepted",
+              reason: "The supplied artifact identity proves completion.",
+              evidenceRefs: [evidenceRef],
+            }),
+            toolCalls: [],
+            finishReason: "stop",
+          };
+        },
+      },
+    }).evaluateGoal(goal, createContext({
+      artifacts: { goalEvidence: "verified final evidence" },
+      transcriptMessages: Array.from({ length: 100 }, () => ({
+        role: "assistant" as const,
+        content: "记".repeat(10_000),
+      })),
+    }));
+
+    const prompt = request?.messages.map((message) => message.content).join("\n") ?? "";
+    const artifactHash = result.evidenceManifest?.artifacts[0]?.sha256;
+    expect(result.accepted).toBe(true);
+    expect(Buffer.byteLength(prompt, "utf8")).toBeLessThanOrEqual(
+      FINAL_GOAL_JUDGE_MAX_PROMPT_BYTES,
+    );
+    expect(prompt).toContain('"verdict":"accepted"|"rejected"|"impossible"');
+    expect(prompt).toContain(evidenceRef);
+    expect(prompt).toContain(artifactHash);
+    expect(prompt).toContain("verified final evidence");
+    expect(prompt).toContain("omitted");
+  });
+
+  it("replays only the final model judge from sealed evidence", async () => {
+    let deterministicCalls = 0;
+    let replaying = false;
+    const kind = "validator:test/final-replay" as const;
+    const registry = createAgentGoalValidatorRegistry({
+      validators: [{
+        kind,
+        async evaluate({ check: selectedCheck }) {
+          deterministicCalls += 1;
+          if (replaying) throw new Error("deterministic validator replayed");
+          return {
+            checkId: selectedCheck.id,
+            kind,
+            passed: true,
+            code: "deterministic_passed",
+            evidenceRefs: ["evidence:deterministic"],
+            detail: "Deterministic evidence passed.",
+          };
+        },
+      }],
+    });
+    const acceptance = createAgentGoalAcceptance({
+      registry,
+      chatClient: {
+        async complete() {
+          throw Object.assign(new Error("busy"), { status: 503 });
+        },
+      },
+    });
+    const goal = createGoal([
+      check("deterministic", kind, {}),
+      check("semantic", "model_review", { evidenceRefs: ["evidence:final"] }, true),
+    ]);
+    const first = await acceptance.evaluateGoal(goal, createContext());
+    replaying = true;
+
+    const replay = await acceptance.replayFinalGoalJudge(
+      goal,
+      first.finalJudgeReplay!,
+      createContext({
+        chatClient: {
+          async complete() {
+            return {
+              content: JSON.stringify({
+                verdict: "accepted",
+                reason: "Sealed final evidence is sufficient.",
+                evidenceRefs: ["evidence:final"],
+              }),
+              toolCalls: [],
+              finishReason: "stop",
+            };
+          },
+        },
+      }),
+    );
+
+    expect(first.finalJudgeReplay?.evidenceFingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(deterministicCalls).toBe(1);
+    expect(toolCalls).toHaveLength(0);
+    expect(replay).toMatchObject({ accepted: true, verdict: "accepted" });
+    expect(replay.checkResults.map((result) => result.checkId)).toEqual([
+      "deterministic",
+      "semantic",
+    ]);
+  });
+
+  it("fails closed before the judge when sealed replay evidence is altered", async () => {
+    let modelCalls = 0;
+    const acceptance = createAgentGoalAcceptance({
+      chatClient: {
+        async complete() {
+          throw Object.assign(new Error("busy"), { status: 503 });
+        },
+      },
+    });
+    const goal = createGoal([
+      check("semantic", "model_review", { evidenceRefs: ["evidence:final"] }, true),
+    ]);
+    const first = await acceptance.evaluateGoal(goal, createContext());
+    const sealed = first.finalJudgeReplay!;
+
+    const replay = await acceptance.replayFinalGoalJudge(
+      goal,
+      { ...sealed, evidenceFingerprint: "0".repeat(64) },
+      createContext({
+        chatClient: {
+          async complete() {
+            modelCalls += 1;
+            throw new Error("must not be called");
+          },
+        },
+      }),
+    );
+
+    expect(replay).toMatchObject({
+      accepted: false,
+      verdict: "acceptance_unavailable",
+      retry: { code: "validator_failed", retryable: false },
+    });
+    expect(modelCalls).toBe(0);
+  });
+
+  it("fails closed when persisted replay evidence is malformed", async () => {
+    const acceptance = createAgentGoalAcceptance({
+      chatClient: {
+        async complete() {
+          throw Object.assign(new Error("busy"), { status: 503 });
+        },
+      },
+    });
+    const goal = createGoal([
+      check("semantic", "model_review", { evidenceRefs: ["evidence:final"] }, true),
+    ]);
+    const first = await acceptance.evaluateGoal(goal, createContext());
+
+    await expect(acceptance.replayFinalGoalJudge(
+      goal,
+      { ...first.finalJudgeReplay!, evidenceManifest: null as never },
+      createContext(),
+    )).resolves.toMatchObject({
+      accepted: false,
+      verdict: "acceptance_unavailable",
+      retry: { code: "validator_failed", retryable: false },
+    });
+  });
+
+  it.each(["deleted", "modified", "symlink_escape"] as const)(
+    "fails closed before replaying a final judge when a sealed file is %s",
+    async (mutation) => {
+      const fixture = await createSealedFileReplayFixture();
+      if (mutation === "deleted") {
+        await rm(fixture.artifactPath);
+      } else if (mutation === "modified") {
+        await writeFile(fixture.artifactPath, "# Final report\nmodified", "utf8");
+      } else {
+        const outsidePath = path.join(homePath, "outside-final.md");
+        await writeFile(outsidePath, "# Final report\ncomplete", "utf8");
+        await rm(fixture.artifactPath);
+        await symlink(outsidePath, fixture.artifactPath);
+      }
+
+      const replay = await fixture.replay();
+
+      expect(replay).toMatchObject({
+        accepted: false,
+        verdict: "acceptance_unavailable",
+        retry: {
+          code: "validator_failed",
+          retryable: false,
+          detail: "Sealed final acceptance evidence no longer matches the current workspace.",
+        },
+        finalJudgeReplay: {
+          evidenceFingerprint: fixture.sealed.evidenceFingerprint,
+        },
+      });
+      expect(replay.evidenceManifest).toEqual(fixture.sealed.evidenceManifest);
+      expect(fixture.replayModelCalls()).toBe(0);
+      expect(fixture.replayValidatorCalls()).toBe(0);
+    },
+  );
+
+  it.each(["deleted", "tampered"] as const)(
+    "fails closed before replaying when required provenance is %s",
+    async (mutation) => {
+      const fixture = await createSealedFileReplayFixture({
+        requireProvenance: true,
+      });
+      const provenancePath = getArtifactProvenancePath(fixture.artifactPath);
+      if (mutation === "deleted") {
+        await rm(provenancePath);
+      } else {
+        const manifest = JSON.parse(await readFile(provenancePath, "utf8")) as {
+          source: { type: string };
+        };
+        manifest.source.type = "tampered-source";
+        await writeFile(provenancePath, `${JSON.stringify(manifest)}\n`, "utf8");
+      }
+
+      const replay = await fixture.replay();
+
+      expect(replay).toMatchObject({
+        accepted: false,
+        verdict: "acceptance_unavailable",
+        finalJudgeReplay: {
+          evidenceFingerprint: fixture.sealed.evidenceFingerprint,
+        },
+      });
+      expect(fixture.replayModelCalls()).toBe(0);
+      expect(fixture.replayValidatorCalls()).toBe(0);
+    },
+  );
+
+  it("accepts an unchanged sealed file without replaying deterministic validators", async () => {
+    const fixture = await createSealedFileReplayFixture({
+      requireProvenance: true,
+    });
+
+    const replay = await fixture.replay();
+
+    expect(replay).toMatchObject({ accepted: true, verdict: "accepted" });
+    expect(fixture.replayModelCalls()).toBe(1);
+    expect(fixture.replayValidatorCalls()).toBe(0);
+  });
+
+  it("applies the final judge deadline while live evidence hashing is paused", async () => {
+    vi.useFakeTimers();
+    let chunkObserved = false;
+    let enterChunkBarrier: (() => void) | undefined;
+    const chunkBarrierEntered = new Promise<void>((resolve) => {
+      enterChunkBarrier = resolve;
+    });
+    const fixture = await createSealedFileReplayFixture({
+      finalJudgeTimeoutMs: 25,
+      replayEvidenceHooks: {
+        async afterChunkProcessed() {
+          chunkObserved = true;
+          enterChunkBarrier?.();
+          await new Promise<void>(() => {
+            // The shared replay deadline must abort this controlled barrier.
+          });
+        },
+      },
+    });
+
+    const replayPromise = fixture.replay();
+    await chunkBarrierEntered;
+    await vi.advanceTimersByTimeAsync(25);
+    const replay = await replayPromise;
+
+    expect(chunkObserved).toBe(true);
+    expect(replay).toMatchObject({
+      accepted: false,
+      verdict: "acceptance_unavailable",
+      retry: { code: "judge_timeout", retryable: true },
+      finalJudgeReplay: {
+        evidenceFingerprint: fixture.sealed.evidenceFingerprint,
+      },
+    });
+    expect(fixture.replayModelCalls()).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("passes only the remaining per-attempt deadline budget to the provider", async () => {
+    vi.useFakeTimers();
+    const startedAt = Date.now();
+    let providerStartedAt = -1;
+    let enterChunkBarrier: (() => void) | undefined;
+    const chunkBarrierEntered = new Promise<void>((resolve) => {
+      enterChunkBarrier = resolve;
+    });
+    let releaseChunkBarrier: (() => void) | undefined;
+    const chunkBarrier = new Promise<void>((resolve) => {
+      releaseChunkBarrier = resolve;
+    });
+    let enterProvider: (() => void) | undefined;
+    const providerEntered = new Promise<void>((resolve) => {
+      enterProvider = resolve;
+    });
+    const fixture = await createSealedFileReplayFixture({
+      finalJudgeTimeoutMs: 30,
+      replayEvidenceHooks: {
+        async afterChunkProcessed() {
+          enterChunkBarrier?.();
+          await chunkBarrier;
+        },
+      },
+      replayComplete(request) {
+        providerStartedAt = Date.now() - startedAt;
+        enterProvider?.();
+        return new Promise((_, reject) => {
+          request.signal?.addEventListener(
+            "abort",
+            () => reject(request.signal?.reason),
+            { once: true },
+          );
+        });
+      },
+    });
+    const replayPromise = fixture.replay();
+    await chunkBarrierEntered;
+    await vi.advanceTimersByTimeAsync(20);
+    releaseChunkBarrier?.();
+    await providerEntered;
+    expect(providerStartedAt).toBe(20);
+    await vi.advanceTimersByTimeAsync(10);
+    const replayResult = await replayPromise;
+
+    expect(replayResult).toMatchObject({
+      accepted: false,
+      retry: { code: "judge_timeout", retryable: true },
+    });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("rejects a parent replaced after precheck by binding the opened file descriptor", async () => {
+    const parentPath = path.join(workspacePath, "sealed-parent");
+    const backupPath = path.join(workspacePath, "sealed-parent-backup");
+    const outsideParent = path.join(homePath, "outside-parent");
+    await mkdir(outsideParent, { recursive: true });
+    await writeFile(
+      path.join(outsideParent, "final-report.md"),
+      "# Final report\ncomplete",
+      "utf8",
+    );
+    let swapped = false;
+    const fixture = await createSealedFileReplayFixture({
+      relativeArtifactPath: "sealed-parent/final-report.md",
+      replayEvidenceHooks: {
+        async beforeOpen(candidatePath) {
+          if (swapped || candidatePath !== path.join(parentPath, "final-report.md")) {
+            return;
+          }
+          swapped = true;
+          await rename(parentPath, backupPath);
+          await symlink(outsideParent, parentPath);
+        },
+      },
+    });
+
+    const replay = await fixture.replay();
+
+    expect(swapped).toBe(true);
+    expect(replay).toMatchObject({
+      accepted: false,
+      verdict: "acceptance_unavailable",
+    });
+    expect(fixture.replayModelCalls()).toBe(0);
+    expect(fixture.replayValidatorCalls()).toBe(0);
   });
 
   it.each([
@@ -1939,9 +2428,35 @@ describe("agent goal acceptance", () => {
     expect(JSON.stringify(result)).not.toContain("secret");
   });
 
+  it("maps a structured provider failure to sanitized retry metadata", async () => {
+    const result = await createAgentGoalAcceptance({
+      chatClient: {
+        async complete() {
+          throw Object.assign(new Error("secret provider payload"), {
+            statusCode: 429,
+            responseHeaders: { "retry-after-ms": "1500" },
+          });
+        },
+      },
+    }).evaluateGoal(
+      createGoal([
+        check("final_rate_limit", "model_review", { evidenceRefs: ["evidence:final"] }, true),
+      ]),
+      createContext(),
+    );
+
+    expect(result.retry).toEqual({
+      code: "rate_limited",
+      retryable: true,
+      detail: "Final judge provider rate limited the request.",
+      retryAfterMs: 1500,
+    });
+    expect(JSON.stringify(result)).not.toContain("secret provider payload");
+  });
+
   it("enforces an asynchronous final-judge timeout and handles the late rejection", async () => {
     const result = await createAgentGoalAcceptance({
-      judgeTimeoutMs: 5,
+      finalJudgeTimeoutMs: 5,
       chatClient: {
         complete() {
           return new Promise((_, reject) => {
@@ -1970,7 +2485,7 @@ describe("agent goal acceptance", () => {
     let finishLateCompletion: (() => void) | undefined;
     const context = createContext();
     const resultPromise = createAgentGoalAcceptance({
-      judgeTimeoutMs: 25,
+      finalJudgeTimeoutMs: 25,
       chatClient: {
         complete(request) {
           observedSignal = request.signal;
@@ -2019,7 +2534,7 @@ describe("agent goal acceptance", () => {
     );
     let modelCalls = 0;
     const evaluation = createAgentGoalAcceptance({
-      judgeTimeoutMs: 25,
+      finalJudgeTimeoutMs: 25,
       chatClient: {
         async complete() {
           modelCalls += 1;
@@ -2046,9 +2561,16 @@ describe("agent goal acceptance", () => {
 
   it("aborts a deferred goal_judged append and cannot return a late accepted verdict", async () => {
     vi.useFakeTimers();
+    const reportPath = path.join(workspacePath, "deferred-timeout-evidence.md");
+    await writeFile(reportPath, "# Stable timeout evidence\n", "utf8");
+    const evidenceRef = `artifact:${reportPath}`;
     const context = createContext();
     let finishLateAppend: (() => void) | undefined;
     let appendSignal: AbortSignal | undefined;
+    let appendStartedResolve: (() => void) | undefined;
+    const appendStarted = new Promise<void>((resolve) => {
+      appendStartedResolve = resolve;
+    });
     context.trajectoryStore = {
       append(_runId, event, options) {
         if (event.type !== "goal_judged") {
@@ -2056,6 +2578,7 @@ describe("agent goal acceptance", () => {
           return Promise.resolve(event);
         }
         appendSignal = options?.signal;
+        appendStartedResolve?.();
         return new Promise((resolve, reject) => {
           options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), {
             once: true,
@@ -2068,14 +2591,14 @@ describe("agent goal acceptance", () => {
       },
     };
     const evaluation = createAgentGoalAcceptance({
-      judgeTimeoutMs: 25,
+      finalJudgeTimeoutMs: 25,
       chatClient: {
         async complete() {
           return {
             content: JSON.stringify({
               verdict: "accepted",
               reason: "Evidence passed before trajectory persistence.",
-              evidenceRefs: ["evidence:final"],
+              evidenceRefs: [evidenceRef],
             }),
             toolCalls: [],
             finishReason: "stop",
@@ -2085,20 +2608,30 @@ describe("agent goal acceptance", () => {
     }).evaluateGoal(
       createGoal([
         check("deferred_judged_append", "model_review", {
-          evidenceRefs: ["evidence:final"],
+          evidenceRefs: [evidenceRef],
         }, true),
       ]),
       context,
     );
+    await appendStarted;
     await vi.advanceTimersByTimeAsync(25);
     finishLateAppend?.();
 
-    await expect(evaluation).resolves.toMatchObject({
+    const result = await evaluation;
+    expect(result).toMatchObject({
       accepted: false,
       checkResults: [{ code: "judge_timeout" }],
     });
     expect(appendSignal?.aborted).toBe(true);
     expect(trajectoryEvents.some((event) => event.type === "goal_judged")).toBe(false);
+    expect(result.evidenceManifest).toMatchObject({
+      artifacts: [
+        {
+          ref: evidenceRef,
+          sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+        },
+      ],
+    });
   });
 
   it("aborts a deferred acceptance_checked append without returning accepted", async () => {
@@ -2177,7 +2710,7 @@ describe("agent goal acceptance", () => {
 
   it("rejects a synchronous/elapsed final-judge completion after its deadline", async () => {
     const result = await createAgentGoalAcceptance({
-      judgeTimeoutMs: 5,
+      finalJudgeTimeoutMs: 5,
       chatClient: {
         async complete() {
           const deadline = performance.now() + 20;
@@ -2632,6 +3165,119 @@ describe("agent goal acceptance", () => {
       ]),
       createContext(),
     );
+  }
+
+  async function createSealedFileReplayFixture(options: {
+    requireProvenance?: boolean;
+    finalJudgeTimeoutMs?: number;
+    relativeArtifactPath?: string;
+    replayEvidenceHooks?: {
+      beforeOpen?(artifactPath: string): Promise<void>;
+      afterChunkProcessed?(artifactPath: string, bytesRead: number): Promise<void>;
+    };
+    replayComplete?: ChatClient["complete"];
+  } = {}) {
+    const artifactPath = path.join(
+      workspacePath,
+      options.relativeArtifactPath ?? "final-report.md",
+    );
+    const evidenceRef = `artifact:${artifactPath}`;
+    await mkdir(path.dirname(artifactPath), { recursive: true });
+    await writeFile(artifactPath, "# Final report\ncomplete", "utf8");
+    if (options.requireProvenance) {
+      await writeArtifactProvenance({
+        artifactPath,
+        artifactId: artifactPath,
+        artifactRef: evidenceRef,
+        runId: "run_acceptance",
+        goalId: "goal_1",
+        milestoneId: "milestone_1",
+        source: { type: "acceptance-test" },
+        generatedAt: "2026-06-12T00:00:00.000Z",
+      });
+    }
+
+    let replaying = false;
+    let replayModelCallCount = 0;
+    let replayValidatorCallCount = 0;
+    const deterministicKind = "validator:test/live-replay" as const;
+    const registry = createAgentGoalValidatorRegistry({
+      validators: [{
+        kind: deterministicKind,
+        async evaluate({ check: selectedCheck }) {
+          if (replaying) replayValidatorCallCount += 1;
+          return {
+            checkId: selectedCheck.id,
+            kind: deterministicKind,
+            passed: true,
+            code: "deterministic_passed",
+            evidenceRefs: ["evidence:deterministic"],
+            detail: "Deterministic validation passed.",
+          };
+        },
+      }],
+    });
+    const acceptance = createAgentGoalAcceptance({
+      registry,
+      ...(options.finalJudgeTimeoutMs === undefined
+        ? {}
+        : { finalJudgeTimeoutMs: options.finalJudgeTimeoutMs }),
+      ...(options.replayEvidenceHooks
+        ? { replayEvidenceHooks: options.replayEvidenceHooks }
+        : {}),
+    } as never);
+    const goal = createGoal([
+      check("deterministic", deterministicKind, {}),
+      check("semantic", "model_review", {
+        evidenceRefs: [evidenceRef],
+        requireProvenance: options.requireProvenance === true,
+      }, true),
+    ]);
+    const first = await acceptance.evaluateGoal(goal, createContext({
+      chatClient: {
+        async complete() {
+          throw Object.assign(new Error("provider busy"), { status: 503 });
+        },
+      },
+    }));
+    if (!first.finalJudgeReplay) {
+      throw new Error("Expected the initial infrastructure failure to produce replay evidence.");
+    }
+    const sealed = sanitizeFinalGoalJudgeReplayEvidence(
+      JSON.parse(JSON.stringify(first.finalJudgeReplay)),
+    );
+    if (!sealed) {
+      throw new Error("Expected serialized replay evidence to pass persistence validation.");
+    }
+
+    return {
+      artifactPath,
+      sealed,
+      replayModelCalls: () => replayModelCallCount,
+      replayValidatorCalls: () => replayValidatorCallCount,
+      async replay() {
+        replaying = true;
+        return acceptance.replayFinalGoalJudge(goal, sealed, createContext({
+          chatClient: {
+            async complete(request) {
+              replayModelCallCount += 1;
+              if (options.replayComplete) {
+                return options.replayComplete(request);
+              }
+              return {
+                content: JSON.stringify({
+                  verdict: "accepted",
+                  reason: "The unchanged sealed artifact proves completion.",
+                  evidenceRefs: [evidenceRef],
+                }),
+                toolCalls: [],
+                finishReason: "stop",
+              };
+            },
+          },
+        }));
+      },
+    };
   }
 
   function createContext(options: {

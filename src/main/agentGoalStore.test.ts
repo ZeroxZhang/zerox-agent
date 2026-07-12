@@ -467,6 +467,166 @@ describe("agent goal store", () => {
     },
   );
 
+  it("keeps completed-unverified goals terminal and preserves the canonical attestation", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const executing = createProtocolV2Goal("goal_manual_terminal", "executing");
+    const completed: Goal = {
+      ...executing,
+      status: "completed_unverified",
+      stopReason: "user_marked_complete",
+      manualCompletionAttestation: {
+        version: 1,
+        goalId: executing.id,
+        completedAt: "2026-07-11T05:00:00.000Z",
+        reason: "user_marked_complete",
+        failedCheckIds: ["check_file"],
+        evidenceRefs: ["artifact:report"],
+        evidenceFingerprint: "a".repeat(64),
+        lastFailureCode: "judge_timeout",
+        retryCycles: 2,
+      },
+      updatedAt: "2026-07-11T05:00:00.000Z",
+    };
+
+    await store.save(executing);
+    await store.save(completed);
+
+    await expect(store.listActive()).resolves.toEqual([]);
+    await expect(
+      store.save({
+        ...executing,
+        status: "executing",
+        updatedAt: "2026-07-11T05:01:00.000Z",
+      }),
+    ).resolves.toEqual(completed);
+    await expect(
+      store.save({
+        ...completed,
+        manualCompletionAttestation: undefined,
+        acceptanceCertificate: {
+          forged: true,
+        } as unknown as Goal["acceptanceCertificate"],
+        updatedAt: "2026-07-11T05:02:00.000Z",
+      }),
+    ).resolves.toEqual(completed);
+  });
+
+  it("strips certificates from every ordinary completed-unverified JSON save", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const unsafe = createGoal("goal_manual_ordinary", "completed_unverified");
+    unsafe.stopReason = "user_marked_complete";
+    unsafe.acceptanceCertificate = {
+      forged: true,
+    } as unknown as Goal["acceptanceCertificate"];
+
+    const saved = await store.save(unsafe);
+
+    expect(saved).not.toHaveProperty("acceptanceCertificate");
+    await expect(store.get(unsafe.id)).resolves.not.toHaveProperty(
+      "acceptanceCertificate",
+    );
+    const raw = JSON.parse(
+      await readFile(
+        path.join(configDir, "agent-goals", `${unsafe.id}.json`),
+        "utf8",
+      ),
+    ) as Goal;
+    expect(raw).not.toHaveProperty("acceptanceCertificate");
+  });
+
+  it("canonically hides certificates on historical completed-unverified JSON", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const goalsDir = path.join(configDir, "agent-goals");
+    const historical = {
+      ...createGoal("goal_manual_historical", "completed_unverified"),
+      chatSessionId: "chat_manual_historical",
+      acceptanceCertificate: { historical: true },
+    } as unknown as Goal;
+    const filePath = path.join(goalsDir, `${historical.id}.json`);
+    const raw = `${JSON.stringify(historical, null, 4)}\n`;
+    await mkdir(goalsDir, { recursive: true });
+    await writeFile(filePath, raw, "utf8");
+
+    await expect(store.get(historical.id)).resolves.toEqual(
+      expect.not.objectContaining({ acceptanceCertificate: expect.anything() }),
+    );
+    await expect(
+      store.listByChatSession("chat_manual_historical"),
+    ).resolves.toEqual([
+      expect.not.objectContaining({ acceptanceCertificate: expect.anything() }),
+    ]);
+    expect(await readFile(filePath, "utf8")).toBe(raw);
+  });
+
+  it("conditionally completes only a canonical waiting goal and clears its stale certificate", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const waiting = createProtocolV2Goal(
+      "goal_manual_cas",
+      "waiting_for_acceptance",
+    );
+    waiting.acceptanceCertificate = {
+      forged: true,
+    } as unknown as Goal["acceptanceCertificate"];
+    const completed = createManualCompletedGoal(waiting);
+
+    await store.save(waiting);
+
+    await expect(
+      store.saveIfStatus(completed, "waiting_for_acceptance"),
+    ).resolves.toEqual({ saved: true, goal: completed });
+    await expect(store.get(waiting.id)).resolves.toEqual(completed);
+  });
+
+  it.each(["executing", "canceled"] as const)(
+    "loses the manual completion CAS when canonical %s wins",
+    async (winnerStatus) => {
+      const store = createAgentGoalStore({ configDir });
+      const waiting = createProtocolV2Goal(
+        `goal_manual_cas_${winnerStatus}`,
+        "waiting_for_acceptance",
+      );
+      const winner: Goal = {
+        ...waiting,
+        status: winnerStatus,
+        ...(winnerStatus === "canceled"
+          ? { stopReason: "user_canceled" as const }
+          : {}),
+        updatedAt: "2026-07-11T05:01:00.000Z",
+      };
+      const completed = createManualCompletedGoal(waiting);
+
+      await store.save(waiting);
+      await store.save(winner);
+
+      await expect(
+        store.saveIfStatus(completed, "waiting_for_acceptance"),
+      ).resolves.toEqual({ saved: false, goal: winner });
+      await expect(store.get(waiting.id)).resolves.toEqual(winner);
+    },
+  );
+
+  it("atomically appends a publication ledger event once across store instances", async () => {
+    const firstStore = createAgentGoalStore({ configDir });
+    const secondStore = createAgentGoalStore({ configDir });
+    const goal = createGoal("goal_ledger_once", "completed_unverified");
+    const event: ProgressLedgerEvent = {
+      at: "2026-07-11T05:03:00.000Z",
+      kind: "acceptance_manual_completion_recorded",
+      summary: "Manual completion recorded without certification.",
+    };
+    await firstStore.save(goal);
+
+    const results = await Promise.all([
+      firstStore.appendLedgerIfAbsent(goal.id, "manual:recorded:a", event),
+      secondStore.appendLedgerIfAbsent(goal.id, "manual:recorded:a", event),
+    ]);
+
+    expect(results.sort()).toEqual([false, true]);
+    expect(await firstStore.readLedger(goal.id)).toEqual([
+      { ...event, publicationKey: "manual:recorded:a" },
+    ]);
+  });
+
   it("still allows a budget-stopped goal to resume after an explicit recovery action", async () => {
     const store = createAgentGoalStore({ configDir });
     const stopped = createGoal("goal_recoverable", "stopped_budget");
@@ -516,6 +676,115 @@ describe("agent goal store", () => {
       executing,
       planning,
     ]);
+  });
+
+  it("lists waiting-for-acceptance goals as active and preserves retry state", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const waiting = createProtocolV2Goal(
+      "goal_waiting_acceptance",
+      "waiting_for_acceptance",
+    );
+    waiting.milestones[0]!.state = "accepted";
+    waiting.acceptanceState = {
+      protocolVersion: 2,
+      phase: "awaiting_user",
+      attempt: 3,
+      recentFailures: [],
+    };
+    waiting.acceptanceRetryState = {
+      cycle: 1,
+      attempt: 3,
+      maxAttempts: 3,
+      lastCode: "judge_timeout",
+      lastDetail: "Final judge timed out.",
+      evidenceFingerprint: "a".repeat(64),
+      finalJudgeReplay: {
+        version: 1,
+        goalId: waiting.id,
+        criteriaFingerprint: "b".repeat(64),
+        evidenceFingerprint: "c".repeat(64),
+        deterministicCheckResults: [],
+        evidenceManifest: {
+          version: 1,
+          generatedAt: "2026-06-12T00:00:00.000Z",
+          artifacts: [],
+          totalRenderedChars: 0,
+          truncated: false,
+        },
+      },
+      resumeFrom: "final_judge",
+    };
+
+    await store.save(waiting);
+
+    await expect(store.listActive()).resolves.toEqual([
+      expect.objectContaining({
+        id: waiting.id,
+        status: "waiting_for_acceptance",
+        acceptanceRetryState: expect.objectContaining({
+          lastCode: "judge_timeout",
+          finalJudgeReplay: expect.objectContaining({ goalId: waiting.id }),
+        }),
+      }),
+    ]);
+  });
+
+  it("drops an oversized final-judge replay bundle at the JSON persistence boundary", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const waiting = createProtocolV2Goal(
+      "goal_oversized_replay",
+      "waiting_for_acceptance",
+    );
+    waiting.acceptanceRetryState = {
+      cycle: 1,
+      attempt: 3,
+      maxAttempts: 3,
+      lastCode: "judge_timeout",
+      lastDetail: "Final judge timed out.",
+      evidenceFingerprint: "a".repeat(64),
+      finalJudgeReplay: {
+        version: 1,
+        goalId: waiting.id,
+        criteriaFingerprint: "b".repeat(64),
+        evidenceFingerprint: "c".repeat(64),
+        deterministicCheckResults: [],
+        evidenceManifest: {
+          version: 1,
+          generatedAt: "2026-06-12T00:00:00.000Z",
+          artifacts: [{
+            ref: "artifact:oversized",
+            mediaType: "text/plain",
+            excerpts: [{ label: "oversized", text: "x".repeat(300_000) }],
+          }],
+          totalRenderedChars: 300_000,
+          truncated: false,
+        },
+      },
+      resumeFrom: "final_judge",
+    };
+
+    await store.save(waiting);
+
+    await expect(store.get(waiting.id)).resolves.toMatchObject({
+      acceptanceRetryState: expect.not.objectContaining({
+        finalJudgeReplay: expect.anything(),
+      }),
+    });
+  });
+
+  it("keeps historical acceptance-unavailable JSON unchanged when optional recovery fields are absent", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const goalsDir = path.join(configDir, "agent-goals");
+    const legacy = createGoal("goal_legacy_acceptance", "stopped_blocked");
+    legacy.stopReason = "acceptance_unavailable";
+    const filePath = path.join(goalsDir, `${legacy.id}.json`);
+    const raw = `${JSON.stringify(legacy, null, 4)}\n`;
+    await mkdir(goalsDir, { recursive: true });
+    await writeFile(filePath, raw, "utf8");
+
+    await expect(store.get(legacy.id)).resolves.toEqual(legacy);
+    await expect(store.listActive()).resolves.toEqual([]);
+    expect(await readFile(filePath, "utf8")).toBe(raw);
   });
 
   it("appends and reads progress ledger events in order", async () => {
@@ -783,6 +1052,27 @@ function createProtocolV2Goal(id: string, status: GoalStatus): Goal {
       attempt: 0,
       recentFailures: [],
     },
+  };
+}
+
+function createManualCompletedGoal(waiting: Goal): Goal {
+  return {
+    ...waiting,
+    status: "completed_unverified",
+    stopReason: "user_marked_complete",
+    acceptanceCertificate: undefined,
+    manualCompletionAttestation: {
+      version: 1,
+      goalId: waiting.id,
+      completedAt: "2026-07-11T05:02:00.000Z",
+      reason: "user_marked_complete",
+      failedCheckIds: ["check_file"],
+      evidenceRefs: ["artifact:report"],
+      evidenceFingerprint: "a".repeat(64),
+      lastFailureCode: "judge_timeout",
+      retryCycles: 1,
+    },
+    updatedAt: "2026-07-11T05:02:00.000Z",
   };
 }
 

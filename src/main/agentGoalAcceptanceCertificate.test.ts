@@ -565,6 +565,25 @@ describe("goal acceptance certificate", () => {
     ).toMatchObject({ ok: false, reason: expect.stringContaining("missing") });
   });
 
+  it("never reports manual completion as certified", () => {
+    const goal = certifiedGoal();
+    goal.status = "completed_unverified";
+    goal.stopReason = "user_marked_complete";
+    goal.manualCompletionAttestation = {
+      version: 1,
+      goalId: goal.id,
+      completedAt: "2026-07-11T05:00:00.000Z",
+      reason: "user_marked_complete",
+      failedCheckIds: ["check_file"],
+      evidenceRefs: ["artifact:report"],
+      evidenceFingerprint: "a".repeat(64),
+      lastFailureCode: "judge_timeout",
+      retryCycles: 1,
+    };
+
+    expect(verifyGoalAcceptanceCertificate(goal)).not.toEqual({ ok: true });
+  });
+
   it.each([
     ["goal", (goal: Goal) => {
       goal.id = "goal_other";

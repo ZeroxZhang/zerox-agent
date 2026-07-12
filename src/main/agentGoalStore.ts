@@ -8,7 +8,12 @@ import {
 } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import type { Goal, GoalStatus, ProgressLedgerEvent } from "../shared/agentGoal";
+import {
+  sanitizeFinalGoalJudgeReplayEvidence,
+  type Goal,
+  type GoalStatus,
+  type ProgressLedgerEvent,
+} from "../shared/agentGoal";
 import { readRecoverableJsonl } from "./jsonlRecovery";
 import { verifyGoalAcceptanceCertificate } from "./agentGoalAcceptanceCertificate";
 
@@ -16,29 +21,48 @@ export type { ProgressLedgerEvent } from "../shared/agentGoal";
 
 export type AgentGoalStore = {
   save(goal: Goal): Promise<Goal>;
+  saveIfStatus(
+    goal: Goal,
+    expectedStatus: GoalStatus,
+  ): Promise<GoalConditionalSaveResult>;
   get(goalId: string): Promise<Goal | null>;
   listActive(): Promise<Goal[]>;
   listByChatSession(chatSessionId: string): Promise<Goal[]>;
   appendLedger(goalId: string, event: ProgressLedgerEvent): Promise<void>;
+  appendLedgerIfAbsent(
+    goalId: string,
+    publicationKey: string,
+    event: ProgressLedgerEvent,
+  ): Promise<boolean>;
   readLedger(goalId: string): Promise<ProgressLedgerEvent[]>;
   delete(goalId: string): Promise<boolean>;
 };
 
+export type GoalConditionalSaveResult = {
+  saved: boolean;
+  goal: Goal | null;
+};
+
 const terminalGoalStatuses = new Set<GoalStatus>([
   "achieved",
+  "completed_unverified",
   "stopped_budget",
   "stopped_stalled",
   "stopped_blocked",
   "failed",
   "canceled",
 ]);
-const irreversibleGoalStatuses = new Set<GoalStatus>(["achieved", "canceled"]);
+const irreversibleGoalStatuses = new Set<GoalStatus>([
+  "achieved",
+  "completed_unverified",
+  "canceled",
+]);
+const goalMutationQueues = new Map<string, Promise<void>>();
 
 export function createAgentGoalStore(options: {
   configDir: string;
 }): AgentGoalStore {
   const goalsDir = path.join(options.configDir, "agent-goals");
-  let mutationQueue = Promise.resolve();
 
   function goalPath(goalId: string): string {
     return path.join(goalsDir, `${goalId}.json`);
@@ -92,45 +116,71 @@ export function createAgentGoalStore(options: {
     return goals.filter((goal): goal is Goal => goal !== null);
   }
 
+  async function persistGoal(
+    goal: Goal,
+    expectedStatus?: GoalStatus,
+  ): Promise<GoalConditionalSaveResult> {
+    return serializeMutation(goalsDir, async () => {
+      const existing = await readRawGoal(goal.id);
+      if (expectedStatus !== undefined && existing?.status !== expectedStatus) {
+        return {
+          saved: false,
+          goal: existing ? sanitizeGoalForRead(existing) : null,
+        };
+      }
+      if (existing && hasInvalidProtocolV2Achievement(existing)) {
+        return { saved: false, goal: sanitizeGoalForRead(existing) };
+      }
+      if (existing && isCanonicalCertifiedAchievement(existing)) {
+        return { saved: false, goal: existing };
+      }
+      if (existing?.status === "completed_unverified") {
+        return { saved: false, goal: sanitizeGoalForRead(existing) };
+      }
+      const candidate = sanitizeFinalJudgeReplay(
+        stripUnverifiedCompletionCertificate(
+          preserveCanonicalAcceptance(existing, goal),
+        ),
+      );
+      if (
+        existing &&
+        irreversibleGoalStatuses.has(existing.status) &&
+        candidate.status !== existing.status
+      ) {
+        return { saved: false, goal: existing };
+      }
+      if (
+        candidate.acceptanceProtocolVersion === 2 &&
+        candidate.status === "achieved"
+      ) {
+        const terminalVerification = verifyProtocolV2Achievement(candidate);
+        if (!terminalVerification.ok) {
+          if (existing) return { saved: false, goal: existing };
+          throw new Error(
+            `Cannot save protocol-v2 achieved goal: ${terminalVerification.reason}`,
+          );
+        }
+      }
+      await writeJsonFileAtomically(
+        goalsDir,
+        goalPath(candidate.id),
+        `${JSON.stringify(candidate, null, 2)}\n`,
+      );
+      return { saved: true, goal: candidate };
+    });
+  }
+
   return {
     async save(goal) {
-      return serializeMutation(mutationQueue, (nextQueue) => {
-        mutationQueue = nextQueue;
-      }, async () => {
-        const existing = await readRawGoal(goal.id);
-        if (existing && hasInvalidProtocolV2Achievement(existing)) {
-          return sanitizeGoalForRead(existing);
-        }
-        if (existing && isCanonicalCertifiedAchievement(existing)) {
-          return existing;
-        }
-        const candidate = preserveCanonicalAcceptance(existing, goal);
-        if (
-          existing &&
-          irreversibleGoalStatuses.has(existing.status) &&
-          candidate.status !== existing.status
-        ) {
-          return existing;
-        }
-        if (
-          candidate.acceptanceProtocolVersion === 2 &&
-          candidate.status === "achieved"
-        ) {
-          const terminalVerification = verifyProtocolV2Achievement(candidate);
-          if (!terminalVerification.ok) {
-            if (existing) return existing;
-            throw new Error(
-              `Cannot save protocol-v2 achieved goal: ${terminalVerification.reason}`,
-            );
-          }
-        }
-        await writeJsonFileAtomically(
-          goalsDir,
-          goalPath(candidate.id),
-          `${JSON.stringify(candidate, null, 2)}\n`,
-        );
-        return candidate;
-      });
+      const result = await persistGoal(goal);
+      if (!result.goal) {
+        throw new Error(`Goal "${goal.id}" could not be saved.`);
+      }
+      return result.goal;
+    },
+
+    async saveIfStatus(goal, expectedStatus) {
+      return persistGoal(goal, expectedStatus);
     },
 
     async get(goalId) {
@@ -158,14 +208,34 @@ export function createAgentGoalStore(options: {
       });
     },
 
+    async appendLedgerIfAbsent(goalId, publicationKey, event) {
+      return serializeMutation(goalsDir, async () => {
+        const ledger = await readRecoverableJsonl<ProgressLedgerEvent>(
+          ledgerPath(goalId),
+        );
+        if (
+          ledger.some(
+            (candidate) => candidate.publicationKey === publicationKey,
+          )
+        ) {
+          return false;
+        }
+        await mkdir(goalsDir, { recursive: true });
+        await writeFile(
+          ledgerPath(goalId),
+          `${JSON.stringify({ ...event, publicationKey })}\n`,
+          { encoding: "utf8", flag: "a" },
+        );
+        return true;
+      });
+    },
+
     async readLedger(goalId) {
       return readRecoverableJsonl<ProgressLedgerEvent>(ledgerPath(goalId));
     },
 
     async delete(goalId) {
-      return serializeMutation(mutationQueue, (nextQueue) => {
-        mutationQueue = nextQueue;
-      }, async () => {
+      return serializeMutation(goalsDir, async () => {
         try {
           await unlink(goalPath(goalId));
           return true;
@@ -182,15 +252,21 @@ export function createAgentGoalStore(options: {
 }
 
 function serializeMutation<T>(
-  currentQueue: Promise<void>,
-  setQueue: (queue: Promise<void>) => void,
+  key: string,
   operation: () => Promise<T>,
 ): Promise<T> {
+  const currentQueue = goalMutationQueues.get(key) ?? Promise.resolve();
   const result = currentQueue.then(operation, operation);
-  setQueue(result.then(
+  const nextQueue = result.then(
     () => undefined,
     () => undefined,
-  ));
+  );
+  goalMutationQueues.set(key, nextQueue);
+  void nextQueue.finally(() => {
+    if (goalMutationQueues.get(key) === nextQueue) {
+      goalMutationQueues.delete(key);
+    }
+  });
   return result;
 }
 
@@ -228,21 +304,38 @@ function isActiveGoal(goal: Goal | null): goal is Goal {
 }
 
 function normalizeGoal(goal: Goal): Goal {
-  return {
+  return sanitizeFinalJudgeReplay({
     ...goal,
     ...(goal.chatSessionId ? { chatSessionId: String(goal.chatSessionId) } : {}),
     ...(goal.originMessageId
       ? { originMessageId: String(goal.originMessageId) }
       : {}),
-  };
+  });
+}
+
+function sanitizeFinalJudgeReplay(goal: Goal): Goal {
+  const retryState = goal.acceptanceRetryState;
+  if (!retryState?.finalJudgeReplay) return goal;
+  const finalJudgeReplay = sanitizeFinalGoalJudgeReplayEvidence(
+    retryState.finalJudgeReplay,
+  );
+  if (finalJudgeReplay) {
+    return {
+      ...goal,
+      acceptanceRetryState: { ...retryState, finalJudgeReplay },
+    };
+  }
+  const { finalJudgeReplay: _invalidReplay, ...safeRetryState } = retryState;
+  return { ...goal, acceptanceRetryState: safeRetryState };
 }
 
 function sanitizeGoalForRead(goal: Goal): Goal {
-  if (!hasInvalidProtocolV2Achievement(goal)) {
-    return goal;
+  const sanitized = stripUnverifiedCompletionCertificate(goal);
+  if (!hasInvalidProtocolV2Achievement(sanitized)) {
+    return sanitized;
   }
 
-  const { acceptanceCertificate: _invalidCertificate, ...safeGoal } = goal;
+  const { acceptanceCertificate: _invalidCertificate, ...safeGoal } = sanitized;
   return {
     ...safeGoal,
     status: "stopped_blocked",
@@ -250,10 +343,10 @@ function sanitizeGoalForRead(goal: Goal): Goal {
     acceptanceState: {
       protocolVersion: 2,
       phase: "blocked",
-      attempt: goal.acceptanceState?.attempt ?? 0,
-      recentFailures: goal.acceptanceState?.recentFailures ?? [],
-      ...(goal.acceptanceState?.lastDecision
-        ? { lastDecision: goal.acceptanceState.lastDecision }
+      attempt: sanitized.acceptanceState?.attempt ?? 0,
+      recentFailures: sanitized.acceptanceState?.recentFailures ?? [],
+      ...(sanitized.acceptanceState?.lastDecision
+        ? { lastDecision: sanitized.acceptanceState.lastDecision }
         : {}),
     },
   };
@@ -291,7 +384,7 @@ function preserveCanonicalAcceptance(
     incoming.acceptanceState,
   );
 
-  return {
+  const candidate: Goal = {
     ...incoming,
     acceptanceProtocolVersion: 2,
     ...(acceptanceState ? { acceptanceState } : {}),
@@ -301,6 +394,15 @@ function preserveCanonicalAcceptance(
         ? { acceptanceCertificate: existing.acceptanceCertificate }
         : {}),
   };
+  return candidate;
+}
+
+function stripUnverifiedCompletionCertificate(goal: Goal): Goal {
+  if (goal.status !== "completed_unverified") {
+    return goal;
+  }
+  const { acceptanceCertificate: _certificate, ...safeGoal } = goal;
+  return safeGoal;
 }
 
 function mergeAcceptanceState(

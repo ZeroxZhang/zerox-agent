@@ -1292,6 +1292,293 @@ describe("goal chat service", () => {
     expect(resumed).toEqual([]);
     expect(progressEvents).toEqual([]);
   });
+
+  it("continues final acceptance explicitly and forwards the caller signal", async () => {
+    const parentController = new AbortController();
+    const signal = parentController.signal;
+    const continuedGoal = createGoal({
+      status: "waiting_for_acceptance",
+      acceptanceState: {
+        protocolVersion: 2,
+        phase: "awaiting_user",
+        attempt: 3,
+        recentFailures: [],
+      },
+    });
+    const continueAcceptance = async (
+      goalId: string,
+      options?: { signal?: AbortSignal },
+    ) => {
+      expect(goalId).toBe(continuedGoal.id);
+      expect(options?.signal).not.toBe(signal);
+      expect(options?.signal?.aborted).toBe(false);
+      parentController.abort();
+      expect(options?.signal?.aborted).toBe(true);
+      const achieved = createGoal({ id: goalId, status: "achieved" });
+      canonicalGoal = achieved;
+      return achieved;
+    };
+    let canonicalGoal = continuedGoal;
+    const service = createGoalChatService({
+      controller: createController({ continueAcceptance }),
+      goalStore: {
+        async get(goalId) {
+          return canonicalGoal.id === goalId ? canonicalGoal : null;
+        },
+        async save(goal) {
+          canonicalGoal = goal;
+          return canonicalGoal;
+        },
+        async appendLedger() {},
+      },
+      planner: createFakePlanner(),
+    });
+
+    await expect(
+      service.continueAcceptance(continuedGoal.id, { signal }),
+    ).resolves.toEqual({
+      id: continuedGoal.id,
+      description: continuedGoal.description,
+      status: "achieved",
+    });
+  });
+
+  it("records explicit unverified completion through the controller", async () => {
+    const waitingGoal = createGoal({ status: "waiting_for_acceptance" });
+    const markCompletedUnverified = async (goalId: string) =>
+      createGoal({ id: goalId, status: "completed_unverified" });
+    const service = createGoalChatService({
+      controller: createController({ markCompletedUnverified }),
+      goalStore: createGoalStore({ existingGoal: waitingGoal }),
+      planner: createFakePlanner(),
+    });
+
+    await expect(
+      service.markCompletedUnverified(waitingGoal.id),
+    ).resolves.toEqual({
+      id: waitingGoal.id,
+      description: waitingGoal.description,
+      status: "completed_unverified",
+    });
+  });
+
+  it("aborts an active final-acceptance continuation when the goal is canceled", async () => {
+    let persistedGoal = createGoal({ status: "waiting_for_acceptance" });
+    let continuationSignal: AbortSignal | undefined;
+    let continuationEnteredResolve: (() => void) | undefined;
+    const continuationEntered = new Promise<void>((resolve) => {
+      continuationEnteredResolve = resolve;
+    });
+    let releaseContinuation: (() => void) | undefined;
+    let continuationCalls = 0;
+    const continueAcceptance = async (
+      goalId: string,
+      options?: { signal?: AbortSignal },
+    ) => {
+      continuationCalls += 1;
+      continuationSignal = options?.signal;
+      continuationEnteredResolve?.();
+      await new Promise<void>((resolve) => {
+        releaseContinuation = resolve;
+        options?.signal?.addEventListener("abort", () => resolve(), {
+          once: true,
+        });
+      });
+      return createGoal({ id: goalId, status: "achieved" });
+    };
+    const service = createGoalChatService({
+      controller: createController({ continueAcceptance }),
+      goalStore: {
+        async get(goalId) {
+          return persistedGoal.id === goalId ? persistedGoal : null;
+        },
+        async save(goal) {
+          persistedGoal = structuredClone(goal);
+          return persistedGoal;
+        },
+        async appendLedger() {},
+      },
+      planner: createFakePlanner(),
+    });
+
+    const continuing = service.continueAcceptance(persistedGoal.id);
+    await continuationEntered;
+    const duplicateContinuation = service.continueAcceptance(persistedGoal.id);
+    const canceled = await service.cancel(persistedGoal.id);
+    releaseContinuation?.();
+
+    expect(continuationSignal?.aborted).toBe(true);
+    expect(continuationCalls).toBe(1);
+    expect(canceled.status).toBe("canceled");
+    await expect(continuing).resolves.toMatchObject({ status: "canceled" });
+    await expect(duplicateContinuation).resolves.toMatchObject({
+      status: "canceled",
+    });
+  });
+
+  it("keeps duplicate continuations registered through the final canonical read", async () => {
+    let persistedGoal = createGoal({ status: "waiting_for_acceptance" });
+    let continuationCalls = 0;
+    let runnerReturned = false;
+    let blockPostRunRead = true;
+    let postRunReadEnteredResolve: (() => void) | undefined;
+    const postRunReadEntered = new Promise<void>((resolve) => {
+      postRunReadEnteredResolve = resolve;
+    });
+    let releasePostRunRead: (() => void) | undefined;
+    const postRunReadReleased = new Promise<void>((resolve) => {
+      releasePostRunRead = resolve;
+    });
+    const service = createGoalChatService({
+      controller: createController({
+        async continueAcceptance(goalId) {
+          continuationCalls += 1;
+          runnerReturned = true;
+          return createGoal({
+            id: goalId,
+            status: "waiting_for_acceptance",
+          });
+        },
+      }),
+      goalStore: {
+        async get(goalId) {
+          const snapshot = structuredClone(persistedGoal);
+          if (runnerReturned && blockPostRunRead) {
+            blockPostRunRead = false;
+            postRunReadEnteredResolve?.();
+            await postRunReadReleased;
+          }
+          return snapshot.id === goalId ? snapshot : null;
+        },
+        async save(goal) {
+          persistedGoal = structuredClone(goal);
+          return persistedGoal;
+        },
+        async appendLedger() {},
+      },
+      planner: createFakePlanner(),
+    });
+
+    const first = service.continueAcceptance(persistedGoal.id);
+    await postRunReadEntered;
+    const second = service.continueAcceptance(persistedGoal.id);
+    expect(continuationCalls).toBe(1);
+
+    const canceled = await service.cancel(persistedGoal.id);
+    releasePostRunRead?.();
+
+    await expect(first).resolves.toMatchObject({ status: "canceled" });
+    await expect(second).resolves.toMatchObject({ status: "canceled" });
+    expect(canceled.status).toBe("canceled");
+    expect(continuationCalls).toBe(1);
+
+    await service.continueAcceptance(persistedGoal.id);
+    expect(continuationCalls).toBe(2);
+  });
+
+  it("starts continuation after a waiting goal is published before background cleanup finishes", async () => {
+    let persistedGoal = createGoal({ status: "executing" });
+    let releaseBackground: (() => void) | undefined;
+    const backgroundReleased = new Promise<void>((resolve) => {
+      releaseBackground = resolve;
+    });
+    let waitingPublishedResolve: (() => void) | undefined;
+    const waitingPublished = new Promise<void>((resolve) => {
+      waitingPublishedResolve = resolve;
+    });
+    let continuationCalls = 0;
+    const service = createGoalChatService({
+      controller: createController({
+        async start(goalId) {
+          persistedGoal = createGoal({
+            id: goalId,
+            status: "waiting_for_acceptance",
+          });
+          waitingPublishedResolve?.();
+          await backgroundReleased;
+          return persistedGoal;
+        },
+        async continueAcceptance(goalId) {
+          continuationCalls += 1;
+          persistedGoal = createGoal({ id: goalId, status: "achieved" });
+          return persistedGoal;
+        },
+      }),
+      goalStore: {
+        async get(goalId) {
+          return persistedGoal.id === goalId
+            ? structuredClone(persistedGoal)
+            : null;
+        },
+        async save(goal) {
+          persistedGoal = structuredClone(goal);
+          return persistedGoal;
+        },
+        async appendLedger() {},
+      },
+      planner: createFakePlanner(),
+    });
+
+    await service.start(persistedGoal.id);
+    await waitingPublished;
+    const continued = service.continueAcceptance(persistedGoal.id);
+    releaseBackground?.();
+
+    await expect(continued).resolves.toMatchObject({ status: "achieved" });
+    expect(continuationCalls).toBe(1);
+  });
+
+  it("returns a canonical terminal winner without starting continuation after background cleanup", async () => {
+    let persistedGoal = createGoal({ status: "executing" });
+    let releaseBackground: (() => void) | undefined;
+    const backgroundReleased = new Promise<void>((resolve) => {
+      releaseBackground = resolve;
+    });
+    let waitingPublishedResolve: (() => void) | undefined;
+    const waitingPublished = new Promise<void>((resolve) => {
+      waitingPublishedResolve = resolve;
+    });
+    let continuationCalls = 0;
+    const service = createGoalChatService({
+      controller: createController({
+        async start(goalId) {
+          persistedGoal = createGoal({
+            id: goalId,
+            status: "waiting_for_acceptance",
+          });
+          waitingPublishedResolve?.();
+          await backgroundReleased;
+          persistedGoal = createGoal({ id: goalId, status: "canceled" });
+          return persistedGoal;
+        },
+        async continueAcceptance(goalId) {
+          continuationCalls += 1;
+          return createGoal({ id: goalId, status: "achieved" });
+        },
+      }),
+      goalStore: {
+        async get(goalId) {
+          return persistedGoal.id === goalId
+            ? structuredClone(persistedGoal)
+            : null;
+        },
+        async save(goal) {
+          persistedGoal = structuredClone(goal);
+          return persistedGoal;
+        },
+        async appendLedger() {},
+      },
+      planner: createFakePlanner(),
+    });
+
+    await service.start(persistedGoal.id);
+    await waitingPublished;
+    const continued = service.continueAcceptance(persistedGoal.id);
+    releaseBackground?.();
+
+    await expect(continued).resolves.toMatchObject({ status: "canceled" });
+    expect(continuationCalls).toBe(0);
+  });
 });
 
 function createFakePlanner(): Pick<
@@ -1319,6 +1606,11 @@ function createController(overrides: Partial<{
   start(goalId: string, options?: { signal?: AbortSignal }): Promise<Goal>;
   resume(goalId: string, options?: { signal?: AbortSignal }): Promise<Goal>;
   resolveReview(goalId: string, decision: GoalReviewDecision): Promise<Goal>;
+  continueAcceptance(
+    goalId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<Goal>;
+  markCompletedUnverified(goalId: string): Promise<Goal>;
 }> = {}) {
   return {
     async start(goalId: string) {
@@ -1329,6 +1621,12 @@ function createController(overrides: Partial<{
     },
     async resolveReview(goalId: string) {
       return createGoal({ id: goalId, status: "executing" });
+    },
+    async continueAcceptance(goalId: string) {
+      return createGoal({ id: goalId, status: "achieved" });
+    },
+    async markCompletedUnverified(goalId: string) {
+      return createGoal({ id: goalId, status: "completed_unverified" });
     },
     ...overrides,
   };

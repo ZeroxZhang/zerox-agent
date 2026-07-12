@@ -302,6 +302,10 @@ const buildingAgent = {
     ipcRenderer.invoke("goal:replan", goalId, instructions),
   retryGoal: (goalId: string): Promise<GoalOperationResult> =>
     ipcRenderer.invoke("goal:retry", goalId),
+  continueGoalAcceptance: (goalId: string): Promise<GoalOperationResult> =>
+    ipcRenderer.invoke("goal:continueAcceptance", goalId),
+  markGoalCompletedUnverified: (goalId: string): Promise<GoalOperationResult> =>
+    ipcRenderer.invoke("goal:markCompletedUnverified", goalId),
   confirmGoalDraft: (
     draftId: string,
     edit?: GoalDraftEdit,

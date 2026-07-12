@@ -68,10 +68,15 @@ describe("providerFactory", () => {
   });
 });
 
-function mockFetch(response: unknown, status = 200): typeof fetch {
+function mockFetch(
+  response: unknown,
+  status = 200,
+  responseHeaders: Record<string, string> = {},
+): typeof fetch {
   return (async () => ({
     ok: status >= 200 && status < 300,
     status,
+    headers: new Headers(responseHeaders),
     text: async () => (typeof response === "string" ? response : JSON.stringify(response)),
     json: async () => response,
     body: null,
@@ -138,7 +143,7 @@ describe("AnthropicProvider", () => {
     expect(res.cacheWriteTokens).toBe(2);
   });
 
-  it("normalizes errors to HTTP <status>: <body>", async () => {
+  it("normalizes errors to an HTTP status without retaining the response body", async () => {
     const provider = createProvider(
       { providerId: "anthropic", apiKey: "k", chatModel: "claude-3" },
       { fetch: mockFetch({ error: "overloaded" }, 529) },
@@ -146,6 +151,35 @@ describe("AnthropicProvider", () => {
     await expect(
       provider.complete({ model: "claude-3", apiKey: "k", temperature: 0, maxTokens: 10, messages: [{ role: "user", content: [{ type: "text", text: "x" }] }] }),
     ).rejects.toThrow(/HTTP 529/);
+  });
+
+  it("exposes only structured retry metadata for an HTTP failure", async () => {
+    const provider = createProvider(
+      { providerId: "anthropic", apiKey: "k", chatModel: "claude-3" },
+      {
+        fetch: mockFetch(
+          { error: "provider-body-secret" },
+          429,
+          { "retry-after": "45", "x-provider-secret": "do-not-copy" },
+        ),
+      },
+    );
+
+    const error = await provider.complete({
+      model: "claude-3",
+      apiKey: "k",
+      temperature: 0,
+      maxTokens: 10,
+      messages: [{ role: "user", content: [{ type: "text", text: "x" }] }],
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({
+      status: 429,
+      statusCode: 429,
+      responseHeaders: { "retry-after": "30" },
+    });
+    expect((error as Error).message).toBe("HTTP 429");
+    expect(JSON.stringify(error)).not.toMatch(/provider-body-secret|do-not-copy/);
   });
 
   it("times out a fetch that never settles", async () => {
@@ -227,6 +261,35 @@ describe("GeminiProvider", () => {
     expect(res.content).toBe("Hi");
     expect(res.toolCalls[0].function.name).toBe("file_read");
     expect(res.cacheReadTokens).toBe(4);
+  });
+
+  it("exposes bounded structured retry metadata for an HTTP failure", async () => {
+    const provider = createProvider(
+      { providerId: "gemini", apiKey: "k", chatModel: "gemini-1.5-pro" },
+      {
+        fetch: mockFetch(
+          { error: "provider-body-secret" },
+          503,
+          { "retry-after-ms": "90000", "x-provider-secret": "do-not-copy" },
+        ),
+      },
+    );
+
+    const error = await provider.complete({
+      model: "gemini-1.5-pro",
+      apiKey: "k",
+      temperature: 0,
+      maxTokens: 10,
+      messages: [{ role: "user", content: [{ type: "text", text: "x" }] }],
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({
+      status: 503,
+      statusCode: 503,
+      responseHeaders: { "retry-after-ms": "30000" },
+    });
+    expect((error as Error).message).toBe("HTTP 503");
+    expect(JSON.stringify(error)).not.toMatch(/provider-body-secret|do-not-copy/);
   });
 
   it("times out a fetch that never settles", async () => {

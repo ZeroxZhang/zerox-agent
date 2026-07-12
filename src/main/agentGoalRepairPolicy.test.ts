@@ -147,6 +147,33 @@ describe("goal acceptance repair policy", () => {
     });
   });
 
+  it("waits only for final-goal infrastructure acceptance failure", () => {
+    expect(
+      decideAcceptanceRepair({
+        ...policyInput("acceptance_unavailable", 3),
+        targetKind: "goal",
+        infrastructureFailure: true,
+      }),
+    ).toMatchObject({
+      action: "wait_for_acceptance",
+      verdict: "acceptance_unavailable",
+    });
+    expect(
+      decideAcceptanceRepair({
+        ...policyInput("acceptance_unavailable", 3),
+        targetKind: "milestone",
+        infrastructureFailure: true,
+      }).action,
+    ).toBe("stop_blocked");
+    expect(
+      decideAcceptanceRepair({
+        ...policyInput("acceptance_unavailable", 3),
+        targetKind: "goal",
+        infrastructureFailure: false,
+      }).action,
+    ).toBe("stop_blocked");
+  });
+
   it("appends immutably and caps recent failure history to the newest 20", () => {
     const history = Array.from({ length: 20 }, (_, index) =>
       failureRecord(`fingerprint_${index}`),

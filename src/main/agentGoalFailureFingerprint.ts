@@ -120,12 +120,15 @@ function createAcceptanceFailureFingerprintInternal(
         ...checkEvidenceRefs,
         ...manifestArtifacts.map((artifact) => safeString(artifact?.ref)),
       ]),
-      artifactHashes: sortedStringSet([
-        ...safeArray(input.artifactHashes).map(safeString),
-        ...manifestArtifacts.flatMap((artifact) =>
-          artifact?.sha256 ? [safeString(artifact.sha256)] : [],
-        ),
-      ]),
+      artifactEvidence: sortedCanonicalSet(
+        manifestArtifacts.map((artifact) => ({
+          ref: safeString(artifact?.ref),
+          sha256: safeString(artifact?.sha256 ?? ""),
+        })),
+      ),
+      artifactHashes: sortedStringSet(
+        safeArray(input.artifactHashes).map(safeString),
+      ),
       ...(includeActionSignatures
         ? {
             actionSignatures: sortedStringSet(

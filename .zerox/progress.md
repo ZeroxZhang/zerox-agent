@@ -6708,3 +6708,149 @@
   - `npm run smoke:prod` -> passed; renderer rendered the Agent chat UI. The known local `better-sqlite3` Node ABI mismatch fell back to JSON storage.
   - `git diff --check` -> passed.
   - Independent UI/integration, runtime, and security reviews completed after four correction rounds. Final reviewers reported no remaining Critical or Important blockers and approved the branch for `main` merge consideration.
+
+## 2026-07-12 - Goal Acceptance Recovery Design
+
+- Diagnosed the reported goal as a final cold-judge timeout rather than task or artifact failure: the report and evidence files were written, the milestone semantic judge accepted them, and the separate final judge ended at the fixed 30-second deadline with `judge_timeout`.
+- Read the relevant MiMo-Code goal gate, shared transient retry classifier, visible retry schedule, max-mode judge replay, provider timeout, and task-blocking implementations.
+- Adopted MiMo-Code's unified transient classification, visible retry state, fresh side-effect-free judge attempts, and durable resume contract while explicitly rejecting its fail-open goal-verifier behavior.
+- Added the approved design at `docs/superpowers/specs/2026-07-12-goal-acceptance-recovery-design.md`.
+- The design preserves fail-closed machine certification, adds bounded automatic final-judge retry, introduces durable `waiting_for_acceptance`, and defines `completed_unverified` plus a manual completion attestation that cannot masquerade as an acceptance certificate.
+- Written-spec review was approved by the user.
+- Added the TDD implementation plan at `docs/superpowers/plans/2026-07-12-goal-acceptance-recovery.md`, split into shared contracts, typed retry classification, controller orchestration, persistence/restart recovery, manual attestation and IPC, renderer UX, and independent review/release gates.
+- Plan self-review covered complete design requirements, placeholder scans, type/signature consistency, final-only 60-second judge timeout, one clean invalid-response retry, and implementation review SHA boundaries.
+- Plan-stage verification: `npm run harness:check` and `git diff --check` passed.
+- Created isolated worktree `.worktrees/goal-acceptance-recovery` on branch `codex/goal-acceptance-recovery` for subagent-driven implementation.
+- Clean worktree baseline: `npm test` passed 199 test files / 1,835 tests before production changes.
+- Registered `P43-goal-acceptance-recovery` as the single in-progress feature.
+
+## 2026-07-12 - P43 Task 4A Durable Persistence and Restart Recovery
+
+- JSON and SQLite goal persistence now keep `waiting_for_acceptance` active
+  while treating `completed_unverified` as terminal and irreversible.
+- Canonical manual completion attestations survive stale and same-status
+  writes; optional retry/attestation fields round-trip without rewriting
+  historical acceptance-unavailable JSON.
+- Startup leaves persisted acceptance waiting untouched and converts an
+  interrupted `executing/retrying/final_judge` timer into durable
+  `waiting_for_acceptance/awaiting_user` without executing work.
+- TDD RED reproduced all three missing boundaries; focused GREEN passed 6/6.
+- Independent review caught and TDD coverage fixed stale progress delivery that
+  could regress a canonical manual completion in chat/session projections.
+- Final evidence: persistence/container suite 90/90 passed, Electron/main
+  TypeScript passed, `npm run harness:check` passed, and `git diff --check`
+  passed.
+- Task 4B (`continueAcceptance`, evidence-staleness guard, and legacy upgrade)
+  was delegated separately and is recorded as complete below.
+
+## 2026-07-12 - P43 Task 4B Continue Final Acceptance and Legacy Upgrade
+
+- Added controller `continueAcceptance` as a final-judge-only recovery cycle;
+  accepted/skipped milestones, task usage, artifacts, and transcripts are
+  preserved without milestone execution or replanning.
+- New cycles increment the durable cycle counter, reset attempt to zero, clear
+  stale retry timing, and retain a separate acceptance retry budget even when
+  the preserved task budget is exhausted.
+- Evidence-only fingerprints bind continuation to artifact refs/hashes. A
+  mismatch returns to acceptance waiting with safe diagnostics and cannot
+  create a protocol-v2 certificate.
+- Eligible all-complete legacy acceptance-unavailable goals upgrade safely;
+  incomplete legacy goals remain on the generic retry path.
+- Parent cancellation aborts resumed judges, and late work cannot overwrite
+  canceled, achieved, or manually completed canonical state.
+- TDD RED captured the missing entry point and the task-budget/final-judge
+  boundary. GREEN passed the full controller suite (87/87).
+- Final evidence: controller/store/container suite 161/161 passed,
+  Electron/main TypeScript passed, `npm run harness:check` passed, and
+  `git diff --check` passed.
+
+## 2026-07-12 - P43 Task 4B Review Fixes
+
+- Removed fabricated empty legacy retry fingerprints and made empty persisted
+  fingerprints fail closed instead of bypassing certification comparison.
+- Scoped task-budget bypass to an explicit in-memory flag carried only by
+  public `continueAcceptance`; generic resume remains budget-gated.
+- Preserved final-judge evidence manifests across post-build deadline catches,
+  preventing unchanged real evidence from producing a false continuation
+  mismatch.
+- Bound evidence hashes to their artifact refs in canonical fingerprints;
+  pair order is stable and hash swaps are distinguishable.
+- TDD RED reproduced all four review findings. GREEN passed controller,
+  acceptance, and failure-fingerprint coverage (231/231), Electron/main
+  TypeScript, harness, and diff checks.
+
+## 2026-07-12 - P43 Task 7 Preliminary Release Gate
+
+- Preliminary main-agent evidence reports the P43 focused regression suite at
+  16 files / 539 tests passed. This is implementation-stage evidence only; it
+  does not claim independent review, full `npm run verify`, or production smoke
+  acceptance.
+- Updated the P43 feature manifest to cover every source, test, documentation,
+  progress, and release-gate file in the feature change set while preserving
+  P43 as the sole `in_progress` feature and retaining the existing definition
+  of done and verification commands.
+- TDD RED: `npm test -- --run src/shared/packageScripts.test.ts` failed 1/8
+  because the v3.6.0 release gate rejected the newly registered P43 open
+  feature.
+- GREEN: the same focused command passed 8/8 after explicitly allowing P43 and
+  asserting all five approved recovery semantics. The maximum-one-open-feature
+  assertion remains unchanged.
+
+## 2026-07-12 - P43 Task 7 Preliminary Review-Fix Evidence
+
+- `a65c5d6` made unverified completion certificate-free across JSON, SQLite,
+  migration, and renderer boundaries; it also fenced interaction results,
+  corrected retry-attempt copy, and introduced exact feature-manifest coverage.
+- `35a242c` added structured native provider HTTP metadata, deterministic
+  32 KiB final-judge prompt compaction, and a sealed final-model-judge-only
+  replay contract that does not rerun deterministic validators or task work.
+- `c5b2be9` persisted the bounded replay seal, preserved immutable evidence
+  anchors and an independent acceptance budget, and repaired continuation
+  handoff across background cleanup.
+- The first independent focused rerun exposed a stale container fixture: the
+  production controller correctly rejected its legacy waiting goal because it
+  lacked a sealed replay bundle. `72ad104` rebuilt the fixture through a real
+  initial acceptance evaluation and verified cancellation of the replay judge.
+- A subsequent Critical review finding showed that a valid persisted seal could
+  replay deleted, modified, symlink-replaced, or provenance-tampered live
+  artifacts. `5ff49dc` now revalidates live bytes, containment, provenance, and
+  hashes before any provider call and fails closed on mismatch.
+- These are preliminary correction and regression records only. Final
+  independent reviewer approval and independent full test acceptance have not
+  yet been claimed.
+
+## 2026-07-12 - P43 Final Independent Acceptance and Closure
+
+- Final review hardening:
+  - `ec6f8aa` moved the single final-judge deadline ahead of live evidence
+    revalidation so artifact/provenance hashing and the provider share one
+    non-resetting attempt budget. Deadline expiry is retryable
+    `judge_timeout` and cannot reach the provider.
+  - Artifact, destination, and provenance reads now share a descriptor-bound
+    snapshot primitive: no-follow open, post-open/post-hash containment and
+    symlink checks, regular-file validation, and descriptor/path device,
+    inode, type, and size binding. Hashes are computed from that same file
+    descriptor in abortable chunks.
+  - Provenance content anchors hash the original bytes before a separate UTF-8
+    decode, so distinct malformed byte sequences cannot collapse to one hash.
+- Independent code review of `79af895..ec6f8aa` approved the implementation
+  with zero Critical or Important findings. Targeted deadline,
+  descriptor-binding, and raw-byte regressions passed 4/4; the reviewer also
+  reconfirmed the earlier retry, persistence, cancellation, IPC, and renderer
+  fixes.
+- Independent test acceptance at `ec6f8aa` passed:
+  - P43 focused suite: 23 files / 777 tests.
+  - Full `npm run verify`: 201 files / 1,976 tests, TypeScript and Vite build,
+    Agent evals 26/26, and Memory evals 2/2.
+  - `npm run harness:check`, `npm run smoke:prod`, and
+    `git diff --check 79af895..HEAD` all passed. Production smoke rendered the
+    Agent chat UI; the known local `better-sqlite3` ABI mismatch safely used
+    the JSON fallback.
+  - Live sealed-evidence tests covered deleted, modified, symlink-escaped,
+    missing/tampered provenance, unchanged evidence, shared deadline, and
+    descriptor parent-swap paths. The sealed container-cancellation test also
+    passed without deterministic-validator replay.
+- Closed the final release-bookkeeping finding by registering
+  `src/shared/agentArtifactProvenance.test.ts` and
+  `src/shared/trustedFileSnapshot.ts`; P43 is now marked `done` only after both
+  independent review and test acceptance had no runtime blocker.

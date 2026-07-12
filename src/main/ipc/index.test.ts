@@ -118,6 +118,68 @@ describe("chat IPC handlers", () => {
 
     expect(renameSource).toContain("container.renameChatSession(sessionId, title)");
   });
+
+  it("registers distinct final-acceptance recovery handlers", async () => {
+    electronState.ipcHandlers.clear();
+    const { registerAllIpcHandlers } = await import("./index");
+    const continueGoalAcceptance = vi.fn(async () => ({ ok: true }));
+    const markGoalCompletedUnverified = vi.fn(async () => ({ ok: true }));
+    const container = {
+      onGoalProgressEvent: vi.fn(),
+      onAgentRunsChanged: vi.fn(),
+      continueGoalAcceptance,
+      markGoalCompletedUnverified,
+    } as unknown as Parameters<typeof registerAllIpcHandlers>[0];
+    registerAllIpcHandlers(container);
+
+    await expect(
+      electronState.ipcHandlers.get("goal:continueAcceptance")?.({}, "goal_1"),
+    ).resolves.toEqual({ ok: true });
+    await expect(
+      electronState.ipcHandlers.get("goal:markCompletedUnverified")?.(
+        {},
+        "goal_1",
+      ),
+    ).resolves.toEqual({ ok: true });
+    expect(continueGoalAcceptance).toHaveBeenCalledWith("goal_1");
+    expect(markGoalCompletedUnverified).toHaveBeenCalledWith("goal_1");
+  });
+
+  it.each([
+    "goal:continueAcceptance",
+    "goal:markCompletedUnverified",
+  ])("rejects unsafe goal ids before invoking %s", async (channel) => {
+    electronState.ipcHandlers.clear();
+    const { registerAllIpcHandlers } = await import("./index");
+    const continueGoalAcceptance = vi.fn(async () => ({ ok: true }));
+    const markGoalCompletedUnverified = vi.fn(async () => ({ ok: true }));
+    const container = {
+      onGoalProgressEvent: vi.fn(),
+      onAgentRunsChanged: vi.fn(),
+      continueGoalAcceptance,
+      markGoalCompletedUnverified,
+    } as unknown as Parameters<typeof registerAllIpcHandlers>[0];
+    registerAllIpcHandlers(container);
+    const handler = electronState.ipcHandlers.get(channel);
+
+    for (const unsafeGoalId of [
+      "",
+      "   ",
+      "../goal_1",
+      "goal_../secret",
+      "goal\\secret",
+      "x".repeat(129),
+      42,
+      null,
+    ]) {
+      await expect(handler?.({}, unsafeGoalId)).resolves.toEqual({
+        ok: false,
+        message: "目标 ID 无效。",
+      });
+    }
+    expect(continueGoalAcceptance).not.toHaveBeenCalled();
+    expect(markGoalCompletedUnverified).not.toHaveBeenCalled();
+  });
 });
 
 function getHandlerSource(source: string, channel: string): string {

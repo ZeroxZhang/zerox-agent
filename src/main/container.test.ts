@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createAppContainer,
   formatGoalTerminalHeading,
+  isTerminalGoalStatus,
   prepareInterruptedGoalForResume,
   reconcileIrreversibleGoalProgressEvent,
 } from "./container";
@@ -18,6 +19,7 @@ import type { AgentExecutionCheckpoint } from "../shared/agentExecution";
 import type { GoalProgressEvent } from "../shared/chat";
 import type { ChatOutputPart } from "../shared/chatOutput";
 import type { AcceptanceValidator } from "./agentGoalValidatorRegistry";
+import type { AcceptanceContext } from "./agentGoalAcceptance";
 
 const execFileAsync = promisify(execFileCallback);
 
@@ -114,6 +116,53 @@ describe("app container goal drafts", () => {
       }],
     });
     expect(prepareInterruptedGoalForResume(goal).milestones[0]?.state).toBe("ready");
+  });
+
+  it("recovers an interrupted final-acceptance retry as waiting instead of auto-running it", () => {
+    const goal = createStoredGoal({
+      id: "goal_interrupted_acceptance",
+      chatSessionId: "chat_1",
+      status: "executing",
+      milestones: [{
+        id: "milestone_1",
+        description: "Completed work",
+        dependsOn: [],
+        successCriteria: [],
+        state: "accepted",
+        runIds: ["run_1"],
+        attempts: 1,
+      }],
+      acceptanceProtocolVersion: 2,
+      acceptanceState: {
+        protocolVersion: 2,
+        phase: "retrying",
+        attempt: 2,
+        recentFailures: [],
+      },
+      acceptanceRetryState: {
+        cycle: 1,
+        attempt: 2,
+        maxAttempts: 3,
+        lastCode: "judge_timeout",
+        lastDetail: "Final judge timed out.",
+        nextRetryAt: "2026-07-11T05:00:02.000Z",
+        evidenceFingerprint: "a".repeat(64),
+        resumeFrom: "final_judge",
+      },
+    });
+
+    expect(prepareInterruptedGoalForResume(goal)).toMatchObject({
+      status: "waiting_for_acceptance",
+      stopReason: undefined,
+      acceptanceState: { phase: "awaiting_user" },
+      acceptanceRetryState: {
+        attempt: 2,
+        evidenceFingerprint: "a".repeat(64),
+      },
+    });
+    expect(
+      prepareInterruptedGoalForResume(goal).acceptanceRetryState,
+    ).not.toHaveProperty("nextRetryAt");
   });
 
   let tempDir: string;
@@ -304,6 +353,60 @@ describe("app container goal drafts", () => {
 
     expect(formatGoalTerminalHeading(goal)).toContain(text);
     expect(formatGoalTerminalHeading(goal)).not.toContain("目标已达成");
+  });
+
+  it("classifies unverified completion as terminal while acceptance waiting stays active", () => {
+    expect(isTerminalGoalStatus("completed_unverified")).toBe(true);
+    expect(isTerminalGoalStatus("waiting_for_acceptance")).toBe(false);
+  });
+
+  it("does not auto-resume a persisted waiting acceptance on startup", async () => {
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const waiting = createStoredGoal({
+      id: "goal_waiting_startup",
+      status: "waiting_for_acceptance",
+      acceptanceProtocolVersion: 2,
+      acceptanceState: {
+        protocolVersion: 2,
+        phase: "awaiting_user",
+        attempt: 3,
+        recentFailures: [],
+      },
+      acceptanceRetryState: {
+        cycle: 1,
+        attempt: 3,
+        maxAttempts: 3,
+        lastCode: "judge_timeout",
+        lastDetail: "Final judge timed out.",
+        evidenceFingerprint: "a".repeat(64),
+        resumeFrom: "final_judge",
+      },
+    });
+    await container.agentGoalStore().save(waiting);
+
+    await expect(container.resumeInterruptedGoals()).resolves.toBe(0);
+    await expect(container.agentGoalStore().get(waiting.id)).resolves.toMatchObject({
+      status: "waiting_for_acceptance",
+      acceptanceState: { phase: "awaiting_user" },
+    });
+  });
+
+  it("formats unverified manual completion without claiming certification", () => {
+    const heading = formatGoalTerminalHeading(
+      createStoredGoal({
+        id: "goal_completed_unverified",
+        status: "completed_unverified",
+        stopReason: "user_marked_complete",
+      }),
+    );
+
+    expect(heading).toContain("手动完成");
+    expect(heading).toContain("未经机器认证");
+    expect(heading).not.toContain("目标已达成");
   });
 
   it("creates evidence-backed model review checks for manual goals", () => {
@@ -655,6 +758,7 @@ describe("app container goal drafts", () => {
     ["achieved", "acceptance_repair_scheduled"],
     ["canceled", "replanned"],
     ["achieved", "checkpoint"],
+    ["completed_unverified", "checkpoint"],
   ] as const)(
     "canonicalizes stale terminal %s/%s progress",
     (status, event) => {
@@ -674,13 +778,23 @@ describe("app container goal drafts", () => {
           createStoredGoal({
             id: stale.goalId,
             status,
-            stopReason: status === "achieved" ? "goal_accepted" : "user_canceled",
+            stopReason:
+              status === "achieved"
+                ? "goal_accepted"
+                : status === "completed_unverified"
+                  ? "user_marked_complete"
+                  : "user_canceled",
           }),
         ),
       ).toMatchObject({
         status,
         event: "stopped",
-        message: status === "achieved" ? "目标已达成。" : "目标已取消。",
+        message:
+          status === "achieved"
+            ? "目标已达成。"
+            : status === "completed_unverified"
+              ? "目标已手动完成（未经机器认证）。"
+              : "目标已取消。",
       });
     },
   );
@@ -689,6 +803,7 @@ describe("app container goal drafts", () => {
     ["achieved", "acceptance_certified"],
     ["achieved", "stopped"],
     ["canceled", "stopped"],
+    ["completed_unverified", "stopped"],
   ] as const)(
     "preserves current terminal %s/%s progress",
     (status, event) => {
@@ -711,7 +826,12 @@ describe("app container goal drafts", () => {
           createStoredGoal({
             id: current.goalId,
             status,
-            stopReason: status === "achieved" ? "goal_accepted" : "user_canceled",
+            stopReason:
+              status === "achieved"
+                ? "goal_accepted"
+                : status === "completed_unverified"
+                  ? "user_marked_complete"
+                  : "user_canceled",
           }),
         ),
       ).toEqual(current);
@@ -1091,6 +1211,183 @@ describe("app container goal drafts", () => {
       JSON.stringify(storedSession).length / 20,
     );
   });
+
+  it("cancels a final-acceptance continuation started through the container wrapper", async () => {
+    let deterministicCalls = 0;
+    const validator: AcceptanceValidator = {
+      kind: "validator:continuation_cancel_probe",
+      async evaluate({ check }) {
+        deterministicCalls += 1;
+        return {
+          checkId: check.id,
+          kind: check.kind,
+          passed: true,
+          code: "accepted",
+          evidenceRefs: [],
+          detail: "Deterministic probe accepted once.",
+        };
+      },
+    };
+    const container = createAppContainer({
+      acceptanceValidators: [validator],
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const deterministicCheck = {
+      id: "check_cancel_probe",
+      kind: validator.kind,
+      description: "Build deterministic sealed evidence once.",
+      params: {},
+      requiresEvidence: false,
+    } as const;
+    const modelReviewCheck = {
+      id: "check_cancel_final_judge",
+      kind: "model_review",
+      description: "Final judge reviews the sealed evidence.",
+      params: {
+        condition: "Confirm the sealed cancellation probe evidence.",
+        evidenceRefs: ["evidence:sealed-cancel-probe"],
+      },
+      requiresEvidence: true,
+    } as const;
+    const goal = createStoredGoal({
+      id: "goal_continue_cancel",
+      chatSessionId: "chat_continue_cancel",
+      status: "waiting_for_acceptance",
+      acceptanceProtocolVersion: 2,
+      acceptanceState: {
+        protocolVersion: 2,
+        phase: "awaiting_user",
+        attempt: 3,
+        recentFailures: [],
+      },
+      acceptanceRetryState: {
+        cycle: 1,
+        attempt: 3,
+        maxAttempts: 3,
+        lastCode: "judge_timeout",
+        lastDetail: "Final judge timed out.",
+        evidenceFingerprint: "a".repeat(64),
+        resumeFrom: "final_judge",
+      },
+      successCriteria: [
+        {
+          id: "criterion_cancel_probe",
+          description: "Cancellation probe completes.",
+          acceptanceChecks: [deterministicCheck, modelReviewCheck],
+        },
+      ],
+      milestones: [
+        {
+          id: "milestone_done",
+          description: "Work already completed.",
+          dependsOn: [],
+          successCriteria: [],
+          state: "accepted",
+          runIds: ["run_done"],
+          attempts: 1,
+        },
+      ],
+    });
+    const initialContext: AcceptanceContext = {
+      runId: "run_initial_final_judge",
+      goalId: goal.id,
+      workspacePath: tempDir,
+      toolExecutor: {
+        async execute() {
+          throw new Error("sealed replay fixture must not execute tools");
+        },
+      },
+      trajectoryStore: {
+        async append(_runId, event) {
+          return event;
+        },
+      },
+      chatClient: {
+        async complete() {
+          throw Object.assign(new Error("initial judge unavailable"), {
+            status: 503,
+          });
+        },
+      },
+      modelProfile: {
+        baseUrl: "https://judge.test/v1",
+        apiKey: "fixture-secret",
+        model: "sealed-judge",
+        temperature: 0,
+        maxTokens: 1024,
+      },
+      now: () => "2026-07-12T00:00:00.000Z",
+    };
+    const initial = await container.agentGoalAcceptance().evaluateGoal(
+      goal,
+      initialContext,
+    );
+    const sealedReplay = initial.finalJudgeReplay;
+    expect(sealedReplay).toBeDefined();
+    if (!sealedReplay) {
+      throw new Error("sealed replay fixture was not created");
+    }
+    goal.acceptanceRetryState = {
+      ...goal.acceptanceRetryState!,
+      finalJudgeReplay: sealedReplay,
+    };
+    await container.modelSettingsStore.save({
+      baseUrl: "https://judge.test/v1",
+      chatModel: "sealed-judge",
+      embeddingModel: "",
+      apiKey: "fixture-secret",
+      temperature: 0,
+      maxTokens: 1024,
+      thinkingEnabled: false,
+      thinkingBudgetTokens: 1024,
+    });
+    await container.agentGoalStore().save(goal);
+
+    let judgeSignal: AbortSignal | undefined;
+    let judgeEnteredResolve: (() => void) | undefined;
+    const judgeEntered = new Promise<void>((resolve) => {
+      judgeEnteredResolve = resolve;
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (_input, init) => {
+        judgeSignal = init?.signal ?? undefined;
+        judgeEnteredResolve?.();
+        return new Promise<Response>((_resolve, reject) => {
+          judgeSignal?.addEventListener(
+            "abort",
+            () =>
+              reject(
+                judgeSignal?.reason ??
+                  new DOMException("Aborted", "AbortError"),
+              ),
+            { once: true },
+          );
+        });
+      },
+    );
+    const { canceling, continued } = await (async () => {
+      try {
+        const continuing = container.continueGoalAcceptance(goal.id);
+        await judgeEntered;
+        const canceling = await container.runGoalOperation(() =>
+          container.goalChatService().cancel(goal.id),
+        );
+        return { canceling, continued: await continuing };
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    })();
+
+    expect(deterministicCalls).toBe(1);
+    expect(judgeSignal?.aborted).toBe(true);
+    expect(canceling).toMatchObject({ ok: true, goal: { status: "canceled" } });
+    expect(continued).toMatchObject({ ok: true, goal: { status: "canceled" } });
+    expect((await container.agentGoalStore().get(goal.id))?.status).toBe(
+      "canceled",
+    );
+  });
 });
 
 async function createSeedGitRepository(repositoryRoot: string): Promise<void> {
@@ -1195,6 +1492,12 @@ function createStoredGoal(
       : {}),
     ...(overrides.acceptanceState
       ? { acceptanceState: overrides.acceptanceState }
+      : {}),
+    ...(overrides.acceptanceRetryState
+      ? { acceptanceRetryState: overrides.acceptanceRetryState }
+      : {}),
+    ...(overrides.manualCompletionAttestation
+      ? { manualCompletionAttestation: overrides.manualCompletionAttestation }
       : {}),
     ...(overrides.acceptanceCertificate
       ? { acceptanceCertificate: overrides.acceptanceCertificate }

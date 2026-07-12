@@ -119,6 +119,264 @@ describe("GoalRepository", () => {
     expect(goals.delete("g1")).toBe(true);
     storage.close();
   });
+
+  it("keeps waiting acceptance active and completed-unverified terminal", async () => {
+    const storage = await createInMemoryStorage();
+    const goals = createGoalRepository(storage);
+    const waiting = baseGoal({
+      id: "g-waiting-acceptance",
+      status: "waiting_for_acceptance",
+      acceptanceRetryState: {
+        cycle: 1,
+        attempt: 3,
+        maxAttempts: 3,
+        lastCode: "judge_timeout",
+        lastDetail: "Final judge timed out.",
+        evidenceFingerprint: "a".repeat(64),
+        finalJudgeReplay: {
+          version: 1,
+          goalId: "g-waiting-acceptance",
+          criteriaFingerprint: "b".repeat(64),
+          evidenceFingerprint: "c".repeat(64),
+          deterministicCheckResults: [],
+          evidenceManifest: {
+            version: 1,
+            generatedAt: "2026-06-12T00:00:00.000Z",
+            artifacts: [],
+            totalRenderedChars: 0,
+            truncated: false,
+          },
+        },
+        resumeFrom: "final_judge",
+      },
+    });
+    const completed = baseGoal({
+      id: "g-completed-unverified",
+      status: "completed_unverified",
+      stopReason: "user_marked_complete",
+      manualCompletionAttestation: {
+        version: 1,
+        goalId: "g-completed-unverified",
+        completedAt: "2026-07-11T05:00:00.000Z",
+        reason: "user_marked_complete",
+        failedCheckIds: ["check_done"],
+        evidenceRefs: [],
+        evidenceFingerprint: "b".repeat(64),
+        lastFailureCode: "judge_timeout",
+        retryCycles: 1,
+      },
+    });
+
+    goals.save(waiting);
+    goals.save(completed);
+
+    expect(goals.listActive()).toEqual([waiting]);
+    expect(
+      goals.save({
+        ...completed,
+        manualCompletionAttestation: undefined,
+        acceptanceCertificate: {
+          forged: true,
+        } as unknown as Goal["acceptanceCertificate"],
+      }),
+    ).toEqual(completed);
+    expect(goals.get(completed.id)).toEqual(completed);
+    storage.close();
+  });
+
+  it("drops an oversized final-judge replay bundle at the SQLite persistence boundary", async () => {
+    const storage = await createInMemoryStorage();
+    const goals = createGoalRepository(storage);
+    const waiting = baseGoal({
+      id: "g-oversized-replay",
+      status: "waiting_for_acceptance",
+      acceptanceRetryState: {
+        cycle: 1,
+        attempt: 3,
+        maxAttempts: 3,
+        lastCode: "judge_timeout",
+        lastDetail: "Final judge timed out.",
+        evidenceFingerprint: "a".repeat(64),
+        finalJudgeReplay: {
+          version: 1,
+          goalId: "g-oversized-replay",
+          criteriaFingerprint: "b".repeat(64),
+          evidenceFingerprint: "c".repeat(64),
+          deterministicCheckResults: [],
+          evidenceManifest: {
+            version: 1,
+            generatedAt: "2026-06-12T00:00:00.000Z",
+            artifacts: [{
+              ref: "artifact:oversized",
+              mediaType: "text/plain",
+              excerpts: [{ label: "oversized", text: "x".repeat(300_000) }],
+            }],
+            totalRenderedChars: 300_000,
+            truncated: false,
+          },
+        },
+        resumeFrom: "final_judge",
+      },
+    });
+
+    goals.save(waiting);
+
+    expect(goals.get(waiting.id)).toMatchObject({
+      acceptanceRetryState: expect.not.objectContaining({
+        finalJudgeReplay: expect.anything(),
+      }),
+    });
+    storage.close();
+  });
+
+  it("atomically completes only SQLite waiting state and clears a stale certificate", async () => {
+    const storage = await createInMemoryStorage();
+    const goals = createGoalRepository(storage);
+    const waiting = baseGoal({
+      id: "g-manual-cas",
+      status: "waiting_for_acceptance",
+      acceptanceCertificate: {
+        forged: true,
+      } as unknown as Goal["acceptanceCertificate"],
+    });
+    const completed = baseGoal({
+      ...waiting,
+      status: "completed_unverified",
+      stopReason: "user_marked_complete",
+      acceptanceCertificate: undefined,
+      manualCompletionAttestation: {
+        version: 1,
+        goalId: waiting.id,
+        completedAt: "2026-07-11T05:00:00.000Z",
+        reason: "user_marked_complete",
+        failedCheckIds: ["check_done"],
+        evidenceRefs: [],
+        evidenceFingerprint: "b".repeat(64),
+        lastFailureCode: "judge_timeout",
+        retryCycles: 1,
+      },
+    });
+
+    goals.save(waiting);
+
+    expect(
+      goals.saveIfStatus(completed, "waiting_for_acceptance"),
+    ).toEqual({ saved: true, goal: completed });
+    expect(goals.get(waiting.id)).toEqual(completed);
+    storage.close();
+  });
+
+  it("strips certificates from every ordinary completed-unverified SQLite save", async () => {
+    const storage = await createInMemoryStorage();
+    const goals = createGoalRepository(storage);
+    const unsafe = baseGoal({
+      id: "g-manual-ordinary",
+      status: "completed_unverified",
+      stopReason: "user_marked_complete",
+      acceptanceCertificate: {
+        forged: true,
+      } as unknown as Goal["acceptanceCertificate"],
+    });
+
+    expect(goals.save(unsafe)).not.toHaveProperty("acceptanceCertificate");
+    expect(goals.get(unsafe.id)).not.toHaveProperty("acceptanceCertificate");
+    const row = storage.db
+      .prepare("SELECT payload FROM goals WHERE id = ?")
+      .get(unsafe.id) as { payload: string };
+    expect(JSON.parse(row.payload)).not.toHaveProperty("acceptanceCertificate");
+    storage.close();
+  });
+
+  it("canonically hides certificates on historical completed-unverified SQLite rows", async () => {
+    const storage = await createInMemoryStorage();
+    const goals = createGoalRepository(storage);
+    const historical = baseGoal({
+      id: "g-manual-historical",
+      chatSessionId: "chat-manual-historical",
+      status: "completed_unverified",
+      acceptanceCertificate: {
+        historical: true,
+      } as unknown as Goal["acceptanceCertificate"],
+    });
+    const raw = JSON.stringify(historical);
+    storage.db.prepare(
+      `INSERT INTO goals (id, chat_session_id, status, payload, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(
+      historical.id,
+      historical.chatSessionId,
+      historical.status,
+      raw,
+      historical.createdAt,
+      historical.updatedAt,
+    );
+
+    expect(goals.get(historical.id)).not.toHaveProperty("acceptanceCertificate");
+    expect(goals.listByChatSession("chat-manual-historical")).toEqual([
+      expect.not.objectContaining({ acceptanceCertificate: expect.anything() }),
+    ]);
+    const row = storage.db
+      .prepare("SELECT payload FROM goals WHERE id = ?")
+      .get(historical.id) as { payload: string };
+    expect(row.payload).toBe(raw);
+    storage.close();
+  });
+
+  it.each(["executing", "canceled"] as const)(
+    "loses the SQLite manual CAS when canonical %s wins",
+    async (winnerStatus) => {
+      const storage = await createInMemoryStorage();
+      const goals = createGoalRepository(storage);
+      const waiting = baseGoal({
+        id: `g-manual-cas-${winnerStatus}`,
+        status: "waiting_for_acceptance",
+      });
+      const winner = baseGoal({
+        ...waiting,
+        status: winnerStatus,
+        ...(winnerStatus === "canceled"
+          ? { stopReason: "user_canceled" }
+          : {}),
+        updatedAt: "2026-07-11T05:01:00.000Z",
+      });
+      const completed = baseGoal({
+        ...waiting,
+        status: "completed_unverified",
+        stopReason: "user_marked_complete",
+      });
+
+      goals.save(waiting);
+      goals.save(winner);
+
+      expect(
+        goals.saveIfStatus(completed, "waiting_for_acceptance"),
+      ).toEqual({ saved: false, goal: winner });
+      expect(goals.get(waiting.id)).toEqual(winner);
+      storage.close();
+    },
+  );
+
+  it("atomically appends a SQLite publication ledger event once across repositories", async () => {
+    const storage = await createInMemoryStorage();
+    const firstGoals = createGoalRepository(storage);
+    const secondGoals = createGoalRepository(storage);
+    const goal = baseGoal({ id: "g-ledger-once", status: "completed_unverified" });
+    const event = {
+      at: "2026-07-11T05:03:00.000Z",
+      kind: "acceptance_manual_completion_recorded" as const,
+      summary: "Manual completion recorded without certification.",
+    };
+    firstGoals.save(goal);
+
+    expect([
+      firstGoals.appendLedgerIfAbsent(goal.id, "manual:recorded:a", event),
+      secondGoals.appendLedgerIfAbsent(goal.id, "manual:recorded:a", event),
+    ].sort()).toEqual([false, true]);
+    expect(firstGoals.readLedger(goal.id)).toEqual([
+      { ...event, publicationKey: "manual:recorded:a" },
+    ]);
+    storage.close();
+  });
 });
 
 describe("SessionRepository + ActorRepository", () => {

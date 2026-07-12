@@ -93,6 +93,17 @@ import {
 } from "../chatTaskActivity";
 import { buildGoalBudgetIncreaseDelta } from "../goalProgressViewModel";
 import {
+  createGoalAcceptanceOperationToken,
+  doesGoalAcceptanceOperationOwnPending,
+  getConfirmedManualCompletionGoalId,
+  isGoalAcceptanceOperationCurrent,
+  isGoalAcceptanceResultForOperation,
+  projectGoalAcceptanceOperationOutcome,
+  type GoalAcceptanceOperationToken,
+  type GoalAcceptanceUiContext,
+  type ManualCompletionConfirmation,
+} from "../goalAcceptanceInteraction";
+import {
   applyChatStreamEvent,
   createChatStreamState,
   finalizeChatStreamResult,
@@ -300,6 +311,8 @@ export function AgentChatPanel({
   >([]);
   const [activeGoalDetail, setActiveGoalDetail] = useState<Goal | null>(null);
   const [goalDrawerOpen, setGoalDrawerOpen] = useState(false);
+  const [goalAcceptanceOperationPending, setGoalAcceptanceOperationPending] =
+    useState<"continue_acceptance" | "mark_completed_unverified" | null>(null);
   const [activeChatRequestId, setActiveChatRequestId] = useState<string | null>(
     null,
   );
@@ -317,6 +330,16 @@ export function AgentChatPanel({
   const activeChatRequestIdRef = useRef<string | null>(null);
   const pendingInputRequestRef = useRef<SkillUserInputRequest | null>(null);
   const activeGoalRef = useRef<ChatSessionGoalSummary | null>(null);
+  const goalAcceptanceOperationPendingRef =
+    useRef<GoalAcceptanceOperationToken | null>(null);
+  const goalAcceptanceOperationSequenceRef = useRef(0);
+  const goalAcceptanceContextRef = useRef<{
+    identity: string;
+    context: GoalAcceptanceUiContext;
+  }>({
+    identity: "",
+    context: { goalId: null, sessionId: null, generation: 0 },
+  });
   const workspaceMenuRef = useRef<HTMLDivElement>(null);
   const measureWorkspaceMenuPosition = useCallback(() => {
     const trigger = workspaceMenuRef.current;
@@ -493,6 +516,8 @@ export function AgentChatPanel({
     setWorkspaceSearch("");
     setActiveGoalDetail(null);
     setGoalDrawerOpen(false);
+    goalAcceptanceOperationPendingRef.current = null;
+    setGoalAcceptanceOperationPending(null);
   }, [newChatRequestKey]);
 
   useEffect(() => {
@@ -933,6 +958,36 @@ export function AgentChatPanel({
   ].filter(Boolean).join(" ");
   const activeGoal = activeSession?.activeGoal ?? null;
   activeGoalRef.current = activeGoal;
+  const goalAcceptanceContextIdentity = JSON.stringify([
+    newChatRequestKey,
+    sessionId,
+    activeGoal?.id ?? null,
+  ]);
+  if (goalAcceptanceContextRef.current.identity !== goalAcceptanceContextIdentity) {
+    goalAcceptanceContextRef.current = {
+      identity: goalAcceptanceContextIdentity,
+      context: {
+        goalId: activeGoal?.id ?? null,
+        sessionId,
+        generation: goalAcceptanceContextRef.current.context.generation + 1,
+      },
+    };
+  }
+  const goalAcceptanceContext = goalAcceptanceContextRef.current.context;
+  useEffect(() => {
+    const pending = goalAcceptanceOperationPendingRef.current;
+    if (
+      pending &&
+      !isGoalAcceptanceOperationCurrent(
+        pending,
+        goalAcceptanceContext,
+        pending,
+      )
+    ) {
+      goalAcceptanceOperationPendingRef.current = null;
+      setGoalAcceptanceOperationPending(null);
+    }
+  }, [goalAcceptanceContext]);
   const goalModeVisuallyEnabled = goalModeEnabled;
   const activeTasks = tasks.filter((task) => task.enabled);
   const workSteps = useMemo(() => buildAgentWorkSteps(workPhase), [workPhase]);
@@ -1445,6 +1500,198 @@ export function AgentChatPanel({
     }
   }
 
+  async function handleContinueGoalAcceptance() {
+    if (
+      !window.buildingAgent ||
+      activeGoalRef.current?.status !== "waiting_for_acceptance" ||
+      goalAcceptanceOperationPendingRef.current
+    ) {
+      return;
+    }
+
+    const operation = createGoalAcceptanceOperationToken(
+      "continue_acceptance",
+      goalAcceptanceContextRef.current.context,
+      `goal_acceptance_${++goalAcceptanceOperationSequenceRef.current}`,
+    );
+    if (!operation || activeGoalRef.current.id !== operation.goalId) {
+      return;
+    }
+    goalAcceptanceOperationPendingRef.current = operation;
+    setGoalAcceptanceOperationPending("continue_acceptance");
+    setStatus({ kind: "working", message: "正在继续最终验收..." });
+    try {
+      const result = await window.buildingAgent.continueGoalAcceptance(
+        operation.goalId,
+      );
+      if (
+        !isGoalAcceptanceOperationCurrent(
+          operation,
+          goalAcceptanceContextRef.current.context,
+          goalAcceptanceOperationPendingRef.current,
+        )
+      ) {
+        return;
+      }
+      if (
+        !result.ok ||
+        !result.goal ||
+        !isGoalAcceptanceResultForOperation(operation, result.goal)
+      ) {
+        const message = result.message ?? "继续最终验收失败，请稍后重试。";
+        setStatus({ kind: "error", message });
+        appendMessage({ role: "assistant", content: `继续验收失败：${message}` });
+        return;
+      }
+
+      setActiveGoalDetail(result.goal);
+      applyGoalSummaryToSessions(result.goal);
+      const outcome = projectGoalAcceptanceOperationOutcome(operation, result.goal);
+      if (!outcome) {
+        const message = "继续最终验收返回了无法确认的目标状态。";
+        setStatus({ kind: "error", message });
+        appendMessage({ role: "assistant", content: message });
+        return;
+      }
+      const goalUiState = getGoalUiSyncState(result.goal.status);
+      setStatus({ kind: goalUiState.statusKind, message: outcome.statusMessage });
+      setWorkPhase(goalUiState.workPhase);
+      setTaskActivity(
+        buildGoalTaskActivity({
+          status: result.goal.status,
+          description: result.goal.description,
+        }),
+      );
+      appendMessage({
+        role: "assistant",
+        content: outcome.assistantMessage,
+      });
+    } catch {
+      if (
+        !isGoalAcceptanceOperationCurrent(
+          operation,
+          goalAcceptanceContextRef.current.context,
+          goalAcceptanceOperationPendingRef.current,
+        )
+      ) {
+        return;
+      }
+      const message = "继续最终验收失败，请稍后重试。";
+      setStatus({ kind: "error", message });
+      appendMessage({ role: "assistant", content: message });
+    } finally {
+      if (
+        doesGoalAcceptanceOperationOwnPending(
+          operation,
+          goalAcceptanceOperationPendingRef.current,
+        )
+      ) {
+        goalAcceptanceOperationPendingRef.current = null;
+        setGoalAcceptanceOperationPending(null);
+      }
+    }
+  }
+
+  async function handleMarkGoalCompletedUnverified(
+    confirmation: ManualCompletionConfirmation,
+  ) {
+    const confirmedGoalId = getConfirmedManualCompletionGoalId(
+      confirmation,
+      goalAcceptanceContextRef.current.context,
+    );
+    if (
+      !window.buildingAgent ||
+      !confirmedGoalId ||
+      activeGoalRef.current?.id !== confirmedGoalId ||
+      activeGoalRef.current.status !== "waiting_for_acceptance" ||
+      goalAcceptanceOperationPendingRef.current
+    ) {
+      return;
+    }
+
+    const operation = createGoalAcceptanceOperationToken(
+      "mark_completed_unverified",
+      goalAcceptanceContextRef.current.context,
+      `goal_acceptance_${++goalAcceptanceOperationSequenceRef.current}`,
+    );
+    if (!operation || operation.goalId !== confirmedGoalId) {
+      return;
+    }
+    goalAcceptanceOperationPendingRef.current = operation;
+    setGoalAcceptanceOperationPending("mark_completed_unverified");
+    setStatus({ kind: "working", message: "正在记录手动完成..." });
+    try {
+      const result = await window.buildingAgent.markGoalCompletedUnverified(
+        operation.goalId,
+      );
+      if (
+        !isGoalAcceptanceOperationCurrent(
+          operation,
+          goalAcceptanceContextRef.current.context,
+          goalAcceptanceOperationPendingRef.current,
+        )
+      ) {
+        return;
+      }
+      if (
+        !result.ok ||
+        !result.goal ||
+        !isGoalAcceptanceResultForOperation(operation, result.goal)
+      ) {
+        const message = result.message ?? "手动标记完成失败，请稍后重试。";
+        setStatus({ kind: "error", message });
+        appendMessage({ role: "assistant", content: `手动标记完成失败：${message}` });
+        return;
+      }
+
+      const outcome = projectGoalAcceptanceOperationOutcome(operation, result.goal);
+      if (!outcome) {
+        const message = "手动标记完成返回了无法确认的目标状态。";
+        setStatus({ kind: "error", message });
+        appendMessage({ role: "assistant", content: message });
+        return;
+      }
+      setActiveGoalDetail(result.goal);
+      applyGoalSummaryToSessions(result.goal);
+      const goalUiState = getGoalUiSyncState(result.goal.status);
+      setStatus({ kind: goalUiState.statusKind, message: outcome.statusMessage });
+      setWorkPhase(goalUiState.workPhase);
+      setTaskActivity(
+        buildGoalTaskActivity({
+          status: result.goal.status,
+          description: result.goal.description,
+        }),
+      );
+      appendMessage({
+        role: "assistant",
+        content: outcome.assistantMessage,
+      });
+    } catch {
+      if (
+        !isGoalAcceptanceOperationCurrent(
+          operation,
+          goalAcceptanceContextRef.current.context,
+          goalAcceptanceOperationPendingRef.current,
+        )
+      ) {
+        return;
+      }
+      const message = "手动标记完成失败，请稍后重试。";
+      setStatus({ kind: "error", message });
+      appendMessage({ role: "assistant", content: message });
+    } finally {
+      if (
+        doesGoalAcceptanceOperationOwnPending(
+          operation,
+          goalAcceptanceOperationPendingRef.current,
+        )
+      ) {
+        goalAcceptanceOperationPendingRef.current = null;
+        setGoalAcceptanceOperationPending(null);
+      }
+    }
+  }
+
   async function handleIncreaseGoalBudget() {
     if (!window.buildingAgent || !activeGoal?.id) {
       return;
@@ -1585,6 +1832,9 @@ export function AgentChatPanel({
       setAutoApprovalEnabled(state.autoApprovalEnabled);
       setAutoApprovalLocked(state.autoApprovalLocked);
       setGoalModeEnabled(state.goalModeEnabled);
+      if (!enabled && state.goalModeEnabled && state.autoApprovalLocked) {
+        setGoalDrawerOpen(true);
+      }
     }
   }
 
@@ -2420,6 +2670,10 @@ export function AgentChatPanel({
                 onIncreaseBudget={handleIncreaseGoalBudget}
                 onReplan={handleReplanGoal}
                 onRetry={handleRetryGoal}
+                onContinueAcceptance={() => void handleContinueGoalAcceptance()}
+                goalAcceptanceOperationPending={
+                  goalAcceptanceOperationPending !== null
+                }
                 onCancel={handleCancelGoal}
               />
             ) : null}
@@ -2852,6 +3106,14 @@ export function AgentChatPanel({
           onIncreaseBudget={handleIncreaseGoalBudget}
           onReplan={handleReplanGoal}
           onRetry={handleRetryGoal}
+          onContinueAcceptance={() => void handleContinueGoalAcceptance()}
+          onMarkCompletedUnverified={(confirmation) =>
+            void handleMarkGoalCompletedUnverified(confirmation)
+          }
+          goalAcceptanceContext={goalAcceptanceContext}
+          goalAcceptanceOperationPending={
+            goalAcceptanceOperationPending !== null
+          }
           onCancel={handleCancelGoal}
         />
       </section>
@@ -4251,7 +4513,9 @@ function translateGoalStatus(status: ChatSessionGoalSummary["status"]): string {
     planning: "规划中",
     executing: "执行中",
     waiting_for_review: "等待审核",
+    waiting_for_acceptance: "等待最终验收",
     achieved: "已达成",
+    completed_unverified: "手动完成 · 未经机器认证",
     stopped_budget: "预算已用尽",
     stopped_stalled: "停滞停止",
     stopped_blocked: "目标受阻",
@@ -4264,6 +4528,7 @@ function translateGoalStatus(status: ChatSessionGoalSummary["status"]): string {
 function isTerminalGoalStatus(status: ChatSessionGoalSummary["status"]): boolean {
   return (
     status === "achieved" ||
+    status === "completed_unverified" ||
     status === "stopped_budget" ||
     status === "stopped_stalled" ||
     status === "stopped_blocked" ||

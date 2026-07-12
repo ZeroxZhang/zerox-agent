@@ -4,17 +4,27 @@
 // status for indexed listing. `goal_ledger` is an append-only table mirroring
 // the legacy `<id>.ledger.jsonl`, with (goal_id, seq) ordering.
 
-import type { Goal, GoalStatus } from "../../../shared/agentGoal";
-import type { ProgressLedgerEvent } from "../../../shared/agentGoal";
+import {
+  sanitizeFinalGoalJudgeReplayEvidence,
+  type Goal,
+  type GoalStatus,
+  type ProgressLedgerEvent,
+} from "../../../shared/agentGoal";
 import type { GoalRepository, Storage } from "../../../shared/storageContract";
 import { getPayloadRow, jsonify, parseJson, selectPayloadRows } from "../repositoryUtils";
 
 const TERMINAL_GOAL_STATUSES = new Set<GoalStatus>([
   "achieved",
+  "completed_unverified",
   "stopped_budget",
   "stopped_stalled",
   "stopped_blocked",
   "failed",
+  "canceled",
+]);
+const IRREVERSIBLE_GOAL_STATUSES = new Set<GoalStatus>([
+  "achieved",
+  "completed_unverified",
   "canceled",
 ]);
 
@@ -27,6 +37,27 @@ export function createGoalRepository(storage: Storage): GoalRepository {
 
   return {
     save(goal: Goal): Goal {
+      const existingRaw = getPayloadRow<Goal>(
+        db,
+        "SELECT payload FROM goals WHERE id = ?",
+        [goal.id],
+      );
+      const existing = existingRaw
+        ? stripUnverifiedCompletionCertificate(existingRaw)
+        : null;
+      if (existing?.status === "completed_unverified") {
+        return existing;
+      }
+      if (
+        existing &&
+        IRREVERSIBLE_GOAL_STATUSES.has(existing.status) &&
+        goal.status !== existing.status
+      ) {
+        return existing;
+      }
+      const candidate = sanitizeFinalJudgeReplay(
+        stripUnverifiedCompletionCertificate(goal),
+      );
       db.prepare(
         `INSERT INTO goals (id, chat_session_id, status, payload, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?)
@@ -34,27 +65,62 @@ export function createGoalRepository(storage: Storage): GoalRepository {
            chat_session_id=excluded.chat_session_id, status=excluded.status,
            payload=excluded.payload, updated_at=excluded.updated_at`,
       ).run(
-        goal.id,
-        goal.chatSessionId ?? null,
-        goal.status,
-        jsonify(goal),
-        goal.createdAt,
-        goal.updatedAt,
+        candidate.id,
+        candidate.chatSessionId ?? null,
+        candidate.status,
+        jsonify(candidate),
+        candidate.createdAt,
+        candidate.updatedAt,
       );
-      return goal;
+      return candidate;
+    },
+
+    saveIfStatus(goal: Goal, expectedStatus: GoalStatus) {
+      const candidate = sanitizeFinalJudgeReplay(
+        stripUnverifiedCompletionCertificate(goal),
+      );
+      const result = db.prepare(
+        `UPDATE goals
+         SET chat_session_id = ?, status = ?, payload = ?, updated_at = ?
+         WHERE id = ? AND status = ?`,
+      ).run(
+        candidate.chatSessionId ?? null,
+        candidate.status,
+        jsonify(candidate),
+        candidate.updatedAt,
+        candidate.id,
+        expectedStatus,
+      );
+      if (result.changes === 1) {
+        return { saved: true, goal: candidate };
+      }
+      return {
+        saved: false,
+        goal: sanitizeStoredGoal(
+          getPayloadRow<Goal>(
+            db,
+            "SELECT payload FROM goals WHERE id = ?",
+            [goal.id],
+          ),
+        ),
+      };
     },
 
     get(goalId: string): Goal | null {
-      return getPayloadRow<Goal>(db, "SELECT payload FROM goals WHERE id = ?", [goalId]);
+      return sanitizeStoredGoal(
+        getPayloadRow<Goal>(db, "SELECT payload FROM goals WHERE id = ?", [goalId]),
+      );
     },
 
     listActive(): Goal[] {
       return selectPayloadRows<Goal>(
         db,
         `SELECT payload FROM goals
-         WHERE status NOT IN ('achieved','stopped_budget','stopped_stalled','stopped_blocked','failed','canceled')
+         WHERE status NOT IN ('achieved','completed_unverified','stopped_budget','stopped_stalled','stopped_blocked','failed','canceled')
          ORDER BY updated_at DESC`,
-      ).filter((g) => isActive(g.status));
+      )
+        .map(stripUnverifiedCompletionCertificate)
+        .filter((g) => isActive(g.status));
     },
 
     listByChatSession(chatSessionId: string): Goal[] {
@@ -62,7 +128,7 @@ export function createGoalRepository(storage: Storage): GoalRepository {
         db,
         "SELECT payload FROM goals WHERE chat_session_id = ? ORDER BY updated_at DESC",
         [chatSessionId],
-      );
+      ).map(stripUnverifiedCompletionCertificate);
     },
 
     delete(goalId: string): boolean {
@@ -80,6 +146,29 @@ export function createGoalRepository(storage: Storage): GoalRepository {
       ).run(goalId, seq, jsonify(event), event.at);
     },
 
+    appendLedgerIfAbsent(goalId, publicationKey, event) {
+      const storedEvent = { ...event, publicationKey };
+      const result = db.prepare(
+        `INSERT INTO goal_ledger (goal_id, seq, payload, created_at)
+         SELECT ?,
+           COALESCE((SELECT MAX(seq) FROM goal_ledger WHERE goal_id = ?), 0) + 1,
+           ?, ?
+         WHERE NOT EXISTS (
+           SELECT 1 FROM goal_ledger
+           WHERE goal_id = ?
+             AND json_extract(payload, '$.publicationKey') = ?
+         )`,
+      ).run(
+        goalId,
+        goalId,
+        jsonify(storedEvent),
+        event.at,
+        goalId,
+        publicationKey,
+      );
+      return result.changes === 1;
+    },
+
     readLedger(goalId: string): ProgressLedgerEvent[] {
       const rows = db
         .prepare("SELECT payload FROM goal_ledger WHERE goal_id = ? ORDER BY seq ASC")
@@ -89,4 +178,34 @@ export function createGoalRepository(storage: Storage): GoalRepository {
         .filter((v): v is ProgressLedgerEvent => v !== null);
     },
   };
+}
+
+function stripUnverifiedCompletionCertificate(goal: Goal): Goal {
+  if (goal.status !== "completed_unverified") {
+    return goal;
+  }
+  const { acceptanceCertificate: _certificate, ...safeGoal } = goal;
+  return safeGoal;
+}
+
+function sanitizeStoredGoal(goal: Goal | null): Goal | null {
+  return goal
+    ? sanitizeFinalJudgeReplay(stripUnverifiedCompletionCertificate(goal))
+    : null;
+}
+
+function sanitizeFinalJudgeReplay(goal: Goal): Goal {
+  const retryState = goal.acceptanceRetryState;
+  if (!retryState?.finalJudgeReplay) return goal;
+  const finalJudgeReplay = sanitizeFinalGoalJudgeReplayEvidence(
+    retryState.finalJudgeReplay,
+  );
+  if (finalJudgeReplay) {
+    return {
+      ...goal,
+      acceptanceRetryState: { ...retryState, finalJudgeReplay },
+    };
+  }
+  const { finalJudgeReplay: _invalidReplay, ...safeRetryState } = retryState;
+  return { ...goal, acceptanceRetryState: safeRetryState };
 }

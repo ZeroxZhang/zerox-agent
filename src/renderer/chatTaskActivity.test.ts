@@ -166,6 +166,44 @@ describe("chat task activity", () => {
     });
   });
 
+  it("keeps acceptance-waiting goals paused for a user decision", () => {
+    const activity = buildGoalTaskActivity({
+      status: "waiting_for_acceptance",
+      description: "生成技术报告",
+      now: 4_500,
+    });
+
+    expect(activity).toMatchObject({
+      kind: "paused",
+      title: "等待最终验收",
+      detail: "任务产物已保留，等待用户决定是否继续验收。",
+    });
+    expect(getGoalUiSyncState("waiting_for_acceptance")).toEqual({
+      statusKind: "paused",
+      workPhase: "paused",
+      shouldClearActiveRequest: true,
+    });
+  });
+
+  it("labels manual unverified completion as terminal without certification", () => {
+    const activity = buildGoalTaskActivity({
+      status: "completed_unverified",
+      description: "生成技术报告",
+      now: 4_600,
+    });
+
+    expect(activity).toMatchObject({
+      kind: "done",
+      title: "手动完成 · 未经机器认证",
+      detail: "生成技术报告",
+    });
+    expect(getGoalUiSyncState("completed_unverified")).toEqual({
+      statusKind: "ready",
+      workPhase: "done",
+      shouldClearActiveRequest: true,
+    });
+  });
+
   it("maps guided input waits to paused input state instead of an error fallback", () => {
     const waitingEvent = createStatusEvent({
       state: "waiting_for_input",

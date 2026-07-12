@@ -25,7 +25,20 @@ export type AcceptanceBlockedDecision = BaseAcceptanceRepairDecision & {
   blockedVerdict: "blocked_external" | "impossible" | "acceptance_unavailable";
 };
 
-export type AcceptanceActionDecision = AcceptanceRepairDirective & {
+export type AcceptanceWaitingDecision = BaseAcceptanceRepairDecision & {
+  action: "wait_for_acceptance";
+  verdict: "acceptance_unavailable";
+};
+
+export type AcceptanceActionDecision = Omit<
+  AcceptanceRepairDirective,
+  "action"
+> & {
+  action:
+    | "repair_same_milestone"
+    | "retry_alternate_strategy"
+    | "replan"
+    | "stop_stalled";
   verdict: Exclude<
     AcceptanceVerdict,
     "accepted" | "blocked_external" | "impossible" | "acceptance_unavailable"
@@ -35,6 +48,7 @@ export type AcceptanceActionDecision = AcceptanceRepairDirective & {
 export type AcceptanceRepairDecision =
   | AcceptanceCertifyDecision
   | AcceptanceBlockedDecision
+  | AcceptanceWaitingDecision
   | AcceptanceActionDecision;
 
 export type RepairPolicyInput = {
@@ -42,6 +56,8 @@ export type RepairPolicyInput = {
   occurrence: number;
   fingerprint: string;
   checkResults: GoalAcceptanceCheckResult[];
+  targetKind?: "milestone" | "goal";
+  infrastructureFailure?: boolean;
 };
 
 export function decideAcceptanceRepair(
@@ -83,6 +99,26 @@ export function decideAcceptanceRepair(
       instructions: [
         failedCheckInstruction(failedCheckIds),
         "Change the goal or milestone structure before running acceptance again.",
+      ],
+    };
+  }
+
+  if (
+    input.verdict === "acceptance_unavailable" &&
+    input.targetKind === "goal" &&
+    input.infrastructureFailure === true
+  ) {
+    return {
+      action: "wait_for_acceptance",
+      verdict: input.verdict,
+      summary: failedSummary(
+        "Final acceptance infrastructure is unavailable; waiting for user action",
+        failedCheckIds,
+      ),
+      ...base,
+      instructions: [
+        "Retry only the final acceptance judge after the infrastructure recovers.",
+        failedCheckInstruction(failedCheckIds),
       ],
     };
   }

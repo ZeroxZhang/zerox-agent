@@ -289,6 +289,12 @@ export type GoalProgressEvent = {
     | "acceptance_failure_classified"
     | "acceptance_repair_scheduled"
     | "acceptance_strategy_changed"
+    | "acceptance_retry_scheduled"
+    | "acceptance_retry_started"
+    | "acceptance_retry_exhausted"
+    | "acceptance_waiting_for_user"
+    | "acceptance_manual_completion_requested"
+    | "acceptance_manual_completion_recorded"
     | "acceptance_blocked"
     | "acceptance_certified";
   message: string;
