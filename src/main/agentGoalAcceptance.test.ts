@@ -2138,9 +2138,16 @@ describe("agent goal acceptance", () => {
 
   it("aborts a deferred goal_judged append and cannot return a late accepted verdict", async () => {
     vi.useFakeTimers();
+    const reportPath = path.join(workspacePath, "deferred-timeout-evidence.md");
+    await writeFile(reportPath, "# Stable timeout evidence\n", "utf8");
+    const evidenceRef = `artifact:${reportPath}`;
     const context = createContext();
     let finishLateAppend: (() => void) | undefined;
     let appendSignal: AbortSignal | undefined;
+    let appendStartedResolve: (() => void) | undefined;
+    const appendStarted = new Promise<void>((resolve) => {
+      appendStartedResolve = resolve;
+    });
     context.trajectoryStore = {
       append(_runId, event, options) {
         if (event.type !== "goal_judged") {
@@ -2148,6 +2155,7 @@ describe("agent goal acceptance", () => {
           return Promise.resolve(event);
         }
         appendSignal = options?.signal;
+        appendStartedResolve?.();
         return new Promise((resolve, reject) => {
           options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), {
             once: true,
@@ -2167,7 +2175,7 @@ describe("agent goal acceptance", () => {
             content: JSON.stringify({
               verdict: "accepted",
               reason: "Evidence passed before trajectory persistence.",
-              evidenceRefs: ["evidence:final"],
+              evidenceRefs: [evidenceRef],
             }),
             toolCalls: [],
             finishReason: "stop",
@@ -2177,20 +2185,30 @@ describe("agent goal acceptance", () => {
     }).evaluateGoal(
       createGoal([
         check("deferred_judged_append", "model_review", {
-          evidenceRefs: ["evidence:final"],
+          evidenceRefs: [evidenceRef],
         }, true),
       ]),
       context,
     );
+    await appendStarted;
     await vi.advanceTimersByTimeAsync(25);
     finishLateAppend?.();
 
-    await expect(evaluation).resolves.toMatchObject({
+    const result = await evaluation;
+    expect(result).toMatchObject({
       accepted: false,
       checkResults: [{ code: "judge_timeout" }],
     });
     expect(appendSignal?.aborted).toBe(true);
     expect(trajectoryEvents.some((event) => event.type === "goal_judged")).toBe(false);
+    expect(result.evidenceManifest).toMatchObject({
+      artifacts: [
+        {
+          ref: evidenceRef,
+          sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+        },
+      ],
+    });
   });
 
   it("aborts a deferred acceptance_checked append without returning accepted", async () => {

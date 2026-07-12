@@ -6763,3 +6763,18 @@
 - Final evidence: controller/store/container suite 161/161 passed,
   Electron/main TypeScript passed, `npm run harness:check` passed, and
   `git diff --check` passed.
+
+## 2026-07-12 - P43 Task 4B Review Fixes
+
+- Removed fabricated empty legacy retry fingerprints and made empty persisted
+  fingerprints fail closed instead of bypassing certification comparison.
+- Scoped task-budget bypass to an explicit in-memory flag carried only by
+  public `continueAcceptance`; generic resume remains budget-gated.
+- Preserved final-judge evidence manifests across post-build deadline catches,
+  preventing unchanged real evidence from producing a false continuation
+  mismatch.
+- Bound evidence hashes to their artifact refs in canonical fingerprints;
+  pair order is stable and hash swaps are distinguishable.
+- TDD RED reproduced all four review findings. GREEN passed controller,
+  acceptance, and failure-fingerprint coverage (231/231), Electron/main
+  TypeScript, harness, and diff checks.

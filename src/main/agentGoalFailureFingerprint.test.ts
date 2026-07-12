@@ -215,6 +215,35 @@ describe("goal acceptance failure fingerprints", () => {
     );
   });
 
+  it("binds each artifact hash to its ref while keeping pair order stable", () => {
+    const artifactA = {
+      ref: "artifact:reports/a.json",
+      mediaType: "application/json",
+      sha256: "a".repeat(64),
+      excerpts: [],
+    };
+    const artifactB = {
+      ref: "artifact:reports/b.json",
+      mediaType: "application/json",
+      sha256: "b".repeat(64),
+      excerpts: [],
+    };
+    const withArtifacts = (artifacts: GoalEvidenceManifest["artifacts"]) =>
+      createAcceptanceLogicalFailureFingerprint(
+        fingerprintInput({ evidenceManifest: manifest({ artifacts }) }),
+      );
+
+    const original = withArtifacts([artifactA, artifactB]);
+    const reordered = withArtifacts([artifactB, artifactA]);
+    const swappedHashes = withArtifacts([
+      { ...artifactA, sha256: artifactB.sha256 },
+      { ...artifactB, sha256: artifactA.sha256 },
+    ]);
+
+    expect(original).toBe(reordered);
+    expect(original).not.toBe(swappedHashes);
+  });
+
   it("redacts secret-like values before signing and never leaks them", () => {
     const secretA = "sk-live-secret-alpha";
     const secretB = "sk-live-secret-beta";

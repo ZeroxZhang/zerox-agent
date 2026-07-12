@@ -110,6 +110,10 @@ export function createAgentGoalController(options: {
   };
 }): AgentGoalController {
   const stallThreshold = options.stallThreshold ?? 3;
+  type InternalRunOptions = {
+    signal?: AbortSignal;
+    finalAcceptanceContinuation?: boolean;
+  };
   type ActiveRunEntry = {
     promise: Promise<Goal>;
     signal?: AbortSignal;
@@ -164,7 +168,7 @@ export function createAgentGoalController(options: {
     };
   }
 
-  async function runLoop(goal: Goal, runOptions?: { signal?: AbortSignal }) {
+  async function runLoop(goal: Goal, runOptions?: InternalRunOptions) {
     const existing = activeRuns.get(goal.id);
     if (existing && !existing.signal?.aborted) {
       return existing.promise;
@@ -367,7 +371,7 @@ export function createAgentGoalController(options: {
 
   async function runLoopInternal(
     goal: Goal,
-    runOptions?: { signal?: AbortSignal },
+    runOptions?: InternalRunOptions,
   ) {
     let stalledIterations = 0;
     let finalAcceptanceCycleAttempt = 0;
@@ -382,8 +386,7 @@ export function createAgentGoalController(options: {
         const nextMilestone = pickNextReadyMilestone(goal);
         if (!nextMilestone) {
           if (allMilestonesAccepted(goal)) {
-            const finalBudgetExhaustion = goal.acceptanceRetryState?.resumeFrom ===
-                "final_judge"
+            const finalBudgetExhaustion = runOptions?.finalAcceptanceContinuation
               ? null
               : describeGoalBudgetExhaustion(goal, false);
             if (finalBudgetExhaustion) {
@@ -425,15 +428,14 @@ export function createAgentGoalController(options: {
               return interruptedAfterManifest;
             }
             if (result.accepted) {
-              const expectedFingerprint =
-                goal.acceptanceRetryState?.evidenceFingerprint;
+              const retryState = goal.acceptanceRetryState;
               const currentFingerprint = finalAcceptanceEvidenceFingerprint(
                 goal,
                 result,
               );
               if (
-                expectedFingerprint &&
-                expectedFingerprint !== currentFingerprint
+                retryState &&
+                retryState.evidenceFingerprint !== currentFingerprint
               ) {
                 return waitForChangedFinalAcceptanceEvidence(
                   goal,
@@ -2010,25 +2012,19 @@ export function createAgentGoalController(options: {
           phase: "retrying",
           lastDecision: undefined,
         },
-        acceptanceRetryState: previousRetryState
+        ...(previousRetryState
           ? {
-              cycle: previousRetryState.cycle + 1,
-              attempt: 0,
-              maxAttempts: previousRetryState.maxAttempts,
-              lastCode: previousRetryState.lastCode,
-              lastDetail: previousRetryState.lastDetail,
-              evidenceFingerprint: previousRetryState.evidenceFingerprint,
-              resumeFrom: "final_judge",
+              acceptanceRetryState: {
+                cycle: previousRetryState.cycle + 1,
+                attempt: 0,
+                maxAttempts: previousRetryState.maxAttempts,
+                lastCode: previousRetryState.lastCode,
+                lastDetail: previousRetryState.lastDetail,
+                evidenceFingerprint: previousRetryState.evidenceFingerprint,
+                resumeFrom: "final_judge" as const,
+              },
             }
-          : {
-              cycle: 1,
-              attempt: 0,
-              maxAttempts: FINAL_ACCEPTANCE_MAX_ATTEMPTS,
-              lastCode: "acceptance_unavailable",
-              lastDetail: "Final acceptance was unavailable.",
-              evidenceFingerprint: "",
-              resumeFrom: "final_judge",
-            },
+          : {}),
       };
       touch(candidate);
       const persisted = await options.goalStore.save(candidate);
@@ -2038,7 +2034,10 @@ export function createAgentGoalController(options: {
         }
         return persisted;
       }
-      return runLoop(persisted, runOptions);
+      return runLoop(persisted, {
+        ...runOptions,
+        finalAcceptanceContinuation: true,
+      });
     },
 
     async resolveReview(goalId, decision) {

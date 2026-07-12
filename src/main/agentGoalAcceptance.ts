@@ -898,6 +898,7 @@ async function evaluateFinalModelReview(
   }
 
   const operation = createLinkedJudgeDeadline(ctx.signal, timeoutMs);
+  let collectedEvidenceManifest: GoalEvidenceManifest | undefined;
   try {
 
   const evidence = await formatEvidenceForPrompt(
@@ -907,6 +908,7 @@ async function evaluateFinalModelReview(
     ctx,
     operation.signal,
   );
+  collectedEvidenceManifest = evidence.manifest;
   throwIfJudgeDeadlinePassed(operation);
   if (evidence.missingArtifactRefs.length > 0) {
     return {
@@ -1015,6 +1017,9 @@ async function evaluateFinalModelReview(
       return {
         checkResult: unavailableJudgeResult(check, evidenceRefs, "judge_timeout"),
         inferentialUsed: true,
+        ...(collectedEvidenceManifest
+          ? { evidenceManifest: collectedEvidenceManifest }
+          : {}),
         retry: classifyAcceptanceInfrastructureFailure({ code: "ETIMEDOUT" }),
       };
     }

@@ -164,3 +164,56 @@ GREEN evidence:
   method; IPC/preload/UI/service integration belongs to the later scoped task.
 - Task 1–3 report modifications were pre-existing sibling-agent work and were
   not edited or staged by Task 4B.
+
+## Task 4B Review Fixes
+
+### Important Findings Resolved
+
+1. Eligible legacy continuation no longer fabricates an empty
+   `acceptanceRetryState`. Its first judge sees no retry state; an accepted
+   result certifies the current evidence, while a failed result lets the
+   existing retry path persist the first real evidence fingerprint. Persisted
+   empty fingerprints are treated as mismatches rather than a certification
+   bypass.
+2. Task-budget bypass is now an in-memory
+   `finalAcceptanceContinuation` run option set only by the public
+   `continueAcceptance` entry point. Generic `start`/`resume` and automatic
+   retry-state recovery retain the normal task-budget gate.
+3. `evaluateFinalModelReview` retains a successfully collected evidence
+   manifest when a deadline fires later in the judge/trajectory path, including
+   artifact refs and SHA-256 hashes. Continuing unchanged real evidence no
+   longer produces a false mismatch.
+4. Acceptance fingerprints canonicalize sorted `{ ref, sha256 }` artifact
+   pairs. Reordering identical pairs is stable, while swapping hashes between
+   refs changes the fingerprint.
+
+### Review-Fix TDD Evidence
+
+- Legacy RED: eligible legacy accepted evaluation observed a fabricated retry
+  state with `evidenceFingerprint: ""`; a waiting record with an empty
+  fingerprint incorrectly certified. GREEN: both focused cases passed with no
+  fabricated state and no empty-string bypass.
+- Budget RED: an exhausted generic `resume` carrying a persisted final-judge
+  retry state reached `achieved`. GREEN: generic resume stops for budget while
+  explicit `continueAcceptance` still reaches the final judge.
+- Manifest RED: a real final judge timed out after evidence construction and
+  returned `evidenceManifest: undefined`. A real controller continuation over
+  unchanged evidence then returned to waiting with a false mismatch. GREEN:
+  the manifest contains the artifact ref/hash and unchanged continuation
+  reaches certified `achieved`.
+- Pair RED: `A:X, B:Y` and `A:Y, B:X` produced the same logical fingerprint.
+  GREEN: pair swaps differ and reordering the same pairs remains stable.
+
+### Review-Fix Verification
+
+- `npm test -- --run src/main/agentGoalController.test.ts src/main/agentGoalAcceptance.test.ts src/main/agentGoalFailureFingerprint.test.ts` — PASS, 231/231 tests.
+- `npx tsc -p tsconfig.electron.json --noEmit` — PASS.
+- `npm run harness:check` — PASS.
+- `git diff --check` — PASS.
+
+### Review-Fix Concerns
+
+- No controller service routing, manual completion action, IPC, preload, or UI
+  code was changed.
+- Task 1–3 report modifications remain pre-existing sibling-agent work and are
+  excluded from this fix commit.
