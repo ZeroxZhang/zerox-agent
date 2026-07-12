@@ -12,6 +12,8 @@ type GoalStatusStripProps = {
   onIncreaseBudget?: () => void;
   onReplan?: () => void;
   onRetry?: () => void;
+  onContinueAcceptance?: () => void;
+  goalAcceptanceOperationPending?: boolean;
   onCancel?: () => void;
 };
 
@@ -115,6 +117,17 @@ function renderStatusAction(
           onClick={props.onRetry}
         >
           重试验收
+        </button>
+      ) : null;
+    case "waiting_for_acceptance":
+      return props.onContinueAcceptance ? (
+        <button
+          type="button"
+          className="goal-primary-action"
+          disabled={props.goalAcceptanceOperationPending}
+          onClick={props.onContinueAcceptance}
+        >
+          继续验收
         </button>
       ) : null;
     case "failed":

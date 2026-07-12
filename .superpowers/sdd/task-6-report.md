@@ -53,3 +53,63 @@ DONE
 
 - The subprocess worker entry still only includes the current registered worker-entry handlers; broader side-effect handler cutover remains owned by later P5/P6-style activation work.
 - `episode:export:built` requires normal CLI arguments for real export work; this task verified the built script path via `--help` rather than exporting a real episode.
+
+---
+
+# Goal Acceptance Recovery — Task 6 Report
+
+## Scope
+
+- Added truthful renderer projections for automatic final-acceptance retries, durable acceptance waiting, and manual unverified completion.
+- Added distinct `继续验收`, `手动标记完成`, and termination actions for the waiting state.
+- Added a local manual-completion confirmation that explicitly says `不会生成机器验收证书`.
+- Wired renderer operations to `continueGoalAcceptance` and `markGoalCompletedUnverified`, with a synchronous ref fence against duplicate clicks and canonical returned-goal refresh.
+- Added amber/neutral styling for `completed_unverified`; certified presentation remains exclusive to `achieved` with a valid certificate.
+- Added the two new status labels to the adjacent sidebar status map required by renderer exhaustiveness.
+
+## RED Evidence
+
+- `npm test -- --run src/renderer/goalProgressViewModel.test.ts`
+  - Failed as expected: 7 new assertions failed because retrying still rendered `执行中`, while `waiting_for_acceptance` and `completed_unverified` returned no presentation.
+- `npm test -- --run src/renderer/materialDesign.test.ts`
+  - Failed as expected: the waiting actions, manual confirmation copy, preload handlers, pending fence, and amber styling were absent.
+
+## GREEN Evidence
+
+- `npm test -- --run src/renderer/goalProgressViewModel.test.ts src/renderer/materialDesign.test.ts`
+  - PASS: 2 files, 122 tests.
+- `./node_modules/.bin/tsc -p tsconfig.renderer.json --noEmit`
+  - PASS.
+- `./node_modules/.bin/tsc -p tsconfig.electron.json --noEmit`
+  - PASS.
+- `npm run harness:check`
+  - PASS: Harness check passed.
+- `git diff --check`
+  - PASS.
+
+## Self-review
+
+- Raw `lastDetail` is never rendered. Only four exact retry codes receive specific Chinese diagnostics; unknown codes, including inherited object keys such as `toString`, use a neutral fixed fallback.
+- Retry UI has no recovery actions while automatic retry is active. Waiting UI exposes exactly `continue_acceptance`, `mark_completed_unverified`, and `terminate` in the view model.
+- Manual completion forcibly omits certificate presentation even if malformed/stale input carries certificate-shaped data.
+- Both acceptance operations are disabled while IPC is pending, and a ref fence prevents duplicate invocations before React state commits.
+- The repository has no renderer DOM interaction-test dependency; the established `materialDesign.test.ts` source-contract suite covers wiring and copy, while view-model behavior is exercised directly.
+
+## Files
+
+- `src/renderer/goalProgressViewModel.ts`
+- `src/renderer/goalProgressViewModel.test.ts`
+- `src/renderer/components/GoalDetailDrawer.tsx`
+- `src/renderer/components/GoalStatusStrip.tsx`
+- `src/renderer/components/AgentChatPanel.tsx`
+- `src/renderer/styles/chat.css`
+- `src/renderer/materialDesign.test.ts`
+- `src/renderer/App.tsx` (minimal exhaustive status-label update)
+
+## Commit
+
+- Pending at report creation; filled in by the task commit.
+
+## Concerns
+
+- Interaction coverage follows the repository's existing source-contract approach rather than browser-driven component tests. Independent packaged smoke/QA remains appropriate for the final feature acceptance.

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Goal } from "../../shared/agentGoal";
 import type { ChatSessionGoalSummary } from "../../shared/chat";
 import { buildGoalProgressViewModel } from "../goalProgressViewModel";
@@ -14,6 +14,9 @@ type GoalDetailDrawerProps = {
   onIncreaseBudget?: () => void;
   onReplan?: () => void;
   onRetry?: () => void;
+  onContinueAcceptance?: () => void;
+  onMarkCompletedUnverified?: () => void;
+  goalAcceptanceOperationPending?: boolean;
   onCancel?: () => void;
 };
 
@@ -22,6 +25,8 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const milestonesRef = useRef<HTMLDivElement>(null);
+  const [manualCompletionConfirmationOpen, setManualCompletionConfirmationOpen] =
+    useState(false);
   const progress = props.summary
     ? buildGoalProgressViewModel(props.summary, props.goal)
     : null;
@@ -40,6 +45,12 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
       element.scrollTop = element.scrollHeight;
     }
   }, [progress?.milestoneRows.length, progress?.milestoneRows.at(-1)?.state]);
+
+  useEffect(() => {
+    if (!props.open || props.summary?.status !== "waiting_for_acceptance") {
+      setManualCompletionConfirmationOpen(false);
+    }
+  }, [props.open, props.summary?.status]);
 
   if (!props.open || !props.summary || !progress) {
     return null;
@@ -141,6 +152,29 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
               <span>恢复路径</span>
               <p>{getRecoveryHint(props.summary.status)}</p>
               <div className="goal-review-actions">
+                {props.summary.status === "waiting_for_acceptance" &&
+                progress.recoveryActions.includes("continue_acceptance") &&
+                props.onContinueAcceptance ? (
+                  <button
+                    type="button"
+                    className="goal-primary-action"
+                    disabled={props.goalAcceptanceOperationPending}
+                    onClick={props.onContinueAcceptance}
+                  >
+                    继续验收
+                  </button>
+                ) : null}
+                {props.summary.status === "waiting_for_acceptance" &&
+                progress.recoveryActions.includes("mark_completed_unverified") &&
+                props.onMarkCompletedUnverified ? (
+                  <button
+                    type="button"
+                    disabled={props.goalAcceptanceOperationPending}
+                    onClick={() => setManualCompletionConfirmationOpen(true)}
+                  >
+                    手动标记完成
+                  </button>
+                ) : null}
                 {props.summary.status === "stopped_blocked" &&
                 progress.recoveryActions.includes("retry_acceptance") &&
                 props.onRetry ? (
@@ -208,6 +242,36 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
                   </button>
                 ) : null}
               </div>
+              {props.summary.status === "waiting_for_acceptance" &&
+              manualCompletionConfirmationOpen ? (
+                <div
+                  className="goal-manual-completion-confirmation"
+                  role="alert"
+                >
+                  <strong>确认手动标记完成？</strong>
+                  <p>
+                    此操作会保留任务产物和本地记录，但不会生成机器验收证书，
+                    也不表示最终裁判已经通过。
+                  </p>
+                  <div className="goal-review-actions">
+                    <button
+                      type="button"
+                      disabled={props.goalAcceptanceOperationPending}
+                      onClick={() => setManualCompletionConfirmationOpen(false)}
+                    >
+                      取消
+                    </button>
+                    <button
+                      type="button"
+                      className="goal-manual-completion-action"
+                      disabled={props.goalAcceptanceOperationPending}
+                      onClick={props.onMarkCompletedUnverified}
+                    >
+                      确认手动完成
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </section>
           ) : null}
 
@@ -407,7 +471,8 @@ function isRecoverableStatus(status: ChatSessionGoalSummary["status"]): boolean 
     status === "failed" ||
     status === "stopped_budget" ||
     status === "stopped_stalled" ||
-    status === "stopped_blocked"
+    status === "stopped_blocked" ||
+    status === "waiting_for_acceptance"
   );
 }
 
@@ -421,6 +486,8 @@ function getRecoveryHint(status: ChatSessionGoalSummary["status"]): string {
       return "目标执行失败。你可以重试或结束目标。";
     case "stopped_blocked":
       return "目标尚未完成。你可以重试验收、调整计划或终止目标。";
+    case "waiting_for_acceptance":
+      return "任务产物和进度已保留。你可以继续验收、手动记录为未经机器认证的完成，或结束目标。";
     default:
       return "";
   }

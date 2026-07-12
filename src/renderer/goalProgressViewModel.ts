@@ -27,6 +27,8 @@ export type GoalProgressMilestoneRow = {
 
 export type GoalRecoveryAction =
   | "retry_acceptance"
+  | "continue_acceptance"
+  | "mark_completed_unverified"
   | "adjust_plan"
   | "terminate";
 
@@ -243,6 +245,21 @@ export function buildGoalStatusPresentation(
     }, acceptance, certificate);
   }
 
+  if (status === "executing" && acceptance?.phase === "retrying") {
+    const retry = goal?.acceptanceRetryState;
+    const maxAttempts = clampRetryCount(retry?.maxAttempts, 3);
+    const attempt = Math.min(clampRetryCount(retry?.attempt, 1), maxAttempts);
+    return withAcceptance({
+      statusLabel: `正在重试最终验收（${attempt}/${maxAttempts}）`,
+      statusDetail: safeAcceptanceRetryDetail(retry?.lastCode, true),
+      nextActionLabel: "最终验收",
+      nextActionDetail: retry?.nextRetryAt
+        ? `下次重试：${formatRetryTime(retry.nextRetryAt)}`
+        : "正在请求独立裁判。",
+      recoveryActions: [],
+    }, acceptance, certificate);
+  }
+
   if (
     status === "executing" &&
     acceptance?.lastDirective?.action === "repair_same_milestone" &&
@@ -298,6 +315,22 @@ export function buildGoalStatusPresentation(
         recoveryActions: [],
         ...(acceptance ? { acceptance } : {}),
       };
+    case "waiting_for_acceptance":
+      return withAcceptance({
+        statusLabel: "任务产物已完成，等待最终验收",
+        statusDetail: safeAcceptanceRetryDetail(
+          goal?.acceptanceRetryState?.lastCode,
+          false,
+        ),
+        nextActionLabel: "需要你决定",
+        nextActionDetail:
+          "当前进度和任务产物已保留。可继续最终验收、手动标记为未经机器认证的完成，或结束目标。",
+        recoveryActions: [
+          "continue_acceptance",
+          "mark_completed_unverified",
+          "terminate",
+        ],
+      }, acceptance, undefined);
     case "achieved":
       const isLegacyAchieved = goal?.acceptanceProtocolVersion !== 2;
       return withAcceptance({
@@ -318,6 +351,16 @@ export function buildGoalStatusPresentation(
             ? "这是旧版完成记录，不会补造验收证书。"
             : "不会为缺失或无效的证书补造展示数据。",
       }, acceptance, certificate);
+    case "completed_unverified":
+      return withAcceptance({
+        statusLabel: "手动完成 · 未经机器认证",
+        statusDetail:
+          "目标已由用户手动标记完成，未生成机器验收证书，也不代表最终裁判已通过。",
+        nextActionLabel: "手动完成记录",
+        nextActionDetail:
+          "可查看保留的任务产物、失败检查和本地手动完成记录。",
+        recoveryActions: [],
+      }, acceptance, undefined);
     case "stopped_budget":
       return {
         statusLabel: "预算已用尽",
@@ -688,6 +731,8 @@ function acceptancePhaseLabel(phase: GoalAcceptanceState["phase"]): string {
     validating: "正在验收",
     repairing: "修复验收问题",
     judging: "最终语义验收",
+    retrying: "正在重试最终验收",
+    awaiting_user: "等待用户处理最终验收",
     blocked: "验收受阻",
     certified: "验收已认证",
   };
@@ -699,6 +744,7 @@ function repairActionLabel(action: AcceptanceRepairDirective["action"]): string 
     repair_same_milestone: "修复同一里程碑",
     retry_alternate_strategy: "切换执行策略",
     replan: "重新规划",
+    wait_for_acceptance: "等待用户处理最终验收",
     stop_stalled: "重复失败后停止",
     stop_blocked: "等待用户处理阻塞",
   };
@@ -707,13 +753,54 @@ function repairActionLabel(action: AcceptanceRepairDirective["action"]): string 
 
 function isAcceptancePhase(value: unknown): value is GoalAcceptanceState["phase"] {
   return value === "idle" || value === "validating" || value === "repairing" ||
-    value === "judging" || value === "blocked" || value === "certified";
+    value === "judging" || value === "retrying" || value === "awaiting_user" ||
+    value === "blocked" || value === "certified";
 }
 
 function isRepairAction(value: unknown): value is AcceptanceRepairDirective["action"] {
   return value === "repair_same_milestone" ||
     value === "retry_alternate_strategy" || value === "replan" ||
-    value === "stop_stalled" || value === "stop_blocked";
+    value === "wait_for_acceptance" || value === "stop_stalled" ||
+    value === "stop_blocked";
+}
+
+function safeAcceptanceRetryDetail(
+  code: string | undefined,
+  retrying: boolean,
+): string {
+  const suffix = retrying
+    ? "系统正在自动重试，当前任务不会重复执行。"
+    : "任务产物和当前进度已保留，请选择继续验收或手动处理。";
+  const diagnostic = code === "judge_timeout"
+    ? "最终裁判超时。"
+    : code === "rate_limited"
+      ? "最终验收请求过于频繁。"
+      : code === "provider_unavailable"
+        ? "验收服务暂时不可用。"
+        : code === "network_reset"
+          ? "最终验收的网络连接意外中断。"
+          : undefined;
+  return diagnostic
+    ? `${diagnostic}${suffix}`
+    : `最终验收暂时未能完成。${suffix}`;
+}
+
+function clampRetryCount(value: number | undefined, fallback: number): number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
+    ? Math.min(value, 3)
+    : fallback;
+}
+
+function formatRetryTime(value: string): string {
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) {
+    return "时间待定";
+  }
+  return new Intl.DateTimeFormat("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(new Date(timestamp));
 }
 
 function safeAcceptanceCheckKind(value: unknown): AcceptanceCheckKind | undefined {

@@ -989,6 +989,31 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource).toContain("void refreshSessions(sessionId ?? undefined)");
   });
 
+  it("wires recoverable final acceptance without implying certification", () => {
+    expect(appSource).toContain('waiting_for_acceptance: "等待最终验收"');
+    expect(appSource).toContain(
+      'completed_unverified: "手动完成 · 未经机器认证"',
+    );
+    expect(goalDetailDrawerSource).toContain("继续验收");
+    expect(goalDetailDrawerSource).toContain("手动标记完成");
+    expect(goalDetailDrawerSource).toContain("不会生成机器验收证书");
+    expect(goalDetailDrawerSource).toContain("onContinueAcceptance");
+    expect(goalDetailDrawerSource).toContain("onMarkCompletedUnverified");
+    expect(goalDetailDrawerSource).toContain("goalAcceptanceOperationPending");
+    expect(goalStatusStripSource).toContain('case "waiting_for_acceptance"');
+    expect(goalStatusStripSource).toContain("继续验收");
+    expect(chatPanelSource).toContain("continueGoalAcceptance(goalId)");
+    expect(chatPanelSource).toContain("markGoalCompletedUnverified(goalId)");
+    expect(chatPanelSource).toContain("setActiveGoalDetail(result.goal)");
+    expect(chatPanelSource).toContain("goalAcceptanceOperationPendingRef.current");
+    expect(styles).toContain(".goal-status-strip.is-completed_unverified");
+    expect(styles).toContain(".goal-manual-completion-confirmation");
+    expect(styles).toContain("var(--status-warning-text)");
+    expect(styles).not.toContain(
+      ".goal-status-strip.is-achieved,\n.goal-status-strip.is-completed_unverified",
+    );
+  });
+
   it("keeps blocked and certificate surfaces bounded, focusable, and Obsidian-styled", () => {
     expect(styles).toContain(".goal-acceptance-evidence");
     expect(styles).toContain(".goal-certificate-details");
