@@ -1,5 +1,6 @@
 import {
   assertGoalTransition,
+  upgradeGoalAcceptanceProtocol,
   type AcceptanceFailureClass,
   type AcceptanceRepairDirective,
   type Goal,
@@ -79,6 +80,10 @@ export type GoalRuntimeEngine = {
 export type AgentGoalController = {
   start(goalId: string, options?: { signal?: AbortSignal }): Promise<Goal>;
   resume(goalId: string, options?: { signal?: AbortSignal }): Promise<Goal>;
+  continueAcceptance(
+    goalId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<Goal>;
   resolveReview(goalId: string, decision: GoalReviewDecision): Promise<Goal>;
 };
 
@@ -377,10 +382,10 @@ export function createAgentGoalController(options: {
         const nextMilestone = pickNextReadyMilestone(goal);
         if (!nextMilestone) {
           if (allMilestonesAccepted(goal)) {
-            const finalBudgetExhaustion = describeGoalBudgetExhaustion(
-              goal,
-              false,
-            );
+            const finalBudgetExhaustion = goal.acceptanceRetryState?.resumeFrom ===
+                "final_judge"
+              ? null
+              : describeGoalBudgetExhaustion(goal, false);
             if (finalBudgetExhaustion) {
               return stopForBudgetExhaustion(goal, finalBudgetExhaustion);
             }
@@ -420,6 +425,23 @@ export function createAgentGoalController(options: {
               return interruptedAfterManifest;
             }
             if (result.accepted) {
+              const expectedFingerprint =
+                goal.acceptanceRetryState?.evidenceFingerprint;
+              const currentFingerprint = finalAcceptanceEvidenceFingerprint(
+                goal,
+                result,
+              );
+              if (
+                expectedFingerprint &&
+                expectedFingerprint !== currentFingerprint
+              ) {
+                return waitForChangedFinalAcceptanceEvidence(
+                  goal,
+                  result,
+                  currentFingerprint,
+                  runOptions,
+                );
+              }
               return certifyOrAchieveGoal(goal, result, runOptions);
             }
             const retryDecision = goal.acceptanceProtocolVersion === 2
@@ -1034,7 +1056,7 @@ export function createAgentGoalController(options: {
           persisted,
           result,
           decision,
-          fingerprint,
+          finalAcceptanceEvidenceFingerprint(persisted, result),
           decisionOptions.finalAcceptanceAttempt ?? 1,
           runOptions,
         ),
@@ -1477,12 +1499,7 @@ export function createAgentGoalController(options: {
     runOptions?: { signal?: AbortSignal },
   ): Promise<Goal> {
     const maxAttempts = maxFinalAcceptanceAttempts(decision.code);
-    const evidenceFingerprint = acceptanceResultFingerprint(
-      goal,
-      null,
-      result,
-      recentActionSignatures.get(goal.id) ?? [],
-    );
+    const evidenceFingerprint = finalAcceptanceEvidenceFingerprint(goal, result);
     goal.acceptanceState = {
       ...ensureAcceptanceState(goal),
       phase: "retrying",
@@ -1623,6 +1640,76 @@ export function createAgentGoalController(options: {
       },
       signal: runOptions?.signal,
     }));
+  }
+
+  async function waitForChangedFinalAcceptanceEvidence(
+    goal: Goal,
+    result: AcceptanceResult,
+    evidenceFingerprint: string,
+    runOptions?: { signal?: AbortSignal },
+  ): Promise<Goal> {
+    const retryState = goal.acceptanceRetryState;
+    assertGoalTransition(goal.status, "waiting_for_acceptance");
+    goal.status = "waiting_for_acceptance";
+    goal.stopReason = undefined;
+    goal.acceptanceCertificate = undefined;
+    goal.acceptanceState = {
+      ...ensureAcceptanceState(goal),
+      phase: "awaiting_user",
+      lastDecision: undefined,
+    };
+    goal.acceptanceRetryState = {
+      cycle: retryState?.cycle ?? 1,
+      attempt: retryState?.attempt ?? 0,
+      maxAttempts: retryState?.maxAttempts ?? FINAL_ACCEPTANCE_MAX_ATTEMPTS,
+      lastCode: "evidence_fingerprint_mismatch",
+      lastDetail:
+        "Final acceptance evidence changed. Review the current artifacts before continuing.",
+      evidenceFingerprint,
+      resumeFrom: "final_judge",
+    };
+    touch(goal);
+    const persisted = await options.goalStore.save(goal);
+    if (persisted.status !== "waiting_for_acceptance") {
+      if (isTerminalGoalStatus(persisted.status)) {
+        await publishCanonicalTerminal(persisted);
+      }
+      return persisted;
+    }
+    const evidenceRefs = safeAcceptanceEvidenceRefs(result);
+    const published = await publishNonterminalGoalEvent({
+      goal: persisted,
+      allowedStatuses: ["waiting_for_acceptance"],
+      ledger: {
+        at: currentTime(),
+        kind: "acceptance_waiting_for_user",
+        summary:
+          "Final acceptance evidence changed; waiting for explicit user continuation.",
+        evidenceRefs,
+      },
+      trajectory: {
+        type: "acceptance_waiting_for_user",
+        payload: {
+          goalId: persisted.id,
+          targetId: persisted.id,
+          fingerprint: evidenceFingerprint,
+          occurrence: retryState?.attempt ?? 0,
+          failedCheckIds: [],
+          action: "wait_for_acceptance",
+          evidenceRefs,
+          code: "evidence_fingerprint_mismatch",
+          attempt: retryState?.attempt ?? 0,
+          maxAttempts:
+            retryState?.maxAttempts ?? FINAL_ACCEPTANCE_MAX_ATTEMPTS,
+        },
+      },
+      progress: {
+        event: "acceptance_waiting_for_user",
+        message: "最终验收证据已变化，请确认后再次继续验收。",
+      },
+      signal: runOptions?.signal,
+    });
+    return published ? persisted : settleSuppressedPublication(persisted);
   }
 
   async function appendFinalAcceptanceRetryEvent(
@@ -1890,6 +1977,70 @@ export function createAgentGoalController(options: {
       return runLoop(goal, runOptions);
     },
 
+    async continueAcceptance(goalId, runOptions) {
+      const goal = await loadGoal(goalId);
+      const waitingForAcceptance = goal.status === "waiting_for_acceptance";
+      const eligibleLegacy =
+        goal.status === "stopped_blocked" &&
+        goal.stopReason === "acceptance_unavailable" &&
+        allMilestonesAccepted(goal);
+      if (!waitingForAcceptance && !eligibleLegacy) {
+        return goal;
+      }
+      if (!allMilestonesAccepted(goal)) {
+        return goal;
+      }
+      if (
+        waitingForAcceptance &&
+        goal.acceptanceRetryState?.resumeFrom !== "final_judge"
+      ) {
+        return goal;
+      }
+
+      assertGoalTransition(goal.status, "executing");
+      const upgraded = upgradeGoalAcceptanceProtocol(goal);
+      const previousRetryState = upgraded.acceptanceRetryState;
+      const candidate: Goal = {
+        ...upgraded,
+        status: "executing",
+        stopReason: undefined,
+        acceptanceCertificate: undefined,
+        acceptanceState: {
+          ...ensureAcceptanceState(upgraded),
+          phase: "retrying",
+          lastDecision: undefined,
+        },
+        acceptanceRetryState: previousRetryState
+          ? {
+              cycle: previousRetryState.cycle + 1,
+              attempt: 0,
+              maxAttempts: previousRetryState.maxAttempts,
+              lastCode: previousRetryState.lastCode,
+              lastDetail: previousRetryState.lastDetail,
+              evidenceFingerprint: previousRetryState.evidenceFingerprint,
+              resumeFrom: "final_judge",
+            }
+          : {
+              cycle: 1,
+              attempt: 0,
+              maxAttempts: FINAL_ACCEPTANCE_MAX_ATTEMPTS,
+              lastCode: "acceptance_unavailable",
+              lastDetail: "Final acceptance was unavailable.",
+              evidenceFingerprint: "",
+              resumeFrom: "final_judge",
+            },
+      };
+      touch(candidate);
+      const persisted = await options.goalStore.save(candidate);
+      if (persisted.status !== "executing") {
+        if (isTerminalGoalStatus(persisted.status)) {
+          await publishCanonicalTerminal(persisted);
+        }
+        return persisted;
+      }
+      return runLoop(persisted, runOptions);
+    },
+
     async resolveReview(goalId, decision) {
       const goal = await loadGoal(goalId);
       if (goal.status !== "waiting_for_review") {
@@ -2020,12 +2171,17 @@ function describeGoalBudgetExhaustion(
 }
 
 function isIrreversibleGoalStatus(status: GoalStatus): boolean {
-  return status === "achieved" || status === "canceled";
+  return (
+    status === "achieved" ||
+    status === "completed_unverified" ||
+    status === "canceled"
+  );
 }
 
 function isTerminalGoalStatus(status: GoalStatus): boolean {
   return (
     status === "achieved" ||
+    status === "completed_unverified" ||
     status === "stopped_budget" ||
     status === "stopped_stalled" ||
     status === "stopped_blocked" ||
@@ -2037,6 +2193,9 @@ function isTerminalGoalStatus(status: GoalStatus): boolean {
 function terminalStatusMessage(goal: Goal): string {
   if (goal.status === "achieved") {
     return "目标已达成。";
+  }
+  if (goal.status === "completed_unverified") {
+    return "目标已手动标记为完成（未验证）。";
   }
   if (goal.status === "canceled") {
     return "目标已取消。";
@@ -2103,24 +2262,21 @@ function safeAcceptanceEvidenceRefs(result: AcceptanceResult): string[] {
     .slice(0, 64);
 }
 
-function acceptanceResultFingerprint(
+function finalAcceptanceEvidenceFingerprint(
   goal: Goal,
-  target: Milestone | null,
   result: AcceptanceResult,
-  actionSignatures: string[],
 ): string {
   const evidenceRefs = safeAcceptanceEvidenceRefs(result);
   return createAcceptanceLogicalFailureFingerprint({
     target: {
-      targetKind: target ? "milestone" : "goal",
-      targetId: target?.id ?? goal.id,
+      targetKind: "goal",
+      targetId: goal.id,
     },
-    failedChecks: result.checkResults,
+    failedChecks: [],
     ...(result.evidenceManifest
       ? { evidenceManifest: result.evidenceManifest }
       : {}),
     evidenceRefs,
-    actionSignatures: sanitizeActionSignaturesForPersistence(actionSignatures),
     protocolVersion: goal.acceptanceProtocolVersion ?? 1,
     validatorVersions: { acceptance: "goal-acceptance-v2" },
   });

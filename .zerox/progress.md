@@ -6741,4 +6741,25 @@
   TypeScript passed, `npm run harness:check` passed, and `git diff --check`
   passed.
 - Task 4B (`continueAcceptance`, evidence-staleness guard, and legacy upgrade)
-  remains pending by explicit parent-agent scope split.
+  was delegated separately and is recorded as complete below.
+
+## 2026-07-12 - P43 Task 4B Continue Final Acceptance and Legacy Upgrade
+
+- Added controller `continueAcceptance` as a final-judge-only recovery cycle;
+  accepted/skipped milestones, task usage, artifacts, and transcripts are
+  preserved without milestone execution or replanning.
+- New cycles increment the durable cycle counter, reset attempt to zero, clear
+  stale retry timing, and retain a separate acceptance retry budget even when
+  the preserved task budget is exhausted.
+- Evidence-only fingerprints bind continuation to artifact refs/hashes. A
+  mismatch returns to acceptance waiting with safe diagnostics and cannot
+  create a protocol-v2 certificate.
+- Eligible all-complete legacy acceptance-unavailable goals upgrade safely;
+  incomplete legacy goals remain on the generic retry path.
+- Parent cancellation aborts resumed judges, and late work cannot overwrite
+  canceled, achieved, or manually completed canonical state.
+- TDD RED captured the missing entry point and the task-budget/final-judge
+  boundary. GREEN passed the full controller suite (87/87).
+- Final evidence: controller/store/container suite 161/161 passed,
+  Electron/main TypeScript passed, `npm run harness:check` passed, and
+  `git diff --check` passed.
