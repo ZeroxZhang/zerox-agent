@@ -5,22 +5,30 @@
 <h1 align="center">Zerox Agent</h1>
 
 <p align="center">
-  <strong>Local-First Desktop AI Agent · macOS · Electron + React + TypeScript</strong><br />
-  <sub>从留白开始，把未知任务转成可执行动作。&nbsp;|&nbsp;Start from Zero. Turn unknown into action.</sub>
+  <strong>Local-First Desktop AI Agent · macOS · Open Source</strong><br />
+  <sub>Start from Zero. Turn unknown into action. · 从留白开始，把未知任务转成可执行动作。</sub>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20darwin-blue" alt="Platform: macOS" />
+  <img src="https://img.shields.io/badge/version-v3.7.0-111827" alt="Version v3.7.0" />
+  <img src="https://img.shields.io/badge/platform-macOS%20arm64-blue" alt="Platform: macOS arm64" />
   <img src="https://img.shields.io/badge/electron-42.3-9feaf9" alt="Electron 42" />
   <img src="https://img.shields.io/badge/react-19.2-61dafb" alt="React 19" />
   <img src="https://img.shields.io/badge/typescript-6.0-3178c6" alt="TypeScript 6" />
   <img src="https://img.shields.io/badge/vite-8.0-646cff" alt="Vite 8" />
-  <img src="https://img.shields.io/badge/better--sqlite3-12-003b57" alt="better-sqlite3" />
+  <img src="https://img.shields.io/badge/storage-JSON%2FJSONL%20default-003b57" alt="JSON/JSONL default storage" />
   <img src="https://img.shields.io/badge/license-ISC-green" alt="License: ISC" />
 </p>
 
 <p align="center">
-  <img src="zerox-agent-onepage.png" alt="Zerox Agent one-page product overview" width="720" />
+  <a href="https://github.com/ZeroxZhang/zerox-agent">GitHub</a> ·
+  <a href="https://github.com/ZeroxZhang/zerox-agent/releases">Releases</a> ·
+  <a href="docs/product/zerox-positioning.md">Product Positioning</a> ·
+  <a href="#chinese">简体中文</a>
+</p>
+
+<p align="center">
+  <img src="docs/product/zerox-agent-product-intro.jpg" alt="Zerox Agent product intro — local-first, permissioned, recoverable, observable desktop AI agent" width="780" />
 </p>
 
 ---
@@ -33,17 +41,20 @@
 
 ## Overview
 
-**Zerox Agent** is a local-first desktop control plane for personal AI agents (current release: v3.4.0). The name comes from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
+**Zerox Agent** is a local-first desktop control plane for personal AI agents (current release: v3.7.0). The name comes from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
 
-It is not a chat wrapper or a generic hosted agent surface. It runs entirely on your machine: it configures OpenAI-compatible / Anthropic / Gemini models, scans local `SKILL.md` skill files, executes recoverable agent runs, invokes permission-controlled tools, tracks parent/child multi-agent sessions, persists experiential knowledge into local long-term memory, and keeps learning user-reviewed before it changes future behavior.
+It is **not** a chat wrapper, a hosted agent cloud, or an unbounded autonomous loop. It runs on your Mac: you bring your own API key (Anthropic / Gemini / OpenAI-compatible), grant explicit tool permissions, and keep session state, trajectories, memory, and learning candidates on disk under local `userData`. High-risk actions ask first; interrupted long work can resume from checkpoints; every step leaves an auditable run trail.
 
-The product boundary is documented in [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md). Runtime, workspace, and learning details live in [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md), [`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md), [`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md), and [`docs/architecture/agent-goal-mode.md`](docs/architecture/agent-goal-mode.md).
+**Primary job:** turn one sentence into a trackable local run — organize files, push long goals, schedule patrols — with process visibility, permission gates, and resume after interrupt.
 
-The v3.2.2 interface system is documented in [`docs/design/zerox-agent-3-2-2-design-system-spec.md`](docs/design/zerox-agent-3-2-2-design-system-spec.md): the app keeps the existing local-first workflows while moving the visible design language to a Figma-inspired Soft Blue Desktop Control Surface.
+### Trust Pillars
 
-The v3.3.0 release is a macOS UI polish pass documented in [`UI_AUDIT.md`](UI_AUDIT.md) and accepted in [`UI_ACCEPTANCE.md`](UI_ACCEPTANCE.md). It tightens modal safety contracts, macOS menus, sidebar/settings density, typography, compact layouts, and release-ready visual QA without changing product behavior.
-
-The v3.4.0 release uses [`docs/design/guidelines_0708.html`](docs/design/guidelines_0708.html) as the active frontend specification and selects **B · Obsidian** as the app theme. It moves the renderer from the older Soft Blue look to a neutral grayscale macOS control surface with a restrained near-black accent, dark-mode accent inversion, tighter focus/press feedback, and no product behavior changes.
+| Pillar | Meaning | Runtime guarantee |
+|--------|---------|-------------------|
+| **Local** | State and memory stay on this machine | No cloud worker; keys encrypted with Electron `safeStorage`; BYO API key only |
+| **Permissioned** | High-risk operations require confirmation | `ToolAuthorizationService` + workspace sandbox; shell uses structural `ShellPlan`, not string match |
+| **Recoverable** | Crash or quit does not erase progress | Durable checkpoints after tool results; pause/resume; goal continuity across compaction |
+| **Observable** | Every step leaves evidence | Trajectory events, Runs export, kernel event replay, reviewed learning only |
 
 ### Design Principles
 
@@ -57,11 +68,39 @@ The v3.4.0 release uses [`docs/design/guidelines_0708.html`](docs/design/guideli
 | **Permissioned** | Tools are gated by per-task policies layered with a workspace sandbox; shell commands are analyzed structurally, not just matched by string. |
 | **Modular** | The primary app flow is Chat, Runs, Tasks, and Settings; diagnostics, skills, tools, memory, learning, and evals live under Settings. |
 
+### Who It Is For
+
+- **Independent builders / power users** who want an agent that moves local files and tools without handing state to a hosted platform
+- **Privacy-sensitive knowledge work** — downloads cleanup, notes export, report writing, scheduled patrols with replayable evidence
+- **People who care about control** — not only chat, but *what* it did, *whether* it can stop, and *whether* it will go rogue
+
+### Documentation Map
+
+| Topic | Doc |
+|-------|-----|
+| Product boundary & decision matrix | [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md) |
+| Recoverable runtime & Agent Runtime Kernel | [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md) |
+| Workspace sandbox | [`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md) |
+| User-reviewed learning loop | [`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md) |
+| Goal Mode / session-native goals | [`docs/architecture/agent-goal-mode.md`](docs/architecture/agent-goal-mode.md) |
+| v3.2.2 Soft Blue Desktop Control Surface | [`docs/design/zerox-agent-3-2-2-design-system-spec.md`](docs/design/zerox-agent-3-2-2-design-system-spec.md) |
+| v3.4.0 **B · Obsidian** theme | [`docs/design/guidelines_0708.html`](docs/design/guidelines_0708.html) |
+| macOS UI acceptance (v3.3.0+) | [`UI_AUDIT.md`](UI_AUDIT.md), [`UI_ACCEPTANCE.md`](UI_ACCEPTANCE.md) |
+| Agent operating guide (contributors) | [`AGENTS.md`](AGENTS.md) |
+
+The v3.2.2 interface system is documented in [`docs/design/zerox-agent-3-2-2-design-system-spec.md`](docs/design/zerox-agent-3-2-2-design-system-spec.md): the app keeps the existing local-first workflows while moving the visible design language to a Figma-inspired Soft Blue Desktop Control Surface.
+
+The v3.3.0 release is a macOS UI polish pass documented in [`UI_AUDIT.md`](UI_AUDIT.md) and accepted in [`UI_ACCEPTANCE.md`](UI_ACCEPTANCE.md). It tightens modal safety contracts, macOS menus, sidebar/settings density, typography, compact layouts, and release-ready visual QA without changing product behavior.
+
+The v3.4.0 release uses [`docs/design/guidelines_0708.html`](docs/design/guidelines_0708.html) as the active frontend specification and selects **B · Obsidian** as the app theme. It moves the renderer from the older Soft Blue look to a neutral grayscale macOS control surface with a restrained near-black accent, dark-mode accent inversion, tighter focus/press feedback, and no product behavior changes.
+
+**v3.7.0** (current line on branch `codex/3.7.0`) hardens the trust surface on top of Obsidian: 本地权限边界, recoverable checkpoints, tool-pairing context integrity, and 持久化原子性 — while keeping trajectories exportable and learning user-reviewed.
+
 ---
 
 ## Architecture
 
-Zerox Agent is a layered Electron application. An Electron shell wraps a dependency-injection **container** that constructs every service lazily. A **kernel** defines the event contract, turn-loop driver, stop policies, permission engine, and compaction. Several **execution loops** (chat, scheduled task, goal milestone) drive the agent. An **actor model** enables sub-agents, a **workflow runtime** runs deterministic pipelines, and a **provider abstraction** talks to LLMs. All state is persisted through a **dual-write storage layer** (SQLite primary, JSON shadow).
+Zerox Agent is a layered Electron application. An Electron shell wraps a dependency-injection **container** that constructs every service lazily. A **kernel** defines the event contract, turn-loop driver, stop policies, permission engine, and compaction. Chat, scheduled tasks, and goal milestones share one production turn-loop contract. An **actor model** enables permissioned sub-agents, a **workflow runtime** retains deterministic pipelines behind explicit activation, and a **provider abstraction** talks to LLMs. JSON/JSONL is the complete default source of truth; SQLite and dual-write are explicit migration modes.
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -84,7 +123,7 @@ Zerox Agent is a layered Electron application. An Electron shell wraps a depende
 │  │ OpenAI-c. │ │           │ │           │ │                  │  │
 │  └───────────┘ └───────────┘ └───────────┘ └──────────────────┘  │
 │  ┌────────────────────────────────────────────────────────────┐  │
-│  │  Storage: SQLite (zerox.db) + dual-write JSON shadow       │  │
+│  │  Storage: JSON/JSONL default · SQLite/dual migration      │  │
 │  └────────────────────────────────────────────────────────────┘  │
 ├─────────────────────────── IPC ──────────────────────────────────┤
 │            Preload bridge  (contextIsolation: true)               │
@@ -105,7 +144,8 @@ Zerox Agent is a layered Electron application. An Electron shell wraps a depende
 | Language | TypeScript 6 | Full-stack type safety, 3 tsconfig targets |
 | UI | React 19 | Function components + Hooks |
 | Styling | Hand-rolled CSS | Token-based design system (CSS custom properties), light/dark |
-| Database | better-sqlite3 | Synchronous SQLite (WAL, FTS5) for all persistent state |
+| Storage (default) | JSON / JSONL under `userData/config` | Complete default source of truth for sessions, goals, memory, checkpoints |
+| Storage (optional) | better-sqlite3 | Explicit `sqlite` / `dual` migration backends via `ZEROX_STORAGE_BACKEND` |
 | Parsing | yaml, cron-parser | `SKILL.md` frontmatter, cron schedules |
 | Testing | Vitest 4 | Unit tests + deterministic agent/memory evals |
 | Packaging | electron-builder 26 | macOS `.app` / `.dmg` / `.zip` |
@@ -151,7 +191,7 @@ The flagship actor is the **checkpoint-writer fork**: it cold-reads the parent r
 
 ### Storage & Persistence
 
-All persistent state lives in **SQLite** (`<userData>/config/zerox.db`, WAL mode, FTS5 required). The schema is plain SQL under versioned migrations (`0000_initial.sql`, embedded into the bundle at build time). **Dual-write** keeps a JSON/JSONL shadow copy so the app still runs if the native module's ABI mismatches; `ZEROX_STORAGE_BACKEND` selects `json` / `sqlite` / `dual` (default `dual`). A parity test guarantees the SQLite repository and the JSON store produce byte-identical run graphs.
+JSON/JSONL is the complete default source of truth. `ZEROX_STORAGE_BACKEND` can explicitly enable transitional `sqlite` / `dual` paths for converted run and trajectory stores, but session, Goal, Memory, and execution checkpoint state remains JSON-backed until store-by-store parity is complete.
 
 Key tables: `sessions`, `chat_messages`, `runs`, `trajectory_events`, `checkpoints`, `tool_results` (raw string offloads), `memory_records` + `memory_fts` (FTS5 external-content), `goals` + `goal_ledger`, `artifacts` (provenance), `tasks` (scheduled), `tool_audit`, `permissions`, `actors`, `learning_candidates`, `eval_candidates`, `workspaces`, `memory_profile`, `validation_snapshots`.
 
@@ -275,7 +315,8 @@ Features: lexical search (title 3×, tags 2×, body 1×, multi-word phrase match
 
 ```bash
 # 1. Clone
-git clone <repo-url> && cd "building agent"
+git clone https://github.com/ZeroxZhang/zerox-agent.git
+cd zerox-agent
 
 # 2. Initialize the repo-local harness and read the agent guide
 ./init.sh
@@ -465,7 +506,7 @@ mcpServers:               # optional MCP servers
 技能的具体指令内容，将作为 Agent 的执行指南。
 ```
 
-At startup the registry scans app-local `skills/` then user roots, parses the frontmatter, validates the manifest, collects MCP configs, initializes MCP clients, and registers custom tools on the dynamic tool registry. Skills are invoked via `@skill` fuzzy autocomplete and run through a staged `SkillExecutionContract` with provenance pinning the skill's hash for tamper-evidence.
+At startup the registry scans app-local `skills/` then user roots, parses frontmatter, and validates manifests. Skill MCP processes do not auto-start by default; automatic MCP initialization requires the explicit `ZEROX_ENABLE_SKILL_MCP=1` opt-in, and child processes inherit only an allowlisted environment plus manifest-declared values. Skills are invoked via `@skill` fuzzy autocomplete and run through a staged `SkillExecutionContract` with provenance pinning the skill's hash for tamper-evidence.
 
 ---
 
@@ -513,8 +554,10 @@ npm run dist:mac      # .dmg + .zip → release/          (distribution)
 
 Current local builds are unsigned and not notarized. Each release passes an independent packaged-app acceptance gate (a computer-use run against the local macOS package) before handoff. After downloading a `.dmg` from GitHub Releases, macOS Gatekeeper may show "Zerox Agent is damaged and can't be opened." The image is usually valid; remove the quarantine attribute before opening:
 
+Launch at login is opt-in. Set `ZEROX_ENABLE_LOGIN_STARTUP=1` only when deliberately enabling the packaged login item; hidden login-item launches keep the main window closed until the user activates the app.
+
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-3.4.0-arm64.dmg"
+xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-3.7.0-arm64.dmg"
 # or, if already dragged into Applications:
 xattr -dr com.apple.quarantine "/Applications/Zerox Agent.app"
 ```
@@ -538,7 +581,7 @@ npm run episode:export -- --config-dir <userData/config> --run-id <runId>
 npm run episode:export -- --config-dir <userData/config> --latest-validation
 ```
 
-`npm run verify` covers the Vitest suite (183 test files), the production build, 26 deterministic agent eval fixtures, and the memory eval suite. Agent evals cover native code engineering, research writing, reflection-after-test-failure, retry-budget exhaustion, context compaction, tool-call checkpointing, model retry, strategy-guard fragmentation recovery, episode eval-candidate, child-handoff review gate, goal-mode recovery/control, bounded-autonomy golden paths, Agent Runtime Kernel kernel event replay, permission-rule behavior, deterministic local artifact provenance acceptance, execution-context/tool-ledger/history contracts, memory-history scope checks, and output-rendering restore fidelity. research writing, reflection-after-test-failure, retry-budget exhaustion, context compaction, tool-call checkpointing, model retry, strategy-guard fragmentation recovery, episode eval-candidate, child-handoff review gate, goal-mode recovery/control, bounded-autonomy golden paths, Agent Runtime Kernel event replay, permission-rule behavior, deterministic local artifact provenance acceptance, execution-context/tool-ledger/history contracts, memory-history scope checks, and output-rendering restore fidelity. Adversarial evals mutation-test the harness itself. The harness score emits the seven-category ETCLOVG score plus a native Agent Capability score used by Overview.
+`npm run verify` covers the Vitest suite (200+ test files under `src/`), the production build, 26 deterministic agent eval fixtures, and the memory eval suite. Agent evals cover native code engineering, research writing, reflection-after-test-failure, retry-budget exhaustion, context compaction, tool-call checkpointing, model retry, strategy-guard fragmentation recovery, episode eval-candidate, child-handoff review gate, goal-mode recovery/control, bounded-autonomy golden paths, Agent Runtime Kernel kernel event replay, permission-rule behavior, deterministic local artifact provenance acceptance, execution-context/tool-ledger/history contracts, memory-history scope checks, and output-rendering restore fidelity. research writing, reflection-after-test-failure, retry-budget exhaustion, context compaction, tool-call checkpointing, model retry, strategy-guard fragmentation recovery, episode eval-candidate, child-handoff review gate, goal-mode recovery/control, bounded-autonomy golden paths, Agent Runtime Kernel event replay, permission-rule behavior, deterministic local artifact provenance acceptance, execution-context/tool-ledger/history contracts, memory-history scope checks, and output-rendering restore fidelity. Adversarial evals mutation-test the harness itself. The harness score emits the seven-category ETCLOVG score plus a native Agent Capability score used by Overview.
 
 Deterministic local artifact goals are accepted only when the task contract, canonical destination, generated artifact, and provenance evidence all agree; location/resource canonicalization normalizes home-relative, workspace-relative, Desktop, Downloads, and absolute roots before sandbox and acceptance checks.
 
@@ -568,15 +611,26 @@ Planned:
 
 <h1 id="chinese">Zerox Agent（中文）</h1>
 
+<p align="center">
+  <img src="docs/product/zerox-agent-product-intro.jpg" alt="Zerox Agent 产品介绍：本地优先、可控、可续、可查的桌面 AI Agent" width="780" />
+</p>
+
 ## 项目概述
 
-**Zerox Agent** 是一个本地优先的桌面智能体控制台。名字取自 **Zero + X**——从留白开始，把未知的本地工作流转成可观察、受权限管控、可恢复的 Agent 运行。
+**Zerox Agent** 是一个本地优先的桌面智能体控制台（**v3.7.0**）。名字取自 **Zero + X**——从留白开始，把未知的本地工作流转成可观察、受权限管控、可恢复的 Agent 运行。
 
-它不是聊天壳，也不是泛用云端 Agent 入口。它运行在本机：配置 OpenAI-compatible / Anthropic / Gemini 模型、扫描本地 `SKILL.md` 技能文件、执行可恢复的 Agent 运行、调用受权限管控的工具、跟踪父子多 Agent 会话、把经验和知识写入本地长期记忆，并且在改变未来行为前保留用户审核。
+它不是聊天壳，也不是泛用云端 Agent 入口，更不是无限自治循环。它运行在你的 Mac 上：自行配置 OpenAI-compatible / Anthropic / Gemini 模型（需自备 API Key）、扫描本地 `SKILL.md` 技能、执行 recoverable agent runs、调用受权限管控的工具、跟踪 parent/child multi-agent sessions、把经验写入本地长期记忆，并且在改变未来行为前保留 **user-reviewed learning**。
 
-产品边界写在 [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md)。运行时、workspace、学习机制和目标模式分别见 [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md)、[`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md)、[`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md) 与 [`docs/architecture/agent-goal-mode.md`](docs/architecture/agent-goal-mode.md)。
+**核心命题：** 把一句话变成一次可追踪的本地运行——整理文件、推进长目标、定时巡检。过程看得见，高风险先问你，中断后还能接着做。
 
-当前版本是 **v3.4.0**。本次发布以 [`docs/design/guidelines_0708.html`](docs/design/guidelines_0708.html) 为前端规范，并选择 **B · 曜石 Obsidian** 作为主色方案；界面从旧的 Soft Blue 迁移到中性灰阶 macOS 控制面、近黑主操作色、暗色模式反转主色、明确焦点与按压反馈，不改变产品核心功能。
+### 信任四支柱
+
+| 支柱 | 含义 | 代码级保证 |
+|------|------|------------|
+| **本地** | 状态与记忆都在本机 | 无云端 worker；API Key 仅 `safeStorage` 加密落盘；workspace-scoped runs |
+| **可控** | 高风险操作必须确认 | 不绕过 `ToolAuthorizationService`；shell 走结构化 `ShellPlan` |
+| **可续** | 崩溃与关应用可接上 | 工具结果后写 checkpoint；Goal 连续性与 resume |
+| **可查** | 每一步留下运行轨迹 | Runs · Evidence · kernel event replay；学习默认不生效 |
 
 ### 设计原则
 
@@ -590,11 +644,21 @@ Planned:
 | **权限管控** | 工具按任务策略授权并叠加 workspace sandbox；shell 命令做结构化分析，而非仅字符串匹配。 |
 | **模块化** | 主流程保留会话、运行、任务和设置；诊断、技能、工具、记忆、学习和评测收纳到设置内。 |
 
+### 适合谁
+
+- **独立构建者 / Power User** — 需要 Agent 动本地文件与工具，但不想把状态交给托管平台
+- **隐私敏感的知识工作** — 整理下载、导出书签、写报告、定时巡检，过程可查可回
+- **关心 Agent 可控性的人** — 不只想聊天，还想看清它做了什么、能不能停、会不会乱来
+
+产品边界写在 [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md)。运行时、workspace、学习机制和目标模式分别见 [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md)、[`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md)、[`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md) 与 [`docs/architecture/agent-goal-mode.md`](docs/architecture/agent-goal-mode.md)。
+
+当前版本是 **v3.7.0**。本次发布在 Obsidian 界面基础上强化本地权限边界、Agent 检查点恢复、上下文工具配对和持久化原子性，并保持运行轨迹可观测、学习结果需审核。
+
 ---
 
 ## 架构设计
 
-Zerox Agent 是分层 Electron 应用。Electron 壳包裹一个依赖注入 **container**，懒加载构造每个服务；**kernel** 定义事件契约、轮次循环驱动、停止策略、权限引擎和压缩；多个**执行循环**（对话、定时任务、目标里程碑）驱动 Agent；**actor 模型**支撑子智能体，**workflow 运行时**跑确定性流水线，**provider 抽象**对接 LLM；所有状态通过**双写存储层**（SQLite 主、JSON 影子）持久化。
+Zerox Agent 是分层 Electron 应用。Electron 壳包裹一个依赖注入 **container**，懒加载构造每个服务；**kernel** 定义事件契约、轮次循环驱动、停止策略、权限引擎和压缩；对话、定时任务与目标里程碑共享同一套生产 turn-loop 契约；**actor 模型**支撑受权限收窄的子智能体，**workflow 运行时**在显式开启后跑确定性流水线，**provider 抽象**对接 LLM。**JSON/JSONL 是覆盖全部核心域的默认真相源**；SQLite / dual-write 仅为显式迁移模式。
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -617,7 +681,7 @@ Zerox Agent 是分层 Electron 应用。Electron 壳包裹一个依赖注入 **c
 │  │ OpenAI-c. │ │           │ │           │ │                  │  │
 │  └───────────┘ └───────────┘ └───────────┘ └──────────────────┘  │
 │  ┌────────────────────────────────────────────────────────────┐  │
-│  │  存储：SQLite (zerox.db) + 双写 JSON 影子                   │  │
+│  │  存储：JSON/JSONL 默认 · SQLite/dual 显式迁移                │  │
 │  └────────────────────────────────────────────────────────────┘  │
 ├─────────────────────────── IPC ──────────────────────────────────┤
 │            Preload 桥接层  (contextIsolation: true)               │
@@ -638,7 +702,8 @@ Zerox Agent 是分层 Electron 应用。Electron 壳包裹一个依赖注入 **c
 | 类型 | TypeScript 6 | 全栈类型安全，三套 tsconfig |
 | UI | React 19 | 函数组件 + Hooks |
 | 样式 | 手写 CSS | 基于 token 的设计系统（CSS 自定义属性），明暗主题 |
-| 数据库 | better-sqlite3 | 同步 SQLite（WAL、FTS5）持久化全部状态 |
+| 存储（默认） | JSON / JSONL | `userData/config` 下完整默认真相源 |
+| 存储（可选） | better-sqlite3 | `ZEROX_STORAGE_BACKEND=sqlite|dual` 显式迁移路径 |
 | 解析 | yaml、cron-parser | `SKILL.md` 前置元数据、cron 调度 |
 | 测试 | Vitest 4 | 单元测试 + 确定性 Agent/记忆评测 |
 | 打包 | electron-builder 26 | macOS `.app` / `.dmg` / `.zip` |
@@ -682,7 +747,7 @@ Zerox Agent 是分层 Electron 应用。Electron 壳包裹一个依赖注入 **c
 
 ### 存储与持久化
 
-所有持久化状态在 **SQLite**（`<userData>/config/zerox.db`，WAL 模式，需要 FTS5）。schema 是版本化迁移下的纯 SQL（`0000_initial.sql`，构建时嵌入 bundle）。**双写**保留 JSON/JSONL 影子副本，原生模块 ABI 不匹配时应用仍可运行；`ZEROX_STORAGE_BACKEND` 选择 `json`/`sqlite`/`dual`（默认 `dual`）。一项 parity 测试保证 SQLite 仓库与 JSON 存储产出逐字节一致的 run graph。
+JSON/JSONL 是覆盖全部核心域的默认真相源。`ZEROX_STORAGE_BACKEND` 可显式启用仍在迁移中的 `sqlite`/`dual` 路径，但会话、Goal、Memory 与执行 checkpoint 在完成逐 store parity 前继续以 JSON 为准。
 
 主要表：`sessions`、`chat_messages`、`runs`、`trajectory_events`、`checkpoints`、`tool_results`（原始字符串卸载）、`memory_records` + `memory_fts`（FTS5 external-content）、`goals` + `goal_ledger`、`artifacts`（来源证明）、`tasks`（定时）、`tool_audit`、`permissions`、`actors`、`learning_candidates`、`eval_candidates`、`workspaces`、`memory_profile`、`validation_snapshots`。
 
@@ -806,7 +871,8 @@ Zerox Agent 是分层 Electron 应用。Electron 壳包裹一个依赖注入 **c
 
 ```bash
 # 1. 克隆仓库
-git clone <repo-url> && cd "building agent"
+git clone https://github.com/ZeroxZhang/zerox-agent.git
+cd zerox-agent
 
 # 2. 初始化仓库本地 harness，并阅读 Agent 操作指南
 ./init.sh
@@ -996,7 +1062,7 @@ mcpServers:               # 可选 MCP 服务器
 技能的具体指令内容，将作为 Agent 的执行指南。
 ```
 
-启动时注册表按序扫描应用内 `skills/` 和用户目录，解析 frontmatter、校验 manifest、收集 MCP 配置、初始化 MCP 客户端，并把自定义工具注册到动态工具注册表。技能通过输入框 `@skill` 模糊自动补全调用，经分阶段 `SkillExecutionContract` 执行，并用 hash 锁定技能来源以防篡改。
+启动时注册表按序扫描应用内 `skills/` 和用户目录，解析 frontmatter 并校验 manifest。Skill MCP 进程默认不会自动启动；只有显式设置 `ZEROX_ENABLE_SKILL_MCP=1` 才会自动初始化，子进程仅继承白名单环境变量和 manifest 明确声明的值。技能通过输入框 `@skill` 模糊自动补全调用，经分阶段 `SkillExecutionContract` 执行，并用 hash 锁定技能来源以防篡改。
 
 ---
 
@@ -1044,6 +1110,8 @@ npm run dist:mac      # .dmg + .zip → release/       （分发）
 
 当前本地构建产物未签名、未公证。每个版本在交接前都会通过独立 packaged-app 验收（针对本地 macOS 包的 computer-use 运行）。从 GitHub Releases 下载 `.dmg` 后，macOS Gatekeeper 可能提示「Zerox Agent 已损坏，无法打开」。这通常不是文件损坏，而是下载隔离属性拦截。打开前在终端执行：
 
+开机登录启动默认关闭。只有明确设置 `ZEROX_ENABLE_LOGIN_STARTUP=1` 时才会配置打包应用的 Login Item；隐藏登录启动不会主动显示主窗口。
+
 ```bash
 xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-<version>-arm64.dmg"
 # 或已拖进 Applications：
@@ -1069,7 +1137,7 @@ npm run episode:export -- --config-dir <userData/config> --run-id <runId>
 npm run episode:export -- --config-dir <userData/config> --latest-validation
 ```
 
-`npm run verify` 覆盖 Vitest 测试套件（183 个测试文件）、生产构建、确定性 Agent 评测套件（26 个 fixture）和记忆评测套件。Agent 评测覆盖原生代码工程、研究写作、测试失败反思、retry budget 耗尽、上下文压缩、tool-call checkpoint、模型重试、strategy guard 碎片化恢复、episode eval candidate、child handoff review gate、goal-mode recovery/control、bounded-autonomy 黄金路径、Agent Runtime Kernel 事件回放、permission-rule 行为、确定性本地 artifact 来源验收、execution-context/tool-ledger/history 契约、memory-history scope 检查和输出渲染恢复保真。对抗评测对 harness 本身做变异测试。harness 评分输出与 Overview 一致的七类 ETCLOVG 分数和原生 Agent Capability 分数。
+`npm run verify` 覆盖 Vitest 测试套件（`src/` 下 200+ 个测试文件）、生产构建、确定性 Agent 评测套件（26 个 fixture）和记忆评测套件。Agent 评测覆盖原生代码工程、研究写作、测试失败反思、retry budget 耗尽、上下文压缩、tool-call checkpoint、模型重试、strategy guard 碎片化恢复、episode eval candidate、child handoff review gate、goal-mode recovery/control、bounded-autonomy 黄金路径、Agent Runtime Kernel 事件回放、permission-rule 行为、确定性本地 artifact 来源验收、execution-context/tool-ledger/history 契约、memory-history scope 检查和输出渲染恢复保真。对抗评测对 harness 本身做变异测试。harness 评分输出与 Overview 一致的七类 ETCLOVG 分数和原生 Agent Capability 分数。
 
 确定性本地 artifact 目标只有在 task contract、canonical destination、生成的 artifact 和 provenance evidence 相互匹配时才通过验收。Location/resource canonicalization 会在 sandbox 和验收检查前规范化 `~`、workspace-relative、Desktop、Downloads 和绝对路径。
 
