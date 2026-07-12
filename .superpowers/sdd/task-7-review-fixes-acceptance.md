@@ -77,3 +77,30 @@ The replay seal authenticated the persisted manifest but did not compare that ma
   - Passed: 4 files, 250 tests.
 - `npx tsc -p tsconfig.electron.json --noEmit --pretty false`
   - Passed.
+
+## Final review follow-up: one deadline and descriptor-bound reads
+
+### RED
+
+- A controlled chunk barrier showed replay had no deadline during live evidence hashing.
+- A delayed revalidation followed by a pending provider showed the provider received a fresh timeout instead of the attempt's remaining budget.
+- Replacing a validated artifact parent with a symlink between precheck and open was not covered by an fd/path identity binding test.
+- Two provenance sidecars with distinct invalid UTF-8 bytes decoded to the same text and therefore produced the same sidecar hash.
+
+### Fix
+
+- Replay creates one linked final-judge deadline before live revalidation. The same deadline signal covers artifact/provenance reads, chunk hashing, model transport, response parsing, and judged publication; model-review helpers do not create a nested timer for replay.
+- Deadline expiry during evidence work returns retryable `judge_timeout`, retains the original seal and manifest, emits no provider call, and leaves parent cancellation on the abort path.
+- `readTrustedRegularFile` centralizes trusted reads for artifacts, artifact destinations, and provenance sidecars:
+  - authorization and canonical roots are captured before the injectable pre-open barrier;
+  - the leaf is opened with `O_NOFOLLOW`;
+  - after open and after hashing, the path is revalidated for containment and symlink segments;
+  - `lstat`/`stat` path identity and regular-file type/size must match the opened fd's `dev` and `ino`;
+  - all bytes are read and hashed asynchronously in 64 KiB chunks from that same fd with abort checks and abortable hooks between chunks.
+- Provenance JSON decoding uses a separate view of the single descriptor-bound raw Buffer; the sealed sidecar SHA-256 is calculated from exact raw bytes without a path reread.
+
+### Verification
+
+- Controlled deadline, remaining-budget, and parent-replacement tests: 3 passed.
+- Exact raw provenance byte regression: 1 passed.
+- Full focused acceptance/evidence/provenance/controller suite: 4 files, 254 tests passed.

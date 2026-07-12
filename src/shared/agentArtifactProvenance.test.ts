@@ -100,6 +100,37 @@ describe("agentArtifactProvenance", () => {
     expect(manifest.destination.sha256).toMatch(/^[a-f0-9]{64}$/);
   });
 
+  it("hashes provenance sidecars from exact raw bytes before UTF-8 decoding", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "artifact-provenance-bytes-"));
+    const artifactPath = path.join(root, "report.md");
+    await writeFile(artifactPath, "# Report\n", "utf8");
+    const provenancePath = await writeArtifactProvenance({
+      artifactPath,
+      artifactId: "report",
+      artifactRef: "artifact:report",
+      runId: "run_1",
+      source: { type: "raw-byte-marker" },
+    });
+    const original = await readFile(provenancePath);
+    const markerOffset = original.indexOf(Buffer.from("raw-byte-marker"));
+    expect(markerOffset).toBeGreaterThanOrEqual(0);
+    const firstBytes = Buffer.from(original);
+    const secondBytes = Buffer.from(original);
+    firstBytes[markerOffset] = 0xc0;
+    secondBytes[markerOffset] = 0xc1;
+
+    await writeFile(provenancePath, firstBytes);
+    const first = await verifyArtifactProvenance({ artifactPath });
+    await writeFile(provenancePath, secondBytes);
+    const second = await verifyArtifactProvenance({ artifactPath });
+
+    expect(first).toMatchObject({ ok: true });
+    expect(second).toMatchObject({ ok: true });
+    expect(first.ok && second.ok && first.sidecarSha256).not.toBe(
+      second.ok ? second.sidecarSha256 : undefined,
+    );
+  });
+
   it("reports deterministic verification failures for missing or stale provenance", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "artifact-provenance-"));
     const artifactPath = path.join(root, "bookmark_list.md");

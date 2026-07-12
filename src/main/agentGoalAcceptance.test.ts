@@ -3,6 +3,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  rename,
   rm,
   symlink,
   writeFile,
@@ -2191,6 +2192,132 @@ describe("agent goal acceptance", () => {
     expect(fixture.replayValidatorCalls()).toBe(0);
   });
 
+  it("applies the final judge deadline while live evidence hashing is paused", async () => {
+    vi.useFakeTimers();
+    let chunkObserved = false;
+    let enterChunkBarrier: (() => void) | undefined;
+    const chunkBarrierEntered = new Promise<void>((resolve) => {
+      enterChunkBarrier = resolve;
+    });
+    const fixture = await createSealedFileReplayFixture({
+      finalJudgeTimeoutMs: 25,
+      replayEvidenceHooks: {
+        async afterChunkProcessed() {
+          chunkObserved = true;
+          enterChunkBarrier?.();
+          await new Promise<void>(() => {
+            // The shared replay deadline must abort this controlled barrier.
+          });
+        },
+      },
+    });
+
+    const replayPromise = fixture.replay();
+    await chunkBarrierEntered;
+    await vi.advanceTimersByTimeAsync(25);
+    const replay = await replayPromise;
+
+    expect(chunkObserved).toBe(true);
+    expect(replay).toMatchObject({
+      accepted: false,
+      verdict: "acceptance_unavailable",
+      retry: { code: "judge_timeout", retryable: true },
+      finalJudgeReplay: {
+        evidenceFingerprint: fixture.sealed.evidenceFingerprint,
+      },
+    });
+    expect(fixture.replayModelCalls()).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("passes only the remaining per-attempt deadline budget to the provider", async () => {
+    vi.useFakeTimers();
+    const startedAt = Date.now();
+    let providerStartedAt = -1;
+    let enterChunkBarrier: (() => void) | undefined;
+    const chunkBarrierEntered = new Promise<void>((resolve) => {
+      enterChunkBarrier = resolve;
+    });
+    let releaseChunkBarrier: (() => void) | undefined;
+    const chunkBarrier = new Promise<void>((resolve) => {
+      releaseChunkBarrier = resolve;
+    });
+    let enterProvider: (() => void) | undefined;
+    const providerEntered = new Promise<void>((resolve) => {
+      enterProvider = resolve;
+    });
+    const fixture = await createSealedFileReplayFixture({
+      finalJudgeTimeoutMs: 30,
+      replayEvidenceHooks: {
+        async afterChunkProcessed() {
+          enterChunkBarrier?.();
+          await chunkBarrier;
+        },
+      },
+      replayComplete(request) {
+        providerStartedAt = Date.now() - startedAt;
+        enterProvider?.();
+        return new Promise((_, reject) => {
+          request.signal?.addEventListener(
+            "abort",
+            () => reject(request.signal?.reason),
+            { once: true },
+          );
+        });
+      },
+    });
+    const replayPromise = fixture.replay();
+    await chunkBarrierEntered;
+    await vi.advanceTimersByTimeAsync(20);
+    releaseChunkBarrier?.();
+    await providerEntered;
+    expect(providerStartedAt).toBe(20);
+    await vi.advanceTimersByTimeAsync(10);
+    const replayResult = await replayPromise;
+
+    expect(replayResult).toMatchObject({
+      accepted: false,
+      retry: { code: "judge_timeout", retryable: true },
+    });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("rejects a parent replaced after precheck by binding the opened file descriptor", async () => {
+    const parentPath = path.join(workspacePath, "sealed-parent");
+    const backupPath = path.join(workspacePath, "sealed-parent-backup");
+    const outsideParent = path.join(homePath, "outside-parent");
+    await mkdir(outsideParent, { recursive: true });
+    await writeFile(
+      path.join(outsideParent, "final-report.md"),
+      "# Final report\ncomplete",
+      "utf8",
+    );
+    let swapped = false;
+    const fixture = await createSealedFileReplayFixture({
+      relativeArtifactPath: "sealed-parent/final-report.md",
+      replayEvidenceHooks: {
+        async beforeOpen(candidatePath) {
+          if (swapped || candidatePath !== path.join(parentPath, "final-report.md")) {
+            return;
+          }
+          swapped = true;
+          await rename(parentPath, backupPath);
+          await symlink(outsideParent, parentPath);
+        },
+      },
+    });
+
+    const replay = await fixture.replay();
+
+    expect(swapped).toBe(true);
+    expect(replay).toMatchObject({
+      accepted: false,
+      verdict: "acceptance_unavailable",
+    });
+    expect(fixture.replayModelCalls()).toBe(0);
+    expect(fixture.replayValidatorCalls()).toBe(0);
+  });
+
   it.each([
     ["accepted", "accepted", undefined, "judge_accepted"],
     ["rejected", "rejected_repairable", "semantic_evidence_insufficient", "semantic_evidence_insufficient"],
@@ -3042,9 +3169,20 @@ describe("agent goal acceptance", () => {
 
   async function createSealedFileReplayFixture(options: {
     requireProvenance?: boolean;
+    finalJudgeTimeoutMs?: number;
+    relativeArtifactPath?: string;
+    replayEvidenceHooks?: {
+      beforeOpen?(artifactPath: string): Promise<void>;
+      afterChunkProcessed?(artifactPath: string, bytesRead: number): Promise<void>;
+    };
+    replayComplete?: ChatClient["complete"];
   } = {}) {
-    const artifactPath = path.join(workspacePath, "final-report.md");
+    const artifactPath = path.join(
+      workspacePath,
+      options.relativeArtifactPath ?? "final-report.md",
+    );
     const evidenceRef = `artifact:${artifactPath}`;
+    await mkdir(path.dirname(artifactPath), { recursive: true });
     await writeFile(artifactPath, "# Final report\ncomplete", "utf8");
     if (options.requireProvenance) {
       await writeArtifactProvenance({
@@ -3079,7 +3217,15 @@ describe("agent goal acceptance", () => {
         },
       }],
     });
-    const acceptance = createAgentGoalAcceptance({ registry });
+    const acceptance = createAgentGoalAcceptance({
+      registry,
+      ...(options.finalJudgeTimeoutMs === undefined
+        ? {}
+        : { finalJudgeTimeoutMs: options.finalJudgeTimeoutMs }),
+      ...(options.replayEvidenceHooks
+        ? { replayEvidenceHooks: options.replayEvidenceHooks }
+        : {}),
+    } as never);
     const goal = createGoal([
       check("deterministic", deterministicKind, {}),
       check("semantic", "model_review", {
@@ -3113,8 +3259,11 @@ describe("agent goal acceptance", () => {
         replaying = true;
         return acceptance.replayFinalGoalJudge(goal, sealed, createContext({
           chatClient: {
-            async complete() {
+            async complete(request) {
               replayModelCallCount += 1;
+              if (options.replayComplete) {
+                return options.replayComplete(request);
+              }
               return {
                 content: JSON.stringify({
                   verdict: "accepted",

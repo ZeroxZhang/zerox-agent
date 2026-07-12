@@ -130,6 +130,10 @@ export type AgentGoalAcceptanceOptions = {
   judgeProviderId?: string;
   judgeTimeoutMs?: number;
   finalJudgeTimeoutMs?: number;
+  replayEvidenceHooks?: {
+    beforeOpen?(artifactPath: string): Promise<void>;
+    afterChunkProcessed?(artifactPath: string, bytesRead: number): Promise<void>;
+  };
 };
 
 export type AgentGoalAcceptance = {
@@ -225,31 +229,44 @@ export function createAgentGoalAcceptance(
         return result;
       }
 
-      const liveEvidence = await revalidateGoalEvidenceManifest({
-        manifest: sealedEvidence.evidenceManifest,
-        workspacePath: ctx.workspacePath,
-        extraAuthorizedRoots: getAllowedExtraRoots(ctx),
-        locationEnv: getAcceptanceLocationEnv(ctx),
-        artifacts: ctx.artifacts,
-        requiredProvenanceRefs: collectRequiredProvenanceRefs(goal),
-        signal: ctx.signal,
-      });
-      if (!liveEvidence.ok) {
-        const result = changedFinalGoalJudgeReplayResult(goal, sealedEvidence);
-        await emitAcceptanceChecked(ctx, result, {
-          targetKind: "goal",
-          goalId: goal.id,
+      const operation = createLinkedJudgeDeadline(ctx.signal, finalJudgeTimeoutMs);
+      let result: AcceptanceResult;
+      try {
+        const liveEvidence = await revalidateGoalEvidenceManifest({
+          manifest: sealedEvidence.evidenceManifest,
+          workspacePath: ctx.workspacePath,
+          extraAuthorizedRoots: getAllowedExtraRoots(ctx),
+          locationEnv: getAcceptanceLocationEnv(ctx),
+          artifacts: ctx.artifacts,
+          requiredProvenanceRefs: collectRequiredProvenanceRefs(goal),
+          signal: operation.signal,
+          beforeTrustedFileOpen: options.replayEvidenceHooks?.beforeOpen,
+          afterChunkProcessed:
+            options.replayEvidenceHooks?.afterChunkProcessed,
         });
-        return result;
+        throwIfJudgeDeadlinePassed(operation);
+        result = liveEvidence.ok
+          ? await replayFinalModelReviews(
+              goal,
+              sealedEvidence,
+              ctx,
+              options,
+              finalJudgeTimeoutMs,
+              operation,
+            )
+          : changedFinalGoalJudgeReplayResult(goal, sealedEvidence);
+      } catch (error) {
+        if (operation.timedOut()) {
+          result = timeoutFinalGoalJudgeReplayResult(goal, sealedEvidence);
+        } else if (ctx.signal?.aborted || operation.signal.aborted) {
+          throw abortError(ctx.signal?.reason ?? operation.signal.reason);
+        } else {
+          throw error;
+        }
+      } finally {
+        operation.dispose();
       }
 
-      const result = await replayFinalModelReviews(
-        goal,
-        sealedEvidence,
-        ctx,
-        options,
-        finalJudgeTimeoutMs,
-      );
       await emitAcceptanceChecked(ctx, result, {
         targetKind: "goal",
         goalId: goal.id,
@@ -948,6 +965,7 @@ async function evaluateFinalModelReview(
   options: AgentGoalAcceptanceOptions,
   timeoutMs: number,
   sealedEvidenceManifest?: GoalEvidenceManifest,
+  sharedOperation?: LinkedJudgeDeadline,
 ): Promise<{
   checkResult: CheckResult;
   inferentialUsed: boolean;
@@ -970,7 +988,8 @@ async function evaluateFinalModelReview(
     };
   }
 
-  const operation = createLinkedJudgeDeadline(ctx.signal, timeoutMs);
+  const operation = sharedOperation ?? createLinkedJudgeDeadline(ctx.signal, timeoutMs);
+  const ownsOperation = sharedOperation === undefined;
   let collectedEvidenceManifest: GoalEvidenceManifest | undefined;
   try {
 
@@ -1104,7 +1123,7 @@ async function evaluateFinalModelReview(
     }
     throw error;
   } finally {
-    operation.dispose();
+    if (ownsOperation) operation.dispose();
   }
 }
 
@@ -1114,6 +1133,7 @@ async function replayFinalModelReviews(
   ctx: AcceptanceContext,
   options: AgentGoalAcceptanceOptions,
   timeoutMs: number,
+  operation: LinkedJudgeDeadline,
 ): Promise<AcceptanceResult> {
   const checkResults = sealedEvidence.deterministicCheckResults.map((result) => ({
     ...result,
@@ -1145,6 +1165,7 @@ async function replayFinalModelReviews(
       options,
       timeoutMs,
       sealedEvidence.evidenceManifest,
+      operation,
     );
     checkResults.push(result.checkResult);
     inferentialUsed = inferentialUsed || result.inferentialUsed;
@@ -1332,6 +1353,30 @@ function changedFinalGoalJudgeReplayResult(
       retryable: false,
       detail,
     },
+  };
+}
+
+function timeoutFinalGoalJudgeReplayResult(
+  goal: Goal,
+  sealedEvidence: FinalGoalJudgeReplayEvidence,
+): AcceptanceResult {
+  const check = goal.successCriteria.flatMap((criterion) => criterion.acceptanceChecks)
+    .find((candidate) => candidate.kind === "model_review");
+  return {
+    accepted: false,
+    verdict: "acceptance_unavailable",
+    failureClass: "judge_unavailable",
+    checkResults: check
+      ? [unavailableJudgeResult(
+          check,
+          parseEvidenceRefs(check.params.evidenceRefs),
+          "judge_timeout",
+        )]
+      : [],
+    inferentialUsed: false,
+    evidenceManifest: sealedEvidence.evidenceManifest,
+    finalJudgeReplay: sealedEvidence,
+    retry: classifyAcceptanceInfrastructureFailure({ code: "ETIMEDOUT" }),
   };
 }
 

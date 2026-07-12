@@ -1,5 +1,3 @@
-import { constants } from "node:fs";
-import { open } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 import path from "node:path";
@@ -15,6 +13,10 @@ import {
   type LocationResourceEnvironment,
 } from "../shared/locationResource";
 import { verifyArtifactProvenance } from "../shared/agentArtifactProvenance";
+import {
+  readTrustedRegularFile,
+  TrustedFileSnapshotValidationError,
+} from "../shared/trustedFileSnapshot";
 
 const defaultMaxRenderedChars = 12_000;
 const defaultMaxReadBytes = 2 * 1024 * 1024;
@@ -47,6 +49,7 @@ export type BuildGoalEvidenceManifestInput = {
   provenance?: GoalEvidenceProvenanceRequirement;
   signal?: AbortSignal;
   afterProvenanceVerified?: (artifactPath: string) => Promise<void>;
+  beforeTrustedFileOpen?: (artifactPath: string) => Promise<void>;
   afterChunkProcessed?: (artifactPath: string, bytesRead: number) => Promise<void>;
   afterFileClosed?: (artifactPath: string) => Promise<void>;
 };
@@ -72,6 +75,8 @@ export type RevalidateGoalEvidenceManifestInput = {
   locationEnv?: LocationResourceEnvironment;
   artifacts?: Record<string, unknown>;
   requiredProvenanceRefs?: string[];
+  beforeTrustedFileOpen?: (artifactPath: string) => Promise<void>;
+  afterChunkProcessed?: (artifactPath: string, bytesRead: number) => Promise<void>;
   signal?: AbortSignal;
 };
 
@@ -192,6 +197,8 @@ export async function revalidateGoalEvidenceManifest(
         now: () => input.manifest.generatedAt,
         maxRenderedChars: 0,
         signal: input.signal,
+        beforeTrustedFileOpen: input.beforeTrustedFileOpen,
+        afterChunkProcessed: input.afterChunkProcessed,
         ...(sealedProvenance
           ? {
               provenance: {
@@ -293,6 +300,19 @@ async function buildArtifact(
           ? { milestoneId: input.provenance.milestoneId }
           : {}),
         signal: input.signal,
+        trustedRoots: roots,
+        locationEnv: env,
+        trustedFileHooks: {
+          ...(input.beforeTrustedFileOpen
+            ? { afterPrecheck: input.beforeTrustedFileOpen }
+            : {}),
+          ...(input.afterChunkProcessed
+            ? {
+                afterChunk: async (artifactPath, chunk) =>
+                  input.afterChunkProcessed?.(artifactPath, chunk.length),
+              }
+            : {}),
+        },
       });
       throwIfManifestAborted(input.signal);
       if (!verification.ok) continue;
@@ -440,59 +460,46 @@ async function buildFileArtifact(
   const boundary = validatePathInsideLocationRoots(candidatePath, roots, env);
   if (!boundary.ok) return null;
 
-  let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
-    handle = await open(
-      boundary.path,
-      constants.O_RDONLY |
-        (constants.O_NONBLOCK ?? 0) |
-        (constants.O_NOFOLLOW ?? 0),
-    );
-    throwIfManifestAborted(input.signal);
-    const stats = await abortableManifestOperation(handle.stat(), input.signal);
-    throwIfManifestAborted(input.signal);
-    if (!stats.isFile()) return null;
     const mediaType = detectMediaType(boundary.path);
     const snapshot = await readSnapshot(
-      handle,
-      stats.mtime.toISOString(),
       maxReadBytes,
       mediaType,
       criterionText,
       boundary.path,
+      roots,
+      env,
       input,
     );
     throwIfManifestAborted(input.signal);
     return adaptSnapshot(ref, boundary.path, mediaType, snapshot, criterionText);
   } catch (error) {
-    if (isUnresolvableFileError(error)) return null;
-    throw error;
-  } finally {
-    if (handle) {
-      await handle.close();
-      await input.afterFileClosed?.(boundary.path);
+    if (input.signal?.aborted || isAbortError(error)) {
+      throw new GoalEvidenceManifestAbortError();
     }
+    if (
+      isUnresolvableFileError(error) ||
+      error instanceof TrustedFileSnapshotValidationError
+    ) return null;
+    throw error;
   }
 }
 
 async function readSnapshot(
-  handle: Awaited<ReturnType<typeof open>>,
-  modifiedAt: string,
   maxReadBytes: number,
   mediaType: string,
   criterionText: string,
   artifactPath: string,
+  roots: string[],
+  env: Required<LocationResourceEnvironment>,
   input: BuildGoalEvidenceManifestInput,
 ): Promise<FileSnapshot> {
   throwIfManifestAborted(input.signal);
-  const hash = createHash("sha256");
-  const readBuffer = Buffer.allocUnsafe(64 * 1024);
   const tailBudget = Math.min(64 * 1024, Math.floor(maxReadBytes / 4));
   const headBudget = Math.max(0, maxReadBytes - tailBudget);
   const headChunks: Buffer[] = [];
   let headBytes = 0;
   let tail: Buffer<ArrayBufferLike> = Buffer.alloc(0);
-  let sizeBytes = 0;
   const isText = isTextMedia(mediaType);
   const decoder = isText ? new StringDecoder("utf8") : null;
   const textScanner = isText ? new TextScanner(criterionText) : null;
@@ -502,34 +509,36 @@ async function readSnapshot(
       ? new DelimitedTableScanner(mediaType === "text/csv" ? "," : "\t")
       : null;
 
-  while (true) {
-    throwIfManifestAborted(input.signal);
-    const { bytesRead } = await abortableManifestOperation(
-      handle.read(readBuffer, 0, readBuffer.length, null),
-      input.signal,
-    );
-    throwIfManifestAborted(input.signal);
-    if (bytesRead === 0) break;
-    const chunk = Buffer.from(readBuffer.subarray(0, bytesRead));
-    hash.update(chunk);
-    sizeBytes += bytesRead;
-    if (headBytes < headBudget) {
-      const retained = chunk.subarray(0, Math.min(chunk.length, headBudget - headBytes));
-      headChunks.push(Buffer.from(retained));
-      headBytes += retained.length;
-    }
-    if (tailBudget > 0) {
-      tail = appendBoundedTail(tail, chunk, tailBudget);
-    }
-    if (decoder) {
-      const decoded = decoder.write(chunk);
-      textScanner?.push(decoded);
-      jsonScanner?.push(decoded);
-      tableScanner?.push(decoded);
-    }
-    await input.afterChunkProcessed?.(artifactPath, bytesRead);
-    throwIfManifestAborted(input.signal);
-  }
+  const trusted = await readTrustedRegularFile({
+    filePath: artifactPath,
+    trustedRoots: roots,
+    locationEnv: env,
+    signal: input.signal,
+    hooks: {
+      ...(input.beforeTrustedFileOpen
+        ? { afterPrecheck: input.beforeTrustedFileOpen }
+        : {}),
+      async afterChunk(_filePath, chunk) {
+        if (headBytes < headBudget) {
+          const retained = chunk.subarray(
+            0,
+            Math.min(chunk.length, headBudget - headBytes),
+          );
+          headChunks.push(Buffer.from(retained));
+          headBytes += retained.length;
+        }
+        if (tailBudget > 0) tail = appendBoundedTail(tail, chunk, tailBudget);
+        if (decoder) {
+          const decoded = decoder.write(chunk);
+          textScanner?.push(decoded);
+          jsonScanner?.push(decoded);
+          tableScanner?.push(decoded);
+        }
+        await input.afterChunkProcessed?.(artifactPath, chunk.length);
+      },
+    },
+    afterClose: input.afterFileClosed,
+  });
   if (decoder) {
     const finalText = decoder.end();
     textScanner?.push(finalText);
@@ -538,9 +547,9 @@ async function readSnapshot(
   }
 
   return {
-    sizeBytes,
-    modifiedAt,
-    sha256: hash.digest("hex"),
+    sizeBytes: trusted.sizeBytes,
+    modifiedAt: trusted.modifiedAt,
+    sha256: trusted.sha256,
     head: Buffer.concat(headChunks),
     tail,
     ...(textScanner ? { text: textScanner.finish() } : {}),
@@ -1556,4 +1565,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function isUnresolvableFileError(error: unknown): boolean {
   const code = (error as NodeJS.ErrnoException).code;
   return code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP" || code === "EACCES" || code === "EPERM";
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
 }
