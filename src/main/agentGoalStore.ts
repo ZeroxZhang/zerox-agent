@@ -8,7 +8,12 @@ import {
 } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import type { Goal, GoalStatus, ProgressLedgerEvent } from "../shared/agentGoal";
+import {
+  sanitizeFinalGoalJudgeReplayEvidence,
+  type Goal,
+  type GoalStatus,
+  type ProgressLedgerEvent,
+} from "../shared/agentGoal";
 import { readRecoverableJsonl } from "./jsonlRecovery";
 import { verifyGoalAcceptanceCertificate } from "./agentGoalAcceptanceCertificate";
 
@@ -132,8 +137,10 @@ export function createAgentGoalStore(options: {
       if (existing?.status === "completed_unverified") {
         return { saved: false, goal: sanitizeGoalForRead(existing) };
       }
-      const candidate = stripUnverifiedCompletionCertificate(
-        preserveCanonicalAcceptance(existing, goal),
+      const candidate = sanitizeFinalJudgeReplay(
+        stripUnverifiedCompletionCertificate(
+          preserveCanonicalAcceptance(existing, goal),
+        ),
       );
       if (
         existing &&
@@ -297,13 +304,29 @@ function isActiveGoal(goal: Goal | null): goal is Goal {
 }
 
 function normalizeGoal(goal: Goal): Goal {
-  return {
+  return sanitizeFinalJudgeReplay({
     ...goal,
     ...(goal.chatSessionId ? { chatSessionId: String(goal.chatSessionId) } : {}),
     ...(goal.originMessageId
       ? { originMessageId: String(goal.originMessageId) }
       : {}),
-  };
+  });
+}
+
+function sanitizeFinalJudgeReplay(goal: Goal): Goal {
+  const retryState = goal.acceptanceRetryState;
+  if (!retryState?.finalJudgeReplay) return goal;
+  const finalJudgeReplay = sanitizeFinalGoalJudgeReplayEvidence(
+    retryState.finalJudgeReplay,
+  );
+  if (finalJudgeReplay) {
+    return {
+      ...goal,
+      acceptanceRetryState: { ...retryState, finalJudgeReplay },
+    };
+  }
+  const { finalJudgeReplay: _invalidReplay, ...safeRetryState } = retryState;
+  return { ...goal, acceptanceRetryState: safeRetryState };
 }
 
 function sanitizeGoalForRead(goal: Goal): Goal {

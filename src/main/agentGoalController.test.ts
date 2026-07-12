@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type {
   AcceptanceRepairDirective,
+  FinalGoalJudgeReplayEvidence,
   Goal,
   GoalEvidenceManifest,
   Milestone,
@@ -1690,6 +1691,8 @@ describe("agent goal controller", () => {
 
     expect(result.status).toBe("achieved");
     expect(acceptance.goalCalls).toBe(2);
+    expect(acceptance.evaluateGoalCalls).toBe(1);
+    expect(acceptance.replayCalls).toBe(1);
     expect(runtime.runMilestoneIds).toEqual(["milestone_1"]);
     expect(result.budgetUsage.toolCalls).toBe(1);
     expect(trajectoryEvents.map((event) => event.type)).toContain(
@@ -1734,6 +1737,8 @@ describe("agent goal controller", () => {
       resumeFrom: "final_judge",
     });
     expect(acceptance.goalCalls).toBe(3);
+    expect(acceptance.evaluateGoalCalls).toBe(1);
+    expect(acceptance.replayCalls).toBe(2);
     expect(observedSleeps).toEqual([1_000, 2_000]);
     expect(runtime.runMilestoneIds).toEqual(["milestone_1", "milestone_2"]);
     expect(result.acceptanceCertificate).toBeUndefined();
@@ -2343,6 +2348,44 @@ describe("agent goal controller", () => {
     });
   });
 
+  it("returns to acceptance waiting after three continued timeouts even when the task budget is exhausted", async () => {
+    await store.save(
+      waitingForAcceptanceGoal({
+        budgetUsage: {
+          iterations: 8,
+          toolCalls: 99,
+          wallClockMs: 600_000,
+          tokens: 0,
+          replans: 2,
+        },
+      }),
+    );
+    const acceptance = createAcceptanceResults({
+      milestones: [],
+      goals: [
+        timeoutResult({ evidenceManifest: emptyManifest }),
+        timeoutResult({ evidenceManifest: emptyManifest }),
+        timeoutResult({ evidenceManifest: emptyManifest }),
+      ],
+    });
+    const controller = createController({
+      runtime: createRuntime(),
+      acceptance,
+      sleep: async () => undefined,
+    });
+
+    const result = await controller.continueAcceptance("goal_1");
+
+    expect(result).toMatchObject({
+      status: "waiting_for_acceptance",
+      acceptanceState: { phase: "awaiting_user" },
+      acceptanceRetryState: { cycle: 2, attempt: 3 },
+    });
+    expect(result.stopReason).toBeUndefined();
+    expect(acceptance.evaluateGoalCalls).toBe(0);
+    expect(acceptance.replayCalls).toBe(3);
+  });
+
   it("keeps the task budget gate for a generic retry-state resume", async () => {
     await store.save(
       waitingForAcceptanceGoal({
@@ -2387,6 +2430,7 @@ describe("agent goal controller", () => {
           lastDetail: "Final judge timed out.",
           nextRetryAt: "2026-06-12T00:00:02.000Z",
           evidenceFingerprint: evidenceFingerprint(emptyManifest),
+          finalJudgeReplay: finalJudgeReplay(emptyManifest),
           resumeFrom: "final_judge",
         },
       }),
@@ -2398,7 +2442,10 @@ describe("agent goal controller", () => {
         async evaluate() {
           throw new Error("accepted milestones must not be evaluated again");
         },
-        async evaluateGoal(goal) {
+        async evaluateGoal() {
+          throw new Error("continued acceptance must not rebuild evidence");
+        },
+        async replayFinalGoalJudge(goal) {
           resumedGoal = structuredClone(goal);
           return acceptedResult("check_done", { evidenceManifest: emptyManifest });
         },
@@ -2431,6 +2478,86 @@ describe("agent goal controller", () => {
     expect(acceptance.goalCalls).toBe(0);
   });
 
+  it("fails closed visibly for a persisted waiting record without sealed replay evidence", async () => {
+    await store.save(
+      waitingForAcceptanceGoal({
+        acceptanceRetryState: {
+          cycle: 1,
+          attempt: 3,
+          maxAttempts: 3,
+          lastCode: "judge_timeout",
+          lastDetail: "Final judge timed out.",
+          evidenceFingerprint: evidenceFingerprint(emptyManifest),
+          resumeFrom: "final_judge",
+        },
+      }),
+    );
+    const acceptance = createAcceptanceResults({ milestones: [], goals: [] });
+    const controller = createController({
+      runtime: createRuntime(),
+      acceptance,
+    });
+
+    const result = await controller.continueAcceptance("goal_1");
+
+    expect(result).toMatchObject({
+      status: "waiting_for_acceptance",
+      acceptanceState: { phase: "awaiting_user" },
+      acceptanceRetryState: {
+        lastCode: "final_judge_replay_unavailable",
+        evidenceFingerprint: evidenceFingerprint(emptyManifest),
+      },
+    });
+    expect(acceptance.goalCalls).toBe(0);
+  });
+
+  it("resumes a persisted automatic retry by replaying the sealed final judge only", async () => {
+    await store.save(
+      waitingForAcceptanceGoal({
+        status: "executing",
+        acceptanceState: {
+          protocolVersion: 2,
+          phase: "retrying",
+          attempt: 2,
+          recentFailures: [],
+        },
+        acceptanceRetryState: {
+          cycle: 1,
+          attempt: 1,
+          maxAttempts: 3,
+          lastCode: "judge_timeout",
+          lastDetail: "Final judge timed out.",
+          evidenceFingerprint: evidenceFingerprint(emptyManifest),
+          finalJudgeReplay: finalJudgeReplay(emptyManifest),
+          resumeFrom: "final_judge",
+        },
+      }),
+    );
+    let replayCalls = 0;
+    const controller = createController({
+      runtime: createRuntime(),
+      acceptance: {
+        async evaluate() {
+          throw new Error("accepted milestones must not be evaluated again");
+        },
+        async evaluateGoal() {
+          throw new Error("restart must not rebuild final evidence");
+        },
+        async replayFinalGoalJudge() {
+          replayCalls += 1;
+          return acceptedResult("check_done", {
+            evidenceManifest: emptyManifest,
+          });
+        },
+      },
+    });
+
+    const result = await controller.resume("goal_1");
+
+    expect(result.status).toBe("achieved");
+    expect(replayCalls).toBe(1);
+  });
+
   it("aborts a continued final judge when its parent is canceled", async () => {
     await store.save(waitingForAcceptanceGoal());
     const abortController = new AbortController();
@@ -2445,7 +2572,10 @@ describe("agent goal controller", () => {
         async evaluate() {
           throw new Error("accepted milestones must not be evaluated again");
         },
-        async evaluateGoal(_goal, context) {
+        async evaluateGoal() {
+          throw new Error("continued acceptance must not rebuild evidence");
+        },
+        async replayFinalGoalJudge(_goal, _sealed, context) {
           observedSignal = context.signal;
           judgeEnteredResolve?.();
           return new Promise<AcceptanceResult>(() => undefined);
@@ -2487,6 +2617,7 @@ describe("agent goal controller", () => {
           lastCode: "judge_timeout",
           lastDetail: "Final judge timed out.",
           evidenceFingerprint: evidenceFingerprint(originalManifest),
+          finalJudgeReplay: finalJudgeReplay(originalManifest),
           resumeFrom: "final_judge",
         },
       }),
@@ -2509,8 +2640,59 @@ describe("agent goal controller", () => {
     expect(result.acceptanceRetryState).toMatchObject({
       cycle: 2,
       lastCode: "evidence_fingerprint_mismatch",
-      evidenceFingerprint: evidenceFingerprint(changedManifest),
+      evidenceFingerprint: evidenceFingerprint(originalManifest),
       resumeFrom: "final_judge",
+    });
+  });
+
+  it("keeps the original evidence anchor after a timed-out continuation later accepts changed evidence", async () => {
+    const originalManifest = manifestWithHash("a".repeat(64));
+    const changedManifest = manifestWithHash("b".repeat(64));
+    await store.save(
+      waitingForAcceptanceGoal({
+        acceptanceRetryState: {
+          cycle: 1,
+          attempt: 3,
+          maxAttempts: 3,
+          lastCode: "judge_timeout",
+          lastDetail: "Final judge timed out.",
+          evidenceFingerprint: evidenceFingerprint(originalManifest),
+          finalJudgeReplay: finalJudgeReplay(originalManifest),
+          resumeFrom: "final_judge",
+        },
+      }),
+    );
+    let replayCalls = 0;
+    const controller = createController({
+      runtime: createRuntime(),
+      acceptance: {
+        async evaluate() {
+          throw new Error("accepted milestones must not be evaluated again");
+        },
+        async evaluateGoal() {
+          throw new Error("continued acceptance must not rebuild evidence");
+        },
+        async replayFinalGoalJudge() {
+          replayCalls += 1;
+          if (replayCalls === 1) {
+            return timeoutResult({ evidenceManifest: originalManifest });
+          }
+          return acceptedResult("check_done", {
+            evidenceManifest: changedManifest,
+          });
+        },
+      },
+      sleep: async () => undefined,
+    });
+
+    const result = await controller.continueAcceptance("goal_1");
+
+    expect(replayCalls).toBe(2);
+    expect(result.status).toBe("waiting_for_acceptance");
+    expect(result.acceptanceCertificate).toBeUndefined();
+    expect(result.acceptanceRetryState).toMatchObject({
+      lastCode: "evidence_fingerprint_mismatch",
+      evidenceFingerprint: evidenceFingerprint(originalManifest),
     });
   });
 
@@ -2594,6 +2776,7 @@ describe("agent goal controller", () => {
           lastCode: "judge_timeout",
           lastDetail: "Final judge timed out.",
           evidenceFingerprint: "",
+          finalJudgeReplay: finalJudgeReplay(emptyManifest),
           resumeFrom: "final_judge",
         },
       }),
@@ -2610,12 +2793,13 @@ describe("agent goal controller", () => {
 
     expect(result.status).toBe("waiting_for_acceptance");
     expect(result.acceptanceCertificate).toBeUndefined();
-    expect(result.acceptanceRetryState?.evidenceFingerprint).toBe(
-      evidenceFingerprint(emptyManifest),
-    );
+    expect(result.acceptanceRetryState).toMatchObject({
+      evidenceFingerprint: "",
+      lastCode: "evidence_fingerprint_mismatch",
+    });
   });
 
-  it("upgrades an eligible legacy acceptance-unavailable goal into a final-only cycle", async () => {
+  it("fails closed for a legacy acceptance-unavailable goal without sealed replay evidence", async () => {
     await store.save(
       createGoal(
         [
@@ -2633,15 +2817,15 @@ describe("agent goal controller", () => {
       ),
     );
     const runtime = createRuntime();
-    let observedRetryState: Goal["acceptanceRetryState"];
+    let finalAcceptanceCalls = 0;
     const controller = createController({
       runtime,
       acceptance: {
         async evaluate() {
           throw new Error("accepted milestones must not be evaluated again");
         },
-        async evaluateGoal(goal) {
-          observedRetryState = goal.acceptanceRetryState;
+        async evaluateGoal() {
+          finalAcceptanceCalls += 1;
           return acceptedResult("check_done", { evidenceManifest: emptyManifest });
         },
       },
@@ -2649,10 +2833,11 @@ describe("agent goal controller", () => {
 
     const result = await controller.continueAcceptance("goal_1");
 
-    expect(result.status).toBe("achieved");
-    expect(result.acceptanceProtocolVersion).toBe(2);
-    expect(observedRetryState).toBeUndefined();
-    expect(result.acceptanceRetryState).toBeUndefined();
+    expect(result).toMatchObject({
+      status: "stopped_blocked",
+      stopReason: "acceptance_unavailable",
+    });
+    expect(finalAcceptanceCalls).toBe(0);
     expect(runtime.runMilestoneIds).toEqual([]);
   });
 
@@ -2724,6 +2909,9 @@ describe("agent goal controller", () => {
           throw new Error("accepted milestones must not be evaluated again");
         },
         async evaluateGoal() {
+          throw new Error("continued acceptance must not rebuild evidence");
+        },
+        async replayFinalGoalJudge() {
           judgeEnteredResolve?.();
           return pendingJudge;
         },
@@ -4104,6 +4292,13 @@ describe("agent goal controller", () => {
       async evaluateGoal(goal: Goal) {
         return acceptance.evaluateGoal(goal, context("run_final_acceptance"));
       },
+      async replayFinalGoalJudge(goal: Goal, sealedEvidence: FinalGoalJudgeReplayEvidence) {
+        return acceptance.replayFinalGoalJudge(
+          goal,
+          sealedEvidence,
+          context("run_final_acceptance"),
+        );
+      },
     };
   }
 
@@ -4348,18 +4543,33 @@ function rejectedResult(
 function timeoutResult(
   overrides: { evidenceManifest?: GoalEvidenceManifest } = {},
 ): AcceptanceResult {
-  return rejectedResult("judge_timeout", {
+  const evidenceManifest = overrides.evidenceManifest ?? emptyManifest;
+  return {
+    ...rejectedResult("judge_timeout", {
     verdict: "acceptance_unavailable",
     failureClass: "judge_unavailable",
-    ...(overrides.evidenceManifest
-      ? { evidenceManifest: overrides.evidenceManifest }
-      : {}),
+    evidenceManifest,
     retry: {
       code: "judge_timeout",
       retryable: true,
       detail: "Final judge timed out.",
     },
-  });
+    }),
+    finalJudgeReplay: finalJudgeReplay(evidenceManifest),
+  };
+}
+
+function finalJudgeReplay(
+  evidenceManifest: GoalEvidenceManifest,
+): FinalGoalJudgeReplayEvidence {
+  return {
+    version: 1,
+    goalId: "goal_1",
+    criteriaFingerprint: "c".repeat(64),
+    evidenceFingerprint: "e".repeat(64),
+    deterministicCheckResults: [],
+    evidenceManifest,
+  };
 }
 
 function createAcceptanceResults(options: {
@@ -4368,16 +4578,27 @@ function createAcceptanceResults(options: {
 }) {
   const milestones = [...options.milestones];
   const goals = [...(options.goals ?? [])];
-  let goalCalls = 0;
+  let evaluateGoalCalls = 0;
+  let replayCalls = 0;
   return {
     get goalCalls() {
-      return goalCalls;
+      return evaluateGoalCalls + replayCalls;
+    },
+    get evaluateGoalCalls() {
+      return evaluateGoalCalls;
+    },
+    get replayCalls() {
+      return replayCalls;
     },
     async evaluate() {
       return milestones.shift() ?? rejectedResult("missing_test_result");
     },
     async evaluateGoal() {
-      goalCalls += 1;
+      evaluateGoalCalls += 1;
+      return goals.shift() ?? rejectedResult("missing_goal_test_result");
+    },
+    async replayFinalGoalJudge() {
+      replayCalls += 1;
       return goals.shift() ?? rejectedResult("missing_goal_test_result");
     },
   };
@@ -4455,6 +4676,7 @@ function waitingForAcceptanceGoal(overrides: Partial<Goal> = {}): Goal {
         lastCode: "judge_timeout",
         lastDetail: "Final judge timed out.",
         evidenceFingerprint: evidenceFingerprint(emptyManifest),
+        finalJudgeReplay: finalJudgeReplay(emptyManifest),
         resumeFrom: "final_judge",
       },
       ...overrides,

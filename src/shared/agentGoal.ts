@@ -126,8 +126,101 @@ export type GoalAcceptanceRetryState = {
   lastDetail: string;
   nextRetryAt?: string;
   evidenceFingerprint: string;
+  finalJudgeReplay?: FinalGoalJudgeReplayEvidence;
   resumeFrom: "final_judge";
 };
+
+export type FinalGoalJudgeReplayEvidence = {
+  version: 1;
+  goalId: string;
+  criteriaFingerprint: string;
+  evidenceFingerprint: string;
+  deterministicCheckResults: GoalAcceptanceCheckResult[];
+  evidenceManifest: GoalEvidenceManifest;
+};
+
+export const MAX_FINAL_JUDGE_REPLAY_BYTES = 256 * 1024;
+
+export function sanitizeFinalGoalJudgeReplayEvidence(
+  value: unknown,
+): FinalGoalJudgeReplayEvidence | undefined {
+  if (!isPlainRecord(value)) return undefined;
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(value);
+  } catch {
+    return undefined;
+  }
+  if (
+    new TextEncoder().encode(serialized).byteLength >
+      MAX_FINAL_JUDGE_REPLAY_BYTES
+  ) {
+    return undefined;
+  }
+  if (
+    value.version !== 1 ||
+    !isBoundedString(value.goalId, 512) ||
+    !isSha256(value.criteriaFingerprint) ||
+    !isSha256(value.evidenceFingerprint) ||
+    !Array.isArray(value.deterministicCheckResults) ||
+    value.deterministicCheckResults.length > 128 ||
+    !value.deterministicCheckResults.every(isReplayCheckResult) ||
+    !isReplayEvidenceManifest(value.evidenceManifest)
+  ) {
+    return undefined;
+  }
+  try {
+    return structuredClone(value) as FinalGoalJudgeReplayEvidence;
+  } catch {
+    return undefined;
+  }
+}
+
+function isReplayCheckResult(value: unknown): boolean {
+  return isPlainRecord(value) &&
+    isBoundedString(value.checkId, 512) &&
+    isBoundedString(value.kind, 512) &&
+    typeof value.passed === "boolean" &&
+    isBoundedString(value.code, 128) &&
+    isBoundedString(value.detail, 4_096) &&
+    Array.isArray(value.evidenceRefs) &&
+    value.evidenceRefs.length <= 64 &&
+    value.evidenceRefs.every((ref) => isBoundedString(ref, 512));
+}
+
+function isReplayEvidenceManifest(value: unknown): boolean {
+  if (!isPlainRecord(value)) return false;
+  return value.version === 1 &&
+    isBoundedString(value.generatedAt, 128) &&
+    Array.isArray(value.artifacts) &&
+    value.artifacts.length <= 128 &&
+    value.artifacts.every((artifact) => {
+      if (!isPlainRecord(artifact)) return false;
+      return isBoundedString(artifact.ref, 512) &&
+        isBoundedString(artifact.mediaType, 256) &&
+        Array.isArray(artifact.excerpts) &&
+        artifact.excerpts.length <= 64 &&
+        artifact.excerpts.every((excerpt) =>
+          isPlainRecord(excerpt) &&
+          isBoundedString(excerpt.label, 256) &&
+          isBoundedString(excerpt.text, 4_096));
+    }) &&
+    typeof value.totalRenderedChars === "number" &&
+    Number.isFinite(value.totalRenderedChars) &&
+    typeof value.truncated === "boolean";
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isBoundedString(value: unknown, maxLength: number): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= maxLength;
+}
+
+function isSha256(value: unknown): value is string {
+  return typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+}
 
 export type GoalManualCompletionAttestation = {
   version: 1;

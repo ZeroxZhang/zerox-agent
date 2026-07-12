@@ -111,6 +111,7 @@ describe("package scripts", () => {
           ".superpowers/sdd/task-5-report.md",
           ".superpowers/sdd/task-6-report.md",
           ".superpowers/sdd/task-7-review-fixes-persistence-ui.md",
+          ".superpowers/sdd/task-7-review-fixes-controller.md",
           ".zerox/feature_list.json",
           ".zerox/progress.md",
           "src/main/agentGoalAcceptance.test.ts",

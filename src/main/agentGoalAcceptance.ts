@@ -17,6 +17,7 @@ import type {
   Goal,
   GoalAcceptanceCheckResult,
   GoalEvidenceManifest,
+  FinalGoalJudgeReplayEvidence,
   Milestone,
   SuccessCriterion,
 } from "../shared/agentGoal";
@@ -95,15 +96,6 @@ export type AcceptanceResult = {
   };
   retry?: AcceptanceInfrastructureFailure;
   finalJudgeReplay?: FinalGoalJudgeReplayEvidence;
-};
-
-export type FinalGoalJudgeReplayEvidence = {
-  version: 1;
-  goalId: string;
-  criteriaFingerprint: string;
-  evidenceFingerprint: string;
-  deterministicCheckResults: GoalAcceptanceCheckResult[];
-  evidenceManifest: GoalEvidenceManifest;
 };
 
 export type AcceptanceContext = {

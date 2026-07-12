@@ -211,6 +211,12 @@ export function createGoalChatService(options: {
       if (!canonical) {
         throw new Error(`Goal "${goalId}" was not found.`);
       }
+      if (
+        canonical.status === "waiting_for_acceptance" &&
+        !runOptions?.signal?.aborted
+      ) {
+        return runAbortableGoalOperation(goalId, runOptions, runner);
+      }
       return canonical;
     }
 

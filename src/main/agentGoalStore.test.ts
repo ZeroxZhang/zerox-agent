@@ -698,6 +698,20 @@ describe("agent goal store", () => {
       lastCode: "judge_timeout",
       lastDetail: "Final judge timed out.",
       evidenceFingerprint: "a".repeat(64),
+      finalJudgeReplay: {
+        version: 1,
+        goalId: waiting.id,
+        criteriaFingerprint: "b".repeat(64),
+        evidenceFingerprint: "c".repeat(64),
+        deterministicCheckResults: [],
+        evidenceManifest: {
+          version: 1,
+          generatedAt: "2026-06-12T00:00:00.000Z",
+          artifacts: [],
+          totalRenderedChars: 0,
+          truncated: false,
+        },
+      },
       resumeFrom: "final_judge",
     };
 
@@ -709,9 +723,53 @@ describe("agent goal store", () => {
         status: "waiting_for_acceptance",
         acceptanceRetryState: expect.objectContaining({
           lastCode: "judge_timeout",
+          finalJudgeReplay: expect.objectContaining({ goalId: waiting.id }),
         }),
       }),
     ]);
+  });
+
+  it("drops an oversized final-judge replay bundle at the JSON persistence boundary", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const waiting = createProtocolV2Goal(
+      "goal_oversized_replay",
+      "waiting_for_acceptance",
+    );
+    waiting.acceptanceRetryState = {
+      cycle: 1,
+      attempt: 3,
+      maxAttempts: 3,
+      lastCode: "judge_timeout",
+      lastDetail: "Final judge timed out.",
+      evidenceFingerprint: "a".repeat(64),
+      finalJudgeReplay: {
+        version: 1,
+        goalId: waiting.id,
+        criteriaFingerprint: "b".repeat(64),
+        evidenceFingerprint: "c".repeat(64),
+        deterministicCheckResults: [],
+        evidenceManifest: {
+          version: 1,
+          generatedAt: "2026-06-12T00:00:00.000Z",
+          artifacts: [{
+            ref: "artifact:oversized",
+            mediaType: "text/plain",
+            excerpts: [{ label: "oversized", text: "x".repeat(300_000) }],
+          }],
+          totalRenderedChars: 300_000,
+          truncated: false,
+        },
+      },
+      resumeFrom: "final_judge",
+    };
+
+    await store.save(waiting);
+
+    await expect(store.get(waiting.id)).resolves.toMatchObject({
+      acceptanceRetryState: expect.not.objectContaining({
+        finalJudgeReplay: expect.anything(),
+      }),
+    });
   });
 
   it("keeps historical acceptance-unavailable JSON unchanged when optional recovery fields are absent", async () => {

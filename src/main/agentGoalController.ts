@@ -1,5 +1,6 @@
 import {
   assertGoalTransition,
+  sanitizeFinalGoalJudgeReplayEvidence,
   upgradeGoalAcceptanceProtocol,
   type AcceptanceFailureClass,
   type AcceptanceRepairDirective,
@@ -92,7 +93,8 @@ export type AgentGoalController = {
 export function createAgentGoalController(options: {
   goalStore: AgentGoalStore;
   runtimeEngine: GoalRuntimeEngine;
-  acceptance: Pick<AgentGoalAcceptance, "evaluate" | "evaluateGoal">;
+  acceptance: Pick<AgentGoalAcceptance, "evaluate" | "evaluateGoal"> &
+    Partial<Pick<AgentGoalAcceptance, "replayFinalGoalJudge">>;
   planner: Pick<AgentGoalPlanner, "replan">;
   trajectoryStore: Pick<
     AgentTrajectoryStore,
@@ -158,7 +160,7 @@ export function createAgentGoalController(options: {
 
   async function createRunAcceptanceContext(
     goal: Goal,
-    runOptions?: { signal?: AbortSignal },
+    runOptions?: InternalRunOptions,
     milestone?: Milestone,
     runResult?: GoalRuntimeRunResult,
   ): Promise<AcceptanceContext | undefined> {
@@ -426,6 +428,16 @@ export function createAgentGoalController(options: {
             if (finalBudgetExhaustion) {
               return stopForBudgetExhaustion(goal, finalBudgetExhaustion);
             }
+            const mustReplayFinalJudge =
+              runOptions?.finalAcceptanceContinuation === true ||
+              goal.acceptanceRetryState?.resumeFrom === "final_judge";
+            if (
+              mustReplayFinalJudge &&
+              (!goal.acceptanceRetryState?.finalJudgeReplay ||
+                !options.acceptance.replayFinalGoalJudge)
+            ) {
+              return waitForMissingFinalJudgeReplay(goal, runOptions);
+            }
             const validatingGoal = await persistAcceptancePhase(
               goal,
               "validating",
@@ -437,11 +449,18 @@ export function createAgentGoalController(options: {
             goal = validatingGoal;
             finalAcceptanceCycleAttempt += 1;
             const currentFinalAcceptanceAttempt = finalAcceptanceCycleAttempt;
+            const acceptanceContext =
+              (await createRunAcceptanceContext(goal, runOptions)) as never;
+            const sealedReplay = goal.acceptanceRetryState?.finalJudgeReplay;
             const result = await racePublicationWithAbort(
-              options.acceptance.evaluateGoal(
-                goal,
-                (await createRunAcceptanceContext(goal, runOptions)) as never,
-              ),
+              mustReplayFinalJudge && sealedReplay &&
+                  options.acceptance.replayFinalGoalJudge
+                ? options.acceptance.replayFinalGoalJudge(
+                    goal,
+                    sealedReplay,
+                    acceptanceContext,
+                  )
+                : options.acceptance.evaluateGoal(goal, acceptanceContext),
               runOptions?.signal,
             );
             const interruptedAfterGoalReview = await canonicalInterruption(
@@ -488,6 +507,12 @@ export function createAgentGoalController(options: {
                 )
               : { action: "not_applicable" as const };
             if (retryDecision.action === "retry") {
+              if (
+                !goal.acceptanceRetryState?.finalJudgeReplay &&
+                !sanitizeFinalGoalJudgeReplayEvidence(result.finalJudgeReplay)
+              ) {
+                return waitForMissingFinalJudgeReplay(goal, runOptions);
+              }
               const retryingGoal = await scheduleFinalAcceptanceRetry(
                 goal,
                 result,
@@ -924,7 +949,7 @@ export function createAgentGoalController(options: {
     target: Milestone | null,
     result: AcceptanceResult,
     actionSignatures: string[],
-    runOptions?: { signal?: AbortSignal },
+    runOptions?: InternalRunOptions,
     decisionOptions: {
       pauseAfterRepair?: boolean;
       pauseSummary?: string;
@@ -1007,10 +1032,10 @@ export function createAgentGoalController(options: {
       return { goal: interruptedAfterClassification, suspend: true };
     }
 
-    const operationalBudgetExhaustion = describeGoalBudgetExhaustion(
-      persisted,
-      false,
-    );
+    const operationalBudgetExhaustion =
+      !target && runOptions?.finalAcceptanceContinuation
+        ? null
+        : describeGoalBudgetExhaustion(persisted, false);
     if (operationalBudgetExhaustion) {
       return {
         goal: await stopForBudgetExhaustion(
@@ -1522,19 +1547,26 @@ export function createAgentGoalController(options: {
     runOptions?: { signal?: AbortSignal },
   ): Promise<Goal> {
     const maxAttempts = maxFinalAcceptanceAttempts(decision.code);
-    const evidenceFingerprint = finalAcceptanceEvidenceFingerprint(goal, result);
+    const priorRetryState = goal.acceptanceRetryState;
+    const evidenceFingerprint =
+      priorRetryState?.evidenceFingerprint ??
+      finalAcceptanceEvidenceFingerprint(goal, result);
+    const finalJudgeReplay =
+      priorRetryState?.finalJudgeReplay ??
+      sanitizeFinalGoalJudgeReplayEvidence(result.finalJudgeReplay);
     goal.acceptanceState = {
       ...ensureAcceptanceState(goal),
       phase: "retrying",
     };
     goal.acceptanceRetryState = {
-      cycle: goal.acceptanceRetryState?.cycle ?? 1,
+      cycle: priorRetryState?.cycle ?? 1,
       attempt,
       maxAttempts,
       lastCode: decision.code,
       lastDetail: safeAcceptanceRetryDetail(result),
       nextRetryAt: decision.nextRetryAt,
       evidenceFingerprint,
+      ...(finalJudgeReplay ? { finalJudgeReplay } : {}),
       resumeFrom: "final_judge",
     };
     touch(goal);
@@ -1566,6 +1598,10 @@ export function createAgentGoalController(options: {
     attempt: number,
     runOptions?: { signal?: AbortSignal },
   ): Promise<Goal> {
+    const retryState = goal.acceptanceRetryState;
+    const returnedReplay = sanitizeFinalGoalJudgeReplayEvidence(
+      result.finalJudgeReplay,
+    );
     const maxAttempts =
       goal.acceptanceRetryState?.maxAttempts ??
       maxFinalAcceptanceAttempts(result.retry?.code ?? "");
@@ -1579,12 +1615,17 @@ export function createAgentGoalController(options: {
       lastDecision: toRepairDirective(decision),
     };
     goal.acceptanceRetryState = {
-      cycle: goal.acceptanceRetryState?.cycle ?? 1,
+      cycle: retryState?.cycle ?? 1,
       attempt,
       maxAttempts,
       lastCode: result.retry?.code ?? "acceptance_unavailable",
       lastDetail: safeAcceptanceRetryDetail(result),
-      evidenceFingerprint,
+      evidenceFingerprint: retryState?.evidenceFingerprint ?? evidenceFingerprint,
+      ...(retryState?.finalJudgeReplay
+        ? { finalJudgeReplay: retryState.finalJudgeReplay }
+        : returnedReplay
+          ? { finalJudgeReplay: returnedReplay }
+          : {}),
       resumeFrom: "final_judge",
     };
     touch(goal);
@@ -1614,6 +1655,59 @@ export function createAgentGoalController(options: {
       return settleSuppressedPublication(persisted);
     }
     return persisted;
+  }
+
+  async function waitForMissingFinalJudgeReplay(
+    goal: Goal,
+    runOptions?: { signal?: AbortSignal },
+  ): Promise<Goal> {
+    if (goal.status === "executing") {
+      assertGoalTransition(goal.status, "waiting_for_acceptance");
+      goal.status = "waiting_for_acceptance";
+    }
+    if (goal.status !== "waiting_for_acceptance") return goal;
+    const retryState = goal.acceptanceRetryState;
+    goal.stopReason = undefined;
+    goal.acceptanceCertificate = undefined;
+    goal.acceptanceState = {
+      ...ensureAcceptanceState(goal),
+      phase: "awaiting_user",
+      lastDecision: undefined,
+    };
+    goal.acceptanceRetryState = {
+      cycle: retryState?.cycle ?? 1,
+      attempt: retryState?.attempt ?? 0,
+      maxAttempts: retryState?.maxAttempts ?? FINAL_ACCEPTANCE_MAX_ATTEMPTS,
+      lastCode: "final_judge_replay_unavailable",
+      lastDetail:
+        "Sealed final-judge evidence is unavailable; deterministic checks were not rerun.",
+      evidenceFingerprint: retryState?.evidenceFingerprint ?? "",
+      resumeFrom: "final_judge",
+    };
+    touch(goal);
+    const persisted = await options.goalStore.save(goal);
+    if (persisted.status !== "waiting_for_acceptance") {
+      if (isTerminalGoalStatus(persisted.status)) {
+        await publishCanonicalTerminal(persisted);
+      }
+      return persisted;
+    }
+    const published = await publishNonterminalGoalEvent({
+      goal: persisted,
+      allowedStatuses: ["waiting_for_acceptance"],
+      ledger: {
+        at: currentTime(),
+        kind: "acceptance_waiting_for_user",
+        summary:
+          "Sealed final-judge evidence is unavailable; waiting for explicit recovery without rerunning validators.",
+      },
+      progress: {
+        event: "acceptance_waiting_for_user",
+        message: "最终验收重放证据不可用，已保留进度且未重复执行检查。",
+      },
+      signal: runOptions?.signal,
+    });
+    return published ? persisted : settleSuppressedPublication(persisted);
   }
 
   async function appendFinalAcceptanceWaitingEvent(
@@ -1688,7 +1782,11 @@ export function createAgentGoalController(options: {
       lastCode: "evidence_fingerprint_mismatch",
       lastDetail:
         "Final acceptance evidence changed. Review the current artifacts before continuing.",
-      evidenceFingerprint,
+      evidenceFingerprint:
+        retryState?.evidenceFingerprint ?? evidenceFingerprint,
+      ...(retryState?.finalJudgeReplay
+        ? { finalJudgeReplay: retryState.finalJudgeReplay }
+        : {}),
       resumeFrom: "final_judge",
     };
     touch(goal);
@@ -2157,11 +2255,23 @@ export function createAgentGoalController(options: {
       if (!allMilestonesAccepted(goal)) {
         return goal;
       }
+      if (eligibleLegacy && !goal.acceptanceRetryState?.finalJudgeReplay) {
+        return goal;
+      }
       if (
         waitingForAcceptance &&
         goal.acceptanceRetryState?.resumeFrom !== "final_judge"
       ) {
         return goal;
+      }
+      const finalJudgeReplay = sanitizeFinalGoalJudgeReplayEvidence(
+        goal.acceptanceRetryState?.finalJudgeReplay,
+      );
+      if (
+        waitingForAcceptance &&
+        (!finalJudgeReplay || !options.acceptance.replayFinalGoalJudge)
+      ) {
+        return waitForMissingFinalJudgeReplay(goal, runOptions);
       }
 
       assertGoalTransition(goal.status, "executing");
@@ -2186,6 +2296,7 @@ export function createAgentGoalController(options: {
                 lastCode: previousRetryState.lastCode,
                 lastDetail: previousRetryState.lastDetail,
                 evidenceFingerprint: previousRetryState.evidenceFingerprint,
+                ...(finalJudgeReplay ? { finalJudgeReplay } : {}),
                 resumeFrom: "final_judge" as const,
               },
             }

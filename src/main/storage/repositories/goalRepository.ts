@@ -4,8 +4,12 @@
 // status for indexed listing. `goal_ledger` is an append-only table mirroring
 // the legacy `<id>.ledger.jsonl`, with (goal_id, seq) ordering.
 
-import type { Goal, GoalStatus } from "../../../shared/agentGoal";
-import type { ProgressLedgerEvent } from "../../../shared/agentGoal";
+import {
+  sanitizeFinalGoalJudgeReplayEvidence,
+  type Goal,
+  type GoalStatus,
+  type ProgressLedgerEvent,
+} from "../../../shared/agentGoal";
 import type { GoalRepository, Storage } from "../../../shared/storageContract";
 import { getPayloadRow, jsonify, parseJson, selectPayloadRows } from "../repositoryUtils";
 
@@ -51,7 +55,9 @@ export function createGoalRepository(storage: Storage): GoalRepository {
       ) {
         return existing;
       }
-      const candidate = stripUnverifiedCompletionCertificate(goal);
+      const candidate = sanitizeFinalJudgeReplay(
+        stripUnverifiedCompletionCertificate(goal),
+      );
       db.prepare(
         `INSERT INTO goals (id, chat_session_id, status, payload, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?)
@@ -70,7 +76,9 @@ export function createGoalRepository(storage: Storage): GoalRepository {
     },
 
     saveIfStatus(goal: Goal, expectedStatus: GoalStatus) {
-      const candidate = stripUnverifiedCompletionCertificate(goal);
+      const candidate = sanitizeFinalJudgeReplay(
+        stripUnverifiedCompletionCertificate(goal),
+      );
       const result = db.prepare(
         `UPDATE goals
          SET chat_session_id = ?, status = ?, payload = ?, updated_at = ?
@@ -181,5 +189,23 @@ function stripUnverifiedCompletionCertificate(goal: Goal): Goal {
 }
 
 function sanitizeStoredGoal(goal: Goal | null): Goal | null {
-  return goal ? stripUnverifiedCompletionCertificate(goal) : null;
+  return goal
+    ? sanitizeFinalJudgeReplay(stripUnverifiedCompletionCertificate(goal))
+    : null;
+}
+
+function sanitizeFinalJudgeReplay(goal: Goal): Goal {
+  const retryState = goal.acceptanceRetryState;
+  if (!retryState?.finalJudgeReplay) return goal;
+  const finalJudgeReplay = sanitizeFinalGoalJudgeReplayEvidence(
+    retryState.finalJudgeReplay,
+  );
+  if (finalJudgeReplay) {
+    return {
+      ...goal,
+      acceptanceRetryState: { ...retryState, finalJudgeReplay },
+    };
+  }
+  const { finalJudgeReplay: _invalidReplay, ...safeRetryState } = retryState;
+  return { ...goal, acceptanceRetryState: safeRetryState };
 }
