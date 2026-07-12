@@ -33,7 +33,9 @@ import {
 import { verifyArtifactProvenance } from "../shared/agentArtifactProvenance";
 import {
   buildGoalEvidenceManifest,
+  revalidateGoalEvidenceManifest,
   renderGoalEvidenceManifest,
+  type GoalEvidenceProvenanceAnchor,
 } from "./agentGoalEvidenceManifest";
 import {
   createAgentGoalValidatorRegistry,
@@ -216,6 +218,24 @@ export function createAgentGoalAcceptance(
       const validated = validateFinalGoalJudgeReplay(goal, sealedEvidence);
       if (!validated) {
         const result = invalidFinalGoalJudgeReplayResult(goal);
+        await emitAcceptanceChecked(ctx, result, {
+          targetKind: "goal",
+          goalId: goal.id,
+        });
+        return result;
+      }
+
+      const liveEvidence = await revalidateGoalEvidenceManifest({
+        manifest: sealedEvidence.evidenceManifest,
+        workspacePath: ctx.workspacePath,
+        extraAuthorizedRoots: getAllowedExtraRoots(ctx),
+        locationEnv: getAcceptanceLocationEnv(ctx),
+        artifacts: ctx.artifacts,
+        requiredProvenanceRefs: collectRequiredProvenanceRefs(goal),
+        signal: ctx.signal,
+      });
+      if (!liveEvidence.ok) {
+        const result = changedFinalGoalJudgeReplayResult(goal, sealedEvidence);
         await emitAcceptanceChecked(ctx, result, {
           targetKind: "goal",
           goalId: goal.id,
@@ -1243,6 +1263,7 @@ function finalGoalReplayEvidenceFingerprint(
         ref: artifact.ref,
         sha256: artifact.sha256 ?? "",
         sizeBytes: artifact.sizeBytes ?? 0,
+        provenance: replayProvenanceAnchor(artifact),
       })).sort((left, right) => left.ref.localeCompare(right.ref)),
       truncated: replay.evidenceManifest.truncated,
       renderedSha256: sha256(renderGoalEvidenceManifest(replay.evidenceManifest)),
@@ -1279,6 +1300,60 @@ function invalidFinalGoalJudgeReplayResult(goal: Goal): AcceptanceResult {
     inferentialUsed: false,
     retry,
   };
+}
+
+function changedFinalGoalJudgeReplayResult(
+  goal: Goal,
+  sealedEvidence: FinalGoalJudgeReplayEvidence,
+): AcceptanceResult {
+  const check = goal.successCriteria.flatMap((criterion) => criterion.acceptanceChecks)
+    .find((candidate) => candidate.kind === "model_review");
+  const detail =
+    "Sealed final acceptance evidence no longer matches the current workspace.";
+  return {
+    accepted: false,
+    verdict: "acceptance_unavailable",
+    failureClass: "validator_unavailable",
+    checkResults: check
+      ? [checkResult(
+          check,
+          false,
+          parseEvidenceRefs(check.params.evidenceRefs),
+          detail,
+          "validator_failed",
+          "validator_unavailable",
+        )]
+      : [],
+    inferentialUsed: false,
+    evidenceManifest: sealedEvidence.evidenceManifest,
+    finalJudgeReplay: sealedEvidence,
+    retry: {
+      code: "validator_failed",
+      retryable: false,
+      detail,
+    },
+  };
+}
+
+function collectRequiredProvenanceRefs(goal: Goal): string[] {
+  return [...new Set(goal.successCriteria.flatMap((criterion) =>
+    criterion.acceptanceChecks.flatMap((check) =>
+      check.kind === "model_review" && check.params.requireProvenance === true
+        ? parseEvidenceRefs(check.params.evidenceRefs).filter((ref) =>
+            ref.startsWith("artifact:"),
+          )
+        : [],
+    ),
+  ))];
+}
+
+function replayProvenanceAnchor(
+  artifact: GoalEvidenceManifest["artifacts"][number],
+): GoalEvidenceProvenanceAnchor | null {
+  const value = (artifact as typeof artifact & {
+    provenance?: GoalEvidenceProvenanceAnchor;
+  }).provenance;
+  return value ?? null;
 }
 
 function formatSealedEvidenceForPrompt(

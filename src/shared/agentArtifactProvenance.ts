@@ -49,7 +49,12 @@ export class ArtifactProvenanceAbortError extends Error {
 }
 
 export type ArtifactProvenanceVerification =
-  | { ok: true; manifest: AgentArtifactProvenanceManifest; provenancePath: string }
+  | {
+      ok: true;
+      manifest: AgentArtifactProvenanceManifest;
+      provenancePath: string;
+      sidecarSha256: string;
+    }
   | { ok: false; reason: string; provenancePath: string };
 
 export function getArtifactProvenancePath(artifactPath: string): string {
@@ -113,11 +118,13 @@ export async function verifyArtifactProvenance(
     return { ok: false, reason: pathCheck, provenancePath };
   }
   let manifest: unknown;
+  let sidecarContent: string;
   try {
-    manifest = JSON.parse(await readProvenanceSidecar(
+    sidecarContent = await readProvenanceSidecar(
       provenancePath,
       input.signal,
-    ));
+    );
+    manifest = JSON.parse(sidecarContent);
   } catch (error) {
     if (input.signal?.aborted || isAbortError(error)) {
       throw new ArtifactProvenanceAbortError();
@@ -176,7 +183,12 @@ export async function verifyArtifactProvenance(
     };
   }
 
-  return { ok: true, manifest, provenancePath };
+  return {
+    ok: true,
+    manifest,
+    provenancePath,
+    sidecarSha256: createHash("sha256").update(sidecarContent).digest("hex"),
+  };
 }
 
 async function readProvenanceSidecar(

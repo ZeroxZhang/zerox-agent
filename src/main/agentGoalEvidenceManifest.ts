@@ -10,6 +10,7 @@ import type {
 import {
   normalizeLocationBoundaryPath,
   normalizeLocationEnvironment,
+  normalizeLocationPath,
   validatePathInsideLocationRoots,
   type LocationResourceEnvironment,
 } from "../shared/locationResource";
@@ -49,6 +50,34 @@ export type BuildGoalEvidenceManifestInput = {
   afterChunkProcessed?: (artifactPath: string, bytesRead: number) => Promise<void>;
   afterFileClosed?: (artifactPath: string) => Promise<void>;
 };
+
+export type GoalEvidenceProvenanceAnchor = {
+  path: string;
+  sha256: string;
+  runId: string;
+  goalId?: string;
+  milestoneId?: string;
+  artifactId: string;
+  artifactRef: string;
+};
+
+type AnchoredGoalEvidenceArtifact = GoalEvidenceArtifact & {
+  provenance?: GoalEvidenceProvenanceAnchor;
+};
+
+export type RevalidateGoalEvidenceManifestInput = {
+  manifest: GoalEvidenceManifest;
+  workspacePath: string;
+  extraAuthorizedRoots?: string[];
+  locationEnv?: LocationResourceEnvironment;
+  artifacts?: Record<string, unknown>;
+  requiredProvenanceRefs?: string[];
+  signal?: AbortSignal;
+};
+
+export type GoalEvidenceRevalidationResult =
+  | { ok: true }
+  | { ok: false; reason: "artifact_changed"; artifactRef: string };
 
 export class GoalEvidenceManifestAbortError extends Error {
   readonly code = "ABORT_ERR";
@@ -132,6 +161,79 @@ export function renderGoalEvidenceManifest(
   return renderManifest(manifest, Math.min(requestedCap, intrinsicCap)).text;
 }
 
+export async function revalidateGoalEvidenceManifest(
+  input: RevalidateGoalEvidenceManifestInput,
+): Promise<GoalEvidenceRevalidationResult> {
+  const requiredProvenanceRefs = new Set(input.requiredProvenanceRefs ?? []);
+  for (const sealedArtifact of input.manifest.artifacts) {
+    throwIfManifestAborted(input.signal);
+    const sealedProvenance = getProvenanceAnchor(sealedArtifact);
+    const requiresProvenance =
+      requiredProvenanceRefs.has(sealedArtifact.ref) || sealedProvenance !== undefined;
+    if (
+      typeof sealedArtifact.sha256 !== "string" ||
+      sealedArtifact.sha256.length !== 64 ||
+      typeof sealedArtifact.sizeBytes !== "number" ||
+      !Number.isFinite(sealedArtifact.sizeBytes) ||
+      (requiresProvenance && !sealedProvenance)
+    ) {
+      return changedArtifact(sealedArtifact.ref);
+    }
+
+    let currentManifest: GoalEvidenceManifest;
+    try {
+      currentManifest = await buildGoalEvidenceManifest({
+        evidenceRefs: [sealedArtifact.ref],
+        criterionText: "",
+        workspacePath: input.workspacePath,
+        extraAuthorizedRoots: input.extraAuthorizedRoots,
+        locationEnv: input.locationEnv,
+        artifacts: input.artifacts,
+        now: () => input.manifest.generatedAt,
+        maxRenderedChars: 0,
+        signal: input.signal,
+        ...(sealedProvenance
+          ? {
+              provenance: {
+                required: true,
+                runId: sealedProvenance.runId,
+                ...(sealedProvenance.goalId
+                  ? { goalId: sealedProvenance.goalId }
+                  : {}),
+                ...(sealedProvenance.milestoneId
+                  ? { milestoneId: sealedProvenance.milestoneId }
+                  : {}),
+              },
+            }
+          : {}),
+      });
+    } catch (error) {
+      if (input.signal?.aborted || error instanceof GoalEvidenceManifestAbortError) {
+        throw error;
+      }
+      return changedArtifact(sealedArtifact.ref);
+    }
+    throwIfManifestAborted(input.signal);
+
+    const currentArtifact = currentManifest.artifacts.find(
+      (candidate) => candidate.ref === sealedArtifact.ref,
+    );
+    if (
+      !currentArtifact ||
+      !sameArtifactLocation(sealedArtifact, currentArtifact, input.locationEnv) ||
+      currentArtifact.sha256 !== sealedArtifact.sha256 ||
+      currentArtifact.sizeBytes !== sealedArtifact.sizeBytes ||
+      !sameProvenanceAnchor(
+        sealedProvenance,
+        getProvenanceAnchor(currentArtifact),
+      )
+    ) {
+      return changedArtifact(sealedArtifact.ref);
+    }
+  }
+  return { ok: true };
+}
+
 async function buildArtifact(
   ref: string,
   input: BuildGoalEvidenceManifestInput,
@@ -178,6 +280,7 @@ async function buildArtifact(
     let verifiedDestination:
       | { sha256: string; sizeBytes: number }
       | undefined;
+    let verifiedProvenance: GoalEvidenceProvenanceAnchor | undefined;
     if (input.provenance?.required) {
       throwIfManifestAborted(input.signal);
       const verification = await verifyArtifactProvenance({
@@ -194,6 +297,19 @@ async function buildArtifact(
       throwIfManifestAborted(input.signal);
       if (!verification.ok) continue;
       verifiedDestination = verification.manifest.destination;
+      verifiedProvenance = {
+        path: verification.provenancePath,
+        sha256: verification.sidecarSha256,
+        runId: verification.manifest.runId,
+        ...(verification.manifest.goalId
+          ? { goalId: verification.manifest.goalId }
+          : {}),
+        ...(verification.manifest.milestoneId
+          ? { milestoneId: verification.manifest.milestoneId }
+          : {}),
+        artifactId: verification.manifest.artifactId,
+        artifactRef: verification.manifest.artifactRef,
+      };
       await input.afterProvenanceVerified?.(boundary.path);
       throwIfManifestAborted(input.signal);
     }
@@ -214,10 +330,64 @@ async function buildArtifact(
         (artifact.sha256 === verifiedDestination.sha256 &&
           artifact.sizeBytes === verifiedDestination.sizeBytes))
     ) {
+      if (verifiedProvenance) {
+        const anchoredArtifact: AnchoredGoalEvidenceArtifact = {
+          ...artifact,
+          provenance: verifiedProvenance,
+        };
+        return anchoredArtifact;
+      }
       return artifact;
     }
   }
   return null;
+}
+
+function changedArtifact(artifactRef: string): GoalEvidenceRevalidationResult {
+  return { ok: false, reason: "artifact_changed", artifactRef };
+}
+
+function getProvenanceAnchor(
+  artifact: GoalEvidenceArtifact,
+): GoalEvidenceProvenanceAnchor | undefined {
+  const value = (artifact as AnchoredGoalEvidenceArtifact).provenance;
+  if (
+    !value ||
+    typeof value.path !== "string" ||
+    !/^[a-f0-9]{64}$/.test(value.sha256) ||
+    typeof value.runId !== "string" ||
+    typeof value.artifactId !== "string" ||
+    typeof value.artifactRef !== "string"
+  ) {
+    return undefined;
+  }
+  return value;
+}
+
+function sameArtifactLocation(
+  sealedArtifact: GoalEvidenceArtifact,
+  currentArtifact: GoalEvidenceArtifact,
+  locationEnv: LocationResourceEnvironment | undefined,
+): boolean {
+  if (sealedArtifact.path === undefined || currentArtifact.path === undefined) {
+    return sealedArtifact.path === currentArtifact.path;
+  }
+  return normalizeLocationPath(sealedArtifact.path, locationEnv) ===
+    normalizeLocationPath(currentArtifact.path, locationEnv);
+}
+
+function sameProvenanceAnchor(
+  sealed: GoalEvidenceProvenanceAnchor | undefined,
+  current: GoalEvidenceProvenanceAnchor | undefined,
+): boolean {
+  if (!sealed || !current) return sealed === current;
+  return sealed.path === current.path &&
+    sealed.sha256 === current.sha256 &&
+    sealed.runId === current.runId &&
+    sealed.goalId === current.goalId &&
+    sealed.milestoneId === current.milestoneId &&
+    sealed.artifactId === current.artifactId &&
+    sealed.artifactRef === current.artifactRef;
 }
 
 function buildMemoryArtifact(

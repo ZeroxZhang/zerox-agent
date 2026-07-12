@@ -52,3 +52,28 @@
 - A deterministic validator throws if invoked during replay; replay still succeeds and tool calls remain zero.
 - Altered fingerprints and malformed persisted replay evidence fail closed before the judge.
 - A 100,000-character Chinese goal, 200 criteria, 200 accepted milestones, thousands of run IDs, 100 failures, large transcript, and artifact evidence remain within 32 KiB while retaining the output schema plus artifact ref, SHA-256, and evidence excerpt.
+
+## Critical follow-up: live artifact revalidation
+
+### Root cause and RED
+
+The replay seal authenticated the persisted manifest but did not compare that manifest with the live workspace. A deleted, modified, or symlink-replaced report could therefore still reach the model with its old excerpt and be accepted.
+
+`npm test -- --run src/main/agentGoalAcceptance.test.ts -t "sealed file|required provenance|unchanged sealed"` initially failed 5 mutation cases: deleted file, modified bytes, workspace-escape symlink, deleted provenance sidecar, and provenance content tampering all returned `accepted`.
+
+### Fix
+
+- `replayFinalGoalJudge` now calls `revalidateGoalEvidenceManifest` before any provider call.
+- Every sealed artifact is resolved again through the current workspace/authorized roots and existing sandbox/symlink checks, opened as a regular file, fully hashed, and compared with the sealed path, byte size, and SHA-256.
+- Provenance-required scans seal the sidecar's exact content SHA-256 plus run/goal/milestone/artifact identity. Replay reuses `verifyArtifactProvenance` to check sidecar containment, no-symlink rules, schema, identity, and destination hash, then compares the exact sidecar content hash with the original anchor.
+- Old provenance-required replay records without a provenance anchor fail closed.
+- A live mismatch returns non-retryable `validator_failed`, retains the original manifest and replay seal for explicit user recovery, and cannot reach an acceptance/certificate path.
+- The production-shaped test fixture uses real temporary files, JSON serialization, and `sanitizeFinalGoalJudgeReplayEvidence` before replay to cover the persisted/restarted shape.
+
+### GREEN
+
+- Mutation/unchanged regression subset: 6 passed; replay validator calls remained zero, mismatch provider calls remained zero.
+- `npm test -- --run src/main/agentGoalAcceptance.test.ts src/main/agentGoalEvidenceManifest.test.ts src/shared/agentArtifactProvenance.test.ts src/main/agentGoalController.test.ts`
+  - Passed: 4 files, 250 tests.
+- `npx tsc -p tsconfig.electron.json --noEmit --pretty false`
+  - Passed.
