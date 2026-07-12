@@ -13,6 +13,10 @@ import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
 import type { GoalProgressEvent } from "../shared/chat";
 import { createAgentGoalStore, type AgentGoalStore } from "./agentGoalStore";
 import {
+  createAgentTrajectoryStore,
+  type AgentTrajectoryStore,
+} from "./agentTrajectoryStore";
+import {
   createAgentGoalController,
   type GoalRuntimeEngine,
 } from "./agentGoalController";
@@ -2031,6 +2035,160 @@ describe("agent goal controller", () => {
     },
   );
 
+  it("lets the CAS loser finish recorded publication when the winner write fails", async () => {
+    await store.save(waitingForAcceptanceGoal());
+    const trajectoryStore = createAgentTrajectoryStore({ configDir });
+    const casBarrier = createTimedBarrier();
+    const recordedBarrier = createTimedBarrier();
+    let recordedCalls = 0;
+    const racingStore: AgentGoalStore = {
+      ...store,
+      async saveIfStatus(goal, expectedStatus) {
+        await casBarrier.wait();
+        return store.saveIfStatus(goal, expectedStatus);
+      },
+      async appendLedgerIfAbsent(goalId, publicationKey, event) {
+        if (event.kind === "acceptance_manual_completion_recorded") {
+          recordedCalls += 1;
+          const call = recordedCalls;
+          await recordedBarrier.wait();
+          if (call === 1) {
+            throw new Error("injected winner recorded failure");
+          }
+        }
+        return store.appendLedgerIfAbsent(goalId, publicationKey, event);
+      },
+    };
+    const first = createController({
+      goalStore: racingStore,
+      trajectoryStore,
+      runtime: createRuntime(),
+      acceptance: createAcceptanceResults({ milestones: [], goals: [] }),
+    });
+    const second = createController({
+      goalStore: racingStore,
+      trajectoryStore,
+      runtime: createRuntime(),
+      acceptance: createAcceptanceResults({ milestones: [], goals: [] }),
+    });
+
+    const results = await Promise.allSettled([
+      first.markCompletedUnverified("goal_1"),
+      second.markCompletedUnverified("goal_1"),
+    ]);
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect(recordedCalls).toBe(2);
+    const ledgerKinds = (await store.readLedger("goal_1")).map(
+      (event) => event.kind,
+    );
+    expect(ledgerKinds.indexOf("acceptance_manual_completion_recorded")).toBeLessThan(
+      ledgerKinds.indexOf("goal_stopped"),
+    );
+    const trajectoryTypes = (await trajectoryStore.list("goal_1")).map(
+      (event) => event.type,
+    );
+    expect(
+      trajectoryTypes.indexOf("acceptance_manual_completion_recorded"),
+    ).toBeLessThan(trajectoryTypes.indexOf("goal_stopped"));
+  });
+
+  it("atomically publishes manual recovery once across controllers", async () => {
+    const waiting = waitingForAcceptanceGoal();
+    await store.save(waiting);
+    await store.save(createManualCompletedGoal(waiting));
+    const durableTrajectory = createAgentTrajectoryStore({ configDir });
+    const ledgerBarriers = new Map([
+      ["acceptance_manual_completion_recorded", createTimedBarrier()],
+      ["goal_stopped", createTimedBarrier()],
+    ]);
+    const trajectoryBarriers = new Map([
+      ["acceptance_manual_completion_recorded", createTimedBarrier()],
+      ["goal_stopped", createTimedBarrier()],
+    ]);
+    const racingStore: AgentGoalStore = {
+      ...store,
+      async appendLedgerIfAbsent(goalId, publicationKey, event) {
+        await ledgerBarriers.get(event.kind)?.wait();
+        return store.appendLedgerIfAbsent(goalId, publicationKey, event);
+      },
+    };
+    const racingTrajectory: Pick<
+      AgentTrajectoryStore,
+      "append" | "appendIfAbsent" | "list"
+    > = {
+      append: durableTrajectory.append,
+      list: durableTrajectory.list,
+      async appendIfAbsent(runId, publicationKey, event, appendOptions) {
+        await trajectoryBarriers.get(event.type)?.wait();
+        return durableTrajectory.appendIfAbsent(
+          runId,
+          publicationKey,
+          event,
+          appendOptions,
+        );
+      },
+    };
+    const progressEvents: GoalProgressEvent[] = [];
+    const createRecoveryController = () => createController({
+      goalStore: racingStore,
+      trajectoryStore: racingTrajectory,
+      runtime: createRuntime(),
+      acceptance: createAcceptanceResults({ milestones: [], goals: [] }),
+      onProgress(event) {
+        progressEvents.push(event);
+      },
+    });
+
+    await expect(
+      Promise.all([
+        createRecoveryController().markCompletedUnverified("goal_1"),
+        createRecoveryController().markCompletedUnverified("goal_1"),
+      ]),
+    ).resolves.toEqual([
+      expect.objectContaining({ status: "completed_unverified" }),
+      expect.objectContaining({ status: "completed_unverified" }),
+    ]);
+
+    for (const barrier of [
+      ...ledgerBarriers.values(),
+      ...trajectoryBarriers.values(),
+    ]) {
+      expect(barrier.arrivals()).toBe(2);
+    }
+    const ledger = await store.readLedger("goal_1");
+    const ledgerTypes = ledger
+      .filter((event) =>
+        event.kind === "acceptance_manual_completion_recorded" ||
+        event.kind === "goal_stopped",
+      )
+      .map((event) => event.kind);
+    expect(ledgerTypes).toEqual([
+      "acceptance_manual_completion_recorded",
+      "goal_stopped",
+    ]);
+    const trajectory = await durableTrajectory.list("goal_1");
+    const trajectoryTypes = trajectory
+      .filter((event) =>
+        event.type === "acceptance_manual_completion_recorded" ||
+        event.type === "goal_stopped",
+      )
+      .map((event) => event.type);
+    expect(trajectoryTypes).toEqual([
+      "acceptance_manual_completion_recorded",
+      "goal_stopped",
+    ]);
+    expect(
+      progressEvents.filter(
+        (event) => event.event === "acceptance_manual_completion_recorded",
+      ),
+    ).toHaveLength(1);
+    expect(
+      progressEvents.filter((event) => event.event === "stopped"),
+    ).toHaveLength(1);
+  });
+
   it.each([
     ["recorded ledger", "acceptance_manual_completion_recorded"],
     ["goal-stopped ledger", "goal_stopped"],
@@ -2041,8 +2199,12 @@ describe("agent goal controller", () => {
       let failOnce = true;
       const failingStore: AgentGoalStore = {
         ...store,
-        async appendLedger(goalId, event) {
-          const result = await store.appendLedger(goalId, event);
+        async appendLedgerIfAbsent(goalId, publicationKey, event) {
+          const result = await store.appendLedgerIfAbsent(
+            goalId,
+            publicationKey,
+            event,
+          );
           if (failOnce && event.kind === failedKind) {
             failOnce = false;
             throw new Error(`injected ${failedKind} failure`);
@@ -3796,6 +3958,10 @@ describe("agent goal controller", () => {
     runtime: GoalRuntimeEngine;
     acceptance: ReturnType<typeof createAcceptance>;
     goalStore?: AgentGoalStore;
+    trajectoryStore?: Pick<
+      AgentTrajectoryStore,
+      "append" | "appendIfAbsent" | "list"
+    >;
     planner?: { replan(goal: Goal, reason: string): Promise<Milestone[]> };
     stallThreshold?: number;
     onProgress?: (event: GoalProgressEvent) => void;
@@ -3824,7 +3990,7 @@ describe("agent goal controller", () => {
             return goal.milestones;
           },
         },
-      trajectoryStore: {
+      trajectoryStore: options.trajectoryStore ?? {
         async append(_runId, event, appendOptions) {
           await options.onTrajectoryAppend?.(event, appendOptions);
           if (appendOptions?.signal?.aborted) {
@@ -3835,6 +4001,21 @@ describe("agent goal controller", () => {
         },
         async list(runId) {
           return trajectoryEvents.filter((event) => event.runId === runId);
+        },
+        async appendIfAbsent(runId, publicationKey, event) {
+          const existing = trajectoryEvents.find(
+            (candidate) =>
+              candidate.runId === runId &&
+              candidate.payload.publicationKey === publicationKey,
+          );
+          if (existing) return { appended: false, event: existing };
+          await options.onTrajectoryAppend?.(event);
+          const stored = {
+            ...event,
+            payload: { ...event.payload, publicationKey },
+          };
+          trajectoryEvents.push(stored);
+          return { appended: true, event: stored };
         },
       },
       onProgress: options.onProgress,
@@ -4279,6 +4460,53 @@ function waitingForAcceptanceGoal(overrides: Partial<Goal> = {}): Goal {
       ...overrides,
     },
   );
+}
+
+function createManualCompletedGoal(waiting: Goal): Goal {
+  return {
+    ...waiting,
+    status: "completed_unverified",
+    stopReason: "user_marked_complete",
+    acceptanceCertificate: undefined,
+    manualCompletionAttestation: {
+      version: 1,
+      goalId: waiting.id,
+      completedAt: "2026-06-12T00:00:00.000Z",
+      reason: "user_marked_complete",
+      failedCheckIds: ["check_done"],
+      evidenceRefs: [],
+      evidenceFingerprint: evidenceFingerprint(emptyManifest),
+      lastFailureCode: "judge_timeout",
+      retryCycles: 1,
+    },
+  };
+}
+
+function createTimedBarrier(timeoutMs = 25): {
+  wait(): Promise<void>;
+  arrivals(): number;
+} {
+  let count = 0;
+  let release: (() => void) | undefined;
+  const ready = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return {
+    async wait() {
+      count += 1;
+      if (count >= 2) {
+        if (timer) clearTimeout(timer);
+        release?.();
+      } else if (!timer) {
+        timer = setTimeout(() => release?.(), timeoutMs);
+      }
+      await ready;
+    },
+    arrivals() {
+      return count;
+    },
+  };
 }
 
 function milestone(id: string, dependsOn: string[] = []): Milestone {

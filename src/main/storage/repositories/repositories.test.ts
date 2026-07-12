@@ -240,6 +240,28 @@ describe("GoalRepository", () => {
       storage.close();
     },
   );
+
+  it("atomically appends a SQLite publication ledger event once across repositories", async () => {
+    const storage = await createInMemoryStorage();
+    const firstGoals = createGoalRepository(storage);
+    const secondGoals = createGoalRepository(storage);
+    const goal = baseGoal({ id: "g-ledger-once", status: "completed_unverified" });
+    const event = {
+      at: "2026-07-11T05:03:00.000Z",
+      kind: "acceptance_manual_completion_recorded" as const,
+      summary: "Manual completion recorded without certification.",
+    };
+    firstGoals.save(goal);
+
+    expect([
+      firstGoals.appendLedgerIfAbsent(goal.id, "manual:recorded:a", event),
+      secondGoals.appendLedgerIfAbsent(goal.id, "manual:recorded:a", event),
+    ].sort()).toEqual([false, true]);
+    expect(firstGoals.readLedger(goal.id)).toEqual([
+      { ...event, publicationKey: "manual:recorded:a" },
+    ]);
+    storage.close();
+  });
 });
 
 describe("SessionRepository + ActorRepository", () => {

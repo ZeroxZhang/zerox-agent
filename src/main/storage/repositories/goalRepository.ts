@@ -128,6 +128,29 @@ export function createGoalRepository(storage: Storage): GoalRepository {
       ).run(goalId, seq, jsonify(event), event.at);
     },
 
+    appendLedgerIfAbsent(goalId, publicationKey, event) {
+      const storedEvent = { ...event, publicationKey };
+      const result = db.prepare(
+        `INSERT INTO goal_ledger (goal_id, seq, payload, created_at)
+         SELECT ?,
+           COALESCE((SELECT MAX(seq) FROM goal_ledger WHERE goal_id = ?), 0) + 1,
+           ?, ?
+         WHERE NOT EXISTS (
+           SELECT 1 FROM goal_ledger
+           WHERE goal_id = ?
+             AND json_extract(payload, '$.publicationKey') = ?
+         )`,
+      ).run(
+        goalId,
+        goalId,
+        jsonify(storedEvent),
+        event.at,
+        goalId,
+        publicationKey,
+      );
+      return result.changes === 1;
+    },
+
     readLedger(goalId: string): ProgressLedgerEvent[] {
       const rows = db
         .prepare("SELECT payload FROM goal_ledger WHERE goal_id = ? ORDER BY seq ASC")

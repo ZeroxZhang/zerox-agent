@@ -94,7 +94,10 @@ export function createAgentGoalController(options: {
   runtimeEngine: GoalRuntimeEngine;
   acceptance: Pick<AgentGoalAcceptance, "evaluate" | "evaluateGoal">;
   planner: Pick<AgentGoalPlanner, "replan">;
-  trajectoryStore: Pick<AgentTrajectoryStore, "append" | "list">;
+  trajectoryStore: Pick<
+    AgentTrajectoryStore,
+    "append" | "appendIfAbsent" | "list"
+  >;
   createAcceptanceContext?: (
     goal: Goal,
     milestone?: Milestone,
@@ -125,6 +128,7 @@ export function createAgentGoalController(options: {
   const publishedTerminalVersions = new Map<string, string>();
   const recentActionSignatures = new Map<string, string[]>();
   const nonterminalPublications = new Map<string, Set<Promise<void>>>();
+  const manualCompletionPublications = new Map<string, Promise<void>>();
 
   function notifyProgress(
     event: GoalProgressEvent["event"],
@@ -247,6 +251,11 @@ export function createAgentGoalController(options: {
     if (!isTerminalGoalStatus(canonical.status)) {
       return;
     }
+    if (isManualCompletionGoal(canonical)) {
+      await publishManualCompletionSequence(canonical);
+      recentActionSignatures.delete(canonical.id);
+      return;
+    }
     await publishTerminalGoalEvent(canonical, terminalStatusMessage(canonical));
     recentActionSignatures.delete(canonical.id);
   }
@@ -258,34 +267,44 @@ export function createAgentGoalController(options: {
     const version = `${canonical.status}:${canonical.updatedAt}`;
     if (publishedTerminalVersions.get(canonical.id) === version) return;
     const ledger = await options.goalStore.readLedger(canonical.id);
-    const terminalLedgerAlreadyDurable =
-      ledger.at(-1)?.kind === "goal_stopped";
-    if (!terminalLedgerAlreadyDurable) {
-      await options.goalStore.appendLedger(canonical.id, {
-        at: currentTime(),
-        kind: "goal_stopped",
-        summary,
-      });
+    const terminalEvents = ledger.filter(
+      (event) => event.kind === "goal_stopped",
+    );
+    const lastEvent = ledger.at(-1);
+    const occurrence = lastEvent?.kind === "goal_stopped"
+      ? terminalEvents.length
+      : terminalEvents.length + 1;
+    const publicationKey = lastEvent?.kind === "goal_stopped"
+      ? lastEvent.publicationKey ??
+        `goal_stopped:${canonical.id}:${version}:${occurrence}`
+      : `goal_stopped:${canonical.id}:${version}:${occurrence}`;
+    if (lastEvent?.kind !== "goal_stopped") {
+      await options.goalStore.appendLedgerIfAbsent(
+        canonical.id,
+        publicationKey,
+        {
+          at: currentTime(),
+          kind: "goal_stopped",
+          summary,
+        },
+      );
     }
-    const trajectory = await options.trajectoryStore.list(canonical.id);
-    if (
-      !terminalLedgerAlreadyDurable ||
-      !trajectory.some(
-        (event) =>
-          event.type === "goal_stopped" &&
-          event.payload.terminalVersion === version,
-      )
-    ) {
-      await emit(canonical.id, "goal_stopped", {
+    const trajectoryAppended = await emitIfAbsent(
+      canonical.id,
+      "goal_stopped",
+      {
         goalId: canonical.id,
         status: canonical.status,
         stopReason: canonical.stopReason,
         summary,
         terminalVersion: version,
-      });
-    }
+      },
+      publicationKey,
+    );
     publishedTerminalVersions.set(canonical.id, version);
-    notifyProgress("stopped", canonical, summary);
+    if (trajectoryAppended) {
+      notifyProgress("stopped", canonical, summary);
+    }
   }
 
   function beginNonterminalPublication(goalId: string): () => void {
@@ -1883,6 +1902,33 @@ export function createAgentGoalController(options: {
     throwIfPublicationAborted(signal);
   }
 
+  async function emitIfAbsent(
+    runId: string,
+    type: AgentTrajectoryEventType,
+    payload: Record<string, unknown>,
+    publicationKey: string,
+  ): Promise<boolean> {
+    const event: AgentTrajectoryEvent = {
+      id: options.createId?.() ?? `${type}_${Date.now()}`,
+      runId,
+      type,
+      sequence: options.nextSequence?.() ?? 0,
+      payload,
+      redaction: {
+        containsApiKey: false,
+        containsFileContent: false,
+        containsUserText: true,
+      },
+      createdAt: currentTime(),
+    };
+    const result = await options.trajectoryStore.appendIfAbsent(
+      runId,
+      publicationKey,
+      event,
+    );
+    return result.appended;
+  }
+
   function racePublicationWithAbort<T>(
     operation: Promise<T>,
     signal: AbortSignal | undefined,
@@ -1988,48 +2034,61 @@ export function createAgentGoalController(options: {
     ) {
       return;
     }
-    const ledger = await options.goalStore.readLedger(goal.id);
-    if (
-      !ledger.some(
-        (event) => event.kind === "acceptance_manual_completion_recorded",
-      )
-    ) {
-      await options.goalStore.appendLedger(goal.id, {
+    const publicationKey =
+      `manual_completion_recorded:${goal.id}:${attestation.evidenceFingerprint}`;
+    await options.goalStore.appendLedgerIfAbsent(
+      goal.id,
+      publicationKey,
+      {
         at: currentTime(),
         kind: "acceptance_manual_completion_recorded",
         summary: "Manual completion recorded without certification.",
         evidenceRefs: attestation.evidenceRefs,
-      });
-    }
-    const trajectory = await options.trajectoryStore.list(goal.id);
-    if (
-      !trajectory.some(
-        (event) =>
-          event.type === "acceptance_manual_completion_recorded" &&
-          event.payload.fingerprint === attestation.evidenceFingerprint,
-      )
-    ) {
-      await emit(
-        goal.id,
+      },
+    );
+    const trajectoryAppended = await emitIfAbsent(
+      goal.id,
+      "acceptance_manual_completion_recorded",
+      manualCompletionPayload(attestation),
+      publicationKey,
+    );
+    if (trajectoryAppended) {
+      notifyProgress(
         "acceptance_manual_completion_recorded",
-        manualCompletionPayload(attestation),
+        goal,
+        "目标已手动标记为完成（未验证）。",
       );
     }
-    notifyProgress(
-      "acceptance_manual_completion_recorded",
-      goal,
-      "目标已手动标记为完成（未验证）。",
-    );
+  }
+
+  function publishManualCompletionSequence(goal: Goal): Promise<void> {
+    const previous = manualCompletionPublications.get(goal.id) ??
+      Promise.resolve();
+    const publication = previous.catch(() => undefined).then(async () => {
+      const canonical = (await options.goalStore.get(goal.id)) ?? goal;
+      if (!isManualCompletionGoal(canonical)) return;
+      const release = beginNonterminalPublication(canonical.id);
+      try {
+        await publishManualCompletionRecorded(canonical);
+        await publishTerminalGoalEvent(
+          canonical,
+          terminalStatusMessage(canonical),
+        );
+      } finally {
+        release();
+      }
+    });
+    manualCompletionPublications.set(goal.id, publication);
+    void publication.finally(() => {
+      if (manualCompletionPublications.get(goal.id) === publication) {
+        manualCompletionPublications.delete(goal.id);
+      }
+    }).catch(() => undefined);
+    return publication;
   }
 
   async function recoverManualCompletion(goal: Goal): Promise<Goal> {
-    const release = beginNonterminalPublication(goal.id);
-    try {
-      await publishManualCompletionRecorded(goal);
-    } finally {
-      release();
-    }
-    await publishCanonicalTerminal(goal);
+    await publishManualCompletionSequence(goal);
     return (await options.goalStore.get(goal.id)) ?? goal;
   }
 
@@ -2199,9 +2258,6 @@ export function createAgentGoalController(options: {
           "waiting_for_acceptance",
         );
         persisted = transition.goal ?? (await loadGoal(goalId));
-        if (transition.saved) {
-          await publishManualCompletionRecorded(persisted);
-        }
       } finally {
         release();
       }
@@ -2347,6 +2403,14 @@ function isIrreversibleGoalStatus(status: GoalStatus): boolean {
     status === "achieved" ||
     status === "completed_unverified" ||
     status === "canceled"
+  );
+}
+
+function isManualCompletionGoal(goal: Goal): boolean {
+  return (
+    goal.status === "completed_unverified" &&
+    goal.stopReason === "user_marked_complete" &&
+    Boolean(goal.manualCompletionAttestation)
   );
 }
 

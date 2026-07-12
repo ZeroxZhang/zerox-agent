@@ -24,6 +24,11 @@ export type AgentGoalStore = {
   listActive(): Promise<Goal[]>;
   listByChatSession(chatSessionId: string): Promise<Goal[]>;
   appendLedger(goalId: string, event: ProgressLedgerEvent): Promise<void>;
+  appendLedgerIfAbsent(
+    goalId: string,
+    publicationKey: string,
+    event: ProgressLedgerEvent,
+  ): Promise<boolean>;
   readLedger(goalId: string): Promise<ProgressLedgerEvent[]>;
   delete(goalId: string): Promise<boolean>;
 };
@@ -47,12 +52,12 @@ const irreversibleGoalStatuses = new Set<GoalStatus>([
   "completed_unverified",
   "canceled",
 ]);
+const goalMutationQueues = new Map<string, Promise<void>>();
 
 export function createAgentGoalStore(options: {
   configDir: string;
 }): AgentGoalStore {
   const goalsDir = path.join(options.configDir, "agent-goals");
-  let mutationQueue = Promise.resolve();
 
   function goalPath(goalId: string): string {
     return path.join(goalsDir, `${goalId}.json`);
@@ -110,9 +115,7 @@ export function createAgentGoalStore(options: {
     goal: Goal,
     expectedStatus?: GoalStatus,
   ): Promise<GoalConditionalSaveResult> {
-    return serializeMutation(mutationQueue, (nextQueue) => {
-      mutationQueue = nextQueue;
-    }, async () => {
+    return serializeMutation(goalsDir, async () => {
       const existing = await readRawGoal(goal.id);
       if (expectedStatus !== undefined && existing?.status !== expectedStatus) {
         return {
@@ -196,14 +199,34 @@ export function createAgentGoalStore(options: {
       });
     },
 
+    async appendLedgerIfAbsent(goalId, publicationKey, event) {
+      return serializeMutation(goalsDir, async () => {
+        const ledger = await readRecoverableJsonl<ProgressLedgerEvent>(
+          ledgerPath(goalId),
+        );
+        if (
+          ledger.some(
+            (candidate) => candidate.publicationKey === publicationKey,
+          )
+        ) {
+          return false;
+        }
+        await mkdir(goalsDir, { recursive: true });
+        await writeFile(
+          ledgerPath(goalId),
+          `${JSON.stringify({ ...event, publicationKey })}\n`,
+          { encoding: "utf8", flag: "a" },
+        );
+        return true;
+      });
+    },
+
     async readLedger(goalId) {
       return readRecoverableJsonl<ProgressLedgerEvent>(ledgerPath(goalId));
     },
 
     async delete(goalId) {
-      return serializeMutation(mutationQueue, (nextQueue) => {
-        mutationQueue = nextQueue;
-      }, async () => {
+      return serializeMutation(goalsDir, async () => {
         try {
           await unlink(goalPath(goalId));
           return true;
@@ -220,15 +243,21 @@ export function createAgentGoalStore(options: {
 }
 
 function serializeMutation<T>(
-  currentQueue: Promise<void>,
-  setQueue: (queue: Promise<void>) => void,
+  key: string,
   operation: () => Promise<T>,
 ): Promise<T> {
+  const currentQueue = goalMutationQueues.get(key) ?? Promise.resolve();
   const result = currentQueue.then(operation, operation);
-  setQueue(result.then(
+  const nextQueue = result.then(
     () => undefined,
     () => undefined,
-  ));
+  );
+  goalMutationQueues.set(key, nextQueue);
+  void nextQueue.finally(() => {
+    if (goalMutationQueues.get(key) === nextQueue) {
+      goalMutationQueues.delete(key);
+    }
+  });
   return result;
 }
 

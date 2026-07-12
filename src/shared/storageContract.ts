@@ -112,6 +112,10 @@ export interface RunRepository {
     runId: string,
     event: AgentTrajectoryEvent,
   ): AgentTrajectoryEvent;
+  appendTrajectoryIfAbsent(
+    runId: string,
+    event: AgentTrajectoryEvent,
+  ): boolean;
   getTrajectory(
     runId: string,
     opts?: { fromSeq?: number },
@@ -194,6 +198,11 @@ export interface GoalRepository {
   listByChatSession(chatSessionId: string): Goal[];
   delete(goalId: string): boolean;
   appendLedger(goalId: string, event: ProgressLedgerEvent): void;
+  appendLedgerIfAbsent(
+    goalId: string,
+    publicationKey: string,
+    event: ProgressLedgerEvent,
+  ): boolean;
   readLedger(goalId: string): ProgressLedgerEvent[];
 }
 

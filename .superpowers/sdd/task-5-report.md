@@ -173,3 +173,57 @@ git diff --check
 - Failure injection covers recorded ledger, recorded trajectory, goal-stopped ledger, and goal-stopped trajectory boundaries. Ledger failure is injected after the durable write to prove replay dedupe; trajectory failure is retried without duplicating durable events.
 - Terminal publication versions are registered only after goal-stopped ledger and trajectory writes are durable. A ledger-tail check distinguishes retry recovery from a later terminal cycle even under a fixed clock.
 - Prior Task 5 report content above is retained verbatim; the original Task 5A report and this review-fix section are appended.
+
+## Task 5A Second Independent Review Fixes
+
+### Status
+
+DONE
+
+### RED evidence
+
+```text
+npm test -- --run src/main/agentGoalController.test.ts src/main/agentGoalStore.test.ts src/main/agentTrajectoryStore.test.ts src/main/storage/repositories/repositories.test.ts
+```
+
+- Expected RED: 4 test files failed; 6 tests failed and 162 passed.
+- Store tests failed because ledger and trajectory atomic append-if-absent APIs did not exist.
+- The CAS loser test showed the winner could fail recorded publication while the loser still returned without repairing it.
+- Cross-controller barrier tests showed publication did not enter atomic boundaries and could not guarantee exactly-once order.
+
+```text
+npm test -- --run src/main/agentTrajectoryStore.test.ts
+```
+
+- Expected RED: 1 test failed and 7 passed; SQLite incorrectly treated an unrelated sequence collision as an existing publication.
+
+### GREEN evidence
+
+```text
+npm test -- --run src/main/agentGoalController.test.ts src/main/agentGoalStore.test.ts src/main/agentTrajectoryStore.test.ts src/main/storage/repositories/repositories.test.ts
+```
+
+- 4 test files passed; 169 tests passed.
+
+```text
+npm test -- --run src/main/agentGoalController.test.ts src/main/agentGoalStore.test.ts src/main/agentTrajectoryStore.test.ts src/main/storage/repositories/repositories.test.ts src/main/storage/repositories/runRepository.test.ts src/main/agentGoalAcceptanceCertificate.test.ts src/main/agentGoalRedaction.test.ts
+```
+
+- Final focused verification: 7 test files passed; 260 tests passed.
+
+```text
+npx tsc -p tsconfig.electron.json --noEmit
+npm run harness:check
+git diff --check
+```
+
+- All passed.
+
+### Fixes and self-review
+
+- Manual terminal publication is now a per-goal serialized sequence inside each controller: durable recorded ledger, durable recorded trajectory, durable goal-stopped ledger, then durable goal-stopped trajectory.
+- A CAS loser that receives another caller's `completed_unverified` canonical result always enters the same recorded-first recovery sequence, including when the winner's recorded write is delayed or fails.
+- Ledger events carry a durable `publicationKey`. JSON goal stores share a path-keyed mutation queue across instances; SQLite uses one `INSERT ... WHERE NOT EXISTS` statement.
+- Trajectory publication uses a deterministic publication event ID. JSON trajectory stores share a path-keyed mutation queue; SQLite uses `INSERT OR IGNORE` and allocates the next durable sequence so restart collisions cannot suppress a missing publication.
+- Barrier regressions force two controllers/stores to reach all four absent-publication boundaries concurrently and prove exactly-once durable events in recorded-before-stopped order.
+- Recorded and stopped progress is emitted only by the caller that atomically appends the corresponding trajectory event, preventing duplicate recovery notifications.

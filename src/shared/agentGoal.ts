@@ -416,6 +416,7 @@ function validateSuccessCriterion(criterion: SuccessCriterion): void {
 // so the storage contract (src/shared/storageContract.ts) can reference it.
 export type ProgressLedgerEvent = {
   at: string;
+  publicationKey?: string;
   kind:
     | "goal_planned"
     | "milestone_started"

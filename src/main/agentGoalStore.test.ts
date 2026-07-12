@@ -558,6 +558,28 @@ describe("agent goal store", () => {
     },
   );
 
+  it("atomically appends a publication ledger event once across store instances", async () => {
+    const firstStore = createAgentGoalStore({ configDir });
+    const secondStore = createAgentGoalStore({ configDir });
+    const goal = createGoal("goal_ledger_once", "completed_unverified");
+    const event: ProgressLedgerEvent = {
+      at: "2026-07-11T05:03:00.000Z",
+      kind: "acceptance_manual_completion_recorded",
+      summary: "Manual completion recorded without certification.",
+    };
+    await firstStore.save(goal);
+
+    const results = await Promise.all([
+      firstStore.appendLedgerIfAbsent(goal.id, "manual:recorded:a", event),
+      secondStore.appendLedgerIfAbsent(goal.id, "manual:recorded:a", event),
+    ]);
+
+    expect(results.sort()).toEqual([false, true]);
+    expect(await firstStore.readLedger(goal.id)).toEqual([
+      { ...event, publicationKey: "manual:recorded:a" },
+    ]);
+  });
+
   it("still allows a budget-stopped goal to resume after an explicit recovery action", async () => {
     const store = createAgentGoalStore({ configDir });
     const stopped = createGoal("goal_recoverable", "stopped_budget");
