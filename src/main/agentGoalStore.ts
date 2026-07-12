@@ -16,12 +16,21 @@ export type { ProgressLedgerEvent } from "../shared/agentGoal";
 
 export type AgentGoalStore = {
   save(goal: Goal): Promise<Goal>;
+  saveIfStatus(
+    goal: Goal,
+    expectedStatus: GoalStatus,
+  ): Promise<GoalConditionalSaveResult>;
   get(goalId: string): Promise<Goal | null>;
   listActive(): Promise<Goal[]>;
   listByChatSession(chatSessionId: string): Promise<Goal[]>;
   appendLedger(goalId: string, event: ProgressLedgerEvent): Promise<void>;
   readLedger(goalId: string): Promise<ProgressLedgerEvent[]>;
   delete(goalId: string): Promise<boolean>;
+};
+
+export type GoalConditionalSaveResult = {
+  saved: boolean;
+  goal: Goal | null;
 };
 
 const terminalGoalStatuses = new Set<GoalStatus>([
@@ -97,48 +106,69 @@ export function createAgentGoalStore(options: {
     return goals.filter((goal): goal is Goal => goal !== null);
   }
 
+  async function persistGoal(
+    goal: Goal,
+    expectedStatus?: GoalStatus,
+  ): Promise<GoalConditionalSaveResult> {
+    return serializeMutation(mutationQueue, (nextQueue) => {
+      mutationQueue = nextQueue;
+    }, async () => {
+      const existing = await readRawGoal(goal.id);
+      if (expectedStatus !== undefined && existing?.status !== expectedStatus) {
+        return {
+          saved: false,
+          goal: existing ? sanitizeGoalForRead(existing) : null,
+        };
+      }
+      if (existing && hasInvalidProtocolV2Achievement(existing)) {
+        return { saved: false, goal: sanitizeGoalForRead(existing) };
+      }
+      if (existing && isCanonicalCertifiedAchievement(existing)) {
+        return { saved: false, goal: existing };
+      }
+      if (existing?.status === "completed_unverified") {
+        return { saved: false, goal: existing };
+      }
+      const candidate = preserveCanonicalAcceptance(existing, goal);
+      if (
+        existing &&
+        irreversibleGoalStatuses.has(existing.status) &&
+        candidate.status !== existing.status
+      ) {
+        return { saved: false, goal: existing };
+      }
+      if (
+        candidate.acceptanceProtocolVersion === 2 &&
+        candidate.status === "achieved"
+      ) {
+        const terminalVerification = verifyProtocolV2Achievement(candidate);
+        if (!terminalVerification.ok) {
+          if (existing) return { saved: false, goal: existing };
+          throw new Error(
+            `Cannot save protocol-v2 achieved goal: ${terminalVerification.reason}`,
+          );
+        }
+      }
+      await writeJsonFileAtomically(
+        goalsDir,
+        goalPath(candidate.id),
+        `${JSON.stringify(candidate, null, 2)}\n`,
+      );
+      return { saved: true, goal: candidate };
+    });
+  }
+
   return {
     async save(goal) {
-      return serializeMutation(mutationQueue, (nextQueue) => {
-        mutationQueue = nextQueue;
-      }, async () => {
-        const existing = await readRawGoal(goal.id);
-        if (existing && hasInvalidProtocolV2Achievement(existing)) {
-          return sanitizeGoalForRead(existing);
-        }
-        if (existing && isCanonicalCertifiedAchievement(existing)) {
-          return existing;
-        }
-        if (existing?.status === "completed_unverified") {
-          return existing;
-        }
-        const candidate = preserveCanonicalAcceptance(existing, goal);
-        if (
-          existing &&
-          irreversibleGoalStatuses.has(existing.status) &&
-          candidate.status !== existing.status
-        ) {
-          return existing;
-        }
-        if (
-          candidate.acceptanceProtocolVersion === 2 &&
-          candidate.status === "achieved"
-        ) {
-          const terminalVerification = verifyProtocolV2Achievement(candidate);
-          if (!terminalVerification.ok) {
-            if (existing) return existing;
-            throw new Error(
-              `Cannot save protocol-v2 achieved goal: ${terminalVerification.reason}`,
-            );
-          }
-        }
-        await writeJsonFileAtomically(
-          goalsDir,
-          goalPath(candidate.id),
-          `${JSON.stringify(candidate, null, 2)}\n`,
-        );
-        return candidate;
-      });
+      const result = await persistGoal(goal);
+      if (!result.goal) {
+        throw new Error(`Goal "${goal.id}" could not be saved.`);
+      }
+      return result.goal;
+    },
+
+    async saveIfStatus(goal, expectedStatus) {
+      return persistGoal(goal, expectedStatus);
     },
 
     async get(goalId) {
@@ -299,7 +329,7 @@ function preserveCanonicalAcceptance(
     incoming.acceptanceState,
   );
 
-  return {
+  const candidate: Goal = {
     ...incoming,
     acceptanceProtocolVersion: 2,
     ...(acceptanceState ? { acceptanceState } : {}),
@@ -309,6 +339,14 @@ function preserveCanonicalAcceptance(
         ? { acceptanceCertificate: existing.acceptanceCertificate }
         : {}),
   };
+  if (
+    candidate.status === "completed_unverified" &&
+    candidate.stopReason === "user_marked_complete" &&
+    candidate.manualCompletionAttestation
+  ) {
+    candidate.acceptanceCertificate = undefined;
+  }
+  return candidate;
 }
 
 function mergeAcceptanceState(

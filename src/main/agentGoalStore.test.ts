@@ -511,6 +511,53 @@ describe("agent goal store", () => {
     ).resolves.toEqual(completed);
   });
 
+  it("conditionally completes only a canonical waiting goal and clears its stale certificate", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const waiting = createProtocolV2Goal(
+      "goal_manual_cas",
+      "waiting_for_acceptance",
+    );
+    waiting.acceptanceCertificate = {
+      forged: true,
+    } as unknown as Goal["acceptanceCertificate"];
+    const completed = createManualCompletedGoal(waiting);
+
+    await store.save(waiting);
+
+    await expect(
+      store.saveIfStatus(completed, "waiting_for_acceptance"),
+    ).resolves.toEqual({ saved: true, goal: completed });
+    await expect(store.get(waiting.id)).resolves.toEqual(completed);
+  });
+
+  it.each(["executing", "canceled"] as const)(
+    "loses the manual completion CAS when canonical %s wins",
+    async (winnerStatus) => {
+      const store = createAgentGoalStore({ configDir });
+      const waiting = createProtocolV2Goal(
+        `goal_manual_cas_${winnerStatus}`,
+        "waiting_for_acceptance",
+      );
+      const winner: Goal = {
+        ...waiting,
+        status: winnerStatus,
+        ...(winnerStatus === "canceled"
+          ? { stopReason: "user_canceled" as const }
+          : {}),
+        updatedAt: "2026-07-11T05:01:00.000Z",
+      };
+      const completed = createManualCompletedGoal(waiting);
+
+      await store.save(waiting);
+      await store.save(winner);
+
+      await expect(
+        store.saveIfStatus(completed, "waiting_for_acceptance"),
+      ).resolves.toEqual({ saved: false, goal: winner });
+      await expect(store.get(waiting.id)).resolves.toEqual(winner);
+    },
+  );
+
   it("still allows a budget-stopped goal to resume after an explicit recovery action", async () => {
     const store = createAgentGoalStore({ configDir });
     const stopped = createGoal("goal_recoverable", "stopped_budget");
@@ -878,6 +925,27 @@ function createProtocolV2Goal(id: string, status: GoalStatus): Goal {
       attempt: 0,
       recentFailures: [],
     },
+  };
+}
+
+function createManualCompletedGoal(waiting: Goal): Goal {
+  return {
+    ...waiting,
+    status: "completed_unverified",
+    stopReason: "user_marked_complete",
+    acceptanceCertificate: undefined,
+    manualCompletionAttestation: {
+      version: 1,
+      goalId: waiting.id,
+      completedAt: "2026-07-11T05:02:00.000Z",
+      reason: "user_marked_complete",
+      failedCheckIds: ["check_file"],
+      evidenceRefs: ["artifact:report"],
+      evidenceFingerprint: "a".repeat(64),
+      lastFailureCode: "judge_timeout",
+      retryCycles: 1,
+    },
+    updatedAt: "2026-07-11T05:02:00.000Z",
   };
 }
 

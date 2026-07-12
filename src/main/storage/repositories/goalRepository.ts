@@ -65,6 +65,33 @@ export function createGoalRepository(storage: Storage): GoalRepository {
       return goal;
     },
 
+    saveIfStatus(goal: Goal, expectedStatus: GoalStatus) {
+      const candidate = clearManualCompletionCertificate(goal);
+      const result = db.prepare(
+        `UPDATE goals
+         SET chat_session_id = ?, status = ?, payload = ?, updated_at = ?
+         WHERE id = ? AND status = ?`,
+      ).run(
+        candidate.chatSessionId ?? null,
+        candidate.status,
+        jsonify(candidate),
+        candidate.updatedAt,
+        candidate.id,
+        expectedStatus,
+      );
+      if (result.changes === 1) {
+        return { saved: true, goal: candidate };
+      }
+      return {
+        saved: false,
+        goal: getPayloadRow<Goal>(
+          db,
+          "SELECT payload FROM goals WHERE id = ?",
+          [goal.id],
+        ),
+      };
+    },
+
     get(goalId: string): Goal | null {
       return getPayloadRow<Goal>(db, "SELECT payload FROM goals WHERE id = ?", [goalId]);
     },
@@ -110,4 +137,15 @@ export function createGoalRepository(storage: Storage): GoalRepository {
         .filter((v): v is ProgressLedgerEvent => v !== null);
     },
   };
+}
+
+function clearManualCompletionCertificate(goal: Goal): Goal {
+  if (
+    goal.status !== "completed_unverified" ||
+    goal.stopReason !== "user_marked_complete" ||
+    !goal.manualCompletionAttestation
+  ) {
+    return goal;
+  }
+  return { ...goal, acceptanceCertificate: undefined };
 }

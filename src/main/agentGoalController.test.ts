@@ -1792,11 +1792,11 @@ describe("agent goal controller", () => {
     const atomicSaveInputs: Goal[] = [];
     const recordingStore: AgentGoalStore = {
       ...store,
-      async save(goal) {
+      async saveIfStatus(goal, expectedStatus) {
         if (goal.status === "completed_unverified") {
           atomicSaveInputs.push(structuredClone(goal));
         }
-        return store.save(goal);
+        return store.saveIfStatus(goal, expectedStatus);
       },
     };
     const controller = createController({
@@ -1963,11 +1963,11 @@ describe("agent goal controller", () => {
     await store.save(waitingForAcceptanceGoal());
     const failingStore: AgentGoalStore = {
       ...store,
-      async save(goal) {
+      async saveIfStatus(goal, expectedStatus) {
         if (goal.status === "completed_unverified") {
           throw new Error("disk full");
         }
-        return store.save(goal);
+        return store.saveIfStatus(goal, expectedStatus);
       },
     };
     const controller = createController({
@@ -1990,6 +1990,147 @@ describe("agent goal controller", () => {
         .map((event) => event.kind),
     ).toEqual(["acceptance_manual_completion_requested"]);
   });
+
+  it.each(["executing", "canceled"] as const)(
+    "does not complete when canonical %s wins the manual CAS race",
+    async (winnerStatus) => {
+      await store.save(waitingForAcceptanceGoal());
+      let injected = false;
+      const racingStore: AgentGoalStore = {
+        ...store,
+        async saveIfStatus(goal, expectedStatus) {
+          if (!injected) {
+            injected = true;
+            const canonical = await store.get(goal.id);
+            await store.save({
+              ...canonical!,
+              status: winnerStatus,
+              ...(winnerStatus === "canceled"
+                ? { stopReason: "user_canceled" as const }
+                : {}),
+            });
+          }
+          return store.saveIfStatus(goal, expectedStatus);
+        },
+      };
+      const controller = createController({
+        goalStore: racingStore,
+        runtime: createRuntime(),
+        acceptance: createAcceptanceResults({ milestones: [], goals: [] }),
+      });
+
+      const result = await controller.markCompletedUnverified("goal_1");
+
+      expect(result.status).toBe(winnerStatus);
+      expect((await store.get("goal_1"))?.status).toBe(winnerStatus);
+      expect(
+        trajectoryEvents.filter(
+          (event) => event.type === "acceptance_manual_completion_recorded",
+        ),
+      ).toEqual([]);
+    },
+  );
+
+  it.each([
+    ["recorded ledger", "acceptance_manual_completion_recorded"],
+    ["goal-stopped ledger", "goal_stopped"],
+  ] as const)(
+    "recovers after a failed %s write without duplicate durable events",
+    async (_boundary, failedKind) => {
+      await store.save(waitingForAcceptanceGoal());
+      let failOnce = true;
+      const failingStore: AgentGoalStore = {
+        ...store,
+        async appendLedger(goalId, event) {
+          const result = await store.appendLedger(goalId, event);
+          if (failOnce && event.kind === failedKind) {
+            failOnce = false;
+            throw new Error(`injected ${failedKind} failure`);
+          }
+          return result;
+        },
+      };
+      const createRetryController = () =>
+        createController({
+          goalStore: failingStore,
+          runtime: createRuntime(),
+          acceptance: createAcceptanceResults({ milestones: [], goals: [] }),
+        });
+
+      const controller = createRetryController();
+      await expect(
+        controller.markCompletedUnverified("goal_1"),
+      ).rejects.toThrow(`injected ${failedKind} failure`);
+      expect((await store.get("goal_1"))?.status).toBe(
+        "completed_unverified",
+      );
+
+      await expect(
+        Promise.all([
+          controller.markCompletedUnverified("goal_1"),
+          controller.markCompletedUnverified("goal_1"),
+        ]),
+      ).resolves.toEqual([
+        expect.objectContaining({ status: "completed_unverified" }),
+        expect.objectContaining({ status: "completed_unverified" }),
+      ]);
+      await expect(
+        createRetryController().markCompletedUnverified("goal_1"),
+      ).resolves.toMatchObject({ status: "completed_unverified" });
+
+      const ledger = await store.readLedger("goal_1");
+      expect(ledger.filter((event) => event.kind === failedKind)).toHaveLength(1);
+      expect(
+        trajectoryEvents.filter((event) => event.type === failedKind),
+      ).toHaveLength(1);
+    },
+  );
+
+  it.each([
+    "acceptance_manual_completion_recorded",
+    "goal_stopped",
+  ] as const)(
+    "recovers after a failed %s trajectory write without duplicate durable events",
+    async (failedType) => {
+      await store.save(waitingForAcceptanceGoal());
+      let failOnce = true;
+      const createRetryController = () =>
+        createController({
+          runtime: createRuntime(),
+          acceptance: createAcceptanceResults({ milestones: [], goals: [] }),
+          onTrajectoryAppend(event) {
+            if (failOnce && event.type === failedType) {
+              failOnce = false;
+              throw new Error(`injected ${failedType} failure`);
+            }
+          },
+        });
+
+      const controller = createRetryController();
+      await expect(
+        controller.markCompletedUnverified("goal_1"),
+      ).rejects.toThrow(`injected ${failedType} failure`);
+
+      await expect(
+        Promise.all([
+          controller.markCompletedUnverified("goal_1"),
+          controller.markCompletedUnverified("goal_1"),
+        ]),
+      ).resolves.toEqual([
+        expect.objectContaining({ status: "completed_unverified" }),
+        expect.objectContaining({ status: "completed_unverified" }),
+      ]);
+      await expect(
+        createRetryController().markCompletedUnverified("goal_1"),
+      ).resolves.toMatchObject({ status: "completed_unverified" });
+
+      const ledger = await store.readLedger("goal_1");
+      expect(ledger.filter((event) => event.kind === failedType)).toHaveLength(1);
+      expect(
+        trajectoryEvents.filter((event) => event.type === failedType),
+      ).toHaveLength(1);
+    },
+  );
 
   it("continues from the final judge without rerunning accepted milestones", async () => {
     await store.save(waitingForAcceptanceGoal());
@@ -3691,6 +3832,9 @@ describe("agent goal controller", () => {
           }
           trajectoryEvents.push(event);
           return event;
+        },
+        async list(runId) {
+          return trajectoryEvents.filter((event) => event.runId === runId);
         },
       },
       onProgress: options.onProgress,

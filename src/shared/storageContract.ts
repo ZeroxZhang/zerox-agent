@@ -185,6 +185,10 @@ export interface MemoryRepository {
 
 export interface GoalRepository {
   save(goal: Goal): Goal;
+  saveIfStatus(
+    goal: Goal,
+    expectedStatus: Goal["status"],
+  ): { saved: boolean; goal: Goal | null };
   get(goalId: string): Goal | null;
   listActive(): Goal[];
   listByChatSession(chatSessionId: string): Goal[];

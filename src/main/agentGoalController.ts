@@ -94,7 +94,7 @@ export function createAgentGoalController(options: {
   runtimeEngine: GoalRuntimeEngine;
   acceptance: Pick<AgentGoalAcceptance, "evaluate" | "evaluateGoal">;
   planner: Pick<AgentGoalPlanner, "replan">;
-  trajectoryStore: Pick<AgentTrajectoryStore, "append">;
+  trajectoryStore: Pick<AgentTrajectoryStore, "append" | "list">;
   createAcceptanceContext?: (
     goal: Goal,
     milestone?: Milestone,
@@ -247,25 +247,45 @@ export function createAgentGoalController(options: {
     if (!isTerminalGoalStatus(canonical.status)) {
       return;
     }
-    if (!registerTerminalPublication(canonical)) {
-      return;
-    }
+    await publishTerminalGoalEvent(canonical, terminalStatusMessage(canonical));
+    recentActionSignatures.delete(canonical.id);
+  }
+
+  async function publishTerminalGoalEvent(
+    canonical: Goal,
+    summary: string,
+  ): Promise<void> {
+    const version = `${canonical.status}:${canonical.updatedAt}`;
+    if (publishedTerminalVersions.get(canonical.id) === version) return;
     const ledger = await options.goalStore.readLedger(canonical.id);
-    if (ledger.at(-1)?.kind !== "goal_stopped") {
+    const terminalLedgerAlreadyDurable =
+      ledger.at(-1)?.kind === "goal_stopped";
+    if (!terminalLedgerAlreadyDurable) {
       await options.goalStore.appendLedger(canonical.id, {
         at: currentTime(),
         kind: "goal_stopped",
-        summary: terminalStatusMessage(canonical),
+        summary,
       });
     }
-    await emit(canonical.id, "goal_stopped", {
-      goalId: canonical.id,
-      status: canonical.status,
-      stopReason: canonical.stopReason,
-      summary: terminalStatusMessage(canonical),
-    });
-    notifyProgress("stopped", canonical, terminalStatusMessage(canonical));
-    recentActionSignatures.delete(canonical.id);
+    const trajectory = await options.trajectoryStore.list(canonical.id);
+    if (
+      !terminalLedgerAlreadyDurable ||
+      !trajectory.some(
+        (event) =>
+          event.type === "goal_stopped" &&
+          event.payload.terminalVersion === version,
+      )
+    ) {
+      await emit(canonical.id, "goal_stopped", {
+        goalId: canonical.id,
+        status: canonical.status,
+        stopReason: canonical.stopReason,
+        summary,
+        terminalVersion: version,
+      });
+    }
+    publishedTerminalVersions.set(canonical.id, version);
+    notifyProgress("stopped", canonical, summary);
   }
 
   function beginNonterminalPublication(goalId: string): () => void {
@@ -356,13 +376,6 @@ export function createAgentGoalController(options: {
     } finally {
       release();
     }
-  }
-
-  function registerTerminalPublication(goal: Goal): boolean {
-    const version = `${goal.status}:${goal.updatedAt}`;
-    if (publishedTerminalVersions.get(goal.id) === version) return false;
-    publishedTerminalVersions.set(goal.id, version);
-    return true;
   }
 
   function clearGoalRuntimeStateIfIdle(goalId: string): void {
@@ -1344,20 +1357,7 @@ export function createAgentGoalController(options: {
     if (!certificatePublished) {
       return settleSuppressedPublication(certifiedGoal);
     }
-    if (registerTerminalPublication(certifiedGoal)) {
-      await options.goalStore.appendLedger(certifiedGoal.id, {
-        at: currentTime(),
-        kind: "goal_stopped",
-        summary: "Goal acceptance passed.",
-      });
-      await emit(certifiedGoal.id, "goal_stopped", {
-        goalId: certifiedGoal.id,
-        status: certifiedGoal.status,
-        stopReason: certifiedGoal.stopReason,
-        summary: "Goal acceptance passed.",
-      });
-      notifyProgress("stopped", certifiedGoal, "Goal acceptance passed.");
-    }
+    await publishTerminalGoalEvent(certifiedGoal, "Goal acceptance passed.");
     clearGoalRuntimeStateIfIdle(certifiedGoal.id);
     return certifiedGoal;
   }
@@ -1814,23 +1814,10 @@ export function createAgentGoalController(options: {
       clearGoalRuntimeStateIfIdle(canonical.id);
       return canonical;
     }
-    if (registerTerminalPublication(canonical)) {
-      const canonicalSummary = canonical.status === status
-        ? summary
-        : terminalStatusMessage(canonical);
-      await options.goalStore.appendLedger(canonical.id, {
-        at: currentTime(),
-        kind: "goal_stopped",
-        summary: canonicalSummary,
-      });
-      await emit(canonical.id, "goal_stopped", {
-        goalId: canonical.id,
-        status: canonical.status,
-        stopReason: canonical.stopReason,
-        summary: canonicalSummary,
-      });
-      notifyProgress("stopped", canonical, canonicalSummary);
-    }
+    const canonicalSummary = canonical.status === status
+      ? summary
+      : terminalStatusMessage(canonical);
+    await publishTerminalGoalEvent(canonical, canonicalSummary);
     clearGoalRuntimeStateIfIdle(canonical.id);
     return canonical;
   }
@@ -1992,6 +1979,60 @@ export function createAgentGoalController(options: {
     };
   }
 
+  async function publishManualCompletionRecorded(goal: Goal): Promise<void> {
+    const attestation = goal.manualCompletionAttestation;
+    if (
+      goal.status !== "completed_unverified" ||
+      goal.stopReason !== "user_marked_complete" ||
+      !attestation
+    ) {
+      return;
+    }
+    const ledger = await options.goalStore.readLedger(goal.id);
+    if (
+      !ledger.some(
+        (event) => event.kind === "acceptance_manual_completion_recorded",
+      )
+    ) {
+      await options.goalStore.appendLedger(goal.id, {
+        at: currentTime(),
+        kind: "acceptance_manual_completion_recorded",
+        summary: "Manual completion recorded without certification.",
+        evidenceRefs: attestation.evidenceRefs,
+      });
+    }
+    const trajectory = await options.trajectoryStore.list(goal.id);
+    if (
+      !trajectory.some(
+        (event) =>
+          event.type === "acceptance_manual_completion_recorded" &&
+          event.payload.fingerprint === attestation.evidenceFingerprint,
+      )
+    ) {
+      await emit(
+        goal.id,
+        "acceptance_manual_completion_recorded",
+        manualCompletionPayload(attestation),
+      );
+    }
+    notifyProgress(
+      "acceptance_manual_completion_recorded",
+      goal,
+      "目标已手动标记为完成（未验证）。",
+    );
+  }
+
+  async function recoverManualCompletion(goal: Goal): Promise<Goal> {
+    const release = beginNonterminalPublication(goal.id);
+    try {
+      await publishManualCompletionRecorded(goal);
+    } finally {
+      release();
+    }
+    await publishCanonicalTerminal(goal);
+    return (await options.goalStore.get(goal.id)) ?? goal;
+  }
+
   function assertManualCompletionStatus(goal: Goal): void {
     if (goal.status !== "waiting_for_acceptance") {
       throw new Error(`Cannot manually complete goal from "${goal.status}".`);
@@ -2107,6 +2148,13 @@ export function createAgentGoalController(options: {
 
     async markCompletedUnverified(goalId) {
       const loaded = await loadGoal(goalId);
+      if (
+        loaded.status === "completed_unverified" &&
+        loaded.stopReason === "user_marked_complete" &&
+        loaded.manualCompletionAttestation
+      ) {
+        return recoverManualCompletion(loaded);
+      }
       assertManualCompletionStatus(loaded);
       createManualCompletionAttestation(loaded);
 
@@ -2146,44 +2194,13 @@ export function createAgentGoalController(options: {
           manualCompletionAttestation: attestation,
           updatedAt: attestation.completedAt,
         };
-        persisted = await options.goalStore.save(candidate);
-        if (
-          persisted.status === "completed_unverified" &&
-          persisted.stopReason === "user_marked_complete" &&
-          persisted.manualCompletionAttestation
-        ) {
-          const recordedAttestation = persisted.manualCompletionAttestation;
-          await options.goalStore.appendLedger(goalId, {
-            at: currentTime(),
-            kind: "acceptance_manual_completion_recorded",
-            summary: "Manual completion recorded without certification.",
-            evidenceRefs: recordedAttestation.evidenceRefs,
-          });
-          const recordedCanonical = await loadGoal(goalId);
-          if (
-            recordedCanonical.status === "completed_unverified" &&
-            recordedCanonical.manualCompletionAttestation
-          ) {
-            await emit(
-              goalId,
-              "acceptance_manual_completion_recorded",
-              manualCompletionPayload(
-                recordedCanonical.manualCompletionAttestation,
-              ),
-            );
-            notifyProgress(
-              "acceptance_manual_completion_recorded",
-              recordedCanonical,
-              "目标已手动标记为完成（未验证）。",
-            );
-          }
-          persisted = recordedCanonical;
-        }
-        if (
-          persisted.status !== "completed_unverified" ||
-          !persisted.manualCompletionAttestation
-        ) {
-          persisted = (await options.goalStore.get(goalId)) ?? persisted;
+        const transition = await options.goalStore.saveIfStatus(
+          candidate,
+          "waiting_for_acceptance",
+        );
+        persisted = transition.goal ?? (await loadGoal(goalId));
+        if (transition.saved) {
+          await publishManualCompletionRecorded(persisted);
         }
       } finally {
         release();

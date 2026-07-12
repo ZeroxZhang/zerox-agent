@@ -1,3 +1,57 @@
+# Task 5 Report - Renderer, IPC, And User-Visible State Coherence
+
+## Status
+
+DONE
+
+## Changed files
+
+- `src/main/agentWorkspaceService.ts`
+- `src/main/agentWorkspaceService.test.ts`
+- `src/main/chatService.ts`
+- `src/main/chatService.test.ts`
+- `src/main/container.ts`
+- `src/main/container.test.ts`
+- `src/main/ipc/index.ts`
+- `src/preload/index.ts`
+- `src/preload/index.test.ts`
+- `src/renderer/components/AgentChatPanel.tsx`
+- `src/renderer/components/RunsPanel.tsx`
+- `src/renderer/materialDesign.test.ts`
+
+## RED evidence
+
+- `npm test -- src/main/agentWorkspaceService.test.ts src/preload/index.test.ts` -> failed as expected: git worktree creation resolved without approval and preload still invoked `agentWorkspaces:createGitWorktree`.
+- `npm test -- src/main/chatService.test.ts src/main/goalChatService.test.ts src/renderer/chatTaskActivity.test.ts` -> failed as expected: review continuation could return `achieved` without clearing the active chat goal link.
+- `npm test -- src/renderer/materialDesign.test.ts` -> failed as expected: Runs panel had no run-lifecycle refresh subscription and empty chat session lists were still ignored.
+
+## GREEN evidence
+
+- `npm test -- src/main/agentWorkspaceService.test.ts src/preload/index.test.ts` -> 2 files / 7 tests passed.
+- `npm test -- src/main/chatService.test.ts src/main/goalChatService.test.ts src/renderer/chatTaskActivity.test.ts` -> 3 files / 46 tests passed.
+- `npm test -- src/renderer/materialDesign.test.ts` -> 1 file / 36 tests passed.
+- `npm test -- src/renderer/materialDesign.test.ts src/renderer/chatTaskActivityRestore.test.ts` -> 2 files / 37 tests passed.
+- `npm run harness:check` -> passed.
+- `npm test` -> 165 files / 1071 tests passed.
+- `npm run build` -> passed.
+- `npm run verify` -> 165 files / 1071 tests passed; build passed; agent eval 26/26; memory eval 2/2.
+- `npm run smoke:prod` -> passed; renderer rendered agent chat UI with expected SQLite ABI fallback to JSON.
+- `git diff --check` -> passed.
+
+## Implementation notes
+
+- `createGitWorktreeWorkspace()` now refuses `git worktree add` unless the main process supplies explicit user approval or the repository root matches a trusted repository policy.
+- The preload worktree API now goes through `agentWorkspaces:requestGitWorktree`; IPC requests approval in the main process before adding an approval marker for the service.
+- Terminal chat-goal summaries are still stored, but `achieved`, `failed`, and `canceled` statuses clear `activeGoalId` through shared main-process helper paths used by chat commands and progress synchronization.
+- RunsPanel refreshes run and active execution lists from a new `agentRuns:changed` subscription and legacy stream events; kernel events remain detail input for the inspector.
+- Desktop `listChatSessions()` returning `[]` now replaces local chat sidebar state instead of preserving fallback/demo sessions.
+
+## Residual risk
+
+- Worktree approval reuses the existing tool-approval coordinator with a synthetic `git_worktree_add` request. This preserves explicit main-process permissioning without adding a new dialog surface, but future UI polish could introduce a dedicated workspace approval copy.
+
+---
+
 # Task 5A Report - Atomic Manual Completion Attestation
 
 ## Status
@@ -71,3 +125,51 @@ git diff --check
 ## Concerns
 
 - `./init.sh` has a pre-existing unrelated failure in `src/shared/packageScripts.test.ts` because the harness expects P42 to be the open release feature while P43 is now the sole in-progress feature. The required standalone `npm run harness:check` passes.
+
+## Task 5A Independent Review Fixes
+
+### Status
+
+DONE
+
+### RED evidence
+
+```text
+npm test -- --run src/main/agentGoalStore.test.ts src/main/storage/repositories/repositories.test.ts src/main/agentGoalController.test.ts
+```
+
+- Expected RED: 3 test files failed; 12 tests failed and 145 passed.
+- JSON and SQLite tests failed because `saveIfStatus` did not exist.
+- Controller race tests showed `completed_unverified` incorrectly overwrote canonical `executing` and `canceled` winners.
+- Recorded/goal-stopped retry tests failed because a committed `completed_unverified` goal was rejected instead of resuming publication.
+
+### GREEN evidence
+
+```text
+npm test -- --run src/main/agentGoalController.test.ts src/main/agentGoalStore.test.ts src/main/storage/repositories/repositories.test.ts src/main/agentGoalAcceptanceCertificate.test.ts src/main/agentGoalRedaction.test.ts
+```
+
+- 5 test files passed; 240 tests passed.
+
+```text
+npx tsc -p tsconfig.electron.json --noEmit
+npm run harness:check
+git diff --check
+```
+
+- All passed.
+
+### Additional changed files
+
+- `src/main/agentGoalStore.ts`
+- `src/main/storage/repositories/goalRepository.ts`
+- `src/shared/storageContract.ts`
+
+### Fixes and self-review
+
+- Added a serialized JSON goal-store CAS and a single-statement SQLite `UPDATE ... WHERE status = ?` CAS. Manual completion can now commit only while canonical status is `waiting_for_acceptance`; `executing` and terminal race winners are returned unchanged.
+- Both CAS implementations explicitly remove `acceptanceCertificate` from a successful manual transition, including when the waiting record contains stale or forged certificate data.
+- A committed manual terminal can re-enter `markCompletedUnverified()` only to recover post-commit publication. Durable ledger and trajectory reads make recorded and goal-stopped publication idempotent across same-controller retries and controller recreation.
+- Failure injection covers recorded ledger, recorded trajectory, goal-stopped ledger, and goal-stopped trajectory boundaries. Ledger failure is injected after the durable write to prove replay dedupe; trajectory failure is retried without duplicating durable events.
+- Terminal publication versions are registered only after goal-stopped ledger and trajectory writes are durable. A ledger-tail check distinguishes retry recovery from a later terminal cycle even under a fixed clock.
+- Prior Task 5 report content above is retained verbatim; the original Task 5A report and this review-fix section are appended.

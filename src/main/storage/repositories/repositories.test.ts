@@ -169,6 +169,77 @@ describe("GoalRepository", () => {
     expect(goals.get(completed.id)).toEqual(completed);
     storage.close();
   });
+
+  it("atomically completes only SQLite waiting state and clears a stale certificate", async () => {
+    const storage = await createInMemoryStorage();
+    const goals = createGoalRepository(storage);
+    const waiting = baseGoal({
+      id: "g-manual-cas",
+      status: "waiting_for_acceptance",
+      acceptanceCertificate: {
+        forged: true,
+      } as unknown as Goal["acceptanceCertificate"],
+    });
+    const completed = baseGoal({
+      ...waiting,
+      status: "completed_unverified",
+      stopReason: "user_marked_complete",
+      acceptanceCertificate: undefined,
+      manualCompletionAttestation: {
+        version: 1,
+        goalId: waiting.id,
+        completedAt: "2026-07-11T05:00:00.000Z",
+        reason: "user_marked_complete",
+        failedCheckIds: ["check_done"],
+        evidenceRefs: [],
+        evidenceFingerprint: "b".repeat(64),
+        lastFailureCode: "judge_timeout",
+        retryCycles: 1,
+      },
+    });
+
+    goals.save(waiting);
+
+    expect(
+      goals.saveIfStatus(completed, "waiting_for_acceptance"),
+    ).toEqual({ saved: true, goal: completed });
+    expect(goals.get(waiting.id)).toEqual(completed);
+    storage.close();
+  });
+
+  it.each(["executing", "canceled"] as const)(
+    "loses the SQLite manual CAS when canonical %s wins",
+    async (winnerStatus) => {
+      const storage = await createInMemoryStorage();
+      const goals = createGoalRepository(storage);
+      const waiting = baseGoal({
+        id: `g-manual-cas-${winnerStatus}`,
+        status: "waiting_for_acceptance",
+      });
+      const winner = baseGoal({
+        ...waiting,
+        status: winnerStatus,
+        ...(winnerStatus === "canceled"
+          ? { stopReason: "user_canceled" }
+          : {}),
+        updatedAt: "2026-07-11T05:01:00.000Z",
+      });
+      const completed = baseGoal({
+        ...waiting,
+        status: "completed_unverified",
+        stopReason: "user_marked_complete",
+      });
+
+      goals.save(waiting);
+      goals.save(winner);
+
+      expect(
+        goals.saveIfStatus(completed, "waiting_for_acceptance"),
+      ).toEqual({ saved: false, goal: winner });
+      expect(goals.get(waiting.id)).toEqual(winner);
+      storage.close();
+    },
+  );
 });
 
 describe("SessionRepository + ActorRepository", () => {
