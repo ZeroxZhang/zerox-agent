@@ -6716,3 +6716,7 @@
 - Adopted MiMo-Code's unified transient classification, visible retry state, fresh side-effect-free judge attempts, and durable resume contract while explicitly rejecting its fail-open goal-verifier behavior.
 - Added the approved design at `docs/superpowers/specs/2026-07-12-goal-acceptance-recovery-design.md`.
 - The design preserves fail-closed machine certification, adds bounded automatic final-judge retry, introduces durable `waiting_for_acceptance`, and defines `completed_unverified` plus a manual completion attestation that cannot masquerade as an acceptance certificate.
+- Written-spec review was approved by the user.
+- Added the TDD implementation plan at `docs/superpowers/plans/2026-07-12-goal-acceptance-recovery.md`, split into shared contracts, typed retry classification, controller orchestration, persistence/restart recovery, manual attestation and IPC, renderer UX, and independent review/release gates.
+- Plan self-review covered complete design requirements, placeholder scans, type/signature consistency, final-only 60-second judge timeout, one clean invalid-response retry, and implementation review SHA boundaries.
+- Plan-stage verification: `npm run harness:check` and `git diff --check` passed.
