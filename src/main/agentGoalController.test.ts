@@ -1691,15 +1691,28 @@ describe("agent goal controller", () => {
   });
 
   it("preserves a completed goal in acceptance waiting after three timeouts", async () => {
-    await store.save(createProtocolV2Goal([milestone("milestone_1")]));
+    await store.save(
+      createProtocolV2Goal([
+        milestone("milestone_1"),
+        milestone("milestone_2", ["milestone_1"]),
+      ]),
+    );
     const runtime = createRuntime();
+    const acceptance = createAcceptanceResults({
+      milestones: [acceptedResult("check_done"), acceptedResult("check_done")],
+      goals: [timeoutResult(), timeoutResult(), timeoutResult()],
+    });
+    const observedSleeps: number[] = [];
+    const progressEvents: GoalProgressEvent[] = [];
     const controller = createController({
       runtime,
-      acceptance: createAcceptanceResults({
-        milestones: [acceptedResult("check_done")],
-        goals: [timeoutResult(), timeoutResult(), timeoutResult()],
-      }),
-      sleep: async () => undefined,
+      acceptance,
+      sleep: async (ms) => {
+        observedSleeps.push(ms);
+      },
+      onProgress(event) {
+        progressEvents.push(event);
+      },
     });
 
     const result = await controller.start("goal_1");
@@ -1713,7 +1726,9 @@ describe("agent goal controller", () => {
       lastCode: "judge_timeout",
       resumeFrom: "final_judge",
     });
-    expect(runtime.runMilestoneIds).toEqual(["milestone_1"]);
+    expect(acceptance.goalCalls).toBe(3);
+    expect(observedSleeps).toEqual([1_000, 2_000]);
+    expect(runtime.runMilestoneIds).toEqual(["milestone_1", "milestone_2"]);
     expect(result.acceptanceCertificate).toBeUndefined();
     expect(trajectoryEvents.map((event) => event.type)).toEqual(
       expect.arrayContaining([
@@ -1724,6 +1739,27 @@ describe("agent goal controller", () => {
     expect(trajectoryEvents.map((event) => event.type)).not.toContain(
       "goal_stopped",
     );
+    expect(
+      trajectoryEvents
+        .filter((event) => event.type === "acceptance_retry_scheduled")
+        .map((event) => [event.payload.attempt, event.payload.delayMs]),
+    ).toEqual([
+      [1, 1_000],
+      [2, 2_000],
+    ]);
+    expect(
+      trajectoryEvents.find(
+        (event) => event.type === "acceptance_retry_exhausted",
+      )?.payload.attempt,
+    ).toBe(3);
+    expect(
+      progressEvents
+        .filter((event) => event.event === "acceptance_retry_scheduled")
+        .map((event) => event.message),
+    ).toEqual([
+      "正在重试最终验收（2/3）",
+      "正在重试最终验收（3/3）",
+    ]);
   });
 
   it("keeps legacy final acceptance unavailable on the blocked path", async () => {

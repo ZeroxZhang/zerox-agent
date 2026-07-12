@@ -365,6 +365,7 @@ export function createAgentGoalController(options: {
     runOptions?: { signal?: AbortSignal },
   ) {
     let stalledIterations = 0;
+    let finalAcceptanceCycleAttempt = 0;
 
     try {
       while (goal.status === "executing") {
@@ -392,6 +393,8 @@ export function createAgentGoalController(options: {
               return validatingGoal;
             }
             goal = validatingGoal;
+            finalAcceptanceCycleAttempt += 1;
+            const currentFinalAcceptanceAttempt = finalAcceptanceCycleAttempt;
             const result = await racePublicationWithAbort(
               options.acceptance.evaluateGoal(
                 goal,
@@ -422,7 +425,7 @@ export function createAgentGoalController(options: {
             const retryDecision = goal.acceptanceProtocolVersion === 2
               ? decideFinalAcceptanceRetry(
                   result,
-                  ensureAcceptanceState(goal).attempt,
+                  currentFinalAcceptanceAttempt,
                   options.acceptanceRetry?.nowMs?.() ?? Date.now(),
                 )
               : { action: "not_applicable" as const };
@@ -431,6 +434,7 @@ export function createAgentGoalController(options: {
                 goal,
                 result,
                 retryDecision,
+                currentFinalAcceptanceAttempt,
                 runOptions,
               );
               if (retryingGoal.status !== "executing") {
@@ -465,7 +469,11 @@ export function createAgentGoalController(options: {
               result,
               recentActionSignatures.get(goal.id) ?? [],
               runOptions,
+              { finalAcceptanceAttempt: currentFinalAcceptanceAttempt },
             );
+            if (retryDecision.action === "not_applicable") {
+              finalAcceptanceCycleAttempt = 0;
+            }
             goal = decisionResult.goal;
             if (decisionResult.suspend) return goal;
             continue;
@@ -862,6 +870,7 @@ export function createAgentGoalController(options: {
     decisionOptions: {
       pauseAfterRepair?: boolean;
       pauseSummary?: string;
+      finalAcceptanceAttempt?: number;
     } = {},
   ): Promise<{ goal: Goal; suspend: boolean }> {
     const safeActionSignatures = sanitizeActionSignaturesForPersistence(
@@ -1026,6 +1035,7 @@ export function createAgentGoalController(options: {
           result,
           decision,
           fingerprint,
+          decisionOptions.finalAcceptanceAttempt ?? 1,
           runOptions,
         ),
         suspend: true,
@@ -1463,9 +1473,9 @@ export function createAgentGoalController(options: {
       ReturnType<typeof decideFinalAcceptanceRetry>,
       { action: "retry" }
     >,
+    attempt: number,
     runOptions?: { signal?: AbortSignal },
   ): Promise<Goal> {
-    const attempt = ensureAcceptanceState(goal).attempt;
     const maxAttempts = maxFinalAcceptanceAttempts(decision.code);
     const evidenceFingerprint = acceptanceResultFingerprint(
       goal,
@@ -1513,9 +1523,9 @@ export function createAgentGoalController(options: {
       { action: "wait_for_acceptance" }
     >,
     evidenceFingerprint: string,
+    attempt: number,
     runOptions?: { signal?: AbortSignal },
   ): Promise<Goal> {
-    const attempt = ensureAcceptanceState(goal).attempt;
     const maxAttempts =
       goal.acceptanceRetryState?.maxAttempts ??
       maxFinalAcceptanceAttempts(result.retry?.code ?? "");
