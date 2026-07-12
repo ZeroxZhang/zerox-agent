@@ -94,9 +94,19 @@ describe("goal progress view model", () => {
 
     expect(presentation.statusLabel).toBe("正在重试最终验收（2/3）");
     expect(presentation.statusDetail).toContain("最终裁判");
+    expect(presentation.statusDetail).toContain(
+      "任务产物与已完成里程碑不会重新执行",
+    );
     expect(presentation.statusDetail).not.toContain("sk-secret");
     expect(presentation.nextActionDetail).toContain("下次重试");
     expect(presentation.recoveryActions).toEqual([]);
+    expect(presentation.acceptance?.retry).toEqual({
+      cycle: 1,
+      attempt: 2,
+      maxAttempts: 3,
+      lastCode: "judge_timeout",
+      nextRetryAt: "2026-07-12T04:05:06.000Z",
+    });
   });
 
   it.each([
@@ -120,7 +130,16 @@ describe("goal progress view model", () => {
         ],
       });
       expect(presentation.statusDetail).toContain(detailFragment);
+      expect(presentation.nextActionDetail).toContain(
+        "任务产物与已完成里程碑不会重新执行",
+      );
       expect(presentation.certificate).toBeUndefined();
+      expect(presentation.acceptance?.retry).toMatchObject({
+        cycle: 1,
+        attempt: 3,
+        maxAttempts: 3,
+        lastCode,
+      });
     },
   );
 
@@ -181,6 +200,77 @@ describe("goal progress view model", () => {
     expect(presentation.statusDetail).toContain("未生成机器验收证书");
     expect(presentation.certificate).toBeUndefined();
     expect(presentation.recoveryActions).toEqual([]);
+    expect(presentation.acceptance?.manualCompletion).toEqual({
+      completedAt: "2026-07-12T04:06:00.000Z",
+      lastFailureCode: "judge_timeout",
+      retryCycles: 1,
+      failedCheckIds: ["criterion_1_review"],
+      evidenceRefs: ["artifact:report.md"],
+    });
+  });
+
+  it("bounds and redacts manual completion metadata", () => {
+    const goal = createGoal({
+      status: "completed_unverified",
+      stopReason: "user_marked_complete",
+      acceptanceProtocolVersion: 2,
+      acceptanceState: {
+        protocolVersion: 2,
+        phase: "awaiting_user",
+        attempt: 3,
+        recentFailures: [],
+      },
+      manualCompletionAttestation: {
+        version: 1,
+        goalId: "goal_1",
+        completedAt: "2026-07-12T04:06:00.000Z",
+        reason: "user_marked_complete",
+        failedCheckIds: Array.from(
+          { length: 30 },
+          (_, index) => `check_${index}?token=sk-proj-secret-${index}`,
+        ),
+        evidenceRefs: Array.from(
+          { length: 40 },
+          (_, index) => `artifact:${index}?password=hunter-${index}`,
+        ),
+        evidenceFingerprint: "a".repeat(64),
+        lastFailureCode: "provider_secret_sk-proj-123456789",
+        retryCycles: 999,
+      },
+    });
+
+    const metadata = buildGoalStatusPresentation(goal.status, goal).acceptance
+      ?.manualCompletion;
+    const serialized = JSON.stringify(metadata);
+
+    expect(metadata?.lastFailureCode).toBe("unknown");
+    expect(metadata?.retryCycles).toBe(999);
+    expect(metadata?.failedCheckIds).toHaveLength(10);
+    expect(metadata?.evidenceRefs).toHaveLength(20);
+    expect(serialized).toContain("[REDACTED]");
+    expect(serialized).not.toContain("sk-proj-secret");
+    expect(serialized).not.toContain("hunter-");
+  });
+
+  it("does not claim an inspectable manual record when attestation is invalid", () => {
+    const goal = createGoal({
+      status: "completed_unverified",
+      stopReason: "user_marked_complete",
+      acceptanceProtocolVersion: 2,
+      acceptanceState: {
+        protocolVersion: 2,
+        phase: "awaiting_user",
+        attempt: 3,
+        recentFailures: [],
+      },
+      manualCompletionAttestation: undefined,
+    });
+
+    const presentation = buildGoalStatusPresentation(goal.status, goal);
+
+    expect(presentation.acceptance?.manualCompletion).toBeUndefined();
+    expect(presentation.nextActionLabel).toBe("手动完成记录不可用");
+    expect(presentation.nextActionDetail).toContain("不会补造");
   });
 
   it("makes budget-stopped goals visibly terminal until the user resumes them", () => {

@@ -124,6 +124,15 @@ export function buildGoalTaskActivity(options: {
     });
   }
 
+  if (options.status === "waiting_for_acceptance") {
+    return createTaskActivity({
+      kind: "paused",
+      title: "等待最终验收",
+      detail: "任务产物已保留，等待用户决定是否继续验收。",
+      now: options.now,
+    });
+  }
+
   if (options.status === "stopped_budget") {
     return createTaskActivity({
       kind: "paused",
@@ -163,6 +172,15 @@ export function buildGoalTaskActivity(options: {
     });
   }
 
+  if (options.status === "completed_unverified") {
+    return createTaskActivity({
+      kind: "done",
+      title: "手动完成 · 未经机器认证",
+      detail: options.description,
+      now: options.now,
+    });
+  }
+
   if (options.status === "canceled") {
     return createTaskActivity({
       kind: "done",
@@ -189,7 +207,7 @@ export function getGoalUiSyncState(status: GoalStatus): GoalUiSyncState {
     };
   }
 
-  if (status === "waiting_for_review") {
+  if (status === "waiting_for_review" || status === "waiting_for_acceptance") {
     return {
       statusKind: "paused",
       workPhase: "paused",

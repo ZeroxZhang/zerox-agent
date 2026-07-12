@@ -112,4 +112,42 @@ DONE
 
 ## Concerns
 
-- Interaction coverage follows the repository's existing source-contract approach rather than browser-driven component tests. Independent packaged smoke/QA remains appropriate for the final feature acceptance.
+- The repository has no renderer DOM test dependency. Interaction safety is covered by pure behavioral state/token tests plus the existing source-contract suite; independent packaged smoke/QA remains appropriate for final click-path acceptance.
+
+## Independent Review Fixes
+
+Review found one Critical, three Important, and two Minor renderer issues. All were addressed test-first:
+
+- Manual-completion confirmation now captures the exact `{ goalId, sessionId, generation }` context. Both the drawer and parent handler validate that snapshot before IPC, so a confirmation opened for one goal cannot complete another goal after navigation.
+- Continue/manual operations now use unique tokens containing operation ID, operation kind, goal ID, session ID, and context generation. Result, error, and `finally` UI mutations are fenced against the current token and context. Acceptance handlers no longer call `refreshSessions`, avoiding stale navigation after a delayed operation.
+- Canonical returned goals must match the operation goal ID before any renderer state is updated.
+- Added explicit `chatTaskActivity` projections: `waiting_for_acceptance` is paused and awaiting a user decision; `completed_unverified` is terminal and explicitly labeled as manually completed without machine certification.
+- Retry metadata is inspectable but bounded: cycle, attempt, maximum attempts, allowlisted last code, and safe timestamp. Manual attestation metadata exposes only bounded/redacted timestamp, failure code, retry cycle count, failed checks, and evidence references.
+- Unknown failure codes render as `unknown`; raw provider detail is never shown. Missing/invalid attestation no longer claims that an inspectable manual record exists.
+- Retry and waiting copy includes the exact reassurance `任务产物与已完成里程碑不会重新执行`.
+
+### Review-fix RED evidence
+
+- Expanded focused suite initially failed with 10 behavioral assertions plus the missing helper module: stale interaction fences, truthful activity states, metadata projections, and strengthened material contracts were absent.
+- A follow-up self-review RED run failed two added cases: cross-goal canonical result rejection and truthful handling of a missing manual attestation.
+
+### Review-fix GREEN evidence
+
+- `npm test -- --run src/renderer/goalAcceptanceInteraction.test.ts src/renderer/chatTaskActivity.test.ts src/renderer/goalProgressViewModel.test.ts src/renderer/materialDesign.test.ts`
+  - PASS: 4 files, 142 tests.
+- `./node_modules/.bin/tsc -p tsconfig.renderer.json --noEmit`
+  - PASS.
+- `./node_modules/.bin/tsc -p tsconfig.electron.json --noEmit`
+  - PASS.
+- `npm run harness:check`
+  - PASS: Harness check passed.
+- `git diff --check`
+  - PASS.
+
+### Review-fix files
+
+- Added `src/renderer/goalAcceptanceInteraction.ts`
+- Added `src/renderer/goalAcceptanceInteraction.test.ts`
+- Modified `src/renderer/chatTaskActivity.ts`
+- Modified `src/renderer/chatTaskActivity.test.ts`
+- Modified renderer Task 6 files listed above.

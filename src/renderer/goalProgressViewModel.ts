@@ -42,6 +42,20 @@ export type GoalAcceptancePresentation = {
   };
   failedCheckIds: string[];
   evidenceRefs: string[];
+  retry?: {
+    cycle: number;
+    attempt: number;
+    maxAttempts: number;
+    lastCode: string;
+    nextRetryAt?: string;
+  };
+  manualCompletion?: {
+    completedAt: string;
+    lastFailureCode: string;
+    retryCycles: number;
+    failedCheckIds: string[];
+    evidenceRefs: string[];
+  };
 };
 
 export type GoalCertificatePresentation = {
@@ -324,7 +338,7 @@ export function buildGoalStatusPresentation(
         ),
         nextActionLabel: "需要你决定",
         nextActionDetail:
-          "当前进度和任务产物已保留。可继续最终验收、手动标记为未经机器认证的完成，或结束目标。",
+          "任务产物与已完成里程碑不会重新执行。可继续最终验收、手动标记为未经机器认证的完成，或结束目标。",
         recoveryActions: [
           "continue_acceptance",
           "mark_completed_unverified",
@@ -352,13 +366,17 @@ export function buildGoalStatusPresentation(
             : "不会为缺失或无效的证书补造展示数据。",
       }, acceptance, certificate);
     case "completed_unverified":
+      const manualCompletion = acceptance?.manualCompletion;
       return withAcceptance({
         statusLabel: "手动完成 · 未经机器认证",
         statusDetail:
           "目标已由用户手动标记完成，未生成机器验收证书，也不代表最终裁判已通过。",
-        nextActionLabel: "手动完成记录",
-        nextActionDetail:
-          "可查看保留的任务产物、失败检查和本地手动完成记录。",
+        nextActionLabel: manualCompletion
+          ? "手动完成记录"
+          : "手动完成记录不可用",
+        nextActionDetail: manualCompletion
+          ? "可查看保留的任务产物、失败检查和本地手动完成记录。"
+          : "手动完成记录元数据不可用；系统不会补造验收或手动完成记录。",
         recoveryActions: [],
       }, acceptance, undefined);
     case "stopped_budget":
@@ -459,6 +477,11 @@ function projectAcceptance(goal: Goal | null): GoalAcceptancePresentation | unde
     MAX_EVIDENCE_REFS,
     MAX_REF_LENGTH,
   );
+  const retry = projectAcceptanceRetry(goal?.acceptanceRetryState);
+  const manualCompletion = projectManualCompletion(
+    goal,
+    goal?.manualCompletionAttestation,
+  );
 
   return {
     phase,
@@ -469,6 +492,69 @@ function projectAcceptance(goal: Goal | null): GoalAcceptancePresentation | unde
       : {}),
     failedCheckIds,
     evidenceRefs,
+    ...(retry ? { retry } : {}),
+    ...(manualCompletion ? { manualCompletion } : {}),
+  };
+}
+
+function projectAcceptanceRetry(
+  value: Goal["acceptanceRetryState"] | undefined,
+): GoalAcceptancePresentation["retry"] | undefined {
+  const raw = asRecord(value);
+  if (!raw) {
+    return undefined;
+  }
+  const cycle = boundedPositiveInteger(raw.cycle, 9_999);
+  const attempt = boundedPositiveInteger(raw.attempt, 3);
+  const maxAttempts = boundedPositiveInteger(raw.maxAttempts, 3);
+  const lastCode = safeAcceptanceFailureCode(raw.lastCode);
+  const nextRetryAt = safeTimestamp(raw.nextRetryAt);
+  if (!cycle || !attempt || !maxAttempts) {
+    return undefined;
+  }
+  return {
+    cycle,
+    attempt: Math.min(attempt, maxAttempts),
+    maxAttempts,
+    lastCode,
+    ...(nextRetryAt ? { nextRetryAt } : {}),
+  };
+}
+
+function projectManualCompletion(
+  goal: Goal | null,
+  value: Goal["manualCompletionAttestation"] | undefined,
+): GoalAcceptancePresentation["manualCompletion"] | undefined {
+  const raw = asRecord(value);
+  if (
+    !goal ||
+    goal.status !== "completed_unverified" ||
+    !raw ||
+    raw.version !== 1 ||
+    raw.goalId !== goal.id ||
+    raw.reason !== "user_marked_complete"
+  ) {
+    return undefined;
+  }
+  const completedAt = safeTimestamp(raw.completedAt);
+  const retryCycles = boundedNonNegativeInteger(raw.retryCycles, 9_999);
+  if (!completedAt || retryCycles === undefined) {
+    return undefined;
+  }
+  return {
+    completedAt,
+    lastFailureCode: safeAcceptanceFailureCode(raw.lastFailureCode),
+    retryCycles,
+    failedCheckIds: boundedUniqueStrings(
+      Array.isArray(raw.failedCheckIds) ? raw.failedCheckIds : [],
+      MAX_FAILED_CHECK_IDS,
+      MAX_ID_LENGTH,
+    ),
+    evidenceRefs: boundedUniqueStrings(
+      Array.isArray(raw.evidenceRefs) ? raw.evidenceRefs : [],
+      MAX_EVIDENCE_REFS,
+      MAX_REF_LENGTH,
+    ),
   };
 }
 
@@ -769,7 +855,7 @@ function safeAcceptanceRetryDetail(
   retrying: boolean,
 ): string {
   const suffix = retrying
-    ? "系统正在自动重试，当前任务不会重复执行。"
+    ? "系统正在自动重试，任务产物与已完成里程碑不会重新执行。"
     : "任务产物和当前进度已保留，请选择继续验收或手动处理。";
   const diagnostic = code === "judge_timeout"
     ? "最终裁判超时。"
@@ -801,6 +887,43 @@ function formatRetryTime(value: string): string {
     minute: "2-digit",
     second: "2-digit",
   }).format(new Date(timestamp));
+}
+
+function safeAcceptanceFailureCode(value: unknown): string {
+  const knownCodes = new Set([
+    "judge_timeout",
+    "rate_limited",
+    "provider_unavailable",
+    "network_reset",
+    "transport_failed",
+    "judge_invalid_response",
+    "validator_missing",
+    "validator_failed",
+  ]);
+  return typeof value === "string" && knownCodes.has(value) ? value : "unknown";
+}
+
+function safeTimestamp(value: unknown): string | undefined {
+  const timestamp = safeString(value, MAX_METADATA_LENGTH);
+  return timestamp && Number.isFinite(Date.parse(timestamp))
+    ? timestamp
+    : undefined;
+}
+
+function boundedPositiveInteger(
+  value: unknown,
+  maximum: number,
+): number | undefined {
+  const safe = safePositiveInteger(value);
+  return safe === undefined ? undefined : Math.min(safe, maximum);
+}
+
+function boundedNonNegativeInteger(
+  value: unknown,
+  maximum: number,
+): number | undefined {
+  const safe = safeNonNegativeInteger(value);
+  return safe === undefined ? undefined : Math.min(safe, maximum);
 }
 
 function safeAcceptanceCheckKind(value: unknown): AcceptanceCheckKind | undefined {

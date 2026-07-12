@@ -997,15 +997,27 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(goalDetailDrawerSource).toContain("继续验收");
     expect(goalDetailDrawerSource).toContain("手动标记完成");
     expect(goalDetailDrawerSource).toContain("不会生成机器验收证书");
+    expect(goalDetailDrawerSource).toContain(
+      "getConfirmedManualCompletionGoalId",
+    );
+    expect(goalDetailDrawerSource).toContain("manualCompletionConfirmation");
     expect(goalDetailDrawerSource).toContain("onContinueAcceptance");
     expect(goalDetailDrawerSource).toContain("onMarkCompletedUnverified");
     expect(goalDetailDrawerSource).toContain("goalAcceptanceOperationPending");
     expect(goalStatusStripSource).toContain('case "waiting_for_acceptance"');
     expect(goalStatusStripSource).toContain("继续验收");
-    expect(chatPanelSource).toContain("continueGoalAcceptance(goalId)");
-    expect(chatPanelSource).toContain("markGoalCompletedUnverified(goalId)");
+    expect(chatPanelSource).toContain("continueGoalAcceptance(\n        operation.goalId");
+    expect(chatPanelSource).toContain(
+      "markGoalCompletedUnverified(\n        operation.goalId",
+    );
     expect(chatPanelSource).toContain("setActiveGoalDetail(result.goal)");
     expect(chatPanelSource).toContain("goalAcceptanceOperationPendingRef.current");
+    expect(chatPanelSource).toContain("isGoalAcceptanceOperationCurrent");
+    expect(chatPanelSource).toContain("doesGoalAcceptanceOperationOwnPending");
+    expect(goalDetailDrawerSource).toContain("progress.acceptance.retry");
+    expect(goalDetailDrawerSource).toContain(
+      "progress.acceptance.manualCompletion",
+    );
     expect(styles).toContain(".goal-status-strip.is-completed_unverified");
     expect(styles).toContain(".goal-manual-completion-confirmation");
     expect(styles).toContain("var(--status-warning-text)");
