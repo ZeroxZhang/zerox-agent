@@ -6720,3 +6720,6 @@
 - Added the TDD implementation plan at `docs/superpowers/plans/2026-07-12-goal-acceptance-recovery.md`, split into shared contracts, typed retry classification, controller orchestration, persistence/restart recovery, manual attestation and IPC, renderer UX, and independent review/release gates.
 - Plan self-review covered complete design requirements, placeholder scans, type/signature consistency, final-only 60-second judge timeout, one clean invalid-response retry, and implementation review SHA boundaries.
 - Plan-stage verification: `npm run harness:check` and `git diff --check` passed.
+- Created isolated worktree `.worktrees/goal-acceptance-recovery` on branch `codex/goal-acceptance-recovery` for subagent-driven implementation.
+- Clean worktree baseline: `npm test` passed 199 test files / 1,835 tests before production changes.
+- Registered `P43-goal-acceptance-recovery` as the single in-progress feature.
