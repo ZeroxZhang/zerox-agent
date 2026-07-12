@@ -1,10 +1,9 @@
 // ToolWorker (contracts v1.4 §3.3, Exit Criteria for P5/P6).
 //
-// Side-effect tools execute out-of-process. `inproc` mode runs handlers in the
-// current process (zero-overhead, the safe default during migration); `subprocess`
-// mode forks `toolWorkerEntry` and round-trips requests over IPC. The parent
-// holds only the result. P5 (checkpoint-writer fork agent) and P6 (actor
-// isolation) reuse this fork/IPC base instead of managing their own subprocesses.
+// `inproc` mode runs registered handlers in the current process. `subprocess`
+// mode is an available isolation transport for handlers explicitly registered
+// in the worker entrypoint; callers must not infer that every tool is isolated
+// merely because this infrastructure exists.
 
 import { fork } from "node:child_process";
 import path from "node:path";
@@ -15,12 +14,12 @@ export interface ToolWorker {
     toolName?: string;
     args?: unknown;
   }): Promise<ToolResult>;
-  close(): void;
+  close(): Promise<void>;
 }
 
 export interface CreateToolWorkerOptions {
   mode: "inproc" | "subprocess";
-  /** Handlers for inproc mode (and the registry subprocess mode delegates to). */
+  /** Handlers for inproc mode. Subprocess handlers live in the worker entrypoint. */
   handlers?: Record<string, ToolHandler>;
   /** Path to the subprocess entry module (subprocess mode). */
   entryModulePath?: string;
@@ -57,7 +56,7 @@ function createInprocWorker(handlers: Record<string, ToolHandler>): ToolWorker {
         return { ok: false, error: String(error) };
       }
     },
-    close() {
+    async close() {
       /* no-op for inproc */
     },
   };
@@ -150,13 +149,30 @@ function createSubprocessWorker(options: CreateToolWorkerOptions): ToolWorker {
         }
       });
     },
-    close() {
-      if (child) {
-        const closingChild = child;
-        child = null;
-        closingChild.send({ kind: "shutdown" } satisfies WorkerRequest);
-        setTimeout(() => closingChild.kill(), 1000).unref?.();
-      }
+    async close() {
+      if (!child) return;
+      const closingChild = child;
+      child = null;
+      await new Promise<void>((resolve) => {
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(forceKill);
+          resolve();
+        };
+        closingChild.once("exit", finish);
+        const forceKill = setTimeout(() => {
+          if (!closingChild.killed) closingChild.kill("SIGKILL");
+          finish();
+        }, 1000);
+        forceKill.unref?.();
+        try {
+          closingChild.send({ kind: "shutdown" } satisfies WorkerRequest);
+        } catch {
+          closingChild.kill();
+        }
+      });
     },
   };
 }

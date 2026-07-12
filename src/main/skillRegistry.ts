@@ -27,6 +27,12 @@ export type SkillRegistryResult = SkillDiscoveryResult & {
   graph: Map<string, string[]>;
 };
 
+export function shouldAutoInitializeSkillMcp(
+  env: Record<string, string | undefined>,
+): boolean {
+  return env.ZEROX_ENABLE_SKILL_MCP === "1";
+}
+
 function getDefaultSkillDirs(): string[] {
   const home = os.homedir();
   return [

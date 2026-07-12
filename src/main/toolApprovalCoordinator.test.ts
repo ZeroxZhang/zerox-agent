@@ -174,6 +174,25 @@ describe("tool approval coordinator", () => {
     ).toBe(false);
   });
 
+  it("rejects and drains every pending approval during shutdown", async () => {
+    let next = 0;
+    const coordinator = createToolApprovalCoordinator({
+      createId: () => `approval_shutdown_${++next}`,
+      sendToRenderers() {},
+    });
+    const first = coordinator.requestUserApproval(createRequest());
+    const second = coordinator.requestUserApproval(createRequest());
+
+    expect(coordinator.rejectAllPending()).toBe(2);
+    await expect(first).resolves.toMatchObject({
+      approved: false,
+      automatic: true,
+      reason: "应用正在退出，授权请求已关闭。",
+    });
+    await expect(second).resolves.toMatchObject({ approved: false });
+    expect(coordinator.rejectAllPending()).toBe(0);
+  });
+
   it("times out a forced ask after the configured bounded wait", async () => {
     vi.useFakeTimers();
     const coordinator = createToolApprovalCoordinator({

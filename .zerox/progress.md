@@ -6880,3 +6880,184 @@
   `src/shared/agentArtifactProvenance.test.ts` and
   `src/shared/trustedFileSnapshot.ts`; P43 is now marked `done` only after both
   independent review and test acceptance had no runtime blocker.
+
+## 2026-07-12 - P44 v3.7.0 Audit Hardening and Release Integrity
+
+- Audit assessment:
+  - Read all seven `docs/audit/grok_v2` reports and cross-checked the older
+    Grok, repository-level, DeepSeek, and OpenCode final reports.
+  - Accepted the current Grok v2 audit as evidence-based and aligned with the
+    local-first, explicit-permission, observable, recoverable, reviewed-learning
+    principles. Older claims such as missing Hardened Runtime, MCP `shell:true`,
+    unwrapped Goal acceptance shell, and automatic side-effect replay were
+    treated as historical or partially remediated rather than current truth.
+  - Kept release signing/notarization and large runtime/storage convergence as
+    explicit follow-up work instead of overstating them as completed here.
+- Permission and execution-boundary fixes:
+  - Chat/Goal tool paths now fail closed when the authorization service or task
+    identity is absent; denied calls become visible tool observations and never
+    reach the executor.
+  - Shell policy rejects `\n`, `\r`, and `\r\n` command separators. ShellPlan
+    exposes newline-separated commands, and package runners/app launchers are
+    opaque. Default Chat grants no longer include shell interpreters,
+    `npm`/`npx`, or `open`.
+  - Skill script and tool entrypoints reject absolute paths, parent traversal,
+    and symlink escape after canonical `realpath` containment checks.
+  - Skill MCP auto-start is off unless `ZEROX_ENABLE_SKILL_MCP=1`; MCP child
+    processes receive only an allowlisted base environment plus manifest values.
+  - Login startup is opt-in (`ZEROX_ENABLE_LOGIN_STARTUP=1`) and a hidden login
+    launch no longer creates a visible main window.
+- Recovery and persistence fixes:
+  - Scheduled runtime failures finish from the latest durable checkpoint, so a
+    later model/auth failure cannot erase already checkpointed tool results.
+  - Kernel compaction removes assistant tool calls and matching tool results as
+    an indivisible group, preventing orphan tool messages.
+  - Runtime checkpoints use per-run serialization and temp-file atomic rename;
+    corrupt JSON is quarantined without breaking active-run enumeration.
+  - Memory create/delete/maintenance mutations share a serialization queue and
+    temp-file atomic rename, preventing concurrent RMW lost updates.
+- Release metadata:
+  - `package.json`, root lockfile metadata, README release/download text, and
+    release-gate tests now consistently identify `3.7.0`.
+- Changed files:
+  - Runtime/security: `src/main/agentLoop.ts`, `goalRuntimeEngine.ts`,
+    `agentRuntimeEngine.ts`, `kernel/compactionEngine.ts`, `skillExecutor.ts`,
+    `tools/shell/shellAnalyzer.ts`, `chatService.ts`, `container.ts`,
+    `skillRegistry.ts`, `mcpClient.ts`, `desktopLifecycle.ts`, and `main.ts`.
+  - Persistence: `src/main/agentExecutionStore.ts` and `memoryStore.ts`.
+  - Contracts/release: `src/shared/toolPermissions.ts`, `package.json`,
+    `package-lock.json`, `README.md`, `.zerox/feature_list.json`, plus focused
+    tests including new `skillExecutor.test.ts` and `mcpClient.test.ts`.
+- Verification evidence:
+  - P44 focused suite -> 11 files / 250 tests passed before lifecycle/MCP scope;
+    final lifecycle/MCP/README suite -> 5 files / 20 tests passed.
+  - Final `npm run verify` -> 203 test files / 2,001 tests passed, TypeScript and
+    Vite production build passed, Agent evals 26/26, Memory evals 2/2.
+  - Final `npm run smoke:prod` -> passed; renderer rendered the Agent chat UI.
+    The known local `better-sqlite3` Node/Electron ABI mismatch safely fell back
+    to JSON storage.
+  - `npm run harness:check` and `git diff --check` -> passed.
+
+## 2026-07-12 - P45 v3.7.0 Audit Closure and Runtime Convergence
+
+- Executed the requested 1–12 closure as one feature, preserving the
+  local-first, explicit-permission, observable, recoverable boundaries:
+  1. Shutdown now prevents premature Electron exit, rejects pending approvals,
+     aborts and drains Chat, Goal, scheduled runs, actors, MCP clients and the
+     ToolWorker, flushes run/trajectory shadow writes, then closes storage.
+  2. Scheduled trajectory sequence allocation is per run, serialized, and
+     resumes from the persisted maximum after engine recreation. SQLite
+     sequence conflicts now throw instead of being silently ignored.
+  3. The shared loop enforces token, tool, turn and wall-clock limits; missing
+     provider usage is conservatively estimated. Chat persists actual or
+     estimated usage and Goal continues to consume its durable budget ledger.
+  4. HTTP timeout/cancellation now covers the response stream through body
+     completion, not only headers.
+  5. Non-shell tool timeouts abort the same child signal passed to the handler,
+     so underlying work is canceled rather than merely abandoned.
+  6. The fabricated workflow web hooks and model-callable workflow tool were
+     removed. Workflow/self-improvement defaults off and fails unavailable
+     instead of returning invented research evidence.
+  7. Web and HTTP/SSE MCP requests share one outbound URL policy: HTTPS-only
+     for MCP, private/special IPv4 and IPv6 denial, DNS result validation,
+     request-time MCP revalidation, redirects disabled, and bounded bodies.
+  8. Chat and Goal already used `runAgentLoop`; the production scheduled path
+     now receives that same shared loop contract, including budgets,
+     checkpoints, observations, retries and optional max-mode execution. The
+     older scheduled loop remains only as a compatibility path when no shared
+     loop is injected.
+  9. JSON/JSONL is the declared and runtime default source of truth. Default
+     startup no longer opens SQLite. SQLite/dual are explicit migration modes,
+     and rollback requires `--confirmSqliteAuthoritative` while preserving
+     unique legacy backups.
+  10. Actor/workflow, ToolWorker/shell and storage flags now resolve through
+      the central uncached feature-flag contract; defaults match live wiring.
+  11. ToolWorker defaults honestly to in-process infrastructure, subprocess is
+      explicit, timeouts recycle stuck children, and asynchronous close waits
+      for child exit. No claim is made that ordinary production tools are
+      isolated when they are not.
+  12. Same-session Chat sends use a per-session FIFO tail, and every successful
+      renderer completion reconciles from the authoritative persisted session.
+- Focused evidence:
+  - Main closure suite: 20 files / 435 tests passed.
+  - Storage/MCP/actor follow-up: 5 files / 78 tests passed.
+  - Electron main TypeScript and `git diff --check` passed.
+- Final gates:
+  - `npm run harness:check` passed.
+  - `npm run verify` passed: 205 test files / 2,031 tests; Electron and
+    renderer TypeScript, Vite build, Agent evals 26/26, Memory evals 2/2.
+    One first-run temp-directory cleanup race (`ENOTEMPTY`) reproduced as
+    passing both alone and in its full 108-test file; the complete verify rerun
+    then passed without code changes.
+  - `npm run smoke:prod` passed and rendered Agent Chat. With JSON as the true
+    default, smoke no longer attempts to load the mismatched SQLite native ABI.
+  - `git diff --check` passed.
+
+## 2026-07-12 - P46 Actor Terminal Resource Cleanup
+
+- Split active Actor resources from a bounded terminal outcome cache. Terminal
+  actors now release their AbortController, inbox, full SpawnInput and handle
+  Promise immediately while recent `wait`, `status`, and ownership checks
+  continue to work from lightweight records.
+- Added configurable cache bounds, oldest-outcome eviction, and shutdown
+  clearing. Shutdown now drains every entry remaining in the active Map,
+  including actors whose visible status was already changed to `canceled` but
+  whose underlying outcome had not settled.
+- Verification:
+  - `npm test -- --run src/main/actors/actorRuntime.test.ts src/main/actors/actorRuntime.full.test.ts src/main/actors/actorTool.test.ts src/main/container.test.ts` -> 4 files / 98 tests passed.
+  - Electron and renderer TypeScript typechecks passed.
+  - `git diff --check` passed.
+
+## 2026-07-12 - P46 v3.7.0 Strict Review Closure
+
+- Ran three independent security, concurrency/testing, and maintainability
+  review passes over the complete v3.7.0 working tree. Every reported Critical
+  or Important finding was fixed and re-reviewed; all three final reviews
+  explicitly reported zero remaining merge blockers.
+- Closed process and network lifecycle gaps:
+  - stdio MCP initialization failure and request cancellation now terminate the
+    detached process group with SIGTERM, bounded SIGKILL fallback, and confirmed
+    exit; failed automatic reconnects consume the complete 1s/2s/4s retry budget
+    under a generation fence.
+  - outbound HTTP uses actual-connection DNS validation, rejects special/private
+    IPv4, IPv6, and mapped addresses, disables redirects, and bounds response
+    bodies through completion.
+- Closed runtime and shutdown races:
+  - Actor run/spawn fails before `runActor` when already canceled; foreground
+    run/wait honors the combined deadline while background spawn remains bound
+    to the parent run lifecycle.
+  - Actor shutdown closes spawn admission before snapshotting, drains active
+    outcomes, and moves terminal results into a bounded 256-entry lightweight
+    cache; canceled actors cannot later publish a successful terminal status.
+  - task/resume/Goal/Chat admission is closed before shutdown snapshots and
+    accepted runtime invocations are tracked through completion.
+- Closed Goal and renderer concurrency gaps:
+  - non-preempting Goal mutations are FIFO per goal id; cancel increments a
+    mutation epoch, invalidates older queued work, runs immediately, and becomes
+    the barrier for later mutations. Reference-counted coordinator state is
+    released for every legal completion order.
+  - session selection generations, request sequences, and Goal mutation tokens
+    prevent old async results from overwriting a new session or newer operation.
+    Persistent-session switching clears transcript, workspace, activity, Goal
+    draft ownership, and old Goal detail before the first await and synchronously
+    blocks sending until the authoritative session has loaded.
+- Closed persistence, compaction, and permission findings:
+  - checkpoint and memory mutations are serialized and atomically renamed;
+    corrupt checkpoints are quarantined.
+  - compaction preserves recent references and keeps assistant tool calls with
+    matching tool results as an indivisible group.
+  - default Chat grants no actor tool; actor handles enforce parent ownership;
+    third-party script tools remain unregistered until an OS capability sandbox
+    exists; MCP auto-start and login startup remain explicit opt-ins.
+- Final evidence:
+  - Focused final regression -> 4 files / 146 tests passed; specialist suites
+    independently passed up to 11 files / 205 tests.
+  - `npm run verify` -> 207 test files / 2,079 tests passed; Electron and renderer
+    TypeScript passed; Vite production build passed; Agent evals 26/26 and Memory
+    evals 2/2 passed.
+  - `npm run smoke:prod` -> passed; renderer rendered the Agent Chat UI.
+  - `npm audit --json` -> 0 total vulnerabilities across all severities.
+  - `git diff --check` -> passed.
+  - The optional local Codex adversarial CLI could not run because the installed
+    CLI did not support its configured model; independent specialist adversarial
+    reviews were used instead and all final blocking severities were zero.

@@ -179,17 +179,51 @@ function fitCompactedMessagesWithinBudget(
   prunedTurns: number[],
 ): ChatMessage[] {
   const kept = [...messages];
+  const protectedMessages = new Set(
+    messages.filter((message, index) =>
+      shouldPreserveMessage(message, index, tailStart),
+    ),
+  );
   let index = 0;
 
   while (estimateMessageTokens(kept) > budget && index < kept.length) {
     const message = kept[index];
-    if (!message || shouldPreserveMessage(message, index, tailStart)) {
+    if (!message || protectedMessages.has(message)) {
       index += 1;
       continue;
     }
 
     if (message.role === "tool") {
       index += 1;
+      continue;
+    }
+
+    if (message.role === "assistant" && message.tool_calls?.length) {
+      const toolCallIds = new Set(message.tool_calls.map((call) => call.id));
+      const groupIndexes = kept
+        .map((candidate, candidateIndex) =>
+          candidateIndex === index ||
+          (candidate.role === "tool" &&
+            candidate.tool_call_id &&
+            toolCallIds.has(candidate.tool_call_id))
+            ? candidateIndex
+            : -1,
+        )
+        .filter((candidateIndex) => candidateIndex >= 0);
+
+      if (
+        groupIndexes.some((groupIndex) =>
+          protectedMessages.has(kept[groupIndex]!),
+        )
+      ) {
+        index += 1;
+        continue;
+      }
+
+      for (const groupIndex of groupIndexes.sort((left, right) => right - left)) {
+        kept.splice(groupIndex, 1);
+        prunedTurns.push(groupIndex);
+      }
       continue;
     }
 

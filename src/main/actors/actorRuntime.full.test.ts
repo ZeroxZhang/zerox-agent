@@ -258,12 +258,13 @@ describe("runGraph actor/workflow projection (additive)", () => {
 });
 
 describe("actorWorkflowOptions", () => {
-  it("defaults to full + on", () => {
-    expect(getActorWorkflowOptions({})).toEqual({ actorRuntime: "full", workflowRuntime: "on" });
+  it("defaults to full with the unavailable workflow runtime disabled", () => {
+    expect(getActorWorkflowOptions({})).toEqual({ actorRuntime: "full", workflowRuntime: "off" });
   });
   it("respects flags", () => {
     expect(getActorWorkflowOptions({ ZEROX_ACTOR_RUNTIME: "v0" }).actorRuntime).toBe("v0");
     expect(getActorWorkflowOptions({ ZEROX_ACTOR_RUNTIME: "legacy" }).actorRuntime).toBe("legacy");
     expect(getActorWorkflowOptions({ ZEROX_WORKFLOW_RUNTIME: "off" }).workflowRuntime).toBe("off");
+    expect(getActorWorkflowOptions({ ZEROX_WORKFLOW_RUNTIME: "on" }).workflowRuntime).toBe("on");
   });
 });

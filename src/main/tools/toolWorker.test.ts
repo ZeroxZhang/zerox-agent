@@ -31,7 +31,7 @@ describe("ToolWorker inproc mode", () => {
     });
     expect(res.ok).toBe(true);
     expect(res.result).toBe(5);
-    worker.close();
+    await worker.close();
   });
 
   it("returns a structured error for an unknown tool", async () => {
@@ -39,7 +39,7 @@ describe("ToolWorker inproc mode", () => {
     const res = await worker.execute("nope", {}, { sandboxPolicy: sandbox, workspaceRoot: "/tmp", runId: "r1" });
     expect(res.ok).toBe(false);
     expect(res.error).toContain("no handler");
-    worker.close();
+    await worker.close();
   });
 
   it("catches handler throws and returns a structured error", async () => {
@@ -50,7 +50,7 @@ describe("ToolWorker inproc mode", () => {
     const res = await worker.execute("boom", {}, { sandboxPolicy: sandbox, workspaceRoot: "/tmp", runId: "r1" });
     expect(res.ok).toBe(false);
     expect(res.error).toContain("kaboom");
-    worker.close();
+    await worker.close();
   });
 });
 
@@ -81,7 +81,7 @@ describe("ToolWorker subprocess mode", () => {
       expect(res.ok).toBe(true);
       expect(res.result).toEqual({ echoed: { hello: "world" } });
     } finally {
-      worker.close();
+      await worker.close();
       rmSync(dir, { recursive: true, force: true });
     }
   }, 15000);
@@ -124,17 +124,17 @@ describe("ToolWorker subprocess mode", () => {
         result: expect.objectContaining({ echoed: { clean: true } }),
       });
     } finally {
-      worker.close();
+      await worker.close();
       rmSync(dir, { recursive: true, force: true });
     }
   }, 15000);
 });
 
 describe("toolWorkerOptions", () => {
-  it("defaults to subprocess + shadow", () => {
+  it("defaults honestly to in-process execution plus the live plan analyzer", () => {
     const opts = getToolWorkerOptions({});
-    expect(opts.worker).toBe("subprocess");
-    expect(opts.shellAnalyzer).toBe("shadow");
+    expect(opts.worker).toBe("inproc");
+    expect(opts.shellAnalyzer).toBe("plan");
   });
 
   it("respects ZEROX_TOOL_WORKER and the BUILDING_AGENT_ legacy alias", () => {

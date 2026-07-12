@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { createChatService } from "./chatService";
+import {
+  buildDefaultChatShellTemplates,
+  createChatService as createProductionChatService,
+} from "./chatService";
 import type { AgentToolExecutor } from "./agentToolExecutor";
+import { runAgentLoop as runProductionAgentLoop } from "./agentLoop";
 import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
 import { createDynamicToolRegistry } from "./dynamicToolRegistry";
 import type { AppendChatMessageInput } from "./chatSessionStore";
@@ -93,7 +97,144 @@ function actorToolCallResponse(
   };
 }
 
+function createChatService(
+  options: Parameters<typeof createProductionChatService>[0],
+) {
+  const runAgentLoop = options.runAgentLoop ??
+    ((messages, profile, loopOptions) =>
+      runProductionAgentLoop(messages, profile, {
+        ...loopOptions,
+        taskId: loopOptions.taskId ?? "task_chat_service_test",
+      }));
+  return createProductionChatService({
+    ...options,
+    runAgentLoop,
+    toolAuthorizationService: options.toolAuthorizationService ?? {
+      async authorize(taskId, request) {
+        return {
+          ok: true as const,
+          decision: {
+            allowed: true,
+            reason: "allowed by chat service test fixture",
+          },
+          auditEvent: {
+            id: `audit_${request.toolName}`,
+            taskId,
+            request,
+            decision: {
+              allowed: true,
+              reason: "allowed by chat service test fixture",
+            },
+            createdAt: "2026-07-12T00:00:00.000Z",
+          },
+        };
+      },
+    },
+  });
+}
+
 describe("chat service", () => {
+  it("serializes concurrent sends for the same persisted session", async () => {
+    const firstStarted = createDeferred<void>();
+    const releaseFirst = createDeferred<void>();
+    let modelCalls = 0;
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          modelCalls += 1;
+          if (modelCalls === 1) {
+            firstStarted.resolve();
+            await releaseFirst.promise;
+          }
+          return chatReply(`reply ${modelCalls}`);
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+    });
+
+    const first = service.sendMessage({
+      sessionId: "session_serial",
+      requestId: "request_1",
+      message: "first",
+    });
+    await firstStarted.promise;
+    const second = service.sendMessage({
+      sessionId: "session_serial",
+      requestId: "request_2",
+      message: "second",
+    });
+    await flushAsyncTasks();
+
+    expect(modelCalls).toBe(1);
+    releaseFirst.resolve();
+    await expect(first).resolves.toMatchObject({ ok: true, reply: "reply 1" });
+    await expect(second).resolves.toMatchObject({ ok: true, reply: "reply 2" });
+    expect(modelCalls).toBe(2);
+  });
+
+  it("cancels a queued same-session request before it persists or reaches the model", async () => {
+    const firstStarted = createDeferred<void>();
+    const releaseFirst = createDeferred<void>();
+    let modelCalls = 0;
+    const chatSessionStore = createChatSessionStore([]);
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          modelCalls += 1;
+          if (modelCalls === 1) {
+            firstStarted.resolve();
+            await releaseFirst.promise;
+          }
+          return chatReply(`reply ${modelCalls}`);
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore,
+    });
+
+    const first = service.sendMessage({
+      sessionId: "session_queued_cancel",
+      requestId: "request_1",
+      message: "first",
+    });
+    await firstStarted.promise;
+    const controller = new AbortController();
+    const second = service.sendMessage(
+      {
+        sessionId: "session_queued_cancel",
+        requestId: "request_2",
+        message: "second must not persist",
+      },
+      { signal: controller.signal },
+    );
+    controller.abort();
+
+    await expect(second).resolves.toEqual({ ok: false, message: "已中断任务。" });
+    expect(modelCalls).toBe(1);
+    expect(
+      (await chatSessionStore.get("session_queued_cancel"))?.messages.some(
+        (message) => message.content.includes("second must not persist"),
+      ) ?? false,
+    ).toBe(false);
+
+    releaseFirst.resolve();
+    await expect(first).resolves.toMatchObject({ ok: true });
+  });
+
+  it("keeps default chat shell grants to non-opaque local diagnostics", () => {
+    const templates = buildDefaultChatShellTemplates();
+
+    expect(templates).toContain("git *");
+    expect(templates).toContain("rg * *");
+    expect(templates).not.toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^(?:npm|npx|pnpm|yarn|bun|open|node|python|bash|sh)\b/),
+      ]),
+    );
+  });
+
   it("returns a structured result for unknown guided skill input responses", async () => {
     const service = createChatService({
       chatClient: {

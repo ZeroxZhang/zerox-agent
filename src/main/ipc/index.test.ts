@@ -113,6 +113,201 @@ describe("chat IPC handlers", () => {
     expect(sender.send).toHaveBeenCalledWith("chat:streamEvent", streamEvent);
   });
 
+  it("aborts and drains active chat messages during application shutdown", async () => {
+    electronState.ipcHandlers.clear();
+    const { registerAllIpcHandlers, shutdownActiveChatMessages } = await import("./index");
+    let observedSignal: AbortSignal | undefined;
+    const sendMessage = vi.fn(async (_input, runtimeOptions) => {
+      observedSignal = runtimeOptions.signal;
+      return new Promise((resolve) => {
+        runtimeOptions.signal.addEventListener("abort", () => {
+          resolve({ ok: false as const, message: "canceled" });
+        }, { once: true });
+      });
+    });
+    const container = {
+      onGoalProgressEvent: vi.fn(),
+      onAgentRunsChanged: vi.fn(),
+      chatService: () => ({ sendMessage }),
+    } as unknown as Parameters<typeof registerAllIpcHandlers>[0];
+    registerAllIpcHandlers(container);
+    const handler = electronState.ipcHandlers.get("chat:sendMessage");
+    const invocation = handler?.(
+      { sender: { isDestroyed: () => false, send: vi.fn() } },
+      { sessionId: "session_1", requestId: "request_shutdown", message: "work" },
+    );
+    await Promise.resolve();
+
+    await expect(shutdownActiveChatMessages()).resolves.toBe(1);
+    expect(observedSignal?.aborted).toBe(true);
+    await expect(invocation).resolves.toEqual({ ok: false, message: "canceled" });
+    await expect(
+      handler?.(
+        { sender: { isDestroyed: () => false, send: vi.fn() } },
+        { requestId: "late_request", message: "must not start" },
+      ),
+    ).resolves.toEqual({
+      ok: false,
+      message: "应用正在退出，未接收新的会话请求。",
+    });
+  });
+
+  it("rejects a duplicate in-flight request id without replacing its cancellation state", async () => {
+    electronState.ipcHandlers.clear();
+    const { registerAllIpcHandlers, shutdownActiveChatMessages } = await import("./index");
+    const sendMessage = vi.fn(async (_input, runtimeOptions) =>
+      new Promise((resolve) => {
+        runtimeOptions.signal.addEventListener("abort", () => {
+          resolve({ ok: false as const, message: "canceled" });
+        }, { once: true });
+      }),
+    );
+    const container = {
+      onGoalProgressEvent: vi.fn(),
+      onAgentRunsChanged: vi.fn(),
+      chatService: () => ({ sendMessage }),
+    } as unknown as Parameters<typeof registerAllIpcHandlers>[0];
+    registerAllIpcHandlers(container);
+    const handler = electronState.ipcHandlers.get("chat:sendMessage");
+    const sender = { isDestroyed: () => false, send: vi.fn() };
+    const input = {
+      sessionId: "session_1",
+      requestId: "request_duplicate",
+      message: "work",
+    };
+
+    const first = handler?.({ sender }, input);
+    await Promise.resolve();
+    await expect(handler?.({ sender }, input)).resolves.toEqual({
+      ok: false,
+      message: "请求 request_duplicate 已在执行，请等待完成或先取消。",
+    });
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+
+    await expect(shutdownActiveChatMessages()).resolves.toBe(1);
+    await expect(first).resolves.toEqual({ ok: false, message: "canceled" });
+  });
+
+  it("does not turn a missing targeted request id into cancel-all", async () => {
+    electronState.ipcHandlers.clear();
+    const { registerAllIpcHandlers, shutdownActiveChatMessages } = await import("./index");
+    let signal: AbortSignal | undefined;
+    const sendMessage = vi.fn(async (_input, runtimeOptions) => {
+      signal = runtimeOptions.signal;
+      return new Promise((resolve) => {
+        signal?.addEventListener("abort", () => {
+          resolve({ ok: false as const, message: "canceled" });
+        }, { once: true });
+      });
+    });
+    const container = {
+      onGoalProgressEvent: vi.fn(),
+      onAgentRunsChanged: vi.fn(),
+      chatService: () => ({ sendMessage }),
+    } as unknown as Parameters<typeof registerAllIpcHandlers>[0];
+    registerAllIpcHandlers(container);
+    const sender = { isDestroyed: () => false, send: vi.fn() };
+    const active = electronState.ipcHandlers.get("chat:sendMessage")?.(
+      { sender },
+      { requestId: "active", message: "work" },
+    );
+    await Promise.resolve();
+
+    expect(
+      electronState.ipcHandlers.get("chat:cancelMessage")?.({}, "stale"),
+    ).toEqual({ ok: false, message: "没有找到请求 stale。" });
+    expect(signal?.aborted).toBe(false);
+
+    await shutdownActiveChatMessages();
+    await expect(active).resolves.toEqual({ ok: false, message: "canceled" });
+  });
+
+  it("passes a generated request id into the chat service", async () => {
+    electronState.ipcHandlers.clear();
+    const { registerAllIpcHandlers } = await import("./index");
+    const sendMessage = vi.fn(async () => ({ ok: false as const, message: "done" }));
+    const container = {
+      onGoalProgressEvent: vi.fn(),
+      onAgentRunsChanged: vi.fn(),
+      chatService: () => ({ sendMessage }),
+    } as unknown as Parameters<typeof registerAllIpcHandlers>[0];
+    registerAllIpcHandlers(container);
+
+    await electronState.ipcHandlers.get("chat:sendMessage")?.(
+      { sender: { isDestroyed: () => false, send: vi.fn() } },
+      { message: "work" },
+    );
+
+    expect(sendMessage.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ requestId: expect.any(String) }),
+    );
+  });
+
+  it("tracks and drains guided skill continuation work during shutdown", async () => {
+    electronState.ipcHandlers.clear();
+    const { registerAllIpcHandlers, shutdownActiveChatMessages } = await import("./index");
+    let signal: AbortSignal | undefined;
+    const respondSkillInput = vi.fn(async (_input, runtimeOptions) => {
+      signal = runtimeOptions.signal;
+      return new Promise((resolve) => {
+        signal?.addEventListener("abort", () => {
+          resolve({ ok: false as const, message: "canceled" });
+        }, { once: true });
+      });
+    });
+    const container = {
+      onGoalProgressEvent: vi.fn(),
+      onAgentRunsChanged: vi.fn(),
+      chatService: () => ({ respondSkillInput }),
+    } as unknown as Parameters<typeof registerAllIpcHandlers>[0];
+    registerAllIpcHandlers(container);
+    const completion = electronState.ipcHandlers.get("chat:respondSkillInput")?.(
+      { sender: { isDestroyed: () => false, send: vi.fn() } },
+      {
+        inputRequestId: "input_shutdown",
+        requestId: "guided_shutdown",
+        values: {},
+      },
+    );
+    await Promise.resolve();
+
+    await expect(shutdownActiveChatMessages()).resolves.toBe(1);
+    expect(signal?.aborted).toBe(true);
+    await expect(completion).resolves.toEqual({ ok: false, message: "canceled" });
+  });
+
+  it("uses the renderer lifecycle request id to cancel guided continuation work", async () => {
+    electronState.ipcHandlers.clear();
+    const { registerAllIpcHandlers } = await import("./index");
+    const respondSkillInput = vi.fn(async (_input, runtimeOptions) =>
+      new Promise((resolve) => {
+        runtimeOptions.signal.addEventListener("abort", () => {
+          resolve({ ok: false as const, message: "canceled" });
+        }, { once: true });
+      }),
+    );
+    const container = {
+      onGoalProgressEvent: vi.fn(),
+      onAgentRunsChanged: vi.fn(),
+      chatService: () => ({ respondSkillInput }),
+    } as unknown as Parameters<typeof registerAllIpcHandlers>[0];
+    registerAllIpcHandlers(container);
+    const completion = electronState.ipcHandlers.get("chat:respondSkillInput")?.(
+      { sender: { isDestroyed: () => false, send: vi.fn() } },
+      {
+        inputRequestId: "input_cancel",
+        requestId: "original_request",
+        values: {},
+      },
+    );
+    await Promise.resolve();
+
+    expect(
+      electronState.ipcHandlers.get("chat:cancelMessage")?.({}, "original_request"),
+    ).toEqual({ ok: true, message: "已请求中断任务。" });
+    await expect(completion).resolves.toEqual({ ok: false, message: "canceled" });
+  });
+
   it("registers a stable chat session rename IPC handler", () => {
     const renameSource = getHandlerSource(ipcSource, '"chatSessions:rename"');
 

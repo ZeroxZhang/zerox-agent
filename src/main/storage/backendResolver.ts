@@ -1,27 +1,25 @@
 // BackendResolver (contracts v1.4 §1.4, spec T1.4).
 //
 // Reads `ZEROX_STORAGE_BACKEND` from the environment (`json` | `sqlite` | `dual`).
-// Invalid or unset values fall back to `dual` with a warning (the spec's safe
-// transition default). The flag is read ONLY from process.env — never from
+// Invalid or unset values fall back to `json`, the only backend implemented by
+// every core domain store. The flag is read ONLY from process.env — never from
 // modelSettingsStore — to avoid a circular dependency with the config layer.
 
 import type { StorageBackend } from "../../shared/storageContract";
+import { readFeatureFlags } from "../../shared/featureFlags";
 
 const VALID_BACKENDS = new Set<StorageBackend>(["json", "sqlite", "dual"]);
-const DEFAULT_BACKEND: StorageBackend = "dual";
-
-let resolved: StorageBackend | null = null;
 
 function resolveFromEnv(env: NodeJS.ProcessEnv): { backend: StorageBackend; warned: boolean } {
   const raw = env.ZEROX_STORAGE_BACKEND;
-  if (!raw) return { backend: DEFAULT_BACKEND, warned: false };
+  const backend = readFeatureFlags(env).ZEROX_STORAGE_BACKEND;
+  if (!raw) return { backend, warned: false };
   const normalized = raw.trim().toLowerCase() as StorageBackend;
-  if (VALID_BACKENDS.has(normalized)) return { backend: normalized, warned: false };
-  return { backend: DEFAULT_BACKEND, warned: true };
+  if (VALID_BACKENDS.has(normalized)) return { backend, warned: false };
+  return { backend, warned: true };
 }
 
 export function resolveStorageBackend(env: NodeJS.ProcessEnv = process.env): StorageBackend {
-  if (resolved) return resolved;
   const { backend, warned } = resolveFromEnv(env);
   if (warned) {
     // eslint-disable-next-line no-console
@@ -29,13 +27,7 @@ export function resolveStorageBackend(env: NodeJS.ProcessEnv = process.env): Sto
       `ZEROX_STORAGE_BACKEND="${env.ZEROX_STORAGE_BACKEND}" is invalid; falling back to "${backend}". Valid values: json | sqlite | dual.`,
     );
   }
-  resolved = backend;
   return backend;
-}
-
-/** Test-only: reset the memoized resolution. */
-export function resetStorageBackendForTesting(): void {
-  resolved = null;
 }
 
 export function isStorageBackendEnabled(

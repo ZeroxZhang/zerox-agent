@@ -8,7 +8,7 @@ type PackageJson = {
 };
 
 describe("package scripts", () => {
-  it("sets release metadata to v3.6.0", () => {
+  it("sets release metadata to v3.7.0", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -16,14 +16,14 @@ describe("package scripts", () => {
       readFileSync(path.join(process.cwd(), "package-lock.json"), "utf8"),
     ) as { version?: string; packages?: Record<string, { version?: string }> };
 
-    expect(packageJson.version).toBe("3.6.0");
+    expect(packageJson.version).toBe("3.7.0");
     // package-lock.json is updated by `npm install`; check it matches the
     // declared package version once dependencies are installed.
-    expect(packageLock.version).toBe("3.6.0");
-    expect(packageLock.packages?.[""]?.version).toBe("3.6.0");
+    expect(packageLock.version).toBe("3.7.0");
+    expect(packageLock.packages?.[""]?.version).toBe("3.7.0");
   });
 
-  it("keeps release gates tracked through v3.6.0", () => {
+  it("keeps release gates tracked through v3.7.0", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -75,6 +75,16 @@ describe("package scripts", () => {
     const p43 = featureList.features.find(
       (feature) => feature.id === "P43-goal-acceptance-recovery",
     );
+    const p44 = featureList.features.find(
+      (feature) => feature.id === "P44-v3.7.0-audit-hardening-release",
+    );
+    const p45 = featureList.features.find(
+      (feature) =>
+        feature.id === "P45-v3.7.0-audit-closure-runtime-convergence",
+    );
+    const p46 = featureList.features.find(
+      (feature) => feature.id === "P46-v3.7.0-strict-review-fixes",
+    );
     const p31 = featureList.features.find(
       (feature) => feature.id === "P31-v3.1.2-window-controls-and-settings-icon",
     );
@@ -88,7 +98,7 @@ describe("package scripts", () => {
       (feature) => feature.id === "P28-v3.0.0-execution-context-spine",
     );
 
-    expect(packageJson.version).toBe("3.6.0");
+    expect(packageJson.version).toBe("3.7.0");
     expect(
       openFeatureIds.every(
         (featureId) =>
@@ -98,10 +108,29 @@ describe("package scripts", () => {
           featureId === "P40-v3.4.0-goal-mode-bounded-termination" ||
           featureId === "P41-v3.4.0-goal-acceptance-policy-engine" ||
           featureId === "P42-v3.7.0-autonomous-goal-runtime" ||
-          featureId === "P43-goal-acceptance-recovery",
+          featureId === "P43-goal-acceptance-recovery" ||
+          featureId === "P44-v3.7.0-audit-hardening-release" ||
+          featureId === "P45-v3.7.0-audit-closure-runtime-convergence" ||
+          featureId === "P46-v3.7.0-strict-review-fixes",
       ),
     ).toBe(true);
     expect(openFeatureIds.length).toBeLessThanOrEqual(1);
+    expect(p45?.status === "in_progress" || p45?.status === "done").toBe(true);
+    expect(p46?.status === "in_progress" || p46?.status === "done").toBe(true);
+    expect(p44?.status === "in_progress" || p44?.status === "done").toBe(true);
+    expect(p44).toEqual(
+      expect.objectContaining({
+        id: "P44-v3.7.0-audit-hardening-release",
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("fails closed"),
+          expect.stringContaining("newline-separated commands"),
+          expect.stringContaining("canonical skill root"),
+          expect.stringContaining("latest durable checkpoint"),
+          expect.stringContaining("serialized atomic persistence"),
+          expect.stringContaining("consistently identify v3.7.0"),
+        ]),
+      }),
+    );
     expect(p43?.status === "in_progress" || p43?.status === "done").toBe(true);
     expect(p43).toEqual(
       expect.objectContaining({

@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { createWebTools } from "./webTools";
 
+const resolvePublicHostname = async () => ["93.184.216.34"];
+
 describe("web tools", () => {
   it("fetches a page and extracts readable text", async () => {
     const tools = createWebTools({
+      resolveHostname: resolvePublicHostname,
       fetch: async () =>
         new Response(
           `<!doctype html>
@@ -39,6 +42,7 @@ describe("web tools", () => {
 
   it("returns a structured error for invalid URLs and non-2xx responses", async () => {
     const tools = createWebTools({
+      resolveHostname: resolvePublicHostname,
       fetch: async () => new Response("Not found", { status: 404 }),
     });
 
@@ -55,6 +59,7 @@ describe("web tools", () => {
   it("searches DuckDuckGo Lite and unwraps result URLs", async () => {
     const requestedUrls: string[] = [];
     const tools = createWebTools({
+      resolveHostname: resolvePublicHostname,
       fetch: async (url) => {
         requestedUrls.push(String(url));
         return new Response(
@@ -100,6 +105,7 @@ describe("web tools", () => {
 
   it("returns a structured error when search fetch fails", async () => {
     const tools = createWebTools({
+      resolveHostname: resolvePublicHostname,
       fetch: async () => {
         throw new Error("network down");
       },

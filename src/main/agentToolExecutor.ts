@@ -87,6 +87,7 @@ export function createAgentToolExecutor(options?: {
   toolResultOffloadStore?: Pick<ToolResultOffloadStore, "read">;
   discoverSkills?: () => Promise<SkillDiscoveryResult>;
   historyIndexStore?: Pick<HistoryIndexStore, "search" | "around">;
+  toolTimeoutMs?: number;
 }): AgentToolExecutor {
   const webTools = options?.webTools ?? createWebTools();
   const registry = options?.registry ?? createDynamicToolRegistry();
@@ -116,7 +117,7 @@ export function createAgentToolExecutor(options?: {
       // default to 2 minutes.
       const toolTimeoutMs = request.toolName === "shell_exec"
         ? 0 // handled inside executeShellCommand
-        : 120_000;
+        : (options?.toolTimeoutMs ?? 120_000);
 
       if (request.toolName === "shell_exec") {
         return executeShellCommand(
@@ -127,16 +128,56 @@ export function createAgentToolExecutor(options?: {
       }
 
       if (toolTimeoutMs > 0) {
-        const result = await Promise.race([
-          registry.execute(request.toolName, request.args, executionOptions),
-          new Promise<AgentToolExecutionResult>((_, reject) =>
-            setTimeout(
-              () => reject(new Error(`${request.toolName} timed out after ${toolTimeoutMs}ms.`)),
-              toolTimeoutMs,
-            ),
-          ),
-        ]);
-        return result;
+        const controller = new AbortController();
+        const abortFromParent = () =>
+          controller.abort(executionOptions?.signal?.reason);
+        if (executionOptions?.signal?.aborted) {
+          abortFromParent();
+        }
+        executionOptions?.signal?.addEventListener("abort", abortFromParent, {
+          once: true,
+        });
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        let forceTimer: ReturnType<typeof setTimeout> | undefined;
+        let timeoutError: Error | undefined;
+        let rejectForceTimeout: ((error: Error) => void) | undefined;
+        try {
+          const execution = registry.execute(request.toolName, request.args, {
+            ...executionOptions,
+            signal: controller.signal,
+            ...(executionOptions?.signal
+              ? { parentSignal: executionOptions.signal }
+              : {}),
+          });
+          const forceTimeout = new Promise<AgentToolExecutionResult>((_, reject) => {
+            rejectForceTimeout = reject;
+          });
+          timer = setTimeout(() => {
+            timeoutError = new Error(
+              `${request.toolName} timed out after ${toolTimeoutMs}ms.`,
+            );
+            controller.abort(timeoutError);
+            forceTimer = setTimeout(() => {
+              rejectForceTimeout?.(
+                new Error(
+                  `${request.toolName} did not stop within 1500ms after timeout.`,
+                ),
+              );
+            }, 1_500);
+            forceTimer.unref?.();
+          }, toolTimeoutMs);
+          const result = await Promise.race([execution, forceTimeout]);
+          if (timeoutError) throw timeoutError;
+          return result;
+        } finally {
+          if (timer) clearTimeout(timer);
+          if (forceTimer) clearTimeout(forceTimer);
+          rejectForceTimeout = undefined;
+          executionOptions?.signal?.removeEventListener(
+            "abort",
+            abortFromParent,
+          );
+        }
       }
 
       return registry.execute(request.toolName, request.args, executionOptions);
@@ -876,7 +917,8 @@ function registerBuiltinTools(
         },
       },
     },
-    async (args) => options.webTools.search(String(args.query ?? "")),
+    async (args, executionOptions) =>
+      options.webTools.search(String(args.query ?? ""), executionOptions),
     "built-in",
   );
 
@@ -895,7 +937,8 @@ function registerBuiltinTools(
         },
       },
     },
-    async (args) => options.webTools.fetchPage(String(args.url ?? "")),
+    async (args, executionOptions) =>
+      options.webTools.fetchPage(String(args.url ?? ""), executionOptions),
     "built-in",
   );
 
@@ -915,7 +958,8 @@ function registerBuiltinTools(
         },
       },
     },
-    async (args) => researchTools.webFetchDocument(args),
+    async (args, executionOptions) =>
+      researchTools.webFetchDocument(args, executionOptions),
     "built-in",
     defineNativeToolDescriptor({
       id: "web_fetch_document",

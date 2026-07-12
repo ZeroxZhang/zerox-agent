@@ -971,6 +971,68 @@ describe("goal chat service", () => {
     expect(startedSignal?.aborted).toBe(true);
   });
 
+  it("aborts and drains background goal runs during application shutdown", async () => {
+    let startedSignal: AbortSignal | undefined;
+    let settled = false;
+    const service = createGoalChatService({
+      controller: createController({
+        async start(goalId, options) {
+          startedSignal = options?.signal;
+          return new Promise<Goal>((resolve) => {
+            options?.signal?.addEventListener("abort", () => {
+              settled = true;
+              resolve(createGoal({ id: goalId, status: "canceled" }));
+            }, { once: true });
+          });
+        },
+      }),
+      goalStore: createGoalStore({
+        existingGoal: createGoal({ status: "planning" }),
+      }),
+      planner: createFakePlanner(),
+      createId: () => "goal_shutdown",
+      now: () => "2026-06-12T08:00:00.000Z",
+    });
+
+    await service.start("goal_release");
+    await service.shutdown();
+
+    expect(startedSignal?.aborted).toBe(true);
+    expect(settled).toBe(true);
+  });
+
+  it("does not let a queued restart escape application shutdown", async () => {
+    let starts = 0;
+    let settleRun!: () => void;
+    const service = createGoalChatService({
+      controller: createController({
+        async start(goalId) {
+          starts += 1;
+          return new Promise<Goal>((resolve) => {
+            settleRun = () => resolve(createGoal({ id: goalId, status: "canceled" }));
+          });
+        },
+      }),
+      goalStore: createGoalStore({
+        existingGoal: createGoal({ status: "planning" }),
+      }),
+      planner: createFakePlanner(),
+      createId: () => "goal_shutdown_restart",
+      now: () => "2026-06-12T08:00:00.000Z",
+    });
+
+    const parent = new AbortController();
+    await service.start("goal_release", { signal: parent.signal });
+    parent.abort();
+    await service.start("goal_release");
+    const shutdown = service.shutdown();
+    settleRun();
+    await shutdown;
+    await Promise.resolve();
+
+    expect(starts).toBe(1);
+  });
+
   it("aborts a background controller run when pausing the goal", async () => {
     let startedSignal: AbortSignal | undefined;
     const service = createGoalChatService({

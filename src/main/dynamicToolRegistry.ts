@@ -10,6 +10,8 @@ export type AgentToolExecutionResult =
 export type ToolExecutionOptions = {
   runContext?: AgentRunContext;
   signal?: AbortSignal;
+  /** Parent run/request lifecycle; remains valid after a background tool returns. */
+  parentSignal?: AbortSignal;
   toolResultReadScope?: ToolResultOffloadReadScope;
   onRuntimeEvent?: (event: ToolRuntimeEvent) => void;
 };

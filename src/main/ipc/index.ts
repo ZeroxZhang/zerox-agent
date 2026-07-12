@@ -486,7 +486,7 @@ function registerGoalsIpcHandlers(container: AppContainer): void {
     },
   );
   ipcMain.handle("goal:start", async (_event, goalId: string) =>
-    container.runGoalOperation(() => container.goalChatService().start(goalId)),
+    container.runGoalOperation(goalId, () => container.goalChatService().start(goalId)),
   );
   ipcMain.handle(
     "goalDraft:confirm",
@@ -503,13 +503,17 @@ function registerGoalsIpcHandlers(container: AppContainer): void {
       container.discardGoalDraft(draftId),
   );
   ipcMain.handle("goal:pause", async (_event, goalId: string) =>
-    container.runGoalOperation(() => container.goalChatService().pause(goalId)),
+    container.runGoalOperation(goalId, () => container.goalChatService().pause(goalId)),
   );
   ipcMain.handle("goal:resume", async (_event, goalId: string) =>
-    container.runGoalOperation(() => container.goalChatService().resume(goalId)),
+    container.runGoalOperation(goalId, () => container.goalChatService().resume(goalId)),
   );
   ipcMain.handle("goal:cancel", async (_event, goalId: string) =>
-    container.runGoalOperation(() => container.goalChatService().cancel(goalId)),
+    container.runGoalOperation(
+      goalId,
+      () => container.goalChatService().cancel(goalId),
+      { preempt: true },
+    ),
   );
   ipcMain.handle(
     "goal:resolveReview",
@@ -518,7 +522,7 @@ function registerGoalsIpcHandlers(container: AppContainer): void {
       goalId: string,
       decision: GoalReviewDecision,
     ): Promise<{ ok: boolean; goal?: Goal; message?: string }> => {
-      return container.runGoalOperation(() =>
+      return container.runGoalOperation(goalId, () =>
         container.goalChatService().resolveReview(goalId, decision),
       );
     },
@@ -845,8 +849,27 @@ function registerModelSettingsIpcHandlers(container: AppContainer): void {
   );
 }
 
+const activeChatMessageControllers = new Map<string, AbortController>();
+const activeChatMessageCompletions = new Map<
+  string,
+  Promise<unknown>
+>();
+let acceptingChatMessages = true;
+
+export async function shutdownActiveChatMessages(): Promise<number> {
+  acceptingChatMessages = false;
+  const controllers = [...activeChatMessageControllers.values()];
+  for (const controller of controllers) {
+    if (!controller.signal.aborted) {
+      controller.abort("application_shutdown");
+    }
+  }
+  await Promise.allSettled([...activeChatMessageCompletions.values()]);
+  return controllers.length;
+}
+
 function registerChatIpcHandlers(container: AppContainer): void {
-  const activeChatMessageControllers = new Map<string, AbortController>();
+  acceptingChatMessages = true;
 
   ipcMain.handle(
     "chat:sendMessage",
@@ -856,11 +879,23 @@ function registerChatIpcHandlers(container: AppContainer): void {
     ): Promise<SendChatMessageResult> => {
       const sender = event.sender;
       const requestId = input.requestId ?? randomUUID();
+      if (!acceptingChatMessages) {
+        return { ok: false, message: "应用正在退出，未接收新的会话请求。" };
+      }
+      if (activeChatMessageControllers.has(requestId)) {
+        return {
+          ok: false,
+          message: `请求 ${requestId} 已在执行，请等待完成或先取消。`,
+        };
+      }
       const controller = new AbortController();
       activeChatMessageControllers.set(requestId, controller);
 
       try {
-        return await container.chatService().sendMessage(input, {
+        const completion = container.chatService().sendMessage({
+          ...input,
+          requestId,
+        }, {
           signal: controller.signal,
           onStatusEvent(statusEvent: ChatTaskStatusEvent) {
             if (!sender.isDestroyed()) {
@@ -873,10 +908,13 @@ function registerChatIpcHandlers(container: AppContainer): void {
             }
           },
         });
+        activeChatMessageCompletions.set(requestId, completion);
+        return await completion;
       } catch (error) {
         return toChatSendMessageFailure(error);
       } finally {
         activeChatMessageControllers.delete(requestId);
+        activeChatMessageCompletions.delete(requestId);
       }
     },
   );
@@ -892,6 +930,10 @@ function registerChatIpcHandlers(container: AppContainer): void {
             message: "已请求中断任务。",
           };
         }
+        return {
+          ok: false,
+          message: `没有找到请求 ${requestId}。`,
+        };
       }
 
       let canceledCount = 0;
@@ -917,23 +959,45 @@ function registerChatIpcHandlers(container: AppContainer): void {
   );
   ipcMain.handle(
     "chat:respondSkillInput",
-    (
+    async (
       event: IpcMainInvokeEvent,
       input: SkillInputResponse,
     ): Promise<SkillInputResponseResult> => {
       const sender = event.sender;
-      return container.chatService().respondSkillInput(input, {
-        onStatusEvent(statusEvent: ChatTaskStatusEvent) {
-          if (!sender.isDestroyed()) {
-            sender.send("chat:statusEvent", statusEvent);
-          }
-        },
-        onStreamEvent(streamEvent: ChatStreamEvent) {
-          if (!sender.isDestroyed()) {
-            sender.send("chat:streamEvent", streamEvent);
-          }
-        },
-      });
+      const requestId = input.requestId?.trim() || `skill-input:${input.inputRequestId}`;
+      if (!acceptingChatMessages) {
+        return { ok: false, message: "应用正在退出，未接收新的技能续跑请求。" };
+      }
+      if (activeChatMessageControllers.has(requestId)) {
+        return {
+          ok: false,
+          message: "Skill input response already in progress.",
+        };
+      }
+      const controller = new AbortController();
+      activeChatMessageControllers.set(requestId, controller);
+      try {
+        const completion = container.chatService().respondSkillInput(input, {
+          signal: controller.signal,
+          onStatusEvent(statusEvent: ChatTaskStatusEvent) {
+            if (!sender.isDestroyed()) {
+              sender.send("chat:statusEvent", statusEvent);
+            }
+          },
+          onStreamEvent(streamEvent: ChatStreamEvent) {
+            if (!sender.isDestroyed()) {
+              sender.send("chat:streamEvent", streamEvent);
+            }
+          },
+        });
+        activeChatMessageCompletions.set(requestId, completion);
+        return await completion;
+      } catch (error) {
+        return toChatSendMessageFailure(error);
+      } finally {
+        activeChatMessageControllers.delete(requestId);
+        activeChatMessageCompletions.delete(requestId);
+      }
     },
   );
   ipcMain.handle("chatSessions:list", () => container.listChatSessions());

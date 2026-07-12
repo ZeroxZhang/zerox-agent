@@ -48,6 +48,7 @@ const NETWORK_COMMANDS = new Set([
 const NETWORK_HINT_SUBSTRINGS = ["npm install", "npm i ", "pnpm install", "yarn add", "pip install", "pip3 install", "git fetch", "git pull", "git clone", "git push", "brew install"];
 
 const CONTROL_OPERATORS: Array<[string, RegExp]> = [
+  ["newline", /[\r\n]/g],
   ["&&", /&&/g],
   ["||", /\|\|/g],
   ["|", /\|/g],
@@ -100,6 +101,13 @@ export function analyzeShell(raw: string, opts: { cwd: string }): ShellPlan {
       "node",
       "ruby",
       "perl",
+      "npm",
+      "npx",
+      "pnpm",
+      "yarn",
+      "bun",
+      "bunx",
+      "open",
     ];
     return (
       (interpreters.includes(name) &&
@@ -144,12 +152,12 @@ function detectControlOperators(raw: string): string[] {
     if (re.test(raw)) found.add(name);
   }
   // Preserve a stable, deduped order.
-  const order = ["&&", "||", "|", ";", "$(", "`", ">>", ">", "<"];
+  const order = ["newline", "&&", "||", "|", ";", "$(", "`", ">>", ">", "<"];
   return order.filter((o) => found.has(o));
 }
 
 /**
- * Split a raw command into top-level command segments on `;`, `&&`, `||`, `|`,
+ * Split a raw command into top-level command segments on newlines, `;`, `&&`, `||`, `|`,
  * while respecting quotes and `$()`/backtick substitution (we keep substitution
  * boundaries as their own segments so the inner command is also analyzed).
  */
@@ -200,9 +208,12 @@ function splitOnControlOperators(raw: string): string[] {
       i += 2;
       continue;
     }
-    if (ch === ";" || ch === "|") {
+    if (ch === ";" || ch === "|" || ch === "\n" || ch === "\r") {
       if (current.trim()) segments.push(current);
       current = "";
+      if (ch === "\r" && raw[i + 1] === "\n") {
+        i++;
+      }
       i++;
       continue;
     }

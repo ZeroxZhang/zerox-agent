@@ -80,7 +80,7 @@ export function createRunRepository(storage: Storage): RunRepository {
       // Synchronous hot path. Use INSERT OR IGNORE on the (run_id, seq) UNIQUE
       // constraint to mirror the legacy append-only semantics (idempotent on
       // identical id+seq; new events always advance seq).
-      db.prepare(
+      const result = db.prepare(
         `INSERT OR IGNORE INTO trajectory_events (id, run_id, seq, type, payload, created_at)
          VALUES (?, ?, ?, ?, ?, ?)`,
       ).run(
@@ -91,6 +91,16 @@ export function createRunRepository(storage: Storage): RunRepository {
         jsonify(event),
         event.createdAt,
       );
+      if (result.changes !== 1) {
+        const existing = db
+          .prepare("SELECT payload FROM trajectory_events WHERE id = ?")
+          .get(event.id) as { payload?: string } | undefined;
+        if (!existing || existing.payload !== jsonify(event)) {
+          throw new Error(
+            `Trajectory sequence collision for run ${runId} at ${event.sequence}.`,
+          );
+        }
+      }
       return event;
     },
 

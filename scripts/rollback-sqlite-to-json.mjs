@@ -3,7 +3,7 @@
 // existing on-disk JSON as *.legacy.json first so nothing is overwritten
 // destructively. Inverse of migrate-to-sqlite.mjs.
 //
-//   node scripts/rollback-sqlite-to-json.mjs --configDir <path>
+//   node scripts/rollback-sqlite-to-json.mjs --configDir <path> --confirmSqliteAuthoritative
 
 import { existsSync, writeFileSync, renameSync, mkdirSync } from "node:fs";
 import path from "node:path";
@@ -11,7 +11,13 @@ import path from "node:path";
 const args = parseArgs(process.argv.slice(2));
 const configDir = args.configDir;
 if (!configDir) {
-  console.error("usage: node scripts/rollback-sqlite-to-json.mjs --configDir <path>");
+  console.error("usage: node scripts/rollback-sqlite-to-json.mjs --configDir <path> --confirmSqliteAuthoritative");
+  process.exit(2);
+}
+if (args.confirmSqliteAuthoritative !== true) {
+  console.error(
+    "refusing rollback export: JSON is the v3.7.0 default source of truth; pass --confirmSqliteAuthoritative only after verifying SQLite was authoritative",
+  );
   process.exit(2);
 }
 
@@ -30,14 +36,23 @@ if (!existsSync(dbPath)) {
 }
 
 function freeze(file) {
-  if (existsSync(file)) renameSync(file, file.replace(/(\.[^.]+)$/, ".legacy$1"));
+  if (!existsSync(file)) return;
+  const base = file.replace(/(\.[^.]+)$/, ".legacy$1");
+  let backup = base;
+  let suffix = 1;
+  while (existsSync(backup)) {
+    backup = `${base}.${suffix++}`;
+  }
+  renameSync(file, backup);
 }
 function writeJson(file, obj) {
   mkdirSync(path.dirname(file), { recursive: true });
+  freeze(file);
   writeFileSync(file, JSON.stringify(obj, null, 2) + "\n", "utf8");
 }
 function writeJsonl(file, rows) {
   mkdirSync(path.dirname(file), { recursive: true });
+  freeze(file);
   writeFileSync(file, rows.map((r) => JSON.stringify(r)).join("\n") + "\n", "utf8");
 }
 

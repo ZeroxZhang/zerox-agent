@@ -1,4 +1,4 @@
-import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -96,6 +96,64 @@ describe("agent execution store", () => {
 
     await expect(store.get("missing")).resolves.toBeNull();
     await expect(store.listActive()).resolves.toEqual([]);
+  });
+
+  it("serializes concurrent writes for the same run without leaving temp files", async () => {
+    const store = createAgentExecutionStore({ configDir });
+    const queued = createCheckpoint("run_serial", "queued");
+    const running = {
+      ...queued,
+      id: "checkpoint_running",
+      status: "running" as const,
+      updatedAt: "2026-06-07T00:01:00.000Z",
+    };
+
+    await Promise.all([store.save(queued), store.save(running)]);
+
+    await expect(store.get("run_serial")).resolves.toEqual(running);
+    const files = await readdir(path.join(configDir, "agent-executions"));
+    expect(files).toEqual(["run_serial.json"]);
+  });
+
+  it("quarantines a corrupt checkpoint without breaking active listing", async () => {
+    const store = createAgentExecutionStore({ configDir });
+    await store.save(createCheckpoint("run_valid", "running"));
+    await writeFile(
+      path.join(configDir, "agent-executions", "run_corrupt.json"),
+      '{"runId":',
+      "utf8",
+    );
+
+    await expect(store.listActive()).resolves.toEqual([
+      createCheckpoint("run_valid", "running"),
+    ]);
+    const files = await readdir(path.join(configDir, "agent-executions"));
+    expect(files).toEqual(
+      expect.arrayContaining([
+        "run_valid.json",
+        expect.stringMatching(/^run_corrupt\.corrupt-.*\.json$/),
+      ]),
+    );
+    expect(files).not.toContain("run_corrupt.json");
+  });
+
+  it("serializes corrupt quarantine with a concurrent valid save", async () => {
+    const store = createAgentExecutionStore({ configDir });
+    await mkdir(path.join(configDir, "agent-executions"), { recursive: true });
+    await writeFile(
+      path.join(configDir, "agent-executions", "run_race.json"),
+      "{broken",
+      "utf8",
+    );
+    const valid = createCheckpoint(
+      "run_race",
+      "running",
+      "2026-07-12T12:00:00.000Z",
+    );
+
+    await Promise.all([store.get("run_race"), store.save(valid)]);
+
+    await expect(store.get("run_race")).resolves.toEqual(valid);
   });
 });
 

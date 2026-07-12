@@ -151,13 +151,15 @@ describe("MCP transports", () => {
     const fakeFetch = (async (url: string, init: RequestInit) => {
       expect(url).toBe("https://mcp.example.com/rpc");
       const body = JSON.parse(init.body as string);
-      return {
-        ok: true, status: 200,
-        text: async () => JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { tools: [] } }),
-        json: async () => ({ jsonrpc: "2.0", id: body.id, result: { tools: [] } }),
-      } as Response;
+      return new Response(
+        JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { tools: [] } }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
     }) as typeof fetch;
-    const transport = createMcpTransport(config, { fetch: fakeFetch });
+    const transport = createMcpTransport(config, {
+      fetch: fakeFetch,
+      resolveHostname: async () => ["93.184.216.34"],
+    });
     await transport.start();
     const res = await transport.send({ jsonrpc: "2.0", id: 1, method: "tools/list" });
     expect(res.id).toBe(1);

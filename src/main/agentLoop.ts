@@ -44,6 +44,8 @@ export type AgentLoopOptions = {
   toolExecutor: AgentToolExecutor;
   toolAuthorizationService?: ToolAuthorizationService;
   taskId?: string;
+  /** Stable execution identity for checkpoints, compaction, and evidence. */
+  runId?: string;
   runContext?: AgentRunContext;
   runtimeTask?: RuntimeToolAuthorizationTask;
   systemPrompt?: string;
@@ -100,6 +102,11 @@ export type AgentLoopOptions = {
   onModelRetry?: (event: ModelRetryEvent) => void;
   onStrategyGuard?: (event: AgentLoopStrategyGuardEvent) => void;
   onCheckpoint?: (checkpoint: AgentLoopCheckpoint) => void | Promise<void>;
+  /** Optional production model-step override (for example best-of-N). */
+  modelRequestExecutor?: (
+    request: ChatCompletionRequest,
+    turn: number,
+  ) => Promise<ChatCompletionResponse>;
 };
 
 export type AgentLoopCheckpoint = {
@@ -172,6 +179,7 @@ export async function runAgentLoop(
     toolExecutor,
     toolAuthorizationService,
     taskId,
+    runId,
     runContext,
     runtimeTask,
     systemPrompt,
@@ -206,6 +214,7 @@ export async function runAgentLoop(
     onContextCompacted,
     onModelRetry,
     onStrategyGuard,
+    modelRequestExecutor,
   } = options;
   const deadline = createDeadline(maxWallClockMs);
   const signal = combineAbortSignals(parentSignal, deadline?.signal);
@@ -280,6 +289,21 @@ export async function runAgentLoop(
       : Math.max(1, contextManager.estimateTokens(messages));
   }
 
+  function consumeModelResponseTokens(
+    response: ChatCompletionResponse,
+  ): boolean {
+    if (effectiveTokenBudget <= 0) return false;
+    const turnTokens = response.usage
+      ? (response.usage.inputTokens ?? 0) +
+        (response.usage.outputTokens ?? 0)
+      : estimateCompletionTokens(messages, response, contextManager);
+    cumulativeTokensConsumed += turnTokens;
+    if (cumulativeTokensConsumed < effectiveTokenBudget) return false;
+    status = "failed";
+    summary = `Token budget exceeded: ${cumulativeTokensConsumed} tokens consumed (limit: ${effectiveTokenBudget}). The agent loop aborted to prevent cost overrun.`;
+    return true;
+  }
+
   async function compactMessagesBeforeModelRequest() {
     const estimatedTokens = contextManager.estimateTokens(messages);
     if (estimatedTokens <= contextTokenBudget) {
@@ -293,9 +317,9 @@ export async function runAgentLoop(
     // exists — byte-equivalent to the legacy path unless a rebuild happens.
     if (compactionStrategy) {
       const result = await compactionStrategy.compact({
-        messages,
+        messages: [...messages],
         budget: contextTokenBudget,
-        runId: modelProfile.model,
+        runId: runId ?? taskId ?? requestId ?? modelProfile.model,
         protectedMarkers: [NEVER_COMPACT_MARKER],
       });
       if (!result.compacted) {
@@ -380,9 +404,13 @@ export async function runAgentLoop(
     try {
       const response = await completeModelRequest({
         ...modelProfile,
-        messages,
+        messages: [...messages],
         ...(signal ? { signal } : {}),
       }, turns + 1);
+
+      if (consumeModelResponseTokens(response)) {
+        return;
+      }
 
       if (response.content) {
         summary = `${options.summaryPrefix}\n\n${response.content}`;
@@ -436,6 +464,9 @@ export async function runAgentLoop(
     request: ChatCompletionRequest,
     turn: number,
   ): Promise<ChatCompletionResponse> {
+    if (modelRequestExecutor) {
+      return modelRequestExecutor(request, turn);
+    }
     if (isStreamingChatClient(chatClient)) {
       try {
         return await aggregateStreamingCompletion(chatClient, request, (event) => {
@@ -488,7 +519,7 @@ export async function runAgentLoop(
 
       const response = await completeModelRequest({
         ...modelProfile,
-        messages,
+        messages: [...messages],
         tools: toolDefinitions,
         tool_choice: "auto",
         ...(signal ? { signal } : {}),
@@ -499,21 +530,13 @@ export async function runAgentLoop(
       }
 
       // v3.6.0: Track cumulative token consumption (CORE-05).
-      if (effectiveTokenBudget > 0 && response.usage) {
-        const turnTokens =
-          (response.usage.inputTokens ?? 0) + (response.usage.outputTokens ?? 0);
-        cumulativeTokensConsumed += turnTokens;
-        if (cumulativeTokensConsumed >= effectiveTokenBudget) {
-          status = "failed";
-          summary = `Token budget exceeded: ${cumulativeTokensConsumed} tokens consumed (limit: ${effectiveTokenBudget}). The agent loop aborted to prevent cost overrun.`;
-          break;
-        }
-      }
+      if (consumeModelResponseTokens(response)) break;
 
       // No tool calls + content → final
       if (!response.toolCalls.length && response.content) {
         summary = response.content;
         status = "succeeded";
+        messages.push({ role: "assistant", content: response.content });
         break;
       }
 
@@ -750,9 +773,32 @@ export async function runAgentLoop(
             }
           } else {
             transitionInvocation({
-              status: "authorized",
-              reason: "tool authorization service not configured",
+              status: "error",
+              error: "工具授权服务未配置，已拒绝执行。",
             });
+            messages.push({
+              role: "tool",
+              tool_call_id: toolCall.id,
+              content: serializeToolObservation({
+                tool: toolName as never,
+                ok: false,
+                error: "工具授权服务未配置，已拒绝执行。",
+                toolCallId: toolCall.id,
+              }),
+            });
+            processedToolCalls.push(toolCall);
+            rememberToolFailure(
+              toolName,
+              "工具授权服务未配置，已拒绝执行。",
+              args,
+            );
+            onToolResult?.(
+              toolName,
+              false,
+              { ok: false, error: "工具授权服务未配置，已拒绝执行。" },
+              toolEventBase,
+            );
+            continue;
           }
 
           onToolCall?.(toolName, args, toolEventBase);
@@ -1567,4 +1613,20 @@ function stableStringify(value: unknown): string {
   }
 
   return JSON.stringify(value) ?? "undefined";
+}
+
+function estimateCompletionTokens(
+  requestMessages: ChatMessage[],
+  response: ChatCompletionResponse,
+  contextManager: ContextManager,
+): number {
+  const output = [
+    response.content ?? "",
+    response.reasoningContent ?? "",
+    ...response.toolCalls.map((call) => call.function.arguments),
+  ].join("\n");
+  return (
+    contextManager.estimateTokens(requestMessages) +
+    Math.max(1, Math.ceil(output.length / 4))
+  );
 }

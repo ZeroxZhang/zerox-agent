@@ -13,15 +13,15 @@
 export interface FeatureFlags {
   /** Actor runtime mode: "full" (default), "v0", or "legacy". */
   ZEROX_ACTOR_RUNTIME: "full" | "v0" | "legacy";
-  /** Workflow runtime: "on" (default) or "off". */
+  /** Workflow runtime registration. Disabled until permissioned web hooks exist. */
   ZEROX_WORKFLOW_RUNTIME: "on" | "off";
-  /** Tool worker isolation: "process" (default) or "inline". */
-  ZEROX_TOOL_WORKER: "process" | "inline";
-  /** Shell analyzer mode: "modern" (default) or "legacy" (regex fallback). */
-  ZEROX_SHELL_ANALYZER: "modern" | "legacy";
+  /** Tool worker infrastructure mode; production tools remain in-process. */
+  ZEROX_TOOL_WORKER: "subprocess" | "inproc";
+  /** Shell analyzer mode used by the live authorization path. */
+  ZEROX_SHELL_ANALYZER: "plan" | "legacy";
   /** Checkpoint writer mode: "on" (default) or "off". */
   ZEROX_CHECKPOINT_WRITER: "on" | "off";
-  /** Storage backend: "dual" (default), "sqlite", or "json". */
+  /** Storage backend: "json" (complete default), "sqlite", or "dual". */
   ZEROX_STORAGE_BACKEND: "dual" | "sqlite" | "json";
   /** Self-improvement / dream-distill background loop: "off" (default) or "on". */
   ZEROX_SELF_IMPROVEMENT: "on" | "off";
@@ -39,11 +39,11 @@ export interface FeatureFlags {
 
 const DEFAULTS: FeatureFlags = {
   ZEROX_ACTOR_RUNTIME: "full",
-  ZEROX_WORKFLOW_RUNTIME: "on",
-  ZEROX_TOOL_WORKER: "process",
-  ZEROX_SHELL_ANALYZER: "modern",
+  ZEROX_WORKFLOW_RUNTIME: "off",
+  ZEROX_TOOL_WORKER: "inproc",
+  ZEROX_SHELL_ANALYZER: "plan",
   ZEROX_CHECKPOINT_WRITER: "on",
-  ZEROX_STORAGE_BACKEND: "dual",
+  ZEROX_STORAGE_BACKEND: "json",
   ZEROX_SELF_IMPROVEMENT: "off",
   ZEROX_MAX_MODE: "off",
   ZEROX_COMPACTION_STRATEGY: "auto",
@@ -53,12 +53,8 @@ const DEFAULTS: FeatureFlags = {
 
 // ── Resolver ─────────────────────────────────────────────────────────────────
 
-let cached: FeatureFlags | null = null;
-
 export function readFeatureFlags(env: NodeJS.ProcessEnv = process.env): FeatureFlags {
-  if (cached) return cached;
-
-  cached = {
+  return {
     ZEROX_ACTOR_RUNTIME: resolveEnum(
       env.ZEROX_ACTOR_RUNTIME,
       ["full", "v0", "legacy"],
@@ -71,12 +67,12 @@ export function readFeatureFlags(env: NodeJS.ProcessEnv = process.env): FeatureF
     ),
     ZEROX_TOOL_WORKER: resolveEnum(
       env.ZEROX_TOOL_WORKER ?? env.BUILDING_AGENT_TOOL_WORKER,
-      ["process", "inline"],
+      ["subprocess", "inproc"],
       DEFAULTS.ZEROX_TOOL_WORKER,
     ),
     ZEROX_SHELL_ANALYZER: resolveEnum(
       env.ZEROX_SHELL_ANALYZER,
-      ["modern", "legacy"],
+      ["plan", "legacy"],
       DEFAULTS.ZEROX_SHELL_ANALYZER,
     ),
     ZEROX_CHECKPOINT_WRITER: resolveEnum(
@@ -113,12 +109,6 @@ export function readFeatureFlags(env: NodeJS.ProcessEnv = process.env): FeatureF
       (env.ZEROX_AGENT_USER_DATA_DIR ?? env.BUILDING_AGENT_USER_DATA_DIR ?? "").trim(),
   };
 
-  return cached;
-}
-
-/** Clear the cached flags so that environment changes take effect on next read. */
-export function clearFeatureFlagsCache(): void {
-  cached = null;
 }
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
@@ -128,7 +118,7 @@ function resolveEnum<T extends string>(
   allowed: readonly T[],
   fallback: T,
 ): T {
-  const normalized = (raw ?? "").toLowerCase() as T;
+  const normalized = (raw ?? "").trim().toLowerCase() as T;
   if ((allowed as readonly string[]).includes(normalized)) {
     return normalized;
   }

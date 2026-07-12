@@ -75,6 +75,12 @@ import {
   shouldRenderMarkdownPreview,
 } from "../chatMarkdownPreview";
 import {
+  isChatSessionSelectionCurrent,
+  shouldApplyPersistedSessionRefresh,
+  shouldApplySequencedSessionResult,
+  type ChatSessionSelectionContext,
+} from "../chatSessionReconciliation";
+import {
   buildRequirementProcessItems,
   buildSubagentProcessItems,
   buildTaskProcessItems,
@@ -260,6 +266,10 @@ export function AgentChatPanel({
   const [goalDraftActionPending, setGoalDraftActionPending] = useState<
     "confirm" | "discard" | null
   >(null);
+  const goalDraftActionPendingRef = useRef<{
+    action: "confirm" | "discard";
+    sequence: number;
+  } | null>(null);
   const [sessions, setSessions] = useState<ChatSession[]>(fallbackSessions);
   const [tasks, setTasks] = useState<ScheduledTask[]>(demoTasks);
   const [runs, setRuns] = useState<AgentRunRecord[]>(demoRuns);
@@ -326,6 +336,11 @@ export function AgentChatPanel({
   const shouldStickToLatestMessageRef = useRef(true);
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const sessionIdRef = useRef<string | null>(sessionId);
+  const sessionSelectionGenerationRef = useRef(0);
+  const sessionListRefreshSequenceRef = useRef(0);
+  const goalDetailRefreshSequenceRef = useRef(0);
+  const goalMutationSequenceRef = useRef(0);
+  const sessionLoadPendingRef = useRef<number | null>(null);
   const activeStatusSessionIdRef = useRef<string | null>(null);
   const activeChatRequestIdRef = useRef<string | null>(null);
   const pendingInputRequestRef = useRef<SkillUserInputRequest | null>(null);
@@ -497,8 +512,11 @@ export function AgentChatPanel({
     };
   }, [measureWorkspaceMenuPosition, workspaceMenuOpen]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     resetActiveChatRefs();
+    sessionLoadPendingRef.current = null;
+    sessionSelectionGenerationRef.current += 1;
+    sessionIdRef.current = null;
     setSessionId(null);
     setChatStreamState(createChatStreamState(initialMessages));
     setStatus({ kind: "ready", message: "会话已就绪" });
@@ -510,6 +528,7 @@ export function AgentChatPanel({
     setPendingGoalDraft(null);
     setGoalDraftDescription("");
     setGoalDraftCriteriaText("");
+    goalDraftActionPendingRef.current = null;
     setGoalDraftActionPending(null);
     setSelectedWorkspaceId(null);
     setWorkspaceMenuOpen(false);
@@ -520,7 +539,7 @@ export function AgentChatPanel({
     setGoalAcceptanceOperationPending(null);
   }, [newChatRequestKey]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!requestedSessionId || requestedSessionId === sessionId) {
       return;
     }
@@ -852,38 +871,103 @@ export function AgentChatPanel({
 
     resetActiveChatRefs();
     shouldStickToLatestMessageRef.current = false;
-    const loadedSession = await window.buildingAgent.getChatSession(sessionIdToLoad);
-    if (!loadedSession) {
-      return;
-    }
-
-    setSessionId(loadedSession.id);
-    setSelectedWorkspaceId(loadedSession.workspaceId ?? null);
-    const restoredActivity = restoreChatTaskActivity(loadedSession.activity);
-    setChatStreamState({
-      ...createChatStreamState(loadedSession.messages.map(toChatMessage)),
-      pendingInputRequest: restoredActivity?.pendingInputRequest ?? null,
-    });
-    if (restoredActivity) {
-      setWorkPhase(restoredActivity.workPhase);
-      setStatus(restoredActivity.status);
-      setTaskActivity(restoredActivity.taskActivity);
-      setTaskProcessEvents(
-        restoredActivity.taskProcessEvents.slice(-MAX_RENDERED_RUNTIME_EVENTS),
-      );
-      activeStatusSessionIdRef.current = loadedSession.id;
-    } else {
-      setWorkPhase("idle");
-      setTaskActivity(idleTaskActivity);
-      setTaskProcessEvents([]);
-      activeStatusSessionIdRef.current = null;
-    }
+    const loadGeneration = sessionSelectionGenerationRef.current + 1;
+    sessionSelectionGenerationRef.current = loadGeneration;
+    sessionLoadPendingRef.current = loadGeneration;
+    sessionIdRef.current = sessionIdToLoad;
+    setSessionId(sessionIdToLoad);
+    // Drafts and their pending actions belong to the previous session. Clear
+    // them synchronously so an old in-flight completion cannot strand or
+    // expose session-scoped controls while the next transcript is loading.
+    setPendingGoalDraft(null);
+    setGoalDraftDescription("");
+    setGoalDraftCriteriaText("");
+    goalDraftActionPendingRef.current = null;
+    setGoalDraftActionPending(null);
+    setActiveGoalDetail(null);
+    setSelectedWorkspaceId(null);
+    setChatStreamState(createChatStreamState([]));
+    setWorkPhase("idle");
+    setStatus({ kind: "working", message: "正在加载会话..." });
+    setTaskActivity(
+      createTaskActivity({
+        kind: "working",
+        title: "正在加载会话",
+        detail: "正在读取本地会话记录",
+      }),
+    );
+    setTaskProcessEvents([]);
     setGoalRunEvents([]);
-    if (loadedSession.activeGoalId) {
-      setActiveGoalDetail(await window.buildingAgent.getGoal(loadedSession.activeGoalId));
-    } else {
-      setActiveGoalDetail(null);
-      setGoalDrawerOpen(false);
+    activeStatusSessionIdRef.current = null;
+
+    try {
+      const loadedSession = await window.buildingAgent.getChatSession(sessionIdToLoad);
+      if (
+        !shouldApplyPersistedSessionRefresh(
+          sessionIdRef.current,
+          sessionIdToLoad,
+          sessionSelectionGenerationRef.current,
+          loadGeneration,
+        )
+      ) {
+        return;
+      }
+      if (!loadedSession) {
+        setStatus({ kind: "error", message: "会话不存在或已被删除。" });
+        setTaskActivity(idleTaskActivity);
+        return;
+      }
+
+      setSessionId(loadedSession.id);
+      setSelectedWorkspaceId(loadedSession.workspaceId ?? null);
+      const restoredActivity = restoreChatTaskActivity(loadedSession.activity);
+      setChatStreamState({
+        ...createChatStreamState(loadedSession.messages.map(toChatMessage)),
+        pendingInputRequest: restoredActivity?.pendingInputRequest ?? null,
+      });
+      if (restoredActivity) {
+        setWorkPhase(restoredActivity.workPhase);
+        setStatus(restoredActivity.status);
+        setTaskActivity(restoredActivity.taskActivity);
+        setTaskProcessEvents(
+          restoredActivity.taskProcessEvents.slice(-MAX_RENDERED_RUNTIME_EVENTS),
+        );
+        activeStatusSessionIdRef.current = loadedSession.id;
+      } else {
+        setWorkPhase("idle");
+        setStatus({ kind: "ready", message: "会话已加载" });
+        setTaskActivity(idleTaskActivity);
+        setTaskProcessEvents([]);
+        activeStatusSessionIdRef.current = null;
+      }
+      if (loadedSession.activeGoalId) {
+        const loadedGoal = await window.buildingAgent.getGoal(loadedSession.activeGoalId);
+        if (
+          sessionSelectionGenerationRef.current !== loadGeneration ||
+          sessionIdRef.current !== sessionIdToLoad
+        ) {
+          return;
+        }
+        setActiveGoalDetail(loadedGoal);
+      } else {
+        setActiveGoalDetail(null);
+        setGoalDrawerOpen(false);
+      }
+    } catch (error) {
+      if (
+        sessionSelectionGenerationRef.current === loadGeneration &&
+        sessionIdRef.current === sessionIdToLoad
+      ) {
+        setStatus({
+          kind: "error",
+          message: error instanceof Error ? error.message : "加载会话失败。",
+        });
+        setTaskActivity(idleTaskActivity);
+      }
+    } finally {
+      if (sessionLoadPendingRef.current === loadGeneration) {
+        sessionLoadPendingRef.current = null;
+      }
     }
   }
 
@@ -892,16 +976,29 @@ export function AgentChatPanel({
       return;
     }
 
+    const refreshGeneration = sessionSelectionGenerationRef.current;
+    const refreshSequence = sessionListRefreshSequenceRef.current + 1;
+    sessionListRefreshSequenceRef.current = refreshSequence;
     const loadedSessions = await window.buildingAgent.listChatSessions();
+    if (
+      refreshGeneration !== sessionSelectionGenerationRef.current ||
+      refreshSequence !== sessionListRefreshSequenceRef.current
+    ) {
+      return;
+    }
     const nextSessions = loadedSessions.map(toSessionRailItem);
     setSessions(nextSessions);
     onChatSessionsChange?.(nextSessions);
-    if (nextActiveSessionId) {
+    if (
+      nextActiveSessionId &&
+      sessionIdRef.current === nextActiveSessionId
+    ) {
       setSessionId(nextActiveSessionId);
     } else if (
       sessionIdRef.current &&
       !nextSessions.some((session) => session.id === sessionIdRef.current)
     ) {
+      sessionIdRef.current = null;
       setSessionId(null);
     }
   }
@@ -910,7 +1007,23 @@ export function AgentChatPanel({
     if (!window.buildingAgent) {
       return;
     }
-    setActiveGoalDetail(await window.buildingAgent.getGoal(goalId));
+    const selection = captureSessionSelection();
+    const requestSequence = goalDetailRefreshSequenceRef.current + 1;
+    goalDetailRefreshSequenceRef.current = requestSequence;
+    const goal = await window.buildingAgent.getGoal(goalId);
+    if (
+      !shouldApplySequencedSessionResult(
+        selection,
+        sessionIdRef.current,
+        sessionSelectionGenerationRef.current,
+        requestSequence,
+        goalDetailRefreshSequenceRef.current,
+      ) ||
+      (activeGoalRef.current && activeGoalRef.current.id !== goalId)
+    ) {
+      return;
+    }
+    setActiveGoalDetail(goal);
   }
 
   async function refreshCurrentSessionMessages(sessionIdToRefresh?: string) {
@@ -922,6 +1035,17 @@ export function AgentChatPanel({
     if (!currentSessionId) {
       return;
     }
+    const refreshGeneration = sessionSelectionGenerationRef.current;
+    if (
+      !shouldApplyPersistedSessionRefresh(
+        sessionIdRef.current,
+        currentSessionId,
+        sessionSelectionGenerationRef.current,
+        refreshGeneration,
+      )
+    ) {
+      return;
+    }
 
     const loadedSession = await window.buildingAgent
       .getChatSession(currentSessionId)
@@ -930,7 +1054,20 @@ export function AgentChatPanel({
       return;
     }
 
-    setSessionId(loadedSession.id);
+    if (
+      !shouldApplyPersistedSessionRefresh(
+        sessionIdRef.current,
+        currentSessionId,
+        sessionSelectionGenerationRef.current,
+        refreshGeneration,
+      )
+    ) {
+      return;
+    }
+
+    if (!sessionIdRef.current) {
+      setSessionId(loadedSession.id);
+    }
     setMessages(loadedSession.messages.map(toChatMessage));
   }
 
@@ -1217,6 +1354,38 @@ export function AgentChatPanel({
     setActiveChatRequestId(null);
   }
 
+  function captureSessionSelection(): ChatSessionSelectionContext {
+    return {
+      sessionId: sessionIdRef.current,
+      generation: sessionSelectionGenerationRef.current,
+    };
+  }
+
+  function isSessionSelectionCurrent(
+    captured: ChatSessionSelectionContext,
+  ): boolean {
+    return isChatSessionSelectionCurrent(
+      captured,
+      sessionIdRef.current,
+      sessionSelectionGenerationRef.current,
+    );
+  }
+
+  function beginGoalMutation(): number {
+    goalMutationSequenceRef.current += 1;
+    return goalMutationSequenceRef.current;
+  }
+
+  function isGoalMutationCurrent(
+    captured: ChatSessionSelectionContext,
+    mutationSequence: number,
+  ): boolean {
+    return (
+      mutationSequence === goalMutationSequenceRef.current &&
+      isSessionSelectionCurrent(captured)
+    );
+  }
+
   function setActiveChatRequest(requestId: string | null) {
     activeChatRequestIdRef.current = requestId;
     setActiveChatRequestId(requestId);
@@ -1372,10 +1541,15 @@ export function AgentChatPanel({
     }
 
     const goalId = activeGoal.id;
+    const selection = captureSessionSelection();
+    const mutationSequence = beginGoalMutation();
     if (decision === "approve") {
       const result = await window.buildingAgent.resolveGoalReview(goalId, {
         kind: "approve_continue",
       });
+      if (!isGoalMutationCurrent(selection, mutationSequence)) {
+        return;
+      }
       if (result.ok && result.goal) {
         applyGoalSummaryToSessions(result.goal);
         setStatus({ kind: "working", message: "目标继续执行" });
@@ -1398,6 +1572,9 @@ export function AgentChatPanel({
 
     if (decision === "terminate") {
       const result = await window.buildingAgent.cancelGoal(goalId);
+      if (!isGoalMutationCurrent(selection, mutationSequence)) {
+        return;
+      }
       if (result.ok && result.goal) {
         applyGoalSummaryToSessions(result.goal);
         setStatus({ kind: "ready", message: "目标已终止" });
@@ -1430,10 +1607,16 @@ export function AgentChatPanel({
       return;
     }
 
+    const goalId = activeGoal.id;
+    const selection = captureSessionSelection();
+    const mutationSequence = beginGoalMutation();
     const result = await window.buildingAgent.replanGoal(
-      activeGoal.id,
+      goalId,
       "用户从恢复界面请求重新规划。",
     );
+    if (!isGoalMutationCurrent(selection, mutationSequence)) {
+      return;
+    }
     const remainsBlocked = result.ok && result.goal?.status === "stopped_blocked";
     appendMessage({
       role: "assistant",
@@ -1469,7 +1652,13 @@ export function AgentChatPanel({
       return;
     }
 
-    const result = await window.buildingAgent.retryGoal(activeGoal.id);
+    const goalId = activeGoal.id;
+    const selection = captureSessionSelection();
+    const mutationSequence = beginGoalMutation();
+    const result = await window.buildingAgent.retryGoal(goalId);
+    if (!isGoalMutationCurrent(selection, mutationSequence)) {
+      return;
+    }
     const retryStarted = result.ok && result.goal?.status === "executing";
     if (result.ok && result.goal) {
       applyGoalSummaryToSessions(result.goal);
@@ -1517,6 +1706,8 @@ export function AgentChatPanel({
     if (!operation || activeGoalRef.current.id !== operation.goalId) {
       return;
     }
+    const selection = captureSessionSelection();
+    const mutationSequence = beginGoalMutation();
     goalAcceptanceOperationPendingRef.current = operation;
     setGoalAcceptanceOperationPending("continue_acceptance");
     setStatus({ kind: "working", message: "正在继续最终验收..." });
@@ -1529,7 +1720,7 @@ export function AgentChatPanel({
           operation,
           goalAcceptanceContextRef.current.context,
           goalAcceptanceOperationPendingRef.current,
-        )
+        ) || !isGoalMutationCurrent(selection, mutationSequence)
       ) {
         return;
       }
@@ -1572,7 +1763,7 @@ export function AgentChatPanel({
           operation,
           goalAcceptanceContextRef.current.context,
           goalAcceptanceOperationPendingRef.current,
-        )
+        ) || !isGoalMutationCurrent(selection, mutationSequence)
       ) {
         return;
       }
@@ -1617,6 +1808,8 @@ export function AgentChatPanel({
     if (!operation || operation.goalId !== confirmedGoalId) {
       return;
     }
+    const selection = captureSessionSelection();
+    const mutationSequence = beginGoalMutation();
     goalAcceptanceOperationPendingRef.current = operation;
     setGoalAcceptanceOperationPending("mark_completed_unverified");
     setStatus({ kind: "working", message: "正在记录手动完成..." });
@@ -1629,7 +1822,7 @@ export function AgentChatPanel({
           operation,
           goalAcceptanceContextRef.current.context,
           goalAcceptanceOperationPendingRef.current,
-        )
+        ) || !isGoalMutationCurrent(selection, mutationSequence)
       ) {
         return;
       }
@@ -1672,7 +1865,7 @@ export function AgentChatPanel({
           operation,
           goalAcceptanceContextRef.current.context,
           goalAcceptanceOperationPendingRef.current,
-        )
+        ) || !isGoalMutationCurrent(selection, mutationSequence)
       ) {
         return;
       }
@@ -1697,11 +1890,17 @@ export function AgentChatPanel({
       return;
     }
 
+    const goalId = activeGoal.id;
+    const selection = captureSessionSelection();
+    const mutationSequence = beginGoalMutation();
     const delta = buildGoalBudgetIncreaseDelta(activeGoalDetail);
     const increased = await window.buildingAgent.increaseGoalBudget(
-      activeGoal.id,
+      goalId,
       delta,
     );
+    if (!isGoalMutationCurrent(selection, mutationSequence)) {
+      return;
+    }
     if (!increased.ok) {
       appendMessage({
         role: "assistant",
@@ -1710,7 +1909,10 @@ export function AgentChatPanel({
       return;
     }
 
-    const result = await window.buildingAgent.retryGoal(activeGoal.id);
+    const result = await window.buildingAgent.retryGoal(goalId);
+    if (!isGoalMutationCurrent(selection, mutationSequence)) {
+      return;
+    }
     if (result.ok && result.goal) {
       applyGoalSummaryToSessions(result.goal);
       setStatus({ kind: "working", message: "预算已增加，目标继续执行" });
@@ -1737,7 +1939,13 @@ export function AgentChatPanel({
       return;
     }
 
-    const result = await window.buildingAgent.pauseGoal(activeGoal.id);
+    const goalId = activeGoal.id;
+    const selection = captureSessionSelection();
+    const mutationSequence = beginGoalMutation();
+    const result = await window.buildingAgent.pauseGoal(goalId);
+    if (!isGoalMutationCurrent(selection, mutationSequence)) {
+      return;
+    }
     if (result.ok && result.goal) {
       applyGoalSummaryToSessions(result.goal);
       setStatus({ kind: "paused", message: "目标已暂停，等待确认" });
@@ -1768,7 +1976,13 @@ export function AgentChatPanel({
       return;
     }
 
-    const result = await window.buildingAgent.cancelGoal(activeGoal.id);
+    const goalId = activeGoal.id;
+    const selection = captureSessionSelection();
+    const mutationSequence = beginGoalMutation();
+    const result = await window.buildingAgent.cancelGoal(goalId);
+    if (!isGoalMutationCurrent(selection, mutationSequence)) {
+      return;
+    }
     if (result.ok && result.goal) {
       applyGoalSummaryToSessions(result.goal);
       setStatus({ kind: "ready", message: "目标已取消" });
@@ -1862,6 +2076,7 @@ export function AgentChatPanel({
     result: SuccessfulChatResult,
     requestId: string,
   ) {
+    sessionIdRef.current = result.sessionId;
     setSessionId(result.sessionId);
     if (result.goalDraft) {
       setPendingGoalDraft(result.goalDraft);
@@ -1927,14 +2142,27 @@ export function AgentChatPanel({
       }),
     );
     void refreshSessions(result.sessionId);
+    // Persisted session state is authoritative after optimistic streaming.
+    void refreshCurrentSessionMessages(result.sessionId);
   }
 
   async function handleConfirmGoalDraft() {
-    if (!window.buildingAgent || !pendingGoalDraft) {
+    if (
+      !window.buildingAgent ||
+      !pendingGoalDraft ||
+      goalDraftActionPendingRef.current
+    ) {
       return;
     }
 
     const draftToConfirm = pendingGoalDraft;
+    const selection = captureSessionSelection();
+    if (selection.sessionId !== draftToConfirm.sessionId) {
+      return;
+    }
+    const mutationSequence = beginGoalMutation();
+    const pendingOperation = { action: "confirm" as const, sequence: mutationSequence };
+    goalDraftActionPendingRef.current = pendingOperation;
     setGoalDraftActionPending("confirm");
     setStatus({ kind: "working", message: "正在确认并启动目标..." });
     try {
@@ -1948,6 +2176,9 @@ export function AgentChatPanel({
           ),
         },
       );
+      if (!isGoalMutationCurrent(selection, mutationSequence)) {
+        return;
+      }
       if (!result.ok) {
         setStatus({ kind: "error", message: result.message });
         return;
@@ -1984,27 +2215,45 @@ export function AgentChatPanel({
       void refreshSessions(draftToConfirm.sessionId);
       void refreshCurrentSessionMessages(draftToConfirm.sessionId);
     } catch (error) {
+      if (!isGoalMutationCurrent(selection, mutationSequence)) {
+        return;
+      }
       setStatus({
         kind: "error",
         message:
           error instanceof Error ? error.message : "确认目标草案失败。",
       });
     } finally {
-      setGoalDraftActionPending(null);
+      if (goalDraftActionPendingRef.current === pendingOperation) {
+        goalDraftActionPendingRef.current = null;
+        if (isGoalMutationCurrent(selection, mutationSequence)) {
+          setGoalDraftActionPending(null);
+        }
+      }
     }
   }
 
   async function handleDiscardGoalDraft() {
-    if (!pendingGoalDraft) {
+    if (!pendingGoalDraft || goalDraftActionPendingRef.current) {
       return;
     }
 
     const draftToDiscard = pendingGoalDraft;
+    const selection = captureSessionSelection();
+    if (selection.sessionId !== draftToDiscard.sessionId) {
+      return;
+    }
+    const mutationSequence = beginGoalMutation();
+    const pendingOperation = { action: "discard" as const, sequence: mutationSequence };
+    goalDraftActionPendingRef.current = pendingOperation;
     setGoalDraftActionPending("discard");
     try {
       const result = await window.buildingAgent?.discardGoalDraft(
         draftToDiscard.id,
       );
+      if (!isGoalMutationCurrent(selection, mutationSequence)) {
+        return;
+      }
       if (result && !result.ok) {
         setStatus({ kind: "error", message: result.message });
         return;
@@ -2019,7 +2268,12 @@ export function AgentChatPanel({
         content: "已丢弃目标草案，未创建目标。",
       });
     } finally {
-      setGoalDraftActionPending(null);
+      if (goalDraftActionPendingRef.current === pendingOperation) {
+        goalDraftActionPendingRef.current = null;
+        if (isGoalMutationCurrent(selection, mutationSequence)) {
+          setGoalDraftActionPending(null);
+        }
+      }
     }
   }
 
@@ -2028,7 +2282,7 @@ export function AgentChatPanel({
     if (!content.trim()) {
       return;
     }
-    if (status.kind === "working") {
+    if (status.kind === "working" || sessionLoadPendingRef.current !== null) {
       return;
     }
 
@@ -2092,6 +2346,7 @@ export function AgentChatPanel({
     setStatus({ kind: "working", message: "正在检索记忆并调用模型..." });
     setWorkPhase("model");
     const requestId = createClientRequestId();
+    const requestGeneration = sessionSelectionGenerationRef.current;
     setActiveChatRequest(requestId);
     const result = await window.buildingAgent
       .sendChatMessage({
@@ -2110,6 +2365,9 @@ export function AgentChatPanel({
       }));
     if (activeChatRequestIdRef.current === requestId) {
       setActiveChatRequest(null);
+    }
+    if (requestGeneration !== sessionSelectionGenerationRef.current) {
+      return;
     }
 
     if (!result.ok) {
@@ -2166,6 +2424,7 @@ export function AgentChatPanel({
 
     const inputRequest = pendingInputRequest;
     const requestId = inputRequest.requestId;
+    const requestGeneration = sessionSelectionGenerationRef.current;
     setStatus({ kind: "working", message: "正在继续技能" });
     setWorkPhase("model");
     setTaskActivity(
@@ -2181,6 +2440,7 @@ export function AgentChatPanel({
     const result = await window.buildingAgent
       .respondSkillInput({
         inputRequestId: inputRequest.id,
+        requestId,
         values: buildSkillInputResponseValues(
           inputRequest.fields,
           guidedInputValues,
@@ -2194,6 +2454,9 @@ export function AgentChatPanel({
 
     if (activeChatRequestIdRef.current === requestId) {
       setActiveChatRequest(null);
+    }
+    if (requestGeneration !== sessionSelectionGenerationRef.current) {
+      return;
     }
 
     if (!result.ok) {
@@ -2250,6 +2513,9 @@ export function AgentChatPanel({
     }
 
     if (activeGoal?.status === "executing") {
+      const goalId = activeGoal.id;
+      const selection = captureSessionSelection();
+      const mutationSequence = beginGoalMutation();
       setStatus({ kind: "working", message: "正在中断目标..." });
       setTaskActivity(
         createTaskActivity({
@@ -2260,12 +2526,15 @@ export function AgentChatPanel({
         }),
       );
       const result = await window.buildingAgent
-        .cancelGoal(activeGoal.id)
+        .cancelGoal(goalId)
         .catch((error) => ({
           ok: false as const,
           message:
             error instanceof Error ? error.message : "中断目标失败，请稍后重试。",
         }));
+      if (!isGoalMutationCurrent(selection, mutationSequence)) {
+        return;
+      }
       if (!result.ok) {
         setStatus({ kind: "error", message: result.message ?? "中断目标失败。" });
         setTaskActivity(
@@ -2293,6 +2562,7 @@ export function AgentChatPanel({
       return;
     }
 
+    const selection = captureSessionSelection();
     setStatus({ kind: "working", message: "正在中断任务..." });
     setTaskActivity(
       createTaskActivity({
@@ -2311,6 +2581,9 @@ export function AgentChatPanel({
           error instanceof Error ? error.message : "中断请求失败，请稍后重试。",
       }));
 
+    if (!isSessionSelectionCurrent(selection)) {
+      return;
+    }
     if (!result.ok) {
       setActiveChatRequest(null);
       setStatus({ kind: "ready", message: result.message });

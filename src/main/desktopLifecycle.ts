@@ -20,6 +20,13 @@ export function getDefaultLoginItemSettings(): Settings {
   };
 }
 
+export function getDisabledLoginItemSettings(): Settings {
+  return {
+    openAtLogin: false,
+    openAsHidden: false,
+  };
+}
+
 export function getTrayTooltip(productName: string): string {
   return `${productName} 正在后台运行`;
 }
@@ -28,7 +35,16 @@ export function shouldApplyLoginStartup(
   isPackaged: boolean,
   env: Record<string, string | undefined>,
 ): boolean {
-  return isPackaged || env.BUILDING_AGENT_ENABLE_LOGIN_STARTUP === "1";
+  return isPackaged && (
+    env.ZEROX_ENABLE_LOGIN_STARTUP === "1" ||
+    env.BUILDING_AGENT_ENABLE_LOGIN_STARTUP === "1"
+  );
+}
+
+export function shouldCreateMainWindowAtStartup(
+  wasOpenedAsHidden: boolean,
+): boolean {
+  return !wasOpenedAsHidden;
 }
 
 export function shouldRestoreMainWindowOnActivate(smokeModeEnabled: boolean): boolean {

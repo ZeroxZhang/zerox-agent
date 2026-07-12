@@ -39,10 +39,12 @@ export async function runCheckpointWriterActor(
   const createdAt = (deps.now ?? (() => new Date().toISOString()))();
 
   try {
+    throwIfActorCanceled(cancel);
     // 1. Cold-read the transcript from frozenAt forward.
     const fromSeq = forkContext?.frozenAt ?? 0;
     const trajectory = deps.runRepository.getTrajectory(parentRunId, { fromSeq });
     const transcript = summarizeTrajectory(trajectory);
+    throwIfActorCanceled(cancel);
 
     // 2. Resolve goal + ledger for the rule-based fallback / LLM context.
     const goalCtx = deps.resolveGoal?.(parentRunId) ?? null;
@@ -59,7 +61,8 @@ export async function runCheckpointWriterActor(
         if (!isValidMarkdownV1(content, parentRunId)) {
           content = ruleBasedContent(parentRunId, goalCtx, createdAt);
         }
-      } catch {
+      } catch (error) {
+        if (cancel.aborted) throw error;
         content = ruleBasedContent(parentRunId, goalCtx, createdAt);
       }
     } else {
@@ -67,6 +70,7 @@ export async function runCheckpointWriterActor(
     }
 
     // 4. Write via CheckpointRepository (path-guarded).
+    throwIfActorCanceled(cancel);
     const ref = deps.checkpointRepository.write(parentRunId, "markdown", {
       format: "markdown-v1",
       content,
@@ -83,7 +87,22 @@ export async function runCheckpointWriterActor(
       ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
     };
   } catch (error) {
+    if (cancel.aborted) {
+      return {
+        status: "canceled",
+        summary: String(cancel.reason ?? error),
+        filesTouched: [],
+      };
+    }
     return { status: "error", summary: String(error), filesTouched: [] };
+  }
+}
+
+function throwIfActorCanceled(signal: AbortSignal): void {
+  if (signal.aborted) {
+    throw signal.reason instanceof Error
+      ? signal.reason
+      : new Error("Actor execution canceled.");
   }
 }
 

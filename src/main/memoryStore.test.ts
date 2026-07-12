@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -55,6 +55,43 @@ describe("memory store", () => {
 
     const reloaded = createMemoryStore({ configDir });
     await expect(reloaded.list()).resolves.toEqual([created]);
+  });
+
+  it("serializes concurrent creates without losing either record", async () => {
+    const store = createMemoryStore({
+      configDir,
+      createId: createSequentialId("mem"),
+      now: createSteppedClock("2026-06-05T08:00:00.000Z"),
+      embeddingService: {
+        async embed(text) {
+          if (text.includes("first")) {
+            await new Promise((resolve) => setTimeout(resolve, 5));
+          }
+          return null;
+        },
+      },
+    });
+
+    await Promise.all([
+      store.create({
+        kind: "semantic",
+        title: "first",
+        content: "first memory",
+      }),
+      store.create({
+        kind: "semantic",
+        title: "second",
+        content: "second memory",
+      }),
+    ]);
+
+    await expect(store.list()).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: "first" }),
+        expect.objectContaining({ title: "second" }),
+      ]),
+    );
+    expect(await readdir(configDir)).toEqual(["memory-records.json"]);
   });
 
   it("rejects invalid memory input with structured errors", async () => {

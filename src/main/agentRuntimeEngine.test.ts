@@ -40,6 +40,113 @@ import { defineNativeToolDescriptor } from "../shared/nativeCapabilities";
 import { getDefaultTaskPermissionPolicy } from "../shared/toolPermissions";
 
 describe("agent runtime engine", () => {
+  it("routes scheduled production execution through the shared agent loop", async () => {
+    let sharedLoopCalls = 0;
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore({ ...createTask(), skillName: "" }),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore([]),
+      resolveSkill: async () => null,
+      chatClient: { async complete() { return finalResponse("unused"); } },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      async runLoop(_initialMessages, _profile, loopOptions) {
+        sharedLoopCalls += 1;
+        return {
+          status: "succeeded",
+          summary: "shared loop complete",
+          turns: 1,
+          messages: [
+            ...(loopOptions.resumeMessages ?? []),
+            { role: "assistant", content: "shared loop complete" },
+          ],
+          toolCallsExecuted: loopOptions.initialToolCallsExecuted ?? 0,
+          tokensConsumed: 12,
+        };
+      },
+      createId: createSequentialId("runtime_shared"),
+      now: createSteppedClock("2026-07-12T00:00:00.000Z"),
+    });
+
+    const result = await engine.startTask("task_123");
+
+    expect(sharedLoopCalls).toBe(1);
+    expect(result).toMatchObject({
+      ok: true,
+      run: { status: "succeeded", summary: "shared loop complete" },
+    });
+  });
+
+  it("continues trajectory sequence numbers after engine recreation and resume", async () => {
+    let persisted: AgentExecutionCheckpoint = {
+      id: "checkpoint_resume",
+      runId: "run_resume",
+      taskId: "task_123",
+      status: "paused",
+      currentStepId: "step_resume",
+      steps: [{
+        id: "step_resume",
+        description: "resume",
+        expectedOutcome: "done",
+        state: "pending",
+        attempts: 0,
+      }],
+      messages: [
+        { role: "system", content: "system" },
+        { role: "user", content: "resume" },
+      ],
+      toolCallCount: 0,
+      createdAt: "2026-07-12T00:00:00.000Z",
+      updatedAt: "2026-07-12T00:00:00.000Z",
+    };
+    const trajectoryEvents: AgentTrajectoryEvent[] = [{
+      id: "event_41",
+      runId: "run_resume",
+      type: "checkpoint_written",
+      sequence: 41,
+      payload: { checkpointId: "old" },
+      redaction: {
+        containsApiKey: false,
+        containsFileContent: false,
+        containsUserText: false,
+      },
+      createdAt: "2026-07-12T00:00:00.000Z",
+    }];
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore: {
+        async save(checkpoint) {
+          persisted = structuredClone(checkpoint);
+          return persisted;
+        },
+        async get(runId) {
+          return runId === persisted.runId ? persisted : null;
+        },
+        async listActive() { return [persisted]; },
+        async delete() { return true; },
+      },
+      trajectoryStore: createMemoryTrajectoryStore(trajectoryEvents),
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: { async complete() { return finalResponse("resumed"); } },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      createId: createSequentialId("resume_sequence"),
+      now: createSteppedClock("2026-07-12T00:00:01.000Z"),
+    });
+
+    await engine.resumeRun("run_resume");
+
+    const appendedSequences = trajectoryEvents.slice(1).map((event) => event.sequence);
+    expect(appendedSequences[0]).toBe(42);
+    expect(appendedSequences).toEqual(
+      [...appendedSequences].sort((left, right) => left - right),
+    );
+    expect(new Set(appendedSequences).size).toBe(appendedSequences.length);
+  });
+
   it("starts a prompt-only scheduled task without resolving a skill", async () => {
     let resolveSkillCalled = false;
     const engine = createAgentRuntimeEngine({
@@ -319,6 +426,51 @@ describe("agent runtime engine", () => {
       status: "succeeded",
       toolCallCount: 1,
     });
+  });
+
+  it("preserves the latest tool progress when a later model request fails", async () => {
+    const savedCheckpoints: AgentExecutionCheckpoint[] = [];
+    let modelCalls = 0;
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore(savedCheckpoints),
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: {
+        async complete() {
+          modelCalls += 1;
+          if (modelCalls === 1) {
+            return toolCallResponse("file_read", {
+              path: "~/Downloads/notes.md",
+            });
+          }
+          throw new Error("provider unavailable after tool completion");
+        },
+      },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor([]),
+      modelRetry: { maxRetries: 0, baseDelayMs: 0, maxDelayMs: 0 },
+      createId: createSequentialId("failure_progress"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+
+    const result = await engine.startTask("task_123");
+
+    expect(result).toMatchObject({
+      ok: true,
+      run: { status: "failed" },
+    });
+    const terminalCheckpoint = savedCheckpoints.at(-1);
+    expect(terminalCheckpoint).toMatchObject({
+      status: "failed",
+      toolCallCount: 1,
+    });
+    expect(
+      terminalCheckpoint?.messages.some(
+        (message) => message.role === "tool" && message.tool_call_id === "call_1",
+      ),
+    ).toBe(true);
   });
 
   it("marks the current runtime step completed when the run succeeds", async () => {

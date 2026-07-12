@@ -6,7 +6,16 @@
 // existing stdio `SKILL.md` mcpServers format is unchanged; http/sse add optional
 // `transport`/`url`/oauth fields (default stdio).
 
+import {
+  fetchWithTimeout,
+  readResponseJsonWithLimit,
+  readResponseTextWithLimit,
+} from "./fetchWithTimeout";
+import { assertSafeOutboundUrl, safeOutboundFetch } from "./outboundUrlPolicy";
+
 export type McpTransportKind = "stdio" | "http" | "sse";
+const MCP_MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
+const MCP_MAX_ERROR_BYTES = 64 * 1024;
 
 export interface JsonRpcRequest {
   jsonrpc: "2.0";
@@ -30,7 +39,7 @@ export interface JsonRpcNotification {
 
 export interface McpTransport {
   start(): Promise<void>;
-  send(req: JsonRpcRequest): Promise<JsonRpcResponse>;
+  send(req: JsonRpcRequest, options?: { signal?: AbortSignal }): Promise<JsonRpcResponse>;
   onNotification?(handler: (n: JsonRpcNotification) => void): void; // Patch 12
   close(): Promise<void>;
 }
@@ -76,32 +85,45 @@ export function createStdioTransport(
 
 export function createStreamableHttpTransport(
   config: McpServerTransportConfig,
-  options?: { fetch?: typeof fetch; getAccessToken?: () => Promise<string | null> },
+  options?: { fetch?: typeof fetch; getAccessToken?: () => Promise<string | null>; resolveHostname?: (hostname: string) => Promise<string[]> },
 ): McpTransport {
-  const fetchImpl = options?.fetch ?? fetch;
+  const fetchImpl = options?.fetch ?? safeOutboundFetch;
   const url = config.url ?? "";
   let started = false;
   let notificationHandler: ((n: JsonRpcNotification) => void) | null = null;
+  const validateUrl = () => assertSafeOutboundUrl(url, {
+    protocols: ["https:"],
+    ...(options?.resolveHostname
+      ? { resolveHostname: options.resolveHostname }
+      : {}),
+  });
 
   return {
     async start() {
       if (!url) throw new Error("StreamableHttpTransport: url required");
+      await validateUrl();
       started = true;
     },
-    async send(req: JsonRpcRequest): Promise<JsonRpcResponse> {
+    async send(req: JsonRpcRequest, sendOptions): Promise<JsonRpcResponse> {
       if (!started) await this.start();
+      await validateUrl();
       const headers: Record<string, string> = { "content-type": "application/json", ...(config.headers ?? {}) };
       const token = await options?.getAccessToken?.();
       if (token) headers["authorization"] = `Bearer ${token}`;
-      const res = await fetchImpl(url, {
+      const res = await fetchWithTimeout(fetchImpl, url, {
         method: "POST",
         headers,
         body: JSON.stringify(req),
-      });
+        redirect: "error",
+      }, 30_000, `MCP ${config.name}`, sendOptions?.signal);
       if (!res.ok) {
-        throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+        throw new Error(
+          `HTTP ${res.status}: ${await readResponseTextWithLimit(res, MCP_MAX_ERROR_BYTES, `MCP ${config.name} error`)}`,
+        );
       }
-      const body = (await res.json()) as JsonRpcResponse | JsonRpcResponse[];
+      const body = await readResponseJsonWithLimit<
+        JsonRpcResponse | JsonRpcResponse[]
+      >(res, MCP_MAX_RESPONSE_BYTES, `MCP ${config.name}`);
       const responses = Array.isArray(body) ? body : [body];
       // Surface any notifications (tools/list_changed etc.) via the handler.
       for (const r of responses) {
@@ -124,26 +146,47 @@ export function createStreamableHttpTransport(
 
 export function createSseTransport(
   config: McpServerTransportConfig,
-  options?: { fetch?: typeof fetch; getAccessToken?: () => Promise<string | null> },
+  options?: { fetch?: typeof fetch; getAccessToken?: () => Promise<string | null>; resolveHostname?: (hostname: string) => Promise<string[]> },
 ): McpTransport {
-  const fetchImpl = options?.fetch ?? fetch;
+  const fetchImpl = options?.fetch ?? safeOutboundFetch;
   const url = config.url ?? "";
   let started = false;
   let notificationHandler: ((n: JsonRpcNotification) => void) | null = null;
+  const validateUrl = () => assertSafeOutboundUrl(url, {
+    protocols: ["https:"],
+    ...(options?.resolveHostname
+      ? { resolveHostname: options.resolveHostname }
+      : {}),
+  });
 
   return {
     async start() {
       if (!url) throw new Error("SseTransport: url required");
+      await validateUrl();
       started = true;
     },
-    async send(req: JsonRpcRequest): Promise<JsonRpcResponse> {
+    async send(req: JsonRpcRequest, sendOptions): Promise<JsonRpcResponse> {
       if (!started) await this.start();
+      await validateUrl();
       const headers: Record<string, string> = { "content-type": "application/json", ...(config.headers ?? {}) };
       const token = await options?.getAccessToken?.();
       if (token) headers["authorization"] = `Bearer ${token}`;
-      const res = await fetchImpl(url, { method: "POST", headers, body: JSON.stringify(req) });
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
-      return (await res.json()) as JsonRpcResponse;
+      const res = await fetchWithTimeout(fetchImpl, url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(req),
+        redirect: "error",
+      }, 30_000, `MCP ${config.name}`, sendOptions?.signal);
+      if (!res.ok) {
+        throw new Error(
+          `HTTP ${res.status}: ${await readResponseTextWithLimit(res, MCP_MAX_ERROR_BYTES, `MCP ${config.name} error`)}`,
+        );
+      }
+      return readResponseJsonWithLimit<JsonRpcResponse>(
+        res,
+        MCP_MAX_RESPONSE_BYTES,
+        `MCP ${config.name}`,
+      );
     },
     onNotification(handler) { notificationHandler = handler; },
     async close() {
@@ -156,7 +199,7 @@ export function createSseTransport(
 /** Transport factory dispatched by `transport` kind (stdio falls back to legacy). */
 export function createMcpTransport(
   config: McpServerTransportConfig,
-  options?: { fetch?: typeof fetch; getAccessToken?: () => Promise<string | null> },
+  options?: { fetch?: typeof fetch; getAccessToken?: () => Promise<string | null>; resolveHostname?: (hostname: string) => Promise<string[]> },
 ): McpTransport {
   switch (config.transport) {
     case "http":

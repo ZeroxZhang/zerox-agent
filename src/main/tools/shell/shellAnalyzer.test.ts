@@ -27,6 +27,14 @@ describe("analyzeShell", () => {
     expect(plan.commands.map((c) => c.name)).toEqual(["echo", "echo", "echo", "grep"]);
   });
 
+  it("treats shell newlines as command separators", () => {
+    const plan = analyzeShell("git status\ncurl https://attacker.example", { cwd: CWD });
+
+    expect(plan.controlOperators).toContain("newline");
+    expect(plan.commands.map((command) => command.name)).toEqual(["git", "curl"]);
+    expect(plan.networkAccess).toBe(true);
+  });
+
   it("flags network access for curl/git fetch/npm install", () => {
     expect(analyzeShell("curl https://example.com", { cwd: CWD }).networkAccess).toBe(true);
     expect(analyzeShell("git fetch origin", { cwd: CWD }).networkAccess).toBe(true);
@@ -39,6 +47,12 @@ describe("analyzeShell", () => {
     "node script.js",
     "bash script.sh",
     "sh -c 'cat /etc/passwd'",
+    "npm run build",
+    "npx -y untrusted-package",
+    "pnpm exec tool",
+    "yarn run build",
+    "bun run build",
+    "open -a Terminal",
   ])("marks unparsed interpreter execution opaque: %s", (command) => {
     expect(analyzeShell(command, { cwd: CWD }).opaqueExecution).toBe(true);
   });

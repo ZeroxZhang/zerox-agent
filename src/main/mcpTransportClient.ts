@@ -21,6 +21,7 @@ import type { McpClient, McpToolResult } from "./mcpClient";
 export interface McpTransportClientOptions {
   fetch?: typeof fetch;
   getAccessToken?: () => Promise<string | null>;
+  resolveHostname?: (hostname: string) => Promise<string[]>;
 }
 
 export function createMcpTransportClient(
@@ -34,20 +35,31 @@ export function createMcpTransportClient(
 
   let connected = false;
   let nextId = 1;
+  let lifecycleGeneration = 0;
 
-  async function sendRequest(method: string, params?: Record<string, unknown>): Promise<JsonRpcResponse> {
+  async function sendRequest(
+    method: string,
+    params?: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<JsonRpcResponse> {
     const req: JsonRpcRequest = { jsonrpc: "2.0", id: nextId++, method, ...(params ? { params } : {}) };
-    return transport.send(req);
+    return transport.send(req, signal ? { signal } : undefined);
   }
 
   return {
     async connect() {
+      const generation = lifecycleGeneration;
       await transport.start();
+      if (generation !== lifecycleGeneration) {
+        await transport.close();
+        throw new Error(`MCP server "${config.name}" disconnected during connect.`);
+      }
       connected = true;
     },
-    disconnect() {
+    async disconnect() {
+      lifecycleGeneration += 1;
       connected = false;
-      void transport.close();
+      await transport.close();
     },
     async listTools(): Promise<ToolDefinition[]> {
       const response = await sendRequest("tools/list", {});
@@ -65,8 +77,12 @@ export function createMcpTransportClient(
         },
       }));
     },
-    async callTool(name: string, args: Record<string, unknown>): Promise<McpToolResult> {
-      const response = await sendRequest("tools/call", { name, arguments: args });
+    async callTool(name: string, args: Record<string, unknown>, callOptions): Promise<McpToolResult> {
+      const response = await sendRequest(
+        "tools/call",
+        { name, arguments: args },
+        callOptions?.signal,
+      );
       if (response.error) {
         return { ok: false, error: response.error.message };
       }

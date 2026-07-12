@@ -1,4 +1,12 @@
-import { mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import {
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 import {
   isTerminalExecutionStatus,
@@ -18,6 +26,7 @@ export function createAgentExecutionStore(options: {
   configDir: string;
 }): AgentExecutionStore {
   const executionsDir = path.join(options.configDir, "agent-executions");
+  const mutationQueues = new Map<string, Promise<void>>();
 
   function checkpointPath(runId: string): string {
     return path.join(executionsDir, `${runId}.json`);
@@ -34,21 +43,72 @@ export function createAgentExecutionStore(options: {
         return null;
       }
 
+      if (error instanceof SyntaxError) {
+        await quarantineCorruptCheckpoint(runId);
+        return null;
+      }
+
       throw error;
+    }
+  }
+
+  async function quarantineCorruptCheckpoint(runId: string): Promise<void> {
+    const source = checkpointPath(runId);
+    const destination = path.join(
+      executionsDir,
+      `${runId}.corrupt-${Date.now()}-${randomUUID()}.json`,
+    );
+    try {
+      await rename(source, destination);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+    }
+  }
+
+  async function withRunMutation<T>(
+    runId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const previous = mutationQueues.get(runId) ?? Promise.resolve();
+    const current = previous.catch(() => undefined).then(operation);
+    const settled = current.then(
+      () => undefined,
+      () => undefined,
+    );
+    mutationQueues.set(runId, settled);
+
+    try {
+      return await current;
+    } finally {
+      if (mutationQueues.get(runId) === settled) {
+        mutationQueues.delete(runId);
+      }
     }
   }
 
   return {
     async save(checkpoint) {
-      await mkdir(executionsDir, { recursive: true });
-      await writeFile(checkpointPath(checkpoint.runId), `${JSON.stringify(checkpoint, null, 2)}\n`, {
-        encoding: "utf8",
+      return withRunMutation(checkpoint.runId, async () => {
+        await mkdir(executionsDir, { recursive: true });
+        const destination = checkpointPath(checkpoint.runId);
+        const temporary = `${destination}.${process.pid}-${randomUUID()}.tmp`;
+        try {
+          await writeFile(temporary, `${JSON.stringify(checkpoint, null, 2)}\n`, {
+            encoding: "utf8",
+          });
+          await rename(temporary, destination);
+        } catch (error) {
+          await unlink(temporary).catch(() => undefined);
+          throw error;
+        }
+        return checkpoint;
       });
-      return checkpoint;
     },
 
     async get(runId) {
-      return readCheckpoint(runId);
+      return withRunMutation(runId, () => readCheckpoint(runId));
     },
 
     async listActive() {
@@ -65,8 +125,13 @@ export function createAgentExecutionStore(options: {
 
       const checkpoints = await Promise.all(
         files
-          .filter((file) => file.endsWith(".json"))
-          .map((file) => readCheckpoint(path.basename(file, ".json"))),
+          .filter(
+            (file) => file.endsWith(".json") && !file.includes(".corrupt-"),
+          )
+          .map((file) => {
+            const runId = path.basename(file, ".json");
+            return withRunMutation(runId, () => readCheckpoint(runId));
+          }),
       );
 
       return checkpoints
@@ -80,16 +145,18 @@ export function createAgentExecutionStore(options: {
     },
 
     async delete(runId) {
-      try {
-        await unlink(checkpointPath(runId));
-        return true;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-          return false;
-        }
+      return withRunMutation(runId, async () => {
+        try {
+          await unlink(checkpointPath(runId));
+          return true;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            return false;
+          }
 
-        throw error;
-      }
+          throw error;
+        }
+      });
     },
   };
 }

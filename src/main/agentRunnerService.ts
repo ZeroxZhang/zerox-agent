@@ -6,6 +6,7 @@ import type { AgentToolExecutor } from "./agentToolExecutor";
 import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
 import type { AgentWorkspaceService } from "./agentWorkspaceService";
 import { createAgentRuntimeEngine } from "./agentRuntimeEngine";
+import type { runAgentLoop as runSharedAgentLoop } from "./agentLoop";
 import { createContextManager, type ContextManager } from "./contextManager";
 import type { CompactionStrategy } from "./kernel/compactionStrategy";
 import type { MemoryStore } from "./memoryStore";
@@ -91,6 +92,8 @@ export function createAgentRunnerService(options: {
   createId?: () => string;
   now?: () => Date;
   maxReflectionRounds?: number;
+  /** Shared production loop used by chat, goals, and scheduled runs. */
+  runAgentLoop?: typeof runSharedAgentLoop;
 }): AgentRunnerService {
   const createId = options.createId ?? randomUUID;
   const now = options.now ?? (() => new Date());
@@ -125,6 +128,7 @@ export function createAgentRunnerService(options: {
           : {}),
         createId,
         now,
+        ...(options.runAgentLoop ? { runLoop: options.runAgentLoop } : {}),
       })
     : null;
 
