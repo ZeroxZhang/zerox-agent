@@ -43,6 +43,7 @@ describe("chat attachment processor", () => {
       expect.objectContaining({ id: "attachment_text", size: 27, kind: "text" }),
     ]);
     expect(result.textContext).toContain("<attachment_context>");
+    expect(result.textContextCharsUsed).toBe(27);
     expect(result.textContext).toContain("<\\/attachment_context>");
     expect(appendChatAttachmentContext("summarize", result.textContext)).toContain(
       "summarize\n\n<attachment_context>",
@@ -102,5 +103,25 @@ describe("chat attachment processor", () => {
     expect(result.textContext.length).toBeLessThan(
       CHAT_ATTACHMENT_MAX_TEXT_CONTEXT_CHARS + 500,
     );
+  });
+
+  it("honors a smaller request-level text context budget", () => {
+    const result = processChatAttachments(
+      [
+        {
+          id: "shared_budget_text",
+          name: "shared.txt",
+          mediaType: "text/plain",
+          size: 6,
+          kind: "text",
+          dataBase64: Buffer.from("abcdef").toString("base64"),
+        },
+      ],
+      { maxTextContextChars: 3 },
+    );
+
+    expect(result.textContextCharsUsed).toBe(3);
+    expect(result.textContext).toContain("abc");
+    expect(result.textContext).not.toContain("abcdef");
   });
 });

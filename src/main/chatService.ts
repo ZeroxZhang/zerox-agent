@@ -35,6 +35,7 @@ import type {
 } from "./toolAuthorizationService";
 import type {
   ChatAgentStatus,
+  ChatAttachmentInput,
   ChatAttachmentMetadata,
   ChatRelatedMemory,
   ChatSessionListItem,
@@ -95,6 +96,11 @@ import type {
   SkillInputResolution,
   SkillInputValue,
 } from "../shared/skillExecutionContract";
+import {
+  CHAT_ATTACHMENT_MAX_COUNT,
+  CHAT_ATTACHMENT_MAX_TEXT_CONTEXT_CHARS,
+  CHAT_ATTACHMENT_MAX_TOTAL_BYTES,
+} from "../shared/chatAttachments";
 import { createRuntimeContextSnapshotForRun } from "./runtimeContextFactory";
 
 export type ChatService = {
@@ -138,8 +144,22 @@ type PendingSkillInputState = {
   createdAtMs: number;
 };
 
+type CachedHistoryAttachmentPayload = {
+  input: ChatAttachmentInput;
+  lastAccessedAtMs: number;
+};
+
+type HistoryAttachmentReplayBudget = {
+  remainingBytes: number;
+  remainingCount: number;
+  remainingTextContextChars: number;
+  seenIds: Set<string>;
+};
+
 const PENDING_ATTACHMENT_PAYLOAD_TTL_MS = 60 * 60 * 1000;
 const PENDING_ATTACHMENT_PAYLOAD_MAX_BYTES = 40 * 1024 * 1024;
+const HISTORY_ATTACHMENT_PAYLOAD_TTL_MS = 60 * 60 * 1000;
+const HISTORY_ATTACHMENT_PAYLOAD_MAX_BYTES = 40 * 1024 * 1024;
 const EXPIRED_PENDING_ATTACHMENT_MESSAGE =
   "附件内容在应用重启或长时间等待后已失效，请重新发送消息并粘贴附件。";
 
@@ -238,6 +258,10 @@ export function createChatService(options: {
   const agentLoopMaxTurns = normalizeAgentLoopMaxTurns(options.agentLoopMaxTurns);
   const pendingContinuations = new Map<string, ChatContinuationState>();
   const pendingSkillInputRequests = new Map<string, PendingSkillInputState>();
+  const historyAttachmentPayloads = new Map<
+    string,
+    CachedHistoryAttachmentPayload
+  >();
   const inFlightSkillInputResponses = new Set<string>();
   const sessionRequestTails = new Map<string, Promise<void>>();
 
@@ -280,6 +304,72 @@ export function createChatService(options: {
       );
       entry.attachments = undefined;
     }
+  }
+
+  function cacheHistoryAttachmentPayloads(
+    sessionId: string,
+    attachments: ChatAttachmentInput[],
+    nowMs: number,
+  ): void {
+    pruneHistoryAttachmentPayloads(nowMs);
+    for (const attachment of attachments) {
+      const key = toHistoryAttachmentCacheKey(sessionId, attachment.id);
+      const existing = historyAttachmentPayloads.get(key);
+      if (
+        existing &&
+        existing.input.dataBase64 !== attachment.dataBase64
+      ) {
+        // Attachment identifiers are expected to be unique. Fail closed on a
+        // collision so an older turn can never be rebound to different bytes.
+        historyAttachmentPayloads.delete(key);
+        continue;
+      }
+      historyAttachmentPayloads.set(key, {
+        input: attachment,
+        lastAccessedAtMs: nowMs,
+      });
+    }
+    pruneHistoryAttachmentPayloads(nowMs);
+  }
+
+  function pruneHistoryAttachmentPayloads(nowMs: number): void {
+    for (const [key, entry] of historyAttachmentPayloads) {
+      if (
+        nowMs - entry.lastAccessedAtMs >
+        HISTORY_ATTACHMENT_PAYLOAD_TTL_MS
+      ) {
+        historyAttachmentPayloads.delete(key);
+      }
+    }
+    const entries = [...historyAttachmentPayloads.entries()].sort(
+      ([, left], [, right]) => left.lastAccessedAtMs - right.lastAccessedAtMs,
+    );
+    let totalBytes = entries.reduce(
+      (sum, [, entry]) => sum + entry.input.size,
+      0,
+    );
+    for (const [key, entry] of entries) {
+      if (totalBytes <= HISTORY_ATTACHMENT_PAYLOAD_MAX_BYTES) {
+        break;
+      }
+      totalBytes -= entry.input.size;
+      historyAttachmentPayloads.delete(key);
+    }
+  }
+
+  function resolveHistoryAttachmentPayload(
+    sessionId: string,
+    metadata: ChatAttachmentMetadata,
+    nowMs: number,
+  ): ChatAttachmentInput | undefined {
+    const entry = historyAttachmentPayloads.get(
+      toHistoryAttachmentCacheKey(sessionId, metadata.id),
+    );
+    if (!entry || !matchesAttachmentMetadata(entry.input, metadata)) {
+      return undefined;
+    }
+    entry.lastAccessedAtMs = nowMs;
+    return entry.input;
   }
 
   async function recoverPendingSkillInputState(
@@ -540,6 +630,15 @@ export function createChatService(options: {
         activeGoal = getActiveGoalSummary(appendResult.session);
       } else if (internalOptions.skipUserMessageAppend) {
         userMessageId = internalOptions.userMessageId ?? null;
+      }
+      if (processedAttachments.validatedInputs.length) {
+        cacheHistoryAttachmentPayloads(
+          sessionId,
+          processedAttachments.validatedInputs,
+          startedAtMs,
+        );
+      } else {
+        pruneHistoryAttachmentPayloads(startedAtMs);
       }
       if (chatRunContext) {
         chatRunContext = {
@@ -882,6 +981,18 @@ export function createChatService(options: {
           history: input.history ?? [],
           relatedMemoryResults,
           historyLimit,
+          historyAttachmentReplayBudget:
+            createHistoryAttachmentReplayBudget(
+              processedAttachments.validatedInputs,
+              processedAttachments.textContextCharsUsed,
+            ),
+          resolveHistoryAttachment(metadata) {
+            return resolveHistoryAttachmentPayload(
+              sessionId,
+              metadata,
+              startedAtMs,
+            );
+          },
         });
         if (requestedSkill?.kind === "matched") {
           chatMessages = injectSkillInvocationMessage(
@@ -3508,6 +3619,10 @@ function buildChatMessages(options: {
   history: SendChatMessageInput["history"];
   relatedMemoryResults: MemorySearchResult[];
   historyLimit: number;
+  historyAttachmentReplayBudget?: HistoryAttachmentReplayBudget;
+  resolveHistoryAttachment?: (
+    metadata: ChatAttachmentMetadata,
+  ) => ChatAttachmentInput | undefined;
 }): ChatMessage[] {
   const messages: ChatMessage[] = [];
   const memoryContext = formatMemoryContext(options.relatedMemoryResults);
@@ -3522,10 +3637,46 @@ function buildChatMessages(options: {
     messages.push({ role: "user", content: `<memory_context>\n${safeMemoryContext}\n</memory_context>` });
   }
 
-  for (const message of (options.history ?? []).slice(-options.historyLimit)) {
+  const history = (options.history ?? []).slice(-options.historyLimit);
+  const replayBudget =
+    options.historyAttachmentReplayBudget ??
+    createHistoryAttachmentReplayBudget([]);
+  const preparedAttachments = history.map(() =>
+    emptyProcessedHistoryAttachments(),
+  );
+  // Allocate the shared request budget newest-first so a follow-up question
+  // retains the most recent attachment context when older turns are evicted.
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const message = history[index];
+    if (message?.role === "user") {
+      preparedAttachments[index] = processCachedHistoryAttachments(
+        message.attachments,
+        options.resolveHistoryAttachment,
+        replayBudget,
+      );
+    }
+  }
+
+  for (let index = 0; index < history.length; index += 1) {
+    const message = history[index];
+    if (!message) {
+      continue;
+    }
+    const historicalAttachments =
+      preparedAttachments[index] ?? emptyProcessedHistoryAttachments();
+    const content = appendUnavailableHistoryAttachmentContext(
+      appendChatAttachmentContext(
+        message.content,
+        historicalAttachments.textContext,
+      ),
+      historicalAttachments.unavailableCount,
+    );
     messages.push({
       role: message.role,
-      content: message.content,
+      content,
+      ...(historicalAttachments.images.length
+        ? { images: historicalAttachments.images }
+        : {}),
     });
   }
 
@@ -3535,6 +3686,152 @@ function buildChatMessages(options: {
     ...(options.images?.length ? { images: options.images } : {}),
   });
   return messages;
+}
+
+function processCachedHistoryAttachments(
+  metadata: ChatAttachmentMetadata[] | undefined,
+  resolveAttachment:
+    | ((metadata: ChatAttachmentMetadata) => ChatAttachmentInput | undefined)
+    | undefined,
+  replayBudget: HistoryAttachmentReplayBudget,
+): ProcessedHistoryAttachments {
+  if (!Array.isArray(metadata) || metadata.length === 0) {
+    return emptyProcessedHistoryAttachments();
+  }
+  const candidates = metadata.slice(0, CHAT_ATTACHMENT_MAX_COUNT) as unknown[];
+  const resolved: ChatAttachmentInput[] = [];
+  let unavailableCount = Math.max(0, metadata.length - candidates.length);
+  for (const candidate of candidates) {
+    if (!isChatAttachmentMetadata(candidate)) {
+      unavailableCount += 1;
+      continue;
+    }
+    if (replayBudget.seenIds.has(candidate.id)) {
+      unavailableCount += 1;
+      continue;
+    }
+    const payload = resolveAttachment?.(candidate);
+    if (!payload) {
+      unavailableCount += 1;
+      continue;
+    }
+    replayBudget.seenIds.add(candidate.id);
+    if (
+      replayBudget.remainingCount <= 0 ||
+      payload.size > replayBudget.remainingBytes
+    ) {
+      unavailableCount += 1;
+      continue;
+    }
+    replayBudget.remainingCount -= 1;
+    replayBudget.remainingBytes -= payload.size;
+    resolved.push(payload);
+  }
+  try {
+    const processed = processChatAttachments(resolved, {
+      maxTextContextChars: replayBudget.remainingTextContextChars,
+    });
+    replayBudget.remainingTextContextChars = Math.max(
+      0,
+      replayBudget.remainingTextContextChars -
+        processed.textContextCharsUsed,
+    );
+    return {
+      images: processed.images,
+      textContext: processed.textContext,
+      unavailableCount,
+    };
+  } catch {
+    return {
+      images: [],
+      textContext: "",
+      unavailableCount: metadata.length,
+    };
+  }
+}
+
+type ProcessedHistoryAttachments = {
+  images: NonNullable<ChatMessage["images"]>;
+  textContext: string;
+  unavailableCount: number;
+};
+
+function emptyProcessedHistoryAttachments(): ProcessedHistoryAttachments {
+  return { images: [], textContext: "", unavailableCount: 0 };
+}
+
+function createHistoryAttachmentReplayBudget(
+  currentAttachments: ChatAttachmentInput[],
+  currentTextContextCharsUsed = 0,
+): HistoryAttachmentReplayBudget {
+  return {
+    remainingBytes: Math.max(
+      0,
+      CHAT_ATTACHMENT_MAX_TOTAL_BYTES -
+        currentAttachments.reduce(
+          (sum, attachment) => sum + attachment.size,
+          0,
+        ),
+    ),
+    remainingCount: Math.max(
+      0,
+      CHAT_ATTACHMENT_MAX_COUNT - currentAttachments.length,
+    ),
+    remainingTextContextChars: Math.max(
+      0,
+      CHAT_ATTACHMENT_MAX_TEXT_CONTEXT_CHARS -
+        currentTextContextCharsUsed,
+    ),
+    seenIds: new Set(currentAttachments.map((attachment) => attachment.id)),
+  };
+}
+
+function isChatAttachmentMetadata(
+  value: unknown,
+): value is ChatAttachmentMetadata {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const metadata = value as Partial<ChatAttachmentMetadata>;
+  return (
+    typeof metadata.id === "string" &&
+    typeof metadata.name === "string" &&
+    typeof metadata.mediaType === "string" &&
+    typeof metadata.size === "number" &&
+    Number.isFinite(metadata.size) &&
+    metadata.size > 0 &&
+    (metadata.kind === "image" || metadata.kind === "text")
+  );
+}
+
+function appendUnavailableHistoryAttachmentContext(
+  content: string,
+  unavailableCount: number,
+): string {
+  if (unavailableCount <= 0) {
+    return content;
+  }
+  return `${content}\n\n<attachment_context>\n[本消息的 ${unavailableCount} 个历史附件内容已失效、不可用，或为控制本次请求大小已省略。不要猜测其内容；如当前问题依赖这些附件，请要求用户重新粘贴。]\n</attachment_context>`;
+}
+
+function matchesAttachmentMetadata(
+  input: ChatAttachmentInput,
+  metadata: ChatAttachmentMetadata,
+): boolean {
+  return (
+    input.id === metadata.id &&
+    input.name === metadata.name &&
+    input.mediaType === metadata.mediaType &&
+    input.size === metadata.size &&
+    input.kind === metadata.kind
+  );
+}
+
+function toHistoryAttachmentCacheKey(
+  sessionId: string,
+  attachmentId: string,
+): string {
+  return `${sessionId.length}:${sessionId}${attachmentId}`;
 }
 
 function formatMemoryContext(results: MemorySearchResult[]): string | null {

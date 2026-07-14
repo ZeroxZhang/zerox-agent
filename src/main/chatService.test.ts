@@ -18,6 +18,7 @@ import {
   getDefaultTaskPermissionPolicy,
 } from "../shared/toolPermissions";
 import type {
+  ChatAttachmentMetadata,
   ChatSessionRecord,
   ChatSessionGoalSummary,
   ChatSessionTokenUsage,
@@ -5833,6 +5834,378 @@ describe("chat service", () => {
       ],
     });
     expect(storedMessages[0]).not.toHaveProperty("attachments.0.dataBase64");
+  });
+
+  it("replays bounded in-memory attachment payloads for a later question in the same session", async () => {
+    const capturedMessages: ChatMessage[][] = [];
+    const onePixelPng =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    const service = createChatService({
+      chatClient: {
+        async complete(request) {
+          capturedMessages.push(request.messages);
+          return chatReply(capturedMessages.length === 1 ? "附件已读取" : "按钮是更新");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([]),
+      createId: createSequentialId("history_attachment"),
+      now: () => new Date("2026-07-14T15:30:00.000Z"),
+    });
+    const attachmentMetadata = [
+      {
+        id: "attachment_image_followup",
+        name: "screen.png",
+        mediaType: "image/png",
+        size: 68,
+        kind: "image" as const,
+      },
+      {
+        id: "attachment_text_followup",
+        name: "notes.md",
+        mediaType: "text/markdown",
+        size: 5,
+        kind: "text" as const,
+      },
+    ];
+
+    const first = await service.sendMessage({
+      message: "看一下截图和说明",
+      attachments: [
+        { ...attachmentMetadata[0], dataBase64: onePixelPng },
+        {
+          ...attachmentMetadata[1],
+          dataBase64: Buffer.from("hello").toString("base64"),
+        },
+      ],
+    });
+    expect(first.ok).toBe(true);
+
+    const second = await service.sendMessage({
+      sessionId: first.ok ? first.sessionId : "",
+      message: "截图里的按钮叫什么？",
+      history: [
+        {
+          role: "user",
+          content: "看一下截图和说明",
+          attachments: attachmentMetadata,
+        },
+        { role: "assistant", content: "附件已读取" },
+      ],
+    });
+
+    expect(second).toMatchObject({ ok: true, reply: "按钮是更新" });
+    expect(capturedMessages[1]?.[1]).toMatchObject({
+      role: "user",
+      content: expect.stringContaining("<attachment_context>"),
+      images: [{ mediaType: "image/png", data: onePixelPng }],
+    });
+    expect(capturedMessages[1]?.at(-1)).toEqual({
+      role: "user",
+      content: "截图里的按钮叫什么？",
+    });
+  });
+
+  it("marks historical attachments unavailable after the in-memory payload TTL", async () => {
+    const capturedMessages: ChatMessage[][] = [];
+    const onePixelPng =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    let nowMs = Date.parse("2026-07-14T15:30:00.000Z");
+    const service = createChatService({
+      chatClient: {
+        async complete(request) {
+          capturedMessages.push(request.messages);
+          return chatReply("ok");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([]),
+      createId: createSequentialId("expired_history_attachment"),
+      now: () => new Date(nowMs),
+    });
+    const metadata = {
+      id: "attachment_image_expired_history",
+      name: "screen.png",
+      mediaType: "image/png",
+      size: 68,
+      kind: "image" as const,
+    };
+
+    const first = await service.sendMessage({
+      message: "看一下截图",
+      attachments: [{ ...metadata, dataBase64: onePixelPng }],
+    });
+    nowMs += 61 * 60 * 1000;
+    await service.sendMessage({
+      sessionId: first.ok ? first.sessionId : "",
+      message: "继续说说",
+      history: [
+        { role: "user", content: "看一下截图", attachments: [metadata] },
+        { role: "assistant", content: "ok" },
+      ],
+    });
+
+    expect(capturedMessages[1]?.[1]).toMatchObject({
+      role: "user",
+      content: expect.stringContaining("历史附件内容已失效、不可用"),
+    });
+    expect(capturedMessages[1]?.[1]).not.toHaveProperty("images");
+  });
+
+  it("gives current retry attachments priority and never sends the same image twice", async () => {
+    const capturedMessages: ChatMessage[][] = [];
+    const onePixelPng =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    const service = createChatService({
+      chatClient: {
+        async complete(request) {
+          capturedMessages.push(request.messages);
+          return chatReply("ok");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([]),
+      createId: createSequentialId("retry_attachment"),
+    });
+    const metadata = {
+      id: "attachment_retry_once",
+      name: "screen.png",
+      mediaType: "image/png",
+      size: 68,
+      kind: "image" as const,
+    };
+    const payload = { ...metadata, dataBase64: onePixelPng };
+
+    const first = await service.sendMessage({
+      message: "分析截图",
+      attachments: [payload],
+    });
+    await service.sendMessage({
+      sessionId: first.ok ? first.sessionId : "",
+      message: "分析截图",
+      attachments: [payload],
+      history: [
+        { role: "user", content: "分析截图", attachments: [metadata] },
+        { role: "assistant", content: "模型调用失败，请重试" },
+      ],
+    });
+
+    const retryRequest = capturedMessages[1] ?? [];
+    expect(
+      retryRequest.reduce(
+        (count, message) => count + (message.images?.length ?? 0),
+        0,
+      ),
+    ).toBe(1);
+    expect(retryRequest[1]).not.toHaveProperty("images");
+    expect(retryRequest.at(-1)).toMatchObject({
+      role: "user",
+      images: [{ mediaType: "image/png", data: onePixelPng }],
+    });
+  });
+
+  it("bounds all replayed history attachments to one 12 MiB model request budget", async () => {
+    let callCount = 0;
+    let finalRequest: ChatMessage[] = [];
+    const service = createChatService({
+      chatClient: {
+        async complete(request) {
+          callCount += 1;
+          if (callCount === 4) {
+            finalRequest = request.messages;
+          }
+          return chatReply("ok");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([]),
+      createId: createSequentialId("bounded_history_attachment"),
+    });
+    const imageSize = 5 * 1024 * 1024;
+    const pngSignature = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ]);
+    const payloads = [1, 2, 3].map((index) => {
+      const bytes = Buffer.alloc(imageSize, index);
+      pngSignature.copy(bytes, 0);
+      return {
+        id: `attachment_large_${index}`,
+        name: `screen-${index}.png`,
+        mediaType: "image/png",
+        size: imageSize,
+        kind: "image" as const,
+        dataBase64: bytes.toString("base64"),
+      };
+    });
+
+    let activeSessionId = "";
+    for (const [index, payload] of payloads.entries()) {
+      const result = await service.sendMessage({
+        ...(activeSessionId ? { sessionId: activeSessionId } : {}),
+        message: `第 ${index + 1} 张图`,
+        attachments: [payload],
+      });
+      if (result.ok) {
+        activeSessionId = result.sessionId;
+      }
+    }
+    await service.sendMessage({
+      sessionId: activeSessionId,
+      message: "比较这些图",
+      history: payloads.flatMap((payload, index) => [
+        {
+          role: "user" as const,
+          content: `第 ${index + 1} 张图`,
+          attachments: [
+            {
+              id: payload.id,
+              name: payload.name,
+              mediaType: payload.mediaType,
+              size: payload.size,
+              kind: payload.kind,
+            },
+          ],
+        },
+        { role: "assistant" as const, content: "ok" },
+      ]),
+    });
+
+    const replayedImages = finalRequest.flatMap(
+      (message) => message.images ?? [],
+    );
+    expect(replayedImages).toHaveLength(2);
+    expect(replayedImages.map((image) => image.data)).toEqual([
+      payloads[1]?.dataBase64,
+      payloads[2]?.dataBase64,
+    ]);
+    expect(finalRequest[1]?.content).toContain("为控制本次请求大小已省略");
+  });
+
+  it("shares one 24,000-character text budget across current and historical attachments", async () => {
+    let callCount = 0;
+    const capturedRequests = new Map<number, ChatMessage[]>();
+    const service = createChatService({
+      chatClient: {
+        async complete(request) {
+          callCount += 1;
+          if (callCount >= 3) {
+            capturedRequests.set(callCount, request.messages);
+          }
+          return chatReply("ok");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([]),
+      createId: createSequentialId("bounded_text_history"),
+    });
+    const createTextPayload = (
+      id: string,
+      content: string,
+    ) => {
+      const bytes = Buffer.from(content);
+      return {
+        id,
+        name: `${id}.txt`,
+        mediaType: "text/plain",
+        size: bytes.length,
+        kind: "text" as const,
+        dataBase64: bytes.toString("base64"),
+      };
+    };
+    const historyPayloads = [
+      createTextPayload("history_text_old", "甲".repeat(20_000)),
+      createTextPayload("history_text_new", "乙".repeat(20_000)),
+    ];
+    const currentPayload = createTextPayload(
+      "current_text",
+      "丙".repeat(30_000),
+    );
+    let activeSessionId = "";
+    for (const [index, payload] of historyPayloads.entries()) {
+      const result = await service.sendMessage({
+        ...(activeSessionId ? { sessionId: activeSessionId } : {}),
+        message: `历史文本 ${index + 1}`,
+        attachments: [payload],
+      });
+      if (result.ok) {
+        activeSessionId = result.sessionId;
+      }
+    }
+    const history = historyPayloads.flatMap((payload, index) => [
+      {
+        role: "user" as const,
+        content: `历史文本 ${index + 1}`,
+        attachments: [
+          {
+            id: payload.id,
+            name: payload.name,
+            mediaType: payload.mediaType,
+            size: payload.size,
+            kind: payload.kind,
+          },
+        ],
+      },
+      { role: "assistant" as const, content: "ok" },
+    ]);
+
+    await service.sendMessage({
+      sessionId: activeSessionId,
+      message: "比较历史文本",
+      history,
+    });
+    await service.sendMessage({
+      sessionId: activeSessionId,
+      message: "优先分析当前文本",
+      history,
+      attachments: [currentPayload],
+    });
+
+    const historyOnlyText = (capturedRequests.get(3) ?? [])
+      .map((message) => message.content)
+      .join("\n");
+    expect(historyOnlyText.match(/[甲乙]/gu)).toHaveLength(24_000);
+    expect(historyOnlyText.match(/乙/gu)).toHaveLength(20_000);
+    const currentPriorityText = (capturedRequests.get(4) ?? [])
+      .map((message) => message.content)
+      .join("\n");
+    expect(currentPriorityText.match(/丙/gu)).toHaveLength(24_000);
+    expect(currentPriorityText).not.toMatch(/[甲乙]/u);
+  });
+
+  it("fails closed on malformed historical attachment metadata from IPC", async () => {
+    const capturedMessages: ChatMessage[][] = [];
+    const service = createChatService({
+      chatClient: {
+        async complete(request) {
+          capturedMessages.push(request.messages);
+          return chatReply("ok");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      createId: createSequentialId("invalid_history_attachment"),
+    });
+
+    const result = await service.sendMessage({
+      message: "继续",
+      history: [
+        {
+          role: "user",
+          content: "之前的附件",
+          attachments: [null] as unknown as ChatAttachmentMetadata[],
+        },
+      ],
+    });
+
+    expect(result.ok).toBe(true);
+    expect(capturedMessages[0]?.[1]?.content).toContain(
+      "历史附件内容已失效、不可用",
+    );
   });
 });
 

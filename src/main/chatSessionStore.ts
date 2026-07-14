@@ -173,11 +173,20 @@ export function createChatSessionStore(options: {
       }, async () => {
         const content = input.content;
         const summaryContent = summarizeSessionContent(content);
-        const timestamp = now().toISOString();
         const stored = await readStoredSessions();
         const existingSession = input.sessionId
           ? stored.sessions.find((session) => session.id === input.sessionId)
           : null;
+        const retriedAttachmentMessage = existingSession
+          ? findRetriedAttachmentMessage(input, existingSession)
+          : null;
+        if (retriedAttachmentMessage && existingSession) {
+          return {
+            session: existingSession,
+            message: retriedAttachmentMessage,
+          };
+        }
+        const timestamp = now().toISOString();
         const newSessionId = existingSession ? null : createId();
         const workspaceId =
           normalizeOptionalString(input.workspaceId) ?? existingSession?.workspaceId;
@@ -389,6 +398,47 @@ export function createChatSessionStore(options: {
         .slice(0, options.limit ?? 20);
     },
   };
+}
+
+function findRetriedAttachmentMessage(
+  input: AppendChatMessageInput,
+  session: ChatSessionRecord,
+): ChatMessageRecord | null {
+  if (input.role !== "user" || !input.attachments?.length) {
+    return null;
+  }
+  const lastMessage = session.messages.at(-1);
+  if (
+    !lastMessage ||
+    lastMessage.role !== "user" ||
+    lastMessage.content !== input.content ||
+    !areAttachmentMetadataListsEqual(
+      lastMessage.attachments,
+      input.attachments,
+    )
+  ) {
+    return null;
+  }
+  return lastMessage;
+}
+
+function areAttachmentMetadataListsEqual(
+  left: ChatAttachmentMetadata[] | undefined,
+  right: ChatAttachmentMetadata[],
+): boolean {
+  return (
+    left?.length === right.length &&
+    right.every((attachment, index) => {
+      const candidate = left[index];
+      return (
+        candidate?.id === attachment.id &&
+        candidate.name === attachment.name &&
+        candidate.mediaType === attachment.mediaType &&
+        candidate.size === attachment.size &&
+        candidate.kind === attachment.kind
+      );
+    })
+  );
 }
 
 function serializeMutation<T>(

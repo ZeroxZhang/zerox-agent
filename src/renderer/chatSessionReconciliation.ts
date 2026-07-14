@@ -44,3 +44,15 @@ export function shouldApplySequencedSessionResult(
     )
   );
 }
+
+export function rollbackFailedAttachmentTurn(
+  messages: ChatStreamMessage[],
+  options: { userMessageId: string; requestId: string },
+): ChatStreamMessage[] {
+  return messages.filter(
+    (message) =>
+      message.id !== options.userMessageId &&
+      message.streamRequestId !== options.requestId,
+  );
+}
+import type { ChatStreamMessage } from "./chatStreamReducer";

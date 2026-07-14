@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-07-15T00:36:42.000+08:00",
+  "updatedAt": "2026-07-15T01:12:30.000+08:00",
   "features": [
     {
       "id": "P48-v3.7.1-auto-update-and-chat-attachments",
@@ -36,6 +36,8 @@
         "src/preload/index.test.ts",
         "src/renderer/App.tsx",
         "src/renderer/chatAttachmentPaste.ts",
+        "src/renderer/chatSessionReconciliation.ts",
+        "src/renderer/chatSessionReconciliation.test.ts",
         "src/renderer/chatStreamReducer.ts",
         "src/renderer/components/AgentChatPanel.tsx",
         "src/renderer/materialDesign.test.ts",
@@ -58,10 +60,11 @@
         "Pasting clipboard images or files into the chat composer creates compact removable attachment chips with bounded file count and byte limits, visible validation feedback, keyboard focus, and reduced-motion-safe styling",
         "Attachment payloads use typed preload and IPC contracts, are revalidated in the main process, persist only bounded display metadata, and preserve local-first trust boundaries",
         "Images reach OpenAI-compatible, Anthropic, and Gemini model requests as actual vision content; bounded UTF-8 text attachments reach the prompt as explicitly untrusted attachment context; unsupported binary files fail visibly instead of being silently discarded",
+        "Later questions in the same live session can reuse still-valid attachment context without persisting raw bytes; replay is isolated per session and bounded per request by attachment count, bytes, text characters, TTL, and de-duplication",
         "Focused frontend, IPC, updater, attachment, provider, and release metadata tests pass together with the full verify, production smoke, harness, packaging, adversarial review, and release checks"
       ],
       "verification": [
-        "npm test -- --run src/main/appUpdateService.test.ts src/main/chatAttachmentProcessor.test.ts src/main/chatService.test.ts src/main/chatSessionStore.test.ts src/main/ipc/index.test.ts src/main/openAiCompatibleClient.test.ts src/main/providers/providers.test.ts src/preload/index.test.ts src/renderer/materialDesign.test.ts src/shared/packageScripts.test.ts src/shared/readme.test.ts src/shared/systemPromptAssembler.test.ts",
+        "npm test -- --run src/main/appUpdateService.test.ts src/main/chatAttachmentProcessor.test.ts src/main/chatService.test.ts src/main/chatSessionStore.test.ts src/main/ipc/index.test.ts src/main/openAiCompatibleClient.test.ts src/main/providers/providers.test.ts src/preload/index.test.ts src/renderer/chatSessionReconciliation.test.ts src/renderer/materialDesign.test.ts src/shared/packageScripts.test.ts src/shared/readme.test.ts src/shared/systemPromptAssembler.test.ts",
         "npm test",
         "npm run build",
         "npm run verify",

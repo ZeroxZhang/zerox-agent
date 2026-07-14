@@ -120,6 +120,39 @@ describe("chat session store", () => {
     });
   });
 
+  it("reuses the pending user record when the same attachment turn is retried", async () => {
+    const store = createChatSessionStore({
+      configDir,
+      createId: createSequentialId("retry"),
+    });
+    const attachments = [
+      {
+        id: "attachment_retry",
+        name: "screen.png",
+        mediaType: "image/png",
+        size: 68,
+        kind: "image" as const,
+      },
+    ];
+    const first = await store.appendMessage({
+      role: "user",
+      content: "分析截图",
+      attachments,
+    });
+    const retry = await store.appendMessage({
+      sessionId: first.session.id,
+      role: "user",
+      content: "分析截图",
+      attachments,
+    });
+
+    expect(retry.message.id).toBe(first.message.id);
+    expect(retry.session.messages).toEqual([first.message]);
+    await expect(store.get(first.session.id)).resolves.toMatchObject({
+      messages: [{ id: first.message.id }],
+    });
+  });
+
   it("quarantines corrupt chat session JSON and starts from an empty store", async () => {
     await writeFile(path.join(configDir, "chat-sessions.json"), "", "utf8");
     const store = createChatSessionStore({

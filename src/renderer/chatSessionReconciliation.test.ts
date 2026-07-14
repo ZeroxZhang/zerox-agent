@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isChatSessionSelectionCurrent,
+  rollbackFailedAttachmentTurn,
   shouldApplyPersistedSessionRefresh,
   shouldApplySequencedSessionResult,
 } from "./chatSessionReconciliation";
@@ -57,5 +58,45 @@ describe("chat session reconciliation", () => {
         8,
       ),
     ).toBe(false);
+  });
+
+  it("rolls back the optimistic user turn and streamed reply before an attachment retry", () => {
+    const messages = [
+      {
+        id: "assistant_previous",
+        role: "assistant" as const,
+        content: "previous",
+        createdAt: "2026-07-14T15:00:00.000Z",
+      },
+      {
+        id: "user_failed",
+        role: "user" as const,
+        content: "分析截图",
+        createdAt: "2026-07-14T15:01:00.000Z",
+        attachments: [
+          {
+            id: "attachment_1",
+            name: "screen.png",
+            mediaType: "image/png",
+            size: 68,
+            kind: "image" as const,
+          },
+        ],
+      },
+      {
+        id: "assistant_stream",
+        role: "assistant" as const,
+        content: "partial",
+        createdAt: "2026-07-14T15:01:01.000Z",
+        streamRequestId: "request_failed",
+      },
+    ];
+
+    expect(
+      rollbackFailedAttachmentTurn(messages, {
+        userMessageId: "user_failed",
+        requestId: "request_failed",
+      }),
+    ).toEqual([messages[0]]);
   });
 });

@@ -22,6 +22,7 @@ export type ChatAttachmentInput = ChatAttachmentMetadata & {
 export type ChatHistoryMessage = {
   role: "assistant" | "user";
   content: string;
+  attachments?: ChatAttachmentMetadata[];
 };
 
 export type ChatMessageRecord = ChatHistoryMessage & {
@@ -32,7 +33,6 @@ export type ChatMessageRecord = ChatHistoryMessage & {
   executedRunId?: string;
   goalId?: string;
   goalEventRef?: string;
-  attachments?: ChatAttachmentMetadata[];
 };
 
 export type ChatSessionGoalSummary = {

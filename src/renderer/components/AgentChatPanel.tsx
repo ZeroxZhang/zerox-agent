@@ -82,6 +82,7 @@ import {
 } from "../chatMarkdownPreview";
 import {
   isChatSessionSelectionCurrent,
+  rollbackFailedAttachmentTurn,
   shouldApplyPersistedSessionRefresh,
   shouldApplySequencedSessionResult,
   type ChatSessionSelectionContext,
@@ -2491,14 +2492,23 @@ export function AgentChatPanel({
         );
         return;
       }
+      let restoredAttachmentSubmission = false;
       if (
         outgoingAttachments.length > 0 &&
         draftAttachmentsRef.current.length === 0
       ) {
+        setMessages((current) =>
+          rollbackFailedAttachmentTurn(current, {
+            userMessageId: userMessage.id,
+            requestId,
+          }),
+        );
+        setComposerDraft(rawContent, rawContent.length);
         setComposerAttachments(outgoingAttachments);
         setAttachmentAnnouncement(
           `发送失败，已保留 ${outgoingAttachments.length} 个附件供重试`,
         );
+        restoredAttachmentSubmission = true;
       }
       activeStatusSessionIdRef.current = null;
       const wasCanceled = isCanceledMessage(result.message);
@@ -2514,7 +2524,7 @@ export function AgentChatPanel({
           detail: result.message,
         }),
       );
-      if (!wasCanceled) {
+      if (!wasCanceled && !restoredAttachmentSubmission) {
         appendMessage({
           role: "assistant",
           content: result.message,
@@ -4911,6 +4921,9 @@ function toChatHistory(messages: ChatMessage[]): ChatHistoryMessage[] {
   return messages.map((message) => ({
     role: message.role,
     content: message.content,
+    ...(message.attachments?.length
+      ? { attachments: message.attachments }
+      : {}),
   }));
 }
 
