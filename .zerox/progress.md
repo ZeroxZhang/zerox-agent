@@ -7121,13 +7121,19 @@
     traffic.
 - Implemented pasted chat attachments end to end:
   - PNG, JPEG, WebP, and bounded UTF-8 text files render as compact removable
-    28px attachment chips and survive normal send failures for retry;
+    28px attachment chips; failed attachment turns roll back their optimistic
+    UI state, restore the composer, and retry idempotently;
   - renderer limits are revalidated in main using canonical Base64, actual byte
     counts, image signatures, strict UTF-8, 7 MiB per image, 12 MiB total, and a
     24,000-character model-context budget;
-  - session history persists display metadata only; guided-skill raw payloads
-    stay in a 40 MiB bounded in-memory cache with a one-hour TTL, and an expired
-    or restarted request fails visibly instead of silently losing its image;
+  - session history persists display metadata only; guided-skill and live
+    multi-turn raw payloads stay in session-isolated, 40 MiB bounded in-memory
+    caches with a one-hour TTL, so later questions can reuse still-valid image
+    and text context without writing raw bytes to disk;
+  - each model request shares one newest-first replay budget across current and
+    historical attachments: 6 attachments, 12 MiB, and 24,000 extracted text
+    characters, with duplicate IDs removed and malformed/expired metadata
+    downgraded to an explicit unavailable-context notice;
   - OpenAI-compatible, Anthropic, and Gemini adapters receive their native
     multimodal request shapes;
   - a protected system-prompt layer treats attachment blocks as untrusted
@@ -7139,6 +7145,12 @@
   Anthropic Base64 limits, prompt injection, TTL/size bypasses, and activity
   normalizer observability loss. Final code-level review: PASS, with no
   remaining signing-independent source blocker.
+- A final post-merge maintainability review found that follow-up turns did not
+  replay prior attachment context. The bounded main-process replay cache was
+  added in `0b392d9`; independent adversarial, test, and design reviewers then
+  found and verified fixes for request amplification, repeated retry payloads,
+  malformed history metadata, and per-message text-budget resets. All three
+  final reviewers returned PASS with no remaining P1/P2.
 - Independent design/accessibility review against
   `docs/design/guidelines_0708.html`: PASS. The final 640px layout keeps the
   update action, attachment row, composer, and send control in the viewport;
@@ -7169,9 +7181,11 @@
   - `src/shared/packageScripts.test.ts`
   - `src/shared/releasePreflight.test.ts`
 - Final frozen-tree evidence:
-  - final focused feature verification: 14 files / 281 tests passed; independent
-    release-preflight focus: 3 files / 17 tests passed;
-  - final `npm run verify`: 211 files / 2,107 tests passed; Agent evals 26/26 and
+  - final multi-turn attachment focus: 5 files / 193 tests passed; independent
+    replay harnesses additionally covered cross-session isolation, 100,000
+    malformed metadata entries, TTL, 40 MiB eviction, retry de-duplication,
+    12 MiB image replay, and shared 24,000-character text replay;
+  - final `npm run verify`: 211 files / 2,116 tests passed; Agent evals 26/26 and
     Memory evals 2/2 passed;
   - `npm run smoke:prod`, `npm run harness:check`, and `git diff --check`
     passed;
@@ -7181,9 +7195,9 @@
     and DMG mounts were unchanged after the full preflight;
   - ZIP extraction, read-only DMG mounting, update metadata, blockmap bytes,
     package identity, and OpenAI/Anthropic/Gemini mock request bodies passed;
-  - latest unsigned trial ZIP: 350,773,149 bytes, SHA512
+  - the pre-follow-up unsigned trial ZIP was 350,773,149 bytes, SHA512
     `2FXbel+oDJhWSpPItalTt/rAzyuA9w/xEb9xinJ4zJD6SLL94eZyPehzPfqFEptP0k9cspvYc31skXiVatDvbA==`;
-  - latest unsigned trial DMG: 129,805,729 bytes, SHA512
+  - the pre-follow-up unsigned trial DMG was 129,805,729 bytes, SHA512
     `YpWpytzYvvEYfHDlxi7TKt8TvEO21wQQZbpoh8pk4E4nEp/XuOxNXwVjrMpTmKI8yM1thNDi3cJxOPpqO+fXNQ==`.
   - the first final verify exposed a multiline JavaScript-import
     `@ts-expect-error` placement error after all 2,107 tests passed; the import
@@ -7195,8 +7209,11 @@
   macOS automatic updates require a valid Developer ID Application signature,
   so no remote push, v3.7.1 tag, or GitHub Release was published. After all
   code-level reviews and tests passed, the frozen feature branch was merged
-  locally into `main` as `05934b0`; local `main` remains ahead of `origin/main`
-  until the signed release gate can pass atomically with publication.
+  locally into `main` as `05934b0`; the source-only multi-turn hardening is
+  committed on local `main` as `0b392d9`. Local `main` remains ahead of
+  `origin/main` until the signed release gate can pass atomically with
+  publication, and the pre-follow-up unsigned artifacts are superseded and
+  must not be released.
 - Release handoff after signing credentials are available:
   1. install the matching Developer ID identity and full Xcode tooling, set the
      real `APPLE_TEAM_ID`, then run `npm run release:mac`;
