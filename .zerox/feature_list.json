@@ -1,7 +1,32 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-07-12T21:59:10.000+08:00",
+  "updatedAt": "2026-07-13T23:06:00.000+08:00",
   "features": [
+    {
+      "id": "P47-project-introduction-site",
+      "priority": 77,
+      "status": "done",
+      "title": "Responsive code-grounded project introduction site",
+      "files": [
+        ".zerox/feature_list.json",
+        ".zerox/progress.md",
+        "zerox-agent-onepage.html",
+        "src/shared/projectIntroductionPage.test.ts",
+        "src/shared/packageScripts.test.ts"
+      ],
+      "definitionOfDone": [
+        "The standalone responsive page explains Zerox Agent from verified source-level architecture and product evidence",
+        "The page covers the local-first trust model, runtime lifecycle, major capabilities, technical architecture, storage, safety boundaries, and contributor entry points",
+        "The page is accessible, usable on desktop and mobile, and does not change the Electron application runtime"
+      ],
+      "verification": [
+        "npm test -- --run src/shared/projectIntroductionPage.test.ts",
+        "npm run harness:check",
+        "npm run verify",
+        "npm run smoke:prod",
+        "git diff --check"
+      ]
+    },
     {
       "id": "P46-v3.7.0-strict-review-fixes",
       "priority": 76,

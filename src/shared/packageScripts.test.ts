@@ -85,6 +85,9 @@ describe("package scripts", () => {
     const p46 = featureList.features.find(
       (feature) => feature.id === "P46-v3.7.0-strict-review-fixes",
     );
+    const p47 = featureList.features.find(
+      (feature) => feature.id === "P47-project-introduction-site",
+    );
     const p31 = featureList.features.find(
       (feature) => feature.id === "P31-v3.1.2-window-controls-and-settings-icon",
     );
@@ -111,10 +114,12 @@ describe("package scripts", () => {
           featureId === "P43-goal-acceptance-recovery" ||
           featureId === "P44-v3.7.0-audit-hardening-release" ||
           featureId === "P45-v3.7.0-audit-closure-runtime-convergence" ||
-          featureId === "P46-v3.7.0-strict-review-fixes",
+          featureId === "P46-v3.7.0-strict-review-fixes" ||
+          featureId === "P47-project-introduction-site",
       ),
     ).toBe(true);
     expect(openFeatureIds.length).toBeLessThanOrEqual(1);
+    expect(p47?.status === "in_progress" || p47?.status === "done").toBe(true);
     expect(p45?.status === "in_progress" || p45?.status === "done").toBe(true);
     expect(p46?.status === "in_progress" || p46?.status === "done").toBe(true);
     expect(p44?.status === "in_progress" || p44?.status === "done").toBe(true);

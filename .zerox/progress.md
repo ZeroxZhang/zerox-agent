@@ -7061,3 +7061,46 @@
   - The optional local Codex adversarial CLI could not run because the installed
     CLI did not support its configured model; independent specialist adversarial
     reviews were used instead and all final blocking severities were zero.
+
+## 2026-07-13 - P47 Responsive Project Introduction Site
+
+- Replaced the stale fixed-size `zerox-agent-onepage.html` poster with a
+  responsive, standalone project introduction page grounded in current v3.7.0
+  source contracts.
+- The page now explains:
+  - the local-first desktop control-plane positioning and explicit non-goals;
+  - the shared six-boundary Agent runtime flow from frozen context through Goal
+    acceptance;
+  - layered tool authorization, workspace sandboxing, human confirmation, and
+    audit evidence;
+  - Chat, Goal, scheduling, Skills, Actors, memory, and reviewed learning;
+  - Electron / Preload / Renderer / Main Process / local-storage boundaries;
+  - JSON/JSONL default persistence, explicit SQLite migration modes, the local
+    code map, technology stack, and release verification gates.
+- Added accessible behavior without changing the Electron runtime: skip link,
+  single-line desktop navigation with mobile menu, system/light/dark themes,
+  keyboard-operable capability tabs, reduced-motion behavior, copy success and
+  failure feedback, responsive layouts, and local project assets only.
+- Added `src/shared/projectIntroductionPage.test.ts` to verify source-backed
+  provider/schedule/execution-state claims, local references, accessibility and
+  responsive contracts, prohibited presentation patterns, and inline script
+  syntax. Updated the release-gate feature allowlist for P47.
+- Changed files:
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+  - `zerox-agent-onepage.html`
+  - `src/shared/projectIntroductionPage.test.ts`
+  - `src/shared/packageScripts.test.ts`
+- Verification evidence:
+  - `npm test -- --run src/shared/projectIntroductionPage.test.ts` -> 1 file / 5 tests passed.
+  - Focused regression after release-gate update -> 3 files / 121 tests passed.
+  - `npm run harness:check` -> passed.
+  - First `npm run verify` exposed the expected new-feature allowlist failure
+    plus one existing Goal acceptance timing fluctuation. The Goal test passed
+    in the focused 121-test rerun without runtime changes.
+  - Final `npm run verify` -> 208 files / 2,084 tests passed; Electron and
+    renderer TypeScript passed; Vite production build passed; Agent evals 26/26
+    and Memory evals 2/2 passed.
+  - `npm run smoke:prod` -> passed; renderer rendered the Agent chat UI.
+  - `git diff --check` -> passed before the final progress/status update and was
+    rerun after it.
