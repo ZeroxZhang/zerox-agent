@@ -7193,12 +7193,15 @@
   zero valid Apple code-signing identities; electron-builder skipped signing,
   `codesign --verify --deep --strict` failed, and `spctl --assess` failed.
   macOS automatic updates require a valid Developer ID Application signature,
-  so the branch was not merged to `main`, pushed, tagged, or published.
+  so no remote push, v3.7.1 tag, or GitHub Release was published. After all
+  code-level reviews and tests passed, the frozen feature branch was merged
+  locally into `main` as `05934b0`; local `main` remains ahead of `origin/main`
+  until the signed release gate can pass atomically with publication.
 - Release handoff after signing credentials are available:
   1. install the matching Developer ID identity and full Xcode tooling, set the
      real `APPLE_TEAM_ID`, then run `npm run release:mac`;
   2. run a real installed-app update/install/reopen check (v3.7.0 itself has no
      updater, so the first transition to v3.7.1 is a manual install);
-  3. merge the frozen branch to `main`, push, tag v3.7.1, and publish the exact
-     `Zerox-Agent-...` ZIP/DMG/blockmaps plus `latest-mac.yml` only after the
-     signed preflight and installed-app check pass.
+  3. push local `main`, tag v3.7.1, and publish the exact `Zerox-Agent-...`
+     ZIP/DMG/blockmaps plus `latest-mac.yml` only after the signed preflight and
+     installed-app check pass.
