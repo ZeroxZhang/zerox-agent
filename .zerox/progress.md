@@ -7214,6 +7214,15 @@
   `origin/main` until the signed release gate can pass atomically with
   publication, and the pre-follow-up unsigned artifacts are superseded and
   must not be released.
+- Clean-tree release recheck after `0b392d9` and `5ca021e`:
+  - local `main` was clean and ahead of `origin/main` by 9 commits;
+  - `security find-identity -v -p codesigning` still reported 0 valid identities
+    and `xcode-select -p` still selected Command Line Tools only;
+  - `npm run release:preflight` rejected the unsigned app, ZIP, and DMG for the
+    expected missing Developer ID signature, Gatekeeper acceptance, sealed
+    resources, notarization ticket, full Xcode stapler, and `APPLE_TEAM_ID`;
+    no Git-trust, update-metadata, checksum, blockmap, archive-binding, or
+    temporary-mount cleanup error was reported.
 - Release handoff after signing credentials are available:
   1. install the matching Developer ID identity and full Xcode tooling, set the
      real `APPLE_TEAM_ID`, then run `npm run release:mac`;
