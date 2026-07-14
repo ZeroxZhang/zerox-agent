@@ -7143,29 +7143,62 @@
   `docs/design/guidelines_0708.html`: PASS. The final 640px layout keeps the
   update action, attachment row, composer, and send control in the viewport;
   update progress and paste/remove/retry events are announced accessibly.
+- Added a fail-closed macOS release pipeline after independent release
+  adversaries found asset-name and verification gaps:
+  - electron-builder now emits updater-safe, no-space ZIP/DMG names that match
+    `latest-mac.yml` exactly;
+  - `npm run release:mac` rebuilds and then requires the expected
+    `APPLE_TEAM_ID`, a matching Developer ID identity, clean trusted Git state,
+    valid Gatekeeper and stapler results, and signed/notarized app copies in the
+    unpacked output, ZIP, and read-only-mounted DMG;
+  - the gate verifies SHA-512, blockmap v2 structure, continuous coverage, and
+    every BLAKE2b-18 chunk checksum before it trusts update metadata;
+  - absolute system tool paths, sanitized Git environment, ignored/untracked
+    packaged-source rejection, Bundle ID/signed-Identifier checks, internal
+    symlink containment, and CDHash/CodeResources binding close the demonstrated
+    local bypasses.
+- Release-hardening changed files:
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+  - `README.md`
+  - `electron-builder.yml`
+  - `package.json`
+  - `package-lock.json`
+  - `scripts/release-preflight.mjs`
+  - `src/shared/electronBuilderConfig.test.ts`
+  - `src/shared/packageScripts.test.ts`
+  - `src/shared/releasePreflight.test.ts`
 - Final frozen-tree evidence:
-  - focused feature verification: 12 files / 272 tests passed;
-  - `npm run verify`: 210 files / 2,099 tests passed; Agent evals 26/26 and
+  - final focused feature verification: 14 files / 281 tests passed; independent
+    release-preflight focus: 3 files / 17 tests passed;
+  - final `npm run verify`: 211 files / 2,107 tests passed; Agent evals 26/26 and
     Memory evals 2/2 passed;
   - `npm run smoke:prod`, `npm run harness:check`, and `git diff --check`
     passed;
   - `npm run dist:mac` and packaged smoke requiring `v3.7.1` passed;
-  - ZIP extraction, DMG verification, blockmap v2 sizes, `Info.plist`,
-    `app-update.yml`, `latest-mac.yml`, ASAR/current-build hashes, and
-    OpenAI/Anthropic/Gemini mock request bodies all passed;
-  - final ZIP: 350,773,149 bytes, SHA512
-    `zszZI4RRQvjdwIeBTyVwX0wv8Tx/5q9cWiNa03Ya6sRVCCFqmlS+PG/AxgmQwW8SoTDFvwwnG+uJwLoOYEBWyw==`;
-  - final DMG: 129,805,844 bytes, SHA512
-    `sSIwFOLEmPeRGGVhrsyiLs3XVEPl4HRfV1pd6XM7t7BJqv4Tgr2rcIKYjwSNgp7S0Fgs2Xk9u3ruojh29kP63A==`.
+  - independent adversarial review and independent artifact testing both ended
+    CODE-LEVEL PASS with no remaining P1/P2; temporary extraction directories
+    and DMG mounts were unchanged after the full preflight;
+  - ZIP extraction, read-only DMG mounting, update metadata, blockmap bytes,
+    package identity, and OpenAI/Anthropic/Gemini mock request bodies passed;
+  - latest unsigned trial ZIP: 350,773,149 bytes, SHA512
+    `2FXbel+oDJhWSpPItalTt/rAzyuA9w/xEb9xinJ4zJD6SLL94eZyPehzPfqFEptP0k9cspvYc31skXiVatDvbA==`;
+  - latest unsigned trial DMG: 129,805,729 bytes, SHA512
+    `YpWpytzYvvEYfHDlxi7TKt8TvEO21wQQZbpoh8pk4E4nEp/XuOxNXwVjrMpTmKI8yM1thNDi3cJxOPpqO+fXNQ==`.
+  - the first final verify exposed a multiline JavaScript-import
+    `@ts-expect-error` placement error after all 2,107 tests passed; the import
+    was made single-line, its focused test passed 1 file / 8 tests, and the
+    complete verify/build/eval pipeline then passed from the corrected tree.
 - Release is intentionally HOLD and P48 remains `in_progress`: this machine has
   zero valid Apple code-signing identities; electron-builder skipped signing,
   `codesign --verify --deep --strict` failed, and `spctl --assess` failed.
   macOS automatic updates require a valid Developer ID Application signature,
   so the branch was not merged to `main`, pushed, tagged, or published.
 - Release handoff after signing credentials are available:
-  1. rebuild and verify signed/notarized DMG and ZIP artifacts;
+  1. install the matching Developer ID identity and full Xcode tooling, set the
+     real `APPLE_TEAM_ID`, then run `npm run release:mac`;
   2. run a real installed-app update/install/reopen check (v3.7.0 itself has no
      updater, so the first transition to v3.7.1 is a manual install);
-  3. upload assets using the exact hyphenated names referenced by
-     `latest-mac.yml` (`Zerox-Agent-...`), including both blockmaps and
-     `latest-mac.yml`, before merging/pushing/tagging the release.
+  3. merge the frozen branch to `main`, push, tag v3.7.1, and publish the exact
+     `Zerox-Agent-...` ZIP/DMG/blockmaps plus `latest-mac.yml` only after the
+     signed preflight and installed-app check pass.

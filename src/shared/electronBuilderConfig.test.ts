@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 type ElectronBuilderConfig = {
   appId?: string;
   productName?: string;
+  artifactName?: string;
   asar?: boolean;
   directories?: {
     output?: string;
@@ -28,6 +29,7 @@ describe("electron-builder config", () => {
     expect(config).toMatchObject({
       appId: "local.zerox.agent.desktop",
       productName: "Zerox Agent",
+      artifactName: "Zerox-Agent-${version}-${arch}.${ext}",
       asar: true,
       directories: {
         output: "release",

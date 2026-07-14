@@ -653,6 +653,8 @@ describe("package scripts", () => {
     expect(packageJson.scripts).toMatchObject({
       "pack:mac": "node scripts/package-mac.mjs --dir",
       "dist:mac": "node scripts/package-mac.mjs dmg zip",
+      "release:preflight": "node scripts/release-preflight.mjs",
+      "release:mac": "npm run dist:mac && npm run release:preflight",
     });
   });
 

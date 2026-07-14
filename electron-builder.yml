@@ -1,5 +1,6 @@
 appId: local.zerox.agent.desktop
 productName: Zerox Agent
+artifactName: "Zerox-Agent-${version}-${arch}.${ext}"
 asar: true
 # Native modules are rebuilt explicitly by scripts/package-mac.mjs before
 # packaging, then restored to the Node ABI for local tests.

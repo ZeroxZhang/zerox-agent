@@ -552,9 +552,10 @@ npm run doctor        # Self-check first
 npm run smoke:prod    # Production smoke
 npm run pack:mac      # Unsigned .app → release/mac/   (local trial)
 npm run dist:mac      # .dmg + .zip → release/          (distribution)
+npm run release:mac   # Rebuild + fail-closed signing/notarization/update preflight
 ```
 
-Current local builds are unsigned and not notarized. Each release passes an independent packaged-app acceptance gate (a computer-use run against the local macOS package) before handoff. After downloading a `.dmg` from GitHub Releases, macOS Gatekeeper may show "Zerox Agent is damaged and can't be opened." The image is usually valid; remove the quarantine attribute before opening:
+`pack:mac` and `dist:mac` may produce unsigned local-trial artifacts. Public releases must set the expected 10-character `APPLE_TEAM_ID` and use `release:mac`, which refuses dirty source trees, unsigned or unnotarized apps, failed Gatekeeper assessments, mismatched versions/hashes/blockmaps, or asset names that diverge from `latest-mac.yml`. It independently checks the unpacked app plus the app copies inside the ZIP and DMG. Each release also passes an independent packaged-app acceptance gate before handoff. Unsigned local trials may require removing the quarantine attribute before opening:
 
 Launch at login is opt-in. Set `ZEROX_ENABLE_LOGIN_STARTUP=1` only when deliberately enabling the packaged login item; hidden login-item launches keep the main window closed until the user activates the app.
 
@@ -564,7 +565,7 @@ xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-3.7.1-arm64.dmg"
 xattr -dr com.apple.quarantine "/Applications/Zerox Agent.app"
 ```
 
-The v3.7.1 auto-update runtime and GitHub release metadata are implemented. macOS automatic installation still requires Apple-signed release artifacts; notarization and crash reporting remain separate distribution work.
+The v3.7.1 auto-update runtime and GitHub release metadata are implemented. macOS automatic installation is published only after Developer ID signing and notarization pass the release preflight; crash reporting remains separate distribution work.
 
 ---
 
@@ -1108,9 +1109,10 @@ npm run doctor        # 先跑自检
 npm run smoke:prod    # 生产包冒烟
 npm run pack:mac      # 未签名 .app → release/mac/  （本地试用）
 npm run dist:mac      # .dmg + .zip → release/       （分发）
+npm run release:mac   # 重新打包 + 签名/公证/更新资产失败关闭检查
 ```
 
-当前本地构建产物未签名、未公证。每个版本在交接前都会通过独立 packaged-app 验收（针对本地 macOS 包的 computer-use 运行）。从 GitHub Releases 下载 `.dmg` 后，macOS Gatekeeper 可能提示「Zerox Agent 已损坏，无法打开」。这通常不是文件损坏，而是下载隔离属性拦截。打开前在终端执行：
+`pack:mac` 与 `dist:mac` 可以生成仅供本地试用的未签名产物。公开发版必须设置预期的 10 位 `APPLE_TEAM_ID` 并使用 `release:mac`；若源码树未冻结、应用未签名或未公证、Gatekeeper 验证失败、版本/哈希/blockmap 不一致，或产物命名与 `latest-mac.yml` 不一致，命令会直接失败。它会分别检查未归档应用及 ZIP、DMG 内的应用副本。每个版本在交接前还会通过独立 packaged-app 验收。未签名的本地试用包可能需要先移除隔离属性：
 
 开机登录启动默认关闭。只有明确设置 `ZEROX_ENABLE_LOGIN_STARTUP=1` 时才会配置打包应用的 Login Item；隐藏登录启动不会主动显示主窗口。
 
@@ -1120,7 +1122,7 @@ xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-<version>-arm64.dmg"
 xattr -dr com.apple.quarantine "/Applications/Zerox Agent.app"
 ```
 
-v3.7.1 已实现自动更新运行时与 GitHub Release 元数据。macOS 自动安装仍要求发布产物经过 Apple 有效签名；公证与崩溃报告属于后续分发工作。
+v3.7.1 已实现自动更新运行时与 GitHub Release 元数据。只有 Developer ID 签名和公证通过发布前置检查后，才允许发布 macOS 自动安装资产；崩溃报告仍属于后续分发工作。
 
 ---
 

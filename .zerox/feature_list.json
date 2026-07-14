@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-07-14T23:57:00.000+08:00",
+  "updatedAt": "2026-07-15T00:36:42.000+08:00",
   "features": [
     {
       "id": "P48-v3.7.1-auto-update-and-chat-attachments",
@@ -47,7 +47,9 @@
         "src/shared/systemPromptAssembler.test.ts",
         "src/shared/systemPromptLayer.ts",
         "src/shared/systemPromptLayerProviders.ts",
-        "scripts/package-mac.mjs"
+        "scripts/package-mac.mjs",
+        "scripts/release-preflight.mjs",
+        "src/shared/releasePreflight.test.ts"
       ],
       "definitionOfDone": [
         "Packaged applications check the configured GitHub release channel automatically, download compatible updates in the background, and expose typed checking, progress, downloaded, unavailable, and error states",
@@ -66,6 +68,7 @@
         "npm run smoke:prod",
         "npm run harness:check",
         "npm run dist:mac",
+        "npm run release:preflight",
         "BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v3.7.1' \"release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent\"",
         "git diff --check"
       ]

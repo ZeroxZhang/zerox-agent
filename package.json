@@ -28,6 +28,8 @@
     "smoke:prod:built": "BUILDING_AGENT_SMOKE=1 electron .",
     "pack:mac": "node scripts/package-mac.mjs --dir",
     "dist:mac": "node scripts/package-mac.mjs dmg zip",
+    "release:preflight": "node scripts/release-preflight.mjs",
+    "release:mac": "npm run dist:mac && npm run release:preflight",
     "clean": "rm -rf dist dist-electron",
     "test": "vitest run",
     "test:watch": "vitest"
@@ -48,6 +50,7 @@
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.0",
+    "@noble/hashes": "^2.2.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.9.1",
     "@types/react": "^19.2.16",
