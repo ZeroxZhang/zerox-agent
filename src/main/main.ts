@@ -8,6 +8,7 @@ import {
   Tray,
 } from "electron";
 import type { MenuItemConstructorOptions } from "electron";
+import electronUpdater from "electron-updater";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { getAgentValidationModeOptions } from "./agentValidationMode";
@@ -40,6 +41,7 @@ import {
 } from "./smokeMode";
 import { setPromptBaseDir, loadModelPromptFile } from "./promptFileLoader";
 import { setProfileContentLoader } from "../shared/systemPromptLayerProviders";
+import { createAppUpdateService } from "./appUpdateService";
 
 app.setName("Zerox Agent");
 applyUserDataDirOverride({
@@ -55,16 +57,19 @@ const rendererUrl = process.env.ELECTRON_RENDERER_URL;
 const appMeta = getAppMeta();
 const smokeMode = getSmokeModeOptions(process.env);
 const validationMode = getAgentValidationModeOptions(process.env);
+const { autoUpdater } = electronUpdater;
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
 let taskSchedulerTimer: NodeJS.Timeout | null = null;
 let memoryMaintenanceTimer: NodeJS.Timeout | null = null;
+let appUpdateTimer: NodeJS.Timeout | null = null;
 let unsubscribeKernelEvents: (() => void) | null = null;
 
 const memoryMaintenanceIntervalMs = 30 * 60 * 1000;
 const taskSchedulerIntervalMs = 60 * 1000;
+const appUpdateIntervalMs = 4 * 60 * 60 * 1000;
 
 const toolApprovalCoordinator = createToolApprovalCoordinator({
   sendToRenderers(channel, payload) {
@@ -79,6 +84,19 @@ const toolApprovalCoordinator = createToolApprovalCoordinator({
 const container = createAppContainer({
   requestToolApproval: toolApprovalCoordinator.requestUserApproval,
   setGoalActive: toolApprovalCoordinator.setGoalActive,
+});
+
+const appUpdateService = createAppUpdateService({
+  updater: autoUpdater,
+  enabled:
+    app.isPackaged &&
+    !smokeMode.enabled &&
+    !validationMode.enabled &&
+    process.env.ZEROX_DISABLE_AUTO_UPDATE !== "1",
+  currentVersion: app.getVersion(),
+  onStateChange(state) {
+    sendToRendererWindows("app:updateStateChanged", state);
+  },
 });
 
 function createMainWindow(): BrowserWindow {
@@ -463,8 +481,27 @@ function stopMemoryMaintenanceScheduler() {
   memoryMaintenanceTimer = null;
 }
 
+function startAppUpdateScheduler() {
+  if (appUpdateTimer) {
+    return;
+  }
+  void appUpdateService.start();
+  appUpdateTimer = setInterval(() => {
+    void appUpdateService.checkForUpdates();
+  }, appUpdateIntervalMs);
+  appUpdateTimer.unref?.();
+}
+
+function stopAppUpdateScheduler() {
+  if (!appUpdateTimer) {
+    return;
+  }
+  clearInterval(appUpdateTimer);
+  appUpdateTimer = null;
+}
+
 app.whenReady().then(() => {
-  registerAllIpcHandlers(container);
+  registerAllIpcHandlers(container, { appUpdateService });
   registerToolApprovalIpcHandlers();
   registerKernelIpcHandlers();
   installApplicationMenu();
@@ -505,6 +542,7 @@ app.whenReady().then(() => {
     createTray();
     startTaskScheduler();
     startMemoryMaintenanceScheduler();
+    startAppUpdateScheduler();
     // P7: start the self-improvement scheduler (dream + distill). Default OFF
     // (ZEROX_SELF_IMPROVEMENT=off); a no-op start() when disabled.
     container.selfImprovementService()?.start();
@@ -646,6 +684,7 @@ app.on("before-quit", (event) => {
   unsubscribeKernelEvents = null;
   stopTaskScheduler();
   stopMemoryMaintenanceScheduler();
+  stopAppUpdateScheduler();
   toolApprovalCoordinator.rejectAllPending();
   const drain = Promise.allSettled([
     shutdownActiveChatMessages(),

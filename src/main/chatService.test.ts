@@ -5599,6 +5599,78 @@ describe("chat service", () => {
       }),
     ]);
   });
+
+  it("passes pasted image bytes and fenced text attachments through the model pipeline", async () => {
+    const capturedMessages: ChatMessage[][] = [];
+    const storedMessages: AppendChatMessageInput[] = [];
+    const onePixelPng =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    const service = createChatService({
+      chatClient: {
+        async complete(request) {
+          capturedMessages.push(request.messages);
+          return chatReply("附件已读取");
+        },
+      },
+      getModelProfile: async () => ({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret",
+        model: "vision-model",
+        temperature: 0.2,
+        maxTokens: 8192,
+      }),
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore(storedMessages),
+      createId: () => "chat_attachment",
+      now: () => new Date("2026-07-14T15:30:00.000Z"),
+    });
+
+    const result = await service.sendMessage({
+      message: "总结图片和说明",
+      attachments: [
+        {
+          id: "attachment_image",
+          name: "screen.png",
+          mediaType: "image/png",
+          size: 68,
+          kind: "image",
+          dataBase64: onePixelPng,
+        },
+        {
+          id: "attachment_text",
+          name: "notes.md",
+          mediaType: "text/markdown",
+          size: 5,
+          kind: "text",
+          dataBase64: Buffer.from("hello").toString("base64"),
+        },
+      ],
+    });
+
+    expect(result).toMatchObject({ ok: true, reply: "附件已读取" });
+    expect(capturedMessages[0]?.at(-1)).toMatchObject({
+      role: "user",
+      content: expect.stringContaining("<attachment_context>"),
+      images: [{ mediaType: "image/png", data: onePixelPng }],
+    });
+    expect(storedMessages[0]).toMatchObject({
+      role: "user",
+      content: "总结图片和说明",
+      attachments: [
+        expect.objectContaining({
+          id: "attachment_image",
+          kind: "image",
+          size: 68,
+        }),
+        expect.objectContaining({
+          id: "attachment_text",
+          kind: "text",
+          size: 5,
+        }),
+      ],
+    });
+    expect(storedMessages[0]).not.toHaveProperty("attachments.0.dataBase64");
+  });
 });
 
 function createMemoryStore(options: {

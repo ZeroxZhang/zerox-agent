@@ -59,11 +59,7 @@ if (status === 0) {
 }
 
 if (status === 0) {
-  status = run(
-    electronBuilderBin,
-    ["--mac", ...targets],
-    { CSC_IDENTITY_AUTO_DISCOVERY: "false" },
-  );
+  status = run(electronBuilderBin, ["--mac", ...targets]);
 }
 
 const restoreStatus = run(npmBin, ["rebuild", "better-sqlite3"]);

@@ -21,6 +21,7 @@ import { SkillLibraryPanel } from "./components/SkillLibraryPanel";
 import { ToolsPanel } from "./components/ToolsPanel";
 import { getAppMeta, type AppMeta } from "../shared/appMeta";
 import type { ChatSessionListItem } from "../shared/chat";
+import type { AppUpdateState } from "../shared/appUpdate";
 import { buildAgentDataBoundary } from "../shared/dataBoundary";
 import { getMaterialNavigationIcon } from "../shared/materialNavigation";
 import {
@@ -43,6 +44,10 @@ import {
 const fallbackMeta = getAppMeta();
 const fallbackSections = getNavigationSections();
 const fallbackAppVersion = "preview";
+const fallbackAppUpdateState: AppUpdateState = {
+  phase: "disabled",
+  currentVersion: fallbackAppVersion,
+};
 const fallbackSessionTimestamp = new Date().toISOString();
 const fallbackChatSessions: ChatSessionListItem[] = [
   {
@@ -104,6 +109,9 @@ export function App() {
   );
   const [meta, setMeta] = useState<AppMeta>(fallbackMeta);
   const [appVersion, setAppVersion] = useState(fallbackAppVersion);
+  const [appUpdateState, setAppUpdateState] = useState<AppUpdateState>(
+    fallbackAppUpdateState,
+  );
   const [sections, setSections] = useState<NavigationSection[]>(fallbackSections);
   const [activeSectionId, setActiveSectionId] = useState<NavigationSectionId>(
     () => getStartupSectionId(),
@@ -160,7 +168,29 @@ export function App() {
     }).catch(() => {
       setChatSessions(fallbackChatSessions);
     });
+
+    window.buildingAgent?.getAppUpdateState().then(setAppUpdateState).catch(() => {
+      setAppUpdateState(fallbackAppUpdateState);
+    });
+    const unsubscribeUpdateState =
+      window.buildingAgent?.onAppUpdateStateChanged(setAppUpdateState);
+    return () => {
+      unsubscribeUpdateState?.();
+    };
   }, []);
+
+  async function handleAppUpdateAction() {
+    const api = window.buildingAgent;
+    if (!api) {
+      return;
+    }
+    if (appUpdateState.phase === "downloaded") {
+      const result = await api.installAppUpdate();
+      setAppUpdateState(result.state);
+      return;
+    }
+    setAppUpdateState(await api.checkForAppUpdates());
+  }
 
   useEffect(() => {
     navigateTo(getStartupNavigationTarget(window.location.hash));
@@ -555,9 +585,30 @@ export function App() {
             ) : null}
           </div>
         </section>
-        <div className="nav-footer">
-          <span>v{appVersion}</span>
-          <small>by Zerox</small>
+        <div className={`nav-footer is-update-${appUpdateState.phase}`}>
+          <div className="nav-footer-version">
+            <span>v{appVersion}</span>
+            <small>by Zerox</small>
+          </div>
+          {getAppUpdateActionLabel(appUpdateState) ? (
+            <button
+              className="nav-update-action"
+              type="button"
+              disabled={
+                appUpdateState.phase === "checking" ||
+                appUpdateState.phase === "downloading" ||
+                appUpdateState.phase === "installing"
+              }
+              title={appUpdateState.message}
+              onClick={() => void handleAppUpdateAction()}
+            >
+              <span className="nav-update-dot" aria-hidden="true" />
+              {getAppUpdateActionLabel(appUpdateState)}
+            </button>
+          ) : null}
+          <span className="sr-only" role="status" aria-live="polite">
+            {appUpdateState.message ?? ""}
+          </span>
         </div>
       </aside>
 
@@ -641,6 +692,27 @@ export function App() {
       ) : null}
     </main>
   );
+}
+
+function getAppUpdateActionLabel(state: AppUpdateState): string | null {
+  if (state.phase === "downloaded") {
+    return state.availableVersion
+      ? `更新 v${state.availableVersion}`
+      : "立即更新";
+  }
+  if (state.phase === "downloading") {
+    return `下载 ${Math.round(state.progressPercent ?? 0)}%`;
+  }
+  if (state.phase === "checking") {
+    return "检查中";
+  }
+  if (state.phase === "installing") {
+    return "正在重启";
+  }
+  if (state.phase === "error") {
+    return "重试更新";
+  }
+  return null;
 }
 
 function SettingsSectionShell(props: {

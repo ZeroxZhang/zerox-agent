@@ -27,7 +27,16 @@ export function toNormalized(messages: ChatMessage[]): NormalizedMessage[] {
       return { role: "tool", toolCallId: msg.tool_call_id ?? "", content: msg.content };
     }
     // user | assistant
-    const content: NormalizedContent[] = [{ type: "text", text: msg.content }];
+    const content: NormalizedContent[] = [
+      { type: "text", text: msg.content },
+      ...(msg.role === "user"
+        ? (msg.images ?? []).map((image) => ({
+            type: "image" as const,
+            mediaType: image.mediaType,
+            data: image.data,
+          }))
+        : []),
+    ];
     const toolCalls = msg.tool_calls;
     if (msg.role === "assistant" && toolCalls && toolCalls.length) {
       return {
@@ -59,6 +68,19 @@ export function fromNormalized(messages: NormalizedMessage[]): ChatMessage[] {
     const out: ChatMessage = {
       role: msg.role,
       content: thinking ? `<thinking>${thinking}</thinking>${text}` : text,
+      ...(msg.role === "user"
+        ? {
+            images: msg.content
+              .filter(
+                (c): c is { type: "image"; mediaType: string; data: string } =>
+                  c.type === "image",
+              )
+              .map((image) => ({
+                mediaType: image.mediaType,
+                data: image.data,
+              })),
+          }
+        : {}),
     };
     if (msg.role === "assistant" && msg.toolCalls && msg.toolCalls.length) {
       out.tool_calls = msg.toolCalls.map(denormalizeToolCall);

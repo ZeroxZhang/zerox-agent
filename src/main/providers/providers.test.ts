@@ -9,6 +9,25 @@ import type { CompleteRequest, LLMProvider, NormalizedMessage, StreamEvent } fro
 import type { PublicModelSettings } from "../../shared/modelSettings";
 
 describe("normalize round-trip", () => {
+  it("preserves user image content across provider normalization", () => {
+    const messages: ChatMessage[] = [
+      {
+        role: "user",
+        content: "inspect",
+        images: [{ mediaType: "image/webp", data: "d2VicA==" }],
+      },
+    ];
+    const normalized = toNormalized(messages);
+    expect(normalized[0]).toEqual({
+      role: "user",
+      content: [
+        { type: "text", text: "inspect" },
+        { type: "image", mediaType: "image/webp", data: "d2VicA==" },
+      ],
+    });
+    expect(fromNormalized(normalized)).toEqual(messages);
+  });
+
   it("preserves system / user / assistant-with-tools / tool messages", () => {
     const messages: ChatMessage[] = [
       { role: "system", content: "You are an agent." },

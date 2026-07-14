@@ -77,10 +77,12 @@ import type {
   ValidateAgentResult,
 } from "../../shared/agentBootstrap";
 import type { ModelSettingsInput, SaveModelSettingsResult } from "../../shared/modelSettings";
+import type { AppUpdateActionResult, AppUpdateState } from "../../shared/appUpdate";
 import { MemoryValidationError } from "../memoryStore";
 import { ModelSettingsValidationError } from "../modelSettingsStore";
 import { ScheduledTaskValidationError } from "../taskStore";
 import { toChatSendMessageFailure } from "./chatSendMessageError";
+import type { AppUpdateService } from "../appUpdateService";
 
 type OpenProjectAgentWorkspaceInput = {
   mode?: "open" | "create";
@@ -89,8 +91,11 @@ type OpenProjectAgentWorkspaceInput = {
 const maximumGoalOperationIdChars = 128;
 const safeGoalOperationIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 
-export function registerAllIpcHandlers(container: AppContainer): void {
-  registerAppIpcHandlers(container);
+export function registerAllIpcHandlers(
+  container: AppContainer,
+  options: { appUpdateService?: AppUpdateService } = {},
+): void {
+  registerAppIpcHandlers(container, options.appUpdateService);
   registerTasksIpcHandlers(container);
   registerToolsIpcHandlers(container);
   registerRunsIpcHandlers(container);
@@ -126,9 +131,40 @@ function registerAgentRunsChangedBroadcaster(container: AppContainer): void {
   });
 }
 
-function registerAppIpcHandlers(container: AppContainer): void {
+function registerAppIpcHandlers(
+  container: AppContainer,
+  appUpdateService?: AppUpdateService,
+): void {
   ipcMain.handle("app:getMeta", () => container.appMeta);
   ipcMain.handle("app:getRuntimeInfo", () => container.buildDesktopRuntimeInfo());
+  ipcMain.handle("app:getUpdateState", (): AppUpdateState =>
+    appUpdateService?.getState() ?? {
+      phase: "disabled",
+      currentVersion: container.buildDesktopRuntimeInfo().version,
+      message: "当前运行环境未启用自动更新。",
+    },
+  );
+  ipcMain.handle("app:checkForUpdates", async (): Promise<AppUpdateState> =>
+    appUpdateService?.checkForUpdates() ?? {
+      phase: "disabled",
+      currentVersion: container.buildDesktopRuntimeInfo().version,
+      message: "当前运行环境未启用自动更新。",
+    },
+  );
+  ipcMain.handle(
+    "app:installUpdate",
+    async (): Promise<AppUpdateActionResult> => {
+      if (appUpdateService) {
+        return appUpdateService.installDownloadedUpdate();
+      }
+      const state: AppUpdateState = {
+        phase: "disabled",
+        currentVersion: container.buildDesktopRuntimeInfo().version,
+        message: "当前运行环境未启用自动更新。",
+      };
+      return { ok: false, state, message: state.message ?? "无法更新。" };
+    },
+  );
   ipcMain.handle("navigation:list", () => container.getNavigationSections());
   ipcMain.handle(
     "agentBootstrap:prepare",

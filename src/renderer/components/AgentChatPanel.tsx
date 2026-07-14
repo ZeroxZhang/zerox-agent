@@ -26,6 +26,8 @@ import { buildAgentReadinessChecklist } from "../../shared/agentReadiness";
 import type { AgentRunEvent, AgentRunRecord } from "../../shared/agentRuns";
 import type { AgentWorkspace } from "../../shared/agentWorkspace";
 import type {
+  ChatAttachmentInput,
+  ChatAttachmentMetadata,
   ChatAgentStatus,
   ChatHistoryMessage,
   ChatSessionGoalSummary,
@@ -37,6 +39,10 @@ import type {
   SkillInputField,
   SkillUserInputRequest,
 } from "../../shared/chat";
+import {
+  formatChatAttachmentSize,
+  formatChatAttachmentTypeLabel,
+} from "../../shared/chatAttachments";
 import type { Goal, SuccessCriterion } from "../../shared/agentGoal";
 import type { GoalDraft } from "../../shared/goalTranslation";
 import type { MemoryRecord } from "../../shared/memory";
@@ -131,6 +137,10 @@ import type {
   ToolApprovalRequestPayload,
 } from "../../shared/toolApproval";
 import { shouldShowToolApproval } from "../toolApprovalVisibility";
+import {
+  ChatAttachmentReadError,
+  readPastedChatAttachments,
+} from "../chatAttachmentPaste";
 
 type AgentChatPanelProps = {
   newChatRequestKey?: number;
@@ -257,6 +267,10 @@ export function AgentChatPanel({
   const [draftCursor, setDraftCursor] = useState(0);
   const draftRef = useRef("");
   const draftCursorRef = useRef(0);
+  const [draftAttachments, setDraftAttachments] = useState<ChatAttachmentInput[]>([]);
+  const draftAttachmentsRef = useRef<ChatAttachmentInput[]>([]);
+  const [attachmentReadPending, setAttachmentReadPending] = useState(false);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [goalModeEnabled, setGoalModeEnabled] = useState(false);
   const [pendingGoalDraft, setPendingGoalDraft] = useState<GoalDraft | null>(
     null,
@@ -1491,6 +1505,58 @@ export function AgentChatPanel({
     });
   }
 
+  function setComposerAttachments(attachments: ChatAttachmentInput[]) {
+    draftAttachmentsRef.current = attachments;
+    setDraftAttachments(attachments);
+  }
+
+  async function handleComposerPaste(
+    event: React.ClipboardEvent<HTMLTextAreaElement>,
+  ) {
+    const itemFiles = Array.from(event.clipboardData.items)
+      .filter((item) => item.kind === "file")
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => Boolean(file));
+    const files = itemFiles.length
+      ? itemFiles
+      : Array.from(event.clipboardData.files);
+    if (!files.length) {
+      return;
+    }
+    event.preventDefault();
+    if (attachmentReadPending || status.kind === "working") {
+      return;
+    }
+    setAttachmentReadPending(true);
+    setAttachmentError(null);
+    try {
+      const attachments = await readPastedChatAttachments(
+        files,
+        draftAttachmentsRef.current,
+      );
+      setComposerAttachments([...draftAttachmentsRef.current, ...attachments]);
+      setStatus({
+        kind: "ready",
+        message: `已识别 ${attachments.length} 个粘贴附件`,
+      });
+    } catch (error) {
+      setAttachmentError(
+        error instanceof ChatAttachmentReadError
+          ? error.message
+          : "无法读取粘贴的附件。",
+      );
+    } finally {
+      setAttachmentReadPending(false);
+    }
+  }
+
+  function removeDraftAttachment(attachmentId: string) {
+    setComposerAttachments(
+      draftAttachmentsRef.current.filter((attachment) => attachment.id !== attachmentId),
+    );
+    setAttachmentError(null);
+  }
+
   function handlePickPrompt(prompt: string) {
     setComposerDraft(prompt);
     setSelectedSkillName(null);
@@ -2277,9 +2343,20 @@ export function AgentChatPanel({
     }
   }
 
-  async function submitUserMessage(rawContent: string) {
+  async function submitUserMessage(
+    rawContent: string,
+    outgoingAttachments: ChatAttachmentInput[] = [],
+  ) {
     const content = rawContent;
     if (!content.trim()) {
+      if (!outgoingAttachments.length) {
+        return;
+      }
+    }
+    const submittedContent = content.trim()
+      ? rawContent
+      : "请分析这些附件。";
+    if (attachmentReadPending) {
       return;
     }
     if (status.kind === "working" || sessionLoadPendingRef.current !== null) {
@@ -2288,7 +2365,13 @@ export function AgentChatPanel({
 
     const history = toChatHistory(messages);
     const userMessage = createMessage(
-      { role: "user", content },
+      {
+        role: "user",
+        content: submittedContent,
+        ...(outgoingAttachments.length
+          ? { attachments: outgoingAttachments.map(toChatAttachmentMetadata) }
+          : {}),
+      },
       messages.length,
     );
 
@@ -2296,6 +2379,10 @@ export function AgentChatPanel({
     setMessages((current) => [...current, userMessage]);
     resetStreamProcessState();
     setComposerDraft("", 0);
+    if (outgoingAttachments.length) {
+      setComposerAttachments([]);
+      setAttachmentError(null);
+    }
     setWorkPhase("planning");
     activeStatusSessionIdRef.current = sessionId;
     setTaskProcessEvents([]);
@@ -2321,7 +2408,7 @@ export function AgentChatPanel({
       appendMessage({
         role: "assistant",
         content: buildLocalAgentReply({
-          input: content,
+          input: submittedContent,
           hasModel: modelSettings.hasApiKey,
           taskCount: tasks.length,
           latestRun,
@@ -2342,7 +2429,8 @@ export function AgentChatPanel({
     }
 
     const shouldCreateGoalDraft =
-      goalModeEnabled || isLegacyGoalCommand(content);
+      outgoingAttachments.length === 0 &&
+      (goalModeEnabled || isLegacyGoalCommand(submittedContent));
     setStatus({ kind: "working", message: "正在检索记忆并调用模型..." });
     setWorkPhase("model");
     const requestId = createClientRequestId();
@@ -2352,7 +2440,10 @@ export function AgentChatPanel({
       .sendChatMessage({
         ...(sessionId ? { sessionId } : {}),
         requestId,
-        message: content,
+        message: submittedContent,
+        ...(outgoingAttachments.length
+          ? { attachments: outgoingAttachments }
+          : {}),
         ...(shouldCreateGoalDraft ? { mode: "goal_draft" as const } : {}),
         ...(selectedSkillName ? { selectedSkillName } : {}),
         ...(selectedWorkspaceId ? { workspaceId: selectedWorkspaceId } : {}),
@@ -2504,7 +2595,7 @@ export function AgentChatPanel({
       handleSelectSkillMention(skillMentionMatches[0]);
       return;
     }
-    await submitUserMessage(draftRef.current);
+    await submitUserMessage(draftRef.current, draftAttachmentsRef.current);
   }
 
   async function handleInterruptCurrentWork() {
@@ -3039,7 +3130,11 @@ export function AgentChatPanel({
 
         <form className="composer" onSubmit={handleSubmit}>
           <div className="composer-inner">
-            <div className="composer-input-shell">
+            <div
+              className={`composer-input-shell${
+                draftAttachments.length ? " has-attachments" : ""
+              }`}
+            >
               <div className="composer-context-row" aria-label="会话上下文">
                 <div className="workspace-picker" ref={workspaceMenuRef}>
                   <button
@@ -3185,6 +3280,13 @@ export function AgentChatPanel({
                   {activeWorkspacePath || activeWorkspaceLabel}
                 </span>
               </div>
+              {draftAttachments.length ? (
+                <ChatAttachmentChips
+                  attachments={draftAttachments}
+                  className="composer-attachment-list"
+                  onRemove={removeDraftAttachment}
+                />
+              ) : null}
               {selectedSkill ? (
                 <div className="selected-skill-chip" aria-label="已选择技能">
                   <span>@{selectedSkill.name}</span>
@@ -3265,12 +3367,15 @@ export function AgentChatPanel({
                   }
                 }}
                 onKeyUp={updateDraftCursor}
+                onPaste={(event) => {
+                  void handleComposerPaste(event);
+                }}
                 placeholder={
                   activeGoal?.status === "executing"
                     ? "继续你的任务…"
                     : goalModeEnabled
                       ? "描述目标，发送后先生成可确认的目标草案"
-                      : "输入消息，Enter 发送，Shift+Enter 或 Option+Enter 换行"
+                      : "输入消息或粘贴图片/附件，Enter 发送；Shift+Enter 或 Option+Enter 换行"
                 }
                 rows={2}
               />
@@ -3340,7 +3445,7 @@ export function AgentChatPanel({
                   aria-label="发送消息"
                   className="composer-icon-button composer-send-button"
                   data-testid="agent-send-button"
-                  disabled={status.kind === "working"}
+                  disabled={status.kind === "working" || attachmentReadPending}
                   title="发送消息"
                   type="submit"
                 >
@@ -3349,6 +3454,15 @@ export function AgentChatPanel({
                 </button>
               </div>
             </div>
+            {attachmentError ? (
+              <p className="composer-attachment-error" role="alert">
+                {attachmentError}
+              </p>
+            ) : attachmentReadPending ? (
+              <p className="composer-attachment-status" role="status">
+                正在读取粘贴的附件…
+              </p>
+            ) : null}
             {autoApprovalEnabled || goalModeEnabled ? (
               <div className="composer-mode-risk-summary" role="status">
                 <strong>高权限模式已开启</strong>
@@ -4488,9 +4602,50 @@ const ChatMessageList = memo(function ChatMessageList({
           {message.role === "assistant" ? (
             <AnswerBlock parts={message.outputParts} />
           ) : (
-            <MarkdownMessage content={message.content} />
+            <>
+              {message.attachments?.length ? (
+                <ChatAttachmentChips
+                  attachments={message.attachments}
+                  className="message-attachment-list"
+                />
+              ) : null}
+              <MarkdownMessage content={message.content} />
+            </>
           )}
         </article>
+      ))}
+    </div>
+  );
+});
+
+const ChatAttachmentChips = memo(function ChatAttachmentChips(props: {
+  attachments: ChatAttachmentMetadata[];
+  className: string;
+  onRemove?: (attachmentId: string) => void;
+}) {
+  return (
+    <div className={`chat-attachment-list ${props.className}`} aria-label="附件">
+      {props.attachments.map((attachment) => (
+        <span
+          className={`chat-attachment-chip is-${attachment.kind}`}
+          key={attachment.id}
+          title={`${attachment.name} · ${formatChatAttachmentSize(attachment.size)}`}
+        >
+          <strong aria-hidden="true">
+            {formatChatAttachmentTypeLabel(attachment)}
+          </strong>
+          <span>{attachment.name}</span>
+          <small>{formatChatAttachmentSize(attachment.size)}</small>
+          {props.onRemove ? (
+            <button
+              type="button"
+              aria-label={`移除附件 ${attachment.name}`}
+              onClick={() => props.onRemove?.(attachment.id)}
+            >
+              <Icon name="close" size={12} />
+            </button>
+          ) : null}
+        </span>
       ))}
     </div>
   );
@@ -4731,6 +4886,18 @@ function toChatHistory(messages: ChatMessage[]): ChatHistoryMessage[] {
   }));
 }
 
+function toChatAttachmentMetadata(
+  attachment: ChatAttachmentInput,
+): ChatAttachmentMetadata {
+  return {
+    id: attachment.id,
+    name: attachment.name,
+    mediaType: attachment.mediaType,
+    size: attachment.size,
+    kind: attachment.kind,
+  };
+}
+
 function toSessionRailItem(session: ChatSessionListItem): ChatSession {
   return {
     id: session.id,
@@ -4772,6 +4939,7 @@ function toChatMessage(message: ChatSessionRecord["messages"][number]): ChatMess
     content: message.content,
     createdAt: message.createdAt,
     ...(message.outputParts ? { outputParts: message.outputParts } : {}),
+    ...(message.attachments ? { attachments: message.attachments } : {}),
   };
 }
 

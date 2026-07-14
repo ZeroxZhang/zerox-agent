@@ -1,11 +1,17 @@
 import { defaultRequestTimeoutMs, fetchWithTimeout } from "./fetchWithTimeout";
 
+export type ChatImageContent = {
+  mediaType: string;
+  data: string;
+};
+
 export type ChatMessage = {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
   tool_calls?: ToolCall[];
   tool_call_id?: string;
   name?: string;
+  images?: ChatImageContent[];
 };
 
 export type ToolDefinition = {
@@ -494,7 +500,18 @@ function serializeMessage(
 ): Record<string, unknown> {
   const serialized: Record<string, unknown> = {
     role: message.role,
-    content: message.content,
+    content:
+      message.role === "user" && message.images?.length
+        ? [
+            { type: "text", text: message.content },
+            ...message.images.map((image) => ({
+              type: "image_url",
+              image_url: {
+                url: `data:${image.mediaType};base64,${image.data}`,
+              },
+            })),
+          ]
+        : message.content,
   };
 
   if (message.tool_calls?.length) {

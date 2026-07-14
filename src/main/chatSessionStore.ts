@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type {
+  ChatAttachmentInput,
+  ChatAttachmentMetadata,
   ChatMessageSearchOptions,
   ChatMessageSearchResult,
   ChatMessageRecord,
@@ -35,6 +37,7 @@ export type AppendChatMessageInput = {
   executedRunId?: string;
   goalId?: string;
   goalEventRef?: string;
+  attachments?: ChatAttachmentMetadata[];
   workspaceId?: string;
   workspaceSummary?: ChatWorkspaceSummary;
 };
@@ -193,6 +196,7 @@ export function createChatSessionStore(options: {
           ...(input.executedRunId ? { executedRunId: input.executedRunId } : {}),
           ...(input.goalId ? { goalId: input.goalId } : {}),
           ...(input.goalEventRef ? { goalEventRef: input.goalEventRef } : {}),
+          ...(input.attachments?.length ? { attachments: input.attachments } : {}),
           createdAt: timestamp,
         };
         const session = existingSession
@@ -628,6 +632,7 @@ function normalizeSkillPendingInputState(
   const requestId = normalizeOptionalString(pending.requestId);
   const userMessage = normalizeOptionalString(pending.userMessage);
   const selectedSkillName = normalizeOptionalString(pending.selectedSkillName);
+  const attachments = normalizeChatAttachmentInputs(pending.attachments);
   if (!inputRequestId || !sessionId || !requestId || !userMessage || !selectedSkillName) {
     return undefined;
   }
@@ -649,7 +654,53 @@ function normalizeSkillPendingInputState(
       ? { workspaceSummary: normalizeChatWorkspaceSummary(pending.workspaceSummary) }
       : {}),
     partialValues: normalizeSkillInputValueRecord(pending.partialValues),
+    ...(attachments.length ? { attachments } : {}),
   };
+}
+
+function normalizeChatAttachmentMetadataList(
+  value: unknown,
+): ChatAttachmentMetadata[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.slice(0, 6).flatMap((entry): ChatAttachmentMetadata[] => {
+    if (!entry || typeof entry !== "object") {
+      return [];
+    }
+    const record = entry as Record<string, unknown>;
+    const id = normalizeOptionalString(record.id);
+    const name = normalizeOptionalString(record.name);
+    const mediaType = normalizeOptionalString(record.mediaType);
+    const kind = record.kind === "image" || record.kind === "text" ? record.kind : null;
+    const size =
+      typeof record.size === "number" && Number.isFinite(record.size)
+        ? Math.max(0, Math.floor(record.size))
+        : null;
+    return id && name && mediaType && kind && size !== null
+      ? [{ id, name, mediaType, size, kind }]
+      : [];
+  });
+}
+
+function normalizeChatAttachmentInputs(value: unknown): ChatAttachmentInput[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const metadata = normalizeChatAttachmentMetadataList(value);
+  const byId = new Map(metadata.map((entry) => [entry.id, entry]));
+  return value.slice(0, 6).flatMap((entry): ChatAttachmentInput[] => {
+    if (!entry || typeof entry !== "object") {
+      return [];
+    }
+    const record = entry as Record<string, unknown>;
+    const id = normalizeOptionalString(record.id);
+    const attachment = id ? byId.get(id) : undefined;
+    const dataBase64 = normalizeOptionalString(record.dataBase64);
+    return attachment && dataBase64
+      ? [{ ...attachment, dataBase64 }]
+      : [];
+  });
 }
 
 function normalizeSkillInputValueRecord(
@@ -725,6 +776,7 @@ function normalizeSkillInputValue(
 function normalizeStoredMessage(message: ChatMessageRecord): ChatMessageRecord {
   const role = message.role === "user" ? "user" : "assistant";
   const outputParts = normalizeOutputParts(message.outputParts);
+  const attachments = normalizeChatAttachmentMetadataList(message.attachments);
   return {
     id: String(message.id ?? ""),
     role,
@@ -736,6 +788,7 @@ function normalizeStoredMessage(message: ChatMessageRecord): ChatMessageRecord {
     ...(message.executedRunId ? { executedRunId: String(message.executedRunId) } : {}),
     ...(message.goalId ? { goalId: String(message.goalId) } : {}),
     ...(message.goalEventRef ? { goalEventRef: String(message.goalEventRef) } : {}),
+    ...(attachments.length ? { attachments } : {}),
     createdAt: String(message.createdAt ?? new Date(0).toISOString()),
   };
 }

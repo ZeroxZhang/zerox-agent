@@ -8,7 +8,7 @@ type PackageJson = {
 };
 
 describe("package scripts", () => {
-  it("sets release metadata to v3.7.0", () => {
+  it("sets release metadata to v3.7.1", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -16,14 +16,14 @@ describe("package scripts", () => {
       readFileSync(path.join(process.cwd(), "package-lock.json"), "utf8"),
     ) as { version?: string; packages?: Record<string, { version?: string }> };
 
-    expect(packageJson.version).toBe("3.7.0");
+    expect(packageJson.version).toBe("3.7.1");
     // package-lock.json is updated by `npm install`; check it matches the
     // declared package version once dependencies are installed.
-    expect(packageLock.version).toBe("3.7.0");
-    expect(packageLock.packages?.[""]?.version).toBe("3.7.0");
+    expect(packageLock.version).toBe("3.7.1");
+    expect(packageLock.packages?.[""]?.version).toBe("3.7.1");
   });
 
-  it("keeps release gates tracked through v3.7.0", () => {
+  it("keeps release gates tracked through v3.7.1", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -88,6 +88,9 @@ describe("package scripts", () => {
     const p47 = featureList.features.find(
       (feature) => feature.id === "P47-project-introduction-site",
     );
+    const p48 = featureList.features.find(
+      (feature) => feature.id === "P48-v3.7.1-auto-update-and-chat-attachments",
+    );
     const p31 = featureList.features.find(
       (feature) => feature.id === "P31-v3.1.2-window-controls-and-settings-icon",
     );
@@ -101,7 +104,7 @@ describe("package scripts", () => {
       (feature) => feature.id === "P28-v3.0.0-execution-context-spine",
     );
 
-    expect(packageJson.version).toBe("3.7.0");
+    expect(packageJson.version).toBe("3.7.1");
     expect(
       openFeatureIds.every(
         (featureId) =>
@@ -115,11 +118,13 @@ describe("package scripts", () => {
           featureId === "P44-v3.7.0-audit-hardening-release" ||
           featureId === "P45-v3.7.0-audit-closure-runtime-convergence" ||
           featureId === "P46-v3.7.0-strict-review-fixes" ||
-          featureId === "P47-project-introduction-site",
+          featureId === "P47-project-introduction-site" ||
+          featureId === "P48-v3.7.1-auto-update-and-chat-attachments",
       ),
     ).toBe(true);
     expect(openFeatureIds.length).toBeLessThanOrEqual(1);
     expect(p47?.status === "in_progress" || p47?.status === "done").toBe(true);
+    expect(p48?.status === "in_progress" || p48?.status === "done").toBe(true);
     expect(p45?.status === "in_progress" || p45?.status === "done").toBe(true);
     expect(p46?.status === "in_progress" || p46?.status === "done").toBe(true);
     expect(p44?.status === "in_progress" || p44?.status === "done").toBe(true);

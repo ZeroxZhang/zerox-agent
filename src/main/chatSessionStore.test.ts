@@ -21,6 +21,41 @@ describe("chat session store", () => {
     await expect(store.list()).resolves.toEqual([]);
   });
 
+  it("persists attachment metadata without persisting attachment bytes", async () => {
+    const store = createChatSessionStore({
+      configDir,
+      createId: createSequentialId("chat"),
+    });
+    const appended = await store.appendMessage({
+      role: "user",
+      content: "分析截图",
+      attachments: [
+        {
+          id: "attachment_1",
+          name: "screen.png",
+          mediaType: "image/png",
+          size: 68,
+          kind: "image",
+        },
+      ],
+    });
+
+    expect(appended.message.attachments).toEqual([
+      {
+        id: "attachment_1",
+        name: "screen.png",
+        mediaType: "image/png",
+        size: 68,
+        kind: "image",
+      },
+    ]);
+    const raw = await readFile(path.join(configDir, "chat-sessions.json"), "utf8");
+    expect(raw).not.toContain("dataBase64");
+    await expect(createChatSessionStore({ configDir }).get(appended.session.id)).resolves.toMatchObject({
+      messages: [expect.objectContaining({ attachments: appended.message.attachments })],
+    });
+  });
+
   it("quarantines corrupt chat session JSON and starts from an empty store", async () => {
     await writeFile(path.join(configDir, "chat-sessions.json"), "", "utf8");
     const store = createChatSessionStore({
