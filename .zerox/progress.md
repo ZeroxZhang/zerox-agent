@@ -7061,3 +7061,144 @@
   - The optional local Codex adversarial CLI could not run because the installed
     CLI did not support its configured model; independent specialist adversarial
     reviews were used instead and all final blocking severities were zero.
+
+## 2026-07-13 - P47 Responsive Project Introduction Site
+
+- Replaced the stale fixed-size `zerox-agent-onepage.html` poster with a
+  responsive, standalone project introduction page grounded in current v3.7.0
+  source contracts.
+- The page now explains:
+  - the local-first desktop control-plane positioning and explicit non-goals;
+  - the shared six-boundary Agent runtime flow from frozen context through Goal
+    acceptance;
+  - layered tool authorization, workspace sandboxing, human confirmation, and
+    audit evidence;
+  - Chat, Goal, scheduling, Skills, Actors, memory, and reviewed learning;
+  - Electron / Preload / Renderer / Main Process / local-storage boundaries;
+  - JSON/JSONL default persistence, explicit SQLite migration modes, the local
+    code map, technology stack, and release verification gates.
+- Added accessible behavior without changing the Electron runtime: skip link,
+  single-line desktop navigation with mobile menu, system/light/dark themes,
+  keyboard-operable capability tabs, reduced-motion behavior, copy success and
+  failure feedback, responsive layouts, and local project assets only.
+- Added `src/shared/projectIntroductionPage.test.ts` to verify source-backed
+  provider/schedule/execution-state claims, local references, accessibility and
+  responsive contracts, prohibited presentation patterns, and inline script
+  syntax. Updated the release-gate feature allowlist for P47.
+- Changed files:
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+  - `zerox-agent-onepage.html`
+  - `src/shared/projectIntroductionPage.test.ts`
+  - `src/shared/packageScripts.test.ts`
+- Verification evidence:
+  - `npm test -- --run src/shared/projectIntroductionPage.test.ts` -> 1 file / 5 tests passed.
+  - Focused regression after release-gate update -> 3 files / 121 tests passed.
+  - `npm run harness:check` -> passed.
+  - First `npm run verify` exposed the expected new-feature allowlist failure
+    plus one existing Goal acceptance timing fluctuation. The Goal test passed
+    in the focused 121-test rerun without runtime changes.
+  - Final `npm run verify` -> 208 files / 2,084 tests passed; Electron and
+    renderer TypeScript passed; Vite production build passed; Agent evals 26/26
+    and Memory evals 2/2 passed.
+  - `npm run smoke:prod` -> passed; renderer rendered the Agent chat UI.
+  - `git diff --check` -> passed before the final progress/status update and was
+    rerun after it.
+
+## 2026-07-15 - P48 v3.7.1 Automatic Updates and Pasted Chat Attachments
+
+- Implemented the v3.7.1 application-update chain across main, preload, IPC,
+  renderer, and release metadata:
+  - packaged applications check the GitHub release channel automatically and
+    download updates in the background;
+  - the version footer exposes compact checking, progress, downloaded,
+    installing, and retry states, including narrow-window and screen-reader
+    behavior;
+  - installation remains an explicit user action, marks the tray lifecycle as
+    quitting before windows close, drains runtime shutdown, and requests a
+    restart through `electron-updater`;
+  - development, validation, and smoke modes do not perform updater network
+    traffic.
+- Implemented pasted chat attachments end to end:
+  - PNG, JPEG, WebP, and bounded UTF-8 text files render as compact removable
+    28px attachment chips and survive normal send failures for retry;
+  - renderer limits are revalidated in main using canonical Base64, actual byte
+    counts, image signatures, strict UTF-8, 7 MiB per image, 12 MiB total, and a
+    24,000-character model-context budget;
+  - session history persists display metadata only; guided-skill raw payloads
+    stay in a 40 MiB bounded in-memory cache with a one-hour TTL, and an expired
+    or restarted request fails visibly instead of silently losing its image;
+  - OpenAI-compatible, Anthropic, and Gemini adapters receive their native
+    multimodal request shapes;
+  - a protected system-prompt layer treats attachment blocks as untrusted
+    quoted data and forbids attachment content from authorizing tool calls or
+    side effects.
+- Independent adversarial review found and verified fixes for updater close
+  interception, silent install-on-quit, pending Base64 persistence, text-context
+  amplification, failed-send attachment loss, Gemini/GIF compatibility,
+  Anthropic Base64 limits, prompt injection, TTL/size bypasses, and activity
+  normalizer observability loss. Final code-level review: PASS, with no
+  remaining signing-independent source blocker.
+- Independent design/accessibility review against
+  `docs/design/guidelines_0708.html`: PASS. The final 640px layout keeps the
+  update action, attachment row, composer, and send control in the viewport;
+  update progress and paste/remove/retry events are announced accessibly.
+- Added a fail-closed macOS release pipeline after independent release
+  adversaries found asset-name and verification gaps:
+  - electron-builder now emits updater-safe, no-space ZIP/DMG names that match
+    `latest-mac.yml` exactly;
+  - `npm run release:mac` rebuilds and then requires the expected
+    `APPLE_TEAM_ID`, a matching Developer ID identity, clean trusted Git state,
+    valid Gatekeeper and stapler results, and signed/notarized app copies in the
+    unpacked output, ZIP, and read-only-mounted DMG;
+  - the gate verifies SHA-512, blockmap v2 structure, continuous coverage, and
+    every BLAKE2b-18 chunk checksum before it trusts update metadata;
+  - absolute system tool paths, sanitized Git environment, ignored/untracked
+    packaged-source rejection, Bundle ID/signed-Identifier checks, internal
+    symlink containment, and CDHash/CodeResources binding close the demonstrated
+    local bypasses.
+- Release-hardening changed files:
+  - `.zerox/feature_list.json`
+  - `.zerox/progress.md`
+  - `README.md`
+  - `electron-builder.yml`
+  - `package.json`
+  - `package-lock.json`
+  - `scripts/release-preflight.mjs`
+  - `src/shared/electronBuilderConfig.test.ts`
+  - `src/shared/packageScripts.test.ts`
+  - `src/shared/releasePreflight.test.ts`
+- Final frozen-tree evidence:
+  - final focused feature verification: 14 files / 281 tests passed; independent
+    release-preflight focus: 3 files / 17 tests passed;
+  - final `npm run verify`: 211 files / 2,107 tests passed; Agent evals 26/26 and
+    Memory evals 2/2 passed;
+  - `npm run smoke:prod`, `npm run harness:check`, and `git diff --check`
+    passed;
+  - `npm run dist:mac` and packaged smoke requiring `v3.7.1` passed;
+  - independent adversarial review and independent artifact testing both ended
+    CODE-LEVEL PASS with no remaining P1/P2; temporary extraction directories
+    and DMG mounts were unchanged after the full preflight;
+  - ZIP extraction, read-only DMG mounting, update metadata, blockmap bytes,
+    package identity, and OpenAI/Anthropic/Gemini mock request bodies passed;
+  - latest unsigned trial ZIP: 350,773,149 bytes, SHA512
+    `2FXbel+oDJhWSpPItalTt/rAzyuA9w/xEb9xinJ4zJD6SLL94eZyPehzPfqFEptP0k9cspvYc31skXiVatDvbA==`;
+  - latest unsigned trial DMG: 129,805,729 bytes, SHA512
+    `YpWpytzYvvEYfHDlxi7TKt8TvEO21wQQZbpoh8pk4E4nEp/XuOxNXwVjrMpTmKI8yM1thNDi3cJxOPpqO+fXNQ==`.
+  - the first final verify exposed a multiline JavaScript-import
+    `@ts-expect-error` placement error after all 2,107 tests passed; the import
+    was made single-line, its focused test passed 1 file / 8 tests, and the
+    complete verify/build/eval pipeline then passed from the corrected tree.
+- Release is intentionally HOLD and P48 remains `in_progress`: this machine has
+  zero valid Apple code-signing identities; electron-builder skipped signing,
+  `codesign --verify --deep --strict` failed, and `spctl --assess` failed.
+  macOS automatic updates require a valid Developer ID Application signature,
+  so the branch was not merged to `main`, pushed, tagged, or published.
+- Release handoff after signing credentials are available:
+  1. install the matching Developer ID identity and full Xcode tooling, set the
+     real `APPLE_TEAM_ID`, then run `npm run release:mac`;
+  2. run a real installed-app update/install/reopen check (v3.7.0 itself has no
+     updater, so the first transition to v3.7.1 is a manual install);
+  3. merge the frozen branch to `main`, push, tag v3.7.1, and publish the exact
+     `Zerox-Agent-...` ZIP/DMG/blockmaps plus `latest-mac.yml` only after the
+     signed preflight and installed-app check pass.

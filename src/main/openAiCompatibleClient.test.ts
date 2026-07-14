@@ -5,6 +5,45 @@ import {
 } from "./openAiCompatibleClient";
 
 describe("OpenAI-compatible chat client", () => {
+  it("serializes pasted images as OpenAI multimodal user content", async () => {
+    const calls: RequestInit[] = [];
+    const client = createOpenAiCompatibleClient({
+      fetch: async (_url, init) => {
+        calls.push(init ?? {});
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "seen" }, finish_reason: "stop" }],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      },
+    });
+
+    await client.complete({
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "secret-key",
+      model: "vision-model",
+      temperature: 0.2,
+      maxTokens: 100,
+      messages: [
+        {
+          role: "user",
+          content: "What is shown?",
+          images: [{ mediaType: "image/png", data: "aW1hZ2U=" }],
+        },
+      ],
+    });
+
+    const body = JSON.parse(String(calls[0]?.body));
+    expect(body.messages[0].content).toEqual([
+      { type: "text", text: "What is shown?" },
+      {
+        type: "image_url",
+        image_url: { url: "data:image/png;base64,aW1hZ2U=" },
+      },
+    ]);
+  });
+
   it("posts chat completions to baseUrl/chat/completions and returns message content", async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const client = createOpenAiCompatibleClient({

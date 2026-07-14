@@ -118,6 +118,7 @@ import type {
   ToolApprovalRequestPayload,
 } from "../shared/toolApproval";
 import type { KernelEvent, PermissionRule } from "../shared/kernelContract";
+import type { AppUpdateActionResult, AppUpdateState } from "../shared/appUpdate";
 
 const KERNEL_IPC = {
   event: "kernel:event",
@@ -155,6 +156,22 @@ const buildingAgent = {
   getAppMeta: (): Promise<AppMeta> => ipcRenderer.invoke("app:getMeta"),
   getRuntimeInfo: (): Promise<DesktopRuntimeInfo> =>
     ipcRenderer.invoke("app:getRuntimeInfo"),
+  getAppUpdateState: (): Promise<AppUpdateState> =>
+    ipcRenderer.invoke("app:getUpdateState"),
+  checkForAppUpdates: (): Promise<AppUpdateState> =>
+    ipcRenderer.invoke("app:checkForUpdates"),
+  installAppUpdate: (): Promise<AppUpdateActionResult> =>
+    ipcRenderer.invoke("app:installUpdate"),
+  onAppUpdateStateChanged: (callback: (state: AppUpdateState) => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      state: AppUpdateState,
+    ) => callback(state);
+    ipcRenderer.on("app:updateStateChanged", handler);
+    return () => {
+      ipcRenderer.removeListener("app:updateStateChanged", handler);
+    };
+  },
   listNavigationSections: (): Promise<NavigationSection[]> =>
     ipcRenderer.invoke("navigation:list"),
   prepareAgent: (): Promise<PrepareAgentResult> =>

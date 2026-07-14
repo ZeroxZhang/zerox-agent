@@ -295,6 +295,113 @@
     inset 0 0 0 1px color-mix(in srgb, var(--color-action-primary) 26%, transparent);
 }
 
+.composer-input-shell.has-attachments textarea {
+  padding-top: 92px;
+}
+
+.chat-attachment-list {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.chat-attachment-list::-webkit-scrollbar {
+  display: none;
+}
+
+.composer-attachment-list {
+  position: absolute;
+  top: 52px;
+  left: 18px;
+  right: 18px;
+  z-index: 5;
+}
+
+.chat-attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 260px;
+  height: 28px;
+  padding: 0 0 0 8px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-full);
+  color: var(--text-secondary);
+  background: var(--color-surface-muted);
+  font-size: 11px;
+  font-weight: var(--font-medium);
+  line-height: 1;
+}
+
+.chat-attachment-chip > strong {
+  color: var(--status-info-text);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: var(--font-semibold);
+  letter-spacing: 0.02em;
+}
+
+.chat-attachment-chip > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-attachment-chip > small {
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+  font-size: 10px;
+}
+
+.chat-attachment-chip > button {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-full);
+  color: var(--text-secondary);
+  background: transparent;
+}
+
+.chat-attachment-chip > button:hover {
+  color: var(--text-primary);
+  background: var(--bg-surface-hover);
+}
+
+.chat-attachment-chip > button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.composer-attachment-error,
+.composer-attachment-status {
+  margin: 0;
+  padding: 0 var(--space-2);
+  font-size: var(--text-xs);
+}
+
+.composer-attachment-error {
+  color: var(--text-danger);
+}
+
+.composer-attachment-status {
+  color: var(--text-tertiary);
+}
+
+.message-attachment-list {
+  margin: 0 0 var(--space-2);
+}
+
 .composer-floating-actions {
   position: absolute;
   right: var(--composer-action-inset);

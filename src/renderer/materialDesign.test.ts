@@ -1526,6 +1526,25 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource).toContain("activeChatRequestIdRef.current = null");
     expect(chatPanelSource).toContain("pendingInputRequestRef.current = null");
   });
+
+  it("keeps update feedback and pasted attachments compact, labeled, and keyboard operable", () => {
+    expect(appSource).toContain("nav-update-action");
+    expect(appSource).toContain("aria-live=\"polite\"");
+    expect(appSource).toContain("installAppUpdate");
+    expect(chatPanelSource).toContain("handleComposerPaste");
+    expect(chatPanelSource).toContain("ChatAttachmentChips");
+    expect(chatPanelSource).toContain("移除附件");
+    expect(styles).toContain(".chat-attachment-chip");
+    expect(styles).toContain("height: 28px");
+    expect(styles).toContain(".nav-update-status");
+    expect(styles).toContain("padding-top: 118px;");
+    expect(styles).toContain("top: 82px;");
+    expect(styles).toContain(".app-shell.is-agent-chat .workspace-sidebar");
+    expect(styles).toContain(".nav-update-action:focus-visible");
+    expect(styles).toContain(".chat-attachment-chip > button:focus-visible");
+    expect(chatPanelSource).toContain("attachmentAnnouncement");
+    expect(appSource).toContain("getAppUpdateAccessibleStatus");
+  });
 });
 
 function getFunctionSource(source: string, functionName: string): string {

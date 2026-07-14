@@ -5599,6 +5599,241 @@ describe("chat service", () => {
       }),
     ]);
   });
+
+  it("keeps guided-skill attachment bytes in bounded memory while persisting metadata only", async () => {
+    const capturedMessages: ChatMessage[][] = [];
+    const storedMessages: AppendChatMessageInput[] = [];
+    const activityEvents: ChatTaskStatusEvent[] = [];
+    const streamEvents: ChatStreamEvent[] = [];
+    const onePixelPng =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    const service = createChatService({
+      chatClient: {
+        async complete(request) {
+          capturedMessages.push(request.messages);
+          return chatReply("技能附件已读取");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore(storedMessages, {
+        activityEvents,
+      }),
+      discoverSkills: async () => ({
+        skills: [
+          createSkillRecord({
+            name: "image-review",
+            manifest: {
+              inputs: [
+                {
+                  name: "focus",
+                  label: "关注点",
+                  type: "string",
+                  required: true,
+                },
+              ],
+            },
+          }),
+        ],
+        errors: [],
+      }),
+      createId: createSequentialId("guided_attachment"),
+      now: () => new Date("2026-07-14T15:30:00.000Z"),
+    });
+
+    await expect(
+      service.sendMessage(
+        {
+          sessionId: "session_1",
+          requestId: "request_1",
+          message: "检查截图",
+          selectedSkillName: "image-review",
+          attachments: [
+            {
+              id: "attachment_image",
+              name: "screen.png",
+              mediaType: "image/png",
+              size: 1,
+              kind: "image",
+              dataBase64: onePixelPng,
+            },
+          ],
+        },
+        { onStreamEvent: (event) => streamEvents.push(event) },
+      ),
+    ).resolves.toEqual({ ok: false, message: "Skill input required." });
+
+    const inputRequest = streamEvents.find(
+      (event): event is Extract<ChatStreamEvent, { type: "waiting_for_input" }> =>
+        event.type === "waiting_for_input",
+    )?.inputRequest;
+    const pendingEvent = activityEvents.find(
+      (event) => event.pendingSkillInput?.status === "pending",
+    );
+    expect(pendingEvent?.pendingSkillInput?.attachments).toEqual([
+      expect.objectContaining({ id: "attachment_image", size: 68 }),
+    ]);
+    expect(JSON.stringify(pendingEvent)).not.toContain("dataBase64");
+
+    await expect(
+      service.respondSkillInput({
+        inputRequestId: inputRequest?.id ?? "",
+        values: { focus: "布局" },
+      }),
+    ).resolves.toMatchObject({ ok: true, reply: "技能附件已读取" });
+    expect(capturedMessages[0]?.at(-1)).toMatchObject({
+      role: "user",
+      images: [{ mediaType: "image/png", data: onePixelPng }],
+    });
+  });
+
+  it("expires a guided-skill attachment payload before responding after its TTL", async () => {
+    const storedMessages: AppendChatMessageInput[] = [];
+    const streamEvents: ChatStreamEvent[] = [];
+    let chatCalls = 0;
+    let nowMs = new Date("2026-07-14T15:30:00.000Z").getTime();
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          chatCalls += 1;
+          return chatReply("should not run");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore(storedMessages),
+      discoverSkills: async () => ({
+        skills: [
+          createSkillRecord({
+            name: "image-review",
+            manifest: {
+              inputs: [
+                {
+                  name: "focus",
+                  label: "关注点",
+                  type: "string",
+                  required: true,
+                },
+              ],
+            },
+          }),
+        ],
+        errors: [],
+      }),
+      createId: createSequentialId("expired_attachment"),
+      now: () => new Date(nowMs),
+    });
+
+    await service.sendMessage(
+      {
+        sessionId: "session_1",
+        requestId: "request_1",
+        message: "检查截图",
+        selectedSkillName: "image-review",
+        attachments: [
+          {
+            id: "attachment_image",
+            name: "screen.png",
+            mediaType: "image/png",
+            size: 1,
+            kind: "image",
+            dataBase64:
+              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+          },
+        ],
+      },
+      { onStreamEvent: (event) => streamEvents.push(event) },
+    );
+    const inputRequest = streamEvents.find(
+      (event): event is Extract<ChatStreamEvent, { type: "waiting_for_input" }> =>
+        event.type === "waiting_for_input",
+    )?.inputRequest;
+    nowMs += 61 * 60 * 1000;
+
+    await expect(
+      service.respondSkillInput({
+        inputRequestId: inputRequest?.id ?? "",
+        values: { focus: "布局" },
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      message:
+        "附件内容在应用重启或长时间等待后已失效，请重新发送消息并粘贴附件。",
+    });
+    expect(chatCalls).toBe(0);
+  });
+
+  it("passes pasted image bytes and fenced text attachments through the model pipeline", async () => {
+    const capturedMessages: ChatMessage[][] = [];
+    const storedMessages: AppendChatMessageInput[] = [];
+    const onePixelPng =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    const service = createChatService({
+      chatClient: {
+        async complete(request) {
+          capturedMessages.push(request.messages);
+          return chatReply("附件已读取");
+        },
+      },
+      getModelProfile: async () => ({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret",
+        model: "vision-model",
+        temperature: 0.2,
+        maxTokens: 8192,
+      }),
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore(storedMessages),
+      createId: () => "chat_attachment",
+      now: () => new Date("2026-07-14T15:30:00.000Z"),
+    });
+
+    const result = await service.sendMessage({
+      message: "总结图片和说明",
+      attachments: [
+        {
+          id: "attachment_image",
+          name: "screen.png",
+          mediaType: "image/png",
+          size: 68,
+          kind: "image",
+          dataBase64: onePixelPng,
+        },
+        {
+          id: "attachment_text",
+          name: "notes.md",
+          mediaType: "text/markdown",
+          size: 5,
+          kind: "text",
+          dataBase64: Buffer.from("hello").toString("base64"),
+        },
+      ],
+    });
+
+    expect(result).toMatchObject({ ok: true, reply: "附件已读取" });
+    expect(capturedMessages[0]?.at(-1)).toMatchObject({
+      role: "user",
+      content: expect.stringContaining("<attachment_context>"),
+      images: [{ mediaType: "image/png", data: onePixelPng }],
+    });
+    expect(storedMessages[0]).toMatchObject({
+      role: "user",
+      content: "总结图片和说明",
+      attachments: [
+        expect.objectContaining({
+          id: "attachment_image",
+          kind: "image",
+          size: 68,
+        }),
+        expect.objectContaining({
+          id: "attachment_text",
+          kind: "text",
+          size: 5,
+        }),
+      ],
+    });
+    expect(storedMessages[0]).not.toHaveProperty("attachments.0.dataBase64");
+  });
 });
 
 function createMemoryStore(options: {

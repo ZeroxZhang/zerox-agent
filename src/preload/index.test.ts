@@ -69,6 +69,14 @@ describe("preload bridge", () => {
     );
   });
 
+  it("exposes app update state, retry, install, and event operations", () => {
+    expect(preloadSource).toContain('ipcRenderer.invoke("app:getUpdateState"');
+    expect(preloadSource).toContain('ipcRenderer.invoke("app:checkForUpdates"');
+    expect(preloadSource).toContain('ipcRenderer.invoke("app:installUpdate"');
+    expect(preloadSource).toContain('ipcRenderer.on("app:updateStateChanged"');
+    expect(preloadSource).toContain('removeListener("app:updateStateChanged"');
+  });
+
   it("exposes distinct final-acceptance recovery operations", () => {
     expect(preloadSource).toContain("continueGoalAcceptance");
     expect(preloadSource).toContain(

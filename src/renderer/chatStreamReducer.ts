@@ -1,4 +1,8 @@
-import type { ChatStreamEvent, SkillUserInputRequest } from "../shared/chat";
+import type {
+  ChatAttachmentMetadata,
+  ChatStreamEvent,
+  SkillUserInputRequest,
+} from "../shared/chat";
 import type { ChatOutputPart } from "../shared/chatOutput";
 
 export type ChatStreamMessage = {
@@ -9,6 +13,7 @@ export type ChatStreamMessage = {
   streamRequestId?: string;
   isStreaming?: boolean;
   outputParts?: ChatOutputPart[];
+  attachments?: ChatAttachmentMetadata[];
 };
 
 export type ChatToolCallPreview = {

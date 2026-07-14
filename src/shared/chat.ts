@@ -5,6 +5,20 @@ import type { GoalStatus } from "./agentGoal";
 import type { ChatOutputPart } from "./chatOutput";
 import type { GoalDraft } from "./goalTranslation";
 
+export type ChatAttachmentKind = "image" | "text";
+
+export type ChatAttachmentMetadata = {
+  id: string;
+  name: string;
+  mediaType: string;
+  size: number;
+  kind: ChatAttachmentKind;
+};
+
+export type ChatAttachmentInput = ChatAttachmentMetadata & {
+  dataBase64: string;
+};
+
 export type ChatHistoryMessage = {
   role: "assistant" | "user";
   content: string;
@@ -18,6 +32,7 @@ export type ChatMessageRecord = ChatHistoryMessage & {
   executedRunId?: string;
   goalId?: string;
   goalEventRef?: string;
+  attachments?: ChatAttachmentMetadata[];
 };
 
 export type ChatSessionGoalSummary = {
@@ -102,6 +117,7 @@ export type SendChatMessageInput = {
   workspaceId?: string;
   workspaceSummary?: ChatWorkspaceSummary;
   history?: ChatHistoryMessage[];
+  attachments?: ChatAttachmentInput[];
 };
 
 export type SkillInputFieldType = "string" | "number" | "boolean" | "path" | "choice";
@@ -144,6 +160,7 @@ export type SkillPendingInputState = {
   workspaceId?: string;
   workspaceSummary?: ChatWorkspaceSummary;
   partialValues: Record<string, string | number | boolean>;
+  attachments?: ChatAttachmentMetadata[];
 };
 
 export type SkillInputResponseResult = SendChatMessageResult;

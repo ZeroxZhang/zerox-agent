@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v3.7.0-111827" alt="Version v3.7.0" />
+  <img src="https://img.shields.io/badge/version-v3.7.1-111827" alt="Version v3.7.1" />
   <img src="https://img.shields.io/badge/platform-macOS%20arm64-blue" alt="Platform: macOS arm64" />
   <img src="https://img.shields.io/badge/electron-42.3-9feaf9" alt="Electron 42" />
   <img src="https://img.shields.io/badge/react-19.2-61dafb" alt="React 19" />
@@ -41,7 +41,7 @@
 
 ## Overview
 
-**Zerox Agent** is a local-first desktop control plane for personal AI agents (current release: v3.7.0). The name comes from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
+**Zerox Agent** is a local-first desktop control plane for personal AI agents (current release: v3.7.1). The name comes from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
 
 It is **not** a chat wrapper, a hosted agent cloud, or an unbounded autonomous loop. It runs on your Mac: you bring your own API key (Anthropic / Gemini / OpenAI-compatible), grant explicit tool permissions, and keep session state, trajectories, memory, and learning candidates on disk under local `userData`. High-risk actions ask first; interrupted long work can resume from checkpoints; every step leaves an auditable run trail.
 
@@ -94,7 +94,9 @@ The v3.3.0 release is a macOS UI polish pass documented in [`UI_AUDIT.md`](UI_AU
 
 The v3.4.0 release uses [`docs/design/guidelines_0708.html`](docs/design/guidelines_0708.html) as the active frontend specification and selects **B · Obsidian** as the app theme. It moves the renderer from the older Soft Blue look to a neutral grayscale macOS control surface with a restrained near-black accent, dark-mode accent inversion, tighter focus/press feedback, and no product behavior changes.
 
-**v3.7.0** (current line on branch `codex/3.7.0`) hardens the trust surface on top of Obsidian: 本地权限边界, recoverable checkpoints, tool-pairing context integrity, and 持久化原子性 — while keeping trajectories exportable and learning user-reviewed.
+**v3.7.0** hardened 本地权限边界, recoverable checkpoints, tool-pairing context integrity, and 持久化原子性 while keeping trajectories exportable and learning user-reviewed.
+
+**v3.7.1** adds packaged-app release detection, background update downloads, and a compact install action beside the sidebar version. Chat now accepts pasted PNG/JPEG/WebP and bounded UTF-8 text attachments, preserves compact attachment metadata in session history, and sends image content through OpenAI-compatible, Anthropic, and Gemini provider paths.
 
 ---
 
@@ -550,19 +552,20 @@ npm run doctor        # Self-check first
 npm run smoke:prod    # Production smoke
 npm run pack:mac      # Unsigned .app → release/mac/   (local trial)
 npm run dist:mac      # .dmg + .zip → release/          (distribution)
+npm run release:mac   # Rebuild + fail-closed signing/notarization/update preflight
 ```
 
-Current local builds are unsigned and not notarized. Each release passes an independent packaged-app acceptance gate (a computer-use run against the local macOS package) before handoff. After downloading a `.dmg` from GitHub Releases, macOS Gatekeeper may show "Zerox Agent is damaged and can't be opened." The image is usually valid; remove the quarantine attribute before opening:
+`pack:mac` and `dist:mac` may produce unsigned local-trial artifacts. Public releases must set the expected 10-character `APPLE_TEAM_ID` and use `release:mac`, which refuses dirty source trees, unsigned or unnotarized apps, failed Gatekeeper assessments, mismatched versions/hashes/blockmaps, or asset names that diverge from `latest-mac.yml`. It independently checks the unpacked app plus the app copies inside the ZIP and DMG. Each release also passes an independent packaged-app acceptance gate before handoff. Unsigned local trials may require removing the quarantine attribute before opening:
 
 Launch at login is opt-in. Set `ZEROX_ENABLE_LOGIN_STARTUP=1` only when deliberately enabling the packaged login item; hidden login-item launches keep the main window closed until the user activates the app.
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-3.7.0-arm64.dmg"
+xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-3.7.1-arm64.dmg"
 # or, if already dragged into Applications:
 xattr -dr com.apple.quarantine "/Applications/Zerox Agent.app"
 ```
 
-For public distribution, Apple signing, notarization, auto-update, and crash reporting still need to be added.
+The v3.7.1 auto-update runtime and GitHub release metadata are implemented. macOS automatic installation is published only after Developer ID signing and notarization pass the release preflight; crash reporting remains separate distribution work.
 
 ---
 
@@ -597,7 +600,7 @@ Deterministic local artifact goals are accepted only when the task contract, can
 
 Planned:
 
-- [ ] Apple signing, notarization, auto-update, and clearer release distribution
+- [ ] Apple signing and notarization for trusted automatic-update distribution
 - [ ] Deeper runtime-loop consolidation with first-class persistent plans and verifier/critic passes
 - [ ] Skill marketplace, remote skill installation, and visual skill/workflow editing
 - [ ] Event-triggered tasks (file changes, system events, etc.)
@@ -617,7 +620,7 @@ Planned:
 
 ## 项目概述
 
-**Zerox Agent** 是一个本地优先的桌面智能体控制台（**v3.7.0**）。名字取自 **Zero + X**——从留白开始，把未知的本地工作流转成可观察、受权限管控、可恢复的 Agent 运行。
+**Zerox Agent** 是一个本地优先的桌面智能体控制台（**v3.7.1**）。名字取自 **Zero + X**——从留白开始，把未知的本地工作流转成可观察、受权限管控、可恢复的 Agent 运行。
 
 它不是聊天壳，也不是泛用云端 Agent 入口，更不是无限自治循环。它运行在你的 Mac 上：自行配置 OpenAI-compatible / Anthropic / Gemini 模型（需自备 API Key）、扫描本地 `SKILL.md` 技能、执行 recoverable agent runs、调用受权限管控的工具、跟踪 parent/child multi-agent sessions、把经验写入本地长期记忆，并且在改变未来行为前保留 **user-reviewed learning**。
 
@@ -652,7 +655,7 @@ Planned:
 
 产品边界写在 [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md)。运行时、workspace、学习机制和目标模式分别见 [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md)、[`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md)、[`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md) 与 [`docs/architecture/agent-goal-mode.md`](docs/architecture/agent-goal-mode.md)。
 
-当前版本是 **v3.7.0**。本次发布在 Obsidian 界面基础上强化本地权限边界、Agent 检查点恢复、上下文工具配对和持久化原子性，并保持运行轨迹可观测、学习结果需审核。
+当前版本是 **v3.7.1**。本次发布新增应用版本自动检测与后台下载，并在侧栏版本号旁提供紧凑更新入口；会话框支持粘贴图片和 UTF-8 文本附件，以小型标签呈现，并把图片内容传递给 OpenAI-compatible、Anthropic 与 Gemini 模型链路。
 
 ---
 
@@ -1106,9 +1109,10 @@ npm run doctor        # 先跑自检
 npm run smoke:prod    # 生产包冒烟
 npm run pack:mac      # 未签名 .app → release/mac/  （本地试用）
 npm run dist:mac      # .dmg + .zip → release/       （分发）
+npm run release:mac   # 重新打包 + 签名/公证/更新资产失败关闭检查
 ```
 
-当前本地构建产物未签名、未公证。每个版本在交接前都会通过独立 packaged-app 验收（针对本地 macOS 包的 computer-use 运行）。从 GitHub Releases 下载 `.dmg` 后，macOS Gatekeeper 可能提示「Zerox Agent 已损坏，无法打开」。这通常不是文件损坏，而是下载隔离属性拦截。打开前在终端执行：
+`pack:mac` 与 `dist:mac` 可以生成仅供本地试用的未签名产物。公开发版必须设置预期的 10 位 `APPLE_TEAM_ID` 并使用 `release:mac`；若源码树未冻结、应用未签名或未公证、Gatekeeper 验证失败、版本/哈希/blockmap 不一致，或产物命名与 `latest-mac.yml` 不一致，命令会直接失败。它会分别检查未归档应用及 ZIP、DMG 内的应用副本。每个版本在交接前还会通过独立 packaged-app 验收。未签名的本地试用包可能需要先移除隔离属性：
 
 开机登录启动默认关闭。只有明确设置 `ZEROX_ENABLE_LOGIN_STARTUP=1` 时才会配置打包应用的 Login Item；隐藏登录启动不会主动显示主窗口。
 
@@ -1118,7 +1122,7 @@ xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-<version>-arm64.dmg"
 xattr -dr com.apple.quarantine "/Applications/Zerox Agent.app"
 ```
 
-如需公开分发，后续需要补充 Apple 签名、公证、自动更新和崩溃报告。
+v3.7.1 已实现自动更新运行时与 GitHub Release 元数据。只有 Developer ID 签名和公证通过发布前置检查后，才允许发布 macOS 自动安装资产；崩溃报告仍属于后续分发工作。
 
 ---
 
@@ -1153,7 +1157,7 @@ npm run episode:export -- --config-dir <userData/config> --latest-validation
 
 后续计划：
 
-- [ ] Apple 签名、公证、自动更新和更清晰的分发流程
+- [ ] Apple 签名与公证，以可信方式分发自动更新
 - [ ] 更深的 runtime loop 统一，包含一等持久化 plan 与 verifier/critic 回路
 - [ ] 技能市场、远程技能安装和可视化技能/工作流编辑
 - [ ] 条件触发任务（文件变化、系统事件等）

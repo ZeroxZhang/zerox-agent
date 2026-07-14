@@ -21,6 +21,105 @@ describe("chat session store", () => {
     await expect(store.list()).resolves.toEqual([]);
   });
 
+  it("persists attachment metadata without persisting attachment bytes", async () => {
+    const store = createChatSessionStore({
+      configDir,
+      createId: createSequentialId("chat"),
+    });
+    const appended = await store.appendMessage({
+      role: "user",
+      content: "分析截图",
+      attachments: [
+        {
+          id: "attachment_1",
+          name: "screen.png",
+          mediaType: "image/png",
+          size: 68,
+          kind: "image",
+        },
+      ],
+    });
+
+    expect(appended.message.attachments).toEqual([
+      {
+        id: "attachment_1",
+        name: "screen.png",
+        mediaType: "image/png",
+        size: 68,
+        kind: "image",
+      },
+    ]);
+    const unsafePendingAttachment = {
+      ...appended.message.attachments?.[0],
+      dataBase64: "must-not-be-persisted",
+    };
+    await store.appendActivityEvent(appended.session.id, {
+      sessionId: appended.session.id,
+      state: "waiting_for_input",
+      message: "Skill input required.",
+      createdAt: "2026-07-14T15:30:00.000Z",
+      elapsedMs: 1,
+      turn: 2,
+      toolCallId: "tool_call_1",
+      toolInvocationId: "invocation_1",
+      toolName: "file_read",
+      toolSource: "native",
+      resultRef: "tool-result-refs/result_1.json",
+      resultBytes: 321,
+      invocationStatus: "completed",
+      checkpointId: "checkpoint_1",
+      memoryScopes: ["session", "workspace"],
+      historyOperation: "append",
+      workspaceId: "workspace_1",
+      workspaceSummary: {
+        name: "项目",
+        rootPath: "/workspace/project",
+        kind: "primary",
+        sandboxMode: "workspace-write",
+        branch: "codex/3.7.1",
+      },
+      ok: true,
+      payload: {
+        actorId: "actor_1",
+        nested: { status: "done", dataBase64: "strip-me" },
+      },
+      pendingSkillInput: {
+        inputRequestId: "input_1",
+        status: "pending",
+        sessionId: appended.session.id,
+        requestId: "request_1",
+        userMessage: "分析截图",
+        selectedSkillName: "image-review",
+        partialValues: {},
+        attachments: [unsafePendingAttachment],
+      },
+    });
+    const raw = await readFile(path.join(configDir, "chat-sessions.json"), "utf8");
+    expect(raw).not.toContain("dataBase64");
+    await expect(
+      createChatSessionStore({ configDir }).get(appended.session.id),
+    ).resolves.toMatchObject({
+      messages: [expect.objectContaining({ attachments: appended.message.attachments })],
+      activity: {
+        statusEvents: [
+          expect.objectContaining({
+            toolCallId: "tool_call_1",
+            toolInvocationId: "invocation_1",
+            resultRef: "tool-result-refs/result_1.json",
+            resultBytes: 321,
+            checkpointId: "checkpoint_1",
+            memoryScopes: ["session", "workspace"],
+            workspaceId: "workspace_1",
+            payload: {
+              actorId: "actor_1",
+              nested: { status: "done" },
+            },
+          }),
+        ],
+      },
+    });
+  });
+
   it("quarantines corrupt chat session JSON and starts from an empty store", async () => {
     await writeFile(path.join(configDir, "chat-sessions.json"), "", "utf8");
     const store = createChatSessionStore({
