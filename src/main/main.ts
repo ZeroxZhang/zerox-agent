@@ -8,7 +8,7 @@ import {
   Tray,
 } from "electron";
 import type { MenuItemConstructorOptions } from "electron";
-import electronUpdater from "electron-updater";
+import { autoUpdater } from "electron-updater";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { getAgentValidationModeOptions } from "./agentValidationMode";
@@ -57,7 +57,6 @@ const rendererUrl = process.env.ELECTRON_RENDERER_URL;
 const appMeta = getAppMeta();
 const smokeMode = getSmokeModeOptions(process.env);
 const validationMode = getAgentValidationModeOptions(process.env);
-const { autoUpdater } = electronUpdater;
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
