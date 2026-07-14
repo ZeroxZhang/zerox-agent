@@ -4,19 +4,18 @@ import type {
 } from "./chat";
 
 export const CHAT_ATTACHMENT_MAX_COUNT = 6;
-export const CHAT_ATTACHMENT_MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+export const CHAT_ATTACHMENT_MAX_IMAGE_BYTES = 7 * 1024 * 1024;
 export const CHAT_ATTACHMENT_MAX_TEXT_BYTES = 1024 * 1024;
-export const CHAT_ATTACHMENT_MAX_TOTAL_BYTES = 20 * 1024 * 1024;
+export const CHAT_ATTACHMENT_MAX_TOTAL_BYTES = 12 * 1024 * 1024;
+export const CHAT_ATTACHMENT_MAX_TEXT_CONTEXT_CHARS = 24_000;
 
 const imageMediaTypes = new Set([
   "image/png",
   "image/jpeg",
   "image/webp",
-  "image/gif",
 ]);
 
 const imageMediaTypeByExtension: Record<string, string> = {
-  gif: "image/gif",
   jpeg: "image/jpeg",
   jpg: "image/jpeg",
   png: "image/png",

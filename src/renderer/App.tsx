@@ -591,23 +591,29 @@ export function App() {
             <small>by Zerox</small>
           </div>
           {getAppUpdateActionLabel(appUpdateState) ? (
-            <button
-              className="nav-update-action"
-              type="button"
-              disabled={
-                appUpdateState.phase === "checking" ||
-                appUpdateState.phase === "downloading" ||
-                appUpdateState.phase === "installing"
-              }
-              title={appUpdateState.message}
-              onClick={() => void handleAppUpdateAction()}
-            >
-              <span className="nav-update-dot" aria-hidden="true" />
-              {getAppUpdateActionLabel(appUpdateState)}
-            </button>
+            isPassiveAppUpdatePhase(appUpdateState) ? (
+              <span
+                aria-hidden="true"
+                className="nav-update-status"
+                title={appUpdateState.message}
+              >
+                <span className="nav-update-dot" />
+                {getAppUpdateActionLabel(appUpdateState)}
+              </span>
+            ) : (
+              <button
+                className="nav-update-action"
+                type="button"
+                title={appUpdateState.message}
+                onClick={() => void handleAppUpdateAction()}
+              >
+                <span className="nav-update-dot" aria-hidden="true" />
+                {getAppUpdateActionLabel(appUpdateState)}
+              </button>
+            )
           ) : null}
           <span className="sr-only" role="status" aria-live="polite">
-            {appUpdateState.message ?? ""}
+            {getAppUpdateAccessibleStatus(appUpdateState)}
           </span>
         </div>
       </aside>
@@ -713,6 +719,25 @@ function getAppUpdateActionLabel(state: AppUpdateState): string | null {
     return "重试更新";
   }
   return null;
+}
+
+function isPassiveAppUpdatePhase(state: AppUpdateState): boolean {
+  return (
+    state.phase === "checking" ||
+    state.phase === "downloading" ||
+    state.phase === "installing"
+  );
+}
+
+function getAppUpdateAccessibleStatus(state: AppUpdateState): string {
+  if (state.phase !== "downloading") {
+    return state.message ?? "";
+  }
+  const progress = Math.min(
+    100,
+    Math.max(0, Math.floor((state.progressPercent ?? 0) / 10) * 10),
+  );
+  return `${state.message ?? "正在后台下载新版本…"} ${progress}%`;
 }
 
 function SettingsSectionShell(props: {

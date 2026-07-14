@@ -4,6 +4,12 @@ import {
   ChatAttachmentValidationError,
   processChatAttachments,
 } from "./chatAttachmentProcessor";
+import {
+  CHAT_ATTACHMENT_MAX_TEXT_CONTEXT_CHARS,
+  CHAT_ATTACHMENT_MAX_IMAGE_BYTES,
+  CHAT_ATTACHMENT_MAX_TOTAL_BYTES,
+  resolveChatAttachmentType,
+} from "../shared/chatAttachments";
 
 const onePixelPng =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
@@ -44,6 +50,9 @@ describe("chat attachment processor", () => {
   });
 
   it("rejects spoofed images and invalid base64", () => {
+    expect(resolveChatAttachmentType("animation.gif", "image/gif")).toBeNull();
+    expect(CHAT_ATTACHMENT_MAX_IMAGE_BYTES).toBe(7 * 1024 * 1024);
+    expect(CHAT_ATTACHMENT_MAX_TOTAL_BYTES).toBe(12 * 1024 * 1024);
     expect(() =>
       processChatAttachments([
         {
@@ -69,5 +78,29 @@ describe("chat attachment processor", () => {
         },
       ]),
     ).toThrow("附件数据格式无效");
+  });
+
+  it("bounds extracted text before it reaches the model context", () => {
+    const oversizedText = "x".repeat(
+      CHAT_ATTACHMENT_MAX_TEXT_CONTEXT_CHARS + 10_000,
+    );
+    const result = processChatAttachments([
+      {
+        id: "large_text",
+        name: "large.txt",
+        mediaType: "text/plain",
+        size: Buffer.byteLength(oversizedText),
+        kind: "text",
+        dataBase64: Buffer.from(oversizedText).toString("base64"),
+      },
+    ]);
+
+    expect(result.textContext).toContain("附件内容已截断");
+    expect(result.textContext).toContain(
+      `仅传入前 ${CHAT_ATTACHMENT_MAX_TEXT_CONTEXT_CHARS} 个字符`,
+    );
+    expect(result.textContext.length).toBeLessThan(
+      CHAT_ATTACHMENT_MAX_TEXT_CONTEXT_CHARS + 500,
+    );
   });
 });

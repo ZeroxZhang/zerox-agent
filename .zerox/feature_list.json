@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-07-14T23:14:00.000+08:00",
+  "updatedAt": "2026-07-14T23:57:00.000+08:00",
   "features": [
     {
       "id": "P48-v3.7.1-auto-update-and-chat-attachments",
@@ -13,6 +13,7 @@
         "electron-builder.yml",
         "package.json",
         "package-lock.json",
+        "README.md",
         "src/shared/appUpdate.ts",
         "src/shared/chat.ts",
         "src/shared/packageScripts.test.ts",
@@ -39,8 +40,13 @@
         "src/renderer/components/AgentChatPanel.tsx",
         "src/renderer/materialDesign.test.ts",
         "src/renderer/styles/composer.css",
+        "src/renderer/styles/responsive.css",
         "src/renderer/styles/sidebar.css",
         "src/shared/chatAttachments.ts",
+        "src/shared/readme.test.ts",
+        "src/shared/systemPromptAssembler.test.ts",
+        "src/shared/systemPromptLayer.ts",
+        "src/shared/systemPromptLayerProviders.ts",
         "scripts/package-mac.mjs"
       ],
       "definitionOfDone": [
@@ -53,7 +59,7 @@
         "Focused frontend, IPC, updater, attachment, provider, and release metadata tests pass together with the full verify, production smoke, harness, packaging, adversarial review, and release checks"
       ],
       "verification": [
-        "npm test -- --run src/main/appUpdateService.test.ts src/main/chatAttachmentProcessor.test.ts src/main/chatService.test.ts src/main/chatSessionStore.test.ts src/main/ipc/index.test.ts src/main/openAiCompatibleClient.test.ts src/main/providers/providers.test.ts src/preload/index.test.ts src/renderer/materialDesign.test.ts src/shared/packageScripts.test.ts",
+        "npm test -- --run src/main/appUpdateService.test.ts src/main/chatAttachmentProcessor.test.ts src/main/chatService.test.ts src/main/chatSessionStore.test.ts src/main/ipc/index.test.ts src/main/openAiCompatibleClient.test.ts src/main/providers/providers.test.ts src/preload/index.test.ts src/renderer/materialDesign.test.ts src/shared/packageScripts.test.ts src/shared/readme.test.ts src/shared/systemPromptAssembler.test.ts",
         "npm test",
         "npm run build",
         "npm run verify",

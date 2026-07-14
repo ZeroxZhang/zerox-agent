@@ -20,7 +20,9 @@ export async function readPastedChatAttachments(
   const existingBytes = existing.reduce((total, attachment) => total + attachment.size, 0);
   const incomingBytes = files.reduce((total, file) => total + file.size, 0);
   if (existingBytes + incomingBytes > CHAT_ATTACHMENT_MAX_TOTAL_BYTES) {
-    throw new ChatAttachmentReadError("附件总大小不能超过 20 MB。");
+    throw new ChatAttachmentReadError(
+      `附件总大小不能超过 ${CHAT_ATTACHMENT_MAX_TOTAL_BYTES / (1024 * 1024)} MB。`,
+    );
   }
 
   return Promise.all(

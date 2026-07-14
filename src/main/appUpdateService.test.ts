@@ -44,7 +44,7 @@ describe("app update service", () => {
     updater.emit("update-downloaded", { version: "3.7.2" });
 
     expect(updater.autoDownload).toBe(true);
-    expect(updater.autoInstallOnAppQuit).toBe(true);
+    expect(updater.autoInstallOnAppQuit).toBe(false);
     expect(updater.allowPrerelease).toBe(false);
     expect(updater.checkForUpdates).toHaveBeenCalledTimes(1);
     expect(states).toContain("checking");
@@ -61,10 +61,12 @@ describe("app update service", () => {
 
   it("installs only after the update-downloaded event", async () => {
     const updater = new FakeUpdater();
+    const onBeforeInstall = vi.fn();
     const service = createAppUpdateService({
       updater,
       enabled: true,
       currentVersion: "3.7.1",
+      onBeforeInstall,
     });
     await service.start();
 
@@ -79,7 +81,11 @@ describe("app update service", () => {
       ok: true,
       state: { phase: "installing", availableVersion: "3.7.2" },
     });
+    expect(onBeforeInstall).toHaveBeenCalledTimes(1);
     expect(updater.quitAndInstall).toHaveBeenCalledWith(false, true);
+    expect(onBeforeInstall.mock.invocationCallOrder[0]).toBeLessThan(
+      updater.quitAndInstall.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
+    );
   });
 
   it("sanitizes update errors and permits a later retry", async () => {

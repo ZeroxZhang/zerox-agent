@@ -15,12 +15,15 @@ describe("package scripts", () => {
     const packageLock = JSON.parse(
       readFileSync(path.join(process.cwd(), "package-lock.json"), "utf8"),
     ) as { version?: string; packages?: Record<string, { version?: string }> };
+    const readme = readFileSync(path.join(process.cwd(), "README.md"), "utf8");
 
     expect(packageJson.version).toBe("3.7.1");
     // package-lock.json is updated by `npm install`; check it matches the
     // declared package version once dependencies are installed.
     expect(packageLock.version).toBe("3.7.1");
     expect(packageLock.packages?.[""]?.version).toBe("3.7.1");
+    expect(readme).toContain("current release: v3.7.1");
+    expect(readme).toContain("当前版本是 **v3.7.1**");
   });
 
   it("keeps release gates tracked through v3.7.1", () => {

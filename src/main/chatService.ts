@@ -35,6 +35,7 @@ import type {
 } from "./toolAuthorizationService";
 import type {
   ChatAgentStatus,
+  ChatAttachmentMetadata,
   ChatRelatedMemory,
   ChatSessionListItem,
   ChatSessionRecord,
@@ -133,7 +134,14 @@ type PendingSkillInputState = {
   workspaceSummary?: ChatWorkspaceSummary;
   runContext?: AgentRunContext;
   partialValues: Record<string, SkillInputValue>;
+  attachments?: SendChatMessageInput["attachments"];
+  createdAtMs: number;
 };
+
+const PENDING_ATTACHMENT_PAYLOAD_TTL_MS = 60 * 60 * 1000;
+const PENDING_ATTACHMENT_PAYLOAD_MAX_BYTES = 40 * 1024 * 1024;
+const EXPIRED_PENDING_ATTACHMENT_MESSAGE =
+  "附件内容在应用重启或长时间等待后已失效，请重新发送消息并粘贴附件。";
 
 type ChatTurnInternalOptions = {
   skipUserMessageAppend?: boolean;
@@ -233,6 +241,47 @@ export function createChatService(options: {
   const inFlightSkillInputResponses = new Set<string>();
   const sessionRequestTails = new Map<string, Promise<void>>();
 
+  function cachePendingSkillInput(
+    inputRequestId: string,
+    pending: PendingSkillInputState,
+  ): void {
+    pendingSkillInputRequests.set(inputRequestId, pending);
+    prunePendingAttachmentPayloads(getNowMs(options.now));
+  }
+
+  function prunePendingAttachmentPayloads(nowMs: number): void {
+    for (const entry of pendingSkillInputRequests.values()) {
+      if (
+        entry.attachments?.length &&
+        nowMs - entry.createdAtMs > PENDING_ATTACHMENT_PAYLOAD_TTL_MS
+      ) {
+        entry.attachments = undefined;
+      }
+    }
+    const entriesWithPayload = [...pendingSkillInputRequests.values()]
+      .filter((entry) => entry.attachments?.length)
+      .sort((left, right) => left.createdAtMs - right.createdAtMs);
+    let totalBytes = entriesWithPayload.reduce(
+      (sum, entry) =>
+        sum +
+        (entry.attachments ?? []).reduce(
+          (attachmentSum, attachment) => attachmentSum + attachment.size,
+          0,
+        ),
+      0,
+    );
+    for (const entry of entriesWithPayload) {
+      if (totalBytes <= PENDING_ATTACHMENT_PAYLOAD_MAX_BYTES) {
+        break;
+      }
+      totalBytes -= (entry.attachments ?? []).reduce(
+        (sum, attachment) => sum + attachment.size,
+        0,
+      );
+      entry.attachments = undefined;
+    }
+  }
+
   async function recoverPendingSkillInputState(
     inputRequestId: string,
   ): Promise<PendingSkillInputState | null> {
@@ -264,6 +313,7 @@ export function createChatService(options: {
     const recovered = toInMemoryPendingSkillInputState({
       persisted,
       selectedSkill: requestedSkill.skill,
+      createdAtMs: getNowMs(options.now),
       ...(workspaceResolution.runContext
         ? {
             runContext: {
@@ -273,7 +323,7 @@ export function createChatService(options: {
           }
         : {}),
     });
-    pendingSkillInputRequests.set(inputRequestId, recovered);
+    cachePendingSkillInput(inputRequestId, recovered);
     return recovered;
   }
 
@@ -603,8 +653,8 @@ export function createChatService(options: {
             ...(chatRunContext?.workspaceId ? { workspaceId: chatRunContext.workspaceId } : {}),
             ...(workspaceSummary ? { workspaceSummary } : {}),
             partialValues: inputResolution.values,
-            ...(input.attachments?.length
-              ? { attachments: input.attachments }
+            ...(processedAttachments.metadata.length
+              ? { attachments: processedAttachments.metadata }
               : {}),
           });
           try {
@@ -624,10 +674,14 @@ export function createChatService(options: {
               message: "Failed to persist skill input request.",
             };
           }
-          pendingSkillInputRequests.set(inputRequest.id, {
+          cachePendingSkillInput(inputRequest.id, {
             ...toInMemoryPendingSkillInputState({
               persisted,
               selectedSkill: requestedSkill.skill,
+              createdAtMs: startedAtMs,
+              ...(processedAttachments.validatedInputs.length
+                ? { attachments: processedAttachments.validatedInputs }
+                : {}),
               ...(chatRunContext ? { runContext: chatRunContext } : {}),
             }),
           });
@@ -1499,6 +1553,7 @@ export function createChatService(options: {
     input: SkillInputResponse,
     runtimeOptions: SendChatMessageRuntimeOptions,
   ): Promise<SkillInputResponseResult> {
+    prunePendingAttachmentPayloads(getNowMs(options.now));
     const pending =
       pendingSkillInputRequests.get(input.inputRequestId) ??
       (await recoverPendingSkillInputState(input.inputRequestId));
@@ -1507,6 +1562,21 @@ export function createChatService(options: {
         ok: false,
         message: "Unknown skill input request.",
       };
+    }
+    if (
+      pending.persisted.attachments?.length &&
+      !pending.attachments?.length
+    ) {
+      try {
+        await markPersistedSkillInputCompleted(pending);
+      } catch {
+        return {
+          ok: false,
+          message: "Failed to persist skill input completion.",
+        };
+      }
+      pendingSkillInputRequests.delete(input.inputRequestId);
+      return { ok: false, message: EXPIRED_PENDING_ATTACHMENT_MESSAGE };
     }
 
     const mergedValues = {
@@ -1600,10 +1670,14 @@ export function createChatService(options: {
           message: "Failed to persist skill input request.",
         };
       }
-      pendingSkillInputRequests.set(inputRequest.id, {
+      cachePendingSkillInput(inputRequest.id, {
         ...toInMemoryPendingSkillInputState({
           persisted,
           selectedSkill: pending.selectedSkill,
+          createdAtMs: pending.createdAtMs,
+          ...(pending.attachments?.length
+            ? { attachments: pending.attachments }
+            : {}),
           ...(pending.runContext ? { runContext: pending.runContext } : {}),
         }),
       });
@@ -1627,8 +1701,8 @@ export function createChatService(options: {
         sessionId: pending.sessionId,
         requestId: pending.requestId,
         message: pending.userMessage,
-        ...(pending.persisted.attachments?.length
-          ? { attachments: pending.persisted.attachments }
+        ...(pending.attachments?.length
+          ? { attachments: pending.attachments }
           : {}),
         selectedSkillName: pending.selectedSkill.manifest.name,
         ...(pending.workspaceId ? { workspaceId: pending.workspaceId } : {}),
@@ -3214,7 +3288,7 @@ function createPendingSkillInputState(options: {
   workspaceId?: string;
   workspaceSummary?: ChatWorkspaceSummary;
   partialValues: Record<string, SkillInputValue>;
-  attachments?: SendChatMessageInput["attachments"];
+  attachments?: ChatAttachmentMetadata[];
 }): SkillPendingInputState {
   return {
     inputRequestId: options.inputRequest.id,
@@ -3235,6 +3309,8 @@ function toInMemoryPendingSkillInputState(options: {
   persisted: SkillPendingInputState;
   selectedSkill: SkillRecord;
   runContext?: AgentRunContext;
+  attachments?: SendChatMessageInput["attachments"];
+  createdAtMs: number;
 }): PendingSkillInputState {
   return {
     persisted: options.persisted,
@@ -3251,6 +3327,10 @@ function toInMemoryPendingSkillInputState(options: {
       : {}),
     ...(options.runContext ? { runContext: options.runContext } : {}),
     partialValues: options.persisted.partialValues,
+    createdAtMs: options.createdAtMs,
+    ...(options.attachments?.length
+      ? { attachments: options.attachments }
+      : {}),
   };
 }
 

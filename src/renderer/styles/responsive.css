@@ -15,10 +15,16 @@
 @media (max-width: 900px) {
   .app-shell {
     grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+    height: 100dvh;
+    min-height: 0;
   }
 
   .workspace {
     grid-column: 1;
+    grid-row: 2;
+    min-height: 0;
+    overflow: auto;
     padding: var(--space-5);
   }
 
@@ -39,9 +45,27 @@
     box-shadow: none;
   }
 
-  .workspace-sidebar .brand,
-  .nav-footer {
+  .workspace-sidebar .brand {
     display: none;
+  }
+
+  .nav-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--space-2);
+    margin-top: 0;
+    padding: 0 var(--space-1);
+  }
+
+  .nav-footer-version {
+    gap: var(--space-1);
+  }
+
+  .nav-update-action,
+  .nav-update-status {
+    min-height: 28px;
+    padding: 4px 8px;
   }
 
   .primary-nav {
@@ -56,11 +80,12 @@
   }
 
   .app-shell.is-agent-chat .workspace {
-    min-height: auto;
+    min-height: 0;
+    overflow: hidden;
   }
 
   .agent-chat-panel {
-    height: calc(100dvh - 92px);
+    height: 100%;
     min-height: 0;
   }
 
@@ -172,11 +197,11 @@
   }
 
   .app-shell.is-agent-chat .workspace {
-    min-height: 100dvh;
+    min-height: 0;
   }
 
   .agent-chat-panel {
-    height: 100dvh;
+    height: 100%;
     min-height: 0;
   }
 
@@ -231,6 +256,16 @@
     padding-top: 78px;
     padding-right: 24px;
     padding-bottom: 96px;
+  }
+
+  .composer-input-shell.has-attachments textarea {
+    padding-top: 118px;
+  }
+
+  .composer-attachment-list {
+    top: 82px;
+    left: 14px;
+    right: 14px;
   }
 
   .composer-floating-actions {
@@ -297,6 +332,12 @@
 
   .settings-section-body-header {
     padding: 0;
+  }
+}
+
+@media (max-width: 780px) {
+  .app-shell.is-agent-chat .workspace-sidebar {
+    display: flex;
   }
 }
 

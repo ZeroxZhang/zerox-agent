@@ -1,5 +1,6 @@
 import {
   app,
+  autoUpdater as nativeAutoUpdater,
   BrowserWindow,
   dialog,
   ipcMain,
@@ -96,6 +97,13 @@ const appUpdateService = createAppUpdateService({
   onStateChange(state) {
     sendToRendererWindows("app:updateStateChanged", state);
   },
+  onBeforeInstall() {
+    isQuitting = true;
+  },
+});
+
+nativeAutoUpdater.on("before-quit-for-update", () => {
+  isQuitting = true;
 });
 
 function createMainWindow(): BrowserWindow {

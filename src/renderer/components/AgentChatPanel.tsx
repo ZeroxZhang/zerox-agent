@@ -271,6 +271,7 @@ export function AgentChatPanel({
   const draftAttachmentsRef = useRef<ChatAttachmentInput[]>([]);
   const [attachmentReadPending, setAttachmentReadPending] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [attachmentAnnouncement, setAttachmentAnnouncement] = useState("");
   const [goalModeEnabled, setGoalModeEnabled] = useState(false);
   const [pendingGoalDraft, setPendingGoalDraft] = useState<GoalDraft | null>(
     null,
@@ -1534,7 +1535,11 @@ export function AgentChatPanel({
         files,
         draftAttachmentsRef.current,
       );
-      setComposerAttachments([...draftAttachmentsRef.current, ...attachments]);
+      const nextAttachments = [...draftAttachmentsRef.current, ...attachments];
+      setComposerAttachments(nextAttachments);
+      setAttachmentAnnouncement(
+        `已识别 ${attachments.length} 个粘贴附件，当前共 ${nextAttachments.length} 个`,
+      );
       setStatus({
         kind: "ready",
         message: `已识别 ${attachments.length} 个粘贴附件`,
@@ -1551,10 +1556,16 @@ export function AgentChatPanel({
   }
 
   function removeDraftAttachment(attachmentId: string) {
+    const removedAttachment = draftAttachmentsRef.current.find(
+      (attachment) => attachment.id === attachmentId,
+    );
     setComposerAttachments(
       draftAttachmentsRef.current.filter((attachment) => attachment.id !== attachmentId),
     );
     setAttachmentError(null);
+    setAttachmentAnnouncement(
+      removedAttachment ? `已移除附件 ${removedAttachment.name}` : "已移除附件",
+    );
   }
 
   function handlePickPrompt(prompt: string) {
@@ -2382,6 +2393,7 @@ export function AgentChatPanel({
     if (outgoingAttachments.length) {
       setComposerAttachments([]);
       setAttachmentError(null);
+      setAttachmentAnnouncement("");
     }
     setWorkPhase("planning");
     activeStatusSessionIdRef.current = sessionId;
@@ -2479,6 +2491,15 @@ export function AgentChatPanel({
         );
         return;
       }
+      if (
+        outgoingAttachments.length > 0 &&
+        draftAttachmentsRef.current.length === 0
+      ) {
+        setComposerAttachments(outgoingAttachments);
+        setAttachmentAnnouncement(
+          `发送失败，已保留 ${outgoingAttachments.length} 个附件供重试`,
+        );
+      }
       activeStatusSessionIdRef.current = null;
       const wasCanceled = isCanceledMessage(result.message);
       setStatus({
@@ -2567,6 +2588,10 @@ export function AgentChatPanel({
           }),
         );
         return;
+      }
+
+      if (result.message.includes("附件内容在应用重启或长时间等待后已失效")) {
+        setPendingInputRequest(null);
       }
 
       setStatus({ kind: "error", message: result.message });
@@ -3463,6 +3488,9 @@ export function AgentChatPanel({
                 正在读取粘贴的附件…
               </p>
             ) : null}
+            <span className="sr-only" role="status" aria-live="polite">
+              {attachmentAnnouncement}
+            </span>
             {autoApprovalEnabled || goalModeEnabled ? (
               <div className="composer-mode-risk-summary" role="status">
                 <strong>高权限模式已开启</strong>

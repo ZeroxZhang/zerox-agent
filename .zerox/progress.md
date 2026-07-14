@@ -7104,3 +7104,68 @@
   - `npm run smoke:prod` -> passed; renderer rendered the Agent chat UI.
   - `git diff --check` -> passed before the final progress/status update and was
     rerun after it.
+
+## 2026-07-15 - P48 v3.7.1 Automatic Updates and Pasted Chat Attachments
+
+- Implemented the v3.7.1 application-update chain across main, preload, IPC,
+  renderer, and release metadata:
+  - packaged applications check the GitHub release channel automatically and
+    download updates in the background;
+  - the version footer exposes compact checking, progress, downloaded,
+    installing, and retry states, including narrow-window and screen-reader
+    behavior;
+  - installation remains an explicit user action, marks the tray lifecycle as
+    quitting before windows close, drains runtime shutdown, and requests a
+    restart through `electron-updater`;
+  - development, validation, and smoke modes do not perform updater network
+    traffic.
+- Implemented pasted chat attachments end to end:
+  - PNG, JPEG, WebP, and bounded UTF-8 text files render as compact removable
+    28px attachment chips and survive normal send failures for retry;
+  - renderer limits are revalidated in main using canonical Base64, actual byte
+    counts, image signatures, strict UTF-8, 7 MiB per image, 12 MiB total, and a
+    24,000-character model-context budget;
+  - session history persists display metadata only; guided-skill raw payloads
+    stay in a 40 MiB bounded in-memory cache with a one-hour TTL, and an expired
+    or restarted request fails visibly instead of silently losing its image;
+  - OpenAI-compatible, Anthropic, and Gemini adapters receive their native
+    multimodal request shapes;
+  - a protected system-prompt layer treats attachment blocks as untrusted
+    quoted data and forbids attachment content from authorizing tool calls or
+    side effects.
+- Independent adversarial review found and verified fixes for updater close
+  interception, silent install-on-quit, pending Base64 persistence, text-context
+  amplification, failed-send attachment loss, Gemini/GIF compatibility,
+  Anthropic Base64 limits, prompt injection, TTL/size bypasses, and activity
+  normalizer observability loss. Final code-level review: PASS, with no
+  remaining signing-independent source blocker.
+- Independent design/accessibility review against
+  `docs/design/guidelines_0708.html`: PASS. The final 640px layout keeps the
+  update action, attachment row, composer, and send control in the viewport;
+  update progress and paste/remove/retry events are announced accessibly.
+- Final frozen-tree evidence:
+  - focused feature verification: 12 files / 272 tests passed;
+  - `npm run verify`: 210 files / 2,099 tests passed; Agent evals 26/26 and
+    Memory evals 2/2 passed;
+  - `npm run smoke:prod`, `npm run harness:check`, and `git diff --check`
+    passed;
+  - `npm run dist:mac` and packaged smoke requiring `v3.7.1` passed;
+  - ZIP extraction, DMG verification, blockmap v2 sizes, `Info.plist`,
+    `app-update.yml`, `latest-mac.yml`, ASAR/current-build hashes, and
+    OpenAI/Anthropic/Gemini mock request bodies all passed;
+  - final ZIP: 350,773,149 bytes, SHA512
+    `zszZI4RRQvjdwIeBTyVwX0wv8Tx/5q9cWiNa03Ya6sRVCCFqmlS+PG/AxgmQwW8SoTDFvwwnG+uJwLoOYEBWyw==`;
+  - final DMG: 129,805,844 bytes, SHA512
+    `sSIwFOLEmPeRGGVhrsyiLs3XVEPl4HRfV1pd6XM7t7BJqv4Tgr2rcIKYjwSNgp7S0Fgs2Xk9u3ruojh29kP63A==`.
+- Release is intentionally HOLD and P48 remains `in_progress`: this machine has
+  zero valid Apple code-signing identities; electron-builder skipped signing,
+  `codesign --verify --deep --strict` failed, and `spctl --assess` failed.
+  macOS automatic updates require a valid Developer ID Application signature,
+  so the branch was not merged to `main`, pushed, tagged, or published.
+- Release handoff after signing credentials are available:
+  1. rebuild and verify signed/notarized DMG and ZIP artifacts;
+  2. run a real installed-app update/install/reopen check (v3.7.0 itself has no
+     updater, so the first transition to v3.7.1 is a manual install);
+  3. upload assets using the exact hyphenated names referenced by
+     `latest-mac.yml` (`Zerox-Agent-...`), including both blockmaps and
+     `latest-mac.yml`, before merging/pushing/tagging the release.

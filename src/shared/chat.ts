@@ -160,7 +160,7 @@ export type SkillPendingInputState = {
   workspaceId?: string;
   workspaceSummary?: ChatWorkspaceSummary;
   partialValues: Record<string, string | number | boolean>;
-  attachments?: ChatAttachmentInput[];
+  attachments?: ChatAttachmentMetadata[];
 };
 
 export type SkillInputResponseResult = SendChatMessageResult;

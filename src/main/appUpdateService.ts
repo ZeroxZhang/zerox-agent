@@ -30,6 +30,7 @@ export function createAppUpdateService(options: {
   currentVersion: string;
   now?: () => Date;
   onStateChange?: (state: AppUpdateState) => void;
+  onBeforeInstall?: () => void;
 }) {
   const now = options.now ?? (() => new Date());
   let started = false;
@@ -145,7 +146,7 @@ export function createAppUpdateService(options: {
     }
     started = true;
     options.updater.autoDownload = true;
-    options.updater.autoInstallOnAppQuit = true;
+    options.updater.autoInstallOnAppQuit = false;
     options.updater.allowPrerelease = false;
     bindUpdaterEvents();
     return checkForUpdates();
@@ -167,6 +168,7 @@ export function createAppUpdateService(options: {
       progressPercent: 100,
       message: "正在安装更新并重新打开应用…",
     });
+    options.onBeforeInstall?.();
     options.updater.quitAndInstall(false, true);
     return { ok: true, state: installingState };
   }

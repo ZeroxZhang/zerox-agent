@@ -4,6 +4,7 @@ import type { AgentPromptProfile } from "./agentProtocol";
 export type SystemPromptLayerId =
   | "agent.identity"       // "you are a local desktop AI agent..."
   | "agent.memory"         // memory system usage instructions (Phase 2)
+  | "agent.attachment_safety" // attachment quoted-data trust boundary
   | "agent.tool_guidance"  // tool prioritization rules
   | "agent.output"         // output language / format rules
   | "agent.profile"        // model-specific behavioral guidance

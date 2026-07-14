@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type {
-  ChatAttachmentInput,
   ChatAttachmentMetadata,
   ChatMessageSearchOptions,
   ChatMessageSearchResult,
@@ -288,20 +287,21 @@ export function createChatSessionStore(options: {
 
     async appendActivityEvent(sessionId, event, eventOptions) {
       return updateSessionById(sessionId, (session) => {
+        const normalizedEvent = normalizeStatusEvent(event);
         const previousEvents = session.activity?.statusEvents ?? [];
-        const statusEvents = [...previousEvents, event].slice(-80);
+        const statusEvents = [...previousEvents, normalizedEvent].slice(-80);
         const selectedSkillName =
           eventOptions?.selectedSkillName ??
-          event.selectedSkillName ??
+          normalizedEvent.selectedSkillName ??
           session.activity?.selectedSkillName;
         return {
           ...session,
           activity: {
-            updatedAt: event.createdAt,
+            updatedAt: normalizedEvent.createdAt,
             statusEvents,
             ...(selectedSkillName ? { selectedSkillName } : {}),
           },
-          updatedAt: event.createdAt,
+          updatedAt: normalizedEvent.createdAt,
         };
       });
     },
@@ -553,9 +553,32 @@ function normalizeStatusEvent(event: ChatTaskStatusEvent): ChatTaskStatusEvent {
         ? event.elapsedMs
         : 0,
     ...(typeof event.turn === "number" ? { turn: event.turn } : {}),
+    ...(event.toolCallId ? { toolCallId: String(event.toolCallId) } : {}),
+    ...(event.toolInvocationId
+      ? { toolInvocationId: String(event.toolInvocationId) }
+      : {}),
     ...(event.toolName ? { toolName: String(event.toolName) } : {}),
+    ...(event.toolSource ? { toolSource: String(event.toolSource) } : {}),
+    ...(event.resultRef ? { resultRef: String(event.resultRef) } : {}),
+    ...(typeof event.resultBytes === "number" && Number.isFinite(event.resultBytes)
+      ? { resultBytes: Math.max(0, Math.floor(event.resultBytes)) }
+      : {}),
+    ...(event.invocationStatus
+      ? { invocationStatus: String(event.invocationStatus) }
+      : {}),
+    ...(event.checkpointId ? { checkpointId: String(event.checkpointId) } : {}),
+    ...(Array.isArray(event.memoryScopes)
+      ? { memoryScopes: event.memoryScopes.slice(0, 32).map(String) }
+      : {}),
+    ...(event.historyOperation
+      ? { historyOperation: String(event.historyOperation) }
+      : {}),
     ...(event.selectedSkillName
       ? { selectedSkillName: String(event.selectedSkillName) }
+      : {}),
+    ...(event.workspaceId ? { workspaceId: String(event.workspaceId) } : {}),
+    ...(normalizeChatWorkspaceSummary(event.workspaceSummary)
+      ? { workspaceSummary: normalizeChatWorkspaceSummary(event.workspaceSummary) }
       : {}),
     ...(typeof event.toolCallsExecuted === "number"
       ? { toolCallsExecuted: event.toolCallsExecuted }
@@ -564,7 +587,65 @@ function normalizeStatusEvent(event: ChatTaskStatusEvent): ChatTaskStatusEvent {
     ...(inputRequest ? { inputRequest } : {}),
     ...(pendingSkillInput ? { pendingSkillInput } : {}),
     ...(typeof event.ok === "boolean" ? { ok: event.ok } : {}),
+    ...(normalizeStatusPayload(event.payload)
+      ? { payload: normalizeStatusPayload(event.payload) }
+      : {}),
   };
+}
+
+function normalizeStatusPayload(
+  value: unknown,
+  depth = 0,
+): Record<string, unknown> | undefined {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    depth > 6
+  ) {
+    return undefined;
+  }
+  const normalized: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value).slice(0, 100)) {
+    if (
+      key === "dataBase64" ||
+      key === "__proto__" ||
+      key === "constructor" ||
+      key === "prototype"
+    ) {
+      continue;
+    }
+    const normalizedEntry = normalizeStatusPayloadValue(entry, depth + 1);
+    if (normalizedEntry !== undefined) {
+      normalized[key] = normalizedEntry;
+    }
+  }
+  return Object.keys(normalized).length ? normalized : undefined;
+}
+
+function normalizeStatusPayloadValue(
+  value: unknown,
+  depth: number,
+): unknown {
+  if (value === null || typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "string") {
+    return value.slice(0, 32_000);
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : undefined;
+  }
+  if (Array.isArray(value)) {
+    if (depth > 6) {
+      return undefined;
+    }
+    return value
+      .slice(0, 100)
+      .map((entry) => normalizeStatusPayloadValue(entry, depth + 1))
+      .filter((entry) => entry !== undefined);
+  }
+  return normalizeStatusPayload(value, depth);
 }
 
 function normalizeStatusEventState(
@@ -632,7 +713,7 @@ function normalizeSkillPendingInputState(
   const requestId = normalizeOptionalString(pending.requestId);
   const userMessage = normalizeOptionalString(pending.userMessage);
   const selectedSkillName = normalizeOptionalString(pending.selectedSkillName);
-  const attachments = normalizeChatAttachmentInputs(pending.attachments);
+  const attachments = normalizeChatAttachmentMetadataList(pending.attachments);
   if (!inputRequestId || !sessionId || !requestId || !userMessage || !selectedSkillName) {
     return undefined;
   }
@@ -679,26 +760,6 @@ function normalizeChatAttachmentMetadataList(
         : null;
     return id && name && mediaType && kind && size !== null
       ? [{ id, name, mediaType, size, kind }]
-      : [];
-  });
-}
-
-function normalizeChatAttachmentInputs(value: unknown): ChatAttachmentInput[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  const metadata = normalizeChatAttachmentMetadataList(value);
-  const byId = new Map(metadata.map((entry) => [entry.id, entry]));
-  return value.slice(0, 6).flatMap((entry): ChatAttachmentInput[] => {
-    if (!entry || typeof entry !== "object") {
-      return [];
-    }
-    const record = entry as Record<string, unknown>;
-    const id = normalizeOptionalString(record.id);
-    const attachment = id ? byId.get(id) : undefined;
-    const dataBase64 = normalizeOptionalString(record.dataBase64);
-    return attachment && dataBase64
-      ? [{ ...attachment, dataBase64 }]
       : [];
   });
 }
