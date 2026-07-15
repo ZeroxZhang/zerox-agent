@@ -7354,3 +7354,9 @@
     parsing `dmg zip` as positional arguments because config flags separated
     them from `--mac`; targets now immediately follow `--mac` and the package
     script contract test pins that ordering.
+  - the next real artifact preflight exposed electron-builder 26 dereferencing
+    signed Electron Framework symlinks inside its ZIP target. Packaging now
+    replaces that archive with a `ditto --keepParent` ZIP from the signed,
+    unpacked app, regenerates the ZIP blockmap, and atomically updates the
+    ZIP size and SHA-512 in `latest-mac.yml`; the strict bundle-topology and
+    deep-signature preflight remains enabled.

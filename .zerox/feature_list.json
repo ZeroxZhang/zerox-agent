@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-07-16T00:10:00.000+08:00",
+  "updatedAt": "2026-07-16T00:36:00.000+08:00",
   "features": [
     {
       "id": "P48-v3.7.1-auto-update-and-chat-attachments",
@@ -56,6 +56,7 @@
         "src/shared/systemPromptLayer.ts",
         "src/shared/systemPromptLayerProviders.ts",
         "scripts/package-mac.mjs",
+        "scripts/finalize-mac-zip.mjs",
         "scripts/after-sign-mac.mjs",
         "scripts/release-preflight.mjs",
         "scripts/sign-update-manifest.mjs",

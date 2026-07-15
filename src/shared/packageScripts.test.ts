@@ -30,6 +30,18 @@ describe("package scripts", () => {
     expect(source).toContain('"--config.mac.hardenedRuntime=false"');
     expect(source).toContain('"--config.mac.notarize=false"');
     expect(source).toContain('CSC_IDENTITY_AUTO_DISCOVERY: "false"');
+    expect(source).toContain('targets.includes("zip")');
+    expect(source).toContain('"finalize-mac-zip.mjs"');
+
+    const finalizeZip = readFileSync(
+      path.join(process.cwd(), "scripts", "finalize-mac-zip.mjs"),
+      "utf8",
+    );
+    expect(finalizeZip).toContain('const dittoBin = "/usr/bin/ditto"');
+    expect(finalizeZip).toContain('"--keepParent"');
+    expect(finalizeZip).toContain("await buildBlockMap(");
+    expect(finalizeZip).toContain('metadata.path = zipEntry.url');
+    expect(finalizeZip).toContain('metadata.sha512 = blockmap.sha512');
 
     const afterSign = readFileSync(
       path.join(process.cwd(), "scripts", "after-sign-mac.mjs"),

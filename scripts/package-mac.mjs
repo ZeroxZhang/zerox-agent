@@ -36,6 +36,7 @@ const electronBuilderBin = resolve(
   ".bin",
   `electron-builder${binSuffix}`,
 );
+const finalizeMacZipScript = resolve(rootDir, "scripts", "finalize-mac-zip.mjs");
 
 function run(command, args, env = {}) {
   const result = spawnSync(command, args, {
@@ -143,6 +144,13 @@ if (status === 0) {
       ? { CSC_IDENTITY_AUTO_DISCOVERY: "false" }
       : {},
   );
+}
+
+if (status === 0 && targets.includes("zip")) {
+  // electron-builder 26's 7-Zip archive path dereferences macOS framework
+  // symlinks, invalidating the signed bundle. ditto preserves the exact app
+  // topology expected by macOS and Squirrel.Mac.
+  status = run(process.execPath, [finalizeMacZipScript]);
 }
 
 if (status === 0) {
