@@ -5,9 +5,18 @@ import { fileURLToPath } from "node:url";
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const targets = process.argv.slice(2);
+const requestedReleaseMode = process.env.ZEROX_RELEASE_MODE?.trim() ?? "";
+const releaseMode = requestedReleaseMode || "developer-id";
 
 if (targets.length === 0) {
   console.error("Usage: node scripts/package-mac.mjs <electron-builder target...>");
+  process.exit(1);
+}
+
+if (releaseMode !== "developer-id" && releaseMode !== "legacy-adhoc") {
+  console.error(
+    "ZEROX_RELEASE_MODE must be unset, developer-id, or legacy-adhoc.",
+  );
   process.exit(1);
 }
 
@@ -114,11 +123,34 @@ if (status === 0) {
 }
 
 if (status === 0) {
-  status = run(electronBuilderBin, [
+  const builderArgs = [
     "--mac",
     `--config.extraMetadata.buildCommit=${frozenCommit}`,
+    `--config.extraMetadata.releaseMode=${releaseMode}`,
+    ...(releaseMode === "legacy-adhoc"
+      ? [
+          "--config.mac.identity=-",
+          "--config.mac.hardenedRuntime=false",
+          "--config.mac.notarize=false",
+        ]
+      : []),
     ...targets,
-  ]);
+  ];
+  status = run(
+    electronBuilderBin,
+    builderArgs,
+    releaseMode === "legacy-adhoc"
+      ? { CSC_IDENTITY_AUTO_DISCOVERY: "false" }
+      : {},
+  );
+}
+
+if (status === 0) {
+  const finalCommit = readFrozenGitCommit();
+  if (finalCommit !== frozenCommit) {
+    console.error("Git HEAD or working tree changed during artifact creation; refusing artifacts.");
+    status = 1;
+  }
 }
 
 const restoreStatus = run(npmBin, ["rebuild", "better-sqlite3"]);

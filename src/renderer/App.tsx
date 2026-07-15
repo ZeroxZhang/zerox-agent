@@ -612,9 +612,16 @@ export function App() {
               </button>
             )
           ) : null}
-          <span className="sr-only" role="status" aria-live="polite">
-            {getAppUpdateAccessibleStatus(appUpdateState)}
-          </span>
+          {appUpdateState.phase === "error" && appUpdateState.message ? (
+            <p className="nav-update-error-message" role="alert">
+              {appUpdateState.message}
+            </p>
+          ) : null}
+          {appUpdateState.phase !== "error" ? (
+            <span className="sr-only" role="status" aria-live="polite">
+              {getAppUpdateAccessibleStatus(appUpdateState)}
+            </span>
+          ) : null}
         </div>
       </aside>
 

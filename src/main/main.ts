@@ -43,6 +43,11 @@ import {
 import { setPromptBaseDir, loadModelPromptFile } from "./promptFileLoader";
 import { setProfileContentLoader } from "../shared/systemPromptLayerProviders";
 import { createAppUpdateService } from "./appUpdateService";
+import {
+  fetchVerifiedUpdateManifest,
+  verifyDownloadedUpdateFiles,
+} from "./appUpdateManifest";
+import { createUpdateHighWaterStore } from "./appUpdateHighWater";
 
 app.setName("Zerox Agent");
 applyUserDataDirOverride({
@@ -66,6 +71,15 @@ let taskSchedulerTimer: NodeJS.Timeout | null = null;
 let memoryMaintenanceTimer: NodeJS.Timeout | null = null;
 let appUpdateTimer: NodeJS.Timeout | null = null;
 let unsubscribeKernelEvents: (() => void) | null = null;
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (app.isReady()) createMainWindow();
+  });
+}
 
 const memoryMaintenanceIntervalMs = 30 * 60 * 1000;
 const taskSchedulerIntervalMs = 60 * 1000;
@@ -94,6 +108,12 @@ const appUpdateService = createAppUpdateService({
     !validationMode.enabled &&
     process.env.ZEROX_DISABLE_AUTO_UPDATE !== "1",
   currentVersion: app.getVersion(),
+  loadVerifiedUpdateManifest: () =>
+    fetchVerifiedUpdateManifest({ resourcesPath: process.resourcesPath }),
+  updateHighWaterStore: createUpdateHighWaterStore(
+    path.join(app.getPath("userData"), "config", "update-high-water.json"),
+  ),
+  verifyDownloadedUpdate: verifyDownloadedUpdateFiles,
   onStateChange(state) {
     sendToRendererWindows("app:updateStateChanged", state);
   },

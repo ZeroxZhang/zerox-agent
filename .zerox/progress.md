@@ -7258,3 +7258,95 @@
     P1/P2 after 13 files / 265 tests; the final exclusive `npm run verify`
     passed 212 files / 2,121 tests, build, Agent evals 26/26, and Memory evals
     2/2 without concurrent build interference.
+- Explicit compatibility release gate on 2026-07-15:
+  - `ZEROX_RELEASE_MODE` now defaults to the existing strict `developer-id`
+    path and accepts only the explicit compatibility value `legacy-adhoc`;
+  - compatibility packaging uses a full ad-hoc bundle signature, disables
+    hardened runtime and signing discovery, and embeds both `buildCommit` and
+    `releaseMode` in the packaged manifest;
+  - the after-sign hook replaces the outer bundle's CDHash-only designated
+    requirement with the stable version-independent requirement
+    `identifier "local.zerox.agent.desktop"`, which preserves Squirrel.Mac
+    cross-version validation while retaining the project's historical
+    non-notarized first-install policy;
+  - compatibility preflight skips only Developer ID, Gatekeeper, and
+    notarization checks. It still requires a valid deep ad-hoc signature and
+    the exact stable designated requirement, in addition to clean Git/HEAD,
+    updater metadata, safe asset names, SHA-512, blockmaps, embedded build
+    metadata, and full bundle consistency across the unpacked app, ZIP, and
+    DMG;
+  - an isolated two-version signing probe passed strict code validation and
+    verified a 3.7.2 bundle against the 3.7.1 designated requirement while
+    retaining the expected Gatekeeper rejection for a non-notarized build;
+  - focused release tests passed 2 files / 21 tests, all three release scripts
+    passed `node --check`, and `npm run harness:check` plus `git diff --check`
+    passed;
+  - full `npm run verify` passed 212 files / 2,124 tests, the production build,
+    Agent evals 26/26, and Memory evals 2/2; `npm run smoke:prod` also passed
+    with the renderer showing the agent chat UI.
+- Compatibility-release security closure on 2026-07-15:
+  - independent adversarial review correctly blocked the first stable ad-hoc
+    requirement design because a bundle identifier alone is not publisher
+    authentication. The compatibility updater now additionally requires an
+    Ed25519 detached signature over the exact-tag raw `latest-mac.yml` bytes,
+    with the public key embedded as an electron-builder extra resource and the
+    private key stored outside the repository;
+  - the main process fetches the bounded signature envelope first, accepts only
+    a stable `vX.Y.Z` tag, fetches the exact-tag manifest from the fixed GitHub
+    repository, and verifies key id, manifest SHA-512, Ed25519 signature, tag,
+    version, safe asset names, sizes, and ZIP/DMG hashes before calling
+    electron-updater;
+  - electron-updater now runs with automatic and differential downloads off,
+    downgrades and prereleases disabled, compares its full update projection to
+    the verified manifest, and only then downloads. A downloaded-version
+    mismatch remains non-installable;
+  - release signing creates `latest-mac.yml.sig`; preflight independently
+    verifies the signature, requires the same public key in the unpacked, ZIP,
+    and DMG app copies, rejects extra ZIP/DMG root payloads, and performs a final
+    clean-HEAD check after electron-builder. Legacy packaging explicitly
+    disables notarization and the hook path is workspace-contained;
+  - the generated Ed25519 key pair interoperated between the release signer,
+    app verifier, and preflight verifier. The private key is backed up in the
+    login Keychain service `local.zerox.agent.update-signing.private-key`;
+    this release materializes it only as a repository-external current-user
+    `0600` file for `ZEROX_UPDATE_SIGNING_PRIVATE_KEY_FILE`. Only its public key and key id
+    `a9e4a8f7350d43543d5b76811548ab54` are tracked/reported;
+  - focused security/release tests passed 5 files / 38 tests. The subsequent
+    full `npm run verify` passed 214 files / 2,137 tests, production build,
+    Agent evals 26/26, and Memory evals 2/2; `npm run smoke:prod`,
+    `npm run harness:check`, and `git diff --check` also passed.
+
+## 2026-07-16 - v3.7.1 Replay-Safe Update and Atomic Publication Closure
+
+- Independent reviewers repeatedly blocked publication until the updater and
+  GitHub publication chain closed demonstrated race and integrity gaps.
+- The V2 Ed25519 envelope binds the exact raw manifest bytes, pinned key id,
+  exact tag, semver-derived monotonic sequence, issued-at time, and one-year
+  expiry. Runtime and preflight reject any future-issued or expired envelope.
+- `appUpdateHighWater.ts` stores the highest accepted sequence under Electron
+  userData using a single-instance app gate, cross-process `wx` lock,
+  alive-owner stale-lock check, inode-owned cleanup, monotonic compare-and-set,
+  file fsync, atomic rename, and parent-directory fsync. A 40-writer high/low
+  concurrency test finishes at the highest sequence.
+- Advisory updater events can no longer overwrite later phases. A downloaded
+  update is authorized only after complete signed metadata comparison, the
+  active `downloadUpdate()` promise settles, and the regular absolute ZIP path
+  from `update-downloaded.downloadedFile` independently matches signed name,
+  size, and SHA-512. File-level `sha2`, packages, packageInfo, blockMapSize, and
+  admin-rights extensions are rejected.
+- The sidebar now renders the update error reason as visible `role=alert` text
+  beside the retry action instead of exposing it only through title/live text.
+- `publish-github-release.mjs` reruns preflight, strips all `GIT_*` overrides,
+  requires local and remote peeled tag commits to equal clean HEAD, stages a
+  uniquely-owned draft, compares all six remote asset names, sizes, and SHA-256
+  digests, publishes only after equality, and rechecks local hashes, clean HEAD,
+  and the remote tag after publication.
+- Verification evidence:
+  - targeted updater/release/renderer/docs suite: 8 files / 128 tests passed;
+  - complete `npm run verify`: 216 files / 2,146 tests, build, Agent evals 26/26,
+    and Memory evals 2/2 passed on rerun; the preceding run hit one unrelated
+    existing 5-second fake-timer test timeout, whose isolated rerun passed;
+  - `npm run smoke:prod`, `npm run harness:check`, release-script syntax checks,
+    TypeScript compilation, and `git diff --check` passed.
+  - independent security replay tests, adversarial publication review, and
+    design/accessibility review all returned PASS with no remaining P0/P1/P2.

@@ -1,4 +1,8 @@
-import { createHash } from "node:crypto";
+import {
+  createHash,
+  generateKeyPairSync,
+  sign,
+} from "node:crypto";
 import {
   mkdtempSync,
   mkdirSync,
@@ -17,9 +21,24 @@ import { describe, expect, it } from "vitest";
 // The release gate stays executable as plain Node.js while exporting its
 // artifact inspector for deterministic fixture tests.
 // @ts-expect-error JavaScript release script intentionally has no declaration file.
-import { createAppBundleDigest, inspectReleaseArtifacts, validatePackagedBuildCommit } from "../../scripts/release-preflight.mjs";
+import * as releasePreflight from "../../scripts/release-preflight.mjs";
 
-function sha512(value: string): string {
+const {
+  createAppBundleDigest,
+  inspectReleaseArtifacts,
+  resolveReleaseMode,
+  validateBundleContentConsistency,
+  validateLegacyAdhocRequirementOutput,
+  validatePackagedBuildMetadata,
+  validateReleaseContainerRoot,
+} = releasePreflight;
+
+const signatureDomain = Buffer.from(
+  "ZEROX_AGENT_UPDATE_MANIFEST\0V2\0ZeroxZhang/zerox-agent\0darwin\0stable\0",
+  "utf8",
+);
+
+function sha512(value: string | Buffer): string {
   return createHash("sha512").update(value).digest("base64");
 }
 
@@ -32,7 +51,9 @@ function createReleaseFixture(
 ) {
   const rootDir = mkdtempSync(path.join(tmpdir(), "zerox-release-preflight-"));
   const releaseDir = path.join(rootDir, "release");
+  const buildDir = path.join(rootDir, "build");
   mkdirSync(releaseDir);
+  mkdirSync(buildDir);
   writeFileSync(path.join(rootDir, "package.json"), JSON.stringify({ version: "3.7.1" }));
 
   const zipName = options.unsafeNames
@@ -69,8 +90,7 @@ function createReleaseFixture(
     );
   }
 
-  writeFileSync(
-    path.join(releaseDir, "latest-mac.yml"),
+  const manifestBytes = Buffer.from(
     stringify({
       version: "3.7.1",
       files: [
@@ -89,15 +109,67 @@ function createReleaseFixture(
       sha512: options.corruptHash ? "invalid" : sha512(zipBody),
     }),
   );
+  writeFileSync(path.join(releaseDir, "latest-mac.yml"), manifestBytes);
+  const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+  const publicKeyPem = publicKey.export({ format: "pem", type: "spki" });
+  writeFileSync(
+    path.join(buildDir, "update-signing-public-key.pem"),
+    publicKeyPem,
+  );
+  const publicDer = publicKey.export({ format: "der", type: "spki" });
+  const keyId = createHash("sha256")
+    .update(publicDer)
+    .digest("hex")
+    .slice(0, 32);
+  const tag = "v3.7.1";
+  const sequence = 3_007_001;
+  const issuedAt = new Date(Date.now() - 60_000).toISOString();
+  const expiresAt = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000 - 60_000).toISOString();
+  const length = Buffer.alloc(8);
+  length.writeBigUInt64BE(BigInt(manifestBytes.length));
+  const signature = sign(
+    null,
+    Buffer.concat([
+      signatureDomain,
+      Buffer.from(`${keyId}\0${tag}\0${sequence}\0${issuedAt}\0${expiresAt}\0`),
+      length,
+      manifestBytes,
+    ]),
+    privateKey,
+  );
+  writeFileSync(
+    path.join(releaseDir, "latest-mac.yml.sig"),
+    JSON.stringify({
+      schema: 2,
+      algorithm: "ed25519",
+      keyId,
+      tag,
+      sequence,
+      issuedAt,
+      expiresAt,
+      manifestSha512: sha512(manifestBytes),
+      signature: signature.toString("base64"),
+    }),
+  );
 
   return rootDir;
 }
 
 describe("macOS release preflight artifacts", () => {
-  it("requires every packaged application to embed the current Git commit", async () => {
+  it("defaults to Developer ID releases and requires an explicit legacy override", () => {
+    expect(resolveReleaseMode(undefined)).toBe("developer-id");
+    expect(resolveReleaseMode("")).toBe("developer-id");
+    expect(resolveReleaseMode("developer-id")).toBe("developer-id");
+    expect(resolveReleaseMode("legacy-adhoc")).toBe("legacy-adhoc");
+    expect(() => resolveReleaseMode("unsigned")).toThrow(
+      "ZEROX_RELEASE_MODE must be unset, developer-id, or legacy-adhoc",
+    );
+  });
+
+  it("requires every packaged application to embed the Git commit and release mode", async () => {
     const expectedBuildCommit = "a".repeat(40);
 
-    async function packagedApp(buildCommit?: string) {
+    async function packagedApp(buildCommit?: string, releaseMode?: string) {
       const fixtureRoot = mkdtempSync(path.join(tmpdir(), "zerox-build-commit-"));
       const sourceDir = path.join(fixtureRoot, "source");
       const appPath = path.join(fixtureRoot, "Zerox Agent.app");
@@ -105,7 +177,12 @@ describe("macOS release preflight artifacts", () => {
       mkdirSync(path.join(appPath, "Contents", "Resources"), { recursive: true });
       writeFileSync(
         path.join(sourceDir, "package.json"),
-        JSON.stringify({ name: "fixture", version: "3.7.1", buildCommit }),
+        JSON.stringify({
+          name: "fixture",
+          version: "3.7.1",
+          buildCommit,
+          releaseMode,
+        }),
       );
       await createPackage(
         sourceDir,
@@ -115,28 +192,139 @@ describe("macOS release preflight artifacts", () => {
     }
 
     const matchingErrors: string[] = [];
-    validatePackagedBuildCommit({
-      appPath: await packagedApp(expectedBuildCommit),
+    validatePackagedBuildMetadata({
+      appPath: await packagedApp(expectedBuildCommit, "legacy-adhoc"),
       errors: matchingErrors,
       expectedBuildCommit,
+      expectedReleaseMode: "legacy-adhoc",
       label: "matching app",
     });
     expect(matchingErrors).toEqual([]);
 
-    for (const [label, buildCommit, expectedMessage] of [
-      ["missing app", undefined, "must embed"],
-      ["invalid app", "not-a-commit", "must embed"],
-      ["stale app", "b".repeat(40), "does not match current Git HEAD"],
+    for (const [label, buildCommit, releaseMode, expectedReleaseMode, expectedMessage] of [
+      ["missing commit", undefined, "developer-id", "developer-id", "must embed"],
+      ["invalid commit", "not-a-commit", "developer-id", "developer-id", "must embed"],
+      [
+        "stale commit",
+        "b".repeat(40),
+        "developer-id",
+        "developer-id",
+        "does not match current Git HEAD",
+      ],
+      [
+        "missing mode",
+        expectedBuildCommit,
+        undefined,
+        "developer-id",
+        "releaseMode <missing> does not match requested release mode developer-id",
+      ],
+      [
+        "wrong mode",
+        expectedBuildCommit,
+        "legacy-adhoc",
+        "developer-id",
+        "releaseMode legacy-adhoc does not match requested release mode developer-id",
+      ],
     ] as const) {
       const errors: string[] = [];
-      validatePackagedBuildCommit({
-        appPath: await packagedApp(buildCommit),
+      validatePackagedBuildMetadata({
+        appPath: await packagedApp(buildCommit, releaseMode),
         errors,
         expectedBuildCommit,
+        expectedReleaseMode,
         label,
       });
       expect(errors.join("\n")).toContain(expectedMessage);
     }
+  });
+
+  it("keeps bundle byte consistency mandatory in both release modes", () => {
+    for (const releaseMode of ["developer-id", "legacy-adhoc"] as const) {
+      const matchingErrors: string[] = [];
+      validateBundleContentConsistency({
+        bundleSha512: "same-bundle",
+        errors: matchingErrors,
+        expectedIntegrity: { bundleSha512: "same-bundle" },
+        label: `${releaseMode} matching app`,
+      });
+      expect(matchingErrors).toEqual([]);
+
+      const mismatchErrors: string[] = [];
+      validateBundleContentConsistency({
+        bundleSha512: "changed-bundle",
+        errors: mismatchErrors,
+        expectedIntegrity: { bundleSha512: "frozen-bundle" },
+        label: `${releaseMode} changed app`,
+      });
+      expect(mismatchErrors).toEqual([
+        `${releaseMode} changed app bundle contents do not match the frozen packaged application`,
+      ]);
+    }
+  });
+
+  it("accepts only the stable cross-version legacy designated requirement", () => {
+    const matchingErrors: string[] = [];
+    validateLegacyAdhocRequirementOutput({
+      errors: matchingErrors,
+      label: "matching app",
+      output:
+        'Executable=/tmp/Zerox Agent.app/Contents/MacOS/Zerox Agent\ndesignated => identifier "local.zerox.agent.desktop"',
+    });
+    expect(matchingErrors).toEqual([]);
+
+    for (const output of [
+      'designated => cdhash H"be373641df5a12774918b5fef1b2f0bab0ad4b1a"',
+      'designated => identifier "local.zerox.agent.desktop" and anchor apple generic',
+      'designated => identifier "com.example.attacker"',
+    ]) {
+      const errors: string[] = [];
+      validateLegacyAdhocRequirementOutput({
+        errors,
+        label: "changed app",
+        output,
+      });
+      expect(errors).toEqual([
+        "changed app must use the stable legacy designated requirement for local.zerox.agent.desktop",
+      ]);
+    }
+  });
+
+  it("rejects extra payloads at ZIP and DMG container roots", () => {
+    const zipRoot = mkdtempSync(path.join(tmpdir(), "zerox-zip-root-"));
+    mkdirSync(path.join(zipRoot, "Zerox Agent.app"));
+    const zipErrors: string[] = [];
+    validateReleaseContainerRoot({
+      errors: zipErrors,
+      kind: "zip",
+      label: "ZIP fixture",
+      rootPath: zipRoot,
+    });
+    expect(zipErrors).toEqual([]);
+    writeFileSync(path.join(zipRoot, "payload"), "unexpected");
+    validateReleaseContainerRoot({
+      errors: zipErrors,
+      kind: "zip",
+      label: "ZIP fixture",
+      rootPath: zipRoot,
+    });
+    expect(zipErrors).toContain(
+      "ZIP fixture ZIP root must contain only Zerox Agent.app",
+    );
+
+    const dmgRoot = mkdtempSync(path.join(tmpdir(), "zerox-dmg-root-"));
+    mkdirSync(path.join(dmgRoot, "Zerox Agent.app"));
+    symlinkSync("/Applications", path.join(dmgRoot, "Applications"));
+    writeFileSync(path.join(dmgRoot, "second-app"), "unexpected");
+    const dmgErrors: string[] = [];
+    validateReleaseContainerRoot({
+      errors: dmgErrors,
+      kind: "dmg",
+      label: "DMG fixture",
+      rootPath: dmgRoot,
+    });
+    expect(dmgErrors).toContain(
+      "DMG fixture contains unexpected root entries: second-app",
+    );
   });
 
   it("pins system verification tools and inspects every published app copy", () => {
@@ -166,6 +354,10 @@ describe("macOS release preflight artifacts", () => {
     expect(source).toContain("signed resource seal does not match");
     expect(source).toContain('runGit(["rev-parse", "--verify", "HEAD^{commit}"])');
     expect(source.match(/expectedBuildCommit,/g)?.length).toBeGreaterThanOrEqual(4);
+    expect(source.match(/releaseMode,/g)?.length).toBeGreaterThanOrEqual(4);
+    expect(source).toContain('if (releaseMode === "developer-id")');
+    expect(source).toContain("bundle contents do not match the frozen packaged application");
+    expect(source).toContain("return { bundleSha512, cdHash, codeResourcesSha512 }");
   });
 
   it("hashes physical app bundles while rejecting root and escaping symlinks", async () => {

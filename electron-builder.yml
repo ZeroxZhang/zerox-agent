@@ -18,6 +18,10 @@ files:
   - package.json
 extraMetadata:
   main: dist-electron/main/main.js
+afterSign: ./scripts/after-sign-mac.mjs
+extraResources:
+  - from: build/update-signing-public-key.pem
+    to: update-signing-public-key.pem
 publish:
   provider: github
   owner: ZeroxZhang

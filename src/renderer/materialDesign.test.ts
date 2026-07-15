@@ -1550,6 +1550,8 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource).toContain("rollbackFailedAttachmentTurn");
     expect(chatPanelSource).toContain("setComposerDraft(rawContent");
     expect(appSource).toContain("getAppUpdateAccessibleStatus");
+    expect(appSource).toContain('className="nav-update-error-message" role="alert"');
+    expect(styles).toContain(".nav-update-error-message");
   });
 });
 

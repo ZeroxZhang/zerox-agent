@@ -1,15 +1,16 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-07-15T09:15:00.000+08:00",
+  "updatedAt": "2026-07-16T00:10:00.000+08:00",
   "features": [
     {
       "id": "P48-v3.7.1-auto-update-and-chat-attachments",
       "priority": 78,
-      "status": "in_progress",
+      "status": "done",
       "title": "v3.7.1 automatic application updates and pasted chat attachments",
       "files": [
         ".zerox/feature_list.json",
         ".zerox/progress.md",
+        "build/update-signing-public-key.pem",
         "electron-builder.yml",
         "package.json",
         "package-lock.json",
@@ -19,6 +20,10 @@
         "src/shared/packageScripts.test.ts",
         "src/main/appUpdateService.ts",
         "src/main/appUpdateService.test.ts",
+        "src/main/appUpdateManifest.ts",
+        "src/main/appUpdateManifest.test.ts",
+        "src/main/appUpdateHighWater.ts",
+        "src/main/appUpdateHighWater.test.ts",
         "src/main/chatAttachmentProcessor.ts",
         "src/main/chatAttachmentProcessor.test.ts",
         "src/main/chatService.ts",
@@ -51,13 +56,19 @@
         "src/shared/systemPromptLayer.ts",
         "src/shared/systemPromptLayerProviders.ts",
         "scripts/package-mac.mjs",
+        "scripts/after-sign-mac.mjs",
         "scripts/release-preflight.mjs",
-        "src/shared/releasePreflight.test.ts"
+        "scripts/sign-update-manifest.mjs",
+        "scripts/publish-github-release.mjs",
+        "src/shared/afterSignMac.test.ts",
+        "src/shared/releasePreflight.test.ts",
+        "src/shared/signUpdateManifest.test.ts"
       ],
       "definitionOfDone": [
         "Packaged applications check the configured GitHub release channel automatically, download compatible updates in the background, and expose typed checking, progress, downloaded, unavailable, and error states",
         "The sidebar version footer presents a compact accessible update action only when useful, and clicking a downloaded update drains the runtime, installs it, and opens the new application version",
         "The release configuration generates updater metadata alongside signed macOS DMG and ZIP artifacts without enabling updater network traffic in development, validation, or smoke modes",
+        "Compatibility releases authenticate exact-tag updater metadata with an embedded Ed25519 public key before electron-updater can download, bind signed sequence and validity bounds, persist a monotonic high-water mark, and require full metadata authorization again before install",
         "Pasting clipboard images or files into the chat composer creates compact removable attachment chips with bounded file count and byte limits, visible validation feedback, keyboard focus, and reduced-motion-safe styling",
         "Attachment payloads use typed preload and IPC contracts, are revalidated in the main process, persist only bounded display metadata, and preserve local-first trust boundaries",
         "Images reach OpenAI-compatible, Anthropic, and Gemini model requests as actual vision content; bounded UTF-8 text attachments reach the prompt as explicitly untrusted attachment context; unsupported binary files fail visibly instead of being silently discarded",
@@ -65,13 +76,14 @@
         "Focused frontend, IPC, updater, attachment, provider, and release metadata tests pass together with the full verify, production smoke, harness, packaging, adversarial review, and release checks"
       ],
       "verification": [
-        "npm test -- --run src/main/appUpdateService.test.ts src/main/chatAttachmentProcessor.test.ts src/main/chatService.test.ts src/main/chatSessionStore.test.ts src/main/ipc/index.test.ts src/main/openAiCompatibleClient.test.ts src/main/providers/providers.test.ts src/preload/index.test.ts src/renderer/chatSessionReconciliation.test.ts src/renderer/materialDesign.test.ts src/shared/packageScripts.test.ts src/shared/readme.test.ts src/shared/systemPromptAssembler.test.ts",
+        "npm test -- --run src/main/appUpdateManifest.test.ts src/main/appUpdateHighWater.test.ts src/main/appUpdateService.test.ts src/main/chatAttachmentProcessor.test.ts src/main/chatService.test.ts src/main/chatSessionStore.test.ts src/main/ipc/index.test.ts src/main/openAiCompatibleClient.test.ts src/main/providers/providers.test.ts src/preload/index.test.ts src/renderer/chatSessionReconciliation.test.ts src/renderer/materialDesign.test.ts src/shared/afterSignMac.test.ts src/shared/packageScripts.test.ts src/shared/readme.test.ts src/shared/releasePreflight.test.ts src/shared/signUpdateManifest.test.ts src/shared/systemPromptAssembler.test.ts",
         "npm test",
         "npm run build",
         "npm run verify",
         "npm run smoke:prod",
         "npm run harness:check",
         "npm run dist:mac",
+        "npm run release:sign",
         "npm run release:preflight",
         "BUILDING_AGENT_SMOKE=1 BUILDING_AGENT_SMOKE_REQUIRED_TEXTS='v3.7.1' \"release/mac-arm64/Zerox Agent.app/Contents/MacOS/Zerox Agent\"",
         "git diff --check"

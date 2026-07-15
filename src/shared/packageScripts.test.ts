@@ -17,9 +17,76 @@ describe("package scripts", () => {
     expect(source).toContain('const gitBin = "/usr/bin/git"');
     expect(source).toContain('if (key.startsWith("GIT_")) delete env[key]');
     expect(source).toContain('"status", "--porcelain", "--untracked-files=all"');
-    expect(source.match(/readFrozenGitCommit\(\)/g)).toHaveLength(3);
+    expect(source.match(/readFrozenGitCommit\(\)/g)).toHaveLength(4);
     expect(source).toContain("currentCommit !== frozenCommit");
+    expect(source).toContain("finalCommit !== frozenCommit");
     expect(source).toContain("--config.extraMetadata.buildCommit=${frozenCommit}");
+    expect(source).toContain('requestedReleaseMode || "developer-id"');
+    expect(source).toContain('releaseMode !== "legacy-adhoc"');
+    expect(source).toContain("--config.extraMetadata.releaseMode=${releaseMode}");
+    expect(source).toContain('releaseMode === "legacy-adhoc"');
+    expect(source).toContain('"--config.mac.identity=-"');
+    expect(source).toContain('"--config.mac.hardenedRuntime=false"');
+    expect(source).toContain('"--config.mac.notarize=false"');
+    expect(source).toContain('CSC_IDENTITY_AUTO_DISCOVERY: "false"');
+
+    const afterSign = readFileSync(
+      path.join(process.cwd(), "scripts", "after-sign-mac.mjs"),
+      "utf8",
+    );
+    expect(afterSign).toContain('legacyReleaseMode = "legacy-adhoc"');
+    expect(afterSign).toContain(
+      'identifier "local.zerox.agent.desktop"',
+    );
+    expect(afterSign).toContain('"--preserve-metadata=identifier,entitlements,flags,runtime"');
+    expect(afterSign).toContain('["--verify", "--deep", "--strict", "--verbose=2", appPath]');
+
+    const builderConfig = readFileSync(
+      path.join(process.cwd(), "electron-builder.yml"),
+      "utf8",
+    );
+    expect(builderConfig).toContain("afterSign: ./scripts/after-sign-mac.mjs");
+    expect(builderConfig).toContain("from: build/update-signing-public-key.pem");
+
+    const signScript = readFileSync(
+      path.join(process.cwd(), "scripts", "sign-update-manifest.mjs"),
+      "utf8",
+    );
+    expect(signScript).toContain("ZEROX_UPDATE_SIGNING_PRIVATE_KEY_FILE");
+    expect(signScript).toContain("inline update signing keys are forbidden");
+    expect(signScript).toContain("outside the repository");
+    expect(signScript).toContain("0600 or stricter");
+    expect(signScript).toContain("ZEROX_AGENT_UPDATE_MANIFEST\\0V2");
+    expect(signScript).toContain("sequence");
+    expect(signScript).toContain("expiresAt");
+    expect(signScript).toContain('algorithm: "ed25519"');
+    expect(signScript).toContain("generated update manifest signature could not be verified");
+
+    const publishScript = readFileSync(
+      path.join(process.cwd(), "scripts", "publish-github-release.mjs"),
+      "utf8",
+    );
+    expect(publishScript).toContain("runReleasePreflight");
+    expect(publishScript).toContain('"--verify-tag"');
+    expect(publishScript).toContain("repos/ZeroxZhang/zerox-agent/git/ref/tags/");
+    expect(publishScript).toContain("repos/ZeroxZhang/zerox-agent/git/tags/");
+    expect(publishScript).toContain("remote tag must resolve to the exact release HEAD");
+    expect(publishScript).toContain('key.startsWith("GIT_")');
+    expect(publishScript).toContain('createHash("sha256")');
+    expect(publishScript).toContain("asset.digest");
+    expect(publishScript).toContain("inspectReleaseArtifacts(stagingRoot)");
+    expect(publishScript).toContain("zerox-release-publish-");
+    expect(publishScript).toContain('"--draft"');
+    expect(publishScript).toContain('"--draft=false"');
+    expect(publishScript).toContain('"delete"');
+    expect(publishScript).toContain("exactly six distinct assets");
+    expect(publishScript).toContain("failed the six-asset verification");
+
+    const mainSource = readFileSync(
+      path.join(process.cwd(), "src", "main", "main.ts"),
+      "utf8",
+    );
+    expect(mainSource).toContain("app.requestSingleInstanceLock()");
   });
 
   it("sets release metadata to v3.7.1", () => {
@@ -667,8 +734,11 @@ describe("package scripts", () => {
     expect(packageJson.scripts).toMatchObject({
       "pack:mac": "node scripts/package-mac.mjs --dir",
       "dist:mac": "node scripts/package-mac.mjs dmg zip",
+      "release:sign": "node scripts/sign-update-manifest.mjs",
       "release:preflight": "node scripts/release-preflight.mjs",
-      "release:mac": "npm run dist:mac && npm run release:preflight",
+      "release:mac":
+        "npm run dist:mac && npm run release:sign && npm run release:preflight",
+      "release:publish": "node scripts/publish-github-release.mjs",
     });
   });
 

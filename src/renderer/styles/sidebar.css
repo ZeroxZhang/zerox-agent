@@ -612,3 +612,11 @@
 .nav-footer.is-update-error .nav-update-dot {
   background: var(--status-error-text);
 }
+
+.nav-update-error-message {
+  margin: 0;
+  color: var(--status-error-text);
+  font-size: 10px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}

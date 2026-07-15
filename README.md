@@ -550,12 +550,23 @@ Active checkpoints appear in the Runs panel and can be paused or resumed after i
 ```bash
 npm run doctor        # Self-check first
 npm run smoke:prod    # Production smoke
-npm run pack:mac      # Unsigned .app → release/mac/   (local trial)
-npm run dist:mac      # .dmg + .zip → release/          (distribution)
-npm run release:mac   # Rebuild + fail-closed signing/notarization/update preflight
+npm run pack:mac      # .app → release/mac/ (local trial)
+npm run dist:mac      # .dmg + .zip → release/ (build only)
+npm run release:mac   # Build + manifest signature + fail-closed release preflight
+npm run release:publish -- /absolute/path/to/release-notes.md
 ```
 
-`pack:mac` and `dist:mac` may produce unsigned local-trial artifacts. Public releases must set the expected 10-character `APPLE_TEAM_ID` and use `release:mac`, which refuses dirty source trees, unsigned or unnotarized apps, failed Gatekeeper assessments, mismatched versions/hashes/blockmaps, or asset names that diverge from `latest-mac.yml`. It independently checks the unpacked app plus the app copies inside the ZIP and DMG. Each release also passes an independent packaged-app acceptance gate before handoff. Unsigned local trials may require removing the quarantine attribute before opening:
+Developer ID remains the default public-release mode: set the expected 10-character `APPLE_TEAM_ID` and Apple signing/notarization credentials. When those credentials are unavailable, the explicit compatibility mode preserves the project's historical first-install behavior while protecting later updates with a separate Ed25519 release signature:
+
+```bash
+export ZEROX_RELEASE_MODE=legacy-adhoc
+export ZEROX_UPDATE_SIGNING_PRIVATE_KEY_FILE=/secure/path/update-signing-private.pem
+npm run release:mac
+```
+
+The private key path must be absolute, outside the repository, owned by the current user, and mode `0600` or stricter; inline environment keys, symlinks, and repository-contained keys are rejected. Its matching public key is packaged with the app. `release:mac` refuses dirty source trees, invalid application signatures, unstable Squirrel requirements, mismatched embedded commits/public keys, unverified Ed25519 metadata, extra ZIP/DMG payloads, invalid hashes/blockmaps, or unsafe asset names. Publication is an exact six-asset allowlist: ZIP, DMG, both blockmaps, `latest-mac.yml`, and `latest-mac.yml.sig`; `release:publish` reruns preflight and verifies the remote asset names and sizes after upload.
+
+Compatibility artifacts remain non-notarized, so the first v3.7.0 → v3.7.1 transition is a manual install and may require right-clicking **Open** or removing quarantine. v3.7.1 is the signed update seed for automatic v3.7.2+ transitions:
 
 Launch at login is opt-in. Set `ZEROX_ENABLE_LOGIN_STARTUP=1` only when deliberately enabling the packaged login item; hidden login-item launches keep the main window closed until the user activates the app.
 
@@ -565,7 +576,7 @@ xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-3.7.1-arm64.dmg"
 xattr -dr com.apple.quarantine "/Applications/Zerox Agent.app"
 ```
 
-The v3.7.1 auto-update runtime and GitHub release metadata are implemented. macOS automatic installation is published only after Developer ID signing and notarization pass the release preflight; crash reporting remains separate distribution work.
+The v3.7.1 auto-update runtime verifies the exact-tag manifest signature before electron-updater can download anything. The signed V2 envelope binds a monotonic release sequence and bounded validity window; the app uses a single-instance gate plus a cross-process monotonic compare-and-set to persist the highest accepted sequence and reject replay below it. Download completion must repeat the complete signed metadata comparison, settle the active `downloadUpdate` promise, and independently rehash the event's regular ZIP file before install is authorized. Developer ID releases add Apple trust and notarization; compatibility releases use the independent Ed25519 publisher-authentication gate described above. Crash reporting remains separate distribution work.
 
 ---
 
@@ -584,7 +595,7 @@ npm run episode:export -- --config-dir <userData/config> --run-id <runId>
 npm run episode:export -- --config-dir <userData/config> --latest-validation
 ```
 
-`npm run verify` covers the Vitest suite (200+ test files under `src/`), the production build, 26 deterministic agent eval fixtures, and the memory eval suite. Agent evals cover native code engineering, research writing, reflection-after-test-failure, retry-budget exhaustion, context compaction, tool-call checkpointing, model retry, strategy-guard fragmentation recovery, episode eval-candidate, child-handoff review gate, goal-mode recovery/control, bounded-autonomy golden paths, Agent Runtime Kernel kernel event replay, permission-rule behavior, deterministic local artifact provenance acceptance, execution-context/tool-ledger/history contracts, memory-history scope checks, and output-rendering restore fidelity. research writing, reflection-after-test-failure, retry-budget exhaustion, context compaction, tool-call checkpointing, model retry, strategy-guard fragmentation recovery, episode eval-candidate, child-handoff review gate, goal-mode recovery/control, bounded-autonomy golden paths, Agent Runtime Kernel event replay, permission-rule behavior, deterministic local artifact provenance acceptance, execution-context/tool-ledger/history contracts, memory-history scope checks, and output-rendering restore fidelity. Adversarial evals mutation-test the harness itself. The harness score emits the seven-category ETCLOVG score plus a native Agent Capability score used by Overview.
+`npm run verify` covers the Vitest suite (200+ test files under `src/`), the production build, 26 deterministic agent eval fixtures, and the memory eval suite. Release readiness additionally requires independent packaged-app acceptance. Agent evals cover native code engineering, research writing, reflection-after-test-failure, retry-budget exhaustion, context compaction, tool-call checkpointing, model retry, strategy-guard fragmentation recovery, episode eval-candidate, child-handoff review gate, goal-mode recovery/control, bounded-autonomy golden paths, Agent Runtime Kernel kernel event replay, permission-rule behavior, deterministic local artifact provenance acceptance, execution-context/tool-ledger/history contracts, memory-history scope checks, and output-rendering restore fidelity. research writing, reflection-after-test-failure, retry-budget exhaustion, context compaction, tool-call checkpointing, model retry, strategy-guard fragmentation recovery, episode eval-candidate, child-handoff review gate, goal-mode recovery/control, bounded-autonomy golden paths, Agent Runtime Kernel event replay, permission-rule behavior, deterministic local artifact provenance acceptance, execution-context/tool-ledger/history contracts, memory-history scope checks, and output-rendering restore fidelity. Adversarial evals mutation-test the harness itself. The harness score emits the seven-category ETCLOVG score plus a native Agent Capability score used by Overview.
 
 Deterministic local artifact goals are accepted only when the task contract, canonical destination, generated artifact, and provenance evidence all agree; location/resource canonicalization normalizes home-relative, workspace-relative, Desktop, Downloads, and absolute roots before sandbox and acceptance checks.
 
@@ -1107,12 +1118,23 @@ finishedAt
 ```bash
 npm run doctor        # 先跑自检
 npm run smoke:prod    # 生产包冒烟
-npm run pack:mac      # 未签名 .app → release/mac/  （本地试用）
-npm run dist:mac      # .dmg + .zip → release/       （分发）
-npm run release:mac   # 重新打包 + 签名/公证/更新资产失败关闭检查
+npm run pack:mac      # .app → release/mac/（本地试用）
+npm run dist:mac      # .dmg + .zip → release/（仅构建）
+npm run release:mac   # 构建 + 清单签名 + 失败关闭发布检查
+npm run release:publish -- /absolute/path/to/release-notes.md
 ```
 
-`pack:mac` 与 `dist:mac` 可以生成仅供本地试用的未签名产物。公开发版必须设置预期的 10 位 `APPLE_TEAM_ID` 并使用 `release:mac`；若源码树未冻结、应用未签名或未公证、Gatekeeper 验证失败、版本/哈希/blockmap 不一致，或产物命名与 `latest-mac.yml` 不一致，命令会直接失败。它会分别检查未归档应用及 ZIP、DMG 内的应用副本。每个版本在交接前还会通过独立 packaged-app 验收。未签名的本地试用包可能需要先移除隔离属性：
+Developer ID 仍是默认公开发版模式，需要设置预期的 10 位 `APPLE_TEAM_ID` 及 Apple 签名/公证凭据。凭据暂不可用时，只能显式启用兼容模式；它保留项目过去的首次安装方式，同时用独立 Ed25519 发布签名保护后续更新：
+
+```bash
+export ZEROX_RELEASE_MODE=legacy-adhoc
+export ZEROX_UPDATE_SIGNING_PRIVATE_KEY_FILE=/secure/path/update-signing-private.pem
+npm run release:mac
+```
+
+私钥路径必须是仓库外绝对路径，文件须由当前用户持有且权限为 `0600` 或更严格；内联环境变量私钥、符号链接和仓库内私钥都会被拒绝。配对公钥会随应用打包。`release:mac` 会拒绝脏源码树、无效应用签名、不稳定的 Squirrel requirement、嵌入提交/公钥不一致、Ed25519 元数据验证失败、ZIP/DMG 额外载荷、错误哈希/blockmap 或不安全资产名。发布严格限定六个资产：ZIP、DMG、两个 blockmap、`latest-mac.yml` 和 `latest-mac.yml.sig`；`release:publish` 会再次运行 preflight，并在上传后核对远端名称和大小。
+
+兼容产物仍未经过 Apple 公证，因此 v3.7.0 → v3.7.1 是一次手动安装，可能需要右键选择“打开”或移除隔离属性。v3.7.1 是 v3.7.2+ 自动更新所需的签名种子：
 
 开机登录启动默认关闭。只有明确设置 `ZEROX_ENABLE_LOGIN_STARTUP=1` 时才会配置打包应用的 Login Item；隐藏登录启动不会主动显示主窗口。
 
@@ -1122,7 +1144,7 @@ xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-<version>-arm64.dmg"
 xattr -dr com.apple.quarantine "/Applications/Zerox Agent.app"
 ```
 
-v3.7.1 已实现自动更新运行时与 GitHub Release 元数据。只有 Developer ID 签名和公证通过发布前置检查后，才允许发布 macOS 自动安装资产；崩溃报告仍属于后续分发工作。
+v3.7.1 自动更新运行时会先验证精确 tag 的清单签名，再允许 electron-updater 下载。V2 签名信封绑定单调发布序号和有限有效期；应用用单实例门加跨进程单调 compare-and-set 保存已接受的最高序号并拒绝低于它的重放。下载完成后还必须再次完整比对签名元数据、等待当前 `downloadUpdate` promise 完成，并独立重算事件所指常规 ZIP 文件的哈希，才能进入安装。Developer ID 模式额外提供 Apple 信任与公证；兼容模式依赖上述独立 Ed25519 发布者认证门。崩溃报告仍属于后续分发工作。
 
 ---
 
@@ -1141,7 +1163,7 @@ npm run episode:export -- --config-dir <userData/config> --run-id <runId>
 npm run episode:export -- --config-dir <userData/config> --latest-validation
 ```
 
-`npm run verify` 覆盖 Vitest 测试套件（`src/` 下 200+ 个测试文件）、生产构建、确定性 Agent 评测套件（26 个 fixture）和记忆评测套件。Agent 评测覆盖原生代码工程、研究写作、测试失败反思、retry budget 耗尽、上下文压缩、tool-call checkpoint、模型重试、strategy guard 碎片化恢复、episode eval candidate、child handoff review gate、goal-mode recovery/control、bounded-autonomy 黄金路径、Agent Runtime Kernel 事件回放、permission-rule 行为、确定性本地 artifact 来源验收、execution-context/tool-ledger/history 契约、memory-history scope 检查和输出渲染恢复保真。对抗评测对 harness 本身做变异测试。harness 评分输出与 Overview 一致的七类 ETCLOVG 分数和原生 Agent Capability 分数。
+`npm run verify` 覆盖 Vitest 测试套件（`src/` 下 200+ 个测试文件）、生产构建、确定性 Agent 评测套件（26 个 fixture）和记忆评测套件；发版还要求独立 packaged-app 验收。Agent 评测覆盖原生代码工程、研究写作、测试失败反思、retry budget 耗尽、上下文压缩、tool-call checkpoint、模型重试、strategy guard 碎片化恢复、episode eval candidate、child handoff review gate、goal-mode recovery/control、bounded-autonomy 黄金路径、Agent Runtime Kernel 事件回放、permission-rule 行为、确定性本地 artifact 来源验收、execution-context/tool-ledger/history 契约、memory-history scope 检查和输出渲染恢复保真。对抗评测对 harness 本身做变异测试。harness 评分输出与 Overview 一致的七类 ETCLOVG 分数和原生 Agent Capability 分数。
 
 确定性本地 artifact 目标只有在 task contract、canonical destination、生成的 artifact 和 provenance evidence 相互匹配时才通过验收。Location/resource canonicalization 会在 sandbox 和验收检查前规范化 `~`、workspace-relative、Desktop、Downloads 和绝对路径。
 
