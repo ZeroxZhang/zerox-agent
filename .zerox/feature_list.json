@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-07-15T01:12:30.000+08:00",
+  "updatedAt": "2026-07-15T09:15:00.000+08:00",
   "features": [
     {
       "id": "P48-v3.7.1-auto-update-and-chat-attachments",
@@ -36,6 +36,7 @@
         "src/preload/index.test.ts",
         "src/renderer/App.tsx",
         "src/renderer/chatAttachmentPaste.ts",
+        "src/renderer/chatAttachmentPaste.test.ts",
         "src/renderer/chatSessionReconciliation.ts",
         "src/renderer/chatSessionReconciliation.test.ts",
         "src/renderer/chatStreamReducer.ts",

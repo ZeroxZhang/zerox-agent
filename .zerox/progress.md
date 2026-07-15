@@ -7231,3 +7231,30 @@
   3. push local `main`, tag v3.7.1, and publish the exact `Zerox-Agent-...`
      ZIP/DMG/blockmaps plus `latest-mac.yml` only after the signed preflight and
      installed-app check pass.
+- User-authorized source-push recheck on 2026-07-15:
+  - final design review found one P2 where a file paste during an active task
+    was prevented without feedback; the composer now shows a visible alert and
+    sends an `aria-live` announcement for both active-task and prior-read
+    conflicts, with three focused decision tests. Independent design review
+    then returned PASS with no remaining P1/P2;
+  - the first complete verify exposed an existing 5 ms acceptance-timeout test
+    race under the parallel suite. The test-only deadline is now 100 ms, still
+    deterministically blocked by its abort-aware trajectory hook; focused tests
+    passed 3 files / 192 tests and the complete verify passed 212 files / 2,121
+    tests, Agent evals 26/26, and Memory evals 2/2;
+  - `npm run smoke:prod`, `npm run harness:check`, and `git diff --check` passed;
+  - `npm run release:preflight` still fails closed because `APPLE_TEAM_ID`, a
+    valid Developer ID Application identity, signed/sealed app copies,
+    Gatekeeper approval, notarization tickets, and full-Xcode stapler are not
+    available. The existing unsigned ZIP/DMG remain superseded and must not be
+    attached to a GitHub Release.
+  - independent artifact testing also proved the existing app.asar predates
+    `0b392d9` and found that a clean tree alone did not bind packaged bytes to
+    HEAD. Packaging now requires the same sanitized, clean Git commit both
+    before build and before electron-builder, embeds that full commit as
+    `buildCommit`, and preflight verifies the app.asar value against HEAD in the
+    unpacked app, ZIP, and DMG copies.
+  - final independent artifact/API/IPC review returned PASS with no remaining
+    P1/P2 after 13 files / 265 tests; the final exclusive `npm run verify`
+    passed 212 files / 2,121 tests, build, Agent evals 26/26, and Memory evals
+    2/2 without concurrent build interference.

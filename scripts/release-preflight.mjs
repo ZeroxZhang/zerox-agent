@@ -21,6 +21,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { blake2b } from "@noble/hashes/blake2.js";
+import { extractFile } from "@electron/asar";
 import { parse } from "yaml";
 
 const scriptPath = fileURLToPath(import.meta.url);
@@ -387,9 +388,43 @@ function validatePublisherConfig(filePath, errors, label) {
   }
 }
 
+export function validatePackagedBuildCommit({
+  appPath,
+  errors,
+  expectedBuildCommit,
+  label,
+}) {
+  const asarPath = join(appPath, "Contents", "Resources", "app.asar");
+  let buildCommit = "";
+  try {
+    const packagedManifest = JSON.parse(
+      extractFile(asarPath, "package.json").toString("utf8"),
+    );
+    buildCommit = typeof packagedManifest.buildCommit === "string"
+      ? packagedManifest.buildCommit
+      : "";
+  } catch (error) {
+    errors.push(
+      `${label} build metadata cannot be read: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return;
+  }
+
+  if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(buildCommit)) {
+    errors.push(`${label} must embed a full lowercase Git buildCommit in app.asar/package.json`);
+    return;
+  }
+  if (buildCommit !== expectedBuildCommit) {
+    errors.push(
+      `${label} buildCommit ${buildCommit} does not match current Git HEAD ${expectedBuildCommit || "<unavailable>"}`,
+    );
+  }
+}
+
 async function validatePackagedApp({
   appPath,
   errors,
+  expectedBuildCommit,
   expectedIntegrity,
   label,
   manifest,
@@ -434,6 +469,12 @@ async function validatePackagedApp({
     errors,
     label,
   );
+  validatePackagedBuildCommit({
+    appPath,
+    errors,
+    expectedBuildCommit,
+    label,
+  });
   assertCommand(
     errors,
     systemCommand.codesign,
@@ -526,6 +567,11 @@ export async function runReleasePreflight(rootDir = defaultRootDir) {
   } else if (gitStatus.output.length > 0) {
     errors.push("the working tree has tracked or untracked changes; commit the frozen release tree");
   }
+  const gitCommit = runGit(["rev-parse", "--verify", "HEAD^{commit}"]);
+  const expectedBuildCommit = gitCommit.ok ? gitCommit.output : "";
+  if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(expectedBuildCommit)) {
+    errors.push("current Git HEAD commit could not be verified");
+  }
   const hiddenIndexEntries = runGit(["ls-files", "-v"]);
   if (!hiddenIndexEntries.ok) {
     errors.push(
@@ -554,6 +600,7 @@ export async function runReleasePreflight(rootDir = defaultRootDir) {
   const frozenIntegrity = await validatePackagedApp({
     appPath: manifest.appPath,
     errors,
+    expectedBuildCommit,
     label: "packaged application",
     manifest,
     teamId,
@@ -574,6 +621,7 @@ export async function runReleasePreflight(rootDir = defaultRootDir) {
       await validatePackagedApp({
         appPath: join(zipDirectory, `${productName}.app`),
         errors,
+        expectedBuildCommit,
         expectedIntegrity: frozenIntegrity,
         label: `${zipAsset.url} application`,
         manifest,
@@ -621,6 +669,7 @@ export async function runReleasePreflight(rootDir = defaultRootDir) {
         await validatePackagedApp({
           appPath: join(mountPoint, `${productName}.app`),
           errors,
+          expectedBuildCommit,
           expectedIntegrity: frozenIntegrity,
           label: `${dmgAsset.url} application`,
           manifest,

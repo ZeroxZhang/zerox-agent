@@ -11,12 +11,13 @@ import path from "node:path";
 import { gzipSync } from "node:zlib";
 import { blake2b } from "@noble/hashes/blake2.js";
 import { stringify } from "yaml";
+import { createPackage } from "@electron/asar";
 import { describe, expect, it } from "vitest";
 
 // The release gate stays executable as plain Node.js while exporting its
 // artifact inspector for deterministic fixture tests.
 // @ts-expect-error JavaScript release script intentionally has no declaration file.
-import { createAppBundleDigest, inspectReleaseArtifacts } from "../../scripts/release-preflight.mjs";
+import { createAppBundleDigest, inspectReleaseArtifacts, validatePackagedBuildCommit } from "../../scripts/release-preflight.mjs";
 
 function sha512(value: string): string {
   return createHash("sha512").update(value).digest("base64");
@@ -93,6 +94,51 @@ function createReleaseFixture(
 }
 
 describe("macOS release preflight artifacts", () => {
+  it("requires every packaged application to embed the current Git commit", async () => {
+    const expectedBuildCommit = "a".repeat(40);
+
+    async function packagedApp(buildCommit?: string) {
+      const fixtureRoot = mkdtempSync(path.join(tmpdir(), "zerox-build-commit-"));
+      const sourceDir = path.join(fixtureRoot, "source");
+      const appPath = path.join(fixtureRoot, "Zerox Agent.app");
+      mkdirSync(sourceDir);
+      mkdirSync(path.join(appPath, "Contents", "Resources"), { recursive: true });
+      writeFileSync(
+        path.join(sourceDir, "package.json"),
+        JSON.stringify({ name: "fixture", version: "3.7.1", buildCommit }),
+      );
+      await createPackage(
+        sourceDir,
+        path.join(appPath, "Contents", "Resources", "app.asar"),
+      );
+      return appPath;
+    }
+
+    const matchingErrors: string[] = [];
+    validatePackagedBuildCommit({
+      appPath: await packagedApp(expectedBuildCommit),
+      errors: matchingErrors,
+      expectedBuildCommit,
+      label: "matching app",
+    });
+    expect(matchingErrors).toEqual([]);
+
+    for (const [label, buildCommit, expectedMessage] of [
+      ["missing app", undefined, "must embed"],
+      ["invalid app", "not-a-commit", "must embed"],
+      ["stale app", "b".repeat(40), "does not match current Git HEAD"],
+    ] as const) {
+      const errors: string[] = [];
+      validatePackagedBuildCommit({
+        appPath: await packagedApp(buildCommit),
+        errors,
+        expectedBuildCommit,
+        label,
+      });
+      expect(errors.join("\n")).toContain(expectedMessage);
+    }
+  });
+
   it("pins system verification tools and inspects every published app copy", () => {
     const source = readFileSync(
       path.join(process.cwd(), "scripts", "release-preflight.mjs"),
@@ -118,6 +164,8 @@ describe("macOS release preflight artifacts", () => {
     expect(source).toContain("expectedIntegrity: frozenIntegrity");
     expect(source).toContain("sealed CodeResources manifest is missing");
     expect(source).toContain("signed resource seal does not match");
+    expect(source).toContain('runGit(["rev-parse", "--verify", "HEAD^{commit}"])');
+    expect(source.match(/expectedBuildCommit,/g)?.length).toBeGreaterThanOrEqual(4);
   });
 
   it("hashes physical app bundles while rejecting root and escaping symlinks", async () => {

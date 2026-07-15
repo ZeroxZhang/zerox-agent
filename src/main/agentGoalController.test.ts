@@ -2721,7 +2721,9 @@ describe("agent goal controller", () => {
     let judgedAppends = 0;
     const acceptance = createRealAcceptance({
       workspacePath: configDir,
-      finalJudgeTimeoutMs: 5,
+      // Leave enough time for evidence hashing under the full parallel suite;
+      // the blocked trajectory append below still deterministically exercises timeout replay.
+      finalJudgeTimeoutMs: 100,
       async complete() {
         return {
           content: JSON.stringify({

@@ -1543,6 +1543,9 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(styles).toContain(".nav-update-action:focus-visible");
     expect(styles).toContain(".chat-attachment-chip > button:focus-visible");
     expect(chatPanelSource).toContain("attachmentAnnouncement");
+    expect(chatPanelSource).toContain("getAttachmentPasteBlockedMessage");
+    expect(chatPanelSource).toContain("setAttachmentError(blockedMessage)");
+    expect(chatPanelSource).toContain("setAttachmentAnnouncement(blockedMessage)");
     expect(chatPanelSource).toContain("attachments: message.attachments");
     expect(chatPanelSource).toContain("rollbackFailedAttachmentTurn");
     expect(chatPanelSource).toContain("setComposerDraft(rawContent");

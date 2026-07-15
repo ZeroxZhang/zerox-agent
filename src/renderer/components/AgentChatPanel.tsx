@@ -140,6 +140,7 @@ import type {
 import { shouldShowToolApproval } from "../toolApprovalVisibility";
 import {
   ChatAttachmentReadError,
+  getAttachmentPasteBlockedMessage,
   readPastedChatAttachments,
 } from "../chatAttachmentPaste";
 
@@ -1526,7 +1527,13 @@ export function AgentChatPanel({
       return;
     }
     event.preventDefault();
-    if (attachmentReadPending || status.kind === "working") {
+    const blockedMessage = getAttachmentPasteBlockedMessage({
+      attachmentReadPending,
+      working: status.kind === "working",
+    });
+    if (blockedMessage) {
+      setAttachmentError(blockedMessage);
+      setAttachmentAnnouncement(blockedMessage);
       return;
     }
     setAttachmentReadPending(true);

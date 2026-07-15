@@ -8,6 +8,20 @@ type PackageJson = {
 };
 
 describe("package scripts", () => {
+  it("binds macOS release artifacts to one clean Git commit", () => {
+    const source = readFileSync(
+      path.join(process.cwd(), "scripts", "package-mac.mjs"),
+      "utf8",
+    );
+
+    expect(source).toContain('const gitBin = "/usr/bin/git"');
+    expect(source).toContain('if (key.startsWith("GIT_")) delete env[key]');
+    expect(source).toContain('"status", "--porcelain", "--untracked-files=all"');
+    expect(source.match(/readFrozenGitCommit\(\)/g)).toHaveLength(3);
+    expect(source).toContain("currentCommit !== frozenCommit");
+    expect(source).toContain("--config.extraMetadata.buildCommit=${frozenCommit}");
+  });
+
   it("sets release metadata to v3.7.1", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),

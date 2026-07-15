@@ -13,6 +13,7 @@ if (targets.length === 0) {
 
 const isWindows = process.platform === "win32";
 const npmBin = isWindows ? "npm.cmd" : "npm";
+const gitBin = "/usr/bin/git";
 const binSuffix = isWindows ? ".cmd" : "";
 const electronRebuildBin = resolve(
   rootDir,
@@ -47,8 +48,54 @@ function run(command, args, env = {}) {
   return result.status ?? 0;
 }
 
+function sanitizedGitEnvironment() {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) {
+    if (key.startsWith("GIT_")) delete env[key];
+  }
+  return env;
+}
+
+function readFrozenGitCommit() {
+  const env = sanitizedGitEnvironment();
+  const commonArgs = [
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "core.untrackedCache=false",
+    "-C",
+    rootDir,
+  ];
+  const commitResult = spawnSync(
+    gitBin,
+    [...commonArgs, "rev-parse", "--verify", "HEAD^{commit}"],
+    { cwd: rootDir, encoding: "utf8", env },
+  );
+  const commit = commitResult.stdout?.trim() ?? "";
+  if (commitResult.status !== 0 || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(commit)) {
+    console.error("Packaging requires a valid frozen Git HEAD commit.");
+    return null;
+  }
+
+  const statusResult = spawnSync(
+    gitBin,
+    [...commonArgs, "status", "--porcelain", "--untracked-files=all"],
+    { cwd: rootDir, encoding: "utf8", env },
+  );
+  if (statusResult.status !== 0 || statusResult.stdout.trim().length > 0) {
+    console.error("Packaging requires a clean working tree.");
+    return null;
+  }
+  return commit;
+}
+
 if (!existsSync(electronRebuildBin) || !existsSync(electronBuilderBin)) {
   console.error("Packaging requires local electron-rebuild and electron-builder binaries.");
+  process.exit(1);
+}
+
+const frozenCommit = readFrozenGitCommit();
+if (!frozenCommit) {
   process.exit(1);
 }
 
@@ -59,7 +106,19 @@ if (status === 0) {
 }
 
 if (status === 0) {
-  status = run(electronBuilderBin, ["--mac", ...targets]);
+  const currentCommit = readFrozenGitCommit();
+  if (currentCommit !== frozenCommit) {
+    console.error("Git HEAD or working tree changed while packaging; refusing stale artifacts.");
+    status = 1;
+  }
+}
+
+if (status === 0) {
+  status = run(electronBuilderBin, [
+    "--mac",
+    `--config.extraMetadata.buildCommit=${frozenCommit}`,
+    ...targets,
+  ]);
 }
 
 const restoreStatus = run(npmBin, ["rebuild", "better-sqlite3"]);

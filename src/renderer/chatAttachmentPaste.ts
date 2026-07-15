@@ -8,6 +8,19 @@ import {
 
 export class ChatAttachmentReadError extends Error {}
 
+export function getAttachmentPasteBlockedMessage(input: {
+  attachmentReadPending: boolean;
+  working: boolean;
+}): string | null {
+  if (input.working) {
+    return "当前任务执行中，暂时无法粘贴附件；请等待完成或中断任务后重试。";
+  }
+  if (input.attachmentReadPending) {
+    return "正在读取上一批粘贴附件，请完成后重试。";
+  }
+  return null;
+}
+
 export async function readPastedChatAttachments(
   files: File[],
   existing: ChatAttachmentInput[],
