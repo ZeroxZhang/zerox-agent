@@ -125,6 +125,7 @@ if (status === 0) {
 if (status === 0) {
   const builderArgs = [
     "--mac",
+    ...targets,
     `--config.extraMetadata.buildCommit=${frozenCommit}`,
     `--config.extraMetadata.releaseMode=${releaseMode}`,
     ...(releaseMode === "legacy-adhoc"
@@ -134,7 +135,6 @@ if (status === 0) {
           "--config.mac.notarize=false",
         ]
       : []),
-    ...targets,
   ];
   status = run(
     electronBuilderBin,

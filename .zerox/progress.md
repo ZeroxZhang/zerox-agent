@@ -7350,3 +7350,7 @@
     TypeScript compilation, and `git diff --check` passed.
   - independent security replay tests, adversarial publication review, and
     design/accessibility review all returned PASS with no remaining P0/P1/P2.
+  - the first frozen packaging attempt exposed electron-builder 26 target
+    parsing `dmg zip` as positional arguments because config flags separated
+    them from `--mac`; targets now immediately follow `--mac` and the package
+    script contract test pins that ordering.

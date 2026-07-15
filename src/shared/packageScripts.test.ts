@@ -15,6 +15,7 @@ describe("package scripts", () => {
     );
 
     expect(source).toContain('const gitBin = "/usr/bin/git"');
+    expect(source).toContain('"--mac",\n    ...targets,');
     expect(source).toContain('if (key.startsWith("GIT_")) delete env[key]');
     expect(source).toContain('"status", "--porcelain", "--untracked-files=all"');
     expect(source.match(/readFrozenGitCommit\(\)/g)).toHaveLength(4);
