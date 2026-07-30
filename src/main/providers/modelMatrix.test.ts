@@ -22,9 +22,10 @@ describe("curated model matrix", () => {
   });
 
   it("covers every configured provider with at least one curated model", () => {
-    for (const kind of providerKinds) {
+    for (const kind of providerKinds.filter((kind) => kind !== "custom")) {
       expect(modelsForProvider(kind).length, kind).toBeGreaterThan(0);
     }
+    expect(modelsForProvider("custom")).toEqual([]);
   });
 
   it("matches the complete curated OpenWorker f96ad4c8 model surface", () => {
@@ -71,6 +72,37 @@ describe("curated model matrix", () => {
       pdf: false,
       streaming: true,
       parallelToolCalls: false,
+    });
+  });
+
+  it("publishes the current Coding Plan allowlist with evidence-based capabilities", () => {
+    const models = modelsForProvider("dashscope-coding");
+    expect(models.map((model) => model.modelId)).toEqual([
+      "qwen3.7-plus",
+      "qwen3.6-plus",
+      "kimi-k2.5",
+      "glm-5",
+      "MiniMax-M2.5",
+      "qwen3.5-plus",
+      "qwen3-max-2026-01-23",
+      "qwen3-coder-next",
+      "qwen3-coder-plus",
+      "glm-4.7",
+    ]);
+    expect(
+      models.find((model) => model.modelId === "qwen3-coder-next"),
+    ).toMatchObject({
+      contextWindow: 262_144,
+      capabilities: {
+        tools: false,
+        parallelToolCalls: false,
+      },
+    });
+    expect(
+      models.find((model) => model.modelId === "qwen3.7-plus"),
+    ).toMatchObject({
+      contextWindow: 1_000_000,
+      capabilities: { tools: true, vision: true },
     });
   });
 });

@@ -97,12 +97,35 @@ export function createProvider(
         }),
         "ollama",
       );
+    case "custom":
+      if (values.protocol === "anthropic") {
+        return withProviderId(
+          createAnthropicProvider({
+            ...(deps.fetch ? { fetch: deps.fetch } : {}),
+            ...(deps.timeoutMs ? { timeoutMs: deps.timeoutMs } : {}),
+            ...(settings.baseUrl
+              ? { baseUrl: normalizeAnthropicBaseUrl(settings.baseUrl) }
+              : {}),
+            apiKey: secrets.apiKey,
+            model: settings.chatModel,
+          }),
+          "custom",
+        );
+      }
+      return withProviderId(
+        createOpenAICompatibleProvider({
+          ...(deps.fetch ? { fetch: deps.fetch } : {}),
+          ...(deps.timeoutMs ? { timeoutMs: deps.timeoutMs } : {}),
+        }),
+        "custom",
+      );
     case "openai":
     case "zai":
     case "deepseek":
     case "kimi":
     case "minimax":
     case "qwen":
+    case "dashscope-coding":
     case "xai":
     case "mistral":
     case "meta":
@@ -126,7 +149,26 @@ export function resolveProviderBaseUrl(
   if (kind === "ollama") {
     return normalizeOllamaBaseUrl(values.baseUrl);
   }
+  if (kind === "custom" && values.protocol === "anthropic") {
+    return normalizeAnthropicBaseUrl(values.baseUrl);
+  }
+  if (kind === "custom") {
+    return normalizeOpenAiBaseUrl(values.baseUrl);
+  }
   return values.baseUrl || undefined;
+}
+
+export function normalizeAnthropicBaseUrl(value: string | undefined): string {
+  return (value?.trim() || "https://api.anthropic.com")
+    .replace(/\/+$/, "")
+    .replace(/\/v1\/messages$/, "")
+    .replace(/\/v1$/, "");
+}
+
+export function normalizeOpenAiBaseUrl(value: string | undefined): string {
+  return (value?.trim() || "")
+    .replace(/\/+$/, "")
+    .replace(/\/chat\/completions$/, "");
 }
 
 function resolveProviderKind(settings: ProviderSettings): ProviderKind {

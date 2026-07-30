@@ -1,4 +1,5 @@
 import type { ResolvedModelBinding } from "./modelSettings";
+import type { GoalSelectedSkill } from "./agentGoal";
 
 export type PlanMode = "direct" | "debate";
 
@@ -47,7 +48,7 @@ export type PlanTaskContract = {
 
 export type PlanEvidenceItem = {
   id: string;
-  kind: "workspace" | "file" | "git" | "web" | "user";
+  kind: "workspace" | "file" | "git" | "web" | "user" | "skill";
   title: string;
   summary: string;
   sourceRef?: string;
@@ -164,6 +165,9 @@ export type PlanRecord = {
   workspaceId?: string;
   workspaceRoot?: string;
   sourceMessage: string;
+  baseSourceMessage?: string;
+  clarifications?: string[];
+  selectedSkill?: GoalSelectedSkill;
   mode: PlanMode;
   status: PlanStatus;
   actionGate: PlanActionGate;
@@ -188,6 +192,7 @@ export type CreatePlanInput = {
   workspaceId?: string;
   workspaceRoot?: string;
   sourceMessage: string;
+  selectedSkill?: GoalSelectedSkill;
   mode: PlanMode;
   modelAssignments?: PlanModelAssignments;
   signal?: AbortSignal;

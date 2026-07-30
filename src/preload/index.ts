@@ -72,9 +72,11 @@ import type {
   ProviderConnectionInput,
   PublicModelCatalog,
   PublicModelSettings,
+  RevisionedModelResourceInput,
   SaveModelProfileResult,
   SaveModelSettingsResult,
   SaveProviderConnectionResult,
+  TestAndSaveProviderConnectionResult,
   TestModelConnectionResult,
   TestProviderConnectionInput,
   TestProviderConnectionResult,
@@ -208,18 +210,29 @@ const buildingAgent = {
     input: ProviderConnectionInput,
   ): Promise<SaveProviderConnectionResult> =>
     ipcRenderer.invoke("modelCatalog:saveConnection", input),
-  deleteProviderConnection: (
-    connectionId: string,
+  testAndSaveProviderConnection: (
+    input: ProviderConnectionInput,
+  ): Promise<TestAndSaveProviderConnectionResult> =>
+    ipcRenderer.invoke("modelCatalog:testAndSaveConnection", input),
+  clearProviderCredential: (
+    input: RevisionedModelResourceInput,
   ): Promise<ModelCatalogMutationResult> =>
-    ipcRenderer.invoke("modelCatalog:deleteConnection", connectionId),
+    ipcRenderer.invoke(
+      "modelCatalog:clearConnectionCredential",
+      input,
+    ),
+  deleteProviderConnection: (
+    input: RevisionedModelResourceInput,
+  ): Promise<ModelCatalogMutationResult> =>
+    ipcRenderer.invoke("modelCatalog:deleteConnection", input),
   saveModelProfile: (
     input: ModelProfileInput,
   ): Promise<SaveModelProfileResult> =>
     ipcRenderer.invoke("modelCatalog:saveProfile", input),
   deleteModelProfile: (
-    profileId: string,
+    input: RevisionedModelResourceInput,
   ): Promise<ModelCatalogMutationResult> =>
-    ipcRenderer.invoke("modelCatalog:deleteProfile", profileId),
+    ipcRenderer.invoke("modelCatalog:deleteProfile", input),
   setDefaultModelProfile: (
     purpose: "chat" | "embedding",
     profileId: string | null,

@@ -3,10 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("Design System — Obsidian desktop control surface", () => {
-  const rootStyles = readFileSync(
-    path.join(process.cwd(), "src/renderer/styles.css"),
-    "utf8",
-  );
+  const rootStyles = readFileSync(path.join(process.cwd(), "src/renderer/styles.css"), "utf8");
   const rendererStyleFiles = [
     "tokens.css",
     "base.css",
@@ -24,16 +21,14 @@ describe("Design System — Obsidian desktop control surface", () => {
       return existsSync(filePath) ? readFileSync(filePath, "utf8") : "";
     }),
   ].join("\n");
-  const appSource = readFileSync(
-    path.join(process.cwd(), "src/renderer/App.tsx"),
-    "utf8",
-  );
-  const preloadSource = readFileSync(
-    path.join(process.cwd(), "src/preload/index.ts"),
-    "utf8",
-  );
+  const appSource = readFileSync(path.join(process.cwd(), "src/renderer/App.tsx"), "utf8");
+  const preloadSource = readFileSync(path.join(process.cwd(), "src/preload/index.ts"), "utf8");
   const chatPanelSource = readFileSync(
     path.join(process.cwd(), "src/renderer/components/AgentChatPanel.tsx"),
+    "utf8",
+  );
+  const modelSettingsPanelSource = readFileSync(
+    path.join(process.cwd(), "src/renderer/components/ModelSettingsPanel.tsx"),
     "utf8",
   );
   const goalStatusStripSource = readFileSync(
@@ -65,10 +60,7 @@ describe("Design System — Obsidian desktop control surface", () => {
     "utf8",
   );
   const designArtifactSource = readFileSync(
-    path.join(
-      process.cwd(),
-      "docs/design/zerox-agent-2-7-0-ui-artifact.html",
-    ),
+    path.join(process.cwd(), "docs/design/zerox-agent-2-7-0-ui-artifact.html"),
     "utf8",
   );
   const outputRenderingArtifactPath = path.join(
@@ -92,10 +84,7 @@ describe("Design System — Obsidian desktop control surface", () => {
   const visualSystemSpecSource = existsSync(visualSystemSpecPath)
     ? readFileSync(visualSystemSpecPath, "utf8")
     : "";
-  const guideline0708Path = path.join(
-    process.cwd(),
-    "docs/design/guidelines_0708.html",
-  );
+  const guideline0708Path = path.join(process.cwd(), "docs/design/guidelines_0708.html");
   const guideline0708Source = existsSync(guideline0708Path)
     ? readFileSync(guideline0708Path, "utf8")
     : "";
@@ -106,24 +95,21 @@ describe("Design System — Obsidian desktop control surface", () => {
   const evalReviewPanelSource = existsSync(evalReviewPanelPath)
     ? readFileSync(evalReviewPanelPath, "utf8")
     : "";
-  const chatOutputComponentDir = path.join(
-    process.cwd(),
-    "src/renderer/components/chat",
-  );
+  const chatOutputComponentDir = path.join(process.cwd(), "src/renderer/components/chat");
   const readChatOutputComponent = (fileName: string) => {
     const filePath = path.join(chatOutputComponentDir, fileName);
     return existsSync(filePath) ? readFileSync(filePath, "utf8") : "";
   };
 
   it("defines comprehensive CSS custom property design tokens", () => {
-    expect(rootStyles).toContain("@import \"./styles/tokens.css\";");
-    expect(rootStyles).toContain("@import \"./styles/base.css\";");
-    expect(rootStyles).toContain("@import \"./styles/app-shell.css\";");
-    expect(rootStyles).toContain("@import \"./styles/sidebar.css\";");
-    expect(rootStyles).toContain("@import \"./styles/chat.css\";");
-    expect(rootStyles).toContain("@import \"./styles/composer.css\";");
-    expect(rootStyles).toContain("@import \"./styles/cards.css\";");
-    expect(rootStyles).toContain("@import \"./styles/responsive.css\";");
+    expect(rootStyles).toContain('@import "./styles/tokens.css";');
+    expect(rootStyles).toContain('@import "./styles/base.css";');
+    expect(rootStyles).toContain('@import "./styles/app-shell.css";');
+    expect(rootStyles).toContain('@import "./styles/sidebar.css";');
+    expect(rootStyles).toContain('@import "./styles/chat.css";');
+    expect(rootStyles).toContain('@import "./styles/composer.css";');
+    expect(rootStyles).toContain('@import "./styles/cards.css";');
+    expect(rootStyles).toContain('@import "./styles/responsive.css";');
     // Color tokens
     expect(styles).toContain("--bg-root");
     expect(styles).toContain("--bg-page");
@@ -172,7 +158,7 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(appSource).toContain("sidebar-section");
     expect(appSource).toContain("sidebar-recents");
     expect(appSource).not.toContain("nav-resize-handle");
-    expect(appSource).not.toContain("aria-label=\"调整功能导航栏宽度\"");
+    expect(appSource).not.toContain('aria-label="调整功能导航栏宽度"');
     expect(appSource).toContain("material-brand"); // brand component class
     expect(appSource).toContain("material-nav-icon"); // icon wrapper class
     expect(appSource).toContain("workspace");
@@ -210,12 +196,8 @@ describe("Design System — Obsidian desktop control surface", () => {
   });
 
   it("lets modifier Enter insert composer newlines while bare Enter submits", () => {
-    expect(chatPanelSource).toContain(
-      'event.key === "Enter" && !event.shiftKey && !event.altKey',
-    );
-    expect(chatPanelSource).toContain(
-      "Shift+Enter 或 Option+Enter 换行",
-    );
+    expect(chatPanelSource).toContain('event.key === "Enter" && !event.shiftKey && !event.altKey');
+    expect(chatPanelSource).toContain("Shift+Enter 或 Option+Enter 换行");
     expect(chatPanelSource).toContain("const content = rawContent;");
     expect(chatPanelSource).toContain("if (!content.trim())");
   });
@@ -258,9 +240,7 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource).toContain("workspaceMenuPosition");
     expect(chatPanelSource).toContain("measureWorkspaceMenuPosition");
     expect(chatPanelSource).toContain("workspaceMenuStyle");
-    expect(chatPanelSource).toContain(
-      "data-placement={workspaceMenuPosition.placement}",
-    );
+    expect(chatPanelSource).toContain("data-placement={workspaceMenuPosition.placement}");
     expect(styles).toContain("position: fixed;");
     expect(styles).toContain("top: clamp(");
     expect(styles).toContain("left: clamp(");
@@ -276,7 +256,7 @@ describe("Design System — Obsidian desktop control surface", () => {
       chatPanelSource.indexOf("runtime-surface-stack"),
     );
     expect(chatPanelSource.indexOf("runtime-surface-stack")).toBeLessThan(
-      chatPanelSource.indexOf("className=\"composer\""),
+      chatPanelSource.indexOf('className="composer"'),
     );
     expect(styles).toContain(".chat-scroll-region");
     expect(styles).toContain(".runtime-surface-stack");
@@ -300,19 +280,19 @@ describe("Design System — Obsidian desktop control surface", () => {
       "utf8",
     );
     expect(iconSource).toContain("export function Icon");
-    expect(chatPanelSource).toContain("<Icon name=\"send\"");
-    expect(chatPanelSource).toContain("<Icon name=\"stop\"");
-    expect(chatPanelSource).toContain("<Icon name=\"close\"");
-    expect(appSource).toContain("<Icon name=\"plus\"");
-    expect(appSource).toContain("<Icon name=\"more\"");
+    expect(chatPanelSource).toContain('<Icon name="send"');
+    expect(chatPanelSource).toContain('<Icon name="stop"');
+    expect(chatPanelSource).toContain('<Icon name="close"');
+    expect(appSource).toContain('<Icon name="plus"');
+    expect(appSource).toContain('<Icon name="more"');
     expect(appSource).not.toContain("＋");
     expect(chatPanelSource).not.toContain("×");
   });
 
   it("presents the local icon system in the 2.7.0 design artifact", () => {
-    expect(designArtifactSource).toContain("class=\"artifact-icon sidebar-button-icon\"");
-    expect(designArtifactSource).toContain("class=\"artifact-icon icon-button-icon\"");
-    expect(designArtifactSource).toContain("stroke=\"currentColor\"");
+    expect(designArtifactSource).toContain('class="artifact-icon sidebar-button-icon"');
+    expect(designArtifactSource).toContain('class="artifact-icon icon-button-icon"');
+    expect(designArtifactSource).toContain('stroke="currentColor"');
     expect(designArtifactSource).not.toContain("+ New Chat");
     expect(designArtifactSource).not.toContain(">Cmd<");
     expect(designArtifactSource).not.toContain(">Stop<");
@@ -350,7 +330,7 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource).toContain("chat-message-meta");
     expect(chatPanelSource).toContain("markdown-code-block");
     expect(chatPanelSource).toContain("markdown-code-header");
-    expect(chatPanelSource).toContain("target=\"_blank\"");
+    expect(chatPanelSource).toContain('target="_blank"');
     expect(styles).toContain(".chat-message-meta");
     expect(styles).toContain(".chat-message-meta span");
     expect(styles).toContain(".markdown-code-block");
@@ -379,9 +359,7 @@ describe("Design System — Obsidian desktop control surface", () => {
     }
 
     const answerBlockSource = readChatOutputComponent("AnswerBlock.tsx");
-    const outputPartRendererSource = readChatOutputComponent(
-      "OutputPartRenderer.tsx",
-    );
+    const outputPartRendererSource = readChatOutputComponent("OutputPartRenderer.tsx");
     const rendererCases = [
       "text",
       "table",
@@ -402,10 +380,12 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource).toContain("import { AnswerBlock }");
     expect(chatPanelSource).toContain("outputPartsFromMessage");
     expect(chatPanelSource).toContain("visibleChatMessages");
-    expect(chatPanelSource).toContain("outputParts.length > 0");
+    expect(chatPanelSource).toContain("shouldHideGoalEventReply");
     expect(chatPanelSource).toContain(
-      "<AnswerBlock parts={message.outputParts} />",
+      "!isTerminalGoalStatus(result.activeGoal.status)",
     );
+    expect(chatPanelSource).toContain("outputParts.length > 0");
+    expect(chatPanelSource).toContain("<AnswerBlock parts={message.outputParts} />");
     expect(chatPanelSource).not.toContain("outputMarkdownFromMessage");
     expect(answerBlockSource).toContain("OutputPartRenderer");
     expect(answerBlockSource).not.toContain("EvidenceRail");
@@ -482,9 +462,7 @@ describe("Design System — Obsidian desktop control surface", () => {
     }
 
     expect(styles).toContain("@media (max-width: 640px)");
-    expect(styles).toMatch(
-      /@media \(max-width: 640px\)[\s\S]*\.chat-answer-block/,
-    );
+    expect(styles).toMatch(/@media \(max-width: 640px\)[\s\S]*\.chat-answer-block/);
     expect(styles).toContain("grid-template-columns: minmax(0, 1fr);");
     expect(styles).toContain("overflow-wrap: anywhere;");
     expect(styles).toContain("max-width: 100%;");
@@ -502,15 +480,9 @@ describe("Design System — Obsidian desktop control surface", () => {
       /\.chat-answer-block\s*{[\s\S]*grid-template-columns: minmax\(0, 1fr\);/,
     );
     expect(styles).not.toMatch(/\.chat-answer-block\.has-evidence/);
-    expect(styles).toMatch(
-      /\.chat-message\s*{[\s\S]*width: min\(960px, 100%\);/,
-    );
-    expect(styles).toMatch(
-      /\.chat-answer-body\s*{[\s\S]*border-left: 0;/,
-    );
-    expect(styles).toMatch(
-      /\.chat-data-table\s*{[\s\S]*table-layout: fixed;/,
-    );
+    expect(styles).toMatch(/\.chat-message\s*{[\s\S]*width: min\(960px, 100%\);/);
+    expect(styles).toMatch(/\.chat-answer-body\s*{[\s\S]*border-left: 0;/);
+    expect(styles).toMatch(/\.chat-data-table\s*{[\s\S]*table-layout: fixed;/);
     expect(styles).toMatch(
       /\.chat-code-block pre,[\s\S]*\.chat-json-preview pre\s*{[\s\S]*white-space: pre-wrap;/,
     );
@@ -538,9 +510,7 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(styles).toMatch(
       /\.markdown-message p,[\s\S]*\.markdown-message blockquote\s*{[\s\S]*font-size: inherit;[\s\S]*line-height: inherit;/,
     );
-    expect(styles).toMatch(
-      /\.markdown-message strong\s*{[\s\S]*font-size: inherit;/,
-    );
+    expect(styles).toMatch(/\.markdown-message strong\s*{[\s\S]*font-size: inherit;/);
     expect(styles).toMatch(
       /\.markdown-message strong\s*{[\s\S]*background: var\(--chat-output-emphasis-bg\);/,
     );
@@ -567,18 +537,15 @@ describe("Design System — Obsidian desktop control surface", () => {
   });
 
   it("keeps context process rows as one-line summaries without expand buttons", () => {
-    const taskProcessItemSource = getFunctionSource(
-      chatPanelSource,
-      "TaskProcessItem",
-    );
+    const taskProcessItemSource = getFunctionSource(chatPanelSource, "TaskProcessItem");
 
     expect(chatPanelSource).toContain("compact?: boolean");
     expect(chatPanelSource).toContain("compact={true}");
     expect(taskProcessItemSource).toContain(
       "const shouldCollapse = !compact && item.message.length > 160;",
     );
-    expect(taskProcessItemSource).toContain(
-      "compact ? getLatestRuntimeLine(item.message) :",
+    expect(taskProcessItemSource).toMatch(
+      /compact\s*\?\s*getLatestRuntimeLine\(item\.message\)\s*:/,
     );
     expect(styles).toMatch(
       /\.agent-context-panel \.task-process-list span\s*{[\s\S]*white-space: nowrap;[\s\S]*text-overflow: ellipsis;/,
@@ -594,9 +561,9 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource).toContain("buildSubagentProcessItems");
     expect(chatPanelSource).toContain("subagentProcessItems");
     expect(chatPanelSource).toContain(
-      "subagentProcessItems.some((item) => item.status === \"running\")",
+      'subagentProcessItems.some((item) => item.status === "running")',
     );
-    expect(chatPanelSource).toContain("aria-label=\"子代理执行状态\"");
+    expect(chatPanelSource).toContain('aria-label="子代理执行状态"');
     expect(chatPanelSource).toContain("SubagentStatusList");
     expect(styles).toContain(".subagent-status-list");
     expect(styles).toContain(".subagent-status-item.is-running");
@@ -618,9 +585,7 @@ describe("Design System — Obsidian desktop control surface", () => {
       "error diagnostic",
       "narrow layout",
     ]) {
-      expect(outputRenderingArtifactSource.toLowerCase()).toContain(
-        requiredState,
-      );
+      expect(outputRenderingArtifactSource.toLowerCase()).toContain(requiredState);
     }
 
     expect(outputRenderingArtifactSource).toContain("chat-answer-block");
@@ -689,12 +654,8 @@ describe("Design System — Obsidian desktop control surface", () => {
   });
 
   it("announces Settings status changes and confirms destructive memory deletes", () => {
-    expect(overviewPanelSource).toContain(
-      'role={status.kind === "error" ? "alert" : "status"}',
-    );
-    expect(memoryPanelSource).toContain(
-      'role={status.kind === "error" ? "alert" : "status"}',
-    );
+    expect(overviewPanelSource).toContain('role={status.kind === "error" ? "alert" : "status"}');
+    expect(memoryPanelSource).toContain('role={status.kind === "error" ? "alert" : "status"}');
     expect(memoryPanelSource).toContain("ConfirmDialog");
     expect(memoryPanelSource).toContain("此操作不可撤销");
     expect(memoryPanelSource).toContain("删除本地长期记忆，不可撤销");
@@ -731,9 +692,7 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(runsPanelSource).toContain("refreshRunsSnapshot");
     expect(runsPanelSource).toContain("onAgentRunsChanged");
     expect(runsPanelSource).toContain("window.buildingAgent.listAgentRuns()");
-    expect(runsPanelSource).toContain(
-      "window.buildingAgent.listActiveAgentExecutions()",
-    );
+    expect(runsPanelSource).toContain("window.buildingAgent.listActiveAgentExecutions()");
     expect(runsPanelSource).toContain("onKernelEvent");
     expect(runsPanelSource).toContain("appendKernelEvent");
   });
@@ -792,11 +751,11 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(appSource).toContain("MemoryPanel");
     expect(appSource).toContain("LearningReviewPanel");
     expect(appSource).toContain("EvalReviewPanel");
-    expect(appSource).not.toContain("activeSection.id === \"skills\"");
-    expect(appSource).not.toContain("activeSection.id === \"tools\"");
-    expect(appSource).not.toContain("activeSection.id === \"memory\"");
-    expect(appSource).not.toContain("activeSection.id === \"learning\"");
-    expect(appSource).not.toContain("activeSection.id === \"evals\"");
+    expect(appSource).not.toContain('activeSection.id === "skills"');
+    expect(appSource).not.toContain('activeSection.id === "tools"');
+    expect(appSource).not.toContain('activeSection.id === "memory"');
+    expect(appSource).not.toContain('activeSection.id === "learning"');
+    expect(appSource).not.toContain('activeSection.id === "evals"');
     expect(styles).toContain(".settings-section-shell");
     expect(styles).toContain(".settings-section-nav");
     expect(styles).toContain(".settings-section-nav-heading");
@@ -826,9 +785,7 @@ describe("Design System — Obsidian desktop control surface", () => {
   it("keeps Settings subpage navigation deep-linkable and intent grouped", () => {
     expect(appSource).toContain("type NavigationTargetId");
     expect(appSource).toContain("onClick={() => navigateTo(section.id)}");
-    expect(appSource).toContain(
-      "navigateTo(getStartupNavigationTarget(window.location.hash))",
-    );
+    expect(appSource).toContain("navigateTo(getStartupNavigationTarget(window.location.hash))");
     expect(appSource).not.toContain("onSelect={setActiveSettingsSectionId}");
     expect(appSource).toContain("设置路径");
     expect(appSource).toContain("按意图分组");
@@ -861,7 +818,7 @@ describe("Design System — Obsidian desktop control surface", () => {
 
     expect(existsSync(guideline0708Path)).toBe(true);
     expect(guideline0708Source).toContain("B · 曜石 Obsidian");
-    expect(guideline0708Source).toContain("[data-accent=\"mono\"]");
+    expect(guideline0708Source).toContain('[data-accent="mono"]');
     expect(guideline0708Source).toContain("--color-accent:#26262A");
     expect(guideline0708Source).toContain("曜石方案在 Dark 下整体反转");
     expect(existsSync(obsidianPlanPath)).toBe(true);
@@ -873,11 +830,11 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(appSource).toMatch(
       /props\.activeSectionId === "system-overview"[\s\S]*<OverviewPanel onNavigate={navigateTo} \/>/,
     );
-    expect(appSource).not.toContain("activeSection.id === \"overview\"");
+    expect(appSource).not.toContain('activeSection.id === "overview"');
   });
 
   it("keeps the four composer controls as auto, goal, stop, and send", () => {
-    expect(chatPanelSource).not.toContain("onClick={() => onNavigate(\"tools\")}");
+    expect(chatPanelSource).not.toContain('onClick={() => onNavigate("tools")}');
     expect(chatPanelSource).toContain("goalModeEnabled");
     expect(chatPanelSource).toContain("composer-goal-mode-button");
     expect(chatPanelSource).toContain("<span>目标</span>");
@@ -906,12 +863,12 @@ describe("Design System — Obsidian desktop control surface", () => {
   });
 
   it("keeps Goal Mode inside Chat instead of a standalone page", () => {
-    expect(appSource).not.toContain("activeSection.id === \"goals\"");
+    expect(appSource).not.toContain('activeSection.id === "goals"');
     expect(appSource).not.toContain("<GoalPanel");
     expect(overviewPanelSource).toContain("listActiveGoals");
     expect(overviewPanelSource).toContain("goalsWaitingForReview");
-    expect(overviewPanelSource).toContain("target: \"chat\"");
-    expect(overviewPanelSource).not.toContain("target: \"goals\"");
+    expect(overviewPanelSource).toContain('target: "chat"');
+    expect(overviewPanelSource).not.toContain('target: "goals"');
   });
 
   it("surfaces session-native Goal Mode inside Chat", () => {
@@ -929,10 +886,9 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource).toMatch(
       /const shouldCreateGoalPlan =\s*!activeGoal &&\s*!planInputLocked/,
     );
-    expect(chatPanelSource).not.toMatch(
-      /outgoingAttachments\.length === 0 &&\s*!activeGoal/,
-    );
-    expect(chatPanelSource).toContain("PlanModeConfiguration");
+    expect(chatPanelSource).not.toMatch(/outgoingAttachments\.length === 0 &&\s*!activeGoal/);
+    expect(chatPanelSource).toContain("PlanModeDecisionCard");
+    expect(chatPanelSource).toContain("PlanModeStatusCard");
     expect(chatPanelSource).toContain("PlanConfirmationCard");
     expect(chatPanelSource).toContain("handleConfirmPlan");
     expect(chatPanelSource).toContain("planModelAssignments");
@@ -953,9 +909,7 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource).toContain(
       "const goalModeVisuallyEnabled = goalModeEnabled || planInputLocked;",
     );
-    expect(chatPanelSource).toContain(
-      "if (wasCanceled && planInputLocked && sessionId)",
-    );
+    expect(chatPanelSource).toContain("if (wasCanceled && planInputLocked && sessionId)");
     expect(chatPanelSource).toContain("aria-pressed={goalModeVisuallyEnabled}");
     expect(chatPanelSource).toContain('className="primary-action"');
     expect(goalDetailDrawerSource).toContain("goal-progress-status");
@@ -980,13 +934,11 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(goalDetailDrawerSource).toContain(
       'progress.recoveryActions.includes("retry_acceptance")',
     );
-    expect(goalDetailDrawerSource).toContain(
-      'progress.recoveryActions.includes("adjust_plan")',
-    );
+    expect(goalDetailDrawerSource).toContain('progress.recoveryActions.includes("adjust_plan")');
     expect(goalDetailDrawerSource).toContain("shortCertificateHash");
     expect(goalDetailDrawerSource).toContain("goal-certificate-hash");
     expect(goalDetailDrawerSource).toContain("<code>{artifact.path}</code>");
-    expect(goalDetailDrawerSource).not.toContain('href={artifact.path}');
+    expect(goalDetailDrawerSource).not.toContain("href={artifact.path}");
     expect(goalStatusStripSource).toContain('case "stopped_blocked"');
     expect(goalStatusStripSource).toContain("progress.acceptance");
     expect(chatPanelSource).toContain("retryGoal(goalId)");
@@ -998,9 +950,7 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource).toContain(
       'const remainsBlocked = result.ok && result.goal?.status === "stopped_blocked"',
     );
-    expect(chatPanelSource).toContain(
-      "const goalUiState = getGoalUiSyncState(result.goal.status)",
-    );
+    expect(chatPanelSource).toContain("const goalUiState = getGoalUiSyncState(result.goal.status)");
     expect(chatPanelSource).toContain("setWorkPhase(goalUiState.workPhase)");
     expect(chatPanelSource).toContain("仍处于受阻状态");
     expect(chatPanelSource).toContain("cancelGoal(goalId)");
@@ -1009,24 +959,22 @@ describe("Design System — Obsidian desktop control surface", () => {
 
   it("wires recoverable final acceptance without implying certification", () => {
     expect(appSource).toContain('waiting_for_acceptance: "等待最终验收"');
-    expect(appSource).toContain(
-      'completed_unverified: "手动完成 · 未经机器认证"',
-    );
+    expect(appSource).toContain('completed_unverified: "手动完成 · 未经机器认证"');
     expect(goalDetailDrawerSource).toContain("继续验收");
     expect(goalDetailDrawerSource).toContain("手动标记完成");
     expect(goalDetailDrawerSource).toContain("不会生成机器验收证书");
-    expect(goalDetailDrawerSource).toContain(
-      "getConfirmedManualCompletionGoalId",
-    );
+    expect(goalDetailDrawerSource).toContain("getConfirmedManualCompletionGoalId");
     expect(goalDetailDrawerSource).toContain("manualCompletionConfirmation");
     expect(goalDetailDrawerSource).toContain("onContinueAcceptance");
     expect(goalDetailDrawerSource).toContain("onMarkCompletedUnverified");
     expect(goalDetailDrawerSource).toContain("goalAcceptanceOperationPending");
     expect(goalStatusStripSource).toContain('case "waiting_for_acceptance"');
     expect(goalStatusStripSource).toContain("继续验收");
-    expect(chatPanelSource).toContain("continueGoalAcceptance(\n        operation.goalId");
-    expect(chatPanelSource).toContain(
-      "markGoalCompletedUnverified(\n        operation.goalId",
+    expect(chatPanelSource).toMatch(
+      /continueGoalAcceptance\(\s*operation\.goalId/,
+    );
+    expect(chatPanelSource).toMatch(
+      /markGoalCompletedUnverified\(\s*operation\.goalId/,
     );
     expect(chatPanelSource).toContain("projectGoalAcceptanceOperationOutcome");
     expect(chatPanelSource).toContain("outcome.statusMessage");
@@ -1037,9 +985,7 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource).toContain("isGoalAcceptanceOperationCurrent");
     expect(chatPanelSource).toContain("doesGoalAcceptanceOperationOwnPending");
     expect(goalDetailDrawerSource).toContain("progress.acceptance.retry");
-    expect(goalDetailDrawerSource).toContain(
-      "progress.acceptance.manualCompletion",
-    );
+    expect(goalDetailDrawerSource).toContain("progress.acceptance.manualCompletion");
     expect(styles).toContain(".goal-status-strip.is-completed_unverified");
     expect(styles).toContain(".goal-manual-completion-confirmation");
     expect(styles).toContain("var(--status-warning-text)");
@@ -1069,19 +1015,13 @@ describe("Design System — Obsidian desktop control surface", () => {
   });
 
   it("uses Obsidian styling for Goal Mode draft and execution surfaces", () => {
-    expect(styles).toContain(
-      ".runtime-surface-stack {\n  flex: 0 0 auto;\n  display: grid;",
-    );
+    expect(styles).toContain(".runtime-surface-stack {\n  flex: 0 0 auto;\n  display: grid;");
     expect(styles).toContain("background: transparent;");
-    expect(styles).toContain(
-      ".goal-draft-card {\n  display: grid;\n  gap: var(--space-3);",
-    );
+    expect(styles).toContain(".goal-draft-card {\n  display: grid;\n  gap: var(--space-3);");
     expect(styles).toContain("border-radius: var(--radius-10);");
     expect(styles).toContain("background: var(--color-surface-primary);");
     expect(styles).toContain(".goal-draft-field textarea:focus");
-    expect(styles).toContain(
-      ".goal-run-process {\n  display: grid;\n  gap: var(--space-2);",
-    );
+    expect(styles).toContain(".goal-run-process {\n  display: grid;\n  gap: var(--space-2);");
     expect(styles).toContain(".goal-run-process summary {\n  display: flex;");
     expect(styles).toContain("background: transparent;");
     expect(styles).toContain(".goal-status-strip-actions button");
@@ -1096,25 +1036,18 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource.indexOf("setActiveGoalDetail((currentGoal) =>")).toBeLessThan(
       chatPanelSource.indexOf("void refreshActiveGoalDetail(event.goalId)"),
     );
-    expect(chatPanelSource).not.toContain(
-      'const goalUiState = event.status === "stopped_blocked"',
-    );
+    expect(chatPanelSource).not.toContain('const goalUiState = event.status === "stopped_blocked"');
   });
 
   it("accepts empty desktop chat session lists as real state", () => {
-    const refreshSessionsSource = getFunctionSource(
-      chatPanelSource,
-      "refreshSessions",
-    );
+    const refreshSessionsSource = getFunctionSource(chatPanelSource, "refreshSessions");
 
     expect(refreshSessionsSource).toContain(
       "const nextSessions = loadedSessions.map(toSessionRailItem);",
     );
     expect(refreshSessionsSource).toContain("setSessions(nextSessions);");
     expect(chatPanelSource).toContain("onChatSessionsChange?.(sessions);");
-    expect(chatPanelSource).toContain(
-      "[onChatSessionsChange, sessions]",
-    );
+    expect(chatPanelSource).toContain("[onChatSessionsChange, sessions]");
     expect(refreshSessionsSource).not.toContain("if (loadedSessions.length)");
   });
 
@@ -1127,40 +1060,26 @@ describe("Design System — Obsidian desktop control surface", () => {
   });
 
   it("reconciles every successful chat completion from persisted session state", () => {
-    const successSource = getFunctionSource(
-      chatPanelSource,
-      "applySuccessfulChatResult",
-    );
+    const successSource = getFunctionSource(chatPanelSource, "applySuccessfulChatResult");
 
     expect(successSource).toContain("finalizeChatStreamResult");
-    expect(successSource).toContain(
-      "void refreshCurrentSessionMessages(result.sessionId);",
-    );
+    expect(successSource).toContain("void refreshCurrentSessionMessages(result.sessionId);");
   });
 
   it("clears session-scoped Goal draft ownership before loading another transcript", () => {
-    const loadSessionSource = getFunctionSource(
-      chatPanelSource,
-      "loadPersistedSession",
-    );
-    const switchBoundary = loadSessionSource.indexOf(
-      "sessionIdRef.current = sessionIdToLoad",
-    );
-    const loadBoundary = loadSessionSource.indexOf(
-      "await window.buildingAgent.getChatSession",
-    );
+    const loadSessionSource = getFunctionSource(chatPanelSource, "loadPersistedSession");
+    const switchBoundary = loadSessionSource.indexOf("sessionIdRef.current = sessionIdToLoad");
+    const loadBoundary = loadSessionSource.indexOf("await window.buildingAgent.getChatSession");
     const cleanupSource = loadSessionSource.slice(switchBoundary, loadBoundary);
 
     expect(cleanupSource).toContain("setPendingGoalDraft(null)");
-    expect(cleanupSource).toContain("setGoalDraftDescription(\"\")");
-    expect(cleanupSource).toContain("setGoalDraftCriteriaText(\"\")");
+    expect(cleanupSource).toContain('setGoalDraftDescription("")');
+    expect(cleanupSource).toContain('setGoalDraftCriteriaText("")');
     expect(cleanupSource).toContain("goalDraftActionPendingRef.current = null");
     expect(cleanupSource).toContain("setGoalDraftActionPending(null)");
     expect(cleanupSource).toContain("setSelectedWorkspaceId(null)");
     expect(cleanupSource).toContain("setChatStreamState(createChatStreamState([]))");
-    expect(loadSessionSource).toContain(
-      "sessionLoadPendingRef.current = loadGeneration",
-    );
+    expect(loadSessionSource).toContain("sessionLoadPendingRef.current = loadGeneration");
     expect(chatPanelSource).toContain(
       'status.kind === "working" || sessionLoadPendingRef.current !== null',
     );
@@ -1178,40 +1097,37 @@ describe("Design System — Obsidian desktop control surface", () => {
   });
 
   it("keeps Plan Mode context, settings, and input in separate non-overlapping rows", () => {
-    expect(chatPanelSource).toContain(
-      '${goalModeVisuallyEnabled ? " has-plan-mode" : ""}',
-    );
-    expect(styles).toContain(
-      ".composer-input-shell.has-plan-mode .composer-context-row",
-    );
+    expect(chatPanelSource).toContain('${goalModeVisuallyEnabled ? " has-plan-mode" : ""}');
+    expect(styles).toContain(".composer-input-shell.has-plan-mode .composer-context-row");
     expect(styles).toContain("position: relative;");
     expect(styles).toContain(
       ".composer-input-shell.has-plan-mode textarea,\n.composer-input-shell.has-plan-mode.has-attachments textarea",
     );
   });
 
-  it("uses progressive disclosure for secondary Plan Mode controls and debate progress", () => {
-    expect(chatPanelSource).toContain(
-      '<details\n      className="plan-mode-configuration"',
-    );
-    expect(chatPanelSource).toContain(
-      '<details className="plan-progress-disclosure">',
-    );
-    expect(chatPanelSource).toContain(
-      '<details className="plan-audit-disclosure">',
-    );
-    expect(chatPanelSource).toContain(
-      'className="plan-artifact-disclosure"',
-    );
+  it("uses a blocking decision card for Plan Mode and progressive disclosure for audit detail", () => {
+    expect(chatPanelSource).toContain('className="plan-mode-decision-card decision-card"');
+    expect(chatPanelSource).toContain("这次目标如何规划？");
+    expect(chatPanelSource).toContain("使用此规划方式");
+    expect(chatPanelSource).toContain("setPlanModeDecisionOpen(false)");
+    expect(chatPanelSource).toContain('<details className="plan-progress-disclosure">');
+    expect(chatPanelSource).toContain('<details className="plan-audit-disclosure">');
+    expect(chatPanelSource).toContain('className="plan-artifact-disclosure"');
     expect(chatPanelSource).toContain(
       "const [planDetailsOpen, setPlanDetailsOpen] = useState(false);",
     );
     expect(chatPanelSource).toContain("setPlanDetailsOpen(false);");
     expect(chatPanelSource).toContain("确认前需要回答");
+    expect(chatPanelSource).toContain("decision-question-form");
+    expect(chatPanelSource).toContain("提交回答并重新规划");
     expect(chatPanelSource).toContain("辩论进度 ·");
-    expect(styles).toContain(
-      ".composer .plan-mode-configuration > summary",
+    expect(chatPanelSource).toContain('role="radiogroup"');
+    expect(chatPanelSource).toContain("onKeyDown={handleModeKeyDown}");
+    expect(chatPanelSource).toContain(
+      'tabIndex={props.mode === "direct" ? 0 : -1}',
     );
+    expect(styles).toContain(".plan-mode-decision-card");
+    expect(styles).toContain(".decision-question-form");
     expect(styles).toContain(".plan-progress-disclosure");
   });
 
@@ -1220,53 +1136,51 @@ describe("Design System — Obsidian desktop control surface", () => {
       "const planInputLocked = isPlanInputRoutingLocked(activePlan);",
     );
     expect(chatPanelSource).toContain("!planInputLocked &&");
-    expect(chatPanelSource).toContain(
-      'disabled={status.kind === "working" || planInputLocked}',
-    );
-    expect(chatPanelSource).toContain(
-      'status.kind === "working" ||\n    planInputLocked',
-    );
-    expect(chatPanelSource).toContain(
-      "const shouldCreateGoalPlan =\n      !activeGoal",
-    );
-    expect(chatPanelSource).toContain(
-      "确认或丢弃前不能退出只读 Plan Mode",
-    );
-    expect(chatPanelSource).toMatch(
-      /\"awaiting_confirmation\",\s*\"canceled\",\s*\"failed\"/,
-    );
-    expect(chatPanelSource).toContain(
-      "getLatestPlanForSession(sessionId)",
-    );
+    expect(chatPanelSource).toContain("planModeDecisionOpen ||");
+    expect(chatPanelSource).toContain("(planInputLocked && !planAcceptsComposerInput)");
+    expect(chatPanelSource).toContain("const shouldCreateGoalPlan =\n      !activeGoal");
+    expect(chatPanelSource).toContain("确认或丢弃前不能退出只读 Plan Mode");
+    expect(chatPanelSource).toMatch(/\"awaiting_confirmation\",\s*\"canceled\",\s*\"failed\"/);
+    expect(chatPanelSource).toContain("getLatestPlanForSession(sessionId)");
     expect(chatPanelSource).not.toContain(
       "const modeState =\n        await window.buildingAgent.setToolGoalModeEnabled(true)",
     );
-    expect(chatPanelSource).toContain(
-      "本条消息只用于补充或修改计划，不会启动普通 Agent",
-    );
-    expect(chatPanelSource).toContain(
-      "当前会话的补充消息只能更新计划",
-    );
-    expect(chatPanelSource).toContain(
-      'options.agentStatus?.state === "failed"',
-    );
+    expect(chatPanelSource).toContain("本条消息只用于补充或修改计划，不会启动普通 Agent");
+    expect(chatPanelSource).toContain("当前计划保持只读");
+    expect(chatPanelSource).toContain('options.agentStatus?.state === "failed"');
     expect(chatPanelSource).toContain("当前结果不是完成态");
     expect(styles).toContain(".plan-input-routing-note");
   });
 
   it("lays provider connections and configuration fields out horizontally before responsive collapse", () => {
     expect(styles).toContain(
-      ".provider-connection-form .provider-identity-grid {\n  grid-template-columns: repeat(3, minmax(0, 1fr));",
+      ".provider-identity-grid {\n  display: grid;\n  grid-template-columns: repeat(3, minmax(0, 1fr));",
     );
     expect(styles).toContain(
       "grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));",
     );
     expect(styles).toContain(
-      ".provider-connection-list {\n  display: flex;",
+      ".provider-manager-layout {\n  display: grid;\n  grid-template-columns: 248px minmax(0, 1fr);",
     );
-    expect(styles).toContain(
-      "@media (max-width: 760px) {\n  .provider-connection-form .provider-identity-grid,",
-    );
+    expect(styles).toContain("@media (max-width: 760px) {\n  .provider-manager-layout {");
+  });
+
+  it("keeps provider verification, credential management, models, and defaults in one connection-first surface", () => {
+    expect(modelSettingsPanelSource).toContain("provider-manager-sidebar");
+    expect(modelSettingsPanelSource).toContain("provider-manager-detail");
+    expect(modelSettingsPanelSource).toContain("testAndSaveProviderConnection");
+    expect(modelSettingsPanelSource).toContain("测试并保存");
+    expect(modelSettingsPanelSource).toContain("仅保存");
+    expect(modelSettingsPanelSource).toContain("clearProviderCredential");
+    expect(modelSettingsPanelSource).toContain("移除凭证");
+    expect(modelSettingsPanelSource).toContain("最近测试");
+    expect(modelSettingsPanelSource).toContain("最近使用");
+    expect(modelSettingsPanelSource).toContain("设为默认");
+    expect(modelSettingsPanelSource).toContain("该连接的模型");
+    expect(modelSettingsPanelSource).toContain('aria-invalid={Boolean(props.error)}');
+    expect(modelSettingsPanelSource).toContain('role="alert"');
+    expect(modelSettingsPanelSource).toContain("模型已验证");
+    expect(modelSettingsPanelSource).not.toContain("API Key 已保存");
   });
 
   it("uses the v3.4.0 Obsidian root background and accent tokens", () => {
@@ -1292,9 +1206,7 @@ describe("Design System — Obsidian desktop control surface", () => {
 
   it("uses a unified secondary-page list style for settings and task surfaces", () => {
     expect(styles).toContain("--secondary-page-outline: var(--color-border-subtle);");
-    expect(styles).toContain(
-      "--secondary-page-accent: var(--color-action-primary);",
-    );
+    expect(styles).toContain("--secondary-page-accent: var(--color-action-primary);");
     expect(styles).toContain(
       ".settings-section-body {\n  display: grid;\n  gap: var(--space-5);\n  width: min(100%, 920px);",
     );
@@ -1310,9 +1222,7 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(styles).toContain(
       ".settings-section-intent.is-safety,\n.settings-section-priority.is-safety {\n  color: var(--status-warning-text);",
     );
-    expect(styles).toContain(
-      ".status-pill.is-preview {\n  color: var(--text-accent);",
-    );
+    expect(styles).toContain(".status-pill.is-preview {\n  color: var(--text-accent);");
     expect(styles).toContain(
       ".scheduled-task-meta div + div {\n  border-top: 1px solid var(--secondary-page-outline);",
     );
@@ -1323,7 +1233,7 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource).toContain("has-context-panel");
     expect(chatPanelSource).toContain("is-focus-mode");
     expect(chatPanelSource).toContain("{showContextPanel ? (");
-    expect(chatPanelSource).not.toContain("<aside className=\"session-rail\"");
+    expect(chatPanelSource).not.toContain('<aside className="session-rail"');
     expect(styles).toContain(".agent-chat-panel.is-focus-mode");
     expect(styles).toContain(".agent-chat-panel.has-context-panel");
     expect(styles).toContain(".agent-context-panel");
@@ -1340,12 +1250,14 @@ describe("Design System — Obsidian desktop control surface", () => {
 
   it("contains long chat titles and live status text inside the hero header", () => {
     expect(chatPanelSource).toContain(
-      "const chatTitle = activeChatSessionTitle ?? activeSession?.title ?? \"新会话\";",
+      'const chatTitle = activeChatSessionTitle ?? activeSession?.title ?? "新会话";',
     );
     expect(chatPanelSource).toContain("title={chatTitle}");
     expect(chatPanelSource).toContain("title={status.message}");
     expect(chatPanelSource).toContain("const chatStatusIsLong");
-    expect(chatPanelSource).toContain("aria-expanded={chatStatusIsLong ? chatStatusExpanded : undefined}");
+    expect(chatPanelSource).toContain(
+      "aria-expanded={chatStatusIsLong ? chatStatusExpanded : undefined}",
+    );
     expect(chatPanelSource).toContain("setChatStatusExpanded((expanded) => !expanded)");
     expect(styles).toContain(".chat-hero h2");
     expect(styles).toContain("-webkit-line-clamp: 2;");
@@ -1361,19 +1273,13 @@ describe("Design System — Obsidian desktop control surface", () => {
   });
 
   it("keeps eval candidate review mutations recoverable on preload rejection", () => {
-    const setCandidateStatusSource = getFunctionSource(
-      evalReviewPanelSource,
-      "setCandidateStatus",
-    );
-    const promoteCandidateSource = getFunctionSource(
-      evalReviewPanelSource,
-      "promoteCandidate",
-    );
+    const setCandidateStatusSource = getFunctionSource(evalReviewPanelSource, "setCandidateStatus");
+    const promoteCandidateSource = getFunctionSource(evalReviewPanelSource, "promoteCandidate");
 
     expect(setCandidateStatusSource).toContain("catch (error)");
-    expect(setCandidateStatusSource).toContain("kind: \"error\"");
+    expect(setCandidateStatusSource).toContain('kind: "error"');
     expect(promoteCandidateSource).toContain("catch (error)");
-    expect(promoteCandidateSource).toContain("kind: \"error\"");
+    expect(promoteCandidateSource).toContain('kind: "error"');
   });
 
   it("keeps run eval candidate generation recoverable on preload rejection", () => {
@@ -1383,7 +1289,7 @@ describe("Design System — Obsidian desktop control surface", () => {
     );
 
     expect(generateCandidateSource).toContain("catch (error)");
-    expect(generateCandidateSource).toContain("kind: \"error\"");
+    expect(generateCandidateSource).toContain('kind: "error"');
   });
 
   it("lets Overview load when pending eval candidate loading fails", () => {
@@ -1412,7 +1318,9 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(styles).toContain("--context-panel-width");
     expect(styles).toContain(".agent-chat-panel.is-focus-mode");
     expect(styles).toContain(".agent-chat-panel.has-context-panel");
-    expect(styles).not.toContain("grid-template-columns: var(--session-rail-width) minmax(520px, 1fr) var(--context-panel-width)");
+    expect(styles).not.toContain(
+      "grid-template-columns: var(--session-rail-width) minmax(520px, 1fr) var(--context-panel-width)",
+    );
     expect(styles).toContain(".kimi-side-card");
     expect(styles).toContain(".chat-message");
     expect(styles).toContain(".composer");
@@ -1422,7 +1330,9 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(styles).toContain(".composer-goal-mode-button");
     expect(styles).toContain(".composer-icon");
     expect(styles).toContain("--composer-action-size: 32px;");
-    expect(styles).toContain("width: var(--composer-action-size); height: var(--composer-action-size);");
+    expect(styles).toContain(
+      "width: var(--composer-action-size); height: var(--composer-action-size);",
+    );
     expect(styles).toContain(".chat-hero {");
     expect(styles).toContain(".message-list {");
     expect(styles).toContain("border: none; background: transparent");
@@ -1436,19 +1346,17 @@ describe("Design System — Obsidian desktop control surface", () => {
   it("keeps chatbox actions icon-only and stop available while work is running", () => {
     expect(chatPanelSource).toContain("composer-goal-mode-button");
     expect(chatPanelSource).toContain("aria-pressed={goalModeVisuallyEnabled}");
-    expect(chatPanelSource).toContain("aria-label=\"中断当前任务\"");
-    expect(chatPanelSource).toContain("aria-label=\"发送消息\"");
-    expect(chatPanelSource).toContain("className=\"composer-floating-actions\"");
+    expect(chatPanelSource).toContain('aria-label="中断当前任务"');
+    expect(chatPanelSource).toContain('aria-label="发送消息"');
+    expect(chatPanelSource).toContain('className="composer-floating-actions"');
     expect(chatPanelSource).toContain("disabled={!canInterruptCurrentWork}");
-    expect(chatPanelSource).toContain(
-      "handleInterruptCurrentWork",
-    );
-    expect(chatPanelSource).toContain("activeGoal.status === \"executing\"");
+    expect(chatPanelSource).toContain("handleInterruptCurrentWork");
+    expect(chatPanelSource).toContain('activeGoal.status === "executing"');
     expect(chatPanelSource).toContain("cancelGoal(goalId)");
     expect(chatPanelSource).toContain("const selection = captureSessionSelection()");
     expect(chatPanelSource).toContain("applyGoalSummaryToSessions(result.goal)");
     expect(chatPanelSource).not.toContain(
-      "disabled={status.kind !== \"working\" || !activeChatRequestId}",
+      'disabled={status.kind !== "working" || !activeChatRequestId}',
     );
   });
 
@@ -1461,7 +1369,7 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource).toContain("tool-approval-panel");
     expect(chatPanelSource).toContain('role="alertdialog"');
     expect(chatPanelSource).toContain('aria-modal="true"');
-    expect(chatPanelSource).toContain("aria-label=\"自动授权工具请求\"");
+    expect(chatPanelSource).toContain('aria-label="自动授权工具请求"');
     expect(chatPanelSource).toContain("composer-mode-risk-summary");
     expect(chatPanelSource).toContain("resolveToolApproval");
     expect(chatPanelSource).toContain("shouldShowToolApproval(");
@@ -1490,7 +1398,9 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(preloadSource).toContain("openAgentRunSession");
     expect(runsPanelSource).toContain("openAgentRunSession(");
     expect(runsPanelSource).toContain("props.onOpenChatSession(result.sessionId)");
-    expect(runsPanelSource).not.toContain("if (action.kind === \"review_permission\") {\n      navigateToHash(\"chat\")");
+    expect(runsPanelSource).not.toContain(
+      'if (action.kind === "review_permission") {\n      navigateToHash("chat")',
+    );
   });
 
   it("keeps scheduled tasks editable from the saved task card", () => {
@@ -1501,28 +1411,24 @@ describe("Design System — Obsidian desktop control surface", () => {
   });
 
   it("keeps goal execution UI compact when long milestone text is active", () => {
-    const handleStartGoalSource = getFunctionSource(
-      chatPanelSource,
-      "handleStartGoal",
-    );
+    const handleStartGoalSource = getFunctionSource(chatPanelSource, "handleStartGoal");
 
     expect(handleStartGoalSource).toContain("setGoalDrawerOpen(false)");
     expect(goalDetailDrawerSource).toContain("goal-detail-drawer-backdrop");
     expect(styles).toContain(".goal-detail-drawer-backdrop");
-    expect(styles).toContain(
-      "grid-template-columns: minmax(0, 0.9fr) minmax(320px, 1.1fr);",
-    );
+    expect(styles).toContain("grid-template-columns: minmax(0, 0.9fr) minmax(320px, 1.1fr);");
     expect(styles).toContain("-webkit-line-clamp: 2;");
     expect(styles).toContain(".agent-work-steps { min-width: 0;");
   });
 
-  it("subscribes to chat stream events and renders separated streaming transcript state", () => {
+  it("subscribes to chat stream events and moves routine streaming process into the status rail", () => {
     expect(chatPanelSource).toContain("onChatStreamEvent");
     expect(chatPanelSource).toContain("applyChatStreamEvent");
     expect(chatPanelSource).toContain("finalizeChatStreamResult");
-    expect(chatPanelSource).toContain("thinking-process-block");
+    expect(chatPanelSource).toContain("ContextRuntimeSummary");
+    expect(chatPanelSource).toContain("context-thinking-disclosure");
     expect(chatPanelSource).toContain("tool-call-preview-block");
-    expect(styles).toContain(".thinking-process-block");
+    expect(styles).toContain(".context-runtime-summary");
     expect(styles).toContain(".tool-call-preview-block");
   });
 
@@ -1574,16 +1480,10 @@ describe("Design System — Obsidian desktop control surface", () => {
 
   it("keeps long transcript rendering isolated from composer input and session switching", () => {
     const answerBlockSource = readChatOutputComponent("AnswerBlock.tsx");
-    const outputPartRendererSource = readChatOutputComponent(
-      "OutputPartRenderer.tsx",
-    );
+    const outputPartRendererSource = readChatOutputComponent("OutputPartRenderer.tsx");
 
-    expect(chatPanelSource).toContain(
-      "const ChatMessageList = memo(function ChatMessageList",
-    );
-    expect(chatPanelSource).toContain(
-      "const MarkdownMessage = memo(function MarkdownMessage",
-    );
+    expect(chatPanelSource).toContain("const ChatMessageList = memo(function ChatMessageList");
+    expect(chatPanelSource).toContain("const MarkdownMessage = memo(function MarkdownMessage");
     expect(chatPanelSource).toContain("draftRef.current = nextDraft");
     expect(chatPanelSource).not.toContain("value={draft}");
     expect(chatPanelSource).toContain("shouldRenderMarkdownPreview(content)");
@@ -1593,12 +1493,8 @@ describe("Design System — Obsidian desktop control surface", () => {
       "shouldPreview && !expanded ? [] : parseMarkdownBlocks(content)",
     );
     expect(answerBlockSource).toContain("memo(function AnswerBlock");
-    expect(outputPartRendererSource).toContain(
-      "memo(function OutputPartRenderer",
-    );
-    expect(outputPartRendererSource).toContain(
-      "const TextPartView = memo(function TextPartView",
-    );
+    expect(outputPartRendererSource).toContain("memo(function OutputPartRenderer");
+    expect(outputPartRendererSource).toContain("const TextPartView = memo(function TextPartView");
     expect(outputPartRendererSource).toContain(
       "shouldPreview && !expanded ? [] : parseMarkdownBlocks(text)",
     );
@@ -1613,19 +1509,14 @@ describe("Design System — Obsidian desktop control surface", () => {
 
   it("keeps guided input reachable when the right context rail is hidden", () => {
     expect(chatPanelSource).toContain("GuidedSkillInputForm");
-    expect(chatPanelSource).toMatch(
-      /<GuidedSkillInputForm[\s\S]*pendingInputRequest/,
-    );
+    expect(chatPanelSource).toMatch(/<GuidedSkillInputForm[\s\S]*pendingInputRequest/);
     expect(styles).toContain("@media (max-width: 1180px)");
     expect(styles).toContain(".agent-context-panel { display: none; }");
     expect(styles).toContain(".guided-skill-input-form");
   });
 
   it("clears all active stream refs during new chat reset so stale events cannot repopulate the transcript", () => {
-    const newChatResetSource = getUseEffectSource(
-      chatPanelSource,
-      "newChatRequestKey",
-    );
+    const newChatResetSource = getUseEffectSource(chatPanelSource, "newChatRequestKey");
 
     expect(newChatResetSource).toContain("resetActiveChatRefs()");
     expect(newChatResetSource).toContain(
@@ -1639,7 +1530,7 @@ describe("Design System — Obsidian desktop control surface", () => {
 
   it("keeps update feedback and pasted attachments compact, labeled, and keyboard operable", () => {
     expect(appSource).toContain("nav-update-action");
-    expect(appSource).toContain("aria-live=\"polite\"");
+    expect(appSource).toContain('aria-live="polite"');
     expect(appSource).toContain("installAppUpdate");
     expect(chatPanelSource).toContain("handleComposerPaste");
     expect(chatPanelSource).toContain("ChatAttachmentChips");

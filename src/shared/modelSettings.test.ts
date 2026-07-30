@@ -4,10 +4,49 @@ import {
   getGenerationSettingRecommendations,
   getModelSettingsFieldGuidance,
   normalizeModelSettingsInput,
+  providerConnectionTargetIdentity,
   validateModelSettingsInput,
 } from "./modelSettings";
 
 describe("model settings", () => {
+  it("binds credential reuse to provider-specific target identity", () => {
+    expect(
+      providerConnectionTargetIdentity("custom", {
+        protocol: "openai",
+        baseUrl: "https://gateway.example/v1/chat/completions/",
+      }),
+    ).toBe(
+      providerConnectionTargetIdentity("custom", {
+        protocol: "openai",
+        baseUrl: "https://gateway.example/v1",
+      }),
+    );
+    expect(
+      providerConnectionTargetIdentity("bedrock", {
+        region: "us-east-1",
+        authMethod: "api_key",
+      }),
+    ).not.toBe(
+      providerConnectionTargetIdentity("bedrock", {
+        region: "us-west-2",
+        authMethod: "api_key",
+      }),
+    );
+    expect(
+      providerConnectionTargetIdentity("vertex", {
+        project: "project-a",
+        location: "global",
+        authMethod: "service_account",
+      }),
+    ).not.toBe(
+      providerConnectionTargetIdentity("vertex", {
+        project: "project-b",
+        location: "global",
+        authMethod: "service_account",
+      }),
+    );
+  });
+
   it("starts with OpenAI-compatible defaults without pretending an API key exists", () => {
     expect(getDefaultModelSettings()).toEqual({
       baseUrl: "https://api.openai.com/v1",

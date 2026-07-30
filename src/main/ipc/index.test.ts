@@ -314,6 +314,24 @@ describe("chat IPC handlers", () => {
     expect(renameSource).toContain("container.renameChatSession(sessionId, title)");
   });
 
+  it("registers provider test-save and credential-removal handlers", () => {
+    const testAndSaveSource = getHandlerSource(
+      ipcSource,
+      '"modelCatalog:testAndSaveConnection"',
+    );
+    const clearCredentialSource = getHandlerSource(
+      ipcSource,
+      '"modelCatalog:clearConnectionCredential"',
+    );
+
+    expect(testAndSaveSource).toContain("testAndSaveProvider(input)");
+    expect(testAndSaveSource).toContain("modelRouter().invalidate");
+    expect(clearCredentialSource).toContain(
+      "clearConnectionCredential(",
+    );
+    expect(clearCredentialSource).toContain("enrichCatalog(result.catalog)");
+  });
+
   it("registers distinct final-acceptance recovery handlers", async () => {
     electronState.ipcHandlers.clear();
     const { registerAllIpcHandlers } = await import("./index");

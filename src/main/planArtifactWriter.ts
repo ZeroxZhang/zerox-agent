@@ -56,7 +56,7 @@ export function createPlanArtifactWriter(options?: {
     },
 
     async verify(plan) {
-      if (!plan.projection || !plan.workspaceRoot) {
+      if (!plan.projection || !plan.workspaceRoot || !plan.finalArtifact) {
         return false;
       }
       try {
@@ -64,7 +64,11 @@ export function createPlanArtifactWriter(options?: {
         assertInside(root, plan.projection.path);
         await assertNoSymlinkChain(root, plan.projection.path);
         const content = await readFile(plan.projection.path, "utf8");
-        return hash(content) === plan.projection.sha256;
+        const currentProjection = renderPlanMarkdown(plan, plan.finalArtifact);
+        return (
+          hash(content) === plan.projection.sha256 &&
+          hash(currentProjection) === plan.projection.sha256
+        );
       } catch {
         return false;
       }
@@ -80,6 +84,13 @@ export function renderPlanMarkdown(
     `# ${artifact.title}`,
     "",
     `> Plan ID: ${plan.id} · Revision: ${plan.revision} · Mode: ${plan.mode}`,
+    ...(plan.selectedSkill
+      ? [
+          `> Selected Skill: ${plan.selectedSkill.manifest.name} · Snapshot SHA-256: ${hash(
+            JSON.stringify(plan.selectedSkill),
+          )}`,
+        ]
+      : []),
     "",
     artifact.summary,
     "",

@@ -15,6 +15,7 @@ docs/*
 docs/design/*
 !docs/design/zerox-agent-3-8-0-plan-debate.md
 !docs/design/zerox-agent-3-8-0-debate-user-path-acceptance.md
+!docs/design/zerox-agent-3-8-1-model-and-conversation-ux.md
 .tmp_*
 .zerox/product-design-audit-*/
 generate_report.py

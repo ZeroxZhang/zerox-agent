@@ -1,5 +1,116 @@
 # Zerox Harness Progress
 
+## 2026-07-31 - v3.8.1 Model Provider and Conversation UX
+
+- Rebuilt model settings as a connection-first surface:
+  - saved connections expose explicit credential, reachability, current
+    verification, last-tested, last-used, and revision state without returning
+    secret values to the renderer;
+  - model profiles are managed inside their connection, with tests and default
+    eligibility bound to both the exact connection and profile revisions;
+  - editing a connection/model, removing a credential, or recording a failed
+    test clears affected defaults, while stale destructive mutations fail
+    closed;
+  - current and historical encrypted credentials are sanitized when removed,
+    and a shared provider target identity prevents key reuse across custom
+    endpoints/protocols, Bedrock regions/auth methods, and Vertex
+    projects/locations/auth methods.
+- Added Alibaba Model Studio Coding Plan at
+  `https://coding.dashscope.aliyuncs.com/v1` with the current 10-model
+  allowlist, `qwen3.7-plus` recommendation, and conservative Function Calling
+  metadata for `qwen3-coder-next`.
+- Added custom OpenAI Chat Completions and native Anthropic Messages
+  connections with normalized Base URLs, protocol-specific authentication,
+  bounded status-only HTTP errors, editable tool/streaming capability
+  declarations, and cross-target credential isolation.
+- Closed Chat and Embedding routing gaps:
+  - profile tests record exact model verification without mutating last-used
+    state, while a successful model test also closes the connection-test path;
+  - Embedding profiles call `/embeddings` and are offered only for implemented
+    OpenAI-compatible/Ollama paths;
+  - Ollama probes installed models and then performs a real normalized
+    `/v1/chat/completions` request before verification/defaulting; saved Chat,
+    Embedding, and runtime paths share the normalized `/v1` target;
+  - retesting an existing connection never silently replaces the user's prior
+    default model.
+- Reduced main-conversation noise:
+  - routine thinking, tools, Goal, Debate, milestone, and approval process
+    activity is summarized in the right status rail with progressive
+    disclosure;
+  - terminal Goal results stay in the transcript;
+  - only user-blocking choices remain as decision cards;
+  - Plan Direct/Debate selection is a keyboard-accessible radio decision card
+    that closes after confirmation and leaves the selected state in the right
+    rail.
+- Changed files span the P55 manifest and release docs, shared model contracts,
+  provider registry/matrix/factory, model store/service and IPC/preload,
+  OpenAI-compatible client and memory embedding wiring, Chat reducers and
+  settings/conversation renderer components, responsive styles, and their
+  focused regression tests. The already-completed P54 trust-hardening files
+  remain included in the same v3.8.1 release tree.
+- Independent adversarial review: PASS with no remaining P0/P1/P2 after
+  revision/default, Ollama, Embedding, credential-target, error-body,
+  accessibility, Plan availability, and disclosure fixes; final focused
+  review suite passed 15 files / 267 tests plus build and diff checks.
+- Independent end-to-end test engineering: PASS.
+  - focused/integration: 13 files / 218 tests;
+  - `npm run verify`: 229 files / 2,274 tests, production build, Agent evals
+    26/26, and Memory evals 2/2;
+  - `npm run smoke:providers`: 19 providers / 58 catalog entries and unknown
+    provider rejection; live calls intentionally remained opt-in;
+  - `npm run smoke:prod`: PASS;
+  - production UI smoke: model settings at 1280×800 and 390×844, plus Chat at
+    390×844, all passed without horizontal overflow;
+  - `npm run harness:check`, `npm audit --omit=dev` (0 vulnerabilities), and
+    `git diff --check`: PASS.
+  - `npm run validate:agent` was a non-blocking live-validation skip because
+    `.api_info.md` was intentionally absent; no external request was sent.
+
+## 2026-07-30 - v3.8.0 Plan Trust-Boundary Hardening
+
+- Closed the strict-review findings around the P52/P53 Plan features:
+  - selected Skill manifests, bodies, locations, and safe defaults now persist
+    through Chat → Plan → confirmed Goal, while execution inputs remain
+    deferred until confirmation;
+  - the immutable Skill snapshot is included in the canonical projection hash,
+    so changing a persisted artifact or Skill contract invalidates
+    confirmation;
+  - structured Plan output now uses a bounded single-pass object scanner,
+    accepts exactly one round-shape-valid candidate, and strictly validates
+    required strings, arrays, enums, milestones, criteria, risks, critiques,
+    decisions, claims, and gates before normalization;
+  - duplicate IDs, missing dependencies, self-dependencies, ambiguous title
+    references, and dependency cycles fail closed before projection and again
+    before Goal creation; all dependency-free roots become ready;
+  - malformed C synthesis repairs inside the same C run without replaying or
+    replacing A1, B1, A2, or B2.
+- Bounded Plan revision and persistence costs:
+  - immutable base requests and at most 12/12,000 characters of clarification
+    history replace recursively embedded revision prompts;
+  - single clarifications are capped at 4,000 characters and Plan requests at
+    32,000 characters;
+  - JSON fallback storage now maintains an atomic session-to-latest-Plan index,
+    validates indexed records, and scans only for legacy/index recovery.
+- Reduced maintainability and renderer costs:
+  - isolated structured-output contracts in `planStructuredOutput.ts` and
+    execution graph checks in `planValidation.ts`;
+  - split React and third-party renderer code into deterministic chunks,
+    reducing the main minified JS bundle from 629.86 kB to 341.72 kB with no
+    oversized-chunk warning;
+  - updated direct `@electron/asar` to 4.2.1 and `electron-builder` to 26.15.3;
+    production dependency audit is clean. The remaining 16 high advisories are
+    confined to pinned transitive development/packaging dependencies and have
+    no non-breaking upstream resolution.
+- Verification evidence from the final tree:
+  - focused hardening suite: 8 files / 186 tests passed;
+  - `npm run verify`: 226 files / 2,235 tests, production build, Agent evals
+    26/26, and Memory evals 2/2 passed;
+  - `npm run smoke:providers`: 17 providers, 48 catalog entries, and unknown
+    provider fail-closed; live provider calls remained explicit opt-in;
+  - `npm run smoke:prod` rendered the production chat UI successfully;
+  - `npm run harness:check`, `npm audit --omit=dev`, `npm ls --depth=0`, and
+    `git diff --check` passed.
+
 ## 2026-07-30 - v3.8.0 Debate Complete User-Path Closure
 
 - Re-reviewed the full Direct/Debate lifecycle as a session state machine and

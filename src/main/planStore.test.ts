@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -101,6 +101,23 @@ describe("plan store parity", () => {
       ),
     ).rejects.toBeInstanceOf(PlanVersionConflictError);
     await expect(store.get(created.id)).resolves.toEqual(updated);
+  });
+
+  it("uses the durable session index without parsing unrelated Plan files", async () => {
+    const configDir = path.join(tempDir, "indexed");
+    const store = createPlanStore({ configDir });
+    const created = await store.create(createRecord());
+    const plansDir = path.join(configDir, "plans");
+    await mkdir(plansDir, { recursive: true });
+    await writeFile(
+      path.join(plansDir, "unrelated-corrupt.json"),
+      "{not valid json",
+      "utf8",
+    );
+
+    await expect(
+      store.getLatestBySession(created.sessionId),
+    ).resolves.toEqual(created);
   });
 });
 

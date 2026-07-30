@@ -80,7 +80,9 @@ import type {
   ModelProfileInput,
   ModelSettingsInput,
   ProviderConnectionInput,
+  RevisionedModelResourceInput,
   SaveModelSettingsResult,
+  TestAndSaveProviderConnectionResult,
   TestProviderConnectionInput,
 } from "../../shared/modelSettings";
 import type {
@@ -995,12 +997,46 @@ function registerModelSettingsIpcHandlers(container: AppContainer): void {
     },
   );
   ipcMain.handle(
-    "modelCatalog:deleteConnection",
-    async (_event, connectionId: string) => {
-      const result =
-        await container.modelSettingsStore.deleteConnection(connectionId);
+    "modelCatalog:testAndSaveConnection",
+    async (
+      _event,
+      input: ProviderConnectionInput,
+    ): Promise<TestAndSaveProviderConnectionResult> => {
+      const result = await container
+        .modelConnectionService()
+        .testAndSaveProvider(input);
       if (result.ok) {
-        container.modelRouter().invalidate(connectionId);
+        container.modelRouter().invalidate(result.connection.id);
+      }
+      return result;
+    },
+  );
+  ipcMain.handle(
+    "modelCatalog:clearConnectionCredential",
+    async (_event, input: RevisionedModelResourceInput) => {
+      const result =
+        await container.modelSettingsStore.clearConnectionCredential(
+          input,
+        );
+      if (result.ok) {
+        container.modelRouter().invalidate(input.id);
+        return {
+          ...result,
+          catalog: await container
+            .modelConnectionService()
+            .enrichCatalog(result.catalog),
+        };
+      }
+      return result;
+    },
+  );
+  ipcMain.handle(
+    "modelCatalog:deleteConnection",
+    async (_event, input: RevisionedModelResourceInput) => {
+      const result =
+        await container.modelSettingsStore.deleteConnection(input);
+      if (result.ok) {
+        container.modelRouter().invalidate(input.id);
       }
       return result.ok
         ? {
@@ -1034,8 +1070,8 @@ function registerModelSettingsIpcHandlers(container: AppContainer): void {
   );
   ipcMain.handle(
     "modelCatalog:deleteProfile",
-    async (_event, profileId: string) => {
-      const result = await container.modelSettingsStore.deleteProfile(profileId);
+    async (_event, input: RevisionedModelResourceInput) => {
+      const result = await container.modelSettingsStore.deleteProfile(input);
       return result.ok
         ? {
             ...result,

@@ -52,10 +52,13 @@ describe("README", () => {
     expect(positioning).toContain("Zerox does not run unbounded autonomous loops");
     expect(readme).toContain("session-native Goal Mode");
     expect(readme).toContain("Chat Session mode");
-    expect(readme).toContain("current release: v3.8.0");
+    expect(readme).toContain("current release: v3.8.1");
     expect(readme).toContain("Plan Debate");
     expect(readme).toContain(
       "docs/design/zerox-agent-3-8-0-plan-debate.md",
+    );
+    expect(readme).toContain(
+      "docs/design/zerox-agent-3-8-1-model-and-conversation-ux.md",
     );
     expect(readme).toContain("v3.4.0");
     expect(readme).toContain("JSON/JSONL is the complete default source of truth");

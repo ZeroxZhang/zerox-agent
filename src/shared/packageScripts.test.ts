@@ -102,7 +102,7 @@ describe("package scripts", () => {
     expect(mainSource).toContain("app.requestSingleInstanceLock()");
   });
 
-  it("sets release metadata to v3.8.0", () => {
+  it("sets release metadata to v3.8.1", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -111,19 +111,19 @@ describe("package scripts", () => {
     ) as { version?: string; packages?: Record<string, { version?: string }> };
     const readme = readFileSync(path.join(process.cwd(), "README.md"), "utf8");
 
-    expect(packageJson.version).toBe("3.8.0");
+    expect(packageJson.version).toBe("3.8.1");
     expect(packageJson.scripts?.["smoke:providers"]).toContain(
       "smoke-multi-provider.mjs",
     );
     // package-lock.json is updated by `npm install`; check it matches the
     // declared package version once dependencies are installed.
-    expect(packageLock.version).toBe("3.8.0");
-    expect(packageLock.packages?.[""]?.version).toBe("3.8.0");
-    expect(readme).toContain("current release: v3.8.0");
-    expect(readme).toContain("当前版本是 **v3.8.0**");
+    expect(packageLock.version).toBe("3.8.1");
+    expect(packageLock.packages?.[""]?.version).toBe("3.8.1");
+    expect(readme).toContain("current release: v3.8.1");
+    expect(readme).toContain("当前版本是 **v3.8.1**");
   });
 
-  it("keeps release gates tracked through v3.8.0", () => {
+  it("keeps release gates tracked through v3.8.1", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -212,6 +212,14 @@ describe("package scripts", () => {
         feature.id ===
         "P53-v3.8.0-plan-input-routing-and-agent-terminal-state",
     );
+    const p54 = featureList.features.find(
+      (feature) =>
+        feature.id === "P54-v3.8.0-plan-trust-boundary-hardening",
+    );
+    const p55 = featureList.features.find(
+      (feature) =>
+        feature.id === "P55-v3.8.1-model-provider-and-conversation-ux",
+    );
     const p31 = featureList.features.find(
       (feature) => feature.id === "P31-v3.1.2-window-controls-and-settings-icon",
     );
@@ -225,7 +233,7 @@ describe("package scripts", () => {
       (feature) => feature.id === "P28-v3.0.0-execution-context-spine",
     );
 
-    expect(packageJson.version).toBe("3.8.0");
+    expect(packageJson.version).toBe("3.8.1");
     expect(
       openFeatureIds.every(
         (featureId) =>
@@ -249,10 +257,36 @@ describe("package scripts", () => {
           featureId ===
             "P52-v3.8.0-plan-c-structured-output-recovery" ||
           featureId ===
-            "P53-v3.8.0-plan-input-routing-and-agent-terminal-state",
+            "P53-v3.8.0-plan-input-routing-and-agent-terminal-state" ||
+          featureId ===
+            "P54-v3.8.0-plan-trust-boundary-hardening" ||
+          featureId ===
+            "P55-v3.8.1-model-provider-and-conversation-ux",
       ),
     ).toBe(true);
     expect(openFeatureIds.length).toBeLessThanOrEqual(1);
+    expect(p55?.status === "in_progress" || p55?.status === "done").toBe(true);
+    expect(p55).toEqual(
+      expect.objectContaining({
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("verified"),
+          expect.stringContaining("Alibaba Model Studio Coding Plan"),
+          expect.stringContaining("custom OpenAI-compatible"),
+          expect.stringContaining("decision cards"),
+        ]),
+      }),
+    );
+    expect(p54?.status === "in_progress" || p54?.status === "done").toBe(true);
+    expect(p54).toEqual(
+      expect.objectContaining({
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("selected Skill"),
+          expect.stringContaining("strictly validated"),
+          expect.stringContaining("dependency cycles"),
+          expect.stringContaining("durable session index"),
+        ]),
+      }),
+    );
     expect(p53?.status === "in_progress" || p53?.status === "done").toBe(true);
     expect(p52?.status === "in_progress" || p52?.status === "done").toBe(true);
     expect(p51?.status === "in_progress" || p51?.status === "done").toBe(true);

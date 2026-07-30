@@ -6,18 +6,22 @@ import {
   getDefaultModelSettings,
   isProviderKind,
   normalizeModelSettingsInput,
+  providerConnectionTargetIdentity,
   type ModelCatalogMutationResult,
   type ModelProfile,
   type ModelProfileInput,
+  type ModelProfileVerification,
   type ModelSettingsInput,
   type ModelSettingsValidationErrors,
   type ProviderConnectionInput,
+  type ProviderConnectionVerification,
   type ProviderCredentialSource,
   type ProviderKind,
   type PublicModelCatalog,
   type PublicModelSettings,
   type PublicProviderConnection,
   type ResolvedModelBinding,
+  type RevisionedModelResourceInput,
   type SaveModelProfileResult,
   type SaveProviderConnectionResult,
   validateModelSettingsInput,
@@ -26,6 +30,7 @@ import { capabilitiesForModel, listModelCatalogEntries } from "./providers/model
 import {
   getProviderDescriptor,
   listProviderDescriptors,
+  providerSupportsEmbeddings,
   requireProviderDescriptor,
   validateProviderFields,
 } from "./providers/providerRegistry";
@@ -53,6 +58,7 @@ type StoredProviderConnection = {
   credentialSource: ProviderCredentialSource;
   keySetAt?: string;
   lastUsedAt?: string;
+  verification?: ProviderConnectionVerification;
   revision: number;
   createdAt: string;
   updatedAt: string;
@@ -88,6 +94,7 @@ export type ResolvedModelProfile = {
 export type ResolvedProviderConnection = {
   id: string;
   providerKind: ProviderKind;
+  credentialSource: ProviderCredentialSource;
   connectionValues: Record<string, string>;
   secrets: Record<string, string>;
   revision: number;
@@ -101,17 +108,35 @@ export type ModelSettingsStore = {
 
   loadCatalog(): Promise<PublicModelCatalog>;
   saveConnection(input: ProviderConnectionInput): Promise<SaveProviderConnectionResult>;
-  deleteConnection(connectionId: string): Promise<ModelCatalogMutationResult>;
+  clearConnectionCredential(
+    input: RevisionedModelResourceInput,
+  ): Promise<ModelCatalogMutationResult>;
+  recordConnectionVerification(
+    connectionId: string,
+    expectedRevision: number,
+    verification: Omit<ProviderConnectionVerification, "connectionRevision">,
+  ): Promise<ModelCatalogMutationResult>;
+  recordProfileVerification(
+    profileId: string,
+    expectedProfileRevision: number,
+    expectedConnectionRevision: number,
+    verification: Omit<
+      ModelProfileVerification,
+      "profileRevision" | "connectionRevision"
+    >,
+  ): Promise<ModelCatalogMutationResult>;
+  deleteConnection(
+    input: RevisionedModelResourceInput,
+  ): Promise<ModelCatalogMutationResult>;
   saveProfile(input: ModelProfileInput): Promise<SaveModelProfileResult>;
-  deleteProfile(profileId: string): Promise<ModelCatalogMutationResult>;
+  deleteProfile(
+    input: RevisionedModelResourceInput,
+  ): Promise<ModelCatalogMutationResult>;
   setDefaultProfile(
     purpose: "chat" | "embedding",
     profileId: string | null,
   ): Promise<ModelCatalogMutationResult>;
-  setModelHidden(
-    routedModelId: string,
-    hidden: boolean,
-  ): Promise<ModelCatalogMutationResult>;
+  setModelHidden(routedModelId: string, hidden: boolean): Promise<ModelCatalogMutationResult>;
   resolveProfile(profileId?: string | null): Promise<ResolvedModelProfile>;
   resolveBinding(binding: ResolvedModelBinding): Promise<ResolvedModelProfile>;
   resolveConnection(connectionId: string): Promise<ResolvedProviderConnection>;
@@ -172,9 +197,7 @@ export function createModelSettingsStore(options: {
     await rename(tempPath, settingsPath);
   }
 
-  function mutate<T>(
-    operation: (stored: StoredModelSettingsV2) => Promise<T>,
-  ): Promise<T> {
+  function mutate<T>(operation: (stored: StoredModelSettingsV2) => Promise<T>): Promise<T> {
     const invocation = mutationTail.then(async () => {
       const stored = await readStoredSettings();
       return operation(stored);
@@ -186,9 +209,7 @@ export function createModelSettingsStore(options: {
     return invocation;
   }
 
-  async function loadCatalogFrom(
-    stored: StoredModelSettingsV2,
-  ): Promise<PublicModelCatalog> {
+  async function loadCatalogFrom(stored: StoredModelSettingsV2): Promise<PublicModelCatalog> {
     return {
       schemaVersion: 2,
       descriptors: listProviderDescriptors(),
@@ -196,7 +217,14 @@ export function createModelSettingsStore(options: {
         (entry) => !stored.hiddenRoutedModelIds.includes(entry.routedModelId),
       ),
       connections: stored.connections.map(toPublicConnection),
-      profiles: stored.profiles.map((profile) => structuredClone(profile)),
+      profiles: stored.profiles.map((profile) =>
+        toPublicProfile(
+          profile,
+          stored.connections.find(
+            (connection) => connection.id === profile.connectionId,
+          ),
+        ),
+      ),
       defaultChatProfileId: stored.defaultChatProfileId,
       defaultEmbeddingProfileId: stored.defaultEmbeddingProfileId,
       hiddenRoutedModelIds: [...stored.hiddenRoutedModelIds],
@@ -204,9 +232,7 @@ export function createModelSettingsStore(options: {
     };
   }
 
-  function decryptSecrets(
-    connection: StoredProviderConnection,
-  ): Record<string, string> {
+  function decryptSecrets(connection: StoredProviderConnection): Record<string, string> {
     return Object.fromEntries(
       Object.entries(connection.encryptedSecrets).map(([key, value]) => [
         key,
@@ -220,27 +246,21 @@ export function createModelSettingsStore(options: {
     profileId?: string | null,
     frozenBinding?: ResolvedModelBinding,
   ): Promise<ResolvedModelProfile> {
-    const selectedId =
-      frozenBinding?.profileId ?? profileId ?? stored.defaultChatProfileId;
+    const selectedId = frozenBinding?.profileId ?? profileId ?? stored.defaultChatProfileId;
     const profileRevision = frozenBinding?.profileRevision;
     const profile = [...stored.profiles, ...stored.profileHistory].find(
       (candidate) =>
         candidate.id === selectedId &&
-        (profileRevision === undefined ||
-          candidate.revision === profileRevision),
+        (profileRevision === undefined || candidate.revision === profileRevision),
     );
     if (!profile) {
       throw new Error("没有可用的模型档案，请先在设置中配置模型。");
     }
     const connectionRevision = frozenBinding?.connectionRevision;
-    const connection = [
-      ...stored.connections,
-      ...stored.connectionHistory,
-    ].find(
+    const connection = [...stored.connections, ...stored.connectionHistory].find(
       (candidate) =>
         candidate.id === profile.connectionId &&
-        (connectionRevision === undefined ||
-          candidate.revision === connectionRevision),
+        (connectionRevision === undefined || candidate.revision === connectionRevision),
     );
     if (!connection) {
       throw new Error(`模型档案 ${profile.name} 引用的服务商连接不存在。`);
@@ -306,14 +326,10 @@ export function createModelSettingsStore(options: {
           (profile) => profile.id === stored.defaultChatProfileId,
         );
         const existingConnection = existingProfile
-          ? stored.connections.find(
-              (connection) => connection.id === existingProfile.connectionId,
-            )
+          ? stored.connections.find((connection) => connection.id === existingProfile.connectionId)
           : undefined;
         const reusableConnection =
-          existingConnection?.providerKind === providerKind
-            ? existingConnection
-            : undefined;
+          existingConnection?.providerKind === providerKind ? existingConnection : undefined;
         const validation = validateModelSettingsInput(
           input,
           Boolean(reusableConnection && legacy.hasApiKey),
@@ -322,8 +338,7 @@ export function createModelSettingsStore(options: {
           throw new ModelSettingsValidationError(validation.errors);
         }
         const timestamp = now();
-        const connectionId =
-          reusableConnection?.id ?? `connection_${createId()}`;
+        const connectionId = reusableConnection?.id ?? `connection_${createId()}`;
         const profileId = existingProfile?.id ?? `profile_${createId()}`;
         const descriptor = requireProviderDescriptor(providerKind);
         const encryptedSecrets = {
@@ -341,8 +356,7 @@ export function createModelSettingsStore(options: {
             baseUrl: normalized.baseUrl,
           },
           encryptedSecrets,
-          credentialSource:
-            Object.keys(encryptedSecrets).length > 0 ? "stored" : "none",
+          credentialSource: Object.keys(encryptedSecrets).length > 0 ? "stored" : "none",
           ...(Object.keys(encryptedSecrets).length > 0
             ? { keySetAt: reusableConnection?.keySetAt ?? timestamp }
             : {}),
@@ -365,8 +379,7 @@ export function createModelSettingsStore(options: {
           custom: !Boolean(
             listModelCatalogEntries().find(
               (entry) =>
-                entry.providerKind === providerKind &&
-                entry.modelId === normalized.chatModel,
+                entry.providerKind === providerKind && entry.modelId === normalized.chatModel,
             ),
           ),
           revision: (existingProfile?.revision ?? 0) + 1,
@@ -389,18 +402,12 @@ export function createModelSettingsStore(options: {
           profile,
         ];
         if (existingProfile) {
-          stored.profileHistory = appendRevisionHistory(
-            stored.profileHistory,
-            existingProfile,
-          );
+          stored.profileHistory = appendRevisionHistory(stored.profileHistory, existingProfile);
         }
         stored.defaultChatProfileId = profileId;
         if (normalized.embeddingModel) {
-          const embeddingId =
-            stored.defaultEmbeddingProfileId ?? `profile_${createId()}`;
-          const oldEmbedding = stored.profiles.find(
-            (candidate) => candidate.id === embeddingId,
-          );
+          const embeddingId = stored.defaultEmbeddingProfileId ?? `profile_${createId()}`;
+          const oldEmbedding = stored.profiles.find((candidate) => candidate.id === embeddingId);
           stored.profiles = [
             ...stored.profiles.filter((candidate) => candidate.id !== embeddingId),
             {
@@ -417,10 +424,7 @@ export function createModelSettingsStore(options: {
             },
           ];
           if (oldEmbedding) {
-            stored.profileHistory = appendRevisionHistory(
-              stored.profileHistory,
-              oldEmbedding,
-            );
+            stored.profileHistory = appendRevisionHistory(stored.profileHistory, oldEmbedding);
           }
           stored.defaultEmbeddingProfileId = embeddingId;
         }
@@ -453,8 +457,27 @@ export function createModelSettingsStore(options: {
           if (existing && existing.providerKind !== input.providerKind) {
             return {
               ok: false,
+              message: "已保存连接不能切换服务商；请新建连接，避免凭证被发送到其他厂商端点。",
+            } satisfies SaveProviderConnectionResult;
+          }
+          if (
+            existing?.providerKind === "custom" &&
+            existing.values.protocol &&
+            existing.values.protocol !== (input.values.protocol || existing.values.protocol)
+          ) {
+            return {
+              ok: false,
               message:
-                "已保存连接不能切换服务商；请新建连接，避免凭证被发送到其他厂商端点。",
+                "已保存的自定义连接不能切换接口协议；请新建连接，避免凭证被发送到不同协议端点。",
+            } satisfies SaveProviderConnectionResult;
+          }
+          if (
+            existing &&
+            input.expectedRevision === undefined
+          ) {
+            return {
+              ok: false,
+              message: "更新服务商连接必须提供当前修订号，请重新加载后再试。",
             } satisfies SaveProviderConnectionResult;
           }
           if (
@@ -465,28 +488,48 @@ export function createModelSettingsStore(options: {
             throw new ModelCatalogConflictError("服务商连接已被其他操作更新。");
           }
           const values = applyProviderDefaults(descriptor, input.values);
+          const requestedCredentialSource =
+            input.credentialSource ??
+            existing?.credentialSource ??
+            (descriptor.needsCredential ? "stored" : "none");
+          const connectionTargetChanged = Boolean(
+            existing &&
+              providerConnectionTargetIdentity(
+                existing.providerKind,
+                existing.values,
+              ) !==
+                providerConnectionTargetIdentity(descriptor.kind, values),
+          );
+          const credentialSourceChanged = Boolean(
+            existing &&
+              existing.credentialSource !== requestedCredentialSource,
+          );
+          const canReuseExistingSecrets =
+            Boolean(existing) &&
+            !connectionTargetChanged &&
+            !credentialSourceChanged;
           const existingSecret =
-            existing && Object.keys(existing.encryptedSecrets).length > 0;
+            canReuseExistingSecrets &&
+            Boolean(existing && Object.keys(existing.encryptedSecrets).length > 0);
           const environmentCredentialAvailable = Boolean(
-            input.credentialSource === "environment" &&
-              descriptor.environmentKey &&
-              process.env[descriptor.environmentKey],
+            requestedCredentialSource === "environment" &&
+            descriptor.environmentKey &&
+            process.env[descriptor.environmentKey],
           );
           const errors = {
             ...validateProviderFields(descriptor, values, {
-              hasStoredSecret:
-                Boolean(existingSecret) || environmentCredentialAvailable,
+              hasStoredSecret: Boolean(existingSecret) || environmentCredentialAvailable,
             }),
-            ...validateConditionalCredentials(descriptor.kind, values, existing),
+            ...validateConditionalCredentials(
+              descriptor.kind,
+              values,
+              canReuseExistingSecrets ? existing : undefined,
+            ),
           };
-          if (
-            input.credentialSource === "environment" &&
-            !descriptor.environmentKey
-          ) {
-            errors.credentialSource =
-              `${descriptor.title} 不支持环境变量凭证来源。`;
+          if (requestedCredentialSource === "environment" && !descriptor.environmentKey) {
+            errors.credentialSource = `${descriptor.title} 不支持环境变量凭证来源。`;
           } else if (
-            input.credentialSource === "environment" &&
+            requestedCredentialSource === "environment" &&
             descriptor.environmentKey &&
             !environmentCredentialAvailable
           ) {
@@ -501,13 +544,13 @@ export function createModelSettingsStore(options: {
           }
 
           const timestamp = now();
-          const encryptedSecrets = { ...(existing?.encryptedSecrets ?? {}) };
+          const encryptedSecrets = canReuseExistingSecrets
+            ? { ...(existing?.encryptedSecrets ?? {}) }
+            : {};
           const publicValues: Record<string, string> = {};
           let secretChanged = false;
-          if (input.credentialSource === "environment") {
-            for (const field of descriptor.fields.filter(
-              (candidate) => candidate.secret,
-            )) {
+          if (requestedCredentialSource === "environment") {
+            for (const field of descriptor.fields.filter((candidate) => candidate.secret)) {
               if (encryptedSecrets[field.key]) {
                 delete encryptedSecrets[field.key];
                 secretChanged = true;
@@ -524,7 +567,7 @@ export function createModelSettingsStore(options: {
                 }
                 continue;
               }
-              if (input.credentialSource !== "environment" && value) {
+              if (requestedCredentialSource !== "environment" && value) {
                 encryptedSecrets[field.key] = encryptSecret(options.vault, value);
                 secretChanged = true;
               }
@@ -537,7 +580,7 @@ export function createModelSettingsStore(options: {
           const credentialSource = resolveCredentialSource(
             descriptor,
             encryptedSecrets,
-            input.credentialSource,
+            requestedCredentialSource,
             values,
           );
           const connection: StoredProviderConnection = {
@@ -549,9 +592,7 @@ export function createModelSettingsStore(options: {
             credentialSource,
             ...(Object.keys(encryptedSecrets).length > 0
               ? {
-                  keySetAt: secretChanged
-                    ? timestamp
-                    : existing?.keySetAt ?? timestamp,
+                  keySetAt: secretChanged ? timestamp : (existing?.keySetAt ?? timestamp),
                 }
               : {}),
             ...(existing?.lastUsedAt ? { lastUsedAt: existing.lastUsedAt } : {}),
@@ -560,53 +601,98 @@ export function createModelSettingsStore(options: {
             updatedAt: timestamp,
           };
           if (existing) {
-            stored.connectionHistory = appendRevisionHistory(
-              stored.connectionHistory,
-              existing,
-            );
+            stored.connectionHistory = appendRevisionHistory(stored.connectionHistory, existing);
           }
           stored.connections = [
-            ...stored.connections.filter(
-              (candidate) => candidate.id !== connection.id,
-            ),
+            ...stored.connections.filter((candidate) => candidate.id !== connection.id),
             connection,
           ];
+          if (existing) {
+            const invalidatedProfileIds = new Set(
+              stored.profiles
+                .filter((profile) => profile.connectionId === connection.id)
+                .map((profile) => profile.id),
+            );
+            stored.profiles = stored.profiles.map((profile) =>
+              profile.connectionId === connection.id
+                ? { ...profile, verification: undefined }
+                : profile,
+            );
+            if (
+              stored.defaultChatProfileId &&
+              invalidatedProfileIds.has(stored.defaultChatProfileId)
+            ) {
+              stored.defaultChatProfileId = null;
+            }
+            if (
+              stored.defaultEmbeddingProfileId &&
+              invalidatedProfileIds.has(stored.defaultEmbeddingProfileId)
+            ) {
+              stored.defaultEmbeddingProfileId = null;
+            }
+          }
 
-          const hasProfile = stored.profiles.some(
+          const initialModelId = descriptor.recommendedModel ?? publicValues.modelId;
+          const connectionProfiles = stored.profiles.filter(
             (profile) => profile.connectionId === connection.id,
           );
-          if (!hasProfile && descriptor.recommendedModel) {
+          const previousCustomModelId =
+            existing?.providerKind === "custom" ? existing.values.modelId : undefined;
+          const customModelProfile =
+            descriptor.kind === "custom" && previousCustomModelId
+              ? (connectionProfiles.find((profile) => profile.modelId === previousCustomModelId) ??
+                connectionProfiles.find((profile) => profile.id === stored.defaultChatProfileId))
+              : undefined;
+          if (
+            customModelProfile &&
+            initialModelId &&
+            customModelProfile.modelId !== initialModelId
+          ) {
+            stored.profileHistory = appendRevisionHistory(
+              stored.profileHistory,
+              customModelProfile,
+            );
+            stored.profiles = stored.profiles.map((profile) =>
+              profile.id === customModelProfile.id
+                ? {
+                    ...profile,
+                    name: profile.name === previousCustomModelId ? initialModelId : profile.name,
+                    modelId: initialModelId,
+                    verification: undefined,
+                    revision: profile.revision + 1,
+                    updatedAt: timestamp,
+                  }
+                : profile,
+            );
+          } else if (connectionProfiles.length === 0 && initialModelId) {
             const profile: ModelProfile = {
               id: `profile_${createId()}`,
-              name: descriptor.recommendedModel,
+              name: initialModelId,
               connectionId: connection.id,
-              modelId: descriptor.recommendedModel,
+              modelId: initialModelId,
               purpose: "chat",
               generation: defaultModelGenerationSettings(),
-              custom: false,
+              ...(descriptor.kind === "custom"
+                ? {
+                    capabilityOverrides: {
+                      tools: true,
+                      streaming: true,
+                    },
+                  }
+                : {}),
+              custom:
+                descriptor.kind === "custom" ||
+                !Boolean(
+                  listModelCatalogEntries().find(
+                    (entry) =>
+                      entry.providerKind === descriptor.kind && entry.modelId === initialModelId,
+                  ),
+                ),
               revision: 1,
               createdAt: timestamp,
               updatedAt: timestamp,
             };
             stored.profiles.push(profile);
-            const currentDefault = stored.profiles.find(
-              (candidate) =>
-                candidate.id === stored.defaultChatProfileId &&
-                candidate.purpose === "chat",
-            );
-            const currentDefaultConnection = currentDefault
-              ? stored.connections.find(
-                  (candidate) =>
-                    candidate.id === currentDefault.connectionId,
-                )
-              : undefined;
-            const currentDefaultWorks = Boolean(
-              currentDefaultConnection &&
-                hasUsableCredential(currentDefaultConnection),
-            );
-            if (!currentDefaultWorks) {
-              stored.defaultChatProfileId = profile.id;
-            }
           }
           stored.updatedAt = timestamp;
           await writeStoredSettings(stored);
@@ -624,22 +710,181 @@ export function createModelSettingsStore(options: {
       }
     },
 
-    async deleteConnection(connectionId) {
+    async clearConnectionCredential(input) {
       return mutate(async (stored) => {
-        if (await options.isConnectionReferenced?.(connectionId)) {
+        const existing = stored.connections.find((candidate) => candidate.id === input.id);
+        if (!existing) {
+          return { ok: false, message: "服务商连接不存在。" };
+        }
+        if (existing.revision !== input.expectedRevision) {
+          return {
+            ok: false,
+            message: "连接已更新，未移除较新修订中的凭证；请重新加载后再试。",
+          };
+        }
+        const timestamp = now();
+        const sanitizedHistory = stored.connectionHistory.map((connection) =>
+          connection.id === input.id ? withoutConnectionSecrets(connection) : connection,
+        );
+        stored.connectionHistory = appendRevisionHistory(
+          sanitizedHistory,
+          withoutConnectionSecrets(existing),
+        );
+        const connection: StoredProviderConnection = {
+          ...withoutConnectionSecrets(existing),
+          revision: existing.revision + 1,
+          updatedAt: timestamp,
+        };
+        stored.connections = stored.connections.map((candidate) =>
+          candidate.id === input.id ? connection : candidate,
+        );
+        const affectedProfileIds = new Set(
+          stored.profiles
+            .filter((profile) => profile.connectionId === input.id)
+            .map((profile) => profile.id),
+        );
+        stored.profiles = stored.profiles.map((profile) =>
+          profile.connectionId === input.id
+            ? { ...profile, verification: undefined }
+            : profile,
+        );
+        if (
+          stored.defaultChatProfileId &&
+          affectedProfileIds.has(stored.defaultChatProfileId)
+        ) {
+          stored.defaultChatProfileId = null;
+        }
+        if (
+          stored.defaultEmbeddingProfileId &&
+          affectedProfileIds.has(stored.defaultEmbeddingProfileId)
+        ) {
+          stored.defaultEmbeddingProfileId = null;
+        }
+        stored.updatedAt = timestamp;
+        await writeStoredSettings(stored);
+        return { ok: true, catalog: await loadCatalogFrom(stored) };
+      });
+    },
+
+    async recordConnectionVerification(connectionId, expectedRevision, verification) {
+      return mutate(async (stored) => {
+        const connection = stored.connections.find((candidate) => candidate.id === connectionId);
+        if (!connection) {
+          return { ok: false, message: "服务商连接不存在。" };
+        }
+        if (connection.revision !== expectedRevision) {
+          return {
+            ok: false,
+            message: "连接已在测试期间更新，请重新测试。",
+          };
+        }
+        connection.verification = {
+          ...verification,
+          connectionRevision: connection.revision,
+        };
+        if (verification.status === "failed") {
+          const affectedProfileIds = new Set(
+            stored.profiles
+              .filter((profile) => profile.connectionId === connectionId)
+              .map((profile) => profile.id),
+          );
+          if (
+            stored.defaultChatProfileId &&
+            affectedProfileIds.has(stored.defaultChatProfileId)
+          ) {
+            stored.defaultChatProfileId = null;
+          }
+          if (
+            stored.defaultEmbeddingProfileId &&
+            affectedProfileIds.has(stored.defaultEmbeddingProfileId)
+          ) {
+            stored.defaultEmbeddingProfileId = null;
+          }
+        }
+        const timestamp = now();
+        connection.updatedAt = timestamp;
+        stored.updatedAt = timestamp;
+        await writeStoredSettings(stored);
+        return { ok: true, catalog: await loadCatalogFrom(stored) };
+      });
+    },
+
+    async recordProfileVerification(
+      profileId,
+      expectedProfileRevision,
+      expectedConnectionRevision,
+      verification,
+    ) {
+      return mutate(async (stored) => {
+        const profile = stored.profiles.find((candidate) => candidate.id === profileId);
+        if (!profile) {
+          return { ok: false, message: "模型档案不存在。" };
+        }
+        const connection = stored.connections.find(
+          (candidate) => candidate.id === profile.connectionId,
+        );
+        if (!connection) {
+          return { ok: false, message: "模型档案引用的服务商连接不存在。" };
+        }
+        if (
+          profile.revision !== expectedProfileRevision ||
+          connection.revision !== expectedConnectionRevision
+        ) {
+          return {
+            ok: false,
+            message: "模型或连接已在测试期间更新，请重新测试。",
+          };
+        }
+        profile.verification = {
+          ...verification,
+          profileRevision: profile.revision,
+          connectionRevision: connection.revision,
+        };
+        if (verification.status === "failed") {
+          if (stored.defaultChatProfileId === profile.id) {
+            stored.defaultChatProfileId = null;
+          }
+          if (stored.defaultEmbeddingProfileId === profile.id) {
+            stored.defaultEmbeddingProfileId = null;
+          }
+        }
+        const timestamp = now();
+        profile.updatedAt = timestamp;
+        stored.updatedAt = timestamp;
+        await writeStoredSettings(stored);
+        return { ok: true, catalog: await loadCatalogFrom(stored) };
+      });
+    },
+
+    async deleteConnection(input) {
+      return mutate(async (stored) => {
+        const connection = stored.connections.find((candidate) => candidate.id === input.id);
+        if (!connection) {
+          return { ok: false, message: "服务商连接不存在。" };
+        }
+        if (connection.revision !== input.expectedRevision) {
+          return {
+            ok: false,
+            message: "连接已更新，未删除较新修订；请重新加载后再试。",
+          };
+        }
+        if (await options.isConnectionReferenced?.(input.id)) {
           return {
             ok: false,
             message: "该连接仍被活动或待确认计划引用，不能删除。",
           };
         }
-        if (stored.profiles.some((profile) => profile.connectionId === connectionId)) {
+        if (stored.profiles.some((profile) => profile.connectionId === input.id)) {
           return {
             ok: false,
             message: "该连接仍被模型档案引用，请先删除相关模型档案。",
           };
         }
         stored.connections = stored.connections.filter(
-          (candidate) => candidate.id !== connectionId,
+          (candidate) => candidate.id !== input.id,
+        );
+        stored.connectionHistory = stored.connectionHistory.filter(
+          (candidate) => candidate.id !== input.id,
         );
         stored.updatedAt = now();
         await writeStoredSettings(stored);
@@ -658,6 +903,18 @@ export function createModelSettingsStore(options: {
         const existing = input.id
           ? stored.profiles.find((candidate) => candidate.id === input.id)
           : undefined;
+        if (input.id && !existing) {
+          return {
+            ok: false,
+            message: "要更新的模型档案不存在，请重新加载后再试。",
+          };
+        }
+        if (existing && input.expectedRevision === undefined) {
+          return {
+            ok: false,
+            message: "更新模型档案必须提供当前修订号，请重新加载后再试。",
+          };
+        }
         if (
           existing &&
           input.expectedRevision !== undefined &&
@@ -669,12 +926,28 @@ export function createModelSettingsStore(options: {
         if (!modelId) {
           return { ok: false, message: "模型 ID 必填。" };
         }
+        if (
+          input.purpose === "embedding" &&
+          !providerSupportsEmbeddings(connection.providerKind, connection.values)
+        ) {
+          return {
+            ok: false,
+            message: "该服务商或接口协议尚未实现 Embedding 调用，不能创建 Embedding 模型。",
+          };
+        }
         const timestamp = now();
         const generation = {
           ...defaultModelGenerationSettings(),
           ...(existing?.generation ?? {}),
           ...(input.generation ?? {}),
         };
+        const capabilityOverrides = input.capabilityOverrides
+          ? { ...input.capabilityOverrides }
+          : existing?.capabilityOverrides
+            ? { ...existing.capabilityOverrides }
+            : connection.providerKind === "custom"
+              ? { tools: true, streaming: true }
+              : undefined;
         const profile: ModelProfile = {
           id: existing?.id ?? `profile_${createId()}`,
           name: input.name.trim() || modelId,
@@ -682,16 +955,11 @@ export function createModelSettingsStore(options: {
           modelId,
           purpose: input.purpose,
           generation,
-          ...(input.capabilityOverrides
-            ? { capabilityOverrides: { ...input.capabilityOverrides } }
-            : existing?.capabilityOverrides
-              ? { capabilityOverrides: { ...existing.capabilityOverrides } }
-              : {}),
+          ...(capabilityOverrides ? { capabilityOverrides } : {}),
           custom: !Boolean(
             listModelCatalogEntries().find(
               (entry) =>
-                entry.providerKind === connection.providerKind &&
-                entry.modelId === modelId,
+                entry.providerKind === connection.providerKind && entry.modelId === modelId,
             ),
           ),
           revision: (existing?.revision ?? 0) + 1,
@@ -699,19 +967,30 @@ export function createModelSettingsStore(options: {
           updatedAt: timestamp,
         };
         if (existing) {
-          stored.profileHistory = appendRevisionHistory(
-            stored.profileHistory,
-            existing,
-          );
+          stored.profileHistory = appendRevisionHistory(stored.profileHistory, existing);
+          if (stored.defaultChatProfileId === existing.id) {
+            stored.defaultChatProfileId = null;
+          }
+          if (stored.defaultEmbeddingProfileId === existing.id) {
+            stored.defaultEmbeddingProfileId = null;
+          }
         }
         stored.profiles = [
           ...stored.profiles.filter((candidate) => candidate.id !== profile.id),
           profile,
         ];
-        if (profile.purpose === "chat" && !stored.defaultChatProfileId) {
+        if (
+          profile.purpose === "chat" &&
+          !stored.defaultChatProfileId &&
+          profileCanBecomeDefault(profile, connection)
+        ) {
           stored.defaultChatProfileId = profile.id;
         }
-        if (profile.purpose === "embedding" && !stored.defaultEmbeddingProfileId) {
+        if (
+          profile.purpose === "embedding" &&
+          !stored.defaultEmbeddingProfileId &&
+          profileCanBecomeDefault(profile, connection)
+        ) {
           stored.defaultEmbeddingProfileId = profile.id;
         }
         stored.updatedAt = timestamp;
@@ -724,26 +1003,52 @@ export function createModelSettingsStore(options: {
       });
     },
 
-    async deleteProfile(profileId) {
+    async deleteProfile(input) {
       return mutate(async (stored) => {
-        if (await options.isProfileReferenced?.(profileId)) {
+        const existing = stored.profiles.find((candidate) => candidate.id === input.id);
+        if (!existing) {
+          return { ok: false, message: "模型档案不存在。" };
+        }
+        if (existing.revision !== input.expectedRevision) {
+          return {
+            ok: false,
+            message: "模型档案已更新，未删除较新修订；请重新加载后再试。",
+          };
+        }
+        if (await options.isProfileReferenced?.(input.id)) {
           return {
             ok: false,
             message: "该模型档案仍被活动或待确认计划引用，不能删除。",
           };
         }
-        stored.profiles = stored.profiles.filter(
-          (candidate) => candidate.id !== profileId,
+        stored.profiles = stored.profiles.filter((candidate) => candidate.id !== input.id);
+        stored.profileHistory = stored.profileHistory.filter(
+          (candidate) => candidate.id !== input.id,
         );
-        if (stored.defaultChatProfileId === profileId) {
+        if (stored.defaultChatProfileId === input.id) {
           stored.defaultChatProfileId =
-            stored.profiles.find((candidate) => candidate.purpose === "chat")?.id ??
-            null;
+            stored.profiles.find(
+              (candidate) =>
+                candidate.purpose === "chat" &&
+                profileCanBecomeDefault(
+                  candidate,
+                  stored.connections.find(
+                    (connection) => connection.id === candidate.connectionId,
+                  ),
+                ),
+            )?.id ?? null;
         }
-        if (stored.defaultEmbeddingProfileId === profileId) {
+        if (stored.defaultEmbeddingProfileId === input.id) {
           stored.defaultEmbeddingProfileId =
             stored.profiles.find(
-              (candidate) => candidate.purpose === "embedding",
+              (candidate) =>
+                candidate.purpose === "embedding" &&
+                profileCanBecomeDefault(
+                  candidate,
+                  stored.connections.find(
+                    (connection) => connection.id === candidate.connectionId,
+                  ),
+                ),
             )?.id ?? null;
         }
         stored.updatedAt = now();
@@ -756,11 +1061,19 @@ export function createModelSettingsStore(options: {
       return mutate(async (stored) => {
         if (profileId) {
           const profile = stored.profiles.find(
-            (candidate) =>
-              candidate.id === profileId && candidate.purpose === purpose,
+            (candidate) => candidate.id === profileId && candidate.purpose === purpose,
           );
           if (!profile) {
             return { ok: false, message: "默认模型档案不存在或用途不匹配。" };
+          }
+          const connection = stored.connections.find(
+            (candidate) => candidate.id === profile.connectionId,
+          );
+          if (!profileCanBecomeDefault(profile, connection)) {
+            return {
+              ok: false,
+              message: "该模型及其连接尚未通过当前修订的测试，不能设为默认。",
+            };
           }
         }
         if (purpose === "chat") {
@@ -794,18 +1107,12 @@ export function createModelSettingsStore(options: {
     },
 
     async resolveBinding(binding) {
-      return resolveProfileFrom(
-        await readStoredSettings(),
-        binding.profileId,
-        binding,
-      );
+      return resolveProfileFrom(await readStoredSettings(), binding.profileId, binding);
     },
 
     async resolveConnection(connectionId) {
       const stored = await readStoredSettings();
-      const connection = stored.connections.find(
-        (candidate) => candidate.id === connectionId,
-      );
+      const connection = stored.connections.find((candidate) => candidate.id === connectionId);
       if (!connection) {
         throw new Error("服务商连接不存在。");
       }
@@ -826,6 +1133,7 @@ export function createModelSettingsStore(options: {
       return {
         id: connection.id,
         providerKind: connection.providerKind,
+        credentialSource: connection.credentialSource,
         connectionValues: { ...connection.values },
         secrets,
         revision: connection.revision,
@@ -834,9 +1142,7 @@ export function createModelSettingsStore(options: {
 
     async markConnectionUsed(connectionId) {
       await mutate(async (stored) => {
-        const connection = stored.connections.find(
-          (candidate) => candidate.id === connectionId,
-        );
+        const connection = stored.connections.find((candidate) => candidate.id === connectionId);
         if (!connection) {
           return;
         }
@@ -855,25 +1161,18 @@ export function createModelSettingsStore(options: {
     },
   };
 
-  function migrateV1(
-    legacy: StoredModelSettingsV1,
-    timestamp: string,
-  ): StoredModelSettingsV2 {
+  function migrateV1(legacy: StoredModelSettingsV1, timestamp: string): StoredModelSettingsV2 {
     const providerKind = normalizeLegacyProviderKind(legacy.providerId);
     const connectionId = "connection_migrated_default";
     const chatProfileId = "profile_migrated_chat";
-    const embeddingProfileId = legacy.embeddingModel
-      ? "profile_migrated_embedding"
-      : null;
+    const embeddingProfileId = legacy.embeddingModel ? "profile_migrated_embedding" : null;
     const descriptor = requireProviderDescriptor(providerKind);
     const connection: StoredProviderConnection = {
       id: connectionId,
       name: descriptor.title,
       providerKind,
       values: legacy.baseUrl ? { baseUrl: legacy.baseUrl } : {},
-      encryptedSecrets: legacy.encryptedApiKey
-        ? { apiKey: legacy.encryptedApiKey }
-        : {},
+      encryptedSecrets: legacy.encryptedApiKey ? { apiKey: legacy.encryptedApiKey } : {},
       credentialSource: legacy.encryptedApiKey ? "stored" : "none",
       ...(legacy.encryptedApiKey ? { keySetAt: legacy.updatedAt } : {}),
       revision: 1,
@@ -898,8 +1197,7 @@ export function createModelSettingsStore(options: {
             custom: !Boolean(
               listModelCatalogEntries().find(
                 (entry) =>
-                  entry.providerKind === providerKind &&
-                  entry.modelId === legacy.chatModel,
+                  entry.providerKind === providerKind && entry.modelId === legacy.chatModel,
               ),
             ),
             revision: 1,
@@ -977,13 +1275,9 @@ function normalizeStoredV2(stored: StoredModelSettingsV2): StoredModelSettingsV2
   return {
     schemaVersion: 2,
     connections: Array.isArray(stored.connections) ? stored.connections : [],
-    connectionHistory: Array.isArray(stored.connectionHistory)
-      ? stored.connectionHistory
-      : [],
+    connectionHistory: Array.isArray(stored.connectionHistory) ? stored.connectionHistory : [],
     profiles: Array.isArray(stored.profiles) ? stored.profiles : [],
-    profileHistory: Array.isArray(stored.profileHistory)
-      ? stored.profileHistory
-      : [],
+    profileHistory: Array.isArray(stored.profileHistory) ? stored.profileHistory : [],
     defaultChatProfileId: stored.defaultChatProfileId ?? null,
     defaultEmbeddingProfileId: stored.defaultEmbeddingProfileId ?? null,
     hiddenRoutedModelIds: Array.isArray(stored.hiddenRoutedModelIds)
@@ -1003,9 +1297,7 @@ function normalizeLegacyProviderKind(value: unknown): ProviderKind {
   throw new Error(`未知模型服务商：${String(value)}`);
 }
 
-function toPublicConnection(
-  connection: StoredProviderConnection,
-): PublicProviderConnection {
+function toPublicConnection(connection: StoredProviderConnection): PublicProviderConnection {
   return {
     id: connection.id,
     name: connection.name,
@@ -1013,6 +1305,10 @@ function toPublicConnection(
     values: { ...connection.values },
     credentialSource: connection.credentialSource,
     hasCredential: hasUsableCredential(connection),
+    ...(connection.verification &&
+    connection.verification.connectionRevision === connection.revision
+      ? { verification: { ...connection.verification } }
+      : {}),
     ...(connection.keySetAt ? { keySetAt: connection.keySetAt } : {}),
     ...(connection.lastUsedAt ? { lastUsedAt: connection.lastUsedAt } : {}),
     revision: connection.revision,
@@ -1021,17 +1317,26 @@ function toPublicConnection(
   };
 }
 
-function toLegacyPublicSettings(
-  stored: StoredModelSettingsV2,
-): PublicModelSettings {
+function toPublicProfile(
+  profile: ModelProfile,
+  connection: StoredProviderConnection | undefined,
+): ModelProfile {
+  const publicProfile = structuredClone(profile);
+  if (
+    !connection ||
+    publicProfile.verification?.profileRevision !== publicProfile.revision ||
+    publicProfile.verification.connectionRevision !== connection.revision
+  ) {
+    delete publicProfile.verification;
+  }
+  return publicProfile;
+}
+
+function toLegacyPublicSettings(stored: StoredModelSettingsV2): PublicModelSettings {
   const defaults = getDefaultModelSettings();
-  const profile = stored.profiles.find(
-    (candidate) => candidate.id === stored.defaultChatProfileId,
-  );
+  const profile = stored.profiles.find((candidate) => candidate.id === stored.defaultChatProfileId);
   const connection = profile
-    ? stored.connections.find(
-        (candidate) => candidate.id === profile.connectionId,
-      )
+    ? stored.connections.find((candidate) => candidate.id === profile.connectionId)
     : undefined;
   const embedding = stored.profiles.find(
     (candidate) => candidate.id === stored.defaultEmbeddingProfileId,
@@ -1055,9 +1360,7 @@ function toLegacyPublicSettings(
     hasApiKey: hasUsableCredential(connection),
     updatedAt: stored.updatedAt,
     providerId:
-      connection.providerKind === "openai"
-        ? "openai-compatible"
-        : connection.providerKind,
+      connection.providerKind === "openai" ? "openai-compatible" : connection.providerKind,
   };
 }
 
@@ -1086,10 +1389,7 @@ function validateConditionalCredentials(
     if (method === "api_key" && !hasSecret("bedrockApiKey")) {
       errors.bedrockApiKey = "Bedrock API Key 必填。";
     }
-    if (
-      method === "iam" &&
-      (!values.awsAccessKeyId?.trim() || !hasSecret("awsSecretAccessKey"))
-    ) {
+    if (method === "iam" && (!values.awsAccessKeyId?.trim() || !hasSecret("awsSecretAccessKey"))) {
       errors.awsSecretAccessKey = "IAM Access Key ID 和 Secret Access Key 必填。";
     }
   }
@@ -1105,21 +1405,38 @@ function validateConditionalCredentials(
   return errors;
 }
 
-function hasUsableCredential(
-  connection: StoredProviderConnection,
-): boolean {
+function hasUsableCredential(connection: StoredProviderConnection): boolean {
   if (Object.keys(connection.encryptedSecrets).length > 0) {
     return true;
   }
   if (connection.credentialSource === "environment") {
-    const environmentKey = getProviderDescriptor(
-      connection.providerKind,
-    )?.environmentKey;
+    const environmentKey = getProviderDescriptor(connection.providerKind)?.environmentKey;
     return Boolean(environmentKey && process.env[environmentKey]);
   }
+  return connection.credentialSource === "ambient" || connection.providerKind === "ollama";
+}
+
+function connectionCanBecomeDefault(
+  connection: StoredProviderConnection | undefined,
+): boolean {
+  if (!connection || !hasUsableCredential(connection)) {
+    return false;
+  }
   return (
-    connection.credentialSource === "ambient" ||
-    connection.providerKind === "ollama"
+    connection.verification?.status === "passed" &&
+    connection.verification.connectionRevision === connection.revision
+  );
+}
+
+function profileCanBecomeDefault(
+  profile: ModelProfile,
+  connection: StoredProviderConnection | undefined,
+): boolean {
+  return (
+    connectionCanBecomeDefault(connection) &&
+    profile.verification?.status === "passed" &&
+    profile.verification.profileRevision === profile.revision &&
+    profile.verification.connectionRevision === connection?.revision
   );
 }
 
@@ -1129,9 +1446,7 @@ function isProviderFieldVisible(
 ): boolean {
   return (
     !field.showWhen ||
-    Object.entries(field.showWhen).every(
-      ([key, expected]) => values[key] === expected,
-    )
+    Object.entries(field.showWhen).every(([key, expected]) => values[key] === expected)
   );
 }
 
@@ -1153,10 +1468,8 @@ function resolveCredentialSource(
   }
   if (
     requested === "ambient" ||
-    (descriptor.kind === "bedrock" &&
-      (values.authMethod === "profile" || !values.authMethod)) ||
-    (descriptor.kind === "vertex" &&
-      (values.authMethod === "adc" || !values.authMethod))
+    (descriptor.kind === "bedrock" && (values.authMethod === "profile" || !values.authMethod)) ||
+    (descriptor.kind === "vertex" && (values.authMethod === "adc" || !values.authMethod))
   ) {
     return "ambient";
   }
@@ -1171,12 +1484,7 @@ function encryptSecret(vault: SecretVault, value: string): string {
 }
 
 function firstSecret(secrets: Record<string, string>): string | null {
-  return (
-    secrets.apiKey ??
-    secrets.bedrockApiKey ??
-    secrets.vertexApiKey ??
-    null
-  );
+  return secrets.apiKey ?? secrets.bedrockApiKey ?? secrets.vertexApiKey ?? null;
 }
 
 function pairRevisions(connectionRevision: number, profileRevision: number): number {
@@ -1192,9 +1500,19 @@ function appendRevisionHistory<T extends { id: string; revision: number }>(
 ): T[] {
   return [
     ...history.filter(
-      (candidate) =>
-        candidate.id !== value.id || candidate.revision !== value.revision,
+      (candidate) => candidate.id !== value.id || candidate.revision !== value.revision,
     ),
     structuredClone(value),
   ];
+}
+
+function withoutConnectionSecrets(connection: StoredProviderConnection): StoredProviderConnection {
+  const sanitized: StoredProviderConnection = {
+    ...structuredClone(connection),
+    encryptedSecrets: {},
+    credentialSource: "none",
+  };
+  delete sanitized.keySetAt;
+  delete sanitized.verification;
+  return sanitized;
 }

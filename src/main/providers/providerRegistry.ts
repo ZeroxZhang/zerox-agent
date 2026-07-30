@@ -48,6 +48,7 @@ const compatible = (input: {
     nativeApi: false,
     local: false,
     customEndpoint: true,
+    embeddings: false,
   },
 });
 
@@ -74,6 +75,7 @@ const descriptors: readonly ProviderDescriptor[] = [
       nativeApi: true,
       local: false,
       customEndpoint: true,
+      embeddings: true,
     },
   },
   {
@@ -88,6 +90,7 @@ const descriptors: readonly ProviderDescriptor[] = [
       nativeApi: true,
       local: false,
       customEndpoint: false,
+      embeddings: false,
     },
   },
   {
@@ -102,6 +105,7 @@ const descriptors: readonly ProviderDescriptor[] = [
       nativeApi: true,
       local: false,
       customEndpoint: false,
+      embeddings: false,
     },
   },
   {
@@ -185,6 +189,7 @@ const descriptors: readonly ProviderDescriptor[] = [
       nativeApi: true,
       local: false,
       customEndpoint: false,
+      embeddings: false,
     },
   },
   {
@@ -254,6 +259,7 @@ const descriptors: readonly ProviderDescriptor[] = [
       nativeApi: true,
       local: false,
       customEndpoint: false,
+      embeddings: false,
     },
   },
   compatible({
@@ -290,6 +296,15 @@ const descriptors: readonly ProviderDescriptor[] = [
     endpoint: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
     recommendedModel: "qwen3-max",
     environmentKey: "DASHSCOPE_API_KEY",
+  }),
+  compatible({
+    kind: "dashscope-coding",
+    title: "阿里云百炼 Coding Plan",
+    endpoint: "https://coding.dashscope.aliyuncs.com/v1",
+    recommendedModel: "qwen3.7-plus",
+    environmentKey: "DASHSCOPE_CODING_API_KEY",
+    description:
+      "使用阿里云百炼 Coding Plan 的 OpenAI Chat Completions 兼容接口；套餐密钥与普通 DashScope 调用分开管理。",
   }),
   compatible({
     kind: "xai",
@@ -353,6 +368,62 @@ const descriptors: readonly ProviderDescriptor[] = [
       nativeApi: false,
       local: true,
       customEndpoint: true,
+      embeddings: true,
+    },
+  },
+  {
+    kind: "custom",
+    title: "自定义服务商",
+    description:
+      "连接遵循 OpenAI Chat Completions 或 Anthropic Messages 标准的自建服务、代理与私有网关。",
+    needsCredential: true,
+    fields: [
+      {
+        key: "protocol",
+        label: "接口协议",
+        secret: false,
+        required: true,
+        defaultValue: "openai",
+        choices: [
+          {
+            value: "openai",
+            label: "OpenAI-compatible",
+            tag: "Chat Completions",
+            description: "Bearer 鉴权，向 Base URL 追加 /chat/completions。",
+          },
+          {
+            value: "anthropic",
+            label: "Anthropic Messages",
+            tag: "原生协议",
+            description:
+              "x-api-key 鉴权，向服务根地址追加 /v1/messages。",
+          },
+        ],
+      },
+      apiKeyField("API Key"),
+      {
+        key: "baseUrl",
+        label: "Base URL",
+        secret: false,
+        required: true,
+        placeholder: "https://gateway.example.com/v1",
+        help:
+          "OpenAI 协议通常填写含 /v1 的 Base URL；Anthropic 协议填写服务根地址，不要包含 /v1/messages。",
+      },
+      {
+        key: "modelId",
+        label: "模型 ID",
+        secret: false,
+        required: true,
+        placeholder: "vendor/model-name",
+        help: "必须与服务端接受的 model 字段完全一致。",
+      },
+    ],
+    capabilities: {
+      nativeApi: false,
+      local: false,
+      customEndpoint: true,
+      embeddings: true,
     },
   },
 ];
@@ -361,6 +432,17 @@ const byKind = new Map(descriptors.map((descriptor) => [descriptor.kind, descrip
 
 export function listProviderDescriptors(): ProviderDescriptor[] {
   return descriptors.map(cloneDescriptor);
+}
+
+export function providerSupportsEmbeddings(
+  kind: ProviderKind,
+  values: Record<string, string>,
+): boolean {
+  const descriptor = getProviderDescriptor(kind);
+  if (!descriptor?.capabilities.embeddings) {
+    return false;
+  }
+  return kind !== "custom" || (values.protocol || "openai") === "openai";
 }
 
 export function getProviderDescriptor(

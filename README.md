@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v3.8.0-111827" alt="Version v3.8.0" />
+  <img src="https://img.shields.io/badge/version-v3.8.1-111827" alt="Version v3.8.1" />
   <img src="https://img.shields.io/badge/platform-macOS%20arm64-blue" alt="Platform: macOS arm64" />
   <img src="https://img.shields.io/badge/electron-42.3-9feaf9" alt="Electron 42" />
   <img src="https://img.shields.io/badge/react-19.2-61dafb" alt="React 19" />
@@ -41,7 +41,7 @@
 
 ## Overview
 
-**Zerox Agent** is a local-first desktop control plane for personal AI agents (current release: v3.8.0). The name comes from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
+**Zerox Agent** is a local-first desktop control plane for personal AI agents (current release: v3.8.1). The name comes from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
 
 It is **not** a chat wrapper, a hosted agent cloud, or an unbounded autonomous loop. It runs on your Mac: you bring your own API key (Anthropic / Gemini / OpenAI-compatible), grant explicit tool permissions, and keep session state, trajectories, memory, and learning candidates on disk under local `userData`. High-risk actions ask first; interrupted long work can resume from checkpoints; every step leaves an auditable run trail.
 
@@ -83,6 +83,7 @@ It is **not** a chat wrapper, a hosted agent cloud, or an unbounded autonomous l
 | Workspace sandbox | [`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md) |
 | User-reviewed learning loop | [`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md) |
 | Goal Mode / session-native goals | [`docs/architecture/agent-goal-mode.md`](docs/architecture/agent-goal-mode.md) |
+| v3.8.1 provider management & decision-card UX | [`docs/design/zerox-agent-3-8-1-model-and-conversation-ux.md`](docs/design/zerox-agent-3-8-1-model-and-conversation-ux.md) |
 | v3.8.0 multi-provider models & Plan Debate | [`docs/design/zerox-agent-3-8-0-plan-debate.md`](docs/design/zerox-agent-3-8-0-plan-debate.md) |
 | v3.2.2 Soft Blue Desktop Control Surface | [`docs/design/zerox-agent-3-2-2-design-system-spec.md`](docs/design/zerox-agent-3-2-2-design-system-spec.md) |
 | v3.4.0 **B · Obsidian** theme | [`docs/design/guidelines_0708.html`](docs/design/guidelines_0708.html) |
@@ -100,6 +101,8 @@ The v3.4.0 release uses [`docs/design/guidelines_0708.html`](docs/design/guideli
 **v3.7.1** adds packaged-app release detection, background update downloads, and a compact install action beside the sidebar version. Chat now accepts pasted PNG/JPEG/WebP and bounded UTF-8 text attachments, preserves compact attachment metadata in session history, and sends image content through OpenAI-compatible, Anthropic, and Gemini provider paths.
 
 **v3.8.0** introduces descriptor-driven multi-provider connections and stable model profiles for OpenAI, Anthropic, Gemini, Bedrock, Vertex, OpenAI-compatible services, and Ollama. Goal Mode now plans before it executes: Direct creates a reviewable plan, while Plan Debate runs isolated `A1 → B1 → A2 → B2 → C` deliberation, preserves evidence and minority opinions, and creates a new writable Goal only after a versioned, drift-checked Ready plan is explicitly confirmed.
+
+**v3.8.1** turns provider setup into one connection-first workflow with explicit saved, credential, tested, failed, last-used, and default-model states. It adds Alibaba Model Studio Coding Plan through `https://coding.dashscope.aliyuncs.com/v1`, custom OpenAI Chat Completions and Anthropic Messages gateways, explicit credential removal, and a lighter Chat surface where routine process moves to the right status rail and only user-blocking choices remain as decision cards.
 
 ---
 
@@ -643,7 +646,7 @@ Planned:
 
 ## 项目概述
 
-**Zerox Agent** 是一个本地优先的桌面智能体控制台（**v3.8.0**）。名字取自 **Zero + X**——从留白开始，把未知的本地工作流转成可观察、受权限管控、可恢复的 Agent 运行。
+**Zerox Agent** 是一个本地优先的桌面智能体控制台（**v3.8.1**）。名字取自 **Zero + X**——从留白开始，把未知的本地工作流转成可观察、受权限管控、可恢复的 Agent 运行。
 
 它不是聊天壳，也不是泛用云端 Agent 入口，更不是无限自治循环。它运行在你的 Mac 上：自行配置 OpenAI-compatible / Anthropic / Gemini 模型（需自备 API Key）、扫描本地 `SKILL.md` 技能、执行 recoverable agent runs、调用受权限管控的工具、跟踪 parent/child multi-agent sessions、把经验写入本地长期记忆，并且在改变未来行为前保留 **user-reviewed learning**。
 
@@ -678,9 +681,9 @@ Planned:
 
 产品边界写在 [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md)。运行时、workspace、学习机制和目标模式分别见 [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md)、[`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md)、[`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md) 与 [`docs/architecture/agent-goal-mode.md`](docs/architecture/agent-goal-mode.md)。
 
-当前版本是 **v3.8.0**。本次发布新增声明式多服务商连接、稳定模型档案与运行期冻结路由，覆盖 OpenAI、Anthropic、Gemini、Bedrock、Vertex、主流 OpenAI-compatible 服务和 Ollama。Goal Mode 改为先规划后执行：Direct 生成可审阅计划，Plan Debate 按隔离的 `A1 → B1 → A2 → B2 → C` 协议审议，保留证据与少数意见；只有版本、哈希和工作区漂移检查都通过的 Ready 计划经用户确认后，系统才创建新的可写 Goal。
+当前版本是 **v3.8.1**。本次发布把模型设置收敛为以连接为中心的服务商与模型管理，明确保存、凭证、连接验证、失败、最近使用和默认模型状态；新增阿里云百炼 Coding Plan、自定义 OpenAI Chat Completions / Anthropic Messages 服务商、显式移除凭证，并把普通思考、工具、Goal 与 Debate 过程移到右侧状态栏。主会话只在需要用户选择或回答时显示决策卡片，Plan 模式选择完成后即收起。
 
-3.8.0 的领域边界、权限门禁、辩论协议和验收标准见 [`docs/design/zerox-agent-3-8-0-plan-debate.md`](docs/design/zerox-agent-3-8-0-plan-debate.md)。
+3.8.1 的模型接入、信息披露与决策卡片规范见 [`docs/design/zerox-agent-3-8-1-model-and-conversation-ux.md`](docs/design/zerox-agent-3-8-1-model-and-conversation-ux.md)；3.8.0 的领域边界、权限门禁和辩论协议见 [`docs/design/zerox-agent-3-8-0-plan-debate.md`](docs/design/zerox-agent-3-8-0-plan-debate.md)。
 
 ---
 

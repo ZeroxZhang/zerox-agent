@@ -31,8 +31,9 @@ describe("plan artifact writer", () => {
       now: () => "2026-07-30T00:00:00.000Z",
     });
     const plan = createPlan(workspaceRoot);
-    const projection = await writer.write(plan, createArtifact());
-    const projectedPlan = { ...plan, projection };
+    const artifact = createArtifact();
+    const projection = await writer.write(plan, artifact);
+    const projectedPlan = { ...plan, projection, finalArtifact: artifact };
     expect(projection.path).toBe(
       path.join(
         await realpath(workspaceRoot),
@@ -42,6 +43,13 @@ describe("plan artifact writer", () => {
       ),
     );
     await expect(writer.verify(projectedPlan)).resolves.toBe(true);
+
+    await expect(
+      writer.verify({
+        ...projectedPlan,
+        finalArtifact: { ...artifact, objective: "tampered objective" },
+      }),
+    ).resolves.toBe(false);
 
     await writeFile(projection.path, "# tampered\n");
     await expect(writer.verify(projectedPlan)).resolves.toBe(false);

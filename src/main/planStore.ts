@@ -34,6 +34,13 @@ export type PlanStore = {
   getLatestBySession(sessionId: string): Promise<PlanRecord | null>;
 };
 
+const SESSION_INDEX_FILENAME = "session-index.json";
+
+type SessionPlanIndex = {
+  version: 1;
+  sessions: Record<string, { planId: string; updatedAt: string }>;
+};
+
 export class PlanVersionConflictError extends Error {
   constructor(
     public readonly planId: string,
@@ -56,6 +63,7 @@ export function createPlanStore(options: {
   const now = options.now ?? (() => new Date().toISOString());
   const createId = options.createId ?? (() => randomUUID());
   const queues = new Map<string, Promise<void>>();
+  let sessionIndexQueue = Promise.resolve();
 
   function planPath(planId: string) {
     return path.join(plansDir, `${safePlanId(planId)}.json`);
@@ -63,6 +71,10 @@ export function createPlanStore(options: {
 
   function eventPath(planId: string) {
     return path.join(plansDir, `${safePlanId(planId)}.events.jsonl`);
+  }
+
+  function sessionIndexPath() {
+    return path.join(plansDir, SESSION_INDEX_FILENAME);
   }
 
   async function readPlan(planId: string): Promise<PlanRecord | null> {
@@ -113,6 +125,58 @@ export function createPlanStore(options: {
     });
   }
 
+  async function readSessionIndex(): Promise<SessionPlanIndex> {
+    try {
+      const parsed = JSON.parse(
+        await readFile(sessionIndexPath(), "utf8"),
+      ) as Partial<SessionPlanIndex>;
+      if (
+        parsed.version !== 1 ||
+        !parsed.sessions ||
+        typeof parsed.sessions !== "object" ||
+        Array.isArray(parsed.sessions)
+      ) {
+        return { version: 1, sessions: {} };
+      }
+      return {
+        version: 1,
+        sessions: parsed.sessions as SessionPlanIndex["sessions"],
+      };
+    } catch (error) {
+      if (
+        (error as NodeJS.ErrnoException).code === "ENOENT" ||
+        error instanceof SyntaxError
+      ) {
+        return { version: 1, sessions: {} };
+      }
+      throw error;
+    }
+  }
+
+  function updateSessionIndex(plan: PlanRecord): Promise<void> {
+    const operation = sessionIndexQueue.then(async () => {
+      await mkdir(plansDir, { recursive: true });
+      const index = await readSessionIndex();
+      const existing = index.sessions[plan.sessionId];
+      if (existing && existing.updatedAt > plan.updatedAt) {
+        return;
+      }
+      index.sessions[plan.sessionId] = {
+        planId: plan.id,
+        updatedAt: plan.updatedAt,
+      };
+      const destination = sessionIndexPath();
+      const temp = `${destination}.${process.pid}.${randomUUID()}.tmp`;
+      await writeFile(temp, `${JSON.stringify(index, null, 2)}\n`, {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+      await rename(temp, destination);
+    });
+    sessionIndexQueue = operation.catch(() => undefined);
+    return operation;
+  }
+
   function serialize<T>(planId: string, operation: () => Promise<T>): Promise<T> {
     const previous = queues.get(planId) ?? Promise.resolve();
     const result = previous.then(operation, operation);
@@ -152,6 +216,7 @@ export function createPlanStore(options: {
         } else {
           await writePlan(created);
           await appendEvent(event);
+          await updateSessionIndex(created);
         }
         return structuredClone(created);
       });
@@ -192,6 +257,7 @@ export function createPlanStore(options: {
         } else {
           await writePlan(updated);
           await appendEvent(event);
+          await updateSessionIndex(updated);
         }
         return structuredClone(updated);
       });
@@ -213,7 +279,10 @@ export function createPlanStore(options: {
         const plans = await Promise.all(
           names
             .filter(
-              (name) => name.endsWith(".json") && !name.endsWith(".events.json"),
+              (name) =>
+                name !== SESSION_INDEX_FILENAME &&
+                name.endsWith(".json") &&
+                !name.endsWith(".events.json"),
             )
             .map((name) => readPlan(name.slice(0, -".json".length))),
         );
@@ -245,7 +314,10 @@ export function createPlanStore(options: {
         const plans = await Promise.all(
           names
             .filter(
-              (name) => name.endsWith(".json") && !name.endsWith(".events.json"),
+              (name) =>
+                name !== SESSION_INDEX_FILENAME &&
+                name.endsWith(".json") &&
+                !name.endsWith(".events.json"),
             )
             .map((name) => readPlan(name.slice(0, -".json".length))),
         );
@@ -261,7 +333,29 @@ export function createPlanStore(options: {
     },
 
     async getLatestBySession(sessionId) {
-      return (await this.listBySession(sessionId))[0] ?? null;
+      if (options.storage) {
+        const row = options.storage.db
+          .prepare(
+            "SELECT payload FROM plan_records WHERE session_id = ? ORDER BY updated_at DESC LIMIT 1",
+          )
+          .get<{ payload: string }>(sessionId);
+        return row
+          ? validatePlanRecord(JSON.parse(row.payload) as PlanRecord)
+          : null;
+      }
+      await sessionIndexQueue;
+      const entry = (await readSessionIndex()).sessions[sessionId];
+      if (entry) {
+        const indexed = await readPlan(entry.planId);
+        if (indexed?.sessionId === sessionId) {
+          return indexed;
+        }
+      }
+      const latest = (await this.listBySession(sessionId))[0] ?? null;
+      if (latest) {
+        await updateSessionIndex(latest);
+      }
+      return latest;
     },
   };
 }

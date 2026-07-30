@@ -74,10 +74,12 @@
 - 取消运行后仍保持上述锁定；取消不是退出模式的替代入口。
 - 普通 Skill 选择器、Skill mention 菜单与普通执行提示隐藏。
 - 新建 Plan 时选中的 Skill 只提供只读规划上下文；Skill 的执行期必填参数推迟到确认后的 Goal。会话进入 Plan 后，更早遗留的 Skill 输入请求立即作废。
+- 选中的 Skill 以不可变快照写入 Plan Record，正文只按有界长度进入规划提示；确认后同一快照和默认输入值继续进入 Goal，不能退化成同名文本 mention。
 - `awaiting_input` 和 `awaiting_confirmation` 显示输入后果；失败轮次时 Composer 禁用。
 - 默认只展示终版和当前门禁。轮次、证据、Claim Ledger、少数意见与模型绑定折叠展示。
 - `丢弃计划` 仅在从未进入执行时可用。
 - `确认计划` 仅在 `awaiting_confirmation + ready + projection/hash 一致` 时可用。
+- 结构化轮次只有在完整字段、非空里程碑验收条件和唯一有效 JSON 候选全部通过校验后才能完成；确认时再次拒绝重复、悬空、自引用或循环的里程碑依赖图。
 - 失败的 AgentLoop 显示“任务未完成”，右侧活动、消息终态、会话恢复和 Token 统计保持一致。
 
 ## 5. 验收用例

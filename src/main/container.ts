@@ -56,9 +56,14 @@ import { createChatSessionStore } from "./chatSessionStore";
 import {
   createElectronSecretVault,
   createModelSettingsStore,
+  type ModelSettingsStore,
 } from "./modelSettingsStore";
 import { createModelConnectionService } from "./modelConnectionService";
-import { createMemoryStore } from "./memoryStore";
+import { providerSupportsEmbeddings } from "./providers/providerRegistry";
+import {
+  createMemoryStore,
+  type MemoryEmbeddingService,
+} from "./memoryStore";
 import { createMemoryProfileStore } from "./memoryProfileStore";
 import { createHistoryIndexStore } from "./historyIndexStore";
 import { createMemoryIngestionService } from "./memoryIngestionService";
@@ -103,6 +108,7 @@ import {
   type PlanRecord,
   type PlanStatus,
 } from "../shared/planMode";
+import { validatePlanMilestoneGraph } from "../shared/planValidation";
 import { toNormalized } from "./providers/normalize";
 import { analyzeShell } from "./tools/shell/shellAnalyzer";
 import { createToolWorker } from "./tools/toolWorker";
@@ -280,6 +286,55 @@ function collectGoalResultSummaries(goal: Goal): string[] {
     summaries.push(`${milestone.description}：${uniqueDetails.join("；")}`);
   }
   return summaries;
+}
+
+export function createModelProfileEmbeddingService(options: {
+  modelSettingsStore: Pick<
+    ModelSettingsStore,
+    "loadCatalog" | "resolveProfile"
+  >;
+  fetch?: typeof fetch;
+}): MemoryEmbeddingService {
+  return {
+    async embed(text: string) {
+      const catalog = await options.modelSettingsStore.loadCatalog();
+      if (!catalog.defaultEmbeddingProfileId) {
+        return null;
+      }
+      const resolved = await options.modelSettingsStore.resolveProfile(
+        catalog.defaultEmbeddingProfileId,
+      );
+      if (
+        !providerSupportsEmbeddings(
+          resolved.binding.providerKind,
+          resolved.connectionValues,
+        )
+      ) {
+        return null;
+      }
+      const apiKey =
+        resolved.secrets.apiKey ?? resolved.secrets.vertexApiKey ?? "";
+      if (!apiKey && resolved.binding.providerKind !== "ollama") {
+        return null;
+      }
+      const baseUrl = resolveProviderBaseUrl(
+        resolved.binding.providerKind,
+        resolved.connectionValues,
+      );
+      const vector = await createOpenAiCompatibleEmbeddingClient({
+        fetch: options.fetch,
+      }).embed({
+        baseUrl: baseUrl ?? "",
+        apiKey,
+        model: resolved.binding.modelId,
+        input: text,
+      });
+      return {
+        model: resolved.binding.modelId,
+        vector,
+      };
+    },
+  };
 }
 
 export function createAppContainer(options: {
@@ -981,44 +1036,9 @@ export function createAppContainer(options: {
     return lazy("memoryStore", () =>
       createMemoryStore({
         configDir,
-        embeddingService: {
-          async embed(text: string) {
-            const catalog = await modelSettingsStore.loadCatalog();
-            if (!catalog.defaultEmbeddingProfileId) {
-              return null;
-            }
-            const resolved = await modelSettingsStore.resolveProfile(
-              catalog.defaultEmbeddingProfileId,
-            );
-            const apiKey =
-              resolved.secrets.apiKey ??
-              resolved.secrets.vertexApiKey ??
-              "";
-            if (
-              !apiKey ||
-              resolved.binding.providerKind === "anthropic" ||
-              resolved.binding.providerKind === "bedrock"
-            ) {
-              return null;
-            }
-            const baseUrl = resolveProviderBaseUrl(
-              resolved.binding.providerKind,
-              resolved.connectionValues,
-            );
-
-            const vector = await createOpenAiCompatibleEmbeddingClient().embed({
-              baseUrl: baseUrl ?? "",
-              apiKey,
-              model: resolved.binding.modelId,
-              input: text,
-            });
-
-            return {
-              model: resolved.binding.modelId,
-              vector,
-            };
-          },
-        },
+        embeddingService: createModelProfileEmbeddingService({
+          modelSettingsStore,
+        }),
       }),
     );
   }
@@ -2245,6 +2265,18 @@ export function createAppContainer(options: {
           plan,
         };
       }
+      let milestoneGraph: ReturnType<typeof validatePlanMilestoneGraph>;
+      try {
+        milestoneGraph = validatePlanMilestoneGraph(artifact.milestones);
+      } catch (error) {
+        return {
+          ok: false,
+          message: `计划执行图无效：${
+            error instanceof Error ? error.message : "无法验证里程碑依赖。"
+          }`,
+          plan,
+        };
+      }
       if (!recovering) {
         plan = await planStore().save(
           {
@@ -2262,13 +2294,15 @@ export function createAppContainer(options: {
       const criteria = artifact.acceptanceCriteria.length
         ? artifact.acceptanceCriteria
         : [`完成计划目标：${artifact.objective}`];
-      const milestoneDependencies =
-        normalizeConfirmedPlanMilestoneDependencies(artifact.milestones);
       const draft: GoalDraft = {
         id: plan.id,
         sessionId: plan.sessionId,
         ...(plan.workspaceId ? { workspaceId: plan.workspaceId } : {}),
         sourceMessage: plan.sourceMessage,
+        ...(plan.selectedSkill
+          ? { selectedSkill: structuredClone(plan.selectedSkill) }
+          : {}),
+        ...defaultSelectedSkillInputValues(plan),
         normalizedDescription: artifact.objective,
         sourcePlanRef: {
           planId: plan.id,
@@ -2299,10 +2333,10 @@ export function createAppContainer(options: {
           hasModelReviewCoverage: true,
         },
         warnings: [],
-        milestones: artifact.milestones.map((milestone, index) => ({
-          id: milestone.id || `milestone_${index + 1}`,
+        milestones: artifact.milestones.map((milestone) => ({
+          id: milestone.id,
           description: `${milestone.title}：${milestone.description}`,
-          state: index === 0 ? "ready" : "pending",
+          state: milestoneGraph.rootIds.has(milestone.id) ? "ready" : "pending",
           successCriteria: milestone.acceptanceCriteria.map(
             (description, criterionIndex) => ({
               id: `${milestone.id}_criterion_${criterionIndex + 1}`,
@@ -2323,7 +2357,7 @@ export function createAppContainer(options: {
           ),
           runIds: [],
           attempts: 0,
-          dependsOn: milestoneDependencies.get(milestone.id) ?? [],
+          dependsOn: milestoneGraph.dependenciesById.get(milestone.id) ?? [],
         })),
         status: "confirmed",
         createdAt: plan.createdAt,
@@ -3015,28 +3049,16 @@ function planStatusForExecutionGoal(
   return "executing";
 }
 
-function normalizeConfirmedPlanMilestoneDependencies(
-  milestones: PlanArtifact["milestones"],
-): Map<string, string[]> {
-  const ids = new Set(milestones.map((milestone) => milestone.id));
-  const titleCounts = new Map<string, number>();
-  for (const milestone of milestones) {
-    const title = milestone.title.trim();
-    titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1);
-  }
-  const uniqueTitleIds = new Map(
-    milestones
-      .filter((milestone) => titleCounts.get(milestone.title.trim()) === 1)
-      .map((milestone) => [milestone.title.trim(), milestone.id] as const),
-  );
-  return new Map(
-    milestones.map((milestone) => {
-      const resolved = milestone.dependencies.flatMap((dependency) => {
-        const candidate = dependency.trim();
-        const id = ids.has(candidate) ? candidate : uniqueTitleIds.get(candidate);
-        return id && id !== milestone.id ? [id] : [];
-      });
-      return [milestone.id, [...new Set(resolved)]] as const;
-    }),
-  );
+function defaultSelectedSkillInputValues(
+  plan: PlanRecord,
+): Pick<GoalDraft, "selectedSkillInputValues"> {
+  const entries =
+    plan.selectedSkill?.manifest.inputs.flatMap((input) =>
+      input.defaultValue === undefined
+        ? []
+        : [[input.name, input.defaultValue] as const],
+    ) ?? [];
+  return entries.length > 0
+    ? { selectedSkillInputValues: Object.fromEntries(entries) }
+    : {};
 }

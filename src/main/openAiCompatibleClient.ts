@@ -1,4 +1,5 @@
 import { defaultRequestTimeoutMs, fetchWithTimeout } from "./fetchWithTimeout";
+import { providerHttpError } from "./providers/providerHttpError";
 
 export type ChatImageContent = {
   mediaType: string;
@@ -116,6 +117,10 @@ export function createOpenAiCompatibleClient(options?: {
         request.signal,
       );
 
+      if (!response.ok) {
+        throw providerHttpError(response);
+      }
+
       const payload = (await response.json()) as {
         choices?: Array<{
           message?: {
@@ -139,14 +144,6 @@ export function createOpenAiCompatibleClient(options?: {
         };
         error?: { message?: string };
       };
-
-      if (!response.ok) {
-        throw new Error(
-          `LLM request failed with status ${response.status}: ${
-            payload.error?.message ?? response.statusText
-          }`,
-        );
-      }
 
       const choice = payload.choices?.[0];
       const message = choice?.message;
@@ -198,15 +195,11 @@ export function createOpenAiCompatibleClient(options?: {
         request.signal,
       );
 
-      if (!response.ok || !response.body) {
-        const errorPayload = await response.json().catch(() => ({})) as {
-          error?: { message?: string };
-        };
-        throw new Error(
-          `LLM streaming request failed with status ${response.status}: ${
-            errorPayload.error?.message ?? response.statusText
-          }`,
-        );
+      if (!response.ok) {
+        throw providerHttpError(response);
+      }
+      if (!response.body) {
+        throw new Error("LLM streaming response did not include a body.");
       }
 
       const reader = response.body.getReader();
@@ -445,18 +438,14 @@ export function createOpenAiCompatibleEmbeddingClient(options?: {
         request.signal,
       );
 
+      if (!response.ok) {
+        throw providerHttpError(response);
+      }
+
       const payload = (await response.json()) as {
         data?: Array<{ embedding?: number[] }>;
         error?: { message?: string };
       };
-
-      if (!response.ok) {
-        throw new Error(
-          `Embedding request failed with status ${response.status}: ${
-            payload.error?.message ?? response.statusText
-          }`,
-        );
-      }
 
       const embedding = payload.data?.[0]?.embedding;
       if (!embedding?.length) {

@@ -6,11 +6,13 @@ import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createAppContainer,
+  createModelProfileEmbeddingService,
   formatGoalTerminalHeading,
   isTerminalGoalStatus,
   prepareInterruptedGoalForResume,
   reconcileIrreversibleGoalProgressEvent,
 } from "./container";
+import type { ModelSettingsStore } from "./modelSettingsStore";
 import { registerAllIpcHandlers } from "./ipc";
 import { createToolApprovalCoordinator } from "./toolApprovalCoordinator";
 import { issueToolResultRefReadCapability } from "./toolResultOffloadStore";
@@ -69,6 +71,83 @@ vi.mock("./tools/toolWorker", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./tools/toolWorker")>()),
   createToolWorker: toolWorkerMock.createToolWorker,
 }));
+
+describe("model profile embedding service", () => {
+  it("uses an Ollama embedding profile without requiring an API key", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ data: [{ embedding: [0.2, 0.8] }] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    const service = createModelProfileEmbeddingService({
+      modelSettingsStore: {
+        loadCatalog: vi.fn(async () => ({
+          defaultEmbeddingProfileId: "embedding_ollama",
+        })),
+        resolveProfile: vi.fn(async () => ({
+          binding: {
+            profileId: "embedding_ollama",
+            connectionId: "ollama_local",
+            providerKind: "ollama" as const,
+            modelId: "nomic-embed-text",
+            revision: 1,
+            connectionRevision: 1,
+            profileRevision: 1,
+            baseUrl: "http://localhost:11434/v1",
+            capabilities: {
+              tools: false,
+              vision: false,
+              pdf: false,
+              streaming: false,
+              parallelToolCalls: false,
+            },
+            generation: {
+              temperature: 0,
+              maxTokens: 1,
+              thinkingEnabled: false,
+              thinkingBudgetTokens: 0,
+            },
+          },
+          connectionValues: { baseUrl: "http://localhost:11434" },
+          secrets: {},
+          profile: {
+            id: "embedding_ollama",
+            name: "Nomic Embed",
+            connectionId: "ollama_local",
+            modelId: "nomic-embed-text",
+            purpose: "embedding" as const,
+            generation: {
+              temperature: 0,
+              maxTokens: 1,
+              thinkingEnabled: false,
+              thinkingBudgetTokens: 0,
+            },
+            custom: true,
+            revision: 1,
+            createdAt: "2026-07-31T00:00:00.000Z",
+            updatedAt: "2026-07-31T00:00:00.000Z",
+          },
+        })),
+      } as unknown as ModelSettingsStore,
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await expect(service.embed("local memory")).resolves.toEqual({
+      model: "nomic-embed-text",
+      vector: [0.2, 0.8],
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:11434/v1/embeddings",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer ",
+        }),
+      }),
+    );
+  });
+});
 
 describe("app container goal drafts", () => {
   it("makes a checkpointed running milestone resumable after process restart", () => {
@@ -1675,7 +1754,7 @@ describe("app container goal drafts", () => {
           title: "Validate",
           description: "Validate the local change.",
           acceptanceCriteria: ["Validation evidence exists."],
-          dependencies: ["Implement", "external approval label"],
+          dependencies: ["Implement"],
         },
       ],
       dependencies: [],
@@ -1693,6 +1772,33 @@ describe("app container goal drafts", () => {
       sessionId: session.session.id,
       workspaceRoot,
       sourceMessage: "Implement one local milestone.",
+      selectedSkill: {
+        rootDir: path.join(tempDir, "skills", "dbs"),
+        skillFile: path.join(tempDir, "skills", "dbs", "SKILL.md"),
+        body: "Follow the DBS execution workflow.",
+        manifest: {
+          name: "dbs",
+          displayName: "DBS",
+          description: "Database workflow",
+          version: "1.0.0",
+          execution: { mode: "agent", entrypoint: null },
+          inputs: [
+            {
+              name: "target",
+              label: "Target",
+              type: "string",
+              required: true,
+              defaultValue: "local-db",
+            },
+          ],
+          permissions: {
+            files: { read: [], write: [] },
+            shell: { commands: [] },
+            web: { search: false, fetchDomains: [] },
+            memory: { read: false, write: false },
+          },
+        },
+      },
       mode: "direct",
       status: "awaiting_confirmation",
       actionGate: "ready",
@@ -1808,6 +1914,11 @@ describe("app container goal drafts", () => {
         planId: basePlan.id,
         sha256: projection.sha256,
       }),
+      selectedSkill: {
+        manifest: expect.objectContaining({ name: "dbs" }),
+        body: "Follow the DBS execution workflow.",
+      },
+      selectedSkillInputValues: { target: "local-db" },
     });
     expect(
       confirmedGoal?.milestones.find(
@@ -1819,6 +1930,116 @@ describe("app container goal drafts", () => {
       () => container.goalChatService().cancel(first.activeGoal.id),
       { preempt: true },
     );
+    await container.shutdownRuntime();
+  });
+
+  it("rejects unsafe milestone graphs before creating an execution Goal", async () => {
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const workspaceRoot = path.join(tempDir, "invalid-graph-workspace");
+    await mkdir(workspaceRoot, { recursive: true });
+    const cases: Array<{
+      name: string;
+      milestones: PlanArtifact["milestones"];
+      expected: string;
+    }> = [
+      {
+        name: "duplicate",
+        milestones: [
+          planMilestone("same", "One"),
+          planMilestone("same", "Two"),
+        ],
+        expected: "重复",
+      },
+      {
+        name: "missing",
+        milestones: [planMilestone("one", "One", ["missing"])],
+        expected: "不存在",
+      },
+      {
+        name: "self",
+        milestones: [planMilestone("one", "One", ["one"])],
+        expected: "自身",
+      },
+      {
+        name: "cycle",
+        milestones: [
+          planMilestone("one", "One", ["two"]),
+          planMilestone("two", "Two", ["one"]),
+        ],
+        expected: "循环",
+      },
+    ];
+
+    for (const testCase of cases) {
+      const session = await container.chatSessionStore().appendMessage({
+        role: "user",
+        content: `Reject ${testCase.name} graph`,
+      });
+      const artifact: PlanArtifact = {
+        title: `Invalid ${testCase.name}`,
+        summary: "Must fail closed.",
+        objective: "Do not create a Goal.",
+        scope: { in: ["validation"], out: [] },
+        assumptions: [],
+        milestones: testCase.milestones,
+        dependencies: [],
+        risks: [],
+        acceptanceCriteria: ["No Goal is created."],
+        claimLedger: [],
+        unresolvedQuestions: [],
+        minorityOpinion: [],
+        actionGate: "ready",
+        gateReason: "Fixture reaches confirmation validation.",
+        markdown: "",
+      };
+      const plan: PlanRecord = {
+        id: `plan_invalid_${testCase.name}`,
+        sessionId: session.session.id,
+        workspaceRoot,
+        sourceMessage: "Validate graph.",
+        mode: "direct",
+        status: "awaiting_confirmation",
+        actionGate: "ready",
+        revision: 1,
+        taskContract: {
+          objective: artifact.objective,
+          audience: "test",
+          inScope: [],
+          outOfScope: [],
+          constraints: [],
+          successCriteria: artifact.acceptanceCriteria,
+          assumptions: [],
+        },
+        evidence: [],
+        requestedModelAssignments: {},
+        frozenModelAssignments: {},
+        rounds: [],
+        finalArtifact: artifact,
+        createdAt: "2026-07-30T00:00:00.000Z",
+        updatedAt: "2026-07-30T00:00:00.000Z",
+      };
+      const projection = await container
+        .planArtifactWriter()
+        .write(plan, artifact);
+      await container.planStore().create({ ...plan, projection });
+
+      const result = await container.confirmPlan({
+        planId: plan.id,
+        expectedRevision: plan.revision,
+      });
+
+      expect(result).toMatchObject({
+        ok: false,
+        message: expect.stringContaining(testCase.expected),
+      });
+      expect(
+        await container.agentGoalStore().get(`goal_from_${plan.id}`),
+      ).toBeNull();
+    }
     await container.shutdownRuntime();
   });
 
@@ -1906,6 +2127,20 @@ describe("app container goal drafts", () => {
     await container.shutdownRuntime();
   });
 });
+
+function planMilestone(
+  id: string,
+  title: string,
+  dependencies: string[] = [],
+): PlanArtifact["milestones"][number] {
+  return {
+    id,
+    title,
+    description: `${title} work`,
+    acceptanceCriteria: [`${title} verified`],
+    dependencies,
+  };
+}
 
 async function createSeedGitRepository(repositoryRoot: string): Promise<void> {
   await mkdir(repositoryRoot, { recursive: true });

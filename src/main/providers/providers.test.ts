@@ -85,6 +85,84 @@ describe("providerFactory", () => {
     expect(an.capabilities.thinking).toBe(true);
     expect(oa.capabilities.promptCache).toBe(false);
   });
+
+  it("routes custom providers through the selected official protocol shape", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchImpl = (async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      requests.push({ url: String(input), init });
+      const isAnthropic = String(input).endsWith("/v1/messages");
+      return new Response(
+        JSON.stringify(
+          isAnthropic
+            ? {
+                content: [{ type: "text", text: "OK" }],
+                stop_reason: "end_turn",
+                usage: { input_tokens: 1, output_tokens: 1 },
+              }
+            : {
+                choices: [
+                  {
+                    message: { content: "OK" },
+                    finish_reason: "stop",
+                  },
+                ],
+              },
+        ),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+    const request = {
+      model: "private-model",
+      apiKey: "private-key",
+      temperature: 0,
+      maxTokens: 16,
+      messages: [
+        { role: "user" as const, content: [{ type: "text" as const, text: "hi" }] },
+      ],
+    };
+
+    await createProvider(
+      {
+        providerKind: "custom",
+        connectionValues: { protocol: "openai" },
+        apiKey: "private-key",
+        chatModel: "private-model",
+      },
+      { fetch: fetchImpl },
+    ).complete({
+      ...request,
+      baseUrl: "https://openai-gateway.example/v1",
+    });
+    await createProvider(
+      {
+        providerKind: "custom",
+        connectionValues: { protocol: "anthropic" },
+        baseUrl: "https://anthropic-gateway.example/v1",
+        apiKey: "private-key",
+        chatModel: "private-model",
+      },
+      { fetch: fetchImpl },
+    ).complete(request);
+
+    expect(requests[0]?.url).toBe(
+      "https://openai-gateway.example/v1/chat/completions",
+    );
+    expect(new Headers(requests[0]?.init?.headers).get("authorization")).toBe(
+      "Bearer private-key",
+    );
+    expect(requests[1]?.url).toBe(
+      "https://anthropic-gateway.example/v1/messages",
+    );
+    expect(new Headers(requests[1]?.init?.headers).get("x-api-key")).toBe(
+      "private-key",
+    );
+    expect(
+      new Headers(requests[1]?.init?.headers).get("anthropic-version"),
+    ).toBe("2023-06-01");
+  });
 });
 
 function mockFetch(

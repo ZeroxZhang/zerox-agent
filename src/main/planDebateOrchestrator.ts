@@ -20,6 +20,11 @@ import type {
   RevisedPlanProposal,
 } from "../shared/planMode";
 import { DEBATE_SEQUENCE } from "../shared/planMode";
+import {
+  assertValidPlanRoundShape,
+  parseUniquePlanRoundObject,
+} from "../shared/planStructuredOutput";
+import { validatePlanMilestoneGraph } from "../shared/planValidation";
 import type {
   ChatCompletionResponse,
   ChatMessage,
@@ -28,6 +33,12 @@ import type { BoundModelClient, ModelRouter } from "./providers/modelRouter";
 import type { PlanArtifactWriter } from "./planArtifactWriter";
 import { renderPlanMarkdown } from "./planArtifactWriter";
 import type { PlanStore } from "./planStore";
+
+const MAX_PLAN_SOURCE_CHARS = 32_000;
+const MAX_CLARIFICATION_CHARS = 4_000;
+const MAX_CLARIFICATION_HISTORY_CHARS = 12_000;
+const MAX_CLARIFICATION_COUNT = 12;
+const MAX_SKILL_PLANNING_BODY_CHARS = 24_000;
 
 export type PlanDebateOrchestrator = {
   createPlan(input: CreatePlanInput): Promise<PlanRecord>;
@@ -62,8 +73,10 @@ export function createPlanDebateOrchestrator(options: {
 
   async function createPlan(input: CreatePlanInput): Promise<PlanRecord> {
     const createdAt = now();
-    const evidence = await collectEvidence(input);
-    const taskContract = buildTaskContract(input.sourceMessage, evidence);
+    const baseSourceMessage = normalizePlanSource(input.sourceMessage);
+    const normalizedInput = { ...input, sourceMessage: baseSourceMessage };
+    const evidence = await collectEvidence(normalizedInput);
+    const taskContract = buildTaskContract(baseSourceMessage, evidence);
     const clients = await resolveClients(input.mode, input.modelAssignments ?? {});
     const frozenModelAssignments = freezeBindings(clients);
     let record = await options.planStore.create({
@@ -71,7 +84,12 @@ export function createPlanDebateOrchestrator(options: {
       sessionId: input.sessionId,
       ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
       ...(input.workspaceRoot ? { workspaceRoot: input.workspaceRoot } : {}),
-      sourceMessage: input.sourceMessage.trim(),
+      sourceMessage: baseSourceMessage,
+      baseSourceMessage,
+      clarifications: [],
+      ...(input.selectedSkill
+        ? { selectedSkill: snapshotSelectedSkill(input.selectedSkill) }
+        : {}),
       mode: input.mode,
       status: "drafting",
       actionGate: "blocked",
@@ -395,12 +413,22 @@ export function createPlanDebateOrchestrator(options: {
           plan: existing,
         };
       }
+      if (clarification.length > MAX_CLARIFICATION_CHARS) {
+        return {
+          ok: false,
+          message: `单次补充信息不能超过 ${MAX_CLARIFICATION_CHARS} 个字符。`,
+          plan: existing,
+        };
+      }
       throwIfAborted(signal);
-      const sourceMessage = [
-        existing.sourceMessage.trim(),
-        "用户补充信息：",
+      const baseSourceMessage = normalizePlanSource(
+        existing.baseSourceMessage ?? existing.sourceMessage,
+      );
+      const clarifications = appendBoundedClarification(
+        existing.clarifications ?? [],
         clarification,
-      ].join("\n\n");
+      );
+      const sourceMessage = formatPlanSource(baseSourceMessage, clarifications);
       const continuationInput: CreatePlanInput = {
         sessionId: existing.sessionId,
         ...(existing.workspaceId ? { workspaceId: existing.workspaceId } : {}),
@@ -408,6 +436,9 @@ export function createPlanDebateOrchestrator(options: {
           ? { workspaceRoot: existing.workspaceRoot }
           : {}),
         sourceMessage,
+        ...(existing.selectedSkill
+          ? { selectedSkill: snapshotSelectedSkill(existing.selectedSkill) }
+          : {}),
         mode: existing.mode,
         modelAssignments: existing.requestedModelAssignments,
         ...(signal ? { signal } : {}),
@@ -428,6 +459,8 @@ export function createPlanDebateOrchestrator(options: {
           sourceMessage,
           taskContract: buildTaskContract(sourceMessage, evidence),
           evidence,
+          baseSourceMessage,
+          clarifications,
           frozenModelAssignments: freezeBindings(clients),
           rounds: invalidatedRounds,
           status: "drafting",
@@ -676,8 +709,9 @@ async function completeStructuredRound(
       if (!response.content?.trim()) {
         throw new Error("规划模型没有返回结构化内容。");
       }
-      const value = parseJsonObject(response.content);
-      const output = normalizeRoundOutput(kind, value);
+      const output = parseUniquePlanRoundObject(response.content, (value) =>
+        normalizeRoundOutput(kind, value),
+      );
       return {
         output,
         ...(hasUsage ? { usage: { inputTokens, outputTokens } } : {}),
@@ -744,6 +778,7 @@ function normalizeRoundOutput(
   value: Record<string, unknown>,
 ): PlanProposal | RevisedPlanProposal | DebateCritique | PlanArtifact {
   const unwrapped = unwrapRoundOutput(kind, value);
+  assertValidPlanRoundShape(kind, unwrapped);
   if (kind === "b1" || kind === "b2") {
     return normalizeCritique(unwrapped);
   }
@@ -771,15 +806,7 @@ function normalizeProposal(value: Record<string, unknown>): PlanProposal {
       dependencies: strings(item.dependencies),
     };
   });
-  if (!string(value.objective) || milestones.length === 0) {
-    const receivedKeys = Object.keys(value).slice(0, 12);
-    throw new Error(
-      `规划输出缺少 objective 或 milestones。收到字段：${
-        receivedKeys.length ? receivedKeys.join(", ") : "空对象"
-      }。`,
-    );
-  }
-  return {
+  const proposal: PlanProposal = {
     title: string(value.title) || "执行计划",
     summary: string(value.summary),
     objective: string(value.objective),
@@ -793,6 +820,8 @@ function normalizeProposal(value: Record<string, unknown>): PlanProposal {
     risks: array(value.risks).map(normalizeRisk),
     acceptanceCriteria: strings(value.acceptanceCriteria),
   };
+  validatePlanMilestoneGraph(proposal.milestones);
+  return proposal;
 }
 
 function unwrapRoundOutput(
@@ -1059,6 +1088,62 @@ function buildTaskContract(
   };
 }
 
+function normalizePlanSource(sourceMessage: string): string {
+  const normalized = sourceMessage.trim();
+  if (!normalized) {
+    throw new Error("计划需求不能为空。");
+  }
+  if (normalized.length > MAX_PLAN_SOURCE_CHARS) {
+    throw new Error(`计划需求不能超过 ${MAX_PLAN_SOURCE_CHARS} 个字符。`);
+  }
+  return normalized;
+}
+
+function appendBoundedClarification(
+  existing: string[],
+  clarification: string,
+): string[] {
+  const candidates = [
+    ...existing.map((item) => item.trim()).filter(Boolean),
+    clarification,
+  ].slice(-MAX_CLARIFICATION_COUNT);
+  const bounded: string[] = [];
+  let totalChars = 0;
+  for (const item of [...candidates].reverse()) {
+    if (totalChars + item.length > MAX_CLARIFICATION_HISTORY_CHARS) {
+      continue;
+    }
+    bounded.unshift(item);
+    totalChars += item.length;
+  }
+  return bounded;
+}
+
+function formatPlanSource(
+  baseSourceMessage: string,
+  clarifications: string[],
+): string {
+  if (clarifications.length === 0) {
+    return baseSourceMessage;
+  }
+  return [
+    baseSourceMessage,
+    "用户补充信息（按时间顺序）：",
+    ...clarifications.map((item, index) => `${index + 1}. ${item}`),
+  ].join("\n\n");
+}
+
+function snapshotSelectedSkill(
+  skill: NonNullable<CreatePlanInput["selectedSkill"]>,
+): NonNullable<PlanRecord["selectedSkill"]> {
+  return {
+    rootDir: skill.rootDir,
+    skillFile: skill.skillFile,
+    body: skill.body,
+    manifest: structuredClone(skill.manifest),
+  };
+}
+
 async function collectBoundedWorkspaceEvidence(
   input: CreatePlanInput,
 ): Promise<PlanEvidenceItem[]> {
@@ -1070,6 +1155,22 @@ async function collectBoundedWorkspaceEvidence(
       summary: input.sourceMessage.slice(0, 12_000),
     },
   ];
+  if (input.selectedSkill) {
+    const planningSummary = [
+      `${input.selectedSkill.manifest.name}: ${input.selectedSkill.manifest.description}`,
+      input.selectedSkill.body.slice(0, MAX_SKILL_PLANNING_BODY_CHARS),
+    ].join("\n\n");
+    evidence.push({
+      id: "evidence_selected_skill",
+      kind: "skill",
+      title: `Selected Skill: ${input.selectedSkill.manifest.name}`,
+      summary: planningSummary,
+      sourceRef: input.selectedSkill.skillFile,
+      sha256: hash(
+        JSON.stringify(input.selectedSkill.manifest) + input.selectedSkill.body,
+      ),
+    });
+  }
   if (!input.workspaceRoot) {
     return evidence;
   }
@@ -1166,71 +1267,6 @@ function latestCompletedRound(
         (round) => round.kind === kind && round.status === "completed",
       ) ?? null
   );
-}
-
-function parseJsonObject(content: string): Record<string, unknown> {
-  const trimmed = content.trim();
-  const unfenced = trimmed
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/, "");
-  let sawCandidate = false;
-  for (let start = 0; start < unfenced.length; start += 1) {
-    if (unfenced[start] !== "{") continue;
-    const candidate = readBalancedJsonObject(unfenced, start);
-    if (!candidate) continue;
-    sawCandidate = true;
-    try {
-      const parsed = JSON.parse(candidate) as unknown;
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        return parsed as Record<string, unknown>;
-      }
-    } catch {
-      // Continue scanning so prose with unrelated braces can precede the JSON.
-    }
-  }
-  if (!sawCandidate) {
-    throw new Error("规划模型没有返回 JSON 对象。");
-  }
-  throw new Error("规划模型返回的 JSON 对象无法解析。");
-}
-
-function readBalancedJsonObject(
-  content: string,
-  start: number,
-): string | null {
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  for (let index = start; index < content.length; index += 1) {
-    const character = content[index]!;
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-      } else if (character === "\\") {
-        escaped = true;
-      } else if (character === '"') {
-        inString = false;
-      }
-      continue;
-    }
-    if (character === '"') {
-      inString = true;
-      continue;
-    }
-    if (character === "{") {
-      depth += 1;
-      continue;
-    }
-    if (character !== "}") continue;
-    depth -= 1;
-    if (depth === 0) {
-      return content.slice(start, index + 1);
-    }
-    if (depth < 0) {
-      return null;
-    }
-  }
-  return null;
 }
 
 function record(value: unknown): Record<string, unknown> {

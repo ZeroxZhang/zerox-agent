@@ -42,9 +42,25 @@ describe("chat stream reducer", () => {
       streamRequestId: "request_1",
       isStreaming: false,
     });
-    expect(
-      state.messages.filter((message) => message.role === "assistant"),
-    ).toHaveLength(1);
+    expect(state.messages.filter((message) => message.role === "assistant")).toHaveLength(1);
+  });
+
+  it("removes routine orchestration replies when their state is rendered elsewhere", () => {
+    let state = applyChatStreamEvent(
+      createChatStreamState([]),
+      createStreamEvent({ type: "answer_delta", text: "已生成计划" }),
+      activeStream,
+    );
+
+    state = finalizeChatStreamResult(state, {
+      requestId: "request_1",
+      sessionId: "session_1",
+      reply: "已生成计划，等待确认。",
+      createdAt: "2026-07-31T00:00:01.000Z",
+      suppressReply: true,
+    });
+
+    expect(state.messages).toEqual([]);
   });
 
   it("uses an ISO timestamp instead of a hardcoded relative label when finalizing non-streamed replies", () => {
@@ -77,7 +93,7 @@ describe("chat stream reducer", () => {
         type: "tool_call_preview",
         toolCallId: "tool_1",
         toolName: "file_read",
-        argumentsDelta: "{\"path\":",
+        argumentsDelta: '{"path":',
       }),
       activeStream,
     );
@@ -86,7 +102,7 @@ describe("chat stream reducer", () => {
       createStreamEvent({
         type: "tool_call_preview",
         toolCallId: "tool_1",
-        argumentsDelta: "\"notes.md\"}",
+        argumentsDelta: '"notes.md"}',
       }),
       activeStream,
     );
@@ -103,7 +119,7 @@ describe("chat stream reducer", () => {
         toolCallId: "tool_1",
         index: undefined,
         toolName: "file_read",
-        argumentsText: "{\"path\":\"notes.md\"}",
+        argumentsText: '{"path":"notes.md"}',
       },
     ]);
   });
@@ -263,11 +279,26 @@ const activeStream = {
 
 function createStreamEvent(
   event:
-    | Omit<Extract<ChatStreamEvent, { type: "answer_delta" }>, "sessionId" | "requestId" | "createdAt" | "sequence" | "turnId">
-    | Omit<Extract<ChatStreamEvent, { type: "thinking_delta" }>, "sessionId" | "requestId" | "createdAt" | "sequence" | "turnId">
-    | Omit<Extract<ChatStreamEvent, { type: "tool_call_preview" }>, "sessionId" | "requestId" | "createdAt" | "sequence" | "turnId">
-    | Omit<Extract<ChatStreamEvent, { type: "output_part" }>, "sessionId" | "requestId" | "createdAt" | "sequence" | "turnId">
-    | Omit<Extract<ChatStreamEvent, { type: "waiting_for_input" }>, "sessionId" | "requestId" | "createdAt" | "sequence" | "turnId">,
+    | Omit<
+        Extract<ChatStreamEvent, { type: "answer_delta" }>,
+        "sessionId" | "requestId" | "createdAt" | "sequence" | "turnId"
+      >
+    | Omit<
+        Extract<ChatStreamEvent, { type: "thinking_delta" }>,
+        "sessionId" | "requestId" | "createdAt" | "sequence" | "turnId"
+      >
+    | Omit<
+        Extract<ChatStreamEvent, { type: "tool_call_preview" }>,
+        "sessionId" | "requestId" | "createdAt" | "sequence" | "turnId"
+      >
+    | Omit<
+        Extract<ChatStreamEvent, { type: "output_part" }>,
+        "sessionId" | "requestId" | "createdAt" | "sequence" | "turnId"
+      >
+    | Omit<
+        Extract<ChatStreamEvent, { type: "waiting_for_input" }>,
+        "sessionId" | "requestId" | "createdAt" | "sequence" | "turnId"
+      >,
 ): ChatStreamEvent {
   return {
     ...event,

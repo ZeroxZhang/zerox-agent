@@ -25,6 +25,7 @@ const expectedKinds = [
   "kimi",
   "minimax",
   "qwen",
+  "dashscope-coding",
   "xai",
   "mistral",
   "meta",
@@ -32,6 +33,7 @@ const expectedKinds = [
   "fireworks",
   "openrouter",
   "ollama",
+  "custom",
 ];
 
 const descriptors = listProviderDescriptors();
@@ -41,9 +43,27 @@ const catalogKinds = new Set(entries.map((entry) => entry.providerKind));
 const missingDescriptors = expectedKinds.filter(
   (kind) => !descriptorKinds.has(kind),
 );
+const providersWithoutCuratedModels = new Set(["custom"]);
 const missingCatalogKinds = expectedKinds.filter(
+  (kind) => !providersWithoutCuratedModels.has(kind),
+).filter(
   (kind) => !catalogKinds.has(kind),
 );
+
+const codingPlan = requireProviderDescriptor("dashscope-coding");
+const codingPlanBaseUrl = codingPlan.fields.find(
+  (field) => field.key === "baseUrl",
+)?.defaultValue;
+if (codingPlanBaseUrl !== "https://coding.dashscope.aliyuncs.com/v1") {
+  console.error("Coding Plan must use the official OpenAI-compatible endpoint.");
+  process.exit(1);
+}
+
+const custom = requireProviderDescriptor("custom");
+if (!custom.fields.some((field) => field.key === "protocol")) {
+  console.error("Custom providers must require an explicit protocol.");
+  process.exit(1);
+}
 
 if (missingDescriptors.length || missingCatalogKinds.length) {
   console.error(

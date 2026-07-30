@@ -25,12 +25,18 @@ const agenticVisionWithoutPdf: ModelCapabilities = {
   pdf: false,
 };
 
+const streamingVisionWithoutTools: ModelCapabilities = {
+  ...defaultModelCapabilities(),
+  vision: true,
+};
+
 const agenticSequentialTools: ModelCapabilities = {
   ...agentic,
   parallelToolCalls: false,
 };
 
 const verifiedAt = "2026-07-28";
+const codingPlanVerifiedAt = "2026-07-31";
 
 const entry = (
   providerKind: ProviderKind,
@@ -68,6 +74,100 @@ const entries: readonly ModelCatalogEntry[] = [
   entry("kimi", "kimi-k2.6", "Kimi K2.6 · Moonshot", agentic, 256_000),
   entry("minimax", "MiniMax-M2.5", "MiniMax M2.5 · MiniMax", agentic),
   entry("qwen", "qwen3-max", "Qwen3 Max · Alibaba", agentic, 256_000),
+  {
+    ...entry(
+      "dashscope-coding",
+      "qwen3.7-plus",
+      "Qwen3.7 Plus · 阿里云百炼 Coding Plan",
+      agenticVisionWithoutPdf,
+      1_000_000,
+    ),
+    verifiedAt: codingPlanVerifiedAt,
+  },
+  {
+    ...entry(
+      "dashscope-coding",
+      "qwen3.6-plus",
+      "Qwen3.6 Plus · 阿里云百炼 Coding Plan",
+      agenticVisionWithoutPdf,
+      1_000_000,
+    ),
+    verifiedAt: codingPlanVerifiedAt,
+  },
+  {
+    ...entry(
+      "dashscope-coding",
+      "kimi-k2.5",
+      "Kimi K2.5 · 阿里云百炼 Coding Plan",
+      streamingVisionWithoutTools,
+    ),
+    verifiedAt: codingPlanVerifiedAt,
+  },
+  {
+    ...entry(
+      "dashscope-coding",
+      "glm-5",
+      "GLM-5 · 阿里云百炼 Coding Plan",
+      defaultModelCapabilities(),
+    ),
+    verifiedAt: codingPlanVerifiedAt,
+  },
+  {
+    ...entry(
+      "dashscope-coding",
+      "MiniMax-M2.5",
+      "MiniMax M2.5 · 阿里云百炼 Coding Plan",
+      defaultModelCapabilities(),
+    ),
+    verifiedAt: codingPlanVerifiedAt,
+  },
+  {
+    ...entry(
+      "dashscope-coding",
+      "qwen3.5-plus",
+      "Qwen3.5 Plus · 阿里云百炼 Coding Plan",
+      agenticVisionWithoutPdf,
+      1_000_000,
+    ),
+    verifiedAt: codingPlanVerifiedAt,
+  },
+  {
+    ...entry(
+      "dashscope-coding",
+      "qwen3-max-2026-01-23",
+      "Qwen3 Max 2026-01-23 · 阿里云百炼 Coding Plan",
+      defaultModelCapabilities(),
+    ),
+    verifiedAt: codingPlanVerifiedAt,
+  },
+  {
+    ...entry(
+      "dashscope-coding",
+      "qwen3-coder-next",
+      "Qwen3 Coder Next · 阿里云百炼 Coding Plan",
+      defaultModelCapabilities(),
+      262_144,
+    ),
+    verifiedAt: codingPlanVerifiedAt,
+  },
+  {
+    ...entry(
+      "dashscope-coding",
+      "qwen3-coder-plus",
+      "Qwen3 Coder Plus · 阿里云百炼 Coding Plan",
+      agentic,
+    ),
+    verifiedAt: codingPlanVerifiedAt,
+  },
+  {
+    ...entry(
+      "dashscope-coding",
+      "glm-4.7",
+      "GLM-4.7 · 阿里云百炼 Coding Plan",
+      defaultModelCapabilities(),
+    ),
+    verifiedAt: codingPlanVerifiedAt,
+  },
   entry("xai", "grok-4.3", "Grok 4.3 · xAI", agentic, 256_000),
   entry("mistral", "mistral-large-latest", "Mistral Large · Mistral", agentic, 128_000),
   entry("meta", "muse-spark-1.1", "Muse Spark 1.1 · Meta", agenticVisionWithoutPdf),

@@ -394,16 +394,46 @@ describe("OpenAI-compatible chat client", () => {
         }),
     });
 
-    await expect(
-      client.complete({
+    const error = await client
+      .complete({
         baseUrl: "https://api.example.com/v1",
         apiKey: "secret-key",
         model: "agent-model",
         temperature: 0.2,
         maxTokens: 8192,
         messages: [],
-      }),
-    ).rejects.toThrow("LLM request failed with status 401: bad key");
+      })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({ status: 401 });
+    expect((error as Error).message).toBe("HTTP 401");
+    expect(JSON.stringify(error)).not.toContain("bad key");
+    expect(JSON.stringify(error)).not.toContain("secret-key");
+  });
+
+  it("does not parse or expose a non-JSON provider error body", async () => {
+    const sentinel = "sentinel-secret-echo";
+    const client = createOpenAiCompatibleClient({
+      fetch: async () =>
+        new Response(`<html>${sentinel}</html>`, {
+          status: 401,
+          headers: { "content-type": "text/html" },
+        }),
+    });
+
+    const error = await client
+      .complete({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret-key",
+        model: "agent-model",
+        temperature: 0.2,
+        maxTokens: 8192,
+        messages: [],
+      })
+      .catch((caught: unknown) => caught);
+
+    expect((error as Error).message).toBe("HTTP 401");
+    expect(JSON.stringify(error)).not.toContain(sentinel);
   });
 
   it("aborts a chat completion request when it exceeds the configured timeout", async () => {
@@ -513,7 +543,30 @@ describe("OpenAI-compatible embedding client", () => {
         model: "text-embedding-example",
         input: "Agent memory architecture",
       }),
-    ).rejects.toThrow("Embedding request failed with status 404: model missing");
+    ).rejects.toThrow("HTTP 404");
+  });
+
+  it("does not parse or expose a non-JSON embedding error body", async () => {
+    const sentinel = "embedding-sentinel-secret";
+    const client = createOpenAiCompatibleEmbeddingClient({
+      fetch: async () =>
+        new Response(`<html>${sentinel}</html>`, {
+          status: 500,
+          headers: { "content-type": "text/html" },
+        }),
+    });
+
+    const error = await client
+      .embed({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret-key",
+        model: "text-embedding-example",
+        input: "Agent memory architecture",
+      })
+      .catch((caught: unknown) => caught);
+
+    expect((error as Error).message).toBe("HTTP 500");
+    expect(JSON.stringify(error)).not.toContain(sentinel);
   });
 
   it("aborts an embedding request when it exceeds the configured timeout", async () => {

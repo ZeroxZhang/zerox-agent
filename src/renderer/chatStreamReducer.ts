@@ -14,6 +14,7 @@ export type ChatStreamMessage = {
   isStreaming?: boolean;
   outputParts?: ChatOutputPart[];
   attachments?: ChatAttachmentMetadata[];
+  goalEventRef?: string;
 };
 
 export type ChatToolCallPreview = {
@@ -35,9 +36,7 @@ export type ActiveChatStream = {
   activeRequestId: string | null;
 };
 
-export function createChatStreamState(
-  messages: ChatStreamMessage[],
-): ChatStreamState {
+export function createChatStreamState(messages: ChatStreamMessage[]): ChatStreamState {
   return {
     messages,
     thinkingText: "",
@@ -84,17 +83,11 @@ export function applyChatStreamEvent(
     };
   }
 
-  if (
-    event.type === "completed" ||
-    event.type === "failed" ||
-    event.type === "canceled"
-  ) {
+  if (event.type === "completed" || event.type === "failed" || event.type === "canceled") {
     return {
       ...state,
       messages: state.messages.map((message) =>
-        message.streamRequestId === event.requestId
-          ? { ...message, isStreaming: false }
-          : message,
+        message.streamRequestId === event.requestId ? { ...message, isStreaming: false } : message,
       ),
     };
   }
@@ -109,11 +102,21 @@ export function finalizeChatStreamResult(
     sessionId: string;
     reply: string;
     createdAt: string;
+    suppressReply?: boolean;
   },
 ): ChatStreamState {
+  if (result.suppressReply) {
+    return {
+      ...state,
+      messages: state.messages.filter((message) => message.streamRequestId !== result.requestId),
+      pendingInputRequest:
+        state.pendingInputRequest?.requestId === result.requestId
+          ? null
+          : state.pendingInputRequest,
+    };
+  }
   const existingIndex = state.messages.findIndex(
-    (message) =>
-      message.role === "assistant" && message.streamRequestId === result.requestId,
+    (message) => message.role === "assistant" && message.streamRequestId === result.requestId,
   );
 
   if (existingIndex === -1) {
@@ -149,16 +152,11 @@ export function finalizeChatStreamResult(
         : message,
     ),
     pendingInputRequest:
-      state.pendingInputRequest?.requestId === result.requestId
-        ? null
-        : state.pendingInputRequest,
+      state.pendingInputRequest?.requestId === result.requestId ? null : state.pendingInputRequest,
   };
 }
 
-function isActiveStreamEvent(
-  event: ChatStreamEvent,
-  activeStream: ActiveChatStream,
-): boolean {
+function isActiveStreamEvent(event: ChatStreamEvent, activeStream: ActiveChatStream): boolean {
   if (!activeStream.activeRequestId) {
     return false;
   }
@@ -167,10 +165,7 @@ function isActiveStreamEvent(
     return false;
   }
 
-  if (
-    activeStream.activeSessionId &&
-    event.sessionId !== activeStream.activeSessionId
-  ) {
+  if (activeStream.activeSessionId && event.sessionId !== activeStream.activeSessionId) {
     return false;
   }
 
@@ -183,10 +178,7 @@ function upsertAssistantOutputPart(
 ): ChatStreamState {
   let didUpdate = false;
   const messages = state.messages.map((message) => {
-    if (
-      message.role !== "assistant" ||
-      message.streamRequestId !== event.requestId
-    ) {
+    if (message.role !== "assistant" || message.streamRequestId !== event.requestId) {
       return message;
     }
 
@@ -195,9 +187,7 @@ function upsertAssistantOutputPart(
       ...message,
       content: event.part.type === "text" ? event.part.text : message.content,
       isStreaming: true,
-      outputParts: orderOutputParts(
-        upsertOutputPart(message.outputParts ?? [], event.part),
-      ),
+      outputParts: orderOutputParts(upsertOutputPart(message.outputParts ?? [], event.part)),
     };
   });
 
@@ -222,10 +212,7 @@ function upsertAssistantOutputPart(
   };
 }
 
-function upsertOutputPart(
-  outputParts: ChatOutputPart[],
-  part: ChatOutputPart,
-): ChatOutputPart[] {
+function upsertOutputPart(outputParts: ChatOutputPart[], part: ChatOutputPart): ChatOutputPart[] {
   let didUpdate = false;
   const nextParts = outputParts.map((existingPart) => {
     if (existingPart.id !== part.id) {
@@ -252,10 +239,7 @@ function upsertAssistantStreamMessage(
 ): ChatStreamState {
   let didUpdate = false;
   const messages = state.messages.map((message) => {
-    if (
-      message.role !== "assistant" ||
-      message.streamRequestId !== event.requestId
-    ) {
+    if (message.role !== "assistant" || message.streamRequestId !== event.requestId) {
       return message;
     }
 

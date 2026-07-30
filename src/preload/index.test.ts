@@ -87,4 +87,15 @@ describe("preload bridge", () => {
       'ipcRenderer.invoke("goal:markCompletedUnverified", goalId)',
     );
   });
+
+  it("exposes explicit provider test-save and credential-removal operations", () => {
+    expect(preloadSource).toContain("testAndSaveProviderConnection");
+    expect(preloadSource).toContain(
+      'ipcRenderer.invoke("modelCatalog:testAndSaveConnection", input)',
+    );
+    expect(preloadSource).toContain("clearProviderCredential");
+    expect(preloadSource).toContain(
+      '"modelCatalog:clearConnectionCredential"',
+    );
+  });
 });

@@ -155,6 +155,67 @@ describe("plan debate orchestrator", () => {
     );
   });
 
+  it("snapshots the selected Skill as bounded read-only planning context", async () => {
+    const calls: Array<{ profileId: string; request: ChatCompletionRequest }> =
+      [];
+    const router = createQueuedRouter(
+      { profileDirect: [artifact("Skill-aware plan")] },
+      calls,
+    );
+    const orchestrator = createPlanDebateOrchestrator({
+      planStore: createPlanStore({
+        configDir: path.join(tempDir, "config"),
+      }),
+      artifactWriter: createPlanArtifactWriter(),
+      modelRouter: router,
+    });
+
+    const plan = await orchestrator.createPlan({
+      sessionId: "session-selected-skill",
+      workspaceRoot,
+      sourceMessage: "使用指定 Skill 规划本地功能。",
+      selectedSkill: {
+        rootDir: path.join(tempDir, "skills", "dbs"),
+        skillFile: path.join(tempDir, "skills", "dbs", "SKILL.md"),
+        body: "DBS_SKILL_PLANNING_CONTEXT",
+        manifest: {
+          name: "dbs",
+          displayName: "DBS",
+          description: "Structured database workflow",
+          version: "1.0.0",
+          execution: { mode: "agent", entrypoint: null },
+          inputs: [
+            {
+              name: "target",
+              label: "Target",
+              type: "string",
+              required: true,
+            },
+          ],
+          permissions: {
+            files: { read: [], write: [] },
+            shell: { commands: [] },
+            web: { search: false, fetchDomains: [] },
+            memory: { read: false, write: false },
+          },
+        },
+      },
+      mode: "direct",
+      modelAssignments: { direct: "profileDirect" },
+    });
+
+    expect(plan.selectedSkill?.manifest.name).toBe("dbs");
+    expect(plan.evidence).toContainEqual(
+      expect.objectContaining({
+        id: "evidence_selected_skill",
+        kind: "skill",
+      }),
+    );
+    expect(calls[0]?.request.messages[1]?.content).toContain(
+      "DBS_SKILL_PLANNING_CONTEXT",
+    );
+  });
+
   it("pauses on a failed role and retries it with a replacement model while invalidating downstream output", async () => {
     const calls: Array<{ profileId: string; request: ChatCompletionRequest }> =
       [];
@@ -342,6 +403,43 @@ describe("plan debate orchestrator", () => {
     );
   });
 
+  it("keeps clarification history bounded without recursively embedding old prompts", async () => {
+    const outputs = Array.from({ length: 15 }, (_, index) =>
+      artifact(`Bounded revision ${index + 1}`),
+    );
+    const router = createQueuedRouter({ profileDirect: outputs }, []);
+    const orchestrator = createPlanDebateOrchestrator({
+      planStore: createPlanStore({
+        configDir: path.join(tempDir, "config"),
+      }),
+      artifactWriter: createPlanArtifactWriter(),
+      modelRouter: router,
+    });
+    let plan = await orchestrator.createPlan({
+      sessionId: "session-bounded-clarifications",
+      workspaceRoot,
+      sourceMessage: "Keep this immutable base objective.",
+      mode: "direct",
+      modelAssignments: { direct: "profileDirect" },
+    });
+
+    for (let index = 1; index <= 14; index += 1) {
+      const result = await orchestrator.continueWithInput(
+        plan.id,
+        `clarification-${String(index).padStart(2, "0")}`,
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      plan = result.plan;
+    }
+
+    expect(plan.baseSourceMessage).toBe("Keep this immutable base objective.");
+    expect(plan.clarifications).toHaveLength(12);
+    expect(plan.clarifications?.[0]).toBe("clarification-03");
+    expect(plan.sourceMessage).not.toContain("clarification-01");
+    expect(plan.sourceMessage.match(/用户补充信息/g)).toHaveLength(1);
+  });
+
   it("treats feedback on a ready plan as a new read-only revision", async () => {
     const calls: Array<{ profileId: string; request: ChatCompletionRequest }> =
       [];
@@ -464,7 +562,7 @@ describe("plan debate orchestrator", () => {
 
     expect(plan.status).toBe("paused");
     expect(plan.actionGate).toBe("blocked");
-    expect(plan.finalArtifact?.actionGate).toBe("blocked");
+    expect(plan.finalArtifact).toBeUndefined();
   });
 
   it("persists cancellation as canceled and never leaves a running round", async () => {
@@ -718,6 +816,120 @@ describe("plan debate orchestrator", () => {
     );
     expect(calls[1]?.request.thinking).toEqual({ type: "disabled" });
     expect(plan.rounds.filter((round) => round.status === "completed")).toHaveLength(1);
+  });
+
+  it("repairs malformed C inside the same run without replaying A1 through B2", async () => {
+    const calls: Array<{ profileId: string; request: ChatCompletionRequest }> =
+      [];
+    const router = createQueuedRouter(
+      {
+        profileA: [proposal("A1"), revisedProposal("A2")],
+        profileB: [critique("B1"), critique("B2")],
+        profileC: ["C returned prose only", artifact("Repaired C")],
+      },
+      calls,
+    );
+    const orchestrator = createPlanDebateOrchestrator({
+      planStore: createPlanStore({
+        configDir: path.join(tempDir, "config"),
+      }),
+      artifactWriter: createPlanArtifactWriter(),
+      modelRouter: router,
+    });
+
+    const plan = await orchestrator.createPlan({
+      sessionId: "session-c-repair",
+      workspaceRoot,
+      sourceMessage: "Generate a debated plan with recoverable synthesis.",
+      mode: "debate",
+      modelAssignments: {
+        a: "profileA",
+        b: "profileB",
+        c: "profileC",
+      },
+    });
+
+    expect(plan.status).toBe("awaiting_confirmation");
+    expect(calls.map((call) => call.profileId)).toEqual([
+      "profileA",
+      "profileB",
+      "profileA",
+      "profileB",
+      "profileC",
+      "profileC",
+    ]);
+    expect(
+      plan.rounds
+        .filter((round) => round.status === "completed")
+        .map((round) => round.kind),
+    ).toEqual(["a1", "b1", "a2", "b2", "c"]);
+    expect(new Set(plan.rounds.map((round) => round.runId)).size).toBe(5);
+    expect(plan.rounds.filter((round) => round.kind === "c")).toHaveLength(1);
+  });
+
+  it("repairs a parseable but incomplete artifact instead of making it confirmable", async () => {
+    const calls: Array<{ profileId: string; request: ChatCompletionRequest }> =
+      [];
+    const router = createQueuedRouter(
+      {
+        profileDirect: [
+          { objective: "Incomplete", milestones: [null] },
+          artifact("Strictly repaired"),
+        ],
+      },
+      calls,
+    );
+    const orchestrator = createPlanDebateOrchestrator({
+      planStore: createPlanStore({
+        configDir: path.join(tempDir, "config"),
+      }),
+      artifactWriter: createPlanArtifactWriter(),
+      modelRouter: router,
+    });
+
+    const plan = await orchestrator.createPlan({
+      sessionId: "session-incomplete-artifact",
+      workspaceRoot,
+      sourceMessage: "Generate a complete plan.",
+      mode: "direct",
+      modelAssignments: { direct: "profileDirect" },
+    });
+
+    expect(calls).toHaveLength(2);
+    expect(plan.status).toBe("awaiting_confirmation");
+    expect(plan.finalArtifact?.title).toBe("Strictly repaired");
+    expect(plan.finalArtifact?.milestones[0]?.acceptanceCriteria).toEqual([
+      "测试通过",
+    ]);
+  });
+
+  it("selects the only round-valid JSON object after unrelated metadata", async () => {
+    const calls: Array<{ profileId: string; request: ChatCompletionRequest }> =
+      [];
+    const content = [
+      JSON.stringify({ note: "unrelated metadata" }),
+      JSON.stringify(artifact("Valid after metadata")),
+    ].join("\n");
+    const router = createQueuedRouter({ profileDirect: [content] }, calls);
+    const orchestrator = createPlanDebateOrchestrator({
+      planStore: createPlanStore({
+        configDir: path.join(tempDir, "config"),
+      }),
+      artifactWriter: createPlanArtifactWriter(),
+      modelRouter: router,
+    });
+
+    const plan = await orchestrator.createPlan({
+      sessionId: "session-json-metadata",
+      workspaceRoot,
+      sourceMessage: "Generate one valid plan.",
+      mode: "direct",
+      modelAssignments: { direct: "profileDirect" },
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(plan.status).toBe("awaiting_confirmation");
+    expect(plan.finalArtifact?.title).toBe("Valid after metadata");
   });
 
   it("extracts a valid object after prose with unrelated braces", async () => {

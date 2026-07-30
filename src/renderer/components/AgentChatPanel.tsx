@@ -18,10 +18,7 @@ import {
   type AgentOnboardingAction,
 } from "../../shared/agentOnboarding";
 import { buildAgentDataBoundary } from "../../shared/dataBoundary";
-import {
-  buildFirstRunGuide,
-  type FirstRunGuideAction,
-} from "../../shared/firstRunGuide";
+import { buildFirstRunGuide, type FirstRunGuideAction } from "../../shared/firstRunGuide";
 import { buildAgentReadinessChecklist } from "../../shared/agentReadiness";
 import type { AgentRunEvent, AgentRunRecord } from "../../shared/agentRuns";
 import type { AgentWorkspace } from "../../shared/agentWorkspace";
@@ -52,11 +49,7 @@ import type {
   PublicModelSettings,
 } from "../../shared/modelSettings";
 import type { NavigationSectionId } from "../../shared/navigation";
-import type {
-  PlanMode,
-  PlanModelAssignments,
-  PlanRecord,
-} from "../../shared/planMode";
+import type { PlanMode, PlanModelAssignments, PlanRecord } from "../../shared/planMode";
 import type { ScheduledTask } from "../../shared/scheduledTasks";
 import {
   extractActiveSkillMention,
@@ -75,20 +68,9 @@ import {
   loadPreviewValidationSnapshot,
   savePreviewValidationSnapshot,
 } from "../agentValidationPreviewStore";
-import {
-  buildAgentWorkSteps,
-  type AgentWorkPhase,
-  type AgentWorkStep,
-} from "../agentWorkStatus";
-import {
-  parseInlineMarkdown,
-  parseMarkdownBlocks,
-  type MarkdownBlock,
-} from "../chatMarkdown";
-import {
-  createMarkdownPreview,
-  shouldRenderMarkdownPreview,
-} from "../chatMarkdownPreview";
+import { buildAgentWorkSteps, type AgentWorkPhase, type AgentWorkStep } from "../agentWorkStatus";
+import { parseInlineMarkdown, parseMarkdownBlocks, type MarkdownBlock } from "../chatMarkdown";
+import { createMarkdownPreview, shouldRenderMarkdownPreview } from "../chatMarkdownPreview";
 import {
   isChatSessionSelectionCurrent,
   rollbackFailedAttachmentTurn,
@@ -132,11 +114,9 @@ import {
   type ChatToolCallPreview,
   type ChatStreamMessage,
 } from "../chatStreamReducer";
-import {
-  outputPartsFromMessage,
-  type RenderedOutputPart,
-} from "../chatOutputModel";
+import { outputPartsFromMessage, type RenderedOutputPart } from "../chatOutputModel";
 import { formatChatMessageTime } from "../chatMessageTime";
+import { availableChatProfiles } from "../modelProfileAvailability";
 import { AnswerBlock } from "./chat/AnswerBlock";
 import { GoalDetailDrawer } from "./GoalDetailDrawer";
 import { GoalStatusStrip } from "./GoalStatusStrip";
@@ -233,10 +213,8 @@ const initialMessages: ChatMessage[] = [];
 const MAX_RENDERED_RUNTIME_EVENTS = 80;
 const MESSAGE_LIST_BOTTOM_THRESHOLD_PX = 96;
 const composerRiskTooltips = {
-  auto:
-    "自动授权：普通文件、Shell 和网络操作默认放行；数据破坏、提权、密钥外传、生产发布和对外发送仍需确认。",
-  goal:
-    "目标模式：先在只读 Plan Mode 生成计划；只有你确认 Ready 计划后，才创建新的可写 Goal Run。",
+  auto: "自动授权：普通文件、Shell 和网络操作默认放行；数据破坏、提权、密钥外传、生产发布和对外发送仍需确认。",
+  goal: "目标模式：先在只读 Plan Mode 生成计划；只有你确认 Ready 计划后，才创建新的可写 Goal Run。",
 } as const;
 
 export function AgentChatPanel({
@@ -247,18 +225,21 @@ export function AgentChatPanel({
   onChatSessionsChange,
   onNavigate,
 }: AgentChatPanelProps) {
-  const dataBoundary = buildAgentDataBoundary(
-    window.buildingAgent ? "desktop" : "preview",
-  );
+  const dataBoundary = buildAgentDataBoundary(window.buildingAgent ? "desktop" : "preview");
   const [chatStreamState, setChatStreamState] = useState(() =>
     createChatStreamState(initialMessages),
   );
   const messages = chatStreamState.messages;
-  const visibleChatMessages = useMemo<VisibleChatMessage[]>(
-    () => {
+  const visibleChatMessages = useMemo<VisibleChatMessage[]>(() => {
       const visibleMessages: VisibleChatMessage[] = [];
       for (const message of messages) {
         if (message.role === "assistant") {
+          if (
+            message.goalEventRef &&
+            shouldHideGoalEventReply(message.goalEventRef)
+          ) {
+            continue;
+          }
           const outputParts = outputPartsFromMessage(message);
           if (outputParts.length > 0) {
             visibleMessages.push({ ...message, role: "assistant", outputParts });
@@ -270,9 +251,7 @@ export function AgentChatPanel({
       }
 
       return visibleMessages;
-    },
-    [messages],
-  );
+  }, [messages]);
   const pendingInputRequest = chatStreamState.pendingInputRequest;
   const [draft, setDraft] = useState("");
   const [draftCursor, setDraftCursor] = useState(0);
@@ -284,18 +263,15 @@ export function AgentChatPanel({
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [attachmentAnnouncement, setAttachmentAnnouncement] = useState("");
   const [goalModeEnabled, setGoalModeEnabled] = useState(false);
+  const [planModeDecisionOpen, setPlanModeDecisionOpen] = useState(false);
   const [goalPlanMode, setGoalPlanMode] = useState<PlanMode>("direct");
-  const [planModelAssignments, setPlanModelAssignments] =
-    useState<PlanModelAssignments>({});
-  const [modelCatalog, setModelCatalog] =
-    useState<PublicModelCatalog | null>(null);
+  const [planModelAssignments, setPlanModelAssignments] = useState<PlanModelAssignments>({});
+  const [modelCatalog, setModelCatalog] = useState<PublicModelCatalog | null>(null);
   const [activePlan, setActivePlan] = useState<PlanRecord | null>(null);
   const [planActionPending, setPlanActionPending] = useState<
     "confirm" | "discard" | "retry" | null
   >(null);
-  const [pendingGoalDraft, setPendingGoalDraft] = useState<GoalDraft | null>(
-    null,
-  );
+  const [pendingGoalDraft, setPendingGoalDraft] = useState<GoalDraft | null>(null);
   const [goalDraftDescription, setGoalDraftDescription] = useState("");
   const [goalDraftCriteriaText, setGoalDraftCriteriaText] = useState("");
   const [goalDraftActionPending, setGoalDraftActionPending] = useState<
@@ -310,24 +286,20 @@ export function AgentChatPanel({
   const [runs, setRuns] = useState<AgentRunRecord[]>(demoRuns);
   const [memories, setMemories] = useState<MemoryRecord[]>(demoMemories);
   const [workspaces, setWorkspaces] = useState<AgentWorkspace[]>([]);
-  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null);
+  const [workspaceActionPending, setWorkspaceActionPending] = useState<"open" | "create" | null>(
     null,
   );
-  const [workspaceActionPending, setWorkspaceActionPending] = useState<
-    "open" | "create" | null
-  >(null);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const [workspaceSearch, setWorkspaceSearch] = useState("");
-  const [workspaceMenuPosition, setWorkspaceMenuPosition] =
-    useState<WorkspaceMenuPosition>({
+  const [workspaceMenuPosition, setWorkspaceMenuPosition] = useState<WorkspaceMenuPosition>({
       top: 0,
       left: 0,
       width: 420,
       maxHeight: 360,
       placement: "above",
     });
-  const [modelSettings, setModelSettings] =
-    useState<PublicModelSettings>(demoModelSettings);
+  const [modelSettings, setModelSettings] = useState<PublicModelSettings>(demoModelSettings);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [skillCount, setSkillCount] = useState(1);
   const [skillOptions, setSkillOptions] = useState<SkillMentionCandidate[]>([]);
@@ -339,28 +311,22 @@ export function AgentChatPanel({
     kind: "ready",
     message: "会话已就绪",
   });
-  const [taskActivity, setTaskActivity] =
-    useState<TaskActivityState>(idleTaskActivity);
-  const [taskProcessEvents, setTaskProcessEvents] = useState<ChatTaskStatusEvent[]>(
-    [],
-  );
+  const [taskActivity, setTaskActivity] = useState<TaskActivityState>(idleTaskActivity);
+  const [taskProcessEvents, setTaskProcessEvents] = useState<ChatTaskStatusEvent[]>([]);
   const [goalRunEvents, setGoalRunEvents] = useState<AgentRunEvent[]>([]);
   const [autoApprovalEnabled, setAutoApprovalEnabled] = useState(false);
   const [autoApprovalLocked, setAutoApprovalLocked] = useState(false);
-  const [pendingToolApprovals, setPendingToolApprovals] = useState<
-    ToolApprovalRequestPayload[]
-  >([]);
+  const [pendingToolApprovals, setPendingToolApprovals] = useState<ToolApprovalRequestPayload[]>(
+    [],
+  );
   const pendingToolApproval = pendingToolApprovals[0] ?? null;
-  const [toolApprovalEvents, setToolApprovalEvents] = useState<
-    ToolApprovalDecisionPayload[]
-  >([]);
+  const [toolApprovalEvents, setToolApprovalEvents] = useState<ToolApprovalDecisionPayload[]>([]);
   const [activeGoalDetail, setActiveGoalDetail] = useState<Goal | null>(null);
   const [goalDrawerOpen, setGoalDrawerOpen] = useState(false);
-  const [goalAcceptanceOperationPending, setGoalAcceptanceOperationPending] =
-    useState<"continue_acceptance" | "mark_completed_unverified" | null>(null);
-  const [activeChatRequestId, setActiveChatRequestId] = useState<string | null>(
-    null,
-  );
+  const [goalAcceptanceOperationPending, setGoalAcceptanceOperationPending] = useState<
+    "continue_acceptance" | "mark_completed_unverified" | null
+  >(null);
+  const [activeChatRequestId, setActiveChatRequestId] = useState<string | null>(null);
   const [guidedInputValues, setGuidedInputValues] = useState<
     Record<string, string | number | boolean>
   >({});
@@ -380,8 +346,7 @@ export function AgentChatPanel({
   const activeChatRequestIdRef = useRef<string | null>(null);
   const pendingInputRequestRef = useRef<SkillUserInputRequest | null>(null);
   const activeGoalRef = useRef<ChatSessionGoalSummary | null>(null);
-  const goalAcceptanceOperationPendingRef =
-    useRef<GoalAcceptanceOperationToken | null>(null);
+  const goalAcceptanceOperationPendingRef = useRef<GoalAcceptanceOperationToken | null>(null);
   const goalAcceptanceOperationSequenceRef = useRef(0);
   const goalAcceptanceContextRef = useRef<{
     identity: string;
@@ -414,24 +379,15 @@ export function AgentChatPanel({
     );
     const spaceAbove = triggerRect.top - viewportMargin;
     const spaceBelow = viewportHeight - triggerRect.bottom - viewportMargin;
-    const placement = spaceBelow >= 300 || spaceBelow > spaceAbove
-      ? "below"
-      : "above";
-    const availableHeight =
-      (placement === "below" ? spaceBelow : spaceAbove) - 8;
-    const minimumHeight = Math.min(
-      180,
-      Math.max(120, viewportHeight - viewportMargin * 2),
-    );
+    const placement = spaceBelow >= 300 || spaceBelow > spaceAbove ? "below" : "above";
+    const availableHeight = (placement === "below" ? spaceBelow : spaceAbove) - 8;
+    const minimumHeight = Math.min(180, Math.max(120, viewportHeight - viewportMargin * 2));
     const maximumHeight = Math.max(
       minimumHeight,
       Math.min(440, viewportHeight - viewportMargin * 2),
     );
     const maxHeight = clampNumber(availableHeight, minimumHeight, maximumHeight);
-    const rawTop =
-      placement === "below"
-        ? triggerRect.bottom + 8
-        : triggerRect.top - maxHeight - 8;
+    const rawTop = placement === "below" ? triggerRect.bottom + 8 : triggerRect.top - maxHeight - 8;
     const top = clampNumber(
       rawTop,
       viewportMargin,
@@ -476,6 +432,7 @@ export function AgentChatPanel({
     messages,
     pendingInputRequest,
     pendingToolApproval,
+    planModeDecisionOpen,
     scrollMessageListToBottom,
   ]);
 
@@ -513,10 +470,7 @@ export function AgentChatPanel({
 
     function handleDocumentMouseDown(event: MouseEvent) {
       const target = event.target;
-      if (
-        target instanceof Node &&
-        workspaceMenuRef.current?.contains(target)
-      ) {
+      if (target instanceof Node && workspaceMenuRef.current?.contains(target)) {
         return;
       }
 
@@ -537,17 +491,11 @@ export function AgentChatPanel({
     measureWorkspaceMenuPosition();
     window.addEventListener("resize", measureWorkspaceMenuPosition);
     window.addEventListener("scroll", measureWorkspaceMenuPosition, true);
-    window.visualViewport?.addEventListener(
-      "resize",
-      measureWorkspaceMenuPosition,
-    );
+    window.visualViewport?.addEventListener("resize", measureWorkspaceMenuPosition);
     return () => {
       window.removeEventListener("resize", measureWorkspaceMenuPosition);
       window.removeEventListener("scroll", measureWorkspaceMenuPosition, true);
-      window.visualViewport?.removeEventListener(
-        "resize",
-        measureWorkspaceMenuPosition,
-      );
+      window.visualViewport?.removeEventListener("resize", measureWorkspaceMenuPosition);
     };
   }, [measureWorkspaceMenuPosition, workspaceMenuOpen]);
 
@@ -566,6 +514,7 @@ export function AgentChatPanel({
     setSelectedSkillName(null);
     setPendingGoalDraft(null);
     setActivePlan(null);
+    setPlanModeDecisionOpen(false);
     setPlanActionPending(null);
     setGoalDraftDescription("");
     setGoalDraftCriteriaText("");
@@ -612,9 +561,7 @@ export function AgentChatPanel({
             ? activeGoalRef.current.description
             : event.message;
         setActiveGoalDetail((currentGoal) =>
-          currentGoal?.id === event.goalId
-            ? { ...currentGoal, status: event.status }
-            : currentGoal,
+          currentGoal?.id === event.goalId ? { ...currentGoal, status: event.status } : currentGoal,
         );
         void refreshActiveGoalDetail(event.goalId);
         setStatus({ kind: goalUiState.statusKind, message: event.message });
@@ -647,9 +594,7 @@ export function AgentChatPanel({
       if (eventBelongsToActiveGoal) {
         void refreshSessions(event.sessionId ?? activeSessionId ?? undefined);
         if (isTerminalGoalStatus(event.status)) {
-          void refreshCurrentSessionMessages(
-            event.sessionId ?? activeSessionId ?? undefined,
-          );
+          void refreshCurrentSessionMessages(event.sessionId ?? activeSessionId ?? undefined);
         }
       }
     });
@@ -668,30 +613,22 @@ export function AgentChatPanel({
         setGoalModeEnabled(state.goalModeEnabled);
       })
       .catch(() => undefined);
-    const unsubscribeRequest = window.buildingAgent.onToolApprovalRequest(
-      (request) => {
+    const unsubscribeRequest = window.buildingAgent.onToolApprovalRequest((request) => {
         setPendingToolApprovals((current) =>
-          current.some((candidate) => candidate.id === request.id)
-            ? current
-            : [...current, request],
+        current.some((candidate) => candidate.id === request.id) ? current : [...current, request],
         );
-      },
-    );
-    const unsubscribeDecision = window.buildingAgent.onToolApprovalDecision(
-      (decision) => {
+    });
+    const unsubscribeDecision = window.buildingAgent.onToolApprovalDecision((decision) => {
         setPendingToolApprovals((current) =>
           current.filter((candidate) => candidate.id !== decision.id),
         );
         setToolApprovalEvents((current) => [...current.slice(-9), decision]);
-      },
-    );
-    const unsubscribeMode = window.buildingAgent.onToolApprovalModeChanged(
-      (state) => {
+    });
+    const unsubscribeMode = window.buildingAgent.onToolApprovalModeChanged((state) => {
         setAutoApprovalEnabled(state.autoApprovalEnabled);
         setAutoApprovalLocked(state.autoApprovalLocked);
         setGoalModeEnabled(state.goalModeEnabled);
-      },
-    );
+    });
 
     return () => {
       unsubscribeRequest();
@@ -723,9 +660,7 @@ export function AgentChatPanel({
       const activeStream = {
         activeSessionId: activeStatusSessionIdRef.current ?? sessionIdRef.current,
         activeRequestId:
-          activeChatRequestIdRef.current ??
-          pendingInputRequestRef.current?.requestId ??
-          null,
+          activeChatRequestIdRef.current ?? pendingInputRequestRef.current?.requestId ?? null,
       };
       if (!chatStreamEventMatchesActive(event, activeStream)) {
         return;
@@ -733,9 +668,7 @@ export function AgentChatPanel({
 
       activeStatusSessionIdRef.current = event.sessionId;
       setSessionId((current) => current ?? event.sessionId);
-      setChatStreamState((current) =>
-        applyChatStreamEvent(current, event, activeStream),
-      );
+      setChatStreamState((current) => applyChatStreamEvent(current, event, activeStream));
 
       if (
         event.type === "answer_delta" ||
@@ -882,9 +815,7 @@ export function AgentChatPanel({
         ]) => {
         setModelSettings(settings);
         setModelCatalog(loadedModelCatalog);
-        setPlanModelAssignments(
-          defaultPlanModelAssignments(loadedModelCatalog),
-        );
+          setPlanModelAssignments(defaultPlanModelAssignments(loadedModelCatalog));
         setTasks(loadedTasks);
         setRuns(loadedRuns);
         setMemories(loadedMemories);
@@ -900,12 +831,12 @@ export function AgentChatPanel({
           kind: "ready",
           message: settings.hasApiKey ? "模型已配置" : "还需要配置模型密钥",
         });
-      })
+        },
+      )
       .catch((error) => {
         setStatus({
           kind: "error",
-          message:
-            error instanceof Error ? error.message : "读取智能体状态失败",
+          message: error instanceof Error ? error.message : "读取智能体状态失败",
         });
       });
   }, [onChatSessionsChange]);
@@ -927,6 +858,7 @@ export function AgentChatPanel({
     // expose session-scoped controls while the next transcript is loading.
     setPendingGoalDraft(null);
     setActivePlan(null);
+    setPlanModeDecisionOpen(false);
     setPlanActionPending(null);
     setGoalDraftDescription("");
     setGoalDraftCriteriaText("");
@@ -988,17 +920,14 @@ export function AgentChatPanel({
         setTaskProcessEvents([]);
         activeStatusSessionIdRef.current = null;
       }
-      const latestPlan =
-        await window.buildingAgent.getLatestPlanForSession(loadedSession.id);
+      const latestPlan = await window.buildingAgent.getLatestPlanForSession(loadedSession.id);
       if (
         sessionSelectionGenerationRef.current !== loadGeneration ||
         sessionIdRef.current !== sessionIdToLoad
       ) {
         return;
       }
-      setActivePlan(
-        latestPlan && latestPlan.status !== "discarded" ? latestPlan : null,
-      );
+      setActivePlan(latestPlan && latestPlan.status !== "discarded" ? latestPlan : null);
       if (latestPlan) {
         void refreshSessions(loadedSession.id);
         void refreshCurrentSessionMessages(loadedSession.id);
@@ -1051,10 +980,7 @@ export function AgentChatPanel({
     }
     const nextSessions = loadedSessions.map(toSessionRailItem);
     setSessions(nextSessions);
-    if (
-      nextActiveSessionId &&
-      sessionIdRef.current === nextActiveSessionId
-    ) {
+    if (nextActiveSessionId && sessionIdRef.current === nextActiveSessionId) {
       setSessionId(nextActiveSessionId);
     } else if (
       sessionIdRef.current &&
@@ -1136,9 +1062,7 @@ export function AgentChatPanel({
   function applyGoalSummaryToSessions(goal: ChatSessionGoalSummary) {
     setSessions((currentSessions) => {
       return currentSessions.map((session) =>
-        session.activeGoal?.id === goal.id
-          ? { ...session, activeGoal: goal }
-          : session,
+        session.activeGoal?.id === goal.id ? { ...session, activeGoal: goal } : session,
       );
     });
   }
@@ -1152,7 +1076,9 @@ export function AgentChatPanel({
     `is-${status.kind}`,
     chatStatusIsLong ? "is-expandable" : "",
     chatStatusExpanded ? "is-expanded" : "",
-  ].filter(Boolean).join(" ");
+  ]
+    .filter(Boolean)
+    .join(" ");
   const activeGoal = activeSession?.activeGoal ?? null;
   activeGoalRef.current = activeGoal;
   const goalAcceptanceContextIdentity = JSON.stringify([
@@ -1173,23 +1099,21 @@ export function AgentChatPanel({
   const goalAcceptanceContext = goalAcceptanceContextRef.current.context;
   useEffect(() => {
     const pending = goalAcceptanceOperationPendingRef.current;
-    if (
-      pending &&
-      !isGoalAcceptanceOperationCurrent(
-        pending,
-        goalAcceptanceContext,
-        pending,
-      )
-    ) {
+    if (pending && !isGoalAcceptanceOperationCurrent(pending, goalAcceptanceContext, pending)) {
       goalAcceptanceOperationPendingRef.current = null;
       setGoalAcceptanceOperationPending(null);
     }
   }, [goalAcceptanceContext]);
   const planInputLocked = isPlanInputRoutingLocked(activePlan);
   const planAcceptsComposerInput =
-    activePlan?.status === "awaiting_input" ||
     activePlan?.status === "awaiting_confirmation" ||
     (activePlan?.status === "paused" && Boolean(activePlan.finalArtifact));
+  const planNeedsDecision =
+    Boolean(activePlan) &&
+    ["awaiting_input", "awaiting_confirmation", "paused", "canceled", "failed"].includes(
+      activePlan?.status ?? "",
+    );
+  const goalNeedsDecision = Boolean(activeGoal) && needsGoalDecision(activeGoal?.status);
   const goalModeVisuallyEnabled = goalModeEnabled || planInputLocked;
   const activeTasks = tasks.filter((task) => task.enabled);
   const workSteps = useMemo(() => buildAgentWorkSteps(workPhase), [workPhase]);
@@ -1212,11 +1136,8 @@ export function AgentChatPanel({
   const hasActiveSubagents = subagentProcessItems.some((item) => item.status === "running");
   const canCancelChatTask =
     Boolean(window.buildingAgent) &&
-    (status.kind === "working" ||
-      taskActivity.kind === "working" ||
-      activeChatRequestId !== null);
-  const canInterruptCurrentWork =
-    canCancelChatTask || Boolean(activeGoal?.status === "executing");
+    (status.kind === "working" || taskActivity.kind === "working" || activeChatRequestId !== null);
+  const canInterruptCurrentWork = canCancelChatTask || Boolean(activeGoal?.status === "executing");
   const workspaceActionsDisabled =
     !window.buildingAgent ||
     Boolean(workspaceActionPending) ||
@@ -1228,21 +1149,17 @@ export function AgentChatPanel({
   );
   const skillMentionMatches = useMemo(
     () =>
-      activeSkillMention
-        ? matchSkillMentionCandidates(skillOptions, activeSkillMention.query)
-        : [],
+      activeSkillMention ? matchSkillMentionCandidates(skillOptions, activeSkillMention.query) : [],
     [activeSkillMention, skillOptions],
   );
   const selectedSkill = selectedSkillName
-    ? skillOptions.find((skill) => skill.name === selectedSkillName) ?? null
+    ? (skillOptions.find((skill) => skill.name === selectedSkillName) ?? null)
     : null;
   const selectedWorkspace = selectedWorkspaceId
-    ? workspaces.find((workspace) => workspace.id === selectedWorkspaceId) ?? null
+    ? (workspaces.find((workspace) => workspace.id === selectedWorkspaceId) ?? null)
     : null;
   const activeWorkspaceLabel =
-    selectedWorkspace?.name ??
-    activeSession?.workspaceSummary?.name ??
-    "默认工作区";
+    selectedWorkspace?.name ?? activeSession?.workspaceSummary?.name ?? "默认工作区";
   const activeWorkspacePath =
     selectedWorkspace?.rootPath ?? activeSession?.workspaceSummary?.rootPath ?? "";
   const visibleWorkspaces = useMemo(() => {
@@ -1252,10 +1169,7 @@ export function AgentChatPanel({
     }
 
     return workspaces.filter((workspace) =>
-      [workspace.name, workspace.rootPath, workspace.kind]
-        .join(" ")
-        .toLowerCase()
-        .includes(query),
+      [workspace.name, workspace.rootPath, workspace.kind].join(" ").toLowerCase().includes(query),
     );
   }, [workspaceSearch, workspaces]);
   const workspaceMenuStyle = {
@@ -1265,24 +1179,18 @@ export function AgentChatPanel({
     "--workspace-menu-max-height": `${workspaceMenuPosition.maxHeight}px`,
   } as CSSProperties;
   const hasRuntimeSurfaces =
-    Boolean(chatStreamState.thinkingText) ||
-    chatStreamState.toolCallPreviews.length > 0 ||
+    planModeDecisionOpen ||
     Boolean(pendingGoalDraft) ||
-    Boolean(activePlan) ||
-    Boolean(activeGoal) ||
-    goalRunEvents.length > 0 ||
+    planNeedsDecision ||
+    goalNeedsDecision ||
     shouldShowToolApproval(pendingToolApproval, autoApprovalEnabled) ||
     Boolean(pendingInputRequest);
-  const latestToolCallPreview =
-    chatStreamState.toolCallPreviews.at(-1) ?? null;
+  const latestToolCallPreview = chatStreamState.toolCallPreviews.at(-1) ?? null;
   const skillMentionMenuVisible =
     !planInputLocked &&
     Boolean(activeSkillMention) &&
     skillMentionMatches.length > 0 &&
-    !(
-      selectedSkillName &&
-      activeSkillMention?.query.toLowerCase() === selectedSkillName
-    );
+    !(selectedSkillName && activeSkillMention?.query.toLowerCase() === selectedSkillName);
 
   useEffect(() => {
     if (planInputLocked) {
@@ -1364,11 +1272,7 @@ export function AgentChatPanel({
     [lastValidationSnapshot, memories, modelSettings, runs, skillCount, tasks],
   );
   const onboardingState = useMemo(
-    () =>
-      buildAgentOnboardingState(
-        readinessChecklist,
-        lastValidationSnapshot?.validatedAt,
-      ),
+    () => buildAgentOnboardingState(readinessChecklist, lastValidationSnapshot?.validatedAt),
     [lastValidationSnapshot, readinessChecklist],
   );
   const firstRunGuide = useMemo(
@@ -1379,6 +1283,13 @@ export function AgentChatPanel({
     (workPhase !== "idle" && workPhase !== "done") ||
     shouldShowActivityCard ||
     Boolean(activeGoal) ||
+    Boolean(activePlan) ||
+    goalModeEnabled ||
+    planInputLocked ||
+    Boolean(chatStreamState.thinkingText) ||
+    chatStreamState.toolCallPreviews.length > 0 ||
+    goalRunEvents.length > 0 ||
+    toolApprovalEvents.length > 0 ||
     Boolean(pendingToolApproval);
 
   function createMessage(
@@ -1392,13 +1303,10 @@ export function AgentChatPanel({
     };
   }
 
-  function setMessages(
-    updater: ChatMessage[] | ((current: ChatMessage[]) => ChatMessage[]),
-  ) {
+  function setMessages(updater: ChatMessage[] | ((current: ChatMessage[]) => ChatMessage[])) {
     setChatStreamState((current) => ({
       ...current,
-      messages:
-        typeof updater === "function" ? updater(current.messages) : updater,
+      messages: typeof updater === "function" ? updater(current.messages) : updater,
     }));
   }
 
@@ -1436,9 +1344,7 @@ export function AgentChatPanel({
     };
   }
 
-  function isSessionSelectionCurrent(
-    captured: ChatSessionSelectionContext,
-  ): boolean {
+  function isSessionSelectionCurrent(captured: ChatSessionSelectionContext): boolean {
     return isChatSessionSelectionCurrent(
       captured,
       sessionIdRef.current,
@@ -1456,8 +1362,7 @@ export function AgentChatPanel({
     mutationSequence: number,
   ): boolean {
     return (
-      mutationSequence === goalMutationSequenceRef.current &&
-      isSessionSelectionCurrent(captured)
+      mutationSequence === goalMutationSequenceRef.current && isSessionSelectionCurrent(captured)
     );
   }
 
@@ -1482,10 +1387,7 @@ export function AgentChatPanel({
     if (workspaceActionsDisabled) {
       return;
     }
-    setWorkspaces((current) => [
-      workspace,
-      ...current.filter((item) => item.id !== workspace.id),
-    ]);
+    setWorkspaces((current) => [workspace, ...current.filter((item) => item.id !== workspace.id)]);
     setSelectedWorkspaceId(workspace.id);
     setWorkspaceMenuOpen(false);
     setWorkspaceSearch("");
@@ -1520,8 +1422,7 @@ export function AgentChatPanel({
     } catch (error) {
       setStatus({
         kind: "error",
-        message:
-          error instanceof Error ? error.message : "打开工作区失败，请稍后重试。",
+        message: error instanceof Error ? error.message : "打开工作区失败，请稍后重试。",
       });
     } finally {
       setWorkspaceActionPending(null);
@@ -1550,8 +1451,7 @@ export function AgentChatPanel({
     } catch (error) {
       setStatus({
         kind: "error",
-        message:
-          error instanceof Error ? error.message : "新建工作区失败，请稍后重试。",
+        message: error instanceof Error ? error.message : "新建工作区失败，请稍后重试。",
       });
     } finally {
       setWorkspaceActionPending(null);
@@ -1577,16 +1477,12 @@ export function AgentChatPanel({
     setDraftAttachments(attachments);
   }
 
-  async function handleComposerPaste(
-    event: React.ClipboardEvent<HTMLTextAreaElement>,
-  ) {
+  async function handleComposerPaste(event: React.ClipboardEvent<HTMLTextAreaElement>) {
     const itemFiles = Array.from(event.clipboardData.items)
       .filter((item) => item.kind === "file")
       .map((item) => item.getAsFile())
       .filter((file): file is File => Boolean(file));
-    const files = itemFiles.length
-      ? itemFiles
-      : Array.from(event.clipboardData.files);
+    const files = itemFiles.length ? itemFiles : Array.from(event.clipboardData.files);
     if (!files.length) {
       return;
     }
@@ -1603,10 +1499,7 @@ export function AgentChatPanel({
     setAttachmentReadPending(true);
     setAttachmentError(null);
     try {
-      const attachments = await readPastedChatAttachments(
-        files,
-        draftAttachmentsRef.current,
-      );
+      const attachments = await readPastedChatAttachments(files, draftAttachmentsRef.current);
       const nextAttachments = [...draftAttachmentsRef.current, ...attachments];
       setComposerAttachments(nextAttachments);
       setAttachmentAnnouncement(
@@ -1618,9 +1511,7 @@ export function AgentChatPanel({
       });
     } catch (error) {
       setAttachmentError(
-        error instanceof ChatAttachmentReadError
-          ? error.message
-          : "无法读取粘贴的附件。",
+        error instanceof ChatAttachmentReadError ? error.message : "无法读取粘贴的附件。",
       );
     } finally {
       setAttachmentReadPending(false);
@@ -1759,10 +1650,7 @@ export function AgentChatPanel({
     const goalId = activeGoal.id;
     const selection = captureSessionSelection();
     const mutationSequence = beginGoalMutation();
-    const result = await window.buildingAgent.replanGoal(
-      goalId,
-      "用户从恢复界面请求重新规划。",
-    );
+    const result = await window.buildingAgent.replanGoal(goalId, "用户从恢复界面请求重新规划。");
     if (!isGoalMutationCurrent(selection, mutationSequence)) {
       return;
     }
@@ -1780,9 +1668,7 @@ export function AgentChatPanel({
       const goalUiState = getGoalUiSyncState(result.goal.status);
       setStatus({
         kind: goalUiState.statusKind,
-        message: remainsBlocked
-          ? "目标计划已调整，仍需明确重试"
-          : "目标计划已调整",
+        message: remainsBlocked ? "目标计划已调整，仍需明确重试" : "目标计划已调整",
       });
       setWorkPhase(goalUiState.workPhase);
       setTaskActivity(
@@ -1861,15 +1747,14 @@ export function AgentChatPanel({
     setGoalAcceptanceOperationPending("continue_acceptance");
     setStatus({ kind: "working", message: "正在继续最终验收..." });
     try {
-      const result = await window.buildingAgent.continueGoalAcceptance(
-        operation.goalId,
-      );
+      const result = await window.buildingAgent.continueGoalAcceptance(operation.goalId);
       if (
         !isGoalAcceptanceOperationCurrent(
           operation,
           goalAcceptanceContextRef.current.context,
           goalAcceptanceOperationPendingRef.current,
-        ) || !isGoalMutationCurrent(selection, mutationSequence)
+        ) ||
+        !isGoalMutationCurrent(selection, mutationSequence)
       ) {
         return;
       }
@@ -1880,7 +1765,10 @@ export function AgentChatPanel({
       ) {
         const message = result.message ?? "继续最终验收失败，请稍后重试。";
         setStatus({ kind: "error", message });
-        appendMessage({ role: "assistant", content: `继续验收失败：${message}` });
+        appendMessage({
+          role: "assistant",
+          content: `继续验收失败：${message}`,
+        });
         return;
       }
 
@@ -1894,7 +1782,10 @@ export function AgentChatPanel({
         return;
       }
       const goalUiState = getGoalUiSyncState(result.goal.status);
-      setStatus({ kind: goalUiState.statusKind, message: outcome.statusMessage });
+      setStatus({
+        kind: goalUiState.statusKind,
+        message: outcome.statusMessage,
+      });
       setWorkPhase(goalUiState.workPhase);
       setTaskActivity(
         buildGoalTaskActivity({
@@ -1912,7 +1803,8 @@ export function AgentChatPanel({
           operation,
           goalAcceptanceContextRef.current.context,
           goalAcceptanceOperationPendingRef.current,
-        ) || !isGoalMutationCurrent(selection, mutationSequence)
+        ) ||
+        !isGoalMutationCurrent(selection, mutationSequence)
       ) {
         return;
       }
@@ -1921,10 +1813,7 @@ export function AgentChatPanel({
       appendMessage({ role: "assistant", content: message });
     } finally {
       if (
-        doesGoalAcceptanceOperationOwnPending(
-          operation,
-          goalAcceptanceOperationPendingRef.current,
-        )
+        doesGoalAcceptanceOperationOwnPending(operation, goalAcceptanceOperationPendingRef.current)
       ) {
         goalAcceptanceOperationPendingRef.current = null;
         setGoalAcceptanceOperationPending(null);
@@ -1932,9 +1821,7 @@ export function AgentChatPanel({
     }
   }
 
-  async function handleMarkGoalCompletedUnverified(
-    confirmation: ManualCompletionConfirmation,
-  ) {
+  async function handleMarkGoalCompletedUnverified(confirmation: ManualCompletionConfirmation) {
     const confirmedGoalId = getConfirmedManualCompletionGoalId(
       confirmation,
       goalAcceptanceContextRef.current.context,
@@ -1963,15 +1850,14 @@ export function AgentChatPanel({
     setGoalAcceptanceOperationPending("mark_completed_unverified");
     setStatus({ kind: "working", message: "正在记录手动完成..." });
     try {
-      const result = await window.buildingAgent.markGoalCompletedUnverified(
-        operation.goalId,
-      );
+      const result = await window.buildingAgent.markGoalCompletedUnverified(operation.goalId);
       if (
         !isGoalAcceptanceOperationCurrent(
           operation,
           goalAcceptanceContextRef.current.context,
           goalAcceptanceOperationPendingRef.current,
-        ) || !isGoalMutationCurrent(selection, mutationSequence)
+        ) ||
+        !isGoalMutationCurrent(selection, mutationSequence)
       ) {
         return;
       }
@@ -1982,7 +1868,10 @@ export function AgentChatPanel({
       ) {
         const message = result.message ?? "手动标记完成失败，请稍后重试。";
         setStatus({ kind: "error", message });
-        appendMessage({ role: "assistant", content: `手动标记完成失败：${message}` });
+        appendMessage({
+          role: "assistant",
+          content: `手动标记完成失败：${message}`,
+        });
         return;
       }
 
@@ -1996,7 +1885,10 @@ export function AgentChatPanel({
       setActiveGoalDetail(result.goal);
       applyGoalSummaryToSessions(result.goal);
       const goalUiState = getGoalUiSyncState(result.goal.status);
-      setStatus({ kind: goalUiState.statusKind, message: outcome.statusMessage });
+      setStatus({
+        kind: goalUiState.statusKind,
+        message: outcome.statusMessage,
+      });
       setWorkPhase(goalUiState.workPhase);
       setTaskActivity(
         buildGoalTaskActivity({
@@ -2014,7 +1906,8 @@ export function AgentChatPanel({
           operation,
           goalAcceptanceContextRef.current.context,
           goalAcceptanceOperationPendingRef.current,
-        ) || !isGoalMutationCurrent(selection, mutationSequence)
+        ) ||
+        !isGoalMutationCurrent(selection, mutationSequence)
       ) {
         return;
       }
@@ -2023,10 +1916,7 @@ export function AgentChatPanel({
       appendMessage({ role: "assistant", content: message });
     } finally {
       if (
-        doesGoalAcceptanceOperationOwnPending(
-          operation,
-          goalAcceptanceOperationPendingRef.current,
-        )
+        doesGoalAcceptanceOperationOwnPending(operation, goalAcceptanceOperationPendingRef.current)
       ) {
         goalAcceptanceOperationPendingRef.current = null;
         setGoalAcceptanceOperationPending(null);
@@ -2043,10 +1933,7 @@ export function AgentChatPanel({
     const selection = captureSessionSelection();
     const mutationSequence = beginGoalMutation();
     const delta = buildGoalBudgetIncreaseDelta(activeGoalDetail);
-    const increased = await window.buildingAgent.increaseGoalBudget(
-      goalId,
-      delta,
-    );
+    const increased = await window.buildingAgent.increaseGoalBudget(goalId, delta);
     if (!isGoalMutationCurrent(selection, mutationSequence)) {
       return;
     }
@@ -2077,9 +1964,7 @@ export function AgentChatPanel({
     }
     appendMessage({
       role: "assistant",
-      content: result.ok
-        ? "已增加耗尽的目标预算并继续执行。"
-        : `继续目标失败：${result.message}`,
+      content: result.ok ? "已增加耗尽的目标预算并继续执行。" : `继续目标失败：${result.message}`,
     });
   }
 
@@ -2110,9 +1995,7 @@ export function AgentChatPanel({
     }
     appendMessage({
       role: "assistant",
-      content: result.ok
-        ? "已暂停目标，等待你的确认。"
-        : `暂停目标失败：${result.message}`,
+      content: result.ok ? "已暂停目标，等待你的确认。" : `暂停目标失败：${result.message}`,
     });
     if (result.ok && result.goal) {
       void refreshActiveGoalDetail(result.goal.id);
@@ -2166,8 +2049,7 @@ export function AgentChatPanel({
       state = await window.buildingAgent?.setToolAutoApprovalEnabled(enabled);
     } catch {
       state =
-        (await window.buildingAgent?.getToolApprovalMode().catch(() => null)) ??
-        previousState;
+        (await window.buildingAgent?.getToolApprovalMode().catch(() => null)) ?? previousState;
     }
     if (state) {
       setAutoApprovalEnabled(state.autoApprovalEnabled);
@@ -2182,6 +2064,7 @@ export function AgentChatPanel({
       // elevation is deferred until handleConfirmPlan receives an explicit
       // user confirmation.
       setGoalModeEnabled(true);
+      setPlanModeDecisionOpen(true);
       return;
     }
     const previousState = {
@@ -2190,13 +2073,13 @@ export function AgentChatPanel({
       autoApprovalLocked,
     };
     setGoalModeEnabled(enabled);
+    setPlanModeDecisionOpen(false);
     let state = null;
     try {
       state = await window.buildingAgent?.setToolGoalModeEnabled(enabled);
     } catch {
       state =
-        (await window.buildingAgent?.getToolApprovalMode().catch(() => null)) ??
-        previousState;
+        (await window.buildingAgent?.getToolApprovalMode().catch(() => null)) ?? previousState;
     }
     if (state) {
       setAutoApprovalEnabled(state.autoApprovalEnabled);
@@ -2214,9 +2097,7 @@ export function AgentChatPanel({
     }
 
     const id = pendingToolApproval.id;
-    setPendingToolApprovals((current) =>
-      current.filter((candidate) => candidate.id !== id),
-    );
+    setPendingToolApprovals((current) => current.filter((candidate) => candidate.id !== id));
     const resolved = await window.buildingAgent
       .resolveToolApproval({ id, approved })
       .catch(() => false);
@@ -2228,10 +2109,7 @@ export function AgentChatPanel({
     }
   }
 
-  function applySuccessfulChatResult(
-    result: SuccessfulChatResult,
-    requestId: string,
-  ) {
+  function applySuccessfulChatResult(result: SuccessfulChatResult, requestId: string) {
     sessionIdRef.current = result.sessionId;
     setSessionId(result.sessionId);
     if (result.goalDraft) {
@@ -2254,19 +2132,14 @@ export function AgentChatPanel({
     }
     setSelectedSkillName(null);
     const isPaused = result.agentStatus?.state === "paused";
-    const failedAgentStatus =
-      result.agentStatus?.state === "failed" ? result.agentStatus : null;
+    const failedAgentStatus = result.agentStatus?.state === "failed" ? result.agentStatus : null;
     const isFailed = Boolean(failedAgentStatus);
     const isGoalExecuting = result.activeGoal?.status === "executing";
     const isGoalDraft = Boolean(result.goalDraft);
-    const isPlanAwaitingConfirmation =
-      result.plan?.status === "awaiting_confirmation";
-    const isPlanPaused = Boolean(
-      result.plan && result.plan.status !== "awaiting_confirmation",
-    );
+    const isPlanAwaitingConfirmation = result.plan?.status === "awaiting_confirmation";
+    const isPlanPaused = Boolean(result.plan && result.plan.status !== "awaiting_confirmation");
     setStatus({
-      kind:
-        isGoalExecuting
+      kind: isGoalExecuting
           ? "working"
           : isFailed
             ? "error"
@@ -2307,12 +2180,8 @@ export function AgentChatPanel({
         ? createTaskActivity({
             kind: "paused",
             title:
-              result.plan.status === "awaiting_confirmation"
-                ? "等待确认终版计划"
-                : "规划已暂停",
-            detail:
-              result.plan.finalArtifact?.title ??
-              result.plan.taskContract.objective,
+              result.plan.status === "awaiting_confirmation" ? "等待确认终版计划" : "规划已暂停",
+            detail: result.plan.finalArtifact?.title ?? result.plan.taskContract.objective,
           })
         : isGoalDraft && result.goalDraft
         ? createTaskActivity({
@@ -2332,15 +2201,19 @@ export function AgentChatPanel({
           }),
     );
     activeStatusSessionIdRef.current =
-      isPaused || isGoalExecuting || isGoalDraft || Boolean(result.plan)
-        ? result.sessionId
-        : null;
+      isPaused || isGoalExecuting || isGoalDraft || Boolean(result.plan) ? result.sessionId : null;
     setChatStreamState((current) =>
       finalizeChatStreamResult(current, {
         requestId,
         sessionId: result.sessionId,
         reply: result.reply,
         createdAt: new Date().toISOString(),
+        suppressReply:
+          Boolean(result.goalDraft || result.plan) ||
+          Boolean(
+            result.activeGoal &&
+              !isTerminalGoalStatus(result.activeGoal.status),
+          ),
       }),
     );
     void refreshSessions(result.sessionId);
@@ -2349,11 +2222,7 @@ export function AgentChatPanel({
   }
 
   async function handleConfirmGoalDraft() {
-    if (
-      !window.buildingAgent ||
-      !pendingGoalDraft ||
-      goalDraftActionPendingRef.current
-    ) {
+    if (!window.buildingAgent || !pendingGoalDraft || goalDraftActionPendingRef.current) {
       return;
     }
 
@@ -2363,21 +2232,18 @@ export function AgentChatPanel({
       return;
     }
     const mutationSequence = beginGoalMutation();
-    const pendingOperation = { action: "confirm" as const, sequence: mutationSequence };
+    const pendingOperation = {
+      action: "confirm" as const,
+      sequence: mutationSequence,
+    };
     goalDraftActionPendingRef.current = pendingOperation;
     setGoalDraftActionPending("confirm");
     setStatus({ kind: "working", message: "正在确认并启动目标..." });
     try {
-      const result = await window.buildingAgent.confirmGoalDraft(
-        draftToConfirm.id,
-        {
+      const result = await window.buildingAgent.confirmGoalDraft(draftToConfirm.id, {
           normalizedDescription: goalDraftDescription,
-          successCriteria: buildEditedGoalDraftCriteria(
-            goalDraftCriteriaText,
-            draftToConfirm,
-          ),
-        },
-      );
+        successCriteria: buildEditedGoalDraftCriteria(goalDraftCriteriaText, draftToConfirm),
+      });
       if (!isGoalMutationCurrent(selection, mutationSequence)) {
         return;
       }
@@ -2399,10 +2265,7 @@ export function AgentChatPanel({
       activeStatusSessionIdRef.current = draftToConfirm.sessionId;
       setStatus({
         kind: result.activeGoal.status === "executing" ? "working" : "ready",
-        message:
-          result.activeGoal.status === "executing"
-            ? "目标正在后台执行"
-            : "目标已确认",
+        message: result.activeGoal.status === "executing" ? "目标正在后台执行" : "目标已确认",
       });
       setWorkPhase(result.activeGoal.status === "executing" ? "tool" : "done");
       setTaskActivity(
@@ -2420,8 +2283,7 @@ export function AgentChatPanel({
       }
       setStatus({
         kind: "error",
-        message:
-          error instanceof Error ? error.message : "确认目标草案失败。",
+        message: error instanceof Error ? error.message : "确认目标草案失败。",
       });
     } finally {
       if (goalDraftActionPendingRef.current === pendingOperation) {
@@ -2444,13 +2306,14 @@ export function AgentChatPanel({
       return;
     }
     const mutationSequence = beginGoalMutation();
-    const pendingOperation = { action: "discard" as const, sequence: mutationSequence };
+    const pendingOperation = {
+      action: "discard" as const,
+      sequence: mutationSequence,
+    };
     goalDraftActionPendingRef.current = pendingOperation;
     setGoalDraftActionPending("discard");
     try {
-      const result = await window.buildingAgent?.discardGoalDraft(
-        draftToDiscard.id,
-      );
+      const result = await window.buildingAgent?.discardGoalDraft(draftToDiscard.id);
       if (!isGoalMutationCurrent(selection, mutationSequence)) {
         return;
       }
@@ -2530,10 +2393,7 @@ export function AgentChatPanel({
     }
     setPlanActionPending("discard");
     try {
-      const result = await window.buildingAgent.discardPlan(
-        activePlan.id,
-        activePlan.revision,
-      );
+      const result = await window.buildingAgent.discardPlan(activePlan.id, activePlan.revision);
       if (!result.ok) {
         if (result.plan) {
           setActivePlan(result.plan);
@@ -2570,8 +2430,7 @@ export function AgentChatPanel({
       setActivePlan(result.plan);
       setStatus({
         kind:
-          result.plan.status === "awaiting_confirmation" ||
-          result.plan.status === "awaiting_input"
+          result.plan.status === "awaiting_confirmation" || result.plan.status === "awaiting_input"
             ? "paused"
             : "error",
         message: result.message,
@@ -2593,9 +2452,7 @@ export function AgentChatPanel({
         return;
       }
     }
-    const submittedContent = content.trim()
-      ? rawContent
-      : "请分析这些附件。";
+    const submittedContent = content.trim() ? rawContent : "请分析这些附件。";
     if (attachmentReadPending) {
       return;
     }
@@ -2672,9 +2529,7 @@ export function AgentChatPanel({
     }
 
     const shouldCreateGoalPlan =
-      !activeGoal &&
-      !planInputLocked &&
-      (goalModeEnabled || isLegacyGoalCommand(submittedContent));
+      !activeGoal && !planInputLocked && (goalModeEnabled || isLegacyGoalCommand(submittedContent));
     setStatus({
       kind: "working",
       message: planInputLocked
@@ -2694,9 +2549,7 @@ export function AgentChatPanel({
         ...(sessionId ? { sessionId } : {}),
         requestId,
         message: submittedContent,
-        ...(outgoingAttachments.length
-          ? { attachments: outgoingAttachments }
-          : {}),
+        ...(outgoingAttachments.length ? { attachments: outgoingAttachments } : {}),
         ...(shouldCreateGoalPlan
           ? {
               mode: "goal_plan" as const,
@@ -2710,8 +2563,7 @@ export function AgentChatPanel({
       })
       .catch((error) => ({
         ok: false as const,
-        message:
-          error instanceof Error ? error.message : "会话请求失败，请稍后重试。",
+        message: error instanceof Error ? error.message : "会话请求失败，请稍后重试。",
       }));
     if (activeChatRequestIdRef.current === requestId) {
       setActiveChatRequest(null);
@@ -2724,25 +2576,20 @@ export function AgentChatPanel({
       if (isSkillInputRequiredMessage(result.message)) {
         setStatus({
           kind: "paused",
-          message:
-            pendingInputRequestRef.current?.reason || "等待技能输入",
+          message: pendingInputRequestRef.current?.reason || "等待技能输入",
         });
         setWorkPhase("paused");
         setTaskActivity(
           createTaskActivity({
             kind: "paused",
             title: "等待技能输入",
-            detail:
-              pendingInputRequestRef.current?.reason || "等待技能输入",
+            detail: pendingInputRequestRef.current?.reason || "等待技能输入",
           }),
         );
         return;
       }
       let restoredAttachmentSubmission = false;
-      if (
-        outgoingAttachments.length > 0 &&
-        draftAttachmentsRef.current.length === 0
-      ) {
+      if (outgoingAttachments.length > 0 && draftAttachmentsRef.current.length === 0) {
         setMessages((current) =>
           rollbackFailedAttachmentTurn(current, {
             userMessageId: userMessage.id,
@@ -2751,9 +2598,7 @@ export function AgentChatPanel({
         );
         setComposerDraft(rawContent, rawContent.length);
         setComposerAttachments(outgoingAttachments);
-        setAttachmentAnnouncement(
-          `发送失败，已保留 ${outgoingAttachments.length} 个附件供重试`,
-        );
+        setAttachmentAnnouncement(`发送失败，已保留 ${outgoingAttachments.length} 个附件供重试`);
         restoredAttachmentSubmission = true;
       }
       activeStatusSessionIdRef.current = null;
@@ -2796,9 +2641,7 @@ export function AgentChatPanel({
     applySuccessfulChatResult(result, requestId);
   }
 
-  async function handleSubmitGuidedSkillInput(
-    event: React.FormEvent<HTMLFormElement>,
-  ) {
+  async function handleSubmitGuidedSkillInput(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!window.buildingAgent || !pendingInputRequest) {
       return;
@@ -2823,15 +2666,11 @@ export function AgentChatPanel({
       .respondSkillInput({
         inputRequestId: inputRequest.id,
         requestId,
-        values: buildSkillInputResponseValues(
-          inputRequest.fields,
-          guidedInputValues,
-        ),
+        values: buildSkillInputResponseValues(inputRequest.fields, guidedInputValues),
       })
       .catch((error) => ({
         ok: false as const,
-        message:
-          error instanceof Error ? error.message : "技能输入提交失败，请稍后重试。",
+        message: error instanceof Error ? error.message : "技能输入提交失败，请稍后重试。",
       }));
 
     if (activeChatRequestIdRef.current === requestId) {
@@ -2845,16 +2684,14 @@ export function AgentChatPanel({
       if (isSkillInputRequiredMessage(result.message)) {
         setStatus({
           kind: "paused",
-          message:
-            pendingInputRequestRef.current?.reason || "等待技能输入",
+          message: pendingInputRequestRef.current?.reason || "等待技能输入",
         });
         setWorkPhase("paused");
         setTaskActivity(
           createTaskActivity({
             kind: "paused",
             title: "等待技能输入",
-            detail:
-              pendingInputRequestRef.current?.reason || "等待技能输入",
+            detail: pendingInputRequestRef.current?.reason || "等待技能输入",
           }),
         );
         return;
@@ -2911,18 +2748,18 @@ export function AgentChatPanel({
           startedAt: taskActivity.startedAt,
         }),
       );
-      const result = await window.buildingAgent
-        .cancelGoal(goalId)
-        .catch((error) => ({
+      const result = await window.buildingAgent.cancelGoal(goalId).catch((error) => ({
           ok: false as const,
-          message:
-            error instanceof Error ? error.message : "中断目标失败，请稍后重试。",
+        message: error instanceof Error ? error.message : "中断目标失败，请稍后重试。",
         }));
       if (!isGoalMutationCurrent(selection, mutationSequence)) {
         return;
       }
       if (!result.ok) {
-        setStatus({ kind: "error", message: result.message ?? "中断目标失败。" });
+        setStatus({
+          kind: "error",
+          message: result.message ?? "中断目标失败。",
+        });
         setTaskActivity(
           createTaskActivity({
             kind: "error",
@@ -2963,8 +2800,7 @@ export function AgentChatPanel({
       .cancelChatMessage(activeChatRequestIdRef.current ?? undefined)
       .catch((error) => ({
         ok: false as const,
-        message:
-          error instanceof Error ? error.message : "中断请求失败，请稍后重试。",
+        message: error instanceof Error ? error.message : "中断请求失败，请稍后重试。",
       }));
 
     if (!isSessionSelectionCurrent(selection)) {
@@ -3073,8 +2909,7 @@ export function AgentChatPanel({
       return;
     }
 
-    const [settings, loadedTasks, loadedRuns, loadedMemories, skills] =
-      await Promise.all([
+    const [settings, loadedTasks, loadedRuns, loadedMemories, skills] = await Promise.all([
         window.buildingAgent.loadModelSettings(),
         window.buildingAgent.listScheduledTasks(),
         window.buildingAgent.listAgentRuns(),
@@ -3141,8 +2976,7 @@ export function AgentChatPanel({
       return;
     }
 
-    const [settings, loadedTasks, loadedRuns, loadedMemories, skills] =
-      await Promise.all([
+    const [settings, loadedTasks, loadedRuns, loadedMemories, skills] = await Promise.all([
         window.buildingAgent.loadModelSettings(),
         window.buildingAgent.listScheduledTasks(),
         window.buildingAgent.listAgentRuns(),
@@ -3164,9 +2998,7 @@ export function AgentChatPanel({
     appendMessage({
       role: "assistant",
       content: [
-        result.report.ready
-          ? "本地智能体已经完成验收运行。"
-          : "验收运行结束，但还有项目需要处理。",
+        result.report.ready ? "本地智能体已经完成验收运行。" : "验收运行结束，但还有项目需要处理。",
         `模型：${result.report.model.message}`,
         `技能：${result.report.skill.message}`,
         `任务：${result.report.task.message}`,
@@ -3209,11 +3041,7 @@ export function AgentChatPanel({
       data-testid="agent-chat-panel"
     >
       <section className="chat-workspace" aria-label="会话窗口">
-        <div
-          className="chat-scroll-region"
-          onScroll={handleMessageListScroll}
-          ref={messageListRef}
-        >
+        <div className="chat-scroll-region" onScroll={handleMessageListScroll} ref={messageListRef}>
         <div className="chat-hero">
           <div className="chat-hero-main">
             <h2 title={chatTitle}>{chatTitle}</h2>
@@ -3234,9 +3062,7 @@ export function AgentChatPanel({
               onClick={() => setChatStatusExpanded((expanded) => !expanded)}
             >
               <span>{status.message}</span>
-              <small className="chat-state-toggle">
-                {chatStatusExpanded ? "收起" : "展开"}
-              </small>
+                <small className="chat-state-toggle">{chatStatusExpanded ? "收起" : "展开"}</small>
             </button>
           ) : (
             <span className={chatStateClassName} title={status.message}>
@@ -3245,8 +3071,7 @@ export function AgentChatPanel({
           )}
         </div>
 
-        {firstRunGuide.primaryAction.command === "prepare" &&
-          !modelSettings.hasApiKey && (
+          {firstRunGuide.primaryAction.command === "prepare" && !modelSettings.hasApiKey && (
           <section className="first-run-guide" aria-label="首次启动引导">
             <div className="first-run-guide-main">
               <div>
@@ -3273,26 +3098,20 @@ export function AgentChatPanel({
             onPickPrompt={handlePickPrompt}
           />
         ) : (
-          <ChatMessageList
-            messageTimeTick={messageTimeTick}
-            messages={visibleChatMessages}
-          />
+            <ChatMessageList messageTimeTick={messageTimeTick} messages={visibleChatMessages} />
         )}
 
         {hasRuntimeSurfaces ? (
-          <div className="runtime-surface-stack" aria-label="执行过程">
-            {chatStreamState.thinkingText ? (
-              <RuntimeTextDisclosure
-                className="thinking-process-block"
-                label="思考"
-                text={chatStreamState.thinkingText}
-              />
-            ) : null}
-
-            {chatStreamState.toolCallPreviews.length > 0 ? (
-              <ToolCallPreviewDisclosure
-                latestToolCallPreview={latestToolCallPreview}
-                previews={chatStreamState.toolCallPreviews}
+            <div className="runtime-surface-stack" aria-label="需要你的决定">
+              {planModeDecisionOpen ? (
+                <PlanModeDecisionCard
+                  assignments={planModelAssignments}
+                  catalog={modelCatalog}
+                  mode={goalPlanMode}
+                  onAssignmentsChange={setPlanModelAssignments}
+                  onConfirm={() => setPlanModeDecisionOpen(false)}
+                  onModeChange={setGoalPlanMode}
+                  onOpenModelSettings={() => onNavigate("settings")}
               />
             ) : null}
 
@@ -3313,7 +3132,7 @@ export function AgentChatPanel({
               />
             ) : null}
 
-            {activePlan ? (
+              {activePlan && planNeedsDecision ? (
               <PlanConfirmationCard
                 catalog={modelCatalog}
                 pendingAction={planActionPending}
@@ -3327,16 +3146,26 @@ export function AgentChatPanel({
                 onRetry={(replacementProfileId) => {
                   void handleRetryPlan(replacementProfileId);
                 }}
+                  onAnswerQuestions={(answers) => {
+                    const questions = activePlan.finalArtifact?.unresolvedQuestions ?? [];
+                    void submitUserMessage(
+                      answers
+                        .map(
+                          (answer, index) =>
+                            `${index + 1}. ${questions[index] ?? "补充信息"}\n${answer}`,
+                        )
+                        .join("\n\n"),
+                    );
+                  }}
               />
             ) : null}
 
-            {activeGoal ? (
+              {activeGoal && goalNeedsDecision ? (
               <GoalStatusStrip
                 goal={activeGoal}
                 detail={activeGoalDetail}
                 onViewDetail={handleViewGoalProgress}
-                {...(activeGoal.status === "planning" ||
-                  activeGoal.status === "canceled"
+                  {...(activeGoal.status === "planning" || activeGoal.status === "canceled"
                   ? { onStart: handleStartGoal }
                   : {})}
                 {...(activeGoal.status === "executing"
@@ -3347,72 +3176,13 @@ export function AgentChatPanel({
                 onReplan={handleReplanGoal}
                 onRetry={handleRetryGoal}
                 onContinueAcceptance={() => void handleContinueGoalAcceptance()}
-                goalAcceptanceOperationPending={
-                  goalAcceptanceOperationPending !== null
-                }
+                  goalAcceptanceOperationPending={goalAcceptanceOperationPending !== null}
                 onCancel={handleCancelGoal}
               />
             ) : null}
 
-            {activeGoal && goalRunEvents.length > 0 ? (
-              <details
-                className="goal-run-process"
-                open={activeGoal.status === "executing"}
-              >
-                <summary>
-                  <span>里程碑运行过程</span>
-                  <small>{goalRunEvents.length} 个事件</small>
-                </summary>
-                <ol className="task-process-list" aria-label="里程碑运行过程">
-                  {goalRunEvents.map((event, index) => (
-                    <li
-                      key={`${event.createdAt}-${index}`}
-                      className={event.phase === "reflecting" ? "is-reasoning" : ""}
-                    >
-                      <time>
-                        {new Date(event.createdAt).toLocaleTimeString("zh-CN", {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                          second: "2-digit",
-                        })}
-                      </time>
-                      <strong>{getGoalRunEventLabel(event)}</strong>
-                      <span>{event.message}</span>
-                    </li>
-                  ))}
-                </ol>
-                {toolApprovalEvents.length > 0 ? (
-                  <ol className="task-process-list" aria-label="工具授权监控">
-                    {toolApprovalEvents.map((event) => (
-                      <li
-                        key={`${event.id}-${event.createdAt}`}
-                        className={
-                          event.risk.level === "critical" ? "is-critical-risk" : ""
-                        }
-                      >
-                        <time>
-                          {new Date(event.createdAt).toLocaleTimeString("zh-CN", {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                            second: "2-digit",
-                          })}
-                        </time>
-                        <strong>{event.automatic ? "自动授权" : "授权处理"}</strong>
-                        <span>
-                          {event.approved ? "已同意" : "已拒绝"} {event.toolName} ·{" "}
-                          {event.risk.reason}
-                        </span>
-                      </li>
-                    ))}
-                  </ol>
-                ) : null}
-              </details>
-            ) : null}
-
-            {shouldShowToolApproval(
-              pendingToolApproval,
-              autoApprovalEnabled,
-            ) && pendingToolApproval ? (
+              {shouldShowToolApproval(pendingToolApproval, autoApprovalEnabled) &&
+              pendingToolApproval ? (
               <ToolApprovalPanel
                 request={pendingToolApproval}
                 onResolve={(approved) => {
@@ -3480,9 +3250,7 @@ export function AgentChatPanel({
                           autoFocus
                           placeholder="搜索项目"
                           value={workspaceSearch}
-                          onChange={(event) =>
-                            setWorkspaceSearch(event.currentTarget.value)
-                          }
+                          onChange={(event) => setWorkspaceSearch(event.currentTarget.value)}
                         />
                       </label>
                       <div className="workspace-menu-section">
@@ -3494,19 +3262,13 @@ export function AgentChatPanel({
                           role="menuitem"
                           type="button"
                         >
-                          <Icon
-                            name="folder"
-                            className="workspace-menu-item-icon"
-                          />
+                          <Icon name="folder" className="workspace-menu-item-icon" />
                           <span>
                             <strong>默认工作区</strong>
                             <small>不指定项目目录</small>
                           </span>
                           {!selectedWorkspaceId ? (
-                            <Icon
-                              name="approval"
-                              className="workspace-menu-check"
-                            />
+                            <Icon name="approval" className="workspace-menu-check" />
                           ) : null}
                         </button>
                         {visibleWorkspaces.map((workspace) => (
@@ -3518,26 +3280,18 @@ export function AgentChatPanel({
                             role="menuitem"
                             type="button"
                           >
-                            <Icon
-                              name="folder"
-                              className="workspace-menu-item-icon"
-                            />
+                            <Icon name="folder" className="workspace-menu-item-icon" />
                             <span>
                               <strong>{workspace.name}</strong>
                               <small>{workspace.rootPath}</small>
                             </span>
                             {selectedWorkspaceId === workspace.id ? (
-                              <Icon
-                                name="approval"
-                                className="workspace-menu-check"
-                              />
+                              <Icon name="approval" className="workspace-menu-check" />
                             ) : null}
                           </button>
                         ))}
                         {visibleWorkspaces.length === 0 ? (
-                          <p className="workspace-menu-empty">
-                            没有匹配的历史工作区
-                          </p>
+                          <p className="workspace-menu-empty">没有匹配的历史工作区</p>
                         ) : null}
                       </div>
                       <div className="workspace-menu-actions">
@@ -3549,15 +3303,10 @@ export function AgentChatPanel({
                           role="menuitem"
                           type="button"
                         >
-                          <Icon
-                            name="folder"
-                            className="workspace-menu-item-icon"
-                          />
+                          <Icon name="folder" className="workspace-menu-item-icon" />
                           <span>
                             <strong>
-                              {workspaceActionPending === "open"
-                                ? "打开中"
-                                : "打开已有目录"}
+                              {workspaceActionPending === "open" ? "打开中" : "打开已有目录"}
                             </strong>
                             <small>选择本地项目文件夹</small>
                           </span>
@@ -3570,15 +3319,10 @@ export function AgentChatPanel({
                           role="menuitem"
                           type="button"
                         >
-                          <Icon
-                            name="plus"
-                            className="workspace-menu-item-icon"
-                          />
+                          <Icon name="plus" className="workspace-menu-item-icon" />
                           <span>
                             <strong>
-                              {workspaceActionPending === "create"
-                                ? "选择中"
-                                : "新建工作区"}
+                              {workspaceActionPending === "create" ? "选择中" : "新建工作区"}
                             </strong>
                             <small>选择或新建本地项目文件夹</small>
                           </span>
@@ -3614,11 +3358,7 @@ export function AgentChatPanel({
                 </div>
               ) : null}
               {skillMentionMenuVisible ? (
-                <div
-                  aria-label="选择技能"
-                  className="skill-mention-menu"
-                  role="listbox"
-                >
+                <div aria-label="选择技能" className="skill-mention-menu" role="listbox">
                   {skillMentionMatches.map((skill) => (
                     <button
                       key={skill.name}
@@ -3636,32 +3376,20 @@ export function AgentChatPanel({
                   ))}
                 </div>
               ) : null}
-              {goalModeEnabled && !planInputLocked ? (
-                <PlanModeConfiguration
-                  assignments={planModelAssignments}
-                  catalog={modelCatalog}
-                  mode={goalPlanMode}
-                  onAssignmentsChange={setPlanModelAssignments}
-                  onModeChange={setGoalPlanMode}
-                  onOpenModelSettings={() => onNavigate("settings")}
-                />
-              ) : null}
               <textarea
                 data-testid="agent-message-input"
                 id="agent-message"
                 ref={messageInputRef}
                 onChange={(event) => {
                   const nextDraft = event.currentTarget.value;
-                  const nextCursor =
-                    event.currentTarget.selectionStart ?? nextDraft.length;
+                  const nextCursor = event.currentTarget.selectionStart ?? nextDraft.length;
                   draftRef.current = nextDraft;
                   draftCursorRef.current = nextCursor;
                   const nextMention = planInputLocked
                     ? null
                     : extractActiveSkillMention(nextDraft, nextCursor);
                   const shouldSyncComposerState =
-                    Boolean(nextMention) ||
-                    Boolean(activeSkillMention);
+                    Boolean(nextMention) || Boolean(activeSkillMention);
                   if (shouldSyncComposerState) {
                     setDraft(nextDraft);
                     setDraftCursor(nextCursor);
@@ -3669,10 +3397,7 @@ export function AgentChatPanel({
                     setDraft("");
                     setDraftCursor(0);
                   }
-                  if (
-                    selectedSkillName &&
-                    !nextDraft.includes(`@${selectedSkillName}`)
-                  ) {
+                  if (selectedSkillName && !nextDraft.includes(`@${selectedSkillName}`)) {
                     setSelectedSkillName(null);
                   }
                 }}
@@ -3693,7 +3418,7 @@ export function AgentChatPanel({
                 onPaste={(event) => {
                   void handleComposerPaste(event);
                 }}
-                disabled={planInputLocked && !planAcceptsComposerInput}
+                disabled={planModeDecisionOpen || (planInputLocked && !planAcceptsComposerInput)}
                 placeholder={
                   activeGoal?.status === "executing"
                     ? "继续你的任务…"
@@ -3703,6 +3428,8 @@ export function AgentChatPanel({
                           ? "输入修改意见会重新规划；点击“确认计划并开始执行”才会进入可写模式"
                           : "补充回答或修改意见；本消息只会更新只读计划，不会执行任务"
                         : "请先使用计划卡片中的重试或丢弃操作"
+                      : planModeDecisionOpen
+                        ? "请先在上方选择规划方式"
                     : goalModeEnabled
                       ? goalPlanMode === "debate"
                         ? "描述目标，由 A/B 对抗审查并由 C 生成终版计划"
@@ -3729,11 +3456,7 @@ export function AgentChatPanel({
                     type="checkbox"
                   />
                   <span>自动授权</span>
-                  <span
-                    aria-hidden="true"
-                    className="composer-risk-tooltip"
-                    role="tooltip"
-                  >
+                  <span aria-hidden="true" className="composer-risk-tooltip" role="tooltip">
                     {composerRiskTooltips.auto}
                   </span>
                 </label>
@@ -3756,11 +3479,7 @@ export function AgentChatPanel({
                   type="button"
                 >
                   <span>目标模式</span>
-                  <span
-                    aria-hidden="true"
-                    className="composer-risk-tooltip"
-                    role="tooltip"
-                  >
+                  <span aria-hidden="true" className="composer-risk-tooltip" role="tooltip">
                     {composerRiskTooltips.goal}
                   </span>
                 </button>
@@ -3785,6 +3504,7 @@ export function AgentChatPanel({
                   disabled={
                     status.kind === "working" ||
                     attachmentReadPending ||
+                    planModeDecisionOpen ||
                     (planInputLocked && !planAcceptsComposerInput)
                   }
                   title="发送消息"
@@ -3807,27 +3527,13 @@ export function AgentChatPanel({
             <span className="sr-only" role="status" aria-live="polite">
               {attachmentAnnouncement}
             </span>
-            {autoApprovalEnabled || goalModeVisuallyEnabled ? (
+            {autoApprovalEnabled ? (
               <div className="composer-mode-risk-summary" role="status">
-                <strong>
-                  {planInputLocked
-                    ? "只读规划模式已锁定"
-                    : autoApprovalEnabled
-                      ? "自动授权已开启"
-                      : "只读规划模式已开启"}
-                </strong>
+                <strong>自动授权已开启</strong>
                 <span>
-                  {autoApprovalEnabled && !planInputLocked
+                  {!planInputLocked
                     ? "普通文件、Shell、网络、安装、构建和测试操作会自动放行；极高危操作仍需确认。"
-                    : ""}
-                  {autoApprovalEnabled && goalModeVisuallyEnabled && !planInputLocked
-                    ? " "
-                    : ""}
-                  {goalModeVisuallyEnabled
-                    ? planInputLocked
-                      ? "当前会话的补充消息只能更新计划；确认或丢弃前，不能切换到普通执行。"
-                      : "确认前禁止修改文件、执行 Shell、测试或写入记忆；仅终版计划投影可由主进程写入。"
-                    : ""}
+                    : "当前计划保持只读；极高危操作仍需单独确认。"}
                 </span>
               </div>
             ) : null}
@@ -3838,9 +3544,7 @@ export function AgentChatPanel({
           open={goalDrawerOpen}
           summary={activeGoal}
           onStart={
-            activeGoal && canStartGoalFromChat(activeGoal.status)
-              ? handleStartGoal
-              : undefined
+            activeGoal && canStartGoalFromChat(activeGoal.status) ? handleStartGoal : undefined
           }
           onClose={() => setGoalDrawerOpen(false)}
           onResolveReview={handleResolveGoalReview}
@@ -3852,15 +3556,42 @@ export function AgentChatPanel({
             void handleMarkGoalCompletedUnverified(confirmation)
           }
           goalAcceptanceContext={goalAcceptanceContext}
-          goalAcceptanceOperationPending={
-            goalAcceptanceOperationPending !== null
-          }
+          goalAcceptanceOperationPending={goalAcceptanceOperationPending !== null}
           onCancel={handleCancelGoal}
         />
       </section>
 
       {showContextPanel ? (
       <aside className="agent-context-panel" aria-label="进度与上下文">
+          {activeGoal ? (
+            <GoalRailStatusCard
+              goal={activeGoal}
+              onPause={activeGoal.status === "executing" ? () => void handlePauseGoal() : undefined}
+              onView={handleViewGoalProgress}
+            />
+          ) : null}
+          {(goalModeEnabled || planInputLocked) && (!planModeDecisionOpen || planInputLocked) ? (
+            <PlanModeStatusCard
+              assignments={activePlan?.requestedModelAssignments ?? planModelAssignments}
+              catalog={modelCatalog}
+              locked={planInputLocked}
+              mode={activePlan?.mode ?? goalPlanMode}
+              onEdit={planInputLocked ? undefined : () => setPlanModeDecisionOpen(true)}
+            />
+          ) : null}
+          {chatStreamState.thinkingText ||
+          chatStreamState.toolCallPreviews.length > 0 ||
+          goalRunEvents.length > 0 ||
+          toolApprovalEvents.length > 0 ||
+          activePlan?.status === "drafting" ? (
+            <ContextRuntimeSummary
+              activePlan={activePlan}
+              goalRunEvents={goalRunEvents}
+              thinkingText={chatStreamState.thinkingText}
+              toolApprovalEvents={toolApprovalEvents}
+              toolCallPreviews={chatStreamState.toolCallPreviews}
+            />
+          ) : null}
         {shouldShowActivityCard ? (
           <ContextActivityCard
             activity={taskActivity}
@@ -3897,11 +3628,7 @@ export function AgentChatPanel({
           ) : (
             <div className="kimi-context-list">
               {contextPanelItems.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  disabled
-                >
+                  <button key={item.id} type="button" disabled>
                   <span aria-hidden="true">
                     <Icon name={item.icon} size={15} />
                   </span>
@@ -3937,9 +3664,7 @@ function AgentHomeHero(props: {
       <h2>让Zerox-Agent帮你做什么？</h2>
       <p>让 Zerox 帮你规划、执行、检查和沉淀本地工作流。</p>
       <div
-        className={`home-status-chips ${
-          props.modelReady ? "is-ready" : "needs-model"
-        }`}
+        className={`home-status-chips ${props.modelReady ? "is-ready" : "needs-model"}`}
         aria-label="本地智能体状态"
       >
         {props.contextCards.map((card) => (
@@ -3950,11 +3675,7 @@ function AgentHomeHero(props: {
       </div>
       <div className="home-suggestions" aria-label="建议动作">
         {suggestions.map((prompt) => (
-          <button
-            key={prompt}
-            type="button"
-            onClick={() => props.onPickPrompt(prompt)}
-          >
+          <button key={prompt} type="button" onClick={() => props.onPickPrompt(prompt)}>
             {prompt}
           </button>
         ))}
@@ -3963,68 +3684,84 @@ function AgentHomeHero(props: {
   );
 }
 
-function PlanModeConfiguration(props: {
+function PlanModeDecisionCard(props: {
   mode: PlanMode;
   assignments: PlanModelAssignments;
   catalog: PublicModelCatalog | null;
   onModeChange: (mode: PlanMode) => void;
   onAssignmentsChange: (assignments: PlanModelAssignments) => void;
+  onConfirm: () => void;
   onOpenModelSettings: () => void;
 }) {
   const profiles = availableChatProfiles(props.catalog);
-  const fallbackProfileId =
-    props.catalog?.defaultChatProfileId ?? profiles[0]?.id ?? "";
+  const fallbackProfileId = props.catalog?.defaultChatProfileId ?? profiles[0]?.id ?? "";
   const selectedProfileIds =
     props.mode === "direct"
       ? [props.assignments.direct ?? fallbackProfileId]
-      : (["a", "b", "c"] as const).map(
-          (role) => props.assignments[role] ?? fallbackProfileId,
-        );
+      : (["a", "b", "c"] as const).map((role) => props.assignments[role] ?? fallbackProfileId);
   const selectedProfileNames = selectedProfileIds
-    .map(
-      (profileId) =>
-        profiles.find((profile) => profile.id === profileId)?.name,
-    )
+    .map((profileId) => profiles.find((profile) => profile.id === profileId)?.name)
     .filter((name): name is string => Boolean(name));
   const assignmentSummary =
     new Set(selectedProfileNames).size <= 1
-      ? selectedProfileNames[0] ?? "尚未配置模型"
+      ? (selectedProfileNames[0] ?? "尚未配置模型")
       : props.mode === "debate"
         ? (["A", "B", "C"] as const)
             .map((role, index) => `${role} ${selectedProfileNames[index] ?? "未配置"}`)
             .join(" · ")
         : selectedProfileNames.join(" · ");
 
-  function updateAssignment(
-    role: "direct" | "a" | "b" | "c",
-    profileId: string,
-  ) {
+  function updateAssignment(role: "direct" | "a" | "b" | "c", profileId: string) {
     props.onAssignmentsChange({
       ...props.assignments,
       [role]: profileId,
     });
   }
 
+  function handleModeKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
+    const nextMode =
+      event.key === "Home"
+        ? "direct"
+        : event.key === "End"
+          ? "debate"
+          : ["ArrowLeft", "ArrowUp", "ArrowRight", "ArrowDown"].includes(
+                event.key,
+              )
+            ? props.mode === "direct"
+              ? "debate"
+              : "direct"
+            : null;
+    if (!nextMode) return;
+    event.preventDefault();
+    props.onModeChange(nextMode);
+    event.currentTarget.parentElement
+      ?.querySelector<HTMLButtonElement>(`[data-plan-mode="${nextMode}"]`)
+      ?.focus();
+  }
+
   return (
-    <details
-      className="plan-mode-configuration"
-      aria-label="计划模式设置"
-      open={profiles.length ? undefined : true}
+    <section
+      className="plan-mode-decision-card decision-card"
+      aria-labelledby="plan-mode-decision-title"
     >
-      <summary>
-        <span>
-          <strong>规划设置</strong>
-          <small>{props.mode === "debate" ? "Debate" : "Direct"}</small>
-        </span>
-        <small title={assignmentSummary}>{assignmentSummary}</small>
-      </summary>
+      <header>
+        <div>
+          <span>需要你的选择</span>
+          <strong id="plan-mode-decision-title">这次目标如何规划？</strong>
+          <p>只选择规划协议；确认终版计划前不会修改文件或执行命令。</p>
+        </div>
+        <small title={assignmentSummary}>{props.mode === "debate" ? "Debate" : "Direct"}</small>
+      </header>
       <div className="plan-mode-configuration-body">
         <div className="plan-mode-switch" role="radiogroup" aria-label="规划方式">
           <button
             aria-checked={props.mode === "direct"}
             className={props.mode === "direct" ? "is-active" : ""}
+            data-plan-mode="direct"
             onClick={() => props.onModeChange("direct")}
+            onKeyDown={handleModeKeyDown}
             role="radio"
+            tabIndex={props.mode === "direct" ? 0 : -1}
             type="button"
           >
             <strong>Direct</strong>
@@ -4033,8 +3770,11 @@ function PlanModeConfiguration(props: {
           <button
             aria-checked={props.mode === "debate"}
             className={props.mode === "debate" ? "is-active" : ""}
+            data-plan-mode="debate"
             onClick={() => props.onModeChange("debate")}
+            onKeyDown={handleModeKeyDown}
             role="radio"
+            tabIndex={props.mode === "debate" ? 0 : -1}
             type="button"
           >
             <strong>Debate</strong>
@@ -4057,11 +3797,7 @@ function PlanModeConfiguration(props: {
                   catalog={props.catalog}
                   key={role}
                   label={
-                    role === "a"
-                      ? "A · 方案提出"
-                      : role === "b"
-                        ? "B · 对抗审查"
-                        : "C · 独立综合"
+                    role === "a" ? "A · 方案提出" : role === "b" ? "B · 对抗审查" : "C · 独立综合"
                   }
                   profileId={props.assignments[role] ?? fallbackProfileId}
                   profiles={profiles}
@@ -4071,11 +3807,7 @@ function PlanModeConfiguration(props: {
             )}
           </div>
         ) : (
-          <button
-            className="plan-model-missing"
-            onClick={props.onOpenModelSettings}
-            type="button"
-          >
+          <button className="plan-model-missing" onClick={props.onOpenModelSettings} type="button">
             尚无可用 Chat 模型档案，前往模型设置
           </button>
         )}
@@ -4085,7 +3817,18 @@ function PlanModeConfiguration(props: {
             : "Direct 只生成计划，不执行 Shell、文件修改、测试或记忆写入。"}
         </p>
       </div>
-    </details>
+      <div className="decision-card-actions">
+        <span title={assignmentSummary}>{assignmentSummary}</span>
+        <button
+          className="primary-action"
+          disabled={!profiles.length}
+          onClick={props.onConfirm}
+          type="button"
+        >
+          使用此规划方式
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -4128,25 +3871,22 @@ function PlanConfirmationCard(props: {
   onConfirm: () => void;
   onDiscard: () => void;
   onRetry: (replacementProfileId?: string) => void;
+  onAnswerQuestions: (answers: string[]) => void;
 }) {
-  const failedRound = props.plan.rounds.find(
-    (round) => round.status === "failed",
-  );
+  const failedRound = props.plan.rounds.find((round) => round.status === "failed");
   const chatProfiles = availableChatProfiles(props.catalog);
   const failedProfileId = failedRound?.modelBinding.profileId ?? "";
-  const [replacementProfileId, setReplacementProfileId] =
-    useState(failedProfileId);
+  const [replacementProfileId, setReplacementProfileId] = useState(failedProfileId);
   const artifact = props.plan.finalArtifact;
   const [planDetailsOpen, setPlanDetailsOpen] = useState(false);
+  const questions = artifact?.unresolvedQuestions ?? [];
+  const [questionAnswers, setQuestionAnswers] = useState<string[]>([]);
   const canConfirm =
     props.plan.status === "awaiting_confirmation" &&
     props.plan.actionGate === "ready" &&
     Boolean(artifact && props.plan.projection);
-  const canDiscard = ![
-    "confirmed_pending_execution",
-    "executing",
-    "completed",
-  ].includes(props.plan.status) &&
+  const canDiscard =
+    !["confirmed_pending_execution", "executing", "completed"].includes(props.plan.status) &&
     !props.plan.executionGoalId &&
     !props.plan.executionRunId;
 
@@ -4158,14 +3898,16 @@ function PlanConfirmationCard(props: {
     setPlanDetailsOpen(false);
   }, [artifact?.actionGate, props.plan.id, props.plan.revision]);
 
+  useEffect(() => {
+    setQuestionAnswers(questions.map(() => ""));
+  }, [props.plan.id, props.plan.revision, questions.length]);
+
   return (
     <section className="plan-confirmation-card" aria-label="终版计划确认">
       <header>
         <div>
           <span>{props.plan.mode === "debate" ? "Debate Plan" : "Direct Plan"}</span>
-          <strong>
-            {artifact?.title ?? props.plan.taskContract.objective}
-          </strong>
+          <strong>{artifact?.title ?? props.plan.taskContract.objective}</strong>
         </div>
         <div className="plan-gate-status">
           <span className={`is-${props.plan.actionGate}`}>
@@ -4177,8 +3919,7 @@ function PlanConfirmationCard(props: {
 
       {props.plan.status === "awaiting_input" ? (
         <p className="plan-input-routing-note" role="status">
-          在下方输入补充信息后会重新规划；确认或丢弃前，本会话不能退出只读
-          Plan Mode。
+          在下方输入补充信息后会重新规划；确认或丢弃前，本会话不能退出只读 Plan Mode。
         </p>
       ) : props.plan.status === "awaiting_confirmation" ? (
         <p className="plan-input-routing-note">
@@ -4193,23 +3934,14 @@ function PlanConfirmationCard(props: {
       {props.plan.mode === "debate" ? (
         <details className="plan-progress-disclosure">
           <summary>
-            辩论进度 ·{" "}
-            {
-              props.plan.rounds.filter(
-                (round) => round.status === "completed",
-              ).length
-            }
+            辩论进度 · {props.plan.rounds.filter((round) => round.status === "completed").length}
             /5 轮完成
           </summary>
           <ol className="debate-round-timeline" aria-label="辩论轮次">
             {(["a1", "b1", "a2", "b2", "c"] as const).map((kind) => {
               const round = [...props.plan.rounds]
                 .reverse()
-                .find(
-                  (candidate) =>
-                    candidate.kind === kind &&
-                    candidate.status !== "invalidated",
-                );
+                .find((candidate) => candidate.kind === kind && candidate.status !== "invalidated");
               return (
                 <li
                   className={`is-${round?.status ?? "pending"}`}
@@ -4225,9 +3957,7 @@ function PlanConfirmationCard(props: {
                   <small>
                     {round
                       ? `${round.modelBinding.modelId}${
-                          round.latencyMs !== undefined
-                            ? ` · ${round.latencyMs} ms`
-                            : ""
+                          round.latencyMs !== undefined ? ` · ${round.latencyMs} ms` : ""
                         }`
                       : "—"}
                   </small>
@@ -4246,20 +3976,49 @@ function PlanConfirmationCard(props: {
             <span>{artifact.gateReason}</span>
           </div>
           {artifact.unresolvedQuestions.length ? (
-            <section className="plan-input-required" aria-label="确认前需要回答">
-              <strong>确认前需要回答</strong>
-              <ul className="plan-unresolved-questions">
-                {artifact.unresolvedQuestions.map((question) => (
-                  <li key={question}>{question}</li>
+            <form
+              className="plan-input-required decision-question-form"
+              aria-label="确认前需要回答"
+              onSubmit={(event) => {
+                event.preventDefault();
+                props.onAnswerQuestions(questionAnswers);
+              }}
+            >
+              <header>
+                <span>需要你的回答</span>
+                <strong>补齐这些信息后继续规划</strong>
+              </header>
+              {artifact.unresolvedQuestions.map((question, index) => (
+                <label key={question}>
+                  <span>{question}</span>
+                  <textarea
+                    onChange={(event) =>
+                      setQuestionAnswers((current) =>
+                        current.map((answer, answerIndex) =>
+                          answerIndex === index ? event.currentTarget.value : answer,
+                        ),
+                      )
+                    }
+                    required
+                    rows={2}
+                    value={questionAnswers[index] ?? ""}
+                  />
+                </label>
                 ))}
-              </ul>
-            </section>
+              <button
+                className="primary-action"
+                disabled={
+                  Boolean(props.pendingAction) || questionAnswers.some((answer) => !answer.trim())
+                }
+                type="submit"
+              >
+                提交回答并重新规划
+              </button>
+            </form>
           ) : null}
           <details
             className="plan-artifact-disclosure"
-            onToggle={(event) =>
-              setPlanDetailsOpen(event.currentTarget.open)
-            }
+            onToggle={(event) => setPlanDetailsOpen(event.currentTarget.open)}
             open={planDetailsOpen}
           >
             <summary>
@@ -4275,9 +4034,7 @@ function PlanConfirmationCard(props: {
                       <strong>{milestone.title}</strong>
                       <span>{milestone.description}</span>
                       {milestone.acceptanceCriteria.length ? (
-                        <small>
-                          验收：{milestone.acceptanceCriteria.join("；")}
-                        </small>
+                        <small>验收：{milestone.acceptanceCriteria.join("；")}</small>
                       ) : null}
                     </li>
                   ))}
@@ -4300,9 +4057,7 @@ function PlanConfirmationCard(props: {
           </details>
         </div>
       ) : (
-        <p className="plan-empty-artifact">
-          {failedRound?.error ?? "计划正在生成或等待恢复。"}
-        </p>
+        <p className="plan-empty-artifact">{failedRound?.error ?? "计划正在生成或等待恢复。"}</p>
       )}
 
       {failedRound ? (
@@ -4314,9 +4069,7 @@ function PlanConfirmationCard(props: {
           <label>
             <span>重试模型</span>
             <select
-              onChange={(event) =>
-                setReplacementProfileId(event.currentTarget.value)
-              }
+              onChange={(event) => setReplacementProfileId(event.currentTarget.value)}
               value={replacementProfileId}
             >
               {chatProfiles.map((profile) => (
@@ -4329,9 +4082,7 @@ function PlanConfirmationCard(props: {
           <button
             className="primary-action"
             disabled={Boolean(props.pendingAction)}
-            onClick={() =>
-              props.onRetry(replacementProfileId || failedProfileId || undefined)
-            }
+            onClick={() => props.onRetry(replacementProfileId || failedProfileId || undefined)}
             type="button"
           >
             {props.pendingAction === "retry" ? "重试中" : "重试失败轮次"}
@@ -4341,8 +4092,7 @@ function PlanConfirmationCard(props: {
 
       <details className="plan-audit-disclosure">
         <summary>
-          审计记录 · {props.plan.rounds.length} 轮 · {props.plan.evidence.length}{" "}
-          条证据
+          审计记录 · {props.plan.rounds.length} 轮 · {props.plan.evidence.length} 条证据
         </summary>
         <div className="plan-audit-grid">
           <section>
@@ -4418,36 +4168,10 @@ function PlanConfirmationCard(props: {
   );
 }
 
-function availableChatProfiles(
-  catalog: PublicModelCatalog | null,
-): ModelProfile[] {
-  if (!catalog) {
-    return [];
-  }
-  const availableConnectionIds = new Set(
-    catalog.connections
-      .filter(
-        (connection) =>
-          connection.providerKind === "ollama"
-            ? connection.availability === "available"
-            : connection.hasCredential,
-      )
-      .map((connection) => connection.id),
-  );
-  return catalog.profiles.filter(
-    (profile) =>
-      profile.purpose === "chat" &&
-      availableConnectionIds.has(profile.connectionId),
-  );
-}
-
-function defaultPlanModelAssignments(
-  catalog: PublicModelCatalog,
-): PlanModelAssignments {
+function defaultPlanModelAssignments(catalog: PublicModelCatalog): PlanModelAssignments {
   const profiles = availableChatProfiles(catalog);
   const selected =
-    profiles.find((profile) => profile.id === catalog.defaultChatProfileId) ??
-    profiles[0];
+    profiles.find((profile) => profile.id === catalog.defaultChatProfileId) ?? profiles[0];
   if (!selected) {
     return {};
   }
@@ -4473,6 +4197,10 @@ function isPlanInputRoutingLocked(plan: PlanRecord | null): boolean {
   ].includes(plan.status);
 }
 
+function needsGoalDecision(status: Goal["status"] | undefined): boolean {
+  return Boolean(status && !["executing", "achieved", "completed_unverified"].includes(status));
+}
+
 function formatPlanGate(gate: PlanRecord["actionGate"]): string {
   if (gate === "ready") {
     return "Ready · 可确认";
@@ -4483,9 +4211,7 @@ function formatPlanGate(gate: PlanRecord["actionGate"]): string {
   return "Blocked";
 }
 
-function formatDebateRoundStatus(
-  status: PlanRecord["rounds"][number]["status"],
-): string {
+function formatDebateRoundStatus(status: PlanRecord["rounds"][number]["status"]): string {
   const labels: Record<PlanRecord["rounds"][number]["status"], string> = {
     pending: "等待",
     running: "进行中",
@@ -4552,9 +4278,7 @@ function GoalDraftCard(props: {
       {hasWarnings ? (
         <ul className="goal-draft-warnings" aria-label="目标草案警告">
           {props.draft.warnings.map((warning) => (
-            <li key={`${warning.code}-${warning.checkId ?? warning.message}`}>
-              {warning.message}
-            </li>
+            <li key={`${warning.code}-${warning.checkId ?? warning.message}`}>{warning.message}</li>
           ))}
         </ul>
       ) : null}
@@ -4587,10 +4311,7 @@ function formatGoalDraftCriteria(draft: GoalDraft): string {
     .join("\n");
 }
 
-function buildEditedGoalDraftCriteria(
-  criteriaText: string,
-  draft: GoalDraft,
-): SuccessCriterion[] {
+function buildEditedGoalDraftCriteria(criteriaText: string, draft: GoalDraft): SuccessCriterion[] {
   const lines = criteriaText
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -4739,11 +4460,7 @@ function buildContextProgressItems(options: {
     id: step.id,
     label: `${step.label} · ${step.detail}`,
     status:
-      step.status === "waiting"
-        ? "pending"
-        : step.status === "active"
-          ? "active"
-          : step.status,
+      step.status === "waiting" ? "pending" : step.status === "active" ? "active" : step.status,
   }));
 }
 
@@ -4845,6 +4562,150 @@ function AgentWorkTimeline({
   );
 }
 
+function GoalRailStatusCard(props: {
+  goal: ChatSessionGoalSummary;
+  onView: () => void;
+  onPause?: () => void;
+}) {
+  return (
+    <section className="kimi-side-card goal-rail-status-card">
+      <header>
+        <strong>目标</strong>
+        <span>{translateGoalStatus(props.goal.status)}</span>
+      </header>
+      <p>{props.goal.description}</p>
+      <div>
+        <button onClick={props.onView} type="button">
+          查看详情
+        </button>
+        {props.onPause ? (
+          <button onClick={props.onPause} type="button">
+            暂停
+          </button>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function PlanModeStatusCard(props: {
+  mode: PlanMode;
+  assignments: PlanModelAssignments;
+  catalog: PublicModelCatalog | null;
+  locked: boolean;
+  onEdit?: () => void;
+}) {
+  const profiles = availableChatProfiles(props.catalog);
+  const fallbackProfileId = props.catalog?.defaultChatProfileId ?? profiles[0]?.id ?? "";
+  const profileIds =
+    props.mode === "direct"
+      ? [props.assignments.direct ?? fallbackProfileId]
+      : (["a", "b", "c"] as const).map((role) => props.assignments[role] ?? fallbackProfileId);
+  const labels = profileIds.map(
+    (profileId) => profiles.find((profile) => profile.id === profileId)?.name ?? "未配置",
+  );
+  return (
+    <section className="kimi-side-card plan-mode-status-card">
+      <header>
+        <strong>Plan 模式</strong>
+        {props.onEdit ? (
+          <button onClick={props.onEdit} type="button">
+            更改
+          </button>
+        ) : (
+          <span className="is-locked">只读锁定</span>
+        )}
+      </header>
+      <div className="plan-mode-status-main">
+        <strong>{props.mode === "debate" ? "Debate" : "Direct"}</strong>
+        <p>
+          {props.mode === "debate" ? `A ${labels[0]} · B ${labels[1]} · C ${labels[2]}` : labels[0]}
+        </p>
+      </div>
+    </section>
+  );
+}
+
+function ContextRuntimeSummary(props: {
+  activePlan: PlanRecord | null;
+  thinkingText: string;
+  toolCallPreviews: ChatToolCallPreview[];
+  goalRunEvents: AgentRunEvent[];
+  toolApprovalEvents: ToolApprovalDecisionPayload[];
+}) {
+  const latestTool = props.toolCallPreviews.at(-1) ?? null;
+  const latestGoalEvent = props.goalRunEvents.at(-1) ?? null;
+  const latestApproval = props.toolApprovalEvents.at(-1) ?? null;
+  const count =
+    Number(Boolean(props.thinkingText)) +
+    props.toolCallPreviews.length +
+    props.goalRunEvents.length +
+    props.toolApprovalEvents.length;
+  return (
+    <section className="kimi-side-card context-runtime-summary">
+      <header>
+        <strong>过程</strong>
+        <span>{count} 项</span>
+      </header>
+      <div className="context-runtime-list">
+        {props.activePlan?.status === "drafting" ? (
+          <div>
+            <span className="task-activity-dot" aria-hidden="true" />
+            <p>
+              <strong>
+                {props.activePlan.mode === "debate" ? "Debate 规划中" : "Direct 规划中"}
+              </strong>
+              <small>完成后仅在需要选择时显示卡片</small>
+            </p>
+          </div>
+        ) : null}
+        {latestTool ? (
+          <div>
+            <span className="task-activity-dot" aria-hidden="true" />
+            <p>
+              <strong>{latestTool.toolName}</strong>
+              <small>{getLatestRuntimeLine(latestTool.argumentsText)}</small>
+            </p>
+          </div>
+        ) : null}
+        {latestGoalEvent ? (
+          <div>
+            <span className="task-activity-dot" aria-hidden="true" />
+            <p>
+              <strong>{getGoalRunEventLabel(latestGoalEvent)}</strong>
+              <small>{latestGoalEvent.message}</small>
+            </p>
+          </div>
+        ) : null}
+        {latestApproval ? (
+          <div>
+            <span className="task-activity-dot" aria-hidden="true" />
+            <p>
+              <strong>
+                {latestApproval.automatic ? "自动授权" : "授权处理"} · {latestApproval.toolName}
+              </strong>
+              <small>{latestApproval.approved ? "已同意" : "已拒绝"}</small>
+            </p>
+          </div>
+        ) : null}
+      </div>
+      {props.thinkingText ? (
+        <RuntimeTextDisclosure
+          className="context-thinking-disclosure"
+          label="思考"
+          text={props.thinkingText}
+        />
+      ) : null}
+      {props.toolCallPreviews.length > 0 ? (
+        <ToolCallPreviewDisclosure
+          latestToolCallPreview={latestTool}
+          previews={props.toolCallPreviews}
+        />
+      ) : null}
+    </section>
+  );
+}
+
 function ContextActivityCard({
   activity,
   detail,
@@ -4878,10 +4739,7 @@ function ContextActivityCard({
           <span>工具调用 {activity.toolCallsExecuted}</span>
         )}
         {onContinue && (
-          <button
-            type="button"
-            onClick={onContinue}
-          >
+          <button type="button" onClick={onContinue}>
             继续执行
           </button>
         )}
@@ -4903,11 +4761,7 @@ function ContextActivityCard({
   );
 }
 
-function SubagentStatusList({
-  items,
-}: {
-  items: SubagentProcessItem[];
-}) {
+function SubagentStatusList({ items }: { items: SubagentProcessItem[] }) {
   return (
     <ol className="subagent-status-list" aria-label="子代理执行状态">
       {items.map((item) => (
@@ -4957,9 +4811,7 @@ function ToolApprovalPanel({
         aria-describedby="tool-approval-description"
         aria-labelledby="tool-approval-title"
         aria-modal="true"
-        className={`tool-approval-panel${
-          isCritical ? " is-critical-risk" : ""
-        }`}
+        className={`tool-approval-panel${isCritical ? " is-critical-risk" : ""}`}
         ref={dialogRef}
         role="alertdialog"
         tabIndex={-1}
@@ -5006,11 +4858,7 @@ function ToolApprovalPanel({
           >
             拒绝
           </button>
-          <button
-            className="tool-approval-approve"
-            type="button"
-            onClick={() => onResolve(true)}
-          >
+          <button className="tool-approval-approve" type="button" onClick={() => onResolve(true)}>
             授权本次
           </button>
         </div>
@@ -5039,11 +4887,7 @@ function GuidedSkillInputForm({
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
 }) {
   return (
-    <form
-      className="guided-skill-input-form"
-      aria-label="技能输入"
-      onSubmit={onSubmit}
-    >
+    <form className="guided-skill-input-form" aria-label="技能输入" onSubmit={onSubmit}>
       <header>
         <span>@{inputRequest.skillName}</span>
         <strong>输入</strong>
@@ -5152,9 +4996,7 @@ function RuntimeTextDisclosure({
 
   return (
     <section
-      className={`${className} runtime-disclosure ${
-        expanded ? "is-expanded" : "is-collapsed"
-      }`}
+      className={`${className} runtime-disclosure ${expanded ? "is-expanded" : "is-collapsed"}`}
     >
       <header>
         <strong className="runtime-disclosure-label">{label}</strong>
@@ -5192,9 +5034,7 @@ function ToolCallPreviewDisclosure({
   const [expanded, setExpanded] = useState(false);
   const latestToolName = latestToolCallPreview?.toolName ?? "工具";
   const latestToolArguments = latestToolCallPreview?.argumentsText ?? "{}";
-  const summary = `${latestToolName} · ${getLatestRuntimeLine(
-    latestToolArguments,
-  )}`;
+  const summary = `${latestToolName} · ${getLatestRuntimeLine(latestToolArguments)}`;
 
   return (
     <section
@@ -5226,9 +5066,7 @@ function ToolCallPreviewDisclosure({
             <article className="tool-call-preview-item" key={preview.toolCallId}>
               <header>
                 <strong>{preview.toolName ?? "工具"}</strong>
-                {typeof preview.index === "number" ? (
-                  <small>#{preview.index + 1}</small>
-                ) : null}
+                {typeof preview.index === "number" ? <small>#{preview.index + 1}</small> : null}
               </header>
               <pre>{preview.argumentsText || "{}"}</pre>
             </article>
@@ -5247,9 +5085,7 @@ function getLatestRuntimeLine(text: string): string {
       .filter(Boolean)
       .at(-1) ?? "";
   const compactLine = latestLine || text.trim() || "{}";
-  return compactLine.length > 180
-    ? `${compactLine.slice(0, 177)}...`
-    : compactLine;
+  return compactLine.length > 180 ? `${compactLine.slice(0, 177)}...` : compactLine;
 }
 
 type TaskProcessItemProps = {
@@ -5261,9 +5097,11 @@ function TaskProcessItem(props: TaskProcessItemProps) {
   const { compact = false, item } = props;
   const [expanded, setExpanded] = useState(false);
   const shouldCollapse = !compact && item.message.length > 160;
-  const displayMessage =
-    compact ? getLatestRuntimeLine(item.message) :
-    expanded || !shouldCollapse ? item.message : `${item.message.slice(0, 157)}...`;
+  const displayMessage = compact
+    ? getLatestRuntimeLine(item.message)
+    : expanded || !shouldCollapse
+      ? item.message
+      : `${item.message.slice(0, 157)}...`;
 
   return (
     <li
@@ -5376,8 +5214,7 @@ function getGoalRunEventLabel(event: AgentRunEvent): string {
 
 function createClientRequestId(): string {
   return (
-    globalThis.crypto?.randomUUID?.() ??
-    `chat-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    globalThis.crypto?.randomUUID?.() ?? `chat-${Date.now()}-${Math.random().toString(36).slice(2)}`
   );
 }
 
@@ -5408,10 +5245,7 @@ function chatStreamEventMatchesActive(
   if (event.requestId !== activeStream.activeRequestId) {
     return false;
   }
-  if (
-    activeStream.activeSessionId &&
-    event.sessionId !== activeStream.activeSessionId
-  ) {
+  if (activeStream.activeSessionId && event.sessionId !== activeStream.activeSessionId) {
     return false;
   }
   return true;
@@ -5420,8 +5254,7 @@ function chatStreamEventMatchesActive(
 function createGuidedInputInitialValues(
   fields: SkillInputField[],
 ): Record<string, string | number | boolean> {
-  return fields.reduce<Record<string, string | number | boolean>>(
-    (values, field) => {
+  return fields.reduce<Record<string, string | number | boolean>>((values, field) => {
       if (field.defaultValue !== undefined) {
         values[field.name] = field.defaultValue;
         return values;
@@ -5432,17 +5265,14 @@ function createGuidedInputInitialValues(
       }
       values[field.name] = "";
       return values;
-    },
-    {},
-  );
+  }, {});
 }
 
 function buildSkillInputResponseValues(
   fields: SkillInputField[],
   values: Record<string, string | number | boolean>,
 ): Record<string, string | number | boolean> {
-  return fields.reduce<Record<string, string | number | boolean>>(
-    (resolvedValues, field) => {
+  return fields.reduce<Record<string, string | number | boolean>>((resolvedValues, field) => {
       const value = values[field.name];
       if (field.type === "boolean") {
         resolvedValues[field.name] = value === true;
@@ -5453,8 +5283,7 @@ function buildSkillInputResponseValues(
         if (value === "" || value === undefined) {
           return resolvedValues;
         }
-        const numberValue =
-          typeof value === "number" ? value : Number.parseFloat(String(value));
+      const numberValue = typeof value === "number" ? value : Number.parseFloat(String(value));
         if (Number.isFinite(numberValue)) {
           resolvedValues[field.name] = numberValue;
         }
@@ -5466,9 +5295,7 @@ function buildSkillInputResponseValues(
       }
       resolvedValues[field.name] = String(value);
       return resolvedValues;
-    },
-    {},
-  );
+  }, {});
 }
 
 function isCanceledMessage(message: string): boolean {
@@ -5492,9 +5319,7 @@ const ChatMessageList = memo(function ChatMessageList({
     <div className="message-list" aria-label="消息列表">
       {messages.map((message) => (
         <article
-          className={`chat-message is-${message.role}${
-            message.isStreaming ? " is-streaming" : ""
-          }`}
+          className={`chat-message is-${message.role}${message.isStreaming ? " is-streaming" : ""}`}
           data-message-id={message.id}
           key={message.id}
         >
@@ -5540,9 +5365,7 @@ const ChatAttachmentChips = memo(function ChatAttachmentChips(props: {
           key={attachment.id}
           title={`${attachment.name} · ${formatChatAttachmentSize(attachment.size)}`}
         >
-          <strong aria-hidden="true">
-            {formatChatAttachmentTypeLabel(attachment)}
-          </strong>
+          <strong aria-hidden="true">{formatChatAttachmentTypeLabel(attachment)}</strong>
           <span>{attachment.name}</span>
           <small>{formatChatAttachmentSize(attachment.size)}</small>
           {props.onRemove ? (
@@ -5560,11 +5383,7 @@ const ChatAttachmentChips = memo(function ChatAttachmentChips(props: {
   );
 });
 
-const MarkdownMessage = memo(function MarkdownMessage({
-  content,
-}: {
-  content: string;
-}) {
+const MarkdownMessage = memo(function MarkdownMessage({ content }: { content: string }) {
   const [expanded, setExpanded] = useState(false);
   const shouldPreview = shouldRenderMarkdownPreview(content);
   const previewContent = useMemo(() => createMarkdownPreview(content), [content]);
@@ -5602,10 +5421,7 @@ function MarkdownBlockView({ block }: { block: MarkdownBlock }) {
   const showFullBlock = expanded || !shouldCollapse;
 
   if (block.type === "heading") {
-    const HeadingTag = `h${Math.min(block.depth + 2, 5)}` as
-      | "h3"
-      | "h4"
-      | "h5";
+    const HeadingTag = `h${Math.min(block.depth + 2, 5)}` as "h3" | "h4" | "h5";
     return (
       <HeadingTag>
         <InlineMarkdown text={block.text} />
@@ -5634,10 +5450,7 @@ function MarkdownBlockView({ block }: { block: MarkdownBlock }) {
   );
 }
 
-function renderMarkdownBlockContent(
-  block: MarkdownBlock,
-  showFullBlock: boolean,
-): ReactNode {
+function renderMarkdownBlockContent(block: MarkdownBlock, showFullBlock: boolean): ReactNode {
   if (block.type === "unorderedList") {
     const items = showFullBlock ? block.items : block.items.slice(0, 4);
     return (
@@ -5747,10 +5560,7 @@ function shouldCollapseMarkdownBlock(block: MarkdownBlock): boolean {
     return block.items.length > 4 || block.items.join("\n").length > 520;
   }
   if (block.type === "taskList") {
-    return (
-      block.items.length > 4 ||
-      block.items.map((item) => item.text).join("\n").length > 520
-    );
+    return block.items.length > 4 || block.items.map((item) => item.text).join("\n").length > 520;
   }
   if (block.type === "table") {
     return block.rows.length > 8 || block.rows.flat().join("\n").length > 700;
@@ -5774,12 +5584,7 @@ function InlineMarkdown({ text }: { text: string }): ReactNode {
     }
     if (segment.type === "link") {
       return (
-        <a
-          href={segment.href}
-          key={`${segment.type}-${index}`}
-          rel="noreferrer"
-          target="_blank"
-        >
+        <a href={segment.href} key={`${segment.type}-${index}`} rel="noreferrer" target="_blank">
           {segment.text}
         </a>
       );
@@ -5792,15 +5597,11 @@ function toChatHistory(messages: ChatMessage[]): ChatHistoryMessage[] {
   return messages.map((message) => ({
     role: message.role,
     content: message.content,
-    ...(message.attachments?.length
-      ? { attachments: message.attachments }
-      : {}),
+    ...(message.attachments?.length ? { attachments: message.attachments } : {}),
   }));
 }
 
-function toChatAttachmentMetadata(
-  attachment: ChatAttachmentInput,
-): ChatAttachmentMetadata {
+function toChatAttachmentMetadata(attachment: ChatAttachmentInput): ChatAttachmentMetadata {
   return {
     id: attachment.id,
     name: attachment.name,
@@ -5823,9 +5624,7 @@ function toSessionRailItem(session: ChatSessionListItem): ChatSession {
       : {}),
     ...(session.tokenUsage ? { tokenUsage: session.tokenUsage } : {}),
     ...(session.workspaceId ? { workspaceId: session.workspaceId } : {}),
-    ...(session.workspaceSummary
-      ? { workspaceSummary: session.workspaceSummary }
-      : {}),
+    ...(session.workspaceSummary ? { workspaceSummary: session.workspaceSummary } : {}),
     updatedAt: session.updatedAt,
   };
 }
@@ -5852,7 +5651,15 @@ function toChatMessage(message: ChatSessionRecord["messages"][number]): ChatMess
     createdAt: message.createdAt,
     ...(message.outputParts ? { outputParts: message.outputParts } : {}),
     ...(message.attachments ? { attachments: message.attachments } : {}),
+    ...(message.goalEventRef ? { goalEventRef: message.goalEventRef } : {}),
   };
+}
+
+function shouldHideGoalEventReply(goalEventRef: string): boolean {
+  return (
+    !goalEventRef.startsWith("goal-terminal:") &&
+    goalEventRef !== "goal_canceled"
+  );
 }
 
 function translateRunStatus(status: AgentRunRecord["status"]): string {

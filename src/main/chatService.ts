@@ -3149,6 +3149,9 @@ async function tryRouteGoalIntent(options: {
           ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
           ...(options.workspaceRoot ? { workspaceRoot: options.workspaceRoot } : {}),
           sourceMessage: options.route.description,
+          ...(options.selectedSkill
+            ? { selectedSkill: options.selectedSkill }
+            : {}),
           mode: options.planMode,
           ...(options.planModelAssignments
             ? { modelAssignments: options.planModelAssignments }

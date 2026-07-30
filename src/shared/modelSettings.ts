@@ -11,6 +11,7 @@ export const providerKinds = [
   "kimi",
   "minimax",
   "qwen",
+  "dashscope-coding",
   "xai",
   "mistral",
   "meta",
@@ -18,6 +19,7 @@ export const providerKinds = [
   "fireworks",
   "openrouter",
   "ollama",
+  "custom",
 ] as const;
 
 export type ProviderKind = (typeof providerKinds)[number];
@@ -26,6 +28,14 @@ export type ProviderCredentialSource =
   | "environment"
   | "ambient"
   | "none";
+
+export type ProviderConnectionVerification = {
+  status: "passed" | "failed";
+  checkedAt: string;
+  message: string;
+  latencyMs?: number;
+  connectionRevision: number;
+};
 
 export type ProviderFieldChoice = {
   value: string;
@@ -59,6 +69,7 @@ export type ProviderDescriptor = {
     nativeApi: boolean;
     local: boolean;
     customEndpoint: boolean;
+    embeddings: boolean;
   };
 };
 
@@ -80,6 +91,7 @@ export type PublicProviderConnection = {
   hasCredential: boolean;
   availability?: "unknown" | "available" | "unavailable";
   availableModelIds?: string[];
+  verification?: ProviderConnectionVerification;
   keySetAt?: string;
   lastUsedAt?: string;
   revision: number;
@@ -108,6 +120,15 @@ export type ModelCatalogEntry = {
 
 export type ModelPurpose = "chat" | "embedding";
 
+export type ModelProfileVerification = {
+  status: "passed" | "failed";
+  checkedAt: string;
+  message: string;
+  latencyMs?: number;
+  connectionRevision: number;
+  profileRevision: number;
+};
+
 export type ModelProfile = {
   id: string;
   name: string;
@@ -121,6 +142,7 @@ export type ModelProfile = {
     thinkingBudgetTokens: number;
   };
   capabilityOverrides?: Partial<ModelCapabilities>;
+  verification?: ModelProfileVerification;
   custom: boolean;
   revision: number;
   createdAt: string;
@@ -175,6 +197,25 @@ export type ModelCatalogMutationResult =
   | { ok: true; catalog: PublicModelCatalog }
   | { ok: false; message: string };
 
+export type RevisionedModelResourceInput = {
+  id: string;
+  expectedRevision: number;
+};
+
+export type TestAndSaveProviderConnectionResult =
+  | {
+      ok: true;
+      catalog: PublicModelCatalog;
+      connection: PublicProviderConnection;
+      test: Extract<TestProviderConnectionResult, { ok: true }>;
+    }
+  | {
+      ok: false;
+      message: string;
+      errors?: Record<string, string>;
+      test?: TestProviderConnectionResult;
+    };
+
 export type TestProviderConnectionResult =
   | {
       ok: true;
@@ -183,8 +224,15 @@ export type TestProviderConnectionResult =
       latencyMs: number;
       checkedAt: string;
       models?: string[];
+      modelId?: string;
     }
-  | { ok: false; message: string };
+  | {
+      ok: false;
+      message: string;
+      providerKind?: ProviderKind;
+      latencyMs?: number;
+      checkedAt?: string;
+    };
 
 export type TestProviderConnectionInput =
   | { profileId: string }
@@ -198,6 +246,38 @@ export function isProviderKind(value: unknown): value is ProviderKind {
     typeof value === "string" &&
     (providerKinds as readonly string[]).includes(value)
   );
+}
+
+export function providerConnectionTargetIdentity(
+  kind: ProviderKind,
+  values: Record<string, string>,
+): string {
+  if (kind === "bedrock") {
+    return JSON.stringify([
+      kind,
+      values.region?.trim() || "us-east-1",
+      values.authMethod?.trim() || "api_key",
+    ]);
+  }
+  if (kind === "vertex") {
+    return JSON.stringify([
+      kind,
+      values.project?.trim() || "",
+      values.location?.trim() || "global",
+      values.authMethod?.trim() || "adc",
+    ]);
+  }
+  const protocol =
+    kind === "custom" ? values.protocol?.trim() || "openai" : "openai";
+  let baseUrl = values.baseUrl?.trim().replace(/\/+$/, "") || "";
+  baseUrl =
+    protocol === "anthropic"
+      ? baseUrl.replace(/\/v1\/messages$/, "")
+      : baseUrl.replace(/\/chat\/completions$/, "");
+  if (kind === "ollama") {
+    baseUrl = baseUrl.replace(/\/v1$/, "");
+  }
+  return JSON.stringify([kind, protocol, baseUrl]);
 }
 
 export function defaultModelCapabilities(): ModelCapabilities {

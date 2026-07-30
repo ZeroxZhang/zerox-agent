@@ -1403,6 +1403,9 @@ describe("chat service", () => {
         sessionId: "persisted_session",
         sourceMessage: "使用 @dbs 规划一个本地功能",
         mode: "debate",
+        selectedSkill: expect.objectContaining({
+          manifest: expect.objectContaining({ name: "dbs" }),
+        }),
       }),
     ]);
     expect(

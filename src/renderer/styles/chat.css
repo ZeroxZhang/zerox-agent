@@ -1632,9 +1632,8 @@
   display: grid;
   gap: var(--space-2);
   min-height: 0;
-  max-height: min(34vh, 260px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  max-height: none;
+  overflow: visible;
   padding: var(--space-2) 4px 4px;
   border-top: 1px solid var(--secondary-page-outline);
   background: transparent;
@@ -1858,6 +1857,143 @@
   color: var(--text-primary);
   font-size: var(--text-sm);
   font-weight: var(--font-semibold);
+}
+
+.goal-rail-status-card > header,
+.plan-mode-status-card > header,
+.context-runtime-summary > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.goal-rail-status-card > header span,
+.plan-mode-status-card > header span,
+.context-runtime-summary > header span {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.goal-rail-status-card > p {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.goal-rail-status-card > div {
+  display: flex;
+  gap: 8px;
+}
+
+.goal-rail-status-card button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  background: var(--bg-surface-raised);
+  font-size: var(--text-xs);
+}
+
+.plan-mode-status-card > header span.is-locked {
+  color: var(--status-warning-text);
+}
+
+.plan-mode-status-card > header button {
+  min-height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  background: transparent;
+  font-size: var(--text-xs);
+}
+
+.plan-mode-status-main {
+  display: grid;
+  gap: 3px;
+}
+
+.plan-mode-status-main > strong {
+  color: var(--text-primary);
+  font-size: var(--text-base);
+}
+
+.plan-mode-status-main > p {
+  overflow: hidden;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  text-overflow: ellipsis;
+}
+
+.context-runtime-list {
+  display: grid;
+  gap: 8px;
+}
+
+.context-runtime-list > div {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.context-runtime-list .task-activity-dot {
+  width: 7px;
+  height: 7px;
+  margin-top: 6px;
+  border-radius: 999px;
+  background: var(--text-accent);
+}
+
+.context-runtime-list p {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  margin: 0;
+}
+
+.context-runtime-list strong,
+.context-runtime-list small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-runtime-list strong {
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+}
+
+.context-runtime-list small {
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.context-runtime-summary .runtime-disclosure {
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+}
+
+.context-runtime-summary .runtime-disclosure > header {
+  min-height: 34px;
+  padding: 6px 0 0;
+}
+
+.context-runtime-summary .runtime-disclosure-body {
+  max-height: 120px;
+  padding: 8px 0 0;
 }
 
 .kimi-progress-list {

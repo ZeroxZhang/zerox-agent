@@ -12,5 +12,23 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [
+            {
+              name: "react-vendor",
+              test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/,
+              priority: 2,
+            },
+            {
+              name: "vendor",
+              test: /node_modules[\\/]/,
+              priority: 1,
+            },
+          ],
+        },
+      },
+    },
   },
 });

@@ -97,4 +97,43 @@ describe("chat task activity restore", () => {
       },
     });
   });
+
+  it("restores a failed terminal event as incomplete with usage counters", () => {
+    const snapshot: ChatSessionActivitySnapshot = {
+      updatedAt: "2026-07-30T10:00:03.000Z",
+      statusEvents: [
+        {
+          sessionId: "session_failed",
+          state: "reasoning",
+          message: "正在执行目标",
+          createdAt: "2026-07-30T10:00:01.000Z",
+          elapsedMs: 1_000,
+        },
+        {
+          sessionId: "session_failed",
+          state: "failed",
+          message: "Token 预算已用尽，任务未完成",
+          toolCallsExecuted: 21,
+          createdAt: "2026-07-30T10:00:03.000Z",
+          elapsedMs: 3_000,
+        },
+      ],
+    };
+
+    const restored = restoreChatTaskActivity(snapshot);
+
+    expect(restored).toMatchObject({
+      status: {
+        kind: "error",
+        message: "Token 预算已用尽，任务未完成",
+      },
+      workPhase: "error",
+      taskActivity: {
+        kind: "error",
+        title: "执行遇到问题",
+        detail: "Token 预算已用尽，任务未完成",
+        toolCallsExecuted: 21,
+      },
+    });
+  });
 });
