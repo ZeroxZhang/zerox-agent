@@ -1,0 +1,153 @@
+.gitignore
+  s_b5666089c7e0c9::t_2e458569d0ee91 13-17
+.zerox/feature_list.json
+  s_b5666089c7e0c9::t_ef83ff4f1a204a 3,5-238
+README.md
+  s_b5666089c7e0c9::t_87d852d28e6dc4 13,44,86,102-103,350,366-373,396,646,681-683,929,945-952,975
+package-lock.json
+  s_b5666089c7e0c9::t_da8f557fc75180 3,9,12-13,18,43-409,436-438,755-757,848-849,853-854,857-860,864-865,1503-1583,2373-2375,2380,2429-2437,2474-2479,2481-2483,2490,2527-2532,2883-2885,2891,2987-2995,3156-3158,3411-3419,3847,3987-3992,4022-4024,4066-4088,4113-4115,4203-4214,4267-4270,4273-4275,4278,4281-4294,4296-4297,4299-4311,4314,4431-4433,4491-4516,4844,4914-4916,4935-4943,4991-5011,5647-5649,5693-5730,5787-5789,6382-6384,6402,6910-6913,7232-7234,7739-7747
+package.json
+  s_b5666089c7e0c9::t_16d01681869720 3,17,44-45,50
+scripts/check-harness-state.mjs
+  s_b5666089c7e0c9::t_32c1bf775dc0b3 19
+scripts/smoke-multi-provider.mjs
+  s_b5666089c7e0c9::t_9889ef9288bace 1-246
+src/main/agentGoalAcceptance.test.ts
+  s_b5666089c7e0c9::t_2cd07614f9700d 813-814,848-849,876-877,2870-2918
+src/main/agentGoalAcceptance.ts
+  s_b5666089c7e0c9::t_2b8f78a48c3f55 855-856,866,868-876,897,902,1069-1083,1104,1109,2083-2084,2092,2094-2142,2151,2168-2169,2178,2182-2186
+src/main/agentGoalController.test.ts
+  s_b5666089c7e0c9::t_0cd392cd9b58ce 49-54
+src/main/agentLoop.test.ts
+  s_b5666089c7e0c9::t_d0b8cacabfb442 540-547,591-661
+src/main/agentLoop.ts
+  s_b5666089c7e0c9::t_df75b9a4a5f1a1 445,934-942
+src/main/agentRunnerService.ts
+  s_b5666089c7e0c9::t_b24190db1087ae 51-52
+src/main/agentToolExecutor.ts
+  s_b5666089c7e0c9::t_fd0c7b78be22ba 52,205-218
+src/main/chatService.test.ts
+  s_b5666089c7e0c9::t_ee175aed320451 39,837-1689,2228-2311,7419-7466
+src/main/chatService.ts
+  s_b5666089c7e0c9::t_038652538933a8 58-62,213-233,254,502-515,607,627,718-853,906,982-988,996-999,1006,1600-1608,1611,1643,1655-1668,1675,1680,1783-1785,3034-3077,3086-3089,3096,3136-3232,4271-4285
+src/main/container.test.ts
+  s_b5666089c7e0c9::t_ea3c2ca9085219 23,1646-1907
+src/main/container.ts
+  s_b5666089c7e0c9::t_3c24a0235e0d00 88-91,93-105,147,344-359,366-385,418,422-472,588-590,801,927-951,986-1001,1004-1007,1010,1012,1017,1073-1082,1085,1087-1092,1096-1097,1116,1122-1141,1145-1153,1617,2163-2390,2639,2674,2697-2699,2728,2986-3042
+src/main/dynamicToolRegistry.ts
+  s_b5666089c7e0c9::t_93c8c3c0002e79 5,60,148-150
+src/main/goalChatService.test.ts
+  s_b5666089c7e0c9::t_44d6bd4b43a1c2 1146-1194
+src/main/goalChatService.ts
+  s_b5666089c7e0c9::t_605da9dc9fea7b 42,376-380,423-425,707,796-841
+src/main/goalRuntimeEngine.test.ts
+  s_b5666089c7e0c9::t_674b99354ba720 881
+src/main/goalRuntimeEngine.ts
+  s_b5666089c7e0c9::t_1356182771013e 727
+src/main/ipc/index.test.ts
+  s_b5666089c7e0c9::t_b2e4846d3445aa 343-446
+src/main/ipc/index.ts
+  s_b5666089c7e0c9::t_31072e4a75705b 79-90,116,630-737,976-1091
+src/main/modelConnectionService.test.ts
+  s_b5666089c7e0c9::t_81e24206e87931 1,91-162
+src/main/modelConnectionService.ts
+  s_b5666089c7e0c9::t_595d331586b933 1-9,11-23,27-30,34,36-37,41-144,147-210,212-231,240-246,248,251-338,340-381,384-387,392,400-427
+src/main/modelSettingsStore.test.ts
+  s_b5666089c7e0c9::t_f7f189021d658f 1,5-9,117-624
+src/main/modelSettingsStore.ts
+  s_b5666089c7e0c9::t_7e46b86f36055f 1-2,5,7,9-11,14-17,19-22,25-31,33,41-57,61-74,81-95,97,101-118,127-128,132-135,138-140,142-143,146,148-149,151,153-157,159-162,165,167-168,170,172,175-178,180-266,268-292,294-297,301-433,435-444,446-623,625,627-648,650-724,727-804,806-824,826-833,835-854,857-938,962-1001,1003-1004,1006-1021,1024-1026,1028-1041,1043-1060,1063-1200
+src/main/nativeGitTools.test.ts
+  s_b5666089c7e0c9::t_14c2f2a321531c 29-34
+src/main/nativeTestRunTool.test.ts
+  s_b5666089c7e0c9::t_a6459f84876a90 1,51-89,91-103
+src/main/nativeTestRunTool.ts
+  s_b5666089c7e0c9::t_0b0a36bde59836 1,4-5,28-31,38-43,46-51,53-75,77-80,83,89-102,104-138,141-189
+src/main/planArtifactWriter.test.ts
+  s_b5666089c7e0c9::t_a3739cb7714be3 1-119
+src/main/planDebateOrchestrator.test.ts
+  s_b5666089c7e0c9::t_aba85bf6fd5318 1-937
+src/main/planDebateOrchestrator.ts
+  s_b5666089c7e0c9::t_74f2bf0de5feba 1-1284
+src/main/planEvidenceVerifier.test.ts
+  s_b5666089c7e0c9::t_6dca0bd09a2e8b 1-90
+src/main/planEvidenceVerifier.ts
+  s_b5666089c7e0c9::t_e3d7441203320e 1-89
+src/main/planModePolicy.test.ts
+  s_b5666089c7e0c9::t_9318dc7e1596e9 1-148
+src/main/planStore.test.ts
+  s_b5666089c7e0c9::t_dcab076f76b08d 1-133
+src/main/planStore.ts
+  s_b5666089c7e0c9::t_2e1ab9eb00b36e 1-346
+src/main/providers/cloudProviders.test.ts
+  s_b5666089c7e0c9::t_98cc67184e9b13 1-194
+src/main/providers/modelMatrix.test.ts
+  s_b5666089c7e0c9::t_39013efedebba6 1-76
+src/main/providers/modelMatrix.ts
+  s_b5666089c7e0c9::t_8e9a2e2122ee13 1-162
+src/main/providers/modelRouter.test.ts
+  s_b5666089c7e0c9::t_6a6a5632de2dca 1-212
+src/main/providers/modelRouter.ts
+  s_b5666089c7e0c9::t_0019f6e6fafdb4 1-163
+src/main/providers/providerChatClient.ts
+  s_b5666089c7e0c9::t_016614603466ff 131-135,140-144,153-154,161-190,197
+src/main/providers/providerFactory.ts
+  s_b5666089c7e0c9::t_4f7ed00fbebfb0 9,11,13-17,21,27-28,40-55,61,69,72-88,92-137,139-165
+src/main/providers/providerRegistry.test.ts
+  s_b5666089c7e0c9::t_cf3e419aa90fb8 1-76
+src/main/providers/vertexProvider.ts
+  s_b5666089c7e0c9::t_1fb41192b97755 1-546
+src/main/storage/migrationBundle.ts
+  s_b5666089c7e0c9::t_e1ba5d4ba6b692 292-327
+src/main/storage/migrations/0001_plan_records.sql
+  s_b5666089c7e0c9::t_b6d540be866e31 1-31
+src/main/toolAuthorizationService.ts
+  s_b5666089c7e0c9::t_b1f8cd05c4f426 16,94-113
+src/preload/index.ts
+  s_b5666089c7e0c9::t_5e34937886a5b4 69-70,72-73,75,77,79-80,82-87,205-240,385-406
+src/renderer/components/AgentChatPanel.tsx
+  s_b5666089c7e0c9::t_bb03ba3c732a9c 49-53,55-59,239,287-295,487-490,568-569,869,881,884-887,929-930,991-1005,1138,1188-1193,1223-1224,1271,1279,1287-1293,1482-1484,1495-1497,2180-2186,2242-2245,2257-2259,2262-2266,2268-2282,2296-2304,2306-2317,2335-2337,2393,2480-2585,2634-2637,2674-2676,2678-2687,2700-2706,2761-2774,3316-3332,3448,3457,3492,3514,3604,3639-3648,3659-3661,3696,3700-3705,3707-3709,3747,3751-3755,3785-3789,3810,3812-3818,3820,3823-3829,3966-4498,5300-5311,5357-5366
+src/renderer/components/GoalStatusStrip.tsx
+  s_b5666089c7e0c9::t_8ac1fadd178951 106-122
+src/renderer/components/ModelSettingsPanel.tsx
+  s_b5666089c7e0c9::t_3f33fed38aabf3 3-13,16-19,21-35,38-40,42-48,50,52-53,56-73,76-78,84,89-141,143-148,150-154,157-161,163-173,175-184,186,190-193,196,200-217,219,223-263,265-292,294-297,301-349,351-352,354-359,362,364,366-417,419-536,538-539,541-554,556-600,602-730,733-743,745,747-758,760-761,763-766,768-778,780-808,810,812-839,841-864,866-867,871-885,887-922,924
+src/renderer/materialDesign.test.ts
+  s_b5666089c7e0c9::t_9c4dd148ec805d 889,928-938,953-958,1114-1117,1180-1271
+src/renderer/styles/cards.css
+  s_b5666089c7e0c9::t_974f8deb5a0aa9 438-1035
+src/renderer/styles/composer.css
+  s_b5666089c7e0c9::t_5d284a4136efeb 487-646
+src/shared/agentGoal.ts
+  s_b5666089c7e0c9::t_2dfda485adc07c 377-381
+src/shared/agentWorkspace.ts
+  s_b5666089c7e0c9::t_8fdc0fb4488d12 78
+src/shared/chat.ts
+  s_b5666089c7e0c9::t_604da0fc3a2763 7-11,120-122,233-238,357
+src/shared/goalTranslation.ts
+  s_b5666089c7e0c9::t_fd973450de67ef 42-46
+src/shared/modelSettings.ts
+  s_b5666089c7e0c9::t_67ad54ca710bf0 3-221
+src/shared/packageScripts.test.ts
+  s_b5666089c7e0c9::t_519e38e425cc97 105,114-117,120-123,126,194-214,228,243-252,256-269
+src/shared/planMode.ts
+  s_b5666089c7e0c9::t_938f79d4312382 1-231
+src/shared/readme.test.ts
+  s_b5666089c7e0c9::t_1372f631e04204 12,55-59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d71147b05d73e09b4bfdba833a1c861a3a46c0ee",
+  "prompts": {},
+  "sessions": {
+    "s_b5666089c7e0c9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fb15b-d1e5-7342-8c70-084fd7d67c8c",
+        "model": "unknown"
+      },
+      "human_author": "Zerox Zhang <22983136+ZeroxZhang@users.noreply.github.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
