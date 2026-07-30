@@ -39,6 +39,11 @@ export type GoalDraft = {
   workspaceId?: string;
   originMessageId?: string;
   sourceMessage: string;
+  sourcePlanRef?: {
+    planId: string;
+    revision: number;
+    sha256: string;
+  };
   normalizedDescription: string;
   successCriteria: SuccessCriterion[];
   acceptanceCoverage: GoalAcceptanceCoverage;

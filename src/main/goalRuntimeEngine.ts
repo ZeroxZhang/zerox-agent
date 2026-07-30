@@ -724,7 +724,7 @@ export function createGoalRuntimeEngine(options: {
           toolResultOffloadStore: options.toolResultOffloadStore,
           toolResultOffloadThreshold: options.toolResultOffloadThreshold,
           pauseOnFailureLoop: true,
-          pauseOnStrategyGuard: true,
+          pauseOnStrategyGuard: false,
           pauseOnTurnLimit: false,
           ...(runSignal ? { signal: runSignal } : {}),
           onTurn(turn, phase) {

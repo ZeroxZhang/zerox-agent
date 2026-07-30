@@ -537,6 +537,14 @@ describe("agent loop", () => {
         count: 4,
       },
     ]);
+    expect(
+      requests[4]?.messages.some(
+        (message) =>
+          message.role === "system" &&
+          message.content.includes("Strategy guard warning") &&
+          message.content.includes("inventory"),
+      ),
+    ).toBe(true);
   });
 
   it("can pause instead of continuing after a strategy guard event", async () => {
@@ -578,6 +586,77 @@ describe("agent loop", () => {
     expect(result.summary).toContain("策略守护触发");
     expect(result.summary).toContain("file_list");
     expect(result.summary).toContain("批量或递归策略");
+  });
+
+  it("does not pause normal multi-file code generation after four file writes", async () => {
+    let requests = 0;
+    const guardEvents: string[] = [];
+    const fileWriteTool: ToolDefinition = {
+      type: "function",
+      function: {
+        name: "file_write",
+        description: "Write one project file",
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string" },
+            content: { type: "string" },
+          },
+          required: ["path", "content"],
+        },
+      },
+    };
+    const chatClient: ChatClient = {
+      async complete() {
+        requests += 1;
+        if (requests <= 4) {
+          return {
+            content: null,
+            finishReason: "tool_calls",
+            toolCalls: [
+              {
+                id: `write_${requests}`,
+                type: "function",
+                function: {
+                  name: "file_write",
+                  arguments: JSON.stringify({
+                    path: `/tmp/project/file_${requests}.ts`,
+                    content: `export const value${requests} = ${requests};`,
+                  }),
+                },
+              },
+            ],
+          };
+        }
+        return {
+          content: "四个项目文件已经生成并验证。",
+          finishReason: "stop",
+          toolCalls: [],
+        };
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "实现一个包含四个源码文件的功能" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(),
+        maxTurns: 6,
+        pauseOnStrategyGuard: true,
+        tools: [fileWriteTool],
+        onStrategyGuard(event) {
+          guardEvents.push(event.code);
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: "succeeded",
+      toolCallsExecuted: 4,
+      summary: "四个项目文件已经生成并验证。",
+    });
+    expect(guardEvents).toEqual([]);
   });
 
   it("keeps paused multi-tool histories provider-valid by not leaving unmatched tool calls", async () => {

@@ -55,6 +55,11 @@ import type {
 import { getSystemPromptAssembler } from "../shared/agentProtocol";
 import type { GoalReviewDecision } from "../shared/agentGoalReview";
 import type { GoalDraft } from "../shared/goalTranslation";
+import type {
+  PlanMode,
+  PlanModelAssignments,
+  PlanRecord,
+} from "../shared/planMode";
 import type { AgentRunRecord, RunScheduledTaskResult } from "../shared/agentRuns";
 import type { ExecutionContextMemoryScope } from "../shared/executionContextPackage";
 import type { MemoryRecord, MemorySearchResult } from "../shared/memory";
@@ -205,6 +210,27 @@ type ChatGoalDraftService = {
   }): Promise<GoalDraft>;
 };
 
+type ChatPlanService = {
+  createPlan(input: {
+    sessionId: string;
+    workspaceId?: string;
+    workspaceRoot?: string;
+    sourceMessage: string;
+    mode: PlanMode;
+    modelAssignments?: PlanModelAssignments;
+    signal?: AbortSignal;
+  }): Promise<PlanRecord>;
+  getInputRoutingPlan(sessionId: string): Promise<PlanRecord | null>;
+  continueWithInput(
+    planId: string,
+    userInput: string,
+    signal?: AbortSignal,
+  ): Promise<
+    | { ok: true; plan: PlanRecord; message: string }
+    | { ok: false; message: string; plan?: PlanRecord }
+  >;
+};
+
 type GoalIntentRoute =
   | { kind: "set_goal"; description: string }
   | { kind: "continue_goal" }
@@ -225,6 +251,7 @@ export function createChatService(options: {
     Partial<Pick<ChatSessionStore, "appendActivityEvent" | "get" | "list">>;
   goalService?: ChatGoalService;
   goalDraftService?: ChatGoalDraftService;
+  planService?: ChatPlanService;
   taskStore?: Pick<ScheduledTaskStore, "create" | "list">;
   runScheduledTask?: (
     taskId: string,
@@ -472,6 +499,20 @@ export function createChatService(options: {
         processedAttachments.textContext,
       );
       const hasAttachments = processedAttachments.metadata.length > 0;
+      const preexistingInputRoutingPlan =
+        options.planService && input.sessionId
+          ? await options.planService.getInputRoutingPlan(input.sessionId)
+          : null;
+      if (
+        processedAttachments.images.length > 0 &&
+        (input.mode === "goal_plan" || preexistingInputRoutingPlan)
+      ) {
+        return {
+          ok: false,
+          message:
+            "只读 Plan Mode 暂不支持图片附件。请先移除图片，或把关键信息转为文本附件后再规划。",
+        };
+      }
 
       let sessionId = input.sessionId ?? createId();
       const startedAtMs = getNowMs(options.now);
@@ -563,6 +604,7 @@ export function createChatService(options: {
         executedRunId?: string;
         goalId?: string;
         goalEventRef?: string;
+        terminalType?: "completed" | "failed";
       }): Promise<string | null> {
         const finalizedOutput = finalizeAssistantOutput(input.content);
         const assistantMessageId = await appendAssistantMessage({
@@ -582,7 +624,7 @@ export function createChatService(options: {
           emitOutputPart(finalizedOutput.finalTextPart);
         }
         emitTerminalStreamEvent({
-          type: "completed",
+          type: input.terminalType ?? "completed",
           message: input.content,
           ...(assistantMessageId ? { finalMessageId: assistantMessageId } : {}),
         });
@@ -673,6 +715,142 @@ export function createChatService(options: {
         createdAt: new Date(startedAtMs).toISOString(),
       });
 
+      if (options.planService) {
+        const inputRoutingPlan =
+          preexistingInputRoutingPlan ??
+          (await options.planService.getInputRoutingPlan(sessionId));
+        if (inputRoutingPlan) {
+          if (internalOptions.skipUserMessageAppend) {
+            const reply =
+              "当前会话已进入只读 Plan Mode，这个更早的 Skill 输入已作废；没有启动 Skill、普通 Agent 或写入工具。请直接在 Plan 输入框补充要求。";
+            emitStatus.send({
+              state: "paused",
+              message: "旧 Skill 输入已作废，当前会话保持只读规划",
+              toolCallsExecuted: 0,
+            });
+            await persistAssistantReply({
+              content: reply,
+              goalEventRef: `plan-invalidated-skill-input:${inputRoutingPlan.id}:${inputRoutingPlan.revision}`,
+            });
+            return {
+              ok: true,
+              reply,
+              sessionId,
+              relatedMemories: [],
+              memoryId: null,
+              plan: inputRoutingPlan,
+            };
+          }
+          const canRevisePlan =
+            inputRoutingPlan.status === "awaiting_input" ||
+            inputRoutingPlan.status === "awaiting_confirmation" ||
+            (inputRoutingPlan.status === "paused" &&
+              Boolean(inputRoutingPlan.finalArtifact));
+          if (!canRevisePlan) {
+            const reply = formatLockedPlanReply(inputRoutingPlan);
+            emitStatus.send({
+              state: "paused",
+              message: "计划仍处于只读状态，请先处理计划恢复入口",
+              toolCallsExecuted: 0,
+            });
+            await persistAssistantReply({
+              content: reply,
+              goalEventRef: `plan-locked:${inputRoutingPlan.id}:${inputRoutingPlan.revision}`,
+            });
+            return {
+              ok: true,
+              reply,
+              sessionId,
+              relatedMemories: [],
+              memoryId: null,
+              plan: inputRoutingPlan,
+            };
+          }
+          emitStatus.send({
+            state: "reasoning",
+            message: "正在把补充或修改意见纳入只读计划并重新执行规划辩论",
+            toolCallsExecuted: 0,
+          });
+          let continuation;
+          try {
+            continuation = await options.planService.continueWithInput(
+              inputRoutingPlan.id,
+              modelUserMessage,
+              runtimeOptions.signal,
+            );
+          } catch (error) {
+            if (isAbortError(error, runtimeOptions.signal)) {
+              emitStatus.send({
+                state: "canceled",
+                message: "规划已中断",
+                toolCallsExecuted: 0,
+              });
+              emitTerminalStreamEvent({
+                type: "canceled",
+                message: "已中断任务。",
+              });
+              return { ok: false, message: "已中断任务。" };
+            }
+            const message =
+              error instanceof Error
+                ? `继续规划失败：${error.message}`
+                : "继续规划失败。";
+            emitStatus.send({
+              state: "failed",
+              message,
+              toolCallsExecuted: 0,
+            });
+            emitTerminalStreamEvent({ type: "failed", message });
+            return { ok: false, message };
+          }
+          if (!continuation.ok) {
+            emitStatus.send({
+              state: "failed",
+              message: continuation.message,
+              toolCallsExecuted: 0,
+            });
+            emitTerminalStreamEvent({
+              type: "failed",
+              message: continuation.message,
+            });
+            return { ok: false, message: continuation.message };
+          }
+          const plan = continuation.plan;
+          const reply = formatPlanContinuationReply(plan);
+          emitStatus.send({
+            state:
+              plan.status === "awaiting_confirmation" ? "completed" : "paused",
+            message:
+              plan.status === "awaiting_confirmation"
+                ? "计划已更新，等待确认"
+                : "计划仍需补充信息或处理门禁",
+            toolCallsExecuted: 0,
+          });
+          await persistAssistantReply({
+            content: reply,
+            goalEventRef: `plan-input:${plan.id}:${plan.revision}`,
+          });
+          appendRawHistoryEntry({
+            historyIndexStore: options.historyIndexStore,
+            createId,
+            sessionId,
+            requestId,
+            role: "assistant",
+            content: reply,
+            workspaceId: chatRunContext?.workspaceId ?? input.workspaceId,
+            createdAt: new Date(getNowMs(options.now)).toISOString(),
+          });
+          return {
+            ok: true,
+            reply,
+            sessionId,
+            relatedMemories: [],
+            memoryId: null,
+            plan,
+          };
+        }
+      }
+
       const pendingContinuation = pendingContinuations.get(sessionId);
       // v3.6.0: TTL-based eviction for stale continuations (CONC-08).
       // If a continuation has been pending for > 1 hour, clean it up.
@@ -725,6 +903,7 @@ export function createChatService(options: {
       let resolvedSkillInput = internalOptions.resolvedSkillInput;
       if (
         requestedSkill?.kind === "matched" &&
+        input.mode !== "goal_plan" &&
         !continuationToResume &&
         !resolvedSkillInput
       ) {
@@ -800,8 +979,13 @@ export function createChatService(options: {
           : undefined;
       const goalRoute = await tryRouteGoalIntent({
         route:
-          input.mode === "goal_draft"
-            ? { kind: "set_goal", description: extractGoalDescription(userMessage) }
+          input.mode === "goal_draft" || input.mode === "goal_plan"
+            ? {
+                kind: "set_goal",
+                description: extractGoalDescription(
+                  input.mode === "goal_plan" ? modelUserMessage : userMessage,
+                ),
+              }
             : hasAttachments
               ? { kind: "none" }
               : detectGoalIntent(userMessage),
@@ -809,12 +993,17 @@ export function createChatService(options: {
         chatSessionStore: options.chatSessionStore,
         goalService: options.goalService,
         goalDraftService: options.goalDraftService,
+        planService: options.planService,
+        usePlanMode: input.mode === "goal_plan",
+        planMode: input.planMode ?? "direct",
+        planModelAssignments: input.planModelAssignments,
         originMessageId: userMessageId,
         sessionId,
         emitStatus,
         now: options.now,
         signal: runtimeOptions.signal,
         workspaceId: chatRunContext?.workspaceId ?? input.workspaceId,
+        workspaceRoot: chatRunContext?.workspaceRoot,
         selectedSkill: selectedSkillForGoal,
         selectedSkillInputValues: selectedSkillInputValuesForGoal,
       });
@@ -1408,10 +1597,18 @@ export function createChatService(options: {
             },
           );
           reply = loopResult.summary;
-          toolCallsUsed = loopResult.toolCallsExecuted;
+          const finalToolCallsExecuted = Math.max(
+            loopResult.toolCallsExecuted,
+            observedToolCallsExecuted,
+          );
+          toolCallsUsed = finalToolCallsExecuted;
+          accumulatedUsage = reconcileAgentLoopTokenUsage(
+            accumulatedUsage,
+            loopResult.tokensConsumed,
+          );
           await evidence.append("final_summary", {
             status: loopResult.status,
-            toolCallsExecuted: loopResult.toolCallsExecuted,
+            toolCallsExecuted: finalToolCallsExecuted,
           });
 
           if (loopResult.status === "canceled") {
@@ -1443,7 +1640,7 @@ export function createChatService(options: {
               runId: evidence.runId,
               reason: loopResult.continuation.reason,
               maxTurns: loopResult.continuation.maxTurns,
-              toolCallsExecuted: loopResult.continuation.toolCallsExecuted,
+              toolCallsExecuted: finalToolCallsExecuted,
               message: loopResult.summary,
             };
             emitStatus.send({
@@ -1455,19 +1652,32 @@ export function createChatService(options: {
                     ? "策略守护触发，等待确认"
                   : "已到达检查点，等待确认",
               maxTurns: loopResult.continuation.maxTurns,
-              toolCallsExecuted: loopResult.continuation.toolCallsExecuted,
+              toolCallsExecuted: finalToolCallsExecuted,
+            });
+          } else if (loopResult.status === "failed") {
+            pendingContinuations.delete(sessionId);
+            agentStatus = {
+              state: "failed",
+              runId: evidence.runId,
+              toolCallsExecuted: finalToolCallsExecuted,
+              message: loopResult.summary,
+            };
+            emitStatus.send({
+              state: "failed",
+              message: formatAgentLoopFailure(loopResult.summary),
+              toolCallsExecuted: finalToolCallsExecuted,
             });
           } else {
             pendingContinuations.delete(sessionId);
             agentStatus = {
               state: "completed",
               runId: evidence.runId,
-              toolCallsExecuted: loopResult.toolCallsExecuted,
+              toolCallsExecuted: finalToolCallsExecuted,
             };
             emitStatus.send({
               state: "completed",
               message: "任务已完成",
-              toolCallsExecuted: loopResult.toolCallsExecuted,
+              toolCallsExecuted: finalToolCallsExecuted,
             });
           }
 
@@ -1570,6 +1780,9 @@ export function createChatService(options: {
       const assistantMessageId = await persistAssistantReply({
         content: reply,
         relatedMemoryIds: relatedMemoryResults.map((result) => result.record.id),
+        ...(agentStatus?.state === "failed"
+          ? { terminalType: "failed" as const }
+          : {}),
       });
       appendRawHistoryEntry({
         historyIndexStore: options.historyIndexStore,
@@ -2818,6 +3031,50 @@ function deriveGoalRequirementLabels(description: string): string[] {
   return uniqueLabels.length ? uniqueLabels.slice(0, 12) : [description.trim()];
 }
 
+function formatPlanContinuationReply(plan: PlanRecord): string {
+  const title =
+    plan.finalArtifact?.title ?? plan.taskContract.objective ?? "未命名计划";
+  if (plan.status === "awaiting_confirmation") {
+    return `已根据你的补充信息重新生成计划「${title}」，确认前仍不会执行任何任务。`;
+  }
+  if (plan.status === "awaiting_input") {
+    const reason =
+      plan.finalArtifact?.gateReason?.trim() ||
+      plan.finalArtifact?.unresolvedQuestions[0]?.trim() ||
+      "仍有必要信息需要补充。";
+    return `已将补充信息纳入规划，但仍需确认：${reason}`;
+  }
+  const failedRound = [...plan.rounds]
+    .reverse()
+    .find((round) => round.status === "failed");
+  return `已将补充信息纳入规划，但计划尚未通过门禁：${
+    failedRound?.error ?? plan.finalArtifact?.gateReason ?? "请检查计划详情。"
+  }`;
+}
+
+function formatLockedPlanReply(plan: PlanRecord): string {
+  const failedRound = [...plan.rounds]
+    .reverse()
+    .find((round) => round.status === "failed");
+  if (failedRound) {
+    return `当前计划仍停在 ${failedRound.kind.toUpperCase()} 失败轮次。为避免绕过只读 Plan Mode，本条消息没有启动普通 Agent 或任何写入工具；请使用“重试失败轮次”，或先丢弃计划再开始普通对话。`;
+  }
+  if (plan.status === "drafting") {
+    return "当前计划仍处于生成状态。为避免绕过只读 Plan Mode，本条消息没有启动普通 Agent 或任何写入工具；请等待规划完成，或丢弃后重新开始。";
+  }
+  return "当前计划尚未退出只读 Plan Mode。本条消息没有启动普通 Agent 或任何写入工具；请先处理计划卡片中的恢复或丢弃操作。";
+}
+
+function formatAgentLoopFailure(summary: string): string {
+  if (summary.startsWith("Token budget exceeded:")) {
+    return "Token 预算已用尽，任务未完成";
+  }
+  if (summary.startsWith("Wall-clock budget exceeded")) {
+    return "运行时间预算已用尽，任务未完成";
+  }
+  return "Agent 执行失败，任务未完成";
+}
+
 async function tryRouteGoalIntent(options: {
   route: GoalIntentRoute;
   activeGoal: ChatSessionGoalSummary | null;
@@ -2826,12 +3083,17 @@ async function tryRouteGoalIntent(options: {
     | undefined;
   goalService: ChatGoalService | undefined;
   goalDraftService: ChatGoalDraftService | undefined;
+  planService: ChatPlanService | undefined;
+  usePlanMode: boolean;
+  planMode: PlanMode;
+  planModelAssignments?: PlanModelAssignments;
   originMessageId: string | null;
   sessionId: string;
   emitStatus?: ReturnType<typeof createChatStatusEmitter>;
   now?: () => Date;
   signal?: AbortSignal;
   workspaceId?: string;
+  workspaceRoot?: string;
   selectedSkill?: SkillRecord;
   selectedSkillInputValues?: Record<string, SkillInputValue>;
 }): Promise<{ result: SendChatMessageResult } | null> {
@@ -2871,6 +3133,103 @@ async function tryRouteGoalIntent(options: {
   }
 
   if (options.route.kind === "set_goal") {
+    if (options.usePlanMode && options.planService) {
+      options.emitStatus?.send({
+        state: "reasoning",
+        message:
+          options.planMode === "debate"
+            ? "正在执行 A1 → B1 → A2 → B2 → C 规划辩论"
+            : "正在生成直接计划",
+        toolCallsExecuted: 0,
+      });
+      let plan: PlanRecord;
+      try {
+        plan = await options.planService.createPlan({
+          sessionId: options.sessionId,
+          ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
+          ...(options.workspaceRoot ? { workspaceRoot: options.workspaceRoot } : {}),
+          sourceMessage: options.route.description,
+          mode: options.planMode,
+          ...(options.planModelAssignments
+            ? { modelAssignments: options.planModelAssignments }
+            : {}),
+          ...(options.signal ? { signal: options.signal } : {}),
+        });
+      } catch (error) {
+        if (isAbortError(error, options.signal)) {
+          options.emitStatus?.send({
+            state: "canceled",
+            message: "规划已中断",
+            toolCallsExecuted: 0,
+          });
+          options.emitStatus?.sendTerminalEvent({
+            type: "canceled",
+            message: "已中断任务。",
+          });
+          return {
+            result: {
+              ok: false,
+              message: "已中断任务。",
+            },
+          };
+        }
+        const message =
+          error instanceof Error
+            ? `生成计划失败：${error.message}`
+            : "生成计划失败。";
+        options.emitStatus?.send({
+          state: "failed",
+          message,
+          toolCallsExecuted: 0,
+        });
+        options.emitStatus?.sendTerminalEvent({
+          type: "failed",
+          message,
+        });
+        return {
+          result: {
+            ok: false,
+            message,
+          },
+        };
+      }
+      const reply =
+        plan.status === "awaiting_confirmation"
+          ? `已生成${plan.mode === "debate" ? "辩论" : "直接"}计划：${plan.finalArtifact?.title ?? plan.taskContract.objective}。确认前不会执行任何任务。`
+          : `计划已暂停：${plan.finalArtifact?.gateReason ?? plan.rounds.find((round) => round.status === "failed")?.error ?? "需要补充信息或重试失败轮次"}。`;
+      options.emitStatus?.send({
+        state:
+          plan.status === "awaiting_confirmation" ? "completed" : "paused",
+        message:
+          plan.status === "awaiting_confirmation"
+            ? "计划已生成，等待确认"
+            : "计划未通过执行门禁",
+        toolCallsExecuted: 0,
+      });
+      await appendGoalReply({
+        content: reply,
+        goalEventRef: `plan_created:${plan.id}`,
+      });
+      return {
+        result: {
+          ok: true,
+          reply,
+          sessionId: options.sessionId,
+          relatedMemories: [],
+          memoryId: null,
+          plan,
+          ...(options.selectedSkill
+            ? {
+                selectedSkill: {
+                  name: options.selectedSkill.manifest.name,
+                  displayName: options.selectedSkill.manifest.displayName,
+                },
+              }
+            : {}),
+        },
+      };
+    }
+
     if (options.goalDraftService) {
       const goalDraft = await options.goalDraftService.createFromChat({
         sessionId: options.sessionId,
@@ -3906,6 +4265,21 @@ function mergeChatSessionTokenUsage(
     ...(promptTokens !== undefined ? { promptTokens } : {}),
     ...(completionTokens !== undefined ? { completionTokens } : {}),
     estimated: current.estimated || next.estimated,
+  };
+}
+
+function reconcileAgentLoopTokenUsage(
+  current: ChatSessionTokenUsage | null,
+  tokensConsumed: number | undefined,
+): ChatSessionTokenUsage | null {
+  const normalized = normalizeTokenCount(tokensConsumed);
+  if (normalized === undefined || normalized <= (current?.totalTokens ?? 0)) {
+    return current;
+  }
+  return {
+    ...(current ?? {}),
+    totalTokens: normalized,
+    estimated: current?.estimated ?? true,
   };
 }
 

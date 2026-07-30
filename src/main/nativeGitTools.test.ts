@@ -26,7 +26,12 @@ describe("native git tools", () => {
   });
 
   afterEach(async () => {
-    await rm(repoDir, { recursive: true, force: true });
+    await rm(repoDir, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 50,
+    });
   });
 
   it("returns structured git status", async () => {

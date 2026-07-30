@@ -1,6 +1,6 @@
 {
   "name": "zerox-agent",
-  "version": "3.7.1",
+  "version": "3.8.0",
   "description": "Zerox Agent, a local-first desktop agent built module by module.",
   "main": "dist-electron/main/main.js",
   "scripts": {
@@ -14,6 +14,7 @@
     "verify": "npm test && npm run build && node scripts/run-agent-evals.mjs && node scripts/run-memory-evals.mjs",
     "doctor": "npm run verify",
     "smoke:llm": "npm run build && node scripts/check-api-info.mjs",
+    "smoke:providers": "npm run build && node scripts/smoke-multi-provider.mjs",
     "smoke:prod": "npm run build && BUILDING_AGENT_SMOKE=1 electron .",
     "validate:agent": "npm run build && BUILDING_AGENT_VALIDATE=1 electron .",
     "eval:agent": "npm run build && node scripts/run-agent-evals.mjs",
@@ -40,10 +41,13 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.1098.0",
+    "@aws-sdk/credential-providers": "^3.1098.0",
     "better-sqlite3": "^12.11.1",
     "cron-parser": "^5.5.0",
     "drizzle-orm": "^0.45.2",
     "electron-updater": "^6.8.9",
+    "google-auth-library": "^10.9.1",
     "ipaddr.js": "^2.4.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

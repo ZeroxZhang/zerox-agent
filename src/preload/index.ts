@@ -66,11 +66,25 @@ import type {
   ApplyAcceptedLearningReport,
 } from "../shared/agentLearning";
 import type {
+  ModelCatalogMutationResult,
+  ModelProfileInput,
   ModelSettingsInput,
+  ProviderConnectionInput,
+  PublicModelCatalog,
   PublicModelSettings,
+  SaveModelProfileResult,
   SaveModelSettingsResult,
+  SaveProviderConnectionResult,
   TestModelConnectionResult,
+  TestProviderConnectionInput,
+  TestProviderConnectionResult,
 } from "../shared/modelSettings";
+import type {
+  ConfirmPlanInput,
+  ConfirmPlanResult,
+  PlanOperationResult,
+  PlanRecord,
+} from "../shared/planMode";
 import type { NavigationSection } from "../shared/navigation";
 import type {
   AgentRunEvent,
@@ -188,6 +202,42 @@ const buildingAgent = {
     ipcRenderer.invoke("modelSettings:save", input),
   testModelConnection: (): Promise<TestModelConnectionResult> =>
     ipcRenderer.invoke("modelSettings:testConnection"),
+  loadModelCatalog: (): Promise<PublicModelCatalog> =>
+    ipcRenderer.invoke("modelCatalog:load"),
+  saveProviderConnection: (
+    input: ProviderConnectionInput,
+  ): Promise<SaveProviderConnectionResult> =>
+    ipcRenderer.invoke("modelCatalog:saveConnection", input),
+  deleteProviderConnection: (
+    connectionId: string,
+  ): Promise<ModelCatalogMutationResult> =>
+    ipcRenderer.invoke("modelCatalog:deleteConnection", connectionId),
+  saveModelProfile: (
+    input: ModelProfileInput,
+  ): Promise<SaveModelProfileResult> =>
+    ipcRenderer.invoke("modelCatalog:saveProfile", input),
+  deleteModelProfile: (
+    profileId: string,
+  ): Promise<ModelCatalogMutationResult> =>
+    ipcRenderer.invoke("modelCatalog:deleteProfile", profileId),
+  setDefaultModelProfile: (
+    purpose: "chat" | "embedding",
+    profileId: string | null,
+  ): Promise<ModelCatalogMutationResult> =>
+    ipcRenderer.invoke(
+      "modelCatalog:setDefaultProfile",
+      purpose,
+      profileId,
+    ),
+  setModelHidden: (
+    routedModelId: string,
+    hidden: boolean,
+  ): Promise<ModelCatalogMutationResult> =>
+    ipcRenderer.invoke("modelCatalog:setModelHidden", routedModelId, hidden),
+  testProviderConnection: (
+    input: TestProviderConnectionInput,
+  ): Promise<TestProviderConnectionResult> =>
+    ipcRenderer.invoke("modelCatalog:testProvider", input),
   listSkills: (): Promise<SkillDiscoveryResult> =>
     ipcRenderer.invoke("skills:list"),
   listScheduledTasks: (): Promise<ScheduledTask[]> =>
@@ -332,6 +382,28 @@ const buildingAgent = {
     draftId: string,
   ): Promise<GoalDraftDiscardResult> =>
     ipcRenderer.invoke("goalDraft:discard", draftId),
+  getPlan: (planId: string): Promise<PlanRecord | null> =>
+    ipcRenderer.invoke("plans:get", planId),
+  getLatestPlanForSession: (
+    sessionId: string,
+  ): Promise<PlanRecord | null> =>
+    ipcRenderer.invoke("plans:getLatestBySession", sessionId),
+  retryFailedPlanRound: (
+    planId: string,
+    replacementProfileId?: string,
+  ): Promise<PlanOperationResult> =>
+    ipcRenderer.invoke(
+      "plans:retryFailedRound",
+      planId,
+      replacementProfileId,
+    ),
+  discardPlan: (
+    planId: string,
+    expectedRevision: number,
+  ): Promise<PlanOperationResult> =>
+    ipcRenderer.invoke("plans:discard", planId, expectedRevision),
+  confirmPlan: (input: ConfirmPlanInput): Promise<ConfirmPlanResult> =>
+    ipcRenderer.invoke("plans:confirm", input),
   getGoal: (goalId: string): Promise<Goal | null> =>
     ipcRenderer.invoke("goal:get", goalId),
   listActiveGoals: (): Promise<Goal[]> => ipcRenderer.invoke("goal:listActive"),

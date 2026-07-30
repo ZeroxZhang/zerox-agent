@@ -878,7 +878,7 @@ describe("goal runtime engine", () => {
     expect(result.tokens).toBeGreaterThan(0);
     expect(loopInputs).toHaveLength(1);
     expect(loopInputs[0]?.taskId).toBe("goal:goal_1");
-    expect(loopInputs[0]?.pauseOnStrategyGuard).toBe(true);
+    expect(loopInputs[0]?.pauseOnStrategyGuard).toBe(false);
     expect(loopInputs[0]?.pauseOnTurnLimit).toBe(false);
     expect(loopInputs[0]?.maxTurns).toBeGreaterThan(8);
     expect(loopInputs[0]?.systemPrompt).toContain("长期目标执行");

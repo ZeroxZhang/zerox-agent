@@ -1,5 +1,224 @@
 export type ProviderId = "openai-compatible" | "anthropic" | "gemini" | (string & {});
 
+export const providerKinds = [
+  "openai",
+  "anthropic",
+  "gemini",
+  "bedrock",
+  "vertex",
+  "zai",
+  "deepseek",
+  "kimi",
+  "minimax",
+  "qwen",
+  "xai",
+  "mistral",
+  "meta",
+  "together",
+  "fireworks",
+  "openrouter",
+  "ollama",
+] as const;
+
+export type ProviderKind = (typeof providerKinds)[number];
+export type ProviderCredentialSource =
+  | "stored"
+  | "environment"
+  | "ambient"
+  | "none";
+
+export type ProviderFieldChoice = {
+  value: string;
+  label: string;
+  tag?: string;
+  description?: string;
+  command?: string;
+};
+
+export type ProviderField = {
+  key: string;
+  label: string;
+  secret: boolean;
+  required: boolean;
+  help?: string;
+  placeholder?: string;
+  defaultValue?: string;
+  choices?: ProviderFieldChoice[];
+  showWhen?: Record<string, string>;
+};
+
+export type ProviderDescriptor = {
+  kind: ProviderKind;
+  title: string;
+  description: string;
+  needsCredential: boolean;
+  recommendedModel?: string;
+  environmentKey?: string;
+  fields: ProviderField[];
+  capabilities: {
+    nativeApi: boolean;
+    local: boolean;
+    customEndpoint: boolean;
+  };
+};
+
+export type ProviderConnectionInput = {
+  id?: string;
+  name: string;
+  providerKind: ProviderKind;
+  values: Record<string, string>;
+  credentialSource?: ProviderCredentialSource;
+  expectedRevision?: number;
+};
+
+export type PublicProviderConnection = {
+  id: string;
+  name: string;
+  providerKind: ProviderKind;
+  values: Record<string, string>;
+  credentialSource: ProviderCredentialSource;
+  hasCredential: boolean;
+  availability?: "unknown" | "available" | "unavailable";
+  availableModelIds?: string[];
+  keySetAt?: string;
+  lastUsedAt?: string;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ModelCapabilities = {
+  tools: boolean;
+  vision: boolean;
+  pdf: boolean;
+  streaming: boolean;
+  parallelToolCalls: boolean;
+};
+
+export type ModelCatalogEntry = {
+  routedModelId: string;
+  providerKind: ProviderKind;
+  modelId: string;
+  label: string;
+  contextWindow?: number;
+  capabilities: ModelCapabilities;
+  verified: boolean;
+  verifiedAt?: string;
+};
+
+export type ModelPurpose = "chat" | "embedding";
+
+export type ModelProfile = {
+  id: string;
+  name: string;
+  connectionId: string;
+  modelId: string;
+  purpose: ModelPurpose;
+  generation: {
+    temperature: number;
+    maxTokens: number;
+    thinkingEnabled: boolean;
+    thinkingBudgetTokens: number;
+  };
+  capabilityOverrides?: Partial<ModelCapabilities>;
+  custom: boolean;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ModelProfileInput = {
+  id?: string;
+  name: string;
+  connectionId: string;
+  modelId: string;
+  purpose: ModelPurpose;
+  generation?: Partial<ModelProfile["generation"]>;
+  capabilityOverrides?: Partial<ModelCapabilities>;
+  expectedRevision?: number;
+};
+
+export type PublicModelCatalog = {
+  schemaVersion: 2;
+  descriptors: ProviderDescriptor[];
+  entries: ModelCatalogEntry[];
+  connections: PublicProviderConnection[];
+  profiles: ModelProfile[];
+  defaultChatProfileId: string | null;
+  defaultEmbeddingProfileId: string | null;
+  hiddenRoutedModelIds: string[];
+  updatedAt: string | null;
+};
+
+export type ResolvedModelBinding = {
+  profileId: string;
+  connectionId: string;
+  providerKind: ProviderKind;
+  modelId: string;
+  revision: number;
+  connectionRevision?: number;
+  profileRevision?: number;
+  baseUrl?: string;
+  capabilities: ModelCapabilities;
+  generation: ModelProfile["generation"];
+};
+
+export type SaveProviderConnectionResult =
+  | { ok: true; catalog: PublicModelCatalog; connection: PublicProviderConnection }
+  | { ok: false; message: string; errors?: Record<string, string> };
+
+export type SaveModelProfileResult =
+  | { ok: true; catalog: PublicModelCatalog; profile: ModelProfile }
+  | { ok: false; message: string };
+
+export type ModelCatalogMutationResult =
+  | { ok: true; catalog: PublicModelCatalog }
+  | { ok: false; message: string };
+
+export type TestProviderConnectionResult =
+  | {
+      ok: true;
+      message: string;
+      providerKind: ProviderKind;
+      latencyMs: number;
+      checkedAt: string;
+      models?: string[];
+    }
+  | { ok: false; message: string };
+
+export type TestProviderConnectionInput =
+  | { profileId: string }
+  | {
+      connection: ProviderConnectionInput;
+      modelId?: string;
+    };
+
+export function isProviderKind(value: unknown): value is ProviderKind {
+  return (
+    typeof value === "string" &&
+    (providerKinds as readonly string[]).includes(value)
+  );
+}
+
+export function defaultModelCapabilities(): ModelCapabilities {
+  return {
+    tools: false,
+    vision: false,
+    pdf: false,
+    streaming: true,
+    parallelToolCalls: false,
+  };
+}
+
+export function defaultModelGenerationSettings(): ModelProfile["generation"] {
+  return {
+    temperature: 0.2,
+    maxTokens: 8192,
+    thinkingEnabled: false,
+    thinkingBudgetTokens: 8192,
+  };
+}
+
 export type ModelSettingsInput = {
   baseUrl: string;
   chatModel: string;

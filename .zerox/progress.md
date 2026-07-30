@@ -1,5 +1,159 @@
 # Zerox Harness Progress
 
+## 2026-07-30 - v3.8.0 Debate Complete User-Path Closure
+
+- Re-reviewed the full Direct/Debate lifecycle as a session state machine and
+  recorded the normative action matrix in
+  `docs/design/zerox-agent-3-8-0-debate-user-path-acceptance.md`. The review
+  covers creation, drafting, required input, ready-plan feedback, round
+  failure, replacement-model retry, cancellation, discard, explicit
+  confirmation, idempotent recovery, execution terminal states, session
+  switching, and application restart.
+- Diagnosed the reported escape from Plan Mode:
+  - the renderer Goal toggle was incorrectly treated as the routing authority;
+  - after a Plan returned `awaiting_input`, a later message sent with the
+    toggle off bypassed the Plan and entered the ordinary writable AgentLoop;
+  - the resulting AgentLoop exhausted 68,374 tokens after 21 visible tool
+    calls, but ChatService mapped its `failed` result to a completed task.
+- Made persisted Plan state authoritative:
+  - every active pre-execution Plan intercepts its session's next message before
+    Skill discovery, memory access, ordinary model routing, or AgentLoop;
+  - `awaiting_input`, `awaiting_confirmation`, and gated final plans accept
+    input only as a new read-only revision; old effective rounds, final
+    artifact, and projection references are invalidated;
+  - drafting and failed-round Plans lock Composer input to retry or discard;
+  - the Goal toggle and workspace selector remain visibly locked until explicit
+    confirmation, discard, or cancellation;
+  - selected Skills do not collect execution-time inputs during Plan creation,
+    and an older pending Skill input is invalidated if its session has since
+    entered Plan Mode.
+- Hardened planning and terminal semantics:
+  - implementation-time unknowns and user-delegated decisions cannot become
+    blocking questions; a `needs_input` gate with no actual unresolved question
+    is deterministically promoted to `ready`;
+  - cancellation is checked before/after every round, synthesis, and projection
+    write, persists `canceled`, and leaves no running round or trusted stale
+    projection;
+  - confirmation remains idempotent after the linked Goal reaches a failed or
+    canceled terminal state, while executed Plans can never be discarded;
+  - AgentLoop failure now emits and persists `failed`, reports runtime Token and
+    tool counts, and renders budget exhaustion as “任务未完成”.
+- Live Electron acceptance:
+  - loaded the user's exact `awaiting_input` Plan
+    `plan_72ee2654-1b70-42e1-88f3-ed6fa6bfb310`; the Goal toggle was disabled
+    with value `1`, workspace selection was disabled, and the Composer stated
+    that input only updates the read-only Plan;
+  - sent the user's DBS clarification with the Goal toggle still unavailable;
+    no ordinary tools ran, the old A1/B1/A2/B2/C rounds became `invalidated`,
+    and a new isolated A1/B1/A2/B2/C sequence completed;
+  - the Plan advanced from revision 12 `needs_input` to revision 24
+    `awaiting_confirmation/ready`, with zero unresolved questions and a valid
+    projection; “确认计划并开始执行” is enabled but was intentionally not
+    clicked;
+  - restarted the Electron main process, reopened the same session, and
+    confirmed the Ready Plan, frozen workspace, disabled Goal toggle, Composer
+    input lock, collapsed full-plan detail, and audit disclosure all recovered.
+- Verification evidence from the final tree:
+  - expanded Plan/Chat/Container/Renderer suite: 5 files / 246 tests passed;
+  - `npm test`: 225 files / 2,212 tests passed;
+  - `npm run build`: Electron and renderer TypeScript plus Vite production build
+    passed;
+  - `npm run verify`: 2,212 tests, production build, Agent evals 26/26, and
+    Memory evals 2/2 passed;
+  - `npm run smoke:providers`: 17 providers, 48 catalog entries, unknown
+    provider fail-closed; live external smoke remained opt-in;
+  - `npm run smoke:prod`, `npm run harness:check`, and `git diff --check`
+    passed;
+  - the optimized development test package remains running for user testing.
+
+## 2026-07-30 - v3.8.0 Plan C Structured-Output Recovery
+
+- Diagnosed the reported Debate failure from the persisted Plan Record and event
+  log. A1, B1, A2, and B2 had completed successfully; the first C run returned
+  non-empty content without a JSON object, so the previous single-attempt parser
+  paused the otherwise healthy plan.
+- Hardened structured round completion:
+  - every structured planning request explicitly disables provider thinking;
+  - one malformed response receives one exact-contract repair request inside
+    the same isolated round, without creating an additional effective speech;
+  - parsing scans balanced JSON objects, ignores braces inside strings, and can
+    skip unrelated invalid brace blocks before a valid object;
+  - validation and normalization occur inside the repair boundary, so both
+    malformed JSON and incomplete structured shapes can recover;
+  - a second invalid response remains fail-closed and reports only finish
+    reason, content length, a truncated digest, and reasoning-only status rather
+    than persisting raw provider output.
+- Added regression coverage for a repaired non-JSON response, prose containing
+  an unrelated invalid brace block, explicit `thinking: disabled`, the
+  two-attempt ceiling, one effective completed round, and safe final diagnostics.
+- Live recovery evidence:
+  - restarted the development Electron main process with the repaired code and
+    opened the exact paused plan
+    `plan_18c6080a-62d0-4cac-a9ce-0bac5b1417fe`;
+  - used “重试失败轮次”; the event log created only one new C run, while the
+    original A1/B1/A2/B2 run IDs and completed outputs remained unchanged;
+  - the old failed C was marked `invalidated`, the replacement C completed in
+    28,993 ms, and the Plan advanced to revision 15 with
+    `status=awaiting_confirmation` and `actionGate=ready`;
+  - the final plan is “arXiv论文解析与微信公众号文章生成技能开发计划（修订版）”,
+    the UI shows `5/5` rounds and enables “确认计划并开始执行”;
+  - the Markdown projection SHA-256 on disk exactly matches the Plan Record
+    value `c48d0ea0da95507592dd3cde54f72333621d8c5bf3192392e3d13f93a8c1ccdc`.
+- Verification evidence:
+  - focused recovery suite: 2 files / 15 tests passed;
+  - `npm test`: 225 files / 2,197 tests passed;
+  - `npm run verify`: 225 files / 2,197 tests, production build, Agent evals
+    26/26, and Memory evals 2/2 passed;
+  - `npm run smoke:prod` and `npm run harness:check` passed;
+  - the optimized development test package remains running for user testing.
+
+## 2026-07-30 - v3.8.0 Goal Runtime False-Block Recovery
+
+- Diagnosed the reported “模板受阻” from the persisted Goal, ledger, runtime
+  checkpoints, trajectories, and the live Electron UI. The Debate plan itself
+  was valid; the confirmed writable Goal was being paused by runtime recovery
+  and validation behavior.
+- Corrected four independent false-block paths:
+  - repeated read discovery now emits non-blocking strategy guidance in Goal
+    Mode, while normal multi-file writes never trigger the fragmented-read
+    guard;
+  - retrying a rejected or stalled Goal rearms the first retryable milestone,
+    clears stale acceptance state, preserves its checkpoint, and exposes a
+    direct retry action;
+  - confirmed Plan dependency labels resolve to stable milestone IDs and
+    unrecognized external labels are dropped rather than stalling the task;
+  - milestone judges disable provider thinking, use a bounded structured-output
+    budget, and retry one malformed response while remaining fail-closed.
+- Replaced native `test_run` shell-only timeout handling with process-group
+  execution. Timeout and cancellation now terminate descendants that inherit
+  stdio, return bounded structured diagnostics, and cannot leave an orphaned
+  Python process holding the Goal open.
+- Moved session-rail synchronization into a post-render effect, eliminating the
+  React warning caused by updating `App` from a `setSessions` updater inside
+  `AgentChatPanel`.
+- Live recovery evidence:
+  - safely paused the old Electron main process and resumed the same Goal from
+    its persisted checkpoint after restart;
+  - the repaired runtime crossed repeated `file_read` and `file_list` strategy
+    guard thresholds multiple times and continued into `tool_result_read`,
+    `shell_exec`, writes, and tests instead of pausing;
+  - two orphaned Python verification processes from the pre-fix runtime were
+    terminated; the regression test verifies no descendant remains after a
+    timeout;
+  - the repaired live `test_concept_extractor.py` run reached its 120-second
+    timeout, returned a structured failed-tool event, left no shell or Python
+    descendant behind, and the Goal continued to its next diagnostic step;
+  - the development app remains running with the repaired main process; the
+    original Goal resumed from its checkpoint and now rests at the explicit
+    `tool calls 128/128` budget boundary with “增加预算并继续” available.
+- Verification evidence:
+  - focused recovery suite: 8 files / 338 tests passed;
+  - `npm test`: 225 files / 2,194 tests passed;
+  - `npm run verify`: 225 files / 2,194 tests, production build, Agent evals
+    26/26, and Memory evals 2/2 passed;
+  - `npm run smoke:prod`, `npm run harness:check`, and `git diff --check`
+    passed.
+
 ## 2026-07-12 - WeChat Article Content Blueprint
 
 - Request:
@@ -7315,6 +7469,158 @@
     full `npm run verify` passed 214 files / 2,137 tests, production build,
     Agent evals 26/26, and Memory evals 2/2; `npm run smoke:prod`,
     `npm run harness:check`, and `git diff --check` also passed.
+
+## 2026-07-30 - v3.8.0 Multi-Provider Models and Plan Debate Mode
+
+- Implemented the OpenWorker `f96ad4c8` provider architecture in TypeScript:
+  a fail-closed descriptor registry, multiple independently credentialed
+  connections per provider, safeStorage-backed secrets, a 48-entry curated
+  model matrix, stable model profiles, frozen runtime bindings, and
+  connection-revision-scoped client caching.
+- Added all 17 requested provider kinds: OpenAI, Anthropic, Gemini, Bedrock,
+  Vertex, Z AI, DeepSeek, Kimi, MiniMax, Qwen, xAI, Mistral, Meta, Together,
+  Fireworks, OpenRouter, and Ollama. Bedrock supports API-key, profile/default
+  chain, and IAM credentials; Vertex supports ADC, service-account JSON/file,
+  and Gemini API-key express mode; Ollama normalizes `/v1`, probes `/api/tags`,
+  caches live results for 30 seconds, and hides unreachable models.
+- Added atomic and idempotent model-settings schema v1-to-v2 migration,
+  current/historical connection revisions for frozen runs, explicit
+  `stored | environment | ambient | none` credential provenance, stale-secret
+  pruning when auth modes change, custom and hidden model handling, and
+  per-provider key isolation without OpenAI credential fallback.
+- Converted Goal Mode into a persisted pre-execution Plan Mode with Direct and
+  Debate choices. Debate enforces the exact isolated sequence
+  `A1 -> B1 -> A2 -> B2 -> C`, bounded A/B turns, a fresh C synthesis context,
+  frozen A/B/C model assignments, structured public claims and minority
+  opinions, targeted retry/model replacement, revision invalidation, and
+  deterministic recovery.
+- Added JSON and SQLite plan stores, evidence/workspace drift verification,
+  canonical structured Plan Records, atomic Markdown projection through the
+  sole `PlanArtifactWriter`, version/hash confirmation, and idempotent creation
+  of a distinct writable Goal Run carrying its source-plan identity.
+- Enforced Plan Mode read-only behavior at tool visibility,
+  `ToolAuthorizationService`, and `AgentToolExecutor`; shell, file writes,
+  tests, workflows, memory writes, and unknown dynamic tools fail closed.
+- Updated Settings with descriptor-driven connection forms, connection tests,
+  credential state, model profiles, defaults, custom/hidden models, and
+  availability metadata. Updated Goal composer and plan cards with Direct /
+  Debate selection, A/B/C profile assignment, round/provider/model/duration
+  status, audit disclosures, retry controls, and ready-only confirmation.
+- Added the design record
+  `docs/design/zerox-agent-3-8-0-plan-debate.md`, the opt-in live provider smoke
+  harness, README guidance, v3.8.0 package metadata, and focused provider,
+  migration, routing, plan, permissions, persistence, IPC, preload, renderer,
+  accessibility, and recovery coverage.
+- Verification evidence from the final tree:
+  - focused 3.8.0 suite: 18 files / 232 tests passed;
+  - `npm test`: 225 files / 2,184 tests passed;
+  - `npm run build`: TypeScript main/renderer checks and Vite production build
+    passed;
+  - `npm run verify`: 225 files / 2,184 tests, production build, Agent evals
+    26/26, and Memory evals 2/2 passed;
+  - `npm run smoke:providers`: 17 providers, 48 catalog entries, and unknown
+    provider fail-closed checks passed. Live external calls were intentionally
+    skipped because `ZEROX_PROVIDER_SMOKE=1` and user-provided smoke cases were
+    not supplied;
+  - `npm run smoke:prod`: Electron started and rendered the agent chat UI;
+  - `npm audit --omit=dev --audit-level=high`: 0 production vulnerabilities;
+  - `npm run harness:check` and `git diff --check`: passed.
+- The full development-dependency audit still reports 20 high-severity
+  `brace-expansion` findings through Electron packaging/rebuild tooling. npm
+  only offers a forced breaking upgrade to `@electron/asar` 4.x, so the
+  implementation does not apply that unsafe major-version rewrite; these
+  findings are absent from the shipped production dependency graph.
+- A pre-final `verify` run exposed an existing asynchronous test-directory
+  cleanup race in `agentGoalController.test.ts`; bounded `fs.rm` retries now
+  absorb transient `ENOTEMPTY`, and the isolated test plus the full final
+  verify both passed.
+
+## 2026-07-30 - v3.8.0 Plan Mode UI and Structured Output Follow-up
+
+- Fixed the Plan Composer overlap reported from the live Electron build.
+  Workspace context is now in normal flow whenever Plan Mode is active, with
+  Plan settings and the message input occupying independent rows; attachments
+  also use a non-overlapping in-flow position in this mode.
+- Reworked model connection configuration into a horizontal connection rail.
+  Provider, connection name, and credential source share an aligned row;
+  descriptor-driven credential and endpoint fields expand horizontally across
+  the full form width and collapse to one column below 760 px.
+- Added progressive disclosure to the main interaction area:
+  - Plan mode/model assignments collapse into a one-line summary;
+  - the five-round Debate timeline and audit/evidence ledger are collapsed;
+  - for `needs_input`, gate reason and required questions are shown first while
+    full milestones and risks are collapsed;
+  - a `ready` final plan opens its complete implementation detail by default so
+    the user can review it before confirmation.
+- Diagnosed the reported DeepSeek A1 failure from the persisted Plan Record:
+  both calls returned parseable JSON, but the returned object did not expose
+  the required top-level `objective` and `milestones`. The round prompt now
+  contains an exact role-specific JSON template, common provider wrappers such
+  as `plan`, `proposal`, `artifact`, and `result` are safely unwrapped, and
+  validation failures report the received structural field names without
+  persisting raw private model output.
+- Performed a real recovery run against the user's existing stored DeepSeek
+  connection and failed Plan Record. A1, B1, A2, B2, and C all completed; C
+  produced a five-milestone, five-risk final plan. Its `needs_input` result is
+  expected because C identified two unresolved product choices, rather than a
+  provider or parser failure.
+- A recovered plan now persists a revision-scoped assistant summary back to
+  the chat session, refreshes the transcript and session rail, and treats both
+  `awaiting_confirmation` and `awaiting_input` as paused review states. This
+  prevents a successful retry from leaving the old A1 failure in the sidebar.
+  Loading a previously recovered plan also performs an idempotent repair when
+  the last stored assistant summary is still the superseded paused failure.
+- Visual QA used the live Electron accessibility tree and screenshots. It
+  confirmed the composer no longer overlaps, the connection identity fields
+  render as a three-column row, API key and endpoint render side by side, and
+  secondary plan detail is hidden behind keyboard-accessible disclosures.
+- Verification evidence:
+  - final focused suite: 4 files / 111 tests passed;
+  - `npm test`: 225 files / 2,190 tests passed;
+  - `npm run build`: TypeScript main/renderer checks and Vite build passed;
+  - `npm run smoke:prod`: Electron rendered the agent chat UI;
+  - `npm run harness:check` and `git diff --check`: passed.
+
+## 2026-07-30 - v3.8.0 Pre-Main Deep Review and User-Path Closure
+
+- Re-reviewed the complete pre-execution Plan lifecycle from creation through
+  clarification, cancellation, retry, confirmation, Goal activation, restart,
+  and terminal recovery. Cancellation now stops the current planning run
+  without releasing the session input lock; only explicit discard or a
+  successfully activated confirmed Goal exits Plan Mode.
+- Removed renderer-side permission elevation before confirmation validation.
+  Writable capability is now enabled only by the Goal controller after the
+  new source-linked Goal Run is actually active.
+- Hardened confirmation with per-Plan serialization, deterministic Goal
+  identity, source-link persistence before resume, crash-window recovery, and
+  chat-summary deduplication. Concurrent confirmations and restart recovery
+  cannot create duplicate Goals or runs.
+- Closed model isolation gaps: an existing Connection cannot change Provider
+  kind, legacy Provider switches cannot inherit the previous Provider key,
+  environment credential sources require a declared environment key, and
+  frozen bindings retain every referenced historical connection revision
+  instead of expiring after 20 edits.
+- Closed Plan input and evidence gaps: text attachments stay on the Plan path,
+  unsupported image attachments fail before persistence, evidence symlinks
+  are checked after `realpath`, and missing/unknown model `actionGate` values
+  fail closed as `blocked`.
+- Added regression coverage for cancellation routing and restart behavior,
+  concurrent confirmation and crash recovery, permission timing, Provider/key
+  isolation, long-lived frozen bindings, malformed gates, attachments, and
+  workspace-escaping evidence symlinks. Updated the acceptance matrix so the
+  documented user path matches the enforced state machine.
+- Final pre-merge verification evidence:
+  - focused security/user-path suite: 7 files / 261 tests passed;
+  - `npm test`: 225 files / 2,222 tests passed;
+  - `npm run build`: TypeScript main/renderer checks and Vite production build
+    passed;
+  - `npm run verify`: 225 files / 2,222 tests, production build, Agent evals
+    26/26, and Memory evals 2/2 passed;
+  - `npm run smoke:providers`: 17 providers, 48 catalog entries, and unknown
+    Provider fail-closed checks passed; live external calls remained opt-in;
+  - `npm run smoke:prod`: Electron rendered the production agent chat UI;
+  - `npm audit --omit=dev --audit-level=high`: 0 production vulnerabilities;
+  - `npm run harness:check`: passed.
 
 ## 2026-07-16 - v3.7.1 Replay-Safe Update and Atomic Publication Closure
 

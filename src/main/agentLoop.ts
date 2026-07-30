@@ -442,6 +442,7 @@ export async function runAgentLoop(
     if (
       count === 4 &&
       capability &&
+      capability.sideEffect === "local_read" &&
       !capability.supportsBatch &&
       !emittedStrategyGuards.has(guardKey)
     ) {
@@ -929,6 +930,15 @@ export async function runAgentLoop(
               toolCallsExecuted,
             );
             break;
+          }
+          if (strategyGuardEvent) {
+            messages.push({
+              role: "system",
+              content: [
+                `Strategy guard warning (${strategyGuardEvent.code}): ${strategyGuardEvent.message}`,
+                "Continue the task, but switch to a batch, recursive, inventory, or search tool before making another call of the same kind.",
+              ].join("\n"),
+            });
           }
 
           if (

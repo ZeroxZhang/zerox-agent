@@ -1,0 +1,346 @@
+import { randomUUID } from "node:crypto";
+import {
+  appendFile,
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  writeFile,
+} from "node:fs/promises";
+import path from "node:path";
+import type { PlanRecord } from "../shared/planMode";
+import type { Storage } from "../shared/storageContract";
+
+export type PlanStoreEvent = {
+  id: string;
+  planId: string;
+  type: string;
+  revision: number;
+  payload?: Record<string, unknown>;
+  createdAt: string;
+};
+
+export type PlanStore = {
+  create(plan: PlanRecord): Promise<PlanRecord>;
+  get(planId: string): Promise<PlanRecord | null>;
+  save(
+    plan: PlanRecord,
+    expectedRevision: number,
+    eventType: string,
+    payload?: Record<string, unknown>,
+  ): Promise<PlanRecord>;
+  listBySession(sessionId: string): Promise<PlanRecord[]>;
+  listAll(): Promise<PlanRecord[]>;
+  getLatestBySession(sessionId: string): Promise<PlanRecord | null>;
+};
+
+export class PlanVersionConflictError extends Error {
+  constructor(
+    public readonly planId: string,
+    public readonly expectedRevision: number,
+    public readonly actualRevision: number,
+  ) {
+    super(
+      `计划版本冲突：期望 ${expectedRevision}，实际 ${actualRevision}。`,
+    );
+  }
+}
+
+export function createPlanStore(options: {
+  configDir: string;
+  storage?: Storage;
+  now?: () => string;
+  createId?: () => string;
+}): PlanStore {
+  const plansDir = path.join(options.configDir, "plans");
+  const now = options.now ?? (() => new Date().toISOString());
+  const createId = options.createId ?? (() => randomUUID());
+  const queues = new Map<string, Promise<void>>();
+
+  function planPath(planId: string) {
+    return path.join(plansDir, `${safePlanId(planId)}.json`);
+  }
+
+  function eventPath(planId: string) {
+    return path.join(plansDir, `${safePlanId(planId)}.events.jsonl`);
+  }
+
+  async function readPlan(planId: string): Promise<PlanRecord | null> {
+    safePlanId(planId);
+    if (options.storage) {
+      const row = options.storage.db
+        .prepare("SELECT payload FROM plan_records WHERE id = ?")
+        .get<{ payload: string }>(planId);
+      return row ? validatePlanRecord(JSON.parse(row.payload) as PlanRecord) : null;
+    }
+    try {
+      const parsed = JSON.parse(
+        await readFile(planPath(planId), "utf8"),
+      ) as PlanRecord;
+      return validatePlanRecord(parsed);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async function writePlan(plan: PlanRecord) {
+    if (options.storage) {
+      writeSqlitePlan(options.storage, plan);
+      return;
+    }
+    await mkdir(plansDir, { recursive: true });
+    const destination = planPath(plan.id);
+    const temp = `${destination}.${process.pid}.${randomUUID()}.tmp`;
+    await writeFile(temp, `${JSON.stringify(plan, null, 2)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+    await rename(temp, destination);
+  }
+
+  async function appendEvent(event: PlanStoreEvent) {
+    if (options.storage) {
+      writeSqliteEvent(options.storage, event);
+      return;
+    }
+    await mkdir(plansDir, { recursive: true });
+    await appendFile(eventPath(event.planId), `${JSON.stringify(event)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+  }
+
+  function serialize<T>(planId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = queues.get(planId) ?? Promise.resolve();
+    const result = previous.then(operation, operation);
+    const tail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    queues.set(planId, tail);
+    void tail.finally(() => {
+      if (queues.get(planId) === tail) {
+        queues.delete(planId);
+      }
+    });
+    return result;
+  }
+
+  return {
+    create(plan) {
+      return serialize(plan.id, async () => {
+        const existing = await readPlan(plan.id);
+        if (existing) {
+          throw new Error(`计划 ${plan.id} 已存在。`);
+        }
+        const created = validatePlanRecord({
+          ...structuredClone(plan),
+          revision: Math.max(1, plan.revision),
+        });
+        const event: PlanStoreEvent = {
+          id: `plan_event_${createId()}`,
+          planId: created.id,
+          type: "plan_created",
+          revision: created.revision,
+          createdAt: now(),
+        };
+        if (options.storage) {
+          writeSqlitePlanAndEvent(options.storage, created, event);
+        } else {
+          await writePlan(created);
+          await appendEvent(event);
+        }
+        return structuredClone(created);
+      });
+    },
+
+    get(planId) {
+      return readPlan(planId);
+    },
+
+    save(plan, expectedRevision, eventType, payload) {
+      return serialize(plan.id, async () => {
+        const existing = await readPlan(plan.id);
+        if (!existing) {
+          throw new Error(`计划 ${plan.id} 不存在。`);
+        }
+        if (existing.revision !== expectedRevision) {
+          throw new PlanVersionConflictError(
+            plan.id,
+            expectedRevision,
+            existing.revision,
+          );
+        }
+        const updated = validatePlanRecord({
+          ...structuredClone(plan),
+          revision: expectedRevision + 1,
+          updatedAt: now(),
+        });
+        const event: PlanStoreEvent = {
+          id: `plan_event_${createId()}`,
+          planId: updated.id,
+          type: eventType,
+          revision: updated.revision,
+          ...(payload ? { payload: structuredClone(payload) } : {}),
+          createdAt: now(),
+        };
+        if (options.storage) {
+          writeSqlitePlanAndEvent(options.storage, updated, event);
+        } else {
+          await writePlan(updated);
+          await appendEvent(event);
+        }
+        return structuredClone(updated);
+      });
+    },
+
+    async listBySession(sessionId) {
+      if (options.storage) {
+        return options.storage.db
+          .prepare(
+            "SELECT payload FROM plan_records WHERE session_id = ? ORDER BY updated_at DESC",
+          )
+          .all<{ payload: string }>(sessionId)
+          .map((row) =>
+            validatePlanRecord(JSON.parse(row.payload) as PlanRecord),
+          );
+      }
+      try {
+        const names = await readdir(plansDir);
+        const plans = await Promise.all(
+          names
+            .filter(
+              (name) => name.endsWith(".json") && !name.endsWith(".events.json"),
+            )
+            .map((name) => readPlan(name.slice(0, -".json".length))),
+        );
+        return plans
+          .filter(
+            (plan): plan is PlanRecord =>
+              Boolean(plan && plan.sessionId === sessionId),
+          )
+          .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          return [];
+        }
+        throw error;
+      }
+    },
+
+    async listAll() {
+      if (options.storage) {
+        return options.storage.db
+          .prepare("SELECT payload FROM plan_records ORDER BY updated_at DESC")
+          .all<{ payload: string }>()
+          .map((row) =>
+            validatePlanRecord(JSON.parse(row.payload) as PlanRecord),
+          );
+      }
+      try {
+        const names = await readdir(plansDir);
+        const plans = await Promise.all(
+          names
+            .filter(
+              (name) => name.endsWith(".json") && !name.endsWith(".events.json"),
+            )
+            .map((name) => readPlan(name.slice(0, -".json".length))),
+        );
+        return plans
+          .filter((plan): plan is PlanRecord => Boolean(plan))
+          .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          return [];
+        }
+        throw error;
+      }
+    },
+
+    async getLatestBySession(sessionId) {
+      return (await this.listBySession(sessionId))[0] ?? null;
+    },
+  };
+}
+
+function writeSqlitePlan(storage: Storage, plan: PlanRecord): void {
+  storage.db
+    .prepare(
+      `INSERT INTO plan_records
+        (id, session_id, mode, status, action_gate, revision, payload, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         session_id=excluded.session_id,
+         mode=excluded.mode,
+         status=excluded.status,
+         action_gate=excluded.action_gate,
+         revision=excluded.revision,
+         payload=excluded.payload,
+         updated_at=excluded.updated_at`,
+    )
+    .run(
+      plan.id,
+      plan.sessionId,
+      plan.mode,
+      plan.status,
+      plan.actionGate,
+      plan.revision,
+      JSON.stringify(plan),
+      plan.createdAt,
+      plan.updatedAt,
+    );
+}
+
+function writeSqliteEvent(storage: Storage, event: PlanStoreEvent): void {
+  storage.db
+    .prepare(
+      `INSERT INTO plan_events
+        (id, plan_id, type, revision, payload, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      event.id,
+      event.planId,
+      event.type,
+      event.revision,
+      event.payload ? JSON.stringify(event.payload) : null,
+      event.createdAt,
+    );
+}
+
+function writeSqlitePlanAndEvent(
+  storage: Storage,
+  plan: PlanRecord,
+  event: PlanStoreEvent,
+): void {
+  storage.db.exec("BEGIN IMMEDIATE");
+  try {
+    writeSqlitePlan(storage, plan);
+    writeSqliteEvent(storage, event);
+    storage.db.exec("COMMIT");
+  } catch (error) {
+    storage.db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+function safePlanId(planId: string): string {
+  const normalized = planId.trim();
+  if (!/^[a-zA-Z0-9_-]{1,160}$/.test(normalized)) {
+    throw new Error("计划 ID 非法。");
+  }
+  return normalized;
+}
+
+function validatePlanRecord(plan: PlanRecord): PlanRecord {
+  if (!plan.id || !plan.sessionId || !plan.sourceMessage) {
+    throw new Error("计划记录缺少必要字段。");
+  }
+  if (plan.mode !== "direct" && plan.mode !== "debate") {
+    throw new Error("计划模式非法。");
+  }
+  return plan;
+}

@@ -76,7 +76,18 @@ import type {
   PrepareAgentResult,
   ValidateAgentResult,
 } from "../../shared/agentBootstrap";
-import type { ModelSettingsInput, SaveModelSettingsResult } from "../../shared/modelSettings";
+import type {
+  ModelProfileInput,
+  ModelSettingsInput,
+  ProviderConnectionInput,
+  SaveModelSettingsResult,
+  TestProviderConnectionInput,
+} from "../../shared/modelSettings";
+import type {
+  ConfirmPlanInput,
+  ConfirmPlanResult,
+  PlanRecord,
+} from "../../shared/planMode";
 import type { AppUpdateActionResult, AppUpdateState } from "../../shared/appUpdate";
 import { MemoryValidationError } from "../memoryStore";
 import { ModelSettingsValidationError } from "../modelSettingsStore";
@@ -102,6 +113,7 @@ export function registerAllIpcHandlers(
   registerWorkspacesIpcHandlers(container);
   registerMultiAgentIpcHandlers(container);
   registerGoalsIpcHandlers(container);
+  registerPlansIpcHandlers(container);
   registerEvalsIpcHandlers(container);
   registerMemoryIpcHandlers(container);
   registerLearningIpcHandlers(container);
@@ -615,6 +627,114 @@ function registerGoalsIpcHandlers(container: AppContainer): void {
   );
 }
 
+function registerPlansIpcHandlers(container: AppContainer): void {
+  ipcMain.handle("plans:get", (_event, planId: string) =>
+    container.planStore().get(planId),
+  );
+  ipcMain.handle(
+    "plans:getLatestBySession",
+    async (_event, sessionId: string) => {
+      const plan = await container.planStore().getLatestBySession(sessionId);
+      if (
+        plan &&
+        (plan.status === "awaiting_confirmation" ||
+          plan.status === "awaiting_input")
+      ) {
+        await persistPlanStatusSummaryIfNeeded(container, plan, false);
+      }
+      return plan;
+    },
+  );
+  ipcMain.handle(
+    "plans:retryFailedRound",
+    async (
+      _event,
+      planId: string,
+      replacementProfileId?: string,
+    ) => {
+      const result = await container
+        .planDebateOrchestrator()
+        .retryFailedRound(planId, replacementProfileId);
+      if (!result.ok) {
+        return result;
+      }
+
+      await persistPlanStatusSummaryIfNeeded(container, result.plan, true);
+      return result;
+    },
+  );
+  ipcMain.handle(
+    "plans:discard",
+    (_event, planId: string, expectedRevision: number) =>
+      container
+        .planDebateOrchestrator()
+        .discard(planId, expectedRevision),
+  );
+  ipcMain.handle(
+    "plans:confirm",
+    (
+      _event,
+      input: ConfirmPlanInput,
+    ): Promise<ConfirmPlanResult> => container.confirmPlan(input),
+  );
+}
+
+async function persistPlanStatusSummaryIfNeeded(
+  container: AppContainer,
+  plan: PlanRecord,
+  force: boolean,
+): Promise<boolean> {
+  const goalEventRef = `plan-retry:${plan.id}:${plan.revision}`;
+  const session = await container.chatSessionStore().get(plan.sessionId);
+  if (
+    !session ||
+    session.messages.some((message) => message.goalEventRef === goalEventRef)
+  ) {
+    return false;
+  }
+  const latestAssistant = [...session.messages]
+    .reverse()
+    .find((message) => message.role === "assistant");
+  const hasStaleFailure =
+    latestAssistant?.content.includes("计划已暂停") ||
+    latestAssistant?.content.includes("规划输出缺少");
+  if (!force && !hasStaleFailure) {
+    return false;
+  }
+
+  await container.chatSessionStore().appendMessage({
+    sessionId: plan.sessionId,
+    role: "assistant",
+    content: formatPlanRetryMessage(plan),
+    goalEventRef,
+  });
+  return true;
+}
+
+function formatPlanRetryMessage(plan: PlanRecord): string {
+  const title =
+    plan.finalArtifact?.title?.trim() ||
+    plan.taskContract.objective.trim() ||
+    "当前计划";
+  if (plan.status === "awaiting_confirmation") {
+    return `规划已恢复，终版计划「${title}」已就绪，等待确认后开始执行。`;
+  }
+  if (plan.status === "awaiting_input") {
+    const reason =
+      plan.finalArtifact?.gateReason?.trim() ||
+      plan.finalArtifact?.unresolvedQuestions[0]?.trim() ||
+      "仍有必要信息需要补充。";
+    return `规划辩论已完成，仍需补充信息：${reason}`;
+  }
+  const failedRound = [...plan.rounds]
+    .reverse()
+    .find((round) => round.status === "failed");
+  if (plan.status === "paused" || plan.status === "failed") {
+    return `计划重试后仍暂停：${failedRound?.error ?? "请检查失败轮次后再次重试。"}`;
+  }
+  return `已从失败轮次继续规划：${title}。`;
+}
+
 function isSafeGoalOperationId(value: unknown): value is string {
   return (
     typeof value === "string" &&
@@ -853,6 +973,122 @@ function registerLearningIpcHandlers(container: AppContainer): void {
 
 function registerModelSettingsIpcHandlers(container: AppContainer): void {
   ipcMain.handle("modelSettings:load", () => container.modelSettingsStore.load());
+  ipcMain.handle("modelCatalog:load", async () =>
+    container
+      .modelConnectionService()
+      .enrichCatalog(await container.modelSettingsStore.loadCatalog()),
+  );
+  ipcMain.handle(
+    "modelCatalog:saveConnection",
+    async (_event, input: ProviderConnectionInput) => {
+      const result = await container.modelSettingsStore.saveConnection(input);
+      if (result.ok) {
+        container.modelRouter().invalidate(result.connection.id);
+        return {
+          ...result,
+          catalog: await container
+            .modelConnectionService()
+            .enrichCatalog(result.catalog),
+        };
+      }
+      return result;
+    },
+  );
+  ipcMain.handle(
+    "modelCatalog:deleteConnection",
+    async (_event, connectionId: string) => {
+      const result =
+        await container.modelSettingsStore.deleteConnection(connectionId);
+      if (result.ok) {
+        container.modelRouter().invalidate(connectionId);
+      }
+      return result.ok
+        ? {
+            ...result,
+            catalog: await container
+              .modelConnectionService()
+              .enrichCatalog(result.catalog),
+          }
+        : result;
+    },
+  );
+  ipcMain.handle(
+    "modelCatalog:saveProfile",
+    async (_event, input: ModelProfileInput) => {
+      const result = await container.modelSettingsStore.saveProfile(input);
+      if (result.ok) {
+        container.modelRouter().invalidate(
+          result.catalog.connections.find(
+            (connection) => connection.id === result.profile.connectionId,
+          )?.id,
+        );
+        return {
+          ...result,
+          catalog: await container
+            .modelConnectionService()
+            .enrichCatalog(result.catalog),
+        };
+      }
+      return result;
+    },
+  );
+  ipcMain.handle(
+    "modelCatalog:deleteProfile",
+    async (_event, profileId: string) => {
+      const result = await container.modelSettingsStore.deleteProfile(profileId);
+      return result.ok
+        ? {
+            ...result,
+            catalog: await container
+              .modelConnectionService()
+              .enrichCatalog(result.catalog),
+          }
+        : result;
+    },
+  );
+  ipcMain.handle(
+    "modelCatalog:setDefaultProfile",
+    async (
+      _event,
+      purpose: "chat" | "embedding",
+      profileId: string | null,
+    ) => {
+      const result = await container.modelSettingsStore.setDefaultProfile(
+        purpose,
+        profileId,
+      );
+      return result.ok
+        ? {
+            ...result,
+            catalog: await container
+              .modelConnectionService()
+              .enrichCatalog(result.catalog),
+          }
+        : result;
+    },
+  );
+  ipcMain.handle(
+    "modelCatalog:setModelHidden",
+    async (_event, routedModelId: string, hidden: boolean) => {
+      const result = await container.modelSettingsStore.setModelHidden(
+        routedModelId,
+        hidden,
+      );
+      return result.ok
+        ? {
+            ...result,
+            catalog: await container
+              .modelConnectionService()
+              .enrichCatalog(result.catalog),
+          }
+        : result;
+    },
+  );
+  ipcMain.handle(
+    "modelCatalog:testProvider",
+    (_event, input: TestProviderConnectionInput) =>
+      container.modelConnectionService().testProvider(input),
+  );
   ipcMain.handle(
     "modelSettings:testConnection",
     () => container.modelConnectionService().testConnection(),

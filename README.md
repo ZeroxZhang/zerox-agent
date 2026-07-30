@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v3.7.1-111827" alt="Version v3.7.1" />
+  <img src="https://img.shields.io/badge/version-v3.8.0-111827" alt="Version v3.8.0" />
   <img src="https://img.shields.io/badge/platform-macOS%20arm64-blue" alt="Platform: macOS arm64" />
   <img src="https://img.shields.io/badge/electron-42.3-9feaf9" alt="Electron 42" />
   <img src="https://img.shields.io/badge/react-19.2-61dafb" alt="React 19" />
@@ -41,7 +41,7 @@
 
 ## Overview
 
-**Zerox Agent** is a local-first desktop control plane for personal AI agents (current release: v3.7.1). The name comes from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
+**Zerox Agent** is a local-first desktop control plane for personal AI agents (current release: v3.8.0). The name comes from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
 
 It is **not** a chat wrapper, a hosted agent cloud, or an unbounded autonomous loop. It runs on your Mac: you bring your own API key (Anthropic / Gemini / OpenAI-compatible), grant explicit tool permissions, and keep session state, trajectories, memory, and learning candidates on disk under local `userData`. High-risk actions ask first; interrupted long work can resume from checkpoints; every step leaves an auditable run trail.
 
@@ -83,6 +83,7 @@ It is **not** a chat wrapper, a hosted agent cloud, or an unbounded autonomous l
 | Workspace sandbox | [`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md) |
 | User-reviewed learning loop | [`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md) |
 | Goal Mode / session-native goals | [`docs/architecture/agent-goal-mode.md`](docs/architecture/agent-goal-mode.md) |
+| v3.8.0 multi-provider models & Plan Debate | [`docs/design/zerox-agent-3-8-0-plan-debate.md`](docs/design/zerox-agent-3-8-0-plan-debate.md) |
 | v3.2.2 Soft Blue Desktop Control Surface | [`docs/design/zerox-agent-3-2-2-design-system-spec.md`](docs/design/zerox-agent-3-2-2-design-system-spec.md) |
 | v3.4.0 **B · Obsidian** theme | [`docs/design/guidelines_0708.html`](docs/design/guidelines_0708.html) |
 | macOS UI acceptance (v3.3.0+) | [`UI_AUDIT.md`](UI_AUDIT.md), [`UI_ACCEPTANCE.md`](UI_ACCEPTANCE.md) |
@@ -97,6 +98,8 @@ The v3.4.0 release uses [`docs/design/guidelines_0708.html`](docs/design/guideli
 **v3.7.0** hardened 本地权限边界, recoverable checkpoints, tool-pairing context integrity, and 持久化原子性 while keeping trajectories exportable and learning user-reviewed.
 
 **v3.7.1** adds packaged-app release detection, background update downloads, and a compact install action beside the sidebar version. Chat now accepts pasted PNG/JPEG/WebP and bounded UTF-8 text attachments, preserves compact attachment metadata in session history, and sends image content through OpenAI-compatible, Anthropic, and Gemini provider paths.
+
+**v3.8.0** introduces descriptor-driven multi-provider connections and stable model profiles for OpenAI, Anthropic, Gemini, Bedrock, Vertex, OpenAI-compatible services, and Ollama. Goal Mode now plans before it executes: Direct creates a reviewable plan, while Plan Debate runs isolated `A1 → B1 → A2 → B2 → C` deliberation, preserves evidence and minority opinions, and creates a new writable Goal only after a versioned, drift-checked Ready plan is explicitly confirmed.
 
 ---
 
@@ -344,7 +347,7 @@ Starts three processes concurrently: Vite dev server (renderer HMR → `http://1
 
 ### First-Time Setup
 
-1. **Configure Model**: Open app → Settings → fill in Base URL, Chat Model, API Key
+1. **Configure Model**: Open app → Settings → add a provider connection, test it, create a Chat Model Profile, and choose the default profile
 2. **Prepare Agent**: return to Overview, click "Prepare Local Agent", review the default file workflow and its allowed directories
 3. **Validate**: click "One-Click Validate" to test connection, tool permissions, run log, and the default task path
 
@@ -359,6 +362,14 @@ npm run smoke:llm
 ```
 
 Parses `.api_info.md`, sends a minimal `/chat/completions` request per provider, and reports results with API keys redacted.
+
+The multi-provider contract smoke always validates the complete descriptor/matrix registry and fail-closed routing:
+
+```bash
+npm run smoke:providers
+```
+
+Live provider calls are opt-in. Set `ZEROX_PROVIDER_SMOKE=1` and pass a JSON array through `ZEROX_PROVIDER_SMOKE_CASES`; each case names `providerKind`, `modelId`, optional non-secret `values`, and a `secretEnvs` map whose values are environment-variable names. Secrets are never accepted inline or printed.
 
 ### Desktop Validation
 
@@ -382,6 +393,7 @@ Runs full validation inside the Electron main process: reads config → saves mo
 | `npm run start:prod` | Production build & launch |
 | `npm test` / `test:watch` | Run / watch unit tests |
 | `npm run smoke:llm` | Real-model connectivity smoke |
+| `npm run smoke:providers` | Multi-provider registry smoke; live calls require explicit environment opt-in |
 | `npm run smoke:prod` | Production smoke (start → verify render → exit) |
 | `npm run validate:agent` | Full desktop agent validation |
 | `npm run eval:agent` / `eval:memory` | Deterministic agent / memory eval suites |
@@ -631,7 +643,7 @@ Planned:
 
 ## 项目概述
 
-**Zerox Agent** 是一个本地优先的桌面智能体控制台（**v3.7.1**）。名字取自 **Zero + X**——从留白开始，把未知的本地工作流转成可观察、受权限管控、可恢复的 Agent 运行。
+**Zerox Agent** 是一个本地优先的桌面智能体控制台（**v3.8.0**）。名字取自 **Zero + X**——从留白开始，把未知的本地工作流转成可观察、受权限管控、可恢复的 Agent 运行。
 
 它不是聊天壳，也不是泛用云端 Agent 入口，更不是无限自治循环。它运行在你的 Mac 上：自行配置 OpenAI-compatible / Anthropic / Gemini 模型（需自备 API Key）、扫描本地 `SKILL.md` 技能、执行 recoverable agent runs、调用受权限管控的工具、跟踪 parent/child multi-agent sessions、把经验写入本地长期记忆，并且在改变未来行为前保留 **user-reviewed learning**。
 
@@ -666,7 +678,9 @@ Planned:
 
 产品边界写在 [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md)。运行时、workspace、学习机制和目标模式分别见 [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md)、[`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md)、[`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md) 与 [`docs/architecture/agent-goal-mode.md`](docs/architecture/agent-goal-mode.md)。
 
-当前版本是 **v3.7.1**。本次发布新增应用版本自动检测与后台下载，并在侧栏版本号旁提供紧凑更新入口；会话框支持粘贴图片和 UTF-8 文本附件，以小型标签呈现，并把图片内容传递给 OpenAI-compatible、Anthropic 与 Gemini 模型链路。
+当前版本是 **v3.8.0**。本次发布新增声明式多服务商连接、稳定模型档案与运行期冻结路由，覆盖 OpenAI、Anthropic、Gemini、Bedrock、Vertex、主流 OpenAI-compatible 服务和 Ollama。Goal Mode 改为先规划后执行：Direct 生成可审阅计划，Plan Debate 按隔离的 `A1 → B1 → A2 → B2 → C` 协议审议，保留证据与少数意见；只有版本、哈希和工作区漂移检查都通过的 Ready 计划经用户确认后，系统才创建新的可写 Goal。
+
+3.8.0 的领域边界、权限门禁、辩论协议和验收标准见 [`docs/design/zerox-agent-3-8-0-plan-debate.md`](docs/design/zerox-agent-3-8-0-plan-debate.md)。
 
 ---
 
@@ -912,7 +926,7 @@ npm run dev
 
 ### 首次启动引导
 
-1. **配置模型**：打开应用 → 设置 → 填写 Base URL、Chat Model、API Key
+1. **配置模型**：打开应用 → 设置 → 新增并测试服务商连接 → 创建 Chat 模型档案 → 选择默认档案
 2. **准备智能体**：回到首页，点击「准备本地智能体」，检查模型、技能和默认任务
 3. **验收运行**：点击「一键验收」，测试连接、工具权限、运行日志和默认任务路径
 
@@ -927,6 +941,14 @@ npm run smoke:llm
 ```
 
 解析 `.api_info.md`，对每个供应商发送一次最小 `/chat/completions` 请求，打印延迟和回复摘要（**API Key 已脱敏**）。
+
+多服务商合约冒烟会默认校验完整 Descriptor/Matrix 注册表与未知服务商 fail-closed：
+
+```bash
+npm run smoke:providers
+```
+
+真实服务商调用必须显式设置 `ZEROX_PROVIDER_SMOKE=1`，并通过 `ZEROX_PROVIDER_SMOKE_CASES` 提供 JSON 数组。每项包含 `providerKind`、`modelId`、可选非敏感 `values`，以及只保存环境变量名的 `secretEnvs`；脚本不接受或输出内联密钥。
 
 ### 桌面端完整验收
 
@@ -950,6 +972,7 @@ npm run validate:agent
 | `npm run start:prod` | 生产构建并启动 |
 | `npm test` / `test:watch` | 运行 / watch 单元测试 |
 | `npm run smoke:llm` | 真实模型连通性冒烟 |
+| `npm run smoke:providers` | 多服务商注册表冒烟；真实调用需显式环境变量 opt-in |
 | `npm run smoke:prod` | 生产包冒烟（启动 → 验证渲染 → 退出） |
 | `npm run validate:agent` | 桌面端完整验收 |
 | `npm run eval:agent` / `eval:memory` | 确定性 Agent / 记忆评测 |

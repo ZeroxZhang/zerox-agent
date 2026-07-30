@@ -10,7 +10,11 @@ npm-debug.log*
 *.local
 .api_info.md
 iteration-roadmap/
-docs/
+docs/*
+!docs/design/
+docs/design/*
+!docs/design/zerox-agent-3-8-0-plan-debate.md
+!docs/design/zerox-agent-3-8-0-debate-user-path-acceptance.md
 .tmp_*
 .zerox/product-design-audit-*/
 generate_report.py

@@ -374,6 +374,11 @@ export type Goal = {
   originMessageId?: string;
   description: string;
   originalDescription?: string;
+  sourcePlanRef?: {
+    planId: string;
+    revision: number;
+    sha256: string;
+  };
   successCriteria: SuccessCriterion[];
   milestones: Milestone[];
   status: GoalStatus;

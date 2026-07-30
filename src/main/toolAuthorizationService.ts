@@ -13,6 +13,7 @@ import {
 import { analyzeShell, type ShellPlan } from "./tools/shell/shellAnalyzer";
 import type { AgentRunContext } from "../shared/agentWorkspace";
 import type { PermissionRule } from "../shared/kernelContract";
+import { authorizePlanModeTool } from "./planModePolicy";
 
 export type ToolAuthorizationService = {
   authorize(
@@ -89,6 +90,26 @@ export function createToolAuthorizationService(options: {
       }
 
       const runContext = authorizeOptions?.runContext;
+
+      if (runContext?.runMode === "plan") {
+        const planDecision = authorizePlanModeTool(request);
+        if (!planDecision.allowed) {
+          const decision = {
+            allowed: false,
+            reason: planDecision.reason,
+          };
+          const auditEvent = await options.auditLog.append({
+            taskId: subject.id,
+            request,
+            decision,
+          });
+          return {
+            ok: true,
+            decision,
+            auditEvent,
+          };
+        }
+      }
 
       // P4: build a ShellPlan for shell_exec when a runContext is available,
       // feeding both permission layers as the single source of truth (Patch 4).

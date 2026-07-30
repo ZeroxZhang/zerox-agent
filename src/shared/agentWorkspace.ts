@@ -75,6 +75,7 @@ export type AgentRunContext = {
   milestoneId?: string;
   parentRunId?: string;
   sessionId?: string;
+  runMode?: "execution" | "plan";
   agentRole: AgentRole;
   depth: number;
 };

@@ -4,6 +4,11 @@ import type { ScheduledTask } from "./scheduledTasks";
 import type { GoalStatus } from "./agentGoal";
 import type { ChatOutputPart } from "./chatOutput";
 import type { GoalDraft } from "./goalTranslation";
+import type {
+  PlanMode,
+  PlanModelAssignments,
+  PlanRecord,
+} from "./planMode";
 
 export type ChatAttachmentKind = "image" | "text";
 
@@ -112,7 +117,9 @@ export type SendChatMessageInput = {
   sessionId?: string;
   requestId?: string;
   message: string;
-  mode?: "chat" | "goal_draft";
+  mode?: "chat" | "goal_draft" | "goal_plan";
+  planMode?: PlanMode;
+  planModelAssignments?: PlanModelAssignments;
   selectedSkillName?: string;
   workspaceId?: string;
   workspaceSummary?: ChatWorkspaceSummary;
@@ -222,6 +229,12 @@ export type ChatAgentStatus =
       state: "completed";
       runId?: string;
       toolCallsExecuted: number;
+    }
+  | {
+      state: "failed";
+      runId?: string;
+      toolCallsExecuted: number;
+      message: string;
     }
   | {
       state: "paused";
@@ -341,6 +354,7 @@ export type SendChatMessageResult =
       agentStatus?: ChatAgentStatus;
       activeGoal?: ChatSessionGoalSummary;
       goalDraft?: GoalDraft;
+      plan?: PlanRecord;
       selectedSkill?: {
         name: string;
         displayName: string;

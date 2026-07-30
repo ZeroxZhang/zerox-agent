@@ -1143,6 +1143,55 @@ describe("goal chat service", () => {
     },
   );
 
+  it("rearms a rejected milestone and removes invalid dependency labels on retry", async () => {
+    const savedGoals: Goal[] = [];
+    const blocked = createBlockedGoal(
+      "acceptance_unavailable",
+      "acceptance_unavailable",
+    );
+    blocked.milestones = [
+      {
+        ...blocked.milestones[0]!,
+        state: "rejected",
+        lastAcceptanceSummary: "The partial run did not pass acceptance.",
+      },
+      {
+        ...blocked.milestones[0]!,
+        id: "milestone_2",
+        description: "Continue after milestone one.",
+        state: "pending",
+        dependsOn: ["milestone_1", "external dependency label"],
+      },
+    ];
+    const service = createGoalChatService({
+      controller: createController({
+        async resume() {
+          return new Promise<Goal>(() => undefined);
+        },
+      }),
+      goalStore: createGoalStore({ existingGoal: blocked, savedGoals }),
+      planner: createFakePlanner(),
+      now: () => "2026-07-30T08:00:00.000Z",
+    });
+
+    await expect(service.retry(blocked.id)).resolves.toMatchObject({
+      status: "executing",
+    });
+    expect(savedGoals.at(-1)?.milestones).toEqual([
+      expect.objectContaining({
+        id: "milestone_1",
+        state: "ready",
+        dependsOn: [],
+        lastAcceptanceSummary: undefined,
+      }),
+      expect.objectContaining({
+        id: "milestone_2",
+        state: "pending",
+        dependsOn: ["milestone_1"],
+      }),
+    ]);
+  });
+
   it("rejects retry and replan for an acceptance-integrity failure", async () => {
     const blocked = createGoal({
       status: "stopped_blocked",

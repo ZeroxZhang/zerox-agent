@@ -48,6 +48,8 @@ export type AgentModelProfile = {
   baseUrl: string;
   apiKey: string;
   model: string;
+  providerId?: string;
+  profile?: string;
   temperature: number;
   maxTokens: number;
   thinking?: { type: "enabled" | "disabled"; budgetTokens?: number };
