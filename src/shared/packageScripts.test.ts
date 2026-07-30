@@ -102,7 +102,7 @@ describe("package scripts", () => {
     expect(mainSource).toContain("app.requestSingleInstanceLock()");
   });
 
-  it("sets release metadata to v3.7.1", () => {
+  it("sets release metadata to v3.8.0", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -111,16 +111,19 @@ describe("package scripts", () => {
     ) as { version?: string; packages?: Record<string, { version?: string }> };
     const readme = readFileSync(path.join(process.cwd(), "README.md"), "utf8");
 
-    expect(packageJson.version).toBe("3.7.1");
+    expect(packageJson.version).toBe("3.8.0");
+    expect(packageJson.scripts?.["smoke:providers"]).toContain(
+      "smoke-multi-provider.mjs",
+    );
     // package-lock.json is updated by `npm install`; check it matches the
     // declared package version once dependencies are installed.
-    expect(packageLock.version).toBe("3.7.1");
-    expect(packageLock.packages?.[""]?.version).toBe("3.7.1");
-    expect(readme).toContain("current release: v3.7.1");
-    expect(readme).toContain("当前版本是 **v3.7.1**");
+    expect(packageLock.version).toBe("3.8.0");
+    expect(packageLock.packages?.[""]?.version).toBe("3.8.0");
+    expect(readme).toContain("current release: v3.8.0");
+    expect(readme).toContain("当前版本是 **v3.8.0**");
   });
 
-  it("keeps release gates tracked through v3.7.1", () => {
+  it("keeps release gates tracked through v3.8.0", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -188,6 +191,27 @@ describe("package scripts", () => {
     const p48 = featureList.features.find(
       (feature) => feature.id === "P48-v3.7.1-auto-update-and-chat-attachments",
     );
+    const p49 = featureList.features.find(
+      (feature) =>
+        feature.id === "P49-v3.8.0-multi-provider-plan-debate",
+    );
+    const p50 = featureList.features.find(
+      (feature) =>
+        feature.id === "P50-v3.8.0-plan-mode-ui-and-structured-output-fixes",
+    );
+    const p51 = featureList.features.find(
+      (feature) =>
+        feature.id === "P51-v3.8.0-goal-runtime-false-block-recovery",
+    );
+    const p52 = featureList.features.find(
+      (feature) =>
+        feature.id === "P52-v3.8.0-plan-c-structured-output-recovery",
+    );
+    const p53 = featureList.features.find(
+      (feature) =>
+        feature.id ===
+        "P53-v3.8.0-plan-input-routing-and-agent-terminal-state",
+    );
     const p31 = featureList.features.find(
       (feature) => feature.id === "P31-v3.1.2-window-controls-and-settings-icon",
     );
@@ -201,7 +225,7 @@ describe("package scripts", () => {
       (feature) => feature.id === "P28-v3.0.0-execution-context-spine",
     );
 
-    expect(packageJson.version).toBe("3.7.1");
+    expect(packageJson.version).toBe("3.8.0");
     expect(
       openFeatureIds.every(
         (featureId) =>
@@ -216,10 +240,33 @@ describe("package scripts", () => {
           featureId === "P45-v3.7.0-audit-closure-runtime-convergence" ||
           featureId === "P46-v3.7.0-strict-review-fixes" ||
           featureId === "P47-project-introduction-site" ||
-          featureId === "P48-v3.7.1-auto-update-and-chat-attachments",
+          featureId === "P48-v3.7.1-auto-update-and-chat-attachments" ||
+          featureId === "P49-v3.8.0-multi-provider-plan-debate" ||
+          featureId ===
+            "P50-v3.8.0-plan-mode-ui-and-structured-output-fixes" ||
+          featureId ===
+            "P51-v3.8.0-goal-runtime-false-block-recovery" ||
+          featureId ===
+            "P52-v3.8.0-plan-c-structured-output-recovery" ||
+          featureId ===
+            "P53-v3.8.0-plan-input-routing-and-agent-terminal-state",
       ),
     ).toBe(true);
     expect(openFeatureIds.length).toBeLessThanOrEqual(1);
+    expect(p53?.status === "in_progress" || p53?.status === "done").toBe(true);
+    expect(p52?.status === "in_progress" || p52?.status === "done").toBe(true);
+    expect(p51?.status === "in_progress" || p51?.status === "done").toBe(true);
+    expect(p50?.status === "in_progress" || p50?.status === "done").toBe(true);
+    expect(p49?.status === "in_progress" || p49?.status === "done").toBe(true);
+    expect(p49).toEqual(
+      expect.objectContaining({
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("descriptor-driven multi-provider"),
+          expect.stringContaining("A1, B1, A2, B2, and C"),
+          expect.stringContaining("Plan runs are read-only"),
+        ]),
+      }),
+    );
     expect(p47?.status === "in_progress" || p47?.status === "done").toBe(true);
     expect(p48?.status === "in_progress" || p48?.status === "done").toBe(true);
     expect(p45?.status === "in_progress" || p45?.status === "done").toBe(true);

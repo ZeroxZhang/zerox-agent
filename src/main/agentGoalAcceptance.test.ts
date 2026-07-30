@@ -810,6 +810,8 @@ describe("agent goal acceptance", () => {
   it("uses transcript-backed judge verdicts for model_review checks", async () => {
     const capturedRequests: Array<{
       temperature: number;
+      maxTokens: number;
+      thinking: unknown;
       toolChoice: unknown;
       roles: string[];
       messages: string[];
@@ -843,6 +845,8 @@ describe("agent goal acceptance", () => {
           async complete(request) {
             capturedRequests.push({
               temperature: request.temperature,
+              maxTokens: request.maxTokens,
+              thinking: request.thinking,
               toolChoice: request.tool_choice,
               roles: request.messages.map((message) => message.role),
               messages: request.messages.map((message) => message.content),
@@ -869,6 +873,8 @@ describe("agent goal acceptance", () => {
     });
     expect(capturedRequests[0]).toMatchObject({
       temperature: 0,
+      maxTokens: 1024,
+      thinking: { type: "disabled" },
       toolChoice: "none",
     });
     expect(capturedRequests[0]?.roles).toEqual(["system", "user"]);
@@ -2859,6 +2865,55 @@ describe("agent goal acceptance", () => {
       failureClass: "judge_unavailable",
       checkResults: [{ code: "judge_invalid_response" }],
     });
+  });
+
+  it("retries one malformed milestone judge response with the exact JSON contract", async () => {
+    let calls = 0;
+    const prompts: string[] = [];
+    const evidenceRef = "evidence:milestone";
+    const result = await createAgentGoalAcceptance({
+      chatClient: {
+        async complete(request) {
+          calls += 1;
+          prompts.push(request.messages.at(-1)?.content ?? "");
+          return {
+            content:
+              calls === 1
+                ? "I think the milestone is complete."
+                : JSON.stringify({
+                    verdict: "accepted",
+                    reason: "The supplied milestone evidence proves completion.",
+                    evidenceRefs: [evidenceRef],
+                  }),
+            toolCalls: [],
+            finishReason: "stop",
+          };
+        },
+      },
+    }).evaluate(
+      createMilestone([
+        check(
+          "retry_malformed_milestone",
+          "model_review",
+          { evidenceRefs: [evidenceRef] },
+          true,
+        ),
+      ]),
+      createContext({
+        transcriptMessages: [
+          { role: "assistant", content: "Milestone evidence is complete." },
+        ],
+      }),
+    );
+
+    expect(result).toMatchObject({
+      accepted: true,
+      verdict: "accepted",
+      checkResults: [{ code: "judge_accepted", passed: true }],
+    });
+    expect(calls).toBe(2);
+    expect(prompts[1]).toContain("previous response was rejected");
+    expect(prompts[1]).toContain("Do not use Markdown fences");
   });
 
   it("rejects file_exists checks that cross leaf or parent symlinks", async () => {

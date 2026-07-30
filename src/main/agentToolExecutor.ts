@@ -49,6 +49,7 @@ import {
   writeArtifactProvenance,
 } from "../shared/agentArtifactProvenance";
 import type { SkillDiscoveryResult } from "../shared/skills";
+import { authorizePlanModeTool } from "./planModePolicy";
 
 const execAsync = promisify(exec);
 
@@ -199,6 +200,20 @@ function validateToolExecutionRequest(
 ): AgentToolExecutionResult | null {
   if (!runContext) {
     return null;
+  }
+
+  if (runContext.runMode === "plan") {
+    const planDecision = authorizePlanModeTool(request);
+    if (!planDecision.allowed) {
+      return {
+        ok: false,
+        error: planDecision.reason,
+        errorDetails: {
+          code: "plan_mode_tool_denied",
+          toolName: request.toolName,
+        },
+      };
+    }
   }
 
   if (

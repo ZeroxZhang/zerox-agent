@@ -886,7 +886,7 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource).toContain("composerRiskTooltips");
     expect(chatPanelSource).toContain("composer-risk-tooltip");
     expect(chatPanelSource).toContain("自动授权：普通文件、Shell 和网络操作默认放行");
-    expect(chatPanelSource).toContain("目标模式：自动开启并锁定自动授权");
+    expect(chatPanelSource).toContain("目标模式：先在只读 Plan Mode 生成计划");
     expect(chatPanelSource).toContain("composer-stop-button");
     expect(chatPanelSource).toContain("composer-send-button");
     expect(chatPanelSource).not.toContain("slash-command-menu");
@@ -925,7 +925,17 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource).toContain("GoalDraftCard");
     expect(chatPanelSource).toContain("handleConfirmGoalDraft");
     expect(chatPanelSource).toContain("confirmGoalDraft");
-    expect(chatPanelSource).toContain("mode: \"goal_draft\"");
+    expect(chatPanelSource).toContain('mode: "goal_plan"');
+    expect(chatPanelSource).toMatch(
+      /const shouldCreateGoalPlan =\s*!activeGoal &&\s*!planInputLocked/,
+    );
+    expect(chatPanelSource).not.toMatch(
+      /outgoingAttachments\.length === 0 &&\s*!activeGoal/,
+    );
+    expect(chatPanelSource).toContain("PlanModeConfiguration");
+    expect(chatPanelSource).toContain("PlanConfirmationCard");
+    expect(chatPanelSource).toContain("handleConfirmPlan");
+    expect(chatPanelSource).toContain("planModelAssignments");
     expect(chatPanelSource).toContain("isLegacyGoalCommand");
     expect(goalStatusStripSource).toContain("buildGoalProgressViewModel");
     expect(goalStatusStripSource).toContain("progress.statusLabel");
@@ -940,7 +950,12 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource).not.toContain('submitUserMessage("暂停这个目标")');
     expect(chatPanelSource).toContain("window.buildingAgent.increaseGoalBudget(");
     expect(chatPanelSource).toContain("onIncreaseBudget={handleIncreaseGoalBudget}");
-    expect(chatPanelSource).toContain("const goalModeVisuallyEnabled = goalModeEnabled;");
+    expect(chatPanelSource).toContain(
+      "const goalModeVisuallyEnabled = goalModeEnabled || planInputLocked;",
+    );
+    expect(chatPanelSource).toContain(
+      "if (wasCanceled && planInputLocked && sessionId)",
+    );
     expect(chatPanelSource).toContain("aria-pressed={goalModeVisuallyEnabled}");
     expect(chatPanelSource).toContain('className="primary-action"');
     expect(goalDetailDrawerSource).toContain("goal-progress-status");
@@ -1096,7 +1111,10 @@ describe("Design System — Obsidian desktop control surface", () => {
       "const nextSessions = loadedSessions.map(toSessionRailItem);",
     );
     expect(refreshSessionsSource).toContain("setSessions(nextSessions);");
-    expect(refreshSessionsSource).toContain("onChatSessionsChange?.(nextSessions);");
+    expect(chatPanelSource).toContain("onChatSessionsChange?.(sessions);");
+    expect(chatPanelSource).toContain(
+      "[onChatSessionsChange, sessions]",
+    );
     expect(refreshSessionsSource).not.toContain("if (loadedSessions.length)");
   });
 
@@ -1157,6 +1175,98 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource).toContain("让Zerox-Agent帮你做什么？");
     expect(styles).toContain(".agent-home-hero");
     expect(styles).toContain(".home-suggestions");
+  });
+
+  it("keeps Plan Mode context, settings, and input in separate non-overlapping rows", () => {
+    expect(chatPanelSource).toContain(
+      '${goalModeVisuallyEnabled ? " has-plan-mode" : ""}',
+    );
+    expect(styles).toContain(
+      ".composer-input-shell.has-plan-mode .composer-context-row",
+    );
+    expect(styles).toContain("position: relative;");
+    expect(styles).toContain(
+      ".composer-input-shell.has-plan-mode textarea,\n.composer-input-shell.has-plan-mode.has-attachments textarea",
+    );
+  });
+
+  it("uses progressive disclosure for secondary Plan Mode controls and debate progress", () => {
+    expect(chatPanelSource).toContain(
+      '<details\n      className="plan-mode-configuration"',
+    );
+    expect(chatPanelSource).toContain(
+      '<details className="plan-progress-disclosure">',
+    );
+    expect(chatPanelSource).toContain(
+      '<details className="plan-audit-disclosure">',
+    );
+    expect(chatPanelSource).toContain(
+      'className="plan-artifact-disclosure"',
+    );
+    expect(chatPanelSource).toContain(
+      "const [planDetailsOpen, setPlanDetailsOpen] = useState(false);",
+    );
+    expect(chatPanelSource).toContain("setPlanDetailsOpen(false);");
+    expect(chatPanelSource).toContain("确认前需要回答");
+    expect(chatPanelSource).toContain("辩论进度 ·");
+    expect(styles).toContain(
+      ".composer .plan-mode-configuration > summary",
+    );
+    expect(styles).toContain(".plan-progress-disclosure");
+  });
+
+  it("locks all follow-up input to the active pre-confirmation Plan state machine", () => {
+    expect(chatPanelSource).toContain(
+      "const planInputLocked = isPlanInputRoutingLocked(activePlan);",
+    );
+    expect(chatPanelSource).toContain("!planInputLocked &&");
+    expect(chatPanelSource).toContain(
+      'disabled={status.kind === "working" || planInputLocked}',
+    );
+    expect(chatPanelSource).toContain(
+      'status.kind === "working" ||\n    planInputLocked',
+    );
+    expect(chatPanelSource).toContain(
+      "const shouldCreateGoalPlan =\n      !activeGoal",
+    );
+    expect(chatPanelSource).toContain(
+      "确认或丢弃前不能退出只读 Plan Mode",
+    );
+    expect(chatPanelSource).toMatch(
+      /\"awaiting_confirmation\",\s*\"canceled\",\s*\"failed\"/,
+    );
+    expect(chatPanelSource).toContain(
+      "getLatestPlanForSession(sessionId)",
+    );
+    expect(chatPanelSource).not.toContain(
+      "const modeState =\n        await window.buildingAgent.setToolGoalModeEnabled(true)",
+    );
+    expect(chatPanelSource).toContain(
+      "本条消息只用于补充或修改计划，不会启动普通 Agent",
+    );
+    expect(chatPanelSource).toContain(
+      "当前会话的补充消息只能更新计划",
+    );
+    expect(chatPanelSource).toContain(
+      'options.agentStatus?.state === "failed"',
+    );
+    expect(chatPanelSource).toContain("当前结果不是完成态");
+    expect(styles).toContain(".plan-input-routing-note");
+  });
+
+  it("lays provider connections and configuration fields out horizontally before responsive collapse", () => {
+    expect(styles).toContain(
+      ".provider-connection-form .provider-identity-grid {\n  grid-template-columns: repeat(3, minmax(0, 1fr));",
+    );
+    expect(styles).toContain(
+      "grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));",
+    );
+    expect(styles).toContain(
+      ".provider-connection-list {\n  display: flex;",
+    );
+    expect(styles).toContain(
+      "@media (max-width: 760px) {\n  .provider-connection-form .provider-identity-grid,",
+    );
   });
 
   it("uses the v3.4.0 Obsidian root background and accent tokens", () => {

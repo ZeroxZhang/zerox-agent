@@ -340,6 +340,110 @@ describe("chat IPC handlers", () => {
     expect(markGoalCompletedUnverified).toHaveBeenCalledWith("goal_1");
   });
 
+  it("persists the recovered plan state so the session rail does not keep a stale failure", async () => {
+    electronState.ipcHandlers.clear();
+    const { registerAllIpcHandlers } = await import("./index");
+    const plan = {
+      id: "plan_1",
+      sessionId: "session_1",
+      status: "awaiting_input",
+      revision: 18,
+      taskContract: { objective: "制作论文解析 Skill" },
+      finalArtifact: {
+        title: "终版论文解析 Skill 计划",
+        gateReason: "请选择 CLI 或 Web UI。",
+        unresolvedQuestions: ["请选择 CLI 或 Web UI。"],
+      },
+      rounds: [],
+    };
+    const retryFailedRound = vi.fn(async () => ({
+      ok: true as const,
+      plan,
+      message: "已从失败轮次继续规划。",
+    }));
+    const appendMessage = vi.fn(async () => undefined);
+    const container = {
+      onGoalProgressEvent: vi.fn(),
+      onAgentRunsChanged: vi.fn(),
+      planDebateOrchestrator: () => ({ retryFailedRound }),
+      chatSessionStore: () => ({
+        get: vi.fn(async () => ({ messages: [] })),
+        appendMessage,
+      }),
+    } as unknown as Parameters<typeof registerAllIpcHandlers>[0];
+    registerAllIpcHandlers(container);
+
+    await expect(
+      electronState.ipcHandlers.get("plans:retryFailedRound")?.(
+        {},
+        "plan_1",
+        "profile_b",
+      ),
+    ).resolves.toEqual({
+      ok: true,
+      plan,
+      message: "已从失败轮次继续规划。",
+    });
+    expect(retryFailedRound).toHaveBeenCalledWith("plan_1", "profile_b");
+    expect(appendMessage).toHaveBeenCalledWith({
+      sessionId: "session_1",
+      role: "assistant",
+      content: "规划辩论已完成，仍需补充信息：请选择 CLI 或 Web UI。",
+      goalEventRef: "plan-retry:plan_1:18",
+    });
+  });
+
+  it("repairs a stale failed session summary when loading a recovered plan", async () => {
+    electronState.ipcHandlers.clear();
+    const { registerAllIpcHandlers } = await import("./index");
+    const plan = {
+      id: "plan_1",
+      sessionId: "session_1",
+      status: "awaiting_confirmation",
+      revision: 19,
+      taskContract: { objective: "制作论文解析 Skill" },
+      finalArtifact: {
+        title: "终版论文解析 Skill 计划",
+        unresolvedQuestions: [],
+      },
+      rounds: [],
+    };
+    const appendMessage = vi.fn(async () => undefined);
+    const container = {
+      onGoalProgressEvent: vi.fn(),
+      onAgentRunsChanged: vi.fn(),
+      planStore: () => ({
+        getLatestBySession: vi.fn(async () => plan),
+      }),
+      chatSessionStore: () => ({
+        get: vi.fn(async () => ({
+          messages: [
+            {
+              role: "assistant",
+              content: "计划已暂停：规划输出缺少 objective 或 milestones。",
+            },
+          ],
+        })),
+        appendMessage,
+      }),
+    } as unknown as Parameters<typeof registerAllIpcHandlers>[0];
+    registerAllIpcHandlers(container);
+
+    await expect(
+      electronState.ipcHandlers.get("plans:getLatestBySession")?.(
+        {},
+        "session_1",
+      ),
+    ).resolves.toEqual(plan);
+    expect(appendMessage).toHaveBeenCalledWith({
+      sessionId: "session_1",
+      role: "assistant",
+      content:
+        "规划已恢复，终版计划「终版论文解析 Skill 计划」已就绪，等待确认后开始执行。",
+      goalEventRef: "plan-retry:plan_1:19",
+    });
+  });
+
   it.each([
     "goal:continueAcceptance",
     "goal:markCompletedUnverified",

@@ -852,6 +852,8 @@ async function evaluateModelReview(
     {
       ...modelProfile,
       temperature: 0,
+      maxTokens: 1024,
+      thinking: { type: "disabled" },
       messages: buildMilestoneJudgeMessages({
         check,
         evidenceLines: evidence.lines,
@@ -861,7 +863,17 @@ async function evaluateModelReview(
       tool_choice: "none",
     },
     operation,
+    suppliedRefs,
   );
+  if (outcome.status === "invalid") {
+    return {
+      checkResult: invalidJudgeResult(check, evidenceRefs),
+      inferentialUsed: true,
+      evidenceManifest: evidence.manifest,
+      judge,
+      retry: classifyAcceptanceInfrastructureFailure({ code: "judge_invalid_response" }),
+    };
+  }
   if (outcome.status !== "completed") {
     const retry = classifyAcceptanceInfrastructureFailure(
       outcome.status === "timed_out" ? { code: "ETIMEDOUT" } : outcome.error,
@@ -879,26 +891,15 @@ async function evaluateModelReview(
     };
   }
 
-  const parsed = parseStrictGoalJudgeVerdict(outcome.content, suppliedRefs);
-  if (!parsed) {
-    return {
-      checkResult: invalidJudgeResult(check, evidenceRefs),
-      inferentialUsed: true,
-      evidenceManifest: evidence.manifest,
-      judge,
-      retry: classifyAcceptanceInfrastructureFailure({ code: "judge_invalid_response" }),
-    };
-  }
-
   await emitGoalJudged(
     ctx,
     check,
-    parsed,
+    outcome.verdict,
     transcript.messageIds.length,
     operation.signal,
   );
   return {
-    checkResult: judgeVerdictResult(check, parsed),
+    checkResult: judgeVerdictResult(check, outcome.verdict),
     inferentialUsed: true,
     evidenceManifest: evidence.manifest,
     judge,
@@ -1065,7 +1066,21 @@ async function evaluateFinalModelReview(
     }),
     tool_choice: "none",
   };
-  const outcome = await completeJudgeWithDeadline(chatClient, request, operation);
+  const outcome = await completeJudgeWithDeadline(
+    chatClient,
+    request,
+    operation,
+    suppliedRefs,
+  );
+  if (outcome.status === "invalid") {
+    return {
+      checkResult: invalidJudgeResult(check, evidenceRefs),
+      inferentialUsed: true,
+      evidenceManifest: evidence.manifest,
+      judge,
+      retry: classifyAcceptanceInfrastructureFailure({ code: "judge_invalid_response" }),
+    };
+  }
   if (outcome.status !== "completed") {
     const retry = classifyAcceptanceInfrastructureFailure(
       outcome.status === "timed_out" ? { code: "ETIMEDOUT" } : outcome.error,
@@ -1083,26 +1098,15 @@ async function evaluateFinalModelReview(
     };
   }
 
-  const parsed = parseStrictGoalJudgeVerdict(outcome.content, suppliedRefs);
-  if (!parsed) {
-    return {
-      checkResult: invalidJudgeResult(check, evidenceRefs),
-      inferentialUsed: true,
-      evidenceManifest: evidence.manifest,
-      judge,
-      retry: classifyAcceptanceInfrastructureFailure({ code: "judge_invalid_response" }),
-    };
-  }
-
   await emitGoalJudged(
     ctx,
     check,
-    parsed,
+    outcome.verdict,
     transcript.messageIds.length,
     operation.signal,
   );
   return {
-    checkResult: judgeVerdictResult(check, parsed),
+    checkResult: judgeVerdictResult(check, outcome.verdict),
     inferentialUsed: true,
     evidenceManifest: evidence.manifest,
     judge,
@@ -2076,7 +2080,8 @@ function collectEvaluatedRunIds(goal: Goal, currentRunId: string): string[] {
 }
 
 type JudgeCompletionOutcome =
-  | { status: "completed"; content: string }
+  | { status: "completed"; verdict: GoalJudgeVerdict }
+  | { status: "invalid" }
   | { status: "failed"; error: unknown }
   | { status: "timed_out" };
 
@@ -2084,7 +2089,57 @@ async function completeJudgeWithDeadline(
   chatClient: ChatClient,
   request: ChatCompletionRequest,
   operation: LinkedJudgeDeadline,
+  suppliedRefs: ReadonlySet<string>,
 ): Promise<JudgeCompletionOutcome> {
+  let currentRequest = request;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const outcome = await completeJudgeAttemptWithDeadline(
+      chatClient,
+      currentRequest,
+      operation,
+    );
+    if (outcome.status !== "completed") {
+      return outcome;
+    }
+    const verdict = parseStrictGoalJudgeVerdict(
+      outcome.content,
+      suppliedRefs,
+    );
+    if (verdict) {
+      return { status: "completed", verdict };
+    }
+    if (attempt === 0 && !operation.deadlinePassed()) {
+      currentRequest = {
+        ...request,
+        messages: [
+          ...request.messages,
+          {
+            role: "user",
+            content: [
+              "Your previous response was rejected because it did not match the required JSON contract.",
+              "Return only one JSON object. Do not use Markdown fences, prose, XML, or extra keys.",
+              'Required shape: {"verdict":"accepted"|"rejected"|"impossible","reason":"non-empty evidence-based reason","evidenceRefs":["one-or-more supplied refs"]}',
+            ].join("\n"),
+          },
+        ],
+      };
+      continue;
+    }
+    return { status: "invalid" };
+  }
+  return { status: "invalid" };
+}
+
+type JudgeAttemptOutcome =
+  | { status: "completed"; content: string }
+  | { status: "failed"; error: unknown }
+  | { status: "timed_out" };
+
+async function completeJudgeAttemptWithDeadline(
+  chatClient: ChatClient,
+  request: ChatCompletionRequest,
+  operation: LinkedJudgeDeadline,
+): Promise<JudgeAttemptOutcome> {
   if (operation.signal.aborted) {
     if (operation.timedOut()) return { status: "timed_out" };
     throw abortError(operation.signal.reason);
@@ -2093,7 +2148,7 @@ async function completeJudgeWithDeadline(
     operation.abortForTimeout();
     return { status: "timed_out" };
   }
-  const completion: Promise<JudgeCompletionOutcome> = Promise.resolve()
+  const completion: Promise<JudgeAttemptOutcome> = Promise.resolve()
     .then(() => chatClient.complete({ ...request, signal: operation.signal }))
     .then(
       (response) => {
@@ -2110,7 +2165,8 @@ async function completeJudgeWithDeadline(
         return { status: "failed", error };
       },
     );
-  const canceled = new Promise<JudgeCompletionOutcome>((resolve, reject) => {
+  let cleanup: () => void = () => undefined;
+  const canceled = new Promise<JudgeAttemptOutcome>((resolve, reject) => {
     const onAbort = () => {
       cleanup();
       if (operation.timedOut()) {
@@ -2119,11 +2175,15 @@ async function completeJudgeWithDeadline(
         reject(abortError(operation.signal.reason));
       }
     };
-    const cleanup = () => operation.signal.removeEventListener("abort", onAbort);
+    cleanup = () => operation.signal.removeEventListener("abort", onAbort);
     operation.signal.addEventListener("abort", onAbort, { once: true });
     operation.setAbortCleanup(cleanup);
   });
-  return Promise.race([completion, canceled]);
+  try {
+    return await Promise.race([completion, canceled]);
+  } finally {
+    cleanup();
+  }
 }
 
 type LinkedJudgeDeadline = {

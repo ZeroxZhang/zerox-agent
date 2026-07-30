@@ -1,386 +1,925 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  getDefaultModelSettings,
-  getGenerationSettingRecommendations,
-  getModelSettingsFieldGuidance,
-  type ModelSettingsInput,
-  type ModelSettingsValidationErrors,
-  type PublicModelSettings,
-  type TestModelConnectionResult,
+  defaultModelGenerationSettings,
+  type ModelProfile,
+  type ModelProfileInput,
+  type ProviderConnectionInput,
+  type ProviderCredentialSource,
+  type ProviderDescriptor,
+  type ProviderField,
+  type ProviderKind,
+  type PublicModelCatalog,
+  type PublicProviderConnection,
+  type TestProviderConnectionResult,
 } from "../../shared/modelSettings";
 
-type SaveStatus =
-  | { kind: "idle"; message: string }
-  | { kind: "saving"; message: string }
-  | { kind: "saved"; message: string }
-  | { kind: "error"; message: string };
+type PanelStatus = {
+  kind: "idle" | "working" | "saved" | "error";
+  message: string;
+};
 
-const defaultSettings = getDefaultModelSettings();
-const recommendations = getGenerationSettingRecommendations();
-const fieldGuidance = getModelSettingsFieldGuidance();
+type ConnectionDraft = ProviderConnectionInput;
+
+type ProfileDraft = ModelProfileInput;
+
+const emptyCatalog: PublicModelCatalog = {
+  schemaVersion: 2,
+  descriptors: [],
+  entries: [],
+  connections: [],
+  profiles: [],
+  defaultChatProfileId: null,
+  defaultEmbeddingProfileId: null,
+  hiddenRoutedModelIds: [],
+  updatedAt: null,
+};
 
 export function ModelSettingsPanel() {
-  const [settings, setSettings] =
-    useState<PublicModelSettings>(defaultSettings);
-  const [form, setForm] = useState<ModelSettingsInput>(() =>
-    toModelSettingsInput(defaultSettings),
+  const [catalog, setCatalog] = useState<PublicModelCatalog>(emptyCatalog);
+  const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(
+    null,
   );
-  const [errors, setErrors] = useState<ModelSettingsValidationErrors>({});
-  const [status, setStatus] = useState<SaveStatus>({
+  const [connectionDraft, setConnectionDraft] =
+    useState<ConnectionDraft | null>(null);
+  const [connectionErrors, setConnectionErrors] = useState<
+    Record<string, string>
+  >({});
+  const [profileDraft, setProfileDraft] = useState<ProfileDraft | null>(null);
+  const [status, setStatus] = useState<PanelStatus>({
     kind: "idle",
-    message: "还没有保存模型配置。",
+    message: "正在加载服务商与模型配置…",
   });
-  const [connectionResult, setConnectionResult] =
-    useState<TestModelConnectionResult | null>(null);
+  const [testResult, setTestResult] =
+    useState<TestProviderConnectionResult | null>(null);
 
   useEffect(() => {
-    window.buildingAgent
-      ?.loadModelSettings()
-      .then((loadedSettings) => {
-        setSettings(loadedSettings);
-        setForm(toModelSettingsInput(loadedSettings));
+    if (!window.buildingAgent) {
+      setStatus({
+        kind: "error",
+        message: "浏览器预览模式无法读取桌面端模型配置。",
+      });
+      return;
+    }
+    void window.buildingAgent
+      .loadModelCatalog()
+      .then((loaded) => {
+        setCatalog(loaded);
+        const firstConnection = loaded.connections[0];
+        if (firstConnection) {
+          setSelectedConnectionId(firstConnection.id);
+          setConnectionDraft(connectionToDraft(firstConnection));
+        } else if (loaded.descriptors[0]) {
+          setConnectionDraft(newConnectionDraft(loaded.descriptors[0]));
+        }
         setStatus({
           kind: "idle",
-          message: loadedSettings.hasApiKey
-            ? "模型配置已加载，API Key 已安全存储。"
-            : "还没有保存模型配置。",
+          message: loaded.connections.length
+            ? `已加载 ${loaded.connections.length} 个服务商连接。`
+            : "先添加一个服务商连接，再创建模型档案。",
         });
       })
       .catch((error) => {
         setStatus({
           kind: "error",
-          message:
-            error instanceof Error
-              ? error.message
-              : "无法加载模型配置。",
+          message: error instanceof Error ? error.message : "无法加载模型配置。",
         });
       });
   }, []);
 
-  const apiKeyPlaceholder = useMemo(() => {
-    return settings.hasApiKey
-      ? "留空即可沿用已保存密钥"
-      : "粘贴你的 API Key";
-  }, [settings.hasApiKey]);
+  const descriptor = useMemo(
+    () =>
+      catalog.descriptors.find(
+        (candidate) => candidate.kind === connectionDraft?.providerKind,
+      ) ?? null,
+    [catalog.descriptors, connectionDraft?.providerKind],
+  );
+  const selectedConnection = useMemo(
+    () =>
+      catalog.connections.find(
+        (connection) => connection.id === selectedConnectionId,
+      ) ?? null,
+    [catalog.connections, selectedConnectionId],
+  );
+  const configuredKinds = useMemo(
+    () =>
+      new Set(
+        catalog.connections
+          .filter(
+            (connection) =>
+              connection.providerKind === "ollama"
+                ? connection.availability === "available"
+                : connection.hasCredential,
+          )
+          .map((connection) => connection.providerKind),
+      ),
+    [catalog.connections],
+  );
+  const visibleEntries = useMemo(
+    () =>
+      catalog.entries.filter(
+        (entry) =>
+          configuredKinds.has(entry.providerKind) &&
+          !catalog.hiddenRoutedModelIds.includes(entry.routedModelId),
+      ),
+    [catalog.entries, catalog.hiddenRoutedModelIds, configuredKinds],
+  );
+  const profileConnection = useMemo(
+    () =>
+      catalog.connections.find(
+        (connection) => connection.id === profileDraft?.connectionId,
+      ) ?? null,
+    [catalog.connections, profileDraft?.connectionId],
+  );
+  const suggestedModels = useMemo(
+    () =>
+      profileConnection
+        ? visibleEntries.filter(
+            (entry) => entry.providerKind === profileConnection.providerKind,
+          )
+        : [],
+    [profileConnection, visibleEntries],
+  );
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setStatus({ kind: "saving", message: "正在保存模型配置..." });
-    setErrors({});
+  function selectConnection(connection: PublicProviderConnection) {
+    setSelectedConnectionId(connection.id);
+    setConnectionDraft(connectionToDraft(connection));
+    setConnectionErrors({});
+    setTestResult(null);
+  }
 
-    if (!window.buildingAgent) {
-      setStatus({
-        kind: "error",
-        message: "浏览器预览模式无法保存桌面配置。",
-      });
+  function startNewConnection(kind?: ProviderKind) {
+    const nextDescriptor =
+      catalog.descriptors.find((candidate) => candidate.kind === kind) ??
+      catalog.descriptors[0];
+    if (!nextDescriptor) {
       return;
     }
+    setSelectedConnectionId(null);
+    setConnectionDraft(newConnectionDraft(nextDescriptor));
+    setConnectionErrors({});
+    setTestResult(null);
+  }
 
-    const result = await window.buildingAgent.saveModelSettings(form);
+  function changeProvider(kind: ProviderKind) {
+    const nextDescriptor = catalog.descriptors.find(
+      (candidate) => candidate.kind === kind,
+    );
+    if (nextDescriptor) {
+      setSelectedConnectionId(null);
+      setConnectionDraft(newConnectionDraft(nextDescriptor));
+      setConnectionErrors({});
+      setTestResult(null);
+    }
+  }
 
+  async function saveConnection(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!connectionDraft || !window.buildingAgent) {
+      return;
+    }
+    setStatus({ kind: "working", message: "正在安全保存服务商连接…" });
+    setConnectionErrors({});
+    const result = await window.buildingAgent.saveProviderConnection(
+      connectionDraft,
+    );
     if (!result.ok) {
-      setErrors(result.errors);
+      setConnectionErrors(result.errors ?? {});
       setStatus({ kind: "error", message: result.message });
       return;
     }
-
-    setSettings(result.settings);
-    setForm(toModelSettingsInput(result.settings));
-    setConnectionResult(null);
+    setCatalog(result.catalog);
+    setSelectedConnectionId(result.connection.id);
+    setConnectionDraft(connectionToDraft(result.connection));
+    setTestResult(null);
     setStatus({
       kind: "saved",
-      message: "模型配置已保存，API Key 不会回传到界面。",
+      message: "连接已保存；密钥不会回传到界面或运行轨迹。",
     });
   }
 
-  async function handleTestConnection() {
-    setStatus({ kind: "saving", message: "正在测试模型连接..." });
-    setConnectionResult(null);
-
-    if (!window.buildingAgent) {
-      const previewResult: TestModelConnectionResult = settings.hasApiKey
-        ? {
-            ok: true,
-            message: "浏览器预览模式：桌面端会使用已保存密钥发起真实测试。",
-            model: form.chatModel || "未填写模型",
-            latencyMs: 0,
-            checkedAt: new Date().toISOString(),
-            replyPreview: "OK",
-          }
-        : {
-            ok: false,
-            message: "浏览器预览模式无法读取桌面密钥，请在桌面端测试。",
-          };
-      setConnectionResult(previewResult);
-      setStatus({
-        kind: previewResult.ok ? "saved" : "error",
-        message: previewResult.message,
-      });
+  async function testConnection() {
+    if (!connectionDraft || !window.buildingAgent) {
       return;
     }
-
-    const result = await window.buildingAgent.testModelConnection();
-    setConnectionResult(result);
+    setStatus({ kind: "working", message: "正在用当前表单临时值测试连接…" });
+    setTestResult(null);
+    const result = await window.buildingAgent.testProviderConnection({
+      connection: connectionDraft,
+      ...(descriptor?.recommendedModel
+        ? { modelId: descriptor.recommendedModel }
+        : {}),
+    });
+    setTestResult(result);
     setStatus({
       kind: result.ok ? "saved" : "error",
       message: result.message,
     });
   }
 
+  async function removeConnection(connection: PublicProviderConnection) {
+    if (!window.buildingAgent) {
+      return;
+    }
+    const result = await window.buildingAgent.deleteProviderConnection(
+      connection.id,
+    );
+    if (!result.ok) {
+      setStatus({ kind: "error", message: result.message });
+      return;
+    }
+    setCatalog(result.catalog);
+    setSelectedConnectionId(null);
+    const first = result.catalog.connections[0];
+    setConnectionDraft(
+      first
+        ? connectionToDraft(first)
+        : result.catalog.descriptors[0]
+          ? newConnectionDraft(result.catalog.descriptors[0])
+          : null,
+    );
+    setStatus({ kind: "saved", message: "服务商连接已删除。" });
+  }
+
+  function startNewProfile(connectionId?: string) {
+    const connection =
+      catalog.connections.find((candidate) => candidate.id === connectionId) ??
+      selectedConnection ??
+      catalog.connections[0];
+    if (!connection) {
+      setStatus({ kind: "error", message: "请先保存一个服务商连接。" });
+      return;
+    }
+    const recommended =
+      catalog.descriptors.find(
+        (candidate) => candidate.kind === connection.providerKind,
+      )?.recommendedModel ?? "";
+    setProfileDraft({
+      name: recommended,
+      connectionId: connection.id,
+      modelId: recommended,
+      purpose: "chat",
+      generation: defaultModelGenerationSettings(),
+    });
+  }
+
+  function editProfile(profile: ModelProfile) {
+    setProfileDraft({
+      id: profile.id,
+      name: profile.name,
+      connectionId: profile.connectionId,
+      modelId: profile.modelId,
+      purpose: profile.purpose,
+      generation: { ...profile.generation },
+      ...(profile.capabilityOverrides
+        ? { capabilityOverrides: { ...profile.capabilityOverrides } }
+        : {}),
+      expectedRevision: profile.revision,
+    });
+  }
+
+  async function saveProfile(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!profileDraft || !window.buildingAgent) {
+      return;
+    }
+    setStatus({ kind: "working", message: "正在保存模型档案…" });
+    const result = await window.buildingAgent.saveModelProfile(profileDraft);
+    if (!result.ok) {
+      setStatus({ kind: "error", message: result.message });
+      return;
+    }
+    setCatalog(result.catalog);
+    setProfileDraft(null);
+    setStatus({
+      kind: "saved",
+      message: result.profile.custom
+        ? "自定义模型档案已保存，并按保守能力值运行。"
+        : "模型档案已保存。",
+    });
+  }
+
+  async function removeProfile(profile: ModelProfile) {
+    if (!window.buildingAgent) {
+      return;
+    }
+    const result = await window.buildingAgent.deleteModelProfile(profile.id);
+    if (!result.ok) {
+      setStatus({ kind: "error", message: result.message });
+      return;
+    }
+    setCatalog(result.catalog);
+    setProfileDraft((current) => (current?.id === profile.id ? null : current));
+    setStatus({ kind: "saved", message: "模型档案已删除。" });
+  }
+
+  async function setDefaultProfile(
+    purpose: "chat" | "embedding",
+    profileId: string | null,
+  ) {
+    if (!window.buildingAgent) {
+      return;
+    }
+    const result = await window.buildingAgent.setDefaultModelProfile(
+      purpose,
+      profileId,
+    );
+    if (!result.ok) {
+      setStatus({ kind: "error", message: result.message });
+      return;
+    }
+    setCatalog(result.catalog);
+    setStatus({ kind: "saved", message: "默认模型已更新。" });
+  }
+
+  async function hideBuiltInModel(routedModelId: string) {
+    if (!window.buildingAgent) {
+      return;
+    }
+    const result = await window.buildingAgent.setModelHidden(
+      routedModelId,
+      true,
+    );
+    if (result.ok) {
+      setCatalog(result.catalog);
+      setStatus({ kind: "saved", message: "内置模型已隐藏。" });
+    } else {
+      setStatus({ kind: "error", message: result.message });
+    }
+  }
+
   return (
-    <form className="settings-panel" onSubmit={handleSubmit}>
-      <div className="settings-header">
+    <div className="settings-panel model-catalog-panel">
+      <header className="settings-header">
         <div>
-          <p className="kicker">兼容 OpenAI 接口</p>
-          <h3>模型配置</h3>
-        </div>
-        <span className={`settings-state is-${status.kind}`}>
-          {settings.hasApiKey ? "密钥已保存" : "未保存密钥"}
-        </span>
-      </div>
-
-      <label className="field">
-        <span>
-          {fieldGuidance.baseUrl.label} <em>必填</em>
-        </span>
-        <input
-          value={form.baseUrl}
-          onChange={(event) =>
-            setForm({ ...form, baseUrl: event.currentTarget.value })
-          }
-          placeholder="https://api.openai.com/v1"
-        />
-        <strong className="field-hint">{fieldGuidance.baseUrl.hint}</strong>
-        {errors.baseUrl ? <small>{errors.baseUrl}</small> : null}
-      </label>
-
-      <div className="field-grid">
-        <label className="field">
-          <span>
-            {fieldGuidance.chatModel.label} <em>必填</em>
-          </span>
-          <input
-            value={form.chatModel}
-            onChange={(event) =>
-              setForm({ ...form, chatModel: event.currentTarget.value })
-            }
-            placeholder="gpt-4.1-mini, deepseek-chat, qwen-plus"
-            />
-          <strong className="field-hint">{fieldGuidance.chatModel.hint}</strong>
-          {errors.chatModel ? <small>{errors.chatModel}</small> : null}
-        </label>
-
-        <label className="field">
-          <span>
-            {fieldGuidance.embeddingModel.label} <em>选填</em>
-          </span>
-          <input
-            value={form.embeddingModel}
-            onChange={(event) =>
-              setForm({ ...form, embeddingModel: event.currentTarget.value })
-            }
-            placeholder="text-embedding-3-small"
-          />
-          <strong className="field-hint">{fieldGuidance.embeddingModel.hint}</strong>
-          {errors.embeddingModel ? (
-            <small>{errors.embeddingModel}</small>
-          ) : null}
-        </label>
-      </div>
-
-      <label className="field">
-        <span>
-          {fieldGuidance.apiKey.label} <em>首次保存必填</em>
-        </span>
-        <input
-          value={form.apiKey}
-          onChange={(event) =>
-            setForm({ ...form, apiKey: event.currentTarget.value })
-          }
-          placeholder={apiKeyPlaceholder}
-          type="password"
-        />
-        <strong className="field-hint">{fieldGuidance.apiKey.hint}</strong>
-        {errors.apiKey ? <small>{errors.apiKey}</small> : null}
-      </label>
-
-      <section className="recommendations" aria-label="推荐生成参数">
-        <div className="recommendations-copy">
-          <span>推荐值</span>
+          <p className="kicker">Provider · Connection · Model Profile</p>
+          <h3>多服务商与模型配置</h3>
           <p>
-            第一版建议先用“智能体 / 编程”。只有想要更多变化时再提高温度；只有单次回复被截断时再提高最大输出。
+            声明式表单统一管理原生 API、云平台、本地模型与兼容 OpenAI
+            接口；每个模型档案绑定一个稳定连接。
           </p>
         </div>
-        <div className="recommendation-list">
-          {recommendations.map((recommendation) => (
-            <button
-              key={recommendation.id}
-              className="recommendation"
-              onClick={() =>
-                setForm({
-                  ...form,
-                  temperature: recommendation.temperature,
-                  maxTokens: recommendation.maxTokens,
-                })
-              }
-              type="button"
+        <span className={`settings-state is-${status.kind}`}>
+          {catalog.connections.length} 个连接
+        </span>
+      </header>
+
+      <section className="model-settings-section" aria-labelledby="provider-heading">
+        <div className="model-settings-section-heading">
+          <div>
+            <span>01</span>
+            <h4 id="provider-heading">服务商连接</h4>
+          </div>
+          <button
+            className="secondary-action"
+            onClick={() => startNewConnection()}
+            type="button"
+          >
+            添加连接
+          </button>
+        </div>
+        <div className="provider-settings-layout">
+          <nav className="provider-connection-list" aria-label="服务商连接列表">
+            {catalog.connections.length ? (
+              catalog.connections.map((connection) => {
+                const connectionDescriptor = catalog.descriptors.find(
+                  (candidate) => candidate.kind === connection.providerKind,
+                );
+                return (
+                  <button
+                    className={
+                      connection.id === selectedConnectionId ? "is-active" : ""
+                    }
+                    key={connection.id}
+                    onClick={() => selectConnection(connection)}
+                    type="button"
+                  >
+                    <strong>{connection.name}</strong>
+                    <span>{connectionDescriptor?.title ?? connection.providerKind}</span>
+                    <small>
+                      {connection.providerKind === "ollama"
+                        ? connection.availability === "available"
+                          ? "本地服务可用"
+                          : connection.availability === "unavailable"
+                            ? "本地服务不可达"
+                            : "等待探测"
+                        : connection.hasCredential
+                          ? "凭证可用"
+                          : "等待凭证"}{" "}
+                      ·{" "}
+                      {formatCredentialSource(connection.credentialSource)}
+                    </small>
+                  </button>
+                );
+              })
+            ) : (
+              <p>还没有连接。选择服务商并填写连接信息。</p>
+            )}
+          </nav>
+
+          {connectionDraft && descriptor ? (
+            <form
+              className="provider-connection-form"
+              onSubmit={(event) => void saveConnection(event)}
             >
-              <strong>{recommendation.label}</strong>
-              <span>
-                温度 {recommendation.temperature} / 输出 {recommendation.maxTokens}
-              </span>
-              <small>{recommendation.description}</small>
-            </button>
-          ))}
+              <div className="field-grid provider-identity-grid">
+                <label className="field">
+                  <span>服务商</span>
+                  <select
+                    disabled={Boolean(connectionDraft.id)}
+                    onChange={(event) =>
+                      changeProvider(event.currentTarget.value as ProviderKind)
+                    }
+                    value={connectionDraft.providerKind}
+                  >
+                    {catalog.descriptors.map((candidate) => (
+                      <option key={candidate.kind} value={candidate.kind}>
+                        {candidate.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>连接名称</span>
+                  <input
+                    onChange={(event) =>
+                      setConnectionDraft({
+                        ...connectionDraft,
+                        name: event.currentTarget.value,
+                      })
+                    }
+                    value={connectionDraft.name}
+                  />
+                </label>
+                {descriptor.needsCredential && descriptor.environmentKey ? (
+                  <label className="field">
+                    <span>凭证来源</span>
+                    <select
+                      onChange={(event) =>
+                        setConnectionDraft({
+                          ...connectionDraft,
+                          credentialSource: event.currentTarget
+                            .value as ProviderCredentialSource,
+                        })
+                      }
+                      value={connectionDraft.credentialSource ?? "stored"}
+                    >
+                      <option value="stored">安全存储</option>
+                      <option value="environment">
+                        环境变量 {descriptor.environmentKey}
+                      </option>
+                    </select>
+                  </label>
+                ) : null}
+              </div>
+              <p className="provider-description">{descriptor.description}</p>
+              <div className="provider-field-grid">
+                {descriptor.fields
+                  .filter((field) =>
+                    isProviderFieldVisible(field, connectionDraft.values),
+                  )
+                  .map((field) => (
+                    <ProviderFieldControl
+                      connectionHasCredential={selectedConnection?.hasCredential ?? false}
+                      error={connectionErrors[field.key]}
+                      field={field}
+                      key={field.key}
+                      value={connectionDraft.values[field.key] ?? ""}
+                      onChange={(value) =>
+                        setConnectionDraft({
+                          ...connectionDraft,
+                          values: {
+                            ...connectionDraft.values,
+                            [field.key]: value,
+                          },
+                        })
+                      }
+                    />
+                  ))}
+              </div>
+              <div className="settings-actions">
+                <button
+                  className="primary-action"
+                  disabled={status.kind === "working"}
+                >
+                  保存连接
+                </button>
+                <button
+                  className="secondary-action"
+                  disabled={status.kind === "working"}
+                  onClick={() => void testConnection()}
+                  type="button"
+                >
+                  测试临时配置
+                </button>
+                {selectedConnection ? (
+                  <button
+                    className="danger-action"
+                    disabled={status.kind === "working"}
+                    onClick={() => void removeConnection(selectedConnection)}
+                    type="button"
+                  >
+                    删除连接
+                  </button>
+                ) : null}
+              </div>
+              {testResult ? (
+                <p
+                  className={`connection-test-summary ${
+                    testResult.ok ? "is-success" : "is-error"
+                  }`}
+                  role="status"
+                >
+                  {testResult.message}
+                  {testResult.ok ? ` · ${testResult.latencyMs} ms` : ""}
+                </p>
+              ) : null}
+            </form>
+          ) : null}
         </div>
       </section>
 
-      <div className="field-grid">
-        <label className="field">
-          <span>
-            {fieldGuidance.temperature.label} <em>选填</em>
-          </span>
-          <div className="range-field">
-            <input
-              max="2"
-              min="0"
-              onChange={(event) =>
-                setForm({
-                  ...form,
-                  temperature: Number(event.currentTarget.value),
-                })
-              }
-              step="0.01"
-              type="range"
-              value={form.temperature}
-            />
-            <output>{form.temperature.toFixed(2)}</output>
+      <section className="model-settings-section" aria-labelledby="profiles-heading">
+        <div className="model-settings-section-heading">
+          <div>
+            <span>02</span>
+            <h4 id="profiles-heading">模型档案</h4>
           </div>
-          <strong className="field-hint">{fieldGuidance.temperature.hint}</strong>
-          {errors.temperature ? <small>{errors.temperature}</small> : null}
-        </label>
+          <button
+            className="secondary-action"
+            disabled={!catalog.connections.length}
+            onClick={() => startNewProfile()}
+            type="button"
+          >
+            添加模型档案
+          </button>
+        </div>
+        <div className="model-profile-list">
+          {catalog.profiles.map((profile) => {
+            const connection = catalog.connections.find(
+              (candidate) => candidate.id === profile.connectionId,
+            );
+            const entry = catalog.entries.find(
+              (candidate) =>
+                candidate.providerKind === connection?.providerKind &&
+                candidate.modelId === profile.modelId,
+            );
+            const isDefault =
+              profile.id === catalog.defaultChatProfileId ||
+              profile.id === catalog.defaultEmbeddingProfileId;
+            return (
+              <article className="model-profile-card" key={profile.id}>
+                <div>
+                  <span>{profile.purpose === "chat" ? "Chat" : "Embedding"}</span>
+                  <strong>{profile.name}</strong>
+                  <p>
+                    {connection?.name ?? "连接缺失"} · {profile.modelId}
+                  </p>
+                </div>
+                <div className="model-profile-badges">
+                  <span className={entry?.verified ? "is-verified" : "is-custom"}>
+                    {entry?.verified ? "已验证" : "未验证"}
+                  </span>
+                  {isDefault ? <span>默认</span> : null}
+                  <span>r{profile.revision}</span>
+                </div>
+                <div className="model-profile-actions">
+                  <button onClick={() => editProfile(profile)} type="button">
+                    编辑
+                  </button>
+                  <button
+                    disabled={isDefault}
+                    onClick={() => void removeProfile(profile)}
+                    type="button"
+                  >
+                    删除
+                  </button>
+                </div>
+              </article>
+            );
+          })}
+          {!catalog.profiles.length ? <p>还没有模型档案。</p> : null}
+        </div>
 
-        <label className="field">
-          <span>
-            {fieldGuidance.maxTokens.label} <em>选填</em>
-          </span>
-          <input
-            inputMode="numeric"
-            min="1"
-            onChange={(event) =>
-              setForm({
-                ...form,
-                maxTokens: Number(event.currentTarget.value),
-              })
-            }
-            step="1"
-            type="number"
-            value={form.maxTokens}
-          />
-          <strong className="field-hint">{fieldGuidance.maxTokens.hint}</strong>
-          {errors.maxTokens ? <small>{errors.maxTokens}</small> : null}
-        </label>
-      </div>
-
-      <div className="field-grid">
-        <label className="field is-checkbox">
-          <span>{fieldGuidance.thinkingEnabled.label}</span>
-          <input
-            checked={form.thinkingEnabled ?? false}
-            onChange={(event) =>
-              setForm({
-                ...form,
-                thinkingEnabled: event.currentTarget.checked,
-              })
-            }
-            type="checkbox"
-          />
-          <strong className="field-hint">
-            {fieldGuidance.thinkingEnabled.hint}
-          </strong>
-        </label>
-
-        {form.thinkingEnabled ? (
-          <label className="field">
-            <span>{fieldGuidance.thinkingBudgetTokens.label}</span>
-            <input
-              min="256"
-              max="32000"
-              onChange={(event) =>
-                setForm({
-                  ...form,
-                  thinkingBudgetTokens: Number(event.currentTarget.value),
-                })
-              }
-              step="1"
-              type="number"
-              value={form.thinkingBudgetTokens ?? 8192}
-            />
-            <strong className="field-hint">
-              {fieldGuidance.thinkingBudgetTokens.hint}
-            </strong>
-            {errors.thinkingBudgetTokens ? (
-              <small>{errors.thinkingBudgetTokens}</small>
+        {profileDraft ? (
+          <form
+            className="model-profile-form"
+            onSubmit={(event) => void saveProfile(event)}
+          >
+            <div className="field-grid">
+              <label className="field">
+                <span>连接</span>
+                <select
+                  onChange={(event) =>
+                    setProfileDraft({
+                      ...profileDraft,
+                      connectionId: event.currentTarget.value,
+                    })
+                  }
+                  value={profileDraft.connectionId}
+                >
+                  {catalog.connections.map((connection) => (
+                    <option key={connection.id} value={connection.id}>
+                      {connection.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>用途</span>
+                <select
+                  onChange={(event) =>
+                    setProfileDraft({
+                      ...profileDraft,
+                      purpose: event.currentTarget.value as "chat" | "embedding",
+                    })
+                  }
+                  value={profileDraft.purpose}
+                >
+                  <option value="chat">Chat</option>
+                  <option value="embedding">Embedding</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>档案名称</span>
+                <input
+                  onChange={(event) =>
+                    setProfileDraft({
+                      ...profileDraft,
+                      name: event.currentTarget.value,
+                    })
+                  }
+                  value={profileDraft.name}
+                />
+              </label>
+              <label className="field">
+                <span>模型 ID</span>
+                <input
+                  list="configured-model-suggestions"
+                  onChange={(event) =>
+                    setProfileDraft({
+                      ...profileDraft,
+                      modelId: event.currentTarget.value,
+                    })
+                  }
+                  placeholder="可填写任意自定义模型 ID"
+                  value={profileDraft.modelId}
+                />
+                <datalist id="configured-model-suggestions">
+                  {suggestedModels.map((entry) => (
+                    <option key={entry.routedModelId} value={entry.modelId}>
+                      {entry.label}
+                    </option>
+                  ))}
+                </datalist>
+              </label>
+            </div>
+            {profileDraft.purpose === "chat" ? (
+              <div className="field-grid">
+                <label className="field">
+                  <span>温度</span>
+                  <input
+                    max="2"
+                    min="0"
+                    onChange={(event) =>
+                      setProfileDraft({
+                        ...profileDraft,
+                        generation: {
+                          ...profileDraft.generation,
+                          temperature: Number(event.currentTarget.value),
+                        },
+                      })
+                    }
+                    step="0.01"
+                    type="number"
+                    value={profileDraft.generation?.temperature ?? 0.2}
+                  />
+                </label>
+                <label className="field">
+                  <span>最大输出 Token</span>
+                  <input
+                    min="1"
+                    onChange={(event) =>
+                      setProfileDraft({
+                        ...profileDraft,
+                        generation: {
+                          ...profileDraft.generation,
+                          maxTokens: Number(event.currentTarget.value),
+                        },
+                      })
+                    }
+                    type="number"
+                    value={profileDraft.generation?.maxTokens ?? 8192}
+                  />
+                </label>
+              </div>
             ) : null}
-          </label>
+            <p className="field-hint">
+              矩阵外的模型会标记为“未验证”，工具、视觉和并行调用能力默认关闭。
+            </p>
+            <div className="settings-actions">
+              <button className="primary-action">保存档案</button>
+              <button
+                className="secondary-action"
+                onClick={() => setProfileDraft(null)}
+                type="button"
+              >
+                取消
+              </button>
+            </div>
+          </form>
         ) : null}
-      </div>
+      </section>
 
-      <div className="settings-actions">
-        <button className="primary-action" disabled={status.kind === "saving"}>
-          保存配置
-        </button>
-        <button
-          className="secondary-action"
-          disabled={status.kind === "saving" || !settings.hasApiKey}
-          onClick={() => void handleTestConnection()}
-          type="button"
-        >
-          测试连接
-        </button>
-        <p className={`settings-message is-${status.kind}`}>{status.message}</p>
-      </div>
-      {connectionResult ? (
-        <section
-          className={`connection-result ${
-            connectionResult.ok ? "is-success" : "is-error"
-          }`}
-          aria-label="模型连接测试结果"
-        >
-          <strong>{connectionResult.message}</strong>
-          {connectionResult.ok ? (
-            <dl>
-              <div>
-                <dt>模型</dt>
-                <dd>{connectionResult.model}</dd>
-              </div>
-              <div>
-                <dt>耗时</dt>
-                <dd>{connectionResult.latencyMs} ms</dd>
-              </div>
-              <div>
-                <dt>回复</dt>
-                <dd>{connectionResult.replyPreview}</dd>
-              </div>
-            </dl>
-          ) : null}
-        </section>
-      ) : null}
-    </form>
+      <section className="model-settings-section" aria-labelledby="defaults-heading">
+        <div className="model-settings-section-heading">
+          <div>
+            <span>03</span>
+            <h4 id="defaults-heading">默认模型与可见性</h4>
+          </div>
+        </div>
+        <div className="field-grid">
+          <label className="field">
+            <span>默认 Chat 模型</span>
+            <select
+              onChange={(event) =>
+                void setDefaultProfile("chat", event.currentTarget.value || null)
+              }
+              value={catalog.defaultChatProfileId ?? ""}
+            >
+              <option value="">未设置</option>
+              {catalog.profiles
+                .filter((profile) => profile.purpose === "chat")
+                .map((profile) => (
+                  <option key={profile.id} value={profile.id}>
+                    {profile.name}
+                  </option>
+                ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>默认 Embedding 模型</span>
+            <select
+              onChange={(event) =>
+                void setDefaultProfile(
+                  "embedding",
+                  event.currentTarget.value || null,
+                )
+              }
+              value={catalog.defaultEmbeddingProfileId ?? ""}
+            >
+              <option value="">未设置</option>
+              {catalog.profiles
+                .filter((profile) => profile.purpose === "embedding")
+                .map((profile) => (
+                  <option key={profile.id} value={profile.id}>
+                    {profile.name}
+                  </option>
+                ))}
+            </select>
+          </label>
+        </div>
+        {visibleEntries.length ? (
+          <details className="model-matrix-disclosure">
+            <summary>已配置服务商的模型矩阵（{visibleEntries.length}）</summary>
+            <div className="model-matrix-list">
+              {visibleEntries.map((entry) => (
+                <div key={entry.routedModelId}>
+                  <span>
+                    <strong>{entry.label}</strong>
+                    <small>
+                      {entry.providerKind}:{entry.modelId}
+                    </small>
+                  </span>
+                  <span>
+                    {entry.capabilities.tools ? "工具" : "无工具"} ·{" "}
+                    {entry.contextWindow
+                      ? `${Math.round(entry.contextWindow / 1000)}k`
+                      : "上下文未知"}
+                  </span>
+                  <button
+                    onClick={() => void hideBuiltInModel(entry.routedModelId)}
+                    type="button"
+                  >
+                    隐藏
+                  </button>
+                </div>
+              ))}
+            </div>
+          </details>
+        ) : null}
+      </section>
+
+      <p className={`settings-message is-${status.kind}`} role="status">
+        {status.message}
+      </p>
+    </div>
   );
 }
 
-function toModelSettingsInput(
-  settings: PublicModelSettings,
-): ModelSettingsInput {
+function ProviderFieldControl(props: {
+  field: ProviderField;
+  value: string;
+  error?: string;
+  connectionHasCredential: boolean;
+  onChange: (value: string) => void;
+}) {
+  const placeholder =
+    props.field.secret && props.connectionHasCredential
+      ? "留空沿用已安全存储的值"
+      : props.field.placeholder;
+  return (
+    <label className="field">
+      <span>
+        {props.field.label}
+        {props.field.required ? <em>必填</em> : null}
+      </span>
+      {props.field.choices ? (
+        <select
+          onChange={(event) => props.onChange(event.currentTarget.value)}
+          value={props.value || props.field.defaultValue || ""}
+        >
+          {props.field.choices.map((choice) => (
+            <option key={choice.value} value={choice.value}>
+              {choice.label}
+              {choice.tag ? ` · ${choice.tag}` : ""}
+            </option>
+          ))}
+        </select>
+      ) : props.field.key === "serviceAccountJson" ? (
+        <textarea
+          onChange={(event) => props.onChange(event.currentTarget.value)}
+          placeholder={placeholder}
+          rows={4}
+          value={props.value}
+        />
+      ) : (
+        <input
+          onChange={(event) => props.onChange(event.currentTarget.value)}
+          placeholder={placeholder}
+          type={props.field.secret ? "password" : "text"}
+          value={props.value}
+        />
+      )}
+      {props.field.help ? (
+        <strong className="field-hint">{props.field.help}</strong>
+      ) : null}
+      {props.error ? <small>{props.error}</small> : null}
+    </label>
+  );
+}
+
+function isProviderFieldVisible(
+  field: ProviderField,
+  values: Record<string, string>,
+): boolean {
+  if (!field.showWhen) {
+    return true;
+  }
+  return Object.entries(field.showWhen).every(
+    ([key, expected]) => (values[key] || "") === expected,
+  );
+}
+
+function newConnectionDraft(
+  descriptor: ProviderDescriptor,
+): ConnectionDraft {
   return {
-    baseUrl: settings.baseUrl,
-    chatModel: settings.chatModel,
-    embeddingModel: settings.embeddingModel,
-    apiKey: "",
-    temperature: settings.temperature,
-    maxTokens: settings.maxTokens,
-    thinkingEnabled: settings.thinkingEnabled,
-    thinkingBudgetTokens: settings.thinkingBudgetTokens,
+    name: descriptor.title,
+    providerKind: descriptor.kind,
+    credentialSource:
+      descriptor.kind === "bedrock" || descriptor.kind === "vertex"
+        ? "ambient"
+        : descriptor.needsCredential
+          ? "stored"
+          : "none",
+    values: Object.fromEntries(
+      descriptor.fields.map((field) => [
+        field.key,
+        field.defaultValue ?? field.choices?.[0]?.value ?? "",
+      ]),
+    ),
   };
+}
+
+function connectionToDraft(
+  connection: PublicProviderConnection,
+): ConnectionDraft {
+  return {
+    id: connection.id,
+    name: connection.name,
+    providerKind: connection.providerKind,
+    values: { ...connection.values },
+    credentialSource: connection.credentialSource,
+    expectedRevision: connection.revision,
+  };
+}
+
+function formatCredentialSource(source: ProviderCredentialSource): string {
+  const labels: Record<ProviderCredentialSource, string> = {
+    stored: "安全存储",
+    environment: "环境变量",
+    ambient: "系统凭证",
+    none: "无凭证",
+  };
+  return labels[source];
 }

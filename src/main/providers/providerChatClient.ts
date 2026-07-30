@@ -128,12 +128,20 @@ export type { CompleteRequest };
 // dependency shape.
 // ---------------------------------------------------------------------------
 
-import type { PublicModelSettings } from "../../shared/modelSettings";
-import { createProvider } from "./providerFactory";
+import type {
+  PublicModelSettings,
+  ResolvedModelBinding,
+} from "../../shared/modelSettings";
+import { createProvider, resolveProviderBaseUrl } from "./providerFactory";
 
 export interface SettingsBackedChatClientOptions {
   loadSettings: () => Promise<PublicModelSettings>;
   getApiKey: () => Promise<string | null>;
+  resolveProfile?: () => Promise<{
+    binding: ResolvedModelBinding;
+    connectionValues: Record<string, string>;
+    secrets: Record<string, string>;
+  }>;
   /** Raw OpenAI-compatible client used for providerId "openai-compatible" (default). */
   fallback: ChatClient & StreamingChatClient;
   fetch?: typeof fetch;
@@ -142,20 +150,51 @@ export interface SettingsBackedChatClientOptions {
 export function createSettingsBackedChatClient(
   options: SettingsBackedChatClientOptions,
 ): ChatClient & StreamingChatClient {
-  // Cache the provider-wrapped client keyed by (providerId, apiKey, chatModel, baseUrl)
+  // Cache by public connection/profile revisions. Credentials must never be
+  // embedded in cache keys, logs, or renderer-visible state.
   // so we don't reconstruct a provider on every turn. The raw fallback is used
   // directly for openai-compatible (the common case) — no wrapping overhead.
   let cacheKey: string | null = null;
   let cachedWrapped: ChatClient & StreamingChatClient | null = null;
 
   async function resolveClient(): Promise<ChatClient & StreamingChatClient> {
+    if (options.resolveProfile) {
+      const resolved = await options.resolveProfile();
+      const key = `${resolved.binding.connectionId}:${resolved.binding.revision}`;
+      if (key === cacheKey && cachedWrapped) return cachedWrapped;
+      const apiKey =
+        resolved.secrets.apiKey ??
+        resolved.secrets.bedrockApiKey ??
+        resolved.secrets.vertexApiKey ??
+        "";
+      const provider = createProvider(
+        {
+          providerKind: resolved.binding.providerKind,
+          apiKey,
+          chatModel: resolved.binding.modelId,
+          connectionValues: resolved.connectionValues,
+          secrets: resolved.secrets,
+          baseUrl: resolveProviderBaseUrl(
+            resolved.binding.providerKind,
+            resolved.connectionValues,
+          ),
+        },
+        options.fetch ? { fetch: options.fetch } : {},
+      );
+      cachedWrapped = createProviderChatClient({
+        provider,
+        fallback: options.fallback,
+      });
+      cacheKey = key;
+      return cachedWrapped;
+    }
     const settings = await options.loadSettings();
     const apiKey = (await options.getApiKey()) ?? "";
     const providerId = settings.providerId ?? "openai-compatible";
     if (providerId === "openai-compatible") {
       return options.fallback;
     }
-    const key = `${providerId}|${apiKey}|${settings.chatModel}|${settings.baseUrl}`;
+    const key = `${providerId}|${settings.chatModel}|${settings.baseUrl}|${settings.updatedAt ?? ""}`;
     if (key === cacheKey && cachedWrapped) return cachedWrapped;
     const provider = createProvider(
       {

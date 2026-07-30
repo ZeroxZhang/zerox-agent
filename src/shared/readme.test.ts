@@ -9,6 +9,7 @@ describe("README", () => {
     expect(readme).toContain("npm run doctor");
     expect(readme).toContain("npm run start:prod");
     expect(readme).toContain("npm run smoke:llm");
+    expect(readme).toContain("npm run smoke:providers");
     expect(readme).toContain("npm run smoke:prod");
     expect(readme).toContain("npm run validate:agent");
     expect(readme).toContain("npm run pack:mac");
@@ -51,7 +52,11 @@ describe("README", () => {
     expect(positioning).toContain("Zerox does not run unbounded autonomous loops");
     expect(readme).toContain("session-native Goal Mode");
     expect(readme).toContain("Chat Session mode");
-    expect(readme).toContain("current release: v3.7.1");
+    expect(readme).toContain("current release: v3.8.0");
+    expect(readme).toContain("Plan Debate");
+    expect(readme).toContain(
+      "docs/design/zerox-agent-3-8-0-plan-debate.md",
+    );
     expect(readme).toContain("v3.4.0");
     expect(readme).toContain("JSON/JSONL is the complete default source of truth");
     expect(readme).not.toContain("SQLite primary, JSON shadow");

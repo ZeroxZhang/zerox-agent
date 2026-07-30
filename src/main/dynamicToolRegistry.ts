@@ -2,6 +2,7 @@ import type { ToolDefinition } from "./openAiCompatibleClient";
 import type { AgentRunContext } from "../shared/agentWorkspace";
 import type { NativeToolDescriptor } from "../shared/nativeCapabilities";
 import type { ToolResultOffloadReadScope } from "./toolResultOffloadStore";
+import { isPlanModeToolAllowed } from "./planModePolicy";
 
 export type AgentToolExecutionResult =
   | { ok: true; result: Record<string, unknown> }
@@ -56,6 +57,7 @@ export type DynamicToolRegistry = {
 export type DynamicToolVisibilityFilter = {
   allowedNames?: string[];
   allowedSources?: string[];
+  runMode?: "execution" | "plan";
 };
 
 export type DynamicToolRegistrationConflict = {
@@ -143,6 +145,9 @@ export function createDynamicToolRegistry(options?: {
 
       return [...definitions.entries()]
         .filter(([name]) => {
+          if (filter.runMode === "plan" && !isPlanModeToolAllowed(name)) {
+            return false;
+          }
           const source = sources.get(name);
           return allowedNames.has(name) || (source ? allowedSources.has(source) : false);
         })

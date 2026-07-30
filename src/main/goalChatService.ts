@@ -39,6 +39,7 @@ export type GoalChatService = {
   createFromDraft(input: {
     draft: GoalDraft;
     edit?: GoalDraftEdit;
+    goalId?: string;
   }): Promise<ChatSessionGoalSummary>;
   start(
     goalId: string,
@@ -372,7 +373,11 @@ export function createGoalChatService(options: {
     },
 
     async createFromDraft(input) {
-      const goalId = createId();
+      const goalId = input.goalId ?? createId();
+      const existingGoal = await options.goalStore.get(goalId);
+      if (existingGoal) {
+        return toGoalSummary(existingGoal);
+      }
       const description =
         input.edit?.normalizedDescription?.trim() ||
         input.draft.normalizedDescription.trim() ||
@@ -415,6 +420,9 @@ export function createGoalChatService(options: {
           : {}),
         description,
         originalDescription,
+        ...(input.draft.sourcePlanRef
+          ? { sourcePlanRef: { ...input.draft.sourcePlanRef } }
+          : {}),
         ...(taskContract ? { taskContract } : {}),
         ...(input.draft.selectedSkill
           ? { selectedSkill: snapshotSelectedSkill(input.draft.selectedSkill) }
@@ -696,6 +704,7 @@ export function createGoalChatService(options: {
         ...upgraded,
         status: "executing",
         stopReason: undefined,
+        milestones: rearmGoalMilestonesForRetry(upgraded.milestones),
         ...(upgraded.acceptanceState?.phase === "blocked"
           ? {
               acceptanceState: {
@@ -782,6 +791,52 @@ function snapshotSelectedSkill(skill: SkillRecord | GoalSelectedSkill): GoalSele
     body: skill.body,
     manifest: JSON.parse(JSON.stringify(skill.manifest)) as SkillRecord["manifest"],
   };
+}
+
+function rearmGoalMilestonesForRetry(milestones: Milestone[]): Milestone[] {
+  const milestoneIds = new Set(milestones.map((milestone) => milestone.id));
+  const completedIds = new Set(
+    milestones
+      .filter(
+        (milestone) =>
+          milestone.state === "accepted" || milestone.state === "skipped",
+      )
+      .map((milestone) => milestone.id),
+  );
+  let hasReadyMilestone = milestones.some(
+    (milestone) => milestone.state === "ready",
+  );
+
+  return milestones.map((milestone) => {
+    const dependsOn = [
+      ...new Set(
+        milestone.dependsOn.filter(
+          (dependencyId) =>
+            dependencyId !== milestone.id && milestoneIds.has(dependencyId),
+        ),
+      ),
+    ];
+    if (
+      !hasReadyMilestone &&
+      (milestone.state === "rejected" ||
+        milestone.state === "failed" ||
+        milestone.state === "running") &&
+      dependsOn.every((dependencyId) => completedIds.has(dependencyId))
+    ) {
+      hasReadyMilestone = true;
+      return {
+        ...milestone,
+        dependsOn,
+        state: "ready",
+        lastAcceptanceSummary: undefined,
+      };
+    }
+    return {
+      ...milestone,
+      dependsOn,
+      ...(milestone.state === "running" ? { state: "pending" as const } : {}),
+    };
+  });
 }
 
 function normalizeDraftMilestones(

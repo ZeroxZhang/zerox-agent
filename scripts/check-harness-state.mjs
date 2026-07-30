@@ -16,6 +16,7 @@ const requiredScripts = [
   "test",
   "build",
   "verify",
+  "smoke:providers",
   "smoke:prod",
   "eval:agent",
   "eval:memory",

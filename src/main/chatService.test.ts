@@ -36,6 +36,7 @@ import type {
   WorkspaceRunTerminalStatus,
 } from "../shared/workspaceRunLedger";
 import type { GoalDraft } from "../shared/goalTranslation";
+import type { PlanRecord } from "../shared/planMode";
 
 function chatReply(content: string): ChatCompletionResponse {
   return { content, toolCalls: [], finishReason: "stop" };
@@ -833,6 +834,859 @@ describe("chat service", () => {
     expect(completeCalled).toBe(false);
   });
 
+  it("routes the next message into an awaiting-input plan before skills or writable chat tools", async () => {
+    const persistedMessages: AppendChatMessageInput[] = [];
+    const attachmentText = "附件补充：实现细节由规划 Agent 自主决定。";
+    const awaitingInputPlan = createPlanFixture({
+      id: "plan_waiting",
+      sessionId: "persisted_session",
+      status: "awaiting_input",
+      actionGate: "needs_input",
+    });
+    const clarifiedPlan = createPlanFixture({
+      ...awaitingInputPlan,
+      status: "awaiting_confirmation",
+      actionGate: "ready",
+      revision: awaitingInputPlan.revision + 7,
+      finalArtifact: {
+        ...awaitingInputPlan.finalArtifact!,
+        title: "Clarified plan",
+        unresolvedQuestions: [],
+        actionGate: "ready",
+        gateReason: "用户已授权执行 Agent 自主决定实现细节。",
+      },
+    });
+    let skillDiscoveryCalls = 0;
+    let modelCalls = 0;
+    const continuations: Array<{ planId: string; userInput: string }> = [];
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          modelCalls += 1;
+          return chatReply("ordinary chat must not run");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore(persistedMessages),
+      planService: {
+        async createPlan() {
+          throw new Error("new plan must not be created");
+        },
+        async getInputRoutingPlan(sessionId) {
+          return sessionId === "persisted_session" ? awaitingInputPlan : null;
+        },
+        async continueWithInput(planId, userInput) {
+          continuations.push({ planId, userInput });
+          return {
+            ok: true as const,
+            plan: clarifiedPlan,
+            message: "continued",
+          };
+        },
+      },
+      async discoverSkills() {
+        skillDiscoveryCalls += 1;
+        return { skills: [], warnings: [] };
+      },
+      toolExecutor: createToolExecutor(),
+      createId: () => "chat_plan_input",
+      now: () => new Date("2026-07-30T11:02:33.000Z"),
+    });
+
+    const result = await service.sendMessage({
+      sessionId: "persisted_session",
+      message: "dbs skill 就在当前技能列表里，其他实现细节你自己决定",
+      selectedSkillName: "dbs",
+      attachments: [
+        {
+          id: "plan_clarification",
+          name: "clarification.txt",
+          mediaType: "text/plain",
+          size: Buffer.byteLength(attachmentText),
+          kind: "text",
+          dataBase64: Buffer.from(attachmentText).toString("base64"),
+        },
+      ],
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      plan: {
+        id: "plan_waiting",
+        status: "awaiting_confirmation",
+        actionGate: "ready",
+      },
+      reply: expect.stringContaining("确认前仍不会执行任何任务"),
+    });
+    expect(continuations).toEqual([
+      expect.objectContaining({
+        planId: "plan_waiting",
+        userInput: expect.stringContaining(
+          "dbs skill 就在当前技能列表里，其他实现细节你自己决定",
+        ),
+      }),
+    ]);
+    expect(continuations[0]?.userInput).toContain("<attachment_context>");
+    expect(continuations[0]?.userInput).toContain(attachmentText);
+    expect(skillDiscoveryCalls).toBe(0);
+    expect(modelCalls).toBe(0);
+    expect(
+      persistedMessages.filter((message) => message.role === "assistant"),
+    ).toHaveLength(1);
+  });
+
+  it("routes feedback on a ready plan into a new Plan revision instead of ordinary chat", async () => {
+    const readyPlan = createPlanFixture({
+      id: "plan_ready",
+      sessionId: "persisted_session",
+      status: "awaiting_confirmation",
+      actionGate: "ready",
+      finalArtifact: {
+        ...createPlanFixture({
+          id: "source",
+          sessionId: "persisted_session",
+          status: "awaiting_input",
+          actionGate: "needs_input",
+        }).finalArtifact!,
+        title: "Ready v1",
+        unresolvedQuestions: [],
+        actionGate: "ready",
+        gateReason: "可确认。",
+      },
+    });
+    const revisedPlan = createPlanFixture({
+      ...readyPlan,
+      revision: readyPlan.revision + 3,
+      finalArtifact: {
+        ...readyPlan.finalArtifact!,
+        title: "Ready v2",
+      },
+    });
+    let modelCalls = 0;
+    let skillDiscoveryCalls = 0;
+    const continuations: string[] = [];
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          modelCalls += 1;
+          return chatReply("ordinary chat must not run");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([]),
+      planService: {
+        async createPlan() {
+          throw new Error("new plan must not be created");
+        },
+        async getInputRoutingPlan() {
+          return readyPlan;
+        },
+        async continueWithInput(_planId, userInput) {
+          continuations.push(userInput);
+          return {
+            ok: true as const,
+            plan: revisedPlan,
+            message: "revised",
+          };
+        },
+      },
+      async discoverSkills() {
+        skillDiscoveryCalls += 1;
+        return { skills: [], warnings: [] };
+      },
+      toolExecutor: createToolExecutor(),
+      createId: () => "chat_ready_plan_feedback",
+      now: () => new Date("2026-07-30T11:02:34.000Z"),
+    });
+
+    const result = await service.sendMessage({
+      sessionId: "persisted_session",
+      message: "把回滚演练加进验收标准",
+      mode: "chat",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      plan: {
+        id: "plan_ready",
+        status: "awaiting_confirmation",
+        finalArtifact: { title: "Ready v2" },
+      },
+    });
+    expect(continuations).toEqual(["把回滚演练加进验收标准"]);
+    expect(skillDiscoveryCalls).toBe(0);
+    expect(modelCalls).toBe(0);
+  });
+
+  it("keeps a failed Plan locked until retry or discard and never falls through to AgentLoop", async () => {
+    const failedPlan = createPlanFixture({
+      id: "plan_failed_round",
+      sessionId: "persisted_session",
+      status: "paused",
+      actionGate: "blocked",
+      finalArtifact: undefined,
+      rounds: [
+        {
+          id: "round_b1",
+          kind: "b1",
+          role: "b",
+          ordinal: 1,
+          runId: "run_b1",
+          modelBinding: {
+            profileId: "profile_b",
+            connectionId: "connection_b",
+            providerKind: "openai",
+            modelId: "model_b",
+            revision: 1,
+            connectionRevision: 1,
+            profileRevision: 1,
+            capabilities: {
+              tools: true,
+              vision: false,
+              pdf: false,
+              streaming: true,
+              parallelToolCalls: false,
+            },
+            generation: {
+              temperature: 0.2,
+              maxTokens: 4096,
+              thinkingEnabled: false,
+              thinkingBudgetTokens: 1024,
+            },
+          },
+          status: "failed",
+          publicInputRefs: ["a1"],
+          error: "provider unavailable",
+        },
+      ],
+    });
+    let modelCalls = 0;
+    let skillDiscoveryCalls = 0;
+    let continuationCalls = 0;
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          modelCalls += 1;
+          return chatReply("ordinary chat must not run");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([]),
+      planService: {
+        async createPlan() {
+          throw new Error("new plan must not be created");
+        },
+        async getInputRoutingPlan() {
+          return failedPlan;
+        },
+        async continueWithInput() {
+          continuationCalls += 1;
+          throw new Error("failed Plan cannot accept composer input");
+        },
+      },
+      async discoverSkills() {
+        skillDiscoveryCalls += 1;
+        return { skills: [], warnings: [] };
+      },
+      toolExecutor: createToolExecutor(),
+      createId: () => "chat_failed_plan_locked",
+      now: () => new Date("2026-07-30T11:02:35.000Z"),
+    });
+
+    const result = await service.sendMessage({
+      sessionId: "persisted_session",
+      message: "继续普通执行",
+      selectedSkillName: "dbs",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      plan: {
+        id: "plan_failed_round",
+        status: "paused",
+      },
+      reply: expect.stringContaining("没有启动普通 Agent 或任何写入工具"),
+    });
+    expect(result.ok ? result.reply : "").toContain("重试失败轮次");
+    expect(continuationCalls).toBe(0);
+    expect(skillDiscoveryCalls).toBe(0);
+    expect(modelCalls).toBe(0);
+  });
+
+  it("keeps a canceled Plan locked until the user explicitly discards it", async () => {
+    const canceledPlan = createPlanFixture({
+      id: "plan_canceled",
+      sessionId: "persisted_session",
+      status: "canceled",
+      actionGate: "blocked",
+      finalArtifact: undefined,
+    });
+    let modelCalls = 0;
+    let skillDiscoveryCalls = 0;
+    let continuationCalls = 0;
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          modelCalls += 1;
+          return chatReply("ordinary chat must not run");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([]),
+      planService: {
+        async createPlan() {
+          throw new Error("new plan must not be created");
+        },
+        async getInputRoutingPlan() {
+          return canceledPlan;
+        },
+        async continueWithInput() {
+          continuationCalls += 1;
+          throw new Error("canceled Plan cannot accept composer input");
+        },
+      },
+      async discoverSkills() {
+        skillDiscoveryCalls += 1;
+        return { skills: [], warnings: [] };
+      },
+      toolExecutor: createToolExecutor(),
+      createId: () => "chat_canceled_plan_locked",
+      now: () => new Date("2026-07-30T11:02:35.500Z"),
+    });
+
+    const result = await service.sendMessage({
+      sessionId: "persisted_session",
+      message: "绕过计划继续执行",
+      selectedSkillName: "dbs",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      plan: { id: "plan_canceled", status: "canceled" },
+      reply: expect.stringContaining("没有启动普通 Agent 或任何写入工具"),
+    });
+    expect(continuationCalls).toBe(0);
+    expect(skillDiscoveryCalls).toBe(0);
+    expect(modelCalls).toBe(0);
+  });
+
+  it("reports Plan clarification cancellation as canceled instead of failed", async () => {
+    const statusEvents: ChatTaskStatusEvent[] = [];
+    const streamEvents: ChatStreamEvent[] = [];
+    const controller = new AbortController();
+    const awaitingInputPlan = createPlanFixture({
+      id: "plan_cancel_input",
+      sessionId: "persisted_session",
+      status: "awaiting_input",
+      actionGate: "needs_input",
+    });
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("ordinary chat must not run");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([]),
+      planService: {
+        async createPlan() {
+          throw new Error("new plan must not be created");
+        },
+        async getInputRoutingPlan() {
+          return awaitingInputPlan;
+        },
+        async continueWithInput() {
+          controller.abort(
+            new DOMException("用户取消规划。", "AbortError"),
+          );
+          throw controller.signal.reason;
+        },
+      },
+      createId: () => "chat_plan_input_canceled",
+      now: () => new Date("2026-07-30T11:02:36.000Z"),
+    });
+
+    const result = await service.sendMessage(
+      {
+        sessionId: "persisted_session",
+        message: "补充后取消",
+      },
+      {
+        signal: controller.signal,
+        onStatusEvent(event) {
+          statusEvents.push(event);
+        },
+        onStreamEvent(event) {
+          streamEvents.push(event);
+        },
+      },
+    );
+
+    expect(result).toEqual({ ok: false, message: "已中断任务。" });
+    expect(statusEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          state: "canceled",
+          message: "规划已中断",
+        }),
+      ]),
+    );
+    expect(statusEvents.some((event) => event.state === "failed")).toBe(false);
+    expect(streamEvents.at(-1)).toMatchObject({
+      type: "canceled",
+      message: "已中断任务。",
+    });
+  });
+
+  it("reports initial Plan cancellation as canceled without loading the normal chat model", async () => {
+    const streamEvents: ChatStreamEvent[] = [];
+    const controller = new AbortController();
+    let modelCalls = 0;
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          modelCalls += 1;
+          return chatReply("ordinary chat must not run");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([]),
+      planService: {
+        async createPlan() {
+          controller.abort(
+            new DOMException("用户取消规划。", "AbortError"),
+          );
+          throw controller.signal.reason;
+        },
+        async getInputRoutingPlan() {
+          return null;
+        },
+        async continueWithInput() {
+          throw new Error("no plan to continue");
+        },
+      },
+      createId: () => "chat_plan_creation_canceled",
+      now: () => new Date("2026-07-30T11:02:37.000Z"),
+    });
+
+    const result = await service.sendMessage(
+      {
+        sessionId: "persisted_session",
+        message: "创建一个辩论计划",
+        mode: "goal_plan",
+        planMode: "debate",
+      },
+      {
+        signal: controller.signal,
+        onStreamEvent(event) {
+          streamEvents.push(event);
+        },
+      },
+    );
+
+    expect(result).toEqual({ ok: false, message: "已中断任务。" });
+    expect(streamEvents.at(-1)).toMatchObject({
+      type: "canceled",
+      message: "已中断任务。",
+    });
+    expect(modelCalls).toBe(0);
+  });
+
+  it("does not collect execution-time Skill inputs before creating a read-only Plan", async () => {
+    const streamEvents: ChatStreamEvent[] = [];
+    const planCreates: Array<{
+      sessionId: string;
+      sourceMessage: string;
+      mode: string;
+    }> = [];
+    let agentLoopCalls = 0;
+    const planned = createPlanFixture({
+      id: "plan_with_skill_context",
+      sessionId: "persisted_session",
+      status: "awaiting_confirmation",
+      actionGate: "ready",
+      finalArtifact: {
+        ...createPlanFixture({
+          id: "source_skill_plan",
+          sessionId: "persisted_session",
+          status: "awaiting_input",
+          actionGate: "needs_input",
+        }).finalArtifact!,
+        unresolvedQuestions: [],
+        actionGate: "ready",
+        gateReason: "Skill execution inputs are deferred to implementation.",
+      },
+    });
+    const selectedSkill = createSkillRecord({
+      name: "dbs",
+      manifest: {
+        inputs: [
+          {
+            name: "target",
+            label: "目标",
+            type: "string",
+            required: true,
+          },
+        ],
+      },
+    });
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("ordinary chat must not run");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([]),
+      planService: {
+        async createPlan(input) {
+          planCreates.push(input);
+          return planned;
+        },
+        async getInputRoutingPlan() {
+          return null;
+        },
+        async continueWithInput() {
+          throw new Error("no plan to continue");
+        },
+      },
+      async discoverSkills() {
+        return { skills: [selectedSkill], errors: [] };
+      },
+      toolExecutor: createToolExecutor(),
+      async runAgentLoop() {
+        agentLoopCalls += 1;
+        return {
+          status: "succeeded" as const,
+          summary: "must not run",
+          turns: 1,
+          messages: [],
+          toolCallsExecuted: 0,
+        };
+      },
+      createId: () => "chat_plan_skill_context",
+      now: () => new Date("2026-07-30T11:02:38.000Z"),
+    });
+
+    const result = await service.sendMessage(
+      {
+        sessionId: "persisted_session",
+        message: "使用 @dbs 规划一个本地功能",
+        selectedSkillName: "dbs",
+        mode: "goal_plan",
+        planMode: "debate",
+      },
+      {
+        onStreamEvent(event) {
+          streamEvents.push(event);
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      plan: {
+        id: "plan_with_skill_context",
+        status: "awaiting_confirmation",
+      },
+      selectedSkill: { name: "dbs" },
+    });
+    expect(planCreates).toEqual([
+      expect.objectContaining({
+        sessionId: "persisted_session",
+        sourceMessage: "使用 @dbs 规划一个本地功能",
+        mode: "debate",
+      }),
+    ]);
+    expect(
+      streamEvents.some((event) => event.type === "waiting_for_input"),
+    ).toBe(false);
+    expect(agentLoopCalls).toBe(0);
+  });
+
+  it("keeps text attachments on the read-only Goal Plan route", async () => {
+    const attachmentText = "附件中的验收要求：不得执行任何写入。";
+    const planCreates: Array<{ sourceMessage: string }> = [];
+    let ordinaryModelCalls = 0;
+    const planned = createPlanFixture({
+      id: "plan_with_text_attachment",
+      sessionId: "persisted_session",
+      status: "awaiting_confirmation",
+      actionGate: "ready",
+    });
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          ordinaryModelCalls += 1;
+          return chatReply("ordinary chat must not run");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([]),
+      planService: {
+        async createPlan(input) {
+          planCreates.push(input);
+          return planned;
+        },
+        async getInputRoutingPlan() {
+          return null;
+        },
+        async continueWithInput() {
+          throw new Error("no plan to continue");
+        },
+      },
+      createId: () => "chat_plan_text_attachment",
+    });
+
+    const result = await service.sendMessage({
+      sessionId: "persisted_session",
+      message: "请先规划这个目标",
+      mode: "goal_plan",
+      planMode: "debate",
+      attachments: [
+        {
+          id: "plan_requirements",
+          name: "requirements.txt",
+          mediaType: "text/plain",
+          size: Buffer.byteLength(attachmentText),
+          kind: "text",
+          dataBase64: Buffer.from(attachmentText).toString("base64"),
+        },
+      ],
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      plan: { id: "plan_with_text_attachment" },
+    });
+    expect(planCreates).toHaveLength(1);
+    expect(planCreates[0]?.sourceMessage).toContain("<attachment_context>");
+    expect(planCreates[0]?.sourceMessage).toContain(attachmentText);
+    expect(ordinaryModelCalls).toBe(0);
+  });
+
+  it("rejects image attachments before a Goal Plan can fall through to ordinary execution", async () => {
+    const storedMessages: AppendChatMessageInput[] = [];
+    let planCreates = 0;
+    let ordinaryModelCalls = 0;
+    const onePixelPng =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Wl5sAAAAASUVORK5CYII=";
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          ordinaryModelCalls += 1;
+          return chatReply("ordinary chat must not run");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore(storedMessages),
+      planService: {
+        async createPlan() {
+          planCreates += 1;
+          throw new Error("image plan must be rejected before creation");
+        },
+        async getInputRoutingPlan() {
+          return null;
+        },
+        async continueWithInput() {
+          throw new Error("no plan to continue");
+        },
+      },
+      createId: () => "chat_plan_image_attachment",
+    });
+
+    await expect(
+      service.sendMessage({
+        sessionId: "persisted_session",
+        message: "根据截图创建计划",
+        mode: "goal_plan",
+        planMode: "debate",
+        attachments: [
+          {
+            id: "plan_screenshot",
+            name: "screen.png",
+            mediaType: "image/png",
+            size: 68,
+            kind: "image",
+            dataBase64: onePixelPng,
+          },
+        ],
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      message:
+        "只读 Plan Mode 暂不支持图片附件。请先移除图片，或把关键信息转为文本附件后再规划。",
+    });
+    expect(storedMessages).toHaveLength(0);
+    expect(planCreates).toBe(0);
+    expect(ordinaryModelCalls).toBe(0);
+  });
+
+  it("rejects image attachments before revising an existing read-only Plan", async () => {
+    const storedMessages: AppendChatMessageInput[] = [];
+    let continuations = 0;
+    const activePlan = createPlanFixture({
+      id: "plan_waiting_for_text",
+      sessionId: "persisted_session",
+      status: "awaiting_input",
+      actionGate: "needs_input",
+    });
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("ordinary chat must not run");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore(storedMessages),
+      planService: {
+        async createPlan() {
+          throw new Error("new plan must not be created");
+        },
+        async getInputRoutingPlan() {
+          return activePlan;
+        },
+        async continueWithInput() {
+          continuations += 1;
+          throw new Error("image must not revise the plan");
+        },
+      },
+      createId: () => "chat_existing_plan_image",
+    });
+
+    await expect(
+      service.sendMessage({
+        sessionId: "persisted_session",
+        message: "截图里是补充信息",
+        attachments: [
+          {
+            id: "clarification_screenshot",
+            name: "clarification.png",
+            mediaType: "image/png",
+            size: 68,
+            kind: "image",
+            dataBase64:
+              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Wl5sAAAAASUVORK5CYII=",
+          },
+        ],
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      message: expect.stringContaining("Plan Mode 暂不支持图片附件"),
+    });
+    expect(storedMessages).toHaveLength(0);
+    expect(continuations).toBe(0);
+  });
+
+  it("invalidates an older pending Skill input when the session has since entered Plan Mode", async () => {
+    const initialStreamEvents: ChatStreamEvent[] = [];
+    const activePlan = createPlanFixture({
+      id: "plan_after_skill_prompt",
+      sessionId: "persisted_session",
+      status: "awaiting_input",
+      actionGate: "needs_input",
+    });
+    let planIsActive = false;
+    let agentLoopCalls = 0;
+    const selectedSkill = createSkillRecord({
+      name: "dbs",
+      manifest: {
+        inputs: [
+          {
+            name: "target",
+            label: "目标",
+            type: "string",
+            required: true,
+          },
+        ],
+      },
+    });
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("ordinary chat must not run");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([]),
+      planService: {
+        async createPlan() {
+          throw new Error("plan creation is external to this fixture");
+        },
+        async getInputRoutingPlan() {
+          return planIsActive ? activePlan : null;
+        },
+        async continueWithInput() {
+          throw new Error("old Skill input must not revise the Plan");
+        },
+      },
+      async discoverSkills() {
+        return { skills: [selectedSkill], errors: [] };
+      },
+      toolExecutor: createToolExecutor(),
+      async runAgentLoop() {
+        agentLoopCalls += 1;
+        return {
+          status: "succeeded" as const,
+          summary: "must not run",
+          turns: 1,
+          messages: [],
+          toolCallsExecuted: 0,
+        };
+      },
+      createId: createSequentialId("stale_skill_plan_lock"),
+      now: () => new Date("2026-07-30T11:02:39.000Z"),
+    });
+
+    await expect(
+      service.sendMessage(
+        {
+          sessionId: "persisted_session",
+          requestId: "request_old_skill",
+          message: "使用 dbs",
+          selectedSkillName: "dbs",
+        },
+        {
+          onStreamEvent(event) {
+            initialStreamEvents.push(event);
+          },
+        },
+      ),
+    ).resolves.toEqual({ ok: false, message: "Skill input required." });
+    const inputRequest = initialStreamEvents.find(
+      (event): event is Extract<ChatStreamEvent, { type: "waiting_for_input" }> =>
+        event.type === "waiting_for_input",
+    )?.inputRequest;
+    expect(inputRequest).toBeTruthy();
+
+    planIsActive = true;
+    const result = await service.respondSkillInput({
+      inputRequestId: inputRequest?.id ?? "",
+      values: { target: "local" },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      plan: {
+        id: "plan_after_skill_prompt",
+        status: "awaiting_input",
+      },
+      reply: expect.stringContaining("更早的 Skill 输入已作废"),
+    });
+    expect(agentLoopCalls).toBe(0);
+  });
+
   it("creates and immediately starts a session goal from a slash goal command", async () => {
     let completeCalled = false;
     const goalCreates: unknown[] = [];
@@ -1369,6 +2223,90 @@ describe("chat service", () => {
       reply: expect.stringContaining("长任务完成。"),
     });
     expect(result.ok ? result.reply : "").not.toContain("已达到工具调用轮次上限");
+  });
+
+  it("preserves a failed agent-loop terminal state instead of reporting task completion", async () => {
+    const statusEvents: ChatTaskStatusEvent[] = [];
+    const streamEvents: ChatStreamEvent[] = [];
+    const persistedMessages: AppendChatMessageInput[] = [];
+    const tokenUsageWrites: Array<{
+      sessionId: string;
+      usage: ChatSessionTokenUsage;
+    }> = [];
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore(persistedMessages, {
+        activityEvents: statusEvents,
+        tokenUsageWrites,
+      }),
+      toolExecutor: createToolExecutor(),
+      async runAgentLoop() {
+        return {
+          summary:
+            "Token budget exceeded: 68374 tokens consumed (limit: 65536). The agent loop aborted to prevent cost overrun.",
+          status: "failed" as const,
+          turns: 16,
+          messages: [],
+          toolCallsExecuted: 21,
+          tokensConsumed: 68_374,
+        };
+      },
+      createId: () => "chat_failed_budget",
+      now: () => new Date("2026-07-30T11:03:21.000Z"),
+    });
+
+    const result = await service.sendMessage(
+      { message: "执行长任务" },
+      {
+        onStatusEvent(event) {
+          statusEvents.push(event);
+        },
+        onStreamEvent(event) {
+          streamEvents.push(event);
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      agentStatus: {
+        state: "failed",
+        toolCallsExecuted: 21,
+        message: expect.stringContaining("Token budget exceeded"),
+      },
+    });
+    expect(statusEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          state: "failed",
+          message: "Token 预算已用尽，任务未完成",
+          toolCallsExecuted: 21,
+        }),
+      ]),
+    );
+    expect(statusEvents.some((event) => event.state === "completed")).toBe(false);
+    expect(streamEvents.at(-1)).toMatchObject({
+      type: "failed",
+      message: expect.stringContaining("Token budget exceeded"),
+    });
+    expect(
+      persistedMessages.find((message) => message.role === "assistant")?.content,
+    ).toContain("Token budget exceeded");
+    expect(tokenUsageWrites).toEqual([
+      {
+        sessionId: "persisted_session",
+        usage: {
+          totalTokens: 68_374,
+          estimated: true,
+        },
+      },
+    ]);
   });
 
   it("pauses long chat tasks at a checkpoint and resumes after user confirmation", async () => {
@@ -6475,6 +7413,54 @@ function createGoalDraftFixture(
     status: "draft",
     createdAt: "2026-07-05T08:00:00.000Z",
     updatedAt: "2026-07-05T08:00:00.000Z",
+  };
+}
+
+function createPlanFixture(
+  partial: Partial<PlanRecord> &
+    Pick<PlanRecord, "id" | "sessionId" | "status" | "actionGate">,
+): PlanRecord {
+  return {
+    id: partial.id,
+    sessionId: partial.sessionId,
+    sourceMessage: "生成一个调用 DBS skill 的本地计划。",
+    mode: "debate",
+    status: partial.status,
+    actionGate: partial.actionGate,
+    revision: 5,
+    taskContract: {
+      objective: "生成一个调用 DBS skill 的本地计划。",
+      audience: "用户",
+      inScope: ["本地实现"],
+      outOfScope: ["外部发布"],
+      constraints: ["确认前不得执行"],
+      successCriteria: ["计划可确认"],
+      assumptions: [],
+    },
+    evidence: [],
+    requestedModelAssignments: {},
+    frozenModelAssignments: {},
+    rounds: [],
+    finalArtifact: {
+      title: "Waiting plan",
+      summary: "等待用户补充信息。",
+      objective: "生成一个调用 DBS skill 的本地计划。",
+      scope: { in: ["本地实现"], out: ["外部发布"] },
+      assumptions: [],
+      milestones: [],
+      dependencies: [],
+      risks: [],
+      acceptanceCriteria: ["计划可确认"],
+      claimLedger: [],
+      unresolvedQuestions: ["DBS skill 在哪里？"],
+      minorityOpinion: [],
+      actionGate: "needs_input",
+      gateReason: "需要用户补充 DBS skill 信息。",
+      markdown: "# Waiting plan\n",
+    },
+    createdAt: "2026-07-30T11:00:00.000Z",
+    updatedAt: "2026-07-30T11:01:00.000Z",
+    ...partial,
   };
 }
 

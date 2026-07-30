@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createModelConnectionService } from "./modelConnectionService";
 import type { ChatCompletionRequest, ChatClient } from "./openAiCompatibleClient";
 import type { ModelSettingsStore } from "./modelSettingsStore";
@@ -87,6 +87,78 @@ describe("model connection service", () => {
       ok: false,
       message: "模型连接测试失败：LLM request failed with status 401: bad key",
     });
+  });
+
+  it("probes Ollama /api/tags once per 30-second cache window and filters unavailable models", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          models: [{ name: "qwen3-coder:30b" }, { name: "llama3.3:70b" }],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    const service = createModelConnectionService({
+      modelSettingsStore: createModelSettingsStore(
+        { chatModel: "", hasApiKey: false },
+        null,
+      ) as ModelSettingsStore,
+      chatClient: createChatClient([], "unused"),
+      fetch: fetchMock as typeof fetch,
+      now: () => new Date("2026-07-30T00:00:00.000Z"),
+    });
+    const catalog = {
+      schemaVersion: 2 as const,
+      descriptors: [],
+      entries: [
+        {
+          routedModelId: "ollama:qwen3-coder:30b",
+          providerKind: "ollama" as const,
+          modelId: "qwen3-coder:30b",
+          label: "Qwen",
+          capabilities: {
+            tools: false,
+            vision: false,
+            pdf: false,
+            streaming: true,
+            parallelToolCalls: false,
+          },
+          verified: true,
+        },
+      ],
+      connections: [
+        {
+          id: "ollama-local",
+          name: "Local",
+          providerKind: "ollama" as const,
+          values: { baseUrl: "http://localhost:11434" },
+          credentialSource: "none" as const,
+          hasCredential: true,
+          revision: 1,
+          createdAt: "2026-07-30T00:00:00.000Z",
+          updatedAt: "2026-07-30T00:00:00.000Z",
+        },
+      ],
+      profiles: [],
+      defaultChatProfileId: null,
+      defaultEmbeddingProfileId: null,
+      hiddenRoutedModelIds: [],
+      updatedAt: null,
+    };
+
+    const first = await service.enrichCatalog(catalog);
+    const second = await service.enrichCatalog(catalog);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(first.connections[0]).toMatchObject({
+      availability: "available",
+      availableModelIds: ["llama3.3:70b", "qwen3-coder:30b"],
+    });
+    expect(first.entries.map((entry) => entry.modelId)).toEqual([
+      "qwen3-coder:30b",
+      "llama3.3:70b",
+    ]);
+    expect(second).toEqual(first);
   });
 });
 

@@ -103,10 +103,23 @@ function renderStatusAction(
         </button>
       ) : null;
     case "stopped_stalled":
-      return props.onReplan ? (
-        <button type="button" onClick={props.onReplan}>
-          重新规划
-        </button>
+      return props.onRetry || props.onReplan ? (
+        <>
+          {props.onRetry ? (
+            <button
+              type="button"
+              className="goal-primary-action"
+              onClick={props.onRetry}
+            >
+              重试目标
+            </button>
+          ) : null}
+          {props.onReplan ? (
+            <button type="button" onClick={props.onReplan}>
+              重新规划
+            </button>
+          ) : null}
+        </>
       ) : null;
     case "stopped_blocked":
       return props.onRetry ? (

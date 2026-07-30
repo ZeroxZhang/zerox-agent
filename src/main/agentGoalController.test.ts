@@ -46,7 +46,12 @@ describe("agent goal controller", () => {
   });
 
   afterEach(async () => {
-    await rm(configDir, { recursive: true, force: true });
+    await rm(configDir, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 10,
+    });
   });
 
   it("accepts three milestones in order and achieves the goal", async () => {

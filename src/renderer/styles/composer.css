@@ -484,6 +484,166 @@
   white-space: nowrap;
 }
 
+.composer .plan-mode-configuration {
+  margin: 8px 8px 4px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 12px;
+  background: var(--color-surface-muted);
+  overflow: hidden;
+}
+
+.composer .plan-mode-configuration > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 44px;
+  padding: 0 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.composer .plan-mode-configuration > summary::-webkit-details-marker {
+  display: none;
+}
+
+.composer .plan-mode-configuration > summary::after {
+  content: "⌄";
+  flex: 0 0 auto;
+  color: var(--color-text-tertiary);
+  font-size: 15px;
+  transform: rotate(-90deg);
+  transition: transform 140ms ease;
+}
+
+.composer .plan-mode-configuration[open] > summary::after {
+  transform: rotate(0);
+}
+
+.composer .plan-mode-configuration > summary > span {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.composer .plan-mode-configuration > summary small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer .plan-mode-configuration > summary > small {
+  margin-left: auto;
+  max-width: 58%;
+}
+
+.composer .plan-mode-configuration-body {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.composer-input-shell.has-plan-mode .composer-context-row {
+  position: relative;
+  inset: auto;
+  z-index: 4;
+  margin: 0 8px;
+  padding: 0 10px;
+}
+
+.composer-input-shell.has-plan-mode textarea,
+.composer-input-shell.has-plan-mode.has-attachments textarea {
+  padding-top: 22px;
+}
+
+.composer-input-shell.has-plan-mode .composer-attachment-list {
+  position: relative;
+  inset: auto;
+  margin: 8px 18px 0;
+}
+
+.composer .plan-mode-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.composer .plan-mode-switch button {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 9px;
+  background: var(--color-surface-primary);
+  color: var(--color-text-primary);
+  text-align: left;
+}
+
+.composer .plan-mode-switch button:hover,
+.composer .plan-mode-switch button.is-active {
+  border-color: var(--color-action-primary);
+}
+
+.composer .plan-mode-switch button.is-active {
+  background: var(--bg-accent-muted);
+}
+
+.composer .plan-mode-switch span,
+.composer .plan-mode-configuration-body > p {
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}
+
+.composer .plan-mode-configuration-body > p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.composer .plan-model-assignment-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.composer .plan-model-assignment-grid label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}
+
+.composer .plan-model-assignment-grid select {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 8px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 8px;
+  background: var(--color-surface-primary);
+  color: var(--color-text-primary);
+}
+
+.composer .plan-model-missing {
+  min-height: 36px;
+  border: 1px dashed var(--status-warning-text);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--status-warning-text);
+}
+
+@media (max-width: 620px) {
+  .composer .plan-model-assignment-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .composer .composer-goal-mode-button:hover {
   border-color: var(--border-strong);
   color: var(--text-primary);

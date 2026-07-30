@@ -20,6 +20,7 @@ import type { GoalProgressEvent } from "../shared/chat";
 import type { ChatOutputPart } from "../shared/chatOutput";
 import type { AcceptanceValidator } from "./agentGoalValidatorRegistry";
 import type { AcceptanceContext } from "./agentGoalAcceptance";
+import type { PlanArtifact, PlanRecord } from "../shared/planMode";
 
 const execFileAsync = promisify(execFileCallback);
 
@@ -1641,6 +1642,268 @@ describe("app container goal drafts", () => {
     expect((await container.agentGoalStore().get(goal.id))?.status).toBe(
       "canceled",
     );
+  });
+
+  it("confirms a ready plan exactly once and links repeated confirmations to the same Goal", async () => {
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const workspaceRoot = path.join(tempDir, "plan-workspace");
+    await mkdir(workspaceRoot, { recursive: true });
+    const session = await container.chatSessionStore().appendMessage({
+      role: "user",
+      content: "Implement the confirmed plan",
+    });
+    const artifact: PlanArtifact = {
+      title: "Confirmed Plan",
+      summary: "A deterministic confirmation fixture.",
+      objective: "Implement one local milestone.",
+      scope: { in: ["local work"], out: ["external publish"] },
+      assumptions: [],
+      milestones: [
+        {
+          id: "milestone_confirm",
+          title: "Implement",
+          description: "Implement the local change.",
+          acceptanceCriteria: ["Reviewed evidence exists."],
+          dependencies: [],
+        },
+        {
+          id: "milestone_validate",
+          title: "Validate",
+          description: "Validate the local change.",
+          acceptanceCriteria: ["Validation evidence exists."],
+          dependencies: ["Implement", "external approval label"],
+        },
+      ],
+      dependencies: [],
+      risks: [],
+      acceptanceCriteria: ["Reviewed evidence exists."],
+      claimLedger: [],
+      unresolvedQuestions: [],
+      minorityOpinion: [],
+      actionGate: "ready",
+      gateReason: "Ready for explicit confirmation.",
+      markdown: "",
+    };
+    const basePlan: PlanRecord = {
+      id: "plan_confirm_once",
+      sessionId: session.session.id,
+      workspaceRoot,
+      sourceMessage: "Implement one local milestone.",
+      mode: "direct",
+      status: "awaiting_confirmation",
+      actionGate: "ready",
+      revision: 1,
+      taskContract: {
+        objective: artifact.objective,
+        audience: "user",
+        inScope: artifact.scope.in,
+        outOfScope: artifact.scope.out,
+        constraints: [],
+        successCriteria: artifact.acceptanceCriteria,
+        assumptions: [],
+      },
+      evidence: [],
+      requestedModelAssignments: {},
+      frozenModelAssignments: {},
+      rounds: [],
+      finalArtifact: artifact,
+      createdAt: "2026-07-30T00:00:00.000Z",
+      updatedAt: "2026-07-30T00:00:00.000Z",
+    };
+    const projection = await container
+      .planArtifactWriter()
+      .write(basePlan, artifact);
+    await container.planStore().create({ ...basePlan, projection });
+
+    const [first, concurrent] = await Promise.all([
+      container.confirmPlan({
+        planId: basePlan.id,
+        expectedRevision: 1,
+      }),
+      container.confirmPlan({
+        planId: basePlan.id,
+        expectedRevision: 1,
+      }),
+    ]);
+    expect(first.ok).toBe(true);
+    expect(concurrent.ok).toBe(true);
+    if (!first.ok || !concurrent.ok) return;
+    expect(concurrent.activeGoal.id).toBe(first.activeGoal.id);
+    const repeated = await container.confirmPlan({
+      planId: basePlan.id,
+      expectedRevision: 1,
+    });
+    expect(repeated.ok).toBe(true);
+    if (!repeated.ok) return;
+    expect(repeated.activeGoal.id).toBe(first.activeGoal.id);
+    expect(repeated.plan.executionGoalId).toBe(first.activeGoal.id);
+    expect(repeated.plan.status).toBe("executing");
+    expect(
+      (
+        await container.chatSessionStore().get(basePlan.sessionId)
+      )?.messages.filter(
+        (message) => message.goalEventRef === `plan-confirmed:${basePlan.id}`,
+      ),
+    ).toHaveLength(1);
+    const linkedBeforeRecovery = await container.planStore().get(basePlan.id);
+    const pendingRecoveryPlan = await container.planStore().save(
+      {
+        ...linkedBeforeRecovery!,
+        status: "confirmed_pending_execution",
+      },
+      linkedBeforeRecovery!.revision,
+      "test_crash_after_goal_link",
+    );
+    const recovered = await container.confirmPlan({
+      planId: basePlan.id,
+      expectedRevision: pendingRecoveryPlan.revision,
+    });
+    expect(recovered.ok).toBe(true);
+    if (!recovered.ok) return;
+    expect(recovered.plan.executionGoalId).toBe(first.activeGoal.id);
+    expect(recovered.activeGoal.id).toBe(first.activeGoal.id);
+    const expectedRecoveredPlanStatus =
+      recovered.activeGoal.status === "achieved" ||
+      recovered.activeGoal.status === "completed_unverified"
+        ? "completed"
+        : recovered.activeGoal.status === "canceled"
+          ? "canceled"
+          : recovered.activeGoal.status === "failed" ||
+              recovered.activeGoal.status === "stopped_budget" ||
+              recovered.activeGoal.status === "stopped_stalled" ||
+              recovered.activeGoal.status === "stopped_blocked"
+            ? "failed"
+            : "executing";
+    expect(recovered.plan.status).toBe(expectedRecoveredPlanStatus);
+    const linkedPlan = await container.planStore().get(basePlan.id);
+    expect(linkedPlan).not.toBeNull();
+    const failedPlan = await container.planStore().save(
+      {
+        ...linkedPlan!,
+        status: "failed",
+        actionGate: "blocked",
+        executionRunId: "run_failed_after_confirmation",
+      },
+      linkedPlan!.revision,
+      "test_plan_execution_failed",
+    );
+    const repeatedAfterFailure = await container.confirmPlan({
+      planId: basePlan.id,
+      expectedRevision: 1,
+    });
+    expect(repeatedAfterFailure.ok).toBe(true);
+    if (!repeatedAfterFailure.ok) return;
+    expect(repeatedAfterFailure.activeGoal.id).toBe(first.activeGoal.id);
+    expect(repeatedAfterFailure.plan.revision).toBe(failedPlan.revision);
+    expect(repeatedAfterFailure.plan.status).toBe("failed");
+    const confirmedGoal = await container.agentGoalStore().get(
+      first.activeGoal.id,
+    );
+    expect(confirmedGoal).toMatchObject({
+      sourcePlanRef: expect.objectContaining({
+        planId: basePlan.id,
+        sha256: projection.sha256,
+      }),
+    });
+    expect(
+      confirmedGoal?.milestones.find(
+        (milestone) => milestone.id === "milestone_validate",
+      )?.dependsOn,
+    ).toEqual(["milestone_confirm"]);
+    await container.runGoalOperation(
+      first.activeGoal.id,
+      () => container.goalChatService().cancel(first.activeGoal.id),
+      { preempt: true },
+    );
+    await container.shutdownRuntime();
+  });
+
+  it("refuses non-ready and drifted plan projections before creating a Goal", async () => {
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const workspaceRoot = path.join(tempDir, "drift-workspace");
+    await mkdir(workspaceRoot, { recursive: true });
+    const session = await container.chatSessionStore().appendMessage({
+      role: "user",
+      content: "Do not execute drifted plan",
+    });
+    const artifact = {
+      title: "Drift Plan",
+      summary: "summary",
+      objective: "objective",
+      scope: { in: [], out: [] },
+      assumptions: [],
+      milestones: [
+        {
+          id: "m1",
+          title: "M1",
+          description: "work",
+          acceptanceCriteria: ["done"],
+          dependencies: [],
+        },
+      ],
+      dependencies: [],
+      risks: [],
+      acceptanceCriteria: ["done"],
+      claimLedger: [],
+      unresolvedQuestions: [],
+      minorityOpinion: [],
+      actionGate: "ready" as const,
+      gateReason: "ready",
+      markdown: "",
+    };
+    const plan: PlanRecord = {
+      id: "plan_drifted",
+      sessionId: session.session.id,
+      workspaceRoot,
+      sourceMessage: "objective",
+      mode: "direct",
+      status: "awaiting_confirmation",
+      actionGate: "ready",
+      revision: 1,
+      taskContract: {
+        objective: "objective",
+        audience: "user",
+        inScope: [],
+        outOfScope: [],
+        constraints: [],
+        successCriteria: ["done"],
+        assumptions: [],
+      },
+      evidence: [],
+      requestedModelAssignments: {},
+      frozenModelAssignments: {},
+      rounds: [],
+      finalArtifact: artifact,
+      createdAt: "2026-07-30T00:00:00.000Z",
+      updatedAt: "2026-07-30T00:00:00.000Z",
+    };
+    const projection = await container
+      .planArtifactWriter()
+      .write(plan, artifact);
+    await writeFile(projection.path, "# user changed the plan\n");
+    await container.planStore().create({ ...plan, projection });
+
+    await expect(
+      container.confirmPlan({
+        planId: plan.id,
+        expectedRevision: plan.revision,
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      message: expect.stringContaining("投影已变化"),
+    });
+    expect(
+      (await container.planStore().get(plan.id))?.executionGoalId,
+    ).toBeUndefined();
+    await container.shutdownRuntime();
   });
 });
 

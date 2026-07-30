@@ -6,16 +6,26 @@
 
 import { createOpenAICompatibleProvider } from "./openAiCompatibleProvider";
 import { createAnthropicProvider } from "./anthropicProvider";
+import { createBedrockProvider } from "./bedrockProvider";
 import { createGeminiProvider } from "./geminiProvider";
+import { createVertexProvider } from "./vertexProvider";
 import type { LLMProvider, ProviderId } from "./provider";
+import {
+  isProviderKind,
+  type ProviderKind,
+} from "../../shared/modelSettings";
+import { normalizeOllamaBaseUrl } from "./providerRegistry";
 
 export interface ProviderSettings {
   providerId?: ProviderId;
+  providerKind?: ProviderKind;
   apiKey: string;
   chatModel: string;
   baseUrl?: string;
   thinkingEnabled?: boolean;
   thinkingBudgetTokens?: number;
+  connectionValues?: Record<string, string>;
+  secrets?: Record<string, string>;
 }
 
 export interface ProviderDeps {
@@ -27,14 +37,28 @@ export function createProvider(
   settings: ProviderSettings,
   deps: ProviderDeps = {},
 ): LLMProvider {
-  const id = (settings.providerId ?? "openai-compatible").toLowerCase() as ProviderId;
-  switch (id) {
+  if (settings.providerKind === undefined) {
+    switch (settings.providerId ?? "openai-compatible") {
+      case "openai-compatible":
+        return createOpenAICompatibleProvider({
+          ...(deps.fetch ? { fetch: deps.fetch } : {}),
+          ...(deps.timeoutMs ? { timeoutMs: deps.timeoutMs } : {}),
+        });
+    }
+  }
+  const kind = resolveProviderKind(settings);
+  const values = settings.connectionValues ?? {};
+  const secrets: Record<string, string | undefined> = {
+    ...(settings.secrets ?? {}),
+    ...(settings.apiKey ? { apiKey: settings.apiKey } : {}),
+  };
+  switch (kind) {
     case "anthropic":
       return createAnthropicProvider({
         ...(deps.fetch ? { fetch: deps.fetch } : {}),
         ...(deps.timeoutMs ? { timeoutMs: deps.timeoutMs } : {}),
         ...(settings.baseUrl ? { baseUrl: settings.baseUrl } : {}),
-        apiKey: settings.apiKey,
+        apiKey: secrets.apiKey,
         model: settings.chatModel,
       });
     case "gemini":
@@ -42,14 +66,101 @@ export function createProvider(
         ...(deps.fetch ? { fetch: deps.fetch } : {}),
         ...(deps.timeoutMs ? { timeoutMs: deps.timeoutMs } : {}),
         ...(settings.baseUrl ? { baseUrl: settings.baseUrl } : {}),
-        apiKey: settings.apiKey,
+        apiKey: secrets.apiKey,
         model: settings.chatModel,
       });
-    case "openai-compatible":
-    default:
-      return createOpenAICompatibleProvider({
+    case "bedrock":
+      return createBedrockProvider({
+        region: values.region || "us-east-1",
+        authMethod: normalizeBedrockAuthMethod(values.authMethod),
+        bedrockApiKey: secrets.bedrockApiKey,
+        awsProfile: values.awsProfile,
+        awsAccessKeyId: values.awsAccessKeyId,
+        awsSecretAccessKey: secrets.awsSecretAccessKey,
+        awsSessionToken: secrets.awsSessionToken,
+      });
+    case "vertex":
+      return createVertexProvider({
+        project: values.project ?? "",
+        location: values.location || "global",
+        authMethod: normalizeVertexAuthMethod(values.authMethod),
+        serviceAccountJson: secrets.serviceAccountJson,
+        apiKey: secrets.vertexApiKey,
         ...(deps.fetch ? { fetch: deps.fetch } : {}),
         ...(deps.timeoutMs ? { timeoutMs: deps.timeoutMs } : {}),
       });
+    case "ollama":
+      return withProviderId(
+        createOpenAICompatibleProvider({
+          ...(deps.fetch ? { fetch: deps.fetch } : {}),
+          ...(deps.timeoutMs ? { timeoutMs: deps.timeoutMs } : {}),
+        }),
+        "ollama",
+      );
+    case "openai":
+    case "zai":
+    case "deepseek":
+    case "kimi":
+    case "minimax":
+    case "qwen":
+    case "xai":
+    case "mistral":
+    case "meta":
+    case "together":
+    case "fireworks":
+    case "openrouter":
+      return withProviderId(
+        createOpenAICompatibleProvider({
+          ...(deps.fetch ? { fetch: deps.fetch } : {}),
+          ...(deps.timeoutMs ? { timeoutMs: deps.timeoutMs } : {}),
+        }),
+        kind,
+      );
   }
+}
+
+export function resolveProviderBaseUrl(
+  kind: ProviderKind,
+  values: Record<string, string>,
+): string | undefined {
+  if (kind === "ollama") {
+    return normalizeOllamaBaseUrl(values.baseUrl);
+  }
+  return values.baseUrl || undefined;
+}
+
+function resolveProviderKind(settings: ProviderSettings): ProviderKind {
+  if (settings.providerKind) {
+    if (isProviderKind(settings.providerKind)) {
+      return settings.providerKind;
+    }
+    throw new Error(`未知模型服务商：${String(settings.providerKind)}`);
+  }
+  const legacy = String(settings.providerId ?? "openai-compatible").toLowerCase();
+  if (legacy === "openai-compatible") {
+    return "openai";
+  }
+  if (isProviderKind(legacy)) {
+    return legacy;
+  }
+  throw new Error(`未知模型服务商：${legacy}`);
+}
+
+function withProviderId(provider: LLMProvider, id: ProviderId): LLMProvider {
+  return {
+    ...provider,
+    id,
+  };
+}
+
+function normalizeBedrockAuthMethod(
+  value: string | undefined,
+): "api_key" | "profile" | "iam" {
+  return value === "profile" || value === "iam" ? value : "api_key";
+}
+
+function normalizeVertexAuthMethod(
+  value: string | undefined,
+): "adc" | "service_account" | "api_key" {
+  return value === "service_account" || value === "api_key" ? value : "adc";
 }

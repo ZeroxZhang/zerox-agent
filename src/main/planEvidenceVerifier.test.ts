@@ -1,0 +1,90 @@
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { PlanRecord } from "../shared/planMode";
+import { verifyPlanEvidence } from "./planEvidenceVerifier";
+
+describe("plan evidence verifier", () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "zerox-plan-evidence-"));
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("detects source-file drift while ignoring the trusted .zerox projection directory", async () => {
+    const sourcePath = path.join(tempDir, "README.md");
+    await writeFile(sourcePath, "before\n");
+    const inventory = "README.md";
+    const plan = createPlan(tempDir, [
+      {
+        id: "inventory",
+        kind: "workspace",
+        title: "inventory",
+        summary: inventory,
+        sourceRef: tempDir,
+        sha256: hash(inventory),
+      },
+      {
+        id: "readme",
+        kind: "file",
+        title: "README.md",
+        summary: "before",
+        sourceRef: sourcePath,
+        sha256: hash("before\n"),
+      },
+    ]);
+    await mkdir(path.join(tempDir, ".zerox", "plans"), { recursive: true });
+    await writeFile(path.join(tempDir, ".zerox", "plans", "plan.md"), "plan");
+    await expect(verifyPlanEvidence(plan)).resolves.toEqual({
+      ok: true,
+      driftedEvidenceIds: [],
+    });
+
+    await writeFile(sourcePath, "after\n");
+    await expect(verifyPlanEvidence(plan)).resolves.toEqual({
+      ok: false,
+      driftedEvidenceIds: ["readme"],
+    });
+  });
+});
+
+function createPlan(
+  workspaceRoot: string,
+  evidence: PlanRecord["evidence"],
+): PlanRecord {
+  return {
+    id: "plan-evidence",
+    sessionId: "session",
+    workspaceRoot,
+    sourceMessage: "verify evidence",
+    mode: "direct",
+    status: "awaiting_confirmation",
+    actionGate: "ready",
+    revision: 1,
+    taskContract: {
+      objective: "verify evidence",
+      audience: "user",
+      inScope: [],
+      outOfScope: [],
+      constraints: [],
+      successCriteria: [],
+      assumptions: [],
+    },
+    evidence,
+    requestedModelAssignments: {},
+    frozenModelAssignments: {},
+    rounds: [],
+    createdAt: "2026-07-30T00:00:00.000Z",
+    updatedAt: "2026-07-30T00:00:00.000Z",
+  };
+}
+
+function hash(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}

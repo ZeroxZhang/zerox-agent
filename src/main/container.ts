@@ -85,8 +85,24 @@ import { createToolAuditLog } from "./toolAuditLog";
 import { KernelEventBus } from "./kernel/eventBus";
 import { createStorageImpl } from "./storage/storageDb";
 import { resolveStorageBackend } from "./storage/backendResolver";
-import { createProvider } from "./providers/providerFactory";
+import {
+  createProvider,
+  resolveProviderBaseUrl,
+} from "./providers/providerFactory";
 import { createSettingsBackedChatClient } from "./providers/providerChatClient";
+import { createModelRouter } from "./providers/modelRouter";
+import { createPlanStore } from "./planStore";
+import { createPlanArtifactWriter } from "./planArtifactWriter";
+import { createPlanDebateOrchestrator } from "./planDebateOrchestrator";
+import { verifyPlanEvidence } from "./planEvidenceVerifier";
+import {
+  isPlanConfirmable,
+  type ConfirmPlanInput,
+  type ConfirmPlanResult,
+  type PlanArtifact,
+  type PlanRecord,
+  type PlanStatus,
+} from "../shared/planMode";
 import { toNormalized } from "./providers/normalize";
 import { analyzeShell } from "./tools/shell/shellAnalyzer";
 import { createToolWorker } from "./tools/toolWorker";
@@ -128,6 +144,7 @@ import type { GoalReviewPolicy } from "../shared/agentGoalReview";
 import type {
   GoalDraftConfirmResult,
   GoalDraftDiscardResult,
+  GoalDraft,
   GoalDraftEdit,
 } from "../shared/goalTranslation";
 import type {
@@ -324,12 +341,48 @@ export function createAppContainer(options: {
   const modelSettingsStore = createModelSettingsStore({
     configDir,
     vault: createElectronSecretVault(safeStorage),
+    isConnectionReferenced: async (connectionId) =>
+      (await planStore().listAll()).some(
+        (plan) =>
+          isLivePlanReference(plan.status) &&
+          Object.values(plan.frozenModelAssignments).some(
+            (binding) => binding?.connectionId === connectionId,
+          ),
+      ),
+    isProfileReferenced: async (profileId) =>
+      (await planStore().listAll()).some(
+        (plan) =>
+          isLivePlanReference(plan.status) &&
+          Object.values(plan.frozenModelAssignments).some(
+            (binding) => binding?.profileId === profileId,
+          ),
+      ),
   });
   let kernelPermissionRules: PermissionRule[] = [];
 
   const goalProgressListeners = new Set<(event: GoalProgressEvent) => void>();
   const agentRunsChangedListeners = new Set<(event: AgentRunsChangedEvent) => void>();
   let goalProgressDeliveryQueue = Promise.resolve();
+  const planConfirmationQueues = new Map<string, Promise<void>>();
+
+  function serializePlanConfirmation<T>(
+    planId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const previous = planConfirmationQueues.get(planId) ?? Promise.resolve();
+    const result = previous.then(operation, operation);
+    const tail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    planConfirmationQueues.set(planId, tail);
+    void tail.finally(() => {
+      if (planConfirmationQueues.get(planId) === tail) {
+        planConfirmationQueues.delete(planId);
+      }
+    });
+    return result;
+  }
 
   function onGoalProgressEvent(callback: (event: GoalProgressEvent) => void) {
     goalProgressListeners.add(callback);
@@ -362,7 +415,59 @@ export function createAppContainer(options: {
       canonicalEvent = latestEvent;
       await syncGoalProgressToChatSession(canonicalEvent).catch(() => undefined);
     }
+    await syncSourcePlanFromGoal(canonicalEvent).catch(() => undefined);
     notifyGoalProgressListeners(canonicalEvent);
+  }
+
+  async function syncSourcePlanFromGoal(event: GoalProgressEvent) {
+    const sourcePlan = (await planStore().listAll()).find(
+      (plan) => plan.executionGoalId === event.goalId,
+    );
+    if (!sourcePlan) {
+      return;
+    }
+    const goal = await agentGoalStore().get(event.goalId);
+    const runId = goal?.milestones
+      .flatMap((milestone) => milestone.runIds)
+      .at(-1);
+    const terminalStatus: PlanStatus | null =
+      event.status === "achieved" ||
+      event.status === "completed_unverified"
+        ? "completed"
+        : event.status === "canceled"
+          ? "canceled"
+          : event.status === "failed" ||
+              event.status === "stopped_budget" ||
+              event.status === "stopped_stalled" ||
+              event.status === "stopped_blocked"
+            ? "failed"
+            : null;
+    if (
+      !terminalStatus &&
+      (!runId || sourcePlan.executionRunId === runId)
+    ) {
+      return;
+    }
+    if (
+      terminalStatus === sourcePlan.status &&
+      (!runId || sourcePlan.executionRunId === runId)
+    ) {
+      return;
+    }
+    await planStore().save(
+      {
+        ...sourcePlan,
+        ...(terminalStatus ? { status: terminalStatus } : {}),
+        ...(runId ? { executionRunId: runId } : {}),
+      },
+      sourcePlan.revision,
+      terminalStatus ? "plan_execution_finished" : "plan_execution_linked",
+      {
+        goalId: event.goalId,
+        ...(runId ? { runId } : {}),
+        ...(terminalStatus ? { status: terminalStatus } : {}),
+      },
+    );
   }
 
   async function reconcileGoalProgressEventFromStore(
@@ -480,7 +585,9 @@ export function createAppContainer(options: {
     if (!session) {
       return;
     }
-    if (session.messages.some((message) => message.goalEventRef === goalEventRef)) {
+    if (
+      session.messages.some((message) => message.goalEventRef === goalEventRef)
+    ) {
       return;
     }
 
@@ -691,6 +798,7 @@ export function createAppContainer(options: {
       createModelConnectionService({
         modelSettingsStore,
         chatClient: chatClient(),
+        modelRouter: modelRouter(),
       }),
     );
   }
@@ -816,6 +924,31 @@ export function createAppContainer(options: {
     return lazy("multiAgentSessionStore", () => createMultiAgentSessionStore({ configDir }));
   }
 
+  function planStore() {
+    return lazy("planStore", () =>
+      createPlanStore({
+        configDir,
+        ...(activeSqliteStorage()
+          ? { storage: activeSqliteStorage()! }
+          : {}),
+      }),
+    );
+  }
+
+  function planArtifactWriter() {
+    return lazy("planArtifactWriter", () => createPlanArtifactWriter());
+  }
+
+  function planDebateOrchestrator() {
+    return lazy("planDebateOrchestrator", () =>
+      createPlanDebateOrchestrator({
+        planStore: planStore(),
+        artifactWriter: planArtifactWriter(),
+        modelRouter: modelRouter(),
+      }),
+    );
+  }
+
   function memoryProfileStore() {
     return lazy("memoryProfileStore", () =>
       createMemoryProfileStore({ configDir, backend: storageBackend(), storage: activeSqliteStorage() ?? undefined }),
@@ -850,22 +983,38 @@ export function createAppContainer(options: {
         configDir,
         embeddingService: {
           async embed(text: string) {
-            const settings = await modelSettingsStore.load();
-            const apiKey = await modelSettingsStore.getApiKey();
-
-            if (!settings.embeddingModel || !apiKey) {
+            const catalog = await modelSettingsStore.loadCatalog();
+            if (!catalog.defaultEmbeddingProfileId) {
               return null;
             }
+            const resolved = await modelSettingsStore.resolveProfile(
+              catalog.defaultEmbeddingProfileId,
+            );
+            const apiKey =
+              resolved.secrets.apiKey ??
+              resolved.secrets.vertexApiKey ??
+              "";
+            if (
+              !apiKey ||
+              resolved.binding.providerKind === "anthropic" ||
+              resolved.binding.providerKind === "bedrock"
+            ) {
+              return null;
+            }
+            const baseUrl = resolveProviderBaseUrl(
+              resolved.binding.providerKind,
+              resolved.connectionValues,
+            );
 
             const vector = await createOpenAiCompatibleEmbeddingClient().embed({
-              baseUrl: settings.baseUrl,
+              baseUrl: baseUrl ?? "",
               apiKey,
-              model: settings.embeddingModel,
+              model: resolved.binding.modelId,
               input: text,
             });
 
             return {
-              model: settings.embeddingModel,
+              model: resolved.binding.modelId,
               vector,
             };
           },
@@ -921,24 +1070,31 @@ export function createAppContainer(options: {
   }
 
   async function getModelProfile() {
-    const settings = await modelSettingsStore.load();
-    const apiKey = await modelSettingsStore.getApiKey();
-
-    if (!settings.chatModel || !apiKey) {
-      throw new Error("模型配置不完整。");
-    }
+    const resolved = await modelSettingsStore.resolveProfile();
+    const apiKey =
+      resolved.secrets.apiKey ??
+      resolved.secrets.bedrockApiKey ??
+      resolved.secrets.vertexApiKey ??
+      "";
+    const baseUrl = resolveProviderBaseUrl(
+      resolved.binding.providerKind,
+      resolved.connectionValues,
+    );
 
     return {
-      baseUrl: settings.baseUrl,
+      baseUrl: baseUrl ?? "",
       apiKey,
-      model: settings.chatModel,
-      temperature: settings.temperature,
-      maxTokens: settings.maxTokens,
-      ...(settings.thinkingEnabled
+      model: resolved.binding.modelId,
+      providerId: resolved.binding.providerKind,
+      profile: resolved.binding.profileId,
+      temperature: resolved.binding.generation.temperature,
+      maxTokens: resolved.binding.generation.maxTokens,
+      ...(resolved.binding.generation.thinkingEnabled
         ? {
             thinking: {
               type: "enabled" as const,
-              budgetTokens: settings.thinkingBudgetTokens,
+              budgetTokens:
+                resolved.binding.generation.thinkingBudgetTokens,
             },
           }
         : {}),
@@ -957,24 +1113,42 @@ export function createAppContainer(options: {
       createSettingsBackedChatClient({
         loadSettings: () => modelSettingsStore.load(),
         getApiKey: () => modelSettingsStore.getApiKey(),
+        resolveProfile: () => modelSettingsStore.resolveProfile(),
         fallback: createOpenAiCompatibleClient(),
       }),
     );
   }
 
-  function getProvider() {
-    return lazy("llmProvider", async () => {
-      const settings = await modelSettingsStore.load();
-      const apiKey = (await modelSettingsStore.getApiKey()) ?? "";
-      return createProvider({
-        providerId: settings.providerId ?? "openai-compatible",
-        apiKey,
-        chatModel: settings.chatModel,
-        baseUrl: settings.baseUrl,
-        thinkingEnabled: settings.thinkingEnabled,
-        thinkingBudgetTokens: settings.thinkingBudgetTokens,
-      });
+  async function getProvider() {
+    const resolved = await modelSettingsStore.resolveProfile();
+    const apiKey =
+      resolved.secrets.apiKey ??
+      resolved.secrets.bedrockApiKey ??
+      resolved.secrets.vertexApiKey ??
+      "";
+    return createProvider({
+      providerKind: resolved.binding.providerKind,
+      apiKey,
+      chatModel: resolved.binding.modelId,
+      baseUrl: resolveProviderBaseUrl(
+        resolved.binding.providerKind,
+        resolved.connectionValues,
+      ),
+      connectionValues: resolved.connectionValues,
+      secrets: resolved.secrets,
+      thinkingEnabled: resolved.binding.generation.thinkingEnabled,
+      thinkingBudgetTokens:
+        resolved.binding.generation.thinkingBudgetTokens,
     });
+  }
+
+  function modelRouter() {
+    return lazy("modelRouter", () =>
+      createModelRouter({
+        modelSettingsStore,
+        fallback: createOpenAiCompatibleClient(),
+      }),
+    );
   }
 
   // P4 shell analyzer + tool worker. Exposed for P5 (checkpoint-writer fork
@@ -1440,6 +1614,7 @@ export function createAppContainer(options: {
         chatSessionStore: chatSessionStore(),
         goalService: goalChatService(),
         goalDraftService: goalDraftService(),
+        planService: planDebateOrchestrator(),
         taskStore: scheduledTaskStore(),
         runScheduledTask: (taskId: string, taskRunOptions) =>
           runAgentTask(taskId, {
@@ -1985,6 +2160,234 @@ export function createAppContainer(options: {
     return trackRuntimeInvocation(() => confirmGoalDraftAccepted(draftId, edit));
   }
 
+  async function confirmPlan(
+    input: ConfirmPlanInput,
+  ): Promise<ConfirmPlanResult> {
+    if (runtimeShuttingDown) {
+      return { ok: false, message: "应用正在退出，未启动计划执行。" };
+    }
+    return trackRuntimeInvocation(() =>
+      serializePlanConfirmation(input.planId, async () => {
+      let plan = await planStore().get(input.planId);
+      if (!plan) {
+        return { ok: false, message: "计划不存在。" };
+      }
+      if (plan.executionGoalId) {
+        const existingGoal = await agentGoalStore().get(plan.executionGoalId);
+        if (!existingGoal) {
+          return { ok: false, message: "计划引用的执行目标不存在。", plan };
+        }
+        if (plan.status === "confirmed_pending_execution") {
+          const resumedGoal = await goalChatService().resume(existingGoal.id);
+          const latestPlan = (await planStore().get(plan.id)) ?? plan;
+          if (latestPlan.status === "confirmed_pending_execution") {
+            const nextStatus = planStatusForExecutionGoal(resumedGoal.status);
+            plan = await planStore().save(
+              {
+                ...latestPlan,
+                status: nextStatus,
+              },
+              latestPlan.revision,
+              nextStatus === "executing"
+                ? "plan_execution_started"
+                : "plan_execution_finished",
+              { goalId: resumedGoal.id, status: nextStatus },
+            );
+          } else {
+            plan = latestPlan;
+          }
+          await attachConfirmedPlanGoal(plan, resumedGoal);
+          return { ok: true, plan, activeGoal: resumedGoal };
+        }
+        return {
+          ok: true,
+          plan,
+          activeGoal: {
+            id: existingGoal.id,
+            description: existingGoal.description,
+            status: existingGoal.status,
+          },
+        };
+      }
+      const recovering =
+        plan.status === "confirmed_pending_execution" &&
+        !plan.executionGoalId;
+      if (!recovering && plan.revision !== input.expectedRevision) {
+        return { ok: false, message: "计划版本已变化，请刷新后重试。", plan };
+      }
+      if (!recovering && !isPlanConfirmable(plan)) {
+        return {
+          ok: false,
+          message: "只有通过门禁且状态为 Ready 的计划可以确认。",
+          plan,
+        };
+      }
+      if (!plan.finalArtifact || !plan.projection) {
+        return { ok: false, message: "计划终版或投影不存在。", plan };
+      }
+      const artifact = plan.finalArtifact;
+      const projection = plan.projection;
+      const confirmedPlanRevision = plan.confirmedRevision ?? plan.revision;
+      if (!(await planArtifactWriter().verify(plan))) {
+        return {
+          ok: false,
+          message: "计划 Markdown 投影已变化，请重新生成后确认。",
+          plan,
+        };
+      }
+      const evidenceVerification = await verifyPlanEvidence(plan);
+      if (!evidenceVerification.ok) {
+        return {
+          ok: false,
+          message: `工作区证据已漂移（${evidenceVerification.driftedEvidenceIds.join(
+            "、",
+          )}），请重新规划后再确认。`,
+          plan,
+        };
+      }
+      if (!recovering) {
+        plan = await planStore().save(
+          {
+            ...plan,
+            status: "confirmed_pending_execution",
+            confirmedRevision: confirmedPlanRevision,
+            confirmedAt: new Date().toISOString(),
+          },
+          plan.revision,
+          "plan_confirmed",
+        );
+      }
+
+      const goalId = `goal_from_${plan.id}`;
+      const criteria = artifact.acceptanceCriteria.length
+        ? artifact.acceptanceCriteria
+        : [`完成计划目标：${artifact.objective}`];
+      const milestoneDependencies =
+        normalizeConfirmedPlanMilestoneDependencies(artifact.milestones);
+      const draft: GoalDraft = {
+        id: plan.id,
+        sessionId: plan.sessionId,
+        ...(plan.workspaceId ? { workspaceId: plan.workspaceId } : {}),
+        sourceMessage: plan.sourceMessage,
+        normalizedDescription: artifact.objective,
+        sourcePlanRef: {
+          planId: plan.id,
+          revision: confirmedPlanRevision,
+          sha256: projection.sha256,
+        },
+        successCriteria: criteria.map((description, index) => ({
+          id: `criterion_${index + 1}`,
+          description,
+          acceptanceChecks: [
+            {
+              id: `criterion_${index + 1}_review`,
+              kind: "model_review",
+              description: "根据执行轨迹和产物验证计划验收条件。",
+              params: {
+                condition: description,
+                evidenceRefs: ["artifact:goalEvidence"],
+              },
+              requiresEvidence: true,
+            },
+          ],
+        })),
+        acceptanceCoverage: {
+          deterministicChecks: 0,
+          modelReviewChecks: criteria.length,
+          totalChecks: criteria.length,
+          hasDeterministicCoverage: false,
+          hasModelReviewCoverage: true,
+        },
+        warnings: [],
+        milestones: artifact.milestones.map((milestone, index) => ({
+          id: milestone.id || `milestone_${index + 1}`,
+          description: `${milestone.title}：${milestone.description}`,
+          state: index === 0 ? "ready" : "pending",
+          successCriteria: milestone.acceptanceCriteria.map(
+            (description, criterionIndex) => ({
+              id: `${milestone.id}_criterion_${criterionIndex + 1}`,
+              description,
+              acceptanceChecks: [
+                {
+                  id: `${milestone.id}_criterion_${criterionIndex + 1}_review`,
+                  kind: "model_review",
+                  description: "根据里程碑执行证据验证条件。",
+                  params: {
+                    condition: description,
+                    evidenceRefs: ["artifact:goalEvidence"],
+                  },
+                  requiresEvidence: true,
+                },
+              ],
+            }),
+          ),
+          runIds: [],
+          attempts: 0,
+          dependsOn: milestoneDependencies.get(milestone.id) ?? [],
+        })),
+        status: "confirmed",
+        createdAt: plan.createdAt,
+        updatedAt: new Date().toISOString(),
+      };
+      const createdGoal = await goalChatService().createFromDraft({
+        draft,
+        goalId,
+      });
+      plan = await planStore().save(
+        {
+          ...plan,
+          status: "confirmed_pending_execution",
+          executionGoalId: createdGoal.id,
+        },
+        plan.revision,
+        "plan_execution_goal_created",
+        { goalId: createdGoal.id },
+      );
+      const activeGoal = await goalChatService().resume(createdGoal.id);
+      const latestPlan = (await planStore().get(plan.id)) ?? plan;
+      if (latestPlan.status === "confirmed_pending_execution") {
+        const nextStatus = planStatusForExecutionGoal(activeGoal.status);
+        plan = await planStore().save(
+          {
+            ...latestPlan,
+            status: nextStatus,
+          },
+          latestPlan.revision,
+          nextStatus === "executing"
+            ? "plan_execution_started"
+            : "plan_execution_finished",
+          { goalId: activeGoal.id, status: nextStatus },
+        );
+      } else {
+        plan = latestPlan;
+      }
+      await attachConfirmedPlanGoal(plan, activeGoal);
+      return { ok: true, plan, activeGoal };
+      }),
+    );
+  }
+
+  async function attachConfirmedPlanGoal(
+    plan: PlanRecord,
+    activeGoal: ChatSessionGoalSummary,
+  ): Promise<void> {
+    const session = await chatSessionStore().attachGoal(
+      plan.sessionId,
+      activeGoal,
+    );
+    const goalEventRef = `plan-confirmed:${plan.id}`;
+    if (session.messages.some((message) => message.goalEventRef === goalEventRef)) {
+      return;
+    }
+    await chatSessionStore().appendMessage({
+      sessionId: plan.sessionId,
+      role: "assistant",
+      content: `计划已确认，开始执行目标：${activeGoal.description}。`,
+      goalId: activeGoal.id,
+      goalEventRef,
+    });
+  }
+
   async function confirmGoalDraftAccepted(
     draftId: string,
     edit?: GoalDraftEdit,
@@ -2233,6 +2636,7 @@ export function createAppContainer(options: {
       .map((client) => client.disconnect());
     const lateMcpResults = await Promise.allSettled(lateMcpCloses);
     const flushResults = await Promise.allSettled([
+      goalProgressDeliveryQueue,
       (lazyStore.get("agentRunStore") as AgentRunStore | undefined)
         ?.flushShadowWrites() ?? Promise.resolve(),
       (lazyStore.get("agentTrajectoryStore") as AgentTrajectoryStore | undefined)
@@ -2267,6 +2671,7 @@ export function createAppContainer(options: {
     discoverSkills: () => discoverSkills({ skillsDir }),
     modelSettingsStore,
     modelConnectionService,
+    modelRouter,
     agentBootstrapService,
     agentValidationStore,
     scheduledTaskStore,
@@ -2289,6 +2694,9 @@ export function createAppContainer(options: {
     requestGitWorktreeAgentWorkspace,
     multiAgentSessionStore,
     multiAgentCoordinator,
+    planStore,
+    planArtifactWriter,
+    planDebateOrchestrator,
     memoryStore,
     memoryProfileStore,
     memoryIngestionService,
@@ -2317,6 +2725,7 @@ export function createAppContainer(options: {
     goalDraftService,
     confirmGoalDraft,
     discardGoalDraft,
+    confirmPlan,
     runGoalOperation,
     runGoalBudgetOperation,
     increaseGoalBudget: (goalId: string, delta: Partial<GoalBudget>) =>
@@ -2573,4 +2982,61 @@ function formatRunStatusForChat(status: AgentRunStatus): string {
     case "queued":
       return "排队中";
   }
+}
+
+function isLivePlanReference(status: PlanStatus): boolean {
+  return (
+    status === "drafting" ||
+    status === "paused" ||
+    status === "awaiting_input" ||
+    status === "awaiting_confirmation" ||
+    status === "confirmed_pending_execution" ||
+    status === "executing"
+  );
+}
+
+function planStatusForExecutionGoal(
+  status: ChatSessionGoalSummary["status"],
+): PlanStatus {
+  if (status === "achieved" || status === "completed_unverified") {
+    return "completed";
+  }
+  if (status === "canceled") {
+    return "canceled";
+  }
+  if (
+    status === "failed" ||
+    status === "stopped_budget" ||
+    status === "stopped_stalled" ||
+    status === "stopped_blocked"
+  ) {
+    return "failed";
+  }
+  return "executing";
+}
+
+function normalizeConfirmedPlanMilestoneDependencies(
+  milestones: PlanArtifact["milestones"],
+): Map<string, string[]> {
+  const ids = new Set(milestones.map((milestone) => milestone.id));
+  const titleCounts = new Map<string, number>();
+  for (const milestone of milestones) {
+    const title = milestone.title.trim();
+    titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1);
+  }
+  const uniqueTitleIds = new Map(
+    milestones
+      .filter((milestone) => titleCounts.get(milestone.title.trim()) === 1)
+      .map((milestone) => [milestone.title.trim(), milestone.id] as const),
+  );
+  return new Map(
+    milestones.map((milestone) => {
+      const resolved = milestone.dependencies.flatMap((dependency) => {
+        const candidate = dependency.trim();
+        const id = ids.has(candidate) ? candidate : uniqueTitleIds.get(candidate);
+        return id && id !== milestone.id ? [id] : [];
+      });
+      return [milestone.id, [...new Set(resolved)]] as const;
+    }),
+  );
 }
