@@ -10,6 +10,7 @@ import type {
 import type { SkillInputValue } from "./skillExecutionContract";
 
 export type PlanMode = "direct" | "debate";
+export type PlanAutonomyMode = "standard" | "auto";
 export type PlanSchemaVersion = 1 | 2;
 export type PlanInvestigationDepth = "quick" | "standard" | "deep";
 
@@ -337,6 +338,7 @@ export type PlanRecord = {
   requestedSkillName?: string | null;
   selectedSkill?: GoalSelectedSkill;
   mode: PlanMode;
+  autonomyMode?: PlanAutonomyMode;
   status: PlanStatus;
   actionGate: PlanActionGate;
   revision: number;
@@ -369,6 +371,7 @@ export type CreatePlanInput = {
   requestedSkillName?: string | null;
   selectedSkill?: GoalSelectedSkill;
   mode: PlanMode;
+  autonomyMode?: PlanAutonomyMode;
   modelAssignments?: PlanModelAssignments;
   signal?: AbortSignal;
 };

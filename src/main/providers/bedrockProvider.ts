@@ -19,6 +19,7 @@ import type {
   ToolDefinition,
 } from "./provider";
 import { withModelServiceNotice } from "../../shared/modelServiceNotice";
+import { defaultRequestTimeoutMs } from "../fetchWithTimeout";
 
 const capabilities: ProviderCapabilities = {
   toolUse: true,
@@ -37,12 +38,14 @@ export type BedrockProviderOptions = {
   awsSecretAccessKey?: string;
   awsSessionToken?: string;
   client?: Pick<BedrockRuntimeClient, "send">;
+  timeoutMs?: number;
 };
 
 export function createBedrockProvider(
   options: BedrockProviderOptions,
 ): LLMProvider {
   const client = options.client ?? new BedrockRuntimeClient(buildClientConfig(options));
+  const timeoutMs = options.timeoutMs ?? defaultRequestTimeoutMs;
 
   return {
     id: "bedrock" as ProviderId,
@@ -52,8 +55,8 @@ export function createBedrockProvider(
       const { family, modelId } = splitFamily(req.model);
       const response =
         family === "claude"
-          ? await completeClaude(client, modelId, req)
-          : await completeConverse(client, modelId, req);
+          ? await completeClaude(client, modelId, req, timeoutMs)
+          : await completeConverse(client, modelId, req, timeoutMs);
       return withModelServiceNotice(response, {
         provider: "bedrock",
         model: req.model,
@@ -119,6 +122,7 @@ async function completeClaude(
   client: Pick<BedrockRuntimeClient, "send">,
   modelId: string,
   req: CompleteRequest,
+  timeoutMs: number,
 ): Promise<CompleteResponse> {
   const { system, messages } = toAnthropicMessages(req.messages);
   const body = {
@@ -138,14 +142,18 @@ async function completeClaude(
       : {}),
     ...bedrockClaudeThinkingBody(req),
   };
-  const output = await client.send(
-    new InvokeModelCommand({
-      modelId,
-      contentType: "application/json",
-      accept: "application/json",
-      body: new TextEncoder().encode(JSON.stringify(body)),
-    }),
-    req.signal ? { abortSignal: req.signal } : undefined,
+  const output = await sendBedrockWithTimeout(
+    (signal) => client.send(
+      new InvokeModelCommand({
+        modelId,
+        contentType: "application/json",
+        accept: "application/json",
+        body: new TextEncoder().encode(JSON.stringify(body)),
+      }),
+      { abortSignal: signal },
+    ),
+    req.signal,
+    timeoutMs,
   );
   const json = JSON.parse(
     new TextDecoder().decode(output.body),
@@ -179,10 +187,11 @@ async function completeConverse(
   client: Pick<BedrockRuntimeClient, "send">,
   modelId: string,
   req: CompleteRequest,
+  timeoutMs: number,
 ): Promise<CompleteResponse> {
   const { system, messages } = toConverseMessages(req.messages);
-  const response = await client.send(
-    new ConverseCommand({
+  const response = await sendBedrockWithTimeout(
+    (signal) => client.send(new ConverseCommand({
       modelId,
       system: system.map((text) => ({ text })),
       messages: messages as never,
@@ -203,8 +212,9 @@ async function completeConverse(
             },
           }
         : {}),
-    }),
-    req.signal ? { abortSignal: req.signal } : undefined,
+    }), { abortSignal: signal }),
+    req.signal,
+    timeoutMs,
   );
 
   const content =
@@ -252,6 +262,43 @@ async function completeConverse(
         }
       : {}),
   };
+}
+
+async function sendBedrockWithTimeout<T>(
+  send: (signal: AbortSignal) => Promise<T>,
+  parentSignal: AbortSignal | undefined,
+  timeoutMs: number,
+): Promise<T> {
+  const controller = new AbortController();
+  const abortFromParent = () => controller.abort(parentSignal?.reason);
+  if (parentSignal?.aborted) {
+    abortFromParent();
+  } else {
+    parentSignal?.addEventListener("abort", abortFromParent, { once: true });
+  }
+  const timer = setTimeout(() => {
+    controller.abort(new Error(`Bedrock request timed out after ${timeoutMs}ms.`));
+  }, timeoutMs);
+  timer.unref?.();
+  try {
+    return await Promise.race([
+      send(controller.signal),
+      new Promise<never>((_resolve, reject) => {
+        const onAbort = () => {
+          controller.signal.removeEventListener("abort", onAbort);
+          reject(
+            controller.signal.reason instanceof Error
+              ? controller.signal.reason
+              : new Error("Bedrock request aborted."),
+          );
+        };
+        controller.signal.addEventListener("abort", onAbort, { once: true });
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+    parentSignal?.removeEventListener("abort", abortFromParent);
+  }
 }
 
 function splitFamily(model: string): { family: string; modelId: string } {

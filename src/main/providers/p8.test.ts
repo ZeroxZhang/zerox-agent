@@ -115,7 +115,7 @@ describe("MaxMode", () => {
     expect(result.judgeModel).toBe("judge-m");
   });
 
-  it("replays winner tool calls via a P6 ephemeral actor", async () => {
+  it("returns winner tool calls without replaying side effects in an actor", async () => {
     const provider: LLMProvider = {
       id: "openai-compatible",
       capabilities: { toolUse: true, thinking: false, vision: false, promptCache: false, streamingToolCalls: false },
@@ -126,16 +126,22 @@ describe("MaxMode", () => {
       async countTokens() { return 0; },
       buildCachePrefix(m) { return { system: "", tools: [], messages: m, watermark: m.length }; },
     };
-    const actorRuntime = createActorRuntime({ deps: { runActor: async () => ({ status: "done", summary: "replayed", filesTouched: ["/tmp/x"] }) } });
+    let actorRuns = 0;
+    const actorRuntime = createActorRuntime({ deps: { runActor: async () => {
+      actorRuns += 1;
+      return { status: "done", summary: "replayed", filesTouched: ["/tmp/x"] };
+    } } });
     const maxMode = createMaxMode(provider);
     const req: CompleteRequest = { model: "m", apiKey: "k", temperature: 0, maxTokens: 100, messages: [{ role: "user", content: [{ type: "text", text: "x" }] }] };
     const result = await maxMode.runStep(req, { candidates: 1, judgeModel: "j", actorRuntime, parentRunId: "run-1" });
-    expect(result.executedViaActor).toBeTruthy();
+    expect(result.winner.toolCalls).toHaveLength(1);
+    expect(actorRuns).toBe(0);
   });
 
   it("isMaxModeEnabled defaults off", () => {
     expect(isMaxModeEnabled({})).toBe(false);
-    expect(isMaxModeEnabled({ ZEROX_MAX_MODE: "true" })).toBe(true);
+    expect(isMaxModeEnabled({ ZEROX_MAX_MODE: "on" })).toBe(true);
+    expect(isMaxModeEnabled({ ZEROX_MAX_MODE: "true" })).toBe(false);
   });
 });
 

@@ -30,7 +30,7 @@ describe("chat IPC handlers", () => {
   it("forwards stream events from guided skill input responses to the invoking renderer", () => {
     const respondSkillInputSource = getHandlerSource(
       ipcSource,
-      '"chat:respondSkillInput"',
+      "IPC_CHANNELS.chatRespondSkillInput",
     );
 
     expect(respondSkillInputSource).toContain("event: IpcMainInvokeEvent");
@@ -39,7 +39,9 @@ describe("chat IPC handlers", () => {
       "container.chatService().respondSkillInput(input,",
     );
     expect(respondSkillInputSource).toContain("onStreamEvent");
-    expect(respondSkillInputSource).toContain('sender.send("chat:streamEvent"');
+    expect(respondSkillInputSource).toContain(
+      "sender.send(IPC_CHANNELS.chatStreamEvent",
+    );
   });
 
   it("opens project workspaces through the native directory picker", () => {
@@ -262,7 +264,7 @@ describe("chat IPC handlers", () => {
     } as unknown as Parameters<typeof registerAllIpcHandlers>[0];
     registerAllIpcHandlers(container);
     const completion = electronState.ipcHandlers.get("chat:respondSkillInput")?.(
-      { sender: { isDestroyed: () => false, send: vi.fn() } },
+      { sender: { id: 42, isDestroyed: () => false, send: vi.fn() } },
       {
         inputRequestId: "input_shutdown",
         requestId: "guided_shutdown",
@@ -293,7 +295,7 @@ describe("chat IPC handlers", () => {
     } as unknown as Parameters<typeof registerAllIpcHandlers>[0];
     registerAllIpcHandlers(container);
     const completion = electronState.ipcHandlers.get("chat:respondSkillInput")?.(
-      { sender: { isDestroyed: () => false, send: vi.fn() } },
+      { sender: { id: 42, isDestroyed: () => false, send: vi.fn() } },
       {
         inputRequestId: "input_cancel",
         requestId: "original_request",
@@ -303,7 +305,10 @@ describe("chat IPC handlers", () => {
     await Promise.resolve();
 
     expect(
-      electronState.ipcHandlers.get("chat:cancelMessage")?.({}, "original_request"),
+      electronState.ipcHandlers.get("chat:cancelMessage")?.(
+        { sender: { id: 42 } },
+        "original_request",
+      ),
     ).toEqual({ ok: true, message: "已请求中断任务。" });
     await expect(completion).resolves.toEqual({ ok: false, message: "canceled" });
   });
@@ -396,13 +401,19 @@ describe("chat IPC handlers", () => {
         {},
         "plan_1",
         "profile_b",
+        "auto",
       ),
     ).resolves.toEqual({
       ok: true,
       plan,
       message: "已从失败轮次继续规划。",
     });
-    expect(retryFailedRound).toHaveBeenCalledWith("plan_1", "profile_b");
+    expect(retryFailedRound).toHaveBeenCalledWith(
+      "plan_1",
+      "profile_b",
+      undefined,
+      "auto",
+    );
     expect(appendMessage).toHaveBeenCalledWith({
       sessionId: "session_1",
       role: "assistant",

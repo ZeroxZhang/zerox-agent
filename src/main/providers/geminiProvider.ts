@@ -89,6 +89,7 @@ export function createGeminiProvider(options: GeminiProviderOptions = {}): LLMPr
         inputTokens: 0,
         outputTokens: 0,
       };
+      let nextToolCallIndex = 0;
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
@@ -100,7 +101,15 @@ export function createGeminiProvider(options: GeminiProviderOptions = {}): LLMPr
           const payload = line.slice(5).trim();
           if (!payload) continue;
           let evt: Record<string, unknown>;
-          try { evt = JSON.parse(payload); } catch { continue; }
+          try {
+            evt = JSON.parse(payload) as Record<string, unknown>;
+          } catch {
+            yield {
+              type: "error",
+              error: new Error("Gemini stream returned malformed JSON."),
+            };
+            return;
+          }
           const candidates = evt.candidates as Array<Record<string, unknown>> | undefined;
           const parts = ((candidates?.[0]?.content as { parts?: Array<Record<string, unknown>> } | undefined)?.parts) ?? [];
           for (const p of parts) {
@@ -111,8 +120,21 @@ export function createGeminiProvider(options: GeminiProviderOptions = {}): LLMPr
               acc.text += p.text;
               yield { type: "text_delta", text: p.text };
             }
-            const fc = p.functionCall as { name: string; args: unknown } | undefined;
-            if (fc) yield { type: "tool_call_delta", toolCallId: fc.name, name: fc.name, argumentsDelta: JSON.stringify(fc.args ?? {}) };
+            const fc = p.functionCall as
+              | { id?: string; name: string; args: unknown }
+              | undefined;
+            if (fc) {
+              const index = nextToolCallIndex++;
+              const toolCallId =
+                fc.id?.trim() || `gemini_tool_call_${index + 1}`;
+              yield {
+                type: "tool_call_delta",
+                toolCallId,
+                index,
+                name: fc.name,
+                argumentsDelta: JSON.stringify(fc.args ?? {}),
+              };
+            }
           }
           if (candidates?.[0]?.finishReason) acc.finish = candidates[0].finishReason as string;
           const um = evt.usageMetadata as {
@@ -271,14 +293,26 @@ function parseGeminiResponse(json: Record<string, unknown>): CompleteResponse {
   let text = "";
   let thinking = "";
   const toolCalls: CompleteResponse["toolCalls"] = [];
-  for (const p of parts) {
+  for (let index = 0; index < parts.length; index += 1) {
+    const p = parts[index]!;
     if (typeof p.text === "string" && p.thought === true) {
       thinking += p.text;
     } else if (typeof p.text === "string") {
       text += p.text;
     }
-    const fc = p.functionCall as { name: string; args: unknown } | undefined;
-    if (fc) toolCalls.push({ id: fc.name, type: "function", function: { name: fc.name, arguments: JSON.stringify(fc.args ?? {}) } });
+    const fc = p.functionCall as
+      | { id?: string; name: string; args: unknown }
+      | undefined;
+    if (fc) {
+      toolCalls.push({
+        id: fc.id?.trim() || `gemini_tool_call_${index + 1}`,
+        type: "function",
+        function: {
+          name: fc.name,
+          arguments: JSON.stringify(fc.args ?? {}),
+        },
+      });
+    }
   }
   const usage = json.usageMetadata as { promptTokenCount?: number; candidatesTokenCount?: number; cachedContentTokenCount?: number } | undefined;
   return {

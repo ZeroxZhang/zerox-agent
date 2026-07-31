@@ -420,6 +420,96 @@ describe("agent goal acceptance", () => {
     ]);
   });
 
+  it("does not mistake quoted program comparisons for shell redirection", async () => {
+    const acceptance = createAgentGoalAcceptance();
+    const command = 'python3 -c "assert 3 >= 1"';
+
+    const result = await acceptance.evaluate(
+      createMilestone([
+        check("check_quoted_comparison", "command_exit_code", {
+          command,
+          expectedExitCode: 0,
+        }),
+      ]),
+      createContext({
+        toolResults: [
+          {
+            ok: true,
+            result: { exitCode: 0, evidenceRefs: ["tool_shell_comparison"] },
+          },
+        ],
+      }),
+    );
+
+    expect(result.accepted).toBe(true);
+    expect(toolCalls).toEqual([
+      { toolName: "shell_exec", args: { command } },
+    ]);
+  });
+
+  it("retries an unavailable python executable once with the authorized python3 variant", async () => {
+    const acceptance = createAgentGoalAcceptance();
+    const command = `python ${path.join(workspacePath, "script.py")} --help`;
+    const result = await acceptance.evaluate(
+      createMilestone([
+        check("check_python", "command_exit_code", {
+          command,
+          expectedExitCode: 0,
+        }),
+      ]),
+      createContext({
+        toolResults: [
+          {
+            ok: false,
+            error: "shell_exec failed: zsh:1: command not found: python",
+            errorDetails: { exitCode: 127 },
+          },
+          {
+            ok: true,
+            result: { exitCode: 0, evidenceRefs: ["tool_shell_python3"] },
+          },
+        ],
+      }),
+    );
+
+    expect(result.accepted).toBe(true);
+    expect(result.checkResults[0]).toMatchObject({
+      passed: true,
+      evidenceRefs: ["tool_shell_python3"],
+      detail: expect.stringContaining('portable "python3" fallback'),
+    });
+    expect(toolCalls).toEqual([
+      { toolName: "shell_exec", args: { command } },
+      {
+        toolName: "shell_exec",
+        args: { command: command.replace(/^python /, "python3 ") },
+      },
+    ]);
+  });
+
+  it("does not mask a real Python script failure with a python3 retry", async () => {
+    const acceptance = createAgentGoalAcceptance();
+    const command = `python ${path.join(workspacePath, "script.py")}`;
+    const result = await acceptance.evaluate(
+      createMilestone([
+        check("check_python_failure", "command_exit_code", {
+          command,
+          expectedExitCode: 0,
+        }),
+      ]),
+      createContext({
+        toolResults: [{
+          ok: false,
+          error: "script failed with an assertion",
+          errorDetails: { exitCode: 1 },
+        }],
+      }),
+    );
+
+    expect(result.accepted).toBe(false);
+    expect(toolCalls).toEqual([{ toolName: "shell_exec", args: { command } }]);
+  });
+
   it("aborts a permissioned command tool when its validator deadline expires", async () => {
     vi.useFakeTimers();
     const context = createContext();
@@ -2465,6 +2555,42 @@ describe("agent goal acceptance", () => {
     expect(JSON.stringify(result)).not.toContain("secret provider payload");
   });
 
+  it("preserves generic final-judge HTTP status as a provider notice", async () => {
+    const result = await createAgentGoalAcceptance({
+      chatClient: {
+        async complete() {
+          throw Object.assign(new Error("secret provider payload"), {
+            statusCode: 400,
+            code: "invalid_request_error",
+          });
+        },
+      },
+    }).evaluateGoal(
+      createGoal([
+        check("final_http_error", "model_review", { evidenceRefs: ["evidence:final"] }, true),
+      ]),
+      createContext({
+        modelProfile: {
+          baseUrl: "https://api.example.com/v1",
+          apiKey: "secret",
+          model: "deepseek-v4-flash",
+          providerId: "deepseek",
+          temperature: 0,
+          maxTokens: 1024,
+        },
+      }),
+    );
+
+    expect(result.modelServiceNotice).toMatchObject({
+      kind: "provider_stop",
+      provider: "deepseek",
+      model: "deepseek-v4-flash",
+      statusCode: 400,
+      code: "invalid_request_error",
+    });
+    expect(JSON.stringify(result)).not.toContain("secret provider payload");
+  });
+
   it("surfaces a truncated final judge response instead of retrying JSON parsing", async () => {
     let calls = 0;
     const result = await createAgentGoalAcceptance({
@@ -2993,6 +3119,17 @@ describe("agent goal acceptance", () => {
           }],
         });
       }
+
+      const explicitlyReadable = await createAgentGoalAcceptance().evaluate(
+        createMilestone([
+          check("allowed_symlink_file", "file_exists", { path: leafLink }),
+        ]),
+        createContext({ extraReadRoots: [outsideRoot] }),
+      );
+      expect(explicitlyReadable).toMatchObject({
+        accepted: true,
+        checkResults: [{ code: "file_exists", passed: true }],
+      });
     } finally {
       await rm(outsideRoot, { recursive: true, force: true });
     }
@@ -3233,6 +3370,46 @@ describe("agent goal acceptance", () => {
       .join("\n");
     expect(result.accepted).toBe(true);
     expect(reconstructed.length).toBeLessThanOrEqual(12_000);
+  });
+
+  it("keeps the latest completion summary when earlier transcript entries fill the evidence limit", async () => {
+    let capturedPrompt = "";
+    const result = await createAgentGoalAcceptance({
+      chatClient: {
+        async complete(request) {
+          capturedPrompt = request.messages.at(-1)?.content ?? "";
+          return {
+            content: JSON.stringify({
+              verdict: "accepted",
+              reason: "The latest completion summary proves the check passed.",
+              evidenceRefs: ["evidence:final"],
+            }),
+            toolCalls: [],
+            finishReason: "stop",
+          };
+        },
+      },
+    }).evaluateGoal(
+      createGoal([
+        check("latest_transcript", "model_review", { evidenceRefs: ["evidence:final"] }, true),
+      ]),
+      createContext({
+        transcriptMessages: [
+          ...Array.from({ length: 4 }, (_, index) => ({
+            role: "tool" as const,
+            content: `EARLY_TOOL_NOISE_${index}:${"x".repeat(5_000)}`,
+          })),
+          {
+            role: "assistant" as const,
+            content: "LATEST_FINAL_SUMMARY: all requested checks passed.",
+          },
+        ],
+      }),
+    );
+
+    expect(result.accepted).toBe(true);
+    expect(capturedPrompt).toContain("LATEST_FINAL_SUMMARY");
+    expect(capturedPrompt).not.toContain("EARLY_TOOL_NOISE_0");
   });
 
   it("records actual judge prompt refs when the final judge has no transcript", async () => {

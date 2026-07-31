@@ -19,7 +19,12 @@ describe("plan evidence verifier", () => {
   });
 
   afterEach(async () => {
-    await rm(tempDir, { recursive: true, force: true });
+    await rm(tempDir, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 20,
+    });
   });
 
   it("detects source-file drift while ignoring the trusted .zerox projection directory", async () => {

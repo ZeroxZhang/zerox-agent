@@ -47,7 +47,7 @@ export function createVertexProvider(
 
     async complete(req) {
       const { family, modelId } = splitFamily(req.model);
-      const auth = await resolveAuth(options);
+      const auth = await resolveAuth(options, req.signal, timeoutMs);
       let response: CompleteResponse;
       if (family === "claude") {
         response = await completeClaude(
@@ -118,7 +118,11 @@ export function createVertexProvider(
 
 type VertexAuth = { bearer?: string; apiKey?: string };
 
-async function resolveAuth(options: VertexProviderOptions): Promise<VertexAuth> {
+async function resolveAuth(
+  options: VertexProviderOptions,
+  signal: AbortSignal | undefined,
+  timeoutMs: number,
+): Promise<VertexAuth> {
   if (options.authMethod === "api_key") {
     if (!options.apiKey) {
       throw new Error("Vertex API Key 未配置。");
@@ -126,7 +130,9 @@ async function resolveAuth(options: VertexProviderOptions): Promise<VertexAuth> 
     return { apiKey: options.apiKey };
   }
   if (options.getAccessToken) {
-    return { bearer: await options.getAccessToken() };
+    return {
+      bearer: await raceVertexAuth(options.getAccessToken(), signal, timeoutMs),
+    };
   }
   const serviceAccount =
     options.authMethod === "service_account"
@@ -145,11 +151,48 @@ async function resolveAuth(options: VertexProviderOptions): Promise<VertexAuth> 
     : new GoogleAuth({
         scopes: ["https://www.googleapis.com/auth/cloud-platform"],
       });
-  const token = await auth.getAccessToken();
+  const token = await raceVertexAuth(auth.getAccessToken(), signal, timeoutMs);
   if (!token) {
     throw new Error("无法获取 Vertex AI 访问令牌。");
   }
   return { bearer: token };
+}
+
+async function raceVertexAuth<T>(
+  promise: Promise<T>,
+  signal: AbortSignal | undefined,
+  timeoutMs: number,
+): Promise<T> {
+  if (signal?.aborted) {
+    void promise.catch(() => undefined);
+    throw signal.reason instanceof Error
+      ? signal.reason
+      : new Error("Vertex authentication aborted.");
+  }
+  let abortHandler: (() => void) | undefined;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        abortHandler = () =>
+          reject(
+            signal?.reason instanceof Error
+              ? signal.reason
+              : new Error("Vertex authentication aborted."),
+          );
+        signal?.addEventListener("abort", abortHandler, { once: true });
+        timeout = setTimeout(
+          () => reject(new Error(`Vertex authentication timed out after ${timeoutMs}ms.`)),
+          timeoutMs,
+        );
+        timeout.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+    if (signal && abortHandler) signal.removeEventListener("abort", abortHandler);
+  }
 }
 
 async function completeGemini(

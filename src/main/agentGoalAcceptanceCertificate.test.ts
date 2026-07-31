@@ -357,6 +357,39 @@ describe("goal acceptance certificate", () => {
     )).toEqual({ ok: true });
   });
 
+  it("grounds semantic result evidence in non-artifact refs declared by its check contract", () => {
+    const input = validInput();
+    const declaredRefs = ["evidence_user_request", "evidence_tool_inventory"];
+    input.goal.successCriteria[1]!.acceptanceChecks[0]!.params.evidenceRefs =
+      declaredRefs;
+    input.checkResults[1]!.evidenceRefs = declaredRefs;
+    input.evidenceManifest.artifacts = input.evidenceManifest.artifacts.filter(
+      (artifact) => artifact.ref !== "artifact:semantic",
+    );
+    delete input.provenanceRefs["artifact:semantic"];
+
+    const certificate = createGoalAcceptanceCertificate(input);
+
+    expect(certificate.evidence.map((entry) => entry.ref)).toEqual([
+      "artifact:report",
+    ]);
+    expect(verifyGoalAcceptanceCertificate(
+      goalWithCertificate(input.goal, certificate),
+    )).toEqual({ ok: true });
+  });
+
+  it("rejects an undeclared logical evidence ref", () => {
+    const input = validInput();
+    input.goal.successCriteria[1]!.acceptanceChecks[0]!.params.evidenceRefs = [
+      "evidence_user_request",
+    ];
+    input.checkResults[1]!.evidenceRefs = ["evidence_untrusted"];
+
+    expect(() => createGoalAcceptanceCertificate(input)).toThrow(
+      /not grounded|does not resolve/i,
+    );
+  });
+
   it("grounds result evidence in an explicitly prefixed certificate run id", () => {
     const input = validInput();
     input.checkResults[0]!.evidenceRefs = ["run:run_a"];

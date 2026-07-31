@@ -6,6 +6,8 @@ import type {
   PlanningBrief,
 } from "../shared/planMode";
 import {
+  applyPlanArtifactAutonomy,
+  applyPlanningBriefAutonomy,
   applyPlanQualityGate,
   createPlanQualityReport,
   createPlanTaskProfile,
@@ -14,6 +16,57 @@ import {
 } from "./plannerKernel";
 
 describe("planner kernel v2", () => {
+  it("turns preference questions into audited assumptions in automatic Goal mode", () => {
+    const autonomousBrief = applyPlanningBriefAutonomy(
+      brief({
+        unresolvedQuestions: [
+          "文稿以什么格式保存、目录和命名规则是什么？",
+          "采用下载视频加 ASR，还是抓取页面字幕？",
+          "复用现有项目还是新建目录？",
+          "需要支持批量链接还是只处理单条？",
+        ],
+      }),
+      "auto",
+    );
+    const autonomousArtifact = applyPlanArtifactAutonomy(
+      {
+        ...planArtifact(),
+        unresolvedQuestions: ["输出目录如何命名？"],
+        actionGate: "needs_input",
+      },
+      "auto",
+    );
+
+    expect(autonomousBrief.unresolvedQuestions).toEqual([]);
+    expect(autonomousBrief.assumptions).toHaveLength(4);
+    expect(autonomousBrief.assumptions[0]).toContain("自动模式决策");
+    expect(autonomousArtifact.unresolvedQuestions).toEqual([]);
+    expect(autonomousArtifact.assumptions).toEqual([
+      expect.stringContaining("自动模式决策"),
+    ]);
+  });
+
+  it("keeps questions that require user authority blocking in automatic Goal mode", () => {
+    const result = applyPlanningBriefAutonomy(
+      brief({
+        unresolvedQuestions: [
+          "请输入 API Key。",
+          "要公开发布到哪个账号？",
+          "输出目录如何命名？",
+        ],
+      }),
+      "auto",
+    );
+
+    expect(result.unresolvedQuestions).toEqual([
+      "请输入 API Key。",
+      "要公开发布到哪个账号？",
+    ]);
+    expect(result.assumptions).toEqual([
+      expect.stringContaining("输出目录如何命名"),
+    ]);
+  });
+
   it("adapts investigation depth from task risk, scale, and ambiguity", () => {
     expect(createPlanTaskProfile("解释这段只读文档").investigationDepth).toBe(
       "quick",
@@ -100,6 +153,56 @@ describe("planner kernel v2", () => {
     expect(routed.decision.source).toBe("none");
     expect(routed.decision.selectedSkillName).toBeUndefined();
     expect(routed.decision.alternatives).toHaveLength(2);
+  });
+
+  it("routes Skill-authoring work to skill-creator instead of a related domain Skill", () => {
+    const routed = routePlannerSkill({
+      brief: brief({
+        objective: "创建一个抖音链接转文稿 Skill",
+        deliverables: ["一个可调用的新 Skill"],
+        recommendedSkillName: "huashu-douyin-script",
+        recommendedSkillReason: "它能下载抖音视频",
+        skillCandidates: [
+          {
+            name: "huashu-douyin-script",
+            reason: "可作为实现参考",
+            evidenceRefs: ["evidence_user_request"],
+          },
+        ],
+      }),
+      skills: [skill("huashu-douyin-script"), skill("skill-creator")],
+    });
+
+    expect(routed.decision).toMatchObject({
+      source: "automatic",
+      selectedSkillName: "skill-creator",
+    });
+    expect(routed.decision.alternatives.map((item) => item.name)).toEqual([
+      "skill-creator",
+    ]);
+  });
+
+  it("uses the ordinary Agent for Skill-authoring work when skill-creator is unavailable", () => {
+    const routed = routePlannerSkill({
+      brief: brief({
+        objective: "创建一个抖音链接转文稿 Skill",
+        deliverables: ["一个可调用的新 Skill"],
+        recommendedSkillName: "huashu-douyin-script",
+        skillCandidates: [
+          {
+            name: "huashu-douyin-script",
+            reason: "可作为实现参考",
+            evidenceRefs: ["evidence_user_request"],
+          },
+        ],
+      }),
+      skills: [skill("huashu-douyin-script")],
+    });
+
+    expect(routed.decision.source).toBe("none");
+    expect(routed.decision.selectedSkillName).toBeUndefined();
+    expect(routed.decision.alternatives).toEqual([]);
+    expect(routed.decision.reason).toContain("交由普通执行 Agent 创建");
   });
 
   it("accepts auto-routed non-default Skill inputs only with evidence", () => {
@@ -237,6 +340,50 @@ describe("planner kernel v2", () => {
       milestonesTotal: 1,
     });
     expect(report.evidenceCoverage.missingRefs).toEqual([]);
+  });
+
+  it("keeps explicit external Skill artifacts confirmable while surfacing the runtime boundary", () => {
+    const artifact = planArtifact();
+    artifact.milestones[0]!.acceptanceChecks = [
+      {
+        id: "skill-file",
+        kind: "file_exists",
+        description: "共享 Skill 入口存在",
+        params: {
+          path: "/Users/test/.claude/skills/douyin-to-transcript/SKILL.md",
+        },
+        requiresEvidence: false,
+      },
+    ];
+
+    const report = createPlanQualityReport({
+      artifact,
+      profile: createPlanTaskProfile("创建一个可供本地 Agent 调用的新 Skill"),
+      brief: brief(),
+      evidence: [
+        {
+          id: "evidence_user_request",
+          kind: "user",
+          title: "用户需求",
+          summary: "创建一个可供本地 Agent 调用的新 Skill",
+        },
+      ],
+      workspaceRoot: "/workspace",
+      now: "2026-07-31T00:00:00.000Z",
+    });
+
+    expect(report.status).toBe("ready");
+    expect(report.blockingIssues).toEqual([]);
+    expect(report.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "INVALID_ACCEPTANCE_CHECK",
+          severity: "warning",
+          checkId: "skill-file",
+          message: expect.stringContaining("运行时授权与沙箱校验"),
+        }),
+      ]),
+    );
   });
 
   it("blocks unresolved high-severity cold-review findings", () => {

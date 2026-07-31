@@ -305,6 +305,50 @@ describe("agent goal store", () => {
     await expect(store.get(protocolV2.id)).resolves.toEqual(merged);
   });
 
+  it("persists an explicit fresh recovery epoch for a user-retried stalled goal", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const stalled = createProtocolV2Goal("goal_recovery_epoch", "stopped_stalled");
+    stalled.stopReason = "progress_stalled";
+    stalled.acceptanceState = {
+      protocolVersion: 2,
+      phase: "idle",
+      attempt: 5,
+      recentFailures: [createFailureRecord({ occurrence: 5 })],
+      lastDecision: createRepairDirective({ occurrence: 5 }),
+    };
+    await store.save(stalled);
+
+    const retried: Goal = {
+      ...stalled,
+      status: "executing",
+      stopReason: undefined,
+      acceptanceState: {
+        ...stalled.acceptanceState,
+        phase: "idle",
+        recentFailures: [],
+        lastDecision: undefined,
+      },
+      updatedAt: "2026-06-12T00:10:00.000Z",
+    };
+
+    await expect(store.save(retried)).resolves.toMatchObject({
+      status: "executing",
+      acceptanceState: {
+        phase: "idle",
+        recentFailures: [],
+        lastDecision: undefined,
+      },
+    });
+    const recovered = await store.get(retried.id);
+    expect(recovered).toMatchObject({
+      status: "executing",
+      acceptanceState: {
+        recentFailures: [],
+      },
+    });
+    expect(recovered?.acceptanceState).not.toHaveProperty("lastDecision");
+  });
+
   it("merges equal-length divergent acceptance histories without resetting occurrences", async () => {
     const store = createAgentGoalStore({ configDir });
     const canonical = createProtocolV2Goal("goal_equal_window", "executing");

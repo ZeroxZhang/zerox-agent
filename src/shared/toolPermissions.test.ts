@@ -1206,6 +1206,31 @@ describe("tool authorization", () => {
     ).toMatchObject({ allowed: false, reason: expect.stringContaining("嵌套解释器") });
   });
 
+  it("allows an exact task-authorized interpreter command while still enforcing its paths", () => {
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: "/Users/demo/project",
+    });
+    const command = "python /Users/demo/project/check.py --help";
+    const policy: TaskPermissionPolicy = {
+      ...getDefaultTaskPermissionPolicy(),
+      files: {
+        read: [runContext.workspaceRoot],
+        write: [runContext.workspaceRoot],
+      },
+      shell: { commands: [command] },
+    };
+
+    expect(
+      authorizeToolCallWithinRunContext(
+        policy,
+        { toolName: "shell_exec", args: { command } },
+        runContext,
+        { shellPlan: analyzeShell(command, { cwd: runContext.workspaceRoot }) },
+      ),
+    ).toMatchObject({ allowed: true });
+  });
+
   it("denies dynamic tools in network-disabled sandboxes", () => {
     const runContext = buildPrimaryRunContext({
       workspaceId: "workspace_1",

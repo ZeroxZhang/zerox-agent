@@ -29,6 +29,7 @@ export type ChatStreamState = {
   thinkingText: string;
   toolCallPreviews: ChatToolCallPreview[];
   pendingInputRequest: SkillUserInputRequest | null;
+  lastSequenceByRequest: Record<string, number>;
 };
 
 export type ActiveChatStream = {
@@ -42,6 +43,7 @@ export function createChatStreamState(messages: ChatStreamMessage[]): ChatStream
     thinkingText: "",
     toolCallPreviews: [],
     pendingInputRequest: null,
+    lastSequenceByRequest: {},
   };
 }
 
@@ -53,46 +55,57 @@ export function applyChatStreamEvent(
   if (!isActiveStreamEvent(event, activeStream)) {
     return state;
   }
+  const previousSequence = state.lastSequenceByRequest[event.requestId] ?? 0;
+  if (event.sequence <= previousSequence) {
+    return state;
+  }
+  const sequencedState: ChatStreamState = {
+    ...state,
+    lastSequenceByRequest: {
+      ...state.lastSequenceByRequest,
+      [event.requestId]: event.sequence,
+    },
+  };
 
   if (event.type === "answer_delta") {
-    return upsertAssistantStreamMessage(state, event);
+    return upsertAssistantStreamMessage(sequencedState, event);
   }
 
   if (event.type === "output_part") {
-    return upsertAssistantOutputPart(state, event);
+    return upsertAssistantOutputPart(sequencedState, event);
   }
 
   if (event.type === "thinking_delta") {
     return {
-      ...state,
-      thinkingText: `${state.thinkingText}${event.text}`,
+      ...sequencedState,
+      thinkingText: `${sequencedState.thinkingText}${event.text}`,
     };
   }
 
   if (event.type === "tool_call_preview") {
     return {
-      ...state,
-      toolCallPreviews: upsertToolCallPreview(state.toolCallPreviews, event),
+      ...sequencedState,
+      toolCallPreviews: upsertToolCallPreview(sequencedState.toolCallPreviews, event),
     };
   }
 
   if (event.type === "waiting_for_input") {
     return {
-      ...state,
+      ...sequencedState,
       pendingInputRequest: event.inputRequest,
     };
   }
 
   if (event.type === "completed" || event.type === "failed" || event.type === "canceled") {
     return {
-      ...state,
-      messages: state.messages.map((message) =>
+      ...sequencedState,
+      messages: sequencedState.messages.map((message) =>
         message.streamRequestId === event.requestId ? { ...message, isStreaming: false } : message,
       ),
     };
   }
 
-  return state;
+  return sequencedState;
 }
 
 export function finalizeChatStreamResult(
@@ -187,7 +200,7 @@ function upsertAssistantOutputPart(
       ...message,
       content: event.part.type === "text" ? event.part.text : message.content,
       isStreaming: true,
-      outputParts: orderOutputParts(upsertOutputPart(message.outputParts ?? [], event.part)),
+      outputParts: upsertOutputPart(message.outputParts ?? [], event.part),
     };
   });
 
@@ -206,7 +219,7 @@ function upsertAssistantOutputPart(
         createdAt: event.createdAt,
         streamRequestId: event.requestId,
         isStreaming: true,
-        outputParts: orderOutputParts(upsertOutputPart([], event.part)),
+        outputParts: upsertOutputPart([], event.part),
       },
     ],
   };
@@ -224,13 +237,6 @@ function upsertOutputPart(outputParts: ChatOutputPart[], part: ChatOutputPart): 
   });
 
   return didUpdate ? nextParts : [...nextParts, part];
-}
-
-function orderOutputParts(outputParts: ChatOutputPart[]): ChatOutputPart[] {
-  return [
-    ...outputParts.filter((part) => part.type === "text"),
-    ...outputParts.filter((part) => part.type !== "text"),
-  ];
 }
 
 function upsertAssistantStreamMessage(

@@ -1558,6 +1558,49 @@ describe("agent goal controller", () => {
     expect(new Set(result.acceptanceState?.recentFailures.map((failure) => failure.fingerprint))).toHaveProperty("size", 1);
   });
 
+  it("discards a sealed final-judge replay after semantic repair and evaluates the repaired evidence fresh", async () => {
+    await store.save(waitingForAcceptanceGoal());
+    const runtime = createRuntime();
+    let replayCalls = 0;
+    let freshGoalCalls = 0;
+    let milestoneAcceptanceCalls = 0;
+    const controller = createController({
+      runtime,
+      acceptance: {
+        async evaluate() {
+          milestoneAcceptanceCalls += 1;
+          return acceptedResult("check_done");
+        },
+        async replayFinalGoalJudge() {
+          replayCalls += 1;
+          if (replayCalls > 1) {
+            throw new Error("repaired evidence must not reuse the stale sealed replay");
+          }
+          return rejectedResult("semantic_evidence_insufficient", {
+            kind: "model_review",
+            failureClass: "semantic_evidence_insufficient",
+            evidenceManifest: emptyManifest,
+          });
+        },
+        async evaluateGoal() {
+          freshGoalCalls += 1;
+          return acceptedResult("check_done", { evidenceManifest: emptyManifest });
+        },
+      },
+    });
+
+    const result = await controller.continueAcceptance("goal_1");
+
+    expect(result.status).toBe("achieved");
+    expect(replayCalls).toBe(1);
+    expect(freshGoalCalls).toBe(1);
+    expect(milestoneAcceptanceCalls).toBe(1);
+    expect(runtime.runMilestoneIds).toEqual([
+      expect.stringMatching(/^repair_/),
+    ]);
+    expect(result.acceptanceRetryState).toBeUndefined();
+  });
+
   it.each([
     ["iterations", { maxIterations: 1 }, { iterations: 1 }],
     ["tool calls", { maxToolCalls: 2 }, { toolCalls: 2 }],
@@ -2834,7 +2877,7 @@ describe("agent goal controller", () => {
     });
   });
 
-  it("fails closed for a legacy acceptance-unavailable goal without sealed replay evidence", async () => {
+  it("rebuilds final evidence for a legacy acceptance-unavailable goal without sealed replay evidence", async () => {
     await store.save(
       createGoal(
         [
@@ -2868,11 +2911,8 @@ describe("agent goal controller", () => {
 
     const result = await controller.continueAcceptance("goal_1");
 
-    expect(result).toMatchObject({
-      status: "stopped_blocked",
-      stopReason: "acceptance_unavailable",
-    });
-    expect(finalAcceptanceCalls).toBe(0);
+    expect(result.status).toBe("achieved");
+    expect(finalAcceptanceCalls).toBe(1);
     expect(runtime.runMilestoneIds).toEqual([]);
   });
 
@@ -3153,6 +3193,68 @@ describe("agent goal controller", () => {
         sha256: "a".repeat(64),
       }),
     ]);
+    expect(verifyGoalAcceptanceCertificate(result)).toEqual({ ok: true });
+  });
+
+  it("certifies a semantic goal whose judge cites declared planning evidence", async () => {
+    const planningEvidenceCriterion: SuccessCriterion = {
+      id: "criterion_planning_evidence",
+      description: "The delivered Skill satisfies the confirmed plan.",
+      acceptanceChecks: [
+        {
+          id: "check_planning_evidence",
+          kind: "model_review",
+          description: "Review the completed Skill against planning evidence.",
+          params: {
+            condition: "The Skill is complete and runnable.",
+            evidenceRefs: [
+              "evidence_user_request",
+              "evidence_tool_inventory",
+            ],
+          },
+          requiresEvidence: true,
+        },
+      ],
+    };
+    await store.save(
+      createProtocolV2Goal(
+        [
+          {
+            ...milestone("milestone_1"),
+            successCriteria: [planningEvidenceCriterion],
+          },
+        ],
+        { successCriteria: [planningEvidenceCriterion] },
+      ),
+    );
+    const semanticAccepted = acceptedResult("check_planning_evidence", {
+      kind: "model_review",
+      evidenceRefs: ["evidence_user_request", "evidence_tool_inventory"],
+      evidenceManifest: emptyManifest,
+      judge: {
+        providerId: "local-provider",
+        model: "cold-judge",
+        promptVersion: "goal-acceptance-v2",
+        evaluatedMessageIds: ["judge:system", "judge:user", "message:24"],
+        runIds: ["run_milestone_1_1"],
+      },
+    });
+    const controller = createController({
+      runtime: createRuntime(),
+      acceptance: createAcceptanceResults({
+        milestones: [semanticAccepted],
+        goals: [semanticAccepted],
+      }),
+    });
+
+    const result = await controller.start("goal_1");
+
+    expect(result.status).toBe("achieved");
+    expect(result.acceptanceCertificate?.checkResults[0]?.evidenceRefs).toEqual([
+      "evidence_tool_inventory",
+      "evidence_user_request",
+    ]);
+    expect(result.acceptanceCertificate?.evidence).toEqual([]);
     expect(verifyGoalAcceptanceCertificate(result)).toEqual({ ok: true });
   });
 

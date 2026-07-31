@@ -49,6 +49,9 @@ export function createAuthorizedGoalAcceptanceToolExecutor(options: {
         // canonical context. Callers cannot replace it with a wider sandbox.
         runContext: options.runContext,
         signal: executionOptions?.signal,
+        ...(request.toolName === "shell_exec"
+          ? { authorizedShellCommand: String(request.args.command ?? "") }
+          : {}),
       });
     },
   };

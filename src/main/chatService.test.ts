@@ -213,7 +213,12 @@ describe("chat service", () => {
     );
     controller.abort();
 
-    await expect(second).resolves.toEqual({ ok: false, message: "已中断任务。" });
+    await expect(second).resolves.toEqual({
+      ok: false,
+      code: "CANCELED",
+      retryable: true,
+      message: "已中断任务。",
+    });
     expect(modelCalls).toBe(1);
     expect(
       (await chatSessionStore.get("session_queued_cancel"))?.messages.some(
@@ -257,6 +262,7 @@ describe("chat service", () => {
       }),
     ).resolves.toEqual({
       ok: false,
+      code: "UNKNOWN_SKILL_INPUT",
       message: "Unknown skill input request.",
     });
   });
@@ -343,6 +349,49 @@ describe("chat service", () => {
         }),
       ]),
     );
+    expect(statusEvents.every((event) =>
+      event.requestId === "request_stream_1" &&
+      typeof event.sequence === "number" &&
+      event.turnId === "turn-request_stream_1"
+    )).toBe(true);
+    const streamSequences = streamEvents.map((event) => event.sequence);
+    expect(streamSequences).toEqual([...streamSequences].sort((left, right) => left - right));
+    expect(new Set(streamSequences).size).toBe(streamSequences.length);
+  });
+
+  it("does not advertise or execute tools when the selected model disables tool use", async () => {
+    const requests: ChatCompletionRequest[] = [];
+    let toolExecutions = 0;
+    const service = createChatService({
+      chatClient: {
+        async complete(request) {
+          requests.push(request);
+          return chatReply("纯文本模型回复");
+        },
+      },
+      getModelProfile: async () => ({
+        ...(await createCompleteProfile()),
+        modelCapabilities: {
+          tools: false,
+          streaming: true,
+          vision: false,
+          thinking: false,
+        },
+      }),
+      memoryStore: createMemoryStore(),
+      toolExecutor: {
+        ...createToolExecutor(),
+        async execute(request, options) {
+          toolExecutions += 1;
+          return createToolExecutor().execute(request, options);
+        },
+      },
+    });
+
+    await expect(service.sendMessage({ message: "只回答，不调用工具" }))
+      .resolves.toMatchObject({ ok: true, reply: "纯文本模型回复" });
+    expect(requests[0]?.tools).toEqual([]);
+    expect(toolExecutions).toBe(0);
   });
 
   it("persists status activity even when observer callbacks throw", async () => {
@@ -507,6 +556,7 @@ describe("chat service", () => {
     ]);
     expect(chatMessages).toEqual([
       {
+        requestId: "request_1780732800000",
         role: "user",
         content: "帮我整理下载文件夹",
       },
@@ -729,6 +779,7 @@ describe("chat service", () => {
     ]);
     expect(chatMessages).toEqual([
       {
+        requestId: "request_goal_start",
         role: "user",
         content: "把这轮设为目标：发布 v1.8.0，直到 GitHub Release 完成才算结束",
       },
@@ -820,6 +871,7 @@ describe("chat service", () => {
     expect(resumes).toEqual([]);
     expect(chatMessages).toEqual([
       {
+        requestId: "request_goal_draft",
         role: "user",
         content: "发布 v1.8.0，直到 GitHub Release 完成才算结束",
       },
@@ -858,7 +910,11 @@ describe("chat service", () => {
     });
     let skillDiscoveryCalls = 0;
     let modelCalls = 0;
-    const continuations: Array<{ planId: string; userInput: string }> = [];
+    const continuations: Array<{
+      planId: string;
+      userInput: string;
+      autonomyMode?: string;
+    }> = [];
     const service = createChatService({
       chatClient: {
         async complete() {
@@ -876,8 +932,8 @@ describe("chat service", () => {
         async getInputRoutingPlan(sessionId) {
           return sessionId === "persisted_session" ? awaitingInputPlan : null;
         },
-        async continueWithInput(planId, userInput) {
-          continuations.push({ planId, userInput });
+        async continueWithInput(planId, userInput, _signal, autonomyMode) {
+          continuations.push({ planId, userInput, autonomyMode });
           return {
             ok: true as const,
             plan: clarifiedPlan,
@@ -897,6 +953,7 @@ describe("chat service", () => {
     const result = await service.sendMessage({
       sessionId: "persisted_session",
       message: "dbs skill 就在当前技能列表里，其他实现细节你自己决定",
+      planAutonomyMode: "auto",
       selectedSkillName: "dbs",
       attachments: [
         {
@@ -922,6 +979,7 @@ describe("chat service", () => {
     expect(continuations).toEqual([
       expect.objectContaining({
         planId: "plan_waiting",
+        autonomyMode: "auto",
         userInput: expect.stringContaining(
           "dbs skill 就在当前技能列表里，其他实现细节你自己决定",
         ),
@@ -1227,7 +1285,12 @@ describe("chat service", () => {
       },
     );
 
-    expect(result).toEqual({ ok: false, message: "已中断任务。" });
+    expect(result).toEqual({
+      ok: false,
+      code: "CANCELED",
+      retryable: true,
+      message: "已中断任务。",
+    });
     expect(statusEvents).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1304,6 +1367,7 @@ describe("chat service", () => {
       sessionId: string;
       sourceMessage: string;
       mode: string;
+      autonomyMode?: string;
     }> = [];
     let agentLoopCalls = 0;
     const planned = createPlanFixture({
@@ -1382,6 +1446,7 @@ describe("chat service", () => {
         selectedSkillName: "dbs",
         mode: "goal_plan",
         planMode: "debate",
+        planAutonomyMode: "auto",
       },
       {
         onStreamEvent(event) {
@@ -1403,6 +1468,7 @@ describe("chat service", () => {
         sessionId: "persisted_session",
         sourceMessage: "使用 @dbs 规划一个本地功能",
         mode: "debate",
+        autonomyMode: "auto",
         selectedSkill: expect.objectContaining({
           manifest: expect.objectContaining({ name: "dbs" }),
         }),
@@ -1666,7 +1732,11 @@ describe("chat service", () => {
           },
         },
       ),
-    ).resolves.toEqual({ ok: false, message: "Skill input required." });
+    ).resolves.toEqual({
+      ok: false,
+      code: "SKILL_INPUT_REQUIRED",
+      message: "Skill input required.",
+    });
     const inputRequest = initialStreamEvents.find(
       (event): event is Extract<ChatStreamEvent, { type: "waiting_for_input" }> =>
         event.type === "waiting_for_input",
@@ -4464,6 +4534,7 @@ describe("chat service", () => {
 
     expect(result).toEqual({
       ok: false,
+      code: "SKILL_INPUT_REQUIRED",
       message: "Skill input required.",
     });
     expect(profileCalls).toBe(0);
@@ -4603,6 +4674,7 @@ describe("chat service", () => {
     persistGate.resolve();
     await expect(sendPromise).resolves.toEqual({
       ok: false,
+      code: "SKILL_INPUT_REQUIRED",
       message: "Skill input required.",
     });
     expect(sendSettled).toBe(true);
@@ -4700,6 +4772,7 @@ describe("chat service", () => {
       }),
     ).resolves.toEqual({
       ok: false,
+      code: "UNKNOWN_SKILL_INPUT",
       message: "Unknown skill input request.",
     });
   });
@@ -4796,6 +4869,7 @@ describe("chat service", () => {
 
     expect(result).toEqual({
       ok: false,
+      code: "SKILL_INPUT_REQUIRED",
       message: "Skill input required.",
     });
     expect(profileCalls).toBe(0);
@@ -5014,6 +5088,7 @@ describe("chat service", () => {
     secondPendingPersistGate.resolve();
     await expect(responsePromise).resolves.toEqual({
       ok: false,
+      code: "SKILL_INPUT_REQUIRED",
       message: "Skill input required.",
     });
   });
@@ -5219,6 +5294,7 @@ describe("chat service", () => {
       ),
     ).resolves.toEqual({
       ok: false,
+      code: "SKILL_INPUT_REQUIRED",
       message: "Skill input required.",
     });
 
@@ -5825,6 +5901,7 @@ describe("chat service", () => {
       }),
     ).resolves.toEqual({
       ok: false,
+      code: "UNKNOWN_SKILL_INPUT",
       message: "Unknown skill input request.",
     });
     expect(capturedMessages).toHaveLength(1);
@@ -6018,6 +6095,7 @@ describe("chat service", () => {
       }),
     ).resolves.toEqual({
       ok: false,
+      code: "UNKNOWN_SKILL_INPUT",
       message: "Unknown skill input request.",
     });
     expect(agentLoopCalls).toBe(1);
@@ -6099,6 +6177,7 @@ describe("chat service", () => {
 
     expect(result).toEqual({
       ok: false,
+      code: "SKILL_INPUT_REQUIRED",
       message: "Skill input required.",
     });
     expect(goalCreates).toEqual([]);
@@ -6333,6 +6412,8 @@ describe("chat service", () => {
     expect(observedAbort).toBe(true);
     expect(result).toEqual({
       ok: false,
+      code: "CANCELED",
+      retryable: true,
       message: "已中断任务。",
     });
     expect(statusEvents).toEqual(
@@ -6516,6 +6597,7 @@ describe("chat service", () => {
     expect(completeCalled).toBe(false);
     expect(chatMessages).toEqual([
       {
+        requestId: "request_1780732800000",
         role: "user",
         content: "每天 9 点整理文件",
       },
@@ -6535,7 +6617,7 @@ describe("chat service", () => {
     ]);
   });
 
-  it("keeps guided-skill attachment bytes in bounded memory while persisting metadata only", async () => {
+  it("persists guided-skill attachment bytes so the input can resume after restart", async () => {
     const capturedMessages: ChatMessage[][] = [];
     const storedMessages: AppendChatMessageInput[] = [];
     const activityEvents: ChatTaskStatusEvent[] = [];
@@ -6596,7 +6678,11 @@ describe("chat service", () => {
         },
         { onStreamEvent: (event) => streamEvents.push(event) },
       ),
-    ).resolves.toEqual({ ok: false, message: "Skill input required." });
+    ).resolves.toEqual({
+      ok: false,
+      code: "SKILL_INPUT_REQUIRED",
+      message: "Skill input required.",
+    });
 
     const inputRequest = streamEvents.find(
       (event): event is Extract<ChatStreamEvent, { type: "waiting_for_input" }> =>
@@ -6608,7 +6694,12 @@ describe("chat service", () => {
     expect(pendingEvent?.pendingSkillInput?.attachments).toEqual([
       expect.objectContaining({ id: "attachment_image", size: 68 }),
     ]);
-    expect(JSON.stringify(pendingEvent)).not.toContain("dataBase64");
+    expect(pendingEvent?.pendingSkillInput?.attachmentPayloads).toEqual([
+      expect.objectContaining({
+        id: "attachment_image",
+        dataBase64: onePixelPng,
+      }),
+    ]);
 
     await expect(
       service.respondSkillInput({
@@ -6622,7 +6713,7 @@ describe("chat service", () => {
     });
   });
 
-  it("expires a guided-skill attachment payload before responding after its TTL", async () => {
+  it("rehydrates a guided-skill attachment from its durable checkpoint after memory TTL", async () => {
     const storedMessages: AppendChatMessageInput[] = [];
     const streamEvents: ChatStreamEvent[] = [];
     let chatCalls = 0;
@@ -6690,12 +6781,8 @@ describe("chat service", () => {
         inputRequestId: inputRequest?.id ?? "",
         values: { focus: "布局" },
       }),
-    ).resolves.toEqual({
-      ok: false,
-      message:
-        "附件内容在应用重启或长时间等待后已失效，请重新发送消息并粘贴附件。",
-    });
-    expect(chatCalls).toBe(0);
+    ).resolves.toMatchObject({ ok: true, reply: "should not run" });
+    expect(chatCalls).toBe(1);
   });
 
   it("passes pasted image bytes and fenced text attachments through the model pipeline", async () => {
@@ -7141,6 +7228,118 @@ describe("chat service", () => {
       "历史附件内容已失效、不可用",
     );
   });
+
+  it("returns the persisted reply for a duplicate request without rerunning the model", async () => {
+    const storedMessages: AppendChatMessageInput[] = [];
+    const store = createChatSessionStore(storedMessages);
+    let modelCalls = 0;
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          modelCalls += 1;
+          return chatReply("只执行一次");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: store,
+    });
+    const input = {
+      sessionId: "dedupe_session",
+      requestId: "dedupe_request",
+      message: "不要重复执行",
+    };
+
+    await expect(service.sendMessage(input)).resolves.toMatchObject({
+      ok: true,
+      reply: "只执行一次",
+    });
+    await expect(service.sendMessage(input)).resolves.toMatchObject({
+      ok: true,
+      reply: "只执行一次",
+    });
+    expect(modelCalls).toBe(1);
+    expect(storedMessages.filter((message) => message.requestId === "dedupe_request"))
+      .toHaveLength(2);
+  });
+
+  it("recovers a provider-paused agent continuation from the session store after restart", async () => {
+    const storedMessages: AppendChatMessageInput[] = [];
+    const store = createChatSessionStore(storedMessages);
+    const firstService = createChatService({
+      chatClient: {
+        async complete() {
+          return {
+            content: "服务商截断前的部分结果",
+            toolCalls: [],
+            finishReason: "length",
+          };
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: store,
+      toolExecutor: createToolExecutor(),
+    });
+    await expect(firstService.sendMessage({
+      sessionId: "restart_session",
+      requestId: "restart_first",
+      message: "执行长任务",
+    })).resolves.toMatchObject({
+      ok: true,
+      agentStatus: {
+        state: "paused",
+        reason: "provider_output_limit",
+        modelServiceNotice: { kind: "output_limit" },
+      },
+    });
+
+    const resumedRequests: ChatMessage[][] = [];
+    const restartedService = createChatService({
+      chatClient: {
+        async complete(request) {
+          resumedRequests.push(request.messages);
+          return chatReply("重启后已继续完成");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: store,
+      toolExecutor: createToolExecutor(),
+      agentLoopMaxTurns: 2,
+    });
+    await expect(restartedService.sendMessage({
+      sessionId: "restart_session",
+      requestId: "restart_second",
+      message: "继续",
+    })).resolves.toMatchObject({
+      ok: true,
+      reply: expect.stringContaining("重启后已继续完成"),
+    });
+    expect(JSON.stringify(resumedRequests[0])).toContain("服务商截断前的部分结果");
+    expect(JSON.stringify(resumedRequests[0])).toContain("用户已确认继续执行");
+
+    const postCompletionRequests: ChatMessage[][] = [];
+    const thirdService = createChatService({
+      chatClient: {
+        async complete(request) {
+          postCompletionRequests.push(request.messages);
+          return chatReply("这是新的普通对话");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: store,
+    });
+    await thirdService.sendMessage({
+      sessionId: "restart_session",
+      requestId: "restart_third",
+      message: "继续",
+    });
+    expect(JSON.stringify(postCompletionRequests[0])).not.toContain(
+      "用户已确认继续执行上一个已暂停的长任务",
+    );
+  });
 });
 
 function createMemoryStore(options: {
@@ -7242,8 +7441,10 @@ function createChatSessionStore(
       };
       const message = {
         id: `message_${messages.length}`,
+        ...(input.requestId ? { requestId: input.requestId } : {}),
         role: input.role,
         content: input.content,
+        ...(input.attachments ? { attachments: input.attachments } : {}),
         ...(inputWithOutputParts.outputParts
           ? { outputParts: inputWithOutputParts.outputParts }
           : {}),

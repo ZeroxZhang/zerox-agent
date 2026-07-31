@@ -145,8 +145,11 @@ export function createGoalChatService(options: {
     }
 
     const controller = new AbortController();
-    const abortFromParent = () => controller.abort();
+    const abortFromParent = () => controller.abort(runOptions?.signal?.reason);
     runOptions?.signal?.addEventListener("abort", abortFromParent, { once: true });
+    if (runOptions?.signal?.aborted) {
+      abortFromParent();
+    }
 
     const completion = runner(goalId, { signal: controller.signal })
       .then(
@@ -418,6 +421,13 @@ export function createGoalChatService(options: {
         ...(input.draft.sourcePlanRef
           ? { sourcePlanRef: { ...input.draft.sourcePlanRef } }
           : {}),
+        ...(input.draft.executionModelBinding
+          ? {
+              executionModelBinding: structuredClone(
+                input.draft.executionModelBinding,
+              ),
+            }
+          : {}),
         ...(taskContract ? { taskContract } : {}),
         ...(input.draft.selectedSkill
           ? { selectedSkill: snapshotSelectedSkill(input.draft.selectedSkill) }
@@ -628,6 +638,23 @@ export function createGoalChatService(options: {
       if (!goal) {
         throw new Error(`Goal "${goalId}" was not found.`);
       }
+
+      if (
+        goal.status === "stopped_blocked" &&
+        goal.stopReason === "acceptance_unavailable" &&
+        goal.milestones.length > 0 &&
+        goal.milestones.every(
+          (milestone) =>
+            milestone.state === "accepted" || milestone.state === "skipped",
+        )
+      ) {
+        // The stopped-blocked UI labels this action "retry acceptance". Route
+        // completed goals through the final-acceptance recovery path so repaired
+        // evidence is rebuilt instead of reviving a stale runtime/replay state.
+        return toGoalSummary(
+          await options.controller.continueAcceptance(goalId),
+        );
+      }
       if (goal.status === "stopped_budget") {
         throw new Error(
           "Legacy budget-stopped goals are read-only and cannot be retried.",
@@ -657,13 +684,24 @@ export function createGoalChatService(options: {
         assertGoalTransition(goal.status, "executing");
       }
       const upgraded = upgradeGoalAcceptanceProtocol(goal);
+      const startsFreshRecoveryEpoch =
+        goal.status === "failed" || goal.status === "stopped_stalled";
       const candidate: Goal = {
         ...upgraded,
         status: "executing",
         stopReason: undefined,
         modelServiceNotice: undefined,
         milestones: rearmGoalMilestonesForRetry(upgraded.milestones),
-        ...(upgraded.acceptanceState?.phase === "blocked"
+        ...(upgraded.acceptanceState && startsFreshRecoveryEpoch
+          ? {
+              acceptanceState: {
+                ...upgraded.acceptanceState,
+                phase: "idle",
+                recentFailures: [],
+                lastDecision: undefined,
+              },
+            }
+          : upgraded.acceptanceState?.phase === "blocked"
           ? {
               acceptanceState: {
                 ...upgraded.acceptanceState,

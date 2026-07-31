@@ -151,6 +151,20 @@ export function modelServiceNoticeFromError(
     });
   }
 
+  if (statusCode !== undefined || (context.provider && code)) {
+    const providerReason = [
+      statusCode !== undefined ? `HTTP ${statusCode}` : "",
+      code,
+    ].filter(Boolean).join(" / ");
+    return buildNotice("provider_stop", context, {
+      ...(code ? { code } : {}),
+      ...(statusCode !== undefined ? { statusCode } : {}),
+      ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
+      rawReason: providerReason,
+      message: `模型服务商返回错误（${providerReason}），请根据服务商状态检查后手动重试。`,
+    });
+  }
+
   return undefined;
 }
 

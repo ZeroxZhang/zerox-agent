@@ -246,7 +246,11 @@ export function createModelSettingsStore(options: {
     profileId?: string | null,
     frozenBinding?: ResolvedModelBinding,
   ): Promise<ResolvedModelProfile> {
-    const selectedId = frozenBinding?.profileId ?? profileId ?? stored.defaultChatProfileId;
+    const selectedId =
+      frozenBinding?.profileId ??
+      profileId ??
+      stored.defaultChatProfileId ??
+      findRecoverableDefaultProfile(stored, "chat")?.id;
     const profileRevision = frozenBinding?.profileRevision;
     const profile = [...stored.profiles, ...stored.profileHistory].find(
       (candidate) =>
@@ -313,8 +317,10 @@ export function createModelSettingsStore(options: {
 
   return {
     async load() {
-      const stored = await readStoredSettings();
-      return toLegacyPublicSettings(stored);
+      return mutate(async (stored) => {
+        await persistRecoveredDefaults(stored);
+        return toLegacyPublicSettings(stored);
+      });
     },
 
     async save(input) {
@@ -435,16 +441,21 @@ export function createModelSettingsStore(options: {
     },
 
     async getApiKey() {
-      const stored = await readStoredSettings();
-      if (!stored.defaultChatProfileId) {
-        return null;
-      }
-      const resolved = await resolveProfileFrom(stored);
-      return firstSecret(resolved.secrets);
+      return mutate(async (stored) => {
+        await persistRecoveredDefaults(stored);
+        if (!stored.defaultChatProfileId) {
+          return null;
+        }
+        const resolved = await resolveProfileFrom(stored);
+        return firstSecret(resolved.secrets);
+      });
     },
 
     async loadCatalog() {
-      return loadCatalogFrom(await readStoredSettings());
+      return mutate(async (stored) => {
+        await persistRecoveredDefaults(stored);
+        return loadCatalogFrom(stored);
+      });
     },
 
     async saveConnection(input) {
@@ -840,7 +851,22 @@ export function createModelSettingsStore(options: {
           profileRevision: profile.revision,
           connectionRevision: connection.revision,
         };
-        if (verification.status === "failed") {
+        if (verification.status === "passed") {
+          if (
+            profile.purpose === "chat" &&
+            !stored.defaultChatProfileId &&
+            profileCanBecomeDefault(profile, connection)
+          ) {
+            stored.defaultChatProfileId = profile.id;
+          }
+          if (
+            profile.purpose === "embedding" &&
+            !stored.defaultEmbeddingProfileId &&
+            profileCanBecomeDefault(profile, connection)
+          ) {
+            stored.defaultEmbeddingProfileId = profile.id;
+          }
+        } else {
           if (stored.defaultChatProfileId === profile.id) {
             stored.defaultChatProfileId = null;
           }
@@ -1103,7 +1129,14 @@ export function createModelSettingsStore(options: {
     },
 
     async resolveProfile(profileId) {
-      return resolveProfileFrom(await readStoredSettings(), profileId);
+      if (profileId) {
+        return resolveProfileFrom(await readStoredSettings(), profileId);
+      }
+      return mutate(async (stored) => {
+        await persistRecoveredDefaults(stored);
+        const resolved = await resolveProfileFrom(stored);
+        return resolved;
+      });
     },
 
     async resolveBinding(binding) {
@@ -1160,6 +1193,34 @@ export function createModelSettingsStore(options: {
       });
     },
   };
+
+  /**
+   * A default is a convenience pointer, not proof that no model is usable.
+   * Older app versions and interrupted settings saves may leave it null even
+   * though a current verified profile exists. Recover it before returning any
+   * public settings so the UI and the runtime make the same decision.
+   */
+  async function persistRecoveredDefaults(stored: StoredModelSettingsV2): Promise<void> {
+    let changed = false;
+    if (!stored.defaultChatProfileId) {
+      const profile = findRecoverableDefaultProfile(stored, "chat");
+      if (profile) {
+        stored.defaultChatProfileId = profile.id;
+        changed = true;
+      }
+    }
+    if (!stored.defaultEmbeddingProfileId) {
+      const profile = findRecoverableDefaultProfile(stored, "embedding");
+      if (profile) {
+        stored.defaultEmbeddingProfileId = profile.id;
+        changed = true;
+      }
+    }
+    if (changed) {
+      stored.updatedAt = now();
+      await writeStoredSettings(stored);
+    }
+  }
 
   function migrateV1(legacy: StoredModelSettingsV1, timestamp: string): StoredModelSettingsV2 {
     const providerKind = normalizeLegacyProviderKind(legacy.providerId);
@@ -1438,6 +1499,30 @@ function profileCanBecomeDefault(
     profile.verification.profileRevision === profile.revision &&
     profile.verification.connectionRevision === connection?.revision
   );
+}
+
+function findRecoverableDefaultProfile(
+  stored: StoredModelSettingsV2,
+  purpose: "chat" | "embedding",
+): ModelProfile | undefined {
+  return stored.profiles
+    .filter(
+      (profile) =>
+        profile.purpose === purpose &&
+        profileCanBecomeDefault(
+          profile,
+          stored.connections.find(
+            (connection) => connection.id === profile.connectionId,
+          ),
+        ),
+    )
+    .sort(
+      (left, right) =>
+        Date.parse(right.verification?.checkedAt ?? right.updatedAt) -
+          Date.parse(left.verification?.checkedAt ?? left.updatedAt) ||
+        right.updatedAt.localeCompare(left.updatedAt) ||
+        left.id.localeCompare(right.id),
+    )[0];
 }
 
 function isProviderFieldVisible(

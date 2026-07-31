@@ -30,7 +30,10 @@ export function applyGoalOutputRootsToRunContext(
   const outputRoots = extractGoalOutputRoots(goal, locationEnv).filter(
     (root) => !isPathInsideLocationRoot(root, runContext.workspaceRoot, locationEnv),
   );
-  if (outputRoots.length === 0) {
+  const referenceRoots = extractGoalReferenceRoots(goal, locationEnv).filter(
+    (root) => !isPathInsideLocationRoot(root, runContext.workspaceRoot, locationEnv),
+  );
+  if (outputRoots.length === 0 && referenceRoots.length === 0) {
     return runContext;
   }
 
@@ -38,10 +41,26 @@ export function applyGoalOutputRootsToRunContext(
     ...runContext,
     sandbox: {
       ...runContext.sandbox,
-      extraReadRoots: mergeRoots(runContext.sandbox.extraReadRoots, outputRoots),
+      extraReadRoots: mergeRoots(
+        runContext.sandbox.extraReadRoots,
+        [...outputRoots, ...referenceRoots],
+      ),
       extraWriteRoots: mergeRoots(runContext.sandbox.extraWriteRoots, outputRoots),
     },
   };
+}
+
+export function extractGoalReferenceRoots(
+  goal: Goal,
+  locationEnv: LocationResourceEnvironment = {},
+): string[] {
+  return mergeRoots(
+    [],
+    goal.milestones.flatMap((milestone) =>
+      extractOutputRootsFromText(milestone.description, locationEnv),
+    ),
+    locationEnv,
+  );
 }
 
 export function extractGoalOutputRoots(

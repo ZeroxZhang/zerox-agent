@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import type {
+  PlanAutonomyMode,
   PlanEvidenceItem,
   PlanInvestigationDepth,
   PlanTaskProfile,
@@ -21,6 +22,7 @@ import { PLAN_MODE_ALLOWED_TOOL_NAMES } from "./planModePolicy";
 import type { BoundModelClient } from "./providers/modelRouter";
 import type { ToolAuthorizationService } from "./toolAuthorizationService";
 import {
+  applyPlanningBriefAutonomy,
   createFallbackPlanningBrief,
   isPlanInvestigationEvidenceInsufficient,
   shouldEscalatePlanInvestigation,
@@ -59,6 +61,7 @@ export type PlanInvestigatorService = {
     workspaceId?: string;
     workspaceRoot?: string;
     sourceMessage: string;
+    autonomyMode?: PlanAutonomyMode;
     profile: PlanTaskProfile;
     baseEvidence: PlanEvidenceItem[];
     explicitSkill?: SkillRecord;
@@ -144,12 +147,15 @@ export function createPlanInvestigatorService(options: {
 
         try {
           if (!input.workspaceRoot) {
-            const brief = createFallbackPlanningBrief({
-              sourceMessage: input.sourceMessage,
-              profile: { ...input.profile, investigationDepth: depth },
-              evidence,
-              skills,
-            });
+            const brief = applyPlanningBriefAutonomy(
+              createFallbackPlanningBrief({
+                sourceMessage: input.sourceMessage,
+                profile: { ...input.profile, investigationDepth: depth },
+                evidence,
+                skills,
+              }),
+              input.autonomyMode,
+            );
             const completed = {
               ...stageBase,
               status: "completed" as const,
@@ -203,7 +209,10 @@ export function createPlanInvestigatorService(options: {
             tools,
             maxTurns: checkpointCadence(depth),
             pauseOnFailureLoop: true,
-            systemPrompt: buildInvestigatorSystemPrompt(depth),
+            systemPrompt: buildInvestigatorSystemPrompt(
+              depth,
+              input.autonomyMode,
+            ),
             ...(input.signal ? { signal: input.signal } : {}),
             onToolCall(toolName, args, event) {
               toolArgs.set(event.toolCallId, { toolName, ...args });
@@ -244,16 +253,21 @@ export function createPlanInvestigatorService(options: {
           await flushPendingEvidence();
           evidence = dedupeEvidence([...evidence, ...collected]);
           if (result.status !== "succeeded") {
+            const providerMessage = result.modelServiceNotice?.message?.trim();
+            const loopMessage = result.summary.trim();
             throw new Error(
-              result.continuation?.reason
-                ? `规划调查暂停：${result.continuation.reason}。`
-                : `规划调查失败：${result.status}。`,
+              providerMessage ||
+                loopMessage ||
+                (result.status === "canceled"
+                  ? "规划调查已取消。"
+                  : "规划模型未返回可用结果。"),
             );
           }
 
           let brief = parseUniquePlanRoundObject(result.summary, (value) =>
             normalizePlanningBrief(value, input, evidence, skills),
           );
+          brief = applyPlanningBriefAutonomy(brief, input.autonomyMode);
           const evidenceInsufficient =
             isPlanInvestigationEvidenceInsufficient({
               brief,
@@ -269,6 +283,7 @@ export function createPlanInvestigatorService(options: {
               ]),
             };
           }
+          brief = applyPlanningBriefAutonomy(brief, input.autonomyMode);
           const completed = {
             ...stageBase,
             status: "completed" as const,
@@ -413,6 +428,7 @@ function planToolsForDepth(
 
 function buildInvestigatorSystemPrompt(
   depth: PlanInvestigationDepth,
+  autonomyMode: PlanAutonomyMode | undefined,
 ): string {
   return [
     "你是 Zerox Professional Planner Kernel v2 的只读调查器。",
@@ -422,6 +438,9 @@ function buildInvestigatorSystemPrompt(
     "协调规则必须确定、可恢复：工具负责事实采集，模型负责语义判断；每个工作区主张都必须引用真实 evidence id。",
     "每个成功的工具结果都会包含 planningEvidenceRef；引用该结果时必须原样使用这个 ref。",
     "只输出公开、可审计的结论；不要输出思维链、凭证、隐藏推理或未验证猜测。",
+    autonomyMode === "auto"
+      ? "本次 Goal 已开启自动模式。输出格式、保存位置、命名、实现技术、复用现有项目还是新建、单条还是批量等偏好型细节必须按工作区证据和最小风险原则自行决定，写入 assumptions，不得放入 unresolvedQuestions。只有缺少凭证/验证码、对外收件人或发布账号、支付或受监管决定、不可逆数据操作授权、工作区本身时才允许提问。"
+      : "只有必须由用户本人决定且会实质改变目标或验收结果的问题才允许放入 unresolvedQuestions；可由执行 Agent 调查或按最佳判断决定的实现细节必须写入 assumptions。",
     "只能推荐候选清单中真实存在的 Skill 名称；多个 Skill 会实质改变结果时不要擅自选择，把歧义写入 unresolvedQuestions。",
     "Skill 输入只能来自用户原文、附件或工具验证过的工作区引用，不得编造；每个非默认输入都必须在 recommendedSkillInputEvidenceRefs 中列出对应证据。",
     "完成调查后只返回一个 JSON 对象，不要 Markdown 代码围栏或额外说明。",
@@ -449,6 +468,7 @@ function buildInvestigatorUserPrompt(
     investigationPolicy: {
       depth,
       readOnly: true,
+      autonomyMode: input.autonomyMode ?? "standard",
       evidenceRequiredForWorkspaceClaims: true,
     },
   });

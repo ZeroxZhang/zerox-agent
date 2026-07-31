@@ -269,7 +269,11 @@ describe("package scripts", () => {
             "P55-v3.8.1-model-provider-and-conversation-ux" ||
           featureId ===
             "P56-v3.8.1-thinking-control-and-empty-response-hotfix" ||
-          featureId === "P58-professional-planner-kernel-v2",
+          featureId === "P58-professional-planner-kernel-v2" ||
+          featureId ===
+            "P59-v3.8.1-autonomous-plan-and-renderer-crash-hotfix" ||
+          featureId ===
+            "P60-agent-interaction-chain-reliability-closure",
       ),
     ).toBe(true);
     expect(openFeatureIds.length).toBeLessThanOrEqual(1);

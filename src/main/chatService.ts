@@ -8,6 +8,11 @@ import { createChatAgentEvidenceRecorder } from "./chatAgentEvidence";
 import { createChatOutputAssembler } from "./chatOutputAssembler";
 import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
 import { runAgentLoop } from "./agentLoop";
+import { isMaxModeEnabled, type MaxMode } from "./providers/maxMode";
+import {
+  toChatCompletionResponse,
+  toCompleteRequest,
+} from "./providers/normalize";
 import { estimateMessageTokens } from "./contextManager";
 import type { CompactionStrategy } from "./kernel/compactionStrategy";
 import type { AppendChatMessageResult, ChatSessionStore } from "./chatSessionStore";
@@ -37,6 +42,7 @@ import type {
   ChatAgentStatus,
   ChatAttachmentInput,
   ChatAttachmentMetadata,
+  ChatHistoryMessage,
   ChatRelatedMemory,
   ChatSessionListItem,
   ChatSessionRecord,
@@ -56,6 +62,7 @@ import { getSystemPromptAssembler } from "../shared/agentProtocol";
 import type { GoalReviewDecision } from "../shared/agentGoalReview";
 import type { GoalDraft } from "../shared/goalTranslation";
 import type {
+  CreatePlanInput,
   PlanMode,
   PlanModelAssignments,
   PlanRecord,
@@ -136,6 +143,10 @@ type ChatContinuationState = {
   evidenceRunId?: string;
   /** v3.6.0: Creation timestamp for TTL-based eviction (CONC-08). */
   createdAt: number;
+};
+
+type PersistedChatContinuation = ChatContinuationState & {
+  version: 1;
 };
 
 type PendingSkillInputState = {
@@ -221,6 +232,7 @@ type ChatPlanService = {
     workspaceRoot?: string;
     sourceMessage: string;
     mode: PlanMode;
+    autonomyMode?: CreatePlanInput["autonomyMode"];
     modelAssignments?: PlanModelAssignments;
     signal?: AbortSignal;
   }): Promise<PlanRecord>;
@@ -229,6 +241,7 @@ type ChatPlanService = {
     planId: string,
     userInput: string,
     signal?: AbortSignal,
+    autonomyMode?: CreatePlanInput["autonomyMode"],
   ): Promise<
     | { ok: true; plan: PlanRecord; message: string }
     | { ok: false; message: string; plan?: PlanRecord }
@@ -282,6 +295,7 @@ export function createChatService(options: {
   historyIndexStore?: Pick<HistoryIndexStore, "append">;
   /** P2: overflow compaction strategy passed through to the chat agent loop. */
   compactionStrategy?: CompactionStrategy;
+  maxMode?: MaxMode;
 }): ChatService {
   const createId = options.createId ?? randomUUID;
   const memoryLimit = options.memoryLimit ?? 4;
@@ -435,6 +449,9 @@ export function createChatService(options: {
       persisted,
       selectedSkill: requestedSkill.skill,
       createdAtMs: getNowMs(options.now),
+      ...(persisted.attachmentPayloads?.length
+        ? { attachments: persisted.attachmentPayloads }
+        : {}),
       ...(workspaceResolution.runContext
         ? {
             runContext: {
@@ -463,6 +480,7 @@ export function createChatService(options: {
       pendingSkillInput: {
         ...pending.persisted,
         status: "completed",
+        attachmentPayloads: undefined,
       },
     });
     if (!record) {
@@ -476,7 +494,7 @@ export function createChatService(options: {
     internalOptions: ChatTurnInternalOptions = {},
   ): Promise<SendChatMessageResult> {
       if (runtimeOptions.signal?.aborted) {
-        return { ok: false, message: "已中断任务。" };
+        return { ok: false, code: "CANCELED", retryable: true, message: "已中断任务。" };
       }
       let processedAttachments;
       try {
@@ -496,7 +514,7 @@ export function createChatService(options: {
           ? "请分析这些附件。"
           : input.message;
       if (!userMessage.trim()) {
-        return { ok: false, message: "消息不能为空。" };
+        return { ok: false, code: "EMPTY_MESSAGE", message: "消息不能为空。" };
       }
       const modelUserMessage = appendChatAttachmentContext(
         userMessage,
@@ -550,9 +568,13 @@ export function createChatService(options: {
             // Observability writes must not fail the user-facing chat turn.
           }
         },
-        async onRequiredPersistEvent(event) {
-          await persistRequiredChatActivityEvent(options.chatSessionStore, event);
-        },
+        ...(options.chatSessionStore?.appendActivityEvent
+          ? {
+              async onRequiredPersistEvent(event: ChatTaskStatusEvent) {
+                await persistRequiredChatActivityEvent(options.chatSessionStore, event);
+              },
+            }
+          : {}),
       });
       const outputAssembler = createChatOutputAssembler(() =>
         new Date(getNowMs(options.now)).toISOString(),
@@ -602,6 +624,30 @@ export function createChatService(options: {
         emitStatus.sendTerminalEvent(event);
       }
 
+      const persistedRequestTurn =
+        input.sessionId && input.requestId && options.chatSessionStore?.get
+          ? await findPersistedRequestTurn(
+              options.chatSessionStore,
+              input.sessionId,
+              input.requestId,
+            )
+          : null;
+      if (persistedRequestTurn?.assistant) {
+        emitStatus.setAssistantMessageId(persistedRequestTurn.assistant.id);
+        emitTerminalStreamEvent({
+          type: "completed",
+          message: persistedRequestTurn.assistant.content,
+          finalMessageId: persistedRequestTurn.assistant.id,
+        });
+        return {
+          ok: true,
+          reply: persistedRequestTurn.assistant.content,
+          sessionId: input.sessionId!,
+          relatedMemories: [],
+          memoryId: null,
+        };
+      }
+
       async function persistAssistantReply(input: {
         content: string;
         relatedMemoryIds?: string[];
@@ -614,6 +660,7 @@ export function createChatService(options: {
         const assistantMessageId = await appendAssistantMessage({
           chatSessionStore: options.chatSessionStore,
           sessionId,
+          requestId,
           content: input.content,
           outputParts: finalizedOutput.outputParts,
           ...(input.relatedMemoryIds?.length
@@ -656,11 +703,17 @@ export function createChatService(options: {
         internalOptions.preResolvedWorkspaceSummary ??
         (chatRunContext ? buildChatWorkspaceSummary(chatRunContext) : input.workspaceSummary);
       let userMessageId: string | null = null;
+      let authoritativeHistory: ChatHistoryMessage[] | null = null;
       let activeGoal: ChatSessionGoalSummary | null = null;
-      if (options.chatSessionStore && !internalOptions.skipUserMessageAppend) {
+      if (
+        options.chatSessionStore &&
+        !internalOptions.skipUserMessageAppend &&
+        !persistedRequestTurn?.user
+      ) {
         const appendResult = await options.chatSessionStore.appendMessage({
           ...(input.sessionId ? { sessionId: input.sessionId } : {}),
           role: "user",
+          requestId,
           content: userMessage,
           ...(processedAttachments.metadata.length
             ? { attachments: processedAttachments.metadata }
@@ -673,7 +726,29 @@ export function createChatService(options: {
         sessionId = appendResult.session.id;
         emitStatus.setSessionId(sessionId);
         userMessageId = appendResult.message.id;
+        authoritativeHistory = appendResult.session.messages
+          .filter((message) => message.id !== userMessageId)
+          .map((message) => ({
+            role: message.role,
+            content: message.content,
+            ...(message.attachments?.length
+              ? { attachments: message.attachments }
+              : {}),
+          }));
         activeGoal = getActiveGoalSummary(appendResult.session);
+      } else if (persistedRequestTurn?.user && input.sessionId) {
+        sessionId = input.sessionId;
+        emitStatus.setSessionId(sessionId);
+        userMessageId = persistedRequestTurn.user.id;
+        authoritativeHistory = persistedRequestTurn.session.messages
+          .filter((message) => message.id !== persistedRequestTurn.user?.id)
+          .map((message) => ({
+            role: message.role,
+            content: message.content,
+            ...(message.attachments?.length
+              ? { attachments: message.attachments }
+              : {}),
+          }));
       } else if (internalOptions.skipUserMessageAppend) {
         userMessageId = internalOptions.userMessageId ?? null;
       }
@@ -781,6 +856,7 @@ export function createChatService(options: {
               inputRoutingPlan.id,
               modelUserMessage,
               runtimeOptions.signal,
+              input.planAutonomyMode,
             );
           } catch (error) {
             if (isAbortError(error, runtimeOptions.signal)) {
@@ -793,7 +869,7 @@ export function createChatService(options: {
                 type: "canceled",
                 message: "已中断任务。",
               });
-              return { ok: false, message: "已中断任务。" };
+              return { ok: false, code: "CANCELED", retryable: true, message: "已中断任务。" };
             }
             const message =
               error instanceof Error
@@ -855,25 +931,25 @@ export function createChatService(options: {
         }
       }
 
-      const pendingContinuation = pendingContinuations.get(sessionId);
-      // v3.6.0: TTL-based eviction for stale continuations (CONC-08).
-      // If a continuation has been pending for > 1 hour, clean it up.
-      const continuationTtlMs = 60 * 60 * 1000; // 1 hour
-      const isContinuationStale =
-        pendingContinuation &&
-        Date.now() - pendingContinuation.createdAt > continuationTtlMs;
-      if (isContinuationStale) {
-        pendingContinuations.delete(sessionId);
-      }
+      const pendingContinuation =
+        pendingContinuations.get(sessionId) ??
+        (await findPersistedChatContinuation({
+          sessionId,
+          chatSessionStore: options.chatSessionStore,
+        }));
       const continuationToResume =
         pendingContinuation &&
-        !isContinuationStale &&
         isContinuationRequest(userMessage)
           ? pendingContinuation
           : null;
 
       if (!continuationToResume && pendingContinuation) {
         pendingContinuations.delete(sessionId);
+        await emitStatus.sendRequired({
+          state: "checkpoint_boundary",
+          message: "新的用户指令已替代上一个暂停检查点。",
+          payload: { continuationCleared: true },
+        });
       }
 
       const requestedSkill = internalOptions.forcedSkill
@@ -938,6 +1014,9 @@ export function createChatService(options: {
             ...(processedAttachments.metadata.length
               ? { attachments: processedAttachments.metadata }
               : {}),
+            ...(processedAttachments.validatedInputs.length
+              ? { attachmentPayloads: processedAttachments.validatedInputs }
+              : {}),
           });
           try {
             await emitStatus.sendWaitingForInput(
@@ -969,6 +1048,7 @@ export function createChatService(options: {
           });
           return {
             ok: false,
+            code: "SKILL_INPUT_REQUIRED",
             message: "Skill input required.",
           };
         }
@@ -1000,6 +1080,7 @@ export function createChatService(options: {
         planService: options.planService,
         usePlanMode: input.mode === "goal_plan",
         planMode: input.planMode ?? "direct",
+        planAutonomyMode: input.planAutonomyMode,
         planModelAssignments: input.planModelAssignments,
         originMessageId: userMessageId,
         sessionId,
@@ -1171,7 +1252,10 @@ export function createChatService(options: {
         chatMessages = buildChatMessages({
           userMessage: modelUserMessage,
           images: processedAttachments.images,
-          history: input.history ?? [],
+          history:
+            authoritativeHistory?.length
+              ? authoritativeHistory
+              : input.history ?? authoritativeHistory ?? [],
           relatedMemoryResults,
           historyLimit,
           historyAttachmentReplayBudget:
@@ -1245,7 +1329,10 @@ export function createChatService(options: {
             createId,
             now: options.now,
           });
-          const toolDefinitions = toolExecutor.getRegistry().getDefinitions();
+          const toolDefinitions =
+            profile.modelCapabilities?.tools === false
+              ? []
+              : toolExecutor.getRegistry().getDefinitions();
           const runtimeContextSnapshot = createRuntimeContextSnapshotForRun({
             surface: "chat",
             runId: evidence.runId,
@@ -1344,10 +1431,33 @@ export function createChatService(options: {
               ...(options.compactionStrategy
                 ? { compactionStrategy: options.compactionStrategy }
                 : {}),
-              // maxTurns is retained as a legacy/checkpoint hint. Zerox no
-              // longer pauses a user task solely because that count is reached.
               pauseOnTurnLimit: false,
               pauseOnFailureLoop: true,
+              ...(options.maxMode && isMaxModeEnabled()
+                ? {
+                    modelRequestExecutor: async (request: import("./openAiCompatibleClient").ChatCompletionRequest) => {
+                      try {
+                        const result = await options.maxMode!.runStep(
+                          toCompleteRequest(request),
+                          {
+                            candidates: 3,
+                            judgeModel: profile.model,
+                            parentRunId: evidence.runId,
+                            ...(runtimeOptions.signal
+                              ? { signal: runtimeOptions.signal }
+                              : {}),
+                          },
+                        );
+                        return toChatCompletionResponse(result.winner, {
+                          provider: profile.providerId,
+                          model: profile.model,
+                        });
+                      } catch {
+                        return options.chatClient.complete(request);
+                      }
+                    },
+                  }
+                : {}),
               ...(continuationToResume
                 ? {
                     resumeMessages: chatMessages,
@@ -1624,6 +1734,8 @@ export function createChatService(options: {
             });
             return {
               ok: false,
+              code: "CANCELED",
+              retryable: true,
               message: "已中断任务。",
             };
           }
@@ -1659,7 +1771,7 @@ export function createChatService(options: {
                 }),
               );
             }
-            emitStatus.send({
+            await emitStatus.sendRequired({
               state: "paused",
               message:
                 loopResult.modelServiceNotice
@@ -1673,6 +1785,11 @@ export function createChatService(options: {
                   : "已到达检查点，等待确认",
               maxTurns: loopResult.continuation.maxTurns,
               toolCallsExecuted: finalToolCallsExecuted,
+              payload: {
+                chatContinuation: toPersistedChatContinuation(
+                  pendingContinuations.get(sessionId)!,
+                ),
+              },
             });
           } else if (loopResult.status === "failed") {
             pendingContinuations.delete(sessionId);
@@ -1716,6 +1833,8 @@ export function createChatService(options: {
             });
             return {
               ok: false,
+              code: "CANCELED",
+              retryable: true,
               message: "已中断任务。",
             };
           }
@@ -1794,7 +1913,7 @@ export function createChatService(options: {
                 message: notice.message,
               }),
             );
-            emitStatus.send({
+            await emitStatus.sendRequired({
               state: "paused",
               message:
                 notice.kind === "output_limit"
@@ -1802,6 +1921,11 @@ export function createChatService(options: {
                   : "模型服务返回限制，等待你重试",
               maxTurns: 1,
               toolCallsExecuted: 0,
+              payload: {
+                chatContinuation: toPersistedChatContinuation(
+                  pendingContinuations.get(sessionId)!,
+                ),
+              },
             });
           } else {
             pendingContinuations.delete(sessionId);
@@ -1823,6 +1947,8 @@ export function createChatService(options: {
             });
             return {
               ok: false,
+              code: "CANCELED",
+              retryable: true,
               message: "已中断任务。",
             };
           }
@@ -1855,11 +1981,16 @@ export function createChatService(options: {
                 message: notice.message,
               }),
             );
-            emitStatus.send({
+            await emitStatus.sendRequired({
               state: "paused",
               message: "模型服务返回限制，等待你重试",
               maxTurns: 1,
               toolCallsExecuted: 0,
+              payload: {
+                chatContinuation: toPersistedChatContinuation(
+                  pendingContinuations.get(sessionId)!,
+                ),
+              },
             });
           } else {
             emitStatus.send({
@@ -1879,6 +2010,18 @@ export function createChatService(options: {
             };
           }
         }
+      }
+
+      if (
+        continuationToResume &&
+        agentStatus?.state !== "paused"
+      ) {
+        pendingContinuations.delete(sessionId);
+        await emitStatus.sendRequired({
+          state: "checkpoint_boundary",
+          message: "暂停检查点已成功消费。",
+          payload: { continuationCleared: true },
+        });
       }
 
       const assistantMessageId = await persistAssistantReply({
@@ -1964,7 +2107,7 @@ export function createChatService(options: {
     try {
       const ready = await waitForTurnOrAbort(previous, runtimeOptions.signal);
       if (!ready) {
-        return { ok: false, message: "已中断任务。" };
+        return { ok: false, code: "CANCELED", retryable: true, message: "已中断任务。" };
       }
       return await executeMessageInternal(input, runtimeOptions, internalOptions);
     } finally {
@@ -1988,8 +2131,17 @@ export function createChatService(options: {
     if (!pending) {
       return {
         ok: false,
+        code: "UNKNOWN_SKILL_INPUT",
         message: "Unknown skill input request.",
       };
+    }
+    if (
+      !pending.attachments?.length &&
+      pending.persisted.attachmentPayloads?.length
+    ) {
+      pending.attachments = structuredClone(
+        pending.persisted.attachmentPayloads,
+      );
     }
     if (
       pending.persisted.attachments?.length &&
@@ -2004,7 +2156,11 @@ export function createChatService(options: {
         };
       }
       pendingSkillInputRequests.delete(input.inputRequestId);
-      return { ok: false, message: EXPIRED_PENDING_ATTACHMENT_MESSAGE };
+      return {
+        ok: false,
+        code: "ATTACHMENT_EXPIRED",
+        message: EXPIRED_PENDING_ATTACHMENT_MESSAGE,
+      };
     }
 
     const mergedValues = {
@@ -2040,6 +2196,9 @@ export function createChatService(options: {
         partialValues: inputResolution.values,
         ...(pending.persisted.attachments?.length
           ? { attachments: pending.persisted.attachments }
+          : {}),
+        ...(pending.attachments?.length
+          ? { attachmentPayloads: pending.attachments }
           : {}),
       });
       const emitStatus = createChatStatusEmitter({
@@ -2111,6 +2270,7 @@ export function createChatService(options: {
       });
       return {
         ok: false,
+        code: "SKILL_INPUT_REQUIRED",
         message: "Skill input required.",
       };
     }
@@ -2197,6 +2357,11 @@ function createChatStatusEmitter(options: {
   let assistantMessageId: string | undefined;
   let sequence = 0;
   const turnId = `turn-${options.requestId}`;
+  const bufferedTextEvents: Array<{
+    type: "answer_delta" | "thinking_delta";
+    text: string;
+  }> = [];
+  let textFlushTimer: ReturnType<typeof setTimeout> | undefined;
 
   function createStreamBase(createdAt: string) {
     return {
@@ -2213,10 +2378,10 @@ function createChatStatusEmitter(options: {
     event: Omit<ChatTaskStatusEvent, "sessionId" | "createdAt" | "elapsedMs">,
   ): ChatTaskStatusEvent {
     const nowMs = getNowMs(options.now);
+    const createdAt = new Date(nowMs).toISOString();
     return {
       ...event,
-      sessionId,
-      createdAt: new Date(nowMs).toISOString(),
+      ...createStreamBase(createdAt),
       elapsedMs: Math.max(0, nowMs - options.startedAtMs),
     };
   }
@@ -2225,6 +2390,7 @@ function createChatStatusEmitter(options: {
     statusEvent: ChatTaskStatusEvent,
     optionsOverride: { persist: boolean },
   ) {
+    flushBufferedTextEvents();
     if (optionsOverride.persist) {
       try {
         options.onPersistEvent?.(statusEvent);
@@ -2241,11 +2407,40 @@ function createChatStatusEmitter(options: {
       options.onStreamEvent?.({
         type: "status",
         status: statusEvent,
-        ...createStreamBase(statusEvent.createdAt),
+        sessionId: statusEvent.sessionId,
+        requestId: statusEvent.requestId ?? options.requestId,
+        sequence:
+          statusEvent.sequence ?? createStreamBase(statusEvent.createdAt).sequence,
+        turnId: statusEvent.turnId ?? turnId,
+        ...(assistantMessageId ? { assistantMessageId } : {}),
+        createdAt: statusEvent.createdAt,
       });
     } catch {
       // Renderer observers are best-effort.
     }
+  }
+
+  function flushBufferedTextEvents() {
+    if (textFlushTimer) {
+      clearTimeout(textFlushTimer);
+      textFlushTimer = undefined;
+    }
+    for (const event of bufferedTextEvents.splice(0)) {
+      const nowMs = getNowMs(options.now);
+      try {
+        options.onStreamEvent?.({
+          ...event,
+          ...createStreamBase(new Date(nowMs).toISOString()),
+        });
+      } catch {
+        // Renderer observers are best-effort.
+      }
+    }
+  }
+
+  function scheduleTextFlush() {
+    if (textFlushTimer) return;
+    textFlushTimer = setTimeout(flushBufferedTextEvents, 16);
   }
 
   return {
@@ -2271,7 +2466,15 @@ function createChatStatusEmitter(options: {
         throw new Error("Chat activity persistence is unavailable.");
       }
       await options.onRequiredPersistEvent(statusEvent);
-      publishStatusEvent(statusEvent, { persist: false });
+      publishStatusEvent(
+        {
+          ...statusEvent,
+          pendingSkillInput: statusEvent.pendingSkillInput
+            ? { ...statusEvent.pendingSkillInput, attachmentPayloads: undefined }
+            : undefined,
+        },
+        { persist: false },
+      );
       const nowMs = getNowMs(options.now);
       try {
         options.onStreamEvent?.({
@@ -2283,10 +2486,36 @@ function createChatStatusEmitter(options: {
         // Renderer observers are best-effort.
       }
     },
+    async sendRequired(
+      event: Omit<ChatTaskStatusEvent, "sessionId" | "createdAt" | "elapsedMs">,
+    ) {
+      const statusEvent = createStatusEvent(event);
+      if (!options.onRequiredPersistEvent) {
+        publishStatusEvent(statusEvent, { persist: true });
+        return;
+      }
+      await options.onRequiredPersistEvent(statusEvent);
+      publishStatusEvent(statusEvent, { persist: false });
+    },
     setAssistantMessageId(nextAssistantMessageId: string | null | undefined) {
       assistantMessageId = nextAssistantMessageId ?? undefined;
     },
     sendStreamEvent(event: ChatModelStreamEventInput) {
+      if (event.type === "answer_delta") {
+        const previous = bufferedTextEvents.at(-1);
+        if (previous?.type === event.type) previous.text += event.text;
+        else bufferedTextEvents.push({ ...event });
+        scheduleTextFlush();
+        return;
+      }
+      if (event.type === "thinking_delta") {
+        const previous = bufferedTextEvents.at(-1);
+        if (previous?.type === event.type) previous.text += event.text;
+        else bufferedTextEvents.push({ ...event });
+        scheduleTextFlush();
+        return;
+      }
+      flushBufferedTextEvents();
       const nowMs = getNowMs(options.now);
       try {
         options.onStreamEvent?.({
@@ -2302,6 +2531,7 @@ function createChatStatusEmitter(options: {
       message?: string;
       finalMessageId?: string;
     }) {
+      flushBufferedTextEvents();
       if (event.finalMessageId) {
         assistantMessageId = event.finalMessageId;
       }
@@ -3205,6 +3435,7 @@ async function tryRouteGoalIntent(options: {
   planService: ChatPlanService | undefined;
   usePlanMode: boolean;
   planMode: PlanMode;
+  planAutonomyMode?: CreatePlanInput["autonomyMode"];
   planModelAssignments?: PlanModelAssignments;
   originMessageId: string | null;
   sessionId: string;
@@ -3272,6 +3503,9 @@ async function tryRouteGoalIntent(options: {
             ? { selectedSkill: options.selectedSkill }
             : {}),
           mode: options.planMode,
+          ...(options.planAutonomyMode
+            ? { autonomyMode: options.planAutonomyMode }
+            : {}),
           ...(options.planModelAssignments
             ? { modelAssignments: options.planModelAssignments }
             : {}),
@@ -3315,17 +3549,27 @@ async function tryRouteGoalIntent(options: {
           },
         };
       }
+      const failedPlanningStage = [...(plan.planningStages ?? [])]
+        .reverse()
+        .find((stage) => stage.status === "failed");
+      const pauseReason =
+        plan.finalArtifact?.gateReason ??
+        [...plan.rounds].reverse().find((round) => round.status === "failed")
+          ?.error ??
+        failedPlanningStage?.error;
       const reply =
         plan.status === "awaiting_confirmation"
           ? `已生成${plan.mode === "debate" ? "辩论" : "直接"}计划：${plan.finalArtifact?.title ?? plan.taskContract.objective}。确认前不会执行任何任务。`
-          : `计划已暂停：${plan.finalArtifact?.gateReason ?? plan.rounds.find((round) => round.status === "failed")?.error ?? "需要补充信息或重试失败轮次"}。`;
+          : `计划未完成：${pauseReason ?? "模型服务未返回可用结果"}。请在计划卡片中重试失败阶段；已收集的调查证据会保留。`;
       options.emitStatus?.send({
         state:
           plan.status === "awaiting_confirmation" ? "completed" : "paused",
         message:
           plan.status === "awaiting_confirmation"
             ? "计划已生成，等待确认"
-            : "计划未通过执行门禁",
+            : pauseReason
+              ? `规划未完成：${pauseReason}`
+              : "规划未完成，可在计划卡片中重试",
         toolCallsExecuted: 0,
       });
       await appendGoalReply({
@@ -3674,6 +3918,7 @@ function buildContinuationMessages(options: {
 async function appendAssistantMessage(options: {
   chatSessionStore: Pick<ChatSessionStore, "appendMessage"> | undefined;
   sessionId: string;
+  requestId?: string;
   content: string;
   outputParts?: ChatOutputPart[];
   relatedMemoryIds?: string[];
@@ -3688,6 +3933,7 @@ async function appendAssistantMessage(options: {
   const appendResult: AppendChatMessageResult =
     await options.chatSessionStore.appendMessage({
       sessionId: options.sessionId,
+      ...(options.requestId ? { requestId: options.requestId } : {}),
       role: "assistant",
       content: options.content,
       ...(options.outputParts?.length ? { outputParts: options.outputParts } : {}),
@@ -3905,6 +4151,7 @@ function createPendingSkillInputState(options: {
   workspaceSummary?: ChatWorkspaceSummary;
   partialValues: Record<string, SkillInputValue>;
   attachments?: ChatAttachmentMetadata[];
+  attachmentPayloads?: ChatAttachmentInput[];
 }): SkillPendingInputState {
   return {
     inputRequestId: options.inputRequest.id,
@@ -3918,6 +4165,9 @@ function createPendingSkillInputState(options: {
     ...(options.workspaceSummary ? { workspaceSummary: options.workspaceSummary } : {}),
     partialValues: options.partialValues,
     ...(options.attachments?.length ? { attachments: options.attachments } : {}),
+    ...(options.attachmentPayloads?.length
+      ? { attachmentPayloads: options.attachmentPayloads }
+      : {}),
   };
 }
 
@@ -3973,6 +4223,128 @@ async function findPersistedPendingSkillInputState(options: {
   }
 
   return latest?.status === "pending" ? latest : null;
+}
+
+function toPersistedChatContinuation(
+  continuation: ChatContinuationState,
+): PersistedChatContinuation {
+  return {
+    version: 1,
+    messages: structuredClone(continuation.messages),
+    maxTurns: continuation.maxTurns,
+    toolCallsExecuted: continuation.toolCallsExecuted,
+    ...(continuation.evidenceRunId
+      ? { evidenceRunId: continuation.evidenceRunId }
+      : {}),
+    createdAt: continuation.createdAt,
+  };
+}
+
+async function findPersistedChatContinuation(options: {
+  sessionId: string;
+  chatSessionStore:
+    | Partial<Pick<ChatSessionStore, "get">>
+    | undefined;
+}): Promise<ChatContinuationState | null> {
+  if (!options.chatSessionStore?.get) {
+    return null;
+  }
+  const record = await options.chatSessionStore.get(options.sessionId);
+  const events = record?.activity?.statusEvents ?? [];
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    const continuation = parsePersistedChatContinuation(
+      event.payload?.chatContinuation,
+    );
+    if (continuation) {
+      return continuation;
+    }
+    if (
+      event.payload?.continuationCleared === true ||
+      event.state === "started" ||
+      event.state === "completed" ||
+      event.state === "failed" ||
+      event.state === "canceled"
+    ) {
+      return null;
+    }
+  }
+  return null;
+}
+
+async function findPersistedRequestTurn(
+  chatSessionStore: Partial<Pick<ChatSessionStore, "get">>,
+  sessionId: string,
+  requestId: string,
+): Promise<{
+  session: ChatSessionRecord;
+  user: ChatSessionRecord["messages"][number] | null;
+  assistant: ChatSessionRecord["messages"][number] | null;
+} | null> {
+  if (!chatSessionStore.get) {
+    return null;
+  }
+  const session = await chatSessionStore.get(sessionId);
+  if (!session) {
+    return null;
+  }
+  const requestMessages = session.messages.filter(
+    (message) => message.requestId === requestId,
+  );
+  const user = requestMessages.find((message) => message.role === "user") ?? null;
+  const assistant =
+    [...requestMessages].reverse().find((message) => message.role === "assistant") ?? null;
+  return user || assistant ? { session, user, assistant } : null;
+}
+
+function parsePersistedChatContinuation(value: unknown): ChatContinuationState | null {
+  if (!isObjectRecord(value) || value.version !== 1) {
+    return null;
+  }
+  if (
+    !Array.isArray(value.messages) ||
+    !value.messages.every(isPersistedChatMessage) ||
+    !isPositiveInteger(value.maxTurns) ||
+    !isNonNegativeInteger(value.toolCallsExecuted) ||
+    typeof value.createdAt !== "number" ||
+    !Number.isFinite(value.createdAt)
+  ) {
+    return null;
+  }
+  return {
+    messages: structuredClone(value.messages),
+    maxTurns: value.maxTurns,
+    toolCallsExecuted: value.toolCallsExecuted,
+    ...(typeof value.evidenceRunId === "string" && value.evidenceRunId
+      ? { evidenceRunId: value.evidenceRunId }
+      : {}),
+    createdAt: value.createdAt,
+  };
+}
+
+function isPersistedChatMessage(value: unknown): value is ChatMessage {
+  if (!isObjectRecord(value)) {
+    return false;
+  }
+  return (
+    (value.role === "system" ||
+      value.role === "user" ||
+      value.role === "assistant" ||
+      value.role === "tool") &&
+    typeof value.content === "string"
+  );
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
 
 async function persistRequiredChatActivityEvent(

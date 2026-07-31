@@ -308,6 +308,11 @@ async function* parseAnthropicStream(res: Response): AsyncIterable<StreamEvent> 
   const decoder = new TextDecoder();
   let buffer = "";
   const acc = { text: "", thinking: "", finish: "stop", cacheRead: 0, cacheWrite: 0 };
+  const toolCalls = new Map<
+    number,
+    { id: string; name: string; arguments: string }
+  >();
+  let doneEmitted = false;
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
@@ -319,14 +324,66 @@ async function* parseAnthropicStream(res: Response): AsyncIterable<StreamEvent> 
       const payload = line.slice(5).trim();
       if (!payload) continue;
       let evt: Record<string, unknown>;
-      try { evt = JSON.parse(payload); } catch { continue; }
+      try {
+        evt = JSON.parse(payload) as Record<string, unknown>;
+      } catch {
+        yield {
+          type: "error",
+          error: new Error("Anthropic stream returned malformed JSON."),
+        };
+        return;
+      }
       const t = evt.type as string;
-      if (t === "content_block_delta") {
+      if (t === "content_block_start") {
+        const index = normalizeAnthropicBlockIndex(evt.index);
+        const block = evt.content_block as Record<string, unknown> | undefined;
+        if (index !== undefined && block?.type === "tool_use") {
+          const id = typeof block.id === "string" ? block.id.trim() : "";
+          const name = typeof block.name === "string" ? block.name.trim() : "";
+          if (!id || !name) {
+            yield {
+              type: "error",
+              error: new Error(
+                "Anthropic tool stream started without a valid tool id and name.",
+              ),
+            };
+            return;
+          }
+          toolCalls.set(index, { id, name, arguments: "" });
+          yield {
+            type: "tool_call_delta",
+            toolCallId: id,
+            index,
+            name,
+            argumentsDelta: "",
+          };
+        }
+      } else if (t === "content_block_delta") {
         const delta = evt.delta as Record<string, unknown>;
         if (delta.type === "text_delta") { acc.text += delta.text; yield { type: "text_delta", text: delta.text as string }; }
         else if (delta.type === "thinking_delta") { acc.thinking += delta.thinking; yield { type: "thinking_delta", text: delta.thinking as string }; }
         else if (delta.type === "input_json_delta") {
-          yield { type: "tool_call_delta", toolCallId: String(evt.index ?? ""), argumentsDelta: delta.partial_json as string };
+          const index = normalizeAnthropicBlockIndex(evt.index);
+          const toolCall = index === undefined ? undefined : toolCalls.get(index);
+          if (index === undefined || !toolCall) {
+            yield {
+              type: "error",
+              error: new Error(
+                "Anthropic tool arguments arrived before the matching tool start event.",
+              ),
+            };
+            return;
+          }
+          const argumentsDelta =
+            typeof delta.partial_json === "string" ? delta.partial_json : "";
+          toolCall.arguments += argumentsDelta;
+          yield {
+            type: "tool_call_delta",
+            toolCallId: toolCall.id,
+            index,
+            name: toolCall.name,
+            argumentsDelta,
+          };
         }
       } else if (t === "message_delta") {
         const d = evt.delta as Record<string, unknown>;
@@ -335,10 +392,38 @@ async function* parseAnthropicStream(res: Response): AsyncIterable<StreamEvent> 
         if (usage?.cache_read_input_tokens) acc.cacheRead = usage.cache_read_input_tokens as number;
         if (usage?.cache_creation_input_tokens) acc.cacheWrite = usage.cache_creation_input_tokens as number;
       } else if (t === "message_stop") {
-        yield { type: "done", response: { content: acc.text || null, toolCalls: [], finishReason: acc.finish, cacheReadTokens: acc.cacheRead, cacheWriteTokens: acc.cacheWrite } };
+        doneEmitted = true;
+        yield {
+          type: "done",
+          response: {
+            content: acc.text || null,
+            toolCalls: [...toolCalls.values()].map((toolCall) => ({
+              id: toolCall.id,
+              type: "function" as const,
+              function: {
+                name: toolCall.name,
+                arguments: toolCall.arguments || "{}",
+              },
+            })),
+            finishReason: acc.finish,
+            cacheReadTokens: acc.cacheRead,
+            cacheWriteTokens: acc.cacheWrite,
+          },
+        };
       }
     }
   }
+  if (!doneEmitted) {
+    yield {
+      type: "error",
+      error: new Error("Anthropic stream ended before message_stop."),
+    };
+  }
+}
+
+function normalizeAnthropicBlockIndex(value: unknown): number | undefined {
+  const index = typeof value === "number" ? value : Number(value);
+  return Number.isInteger(index) && index >= 0 ? index : undefined;
 }
 
 function heuristicCount(messages: NormalizedMessage[], system?: string, tools?: ToolDefinition[]): number {

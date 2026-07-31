@@ -7,6 +7,8 @@ import {
 import type { ChatStreamEvent, SkillUserInputRequest } from "../shared/chat";
 import type { ChatOutputPart } from "../shared/chatOutput";
 
+let nextSequence = 0;
+
 describe("chat stream reducer", () => {
   it("streams answer deltas into one assistant placeholder and finalizes without a duplicate reply", () => {
     let state = createChatStreamState([
@@ -223,9 +225,9 @@ describe("chat stream reducer", () => {
 
     expect(state.messages[0]?.content).toBe("Answer first.\nDo not trim.  ");
     expect(state.messages[0]?.outputParts?.map((part) => part.type)).toEqual([
-      "text",
       "tool_call",
       "tool_result",
+      "text",
     ]);
   });
 
@@ -304,7 +306,7 @@ function createStreamEvent(
     ...event,
     sessionId: "session_1",
     requestId: "request_1",
-    sequence: 1,
+    sequence: ++nextSequence,
     turnId: "turn-request_1",
     createdAt: "2026-06-23T08:00:00.000Z",
   } as ChatStreamEvent;

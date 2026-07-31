@@ -402,10 +402,18 @@ function preserveCanonicalAcceptance(
     return incoming;
   }
 
-  const acceptanceState = mergeAcceptanceState(
-    existing.acceptanceState,
-    incoming.acceptanceState,
-  );
+  const isExplicitTerminalRecovery =
+    (existing.status === "stopped_stalled" || existing.status === "failed") &&
+    incoming.status === "executing" &&
+    incoming.acceptanceState?.phase === "idle" &&
+    incoming.acceptanceState.recentFailures.length === 0 &&
+    !incoming.acceptanceState.lastDecision;
+  const acceptanceState = isExplicitTerminalRecovery
+    ? incoming.acceptanceState
+    : mergeAcceptanceState(
+        existing.acceptanceState,
+        incoming.acceptanceState,
+      );
 
   const candidate: Goal = {
     ...incoming,

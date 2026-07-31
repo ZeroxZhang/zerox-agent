@@ -410,11 +410,11 @@ export async function runAgentLoop(
     await compactMessagesBeforeModelRequest();
 
     try {
-      const response = await completeModelRequest({
+      const response = await raceWithCancellation(completeModelRequest({
         ...modelProfile,
         messages: [...messages],
         ...(signal ? { signal } : {}),
-      }, turns + 1);
+      }, turns + 1), signal);
 
       recordModelResponseTokens(response);
 
@@ -532,13 +532,13 @@ export async function runAgentLoop(
       });
       await compactMessagesBeforeModelRequest();
 
-      const response = await completeModelRequest({
+      const response = await raceWithCancellation(completeModelRequest({
         ...modelProfile,
         messages: [...messages],
         tools: toolDefinitions,
         tool_choice: "auto",
         ...(signal ? { signal } : {}),
-      }, turns + 1);
+      }, turns + 1), signal);
       onModelResponse?.(response, turns + 1);
       if (response.reasoningContent) {
         onReasoning?.(response.reasoningContent, turns + 1);
@@ -832,13 +832,16 @@ export async function runAgentLoop(
           transitionInvocation({ status: "running" });
 
           // Execute tool
-          const result = await toolExecutor.execute({
+          const result = await raceWithCancellation(toolExecutor.execute({
             toolName: toolName as never,
             ...(registeredToolSource ? { source: registeredToolSource } : {}),
             args,
           }, {
             ...(signal ? { signal } : {}),
             ...(runContext ? { runContext } : {}),
+            ...(toolName === "shell_exec"
+              ? { authorizedShellCommand: String(args.command ?? "") }
+              : {}),
             onRuntimeEvent(runtimeEvent) {
               onToolRuntimeEvent?.(toolName, runtimeEvent, toolEventBase);
             },
@@ -848,7 +851,7 @@ export async function runAgentLoop(
               ...(requestId ? { requestId } : {}),
               ...(workspaceRunId ? { workspaceRunId } : {}),
             },
-          });
+          }), signal);
 
           toolCallsExecuted += 1;
           const strategyGuardEvent = recordToolStrategySignals(toolName);
@@ -1081,6 +1084,39 @@ function isStreamingChatClient(
   client: ChatClient,
 ): client is ChatClient & StreamingChatClient {
   return typeof (client as { streamComplete?: unknown }).streamComplete === "function";
+}
+
+async function raceWithCancellation<T>(
+  promise: Promise<T>,
+  signal: AbortSignal | undefined,
+): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) {
+    void promise.catch(() => undefined);
+    throw signal.reason instanceof Error
+      ? signal.reason
+      : new Error("Agent loop canceled.");
+  }
+
+  let abortHandler: (() => void) | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        abortHandler = () => {
+          void promise.catch(() => undefined);
+          reject(
+            signal.reason instanceof Error
+              ? signal.reason
+              : new Error("Agent loop canceled."),
+          );
+        };
+        signal.addEventListener("abort", abortHandler, { once: true });
+      }),
+    ]);
+  } finally {
+    if (abortHandler) signal.removeEventListener("abort", abortHandler);
+  }
 }
 
 function throwIfCanceled(signal: AbortSignal | undefined) {

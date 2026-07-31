@@ -1389,6 +1389,43 @@ describe("app container goal drafts", () => {
     });
   });
 
+  it("restores a legacy failed goal as the active recoverable goal", async () => {
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const session = await container.chatSessionStore().appendMessage({
+      role: "user",
+      content: "/目标 回复 smoke 短句",
+    });
+    const goal = createStoredGoal({
+      id: "goal_legacy_failed_recovery",
+      chatSessionId: session.session.id,
+      status: "failed",
+      stopReason: "unrecoverable_failure",
+    });
+
+    await container.agentGoalStore().save(goal);
+    await container.chatSessionStore().attachGoal(session.session.id, {
+      id: goal.id,
+      description: goal.description,
+      status: goal.status,
+    });
+    await container.chatSessionStore().clearActiveGoal(session.session.id, goal.id);
+
+    const listedSession = (await container.listChatSessions()).find(
+      (item) => item.id === session.session.id,
+    );
+    expect(listedSession?.activeGoal).toMatchObject({
+      id: goal.id,
+      status: "failed",
+    });
+
+    const loadedSession = await container.getChatSession(session.session.id);
+    expect(loadedSession?.activeGoalId).toBe(goal.id);
+  });
+
   it("projects chat session details for the renderer without dropping stored audit output", async () => {
     const container = createAppContainer({
       async requestToolApproval() {
@@ -1728,6 +1765,148 @@ describe("app container goal drafts", () => {
     );
   });
 
+  it("runs final acceptance with the Goal's frozen model when no default chat profile exists", async () => {
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const connection = await container.modelSettingsStore.saveConnection({
+      name: "Bound final judge",
+      providerKind: "deepseek",
+      credentialSource: "stored",
+      values: {
+        apiKey: "bound-judge-secret",
+        baseUrl: "https://bound-judge.test/v1",
+      },
+    });
+    expect(connection.ok).toBe(true);
+    if (!connection.ok) return;
+    expect(connection.catalog.defaultChatProfileId).toBeNull();
+    const profile = connection.catalog.profiles.find(
+      (candidate) => candidate.connectionId === connection.connection.id,
+    );
+    expect(profile).toBeDefined();
+    if (!profile) return;
+    const resolved = await container.modelSettingsStore.resolveProfile(profile.id);
+    const goal: Goal = {
+      ...createStoredGoal({
+        id: "goal_bound_final_judge",
+        chatSessionId: "chat_bound_final_judge",
+        status: "waiting_for_acceptance",
+        acceptanceProtocolVersion: 2,
+        acceptanceState: {
+          protocolVersion: 2,
+          phase: "awaiting_user",
+          attempt: 1,
+          recentFailures: [],
+        },
+        successCriteria: [{
+          id: "criterion_bound_final_judge",
+          description: "The completed work passes final review.",
+          acceptanceChecks: [{
+            id: "check_bound_final_judge",
+            kind: "model_review",
+            description: "The bound model reviews final evidence.",
+            params: { evidenceRefs: ["evidence:final"] },
+            requiresEvidence: true,
+          }],
+        }],
+        milestones: [{
+          id: "milestone_done",
+          description: "Work already completed.",
+          dependsOn: [],
+          successCriteria: [],
+          state: "accepted",
+          runIds: ["run_done"],
+          attempts: 1,
+        }],
+      }),
+      executionModelBinding: resolved.binding,
+    };
+    const initial = await container.agentGoalAcceptance().evaluateGoal(goal, {
+      runId: "run_seed_bound_final_judge",
+      goalId: goal.id,
+      workspacePath: tempDir,
+      toolExecutor: {
+        async execute() {
+          throw new Error("final judge seed must not execute tools");
+        },
+      },
+      trajectoryStore: {
+        async append(_runId, event) {
+          return event;
+        },
+      },
+      chatClient: {
+        async complete() {
+          throw Object.assign(new Error("seed unavailable"), { status: 503 });
+        },
+      },
+      modelProfile: {
+        baseUrl: "https://seed.invalid/v1",
+        apiKey: "seed-secret",
+        model: resolved.binding.modelId,
+        providerId: "deepseek",
+        temperature: 0,
+        maxTokens: 1024,
+      },
+      artifacts: {},
+    });
+    expect(initial.finalJudgeReplay).toBeDefined();
+    if (!initial.finalJudgeReplay) return;
+    goal.acceptanceRetryState = {
+      cycle: 1,
+      attempt: 1,
+      maxAttempts: 3,
+      lastCode: "provider_unavailable",
+      lastDetail: "Final judge provider is unavailable.",
+      evidenceFingerprint: "a".repeat(64),
+      finalJudgeReplay: initial.finalJudgeReplay,
+      resumeFrom: "final_judge",
+    };
+    const persistedGoal = await container.agentGoalStore().save(goal);
+    expect(persistedGoal.acceptanceRetryState?.finalJudgeReplay).toBeDefined();
+    expect(await container.agentGoalStore().get(goal.id)).toMatchObject({
+      status: "waiting_for_acceptance",
+      milestones: [{ state: "accepted" }],
+      acceptanceRetryState: {
+        resumeFrom: "final_judge",
+        finalJudgeReplay: { version: 1 },
+      },
+    });
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input, init) => {
+        expect(String(input)).toBe("https://bound-judge.test/v1/chat/completions");
+        const body = JSON.parse(String(init?.body)) as { model?: string };
+        expect(body.model).toBe(resolved.binding.modelId);
+        return new Response(JSON.stringify({
+          choices: [{
+            message: {
+              content: JSON.stringify({
+                verdict: "accepted",
+                reason: "The supplied goal evidence confirms completion.",
+                evidenceRefs: ["evidence:final"],
+              }),
+            },
+            finish_reason: "stop",
+          }],
+        }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    );
+    try {
+      const result = await container.agentGoalController().continueAcceptance(goal.id);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(["achieved", "waiting_for_acceptance"]).toContain(result.status);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
   it("confirms a ready plan exactly once and links repeated confirmations to the same Goal", async () => {
     const container = createAppContainer({
       async requestToolApproval() {
@@ -1852,7 +2031,9 @@ describe("app container goal drafts", () => {
     if (!repeated.ok) return;
     expect(repeated.activeGoal.id).toBe(first.activeGoal.id);
     expect(repeated.plan.executionGoalId).toBe(first.activeGoal.id);
-    expect(repeated.plan.status).toBe("executing");
+    expect(repeated.plan.status).toBe(
+      expectedPlanStatusForGoal(repeated.activeGoal.status),
+    );
     expect(
       (
         await container.chatSessionStore().get(basePlan.sessionId)
@@ -1877,19 +2058,9 @@ describe("app container goal drafts", () => {
     if (!recovered.ok) return;
     expect(recovered.plan.executionGoalId).toBe(first.activeGoal.id);
     expect(recovered.activeGoal.id).toBe(first.activeGoal.id);
-    const expectedRecoveredPlanStatus =
-      recovered.activeGoal.status === "achieved" ||
-      recovered.activeGoal.status === "completed_unverified"
-        ? "completed"
-        : recovered.activeGoal.status === "canceled"
-          ? "canceled"
-          : recovered.activeGoal.status === "failed" ||
-              recovered.activeGoal.status === "stopped_budget" ||
-              recovered.activeGoal.status === "stopped_stalled" ||
-              recovered.activeGoal.status === "stopped_blocked"
-            ? "failed"
-            : "executing";
-    expect(recovered.plan.status).toBe(expectedRecoveredPlanStatus);
+    expect(recovered.plan.status).toBe(
+      expectedPlanStatusForGoal(recovered.activeGoal.status),
+    );
     const linkedPlan = await container.planStore().get(basePlan.id);
     expect(linkedPlan).not.toBeNull();
     const failedPlan = await container.planStore().save(
@@ -2349,6 +2520,26 @@ async function listGitBranches(repositoryRoot: string): Promise<string[]> {
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
+}
+
+function expectedPlanStatusForGoal(
+  status: Goal["status"],
+): PlanRecord["status"] {
+  if (status === "achieved" || status === "completed_unverified") {
+    return "completed";
+  }
+  if (status === "canceled") {
+    return "canceled";
+  }
+  if (
+    status === "failed" ||
+    status === "stopped_budget" ||
+    status === "stopped_stalled" ||
+    status === "stopped_blocked"
+  ) {
+    return "failed";
+  }
+  return "executing";
 }
 
 function createStoredGoal(

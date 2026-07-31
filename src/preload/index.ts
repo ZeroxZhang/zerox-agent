@@ -84,6 +84,7 @@ import type {
 import type {
   ConfirmPlanInput,
   ConfirmPlanResult,
+  PlanAutonomyMode,
   PlanOperationResult,
   PlanRecord,
 } from "../shared/planMode";
@@ -142,6 +143,14 @@ const KERNEL_IPC = {
   resumeRun: "kernel:resumeRun",
   updatePermissionRules: "kernel:updatePermissionRules",
   respondPermission: "kernel:respondPermission",
+} as const;
+
+const CHAT_IPC = {
+  sendMessage: "chat:sendMessage",
+  cancelMessage: "chat:cancelMessage",
+  respondSkillInput: "chat:respondSkillInput",
+  statusEvent: "chat:statusEvent",
+  streamEvent: "chat:streamEvent",
 } as const;
 
 export type AgentRunsChangedEvent = {
@@ -400,11 +409,13 @@ const buildingAgent = {
   retryFailedPlanRound: (
     planId: string,
     replacementProfileId?: string,
+    autonomyMode?: PlanAutonomyMode,
   ): Promise<PlanOperationResult> =>
     ipcRenderer.invoke(
       "plans:retryFailedRound",
       planId,
       replacementProfileId,
+      autonomyMode,
     ),
   discardPlan: (
     planId: string,
@@ -517,33 +528,33 @@ const buildingAgent = {
   sendChatMessage: (
     input: SendChatMessageInput,
   ): Promise<SendChatMessageResult> =>
-    ipcRenderer.invoke("chat:sendMessage", input),
+    ipcRenderer.invoke(CHAT_IPC.sendMessage, input),
   cancelChatMessage: (
-    requestId?: string,
+    requestId: string,
   ): Promise<CancelChatMessageResult> =>
-    ipcRenderer.invoke("chat:cancelMessage", requestId),
+    ipcRenderer.invoke(CHAT_IPC.cancelMessage, requestId),
   onChatStreamEvent: (callback: (event: ChatStreamEvent) => void) => {
     const handler = (
       _event: Electron.IpcRendererEvent,
       data: ChatStreamEvent,
     ) => callback(data);
-    ipcRenderer.on("chat:streamEvent", handler);
+    ipcRenderer.on(CHAT_IPC.streamEvent, handler);
     return () => {
-      ipcRenderer.removeListener("chat:streamEvent", handler);
+      ipcRenderer.removeListener(CHAT_IPC.streamEvent, handler);
     };
   },
   respondSkillInput: (
     input: SkillInputResponse,
   ): Promise<SkillInputResponseResult> =>
-    ipcRenderer.invoke("chat:respondSkillInput", input),
+    ipcRenderer.invoke(CHAT_IPC.respondSkillInput, input),
   onChatTaskStatusEvent: (callback: (event: ChatTaskStatusEvent) => void) => {
     const handler = (
       _event: Electron.IpcRendererEvent,
       data: ChatTaskStatusEvent,
     ) => callback(data);
-    ipcRenderer.on("chat:statusEvent", handler);
+    ipcRenderer.on(CHAT_IPC.statusEvent, handler);
     return () => {
-      ipcRenderer.removeListener("chat:statusEvent", handler);
+      ipcRenderer.removeListener(CHAT_IPC.statusEvent, handler);
     };
   },
   onGoalProgressEvent: (callback: (event: GoalProgressEvent) => void) => {

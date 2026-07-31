@@ -979,7 +979,25 @@ describe("model settings store", () => {
         message: "passed",
       },
     );
-    expect(profileVerified.ok).toBe(true);
+    expect(profileVerified).toMatchObject({
+      ok: true,
+      catalog: { defaultChatProfileId: profile.id },
+    });
+    await expect(store.setDefaultProfile("chat", null)).resolves.toMatchObject({
+      ok: true,
+      catalog: { defaultChatProfileId: null },
+    });
+    // A stale or interrupted default selection must not make the visible
+    // catalog claim that no configured model exists.
+    await expect(store.loadCatalog()).resolves.toMatchObject({
+      defaultChatProfileId: profile.id,
+    });
+    await expect(store.resolveProfile()).resolves.toMatchObject({
+      binding: { profileId: profile.id },
+    });
+    await expect(store.loadCatalog()).resolves.toMatchObject({
+      defaultChatProfileId: profile.id,
+    });
     await expect(
       store.setDefaultProfile("chat", profile.id),
     ).resolves.toMatchObject({ ok: true });

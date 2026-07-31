@@ -1,7 +1,283 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-07-31T16:56:55.000+08:00",
+  "updatedAt": "2026-07-31T21:50:00.000+08:00",
   "features": [
+    {
+      "id": "P65-plan-quality-compatibility-and-model-default-recovery",
+      "priority": 95,
+      "status": "done",
+      "title": "Recover compatible Plan quality gates and verified default model profiles",
+      "files": [
+        ".zerox/feature_list.json",
+        ".zerox/progress.md",
+        "src/shared/acceptanceCommand.ts",
+        "src/main/acceptanceContractValidator.ts",
+        "src/main/acceptanceContractValidator.test.ts",
+        "src/main/agentGoalAcceptance.ts",
+        "src/main/agentGoalAcceptance.test.ts",
+        "src/main/plannerKernel.ts",
+        "src/main/planDebateOrchestrator.ts",
+        "src/main/planDebateOrchestrator.test.ts",
+        "src/main/modelSettingsStore.ts",
+        "src/main/modelSettingsStore.test.ts"
+      ],
+      "definitionOfDone": [
+        "Quoted program comparisons in deterministic acceptance commands are not mistaken for Shell syntax, while executable Shell redirection and control syntax remain blocked",
+        "Legacy planner capability labels normalize to registered tool names at both model-ingest and persisted-plan retry boundaries",
+        "Re-running a failed quality gate rechecks a persisted artifact locally instead of spending another provider model turn",
+        "A verified usable Chat profile is restored as the default before catalog or legacy settings are returned, so the UI and ordinary Chat use the same selection",
+        "The recovered ecommerce Skill plan is Ready for user confirmation and a normal chat round reaches the configured provider"
+      ],
+      "verification": [
+        "npm test -- --run src/main/acceptanceContractValidator.test.ts src/main/agentGoalAcceptance.test.ts src/main/planDebateOrchestrator.test.ts src/main/modelSettingsStore.test.ts",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "git diff --check",
+        "real Electron UI: startup shows deepseek-v4-flash 已配置, recovered ecommerce plan is Ready · 可确认, and ordinary Chat returns 模型可用。"
+      ]
+    },
+    {
+      "id": "P64-final-acceptance-certificate-and-provider-recovery",
+      "priority": 94,
+      "status": "done",
+      "title": "Close final acceptance certification, provider-authoritative recovery, and Plan status races",
+      "files": [
+        ".zerox/feature_list.json",
+        ".zerox/progress.md",
+        "src/main/agentGoalAcceptance.ts",
+        "src/main/agentGoalAcceptance.test.ts",
+        "src/main/agentGoalAcceptanceCertificate.ts",
+        "src/main/agentGoalAcceptanceCertificate.test.ts",
+        "src/main/agentGoalController.ts",
+        "src/main/agentGoalController.test.ts",
+        "src/main/goalChatService.ts",
+        "src/main/goalChatService.test.ts",
+        "src/main/agentRuntimeEngine.ts",
+        "src/main/agentRuntimeEngine.test.ts",
+        "src/main/agentLoop.test.ts",
+        "src/main/modelRetry.test.ts",
+        "src/main/container.ts",
+        "src/main/container.test.ts",
+        "src/main/planEvidenceVerifier.test.ts",
+        "src/shared/modelServiceNotice.ts",
+        "src/renderer/chatTaskActivity.ts",
+        "src/renderer/chatTaskActivity.test.ts",
+        "src/renderer/components/AgentChatPanel.tsx",
+        "src/renderer/materialDesign.test.ts"
+      ],
+      "definitionOfDone": [
+        "A successful final model review can certify contract-declared non-artifact planning evidence without weakening artifact manifest or undeclared-reference checks",
+        "Semantic repair discards stale sealed judge evidence while legacy acceptance-unavailable goals rebuild current evidence and generic UI retry reaches final acceptance",
+        "Provider HTTP failures pause with structured provider feedback and never consume an automatic Agent retry; internal tool failures remain internal",
+        "Plan confirmation and asynchronous Goal progress updates serialize per Plan and return the canonical Goal-derived status",
+        "Reloading a session with an attached Goal gives that Goal status precedence over stale pre-confirmation Plan activity",
+        "The reported seven-of-seven Skill Goal reaches achieved with a valid persisted acceptance certificate through the real production UI"
+      ],
+      "verification": [
+        "focused acceptance, certificate, controller, provider, runtime, and container suites",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "git diff --check",
+        "real UI retry persisted achieved / goal_accepted / certified and emitted acceptance_certified"
+      ]
+    },
+    {
+      "id": "P63-plan-external-artifact-gate-and-stage-errors",
+      "priority": 93,
+      "status": "done",
+      "title": "Keep confirmed external Skill artifacts plannable and identify the actual failed stage",
+      "files": [
+        ".zerox/feature_list.json",
+        ".zerox/progress.md",
+        "src/main/acceptanceContractValidator.ts",
+        "src/main/acceptanceContractValidator.test.ts",
+        "src/main/plannerKernel.ts",
+        "src/main/plannerKernel.test.ts",
+        "src/renderer/components/AgentChatPanel.tsx",
+        "src/renderer/planFailurePresentation.ts",
+        "src/renderer/planFailurePresentation.test.ts"
+      ],
+      "definitionOfDone": [
+        "Plan quality accepts an explicit absolute external file target as a warning instead of falsely blocking it as a workspace traversal",
+        "Relative traversal paths remain blocked and the confirmed Goal runtime retains live authorization and sandbox enforcement",
+        "Planning-stage failures name triage, investigation, Skill routing, contract, generation, review, or quality accurately",
+        "Reloading a recovered Ready plan overrides stale persisted failure activity in the status banner",
+        "The persisted failed Skill plan recovers through the real UI to awaiting_confirmation without confirming execution"
+      ],
+      "verification": [
+        "focused validator, planner, and renderer presentation suites",
+        "npm test",
+        "npm run build",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "git diff --check",
+        "real UI retry reached Ready · 可确认 with 5/5 Debate rounds and 6/6 planning stages"
+      ]
+    },
+    {
+      "id": "P62-plan-structured-output-and-skill-authoring-recovery",
+      "priority": 92,
+      "status": "done",
+      "title": "Recover safe Plan display fields and route Skill-authoring tasks correctly",
+      "files": [
+        ".zerox/feature_list.json",
+        ".zerox/progress.md",
+        "src/main/planDebateOrchestrator.ts",
+        "src/main/planDebateOrchestrator.test.ts",
+        "src/main/plannerKernel.ts",
+        "src/main/plannerKernel.test.ts"
+      ],
+      "definitionOfDone": [
+        "A missing Plan display title is derived deterministically from a non-empty objective or summary before strict validation",
+        "Semantic Plan fields such as milestones and acceptance criteria remain strictly validated",
+        "Skill-authoring tasks select skill-creator when available and never auto-invoke an unrelated domain Skill",
+        "Skill-authoring tasks fall back to the ordinary execution Agent when skill-creator is unavailable",
+        "Retrying an already persisted failed round refreshes stale automatic Skill routing before continuing"
+      ],
+      "verification": [
+        "npm test -- --run src/main/planDebateOrchestrator.test.ts src/main/plannerKernel.test.ts",
+        "npm test",
+        "npm run build",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "git diff --check"
+      ]
+    },
+    {
+      "id": "P61-provider-authoritative-stop-and-plan-recovery",
+      "priority": 91,
+      "status": "done",
+      "title": "Restore provider-authoritative stopping and actionable Plan investigation recovery",
+      "files": [
+        ".zerox/feature_list.json",
+        ".zerox/progress.md",
+        "src/shared/chat.ts",
+        "src/main/agentLoop.ts",
+        "src/main/agentRuntimeEngine.ts",
+        "src/main/chatService.ts",
+        "src/main/planInvestigatorService.ts",
+        "src/renderer/components/AgentChatPanel.tsx",
+        "src/main/agentLoop.test.ts",
+        "src/main/chatService.test.ts",
+        "src/main/planInvestigatorService.test.ts"
+      ],
+      "definitionOfDone": [
+        "Model-turn values are checkpoint cadence only and never pause or fail a task",
+        "Tool-call and wall-clock counters remain telemetry and never become task stop reasons",
+        "Explicit user cancellation still returns promptly when a provider or tool ignores its abort signal",
+        "Planning failures surface the provider ModelServiceNotice rather than an internal continuation code",
+        "Historical turn_limit records explain the obsolete internal interruption and provide a direct investigation retry action",
+        "Paused Plan replies and status surfaces include the latest failed stage reason and preserve collected evidence"
+      ],
+      "verification": [
+        "npm test",
+        "npm run build",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "git diff --check"
+      ]
+    },
+    {
+      "id": "P60-agent-interaction-chain-reliability-closure",
+      "priority": 90,
+      "status": "done",
+      "title": "Close user-harness-loop-model protocol, recovery, concurrency, streaming, tool, and mode gaps",
+      "files": [
+        ".zerox/feature_list.json",
+        ".zerox/progress.md",
+        "src/shared/chat.ts",
+        "src/shared/ipcChannels.ts",
+        "src/main/agentLoop.ts",
+        "src/main/agentRunnerService.ts",
+        "src/main/agentRuntimeEngine.ts",
+        "src/main/chatService.ts",
+        "src/main/chatSessionStore.ts",
+        "src/main/container.ts",
+        "src/main/goalChatService.ts",
+        "src/main/goalRuntimeEngine.ts",
+        "src/main/ipc/index.ts",
+        "src/main/modelRetry.ts",
+        "src/main/openAiCompatibleClient.ts",
+        "src/main/providers/anthropicProvider.ts",
+        "src/main/providers/bedrockProvider.ts",
+        "src/main/providers/geminiProvider.ts",
+        "src/main/providers/maxMode.ts",
+        "src/main/providers/vertexProvider.ts",
+        "src/main/toolApprovalCoordinator.ts",
+        "src/preload/index.ts",
+        "src/renderer/chatStreamReducer.ts",
+        "src/renderer/chatTaskActivity.ts",
+        "src/renderer/components/AgentChatPanel.tsx"
+      ],
+      "definitionOfDone": [
+        "Every provider preserves streamed tool-call identity and malformed transport data fails visibly",
+        "Chat, scheduled, and Goal paths honor cancellation, model capabilities, provider-reported limits and timeouts, and scoped approval modes without local task-budget termination",
+        "Paused continuations and guided-input attachments recover after restart without duplicate side effects",
+        "Status and stream events carry request identity and monotonic sequence while slow consumers remain bounded",
+        "Concurrent turns use server-authoritative history and durable request idempotency",
+        "Every supported interaction mode has focused regression coverage and full verification passes"
+      ],
+      "verification": [
+        "focused protocol, provider, chat, runtime, IPC, renderer, and persistence suites",
+        "npm test",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "git diff --check"
+      ]
+    },
+    {
+      "id": "P59-v3.8.1-autonomous-plan-and-renderer-crash-hotfix",
+      "priority": 89,
+      "status": "done",
+      "title": "v3.8.1 honor automatic Goal autonomy, tolerate compact risk JSON, and prevent clarification white screens",
+      "files": [
+        ".zerox/feature_list.json",
+        ".zerox/progress.md",
+        "src/shared/chat.ts",
+        "src/shared/planMode.ts",
+        "src/shared/packageScripts.test.ts",
+        "src/main/plannerKernel.ts",
+        "src/main/plannerKernel.test.ts",
+        "src/main/planInvestigatorService.ts",
+        "src/main/planInvestigatorService.test.ts",
+        "src/main/planDebateOrchestrator.ts",
+        "src/main/planDebateOrchestrator.test.ts",
+        "src/main/planStore.ts",
+        "src/main/planStore.test.ts",
+        "src/main/chatService.ts",
+        "src/main/chatService.test.ts",
+        "src/main/ipc/index.ts",
+        "src/main/ipc/index.test.ts",
+        "src/preload/index.ts",
+        "src/renderer/components/AgentChatPanel.tsx",
+        "src/renderer/components/RendererErrorBoundary.tsx",
+        "src/renderer/main.tsx",
+        "src/renderer/styles/cards.css",
+        "src/renderer/materialDesign.test.ts"
+      ],
+      "definitionOfDone": [
+        "Automatic authorization selected with Goal mode is carried into the durable Plan record and causes preference-level ambiguities to become auditable safe assumptions instead of user-blocking questions",
+        "Questions requiring secrets, irreversible external authority, regulated decisions, or a missing workspace remain blocking and extreme-risk operations still require confirmation",
+        "Common compact string risks from a provider are normalized before strict Plan round validation without weakening the remaining structured contract",
+        "Typing in a Plan clarification textarea never dereferences a released React event, and the exact displayed questions remain paired with submitted answers",
+        "A top-level renderer error boundary replaces unrecoverable white screens with a visible recovery surface",
+        "Focused regressions, full verification, production smoke, harness, and diff checks pass"
+      ],
+      "verification": [
+        "focused Planner, chat, and renderer regression suites",
+        "npm test",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "git diff --check"
+      ]
+    },
     {
       "id": "P58-professional-planner-kernel-v2",
       "priority": 88,

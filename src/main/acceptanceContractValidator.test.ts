@@ -87,6 +87,30 @@ describe("shared acceptance contract validator", () => {
     ).toBe(false);
   });
 
+  it("accepts comparison operators inside quoted program arguments", () => {
+    expect(
+      validateAcceptanceCheckContract({
+        id: "python-comparison",
+        kind: "command_exit_code",
+        description: "Python 内联断言",
+        params: {
+          command: 'python3 -c "assert 3 >= 1"',
+          expectedExitCode: 0,
+        },
+        requiresEvidence: false,
+      }),
+    ).toMatchObject({ valid: true });
+    expect(
+      validateAcceptanceCheckContract({
+        id: "redirection",
+        kind: "command_exit_code",
+        description: "Shell 重定向",
+        params: { command: "cat < input.txt", expectedExitCode: 0 },
+        requiresEvidence: false,
+      }),
+    ).toMatchObject({ valid: false });
+  });
+
   it("accepts structured user destinations but rejects traversal filenames", () => {
     expect(
       validateAcceptanceCheckContract(
@@ -114,6 +138,43 @@ describe("shared acceptance contract validator", () => {
           requiresEvidence: false,
         },
         { workspaceRoot: "/workspace" },
+      ).valid,
+    ).toBe(false);
+  });
+
+  it("lets Plan Mode describe an explicit external output without allowing hidden traversal", () => {
+    const externalCheck: AcceptanceCheck = {
+      id: "shared-skill",
+      kind: "file_exists",
+      description: "共享 Skill 已创建",
+      params: { path: "/Users/test/.claude/skills/example/SKILL.md" },
+      requiresEvidence: false,
+    };
+    const planningResult = validateAcceptanceCheckContract(externalCheck, {
+      workspaceRoot: "/workspace",
+      allowExternalFileTargets: true,
+    });
+
+    expect(planningResult.valid).toBe(true);
+    expect(planningResult.warnings).toEqual([
+      expect.stringContaining("确认计划后仍须通过运行时授权与沙箱校验"),
+    ]);
+    expect(
+      validateAcceptanceCheckContract(externalCheck, {
+        workspaceRoot: "/workspace",
+      }).valid,
+    ).toBe(false);
+    expect(
+      validateAcceptanceCheckContract(
+        {
+          ...externalCheck,
+          id: "hidden-traversal",
+          params: { path: "../secret" },
+        },
+        {
+          workspaceRoot: "/workspace",
+          allowExternalFileTargets: true,
+        },
       ).valid,
     ).toBe(false);
   });

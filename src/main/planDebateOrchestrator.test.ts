@@ -124,6 +124,192 @@ describe("plan debate orchestrator", () => {
     expect(plan.finalArtifact?.markdown).toBe(markdown);
   });
 
+  it("normalizes compact string risks before strict Debate validation", async () => {
+    const calls: Array<{ profileId: string; request: ChatCompletionRequest }> =
+      [];
+    const compactB1 = {
+      ...critique("B1 compact risk"),
+      unresolvedRisks: ["转录接口可能不可用，需要准备本地 ASR 回退。"],
+    };
+    const orchestrator = createPlanDebateOrchestrator({
+      planStore: createPlanStore({
+        configDir: path.join(tempDir, "config-compact-risk"),
+      }),
+      artifactWriter: createPlanArtifactWriter(),
+      modelRouter: createQueuedRouter(
+        {
+          profileA: [proposal("A1"), revisedProposal("A2")],
+          profileB: [compactB1, critique("B2")],
+          profileC: [artifact("Compact Risk Final")],
+        },
+        calls,
+      ),
+    });
+
+    const plan = await orchestrator.createPlan({
+      sessionId: "session-compact-risk",
+      workspaceRoot,
+      sourceMessage: "实现转录 Skill 并验证失败回退。",
+      mode: "debate",
+      modelAssignments: {
+        a: "profileA",
+        b: "profileB",
+        c: "profileC",
+      },
+    });
+
+    expect(plan.status).toBe("awaiting_confirmation");
+    expect(calls).toHaveLength(5);
+    expect(
+      plan.rounds.find((round) => round.kind === "b1")?.output,
+    ).toMatchObject({
+      unresolvedRisks: [
+        {
+          severity: "medium",
+          description: "转录接口可能不可用，需要准备本地 ASR 回退。",
+          status: "open",
+        },
+      ],
+    });
+  });
+
+  it("normalizes legacy planner tool aliases and quoted command comparisons before quality gating", async () => {
+    const candidate = artifact("Compatible Final");
+    const milestone = (candidate.milestones as Array<Record<string, unknown>>)[0]!;
+    milestone.toolNames = [
+      "file_write",
+      "file_exists",
+      "command_run",
+      "command_exit_code",
+      "test_passes",
+    ];
+    milestone.acceptanceChecks = [
+      {
+        id: "m1-skill-file",
+        kind: "file_exists",
+        description: "Skill 入口存在",
+        params: { path: "skill/SKILL.md" },
+        requiresEvidence: false,
+      },
+      {
+        id: "m1-quoted-python",
+        kind: "command_exit_code",
+        description: "前置元数据满足要求",
+        params: {
+          command: 'python3 -c "assert 3 >= 1"',
+          expectedExitCode: 0,
+        },
+        requiresEvidence: false,
+      },
+    ];
+    const orchestrator = createPlanDebateOrchestrator({
+      planStore: createPlanStore({
+        configDir: path.join(tempDir, "config-tool-aliases"),
+      }),
+      artifactWriter: createPlanArtifactWriter(),
+      modelRouter: createQueuedRouter({ profileDirect: [candidate] }, []),
+      availableToolNames: () => ["file_write", "file_stat", "shell_exec", "test_run"],
+    });
+
+    const plan = await orchestrator.createPlan({
+      sessionId: "session-tool-aliases",
+      workspaceRoot,
+      sourceMessage: "创建一个本地 Skill 并验证其结构。",
+      mode: "direct",
+      modelAssignments: { direct: "profileDirect" },
+    });
+
+    expect(plan.status).toBe("awaiting_confirmation");
+    expect(plan.qualityReport).toMatchObject({ status: "ready" });
+    expect(plan.finalArtifact?.milestones[0]?.toolNames).toEqual([
+      "file_write",
+      "file_stat",
+      "shell_exec",
+      "test_run",
+    ]);
+  });
+
+  it("derives a missing display title from the objective without retrying the round", async () => {
+    const calls: Array<{ profileId: string; request: ChatCompletionRequest }> =
+      [];
+    const a1WithoutTitle = proposal("unused title");
+    delete a1WithoutTitle.title;
+    const orchestrator = createPlanDebateOrchestrator({
+      planStore: createPlanStore({
+        configDir: path.join(tempDir, "config-derived-title"),
+      }),
+      artifactWriter: createPlanArtifactWriter(),
+      modelRouter: createQueuedRouter(
+        {
+          profileA: [a1WithoutTitle, revisedProposal("A2")],
+          profileB: [critique("B1"), critique("B2")],
+          profileC: [artifact("Derived Title Final")],
+        },
+        calls,
+      ),
+    });
+
+    const plan = await orchestrator.createPlan({
+      sessionId: "session-derived-title",
+      workspaceRoot,
+      sourceMessage: "创建一个抖音链接转文稿 Skill。",
+      mode: "debate",
+      modelAssignments: {
+        a: "profileA",
+        b: "profileB",
+        c: "profileC",
+      },
+    });
+
+    expect(plan.status).toBe("awaiting_confirmation");
+    expect(calls).toHaveLength(5);
+    expect(plan.rounds.find((round) => round.kind === "a1")?.output).toMatchObject({
+      title: "完成本地实现",
+    });
+  });
+
+  it("honors durable automatic autonomy without blocking on preference questions", async () => {
+    const calls: Array<{ profileId: string; request: ChatCompletionRequest }> =
+      [];
+    const candidate = {
+      ...artifact("Autonomous Final"),
+      unresolvedQuestions: [
+        "文稿保存到哪个目录并采用什么命名？",
+        "复用现有项目还是新建目录？",
+        "支持单条链接还是批量链接？",
+      ],
+      actionGate: "needs_input",
+      gateReason: "等待偏好。",
+    };
+    const orchestrator = createPlanDebateOrchestrator({
+      planStore: createPlanStore({
+        configDir: path.join(tempDir, "config-auto-autonomy"),
+      }),
+      artifactWriter: createPlanArtifactWriter(),
+      modelRouter: createQueuedRouter(
+        { profileDirect: [candidate] },
+        calls,
+      ),
+    });
+
+    const plan = await orchestrator.createPlan({
+      sessionId: "session-auto-autonomy",
+      workspaceRoot,
+      sourceMessage: "创建抖音链接转文稿 Skill。",
+      mode: "direct",
+      autonomyMode: "auto",
+      modelAssignments: { direct: "profileDirect" },
+    });
+
+    expect(plan.autonomyMode).toBe("auto");
+    expect(plan.status).toBe("awaiting_confirmation");
+    expect(plan.finalArtifact?.unresolvedQuestions).toEqual([]);
+    expect(plan.finalArtifact?.assumptions).toHaveLength(3);
+    expect(calls[0]?.request.messages[0]?.content).toContain(
+      "本次 Goal 已开启自动模式",
+    );
+  });
+
   it("uses the same frozen Direct profile in isolated generation and review contexts", async () => {
     const calls: Array<{ profileId: string; request: ChatCompletionRequest }> =
       [];
@@ -446,10 +632,13 @@ describe("plan debate orchestrator", () => {
     const result = await orchestrator.retryFailedRound(
       paused.id,
       "replacementB",
+      undefined,
+      "auto",
     );
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
+    expect(result.plan.autonomyMode).toBe("auto");
     expect(result.plan.status).toBe("awaiting_confirmation");
     expect(
       result.plan.rounds.find(

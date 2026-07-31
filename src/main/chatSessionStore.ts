@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type {
   ChatAttachmentMetadata,
+  ChatAttachmentInput,
   ChatMessageSearchOptions,
   ChatMessageSearchResult,
   ChatMessageRecord,
@@ -29,6 +30,7 @@ const SESSION_SUMMARY_PREVIEW_MAX_CHARS = 160;
 
 export type AppendChatMessageInput = {
   sessionId?: string;
+  requestId?: string;
   role: ChatMessageRecord["role"];
   content: string;
   outputParts?: ChatOutputPart[];
@@ -47,6 +49,7 @@ export type AppendChatMessageResult = {
 };
 
 export type ChatSessionStore = {
+  flush(): Promise<void>;
   list(): Promise<ChatSessionListItem[]>;
   get(sessionId: string): Promise<ChatSessionRecord | null>;
   appendMessage(input: AppendChatMessageInput): Promise<AppendChatMessageResult>;
@@ -108,8 +111,29 @@ export function createChatSessionStore(options: {
         return storedSessionsCache;
       }
       if (error instanceof SyntaxError) {
-        await quarantineCorruptJsonFile(sessionsPath);
-        storedSessionsCache = { schemaVersion: 1, sessions: [] };
+        const quarantinedPath = await quarantineCorruptJsonFile(sessionsPath);
+        const timestamp = now().toISOString();
+        const warningMessage = [
+          "检测到会话存储损坏，原文件已隔离，应用没有把它静默当作空历史。",
+          quarantinedPath ? `隔离文件：${quarantinedPath}` : "原文件已被其他恢复流程隔离。",
+          "你可以继续新会话；如需恢复旧内容，请从隔离文件备份中处理。",
+        ].join("\n");
+        storedSessionsCache = {
+          schemaVersion: 1,
+          sessions: [
+            createSession({
+              sessionId: `recovery_corrupt_${Date.now()}`,
+              content: "会话存储恢复通知",
+              message: {
+                id: `recovery_message_${Date.now()}`,
+                role: "assistant",
+                content: warningMessage,
+                createdAt: timestamp,
+              },
+              timestamp,
+            }),
+          ],
+        };
         return storedSessionsCache;
       }
 
@@ -154,7 +178,11 @@ export function createChatSessionStore(options: {
   }
 
   return {
+    async flush() {
+      await mutationQueue;
+    },
     async list() {
+      await mutationQueue;
       const stored = await readStoredSessions();
       return stored.sessions
         .slice()
@@ -163,6 +191,7 @@ export function createChatSessionStore(options: {
     },
 
     async get(sessionId) {
+      await mutationQueue;
       const stored = await readStoredSessions();
       return stored.sessions.find((session) => session.id === sessionId) ?? null;
     },
@@ -195,6 +224,7 @@ export function createChatSessionStore(options: {
           existingSession?.workspaceSummary;
         const message: ChatMessageRecord = {
           id: createId(),
+          ...(input.requestId ? { requestId: input.requestId } : {}),
           role: input.role,
           content,
           ...(input.outputParts?.length ? { outputParts: input.outputParts } : {}),
@@ -526,13 +556,16 @@ function summarizeSessionContent(content: string): string {
   return `${normalized.slice(0, SESSION_SUMMARY_PREVIEW_MAX_CHARS - 3)}...`;
 }
 
-async function quarantineCorruptJsonFile(filePath: string): Promise<void> {
+async function quarantineCorruptJsonFile(filePath: string): Promise<string | null> {
+  const quarantinedPath = `${filePath}.corrupt-${Date.now()}`;
   try {
-    await rename(filePath, `${filePath}.corrupt-${Date.now()}`);
+    await rename(filePath, quarantinedPath);
+    return quarantinedPath;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       throw error;
     }
+    return null;
   }
 }
 
@@ -595,6 +628,15 @@ function normalizeStatusEvent(event: ChatTaskStatusEvent): ChatTaskStatusEvent {
   );
   return {
     sessionId: String(event.sessionId ?? ""),
+    ...(normalizeOptionalString(event.requestId)
+      ? { requestId: normalizeOptionalString(event.requestId) }
+      : {}),
+    ...(typeof event.sequence === "number" && Number.isFinite(event.sequence)
+      ? { sequence: Math.max(0, Math.floor(event.sequence)) }
+      : {}),
+    ...(normalizeOptionalString(event.turnId)
+      ? { turnId: normalizeOptionalString(event.turnId) }
+      : {}),
     state,
     message: String(event.message ?? ""),
     createdAt: String(event.createdAt ?? new Date(0).toISOString()),
@@ -705,12 +747,20 @@ function normalizeStatusEventState(
     state === "started" ||
     state === "workspace" ||
     state === "skill" ||
+    state === "skill_load" ||
     state === "memory" ||
+    state === "memory_scope" ||
+    state === "history" ||
     state === "model" ||
     state === "reasoning" ||
     state === "streaming" ||
+    state === "requirement" ||
+    state === "actor_spawned" ||
+    state === "actor_done" ||
+    state === "tool_invocation" ||
     state === "tool_call" ||
     state === "tool_result" ||
+    state === "checkpoint_boundary" ||
     state === "waiting_for_input" ||
     state === "paused" ||
     state === "canceled" ||
@@ -764,6 +814,9 @@ function normalizeSkillPendingInputState(
   const userMessage = normalizeOptionalString(pending.userMessage);
   const selectedSkillName = normalizeOptionalString(pending.selectedSkillName);
   const attachments = normalizeChatAttachmentMetadataList(pending.attachments);
+  const attachmentPayloads = normalizeChatAttachmentInputList(
+    pending.attachmentPayloads,
+  );
   if (!inputRequestId || !sessionId || !requestId || !userMessage || !selectedSkillName) {
     return undefined;
   }
@@ -786,7 +839,29 @@ function normalizeSkillPendingInputState(
       : {}),
     partialValues: normalizeSkillInputValueRecord(pending.partialValues),
     ...(attachments.length ? { attachments } : {}),
+    ...(attachmentPayloads.length ? { attachmentPayloads } : {}),
   };
+}
+
+function normalizeChatAttachmentInputList(value: unknown): ChatAttachmentInput[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  let totalBytes = 0;
+  return value.slice(0, 6).flatMap((entry): ChatAttachmentInput[] => {
+    const metadata = normalizeChatAttachmentMetadataList([entry])[0];
+    if (!metadata || !entry || typeof entry !== "object") {
+      return [];
+    }
+    const dataBase64 = normalizeOptionalString(
+      (entry as Record<string, unknown>).dataBase64,
+    );
+    if (!dataBase64 || totalBytes + metadata.size > 40 * 1024 * 1024) {
+      return [];
+    }
+    totalBytes += metadata.size;
+    return [{ ...metadata, dataBase64 }];
+  });
 }
 
 function normalizeChatAttachmentMetadataList(
@@ -890,6 +965,9 @@ function normalizeStoredMessage(message: ChatMessageRecord): ChatMessageRecord {
   const attachments = normalizeChatAttachmentMetadataList(message.attachments);
   return {
     id: String(message.id ?? ""),
+    ...(normalizeOptionalString(message.requestId)
+      ? { requestId: normalizeOptionalString(message.requestId) }
+      : {}),
     role,
     content: String(message.content ?? ""),
     ...(outputParts?.length ? { outputParts } : {}),

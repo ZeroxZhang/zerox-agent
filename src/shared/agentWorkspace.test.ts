@@ -1,3 +1,6 @@
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   buildChildRunContext,
@@ -5,6 +8,7 @@ import {
   buildPrimaryRunContext,
   isPathInsideRunContext,
   toWorkspaceContract,
+  validatePathInsideRunContext,
   type AgentWorkspace,
 } from "./agentWorkspace";
 
@@ -100,6 +104,39 @@ describe("agent workspace model", () => {
         "write",
       ),
     ).toBe(false);
+  });
+
+  it("allows a read-only symlink hop only when its target root is explicitly readable", async () => {
+    const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), "agent-workspace-link-"));
+    try {
+      const workspaceRoot = path.join(fixtureRoot, "workspace");
+      const sourceRoot = path.join(fixtureRoot, "source");
+      const sourceFile = path.join(sourceRoot, "download.py");
+      const linkPath = path.join(workspaceRoot, "download.py");
+      await mkdir(workspaceRoot, { recursive: true });
+      await mkdir(sourceRoot, { recursive: true });
+      await writeFile(sourceFile, "print('ok')", "utf8");
+      await symlink(sourceFile, linkPath);
+
+      const permitted = buildPrimaryRunContext({
+        workspaceId: "workspace_default",
+        workspaceRoot,
+        sandbox: {
+          ...buildDefaultSandboxPolicy(),
+          extraReadRoots: [sourceRoot],
+        },
+      });
+      const unpermitted = buildPrimaryRunContext({
+        workspaceId: "workspace_default",
+        workspaceRoot,
+      });
+
+      expect(validatePathInsideRunContext(linkPath, permitted, "read").ok).toBe(true);
+      expect(validatePathInsideRunContext(linkPath, permitted, "write").ok).toBe(false);
+      expect(validatePathInsideRunContext(linkPath, unpermitted, "read").ok).toBe(false);
+    } finally {
+      await rm(fixtureRoot, { recursive: true, force: true });
+    }
   });
 
   it("does not expose writable roots for read-only run contexts", () => {

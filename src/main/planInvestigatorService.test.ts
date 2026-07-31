@@ -89,7 +89,7 @@ describe("plan investigator service", () => {
             outOfScope: ["修改文件"],
             constraints: ["只读"],
             assumptions: [],
-            unresolvedQuestions: [],
+            unresolvedQuestions: ["文稿保存目录和命名规则是什么？"],
             targetRefs: ["README.md"],
             evidenceRefs: ["evidence_user_request", evidenceRef],
             skillCandidates: [],
@@ -119,6 +119,7 @@ describe("plan investigator service", () => {
       sessionId: "session-1",
       workspaceRoot: "/workspace",
       sourceMessage: "分析 README",
+      autonomyMode: "auto",
       profile: createPlanTaskProfile("分析 README"),
       baseEvidence: [
         {
@@ -134,6 +135,7 @@ describe("plan investigator service", () => {
     expect(observedRunMode).toBe("plan");
     expect(observedSandboxMode).toBe("read_only");
     expect(observedSystemPrompt).toContain("planningEvidenceRef");
+    expect(observedSystemPrompt).toContain("本次 Goal 已开启自动模式");
     expect(
       result.evidence.some((item) =>
         item.id.startsWith("evidence_tool_"),
@@ -145,6 +147,10 @@ describe("plan investigator service", () => {
         expect.stringMatching(/^evidence_tool_/),
       ]),
     );
+    expect(result.brief.unresolvedQuestions).toEqual([]);
+    expect(result.brief.assumptions).toEqual([
+      expect.stringContaining("自动模式决策"),
+    ]);
     expect(result.stage).toMatchObject({
       kind: "investigation",
       status: "completed",
@@ -361,6 +367,72 @@ describe("plan investigator service", () => {
       PlanInvestigationError,
     );
     expect(stageStatuses).toEqual(["running", "failed"]);
+  });
+
+  it("surfaces the provider notice instead of an internal continuation reason", async () => {
+    const providerMessage = "模型服务商正在限流，请稍后由你手动重试。";
+    const stageErrors: string[] = [];
+    const registry = {
+      getVisibleDefinitions() {
+        return [];
+      },
+    } as unknown as DynamicToolRegistry;
+    const service = createPlanInvestigatorService({
+      toolExecutor: {
+        getRegistry: () => registry,
+        hasTool: () => false,
+        async execute() {
+          throw new Error("no tools expected");
+        },
+      },
+      toolAuthorizationService: {} as ToolAuthorizationService,
+      discoverSkills: async () => ({ skills: [], errors: [] }),
+      runLoop: async () => ({
+        summary: "internal continuation detail",
+        status: "paused",
+        turns: 1,
+        messages: [],
+        toolCallsExecuted: 0,
+        continuation: {
+          reason: "provider_rate_limit",
+          maxTurns: 4,
+          toolCallsExecuted: 0,
+        },
+        modelServiceNotice: {
+          kind: "rate_limit",
+          provider: "deepseek",
+          model: "deepseek-v4-flash",
+          statusCode: 429,
+          message: providerMessage,
+        },
+      }),
+      now: () => "2026-07-31T00:00:00.000Z",
+    });
+
+    const investigation = service.investigate({
+      planId: "plan-provider-limit",
+      sessionId: "session-provider-limit",
+      workspaceRoot: "/workspace",
+      sourceMessage: "分析工作区",
+      profile: createPlanTaskProfile("分析工作区"),
+      baseEvidence: [
+        {
+          id: "evidence_user_request",
+          kind: "user",
+          title: "用户需求",
+          summary: "分析工作区",
+        },
+      ],
+      model: model(),
+      async onStageUpdate(stage) {
+        if (stage.error) stageErrors.push(stage.error);
+      },
+    });
+
+    await expect(investigation).rejects.toMatchObject({
+      message: providerMessage,
+    });
+    expect(stageErrors).toEqual([providerMessage]);
   });
 });
 

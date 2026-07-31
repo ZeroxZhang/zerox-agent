@@ -85,6 +85,7 @@ import {
   buildTaskActivityDetail,
   buildTaskActivityFromStatusEvent,
   buildGoalTaskActivity,
+  buildPersistedGoalActivity,
   createTaskActivity,
   getChatStatusKindFromStatusEvent,
   getGoalUiSyncState,
@@ -116,6 +117,10 @@ import {
 import { outputPartsFromMessage, type RenderedOutputPart } from "../chatOutputModel";
 import { formatChatMessageTime } from "../chatMessageTime";
 import { availableChatProfiles } from "../modelProfileAvailability";
+import {
+  getActivePlanPresentation,
+  getPlanFailurePresentation,
+} from "../planFailurePresentation";
 import { AnswerBlock } from "./chat/AnswerBlock";
 import { GoalDetailDrawer } from "./GoalDetailDrawer";
 import { GoalStatusStrip } from "./GoalStatusStrip";
@@ -343,6 +348,7 @@ export function AgentChatPanel({
   const sessionLoadPendingRef = useRef<number | null>(null);
   const activeStatusSessionIdRef = useRef<string | null>(null);
   const activeChatRequestIdRef = useRef<string | null>(null);
+  const submissionInFlightRef = useRef(false);
   const pendingInputRequestRef = useRef<SkillUserInputRequest | null>(null);
   const activeGoalRef = useRef<ChatSessionGoalSummary | null>(null);
   const goalAcceptanceOperationPendingRef = useRef<GoalAcceptanceOperationToken | null>(null);
@@ -499,6 +505,10 @@ export function AgentChatPanel({
   }, [measureWorkspaceMenuPosition, workspaceMenuOpen]);
 
   useLayoutEffect(() => {
+    const previousRequestId = activeChatRequestIdRef.current;
+    if (previousRequestId && window.buildingAgent) {
+      void window.buildingAgent.cancelChatMessage(previousRequestId);
+    }
     resetActiveChatRefs();
     sessionLoadPendingRef.current = null;
     sessionSelectionGenerationRef.current += 1;
@@ -713,6 +723,11 @@ export function AgentChatPanel({
     }
 
     return window.buildingAgent.onChatTaskStatusEvent((event) => {
+      const activeRequestId =
+        activeChatRequestIdRef.current ?? pendingInputRequestRef.current?.requestId ?? null;
+      if (!activeRequestId || (event.requestId && event.requestId !== activeRequestId)) {
+        return;
+      }
       const activeSessionId = activeStatusSessionIdRef.current;
       const currentSessionId = sessionIdRef.current;
       if (activeSessionId && event.sessionId !== activeSessionId) {
@@ -927,12 +942,37 @@ export function AgentChatPanel({
         return;
       }
       setActivePlan(latestPlan && latestPlan.status !== "discarded" ? latestPlan : null);
+      const restoredGoalId =
+        loadedSession.activeGoalId ??
+        latestPlan?.executionGoalId ??
+        (!latestPlan ? loadedSession.goalSummaries?.at(-1)?.id : undefined);
+      if (
+        latestPlan &&
+        latestPlan.status !== "discarded" &&
+        !restoredGoalId &&
+        isPlanInputRoutingLocked(latestPlan)
+      ) {
+        const planPresentation = getActivePlanPresentation(latestPlan);
+        setWorkPhase("paused");
+        setStatus({
+          kind: "paused",
+          message: planPresentation.statusMessage,
+        });
+        setTaskActivity(
+          createTaskActivity({
+            kind: "paused",
+            title: planPresentation.taskTitle,
+            detail: planPresentation.taskDetail,
+          }),
+        );
+        activeStatusSessionIdRef.current = loadedSession.id;
+      }
       if (latestPlan) {
         void refreshSessions(loadedSession.id);
         void refreshCurrentSessionMessages(loadedSession.id);
       }
-      if (loadedSession.activeGoalId) {
-        const loadedGoal = await window.buildingAgent.getGoal(loadedSession.activeGoalId);
+      if (restoredGoalId) {
+        const loadedGoal = await window.buildingAgent.getGoal(restoredGoalId);
         if (
           sessionSelectionGenerationRef.current !== loadGeneration ||
           sessionIdRef.current !== sessionIdToLoad
@@ -940,6 +980,16 @@ export function AgentChatPanel({
           return;
         }
         setActiveGoalDetail(loadedGoal);
+        if (loadedGoal) {
+          const restoredGoalActivity = buildPersistedGoalActivity({
+            status: loadedGoal.status,
+            description: loadedGoal.description,
+          });
+          setStatus(restoredGoalActivity.status);
+          setWorkPhase(restoredGoalActivity.workPhase);
+          setTaskActivity(restoredGoalActivity.taskActivity);
+          activeStatusSessionIdRef.current = null;
+        }
       } else {
         setActiveGoalDetail(null);
         setGoalDrawerOpen(false);
@@ -1109,6 +1159,7 @@ export function AgentChatPanel({
     (activePlan?.status === "paused" && Boolean(activePlan.finalArtifact));
   const planNeedsDecision =
     Boolean(activePlan) &&
+    !activePlan?.executionGoalId &&
     ["awaiting_input", "awaiting_confirmation", "paused", "canceled", "failed"].includes(
       activePlan?.status ?? "",
     );
@@ -2095,6 +2146,9 @@ export function AgentChatPanel({
     const isGoalDraft = Boolean(result.goalDraft);
     const isPlanAwaitingConfirmation = result.plan?.status === "awaiting_confirmation";
     const isPlanPaused = Boolean(result.plan && result.plan.status !== "awaiting_confirmation");
+    const planFailure = result.plan
+      ? getPlanFailurePresentation(result.plan)
+      : null;
     setStatus({
       kind: isGoalExecuting
           ? "working"
@@ -2108,7 +2162,9 @@ export function AgentChatPanel({
         : isPlanAwaitingConfirmation
         ? "计划已生成，确认前不会执行"
         : isPlanPaused
-          ? "计划已暂停，请处理门禁或失败轮次"
+          ? planFailure
+            ? `${planFailure.title}：${planFailure.detail}`
+            : "规划未完成，请查看计划卡片中的原因和恢复操作"
         : isGoalDraft
         ? "目标草案已生成，等待确认"
         : isGoalExecuting
@@ -2141,8 +2197,13 @@ export function AgentChatPanel({
         ? createTaskActivity({
             kind: "paused",
             title:
-              result.plan.status === "awaiting_confirmation" ? "等待确认终版计划" : "规划已暂停",
-            detail: result.plan.finalArtifact?.title ?? result.plan.taskContract.objective,
+              result.plan.status === "awaiting_confirmation"
+                ? "等待确认终版计划"
+                : planFailure?.title ?? "规划未完成",
+            detail:
+              planFailure?.detail ??
+              result.plan.finalArtifact?.title ??
+              result.plan.taskContract.objective,
           })
         : isGoalDraft && result.goalDraft
         ? createTaskActivity({
@@ -2380,6 +2441,7 @@ export function AgentChatPanel({
       const result = await window.buildingAgent.retryFailedPlanRound(
         activePlan.id,
         replacementProfileId,
+        autoApprovalEnabled ? "auto" : "standard",
       );
       if (!result.ok) {
         if (result.plan) {
@@ -2417,9 +2479,15 @@ export function AgentChatPanel({
     if (attachmentReadPending) {
       return;
     }
-    if (status.kind === "working" || sessionLoadPendingRef.current !== null) {
+    if (
+      submissionInFlightRef.current ||
+      activeChatRequestIdRef.current !== null ||
+      status.kind === "working" ||
+      sessionLoadPendingRef.current !== null
+    ) {
       return;
     }
+    submissionInFlightRef.current = true;
 
     const history = toChatHistory(messages);
     const userMessage = createMessage(
@@ -2486,6 +2554,7 @@ export function AgentChatPanel({
         }),
       );
       activeStatusSessionIdRef.current = null;
+      submissionInFlightRef.current = false;
       return;
     }
 
@@ -2505,6 +2574,7 @@ export function AgentChatPanel({
     const requestId = createClientRequestId();
     const requestGeneration = sessionSelectionGenerationRef.current;
     setActiveChatRequest(requestId);
+    submissionInFlightRef.current = false;
     const result = await window.buildingAgent
       .sendChatMessage({
         ...(sessionId ? { sessionId } : {}),
@@ -2518,12 +2588,21 @@ export function AgentChatPanel({
               planModelAssignments,
             }
           : {}),
+        ...(shouldCreateGoalPlan || planInputLocked
+          ? {
+              planAutonomyMode: autoApprovalEnabled
+                ? "auto" as const
+                : "standard" as const,
+            }
+          : {}),
         ...(selectedSkillName ? { selectedSkillName } : {}),
         ...(selectedWorkspaceId ? { workspaceId: selectedWorkspaceId } : {}),
         history,
       })
       .catch((error) => ({
         ok: false as const,
+        code: "TRANSPORT_ERROR" as const,
+        retryable: true,
         message: error instanceof Error ? error.message : "会话请求失败，请稍后重试。",
       }));
     if (activeChatRequestIdRef.current === requestId) {
@@ -2534,7 +2613,7 @@ export function AgentChatPanel({
     }
 
     if (!result.ok) {
-      if (isSkillInputRequiredMessage(result.message)) {
+      if (result.code === "SKILL_INPUT_REQUIRED") {
         setStatus({
           kind: "paused",
           message: pendingInputRequestRef.current?.reason || "等待技能输入",
@@ -2563,7 +2642,7 @@ export function AgentChatPanel({
         restoredAttachmentSubmission = true;
       }
       activeStatusSessionIdRef.current = null;
-      const wasCanceled = isCanceledMessage(result.message);
+      const wasCanceled = result.code === "CANCELED";
       if (wasCanceled && planInputLocked && sessionId) {
         const canceledPlan = await window.buildingAgent
           .getLatestPlanForSession(sessionId)
@@ -2631,6 +2710,8 @@ export function AgentChatPanel({
       })
       .catch((error) => ({
         ok: false as const,
+        code: "TRANSPORT_ERROR" as const,
+        retryable: true,
         message: error instanceof Error ? error.message : "技能输入提交失败，请稍后重试。",
       }));
 
@@ -2642,7 +2723,7 @@ export function AgentChatPanel({
     }
 
     if (!result.ok) {
-      if (isSkillInputRequiredMessage(result.message)) {
+      if (result.code === "SKILL_INPUT_REQUIRED") {
         setStatus({
           kind: "paused",
           message: pendingInputRequestRef.current?.reason || "等待技能输入",
@@ -2658,7 +2739,7 @@ export function AgentChatPanel({
         return;
       }
 
-      if (result.message.includes("附件内容在应用重启或长时间等待后已失效")) {
+      if (result.code === "ATTACHMENT_EXPIRED") {
         setPendingInputRequest(null);
       }
 
@@ -2757,8 +2838,14 @@ export function AgentChatPanel({
       }),
     );
 
+    const requestId = activeChatRequestIdRef.current;
+    if (!requestId) {
+      setStatus({ kind: "ready", message: "当前没有可中断的请求。" });
+      setTaskActivity(idleTaskActivity);
+      return;
+    }
     const result = await window.buildingAgent
-      .cancelChatMessage(activeChatRequestIdRef.current ?? undefined)
+      .cancelChatMessage(requestId)
       .catch((error) => ({
         ok: false as const,
         message: error instanceof Error ? error.message : "中断请求失败，请稍后重试。",
@@ -3107,16 +3194,8 @@ export function AgentChatPanel({
                 onRetry={(replacementProfileId) => {
                   void handleRetryPlan(replacementProfileId);
                 }}
-                  onAnswerQuestions={(answers) => {
-                    const questions = activePlan.finalArtifact?.unresolvedQuestions ?? [];
-                    void submitUserMessage(
-                      answers
-                        .map(
-                          (answer, index) =>
-                            `${index + 1}. ${questions[index] ?? "补充信息"}\n${answer}`,
-                        )
-                        .join("\n\n"),
-                    );
+                  onAnswerQuestions={(clarification) => {
+                    void submitUserMessage(clarification);
                   }}
               />
             ) : null}
@@ -3831,12 +3910,15 @@ function PlanConfirmationCard(props: {
   onConfirm: () => void;
   onDiscard: () => void;
   onRetry: (replacementProfileId?: string) => void;
-  onAnswerQuestions: (answers: string[]) => void;
+  onAnswerQuestions: (clarification: string) => void;
 }) {
-  const failedRound = props.plan.rounds.find((round) => round.status === "failed");
-  const failedPlanningStage = props.plan.planningStages?.find(
-    (stage) => stage.status === "failed",
-  );
+  const failedRound = [...props.plan.rounds]
+    .reverse()
+    .find((round) => round.status === "failed");
+  const failedPlanningStage = [...(props.plan.planningStages ?? [])]
+    .reverse()
+    .find((stage) => stage.status === "failed");
+  const failurePresentation = getPlanFailurePresentation(props.plan);
   const chatProfiles = availableChatProfiles(props.catalog);
   const failedProfileId =
     failedRound?.modelBinding.profileId ??
@@ -3880,7 +3962,14 @@ function PlanConfirmationCard(props: {
       aria-label="确认前需要回答"
       onSubmit={(event) => {
         event.preventDefault();
-        props.onAnswerQuestions(questionAnswers);
+        props.onAnswerQuestions(
+          questions
+            .map(
+              (question, index) =>
+                `${index + 1}. ${question}\n${questionAnswers[index] ?? ""}`,
+            )
+            .join("\n\n"),
+        );
       }}
     >
       <header>
@@ -3891,13 +3980,14 @@ function PlanConfirmationCard(props: {
         <label key={question}>
           <span>{question}</span>
           <textarea
-            onChange={(event) =>
+            onChange={(event) => {
+              const nextAnswer = event.currentTarget.value;
               setQuestionAnswers((current) =>
                 current.map((answer, answerIndex) =>
-                  answerIndex === index ? event.currentTarget.value : answer,
+                  answerIndex === index ? nextAnswer : answer,
                 ),
-              )
-            }
+              );
+            }}
             required
             rows={2}
             value={questionAnswers[index] ?? ""}
@@ -3926,7 +4016,9 @@ function PlanConfirmationCard(props: {
         </div>
         <div className="plan-gate-status">
           <span className={`is-${props.plan.actionGate}`}>
-            {formatPlanGate(props.plan.actionGate)}
+            {failurePresentation
+              ? "规划未完成 · 可重试"
+              : formatPlanGate(props.plan.actionGate)}
           </span>
           <small>v{props.plan.revision}</small>
         </div>
@@ -4219,8 +4311,7 @@ function PlanConfirmationCard(props: {
         </div>
       ) : (
         <p className="plan-empty-artifact">
-          {failedRound?.error ??
-            failedPlanningStage?.error ??
+          {failurePresentation?.detail ??
             "计划正在生成或等待恢复。"}
         </p>
       )}
@@ -4229,10 +4320,10 @@ function PlanConfirmationCard(props: {
         <section className="plan-recovery-panel" aria-label="失败轮次恢复">
           <div>
             <strong>
-              {(failedRound?.kind ?? failedPlanningStage?.kind ?? "planning").toUpperCase()}{" "}
-              失败
+              {failurePresentation?.title ??
+                `${(failedRound?.kind ?? failedPlanningStage?.kind ?? "planning").toUpperCase()} 未完成`}
             </strong>
-            <span>{failedRound?.error ?? failedPlanningStage?.error}</span>
+            <span>{failurePresentation?.detail}</span>
           </div>
           <label>
             <span>重试模型</span>
@@ -4253,7 +4344,9 @@ function PlanConfirmationCard(props: {
             onClick={() => props.onRetry(replacementProfileId || failedProfileId || undefined)}
             type="button"
           >
-            {props.pendingAction === "retry" ? "重试中" : "重试失败轮次"}
+            {props.pendingAction === "retry"
+              ? "重新运行中"
+              : failurePresentation?.actionLabel ?? "重新运行失败阶段"}
           </button>
         </section>
       ) : null}
@@ -5481,14 +5574,6 @@ function buildSkillInputResponseValues(
       resolvedValues[field.name] = String(value);
       return resolvedValues;
   }, {});
-}
-
-function isCanceledMessage(message: string): boolean {
-  return /中断|取消|cancel|canceled|cancelled|abort|aborted/i.test(message);
-}
-
-function isSkillInputRequiredMessage(message: string): boolean {
-  return /skill input required|input required|等待技能输入/i.test(message);
 }
 
 const ChatMessageList = memo(function ChatMessageList({

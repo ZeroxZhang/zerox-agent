@@ -6,6 +6,42 @@
   font-weight: var(--font-medium);
 }
 
+.renderer-recovery-surface {
+  display: grid;
+  min-height: 100vh;
+  padding: var(--space-8);
+  place-items: center;
+  color: var(--text-primary);
+  background: var(--bg-root);
+}
+
+.renderer-recovery-surface section {
+  display: grid;
+  width: min(560px, 100%);
+  gap: var(--space-4);
+  padding: var(--space-8);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xl);
+  background: var(--bg-surface-raised);
+  box-shadow: var(--shadow-md);
+}
+
+.renderer-recovery-surface span,
+.renderer-recovery-surface p {
+  color: var(--text-secondary);
+}
+
+.renderer-recovery-surface h1,
+.renderer-recovery-surface p {
+  margin: 0;
+}
+
+.renderer-recovery-surface div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
 .module-card, .health-card, .skill-card {
   border: 1px solid var(--border-default);
   border-radius: var(--radius-12);

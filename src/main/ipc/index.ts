@@ -6,6 +6,7 @@ import {
 } from "electron";
 import { randomUUID } from "node:crypto";
 import type { AppContainer } from "../container";
+import { IPC_CHANNELS } from "../../shared/ipcChannels";
 import type {
   CancelChatMessageResult,
   ChatStreamEvent,
@@ -401,8 +402,7 @@ function registerRunsIpcHandlers(container: AppContainer): void {
       const sender = event.sender;
 
       try {
-        const runner = container.agentRunnerService();
-        for await (const streamEvent of runner.runTaskStreaming(taskId)) {
+        for await (const streamEvent of container.runAgentTaskStreaming(taskId)) {
           if (sender.isDestroyed()) break;
           sender.send("agent:streamEvent", streamEvent);
         }
@@ -651,10 +651,16 @@ function registerPlansIpcHandlers(container: AppContainer): void {
       _event,
       planId: string,
       replacementProfileId?: string,
+      autonomyMode?: PlanRecord["autonomyMode"],
     ) => {
       const result = await container
         .planDebateOrchestrator()
-        .retryFailedRound(planId, replacementProfileId);
+        .retryFailedRound(
+          planId,
+          replacementProfileId,
+          undefined,
+          autonomyMode,
+        );
       if (!result.ok) {
         return result;
       }
@@ -1156,6 +1162,7 @@ function registerModelSettingsIpcHandlers(container: AppContainer): void {
 }
 
 const activeChatMessageControllers = new Map<string, AbortController>();
+const activeChatMessageOwnerIds = new Map<string, number>();
 const activeChatMessageCompletions = new Map<
   string,
   Promise<unknown>
@@ -1178,11 +1185,18 @@ function registerChatIpcHandlers(container: AppContainer): void {
   acceptingChatMessages = true;
 
   ipcMain.handle(
-    "chat:sendMessage",
+    IPC_CHANNELS.chatSendMessage,
     async (
       event: IpcMainInvokeEvent,
       input: SendChatMessageInput,
     ): Promise<SendChatMessageResult> => {
+      if (!isSendChatMessageInput(input)) {
+        return {
+          ok: false,
+          code: "INTERNAL_ERROR",
+          message: "消息请求格式无效。",
+        };
+      }
       const sender = event.sender;
       const requestId = input.requestId ?? randomUUID();
       if (!acceptingChatMessages) {
@@ -1196,6 +1210,7 @@ function registerChatIpcHandlers(container: AppContainer): void {
       }
       const controller = new AbortController();
       activeChatMessageControllers.set(requestId, controller);
+      activeChatMessageOwnerIds.set(requestId, sender.id);
 
       try {
         const completion = container.chatService().sendMessage({
@@ -1205,12 +1220,12 @@ function registerChatIpcHandlers(container: AppContainer): void {
           signal: controller.signal,
           onStatusEvent(statusEvent: ChatTaskStatusEvent) {
             if (!sender.isDestroyed()) {
-              sender.send("chat:statusEvent", statusEvent);
+              sender.send(IPC_CHANNELS.chatStatusEvent, statusEvent);
             }
           },
           onStreamEvent(streamEvent: ChatStreamEvent) {
             if (!sender.isDestroyed()) {
-              sender.send("chat:streamEvent", streamEvent);
+              sender.send(IPC_CHANNELS.chatStreamEvent, streamEvent);
             }
           },
         });
@@ -1220,16 +1235,18 @@ function registerChatIpcHandlers(container: AppContainer): void {
         return toChatSendMessageFailure(error);
       } finally {
         activeChatMessageControllers.delete(requestId);
+        activeChatMessageOwnerIds.delete(requestId);
         activeChatMessageCompletions.delete(requestId);
       }
     },
   );
   ipcMain.handle(
-    "chat:cancelMessage",
-    (_event, requestId?: string): CancelChatMessageResult => {
-      if (requestId) {
+    IPC_CHANNELS.chatCancelMessage,
+    (event, requestId?: string): CancelChatMessageResult => {
+      if (typeof requestId === "string" && requestId.trim()) {
         const controller = activeChatMessageControllers.get(requestId);
-        if (controller) {
+        const ownerId = activeChatMessageOwnerIds.get(requestId);
+        if (controller && ownerId === event.sender.id) {
           controller.abort();
           return {
             ok: true,
@@ -1242,33 +1259,25 @@ function registerChatIpcHandlers(container: AppContainer): void {
         };
       }
 
-      let canceledCount = 0;
-      for (const controller of activeChatMessageControllers.values()) {
-        if (!controller.signal.aborted) {
-          controller.abort();
-          canceledCount += 1;
-        }
-      }
-
-      if (canceledCount === 0) {
-        return {
-          ok: false,
-          message: "没有正在运行的会话任务。",
-        };
-      }
-
       return {
-        ok: true,
-        message: `已请求中断 ${canceledCount} 个任务。`,
+        ok: false,
+        message: "缺少要中断的请求 ID，未停止任何任务。",
       };
     },
   );
   ipcMain.handle(
-    "chat:respondSkillInput",
+    IPC_CHANNELS.chatRespondSkillInput,
     async (
       event: IpcMainInvokeEvent,
       input: SkillInputResponse,
     ): Promise<SkillInputResponseResult> => {
+      if (!isSkillInputResponse(input)) {
+        return {
+          ok: false,
+          code: "INTERNAL_ERROR",
+          message: "技能输入响应格式无效。",
+        };
+      }
       const sender = event.sender;
       const requestId = input.requestId?.trim() || `skill-input:${input.inputRequestId}`;
       if (!acceptingChatMessages) {
@@ -1282,17 +1291,18 @@ function registerChatIpcHandlers(container: AppContainer): void {
       }
       const controller = new AbortController();
       activeChatMessageControllers.set(requestId, controller);
+      activeChatMessageOwnerIds.set(requestId, sender.id);
       try {
         const completion = container.chatService().respondSkillInput(input, {
           signal: controller.signal,
           onStatusEvent(statusEvent: ChatTaskStatusEvent) {
             if (!sender.isDestroyed()) {
-              sender.send("chat:statusEvent", statusEvent);
+              sender.send(IPC_CHANNELS.chatStatusEvent, statusEvent);
             }
           },
           onStreamEvent(streamEvent: ChatStreamEvent) {
             if (!sender.isDestroyed()) {
-              sender.send("chat:streamEvent", streamEvent);
+              sender.send(IPC_CHANNELS.chatStreamEvent, streamEvent);
             }
           },
         });
@@ -1302,6 +1312,7 @@ function registerChatIpcHandlers(container: AppContainer): void {
         return toChatSendMessageFailure(error);
       } finally {
         activeChatMessageControllers.delete(requestId);
+        activeChatMessageOwnerIds.delete(requestId);
         activeChatMessageCompletions.delete(requestId);
       }
     },
@@ -1330,4 +1341,41 @@ function registerChatIpcHandlers(container: AppContainer): void {
     (_event, sessionId: string): Promise<ChatSessionOperationResult> =>
       container.deleteChatSession(sessionId),
   );
+}
+
+function isSendChatMessageInput(value: unknown): value is SendChatMessageInput {
+  if (!isPlainRecord(value) || typeof value.message !== "string") {
+    return false;
+  }
+  for (const key of ["sessionId", "requestId", "selectedSkillName", "workspaceId"] as const) {
+    if (value[key] !== undefined && typeof value[key] !== "string") {
+      return false;
+    }
+  }
+  if (value.history !== undefined && !Array.isArray(value.history)) {
+    return false;
+  }
+  if (value.attachments !== undefined && !Array.isArray(value.attachments)) {
+    return false;
+  }
+  return true;
+}
+
+function isSkillInputResponse(value: unknown): value is SkillInputResponse {
+  return (
+    isPlainRecord(value) &&
+    typeof value.inputRequestId === "string" &&
+    (value.requestId === undefined || typeof value.requestId === "string") &&
+    isPlainRecord(value.values) &&
+    Object.values(value.values).every(
+      (entry) =>
+        typeof entry === "string" ||
+        typeof entry === "boolean" ||
+        (typeof entry === "number" && Number.isFinite(entry)),
+    )
+  );
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

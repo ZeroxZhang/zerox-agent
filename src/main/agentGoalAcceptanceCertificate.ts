@@ -528,6 +528,9 @@ function verifyEvidenceReferences(
   );
   for (const result of checkResults) {
     const expected = expectedById.get(result.checkId);
+    const declaredLogicalRefs = expected
+      ? getDeclaredLogicalEvidenceRefs(expected)
+      : new Set<string>();
     if (expected?.requiresEvidence && result.evidenceRefs.length === 0) {
       return failure(
         `Check ${result.checkId} requires evidence but has missing evidence refs.`,
@@ -541,9 +544,15 @@ function verifyEvidenceReferences(
       if (runEvidenceRefs.has(ref)) {
         matches += 1;
       }
+      if (
+        expected?.kind === "model_review" &&
+        declaredLogicalRefs.has(ref)
+      ) {
+        matches += 1;
+      }
       if (matches === 0) {
         return failure(
-          `Check ${result.checkId} evidence ref ${ref} is not grounded and does not resolve to certificate evidence, judge messages, or runs.`,
+          `Check ${result.checkId} evidence ref ${ref} is not grounded and does not resolve to certificate evidence, declared review evidence, judge messages, or runs.`,
         );
       }
       if (matches > 1) {
@@ -554,6 +563,18 @@ function verifyEvidenceReferences(
     }
   }
   return { ok: true };
+}
+
+function getDeclaredLogicalEvidenceRefs(check: AcceptanceCheck): Set<string> {
+  const configured = check.params.evidenceRefs;
+  if (!Array.isArray(configured)) return new Set();
+
+  return new Set(
+    configured
+      .filter((ref): ref is string => typeof ref === "string")
+      .map((ref) => redactAndBoundEvidenceRef(ref.trim()))
+      .filter((ref) => ref.length > 0 && !ref.startsWith("artifact:")),
+  );
 }
 
 function verifyJudge(

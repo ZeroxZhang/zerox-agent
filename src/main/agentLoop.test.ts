@@ -191,7 +191,7 @@ describe("agent loop", () => {
     expect(executed).toBe(false);
   });
 
-  it("retries transient model request failures before failing the loop", async () => {
+  it("surfaces provider HTTP failures without an automatic retry", async () => {
     let attempts = 0;
     const retryEvents: Array<{ attempt: number; delayMs: number; error: string }> = [];
     const chatClient: ChatClient = {
@@ -223,18 +223,16 @@ describe("agent loop", () => {
     );
 
     expect(result).toMatchObject({
-      status: "succeeded",
-      summary: "重试后完成。",
-    });
-    expect(attempts).toBe(2);
-    expect(retryEvents).toEqual([
-      {
-        attempt: 1,
-        maxRetries: 2,
-        delayMs: 0,
-        error: "LLM request failed with status 500: overloaded",
+      status: "paused",
+      summary: "模型服务商返回错误（HTTP 500），请根据服务商状态检查后手动重试。",
+      modelServiceNotice: {
+        kind: "provider_stop",
+        statusCode: 500,
+        rawReason: "HTTP 500",
       },
-    ]);
+    });
+    expect(attempts).toBe(1);
+    expect(retryEvents).toEqual([]);
   });
 
   it("compacts messages before model requests when the context exceeds budget", async () => {
@@ -2033,6 +2031,39 @@ describe("agent loop", () => {
       toolCallsExecuted: 0,
     });
     expect(completeCalls).toBe(0);
+  });
+
+  it("honors explicit cancellation when a model request ignores the abort signal", async () => {
+    const controller = new AbortController();
+    let markStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const resultPromise = runAgentLoop(
+      [{ role: "user", content: "等待后取消" }],
+      modelProfile,
+      {
+        chatClient: {
+          async complete() {
+            markStarted?.();
+            return new Promise<ChatCompletionResponse>(() => undefined);
+          },
+        },
+        toolExecutor: createToolExecutor(),
+        tools: testTools,
+        signal: controller.signal,
+        maxWallClockMs: 1,
+      },
+    );
+
+    await started;
+    controller.abort(new Error("user canceled"));
+
+    await expect(resultPromise).resolves.toMatchObject({
+      status: "canceled",
+      summary: "Agent loop canceled.",
+      toolCallsExecuted: 0,
+    });
   });
 });
 

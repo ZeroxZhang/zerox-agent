@@ -15,6 +15,15 @@ export type GoalUiSyncState = {
   shouldClearActiveRequest: boolean;
 };
 
+export type PersistedGoalActivityState = {
+  status: {
+    kind: GoalUiStatusKind;
+    message: string;
+  };
+  workPhase: AgentWorkPhase;
+  taskActivity: TaskActivityState;
+};
+
 export type TaskActivityState = {
   kind: TaskActivityKind;
   title: string;
@@ -269,6 +278,22 @@ export function getGoalUiSyncState(status: GoalStatus): GoalUiSyncState {
   };
 }
 
+export function buildPersistedGoalActivity(options: {
+  status: GoalStatus;
+  description: string;
+}): PersistedGoalActivityState {
+  const syncState = getGoalUiSyncState(options.status);
+  const taskActivity = buildGoalTaskActivity(options);
+  return {
+    status: {
+      kind: syncState.statusKind,
+      message: taskActivity.title,
+    },
+    workPhase: syncState.workPhase,
+    taskActivity,
+  };
+}
+
 export function buildTaskActivityDetail(
   activity: TaskActivityState,
   now: number,
@@ -371,6 +396,33 @@ export function restoreChatTaskActivity(
 
   const events = snapshot.statusEvents;
   const latestEvent = events[events.length - 1];
+  if (
+    latestEvent.state !== "paused" &&
+    latestEvent.state !== "waiting_for_input" &&
+    latestEvent.state !== "completed" &&
+    latestEvent.state !== "canceled" &&
+    latestEvent.state !== "failed"
+  ) {
+    const interruptedAt = parseEventTime(latestEvent.createdAt);
+    return {
+      status: {
+        kind: "error",
+        message: "上次运行已中断，可以重新发送或恢复任务。",
+      },
+      workPhase: "error",
+      taskActivity: createTaskActivity({
+        kind: "error",
+        title: "上次运行已中断",
+        detail: "应用退出前没有记录终态；当前没有后台任务仍在运行。",
+        now: interruptedAt,
+        startedAt: interruptedAt - latestEvent.elapsedMs,
+        lastEventAt: interruptedAt,
+        toolCallsExecuted: latestEvent.toolCallsExecuted,
+        maxTurns: latestEvent.maxTurns,
+      }),
+      taskProcessEvents: events,
+    };
+  }
   return {
     status: {
       kind: getChatStatusKindFromStatusEvent(latestEvent),

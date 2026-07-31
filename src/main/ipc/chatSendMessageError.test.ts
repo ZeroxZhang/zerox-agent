@@ -7,6 +7,8 @@ describe("toChatSendMessageFailure", () => {
       toChatSendMessageFailure(new SyntaxError("Unexpected end of JSON input")),
     ).toEqual({
       ok: false,
+      code: "INTERNAL_ERROR",
+      retryable: true,
       message: "消息发送失败：Unexpected end of JSON input",
     });
   });
@@ -14,6 +16,8 @@ describe("toChatSendMessageFailure", () => {
   it("handles non-error throw values", () => {
     expect(toChatSendMessageFailure("boom")).toEqual({
       ok: false,
+      code: "INTERNAL_ERROR",
+      retryable: true,
       message: "消息发送失败。",
     });
   });

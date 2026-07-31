@@ -464,7 +464,8 @@ export function authorizeToolCallWithinRunContext(
   if (
     request.toolName === "shell_exec" &&
     !runContext.sandbox.allowWorkspaceEscape &&
-    opts?.shellPlan?.opaqueExecution
+    opts?.shellPlan?.opaqueExecution &&
+    !taskDecision.allowed
   ) {
     return deny("shell_exec 被运行沙箱阻止：无法证明嵌套解释器命令位于工作区内。");
   }

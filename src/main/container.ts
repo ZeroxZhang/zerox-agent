@@ -25,6 +25,10 @@ import {
 import { createAgentGoalContext } from "./agentGoalContext";
 import { createAgentGoalPlanner } from "./agentGoalPlanner";
 import { createGoalRuntimeEngine } from "./goalRuntimeEngine";
+import {
+  resolveGoalExecutionModelBinding,
+  selectPlanExecutionModelBinding,
+} from "./goalExecutionModel";
 import { createAuthorizedGoalAcceptanceToolExecutor } from "./agentGoalAcceptanceToolExecutor";
 import { applyGoalOutputRootsToRunContext } from "./goalOutputRoots";
 import {
@@ -52,7 +56,10 @@ import { createAgentBootstrapService } from "./agentBootstrapService";
 import { createAgentValidationStore } from "./agentValidationStore";
 import { createAgentToolExecutor } from "./agentToolExecutor";
 import { createChatService } from "./chatService";
-import { createChatSessionStore } from "./chatSessionStore";
+import {
+  createChatSessionStore,
+  type ChatSessionStore,
+} from "./chatSessionStore";
 import {
   createElectronSecretVault,
   createModelSettingsStore,
@@ -165,6 +172,7 @@ import type {
   GoalProgressEvent,
 } from "../shared/chat";
 import type {
+  AgentRunEvent,
   AgentRunRecord,
   AgentRunStatus,
   CancelScheduledTaskRunResult,
@@ -486,48 +494,49 @@ export function createAppContainer(options: {
     if (!sourcePlan) {
       return;
     }
-    const goal = await agentGoalStore().get(event.goalId);
-    const runId = goal?.milestones
-      .flatMap((milestone) => milestone.runIds)
-      .at(-1);
-    const terminalStatus: PlanStatus | null =
-      event.status === "achieved" ||
-      event.status === "completed_unverified"
-        ? "completed"
-        : event.status === "canceled"
-          ? "canceled"
-          : event.status === "failed" ||
-              event.status === "stopped_budget" ||
-              event.status === "stopped_stalled" ||
-              event.status === "stopped_blocked"
-            ? "failed"
-            : null;
-    if (
-      !terminalStatus &&
-      (!runId || sourcePlan.executionRunId === runId)
-    ) {
-      return;
-    }
-    if (
-      terminalStatus === sourcePlan.status &&
-      (!runId || sourcePlan.executionRunId === runId)
-    ) {
-      return;
-    }
-    await planStore().save(
-      {
-        ...sourcePlan,
-        ...(terminalStatus ? { status: terminalStatus } : {}),
-        ...(runId ? { executionRunId: runId } : {}),
-      },
-      sourcePlan.revision,
-      terminalStatus ? "plan_execution_finished" : "plan_execution_linked",
-      {
-        goalId: event.goalId,
-        ...(runId ? { runId } : {}),
-        ...(terminalStatus ? { status: terminalStatus } : {}),
-      },
-    );
+    await serializePlanConfirmation(sourcePlan.id, async () => {
+      const canonicalPlan = await planStore().get(sourcePlan.id);
+      if (!canonicalPlan || canonicalPlan.executionGoalId !== event.goalId) {
+        return;
+      }
+      const goal = await agentGoalStore().get(event.goalId);
+      const runId = goal?.milestones
+        .flatMap((milestone) => milestone.runIds)
+        .at(-1);
+      const terminalStatus: PlanStatus | null =
+        event.status === "achieved" ||
+        event.status === "completed_unverified"
+          ? "completed"
+          : event.status === "canceled"
+            ? "canceled"
+            : event.status === "failed" ||
+                event.status === "stopped_budget" ||
+                event.status === "stopped_stalled" ||
+                event.status === "stopped_blocked"
+              ? "failed"
+              : null;
+      const nextStatus = terminalStatus ?? "executing";
+      if (
+        nextStatus === canonicalPlan.status &&
+        (!runId || canonicalPlan.executionRunId === runId)
+      ) {
+        return;
+      }
+      await planStore().save(
+        {
+          ...canonicalPlan,
+          status: nextStatus,
+          ...(runId ? { executionRunId: runId } : {}),
+        },
+        canonicalPlan.revision,
+        terminalStatus ? "plan_execution_finished" : "plan_execution_linked",
+        {
+          goalId: event.goalId,
+          ...(runId ? { runId } : {}),
+          status: nextStatus,
+        },
+      );
+    });
   }
 
   async function reconcileGoalProgressEventFromStore(
@@ -669,7 +678,37 @@ export function createAppContainer(options: {
   }
 
   function shouldClearActiveChatGoal(status: Goal["status"]): boolean {
-    return status === "achieved" || status === "failed" || status === "canceled";
+    return (
+      status === "achieved" ||
+      status === "completed_unverified" ||
+      status === "stopped_budget" ||
+      status === "canceled"
+    );
+  }
+
+  async function restoreRecoverableFailedChatGoal(
+    sessionId: string,
+  ): Promise<ChatSessionGoalSummary | undefined> {
+    const session = await chatSessionStore().get(sessionId);
+    if (!session || session.activeGoalId) {
+      return session?.goalSummaries?.find(
+        (summary) => summary.id === session.activeGoalId,
+      );
+    }
+
+    const latestSummary = session.goalSummaries?.at(-1);
+    if (latestSummary?.status !== "failed") {
+      return undefined;
+    }
+
+    const goal = await agentGoalStore().get(latestSummary.id);
+    if (!goal || goal.chatSessionId !== sessionId || goal.status !== "failed") {
+      return undefined;
+    }
+
+    const summary = toChatGoalSummary(goal);
+    await chatSessionStore().attachGoal(sessionId, summary);
+    return summary;
   }
 
   async function reconcileChatSessionGoalSummary(
@@ -697,9 +736,12 @@ export function createAppContainer(options: {
     const sessions = await chatSessionStore().list();
     return Promise.all(
       sessions.map(async (session) => {
+        const restoredGoal = session.activeGoal
+          ? undefined
+          : await restoreRecoverableFailedChatGoal(session.id);
         const activeGoal = await reconcileChatSessionGoalSummary(
           session.id,
-          session.activeGoal,
+          session.activeGoal ?? restoredGoal,
         );
         const sessionWithoutActiveGoal = { ...session };
         delete sessionWithoutActiveGoal.activeGoal;
@@ -714,7 +756,11 @@ export function createAppContainer(options: {
   async function getChatSession(
     sessionId: string,
   ): Promise<ChatSessionRecord | null> {
-    const session = await chatSessionStore().get(sessionId);
+    let session = await chatSessionStore().get(sessionId);
+    if (session && !session.activeGoalId) {
+      await restoreRecoverableFailedChatGoal(sessionId);
+      session = await chatSessionStore().get(sessionId);
+    }
     if (!session?.activeGoalId) {
       return session ? projectChatSessionForTranscript(session) : session;
     }
@@ -1117,6 +1163,12 @@ export function createAppContainer(options: {
 
   async function getModelProfile() {
     const resolved = await modelSettingsStore.resolveProfile();
+    return toRuntimeModelProfile(resolved);
+  }
+
+  function toRuntimeModelProfile(
+    resolved: Awaited<ReturnType<ModelSettingsStore["resolveProfile"]>>,
+  ) {
     const apiKey =
       resolved.secrets.apiKey ??
       resolved.secrets.bedrockApiKey ??
@@ -1142,7 +1194,54 @@ export function createAppContainer(options: {
               resolved.binding.generation.thinkingBudgetTokens,
           }
         : { type: "disabled" as const },
+      modelCapabilities: { ...resolved.binding.capabilities },
     };
+  }
+
+  async function resolveGoalModelSettings(goal: Goal) {
+    const binding = await resolveGoalExecutionModelBinding(
+      goal,
+      (planId) => planStore().get(planId),
+    );
+    return binding
+      ? modelSettingsStore.resolveBinding(binding)
+      : modelSettingsStore.resolveProfile();
+  }
+
+  async function getGoalModelProfile(goal: Goal) {
+    return toRuntimeModelProfile(await resolveGoalModelSettings(goal));
+  }
+
+  function goalChatClient(goal: Goal) {
+    return createSettingsBackedChatClient({
+      loadSettings: () => modelSettingsStore.load(),
+      getApiKey: () => modelSettingsStore.getApiKey(),
+      resolveProfile: () => resolveGoalModelSettings(goal),
+      fallback: createOpenAiCompatibleClient(),
+    });
+  }
+
+  async function getGoalProvider(goal: Goal) {
+    const resolved = await resolveGoalModelSettings(goal);
+    const apiKey =
+      resolved.secrets.apiKey ??
+      resolved.secrets.bedrockApiKey ??
+      resolved.secrets.vertexApiKey ??
+      "";
+    return createProvider({
+      providerKind: resolved.binding.providerKind,
+      apiKey,
+      chatModel: resolved.binding.modelId,
+      baseUrl: resolveProviderBaseUrl(
+        resolved.binding.providerKind,
+        resolved.connectionValues,
+      ),
+      connectionValues: resolved.connectionValues,
+      secrets: resolved.secrets,
+      thinkingEnabled: resolved.binding.generation.thinkingEnabled,
+      thinkingBudgetTokens:
+        resolved.binding.generation.thinkingBudgetTokens,
+    });
   }
 
   // P3 provider abstraction. Returns the LLMProvider for the current model
@@ -1442,7 +1541,8 @@ export function createAppContainer(options: {
         runtimeEngine: createGoalRuntimeEngine({
           workspaceService: agentWorkspaceService(),
           chatClient: chatClient(),
-          getModelProfile,
+          getChatClient: goalChatClient,
+          getModelProfile: getGoalModelProfile,
           toolExecutor,
           toolAuthorizationService: toolAuthorizationService(),
           runStore: agentRunStore(),
@@ -1457,6 +1557,14 @@ export function createAppContainer(options: {
           nextSequence: nextGoalTrajectorySequence,
           now: () => new Date().toISOString(),
           onProgress: emitGoalProgressEvent,
+          maxMode: {
+            async runStep(req, opts) {
+              const provider = await getProvider();
+              return createMaxMode(provider).runStep(req, opts);
+            },
+          },
+          getMaxMode: async (goal) =>
+            createMaxMode(await getGoalProvider(goal)),
           onEvent(event) {
             for (const window of BrowserWindow.getAllWindows()) {
               if (!window.isDestroyed()) {
@@ -1471,15 +1579,15 @@ export function createAppContainer(options: {
         planner: {
           async replan(goal, reason) {
             return createAgentGoalPlanner({
-              chatClient: chatClient(),
-              modelProfile: await getModelProfile(),
+              chatClient: goalChatClient(goal),
+              modelProfile: await getGoalModelProfile(goal),
             }).replan(goal, reason);
           },
         },
         trajectoryStore: agentTrajectoryStore(),
         createAcceptanceContext: async (goal, milestone, runResult) => {
           const modelProfile = acceptanceContextNeedsModel(goal, milestone)
-            ? await getModelProfile()
+            ? await getGoalModelProfile(goal)
             : undefined;
           const runContext = applyGoalOutputRootsToRunContext(
             await agentWorkspaceService().resolveRunContext({
@@ -1529,7 +1637,7 @@ export function createAppContainer(options: {
             trajectoryStore: agentTrajectoryStore(),
             ...(modelProfile
               ? {
-                  chatClient: chatClient(),
+                  chatClient: goalChatClient(goal),
                   modelProfile,
                 }
               : {}),
@@ -1674,6 +1782,12 @@ export function createAppContainer(options: {
         historyIndexStore: historyIndexStore(),
         toolResultOffloadStore: toolResultOffloadStore(),
         compactionStrategy: compactionStrategy(),
+        maxMode: {
+          async runStep(req, opts) {
+            const provider = await getProvider();
+            return createMaxMode(provider).runStep(req, opts);
+          },
+        },
       }),
     );
   }
@@ -1835,6 +1949,62 @@ export function createAppContainer(options: {
       () => executionReservations.delete(reservation),
     );
     return invocation;
+  }
+
+  async function* runAgentTaskStreaming(
+    taskId: string,
+  ): AsyncIterable<AgentRunEvent> {
+    if (runtimeShuttingDown) {
+      yield {
+        level: "error",
+        message: "应用正在退出，未启动新的任务运行。",
+        createdAt: new Date().toISOString(),
+      };
+      return;
+    }
+    const reservation = `task:${taskId}`;
+    if (
+      executionReservations.has(reservation) ||
+      activeTaskRunControllers.has(taskId)
+    ) {
+      yield {
+        level: "error",
+        message: "这个任务已经在运行中。",
+        createdAt: new Date().toISOString(),
+      };
+      return;
+    }
+
+    executionReservations.add(reservation);
+    const controller = new AbortController();
+    let settleCompletion: (() => void) | undefined;
+    const completion = new Promise<void>((resolve) => {
+      settleCompletion = resolve;
+    });
+    activeTaskRunControllers.set(taskId, controller);
+    activeTaskRunCompletions.set(taskId, completion);
+    emitAgentRunsChanged({ reason: "active_execution_changed", taskId });
+
+    try {
+      for await (const event of agentRunnerService().runTaskStreaming(taskId, {
+        signal: controller.signal,
+      })) {
+        yield event;
+      }
+    } finally {
+      if (!controller.signal.aborted) {
+        controller.abort("stream_consumer_detached");
+      }
+      executionReservations.delete(reservation);
+      if (activeTaskRunControllers.get(taskId) === controller) {
+        activeTaskRunControllers.delete(taskId);
+      }
+      settleCompletion?.();
+      if (activeTaskRunCompletions.get(taskId) === completion) {
+        activeTaskRunCompletions.delete(taskId);
+      }
+      emitAgentRunsChanged({ reason: "active_execution_changed", taskId });
+    }
   }
 
   async function runAgentTaskAccepted(
@@ -2243,6 +2413,20 @@ export function createAppContainer(options: {
           await attachConfirmedPlanGoal(plan, resumedGoal);
           return { ok: true, plan, activeGoal: resumedGoal };
         }
+        if (plan.status === "executing") {
+          const nextStatus = planStatusForExecutionGoal(existingGoal.status);
+          if (nextStatus !== plan.status) {
+            plan = await planStore().save(
+              {
+                ...plan,
+                status: nextStatus,
+              },
+              plan.revision,
+              "plan_execution_finished",
+              { goalId: existingGoal.id, status: nextStatus },
+            );
+          }
+        }
         return {
           ok: true,
           plan,
@@ -2535,6 +2719,13 @@ export function createAppContainer(options: {
           revision: confirmedPlanRevision,
           sha256: projection.sha256,
         },
+        ...(selectPlanExecutionModelBinding(plan)
+          ? {
+              executionModelBinding: structuredClone(
+                selectPlanExecutionModelBinding(plan)!,
+              ),
+            }
+          : {}),
         successCriteria: goalSuccessCriteria,
         acceptanceCoverage: {
           deterministicChecks: deterministicCheckCount,
@@ -2887,6 +3078,8 @@ export function createAppContainer(options: {
         ?.flushShadowWrites() ?? Promise.resolve(),
       (lazyStore.get("agentTrajectoryStore") as AgentTrajectoryStore | undefined)
         ?.flushShadowWrites() ?? Promise.resolve(),
+      (lazyStore.get("chatSessionStore") as ChatSessionStore | undefined)
+        ?.flush() ?? Promise.resolve(),
     ]);
     let storageCloseError: unknown;
     try {
@@ -2964,6 +3157,7 @@ export function createAppContainer(options: {
     chatService,
     taskSchedulerService,
     runAgentTask,
+    runAgentTaskStreaming,
     openAgentRunSession,
     resumeAgentRun,
     pauseAgentRun,

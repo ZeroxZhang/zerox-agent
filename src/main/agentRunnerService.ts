@@ -42,6 +42,7 @@ import type {
   RunScheduledTaskResult,
 } from "../shared/agentRuns";
 import type { SkillRecord } from "../shared/skills";
+import type { ModelCapabilities } from "../shared/modelSettings";
 import { filterToolDefinitionsForScheduledTask } from "./scheduledTaskToolVisibility";
 import {
   modelServiceNoticeFromError,
@@ -58,16 +59,21 @@ export type AgentModelProfile = {
   temperature: number;
   maxTokens: number;
   thinking?: { type: "enabled" | "disabled"; budgetTokens?: number };
+  modelCapabilities?: ModelCapabilities;
 };
 
 export type AgentRunnerService = {
   runTask(
     taskId: string,
-    options?: { signal?: AbortSignal; sessionId?: string },
+    options?: {
+      signal?: AbortSignal;
+      sessionId?: string;
+      onEvent?: (event: AgentRunEvent) => void;
+    },
   ): Promise<RunScheduledTaskResult>;
   resumeRun(
     runId: string,
-    options?: { signal?: AbortSignal },
+    options?: { signal?: AbortSignal; onEvent?: (event: AgentRunEvent) => void },
   ): Promise<RunScheduledTaskResult>;
   runTaskStreaming(
     taskId: string,
@@ -325,14 +331,12 @@ export function createAgentRunnerService(options: {
 
     emit(createEvent("info", "Agent run started.", "planning"));
 
-    const toolDefinitions = filterToolDefinitionsForScheduledTask(
+    const availableToolDefinitions = filterToolDefinitionsForScheduledTask(
       "getRegistry" in options.toolExecutor
         ? (options.toolExecutor as AgentToolExecutor & { getRegistry(): { getDefinitions(): ToolDefinition[] } }).getRegistry().getDefinitions()
         : buildToolDefinitions(),
       task,
     );
-    const toolNames = toolDefinitions.map((td) => td.function.name);
-
     // Fetch model profile early so we can pass modelId to the system prompt builder.
     // Wrapped in try/catch because this runs outside the main try block below.
     let profile: AgentModelProfile;
@@ -346,6 +350,9 @@ export function createAgentRunnerService(options: {
         }`,
       };
     }
+    const toolDefinitions =
+      profile.modelCapabilities?.tools === false ? [] : availableToolDefinitions;
+    const toolNames = toolDefinitions.map((td) => td.function.name);
     const systemTimeZone = getSystemTimeZone();
     const systemPrompt = buildAgentSystemPrompt({
       modelId: profile.model,
@@ -799,7 +806,7 @@ export function createAgentRunnerService(options: {
         return runtimeEngine.startTask(taskId, runOptions);
       }
 
-      return runInternal(taskId, runOptions?.signal);
+      return runInternal(taskId, runOptions?.signal, runOptions?.onEvent);
     },
 
     async resumeRun(runId, runOptions) {
@@ -814,42 +821,54 @@ export function createAgentRunnerService(options: {
     },
 
     async *runTaskStreaming(taskId, runOptions) {
-      if (runtimeEngine) {
-        const result = await runtimeEngine.startTask(taskId, runOptions);
-
-        if (result.ok) {
-          for (const event of result.run.events) {
-            yield event;
-          }
-          yield {
-            level: "info",
-            message: JSON.stringify(result.run),
-            createdAt: now().toISOString(),
-          };
-        } else {
-          yield {
-            level: "error",
-            message: result.message,
-            createdAt: now().toISOString(),
-          };
+      const maxBufferedEvents = 256;
+      const bufferedEvents: AgentRunEvent[] = [];
+      let droppedEvents = 0;
+      let wakeConsumer: (() => void) | undefined;
+      let settled = false;
+      const onEvent = (event: AgentRunEvent) => {
+        if (bufferedEvents.length >= maxBufferedEvents) {
+          const droppableIndex = bufferedEvents.findIndex(
+            (candidate) => candidate.level === "info",
+          );
+          bufferedEvents.splice(droppableIndex >= 0 ? droppableIndex : 0, 1);
+          droppedEvents += 1;
         }
-        return;
+        bufferedEvents.push(event);
+        wakeConsumer?.();
+        wakeConsumer = undefined;
+      };
+      const completion = (
+        runtimeEngine
+          ? runtimeEngine.startTask(taskId, { ...runOptions, onEvent })
+          : runInternal(taskId, runOptions?.signal, onEvent)
+      ).finally(() => {
+        settled = true;
+        wakeConsumer?.();
+        wakeConsumer = undefined;
+      });
+
+      while (!settled || bufferedEvents.length > 0) {
+        const event = bufferedEvents.shift();
+        if (event) {
+          yield event;
+          continue;
+        }
+        await new Promise<void>((resolve) => {
+          wakeConsumer = resolve;
+        });
       }
 
-      const emittedEvents: AgentRunEvent[] = [];
-
-      const result = await runInternal(
-        taskId,
-        runOptions?.signal,
-        (event) => {
-          emittedEvents.push(event);
-        },
-      );
-
-      // Yield all events
-      for (const event of emittedEvents) {
-        yield event;
+      if (droppedEvents > 0) {
+        yield {
+          level: "warn",
+          message: `流式消费者处理过慢，已合并或丢弃 ${droppedEvents} 条中间信息事件；最终运行记录仍完整保留。`,
+          data: { code: "STREAM_BACKPRESSURE", droppedEvents },
+          createdAt: now().toISOString(),
+        };
       }
+
+      const result = await completion;
 
       // Yield the final result as a special event
       if (result.ok) {

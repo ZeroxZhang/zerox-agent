@@ -28,9 +28,11 @@ import type {
   RuntimeToolAuthorizationTask,
   ToolAuthorizationService,
 } from "./toolAuthorizationService";
+import { getAcceptanceCommandVariants } from "../shared/acceptanceCommand";
 import type { ToolResultOffloadStore } from "./toolResultOffloadStore";
 import { estimateMessageTokens } from "./contextManager";
 import type { GoalProgressEvent } from "../shared/chat";
+import type { ModelCapabilities } from "../shared/modelSettings";
 import { applyGoalOutputRootsToRunContext } from "./goalOutputRoots";
 import { buildAgentSystemPrompt, getSystemPromptAssembler } from "../shared/agentProtocol";
 import {
@@ -52,6 +54,11 @@ import {
   sanitizeActionSignaturesForPersistence,
 } from "./agentGoalFailureFingerprint";
 import { boundRuntimeTranscript } from "./runtimeTranscript";
+import { isMaxModeEnabled, type MaxMode } from "./providers/maxMode";
+import {
+  toChatCompletionResponse,
+  toCompleteRequest,
+} from "./providers/normalize";
 
 export type GoalRuntimeModelProfile = {
   baseUrl: string;
@@ -59,13 +66,15 @@ export type GoalRuntimeModelProfile = {
   model: string;
   temperature: number;
   maxTokens: number;
+  modelCapabilities?: ModelCapabilities;
 };
 
 export function createGoalRuntimeEngine(options: {
   workspaceRoot?: string;
   workspaceService?: Pick<AgentWorkspaceService, "resolveRunContext">;
   chatClient: ChatClient;
-  getModelProfile: () => Promise<GoalRuntimeModelProfile>;
+  getModelProfile: (goal: Goal) => Promise<GoalRuntimeModelProfile>;
+  getChatClient?: (goal: Goal) => ChatClient;
   toolExecutor: AgentToolExecutor;
   runStore: Pick<AgentRunStore, "append">;
   trajectoryStore: Pick<AgentTrajectoryStore, "append">;
@@ -79,6 +88,8 @@ export function createGoalRuntimeEngine(options: {
   nextSequence?: () => number;
   maxTurns?: number;
   tokenBudget?: number;
+  maxMode?: MaxMode;
+  getMaxMode?: (goal: Goal) => Promise<MaxMode>;
   onProgress?: (event: GoalProgressEvent) => void;
   onEvent?: (event: AgentRunEvent) => void;
 }): GoalRuntimeEngine {
@@ -452,6 +463,9 @@ export function createGoalRuntimeEngine(options: {
               {
                 ...(runSignal ? { signal: runSignal } : {}),
                 runContext,
+                ...(toolName === "shell_exec"
+                  ? { authorizedShellCommand: String(args.command ?? "") }
+                  : {}),
                 ...(deterministicOptions?.artifactWrite
                   ? { artifactWrite: deterministicOptions.artifactWrite }
                   : {}),
@@ -573,13 +587,22 @@ export function createGoalRuntimeEngine(options: {
         };
       }
 
-      const modelProfile = await options.getModelProfile();
+      const modelProfile = await options.getModelProfile(goal);
+      const goalChatClient = options.getChatClient?.(goal) ?? options.chatClient;
+      const goalMaxMode =
+        options.getMaxMode && isMaxModeEnabled()
+          ? await options.getMaxMode(goal)
+          : options.maxMode;
+      const modelToolDefinitions =
+        modelProfile.modelCapabilities?.tools === false
+          ? []
+          : options.toolExecutor.getRegistry().getDefinitions();
       const runtimeContextSnapshot = createRuntimeContextSnapshotForRun({
         surface: "goal",
         runId,
         runContext,
         modelProfile,
-        tools: options.toolExecutor.getRegistry().getDefinitions(),
+        tools: modelToolDefinitions,
         getToolSource: (toolName) =>
           options.toolExecutor.getRegistry().getSource(toolName),
         ...(goal.selectedSkill ? { selectedSkill: goal.selectedSkill } : {}),
@@ -644,7 +667,7 @@ export function createGoalRuntimeEngine(options: {
         initialMessages,
         modelProfile,
         {
-          chatClient: options.chatClient,
+          chatClient: goalChatClient,
           toolExecutor: options.toolExecutor,
           toolAuthorizationService: options.toolAuthorizationService,
           taskId,
@@ -653,12 +676,34 @@ export function createGoalRuntimeEngine(options: {
           runtimeTask: buildGoalMilestoneRuntimeTask(goal, runContext),
           systemPrompt: buildGoalSystemPrompt(modelProfile.model, startedAt.split("T")[0]),
           maxTurns: options.maxTurns ?? 32,
-          tools: options.toolExecutor.getRegistry().getDefinitions(),
+          tools: modelToolDefinitions,
           toolResultOffloadStore: options.toolResultOffloadStore,
           toolResultOffloadThreshold: options.toolResultOffloadThreshold,
           pauseOnFailureLoop: true,
           pauseOnStrategyGuard: false,
           pauseOnTurnLimit: false,
+          ...(goalMaxMode && isMaxModeEnabled()
+            ? {
+                modelRequestExecutor: async (request) => {
+                  try {
+                    const result = await goalMaxMode.runStep(
+                      toCompleteRequest(request),
+                      {
+                        candidates: 3,
+                        judgeModel: modelProfile.model,
+                        parentRunId: runId,
+                        ...(runSignal ? { signal: runSignal } : {}),
+                      },
+                    );
+                    return toChatCompletionResponse(result.winner, {
+                      model: modelProfile.model,
+                    });
+                  } catch {
+                    return goalChatClient.complete(request);
+                  }
+                },
+              }
+            : {}),
           ...(runSignal ? { signal: runSignal } : {}),
           onTurn(turn, phase) {
             void appendRunTrajectory("model_request", {
@@ -1118,6 +1163,7 @@ function buildGoalMilestonePermissionPolicy(
         "git status",
         "git diff",
         "git diff -- *",
+        ...collectGoalAcceptanceCommands(goal),
         ...(selectedSkill?.manifest.permissions.shell.commands ?? []),
       ]),
     },
@@ -1146,6 +1192,18 @@ function buildGoalMilestonePermissionPolicy(
         }
       : {}),
   };
+}
+
+function collectGoalAcceptanceCommands(goal: Goal): string[] {
+  return [...goal.successCriteria, ...goal.milestones.flatMap((milestone) => milestone.successCriteria)]
+    .flatMap((criterion) => criterion.acceptanceChecks)
+    .filter(
+      (check) =>
+        check.kind === "command_exit_code" || check.kind === "test_passes",
+    )
+    .flatMap((check) =>
+      getAcceptanceCommandVariants(String(check.params.command ?? "")),
+    );
 }
 
 function buildGoalSystemPrompt(modelId?: string, currentDate?: string): string {

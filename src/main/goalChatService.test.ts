@@ -308,6 +308,29 @@ describe("goal chat service", () => {
     const summary = await service.createFromDraft({
       draft: createGoalDraft({
         workspaceId: "workspace_project",
+        executionModelBinding: {
+          profileId: "profile-plan-c",
+          connectionId: "connection-plan-c",
+          providerKind: "deepseek",
+          modelId: "deepseek-v4-flash",
+          revision: 7,
+          connectionRevision: 2,
+          profileRevision: 1,
+          baseUrl: "https://api.deepseek.com",
+          capabilities: {
+            tools: true,
+            vision: false,
+            pdf: false,
+            streaming: true,
+            parallelToolCalls: true,
+          },
+          generation: {
+            temperature: 0.2,
+            maxTokens: 8192,
+            thinkingEnabled: false,
+            thinkingBudgetTokens: 8192,
+          },
+        },
         selectedSkill: createSkillRecord({
           name: "onepager",
           body: "Onepager body.",
@@ -328,6 +351,11 @@ describe("goal chat service", () => {
       originMessageId: "message_1",
       description: "发布 v3.2.0 并完成验收",
       originalDescription: "请发布 v3.2.0",
+      executionModelBinding: {
+        profileId: "profile-plan-c",
+        connectionId: "connection-plan-c",
+        modelId: "deepseek-v4-flash",
+      },
       acceptanceProtocolVersion: 2,
       acceptanceState: {
         protocolVersion: 2,
@@ -1166,6 +1194,44 @@ describe("goal chat service", () => {
     },
   );
 
+  it("routes retry acceptance for a fully completed blocked goal through final acceptance recovery", async () => {
+    const blocked = createBlockedGoal(
+      "acceptance_unavailable",
+      "acceptance_unavailable",
+    );
+    blocked.milestones = blocked.milestones.map((milestone) => ({
+      ...milestone,
+      state: "accepted" as const,
+      attempts: 1,
+      runIds: ["run_done"],
+    }));
+    const continued: string[] = [];
+    const resumed: string[] = [];
+    const savedGoals: Goal[] = [];
+    const service = createGoalChatService({
+      controller: createController({
+        async continueAcceptance(goalId) {
+          continued.push(goalId);
+          return createGoal({ id: goalId, status: "achieved" });
+        },
+        async resume(goalId) {
+          resumed.push(goalId);
+          return blocked;
+        },
+      }),
+      goalStore: createGoalStore({ existingGoal: blocked, savedGoals }),
+      planner: createFakePlanner(),
+    });
+
+    await expect(service.retry(blocked.id)).resolves.toMatchObject({
+      id: blocked.id,
+      status: "achieved",
+    });
+    expect(continued).toEqual([blocked.id]);
+    expect(resumed).toEqual([]);
+    expect(savedGoals).toEqual([]);
+  });
+
   it("rearms a rejected milestone and removes invalid dependency labels on retry", async () => {
     const savedGoals: Goal[] = [];
     const blocked = createBlockedGoal(
@@ -1213,6 +1279,60 @@ describe("goal chat service", () => {
         dependsOn: ["milestone_1"],
       }),
     ]);
+  });
+
+  it("starts a fresh recovery epoch when the user retries a stalled goal", async () => {
+    const savedGoals: Goal[] = [];
+    const stalled = createGoal({
+      status: "stopped_stalled",
+      stopReason: "progress_stalled",
+      acceptanceProtocolVersion: 2,
+      acceptanceState: {
+        protocolVersion: 2,
+        phase: "idle",
+        attempt: 5,
+        recentFailures: [{
+          at: "2026-07-30T07:59:00.000Z",
+          targetKind: "milestone",
+          targetId: "milestone_1",
+          fingerprint: "c".repeat(64),
+          occurrence: 5,
+          verdict: "rejected",
+          failureClass: "command_failed",
+          failedCheckIds: ["check_python"],
+          evidenceRefs: [],
+          actionSignatures: ["shell_exec:python"],
+        }],
+        lastDecision: {
+          action: "stop_stalled",
+          summary: "The same acceptance failure repeated.",
+          failedCheckIds: ["check_python"],
+          fingerprint: "c".repeat(64),
+          occurrence: 5,
+          instructions: ["Resolve the environment mismatch."],
+        },
+      },
+    });
+    const service = createGoalChatService({
+      controller: createController({
+        async resume() {
+          return new Promise<Goal>(() => undefined);
+        },
+      }),
+      goalStore: createGoalStore({ existingGoal: stalled, savedGoals }),
+      planner: createFakePlanner(),
+      now: () => "2026-07-30T08:00:00.000Z",
+    });
+
+    await expect(service.retry(stalled.id)).resolves.toMatchObject({
+      status: "executing",
+    });
+    expect(savedGoals.at(-1)?.acceptanceState).toMatchObject({
+      phase: "idle",
+      attempt: 5,
+      recentFailures: [],
+      lastDecision: undefined,
+    });
   });
 
   it("rejects retry and replan for an acceptance-integrity failure", async () => {

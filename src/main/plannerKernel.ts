@@ -4,6 +4,7 @@ import { classifyTaskFrame } from "../shared/agentTaskStrategy";
 import type {
   PlanActionGate,
   PlanArtifact,
+  PlanAutonomyMode,
   PlanEvidenceItem,
   PlanInvestigationDepth,
   PlanQualityIssue,
@@ -23,6 +24,16 @@ import {
   validateAcceptanceCheckContract,
 } from "./acceptanceContractValidator";
 import { resolveSkillInput } from "./skillExecutionService";
+
+const USER_AUTHORITY_QUESTION_PATTERNS = [
+  /(?:api[\s_-]?key|access[\s_-]?token|refresh[\s_-]?token|password|passcode|secret|credential|密钥|口令|密码|令牌|凭证)/i,
+  /(?:验证码|动态码|二次验证|双重验证|2fa|mfa|one[\s_-]?time[\s_-]?code)/i,
+  /(?:收件人|接收人|发送给谁|对外发送|公开发布|发布账号|recipient|external recipient|publish account)/i,
+  /(?:付款|支付|购买|转账|金额|预算上限|payment|purchase|transfer|spend|budget limit)/i,
+  /(?:法务|法律意见|合规批准|医疗决定|处方|legal approval|regulated decision|medical decision)/i,
+  /(?:永久删除|不可恢复|不可逆|清空数据|覆盖现有|生产环境变更|production deployment|irreversible|permanently delete)/i,
+  /(?:选择工作区|工作区路径|workspace path|select (?:a )?workspace)/i,
+] as const;
 
 export type PlannerSkillRoutingInput = {
   brief: PlanningBrief;
@@ -148,6 +159,46 @@ export function createFallbackPlanningBrief(input: {
   };
 }
 
+export function applyPlanningBriefAutonomy(
+  brief: PlanningBrief,
+  autonomyMode: PlanAutonomyMode | undefined,
+): PlanningBrief {
+  if (autonomyMode !== "auto" || brief.unresolvedQuestions.length === 0) {
+    return brief;
+  }
+  const { blocking, delegated } = partitionAutonomousQuestions(
+    brief.unresolvedQuestions,
+  );
+  return {
+    ...brief,
+    assumptions: unique([
+      ...brief.assumptions,
+      ...delegated.map(toAutonomousAssumption),
+    ]),
+    unresolvedQuestions: blocking,
+  };
+}
+
+export function applyPlanArtifactAutonomy(
+  artifact: PlanArtifact,
+  autonomyMode: PlanAutonomyMode | undefined,
+): PlanArtifact {
+  if (autonomyMode !== "auto" || artifact.unresolvedQuestions.length === 0) {
+    return artifact;
+  }
+  const { blocking, delegated } = partitionAutonomousQuestions(
+    artifact.unresolvedQuestions,
+  );
+  return {
+    ...artifact,
+    assumptions: unique([
+      ...artifact.assumptions,
+      ...delegated.map(toAutonomousAssumption),
+    ]),
+    unresolvedQuestions: blocking,
+  };
+}
+
 export function buildPlanTaskContract(
   brief: PlanningBrief,
 ): PlanTaskContract {
@@ -173,11 +224,29 @@ export function routePlannerSkill(
   const actualSkills = new Map(
     input.skills.map((skill) => [skill.manifest.name, skill]),
   );
+  const skillAuthoringTask =
+    !input.explicitSkill && isSkillAuthoringBrief(input.brief);
+  const skillCreator = actualSkills.get("skill-creator");
+  const creatorCandidate = skillCreator
+    ? input.brief.skillCandidates.find(
+        (candidate) => candidate.name === skillCreator.manifest.name,
+      ) ?? {
+        name: skillCreator.manifest.name,
+        reason:
+          "该任务要创建或更新 Skill，应使用专门的 Skill 创建器，而不是调用一个领域内容 Skill。",
+        evidenceRefs: [] as string[],
+      }
+    : undefined;
+  const routingCandidates = skillAuthoringTask
+    ? creatorCandidate
+      ? [creatorCandidate]
+      : []
+    : input.brief.skillCandidates;
   let source: PlanSkillDecision["source"] = "none";
   let selected: GoalSelectedSkill | undefined;
   let reason = "没有发现能实质改善结果的已安装 Skill。";
   const candidateNames = unique(
-    input.brief.skillCandidates
+    routingCandidates
       .map((candidate) => candidate.name)
       .filter((name) => actualSkills.has(name)),
   );
@@ -186,6 +255,17 @@ export function routePlannerSkill(
     source = "explicit";
     selected = snapshotSkill(input.explicitSkill);
     reason = "保留用户显式选择的 Skill，自动路由不得替换。";
+  } else if (skillAuthoringTask) {
+    if (skillCreator) {
+      source = "automatic";
+      selected = snapshotSkill(skillCreator);
+      reason =
+        creatorCandidate?.reason ??
+        "创建或更新 Skill 的任务由 Skill 创建器执行。";
+    } else {
+      reason =
+        "这是创建新 Skill 的任务，但未安装 skill-creator；交由普通执行 Agent 创建，不调用现有领域 Skill。";
+    }
   } else {
     const recommendedName = input.brief.recommendedSkillName?.trim();
     if (recommendedName && actualSkills.has(recommendedName)) {
@@ -198,7 +278,7 @@ export function routePlannerSkill(
       source = "automatic";
       selected = snapshotSkill(actualSkills.get(candidateNames[0]!)!);
       reason =
-        input.brief.skillCandidates.find(
+        routingCandidates.find(
           (candidate) => candidate.name === candidateNames[0],
         )?.reason || "只有一个已验证的 Skill 候选。";
     } else if (candidateNames.length > 1) {
@@ -272,10 +352,10 @@ export function routePlannerSkill(
     ...(selected ? { selectedSkillName: selected.manifest.name } : {}),
     reason,
     evidenceRefs:
-      input.brief.skillCandidates.find(
+      routingCandidates.find(
         (candidate) => candidate.name === selected?.manifest.name,
       )?.evidenceRefs ?? [],
-    alternatives: input.brief.skillCandidates
+    alternatives: routingCandidates
       .filter((candidate) => actualSkills.has(candidate.name))
       .map((candidate) => ({ ...candidate })),
     ...(selected
@@ -299,6 +379,20 @@ export function routePlannerSkill(
     decision,
     ...(selected ? { selectedSkill: selected } : {}),
   };
+}
+
+function isSkillAuthoringBrief(brief: PlanningBrief): boolean {
+  const text = [brief.objective, ...brief.deliverables, ...brief.inScope]
+    .join("\n")
+    .toLowerCase();
+  return (
+    /(?:创建|新建|开发|制作|编写|生成|搭建|实现|更新|修改).{0,32}(?:skill|技能)/iu.test(
+      text,
+    ) ||
+    /(?:create|build|develop|write|generate|update|modify)\s+(?:a\s+|an\s+)?skill\b/i.test(
+      text,
+    )
+  );
 }
 
 export function createPlanQualityReport(input: {
@@ -501,6 +595,11 @@ export function createPlanQualityReport(input: {
     const validation = validateAcceptanceCheckContract(check, {
       workspaceRoot: input.workspaceRoot,
       evidenceRefs: evidenceIds,
+      // A read-only plan may propose an explicit external artifact location
+      // (for example a shared Skill directory). User confirmation establishes
+      // intent; the Goal runtime remains responsible for authorization and
+      // live sandbox enforcement.
+      allowExternalFileTargets: true,
     });
     if (isDeterministicAcceptanceCheck(check)) deterministicChecks += 1;
     if (check.kind === "model_review") modelReviewChecks += 1;
@@ -645,6 +744,44 @@ export function applyPlanQualityGate(
   };
 }
 
+/**
+ * Older planner prompts and several compatible providers use these labels for
+ * capabilities.  They are not registered Agent tools: normalize them at the
+ * planning boundary so the persisted plan only names executable tools.
+ */
+const plannerToolAliases: Readonly<Record<string, string>> = {
+  command_run: "shell_exec",
+  command_exit_code: "shell_exec",
+  file_exists: "file_stat",
+  test_passes: "test_run",
+};
+
+export function normalizePlanToolNames(toolNames: Iterable<string>): string[] {
+  return unique(
+    [...toolNames]
+      .map((toolName) => toolName.trim())
+      .filter(Boolean)
+      .map((toolName) => plannerToolAliases[toolName] ?? toolName),
+  );
+}
+
+/**
+ * Rewrites only documented planner compatibility aliases.  This permits a
+ * previously persisted Plan Mode artifact to be re-checked safely without
+ * asking the model to regenerate an otherwise valid plan.
+ */
+export function normalizePlanArtifactToolNames(
+  artifact: PlanArtifact,
+): PlanArtifact {
+  return {
+    ...artifact,
+    milestones: artifact.milestones.map((milestone) => ({
+      ...milestone,
+      toolNames: normalizePlanToolNames(milestone.toolNames ?? []),
+    })),
+  };
+}
+
 function snapshotSkill(skill: GoalSelectedSkill): GoalSelectedSkill {
   return {
     rootDir: skill.rootDir,
@@ -670,6 +807,31 @@ function summarizePermissions(
 
 function unique(values: string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+function partitionAutonomousQuestions(questions: string[]): {
+  blocking: string[];
+  delegated: string[];
+} {
+  const blocking: string[] = [];
+  const delegated: string[] = [];
+  for (const question of unique(questions)) {
+    if (
+      USER_AUTHORITY_QUESTION_PATTERNS.some((pattern) =>
+        pattern.test(question),
+      )
+    ) {
+      blocking.push(question);
+    } else {
+      delegated.push(question);
+    }
+  }
+  return { blocking, delegated };
+}
+
+function toAutonomousAssumption(question: string): string {
+  const decision = question.replace(/[?？\s]+$/u, "");
+  return `自动模式决策：${decision}；执行 Agent 按工作区证据、最小风险和可验证性选择默认方案，并在结果中记录实际选择。`;
 }
 
 function hash(value: string): string {

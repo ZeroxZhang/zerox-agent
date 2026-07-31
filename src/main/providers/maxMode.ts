@@ -1,18 +1,14 @@
 // MaxMode / best-of-N (contracts v1.4 §10.2, Patch 13, P8).
 //
 // N parallel propose-only candidates (tool schema-only, NOT executed) → a judge
-// model selects the winner → the winner's tool calls are replayed via a P6
-// ephemeral state actor (contract §10.2 + Patch 13 `executedViaActor`). Only the
-// winner enters the parent context; ensemble cost is tracked but does NOT count
+// model selects the winner. The parent AgentLoop executes the winner's tool calls
+// exactly once through its normal authorization path. Only the winner enters the
+// parent context; ensemble cost is tracked but does NOT count
 // against the context token budget. Disabled by default (ZEROX_MAX_MODE).
 
-import type {
-  CompleteRequest,
-  CompleteResponse,
-  LLMProvider,
-  ToolCall,
-} from "./provider";
-import type { ActorRuntime, ActorOutcome, SpawnInput } from "../actors/actorRuntime";
+import type { CompleteRequest, CompleteResponse, LLMProvider } from "./provider";
+import type { ActorRuntime } from "../actors/actorRuntime";
+import { readFeatureFlags } from "../../shared/featureFlags";
 import {
   ModelServiceNoticeError,
   throwForModelServiceNotice,
@@ -32,7 +28,6 @@ export interface MaxModeResult {
   candidatesTried: number;
   judgeModel: string;
   ensembleTokens: { input: number; output: number };
-  executedViaActor?: string; // actorId if winner had tool calls replayed via actor
 }
 
 export interface MaxMode {
@@ -43,8 +38,12 @@ export function createMaxMode(provider: LLMProvider): MaxMode {
   return {
     async runStep(input, opts): Promise<MaxModeResult> {
       const n = Math.max(1, opts.candidates);
-      // 1. N parallel propose-only candidates (toolChoice: none → schema-only, no exec).
-      const proposeReq: CompleteRequest = { ...input, toolChoice: "none" };
+      // 1. N parallel proposals. Provider calls only describe tool calls; the
+      // parent AgentLoop remains the sole side-effect executor.
+      const proposeReq: CompleteRequest = {
+        ...input,
+        toolChoice: input.toolChoice ?? "auto",
+      };
       const candidateResults = await Promise.allSettled(
         Array.from({ length: n }, () => provider.complete(proposeReq)),
       );
@@ -70,29 +69,11 @@ export function createMaxMode(provider: LLMProvider): MaxMode {
         ? candidates[0]!
         : await judgeWinner(opts.judgeProvider ?? provider, opts.judgeModel, input, candidates, opts.signal);
 
-      // 3. If the winner has tool calls, replay them via a P6 ephemeral state actor
-      //    (contract §10.2 + Patch 13). The actor executes the side effects; only the
-      //    winner's message enters the parent context (handled by the caller).
-      let executedViaActor: string | undefined;
-      if (winner.toolCalls && winner.toolCalls.length > 0 && opts.actorRuntime && opts.parentRunId) {
-        const replayInput: SpawnInput = {
-          contextMode: "state",
-          lifecycle: "ephemeral",
-          toolWhitelist: "inherit",
-          task: `Replay max-mode winner tool calls: ${winner.toolCalls.map((tc: ToolCall) => tc.function.name).join(", ")}`,
-          parentRunId: opts.parentRunId,
-        };
-        const handle = opts.actorRuntime.spawn(replayInput);
-        const outcome: ActorOutcome = await opts.actorRuntime.wait(handle.actorId);
-        if (outcome.status === "done") executedViaActor = handle.actorId;
-      }
-
       return {
         winner,
         candidatesTried: candidates.length,
         judgeModel: opts.judgeModel,
         ensembleTokens: { input: ensembleInput, output: ensembleOutput },
-        ...(executedViaActor ? { executedViaActor } : {}),
       };
     },
   };
@@ -144,6 +125,5 @@ function summarizeTask(req: CompleteRequest): string {
 }
 
 export function isMaxModeEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  const raw = (env.ZEROX_MAX_MODE ?? "").toLowerCase();
-  return raw === "1" || raw === "true" || raw === "on";
+  return readFeatureFlags(env).ZEROX_MAX_MODE === "on";
 }

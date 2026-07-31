@@ -42,40 +42,39 @@ describe("completeWithModelRetry", () => {
     expect(retryEvents).toEqual([]);
   });
 
-  it("honors retry-after seconds", async () => {
+  it("surfaces provider retry-after seconds without automatic retry", async () => {
     const sleeps: number[] = [];
     const client = createFlakyClient(
       retryableError(503, { "retry-after": "2" }),
     );
 
-    await completeWithModelRetry(client, request, {
+    await expect(completeWithModelRetry(client, request, {
       maxRetries: 1,
       baseDelayMs: 1000,
       sleep: async (delayMs) => {
         sleeps.push(delayMs);
       },
-    });
+    })).rejects.toThrow("status 503");
 
-    expect(sleeps).toEqual([2000]);
+    expect(sleeps).toEqual([]);
   });
 
-  it("honors retry-after HTTP dates", async () => {
+  it("surfaces provider retry-after HTTP dates without automatic retry", async () => {
     const sleeps: number[] = [];
     const retryAt = new Date(Date.now() + 2500).toUTCString();
     const client = createFlakyClient(
       retryableError(503, { "retry-after": retryAt }),
     );
 
-    await completeWithModelRetry(client, request, {
+    await expect(completeWithModelRetry(client, request, {
       maxRetries: 1,
       baseDelayMs: 1000,
       sleep: async (delayMs) => {
         sleeps.push(delayMs);
       },
-    });
+    })).rejects.toThrow("status 503");
 
-    expect(sleeps[0]).toBeGreaterThan(0);
-    expect(sleeps[0]).toBeLessThanOrEqual(3000);
+    expect(sleeps).toEqual([]);
   });
 
   it("does not retry non-retryable authorization errors", async () => {
@@ -102,7 +101,7 @@ describe("completeWithModelRetry", () => {
     const client: ChatClient = {
       async complete() {
         attempts += 1;
-        throw retryableError(500, {});
+        throw new Error("temporary network failure");
       },
     };
 

@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { AcceptanceCheck } from "../shared/agentGoal";
+import { findBlockedShellControl } from "../shared/acceptanceCommand";
 
 const deterministicKinds = new Set([
   "file_exists",
@@ -8,13 +9,18 @@ const deterministicKinds = new Set([
   "assertion",
 ]);
 const builtinKinds = new Set([...deterministicKinds, "model_review"]);
-const shellControlPattern = /[\r\n;&|`()<>]|\$\(/;
 const allowedDeferredEvidenceRefs = new Set(["artifact:goalEvidence"]);
 
 export type AcceptanceContractValidationContext = {
   workspaceRoot?: string;
   evidenceRefs?: Iterable<string>;
   allowedCommandPrefixes?: string[];
+  /**
+   * Plan Mode may describe an explicit absolute output target outside the
+   * selected workspace. The confirmed Goal runtime still has to authorize
+   * that root and enforce its live sandbox boundary.
+   */
+  allowExternalFileTargets?: boolean;
   /** Goal runtime will perform location/provenance checks with live context. */
   deferRuntimeChecks?: boolean;
 };
@@ -57,7 +63,7 @@ export function validateAcceptanceCheckContract(
 
   switch (kind) {
     case "file_exists":
-      validateFileExists(check, context, errors);
+      validateFileExists(check, context, errors, warnings);
       break;
     case "command_exit_code":
       validateCommand(check, context, errors);
@@ -144,6 +150,7 @@ function validateFileExists(
   check: AcceptanceCheck,
   context: AcceptanceContractValidationContext,
   errors: string[],
+  warnings: string[],
 ): void {
   const destination = getStructuredDestination(check.params.destination);
   if (
@@ -162,12 +169,23 @@ function validateFileExists(
     errors.push(`验收检查 ${check.id} 必须提供 path 或结构化 destination。`);
     return;
   }
-  if (
-    !destination?.external &&
-    !context.deferRuntimeChecks &&
-    !validateWorkspacePath(targetPath, context.workspaceRoot)
-  ) {
-    errors.push(`验收检查 ${check.id} 的目标路径超出工作区。`);
+  if (!destination?.external && !context.deferRuntimeChecks) {
+    const insideWorkspace = validateWorkspacePath(
+      targetPath,
+      context.workspaceRoot,
+    );
+    if (!insideWorkspace) {
+      if (
+        context.allowExternalFileTargets &&
+        isExplicitExternalFilePath(targetPath)
+      ) {
+        warnings.push(
+          `验收检查 ${check.id} 使用工作区外的明确输出路径；确认计划后仍须通过运行时授权与沙箱校验。`,
+        );
+      } else {
+        errors.push(`验收检查 ${check.id} 的目标路径超出工作区。`);
+      }
+    }
   }
   if (
     check.params.requireProvenance === true &&
@@ -177,6 +195,11 @@ function validateFileExists(
       `验收检查 ${check.id} 要求产物溯源时必须提供 artifactRef。`,
     );
   }
+}
+
+function isExplicitExternalFilePath(candidate: string): boolean {
+  const trimmed = candidate.trim();
+  return path.isAbsolute(trimmed) || trimmed === "~" || trimmed.startsWith("~/");
 }
 
 function validateCommand(
@@ -191,7 +214,7 @@ function validateCommand(
     errors.push(`验收检查 ${check.id} 缺少 command。`);
     return;
   }
-  if (!context.deferRuntimeChecks && shellControlPattern.test(command)) {
+  if (!context.deferRuntimeChecks && findBlockedShellControl(command)) {
     errors.push(`验收检查 ${check.id} 的 command 含有被禁止的 Shell 控制符。`);
   }
   if (

@@ -234,7 +234,9 @@ export function validatePathInsideRunContext(
   const locationEnv = getRunContextLocationEnv(context);
   const roots = getRunContextPathRoots(context, access);
 
-  return validatePathInsideLocationRoots(candidatePath, roots, locationEnv);
+  return validatePathInsideLocationRoots(candidatePath, roots, locationEnv, {
+    allowSymlinks: access === "read",
+  });
 }
 
 export function getRunContextPathRoots(
