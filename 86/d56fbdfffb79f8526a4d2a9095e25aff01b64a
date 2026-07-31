@@ -1,0 +1,53 @@
+src/main/acceptanceContractValidator.test.ts
+  s_cda993db6391e2::t_7cbf443e6d2c6d 1-171
+src/main/agentGoalAcceptance.ts
+  s_cda993db6391e2::t_82bb09fdb83541 58,298-319,322-325
+src/main/container.test.ts
+  s_cda993db6391e2::t_9acff04d26d253 26-29,277-282,1941-2120
+src/main/container.ts
+  s_cda993db6391e2::t_c29876ac76f3a1 2,102-104,111,1008-1021,2292-2445,2475-2513,2522-2531,2538,2540-2544,2551-2576
+src/main/nativeGitTools.ts
+  s_cda993db6391e2::t_b5f16f2fa1f0e8 2-4,10-111,191-202
+src/main/planArtifactWriter.ts
+  s_cda993db6391e2::t_ea2577b1be80eb 86-91,94-99,105-139,167-186,201-208,222-234
+src/main/planDebateOrchestrator.test.ts
+  s_cda993db6391e2::t_f4c283516fb845 27,127-309,377,470-544,796,1409-1421,1427-1438,1482,1495-1532
+src/main/planDebateOrchestrator.ts
+  s_cda993db6391e2::t_ba886ab170eb2f 4-6,20,24-25,43-57,64,91-95,107-114,117-120,122,130,138-150,160-163,167-453,504,594-810,820-824,841-845,862-866,1006-1020,1028-1036,1051-1067,1072-1077,1081,1084-1096,1101,1110-1113,1132-1247,1386-1388,1390-1391,1417,1419-1424,1427,1441,1477,1499,1507-1628,1632,1641,1668,1671,1697-1703,1719-1721,1771-1798,1805,1817-1832,1955-1973,2056-2061,2115,2127,2177,2186,2188,2190-2193,2239-2274,2285-2292,2309-2321
+src/main/planEvidenceVerifier.test.ts
+  s_cda993db6391e2::t_e1022586508efb 2,6,10-12,60-96
+src/main/planEvidenceVerifier.ts
+  s_cda993db6391e2::t_da360df6e530d7 5,26-31,33-43,53-61,78-86,117
+src/main/planModePolicy.ts
+  s_cda993db6391e2::t_445de38ccf2d35 14-20
+src/main/planStore.test.ts
+  s_cda993db6391e2::t_b04b28ff8cf3dc 43,123-192
+src/main/plannerKernel.eval.test.ts
+  s_cda993db6391e2::t_6ecf114b907aaa 1-197
+src/renderer/styles/cards.css
+  s_cda993db6391e2::t_8b07dfd05353f3 1099,1103-1178,1409
+src/shared/packageScripts.test.ts
+  s_cda993db6391e2::t_4b0b13fc10e7ce 271-272
+src/shared/planMode.ts
+  s_cda993db6391e2::t_4426bae4d11510 2-10,13-14,49-59,63,69-70,80-215,224-228,252,329,337,343-348,369
+src/shared/planStructuredOutput.ts
+  s_cda993db6391e2::t_a8b4ebe2c1ea9f 42,73,116-119,141-154,163-186
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "86d56fbdfffb79f8526a4d2a9095e25aff01b64a",
+  "prompts": {},
+  "sessions": {
+    "s_cda993db6391e2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fb6d5-6a9f-7f71-a5ee-333722928175",
+        "model": "unknown"
+      },
+      "human_author": "Zerox Zhang <22983136+ZeroxZhang@users.noreply.github.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
