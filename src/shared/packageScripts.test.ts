@@ -268,7 +268,8 @@ describe("package scripts", () => {
           featureId ===
             "P55-v3.8.1-model-provider-and-conversation-ux" ||
           featureId ===
-            "P56-v3.8.1-thinking-control-and-empty-response-hotfix",
+            "P56-v3.8.1-thinking-control-and-empty-response-hotfix" ||
+          featureId === "P58-professional-planner-kernel-v2",
       ),
     ).toBe(true);
     expect(openFeatureIds.length).toBeLessThanOrEqual(1);

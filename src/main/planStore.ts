@@ -63,6 +63,7 @@ export function createPlanStore(options: {
   const now = options.now ?? (() => new Date().toISOString());
   const createId = options.createId ?? (() => randomUUID());
   const queues = new Map<string, Promise<void>>();
+  const activeRunIds = new Set<string>();
   let sessionIndexQueue = Promise.resolve();
 
   function planPath(planId: string) {
@@ -83,13 +84,21 @@ export function createPlanStore(options: {
       const row = options.storage.db
         .prepare("SELECT payload FROM plan_records WHERE id = ?")
         .get<{ payload: string }>(planId);
-      return row ? validatePlanRecord(JSON.parse(row.payload) as PlanRecord) : null;
+      return row
+        ? recoverInterruptedPlanRecord(
+            validatePlanRecord(JSON.parse(row.payload) as PlanRecord),
+            activeRunIds,
+          )
+        : null;
     }
     try {
       const parsed = JSON.parse(
         await readFile(planPath(planId), "utf8"),
       ) as PlanRecord;
-      return validatePlanRecord(parsed);
+      return recoverInterruptedPlanRecord(
+        validatePlanRecord(parsed),
+        activeRunIds,
+      );
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         return null;
@@ -211,6 +220,7 @@ export function createPlanStore(options: {
           revision: created.revision,
           createdAt: now(),
         };
+        trackActiveRunIds(created, activeRunIds);
         if (options.storage) {
           writeSqlitePlanAndEvent(options.storage, created, event);
         } else {
@@ -252,6 +262,7 @@ export function createPlanStore(options: {
           ...(payload ? { payload: structuredClone(payload) } : {}),
           createdAt: now(),
         };
+        trackActiveRunIds(updated, activeRunIds);
         if (options.storage) {
           writeSqlitePlanAndEvent(options.storage, updated, event);
         } else {
@@ -271,7 +282,10 @@ export function createPlanStore(options: {
           )
           .all<{ payload: string }>(sessionId)
           .map((row) =>
-            validatePlanRecord(JSON.parse(row.payload) as PlanRecord),
+            recoverInterruptedPlanRecord(
+              validatePlanRecord(JSON.parse(row.payload) as PlanRecord),
+              activeRunIds,
+            ),
           );
       }
       try {
@@ -306,7 +320,10 @@ export function createPlanStore(options: {
           .prepare("SELECT payload FROM plan_records ORDER BY updated_at DESC")
           .all<{ payload: string }>()
           .map((row) =>
-            validatePlanRecord(JSON.parse(row.payload) as PlanRecord),
+            recoverInterruptedPlanRecord(
+              validatePlanRecord(JSON.parse(row.payload) as PlanRecord),
+              activeRunIds,
+            ),
           );
       }
       try {
@@ -340,7 +357,10 @@ export function createPlanStore(options: {
           )
           .get<{ payload: string }>(sessionId);
         return row
-          ? validatePlanRecord(JSON.parse(row.payload) as PlanRecord)
+          ? recoverInterruptedPlanRecord(
+              validatePlanRecord(JSON.parse(row.payload) as PlanRecord),
+              activeRunIds,
+            )
           : null;
       }
       await sessionIndexQueue;
@@ -436,5 +456,79 @@ function validatePlanRecord(plan: PlanRecord): PlanRecord {
   if (plan.mode !== "direct" && plan.mode !== "debate") {
     throw new Error("计划模式非法。");
   }
-  return plan;
+  const schemaVersion = plan.schemaVersion ?? 1;
+  if (schemaVersion !== 1 && schemaVersion !== 2) {
+    throw new Error("计划 Schema 版本非法。");
+  }
+  if (
+    schemaVersion === 2 &&
+    (!plan.taskProfile ||
+      !plan.planningBrief ||
+      !Array.isArray(plan.planningStages))
+  ) {
+    throw new Error("v2 计划记录缺少任务画像、调查摘要或阶段记录。");
+  }
+  return schemaVersion === plan.schemaVersion
+    ? plan
+    : { ...plan, schemaVersion };
+}
+
+function trackActiveRunIds(plan: PlanRecord, activeRunIds: Set<string>): void {
+  const current = [
+    ...plan.rounds
+      .filter((round) => round.status === "running")
+      .map((round) => round.runId),
+    ...(plan.planningStages ?? [])
+      .filter((stage) => stage.status === "running")
+      .map((stage) => stage.runId),
+  ];
+  for (const runId of current) activeRunIds.add(runId);
+}
+
+function recoverInterruptedPlanRecord(
+  plan: PlanRecord,
+  activeRunIds: ReadonlySet<string>,
+): PlanRecord {
+  const interruptedRoundIds = new Set(
+    plan.rounds
+      .filter(
+        (round) =>
+          round.status === "running" && !activeRunIds.has(round.runId),
+      )
+      .map((round) => round.id),
+  );
+  const interruptedStageIds = new Set(
+    (plan.planningStages ?? [])
+      .filter(
+        (stage) =>
+          stage.status === "running" && !activeRunIds.has(stage.runId),
+      )
+      .map((stage) => stage.id),
+  );
+  if (interruptedRoundIds.size === 0 && interruptedStageIds.size === 0) {
+    return plan;
+  }
+  return {
+    ...plan,
+    status: "paused",
+    actionGate: "blocked",
+    rounds: plan.rounds.map((round) =>
+      interruptedRoundIds.has(round.id)
+        ? {
+            ...round,
+            status: "failed" as const,
+            error: "应用在该规划轮次运行期间中断，请从此轮重试。",
+          }
+        : round,
+    ),
+    planningStages: (plan.planningStages ?? []).map((stage) =>
+      interruptedStageIds.has(stage.id)
+        ? {
+            ...stage,
+            status: "failed" as const,
+            error: "应用在该规划阶段运行期间中断，请从此阶段重试。",
+          }
+        : stage,
+    ),
+  };
 }

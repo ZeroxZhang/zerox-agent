@@ -1,10 +1,15 @@
 import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PlanRecord } from "../shared/planMode";
 import { verifyPlanEvidence } from "./planEvidenceVerifier";
+import { readGitPlanningState } from "./nativeGitTools";
+
+const execFileAsync = promisify(execFile);
 
 describe("plan evidence verifier", () => {
   let tempDir: string;
@@ -50,6 +55,43 @@ describe("plan evidence verifier", () => {
     await expect(verifyPlanEvidence(plan)).resolves.toEqual({
       ok: false,
       driftedEvidenceIds: ["readme"],
+    });
+  });
+
+  it("detects HEAD, staged, and unstaged Git drift from a repository state fingerprint", async () => {
+    await execFileAsync("git", ["init"], { cwd: tempDir });
+    await execFileAsync("git", ["config", "user.name", "Zerox Test"], {
+      cwd: tempDir,
+    });
+    await execFileAsync(
+      "git",
+      ["config", "user.email", "zerox@example.test"],
+      { cwd: tempDir },
+    );
+    const sourcePath = path.join(tempDir, "README.md");
+    await writeFile(sourcePath, "before\n");
+    await execFileAsync("git", ["add", "README.md"], { cwd: tempDir });
+    await execFileAsync("git", ["commit", "-m", "initial"], { cwd: tempDir });
+    const state = await readGitPlanningState({ workspaceRoot: tempDir });
+    const plan = createPlan(tempDir, [
+      {
+        id: "evidence_git_state",
+        kind: "git",
+        title: "Git 状态指纹",
+        summary: state.summary,
+        sourceRef: tempDir,
+        sha256: state.sha256,
+      },
+    ]);
+
+    await expect(verifyPlanEvidence(plan)).resolves.toEqual({
+      ok: true,
+      driftedEvidenceIds: [],
+    });
+    await writeFile(sourcePath, "after\n");
+    await expect(verifyPlanEvidence(plan)).resolves.toEqual({
+      ok: false,
+      driftedEvidenceIds: ["evidence_git_state"],
     });
   });
 });

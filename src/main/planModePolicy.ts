@@ -11,6 +11,13 @@ export const PLAN_MODE_ALLOWED_TOOL_NAMES = [
   "git_status",
   "git_diff",
   "memory_search",
+  "conversation_search",
+  "history_search",
+  "history_around",
+  "tool_result_read",
+  "skill_resource_list",
+  "skill_load",
+  // Legacy aliases kept for historical adapters.
   "chat_history_search",
   "raw_history_search",
   "raw_history_around",

@@ -24,6 +24,7 @@ import type {
   BoundModelClient,
   ModelRouter,
 } from "./providers/modelRouter";
+import type { SkillRecord } from "../shared/skills";
 
 describe("plan debate orchestrator", () => {
   let tempDir: string;
@@ -123,6 +124,189 @@ describe("plan debate orchestrator", () => {
     expect(plan.finalArtifact?.markdown).toBe(markdown);
   });
 
+  it("uses the same frozen Direct profile in isolated generation and review contexts", async () => {
+    const calls: Array<{ profileId: string; request: ChatCompletionRequest }> =
+      [];
+    const router = createQueuedRouter(
+      {
+        profileDirect: [
+          artifact("Direct candidate"),
+          { approved: true, issues: [] },
+        ],
+      },
+      calls,
+    );
+    const orchestrator = createPlanDebateOrchestrator({
+      planStore: createPlanStore({
+        configDir: path.join(tempDir, "config-direct-review"),
+      }),
+      artifactWriter: createPlanArtifactWriter(),
+      modelRouter: router,
+      enableDirectReview: true,
+    });
+
+    const plan = await orchestrator.createPlan({
+      sessionId: "session-direct-review",
+      workspaceRoot,
+      sourceMessage: "实现本地功能并运行测试。",
+      mode: "direct",
+      modelAssignments: { direct: "profileDirect" },
+    });
+
+    expect(plan.status).toBe("awaiting_confirmation");
+    expect(calls.map((call) => call.profileId)).toEqual([
+      "profileDirect",
+      "profileDirect",
+    ]);
+    expect(calls.every((call) => call.request.messages.length === 2)).toBe(
+      true,
+    );
+    expect(calls[1]?.request.messages[1]?.content).toContain(
+      "candidateArtifact",
+    );
+    expect(calls[0]?.request.messages[0]?.content).toContain("不可信数据");
+    expect(calls[1]?.request.messages[0]?.content).toContain("不可信数据");
+    expect(
+      plan.planningStages?.find((stage) => stage.kind === "review"),
+    ).toMatchObject({ status: "completed" });
+  });
+
+  it("repairs once, cold-reviews the revision, and blocks unresolved high-severity findings", async () => {
+    const calls: Array<{ profileId: string; request: ChatCompletionRequest }> =
+      [];
+    const router = createQueuedRouter(
+      {
+        profileDirect: [
+          artifact("Direct candidate"),
+          {
+            approved: false,
+            issues: [
+              {
+                code: "MISSING_ROLLBACK",
+                severity: "high",
+                message: "缺少回滚验证。",
+                repairable: true,
+                repairInstruction: "补充回滚验证。",
+              },
+            ],
+          },
+          artifact("Direct revision"),
+          {
+            approved: false,
+            issues: [
+              {
+                code: "UNSUPPORTED_SCOPE",
+                severity: "critical",
+                message: "修订后仍包含无证据支撑的范围。",
+                repairable: false,
+                repairInstruction: "",
+              },
+            ],
+          },
+        ],
+      },
+      calls,
+    );
+    const orchestrator = createPlanDebateOrchestrator({
+      planStore: createPlanStore({
+        configDir: path.join(tempDir, "config-direct-review-block"),
+      }),
+      artifactWriter: createPlanArtifactWriter(),
+      modelRouter: router,
+      enableDirectReview: true,
+    });
+
+    const plan = await orchestrator.createPlan({
+      sessionId: "session-direct-review-block",
+      workspaceRoot,
+      sourceMessage: "实现本地功能并运行测试。",
+      mode: "direct",
+      modelAssignments: { direct: "profileDirect" },
+    });
+
+    expect(calls).toHaveLength(4);
+    expect(calls[3]?.request.messages).toHaveLength(2);
+    expect(plan.status).toBe("paused");
+    expect(plan.actionGate).toBe("blocked");
+    expect(plan.qualityReport?.blockingIssues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "MODEL_REVIEW_REJECTED",
+        }),
+      ]),
+    );
+    expect(
+      plan.planningStages?.find((stage) => stage.kind === "review"),
+    ).toMatchObject({
+      status: "completed",
+      reviewApproved: false,
+      revisionAttempted: true,
+      reviewIssues: [
+        expect.objectContaining({ code: "UNSUPPORTED_SCOPE" }),
+      ],
+    });
+  });
+
+  it("does not silently retain an old explicit Skill when a replacement is unknown", async () => {
+    const selectedSkill = skill("known-skill");
+    const router = createQueuedRouter(
+      {
+        profileDirect: [
+          artifact("Skill plan"),
+          artifact("No-Skill plan"),
+        ],
+      },
+      [],
+    );
+    const orchestrator = createPlanDebateOrchestrator({
+      planStore: createPlanStore({
+        configDir: path.join(tempDir, "config-unknown-skill"),
+      }),
+      artifactWriter: createPlanArtifactWriter(),
+      modelRouter: router,
+      discoverSkills: async () => ({ skills: [selectedSkill], errors: [] }),
+    });
+    const ready = await orchestrator.createPlan({
+      sessionId: "session-unknown-skill",
+      workspaceRoot,
+      sourceMessage: "用已选择的 Skill 生成计划。",
+      selectedSkill,
+      mode: "direct",
+      modelAssignments: { direct: "profileDirect" },
+    });
+
+    const result = await orchestrator.continueWithInput(
+      ready.id,
+      "改用 @missing-skill",
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.plan.status).toBe("awaiting_input");
+    expect(result.plan.actionGate).toBe("needs_input");
+    expect(result.plan.requestedSkillName).toBe("missing-skill");
+    expect(result.plan.selectedSkill).toBeUndefined();
+    expect(result.plan.planningBrief?.unresolvedQuestions).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("@missing-skill 未安装"),
+      ]),
+    );
+
+    const withoutSkill = await orchestrator.continueWithInput(
+      result.plan.id,
+      "不使用 Skill，继续规划",
+    );
+    expect(withoutSkill.ok).toBe(true);
+    if (!withoutSkill.ok) return;
+    expect(withoutSkill.plan.status).toBe("awaiting_confirmation");
+    expect(withoutSkill.plan.requestedSkillName).toBeNull();
+    expect(withoutSkill.plan.selectedSkill).toBeUndefined();
+    expect(withoutSkill.plan.skillDecision).toMatchObject({
+      source: "none",
+      reason: "用户明确选择不使用 Skill。",
+    });
+  });
+
   it("does not collect evidence through workspace symlinks that escape the root", async () => {
     const outsideReadme = path.join(tempDir, "outside-secret.md");
     await writeFile(outsideReadme, "OUTSIDE_SECRET_MUST_NOT_BE_READ\n");
@@ -190,6 +374,7 @@ describe("plan debate orchestrator", () => {
               label: "Target",
               type: "string",
               required: true,
+              defaultValue: "workspace",
             },
           ],
           permissions: {
@@ -280,6 +465,81 @@ describe("plan debate orchestrator", () => {
     ).toBe(true);
     expect(result.plan.requestedModelAssignments.b).toBe("replacementB");
     expect(result.plan.frozenModelAssignments.a?.profileId).toBe("profileA");
+  });
+
+  it("retries a historical v1 Direct Plan with the legacy output contract", async () => {
+    const calls: Array<{ profileId: string; request: ChatCompletionRequest }> =
+      [];
+    const router = createQueuedRouter(
+      { profileDirect: [legacyArtifact("Recovered v1")] },
+      calls,
+    );
+    const store = createPlanStore({
+      configDir: path.join(tempDir, "config-v1-retry"),
+    });
+    const binding = bindingFor("profileDirect");
+    await store.create({
+      id: "historical-v1",
+      sessionId: "session-v1",
+      workspaceRoot,
+      sourceMessage: "Retry historical plan",
+      mode: "direct",
+      status: "paused",
+      actionGate: "blocked",
+      revision: 1,
+      taskContract: {
+        objective: "Retry historical plan",
+        audience: "user",
+        inScope: ["workspace"],
+        outOfScope: [],
+        constraints: [],
+        successCriteria: ["done"],
+        assumptions: [],
+      },
+      evidence: [
+        {
+          id: "evidence_user_request",
+          kind: "user",
+          title: "用户需求",
+          summary: "Retry historical plan",
+        },
+      ],
+      requestedModelAssignments: { direct: "profileDirect" },
+      frozenModelAssignments: { direct: binding },
+      rounds: [
+        {
+          id: "legacy-round",
+          kind: "direct",
+          role: "direct",
+          ordinal: 1,
+          runId: "legacy-run",
+          modelBinding: binding,
+          status: "failed",
+          publicInputRefs: [],
+          error: "legacy failure",
+        },
+      ],
+      createdAt: "2026-07-30T00:00:00.000Z",
+      updatedAt: "2026-07-30T00:00:00.000Z",
+    });
+    const orchestrator = createPlanDebateOrchestrator({
+      planStore: store,
+      artifactWriter: createPlanArtifactWriter(),
+      modelRouter: router,
+    });
+
+    const result = await orchestrator.retryFailedRound("historical-v1");
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.plan.schemaVersion).toBe(1);
+    expect(result.plan.status).toBe("awaiting_confirmation");
+    expect(result.plan.finalArtifact?.milestones[0]?.acceptanceChecks).toEqual(
+      [],
+    );
+    expect(calls[0]?.request.messages[0]?.content).not.toContain(
+      "v2 里程碑必须",
+    );
   });
 
   it("publishes an explicit output contract and accepts a common wrapped plan object", async () => {
@@ -533,7 +793,7 @@ describe("plan debate orchestrator", () => {
     expect(plan.finalArtifact).toMatchObject({
       actionGate: "ready",
       unresolvedQuestions: [],
-      gateReason: "没有必须由用户立即回答的关键问题，计划可以进入确认。",
+      gateReason: "代码质量门禁通过，计划可以进入用户确认。",
     });
   });
 
@@ -1146,11 +1406,36 @@ function proposal(title: string): Record<string, unknown> {
         description: "实现功能",
         acceptanceCriteria: ["测试通过"],
         dependencies: [],
+        targetRefs: ["src/"],
+        evidenceRefs: ["evidence_user_request"],
+        actions: ["实现功能并运行测试"],
+        toolNames: ["test_run"],
+        acceptanceChecks: [
+          {
+            id: "m1-test",
+            kind: "test_passes",
+            description: "项目测试通过",
+            params: { command: "npm test", workspaceRoot: "." },
+            requiresEvidence: false,
+          },
+        ],
       },
     ],
     dependencies: [],
     risks: [],
     acceptanceCriteria: ["测试通过"],
+    acceptanceChecks: [
+      {
+        id: "goal-review",
+        kind: "model_review",
+        description: "复核整体交付",
+        params: {
+          condition: "完成本地实现",
+          evidenceRefs: ["evidence_user_request"],
+        },
+        requiresEvidence: true,
+      },
+    ],
   };
 }
 
@@ -1194,7 +1479,7 @@ function artifact(title: string): Record<string, unknown> {
       {
         id: "claim-1",
         claim: "实现可由测试验证",
-        evidenceRefs: ["evidence_file"],
+        evidenceRefs: ["evidence_user_request"],
         counterexamples: [],
         conditions: ["测试通过"],
         confidence: 0.9,
@@ -1205,5 +1490,43 @@ function artifact(title: string): Record<string, unknown> {
     minorityOpinion: ["保留一次人工回滚演练。"],
     actionGate: "ready",
     gateReason: "计划结构完整且没有未缓解的严重风险。",
+  };
+}
+
+function legacyArtifact(title: string): Record<string, unknown> {
+  const value = artifact(title);
+  const milestones = (value.milestones as Array<Record<string, unknown>>).map(
+    ({
+      targetRefs: _targetRefs,
+      evidenceRefs: _evidenceRefs,
+      actions: _actions,
+      toolNames: _toolNames,
+      acceptanceChecks: _acceptanceChecks,
+      ...milestone
+    }) => milestone,
+  );
+  const { acceptanceChecks: _acceptanceChecks, ...legacy } = value;
+  return { ...legacy, milestones };
+}
+
+function skill(name: string): SkillRecord {
+  return {
+    rootDir: `/skills/${name}`,
+    skillFile: `/skills/${name}/SKILL.md`,
+    body: `# ${name}`,
+    manifest: {
+      name,
+      displayName: name,
+      description: `${name} description`,
+      version: "1.0.0",
+      execution: { mode: "agent", entrypoint: null },
+      inputs: [],
+      permissions: {
+        files: { read: [], write: [] },
+        shell: { commands: [] },
+        web: { search: false, fetchDomains: [] },
+        memory: { read: false, write: false },
+      },
+    },
   };
 }

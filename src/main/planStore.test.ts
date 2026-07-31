@@ -40,6 +40,7 @@ describe("plan store parity", () => {
       const jsonCreated = await json.create(record);
       const sqliteCreated = await sqlite.create(record);
       expect(sqliteCreated).toEqual(jsonCreated);
+      expect(jsonCreated.schemaVersion).toBe(1);
 
       const jsonSaved = await json.save(
         {
@@ -118,6 +119,76 @@ describe("plan store parity", () => {
     await expect(
       store.getLatestBySession(created.sessionId),
     ).resolves.toEqual(created);
+  });
+
+  it("recovers an interrupted v2 planning stage as a retryable failure in a new runtime", async () => {
+    const configDir = path.join(tempDir, "crash-recovery");
+    const firstRuntime = createPlanStore({ configDir });
+    const base = createRecord();
+    const created = await firstRuntime.create({
+      ...base,
+      schemaVersion: 2,
+      taskProfile: {
+        domain: "code",
+        mode: "exploratory",
+        risk: "writes_files",
+        expectedScale: "small",
+        needsConfirmation: false,
+        targetRefs: [],
+        ambiguity: [],
+        investigationDepth: "standard",
+      },
+      planningBrief: {
+        objective: "Test plan",
+        deliverables: ["实现"],
+        inScope: ["workspace"],
+        outOfScope: [],
+        constraints: ["read-only"],
+        assumptions: [],
+        unresolvedQuestions: [],
+        targetRefs: [],
+        evidenceRefs: [],
+        skillCandidates: [],
+      },
+      planningStages: [],
+    });
+    const running = await firstRuntime.save(
+      {
+        ...created,
+        planningStages: [
+          {
+            id: "investigation-stage",
+            kind: "investigation",
+            runId: "investigation-run",
+            status: "running",
+            investigationDepth: "standard",
+            evidenceRefs: [],
+          },
+        ],
+      },
+      created.revision,
+      "planner_investigation_started",
+    );
+    await expect(firstRuntime.get(running.id)).resolves.toMatchObject({
+      status: "drafting",
+      planningStages: [{ status: "running" }],
+    });
+
+    const recovered = await createPlanStore({ configDir }).get(running.id);
+
+    expect(recovered).toMatchObject({
+      revision: running.revision,
+      status: "paused",
+      actionGate: "blocked",
+      planningStages: [
+        {
+          id: "investigation-stage",
+          runId: "investigation-run",
+          status: "failed",
+          error: expect.stringContaining("中断"),
+        },
+      ],
+    });
   });
 });
 

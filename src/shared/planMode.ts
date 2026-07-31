@@ -1,7 +1,17 @@
 import type { ResolvedModelBinding } from "./modelSettings";
-import type { GoalSelectedSkill } from "./agentGoal";
+import type { AcceptanceCheck, GoalSelectedSkill } from "./agentGoal";
+import type {
+  ExpectedTaskScale,
+  ResolvedReference,
+  TaskDomain,
+  TaskMode,
+  TaskRisk,
+} from "./agentTaskStrategy";
+import type { SkillInputValue } from "./skillExecutionContract";
 
 export type PlanMode = "direct" | "debate";
+export type PlanSchemaVersion = 1 | 2;
+export type PlanInvestigationDepth = "quick" | "standard" | "deep";
 
 export type PlanStatus =
   | "drafting"
@@ -36,14 +46,28 @@ export type FrozenPlanModelAssignments = Partial<
   Record<"direct" | "a" | "b" | "c", ResolvedModelBinding>
 >;
 
+export type PlanTaskProfile = {
+  domain: TaskDomain;
+  mode: TaskMode;
+  risk: TaskRisk;
+  expectedScale: ExpectedTaskScale;
+  needsConfirmation: boolean;
+  targetRefs: ResolvedReference[];
+  ambiguity: Array<{ field: string; reason: string; options: string[] }>;
+  investigationDepth: PlanInvestigationDepth;
+};
+
 export type PlanTaskContract = {
   objective: string;
   audience: string;
+  deliverables?: string[];
   inScope: string[];
   outOfScope: string[];
   constraints: string[];
   successCriteria: string[];
   assumptions: string[];
+  targetRefs?: string[];
+  evidenceRefs?: string[];
 };
 
 export type PlanEvidenceItem = {
@@ -53,6 +77,142 @@ export type PlanEvidenceItem = {
   summary: string;
   sourceRef?: string;
   sha256?: string;
+  sourceHashes?: Array<{ sourceRef: string; sha256: string }>;
+};
+
+export type PlanSkillPermissionSummary = {
+  fileRead: string[];
+  fileWrite: string[];
+  shellCommands: string[];
+  webSearch: boolean;
+  webFetchDomains: string[];
+  memoryRead: boolean;
+  memoryWrite: boolean;
+};
+
+export type PlanSkillCandidate = {
+  name: string;
+  reason: string;
+  evidenceRefs: string[];
+};
+
+export type PlanSkillDecision = {
+  source: "explicit" | "automatic" | "none";
+  selectedSkillName?: string;
+  reason: string;
+  evidenceRefs: string[];
+  alternatives: PlanSkillCandidate[];
+  snapshotSha256?: string;
+  inputValues: Record<string, SkillInputValue>;
+  inputEvidenceRefs: Record<string, string[]>;
+  missingInputFields: string[];
+  invalidInputFields: string[];
+  permissions?: PlanSkillPermissionSummary;
+};
+
+export type PlanningBrief = {
+  objective: string;
+  deliverables: string[];
+  inScope: string[];
+  outOfScope: string[];
+  constraints: string[];
+  assumptions: string[];
+  unresolvedQuestions: string[];
+  targetRefs: string[];
+  evidenceRefs: string[];
+  skillCandidates: PlanSkillCandidate[];
+  recommendedSkillName?: string;
+  recommendedSkillReason?: string;
+  recommendedSkillInputValues?: Record<string, SkillInputValue>;
+  recommendedSkillInputEvidenceRefs?: Record<string, string[]>;
+};
+
+export type PlanningStageKind =
+  | "triage"
+  | "investigation"
+  | "skill_route"
+  | "contract"
+  | "generation"
+  | "review"
+  | "quality";
+
+export type PlanningStageStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "invalidated";
+
+export type PlanReviewIssue = {
+  code: string;
+  severity: "low" | "medium" | "high" | "critical";
+  message: string;
+  repairable: boolean;
+  repairInstruction: string;
+};
+
+export type PlanningStageRecord = {
+  id: string;
+  kind: PlanningStageKind;
+  runId: string;
+  status: PlanningStageStatus;
+  investigationDepth?: PlanInvestigationDepth;
+  modelBinding?: ResolvedModelBinding;
+  evidenceRefs: string[];
+  reviewApproved?: boolean;
+  reviewIssues?: PlanReviewIssue[];
+  revisionAttempted?: boolean;
+  startedAt?: string;
+  completedAt?: string;
+  latencyMs?: number;
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+  };
+  error?: string;
+};
+
+export type PlanQualityIssueCode =
+  | "INVALID_SCHEMA"
+  | "INVALID_DAG"
+  | "UNKNOWN_SKILL"
+  | "SKILL_INPUT_MISSING"
+  | "SKILL_INPUT_INVALID"
+  | "UNKNOWN_TOOL"
+  | "INVALID_ACCEPTANCE_CHECK"
+  | "MISSING_EVIDENCE"
+  | "INSUFFICIENT_DETERMINISTIC_ACCEPTANCE"
+  | "UNRESOLVED_AMBIGUITY"
+  | "UNMITIGATED_CRITICAL_RISK"
+  | "MODEL_REVIEW_REJECTED"
+  | "ILLEGAL_CAPABILITY";
+
+export type PlanQualityIssue = {
+  code: PlanQualityIssueCode;
+  severity: "warning" | "blocking";
+  message: string;
+  milestoneId?: string;
+  checkId?: string;
+  evidenceRefs?: string[];
+};
+
+export type PlanQualityReport = {
+  status: PlanActionGate;
+  blockingIssues: PlanQualityIssue[];
+  warnings: PlanQualityIssue[];
+  evidenceCoverage: {
+    referenced: number;
+    total: number;
+    missingRefs: string[];
+  };
+  acceptanceCoverage: {
+    deterministicChecks: number;
+    modelReviewChecks: number;
+    totalChecks: number;
+    milestonesCovered: number;
+    milestonesTotal: number;
+  };
+  generatedAt: string;
 };
 
 export type PlanMilestone = {
@@ -61,6 +221,11 @@ export type PlanMilestone = {
   description: string;
   acceptanceCriteria: string[];
   dependencies: string[];
+  targetRefs?: string[];
+  evidenceRefs?: string[];
+  actions?: string[];
+  toolNames?: string[];
+  acceptanceChecks?: AcceptanceCheck[];
 };
 
 export type PlanRisk = {
@@ -84,6 +249,7 @@ export type PlanProposal = {
   dependencies: string[];
   risks: PlanRisk[];
   acceptanceCriteria: string[];
+  acceptanceChecks?: AcceptanceCheck[];
 };
 
 export type DebateCritiqueIssue = {
@@ -160,6 +326,7 @@ export type PlanProjection = {
 };
 
 export type PlanRecord = {
+  schemaVersion?: PlanSchemaVersion;
   id: string;
   sessionId: string;
   workspaceId?: string;
@@ -167,11 +334,18 @@ export type PlanRecord = {
   sourceMessage: string;
   baseSourceMessage?: string;
   clarifications?: string[];
+  requestedSkillName?: string | null;
   selectedSkill?: GoalSelectedSkill;
   mode: PlanMode;
   status: PlanStatus;
   actionGate: PlanActionGate;
   revision: number;
+  taskProfile?: PlanTaskProfile;
+  planningBrief?: PlanningBrief;
+  planningStages?: PlanningStageRecord[];
+  skillDecision?: PlanSkillDecision;
+  selectedSkillInputValues?: Record<string, SkillInputValue>;
+  qualityReport?: PlanQualityReport;
   taskContract: PlanTaskContract;
   evidence: PlanEvidenceItem[];
   requestedModelAssignments: PlanModelAssignments;
@@ -192,6 +366,7 @@ export type CreatePlanInput = {
   workspaceId?: string;
   workspaceRoot?: string;
   sourceMessage: string;
+  requestedSkillName?: string | null;
   selectedSkill?: GoalSelectedSkill;
   mode: PlanMode;
   modelAssignments?: PlanModelAssignments;

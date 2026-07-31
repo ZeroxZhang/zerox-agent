@@ -23,6 +23,10 @@ import type { ChatOutputPart } from "../shared/chatOutput";
 import type { AcceptanceValidator } from "./agentGoalValidatorRegistry";
 import type { AcceptanceContext } from "./agentGoalAcceptance";
 import type { PlanArtifact, PlanRecord } from "../shared/planMode";
+import {
+  createPlanQualityReport,
+  createPlanTaskProfile,
+} from "./plannerKernel";
 
 const execFileAsync = promisify(execFileCallback);
 
@@ -270,7 +274,12 @@ describe("app container goal drafts", () => {
     } else {
       process.env.BUILDING_AGENT_TOOL_WORKER = originalLegacyToolWorkerEnv;
     }
-    await rm(tempDir, { force: true, recursive: true });
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+      maxRetries: 5,
+      retryDelay: 20,
+    });
   });
 
   it("wires ZEROX_TOOL_WORKER=subprocess through the production container worker", () => {
@@ -1924,6 +1933,186 @@ describe("app container goal drafts", () => {
     await container.runGoalOperation(
       first.activeGoal.id,
       () => container.goalChatService().cancel(first.activeGoal.id),
+      { preempt: true },
+    );
+    await container.shutdownRuntime();
+  });
+
+  it("preserves v2 typed acceptance checks unchanged when confirming into Goal", async () => {
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const workspaceRoot = path.join(tempDir, "typed-plan-workspace");
+    await mkdir(workspaceRoot, { recursive: true });
+    await writeFile(path.join(workspaceRoot, "result.json"), '{"status":"ok"}');
+    const session = await container.chatSessionStore().appendMessage({
+      role: "user",
+      content: "确认类型化验收计划",
+    });
+    const profile = createPlanTaskProfile("整理工作区文件并验证 result.json");
+    const evidence = [
+      {
+        id: "evidence_user_request",
+        kind: "user" as const,
+        title: "用户需求",
+        summary: "整理工作区文件并验证 result.json",
+      },
+    ];
+    const planningBrief = {
+      objective: "整理工作区文件并验证 result.json",
+      deliverables: ["result.json 保持可验证"],
+      inScope: ["result.json"],
+      outOfScope: ["外部发布"],
+      constraints: ["确认前只读"],
+      assumptions: [],
+      unresolvedQuestions: [],
+      targetRefs: ["result.json"],
+      evidenceRefs: ["evidence_user_request"],
+      skillCandidates: [],
+    };
+    const goalTypedCheck = {
+      id: "goal-result-file-exists",
+      kind: "file_exists" as const,
+      description: "result.json 存在",
+      params: { path: "result.json" },
+      requiresEvidence: false,
+    };
+    const milestoneTypedCheck = {
+      ...goalTypedCheck,
+      id: "milestone-result-file-exists",
+    };
+    const artifact: PlanArtifact = {
+      title: "类型化验收计划",
+      summary: "保留检查合同",
+      objective: planningBrief.objective,
+      scope: { in: ["result.json"], out: ["外部发布"] },
+      assumptions: [],
+      milestones: [
+        {
+          id: "m1",
+          title: "验证文件",
+          description: "验证 result.json",
+          acceptanceCriteria: ["result.json 存在"],
+          dependencies: [],
+          targetRefs: ["result.json"],
+          evidenceRefs: ["evidence_user_request"],
+          actions: ["验证文件存在"],
+          toolNames: [],
+          acceptanceChecks: [milestoneTypedCheck],
+        },
+      ],
+      dependencies: [],
+      risks: [],
+      acceptanceCriteria: ["result.json 存在"],
+      acceptanceChecks: [goalTypedCheck],
+      claimLedger: [
+        {
+          id: "claim-1",
+          claim: "用户要求验证 result.json",
+          evidenceRefs: ["evidence_user_request"],
+          counterexamples: [],
+          conditions: [],
+          confidence: 1,
+          status: "verified",
+        },
+      ],
+      unresolvedQuestions: [],
+      minorityOpinion: [],
+      actionGate: "ready",
+      gateReason: "代码门禁通过",
+      markdown: "",
+    };
+    const qualityReport = createPlanQualityReport({
+      artifact,
+      profile,
+      brief: planningBrief,
+      evidence,
+      workspaceRoot,
+      now: "2026-07-31T00:00:00.000Z",
+    });
+    expect(qualityReport.status).toBe("ready");
+    const plan: PlanRecord = {
+      schemaVersion: 2,
+      id: "plan_typed_acceptance",
+      sessionId: session.session.id,
+      workspaceRoot,
+      sourceMessage: planningBrief.objective,
+      mode: "direct",
+      status: "awaiting_confirmation",
+      actionGate: "ready",
+      revision: 1,
+      taskProfile: profile,
+      planningBrief,
+      planningStages: [
+        "triage",
+        "investigation",
+        "skill_route",
+        "contract",
+        "generation",
+        "review",
+        "quality",
+      ].map((kind, index) => ({
+        id: `stage-${kind}`,
+        kind: kind as
+          | "triage"
+          | "investigation"
+          | "skill_route"
+          | "contract"
+          | "generation"
+          | "review"
+          | "quality",
+        runId: `run-${kind}`,
+        status: "completed" as const,
+        evidenceRefs: ["evidence_user_request"],
+        ...(kind === "review"
+          ? { reviewApproved: true, reviewIssues: [] }
+          : {}),
+        startedAt: `2026-07-31T00:00:0${index}.000Z`,
+        completedAt: `2026-07-31T00:00:0${index}.000Z`,
+      })),
+      taskContract: {
+        objective: planningBrief.objective,
+        audience: "user",
+        deliverables: planningBrief.deliverables,
+        inScope: planningBrief.inScope,
+        outOfScope: planningBrief.outOfScope,
+        constraints: planningBrief.constraints,
+        successCriteria: artifact.acceptanceCriteria,
+        assumptions: [],
+        targetRefs: planningBrief.targetRefs,
+        evidenceRefs: planningBrief.evidenceRefs,
+      },
+      evidence,
+      requestedModelAssignments: {},
+      frozenModelAssignments: {},
+      rounds: [],
+      finalArtifact: artifact,
+      qualityReport,
+      createdAt: "2026-07-31T00:00:00.000Z",
+      updatedAt: "2026-07-31T00:00:00.000Z",
+    };
+    const projection = await container.planArtifactWriter().write(plan, artifact);
+    await container.planStore().create({ ...plan, projection });
+
+    const result = await container.confirmPlan({
+      planId: plan.id,
+      expectedRevision: plan.revision,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const goal = await container.agentGoalStore().get(result.activeGoal.id);
+    expect(goal?.successCriteria[0]?.acceptanceChecks[0]).toEqual(
+      goalTypedCheck,
+    );
+    expect(
+      goal?.milestones[0]?.successCriteria[0]?.acceptanceChecks[0],
+    ).toEqual(milestoneTypedCheck);
+    await container.runGoalOperation(
+      result.activeGoal.id,
+      () => container.goalChatService().cancel(result.activeGoal.id),
       { preempt: true },
     );
     await container.shutdownRuntime();

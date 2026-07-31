@@ -1,7 +1,59 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-07-31T14:56:48.000+08:00",
+  "updatedAt": "2026-07-31T16:56:55.000+08:00",
   "features": [
+    {
+      "id": "P58-professional-planner-kernel-v2",
+      "priority": 88,
+      "status": "done",
+      "title": "Professional Planner Kernel v2 for evidence-grounded Direct and Debate Goal planning",
+      "files": [
+        ".zerox/feature_list.json",
+        ".zerox/progress.md",
+        "src/shared/planMode.ts",
+        "src/shared/planValidation.ts",
+        "src/shared/planStructuredOutput.ts",
+        "src/main/acceptanceContractValidator.ts",
+        "src/main/plannerKernel.ts",
+        "src/main/planInvestigatorService.ts",
+        "src/main/planDebateOrchestrator.ts",
+        "src/main/planArtifactWriter.ts",
+        "src/main/planEvidenceVerifier.ts",
+        "src/main/nativeGitTools.ts",
+        "src/main/planModePolicy.ts",
+        "src/main/planStore.ts",
+        "src/main/agentGoalAcceptance.ts",
+        "src/main/container.ts",
+        "src/renderer/components/AgentChatPanel.tsx",
+        "src/renderer/styles/cards.css",
+        "src/main/acceptanceContractValidator.test.ts",
+        "src/main/plannerKernel.test.ts",
+        "src/main/plannerKernel.eval.test.ts",
+        "src/main/planInvestigatorService.test.ts",
+        "src/main/planDebateOrchestrator.test.ts",
+        "src/main/planEvidenceVerifier.test.ts",
+        "src/main/planStore.test.ts",
+        "src/main/container.test.ts",
+        "src/shared/packageScripts.test.ts"
+      ],
+      "definitionOfDone": [
+        "New Goal plans use a versioned Planner v2 pipeline with task profiling, read-only investigation, a structured planning brief, Skill routing, and a code-owned quality gate",
+        "Direct uses isolated same-profile investigation, generation, and review stages while Debate preserves A1, B1, A2, B2, C",
+        "Explicit Skill selection wins, safe automatic Skill selection is visible, and required Skill inputs block confirmation before permissions become active",
+        "Typed deterministic and evidence-backed acceptance checks survive Plan confirmation into Goal execution",
+        "Historical v1 Plans remain readable and recoverable without silent migration or fallback",
+        "Focused Planner, confirmation, permission, compatibility, and renderer tests pass with project verification evidence"
+      ],
+      "verification": [
+        "focused Planner v2 unit and integration suites",
+        "npm test",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "git diff --check"
+      ]
+    },
     {
       "id": "P57-v3.8.1-remove-local-task-budget-stops",
       "priority": 87,

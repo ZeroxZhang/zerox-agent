@@ -39,6 +39,7 @@ export function parseUniquePlanRoundObject<T>(
 export function assertValidPlanRoundShape(
   kind: DebateRoundKind,
   value: Record<string, unknown>,
+  schemaVersion: 1 | 2 = 1,
 ): void {
   if (kind === "b1" || kind === "b2") {
     assertNonEmptyString(value.summary, "summary");
@@ -69,7 +70,7 @@ export function assertValidPlanRoundShape(
     return;
   }
 
-  assertProposalShape(value);
+  assertProposalShape(value, schemaVersion);
   if (kind === "a2") {
     assertObjectArray(value.decisions, "decisions", (decision, index) => {
       const prefix = `decisions[${index}]`;
@@ -112,7 +113,10 @@ export function assertValidPlanRoundShape(
   }
 }
 
-function assertProposalShape(value: Record<string, unknown>): void {
+function assertProposalShape(
+  value: Record<string, unknown>,
+  schemaVersion: 1 | 2,
+): void {
   for (const key of ["title", "summary", "objective"] as const) {
     assertNonEmptyString(value[key], key);
   }
@@ -134,6 +138,20 @@ function assertProposalShape(value: Record<string, unknown>): void {
         { requireNonEmpty: true },
       );
       assertStringArray(milestone.dependencies, `${prefix}.dependencies`);
+      if (schemaVersion === 2) {
+        assertStringArray(milestone.targetRefs, `${prefix}.targetRefs`);
+        assertStringArray(milestone.evidenceRefs, `${prefix}.evidenceRefs`);
+        assertStringArray(milestone.actions, `${prefix}.actions`, {
+          requireNonEmpty: true,
+        });
+        assertStringArray(milestone.toolNames, `${prefix}.toolNames`);
+        assertObjectArray(
+          milestone.acceptanceChecks,
+          `${prefix}.acceptanceChecks`,
+          assertAcceptanceCheckShape,
+          { requireNonEmpty: true },
+        );
+      }
     },
     { requireNonEmpty: true },
   );
@@ -142,6 +160,30 @@ function assertProposalShape(value: Record<string, unknown>): void {
   assertStringArray(value.acceptanceCriteria, "acceptanceCriteria", {
     requireNonEmpty: true,
   });
+  if (schemaVersion === 2) {
+    assertObjectArray(
+      value.acceptanceChecks,
+      "acceptanceChecks",
+      assertAcceptanceCheckShape,
+      { requireNonEmpty: true },
+    );
+  }
+}
+
+function assertAcceptanceCheckShape(
+  check: Record<string, unknown>,
+  index: number,
+): void {
+  const prefix = `acceptanceChecks[${index}]`;
+  assertNonEmptyString(check.id, `${prefix}.id`);
+  assertNonEmptyString(check.kind, `${prefix}.kind`);
+  assertNonEmptyString(check.description, `${prefix}.description`);
+  assertRecord(check.params, `${prefix}.params`);
+  if (typeof check.requiresEvidence !== "boolean") {
+    throw new Error(
+      `规划输出字段 ${prefix}.requiresEvidence 必须是布尔值。`,
+    );
+  }
 }
 
 function assertRiskShape(

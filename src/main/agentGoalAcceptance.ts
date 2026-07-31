@@ -55,6 +55,7 @@ import {
   modelServiceNoticeFromError,
   type ModelServiceNotice,
 } from "../shared/modelServiceNotice";
+import { validateAcceptanceCheckContract } from "./acceptanceContractValidator";
 
 const shellRedirectionOperatorPattern = /[<>]/;
 const defaultJudgeTimeoutMs = 30_000;
@@ -294,10 +295,34 @@ async function evaluateCriteria(
   },
 ): Promise<AcceptanceResult> {
   const checks = criteria.flatMap((criterion) => criterion.acceptanceChecks);
-  const deterministicChecks = checks.filter((check) => check.kind !== "model_review");
+  const checkResults: CheckResult[] = [];
+  const validChecks = checks.filter((check) => {
+    const validation = validateAcceptanceCheckContract(check, {
+      workspaceRoot: ctx.workspacePath,
+      deferRuntimeChecks: true,
+    });
+    if (validation.valid) return true;
+    checkResults.push(
+      checkResult(
+        check,
+        false,
+        [],
+        validation.errors.join(" "),
+        "acceptance_contract_invalid",
+        "plan_structure_invalid",
+      ),
+    );
+    return false;
+  });
+  const deterministicChecks = validChecks.filter(
+    (check) => check.kind !== "model_review",
+  );
   const modelReviewChecks = criteria.flatMap((criterion) =>
     criterion.acceptanceChecks
-      .filter((check) => check.kind === "model_review")
+      .filter(
+        (check) =>
+          check.kind === "model_review" && validChecks.includes(check),
+      )
       .map((check) => ({
         check,
         criterionText: [
@@ -309,8 +334,6 @@ async function evaluateCriteria(
           .join("\n"),
       })),
   );
-  const checkResults: CheckResult[] = [];
-
   for (const check of deterministicChecks) {
     checkResults.push(
       bindValidatorResult(check, await evaluation.registry.evaluate(check, ctx)),

@@ -1,8 +1,113 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
+import { lstat, readFile } from "node:fs/promises";
+import path from "node:path";
 import { promisify } from "node:util";
 import type { AgentToolExecutionResult } from "./dynamicToolRegistry";
 
 const execFileAsync = promisify(execFile);
+
+export type GitPlanningState = {
+  summary: string;
+  sha256: string;
+};
+
+export async function readGitPlanningState(args: {
+  workspaceRoot: string;
+}): Promise<GitPlanningState> {
+  if (!args.workspaceRoot) {
+    throw new Error("git planning state requires workspaceRoot.");
+  }
+  const [head, branch, status, unstaged, staged, untracked] = await Promise.all([
+    gitOptional(args.workspaceRoot, ["rev-parse", "--verify", "HEAD"]),
+    git(args.workspaceRoot, ["branch", "--show-current"]),
+    git(args.workspaceRoot, ["status", "--porcelain=v1", "--untracked-files=all"]),
+    git(args.workspaceRoot, [
+      "diff",
+      "--binary",
+      "--no-ext-diff",
+      "--no-textconv",
+    ]),
+    git(args.workspaceRoot, [
+      "diff",
+      "--cached",
+      "--binary",
+      "--no-ext-diff",
+      "--no-textconv",
+    ]),
+    git(args.workspaceRoot, [
+      "ls-files",
+      "--others",
+      "--exclude-standard",
+      "-z",
+    ]),
+  ]);
+  const untrackedFiles = await fingerprintUntrackedFiles(
+    args.workspaceRoot,
+    untracked.stdout.split("\u0000").filter(Boolean),
+  );
+  const state = {
+    head: head.stdout.trim(),
+    branch: branch.stdout.trim(),
+    status: status.stdout,
+    unstagedDiffSha256: hash(unstaged.stdout),
+    stagedDiffSha256: hash(staged.stdout),
+    untrackedFiles,
+  };
+  return {
+    summary: JSON.stringify(state),
+    sha256: hash(JSON.stringify(state)),
+  };
+}
+
+async function fingerprintUntrackedFiles(
+  workspaceRoot: string,
+  relativePaths: string[],
+): Promise<
+  Array<{
+    path: string;
+    size: number;
+    sha256?: string;
+    modifiedAtMs?: number;
+    truncated?: boolean;
+  }>
+> {
+  const root = path.resolve(workspaceRoot);
+  const fingerprints = [];
+  for (const relativePath of relativePaths.sort().slice(0, 80)) {
+    const candidate = path.resolve(root, relativePath);
+    const relative = path.relative(root, candidate);
+    if (relative.startsWith("..") || path.isAbsolute(relative)) continue;
+    try {
+      const info = await lstat(candidate);
+      if (!info.isFile()) continue;
+      if (info.size > 1024 * 1024) {
+        fingerprints.push({
+          path: relativePath,
+          size: info.size,
+          modifiedAtMs: info.mtimeMs,
+          truncated: true,
+        });
+        continue;
+      }
+      fingerprints.push({
+        path: relativePath,
+        size: info.size,
+        sha256: hash(await readFile(candidate)),
+      });
+    } catch {
+      fingerprints.push({ path: relativePath, size: -1 });
+    }
+  }
+  if (relativePaths.length > 80) {
+    fingerprints.push({
+      path: `__truncated__:${relativePaths.length - 80}`,
+      size: -1,
+      truncated: true,
+    });
+  }
+  return fingerprints;
+}
 
 export async function readGitStatus(args: {
   workspaceRoot: string;
@@ -82,4 +187,16 @@ async function git(cwd: string, args: string[]) {
       `git ${args.join(" ")} failed: ${typed.stderr || typed.message}`,
     );
   }
+}
+
+async function gitOptional(cwd: string, args: string[]) {
+  try {
+    return await git(cwd, args);
+  } catch {
+    return { stdout: "", stderr: "" };
+  }
+}
+
+function hash(value: string | NodeJS.ArrayBufferView): string {
+  return createHash("sha256").update(value).digest("hex");
 }

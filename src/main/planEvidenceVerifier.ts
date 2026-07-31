@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import type { PlanEvidenceItem, PlanRecord } from "../shared/planMode";
+import { readGitPlanningState } from "./nativeGitTools";
 
 export type PlanEvidenceVerification = {
   ok: boolean;
@@ -22,13 +23,24 @@ export async function verifyPlanEvidence(
   }
   const driftedEvidenceIds: string[] = [];
   for (const evidence of plan.evidence) {
-    if (!evidence.sha256 || !evidence.sourceRef) {
-      continue;
+    let drifted = false;
+    if (evidence.sha256 && evidence.sourceRef) {
+      const current = await resolveCurrentEvidenceHash(root, evidence).catch(
+        () => null,
+      );
+      drifted = current !== evidence.sha256;
     }
-    const current = await resolveCurrentEvidenceHash(root, evidence).catch(
-      () => null,
-    );
-    if (current !== evidence.sha256) {
+    for (const sourceHash of evidence.sourceHashes ?? []) {
+      const current = await resolveCurrentSourceHash(
+        root,
+        sourceHash.sourceRef,
+      ).catch(() => null);
+      if (current !== sourceHash.sha256) {
+        drifted = true;
+        break;
+      }
+    }
+    if (drifted) {
       driftedEvidenceIds.push(evidence.id);
     }
   }
@@ -36,6 +48,15 @@ export async function verifyPlanEvidence(
     ok: driftedEvidenceIds.length === 0,
     driftedEvidenceIds,
   };
+}
+
+async function resolveCurrentSourceHash(
+  root: string,
+  sourceRef: string,
+): Promise<string> {
+  const source = await realpath(sourceRef);
+  assertInside(root, source);
+  return hash(await readFile(source));
 }
 
 async function resolveCurrentEvidenceHash(
@@ -54,6 +75,15 @@ async function resolveCurrentEvidenceHash(
     return hash(inventory);
   }
   if (evidence.kind === "git") {
+    if (evidence.id === "evidence_git_state") {
+      const source = await realpath(evidence.sourceRef!);
+      assertInside(root, source);
+      return (
+        await readGitPlanningState({
+          workspaceRoot: source,
+        })
+      ).sha256;
+    }
     const gitDir = await realpath(evidence.sourceRef!);
     assertInside(root, gitDir);
     const head = (await readFile(path.join(gitDir, "HEAD"), "utf8")).trim();
@@ -84,6 +114,6 @@ function assertInside(root: string, target: string): void {
   }
 }
 
-function hash(value: string): string {
+function hash(value: string | NodeJS.ArrayBufferView): string {
   return createHash("sha256").update(value).digest("hex");
 }

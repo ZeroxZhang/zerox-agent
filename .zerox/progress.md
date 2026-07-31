@@ -1,5 +1,73 @@
 # Zerox Harness Progress
 
+## 2026-07-31 - Professional Planner Kernel v2
+
+- Added a versioned Planner v2 pipeline for every newly created Goal Plan:
+  task profiling, adaptive read-only investigation, a structured
+  `PlanningBrief`, Skill routing, task-contract generation, candidate
+  generation, independent review, and a code-owned quality gate. Historical
+  v1 records are normalized as v1 on read and retain their legacy retry,
+  confirmation, and projection lifecycle.
+- Reused the production Agent Loop and all three permission layers for
+  investigation. Planner runs use `runMode: "plan"`, a read-only workspace
+  sandbox, no Shell/write permissions, depth-scoped tool visibility, isolated
+  run IDs, recoverable stage records, and model-visible stable
+  `planningEvidenceRef` values. Only public conclusions, bounded tool evidence,
+  and hashes are persisted.
+- Implemented evidence-grounded Skill routing:
+  - an explicit `@skill` remains authoritative, including a replacement Skill
+    named in later clarification;
+  - automatic recommendations are constrained to the installed Skill
+    inventory and ambiguous material choices enter `needs_input`;
+  - manifest inputs are resolved before confirmation, non-default values
+    require real evidence references, and the Plan records the source, reason,
+    alternatives, snapshot hash, values, input evidence, and permission
+    summary;
+  - confirmation re-discovers the installed Skill, detects snapshot/input
+    drift, and does not activate permissions until the Goal starts.
+- Direct now uses one frozen model profile across isolated investigation,
+  generation, and cold-review contexts. A high-severity repairable review may
+  trigger one structured revision before the code gate. Debate still executes
+  `A1 → B1 → A2 → B2 → C`; roles exchange only the public task profile,
+  PlanningBrief, contract, evidence, Skill decision, and prior structured
+  outputs.
+- Added versioned structured milestones with target references, evidence
+  references, execution actions, declared tool names, and typed acceptance
+  checks. A shared static validator covers `file_exists`, `test_passes`,
+  `command_exit_code`, `assertion`, and evidence-backed `model_review`.
+  Planner validation and live Goal Acceptance both invoke the contract; live
+  execution retains its richer location/provenance checks.
+- The quality gate now owns the final `ready`, `needs_input`, or `blocked`
+  state. It validates the milestone DAG, known tools, Skill inputs, command and
+  path shapes, evidence coverage, critical risks, and deterministic coverage
+  for code/file/data work. Model-provided `actionGate` values are advisory.
+  Confirmation reruns the gate and preserves typed checks unchanged when
+  constructing Goal and milestone success criteria.
+- Expanded the confirmation card with investigation depth and stage progress,
+  task contract, automatic/explicit Skill rationale, values and permission
+  summary, typed checks, evidence, and quality issues. Failed investigation,
+  review, and quality stages remain recoverable through the existing retry
+  action.
+- Incorporated the supplied workflow-planner reference where it aligned with
+  Zerox boundaries: deterministic phase orchestration, structured boundaries,
+  self-contained isolated contexts, code-owned coordination, independent
+  verification, failure tolerance, and observable progress. Model tier
+  switching and unrestricted subagent fan-out were intentionally not adopted
+  because Direct keeps one frozen profile and Plan Mode remains permissioned.
+- Strict pre-merge review closed recovery, review-isolation, evidence-drift,
+  prompt-injection, Skill replacement, typed-acceptance compatibility, and
+  confirmation-stage validation gaps. Malformed structured briefs now fail
+  closed with a recoverable failed investigation stage.
+- Verification evidence:
+  - focused Planner/confirmation/permission/compatibility suite: 10 files,
+    224 tests passed;
+  - final `npm test`: 234 files / 2,348 tests passed;
+  - `npm run verify`: 234 files / 2,348 tests, production build, Agent evals
+    26/26, and Memory evals 2/2 passed;
+  - `npm run smoke:prod`: Electron rendered the production agent chat UI;
+  - `npm run harness:check`, TypeScript main/renderer checks, and
+    `git diff --check`: passed.
+
 ## 2026-07-31 - v3.8.1 Local Task-Budget Stop Removal
 
 - Removed Zerox-owned task termination based on accumulated Token usage,

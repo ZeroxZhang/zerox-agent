@@ -1,5 +1,5 @@
 import { app, BrowserWindow, safeStorage } from "electron";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import { createAgentExecutionStore } from "./agentExecutionStore";
 import {
@@ -99,12 +99,16 @@ import { createModelRouter } from "./providers/modelRouter";
 import { createPlanStore } from "./planStore";
 import { createPlanArtifactWriter } from "./planArtifactWriter";
 import { createPlanDebateOrchestrator } from "./planDebateOrchestrator";
+import { createPlanInvestigatorService } from "./planInvestigatorService";
+import { createPlanQualityReport } from "./plannerKernel";
+import { resolveSkillInput } from "./skillExecutionService";
 import { verifyPlanEvidence } from "./planEvidenceVerifier";
 import {
   isPlanConfirmable,
   type ConfirmPlanInput,
   type ConfirmPlanResult,
   type PlanArtifact,
+  type PlanningStageKind,
   type PlanRecord,
   type PlanStatus,
 } from "../shared/planMode";
@@ -1001,6 +1005,20 @@ export function createAppContainer(options: {
         planStore: planStore(),
         artifactWriter: planArtifactWriter(),
         modelRouter: modelRouter(),
+        investigator: createPlanInvestigatorService({
+          toolExecutor: createToolExecutor(),
+          toolAuthorizationService: toolAuthorizationService(),
+          discoverSkills: () => discoverSkills({ skillsDir }),
+        }),
+        discoverSkills: () => discoverSkills({ skillsDir }),
+        availableToolNames: () =>
+          createToolExecutor()
+            .getRegistry()
+            .getDefinitions()
+            .map((definition) => definition.function.name),
+        availableAcceptanceKinds: () =>
+          agentGoalValidatorRegistry().listKinds(),
+        enableDirectReview: true,
       }),
     );
   }
@@ -2271,6 +2289,160 @@ export function createAppContainer(options: {
           plan,
         };
       }
+      if (plan.schemaVersion === 2) {
+        if (!plan.taskProfile || !plan.planningBrief || !plan.qualityReport) {
+          return {
+            ok: false,
+            message: "v2 计划缺少任务画像、调查摘要或质量报告，请重新规划。",
+            plan,
+          };
+        }
+        const completedStageKinds = new Set(
+          (plan.planningStages ?? [])
+            .filter((stage) => stage.status === "completed")
+            .map((stage) => stage.kind),
+        );
+        const requiredStageKinds: PlanningStageKind[] = [
+          "triage",
+          "investigation",
+          "skill_route",
+          "contract",
+          "generation",
+        ];
+        if (plan.mode === "direct") requiredStageKinds.push("review");
+        requiredStageKinds.push("quality");
+        const missingStageKinds = requiredStageKinds.filter(
+          (kind) => !completedStageKinds.has(kind),
+        );
+        if (missingStageKinds.length > 0) {
+          return {
+            ok: false,
+            message: `v2 计划缺少已完成阶段：${missingStageKinds.join("、")}。`,
+            plan,
+          };
+        }
+        const completedReviewStage = [...(plan.planningStages ?? [])]
+          .reverse()
+          .find(
+            (stage) =>
+              stage.kind === "review" &&
+              stage.status === "completed",
+          );
+        if (
+          plan.mode === "direct" &&
+          typeof completedReviewStage?.reviewApproved !== "boolean"
+        ) {
+          return {
+            ok: false,
+            message: "v2 Direct 计划缺少独立审查结论，请重新规划。",
+            plan,
+          };
+        }
+        const refreshedQuality = createPlanQualityReport({
+          artifact,
+          profile: plan.taskProfile,
+          brief: plan.planningBrief,
+          evidence: plan.evidence,
+          skillDecision: plan.skillDecision,
+          workspaceRoot: plan.workspaceRoot,
+          availableToolNames: [
+            ...createToolExecutor()
+              .getRegistry()
+              .getDefinitions()
+              .map((definition) => definition.function.name),
+            ...(plan.selectedSkill?.manifest.tools?.map(
+              (tool) => tool.name,
+            ) ?? []),
+          ],
+          reviewApproved: completedReviewStage?.reviewApproved,
+          reviewIssues: completedReviewStage?.reviewIssues,
+          availableAcceptanceKinds:
+            agentGoalValidatorRegistry().listKinds(),
+          now: new Date().toISOString(),
+        });
+        if (refreshedQuality.status !== "ready") {
+          return {
+            ok: false,
+            message: `计划质量门禁已失效：${refreshedQuality.blockingIssues
+              .map((issue) => issue.message)
+              .join(" ")}`,
+            plan,
+          };
+        }
+        if (
+          plan.skillDecision?.selectedSkillName !==
+          plan.selectedSkill?.manifest.name
+        ) {
+          return {
+            ok: false,
+            message: "计划中的 Skill 决策与绑定快照不一致，请重新规划。",
+            plan,
+          };
+        }
+        if (
+          plan.selectedSkill &&
+          !plan.skillDecision?.snapshotSha256
+        ) {
+          return {
+            ok: false,
+            message: "计划绑定的 Skill 缺少快照哈希，请重新规划。",
+            plan,
+          };
+        }
+        if (plan.selectedSkill && plan.skillDecision?.snapshotSha256) {
+          const selectedSkillName = plan.selectedSkill.manifest.name;
+          const currentSkill = (await discoverSkills({ skillsDir })).skills.find(
+            (skill) => skill.manifest.name === selectedSkillName,
+          );
+          if (!currentSkill) {
+            return {
+              ok: false,
+              message: "计划绑定的 Skill 已不存在，请重新规划后再确认。",
+              plan,
+            };
+          }
+          const currentSkillHash = createHash("sha256")
+            .update(
+              JSON.stringify(currentSkill.manifest) + currentSkill.body,
+            )
+            .digest("hex");
+          if (currentSkillHash !== plan.skillDecision.snapshotSha256) {
+            return {
+              ok: false,
+              message: "计划绑定的 Skill 快照已漂移，请重新规划后再确认。",
+              plan,
+            };
+          }
+          const inputResolution = resolveSkillInput({
+            skill: plan.selectedSkill,
+            values: plan.selectedSkillInputValues,
+            runContext: plan.workspaceRoot
+              ? {
+                  workspaceId: plan.workspaceId ?? "planner-workspace",
+                  workspaceRoot: plan.workspaceRoot,
+                  runMode: "plan",
+                  agentRole: "planner",
+                  depth: 0,
+                  sandbox: {
+                    mode: "read_only",
+                    network: "none",
+                    shell: "disabled",
+                    allowWorkspaceEscape: false,
+                    extraReadRoots: [],
+                    extraWriteRoots: [],
+                  },
+                }
+              : undefined,
+          });
+          if (inputResolution.status !== "complete") {
+            return {
+              ok: false,
+              message: "计划绑定的 Skill 输入缺失或已失效，请补充信息后重新规划。",
+              plan,
+            };
+          }
+        }
+      }
       let milestoneGraph: ReturnType<typeof validatePlanMilestoneGraph>;
       try {
         milestoneGraph = validatePlanMilestoneGraph(artifact.milestones);
@@ -2300,6 +2472,45 @@ export function createAppContainer(options: {
       const criteria = artifact.acceptanceCriteria.length
         ? artifact.acceptanceCriteria
         : [`完成计划目标：${artifact.objective}`];
+      const goalSuccessCriteria =
+        plan.schemaVersion === 2 && artifact.acceptanceChecks?.length
+          ? artifact.acceptanceChecks.map((check, index) => ({
+              id: `criterion_${index + 1}`,
+              description: check.description,
+              acceptanceChecks: [structuredClone(check)],
+            }))
+          : criteria.map((description, index) => ({
+              id: `criterion_${index + 1}`,
+              description,
+              acceptanceChecks: [
+                {
+                  id: `criterion_${index + 1}_review`,
+                  kind: "model_review" as const,
+                  description: "根据执行轨迹和产物验证计划验收条件。",
+                  params: {
+                    condition: description,
+                    evidenceRefs: ["artifact:goalEvidence"],
+                  },
+                  requiresEvidence: true,
+                },
+              ],
+            }));
+      const milestoneChecks = artifact.milestones.flatMap(
+        (milestone) => milestone.acceptanceChecks ?? [],
+      );
+      const confirmedPlanSchemaVersion = plan.schemaVersion;
+      const allPlanChecks = [
+        ...goalSuccessCriteria.flatMap(
+          (criterion) => criterion.acceptanceChecks,
+        ),
+        ...milestoneChecks,
+      ];
+      const deterministicCheckCount = allPlanChecks.filter(
+        (check) => check.kind !== "model_review",
+      ).length;
+      const modelReviewCheckCount = allPlanChecks.filter(
+        (check) => check.kind === "model_review",
+      ).length;
       const draft: GoalDraft = {
         id: plan.id,
         sessionId: plan.sessionId,
@@ -2308,59 +2519,61 @@ export function createAppContainer(options: {
         ...(plan.selectedSkill
           ? { selectedSkill: structuredClone(plan.selectedSkill) }
           : {}),
-        ...defaultSelectedSkillInputValues(plan),
+        ...(plan.schemaVersion === 2
+          ? plan.selectedSkillInputValues &&
+            Object.keys(plan.selectedSkillInputValues).length > 0
+            ? {
+                selectedSkillInputValues: structuredClone(
+                  plan.selectedSkillInputValues,
+                ),
+              }
+            : {}
+          : defaultSelectedSkillInputValues(plan)),
         normalizedDescription: artifact.objective,
         sourcePlanRef: {
           planId: plan.id,
           revision: confirmedPlanRevision,
           sha256: projection.sha256,
         },
-        successCriteria: criteria.map((description, index) => ({
-          id: `criterion_${index + 1}`,
-          description,
-          acceptanceChecks: [
-            {
-              id: `criterion_${index + 1}_review`,
-              kind: "model_review",
-              description: "根据执行轨迹和产物验证计划验收条件。",
-              params: {
-                condition: description,
-                evidenceRefs: ["artifact:goalEvidence"],
-              },
-              requiresEvidence: true,
-            },
-          ],
-        })),
+        successCriteria: goalSuccessCriteria,
         acceptanceCoverage: {
-          deterministicChecks: 0,
-          modelReviewChecks: criteria.length,
-          totalChecks: criteria.length,
-          hasDeterministicCoverage: false,
-          hasModelReviewCoverage: true,
+          deterministicChecks: deterministicCheckCount,
+          modelReviewChecks: modelReviewCheckCount,
+          totalChecks: allPlanChecks.length,
+          hasDeterministicCoverage: deterministicCheckCount > 0,
+          hasModelReviewCoverage: modelReviewCheckCount > 0,
         },
         warnings: [],
         milestones: artifact.milestones.map((milestone) => ({
           id: milestone.id,
           description: `${milestone.title}：${milestone.description}`,
           state: milestoneGraph.rootIds.has(milestone.id) ? "ready" : "pending",
-          successCriteria: milestone.acceptanceCriteria.map(
-            (description, criterionIndex) => ({
-              id: `${milestone.id}_criterion_${criterionIndex + 1}`,
-              description,
-              acceptanceChecks: [
-                {
-                  id: `${milestone.id}_criterion_${criterionIndex + 1}_review`,
-                  kind: "model_review",
-                  description: "根据里程碑执行证据验证条件。",
-                  params: {
-                    condition: description,
-                    evidenceRefs: ["artifact:goalEvidence"],
-                  },
-                  requiresEvidence: true,
-                },
-              ],
-            }),
-          ),
+          successCriteria:
+            confirmedPlanSchemaVersion === 2 &&
+            milestone.acceptanceChecks?.length
+              ? milestone.acceptanceChecks.map((check, criterionIndex) => ({
+                  id: `${milestone.id}_criterion_${criterionIndex + 1}`,
+                  description: check.description,
+                  acceptanceChecks: [structuredClone(check)],
+                }))
+              : milestone.acceptanceCriteria.map(
+                  (description, criterionIndex) => ({
+                    id: `${milestone.id}_criterion_${criterionIndex + 1}`,
+                    description,
+                    acceptanceChecks: [
+                      {
+                        id: `${milestone.id}_criterion_${criterionIndex + 1}_review`,
+                        kind: "model_review" as const,
+                        description: "根据里程碑执行证据验证条件。",
+                        params: {
+                          condition: description,
+                          evidenceRefs: ["artifact:goalEvidence"],
+                        },
+                        requiresEvidence: true,
+                      },
+                    ],
+                  }),
+                ),
           runIds: [],
           attempts: 0,
           dependsOn: milestoneGraph.dependenciesById.get(milestone.id) ?? [],

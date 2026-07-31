@@ -3834,12 +3834,24 @@ function PlanConfirmationCard(props: {
   onAnswerQuestions: (answers: string[]) => void;
 }) {
   const failedRound = props.plan.rounds.find((round) => round.status === "failed");
+  const failedPlanningStage = props.plan.planningStages?.find(
+    (stage) => stage.status === "failed",
+  );
   const chatProfiles = availableChatProfiles(props.catalog);
-  const failedProfileId = failedRound?.modelBinding.profileId ?? "";
+  const failedProfileId =
+    failedRound?.modelBinding.profileId ??
+    failedPlanningStage?.modelBinding?.profileId ??
+    "";
   const [replacementProfileId, setReplacementProfileId] = useState(failedProfileId);
   const artifact = props.plan.finalArtifact;
   const [planDetailsOpen, setPlanDetailsOpen] = useState(false);
-  const questions = artifact?.unresolvedQuestions ?? [];
+  const activePlanningStages = (props.plan.planningStages ?? []).filter(
+    (stage) => stage.status !== "invalidated",
+  );
+  const questions = [
+    ...(props.plan.planningBrief?.unresolvedQuestions ?? []),
+    ...(artifact?.unresolvedQuestions ?? []),
+  ].filter((question, index, values) => values.indexOf(question) === index);
   const [questionAnswers, setQuestionAnswers] = useState<string[]>([]);
   const canConfirm =
     props.plan.status === "awaiting_confirmation" &&
@@ -3852,7 +3864,7 @@ function PlanConfirmationCard(props: {
 
   useEffect(() => {
     setReplacementProfileId(failedProfileId);
-  }, [failedProfileId, failedRound?.id]);
+  }, [failedProfileId, failedPlanningStage?.id, failedRound?.id]);
 
   useEffect(() => {
     setPlanDetailsOpen(false);
@@ -3861,6 +3873,49 @@ function PlanConfirmationCard(props: {
   useEffect(() => {
     setQuestionAnswers(questions.map(() => ""));
   }, [props.plan.id, props.plan.revision, questions.length]);
+
+  const questionForm = questions.length ? (
+    <form
+      className="plan-input-required decision-question-form"
+      aria-label="确认前需要回答"
+      onSubmit={(event) => {
+        event.preventDefault();
+        props.onAnswerQuestions(questionAnswers);
+      }}
+    >
+      <header>
+        <span>需要你的回答</span>
+        <strong>补齐这些信息后继续规划</strong>
+      </header>
+      {questions.map((question, index) => (
+        <label key={question}>
+          <span>{question}</span>
+          <textarea
+            onChange={(event) =>
+              setQuestionAnswers((current) =>
+                current.map((answer, answerIndex) =>
+                  answerIndex === index ? event.currentTarget.value : answer,
+                ),
+              )
+            }
+            required
+            rows={2}
+            value={questionAnswers[index] ?? ""}
+          />
+        </label>
+      ))}
+      <button
+        className="primary-action"
+        disabled={
+          Boolean(props.pendingAction) ||
+          questionAnswers.some((answer) => !answer.trim())
+        }
+        type="submit"
+      >
+        提交回答并重新规划
+      </button>
+    </form>
+  ) : null;
 
   return (
     <section className="plan-confirmation-card" aria-label="终版计划确认">
@@ -3889,6 +3944,42 @@ function PlanConfirmationCard(props: {
         <p className="plan-input-routing-note" role="status">
           本次规划已中断，但会话仍保持只读 Plan Mode；请先丢弃计划，再决定是否退出目标模式。
         </p>
+      ) : null}
+
+      {props.plan.schemaVersion === 2 ? (
+        <details className="plan-progress-disclosure">
+          <summary>
+            规划内核 · {props.plan.taskProfile?.investigationDepth ?? "standard"} 调查 ·{" "}
+            {activePlanningStages.filter(
+              (stage) => stage.status === "completed",
+            ).length}
+            /{activePlanningStages.length} 阶段完成
+          </summary>
+          <ol className="debate-round-timeline" aria-label="规划内核阶段">
+            {activePlanningStages.map((stage) => (
+                <li className={`is-${stage.status}`} key={stage.id}>
+                  <strong>{stage.kind}</strong>
+                  <span>
+                    {formatDebateRoundStatus(
+                      stage.status === "failed"
+                        ? "failed"
+                        : stage.status === "running"
+                          ? "running"
+                          : stage.status === "completed"
+                            ? "completed"
+                            : "pending",
+                    )}
+                  </span>
+                  <small>
+                    {stage.modelBinding?.modelId ?? "代码阶段"}
+                    {stage.latencyMs !== undefined
+                      ? ` · ${stage.latencyMs} ms`
+                      : ""}
+                  </small>
+                </li>
+              ))}
+          </ol>
+        </details>
       ) : null}
 
       {props.plan.mode === "debate" ? (
@@ -3928,6 +4019,132 @@ function PlanConfirmationCard(props: {
         </details>
       ) : null}
 
+      {props.plan.schemaVersion === 2 ? (
+        <section className="plan-kernel-summary" aria-label="规划合同与 Skill 路由">
+          <div>
+            <span>任务合同</span>
+            <strong>{props.plan.taskContract.objective}</strong>
+            <small>
+              {(props.plan.taskContract.deliverables ?? []).join("；") ||
+                "等待调查明确交付物"}
+            </small>
+          </div>
+          <div>
+            <span>Skill 路由</span>
+            <strong>
+              {props.plan.skillDecision?.selectedSkillName
+                ? `@${props.plan.skillDecision.selectedSkillName}`
+                : "无 Skill"}
+              {props.plan.skillDecision
+                ? ` · ${props.plan.skillDecision.source}`
+                : ""}
+            </strong>
+            <small>{props.plan.skillDecision?.reason ?? "等待 Skill 路由"}</small>
+            {props.plan.skillDecision?.missingInputFields.length ? (
+              <small>
+                缺少输入：{props.plan.skillDecision.missingInputFields.join("、")}
+              </small>
+            ) : null}
+            {props.plan.skillDecision &&
+            Object.keys(props.plan.skillDecision.inputValues).length ? (
+              <small>
+                输入：
+                {Object.entries(props.plan.skillDecision.inputValues)
+                  .map(([name, value]) => `${name}=${String(value)}`)
+                  .join("；")}
+              </small>
+            ) : null}
+            {props.plan.skillDecision?.permissions ? (
+              <>
+                <small>
+                  文件读取：
+                  {props.plan.skillDecision.permissions.fileRead.join("、") ||
+                    "无"}
+                </small>
+                <small>
+                  文件写入：
+                  {props.plan.skillDecision.permissions.fileWrite.join("、") ||
+                    "无"}
+                </small>
+                <small>
+                  Shell：
+                  {props.plan.skillDecision.permissions.shellCommands.join(
+                    "、",
+                  ) || "无"}
+                </small>
+                <small>
+                  Web：
+                  {props.plan.skillDecision.permissions.webSearch
+                    ? "允许搜索"
+                    : "不允许搜索"}
+                  {props.plan.skillDecision.permissions.webFetchDomains.length
+                    ? `；域名 ${props.plan.skillDecision.permissions.webFetchDomains.join(
+                        "、",
+                      )}`
+                    : ""}
+                </small>
+                <small>
+                  Memory：读{" "}
+                  {props.plan.skillDecision.permissions.memoryRead
+                    ? "允许"
+                    : "禁止"}
+                  ；写{" "}
+                  {props.plan.skillDecision.permissions.memoryWrite
+                    ? "允许"
+                    : "禁止"}
+                </small>
+              </>
+            ) : null}
+          </div>
+          <div>
+            <span>调查证据</span>
+            <strong>{props.plan.evidence.length} 条</strong>
+            <ul className="plan-evidence-list">
+              {props.plan.evidence.map((item) => (
+                <li key={item.id}>
+                  <code>{item.id}</code>
+                  <small>
+                    {item.title}
+                    {item.sourceRef ? ` · ${item.sourceRef}` : ""}
+                  </small>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
+      ) : null}
+
+      {props.plan.qualityReport?.blockingIssues.length ? (
+        <section className="plan-quality-issues" aria-label="质量门禁问题">
+          <strong>质量门禁问题</strong>
+          <ul>
+            {props.plan.qualityReport.blockingIssues.map((issue, index) => (
+              <li
+                key={`${issue.code}-${issue.checkId ?? issue.milestoneId ?? index}`}
+              >
+                {issue.message}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      {props.plan.qualityReport?.warnings.length ? (
+        <section className="plan-quality-warnings" aria-label="质量门禁警告">
+          <strong>质量门禁警告</strong>
+          <ul>
+            {props.plan.qualityReport.warnings.map((issue, index) => (
+              <li
+                key={`${issue.code}-${issue.checkId ?? issue.milestoneId ?? index}`}
+              >
+                {issue.message}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {!artifact ? questionForm : null}
+
       {artifact ? (
         <div className="plan-artifact-summary">
           <p>{artifact.summary || artifact.objective}</p>
@@ -3935,47 +4152,7 @@ function PlanConfirmationCard(props: {
             <strong>{formatPlanGate(artifact.actionGate)}</strong>
             <span>{artifact.gateReason}</span>
           </div>
-          {artifact.unresolvedQuestions.length ? (
-            <form
-              className="plan-input-required decision-question-form"
-              aria-label="确认前需要回答"
-              onSubmit={(event) => {
-                event.preventDefault();
-                props.onAnswerQuestions(questionAnswers);
-              }}
-            >
-              <header>
-                <span>需要你的回答</span>
-                <strong>补齐这些信息后继续规划</strong>
-              </header>
-              {artifact.unresolvedQuestions.map((question, index) => (
-                <label key={question}>
-                  <span>{question}</span>
-                  <textarea
-                    onChange={(event) =>
-                      setQuestionAnswers((current) =>
-                        current.map((answer, answerIndex) =>
-                          answerIndex === index ? event.currentTarget.value : answer,
-                        ),
-                      )
-                    }
-                    required
-                    rows={2}
-                    value={questionAnswers[index] ?? ""}
-                  />
-                </label>
-                ))}
-              <button
-                className="primary-action"
-                disabled={
-                  Boolean(props.pendingAction) || questionAnswers.some((answer) => !answer.trim())
-                }
-                type="submit"
-              >
-                提交回答并重新规划
-              </button>
-            </form>
-          ) : null}
+          {questionForm}
           <details
             className="plan-artifact-disclosure"
             onToggle={(event) => setPlanDetailsOpen(event.currentTarget.open)}
@@ -3996,10 +4173,34 @@ function PlanConfirmationCard(props: {
                       {milestone.acceptanceCriteria.length ? (
                         <small>验收：{milestone.acceptanceCriteria.join("；")}</small>
                       ) : null}
+                      {milestone.acceptanceChecks?.length ? (
+                        <small>
+                          类型化检查：
+                          {milestone.acceptanceChecks
+                            .map(
+                              (check) =>
+                                `${check.kind} · ${check.description}`,
+                            )
+                            .join("；")}
+                        </small>
+                      ) : null}
                     </li>
                   ))}
                 </ol>
               </section>
+              {artifact.acceptanceChecks?.length ? (
+                <section>
+                  <h4>整体验收检查</h4>
+                  <ul className="plan-risk-list">
+                    {artifact.acceptanceChecks.map((check) => (
+                      <li key={check.id}>
+                        <strong>{check.kind}</strong>
+                        <span>{check.description}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
               {artifact.risks.length ? (
                 <section>
                   <h4>风险与缓解</h4>
@@ -4017,14 +4218,21 @@ function PlanConfirmationCard(props: {
           </details>
         </div>
       ) : (
-        <p className="plan-empty-artifact">{failedRound?.error ?? "计划正在生成或等待恢复。"}</p>
+        <p className="plan-empty-artifact">
+          {failedRound?.error ??
+            failedPlanningStage?.error ??
+            "计划正在生成或等待恢复。"}
+        </p>
       )}
 
-      {failedRound ? (
+      {failedRound || failedPlanningStage ? (
         <section className="plan-recovery-panel" aria-label="失败轮次恢复">
           <div>
-            <strong>{failedRound.kind.toUpperCase()} 失败</strong>
-            <span>{failedRound.error}</span>
+            <strong>
+              {(failedRound?.kind ?? failedPlanningStage?.kind ?? "planning").toUpperCase()}{" "}
+              失败
+            </strong>
+            <span>{failedRound?.error ?? failedPlanningStage?.error}</span>
           </div>
           <label>
             <span>重试模型</span>
