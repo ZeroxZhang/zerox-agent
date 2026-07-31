@@ -1,0 +1,187 @@
+src/main/agentGoalAcceptanceCertificate.test.ts
+  s_dce169b3f79441::t_3a8f1996d76883 360-392
+src/main/agentGoalAcceptanceCertificate.ts
+  s_dce169b3f79441::t_735ec7713bdee4 531-533,547-552,555,568-579
+src/main/agentGoalAcceptanceToolExecutor.test.ts
+  s_dce169b3f79441::t_e753d9ff74ff67 193-233
+src/main/agentGoalAcceptanceToolExecutor.ts
+  s_dce169b3f79441::t_672b70478fb585 52-54
+src/main/agentGoalController.test.ts
+  s_dce169b3f79441::t_39d744a2c131c4 1561-1603,2880,2914-2915,3199-3260
+src/main/agentGoalController.ts
+  s_dce169b3f79441::t_a3846a582d9d85 1095-1098,2294-2296,2307,2309-2316,2318,2330
+src/main/agentGoalStore.test.ts
+  s_dce169b3f79441::t_d947eaa41267a7 308-351
+src/main/agentGoalStore.ts
+  s_dce169b3f79441::t_eb2f0231c222d6 405-416
+src/main/agentLoop.test.ts
+  s_dce169b3f79441::t_76e601093cf932 194,226-231,233-235,2035-2067
+src/main/agentLoop.ts
+  s_dce169b3f79441::t_980ddb9e207558 413,417,535,541,835,842-844,854,1089-1121
+src/main/agentRunnerService.test.ts
+  s_dce169b3f79441::t_4a97cab3c7205e 622-661
+src/main/agentRunnerService.ts
+  s_dce169b3f79441::t_91ddcde2a121a7 45,62,68-72,76,334,353-355,809,824-849,851-855,857-859,862-868,871-872
+src/main/agentRuntimeEngine.test.ts
+  s_dce169b3f79441::t_e77baf31c63bb2 801,832-838,841-843
+src/main/agentRuntimeEngine.ts
+  s_dce169b3f79441::t_174fbfb7bf2a2e 64-68,90,96-100,104,159-166,256,313,315,319,324,358,369-374,468-474,498-500,507-512,524-530,562-567,599-605,613,615,632,642,657-662,846,990-992,1130-1131,1136-1141,1255,1270,1287,1293-1310,1321,1349,1351,1366,1372-1386,1401
+src/main/agentToolExecutor.test.ts
+  s_dce169b3f79441::t_20ea13143824db 1295-1325
+src/main/agentToolExecutor.ts
+  s_dce169b3f79441::t_bce821168f7e1e 63-64,113,203,234-235,247-251
+src/main/chatService.test.ts
+  s_dce169b3f79441::t_a866d5fee26bf3 216-221,265,352-394,559,782,874,913-917,935-936,956,982,1288-1293,1370,1449,1471,1735-1739,4537,4677,4775,4872,5091,5297,5904,6098,6180,6415-6416,6600,6620,6681-6685,6697-6702,6716,6784-6785,7231-7342,7444,7447
+src/main/chatService.ts
+  s_dce169b3f79441::t_71991a4ae27ab8 11-15,45,65,148-151,235,244,298,452-454,483,497,517,571-577,627-650,663,706,708-712,716,729-737,739-751,859,872,934-939,948-952,1017-1019,1051,1083,1255-1258,1332-1335,1436-1460,1737-1738,1774,1788-1792,1836-1837,1916,1924-1928,1950-1951,1984,1989-1993,2015-2026,2110,2134,2138-2145,2159-2163,2200-2202,2273,2360-2364,2381,2384,2393,2410-2416,2423-2445,2469-2477,2489-2499,2504-2518,2534,3438,3506-3508,3552-3559,3563,3570-3572,3921,3936,4154,4168-4170,4228-4349
+src/main/chatSessionStore.test.ts
+  s_dce169b3f79441::t_0834af95b05ca5 123-172,206,213-218,236-239
+src/main/chatSessionStore.ts
+  s_dce169b3f79441::t_891164613c8a59 6,33,52,114-136,181-183,185,194,227,559-560,562-563,568,631-639,750,752-753,757-760,763,817-819,842,846-866,968-970
+src/main/container.test.ts
+  s_dce169b3f79441::t_71eb80504a42c7 1392-1428,1768-1909,2034-2036,2061-2063,2525-2544
+src/main/container.ts
+  s_dce169b3f79441::t_2f1ef16da39312 28-31,59-62,175,497-539,681-711,739-741,744,759-763,1166-1171,1197,1201-1246,1544-1545,1560-1567,1582-1583,1590,1640,1785-1790,1954-2009,2416-2429,2722-2728,3081-3082,3160
+src/main/goalChatService.test.ts
+  s_dce169b3f79441::t_4e52e1841b3ffe 311-333,354-358,1197-1234,1284-1337
+src/main/goalChatService.ts
+  s_dce169b3f79441::t_3a4d977978726e 148,150-152,424-430,641-657,687-688,695-704
+src/main/goalExecutionModel.test.ts
+  s_dce169b3f79441::t_2393bdf53a178a 1-87
+src/main/goalExecutionModel.ts
+  s_dce169b3f79441::t_b88d9b5a5685bf 1-35
+src/main/goalOutputRoots.test.ts
+  s_dce169b3f79441::t_c524038615fabc 3-7,194-236
+src/main/goalOutputRoots.ts
+  s_dce169b3f79441::t_4ac5550c784a1a 33-36,44-47,53-65
+src/main/goalRuntimeEngine.test.ts
+  s_dce169b3f79441::t_aaf948c28f1251 17,58-92,453-458,469,472-475,512,529
+src/main/goalRuntimeEngine.ts
+  s_dce169b3f79441::t_da1863bf26a488 31,35,57-61,69,76-77,91-92,466-468,590-599,605,670,679,685-706,1166,1197-1208
+src/main/ipc/chatSendMessageError.test.ts
+  s_dce169b3f79441::t_a13432f826f7fc 10-11,19-20
+src/main/ipc/chatSendMessageError.ts
+  s_dce169b3f79441::t_f3084cafab77d8 7-8
+src/main/ipc/index.test.ts
+  s_dce169b3f79441::t_1c2d3041d213b5 33,42-44,267,298,308-311,404,411-416
+src/main/ipc/index.ts
+  s_dce169b3f79441::t_6d9bbfd0f97afb 9,405,654,658-663,1165,1188,1193-1199,1213,1223,1228,1238,1244-1246,1248-1249,1263-1264,1269,1274-1280,1294,1300,1305,1315,1345-1381
+src/main/modelRetry.test.ts
+  s_dce169b3f79441::t_43aab4c04305f0 45,51,57,59,62,69,75,77,104
+src/main/modelRetry.ts
+  s_dce169b3f79441::t_308426d862a57e 214,216,218-223
+src/main/openAiCompatibleClient.test.ts
+  s_dce169b3f79441::t_c99f71aee2ece3 406-472
+src/main/openAiCompatibleClient.ts
+  s_dce169b3f79441::t_a7027b8e688405 283,285,369-372
+src/main/planEvidenceVerifier.test.ts
+  s_dce169b3f79441::t_b352cd29611dc2 22-27
+src/main/planInvestigatorService.test.ts
+  s_dce169b3f79441::t_d07c83cb52e642 92,122,138,150-153,371-436
+src/main/planInvestigatorService.ts
+  s_dce169b3f79441::t_665a84c4db169b 5,25,64,150-158,212-215,256-257,259-263,270,286,431,441-443,471
+src/main/planStore.test.ts
+  s_21d9cb8179889b::t_ed0c52373a5d87 107-117
+src/main/planStore.ts
+  s_21d9cb8179889b::t_fb34d1fb2d197a 459-465
+src/main/plannerKernel.test.ts
+  s_dce169b3f79441::t_d2733aacc3cc5e 9-10,19-69,158-207,345-388
+src/main/providers/anthropicProvider.ts
+  s_dce169b3f79441::t_d001bda239776f 311-315,327-335,337-361,366-386,395-412,416-426
+src/main/providers/bedrockProvider.ts
+  s_dce169b3f79441::t_539400eade7013 22,41,48,58-59,125,145-156,190,193-194,215-217,267-303
+src/main/providers/cloudProviders.test.ts
+  s_dce169b3f79441::t_c4aca80927950c 161-172,176-191
+src/main/providers/geminiProvider.ts
+  s_dce169b3f79441::t_28079fe55aee50 92,104-112,123-137,296-297,303-315
+src/main/providers/maxMode.ts
+  s_dce169b3f79441::t_3b30a2875d13c7 4-6,9-11,41-46,128
+src/main/providers/p8.test.ts
+  s_dce169b3f79441::t_ab7da7daa84878 118,129-133,137-138,143-144
+src/main/providers/providers.test.ts
+  s_dce169b3f79441::t_d9bae489098036 409-501,698-735
+src/main/providers/vertexProvider.ts
+  s_dce169b3f79441::t_a9ffa4a39ba2eb 50,121-125,133-135,154,161-197
+src/main/toolApprovalCoordinator.test.ts
+  s_dce169b3f79441::t_674f7a5f2e4cd3 267-290
+src/main/toolApprovalCoordinator.ts
+  s_dce169b3f79441::t_aa8a1da0d7036f 83,109,156-166
+src/preload/index.test.ts
+  s_dce169b3f79441::t_3fe032410969d9 64-65,68
+src/preload/index.ts
+  s_dce169b3f79441::t_8fa7e25f4e7e0c 87,148-155,412,418,531,533,535,541,543,549,555,557
+src/renderer/chatStreamReducer.test.ts
+  s_dce169b3f79441::t_f718c066f6c86d 10-11,230,309
+src/renderer/chatStreamReducer.ts
+  s_dce169b3f79441::t_4687c5c224cae5 32,46,58-68,71,75,80-81,87-88,94,101-102,108,203,222
+src/renderer/chatTaskActivity.test.ts
+  s_dce169b3f79441::t_d39d3ea8cd68ef 3,131-148
+src/renderer/chatTaskActivity.ts
+  s_dce169b3f79441::t_36c69f95d1803a 18-26,281-296,399-425
+src/renderer/components/AgentChatPanel.tsx
+  s_dce169b3f79441::t_1f110db0205a18 88,120-123,351,508-511,726-730,945-969,974-975,983-992,1162,2149-2151,2165-2167,2200-2206,2444,2482-2487,2490,2557,2577,2591-2597,2604-2605,2616,2645,2713-2714,2726,2742,2841-2846,2848,3197-3198,3913,3915-3921,3965-3972,3983-3984,3987,3989-3990,4019-4021,4314,4323-4324,4326,4347-4349
+src/renderer/components/RendererErrorBoundary.tsx
+  s_21d9cb8179889b::t_b920a4533cb10b 1-67
+src/renderer/main.tsx
+  s_21d9cb8179889b::t_07d7e017f650fa 4,9-11
+src/renderer/materialDesign.test.ts
+  s_dce169b3f79441::t_3dbcd63f3d3c86 25-35,958,1076-1087,1109,1158-1178
+src/renderer/planFailurePresentation.test.ts
+  s_dce169b3f79441::t_82a895720f7e84 1-87
+src/renderer/planFailurePresentation.ts
+  s_dce169b3f79441::t_6adf28fa61eaac 1-124
+src/renderer/styles/cards.css
+  s_21d9cb8179889b::t_6381cfeb3b2c35 9-44
+src/shared/agentGoal.ts
+  s_dce169b3f79441::t_38f18a08345066 5,386-387
+src/shared/agentWorkspace.test.ts
+  s_dce169b3f79441::t_0360ade731d34d 1-3,11,109-141
+src/shared/agentWorkspace.ts
+  s_dce169b3f79441::t_fe22ddfc246a0b 237-239
+src/shared/chat.ts
+  s_dce169b3f79441::t_fcdab02f02edb2 9,37,125,175-176,264-268,364-375,397-398
+src/shared/goalTranslation.ts
+  s_dce169b3f79441::t_0b0a98b3316637 9,48-49
+src/shared/ipcChannels.ts
+  s_dce169b3f79441::t_6b2719018ef2b7 1-7
+src/shared/locationResource.ts
+  s_dce169b3f79441::t_0f137c1193234f 150-152,154-163,165-167
+src/shared/modelServiceNotice.test.ts
+  s_dce169b3f79441::t_d044fb383b31a7 84-105
+src/shared/modelServiceNotice.ts
+  s_dce169b3f79441::t_8d2a3cd081c826 154-167
+src/shared/packageScripts.test.ts
+  s_dce169b3f79441::t_bab06f628f57a9 272-276
+src/shared/planMode.ts
+  s_21d9cb8179889b::t_80e89050716f67 13,341,374
+src/shared/toolPermissions.test.ts
+  s_dce169b3f79441::t_6c8b198551b6ac 1209-1233
+src/shared/toolPermissions.ts
+  s_dce169b3f79441::t_4beb5637c155f5 467-468
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8f500826547439a1aeaa0c3006e1eb4216c0dd9f",
+  "prompts": {},
+  "sessions": {
+    "s_21d9cb8179889b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fb76f-54b2-7e02-bd83-0b19d1b523b4",
+        "model": "unknown"
+      },
+      "human_author": "Zerox Zhang <22983136+ZeroxZhang@users.noreply.github.com>"
+    },
+    "s_dce169b3f79441": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fb780-af58-7b83-8c01-07a7ff74643a",
+        "model": "unknown"
+      },
+      "human_author": "Zerox Zhang <22983136+ZeroxZhang@users.noreply.github.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
