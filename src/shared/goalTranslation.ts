@@ -6,6 +6,7 @@ import type {
   Milestone,
   SuccessCriterion,
 } from "./agentGoal";
+import type { ResolvedModelBinding } from "./modelSettings";
 
 export type GoalDraftStatus = "draft" | "confirmed" | "discarded";
 
@@ -44,6 +45,8 @@ export type GoalDraft = {
     revision: number;
     sha256: string;
   };
+  /** Frozen model selected for execution when this draft came from Plan Mode. */
+  executionModelBinding?: ResolvedModelBinding;
   normalizedDescription: string;
   successCriteria: SuccessCriterion[];
   acceptanceCoverage: GoalAcceptanceCoverage;

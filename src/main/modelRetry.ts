@@ -211,11 +211,16 @@ async function sleep(
   }
 
   await new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(resolve, delayMs);
-    signal?.addEventListener("abort", () => {
+    const onAbort = () => {
       clearTimeout(timeout);
+      signal?.removeEventListener("abort", onAbort);
       reject(new Error("Agent run canceled."));
-    }, { once: true });
+    };
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, delayMs);
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
 

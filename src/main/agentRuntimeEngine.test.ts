@@ -798,7 +798,7 @@ describe("agent runtime engine", () => {
     );
   });
 
-  it("retries transient runtime model request failures with trajectory evidence", async () => {
+  it("surfaces runtime provider failures without spending an automatic retry", async () => {
     const trajectoryEvents: AgentTrajectoryEvent[] = [];
     let attempts = 0;
     const engine = createAgentRuntimeEngine({
@@ -829,23 +829,18 @@ describe("agent runtime engine", () => {
     expect(result).toMatchObject({
       ok: true,
       run: {
-        status: "succeeded",
-        summary: "Retry recovered.",
+        status: "paused",
+        summary: "模型服务商返回错误（HTTP 500），请根据服务商状态检查后手动重试。",
+        modelServiceNotice: {
+          kind: "provider_stop",
+          statusCode: 500,
+          rawReason: "HTTP 500",
+        },
       },
     });
-    expect(attempts).toBe(2);
-    expect(trajectoryEvents).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          type: "model_retry",
-          payload: expect.objectContaining({
-            attempt: 1,
-            maxRetries: 2,
-            delayMs: 0,
-            error: "LLM request failed with status 500: overloaded",
-          }),
-        }),
-      ]),
+    expect(attempts).toBe(1);
+    expect(trajectoryEvents.map((event) => event.type)).not.toContain(
+      "model_retry",
     );
   });
 

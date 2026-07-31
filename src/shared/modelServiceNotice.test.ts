@@ -81,4 +81,26 @@ describe("model service notices", () => {
       retryAfterMs: 750,
     });
   });
+
+  it("surfaces a generic provider HTTP error without exposing its response body", () => {
+    const notice = modelServiceNoticeFromError(
+      Object.assign(new Error("private provider response sk-secret"), {
+        statusCode: 400,
+        code: "invalid_request_error",
+      }),
+      { provider: "deepseek", model: "deepseek-v4-flash" },
+    );
+
+    expect(notice).toEqual({
+      kind: "provider_stop",
+      provider: "deepseek",
+      model: "deepseek-v4-flash",
+      code: "invalid_request_error",
+      statusCode: 400,
+      rawReason: "HTTP 400 / invalid_request_error",
+      message:
+        "模型服务商返回错误（HTTP 400 / invalid_request_error），请根据服务商状态检查后手动重试。",
+    });
+    expect(JSON.stringify(notice)).not.toContain("sk-secret");
+  });
 });

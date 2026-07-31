@@ -104,6 +104,17 @@ describe("plan store parity", () => {
     await expect(store.get(created.id)).resolves.toEqual(updated);
   });
 
+  it("rejects an invalid persisted Plan autonomy mode", async () => {
+    const store = createPlanStore({ configDir: tempDir });
+
+    await expect(
+      store.create({
+        ...createRecord(),
+        autonomyMode: "untrusted" as PlanRecord["autonomyMode"],
+      }),
+    ).rejects.toThrow("计划自主模式非法");
+  });
+
   it("uses the durable session index without parsing unrelated Plan files", async () => {
     const configDir = path.join(tempDir, "indexed");
     const store = createPlanStore({ configDir });

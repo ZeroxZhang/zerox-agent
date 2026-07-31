@@ -22,6 +22,17 @@ describe("Design System — Obsidian desktop control surface", () => {
     }),
   ].join("\n");
   const appSource = readFileSync(path.join(process.cwd(), "src/renderer/App.tsx"), "utf8");
+  const rendererMainSource = readFileSync(
+    path.join(process.cwd(), "src/renderer/main.tsx"),
+    "utf8",
+  );
+  const rendererErrorBoundarySource = readFileSync(
+    path.join(
+      process.cwd(),
+      "src/renderer/components/RendererErrorBoundary.tsx",
+    ),
+    "utf8",
+  );
   const preloadSource = readFileSync(path.join(process.cwd(), "src/preload/index.ts"), "utf8");
   const chatPanelSource = readFileSync(
     path.join(process.cwd(), "src/renderer/components/AgentChatPanel.tsx"),
@@ -944,6 +955,7 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(goalStatusStripSource).toContain('case "stopped_blocked"');
     expect(goalStatusStripSource).toContain("progress.acceptance");
     expect(chatPanelSource).toContain("retryGoal(goalId)");
+    expect(chatPanelSource).toContain("!activePlan?.executionGoalId");
     expect(chatPanelSource).toContain(
       'const retryStarted = result.ok && result.goal?.status === "executing"',
     );
@@ -1061,6 +1073,18 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource).toContain("event.sessionId ?? activeSessionId ?? undefined");
   });
 
+  it("restores the persisted Goal status ahead of stale Plan activity", () => {
+    const loadSessionSource = getFunctionSource(chatPanelSource, "loadPersistedSession");
+
+    expect(loadSessionSource).toContain("const restoredGoalId =");
+    expect(loadSessionSource).toContain("latestPlan?.executionGoalId");
+    expect(loadSessionSource).toContain("loadedSession.goalSummaries?.at(-1)?.id");
+    expect(loadSessionSource).toContain("!restoredGoalId");
+    expect(loadSessionSource).toContain("buildPersistedGoalActivity({");
+    expect(loadSessionSource).toContain("status: loadedGoal.status");
+    expect(loadSessionSource).toContain("setStatus(restoredGoalActivity.status)");
+  });
+
   it("reconciles every successful chat completion from persisted session state", () => {
     const successSource = getFunctionSource(chatPanelSource, "applySuccessfulChatResult");
 
@@ -1082,9 +1106,7 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(cleanupSource).toContain("setSelectedWorkspaceId(null)");
     expect(cleanupSource).toContain("setChatStreamState(createChatStreamState([]))");
     expect(loadSessionSource).toContain("sessionLoadPendingRef.current = loadGeneration");
-    expect(chatPanelSource).toContain(
-      'status.kind === "working" || sessionLoadPendingRef.current !== null',
-    );
+    expect(chatPanelSource).toContain("sessionLoadPendingRef.current !== null");
   });
 
   it("starts Chat in a goal-mode-ready empty home state", () => {
@@ -1131,6 +1153,27 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(styles).toContain(".plan-mode-decision-card");
     expect(styles).toContain(".decision-question-form");
     expect(styles).toContain(".plan-progress-disclosure");
+  });
+
+  it("keeps Plan clarification typing synchronous and replaces white screens with recovery UI", () => {
+    expect(chatPanelSource).toContain(
+      "const nextAnswer = event.currentTarget.value;",
+    );
+    expect(chatPanelSource).toContain(
+      "answerIndex === index ? nextAnswer : answer",
+    );
+    expect(chatPanelSource).not.toContain(
+      "answerIndex === index ? event.currentTarget.value : answer",
+    );
+    expect(chatPanelSource).toContain(
+      '`${index + 1}. ${question}\\n${questionAnswers[index] ?? ""}`',
+    );
+    expect(rendererMainSource).toContain("<RendererErrorBoundary>");
+    expect(rendererErrorBoundarySource).toContain(
+      "界面遇到错误，任务数据仍保留在本地",
+    );
+    expect(rendererErrorBoundarySource).toContain("window.location.reload()");
+    expect(styles).toContain(".renderer-recovery-surface");
   });
 
   it("locks all follow-up input to the active pre-confirmation Plan state machine", () => {

@@ -56,8 +56,12 @@ import {
   type ModelServiceNotice,
 } from "../shared/modelServiceNotice";
 import { validateAcceptanceCheckContract } from "./acceptanceContractValidator";
+import {
+  findBlockedShellControl,
+  getPython3AcceptanceFallback,
+  shouldRetryAcceptanceWithPython3,
+} from "../shared/acceptanceCommand";
 
-const shellRedirectionOperatorPattern = /[<>]/;
 const defaultJudgeTimeoutMs = 30_000;
 const defaultFinalJudgeTimeoutMs = 60_000;
 const maximumTimerDelayMs = 2_147_483_647;
@@ -121,7 +125,7 @@ export type AcceptanceContext = {
   modelProfile?: Pick<
     ChatCompletionRequest,
     "baseUrl" | "apiKey" | "model" | "temperature" | "maxTokens" | "thinking"
-  >;
+  > & { providerId?: string };
   artifacts?: Record<string, unknown>;
   transcriptMessages?: ChatMessage[];
   createId?: () => string;
@@ -509,6 +513,7 @@ async function evaluateFileExists(
     candidatePath,
     [ctx.workspacePath, ...getAllowedExtraRoots(ctx)],
     getAcceptanceLocationEnv(ctx),
+    { allowSymlinks: true },
   );
   if (!boundary.ok) {
     return checkResult(
@@ -647,19 +652,46 @@ async function evaluateCommandExitCode(
   }
 
   const expectedExitCode = Number(check.params.expectedExitCode ?? 0);
-  const result = await ctx.toolExecutor.execute({
+  let result = await ctx.toolExecutor.execute({
     toolName: "shell_exec",
     args: { command },
   }, { signal: ctx.signal });
   throwIfAcceptanceAborted(ctx.signal);
+  const initialExitCode = getExitCode(result);
+  const fallbackCommand = getPython3AcceptanceFallback(command);
+  const usedPython3Fallback = Boolean(
+    !result.ok &&
+    fallbackCommand &&
+    shouldRetryAcceptanceWithPython3({
+      command,
+      exitCode: initialExitCode,
+      error: result.error,
+    }),
+  );
+  if (usedPython3Fallback && fallbackCommand) {
+    result = await ctx.toolExecutor.execute({
+      toolName: "shell_exec",
+      args: { command: fallbackCommand },
+    }, { signal: ctx.signal });
+    throwIfAcceptanceAborted(ctx.signal);
+  }
   const exitCode = getExitCode(result);
   const passed = result.ok && exitCode === expectedExitCode;
+  const detail = result.ok
+    ? `Command exited with ${exitCode}; expected ${expectedExitCode}.${
+        usedPython3Fallback
+          ? ' Used the portable "python3" fallback because "python" is unavailable.'
+          : ""
+      }`
+    : `Command execution failed${
+        usedPython3Fallback ? ' after the portable "python3" fallback' : ""
+      }: ${result.error}`;
 
   return checkResult(
     check,
     passed,
     getEvidenceRefs(result),
-    `Command exited with ${exitCode}; expected ${expectedExitCode}.`,
+    detail,
     passed
       ? "command_exit_matched"
       : result.ok
@@ -735,12 +767,15 @@ function checkCommandPaths(
   extraRoots: string[] = [],
   locationEnv: LocationResourceEnvironment = {},
 ): CheckResult | null {
-  if (shellRedirectionOperatorPattern.test(command)) {
+  const shellControl = findBlockedShellControl(command);
+  if (shellControl) {
     return checkResult(
       check,
       false,
       [],
-      "Command contains blocked shell redirection.",
+      shellControl === "redirection"
+        ? "Command contains blocked shell redirection."
+        : "Command contains blocked Shell control operator.",
       check.kind === "test_passes" ? "test_command_restricted" : "command_restricted",
       check.kind === "test_passes" ? "test_failed" : "command_failed",
     );
@@ -859,7 +894,9 @@ async function evaluateModelReview(
   const modelProfile = getModelProfile(ctx, options);
   const transcript = boundedTranscriptEvidence(ctx.transcriptMessages ?? []);
   const judge: NonNullable<AcceptanceResult["judge"]> = {
-    ...(options.judgeProviderId ? { providerId: options.judgeProviderId } : {}),
+    ...((options.judgeProviderId ?? modelProfile.providerId)
+      ? { providerId: options.judgeProviderId ?? modelProfile.providerId }
+      : {}),
     model: modelProfile.model,
     promptVersion: GOAL_JUDGE_PROMPT_VERSION,
     evaluatedMessageIds: [
@@ -914,7 +951,7 @@ async function evaluateModelReview(
     const modelServiceNotice =
       outcome.status === "failed"
         ? modelServiceNoticeFromError(outcome.error, {
-            provider: options.judgeProviderId,
+            provider: options.judgeProviderId ?? modelProfile.providerId,
             model: modelProfile.model,
           })
         : undefined;
@@ -1067,7 +1104,9 @@ async function evaluateFinalModelReview(
   const transcript = boundedTranscriptEvidence(ctx.transcriptMessages ?? []);
   const runIds = collectEvaluatedRunIds(goal, ctx.runId);
   const judge: NonNullable<AcceptanceResult["judge"]> = {
-    ...(options.judgeProviderId ? { providerId: options.judgeProviderId } : {}),
+    ...((options.judgeProviderId ?? modelProfile.providerId)
+      ? { providerId: options.judgeProviderId ?? modelProfile.providerId }
+      : {}),
     model: modelProfile.model,
     promptVersion: GOAL_JUDGE_PROMPT_VERSION,
     evaluatedMessageIds: [
@@ -1130,7 +1169,7 @@ async function evaluateFinalModelReview(
     const modelServiceNotice =
       outcome.status === "failed"
         ? modelServiceNoticeFromError(outcome.error, {
-            provider: options.judgeProviderId,
+            provider: options.judgeProviderId ?? modelProfile.providerId,
             model: modelProfile.model,
           })
         : undefined;
@@ -1902,7 +1941,7 @@ function getAcceptanceLocationEnv(
 
 function getExitCode(result: AgentToolExecutionResult): number {
   const value = result.ok ? result.result.exitCode : result.errorDetails?.exitCode;
-  return typeof value === "number" ? value : 0;
+  return typeof value === "number" ? value : result.ok ? 0 : -1;
 }
 
 function getEvidenceRefs(result: AgentToolExecutionResult): string[] {
@@ -2004,7 +2043,7 @@ function getModelProfile(
 ): Pick<
   ChatCompletionRequest,
   "baseUrl" | "apiKey" | "model" | "temperature" | "maxTokens" | "thinking"
-> {
+> & { providerId?: string } {
   return (
     ctx.modelProfile ?? options.modelProfile ?? {
       baseUrl: "http://local.invalid",
@@ -2096,33 +2135,34 @@ function boundedTranscriptEvidence(messages: ChatMessage[]): {
   const maxMessages = 30;
   const maxChars = 12_000;
   const startIndex = Math.max(0, messages.length - maxMessages);
-  const rendered: string[] = [];
-  const messageIds: string[] = [];
+  const selected: Array<{ line: string; ref: string }> = [];
   let renderedChars = 0;
-  for (let index = startIndex; index < messages.length; index += 1) {
+  // Select newest evidence first so large historical tool results cannot evict
+  // the final assistant summary that explains what the run actually completed.
+  for (let index = messages.length - 1; index >= startIndex; index -= 1) {
     const message = messages[index];
     if (!message) continue;
     const ref = `message:${index + 1}`;
     const line = `${ref} [${message.role}] ${truncateEvidence(message.content)}`;
-    const separatorChars = rendered.length > 0 ? 1 : 0;
+    const separatorChars = selected.length > 0 ? 1 : 0;
     const remaining = maxChars - renderedChars - separatorChars;
-    if (line.length > remaining) {
-      if (remaining > 0) {
-        const suffix = "... [truncated]";
-        rendered.push(
-          remaining <= suffix.length
-            ? suffix.slice(0, remaining)
-            : `${line.slice(0, remaining - suffix.length)}${suffix}`,
-        );
-        messageIds.push(ref);
-      }
-      break;
-    }
-    rendered.push(line);
-    messageIds.push(ref);
-    renderedChars += separatorChars + line.length;
+    if (remaining <= 0) break;
+    const suffix = "... [truncated]";
+    const boundedLine = line.length <= remaining
+      ? line
+      : remaining <= suffix.length
+        ? suffix.slice(0, remaining)
+        : `${line.slice(0, remaining - suffix.length)}${suffix}`;
+    selected.push({ line: boundedLine, ref });
+    renderedChars += separatorChars + boundedLine.length;
+    if (boundedLine.length < line.length) break;
   }
-  return { rendered: rendered.join("\n"), messageIds };
+  return {
+    rendered: selected.map((entry) => entry.line).join("\n"),
+    // Keep audit identifiers in their original chronological order even though
+    // the quoted evidence is rendered newest-first for truncation safety.
+    messageIds: [...selected].reverse().map((entry) => entry.ref),
+  };
 }
 
 function collectEvaluatedRunIds(goal: Goal, currentRunId: string): string[] {

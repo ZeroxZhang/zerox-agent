@@ -60,6 +60,8 @@ export type AgentToolExecutionResult =
 export type AgentToolExecutionOptions = {
   runContext?: AgentRunContext;
   signal?: AbortSignal;
+  /** Exact shell command already approved by ToolAuthorizationService. */
+  authorizedShellCommand?: string;
   artifactWrite?: TrustedArtifactWriteMetadata;
   toolResultReadScope?: ToolResultOffloadReadScope;
   onRuntimeEvent?: (event: ToolRuntimeEvent) => void;
@@ -108,6 +110,7 @@ export function createAgentToolExecutor(options?: {
       const guard = validateToolExecutionRequest(
         request,
         executionOptions?.runContext,
+        executionOptions?.authorizedShellCommand,
       );
       if (guard) {
         return guard;
@@ -197,6 +200,7 @@ export function createAgentToolExecutor(options?: {
 function validateToolExecutionRequest(
   request: ToolCallRequest,
   runContext?: AgentRunContext,
+  authorizedShellCommand?: string,
 ): AgentToolExecutionResult | null {
   if (!runContext) {
     return null;
@@ -227,7 +231,8 @@ function validateToolExecutionRequest(
   }
 
   if (request.toolName === "shell_exec") {
-    const shellPlan = analyzeShell(String(request.args.command ?? ""), {
+    const command = String(request.args.command ?? "");
+    const shellPlan = analyzeShell(command, {
       cwd: runContext.workspaceRoot,
     });
     if (runContext.sandbox.shell === "disabled") {
@@ -239,7 +244,11 @@ function validateToolExecutionRequest(
     if (runContext.sandbox.network === "none" && shellPlan.networkAccess) {
       return { ok: false, error: "shell_exec refused by network-disabled run sandbox." };
     }
-    if (!runContext.sandbox.allowWorkspaceEscape && shellPlan.opaqueExecution) {
+    if (
+      !runContext.sandbox.allowWorkspaceEscape &&
+      shellPlan.opaqueExecution &&
+      authorizedShellCommand !== command
+    ) {
       return {
         ok: false,
         error: "shell_exec refused opaque interpreter command in workspace-only sandbox.",

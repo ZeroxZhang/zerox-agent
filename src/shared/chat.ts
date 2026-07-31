@@ -6,6 +6,7 @@ import type { ChatOutputPart } from "./chatOutput";
 import type { ModelServiceNotice } from "./modelServiceNotice";
 import type { GoalDraft } from "./goalTranslation";
 import type {
+  PlanAutonomyMode,
   PlanMode,
   PlanModelAssignments,
   PlanRecord,
@@ -33,6 +34,7 @@ export type ChatHistoryMessage = {
 
 export type ChatMessageRecord = ChatHistoryMessage & {
   id: string;
+  requestId?: string;
   createdAt: string;
   outputParts?: ChatOutputPart[];
   relatedMemoryIds?: string[];
@@ -120,6 +122,7 @@ export type SendChatMessageInput = {
   message: string;
   mode?: "chat" | "goal_draft" | "goal_plan";
   planMode?: PlanMode;
+  planAutonomyMode?: PlanAutonomyMode;
   planModelAssignments?: PlanModelAssignments;
   selectedSkillName?: string;
   workspaceId?: string;
@@ -169,6 +172,8 @@ export type SkillPendingInputState = {
   workspaceSummary?: ChatWorkspaceSummary;
   partialValues: Record<string, string | number | boolean>;
   attachments?: ChatAttachmentMetadata[];
+  /** Local-only payload checkpoint used to resume guided input after restart. */
+  attachmentPayloads?: ChatAttachmentInput[];
 };
 
 export type SkillInputResponseResult = SendChatMessageResult;
@@ -256,6 +261,11 @@ export type ChatAgentStatus =
 
 export type ChatTaskStatusEvent = {
   sessionId: string;
+  /** Present on newly emitted events; optional only for persisted v1 records. */
+  requestId?: string;
+  /** Monotonic within one request across status and stream events. */
+  sequence?: number;
+  turnId?: string;
   state:
     | "started"
     | "workspace"
@@ -351,6 +361,18 @@ export type CancelChatMessageResult =
       message: string;
     };
 
+export type ChatErrorCode =
+  | "CANCELED"
+  | "EMPTY_MESSAGE"
+  | "SKILL_INPUT_REQUIRED"
+  | "UNKNOWN_SKILL_INPUT"
+  | "ATTACHMENT_EXPIRED"
+  | "INVALID_ATTACHMENT"
+  | "MODEL_UNAVAILABLE"
+  | "TRANSPORT_ERROR"
+  | "CONFLICT"
+  | "INTERNAL_ERROR";
+
 export type SendChatMessageResult =
   | {
       ok: true;
@@ -372,4 +394,6 @@ export type SendChatMessageResult =
   | {
       ok: false;
       message: string;
+      code?: ChatErrorCode;
+      retryable?: boolean;
     };

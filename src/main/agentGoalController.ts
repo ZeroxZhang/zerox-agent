@@ -470,7 +470,6 @@ export function createAgentGoalController(options: {
         if (!nextMilestone) {
           if (allMilestonesAccepted(goal)) {
             const mustReplayFinalJudge =
-              runOptions?.finalAcceptanceContinuation === true ||
               goal.acceptanceRetryState?.resumeFrom === "final_judge";
             if (
               mustReplayFinalJudge &&
@@ -1093,6 +1092,10 @@ export function createAgentGoalController(options: {
         );
         if (currentTarget) currentTarget.state = "ready";
       } else {
+        // A semantic repair changes the evidence being judged. The sealed replay is
+        // only valid for retrying the same infrastructure-failed judge request; it
+        // must never survive into a newly repaired goal evaluation.
+        persisted.acceptanceRetryState = undefined;
         scheduleFinalRepairMilestone(persisted, decision);
       }
       touch(persisted);
@@ -2270,9 +2273,6 @@ export function createAgentGoalController(options: {
       if (!allMilestonesAccepted(goal)) {
         return goal;
       }
-      if (eligibleLegacy && !goal.acceptanceRetryState?.finalJudgeReplay) {
-        return goal;
-      }
       if (
         waitingForAcceptance &&
         goal.acceptanceRetryState?.resumeFrom !== "final_judge"
@@ -2291,7 +2291,9 @@ export function createAgentGoalController(options: {
 
       assertGoalTransition(goal.status, "executing");
       const upgraded = upgradeGoalAcceptanceProtocol(goal);
-      const previousRetryState = upgraded.acceptanceRetryState;
+      const previousRetryState = waitingForAcceptance
+        ? upgraded.acceptanceRetryState
+        : undefined;
       const candidate: Goal = {
         ...upgraded,
         status: "executing",
@@ -2302,20 +2304,18 @@ export function createAgentGoalController(options: {
           phase: "retrying",
           lastDecision: undefined,
         },
-        ...(previousRetryState
+        acceptanceRetryState: previousRetryState
           ? {
-              acceptanceRetryState: {
-                cycle: previousRetryState.cycle + 1,
-                attempt: 0,
-                maxAttempts: previousRetryState.maxAttempts,
-                lastCode: previousRetryState.lastCode,
-                lastDetail: previousRetryState.lastDetail,
-                evidenceFingerprint: previousRetryState.evidenceFingerprint,
-                ...(finalJudgeReplay ? { finalJudgeReplay } : {}),
-                resumeFrom: "final_judge" as const,
-              },
+              cycle: previousRetryState.cycle + 1,
+              attempt: 0,
+              maxAttempts: previousRetryState.maxAttempts,
+              lastCode: previousRetryState.lastCode,
+              lastDetail: previousRetryState.lastDetail,
+              evidenceFingerprint: previousRetryState.evidenceFingerprint,
+              ...(finalJudgeReplay ? { finalJudgeReplay } : {}),
+              resumeFrom: "final_judge" as const,
             }
-          : {}),
+          : undefined,
       };
       touch(candidate);
       const persisted = await options.goalStore.save(candidate);
@@ -2327,7 +2327,7 @@ export function createAgentGoalController(options: {
       }
       return runLoop(persisted, {
         ...runOptions,
-        finalAcceptanceContinuation: true,
+        finalAcceptanceContinuation: waitingForAcceptance,
       });
     },
 

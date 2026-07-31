@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildPersistedGoalActivity,
   buildGoalTaskActivity,
   buildRequirementProcessItems,
   buildSubagentProcessItems,
@@ -124,6 +125,24 @@ describe("chat task activity", () => {
       statusKind: "ready",
       workPhase: "done",
       shouldClearActiveRequest: true,
+    });
+  });
+
+  it("restores an achieved Goal as the authoritative session banner", () => {
+    expect(buildPersistedGoalActivity({
+      status: "achieved",
+      description: "交付抖音链接转文稿 Skill",
+    })).toMatchObject({
+      status: {
+        kind: "ready",
+        message: "目标已达成",
+      },
+      workPhase: "done",
+      taskActivity: {
+        kind: "done",
+        title: "目标已达成",
+        detail: "交付抖音链接转文稿 Skill",
+      },
     });
   });
 

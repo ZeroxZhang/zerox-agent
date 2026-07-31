@@ -403,6 +403,73 @@ describe("OpenAI-compatible chat client", () => {
     ]);
   });
 
+  it("accepts SSE data fields without an optional space", async () => {
+    const encoder = new TextEncoder();
+    const client = createOpenAiCompatibleClient({
+      fetch: async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(
+                encoder.encode(
+                  `data:${JSON.stringify({ choices: [{ delta: { content: "answer" } }] })}\n\n`,
+                ),
+              );
+              controller.enqueue(encoder.encode("data:[DONE]\n\n"));
+              controller.close();
+            },
+          }),
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        ),
+    });
+    const events = [];
+
+    for await (const event of client.streamComplete({
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "secret-key",
+      model: "agent-model",
+      temperature: 0,
+      maxTokens: 10,
+      messages: [{ role: "user", content: "Run" }],
+    })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: "content_delta", text: "answer" },
+      { type: "done", finishReason: "stop" },
+    ]);
+  });
+
+  it("fails the stream instead of silently dropping malformed JSON", async () => {
+    const encoder = new TextEncoder();
+    const client = createOpenAiCompatibleClient({
+      fetch: async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(encoder.encode("data: {not-json}\n\n"));
+              controller.close();
+            },
+          }),
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        ),
+    });
+
+    await expect(async () => {
+      for await (const _event of client.streamComplete({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret-key",
+        model: "agent-model",
+        temperature: 0,
+        maxTokens: 10,
+        messages: [{ role: "user", content: "Run" }],
+      })) {
+        // Drain.
+      }
+    }).rejects.toThrow("LLM stream returned malformed JSON.");
+  });
+
   it("preserves a streamed length finish reason when a later [DONE] arrives", async () => {
     const encoder = new TextEncoder();
     const client = createOpenAiCompatibleClient({

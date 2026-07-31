@@ -1,5 +1,98 @@
 # Zerox Harness Progress
 
+## 2026-07-31 - Final Acceptance and Provider Recovery Closure
+
+- Reproduced the reported 7/7 `Blocked` failure against the durable Goal and
+  trajectory. DeepSeek had returned `accepted` on every final review; the
+  controller then discarded that result because the acceptance certificate
+  could not resolve the Plan contract's logical evidence references
+  (`evidence_user_request` and `evidence_tool_*`) through an artifact-only
+  manifest.
+- Extended certificate grounding narrowly for non-artifact evidence references
+  explicitly declared by the owning `model_review` check. Undeclared logical
+  references still fail, `artifact:` references still require manifest-backed
+  evidence, duplicate resolution remains ambiguous, and the criteria hash binds
+  the declared references into the signed certificate.
+- Corrected final-acceptance recovery semantics:
+  - semantic repair clears the stale sealed-judge replay and performs a fresh
+    evaluation of the repaired evidence;
+  - a historical `acceptance_unavailable` Goal without replay data rebuilds
+    current evidence instead of failing closed forever;
+  - the generic Goal retry action routes a completed blocked Goal directly to
+    final acceptance, matching the renderer's `重试验收` action.
+- Preserved provider-authoritative behavior. HTTP errors now pause with a
+  structured `ModelServiceNotice` and no hidden retry or Agent-owned budget
+  consumption. Internal duplicate-tool retry protection is not misclassified
+  as a provider failure, and scheduled runtime records preserve the same
+  actionable provider notice.
+- Serialized asynchronous Goal-to-Plan progress synchronization with Plan
+  confirmation and re-read canonical Plan revisions before saving. Concurrent
+  and repeated confirmation no longer races a progress event, and an existing
+  execution link reports the Goal-derived terminal state instead of stale
+  `executing`.
+- Made the attached persisted Goal authoritative when reloading a chat. A stale
+  pre-confirmation Plan activity snapshot can no longer leave a contradictory
+  `规划未完成` banner above an achieved Goal; the restored banner, work phase,
+  and activity card now all say `目标已达成`.
+- Hardened the macOS temporary Git-fixture cleanup against transient
+  `ENOTEMPTY` without changing product behavior.
+- Real production-UI evidence:
+  - rebuilt and launched the local Electron package;
+  - clicked `重试验收` once on
+    `goal_from_plan_5d18d1aa-fa3a-400a-866e-95c816700db6`;
+  - UI changed from `目标受阻 · 7/7` to `目标已达成`;
+  - durable Goal now has `status=achieved`, `stopReason=goal_accepted`,
+    acceptance phase `certified`, 18 bound run IDs, and certificate hash
+    `26b14de45124ffad49158adc1c948450e791be33e7e68a536d401afa9d35599b`;
+  - trajectory ends with `acceptance_certified` followed by the canonical
+    achieved terminal event.
+- Verification evidence:
+  - focused final-acceptance chain: 5 files / 389 tests passed;
+  - focused provider/runtime/concurrency regressions: 5 files / 141 tests
+    passed;
+  - `npm run verify`: 236 files / 2,401 tests, production build, Agent evals
+    26/26, and Memory evals 2/2 passed;
+  - `npm run smoke:prod`, `npm run harness:check`, and `git diff --check`:
+    passed.
+
+## 2026-07-31 - Autonomous Plan and Renderer Crash Hotfix
+
+- Fixed the Plan clarification white screen at its React event-lifetime root
+  cause. The textarea now snapshots `currentTarget.value` synchronously before
+  entering a state updater, and the submission payload is built from the same
+  deduplicated question list that is rendered. PlanningBrief-only questions can
+  no longer be relabeled or paired with the wrong answers.
+- Added a top-level renderer error boundary. An unexpected React render or
+  lifecycle failure now shows a local-data-safe recovery surface with retry and
+  reload actions instead of leaving the Electron window entirely white.
+- Carried the composer automatic-authorization choice into a typed, durable
+  `PlanAutonomyMode`. New Goal Plans, clarification replans, and failed-round
+  retries all preserve it; an already-persisted Plan can adopt automatic
+  autonomy when retried or continued after upgrade.
+- Automatic Goal autonomy now turns preference-level questions such as output
+  format/path/naming, implementation technology, existing-project reuse, and
+  single-versus-batch handling into explicit auditable assumptions. Questions
+  requiring credentials or verification codes, an external recipient or
+  publication account, payment or regulated decisions, irreversible authority,
+  or a workspace remain blocking. Existing extreme-risk confirmation and tool
+  authorization boundaries are unchanged.
+- Repaired the reported B1 structured-output failure. Compact string entries in
+  `risks` or `unresolvedRisks` are deterministically normalized to bounded risk
+  objects before strict round validation; every other required field remains
+  fail-closed. The retry path uses the same normalization, so it no longer
+  repeats the identical `unresolvedRisks[0] 必须是对象` failure.
+- Added runtime validation for persisted autonomy modes and regression coverage
+  across Planner Kernel, read-only investigation, Direct/Debate orchestration,
+  old-Plan retry/continuation, chat/IPC/preload propagation, Plan storage, the
+  clarification form, and the renderer recovery surface.
+- Verification evidence:
+  - focused main/preload/renderer regressions: 8 files / 250 tests passed;
+  - final `npm run verify`: 234 files / 2,354 tests, production build, Agent
+    evals 26/26, and Memory evals 2/2 passed;
+  - `npm run smoke:prod`: production Electron startup exited successfully;
+  - main and renderer TypeScript checks, `npm run harness:check`, and
+    `git diff --check`: passed.
+
 ## 2026-07-31 - Professional Planner Kernel v2
 
 - Added a versioned Planner v2 pipeline for every newly created Goal Plan:
@@ -7934,3 +8027,171 @@
     unpacked app, regenerates the ZIP blockmap, and atomically updates the
     ZIP size and SHA-512 in `latest-mac.yml`; the strict bundle-topology and
     deep-signature preflight remains enabled.
+
+## 2026-07-31 - P65 Plan Quality Compatibility and Model Default Recovery
+
+- Reproduced the two current user-visible failures from durable runtime state:
+  the ecommerce Plan's displayed quality failure treated historical planner
+  aliases (`command_run`, `command_exit_code`, `file_exists`) as absent tools,
+  and an ordinary chat could report no model profile while two verified Chat
+  profiles were present but `defaultChatProfileId` was null.
+- Planning now normalizes documented compatibility aliases to the actual
+  executable names (`shell_exec`, `file_stat`, `test_run`) both when a model
+  proposal enters the system and when a persisted failed quality gate is
+  retried. The quality retry is entirely local: it rechecks the artifact,
+  persists a fresh quality stage and projection, and does not consume another
+  provider turn.
+- Replaced the flat Shell-character heuristic with a quote-aware parser.
+  Python expressions such as `assert len(items) >= 3` inside `python3 -c` are
+  accepted as program text; unquoted redirection, pipelines, chaining, command
+  substitution, and newlines remain blocked before tool execution.
+- Model settings now recover and persist the newest verified usable default
+  Chat/Embedding profile during `load`, `loadCatalog`, `getApiKey`, and normal
+  profile resolution. This prevents the home UI from calling an already tested
+  provider "未配置" and keeps renderer status aligned with execution routing.
+- Live Electron evidence after the production rebuild:
+  - the recovered ecommerce plan is `Ready · 可确认` with all planning stages
+    completed, and its portable frontmatter check uses standard-library `re`;
+  - the app home now renders `模型已配置` and `deepseek-v4-flash` immediately
+    after startup;
+  - a normal no-Plan-mode chat completed with `模型可用。` rather than the
+    previous false configuration error.
+- Focused evidence before final full verification:
+  - `npm test -- --run src/main/acceptanceContractValidator.test.ts src/main/agentGoalAcceptance.test.ts src/main/planDebateOrchestrator.test.ts src/main/modelSettingsStore.test.ts`: 4 files / 171 tests passed;
+  - `npm run build`: TypeScript main/renderer checks and Vite production build
+    passed.
+- Final verification evidence:
+  - `npm run verify`: 236 files / 2,404 tests passed; the production build,
+    Agent evaluations (26/26), and memory evaluations (2/2) passed;
+  - `npm run smoke:prod`, `npm run harness:check`, and `git diff --check`:
+    passed;
+  - after a clean Electron restart, the home status showed
+    `模型已配置 · deepseek-v4-flash`, and a freshly sent ordinary message
+    received `普通会话已恢复。` from the configured provider.
+
+## 2026-07-31 - P60 Agent Interaction Chain Reliability Closure
+
+- Closed provider protocol gaps: Anthropic streamed tool calls retain their
+  real block id/name/index, Gemini parallel same-name calls receive unique
+  identities, and malformed OpenAI-compatible SSE now fails visibly instead
+  of disappearing.
+- Scheduled runs now use the same execution reservation, cancellation, and
+  completion state for live streaming and non-streaming callers. Live event
+  delivery begins before completion and uses a bounded overflow-signaling
+  queue.
+- Chat status and stream events now carry request/turn identity plus one
+  monotonic sequence. The renderer rejects stale/out-of-order events, keeps
+  output-part arrival order, blocks rapid duplicate submission, isolates New
+  Chat from old statuses, and never performs cancel-all when an id is absent.
+- Added server-authoritative session history and durable request-id
+  idempotency. A repeated completed request returns its persisted assistant
+  reply without rerunning the model or tools.
+- Paused AgentLoop continuations, guided Skill input, and guided attachment
+  bytes are durable across restart. New work and successfully consumed
+  checkpoints synchronously invalidate older continuations to close crash
+  windows.
+- Preserved model-turn values as automatic checkpoint cadence and tool-call /
+  wall-clock counts as telemetry; none of them may terminate a user task.
+  Explicit cancellation still releases the user request when a model or tool
+  ignores its abort signal.
+- Scoped Goal automatic approval to matching `goal:<id>` tasks so an active
+  Goal cannot auto-approve ordinary Chat or scheduled work. Model tool
+  capability flags now suppress tool schemas consistently across Chat,
+  scheduled, and Goal paths.
+- Max mode now reads the centralized feature flag, is wired across all three
+  execution surfaces, and returns proposed winner tool calls to the parent
+  loop for exactly-once authorization/execution instead of replaying side
+  effects through an actor first.
+- Added Bedrock SDK and Vertex token-acquisition timeouts, cleaned retry abort
+  listeners, made Chat store reads wait for pending mutations, flushes the
+  store during shutdown, and surfaces corrupt-session quarantine as a visible
+  recovery conversation.
+- Verification evidence:
+  - focused protocol/provider/chat/runtime/IPC/renderer/persistence suites
+    passed, including restart, cancellation, timeout, idempotency, sequencing,
+    capability, approval-isolation, and checkpoint-continuity regressions;
+  - `npm run verify`: 234 files / 2,367 tests passed, production build passed,
+    Agent evals 26/26 and Memory evals 2/2 passed;
+  - `npm run smoke:prod`, `npm run harness:check`, and `git diff --check`
+    passed.
+
+## 2026-07-31 - P61 Provider-Authoritative Stop and Plan Recovery
+
+- Reproduced the visible Plan failure from its durable record. DeepSeek
+  completed eight tool-using turns and produced 22 evidence items, but the
+  local loop emitted `turn_limit` before the provider returned a final
+  `PlanningBrief`; retrying the same stage repeated the local interruption.
+- Restored the previously established task-budget contract across the shared
+  AgentLoop and the scheduled-runtime compatibility loop: `maxTurns` saves
+  automatic checkpoints and continues, while tool-call and wall-clock values
+  remain telemetry. Runtime code no longer emits `turn_limit`, `tool_limit`,
+  or `wall_clock_limit`.
+- Kept cancellation independent from budgets. Model and tool promises are
+  raced only against the explicit caller signal, so a provider that ignores
+  AbortSignal cannot keep a canceled user request open.
+- Plan investigation now persists the exact `ModelServiceNotice` message for
+  provider output limits, rate limits, quota exhaustion, or provider stops
+  instead of replacing it with an internal continuation code.
+- Plan chat replies, the status strip, activity card, and recovery panel now
+  expose the latest failed planning-stage reason, explain old `turn_limit`
+  records as an obsolete local interruption, report retained evidence count,
+  and offer a direct “重新运行调查” action.
+- Verification evidence:
+  - focused AgentLoop, Plan investigator, Chat, scheduled runtime, kernel, and
+    renderer suites: 8 files / 277 tests passed;
+  - `npm test`: 234 files / 2,368 tests passed;
+  - `npm run build`: TypeScript main/renderer checks and Vite production build
+    passed;
+  - `npm run smoke:prod` and `npm run harness:check`: passed.
+
+## 2026-07-31 - P62 Plan Structured Output and Skill-Authoring Recovery
+
+- Reproduced the next visible failure from `plan_5d18d1aa-...`: investigation
+  completed successfully with 34 retained evidence items and the provider
+  returned normally (`finishReason=stop`), but both A1 attempts omitted the
+  display-only `title`; strict validation rejected the otherwise structured
+  response before the Debate could reach B1.
+- Plan round compatibility normalization now derives a missing display title
+  from the non-empty objective or summary before strict schema validation.
+  Milestones, graph structure, typed acceptance checks, claims, and other
+  semantic fields remain fail-closed.
+- Corrected automatic Skill routing for authoring intent. Creating or updating
+  a Skill selects `skill-creator` when installed; otherwise the ordinary Agent
+  performs the creation. A related content Skill such as
+  `huashu-douyin-script` may remain investigation evidence but is never
+  auto-selected as the executor for creating a new Skill.
+- Failed-round retry refreshes stale automatic Skill routing, removes the old
+  selected-Skill evidence when no longer applicable, rebuilds the task
+  contract, and then resumes from the failed Debate round. Existing paused
+  plans therefore recover without being discarded or recreated.
+- Verification evidence:
+  - focused Plan orchestrator and Planner Kernel suite: 2 files / 41 tests;
+  - `npm test`: 234 files / 2,371 tests passed;
+  - TypeScript main/renderer checks and Vite production build passed.
+
+## 2026-07-31 - P63 External Skill Artifact Gate and Accurate Stage Recovery
+
+- Replayed the user's persisted failed plan through the production UI. The
+  provider completed all five Debate rounds, but the local quality gate
+  rejected every `file_exists` check under the shared
+  `/Users/zeorx/.claude/skills/douyin-to-transcript` output as if it were an
+  implicit workspace traversal.
+- Plan quality now treats only an explicit absolute or home-relative external
+  file target as a confirmable warning. Hidden relative traversal such as
+  `../secret` remains blocking. Confirmation does not bypass enforcement: the
+  Goal runtime still resolves the approved output root and applies live tool
+  authorization, sandbox, and acceptance-boundary checks.
+- Extracted planning failure presentation from the chat component and mapped
+  every stage kind to its actual user-facing failure and retry action. A
+  quality-gate failure no longer claims that investigation failed. Reloading
+  the session also projects the latest durable Plan state over stale activity,
+  so a recovered Ready plan no longer keeps the old red failure banner.
+- Rebuilt and reopened the local app, retried the same durable plan, and
+  observed it reach `Ready · 可确认`: 5/5 Debate rounds, 6/6 planning stages,
+  corrected no-Skill authoring route, and explicit external-path warnings.
+  Execution was deliberately not confirmed.
+- Verification evidence:
+  - focused validator, planner, orchestrator, and renderer suites passed;
+  - `npm test`: 235 files / 2,376 tests passed;
+  - TypeScript main/renderer checks and Vite production build passed;
+  - `npm run smoke:prod` and `npm run harness:check` passed.

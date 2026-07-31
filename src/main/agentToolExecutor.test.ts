@@ -1292,6 +1292,37 @@ describe("agent tool executor", () => {
     });
   });
 
+  it("executes an opaque interpreter command only with an exact authorization proof", async () => {
+    const executor = createAgentToolExecutor();
+    const scriptPath = path.join(tempDir, "check.js");
+    await writeFile(scriptPath, "console.log('help ok')", "utf8");
+    const command = `${JSON.stringify(process.execPath)} ${JSON.stringify(scriptPath)} --help`;
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: tempDir,
+    });
+
+    await expect(
+      executor.execute(
+        { toolName: "shell_exec", args: { command } },
+        { runContext },
+      ),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining("opaque interpreter"),
+    });
+
+    await expect(
+      executor.execute(
+        { toolName: "shell_exec", args: { command } },
+        { runContext, authorizedShellCommand: command },
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      result: { stdout: "help ok\n", exitCode: 0 },
+    });
+  });
+
   it("blocks relative shell path escapes before executing from the run workspace", async () => {
     const workspaceRoot = path.join(tempDir, "workspace");
     const outsideRoot = path.join(tempDir, "outside");

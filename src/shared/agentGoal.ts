@@ -2,6 +2,7 @@ import type { GoalReviewPolicy } from "./agentGoalReview";
 import type { AgentTaskContract } from "./agentTaskContract";
 import type { SkillRecord } from "./skills";
 import type { ModelServiceNotice } from "./modelServiceNotice";
+import type { ResolvedModelBinding } from "./modelSettings";
 
 export type GoalStatus =
   | "planning"
@@ -382,6 +383,8 @@ export type Goal = {
     revision: number;
     sha256: string;
   };
+  /** Frozen execution model inherited from a confirmed Plan. */
+  executionModelBinding?: ResolvedModelBinding;
   successCriteria: SuccessCriterion[];
   milestones: Milestone[];
   status: GoalStatus;

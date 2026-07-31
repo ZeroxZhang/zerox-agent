@@ -61,7 +61,11 @@ import type {
   AgentRunRecord,
   RunScheduledTaskResult,
 } from "../shared/agentRuns";
-import type { ModelServiceNotice } from "../shared/modelServiceNotice";
+import {
+  modelServiceNoticeFromError,
+  type ModelServiceNotice,
+} from "../shared/modelServiceNotice";
+import type { ModelCapabilities } from "../shared/modelSettings";
 import type { SkillRecord } from "../shared/skills";
 import type { AgentToolName } from "../shared/toolPermissions";
 import type { ScheduledTask } from "../shared/scheduledTasks";
@@ -83,16 +87,21 @@ export type AgentRuntimeModelProfile = {
   model: string;
   temperature: number;
   maxTokens: number;
+  modelCapabilities?: ModelCapabilities;
 };
 
 export type AgentRuntimeEngine = {
   startTask(
     taskId: string,
-    options?: { signal?: AbortSignal; sessionId?: string },
+    options?: {
+      signal?: AbortSignal;
+      sessionId?: string;
+      onEvent?: (event: AgentRunEvent) => void;
+    },
   ): Promise<RunScheduledTaskResult>;
   resumeRun(
     runId: string,
-    options?: { signal?: AbortSignal },
+    options?: { signal?: AbortSignal; onEvent?: (event: AgentRunEvent) => void },
   ): Promise<RunScheduledTaskResult>;
 };
 
@@ -145,6 +154,14 @@ export function createAgentRuntimeEngine(options: {
       ...(data ? { data } : {}),
       createdAt: now().toISOString(),
     };
+  }
+
+  function publishEvent(
+    event: AgentRunEvent,
+    onEvent: ((event: AgentRunEvent) => void) | undefined,
+  ): AgentRunEvent {
+    onEvent?.(event);
+    return event;
   }
 
   async function saveCheckpoint(
@@ -236,6 +253,7 @@ export function createAgentRuntimeEngine(options: {
     startedAt: string;
     modelServiceNotice?: ModelServiceNotice;
     failure?: unknown;
+    onEvent?: (event: AgentRunEvent) => void;
   }): Promise<RunScheduledTaskResult> {
     const finishedAt = now().toISOString();
     const failureClass = input.failure
@@ -292,18 +310,18 @@ export function createAgentRuntimeEngine(options: {
           importance: 3,
         });
         run.events.push(
-          createEvent("info", "Episodic memory written.", {
+          publishEvent(createEvent("info", "Episodic memory written.", {
             memoryKind: "episodic",
-          }),
+          }), input.onEvent),
         );
       } catch (error) {
         run.events.push(
-          createEvent("warn", "Unable to write episodic memory.", {
+          publishEvent(createEvent("warn", "Unable to write episodic memory.", {
             error:
               error instanceof Error
                 ? error.message
                 : "Unknown memory error.",
-          }),
+          }), input.onEvent),
         );
       }
     }
@@ -337,6 +355,7 @@ export function createAgentRuntimeEngine(options: {
     signal: AbortSignal | undefined,
     events: AgentRunEvent[],
     startedAt: string,
+    onEvent?: (event: AgentRunEvent) => void,
   ): Promise<RunScheduledTaskResult> {
     let current = await saveCheckpoint(checkpoint, "running", {
       steps: markCurrentStepRunning(
@@ -347,10 +366,12 @@ export function createAgentRuntimeEngine(options: {
     });
     const profile = await options.getModelProfile();
     const maxTurns = skill?.manifest.execution.maxTurns ?? 10;
-    const toolDefinitions = filterToolDefinitionsForScheduledTask(
-      getToolDefinitions(options.toolExecutor),
-      task,
-    );
+    const toolDefinitions = profile.modelCapabilities?.tools === false
+      ? []
+      : filterToolDefinitionsForScheduledTask(
+          getToolDefinitions(options.toolExecutor),
+          task,
+        );
     let observationTail = Promise.resolve();
     const observe = (operation: () => Promise<void>) => {
       observationTail = observationTail.then(operation, operation);
@@ -444,6 +465,13 @@ export function createAgentRuntimeEngine(options: {
             }
           : {}),
         onTurn(turn, phase) {
+          const event = createEvent(
+            "info",
+            phase === "executing" ? `Agent turn ${turn + 1}.` : `Agent phase: ${phase}.`,
+            { turn, phase },
+          );
+          events.push(event);
+          onEvent?.(event);
           appendObserved("model_request", {
             turn,
             phase,
@@ -467,12 +495,21 @@ export function createAgentRuntimeEngine(options: {
           });
         },
         onModelRetry(event) {
+          const runEvent = createEvent("warn", "Retrying model request.", event);
+          events.push(runEvent);
+          onEvent?.(runEvent);
           appendObserved("model_retry", event);
         },
         onContextCompacted(event) {
           appendObserved("context_compacted", event);
         },
         onToolCall(toolName, args, event) {
+          const runEvent = createEvent("info", `Calling tool: ${toolName}.`, {
+            toolCallId: event.toolCallId,
+            toolName,
+          });
+          events.push(runEvent);
+          onEvent?.(runEvent);
           appendObserved("tool_call", {
             toolCallId: event.toolCallId,
             toolName,
@@ -484,6 +521,13 @@ export function createAgentRuntimeEngine(options: {
           });
         },
         onToolResult(toolName, ok, result, event) {
+          const runEvent = createEvent(
+            ok ? "info" : "warn",
+            ok ? `Tool completed: ${toolName}.` : `Tool failed: ${toolName}.`,
+            { toolCallId: event.toolCallId, toolName, ok },
+          );
+          events.push(runEvent);
+          onEvent?.(runEvent);
           appendObserved("tool_result", {
             toolCallId: event.toolCallId,
             toolName,
@@ -515,6 +559,12 @@ export function createAgentRuntimeEngine(options: {
             messages: loopCheckpoint.messages.map(toExecutionMessage),
             toolCallCount: loopCheckpoint.toolCallsExecuted,
           });
+          const event = createEvent("info", "Agent checkpoint saved.", {
+            checkpointId: current.id,
+            toolCallsExecuted: loopCheckpoint.toolCallsExecuted,
+          });
+          events.push(event);
+          onEvent?.(event);
         },
       },
     );
@@ -546,6 +596,13 @@ export function createAgentRuntimeEngine(options: {
     }
 
     const status = loopResult.status;
+    const terminalEvent = createEvent(
+      status === "succeeded" ? "info" : status === "paused" ? "warn" : "error",
+      `Shared agent loop ${status}.`,
+      { tokensConsumed: loopResult.tokensConsumed ?? 0 },
+    );
+    events.push(terminalEvent);
+    onEvent?.(terminalEvent);
     return finishRun({
       checkpoint: current,
       taskId: task.id,
@@ -553,15 +610,9 @@ export function createAgentRuntimeEngine(options: {
       skillName: getRunSkillName(task),
       status,
       summary: loopResult.summary,
-      events: [
-        ...events,
-        createEvent(
-          status === "succeeded" ? "info" : status === "paused" ? "warn" : "error",
-          `Shared agent loop ${status}.`,
-          { tokensConsumed: loopResult.tokensConsumed ?? 0 },
-        ),
-      ],
+      events,
       startedAt,
+      ...(onEvent ? { onEvent } : {}),
       ...(loopResult.modelServiceNotice
         ? { modelServiceNotice: loopResult.modelServiceNotice }
         : {}),
@@ -578,6 +629,7 @@ export function createAgentRuntimeEngine(options: {
     signal: AbortSignal | undefined,
     events: AgentRunEvent[],
     startedAt: string,
+    onEvent?: (event: AgentRunEvent) => void,
   ): Promise<RunScheduledTaskResult> {
     if (options.runLoop) {
       return runFromCheckpointWithSharedLoop(
@@ -587,6 +639,7 @@ export function createAgentRuntimeEngine(options: {
         signal,
         events,
         startedAt,
+        onEvent,
       );
     }
     let current = await saveCheckpoint(checkpoint, "running", {
@@ -601,10 +654,12 @@ export function createAgentRuntimeEngine(options: {
     const reflectionDecisions: AgentReflectionDecision[] = [];
     const profile = await options.getModelProfile();
     const maxTurns = skill?.manifest.execution.maxTurns ?? 10;
-    const toolDefinitions = filterToolDefinitionsForScheduledTask(
-      getToolDefinitions(options.toolExecutor),
-      task,
-    );
+    const toolDefinitions = profile.modelCapabilities?.tools === false
+      ? []
+      : filterToolDefinitionsForScheduledTask(
+          getToolDefinitions(options.toolExecutor),
+          task,
+        );
     const contextTokenBudget = Math.max(1, Math.floor(profile.maxTokens * 0.7));
 
     async function compactMessagesBeforeModelRequest() {
@@ -788,6 +843,7 @@ export function createAgentRuntimeEngine(options: {
           summary: response.content,
           events,
           startedAt,
+          ...(onEvent ? { onEvent } : {}),
         });
       }
 
@@ -931,6 +987,9 @@ export function createAgentRuntimeEngine(options: {
           {
             runContext: current.runContext,
             ...(signal ? { signal } : {}),
+            ...(toolName === "shell_exec"
+              ? { authorizedShellCommand: String(args.command ?? "") }
+              : {}),
             toolResultReadScope: {
               runId: current.runId,
               ...(current.runContext?.sessionId
@@ -1068,15 +1127,18 @@ export function createAgentRuntimeEngine(options: {
 
       const startedAt = now().toISOString();
       const runId = createId();
-      const events = [createEvent("info", "Agent runtime started.")];
+      const startedEvent = createEvent("info", "Agent runtime started.");
+      const events = [publishEvent(startedEvent, runOptions?.onEvent)];
       const runContext = await options.workspaceService?.resolveRunContext(
         runOptions?.sessionId ? { sessionId: runOptions.sessionId } : undefined,
       );
       const initialProfile = await options.getModelProfile();
-      const initialToolDefinitions = filterToolDefinitionsForScheduledTask(
-        getToolDefinitions(options.toolExecutor),
-        task,
-      );
+      const initialToolDefinitions = initialProfile.modelCapabilities?.tools === false
+        ? []
+        : filterToolDefinitionsForScheduledTask(
+            getToolDefinitions(options.toolExecutor),
+            task,
+          );
       const systemTimeZone = getSystemTimeZone();
       const proceduralMemoryContext =
         await buildProceduralMemoryPromptContext({
@@ -1190,6 +1252,7 @@ export function createAgentRuntimeEngine(options: {
           runOptions?.signal,
           events,
           startedAt,
+          runOptions?.onEvent,
         );
       } catch (error) {
         if (isPauseError(error, runOptions?.signal)) {
@@ -1204,6 +1267,7 @@ export function createAgentRuntimeEngine(options: {
             summary: "运行已暂停。",
             events: [...events, createEvent("warn", "Agent run paused.")],
             startedAt,
+            ...(runOptions?.onEvent ? { onEvent: runOptions.onEvent } : {}),
           });
         }
 
@@ -1220,11 +1284,30 @@ export function createAgentRuntimeEngine(options: {
             events: [...events, createEvent("warn", "Agent run canceled.")],
             startedAt,
             failure: error,
+            ...(runOptions?.onEvent ? { onEvent: runOptions.onEvent } : {}),
           });
         }
 
         const latestCheckpoint =
           (await options.executionStore.get(runId)) ?? checkpoint;
+        const modelServiceNotice = modelServiceNoticeFromError(error);
+        if (modelServiceNotice) {
+          return finishRun({
+            checkpoint: latestCheckpoint,
+            taskId: task.id,
+            taskName: task.name,
+            skillName: getRunSkillName(task),
+            status: "paused",
+            summary: modelServiceNotice.message,
+            events: [
+              ...events,
+              createEvent("warn", modelServiceNotice.message),
+            ],
+            startedAt,
+            modelServiceNotice,
+            ...(runOptions?.onEvent ? { onEvent: runOptions.onEvent } : {}),
+          });
+        }
         return finishRun({
           checkpoint: latestCheckpoint,
           taskId: task.id,
@@ -1235,6 +1318,7 @@ export function createAgentRuntimeEngine(options: {
           events: [...events, createEvent("error", formatFailureMessage(error))],
           startedAt,
           failure: error,
+          ...(runOptions?.onEvent ? { onEvent: runOptions.onEvent } : {}),
         });
       }
     },
@@ -1262,8 +1346,9 @@ export function createAgentRuntimeEngine(options: {
           task,
           skill,
           runOptions?.signal,
-          [createEvent("info", "Agent runtime resumed.")],
+          [publishEvent(createEvent("info", "Agent runtime resumed."), runOptions?.onEvent)],
           checkpoint.createdAt,
+          runOptions?.onEvent,
         );
       } catch (error) {
         if (isPauseError(error, runOptions?.signal)) {
@@ -1278,11 +1363,27 @@ export function createAgentRuntimeEngine(options: {
             summary: "运行已暂停。",
             events: [createEvent("warn", "Agent run paused.")],
             startedAt: checkpoint.createdAt,
+            ...(runOptions?.onEvent ? { onEvent: runOptions.onEvent } : {}),
           });
         }
 
         const latestCheckpoint =
           (await options.executionStore.get(runId)) ?? checkpoint;
+        const modelServiceNotice = modelServiceNoticeFromError(error);
+        if (modelServiceNotice) {
+          return finishRun({
+            checkpoint: latestCheckpoint,
+            taskId: task.id,
+            taskName: task.name,
+            skillName: getRunSkillName(task),
+            status: "paused",
+            summary: modelServiceNotice.message,
+            events: [createEvent("warn", modelServiceNotice.message)],
+            startedAt: checkpoint.createdAt,
+            modelServiceNotice,
+            ...(runOptions?.onEvent ? { onEvent: runOptions.onEvent } : {}),
+          });
+        }
         return finishRun({
           checkpoint: latestCheckpoint,
           taskId: task.id,
@@ -1297,6 +1398,7 @@ export function createAgentRuntimeEngine(options: {
           events: [createEvent("error", formatFailureMessage(error))],
           startedAt: checkpoint.createdAt,
           failure: error,
+          ...(runOptions?.onEvent ? { onEvent: runOptions.onEvent } : {}),
         });
       }
     },

@@ -456,6 +456,13 @@ function validatePlanRecord(plan: PlanRecord): PlanRecord {
   if (plan.mode !== "direct" && plan.mode !== "debate") {
     throw new Error("计划模式非法。");
   }
+  if (
+    plan.autonomyMode !== undefined &&
+    plan.autonomyMode !== "standard" &&
+    plan.autonomyMode !== "auto"
+  ) {
+    throw new Error("计划自主模式非法。");
+  }
   const schemaVersion = plan.schemaVersion ?? 1;
   if (schemaVersion !== 1 && schemaVersion !== 2) {
     throw new Error("计划 Schema 版本非法。");

@@ -619,6 +619,46 @@ describe("agent runner service", () => {
     });
   });
 
+  it("emits runtime events before a streaming task completes", async () => {
+    let resolveModel!: (response: ChatCompletionResponse) => void;
+    const service = createAgentRunnerService({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore([]),
+      resolveSkill: async () => createSkillRecord(4),
+      chatClient: {
+        async complete() {
+          return new Promise<ChatCompletionResponse>((resolve) => {
+            resolveModel = resolve;
+          });
+        },
+      },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      createId: createSequentialId("runner_stream"),
+      now: createSteppedClock("2026-06-07T00:00:00.000Z"),
+    });
+    const stream = service.runTaskStreaming("task_123")[Symbol.asyncIterator]();
+
+    await expect(stream.next()).resolves.toMatchObject({
+      done: false,
+      value: { level: "info", message: "Agent runtime started." },
+    });
+
+    await waitFor(() => resolveModel);
+    resolveModel(finalResponse("Streaming report complete"));
+    const remainingEvents = [];
+    while (true) {
+      const next = await stream.next();
+      if (next.done) break;
+      remainingEvents.push(next.value);
+    }
+    expect(remainingEvents).toContainEqual(
+      expect.objectContaining({ message: expect.stringContaining("succeeded") }),
+    );
+  });
+
   it("resumes a checkpoint through the recoverable runtime", async () => {
     const savedCheckpoints: AgentExecutionCheckpoint[] = [];
     const executionStore = createMemoryExecutionStore(savedCheckpoints);

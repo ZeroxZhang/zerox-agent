@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { Goal } from "../shared/agentGoal";
-import { extractGoalOutputRoots } from "./goalOutputRoots";
+import {
+  applyGoalOutputRootsToRunContext,
+  extractGoalOutputRoots,
+  extractGoalReferenceRoots,
+} from "./goalOutputRoots";
 
 describe("goal output roots", () => {
   it("trims Chinese prose that is directly attached to an absolute path", () => {
@@ -186,6 +190,49 @@ describe("goal output roots", () => {
         platform: "darwin",
       }),
     ).toEqual([root]);
+  });
+
+  it("grants milestone-declared source paths read access without widening writes", () => {
+    const goal = createGoal("Create a reusable skill in the configured output directory.");
+    goal.milestones = [
+      {
+        id: "milestone_1",
+        description:
+          "复用 /Users/demo/.claude/skills/source/scripts/download.py，写入目标 Skill。",
+        dependsOn: [],
+        successCriteria: [],
+        state: "ready",
+        runIds: [],
+        attempts: 0,
+      },
+    ];
+
+    expect(extractGoalReferenceRoots(goal)).toEqual([
+      "/Users/demo/.claude/skills/source/scripts",
+    ]);
+
+    const context = applyGoalOutputRootsToRunContext(
+      {
+        workspaceId: "workspace_1",
+        workspaceRoot: "/Users/demo/project",
+        sandbox: {
+          mode: "workspace-write",
+          allowWorkspaceEscape: false,
+          extraReadRoots: [],
+          extraWriteRoots: [],
+        },
+        locationEnv: {
+          homeDir: "/Users/demo",
+          platform: "darwin",
+        },
+      },
+      goal,
+    );
+
+    expect(context.sandbox.extraReadRoots).toEqual([
+      "/Users/demo/.claude/skills/source/scripts",
+    ]);
+    expect(context.sandbox.extraWriteRoots).toEqual([]);
   });
 });
 

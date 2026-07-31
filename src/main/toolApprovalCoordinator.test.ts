@@ -264,6 +264,30 @@ describe("tool approval coordinator", () => {
       autoApprovalLocked: false,
     });
   });
+
+  it("does not leak an active goal's auto approval into a chat request", async () => {
+    const sent: Array<{ channel: string; payload: unknown }> = [];
+    const coordinator = createToolApprovalCoordinator({
+      createId: () => "approval_chat",
+      sendToRenderers(channel, payload) {
+        sent.push({ channel, payload });
+      },
+    });
+    coordinator.setGoalActive("goal_1", true);
+
+    const approval = coordinator.requestUserApproval({
+      ...createRequest(),
+      taskId: "chat_session_1_request_1",
+      taskName: "Chat task",
+    });
+
+    expect(sent).toContainEqual({
+      channel: "toolApproval:request",
+      payload: expect.objectContaining({ id: "approval_chat" }),
+    });
+    expect(coordinator.resolveApproval({ id: "approval_chat", approved: false })).toBe(true);
+    await expect(approval).resolves.toMatchObject({ approved: false });
+  });
 });
 
 function createRequest(): ToolUserApprovalRequest {

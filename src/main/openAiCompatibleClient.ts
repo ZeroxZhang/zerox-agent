@@ -280,9 +280,9 @@ export function createOpenAiCompatibleClient(options?: {
 
           for (const line of lines) {
             const trimmed = line.trim();
-            if (!trimmed || !trimmed.startsWith("data: ")) continue;
+            if (!trimmed || !trimmed.startsWith("data:")) continue;
 
-            const data = trimmed.slice(6);
+            const data = trimmed.slice(5).trimStart();
             if (data === "[DONE]") {
               streamEnded = true;
               // v3.6.0: Flush final UTF-8 bytes from TextDecoder before done
@@ -366,8 +366,10 @@ export function createOpenAiCompatibleClient(options?: {
                   terminalFinishReason = finishReason;
                 }
               }
-            } catch {
-              // Skip unparseable chunks in streaming
+            } catch (error) {
+              throw new Error("LLM stream returned malformed JSON.", {
+                cause: error,
+              });
             }
           }
         }

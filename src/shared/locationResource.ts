@@ -147,11 +147,24 @@ export function validatePathInsideLocationRoots(
   const roots = rootPaths.map((rootPath) =>
     normalizeLocationBoundaryPath(rootPath, resolvedEnv),
   );
+  const lexicalRoots = roots.filter((root) =>
+    isNormalizedPathInsideBoundary(candidate, root),
+  );
 
-  for (const root of roots) {
-    if (!isNormalizedPathInsideBoundary(candidate, root)) {
-      continue;
+  if (options.allowSymlinks && lexicalRoots.length > 0) {
+    const realCandidate = resolveComparableRealPath(candidate);
+    const targetRoot = roots.find((root) =>
+      isNormalizedPathInsideBoundary(
+        realCandidate,
+        resolveComparableRealPath(root),
+      ),
+    );
+    if (targetRoot) {
+      return { ok: true, path: candidate, root: lexicalRoots[0]! };
     }
+  }
+
+  for (const root of lexicalRoots) {
 
     if (!options.allowSymlinks) {
       const symlinkPath = findSymlinkPathSegment(root, candidate, resolvedEnv);

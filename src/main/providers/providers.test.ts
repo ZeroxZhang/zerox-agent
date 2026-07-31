@@ -406,6 +406,99 @@ describe("AnthropicProvider", () => {
     });
   });
 
+  it("preserves native streaming tool ids, names, indexes, and arguments", async () => {
+    const encoder = new TextEncoder();
+    const provider = createProvider(
+      { providerId: "anthropic", apiKey: "k", chatModel: "claude-sonnet-4-6" },
+      {
+        fetch: (async () => new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              const events = [
+                {
+                  type: "content_block_start",
+                  index: 1,
+                  content_block: {
+                    type: "tool_use",
+                    id: "toolu_real_1",
+                    name: "file_read",
+                    input: {},
+                  },
+                },
+                {
+                  type: "content_block_delta",
+                  index: 1,
+                  delta: { type: "input_json_delta", partial_json: '{"path":' },
+                },
+                {
+                  type: "content_block_delta",
+                  index: 1,
+                  delta: { type: "input_json_delta", partial_json: '"/safe"}' },
+                },
+                {
+                  type: "message_delta",
+                  delta: { stop_reason: "tool_use" },
+                },
+                { type: "message_stop" },
+              ];
+              controller.enqueue(
+                encoder.encode(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("")),
+              );
+              controller.close();
+            },
+          }),
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        )) as typeof fetch,
+      },
+    );
+    const client = createProviderChatClient({ provider });
+    const events = [];
+
+    for await (const event of client.streamComplete({
+      baseUrl: "",
+      apiKey: "k",
+      model: "claude-sonnet-4-6",
+      temperature: 0,
+      maxTokens: 100,
+      messages: [{ role: "user", content: "read" }],
+      tools: [{
+        type: "function",
+        function: {
+          name: "file_read",
+          description: "Read a file",
+          parameters: { type: "object", properties: {} },
+        },
+      }],
+    })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      {
+        type: "tool_call_delta",
+        id: "toolu_real_1",
+        index: 1,
+        name: "file_read",
+        arguments: "",
+      },
+      {
+        type: "tool_call_delta",
+        id: "toolu_real_1",
+        index: 1,
+        name: "file_read",
+        arguments: '{"path":',
+      },
+      {
+        type: "tool_call_delta",
+        id: "toolu_real_1",
+        index: 1,
+        name: "file_read",
+        arguments: '"/safe"}',
+      },
+      { type: "done", finishReason: "tool_use" },
+    ]);
+  });
+
   it("applies the same bounded thinking configuration to complete and stream requests", async () => {
     const bodies: Array<Record<string, unknown>> = [];
     const encoder = new TextEncoder();
@@ -600,6 +693,44 @@ describe("GeminiProvider", () => {
     expect(res.content).toBe("Hi");
     expect(res.toolCalls[0].function.name).toBe("file_read");
     expect(res.cacheReadTokens).toBe(4);
+  });
+
+  it("assigns unique ids to parallel calls of the same function", async () => {
+    const provider = createProvider(
+      { providerId: "gemini", apiKey: "k", chatModel: "gemini-2.5-pro" },
+      {
+        fetch: mockFetch({
+          candidates: [{
+            content: {
+              parts: [
+                { functionCall: { name: "file_read", args: { path: "/a" } } },
+                { functionCall: { name: "file_read", args: { path: "/b" } } },
+              ],
+            },
+            finishReason: "STOP",
+          }],
+        }),
+      },
+    );
+
+    const response = await provider.complete({
+      model: "gemini-2.5-pro",
+      apiKey: "k",
+      temperature: 0,
+      maxTokens: 100,
+      messages: [{ role: "user", content: [{ type: "text", text: "read both" }] }],
+    });
+
+    expect(response.toolCalls).toEqual([
+      expect.objectContaining({
+        id: "gemini_tool_call_1",
+        function: { name: "file_read", arguments: '{"path":"/a"}' },
+      }),
+      expect.objectContaining({
+        id: "gemini_tool_call_2",
+        function: { name: "file_read", arguments: '{"path":"/b"}' },
+      }),
+    ]);
   });
 
   it("surfaces Gemini MAX_TOKENS as an output-limit notice", async () => {

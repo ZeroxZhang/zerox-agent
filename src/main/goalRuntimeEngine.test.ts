@@ -14,6 +14,7 @@ import { createAgentToolExecutor } from "./agentToolExecutor";
 import { createAgentGoalAcceptance } from "./agentGoalAcceptance";
 import { createDynamicToolRegistry } from "./dynamicToolRegistry";
 import {
+  buildGoalMilestoneRuntimeTask,
   createGoalRuntimeEngine as createProductionGoalRuntimeEngine,
 } from "./goalRuntimeEngine";
 import { createAgentGoalContext } from "./agentGoalContext";
@@ -54,6 +55,41 @@ function createGoalRuntimeEngine(
 }
 
 describe("goal runtime engine", () => {
+  it("authorizes both frozen python acceptance commands and their portable python3 fallback", () => {
+    const command = "python /Users/demo/project/check.py --help";
+    const goal = createGoal({
+      successCriteria: [{
+        id: "criterion_python",
+        description: "Python CLI is callable.",
+        acceptanceChecks: [{
+          id: "check_python",
+          kind: "command_exit_code",
+          description: "Python CLI is callable.",
+          params: { command, expectedExitCode: 0 },
+          requiresEvidence: true,
+        }],
+      }],
+    });
+    const runContext = buildPrimaryRunContext({
+      runId: "run_python_fallback",
+      taskId: "goal_1",
+      workspaceRoot: "/Users/demo/project",
+      permissionPolicy: {
+        files: { read: ["/Users/demo/project"], write: ["/Users/demo/project"] },
+        web: { search: false, fetchDomains: [] },
+        shell: { commands: [] },
+        memory: { read: true, write: false },
+      },
+    });
+
+    expect(
+      buildGoalMilestoneRuntimeTask(goal, runContext).permissions.shell.commands,
+    ).toEqual(expect.arrayContaining([
+      command,
+      "python3 /Users/demo/project/check.py --help",
+    ]));
+  });
+
   it("routes supported deterministic contracts through the native pipeline without a model loop", async () => {
     const runs: AgentRunRecord[] = [];
     const trajectoryEvents: AgentTrajectoryEvent[] = [];
@@ -414,6 +450,12 @@ describe("goal runtime engine", () => {
     const trajectoryEvents: AgentTrajectoryEvent[] = [];
     let capturedMessages: ChatMessage[] = [];
     let capturedRuntimeTask: unknown;
+    let capturedChatClient: unknown;
+    const goalBoundChatClient = {
+      async complete() {
+        throw new Error("runAgentLoop stub handles bound model execution");
+      },
+    };
     const selectedSkill = createSkillRecord({
       name: "onepager",
       body: "Onepager 技能流程：必须先做内容架构分析。",
@@ -424,8 +466,12 @@ describe("goal runtime engine", () => {
       workspaceRoot: "/Users/demo/project",
       chatClient: {
         async complete() {
-          throw new Error("runAgentLoop stub handles model execution");
+          throw new Error("default chat client must not run a bound Goal");
         },
+      },
+      getChatClient(currentGoal) {
+        expect(currentGoal.id).toBe(goal.id);
+        return goalBoundChatClient;
       },
       getModelProfile: async () => ({
         baseUrl: "https://api.example.com/v1",
@@ -463,6 +509,7 @@ describe("goal runtime engine", () => {
       runAgentLoop: async (messages, _profile, options): Promise<AgentLoopResult> => {
         capturedMessages = messages;
         capturedRuntimeTask = options.runtimeTask;
+        capturedChatClient = options.chatClient;
         return {
           status: "succeeded",
           summary: "skill report complete",
@@ -479,6 +526,7 @@ describe("goal runtime engine", () => {
       status: "succeeded",
       summary: "skill report complete",
     });
+    expect(capturedChatClient).toBe(goalBoundChatClient);
     const prompt = capturedMessages.map((message) => message.content).join("\n");
     expect(prompt).toContain("Selected skill execution contract");
     expect(prompt).toContain("Onepager 技能流程：必须先做内容架构分析。");

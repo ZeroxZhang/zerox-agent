@@ -120,6 +120,56 @@ describe("chat session store", () => {
     });
   });
 
+  it("persists guided-input attachment payloads for restart recovery", async () => {
+    const store = createChatSessionStore({
+      configDir,
+      createId: createSequentialId("guided"),
+    });
+    const session = await store.appendMessage({ role: "user", content: "检查截图" });
+    await store.appendActivityEvent(session.session.id, {
+      sessionId: session.session.id,
+      requestId: "request_guided",
+      sequence: 1,
+      turnId: "turn-request_guided",
+      state: "waiting_for_input",
+      message: "等待输入",
+      createdAt: "2026-07-31T00:00:00.000Z",
+      elapsedMs: 1,
+      pendingSkillInput: {
+        inputRequestId: "input_guided",
+        status: "pending",
+        sessionId: session.session.id,
+        requestId: "request_guided",
+        userMessage: "检查截图",
+        selectedSkillName: "image-review",
+        partialValues: {},
+        attachments: [
+          { id: "image_1", name: "screen.png", mediaType: "image/png", size: 3, kind: "image" },
+        ],
+        attachmentPayloads: [
+          { id: "image_1", name: "screen.png", mediaType: "image/png", size: 3, kind: "image", dataBase64: "YWJj" },
+        ],
+      },
+    });
+    await store.flush();
+
+    const restarted = createChatSessionStore({ configDir });
+    await expect(restarted.get(session.session.id)).resolves.toMatchObject({
+      activity: {
+        statusEvents: [
+          expect.objectContaining({
+            requestId: "request_guided",
+            sequence: 1,
+            turnId: "turn-request_guided",
+            pendingSkillInput: expect.objectContaining({
+              attachmentPayloads: [expect.objectContaining({ dataBase64: "YWJj" })],
+            }),
+          }),
+        ],
+      },
+    });
+  });
+
   it("reuses the pending user record when the same attachment turn is retried", async () => {
     const store = createChatSessionStore({
       configDir,
@@ -153,14 +203,19 @@ describe("chat session store", () => {
     });
   });
 
-  it("quarantines corrupt chat session JSON and starts from an empty store", async () => {
+  it("quarantines corrupt chat JSON and exposes a recovery notice to the user", async () => {
     await writeFile(path.join(configDir, "chat-sessions.json"), "", "utf8");
     const store = createChatSessionStore({
       configDir,
       createId: createSequentialId("chat"),
     });
 
-    await expect(store.list()).resolves.toEqual([]);
+    await expect(store.list()).resolves.toEqual([
+      expect.objectContaining({
+        title: "会话存储恢复通知",
+        messageCount: 1,
+      }),
+    ]);
 
     const files = await readdir(configDir);
     expect(
@@ -178,11 +233,10 @@ describe("chat session store", () => {
     await writeFile(path.join(configDir, "chat-sessions.json"), "", "utf8");
     const store = createChatSessionStore({ configDir });
 
-    await expect(Promise.all([store.list(), store.list(), store.list()])).resolves.toEqual([
-      [],
-      [],
-      [],
-    ]);
+    const recovered = await Promise.all([store.list(), store.list(), store.list()]);
+    expect(recovered.every((sessions) => sessions.length === 1)).toBe(true);
+    expect(recovered.flat().every((session) => session.title === "会话存储恢复通知"))
+      .toBe(true);
   });
 
   it("creates a session with a brief generated title and persists messages", async () => {

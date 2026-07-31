@@ -80,6 +80,7 @@ export function createToolApprovalCoordinator(options: {
     if (state.autoApprovalEnabled) {
       for (const [id, entry] of [...pending]) {
         if (entry.request.risk.requiresConfirmation) continue;
+        if (!shouldAutoApproveTask(entry.request.taskId)) continue;
         settlePending(
           id,
           {
@@ -105,7 +106,7 @@ export function createToolApprovalCoordinator(options: {
       return rejectAborted(payload);
     }
 
-    if (getAutoApprovalState().autoApprovalEnabled && !payload.risk.requiresConfirmation) {
+    if (shouldAutoApproveTask(request.taskId) && !payload.risk.requiresConfirmation) {
       return approveAutomatically(
         payload,
         `自动授权已放行本次 ${toolName}。`,
@@ -150,6 +151,17 @@ export function createToolApprovalCoordinator(options: {
       }
       pending.set(payload.id, entry);
     });
+  }
+
+  function shouldAutoApproveTask(taskId: string): boolean {
+    if (standaloneAutoApprovalEnabled) {
+      return true;
+    }
+    if (!taskId.startsWith("goal:")) {
+      return false;
+    }
+    const goalId = taskId.slice("goal:".length);
+    return goalModePreferenceEnabled || activeGoalIds.has(goalId);
   }
 
   function resolveApproval(input: ResolveToolApprovalInput): boolean {

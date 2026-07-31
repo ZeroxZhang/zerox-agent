@@ -158,9 +158,37 @@ describe("Bedrock provider", () => {
       },
     });
   });
+
+  it("times out a Bedrock SDK call even when the client ignores abort", async () => {
+    const provider = createBedrockProvider({
+      region: "us-east-1",
+      timeoutMs: 5,
+      client: { send: () => new Promise(() => undefined) } as never,
+    });
+    await expect(provider.complete({
+      ...request,
+      model: "other/amazon.nova-2-pro-v1:0",
+    })).rejects.toThrow("Bedrock request timed out after 5ms");
+  });
 });
 
 describe("Vertex provider", () => {
+  it("times out access-token acquisition before starting the HTTP request", async () => {
+    const fetchMock = vi.fn();
+    const provider = createVertexProvider({
+      project: "project",
+      location: "global",
+      timeoutMs: 5,
+      getAccessToken: () => new Promise(() => undefined),
+      fetch: fetchMock as typeof fetch,
+    });
+    await expect(provider.complete({
+      ...request,
+      model: "gemini/gemini-3.6-flash",
+    })).rejects.toThrow("Vertex authentication timed out after 5ms");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("uses the global Gemini path and API key without a bearer token", async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       expect(url).toContain("https://aiplatform.googleapis.com/v1/");
