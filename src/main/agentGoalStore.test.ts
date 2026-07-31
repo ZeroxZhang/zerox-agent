@@ -57,8 +57,8 @@ describe("agent goal store", () => {
           attempts: 1,
         },
       ],
-      budgetUsage: {
-        ...planning.budgetUsage,
+      executionUsage: {
+        ...planning.executionUsage,
         iterations: 1,
         toolCalls: 3,
       },
@@ -77,7 +77,7 @@ describe("agent goal store", () => {
     const updates = Array.from({ length: 5 }, (_, index) => ({
       ...createGoal("goal_concurrent", "executing"),
       updatedAt: `2026-06-12T00:0${index}:00.000Z`,
-      budgetUsage: {
+      executionUsage: {
         iterations: index,
         toolCalls: index,
         wallClockMs: 0,
@@ -627,19 +627,50 @@ describe("agent goal store", () => {
     ]);
   });
 
-  it("still allows a budget-stopped goal to resume after an explicit recovery action", async () => {
+  it("preserves a budget-stopped goal as historical read-only data", async () => {
     const store = createAgentGoalStore({ configDir });
-    const stopped = createGoal("goal_recoverable", "stopped_budget");
-    const resumed: Goal = {
-      ...stopped,
-      status: "executing",
-      stopReason: undefined,
-      updatedAt: "2026-06-12T00:03:00.000Z",
-    };
+    const stopped = createGoal("goal_historical", "stopped_budget");
 
     await store.save(stopped);
-    await expect(store.save(resumed)).resolves.toEqual(resumed);
-    await expect(store.get("goal_recoverable")).resolves.toEqual(resumed);
+    await expect(store.get("goal_historical")).resolves.toEqual(stopped);
+    expect(stopped.status).toBe("stopped_budget");
+  });
+
+  it("converts legacy budgetUsage into executionUsage without applying limits", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const goal = createGoal("goal_legacy_usage", "stopped_budget");
+    const goalsDir = path.join(configDir, "agent-goals");
+    await mkdir(goalsDir, { recursive: true });
+    const legacy = {
+      ...goal,
+      executionUsage: undefined,
+      budgetUsage: {
+        iterations: 90,
+        toolCalls: 400,
+        wallClockMs: 9_000_000,
+        tokens: 800_000,
+        replans: 25,
+      },
+      budget: {
+        maxIterations: 8,
+        maxToolCalls: 64,
+        maxWallClockMs: 2_700_000,
+        maxTokens: 64_000,
+        maxReplans: 3,
+      },
+    };
+    await writeFile(
+      path.join(goalsDir, `${goal.id}.json`),
+      JSON.stringify(legacy),
+      "utf8",
+    );
+
+    const restored = await store.get(goal.id);
+    expect(restored).toMatchObject({
+      status: "stopped_budget",
+      executionUsage: legacy.budgetUsage,
+    });
+    expect(restored).not.toHaveProperty("budgetUsage");
   });
 
   it("lists active goals and excludes terminal statuses", async () => {
@@ -882,8 +913,8 @@ describe("agent goal store", () => {
     running.milestones[0].state = "running";
     running.milestones[0].runIds = ["run_restart"];
     running.milestones[0].attempts = 1;
-    running.budgetUsage.iterations = 2;
-    running.budgetUsage.toolCalls = 7;
+    running.executionUsage.iterations = 2;
+    running.executionUsage.toolCalls = 7;
 
     await firstStore.save(running);
 
@@ -1028,7 +1059,7 @@ function createGoal(
       maxWallClockMs: 600_000,
       maxReplans: 2,
     },
-    budgetUsage: {
+    executionUsage: {
       iterations: 0,
       toolCalls: 0,
       wallClockMs: 0,

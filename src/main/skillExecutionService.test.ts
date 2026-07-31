@@ -23,7 +23,7 @@ describe("SkillExecutionService", () => {
       sessionId: "session_1",
       requestId: "request_1",
       workspaceId: "workspace_1",
-      budgets: { maxTurns: 4, maxToolCalls: 8 },
+      executionPolicy: { checkpointEveryTurns: 4 },
       runAgentSkill: async () => ({
         ok: true,
         result: { summary: "skill completed" },
@@ -46,7 +46,7 @@ describe("SkillExecutionService", () => {
         skillFile: "/skills/agent-reach/SKILL.md",
         rootDir: "/skills/agent-reach",
       },
-      budgets: { maxTurns: 4, maxToolCalls: 8 },
+      executionPolicy: { checkpointEveryTurns: 4 },
     });
     expect(result.snapshot.stageRecords.map((record) => record.stage)).toEqual([
       "resolving_skill",

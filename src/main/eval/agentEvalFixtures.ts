@@ -230,9 +230,9 @@ export function createAgentEvalFixtures(): AgentEvalFixture[] {
       recoverabilityRequired: true,
     },
     {
-      id: "reflection-retry-budget-exhausted",
+      id: "reflection-duplicate-retry-stalled",
       description:
-        "Repeated recoverable tool failures record retry budget exhaustion before failure classification.",
+        "Repeated identical tool failures are stopped as a state-based duplicate retry.",
       events: createEvents("reflection-retry-budget-exhausted", [
         ["tool_call", { toolName: "file_read", path: "~/Downloads/missing-1.md" }],
         ["tool_result", { toolName: "file_read", ok: false }],
@@ -240,13 +240,13 @@ export function createAgentEvalFixtures(): AgentEvalFixture[] {
           "reflection_added",
           { toolName: "file_read", failureClass: "tool_failed", retryAllowed: true },
         ],
-        ["tool_call", { toolName: "file_read", path: "~/Downloads/missing-2.md" }],
+        ["tool_call", { toolName: "file_read", path: "~/Downloads/missing-1.md" }],
         ["tool_result", { toolName: "file_read", ok: false }],
         [
           "reflection_added",
           {
             toolName: "file_read",
-            failureClass: "budget_exhausted",
+            failureClass: "duplicate_retry_blocked",
             retryAllowed: false,
           },
         ],
@@ -255,7 +255,7 @@ export function createAgentEvalFixtures(): AgentEvalFixture[] {
           {
             failureClass: "tool_error",
             toolName: "file_read",
-            reflectionFailureClass: "budget_exhausted",
+            reflectionFailureClass: "duplicate_retry_blocked",
           },
         ],
       ]),
@@ -268,12 +268,12 @@ export function createAgentEvalFixtures(): AgentEvalFixture[] {
       assertions: [
         {
           type: "reflection_added",
-          payload: { failureClass: "budget_exhausted" },
+          payload: { failureClass: "duplicate_retry_blocked" },
           after: "tool_result",
         },
         {
           type: "failure_classified",
-          payload: { reflectionFailureClass: "budget_exhausted" },
+          payload: { reflectionFailureClass: "duplicate_retry_blocked" },
           after: "reflection_added",
         },
       ],
@@ -1153,7 +1153,7 @@ function createGoalEvalFixtures(): AgentEvalFixture[] {
           {
             goalId: "goal_eval_continue",
             status: "executing",
-            budgetUsage: { iterations: 1, toolCalls: 1 },
+            executionUsage: { iterations: 1, toolCalls: 1 },
           },
         ],
         [

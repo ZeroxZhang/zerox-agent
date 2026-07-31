@@ -2,7 +2,9 @@ import { GoogleAuth } from "google-auth-library";
 import { estimateTextTokens } from "../contextManager";
 import { defaultRequestTimeoutMs, fetchWithTimeout } from "../fetchWithTimeout";
 import { buildCachePrefix } from "./cachePrefix";
+import { geminiGenerationConfig } from "./geminiProvider";
 import { providerHttpError } from "./providerHttpError";
+import { withModelServiceNotice } from "../../shared/modelServiceNotice";
 import type {
   CompleteRequest,
   CompleteResponse,
@@ -46,11 +48,27 @@ export function createVertexProvider(
     async complete(req) {
       const { family, modelId } = splitFamily(req.model);
       const auth = await resolveAuth(options);
+      let response: CompleteResponse;
       if (family === "claude") {
-        return completeClaude(fetchImpl, options, modelId, req, auth, timeoutMs);
-      }
-      if (family === "openweight") {
-        return completeOpenWeight(
+        response = await completeClaude(
+          fetchImpl,
+          options,
+          modelId,
+          req,
+          auth,
+          timeoutMs,
+        );
+      } else if (family === "openweight") {
+        response = await completeOpenWeight(
+          fetchImpl,
+          options,
+          modelId,
+          req,
+          auth,
+          timeoutMs,
+        );
+      } else {
+        response = await completeGemini(
           fetchImpl,
           options,
           modelId,
@@ -59,7 +77,10 @@ export function createVertexProvider(
           timeoutMs,
         );
       }
-      return completeGemini(fetchImpl, options, modelId, req, auth, timeoutMs);
+      return withModelServiceNotice(response, {
+        provider: "vertex",
+        model: req.model,
+      });
     },
 
     async *stream(req): AsyncIterable<StreamEvent> {
@@ -145,10 +166,7 @@ async function completeGemini(
     ...(system
       ? { systemInstruction: { parts: [{ text: system }] } }
       : {}),
-    generationConfig: {
-      temperature: req.temperature,
-      maxOutputTokens: req.maxTokens,
-    },
+    generationConfig: geminiGenerationConfig(req),
     ...(req.tools?.length
       ? {
           tools: [
@@ -204,6 +222,7 @@ async function completeClaude(
           })),
         }
       : {}),
+    ...vertexAnthropicThinkingBody(req),
   };
   const url = vertexUrl(
     options.location || "global",
@@ -212,6 +231,28 @@ async function completeClaude(
   );
   const json = await vertexFetch(fetchImpl, url, body, auth, timeoutMs, req.signal);
   return parseAnthropicResponse(json);
+}
+
+function vertexAnthropicThinkingBody(
+  req: CompleteRequest,
+): { thinking?: { type: "enabled"; budget_tokens: number } } {
+  if (req.thinking?.type !== "enabled") {
+    return {};
+  }
+  if (req.maxTokens <= 1024) {
+    throw new Error(
+      "Vertex Claude 思考模式要求 max tokens 大于最小思考预算 1024。",
+    );
+  }
+  return {
+    thinking: {
+      type: "enabled",
+      budget_tokens: Math.min(
+        req.thinking.budgetTokens ?? 4096,
+        req.maxTokens - 1,
+      ),
+    },
+  };
 }
 
 async function completeOpenWeight(
@@ -289,7 +330,7 @@ async function vertexFetch(
   );
   const text = await response.text();
   if (!response.ok) {
-    throw providerHttpError(response);
+    throw await providerHttpError(response);
   }
   return JSON.parse(text) as Record<string, unknown>;
 }
@@ -350,7 +391,10 @@ function toGeminiMessages(messages: NormalizedMessage[]): {
       role: message.role === "assistant" ? "model" : "user",
       parts: message.content.map((content) => {
         if (content.type === "text" || content.type === "thinking") {
-          return { text: content.text };
+          return {
+            text: content.text,
+            ...(content.type === "thinking" ? { thought: true } : {}),
+          };
         }
         if (content.type === "image") {
           return {
@@ -461,9 +505,14 @@ function parseGeminiResponse(json: Record<string, unknown>): CompleteResponse {
         | undefined
     )?.parts ?? [];
   let text = "";
+  let thinking = "";
   const toolCalls: CompleteResponse["toolCalls"] = [];
   for (const part of parts) {
-    if (typeof part.text === "string") text += part.text;
+    if (typeof part.text === "string" && part.thought === true) {
+      thinking += part.text;
+    } else if (typeof part.text === "string") {
+      text += part.text;
+    }
     const call = part.functionCall as
       | { name?: string; args?: unknown }
       | undefined;
@@ -485,6 +534,7 @@ function parseGeminiResponse(json: Record<string, unknown>): CompleteResponse {
     content: text || null,
     toolCalls,
     finishReason: String(candidate?.finishReason ?? "STOP"),
+    ...(thinking ? { reasoningContent: thinking } : {}),
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
     ...(usage
@@ -503,6 +553,7 @@ function parseAnthropicResponse(
 ): CompleteResponse {
   const content = Array.isArray(json.content) ? json.content : [];
   let text = "";
+  let thinking = "";
   const toolCalls: CompleteResponse["toolCalls"] = [];
   for (const block of content) {
     const candidate = block as {
@@ -511,8 +562,12 @@ function parseAnthropicResponse(
       id?: string;
       name?: string;
       input?: unknown;
+      thinking?: string;
     };
     if (candidate.type === "text" && candidate.text) text += candidate.text;
+    if (candidate.type === "thinking" && candidate.thinking) {
+      thinking += candidate.thinking;
+    }
     if (candidate.type === "tool_use" && candidate.name) {
       toolCalls.push({
         id: candidate.id ?? candidate.name,
@@ -528,6 +583,7 @@ function parseAnthropicResponse(
     content: text || null,
     toolCalls,
     finishReason: String(json.stop_reason ?? "end_turn"),
+    ...(thinking ? { reasoningContent: thinking } : {}),
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
   };

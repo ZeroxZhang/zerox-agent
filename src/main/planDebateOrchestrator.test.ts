@@ -1005,6 +1005,66 @@ describe("plan debate orchestrator", () => {
     expect(error).toMatch(/contentSha256=[a-f0-9]{16}/);
     expect(error).not.toContain("second invalid response");
   });
+
+  it("reports an output-limit notice without retrying JSON repair or persisting reasoning", async () => {
+    let calls = 0;
+    const binding = bindingFor("profileDirect");
+    const client: BoundModelClient["client"] = {
+      async complete() {
+        calls += 1;
+        return {
+          content: null,
+          reasoningContent: "private reasoning must not be persisted",
+          toolCalls: [],
+          finishReason: "length",
+          usage: { inputTokens: 120, outputTokens: 4096 },
+          modelServiceNotice: {
+            kind: "output_limit",
+            provider: "test-provider",
+            model: "test-model",
+            rawReason: "length",
+            message: "模型输出达到限制。",
+          },
+        };
+      },
+      async *streamComplete() {
+        yield { type: "done" as const, finishReason: "length" };
+      },
+    };
+    const router: ModelRouter = {
+      async resolve() {
+        return { binding, client };
+      },
+      async resolveFrozen() {
+        return { binding, client };
+      },
+      invalidate() {},
+    };
+    const orchestrator = createPlanDebateOrchestrator({
+      planStore: createPlanStore({
+        configDir: path.join(tempDir, "config"),
+      }),
+      artifactWriter: createPlanArtifactWriter(),
+      modelRouter: router,
+    });
+
+    const plan = await orchestrator.createPlan({
+      sessionId: "session-reasoning-only",
+      workspaceRoot,
+      sourceMessage: "生成一个结构化计划。",
+      mode: "direct",
+      modelAssignments: { direct: "profileDirect" },
+    });
+
+    expect(calls).toBe(1);
+    expect(plan.status).toBe("paused");
+    const error =
+      plan.rounds.find((round) => round.status === "failed")?.error ?? "";
+    expect(error).toContain("模型输出达到限制");
+    expect(JSON.stringify(plan)).not.toContain(
+      "private reasoning must not be persisted",
+    );
+  });
 });
 
 function createQueuedRouter(

@@ -9,6 +9,7 @@ import { buildCachePrefix } from "./cachePrefix";
 import { estimateTextTokens } from "../contextManager";
 import { defaultRequestTimeoutMs, fetchWithTimeout } from "../fetchWithTimeout";
 import { providerHttpError } from "./providerHttpError";
+import { withModelServiceNotice } from "../../shared/modelServiceNotice";
 import type {
   CompleteRequest,
   CompleteResponse,
@@ -54,11 +55,13 @@ export function createGeminiProvider(options: GeminiProviderOptions = {}): LLMPr
         contents,
         ...(systemInstruction ? { systemInstruction: { parts: [{ text: systemInstruction }] } } : {}),
         ...(tools ? { tools: [{ functionDeclarations: tools.map(toGeminiFunctionDecl) }] } : {}),
-        generationConfig: { temperature: req.temperature, maxOutputTokens: req.maxTokens },
-        ...(req.thinking?.type === "enabled" ? { thinkingConfig: { thinkingBudget: req.thinking.budgetTokens ?? 0 } } : {}),
+        generationConfig: geminiGenerationConfig(req),
       };
       const json = await geminiFetch(fetchImpl, baseUrl, `/v1beta/models/${req.model}:generateContent`, req.apiKey, body, timeoutMs, req.signal);
-      return parseGeminiResponse(json);
+      return withModelServiceNotice(parseGeminiResponse(json), {
+        provider: "gemini",
+        model: req.model,
+      });
     },
 
     async *stream(req: CompleteRequest): AsyncIterable<StreamEvent> {
@@ -67,18 +70,25 @@ export function createGeminiProvider(options: GeminiProviderOptions = {}): LLMPr
         contents,
         ...(systemInstruction ? { systemInstruction: { parts: [{ text: systemInstruction }] } } : {}),
         ...(tools ? { tools: [{ functionDeclarations: tools.map(toGeminiFunctionDecl) }] } : {}),
-        generationConfig: { temperature: req.temperature, maxOutputTokens: req.maxTokens },
+        generationConfig: geminiGenerationConfig(req),
       };
       const res = await geminiFetchRaw(fetchImpl, baseUrl, `/v1beta/models/${req.model}:streamGenerateContent?alt=sse`, req.apiKey, body, timeoutMs, req.signal);
       if (!res.ok) {
-        yield { type: "error", error: providerHttpError(res) };
+        yield { type: "error", error: await providerHttpError(res) };
         return;
       }
       const reader = res.body?.getReader();
       if (!reader) return;
       const decoder = new TextDecoder();
       let buffer = "";
-      const acc = { text: "", finish: "STOP", cacheRead: 0 };
+      const acc = {
+        text: "",
+        thinking: "",
+        finish: "STOP",
+        cacheRead: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+      };
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
@@ -94,16 +104,42 @@ export function createGeminiProvider(options: GeminiProviderOptions = {}): LLMPr
           const candidates = evt.candidates as Array<Record<string, unknown>> | undefined;
           const parts = ((candidates?.[0]?.content as { parts?: Array<Record<string, unknown>> } | undefined)?.parts) ?? [];
           for (const p of parts) {
-            if (typeof p.text === "string") { acc.text += p.text; yield { type: "text_delta", text: p.text }; }
+            if (typeof p.text === "string" && p.thought === true) {
+              acc.thinking += p.text;
+              yield { type: "thinking_delta", text: p.text };
+            } else if (typeof p.text === "string") {
+              acc.text += p.text;
+              yield { type: "text_delta", text: p.text };
+            }
             const fc = p.functionCall as { name: string; args: unknown } | undefined;
             if (fc) yield { type: "tool_call_delta", toolCallId: fc.name, name: fc.name, argumentsDelta: JSON.stringify(fc.args ?? {}) };
           }
           if (candidates?.[0]?.finishReason) acc.finish = candidates[0].finishReason as string;
-          const um = evt.usageMetadata as { cachedContentTokenCount?: number } | undefined;
+          const um = evt.usageMetadata as {
+            cachedContentTokenCount?: number;
+            promptTokenCount?: number;
+            candidatesTokenCount?: number;
+          } | undefined;
           if (um?.cachedContentTokenCount) acc.cacheRead = um.cachedContentTokenCount;
+          if (um?.promptTokenCount) acc.inputTokens = um.promptTokenCount;
+          if (um?.candidatesTokenCount) acc.outputTokens = um.candidatesTokenCount;
         }
       }
-      yield { type: "done", response: { content: acc.text || null, toolCalls: [], finishReason: acc.finish, cacheReadTokens: acc.cacheRead, cacheWriteTokens: 0 } };
+      yield {
+        type: "done",
+        response: {
+          content: acc.text || null,
+          toolCalls: [],
+          finishReason: acc.finish,
+          ...(acc.thinking ? { reasoningContent: acc.thinking } : {}),
+          cacheReadTokens: acc.cacheRead,
+          cacheWriteTokens: 0,
+          usage: {
+            inputTokens: acc.inputTokens,
+            outputTokens: acc.outputTokens,
+          },
+        },
+      };
     },
 
     async countTokens(messages, opts?) {
@@ -121,6 +157,48 @@ export function createGeminiProvider(options: GeminiProviderOptions = {}): LLMPr
       return buildCachePrefix(messages, opts);
     },
   };
+}
+
+export function geminiGenerationConfig(
+  req: CompleteRequest,
+): Record<string, unknown> {
+  const modelId = req.model.slice(req.model.lastIndexOf("/") + 1);
+  const config: Record<string, unknown> = {
+    temperature: req.temperature,
+    maxOutputTokens: req.maxTokens,
+  };
+  if (!req.thinking) {
+    return config;
+  }
+  if (/^gemini-3(?:\.|[-_])/i.test(modelId)) {
+    const proModel = /pro/i.test(modelId);
+    config.thinkingConfig = {
+      thinkingLevel:
+        req.thinking.type === "enabled"
+          ? "high"
+          : proModel
+            ? "low"
+            : "minimal",
+      includeThoughts: req.thinking.type === "enabled",
+    };
+    return config;
+  }
+  const gemini25Pro = /^gemini-2\.5-pro(?:[-_]|$)/i.test(modelId);
+  const configuredBudget = req.thinking.budgetTokens;
+  config.thinkingConfig = {
+    thinkingBudget:
+      req.thinking.type === "enabled"
+        ? configuredBudget === undefined
+          ? -1
+          : gemini25Pro
+            ? Math.min(32_768, Math.max(128, configuredBudget))
+            : configuredBudget
+        : gemini25Pro
+          ? 128
+          : 0,
+    includeThoughts: req.thinking.type === "enabled",
+  };
+  return config;
 }
 
 function toGeminiBody(
@@ -167,7 +245,7 @@ async function geminiFetch(
 ): Promise<Record<string, unknown>> {
   const res = await geminiFetchRaw(fetchImpl, baseUrl, path, apiKey, body, timeoutMs, signal);
   const text = await res.text();
-  if (!res.ok) throw providerHttpError(res);
+  if (!res.ok) throw await providerHttpError(res);
   return JSON.parse(text) as Record<string, unknown>;
 }
 
@@ -191,9 +269,14 @@ function parseGeminiResponse(json: Record<string, unknown>): CompleteResponse {
   const candidate = (json.candidates as Array<Record<string, unknown>>)?.[0];
   const parts = (candidate?.content as { parts?: Array<Record<string, unknown>> })?.parts ?? [];
   let text = "";
+  let thinking = "";
   const toolCalls: CompleteResponse["toolCalls"] = [];
   for (const p of parts) {
-    if (typeof p.text === "string") text += p.text;
+    if (typeof p.text === "string" && p.thought === true) {
+      thinking += p.text;
+    } else if (typeof p.text === "string") {
+      text += p.text;
+    }
     const fc = p.functionCall as { name: string; args: unknown } | undefined;
     if (fc) toolCalls.push({ id: fc.name, type: "function", function: { name: fc.name, arguments: JSON.stringify(fc.args ?? {}) } });
   }
@@ -202,6 +285,7 @@ function parseGeminiResponse(json: Record<string, unknown>): CompleteResponse {
     content: text || null,
     toolCalls,
     finishReason: (candidate?.finishReason as string) ?? "STOP",
+    ...(thinking ? { reasoningContent: thinking } : {}),
     cacheReadTokens: usage?.cachedContentTokenCount ?? 0,
     cacheWriteTokens: 0,
     ...(usage ? { usage: { inputTokens: usage.promptTokenCount ?? 0, outputTokens: usage.candidatesTokenCount ?? 0 } } : {}),

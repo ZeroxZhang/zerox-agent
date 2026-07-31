@@ -1,5 +1,94 @@
 # Zerox Harness Progress
 
+## 2026-07-31 - v3.8.1 Local Task-Budget Stop Removal
+
+- Removed Zerox-owned task termination based on accumulated Token usage,
+  iteration count, tool-call count, wall-clock duration, or replan count.
+  `GoalExecutionUsage` remains durable audit and cost telemetry but no longer
+  carries or compares against limits.
+- Reinterpreted legacy `maxTurns` as checkpoint cadence. AgentLoop, scheduled
+  runtime, Goal runtime, Skill execution, handoffs, and Runtime Kernel save
+  recoverable state and continue automatically rather than pausing, failing,
+  or asking the user to increase a budget. A regression run crosses 64 model
+  iterations and 64 tool calls before completing naturally.
+- Preserved state-based safety boundaries: user cancellation, permission
+  denial, application shutdown, repeated identical tool failures, consecutive
+  no-progress behavior, explicit impossibility, acceptance blocking, and
+  unrecoverable service errors still stop or suspend safely.
+- Added a shared, redacted `ModelServiceNotice` contract for output truncation,
+  provider rate limits, provider quota exhaustion, and other provider stop
+  reasons. OpenAI-compatible, Anthropic, Gemini, Vertex, and Bedrock complete
+  and streaming paths preserve the original finish reason and emit exactly one
+  terminal stream event; trailing `stop` or `[DONE]` markers cannot hide an
+  earlier output limit.
+- Removed automatic retry for 429, quota exhaustion, and output truncation.
+  Existing bounded retries remain only for temporary network failures and
+  provider 5xx responses. Partial content, tool evidence, checkpoints, and
+  continuation state are retained for explicit user recovery.
+- Added `waiting_for_model` to Goal state and propagated notices through chat,
+  scheduled tasks, Plan Debate, planners, acceptance judges, and run history.
+  UI actions now say `继续生成` for output truncation and `重试` for rate/quota
+  limits. Scheduled tasks with an active recoverable checkpoint are excluded
+  from automatic scheduler dispatch.
+- Removed current budget controls from Goal creation, renderer actions,
+  preload API, and service methods. The old `goal:increaseBudget` channel
+  returns `budget_control_removed`; historical `stopped_budget` tasks remain
+  readable and explicitly read-only with no continuation entry point.
+- Storage converts legacy `budgetUsage` into the new execution statistics
+  shape and drops the legacy field. Goal detail now presents iteration, tool
+  calls, Token usage, elapsed time, and replans as plain execution statistics,
+  never as used/limit ratios.
+- Verification evidence from the final implementation:
+  - focused runtime/provider/Goal/chat/scheduler/storage/renderer suites passed;
+  - `npm test`: 230 files / 2,313 tests passed;
+  - `npm run build`: Electron and renderer TypeScript checks plus Vite
+    production build passed;
+  - `npm run verify`: 230 files / 2,313 tests, Agent evals 26/26, and Memory
+    evals 2/2 passed;
+  - `npm run smoke:prod`: Electron rendered the production agent chat UI;
+  - `npm run harness:check` and `git diff --check`: passed.
+
+## 2026-07-31 - v3.8.1 Thinking Control and Empty-Response Hotfix
+
+- Reproduced the reported failure from the persisted Debate record: the
+  DeepSeek connection probe had passed, but A1 later exhausted its response
+  budget with no formal message content. The semantic
+  `thinking: { type: "disabled" }` setting was dropped by the shared
+  OpenAI-compatible serializer, allowing providers whose current models enable
+  reasoning by default to consume the output budget before producing the
+  structured Plan response.
+- Closed the request-shape gap across the provider matrix:
+  - DeepSeek, Z.AI, and Kimi use `thinking.type`;
+  - Qwen and DashScope Coding use `enable_thinking` and `thinking_budget`;
+  - OpenRouter uses `reasoning`, while supported current OpenAI and xAI models
+    use `reasoning_effort`;
+  - unsupported/legacy OpenAI models and custom gateways retain compatible
+    omission/legacy behavior instead of receiving foreign extension fields;
+  - model-profile routing now enforces both enabled and disabled settings for
+    complete and streaming requests.
+- Hardened native providers:
+  - Anthropic, Vertex Claude, and Bedrock Claude preserve thinking settings and
+    clamp the minimum thinking budget below `max_tokens`;
+  - Gemini and Vertex Gemini place `thinkingConfig` inside
+    `generationConfig`, distinguish Gemini 3 levels from Gemini 2.5 budgets,
+    use the minimum valid budget for Gemini 2.5 Pro, and keep thought summaries
+    separate from final answer text in complete and streaming responses.
+- Preserved response evidence through every adapter: reasoning-only responses,
+  finish reasons, token usage, and reported prompt-cache tokens now reach the
+  Plan layer. Truly empty successful responses expose bounded structural
+  diagnostics, connection tests cannot record reasoning-only replies as
+  successful, and Plan Debate retries once before persisting safe token/finish
+  diagnostics without private reasoning text.
+- Verification evidence from the final tree:
+  - focused regression suite: 8 files / 158 tests passed;
+  - `npm run verify`: 229 files / 2,287 tests, production build, Agent evals
+    26/26, and Memory evals 2/2 passed on the final clean rerun;
+  - `npm run smoke:providers`: 19 providers / 58 catalog entries and unknown
+    provider rejection passed; live paid-provider calls remained explicit
+    opt-in and were not sent;
+  - `npm run smoke:prod`, `npm run harness:check`, and `git diff --check`
+    passed.
+
 ## 2026-07-31 - v3.8.1 Model Provider and Conversation UX
 
 - Rebuilt model settings as a connection-first surface:

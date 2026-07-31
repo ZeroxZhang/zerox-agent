@@ -1,12 +1,14 @@
 import type { GoalReviewPolicy } from "./agentGoalReview";
 import type { AgentTaskContract } from "./agentTaskContract";
 import type { SkillRecord } from "./skills";
+import type { ModelServiceNotice } from "./modelServiceNotice";
 
 export type GoalStatus =
   | "planning"
   | "executing"
   | "waiting_for_review"
   | "waiting_for_acceptance"
+  | "waiting_for_model"
   | "achieved"
   | "completed_unverified"
   | "stopped_budget"
@@ -323,6 +325,7 @@ export type Milestone = {
   lastRunSummary?: string;
 };
 
+/** @deprecated Historical storage and goal:create decoding only. */
 export type GoalBudget = {
   maxIterations: number;
   maxToolCalls: number;
@@ -331,7 +334,7 @@ export type GoalBudget = {
   maxReplans: number;
 };
 
-export type GoalBudgetUsage = {
+export type GoalExecutionUsage = {
   iterations: number;
   toolCalls: number;
   wallClockMs: number;
@@ -383,8 +386,9 @@ export type Goal = {
   milestones: Milestone[];
   status: GoalStatus;
   stopReason?: StopReason;
-  budget: GoalBudget;
-  budgetUsage: GoalBudgetUsage;
+  /** @deprecated Legacy data only. Runtime decisions must not read these limits. */
+  budget?: GoalBudget;
+  executionUsage: GoalExecutionUsage;
   reviewPolicy: GoalReviewPolicy;
   planVersion: number;
   workspaceId?: string;
@@ -392,6 +396,7 @@ export type Goal = {
   selectedSkill?: GoalSelectedSkill;
   selectedSkillInputValues?: Record<string, string | number | boolean>;
   runtimeCheckpoint?: GoalRuntimeCheckpoint;
+  modelServiceNotice?: ModelServiceNotice;
   acceptanceProtocolVersion?: GoalAcceptanceProtocolVersion;
   acceptanceState?: GoalAcceptanceState;
   acceptanceRetryState?: GoalAcceptanceRetryState;
@@ -423,8 +428,8 @@ const allowedTransitions: Record<GoalStatus, GoalStatus[]> = {
   executing: [
     "waiting_for_review",
     "waiting_for_acceptance",
+    "waiting_for_model",
     "achieved",
-    "stopped_budget",
     "stopped_stalled",
     "stopped_blocked",
     "failed",
@@ -432,9 +437,10 @@ const allowedTransitions: Record<GoalStatus, GoalStatus[]> = {
   ],
   waiting_for_review: ["executing", "canceled"],
   waiting_for_acceptance: ["executing", "completed_unverified", "canceled"],
+  waiting_for_model: ["executing", "canceled"],
   achieved: [],
   completed_unverified: [],
-  stopped_budget: ["executing", "canceled"],
+  stopped_budget: [],
   stopped_stalled: [],
   stopped_blocked: ["executing", "canceled"],
   failed: [],

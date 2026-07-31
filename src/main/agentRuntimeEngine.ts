@@ -61,6 +61,7 @@ import type {
   AgentRunRecord,
   RunScheduledTaskResult,
 } from "../shared/agentRuns";
+import type { ModelServiceNotice } from "../shared/modelServiceNotice";
 import type { SkillRecord } from "../shared/skills";
 import type { AgentToolName } from "../shared/toolPermissions";
 import type { ScheduledTask } from "../shared/scheduledTasks";
@@ -233,6 +234,7 @@ export function createAgentRuntimeEngine(options: {
     summary: string;
     events: AgentRunEvent[];
     startedAt: string;
+    modelServiceNotice?: ModelServiceNotice;
     failure?: unknown;
   }): Promise<RunScheduledTaskResult> {
     const finishedAt = now().toISOString();
@@ -270,6 +272,9 @@ export function createAgentRuntimeEngine(options: {
       summary: input.summary,
       events: input.events,
       checkpointId: checkpoint.id,
+      ...(input.modelServiceNotice
+        ? { modelServiceNotice: input.modelServiceNotice }
+        : {}),
       ...(failureClass ? { failureClass } : {}),
       ...(failureMessage ? { failureMessage } : {}),
       startedAt: input.startedAt,
@@ -382,13 +387,7 @@ export function createAgentRuntimeEngine(options: {
         initialToolCallsExecuted: current.toolCallCount,
         tools: toolDefinitions,
         maxTurns,
-        maxToolCalls: Math.max(1, maxTurns * 4),
-        tokenBudget: Math.max(
-          profile.maxTokens,
-          profile.maxTokens * Math.min(maxTurns, 8),
-        ),
-        maxWallClockMs: 30 * 60 * 1000,
-        pauseOnTurnLimit: true,
+        pauseOnTurnLimit: false,
         pauseOnFailureLoop: true,
         ...(signal ? { signal } : {}),
         ...(options.toolResultOffloadStore
@@ -563,6 +562,9 @@ export function createAgentRuntimeEngine(options: {
         ),
       ],
       startedAt,
+      ...(loopResult.modelServiceNotice
+        ? { modelServiceNotice: loopResult.modelServiceNotice }
+        : {}),
       ...(status === "failed" || status === "canceled"
         ? { failure: new Error(loopResult.summary) }
         : {}),
@@ -678,7 +680,7 @@ export function createAgentRuntimeEngine(options: {
       }, current.runContext);
     }
 
-    for (let turn = 0; turn < maxTurns; turn += 1) {
+    for (let turn = 0; Number.isFinite(turn); turn += 1) {
       throwIfCanceled(signal);
       await compactMessagesBeforeModelRequest();
       await appendTrajectory(current.runId, "model_request", {
@@ -1022,7 +1024,6 @@ export function createAgentRuntimeEngine(options: {
             error: result.error,
             errorDetails: result.errorDetails,
             previousReflections: reflectionDecisions,
-            budget: { retryBudget: 1 },
           });
           reflectionDecisions.push(reflection);
           await appendTrajectory(current.runId, "reflection_added", {
@@ -1049,7 +1050,7 @@ export function createAgentRuntimeEngine(options: {
       }
     }
 
-    throw new Error("Agent run reached the maximum turn limit.");
+    throw new Error("Agent run ended without a terminal model response.");
   }
 
   return {

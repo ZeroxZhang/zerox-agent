@@ -50,7 +50,8 @@ describe("goal continuity checkpoint", () => {
     expect(checkpoint).toContain("- collect_sources [accepted]");
     expect(checkpoint).toContain("- write_report [running]");
     expect(checkpoint).toContain("citation:serenity");
-    expect(checkpoint).toContain("iterations=2/8");
+    expect(checkpoint).toContain("iterations=2; toolCalls=5");
+    expect(checkpoint).not.toContain("iterations=2/8");
     expect(checkpoint).toContain("checkpointedAt=2026-06-16T00:02:00.000Z");
   });
 
@@ -89,13 +90,7 @@ function createGoal(milestones: Milestone[]): Goal {
     successCriteria: [criterion],
     milestones,
     status: "executing",
-    budget: {
-      maxIterations: 8,
-      maxToolCalls: 24,
-      maxWallClockMs: 600_000,
-      maxReplans: 2,
-    },
-    budgetUsage: {
+    executionUsage: {
       iterations: 2,
       toolCalls: 5,
       wallClockMs: 3000,

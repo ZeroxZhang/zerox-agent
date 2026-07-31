@@ -16,6 +16,10 @@ import type {
 } from "../openAiCompatibleClient";
 import type { LLMProvider, CompleteRequest } from "./provider";
 import {
+  modelServiceNoticeFromFinishReason,
+  type ModelServiceNotice,
+} from "../../shared/modelServiceNotice";
+import {
   fromNormalized,
   toChatCompletionResponse,
   toCompleteRequest,
@@ -42,7 +46,10 @@ export function createProviderChatClient(
       }
       const req = toCompleteRequest(request);
       const res = await provider.complete(req);
-      return toChatCompletionResponse(res);
+      return toChatCompletionResponse(res, {
+        provider: provider.id,
+        model: request.model,
+      });
     },
 
     async *streamComplete(
@@ -60,6 +67,7 @@ export function createProviderChatClient(
         return;
       }
       let finishReason = "stop";
+      let modelServiceNotice: ModelServiceNotice | undefined;
       for await (const ev of provider.stream(req)) {
         if (ev.type === "text_delta") {
           yield { type: "content_delta", text: ev.text };
@@ -74,10 +82,31 @@ export function createProviderChatClient(
             arguments: ev.argumentsDelta ?? "",
           };
         } else if (ev.type === "done") {
-          if (ev.response?.finishReason) finishReason = ev.response.finishReason;
-          yield { type: "done", finishReason };
+          const candidateReason =
+            ev.response?.finishReason ?? ev.finishReason ?? "stop";
+          const candidateNotice =
+            ev.response?.modelServiceNotice ??
+            modelServiceNoticeFromFinishReason(candidateReason, {
+              provider: provider.id,
+              model: request.model,
+            });
+          if (candidateNotice || !modelServiceNotice) {
+            finishReason = candidateReason;
+          }
+          modelServiceNotice ??= candidateNotice;
+        } else if (ev.type === "error") {
+          throw ev.error;
         }
       }
+      modelServiceNotice ??= modelServiceNoticeFromFinishReason(finishReason, {
+        provider: provider.id,
+        model: request.model,
+      });
+      yield {
+        type: "done",
+        finishReason,
+        ...(modelServiceNotice ? { modelServiceNotice } : {}),
+      };
     },
   };
 }
@@ -109,7 +138,13 @@ async function* completeResponseToStreamEvents(
       arguments: toolCall.function.arguments,
     };
   }
-  yield { type: "done", finishReason: response.finishReason };
+  yield {
+    type: "done",
+    finishReason: response.finishReason,
+    ...(response.modelServiceNotice
+      ? { modelServiceNotice: response.modelServiceNotice }
+      : {}),
+  };
 }
 
 // Re-export normalize helpers for consumers that build CompleteRequest directly.
@@ -185,6 +220,14 @@ export function createSettingsBackedChatClient(
         provider,
         fallback: options.fallback,
       });
+      cachedWrapped = bindResolvedProfileRequest(cachedWrapped, {
+        binding: resolved.binding,
+        apiKey,
+        baseUrl: resolveProviderBaseUrl(
+          resolved.binding.providerKind,
+          resolved.connectionValues,
+        ),
+      });
       cacheKey = key;
       return cachedWrapped;
     }
@@ -220,6 +263,38 @@ export function createSettingsBackedChatClient(
     async *streamComplete(request: ChatCompletionRequest): AsyncIterable<LowLevelStreamEvent> {
       const client = await resolveClient();
       yield* client.streamComplete(request);
+    },
+  };
+}
+
+function bindResolvedProfileRequest(
+  client: ChatClient & StreamingChatClient,
+  options: {
+    binding: ResolvedModelBinding;
+    apiKey: string;
+    baseUrl?: string;
+  },
+): ChatClient & StreamingChatClient {
+  const apply = (request: ChatCompletionRequest): ChatCompletionRequest => ({
+    ...request,
+    model: options.binding.modelId,
+    apiKey: options.apiKey,
+    baseUrl: options.baseUrl ?? request.baseUrl,
+    temperature: options.binding.generation.temperature,
+    maxTokens: options.binding.generation.maxTokens,
+    thinking: options.binding.generation.thinkingEnabled
+      ? {
+          type: "enabled",
+          budgetTokens: options.binding.generation.thinkingBudgetTokens,
+        }
+      : { type: "disabled" },
+  });
+  return {
+    complete(request) {
+      return client.complete(apply(request));
+    },
+    async *streamComplete(request) {
+      yield* client.streamComplete(apply(request));
     },
   };
 }

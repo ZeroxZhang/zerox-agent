@@ -34,6 +34,7 @@ describe("model connection service", () => {
         model: "qwen-plus",
         temperature: 0,
         maxTokens: 32,
+        thinking: { type: "disabled" },
         messages: [
           {
             role: "system",
@@ -46,6 +47,35 @@ describe("model connection service", () => {
         ],
       }),
     ]);
+  });
+
+  it("rejects a reasoning-only reply instead of recording a false-positive connection", async () => {
+    const service = createModelConnectionService({
+      modelSettingsStore: createModelSettingsStore(
+        {
+          chatModel: "reasoning-model",
+          hasApiKey: true,
+        },
+        "secret-key",
+      ),
+      chatClient: {
+        async complete() {
+          return {
+            content: null,
+            reasoningContent: "private chain of thought",
+            toolCalls: [],
+            finishReason: "length",
+            usage: { inputTokens: 10, outputTokens: 32 },
+          };
+        },
+      },
+    });
+
+    await expect(service.testConnection()).resolves.toEqual({
+      ok: false,
+      message:
+        "模型连接测试失败：模型未返回连通性测试文本。 finishReason=length reasoningOnly=true outputTokens=32",
+    });
   });
 
   it("returns a setup error without calling the model when chat config is incomplete", async () => {

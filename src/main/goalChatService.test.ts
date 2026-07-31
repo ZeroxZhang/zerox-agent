@@ -640,21 +640,15 @@ describe("goal chat service", () => {
     expect(achieved).not.toHaveProperty("acceptanceCertificate");
   });
 
-  it.each([
-    ["resume", "executing", undefined],
-    ["retry", "stopped_budget", "budget_exhausted"],
-  ] as const)(
-    "upgrades a serialized legacy %s goal through the real store before controller execution",
-    async (operation, status, stopReason) => {
+  it(
+    "upgrades a serialized legacy executing goal through the real store before controller execution",
+    async () => {
       const configDir = await mkdtemp(path.join(os.tmpdir(), "goal-chat-legacy-"));
       try {
         const goalsDir = path.join(configDir, "agent-goals");
         const goalPath = path.join(goalsDir, "goal_release.json");
         await mkdir(goalsDir, { recursive: true });
-        const legacy = createGoal({
-          status,
-          ...(stopReason ? { stopReason } : {}),
-        });
+        const legacy = createGoal({ status: "executing" });
         const raw = `${JSON.stringify(legacy, null, 2)}\n`;
         await writeFile(goalPath, raw, "utf8");
         const realStore = createAgentGoalStore({ configDir });
@@ -671,7 +665,7 @@ describe("goal chat service", () => {
           now: () => "2026-07-11T08:00:00.000Z",
         });
 
-        const summary = await service[operation](legacy.id);
+        const summary = await service.resume(legacy.id);
         await Promise.resolve();
         const persisted = await realStore.get(legacy.id);
 
@@ -733,7 +727,7 @@ describe("goal chat service", () => {
     }
   });
 
-  it("counts a manual replan exactly once when the planner updates usage", async () => {
+  it("keeps a historical budget-stopped goal read-only during replan", async () => {
     const savedGoals: Goal[] = [];
     const existingGoal = createGoal({ status: "stopped_budget" });
     const service = createGoalChatService({
@@ -745,21 +739,21 @@ describe("goal chat service", () => {
         },
         async replan(goal) {
           goal.planVersion += 1;
-          goal.budgetUsage.replans += 1;
+          goal.executionUsage.replans += 1;
           return goal.milestones;
         },
       },
       now: () => "2026-06-12T08:00:00.000Z",
     });
 
-    await service.replan("goal_release", "只调整剩余步骤");
-
-    expect(savedGoals.at(-1)?.planVersion).toBe(2);
-    expect(savedGoals.at(-1)?.budgetUsage.replans).toBe(1);
+    await expect(
+      service.replan("goal_release", "只调整剩余步骤"),
+    ).rejects.toThrow("read-only");
+    expect(savedGoals).toEqual([]);
   });
 
   it("returns a concurrently canceled goal instead of publishing a stale manual replan", async () => {
-    const existingGoal = createGoal({ status: "stopped_budget" });
+    const existingGoal = createGoal({ status: "stopped_blocked" });
     const canceledGoal = createGoal({
       status: "canceled",
       stopReason: "user_canceled",
@@ -784,7 +778,7 @@ describe("goal chat service", () => {
         },
         async replan(goal) {
           goal.planVersion += 1;
-          goal.budgetUsage.replans += 1;
+          goal.executionUsage.replans += 1;
           return goal.milestones;
         },
       },
@@ -1057,7 +1051,7 @@ describe("goal chat service", () => {
     expect(startedSignal?.aborted).toBe(true);
   });
 
-  it("retries budget-stopped chat goals directly without requiring a budget increase", async () => {
+  it("keeps historical budget-stopped chat goals read-only", async () => {
     const savedGoals: Goal[] = [];
     const ledgerEvents: ProgressLedgerEvent[] = [];
     const resumed: string[] = [];
@@ -1081,26 +1075,55 @@ describe("goal chat service", () => {
       now: () => "2026-06-12T08:00:00.000Z",
     });
 
-    const summary = await service.retry("goal_release");
+    await expect(service.retry("goal_release")).rejects.toThrow("read-only");
+    expect(resumed).toEqual([]);
+    expect(savedGoals).toEqual([]);
+    expect(ledgerEvents).toEqual([]);
+  });
 
-    expect(summary).toEqual({
-      id: "goal_release",
-      description: "发布 v1.8.0",
-      status: "executing",
+  it("retries a waiting-for-model goal only after the user requests it", async () => {
+    const savedGoals: Goal[] = [];
+    const ledgerEvents: ProgressLedgerEvent[] = [];
+    const resumed: string[] = [];
+    const waiting = createGoal({
+      status: "waiting_for_model",
+      modelServiceNotice: {
+        kind: "rate_limit",
+        provider: "test-provider",
+        model: "test-model",
+        statusCode: 429,
+        retryAfterMs: 500,
+        message: "模型服务商正在限流。",
+      },
     });
-    expect(resumed).toEqual(["goal_release"]);
+    const service = createGoalChatService({
+      controller: createController({
+        async resume(goalId) {
+          resumed.push(goalId);
+          return createGoal({ id: goalId, status: "executing" });
+        },
+      }),
+      goalStore: createGoalStore({
+        existingGoal: waiting,
+        savedGoals,
+        ledgerEvents,
+      }),
+      planner: createFakePlanner(),
+      now: () => "2026-06-12T08:00:00.000Z",
+    });
+
+    const summary = await service.retry(waiting.id);
+    await Promise.resolve();
+
+    expect(summary.status).toBe("executing");
     expect(savedGoals.at(-1)).toMatchObject({
-      id: "goal_release",
       status: "executing",
-      stopReason: undefined,
-      acceptanceProtocolVersion: 2,
-      acceptanceState: { protocolVersion: 2, phase: "idle" },
+      modelServiceNotice: undefined,
     });
-    expect(ledgerEvents.at(-1)).toEqual({
-      at: "2026-06-12T08:00:00.000Z",
-      kind: "goal_planned",
-      summary: "Goal retried from chat recovery UI.",
-    });
+    expect(ledgerEvents.at(-1)?.summary).toBe(
+      "Goal retried from chat recovery UI.",
+    );
+    expect(resumed).toEqual([waiting.id]);
   });
 
   it.each([
@@ -1133,7 +1156,7 @@ describe("goal chat service", () => {
         status: "executing",
         stopReason: undefined,
         planVersion: 1,
-        budgetUsage: { replans: 0 },
+        executionUsage: { replans: 0 },
         acceptanceState: {
           phase: "idle",
           recentFailures: blocked.acceptanceState?.recentFailures,
@@ -1276,7 +1299,7 @@ describe("goal chat service", () => {
         },
         async replan(goal) {
           goal.planVersion += 1;
-          goal.budgetUsage.replans += 1;
+          goal.executionUsage.replans += 1;
           return goal.milestones.map((milestone) => ({
             ...milestone,
             description: "Use the adjusted feasible plan.",
@@ -1292,7 +1315,7 @@ describe("goal chat service", () => {
       status: "stopped_blocked",
       stopReason: "goal_impossible",
       planVersion: 2,
-      budgetUsage: { replans: 1 },
+      executionUsage: { replans: 1 },
       acceptanceState: {
         phase: "idle",
         recentFailures: blocked.acceptanceState?.recentFailures,
@@ -1307,7 +1330,7 @@ describe("goal chat service", () => {
     expect(savedGoals.at(-1)).toMatchObject({
       status: "executing",
       planVersion: 2,
-      budgetUsage: { replans: 1 },
+      executionUsage: { replans: 1 },
       acceptanceState: {
         phase: "idle",
         recentFailures: blocked.acceptanceState?.recentFailures,
@@ -1320,8 +1343,7 @@ describe("goal chat service", () => {
     const ledgerEvents: ProgressLedgerEvent[] = [];
     const resumed: string[] = [];
     const stoppedGoal = createGoal({
-      status: "stopped_budget",
-      stopReason: "budget_exhausted",
+      status: "waiting_for_model",
     });
     const canceledGoal = createGoal({
       status: "canceled",
@@ -1366,8 +1388,7 @@ describe("goal chat service", () => {
     const progressEvents: import("../shared/chat").GoalProgressEvent[] = [];
     const resumed: string[] = [];
     const stoppedGoal = createGoal({
-      status: "stopped_budget",
-      stopReason: "budget_exhausted",
+      status: "waiting_for_model",
     });
     const achievedGoal = createGoal({
       status: "achieved",
@@ -1886,7 +1907,7 @@ function createGoal(overrides: Partial<Goal> = {}): Goal {
       maxWallClockMs: 45 * 60 * 1000,
       maxReplans: 3,
     },
-    budgetUsage: {
+    executionUsage: {
       iterations: 0,
       toolCalls: 0,
       wallClockMs: 0,

@@ -1995,7 +1995,7 @@ describe("chat service", () => {
     expect(completeCalled).toBe(false);
   });
 
-  it("continues legacy budget-stopped goals without creating a new retry attempt", async () => {
+  it("keeps legacy budget-stopped goals read-only from chat", async () => {
     let completeCalled = false;
     const resumes: string[] = [];
     const goalCreates: unknown[] = [];
@@ -2026,15 +2026,16 @@ describe("chat service", () => {
 
     expect(result).toMatchObject({
       ok: true,
-      reply: "继续推进目标：发布。",
+      reply:
+        "这是旧版本地预算机制留下的只读任务，不能继续执行。你仍可查看原结果和执行证据。",
       activeGoal: {
         id: "goal_release",
         description: "发布",
-        status: "executing",
+        status: "stopped_budget",
       },
     });
     expect(goalCreates).toEqual([]);
-    expect(resumes).toEqual(["goal_release"]);
+    expect(resumes).toEqual([]);
     expect(completeCalled).toBe(false);
   });
 
@@ -2228,7 +2229,7 @@ describe("chat service", () => {
     expect(result.ok ? result.reply : "").not.toContain("已达到工具调用轮次上限");
   });
 
-  it("preserves a failed agent-loop terminal state instead of reporting task completion", async () => {
+  it("preserves an injected legacy budget failure as a read-only terminal record", async () => {
     const statusEvents: ChatTaskStatusEvent[] = [];
     const streamEvents: ChatStreamEvent[] = [];
     const persistedMessages: AppendChatMessageInput[] = [];
@@ -2288,7 +2289,7 @@ describe("chat service", () => {
       expect.arrayContaining([
         expect.objectContaining({
           state: "failed",
-          message: "Token 预算已用尽，任务未完成",
+          message: "检测到旧版 Token 预算停止记录，任务未完成（只读）",
           toolCallsExecuted: 21,
         }),
       ]),
@@ -2312,7 +2313,7 @@ describe("chat service", () => {
     ]);
   });
 
-  it("pauses long chat tasks at a checkpoint and resumes after user confirmation", async () => {
+  it("automatically continues long chat tasks across checkpoint intervals", async () => {
     let toolModelTurns = 0;
     const requestMessageCounts: number[] = [];
     const service = createChatService({
@@ -2346,29 +2347,11 @@ describe("chat service", () => {
       agentLoopMaxTurns: 2,
     });
 
-    const paused = await service.sendMessage({
+    const completed = await service.sendMessage({
       message: "请执行一个需要检查点确认的长任务",
     });
 
-    expect(paused).toMatchObject({
-      ok: true,
-      sessionId: "chat_checkpoint",
-      agentStatus: {
-        state: "paused",
-        reason: "turn_limit",
-        maxTurns: 2,
-        toolCallsExecuted: 2,
-      },
-    });
-    expect(paused.ok ? paused.reply : "").toContain("等待你确认");
-    expect(paused.ok ? paused.reply : "").not.toContain("请把任务拆小一点");
-
-    const resumed = await service.sendMessage({
-      sessionId: "chat_checkpoint",
-      message: "继续",
-    });
-
-    expect(resumed).toMatchObject({
+    expect(completed).toMatchObject({
       ok: true,
       sessionId: "chat_checkpoint",
       reply: expect.stringContaining("长任务完成。"),
@@ -2386,7 +2369,10 @@ describe("chat service", () => {
     const service = createChatService({
       chatClient: {
         async complete(request) {
-          if (request.tools) {
+          if (
+            request.tools &&
+            !request.messages.some((message) => message.role === "tool")
+          ) {
             return toolCallResponse("call_1", "/tmp/status-events");
           }
 
@@ -4025,11 +4011,18 @@ describe("chat service", () => {
 
   it("emits indexed tool previews with a usable fallback id for idless chunks", async () => {
     const streamEvents: ChatStreamEvent[] = [];
+    let streamCalls = 0;
     const chatClient: ChatClient & StreamingChatClient = {
       async complete() {
         throw new Error("non-streaming complete should not be used");
       },
       async *streamComplete() {
+        streamCalls += 1;
+        if (streamCalls > 1) {
+          yield { type: "content_delta", text: "Preview complete." };
+          yield { type: "done", finishReason: "stop" };
+          return;
+        }
         yield {
           type: "tool_call_delta",
           index: 1,

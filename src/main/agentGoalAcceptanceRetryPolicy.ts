@@ -84,6 +84,9 @@ export function decideFinalAcceptanceRetry(
 
   const retry = result.retry;
   if (!retry) return { action: "not_applicable" };
+  if (retry.code === "rate_limited") {
+    return { action: "wait_for_user", code: retry.code };
+  }
   const maxAttempts = retry.code === "judge_invalid_response"
     ? 2
     : FINAL_ACCEPTANCE_MAX_ATTEMPTS;

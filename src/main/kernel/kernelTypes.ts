@@ -16,10 +16,12 @@ export type RunContext = {
 
 export type TurnResult = {
   summary?: string;
+  /** Explicit semantic completion; legacy maxTurns is only a checkpoint interval. */
+  completed?: boolean;
 };
 
 export type StopPolicy = {
-  kind: "turn_limit" | "evidence_judge";
+  kind: "checkpoint_interval" | "evidence_judge";
   shouldStop(ctx: RunContext, lastTurn: TurnResult): Promise<StopDecision>;
 };
 

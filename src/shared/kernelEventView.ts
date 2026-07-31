@@ -30,7 +30,7 @@ export function summarizeKernelEventForTimeline(
       return {
         tone: "info",
         title: "Turn started",
-        detail: `turn ${event.turn}/${event.maxTurns}`,
+        detail: `turn ${event.turn}; checkpoint every ${event.maxTurns} turns`,
       };
     case "tool_call":
       return {

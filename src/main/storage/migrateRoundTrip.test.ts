@@ -118,7 +118,7 @@ describe("P1 migration scripts round-trip", () => {
           milestones: [],
           status: "completed_unverified",
           budget: {},
-          budgetUsage: {},
+          executionUsage: {},
           reviewPolicy: "review_final_only",
           planVersion: 1,
           acceptanceCertificate: { forged: true },

@@ -17,6 +17,7 @@ import type {
   ChatCompletionResponse,
 } from "../openAiCompatibleClient";
 import type { CompleteRequest, CompleteResponse } from "./provider";
+import { modelServiceNoticeFromFinishReason } from "../../shared/modelServiceNotice";
 
 export function toNormalized(messages: ChatMessage[]): NormalizedMessage[] {
   return messages.map((msg) => {
@@ -113,11 +114,46 @@ export function toCompleteRequest(req: ChatCompletionRequest): CompleteRequest {
 }
 
 /** Convert a contract `CompleteResponse` to a legacy `ChatCompletionResponse`. */
-export function toChatCompletionResponse(res: CompleteResponse): ChatCompletionResponse {
+export function toChatCompletionResponse(
+  res: CompleteResponse,
+  context: { provider?: string; model?: string } = {},
+): ChatCompletionResponse {
+  const rawModelServiceNotice =
+    res.modelServiceNotice ??
+    modelServiceNoticeFromFinishReason(res.finishReason, context);
+  const modelServiceNotice = rawModelServiceNotice
+    ? {
+        ...rawModelServiceNotice,
+        ...(rawModelServiceNotice.provider
+          ? {}
+          : context.provider
+            ? { provider: context.provider }
+            : {}),
+        ...(rawModelServiceNotice.model
+          ? {}
+          : context.model
+            ? { model: context.model }
+            : {}),
+      }
+    : undefined;
   const out: ChatCompletionResponse = {
     content: res.content,
     toolCalls: res.toolCalls,
     finishReason: res.finishReason,
+    ...(modelServiceNotice ? { modelServiceNotice } : {}),
+    ...(res.usage
+      ? {
+          usage: {
+            inputTokens: res.usage.inputTokens,
+            outputTokens: res.usage.outputTokens,
+            promptTokens: res.usage.inputTokens,
+            completionTokens: res.usage.outputTokens,
+            totalTokens: res.usage.inputTokens + res.usage.outputTokens,
+          },
+        }
+      : {}),
+    ...(res.cacheReadTokens ? { cacheReadTokens: res.cacheReadTokens } : {}),
+    ...(res.cacheWriteTokens ? { cacheWriteTokens: res.cacheWriteTokens } : {}),
   };
   if (res.reasoningContent !== undefined) out.reasoningContent = res.reasoningContent;
   return out;

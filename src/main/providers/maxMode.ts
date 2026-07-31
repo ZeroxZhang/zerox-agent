@@ -13,6 +13,10 @@ import type {
   ToolCall,
 } from "./provider";
 import type { ActorRuntime, ActorOutcome, SpawnInput } from "../actors/actorRuntime";
+import {
+  ModelServiceNoticeError,
+  throwForModelServiceNotice,
+} from "../../shared/modelServiceNotice";
 
 export interface MaxModeRunStepOptions {
   candidates: number;
@@ -44,13 +48,20 @@ export function createMaxMode(provider: LLMProvider): MaxMode {
       const candidateResults = await Promise.allSettled(
         Array.from({ length: n }, () => provider.complete(proposeReq)),
       );
-      const candidates = candidateResults
+      const completedResponses = candidateResults
         .filter((r): r is PromiseFulfilledResult<CompleteResponse> => r.status === "fulfilled")
         .map((r) => r.value);
+      const firstNotice = completedResponses.find(
+        (candidate) => candidate.modelServiceNotice,
+      )?.modelServiceNotice;
+      const candidates = completedResponses.filter(
+        (candidate) => !candidate.modelServiceNotice,
+      );
       const ensembleInput = candidates.reduce((s, c) => s + (c.usage?.inputTokens ?? 0), 0);
       const ensembleOutput = candidates.reduce((s, c) => s + (c.usage?.outputTokens ?? 0), 0);
 
       if (candidates.length === 0) {
+        throwForModelServiceNotice(firstNotice);
         throw new Error("MaxMode: all candidates failed");
       }
 
@@ -110,12 +121,14 @@ async function judgeWinner(
       ...(signal ? { signal } : {}),
     };
     const res = await judgeProvider.complete(req);
+    throwForModelServiceNotice(res.modelServiceNotice);
     const match = (res.content ?? "").match(/(\d+)/);
     if (match) {
       const idx = parseInt(match[1]!, 10) - 1;
       if (idx >= 0 && idx < candidates.length) return candidates[idx]!;
     }
-  } catch {
+  } catch (error) {
+    if (error instanceof ModelServiceNoticeError) throw error;
     // judge failed — fall through to heuristic
   }
   // Heuristic: prefer the candidate with tool calls, else the longest text.

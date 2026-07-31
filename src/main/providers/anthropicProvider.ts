@@ -11,6 +11,7 @@ import { buildCachePrefix } from "./cachePrefix";
 import { estimateTextTokens } from "../contextManager";
 import { defaultRequestTimeoutMs, fetchWithTimeout } from "../fetchWithTimeout";
 import { providerHttpError } from "./providerHttpError";
+import { withModelServiceNotice } from "../../shared/modelServiceNotice";
 import type {
   CompleteRequest,
   CompleteResponse,
@@ -65,13 +66,14 @@ export function createAnthropicProvider(
         messages,
         ...(tools ? { tools } : {}),
         ...(req.toolChoice ? { tool_choice: toAnthropicToolChoice(req.toolChoice) } : {}),
-        ...(req.thinking?.type === "enabled"
-          ? { thinking: { type: "enabled", budget_tokens: req.thinking.budgetTokens ?? 4096 } }
-          : {}),
+        ...anthropicThinkingBody(req),
       };
       if (req.cachePrefix) applyCacheBreakpoint(body);
       const json = await anthropicFetch(fetchImpl, baseUrl, "/v1/messages", req.apiKey, body, timeoutMs, req.signal);
-      return parseAnthropicResponse(json);
+      return withModelServiceNotice(parseAnthropicResponse(json), {
+        provider: "anthropic",
+        model: req.model,
+      });
     },
 
     async *stream(req: CompleteRequest): AsyncIterable<StreamEvent> {
@@ -85,10 +87,11 @@ export function createAnthropicProvider(
         stream: true,
         ...(tools ? { tools } : {}),
         ...(req.toolChoice ? { tool_choice: toAnthropicToolChoice(req.toolChoice) } : {}),
+        ...anthropicThinkingBody(req),
       };
       const res = await anthropicFetchRaw(fetchImpl, baseUrl, "/v1/messages", req.apiKey, body, timeoutMs, req.signal);
       if (!res.ok) {
-        yield { type: "error", error: providerHttpError(res) };
+        yield { type: "error", error: await providerHttpError(res) };
         return;
       }
       yield* parseAnthropicStream(res);
@@ -114,6 +117,28 @@ export function createAnthropicProvider(
 
     buildCachePrefix(messages, opts?) {
       return buildCachePrefix(messages, opts);
+    },
+  };
+}
+
+function anthropicThinkingBody(
+  req: CompleteRequest,
+): { thinking?: { type: "enabled"; budget_tokens: number } } {
+  if (req.thinking?.type !== "enabled") {
+    return {};
+  }
+  if (req.maxTokens <= 1024) {
+    throw new Error(
+      "Anthropic 思考模式要求 max tokens 大于最小思考预算 1024。",
+    );
+  }
+  return {
+    thinking: {
+      type: "enabled",
+      budget_tokens: Math.min(
+        req.thinking.budgetTokens ?? 4096,
+        req.maxTokens - 1,
+      ),
     },
   };
 }
@@ -225,7 +250,7 @@ async function anthropicFetch(
 ): Promise<Record<string, unknown>> {
   const res = await anthropicFetchRaw(fetchImpl, baseUrl, path, apiKey, body, timeoutMs, signal);
   const text = await res.text();
-  if (!res.ok) throw providerHttpError(res);
+  if (!res.ok) throw await providerHttpError(res);
   return JSON.parse(text) as Record<string, unknown>;
 }
 

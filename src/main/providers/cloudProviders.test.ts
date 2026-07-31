@@ -53,6 +53,48 @@ describe("Bedrock provider", () => {
     });
   });
 
+  it("clamps Claude thinking below max tokens and preserves reasoning separately", async () => {
+    const send = vi.fn(async (command: unknown) => {
+      expect(command).toBeInstanceOf(InvokeModelCommand);
+      const input = (command as InvokeModelCommand).input;
+      const body = JSON.parse(
+        new TextDecoder().decode(input.body as Uint8Array),
+      ) as Record<string, unknown>;
+      expect(body.thinking).toEqual({
+        type: "enabled",
+        budget_tokens: 2047,
+      });
+      return {
+        body: new TextEncoder().encode(
+          JSON.stringify({
+            content: [
+              { type: "thinking", thinking: "private reasoning" },
+              { type: "text", text: "Claude response" },
+            ],
+            stop_reason: "end_turn",
+            usage: { input_tokens: 4, output_tokens: 20 },
+          }),
+        ),
+      };
+    });
+    const provider = createBedrockProvider({
+      region: "us-east-1",
+      client: { send } as never,
+    });
+
+    await expect(
+      provider.complete({
+        ...request,
+        maxTokens: 2048,
+        thinking: { type: "enabled", budgetTokens: 8192 },
+        model: "claude/anthropic.claude-sonnet-4-6-v1:0",
+      }),
+    ).resolves.toMatchObject({
+      content: "Claude response",
+      reasoningContent: "private reasoning",
+    });
+  });
+
   it("routes non-Claude families through Converse", async () => {
     const send = vi.fn(async (command: unknown) => {
       expect(command).toBeInstanceOf(ConverseCommand);
@@ -79,6 +121,43 @@ describe("Bedrock provider", () => {
       usage: { inputTokens: 5, outputTokens: 3 },
     });
   });
+
+  it("surfaces Bedrock output limits through complete and stream", async () => {
+    const send = vi.fn(async () => ({
+      output: { message: { content: [{ text: "partial" }] } },
+      stopReason: "max_tokens",
+      usage: { inputTokens: 5, outputTokens: 512 },
+    }));
+    const provider = createBedrockProvider({
+      region: "us-west-2",
+      client: { send } as never,
+    });
+    const limitedRequest = {
+      ...request,
+      model: "other/amazon.nova-2-pro-v1:0",
+    };
+
+    await expect(provider.complete(limitedRequest)).resolves.toMatchObject({
+      content: "partial",
+      finishReason: "max_tokens",
+      modelServiceNotice: {
+        kind: "output_limit",
+        provider: "bedrock",
+      },
+    });
+
+    const events = [];
+    for await (const event of provider.stream(limitedRequest)) {
+      events.push(event);
+    }
+    expect(events.at(-1)).toMatchObject({
+      type: "done",
+      response: {
+        finishReason: "max_tokens",
+        modelServiceNotice: { kind: "output_limit" },
+      },
+    });
+  });
 });
 
 describe("Vertex provider", () => {
@@ -92,11 +171,28 @@ describe("Vertex provider", () => {
       const headers = new Headers(init?.headers);
       expect(headers.get("authorization")).toBeNull();
       expect(headers.get("x-goog-api-key")).toBe("vertex-key");
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(body).toMatchObject({
+        generationConfig: {
+          temperature: 0.2,
+          maxOutputTokens: 512,
+          thinkingConfig: {
+            thinkingLevel: "minimal",
+            includeThoughts: false,
+          },
+        },
+      });
+      expect(body).not.toHaveProperty("thinkingConfig");
       return new Response(
         JSON.stringify({
           candidates: [
             {
-              content: { parts: [{ text: "Gemini response" }] },
+              content: {
+                parts: [
+                  { text: "private reasoning", thought: true },
+                  { text: "Gemini response" },
+                ],
+              },
               finishReason: "STOP",
             },
           ],
@@ -116,10 +212,60 @@ describe("Vertex provider", () => {
       provider.complete({
         ...request,
         model: "gemini/gemini-3.6-flash",
+        thinking: { type: "disabled" },
       }),
     ).resolves.toMatchObject({
       content: "Gemini response",
+      reasoningContent: "private reasoning",
       usage: { inputTokens: 7, outputTokens: 4 },
+    });
+  });
+
+  it("surfaces Vertex MAX_TOKENS through complete and stream", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: { parts: [{ text: "partial" }] },
+              finishReason: "MAX_TOKENS",
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    const provider = createVertexProvider({
+      project: "project",
+      location: "global",
+      authMethod: "api_key",
+      apiKey: "vertex-key",
+      fetch: fetchMock as typeof fetch,
+    });
+    const limitedRequest = {
+      ...request,
+      model: "gemini/gemini-3.6-flash",
+    };
+
+    await expect(provider.complete(limitedRequest)).resolves.toMatchObject({
+      content: "partial",
+      finishReason: "MAX_TOKENS",
+      modelServiceNotice: {
+        kind: "output_limit",
+        provider: "vertex",
+      },
+    });
+
+    const events = [];
+    for await (const event of provider.stream(limitedRequest)) {
+      events.push(event);
+    }
+    expect(events.at(-1)).toMatchObject({
+      type: "done",
+      response: {
+        finishReason: "MAX_TOKENS",
+        modelServiceNotice: { kind: "output_limit" },
+      },
     });
   });
 
@@ -131,9 +277,17 @@ describe("Vertex provider", () => {
       expect((init?.headers as Record<string, string>).authorization).toBe(
         "Bearer adc-token",
       );
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(body.thinking).toEqual({
+        type: "enabled",
+        budget_tokens: 2047,
+      });
       return new Response(
         JSON.stringify({
-          content: [{ type: "text", text: "Vertex Claude" }],
+          content: [
+            { type: "thinking", thinking: "private reasoning" },
+            { type: "text", text: "Vertex Claude" },
+          ],
           stop_reason: "end_turn",
           usage: { input_tokens: 3, output_tokens: 2 },
         }),
@@ -149,9 +303,14 @@ describe("Vertex provider", () => {
     await expect(
       provider.complete({
         ...request,
+        maxTokens: 2048,
         model: "claude/claude-sonnet-4-6",
+        thinking: { type: "enabled", budgetTokens: 8192 },
       }),
-    ).resolves.toMatchObject({ content: "Vertex Claude" });
+    ).resolves.toMatchObject({
+      content: "Vertex Claude",
+      reasoningContent: "private reasoning",
+    });
   });
 });
 

@@ -50,6 +50,11 @@ import {
   classifyAcceptanceInfrastructureFailure,
   type AcceptanceInfrastructureFailure,
 } from "./agentGoalAcceptanceRetryPolicy";
+import {
+  ModelServiceNoticeError,
+  modelServiceNoticeFromError,
+  type ModelServiceNotice,
+} from "../shared/modelServiceNotice";
 
 const shellRedirectionOperatorPattern = /[<>]/;
 const defaultJudgeTimeoutMs = 30_000;
@@ -97,6 +102,7 @@ export type AcceptanceResult = {
     runIds: string[];
   };
   retry?: AcceptanceInfrastructureFailure;
+  modelServiceNotice?: ModelServiceNotice;
   finalJudgeReplay?: FinalGoalJudgeReplayEvidence;
 };
 
@@ -316,6 +322,7 @@ async function evaluateCriteria(
   let evidenceManifest: GoalEvidenceManifest | undefined;
   let judge: AcceptanceResult["judge"];
   let retry: AcceptanceResult["retry"];
+  let modelServiceNotice: ModelServiceNotice | undefined;
 
   if (deterministicPassed) {
     for (const { check, criterionText } of modelReviewChecks) {
@@ -342,6 +349,7 @@ async function evaluateCriteria(
       evidenceManifest = mergeEvidenceManifests(evidenceManifest, result.evidenceManifest);
       judge = result.judge ?? judge;
       retry = result.retry ?? retry;
+      modelServiceNotice = result.modelServiceNotice ?? modelServiceNotice;
     }
   }
 
@@ -356,6 +364,7 @@ async function evaluateCriteria(
     ...(evidenceManifest ? { evidenceManifest } : {}),
     ...(judge ? { judge } : {}),
     ...(retry ? { retry } : {}),
+    ...(modelServiceNotice ? { modelServiceNotice } : {}),
   };
   if (
     evaluation.mode === "goal" &&
@@ -780,6 +789,7 @@ async function evaluateModelReview(
   evidenceManifest?: GoalEvidenceManifest;
   judge?: AcceptanceResult["judge"];
   retry?: AcceptanceInfrastructureFailure;
+  modelServiceNotice?: ModelServiceNotice;
 }> {
   const evidenceRefs = parseEvidenceRefs(check.params.evidenceRefs);
   if (!check.requiresEvidence || evidenceRefs.length === 0) {
@@ -878,6 +888,13 @@ async function evaluateModelReview(
     const retry = classifyAcceptanceInfrastructureFailure(
       outcome.status === "timed_out" ? { code: "ETIMEDOUT" } : outcome.error,
     );
+    const modelServiceNotice =
+      outcome.status === "failed"
+        ? modelServiceNoticeFromError(outcome.error, {
+            provider: options.judgeProviderId,
+            model: modelProfile.model,
+          })
+        : undefined;
     return {
       checkResult: unavailableJudgeResult(
         check,
@@ -888,6 +905,7 @@ async function evaluateModelReview(
       evidenceManifest: evidence.manifest,
       judge,
       retry,
+      ...(modelServiceNotice ? { modelServiceNotice } : {}),
     };
   }
 
@@ -973,6 +991,7 @@ async function evaluateFinalModelReview(
   evidenceManifest?: GoalEvidenceManifest;
   judge?: AcceptanceResult["judge"];
   retry?: AcceptanceInfrastructureFailure;
+  modelServiceNotice?: ModelServiceNotice;
 }> {
   const evidenceRefs = parseEvidenceRefs(check.params.evidenceRefs);
   if (!check.requiresEvidence || evidenceRefs.length === 0) {
@@ -1085,6 +1104,13 @@ async function evaluateFinalModelReview(
     const retry = classifyAcceptanceInfrastructureFailure(
       outcome.status === "timed_out" ? { code: "ETIMEDOUT" } : outcome.error,
     );
+    const modelServiceNotice =
+      outcome.status === "failed"
+        ? modelServiceNoticeFromError(outcome.error, {
+            provider: options.judgeProviderId,
+            model: modelProfile.model,
+          })
+        : undefined;
     return {
       checkResult: unavailableJudgeResult(
         check,
@@ -1095,6 +1121,7 @@ async function evaluateFinalModelReview(
       evidenceManifest: evidence.manifest,
       judge,
       retry,
+      ...(modelServiceNotice ? { modelServiceNotice } : {}),
     };
   }
 
@@ -1146,6 +1173,7 @@ async function replayFinalModelReviews(
   let inferentialUsed = false;
   let judge: AcceptanceResult["judge"];
   let retry: AcceptanceInfrastructureFailure | undefined;
+  let modelServiceNotice: ModelServiceNotice | undefined;
   const modelReviewChecks = goal.successCriteria.flatMap((criterion) =>
     criterion.acceptanceChecks
       .filter((candidate) => candidate.kind === "model_review")
@@ -1175,6 +1203,7 @@ async function replayFinalModelReviews(
     inferentialUsed = inferentialUsed || result.inferentialUsed;
     judge = result.judge ?? judge;
     retry = result.retry ?? retry;
+    modelServiceNotice = result.modelServiceNotice ?? modelServiceNotice;
   }
 
   const complete = checkResults.length === goal.successCriteria.flatMap(
@@ -1190,6 +1219,7 @@ async function replayFinalModelReviews(
     evidenceManifest: sealedEvidence.evidenceManifest,
     ...(judge ? { judge } : {}),
     ...(retry ? { retry } : {}),
+    ...(modelServiceNotice ? { modelServiceNotice } : {}),
     ...(aggregate.verdict === "acceptance_unavailable"
       ? { finalJudgeReplay: sealedEvidence }
       : {}),
@@ -2157,6 +2187,12 @@ async function completeJudgeAttemptWithDeadline(
           return { status: "timed_out" };
         }
         if (operation.signal.aborted) throw abortError(operation.signal.reason);
+        if (response.modelServiceNotice) {
+          return {
+            status: "failed",
+            error: new ModelServiceNoticeError(response.modelServiceNotice),
+          };
+        }
         return { status: "completed", content: response.content ?? "" };
       },
       (error) => {

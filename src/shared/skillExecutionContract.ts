@@ -48,11 +48,17 @@ export type SkillExecutionProvenance = {
   manifestHash: string;
 };
 
+/** @deprecated Legacy serialized limits; values are never execution stop gates. */
 export type SkillExecutionBudgets = {
   maxTurns: number;
   usedTurns?: number;
   maxToolCalls?: number;
   maxWallClockMs?: number;
+};
+
+export type SkillExecutionPolicy = {
+  /** Automatic persistence/visibility checkpoint interval, never a task limit. */
+  checkpointEveryTurns: number;
 };
 
 export type SkillStageRecord = {
@@ -74,7 +80,9 @@ export type SkillExecutionContract = {
   workspaceId?: string;
   selectedSkillName: string;
   skill: SkillExecutionProvenance;
-  budgets: SkillExecutionBudgets;
+  executionPolicy: SkillExecutionPolicy;
+  /** @deprecated Read compatibility only. New snapshots do not write budgets. */
+  budgets?: SkillExecutionBudgets;
   resources?: SkillExecutionResource[];
   createdAt: string;
 };

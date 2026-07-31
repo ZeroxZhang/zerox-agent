@@ -7,7 +7,7 @@ import {
 } from "./runtimeKernel";
 
 describe("runRuntimeKernel", () => {
-  it("runs chat turns until a turn-limit stop policy stops it", async () => {
+  it("continues across a legacy turn checkpoint until semantic completion", async () => {
     const bus = new KernelEventBus();
     const turns: number[] = [];
 
@@ -22,19 +22,26 @@ describe("runRuntimeKernel", () => {
         turns.push(ctx.turn);
         return {
           summary: `turn ${ctx.turn}`,
+          completed: ctx.turn === 4,
         };
+      },
+      async onCheckpoint(ctx) {
+        return `checkpoint:${ctx.turn}`;
       },
     });
 
     expect(result).toEqual({
       runId: "run_1",
       status: "succeeded",
-      turns: 2,
-      reason: "turn limit reached",
-      summary: "turn 2",
+      turns: 4,
+      reason: "run completed",
+      summary: "turn 4",
     });
-    expect(turns).toEqual([1, 2]);
+    expect(turns).toEqual([1, 2, 3, 4]);
     expect(bus.history().map((event) => event.type)).toEqual([
+      "turn_start",
+      "turn_start",
+      "checkpoint_written",
       "turn_start",
       "turn_start",
       "run_end",
@@ -167,18 +174,18 @@ function createContext(overrides: Partial<RunContext> = {}): RunContext {
 
 function turnLimitPolicy(): StopPolicy {
   return {
-    kind: "turn_limit",
-    async shouldStop(ctx) {
-      if (ctx.turn >= ctx.maxTurns) {
+    kind: "checkpoint_interval",
+    async shouldStop(_ctx, lastTurn) {
+      if (lastTurn.completed) {
         return {
           stop: true,
-          reason: "turn limit reached",
+          reason: "run completed",
         };
       }
 
       return {
         stop: false,
-        reason: "turns remain",
+        reason: "continue after checkpoint",
       };
     },
   };

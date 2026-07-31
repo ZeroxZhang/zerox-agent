@@ -123,6 +123,24 @@ describe("runRecordViewModel", () => {
     ).toBe("查看授权");
   });
 
+  it("labels provider-limited scheduled runs for explicit user recovery", () => {
+    expect(getRunRecordAction({
+      ...runWithStatus("paused"),
+      modelServiceNotice: {
+        kind: "output_limit",
+        message: "partial",
+      },
+    }).primary.label).toBe("继续生成");
+    expect(getRunRecordAction({
+      ...runWithStatus("paused"),
+      modelServiceNotice: {
+        kind: "rate_limit",
+        statusCode: 429,
+        message: "retry later",
+      },
+    }).primary.label).toBe("重试");
+  });
+
   it("prioritizes attention records before completed history", () => {
     const sorted = [
       runWithStatus("succeeded"),

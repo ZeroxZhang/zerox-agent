@@ -4,25 +4,51 @@ export class ProviderHttpError extends Error {
   readonly status: number;
   readonly statusCode: number;
   readonly responseHeaders: Readonly<Record<string, string>>;
+  readonly code?: string;
 
-  constructor(status: number, responseHeaders: Readonly<Record<string, string>>) {
+  constructor(
+    status: number,
+    responseHeaders: Readonly<Record<string, string>>,
+    code?: string,
+  ) {
     super(`HTTP ${status}`);
     this.name = "ProviderHttpError";
     this.status = status;
     this.statusCode = status;
     this.responseHeaders = responseHeaders;
+    this.code = code;
   }
 }
 
-export function providerHttpError(response: Response): ProviderHttpError {
+export async function providerHttpError(
+  response: Response,
+): Promise<ProviderHttpError> {
   const retryAfterMs = parseRetryAfterMs(response.headers?.get("retry-after-ms"));
   const retryAfter = parseRetryAfterSeconds(response.headers?.get("retry-after"));
+  const code = await readSafeProviderCode(response);
   return new ProviderHttpError(response.status, {
     ...(retryAfterMs === undefined
       ? {}
       : { "retry-after-ms": String(retryAfterMs) }),
     ...(retryAfter === undefined ? {} : { "retry-after": retryAfter }),
-  });
+  }, code);
+}
+
+async function readSafeProviderCode(response: Response): Promise<string | undefined> {
+  try {
+    const body = (await response.clone().text()).slice(0, 8_192);
+    const parsed = JSON.parse(body) as {
+      code?: unknown;
+      type?: unknown;
+      error?: { code?: unknown; type?: unknown };
+    };
+    const value =
+      parsed.error?.code ?? parsed.error?.type ?? parsed.code ?? parsed.type;
+    if (typeof value !== "string") return undefined;
+    return value.trim().replace(/[^\w.\-:/]/g, "_").slice(0, 96) || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function parseRetryAfterMs(value: string | null | undefined): number | undefined {

@@ -20,6 +20,10 @@ import {
   hasTaskContractAcceptanceCriteria,
 } from "../shared/agentTaskContractAcceptance";
 import { classifyTaskFrame } from "../shared/agentTaskStrategy";
+import {
+  ModelServiceNoticeError,
+  throwForModelServiceNotice,
+} from "../shared/modelServiceNotice";
 
 type AgentGoalPlanOptions = {
   successCriteria: SuccessCriterion[];
@@ -68,10 +72,12 @@ export function createAgentGoalPlanner(options: {
           ],
           tool_choice: "none",
         });
+        throwForModelServiceNotice(response.modelServiceNotice);
         const milestones = parseMilestones(response.content ?? "");
         validateMilestonePlan(request.successCriteria, milestones);
         return milestones;
       } catch (error) {
+        if (error instanceof ModelServiceNoticeError) throw error;
         rejectionReason = (error as Error).message;
         if (attempt === maxPlanAttempts - 1) {
           throw error;
@@ -121,7 +127,7 @@ export function createAgentGoalPlanner(options: {
 
       validateMilestonePlan(goal.successCriteria, merged);
       goal.planVersion += 1;
-      goal.budgetUsage.replans += 1;
+      goal.executionUsage.replans += 1;
 
       return merged;
     },

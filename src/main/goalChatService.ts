@@ -60,10 +60,6 @@ export type GoalChatService = {
     options?: { signal?: AbortSignal },
   ): Promise<ChatSessionGoalSummary>;
   markCompletedUnverified(goalId: string): Promise<ChatSessionGoalSummary>;
-  increaseBudget(
-    goalId: string,
-    delta: Partial<GoalBudget>,
-  ): Promise<ChatSessionGoalSummary>;
   replan(goalId: string, instructions: string): Promise<ChatSessionGoalSummary>;
   retry(goalId: string): Promise<ChatSessionGoalSummary>;
   shutdown(): Promise<void>;
@@ -348,8 +344,7 @@ export function createGoalChatService(options: {
         successCriteria: [goalCriterion],
         milestones,
         status: "planning",
-        budget: createDefaultChatGoalBudget(),
-        budgetUsage: {
+        executionUsage: {
           iterations: 0,
           toolCalls: 0,
           wallClockMs: 0,
@@ -433,8 +428,7 @@ export function createGoalChatService(options: {
         successCriteria,
         milestones,
         status: "planning",
-        budget: createDefaultChatGoalBudget(),
-        budgetUsage: {
+        executionUsage: {
           iterations: 0,
           toolCalls: 0,
           wallClockMs: 0,
@@ -575,52 +569,6 @@ export function createGoalChatService(options: {
       );
     },
 
-    async increaseBudget(goalId, delta) {
-      const goal = await options.goalStore.get(goalId);
-      if (!goal) {
-        throw new Error(`Goal "${goalId}" was not found.`);
-      }
-
-      goal.budget = {
-        maxIterations: Math.max(
-          goal.budget.maxIterations,
-          goal.budget.maxIterations + (delta.maxIterations ?? 0),
-        ),
-        maxToolCalls: Math.max(
-          goal.budget.maxToolCalls,
-          goal.budget.maxToolCalls + (delta.maxToolCalls ?? 0),
-        ),
-        maxWallClockMs: Math.max(
-          goal.budget.maxWallClockMs,
-          goal.budget.maxWallClockMs + (delta.maxWallClockMs ?? 0),
-        ),
-        maxReplans: Math.max(
-          goal.budget.maxReplans,
-          goal.budget.maxReplans + (delta.maxReplans ?? 0),
-        ),
-        ...(goal.budget.maxTokens !== undefined || delta.maxTokens !== undefined
-          ? {
-              maxTokens: Math.max(
-                goal.budget.maxTokens ?? 0,
-                (goal.budget.maxTokens ?? 0) + (delta.maxTokens ?? 0),
-              ),
-            }
-          : {}),
-      };
-      goal.updatedAt = now();
-      const persisted = await options.goalStore.save(goal);
-      if (persisted.status !== goal.status) {
-        return toGoalSummary(persisted);
-      }
-      await options.goalStore.appendLedger(goal.id, {
-        at: goal.updatedAt,
-        kind: "goal_replanned",
-        summary: "Budget increased from chat recovery UI.",
-      });
-      notifyProgress("replanned", persisted, "预算已增加，可以继续执行。");
-      return toGoalSummary(persisted);
-    },
-
     async replan(goalId, instructions) {
       const goal = await options.goalStore.get(goalId);
       if (!goal) {
@@ -630,6 +578,11 @@ export function createGoalChatService(options: {
       if (goal.status === "achieved" || goal.status === "canceled") {
         throw new Error(`Cannot replan a terminal ${goal.status} goal.`);
       }
+      if (goal.status === "stopped_budget") {
+        throw new Error(
+          "Legacy budget-stopped goals are read-only and cannot be replanned.",
+        );
+      }
       if (
         goal.status === "stopped_blocked" &&
         goal.stopReason === "acceptance_integrity_failed"
@@ -638,7 +591,6 @@ export function createGoalChatService(options: {
           "Cannot replan a goal whose acceptance certificate failed integrity verification.",
         );
       }
-
       const replanningGoal = structuredClone(goal);
       const milestones = await options.planner.replan(
         replanningGoal,
@@ -676,6 +628,11 @@ export function createGoalChatService(options: {
       if (!goal) {
         throw new Error(`Goal "${goalId}" was not found.`);
       }
+      if (goal.status === "stopped_budget") {
+        throw new Error(
+          "Legacy budget-stopped goals are read-only and cannot be retried.",
+        );
+      }
 
       if (
         goal.status === "stopped_blocked" &&
@@ -704,6 +661,7 @@ export function createGoalChatService(options: {
         ...upgraded,
         status: "executing",
         stopReason: undefined,
+        modelServiceNotice: undefined,
         milestones: rearmGoalMilestonesForRetry(upgraded.milestones),
         ...(upgraded.acceptanceState?.phase === "blocked"
           ? {
@@ -724,12 +682,17 @@ export function createGoalChatService(options: {
         kind: "goal_planned",
         summary: "Goal retried from chat recovery UI.",
       });
-      notifyProgress("started", persisted, "目标已恢复执行。");
+      const canonicalAfterLedger =
+        (await options.goalStore.get(candidate.id)) ?? persisted;
+      if (canonicalAfterLedger.status !== "executing") {
+        return toGoalSummary(canonicalAfterLedger);
+      }
+      notifyProgress("started", canonicalAfterLedger, "目标已恢复执行。");
       startBackgroundGoalRun(goalId, { signal: undefined }, (id, runnerOptions) =>
         options.controller.resume(id, runnerOptions),
       );
       return toGoalSummary(
-        (await options.goalStore.get(goalId)) ?? persisted,
+        (await options.goalStore.get(goalId)) ?? canonicalAfterLedger,
       );
     },
 
@@ -883,15 +846,6 @@ function createGoalSuccessCriterion(
         requiresEvidence: true,
       },
     ],
-  };
-}
-
-function createDefaultChatGoalBudget(): GoalBudget {
-  return {
-    maxIterations: 64,
-    maxToolCalls: 64,
-    maxWallClockMs: 45 * 60 * 1000,
-    maxReplans: 3,
   };
 }
 

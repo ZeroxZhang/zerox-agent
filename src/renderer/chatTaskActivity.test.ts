@@ -127,7 +127,7 @@ describe("chat task activity", () => {
     });
   });
 
-  it("maps budget-stopped goals to an explicit non-running paused state", () => {
+  it("maps legacy budget-stopped goals to a read-only paused state", () => {
     const activity = buildGoalTaskActivity({
       status: "stopped_budget",
       description: "发布 v2.1.1",
@@ -136,8 +136,9 @@ describe("chat task activity", () => {
 
     expect(activity).toMatchObject({
       kind: "paused",
-      title: "目标预算已用尽",
-      detail: "发布 v2.1.1",
+      title: "旧版任务已停止（只读）",
+      detail: "可查看原结果和证据：发布 v2.1.1",
+      canContinue: false,
     });
     expect(getGoalUiSyncState("stopped_budget")).toEqual({
       statusKind: "paused",

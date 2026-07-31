@@ -24,7 +24,7 @@ function baseGoal(): Goal {
     id: "goal-1", description: "Ship the feature", successCriteria: [], milestones: [],
     status: "executing",
     budget: { maxTurns: 10, maxMinutes: 60, maxCostUsd: 1 } as Goal["budget"],
-    budgetUsage: { turns: 0, minutes: 0, costUsd: 0 } as Goal["budgetUsage"],
+    executionUsage: { turns: 0, minutes: 0, costUsd: 0 } as Goal["executionUsage"],
     reviewPolicy: { mode: "human" } as Goal["reviewPolicy"],
     planVersion: 1, createdAt: "2026-06-19T00:00:00.000Z", updatedAt: "2026-06-19T00:00:00.000Z",
   };

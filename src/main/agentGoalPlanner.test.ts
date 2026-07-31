@@ -608,7 +608,7 @@ describe("agent goal planner", () => {
       },
     ]);
     expect(goal.planVersion).toBe(2);
-    expect(goal.budgetUsage.replans).toBe(1);
+    expect(goal.executionUsage.replans).toBe(1);
   });
 
   it("falls back to a safe remaining milestone when replanning responses stay non-json", async () => {
@@ -708,7 +708,7 @@ function createGoal(): Goal {
       maxWallClockMs: 600_000,
       maxReplans: 2,
     },
-    budgetUsage: {
+    executionUsage: {
       iterations: 1,
       toolCalls: 4,
       wallClockMs: 1000,

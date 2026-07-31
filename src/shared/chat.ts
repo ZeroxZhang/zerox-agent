@@ -3,6 +3,7 @@ import type { AgentRunRecord } from "./agentRuns";
 import type { ScheduledTask } from "./scheduledTasks";
 import type { GoalStatus } from "./agentGoal";
 import type { ChatOutputPart } from "./chatOutput";
+import type { ModelServiceNotice } from "./modelServiceNotice";
 import type { GoalDraft } from "./goalTranslation";
 import type {
   PlanMode,
@@ -239,10 +240,18 @@ export type ChatAgentStatus =
   | {
       state: "paused";
       runId?: string;
-      reason: "turn_limit" | "tool_failure_loop" | "strategy_guard";
+      reason:
+        | "turn_limit"
+        | "tool_failure_loop"
+        | "strategy_guard"
+        | "provider_output_limit"
+        | "provider_rate_limit"
+        | "provider_quota"
+        | "provider_stop";
       maxTurns: number;
       toolCallsExecuted: number;
       message: string;
+      modelServiceNotice?: ModelServiceNotice;
     };
 
 export type ChatTaskStatusEvent = {

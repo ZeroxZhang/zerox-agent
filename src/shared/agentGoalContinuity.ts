@@ -64,7 +64,7 @@ export function buildGoalContinuityCheckpoint(
     "",
     "## §9 Live resources",
     `- status=${input.goal.status}; planVersion=${input.goal.planVersion}; checkpointedAt=${checkpointedAt}`,
-    `- budget ${budgetLine(input.goal)}`,
+    `- execution usage ${executionUsageLine(input.goal)}`,
     "",
     "## §10 Design decisions",
     `- reviewPolicy=${input.goal.reviewPolicy}; stopReason=${input.goal.stopReason ?? "none"}`,
@@ -100,7 +100,7 @@ function buildCompactGoalContinuityCheckpoint(
     "## §8 Errors and fixes",
     compactErrors(goal),
     "## §9 Live resources",
-    `status=${goal.status}; plan=${goal.planVersion}; checkpointedAt=${checkpointedAt}; ${budgetLine(goal)}`,
+    `status=${goal.status}; plan=${goal.planVersion}; checkpointedAt=${checkpointedAt}; ${executionUsageLine(goal)}`,
     "## §10 Design decisions",
     `reviewPolicy=${goal.reviewPolicy}; stopReason=${goal.stopReason ?? "none"}`,
     "## §11 Open notes",
@@ -283,13 +283,13 @@ function errorsAndFixes(
   return lines.length ? lines : ["- (none recorded)"];
 }
 
-function budgetLine(goal: Goal): string {
+function executionUsageLine(goal: Goal): string {
   return [
-    `iterations=${goal.budgetUsage.iterations}/${goal.budget.maxIterations}`,
-    `toolCalls=${goal.budgetUsage.toolCalls}/${goal.budget.maxToolCalls}`,
-    `wallClockMs=${goal.budgetUsage.wallClockMs}/${goal.budget.maxWallClockMs}`,
-    `tokens=${goal.budgetUsage.tokens}/${goal.budget.maxTokens ?? "unbounded"}`,
-    `replans=${goal.budgetUsage.replans}/${goal.budget.maxReplans}`,
+    `iterations=${goal.executionUsage.iterations}`,
+    `toolCalls=${goal.executionUsage.toolCalls}`,
+    `wallClockMs=${goal.executionUsage.wallClockMs}`,
+    `tokens=${goal.executionUsage.tokens}`,
+    `replans=${goal.executionUsage.replans}`,
   ].join("; ");
 }
 

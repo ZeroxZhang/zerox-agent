@@ -168,7 +168,7 @@ export function projectRunGraph(input: ProjectRunGraphInput): RunGraphView {
         id: turnNodeId,
         kind: "turn",
         status: "running",
-        title: `Turn ${event.turn}/${event.maxTurns}`,
+        title: `Turn ${event.turn} · checkpoint every ${event.maxTurns}`,
         sourceRefs: [ref],
         order: kernelOrder(event),
       });

@@ -160,7 +160,7 @@ function createGoal(milestones: Milestone[]): Goal {
       maxWallClockMs: 600_000,
       maxReplans: 2,
     },
-    budgetUsage: {
+    executionUsage: {
       iterations: 1,
       toolCalls: 3,
       wallClockMs: 1000,

@@ -27,6 +27,7 @@ import {
   requireProviderDescriptor,
   validateProviderFields,
 } from "./providers/providerRegistry";
+import { throwForModelServiceNotice } from "../shared/modelServiceNotice";
 
 export type ModelConnectionService = {
   testConnection(): Promise<TestModelConnectionResult>;
@@ -116,6 +117,7 @@ export function createModelConnectionService(options: {
         model: input.model,
         temperature: 0,
         maxTokens: 32,
+        thinking: { type: "disabled" },
         messages: [
           {
             role: "system",
@@ -127,6 +129,17 @@ export function createModelConnectionService(options: {
           },
         ],
       });
+      throwForModelServiceNotice(response.modelServiceNotice);
+      if (!response.content?.trim()) {
+        throw new Error(
+          [
+            "模型未返回连通性测试文本。",
+            `finishReason=${response.finishReason || "unknown"}`,
+            `reasoningOnly=${Boolean(response.reasoningContent)}`,
+            `outputTokens=${response.usage?.outputTokens ?? "unknown"}`,
+          ].join(" "),
+        );
+      }
       const checkedAt = now();
       return {
         ok: true,

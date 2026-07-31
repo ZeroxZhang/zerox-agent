@@ -2,7 +2,6 @@ import type {
   AcceptanceCheckKind,
   AcceptanceRepairDirective,
   Goal,
-  GoalBudget,
   GoalAcceptanceState,
   GoalStatus,
   Milestone,
@@ -30,6 +29,7 @@ export type GoalRecoveryAction =
   | "continue_acceptance"
   | "mark_completed_unverified"
   | "adjust_plan"
+  | "retry_model"
   | "terminate";
 
 export type GoalAcceptancePresentation = {
@@ -157,64 +157,6 @@ const SECRET_METADATA_SUFFIXES = [
   "securitytoken",
   "webhookurl",
 ] as const;
-
-export function buildGoalBudgetIncreaseDelta(
-  goal: Goal | null,
-): Partial<GoalBudget> {
-  if (!goal) {
-    return {
-      maxIterations: 8,
-      maxToolCalls: 64,
-      maxWallClockMs: 45 * 60 * 1000,
-      maxReplans: 3,
-    };
-  }
-
-  const delta: Partial<GoalBudget> = {};
-  if (goal.budgetUsage.iterations >= goal.budget.maxIterations) {
-    delta.maxIterations = Math.max(
-      1,
-      goal.budget.maxIterations,
-      goal.budgetUsage.iterations,
-    );
-  }
-  if (goal.budgetUsage.toolCalls >= goal.budget.maxToolCalls) {
-    delta.maxToolCalls = Math.max(
-      1,
-      goal.budget.maxToolCalls,
-      goal.budgetUsage.toolCalls,
-    );
-  }
-  if (goal.budgetUsage.wallClockMs >= goal.budget.maxWallClockMs) {
-    delta.maxWallClockMs = Math.max(
-      60_000,
-      goal.budget.maxWallClockMs,
-      goal.budgetUsage.wallClockMs,
-    );
-  }
-  if (goal.budgetUsage.replans >= goal.budget.maxReplans) {
-    delta.maxReplans = Math.max(
-      1,
-      goal.budget.maxReplans,
-      goal.budgetUsage.replans,
-    );
-  }
-  if (
-    goal.budget.maxTokens !== undefined &&
-    goal.budgetUsage.tokens >= goal.budget.maxTokens
-  ) {
-    delta.maxTokens = Math.max(
-      1,
-      goal.budget.maxTokens,
-      goal.budgetUsage.tokens,
-    );
-  }
-
-  if (Object.keys(delta).length === 0) {
-    delta.maxIterations = Math.max(1, goal.budget.maxIterations);
-  }
-  return delta;
-}
 
 export function buildGoalProgressViewModel(
   summary: ChatSessionGoalSummary,
@@ -345,6 +287,20 @@ export function buildGoalStatusPresentation(
           "terminate",
         ],
       }, acceptance, undefined);
+    case "waiting_for_model":
+      return {
+        statusLabel: "等待模型服务",
+        statusDetail:
+          goal?.modelServiceNotice?.message ??
+          "模型服务暂时无法继续，当前结果和检查点已保留。",
+        nextActionLabel:
+          goal?.modelServiceNotice?.kind === "output_limit"
+            ? "继续生成"
+            : "重试模型",
+        nextActionDetail: `恢复时会从现有检查点继续。${milestoneDetail}`,
+        recoveryActions: ["retry_model"],
+        ...(acceptance ? { acceptance } : {}),
+      };
     case "achieved":
       const isLegacyAchieved = goal?.acceptanceProtocolVersion !== 2;
       return withAcceptance({
@@ -381,11 +337,11 @@ export function buildGoalStatusPresentation(
       }, acceptance, undefined);
     case "stopped_budget":
       return {
-        statusLabel: "预算已用尽",
+        statusLabel: "旧版任务已停止（只读）",
         statusDetail:
-          "目标已达到执行预算上限并停止，不会在后台继续。你可以查看证据，或明确增加预算后继续。",
-        nextActionLabel: "需要你处理",
-        nextActionDetail: `查看证据或增加预算继续。${milestoneDetail}`,
+          "这是旧版本地预算机制留下的历史记录。当前版本不会再产生此状态，也不会自动恢复该任务。",
+        nextActionLabel: "历史记录",
+        nextActionDetail: `可查看原结果和执行证据。${milestoneDetail}`,
         recoveryActions: [],
         ...(acceptance ? { acceptance } : {}),
       };
@@ -1046,19 +1002,23 @@ function buildMetricCards(goal: Goal | null): GoalProgressMetricCard[] {
   return [
     {
       label: "迭代",
-      value: String(goal.budgetUsage.iterations),
+      value: String(goal.executionUsage.iterations),
     },
     {
       label: "工具调用",
-      value: String(goal.budgetUsage.toolCalls),
+      value: String(goal.executionUsage.toolCalls),
+    },
+    {
+      label: "Token",
+      value: String(goal.executionUsage.tokens),
     },
     {
       label: "运行时间",
-      value: `${formatMinutes(goal.budgetUsage.wallClockMs)} 分钟`,
+      value: `${formatMinutes(goal.executionUsage.wallClockMs)} 分钟`,
     },
     {
       label: "重规划",
-      value: String(goal.budgetUsage.replans),
+      value: String(goal.executionUsage.replans),
     },
   ];
 }

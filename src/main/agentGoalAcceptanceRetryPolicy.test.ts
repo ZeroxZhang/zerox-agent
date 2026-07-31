@@ -20,7 +20,7 @@ describe("agent goal acceptance retry policy", () => {
     });
   });
 
-  it("uses bounded retry-after before exponential fallback", () => {
+  it("keeps bounded retry-after metadata while requiring manual 429 retry", () => {
     const limited = Object.assign(new Error("limited"), {
       status: 429,
       responseHeaders: { "retry-after-ms": "1500" },
@@ -44,10 +44,11 @@ describe("agent goal acceptance retry policy", () => {
       delayMs: 2000,
       nextRetryAt: new Date(12_000).toISOString(),
     });
-    expect(decideFinalAcceptanceRetry(rateLimitedResult(1500), 1, 10_000)).toMatchObject({
-      action: "retry",
-      delayMs: 1500,
-      nextRetryAt: new Date(11_500).toISOString(),
+    expect(
+      decideFinalAcceptanceRetry(rateLimitedResult(1500), 1, 10_000),
+    ).toEqual({
+      action: "wait_for_user",
+      code: "rate_limited",
     });
   });
 

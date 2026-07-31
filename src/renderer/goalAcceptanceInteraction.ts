@@ -165,7 +165,7 @@ function projectContinueAcceptanceOutcome(
         assistantMessage: "最终验收未继续：目标当前受阻。",
       };
     case "stopped_budget":
-      return neutralContinueOutcome("目标已因预算停止");
+      return neutralContinueOutcome("旧版预算停止任务为只读");
     case "stopped_stalled":
       return neutralContinueOutcome("目标已因停滞停止");
     case "failed":
@@ -176,6 +176,8 @@ function projectContinueAcceptanceOutcome(
       return neutralContinueOutcome("目标仍在规划中");
     case "waiting_for_review":
       return neutralContinueOutcome("目标正在等待人工审核");
+    case "waiting_for_model":
+      return neutralContinueOutcome("目标正在等待模型服务恢复");
   }
 }
 
@@ -234,7 +236,7 @@ function manualCompletionRaceState(status: GoalStatus): string {
     case "stopped_blocked":
       return "目标当前受阻";
     case "stopped_budget":
-      return "目标已因预算停止";
+      return "旧版预算停止任务为只读";
     case "stopped_stalled":
       return "目标已因停滞停止";
     case "failed":
@@ -243,6 +245,8 @@ function manualCompletionRaceState(status: GoalStatus): string {
       return "目标仍在规划中";
     case "waiting_for_review":
       return "目标正在等待人工审核";
+    case "waiting_for_model":
+      return "目标正在等待模型服务恢复";
     case "completed_unverified":
       return "手动完成记录不可确认";
   }

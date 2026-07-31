@@ -38,20 +38,20 @@ export type EvidenceJudgePolicyOptions = {
   judge(input: EvidenceJudgeInput): Promise<EvidenceJudgeVerdict>;
 };
 
-export function createTurnLimitPolicy(): StopPolicy {
+export function createCheckpointIntervalPolicy(): StopPolicy {
   return {
-    kind: "turn_limit",
-    async shouldStop(ctx) {
-      if (ctx.turn >= ctx.maxTurns) {
+    kind: "checkpoint_interval",
+    async shouldStop(_ctx, lastTurn) {
+      if (lastTurn.completed) {
         return {
           stop: true,
-          reason: "turn limit reached",
+          reason: "run completed",
         };
       }
 
       return {
         stop: false,
-        reason: "turns remain",
+        reason: "continue after checkpoint",
       };
     },
   };
@@ -70,7 +70,7 @@ export function createEvidenceJudgePolicy(
         return {
           stop: true,
           impossible: true,
-          reason: "evidence judge maxReact exhausted",
+          reason: "evidence judge stalled without verifiable progress",
         };
       }
 

@@ -43,6 +43,11 @@ import type {
 } from "../shared/agentRuns";
 import type { SkillRecord } from "../shared/skills";
 import { filterToolDefinitionsForScheduledTask } from "./scheduledTaskToolVisibility";
+import {
+  modelServiceNoticeFromError,
+  throwForModelServiceNotice,
+  type ModelServiceNotice,
+} from "../shared/modelServiceNotice";
 
 export type AgentModelProfile = {
   baseUrl: string;
@@ -285,6 +290,13 @@ export function createAgentRunnerService(options: {
       });
     }
 
+    const denied = authResults.find((result) => !result.allowed);
+    if (denied) {
+      throw new Error(
+        `Permission denied for tool ${denied.toolName}: ${denied.reason}`,
+      );
+    }
+
     return toolMessages;
   }
 
@@ -361,13 +373,14 @@ export function createAgentRunnerService(options: {
 
     let summary = "";
     let status: AgentRunRecord["status"] = "failed";
+    let modelServiceNotice: ModelServiceNotice | undefined;
     let currentPhase: AgentPhase = "planning";
 
-    // Determine if planning is needed
-    const needsPlanning =
-      skill?.manifest.execution?.maxTurns !== undefined
-        ? (skill.manifest.execution.maxTurns ?? 10) > 3
-        : true;
+    // Planning is an explicit Skill contract. maxTurns is only a checkpoint
+    // interval and must not silently enable or disable planning.
+    const needsPlanning = skill
+      ? skill.manifest.planning?.required === true
+      : true;
 
     try {
       throwIfCanceled(signal);
@@ -383,32 +396,6 @@ export function createAgentRunnerService(options: {
         }
         return msgs;
       }
-
-      async function completeWithRetry(
-      requestParams: Parameters<typeof options.chatClient.complete>[0],
-      maxRetries = 2,
-    ): ReturnType<typeof options.chatClient.complete> {
-      for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
-        try {
-          throwIfCanceled(signal);
-          return await options.chatClient.complete(requestParams);
-        } catch (error) {
-          if (attempt === maxRetries || isCancellationError(error, signal)) {
-            throw error;
-          }
-          const delay = Math.min(1000 * Math.pow(2, attempt), 8000);
-          emit(
-            createEvent(
-              "warn",
-              `LLM 调用失败，${delay}ms 后重试 (${attempt + 1}/${maxRetries})`,
-              currentPhase,
-            ),
-          );
-          await new Promise((resolve) => setTimeout(resolve, delay));
-        }
-      }
-      throw new Error("LLM retry exhausted.");
-    }
 
     // ── PHASE 1: PLAN ──
       let planSteps: Array<{
@@ -441,6 +428,7 @@ export function createAgentRunnerService(options: {
           messages: planMessages,
           temperature: Math.min(profile.temperature, 0.3),
         });
+        throwForModelServiceNotice(planResponse.modelServiceNotice);
 
         const planText = planResponse.content ?? "";
         const plan = parsePlanFromResponse(planText);
@@ -464,18 +452,26 @@ export function createAgentRunnerService(options: {
 
       // ── PHASE 2: EXECUTE ──
       currentPhase = "executing";
-      const maxTurns =
+      const checkpointInterval =
         skill?.manifest.execution?.maxTurns ??
         (planSteps.length > 0 ? planSteps.length * 2 + 3 : 10);
       let turn = 0;
+      const recordExecutionCheckpoint = () => {
+        if (checkpointInterval > 0 && turn % checkpointInterval === 0) {
+          emit(
+            createEvent(
+              "info",
+              `已到达第 ${turn} 轮执行检查点，任务将自动继续。`,
+              "executing",
+              { turn, checkpointInterval },
+            ),
+          );
+        }
+      };
 
       if (planSteps.length > 0) {
         // Step-by-step execution with plan
-        for (
-          let stepIndex = 0;
-          stepIndex < planSteps.length && turn < maxTurns;
-          stepIndex++
-        ) {
+        for (let stepIndex = 0; stepIndex < planSteps.length; stepIndex++) {
           throwIfCanceled(signal);
           const step = planSteps[stepIndex];
           step.status = "in_progress";
@@ -506,12 +502,13 @@ export function createAgentRunnerService(options: {
           // Execute turns for this step
           let stepDone = false;
           let stepTurns = 0;
-          const maxStepTurns = 4;
+          const stepProgressCheckInterval = 4;
 
-          while (!stepDone && stepTurns < maxStepTurns && turn < maxTurns) {
+          while (!stepDone && stepTurns < stepProgressCheckInterval) {
             throwIfCanceled(signal);
             turn += 1;
             stepTurns += 1;
+            recordExecutionCheckpoint();
 
             const response = await options.chatClient.complete({
               ...profile,
@@ -520,6 +517,7 @@ export function createAgentRunnerService(options: {
               tool_choice: "auto",
               ...(signal ? { signal } : {}),
             });
+            throwForModelServiceNotice(response.modelServiceNotice);
 
             if (response.content) {
               emit(
@@ -623,6 +621,9 @@ export function createAgentRunnerService(options: {
                 messages: [{ role: "user", content: reflectionPrompt }],
                 temperature: Math.min(profile.temperature, 0.3),
               });
+              throwForModelServiceNotice(
+                reflectionResponse.modelServiceNotice,
+              );
 
               const reflection = parseReflectionFromResponse(
                 reflectionResponse.content ?? "",
@@ -664,9 +665,10 @@ export function createAgentRunnerService(options: {
         }
       } else {
         // No plan — execute reactively
-        while (turn < maxTurns) {
+        while (Number.isFinite(turn)) {
           throwIfCanceled(signal);
           turn += 1;
+          recordExecutionCheckpoint();
           messages = ensureContextWindow(messages);
 
           const response = await options.chatClient.complete({
@@ -676,6 +678,7 @@ export function createAgentRunnerService(options: {
             tool_choice: "auto",
             ...(signal ? { signal } : {}),
           });
+          throwForModelServiceNotice(response.modelServiceNotice);
 
           if (response.content) {
             emit(
@@ -724,9 +727,6 @@ export function createAgentRunnerService(options: {
         if (planSteps.every((s) => s.status === "completed")) {
           summary = "所有计划步骤已完成。";
           status = "succeeded";
-        } else if (turn >= maxTurns) {
-          summary = "Agent run reached the maximum turn limit.";
-          emit(createEvent("error", summary, "done"));
         }
       }
     } catch (error) {
@@ -735,10 +735,14 @@ export function createAgentRunnerService(options: {
         summary = "运行已取消。";
         emit(createEvent("warn", "Agent run canceled.", "done"));
       } else {
-        status = "failed";
+        modelServiceNotice = modelServiceNoticeFromError(error, {
+          model: profile.model,
+        });
+        status = modelServiceNotice ? "paused" : "failed";
         summary =
-          error instanceof Error ? error.message : "Agent run failed.";
-        emit(createEvent("error", summary, "done"));
+          modelServiceNotice?.message ??
+          (error instanceof Error ? error.message : "Agent run failed.");
+        emit(createEvent(modelServiceNotice ? "warn" : "error", summary, "done"));
       }
     }
 
@@ -751,6 +755,7 @@ export function createAgentRunnerService(options: {
       status,
       summary,
       events,
+      ...(modelServiceNotice ? { modelServiceNotice } : {}),
       startedAt,
       finishedAt: now().toISOString(),
     };

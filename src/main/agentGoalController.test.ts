@@ -164,7 +164,7 @@ describe("agent goal controller", () => {
         { role: "assistant", content: "inspected repository" },
       ],
     });
-    expect(checkpointed?.budgetUsage).toMatchObject({
+    expect(checkpointed?.executionUsage).toMatchObject({
       toolCalls: 2,
       wallClockMs: 500,
       tokens: 25,
@@ -172,14 +172,14 @@ describe("agent goal controller", () => {
 
     releaseRun?.();
     const result = await running;
-    expect(result.budgetUsage).toMatchObject({
+    expect(result.executionUsage).toMatchObject({
       toolCalls: 2,
       wallClockMs: 500,
       tokens: 25,
     });
   });
 
-  it("stops before dispatching another milestone when the iteration budget is exhausted", async () => {
+  it("ignores the legacy iteration budget and dispatches every ready milestone", async () => {
     await store.save(
       createGoal(
         [milestone("milestone_1"), milestone("milestone_2", ["milestone_1"])],
@@ -204,42 +204,90 @@ describe("agent goal controller", () => {
 
     const result = await controller.start("goal_1");
 
-    expect(result.status).toBe("stopped_budget");
-    expect(result.stopReason).toBe("budget_exhausted");
-    expect(runtime.runMilestoneIds).toEqual(["milestone_1"]);
+    expect(result.status).toBe("achieved");
+    expect(result.stopReason).toBe("goal_accepted");
+    expect(runtime.runMilestoneIds).toEqual(["milestone_1", "milestone_2"]);
     const ledger = await store.readLedger("goal_1");
-    expect(ledger.at(-1)?.summary).toContain("iterations 1/1");
+    expect(ledger.some((entry) => entry.summary.includes("budget"))).toBe(false);
+  });
+
+  it("waits for explicit user recovery when the model service limits a run", async () => {
+    await store.save(createGoal([milestone("milestone_1")]));
+    let acceptanceCalls = 0;
+    const controller = createController({
+      runtime: {
+        async runMilestone() {
+          return {
+            runId: "run_limited",
+            status: "paused",
+            toolCallCount: 0,
+            summary: "partial result",
+            modelServiceNotice: {
+              kind: "output_limit",
+              provider: "test-provider",
+              model: "test-model",
+              rawReason: "length",
+              message: "模型输出达到限制。",
+            },
+          };
+        },
+      },
+      acceptance: {
+        async evaluate() {
+          acceptanceCalls += 1;
+          return acceptedResult("check_done");
+        },
+        async evaluateGoal() {
+          throw new Error("waiting goals must not reach final acceptance");
+        },
+      },
+    });
+
+    const result = await controller.start("goal_1");
+
+    expect(result).toMatchObject({
+      status: "waiting_for_model",
+      modelServiceNotice: {
+        kind: "output_limit",
+        provider: "test-provider",
+      },
+      milestones: [
+        {
+          id: "milestone_1",
+          state: "ready",
+          lastRunStatus: "paused",
+          runIds: ["run_limited"],
+        },
+      ],
+    });
+    expect(acceptanceCalls).toBe(0);
   });
 
   it.each([
     {
       label: "tool calls",
       budget: { maxToolCalls: 4 },
-      budgetUsage: { toolCalls: 4 },
-      expected: "tool calls 4/4",
+      executionUsage: { toolCalls: 4 },
     },
     {
       label: "wall clock",
       budget: { maxWallClockMs: 2_000 },
-      budgetUsage: { wallClockMs: 2_000 },
-      expected: "wall clock 2000/2000ms",
+      executionUsage: { wallClockMs: 2_000 },
     },
     {
       label: "tokens",
       budget: { maxTokens: 50 },
-      budgetUsage: { tokens: 50 },
-      expected: "tokens 50/50",
+      executionUsage: { tokens: 50 },
     },
-  ])("stops before dispatch when the $label budget is exhausted", async ({
+  ])("ignores the legacy $label budget while retaining usage", async ({
     budget,
-    budgetUsage,
-    expected,
+    executionUsage,
   }) => {
     const base = createGoal([milestone("milestone_1")], { status: "executing" });
     await store.save({
       ...base,
       budget: { ...base.budget, ...budget },
-      budgetUsage: { ...base.budgetUsage, ...budgetUsage },
+      executionUsage: { ...base.executionUsage, ...executionUsage },
     });
     const runtime = createRuntime();
     const controller = createController({
@@ -250,10 +298,15 @@ describe("agent goal controller", () => {
     const result = await controller.resume("goal_1");
     const ledger = await store.readLedger("goal_1");
 
-    expect(result.status).toBe("stopped_budget");
-    expect(result.stopReason).toBe("budget_exhausted");
-    expect(runtime.runMilestoneIds).toEqual([]);
-    expect(ledger.at(-1)?.summary).toContain(expected);
+    expect(result.status).toBe("achieved");
+    expect(result.stopReason).toBe("goal_accepted");
+    expect(runtime.runMilestoneIds).toEqual(["milestone_1"]);
+    for (const [key, value] of Object.entries(executionUsage)) {
+      expect(result.executionUsage[key as keyof typeof result.executionUsage]).toBeGreaterThanOrEqual(
+        value,
+      );
+    }
+    expect(ledger.some((entry) => entry.summary.includes("budget"))).toBe(false);
   });
 
   it("stops stalled goals after consecutive iterations without ledger progress", async () => {
@@ -294,7 +347,7 @@ describe("agent goal controller", () => {
       planner: {
         async replan(goal) {
           goal.planVersion += 1;
-          goal.budgetUsage.replans += 1;
+          goal.executionUsage.replans += 1;
           return [milestone("milestone_replanned")];
         },
       },
@@ -304,7 +357,7 @@ describe("agent goal controller", () => {
 
     expect(result.status).toBe("achieved");
     expect(result.planVersion).toBe(2);
-    expect(result.budgetUsage.replans).toBe(1);
+    expect(result.executionUsage.replans).toBe(1);
     expect(runtime.runMilestoneIds).toEqual([
       "milestone_original",
       "milestone_replanned",
@@ -312,7 +365,7 @@ describe("agent goal controller", () => {
     expect(trajectoryEvents.map((event) => event.type)).toContain("goal_replanned");
   });
 
-  it("stops after the configured replan limit instead of replanning forever", async () => {
+  it("does not turn a legacy replan limit into a budget stop", async () => {
     await store.save(
       createGoal([milestone("milestone_original")], {
         budget: {
@@ -346,7 +399,7 @@ describe("agent goal controller", () => {
             throw new Error("unexpected second replan");
           }
           goal.planVersion += 1;
-          goal.budgetUsage.replans += 1;
+          goal.executionUsage.replans += 1;
           return [milestone("milestone_replanned")];
         },
       },
@@ -355,15 +408,15 @@ describe("agent goal controller", () => {
     const result = await controller.start("goal_1");
     const ledger = await store.readLedger("goal_1");
 
-    expect(result.status).toBe("stopped_budget");
-    expect(result.stopReason).toBe("budget_exhausted");
-    expect(result.budgetUsage.replans).toBe(1);
-    expect(plannerCalls).toBe(1);
+    expect(result.status).toBe("failed");
+    expect(result.stopReason).toBe("unrecoverable_failure");
+    expect(result.executionUsage.replans).toBe(1);
+    expect(plannerCalls).toBe(2);
     expect(runtime.runMilestoneIds).toEqual([
       "milestone_original",
       "milestone_replanned",
     ]);
-    expect(ledger.at(-1)?.summary).toContain("replans 1/1");
+    expect(ledger.at(-1)?.summary).toContain("unexpected second replan");
   });
 
   it("continues internally instead of requesting review for a turn-limited milestone", async () => {
@@ -477,7 +530,7 @@ describe("agent goal controller", () => {
         async replan(goal) {
           plannerCalls += 1;
           goal.planVersion += 1;
-          goal.budgetUsage.replans += 1;
+          goal.executionUsage.replans += 1;
           return [milestone("milestone_replanned")];
         },
       },
@@ -488,10 +541,10 @@ describe("agent goal controller", () => {
     expect(result.status).toBe("achieved");
     expect(plannerCalls).toBe(1);
     expect(runtimeCalls).toBe(2);
-    expect(result.budgetUsage.replans).toBe(1);
+    expect(result.executionUsage.replans).toBe(1);
   });
 
-  it("keeps a turn-limited milestone ready when the same run exhausts its budget", async () => {
+  it("does not convert a legacy turn checkpoint into a budget stop", async () => {
     await store.save(
       createGoal([milestone("milestone_1")], {
         budget: {
@@ -532,23 +585,13 @@ describe("agent goal controller", () => {
       },
     });
 
-    const stopped = await controller.start("goal_1");
-    expect(stopped.status).toBe("stopped_budget");
-    expect(stopped.milestones[0]).toMatchObject({
-      state: "ready",
+    const result = await controller.start("goal_1");
+    expect(result.status).toBe("achieved");
+    expect(result.milestones[0]).toMatchObject({
+      state: "accepted",
       lastRunStatus: "paused",
     });
-
-    await store.save({
-      ...stopped,
-      status: "executing",
-      stopReason: undefined,
-      budget: { ...stopped.budget, maxIterations: 3 },
-    });
-    const recovered = await controller.resume("goal_1");
-
-    expect(recovered.status).toBe("achieved");
-    expect(runMilestoneIds).toEqual(["milestone_1", "milestone_1"]);
+    expect(runMilestoneIds).toEqual(["milestone_1"]);
   });
 
   it("does not let a replan that resolves after cancellation overwrite the terminal goal", async () => {
@@ -577,7 +620,7 @@ describe("agent goal controller", () => {
           plannerEnteredResolve?.();
           const milestones = await plannerPromise;
           goal.planVersion += 1;
-          goal.budgetUsage.replans += 1;
+          goal.executionUsage.replans += 1;
           return milestones;
         },
       },
@@ -628,7 +671,7 @@ describe("agent goal controller", () => {
       planner: {
         async replan(goal) {
           goal.planVersion += 1;
-          goal.budgetUsage.replans += 1;
+          goal.executionUsage.replans += 1;
           return [milestone("milestone_replanned")];
         },
       },
@@ -723,7 +766,7 @@ describe("agent goal controller", () => {
         async replan(goal, reason) {
           replanReasons.push(reason);
           goal.planVersion += 1;
-          goal.budgetUsage.replans += 1;
+          goal.executionUsage.replans += 1;
           return [
             ...goal.milestones,
             milestone("milestone_followup", ["milestone_initial"]),
@@ -737,7 +780,7 @@ describe("agent goal controller", () => {
     expect(result.status).toBe("achieved");
     expect(result.stopReason).toBe("goal_accepted");
     expect(result.planVersion).toBe(2);
-    expect(result.budgetUsage.replans).toBe(1);
+    expect(result.executionUsage.replans).toBe(1);
     expect(replanReasons[0]).toContain("structural replanning");
     expect(runtime.runMilestoneIds).toEqual([
       "milestone_initial",
@@ -1000,7 +1043,7 @@ describe("agent goal controller", () => {
             stopReason: "user_canceled",
           });
           goal.planVersion += 1;
-          goal.budgetUsage.replans += 1;
+          goal.executionUsage.replans += 1;
           return [milestone("milestone_replanned")];
         },
       },
@@ -1127,7 +1170,7 @@ describe("agent goal controller", () => {
     expect(result.status).toBe("stopped_stalled");
     expect(result.stopReason).toBe("progress_stalled");
     expect(result.planVersion).toBe(1);
-    expect(result.budgetUsage.replans).toBe(0);
+    expect(result.executionUsage.replans).toBe(0);
     expect(plannerCalls).toBe(0);
     expect(result.acceptanceState?.recentFailures.map((failure) => failure.occurrence)).toEqual([
       1,
@@ -1208,7 +1251,7 @@ describe("agent goal controller", () => {
 
     expect(result.status).toBe("stopped_stalled");
     expect(result.planVersion).toBe(1);
-    expect(result.budgetUsage.replans).toBe(0);
+    expect(result.executionUsage.replans).toBe(0);
     expect(runtime.runMilestoneIds).toHaveLength(3);
     expect(result.acceptanceState?.recentFailures.at(-1)?.occurrence).toBe(3);
     expect(plannerCalls).toBe(0);
@@ -1319,7 +1362,7 @@ describe("agent goal controller", () => {
         async replan(goal) {
           plannerCalls += 1;
           goal.planVersion += 1;
-          goal.budgetUsage.replans += 1;
+          goal.executionUsage.replans += 1;
           return [milestone("milestone_replanned")];
         },
       },
@@ -1330,7 +1373,7 @@ describe("agent goal controller", () => {
     expect(result.status).toBe("achieved");
     expect(plannerCalls).toBe(1);
     expect(result.planVersion).toBe(2);
-    expect(result.budgetUsage.replans).toBe(1);
+    expect(result.executionUsage.replans).toBe(1);
     expect(runtime.runMilestoneIds).toEqual(["milestone_original", "milestone_replanned"]);
   });
 
@@ -1364,7 +1407,7 @@ describe("agent goal controller", () => {
     },
   );
 
-  it("lets operational budget exhaustion win before scheduling a repair", async () => {
+  it("uses state-based stall protection after repeated acceptance repair", async () => {
     await store.save(
       createProtocolV2Goal([milestone("milestone_1")], {
         budget: {
@@ -1384,23 +1427,23 @@ describe("agent goal controller", () => {
           return rejectedResult("assertion_mismatch");
         },
         async evaluateGoal() {
-          throw new Error("budget stop must not reach final acceptance");
+          throw new Error("stalled repair must not reach final acceptance");
         },
       },
     });
 
     const result = await controller.start("goal_1");
 
-    expect(result.status).toBe("stopped_budget");
-    expect(acceptanceCalls).toBe(0);
-    expect(result.acceptanceState?.lastDecision).toBeUndefined();
-    expect(result.acceptanceState?.recentFailures).toHaveLength(0);
-    expect(trajectoryEvents.map((event) => event.type)).not.toContain(
+    expect(result.status).toBe("stopped_stalled");
+    expect(acceptanceCalls).toBeGreaterThan(0);
+    expect(result.acceptanceState?.lastDecision).toBeDefined();
+    expect(result.acceptanceState?.recentFailures.length).toBeGreaterThan(0);
+    expect(trajectoryEvents.map((event) => event.type)).toContain(
       "acceptance_repair_scheduled",
     );
   });
 
-  it("leaves a successful hard-cap milestone ready and schedules it after budget recovery", async () => {
+  it("accepts a successful milestone regardless of a legacy hard cap", async () => {
     await store.save(
       createProtocolV2Goal([milestone("milestone_1")], {
         budget: {
@@ -1435,31 +1478,16 @@ describe("agent goal controller", () => {
       },
     });
 
-    const stopped = await controller.start("goal_1");
+    const result = await controller.start("goal_1");
 
-    expect(stopped.status).toBe("stopped_budget");
-    expect(stopped.milestones[0]).toMatchObject({
-      state: "ready",
+    expect(result.status).toBe("achieved");
+    expect(result.milestones[0]).toMatchObject({
+      state: "accepted",
       lastRunStatus: "succeeded",
       runIds: ["run_milestone_1_1"],
     });
-    expect(acceptanceCalls).toBe(0);
-
-    await store.save({
-      ...stopped,
-      status: "executing",
-      stopReason: undefined,
-      budget: { ...stopped.budget, maxIterations: 3 },
-    });
-    const recovered = await controller.resume("goal_1");
-
-    expect(recovered.status).toBe("achieved");
-    expect(runtimeCalls).toBe(2);
     expect(acceptanceCalls).toBe(1);
-    expect(recovered.milestones[0]?.runIds).toEqual([
-      "run_milestone_1_1",
-      "run_milestone_1_2",
-    ]);
+    expect(runtimeCalls).toBe(1);
   });
 
   it("reuses one deterministic final repair milestone and never creates a repair chain", async () => {
@@ -1536,7 +1564,7 @@ describe("agent goal controller", () => {
     ["wall clock", { maxWallClockMs: 50 }, { wallClockMs: 50 }],
     ["tokens", { maxTokens: 10 }, { tokens: 10 }],
   ] as const)(
-    "enforces the final %s hard budget before evaluateGoal",
+    "ignores the final legacy %s budget before evaluateGoal",
     async (_label, budgetOverride, usageOverride) => {
       const base = createProtocolV2Goal(
         [
@@ -1552,18 +1580,18 @@ describe("agent goal controller", () => {
       await store.save({
         ...base,
         budget: { ...base.budget, ...budgetOverride },
-        budgetUsage: { ...base.budgetUsage, ...usageOverride },
+        executionUsage: { ...base.executionUsage, ...usageOverride },
       });
       let goalAcceptanceCalls = 0;
       const controller = createController({
         runtime: {
           async runMilestone() {
-            throw new Error("final budget must stop before runtime");
+            throw new Error("an already-complete goal must not return to runtime");
           },
         },
         acceptance: {
           async evaluate() {
-            throw new Error("final budget must stop before milestone acceptance");
+            throw new Error("an already-accepted milestone must not be re-evaluated");
           },
           async evaluateGoal() {
             goalAcceptanceCalls += 1;
@@ -1574,9 +1602,9 @@ describe("agent goal controller", () => {
 
       const result = await controller.resume("goal_1");
 
-      expect(result.status).toBe("stopped_budget");
-      expect(result.stopReason).toBe("budget_exhausted");
-      expect(goalAcceptanceCalls).toBe(0);
+      expect(result.status).toBe("achieved");
+      expect(result.stopReason).toBe("goal_accepted");
+      expect(goalAcceptanceCalls).toBe(1);
     },
   );
 
@@ -1699,7 +1727,7 @@ describe("agent goal controller", () => {
     expect(acceptance.evaluateGoalCalls).toBe(1);
     expect(acceptance.replayCalls).toBe(1);
     expect(runtime.runMilestoneIds).toEqual(["milestone_1"]);
-    expect(result.budgetUsage.toolCalls).toBe(1);
+    expect(result.executionUsage.toolCalls).toBe(1);
     expect(trajectoryEvents.map((event) => event.type)).toContain(
       "acceptance_retry_scheduled",
     );
@@ -2324,7 +2352,7 @@ describe("agent goal controller", () => {
   it("uses the acceptance retry budget even when the task budget is exhausted", async () => {
     await store.save(
       waitingForAcceptanceGoal({
-        budgetUsage: {
+        executionUsage: {
           iterations: 8,
           toolCalls: 99,
           wallClockMs: 600_000,
@@ -2345,7 +2373,7 @@ describe("agent goal controller", () => {
     expect(result.status).toBe("achieved");
     expect(runtime.runMilestoneIds).toEqual([]);
     expect(acceptance.goalCalls).toBe(1);
-    expect(result.budgetUsage).toMatchObject({
+    expect(result.executionUsage).toMatchObject({
       iterations: 8,
       toolCalls: 99,
       wallClockMs: 600_000,
@@ -2356,7 +2384,7 @@ describe("agent goal controller", () => {
   it("returns to acceptance waiting after three continued timeouts even when the task budget is exhausted", async () => {
     await store.save(
       waitingForAcceptanceGoal({
-        budgetUsage: {
+        executionUsage: {
           iterations: 8,
           toolCalls: 99,
           wallClockMs: 600_000,
@@ -2391,7 +2419,7 @@ describe("agent goal controller", () => {
     expect(acceptance.replayCalls).toBe(3);
   });
 
-  it("keeps the task budget gate for a generic retry-state resume", async () => {
+  it("ignores legacy task budgets for a generic retry-state resume", async () => {
     await store.save(
       waitingForAcceptanceGoal({
         status: "executing",
@@ -2401,7 +2429,7 @@ describe("agent goal controller", () => {
           attempt: 3,
           recentFailures: [],
         },
-        budgetUsage: {
+        executionUsage: {
           iterations: 8,
           toolCalls: 99,
           wallClockMs: 600_000,
@@ -2419,9 +2447,9 @@ describe("agent goal controller", () => {
 
     const result = await controller.resume("goal_1");
 
-    expect(result.status).toBe("stopped_budget");
+    expect(result.status).toBe("achieved");
     expect(runtime.runMilestoneIds).toEqual([]);
-    expect(acceptance.goalCalls).toBe(0);
+    expect(acceptance.goalCalls).toBe(1);
   });
 
   it("increments the acceptance cycle and resets its local attempt", async () => {
@@ -4181,7 +4209,7 @@ describe("agent goal controller", () => {
         options.planner ?? {
           async replan(goal) {
             goal.planVersion += 1;
-            goal.budgetUsage.replans += 1;
+            goal.executionUsage.replans += 1;
             return goal.milestones;
           },
         },
@@ -4627,7 +4655,7 @@ function createGoal(
       maxWallClockMs: 600_000,
       maxReplans: 2,
     },
-    budgetUsage: {
+    executionUsage: {
       iterations: 0,
       toolCalls: 0,
       wallClockMs: 0,

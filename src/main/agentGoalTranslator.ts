@@ -13,6 +13,10 @@ import {
 import type { SkillInputValue } from "../shared/skillExecutionContract";
 import type { ChatClient, ChatMessage } from "./openAiCompatibleClient";
 import type { AgentModelProfile } from "./agentRunnerService";
+import {
+  ModelServiceNoticeError,
+  throwForModelServiceNotice,
+} from "../shared/modelServiceNotice";
 
 type ParsedGoalDraft = {
   normalizedDescription?: unknown;
@@ -157,12 +161,14 @@ async function translateWithModel(
           maxTokens: Math.min(profile.maxTokens, 1200),
           ...(signal ? { signal } : {}),
         });
+        throwForModelServiceNotice(response.modelServiceNotice);
         const parsed = parseDraftJson(response.content);
         if (parsed) return { parsed };
         lastError = new Error(
           "Goal translation model returned an invalid goal draft.",
         );
       } catch (error) {
+        if (error instanceof ModelServiceNoticeError) throw error;
         if (signal?.aborted || isAbortError(error)) {
           throw signal?.reason ?? error;
         }

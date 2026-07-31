@@ -16,6 +16,7 @@ import type {
 } from "../shared/memoryIngestion";
 import type { RawHistoryEntry } from "../shared/rawHistory";
 import type { ChatClient, ChatMessage } from "./openAiCompatibleClient";
+import { throwForModelServiceNotice } from "../shared/modelServiceNotice";
 import type { AgentModelProfile } from "./agentRunnerService";
 import type { HistoryIndexStore } from "./historyIndexStore";
 import type { MemoryStore } from "./memoryStore";
@@ -400,6 +401,7 @@ async function extractCandidatesWithModel(options: {
       temperature: Math.min(profile.temperature, 0.2),
       maxTokens: Math.min(profile.maxTokens, 1600),
     });
+    throwForModelServiceNotice(response.modelServiceNotice);
     return parseCandidateJson(response.content);
   } catch {
     return null;

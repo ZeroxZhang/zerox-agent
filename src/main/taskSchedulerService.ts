@@ -17,6 +17,8 @@ export type TaskSchedulerService = {
 export function createTaskSchedulerService(options: {
   taskStore: Pick<ScheduledTaskStore, "list">;
   runScheduledTask: (taskId: string) => Promise<RunScheduledTaskResult>;
+  /** Active checkpoints require explicit resume and must not be auto-run again. */
+  listActiveTaskIds?: () => Promise<ReadonlySet<string>>;
   now?: () => Date;
 }): TaskSchedulerService {
   const now = options.now ?? (() => new Date());
@@ -25,7 +27,13 @@ export function createTaskSchedulerService(options: {
     async runDueTasks() {
       const currentTime = now();
       const tasks = await options.taskStore.list();
-      const dueTasks = tasks.filter((task) => isTaskDue(task, currentTime));
+      const activeTaskIds =
+        (await options.listActiveTaskIds?.()) ?? new Set<string>();
+      const dueTasks = tasks.filter(
+        (task) =>
+          !activeTaskIds.has(task.id) &&
+          isTaskDue(task, currentTime),
+      );
       const report: TaskSchedulerReport = {
         checked: tasks.length,
         due: dueTasks.length,

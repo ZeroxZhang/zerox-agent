@@ -1,5 +1,9 @@
 import type { AgentRunnerService } from "./agentRunnerService";
 import type { ChatClient } from "./openAiCompatibleClient";
+import {
+  ModelServiceNoticeError,
+  throwForModelServiceNotice,
+} from "../shared/modelServiceNotice";
 
 export type SubTask = {
   id: string;
@@ -222,6 +226,7 @@ async function decomposeTask(
       messages: [{ role: "user", content: prompt }],
       temperature: 0.2,
     });
+    throwForModelServiceNotice(response.modelServiceNotice);
 
     const content = response.content ?? "";
     const parsed = JSON.parse(content) as {
@@ -255,7 +260,8 @@ async function decomposeTask(
       reasoning: parsed.reasoning ?? "",
       parallelizable: parsed.parallelizable ?? false,
     };
-  } catch {
+  } catch (error) {
+    if (error instanceof ModelServiceNoticeError) throw error;
     return null;
   }
 }

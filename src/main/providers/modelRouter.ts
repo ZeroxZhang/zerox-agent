@@ -129,15 +129,12 @@ function bindRequestProfile(
     baseUrl: options.baseUrl ?? request.baseUrl,
     temperature: options.binding.generation.temperature,
     maxTokens: options.binding.generation.maxTokens,
-    ...(options.binding.generation.thinkingEnabled
+    thinking: options.binding.generation.thinkingEnabled
       ? {
-          thinking: {
-            type: "enabled" as const,
-            budgetTokens:
-              options.binding.generation.thinkingBudgetTokens,
-          },
+          type: "enabled" as const,
+          budgetTokens: options.binding.generation.thinkingBudgetTokens,
         }
-      : {}),
+      : { type: "disabled" as const },
   });
   return {
     complete(

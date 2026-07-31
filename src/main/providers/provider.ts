@@ -10,6 +10,7 @@
 // `LLMProvider.stream()` + the `StreamEvent` variants. Both import from here.
 
 import type { ProviderId } from "../../shared/modelSettings";
+import type { ModelServiceNotice } from "../../shared/modelServiceNotice";
 
 export type { ProviderId };
 
@@ -71,6 +72,7 @@ export interface CompleteResponse {
   cacheReadTokens: number; // §2.3
   cacheWriteTokens: number; // §2.3
   usage?: { inputTokens: number; outputTokens: number };
+  modelServiceNotice?: ModelServiceNotice;
 }
 
 // Contract StreamEvent (§12 Patch 2 / Patch 10 authoritative 5-variant shape).
@@ -80,7 +82,7 @@ export type StreamEvent =
   | { type: "text_delta"; text: string }
   | { type: "thinking_delta"; text: string }
   | { type: "tool_call_delta"; toolCallId: string; index?: number; name?: string; argumentsDelta?: string }
-  | { type: "done"; response?: CompleteResponse }
+  | { type: "done"; finishReason?: string; response?: CompleteResponse }
   | { type: "error"; error: Error };
 
 export interface CachePrefix {

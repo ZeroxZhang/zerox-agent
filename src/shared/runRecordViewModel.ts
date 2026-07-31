@@ -132,6 +132,17 @@ export function getRunRecordStatus(
         needsAttention: true,
       };
     case "paused":
+      if ("modelServiceNotice" in record && record.modelServiceNotice) {
+        return {
+          label:
+            record.modelServiceNotice.kind === "output_limit"
+              ? "等待继续生成"
+              : "等待重试",
+          tone: "attention",
+          description: record.modelServiceNotice.message,
+          needsAttention: true,
+        };
+      }
       return {
         label: "已暂停",
         tone: "info",
@@ -175,6 +186,22 @@ export function getRunRecordAction(
         ],
       };
     case "paused":
+      if ("modelServiceNotice" in record && record.modelServiceNotice) {
+        return {
+          primary: {
+            kind: "continue",
+            label:
+              record.modelServiceNotice.kind === "output_limit"
+                ? "继续生成"
+                : "重试",
+          },
+          secondary: [
+            { kind: "stop", label: "停止" },
+            { kind: "open_chat", label: "打开会话" },
+            { kind: "view_details", label: "查看详情" },
+          ],
+        };
+      }
       return {
         primary: { kind: "continue", label: "继续" },
         secondary: [

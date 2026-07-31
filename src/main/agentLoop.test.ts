@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { runAgentLoop as runProductionAgentLoop } from "./agentLoop";
+import type { AgentLoopCheckpoint } from "./agentLoop";
 import type { AgentToolExecutor } from "./agentToolExecutor";
 import type {
   ChatClient,
@@ -445,7 +446,7 @@ describe("agent loop", () => {
     });
   });
 
-  it("asks the model for a final no-tool summary when tool turns reach the limit", async () => {
+  it("continues a direct execution segment after its checkpoint interval", async () => {
     const requests: ChatCompletionRequest[] = [];
     const chatClient: ChatClient = {
       async complete(request) {
@@ -457,13 +458,9 @@ describe("agent loop", () => {
           );
         }
 
-        expect(request.tools).toBeUndefined();
-        expect(request.messages.at(-1)).toMatchObject({
-          role: "system",
-          content: expect.stringContaining("工具调用轮次已达到上限"),
-        });
+        expect(request.tools).toEqual(testTools);
         return {
-          content: "我已经检查了已有结果，建议把任务拆成更小步骤继续。",
+          content: "我已经检查完已有结果。",
           toolCalls: [],
           finishReason: "stop",
         };
@@ -484,11 +481,11 @@ describe("agent loop", () => {
     expect(requests).toHaveLength(3);
     expect(result).toMatchObject({
       status: "succeeded",
-      summary:
-        "已达到工具调用轮次上限，我先基于已有结果给出阶段性总结：\n\n我已经检查了已有结果，建议把任务拆成更小步骤继续。",
       turns: 2,
       toolCallsExecuted: 2,
+      summary: "我已经检查完已有结果。",
     });
+    expect(result.continuation).toBeUndefined();
   });
 
   it("emits a strategy guard event when repeated single-tool calls fragment work", async () => {
@@ -1202,11 +1199,19 @@ describe("agent loop", () => {
     );
   });
 
-  it("can pause at a turn checkpoint instead of ending the task", async () => {
+  it("saves a turn checkpoint and continues automatically", async () => {
     const requests: ChatCompletionRequest[] = [];
+    const checkpoints: AgentLoopCheckpoint[] = [];
     const chatClient: ChatClient = {
       async complete(request) {
         requests.push(request);
+        if (requests.length > 2) {
+          return {
+            content: "目录检查完成。",
+            toolCalls: [],
+            finishReason: "stop",
+          };
+        }
         return toolCallResponse(
           `tool_call_${requests.length}`,
           `/tmp/path_${requests.length}`,
@@ -1223,23 +1228,26 @@ describe("agent loop", () => {
         maxTurns: 2,
         pauseOnTurnLimit: true,
         tools: testTools,
+        onCheckpoint(checkpoint) {
+          checkpoints.push(checkpoint);
+        },
       },
     );
 
-    expect(requests).toHaveLength(2);
+    expect(requests).toHaveLength(3);
     expect(result).toMatchObject({
-      status: "paused",
+      status: "succeeded",
       turns: 2,
       toolCallsExecuted: 2,
-      continuation: {
-        reason: "turn_limit",
-        maxTurns: 2,
-        toolCallsExecuted: 2,
-      },
+      summary: "目录检查完成。",
     });
-    expect(result.summary).toContain("已到达长任务检查点");
-    expect(result.summary).toContain("等待你确认");
-    expect(result.summary).not.toContain("请把任务拆小一点");
+    expect(result.continuation).toBeUndefined();
+    expect(checkpoints.at(-1)).toMatchObject({
+      turns: 2,
+      toolCallsExecuted: 2,
+      nextAction:
+        "Checkpoint interval reached; state saved and execution continues automatically.",
+    });
   });
 
   it("pauses when the model keeps hitting the same class of tool failure after recovery", async () => {
@@ -1418,27 +1426,36 @@ describe("agent loop", () => {
     });
   });
 
-  it("enforces the remaining tool-call budget inside a multi-tool response", async () => {
+  it("runs beyond 64 iterations and tool calls without enforcing legacy budgets", async () => {
     const baseExecutor = createToolExecutor();
     let executed = 0;
-    let checkpointToolResults = 0;
+    let modelCalls = 0;
+    let checkpointToolCalls = 0;
     const result = await runAgentLoop(
-      [{ role: "user", content: "inspect two paths" }],
+      [{ role: "user", content: "inspect many paths" }],
       modelProfile,
       {
         chatClient: {
           async complete() {
+            modelCalls += 1;
+            if (modelCalls > 65) {
+              return {
+                content: "all paths inspected",
+                finishReason: "stop",
+                toolCalls: [],
+              };
+            }
             return {
               content: null,
               finishReason: "tool_calls",
-              toolCalls: [1, 2].map((index) => ({
-                id: `call_${index}`,
+              toolCalls: [{
+                id: `call_${modelCalls}`,
                 type: "function" as const,
                 function: {
                   name: "file_list",
-                  arguments: JSON.stringify({ path: `/tmp/${index}` }),
+                  arguments: JSON.stringify({ path: `/tmp/${modelCalls}` }),
                 },
-              })),
+              }],
             };
           },
         },
@@ -1453,34 +1470,35 @@ describe("agent loop", () => {
         maxTurns: 2,
         maxToolCalls: 1,
         async onCheckpoint(checkpoint) {
-          checkpointToolResults = checkpoint.messages.filter(
-            (message) => message.role === "tool",
-          ).length;
+          checkpointToolCalls = checkpoint.toolCallsExecuted;
         },
       },
     );
 
-    expect(executed).toBe(1);
-    expect(result.toolCallsExecuted).toBe(1);
-    expect(checkpointToolResults).toBe(1);
-    const assistant = result.messages.find((message) => message.tool_calls?.length);
-    expect(assistant?.tool_calls).toHaveLength(1);
+    expect(modelCalls).toBe(66);
+    expect(executed).toBe(65);
+    expect(result.toolCallsExecuted).toBe(65);
+    expect(checkpointToolCalls).toBe(65);
+    expect(result).toMatchObject({
+      status: "succeeded",
+      summary: "all paths inspected",
+      turns: 65,
+    });
   });
 
-  it("aborts a hung model request when the wall-clock budget expires", async () => {
+  it("does not abort a model request because of the legacy wall-clock budget", async () => {
     const result = await runAgentLoop(
       [{ role: "user", content: "wait forever" }],
       modelProfile,
       {
         chatClient: {
-          async complete(request) {
-            return new Promise((_, reject) => {
-              request.signal?.addEventListener(
-                "abort",
-                () => reject(request.signal?.reason),
-                { once: true },
-              );
-            });
+          async complete() {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+            return {
+              content: "completed after the legacy deadline",
+              toolCalls: [],
+              finishReason: "stop",
+            };
           },
         },
         toolExecutor: createToolExecutor(),
@@ -1490,11 +1508,11 @@ describe("agent loop", () => {
       },
     );
 
-    expect(result.status).toBe("failed");
-    expect(result.summary).toContain("Wall-clock budget exceeded");
+    expect(result.status).toBe("succeeded");
+    expect(result.summary).toContain("completed after the legacy deadline");
   });
 
-  it("enforces the token budget when a provider omits usage metadata", async () => {
+  it("records token telemetry without enforcing the legacy token budget", async () => {
     const result = await runAgentLoop(
       [{ role: "user", content: "produce a long answer" }],
       modelProfile,
@@ -1515,8 +1533,8 @@ describe("agent loop", () => {
       },
     );
 
-    expect(result.status).toBe("failed");
-    expect(result.summary).toContain("Token budget exceeded");
+    expect(result.status).toBe("succeeded");
+    expect(result.summary).toContain("budgeted");
     expect(result.tokensConsumed).toBeGreaterThanOrEqual(8);
   });
 
@@ -1739,6 +1757,98 @@ describe("agent loop", () => {
     expect(streamCalls).toBe(1);
     expect(completeCalls).toBe(1);
     expect(executions).toBe(0);
+  });
+
+  it("preserves partial streamed output and pauses on an output limit", async () => {
+    let completeCalls = 0;
+    const chatClient: ChatClient & StreamingChatClient = {
+      async complete() {
+        completeCalls += 1;
+        throw new Error("output-limit streams must not fall back to complete");
+      },
+      async *streamComplete() {
+        yield { type: "content_delta", text: "partial answer" };
+        yield {
+          type: "done",
+          finishReason: "length",
+          modelServiceNotice: {
+            kind: "output_limit",
+            provider: "test-provider",
+            model: "agent-model",
+            rawReason: "length",
+            message: "模型输出达到限制。",
+          },
+        };
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "write a long answer" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(),
+        tools: testTools,
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: "paused",
+      summary: "partial answer",
+      continuation: { reason: "provider_output_limit" },
+      modelServiceNotice: { kind: "output_limit" },
+    });
+    expect(result.messages.at(-1)).toEqual({
+      role: "assistant",
+      content: "partial answer",
+    });
+    expect(completeCalls).toBe(0);
+  });
+
+  it("does not fall back or auto-retry when a stream is rate limited", async () => {
+    let completeCalls = 0;
+    let streamCalls = 0;
+    const chatClient: ChatClient & StreamingChatClient = {
+      async complete() {
+        completeCalls += 1;
+        return {
+          content: "unexpected retry",
+          toolCalls: [],
+          finishReason: "stop",
+        };
+      },
+      async *streamComplete() {
+        streamCalls += 1;
+        throw Object.assign(new Error("HTTP 429"), {
+          statusCode: 429,
+          code: "rate_limit_exceeded",
+          responseHeaders: { "retry-after-ms": "500" },
+        });
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "retry only when I ask" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(),
+        tools: testTools,
+        modelRetry: { maxRetries: 3, sleep: async () => undefined },
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: "paused",
+      continuation: { reason: "provider_rate_limit" },
+      modelServiceNotice: {
+        kind: "rate_limit",
+        statusCode: 429,
+        retryAfterMs: 500,
+      },
+    });
+    expect(streamCalls).toBe(1);
+    expect(completeCalls).toBe(0);
   });
 
   it("does not fall back to complete after a streamed answer delta", async () => {

@@ -189,9 +189,42 @@ function stripUnverifiedCompletionCertificate(goal: Goal): Goal {
 }
 
 function sanitizeStoredGoal(goal: Goal | null): Goal | null {
-  return goal
-    ? sanitizeFinalJudgeReplay(stripUnverifiedCompletionCertificate(goal))
-    : null;
+  if (!goal) return null;
+  const {
+    budgetUsage: legacyUsage,
+    ...goalWithoutLegacyUsage
+  } = (
+    goal as Goal & {
+      budgetUsage?: Goal["executionUsage"];
+    }
+  );
+  return sanitizeFinalJudgeReplay(
+    stripUnverifiedCompletionCertificate({
+      ...goalWithoutLegacyUsage,
+      executionUsage: {
+        iterations: Math.max(
+          0,
+          Number((goal.executionUsage ?? legacyUsage)?.iterations ?? 0),
+        ),
+        toolCalls: Math.max(
+          0,
+          Number((goal.executionUsage ?? legacyUsage)?.toolCalls ?? 0),
+        ),
+        wallClockMs: Math.max(
+          0,
+          Number((goal.executionUsage ?? legacyUsage)?.wallClockMs ?? 0),
+        ),
+        tokens: Math.max(
+          0,
+          Number((goal.executionUsage ?? legacyUsage)?.tokens ?? 0),
+        ),
+        replans: Math.max(
+          0,
+          Number((goal.executionUsage ?? legacyUsage)?.replans ?? 0),
+        ),
+      },
+    }),
+  );
 }
 
 function sanitizeFinalJudgeReplay(goal: Goal): Goal {

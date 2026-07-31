@@ -54,7 +54,7 @@ function createGoal(overrides: Partial<Goal> = {}): Goal {
       maxWallClockMs: 600_000,
       maxReplans: 2,
     },
-    budgetUsage: {
+    executionUsage: {
       iterations: 0,
       toolCalls: 0,
       wallClockMs: 0,
@@ -75,18 +75,20 @@ describe("agent goal model", () => {
     expect(canTransitionGoalStatus("executing", "waiting_for_review")).toBe(true);
     expect(canTransitionGoalStatus("waiting_for_review", "executing")).toBe(true);
     expect(canTransitionGoalStatus("executing", "achieved")).toBe(true);
-    expect(canTransitionGoalStatus("executing", "stopped_budget")).toBe(true);
+    expect(canTransitionGoalStatus("executing", "stopped_budget")).toBe(false);
     expect(canTransitionGoalStatus("executing", "stopped_stalled")).toBe(true);
     expect(canTransitionGoalStatus("executing", "stopped_blocked")).toBe(true);
     expect(canTransitionGoalStatus("executing", "failed")).toBe(true);
     expect(canTransitionGoalStatus("executing", "canceled")).toBe(true);
     expect(canTransitionGoalStatus("waiting_for_review", "canceled")).toBe(true);
-    expect(canTransitionGoalStatus("stopped_budget", "executing")).toBe(true);
+    expect(canTransitionGoalStatus("stopped_budget", "executing")).toBe(false);
     expect(canTransitionGoalStatus("stopped_blocked", "executing")).toBe(true);
     expect(canTransitionGoalStatus("stopped_blocked", "canceled")).toBe(true);
   });
 
   it("supports recoverable acceptance waiting and unverified completion", () => {
+    expect(canTransitionGoalStatus("executing", "waiting_for_model")).toBe(true);
+    expect(canTransitionGoalStatus("waiting_for_model", "executing")).toBe(true);
     expect(canTransitionGoalStatus("executing", "waiting_for_acceptance")).toBe(true);
     expect(canTransitionGoalStatus("waiting_for_acceptance", "executing")).toBe(true);
     expect(

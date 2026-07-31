@@ -24,6 +24,7 @@ import type { AgentGoalPlanner } from "./agentGoalPlanner";
 import type { AgentGoalStore } from "./agentGoalStore";
 import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
 import type { ChatMessage } from "./openAiCompatibleClient";
+import type { ModelServiceNotice } from "../shared/modelServiceNotice";
 import {
   countConsecutiveFingerprint,
   createAcceptanceLogicalFailureFingerprint,
@@ -54,6 +55,7 @@ export type GoalRuntimeRunResult = {
   tokens?: number;
   transcriptMessages?: ChatMessage[];
   actionSignatures?: string[];
+  modelServiceNotice?: ModelServiceNotice;
 };
 
 export type GoalRuntimeProgressCheckpoint = {
@@ -405,6 +407,51 @@ export function createAgentGoalController(options: {
     publishedTerminalVersions.delete(goalId);
   }
 
+  async function waitForModelService(
+    goal: Goal,
+    notice: ModelServiceNotice,
+    milestoneId?: string,
+  ): Promise<Goal> {
+    assertGoalTransition(goal.status, "waiting_for_model");
+    const waitingGoal: Goal = {
+      ...goal,
+      status: "waiting_for_model",
+      stopReason: undefined,
+      modelServiceNotice: notice,
+      milestones: goal.milestones.map((milestone) =>
+        milestone.state === "running"
+          ? { ...milestone, state: "ready" }
+          : milestone,
+      ),
+      ...(goal.acceptanceState
+        ? {
+            acceptanceState: {
+              ...goal.acceptanceState,
+              phase: "awaiting_user",
+            },
+          }
+        : {}),
+    };
+    touch(waitingGoal);
+    const persisted = await options.goalStore.save(waitingGoal);
+    if (persisted.status !== "waiting_for_model") {
+      return persisted;
+    }
+    await options.goalStore.appendLedger(goal.id, {
+      at: waitingGoal.updatedAt,
+      kind: "review_requested",
+      ...(milestoneId ? { milestoneId } : {}),
+      summary: notice.message,
+    });
+    notifyProgress(
+      "review_requested",
+      persisted,
+      notice.message,
+      milestoneId,
+    );
+    return persisted;
+  }
+
   async function runLoopInternal(
     goal: Goal,
     runOptions?: InternalRunOptions,
@@ -422,12 +469,6 @@ export function createAgentGoalController(options: {
         const nextMilestone = pickNextReadyMilestone(goal);
         if (!nextMilestone) {
           if (allMilestonesAccepted(goal)) {
-            const finalBudgetExhaustion = runOptions?.finalAcceptanceContinuation
-              ? null
-              : describeGoalBudgetExhaustion(goal, false);
-            if (finalBudgetExhaustion) {
-              return stopForBudgetExhaustion(goal, finalBudgetExhaustion);
-            }
             const mustReplayFinalJudge =
               runOptions?.finalAcceptanceContinuation === true ||
               goal.acceptanceRetryState?.resumeFrom === "final_judge";
@@ -479,6 +520,9 @@ export function createAgentGoalController(options: {
             );
             if (interruptedAfterManifest) {
               return interruptedAfterManifest;
+            }
+            if (result.modelServiceNotice) {
+              return waitForModelService(goal, result.modelServiceNotice);
             }
             if (result.accepted) {
               const retryState = goal.acceptanceRetryState;
@@ -562,11 +606,6 @@ export function createAgentGoalController(options: {
             continue;
           }
 
-          const budgetExhaustion = describeGoalBudgetExhaustion(goal, false);
-          if (budgetExhaustion) {
-            return stopForBudgetExhaustion(goal, budgetExhaustion);
-          }
-
           stalledIterations += 1;
           if (stalledIterations >= stallThreshold) {
             return stopGoal(
@@ -577,11 +616,6 @@ export function createAgentGoalController(options: {
             );
           }
           continue;
-        }
-
-        const budgetExhaustion = describeGoalBudgetExhaustion(goal, false);
-        if (budgetExhaustion) {
-          return stopForBudgetExhaustion(goal, budgetExhaustion);
         }
 
         stalledIterations = 0;
@@ -684,15 +718,15 @@ export function createAgentGoalController(options: {
             nextAction: runtimeCheckpoint.nextAction,
             updatedAt: currentTime(),
           };
-          goal.budgetUsage.toolCalls += Math.max(
+          goal.executionUsage.toolCalls += Math.max(
             0,
             runtimeCheckpoint.toolCallCount - checkpointedToolCalls,
           );
-          goal.budgetUsage.wallClockMs += Math.max(
+          goal.executionUsage.wallClockMs += Math.max(
             0,
             runtimeCheckpoint.wallClockMs - checkpointedWallClockMs,
           );
-          goal.budgetUsage.tokens += Math.max(
+          goal.executionUsage.tokens += Math.max(
             0,
             runtimeCheckpoint.tokens - checkpointedTokens,
           );
@@ -737,16 +771,16 @@ export function createAgentGoalController(options: {
         updatedAt: currentTime(),
       };
     }
-    goal.budgetUsage.iterations += 1;
-    goal.budgetUsage.toolCalls += Math.max(
+    goal.executionUsage.iterations += 1;
+    goal.executionUsage.toolCalls += Math.max(
       0,
       runResult.toolCallCount - checkpointedToolCalls,
     );
-    goal.budgetUsage.wallClockMs += Math.max(
+    goal.executionUsage.wallClockMs += Math.max(
       0,
       (runResult.wallClockMs ?? 0) - checkpointedWallClockMs,
     );
-    goal.budgetUsage.tokens += Math.max(
+    goal.executionUsage.tokens += Math.max(
       0,
       (runResult.tokens ?? 0) - checkpointedTokens,
     );
@@ -760,23 +794,27 @@ export function createAgentGoalController(options: {
       milestone.state = "ready";
       touch(goal);
     }
-
-    const acceptanceBudgetExhaustion = describeGoalBudgetExhaustion(
-      usageGoal,
-      false,
-    );
-    if (acceptanceBudgetExhaustion) {
-      if (milestone.state === "running") {
-        milestone.state = "ready";
-        touch(usageGoal);
-      }
-      return {
-        goal: await stopForBudgetExhaustion(
-          usageGoal,
-          acceptanceBudgetExhaustion,
+    if (runResult.modelServiceNotice) {
+      assertGoalTransition(usageGoal.status, "waiting_for_model");
+      const waitingGoal: Goal = {
+        ...usageGoal,
+        status: "waiting_for_model",
+        modelServiceNotice: runResult.modelServiceNotice,
+        milestones: usageGoal.milestones.map((candidate) =>
+          candidate.id === milestone.id
+            ? { ...candidate, state: "ready" }
+            : candidate,
         ),
-        suspend: true,
       };
+      touch(waitingGoal);
+      const persistedWaiting = await options.goalStore.save(waitingGoal);
+      notifyProgress(
+        "review_requested",
+        persistedWaiting,
+        runResult.modelServiceNotice.message,
+        milestone.id,
+      );
+      return { goal: persistedWaiting, suspend: true };
     }
 
     const validatingGoal = await persistAcceptancePhase(
@@ -809,6 +847,16 @@ export function createAgentGoalController(options: {
     const interruptedAfterManifest = await canonicalInterruption(goal, runOptions);
     if (interruptedAfterManifest) {
       return { goal: interruptedAfterManifest, suspend: true };
+    }
+    if (acceptance.modelServiceNotice) {
+      return {
+        goal: await waitForModelService(
+          goal,
+          acceptance.modelServiceNotice,
+          milestone.id,
+        ),
+        suspend: true,
+      };
     }
 
     if (acceptance.accepted) {
@@ -1032,20 +1080,6 @@ export function createAgentGoalController(options: {
       return { goal: interruptedAfterClassification, suspend: true };
     }
 
-    const operationalBudgetExhaustion =
-      !target && runOptions?.finalAcceptanceContinuation
-        ? null
-        : describeGoalBudgetExhaustion(persisted, false);
-    if (operationalBudgetExhaustion) {
-      return {
-        goal: await stopForBudgetExhaustion(
-          persisted,
-          operationalBudgetExhaustion,
-        ),
-        suspend: true,
-      };
-    }
-
     if (decision.action === "repair_same_milestone" ||
         decision.action === "retry_alternate_strategy") {
       persisted.acceptanceState = {
@@ -1171,13 +1205,6 @@ export function createAgentGoalController(options: {
       };
     }
 
-    const replanBudgetExhaustion = describeGoalBudgetExhaustion(persisted, true);
-    if (replanBudgetExhaustion) {
-      return {
-        goal: await stopForBudgetExhaustion(persisted, replanBudgetExhaustion),
-        suspend: true,
-      };
-    }
     persisted.acceptanceState = {
       ...ensureAcceptanceState(persisted),
       phase: "repairing",
@@ -1228,7 +1255,7 @@ export function createAgentGoalController(options: {
           action: decision.action,
           evidenceRefs,
           planVersion: persisted.planVersion,
-          replans: persisted.budgetUsage.replans,
+          replans: persisted.executionUsage.replans,
         },
       },
       progress: {
@@ -1895,18 +1922,6 @@ export function createAgentGoalController(options: {
     await racePublicationWithAbort(sleep(delayMs, signal), signal);
   }
 
-  async function stopForBudgetExhaustion(
-    goal: Goal,
-    detail: string,
-  ): Promise<Goal> {
-    return stopGoal(
-      goal,
-      "stopped_budget",
-      "budget_exhausted",
-      `Goal budget exhausted: ${detail}.`,
-    );
-  }
-
   async function stopGoal(
     goal: Goal,
     status: GoalStatus,
@@ -1956,7 +1971,7 @@ export function createAgentGoalController(options: {
           status: saved.status,
           reason,
           planVersion: saved.planVersion,
-          budgetUsage: saved.budgetUsage,
+          executionUsage: saved.executionUsage,
         },
       },
       progress: {
@@ -2433,7 +2448,7 @@ export function createAgentGoalController(options: {
                 payload: {
                   goalId: goal.id,
                   planVersion: persisted.planVersion,
-                  replans: persisted.budgetUsage.replans,
+                  replans: persisted.executionUsage.replans,
                 },
               },
             }
@@ -2482,31 +2497,6 @@ function allMilestonesAccepted(goal: Goal): boolean {
         milestone.state === "accepted" || milestone.state === "skipped",
     )
   );
-}
-
-function describeGoalBudgetExhaustion(
-  goal: Goal,
-  includeReplans: boolean,
-): string | null {
-  if (goal.budgetUsage.iterations >= goal.budget.maxIterations) {
-    return `iterations ${goal.budgetUsage.iterations}/${goal.budget.maxIterations}`;
-  }
-  if (goal.budgetUsage.toolCalls >= goal.budget.maxToolCalls) {
-    return `tool calls ${goal.budgetUsage.toolCalls}/${goal.budget.maxToolCalls}`;
-  }
-  if (goal.budgetUsage.wallClockMs >= goal.budget.maxWallClockMs) {
-    return `wall clock ${goal.budgetUsage.wallClockMs}/${goal.budget.maxWallClockMs}ms`;
-  }
-  if (
-    goal.budget.maxTokens !== undefined &&
-    goal.budgetUsage.tokens >= goal.budget.maxTokens
-  ) {
-    return `tokens ${goal.budgetUsage.tokens}/${goal.budget.maxTokens}`;
-  }
-  if (includeReplans && goal.budgetUsage.replans >= goal.budget.maxReplans) {
-    return `replans ${goal.budgetUsage.replans}/${goal.budget.maxReplans}`;
-  }
-  return null;
 }
 
 function isIrreversibleGoalStatus(status: GoalStatus): boolean {

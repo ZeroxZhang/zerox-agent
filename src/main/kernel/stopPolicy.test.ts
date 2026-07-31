@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { RunContext } from "./kernelTypes";
 import {
+  createCheckpointIntervalPolicy,
   createEvidenceJudgePolicy,
-  createTurnLimitPolicy,
 } from "./stopPolicy";
 
 describe("kernel stop policies", () => {
@@ -118,17 +118,26 @@ describe("kernel stop policies", () => {
     await expect(policy.shouldStop(createContext(policy), {})).resolves.toEqual({
       stop: true,
       impossible: true,
-      reason: "evidence judge maxReact exhausted",
+      reason: "evidence judge stalled without verifiable progress",
     });
     expect(judgeCalls).toBe(1);
   });
 
-  it("provides a turn-limit policy helper", async () => {
-    const policy = createTurnLimitPolicy();
+  it("treats the legacy turn limit as a checkpoint interval", async () => {
+    const policy = createCheckpointIntervalPolicy();
     await expect(policy.shouldStop(createContext(policy, { turn: 2, maxTurns: 2 }), {}))
       .resolves.toEqual({
+        stop: false,
+        reason: "continue after checkpoint",
+      });
+    await expect(
+      policy.shouldStop(
+        createContext(policy, { turn: 3, maxTurns: 2 }),
+        { completed: true },
+      ),
+    ).resolves.toEqual({
         stop: true,
-        reason: "turn limit reached",
+        reason: "run completed",
       });
   });
 });

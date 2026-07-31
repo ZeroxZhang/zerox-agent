@@ -8,10 +8,15 @@ export type AgentHandoffRole = Extract<
   "researcher" | "executor" | "reviewer"
 >;
 
+/** @deprecated Legacy serialized limits; values are never execution stop gates. */
 export type AgentHandoffBudget = {
   toolCallBudget: number;
   wallClockBudgetMs?: number;
   revisionBudget?: number;
+};
+
+export type AgentHandoffExecutionPolicy = {
+  checkpointEveryToolCalls: number;
 };
 
 export type AgentHandoffReviewGate = {
@@ -27,7 +32,9 @@ export type AgentHandoffContract = {
   objective: string;
   allowedTools: AgentToolName[];
   workspaceRoot: string;
-  budget: AgentHandoffBudget;
+  executionPolicy: AgentHandoffExecutionPolicy;
+  /** @deprecated Read compatibility only. New handoffs do not write budgets. */
+  budget?: AgentHandoffBudget;
   expectedArtifacts: AgentExecutionArtifact["kind"][];
   reviewGate: AgentHandoffReviewGate;
 };
@@ -38,7 +45,9 @@ export type AgentHandoffContractInput = {
   childRole: string;
   objective: string;
   allowedTools: AgentToolName[];
-  budget: AgentHandoffBudget;
+  executionPolicy?: AgentHandoffExecutionPolicy;
+  /** @deprecated Legacy input; toolCallBudget is a checkpoint interval. */
+  budget?: AgentHandoffBudget;
   expectedArtifacts: AgentExecutionArtifact["kind"][];
   reviewGate: AgentHandoffReviewGate;
 };
@@ -115,10 +124,6 @@ export function createAgentHandoffContract(
     throw new Error("handoff allowedTools must include at least one tool.");
   }
 
-  if (!Number.isFinite(input.budget.toolCallBudget) || input.budget.toolCallBudget < 1) {
-    throw new Error("handoff toolCallBudget must be at least 1.");
-  }
-
   if (!input.expectedArtifacts.length) {
     throw new Error("handoff expectedArtifacts must include at least one artifact kind.");
   }
@@ -130,14 +135,15 @@ export function createAgentHandoffContract(
     objective,
     allowedTools,
     workspaceRoot: parentContext.workspaceRoot,
-    budget: {
-      toolCallBudget: Math.floor(input.budget.toolCallBudget),
-      ...(input.budget.wallClockBudgetMs
-        ? { wallClockBudgetMs: Math.floor(input.budget.wallClockBudgetMs) }
-        : {}),
-      ...(input.budget.revisionBudget
-        ? { revisionBudget: Math.floor(input.budget.revisionBudget) }
-        : {}),
+    executionPolicy: {
+      checkpointEveryToolCalls: Math.max(
+        1,
+        Math.floor(
+          input.executionPolicy?.checkpointEveryToolCalls ??
+            input.budget?.toolCallBudget ??
+            8,
+        ),
+      ),
     },
     expectedArtifacts: [...new Set(input.expectedArtifacts)],
     reviewGate: {
@@ -275,9 +281,21 @@ function readHandoff(payload: Record<string, unknown>): AgentHandoffContract | n
     objective,
     allowedTools: readStringArray(raw.allowedTools) as AgentToolName[],
     workspaceRoot: readString(raw.workspaceRoot) ?? "",
-    budget: isRecord(raw.budget)
-      ? { toolCallBudget: Number(raw.budget.toolCallBudget ?? 0) }
-      : { toolCallBudget: 0 },
+    executionPolicy: isRecord(raw.executionPolicy)
+      ? {
+          checkpointEveryToolCalls: Math.max(
+            1,
+            Number(raw.executionPolicy.checkpointEveryToolCalls ?? 8),
+          ),
+        }
+      : {
+          checkpointEveryToolCalls: Math.max(
+            1,
+            isRecord(raw.budget)
+              ? Number(raw.budget.toolCallBudget ?? 8)
+              : 8,
+          ),
+        },
     expectedArtifacts: readStringArray(
       raw.expectedArtifacts,
     ) as AgentExecutionArtifact["kind"][],

@@ -250,7 +250,7 @@ export function formatGoalTerminalHeading(goal: Goal): string {
     case "canceled":
       return `目标已取消：${goal.description}`;
     case "stopped_budget":
-      return `目标因预算停止：${goal.description}`;
+      return `旧版任务已停止（只读）：${goal.description}`;
     case "stopped_stalled":
       return `目标因进展停滞停止：${goal.description}`;
     case "stopped_blocked":
@@ -268,6 +268,7 @@ export function formatGoalTerminalHeading(goal: Goal): string {
     case "executing":
     case "waiting_for_review":
     case "waiting_for_acceptance":
+    case "waiting_for_model":
       return `目标状态更新：${goal.description}`;
   }
 }
@@ -1085,6 +1086,13 @@ export function createAppContainer(options: {
       createTaskSchedulerService({
         taskStore: scheduledTaskStore(),
         runScheduledTask: (taskId: string) => runAgentTask(taskId),
+        async listActiveTaskIds() {
+          return new Set(
+            (await agentExecutionStore().listActive()).map(
+              (checkpoint) => checkpoint.taskId,
+            ),
+          );
+        },
       }),
     );
   }
@@ -1109,15 +1117,13 @@ export function createAppContainer(options: {
       profile: resolved.binding.profileId,
       temperature: resolved.binding.generation.temperature,
       maxTokens: resolved.binding.generation.maxTokens,
-      ...(resolved.binding.generation.thinkingEnabled
+      thinking: resolved.binding.generation.thinkingEnabled
         ? {
-            thinking: {
-              type: "enabled" as const,
-              budgetTokens:
-                resolved.binding.generation.thinkingBudgetTokens,
-            },
+            type: "enabled" as const,
+            budgetTokens:
+              resolved.binding.generation.thinkingBudgetTokens,
           }
-        : {}),
+        : { type: "disabled" as const },
     };
   }
 
@@ -2106,7 +2112,8 @@ export function createAppContainer(options: {
   function createGoalDraft(input: {
     description: string;
     successCriteria: string[];
-    budget: GoalBudget;
+    /** @deprecated Ignored. Kept for IPC compatibility. */
+    budget?: GoalBudget;
     reviewPolicy: GoalReviewPolicy;
   }): Goal {
     const now = new Date().toISOString();
@@ -2155,8 +2162,7 @@ export function createAppContainer(options: {
           ],
       milestones: [],
       status: "planning",
-      budget: input.budget,
-      budgetUsage: {
+      executionUsage: {
         iterations: 0,
         toolCalls: 0,
         wallClockMs: 0,
@@ -2557,13 +2563,6 @@ export function createAppContainer(options: {
     }
   }
 
-  async function runGoalBudgetOperation(
-    goalId: string,
-    operation: () => Promise<ChatSessionGoalSummary>,
-  ): Promise<{ ok: boolean; goal?: Goal; message?: string }> {
-    return runGoalOperation(goalId, operation);
-  }
-
   async function readToolResultRef(
     ref: string,
     options?: ToolResultOffloadReadScope,
@@ -2761,9 +2760,6 @@ export function createAppContainer(options: {
     discardGoalDraft,
     confirmPlan,
     runGoalOperation,
-    runGoalBudgetOperation,
-    increaseGoalBudget: (goalId: string, delta: Partial<GoalBudget>) =>
-      runGoalBudgetOperation(goalId, () => goalChatService().increaseBudget(goalId, delta)),
     replanGoal: (goalId: string, instructions: string) =>
       runGoalOperation(goalId, () => goalChatService().replan(goalId, instructions)),
     retryGoal: (goalId: string) =>

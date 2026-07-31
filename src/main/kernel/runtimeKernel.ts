@@ -13,6 +13,7 @@ import type {
 export type RuntimeKernelDependencies = {
   bus: KernelEventBus;
   runTurn: (ctx: RunContext) => Promise<TurnResult>;
+  onCheckpoint?: (ctx: RunContext) => Promise<string | undefined>;
   now?: () => string;
 };
 
@@ -31,7 +32,7 @@ export async function runRuntimeKernel(
   let ctx: RunContext = {
     ...initialContext,
     turn: Math.max(0, Math.floor(initialContext.turn)),
-    maxTurns: Math.max(0, Math.floor(initialContext.maxTurns)),
+    maxTurns: Math.max(1, Math.floor(initialContext.maxTurns)),
   };
   let summary = "";
 
@@ -39,7 +40,7 @@ export async function runRuntimeKernel(
     return endRun(ctx, deps.bus, now, "canceled", "Agent run canceled.", summary);
   }
 
-  while (ctx.turn < ctx.maxTurns) {
+  while (Number.isFinite(ctx.turn)) {
     ctx = {
       ...ctx,
       turn: ctx.turn + 1,
@@ -96,9 +97,28 @@ export async function runRuntimeKernel(
         summary,
       );
     }
+
+    if (ctx.turn % ctx.maxTurns === 0 && deps.onCheckpoint) {
+      try {
+        const checkpointRef = await deps.onCheckpoint(ctx);
+        if (checkpointRef) {
+          ctx = { ...ctx, checkpointRef };
+          deps.bus.publish({
+            v: KERNEL_EVENT_VERSION,
+            type: "checkpoint_written",
+            runId: ctx.runId,
+            ref: checkpointRef,
+            turn: ctx.turn,
+            createdAt: now(),
+          });
+        }
+      } catch (error) {
+        return endRun(ctx, deps.bus, now, "failed", formatError(error), summary);
+      }
+    }
   }
 
-  return endRun(ctx, deps.bus, now, "paused", "max turns exhausted", summary);
+  return endRun(ctx, deps.bus, now, "failed", "invalid turn state", summary);
 }
 
 function endRun(

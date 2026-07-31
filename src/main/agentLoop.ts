@@ -33,6 +33,11 @@ import { serializeToolObservationWithOffload } from "./toolObservationOffload";
 import type { ToolResultOffloadStore } from "./toolResultOffloadStore";
 import { getToolCapability } from "../shared/agentToolCapabilities";
 import {
+  modelServiceNoticeFromError,
+  modelServiceNoticeFromFinishReason,
+  type ModelServiceNotice,
+} from "../shared/modelServiceNotice";
+import {
   createToolInvocation,
   transitionToolInvocation,
   type ToolInvocationRecord,
@@ -49,8 +54,11 @@ export type AgentLoopOptions = {
   runContext?: AgentRunContext;
   runtimeTask?: RuntimeToolAuthorizationTask;
   systemPrompt?: string;
+  /** Legacy name; controls checkpoint cadence and never limits total turns. */
   maxTurns?: number;
+  /** @deprecated Ignored. Tool calls are usage telemetry only. */
   maxToolCalls?: number;
+  /** @deprecated Ignored. Wall-clock time is usage telemetry only. */
   maxWallClockMs?: number;
   signal?: AbortSignal;
   tools?: ReturnType<typeof buildToolDefinitions>;
@@ -58,15 +66,14 @@ export type AgentLoopOptions = {
   toolResultOffloadThreshold?: number;
   requestId?: string;
   workspaceRunId?: string;
+  /** @deprecated Ignored. maxTurns is a checkpoint interval, never a stop. */
   pauseOnTurnLimit?: boolean;
   pauseOnStrategyGuard?: boolean;
   resumeMessages?: ChatMessage[];
   initialToolCallsExecuted?: number;
   pauseOnFailureLoop?: boolean;
   contextManager?: ContextManager;
-  /** v3.6.0: Maximum cumulative tokens to consume across the entire agent run.
-   *  When exceeded, the loop aborts cleanly with status "failed" and a budget-
-   *  exceeded summary. Undefined / 0 = no limit (CORE-05). */
+  /** @deprecated Kept for caller compatibility. Token usage is telemetry-only. */
   tokenBudget?: number;
   /** P2: overflow compaction routes through this strategy when provided
    *  (auto→rebuild when a checkpoint exists, else summarize = current behavior).
@@ -143,7 +150,15 @@ export type AgentLoopToolEvent = {
 };
 
 export type AgentLoopContinuation = {
-  reason: "turn_limit" | "tool_failure_loop" | "strategy_guard";
+  reason:
+    /** @deprecated Historical continuation decoding only. */
+    | "turn_limit"
+    | "tool_failure_loop"
+    | "strategy_guard"
+    | "provider_output_limit"
+    | "provider_rate_limit"
+    | "provider_quota"
+    | "provider_stop";
   maxTurns: number;
   toolCallsExecuted: number;
   toolName?: string;
@@ -161,6 +176,7 @@ export type AgentLoopResult = {
   toolCallsExecuted: number;
   tokensConsumed?: number;
   continuation?: AgentLoopContinuation;
+  modelServiceNotice?: ModelServiceNotice;
 };
 
 export async function runAgentLoop(
@@ -169,6 +185,7 @@ export async function runAgentLoop(
     baseUrl: string;
     apiKey: string;
     model: string;
+    providerId?: string;
     temperature: number;
     maxTokens: number;
   },
@@ -190,18 +207,14 @@ export async function runAgentLoop(
     toolResultOffloadThreshold,
     requestId,
     workspaceRunId,
-    pauseOnTurnLimit = false,
     pauseOnStrategyGuard = false,
     resumeMessages,
     initialToolCallsExecuted = 0,
-    maxToolCalls = Number.POSITIVE_INFINITY,
-    maxWallClockMs = 0,
     pauseOnFailureLoop = false,
     contextManager = createContextManager(),
     compactionStrategy,
     systemReminderRegistry,
     onCheckpoint,
-    tokenBudget = 0,
     modelRetry,
     onToolCall,
     onToolResult,
@@ -216,8 +229,8 @@ export async function runAgentLoop(
     onStrategyGuard,
     modelRequestExecutor,
   } = options;
-  const deadline = createDeadline(maxWallClockMs);
-  const signal = combineAbortSignals(parentSignal, deadline?.signal);
+  const signal = parentSignal;
+  const checkpointInterval = Math.max(1, Math.floor(maxTurns));
 
   async function emitCheckpoint(nextAction: string): Promise<void> {
     await onCheckpoint?.({
@@ -267,6 +280,7 @@ export async function runAgentLoop(
     args?: Record<string, unknown>;
   } | null = null;
   let continuation: AgentLoopContinuation | undefined;
+  let modelServiceNotice: ModelServiceNotice | undefined;
   let lastExecutedToolSignature: string | null =
     findLastExecutedToolSignature(messages);
   let toolFailureStreak: {
@@ -279,9 +293,8 @@ export async function runAgentLoop(
   const emittedStrategyGuards = new Set<string>();
   const successfulToolNames = new Set<string>();
   const contextTokenBudget = Math.max(1, Math.floor(modelProfile.maxTokens * 0.7));
-  // v3.6.0: Cumulative token consumption tracking for budget enforcement (CORE-05).
+  // Token consumption is observability-only and never changes run status.
   let cumulativeTokensConsumed = 0;
-  const effectiveTokenBudget = tokenBudget > 0 ? tokenBudget : 0;
 
   function estimateConsumedTokens(): number {
     return cumulativeTokensConsumed > 0
@@ -289,19 +302,14 @@ export async function runAgentLoop(
       : Math.max(1, contextManager.estimateTokens(messages));
   }
 
-  function consumeModelResponseTokens(
+  function recordModelResponseTokens(
     response: ChatCompletionResponse,
-  ): boolean {
-    if (effectiveTokenBudget <= 0) return false;
+  ): void {
     const turnTokens = response.usage
       ? (response.usage.inputTokens ?? 0) +
         (response.usage.outputTokens ?? 0)
       : estimateCompletionTokens(messages, response, contextManager);
     cumulativeTokensConsumed += turnTokens;
-    if (cumulativeTokensConsumed < effectiveTokenBudget) return false;
-    status = "failed";
-    summary = `Token budget exceeded: ${cumulativeTokensConsumed} tokens consumed (limit: ${effectiveTokenBudget}). The agent loop aborted to prevent cost overrun.`;
-    return true;
   }
 
   async function compactMessagesBeforeModelRequest() {
@@ -408,9 +416,7 @@ export async function runAgentLoop(
         ...(signal ? { signal } : {}),
       }, turns + 1);
 
-      if (consumeModelResponseTokens(response)) {
-        return;
-      }
+      recordModelResponseTokens(response);
 
       if (response.content) {
         summary = `${options.summaryPrefix}\n\n${response.content}`;
@@ -479,6 +485,14 @@ export async function runAgentLoop(
           !error.hasMeaningfulStreamEvent &&
           !isStreamAbortError(error.cause, request.signal)
         ) {
+          if (
+            modelServiceNoticeFromError(error.cause, {
+              provider: modelProfile.providerId,
+              model: modelProfile.model,
+            })
+          ) {
+            throw error.cause;
+          }
           return completeWithModelRetry(
             chatClient,
             request,
@@ -499,7 +513,7 @@ export async function runAgentLoop(
   }
 
   try {
-    for (; turns < maxTurns; turns += 1) {
+    for (;; turns += 1) {
       if (signal?.aborted) {
         status = "canceled";
         summary = "Agent loop canceled.";
@@ -530,8 +544,28 @@ export async function runAgentLoop(
         onReasoning?.(response.reasoningContent, turns + 1);
       }
 
-      // v3.6.0: Track cumulative token consumption (CORE-05).
-      if (consumeModelResponseTokens(response)) break;
+      recordModelResponseTokens(response);
+      modelServiceNotice =
+        response.modelServiceNotice ??
+        modelServiceNoticeFromFinishReason(response.finishReason, {
+          provider: modelProfile.providerId,
+          model: modelProfile.model,
+        });
+      if (modelServiceNotice) {
+        const partialContent =
+          response.content?.trim() ||
+          response.reasoningContent?.trim() ||
+          modelServiceNotice.message;
+        messages.push({ role: "assistant", content: partialContent });
+        status = "paused";
+        continuation = {
+          reason: continuationReasonForNotice(modelServiceNotice),
+          maxTurns: checkpointInterval,
+          toolCallsExecuted,
+        };
+        summary = partialContent;
+        break;
+      }
 
       // No tool calls + content → final
       if (!response.toolCalls.length && response.content) {
@@ -614,14 +648,6 @@ export async function runAgentLoop(
             summary = "Agent loop canceled during tool execution.";
             break;
           }
-          if (
-            toolCallsExecuted - initialToolCallsExecuted >= maxToolCalls
-          ) {
-            status = "paused";
-            summary = `Tool-call budget reached after ${maxToolCalls} calls in this segment.`;
-            break;
-          }
-
           const { toolCall, toolName, signature } = preparedToolCall;
           const toolEventBase = buildToolEvent({
             toolCallId: toolCall.id,
@@ -920,7 +946,7 @@ export async function runAgentLoop(
             status = "paused";
             continuation = {
               reason: "strategy_guard",
-              maxTurns,
+              maxTurns: checkpointInterval,
               toolCallsExecuted,
               toolName,
               strategyGuardCode: strategyGuardEvent.code,
@@ -968,7 +994,7 @@ export async function runAgentLoop(
             status = "paused";
             continuation = {
               reason: "tool_failure_loop",
-              maxTurns,
+              maxTurns: checkpointInterval,
               toolCallsExecuted,
               toolName,
               failureKind,
@@ -989,7 +1015,13 @@ export async function runAgentLoop(
 
         trimUnansweredToolCalls(assistantToolMessage, processedToolCalls);
         if (!signal?.aborted && processedToolCalls.length > 0) {
-          await emitCheckpoint("Continue from the completed tool-call batch.");
+          const reachedCheckpointInterval =
+            (turns + 1) % checkpointInterval === 0;
+          await emitCheckpoint(
+            reachedCheckpointInterval
+              ? "Checkpoint interval reached; state saved and execution continues automatically."
+              : "Continue from the completed tool-call batch.",
+          );
         }
 
         if (status === "paused") {
@@ -1009,39 +1041,29 @@ export async function runAgentLoop(
       break;
     }
 
-    if (!summary && turns >= maxTurns) {
-      if (pauseOnTurnLimit) {
-        status = "paused";
-        continuation = {
-          reason: "turn_limit",
-          maxTurns,
-          toolCallsExecuted,
-        };
-        summary = buildTurnLimitPauseSummary(maxTurns, toolCallsExecuted);
-        onTurn?.(turns, "paused");
-      } else {
-        await finalizeWithoutTools({
-          prompt: buildTurnLimitFinalizationPrompt(maxTurns, toolCallsExecuted),
-          summaryPrefix: "已达到工具调用轮次上限，我先基于已有结果给出阶段性总结：",
-          fallbackSummary: buildTurnLimitFallbackSummary(maxTurns, toolCallsExecuted),
-        });
-      }
-    }
   } catch (error) {
     if (signal?.aborted) {
       status = "canceled";
       summary = "Agent loop canceled.";
     } else {
-      status = "failed";
-      summary = error instanceof Error ? error.message : "Agent loop failed.";
+      modelServiceNotice = modelServiceNoticeFromError(
+        error instanceof StreamingCompletionError ? error.cause : error,
+        { provider: modelProfile.providerId, model: modelProfile.model },
+      );
+      if (modelServiceNotice) {
+        status = "paused";
+        continuation = {
+          reason: continuationReasonForNotice(modelServiceNotice),
+          maxTurns: checkpointInterval,
+          toolCallsExecuted,
+        };
+        summary = modelServiceNotice.message;
+      } else {
+        status = "failed";
+        summary = error instanceof Error ? error.message : "Agent loop failed.";
+      }
     }
   }
-
-  if (deadline?.signal.aborted && !parentSignal?.aborted) {
-    status = "failed";
-    summary = `Wall-clock budget exceeded after ${maxWallClockMs}ms.`;
-  }
-  deadline?.dispose();
 
   return {
     summary,
@@ -1051,38 +1073,8 @@ export async function runAgentLoop(
     toolCallsExecuted,
     tokensConsumed: estimateConsumedTokens(),
     ...(continuation ? { continuation } : {}),
+    ...(modelServiceNotice ? { modelServiceNotice } : {}),
   };
-}
-
-function createDeadline(maxWallClockMs: number): {
-  signal: AbortSignal;
-  dispose: () => void;
-} | null {
-  if (!Number.isFinite(maxWallClockMs) || maxWallClockMs <= 0) return null;
-  const controller = new AbortController();
-  const timer = setTimeout(
-    () => controller.abort(new DOMException("Wall-clock budget exceeded.", "TimeoutError")),
-    maxWallClockMs,
-  );
-  timer.unref?.();
-  return { signal: controller.signal, dispose: () => clearTimeout(timer) };
-}
-
-function combineAbortSignals(
-  first: AbortSignal | undefined,
-  second: AbortSignal | undefined,
-): AbortSignal | undefined {
-  if (!first) return second;
-  if (!second) return first;
-  const controller = new AbortController();
-  const abort = (signal: AbortSignal) => {
-    if (!controller.signal.aborted) controller.abort(signal.reason);
-  };
-  if (first.aborted) abort(first);
-  else first.addEventListener("abort", () => abort(first), { once: true });
-  if (second.aborted) abort(second);
-  else second.addEventListener("abort", () => abort(second), { once: true });
-  return controller.signal;
 }
 
 function isStreamingChatClient(
@@ -1117,6 +1109,7 @@ async function aggregateStreamingCompletion(
   let content = "";
   let reasoningContent = "";
   let finishReason = "stop";
+  let streamModelServiceNotice: ModelServiceNotice | undefined;
   let activeToolCallKey: string | null = null;
   let hasMeaningfulStreamEvent = false;
   const toolCalls = new Map<string, { id: string; name: string; arguments: string }>();
@@ -1175,6 +1168,8 @@ async function aggregateStreamingCompletion(
       }
 
       finishReason = event.finishReason || finishReason;
+      streamModelServiceNotice =
+        event.modelServiceNotice ?? streamModelServiceNotice;
     }
   } catch (error) {
     throw new StreamingCompletionError(error, hasMeaningfulStreamEvent);
@@ -1193,8 +1188,35 @@ async function aggregateStreamingCompletion(
       },
     })),
     finishReason,
+    ...(streamModelServiceNotice ??
+    modelServiceNoticeFromFinishReason(finishReason, {
+      model: request.model,
+    })
+      ? {
+          modelServiceNotice:
+            streamModelServiceNotice ??
+            modelServiceNoticeFromFinishReason(finishReason, {
+              model: request.model,
+            }),
+        }
+      : {}),
     ...(reasoningContent ? { reasoningContent } : {}),
   };
+}
+
+function continuationReasonForNotice(
+  notice: ModelServiceNotice,
+): AgentLoopContinuation["reason"] {
+  switch (notice.kind) {
+    case "output_limit":
+      return "provider_output_limit";
+    case "rate_limit":
+      return "provider_rate_limit";
+    case "quota_exhausted":
+      return "provider_quota";
+    case "provider_stop":
+      return "provider_stop";
+  }
 }
 
 function normalizeStreamToolCallIndex(value: unknown): number | undefined {
@@ -1413,36 +1435,6 @@ function truncateForPrompt(value: string, maxLength: number): string {
     return normalized;
   }
   return `${normalized.slice(0, maxLength - 1)}…`;
-}
-
-function buildTurnLimitPauseSummary(
-  maxTurns: number,
-  toolCallsExecuted: number,
-): string {
-  return [
-    `已到达长任务检查点（本轮 ${maxTurns} 轮，累计执行 ${toolCallsExecuted} 个工具）。`,
-    "我已经暂停在当前上下文里，等待你确认下一步。",
-    "回复“继续”会从已有工具结果接着执行；也可以告诉我调整方向或停止。",
-  ].join("\n");
-}
-
-function buildTurnLimitFinalizationPrompt(
-  maxTurns: number,
-  toolCallsExecuted: number,
-): string {
-  return [
-    `工具调用轮次已达到上限（${maxTurns} 轮，已执行 ${toolCallsExecuted} 个工具）。`,
-    "现在不要再调用工具。",
-    "请只基于当前对话和已有工具结果，用中文给用户一个简洁的阶段性总结。",
-    "如果任务还没完成，请说明已完成什么、卡在哪里、建议用户如何缩小范围或继续下一步。",
-  ].join("\n");
-}
-
-function buildTurnLimitFallbackSummary(
-  maxTurns: number,
-  toolCallsExecuted: number,
-): string {
-  return `已达到工具调用轮次上限（${maxTurns} 轮，已执行 ${toolCallsExecuted} 个工具）。请把任务拆小一点，或补充更明确的目标后重试。`;
 }
 
 function buildRepeatedToolCallFinalizationPrompt(

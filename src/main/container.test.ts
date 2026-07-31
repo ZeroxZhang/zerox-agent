@@ -1099,7 +1099,7 @@ describe("app container goal drafts", () => {
     },
   );
 
-  it("keeps the chat session terminal when a stale budget event arrives after cancellation", async () => {
+  it("keeps the chat session terminal when a stale model retry event arrives after cancellation", async () => {
     const container = createAppContainer({
       async requestToolApproval() {
         return { approved: false, reason: "test" };
@@ -1112,8 +1112,7 @@ describe("app container goal drafts", () => {
     const goal = createStoredGoal({
       id: "goal_progress_race",
       chatSessionId: session.session.id,
-      status: "stopped_budget",
-      stopReason: "budget_exhausted",
+      status: "waiting_for_model",
     });
     const store = container.agentGoalStore();
     await store.save(goal);
@@ -1123,60 +1122,57 @@ describe("app container goal drafts", () => {
       status: goal.status,
     });
 
-    let releaseBudgetLedger: (() => void) | undefined;
-    const budgetLedgerGate = new Promise<void>((resolve) => {
-      releaseBudgetLedger = resolve;
+    let releaseRetryLedger: (() => void) | undefined;
+    const retryLedgerGate = new Promise<void>((resolve) => {
+      releaseRetryLedger = resolve;
     });
-    let budgetLedgerEnteredResolve: (() => void) | undefined;
-    const budgetLedgerEntered = new Promise<void>((resolve) => {
-      budgetLedgerEnteredResolve = resolve;
+    let retryLedgerEnteredResolve: (() => void) | undefined;
+    const retryLedgerEntered = new Promise<void>((resolve) => {
+      retryLedgerEnteredResolve = resolve;
     });
     const appendLedger = store.appendLedger.bind(store);
     store.appendLedger = async (goalId, event) => {
-      if (event.kind === "goal_replanned") {
-        budgetLedgerEnteredResolve?.();
-        await budgetLedgerGate;
+      if (event.kind === "goal_planned") {
+        retryLedgerEnteredResolve?.();
+        await retryLedgerGate;
       }
       await appendLedger(goalId, event);
     };
 
     const progressEvents: GoalProgressEvent[] = [];
-    let deliveredResolve: (() => void) | undefined;
-    const delivered = new Promise<void>((resolve) => {
-      deliveredResolve = resolve;
-    });
     const unsubscribe = container.onGoalProgressEvent((event) => {
       if (event.goalId !== goal.id) {
         return;
       }
       progressEvents.push(event);
-      if (progressEvents.length >= 2) {
-        deliveredResolve?.();
-      }
     });
 
-    const increasing = container.goalChatService().increaseBudget(goal.id, {
-      maxIterations: 1,
-    });
-    await budgetLedgerEntered;
+    const retrying = container.goalChatService().retry(goal.id);
+    await retryLedgerEntered;
     await container.goalChatService().cancel(goal.id);
-    releaseBudgetLedger?.();
-    await increasing;
-    await delivered;
+    releaseRetryLedger?.();
+    await retrying;
+    await new Promise((resolve) => setTimeout(resolve, 0));
     unsubscribe();
 
-    expect(progressEvents).toHaveLength(2);
-    expect(progressEvents.every((event) => event.status === "canceled")).toBe(true);
-    expect(progressEvents.at(-1)).toMatchObject({
-      status: "canceled",
-      event: "stopped",
-      message: "目标已取消。",
-    });
     expect(
-      (await container.chatSessionStore().get(session.session.id))?.goalSummaries?.find(
-        (summary) => summary.id === goal.id,
-      ),
-    ).toMatchObject({ status: "canceled" });
+      progressEvents.some((event) => event.status === "executing"),
+    ).toBe(false);
+    expect(await store.get(goal.id)).toMatchObject({
+      status: "canceled",
+      stopReason: "user_canceled",
+    });
+    let syncedSummary = (
+      await container.chatSessionStore().get(session.session.id)
+    )?.goalSummaries?.find((summary) => summary.id === goal.id);
+    for (let attempt = 0; attempt < 50 && syncedSummary?.status !== "canceled"; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      syncedSummary = (
+        await container.chatSessionStore().get(session.session.id)
+      )?.goalSummaries?.find((summary) => summary.id === goal.id);
+    }
+    expect(syncedSummary).toMatchObject({ status: "canceled" });
+    await container.shutdownRuntime();
   });
 
   it("appends a final assistant result when a background goal is achieved", async () => {
@@ -2228,7 +2224,7 @@ function createStoredGoal(
       maxWallClockMs: 60_000,
       maxReplans: 1,
     },
-    budgetUsage: overrides.budgetUsage ?? {
+    executionUsage: overrides.executionUsage ?? {
       iterations: 0,
       toolCalls: 0,
       wallClockMs: 0,

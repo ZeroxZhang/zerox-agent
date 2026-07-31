@@ -202,7 +202,7 @@ function createGoal(description: string, successCriteria: Goal["successCriteria"
       maxWallClockMs: 600_000,
       maxReplans: 2,
     },
-    budgetUsage: {
+    executionUsage: {
       iterations: 0,
       toolCalls: 0,
       wallClockMs: 0,

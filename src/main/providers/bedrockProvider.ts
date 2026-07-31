@@ -18,6 +18,7 @@ import type {
   StreamEvent,
   ToolDefinition,
 } from "./provider";
+import { withModelServiceNotice } from "../../shared/modelServiceNotice";
 
 const capabilities: ProviderCapabilities = {
   toolUse: true,
@@ -49,10 +50,14 @@ export function createBedrockProvider(
 
     async complete(req) {
       const { family, modelId } = splitFamily(req.model);
-      if (family === "claude") {
-        return completeClaude(client, modelId, req);
-      }
-      return completeConverse(client, modelId, req);
+      const response =
+        family === "claude"
+          ? await completeClaude(client, modelId, req)
+          : await completeConverse(client, modelId, req);
+      return withModelServiceNotice(response, {
+        provider: "bedrock",
+        model: req.model,
+      });
     },
 
     async *stream(req): AsyncIterable<StreamEvent> {
@@ -131,14 +136,7 @@ async function completeClaude(
           })),
         }
       : {}),
-    ...(req.thinking?.type === "enabled"
-      ? {
-          thinking: {
-            type: "enabled",
-            budget_tokens: req.thinking.budgetTokens ?? 4096,
-          },
-        }
-      : {}),
+    ...bedrockClaudeThinkingBody(req),
   };
   const output = await client.send(
     new InvokeModelCommand({
@@ -153,6 +151,28 @@ async function completeClaude(
     new TextDecoder().decode(output.body),
   ) as Record<string, unknown>;
   return parseAnthropicResponse(json);
+}
+
+function bedrockClaudeThinkingBody(
+  req: CompleteRequest,
+): { thinking?: { type: "enabled"; budget_tokens: number } } {
+  if (req.thinking?.type !== "enabled") {
+    return {};
+  }
+  if (req.maxTokens <= 1024) {
+    throw new Error(
+      "Bedrock Claude 思考模式要求 max tokens 大于最小思考预算 1024。",
+    );
+  }
+  return {
+    thinking: {
+      type: "enabled",
+      budget_tokens: Math.min(
+        req.thinking.budgetTokens ?? 4096,
+        req.maxTokens - 1,
+      ),
+    },
+  };
 }
 
 async function completeConverse(

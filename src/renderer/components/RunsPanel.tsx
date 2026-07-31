@@ -1084,7 +1084,10 @@ function RunInspector(props: {
                 <div>
                   <dt>轮次</dt>
                   <dd>
-                    {kernelRunView.turn}/{kernelRunView.maxTurns || "?"}
+                    第 {kernelRunView.turn} 轮
+                    {kernelRunView.maxTurns
+                      ? ` · 每 ${kernelRunView.maxTurns} 轮保存检查点`
+                      : ""}
                   </dd>
                 </div>
               </dl>

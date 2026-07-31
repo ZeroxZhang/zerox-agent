@@ -6,7 +6,6 @@ import {
   verifyGoalAcceptanceCertificate,
 } from "../main/agentGoalAcceptanceCertificate";
 import {
-  buildGoalBudgetIncreaseDelta,
   buildGoalProgressViewModel,
   buildGoalStatusPresentation,
 } from "./goalProgressViewModel";
@@ -44,7 +43,7 @@ describe("goal progress view model", () => {
         }),
         milestone({ id: "milestone_running", state: "running" }),
       ],
-      budgetUsage: {
+      executionUsage: {
         iterations: 1,
         toolCalls: 5,
         wallClockMs: 90_000,
@@ -63,6 +62,7 @@ describe("goal progress view model", () => {
       expect.arrayContaining([
         { label: "迭代", value: "1" },
         { label: "工具调用", value: "5" },
+        { label: "Token", value: "0" },
         { label: "运行时间", value: "1.5 分钟" },
       ]),
     );
@@ -329,11 +329,11 @@ describe("goal progress view model", () => {
     expect(presentation.nextActionDetail).toContain("不会补造");
   });
 
-  it("makes budget-stopped goals visibly terminal until the user resumes them", () => {
+  it("renders historical budget-stopped goals as read-only records", () => {
     const goal = createGoal({
       status: "stopped_budget",
       stopReason: "budget_exhausted",
-      budgetUsage: {
+      executionUsage: {
         iterations: 8,
         toolCalls: 64,
         wallClockMs: 45 * 60 * 1000,
@@ -344,9 +344,10 @@ describe("goal progress view model", () => {
 
     const viewModel = buildGoalProgressViewModel(toSummary(goal), goal);
 
-    expect(viewModel.statusLabel).toBe("预算已用尽");
-    expect(viewModel.statusDetail).toContain("不会在后台继续");
-    expect(viewModel.nextActionLabel).toBe("需要你处理");
+    expect(viewModel.statusLabel).toBe("旧版任务已停止（只读）");
+    expect(viewModel.statusDetail).toContain("不会自动恢复");
+    expect(viewModel.nextActionLabel).toBe("历史记录");
+    expect(viewModel.recoveryActions).toEqual([]);
     expect(viewModel.metricCards.map((card) => card.label)).not.toContain("预算");
     expect(viewModel.metricCards.map((card) => card.value)).not.toContain("8/8");
   });
@@ -388,10 +389,10 @@ describe("goal progress view model", () => {
     expect(viewModel.nextActionDetail).toContain("重试目标");
   });
 
-  it("increases an overrun historical goal beyond its accumulated usage", () => {
+  it("renders an overrun historical goal as read-only legacy data", () => {
     const goal = createGoal({
       status: "stopped_budget",
-      budgetUsage: {
+      executionUsage: {
         iterations: 322,
         toolCalls: 2_105,
         wallClockMs: 53_905_191,
@@ -400,12 +401,12 @@ describe("goal progress view model", () => {
       },
     });
 
-    expect(buildGoalBudgetIncreaseDelta(goal)).toEqual({
-      maxIterations: 322,
-      maxToolCalls: 2_105,
-      maxWallClockMs: 53_905_191,
-      maxReplans: 320,
-    });
+    const viewModel = buildGoalProgressViewModel(
+      { id: goal.id, description: goal.description, status: goal.status },
+      goal,
+    );
+    expect(viewModel.statusLabel).toBe("旧版任务已停止（只读）");
+    expect(viewModel.statusDetail).toContain("历史记录");
   });
 
   it.each([
@@ -1089,7 +1090,7 @@ function createGoal(overrides: Partial<Goal> = {}): Goal {
       maxWallClockMs: 45 * 60 * 1000,
       maxReplans: 3,
     },
-    budgetUsage: {
+    executionUsage: {
       iterations: 0,
       toolCalls: 0,
       wallClockMs: 0,

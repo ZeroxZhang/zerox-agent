@@ -21,7 +21,7 @@ const request: ChatCompletionRequest = {
 };
 
 describe("completeWithModelRetry", () => {
-  it("honors retry-after-ms before exponential fallback", async () => {
+  it("does not automatically retry provider rate limits", async () => {
     const sleeps: number[] = [];
     const retryEvents: ModelRetryEvent[] = [];
     const client = createFlakyClient(
@@ -36,17 +36,10 @@ describe("completeWithModelRetry", () => {
       },
     }, (event) => {
       retryEvents.push(event);
-    })).resolves.toMatchObject({
-      content: "ok",
-    });
+    })).rejects.toThrow("status 429");
 
-    expect(sleeps).toEqual([500]);
-    expect(retryEvents[0]).toMatchObject({
-      attempt: 1,
-      maxRetries: 2,
-      delayMs: 500,
-      error: "LLM request failed with status 429: overloaded",
-    });
+    expect(sleeps).toEqual([]);
+    expect(retryEvents).toEqual([]);
   });
 
   it("honors retry-after seconds", async () => {

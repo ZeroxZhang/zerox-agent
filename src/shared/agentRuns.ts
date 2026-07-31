@@ -4,6 +4,7 @@ import type {
   AgentFailureClass,
 } from "./agentExecution";
 import type { AgentRunContext } from "./agentWorkspace";
+import type { ModelServiceNotice } from "./modelServiceNotice";
 
 export type AgentRunStatus = AgentExecutionStatus;
 
@@ -43,6 +44,7 @@ export type AgentRunRecord = {
   checkpointPath?: string;
   artifacts?: AgentExecutionArtifact[];
   childRunIds?: string[];
+  modelServiceNotice?: ModelServiceNotice;
   failureClass?: AgentFailureClass;
   failureMessage?: string;
   startedAt: string;

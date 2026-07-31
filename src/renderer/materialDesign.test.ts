@@ -896,7 +896,9 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(goalStatusStripSource).toContain("buildGoalProgressViewModel");
     expect(goalStatusStripSource).toContain("progress.statusLabel");
     expect(goalStatusStripSource).toContain("onResolveReview");
-    expect(goalStatusStripSource).toContain("onIncreaseBudget");
+    expect(goalStatusStripSource).not.toContain("onIncreaseBudget");
+    expect(goalStatusStripSource).toContain('case "waiting_for_model"');
+    expect(goalStatusStripSource).toContain("继续生成");
     expect(chatPanelSource).toContain("async function handlePauseGoal");
     expect(chatPanelSource).toContain("pauseGoal(goalId)");
     expect(chatPanelSource).toContain("isSessionSelectionCurrent(selection)");
@@ -904,8 +906,8 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource).toContain("isGoalMutationCurrent(selection, mutationSequence)");
     expect(chatPanelSource).toContain("? { onPause: () => void handlePauseGoal() }");
     expect(chatPanelSource).not.toContain('submitUserMessage("暂停这个目标")');
-    expect(chatPanelSource).toContain("window.buildingAgent.increaseGoalBudget(");
-    expect(chatPanelSource).toContain("onIncreaseBudget={handleIncreaseGoalBudget}");
+    expect(chatPanelSource).not.toContain("window.buildingAgent.increaseGoalBudget(");
+    expect(chatPanelSource).not.toContain("onIncreaseBudget={handleIncreaseGoalBudget}");
     expect(chatPanelSource).toContain(
       "const goalModeVisuallyEnabled = goalModeEnabled || planInputLocked;",
     );

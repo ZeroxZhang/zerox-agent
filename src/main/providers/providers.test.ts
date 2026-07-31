@@ -6,7 +6,10 @@ import { createProviderChatClient, createSettingsBackedChatClient } from "./prov
 import { createOpenAICompatibleProvider } from "./openAiCompatibleProvider";
 import type { ChatMessage, ChatCompletionRequest } from "../openAiCompatibleClient";
 import type { CompleteRequest, LLMProvider, NormalizedMessage, StreamEvent } from "./provider";
-import type { PublicModelSettings } from "../../shared/modelSettings";
+import type {
+  ProviderKind,
+  PublicModelSettings,
+} from "../../shared/modelSettings";
 
 describe("normalize round-trip", () => {
   it("preserves user image content across provider normalization", () => {
@@ -163,6 +166,136 @@ describe("providerFactory", () => {
       new Headers(requests[1]?.init?.headers).get("anthropic-version"),
     ).toBe("2023-06-01");
   });
+
+  it("maps semantic thinking controls to documented provider-specific fields", async () => {
+    const cases: Array<{
+      providerKind: ProviderKind;
+      model?: string;
+      expected: Record<string, unknown>;
+      absent: string[];
+    }> = [
+      {
+        providerKind: "deepseek",
+        expected: { thinking: { type: "disabled" } },
+        absent: ["enable_thinking", "reasoning", "reasoning_effort"],
+      },
+      {
+        providerKind: "zai",
+        expected: { thinking: { type: "disabled" } },
+        absent: ["enable_thinking", "reasoning", "reasoning_effort"],
+      },
+      {
+        providerKind: "kimi",
+        expected: { thinking: { type: "disabled" } },
+        absent: ["enable_thinking", "reasoning", "reasoning_effort"],
+      },
+      {
+        providerKind: "qwen",
+        expected: { enable_thinking: false },
+        absent: ["thinking", "reasoning", "reasoning_effort"],
+      },
+      {
+        providerKind: "dashscope-coding",
+        expected: { enable_thinking: false },
+        absent: ["thinking", "reasoning", "reasoning_effort"],
+      },
+      {
+        providerKind: "openrouter",
+        expected: { reasoning: { effort: "none" } },
+        absent: ["thinking", "enable_thinking", "reasoning_effort"],
+      },
+      {
+        providerKind: "openai",
+        model: "gpt-5.6-sol",
+        expected: { reasoning_effort: "none" },
+        absent: ["thinking", "enable_thinking", "reasoning"],
+      },
+      {
+        providerKind: "xai",
+        model: "grok-4.3",
+        expected: { reasoning_effort: "none" },
+        absent: ["thinking", "enable_thinking", "reasoning"],
+      },
+      {
+        providerKind: "openai",
+        model: "gpt-4o",
+        expected: {},
+        absent: [
+          "thinking",
+          "enable_thinking",
+          "reasoning",
+          "reasoning_effort",
+        ],
+      },
+      {
+        providerKind: "custom",
+        expected: {},
+        absent: [
+          "thinking",
+          "enable_thinking",
+          "reasoning",
+          "reasoning_effort",
+        ],
+      },
+      {
+        providerKind: "minimax",
+        expected: {},
+        absent: [
+          "thinking",
+          "enable_thinking",
+          "reasoning",
+          "reasoning_effort",
+        ],
+      },
+    ];
+
+    for (const candidate of cases) {
+      let body: Record<string, unknown> = {};
+      const provider = createProvider(
+        {
+          providerKind: candidate.providerKind,
+          apiKey: "key",
+          chatModel: candidate.model ?? "model",
+          ...(candidate.providerKind === "custom"
+            ? { connectionValues: { protocol: "openai" } }
+            : {}),
+        },
+        {
+          fetch: (async (_url, init) => {
+            body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+            return new Response(
+              JSON.stringify({
+                choices: [
+                  { message: { content: "OK" }, finish_reason: "stop" },
+                ],
+              }),
+              {
+                status: 200,
+                headers: { "content-type": "application/json" },
+              },
+            );
+          }) as typeof fetch,
+        },
+      );
+
+      await provider.complete({
+        model: candidate.model ?? "model",
+        apiKey: "key",
+        baseUrl: "https://provider.example/v1",
+        temperature: 0,
+        maxTokens: 128,
+        messages: [
+          { role: "user", content: [{ type: "text", text: "hi" }] },
+        ],
+        thinking: { type: "disabled" },
+      });
+
+      expect(body).toMatchObject(candidate.expected);
+      for (const field of candidate.absent) {
+        expect(body).not.toHaveProperty(field);
+      }
+    }
+  });
 });
 
 function mockFetch(
@@ -238,6 +371,115 @@ describe("AnthropicProvider", () => {
     expect(res.finishReason).toBe("tool_use");
     expect(res.cacheReadTokens).toBe(3);
     expect(res.cacheWriteTokens).toBe(2);
+  });
+
+  it("surfaces Anthropic max_tokens as an output-limit notice", async () => {
+    const provider = createProvider(
+      { providerId: "anthropic", apiKey: "k", chatModel: "claude-3-5-sonnet" },
+      {
+        fetch: mockFetch({
+          content: [{ type: "text", text: "partial" }],
+          stop_reason: "max_tokens",
+          usage: { input_tokens: 10, output_tokens: 100 },
+        }),
+      },
+    );
+
+    await expect(
+      provider.complete({
+        model: "claude-3-5-sonnet",
+        apiKey: "k",
+        temperature: 0,
+        maxTokens: 100,
+        messages: [
+          { role: "user", content: [{ type: "text", text: "hi" }] },
+        ],
+      }),
+    ).resolves.toMatchObject({
+      content: "partial",
+      finishReason: "max_tokens",
+      modelServiceNotice: {
+        kind: "output_limit",
+        provider: "anthropic",
+        model: "claude-3-5-sonnet",
+      },
+    });
+  });
+
+  it("applies the same bounded thinking configuration to complete and stream requests", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const encoder = new TextEncoder();
+    const provider = createProvider(
+      {
+        providerId: "anthropic",
+        apiKey: "k",
+        chatModel: "claude-sonnet-4-6",
+      },
+      {
+        fetch: (async (_url, init) => {
+          const body = JSON.parse(
+            String(init?.body),
+          ) as Record<string, unknown>;
+          bodies.push(body);
+          if (body.stream === true) {
+            return new Response(
+              new ReadableStream<Uint8Array>({
+                start(controller) {
+                  controller.enqueue(
+                    encoder.encode(
+                      `data: ${JSON.stringify({
+                        type: "message_delta",
+                        delta: { stop_reason: "end_turn" },
+                      })}\n\n`,
+                    ),
+                  );
+                  controller.close();
+                },
+              }),
+              {
+                status: 200,
+                headers: { "content-type": "text/event-stream" },
+              },
+            );
+          }
+          return new Response(
+            JSON.stringify({
+              content: [{ type: "text", text: "OK" }],
+              stop_reason: "end_turn",
+              usage: { input_tokens: 1, output_tokens: 1 },
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          );
+        }) as typeof fetch,
+      },
+    );
+    const req: CompleteRequest = {
+      model: "claude-sonnet-4-6",
+      apiKey: "k",
+      temperature: 0,
+      maxTokens: 4096,
+      messages: [
+        { role: "user", content: [{ type: "text", text: "hi" }] },
+      ],
+      thinking: { type: "enabled", budgetTokens: 8192 },
+    };
+
+    await provider.complete(req);
+    for await (const _event of provider.stream(req)) {
+      // Drain the stream so the request body is exercised.
+    }
+
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]).toMatchObject({
+      thinking: { type: "enabled", budget_tokens: 4095 },
+    });
+    expect(bodies[1]).toMatchObject({
+      stream: true,
+      thinking: { type: "enabled", budget_tokens: 4095 },
+    });
   });
 
   it("normalizes errors to an HTTP status without retaining the response body", async () => {
@@ -360,6 +602,252 @@ describe("GeminiProvider", () => {
     expect(res.cacheReadTokens).toBe(4);
   });
 
+  it("surfaces Gemini MAX_TOKENS as an output-limit notice", async () => {
+    const provider = createProvider(
+      { providerId: "gemini", apiKey: "k", chatModel: "gemini-2.5-pro" },
+      {
+        fetch: mockFetch({
+          candidates: [
+            {
+              content: { parts: [{ text: "partial" }], role: "model" },
+              finishReason: "MAX_TOKENS",
+            },
+          ],
+        }),
+      },
+    );
+
+    await expect(
+      provider.complete({
+        model: "gemini-2.5-pro",
+        apiKey: "k",
+        temperature: 0,
+        maxTokens: 100,
+        messages: [
+          { role: "user", content: [{ type: "text", text: "hi" }] },
+        ],
+      }),
+    ).resolves.toMatchObject({
+      content: "partial",
+      finishReason: "MAX_TOKENS",
+      modelServiceNotice: {
+        kind: "output_limit",
+        provider: "gemini",
+        model: "gemini-2.5-pro",
+      },
+    });
+  });
+
+  it("places thinking config inside generationConfig and separates thought summaries", async () => {
+    let requestBody: Record<string, unknown> = {};
+    const provider = createProvider(
+      {
+        providerId: "gemini",
+        apiKey: "k",
+        chatModel: "gemini-3.6-flash",
+      },
+      {
+        fetch: (async (_url, init) => {
+          requestBody = JSON.parse(
+            String(init?.body),
+          ) as Record<string, unknown>;
+          return new Response(
+            JSON.stringify({
+              candidates: [
+                {
+                  content: {
+                    parts: [
+                      { text: "公开思考摘要", thought: true },
+                      { text: "最终答案" },
+                    ],
+                  },
+                  finishReason: "STOP",
+                },
+              ],
+              usageMetadata: {
+                promptTokenCount: 8,
+                candidatesTokenCount: 5,
+              },
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          );
+        }) as typeof fetch,
+      },
+    );
+
+    await expect(
+      provider.complete({
+        model: "gemini-3.6-flash",
+        apiKey: "k",
+        temperature: 0,
+        maxTokens: 100,
+        messages: [
+          { role: "user", content: [{ type: "text", text: "hi" }] },
+        ],
+        thinking: { type: "disabled" },
+      }),
+    ).resolves.toMatchObject({
+      content: "最终答案",
+      reasoningContent: "公开思考摘要",
+    });
+    expect(requestBody).toMatchObject({
+      generationConfig: {
+        temperature: 0,
+        maxOutputTokens: 100,
+        thinkingConfig: {
+          thinkingLevel: "minimal",
+          includeThoughts: false,
+        },
+      },
+    });
+    expect(requestBody).not.toHaveProperty("thinkingConfig");
+  });
+
+  it("uses Gemini 2.5 Pro's minimum valid budget when thinking cannot be disabled", async () => {
+    let requestBody: Record<string, unknown> = {};
+    const provider = createProvider(
+      {
+        providerId: "gemini",
+        apiKey: "k",
+        chatModel: "gemini-2.5-pro",
+      },
+      {
+        fetch: (async (_url, init) => {
+          requestBody = JSON.parse(
+            String(init?.body),
+          ) as Record<string, unknown>;
+          return new Response(
+            JSON.stringify({
+              candidates: [
+                {
+                  content: { parts: [{ text: "最终答案" }] },
+                  finishReason: "STOP",
+                },
+              ],
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          );
+        }) as typeof fetch,
+      },
+    );
+
+    await provider.complete({
+      model: "gemini-2.5-pro",
+      apiKey: "k",
+      temperature: 0,
+      maxTokens: 1024,
+      messages: [
+        { role: "user", content: [{ type: "text", text: "hi" }] },
+      ],
+      thinking: { type: "disabled" },
+    });
+
+    expect(requestBody).toMatchObject({
+      generationConfig: {
+        thinkingConfig: {
+          thinkingBudget: 128,
+          includeThoughts: false,
+        },
+      },
+    });
+  });
+
+  it("preserves Gemini thinking configuration and deltas in streaming mode", async () => {
+    let requestBody: Record<string, unknown> = {};
+    const encoder = new TextEncoder();
+    const provider = createProvider(
+      {
+        providerId: "gemini",
+        apiKey: "k",
+        chatModel: "gemini-3.6-flash",
+      },
+      {
+        fetch: (async (_url, init) => {
+          requestBody = JSON.parse(
+            String(init?.body),
+          ) as Record<string, unknown>;
+          return new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(
+                  encoder.encode(
+                    `data: ${JSON.stringify({
+                      candidates: [
+                        {
+                          content: {
+                            parts: [
+                              { text: "摘要", thought: true },
+                              { text: "答案" },
+                            ],
+                          },
+                          finishReason: "STOP",
+                        },
+                      ],
+                      usageMetadata: {
+                        promptTokenCount: 4,
+                        candidatesTokenCount: 3,
+                      },
+                    })}\n\n`,
+                  ),
+                );
+                controller.close();
+              },
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "text/event-stream" },
+            },
+          );
+        }) as typeof fetch,
+      },
+    );
+    const events = [];
+
+    for await (const event of provider.stream({
+      model: "gemini-3.6-flash",
+      apiKey: "k",
+      temperature: 0,
+      maxTokens: 100,
+      messages: [
+        { role: "user", content: [{ type: "text", text: "hi" }] },
+      ],
+      thinking: { type: "enabled", budgetTokens: 2048 },
+    })) {
+      events.push(event);
+    }
+
+    expect(requestBody).toMatchObject({
+      generationConfig: {
+        thinkingConfig: {
+          thinkingLevel: "high",
+          includeThoughts: true,
+        },
+      },
+    });
+    expect(events).toEqual([
+      { type: "thinking_delta", text: "摘要" },
+      { type: "text_delta", text: "答案" },
+      {
+        type: "done",
+        response: {
+          content: "答案",
+          reasoningContent: "摘要",
+          toolCalls: [],
+          finishReason: "STOP",
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          usage: { inputTokens: 4, outputTokens: 3 },
+        },
+      },
+    ]);
+  });
+
   it("exposes bounded structured retry metadata for an HTTP failure", async () => {
     const provider = createProvider(
       { providerId: "gemini", apiKey: "k", chatModel: "gemini-1.5-pro" },
@@ -441,6 +929,11 @@ describe("ProviderChatClient adapter", () => {
     });
     expect(res.content).toBe("ok");
     expect(res.finishReason).toBe("end_turn");
+    expect(res.usage).toMatchObject({
+      inputTokens: 1,
+      outputTokens: 1,
+      totalTokens: 2,
+    });
   });
 
   it("falls back to the raw client when no provider is configured", async () => {
@@ -514,6 +1007,39 @@ describe("ProviderChatClient adapter", () => {
         arguments: '{"path":"/tmp"}',
       },
       { type: "done", finishReason: "stop" },
+    ]);
+  });
+
+  it("emits one final done event without letting a trailing stop hide output truncation", async () => {
+    const provider = scriptedProvider([
+      { type: "text_delta", text: "partial" },
+      { type: "done", finishReason: "MAX_TOKENS" },
+      { type: "done", finishReason: "stop" },
+    ]);
+    const client = createProviderChatClient({ provider });
+    const events = [];
+
+    for await (const event of client.streamComplete({
+      baseUrl: "",
+      apiKey: "k",
+      model: "m",
+      temperature: 0,
+      maxTokens: 10,
+      messages: [{ role: "user", content: "hi" }],
+    })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: "content_delta", text: "partial" },
+      {
+        type: "done",
+        finishReason: "MAX_TOKENS",
+        modelServiceNotice: expect.objectContaining({
+          kind: "output_limit",
+          rawReason: "MAX_TOKENS",
+        }),
+      },
     ]);
   });
 
@@ -629,9 +1155,17 @@ function scriptedProvider(events: StreamEvent[]): LLMProvider {
 }
 
 describe("OpenAICompatibleProvider", () => {
-  it("reports zero cache tokens (no OpenAI cache reporting)", async () => {
+  it("propagates OpenAI-compatible usage and reported prompt-cache tokens", async () => {
     const provider = createOpenAICompatibleProvider({
-      fetch: mockFetch({ choices: [{ message: { content: "hi" }, finish_reason: "stop" }] }) as never,
+      fetch: mockFetch({
+        choices: [{ message: { content: "hi" }, finish_reason: "stop" }],
+        usage: {
+          prompt_tokens: 7,
+          completion_tokens: 3,
+          total_tokens: 10,
+          prompt_tokens_details: { cached_tokens: 2 },
+        },
+      }) as never,
     });
     const req: CompleteRequest = {
       model: "gpt-4", apiKey: "k", baseUrl: "https://api.openai.com/v1",
@@ -639,8 +1173,9 @@ describe("OpenAICompatibleProvider", () => {
     };
     const res = await provider.complete(req);
     expect(res.content).toBe("hi");
-    expect(res.cacheReadTokens).toBe(0);
+    expect(res.cacheReadTokens).toBe(2);
     expect(res.cacheWriteTokens).toBe(0);
+    expect(res.usage).toEqual({ inputTokens: 7, outputTokens: 3 });
   });
 
   it("maps low-level streaming reasoning deltas to provider thinking deltas", async () => {
@@ -673,7 +1208,7 @@ describe("OpenAICompatibleProvider", () => {
 
     expect(events).toEqual([
       { type: "thinking_delta", text: "stream thought" },
-      { type: "done" },
+      { type: "done", finishReason: "stop" },
     ]);
   });
 
@@ -718,5 +1253,73 @@ describe("createSettingsBackedChatClient (P3 activation)", () => {
     });
     const res = await client.complete({ ...req, model: "claude-3-5-sonnet" });
     expect(res.content).toBe("from anthropic");
+  });
+
+  it("enforces a resolved profile's disabled thinking semantics on every request", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const client = createSettingsBackedChatClient({
+      loadSettings: async () => baseSettings,
+      getApiKey: async () => "legacy-key",
+      resolveProfile: async () => ({
+        binding: {
+          profileId: "deepseek-chat",
+          connectionId: "deepseek-primary",
+          providerKind: "deepseek",
+          modelId: "deepseek-v4-flash",
+          revision: 3,
+          capabilities: {
+            tools: true,
+            vision: false,
+            pdf: false,
+            streaming: true,
+            parallelToolCalls: true,
+          },
+          generation: {
+            temperature: 0.3,
+            maxTokens: 4096,
+            thinkingEnabled: false,
+            thinkingBudgetTokens: 8192,
+          },
+        },
+        connectionValues: { baseUrl: "https://api.deepseek.com" },
+        secrets: { apiKey: "profile-key" },
+      }),
+      fallback: {
+        async complete() {
+          throw new Error("fallback must not be used");
+        },
+        async *streamComplete() {
+          throw new Error("fallback must not be used");
+        },
+      },
+      fetch: (async (_input, init) => {
+        bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new Response(
+          JSON.stringify({
+            choices: [
+              { message: { content: "OK" }, finish_reason: "stop" },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }) as typeof fetch,
+    });
+
+    await expect(
+      client.complete({
+        ...req,
+        model: "caller-model",
+        apiKey: "caller-key",
+        thinking: { type: "enabled", budgetTokens: 9999 },
+      }),
+    ).resolves.toMatchObject({ content: "OK" });
+    expect(bodies).toEqual([
+      expect.objectContaining({
+        model: "deepseek-v4-flash",
+        temperature: 0.3,
+        max_tokens: 4096,
+        thinking: { type: "disabled" },
+      }),
+    ]);
   });
 });

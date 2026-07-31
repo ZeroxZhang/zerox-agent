@@ -209,6 +209,164 @@ describe("OpenAI-compatible chat client", () => {
     });
   });
 
+  it("returns reasoning-only responses so upper layers can recover or finalize them", async () => {
+    const client = createOpenAiCompatibleClient({
+      fetch: async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  reasoning_content: "已完成推理，但正式答案被输出上限截断。",
+                  content: null,
+                },
+                finish_reason: "length",
+              },
+            ],
+            usage: {
+              prompt_tokens: 40,
+              completion_tokens: 8192,
+              total_tokens: 8232,
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    });
+
+    await expect(
+      client.complete({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret-key",
+        model: "reasoning-model",
+        temperature: 0.2,
+        maxTokens: 8192,
+        messages: [{ role: "user", content: "Run" }],
+      }),
+    ).resolves.toMatchObject({
+      content: null,
+      toolCalls: [],
+      finishReason: "length",
+      reasoningContent: "已完成推理，但正式答案被输出上限截断。",
+      usage: {
+        inputTokens: 40,
+        outputTokens: 8192,
+      },
+    });
+  });
+
+  it("serializes documented provider thinking wire formats without conflating them", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const client = createOpenAiCompatibleClient({
+      fetch: async (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "OK" }, finish_reason: "stop" }],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      },
+    });
+    const request = {
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "secret-key",
+      model: "agent-model",
+      temperature: 0.2,
+      maxTokens: 8192,
+      messages: [{ role: "user" as const, content: "Run" }],
+    };
+
+    await client.complete({
+      ...request,
+      thinking: { type: "disabled" },
+      thinkingWireFormat: "thinking-object",
+    });
+    await client.complete({
+      ...request,
+      thinking: { type: "enabled", budgetTokens: 2048 },
+      thinkingWireFormat: "enable-thinking",
+    });
+    await client.complete({
+      ...request,
+      thinking: { type: "disabled" },
+      thinkingWireFormat: "reasoning-object",
+    });
+    await client.complete({
+      ...request,
+      thinking: { type: "disabled" },
+      thinkingWireFormat: "reasoning-effort",
+    });
+    await client.complete({
+      ...request,
+      thinking: { type: "enabled", budgetTokens: 2048 },
+      thinkingWireFormat: "omit",
+    });
+    await client.complete({
+      ...request,
+      thinking: { type: "enabled", budgetTokens: 2048 },
+    });
+
+    expect(bodies[0]).toMatchObject({
+      thinking: { type: "disabled" },
+    });
+    expect(bodies[0]).not.toHaveProperty("thinking.budget_tokens");
+    expect(bodies[1]).toMatchObject({
+      enable_thinking: true,
+      thinking_budget: 2048,
+    });
+    expect(bodies[1]).not.toHaveProperty("thinking");
+    expect(bodies[2]).toMatchObject({
+      reasoning: { effort: "none" },
+    });
+    expect(bodies[3]).toMatchObject({
+      reasoning_effort: "none",
+    });
+    expect(bodies[4]).not.toHaveProperty("thinking");
+    expect(bodies[4]).not.toHaveProperty("enable_thinking");
+    expect(bodies[4]).not.toHaveProperty("reasoning");
+    expect(bodies[4]).not.toHaveProperty("reasoning_effort");
+    expect(bodies[5]).toMatchObject({
+      thinking: { type: "enabled", budget_tokens: 2048 },
+    });
+  });
+
+  it("returns an output-limit notice instead of misreporting an empty response", async () => {
+    const client = createOpenAiCompatibleClient({
+      fetch: async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: { content: null },
+                finish_reason: "length",
+              },
+            ],
+            usage: { completion_tokens: 8192 },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    });
+
+    await expect(
+      client.complete({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret-key",
+        model: "agent-model",
+        temperature: 0.2,
+        maxTokens: 8192,
+        messages: [{ role: "user", content: "Run" }],
+      }),
+    ).resolves.toMatchObject({
+      content: null,
+      finishReason: "length",
+      modelServiceNotice: {
+        kind: "output_limit",
+        model: "agent-model",
+        rawReason: "length",
+      },
+    });
+  });
+
   it("streams provider reasoning deltas from SSE chunks", async () => {
     const encoder = new TextEncoder();
     const client = createOpenAiCompatibleClient({
@@ -242,6 +400,70 @@ describe("OpenAI-compatible chat client", () => {
       { type: "reasoning_delta", text: "plan " },
       { type: "content_delta", text: "answer" },
       { type: "done", finishReason: "stop" },
+    ]);
+  });
+
+  it("preserves a streamed length finish reason when a later [DONE] arrives", async () => {
+    const encoder = new TextEncoder();
+    const client = createOpenAiCompatibleClient({
+      fetch: async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(
+                encoder.encode(
+                  `data: ${JSON.stringify({
+                    choices: [
+                      {
+                        delta: { content: "partial answer" },
+                        finish_reason: "length",
+                      },
+                    ],
+                  })}\n\n`,
+                ),
+              );
+              controller.enqueue(
+                encoder.encode(
+                  `data: ${JSON.stringify({
+                    choices: [
+                      {
+                        delta: {},
+                        finish_reason: "stop",
+                      },
+                    ],
+                  })}\n\n`,
+                ),
+              );
+              controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+              controller.close();
+            },
+          }),
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        ),
+    });
+
+    const events = [];
+    for await (const event of client.streamComplete({
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "secret-key",
+      model: "agent-model",
+      temperature: 0,
+      maxTokens: 10,
+      messages: [{ role: "user", content: "Run" }],
+    })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: "content_delta", text: "partial answer" },
+      {
+        type: "done",
+        finishReason: "length",
+        modelServiceNotice: expect.objectContaining({
+          kind: "output_limit",
+          rawReason: "length",
+        }),
+      },
     ]);
   });
 

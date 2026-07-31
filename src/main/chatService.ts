@@ -86,6 +86,10 @@ import {
   summarizeAgentRuntimeContextSnapshot,
 } from "../shared/agentRuntimeContext";
 import {
+  modelServiceNoticeFromError,
+  type ModelServiceNotice,
+} from "../shared/modelServiceNotice";
+import {
   extractRequestedSkillQuery,
   matchSkillMentionCandidates,
 } from "../shared/skillMentions";
@@ -1340,13 +1344,10 @@ export function createChatService(options: {
               ...(options.compactionStrategy
                 ? { compactionStrategy: options.compactionStrategy }
                 : {}),
-              pauseOnTurnLimit: true,
+              // maxTurns is retained as a legacy/checkpoint hint. Zerox no
+              // longer pauses a user task solely because that count is reached.
+              pauseOnTurnLimit: false,
               pauseOnFailureLoop: true,
-              tokenBudget: Math.max(
-                profile.maxTokens,
-                profile.maxTokens * Math.min(loopMaxTurns, 8),
-              ),
-              maxWallClockMs: 30 * 60 * 1000,
               ...(continuationToResume
                 ? {
                     resumeMessages: chatMessages,
@@ -1642,11 +1643,30 @@ export function createChatService(options: {
               maxTurns: loopResult.continuation.maxTurns,
               toolCallsExecuted: finalToolCallsExecuted,
               message: loopResult.summary,
+              ...(loopResult.modelServiceNotice
+                ? { modelServiceNotice: loopResult.modelServiceNotice }
+                : {}),
             };
+            if (loopResult.modelServiceNotice) {
+              emitOutputPart(
+                outputAssembler.appendDiagnostic({
+                  severity: "warning",
+                  title:
+                    loopResult.modelServiceNotice.kind === "output_limit"
+                      ? "模型输出未完成"
+                      : "模型服务暂不可用",
+                  message: loopResult.modelServiceNotice.message,
+                }),
+              );
+            }
             emitStatus.send({
               state: "paused",
               message:
-                loopResult.continuation.reason === "tool_failure_loop"
+                loopResult.modelServiceNotice
+                  ? loopResult.modelServiceNotice.kind === "output_limit"
+                    ? "模型输出被服务商截断，等待你继续"
+                    : "模型服务返回限制，等待你重试"
+                  : loopResult.continuation.reason === "tool_failure_loop"
                   ? "连续工具失败，等待确认"
                   : loopResult.continuation.reason === "strategy_guard"
                     ? "策略守护触发，等待确认"
@@ -1717,11 +1737,11 @@ export function createChatService(options: {
         }
       } else {
         // Fallback: simple LLM chat (no tools)
+        const messages: ChatMessage[] = [
+          { role: "system", content: buildChatSystemPrompt(chatDate, chatTimeZone) },
+          ...chatMessages,
+        ];
         try {
-          const messages: ChatMessage[] = [
-            { role: "system", content: buildChatSystemPrompt(chatDate, chatTimeZone) },
-            ...chatMessages,
-          ];
           const response = await options.chatClient.complete({
             ...profile,
             messages,
@@ -1739,11 +1759,58 @@ export function createChatService(options: {
             toChatSessionTokenUsage(response.usage),
           );
           reply = response.content ?? "";
-          emitStatus.send({
-            state: "completed",
-            message: "任务已完成",
-            toolCallsExecuted: 0,
-          });
+          if (response.modelServiceNotice) {
+            const notice = response.modelServiceNotice;
+            const continuationReason =
+              modelNoticeContinuationReason(notice);
+            pendingContinuations.set(sessionId, {
+              messages: [
+                ...messages,
+                ...(reply
+                  ? [{ role: "assistant" as const, content: reply }]
+                  : []),
+              ],
+              maxTurns: 1,
+              toolCallsExecuted: 0,
+              evidenceRunId: requestId,
+              createdAt: Date.now(),
+            });
+            agentStatus = {
+              state: "paused",
+              runId: requestId,
+              reason: continuationReason,
+              maxTurns: 1,
+              toolCallsExecuted: 0,
+              message: notice.message,
+              modelServiceNotice: notice,
+            };
+            emitOutputPart(
+              outputAssembler.appendDiagnostic({
+                severity: "warning",
+                title:
+                  notice.kind === "output_limit"
+                    ? "模型输出未完成"
+                    : "模型服务暂不可用",
+                message: notice.message,
+              }),
+            );
+            emitStatus.send({
+              state: "paused",
+              message:
+                notice.kind === "output_limit"
+                  ? "模型输出被服务商截断，等待你继续"
+                  : "模型服务返回限制，等待你重试",
+              maxTurns: 1,
+              toolCallsExecuted: 0,
+            });
+          } else {
+            pendingContinuations.delete(sessionId);
+            emitStatus.send({
+              state: "completed",
+              message: "任务已完成",
+              toolCallsExecuted: 0,
+            });
+          }
         } catch (error) {
           if (isAbortError(error, runtimeOptions.signal)) {
             emitStatus.send({
@@ -1759,21 +1826,58 @@ export function createChatService(options: {
               message: "已中断任务。",
             };
           }
-          emitStatus.send({
-            state: "failed",
-            message:
-              error instanceof Error ? `模型调用失败：${error.message}` : "模型调用失败。",
+          const notice = modelServiceNoticeFromError(error, {
+            provider: profile.providerId,
+            model: profile.model,
           });
-          emitTerminalStreamEvent({
-            type: "failed",
-            message:
-              error instanceof Error ? `模型调用失败：${error.message}` : "模型调用失败。",
-          });
-          return {
-            ok: false,
-            message:
-              error instanceof Error ? `模型调用失败：${error.message}` : "模型调用失败。",
-          };
+          if (notice) {
+            reply = notice.message;
+            pendingContinuations.set(sessionId, {
+              messages,
+              maxTurns: 1,
+              toolCallsExecuted: 0,
+              evidenceRunId: requestId,
+              createdAt: Date.now(),
+            });
+            agentStatus = {
+              state: "paused",
+              runId: requestId,
+              reason: modelNoticeContinuationReason(notice),
+              maxTurns: 1,
+              toolCallsExecuted: 0,
+              message: notice.message,
+              modelServiceNotice: notice,
+            };
+            emitOutputPart(
+              outputAssembler.appendDiagnostic({
+                severity: "warning",
+                title: "模型服务暂不可用",
+                message: notice.message,
+              }),
+            );
+            emitStatus.send({
+              state: "paused",
+              message: "模型服务返回限制，等待你重试",
+              maxTurns: 1,
+              toolCallsExecuted: 0,
+            });
+          } else {
+            emitStatus.send({
+              state: "failed",
+              message:
+                error instanceof Error ? `模型调用失败：${error.message}` : "模型调用失败。",
+            });
+            emitTerminalStreamEvent({
+              type: "failed",
+              message:
+                error instanceof Error ? `模型调用失败：${error.message}` : "模型调用失败。",
+            });
+            return {
+              ok: false,
+              message:
+                error instanceof Error ? `模型调用失败：${error.message}` : "模型调用失败。",
+            };
+          }
         }
       }
 
@@ -3067,12 +3171,27 @@ function formatLockedPlanReply(plan: PlanRecord): string {
 
 function formatAgentLoopFailure(summary: string): string {
   if (summary.startsWith("Token budget exceeded:")) {
-    return "Token 预算已用尽，任务未完成";
+    return "检测到旧版 Token 预算停止记录，任务未完成（只读）";
   }
   if (summary.startsWith("Wall-clock budget exceeded")) {
-    return "运行时间预算已用尽，任务未完成";
+    return "检测到旧版运行时间预算停止记录，任务未完成（只读）";
   }
   return "Agent 执行失败，任务未完成";
+}
+
+function modelNoticeContinuationReason(
+  notice: ModelServiceNotice,
+): Extract<ChatAgentStatus, { state: "paused" }>["reason"] {
+  switch (notice.kind) {
+    case "output_limit":
+      return "provider_output_limit";
+    case "rate_limit":
+      return "provider_rate_limit";
+    case "quota_exhausted":
+      return "provider_quota";
+    case "provider_stop":
+      return "provider_stop";
+  }
 }
 
 async function tryRouteGoalIntent(options: {
@@ -3341,6 +3460,30 @@ async function tryRouteGoalIntent(options: {
   }
 
   if (options.route.kind === "continue_goal") {
+    if (options.activeGoal.status === "stopped_budget") {
+      const reply =
+        "这是旧版本地预算机制留下的只读任务，不能继续执行。你仍可查看原结果和执行证据。";
+      options.emitStatus?.send({
+        state: "paused",
+        message: "旧版任务已停止（只读）",
+        toolCallsExecuted: 0,
+      });
+      await appendGoalReply({
+        content: reply,
+        goalId: options.activeGoal.id,
+        goalEventRef: "legacy_goal_read_only",
+      });
+      return {
+        result: {
+          ok: true,
+          reply,
+          sessionId: options.sessionId,
+          relatedMemories: [],
+          memoryId: null,
+          activeGoal: options.activeGoal,
+        },
+      };
+    }
     const restartingTerminalGoal = isTerminalGoalStatus(options.activeGoal.status);
     const goalToContinue = restartingTerminalGoal
       ? await options.goalService.createFromChat({

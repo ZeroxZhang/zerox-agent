@@ -28,10 +28,8 @@ function createSnapshot(
       bodyHash: "sha256:body",
       manifestHash: "sha256:manifest",
     },
-    budgets: {
-      maxTurns: 8,
-      usedTurns: 2,
-      maxToolCalls: 12,
+    executionPolicy: {
+      checkpointEveryTurns: 8,
     },
     resources: [
       {
@@ -124,7 +122,7 @@ describe("skill execution contract", () => {
     });
   });
 
-  it("preserves skill provenance and budgets in snapshots", () => {
+  it("preserves skill provenance and checkpoint policy in snapshots", () => {
     const snapshot = transitionSkillExecution(
       createSnapshot("executing"),
       "validating",
@@ -145,10 +143,8 @@ describe("skill execution contract", () => {
         bodyHash: "sha256:body",
         manifestHash: "sha256:manifest",
       },
-      budgets: {
-        maxTurns: 8,
-        usedTurns: 2,
-        maxToolCalls: 12,
+      executionPolicy: {
+        checkpointEveryTurns: 8,
       },
     });
     expect(snapshot.resources).toEqual([

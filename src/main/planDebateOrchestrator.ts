@@ -25,6 +25,7 @@ import {
   parseUniquePlanRoundObject,
 } from "../shared/planStructuredOutput";
 import { validatePlanMilestoneGraph } from "../shared/planValidation";
+import { throwForModelServiceNotice } from "../shared/modelServiceNotice";
 import type {
   ChatCompletionResponse,
   ChatMessage,
@@ -705,6 +706,7 @@ async function completeStructuredRound(
       inputTokens += response.usage.inputTokens;
       outputTokens += response.usage.outputTokens;
     }
+    throwForModelServiceNotice(response.modelServiceNotice);
     try {
       if (!response.content?.trim()) {
         throw new Error("规划模型没有返回结构化内容。");
@@ -767,6 +769,8 @@ function structuredRoundFailure(
     `contentLength=${content.length}`,
     `contentSha256=${content ? hash(content).slice(0, 16) : "empty"}`,
     `reasoningOnly=${Boolean(response.reasoningContent && !content.trim())}`,
+    `inputTokens=${response.usage?.inputTokens ?? "unknown"}`,
+    `outputTokens=${response.usage?.outputTokens ?? "unknown"}`,
   ].join(", ");
   return new Error(
     `规划模型连续两次未返回可用 JSON 对象。最后错误：${reason}（${diagnostics}）。`,

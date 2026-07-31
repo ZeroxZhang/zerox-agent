@@ -136,6 +136,47 @@ describe("agent runner service", () => {
     });
   });
 
+  it("keeps a provider-limited legacy run paused for a user-triggered retry", async () => {
+    const service = createAgentRunnerService({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      resolveSkill: async () => createSkillRecord(2),
+      chatClient: {
+        async complete() {
+          return {
+            content: "partial",
+            toolCalls: [],
+            finishReason: "MAX_TOKENS",
+            modelServiceNotice: {
+              kind: "output_limit",
+              provider: "test-provider",
+              model: "test-model",
+              rawReason: "MAX_TOKENS",
+              message: "模型输出被截断。",
+            },
+          };
+        },
+      },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      createId: () => "run_provider_limit",
+      now: () => new Date("2026-06-05T08:00:00.000Z"),
+    });
+
+    await expect(service.runTask("task_123")).resolves.toMatchObject({
+      ok: true,
+      run: {
+        status: "paused",
+        summary: "模型输出被截断。",
+        modelServiceNotice: {
+          kind: "output_limit",
+          rawReason: "MAX_TOKENS",
+        },
+      },
+    });
+  });
+
   it("writes episodic memory after a successful run", async () => {
     const memoryWrites: MemoryInput[] = [];
     const service = createAgentRunnerService({
@@ -183,7 +224,7 @@ describe("agent runner service", () => {
     const service = createAgentRunnerService({
       taskStore: createTaskStore(createTask()),
       runStore: createMemoryRunStore(),
-      resolveSkill: async () => createSkillRecord(4),
+      resolveSkill: async () => createSkillRecord(4, true),
       chatClient: {
         async complete(request) {
           capturedMessages.push(request.messages);
@@ -629,7 +670,10 @@ function createTask(partial: Partial<ScheduledTask> = {}): ScheduledTask {
   };
 }
 
-function createSkillRecord(maxTurns?: number): SkillRecord {
+function createSkillRecord(
+  maxTurns?: number,
+  planningRequired = false,
+): SkillRecord {
   return {
     manifest: {
       name: "local-file-organizer",
@@ -637,6 +681,7 @@ function createSkillRecord(maxTurns?: number): SkillRecord {
       description: "Organize local files.",
       version: "0.1.0",
       execution: { mode: "agent", entrypoint: null, ...(maxTurns !== undefined ? { maxTurns } : {}) },
+      planning: { required: planningRequired },
       inputs: [],
       permissions: {
         files: { read: [], write: [] },

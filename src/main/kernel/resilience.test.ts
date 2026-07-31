@@ -1,43 +1,47 @@
 import { describe, expect, it } from "vitest";
 import {
-  ABSOLUTE_MAX_TURNS,
-  DEFAULT_CHAT_MAX_TURNS,
-  PER_MILESTONE_TURNS,
-  deriveRuntimeMaxTurns,
+  DEFAULT_CHAT_CHECKPOINT_INTERVAL,
+  MAX_CHECKPOINT_INTERVAL,
+  PER_MILESTONE_CHECKPOINT_TURNS,
+  deriveRuntimeCheckpointInterval,
 } from "./resilience";
 
-describe("deriveRuntimeMaxTurns", () => {
+describe("deriveRuntimeCheckpointInterval", () => {
   it("uses the chat default without an override", () => {
-    expect(deriveRuntimeMaxTurns({ mode: "chat" })).toBe(DEFAULT_CHAT_MAX_TURNS);
+    expect(deriveRuntimeCheckpointInterval({ mode: "chat" })).toBe(
+      DEFAULT_CHAT_CHECKPOINT_INTERVAL,
+    );
   });
 
-  it("lets chat overrides win while respecting the hard maximum", () => {
-    expect(deriveRuntimeMaxTurns({ mode: "chat", userOverride: 12 })).toBe(12);
-    expect(deriveRuntimeMaxTurns({
+  it("lets chat overrides win while bounding checkpoint frequency", () => {
+    expect(
+      deriveRuntimeCheckpointInterval({ mode: "chat", userOverride: 12 }),
+    ).toBe(12);
+    expect(deriveRuntimeCheckpointInterval({
       mode: "chat",
       userOverride: 120,
-      absoluteMaxTurns: 40,
+      maxCheckpointInterval: 40,
     })).toBe(40);
   });
 
-  it("derives goal turns from milestone count", () => {
-    expect(deriveRuntimeMaxTurns({
+  it("derives a goal checkpoint interval from milestone count", () => {
+    expect(deriveRuntimeCheckpointInterval({
       mode: "goal",
       milestoneCount: 5,
-    })).toBe(5 * PER_MILESTONE_TURNS);
+    })).toBe(5 * PER_MILESTONE_CHECKPOINT_TURNS);
   });
 
-  it("caps goal turns at the absolute maximum", () => {
-    expect(deriveRuntimeMaxTurns({
+  it("caps only the checkpoint interval", () => {
+    expect(deriveRuntimeCheckpointInterval({
       mode: "goal",
       milestoneCount: 20,
-    })).toBe(ABSOLUTE_MAX_TURNS);
+    })).toBe(MAX_CHECKPOINT_INTERVAL);
   });
 
-  it("gives zero-milestone goals one milestone budget", () => {
-    expect(deriveRuntimeMaxTurns({
+  it("gives zero-milestone goals one checkpoint interval", () => {
+    expect(deriveRuntimeCheckpointInterval({
       mode: "goal",
       milestoneCount: 0,
-    })).toBe(PER_MILESTONE_TURNS);
+    })).toBe(PER_MILESTONE_CHECKPOINT_TURNS);
   });
 });

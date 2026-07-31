@@ -246,7 +246,7 @@ function goal(): Goal {
       maxWallClockMs: 60_000,
       maxReplans: 1,
     },
-    budgetUsage: {
+    executionUsage: {
       iterations: 0,
       toolCalls: 0,
       wallClockMs: 0,

@@ -24,6 +24,8 @@ export type TaskActivityState = {
   startedAt?: number;
   toolCallsExecuted?: number;
   maxTurns?: number;
+  actionLabel?: string;
+  canContinue?: boolean;
 };
 
 export type TaskProcessItem = {
@@ -80,6 +82,8 @@ export function createTaskActivity(options: {
   lastEventAt?: number;
   toolCallsExecuted?: number;
   maxTurns?: number;
+  actionLabel?: string;
+  canContinue?: boolean;
 }): TaskActivityState {
   const now = options.now ?? Date.now();
 
@@ -98,6 +102,10 @@ export function createTaskActivity(options: {
       ? { toolCallsExecuted: options.toolCallsExecuted }
       : {}),
     ...(typeof options.maxTurns === "number" ? { maxTurns: options.maxTurns } : {}),
+    ...(options.actionLabel ? { actionLabel: options.actionLabel } : {}),
+    ...(typeof options.canContinue === "boolean"
+      ? { canContinue: options.canContinue }
+      : {}),
   };
 }
 
@@ -133,11 +141,22 @@ export function buildGoalTaskActivity(options: {
     });
   }
 
+  if (options.status === "waiting_for_model") {
+    return createTaskActivity({
+      kind: "paused",
+      title: "等待模型服务",
+      detail: options.description,
+      actionLabel: "重试模型",
+      now: options.now,
+    });
+  }
+
   if (options.status === "stopped_budget") {
     return createTaskActivity({
       kind: "paused",
-      title: "目标预算已用尽",
-      detail: options.description,
+      title: "旧版任务已停止（只读）",
+      detail: `可查看原结果和证据：${options.description}`,
+      canContinue: false,
       now: options.now,
     });
   }
@@ -207,7 +226,11 @@ export function getGoalUiSyncState(status: GoalStatus): GoalUiSyncState {
     };
   }
 
-  if (status === "waiting_for_review" || status === "waiting_for_acceptance") {
+  if (
+    status === "waiting_for_review" ||
+    status === "waiting_for_acceptance" ||
+    status === "waiting_for_model"
+  ) {
     return {
       statusKind: "paused",
       workPhase: "paused",

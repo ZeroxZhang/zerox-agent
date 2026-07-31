@@ -78,6 +78,53 @@ describe("agent runtime engine", () => {
     });
   });
 
+  it("preserves a provider limit on a paused scheduled run for manual recovery", async () => {
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore({ ...createTask(), skillName: "" }),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore([]),
+      resolveSkill: async () => null,
+      chatClient: { async complete() { return finalResponse("unused"); } },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      async runLoop(_initialMessages, _profile, loopOptions) {
+        return {
+          status: "paused",
+          summary: "partial output",
+          turns: 65,
+          messages: [
+            ...(loopOptions.resumeMessages ?? []),
+            { role: "assistant", content: "partial output" },
+          ],
+          toolCallsExecuted: 65,
+          tokensConsumed: 50_000,
+          modelServiceNotice: {
+            kind: "output_limit",
+            provider: "test-provider",
+            model: "test-model",
+            rawReason: "MAX_TOKENS",
+            message: "模型输出被截断。",
+          },
+        };
+      },
+      createId: createSequentialId("runtime_notice"),
+      now: createSteppedClock("2026-07-12T00:00:00.000Z"),
+    });
+
+    await expect(engine.startTask("task_123")).resolves.toMatchObject({
+      ok: true,
+      run: {
+        status: "paused",
+        summary: "partial output",
+        modelServiceNotice: {
+          kind: "output_limit",
+          rawReason: "MAX_TOKENS",
+        },
+      },
+    });
+  });
+
   it("continues trajectory sequence numbers after engine recreation and resume", async () => {
     let persisted: AgentExecutionCheckpoint = {
       id: "checkpoint_resume",
@@ -1205,7 +1252,7 @@ describe("agent runtime engine", () => {
     );
   });
 
-  it("classifies retry budget exhaustion in failure trajectory", async () => {
+  it("allows changed retry arguments and stops only on an identical failed retry", async () => {
     const trajectoryEvents: AgentTrajectoryEvent[] = [];
     const executedPaths: string[] = [];
     const engine = createAgentRuntimeEngine({
@@ -1217,6 +1264,9 @@ describe("agent runtime engine", () => {
       chatClient: createChatClient([
         toolCallResponse("file_read", {
           path: "~/Downloads/missing-1.md",
+        }),
+        toolCallResponse("file_read", {
+          path: "~/Downloads/missing-2.md",
         }),
         toolCallResponse("file_read", {
           path: "~/Downloads/missing-2.md",
@@ -1234,7 +1284,7 @@ describe("agent runtime engine", () => {
           };
         },
       },
-      createId: createSequentialId("budget_exhausted"),
+      createId: createSequentialId("duplicate_retry"),
       now: createSteppedClock("2026-06-07T00:00:00.000Z"),
     });
 
@@ -1245,17 +1295,22 @@ describe("agent runtime engine", () => {
       run: {
         status: "failed",
         failureClass: "tool_error",
-        failureMessage: expect.stringContaining("budget_exhausted"),
+        failureMessage: expect.stringContaining("duplicate_retry_blocked"),
       },
     });
     expect(executedPaths).toEqual([
       "~/Downloads/missing-1.md",
       "~/Downloads/missing-2.md",
+      "~/Downloads/missing-2.md",
     ]);
     const reflectionClasses = trajectoryEvents
       .filter((event) => event.type === "reflection_added")
       .map((event) => event.payload.failureClass);
-    expect(reflectionClasses).toEqual(["tool_failed", "budget_exhausted"]);
+    expect(reflectionClasses).toEqual([
+      "tool_failed",
+      "tool_failed",
+      "duplicate_retry_blocked",
+    ]);
     expect(trajectoryEvents).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1263,7 +1318,7 @@ describe("agent runtime engine", () => {
           payload: expect.objectContaining({
             failureClass: "tool_error",
             toolName: "file_read",
-            reflectionFailureClass: "budget_exhausted",
+            reflectionFailureClass: "duplicate_retry_blocked",
             retryAllowed: false,
             suggestion: "abort",
           }),

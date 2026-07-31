@@ -1110,7 +1110,7 @@ describe("goal runtime engine", () => {
     expect(runs[0]?.status).toBe("canceled");
   });
 
-  it("applies the wall-clock deadline to deterministic pipeline tools", async () => {
+  it("ignores a legacy wall-clock budget for deterministic pipeline tools", async () => {
     const runs: AgentRunRecord[] = [];
     const goal = createGoal({ taskContract: chromeBookmarkTaskContract });
     goal.budget.maxWallClockMs = 10;
@@ -1119,14 +1119,22 @@ describe("goal runtime engine", () => {
       chatClient: { async complete() { throw new Error("unused"); } },
       getModelProfile: async () => { throw new Error("unused"); },
       toolExecutor: {
-        async execute(_request, options) {
-          return new Promise((_, reject) => {
-            options?.signal?.addEventListener(
-              "abort",
-              () => reject(options.signal?.reason),
-              { once: true },
-            );
-          });
+        async execute() {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          return {
+            ok: true,
+            result: {
+              artifactRef: "artifact:bookmark_list",
+              artifactPath: "/Users/demo/Desktop/bookmark_list.md",
+              provenanceRef: "provenance:bookmark_list",
+              provenancePath: "/Users/demo/Desktop/bookmark_list.md.provenance.json",
+              goalEvidenceRef: "artifact:goalEvidence",
+              goalEvidencePath: "/Users/demo/Desktop/goalEvidence.md",
+              goalEvidenceProvenanceRef: "provenance:goalEvidence",
+              goalEvidenceProvenancePath:
+                "/Users/demo/Desktop/goalEvidence.md.provenance.json",
+            },
+          };
         },
         getRegistry() { return createDynamicToolRegistry(); },
         hasTool() { return true; },
@@ -1151,9 +1159,8 @@ describe("goal runtime engine", () => {
 
     const result = await engine.runMilestone(goal, goal.milestones[0]!);
 
-    expect(result.status).toBe("failed");
-    expect(result.summary).toContain("wall-clock budget");
-    expect(runs.at(-1)?.status).toBe("failed");
+    expect(result.status).toBe("succeeded");
+    expect(runs.at(-1)?.status).toBe("succeeded");
   });
 
   it("passes run-scoped identity into chrome bookmark provenance and projects artifact events", async () => {
@@ -1903,7 +1910,7 @@ function createGoal(overrides: {
       maxWallClockMs: 45 * 60 * 1000,
       maxReplans: 3,
     },
-    budgetUsage: {
+    executionUsage: {
       iterations: 0,
       toolCalls: 0,
       wallClockMs: 0,

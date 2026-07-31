@@ -10,7 +10,7 @@ describe("agent trajectory insights", () => {
     const insights = summarizeTrajectoryInsights([
       createEvent("reflection_added", {
         toolName: "file_read",
-        failureClass: "budget_exhausted",
+        failureClass: "duplicate_retry_blocked",
         retryAllowed: false,
         suggestion: "abort",
       }),
@@ -33,7 +33,7 @@ describe("agent trajectory insights", () => {
         eventId: "event_1",
         tone: "warn",
         title: "恢复停止",
-        detail: "file_read: budget_exhausted -> abort",
+        detail: "file_read: duplicate_retry_blocked -> abort",
       },
       {
         eventId: "event_2",

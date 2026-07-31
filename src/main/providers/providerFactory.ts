@@ -92,6 +92,7 @@ export function createProvider(
     case "ollama":
       return withProviderId(
         createOpenAICompatibleProvider({
+          providerKind: "ollama",
           ...(deps.fetch ? { fetch: deps.fetch } : {}),
           ...(deps.timeoutMs ? { timeoutMs: deps.timeoutMs } : {}),
         }),
@@ -114,6 +115,7 @@ export function createProvider(
       }
       return withProviderId(
         createOpenAICompatibleProvider({
+          providerKind: "custom",
           ...(deps.fetch ? { fetch: deps.fetch } : {}),
           ...(deps.timeoutMs ? { timeoutMs: deps.timeoutMs } : {}),
         }),
@@ -134,6 +136,7 @@ export function createProvider(
     case "openrouter":
       return withProviderId(
         createOpenAICompatibleProvider({
+          providerKind: kind,
           ...(deps.fetch ? { fetch: deps.fetch } : {}),
           ...(deps.timeoutMs ? { timeoutMs: deps.timeoutMs } : {}),
         }),

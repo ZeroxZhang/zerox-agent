@@ -220,6 +220,11 @@ describe("package scripts", () => {
       (feature) =>
         feature.id === "P55-v3.8.1-model-provider-and-conversation-ux",
     );
+    const p56 = featureList.features.find(
+      (feature) =>
+        feature.id ===
+        "P56-v3.8.1-thinking-control-and-empty-response-hotfix",
+    );
     const p31 = featureList.features.find(
       (feature) => feature.id === "P31-v3.1.2-window-controls-and-settings-icon",
     );
@@ -261,10 +266,22 @@ describe("package scripts", () => {
           featureId ===
             "P54-v3.8.0-plan-trust-boundary-hardening" ||
           featureId ===
-            "P55-v3.8.1-model-provider-and-conversation-ux",
+            "P55-v3.8.1-model-provider-and-conversation-ux" ||
+          featureId ===
+            "P56-v3.8.1-thinking-control-and-empty-response-hotfix",
       ),
     ).toBe(true);
     expect(openFeatureIds.length).toBeLessThanOrEqual(1);
+    expect(p56?.status === "in_progress" || p56?.status === "done").toBe(true);
+    expect(p56).toEqual(
+      expect.objectContaining({
+        definitionOfDone: expect.arrayContaining([
+          expect.stringContaining("DeepSeek"),
+          expect.stringContaining("reasoning-only"),
+          expect.stringContaining("provider"),
+        ]),
+      }),
+    );
     expect(p55?.status === "in_progress" || p55?.status === "done").toBe(true);
     expect(p55).toEqual(
       expect.objectContaining({

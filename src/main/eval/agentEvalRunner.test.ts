@@ -270,7 +270,7 @@ describe("agent eval runner", () => {
         "workspace-escape-denied",
         "code-engineering-native-tools",
         "reflection-after-test-failure",
-        "reflection-retry-budget-exhausted",
+        "reflection-duplicate-retry-stalled",
         "context-compaction-before-model-request",
         "tool-result-checkpoint-before-next-tool",
         "model-retry-before-response",
@@ -331,7 +331,7 @@ describe("agent eval runner", () => {
     });
     expect(
       fixtures.find(
-        (fixture) => fixture.id === "reflection-retry-budget-exhausted",
+        (fixture) => fixture.id === "reflection-duplicate-retry-stalled",
       ),
     ).toMatchObject({
       requiredEventTypes: [
@@ -343,12 +343,12 @@ describe("agent eval runner", () => {
       assertions: expect.arrayContaining([
         {
           type: "reflection_added",
-          payload: { failureClass: "budget_exhausted" },
+          payload: { failureClass: "duplicate_retry_blocked" },
           after: "tool_result",
         },
         {
           type: "failure_classified",
-          payload: { reflectionFailureClass: "budget_exhausted" },
+          payload: { reflectionFailureClass: "duplicate_retry_blocked" },
           after: "reflection_added",
         },
       ]),

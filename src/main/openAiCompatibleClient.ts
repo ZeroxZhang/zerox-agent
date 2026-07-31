@@ -1,5 +1,9 @@
 import { defaultRequestTimeoutMs, fetchWithTimeout } from "./fetchWithTimeout";
 import { providerHttpError } from "./providers/providerHttpError";
+import {
+  modelServiceNoticeFromFinishReason,
+  type ModelServiceNotice,
+} from "../shared/modelServiceNotice";
 
 export type ChatImageContent = {
   mediaType: string;
@@ -44,6 +48,16 @@ export type ChatCompletionRequest = {
   tool_choice?: "auto" | "none" | { type: "function"; function: { name: string } };
   signal?: AbortSignal;
   thinking?: { type: "enabled" | "disabled"; budgetTokens?: number };
+  /**
+   * Provider-specific wire shape for the semantic `thinking` setting.
+   * Callers should normally leave this to the provider adapter.
+   */
+  thinkingWireFormat?:
+    | "thinking-object"
+    | "enable-thinking"
+    | "reasoning-object"
+    | "reasoning-effort"
+    | "omit";
 };
 
 export type ChatCompletionResponse = {
@@ -62,6 +76,7 @@ export type ChatCompletionResponse = {
   };
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
+  modelServiceNotice?: ModelServiceNotice;
 };
 
 export type ChatClient = {
@@ -88,7 +103,11 @@ export type StreamEvent =
   | { type: "content_delta"; text: string }
   | { type: "reasoning_delta"; text: string }
   | { type: "tool_call_delta"; id: string; index?: number; name: string; arguments: string }
-  | { type: "done"; finishReason: string };
+  | {
+      type: "done";
+      finishReason: string;
+      modelServiceNotice?: ModelServiceNotice;
+    };
 
 export type StreamingChatClient = ChatClient & {
   streamComplete(
@@ -118,7 +137,7 @@ export function createOpenAiCompatibleClient(options?: {
       );
 
       if (!response.ok) {
-        throw providerHttpError(response);
+        throw await providerHttpError(response);
       }
 
       const payload = (await response.json()) as {
@@ -152,14 +171,34 @@ export function createOpenAiCompatibleClient(options?: {
       const reasoningContent = normalizeReasoningContent(message);
       const usage = normalizeCompletionUsage(payload.usage);
 
-      if (!content && !toolCalls.length) {
-        throw new Error("LLM response did not include message content or tool calls.");
+      const finishReason = choice?.finish_reason ?? "stop";
+      const modelServiceNotice = modelServiceNoticeFromFinishReason(
+        finishReason,
+        { model: request.model },
+      );
+
+      if (
+        !content &&
+        !toolCalls.length &&
+        !reasoningContent &&
+        !modelServiceNotice
+      ) {
+        const diagnostics = [
+          `choice=${choice ? "present" : "missing"}`,
+          `message=${message ? "present" : "missing"}`,
+          `finishReason=${choice?.finish_reason ?? "unknown"}`,
+          `completionTokens=${usage?.completionTokens ?? "unknown"}`,
+        ].join(", ");
+        throw new Error(
+          `LLM response did not include message content, reasoning content, or tool calls (${diagnostics}).`,
+        );
       }
 
       return {
         content,
         toolCalls,
-        finishReason: choice?.finish_reason ?? "stop",
+        finishReason,
+        ...(modelServiceNotice ? { modelServiceNotice } : {}),
         ...(reasoningContent ? { reasoningContent } : {}),
         // P8: surface provider usage for runGraph cost aggregation.
         ...(usage
@@ -196,7 +235,7 @@ export function createOpenAiCompatibleClient(options?: {
       );
 
       if (!response.ok) {
-        throw providerHttpError(response);
+        throw await providerHttpError(response);
       }
       if (!response.body) {
         throw new Error("LLM streaming response did not include a body.");
@@ -205,6 +244,8 @@ export function createOpenAiCompatibleClient(options?: {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let terminalFinishReason = "stop";
+      let doneEmitted = false;
 
       // v3.6.0: SSE idle timeout per read (30 s). Prevents infinite hang when
       // the stream stalls without sending [DONE] (CORE-02, NET-14).
@@ -251,7 +292,18 @@ export function createOpenAiCompatibleClient(options?: {
                 const final = decoder.decode();
                 if (final) buffer += final;
               }
-              yield { type: "done", finishReason: "stop" };
+              if (!doneEmitted) {
+                doneEmitted = true;
+                const modelServiceNotice =
+                  modelServiceNoticeFromFinishReason(terminalFinishReason, {
+                    model: request.model,
+                  });
+                yield {
+                  type: "done",
+                  finishReason: terminalFinishReason,
+                  ...(modelServiceNotice ? { modelServiceNotice } : {}),
+                };
+              }
               return;
             }
 
@@ -302,7 +354,17 @@ export function createOpenAiCompatibleClient(options?: {
               // done reason so the caller can issue a continuation (CORE-03).
               if (finishReason) {
                 streamEnded = true;
-                yield { type: "done", finishReason };
+                const currentNotice =
+                  modelServiceNoticeFromFinishReason(terminalFinishReason, {
+                    model: request.model,
+                  });
+                const candidateNotice =
+                  modelServiceNoticeFromFinishReason(finishReason, {
+                    model: request.model,
+                  });
+                if (candidateNotice || !currentNotice) {
+                  terminalFinishReason = finishReason;
+                }
               }
             } catch {
               // Skip unparseable chunks in streaming
@@ -319,6 +381,17 @@ export function createOpenAiCompatibleClient(options?: {
           if (final.length > 0) {
             yield { type: "content_delta", text: final };
           }
+        }
+        if (!doneEmitted) {
+          const modelServiceNotice = modelServiceNoticeFromFinishReason(
+            terminalFinishReason,
+            { model: request.model },
+          );
+          yield {
+            type: "done",
+            finishReason: terminalFinishReason,
+            ...(modelServiceNotice ? { modelServiceNotice } : {}),
+          };
         }
       } finally {
         reader.releaseLock();
@@ -439,7 +512,7 @@ export function createOpenAiCompatibleEmbeddingClient(options?: {
       );
 
       if (!response.ok) {
-        throw providerHttpError(response);
+        throw await providerHttpError(response);
       }
 
       const payload = (await response.json()) as {
@@ -472,7 +545,55 @@ function buildChatCompletionBody(
     body.tool_choice = request.tool_choice ?? "auto";
   }
 
-  if (request.thinking?.type === "enabled") {
+  applyThinkingWireFormat(body, request);
+
+  return body;
+}
+
+function applyThinkingWireFormat(
+  body: Record<string, unknown>,
+  request: ChatCompletionRequest,
+): void {
+  if (!request.thinking || request.thinkingWireFormat === "omit") {
+    return;
+  }
+
+  const format = request.thinkingWireFormat ?? "legacy";
+  if (format === "thinking-object") {
+    body.thinking = { type: request.thinking.type };
+    return;
+  }
+  if (format === "enable-thinking") {
+    body.enable_thinking = request.thinking.type === "enabled";
+    if (
+      request.thinking.type === "enabled" &&
+      typeof request.thinking.budgetTokens === "number"
+    ) {
+      body.thinking_budget = request.thinking.budgetTokens;
+    }
+    return;
+  }
+  if (format === "reasoning-object") {
+    body.reasoning =
+      request.thinking.type === "enabled"
+        ? {
+            enabled: true,
+            ...(typeof request.thinking.budgetTokens === "number"
+              ? { max_tokens: request.thinking.budgetTokens }
+              : {}),
+          }
+        : { effort: "none" };
+    return;
+  }
+  if (format === "reasoning-effort") {
+    body.reasoning_effort =
+      request.thinking.type === "enabled" ? "high" : "none";
+    return;
+  }
+
+  // Preserve the legacy generic-client behavior. Provider-routed requests use
+  // an explicit wire format and therefore serialize both enabled and disabled.
+  if (request.thinking.type === "enabled") {
     body.thinking = {
       type: "enabled",
       ...(typeof request.thinking.budgetTokens === "number"
@@ -480,8 +601,6 @@ function buildChatCompletionBody(
         : {}),
     };
   }
-
-  return body;
 }
 
 function serializeMessage(

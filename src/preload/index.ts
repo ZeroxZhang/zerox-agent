@@ -154,7 +154,8 @@ export type AgentRunsChangedEvent = {
 export type CreateGoalInput = {
   description: string;
   successCriteria: string[];
-  budget: GoalBudget;
+  /** @deprecated Ignored by the runtime. */
+  budget?: GoalBudget;
   reviewPolicy: GoalReviewPolicy;
 };
 
@@ -370,11 +371,6 @@ const buildingAgent = {
     ipcRenderer.invoke("goal:resolveReview", goalId, decision),
   cancelGoal: (goalId: string): Promise<GoalOperationResult> =>
     ipcRenderer.invoke("goal:cancel", goalId),
-  increaseGoalBudget: (
-    goalId: string,
-    delta: Partial<GoalBudget>,
-  ): Promise<GoalOperationResult> =>
-    ipcRenderer.invoke("goal:increaseBudget", goalId, delta),
   replanGoal: (
     goalId: string,
     instructions: string,

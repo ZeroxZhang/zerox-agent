@@ -9,7 +9,6 @@ describe("agent reflection policy", () => {
       error: "test_run failed with exit code 1.",
       errorDetails: { kind: "exit", stdout: "", stderr: "expected 1 to equal 2" },
       previousReflections: [],
-      budget: { retryBudget: 1 },
     });
 
     expect(reflection).toMatchObject({
@@ -27,14 +26,12 @@ describe("agent reflection policy", () => {
       args: { workspaceRoot: "/repo", query: "missingSymbol" },
       error: "No matches.",
       previousReflections: [],
-      budget: { retryBudget: 1 },
     });
     const second = createToolFailureReflection({
       toolName: "code_search",
       args: { workspaceRoot: "/repo", query: "missingSymbol" },
       error: "No matches.",
       previousReflections: [first],
-      budget: { retryBudget: 1 },
     });
 
     expect(second).toMatchObject({
@@ -50,7 +47,6 @@ describe("agent reflection policy", () => {
       args: { path: "/private/out.md" },
       error: "file_write 被运行沙箱阻止：路径不在工作区或额外可写目录内。",
       previousReflections: [],
-      budget: { retryBudget: 2 },
     });
 
     expect(reflection).toMatchObject({

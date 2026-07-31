@@ -514,7 +514,8 @@ function registerGoalsIpcHandlers(container: AppContainer): void {
       input: {
         description: string;
         successCriteria: string[];
-        budget: GoalBudget;
+        /** @deprecated Ignored by the runtime. */
+        budget?: GoalBudget;
         reviewPolicy: GoalReviewPolicy;
       },
     ): Promise<{ ok: boolean; goal?: Goal; message?: string }> => {
@@ -579,13 +580,10 @@ function registerGoalsIpcHandlers(container: AppContainer): void {
   );
   ipcMain.handle(
     "goal:increaseBudget",
-    async (
-      _event,
-      goalId: string,
-      delta: Partial<GoalBudget>,
-    ): Promise<{ ok: boolean; goal?: Goal; message?: string }> => {
-      return container.increaseGoalBudget(goalId, delta);
-    },
+    async (): Promise<{ ok: false; message: string }> => ({
+      ok: false,
+      message: "budget_control_removed",
+    }),
   );
   ipcMain.handle(
     "goal:replan",

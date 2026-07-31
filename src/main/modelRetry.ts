@@ -3,6 +3,7 @@ import type {
   ChatCompletionRequest,
   ChatCompletionResponse,
 } from "./openAiCompatibleClient";
+import { modelServiceNoticeFromError } from "../shared/modelServiceNotice";
 
 export type ModelRetryOptions = {
   maxRetries?: number;
@@ -52,16 +53,31 @@ export async function completeWithModelRetry(
     }
   }
 
-  throw new Error("LLM retry exhausted.");
+  throw new Error("Temporary model transport retries did not recover.");
 }
 
 function isRetryableModelError(error: unknown): boolean {
+  if (modelServiceNoticeFromError(error)) {
+    return false;
+  }
+  const record =
+    error && typeof error === "object"
+      ? (error as Record<string, unknown>)
+      : undefined;
+  const status = Number(record?.statusCode ?? record?.status);
+  if (Number.isFinite(status)) {
+    if (status === 402 || status === 429) return false;
+    if (status === 408 || status === 409 || status === 425 || status >= 500) {
+      return true;
+    }
+  }
   const message = formatError(error);
   if (/status\s+(401|403)|unauthori[sz]ed|permission|forbidden/i.test(message)) {
     return false;
   }
 
-  return /status\s+(408|409|425|429|5\d\d)|timeout|timed out|network|fetch|ENOTFOUND|ECONNRESET|EPIPE|overloaded/i
+  // Provider rate/quota limits are surfaced to the user for an explicit retry.
+  return /(?:status|http)\s+(408|409|425|5\d\d)|timeout|timed out|network|fetch|ENOTFOUND|ECONNRESET|EPIPE|overloaded/i
     .test(message);
 }
 

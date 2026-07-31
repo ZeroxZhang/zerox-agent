@@ -2457,7 +2457,56 @@ describe("agent goal acceptance", () => {
       detail: "Final judge provider rate limited the request.",
       retryAfterMs: 1500,
     });
+    expect(result.modelServiceNotice).toMatchObject({
+      kind: "rate_limit",
+      statusCode: 429,
+      retryAfterMs: 1500,
+    });
     expect(JSON.stringify(result)).not.toContain("secret provider payload");
+  });
+
+  it("surfaces a truncated final judge response instead of retrying JSON parsing", async () => {
+    let calls = 0;
+    const result = await createAgentGoalAcceptance({
+      chatClient: {
+        async complete() {
+          calls += 1;
+          return {
+            content: '{"verdict":"accepted"',
+            toolCalls: [],
+            finishReason: "length",
+            modelServiceNotice: {
+              kind: "output_limit",
+              provider: "test-provider",
+              model: "judge-model",
+              rawReason: "length",
+              message: "模型输出达到限制。",
+            },
+          };
+        },
+      },
+    }).evaluateGoal(
+      createGoal([
+        check(
+          "final_output_limit",
+          "model_review",
+          { evidenceRefs: ["evidence:final"] },
+          true,
+        ),
+      ]),
+      createContext(),
+    );
+
+    expect(calls).toBe(1);
+    expect(result).toMatchObject({
+      accepted: false,
+      verdict: "acceptance_unavailable",
+      modelServiceNotice: {
+        kind: "output_limit",
+        rawReason: "length",
+      },
+    });
+    expect(result.checkResults[0]?.code).toBe("judge_unavailable");
   });
 
   it("enforces an asynchronous final-judge timeout and handles the late rejection", async () => {
@@ -3410,7 +3459,7 @@ function createGoal(checks: AcceptanceCheck[]): Goal {
       maxWallClockMs: 600_000,
       maxReplans: 2,
     },
-    budgetUsage: {
+    executionUsage: {
       iterations: 1,
       toolCalls: 1,
       wallClockMs: 1000,

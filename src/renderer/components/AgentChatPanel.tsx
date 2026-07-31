@@ -95,7 +95,6 @@ import {
   type TaskActivityState,
   type SubagentProcessItem,
 } from "../chatTaskActivity";
-import { buildGoalBudgetIncreaseDelta } from "../goalProgressViewModel";
 import {
   createGoalAcceptanceOperationToken,
   doesGoalAcceptanceOperationOwnPending,
@@ -1924,50 +1923,6 @@ export function AgentChatPanel({
     }
   }
 
-  async function handleIncreaseGoalBudget() {
-    if (!window.buildingAgent || !activeGoal?.id) {
-      return;
-    }
-
-    const goalId = activeGoal.id;
-    const selection = captureSessionSelection();
-    const mutationSequence = beginGoalMutation();
-    const delta = buildGoalBudgetIncreaseDelta(activeGoalDetail);
-    const increased = await window.buildingAgent.increaseGoalBudget(goalId, delta);
-    if (!isGoalMutationCurrent(selection, mutationSequence)) {
-      return;
-    }
-    if (!increased.ok) {
-      appendMessage({
-        role: "assistant",
-        content: `增加目标预算失败：${increased.message}`,
-      });
-      return;
-    }
-
-    const result = await window.buildingAgent.retryGoal(goalId);
-    if (!isGoalMutationCurrent(selection, mutationSequence)) {
-      return;
-    }
-    if (result.ok && result.goal) {
-      applyGoalSummaryToSessions(result.goal);
-      setStatus({ kind: "working", message: "预算已增加，目标继续执行" });
-      setWorkPhase("tool");
-      setTaskActivity(
-        buildGoalTaskActivity({
-          status: result.goal.status,
-          description: result.goal.description,
-        }),
-      );
-      void refreshActiveGoalDetail(result.goal.id);
-      void refreshSessions(sessionId ?? undefined);
-    }
-    appendMessage({
-      role: "assistant",
-      content: result.ok ? "已增加耗尽的目标预算并继续执行。" : `继续目标失败：${result.message}`,
-    });
-  }
-
   async function handlePauseGoal() {
     if (!window.buildingAgent || !activeGoal?.id) {
       return;
@@ -2131,7 +2086,9 @@ export function AgentChatPanel({
       void refreshActiveGoalDetail(result.activeGoal.id);
     }
     setSelectedSkillName(null);
-    const isPaused = result.agentStatus?.state === "paused";
+    const pausedAgentStatus =
+      result.agentStatus?.state === "paused" ? result.agentStatus : null;
+    const isPaused = Boolean(pausedAgentStatus);
     const failedAgentStatus = result.agentStatus?.state === "failed" ? result.agentStatus : null;
     const isFailed = Boolean(failedAgentStatus);
     const isGoalExecuting = result.activeGoal?.status === "executing";
@@ -2157,7 +2114,11 @@ export function AgentChatPanel({
         : isGoalExecuting
         ? "目标正在后台执行"
         : isPaused
-        ? "等待你确认是否继续"
+        ? pausedAgentStatus?.modelServiceNotice?.kind === "output_limit"
+          ? "模型输出未完成，等待你继续生成"
+          : pausedAgentStatus?.modelServiceNotice
+            ? "模型服务返回限制，等待你重试"
+            : "等待你确认是否继续"
         : result.createdTask
           ? "任务已创建"
           : result.executedRun
@@ -3172,7 +3133,6 @@ export function AgentChatPanel({
                   ? { onPause: () => void handlePauseGoal() }
                   : {})}
                 onResolveReview={handleResolveGoalReview}
-                onIncreaseBudget={handleIncreaseGoalBudget}
                 onReplan={handleReplanGoal}
                 onRetry={handleRetryGoal}
                 onContinueAcceptance={() => void handleContinueGoalAcceptance()}
@@ -3548,7 +3508,6 @@ export function AgentChatPanel({
           }
           onClose={() => setGoalDrawerOpen(false)}
           onResolveReview={handleResolveGoalReview}
-          onIncreaseBudget={handleIncreaseGoalBudget}
           onReplan={handleReplanGoal}
           onRetry={handleRetryGoal}
           onContinueAcceptance={() => void handleContinueGoalAcceptance()}
@@ -3598,7 +3557,8 @@ export function AgentChatPanel({
             detail={taskActivityDetail}
             processItems={taskProcessItems}
             onContinue={
-              taskActivity.kind === "paused"
+              taskActivity.kind === "paused" &&
+              taskActivity.canContinue !== false
                 ? () => {
                     void submitUserMessage("继续");
                   }
@@ -4740,7 +4700,7 @@ function ContextActivityCard({
         )}
         {onContinue && (
           <button type="button" onClick={onContinue}>
-            继续执行
+            {activity.actionLabel ?? "继续执行"}
           </button>
         )}
       </div>
@@ -5150,20 +5110,37 @@ function buildTaskActivityFromAgentStatus(options: {
   if (options.agentStatus?.state === "paused") {
     const isFailureLoop = options.agentStatus.reason === "tool_failure_loop";
     const isStrategyGuard = options.agentStatus.reason === "strategy_guard";
+    const isProviderOutput =
+      options.agentStatus.reason === "provider_output_limit";
+    const isProviderLimit =
+      isProviderOutput ||
+      options.agentStatus.reason === "provider_rate_limit" ||
+      options.agentStatus.reason === "provider_quota" ||
+      options.agentStatus.reason === "provider_stop";
     return createTaskActivity({
       kind: "paused",
       title: isFailureLoop
         ? "连续工具失败，等待确认"
         : isStrategyGuard
           ? "策略守护触发，等待确认"
-          : "长任务等待确认",
+          : isProviderOutput
+            ? "模型输出未完成"
+            : isProviderLimit
+              ? "模型服务暂不可用"
+              : "长任务等待确认",
       detail: isFailureLoop
         ? `已执行 ${options.agentStatus.toolCallsExecuted} 个工具，检测到同类失败循环`
         : isStrategyGuard
           ? `已执行 ${options.agentStatus.toolCallsExecuted} 个工具，检测到碎片化工具调用`
-        : `已执行 ${options.agentStatus.toolCallsExecuted} 个工具，停在第 ${options.agentStatus.maxTurns} 轮检查点`,
+          : isProviderLimit
+            ? options.agentStatus.modelServiceNotice?.message ??
+              options.agentStatus.message
+            : `已执行 ${options.agentStatus.toolCallsExecuted} 个工具，停在第 ${options.agentStatus.maxTurns} 轮检查点`,
       toolCallsExecuted: options.agentStatus.toolCallsExecuted,
       maxTurns: options.agentStatus.maxTurns,
+      ...(isProviderLimit
+        ? { actionLabel: isProviderOutput ? "继续生成" : "重试" }
+        : {}),
     });
   }
 
@@ -5194,10 +5171,10 @@ function buildTaskActivityFromAgentStatus(options: {
 
 function formatAgentFailureForDisplay(message?: string): string {
   if (message?.startsWith("Token budget exceeded:")) {
-    return "Token 预算已用尽，执行已安全停止；当前结果不是完成态。";
+    return "这是旧版 Token 预算停止记录；当前结果不是完成态，且保持只读。";
   }
   if (message?.startsWith("Wall-clock budget exceeded")) {
-    return "运行时间预算已用尽，执行已安全停止；当前结果不是完成态。";
+    return "这是旧版运行时间预算停止记录；当前结果不是完成态，且保持只读。";
   }
   return message?.trim() || "Agent 执行失败，当前任务未完成。";
 }
@@ -5674,9 +5651,10 @@ function translateGoalStatus(status: ChatSessionGoalSummary["status"]): string {
     executing: "执行中",
     waiting_for_review: "等待审核",
     waiting_for_acceptance: "等待最终验收",
+    waiting_for_model: "等待模型服务",
     achieved: "已达成",
     completed_unverified: "手动完成 · 未经机器认证",
-    stopped_budget: "预算已用尽",
+    stopped_budget: "旧版停止（只读）",
     stopped_stalled: "停滞停止",
     stopped_blocked: "目标受阻",
     failed: "失败",

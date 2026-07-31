@@ -5,14 +5,9 @@ export type AgentReflectionFailureClass =
   | "verification_failed"
   | "network_failed"
   | "tool_failed"
-  | "duplicate_retry_blocked"
-  | "budget_exhausted";
+  | "duplicate_retry_blocked";
 
 export type AgentReflectionSuggestion = "retry" | "skip" | "abort";
-
-export type AgentRunBudget = {
-  retryBudget: number;
-};
 
 export type AgentReflectionDecision = {
   failureClass: AgentReflectionFailureClass;
@@ -29,7 +24,6 @@ export function createToolFailureReflection(input: {
   error: string;
   errorDetails?: Record<string, unknown>;
   previousReflections: AgentReflectionDecision[];
-  budget: AgentRunBudget;
 }): AgentReflectionDecision {
   const argumentFingerprint = `${input.toolName}:${stableStringify(input.args)}`;
   if (
@@ -44,17 +38,6 @@ export function createToolFailureReflection(input: {
       retryAllowed: false,
       adjustedApproach:
         "Do not retry the exact same tool arguments again; change the query, path, command, or ask the user for direction.",
-    });
-  }
-
-  if (input.previousReflections.length >= input.budget.retryBudget) {
-    return buildDecision(input, {
-      argumentFingerprint,
-      failureClass: "budget_exhausted",
-      suggestion: "abort",
-      retryAllowed: false,
-      adjustedApproach:
-        "Retry budget is exhausted; return a partial result with the evidence already collected.",
     });
   }
 

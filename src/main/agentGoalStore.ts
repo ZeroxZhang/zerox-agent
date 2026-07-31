@@ -304,13 +304,36 @@ function isActiveGoal(goal: Goal | null): goal is Goal {
 }
 
 function normalizeGoal(goal: Goal): Goal {
+  const {
+    budgetUsage: legacyUsage,
+    ...goalWithoutLegacyUsage
+  } = (
+    goal as Goal & {
+      budgetUsage?: Goal["executionUsage"];
+    }
+  );
   return sanitizeFinalJudgeReplay({
-    ...goal,
+    ...goalWithoutLegacyUsage,
+    executionUsage: normalizeExecutionUsage(
+      goal.executionUsage ?? legacyUsage,
+    ),
     ...(goal.chatSessionId ? { chatSessionId: String(goal.chatSessionId) } : {}),
     ...(goal.originMessageId
       ? { originMessageId: String(goal.originMessageId) }
       : {}),
   });
+}
+
+function normalizeExecutionUsage(
+  usage: Goal["executionUsage"] | undefined,
+): Goal["executionUsage"] {
+  return {
+    iterations: Math.max(0, Number(usage?.iterations ?? 0)),
+    toolCalls: Math.max(0, Number(usage?.toolCalls ?? 0)),
+    wallClockMs: Math.max(0, Number(usage?.wallClockMs ?? 0)),
+    tokens: Math.max(0, Number(usage?.tokens ?? 0)),
+    replans: Math.max(0, Number(usage?.replans ?? 0)),
+  };
 }
 
 function sanitizeFinalJudgeReplay(goal: Goal): Goal {

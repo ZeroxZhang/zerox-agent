@@ -189,15 +189,7 @@ export function createGoalRuntimeEngine(options: {
     async runMilestone(goal, milestone, runOptions) {
       const startedAt = now();
       const runId = createId();
-      const remainingWallClockMs = Math.max(
-        1,
-        goal.budget.maxWallClockMs - goal.budgetUsage.wallClockMs,
-      );
-      const deadlineSignal = createBudgetDeadlineSignal(remainingWallClockMs);
-      const runSignal = combineRuntimeSignals(
-        runOptions?.signal,
-        deadlineSignal,
-      );
+      const runSignal = runOptions?.signal;
       let trajectoryQueue: Promise<void> = Promise.resolve();
       const appendRunTrajectory = (
         type: Parameters<AgentTrajectoryStore["append"]>[1]["type"],
@@ -284,37 +276,6 @@ export function createGoalRuntimeEngine(options: {
           ]),
         };
       };
-      const recordTimedOutRun = async (skillName: string) => {
-        const finishedAt = now();
-        const summary = `Goal milestone exceeded wall-clock budget after ${remainingWallClockMs}ms.`;
-        const failedRun: AgentRunRecord = {
-          id: runId,
-          taskId,
-          taskName: goal.description,
-          skillName,
-          status: "failed",
-          runContext,
-          summary,
-          events,
-          startedAt,
-          finishedAt,
-        };
-        await options.runStore.append(failedRun);
-        await flushTrajectoryWrites();
-        return {
-          runId,
-          toolCallCount: observedToolCalls,
-          status: "failed" as const,
-          summary,
-          wallClockMs: remainingWallClockMs,
-          tokens: 0,
-          transcriptMessages: [] as ChatMessage[],
-          actionSignatures: sanitizeActionSignaturesForPersistence([
-            ...actionSignatures,
-          ]),
-        };
-      };
-
       const taskContract = goal.taskContract;
       if (isDeterministicGoalPipelineSupported(taskContract)) {
         const runtimeContextSnapshot = createRuntimeContextSnapshotForRun({
@@ -530,9 +491,6 @@ export function createGoalRuntimeEngine(options: {
           },
           });
         } catch (error) {
-          if (deadlineSignal.aborted && !runOptions?.signal?.aborted) {
-            return recordTimedOutRun("deterministic-goal-pipeline");
-          }
           if (runOptions?.signal?.aborted || isAbortLike(error)) {
             return recordCanceledRun(
               "deterministic-goal-pipeline",
@@ -543,9 +501,6 @@ export function createGoalRuntimeEngine(options: {
           throw error;
         }
         const finishedAt = now();
-        if (deadlineSignal.aborted && !runOptions?.signal?.aborted) {
-          return recordTimedOutRun("deterministic-goal-pipeline");
-        }
         if (runOptions?.signal?.aborted) {
           return recordCanceledRun("deterministic-goal-pipeline", [], 0);
         }
@@ -657,16 +612,10 @@ export function createGoalRuntimeEngine(options: {
         runtimeContextSnapshotSummary:
           summarizeAgentRuntimeContextSnapshot(runtimeContextSnapshot),
       }, false);
-      const tokenBudget =
-        options.tokenBudget ??
-        (goal.budget.maxTokens
-          ? Math.max(1, goal.budget.maxTokens - goal.budgetUsage.tokens)
-          : undefined) ??
-        modelProfile.maxTokens;
       const assembled = options.goalContext.assemble(
         goal,
         runOptions?.resumeMessages ?? [],
-        tokenBudget,
+        options.tokenBudget ?? modelProfile.maxTokens,
       );
       const milestoneInstruction: ChatMessage = {
         role: "user",
@@ -703,23 +652,7 @@ export function createGoalRuntimeEngine(options: {
           runContext,
           runtimeTask: buildGoalMilestoneRuntimeTask(goal, runContext),
           systemPrompt: buildGoalSystemPrompt(modelProfile.model, startedAt.split("T")[0]),
-          maxTurns:
-            options.maxTurns ??
-            Math.max(
-              4,
-              Math.min(
-                32,
-                goal.budget.maxToolCalls - goal.budgetUsage.toolCalls,
-              ),
-            ),
-          maxToolCalls: Math.max(
-            0,
-            goal.budget.maxToolCalls - goal.budgetUsage.toolCalls,
-          ),
-          maxWallClockMs: Math.max(
-            1,
-            goal.budget.maxWallClockMs - goal.budgetUsage.wallClockMs,
-          ),
+          maxTurns: options.maxTurns ?? 32,
           tools: options.toolExecutor.getRegistry().getDefinitions(),
           toolResultOffloadStore: options.toolResultOffloadStore,
           toolResultOffloadThreshold: options.toolResultOffloadThreshold,
@@ -942,6 +875,9 @@ export function createGoalRuntimeEngine(options: {
         actionSignatures: sanitizeActionSignaturesForPersistence([
           ...actionSignatures,
         ]),
+        ...(loopResult.modelServiceNotice
+          ? { modelServiceNotice: loopResult.modelServiceNotice }
+          : {}),
       };
     },
   };
@@ -966,32 +902,6 @@ function isAbortLike(error: unknown): boolean {
     (error instanceof DOMException && error.name === "AbortError") ||
     (error instanceof Error && /abort|cancel/i.test(`${error.name} ${error.message}`))
   );
-}
-
-function createBudgetDeadlineSignal(ms: number): AbortSignal {
-  const controller = new AbortController();
-  const timer = setTimeout(
-    () => controller.abort(new DOMException("Wall-clock budget exceeded.", "TimeoutError")),
-    ms,
-  );
-  timer.unref?.();
-  return controller.signal;
-}
-
-function combineRuntimeSignals(
-  first: AbortSignal | undefined,
-  second: AbortSignal,
-): AbortSignal {
-  if (!first) return second;
-  const controller = new AbortController();
-  const forward = (signal: AbortSignal) => {
-    if (!controller.signal.aborted) controller.abort(signal.reason);
-  };
-  if (first.aborted) forward(first);
-  else first.addEventListener("abort", () => forward(first), { once: true });
-  if (second.aborted) forward(second);
-  else second.addEventListener("abort", () => forward(second), { once: true });
-  return controller.signal;
 }
 
 function buildGoalRuntimeMemoryScopes(

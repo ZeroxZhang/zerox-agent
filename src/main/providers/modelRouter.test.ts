@@ -8,7 +8,10 @@ import type {
   ModelSettingsStore,
   ResolvedModelProfile,
 } from "../modelSettingsStore";
-import type { ResolvedModelBinding } from "../../shared/modelSettings";
+import type {
+  ProviderKind,
+  ResolvedModelBinding,
+} from "../../shared/modelSettings";
 import { createModelRouter } from "./modelRouter";
 
 const generation = {
@@ -33,19 +36,28 @@ function resolved(input: {
   baseUrl: string;
   apiKey: string;
   revision?: number;
+  providerKind?: ProviderKind;
+  thinkingEnabled?: boolean;
+  thinkingBudgetTokens?: number;
 }): ResolvedModelProfile {
   const revision = input.revision ?? 1;
+  const resolvedGeneration = {
+    ...generation,
+    thinkingEnabled: input.thinkingEnabled ?? generation.thinkingEnabled,
+    thinkingBudgetTokens:
+      input.thinkingBudgetTokens ?? generation.thinkingBudgetTokens,
+  };
   const binding: ResolvedModelBinding = {
     profileId: input.profileId,
     connectionId: input.connectionId,
-    providerKind: "openai",
+    providerKind: input.providerKind ?? "openai",
     modelId: input.modelId,
     revision,
     connectionRevision: revision,
     profileRevision: revision,
     baseUrl: input.baseUrl,
     capabilities,
-    generation,
+    generation: resolvedGeneration,
   };
   return {
     binding,
@@ -57,7 +69,7 @@ function resolved(input: {
       connectionId: input.connectionId,
       modelId: input.modelId,
       purpose: "chat",
-      generation,
+      generation: resolvedGeneration,
       custom: false,
       revision,
       createdAt: "2026-07-30T00:00:00.000Z",
@@ -208,5 +220,83 @@ describe("ModelRouter", () => {
     expect(resolveBinding).toHaveBeenCalledWith(frozen.binding);
     expect(bound.binding.modelId).toBe("model-v1");
     expect(bound.binding.revision).toBe(1);
+  });
+
+  it("enforces profile thinking settings with each provider's documented request shape", async () => {
+    const profiles = new Map([
+      [
+        "deepseek-off",
+        resolved({
+          profileId: "deepseek-off",
+          connectionId: "deepseek",
+          providerKind: "deepseek",
+          modelId: "deepseek-v4-flash",
+          baseUrl: "https://api.deepseek.com",
+          apiKey: "deepseek-key",
+          thinkingEnabled: false,
+        }),
+      ],
+      [
+        "qwen-on",
+        resolved({
+          profileId: "qwen-on",
+          connectionId: "qwen",
+          providerKind: "dashscope-coding",
+          modelId: "qwen3.7-plus",
+          baseUrl: "https://coding.dashscope.aliyuncs.com/v1",
+          apiKey: "qwen-key",
+          thinkingEnabled: true,
+          thinkingBudgetTokens: 2048,
+        }),
+      ],
+    ]);
+    const bodies: Array<Record<string, unknown>> = [];
+    const store = {
+      resolveProfile: async (profileId?: string | null) => {
+        const profile = profileId ? profiles.get(profileId) : undefined;
+        if (!profile) throw new Error("missing profile");
+        return structuredClone(profile);
+      },
+      resolveBinding: async () => {
+        throw new Error("unused");
+      },
+      markConnectionUsed: async () => undefined,
+    } as unknown as ModelSettingsStore;
+    const router = createModelRouter({
+      modelSettingsStore: store,
+      fallback: fallback(),
+      fetch: (async (_input, init) => {
+        bodies.push(
+          JSON.parse(String(init?.body)) as Record<string, unknown>,
+        );
+        return new Response(
+          JSON.stringify({
+            choices: [
+              { message: { content: "ok" }, finish_reason: "stop" },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }) as typeof fetch,
+    });
+
+    await (await router.resolve("deepseek-off")).client.complete({
+      ...request(),
+      thinking: { type: "enabled", budgetTokens: 9999 },
+    });
+    await (await router.resolve("qwen-on")).client.complete({
+      ...request(),
+      thinking: { type: "disabled" },
+    });
+
+    expect(bodies[0]).toMatchObject({
+      model: "deepseek-v4-flash",
+      thinking: { type: "disabled" },
+    });
+    expect(bodies[1]).toMatchObject({
+      model: "qwen3.7-plus",
+      enable_thinking: true,
+      thinking_budget: 2048,
+    });
   });
 });

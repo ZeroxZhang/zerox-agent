@@ -14,6 +14,7 @@ import type { CheckpointRepository, RunRepository } from "../../shared/storageCo
 import type { Goal, ProgressLedgerEvent } from "../../shared/agentGoal";
 import type { LLMProvider, CompleteRequest } from "../providers/provider";
 import type { ActorOutcome, ForkContext, SpawnInput } from "./actorRuntime";
+import { throwForModelServiceNotice } from "../../shared/modelServiceNotice";
 
 export interface CheckpointWriterActorDeps {
   runRepository: RunRepository;
@@ -138,6 +139,7 @@ async function distillWithLlm(
     ...(cancel ? { signal: cancel } : {}),
   };
   const res = await provider.complete(req);
+  throwForModelServiceNotice(res.modelServiceNotice);
   return { content: res.content ?? "", ...(res.cacheReadTokens ? { cacheReadTokens: res.cacheReadTokens } : {}) };
 }
 

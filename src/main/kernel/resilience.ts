@@ -1,37 +1,45 @@
 import type { KernelRunMode } from "../../shared/kernelContract";
 
-export const DEFAULT_CHAT_MAX_TURNS = 8;
-export const PER_MILESTONE_TURNS = 6;
-export const ABSOLUTE_MAX_TURNS = 60;
+export const DEFAULT_CHAT_CHECKPOINT_INTERVAL = 8;
+export const PER_MILESTONE_CHECKPOINT_TURNS = 6;
+export const MAX_CHECKPOINT_INTERVAL = 60;
 
-export type RuntimeTurnBudgetInput = {
+export type RuntimeCheckpointIntervalInput = {
   mode: KernelRunMode;
   userOverride?: number;
   milestoneCount?: number;
   perMilestoneTurns?: number;
-  absoluteMaxTurns?: number;
+  maxCheckpointInterval?: number;
 };
 
-export function deriveRuntimeMaxTurns(input: RuntimeTurnBudgetInput): number {
-  const absoluteMaxTurns = positiveIntegerOrDefault(
-    input.absoluteMaxTurns,
-    ABSOLUTE_MAX_TURNS,
+export function deriveRuntimeCheckpointInterval(
+  input: RuntimeCheckpointIntervalInput,
+): number {
+  const maxCheckpointInterval = positiveIntegerOrDefault(
+    input.maxCheckpointInterval,
+    MAX_CHECKPOINT_INTERVAL,
   );
 
   if (input.userOverride !== undefined) {
-    return clampTurnBudget(input.userOverride, absoluteMaxTurns);
+    return clampCheckpointInterval(input.userOverride, maxCheckpointInterval);
   }
 
   if (input.mode === "chat") {
-    return clampTurnBudget(DEFAULT_CHAT_MAX_TURNS, absoluteMaxTurns);
+    return clampCheckpointInterval(
+      DEFAULT_CHAT_CHECKPOINT_INTERVAL,
+      maxCheckpointInterval,
+    );
   }
 
   const perMilestoneTurns = positiveIntegerOrDefault(
     input.perMilestoneTurns,
-    PER_MILESTONE_TURNS,
+    PER_MILESTONE_CHECKPOINT_TURNS,
   );
   const milestoneCount = Math.max(1, Math.floor(input.milestoneCount ?? 1));
-  return clampTurnBudget(milestoneCount * perMilestoneTurns, absoluteMaxTurns);
+  return clampCheckpointInterval(
+    milestoneCount * perMilestoneTurns,
+    maxCheckpointInterval,
+  );
 }
 
 function positiveIntegerOrDefault(value: number | undefined, fallback: number): number {
@@ -42,6 +50,12 @@ function positiveIntegerOrDefault(value: number | undefined, fallback: number): 
   return Math.max(1, Math.floor(value));
 }
 
-function clampTurnBudget(value: number, absoluteMaxTurns: number): number {
-  return Math.min(positiveIntegerOrDefault(value, 1), absoluteMaxTurns);
+function clampCheckpointInterval(
+  value: number,
+  maxCheckpointInterval: number,
+): number {
+  return Math.min(
+    positiveIntegerOrDefault(value, 1),
+    maxCheckpointInterval,
+  );
 }

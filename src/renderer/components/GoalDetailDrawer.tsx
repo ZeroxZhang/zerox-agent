@@ -17,7 +17,6 @@ type GoalDetailDrawerProps = {
   onClose: () => void;
   onStart?: () => void;
   onResolveReview?: (decision: "approve" | "reject" | "terminate") => void;
-  onIncreaseBudget?: () => void;
   onReplan?: () => void;
   onRetry?: () => void;
   onContinueAcceptance?: () => void;
@@ -225,16 +224,6 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
                     调整计划
                   </button>
                 ) : null}
-                {props.summary.status === "stopped_budget" &&
-                props.onIncreaseBudget ? (
-                  <button
-                    type="button"
-                    className="goal-primary-action"
-                    onClick={props.onIncreaseBudget}
-                  >
-                    增加预算并继续
-                  </button>
-                ) : null}
                 {props.summary.status === "stopped_stalled" && props.onReplan ? (
                   <button
                     type="button"
@@ -245,6 +234,7 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
                   </button>
                 ) : null}
                 {(props.summary.status === "failed" ||
+                  props.summary.status === "waiting_for_model" ||
                   props.summary.status === "stopped_stalled") &&
                 props.onRetry ? (
                   <button
@@ -252,7 +242,11 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
                     className="goal-primary-action"
                     onClick={props.onRetry}
                   >
-                    重试目标
+                    {props.summary.status === "waiting_for_model"
+                      ? props.goal?.modelServiceNotice?.kind === "output_limit"
+                        ? "继续生成"
+                        : "重试模型"
+                      : "重试目标"}
                   </button>
                 ) : null}
                 {props.onCancel &&
@@ -500,6 +494,9 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
             <p>{progress.nextActionDetail}</p>
           </section>
 
+          <div className="goal-detail-section-header">
+            <span>执行统计</span>
+          </div>
           <dl className="goal-progress-metrics">
             <div>
               <dt>进度</dt>
@@ -578,7 +575,7 @@ function isRecoverableStatus(status: ChatSessionGoalSummary["status"]): boolean 
 function getRecoveryHint(status: ChatSessionGoalSummary["status"]): string {
   switch (status) {
     case "stopped_budget":
-      return "目标已达到预算上限并停止，不会在后台继续。你可以增加预算后继续，或查看证据并结束目标。";
+      return "这是旧版本地预算机制留下的只读任务。可查看原结果和执行证据，但不能继续或修改。";
     case "stopped_stalled":
       return "目标没有可推进的里程碑。你可以重新规划、重试或结束目标。";
     case "failed":

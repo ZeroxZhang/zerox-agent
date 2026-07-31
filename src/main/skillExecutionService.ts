@@ -7,6 +7,7 @@ import type { SkillInput, SkillRecord } from "../shared/skills";
 import {
   transitionSkillExecution,
   type SkillExecutionBudgets,
+  type SkillExecutionPolicy,
   type SkillExecutionSnapshot,
   type SkillExecutionStage,
   type SkillExecutionTransitionOptions,
@@ -26,7 +27,9 @@ export type SkillExecutionServiceInput = {
   sessionId?: string;
   requestId?: string;
   workspaceId?: string;
-  budgets: SkillExecutionBudgets;
+  executionPolicy?: SkillExecutionPolicy;
+  /** @deprecated Legacy input; maxTurns is interpreted as a checkpoint interval. */
+  budgets?: SkillExecutionBudgets;
   values?: Record<string, unknown>;
   runContext?: AgentRunContext;
   runAgentSkill?: (snapshot: SkillExecutionSnapshot) => Promise<SkillExecutionResult>;
@@ -253,7 +256,12 @@ function createInitialSnapshot(
       bodyHash: hashValue(input.skill.body),
       manifestHash: hashValue(JSON.stringify(input.skill.manifest)),
     },
-    budgets: input.budgets,
+    executionPolicy: input.executionPolicy ?? {
+      checkpointEveryTurns: Math.max(
+        1,
+        Math.floor(input.budgets?.maxTurns ?? input.skill.manifest.execution.maxTurns ?? 10),
+      ),
+    },
     resources: [
       {
         kind: "skill",

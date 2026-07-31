@@ -31,7 +31,7 @@ describe("kernel event view", () => {
       event({
         type: "run_end",
         status: "paused",
-        reason: "max turns exhausted",
+        reason: "waiting for user input",
       }),
     ]);
 
@@ -53,6 +53,14 @@ describe("kernel event view", () => {
   });
 
   it("summarizes long-task kernel events for timeline cards", () => {
+    expect(summarizeKernelEventForTimeline(event({
+      type: "turn_start",
+      turn: 4,
+      maxTurns: 8,
+    }))).toMatchObject({
+      title: "Turn started",
+      detail: "turn 4; checkpoint every 8 turns",
+    });
     expect(summarizeKernelEventForTimeline(event({
       type: "compaction",
       beforeTokens: 12000,

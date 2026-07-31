@@ -790,7 +790,7 @@ function createGoal(): Goal {
       maxWallClockMs: 600_000,
       maxReplans: 2,
     },
-    budgetUsage: {
+    executionUsage: {
       iterations: 1,
       toolCalls: 2,
       wallClockMs: 100,

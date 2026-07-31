@@ -88,6 +88,38 @@ describe("task scheduler service", () => {
     });
     expect(completedRuns).toEqual([]);
   });
+
+  it("does not auto-run a due task that has a user-recoverable checkpoint", async () => {
+    const runTaskIds: string[] = [];
+    const taskStore = createTaskStore([
+      createTask({
+        id: "paused_task",
+        enabled: true,
+        schedule: { kind: "interval", every: 30, unit: "minutes" },
+        nextRunAt: "2026-06-06T08:00:00.000Z",
+      }),
+    ], []);
+    const service = createTaskSchedulerService({
+      taskStore,
+      async runScheduledTask(taskId) {
+        runTaskIds.push(taskId);
+        return createRunResult(taskId);
+      },
+      async listActiveTaskIds() {
+        return new Set(["paused_task"]);
+      },
+      now: () => new Date("2026-06-06T08:05:00.000Z"),
+    });
+
+    await expect(service.runDueTasks()).resolves.toEqual({
+      checked: 1,
+      due: 0,
+      ran: 0,
+      failed: 0,
+      runIds: [],
+    });
+    expect(runTaskIds).toEqual([]);
+  });
 });
 
 function createTaskStore(

@@ -10,6 +10,7 @@
 
 import { createOpenAiCompatibleClient } from "../openAiCompatibleClient";
 import type { ChatCompletionRequest } from "../openAiCompatibleClient";
+import type { ProviderKind } from "../../shared/modelSettings";
 import { estimateTextTokens } from "../contextManager";
 import { fromNormalized } from "./normalize";
 import { buildCachePrefix } from "./cachePrefix";
@@ -36,6 +37,7 @@ export interface OpenAICompatibleProviderOptions {
   /** Injectable fetch (tests). */
   fetch?: typeof fetch;
   timeoutMs?: number;
+  providerKind?: ProviderKind;
 }
 
 export function createOpenAICompatibleProvider(
@@ -51,20 +53,31 @@ export function createOpenAICompatibleProvider(
     capabilities: CAPABILITIES,
 
     async complete(req: CompleteRequest): Promise<CompleteResponse> {
-      const chatReq = toChatRequest(req);
+      const chatReq = toChatRequest(req, options.providerKind);
       const res = await client.complete(chatReq);
       return {
         content: res.content,
         toolCalls: res.toolCalls,
         finishReason: res.finishReason,
+        ...(res.modelServiceNotice
+          ? { modelServiceNotice: res.modelServiceNotice }
+          : {}),
         ...(res.reasoningContent !== undefined ? { reasoningContent: res.reasoningContent } : {}),
-        cacheReadTokens: 0,
-        cacheWriteTokens: 0,
+        cacheReadTokens: res.cacheReadTokens ?? 0,
+        cacheWriteTokens: res.cacheWriteTokens ?? 0,
+        ...(res.usage
+          ? {
+              usage: {
+                inputTokens: res.usage.inputTokens,
+                outputTokens: res.usage.outputTokens,
+              },
+            }
+          : {}),
       };
     },
 
     async *stream(req: CompleteRequest): AsyncIterable<StreamEvent> {
-      const chatReq = toChatRequest(req);
+      const chatReq = toChatRequest(req, options.providerKind);
       for await (const ev of client.streamComplete(chatReq)) {
         if (ev.type === "content_delta") {
           yield { type: "text_delta", text: ev.text };
@@ -79,7 +92,7 @@ export function createOpenAICompatibleProvider(
             argumentsDelta: ev.arguments,
           };
         } else if (ev.type === "done") {
-          yield { type: "done" };
+          yield { type: "done", finishReason: ev.finishReason };
         }
       }
     },
@@ -108,7 +121,10 @@ export function createOpenAICompatibleProvider(
   };
 }
 
-function toChatRequest(req: CompleteRequest): ChatCompletionRequest {
+function toChatRequest(
+  req: CompleteRequest,
+  providerKind?: ProviderKind,
+): ChatCompletionRequest {
   // Reconstruct the legacy ChatCompletionRequest shape from the contract request.
   // The contract's toolChoice allows "required" (OpenAI supports it); the legacy
   // type is narrower, so cast at the boundary.
@@ -122,8 +138,63 @@ function toChatRequest(req: CompleteRequest): ChatCompletionRequest {
     ...(req.tools ? { tools: req.tools } : {}),
     ...(req.toolChoice ? { tool_choice: req.toolChoice as ChatCompletionRequest["tool_choice"] } : {}),
     ...(req.thinking ? { thinking: req.thinking } : {}),
+    ...(req.thinking && providerKind
+      ? optionalThinkingWireFormat(providerKind, req.model)
+      : {}),
     ...(req.signal ? { signal: req.signal } : {}),
   };
+}
+
+function optionalThinkingWireFormat(
+  providerKind: ProviderKind,
+  modelId: string,
+): Pick<ChatCompletionRequest, "thinkingWireFormat"> {
+  const wireFormat = thinkingWireFormat(providerKind, modelId);
+  return wireFormat ? { thinkingWireFormat: wireFormat } : {};
+}
+
+function thinkingWireFormat(
+  providerKind: ProviderKind,
+  modelId: string,
+): ChatCompletionRequest["thinkingWireFormat"] | undefined {
+  switch (providerKind) {
+    case "deepseek":
+    case "zai":
+    case "kimi":
+      return "thinking-object";
+    case "qwen":
+    case "dashscope-coding":
+      return "enable-thinking";
+    case "openrouter":
+      return "reasoning-object";
+    case "custom":
+      // Custom OpenAI-compatible services retain the existing generic shape.
+      return undefined;
+    case "openai":
+      return supportsOpenAiNoneReasoning(modelId)
+        ? "reasoning-effort"
+        : "omit";
+    case "xai":
+      return supportsXaiNoneReasoning(modelId) ? "reasoning-effort" : "omit";
+    default:
+      // Providers without a documented per-request thinking switch must not
+      // receive another vendor's private extension fields.
+      return "omit";
+  }
+}
+
+function supportsOpenAiNoneReasoning(modelId: string): boolean {
+  return (
+    /^gpt-5\.(?:[1-9]\d*)(?:[-.]|$)/i.test(modelId) ||
+    /^gpt-(?:[6-9]|\d{2,})(?:[-.]|$)/i.test(modelId)
+  );
+}
+
+function supportsXaiNoneReasoning(modelId: string): boolean {
+  return (
+    /^grok-4\.(?:[3-9]|\d{2,})(?:[-.]|$)/i.test(modelId) ||
+    /^grok-(?:[5-9]|\d{2,})(?:[-.]|$)/i.test(modelId)
+  );
 }
 
 function summarizeNormalized(m: NormalizedMessage): string {
