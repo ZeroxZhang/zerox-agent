@@ -36,6 +36,17 @@
   system prompts are stripped before checkpoint persistence so they no
   longer accumulate across resume cycles.
 - Verification evidence:
+  - code-level reproduction: a temporary side-by-side vitest run (base
+    19bc892 vs this branch, 10/10 assertions) demonstrated that the old
+    agentLoop returned transcripts with unanswered tool_calls after an
+    executor exception, the old goal-context assembly forwarded incomplete
+    tool pairs to the provider, the old runtimeTranscript silently
+    swallowed the latest tool action, the old streaming path failed the
+    whole run on a 30 s SSE idle timeout, and the old checkpointing kept
+    every injected system prompt — while the new code satisfies the
+    invariant in the identical scenarios; static inspection confirmed the
+    old controller had zero sequence-error tracking and persisted
+    failed-run transcripts unconditionally;
   - new suites: messageIntegrity 15 tests; agentLoop stream-retry and
     interrupted-batch repair tests; goalRuntimeEngine corrupted-resume
     repair test; controller circuit-breaker test;
