@@ -44,6 +44,12 @@ import {
   type ToolInvocationTransition,
 } from "../shared/toolInvocationLedger";
 import { sanitizeChatMessages } from "./messageIntegrity";
+import {
+  buildExplorationDedupNote,
+  createExplorationDedupTracker,
+  isMutatingToolCall,
+  isReadClassTool,
+} from "./agentExplorationDedup";
 
 export type AgentLoopOptions = {
   chatClient: ChatClient;
@@ -133,7 +139,7 @@ export type AgentLoopContextCompaction = {
 };
 
 export type AgentLoopStrategyGuardEvent = {
-  code: "FRAGMENTED_TOOL_CALLS";
+  code: "FRAGMENTED_TOOL_CALLS" | "REPEATED_EXPLORATION";
   severity: "warn";
   message: string;
   toolName: string;
@@ -293,6 +299,12 @@ export async function runAgentLoop(
   const toolCallCounts = new Map<string, number>();
   const emittedStrategyGuards = new Set<string>();
   const successfulToolNames = new Set<string>();
+  // Exploration dedup: track successful read-class calls per run so
+  // cross-turn duplicate exploration is surfaced to the model instead of
+  // silently burning turns (observed in production: same files re-read
+  // dozens of times in long goal runs).
+  const explorationDedup = createExplorationDedupTracker();
+  let emittedExplorationGuards = 0;
   const contextTokenBudget = Math.max(1, Math.floor(modelProfile.maxTokens * 0.7));
   // Token consumption is observability-only and never changes run status.
   let cumulativeTokensConsumed = 0;
@@ -915,6 +927,13 @@ export async function runAgentLoop(
           }
 
           onToolCall?.(toolName, args, toolEventBase);
+          // Exploration dedup: check before execution so a cross-turn
+          // duplicate read is flagged even if the call itself fails.
+          const explorationDedupCheck = explorationDedup.check(
+            toolName,
+            args,
+            turns + 1,
+          );
           transitionInvocation({ status: "running" });
 
           // Execute tool
@@ -1021,6 +1040,17 @@ export async function runAgentLoop(
           processedToolCalls.push(toolCall);
           onToolResult?.(toolName, result.ok, result, toolResultEvent);
 
+          // Exploration dedup bookkeeping: a successful mutation may change
+          // what earlier reads observed, so it invalidates the recorded read
+          // state; a successful read extends it.
+          if (result.ok) {
+            if (isMutatingToolCall(toolName, args)) {
+              explorationDedup.recordMutation(toolName);
+            } else if (isReadClassTool(toolName)) {
+              explorationDedup.recordRead(toolName, args, turns + 1);
+            }
+          }
+
           const selfFinalizingSummary = buildSelfFinalizingToolSummary(
             toolName,
             result,
@@ -1054,6 +1084,32 @@ export async function runAgentLoop(
                 "Continue the task, but switch to a batch, recursive, inventory, or search tool before making another call of the same kind.",
               ].join("\n"),
             });
+          }
+
+          // Exploration dedup: nudge the model when it re-reads a target it
+          // already has, and surface a guard event once duplicates pile up.
+          // Never blocks the call and never pauses the run.
+          if (explorationDedupCheck?.isDuplicate && result.ok) {
+            messages.push({
+              role: "system",
+              content: buildExplorationDedupNote({
+                toolName,
+                args,
+                priorReads: explorationDedupCheck.priorReads,
+                firstTurn: explorationDedupCheck.firstTurn,
+              }),
+            });
+            const nextGuardThreshold = (emittedExplorationGuards + 1) * 3;
+            if (explorationDedup.duplicateCount() >= nextGuardThreshold) {
+              emittedExplorationGuards += 1;
+              onStrategyGuard?.({
+                code: "REPEATED_EXPLORATION",
+                severity: "warn",
+                message: `The model has re-read already-explored targets ${explorationDedup.duplicateCount()} times in this run; reuse the existing evidence and focus on unexplored areas or the deliverable.`,
+                toolName,
+                count: explorationDedup.duplicateCount(),
+              });
+            }
           }
 
           if (

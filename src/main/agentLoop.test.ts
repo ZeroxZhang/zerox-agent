@@ -583,6 +583,179 @@ describe("agent loop", () => {
     expect(result.summary).toContain("批量或递归策略");
   });
 
+  it("nudges the model and emits a guard when exploration repeats across turns", async () => {
+    const explorationTools: ToolDefinition[] = [
+      testTools[0]!,
+      {
+        type: "function",
+        function: {
+          name: "file_read",
+          description: "Read file",
+          parameters: {
+            type: "object",
+            properties: { path: { type: "string" } },
+            required: ["path"],
+          },
+        },
+      },
+    ];
+    const guardEvents: Array<{ code: string; toolName?: string; count?: number }> = [];
+    const requests: ChatCompletionRequest[] = [];
+    // Alternating targets so the immediate-repeat finalizer never fires;
+    // duplicates: turn 3 list(A)=1, turn 4 read(B)=2, turn 5 list(A)=3.
+    const plannedCalls = [
+      { name: "file_list", args: { path: "/tmp/project" } },
+      { name: "file_read", args: { path: "/tmp/project/a.txt" } },
+      { name: "file_list", args: { path: "/tmp/project" } },
+      { name: "file_read", args: { path: "/tmp/project/a.txt" } },
+      { name: "file_list", args: { path: "/tmp/project" } },
+    ];
+    const chatClient: ChatClient = {
+      async complete(request) {
+        requests.push(request);
+        const planned = plannedCalls[requests.length - 1];
+        if (planned) {
+          return {
+            content: null,
+            finishReason: "tool_calls",
+            toolCalls: [
+              {
+                id: `dedup_call_${requests.length}`,
+                type: "function",
+                function: {
+                  name: planned.name,
+                  arguments: JSON.stringify(planned.args),
+                },
+              },
+            ],
+          };
+        }
+
+        return {
+          content: "探索完成。",
+          toolCalls: [],
+          finishReason: "stop",
+        };
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "探索这个项目" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(),
+        maxTurns: 8,
+        tools: explorationTools,
+        onStrategyGuard(event) {
+          guardEvents.push(event);
+        },
+      },
+    );
+
+    expect(result.status).toBe("succeeded");
+    expect(result.toolCallsExecuted).toBe(5);
+    // Every duplicate executes (never blocked), and the run never pauses.
+    expect(result.continuation).toBeUndefined();
+    // The request after the first duplicate carries the dedup nudge.
+    expect(
+      requests[3]?.messages.some(
+        (message) =>
+          message.role === "system" &&
+          message.content.includes("探索去重提示") &&
+          message.content.includes("file_list /tmp/project"),
+      ),
+    ).toBe(true);
+    // Third duplicate escalates to an observable guard event.
+    expect(guardEvents).toEqual([
+      {
+        code: "REPEATED_EXPLORATION",
+        severity: "warn",
+        message:
+          "The model has re-read already-explored targets 3 times in this run; reuse the existing evidence and focus on unexplored areas or the deliverable.",
+        toolName: "file_list",
+        count: 3,
+      },
+    ]);
+  });
+
+  it("treats re-reads after a successful write as fresh, not duplicates", async () => {
+    const readWriteTools: ToolDefinition[] = [
+      testTools[0]!,
+      {
+        type: "function",
+        function: {
+          name: "file_write",
+          description: "Write file",
+          parameters: {
+            type: "object",
+            properties: {
+              path: { type: "string" },
+              content: { type: "string" },
+            },
+            required: ["path", "content"],
+          },
+        },
+      },
+    ];
+    const requests: ChatCompletionRequest[] = [];
+    const plannedCalls = [
+      { name: "file_list", args: { path: "/tmp/project" } },
+      { name: "file_write", args: { path: "/tmp/project/new.txt", content: "x" } },
+      { name: "file_list", args: { path: "/tmp/project" } },
+    ];
+    const chatClient: ChatClient = {
+      async complete(request) {
+        requests.push(request);
+        const planned = plannedCalls[requests.length - 1];
+        if (planned) {
+          return {
+            content: null,
+            finishReason: "tool_calls",
+            toolCalls: [
+              {
+                id: `fresh_call_${requests.length}`,
+                type: "function",
+                function: {
+                  name: planned.name,
+                  arguments: JSON.stringify(planned.args),
+                },
+              },
+            ],
+          };
+        }
+
+        return {
+          content: "完成。",
+          toolCalls: [],
+          finishReason: "stop",
+        };
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "写入一个新文件再确认目录" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(),
+        maxTurns: 6,
+        tools: readWriteTools,
+      },
+    );
+
+    expect(result.status).toBe("succeeded");
+    expect(result.toolCallsExecuted).toBe(3);
+    // The final request must NOT contain a dedup nudge: the write
+    // invalidated the earlier read, so the re-list was legitimate.
+    expect(
+      requests[3]?.messages.some(
+        (message) =>
+          message.role === "system" && message.content.includes("探索去重提示"),
+      ) ?? false,
+    ).toBe(false);
+  });
+
   it("does not pause normal multi-file code generation after four file writes", async () => {
     let requests = 0;
     const guardEvents: string[] = [];

@@ -1,5 +1,33 @@
 # Zerox Harness Progress
 
+## 2026-08-01 - Repeated-Exploration Efficiency Fix (Cross-Turn Dedup)
+
+- The live replay evidence showed the runtime was healthy but inefficient:
+  the model re-read the same files and re-listed the same directories dozens
+  of times within one goal run, burning turns and tokens rediscovering what
+  it already knew. The FRAGMENTED_TOOL_CALLS guard only fires on 4
+  consecutive same-tool calls and the repeated-call finalizer only catches an
+  immediately repeated signature, so cross-turn duplicate exploration went
+  unaddressed.
+- New `src/main/agentExplorationDedup.ts`: a per-run tracker records
+  successful read-class calls (file_read/file_list/file_search/file_stat/
+  file_inventory/code_search/git_*/tool_result_read/skill_resource_list).
+  Re-reading an already-read target injects a short dedup note telling the
+  model to reuse its existing evidence; every third duplicate escalates to a
+  `REPEATED_EXPLORATION` strategy-guard event for trajectory/UI
+  observability. It never blocks a call and never pauses the run, and any
+  successful mutating call (file writes, heuristic shell mutations, test
+  runs) invalidates the recorded read state so freshness-sensitive re-reads
+  after writes stay legitimate.
+- Wired into agentLoop at the tool-execution boundary: check before
+  execution, record after successful results, nudge + guard after duplicates.
+- Verification evidence:
+  - new suites: agentExplorationDedup 12 tests; agentLoop cross-turn dedup
+    nudge/guard test and write-invalidates-read test;
+  - `npm test`: 238 files / 2438 tests passed (zero flakes this run);
+  - TypeScript electron check, `npm run build`, `npm run harness:check`, and
+    `smoke:prod` all passed.
+
 ## 2026-08-01 - Goal-Mode Failure Storm Root-Cause Fix (Message Integrity, Resume Circuit Breaker, Stream Resilience)
 
 - Root-caused the recurring goal-mode error/interruption storms from the
