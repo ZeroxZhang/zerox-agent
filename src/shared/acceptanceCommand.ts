@@ -108,3 +108,37 @@ export function shouldRetryAcceptanceWithPython3(input: {
     pythonCommandMissingPatterns.some((pattern) => pattern.test(input.error)),
   );
 }
+
+/**
+ * Planner models routinely express "run CMD in directory X" as the
+ * idiomatic `cd X && CMD` chain. The acceptance sandbox forbids shell
+ * control operators so every command stays a single statically checkable
+ * invocation, but the semantic intent is legitimate and maps exactly onto
+ * the workspaceRoot parameter that test_run already supports end-to-end.
+ * This extractor separates the leading `cd <dir> &&` prefix (dir possibly
+ * quoted) from the real command so callers can rewrite the pair into
+ * params form instead of rejecting the check outright.
+ */
+const LEADING_CD_CHAIN_PATTERN =
+  /^cd\s+(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))\s*&&\s*([\s\S]+)$/;
+
+export function extractLeadingCdWorkspace(
+  command: string,
+): { dir: string; rest: string } | null {
+  const match = LEADING_CD_CHAIN_PATTERN.exec(command.trim());
+  if (!match) {
+    return null;
+  }
+  const dir = (match[1] ?? match[2] ?? match[3] ?? "").trim();
+  const rest = (match[4] ?? "").trim();
+  if (!dir || !rest) {
+    return null;
+  }
+  // Only a single `cd X && CMD` chain is mechanically rewritable. If the
+  // remainder still chains or redirects, leave the command untouched so
+  // the gate keeps blocking genuinely structural shell syntax.
+  if (findBlockedShellControl(rest)) {
+    return null;
+  }
+  return { dir, rest };
+}

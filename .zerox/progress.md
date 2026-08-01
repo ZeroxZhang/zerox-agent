@@ -1,5 +1,40 @@
 # Zerox Harness Progress
 
+## 2026-08-01 - Acceptance cd-Chain Normalization (Quality-Gate False Block)
+
+- User acceptance surfaced a plan-mode blocker: a fresh debate plan paused
+  with `INVALID_ACCEPTANCE_CHECK` — "验收检查 milestone_4_check_3 的 command
+  含有被禁止的 Shell 控制符". The planner had written the idiomatic
+  `cd <subdir> && PYTHONPATH=... python3 -m unittest ...` chain; the gate
+  correctly forbids shell control operators (acceptance commands must stay
+  single statically checkable invocations), but there was no repair path,
+  so an otherwise valid plan forced full regeneration.
+- Fix: `extractLeadingCdWorkspace` (shared/acceptanceCommand) parses a
+  single leading `cd <dir> &&` prefix (quoted or relative) and refuses
+  remainders that still carry shell control syntax;
+  `normalizePlanArtifactAcceptanceCommands` (plannerKernel) rewrites the
+  pair into the sandbox-compliant params form (`command` + boundary-checked
+  `workspaceRoot`) when the dir resolves inside the plan workspace, and
+  retags `command_exit_code` expecting exit 0 as `test_passes` — the kind
+  that honors workspaceRoot end-to-end through test_run. Out-of-workspace
+  targets, chained/piped remainders, conflicting workspaceRoot params, and
+  nonzero expected exit codes stay blocked as before.
+- Wired at both quality-gate boundaries in the debate orchestrator (initial
+  gating after final round + repair rounds, and retryQualityGate), following
+  the existing normalizePlanArtifactToolNames compatibility-normalization
+  pattern.
+- Verified against the user's real blocked plan (plan_6deaec5c, rev 16):
+  after normalization the quality report flips from blocked to `ready`
+  with zero blocking issues; the milestone_4 check becomes
+  `test_passes @ .../ecommerce-selection`.
+- Verification evidence:
+  - new suites: shared/acceptanceCommand 5 tests; plannerKernel 4 tests
+    (rewrite + gate pass, quoted relative dir, blocked cases stay blocked,
+    conflicting workspaceRoot untouched);
+  - `npm test`: 239 files / 2451 tests passed;
+  - TypeScript electron check, `npm run build`, `npm run harness:check`,
+    `smoke:prod` passed.
+
 ## 2026-08-01 - Dedup Digest Upgrade + Live Acceptance Rounds
 
 - First live round (clone data dir, production container, real DeepSeek,

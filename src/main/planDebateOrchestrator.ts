@@ -53,6 +53,7 @@ import {
   createFallbackPlanningBrief,
   createPlanQualityReport,
   createPlanTaskProfile,
+  normalizePlanArtifactAcceptanceCommands,
   normalizePlanArtifactToolNames,
   normalizePlanToolNames,
   routePlannerSkill,
@@ -607,9 +608,12 @@ export function createPlanDebateOrchestrator(options: {
         "plan_failed",
       );
     }
-    let artifact = applyPlanArtifactAutonomy(
-      normalizePlanArtifact(finalRound.output),
-      record.autonomyMode,
+    let artifact = normalizePlanArtifactAcceptanceCommands(
+      applyPlanArtifactAutonomy(
+        normalizePlanArtifact(finalRound.output),
+        record.autonomyMode,
+      ),
+      record.workspaceRoot,
     );
     const generationCompletedAt = now();
     const generationStage: PlanningStageRecord | undefined =
@@ -696,9 +700,12 @@ export function createPlanDebateOrchestrator(options: {
             signal,
             2,
           );
-          artifact = applyPlanArtifactAutonomy(
-            normalizePlanArtifact(repair.output),
-            record.autonomyMode,
+          artifact = normalizePlanArtifactAcceptanceCommands(
+            applyPlanArtifactAutonomy(
+              normalizePlanArtifact(repair.output),
+              record.autonomyMode,
+            ),
+            record.workspaceRoot,
           );
           revisionAttempted = true;
           review = await completePlanReview(
@@ -1063,7 +1070,10 @@ export function createPlanDebateOrchestrator(options: {
       };
     }
 
-    const artifact = normalizePlanArtifactToolNames(record.finalArtifact);
+    const artifact = normalizePlanArtifactAcceptanceCommands(
+      normalizePlanArtifactToolNames(record.finalArtifact),
+      record.workspaceRoot,
+    );
     const compatibilityNormalized =
       JSON.stringify(artifact) !== JSON.stringify(record.finalArtifact);
     const completedReviewStage = [...(record.planningStages ?? [])]

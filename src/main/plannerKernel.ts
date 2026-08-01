@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
+import path from "node:path";
 import type { AcceptanceCheck, GoalSelectedSkill } from "../shared/agentGoal";
+import { extractLeadingCdWorkspace } from "../shared/acceptanceCommand";
 import { classifyTaskFrame } from "../shared/agentTaskStrategy";
 import type {
   PlanActionGate,
@@ -778,6 +780,89 @@ export function normalizePlanArtifactToolNames(
     milestones: artifact.milestones.map((milestone) => ({
       ...milestone,
       toolNames: normalizePlanToolNames(milestone.toolNames ?? []),
+    })),
+  };
+}
+
+/**
+ * Rewrites idiomatic `cd <dir> && <cmd>` acceptance commands into the
+ * sandbox-compliant params form (`command` + `workspaceRoot`) when the cd
+ * target resolves inside the plan workspace. Planner models produce this
+ * chain naturally; rejecting it forces a full regeneration of an otherwise
+ * valid plan. `command_exit_code` checks expecting exit 0 are retagged as
+ * `test_passes`, which honors the workspaceRoot parameter end-to-end
+ * (boundary-checked and executed through test_run). Chains whose remainder
+ * still contains shell control syntax, conflicting workspaceRoot params,
+ * nonzero expected exit codes, and cd targets outside the workspace are
+ * left untouched so the quality gate keeps blocking them.
+ */
+export function normalizePlanArtifactAcceptanceCommands(
+  artifact: PlanArtifact,
+  workspaceRoot?: string,
+): PlanArtifact {
+  const normalizeCheck = (check: AcceptanceCheck): AcceptanceCheck => {
+    if (
+      !workspaceRoot ||
+      (check.kind !== "command_exit_code" && check.kind !== "test_passes")
+    ) {
+      return check;
+    }
+    if (
+      check.kind === "command_exit_code" &&
+      Number(check.params.expectedExitCode ?? 0) !== 0
+    ) {
+      // command_exit_code ignores workspaceRoot at acceptance time, so a
+      // nonzero-exit cd chain has no faithful rewrite; keep it blocked.
+      return check;
+    }
+    const command =
+      typeof check.params.command === "string" ? check.params.command : "";
+    const extracted = extractLeadingCdWorkspace(command);
+    if (!extracted) {
+      return check;
+    }
+    const existingRoot =
+      typeof check.params.workspaceRoot === "string"
+        ? check.params.workspaceRoot.trim()
+        : "";
+    if (existingRoot && existingRoot !== extracted.dir) {
+      return check;
+    }
+    const resolvedDir = path.isAbsolute(extracted.dir)
+      ? path.resolve(extracted.dir)
+      : path.resolve(workspaceRoot, extracted.dir);
+    const resolvedWorkspace = path.resolve(workspaceRoot);
+    const insideWorkspace =
+      resolvedDir === resolvedWorkspace ||
+      resolvedDir.startsWith(`${resolvedWorkspace}${path.sep}`);
+    if (!insideWorkspace) {
+      return check;
+    }
+
+    const params: Record<string, unknown> = {
+      ...check.params,
+      command: extracted.rest,
+      workspaceRoot: resolvedDir,
+    };
+    let kind = check.kind;
+    if (
+      kind === "command_exit_code" &&
+      Number(check.params.expectedExitCode ?? 0) === 0
+    ) {
+      // test_passes is exactly "command exits 0" and executes through
+      // test_run, which honors the workspaceRoot parameter end-to-end.
+      kind = "test_passes";
+      delete params.expectedExitCode;
+    }
+    return { ...check, kind, params };
+  };
+
+  return {
+    ...artifact,
+    acceptanceChecks: (artifact.acceptanceChecks ?? []).map(normalizeCheck),
+    milestones: artifact.milestones.map((milestone) => ({
+      ...milestone,
+      acceptanceChecks: (milestone.acceptanceChecks ?? []).map(normalizeCheck),
     })),
   };
 }
