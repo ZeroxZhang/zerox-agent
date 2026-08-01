@@ -519,6 +519,118 @@ function startAppUpdateScheduler() {
   appUpdateTimer.unref?.();
 }
 
+/**
+ * Env-driven end-to-end goal replay driver (debug/acceptance aid).
+ *
+ * When ZEROX_AGENT_REPLAY_GOAL_ID is set, retries that goal through the
+ * fully wired production container, polls its persisted state from disk,
+ * logs [GOAL-REPLAY] progress lines, and quits on a terminal status or on
+ * ZEROX_AGENT_REPLAY_TIMEOUT_MS (default 10 minutes). Used to replay
+ * historically failed goals against the live provider for acceptance.
+ */
+function startGoalReplayDriver() {
+  const goalId = process.env.ZEROX_AGENT_REPLAY_GOAL_ID?.trim();
+  if (!goalId) return;
+  const timeoutMs = Math.max(
+    60_000,
+    Number(process.env.ZEROX_AGENT_REPLAY_TIMEOUT_MS ?? 600_000) || 600_000,
+  );
+  const goalFile = path.join(
+    app.getPath("userData"),
+    "config",
+    "agent-goals",
+    `${goalId}.json`,
+  );
+  const startedAt = Date.now();
+  const log = (message: string, extra?: unknown) => {
+    const suffix = extra === undefined ? "" : ` ${JSON.stringify(extra)}`;
+    console.log(`[GOAL-REPLAY] ${message}${suffix}`);
+  };
+  const readGoalState = async () => {
+    try {
+      const raw = await readFile(goalFile, "utf8");
+      const goal = JSON.parse(raw) as {
+        status: string;
+        stopReason?: string;
+        milestones?: Array<{
+          id: string;
+          state?: string;
+          attempts?: number;
+          lastRunStatus?: string;
+          lastRunSummary?: string;
+        }>;
+      };
+      return goal;
+    } catch (error) {
+      log("无法读取目标状态文件", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  };
+  const isTerminal = (status: string) =>
+    [
+      "achieved",
+      "completed_unverified",
+      "stopped_budget",
+      "stopped_stalled",
+      "stopped_blocked",
+      "failed",
+      "canceled",
+    ].includes(status);
+
+  log("回放驱动已启动", { goalId, timeoutMs });
+  setTimeout(() => {
+    void (async () => {
+      try {
+        log("触发 retryGoal", { goalId });
+        const summary = await container.retryGoal(goalId);
+        log("retryGoal 已受理", summary as unknown as Record<string, unknown>);
+      } catch (error) {
+        log("retryGoal 失败", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        app.exit(2);
+      }
+    })();
+  }, 3_000);
+
+  const poller = setInterval(() => {
+    void (async () => {
+      const elapsed = Date.now() - startedAt;
+      const goal = await readGoalState();
+      if (goal) {
+        log("状态轮询", {
+          elapsedMs: elapsed,
+          status: goal.status,
+          stopReason: goal.stopReason,
+          milestones: (goal.milestones ?? []).map((milestone) => ({
+            id: milestone.id,
+            state: milestone.state,
+            attempts: milestone.attempts,
+            lastRunStatus: milestone.lastRunStatus,
+            lastRunSummary: milestone.lastRunSummary?.slice(0, 160),
+          })),
+        });
+        if (isTerminal(goal.status)) {
+          clearInterval(poller);
+          log("目标到达终态，即将退出", {
+            status: goal.status,
+            stopReason: goal.stopReason,
+          });
+          setTimeout(() => app.exit(0), 5_000);
+        }
+      }
+      if (elapsed >= timeoutMs) {
+        clearInterval(poller);
+        log("回放超时，即将退出", { timeoutMs });
+        setTimeout(() => app.exit(3), 5_000);
+      }
+    })();
+  }, 15_000);
+  poller.unref?.();
+}
+
 function stopAppUpdateScheduler() {
   if (!appUpdateTimer) {
     return;
@@ -566,6 +678,7 @@ app.whenReady().then(() => {
     void container.resumeInterruptedGoals().catch((error) => {
       console.error("Failed to resume interrupted goals:", error);
     });
+    startGoalReplayDriver();
     createTray();
     startTaskScheduler();
     startMemoryMaintenanceScheduler();

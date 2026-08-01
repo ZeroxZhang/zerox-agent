@@ -36,6 +36,15 @@
   system prompts are stripped before checkpoint persistence so they no
   longer accumulate across resume cycles.
 - Verification evidence:
+  - live end-to-end replay: cloned the user data dir, restored the failed
+    paper-to-mp goal (12 prior failed attempts, poisoned 21-message
+    checkpoint), and re-ran it through the production container with the
+    real DeepSeek provider via a new env-guarded replay driver
+    (ZEROX_AGENT_REPLAY_GOAL_ID, main.ts). Result: 123 model requests /
+    122 responses, 175 tool calls, 971 invocation events, zero provider
+    rejections, zero stream-fatal interruptions in 5+ minutes — versus an
+    instant HTTP 400 on every historical attempt. Replay log kept at
+    /tmp/zerox-replay-run.log; the user's real data dir was never touched;
   - code-level reproduction: a temporary side-by-side vitest run (base
     19bc892 vs this branch, 10/10 assertions) demonstrated that the old
     agentLoop returned transcripts with unanswered tool_calls after an
