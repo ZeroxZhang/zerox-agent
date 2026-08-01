@@ -1,5 +1,30 @@
 # Zerox Harness Progress
 
+## 2026-08-01 - Investigation Structured-Output Repair (Single-Slip Plan Death)
+
+- Second user-acceptance failure, different layer: a fresh plan paused with
+  "规划调查未完成" after the investigation stage ran 41 s and collected 15+
+  evidence items successfully. Root cause from the persisted stage record:
+  the model's final structured JSON had one syntax error ("Expected ',' or
+  '}' after property value in JSON at position 142") and the investigation
+  pipeline had NO retry — a single transient formatting slip killed the
+  whole plan even though the underlying research had succeeded.
+- Fix: `parseInvestigationBriefWithRepair` in planInvestigatorService wraps
+  the structured-output parse. On parse/contract failure it issues up to 2
+  cheap repair completions (no tools, temperature 0, "return the corrected
+  JSON only", carrying the parse error and the broken text), reparsing each
+  repair. Repair-request transport failures break immediately to the
+  original error, and exhausted repairs preserve the previous fail-closed
+  behavior exactly (stage failed, PlanInvestigationError, evidence kept).
+- Verification evidence:
+  - new tests: repair succeeds on first retry and completes the stage
+    (repair prompt carries the broken text); repairs exhausted still fails
+    closed after exactly 2 attempts; the pre-existing malformed-brief
+    fail-closed test passes unchanged;
+  - `npm test`: 239 files / 2453 tests passed;
+  - TypeScript electron check, `npm run build`, `npm run harness:check`,
+    `smoke:prod` passed.
+
 ## 2026-08-01 - Acceptance cd-Chain Normalization (Quality-Gate False Block)
 
 - User acceptance surfaced a plan-mode blocker: a fresh debate plan paused

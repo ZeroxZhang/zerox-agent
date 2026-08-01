@@ -264,9 +264,12 @@ export function createPlanInvestigatorService(options: {
             );
           }
 
-          let brief = parseUniquePlanRoundObject(result.summary, (value) =>
-            normalizePlanningBrief(value, input, evidence, skills),
-          );
+          let brief = await parseInvestigationBriefWithRepair({
+            summary: result.summary,
+            normalize: (value) =>
+              normalizePlanningBrief(value, input, evidence, skills),
+            model: input.model,
+          });
           brief = applyPlanningBriefAutonomy(brief, input.autonomyMode);
           const evidenceInsufficient =
             isPlanInvestigationEvidenceInsufficient({
@@ -340,8 +343,76 @@ export function createPlanInvestigatorService(options: {
   };
 }
 
-function createReadOnlyPlanContext(input: {
-  runId: string;
+/**
+ * Parse the investigator's structured brief, repairing malformed JSON with
+ * bounded model retries. Observed in production (2026-08-01): a single
+ * syntax error in the model's final JSON ("Expected ',' or '}' after
+ * property value") failed the whole investigation stage — and paused the
+ * entire plan — even though the underlying research had succeeded. The
+ * evidence and the summary both survive such slips, so a cheap repair pass
+ * ("return the corrected JSON only") recovers the run without re-executing
+ * any tool work. Falls back to the original error when repairs exhaust.
+ */
+const MAX_BRIEF_REPAIR_ATTEMPTS = 2;
+
+async function parseInvestigationBriefWithRepair(input: {
+  summary: string;
+  normalize: (value: Record<string, unknown>) => PlanningBrief;
+  model: BoundModelClient;
+}): Promise<PlanningBrief> {
+  try {
+    return parseUniquePlanRoundObject(input.summary, input.normalize);
+  } catch (initialError) {
+    let lastError =
+      initialError instanceof Error ? initialError : new Error(String(initialError));
+    let candidate = input.summary;
+    for (let attempt = 1; attempt <= MAX_BRIEF_REPAIR_ATTEMPTS; attempt += 1) {
+      let repaired: string;
+      try {
+        const response = await input.model.client.complete({
+          baseUrl: input.model.binding.baseUrl ?? "",
+          apiKey: "",
+          model: input.model.binding.modelId,
+          temperature: 0,
+          maxTokens: input.model.binding.generation.maxTokens,
+          messages: [
+            {
+              role: "system",
+              content:
+                "你是 JSON 修复器。你的唯一任务是把用户给出的损坏文本修复为一个合法的 JSON 对象。只输出修复后的 JSON 对象本身，不要输出解释、Markdown 代码围栏或任何其他文本。",
+            },
+            {
+              role: "user",
+              content: [
+                `下面的文本本应是一个 JSON 对象，但 JSON 解析失败：${lastError.message}`,
+                "请保持原有内容与结构，仅修复使其成为合法 JSON 所必需的错误（如未转义的引号/换行、缺失的逗号或括号），并只返回修复后的 JSON 对象。",
+                "",
+                candidate,
+              ].join("\n"),
+            },
+          ],
+        });
+        repaired = response.content?.trim() ?? "";
+      } catch {
+        // Repair request itself failed (transport/provider) — the original
+        // parse error is the actionable failure; stop retrying.
+        break;
+      }
+      try {
+        return parseUniquePlanRoundObject(repaired, input.normalize);
+      } catch (repairParseError) {
+        lastError =
+          repairParseError instanceof Error
+            ? repairParseError
+            : new Error(String(repairParseError));
+        candidate = repaired || candidate;
+      }
+    }
+    throw lastError;
+  }
+}
+
+function createReadOnlyPlanContext(input: {  runId: string;
   sessionId: string;
   workspaceId?: string;
   workspaceRoot: string;
