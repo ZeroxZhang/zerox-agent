@@ -1,5 +1,51 @@
 # Zerox Harness Progress
 
+## 2026-08-01 - Goal-Mode Failure Storm Root-Cause Fix (Message Integrity, Resume Circuit Breaker, Stream Resilience)
+
+- Root-caused the recurring goal-mode error/interruption storms from the
+  user's real runtime data (`agent-runs.jsonl`, goal checkpoints,
+  trajectories): repeated provider HTTP 400 tool_call-pairing rejections
+  replayed from persisted checkpoints (5 identical failures in 2 minutes),
+  fatal 30 s SSE idle timeouts on thinking-style models, and checkpoints
+  accumulating 7-8 stacked runtime-injected system messages.
+- Systemic cause: four divergent modules (context compaction, runtime
+  transcript bounding, goal-context assembly, loop trimming) each mutated
+  conversation state with different pair-preservation rules; none enforced
+  the provider message-sequence invariant at persistence/resume/request
+  boundaries, and the goal controller unconditionally resumed from failed
+  runs' transcripts.
+- New shared integrity layer `src/main/messageIntegrity.ts`:
+  `sanitizeChatMessages` repairs orphan tool messages, unanswered
+  tool_calls (synthesize for live requests, trim for persistence), empty
+  and duplicate assistants, and strips runtime-injected system messages;
+  `inspectChatMessages` diagnoses; `isMessageSequenceProviderError`
+  fingerprints the 400 class; one `groupToolPairedMessages` replaces the
+  three divergent grouping implementations.
+- Wired enforcement at every boundary: agentLoop sanitizes before every
+  model request and on every exit path (including exceptions escaping a
+  tool batch); runtimeTranscript and goal-context assembly route through
+  the shared layer; chatService sanitizes session history before replay.
+- Resume circuit breaker in the goal controller: consecutive identical
+  message-sequence rejections (limit 2) drop the poisoned transcript
+  checkpoint and restart the milestone clean from goal anchors, recorded
+  via new `goal_resume_circuit_broken` trajectory and ledger events.
+- Transport resilience: SSE idle-timeout / connection-reset stream failures
+  are retried up to 3 attempts with bounded backoff instead of failing the
+  run; aborts and provider limit notices remain non-retryable.
+- Checkpoint hygiene: injected strategy-guard/finalize/recovery/resume
+  system prompts are stripped before checkpoint persistence so they no
+  longer accumulate across resume cycles.
+- Verification evidence:
+  - new suites: messageIntegrity 15 tests; agentLoop stream-retry and
+    interrupted-batch repair tests; goalRuntimeEngine corrupted-resume
+    repair test; controller circuit-breaker test;
+  - focused suites: agentLoop, goal controller, goal context, chat service,
+    runtime engines — all pass;
+  - `npm test`: 2422 passed / 1 pre-existing flake
+    (`sourceImportCasing` times out identically on the unmodified base);
+  - `npm run build`, `npm run harness:check`, agent/memory evals, and
+    `smoke:prod` all passed.
+
 ## 2026-07-31 - Final Acceptance and Provider Recovery Closure
 
 - Reproduced the reported 7/7 `Blocked` failure against the durable Goal and

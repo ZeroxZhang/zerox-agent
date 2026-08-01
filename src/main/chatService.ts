@@ -8,6 +8,7 @@ import { createChatAgentEvidenceRecorder } from "./chatAgentEvidence";
 import { createChatOutputAssembler } from "./chatOutputAssembler";
 import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
 import { runAgentLoop } from "./agentLoop";
+import { sanitizeChatMessages } from "./messageIntegrity";
 import { isMaxModeEnabled, type MaxMode } from "./providers/maxMode";
 import {
   toChatCompletionResponse,
@@ -1405,8 +1406,16 @@ export function createChatService(options: {
             });
           }
           const executeAgentLoop = options.runAgentLoop ?? runAgentLoop;
-          const loopResult = await executeAgentLoop(
+          // Session history can contain interrupted tool batches from
+          // earlier turns (aborts, mid-batch crashes). Repair pair
+          // integrity before replaying it to the provider so a stale
+          // session can never produce tool_call pairing HTTP 400s.
+          const { messages: loopInputMessages } = sanitizeChatMessages(
             chatMessages,
+            { unresolvedToolCalls: "trim" },
+          );
+          const loopResult = await executeAgentLoop(
+            loopInputMessages,
             profile,
             {
               chatClient: options.chatClient,
@@ -1460,7 +1469,7 @@ export function createChatService(options: {
                 : {}),
               ...(continuationToResume
                 ? {
-                    resumeMessages: chatMessages,
+                    resumeMessages: loopInputMessages,
                     initialToolCallsExecuted:
                       continuationToResume.toolCallsExecuted,
                   }

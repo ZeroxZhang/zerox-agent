@@ -1891,6 +1891,146 @@ describe("agent loop", () => {
     expect(completeCalls).toBe(0);
   });
 
+  it("retries an idle-timed-out stream instead of failing the run", async () => {
+    let streamCalls = 0;
+    let completeCalls = 0;
+    const retryEvents: Array<{ attempt: number; error: string }> = [];
+    const chatClient: ChatClient & StreamingChatClient = {
+      async complete() {
+        completeCalls += 1;
+        throw new Error("complete must not replace a retryable stream");
+      },
+      async *streamComplete() {
+        streamCalls += 1;
+        if (streamCalls === 1) {
+          // Thinking-style models pause; the 30s per-read idle budget fires
+          // mid-generation. This must be retried, not fatal.
+          yield { type: "content_delta", text: "partial thinking" };
+          throw new Error("SSE stream idle timeout after 30 s");
+        }
+        yield { type: "content_delta", text: "full answer" };
+        yield { type: "done", finishReason: "stop" };
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "stream stalls once" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(),
+        tools: testTools,
+        onModelRetry(event) {
+          retryEvents.push({ attempt: event.attempt, error: event.error });
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: "succeeded",
+      summary: "full answer",
+      toolCallsExecuted: 0,
+    });
+    expect(streamCalls).toBe(2);
+    expect(completeCalls).toBe(0);
+    expect(retryEvents).toHaveLength(1);
+    expect(retryEvents[0]!.error).toContain("idle timeout");
+  });
+
+  it("fails after repeated mid-stream idle timeouts", async () => {
+    let streamCalls = 0;
+    const chatClient: ChatClient & StreamingChatClient = {
+      async complete() {
+        throw new Error("complete must not run");
+      },
+      async *streamComplete() {
+        streamCalls += 1;
+        yield { type: "content_delta", text: "partial" };
+        throw new Error("SSE stream idle timeout after 30 s");
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "stream always stalls" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(),
+        tools: testTools,
+      },
+    );
+
+    expect(result.status).toBe("failed");
+    expect(result.summary).toContain("idle timeout");
+    expect(streamCalls).toBe(3);
+  }, 15_000);
+
+  it("repairs an interrupted tool batch in the transcript it returns", async () => {
+    // Simulate a provider that issues two tool calls; the executor throws
+    // unexpectedly on the first one, escaping the batch before the second
+    // tool_call is answered. The returned transcript must still satisfy the
+    // provider pairing invariant (unanswered calls trimmed).
+    let modelCalls = 0;
+    const chatClient: ChatClient = {
+      async complete() {
+        modelCalls += 1;
+        return {
+          content: null,
+          toolCalls: [
+            {
+              id: "call_explode",
+              type: "function" as const,
+              function: { name: "file_list", arguments: '{"path":"/a"}' },
+            },
+            {
+              id: "call_unanswered",
+              type: "function" as const,
+              function: { name: "file_list", arguments: '{"path":"/b"}' },
+            },
+          ],
+          finishReason: "tool_calls",
+        };
+      },
+    };
+    const toolExecutor: AgentToolExecutor = {
+      async execute() {
+        throw new Error("executor exploded unexpectedly");
+      },
+      getRegistry() {
+        return createDynamicToolRegistry();
+      },
+      hasTool() {
+        return true;
+      },
+    } as unknown as AgentToolExecutor;
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "explode" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor,
+        tools: testTools,
+      },
+    );
+
+    expect(modelCalls).toBe(1);
+    expect(result.status).toBe("failed");
+    // The transcript must not contain an unanswered tool_call.
+    const assistant = result.messages.find(
+      (message) => message.role === "assistant" && message.tool_calls?.length,
+    );
+    const openIds = new Set(
+      (assistant?.tool_calls ?? []).map((call) => call.id),
+    );
+    const answered = result.messages.filter(
+      (message) =>
+        message.role === "tool" && openIds.has(message.tool_call_id ?? ""),
+    );
+    expect(openIds.size).toBe(answered.length);
+    expect(openIds.has("call_unanswered")).toBe(false);
+  });
+
   it("assembles concurrent indexed streamed tool calls before authorization", async () => {
     let streamCalls = 0;
     const authorizationRequests: ToolCallRequest[] = [];

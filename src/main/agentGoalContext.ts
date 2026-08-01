@@ -5,6 +5,10 @@ import type { ProgressLedgerEvent } from "./agentGoalStore";
 import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
 import { estimateMessageTokens } from "./contextManager";
 import { buildGoalContinuityCheckpoint } from "../shared/agentGoalContinuity";
+import {
+  groupToolPairedMessages,
+  sanitizeChatMessages,
+} from "./messageIntegrity";
 
 export type AgentGoalContext = {
   assemble(
@@ -29,7 +33,14 @@ export function createAgentGoalContext(options: {
   return {
     assemble(goal, history, tokenBudget) {
       const anchors = buildAnchorMessages(goal, options.ledgerEvents ?? []);
-      const normalizedHistory = normalizeHistory(history);
+      // Repair the resumed transcript before it is combined with anchors:
+      // historical grouping kept incomplete tool-call pairs, so a single
+      // interrupted batch poisoned every subsequent resume with provider
+      // HTTP 400 rejections.
+      const { messages: intactHistory } = sanitizeChatMessages(history, {
+        unresolvedToolCalls: "trim",
+      });
+      const normalizedHistory = normalizeHistory(intactHistory);
       const combined = [...anchors, ...normalizedHistory.messages];
       const beforeTokens = estimateMessageTokens(combined);
 
@@ -71,7 +82,7 @@ function fitAtomicHistoryWithinBudget(
   tokenBudget: number,
   droppedRefs: string[],
 ): ChatMessage[] {
-  const groups = groupAtomicHistory(history);
+  const groups = groupToolPairedMessages(history);
   while (
     estimateMessageTokens([...anchors, ...groups.flat()]) > tokenBudget &&
     groups.length > 0
@@ -88,29 +99,6 @@ function fitAtomicHistoryWithinBudget(
     }
   }
   return [...anchors, ...groups.flat()];
-}
-
-function groupAtomicHistory(history: ChatMessage[]): ChatMessage[][] {
-  const groups: ChatMessage[][] = [];
-  for (let index = 0; index < history.length; index += 1) {
-    const message = history[index]!;
-    if (message.role !== "assistant" || !message.tool_calls?.length) {
-      groups.push([message]);
-      continue;
-    }
-    const ids = new Set(message.tool_calls.map((call) => call.id));
-    const group = [message];
-    while (
-      index + 1 < history.length &&
-      history[index + 1]?.role === "tool" &&
-      ids.has(history[index + 1]?.tool_call_id ?? "")
-    ) {
-      index += 1;
-      group.push(history[index]!);
-    }
-    groups.push(group);
-  }
-  return groups;
 }
 
 function buildAnchorMessages(

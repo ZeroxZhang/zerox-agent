@@ -211,6 +211,93 @@ describe("agent goal controller", () => {
     expect(ledger.some((entry) => entry.summary.includes("budget"))).toBe(false);
   });
 
+  it("breaks a poisoned resume loop after repeated message-sequence rejections", async () => {
+    await store.save(createGoal([milestone("milestone_1")]));
+    const provider400 =
+      "LLM request failed with status 400: An assistant message with 'tool_calls' must be followed by tool messages responding to each 'tool_call_id'.";
+    const resumeMessagesPerCall: Array<unknown> = [];
+    let call = 0;
+    const runtime: GoalRuntimeEngine = {
+      async runMilestone(_goal, milestone, runOptions) {
+        call += 1;
+        resumeMessagesPerCall.push(
+          runOptions && "resumeMessages" in runOptions
+            ? runOptions.resumeMessages
+            : undefined,
+        );
+        if (call <= 2) {
+          // Both attempts replay the checkpoint transcript into the provider
+          // and fail with the same structural HTTP 400.
+          return {
+            runId: `run_${milestone.id}_${call}`,
+            toolCallCount: 0,
+            wallClockMs: 10,
+            tokens: 5,
+            status: "failed" as const,
+            summary: provider400,
+            transcriptMessages: [
+              {
+                role: "assistant" as const,
+                content: "working",
+                tool_calls: [
+                  {
+                    id: `call_${call}`,
+                    type: "function" as const,
+                    function: { name: "file_list", arguments: "{}" },
+                  },
+                ],
+              },
+              {
+                role: "tool" as const,
+                tool_call_id: `call_${call}`,
+                content: "{}",
+              },
+            ],
+          };
+        }
+        // Third attempt: circuit broken, milestone restarts clean and succeeds.
+        expect(runOptions?.resumeMessages).toBeUndefined();
+        return {
+          runId: `run_${milestone.id}_3`,
+          toolCallCount: 1,
+          wallClockMs: 10,
+          tokens: 5,
+          status: "succeeded" as const,
+          summary: "Milestone completed after clean restart.",
+          transcriptMessages: [
+            { role: "assistant" as const, content: "done" },
+          ],
+        };
+      },
+    };
+    const controller = createController({
+      runtime,
+      acceptance: createAcceptance({
+        milestoneAccepted: [false, false, true],
+        goalAccepted: [true],
+      }),
+    });
+
+    const result = await controller.start("goal_1");
+
+    expect(call).toBe(3);
+    expect(resumeMessagesPerCall[0]).toBeUndefined();
+    // Second attempt resumes from the (poisoned) checkpoint one last time.
+    expect(Array.isArray(resumeMessagesPerCall[1])).toBe(true);
+    // Third attempt must NOT resume — the circuit breaker dropped it.
+    expect(resumeMessagesPerCall[2]).toBeUndefined();
+    expect(
+      trajectoryEvents.some(
+        (event) => event.type === "goal_resume_circuit_broken",
+      ),
+    ).toBe(true);
+    const ledger = await store.readLedger("goal_1");
+    expect(
+      ledger.some((entry) => entry.kind === "goal_resume_circuit_broken"),
+    ).toBe(true);
+    expect(result.status).toBe("achieved");
+  });
+
   it("waits for explicit user recovery when the model service limits a run", async () => {
     await store.save(createGoal([milestone("milestone_1")]));
     let acceptanceCalls = 0;

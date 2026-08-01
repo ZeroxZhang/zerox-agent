@@ -43,6 +43,7 @@ import {
   type ToolInvocationRecord,
   type ToolInvocationTransition,
 } from "../shared/toolInvocationLedger";
+import { sanitizeChatMessages } from "./messageIntegrity";
 
 export type AgentLoopOptions = {
   chatClient: ChatClient;
@@ -302,6 +303,26 @@ export async function runAgentLoop(
       : Math.max(1, contextManager.estimateTokens(messages));
   }
 
+  /**
+   * Enforce the provider message-sequence invariant on the live
+   * conversation. Runs before every model request (synthesizing answers for
+   * interrupted tool batches) and once more when the loop exits (trimming
+   * unanswered calls) so persisted transcripts can never poison a resume.
+   * Returns the repairs so callers can observe them.
+   */
+  function enforceMessageIntegrity(
+    unresolvedToolCalls: "synthesize" | "trim",
+  ) {
+    const { messages: sanitized, repairs } = sanitizeChatMessages(messages, {
+      unresolvedToolCalls,
+    });
+    if (repairs.length === 0) {
+      return repairs;
+    }
+    messages.splice(0, messages.length, ...sanitized);
+    return repairs;
+  }
+
   function recordModelResponseTokens(
     response: ChatCompletionResponse,
   ): void {
@@ -408,6 +429,7 @@ export async function runAgentLoop(
       tokenBudget: contextTokenBudget,
     });
     await compactMessagesBeforeModelRequest();
+    enforceMessageIntegrity("synthesize");
 
     try {
       const response = await raceWithCancellation(completeModelRequest({
@@ -475,33 +497,66 @@ export async function runAgentLoop(
       return modelRequestExecutor(request, turn);
     }
     if (isStreamingChatClient(chatClient)) {
-      try {
-        return await aggregateStreamingCompletion(chatClient, request, (event) => {
-          onModelStreamEvent?.(event, turn);
-        });
-      } catch (error) {
-        if (
-          error instanceof StreamingCompletionError &&
-          !error.hasMeaningfulStreamEvent &&
-          !isStreamAbortError(error.cause, request.signal)
-        ) {
+      // Transport resilience: a stream that stalls mid-generation (SSE idle
+      // timeout, connection reset) previously failed the whole run even
+      // though the request is idempotent. Retry the stream a bounded number
+      // of times before giving up. Thinking-style models routinely pause
+      // longer than the 30s per-read idle budget, so a single idle timeout
+      // must never be fatal.
+      const maxStreamAttempts = 3;
+      for (let attempt = 1; attempt <= maxStreamAttempts; attempt += 1) {
+        try {
+          return await aggregateStreamingCompletion(chatClient, request, (event) => {
+            onModelStreamEvent?.(event, turn);
+          });
+        } catch (error) {
           if (
-            modelServiceNoticeFromError(error.cause, {
+            error instanceof StreamingCompletionError &&
+            !error.hasMeaningfulStreamEvent &&
+            !isStreamAbortError(error.cause, request.signal)
+          ) {
+            if (
+              modelServiceNoticeFromError(error.cause, {
+                provider: modelProfile.providerId,
+                model: modelProfile.model,
+              })
+            ) {
+              throw error.cause;
+            }
+            return completeWithModelRetry(
+              chatClient,
+              request,
+              modelRetry,
+              onModelRetry,
+            );
+          }
+          const retryableStreamFailure =
+            error instanceof StreamingCompletionError &&
+            !isStreamAbortError(error.cause, request.signal) &&
+            isRetryableStreamError(error.cause) &&
+            !modelServiceNoticeFromError(error.cause, {
               provider: modelProfile.providerId,
               model: modelProfile.model,
-            })
-          ) {
-            throw error.cause;
+            });
+          if (retryableStreamFailure && attempt < maxStreamAttempts) {
+            const delayMs = Math.min(2_000 * attempt, 5_000);
+            await onModelRetry?.({
+              attempt,
+              maxRetries: maxStreamAttempts - 1,
+              delayMs,
+              error: `模型流中断（第 ${attempt} 次），即将重试：${
+                error.cause instanceof Error
+                  ? error.cause.message
+                  : String(error.cause ?? "unknown")
+              }`,
+            });
+            await sleepBeforeStreamRetry(delayMs, request.signal);
+            continue;
           }
-          return completeWithModelRetry(
-            chatClient,
-            request,
-            modelRetry,
-            onModelRetry,
-          );
+          throw error;
         }
-        throw error;
       }
+      throw new Error("Model stream retries exhausted.");
     }
 
     return completeWithModelRetry(
@@ -510,6 +565,36 @@ export async function runAgentLoop(
       modelRetry,
       onModelRetry,
     );
+  }
+
+  function isRetryableStreamError(error: unknown): boolean {
+    const message =
+      error instanceof Error ? error.message : String(error ?? "");
+    return /idle timeout|timed out|timeout|ECONNRESET|EPIPE|network|fetch failed|socket|terminated|overloaded/i.test(
+      message,
+    );
+  }
+
+  async function sleepBeforeStreamRetry(
+    delayMs: number,
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      const onAbort = () => {
+        clearTimeout(timeout);
+        signal?.removeEventListener("abort", onAbort);
+        reject(
+          signal?.reason instanceof Error
+            ? signal.reason
+            : new Error("Agent loop canceled."),
+        );
+      };
+      const timeout = setTimeout(() => {
+        signal?.removeEventListener("abort", onAbort);
+        resolve();
+      }, delayMs);
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
   }
 
   try {
@@ -531,6 +616,7 @@ export async function runAgentLoop(
         mode: turns === 0 ? "planning" : turns === 1 ? "execution" : undefined,
       });
       await compactMessagesBeforeModelRequest();
+      enforceMessageIntegrity("synthesize");
 
       const response = await raceWithCancellation(completeModelRequest({
         ...modelProfile,
@@ -1067,6 +1153,13 @@ export async function runAgentLoop(
       }
     }
   }
+
+  // Final integrity pass: anything that leaves the loop — success, failure,
+  // pause, cancel, or an exception escaping mid-tool-batch — carries a
+  // transcript that satisfies the provider invariant. Unanswered tool calls
+  // are trimmed (not synthesized) so persisted checkpoints never replay a
+  // dead call into the next run.
+  enforceMessageIntegrity("trim");
 
   return {
     summary,

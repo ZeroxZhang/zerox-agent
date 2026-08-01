@@ -6,6 +6,7 @@ export type AgentTrajectoryEventType =
   | "goal_planned"
   | "milestone_started"
   | "goal_replanned"
+  | "goal_resume_circuit_broken"
   | "goal_review_requested"
   | "goal_stopped"
   | "goal_judged"

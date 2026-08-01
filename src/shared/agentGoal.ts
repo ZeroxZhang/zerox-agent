@@ -544,6 +544,7 @@ export type ProgressLedgerEvent = {
     | "acceptance_certified"
     | "review_requested"
     | "review_resolved"
+    | "goal_resume_circuit_broken"
     | "goal_stopped";
   milestoneId?: string;
   summary: string;
