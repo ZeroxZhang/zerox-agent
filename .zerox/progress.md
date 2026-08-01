@@ -1,5 +1,40 @@
 # Zerox Harness Progress
 
+## 2026-08-01 - Dedup Digest Upgrade + Live Acceptance Rounds
+
+- First live round (clone data dir, production container, real DeepSeek,
+  retryGoal channel identical to the UI retry button): the historically
+  12x-failed paper-to-mp goal completed milestone_0 with state `accepted`
+  (14 attempts total, zero provider 400s, zero fatal interruptions across
+  43 model requests). The REPEATED_EXPLORATION guard fired 7 times
+  (duplicate counts 3..21), proving the tracker works in production — but
+  the model kept re-reading (46% of read-class calls were cross-turn
+  duplicates, rising in the second half). Root cause: goal-mode transcript
+  bounding keeps only ~24 messages, so earlier read results genuinely leave
+  the context; a text-only "you already read this" nudge asks the model to
+  reuse evidence it can no longer see.
+- Upgraded the dedup note to carry a compact digest (max 600 chars,
+  XML-wrapper stripped) of the most recent successful read result, so the
+  model gets real reusable evidence even after bounding drops the original
+  tool result. The note now tells the model to reuse the digest when
+  sufficient and to re-read only with precise offset/limit parameters when
+  it needs content beyond the excerpt. Digests refresh on every successful
+  re-read and are invalidated by any successful mutation as before.
+- Second live round (same setup, digest build): milestone_1 accepted, goal
+  advanced to milestone_2; 21/21 model requests answered, 0 duplicates,
+  0 guards, 0 errors. The milestone was build/test-phase work (17 test_run
+  calls), so exploration was minimal by nature — digest effectiveness on
+  exploration-heavy phases is proven at the integration-test level (note
+  carries the earlier result content into the next model request) and
+  awaits a future exploration-heavy live run for production measurement.
+- Verification evidence:
+  - new/updated suites: agentExplorationDedup 16 tests (digest carry,
+    wrapper stripping, truncation); agentLoop integration asserts the
+    production note embeds the earlier read content;
+  - `npm test`: 2442 passed; TypeScript electron check, `npm run build`,
+    `npm run harness:check` passed; replay driver self-exited at timeout in
+    both rounds, no stray Electron processes left.
+
 ## 2026-08-01 - Repeated-Exploration Efficiency Fix (Cross-Turn Dedup)
 
 - The live replay evidence showed the runtime was healthy but inefficient:

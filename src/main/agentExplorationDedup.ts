@@ -24,13 +24,22 @@ export type ExplorationDedupCheck = {
   priorReads: number;
   /** turn of the first successful read. */
   firstTurn: number;
+  /** turn of the most recent successful read. */
+  lastTurn: number;
+  /**
+   * Compact excerpt of the most recent read result. Carrying the digest in
+   * the dedup note is what lets the model actually reuse prior evidence:
+   * in goal mode the transcript is bounded, so the original tool result may
+   * no longer be present in the conversation.
+   */
+  digest?: string;
 };
 
 export type ExplorationDedupTracker = {
   /** Call before executing a read-class tool. */
   check(toolName: string, args: Record<string, unknown>, turn: number): ExplorationDedupCheck | null;
-  /** Record a successful read-class result. */
-  recordRead(toolName: string, args: Record<string, unknown>, turn: number): void;
+  /** Record a successful read-class result, with a compact result digest. */
+  recordRead(toolName: string, args: Record<string, unknown>, turn: number, digest?: string): void;
   /** Record a successful mutating call; invalidates recorded reads. */
   recordMutation(toolName: string): void;
   /** Total duplicate reads observed in this run. */
@@ -109,7 +118,10 @@ function stableSignature(value: unknown): string {
 }
 
 export function createExplorationDedupTracker(): ExplorationDedupTracker {
-  const reads = new Map<string, { count: number; firstTurn: number }>();
+  const reads = new Map<
+    string,
+    { count: number; firstTurn: number; lastTurn: number; digest?: string }
+  >();
   let duplicates = 0;
 
   return {
@@ -118,7 +130,7 @@ export function createExplorationDedupTracker(): ExplorationDedupTracker {
       const signature = `${toolName}:${stableSignature(normalizeArgsForSignature(args))}`;
       const recorded = reads.get(signature);
       if (!recorded) {
-        return { isDuplicate: false, priorReads: 0, firstTurn: 0 };
+        return { isDuplicate: false, priorReads: 0, firstTurn: 0, lastTurn: 0 };
       }
       if (recorded.count > 0) {
         duplicates += 1;
@@ -127,16 +139,27 @@ export function createExplorationDedupTracker(): ExplorationDedupTracker {
         isDuplicate: true,
         priorReads: recorded.count,
         firstTurn: recorded.firstTurn,
+        lastTurn: recorded.lastTurn,
+        ...(recorded.digest ? { digest: recorded.digest } : {}),
       };
     },
-    recordRead(toolName, args, turn) {
+    recordRead(toolName, args, turn, digest) {
       if (!isReadClassTool(toolName)) return;
       const signature = `${toolName}:${stableSignature(normalizeArgsForSignature(args))}`;
       const recorded = reads.get(signature);
       if (recorded) {
         recorded.count += 1;
+        recorded.lastTurn = turn;
+        if (digest) {
+          recorded.digest = digest;
+        }
       } else {
-        reads.set(signature, { count: 1, firstTurn: turn });
+        reads.set(signature, {
+          count: 1,
+          firstTurn: turn,
+          lastTurn: turn,
+          ...(digest ? { digest } : {}),
+        });
       }
     },
     recordMutation(_toolName) {
@@ -149,18 +172,51 @@ export function createExplorationDedupTracker(): ExplorationDedupTracker {
   };
 }
 
+/** Maximum characters of a prior read result carried in a dedup note. */
+export const EXPLORATION_DIGEST_MAX_CHARS = 600;
+
+/**
+ * Build a compact digest from a serialized tool observation. Strips the
+ * XML result wrapper and collapses whitespace so the excerpt is cheap to
+ * carry in a steering note.
+ */
+export function buildReadResultDigest(serializedContent: string): string {
+  const inner = serializedContent
+    .replace(/^<tool_result[^>]*>\n?/, "")
+    .replace(/\n?<\/tool_result>\s*$/, "");
+  const collapsed = inner.replace(/\s+/g, " ").trim();
+  return collapsed.length > EXPLORATION_DIGEST_MAX_CHARS
+    ? `${collapsed.slice(0, EXPLORATION_DIGEST_MAX_CHARS)}…`
+    : collapsed;
+}
+
 export function buildExplorationDedupNote(input: {
   toolName: string;
   args: Record<string, unknown>;
   priorReads: number;
   firstTurn: number;
+  lastTurn?: number;
+  digest?: string;
 }): string {
   const target =
     String(
       input.args.path ?? input.args.root ?? input.args.query ?? input.args.ref ?? "",
     ).slice(0, 120) || JSON.stringify(input.args).slice(0, 120);
-  return [
-    `探索去重提示：「${input.toolName} ${target}」在本轮运行中已经成功读取过 ${input.priorReads} 次（最早第 ${input.firstTurn} 轮），结果仍在上文对话中。`,
-    "除非该目标刚刚被你修改过，请直接复用已有结果，不要再次读取；把后续动作集中在尚未探索的区域、或直接产出交付物。",
-  ].join("\n");
+  const lines = [
+    `探索去重提示：「${input.toolName} ${target}」在本轮运行中已经成功读取过 ${input.priorReads} 次（最早第 ${input.firstTurn} 轮${
+      input.lastTurn && input.lastTurn !== input.firstTurn
+        ? `，最近一次第 ${input.lastTurn} 轮`
+        : ""
+    }）。`,
+  ];
+  if (input.digest) {
+    lines.push(`最近一次读取结果摘要：${input.digest}`);
+    lines.push(
+      "若上述摘要足以支撑当前步骤，请直接复用，不要再次读取；只有需要摘要之外的具体内容时才重新读取，并优先用 offset/limit 等参数精确读取所需片段。",
+    );
+  } else {
+    lines.push("若该结果仍在上文对话中，请直接复用，不要再次读取。");
+  }
+  lines.push("把后续动作集中在尚未探索的区域、或直接产出交付物。");
+  return lines.join("\n");
 }

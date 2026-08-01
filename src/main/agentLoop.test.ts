@@ -657,13 +657,16 @@ describe("agent loop", () => {
     expect(result.toolCallsExecuted).toBe(5);
     // Every duplicate executes (never blocked), and the run never pauses.
     expect(result.continuation).toBeUndefined();
-    // The request after the first duplicate carries the dedup nudge.
+    // The request after the first duplicate carries the dedup nudge,
+    // including a digest of the earlier read result so the model can
+    // actually reuse it even if the original scrolled out of context.
     expect(
       requests[3]?.messages.some(
         (message) =>
           message.role === "system" &&
           message.content.includes("探索去重提示") &&
-          message.content.includes("file_list /tmp/project"),
+          message.content.includes("file_list /tmp/project") &&
+          message.content.includes("a.txt"),
       ),
     ).toBe(true);
     // Third duplicate escalates to an observable guard event.

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildExplorationDedupNote,
+  buildReadResultDigest,
   createExplorationDedupTracker,
   isMutatingToolCall,
   isReadClassTool,
@@ -10,7 +11,12 @@ describe("exploration dedup tracker", () => {
   it("treats the first read of a target as fresh", () => {
     const tracker = createExplorationDedupTracker();
     const check = tracker.check("file_read", { path: "/tmp/a.txt" }, 1);
-    expect(check).toEqual({ isDuplicate: false, priorReads: 0, firstTurn: 0 });
+    expect(check).toEqual({
+      isDuplicate: false,
+      priorReads: 0,
+      firstTurn: 0,
+      lastTurn: 0,
+    });
     expect(tracker.duplicateCount()).toBe(0);
   });
 
@@ -19,8 +25,28 @@ describe("exploration dedup tracker", () => {
     tracker.recordRead("file_read", { path: "/tmp/a.txt" }, 2);
 
     const check = tracker.check("file_read", { path: "/tmp/a.txt" }, 5);
-    expect(check).toEqual({ isDuplicate: true, priorReads: 1, firstTurn: 2 });
+    expect(check).toEqual({
+      isDuplicate: true,
+      priorReads: 1,
+      firstTurn: 2,
+      lastTurn: 2,
+    });
     expect(tracker.duplicateCount()).toBe(1);
+  });
+
+  it("carries the latest result digest into the duplicate check", () => {
+    const tracker = createExplorationDedupTracker();
+    tracker.recordRead("file_list", { path: "/tmp/dir" }, 1, "a.txt b.txt");
+    tracker.recordRead("file_list", { path: "/tmp/dir" }, 3, "a.txt b.txt c.txt");
+
+    const check = tracker.check("file_list", { path: "/tmp/dir" }, 5);
+    expect(check).toMatchObject({
+      isDuplicate: true,
+      priorReads: 2,
+      firstTurn: 1,
+      lastTurn: 3,
+      digest: "a.txt b.txt c.txt",
+    });
   });
 
   it("counts every subsequent duplicate read", () => {
@@ -69,7 +95,12 @@ describe("exploration dedup tracker", () => {
 
     tracker.recordMutation("file_edit");
     const check = tracker.check("file_read", { path: "/tmp/a.txt" }, 3);
-    expect(check).toEqual({ isDuplicate: false, priorReads: 0, firstTurn: 0 });
+    expect(check).toEqual({
+      isDuplicate: false,
+      priorReads: 0,
+      firstTurn: 0,
+      lastTurn: 0,
+    });
   });
 });
 
@@ -114,5 +145,34 @@ describe("dedup note", () => {
     expect(note).toContain("2");
     expect(note).toContain("3");
     expect(note).toContain("复用");
+  });
+
+  it("embeds the latest result digest when available", () => {
+    const note = buildExplorationDedupNote({
+      toolName: "file_list",
+      args: { path: "/tmp/project" },
+      priorReads: 2,
+      firstTurn: 1,
+      lastTurn: 4,
+      digest: "a.txt b.txt c.txt",
+    });
+    expect(note).toContain("最近一次第 4 轮");
+    expect(note).toContain("a.txt b.txt c.txt");
+    expect(note).toContain("offset/limit");
+  });
+});
+
+describe("read result digest", () => {
+  it("strips the XML wrapper and collapses whitespace", () => {
+    const digest = buildReadResultDigest(
+      '<tool_result tool="file_list">\n{"files": ["a.txt",\n"b.txt"]}\n</tool_result>',
+    );
+    expect(digest).toBe('{"files": ["a.txt", "b.txt"]}');
+  });
+
+  it("truncates oversized results", () => {
+    const digest = buildReadResultDigest(`<tool_result>${"x".repeat(5000)}</tool_result>`);
+    expect(digest.length).toBeLessThanOrEqual(601);
+    expect(digest.endsWith("…")).toBe(true);
   });
 });

@@ -46,6 +46,7 @@ import {
 import { sanitizeChatMessages } from "./messageIntegrity";
 import {
   buildExplorationDedupNote,
+  buildReadResultDigest,
   createExplorationDedupTracker,
   isMutatingToolCall,
   isReadClassTool,
@@ -1042,12 +1043,19 @@ export async function runAgentLoop(
 
           // Exploration dedup bookkeeping: a successful mutation may change
           // what earlier reads observed, so it invalidates the recorded read
-          // state; a successful read extends it.
+          // state; a successful read extends it. The digest keeps a compact
+          // excerpt of the result so a later dedup note can carry real
+          // evidence even after transcript bounding drops the original.
           if (result.ok) {
             if (isMutatingToolCall(toolName, args)) {
               explorationDedup.recordMutation(toolName);
             } else if (isReadClassTool(toolName)) {
-              explorationDedup.recordRead(toolName, args, turns + 1);
+              explorationDedup.recordRead(
+                toolName,
+                args,
+                turns + 1,
+                buildReadResultDigest(serializedObservation.content),
+              );
             }
           }
 
@@ -1097,6 +1105,10 @@ export async function runAgentLoop(
                 args,
                 priorReads: explorationDedupCheck.priorReads,
                 firstTurn: explorationDedupCheck.firstTurn,
+                lastTurn: explorationDedupCheck.lastTurn,
+                ...(explorationDedupCheck.digest
+                  ? { digest: explorationDedupCheck.digest }
+                  : {}),
               }),
             });
             const nextGuardThreshold = (emittedExplorationGuards + 1) * 3;
