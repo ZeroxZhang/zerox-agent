@@ -1,5 +1,44 @@
 # Zerox Harness Progress
 
+## 2026-08-01 - Output-Budget Recovery Ladder (Truncation Killed Planning)
+
+- Third user-acceptance failure, budget dimension: a fresh debate plan
+  paused with "规划模型未完成本轮 / 模型或服务商已达到本次输出长度限制".
+  Root cause verified against the live config: both planner profiles cap
+  maxTokens at 8192, while a complex v2 PlanArtifact JSON routinely exceeds
+  that (the same content renders to 22-31 KB plan markdown; Chinese ≈ 1
+  token/char). Every structured planning boundary treated
+  `finishReason=length` as fatal, so a budget mismatch killed the whole
+  plan even though the model had produced most of a valid artifact.
+- Fix (shared protocol adapter for the budget dimension,
+  src/main/structuredOutputBudget.ts):
+  - `isRecoverableOutputLimit` — truncation is recoverable only with
+    partial content present; empty truncated responses stay fatal.
+  - `escalateOutputBudget` — retry budget doubles with a 16384 floor and a
+    32768 ceiling.
+  - `buildOutputLimitContinuationPrompt` — resume exactly at the cut, no
+    repetition, compact JSON, bounded field sizes.
+  - Wired into every structured planning boundary: debate rounds
+    (`completeStructuredRound`), the cold reviewer (`completePlanReview`),
+    the goal milestone planner (`requestMilestones`), and investigation
+    brief repairs (escalating budget per repair attempt, since repairs
+    regenerate the whole JSON). Each site runs a bounded ladder of at most
+    3 completions (normal → continuation → contract repair); persistent
+    truncation still fails closed exactly as before.
+  - Prompt-side prevention: round prompts now carry an output-budget
+    discipline line (compact JSON, field/array size caps, evidence by
+    reference instead of verbatim).
+- Verification evidence:
+  - new tests: budget escalation math + recoverability classifier;
+    truncated debate round continues with escalated budget and completes
+    the plan (continuation request carries the exact prefix); persistent
+    truncation fails closed after exactly 2 completions; goal planner
+    continuation success + notice surfaced on double truncation;
+    investigation repair runs with escalated maxTokens;
+  - `npm test`: 240 files / 2466 tests passed;
+  - TypeScript electron check, `npm run build`, `npm run harness:check`,
+    `BUILDING_AGENT_SMOKE=1 npx electron .` passed.
+
 ## 2026-08-01 - Protocol-Adapter Layer for Model Output Boundaries
 
 - Root-cause review across every model-output parse point (communication

@@ -32,6 +32,12 @@ import {
 } from "../shared/planStructuredOutput";
 import { validatePlanMilestoneGraph } from "../shared/planValidation";
 import { throwForModelServiceNotice } from "../shared/modelServiceNotice";
+import {
+  buildOutputLimitContinuationPrompt,
+  escalateOutputBudget,
+  isRecoverableOutputLimit,
+  OUTPUT_LIMIT_CONTINUATION_PREFIX_MAX_CHARS,
+} from "./structuredOutputBudget";
 import type {
   ChatCompletionResponse,
   ChatMessage,
@@ -1674,6 +1680,7 @@ function buildRoundPrompt(
             "v2 里程碑必须给出 targetRefs、evidenceRefs、actions、toolNames 和类型化 acceptanceChecks。toolNames 只能填写运行时真实存在的工具；只允许 file_exists、test_passes、command_exit_code、assertion、model_review；代码/文件/数据任务在可行时必须包含确定性检查。",
             "file_exists 提供 path 或结构化 destination；test_passes 提供 command 和 workspaceRoot；command_exit_code 提供 command 和 expectedExitCode；assertion 提供 artifactRef、path、equals；model_review 只能用于语义结果且必须 requiresEvidence=true 并引用真实 evidenceRefs。",
             "验收 command 必须是单条命令：禁止 Shell 控制符与重定向（&&、;、|、>、<、反引号、$()、括号、换行）；需要指定执行目录时填写 workspaceRoot 参数而不是 cd X && 前缀；允许 KEY=value 环境变量前缀；引号内属于程序参数的比较运算符不受限制。",
+            "输出预算纪律：只输出紧凑 JSON（不缩进、无多余空白）；长文本字段从简（title 不超过 60 字、summary/description 不超过 200 字）；数组从简（milestones 不超过 8 个、单项 acceptanceChecks 不超过 6 条、risks/dependencies/assumptions 各不超过 8 条）；不要复述证据原文，用 evidenceRefs 引用。",
           ]
         : []),
       instruction[kind],
@@ -1702,17 +1709,25 @@ async function completeStructuredRound(
     { role: "user", content: prompt.user },
   ];
   let messages = baseMessages;
+  let maxTokens = bound.binding.generation.maxTokens;
+  let outputLimitRecovered = false;
+  let repairAttempted = false;
+  let continuationPrefix = "";
   let inputTokens = 0;
   let outputTokens = 0;
   let hasUsage = false;
 
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  // Bounded recovery ladder, at most 3 completions: normal attempt → one
+  // output-limit continuation with an escalated budget (a truncated prefix
+  // is valid partial JSON, so a budget mismatch must not kill the round) →
+  // one contract-feedback repair for malformed output.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
     const response = await bound.client.complete({
       baseUrl: bound.binding.baseUrl ?? "",
       apiKey: "",
       model: bound.binding.modelId,
       temperature: bound.binding.generation.temperature,
-      maxTokens: bound.binding.generation.maxTokens,
+      maxTokens,
       thinking: { type: "disabled" },
       messages,
       ...(signal ? { signal } : {}),
@@ -1722,12 +1737,34 @@ async function completeStructuredRound(
       inputTokens += response.usage.inputTokens;
       outputTokens += response.usage.outputTokens;
     }
+    if (
+      !outputLimitRecovered &&
+      isRecoverableOutputLimit(response.modelServiceNotice, response.content)
+    ) {
+      outputLimitRecovered = true;
+      maxTokens = escalateOutputBudget(maxTokens);
+      continuationPrefix = (response.content ?? "")
+        .trim()
+        .slice(0, OUTPUT_LIMIT_CONTINUATION_PREFIX_MAX_CHARS);
+      messages = [
+        ...baseMessages,
+        { role: "assistant" as const, content: continuationPrefix },
+        {
+          role: "user" as const,
+          content: buildOutputLimitContinuationPrompt(),
+        },
+      ];
+      continue;
+    }
     throwForModelServiceNotice(response.modelServiceNotice);
+    const text = continuationPrefix
+      ? continuationPrefix + (response.content ?? "")
+      : (response.content ?? "");
     try {
-      if (!response.content?.trim()) {
+      if (!text.trim()) {
         throw new Error("规划模型没有返回结构化内容。");
       }
-      const output = parseUniquePlanRoundObject(response.content, (value) =>
+      const output = parseUniquePlanRoundObject(text, (value) =>
         normalizeRoundOutput(kind, value, schemaVersion),
       );
       return {
@@ -1735,16 +1772,18 @@ async function completeStructuredRound(
         ...(hasUsage ? { usage: { inputTokens, outputTokens } } : {}),
       };
     } catch (error) {
-      if (attempt === 1) {
+      if (repairAttempted) {
         throw structuredRoundFailure(error, response);
       }
+      repairAttempted = true;
+      continuationPrefix = "";
       messages = [
         ...baseMessages,
-        ...(response.content?.trim()
+        ...(text.trim()
           ? [
               {
                 role: "assistant" as const,
-                content: response.content.slice(0, 16_000),
+                content: text.trim().slice(0, 16_000),
               },
             ]
           : []),
@@ -1806,28 +1845,55 @@ async function completePlanReview(
     },
   ];
   // Same resilience contract as structured debate rounds and the goal
-  // judge: one malformed JSON slip must not fail the whole review (and
-  // pause the plan), so a single contract-feedback repair attempt is
-  // allowed before surfacing the failure.
+  // judge: one malformed JSON slip or one output-budget truncation must not
+  // fail the whole review (and pause the plan), so a bounded ladder of one
+  // output-limit continuation plus one contract-feedback repair is allowed
+  // before surfacing the failure.
   let messages = baseMessages;
+  let maxTokens = bound.binding.generation.maxTokens;
+  let outputLimitRecovered = false;
+  let repairAttempted = false;
+  let continuationPrefix = "";
   let lastError: unknown;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
     const response = await bound.client.complete({
       baseUrl: bound.binding.baseUrl ?? "",
       apiKey: "",
       model: bound.binding.modelId,
       temperature: bound.binding.generation.temperature,
-      maxTokens: bound.binding.generation.maxTokens,
+      maxTokens,
       thinking: { type: "disabled" },
       messages,
       ...(signal ? { signal } : {}),
     });
+    if (
+      !outputLimitRecovered &&
+      isRecoverableOutputLimit(response.modelServiceNotice, response.content)
+    ) {
+      outputLimitRecovered = true;
+      maxTokens = escalateOutputBudget(maxTokens);
+      continuationPrefix = (response.content ?? "")
+        .trim()
+        .slice(0, OUTPUT_LIMIT_CONTINUATION_PREFIX_MAX_CHARS);
+      messages = [
+        ...baseMessages,
+        { role: "assistant" as const, content: continuationPrefix },
+        {
+          role: "user" as const,
+          content: buildOutputLimitContinuationPrompt(),
+        },
+      ];
+      continue;
+    }
     throwForModelServiceNotice(response.modelServiceNotice);
-    if (!response.content?.trim()) {
+    const text = continuationPrefix
+      ? continuationPrefix + (response.content ?? "")
+      : (response.content ?? "");
+    if (!text.trim()) {
       lastError = new Error("规划审查模型没有返回结构化内容。");
     } else {
       try {
-        const parsed = parseUniquePlanRoundObject(response.content, (value) => {
+        const parsed = parseUniquePlanRoundObject(text, (value) => {
           if (typeof value.approved !== "boolean" || !Array.isArray(value.issues)) {
             throw new Error("规划审查输出缺少 approved 或 issues。");
           }
@@ -1864,16 +1930,18 @@ async function completePlanReview(
         lastError = error;
       }
     }
-    if (attempt === 0) {
+    if (!repairAttempted) {
+      repairAttempted = true;
+      continuationPrefix = "";
       const reason =
         lastError instanceof Error ? lastError.message : "响应未通过审查合同校验。";
       messages = [
         ...baseMessages,
-        ...(response.content?.trim()
+        ...(text.trim()
           ? [
               {
                 role: "assistant" as const,
-                content: response.content.slice(0, 16_000),
+                content: text.trim().slice(0, 16_000),
               },
             ]
           : []),
@@ -1887,6 +1955,10 @@ async function completePlanReview(
           ].join("\n"),
         },
       ];
+    } else {
+      // Repair already consumed — surface the last contract failure instead
+      // of spending another completion on an identical retry.
+      break;
     }
   }
   throw lastError instanceof Error

@@ -20,6 +20,7 @@ import { runAgentLoop, type AgentLoopOptions } from "./agentLoop";
 import type { AgentToolExecutor } from "./agentToolExecutor";
 import { PLAN_MODE_ALLOWED_TOOL_NAMES } from "./planModePolicy";
 import type { BoundModelClient } from "./providers/modelRouter";
+import { escalateOutputBudget } from "./structuredOutputBudget";
 import type { ToolAuthorizationService } from "./toolAuthorizationService";
 import {
   applyPlanningBriefAutonomy,
@@ -366,7 +367,13 @@ async function parseInvestigationBriefWithRepair(input: {
     let lastError =
       initialError instanceof Error ? initialError : new Error(String(initialError));
     let candidate = input.summary;
+    // Repair completions regenerate the whole brief, so give them an
+    // escalating output budget: the most common reason the original brief
+    // was malformed is truncation at the profile's maxTokens, and
+    // re-emitting the same budget would just truncate the repair too.
+    let repairMaxTokens = input.model.binding.generation.maxTokens;
     for (let attempt = 1; attempt <= MAX_BRIEF_REPAIR_ATTEMPTS; attempt += 1) {
+      repairMaxTokens = escalateOutputBudget(repairMaxTokens);
       let repaired: string;
       try {
         const response = await input.model.client.complete({
@@ -374,7 +381,7 @@ async function parseInvestigationBriefWithRepair(input: {
           apiKey: "",
           model: input.model.binding.modelId,
           temperature: 0,
-          maxTokens: input.model.binding.generation.maxTokens,
+          maxTokens: repairMaxTokens,
           messages: [
             {
               role: "system",

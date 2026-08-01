@@ -516,6 +516,111 @@ describe("plan debate orchestrator", () => {
     ).toMatchObject({ status: "failed" });
   });
 
+  it("continues a truncated round with an escalated output budget instead of pausing", async () => {
+    const calls: Array<{ profileId: string; request: ChatCompletionRequest }> =
+      [];
+    const fullArtifact = JSON.stringify(artifact("Budget-recovered plan"));
+    const splitAt = Math.floor(fullArtifact.length / 2);
+    const router = createQueuedRouter(
+      {
+        profileDirect: [
+          {
+            __rawResponse: true,
+            content: fullArtifact.slice(0, splitAt),
+            finishReason: "length",
+            modelServiceNotice: {
+              kind: "output_limit",
+              message:
+                "模型或服务商已达到本次输出长度限制，当前内容可能不完整。",
+            },
+          },
+          fullArtifact.slice(splitAt),
+          { approved: true, issues: [] },
+        ],
+      },
+      calls,
+    );
+    const orchestrator = createPlanDebateOrchestrator({
+      planStore: createPlanStore({
+        configDir: path.join(tempDir, "config-output-limit-recovery"),
+      }),
+      artifactWriter: createPlanArtifactWriter(),
+      modelRouter: router,
+      enableDirectReview: true,
+    });
+
+    const plan = await orchestrator.createPlan({
+      sessionId: "session-output-limit-recovery",
+      workspaceRoot,
+      sourceMessage: "实现本地功能并运行测试。",
+      mode: "direct",
+      modelAssignments: { direct: "profileDirect" },
+    });
+
+    expect(plan.status).toBe("awaiting_confirmation");
+    expect(plan.finalArtifact?.title).toBe("Budget-recovered plan");
+    expect(calls).toHaveLength(3);
+    // Test binding maxTokens is 4096; the continuation escalates to 16384.
+    expect(calls[1]?.request.maxTokens).toBe(16384);
+    const continuationMessages = calls[1]?.request.messages ?? [];
+    expect(continuationMessages).toHaveLength(4);
+    expect(continuationMessages[2]?.role).toBe("assistant");
+    expect(continuationMessages[2]?.content).toBe(
+      fullArtifact.slice(0, splitAt),
+    );
+    expect(continuationMessages[3]?.role).toBe("user");
+    expect(continuationMessages[3]?.content).toContain("继续输出剩余 JSON");
+  });
+
+  it("fails closed when a round stays truncated after budget escalation", async () => {
+    const calls: Array<{ profileId: string; request: ChatCompletionRequest }> =
+      [];
+    const truncatedNotice = {
+      kind: "output_limit" as const,
+      message: "模型或服务商已达到本次输出长度限制，当前内容可能不完整。",
+    };
+    const router = createQueuedRouter(
+      {
+        profileDirect: [
+          {
+            __rawResponse: true,
+            content: '{"title":"partial',
+            finishReason: "length",
+            modelServiceNotice: truncatedNotice,
+          },
+          {
+            __rawResponse: true,
+            content: ' plan","summary":"still cut',
+            finishReason: "length",
+            modelServiceNotice: truncatedNotice,
+          },
+        ],
+      },
+      calls,
+    );
+    const orchestrator = createPlanDebateOrchestrator({
+      planStore: createPlanStore({
+        configDir: path.join(tempDir, "config-output-limit-fail-closed"),
+      }),
+      artifactWriter: createPlanArtifactWriter(),
+      modelRouter: router,
+      enableDirectReview: true,
+    });
+
+    const plan = await orchestrator.createPlan({
+      sessionId: "session-output-limit-fail-closed",
+      workspaceRoot,
+      sourceMessage: "实现本地功能并运行测试。",
+      mode: "direct",
+      modelAssignments: { direct: "profileDirect" },
+    });
+
+    expect(plan.status).toBe("paused");
+    expect(plan.actionGate).toBe("blocked");
+    expect(calls).toHaveLength(2);
+    expect(calls[1]?.request.maxTokens).toBe(16384);
+  });
+
   it("does not silently retain an old explicit Skill when a replacement is unknown", async () => {
     const selectedSkill = skill("known-skill");
     const router = createQueuedRouter(
@@ -1615,6 +1720,22 @@ function createQueuedRouter(
         const value = outputs[selected]?.shift();
         if (value instanceof Error) throw value;
         if (!value) throw new Error(`No queued output for ${selected}.`);
+        if (typeof value === "object" && "__rawResponse" in value) {
+          const raw = value as {
+            content: string;
+            finishReason?: string;
+            modelServiceNotice?: ChatCompletionResponse["modelServiceNotice"];
+          };
+          return {
+            content: raw.content,
+            toolCalls: [],
+            finishReason: raw.finishReason ?? "length",
+            ...(raw.modelServiceNotice
+              ? { modelServiceNotice: raw.modelServiceNotice }
+              : {}),
+            usage: { inputTokens: 10, outputTokens: 5 },
+          };
+        }
         return {
           content: typeof value === "string" ? value : JSON.stringify(value),
           toolCalls: [],

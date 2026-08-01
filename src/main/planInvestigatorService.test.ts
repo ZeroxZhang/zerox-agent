@@ -456,6 +456,10 @@ describe("plan investigator service", () => {
     expect(result.brief.objective).toBe("理解工作区");
     expect(stageStatuses).toEqual(["running", "completed"]);
     expect(repairRequests).toHaveLength(1);
+    // Repair completions regenerate the whole brief, so they run with an
+    // escalated output budget (4096 profile → 16384) to avoid truncating
+    // the repair the same way the original was truncated.
+    expect(repairRequests[0]).toMatchObject({ maxTokens: 16384 });
     const repairUserMessage = repairRequests[0]?.messages as Array<{
       role: string;
       content: string;
