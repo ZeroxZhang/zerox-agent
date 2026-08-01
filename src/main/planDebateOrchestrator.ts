@@ -1673,6 +1673,7 @@ function buildRoundPrompt(
         ? [
             "v2 里程碑必须给出 targetRefs、evidenceRefs、actions、toolNames 和类型化 acceptanceChecks。toolNames 只能填写运行时真实存在的工具；只允许 file_exists、test_passes、command_exit_code、assertion、model_review；代码/文件/数据任务在可行时必须包含确定性检查。",
             "file_exists 提供 path 或结构化 destination；test_passes 提供 command 和 workspaceRoot；command_exit_code 提供 command 和 expectedExitCode；assertion 提供 artifactRef、path、equals；model_review 只能用于语义结果且必须 requiresEvidence=true 并引用真实 evidenceRefs。",
+            "验收 command 必须是单条命令：禁止 Shell 控制符与重定向（&&、;、|、>、<、反引号、$()、括号、换行）；需要指定执行目录时填写 workspaceRoot 参数而不是 cd X && 前缀；允许 KEY=value 环境变量前缀；引号内属于程序参数的比较运算符不受限制。",
           ]
         : []),
       instruction[kind],
@@ -1769,7 +1770,7 @@ async function completePlanReview(
   artifact: PlanArtifact,
   signal?: AbortSignal,
 ): Promise<DirectPlanReview> {
-  const messages: ChatMessage[] = [
+  const baseMessages: ChatMessage[] = [
     {
       role: "system",
       content: [
@@ -1804,53 +1805,93 @@ async function completePlanReview(
       }),
     },
   ];
-  const response = await bound.client.complete({
-    baseUrl: bound.binding.baseUrl ?? "",
-    apiKey: "",
-    model: bound.binding.modelId,
-    temperature: bound.binding.generation.temperature,
-    maxTokens: bound.binding.generation.maxTokens,
-    thinking: { type: "disabled" },
-    messages,
-    ...(signal ? { signal } : {}),
-  });
-  throwForModelServiceNotice(response.modelServiceNotice);
-  if (!response.content?.trim()) {
-    throw new Error("规划审查模型没有返回结构化内容。");
-  }
-  const parsed = parseUniquePlanRoundObject(response.content, (value) => {
-    if (typeof value.approved !== "boolean" || !Array.isArray(value.issues)) {
-      throw new Error("规划审查输出缺少 approved 或 issues。");
-    }
-    return {
-      approved: value.approved,
-      issues: value.issues.slice(0, 40).map((candidate, index) => {
-        const item = record(candidate);
-        const message = string(item.message).slice(0, 2_000);
-        if (!message) {
-          throw new Error(`规划审查 issues[${index}].message 不能为空。`);
-        }
+  // Same resilience contract as structured debate rounds and the goal
+  // judge: one malformed JSON slip must not fail the whole review (and
+  // pause the plan), so a single contract-feedback repair attempt is
+  // allowed before surfacing the failure.
+  let messages = baseMessages;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const response = await bound.client.complete({
+      baseUrl: bound.binding.baseUrl ?? "",
+      apiKey: "",
+      model: bound.binding.modelId,
+      temperature: bound.binding.generation.temperature,
+      maxTokens: bound.binding.generation.maxTokens,
+      thinking: { type: "disabled" },
+      messages,
+      ...(signal ? { signal } : {}),
+    });
+    throwForModelServiceNotice(response.modelServiceNotice);
+    if (!response.content?.trim()) {
+      lastError = new Error("规划审查模型没有返回结构化内容。");
+    } else {
+      try {
+        const parsed = parseUniquePlanRoundObject(response.content, (value) => {
+          if (typeof value.approved !== "boolean" || !Array.isArray(value.issues)) {
+            throw new Error("规划审查输出缺少 approved 或 issues。");
+          }
+          return {
+            approved: value.approved,
+            issues: value.issues.slice(0, 40).map((candidate, index) => {
+              const item = record(candidate);
+              const message = string(item.message).slice(0, 2_000);
+              if (!message) {
+                throw new Error(`规划审查 issues[${index}].message 不能为空。`);
+              }
+              return {
+                code: normalizeReviewCode(item.code, index),
+                severity: normalizeSeverity(item.severity),
+                message,
+                repairable: item.repairable === true,
+                repairInstruction: string(item.repairInstruction).slice(0, 2_000),
+              };
+            }),
+          };
+        });
         return {
-          code: normalizeReviewCode(item.code, index),
-          severity: normalizeSeverity(item.severity),
-          message,
-          repairable: item.repairable === true,
-          repairInstruction: string(item.repairInstruction).slice(0, 2_000),
+          ...parsed,
+          ...(response.usage
+            ? {
+                usage: {
+                  inputTokens: response.usage.inputTokens,
+                  outputTokens: response.usage.outputTokens,
+                },
+              }
+            : {}),
         };
-      }),
-    };
-  });
-  return {
-    ...parsed,
-    ...(response.usage
-      ? {
-          usage: {
-            inputTokens: response.usage.inputTokens,
-            outputTokens: response.usage.outputTokens,
-          },
-        }
-      : {}),
-  };
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (attempt === 0) {
+      const reason =
+        lastError instanceof Error ? lastError.message : "响应未通过审查合同校验。";
+      messages = [
+        ...baseMessages,
+        ...(response.content?.trim()
+          ? [
+              {
+                role: "assistant" as const,
+                content: response.content.slice(0, 16_000),
+              },
+            ]
+          : []),
+        {
+          role: "user",
+          content: [
+            "上一条响应未通过审查输出的结构化合同校验。",
+            `校验失败：${reason}`,
+            "只返回一个 JSON 对象；不要输出解释、Markdown、XML、前后缀或代码围栏。",
+            '必须是这个形状：{"approved": boolean, "issues": [{"code": string, "severity": "low|medium|high|critical", "message": string, "repairable": boolean, "repairInstruction": string}]}',
+          ].join("\n"),
+        },
+      ];
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("规划审查模型结构化输出修复未完成。");
 }
 
 function buildDirectRepairPrompt(

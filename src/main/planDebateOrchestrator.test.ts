@@ -433,6 +433,89 @@ describe("plan debate orchestrator", () => {
     });
   });
 
+  it("repairs a malformed cold-review response once instead of pausing the plan", async () => {
+    const calls: Array<{ profileId: string; request: ChatCompletionRequest }> =
+      [];
+    const router = createQueuedRouter(
+      {
+        profileDirect: [
+          artifact("Cold-review repair candidate"),
+          '{"approved": tru',
+          { approved: true, issues: [] },
+        ],
+      },
+      calls,
+    );
+    const orchestrator = createPlanDebateOrchestrator({
+      planStore: createPlanStore({
+        configDir: path.join(tempDir, "config-cold-review-repair"),
+      }),
+      artifactWriter: createPlanArtifactWriter(),
+      modelRouter: router,
+      enableDirectReview: true,
+    });
+
+    const plan = await orchestrator.createPlan({
+      sessionId: "session-cold-review-repair",
+      workspaceRoot,
+      sourceMessage: "实现本地功能并运行测试。",
+      mode: "direct",
+      modelAssignments: { direct: "profileDirect" },
+    });
+
+    expect(plan.status).toBe("awaiting_confirmation");
+    expect(calls).toHaveLength(3);
+    const repairMessages = calls[2]?.request.messages ?? [];
+    expect(repairMessages).toHaveLength(4);
+    expect(repairMessages[2]?.role).toBe("assistant");
+    expect(repairMessages[2]?.content).toContain('"approved": tru');
+    expect(repairMessages[3]?.role).toBe("user");
+    expect(repairMessages[3]?.content).toContain(
+      "上一条响应未通过审查输出的结构化合同校验",
+    );
+    expect(
+      plan.planningStages?.find((stage) => stage.kind === "review"),
+    ).toMatchObject({ status: "completed", reviewApproved: true });
+  });
+
+  it("pauses the plan when the cold review stays malformed after one repair", async () => {
+    const calls: Array<{ profileId: string; request: ChatCompletionRequest }> =
+      [];
+    const router = createQueuedRouter(
+      {
+        profileDirect: [
+          artifact("Cold-review fail-closed candidate"),
+          "first broken review",
+          "second broken review",
+        ],
+      },
+      calls,
+    );
+    const orchestrator = createPlanDebateOrchestrator({
+      planStore: createPlanStore({
+        configDir: path.join(tempDir, "config-cold-review-fail-closed"),
+      }),
+      artifactWriter: createPlanArtifactWriter(),
+      modelRouter: router,
+      enableDirectReview: true,
+    });
+
+    const plan = await orchestrator.createPlan({
+      sessionId: "session-cold-review-fail-closed",
+      workspaceRoot,
+      sourceMessage: "实现本地功能并运行测试。",
+      mode: "direct",
+      modelAssignments: { direct: "profileDirect" },
+    });
+
+    expect(plan.status).toBe("paused");
+    expect(plan.actionGate).toBe("blocked");
+    expect(calls).toHaveLength(3);
+    expect(
+      plan.planningStages?.find((stage) => stage.kind === "review"),
+    ).toMatchObject({ status: "failed" });
+  });
+
   it("does not silently retain an old explicit Skill when a replacement is unknown", async () => {
     const selectedSkill = skill("known-skill");
     const router = createQueuedRouter(

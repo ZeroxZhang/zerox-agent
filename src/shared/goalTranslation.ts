@@ -7,6 +7,7 @@ import type {
   SuccessCriterion,
 } from "./agentGoal";
 import type { ResolvedModelBinding } from "./modelSettings";
+import { extractLeadingCdWorkspace } from "./acceptanceCommand";
 
 export type GoalDraftStatus = "draft" | "confirmed" | "discarded";
 
@@ -16,7 +17,8 @@ export type GoalDraftWarningCode =
   | "model_review_requires_evidence"
   | "model_only_acceptance"
   | "missing_deterministic_checks"
-  | "empty_success_criteria";
+  | "empty_success_criteria"
+  | "cd_chain_acceptance_command_rewritten";
 
 export type GoalDraftWarning = {
   code: GoalDraftWarningCode;
@@ -191,7 +193,7 @@ function normalizeAcceptanceCheck(
   warnings: GoalDraftWarning[],
 ): AcceptanceCheck {
   const id = safeId(check.id, `${criterionId}_check_${checkIndex + 1}`);
-  const kind = allowedAcceptanceCheckKinds.includes(check.kind)
+  let kind = allowedAcceptanceCheckKinds.includes(check.kind)
     ? check.kind
     : "model_review";
   const params =
@@ -206,6 +208,51 @@ function normalizeAcceptanceCheck(
       checkId: id,
       message: `验收检查 ${id} 使用了不支持的类型，已降级为模型复核。`,
     });
+  }
+
+  // Planner models routinely write "run CMD in directory X" as the
+  // idiomatic `cd X && CMD` chain, which the acceptance sandbox rejects
+  // outright (shell control operators are forbidden so every command stays
+  // a single statically checkable invocation). Rewrite the chain into the
+  // params form instead: the acceptance runner resolves workspaceRoot
+  // against the goal workspace and fail-closes on anything outside the
+  // boundary, so semantics are preserved without weakening containment.
+  // Mirrors normalizePlanArtifactAcceptanceCommands on the plan path.
+  const expectedExitCode = Number(params.expectedExitCode ?? 0);
+  const rewritableCommandCheck =
+    kind === "test_passes" ||
+    (kind === "command_exit_code" && expectedExitCode === 0);
+  if (rewritableCommandCheck) {
+    const command = typeof params.command === "string" ? params.command : "";
+    const extracted = extractLeadingCdWorkspace(command);
+    if (extracted) {
+      const existingRoot =
+        typeof params.workspaceRoot === "string"
+          ? params.workspaceRoot.trim()
+          : "";
+      if (!existingRoot || existingRoot === extracted.dir) {
+        params.command = extracted.rest;
+        if (extracted.dir === "." || extracted.dir === "./") {
+          delete params.workspaceRoot;
+        } else {
+          params.workspaceRoot = extracted.dir;
+        }
+        if (kind === "command_exit_code") {
+          // test_passes is exactly "command exits 0" and executes through
+          // test_run, which honors the workspaceRoot parameter end-to-end
+          // (command_exit_code runs through shell_exec and ignores it).
+          kind = "test_passes";
+          delete params.expectedExitCode;
+        }
+        warnings.push({
+          code: "cd_chain_acceptance_command_rewritten",
+          severity: "warning",
+          criterionId,
+          checkId: id,
+          message: `验收检查 ${id} 的 cd 链式命令已改写为 workspaceRoot 参数形式。`,
+        });
+      }
+    }
   }
 
   if (kind === "model_review") {

@@ -316,6 +316,7 @@ function buildPlanPrompt(
     '{"milestones":[{"id":"milestone_id","description":"work to do","dependsOn":[],"successCriteria":[]}]}',
     "",
     "Every milestone must include at least one success criterion with at least one acceptance check.",
+    "Acceptance check commands must be single, statically checkable commands: no shell control operators or redirection (&&, ;, |, >, <, backticks, $(), subshells, newlines). Use the workspaceRoot param for the working directory instead of a `cd X &&` prefix; KEY=value env prefixes are allowed.",
   ].join("\n");
 }
 

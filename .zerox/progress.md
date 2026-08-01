@@ -1,5 +1,44 @@
 # Zerox Harness Progress
 
+## 2026-08-01 - Protocol-Adapter Layer for Model Output Boundaries
+
+- Root-cause review across every model-output parse point (communication
+  protocol perspective): the real gap was not one protocol bug but three
+  model boundaries lacking a uniform protocol-adapter layer. Two were
+  already repaired (context integrity, exploration dedup/summary); the
+  audit located the remaining concrete gap — the plan cold reviewer
+  (`completePlanReview`) was the last structured-output boundary with no
+  repair retry, so one malformed JSON slip paused the whole plan.
+- Fixes:
+  - `completePlanReview` now mirrors the debate-round/judge resilience
+    contract: on parse or contract failure it appends the broken response
+    (bounded to 16k chars) plus a contract-feedback user message and
+    retries exactly once before failing closed.
+  - Prompt-side contract front-loading: the acceptance command DSL (single
+    command, no shell control operators/redirection, workspaceRoot param
+    instead of `cd X &&`, KEY=value env prefixes allowed) is now written
+    into the plan-debate round prompt and the goal planner prompt so
+    models produce gate-compliant commands on the first attempt.
+  - Consistency gap closed: `normalizeGoalDraftCriteria` (goalTranslation)
+    now applies the same cd-chain rewrite as the plan path —
+    `cd <dir> && <cmd>` exit-0 checks become `{command, workspaceRoot}`
+    and `command_exit_code` retags to `test_passes` (which honors
+    workspaceRoot end-to-end through test_run); the acceptance runner
+    still boundary-checks workspaceRoot and fail-closes outside the
+    workspace, so containment is not weakened. Non-rewritable chains
+    (nonzero expected exit, conflicting workspaceRoot, still-chained
+    remainder) stay untouched for the quality gate, with an auditable
+    `cd_chain_acceptance_command_rewritten` warning when a rewrite fires.
+- Verification evidence:
+  - new tests: cold review repairs a malformed response once and approves
+    (repair request carries the broken text + contract feedback); cold
+    review fail-closed after two malformed responses (plan paused,
+    review stage failed); goalTranslation cd-chain rewrite, `cd .`
+    prefix drop, and three non-rewritable leave-untouched cases;
+  - `npm test`: 239 files / 2458 tests passed;
+  - TypeScript electron check, `npm run build`, `npm run harness:check`,
+    `BUILDING_AGENT_SMOKE=1 npx electron .` passed.
+
 ## 2026-08-01 - Investigation Structured-Output Repair (Single-Slip Plan Death)
 
 - Second user-acceptance failure, different layer: a fresh plan paused with
