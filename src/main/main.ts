@@ -631,6 +631,113 @@ function startGoalReplayDriver() {
   poller.unref?.();
 }
 
+/**
+ * Env-driven plan replay driver (debug/acceptance aid).
+ *
+ * When ZEROX_AGENT_REPLAY_PLAN_ID is set, reruns that paused plan from its
+ * failed round through the fully wired production container
+ * (`retryFailedRound`), logs [PLAN-REPLAY] lines including persisted
+ * failure excerpts, and exits 0 when the plan leaves the paused/failed
+ * state, 3 when it stays paused, 2 on driver error, 4 on timeout
+ * (ZEROX_AGENT_REPLAY_TIMEOUT_MS, default 10 minutes).
+ */
+function startPlanReplayDriver() {
+  const planId = process.env.ZEROX_AGENT_REPLAY_PLAN_ID?.trim();
+  if (!planId) return;
+  const timeoutMs = Math.max(
+    60_000,
+    Number(process.env.ZEROX_AGENT_REPLAY_TIMEOUT_MS ?? 600_000) || 600_000,
+  );
+  const planFile = path.join(
+    app.getPath("userData"),
+    "config",
+    "plans",
+    `${planId}.json`,
+  );
+  const log = (message: string, extra?: unknown) => {
+    const suffix = extra === undefined ? "" : ` ${JSON.stringify(extra)}`;
+    console.log(`[PLAN-REPLAY] ${message}${suffix}`);
+  };
+  const readPlan = async () => {
+    try {
+      const raw = await readFile(planFile, "utf8");
+      return JSON.parse(raw) as {
+        status: string;
+        rounds?: Array<{
+          kind: string;
+          status: string;
+          error?: string;
+          failureExcerpt?: string;
+        }>;
+        planningStages?: Array<{ kind: string; status: string; error?: string }>;
+      };
+    } catch (error) {
+      log("无法读取计划文件", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  };
+  const logPlanDetail = async (heading: string) => {
+    const plan = await readPlan();
+    if (!plan) return;
+    log(heading, { status: plan.status });
+    for (const round of plan.rounds ?? []) {
+      log("轮次状态", {
+        kind: round.kind,
+        status: round.status,
+        error: round.error?.slice(0, 300),
+      });
+      if (round.failureExcerpt) {
+        log("失败摘录", {
+          kind: round.kind,
+          excerpt: round.failureExcerpt.slice(0, 6_000),
+        });
+      }
+    }
+    for (const stage of plan.planningStages ?? []) {
+      if (stage.status === "failed") {
+        log("阶段失败", { kind: stage.kind, error: stage.error?.slice(0, 300) });
+      }
+    }
+  };
+
+  log("回放驱动已启动", { planId, timeoutMs });
+  const timeout = setTimeout(() => {
+    log("回放超时，即将退出", { timeoutMs });
+    app.exit(4);
+  }, timeoutMs);
+  timeout.unref?.();
+
+  setTimeout(() => {
+    void (async () => {
+      try {
+        await logPlanDetail("重试前状态");
+        log("触发 retryFailedRound", { planId });
+        const result = await container
+          .planDebateOrchestrator()
+          .retryFailedRound(planId);
+        log("retryFailedRound 完成", {
+          ok: result.ok,
+          message: result.message,
+          status: result.plan?.status,
+        });
+        await logPlanDetail("重试后状态");
+        clearTimeout(timeout);
+        const terminal =
+          result.plan?.status && result.plan.status !== "paused";
+        app.exit(terminal ? 0 : 3);
+      } catch (error) {
+        log("retryFailedRound 失败", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        clearTimeout(timeout);
+        app.exit(2);
+      }
+    })();
+  }, 3_000);
+}
+
 function stopAppUpdateScheduler() {
   if (!appUpdateTimer) {
     return;
@@ -679,6 +786,7 @@ app.whenReady().then(() => {
       console.error("Failed to resume interrupted goals:", error);
     });
     startGoalReplayDriver();
+    startPlanReplayDriver();
     createTray();
     startTaskScheduler();
     startMemoryMaintenanceScheduler();

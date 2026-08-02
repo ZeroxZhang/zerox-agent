@@ -1,6 +1,7 @@
 import type { DebateRoundKind } from "./planMode";
 
 const MAX_STRUCTURED_OUTPUT_CHARS = 128_000;
+const MAX_SALVAGE_POSITIONS = 24;
 
 export function parseUniquePlanRoundObject<T>(
   content: string,
@@ -31,9 +32,110 @@ export function parseUniquePlanRoundObject<T>(
   if (valid.length > 1) {
     throw new Error("规划模型返回了多个符合当前轮次合同的 JSON 对象。");
   }
+
+  // Observed in production (2026-08-02, contentSha256 805202…): the model
+  // closed the root object one field too early (a single spurious `}` after
+  // "assumptions"), splitting one plan JSON into fragments. The fragment
+  // errors ("title 必须是非空字符串" on a bare milestone object) completely
+  // masked the real syntax error — and the repair round, fed the misleading
+  // error, regenerated the same slip. Analyze the outermost JSON span as a
+  // whole before surfacing any fragment error.
+  const whole = sliceOutermostJsonSpan(content);
+  if (whole && candidates.length > 1) {
+    const salvaged = salvageSinglePrematureBrace(whole, (value) =>
+      normalize(assertRecord(value, "root")),
+    );
+    if (salvaged !== undefined) {
+      return salvaged;
+    }
+    try {
+      JSON.parse(whole);
+    } catch (syntaxError) {
+      const detail =
+        syntaxError instanceof Error ? syntaxError.message : String(syntaxError);
+      throw new Error(
+        `规划输出 JSON 存在语法错误，响应被切成 ${candidates.length} 个片段（疑似多/缺括号）：${detail}`,
+      );
+    }
+  }
+
   throw lastError instanceof Error
     ? lastError
     : new Error("规划模型返回的 JSON 对象未通过当前轮次合同校验。");
+}
+
+/**
+ * The span from the first `{` to the last `}` — the model's intended JSON
+ * object when prose or a syntax slip surrounds/splits it.
+ */
+function sliceOutermostJsonSpan(content: string): string | null {
+  const start = content.indexOf("{");
+  const end = content.lastIndexOf("}");
+  if (start < 0 || end <= start) {
+    return null;
+  }
+  return content.slice(start, end + 1);
+}
+
+/**
+ * Bounded single-position salvage for the premature-`}` slip: when the root
+ * object was closed one field too early, the remainder (`,"field":...}`)
+ * still follows. Deleting exactly that one `}` rejoins the object. Only
+ * positions where a `}` returns to depth 0 and the next token is `,` are
+ * tried, at most MAX_SALVAGE_POSITIONS of them, and a candidate wins only
+ * if it both parses and passes the round contract — fail-closed otherwise.
+ */
+function salvageSinglePrematureBrace<T>(
+  whole: string,
+  normalize: (value: Record<string, unknown>) => T,
+): T | undefined {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  let tried = 0;
+  for (let index = 0; index < whole.length - 1; index += 1) {
+    const character = whole[index]!;
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (character === '"' && depth > 0) {
+      inString = true;
+      continue;
+    }
+    if (character === "{") {
+      depth += 1;
+      continue;
+    }
+    if (character !== "}") {
+      continue;
+    }
+    depth -= 1;
+    if (depth !== 0) {
+      continue;
+    }
+    const rest = whole.slice(index + 1).trimStart();
+    if (!rest.startsWith(",")) {
+      continue;
+    }
+    tried += 1;
+    if (tried > MAX_SALVAGE_POSITIONS) {
+      return undefined;
+    }
+    const rejoined = whole.slice(0, index) + whole.slice(index + 1);
+    try {
+      return normalize(assertRecord(JSON.parse(rejoined), "root"));
+    } catch {
+      // This position was not the slip — keep scanning.
+    }
+  }
+  return undefined;
 }
 
 export function assertValidPlanRoundShape(

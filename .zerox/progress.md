@@ -1,5 +1,51 @@
 # Zerox Harness Progress
 
+## 2026-08-02 - Fragment-Masked Syntax Errors + Single-Brace Salvage
+
+- Fourth user-acceptance failure, and the most instructive: a1 debate round
+  died with "规划输出字段 title 必须是非空字符串" even though the model had
+  returned a complete 12-13 KB plan with a perfectly good title. Root cause
+  proven by replaying the exact failed plan (new ZEROX_AGENT_REPLAY_PLAN_ID
+  driver) and dumping the full raw response
+  (ZEROX_AGENT_FAILURE_DUMP_DIR):
+  - the model closed the root object one field early — a single spurious
+    `}` after "assumptions" at position 1949 split one plan JSON into
+    fragments;
+  - the extractor treated each fragment (bare milestone/risk objects) as a
+    top-level candidate, so the LAST fragment's contract error ("title
+    missing") completely masked the real syntax error;
+  - the repair round was fed the misleading error and regenerated the same
+    slip — "连续两次" failure was the diagnostics layer lying, not the
+    model being unfixable.
+- Fixes:
+  - Observability: failed rounds now persist a bounded raw excerpt
+    (`DebateRound.failureExcerpt`, head 4000 + tail 2000 chars) via
+    `PlanRoundFailureError`; full-response debug dumps behind
+    ZEROX_AGENT_FAILURE_DUMP_DIR; plan replay driver in main.ts mirrors
+    the goal replay driver.
+  - Parser (shared/planStructuredOutput.ts): when a response fragments
+    into multiple candidates with no valid one, the outermost JSON span is
+    analyzed as a whole — (a) bounded single-premature-brace salvage
+    (≤24 suspect positions, candidate must parse AND pass the round
+    contract, fail-closed otherwise); (b) unsalvageable responses now
+    throw the real syntax error ("语法错误，响应被切成 N 个片段") instead
+    of a fragment's contract error, so repair rounds target the actual
+    mistake.
+- End-to-end evidence: the exact failed plan
+  (plan_2c9fbef2, a1 failed twice under the old build) was replayed
+  against the live provider with the fix — a1/b1/a2/b2/c all completed,
+  plan reached awaiting_confirmation (replay exit 0). The salvage was
+  separately verified against the captured raw dump: position 1949 rejoins
+  to a complete valid plan (title, 3 milestones, 3 risks).
+- Verification evidence:
+  - new tests: premature-brace salvage, prose-wrapped salvage, real
+    syntax-error reporting (must NOT say "title 必须是非空字符串"),
+    intact-object contract errors unchanged, multiple-valid-objects
+    rejection unchanged;
+  - `npm test`: 241 files / 2472 tests passed;
+  - TypeScript electron check, `npm run build`, `npm run harness:check`,
+    `BUILDING_AGENT_SMOKE=1 npx electron .` passed.
+
 ## 2026-08-01 - Output-Budget Recovery Ladder (Truncation Killed Planning)
 
 - Third user-acceptance failure, budget dimension: a fresh debate plan

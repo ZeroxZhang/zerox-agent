@@ -311,6 +311,12 @@ export type DebateRound = {
   publicInputRefs: string[];
   output?: PlanProposal | RevisedPlanProposal | DebateCritique | PlanArtifact;
   error?: string;
+  /**
+   * Bounded excerpt of the raw model response that failed the round
+   * contract, persisted for post-mortem diagnosis. Local-only; never
+   * rendered into prompts.
+   */
+  failureExcerpt?: string;
   startedAt?: string;
   completedAt?: string;
   latencyMs?: number;

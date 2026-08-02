@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { readFile, readdir, realpath, stat } from "node:fs/promises";
+import { readFile, readdir, realpath, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type {
   AcceptanceCheck,
@@ -574,6 +574,9 @@ export function createPlanDebateOrchestrator(options: {
           status: "failed",
           error:
             error instanceof Error ? error.message : "规划模型调用失败。",
+          ...(error instanceof PlanRoundFailureError && error.failureExcerpt
+            ? { failureExcerpt: error.failureExcerpt }
+            : {}),
           completedAt: now(),
           latencyMs: Math.max(0, Date.now() - startedAtMs),
         };
@@ -2008,6 +2011,36 @@ function buildStructuredRepairPrompt(
   ].join("\n");
 }
 
+const FAILURE_EXCERPT_HEAD_CHARS = 4_000;
+const FAILURE_EXCERPT_TAIL_CHARS = 2_000;
+
+/**
+ * Error raised when a structured round exhausts its recovery ladder. Carries
+ * a bounded excerpt of the last failing raw response so the paused plan
+ * record stays self-diagnosing (the 2026-08-02 "title 必须是非空字符串"
+ * incident was undebuggable precisely because only a SHA-256 survived).
+ */
+export class PlanRoundFailureError extends Error {
+  constructor(
+    message: string,
+    readonly failureExcerpt?: string,
+  ) {
+    super(message);
+    this.name = "PlanRoundFailureError";
+  }
+}
+
+export function buildFailureExcerpt(content: string): string | undefined {
+  const trimmed = content.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  if (trimmed.length <= FAILURE_EXCERPT_HEAD_CHARS + FAILURE_EXCERPT_TAIL_CHARS) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, FAILURE_EXCERPT_HEAD_CHARS)}\n…[中间省略，共 ${trimmed.length} 字符]…\n${trimmed.slice(-FAILURE_EXCERPT_TAIL_CHARS)}`;
+}
+
 function structuredRoundFailure(
   error: unknown,
   response: ChatCompletionResponse,
@@ -2023,9 +2056,28 @@ function structuredRoundFailure(
     `inputTokens=${response.usage?.inputTokens ?? "unknown"}`,
     `outputTokens=${response.usage?.outputTokens ?? "unknown"}`,
   ].join(", ");
-  return new Error(
+  dumpFullFailureContentForDebug(content);
+  return new PlanRoundFailureError(
     `规划模型连续两次未返回可用 JSON 对象。最后错误：${reason}（${diagnostics}）。`,
+    buildFailureExcerpt(content),
   );
+}
+
+/**
+ * Debug aid: when ZEROX_AGENT_FAILURE_DUMP_DIR is set, persist the FULL raw
+ * failing response (the round record only keeps a bounded excerpt) so
+ * contract-mismatch post-mortems can inspect the exact syntax error.
+ */
+function dumpFullFailureContentForDebug(content: string): void {
+  const dir = process.env.ZEROX_AGENT_FAILURE_DUMP_DIR?.trim();
+  if (!dir || !content) {
+    return;
+  }
+  const file = path.join(
+    dir,
+    `round-failure-${Date.now()}-${randomUUID().slice(0, 8)}.txt`,
+  );
+  void writeFile(file, content, "utf8").catch(() => {});
 }
 
 function normalizeRoundOutput(
