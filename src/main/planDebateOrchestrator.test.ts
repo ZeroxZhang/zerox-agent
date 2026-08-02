@@ -229,6 +229,261 @@ describe("plan debate orchestrator", () => {
     ]);
   });
 
+  it("repairs a gate-blocked artifact once with the precise gate issues and re-runs the gate", async () => {
+    const calls: Array<{ profileId: string; request: ChatCompletionRequest }> =
+      [];
+    const violating = artifact("Violating Final");
+    (violating.milestones as Array<Record<string, unknown>>)[0]!
+      .acceptanceChecks = [
+      {
+        id: "m1-assert",
+        kind: "assertion",
+        description: "SKILL.md frontmatter 包含 name 字段",
+        params: {
+          artifactRef: "evidence_tool_1f3c8443f5aeef260a39",
+          path: "/Users/test/workspace/skill/SKILL.md",
+          equals: "name: ecommerce-selection",
+        },
+        requiresEvidence: false,
+      },
+    ];
+    const orchestrator = createPlanDebateOrchestrator({
+      planStore: createPlanStore({
+        configDir: path.join(tempDir, "config-gate-repair"),
+      }),
+      artifactWriter: createPlanArtifactWriter(),
+      modelRouter: createQueuedRouter(
+        {
+          profileA: [proposal("A1"), revisedProposal("A2")],
+          profileB: [critique("B1"), critique("B2")],
+          profileC: [violating, artifact("Repaired Final")],
+        },
+        calls,
+      ),
+    });
+
+    const plan = await orchestrator.createPlan({
+      sessionId: "session-gate-repair",
+      workspaceRoot,
+      sourceMessage: "验证本地 Skill 包结构。",
+      mode: "debate",
+      modelAssignments: {
+        a: "profileA",
+        b: "profileB",
+        c: "profileC",
+      },
+    });
+
+    expect(plan.status).toBe("awaiting_confirmation");
+    expect(plan.qualityReport).toMatchObject({ status: "ready" });
+    expect(calls).toHaveLength(6);
+    const repairCall = calls.at(-1)!;
+    expect(repairCall.profileId).toBe("profileC");
+    const repairSystem = String(repairCall.request.messages[0]?.content);
+    expect(repairSystem).toContain("artifact:goalEvidence");
+    expect(repairSystem).toContain("不是文件系统路径");
+    const repairInput = String(repairCall.request.messages[1]?.content);
+    expect(repairInput).toContain("gateBlockingIssues");
+    expect(repairInput).toContain("artifactRef 非法");
+    expect(
+      plan.planningStages?.find((stage) => stage.kind === "quality"),
+    ).toMatchObject({ status: "completed", gateRepairAttempted: true });
+    expect(plan.finalArtifact?.title).toBe("Repaired Final");
+  });
+
+  it("keeps the plan blocked when the single gate repair still violates the contract", async () => {
+    const calls: Array<{ profileId: string; request: ChatCompletionRequest }> =
+      [];
+    const violating = artifact("Violating Final");
+    (violating.milestones as Array<Record<string, unknown>>)[0]!
+      .acceptanceChecks = [
+      {
+        id: "m1-assert",
+        kind: "assertion",
+        description: "SKILL.md frontmatter 包含 name 字段",
+        params: {
+          artifactRef: "evidence_tool_1f3c8443f5aeef260a39",
+          path: "/Users/test/workspace/skill/SKILL.md",
+          equals: "name: ecommerce-selection",
+        },
+        requiresEvidence: false,
+      },
+    ];
+    const stillViolating = artifact("Still Violating");
+    (stillViolating.milestones as Array<Record<string, unknown>>)[0]!
+      .acceptanceChecks = [
+      {
+        id: "m1-assert",
+        kind: "assertion",
+        description: "SKILL.md frontmatter 包含 version 字段",
+        params: {
+          artifactRef: "evidence_tool_deadbeef",
+          path: "/Users/test/workspace/skill/SKILL.md",
+          equals: "version: 0.1.0",
+        },
+        requiresEvidence: false,
+      },
+    ];
+    const orchestrator = createPlanDebateOrchestrator({
+      planStore: createPlanStore({
+        configDir: path.join(tempDir, "config-gate-repair-blocked"),
+      }),
+      artifactWriter: createPlanArtifactWriter(),
+      modelRouter: createQueuedRouter(
+        {
+          profileA: [proposal("A1"), revisedProposal("A2")],
+          profileB: [critique("B1"), critique("B2")],
+          profileC: [violating, stillViolating],
+        },
+        calls,
+      ),
+    });
+
+    const plan = await orchestrator.createPlan({
+      sessionId: "session-gate-repair-blocked",
+      workspaceRoot,
+      sourceMessage: "验证本地 Skill 包结构。",
+      mode: "debate",
+      modelAssignments: {
+        a: "profileA",
+        b: "profileB",
+        c: "profileC",
+      },
+    });
+
+    expect(plan.status).toBe("paused");
+    expect(plan.actionGate).toBe("blocked");
+    expect(calls).toHaveLength(6);
+    expect(
+      plan.planningStages?.find((stage) => stage.kind === "quality"),
+    ).toMatchObject({ status: "failed", gateRepairAttempted: true });
+    expect(plan.qualityReport?.blockingIssues.length).toBeGreaterThan(0);
+  });
+
+  it("keeps the original blocked artifact when the gate repair call itself fails", async () => {
+    const calls: Array<{ profileId: string; request: ChatCompletionRequest }> =
+      [];
+    const violating = artifact("Violating Final");
+    (violating.milestones as Array<Record<string, unknown>>)[0]!
+      .acceptanceChecks = [
+      {
+        id: "m1-assert",
+        kind: "assertion",
+        description: "SKILL.md frontmatter 包含 name 字段",
+        params: {
+          artifactRef: "evidence_tool_1f3c8443f5aeef260a39",
+          path: "/Users/test/workspace/skill/SKILL.md",
+          equals: "name: ecommerce-selection",
+        },
+        requiresEvidence: false,
+      },
+    ];
+    const orchestrator = createPlanDebateOrchestrator({
+      planStore: createPlanStore({
+        configDir: path.join(tempDir, "config-gate-repair-error"),
+      }),
+      artifactWriter: createPlanArtifactWriter(),
+      modelRouter: createQueuedRouter(
+        {
+          profileA: [proposal("A1"), revisedProposal("A2")],
+          profileB: [critique("B1"), critique("B2")],
+          profileC: [violating, new Error("provider unavailable")],
+        },
+        calls,
+      ),
+    });
+
+    const plan = await orchestrator.createPlan({
+      sessionId: "session-gate-repair-error",
+      workspaceRoot,
+      sourceMessage: "验证本地 Skill 包结构。",
+      mode: "debate",
+      modelAssignments: {
+        a: "profileA",
+        b: "profileB",
+        c: "profileC",
+      },
+    });
+
+    expect(plan.status).toBe("paused");
+    expect(plan.actionGate).toBe("blocked");
+    expect(calls).toHaveLength(6);
+    expect(plan.finalArtifact?.title).toBe("Violating Final");
+    expect(
+      plan.planningStages?.find((stage) => stage.kind === "quality"),
+    ).toMatchObject({ status: "failed", gateRepairAttempted: true });
+  });
+
+  it("recovers a gate-blocked plan through the manual quality-gate retry with a replacement model", async () => {
+    const calls: Array<{ profileId: string; request: ChatCompletionRequest }> =
+      [];
+    const violating = artifact("Violating Final");
+    (violating.milestones as Array<Record<string, unknown>>)[0]!
+      .acceptanceChecks = [
+      {
+        id: "m1-assert",
+        kind: "assertion",
+        description: "SKILL.md frontmatter 包含 name 字段",
+        params: {
+          artifactRef: "evidence_tool_1f3c8443f5aeef260a39",
+          path: "/Users/test/workspace/skill/SKILL.md",
+          equals: "name: ecommerce-selection",
+        },
+        requiresEvidence: false,
+      },
+    ];
+    const orchestrator = createPlanDebateOrchestrator({
+      planStore: createPlanStore({
+        configDir: path.join(tempDir, "config-gate-manual-retry"),
+      }),
+      artifactWriter: createPlanArtifactWriter(),
+      modelRouter: createQueuedRouter(
+        {
+          profileA: [proposal("A1"), revisedProposal("A2")],
+          profileB: [critique("B1"), critique("B2")],
+          profileC: [violating, violating],
+          replacementC: [artifact("Recovered Final")],
+        },
+        calls,
+      ),
+    });
+
+    const paused = await orchestrator.createPlan({
+      sessionId: "session-gate-manual-retry",
+      workspaceRoot,
+      sourceMessage: "验证本地 Skill 包结构。",
+      mode: "debate",
+      modelAssignments: {
+        a: "profileA",
+        b: "profileB",
+        c: "profileC",
+      },
+    });
+    expect(paused.status).toBe("paused");
+    expect(
+      paused.planningStages?.find((stage) => stage.kind === "quality"),
+    ).toMatchObject({ status: "failed" });
+
+    const result = await orchestrator.retryFailedRound(
+      paused.id,
+      "replacementC",
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.plan.status).toBe("awaiting_confirmation");
+    expect(result.message).toContain("自动修复");
+    expect(result.plan.finalArtifact?.title).toBe("Recovered Final");
+    const latestQualityStage = [
+      ...(result.plan.planningStages ?? []),
+    ].reverse().find((stage) => stage.kind === "quality");
+    expect(latestQualityStage).toMatchObject({
+      status: "completed",
+      gateRepairAttempted: true,
+    });
+    expect(calls.at(-1)?.profileId).toBe("replacementC");
+  });
+
   it("derives a missing display title from the objective without retrying the round", async () => {
     const calls: Array<{ profileId: string; request: ChatCompletionRequest }> =
       [];

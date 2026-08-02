@@ -1,5 +1,52 @@
 # Zerox Harness Progress
 
+## 2026-08-02 - Acceptance-Check Contract Completion + Gate-Repair Ladder
+
+- Fifth user-acceptance failure, a new class: plan debate completed all
+  five rounds (46 evidence items), then the deterministic quality gate
+  dead-ended the plan — "验收检查 milestone_2_check_1/2/3 的 artifactRef
+  非法", status paused, no way forward. The stored plan showed the model
+  had misunderstood `assertion` in three ways at once: artifactRef was an
+  evidence id (`evidence_tool_…`), path was a filesystem path, equals was
+  a file-content fragment. Its actual intent (frontmatter contains
+  name/version/mode) is not expressible as assertion at all.
+- Two root causes, both fixed:
+  1. Prompt contract under-specified: the v2 prompt listed field names
+     ("assertion 提供 artifactRef、path、equals") but never the semantics —
+     artifactRef regex + allowed runtime artifacts (artifact:goalEvidence,
+     artifact:bookmark_list), path = dotted JSON field path (not fs path),
+     and the intent→kind mapping (file content → command_exit_code grep
+     or model_review; file presence → file_exists). Added
+     ACCEPTANCE_CHECK_CONTRACT_RULES to the round prompt, the cold-review
+     prompt, and the gate-repair prompt, with a comment demanding it stay
+     in sync with acceptanceContractValidator.ts/agentGoalAcceptance.ts.
+  2. Quality gate was a dead-end: blocking issues are deterministic
+     contract violations in a model-produced artifact — the same failure
+     class as malformed round JSON, but unlike rounds the gate had no
+     repair ladder. Added attemptGateRepair: exactly one bounded
+     synthesizer repair round fed with the precise machine-generated
+     issue list, then gate re-run; adopt repaired artifact only when not
+     worse; a failed repair completion never crashes planning. Eligible
+     only when ALL blocking issues are contract-level (INVALID_SCHEMA,
+     INVALID_DAG, UNKNOWN_TOOL, INVALID_ACCEPTANCE_CHECK,
+     MISSING_EVIDENCE, INSUFFICIENT_DETERMINISTIC_ACCEPTANCE,
+     ILLEGAL_CAPABILITY) — MODEL_REVIEW_REJECTED already had its
+     review-stage repair round; skill-input/ambiguity/risk issues need
+     the user. Wired into BOTH createPlan and the manual
+     retryQualityGate path (so already-parked plans can recover);
+     observability via PlanningStageRecord.gateRepairAttempted.
+- End-to-end evidence on the user's actual blocked plan: replayed
+  plan_5360d0bf (paused, 3x artifactRef 非法) through the production
+  container with the real provider — gate repair regenerated the three
+  checks as command_exit_code greps with proper workspaceRoot (exactly
+  the documented intent→kind mapping), gate passed, plan reached
+  awaiting_confirmation (replay exit 0, message "质量门禁发现合同问题，
+  已完成一次自动修复并复检通过").
+- Verification evidence: orchestrator suite 36/36 (4 new gate-repair
+  tests: recovery, still-blocked, repair-call failure, manual retry with
+  replacement model); full npm test 2482 passed; npm run build OK;
+  harness:check passed; BUILDING_AGENT_SMOKE=1 smoke exit 0.
+
 ## 2026-08-02 - Unified Model Boundary Protocol Engine
 
 - Architectural follow-through after four consecutive acceptance failures
