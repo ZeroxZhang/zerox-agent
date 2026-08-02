@@ -171,6 +171,11 @@ export type PlanningStageRecord = {
     outputTokens: number;
   };
   error?: string;
+  /**
+   * Bounded excerpt of the raw model response that failed the stage (same
+   * observability contract as DebateRound.failureExcerpt).
+   */
+  failureExcerpt?: string;
 };
 
 export type PlanQualityIssueCode =

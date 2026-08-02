@@ -1,5 +1,47 @@
 # Zerox Harness Progress
 
+## 2026-08-02 - Unified Model Boundary Protocol Engine
+
+- Architectural follow-through after four consecutive acceptance failures
+  (message integrity, unretried malformed investigation JSON, verification
+  gate false positive, output truncation, fragment-masked syntax error).
+  Each fix had landed in a different layer with its own bespoke ladder —
+  classic whack-a-mole: the invariants existed in prompts/parsers at every
+  boundary, but there was no single place that owned the completion→
+  validate→recover→fail-closed flow. Stricter contracts alone could not
+  have prevented any of the four (each failure happened while the strict
+  contract was already in the prompt); the root fix is a unified protocol
+  stack engine.
+- New `src/main/structuredModelProtocol.ts`: `completeStructuredBoundary()`
+  — one engine for every model boundary that must return a structured
+  artifact. Uniform ladder: normal completion → (on truncation) one
+  continuation + budget escalation (shared structuredOutputBudget) → (on
+  parse failure) one contract-repair round with the parse error fed back →
+  fail-closed with typed error + full response snapshot for observability.
+  Boundaries declare only a `StructuredBoundaryContract<T>` (name,
+  baseMessages, parse, buildRepairPrompt, buildFailure).
+- Migrated onto the engine: debate structured rounds
+  (`completeStructuredRound`) and cold plan review (`completePlanReview`)
+  in planDebateOrchestrator — now thin adapters; all recovery semantics
+  (repair prompts, failureExcerpt, stage records) behavior-preserved.
+  `PlanningStageRecord.failureExcerpt` added so review-stage failures are
+  observable like round failures.
+- Deliberately NOT migrated (registered in the spec instead): goalPlanner
+  (has refusal-retry semantics the engine doesn't model) and the
+  investigation collector (first artifact is produced inside the agent
+  loop, not a single completion) — both keep their own ladders but share
+  the structuredOutputBudget primitives.
+- Formal spec written: `.zerox/model-boundary-protocol.md` — inbound
+  message protocol, outbound contract rules, the uniform ladder, the
+  anti-masking rule (never report a fragment's contract error when the
+  real error is syntax/truncation upstream), observability requirements,
+  and a boundary registry table so every future model boundary registers
+  here and uses the engine by default.
+- Verification evidence: engine unit tests 6/6; orchestrator suite 32/32
+  unchanged post-migration; full `npm test` 242 files / 2478 tests pass;
+  `npm run build` OK; `npm run harness:check` passed;
+  BUILDING_AGENT_SMOKE=1 electron smoke OK.
+
 ## 2026-08-02 - Fragment-Masked Syntax Errors + Single-Brace Salvage
 
 - Fourth user-acceptance failure, and the most instructive: a1 debate round
