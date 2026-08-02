@@ -1,5 +1,45 @@
 # Zerox Harness Progress
 
+## 2026-08-02 - Tool-Name Namespace Separation + Gate Blocks Ask Instead of Strand
+
+- Sixth user-acceptance failure: debate completed, gate blocked on
+  "里程碑 milestone_4 引用了不存在的工具 model_review" — the model had
+  written an acceptance-check KIND into milestone toolNames. The previous
+  commit's gate-repair ladder fired (gateRepairAttempted=true on both
+  stages) but the repair round regenerated the same slip because the
+  repair prompt never listed the available tools nor stated that check
+  kinds are not tools.
+- Owner directive this round, treated as a product principle: "用户让他
+  干嘛就干，不清楚了就发起提问让用户决策，而不是直接中断" — terminal
+  failures must ask the user, never strand the plan on a dead "Blocked"
+  card.
+- Fixes:
+  1. Deterministic namespace separation (plannerKernel): assertion and
+     model_review (plus validator:* names) are acceptance-verifier names,
+     never executable tools — now stripped from milestone toolNames
+     during normalization, same philosophy as the existing alias map
+     (file_exists→file_stat etc.). This class can no longer reach the
+     gate at all.
+  2. Gate-repair prompt now carries the live available-tool list and an
+     explicit "check kinds are not tools" rule, so remaining UNKNOWN_TOOL
+     slips are repairable by the model.
+  3. UX principle implemented: a terminal gate block (after the bounded
+     repair ladder) no longer persists status "paused" — the plan is
+     persisted as awaiting_input with an actionable gateReason (issues +
+     "请在下方输入处理意见…或丢弃计划"), while actionGate stays "blocked"
+     so confirmation remains impossible and the audit trail stays honest.
+     Applied to both createPlan and the manual retryQualityGate path;
+     the awaiting_input UI already offers the revise-by-reply route
+     (continueWithInput replans from user input).
+- End-to-end evidence: the user's real blocked plan (plan_7dae6f91,
+  UNKNOWN_TOOL model_review) replayed through the production container —
+  the deterministic strip alone cleared the gate with zero model calls,
+  plan reached awaiting_confirmation (replay exit 0, qualityReport ready,
+  blocking 0, milestone_4 toolNames []).
+- Verification evidence: orchestrator suite 36/36 (4 expectations updated
+  to the new awaiting_input terminal semantics); full npm test 2482
+  passed; npm run build OK; harness:check passed; smoke exit 0.
+
 ## 2026-08-02 - Acceptance-Check Contract Completion + Gate-Repair Ladder
 
 - Fifth user-acceptance failure, a new class: plan debate completed all

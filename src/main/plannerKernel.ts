@@ -758,11 +758,29 @@ const plannerToolAliases: Readonly<Record<string, string>> = {
   test_passes: "test_run",
 };
 
+/**
+ * Acceptance-check kinds are execution-time verifier names, not Agent
+ * tools. Planner models repeatedly confuse the two namespaces (2026-08-02
+ * "milestone_4 引用了不存在的工具 model_review" — blocked twice even
+ * after a gate-repair round). Three kinds have executable aliases above;
+ * the rest must never appear in toolNames, so strip them deterministically
+ * instead of asking the model to regenerate an otherwise valid plan.
+ */
+const acceptanceKindOnlyToolNames: ReadonlySet<string> = new Set([
+  "assertion",
+  "model_review",
+]);
+
 export function normalizePlanToolNames(toolNames: Iterable<string>): string[] {
   return unique(
     [...toolNames]
       .map((toolName) => toolName.trim())
       .filter(Boolean)
+      .filter(
+        (toolName) =>
+          !acceptanceKindOnlyToolNames.has(toolName) &&
+          !toolName.startsWith("validator:"),
+      )
       .map((toolName) => plannerToolAliases[toolName] ?? toolName),
   );
 }

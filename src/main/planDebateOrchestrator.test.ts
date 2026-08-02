@@ -351,13 +351,14 @@ describe("plan debate orchestrator", () => {
       },
     });
 
-    expect(plan.status).toBe("paused");
+    expect(plan.status).toBe("awaiting_input");
     expect(plan.actionGate).toBe("blocked");
     expect(calls).toHaveLength(6);
     expect(
       plan.planningStages?.find((stage) => stage.kind === "quality"),
     ).toMatchObject({ status: "failed", gateRepairAttempted: true });
     expect(plan.qualityReport?.blockingIssues.length).toBeGreaterThan(0);
+    expect(plan.finalArtifact?.gateReason).toContain("输入处理意见");
   });
 
   it("keeps the original blocked artifact when the gate repair call itself fails", async () => {
@@ -405,7 +406,7 @@ describe("plan debate orchestrator", () => {
       },
     });
 
-    expect(plan.status).toBe("paused");
+    expect(plan.status).toBe("awaiting_input");
     expect(plan.actionGate).toBe("blocked");
     expect(calls).toHaveLength(6);
     expect(plan.finalArtifact?.title).toBe("Violating Final");
@@ -459,7 +460,7 @@ describe("plan debate orchestrator", () => {
         c: "profileC",
       },
     });
-    expect(paused.status).toBe("paused");
+    expect(paused.status).toBe("awaiting_input");
     expect(
       paused.planningStages?.find((stage) => stage.kind === "quality"),
     ).toMatchObject({ status: "failed" });
@@ -667,7 +668,7 @@ describe("plan debate orchestrator", () => {
 
     expect(calls).toHaveLength(4);
     expect(calls[3]?.request.messages).toHaveLength(2);
-    expect(plan.status).toBe("paused");
+    expect(plan.status).toBe("awaiting_input");
     expect(plan.actionGate).toBe("blocked");
     expect(plan.qualityReport?.blockingIssues).toEqual(
       expect.arrayContaining([
