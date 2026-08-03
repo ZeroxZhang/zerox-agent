@@ -1,0 +1,23 @@
+.github/workflows/release.yml
+  s_58766b87f986dd::t_79aa340201fa84 43-46
+src/shared/packageScripts.test.ts
+  s_58766b87f986dd::t_f37eb99c497e07 146-148
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a4c630aff9904831aab396ec27f31e774610f76f",
+  "prompts": {},
+  "sessions": {
+    "s_58766b87f986dd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fc603-14b2-7652-9bcc-3c7bffeaeb11",
+        "model": "unknown"
+      },
+      "human_author": "Zerox Zhang <22983136+ZeroxZhang@users.noreply.github.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
