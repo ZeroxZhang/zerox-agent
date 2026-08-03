@@ -1,0 +1,29 @@
+.github/release-notes/v3.8.1.md
+  s_58766b87f986dd::t_71a5b4096d9c98 1-29
+.github/workflows/release.yml
+  s_58766b87f986dd::t_2ac638820da9b0 1-73
+README.md
+  s_58766b87f986dd::t_11581b5c38d57b 105,589-590,684,1168-1169
+src/shared/packageScripts.test.ts
+  s_58766b87f986dd::t_cc5a0aff85703c 126-152
+src/shared/readme.test.ts
+  s_58766b87f986dd::t_e96bbeee3b8972 18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e26beed5d3026eb72c74a31fc383512db340a849",
+  "prompts": {},
+  "sessions": {
+    "s_58766b87f986dd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fc603-14b2-7652-9bcc-3c7bffeaeb11",
+        "model": "unknown"
+      },
+      "human_author": "Zerox Zhang <22983136+ZeroxZhang@users.noreply.github.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
