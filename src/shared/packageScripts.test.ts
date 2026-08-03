@@ -143,6 +143,9 @@ describe("package scripts", () => {
     expect(workflow).toContain('test "$(uname -m)" = "arm64"');
     expect(workflow).toContain("secrets.ZEROX_UPDATE_SIGNING_PRIVATE_KEY");
     expect(workflow).toContain("ZEROX_RELEASE_MODE: legacy-adhoc");
+    expect(workflow).toContain("npm test -- --maxWorkers=1");
+    expect(workflow).toContain("npm run eval:agent:built");
+    expect(workflow).toContain("npm run eval:memory:built");
     expect(workflow).toContain("npm run release:mac");
     expect(workflow).toContain("npm run release:publish");
     expect(releaseNotes).toContain("# Zerox Agent v3.8.1");
