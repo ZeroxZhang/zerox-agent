@@ -36,15 +36,20 @@ describe("authorized goal acceptance tool executor", () => {
       trajectoryStore: { async append(_runId, event) { return event; } },
     });
 
-    expect(result.accepted).toBe(false);
-    expect(result.checkResults[0]).toMatchObject({
-      passed: false,
-      code: "command_execution_failed",
+    expect(result).toMatchObject({
+      accepted: false,
+      verdict: "acceptance_unavailable",
+      failureClass: "validator_unavailable",
+      checkResults: [{
+        passed: false,
+        code: "command_executor_unavailable",
+        failureClass: "validator_unavailable",
+      }],
     });
     expect(rawCalls).toBe(0);
     expect(authorize).toHaveBeenCalledWith(
       "goal_acceptance:goal_acceptance_deny:milestone_command",
-      expect.objectContaining({ toolName: "shell_exec" }),
+      expect.objectContaining({ toolName: "test_run" }),
       expect.objectContaining({ runContext }),
     );
   });
@@ -192,11 +197,15 @@ describe("authorized goal acceptance tool executor", () => {
   });
 
   it("executes an interpreter acceptance command frozen into the goal contract", async () => {
-    const command = "python /tmp/acceptance-workspace/check.py --help";
+    const command =
+      "python3 -c \"import json; json.load(open('allergen-map/data/china.geo.json'))\"";
     const commandGoal = goal();
     commandGoal.successCriteria[0]!.acceptanceChecks[0]!.params.command = command;
+    commandGoal.successCriteria[0]!.acceptanceChecks[0]!.params.workspaceRoot = ".";
     commandGoal.milestones[0]!.successCriteria[0]!.acceptanceChecks[0]!.params.command =
       command;
+    commandGoal.milestones[0]!.successCriteria[0]!.acceptanceChecks[0]!.params.workspaceRoot =
+      ".";
     const runContext = canonicalRunContext();
     const authorization = createToolAuthorizationService({
       taskStore: { async get() { return null; } } as never,
@@ -206,7 +215,10 @@ describe("authorized goal acceptance tool executor", () => {
         },
       } as never,
     });
-    let rawCalls = 0;
+    const rawExecute = vi.fn(async () => ({
+      ok: true as const,
+      result: { exitCode: 0 },
+    }));
     const acceptance = createAgentGoalAcceptance();
     const result = await acceptance.evaluate(commandGoal.milestones[0]!, {
       runId: "run_acceptance_allowed",
@@ -218,18 +230,26 @@ describe("authorized goal acceptance tool executor", () => {
         goal: commandGoal,
         runContext,
         toolAuthorizationService: authorization,
-        toolExecutor: {
-          async execute() {
-            rawCalls += 1;
-            return { ok: true, result: { exitCode: 0 } };
-          },
-        },
+        toolExecutor: { execute: rawExecute },
       }),
       trajectoryStore: { async append(_runId, event) { return event; } },
     });
 
     expect(result.accepted).toBe(true);
-    expect(rawCalls).toBe(1);
+    expect(rawExecute).toHaveBeenCalledTimes(1);
+    expect(rawExecute).toHaveBeenCalledWith(
+      {
+        toolName: "test_run",
+        args: {
+          command,
+          workspaceRoot: runContext.workspaceRoot,
+        },
+      },
+      expect.objectContaining({
+        runContext,
+        authorizedShellCommand: command,
+      }),
+    );
   });
 });
 

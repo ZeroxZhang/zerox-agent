@@ -35,11 +35,19 @@ export function createAuthorizedGoalAcceptanceToolExecutor(options: {
       );
       throwIfAborted(executionOptions?.signal);
       if (!authorization.ok || !authorization.decision.allowed) {
+        const reason = authorization.ok
+          ? authorization.decision.reason
+          : authorization.message;
         return {
           ok: false,
-          error: authorization.ok
-            ? authorization.decision.reason
-            : authorization.message,
+          error: reason,
+          errorDetails: {
+            kind: authorization.ok
+              ? "authorization_denied"
+              : "authorization_unavailable",
+            toolName: request.toolName,
+            reason,
+          },
         };
       }
 
@@ -49,7 +57,7 @@ export function createAuthorizedGoalAcceptanceToolExecutor(options: {
         // canonical context. Callers cannot replace it with a wider sandbox.
         runContext: options.runContext,
         signal: executionOptions?.signal,
-        ...(request.toolName === "shell_exec"
+        ...(request.toolName === "shell_exec" || request.toolName === "test_run"
           ? { authorizedShellCommand: String(request.args.command ?? "") }
           : {}),
       });

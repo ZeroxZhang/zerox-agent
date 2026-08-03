@@ -31,12 +31,15 @@ describe("chat task activity restore", () => {
     const restored = restoreChatTaskActivity(snapshot);
 
     expect(restored).toMatchObject({
-      status: { kind: "ready", message: "任务已完成" },
+      status: {
+        kind: "ready",
+        message: "本轮已完成。你可以查看结果，或继续提出下一步。",
+      },
       workPhase: "done",
       taskActivity: {
         kind: "done",
         title: "本轮已完成",
-        detail: "任务已完成",
+        detail: "本轮已完成。你可以查看结果，或继续提出下一步。",
         toolCallsExecuted: 3,
       },
     });
@@ -125,13 +128,13 @@ describe("chat task activity restore", () => {
     expect(restored).toMatchObject({
       status: {
         kind: "error",
-        message: "Token 预算已用尽，任务未完成",
+        message: "本轮未完成。请根据对话中的恢复建议处理后重试。",
       },
       workPhase: "error",
       taskActivity: {
         kind: "error",
         title: "执行遇到问题",
-        detail: "Token 预算已用尽，任务未完成",
+        detail: "本轮未完成。请根据对话中的恢复建议处理后重试。",
         toolCallsExecuted: 21,
       },
     });

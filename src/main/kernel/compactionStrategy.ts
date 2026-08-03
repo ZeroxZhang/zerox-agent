@@ -24,7 +24,7 @@ export type CompactionStrategyId = "summarize" | "rebuild";
 
 export interface CompactionContext {
   messages: ChatMessage[];
-  budget: number; // maxTokens * 0.7
+  budget: number; // effective input budget resolved from the model context window
   runId: string;
   latestCheckpoint?: unknown; // hint; RebuildFromCheckpoint fetches fresh
   protectedMarkers: string[]; // incl NEVER_COMPACT_MARKER

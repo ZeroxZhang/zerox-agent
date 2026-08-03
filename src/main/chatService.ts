@@ -45,6 +45,7 @@ import type {
   ChatAttachmentMetadata,
   ChatHistoryMessage,
   ChatRelatedMemory,
+  ChatSessionContextSnapshot,
   ChatSessionListItem,
   ChatSessionRecord,
   ChatSessionGoalSummary,
@@ -59,6 +60,11 @@ import type {
   SkillInputResponseResult,
   SkillUserInputRequest,
 } from "../shared/chat";
+import {
+  getActionableGoalSummary,
+  isLiveGoalStatus,
+  isRecoverableGoalStatus,
+} from "../shared/chatSessionWork";
 import { getSystemPromptAssembler } from "../shared/agentProtocol";
 import type { GoalReviewDecision } from "../shared/agentGoalReview";
 import type { GoalDraft } from "../shared/goalTranslation";
@@ -68,9 +74,11 @@ import type {
   PlanModelAssignments,
   PlanRecord,
 } from "../shared/planMode";
+import { getPlanOutcomePresentation } from "../shared/planOutcome";
 import type { AgentRunRecord, RunScheduledTaskResult } from "../shared/agentRuns";
 import type { ExecutionContextMemoryScope } from "../shared/executionContextPackage";
 import type { MemoryRecord, MemorySearchResult } from "../shared/memory";
+import type { AgentContextUsage } from "../shared/contextUsage";
 import type { NativeToolDescriptor } from "../shared/nativeCapabilities";
 import type { SkillDiscoveryResult, SkillRecord } from "../shared/skills";
 import type {
@@ -206,6 +214,7 @@ type ChatGoalService = {
     goalId: string,
     options?: { signal?: AbortSignal },
   ): Promise<ChatSessionGoalSummary>;
+  retry(goalId: string): Promise<ChatSessionGoalSummary>;
   pause(goalId: string): Promise<ChatSessionGoalSummary>;
   cancel(goalId: string): Promise<ChatSessionGoalSummary>;
   resolveReview(
@@ -705,6 +714,8 @@ export function createChatService(options: {
         (chatRunContext ? buildChatWorkspaceSummary(chatRunContext) : input.workspaceSummary);
       let userMessageId: string | null = null;
       let authoritativeHistory: ChatHistoryMessage[] | null = null;
+      let sessionMessageCount = 0;
+      let sessionCompactionBaseline = 0;
       let activeGoal: ChatSessionGoalSummary | null = null;
       if (
         options.chatSessionStore &&
@@ -736,6 +747,9 @@ export function createChatService(options: {
               ? { attachments: message.attachments }
               : {}),
           }));
+        sessionMessageCount = appendResult.session.messages.length;
+        sessionCompactionBaseline =
+          appendResult.session.context?.compactionCount ?? 0;
         activeGoal = getActiveGoalSummary(appendResult.session);
       } else if (persistedRequestTurn?.user && input.sessionId) {
         sessionId = input.sessionId;
@@ -750,8 +764,29 @@ export function createChatService(options: {
               ? { attachments: message.attachments }
               : {}),
           }));
+        sessionMessageCount = persistedRequestTurn.session.messages.length;
+        sessionCompactionBaseline =
+          persistedRequestTurn.session.context?.compactionCount ?? 0;
       } else if (internalOptions.skipUserMessageAppend) {
         userMessageId = internalOptions.userMessageId ?? null;
+        const storedSession =
+          options.chatSessionStore?.get && input.sessionId
+            ? await options.chatSessionStore.get(input.sessionId)
+            : null;
+        if (storedSession) {
+          authoritativeHistory = storedSession.messages
+            .filter((message) => message.id !== userMessageId)
+            .map((message) => ({
+              role: message.role,
+              content: message.content,
+              ...(message.attachments?.length
+                ? { attachments: message.attachments }
+                : {}),
+            }));
+          sessionMessageCount = storedSession.messages.length;
+          sessionCompactionBaseline =
+            storedSession.context?.compactionCount ?? 0;
+        }
       }
       if (processedAttachments.validatedInputs.length) {
         cacheHistoryAttachmentPayloads(
@@ -1249,14 +1284,17 @@ export function createChatService(options: {
           memoryStore: options.memoryStore,
           query: userMessage,
           limit: memoryLimit,
+          sessionId,
         });
         chatMessages = buildChatMessages({
           userMessage: modelUserMessage,
           images: processedAttachments.images,
-          history:
-            authoritativeHistory?.length
-              ? authoritativeHistory
-              : input.history ?? authoritativeHistory ?? [],
+          // Durable main-process state is authoritative. A renderer can be
+          // stale during New Chat or session switches, so its history is used
+          // only by compatibility callers that have no session store.
+          history: options.chatSessionStore
+            ? authoritativeHistory ?? []
+            : input.history ?? [],
           relatedMemoryResults,
           historyLimit,
           historyAttachmentReplayBudget:
@@ -1499,6 +1537,24 @@ export function createChatService(options: {
                   toolCallCount: response.toolCalls.length,
                   finishReason: response.finishReason,
                 });
+              },
+              onContextUsage(usage) {
+                const context = toChatSessionContextSnapshot({
+                  usage,
+                  sessionMessageCount,
+                  historyMessageCount: authoritativeHistory?.length ?? 0,
+                  relatedMemoryResults,
+                  sessionCompactionBaseline,
+                });
+                emitStatus.send({
+                  state: "context",
+                  message: formatContextUsageStatus(context),
+                  context,
+                  toolCallsExecuted: observedToolCallsExecuted,
+                });
+              },
+              onContextCompacted(event) {
+                void evidence.append("context_compacted", event);
               },
               onReasoning(reasoningContent) {
                 emitStatus.send({
@@ -3083,10 +3139,19 @@ function uniqueStrings(values: string[]): string[] {
 }
 
 function normalizeReasoningForStatus(reasoningContent: string): string {
-  return reasoningContent
+  const normalized = reasoningContent
     .replace(/<\/?think>/gi, "")
     .replace(/\s+/g, " ")
     .trim();
+  if (!normalized) {
+    return "已完成本轮分析，正在整理下一步。";
+  }
+  const sentences = normalized
+    .split(/(?<=[。！？.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+  const summary = sentences.at(-1) ?? normalized;
+  return summary.length > 180 ? `${summary.slice(0, 177)}...` : summary;
 }
 
 function buildToolResultStatusMessage(
@@ -3264,6 +3329,15 @@ function isContinuationRequest(message: string): boolean {
 
   return (
     /^(继续|接着|续跑|继续执行|接着执行|继续吧|接着跑)/.test(compact) ||
+    /(?:把|将)?(?:接下来|剩下|剩余|后续|未完成|收尾)(?:的)?(?:工作|部分|任务|事项)?.{0,10}(?:继续|推进|完成|做完|收尾)/.test(
+      compact,
+    ) ||
+    /(?:按照|按).{0,12}(?:建议|方案|计划).{0,12}(?:继续|推进|完成|做完|收尾)/.test(
+      compact,
+    ) ||
+    /(?:继续|接着|推进).{0,10}(?:这个|该|当前|原有|原来的)?(?:目标|任务|工作)/.test(
+      compact,
+    ) ||
     /^(continue|resume|go on)\b/.test(normalized)
   );
 }
@@ -3320,14 +3394,7 @@ function extractGoalDescription(message: string): string {
 function getActiveGoalSummary(
   session: AppendChatMessageResult["session"],
 ): ChatSessionGoalSummary | null {
-  if (!session.activeGoalId || !session.goalSummaries?.length) {
-    return null;
-  }
-
-  return (
-    session.goalSummaries.find((goal) => goal.id === session.activeGoalId) ??
-    null
-  );
+  return getActionableGoalSummary(session) ?? null;
 }
 
 function emitGoalRequirementStatusEvents(options: {
@@ -3539,9 +3606,9 @@ async function tryRouteGoalIntent(options: {
           };
         }
         const message =
-          error instanceof Error
-            ? `生成计划失败：${error.message}`
-            : "生成计划失败。";
+          options.planMode === "debate"
+            ? "Debate 规划失败。请检查模型连接后重新尝试；你的目标描述已经保留。"
+            : "规划失败。请检查模型连接后重新尝试；你的目标描述已经保留。";
         options.emitStatus?.send({
           state: "failed",
           message,
@@ -3558,27 +3625,12 @@ async function tryRouteGoalIntent(options: {
           },
         };
       }
-      const failedPlanningStage = [...(plan.planningStages ?? [])]
-        .reverse()
-        .find((stage) => stage.status === "failed");
-      const pauseReason =
-        plan.finalArtifact?.gateReason ??
-        [...plan.rounds].reverse().find((round) => round.status === "failed")
-          ?.error ??
-        failedPlanningStage?.error;
-      const reply =
-        plan.status === "awaiting_confirmation"
-          ? `已生成${plan.mode === "debate" ? "辩论" : "直接"}计划：${plan.finalArtifact?.title ?? plan.taskContract.objective}。确认前不会执行任何任务。`
-          : `计划未完成：${pauseReason ?? "模型服务未返回可用结果"}。请在计划卡片中重试失败阶段；已收集的调查证据会保留。`;
+      const outcome = getPlanOutcomePresentation(plan);
+      const reply = `${outcome.title}。${outcome.detail} 下一步：${outcome.nextAction}`;
       options.emitStatus?.send({
         state:
           plan.status === "awaiting_confirmation" ? "completed" : "paused",
-        message:
-          plan.status === "awaiting_confirmation"
-            ? "计划已生成，等待确认"
-            : pauseReason
-              ? `规划未完成：${pauseReason}`
-              : "规划未完成，可在计划卡片中重试",
+        message: `${outcome.title} · ${outcome.nextAction}`,
         toolCallsExecuted: 0,
       });
       await appendGoalReply({
@@ -3737,22 +3789,14 @@ async function tryRouteGoalIntent(options: {
         },
       };
     }
-    const restartingTerminalGoal = isTerminalGoalStatus(options.activeGoal.status);
-    const goalToContinue = restartingTerminalGoal
-      ? await options.goalService.createFromChat({
-          sessionId: options.sessionId,
-          ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
-          originMessageId: options.originMessageId,
-          description: options.activeGoal.description,
-        })
-      : options.activeGoal;
-
-    const activeGoal =
-      goalToContinue.status === "waiting_for_review"
-        ? await options.goalService.resolveReview(goalToContinue.id, {
+    const recoveringGoal = isRecoverableGoalStatus(options.activeGoal.status);
+    const activeGoal = recoveringGoal
+      ? await options.goalService.retry(options.activeGoal.id)
+      : options.activeGoal.status === "waiting_for_review"
+        ? await options.goalService.resolveReview(options.activeGoal.id, {
             kind: "approve_continue",
           })
-        : await options.goalService.resume(goalToContinue.id, {
+        : await options.goalService.resume(options.activeGoal.id, {
             ...(options.signal ? { signal: options.signal } : {}),
           });
 
@@ -3761,20 +3805,20 @@ async function tryRouteGoalIntent(options: {
       options.sessionId,
       activeGoal,
     );
-    const reply = restartingTerminalGoal
-      ? formatTerminalGoalRestartReply(options.activeGoal.status, activeGoal.description)
+    const reply = recoveringGoal
+      ? `已恢复原目标并继续执行：${activeGoal.description}。原有 Plan、里程碑和验收记录保持关联。`
       : `继续推进目标：${activeGoal.description}。`;
     options.emitStatus?.send({
       state: "completed",
-      message: restartingTerminalGoal
-        ? "已创建新一轮目标重试"
+      message: recoveringGoal
+        ? "已恢复原目标执行"
         : "目标执行已更新",
       toolCallsExecuted: 0,
     });
     await appendGoalReply({
       content: reply,
       goalId: activeGoal.id,
-      goalEventRef: "goal_resumed",
+      goalEventRef: recoveringGoal ? "goal_retried" : "goal_resumed",
     });
     return {
       result: {
@@ -3890,18 +3934,7 @@ async function syncChatGoalSummary(
 function shouldClearActiveChatGoal(
   status: ChatSessionGoalSummary["status"],
 ): boolean {
-  return status === "achieved" || status === "failed" || status === "canceled";
-}
-
-function formatTerminalGoalRestartReply(
-  status: ChatSessionGoalSummary["status"],
-  description: string,
-): string {
-  if (status === "failed") {
-    return `上一次目标已失败，已基于原描述创建新一轮重试：${description}。`;
-  }
-
-  return `上一次目标已结束，已基于原描述创建新一轮执行：${description}。`;
+  return !isLiveGoalStatus(status);
 }
 
 function buildContinuationMessages(options: {
@@ -4732,13 +4765,63 @@ async function searchRelatedMemories(options: {
   memoryStore: Pick<MemoryStore, "search">;
   query: string;
   limit: number;
+  sessionId: string;
 }): Promise<MemorySearchResult[]> {
-  return recallMemoriesWithBudget({
+  const results = await recallMemoriesWithBudget({
     memoryStore: options.memoryStore,
     query: options.query,
     kind: "all",
+    sessionId: options.sessionId,
     limit: options.limit,
   });
+  return results
+    .filter((result) =>
+      isMemoryVisibleToChatSession(result.record, options.sessionId),
+    )
+    .slice(0, options.limit);
+}
+
+export function isMemoryVisibleToChatSession(
+  memory: MemoryRecord,
+  sessionId: string,
+): boolean {
+  if (memory.kind !== "session") {
+    return true;
+  }
+  return (
+    memory.source.type === "chat_session" &&
+    memory.source.sessionId === sessionId
+  );
+}
+
+function toChatSessionContextSnapshot(options: {
+  usage: AgentContextUsage;
+  sessionMessageCount: number;
+  historyMessageCount: number;
+  relatedMemoryResults: MemorySearchResult[];
+  sessionCompactionBaseline: number;
+}): ChatSessionContextSnapshot {
+  const recalledSessionMemories = options.relatedMemoryResults.filter(
+    (result) => result.record.kind === "session",
+  ).length;
+  return {
+    ...options.usage,
+    compactionCount:
+      options.sessionCompactionBaseline + options.usage.compactionCount,
+    isolation: "session_plus_global_memory",
+    sessionMessageCount: Math.max(0, options.sessionMessageCount),
+    historyMessageCount: Math.max(0, options.historyMessageCount),
+    recalledSessionMemories,
+    recalledGlobalMemories:
+      options.relatedMemoryResults.length - recalledSessionMemories,
+  };
+}
+
+function formatContextUsageStatus(context: ChatSessionContextSnapshot): string {
+  const percent = Math.round(context.occupancyRatio * 100);
+  return context.lastCompaction
+    ? `上下文 ${percent}% · 已压缩 ${context.compactionCount} 次`
+    : `上下文 ${percent}% · 当前会话已隔离`;
 }
 
 function toChatSessionTokenUsage(

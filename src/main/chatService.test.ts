@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildDefaultChatShellTemplates,
   createChatService as createProductionChatService,
+  isMemoryVisibleToChatSession,
 } from "./chatService";
 import type { AgentToolExecutor } from "./agentToolExecutor";
 import { runAgentLoop as runProductionAgentLoop } from "./agentLoop";
@@ -536,9 +537,9 @@ describe("chat service", () => {
         role: "user",
         content: expect.stringContaining("<memory_context>"),
       },
-      { role: "assistant", content: "我已准备好。" },
       { role: "user", content: "帮我整理下载文件夹" },
     ]);
+    expect(JSON.stringify(capturedMessages[0])).not.toContain("我已准备好。");
     expect(memoryWrites).toEqual([
       {
         kind: "session",
@@ -573,6 +574,75 @@ describe("chat service", () => {
         ]),
       }),
     ]);
+  });
+
+  it("keeps renderer-provided history out of a durable session context", async () => {
+    const capturedMessages: ChatMessage[][] = [];
+    const chatMessages: AppendChatMessageInput[] = [];
+    const service = createChatService({
+      chatClient: {
+        async complete(request) {
+          capturedMessages.push(request.messages);
+          return chatReply("只使用当前会话回答");
+        },
+      },
+      getModelProfile: async () => ({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret",
+        model: "agent-model",
+        temperature: 0.2,
+        maxTokens: 8192,
+      }),
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore(chatMessages),
+    });
+
+    await service.sendMessage({
+      message: "这是当前会话",
+      history: [
+        { role: "assistant", content: "FOREIGN_SESSION_SECRET" },
+      ],
+    });
+
+    expect(JSON.stringify(capturedMessages[0])).toContain("这是当前会话");
+    expect(JSON.stringify(capturedMessages[0])).not.toContain(
+      "FOREIGN_SESSION_SECRET",
+    );
+  });
+
+  it("allows global memory and only the current session's session memory", () => {
+    const currentSessionMemory = createMemoryRecord({
+      id: "memory_current_session",
+      title: "当前会话记忆",
+      content: "只属于当前会话",
+      kind: "session",
+      source: {
+        type: "chat_session",
+        sessionId: "session_current",
+        messageIds: [],
+      },
+    });
+    const foreignSessionMemory = createMemoryRecord({
+      id: "memory_foreign_session",
+      title: "其他会话记忆",
+      content: "不能进入当前会话",
+      kind: "session",
+      source: {
+        type: "chat_session",
+        sessionId: "session_foreign",
+        messageIds: [],
+      },
+    });
+    const globalMemory = createMemoryRecord({
+      id: "memory_global",
+      title: "全局记忆",
+      content: "允许跨会话使用",
+      kind: "semantic",
+    });
+
+    expect(isMemoryVisibleToChatSession(currentSessionMemory, "session_current")).toBe(true);
+    expect(isMemoryVisibleToChatSession(foreignSessionMemory, "session_current")).toBe(false);
+    expect(isMemoryVisibleToChatSession(globalMemory, "session_current")).toBe(true);
   });
 
   it("anchors chat prompt dates in the configured system timezone", async () => {
@@ -1361,6 +1431,129 @@ describe("chat service", () => {
     expect(modelCalls).toBe(0);
   });
 
+  it("keeps raw Debate creation errors out of user-visible replies and status", async () => {
+    const rawError = "HTTP 429 provider_request_id=req-secret stack=orchestrator.ts:517";
+    const statusEvents: ChatTaskStatusEvent[] = [];
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("ordinary chat must not run");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([]),
+      planService: {
+        async createPlan() {
+          throw new Error(rawError);
+        },
+        async getInputRoutingPlan() {
+          return null;
+        },
+        async continueWithInput() {
+          throw new Error("no plan to continue");
+        },
+      },
+      createId: () => "chat_plan_creation_failed",
+    });
+
+    const result = await service.sendMessage(
+      {
+        sessionId: "persisted_session",
+        message: "创建一个 Debate 计划",
+        mode: "goal_plan",
+        planMode: "debate",
+      },
+      {
+        onStatusEvent(event) {
+          statusEvents.push(event);
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      message:
+        "Debate 规划失败。请检查模型连接后重新尝试；你的目标描述已经保留。",
+    });
+    expect(
+      JSON.stringify({
+        reply: result.ok ? result.reply : result.message,
+        statusEvents,
+      }),
+    ).not.toContain(rawError);
+  });
+
+  it("projects a failed Debate record into one outcome and one next action", async () => {
+    const rawError = "invalid structured output at A2; raw_payload={...}";
+    const statusEvents: ChatTaskStatusEvent[] = [];
+    const planned = createPlanFixture({
+      id: "plan_failed_for_user",
+      sessionId: "persisted_session",
+      status: "paused",
+      actionGate: "blocked",
+      finalArtifact: undefined,
+      planningStages: [
+        {
+          id: "generation_failed",
+          kind: "generation",
+          runId: "generation_run",
+          status: "failed",
+          evidenceRefs: [],
+          error: rawError,
+        },
+      ],
+    });
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("ordinary chat must not run");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([]),
+      planService: {
+        async createPlan() {
+          return planned;
+        },
+        async getInputRoutingPlan() {
+          return null;
+        },
+        async continueWithInput() {
+          throw new Error("no plan to continue");
+        },
+      },
+      createId: () => "chat_plan_failed_record",
+    });
+
+    const result = await service.sendMessage(
+      {
+        sessionId: "persisted_session",
+        message: "规划一个目标",
+        mode: "goal_plan",
+        planMode: "debate",
+      },
+      {
+        onStatusEvent(event) {
+          statusEvents.push(event);
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      reply:
+        "Debate 规划失败。系统没有完成这次规划，但已完成的内容已经保留。 下一步：请选择一个可用模型后重新尝试，已完成的准备工作会保留。",
+    });
+    expect(
+      JSON.stringify({
+        reply: result.ok ? result.reply : result.message,
+        statusEvents,
+      }),
+    ).not.toContain(rawError);
+  });
+
   it("does not collect execution-time Skill inputs before creating a read-only Plan", async () => {
     const streamEvents: ChatStreamEvent[] = [];
     const planCreates: Array<{
@@ -1996,16 +2189,18 @@ describe("chat service", () => {
     expect(completeCalled).toBe(false);
   });
 
-  it("creates a new retry attempt for a terminal session goal when continuing it", async () => {
+  it.each(["failed", "stopped_stalled"] as const)(
+    "retries the same %s session goal for a natural-language continuation",
+    async (status) => {
     let completeCalled = false;
     const statusEvents: ChatTaskStatusEvent[] = [];
-    const resumes: string[] = [];
+    const retries: string[] = [];
     const goalCreates: unknown[] = [];
     const attachedGoals: ChatSessionGoalSummary[] = [];
     const activeGoal: ChatSessionGoalSummary = {
-      id: "goal_failed",
+      id: "goal_recoverable",
       description: "深度调研 Serenity",
-      status: "failed",
+      status,
     };
     const service = createChatService({
       chatClient: {
@@ -2020,7 +2215,7 @@ describe("chat service", () => {
         activeGoal,
         attachedGoals,
       }),
-      goalService: createGoalService({ goalCreates, resumes }),
+      goalService: createGoalService({ goalCreates, retries }),
       createId: () => "chat_goal",
       now: () => new Date("2026-06-13T08:00:00.000Z"),
     });
@@ -2028,7 +2223,7 @@ describe("chat service", () => {
     const result = await service.sendMessage(
       {
         sessionId: "persisted_session",
-        message: "继续这个目标",
+        message: "按照你的建议，把接下来的工作推进完成。",
       },
       {
         onStatusEvent(event) {
@@ -2039,31 +2234,27 @@ describe("chat service", () => {
 
     expect(result).toMatchObject({
       ok: true,
-      reply: "上一次目标已失败，已基于原描述创建新一轮重试：深度调研 Serenity。",
+      reply:
+        "已恢复原目标并继续执行：深度调研 Serenity。原有 Plan、里程碑和验收记录保持关联。",
       activeGoal: {
-        id: "goal_release",
+        id: "goal_recoverable",
         description: "深度调研 Serenity",
         status: "executing",
       },
     });
-    expect(goalCreates).toEqual([
-      {
-        sessionId: "persisted_session",
-        originMessageId: "message_1",
-        description: "深度调研 Serenity",
-      },
-    ]);
-    expect(resumes).toEqual(["goal_release"]);
+    expect(goalCreates).toEqual([]);
+    expect(retries).toEqual(["goal_recoverable"]);
     expect(attachedGoals.at(-1)).toEqual({
-      id: "goal_release",
+      id: "goal_recoverable",
       description: "深度调研 Serenity",
       status: "executing",
     });
     expect(statusEvents.map((event) => event.message)).toContain(
-      "已创建新一轮目标重试",
+      "已恢复原目标执行",
     );
     expect(completeCalled).toBe(false);
-  });
+    },
+  );
 
   it("keeps legacy budget-stopped goals read-only from chat", async () => {
     let completeCalled = false;
@@ -7511,6 +7702,7 @@ function createChatSessionStore(
 function createGoalService(options: {
   goalCreates?: unknown[];
   resumes?: string[];
+  retries?: string[];
   pauses?: string[];
   resolveStatus?: ChatSessionGoalSummary["status"];
 } = {}) {
@@ -7536,6 +7728,14 @@ function createGoalService(options: {
       return {
         id: goalId,
         description: goalDescriptions.get(goalId) ?? "发布",
+        status: "executing",
+      };
+    },
+    async retry(goalId: string): Promise<ChatSessionGoalSummary> {
+      options.retries?.push(goalId);
+      return {
+        id: goalId,
+        description: goalDescriptions.get(goalId) ?? "深度调研 Serenity",
         status: "executing",
       };
     },

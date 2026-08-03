@@ -139,6 +139,14 @@ describe("agent goal controller", () => {
           toolCallCount: 2,
           wallClockMs: 500,
           tokens: 25,
+          contextUsage: {
+            estimatedTokens: 240,
+            tokenBudget: 1_000,
+            occupancyRatio: 0.24,
+            messageCount: 4,
+            compactionCount: 1,
+            updatedAt: "2026-08-03T08:00:00.000Z",
+          },
           transcriptMessages: [
             { role: "assistant", content: "inspected repository" },
           ],
@@ -176,6 +184,18 @@ describe("agent goal controller", () => {
       toolCalls: 2,
       wallClockMs: 500,
       tokens: 25,
+    });
+    expect(result.contextUsage).toMatchObject({
+      estimatedTokens: 240,
+      tokenBudget: 1_000,
+      compactionCount: 1,
+    });
+    await expect(store.get("goal_1")).resolves.toMatchObject({
+      contextUsage: {
+        estimatedTokens: 240,
+        tokenBudget: 1_000,
+        compactionCount: 1,
+      },
     });
   });
 

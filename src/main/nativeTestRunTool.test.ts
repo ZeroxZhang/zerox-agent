@@ -49,6 +49,26 @@ describe("native test run tool", () => {
     });
   });
 
+  it("distinguishes runner startup failure from an observed command exit", async () => {
+    const missingRoot = path.join(workspaceRoot, "missing-root");
+
+    await expect(
+      runNativeTestCommand({
+        workspaceRoot: missingRoot,
+        command: `${JSON.stringify(process.execPath)} -e "process.exit(0)"`,
+        timeoutMs: 5000,
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining("test_run failed to start"),
+      errorDetails: {
+        kind: "spawn_error",
+        cwd: missingRoot,
+        exitCode: null,
+      },
+    });
+  });
+
   it("times out and terminates descendant processes that keep stdio open", async () => {
     if (process.platform === "win32") {
       return;

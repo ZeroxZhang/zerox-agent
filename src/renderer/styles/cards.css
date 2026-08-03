@@ -917,6 +917,9 @@
   gap: var(--space-3);
   padding: var(--space-4);
   border: 1px solid var(--secondary-page-outline);
+  border-radius: var(--radius-12);
+  background: var(--secondary-page-surface);
+  box-shadow: var(--shadow-sm);
 }
 
 .plan-mode-decision-card > header,
@@ -984,23 +987,163 @@
   font-size: var(--text-xs);
 }
 
+.plan-model-assignment-section {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--secondary-page-outline);
+  border-radius: var(--radius-12);
+  background: var(--secondary-page-row);
+}
+
+.plan-model-assignment-section > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.plan-model-assignment-section > header > div {
+  display: grid;
+  gap: 3px;
+}
+
+.plan-model-assignment-section > header span {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.plan-model-unify-action {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--secondary-page-outline);
+  border-radius: 999px;
+  background: var(--secondary-page-surface);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+}
+
+.plan-model-unify-action:hover {
+  border-color: var(--color-action-primary);
+  color: var(--color-text-primary);
+}
+
+.plan-model-unify-action:focus-visible,
+.plan-model-role-card:focus-within {
+  outline: 2px solid var(--color-focus-ring-strong);
+  outline-offset: 2px;
+}
+
 .plan-model-assignment-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-2);
 }
 
-.plan-model-assignment-grid label {
-  display: grid;
-  gap: 5px;
-  min-width: 0;
-  color: var(--color-text-secondary);
-  font-size: var(--text-xs);
+.plan-model-assignment-grid.is-direct {
+  grid-template-columns: minmax(0, 1fr);
 }
 
-.plan-model-assignment-grid select {
+.plan-model-role-card {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--secondary-page-outline);
+  border-radius: var(--radius-10);
+  background: var(--secondary-page-surface);
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease;
+}
+
+.plan-model-role-card:hover,
+.plan-model-role-card:focus-within {
+  border-color: var(--color-border-strong);
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}
+
+.plan-model-role-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.plan-model-role-heading > span:last-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.plan-model-role-heading small,
+.plan-model-current-meta {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
+.plan-model-role-badge {
+  display: grid;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: var(--radius-8);
+  color: var(--color-on-accent);
+  background: var(--color-action-primary);
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+}
+
+.plan-model-select-shell {
+  position: relative;
+  display: block;
+}
+
+.plan-model-select-shell::after {
+  position: absolute;
+  top: 50%;
+  right: var(--space-3);
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid var(--color-text-secondary);
+  border-bottom: 1.5px solid var(--color-text-secondary);
+  content: "";
+  pointer-events: none;
+  transform: translateY(-70%) rotate(45deg);
+}
+
+.plan-model-select-shell select {
   width: 100%;
   min-width: 0;
+  min-height: 42px;
+  padding: 0 calc(var(--space-5) + var(--space-2)) 0 var(--space-3);
+  appearance: none;
+  border: 1px solid var(--secondary-page-outline);
+  border-radius: var(--radius-8);
+  color: var(--color-text-primary);
+  background: var(--secondary-page-row);
+  font: inherit;
+}
+
+.plan-model-select-shell select:hover {
+  border-color: var(--color-border-strong);
+}
+
+.plan-model-select-shell select:focus {
+  border-color: var(--color-action-primary);
+  outline: none;
+}
+
+.plan-model-current-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .plan-model-missing {
@@ -1050,6 +1193,69 @@
 
 .plan-confirmation-card > header strong {
   overflow-wrap: anywhere;
+}
+
+.plan-outcome-summary {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: flex-start;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--status-neutral-border);
+  border-radius: var(--radius-10);
+  background: var(--status-neutral-bg);
+}
+
+.plan-outcome-summary.is-success {
+  border-color: var(--status-success-border);
+  background: var(--status-success-bg);
+}
+
+.plan-outcome-summary.is-failure {
+  border-color: var(--status-error-border);
+  background: var(--status-error-bg);
+}
+
+.plan-outcome-summary.is-needs_input,
+.plan-outcome-summary.is-canceled {
+  border-color: var(--status-warning-border);
+  background: var(--status-warning-bg);
+}
+
+.plan-outcome-mark {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--color-text-primary);
+  background: var(--color-surface-primary);
+  font-size: var(--text-md);
+  font-weight: var(--font-semibold);
+  box-shadow: var(--shadow-sm);
+}
+
+.plan-outcome-summary > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.plan-outcome-summary p,
+.plan-outcome-summary small {
+  margin: 0;
+  color: var(--color-text-secondary);
+  line-height: 1.55;
+}
+
+.plan-outcome-summary small {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.plan-outcome-summary small b {
+  flex: 0 0 auto;
+  color: var(--color-text-primary);
 }
 
 .plan-input-routing-note {
@@ -1108,7 +1314,8 @@
 
 .plan-progress-disclosure,
 .plan-artifact-disclosure,
-.plan-audit-disclosure {
+.plan-audit-disclosure,
+.plan-technical-disclosure {
   border: 1px solid var(--secondary-page-outline);
   border-radius: var(--radius-10);
   background: var(--secondary-page-row);
@@ -1117,7 +1324,8 @@
 
 .plan-progress-disclosure > summary,
 .plan-artifact-disclosure > summary,
-.plan-audit-disclosure > summary {
+.plan-audit-disclosure > summary,
+.plan-technical-disclosure > summary {
   padding: var(--space-3) var(--space-4);
   cursor: pointer;
   color: var(--color-text-secondary);
@@ -1127,13 +1335,50 @@
 
 .plan-progress-disclosure[open] > summary,
 .plan-artifact-disclosure[open] > summary,
-.plan-audit-disclosure[open] > summary {
+.plan-audit-disclosure[open] > summary,
+.plan-technical-disclosure[open] > summary {
   border-bottom: 1px solid var(--secondary-page-outline);
 }
 
 .plan-progress-disclosure .debate-round-timeline {
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   padding: var(--space-3);
+}
+
+.plan-technical-body {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+
+.plan-technical-body > section {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.plan-technical-body h4 {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.plan-technical-error {
+  padding: var(--space-3);
+  border: 1px solid var(--status-error-border);
+  border-radius: var(--radius-8);
+  background: var(--status-error-bg);
+}
+
+.plan-technical-error code,
+.plan-projection-ref {
+  overflow-wrap: anywhere;
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.plan-projection-ref {
+  margin: 0;
 }
 
 .plan-kernel-summary {
@@ -1452,6 +1697,20 @@
   .plan-confirmation-card > header {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .plan-model-assignment-section > header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .plan-model-unify-action {
+    width: 100%;
+  }
+
+  .plan-outcome-summary small {
+    display: grid;
+    gap: 2px;
   }
 }
 

@@ -90,6 +90,46 @@ describe("agent runner service", () => {
     )).toBe(true);
   });
 
+  it("uses the model context window instead of max output tokens for legacy compaction", async () => {
+    const compactionBudgets: number[] = [];
+    let completionCalls = 0;
+    const service = createAgentRunnerService({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      resolveSkill: async () => createSkillRecord(2),
+      chatClient: {
+        async complete() {
+          completionCalls += 1;
+          return completionCalls === 1
+            ? finalResponse("no explicit plan")
+            : finalResponse("Report complete");
+        },
+      },
+      getModelProfile: async () => ({
+        ...createModelProfile(),
+        maxTokens: 128,
+        contextWindow: 300,
+      }),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      contextManager: {
+        estimateTokens(messages) {
+          return messages.length * 100;
+        },
+        compressMessages(messages, budget) {
+          compactionBudgets.push(budget ?? 0);
+          return messages;
+        },
+      },
+    });
+
+    await expect(service.runTask("task_123")).resolves.toMatchObject({
+      ok: true,
+      run: { status: "succeeded" },
+    });
+    expect(compactionBudgets).toEqual([154]);
+  });
+
   it("runs a prompt-only scheduled task without resolving a skill", async () => {
     let resolveSkillCalled = false;
     let completionCalls = 0;

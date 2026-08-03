@@ -504,6 +504,29 @@ describe("tool authorization", () => {
     });
   });
 
+  it.each(["shell_exec", "test_run"] as const)(
+    "allows quoted interpreter statements for an exact %s command contract",
+    (toolName) => {
+      const command =
+        "python3 -c \"import json; json.load(open('allergen-map/data/china.geo.json'))\"";
+      const commandPolicy = getDefaultTaskPermissionPolicy();
+      commandPolicy.files.read = ["/workspace/project"];
+      commandPolicy.shell.commands = [command];
+
+      expect(
+        authorizeToolCall(commandPolicy, {
+          toolName,
+          args: {
+            command,
+            ...(toolName === "test_run"
+              ? { workspaceRoot: "/workspace/project" }
+              : {}),
+          },
+        }),
+      ).toMatchObject({ allowed: true });
+    },
+  );
+
   it.each(["\n", "\r", "\r\n"])(
     "rejects newline-separated shell commands before template matching: %j",
     (separator) => {
@@ -1188,6 +1211,33 @@ describe("tool authorization", () => {
         { shellPlan: analyzeShell(command, { cwd: runContext.workspaceRoot }) },
       ),
     ).toMatchObject({ allowed: false });
+  });
+
+  it("applies parsed network restrictions to test_run commands", () => {
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: "/Users/demo/project",
+      sandbox: { ...buildDefaultSandboxPolicy(), network: "none" },
+    });
+    const command = "python3 -c 'import requests; requests.get(\"https://example.com\")'";
+    const policy = getDefaultTaskPermissionPolicy();
+    policy.files.read = [runContext.workspaceRoot];
+    policy.shell.commands = [command];
+
+    expect(
+      authorizeToolCallWithinRunContext(
+        policy,
+        {
+          toolName: "test_run",
+          args: { command, workspaceRoot: runContext.workspaceRoot },
+        },
+        runContext,
+        { shellPlan: analyzeShell(command, { cwd: runContext.workspaceRoot }) },
+      ),
+    ).toMatchObject({
+      allowed: false,
+      reason: expect.stringContaining("test_run 被运行沙箱阻止：网络访问已禁用"),
+    });
   });
 
   it("denies opaque nested shell execution in workspace-only sandboxes", () => {

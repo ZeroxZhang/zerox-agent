@@ -237,6 +237,17 @@ describe("agent loop", () => {
 
   it("compacts messages before model requests when the context exceeds budget", async () => {
     const requests: ChatCompletionRequest[] = [];
+    const contextUsageEvents: Array<{
+      tokenBudget: number;
+      compactionCount: number;
+      messageCount: number;
+    }> = [];
+    const compactionEvents: Array<{
+      tokenBudget: number;
+      estimatedTokens: number;
+      compactedTokens: number;
+      strategy: string;
+    }> = [];
     const chatClient: ChatClient = {
       async complete(request) {
         requests.push(request);
@@ -254,7 +265,7 @@ describe("agent loop", () => {
         { role: "assistant", content: "old answer" },
         { role: "user", content: "current request" },
       ],
-      { ...modelProfile, maxTokens: 128 },
+      { ...modelProfile, maxTokens: 128, contextWindow: 300 },
       {
         chatClient,
         toolExecutor: createToolExecutor(),
@@ -271,6 +282,12 @@ describe("agent loop", () => {
             ].filter(Boolean) as ChatCompletionRequest["messages"];
           },
         },
+        onContextUsage(usage) {
+          contextUsageEvents.push(usage);
+        },
+        onContextCompacted(event) {
+          compactionEvents.push(event);
+        },
       },
     );
 
@@ -280,6 +297,27 @@ describe("agent loop", () => {
       { role: "user", content: "[之前对话摘要]\nold request -> old answer" },
       { role: "user", content: "current request" },
     ]);
+    expect(compactionEvents).toEqual([
+      expect.objectContaining({
+        tokenBudget: 154,
+        estimatedTokens: 400,
+        compactedTokens: 300,
+        strategy: "summarize",
+      }),
+    ]);
+    expect(contextUsageEvents.at(-1)).toMatchObject({
+      tokenBudget: 154,
+      compactionCount: 1,
+      messageCount: 3,
+    });
+    expect(result.contextUsage).toMatchObject({
+      tokenBudget: 154,
+      compactionCount: 1,
+      lastCompaction: expect.objectContaining({
+        beforeTokens: 400,
+        afterTokens: 300,
+      }),
+    });
   });
 
   it("routes overflow compaction through the injected strategy when provided (P2)", async () => {

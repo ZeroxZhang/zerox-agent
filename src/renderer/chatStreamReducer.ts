@@ -37,6 +37,9 @@ export type ActiveChatStream = {
   activeRequestId: string | null;
 };
 
+const MAX_TRANSIENT_REASONING_CHARS = 2_000;
+const MAX_TRANSIENT_TOOL_PREVIEWS = 24;
+
 export function createChatStreamState(messages: ChatStreamMessage[]): ChatStreamState {
   return {
     messages,
@@ -78,14 +81,19 @@ export function applyChatStreamEvent(
   if (event.type === "thinking_delta") {
     return {
       ...sequencedState,
-      thinkingText: `${sequencedState.thinkingText}${event.text}`,
+      thinkingText: `${sequencedState.thinkingText}${event.text}`.slice(
+        -MAX_TRANSIENT_REASONING_CHARS,
+      ),
     };
   }
 
   if (event.type === "tool_call_preview") {
     return {
       ...sequencedState,
-      toolCallPreviews: upsertToolCallPreview(sequencedState.toolCallPreviews, event),
+      toolCallPreviews: upsertToolCallPreview(
+        sequencedState.toolCallPreviews,
+        event,
+      ).slice(-MAX_TRANSIENT_TOOL_PREVIEWS),
     };
   }
 

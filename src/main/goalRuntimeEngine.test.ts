@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { AcceptanceRepairDirective, Goal, Milestone } from "../shared/agentGoal";
 import type { AgentRunRecord } from "../shared/agentRuns";
+import type { GoalProgressEvent } from "../shared/chat";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
 import type { AgentTaskContract } from "../shared/agentTaskContract";
 import type { SkillRecord } from "../shared/skills";
@@ -845,6 +846,7 @@ describe("goal runtime engine", () => {
   it("runs a goal milestone through the agent loop and records the run", async () => {
     const runs: AgentRunRecord[] = [];
     const trajectoryEvents: AgentTrajectoryEvent[] = [];
+    const progressEvents: GoalProgressEvent[] = [];
     const loopInputs: Array<{
       messages: ChatMessage[];
       taskId: string | undefined;
@@ -894,6 +896,9 @@ describe("goal runtime engine", () => {
         },
       },
       goalContext,
+      onProgress(event) {
+        progressEvents.push(event);
+      },
       createId: () => "goal_run_1",
       now: () => "2026-06-13T10:00:00.000Z",
       runAgentLoop: async (messages, _profile, options): Promise<AgentLoopResult> => {
@@ -905,12 +910,38 @@ describe("goal runtime engine", () => {
           pauseOnStrategyGuard: options.pauseOnStrategyGuard,
           pauseOnTurnLimit: options.pauseOnTurnLimit,
         });
+        const contextUsage = {
+          estimatedTokens: 240,
+          tokenBudget: 1_000,
+          occupancyRatio: 0.24,
+          messageCount: messages.length,
+          compactionCount: 1,
+          lastCompaction: {
+            strategy: "summarize" as const,
+            beforeMessages: 8,
+            afterMessages: 4,
+            beforeTokens: 800,
+            afterTokens: 240,
+            compactedAt: "2026-08-03T08:00:00.000Z",
+          },
+          updatedAt: "2026-08-03T08:00:00.000Z",
+        };
+        options.onContextUsage?.(contextUsage);
+        options.onContextCompacted?.({
+          originalMessageCount: 8,
+          compactedMessageCount: 4,
+          estimatedTokens: 800,
+          compactedTokens: 240,
+          tokenBudget: 1_000,
+          strategy: "summarize",
+        });
         return {
           summary: "已完成 Serenity 投资方法论调研摘要。",
           status: "succeeded",
           turns: 2,
           messages,
           toolCallsExecuted: 3,
+          contextUsage,
         };
       },
     });
@@ -924,6 +955,10 @@ describe("goal runtime engine", () => {
       summary: "已完成 Serenity 投资方法论调研摘要。",
     });
     expect(result.tokens).toBeGreaterThan(0);
+    expect(result.contextUsage).toMatchObject({
+      estimatedTokens: 240,
+      compactionCount: 1,
+    });
     expect(loopInputs).toHaveLength(1);
     expect(loopInputs[0]?.taskId).toBe("goal:goal_1");
     expect(loopInputs[0]?.pauseOnStrategyGuard).toBe(false);
@@ -996,6 +1031,14 @@ describe("goal runtime engine", () => {
     );
     expect(trajectoryEvents.map((event) => event.type)).toContain("final_summary");
     expect(trajectoryEvents.map((event) => event.type)).toContain("checkpoint_written");
+    expect(trajectoryEvents.map((event) => event.type)).toContain("context_compacted");
+    expect(progressEvents).toContainEqual(
+      expect.objectContaining({
+        event: "context_compacted",
+        goalId: goal.id,
+        milestoneId: milestone.id,
+      }),
+    );
   });
 
   it("rebuilds a milestone run from the prior real transcript", async () => {

@@ -273,7 +273,11 @@ describe("package scripts", () => {
           featureId ===
             "P59-v3.8.1-autonomous-plan-and-renderer-crash-hotfix" ||
           featureId ===
-            "P60-agent-interaction-chain-reliability-closure",
+            "P60-agent-interaction-chain-reliability-closure" ||
+          featureId === "P66-goal-mode-experience-contract" ||
+          featureId ===
+            "P68-session-runtime-context-and-progress-projection" ||
+          featureId === "P69-goal-acceptance-execution-contract",
       ),
     ).toBe(true);
     expect(openFeatureIds.length).toBeLessThanOrEqual(1);

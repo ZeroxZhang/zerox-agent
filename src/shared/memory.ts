@@ -91,6 +91,11 @@ export type MemoryValidationResult = {
 export type MemorySearchOptions = {
   query: string;
   kind?: MemoryKind | "all";
+  /**
+   * When present, session memories are restricted to this chat session while
+   * non-session memories remain globally visible.
+   */
+  sessionId?: string;
   limit?: number;
   minScore?: number;
   queryEmbedding?: number[];

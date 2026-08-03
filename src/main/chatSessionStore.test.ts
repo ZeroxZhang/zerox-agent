@@ -281,6 +281,11 @@ describe("chat session store", () => {
         title: "整理下载报告",
         summary: "我会先检查权限，然后运行本地文件整理任务。",
         messageCount: 2,
+        work: {
+          source: "idle",
+          status: "idle",
+          updatedAt: "2026-06-06T08:01:00.000Z",
+        },
         lastAssistantMessageAt: "2026-06-06T08:01:00.000Z",
         updatedAt: "2026-06-06T08:01:00.000Z",
       },
@@ -503,6 +508,69 @@ describe("chat session store", () => {
     });
   });
 
+  it("persists the latest isolated context snapshot on the session and list item", async () => {
+    const store = createChatSessionStore({
+      configDir,
+      createId: createSequentialId("context"),
+    });
+    const first = await store.appendMessage({
+      role: "user",
+      content: "检查上下文隔离",
+    });
+    await store.appendActivityEvent(first.session.id, {
+      sessionId: first.session.id,
+      state: "context",
+      message: "上下文已压缩",
+      createdAt: "2026-08-03T08:00:00.000Z",
+      elapsedMs: 200,
+      context: {
+        isolation: "session_plus_global_memory",
+        estimatedTokens: 240,
+        tokenBudget: 1_000,
+        occupancyRatio: 0.99,
+        messageCount: 4,
+        compactionCount: 1,
+        sessionMessageCount: 1,
+        historyMessageCount: 1,
+        recalledSessionMemories: 0,
+        recalledGlobalMemories: 2,
+        lastCompaction: {
+          strategy: "summarize",
+          beforeMessages: 8,
+          afterMessages: 4,
+          beforeTokens: 800,
+          afterTokens: 240,
+          compactedAt: "2026-08-03T08:00:00.000Z",
+        },
+        updatedAt: "2026-08-03T08:00:00.000Z",
+      },
+    });
+
+    const restarted = createChatSessionStore({ configDir });
+    await expect(restarted.get(first.session.id)).resolves.toMatchObject({
+      context: {
+        isolation: "session_plus_global_memory",
+        estimatedTokens: 240,
+        tokenBudget: 1_000,
+        occupancyRatio: 0.24,
+        compactionCount: 1,
+        lastCompaction: {
+          beforeTokens: 800,
+          afterTokens: 240,
+        },
+      },
+    });
+    await expect(restarted.list()).resolves.toEqual([
+      expect.objectContaining({
+        context: expect.objectContaining({
+          isolation: "session_plus_global_memory",
+          estimatedTokens: 240,
+          compactionCount: 1,
+        }),
+      }),
+    ]);
+  });
+
   it("archives restores and deletes sessions without touching other sessions", async () => {
     const store = createChatSessionStore({
       configDir,
@@ -617,6 +685,11 @@ describe("chat session store", () => {
         messageCount: 1,
         updatedAt: "2026-06-18T08:00:00.000Z",
         lastAssistantMessageAt: "2026-06-18T08:00:00.000Z",
+        work: {
+          source: "idle",
+          status: "idle",
+          updatedAt: "2026-06-18T08:00:00.000Z",
+        },
       },
     ]);
   });
@@ -895,6 +968,37 @@ describe("chat session store", () => {
       }),
     ]);
     expect(listed[0].activeGoal).toBeUndefined();
+  });
+
+  it("stores a stalled goal as recovery context instead of an active goal", async () => {
+    const store = createChatSessionStore({
+      configDir,
+      createId: createSequentialId("chat"),
+      now: createSteppedClock("2026-08-02T07:50:00.000Z"),
+    });
+    const first = await store.appendMessage({
+      role: "user",
+      content: "继续完成 Skill 包",
+    });
+
+    const linked = await store.attachGoal(first.session.id, {
+      id: "goal_stalled",
+      status: "stopped_stalled",
+      description: "构建 Skill 包",
+      updatedAt: "2026-08-02T07:50:00.000Z",
+    });
+
+    expect(linked.activeGoalId).toBeUndefined();
+    await expect(store.list()).resolves.toEqual([
+      expect.objectContaining({
+        recoveryGoal: expect.objectContaining({ id: "goal_stalled" }),
+        work: expect.objectContaining({
+          source: "goal",
+          relationship: "recovery",
+          goalId: "goal_stalled",
+        }),
+      }),
+    ]);
   });
 });
 

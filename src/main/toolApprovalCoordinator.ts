@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   classifyToolApprovalRisk,
+  deriveToolApprovalModeState,
   summarizeToolApprovalArgs,
   type ResolveToolApprovalInput,
   type ToolApprovalDecisionPayload,
@@ -41,18 +42,12 @@ export function createToolApprovalCoordinator(options: {
   let goalModePreferenceEnabled = false;
   const activeGoalIds = new Set<string>();
 
-  function isGoalModeEffective(): boolean {
-    return goalModePreferenceEnabled || activeGoalIds.size > 0;
-  }
-
   function getAutoApprovalState(): ToolApprovalModeState {
-    const goalModeEnabled = isGoalModeEffective();
-    return {
-      autoApprovalEnabled:
-        goalModeEnabled || standaloneAutoApprovalEnabled,
-      goalModeEnabled,
-      autoApprovalLocked: goalModeEnabled,
-    };
+    return deriveToolApprovalModeState({
+      standaloneAutoApprovalEnabled,
+      goalModePreferenceEnabled,
+      activeGoalCount: activeGoalIds.size,
+    });
   }
 
   function setAutoApprovalEnabled(enabled: boolean): ToolApprovalModeState {

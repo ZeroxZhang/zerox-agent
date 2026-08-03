@@ -121,7 +121,40 @@ describe("goal draft translation validation", () => {
     ).toBeUndefined();
   });
 
-  it("keeps non-rewritable cd chains untouched for the quality gate", () => {
+  it("routes an exit-0 command with an explicit workspaceRoot through test_run", () => {
+    const result = normalizeGoalDraftCriteria([
+      {
+        id: "criterion_eval",
+        description: "Evals are valid.",
+        acceptanceChecks: [
+          {
+            id: "check_eval",
+            kind: "command_exit_code",
+            description: "Eval validation exits 0.",
+            params: {
+              command: "python3 -m unittest discover -s tests",
+              expectedExitCode: 0,
+              workspaceRoot: "cross-border-selection",
+            },
+            requiresEvidence: false,
+          },
+        ],
+      },
+    ]);
+
+    expect(result.successCriteria[0].acceptanceChecks[0]).toMatchObject({
+      kind: "test_passes",
+      params: {
+        command: "python3 -m unittest discover -s tests",
+        workspaceRoot: "cross-border-selection",
+      },
+    });
+    expect(
+      result.successCriteria[0].acceptanceChecks[0].params.expectedExitCode,
+    ).toBeUndefined();
+  });
+
+  it("normalizes nonzero cd checks while leaving unsafe chains untouched", () => {
     const result = normalizeGoalDraftCriteria([
       {
         id: "criterion_deploy",
@@ -163,8 +196,9 @@ describe("goal draft translation validation", () => {
     expect(nonzero).toMatchObject({
       kind: "command_exit_code",
       params: {
-        command: "cd packages/app && npm run check",
+        command: "npm run check",
         expectedExitCode: 2,
+        workspaceRoot: "packages/app",
       },
     });
     expect(conflicting.params.command).toBe("cd packages/app && npm test");
@@ -175,6 +209,35 @@ describe("goal draft translation validation", () => {
       result.warnings.filter(
         (warning) => warning.code === "cd_chain_acceptance_command_rewritten",
       ),
-    ).toEqual([]);
+    ).toHaveLength(1);
+  });
+
+  it("uses test_passes for an exit-0 command without an explicit root", () => {
+    const result = normalizeGoalDraftCriteria([{
+      id: "criterion_json",
+      description: "GeoJSON parses.",
+      acceptanceChecks: [{
+        id: "check_json",
+        kind: "command_exit_code",
+        description: "GeoJSON parses.",
+        params: {
+          command:
+            "python3 -c \"import json; json.load(open('allergen-map/data/china.geo.json'))\"",
+          expectedExitCode: 0,
+        },
+        requiresEvidence: false,
+      }],
+    }]);
+
+    expect(result.successCriteria[0]!.acceptanceChecks[0]).toEqual({
+      id: "check_json",
+      kind: "test_passes",
+      description: "GeoJSON parses.",
+      params: {
+        command:
+          "python3 -c \"import json; json.load(open('allergen-map/data/china.geo.json'))\"",
+      },
+      requiresEvidence: false,
+    });
   });
 });

@@ -85,6 +85,30 @@ describe("model settings store", () => {
     expect(saved.hasApiKey).toBe(true);
   });
 
+  it("projects a catalog model context window into the resolved runtime binding", async () => {
+    const store = createModelSettingsStore({
+      configDir: tempDir,
+      vault: new FakeSecretVault(),
+    });
+    await store.save({
+      providerId: "openai-compatible",
+      baseUrl: "https://api.openai.com/v1",
+      chatModel: "gpt-5.6-sol",
+      embeddingModel: "",
+      apiKey: "sk-secret-value",
+      temperature: 0.2,
+      maxTokens: 8_192,
+    });
+
+    await expect(store.resolveProfile()).resolves.toMatchObject({
+      binding: {
+        providerKind: "openai",
+        modelId: "gpt-5.6-sol",
+        contextWindow: 400_000,
+      },
+    });
+  });
+
   it("keeps the existing encrypted key when saving non-secret fields", async () => {
     const store = createModelSettingsStore({
       configDir: tempDir,

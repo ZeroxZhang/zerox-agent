@@ -49,6 +49,7 @@ import {
   throwForModelServiceNotice,
   type ModelServiceNotice,
 } from "../shared/modelServiceNotice";
+import { resolveContextTokenBudget } from "../shared/contextUsage";
 
 export type AgentModelProfile = {
   baseUrl: string;
@@ -58,6 +59,7 @@ export type AgentModelProfile = {
   profile?: string;
   temperature: number;
   maxTokens: number;
+  contextWindow?: number;
   thinking?: { type: "enabled" | "disabled"; budgetTokens?: number };
   modelCapabilities?: ModelCapabilities;
 };
@@ -388,6 +390,10 @@ export function createAgentRunnerService(options: {
     const needsPlanning = skill
       ? skill.manifest.planning?.required === true
       : true;
+    const contextTokenBudget = resolveContextTokenBudget({
+      contextWindow: profile.contextWindow,
+      maxOutputTokens: profile.maxTokens,
+    });
 
     try {
       throwIfCanceled(signal);
@@ -395,11 +401,24 @@ export function createAgentRunnerService(options: {
 
       function ensureContextWindow(msgs: ChatMessage[]): ChatMessage[] {
         const tokens = contextManager.estimateTokens(msgs);
-        if (tokens > profile.maxTokens * 0.8) {
-          emit(
-            createEvent("info", `上下文窗口接近上限 (${tokens}/${profile.maxTokens} tokens)，正在压缩...`, currentPhase),
+        if (tokens > contextTokenBudget) {
+          const compacted = contextManager.compressMessages(
+            msgs,
+            contextTokenBudget,
           );
-          return contextManager.compressMessages(msgs, Math.floor(profile.maxTokens * 0.7));
+          emit(
+            createEvent(
+              "info",
+              `上下文已压缩：${tokens} → ${contextManager.estimateTokens(compacted)} tokens`,
+              currentPhase,
+              {
+                estimatedTokens: tokens,
+                compactedTokens: contextManager.estimateTokens(compacted),
+                tokenBudget: contextTokenBudget,
+              },
+            ),
+          );
+          return compacted;
         }
         return msgs;
       }
@@ -432,7 +451,7 @@ export function createAgentRunnerService(options: {
 
         const planResponse = await options.chatClient.complete({
           ...profile,
-          messages: planMessages,
+          messages: ensureContextWindow(planMessages),
           temperature: Math.min(profile.temperature, 0.3),
         });
         throwForModelServiceNotice(planResponse.modelServiceNotice);
@@ -516,6 +535,7 @@ export function createAgentRunnerService(options: {
             turn += 1;
             stepTurns += 1;
             recordExecutionCheckpoint();
+            messages = ensureContextWindow(messages);
 
             const response = await options.chatClient.complete({
               ...profile,

@@ -1129,13 +1129,13 @@ describe("Design System — Obsidian desktop control surface", () => {
     );
   });
 
-  it("uses a blocking decision card for Plan Mode and progressive disclosure for audit detail", () => {
+  it("uses a blocking Plan decision, role-based model cards, and one technical disclosure", () => {
     expect(chatPanelSource).toContain('className="plan-mode-decision-card decision-card"');
     expect(chatPanelSource).toContain("这次目标如何规划？");
     expect(chatPanelSource).toContain("使用此规划方式");
     expect(chatPanelSource).toContain("setPlanModeDecisionOpen(false)");
-    expect(chatPanelSource).toContain('<details className="plan-progress-disclosure">');
-    expect(chatPanelSource).toContain('<details className="plan-audit-disclosure">');
+    expect(chatPanelSource).toContain('<details className="plan-technical-disclosure">');
+    expect(chatPanelSource).toContain("技术详情（排障时使用）");
     expect(chatPanelSource).toContain('className="plan-artifact-disclosure"');
     expect(chatPanelSource).toContain(
       "const [planDetailsOpen, setPlanDetailsOpen] = useState(false);",
@@ -1144,15 +1144,32 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource).toContain("确认前需要回答");
     expect(chatPanelSource).toContain("decision-question-form");
     expect(chatPanelSource).toContain("提交回答并重新规划");
-    expect(chatPanelSource).toContain("辩论进度 ·");
+    expect(chatPanelSource).toContain("Debate 轮次");
+    expect(chatPanelSource).toContain("plan-model-role-card");
+    expect(chatPanelSource).toContain("plan-model-role-badge");
+    expect(chatPanelSource).toContain("全部使用");
+    expect(chatPanelSource).toContain("分配 Debate 角色");
     expect(chatPanelSource).toContain('role="radiogroup"');
     expect(chatPanelSource).toContain("onKeyDown={handleModeKeyDown}");
     expect(chatPanelSource).toContain(
       'tabIndex={props.mode === "direct" ? 0 : -1}',
     );
     expect(styles).toContain(".plan-mode-decision-card");
+    expect(styles).toContain(".plan-model-role-card");
+    expect(styles).toContain(".plan-model-select-shell");
+    expect(styles).toContain(".plan-model-unify-action:focus-visible");
     expect(styles).toContain(".decision-question-form");
-    expect(styles).toContain(".plan-progress-disclosure");
+    expect(styles).toContain(".plan-technical-disclosure");
+  });
+
+  it("keeps the default Plan result focused on outcome and next action", () => {
+    expect(chatPanelSource).toContain('aria-label="规划结果"');
+    expect(chatPanelSource).toContain("outcomePresentation.title");
+    expect(chatPanelSource).toContain("outcomePresentation.detail");
+    expect(chatPanelSource).toContain("outcomePresentation.nextAction");
+    expect(chatPanelSource).toContain("failure.technicalDetail");
+    expect(styles).toContain(".plan-outcome-summary.is-success");
+    expect(styles).toContain(".plan-outcome-summary.is-failure");
   });
 
   it("keeps Plan clarification typing synchronous and replaces white screens with recovery UI", () => {
@@ -1406,8 +1423,19 @@ describe("Design System — Obsidian desktop control surface", () => {
   });
 
   it("keeps tool approval inside chat with an auto-authorization toggle and critical risk styling", () => {
+    const goalModeHandlerSource = getFunctionSource(
+      chatPanelSource,
+      "handleSetGoalModeEnabled",
+    );
+
     expect(chatPanelSource).toContain("autoApprovalEnabled");
     expect(chatPanelSource).toContain("autoApprovalLocked");
+    expect(chatPanelSource).toContain(
+      "const [toolApprovalMode, setToolApprovalMode] = useState<ToolApprovalModeState>",
+    );
+    expect(chatPanelSource).not.toContain(
+      "const [goalModeEnabled, setGoalModeEnabled] = useState(false)",
+    );
     expect(chatPanelSource).toContain("setToolGoalModeEnabled");
     expect(chatPanelSource).toContain("setToolAutoApprovalEnabled");
     expect(chatPanelSource).toContain("onToolApprovalRequest");
@@ -1419,6 +1447,19 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource).toContain("resolveToolApproval");
     expect(chatPanelSource).toContain("shouldShowToolApproval(");
     expect(chatPanelSource).toContain("disabled={autoApprovalLocked}");
+    expect(goalModeHandlerSource).toContain(
+      "autoApprovalEnabled: true",
+    );
+    expect(goalModeHandlerSource).toContain(
+      "autoApprovalLocked: true",
+    );
+    expect(goalModeHandlerSource).toContain(
+      "setToolGoalModeEnabled(enabled)",
+    );
+    expect(chatPanelSource).toContain(
+      "A persisted Plan proves that Goal mode was selected",
+    );
+    expect(chatPanelSource).toContain("setToolGoalModeEnabled(true)");
     expect(chatPanelSource).toContain("is-critical-risk");
     expect(styles).toContain(".tool-approval-panel");
     expect(styles).toContain(".auto-approval-toggle");
@@ -1466,39 +1507,25 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(styles).toContain(".agent-work-steps { min-width: 0;");
   });
 
-  it("subscribes to chat stream events and moves routine streaming process into the status rail", () => {
+  it("subscribes to chat stream events and projects public progress into the conversation and status rail", () => {
     expect(chatPanelSource).toContain("onChatStreamEvent");
     expect(chatPanelSource).toContain("applyChatStreamEvent");
     expect(chatPanelSource).toContain("finalizeChatStreamResult");
     expect(chatPanelSource).toContain("ContextRuntimeSummary");
-    expect(chatPanelSource).toContain("context-thinking-disclosure");
-    expect(chatPanelSource).toContain("tool-call-preview-block");
+    expect(chatPanelSource).toContain("ConversationProgressDisclosure");
+    expect(chatPanelSource).toContain("SessionContextStatusCard");
     expect(styles).toContain(".context-runtime-summary");
-    expect(styles).toContain(".tool-call-preview-block");
+    expect(styles).toContain(".conversation-progress");
+    expect(styles).toContain(".session-context-status-card");
   });
 
-  it("keeps thinking and tool stream previews collapsed to one latest row by default", () => {
-    expect(chatPanelSource).toContain("RuntimeTextDisclosure");
-    expect(chatPanelSource).toContain("ToolCallPreviewDisclosure");
-    expect(chatPanelSource).toContain("latestToolCallPreview");
-    expect(chatPanelSource).toContain("getLatestRuntimeLine");
-    expect(chatPanelSource).toContain("runtime-disclosure-summary");
-    expect(chatPanelSource).toContain("runtime-disclosure-label");
-    expect(chatPanelSource).toContain("runtime-disclosure-toggle");
-    expect(chatPanelSource).toContain("aria-label={expanded ? `收起${label}` : `展开${label}`}");
-    expect(chatPanelSource).toContain('Icon name={expanded ? "collapse" : "expand"}');
-    expect(chatPanelSource).not.toMatch(
-      /chatStreamState\.toolCallPreviews\.map[\s\S]*<CollapsibleTextBlock/,
-    );
-    expect(styles).toContain(".runtime-disclosure.is-collapsed");
-    expect(styles).toContain(".runtime-disclosure-label::before");
-    expect(styles).toContain(".runtime-disclosure-toggle");
-    expect(styles).toContain("border-radius: var(--radius-full);");
-    expect(styles).toContain(".runtime-disclosure-summary");
-    expect(styles).toContain(".runtime-disclosure-body");
-    expect(styles).toContain(".tool-call-preview-list");
-    expect(styles).toContain("white-space: nowrap;");
-    expect(styles).toContain("max-height: min(32vh, 240px);");
+  it("keeps tool and raw reasoning previews out of the main interface", () => {
+    expect(chatPanelSource).not.toContain("RuntimeTextDisclosure");
+    expect(chatPanelSource).not.toContain("ToolCallPreviewDisclosure");
+    expect(chatPanelSource).not.toContain("latestToolCallPreview");
+    expect(chatPanelSource).not.toContain("context-thinking-disclosure");
+    expect(chatPanelSource).not.toContain("tool-call-preview-block");
+    expect(chatPanelSource).toContain("getChatStatusMessageFromStatusEvent");
   });
 
   it("renders guided skill input in the main chat surface with all required controls", () => {

@@ -51,6 +51,12 @@ import {
   isMutatingToolCall,
   isReadClassTool,
 } from "./agentExplorationDedup";
+import {
+  createAgentContextUsage,
+  resolveContextTokenBudget,
+  type AgentContextCompactionSummary,
+  type AgentContextUsage,
+} from "../shared/contextUsage";
 
 export type AgentLoopOptions = {
   chatClient: ChatClient;
@@ -114,6 +120,7 @@ export type AgentLoopOptions = {
   onModelResponse?: (response: ChatCompletionResponse, turn: number) => void;
   onModelStreamEvent?: (event: StreamEvent, turn: number) => void;
   onContextCompacted?: (event: AgentLoopContextCompaction) => void;
+  onContextUsage?: (usage: AgentContextUsage) => void;
   onModelRetry?: (event: ModelRetryEvent) => void;
   onStrategyGuard?: (event: AgentLoopStrategyGuardEvent) => void;
   onCheckpoint?: (checkpoint: AgentLoopCheckpoint) => void | Promise<void>;
@@ -136,7 +143,9 @@ export type AgentLoopContextCompaction = {
   originalMessageCount: number;
   compactedMessageCount: number;
   estimatedTokens: number;
+  compactedTokens: number;
   tokenBudget: number;
+  strategy: AgentContextCompactionSummary["strategy"];
 };
 
 export type AgentLoopStrategyGuardEvent = {
@@ -183,6 +192,7 @@ export type AgentLoopResult = {
   messages: ChatMessage[];
   toolCallsExecuted: number;
   tokensConsumed?: number;
+  contextUsage?: AgentContextUsage;
   continuation?: AgentLoopContinuation;
   modelServiceNotice?: ModelServiceNotice;
 };
@@ -196,6 +206,7 @@ export async function runAgentLoop(
     providerId?: string;
     temperature: number;
     maxTokens: number;
+    contextWindow?: number;
   },
   options: AgentLoopOptions,
 ): Promise<AgentLoopResult> {
@@ -233,6 +244,7 @@ export async function runAgentLoop(
     onModelResponse,
     onModelStreamEvent,
     onContextCompacted,
+    onContextUsage,
     onModelRetry,
     onStrategyGuard,
     modelRequestExecutor,
@@ -306,7 +318,13 @@ export async function runAgentLoop(
   // dozens of times in long goal runs).
   const explorationDedup = createExplorationDedupTracker();
   let emittedExplorationGuards = 0;
-  const contextTokenBudget = Math.max(1, Math.floor(modelProfile.maxTokens * 0.7));
+  const contextTokenBudget = resolveContextTokenBudget({
+    contextWindow: modelProfile.contextWindow,
+    maxOutputTokens: modelProfile.maxTokens,
+  });
+  let contextCompactionCount = 0;
+  let latestContextUsage: AgentContextUsage | undefined;
+  let lastContextCompaction: AgentContextCompactionSummary | undefined;
   // Token consumption is observability-only and never changes run status.
   let cumulativeTokensConsumed = 0;
 
@@ -346,9 +364,29 @@ export async function runAgentLoop(
     cumulativeTokensConsumed += turnTokens;
   }
 
+  function reportContextUsage(estimatedTokens: number): AgentContextUsage {
+    const usage = createAgentContextUsage({
+      estimatedTokens,
+      tokenBudget: contextTokenBudget,
+      messageCount: messages.length,
+      compactionCount: contextCompactionCount,
+      ...(modelProfile.contextWindow
+        ? { contextWindow: modelProfile.contextWindow }
+        : {}),
+      ...(lastContextCompaction
+        ? { lastCompaction: lastContextCompaction }
+        : {}),
+      updatedAt: new Date().toISOString(),
+    });
+    latestContextUsage = usage;
+    onContextUsage?.(usage);
+    return usage;
+  }
+
   async function compactMessagesBeforeModelRequest() {
     const estimatedTokens = contextManager.estimateTokens(messages);
     if (estimatedTokens <= contextTokenBudget) {
+      reportContextUsage(estimatedTokens);
       return;
     }
 
@@ -365,15 +403,29 @@ export async function runAgentLoop(
         protectedMarkers: [NEVER_COMPACT_MARKER],
       });
       if (!result.compacted) {
+        reportContextUsage(estimatedTokens);
         return;
       }
       messages.splice(0, messages.length, ...result.messages);
+      const compactedTokens = contextManager.estimateTokens(messages);
+      contextCompactionCount += 1;
+      lastContextCompaction = {
+        strategy: result.strategy,
+        beforeMessages: originalMessageCount,
+        afterMessages: messages.length,
+        beforeTokens: estimatedTokens,
+        afterTokens: compactedTokens,
+        compactedAt: new Date().toISOString(),
+      };
       onContextCompacted?.({
         originalMessageCount,
         compactedMessageCount: messages.length,
         estimatedTokens,
+        compactedTokens,
         tokenBudget: contextTokenBudget,
+        strategy: result.strategy,
       });
+      reportContextUsage(compactedTokens);
       return;
     }
 
@@ -382,16 +434,30 @@ export async function runAgentLoop(
       contextTokenBudget,
     );
     if (compacted.length === originalMessageCount && compacted === messages) {
+      reportContextUsage(estimatedTokens);
       return;
     }
 
     messages.splice(0, messages.length, ...compacted);
+    const compactedTokens = contextManager.estimateTokens(messages);
+    contextCompactionCount += 1;
+    lastContextCompaction = {
+      strategy: "summarize",
+      beforeMessages: originalMessageCount,
+      afterMessages: messages.length,
+      beforeTokens: estimatedTokens,
+      afterTokens: compactedTokens,
+      compactedAt: new Date().toISOString(),
+    };
     onContextCompacted?.({
       originalMessageCount,
       compactedMessageCount: messages.length,
       estimatedTokens,
+      compactedTokens,
       tokenBudget: contextTokenBudget,
+      strategy: "summarize",
     });
+    reportContextUsage(compactedTokens);
   }
 
   /** Evaluate system-reminder triggers and inject matching reminders as synthetic user messages. */
@@ -945,7 +1011,7 @@ export async function runAgentLoop(
           }, {
             ...(signal ? { signal } : {}),
             ...(runContext ? { runContext } : {}),
-            ...(toolName === "shell_exec"
+            ...(toolName === "shell_exec" || toolName === "test_run"
               ? { authorizedShellCommand: String(args.command ?? "") }
               : {}),
             onRuntimeEvent(runtimeEvent) {
@@ -1236,6 +1302,7 @@ export async function runAgentLoop(
     messages,
     toolCallsExecuted,
     tokensConsumed: estimateConsumedTokens(),
+    ...(latestContextUsage ? { contextUsage: latestContextUsage } : {}),
     ...(continuation ? { continuation } : {}),
     ...(modelServiceNotice ? { modelServiceNotice } : {}),
   };

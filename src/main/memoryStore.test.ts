@@ -149,6 +149,55 @@ describe("memory store", () => {
     expect(searchResults[0].score).toBeGreaterThan(searchResults[1].score);
   });
 
+  it("filters foreign session memories before ranking while retaining global memory", async () => {
+    const store = createMemoryStore({
+      configDir,
+      createId: createSequentialId("mem"),
+      now: createSteppedClock("2026-08-03T08:00:00.000Z"),
+    });
+    await store.create({
+      kind: "session",
+      title: "Foreign project decision",
+      content: "agent context isolation decision",
+      source: {
+        type: "chat_session",
+        sessionId: "session_foreign",
+        messageIds: ["message_foreign"],
+      },
+    });
+    await store.create({
+      kind: "session",
+      title: "Current project decision",
+      content: "agent context isolation decision",
+      source: {
+        type: "chat_session",
+        sessionId: "session_current",
+        messageIds: ["message_current"],
+      },
+    });
+    await store.create({
+      kind: "semantic",
+      title: "Global project convention",
+      content: "agent context isolation decision",
+    });
+
+    const results = await store.search({
+      query: "agent context isolation decision",
+      sessionId: "session_current",
+      limit: 5,
+    });
+
+    expect(results.map((result) => result.record.title)).toEqual(
+      expect.arrayContaining([
+        "Current project decision",
+        "Global project convention",
+      ]),
+    );
+    expect(results.map((result) => result.record.title)).not.toContain(
+      "Foreign project decision",
+    );
+  });
+
   it("stores embeddings and uses query embeddings when an embedding service is available", async () => {
     const store = createMemoryStore({
       configDir,

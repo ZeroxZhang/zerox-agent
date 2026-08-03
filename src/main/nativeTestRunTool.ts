@@ -61,10 +61,10 @@ export async function runNativeTestCommand(args: {
         ok: false,
         error: `test_run failed to start: ${error.message}`,
         errorDetails: {
-          kind: "exit",
+          kind: "spawn_error",
           command,
           cwd: workspaceRoot,
-          exitCode: 0,
+          exitCode: null,
           stdout,
           stderr,
           timeoutMs,

@@ -8637,3 +8637,145 @@
   - `npm test`: 235 files / 2,376 tests passed;
   - TypeScript main/renderer checks and Vite production build passed;
   - `npm run smoke:prod` and `npm run harness:check` passed.
+
+## 2026-08-02 - P66 Goal Mode Experience Contract
+
+- Replaced three renderer-owned Goal/automatic-approval booleans with one
+  atomic `ToolApprovalModeState`. The shared policy derivation now makes the
+  invariant explicit: a selected or active Goal always enables and locks
+  automatic approval, while the authorization service and critical-risk
+  confirmation boundary remain intact.
+- Goal selection now commits the main-process policy instead of only changing
+  the renderer. Failed IPC rolls back the optimistic UI, and a persisted Plan
+  re-establishes the same policy after a renderer/main-process lifecycle.
+- Added a shared Plan outcome projection used by both main Chat status/replies
+  and the renderer. The default surface now shows only success/failure, the
+  current execution state, and one next action. Provider errors, raw output,
+  stage/round telemetry, evidence, and quality/audit records live under one
+  collapsed technical-details disclosure.
+- Rebuilt Debate model assignment as responsive A/B/C role cards with role
+  responsibilities, provider/model metadata, keyboard-accessible Direct vs.
+  Debate selection, and a one-click action to use the default model for all
+  roles.
+- Verification evidence:
+  - focused policy, Chat projection, renderer presentation, and design suites:
+    4 files / 207 tests passed;
+  - `npm run verify`: 242 files / 2,490 tests passed; production build, Agent
+    evaluations (26/26), and Memory evaluations (2/2) passed;
+  - `npm run smoke:prod`: a clean Electron process rendered Agent Chat UI;
+  - `npm run harness:check` and `git diff --check`: passed;
+  - real Electron UI: selecting Goal returned `goal=true` and `auto=true`, the
+    automatic-approval control remained locked, and Debate rendered aligned
+    A/B/C responsibility cards plus the one-click unified-model action.
+
+## 2026-08-03 - P67 Session Work Lineage and Recovery Projection
+
+- Diagnosed the reported contradiction from the durable records, not only the
+  renderer: the confirmed Plan and its Goal stopped at 15:50, while the 15:52
+  instruction was routed into an unrelated ordinary Chat run that succeeded
+  at 15:53. Both records were individually true, but no shared lineage or
+  canonical session projection existed.
+- Split lifecycle roles explicitly. `activeGoalId` now means only a live Goal;
+  stalled, blocked, and failed Goals are retained as `recoveryGoal`. A shared
+  session-work projection chooses one primary source for sidebar, status,
+  progress, and context while keeping recovery history separately actionable.
+- Expanded continuation intent beyond prefix matching. Phrases such as
+  `按照你的建议，把接下来的工作推进完成` now call `retry` on the same Goal
+  instead of creating a new Goal or falling through to ordinary Chat, so the
+  original Plan, milestones, acceptance state, and audit lineage remain bound.
+- Removed stale-Goal display priority. A later successful Chat run renders as
+  completed; the older stopped Goal is labeled `待恢复目标` and no longer
+  overwrites the status bar or progress list. Reloaded terminal messages use a
+  concise result plus next-action summary while raw events remain auditable.
+- Made acceptance execution roots explicit. Plan commands infer a safe common
+  artifact root from milestone targetRefs and exit-0 checks run through
+  `test_run` with that boundary-checked workspaceRoot. The reproduced
+  `evals/evals.json` command therefore runs in `cross-border-selection`
+  instead of its parent workspace.
+- Regression evidence:
+  - focused session projection, continuation, persistence, container, planner,
+    translation, activity restore, and renderer suites: 10 files / 320 tests;
+  - `npm test -- --maxWorkers=1`: 243 files / 2,498 tests passed;
+    production build passed; Agent evaluations 26/26 and Memory evaluations
+    2/2 passed;
+  - `npm run smoke:prod`, `npm run harness:check`, and `git diff --check` passed;
+  - the real persisted screenshot session projects primary
+    `chat/completed@2026-08-02T15:53:07.849Z` and retains
+    `goal_from_plan_9cd114be-3913-4584-9279-2170fe719e42` only as recovery.
+- Parallel verification also reproduced an existing dual-storage test teardown
+  race (`ENOTEMPTY` once and a lagging JSON sidecar once). Both isolated tests
+  passed immediately, and the single-worker full suite passed; no affected
+  storage code is part of P67.
+
+## 2026-08-03 - P68 Session Runtime Context and Progress Projection
+
+- Replaced renderer-owned conversation replay with one main-process authority.
+  Durable session history is now always loaded from `ChatSessionStore`; a stale
+  renderer history payload cannot enter a new or switched session.
+- Moved session-memory isolation into the memory search boundary before ranking.
+  A Chat run can recall only its own `session` memories plus global non-session
+  memory, with a second defensive filter at prompt assembly.
+- Added a typed runtime context projection shared by ordinary Chat and Goal
+  runs. It reports the true model context budget, estimated occupancy, message
+  counts, compaction count and latest compaction. The shared loop and both
+  scheduled-task compatibility runtimes now use the same budget resolver, so
+  known model context windows are never confused with maximum output tokens.
+- Added cumulative session token accounting across Chat, Plan, and Goal usage,
+  deduplicating planning stages and Debate rounds by run id. The right rail now
+  shows total tokens, usage breakdown, independent scope, context occupancy,
+  entered messages, and compaction history alongside the existing objective,
+  Plan-mode, subtask, and progress projections.
+- Replaced raw thinking/tool disclosures with a bounded public progress stream.
+  The main conversation surfaces only key progress, concise decision summaries,
+  waits, failures, and context compaction. Tool calls/results and raw stream
+  reasoning remain internal/auditable and are not rendered by default; explicit
+  approval prompts remain available when a user decision is required.
+- Regression evidence:
+  - focused isolation, accounting, Chat, shared and legacy Agent runtimes,
+    Goal, memory, model, container, and renderer suites: 17 files / 568 tests
+    passed;
+  - `npm run verify`: 245 files / 2,510 tests passed; production build passed;
+    Agent evaluations 26/26 and Memory evaluations 2/2 passed;
+  - `npm run smoke:prod`, `npm run harness:check`, and `git diff --check`
+    passed on `codex/debug`.
+
+## 2026-08-03 - P69 Goal Acceptance Execution Contract
+
+- Reconstructed the reported failure from the persisted Plan, Goal, ledger,
+  six run trajectories, and tool audit. The artifact was valid and repeated
+  Python, Node, and jq checks exited 0, but the acceptance validator replayed
+  the frozen `python3 -c` command through `shell_exec`. Authorization treated
+  the semicolon inside the quoted Python program as a Shell control operator,
+  classified the resulting denial as `command_failed`, and stopped the Goal
+  after three identical repair fingerprints.
+- Replaced the split command-verification paths with one typed execution
+  contract. Both `test_passes` and historical `command_exit_code` checks now
+  resolve and enforce `workspaceRoot`, execute through `test_run`, and compare
+  the observed exit code; nonzero expected exits remain supported without an
+  unscoped Shell fallback.
+- Unified Shell analysis for `shell_exec` and `test_run` across authorization
+  and execution. Quoted interpreter source is parsed correctly, while network,
+  path-escape, opaque-command, and exact-authorization defenses remain active
+  for both command-capable tools.
+- Separated deliverable failures from acceptance infrastructure failures.
+  Observed exit mismatches remain repairable `command_failed`/`test_failed`
+  results; authorization, sandbox, runner-start, and missing-runner failures
+  become `validator_unavailable`, so the controller does not ask the model to
+  rewrite a correct artifact until the Goal stalls.
+- Canonicalized command checks at both Plan and Goal boundaries, including
+  explicit `workspaceRoot: "."`, inferred artifact roots, Plan-confirmed
+  milestone criteria, and nonzero-exit `cd` commands. Persisted older Goals do
+  not require migration because runtime evaluation is backward compatible.
+- Replay evidence:
+  - loaded the exact persisted
+    `goal_from_plan_efa25e80-31e8-4ac9-ab28-7c483451c908` record without edits;
+  - all four milestone checks passed;
+  - historical `milestone_1_check_4` remained `command_exit_code` and returned
+    `command_exit_matched` with exit code 0.
+- Verification evidence:
+  - focused acceptance, authorization, planner, translation, runtime, native
+    runner, and Goal service suites: 12 files / 391 tests passed;
+  - `npm run verify`: 245 files / 2,520 tests passed; production build passed;
+    Agent evaluations 26/26 and Memory evaluations 2/2 passed;
+  - `npm run smoke:prod`, `npm run harness:check`, and `git diff --check`
+    passed on `codex/debug`.

@@ -155,6 +155,14 @@ export function createMemoryStore(options: {
 
     async search(searchOptions) {
       const stored = await readStoredRecords();
+      const scopedRecords = searchOptions.sessionId
+        ? stored.records.filter(
+            (record) =>
+              record.kind !== "session" ||
+              (record.source.type === "chat_session" &&
+                record.source.sessionId === searchOptions.sessionId),
+          )
+        : stored.records;
       const queryEmbedding =
         searchOptions.queryEmbedding ??
         (await createQueryEmbedding(
@@ -162,7 +170,7 @@ export function createMemoryStore(options: {
           options.embeddingService,
         ));
 
-      const results = searchMemoryRecords(stored.records, {
+      const results = searchMemoryRecords(scopedRecords, {
         ...searchOptions,
         ...(queryEmbedding ? { queryEmbedding } : {}),
       });

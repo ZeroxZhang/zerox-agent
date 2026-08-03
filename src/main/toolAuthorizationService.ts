@@ -111,12 +111,22 @@ export function createToolAuthorizationService(options: {
         }
       }
 
-      // P4: build a ShellPlan for shell_exec when a runContext is available,
-      // feeding both permission layers as the single source of truth (Patch 4).
-      // Zero regression for non-shell tools / when no runContext is present.
+      // Every command-capable tool shares one parsed ShellPlan. test_run uses
+      // its declared workspaceRoot as cwd, while shell_exec uses the canonical
+      // run root. Authorization and the executor therefore reason about the
+      // same paths, network access, and nested interpreter structure.
+      const isCommandTool =
+        request.toolName === "shell_exec" || request.toolName === "test_run";
+      const requestedTestRoot = String(request.args.workspaceRoot ?? "").trim();
+      const commandCwd =
+        request.toolName === "test_run" && requestedTestRoot
+          ? path.isAbsolute(requestedTestRoot)
+            ? path.resolve(requestedTestRoot)
+            : path.resolve(runContext?.workspaceRoot ?? process.cwd(), requestedTestRoot)
+          : runContext?.workspaceRoot;
       const shellPlan: ShellPlan | undefined =
-        request.toolName === "shell_exec" && runContext
-          ? analyzeShell(String(request.args.command ?? ""), { cwd: runContext.workspaceRoot })
+        isCommandTool && runContext && commandCwd
+          ? analyzeShell(String(request.args.command ?? ""), { cwd: commandCwd })
           : undefined;
 
       const ruleEvaluation = evaluatePermission(

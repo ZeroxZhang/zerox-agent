@@ -49,6 +49,7 @@ import {
   isMessageSequenceProviderError,
   sanitizeChatMessages,
 } from "./messageIntegrity";
+import type { AgentContextUsage } from "../shared/contextUsage";
 
 export type GoalRuntimeRunResult = {
   runId: string;
@@ -60,6 +61,7 @@ export type GoalRuntimeRunResult = {
   transcriptMessages?: ChatMessage[];
   actionSignatures?: string[];
   modelServiceNotice?: ModelServiceNotice;
+  contextUsage?: AgentContextUsage;
 };
 
 export type GoalRuntimeProgressCheckpoint = {
@@ -845,6 +847,9 @@ export function createAgentGoalController(options: {
       0,
       (runResult.tokens ?? 0) - checkpointedTokens,
     );
+    if (runResult.contextUsage) {
+      goal.contextUsage = structuredClone(runResult.contextUsage);
+    }
     touch(goal);
     const usageGoal = await options.goalStore.save(goal);
     if (usageGoal.status !== goal.status) {

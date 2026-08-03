@@ -522,7 +522,67 @@ describe("planner kernel v2", () => {
     });
   });
 
-  it("leaves out-of-workspace, chained, and nonzero-exit cd commands blocked", () => {
+  it("infers the artifact root for relative commands from milestone targets", () => {
+    const artifact = planArtifact();
+    artifact.milestones[0]!.targetRefs = [
+      "/workspace/cross-border-selection/scripts",
+      "/workspace/cross-border-selection/tests",
+      "/workspace/cross-border-selection/evals",
+    ];
+    artifact.milestones[0]!.acceptanceChecks = [
+      {
+        id: "eval-contract",
+        kind: "command_exit_code",
+        description: "校验 evals JSON",
+        params: {
+          command:
+            "python3 -c \"import json;d=json.load(open('evals/evals.json'));assert len(d['evals'])>=3\"",
+          expectedExitCode: 0,
+        },
+        requiresEvidence: false,
+      },
+    ];
+
+    const normalized = normalizePlanArtifactAcceptanceCommands(
+      artifact,
+      "/workspace",
+    );
+
+    expect(normalized.milestones[0]!.acceptanceChecks![0]).toMatchObject({
+      kind: "test_passes",
+      params: {
+        command:
+          "python3 -c \"import json;d=json.load(open('evals/evals.json'));assert len(d['evals'])>=3\"",
+        workspaceRoot: "/workspace/cross-border-selection",
+      },
+    });
+  });
+
+  it("does not mistake a generic source directory for the project root", () => {
+    const artifact = planArtifact();
+    artifact.milestones[0]!.targetRefs = ["/workspace/src"];
+    artifact.milestones[0]!.acceptanceChecks = [
+      {
+        id: "root-test",
+        kind: "command_exit_code",
+        description: "Run repository tests.",
+        params: { command: "npm test", expectedExitCode: 0 },
+        requiresEvidence: false,
+      },
+    ];
+
+    const normalized = normalizePlanArtifactAcceptanceCommands(
+      artifact,
+      "/workspace",
+    );
+
+    expect(normalized.milestones[0]!.acceptanceChecks![0]).toMatchObject({
+      kind: "test_passes",
+      params: { command: "npm test", workspaceRoot: "/workspace" },
+    });
+  });
+
+  it("keeps unsafe cd commands blocked while normalizing nonzero exit checks", () => {
     const artifact = planArtifact();
     artifact.milestones[0]!.acceptanceChecks = [
       {
@@ -552,10 +612,18 @@ describe("planner kernel v2", () => {
       artifact,
       "/workspace",
     );
-    // All three stay untouched: the gate must keep blocking them.
-    expect(normalized.milestones[0]!.acceptanceChecks).toEqual(
-      artifact.milestones[0]!.acceptanceChecks,
-    );
+    expect(normalized.milestones[0]!.acceptanceChecks).toEqual([
+      artifact.milestones[0]!.acceptanceChecks![0],
+      artifact.milestones[0]!.acceptanceChecks![1],
+      {
+        ...artifact.milestones[0]!.acceptanceChecks![2],
+        params: {
+          command: "npm test",
+          expectedExitCode: 2,
+          workspaceRoot: "/workspace",
+        },
+      },
+    ]);
 
     const report = createPlanQualityReport({
       artifact: normalized,
@@ -577,7 +645,39 @@ describe("planner kernel v2", () => {
       report.blockingIssues.filter((issue) =>
         issue.message.includes("Shell 控制符"),
       ),
-    ).toHaveLength(3);
+    ).toHaveLength(2);
+  });
+
+  it("canonicalizes an explicit dot workspaceRoot for an exit-0 check", () => {
+    const artifact = planArtifact();
+    artifact.milestones[0]!.targetRefs = ["allergen-map/data/china.geo.json"];
+    artifact.milestones[0]!.acceptanceChecks = [{
+      id: "geojson-valid",
+      kind: "command_exit_code",
+      description: "GeoJSON parses.",
+      params: {
+        command:
+          "python3 -c \"import json; json.load(open('allergen-map/data/china.geo.json'))\"",
+        workspaceRoot: ".",
+        expectedExitCode: 0,
+      },
+      requiresEvidence: false,
+    }];
+
+    expect(
+      normalizePlanArtifactAcceptanceCommands(artifact, "/workspace")
+        .milestones[0]!.acceptanceChecks![0],
+    ).toEqual({
+      id: "geojson-valid",
+      kind: "test_passes",
+      description: "GeoJSON parses.",
+      params: {
+        command:
+          "python3 -c \"import json; json.load(open('allergen-map/data/china.geo.json'))\"",
+        workspaceRoot: "/workspace",
+      },
+      requiresEvidence: false,
+    });
   });
 
   it("does not rewrite when the check already pins a different workspaceRoot", () => {

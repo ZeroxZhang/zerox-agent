@@ -1323,6 +1323,34 @@ describe("agent tool executor", () => {
     });
   });
 
+  it("applies the same opaque-command proof to test_run", async () => {
+    const executor = createAgentToolExecutor();
+    const command = `${JSON.stringify(process.execPath)} -e "const value=1; if(value!==1) process.exit(2)"`;
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: tempDir,
+    });
+    const request = {
+      toolName: "test_run",
+      args: { command, workspaceRoot: tempDir },
+    };
+
+    await expect(
+      executor.execute(request, { runContext }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining("opaque interpreter"),
+      errorDetails: { kind: "sandbox_denied", toolName: "test_run" },
+    });
+
+    await expect(
+      executor.execute(request, { runContext, authorizedShellCommand: command }),
+    ).resolves.toMatchObject({
+      ok: true,
+      result: { exitCode: 0, cwd: tempDir },
+    });
+  });
+
   it("blocks relative shell path escapes before executing from the run workspace", async () => {
     const workspaceRoot = path.join(tempDir, "workspace");
     const outsideRoot = path.join(tempDir, "outside");

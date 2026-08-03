@@ -171,6 +171,12 @@ import type {
   ChatSessionRecord,
   GoalProgressEvent,
 } from "../shared/chat";
+import {
+  getActiveGoalSummary,
+  getRecoveryGoalSummary,
+  isLiveGoalStatus,
+} from "../shared/chatSessionWork";
+import { projectChatSessionTokenUsage } from "./chatSessionUsage";
 import type {
   AgentRunEvent,
   AgentRunRecord,
@@ -618,9 +624,9 @@ export function createAppContainer(options: {
       (candidate) => candidate.id === summary.id,
     );
     if (
-      session.activeGoalId === summary.id &&
       existingSummary?.description === summary.description &&
-      existingSummary.status === summary.status
+      existingSummary.status === summary.status &&
+      Boolean(existingSummary.updatedAt)
     ) {
       await clearActiveChatGoalIfTerminal(sessionId, summary);
       return false;
@@ -674,41 +680,12 @@ export function createAppContainer(options: {
       id: goal.id,
       description: goal.description,
       status: goal.status,
+      updatedAt: goal.updatedAt,
     };
   }
 
   function shouldClearActiveChatGoal(status: Goal["status"]): boolean {
-    return (
-      status === "achieved" ||
-      status === "completed_unverified" ||
-      status === "stopped_budget" ||
-      status === "canceled"
-    );
-  }
-
-  async function restoreRecoverableFailedChatGoal(
-    sessionId: string,
-  ): Promise<ChatSessionGoalSummary | undefined> {
-    const session = await chatSessionStore().get(sessionId);
-    if (!session || session.activeGoalId) {
-      return session?.goalSummaries?.find(
-        (summary) => summary.id === session.activeGoalId,
-      );
-    }
-
-    const latestSummary = session.goalSummaries?.at(-1);
-    if (latestSummary?.status !== "failed") {
-      return undefined;
-    }
-
-    const goal = await agentGoalStore().get(latestSummary.id);
-    if (!goal || goal.chatSessionId !== sessionId || goal.status !== "failed") {
-      return undefined;
-    }
-
-    const summary = toChatGoalSummary(goal);
-    await chatSessionStore().attachGoal(sessionId, summary);
-    return summary;
+    return !isLiveGoalStatus(status);
   }
 
   async function reconcileChatSessionGoalSummary(
@@ -726,63 +703,85 @@ export function createAppContainer(options: {
 
     const summary = toChatGoalSummary(goal);
     await attachGoalSummaryIfChanged(sessionId, summary);
-    if (shouldClearActiveChatGoal(summary.status)) {
-      return undefined;
-    }
-    return summary;
+    return isLiveGoalStatus(summary.status) ? summary : undefined;
   }
 
   async function listChatSessions(): Promise<ChatSessionListItem[]> {
     const sessions = await chatSessionStore().list();
-    return Promise.all(
+    await Promise.all(
       sessions.map(async (session) => {
-        const restoredGoal = session.activeGoal
-          ? undefined
-          : await restoreRecoverableFailedChatGoal(session.id);
-        const activeGoal = await reconcileChatSessionGoalSummary(
-          session.id,
-          session.activeGoal ?? restoredGoal,
-        );
-        const sessionWithoutActiveGoal = { ...session };
-        delete sessionWithoutActiveGoal.activeGoal;
-        return {
-          ...sessionWithoutActiveGoal,
-          ...(activeGoal ? { activeGoal } : {}),
-        };
+        const record = await chatSessionStore().get(session.id);
+        if (!record) return;
+        const activeGoal = getActiveGoalSummary(record);
+        const recoveryGoal = getRecoveryGoalSummary(record);
+        if (activeGoal) {
+          await reconcileChatSessionGoalSummary(session.id, activeGoal);
+        }
+        if (recoveryGoal && recoveryGoal.id !== activeGoal?.id) {
+          await reconcileChatSessionGoalSummary(session.id, recoveryGoal);
+        }
       }),
     );
+    return Promise.all(
+      (await chatSessionStore().list()).map(enrichChatSessionListItemUsage),
+    );
+  }
+
+  async function enrichChatSessionListItemUsage(
+    session: ChatSessionListItem,
+  ): Promise<ChatSessionListItem> {
+    const record = await chatSessionStore().get(session.id);
+    if (!record) return session;
+    const [plans, goals] = await Promise.all([
+      planStore().listBySession(session.id),
+      Promise.all(
+        (record.goalIds ?? []).map((goalId) => agentGoalStore().get(goalId)),
+      ),
+    ]);
+    const tokenUsage = projectChatSessionTokenUsage({
+      chatUsage: record.tokenUsage,
+      plans,
+      goals: goals.filter((goal): goal is Goal => Boolean(goal)),
+    });
+    return {
+      ...session,
+      ...(tokenUsage ? { tokenUsage } : {}),
+    };
   }
 
   async function getChatSession(
     sessionId: string,
   ): Promise<ChatSessionRecord | null> {
-    let session = await chatSessionStore().get(sessionId);
-    if (session && !session.activeGoalId) {
-      await restoreRecoverableFailedChatGoal(sessionId);
-      session = await chatSessionStore().get(sessionId);
+    const session = await chatSessionStore().get(sessionId);
+    if (!session) return null;
+    const activeGoal = getActiveGoalSummary(session);
+    const recoveryGoal = getRecoveryGoalSummary(session);
+    if (activeGoal) {
+      await reconcileChatSessionGoalSummary(session.id, activeGoal);
     }
-    if (!session?.activeGoalId) {
-      return session ? projectChatSessionForTranscript(session) : session;
-    }
-
-    const activeGoal = session.goalSummaries?.find(
-      (summary) => summary.id === session.activeGoalId,
-    );
-    const reconciledGoal = await reconcileChatSessionGoalSummary(
-      session.id,
-      activeGoal,
-    );
-    if (!reconciledGoal) {
-      const repairedSession = await chatSessionStore().get(sessionId);
-      return repairedSession
-        ? projectChatSessionForTranscript(repairedSession)
-        : repairedSession;
+    if (recoveryGoal && recoveryGoal.id !== activeGoal?.id) {
+      await reconcileChatSessionGoalSummary(session.id, recoveryGoal);
     }
 
     const repairedSession = await chatSessionStore().get(sessionId);
-    return repairedSession
-      ? projectChatSessionForTranscript(repairedSession)
-      : repairedSession;
+    if (!repairedSession) return repairedSession;
+    const [plans, goals] = await Promise.all([
+      planStore().listBySession(sessionId),
+      Promise.all(
+        (repairedSession.goalIds ?? []).map((goalId) =>
+          agentGoalStore().get(goalId),
+        ),
+      ),
+    ]);
+    const tokenUsage = projectChatSessionTokenUsage({
+      chatUsage: repairedSession.tokenUsage,
+      plans,
+      goals: goals.filter((goal): goal is Goal => Boolean(goal)),
+    });
+    return projectChatSessionForTranscript({
+      ...repairedSession,
+      ...(tokenUsage ? { tokenUsage } : {}),
+    });
   }
 
   async function archiveChatSession(
@@ -1187,6 +1186,9 @@ export function createAppContainer(options: {
       profile: resolved.binding.profileId,
       temperature: resolved.binding.generation.temperature,
       maxTokens: resolved.binding.generation.maxTokens,
+      ...(resolved.binding.contextWindow
+        ? { contextWindow: resolved.binding.contextWindow }
+        : {}),
       thinking: resolved.binding.generation.thinkingEnabled
         ? {
             type: "enabled" as const,

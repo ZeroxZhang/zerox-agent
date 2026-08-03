@@ -220,8 +220,7 @@ function normalizeAcceptanceCheck(
   // Mirrors normalizePlanArtifactAcceptanceCommands on the plan path.
   const expectedExitCode = Number(params.expectedExitCode ?? 0);
   const rewritableCommandCheck =
-    kind === "test_passes" ||
-    (kind === "command_exit_code" && expectedExitCode === 0);
+    kind === "test_passes" || kind === "command_exit_code";
   if (rewritableCommandCheck) {
     const command = typeof params.command === "string" ? params.command : "";
     const extracted = extractLeadingCdWorkspace(command);
@@ -237,10 +236,10 @@ function normalizeAcceptanceCheck(
         } else {
           params.workspaceRoot = extracted.dir;
         }
-        if (kind === "command_exit_code") {
-          // test_passes is exactly "command exits 0" and executes through
-          // test_run, which honors the workspaceRoot parameter end-to-end
-          // (command_exit_code runs through shell_exec and ignores it).
+        if (kind === "command_exit_code" && expectedExitCode === 0) {
+          // test_passes is the canonical spelling for "command exits 0".
+          // Nonzero command_exit_code checks retain their expected value but
+          // use the same workspace-aware typed runner at acceptance time.
           kind = "test_passes";
           delete params.expectedExitCode;
         }
@@ -252,6 +251,14 @@ function normalizeAcceptanceCheck(
           message: `验收检查 ${id} 的 cd 链式命令已改写为 workspaceRoot 参数形式。`,
         });
       }
+    }
+    if (
+      !extracted &&
+      kind === "command_exit_code" &&
+      expectedExitCode === 0
+    ) {
+      kind = "test_passes";
+      delete params.expectedExitCode;
     }
   }
 

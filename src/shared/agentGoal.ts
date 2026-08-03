@@ -2,6 +2,7 @@ import type { GoalReviewPolicy } from "./agentGoalReview";
 import type { AgentTaskContract } from "./agentTaskContract";
 import type { SkillRecord } from "./skills";
 import type { ModelServiceNotice } from "./modelServiceNotice";
+import type { AgentContextUsage } from "./contextUsage";
 import type { ResolvedModelBinding } from "./modelSettings";
 
 export type GoalStatus =
@@ -399,6 +400,7 @@ export type Goal = {
   selectedSkill?: GoalSelectedSkill;
   selectedSkillInputValues?: Record<string, string | number | boolean>;
   runtimeCheckpoint?: GoalRuntimeCheckpoint;
+  contextUsage?: AgentContextUsage;
   modelServiceNotice?: ModelServiceNotice;
   acceptanceProtocolVersion?: GoalAcceptanceProtocolVersion;
   acceptanceState?: GoalAcceptanceState;
