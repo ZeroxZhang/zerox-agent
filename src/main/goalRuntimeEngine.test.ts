@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { AcceptanceRepairDirective, Goal, Milestone } from "../shared/agentGoal";
 import type { AgentRunRecord } from "../shared/agentRuns";
+import type { GoalProgressEvent } from "../shared/chat";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
 import type { AgentTaskContract } from "../shared/agentTaskContract";
 import type { SkillRecord } from "../shared/skills";
@@ -845,6 +846,7 @@ describe("goal runtime engine", () => {
   it("runs a goal milestone through the agent loop and records the run", async () => {
     const runs: AgentRunRecord[] = [];
     const trajectoryEvents: AgentTrajectoryEvent[] = [];
+    const progressEvents: GoalProgressEvent[] = [];
     const loopInputs: Array<{
       messages: ChatMessage[];
       taskId: string | undefined;
@@ -894,6 +896,9 @@ describe("goal runtime engine", () => {
         },
       },
       goalContext,
+      onProgress(event) {
+        progressEvents.push(event);
+      },
       createId: () => "goal_run_1",
       now: () => "2026-06-13T10:00:00.000Z",
       runAgentLoop: async (messages, _profile, options): Promise<AgentLoopResult> => {
@@ -905,12 +910,38 @@ describe("goal runtime engine", () => {
           pauseOnStrategyGuard: options.pauseOnStrategyGuard,
           pauseOnTurnLimit: options.pauseOnTurnLimit,
         });
+        const contextUsage = {
+          estimatedTokens: 240,
+          tokenBudget: 1_000,
+          occupancyRatio: 0.24,
+          messageCount: messages.length,
+          compactionCount: 1,
+          lastCompaction: {
+            strategy: "summarize" as const,
+            beforeMessages: 8,
+            afterMessages: 4,
+            beforeTokens: 800,
+            afterTokens: 240,
+            compactedAt: "2026-08-03T08:00:00.000Z",
+          },
+          updatedAt: "2026-08-03T08:00:00.000Z",
+        };
+        options.onContextUsage?.(contextUsage);
+        options.onContextCompacted?.({
+          originalMessageCount: 8,
+          compactedMessageCount: 4,
+          estimatedTokens: 800,
+          compactedTokens: 240,
+          tokenBudget: 1_000,
+          strategy: "summarize",
+        });
         return {
           summary: "已完成 Serenity 投资方法论调研摘要。",
           status: "succeeded",
           turns: 2,
           messages,
           toolCallsExecuted: 3,
+          contextUsage,
         };
       },
     });
@@ -924,6 +955,10 @@ describe("goal runtime engine", () => {
       summary: "已完成 Serenity 投资方法论调研摘要。",
     });
     expect(result.tokens).toBeGreaterThan(0);
+    expect(result.contextUsage).toMatchObject({
+      estimatedTokens: 240,
+      compactionCount: 1,
+    });
     expect(loopInputs).toHaveLength(1);
     expect(loopInputs[0]?.taskId).toBe("goal:goal_1");
     expect(loopInputs[0]?.pauseOnStrategyGuard).toBe(false);
@@ -996,6 +1031,14 @@ describe("goal runtime engine", () => {
     );
     expect(trajectoryEvents.map((event) => event.type)).toContain("final_summary");
     expect(trajectoryEvents.map((event) => event.type)).toContain("checkpoint_written");
+    expect(trajectoryEvents.map((event) => event.type)).toContain("context_compacted");
+    expect(progressEvents).toContainEqual(
+      expect.objectContaining({
+        event: "context_compacted",
+        goalId: goal.id,
+        milestoneId: milestone.id,
+      }),
+    );
   });
 
   it("rebuilds a milestone run from the prior real transcript", async () => {
@@ -1032,7 +1075,17 @@ describe("goal runtime engine", () => {
       },
     });
     const priorTranscript: ChatMessage[] = [
-      { role: "assistant", content: "I will inspect package.json." },
+      {
+        role: "assistant",
+        content: "I will inspect package.json.",
+        tool_calls: [
+          {
+            id: "call_read",
+            type: "function" as const,
+            function: { name: "file_read", arguments: "{}" },
+          },
+        ],
+      },
       {
         role: "tool",
         tool_call_id: "call_read",
@@ -1049,6 +1102,80 @@ describe("goal runtime engine", () => {
     );
     expect(observedMessages.map((message) => message.content).join("\n"))
       .toContain("Resume directly from the latest real message/tool result");
+  });
+
+  it("repairs a corrupted resume transcript before it reaches the provider", async () => {
+    const goal = createGoal();
+    const milestone = goal.milestones[0]!;
+    let observedMessages: ChatMessage[] = [];
+    const engine = createGoalRuntimeEngine({
+      workspaceRoot: "/Users/demo/project",
+      chatClient: { async complete() { throw new Error("unused"); } },
+      getModelProfile: async () => ({
+        baseUrl: "http://localhost",
+        apiKey: "test",
+        model: "test-model",
+        temperature: 0,
+        maxTokens: 4_000,
+      }),
+      toolExecutor: {
+        async execute() { return { ok: true, result: {} }; },
+        getRegistry() { return createDynamicToolRegistry(); },
+        hasTool() { return true; },
+      },
+      runStore: { async append(run) { return run; } },
+      trajectoryStore: { async append(_runId, event) { return event; } },
+      goalContext: createAgentGoalContext(),
+      runAgentLoop: async (messages) => {
+        observedMessages = messages;
+        return {
+          summary: "continued",
+          status: "succeeded",
+          turns: 1,
+          messages,
+          toolCallsExecuted: 0,
+        };
+      },
+    });
+    // Corrupted transcript: an orphan tool message answering nothing, plus
+    // an assistant tool_call whose result was never recorded.
+    const corruptedTranscript: ChatMessage[] = [
+      { role: "assistant", content: "I will inspect package.json." },
+      {
+        role: "tool",
+        tool_call_id: "call_orphan",
+        content: JSON.stringify({ ok: true, result: { name: "zerox-agent" } }),
+      },
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [
+          {
+            id: "call_dead",
+            type: "function" as const,
+            function: { name: "file_list", arguments: "{}" },
+          },
+        ],
+      },
+    ];
+
+    await engine.runMilestone(goal, milestone, {
+      resumeMessages: corruptedTranscript,
+    });
+
+    // The orphan tool message is dropped and the dead tool_call is trimmed,
+    // so nothing the provider would reject with HTTP 400 remains.
+    expect(
+      observedMessages.some(
+        (message) =>
+          message.role === "tool" && message.tool_call_id === "call_orphan",
+      ),
+    ).toBe(false);
+    expect(
+      observedMessages.some((message) =>
+        message.tool_calls?.some((call) => call.id === "call_dead"),
+      ),
+    ).toBe(false);
   });
 
   it("records cancellation without publishing a misleading final trajectory", async () => {

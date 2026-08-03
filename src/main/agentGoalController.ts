@@ -45,6 +45,11 @@ import {
   FINAL_ACCEPTANCE_MAX_ATTEMPTS,
 } from "./agentGoalAcceptanceRetryPolicy";
 import { boundRuntimeTranscript } from "./runtimeTranscript";
+import {
+  isMessageSequenceProviderError,
+  sanitizeChatMessages,
+} from "./messageIntegrity";
+import type { AgentContextUsage } from "../shared/contextUsage";
 
 export type GoalRuntimeRunResult = {
   runId: string;
@@ -56,6 +61,7 @@ export type GoalRuntimeRunResult = {
   transcriptMessages?: ChatMessage[];
   actionSignatures?: string[];
   modelServiceNotice?: ModelServiceNotice;
+  contextUsage?: AgentContextUsage;
 };
 
 export type GoalRuntimeProgressCheckpoint = {
@@ -119,6 +125,13 @@ export function createAgentGoalController(options: {
   };
 }): AgentGoalController {
   const stallThreshold = options.stallThreshold ?? 3;
+  /**
+   * Consecutive message-sequence provider rejections tolerated before a
+   * milestone stops resuming from its (poisoned) transcript checkpoint and
+   * restarts clean from goal anchors. First rejection may be transient;
+   * the second identical one is structural.
+   */
+  const SEQUENCE_REJECTION_RESUME_LIMIT = 2;
   type InternalRunOptions = {
     signal?: AbortSignal;
     finalAcceptanceContinuation?: boolean;
@@ -131,6 +144,14 @@ export function createAgentGoalController(options: {
   const runOwnersByGoal = new Map<string, Set<ActiveRunEntry>>();
   const publishedTerminalVersions = new Map<string, string>();
   const recentActionSignatures = new Map<string, string[]>();
+  /**
+   * Resume circuit breaker: consecutive message-sequence provider
+   * rejections (HTTP 400 tool_call pairing) per goal:milestone. When a
+   * corrupted transcript keeps being replayed into the provider, resuming
+   * from it can never succeed — after the limit, the milestone restarts
+   * clean from anchors instead of the poisoned checkpoint.
+   */
+  const sequenceRejectionStreaks = new Map<string, number>();
   const nonterminalPublications = new Map<string, Set<Promise<void>>>();
   const manualCompletionPublications = new Map<string, Promise<void>>();
 
@@ -687,10 +708,37 @@ export function createAgentGoalController(options: {
     let checkpointedWallClockMs = 0;
     let checkpointedTokens = 0;
     const checkpoint = goal.runtimeCheckpoint;
+    const streakKey = `${goal.id}:${milestone.id}`;
+    const sequenceRejections = sequenceRejectionStreaks.get(streakKey) ?? 0;
+    // Resume circuit breaker: a transcript that already produced repeated
+    // message-sequence provider rejections is poisoned — replaying it only
+    // reproduces the same HTTP 400. Restart the milestone clean from goal
+    // anchors instead, and drop the tainted checkpoint.
+    const resumeCircuitBroken =
+      sequenceRejections >= SEQUENCE_REJECTION_RESUME_LIMIT;
     const canResumeCheckpoint = Boolean(
       checkpoint &&
+        !resumeCircuitBroken &&
         (checkpoint.milestoneId === milestone.id || repairDirective),
     );
+    if (resumeCircuitBroken && checkpoint) {
+      goal.runtimeCheckpoint = undefined;
+      touch(goal);
+      await options.goalStore.appendLedger(goal.id, {
+        at: currentTime(),
+        kind: "goal_resume_circuit_broken",
+        milestoneId: milestone.id,
+        summary:
+          `Resume circuit broken after ${sequenceRejections} consecutive ` +
+          "message-sequence provider rejections; milestone restarts from goal anchors.",
+      });
+      await emit(goal.id, "goal_resume_circuit_broken", {
+        goalId: goal.id,
+        milestoneId: milestone.id,
+        consecutiveSequenceRejections: sequenceRejections,
+      });
+      sequenceRejectionStreaks.delete(streakKey);
+    }
     const runResult = await options.runtimeEngine.runMilestone(
       goal,
       milestone,
@@ -698,7 +746,12 @@ export function createAgentGoalController(options: {
         ...(runOptions?.signal ? { signal: runOptions.signal } : {}),
         ...(canResumeCheckpoint && checkpoint
           ? {
-              resumeMessages: checkpoint.transcriptMessages,
+              // Belt and braces: even a persisted checkpoint passes through
+              // the integrity layer before it reaches the provider again.
+              resumeMessages: sanitizeChatMessages(
+                checkpoint.transcriptMessages,
+                { unresolvedToolCalls: "trim" },
+              ).messages,
             }
           : {}),
         ...(repairDirective
@@ -753,6 +806,17 @@ export function createAgentGoalController(options: {
       goal.id,
       sanitizeActionSignaturesForPersistence(runResult.actionSignatures ?? []),
     );
+    // Track consecutive message-sequence provider rejections so the resume
+    // circuit breaker can stop replaying a poisoned transcript. Any other
+    // outcome resets the streak.
+    if (
+      runResult.status === "failed" &&
+      isMessageSequenceProviderError(runResult.summary)
+    ) {
+      sequenceRejectionStreaks.set(streakKey, sequenceRejections + 1);
+    } else {
+      sequenceRejectionStreaks.delete(streakKey);
+    }
     milestone.runIds.push(runResult.runId);
     milestone.lastRunStatus = runResult.status ?? "succeeded";
     if (runResult.summary) {
@@ -783,6 +847,9 @@ export function createAgentGoalController(options: {
       0,
       (runResult.tokens ?? 0) - checkpointedTokens,
     );
+    if (runResult.contextUsage) {
+      goal.contextUsage = structuredClone(runResult.contextUsage);
+    }
     touch(goal);
     const usageGoal = await options.goalStore.save(goal);
     if (usageGoal.status !== goal.status) {
@@ -2748,7 +2815,17 @@ function repairDirectiveForMilestone(
 function boundRuntimeCheckpointMessages(
   messages: ChatMessage[],
 ): NonNullable<Goal["runtimeCheckpoint"]>["transcriptMessages"] {
-  return boundRuntimeTranscript(messages).map((message) => ({
+  // Checkpoint hygiene: boundRuntimeTranscript already repairs pair
+  // integrity and trims unanswered tool calls. Additionally strip
+  // runtime-injected system messages (strategy guards, finalize and
+  // recovery prompts, resume directives) so they do not accumulate across
+  // resume cycles — observed checkpoints carried 7-8 stacked injected
+  // system messages, wasting budget and confusing the model.
+  const { messages: hygienic } = sanitizeChatMessages(messages, {
+    unresolvedToolCalls: "trim",
+    stripInjectedSystemMessages: true,
+  });
+  return boundRuntimeTranscript(hygienic).map((message) => ({
     role: message.role,
     content:
       message.content.length > 4_000

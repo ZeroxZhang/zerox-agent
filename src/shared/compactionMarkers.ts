@@ -16,7 +16,7 @@ export const NEVER_COMPACT_MARKER = "[Goal continuity checkpoint - never compact
  */
 export const REBUILD_BOUNDARY_MARKER = "[Context rebuilt from checkpoint]";
 
-/** Context budget ratio: maxTokens * 0.7 (previously a duplicated literal). */
+/** Legacy fallback ratio used only when a model context window is unknown. */
 export const CONTEXT_BUDGET_RATIO = 0.7;
 
 export function buildRebuildBoundaryMessage(ref: string, iso: string): string {

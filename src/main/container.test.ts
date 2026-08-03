@@ -1098,7 +1098,8 @@ describe("app container goal drafts", () => {
       );
       const message = formatGoalTerminalHeading(goal);
 
-      expect(listed?.activeGoal).toMatchObject({
+      expect(listed?.activeGoal).toBeUndefined();
+      expect(listed?.recoveryGoal).toMatchObject({
         id: goal.id,
         status: "stopped_blocked",
       });
@@ -1389,7 +1390,7 @@ describe("app container goal drafts", () => {
     });
   });
 
-  it("restores a legacy failed goal as the active recoverable goal", async () => {
+  it("restores a legacy failed goal as recovery context without marking it active", async () => {
     const container = createAppContainer({
       async requestToolApproval() {
         return { approved: false, reason: "test" };
@@ -1417,13 +1418,17 @@ describe("app container goal drafts", () => {
     const listedSession = (await container.listChatSessions()).find(
       (item) => item.id === session.session.id,
     );
-    expect(listedSession?.activeGoal).toMatchObject({
+    expect(listedSession?.activeGoal).toBeUndefined();
+    expect(listedSession?.recoveryGoal).toMatchObject({
       id: goal.id,
       status: "failed",
     });
 
     const loadedSession = await container.getChatSession(session.session.id);
-    expect(loadedSession?.activeGoalId).toBe(goal.id);
+    expect(loadedSession?.activeGoalId).toBeUndefined();
+    expect(
+      loadedSession?.goalSummaries?.find((summary) => summary.id === goal.id),
+    ).toMatchObject({ id: goal.id, status: "failed" });
   });
 
   it("projects chat session details for the renderer without dropping stored audit output", async () => {

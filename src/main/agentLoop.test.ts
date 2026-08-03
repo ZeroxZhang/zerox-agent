@@ -237,6 +237,17 @@ describe("agent loop", () => {
 
   it("compacts messages before model requests when the context exceeds budget", async () => {
     const requests: ChatCompletionRequest[] = [];
+    const contextUsageEvents: Array<{
+      tokenBudget: number;
+      compactionCount: number;
+      messageCount: number;
+    }> = [];
+    const compactionEvents: Array<{
+      tokenBudget: number;
+      estimatedTokens: number;
+      compactedTokens: number;
+      strategy: string;
+    }> = [];
     const chatClient: ChatClient = {
       async complete(request) {
         requests.push(request);
@@ -254,7 +265,7 @@ describe("agent loop", () => {
         { role: "assistant", content: "old answer" },
         { role: "user", content: "current request" },
       ],
-      { ...modelProfile, maxTokens: 128 },
+      { ...modelProfile, maxTokens: 128, contextWindow: 300 },
       {
         chatClient,
         toolExecutor: createToolExecutor(),
@@ -271,6 +282,12 @@ describe("agent loop", () => {
             ].filter(Boolean) as ChatCompletionRequest["messages"];
           },
         },
+        onContextUsage(usage) {
+          contextUsageEvents.push(usage);
+        },
+        onContextCompacted(event) {
+          compactionEvents.push(event);
+        },
       },
     );
 
@@ -280,6 +297,27 @@ describe("agent loop", () => {
       { role: "user", content: "[之前对话摘要]\nold request -> old answer" },
       { role: "user", content: "current request" },
     ]);
+    expect(compactionEvents).toEqual([
+      expect.objectContaining({
+        tokenBudget: 154,
+        estimatedTokens: 400,
+        compactedTokens: 300,
+        strategy: "summarize",
+      }),
+    ]);
+    expect(contextUsageEvents.at(-1)).toMatchObject({
+      tokenBudget: 154,
+      compactionCount: 1,
+      messageCount: 3,
+    });
+    expect(result.contextUsage).toMatchObject({
+      tokenBudget: 154,
+      compactionCount: 1,
+      lastCompaction: expect.objectContaining({
+        beforeTokens: 400,
+        afterTokens: 300,
+      }),
+    });
   });
 
   it("routes overflow compaction through the injected strategy when provided (P2)", async () => {
@@ -581,6 +619,182 @@ describe("agent loop", () => {
     expect(result.summary).toContain("策略守护触发");
     expect(result.summary).toContain("file_list");
     expect(result.summary).toContain("批量或递归策略");
+  });
+
+  it("nudges the model and emits a guard when exploration repeats across turns", async () => {
+    const explorationTools: ToolDefinition[] = [
+      testTools[0]!,
+      {
+        type: "function",
+        function: {
+          name: "file_read",
+          description: "Read file",
+          parameters: {
+            type: "object",
+            properties: { path: { type: "string" } },
+            required: ["path"],
+          },
+        },
+      },
+    ];
+    const guardEvents: Array<{ code: string; toolName?: string; count?: number }> = [];
+    const requests: ChatCompletionRequest[] = [];
+    // Alternating targets so the immediate-repeat finalizer never fires;
+    // duplicates: turn 3 list(A)=1, turn 4 read(B)=2, turn 5 list(A)=3.
+    const plannedCalls = [
+      { name: "file_list", args: { path: "/tmp/project" } },
+      { name: "file_read", args: { path: "/tmp/project/a.txt" } },
+      { name: "file_list", args: { path: "/tmp/project" } },
+      { name: "file_read", args: { path: "/tmp/project/a.txt" } },
+      { name: "file_list", args: { path: "/tmp/project" } },
+    ];
+    const chatClient: ChatClient = {
+      async complete(request) {
+        requests.push(request);
+        const planned = plannedCalls[requests.length - 1];
+        if (planned) {
+          return {
+            content: null,
+            finishReason: "tool_calls",
+            toolCalls: [
+              {
+                id: `dedup_call_${requests.length}`,
+                type: "function",
+                function: {
+                  name: planned.name,
+                  arguments: JSON.stringify(planned.args),
+                },
+              },
+            ],
+          };
+        }
+
+        return {
+          content: "探索完成。",
+          toolCalls: [],
+          finishReason: "stop",
+        };
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "探索这个项目" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(),
+        maxTurns: 8,
+        tools: explorationTools,
+        onStrategyGuard(event) {
+          guardEvents.push(event);
+        },
+      },
+    );
+
+    expect(result.status).toBe("succeeded");
+    expect(result.toolCallsExecuted).toBe(5);
+    // Every duplicate executes (never blocked), and the run never pauses.
+    expect(result.continuation).toBeUndefined();
+    // The request after the first duplicate carries the dedup nudge,
+    // including a digest of the earlier read result so the model can
+    // actually reuse it even if the original scrolled out of context.
+    expect(
+      requests[3]?.messages.some(
+        (message) =>
+          message.role === "system" &&
+          message.content.includes("探索去重提示") &&
+          message.content.includes("file_list /tmp/project") &&
+          message.content.includes("a.txt"),
+      ),
+    ).toBe(true);
+    // Third duplicate escalates to an observable guard event.
+    expect(guardEvents).toEqual([
+      {
+        code: "REPEATED_EXPLORATION",
+        severity: "warn",
+        message:
+          "The model has re-read already-explored targets 3 times in this run; reuse the existing evidence and focus on unexplored areas or the deliverable.",
+        toolName: "file_list",
+        count: 3,
+      },
+    ]);
+  });
+
+  it("treats re-reads after a successful write as fresh, not duplicates", async () => {
+    const readWriteTools: ToolDefinition[] = [
+      testTools[0]!,
+      {
+        type: "function",
+        function: {
+          name: "file_write",
+          description: "Write file",
+          parameters: {
+            type: "object",
+            properties: {
+              path: { type: "string" },
+              content: { type: "string" },
+            },
+            required: ["path", "content"],
+          },
+        },
+      },
+    ];
+    const requests: ChatCompletionRequest[] = [];
+    const plannedCalls = [
+      { name: "file_list", args: { path: "/tmp/project" } },
+      { name: "file_write", args: { path: "/tmp/project/new.txt", content: "x" } },
+      { name: "file_list", args: { path: "/tmp/project" } },
+    ];
+    const chatClient: ChatClient = {
+      async complete(request) {
+        requests.push(request);
+        const planned = plannedCalls[requests.length - 1];
+        if (planned) {
+          return {
+            content: null,
+            finishReason: "tool_calls",
+            toolCalls: [
+              {
+                id: `fresh_call_${requests.length}`,
+                type: "function",
+                function: {
+                  name: planned.name,
+                  arguments: JSON.stringify(planned.args),
+                },
+              },
+            ],
+          };
+        }
+
+        return {
+          content: "完成。",
+          toolCalls: [],
+          finishReason: "stop",
+        };
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "写入一个新文件再确认目录" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(),
+        maxTurns: 6,
+        tools: readWriteTools,
+      },
+    );
+
+    expect(result.status).toBe("succeeded");
+    expect(result.toolCallsExecuted).toBe(3);
+    // The final request must NOT contain a dedup nudge: the write
+    // invalidated the earlier read, so the re-list was legitimate.
+    expect(
+      requests[3]?.messages.some(
+        (message) =>
+          message.role === "system" && message.content.includes("探索去重提示"),
+      ) ?? false,
+    ).toBe(false);
   });
 
   it("does not pause normal multi-file code generation after four file writes", async () => {
@@ -1889,6 +2103,146 @@ describe("agent loop", () => {
       { type: "content_delta", text: "partial answer" },
     ]);
     expect(completeCalls).toBe(0);
+  });
+
+  it("retries an idle-timed-out stream instead of failing the run", async () => {
+    let streamCalls = 0;
+    let completeCalls = 0;
+    const retryEvents: Array<{ attempt: number; error: string }> = [];
+    const chatClient: ChatClient & StreamingChatClient = {
+      async complete() {
+        completeCalls += 1;
+        throw new Error("complete must not replace a retryable stream");
+      },
+      async *streamComplete() {
+        streamCalls += 1;
+        if (streamCalls === 1) {
+          // Thinking-style models pause; the 30s per-read idle budget fires
+          // mid-generation. This must be retried, not fatal.
+          yield { type: "content_delta", text: "partial thinking" };
+          throw new Error("SSE stream idle timeout after 30 s");
+        }
+        yield { type: "content_delta", text: "full answer" };
+        yield { type: "done", finishReason: "stop" };
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "stream stalls once" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(),
+        tools: testTools,
+        onModelRetry(event) {
+          retryEvents.push({ attempt: event.attempt, error: event.error });
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: "succeeded",
+      summary: "full answer",
+      toolCallsExecuted: 0,
+    });
+    expect(streamCalls).toBe(2);
+    expect(completeCalls).toBe(0);
+    expect(retryEvents).toHaveLength(1);
+    expect(retryEvents[0]!.error).toContain("idle timeout");
+  });
+
+  it("fails after repeated mid-stream idle timeouts", async () => {
+    let streamCalls = 0;
+    const chatClient: ChatClient & StreamingChatClient = {
+      async complete() {
+        throw new Error("complete must not run");
+      },
+      async *streamComplete() {
+        streamCalls += 1;
+        yield { type: "content_delta", text: "partial" };
+        throw new Error("SSE stream idle timeout after 30 s");
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "stream always stalls" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(),
+        tools: testTools,
+      },
+    );
+
+    expect(result.status).toBe("failed");
+    expect(result.summary).toContain("idle timeout");
+    expect(streamCalls).toBe(3);
+  }, 15_000);
+
+  it("repairs an interrupted tool batch in the transcript it returns", async () => {
+    // Simulate a provider that issues two tool calls; the executor throws
+    // unexpectedly on the first one, escaping the batch before the second
+    // tool_call is answered. The returned transcript must still satisfy the
+    // provider pairing invariant (unanswered calls trimmed).
+    let modelCalls = 0;
+    const chatClient: ChatClient = {
+      async complete() {
+        modelCalls += 1;
+        return {
+          content: null,
+          toolCalls: [
+            {
+              id: "call_explode",
+              type: "function" as const,
+              function: { name: "file_list", arguments: '{"path":"/a"}' },
+            },
+            {
+              id: "call_unanswered",
+              type: "function" as const,
+              function: { name: "file_list", arguments: '{"path":"/b"}' },
+            },
+          ],
+          finishReason: "tool_calls",
+        };
+      },
+    };
+    const toolExecutor: AgentToolExecutor = {
+      async execute() {
+        throw new Error("executor exploded unexpectedly");
+      },
+      getRegistry() {
+        return createDynamicToolRegistry();
+      },
+      hasTool() {
+        return true;
+      },
+    } as unknown as AgentToolExecutor;
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "explode" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor,
+        tools: testTools,
+      },
+    );
+
+    expect(modelCalls).toBe(1);
+    expect(result.status).toBe("failed");
+    // The transcript must not contain an unanswered tool_call.
+    const assistant = result.messages.find(
+      (message) => message.role === "assistant" && message.tool_calls?.length,
+    );
+    const openIds = new Set(
+      (assistant?.tool_calls ?? []).map((call) => call.id),
+    );
+    const answered = result.messages.filter(
+      (message) =>
+        message.role === "tool" && openIds.has(message.tool_call_id ?? ""),
+    );
+    expect(openIds.size).toBe(answered.length);
+    expect(openIds.has("call_unanswered")).toBe(false);
   });
 
   it("assembles concurrent indexed streamed tool calls before authorization", async () => {

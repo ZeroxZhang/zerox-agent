@@ -5,6 +5,7 @@ import type { GoalStatus } from "./agentGoal";
 import type { ChatOutputPart } from "./chatOutput";
 import type { ModelServiceNotice } from "./modelServiceNotice";
 import type { GoalDraft } from "./goalTranslation";
+import type { AgentContextUsage } from "./contextUsage";
 import type {
   PlanAutonomyMode,
   PlanMode,
@@ -47,13 +48,47 @@ export type ChatSessionGoalSummary = {
   id: string;
   description: string;
   status: GoalStatus;
+  /** Goal-store time, used to order Goal state against independent Chat runs. */
+  updatedAt?: string;
 };
+
+export type ChatSessionWorkSummary =
+  | {
+      source: "goal";
+      relationship: "active" | "recovery";
+      goalId: string;
+      status: GoalStatus;
+      updatedAt: string;
+    }
+  | {
+      source: "chat";
+      status: "working" | "paused" | "completed" | "failed" | "canceled";
+      updatedAt: string;
+    }
+  | {
+      source: "idle";
+      status: "idle";
+      updatedAt: string;
+    };
 
 export type ChatSessionTokenUsage = {
   totalTokens: number;
   promptTokens?: number;
   completionTokens?: number;
   estimated: boolean;
+  breakdown?: {
+    chatTokens: number;
+    planTokens: number;
+    goalTokens: number;
+  };
+};
+
+export type ChatSessionContextSnapshot = AgentContextUsage & {
+  isolation: "session_plus_global_memory";
+  sessionMessageCount: number;
+  historyMessageCount: number;
+  recalledSessionMemories: number;
+  recalledGlobalMemories: number;
 };
 
 export type ChatWorkspaceSummary = {
@@ -92,6 +127,7 @@ export type ChatSessionRecord = {
   goalIds?: string[];
   goalSummaries?: ChatSessionGoalSummary[];
   activity?: ChatSessionActivitySnapshot;
+  context?: ChatSessionContextSnapshot;
   archivedAt?: string;
   tokenUsage?: ChatSessionTokenUsage;
   createdAt: string;
@@ -106,9 +142,12 @@ export type ChatSessionListItem = {
   workspaceId?: string;
   workspaceSummary?: ChatWorkspaceSummary;
   activeGoal?: ChatSessionGoalSummary;
+  recoveryGoal?: ChatSessionGoalSummary;
+  work: ChatSessionWorkSummary;
   archivedAt?: string;
   lastAssistantMessageAt?: string;
   tokenUsage?: ChatSessionTokenUsage;
+  context?: ChatSessionContextSnapshot;
   updatedAt: string;
 };
 
@@ -274,6 +313,7 @@ export type ChatTaskStatusEvent = {
     | "memory"
     | "memory_scope"
     | "history"
+    | "context"
     | "model"
     | "reasoning"
     | "streaming"
@@ -312,6 +352,7 @@ export type ChatTaskStatusEvent = {
   pendingSkillInput?: SkillPendingInputState;
   ok?: boolean;
   payload?: Record<string, unknown>;
+  context?: ChatSessionContextSnapshot;
 };
 
 export type ChatSessionActivitySnapshot = {
@@ -335,6 +376,7 @@ export type GoalProgressEvent = {
     | "replanned"
     | "stopped"
     | "checkpoint"
+    | "context_compacted"
     | "acceptance_manifest_created"
     | "acceptance_failure_classified"
     | "acceptance_repair_scheduled"

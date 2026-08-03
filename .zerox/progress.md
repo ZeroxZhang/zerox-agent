@@ -1,5 +1,447 @@
 # Zerox Harness Progress
 
+## 2026-08-02 - Tool-Name Namespace Separation + Gate Blocks Ask Instead of Strand
+
+- Sixth user-acceptance failure: debate completed, gate blocked on
+  "里程碑 milestone_4 引用了不存在的工具 model_review" — the model had
+  written an acceptance-check KIND into milestone toolNames. The previous
+  commit's gate-repair ladder fired (gateRepairAttempted=true on both
+  stages) but the repair round regenerated the same slip because the
+  repair prompt never listed the available tools nor stated that check
+  kinds are not tools.
+- Owner directive this round, treated as a product principle: "用户让他
+  干嘛就干，不清楚了就发起提问让用户决策，而不是直接中断" — terminal
+  failures must ask the user, never strand the plan on a dead "Blocked"
+  card.
+- Fixes:
+  1. Deterministic namespace separation (plannerKernel): assertion and
+     model_review (plus validator:* names) are acceptance-verifier names,
+     never executable tools — now stripped from milestone toolNames
+     during normalization, same philosophy as the existing alias map
+     (file_exists→file_stat etc.). This class can no longer reach the
+     gate at all.
+  2. Gate-repair prompt now carries the live available-tool list and an
+     explicit "check kinds are not tools" rule, so remaining UNKNOWN_TOOL
+     slips are repairable by the model.
+  3. UX principle implemented: a terminal gate block (after the bounded
+     repair ladder) no longer persists status "paused" — the plan is
+     persisted as awaiting_input with an actionable gateReason (issues +
+     "请在下方输入处理意见…或丢弃计划"), while actionGate stays "blocked"
+     so confirmation remains impossible and the audit trail stays honest.
+     Applied to both createPlan and the manual retryQualityGate path;
+     the awaiting_input UI already offers the revise-by-reply route
+     (continueWithInput replans from user input).
+- End-to-end evidence: the user's real blocked plan (plan_7dae6f91,
+  UNKNOWN_TOOL model_review) replayed through the production container —
+  the deterministic strip alone cleared the gate with zero model calls,
+  plan reached awaiting_confirmation (replay exit 0, qualityReport ready,
+  blocking 0, milestone_4 toolNames []).
+- Verification evidence: orchestrator suite 36/36 (4 expectations updated
+  to the new awaiting_input terminal semantics); full npm test 2482
+  passed; npm run build OK; harness:check passed; smoke exit 0.
+
+## 2026-08-02 - Acceptance-Check Contract Completion + Gate-Repair Ladder
+
+- Fifth user-acceptance failure, a new class: plan debate completed all
+  five rounds (46 evidence items), then the deterministic quality gate
+  dead-ended the plan — "验收检查 milestone_2_check_1/2/3 的 artifactRef
+  非法", status paused, no way forward. The stored plan showed the model
+  had misunderstood `assertion` in three ways at once: artifactRef was an
+  evidence id (`evidence_tool_…`), path was a filesystem path, equals was
+  a file-content fragment. Its actual intent (frontmatter contains
+  name/version/mode) is not expressible as assertion at all.
+- Two root causes, both fixed:
+  1. Prompt contract under-specified: the v2 prompt listed field names
+     ("assertion 提供 artifactRef、path、equals") but never the semantics —
+     artifactRef regex + allowed runtime artifacts (artifact:goalEvidence,
+     artifact:bookmark_list), path = dotted JSON field path (not fs path),
+     and the intent→kind mapping (file content → command_exit_code grep
+     or model_review; file presence → file_exists). Added
+     ACCEPTANCE_CHECK_CONTRACT_RULES to the round prompt, the cold-review
+     prompt, and the gate-repair prompt, with a comment demanding it stay
+     in sync with acceptanceContractValidator.ts/agentGoalAcceptance.ts.
+  2. Quality gate was a dead-end: blocking issues are deterministic
+     contract violations in a model-produced artifact — the same failure
+     class as malformed round JSON, but unlike rounds the gate had no
+     repair ladder. Added attemptGateRepair: exactly one bounded
+     synthesizer repair round fed with the precise machine-generated
+     issue list, then gate re-run; adopt repaired artifact only when not
+     worse; a failed repair completion never crashes planning. Eligible
+     only when ALL blocking issues are contract-level (INVALID_SCHEMA,
+     INVALID_DAG, UNKNOWN_TOOL, INVALID_ACCEPTANCE_CHECK,
+     MISSING_EVIDENCE, INSUFFICIENT_DETERMINISTIC_ACCEPTANCE,
+     ILLEGAL_CAPABILITY) — MODEL_REVIEW_REJECTED already had its
+     review-stage repair round; skill-input/ambiguity/risk issues need
+     the user. Wired into BOTH createPlan and the manual
+     retryQualityGate path (so already-parked plans can recover);
+     observability via PlanningStageRecord.gateRepairAttempted.
+- End-to-end evidence on the user's actual blocked plan: replayed
+  plan_5360d0bf (paused, 3x artifactRef 非法) through the production
+  container with the real provider — gate repair regenerated the three
+  checks as command_exit_code greps with proper workspaceRoot (exactly
+  the documented intent→kind mapping), gate passed, plan reached
+  awaiting_confirmation (replay exit 0, message "质量门禁发现合同问题，
+  已完成一次自动修复并复检通过").
+- Verification evidence: orchestrator suite 36/36 (4 new gate-repair
+  tests: recovery, still-blocked, repair-call failure, manual retry with
+  replacement model); full npm test 2482 passed; npm run build OK;
+  harness:check passed; BUILDING_AGENT_SMOKE=1 smoke exit 0.
+
+## 2026-08-02 - Unified Model Boundary Protocol Engine
+
+- Architectural follow-through after four consecutive acceptance failures
+  (message integrity, unretried malformed investigation JSON, verification
+  gate false positive, output truncation, fragment-masked syntax error).
+  Each fix had landed in a different layer with its own bespoke ladder —
+  classic whack-a-mole: the invariants existed in prompts/parsers at every
+  boundary, but there was no single place that owned the completion→
+  validate→recover→fail-closed flow. Stricter contracts alone could not
+  have prevented any of the four (each failure happened while the strict
+  contract was already in the prompt); the root fix is a unified protocol
+  stack engine.
+- New `src/main/structuredModelProtocol.ts`: `completeStructuredBoundary()`
+  — one engine for every model boundary that must return a structured
+  artifact. Uniform ladder: normal completion → (on truncation) one
+  continuation + budget escalation (shared structuredOutputBudget) → (on
+  parse failure) one contract-repair round with the parse error fed back →
+  fail-closed with typed error + full response snapshot for observability.
+  Boundaries declare only a `StructuredBoundaryContract<T>` (name,
+  baseMessages, parse, buildRepairPrompt, buildFailure).
+- Migrated onto the engine: debate structured rounds
+  (`completeStructuredRound`) and cold plan review (`completePlanReview`)
+  in planDebateOrchestrator — now thin adapters; all recovery semantics
+  (repair prompts, failureExcerpt, stage records) behavior-preserved.
+  `PlanningStageRecord.failureExcerpt` added so review-stage failures are
+  observable like round failures.
+- Deliberately NOT migrated (registered in the spec instead): goalPlanner
+  (has refusal-retry semantics the engine doesn't model) and the
+  investigation collector (first artifact is produced inside the agent
+  loop, not a single completion) — both keep their own ladders but share
+  the structuredOutputBudget primitives.
+- Formal spec written: `.zerox/model-boundary-protocol.md` — inbound
+  message protocol, outbound contract rules, the uniform ladder, the
+  anti-masking rule (never report a fragment's contract error when the
+  real error is syntax/truncation upstream), observability requirements,
+  and a boundary registry table so every future model boundary registers
+  here and uses the engine by default.
+- Verification evidence: engine unit tests 6/6; orchestrator suite 32/32
+  unchanged post-migration; full `npm test` 242 files / 2478 tests pass;
+  `npm run build` OK; `npm run harness:check` passed;
+  BUILDING_AGENT_SMOKE=1 electron smoke OK.
+
+## 2026-08-02 - Fragment-Masked Syntax Errors + Single-Brace Salvage
+
+- Fourth user-acceptance failure, and the most instructive: a1 debate round
+  died with "规划输出字段 title 必须是非空字符串" even though the model had
+  returned a complete 12-13 KB plan with a perfectly good title. Root cause
+  proven by replaying the exact failed plan (new ZEROX_AGENT_REPLAY_PLAN_ID
+  driver) and dumping the full raw response
+  (ZEROX_AGENT_FAILURE_DUMP_DIR):
+  - the model closed the root object one field early — a single spurious
+    `}` after "assumptions" at position 1949 split one plan JSON into
+    fragments;
+  - the extractor treated each fragment (bare milestone/risk objects) as a
+    top-level candidate, so the LAST fragment's contract error ("title
+    missing") completely masked the real syntax error;
+  - the repair round was fed the misleading error and regenerated the same
+    slip — "连续两次" failure was the diagnostics layer lying, not the
+    model being unfixable.
+- Fixes:
+  - Observability: failed rounds now persist a bounded raw excerpt
+    (`DebateRound.failureExcerpt`, head 4000 + tail 2000 chars) via
+    `PlanRoundFailureError`; full-response debug dumps behind
+    ZEROX_AGENT_FAILURE_DUMP_DIR; plan replay driver in main.ts mirrors
+    the goal replay driver.
+  - Parser (shared/planStructuredOutput.ts): when a response fragments
+    into multiple candidates with no valid one, the outermost JSON span is
+    analyzed as a whole — (a) bounded single-premature-brace salvage
+    (≤24 suspect positions, candidate must parse AND pass the round
+    contract, fail-closed otherwise); (b) unsalvageable responses now
+    throw the real syntax error ("语法错误，响应被切成 N 个片段") instead
+    of a fragment's contract error, so repair rounds target the actual
+    mistake.
+- End-to-end evidence: the exact failed plan
+  (plan_2c9fbef2, a1 failed twice under the old build) was replayed
+  against the live provider with the fix — a1/b1/a2/b2/c all completed,
+  plan reached awaiting_confirmation (replay exit 0). The salvage was
+  separately verified against the captured raw dump: position 1949 rejoins
+  to a complete valid plan (title, 3 milestones, 3 risks).
+- Verification evidence:
+  - new tests: premature-brace salvage, prose-wrapped salvage, real
+    syntax-error reporting (must NOT say "title 必须是非空字符串"),
+    intact-object contract errors unchanged, multiple-valid-objects
+    rejection unchanged;
+  - `npm test`: 241 files / 2472 tests passed;
+  - TypeScript electron check, `npm run build`, `npm run harness:check`,
+    `BUILDING_AGENT_SMOKE=1 npx electron .` passed.
+
+## 2026-08-01 - Output-Budget Recovery Ladder (Truncation Killed Planning)
+
+- Third user-acceptance failure, budget dimension: a fresh debate plan
+  paused with "规划模型未完成本轮 / 模型或服务商已达到本次输出长度限制".
+  Root cause verified against the live config: both planner profiles cap
+  maxTokens at 8192, while a complex v2 PlanArtifact JSON routinely exceeds
+  that (the same content renders to 22-31 KB plan markdown; Chinese ≈ 1
+  token/char). Every structured planning boundary treated
+  `finishReason=length` as fatal, so a budget mismatch killed the whole
+  plan even though the model had produced most of a valid artifact.
+- Fix (shared protocol adapter for the budget dimension,
+  src/main/structuredOutputBudget.ts):
+  - `isRecoverableOutputLimit` — truncation is recoverable only with
+    partial content present; empty truncated responses stay fatal.
+  - `escalateOutputBudget` — retry budget doubles with a 16384 floor and a
+    32768 ceiling.
+  - `buildOutputLimitContinuationPrompt` — resume exactly at the cut, no
+    repetition, compact JSON, bounded field sizes.
+  - Wired into every structured planning boundary: debate rounds
+    (`completeStructuredRound`), the cold reviewer (`completePlanReview`),
+    the goal milestone planner (`requestMilestones`), and investigation
+    brief repairs (escalating budget per repair attempt, since repairs
+    regenerate the whole JSON). Each site runs a bounded ladder of at most
+    3 completions (normal → continuation → contract repair); persistent
+    truncation still fails closed exactly as before.
+  - Prompt-side prevention: round prompts now carry an output-budget
+    discipline line (compact JSON, field/array size caps, evidence by
+    reference instead of verbatim).
+- Verification evidence:
+  - new tests: budget escalation math + recoverability classifier;
+    truncated debate round continues with escalated budget and completes
+    the plan (continuation request carries the exact prefix); persistent
+    truncation fails closed after exactly 2 completions; goal planner
+    continuation success + notice surfaced on double truncation;
+    investigation repair runs with escalated maxTokens;
+  - `npm test`: 240 files / 2466 tests passed;
+  - TypeScript electron check, `npm run build`, `npm run harness:check`,
+    `BUILDING_AGENT_SMOKE=1 npx electron .` passed.
+
+## 2026-08-01 - Protocol-Adapter Layer for Model Output Boundaries
+
+- Root-cause review across every model-output parse point (communication
+  protocol perspective): the real gap was not one protocol bug but three
+  model boundaries lacking a uniform protocol-adapter layer. Two were
+  already repaired (context integrity, exploration dedup/summary); the
+  audit located the remaining concrete gap — the plan cold reviewer
+  (`completePlanReview`) was the last structured-output boundary with no
+  repair retry, so one malformed JSON slip paused the whole plan.
+- Fixes:
+  - `completePlanReview` now mirrors the debate-round/judge resilience
+    contract: on parse or contract failure it appends the broken response
+    (bounded to 16k chars) plus a contract-feedback user message and
+    retries exactly once before failing closed.
+  - Prompt-side contract front-loading: the acceptance command DSL (single
+    command, no shell control operators/redirection, workspaceRoot param
+    instead of `cd X &&`, KEY=value env prefixes allowed) is now written
+    into the plan-debate round prompt and the goal planner prompt so
+    models produce gate-compliant commands on the first attempt.
+  - Consistency gap closed: `normalizeGoalDraftCriteria` (goalTranslation)
+    now applies the same cd-chain rewrite as the plan path —
+    `cd <dir> && <cmd>` exit-0 checks become `{command, workspaceRoot}`
+    and `command_exit_code` retags to `test_passes` (which honors
+    workspaceRoot end-to-end through test_run); the acceptance runner
+    still boundary-checks workspaceRoot and fail-closes outside the
+    workspace, so containment is not weakened. Non-rewritable chains
+    (nonzero expected exit, conflicting workspaceRoot, still-chained
+    remainder) stay untouched for the quality gate, with an auditable
+    `cd_chain_acceptance_command_rewritten` warning when a rewrite fires.
+- Verification evidence:
+  - new tests: cold review repairs a malformed response once and approves
+    (repair request carries the broken text + contract feedback); cold
+    review fail-closed after two malformed responses (plan paused,
+    review stage failed); goalTranslation cd-chain rewrite, `cd .`
+    prefix drop, and three non-rewritable leave-untouched cases;
+  - `npm test`: 239 files / 2458 tests passed;
+  - TypeScript electron check, `npm run build`, `npm run harness:check`,
+    `BUILDING_AGENT_SMOKE=1 npx electron .` passed.
+
+## 2026-08-01 - Investigation Structured-Output Repair (Single-Slip Plan Death)
+
+- Second user-acceptance failure, different layer: a fresh plan paused with
+  "规划调查未完成" after the investigation stage ran 41 s and collected 15+
+  evidence items successfully. Root cause from the persisted stage record:
+  the model's final structured JSON had one syntax error ("Expected ',' or
+  '}' after property value in JSON at position 142") and the investigation
+  pipeline had NO retry — a single transient formatting slip killed the
+  whole plan even though the underlying research had succeeded.
+- Fix: `parseInvestigationBriefWithRepair` in planInvestigatorService wraps
+  the structured-output parse. On parse/contract failure it issues up to 2
+  cheap repair completions (no tools, temperature 0, "return the corrected
+  JSON only", carrying the parse error and the broken text), reparsing each
+  repair. Repair-request transport failures break immediately to the
+  original error, and exhausted repairs preserve the previous fail-closed
+  behavior exactly (stage failed, PlanInvestigationError, evidence kept).
+- Verification evidence:
+  - new tests: repair succeeds on first retry and completes the stage
+    (repair prompt carries the broken text); repairs exhausted still fails
+    closed after exactly 2 attempts; the pre-existing malformed-brief
+    fail-closed test passes unchanged;
+  - `npm test`: 239 files / 2453 tests passed;
+  - TypeScript electron check, `npm run build`, `npm run harness:check`,
+    `smoke:prod` passed.
+
+## 2026-08-01 - Acceptance cd-Chain Normalization (Quality-Gate False Block)
+
+- User acceptance surfaced a plan-mode blocker: a fresh debate plan paused
+  with `INVALID_ACCEPTANCE_CHECK` — "验收检查 milestone_4_check_3 的 command
+  含有被禁止的 Shell 控制符". The planner had written the idiomatic
+  `cd <subdir> && PYTHONPATH=... python3 -m unittest ...` chain; the gate
+  correctly forbids shell control operators (acceptance commands must stay
+  single statically checkable invocations), but there was no repair path,
+  so an otherwise valid plan forced full regeneration.
+- Fix: `extractLeadingCdWorkspace` (shared/acceptanceCommand) parses a
+  single leading `cd <dir> &&` prefix (quoted or relative) and refuses
+  remainders that still carry shell control syntax;
+  `normalizePlanArtifactAcceptanceCommands` (plannerKernel) rewrites the
+  pair into the sandbox-compliant params form (`command` + boundary-checked
+  `workspaceRoot`) when the dir resolves inside the plan workspace, and
+  retags `command_exit_code` expecting exit 0 as `test_passes` — the kind
+  that honors workspaceRoot end-to-end through test_run. Out-of-workspace
+  targets, chained/piped remainders, conflicting workspaceRoot params, and
+  nonzero expected exit codes stay blocked as before.
+- Wired at both quality-gate boundaries in the debate orchestrator (initial
+  gating after final round + repair rounds, and retryQualityGate), following
+  the existing normalizePlanArtifactToolNames compatibility-normalization
+  pattern.
+- Verified against the user's real blocked plan (plan_6deaec5c, rev 16):
+  after normalization the quality report flips from blocked to `ready`
+  with zero blocking issues; the milestone_4 check becomes
+  `test_passes @ .../ecommerce-selection`.
+- Verification evidence:
+  - new suites: shared/acceptanceCommand 5 tests; plannerKernel 4 tests
+    (rewrite + gate pass, quoted relative dir, blocked cases stay blocked,
+    conflicting workspaceRoot untouched);
+  - `npm test`: 239 files / 2451 tests passed;
+  - TypeScript electron check, `npm run build`, `npm run harness:check`,
+    `smoke:prod` passed.
+
+## 2026-08-01 - Dedup Digest Upgrade + Live Acceptance Rounds
+
+- First live round (clone data dir, production container, real DeepSeek,
+  retryGoal channel identical to the UI retry button): the historically
+  12x-failed paper-to-mp goal completed milestone_0 with state `accepted`
+  (14 attempts total, zero provider 400s, zero fatal interruptions across
+  43 model requests). The REPEATED_EXPLORATION guard fired 7 times
+  (duplicate counts 3..21), proving the tracker works in production — but
+  the model kept re-reading (46% of read-class calls were cross-turn
+  duplicates, rising in the second half). Root cause: goal-mode transcript
+  bounding keeps only ~24 messages, so earlier read results genuinely leave
+  the context; a text-only "you already read this" nudge asks the model to
+  reuse evidence it can no longer see.
+- Upgraded the dedup note to carry a compact digest (max 600 chars,
+  XML-wrapper stripped) of the most recent successful read result, so the
+  model gets real reusable evidence even after bounding drops the original
+  tool result. The note now tells the model to reuse the digest when
+  sufficient and to re-read only with precise offset/limit parameters when
+  it needs content beyond the excerpt. Digests refresh on every successful
+  re-read and are invalidated by any successful mutation as before.
+- Second live round (same setup, digest build): milestone_1 accepted, goal
+  advanced to milestone_2; 21/21 model requests answered, 0 duplicates,
+  0 guards, 0 errors. The milestone was build/test-phase work (17 test_run
+  calls), so exploration was minimal by nature — digest effectiveness on
+  exploration-heavy phases is proven at the integration-test level (note
+  carries the earlier result content into the next model request) and
+  awaits a future exploration-heavy live run for production measurement.
+- Verification evidence:
+  - new/updated suites: agentExplorationDedup 16 tests (digest carry,
+    wrapper stripping, truncation); agentLoop integration asserts the
+    production note embeds the earlier read content;
+  - `npm test`: 2442 passed; TypeScript electron check, `npm run build`,
+    `npm run harness:check` passed; replay driver self-exited at timeout in
+    both rounds, no stray Electron processes left.
+
+## 2026-08-01 - Repeated-Exploration Efficiency Fix (Cross-Turn Dedup)
+
+- The live replay evidence showed the runtime was healthy but inefficient:
+  the model re-read the same files and re-listed the same directories dozens
+  of times within one goal run, burning turns and tokens rediscovering what
+  it already knew. The FRAGMENTED_TOOL_CALLS guard only fires on 4
+  consecutive same-tool calls and the repeated-call finalizer only catches an
+  immediately repeated signature, so cross-turn duplicate exploration went
+  unaddressed.
+- New `src/main/agentExplorationDedup.ts`: a per-run tracker records
+  successful read-class calls (file_read/file_list/file_search/file_stat/
+  file_inventory/code_search/git_*/tool_result_read/skill_resource_list).
+  Re-reading an already-read target injects a short dedup note telling the
+  model to reuse its existing evidence; every third duplicate escalates to a
+  `REPEATED_EXPLORATION` strategy-guard event for trajectory/UI
+  observability. It never blocks a call and never pauses the run, and any
+  successful mutating call (file writes, heuristic shell mutations, test
+  runs) invalidates the recorded read state so freshness-sensitive re-reads
+  after writes stay legitimate.
+- Wired into agentLoop at the tool-execution boundary: check before
+  execution, record after successful results, nudge + guard after duplicates.
+- Verification evidence:
+  - new suites: agentExplorationDedup 12 tests; agentLoop cross-turn dedup
+    nudge/guard test and write-invalidates-read test;
+  - `npm test`: 238 files / 2438 tests passed (zero flakes this run);
+  - TypeScript electron check, `npm run build`, `npm run harness:check`, and
+    `smoke:prod` all passed.
+
+## 2026-08-01 - Goal-Mode Failure Storm Root-Cause Fix (Message Integrity, Resume Circuit Breaker, Stream Resilience)
+
+- Root-caused the recurring goal-mode error/interruption storms from the
+  user's real runtime data (`agent-runs.jsonl`, goal checkpoints,
+  trajectories): repeated provider HTTP 400 tool_call-pairing rejections
+  replayed from persisted checkpoints (5 identical failures in 2 minutes),
+  fatal 30 s SSE idle timeouts on thinking-style models, and checkpoints
+  accumulating 7-8 stacked runtime-injected system messages.
+- Systemic cause: four divergent modules (context compaction, runtime
+  transcript bounding, goal-context assembly, loop trimming) each mutated
+  conversation state with different pair-preservation rules; none enforced
+  the provider message-sequence invariant at persistence/resume/request
+  boundaries, and the goal controller unconditionally resumed from failed
+  runs' transcripts.
+- New shared integrity layer `src/main/messageIntegrity.ts`:
+  `sanitizeChatMessages` repairs orphan tool messages, unanswered
+  tool_calls (synthesize for live requests, trim for persistence), empty
+  and duplicate assistants, and strips runtime-injected system messages;
+  `inspectChatMessages` diagnoses; `isMessageSequenceProviderError`
+  fingerprints the 400 class; one `groupToolPairedMessages` replaces the
+  three divergent grouping implementations.
+- Wired enforcement at every boundary: agentLoop sanitizes before every
+  model request and on every exit path (including exceptions escaping a
+  tool batch); runtimeTranscript and goal-context assembly route through
+  the shared layer; chatService sanitizes session history before replay.
+- Resume circuit breaker in the goal controller: consecutive identical
+  message-sequence rejections (limit 2) drop the poisoned transcript
+  checkpoint and restart the milestone clean from goal anchors, recorded
+  via new `goal_resume_circuit_broken` trajectory and ledger events.
+- Transport resilience: SSE idle-timeout / connection-reset stream failures
+  are retried up to 3 attempts with bounded backoff instead of failing the
+  run; aborts and provider limit notices remain non-retryable.
+- Checkpoint hygiene: injected strategy-guard/finalize/recovery/resume
+  system prompts are stripped before checkpoint persistence so they no
+  longer accumulate across resume cycles.
+- Verification evidence:
+  - live end-to-end replay: cloned the user data dir, restored the failed
+    paper-to-mp goal (12 prior failed attempts, poisoned 21-message
+    checkpoint), and re-ran it through the production container with the
+    real DeepSeek provider via a new env-guarded replay driver
+    (ZEROX_AGENT_REPLAY_GOAL_ID, main.ts). Result: 123 model requests /
+    122 responses, 175 tool calls, 971 invocation events, zero provider
+    rejections, zero stream-fatal interruptions in 5+ minutes — versus an
+    instant HTTP 400 on every historical attempt. Replay log kept at
+    /tmp/zerox-replay-run.log; the user's real data dir was never touched;
+  - code-level reproduction: a temporary side-by-side vitest run (base
+    19bc892 vs this branch, 10/10 assertions) demonstrated that the old
+    agentLoop returned transcripts with unanswered tool_calls after an
+    executor exception, the old goal-context assembly forwarded incomplete
+    tool pairs to the provider, the old runtimeTranscript silently
+    swallowed the latest tool action, the old streaming path failed the
+    whole run on a 30 s SSE idle timeout, and the old checkpointing kept
+    every injected system prompt — while the new code satisfies the
+    invariant in the identical scenarios; static inspection confirmed the
+    old controller had zero sequence-error tracking and persisted
+    failed-run transcripts unconditionally;
+  - new suites: messageIntegrity 15 tests; agentLoop stream-retry and
+    interrupted-batch repair tests; goalRuntimeEngine corrupted-resume
+    repair test; controller circuit-breaker test;
+  - focused suites: agentLoop, goal controller, goal context, chat service,
+    runtime engines — all pass;
+  - `npm test`: 2422 passed / 1 pre-existing flake
+    (`sourceImportCasing` times out identically on the unmodified base);
+  - `npm run build`, `npm run harness:check`, agent/memory evals, and
+    `smoke:prod` all passed.
+
 ## 2026-07-31 - Final Acceptance and Provider Recovery Closure
 
 - Reproduced the reported 7/7 `Blocked` failure against the durable Goal and
@@ -8195,3 +8637,145 @@
   - `npm test`: 235 files / 2,376 tests passed;
   - TypeScript main/renderer checks and Vite production build passed;
   - `npm run smoke:prod` and `npm run harness:check` passed.
+
+## 2026-08-02 - P66 Goal Mode Experience Contract
+
+- Replaced three renderer-owned Goal/automatic-approval booleans with one
+  atomic `ToolApprovalModeState`. The shared policy derivation now makes the
+  invariant explicit: a selected or active Goal always enables and locks
+  automatic approval, while the authorization service and critical-risk
+  confirmation boundary remain intact.
+- Goal selection now commits the main-process policy instead of only changing
+  the renderer. Failed IPC rolls back the optimistic UI, and a persisted Plan
+  re-establishes the same policy after a renderer/main-process lifecycle.
+- Added a shared Plan outcome projection used by both main Chat status/replies
+  and the renderer. The default surface now shows only success/failure, the
+  current execution state, and one next action. Provider errors, raw output,
+  stage/round telemetry, evidence, and quality/audit records live under one
+  collapsed technical-details disclosure.
+- Rebuilt Debate model assignment as responsive A/B/C role cards with role
+  responsibilities, provider/model metadata, keyboard-accessible Direct vs.
+  Debate selection, and a one-click action to use the default model for all
+  roles.
+- Verification evidence:
+  - focused policy, Chat projection, renderer presentation, and design suites:
+    4 files / 207 tests passed;
+  - `npm run verify`: 242 files / 2,490 tests passed; production build, Agent
+    evaluations (26/26), and Memory evaluations (2/2) passed;
+  - `npm run smoke:prod`: a clean Electron process rendered Agent Chat UI;
+  - `npm run harness:check` and `git diff --check`: passed;
+  - real Electron UI: selecting Goal returned `goal=true` and `auto=true`, the
+    automatic-approval control remained locked, and Debate rendered aligned
+    A/B/C responsibility cards plus the one-click unified-model action.
+
+## 2026-08-03 - P67 Session Work Lineage and Recovery Projection
+
+- Diagnosed the reported contradiction from the durable records, not only the
+  renderer: the confirmed Plan and its Goal stopped at 15:50, while the 15:52
+  instruction was routed into an unrelated ordinary Chat run that succeeded
+  at 15:53. Both records were individually true, but no shared lineage or
+  canonical session projection existed.
+- Split lifecycle roles explicitly. `activeGoalId` now means only a live Goal;
+  stalled, blocked, and failed Goals are retained as `recoveryGoal`. A shared
+  session-work projection chooses one primary source for sidebar, status,
+  progress, and context while keeping recovery history separately actionable.
+- Expanded continuation intent beyond prefix matching. Phrases such as
+  `按照你的建议，把接下来的工作推进完成` now call `retry` on the same Goal
+  instead of creating a new Goal or falling through to ordinary Chat, so the
+  original Plan, milestones, acceptance state, and audit lineage remain bound.
+- Removed stale-Goal display priority. A later successful Chat run renders as
+  completed; the older stopped Goal is labeled `待恢复目标` and no longer
+  overwrites the status bar or progress list. Reloaded terminal messages use a
+  concise result plus next-action summary while raw events remain auditable.
+- Made acceptance execution roots explicit. Plan commands infer a safe common
+  artifact root from milestone targetRefs and exit-0 checks run through
+  `test_run` with that boundary-checked workspaceRoot. The reproduced
+  `evals/evals.json` command therefore runs in `cross-border-selection`
+  instead of its parent workspace.
+- Regression evidence:
+  - focused session projection, continuation, persistence, container, planner,
+    translation, activity restore, and renderer suites: 10 files / 320 tests;
+  - `npm test -- --maxWorkers=1`: 243 files / 2,498 tests passed;
+    production build passed; Agent evaluations 26/26 and Memory evaluations
+    2/2 passed;
+  - `npm run smoke:prod`, `npm run harness:check`, and `git diff --check` passed;
+  - the real persisted screenshot session projects primary
+    `chat/completed@2026-08-02T15:53:07.849Z` and retains
+    `goal_from_plan_9cd114be-3913-4584-9279-2170fe719e42` only as recovery.
+- Parallel verification also reproduced an existing dual-storage test teardown
+  race (`ENOTEMPTY` once and a lagging JSON sidecar once). Both isolated tests
+  passed immediately, and the single-worker full suite passed; no affected
+  storage code is part of P67.
+
+## 2026-08-03 - P68 Session Runtime Context and Progress Projection
+
+- Replaced renderer-owned conversation replay with one main-process authority.
+  Durable session history is now always loaded from `ChatSessionStore`; a stale
+  renderer history payload cannot enter a new or switched session.
+- Moved session-memory isolation into the memory search boundary before ranking.
+  A Chat run can recall only its own `session` memories plus global non-session
+  memory, with a second defensive filter at prompt assembly.
+- Added a typed runtime context projection shared by ordinary Chat and Goal
+  runs. It reports the true model context budget, estimated occupancy, message
+  counts, compaction count and latest compaction. The shared loop and both
+  scheduled-task compatibility runtimes now use the same budget resolver, so
+  known model context windows are never confused with maximum output tokens.
+- Added cumulative session token accounting across Chat, Plan, and Goal usage,
+  deduplicating planning stages and Debate rounds by run id. The right rail now
+  shows total tokens, usage breakdown, independent scope, context occupancy,
+  entered messages, and compaction history alongside the existing objective,
+  Plan-mode, subtask, and progress projections.
+- Replaced raw thinking/tool disclosures with a bounded public progress stream.
+  The main conversation surfaces only key progress, concise decision summaries,
+  waits, failures, and context compaction. Tool calls/results and raw stream
+  reasoning remain internal/auditable and are not rendered by default; explicit
+  approval prompts remain available when a user decision is required.
+- Regression evidence:
+  - focused isolation, accounting, Chat, shared and legacy Agent runtimes,
+    Goal, memory, model, container, and renderer suites: 17 files / 568 tests
+    passed;
+  - `npm run verify`: 245 files / 2,510 tests passed; production build passed;
+    Agent evaluations 26/26 and Memory evaluations 2/2 passed;
+  - `npm run smoke:prod`, `npm run harness:check`, and `git diff --check`
+    passed on `codex/debug`.
+
+## 2026-08-03 - P69 Goal Acceptance Execution Contract
+
+- Reconstructed the reported failure from the persisted Plan, Goal, ledger,
+  six run trajectories, and tool audit. The artifact was valid and repeated
+  Python, Node, and jq checks exited 0, but the acceptance validator replayed
+  the frozen `python3 -c` command through `shell_exec`. Authorization treated
+  the semicolon inside the quoted Python program as a Shell control operator,
+  classified the resulting denial as `command_failed`, and stopped the Goal
+  after three identical repair fingerprints.
+- Replaced the split command-verification paths with one typed execution
+  contract. Both `test_passes` and historical `command_exit_code` checks now
+  resolve and enforce `workspaceRoot`, execute through `test_run`, and compare
+  the observed exit code; nonzero expected exits remain supported without an
+  unscoped Shell fallback.
+- Unified Shell analysis for `shell_exec` and `test_run` across authorization
+  and execution. Quoted interpreter source is parsed correctly, while network,
+  path-escape, opaque-command, and exact-authorization defenses remain active
+  for both command-capable tools.
+- Separated deliverable failures from acceptance infrastructure failures.
+  Observed exit mismatches remain repairable `command_failed`/`test_failed`
+  results; authorization, sandbox, runner-start, and missing-runner failures
+  become `validator_unavailable`, so the controller does not ask the model to
+  rewrite a correct artifact until the Goal stalls.
+- Canonicalized command checks at both Plan and Goal boundaries, including
+  explicit `workspaceRoot: "."`, inferred artifact roots, Plan-confirmed
+  milestone criteria, and nonzero-exit `cd` commands. Persisted older Goals do
+  not require migration because runtime evaluation is backward compatible.
+- Replay evidence:
+  - loaded the exact persisted
+    `goal_from_plan_efa25e80-31e8-4ac9-ab28-7c483451c908` record without edits;
+  - all four milestone checks passed;
+  - historical `milestone_1_check_4` remained `command_exit_code` and returned
+    `command_exit_matched` with exit code 0.
+- Verification evidence:
+  - focused acceptance, authorization, planner, translation, runtime, native
+    runner, and Goal service suites: 12 files / 391 tests passed;
+  - `npm run verify`: 245 files / 2,520 tests passed; production build passed;
+    Agent evaluations 26/26 and Memory evaluations 2/2 passed;
+  - `npm run smoke:prod`, `npm run harness:check`, and `git diff --check`
+    passed on `codex/debug`.

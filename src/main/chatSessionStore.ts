@@ -8,6 +8,7 @@ import type {
   ChatMessageSearchResult,
   ChatMessageRecord,
   ChatSessionGoalSummary,
+  ChatSessionContextSnapshot,
   ChatSessionActivitySnapshot,
   ChatSessionListItem,
   ChatSessionRecord,
@@ -20,6 +21,12 @@ import type {
   SkillUserInputRequest,
 } from "../shared/chat";
 import type { ChatOutputPart } from "../shared/chatOutput";
+import {
+  deriveChatSessionWork,
+  getActiveGoalSummary,
+  getRecoveryGoalSummary,
+  isLiveGoalStatus,
+} from "../shared/chatSessionWork";
 
 type StoredChatSessions = {
   schemaVersion: 1;
@@ -335,6 +342,9 @@ export function createChatSessionStore(options: {
           session.activity?.selectedSkillName;
         return {
           ...session,
+          ...(normalizedEvent.context
+            ? { context: normalizedEvent.context }
+            : {}),
           activity: {
             updatedAt: normalizedEvent.createdAt,
             statusEvents,
@@ -527,9 +537,8 @@ function createSession(options: {
 }
 
 function toListItem(session: ChatSessionRecord): ChatSessionListItem {
-  const activeGoal = session.goalSummaries?.find(
-    (goal) => goal.id === session.activeGoalId,
-  );
+  const activeGoal = getActiveGoalSummary(session);
+  const recoveryGoal = getRecoveryGoalSummary(session);
   return {
     id: session.id,
     title: session.title,
@@ -540,9 +549,12 @@ function toListItem(session: ChatSessionRecord): ChatSessionListItem {
       ? { workspaceSummary: session.workspaceSummary }
       : {}),
     ...(activeGoal ? { activeGoal } : {}),
+    ...(recoveryGoal ? { recoveryGoal } : {}),
+    work: deriveChatSessionWork(session),
     ...(session.archivedAt ? { archivedAt: session.archivedAt } : {}),
     lastAssistantMessageAt: getLastAssistantMessageAt(session),
     ...(session.tokenUsage ? { tokenUsage: session.tokenUsage } : {}),
+    ...(session.context ? { context: session.context } : {}),
     updatedAt: session.updatedAt,
   };
 }
@@ -570,7 +582,7 @@ async function quarantineCorruptJsonFile(filePath: string): Promise<string | nul
 }
 
 function normalizeStoredSession(session: ChatSessionRecord): ChatSessionRecord {
-  const activeGoalId = session.activeGoalId
+  const requestedActiveGoalId = session.activeGoalId
     ? String(session.activeGoalId)
     : undefined;
   const goalIds = Array.isArray(session.goalIds)
@@ -579,6 +591,12 @@ function normalizeStoredSession(session: ChatSessionRecord): ChatSessionRecord {
   const goalSummaries = Array.isArray(session.goalSummaries)
     ? session.goalSummaries.map(normalizeGoalSummary)
     : [];
+  const activeGoalId = goalSummaries.some(
+    (summary) =>
+      summary.id === requestedActiveGoalId && isLiveGoalStatus(summary.status),
+  )
+    ? requestedActiveGoalId
+    : undefined;
   const workspaceId = normalizeOptionalString(session.workspaceId);
   const workspaceSummary = normalizeChatWorkspaceSummary(session.workspaceSummary);
   return {
@@ -595,6 +613,9 @@ function normalizeStoredSession(session: ChatSessionRecord): ChatSessionRecord {
     ...(goalSummaries.length ? { goalSummaries } : {}),
     ...(session.activity
       ? { activity: normalizeActivitySnapshot(session.activity) }
+      : {}),
+    ...(normalizeContextSnapshot(session.context)
+      ? { context: normalizeContextSnapshot(session.context) }
       : {}),
     ...(session.archivedAt ? { archivedAt: String(session.archivedAt) } : {}),
     ...(session.tokenUsage
@@ -682,6 +703,54 @@ function normalizeStatusEvent(event: ChatTaskStatusEvent): ChatTaskStatusEvent {
     ...(normalizeStatusPayload(event.payload)
       ? { payload: normalizeStatusPayload(event.payload) }
       : {}),
+    ...(normalizeContextSnapshot(event.context)
+      ? { context: normalizeContextSnapshot(event.context) }
+      : {}),
+  };
+}
+
+function normalizeContextSnapshot(
+  value: unknown,
+): ChatSessionContextSnapshot | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const snapshot = value as Partial<ChatSessionContextSnapshot>;
+  if (snapshot.isolation !== "session_plus_global_memory") {
+    return undefined;
+  }
+  const lastCompaction = snapshot.lastCompaction;
+  const normalizedCompaction =
+    lastCompaction &&
+    (lastCompaction.strategy === "summarize" ||
+      lastCompaction.strategy === "rebuild" ||
+      lastCompaction.strategy === "summarize-degraded")
+      ? {
+          strategy: lastCompaction.strategy,
+          beforeMessages: normalizeCount(lastCompaction.beforeMessages),
+          afterMessages: normalizeCount(lastCompaction.afterMessages),
+          beforeTokens: normalizeCount(lastCompaction.beforeTokens),
+          afterTokens: normalizeCount(lastCompaction.afterTokens),
+          compactedAt: String(lastCompaction.compactedAt ?? new Date(0).toISOString()),
+        }
+      : undefined;
+  const tokenBudget = Math.max(1, normalizeCount(snapshot.tokenBudget));
+  const estimatedTokens = normalizeCount(snapshot.estimatedTokens);
+  const contextWindow = normalizeOptionalPositiveCount(snapshot.contextWindow);
+  return {
+    isolation: "session_plus_global_memory",
+    estimatedTokens,
+    tokenBudget,
+    occupancyRatio: Math.min(1, estimatedTokens / tokenBudget),
+    messageCount: normalizeCount(snapshot.messageCount),
+    compactionCount: normalizeCount(snapshot.compactionCount),
+    ...(contextWindow ? { contextWindow } : {}),
+    ...(normalizedCompaction ? { lastCompaction: normalizedCompaction } : {}),
+    sessionMessageCount: normalizeCount(snapshot.sessionMessageCount),
+    historyMessageCount: normalizeCount(snapshot.historyMessageCount),
+    recalledSessionMemories: normalizeCount(snapshot.recalledSessionMemories),
+    recalledGlobalMemories: normalizeCount(snapshot.recalledGlobalMemories),
+    updatedAt: String(snapshot.updatedAt ?? new Date(0).toISOString()),
   };
 }
 
@@ -751,6 +820,7 @@ function normalizeStatusEventState(
     state === "memory" ||
     state === "memory_scope" ||
     state === "history" ||
+    state === "context" ||
     state === "model" ||
     state === "reasoning" ||
     state === "streaming" ||
@@ -997,6 +1067,7 @@ function normalizeGoalSummary(goal: ChatSessionGoalSummary): ChatSessionGoalSumm
     id: String(goal.id ?? ""),
     description: String(goal.description ?? ""),
     status: goal.status,
+    ...(goal.updatedAt ? { updatedAt: String(goal.updatedAt) } : {}),
   };
 }
 
@@ -1036,6 +1107,17 @@ function normalizeOptionalString(value: unknown): string | undefined {
   return normalized ? normalized : undefined;
 }
 
+function normalizeCount(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(0, Math.floor(value))
+    : 0;
+}
+
+function normalizeOptionalPositiveCount(value: unknown): number | undefined {
+  const normalized = normalizeCount(value);
+  return normalized > 0 ? normalized : undefined;
+}
+
 function compareSessionsForList(
   left: ChatSessionRecord,
   right: ChatSessionRecord,
@@ -1068,12 +1150,20 @@ function normalizeTokenUsage(
   const promptTokens = normalizeOptionalTokenCount(usage.promptTokens);
   const completionTokens = normalizeOptionalTokenCount(usage.completionTokens);
   const totalTokens = Math.max(0, Math.floor(Number(usage.totalTokens) || 0));
+  const breakdown = usage.breakdown
+    ? {
+        chatTokens: normalizeCount(usage.breakdown.chatTokens),
+        planTokens: normalizeCount(usage.breakdown.planTokens),
+        goalTokens: normalizeCount(usage.breakdown.goalTokens),
+      }
+    : undefined;
 
   return {
     totalTokens,
     ...(promptTokens !== undefined ? { promptTokens } : {}),
     ...(completionTokens !== undefined ? { completionTokens } : {}),
     estimated: Boolean(usage.estimated),
+    ...(breakdown ? { breakdown } : {}),
   };
 }
 
@@ -1119,7 +1209,11 @@ function attachGoalToSession(
 
   return {
     ...session,
-    activeGoalId: normalizedGoal.id,
+    ...(isLiveGoalStatus(normalizedGoal.status)
+      ? { activeGoalId: normalizedGoal.id }
+      : session.activeGoalId === normalizedGoal.id
+        ? { activeGoalId: undefined }
+        : {}),
     goalIds,
     goalSummaries,
     updatedAt,

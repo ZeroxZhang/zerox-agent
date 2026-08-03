@@ -84,7 +84,22 @@ describe("agent goal context", () => {
       goal,
       [
         { role: "user", content: "Read the large file." },
-        { role: "tool", content: JSON.stringify(largeObservation) },
+        {
+          role: "assistant",
+          content: "Reading it now.",
+          tool_calls: [
+            {
+              id: "call_file_read",
+              type: "function" as const,
+              function: { name: "file_read", arguments: "{}" },
+            },
+          ],
+        },
+        {
+          role: "tool",
+          tool_call_id: "call_file_read",
+          content: JSON.stringify(largeObservation),
+        },
         ...noisyHistory(),
       ],
       260,
@@ -118,7 +133,17 @@ describe("agent goal context", () => {
     const assembled = context.assemble(
       createGoal([milestone("running_report", [], "running")]),
       [
-        { role: "assistant", content: "Reading the current implementation." },
+        {
+          role: "assistant",
+          content: "Reading the current implementation.",
+          tool_calls: [
+            {
+              id: "call_1",
+              type: "function" as const,
+              function: { name: "file_read", arguments: "{}" },
+            },
+          ],
+        },
         { role: "tool", tool_call_id: "call_1", content: "tool result" },
       ],
       600,
@@ -126,7 +151,17 @@ describe("agent goal context", () => {
 
     expect(assembled.messages).toEqual(
       expect.arrayContaining([
-        { role: "assistant", content: "Reading the current implementation." },
+        {
+          role: "assistant",
+          content: "Reading the current implementation.",
+          tool_calls: [
+            {
+              id: "call_1",
+              type: "function" as const,
+              function: { name: "file_read", arguments: "{}" },
+            },
+          ],
+        },
         { role: "tool", tool_call_id: "call_1", content: "tool result" },
       ]),
     );

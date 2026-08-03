@@ -412,12 +412,73 @@ describe("agent goal acceptance", () => {
       passed: true,
       evidenceRefs: ["tool_shell_1"],
     });
-    expect(toolCalls).toEqual([
-      {
-        toolName: "shell_exec",
-        args: { command: "npm test -- src/shared/agentGoal.test.ts" },
+    expect(toolCalls).toEqual([{
+      toolName: "test_run",
+      args: {
+        command: "npm test -- src/shared/agentGoal.test.ts",
+        workspaceRoot: workspacePath,
       },
-    ]);
+    }]);
+  });
+
+  it("accepts an expected nonzero exit observed by the typed runner", async () => {
+    const acceptance = createAgentGoalAcceptance();
+    const command = "node scripts/expect-failure.js";
+    const result = await acceptance.evaluate(
+      createMilestone([
+        check("check_expected_failure", "command_exit_code", {
+          command,
+          expectedExitCode: 2,
+          workspaceRoot: ".",
+        }),
+      ]),
+      createContext({
+        toolResults: [{
+          ok: false,
+          error: "test_run failed with exit code 2.",
+          errorDetails: { kind: "exit", exitCode: 2 },
+        }],
+      }),
+    );
+
+    expect(result.accepted).toBe(true);
+    expect(result.checkResults[0]).toMatchObject({
+      code: "command_exit_matched",
+      passed: true,
+    });
+    expect(toolCalls).toEqual([{
+      toolName: "test_run",
+      args: { command, workspaceRoot: workspacePath },
+    }]);
+  });
+
+  it("classifies a command runner authorization failure as acceptance unavailable", async () => {
+    const acceptance = createAgentGoalAcceptance();
+    const result = await acceptance.evaluate(
+      createMilestone([
+        check("check_authorization", "command_exit_code", {
+          command: "python3 -c \"print('safe')\"",
+          expectedExitCode: 0,
+        }),
+      ]),
+      createContext({
+        toolResults: [{
+          ok: false,
+          error: "Denied by runtime policy.",
+          errorDetails: { kind: "authorization_denied" },
+        }],
+      }),
+    );
+
+    expect(result).toMatchObject({
+      accepted: false,
+      verdict: "acceptance_unavailable",
+      failureClass: "validator_unavailable",
+      checkResults: [{
+        code: "command_executor_unavailable",
+        failureClass: "validator_unavailable",
+      }],
+    });
   });
 
   it("does not mistake quoted program comparisons for shell redirection", async () => {
@@ -442,9 +503,10 @@ describe("agent goal acceptance", () => {
     );
 
     expect(result.accepted).toBe(true);
-    expect(toolCalls).toEqual([
-      { toolName: "shell_exec", args: { command } },
-    ]);
+    expect(toolCalls).toEqual([{
+      toolName: "test_run",
+      args: { command, workspaceRoot: workspacePath },
+    }]);
   });
 
   it("retries an unavailable python executable once with the authorized python3 variant", async () => {
@@ -479,10 +541,16 @@ describe("agent goal acceptance", () => {
       detail: expect.stringContaining('portable "python3" fallback'),
     });
     expect(toolCalls).toEqual([
-      { toolName: "shell_exec", args: { command } },
       {
-        toolName: "shell_exec",
-        args: { command: command.replace(/^python /, "python3 ") },
+        toolName: "test_run",
+        args: { command, workspaceRoot: workspacePath },
+      },
+      {
+        toolName: "test_run",
+        args: {
+          command: command.replace(/^python /, "python3 "),
+          workspaceRoot: workspacePath,
+        },
       },
     ]);
   });
@@ -507,7 +575,10 @@ describe("agent goal acceptance", () => {
     );
 
     expect(result.accepted).toBe(false);
-    expect(toolCalls).toEqual([{ toolName: "shell_exec", args: { command } }]);
+    expect(toolCalls).toEqual([{
+      toolName: "test_run",
+      args: { command, workspaceRoot: workspacePath },
+    }]);
   });
 
   it("aborts a permissioned command tool when its validator deadline expires", async () => {
@@ -630,12 +701,13 @@ describe("agent goal acceptance", () => {
     );
 
     expect(result.accepted).toBe(true);
-    expect(toolCalls).toEqual([
-      {
-        toolName: "shell_exec",
-        args: { command: "cat ~/桌面/report.md" },
+    expect(toolCalls).toEqual([{
+      toolName: "test_run",
+      args: {
+        command: "cat ~/桌面/report.md",
+        workspaceRoot: workspacePath,
       },
-    ]);
+    }]);
   });
 
   it.each([
@@ -662,12 +734,10 @@ describe("agent goal acceptance", () => {
     );
 
     expect(result.accepted).toBe(true);
-    expect(toolCalls).toEqual([
-      {
-        toolName: "shell_exec",
-        args: { command },
-      },
-    ]);
+    expect(toolCalls).toEqual([{
+      toolName: "test_run",
+      args: { command, workspaceRoot: workspacePath },
+    }]);
   });
 
   it("runs test_passes checks through the native test_run tool", async () => {

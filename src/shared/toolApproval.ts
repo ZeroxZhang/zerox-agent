@@ -43,6 +43,31 @@ export type ToolApprovalModeState = {
   autoApprovalLocked: boolean;
 };
 
+export type ToolApprovalModeInputs = {
+  standaloneAutoApprovalEnabled: boolean;
+  goalModePreferenceEnabled: boolean;
+  activeGoalCount: number;
+};
+
+/**
+ * Goal autonomy is a product invariant, not a renderer convenience: whenever
+ * Goal mode is selected or a Goal is active, automatic approval is enabled
+ * and locked. Policy-B operations still require explicit confirmation in the
+ * authorization layer.
+ */
+export function deriveToolApprovalModeState(
+  input: ToolApprovalModeInputs,
+): ToolApprovalModeState {
+  const goalModeEnabled =
+    input.goalModePreferenceEnabled || input.activeGoalCount > 0;
+  return {
+    autoApprovalEnabled:
+      goalModeEnabled || input.standaloneAutoApprovalEnabled,
+    goalModeEnabled,
+    autoApprovalLocked: goalModeEnabled,
+  };
+}
+
 export type ResolveToolApprovalInput = {
   id: string;
   approved: boolean;

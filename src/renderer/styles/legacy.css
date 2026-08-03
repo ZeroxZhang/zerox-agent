@@ -2097,14 +2097,17 @@ nav {
   font-size: 0.625rem; font-weight: var(--font-medium); line-height: 1.2;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.goal-session-badge.is-achieved {
+.goal-session-badge.is-achieved,
+.goal-session-badge.is-completed {
   color: var(--status-success-text);
   background: var(--status-success-bg);
   border-color: var(--status-success-border);
 }
 .goal-session-badge.is-waiting_for_review,
 .goal-session-badge.is-stopped_budget,
-.goal-session-badge.is-stopped_stalled {
+.goal-session-badge.is-stopped_stalled,
+.goal-session-badge.is-paused,
+.goal-session-badge.is-recovery {
   color: var(--status-warning-text);
   background: var(--status-warning-bg);
   border-color: var(--status-warning-border);

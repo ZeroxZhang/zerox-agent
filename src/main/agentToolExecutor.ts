@@ -230,19 +230,51 @@ function validateToolExecutionRequest(
     };
   }
 
-  if (request.toolName === "shell_exec") {
+  if (request.toolName === "shell_exec" || request.toolName === "test_run") {
+    const toolName = request.toolName;
     const command = String(request.args.command ?? "");
+    const requestedWorkspaceRoot = String(
+      request.args.workspaceRoot ?? runContext.workspaceRoot,
+    );
+    if (
+      toolName === "test_run" &&
+      !validatePathInsideRunContext(requestedWorkspaceRoot, runContext, "read").ok
+    ) {
+      return {
+        ok: false,
+        error: `test_run refused path outside the run sandbox: ${requestedWorkspaceRoot}`,
+        errorDetails: { kind: "sandbox_denied", toolName },
+      };
+    }
+    const commandCwd =
+      toolName === "test_run"
+        ? path.isAbsolute(requestedWorkspaceRoot)
+          ? path.resolve(requestedWorkspaceRoot)
+          : path.resolve(runContext.workspaceRoot, requestedWorkspaceRoot)
+        : runContext.workspaceRoot;
     const shellPlan = analyzeShell(command, {
-      cwd: runContext.workspaceRoot,
+      cwd: commandCwd,
     });
     if (runContext.sandbox.shell === "disabled") {
-      return { ok: false, error: "shell_exec refused by disabled shell sandbox." };
+      return {
+        ok: false,
+        error: `${toolName} refused by disabled shell sandbox.`,
+        errorDetails: { kind: "sandbox_denied", toolName },
+      };
     }
-    if (runContext.sandbox.mode === "read_only") {
-      return { ok: false, error: "shell_exec refused by read-only run sandbox." };
+    if (toolName === "shell_exec" && runContext.sandbox.mode === "read_only") {
+      return {
+        ok: false,
+        error: "shell_exec refused by read-only run sandbox.",
+        errorDetails: { kind: "sandbox_denied", toolName },
+      };
     }
     if (runContext.sandbox.network === "none" && shellPlan.networkAccess) {
-      return { ok: false, error: "shell_exec refused by network-disabled run sandbox." };
+      return {
+        ok: false,
+        error: `${toolName} refused by network-disabled run sandbox.`,
+        errorDetails: { kind: "sandbox_denied", toolName },
+      };
     }
     if (
       !runContext.sandbox.allowWorkspaceEscape &&
@@ -251,7 +283,8 @@ function validateToolExecutionRequest(
     ) {
       return {
         ok: false,
-        error: "shell_exec refused opaque interpreter command in workspace-only sandbox.",
+        error: `${toolName} refused opaque interpreter command in workspace-only sandbox.`,
+        errorDetails: { kind: "sandbox_denied", toolName },
       };
     }
     if (!runContext.sandbox.allowWorkspaceEscape) {
@@ -263,7 +296,8 @@ function validateToolExecutionRequest(
       if (outsidePath) {
         return {
           ok: false,
-          error: `shell_exec refused path outside the run sandbox: ${outsidePath}`,
+          error: `${toolName} refused path outside the run sandbox: ${outsidePath}`,
+          errorDetails: { kind: "sandbox_denied", toolName },
         };
       }
     }

@@ -20,7 +20,10 @@ import { ScheduledTasksPanel } from "./components/ScheduledTasksPanel";
 import { SkillLibraryPanel } from "./components/SkillLibraryPanel";
 import { ToolsPanel } from "./components/ToolsPanel";
 import { getAppMeta, type AppMeta } from "../shared/appMeta";
-import type { ChatSessionListItem } from "../shared/chat";
+import type {
+  ChatSessionListItem,
+  ChatSessionWorkSummary,
+} from "../shared/chat";
 import type { AppUpdateState } from "../shared/appUpdate";
 import { buildAgentDataBoundary } from "../shared/dataBoundary";
 import { getMaterialNavigationIcon } from "../shared/materialNavigation";
@@ -55,6 +58,7 @@ const fallbackChatSessions: ChatSessionListItem[] = [
     title: "当前会话",
     summary: "直接发指令给本地智能体",
     messageCount: 0,
+    work: { source: "idle", status: "idle", updatedAt: fallbackSessionTimestamp },
     updatedAt: fallbackSessionTimestamp,
   },
   {
@@ -62,6 +66,7 @@ const fallbackChatSessions: ChatSessionListItem[] = [
     title: "文件整理会话",
     summary: "整理下载目录并写报告",
     messageCount: 2,
+    work: { source: "idle", status: "idle", updatedAt: fallbackSessionTimestamp },
     tokenUsage: { totalTokens: 1280, estimated: true },
     updatedAt: fallbackSessionTimestamp,
   },
@@ -70,6 +75,7 @@ const fallbackChatSessions: ChatSessionListItem[] = [
     title: "资料调研会话",
     summary: "搜索、抓取、总结网页",
     messageCount: 2,
+    work: { source: "idle", status: "idle", updatedAt: fallbackSessionTimestamp },
     tokenUsage: { totalTokens: 2430, estimated: true },
     updatedAt: fallbackSessionTimestamp,
   },
@@ -848,6 +854,7 @@ function SidebarSessionRow(props: {
 }) {
   const { session } = props;
   const isArchived = Boolean(session.archivedAt);
+  const workBadge = getSessionWorkBadge(session.work);
 
   return (
     <div
@@ -879,9 +886,9 @@ function SidebarSessionRow(props: {
               {formatTokenUsage(session.tokenUsage)}
             </span>
           </span>
-          {session.activeGoal ? (
-            <span className={`goal-session-badge is-${session.activeGoal.status}`}>
-              {translateSidebarGoalStatus(session.activeGoal.status)}
+          {workBadge ? (
+            <span className={`goal-session-badge is-${workBadge.tone}`}>
+              {workBadge.label}
             </span>
           ) : null}
         </span>
@@ -1018,11 +1025,19 @@ function toChatSessionListItem(session: ChatSidebarSession): ChatSessionListItem
     summary: session.summary,
     messageCount: session.messageCount ?? 0,
     ...(session.activeGoal ? { activeGoal: session.activeGoal } : {}),
+    ...(session.recoveryGoal ? { recoveryGoal: session.recoveryGoal } : {}),
+    work:
+      session.work ?? {
+        source: "idle",
+        status: "idle",
+        updatedAt: session.updatedAt,
+      },
     ...(session.archivedAt ? { archivedAt: session.archivedAt } : {}),
     ...(session.lastAssistantMessageAt
       ? { lastAssistantMessageAt: session.lastAssistantMessageAt }
       : {}),
     ...(session.tokenUsage ? { tokenUsage: session.tokenUsage } : {}),
+    ...(session.context ? { context: session.context } : {}),
     updatedAt: session.updatedAt,
   };
 }
@@ -1115,4 +1130,30 @@ function translateSidebarGoalStatus(
     canceled: "已取消",
   };
   return labels[status];
+}
+
+function getSessionWorkBadge(
+  work: ChatSessionWorkSummary,
+): { label: string; tone: string } | null {
+  if (work.source === "idle") return null;
+  if (work.source === "goal") {
+    if (work.relationship === "recovery") {
+      return { label: "目标待恢复", tone: "recovery" };
+    }
+    return {
+      label: translateSidebarGoalStatus(work.status),
+      tone: work.status,
+    };
+  }
+  const labels: Record<
+    Extract<ChatSessionWorkSummary, { source: "chat" }>["status"],
+    string
+  > = {
+    working: "执行中",
+    paused: "等待继续",
+    completed: "已完成",
+    failed: "执行失败",
+    canceled: "已取消",
+  };
+  return { label: labels[work.status], tone: work.status };
 }

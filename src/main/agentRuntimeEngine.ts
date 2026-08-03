@@ -80,6 +80,7 @@ import { createRuntimeContextSnapshotForRun } from "./runtimeContextFactory";
 import { summarizeAgentRuntimeContextSnapshot } from "../shared/agentRuntimeContext";
 import type { ExecutionContextMemoryScope } from "../shared/executionContextPackage";
 import { runAgentLoop as runSharedAgentLoop } from "./agentLoop";
+import { resolveContextTokenBudget } from "../shared/contextUsage";
 
 export type AgentRuntimeModelProfile = {
   baseUrl: string;
@@ -87,6 +88,7 @@ export type AgentRuntimeModelProfile = {
   model: string;
   temperature: number;
   maxTokens: number;
+  contextWindow?: number;
   modelCapabilities?: ModelCapabilities;
 };
 
@@ -501,6 +503,13 @@ export function createAgentRuntimeEngine(options: {
           appendObserved("model_retry", event);
         },
         onContextCompacted(event) {
+          const runEvent = createEvent(
+            "info",
+            `上下文已压缩：${event.estimatedTokens} → ${event.compactedTokens} tokens`,
+            { ...event },
+          );
+          events.push(runEvent);
+          onEvent?.(runEvent);
           appendObserved("context_compacted", event);
         },
         onToolCall(toolName, args, event) {
@@ -660,7 +669,23 @@ export function createAgentRuntimeEngine(options: {
           getToolDefinitions(options.toolExecutor),
           task,
         );
-    const contextTokenBudget = Math.max(1, Math.floor(profile.maxTokens * 0.7));
+    const contextTokenBudget = resolveContextTokenBudget({
+      contextWindow: profile.contextWindow,
+      maxOutputTokens: profile.maxTokens,
+    });
+
+    function publishContextCompaction(
+      estimatedTokens: number,
+      compactedTokens: number,
+    ) {
+      const event = createEvent(
+        "info",
+        `上下文已压缩：${estimatedTokens} → ${compactedTokens} tokens`,
+        { estimatedTokens, compactedTokens, tokenBudget: contextTokenBudget },
+      );
+      events.push(event);
+      onEvent?.(event);
+    }
 
     async function compactMessagesBeforeModelRequest() {
       const estimatedTokens = contextManager.estimateTokens(messages);
@@ -673,6 +698,7 @@ export function createAgentRuntimeEngine(options: {
       // exists, so this is byte-equivalent to the legacy path unless a markdown
       // checkpoint is present (rebuild). Absent strategy → legacy path.
       if (options.compactionStrategy) {
+        const originalMessageCount = messages.length;
         const result = await options.compactionStrategy.compact({
           messages,
           budget: contextTokenBudget,
@@ -683,6 +709,8 @@ export function createAgentRuntimeEngine(options: {
           return;
         }
         messages = result.messages;
+        const compactedTokens = contextManager.estimateTokens(messages);
+        publishContextCompaction(estimatedTokens, compactedTokens);
         if (result.strategy === "rebuild" || result.strategy === "summarize-degraded") {
           await appendTrajectory(current.runId, "context_rebuilt", {
             strategy: result.strategy,
@@ -700,10 +728,12 @@ export function createAgentRuntimeEngine(options: {
           }, current.runContext);
         } else {
           await appendTrajectory(current.runId, "context_compacted", {
-            originalMessageCount: messages.length,
+            originalMessageCount,
             compactedMessageCount: messages.length,
             estimatedTokens,
+            compactedTokens,
             tokenBudget: contextTokenBudget,
+            strategy: result.strategy,
           }, {
             containsApiKey: false,
             containsFileContent: false,
@@ -723,11 +753,15 @@ export function createAgentRuntimeEngine(options: {
       }
 
       messages = compacted;
+      const compactedTokens = contextManager.estimateTokens(messages);
+      publishContextCompaction(estimatedTokens, compactedTokens);
       await appendTrajectory(current.runId, "context_compacted", {
         originalMessageCount,
         compactedMessageCount: messages.length,
         estimatedTokens,
+        compactedTokens,
         tokenBudget: contextTokenBudget,
+        strategy: "summarize",
       }, {
         containsApiKey: false,
         containsFileContent: false,
@@ -987,7 +1021,7 @@ export function createAgentRuntimeEngine(options: {
           {
             runContext: current.runContext,
             ...(signal ? { signal } : {}),
-            ...(toolName === "shell_exec"
+            ...(toolName === "shell_exec" || toolName === "test_run"
               ? { authorizedShellCommand: String(args.command ?? "") }
               : {}),
             toolResultReadScope: {

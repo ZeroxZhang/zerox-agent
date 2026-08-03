@@ -177,6 +177,7 @@ export type ResolvedModelBinding = {
   connectionId: string;
   providerKind: ProviderKind;
   modelId: string;
+  contextWindow?: number;
   revision: number;
   connectionRevision?: number;
   profileRevision?: number;

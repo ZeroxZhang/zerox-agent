@@ -652,40 +652,22 @@ async function evaluateCommandExitCode(
   }
 
   const expectedExitCode = Number(check.params.expectedExitCode ?? 0);
-  let result = await ctx.toolExecutor.execute({
-    toolName: "shell_exec",
-    args: { command },
-  }, { signal: ctx.signal });
-  throwIfAcceptanceAborted(ctx.signal);
-  const initialExitCode = getExitCode(result);
-  const fallbackCommand = getPython3AcceptanceFallback(command);
-  const usedPython3Fallback = Boolean(
-    !result.ok &&
-    fallbackCommand &&
-    shouldRetryAcceptanceWithPython3({
-      command,
-      exitCode: initialExitCode,
-      error: result.error,
-    }),
-  );
-  if (usedPython3Fallback && fallbackCommand) {
-    result = await ctx.toolExecutor.execute({
-      toolName: "shell_exec",
-      args: { command: fallbackCommand },
-    }, { signal: ctx.signal });
-    throwIfAcceptanceAborted(ctx.signal);
-  }
-  const exitCode = getExitCode(result);
-  const passed = result.ok && exitCode === expectedExitCode;
-  const detail = result.ok
-    ? `Command exited with ${exitCode}; expected ${expectedExitCode}.${
-        usedPython3Fallback
-          ? ' Used the portable "python3" fallback because "python" is unavailable.'
-          : ""
-      }`
-    : `Command execution failed${
-        usedPython3Fallback ? ' after the portable "python3" fallback' : ""
-      }: ${result.error}`;
+  const execution = await executeAcceptanceCommand(check, ctx, command);
+  if (!execution.ok) return execution.result;
+  const { result, exitCode, exitObserved, usedPython3Fallback } = execution;
+  const infrastructureUnavailable =
+    isAcceptanceCommandInfrastructureUnavailable(result, exitObserved);
+  const passed = exitObserved && exitCode === expectedExitCode;
+  const fallbackDetail = usedPython3Fallback
+    ? ' Used the portable "python3" fallback because "python" is unavailable.'
+    : "";
+  const detail = passed || exitObserved
+    ? `Command exited with ${exitCode}; expected ${expectedExitCode}.${fallbackDetail}`
+    : infrastructureUnavailable
+      ? `Command acceptance is unavailable: ${result.ok ? "unknown runner failure" : result.error}`
+      : `Command execution failed${
+          usedPython3Fallback ? ' after the portable "python3" fallback' : ""
+        }: ${result.ok ? "unknown execution failure" : result.error}`;
 
   return checkResult(
     check,
@@ -694,10 +676,16 @@ async function evaluateCommandExitCode(
     detail,
     passed
       ? "command_exit_matched"
-      : result.ok
+      : infrastructureUnavailable
+        ? "command_executor_unavailable"
+        : exitObserved
         ? "command_exit_mismatch"
         : "command_execution_failed",
-    passed ? undefined : "command_failed",
+    passed
+      ? undefined
+      : infrastructureUnavailable
+        ? "validator_unavailable"
+        : "command_failed",
   );
 }
 
@@ -719,34 +707,12 @@ async function evaluateTestPasses(
     return pathCheck;
   }
 
-  const requestedWorkspaceRoot = String(check.params.workspaceRoot ?? ctx.workspacePath);
-  const resolvedWorkspaceRoot = resolveWorkspacePath(
-    ctx.workspacePath,
-    requestedWorkspaceRoot,
-    extraRoots,
-    locationEnv,
-  );
-  if (!resolvedWorkspaceRoot) {
-    return checkResult(
-      check,
-      false,
-      [],
-      `workspaceRoot is outside the workspace: ${requestedWorkspaceRoot}`,
-      "test_outside_boundary",
-      "test_failed",
-    );
-  }
-
-  const result = await ctx.toolExecutor.execute({
-    toolName: "test_run",
-    args: {
-      command,
-      workspaceRoot: resolvedWorkspaceRoot,
-    },
-  }, { signal: ctx.signal });
-  throwIfAcceptanceAborted(ctx.signal);
-  const exitCode = getExitCode(result);
-  const passed = result.ok && exitCode === 0;
+  const execution = await executeAcceptanceCommand(check, ctx, command);
+  if (!execution.ok) return execution.result;
+  const { result, exitCode, exitObserved } = execution;
+  const infrastructureUnavailable =
+    isAcceptanceCommandInfrastructureUnavailable(result, exitObserved);
+  const passed = exitObserved && exitCode === 0;
 
   return checkResult(
     check,
@@ -754,10 +720,136 @@ async function evaluateTestPasses(
     getEvidenceRefs(result),
     passed
       ? "Test command passed."
-      : `Test command failed with exit code ${exitCode}.`,
-    passed ? "test_passed" : "test_exit_nonzero",
-    passed ? undefined : "test_failed",
+      : infrastructureUnavailable
+        ? `Test acceptance is unavailable: ${result.ok ? "unknown runner failure" : result.error}`
+        : exitObserved
+          ? `Test command failed with exit code ${exitCode}.`
+          : `Test command execution failed: ${result.ok ? "unknown execution failure" : result.error}`,
+    passed
+      ? "test_passed"
+      : infrastructureUnavailable
+        ? "test_executor_unavailable"
+        : exitObserved
+          ? "test_exit_nonzero"
+          : "test_execution_failed",
+    passed
+      ? undefined
+      : infrastructureUnavailable
+        ? "validator_unavailable"
+        : "test_failed",
   );
+}
+
+type AcceptanceCommandExecution =
+  | {
+      ok: true;
+      result: AgentToolExecutionResult;
+      exitCode: number;
+      exitObserved: boolean;
+      usedPython3Fallback: boolean;
+    }
+  | { ok: false; result: CheckResult };
+
+/**
+ * Command checks have one runtime contract: resolve a canonical workspace,
+ * authorize the exact command, and execute it through the typed test runner.
+ * command_exit_code differs from test_passes only in how the observed exit
+ * code is compared; neither kind falls back to an unscoped shell execution.
+ */
+async function executeAcceptanceCommand(
+  check: AcceptanceCheck,
+  ctx: AcceptanceContext,
+  command: string,
+): Promise<AcceptanceCommandExecution> {
+  const requestedWorkspaceRoot = String(
+    check.params.workspaceRoot ?? ctx.workspacePath,
+  );
+  const resolvedWorkspaceRoot = resolveWorkspacePath(
+    ctx.workspacePath,
+    requestedWorkspaceRoot,
+    getAllowedExtraRoots(ctx),
+    getAcceptanceLocationEnv(ctx),
+  );
+  if (!resolvedWorkspaceRoot) {
+    return {
+      ok: false,
+      result: checkResult(
+        check,
+        false,
+        [],
+        `workspaceRoot is outside the workspace: ${requestedWorkspaceRoot}`,
+        check.kind === "test_passes"
+          ? "test_outside_boundary"
+          : "command_outside_boundary",
+        "plan_structure_invalid",
+      ),
+    };
+  }
+
+  let result = await ctx.toolExecutor.execute({
+    toolName: "test_run",
+    args: { command, workspaceRoot: resolvedWorkspaceRoot },
+  }, { signal: ctx.signal });
+  throwIfAcceptanceAborted(ctx.signal);
+  const initialExitCode = getExitCode(result);
+  const fallbackCommand = getPython3AcceptanceFallback(command);
+  const usedPython3Fallback = Boolean(
+    !result.ok &&
+    fallbackCommand &&
+    shouldRetryAcceptanceWithPython3({
+      command,
+      exitCode: initialExitCode,
+      error: acceptanceCommandErrorText(result),
+    }),
+  );
+  if (usedPython3Fallback && fallbackCommand) {
+    result = await ctx.toolExecutor.execute({
+      toolName: "test_run",
+      args: { command: fallbackCommand, workspaceRoot: resolvedWorkspaceRoot },
+    }, { signal: ctx.signal });
+    throwIfAcceptanceAborted(ctx.signal);
+  }
+
+  return {
+    ok: true,
+    result,
+    exitCode: getExitCode(result),
+    exitObserved: hasObservedCommandExit(result),
+    usedPython3Fallback,
+  };
+}
+
+function hasObservedCommandExit(result: AgentToolExecutionResult): boolean {
+  if (result.ok) return true;
+  const kind = String(result.errorDetails?.kind ?? "");
+  return (
+    kind === "exit" ||
+    (!kind && typeof result.errorDetails?.exitCode === "number")
+  );
+}
+
+function isAcceptanceCommandInfrastructureUnavailable(
+  result: AgentToolExecutionResult,
+  exitObserved: boolean,
+): boolean {
+  if (result.ok || exitObserved) return false;
+  const kind = String(result.errorDetails?.kind ?? "");
+  return (
+    kind === "authorization_denied" ||
+    kind === "authorization_unavailable" ||
+    kind === "sandbox_denied" ||
+    kind === "spawn_error" ||
+    kind === "tool_unavailable" ||
+    !kind
+  );
+}
+
+function acceptanceCommandErrorText(result: AgentToolExecutionResult): string {
+  if (result.ok) return "";
+  return [
+    result.error,
+    String(result.errorDetails?.stderr ?? ""),
+  ].filter(Boolean).join("\n");
 }
 
 function checkCommandPaths(
@@ -777,7 +869,7 @@ function checkCommandPaths(
         ? "Command contains blocked shell redirection."
         : "Command contains blocked Shell control operator.",
       check.kind === "test_passes" ? "test_command_restricted" : "command_restricted",
-      check.kind === "test_passes" ? "test_failed" : "command_failed",
+      "plan_structure_invalid",
     );
   }
 
@@ -795,7 +887,7 @@ function checkCommandPaths(
         [],
         `Command references a path outside the workspace: ${token}`,
         check.kind === "test_passes" ? "test_outside_boundary" : "command_outside_boundary",
-        check.kind === "test_passes" ? "test_failed" : "command_failed",
+        "plan_structure_invalid",
       );
     }
   }

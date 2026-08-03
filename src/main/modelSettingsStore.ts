@@ -293,12 +293,18 @@ export function createModelSettingsStore(options: {
     const baseUrl =
       connection.values.baseUrl ||
       descriptor.fields.find((field) => field.key === "baseUrl")?.defaultValue;
+    const contextWindow = listModelCatalogEntries().find(
+      (entry) =>
+        entry.providerKind === connection.providerKind &&
+        entry.modelId === profile.modelId,
+    )?.contextWindow;
     return {
       binding: {
         profileId: profile.id,
         connectionId: connection.id,
         providerKind: connection.providerKind,
         modelId: profile.modelId,
+        ...(contextWindow ? { contextWindow } : {}),
         revision: pairRevisions(connection.revision, profile.revision),
         connectionRevision: connection.revision,
         profileRevision: profile.revision,

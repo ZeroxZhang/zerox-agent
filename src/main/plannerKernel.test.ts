@@ -11,6 +11,7 @@ import {
   applyPlanQualityGate,
   createPlanQualityReport,
   createPlanTaskProfile,
+  normalizePlanArtifactAcceptanceCommands,
   routePlannerSkill,
   shouldEscalatePlanInvestigation,
 } from "./plannerKernel";
@@ -447,6 +448,259 @@ describe("planner kernel v2", () => {
           message: "验收检查 id 重复：m1-test。",
         }),
       ]),
+    );
+  });
+
+  it("rewrites idiomatic cd-chained acceptance commands into params form", () => {
+    const artifact = planArtifact();
+    artifact.milestones[0]!.acceptanceChecks = [
+      {
+        id: "m1-test",
+        kind: "command_exit_code",
+        description: "运行单元测试验证全部通过。",
+        params: {
+          command:
+            "cd /workspace/app && PYTHONPATH=scripts python3 -m unittest discover -s tests -v",
+          expectedExitCode: 0,
+        },
+        requiresEvidence: false,
+      },
+    ];
+
+    const normalized = normalizePlanArtifactAcceptanceCommands(
+      artifact,
+      "/workspace",
+    );
+    const check = normalized.milestones[0]!.acceptanceChecks![0]!;
+    expect(check.kind).toBe("test_passes");
+    expect(check.params).toEqual({
+      command: "PYTHONPATH=scripts python3 -m unittest discover -s tests -v",
+      workspaceRoot: "/workspace/app",
+    });
+
+    // The normalized artifact passes the quality gate instead of blocking
+    // on the shell-control rule.
+    const report = createPlanQualityReport({
+      artifact: normalized,
+      profile: createPlanTaskProfile("修复登录代码并运行测试"),
+      brief: brief(),
+      evidence: [
+        {
+          id: "evidence_user_request",
+          kind: "user",
+          title: "用户需求",
+          summary: "修复登录代码并运行测试",
+        },
+      ],
+      workspaceRoot: "/workspace",
+      now: "2026-07-31T00:00:00.000Z",
+    });
+    expect(report.blockingIssues).toEqual([]);
+  });
+
+  it("keeps quoted relative cd targets inside the workspace", () => {
+    const artifact = planArtifact();
+    artifact.milestones[0]!.acceptanceChecks = [
+      {
+        id: "m1-test",
+        kind: "test_passes",
+        description: "运行子目录测试",
+        params: { command: 'cd "sub dir" && npm test' },
+        requiresEvidence: false,
+      },
+    ];
+
+    const normalized = normalizePlanArtifactAcceptanceCommands(
+      artifact,
+      "/workspace",
+    );
+    const check = normalized.milestones[0]!.acceptanceChecks![0]!;
+    expect(check.kind).toBe("test_passes");
+    expect(check.params).toEqual({
+      command: "npm test",
+      workspaceRoot: "/workspace/sub dir",
+    });
+  });
+
+  it("infers the artifact root for relative commands from milestone targets", () => {
+    const artifact = planArtifact();
+    artifact.milestones[0]!.targetRefs = [
+      "/workspace/cross-border-selection/scripts",
+      "/workspace/cross-border-selection/tests",
+      "/workspace/cross-border-selection/evals",
+    ];
+    artifact.milestones[0]!.acceptanceChecks = [
+      {
+        id: "eval-contract",
+        kind: "command_exit_code",
+        description: "校验 evals JSON",
+        params: {
+          command:
+            "python3 -c \"import json;d=json.load(open('evals/evals.json'));assert len(d['evals'])>=3\"",
+          expectedExitCode: 0,
+        },
+        requiresEvidence: false,
+      },
+    ];
+
+    const normalized = normalizePlanArtifactAcceptanceCommands(
+      artifact,
+      "/workspace",
+    );
+
+    expect(normalized.milestones[0]!.acceptanceChecks![0]).toMatchObject({
+      kind: "test_passes",
+      params: {
+        command:
+          "python3 -c \"import json;d=json.load(open('evals/evals.json'));assert len(d['evals'])>=3\"",
+        workspaceRoot: "/workspace/cross-border-selection",
+      },
+    });
+  });
+
+  it("does not mistake a generic source directory for the project root", () => {
+    const artifact = planArtifact();
+    artifact.milestones[0]!.targetRefs = ["/workspace/src"];
+    artifact.milestones[0]!.acceptanceChecks = [
+      {
+        id: "root-test",
+        kind: "command_exit_code",
+        description: "Run repository tests.",
+        params: { command: "npm test", expectedExitCode: 0 },
+        requiresEvidence: false,
+      },
+    ];
+
+    const normalized = normalizePlanArtifactAcceptanceCommands(
+      artifact,
+      "/workspace",
+    );
+
+    expect(normalized.milestones[0]!.acceptanceChecks![0]).toMatchObject({
+      kind: "test_passes",
+      params: { command: "npm test", workspaceRoot: "/workspace" },
+    });
+  });
+
+  it("keeps unsafe cd commands blocked while normalizing nonzero exit checks", () => {
+    const artifact = planArtifact();
+    artifact.milestones[0]!.acceptanceChecks = [
+      {
+        id: "m1-outside",
+        kind: "command_exit_code",
+        description: "越界目录",
+        params: { command: "cd /etc && npm test", expectedExitCode: 0 },
+        requiresEvidence: false,
+      },
+      {
+        id: "m1-chained",
+        kind: "command_exit_code",
+        description: "多重链式",
+        params: { command: "cd /workspace && npm test && npm run build", expectedExitCode: 0 },
+        requiresEvidence: false,
+      },
+      {
+        id: "m1-nonzero",
+        kind: "command_exit_code",
+        description: "非零退出码",
+        params: { command: "cd /workspace && npm test", expectedExitCode: 2 },
+        requiresEvidence: false,
+      },
+    ];
+
+    const normalized = normalizePlanArtifactAcceptanceCommands(
+      artifact,
+      "/workspace",
+    );
+    expect(normalized.milestones[0]!.acceptanceChecks).toEqual([
+      artifact.milestones[0]!.acceptanceChecks![0],
+      artifact.milestones[0]!.acceptanceChecks![1],
+      {
+        ...artifact.milestones[0]!.acceptanceChecks![2],
+        params: {
+          command: "npm test",
+          expectedExitCode: 2,
+          workspaceRoot: "/workspace",
+        },
+      },
+    ]);
+
+    const report = createPlanQualityReport({
+      artifact: normalized,
+      profile: createPlanTaskProfile("修复登录代码并运行测试"),
+      brief: brief(),
+      evidence: [
+        {
+          id: "evidence_user_request",
+          kind: "user",
+          title: "用户需求",
+          summary: "修复登录代码并运行测试",
+        },
+      ],
+      workspaceRoot: "/workspace",
+      now: "2026-07-31T00:00:00.000Z",
+    });
+    expect(report.status).toBe("blocked");
+    expect(
+      report.blockingIssues.filter((issue) =>
+        issue.message.includes("Shell 控制符"),
+      ),
+    ).toHaveLength(2);
+  });
+
+  it("canonicalizes an explicit dot workspaceRoot for an exit-0 check", () => {
+    const artifact = planArtifact();
+    artifact.milestones[0]!.targetRefs = ["allergen-map/data/china.geo.json"];
+    artifact.milestones[0]!.acceptanceChecks = [{
+      id: "geojson-valid",
+      kind: "command_exit_code",
+      description: "GeoJSON parses.",
+      params: {
+        command:
+          "python3 -c \"import json; json.load(open('allergen-map/data/china.geo.json'))\"",
+        workspaceRoot: ".",
+        expectedExitCode: 0,
+      },
+      requiresEvidence: false,
+    }];
+
+    expect(
+      normalizePlanArtifactAcceptanceCommands(artifact, "/workspace")
+        .milestones[0]!.acceptanceChecks![0],
+    ).toEqual({
+      id: "geojson-valid",
+      kind: "test_passes",
+      description: "GeoJSON parses.",
+      params: {
+        command:
+          "python3 -c \"import json; json.load(open('allergen-map/data/china.geo.json'))\"",
+        workspaceRoot: "/workspace",
+      },
+      requiresEvidence: false,
+    });
+  });
+
+  it("does not rewrite when the check already pins a different workspaceRoot", () => {
+    const artifact = planArtifact();
+    artifact.milestones[0]!.acceptanceChecks = [
+      {
+        id: "m1-test",
+        kind: "test_passes",
+        description: "冲突的工作区参数",
+        params: {
+          command: "cd /workspace/app && npm test",
+          workspaceRoot: "/workspace/other",
+        },
+        requiresEvidence: false,
+      },
+    ];
+
+    const normalized = normalizePlanArtifactAcceptanceCommands(
+      artifact,
+      "/workspace",
+    );
+    expect(normalized.milestones[0]!.acceptanceChecks).toEqual(
+      artifact.milestones[0]!.acceptanceChecks,
     );
   });
 });

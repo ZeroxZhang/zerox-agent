@@ -5,6 +5,7 @@ import { buildGoalProgressViewModel } from "../goalProgressViewModel";
 type GoalStatusStripProps = {
   goal: ChatSessionGoalSummary;
   detail: Goal | null;
+  recovery?: boolean;
   onViewDetail: () => void;
   onStart?: () => void;
   onPause?: () => void;
@@ -27,9 +28,11 @@ export function GoalStatusStrip(props: GoalStatusStripProps) {
       <div className="goal-status-strip-main">
         <div className="goal-status-strip-dot" aria-hidden="true" />
         <div className="goal-status-strip-text">
-          <strong>{progress.statusLabel}</strong>
+          <strong>{props.recovery ? "之前的目标待恢复" : progress.statusLabel}</strong>
           <small>
-            {progress.acceptance
+            {props.recovery
+              ? "当前结果不会自动改写原 Goal；重试后将沿用原 Plan、里程碑和验收记录"
+              : progress.acceptance
               ? `${progress.acceptance.phaseLabel}${
                   progress.acceptance.lastDirective
                     ? ` · ${progress.acceptance.lastDirective.label}`
@@ -37,8 +40,8 @@ export function GoalStatusStrip(props: GoalStatusStripProps) {
                 }`
               : currentMilestone
               ? `${currentMilestone.stateLabel} · ${currentMilestone.description}`
-              : progress.statusDetail}
-            {" "}· {progress.progressText}
+                : progress.statusDetail}
+            {props.recovery ? "" : ` · ${progress.progressText}`}
           </small>
         </div>
       </div>

@@ -163,6 +163,13 @@ export type PlanningStageRecord = {
   reviewApproved?: boolean;
   reviewIssues?: PlanReviewIssue[];
   revisionAttempted?: boolean;
+  /**
+   * Quality stage only: one bounded model repair round was attempted after
+   * the deterministic quality gate blocked the artifact (gate violations
+   * are contract slips by the synthesizer, so they get the same single
+   * repair-ladder chance as malformed round output).
+   */
+  gateRepairAttempted?: boolean;
   startedAt?: string;
   completedAt?: string;
   latencyMs?: number;
@@ -171,6 +178,11 @@ export type PlanningStageRecord = {
     outputTokens: number;
   };
   error?: string;
+  /**
+   * Bounded excerpt of the raw model response that failed the stage (same
+   * observability contract as DebateRound.failureExcerpt).
+   */
+  failureExcerpt?: string;
 };
 
 export type PlanQualityIssueCode =
@@ -311,6 +323,12 @@ export type DebateRound = {
   publicInputRefs: string[];
   output?: PlanProposal | RevisedPlanProposal | DebateCritique | PlanArtifact;
   error?: string;
+  /**
+   * Bounded excerpt of the raw model response that failed the round
+   * contract, persisted for post-mortem diagnosis. Local-only; never
+   * rendered into prompts.
+   */
+  failureExcerpt?: string;
   startedAt?: string;
   completedAt?: string;
   latencyMs?: number;

@@ -665,6 +665,93 @@ describe("agent goal planner", () => {
       }),
     ).rejects.toThrow("Goal milestone dependencies must not contain cycles.");
   });
+
+  it("continues a truncated milestone plan with an escalated output budget", async () => {
+    const requests: ChatCompletionRequest[] = [];
+    const fullPlan = JSON.stringify({
+      milestones: [
+        {
+          id: "milestone_only",
+          description: "Do everything in one step.",
+          dependsOn: [],
+          successCriteria: [criterion],
+        },
+      ],
+    });
+    const splitAt = Math.floor(fullPlan.length / 2);
+    const planner = createAgentGoalPlanner({
+      chatClient: createFakeChatClient(
+        [
+          {
+            __rawResponse: true,
+            content: fullPlan.slice(0, splitAt),
+            finishReason: "length",
+            modelServiceNotice: {
+              kind: "output_limit",
+              message:
+                "模型或服务商已达到本次输出长度限制，当前内容可能不完整。",
+            },
+          },
+          fullPlan.slice(splitAt),
+        ],
+        requests,
+      ),
+      modelProfile: fakeModelProfile,
+    });
+
+    const milestones = await planner.plan("Prepare a local research report", {
+      successCriteria: [criterion],
+      availableTools: [],
+      availableSkills: [],
+    });
+
+    expect(milestones).toHaveLength(1);
+    expect(milestones[0]?.id).toBe("milestone_only");
+    expect(requests).toHaveLength(2);
+    // fakeModelProfile maxTokens is 2000; the continuation escalates to 16384.
+    expect(requests[1]?.maxTokens).toBe(16384);
+    expect(requests[1]?.messages).toHaveLength(3);
+    expect(requests[1]?.messages[1]?.role).toBe("assistant");
+    expect(requests[1]?.messages[1]?.content).toBe(fullPlan.slice(0, splitAt));
+    expect(requests[1]?.messages[2]?.content).toContain("继续输出剩余 JSON");
+  });
+
+  it("surfaces the output-limit notice when the continuation is also truncated", async () => {
+    const requests: ChatCompletionRequest[] = [];
+    const truncatedNotice = {
+      kind: "output_limit" as const,
+      message: "模型或服务商已达到本次输出长度限制，当前内容可能不完整。",
+    };
+    const planner = createAgentGoalPlanner({
+      chatClient: createFakeChatClient(
+        [
+          {
+            __rawResponse: true,
+            content: '{"milestones":[{"id":"m1"',
+            finishReason: "length",
+            modelServiceNotice: truncatedNotice,
+          },
+          {
+            __rawResponse: true,
+            content: ',"description":"still cut"',
+            finishReason: "length",
+            modelServiceNotice: truncatedNotice,
+          },
+        ],
+        requests,
+      ),
+      modelProfile: fakeModelProfile,
+    });
+
+    await expect(
+      planner.plan("Prepare a local research report", {
+        successCriteria: [criterion],
+        availableTools: [],
+        availableSkills: [],
+      }),
+    ).rejects.toThrow("输出长度限制");
+    expect(requests).toHaveLength(2);
+  });
 });
 
 const fakeModelProfile = {
@@ -734,6 +821,24 @@ function createFakeChatClient(
       const response = responses[index++];
       if (!response) {
         throw new Error("Unexpected model request.");
+      }
+      if (typeof response === "object" && "__rawResponse" in response) {
+        const raw = response as {
+          content: string;
+          finishReason?: string;
+          modelServiceNotice?: {
+            kind: "output_limit" | "rate_limit" | "quota_exhausted" | "provider_stop";
+            message: string;
+          };
+        };
+        return {
+          content: raw.content,
+          toolCalls: [],
+          finishReason: raw.finishReason ?? "length",
+          ...(raw.modelServiceNotice
+            ? { modelServiceNotice: raw.modelServiceNotice }
+            : {}),
+        };
       }
       return {
         content: typeof response === "string" ? response : JSON.stringify(response),

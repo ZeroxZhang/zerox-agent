@@ -43,6 +43,20 @@ import {
   type ToolInvocationRecord,
   type ToolInvocationTransition,
 } from "../shared/toolInvocationLedger";
+import { sanitizeChatMessages } from "./messageIntegrity";
+import {
+  buildExplorationDedupNote,
+  buildReadResultDigest,
+  createExplorationDedupTracker,
+  isMutatingToolCall,
+  isReadClassTool,
+} from "./agentExplorationDedup";
+import {
+  createAgentContextUsage,
+  resolveContextTokenBudget,
+  type AgentContextCompactionSummary,
+  type AgentContextUsage,
+} from "../shared/contextUsage";
 
 export type AgentLoopOptions = {
   chatClient: ChatClient;
@@ -106,6 +120,7 @@ export type AgentLoopOptions = {
   onModelResponse?: (response: ChatCompletionResponse, turn: number) => void;
   onModelStreamEvent?: (event: StreamEvent, turn: number) => void;
   onContextCompacted?: (event: AgentLoopContextCompaction) => void;
+  onContextUsage?: (usage: AgentContextUsage) => void;
   onModelRetry?: (event: ModelRetryEvent) => void;
   onStrategyGuard?: (event: AgentLoopStrategyGuardEvent) => void;
   onCheckpoint?: (checkpoint: AgentLoopCheckpoint) => void | Promise<void>;
@@ -128,11 +143,13 @@ export type AgentLoopContextCompaction = {
   originalMessageCount: number;
   compactedMessageCount: number;
   estimatedTokens: number;
+  compactedTokens: number;
   tokenBudget: number;
+  strategy: AgentContextCompactionSummary["strategy"];
 };
 
 export type AgentLoopStrategyGuardEvent = {
-  code: "FRAGMENTED_TOOL_CALLS";
+  code: "FRAGMENTED_TOOL_CALLS" | "REPEATED_EXPLORATION";
   severity: "warn";
   message: string;
   toolName: string;
@@ -175,6 +192,7 @@ export type AgentLoopResult = {
   messages: ChatMessage[];
   toolCallsExecuted: number;
   tokensConsumed?: number;
+  contextUsage?: AgentContextUsage;
   continuation?: AgentLoopContinuation;
   modelServiceNotice?: ModelServiceNotice;
 };
@@ -188,6 +206,7 @@ export async function runAgentLoop(
     providerId?: string;
     temperature: number;
     maxTokens: number;
+    contextWindow?: number;
   },
   options: AgentLoopOptions,
 ): Promise<AgentLoopResult> {
@@ -225,6 +244,7 @@ export async function runAgentLoop(
     onModelResponse,
     onModelStreamEvent,
     onContextCompacted,
+    onContextUsage,
     onModelRetry,
     onStrategyGuard,
     modelRequestExecutor,
@@ -292,7 +312,19 @@ export async function runAgentLoop(
   const toolCallCounts = new Map<string, number>();
   const emittedStrategyGuards = new Set<string>();
   const successfulToolNames = new Set<string>();
-  const contextTokenBudget = Math.max(1, Math.floor(modelProfile.maxTokens * 0.7));
+  // Exploration dedup: track successful read-class calls per run so
+  // cross-turn duplicate exploration is surfaced to the model instead of
+  // silently burning turns (observed in production: same files re-read
+  // dozens of times in long goal runs).
+  const explorationDedup = createExplorationDedupTracker();
+  let emittedExplorationGuards = 0;
+  const contextTokenBudget = resolveContextTokenBudget({
+    contextWindow: modelProfile.contextWindow,
+    maxOutputTokens: modelProfile.maxTokens,
+  });
+  let contextCompactionCount = 0;
+  let latestContextUsage: AgentContextUsage | undefined;
+  let lastContextCompaction: AgentContextCompactionSummary | undefined;
   // Token consumption is observability-only and never changes run status.
   let cumulativeTokensConsumed = 0;
 
@@ -300,6 +332,26 @@ export async function runAgentLoop(
     return cumulativeTokensConsumed > 0
       ? cumulativeTokensConsumed
       : Math.max(1, contextManager.estimateTokens(messages));
+  }
+
+  /**
+   * Enforce the provider message-sequence invariant on the live
+   * conversation. Runs before every model request (synthesizing answers for
+   * interrupted tool batches) and once more when the loop exits (trimming
+   * unanswered calls) so persisted transcripts can never poison a resume.
+   * Returns the repairs so callers can observe them.
+   */
+  function enforceMessageIntegrity(
+    unresolvedToolCalls: "synthesize" | "trim",
+  ) {
+    const { messages: sanitized, repairs } = sanitizeChatMessages(messages, {
+      unresolvedToolCalls,
+    });
+    if (repairs.length === 0) {
+      return repairs;
+    }
+    messages.splice(0, messages.length, ...sanitized);
+    return repairs;
   }
 
   function recordModelResponseTokens(
@@ -312,9 +364,29 @@ export async function runAgentLoop(
     cumulativeTokensConsumed += turnTokens;
   }
 
+  function reportContextUsage(estimatedTokens: number): AgentContextUsage {
+    const usage = createAgentContextUsage({
+      estimatedTokens,
+      tokenBudget: contextTokenBudget,
+      messageCount: messages.length,
+      compactionCount: contextCompactionCount,
+      ...(modelProfile.contextWindow
+        ? { contextWindow: modelProfile.contextWindow }
+        : {}),
+      ...(lastContextCompaction
+        ? { lastCompaction: lastContextCompaction }
+        : {}),
+      updatedAt: new Date().toISOString(),
+    });
+    latestContextUsage = usage;
+    onContextUsage?.(usage);
+    return usage;
+  }
+
   async function compactMessagesBeforeModelRequest() {
     const estimatedTokens = contextManager.estimateTokens(messages);
     if (estimatedTokens <= contextTokenBudget) {
+      reportContextUsage(estimatedTokens);
       return;
     }
 
@@ -331,15 +403,29 @@ export async function runAgentLoop(
         protectedMarkers: [NEVER_COMPACT_MARKER],
       });
       if (!result.compacted) {
+        reportContextUsage(estimatedTokens);
         return;
       }
       messages.splice(0, messages.length, ...result.messages);
+      const compactedTokens = contextManager.estimateTokens(messages);
+      contextCompactionCount += 1;
+      lastContextCompaction = {
+        strategy: result.strategy,
+        beforeMessages: originalMessageCount,
+        afterMessages: messages.length,
+        beforeTokens: estimatedTokens,
+        afterTokens: compactedTokens,
+        compactedAt: new Date().toISOString(),
+      };
       onContextCompacted?.({
         originalMessageCount,
         compactedMessageCount: messages.length,
         estimatedTokens,
+        compactedTokens,
         tokenBudget: contextTokenBudget,
+        strategy: result.strategy,
       });
+      reportContextUsage(compactedTokens);
       return;
     }
 
@@ -348,16 +434,30 @@ export async function runAgentLoop(
       contextTokenBudget,
     );
     if (compacted.length === originalMessageCount && compacted === messages) {
+      reportContextUsage(estimatedTokens);
       return;
     }
 
     messages.splice(0, messages.length, ...compacted);
+    const compactedTokens = contextManager.estimateTokens(messages);
+    contextCompactionCount += 1;
+    lastContextCompaction = {
+      strategy: "summarize",
+      beforeMessages: originalMessageCount,
+      afterMessages: messages.length,
+      beforeTokens: estimatedTokens,
+      afterTokens: compactedTokens,
+      compactedAt: new Date().toISOString(),
+    };
     onContextCompacted?.({
       originalMessageCount,
       compactedMessageCount: messages.length,
       estimatedTokens,
+      compactedTokens,
       tokenBudget: contextTokenBudget,
+      strategy: "summarize",
     });
+    reportContextUsage(compactedTokens);
   }
 
   /** Evaluate system-reminder triggers and inject matching reminders as synthetic user messages. */
@@ -408,6 +508,7 @@ export async function runAgentLoop(
       tokenBudget: contextTokenBudget,
     });
     await compactMessagesBeforeModelRequest();
+    enforceMessageIntegrity("synthesize");
 
     try {
       const response = await raceWithCancellation(completeModelRequest({
@@ -475,33 +576,66 @@ export async function runAgentLoop(
       return modelRequestExecutor(request, turn);
     }
     if (isStreamingChatClient(chatClient)) {
-      try {
-        return await aggregateStreamingCompletion(chatClient, request, (event) => {
-          onModelStreamEvent?.(event, turn);
-        });
-      } catch (error) {
-        if (
-          error instanceof StreamingCompletionError &&
-          !error.hasMeaningfulStreamEvent &&
-          !isStreamAbortError(error.cause, request.signal)
-        ) {
+      // Transport resilience: a stream that stalls mid-generation (SSE idle
+      // timeout, connection reset) previously failed the whole run even
+      // though the request is idempotent. Retry the stream a bounded number
+      // of times before giving up. Thinking-style models routinely pause
+      // longer than the 30s per-read idle budget, so a single idle timeout
+      // must never be fatal.
+      const maxStreamAttempts = 3;
+      for (let attempt = 1; attempt <= maxStreamAttempts; attempt += 1) {
+        try {
+          return await aggregateStreamingCompletion(chatClient, request, (event) => {
+            onModelStreamEvent?.(event, turn);
+          });
+        } catch (error) {
           if (
-            modelServiceNoticeFromError(error.cause, {
+            error instanceof StreamingCompletionError &&
+            !error.hasMeaningfulStreamEvent &&
+            !isStreamAbortError(error.cause, request.signal)
+          ) {
+            if (
+              modelServiceNoticeFromError(error.cause, {
+                provider: modelProfile.providerId,
+                model: modelProfile.model,
+              })
+            ) {
+              throw error.cause;
+            }
+            return completeWithModelRetry(
+              chatClient,
+              request,
+              modelRetry,
+              onModelRetry,
+            );
+          }
+          const retryableStreamFailure =
+            error instanceof StreamingCompletionError &&
+            !isStreamAbortError(error.cause, request.signal) &&
+            isRetryableStreamError(error.cause) &&
+            !modelServiceNoticeFromError(error.cause, {
               provider: modelProfile.providerId,
               model: modelProfile.model,
-            })
-          ) {
-            throw error.cause;
+            });
+          if (retryableStreamFailure && attempt < maxStreamAttempts) {
+            const delayMs = Math.min(2_000 * attempt, 5_000);
+            await onModelRetry?.({
+              attempt,
+              maxRetries: maxStreamAttempts - 1,
+              delayMs,
+              error: `模型流中断（第 ${attempt} 次），即将重试：${
+                error.cause instanceof Error
+                  ? error.cause.message
+                  : String(error.cause ?? "unknown")
+              }`,
+            });
+            await sleepBeforeStreamRetry(delayMs, request.signal);
+            continue;
           }
-          return completeWithModelRetry(
-            chatClient,
-            request,
-            modelRetry,
-            onModelRetry,
-          );
+          throw error;
         }
-        throw error;
       }
+      throw new Error("Model stream retries exhausted.");
     }
 
     return completeWithModelRetry(
@@ -510,6 +644,36 @@ export async function runAgentLoop(
       modelRetry,
       onModelRetry,
     );
+  }
+
+  function isRetryableStreamError(error: unknown): boolean {
+    const message =
+      error instanceof Error ? error.message : String(error ?? "");
+    return /idle timeout|timed out|timeout|ECONNRESET|EPIPE|network|fetch failed|socket|terminated|overloaded/i.test(
+      message,
+    );
+  }
+
+  async function sleepBeforeStreamRetry(
+    delayMs: number,
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      const onAbort = () => {
+        clearTimeout(timeout);
+        signal?.removeEventListener("abort", onAbort);
+        reject(
+          signal?.reason instanceof Error
+            ? signal.reason
+            : new Error("Agent loop canceled."),
+        );
+      };
+      const timeout = setTimeout(() => {
+        signal?.removeEventListener("abort", onAbort);
+        resolve();
+      }, delayMs);
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
   }
 
   try {
@@ -531,6 +695,7 @@ export async function runAgentLoop(
         mode: turns === 0 ? "planning" : turns === 1 ? "execution" : undefined,
       });
       await compactMessagesBeforeModelRequest();
+      enforceMessageIntegrity("synthesize");
 
       const response = await raceWithCancellation(completeModelRequest({
         ...modelProfile,
@@ -829,6 +994,13 @@ export async function runAgentLoop(
           }
 
           onToolCall?.(toolName, args, toolEventBase);
+          // Exploration dedup: check before execution so a cross-turn
+          // duplicate read is flagged even if the call itself fails.
+          const explorationDedupCheck = explorationDedup.check(
+            toolName,
+            args,
+            turns + 1,
+          );
           transitionInvocation({ status: "running" });
 
           // Execute tool
@@ -839,7 +1011,7 @@ export async function runAgentLoop(
           }, {
             ...(signal ? { signal } : {}),
             ...(runContext ? { runContext } : {}),
-            ...(toolName === "shell_exec"
+            ...(toolName === "shell_exec" || toolName === "test_run"
               ? { authorizedShellCommand: String(args.command ?? "") }
               : {}),
             onRuntimeEvent(runtimeEvent) {
@@ -935,6 +1107,24 @@ export async function runAgentLoop(
           processedToolCalls.push(toolCall);
           onToolResult?.(toolName, result.ok, result, toolResultEvent);
 
+          // Exploration dedup bookkeeping: a successful mutation may change
+          // what earlier reads observed, so it invalidates the recorded read
+          // state; a successful read extends it. The digest keeps a compact
+          // excerpt of the result so a later dedup note can carry real
+          // evidence even after transcript bounding drops the original.
+          if (result.ok) {
+            if (isMutatingToolCall(toolName, args)) {
+              explorationDedup.recordMutation(toolName);
+            } else if (isReadClassTool(toolName)) {
+              explorationDedup.recordRead(
+                toolName,
+                args,
+                turns + 1,
+                buildReadResultDigest(serializedObservation.content),
+              );
+            }
+          }
+
           const selfFinalizingSummary = buildSelfFinalizingToolSummary(
             toolName,
             result,
@@ -968,6 +1158,36 @@ export async function runAgentLoop(
                 "Continue the task, but switch to a batch, recursive, inventory, or search tool before making another call of the same kind.",
               ].join("\n"),
             });
+          }
+
+          // Exploration dedup: nudge the model when it re-reads a target it
+          // already has, and surface a guard event once duplicates pile up.
+          // Never blocks the call and never pauses the run.
+          if (explorationDedupCheck?.isDuplicate && result.ok) {
+            messages.push({
+              role: "system",
+              content: buildExplorationDedupNote({
+                toolName,
+                args,
+                priorReads: explorationDedupCheck.priorReads,
+                firstTurn: explorationDedupCheck.firstTurn,
+                lastTurn: explorationDedupCheck.lastTurn,
+                ...(explorationDedupCheck.digest
+                  ? { digest: explorationDedupCheck.digest }
+                  : {}),
+              }),
+            });
+            const nextGuardThreshold = (emittedExplorationGuards + 1) * 3;
+            if (explorationDedup.duplicateCount() >= nextGuardThreshold) {
+              emittedExplorationGuards += 1;
+              onStrategyGuard?.({
+                code: "REPEATED_EXPLORATION",
+                severity: "warn",
+                message: `The model has re-read already-explored targets ${explorationDedup.duplicateCount()} times in this run; reuse the existing evidence and focus on unexplored areas or the deliverable.`,
+                toolName,
+                count: explorationDedup.duplicateCount(),
+              });
+            }
           }
 
           if (
@@ -1068,6 +1288,13 @@ export async function runAgentLoop(
     }
   }
 
+  // Final integrity pass: anything that leaves the loop — success, failure,
+  // pause, cancel, or an exception escaping mid-tool-batch — carries a
+  // transcript that satisfies the provider invariant. Unanswered tool calls
+  // are trimmed (not synthesized) so persisted checkpoints never replay a
+  // dead call into the next run.
+  enforceMessageIntegrity("trim");
+
   return {
     summary,
     status,
@@ -1075,6 +1302,7 @@ export async function runAgentLoop(
     messages,
     toolCallsExecuted,
     tokensConsumed: estimateConsumedTokens(),
+    ...(latestContextUsage ? { contextUsage: latestContextUsage } : {}),
     ...(continuation ? { continuation } : {}),
     ...(modelServiceNotice ? { modelServiceNotice } : {}),
   };

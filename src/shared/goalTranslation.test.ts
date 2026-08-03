@@ -59,4 +59,185 @@ describe("goal draft translation validation", () => {
     });
     expect(result.warnings).toEqual([]);
   });
+
+  it("rewrites a cd-chained exit-0 command into the workspaceRoot params form", () => {
+    const result = normalizeGoalDraftCriteria([
+      {
+        id: "criterion_tests",
+        description: "Tests pass.",
+        acceptanceChecks: [
+          {
+            id: "check_tests",
+            kind: "command_exit_code",
+            description: "Unit tests exit 0.",
+            params: {
+              command: "cd packages/app && npm test",
+              expectedExitCode: 0,
+            },
+            requiresEvidence: false,
+          },
+        ],
+      },
+    ]);
+
+    expect(result.successCriteria[0].acceptanceChecks[0]).toMatchObject({
+      kind: "test_passes",
+      params: {
+        command: "npm test",
+        workspaceRoot: "packages/app",
+      },
+    });
+    expect(
+      result.successCriteria[0].acceptanceChecks[0].params.expectedExitCode,
+    ).toBeUndefined();
+    expect(result.warnings.map((warning) => warning.code)).toEqual([
+      "cd_chain_acceptance_command_rewritten",
+    ]);
+  });
+
+  it("drops a `cd .` prefix instead of pinning a workspaceRoot", () => {
+    const result = normalizeGoalDraftCriteria([
+      {
+        id: "criterion_lint",
+        description: "Lint passes.",
+        acceptanceChecks: [
+          {
+            id: "check_lint",
+            kind: "test_passes",
+            description: "Lint exits 0.",
+            params: { command: "cd . && npm run lint" },
+            requiresEvidence: false,
+          },
+        ],
+      },
+    ]);
+
+    expect(result.successCriteria[0].acceptanceChecks[0]).toMatchObject({
+      kind: "test_passes",
+      params: { command: "npm run lint" },
+    });
+    expect(
+      result.successCriteria[0].acceptanceChecks[0].params.workspaceRoot,
+    ).toBeUndefined();
+  });
+
+  it("routes an exit-0 command with an explicit workspaceRoot through test_run", () => {
+    const result = normalizeGoalDraftCriteria([
+      {
+        id: "criterion_eval",
+        description: "Evals are valid.",
+        acceptanceChecks: [
+          {
+            id: "check_eval",
+            kind: "command_exit_code",
+            description: "Eval validation exits 0.",
+            params: {
+              command: "python3 -m unittest discover -s tests",
+              expectedExitCode: 0,
+              workspaceRoot: "cross-border-selection",
+            },
+            requiresEvidence: false,
+          },
+        ],
+      },
+    ]);
+
+    expect(result.successCriteria[0].acceptanceChecks[0]).toMatchObject({
+      kind: "test_passes",
+      params: {
+        command: "python3 -m unittest discover -s tests",
+        workspaceRoot: "cross-border-selection",
+      },
+    });
+    expect(
+      result.successCriteria[0].acceptanceChecks[0].params.expectedExitCode,
+    ).toBeUndefined();
+  });
+
+  it("normalizes nonzero cd checks while leaving unsafe chains untouched", () => {
+    const result = normalizeGoalDraftCriteria([
+      {
+        id: "criterion_deploy",
+        description: "Deploy check.",
+        acceptanceChecks: [
+          {
+            id: "check_nonzero",
+            kind: "command_exit_code",
+            description: "Command exits 2.",
+            params: {
+              command: "cd packages/app && npm run check",
+              expectedExitCode: 2,
+            },
+            requiresEvidence: false,
+          },
+          {
+            id: "check_conflicting_root",
+            kind: "test_passes",
+            description: "Conflicting workspaceRoot stays blocked.",
+            params: {
+              command: "cd packages/app && npm test",
+              workspaceRoot: "other/dir",
+            },
+            requiresEvidence: false,
+          },
+          {
+            id: "check_still_chained",
+            kind: "test_passes",
+            description: "Remainder still chains.",
+            params: { command: "cd packages/app && npm test && npm run lint" },
+            requiresEvidence: false,
+          },
+        ],
+      },
+    ]);
+
+    const [nonzero, conflicting, stillChained] =
+      result.successCriteria[0].acceptanceChecks;
+    expect(nonzero).toMatchObject({
+      kind: "command_exit_code",
+      params: {
+        command: "npm run check",
+        expectedExitCode: 2,
+        workspaceRoot: "packages/app",
+      },
+    });
+    expect(conflicting.params.command).toBe("cd packages/app && npm test");
+    expect(stillChained.params.command).toBe(
+      "cd packages/app && npm test && npm run lint",
+    );
+    expect(
+      result.warnings.filter(
+        (warning) => warning.code === "cd_chain_acceptance_command_rewritten",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("uses test_passes for an exit-0 command without an explicit root", () => {
+    const result = normalizeGoalDraftCriteria([{
+      id: "criterion_json",
+      description: "GeoJSON parses.",
+      acceptanceChecks: [{
+        id: "check_json",
+        kind: "command_exit_code",
+        description: "GeoJSON parses.",
+        params: {
+          command:
+            "python3 -c \"import json; json.load(open('allergen-map/data/china.geo.json'))\"",
+          expectedExitCode: 0,
+        },
+        requiresEvidence: false,
+      }],
+    }]);
+
+    expect(result.successCriteria[0]!.acceptanceChecks[0]).toEqual({
+      id: "check_json",
+      kind: "test_passes",
+      description: "GeoJSON parses.",
+      params: {
+        command:
+          "python3 -c \"import json; json.load(open('allergen-map/data/china.geo.json'))\"",
+      },
+      requiresEvidence: false,
+    });
+  });
 });

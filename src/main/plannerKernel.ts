@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
+import path from "node:path";
 import type { AcceptanceCheck, GoalSelectedSkill } from "../shared/agentGoal";
+import {
+  extractLeadingCdWorkspace,
+  findBlockedShellControl,
+} from "../shared/acceptanceCommand";
 import { classifyTaskFrame } from "../shared/agentTaskStrategy";
 import type {
   PlanActionGate,
@@ -756,11 +761,29 @@ const plannerToolAliases: Readonly<Record<string, string>> = {
   test_passes: "test_run",
 };
 
+/**
+ * Acceptance-check kinds are execution-time verifier names, not Agent
+ * tools. Planner models repeatedly confuse the two namespaces (2026-08-02
+ * "milestone_4 引用了不存在的工具 model_review" — blocked twice even
+ * after a gate-repair round). Three kinds have executable aliases above;
+ * the rest must never appear in toolNames, so strip them deterministically
+ * instead of asking the model to regenerate an otherwise valid plan.
+ */
+const acceptanceKindOnlyToolNames: ReadonlySet<string> = new Set([
+  "assertion",
+  "model_review",
+]);
+
 export function normalizePlanToolNames(toolNames: Iterable<string>): string[] {
   return unique(
     [...toolNames]
       .map((toolName) => toolName.trim())
       .filter(Boolean)
+      .filter(
+        (toolName) =>
+          !acceptanceKindOnlyToolNames.has(toolName) &&
+          !toolName.startsWith("validator:"),
+      )
       .map((toolName) => plannerToolAliases[toolName] ?? toolName),
   );
 }
@@ -780,6 +803,184 @@ export function normalizePlanArtifactToolNames(
       toolNames: normalizePlanToolNames(milestone.toolNames ?? []),
     })),
   };
+}
+
+/**
+ * Gives acceptance commands an explicit execution root. Idiomatic
+ * `cd <dir> && <cmd>` chains are split into `command` + `workspaceRoot`;
+ * otherwise the root is inferred from the milestone's declared targetRefs.
+ * Only roots inside the Plan workspace are accepted. Exit-0 command checks
+ * are retagged as `test_passes`; nonzero checks retain command_exit_code but
+ * use the same typed runner. Ambiguous roots, unsafe shell structure,
+ * conflicting params, and workspace escapes remain unchanged so the quality
+ * gate keeps failing closed.
+ */
+export function normalizePlanArtifactAcceptanceCommands(
+  artifact: PlanArtifact,
+  workspaceRoot?: string,
+): PlanArtifact {
+  const normalizeCheck = (
+    check: AcceptanceCheck,
+    inferredWorkspaceRoot?: string,
+  ): AcceptanceCheck => {
+    if (
+      !workspaceRoot ||
+      (check.kind !== "command_exit_code" && check.kind !== "test_passes")
+    ) {
+      return check;
+    }
+    const command =
+      typeof check.params.command === "string" ? check.params.command : "";
+    const extracted = extractLeadingCdWorkspace(command);
+    const existingRoot =
+      typeof check.params.workspaceRoot === "string"
+        ? check.params.workspaceRoot.trim()
+        : "";
+    if (!extracted) {
+      if (findBlockedShellControl(command) || /^\s*cd\s+/i.test(command)) {
+        return check;
+      }
+      const requestedRoot =
+        existingRoot || inferredWorkspaceRoot || workspaceRoot;
+      const resolvedRoot = path.isAbsolute(requestedRoot)
+        ? path.resolve(requestedRoot)
+        : path.resolve(workspaceRoot, requestedRoot);
+      const resolvedWorkspace = path.resolve(workspaceRoot);
+      if (
+        resolvedRoot !== resolvedWorkspace &&
+        !resolvedRoot.startsWith(`${resolvedWorkspace}${path.sep}`)
+      ) {
+        return check;
+      }
+      const params: Record<string, unknown> = {
+        ...check.params,
+        workspaceRoot: resolvedRoot,
+      };
+      if (
+        check.kind === "command_exit_code" &&
+        Number(check.params.expectedExitCode ?? 0) === 0
+      ) {
+        delete params.expectedExitCode;
+        return { ...check, kind: "test_passes", params };
+      }
+      return { ...check, params };
+    }
+    const resolvedDir = path.isAbsolute(extracted.dir)
+      ? path.resolve(extracted.dir)
+      : path.resolve(workspaceRoot, extracted.dir);
+    const resolvedWorkspace = path.resolve(workspaceRoot);
+    const resolvedExistingRoot = existingRoot
+      ? path.isAbsolute(existingRoot)
+        ? path.resolve(existingRoot)
+        : path.resolve(workspaceRoot, existingRoot)
+      : "";
+    if (resolvedExistingRoot && resolvedExistingRoot !== resolvedDir) {
+      return check;
+    }
+    const insideWorkspace =
+      resolvedDir === resolvedWorkspace ||
+      resolvedDir.startsWith(`${resolvedWorkspace}${path.sep}`);
+    if (!insideWorkspace) {
+      return check;
+    }
+
+    const params: Record<string, unknown> = {
+      ...check.params,
+      command: extracted.rest,
+      workspaceRoot: resolvedDir,
+    };
+    let kind = check.kind;
+    if (
+      kind === "command_exit_code" &&
+      Number(check.params.expectedExitCode ?? 0) === 0
+    ) {
+      // test_passes is exactly "command exits 0" and executes through
+      // test_run, which honors the workspaceRoot parameter end-to-end.
+      kind = "test_passes";
+      delete params.expectedExitCode;
+    }
+    return { ...check, kind, params };
+  };
+
+  const milestoneRoots = artifact.milestones.map((milestone) =>
+    inferTargetWorkspaceRoot(milestone.targetRefs, workspaceRoot),
+  );
+  const artifactWorkspaceRoot = commonWorkspaceRoot(
+    milestoneRoots.filter((root): root is string => Boolean(root)),
+    workspaceRoot,
+  );
+
+  return {
+    ...artifact,
+    acceptanceChecks: (artifact.acceptanceChecks ?? []).map((check) =>
+      normalizeCheck(check, artifactWorkspaceRoot),
+    ),
+    milestones: artifact.milestones.map((milestone, index) => ({
+      ...milestone,
+      acceptanceChecks: (milestone.acceptanceChecks ?? []).map((check) =>
+        normalizeCheck(check, milestoneRoots[index]),
+      ),
+    })),
+  };
+}
+
+function inferTargetWorkspaceRoot(
+  targetRefs: string[] | undefined,
+  planWorkspaceRoot: string | undefined,
+): string | undefined {
+  if (!planWorkspaceRoot || !targetRefs?.length) return undefined;
+  const resolvedPlanRoot = path.resolve(planWorkspaceRoot);
+  let candidates = targetRefs
+    .map((targetRef) => targetRef.trim())
+    .filter(Boolean)
+    .map((targetRef) =>
+      path.isAbsolute(targetRef)
+        ? path.resolve(targetRef)
+        : path.resolve(resolvedPlanRoot, targetRef),
+    )
+    .filter(
+      (candidate) =>
+        candidate === resolvedPlanRoot ||
+        candidate.startsWith(`${resolvedPlanRoot}${path.sep}`),
+    )
+    .map((candidate) =>
+      path.extname(path.basename(candidate)) ? path.dirname(candidate) : candidate,
+    );
+  if (
+    candidates.length === 1 &&
+    /^(?:src|lib|scripts?|tests?|evals?|references?|docs?)$/i.test(
+      path.basename(candidates[0]),
+    )
+  ) {
+    candidates = [path.dirname(candidates[0])];
+  }
+  return commonWorkspaceRoot(candidates, resolvedPlanRoot);
+}
+
+function commonWorkspaceRoot(
+  candidates: string[],
+  planWorkspaceRoot: string | undefined,
+): string | undefined {
+  if (!candidates.length || !planWorkspaceRoot) return undefined;
+  const resolvedPlanRoot = path.resolve(planWorkspaceRoot);
+  let common = path.resolve(candidates[0]);
+  for (const candidate of candidates.slice(1)) {
+    const resolvedCandidate = path.resolve(candidate);
+    while (
+      common !== resolvedPlanRoot &&
+      resolvedCandidate !== common &&
+      !resolvedCandidate.startsWith(`${common}${path.sep}`)
+    ) {
+      common = path.dirname(common);
+    }
+  }
+  if (
+    common !== resolvedPlanRoot &&
+    !common.startsWith(`${resolvedPlanRoot}${path.sep}`)
+  ) {
+    return undefined;
+  }
+  return common;
 }
 
 function snapshotSkill(skill: GoalSelectedSkill): GoalSelectedSkill {

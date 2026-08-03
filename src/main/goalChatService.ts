@@ -844,17 +844,27 @@ function normalizeDraftMilestones(
   milestones: Milestone[],
   successCriteria: SuccessCriterion[],
 ): Milestone[] {
-  return milestones.map((milestone, index) => ({
-    ...milestone,
-    id: milestone.id.trim() || `milestone_${index + 1}`,
-    description: milestone.description.trim(),
-    successCriteria: milestone.successCriteria.length
+  return milestones.map((milestone, index) => {
+    const milestoneCriteria = milestone.successCriteria.length
       ? milestone.successCriteria
-      : successCriteria,
-    state: index === 0 && milestone.state === "pending" ? "ready" : milestone.state,
-    runIds: milestone.runIds ?? [],
-    attempts: milestone.attempts ?? 0,
-  }));
+      : successCriteria;
+    return {
+      ...milestone,
+      id: milestone.id.trim() || `milestone_${index + 1}`,
+      description: milestone.description.trim(),
+      // Plan-confirmed milestones and ordinary Goal drafts must cross the
+      // same acceptance-contract boundary. Otherwise the goal-level checks
+      // are canonical while milestone checks retain stale shell semantics.
+      successCriteria: normalizeGoalDraftCriteria(milestoneCriteria)
+        .successCriteria,
+      state:
+        index === 0 && milestone.state === "pending"
+          ? "ready"
+          : milestone.state,
+      runIds: milestone.runIds ?? [],
+      attempts: milestone.attempts ?? 0,
+    };
+  });
 }
 
 function createGoalSuccessCriterion(

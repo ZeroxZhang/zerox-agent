@@ -24,6 +24,12 @@ import {
   ModelServiceNoticeError,
   throwForModelServiceNotice,
 } from "../shared/modelServiceNotice";
+import {
+  buildOutputLimitContinuationPrompt,
+  escalateOutputBudget,
+  isRecoverableOutputLimit,
+  OUTPUT_LIMIT_CONTINUATION_PREFIX_MAX_CHARS,
+} from "./structuredOutputBudget";
 
 type AgentGoalPlanOptions = {
   successCriteria: SuccessCriterion[];
@@ -58,13 +64,22 @@ export function createAgentGoalPlanner(options: {
     successCriteria: SuccessCriterion[];
   }): Promise<Milestone[]> {
     let rejectionReason: string | undefined;
+    // Output-budget recovery: a milestone plan that exceeds the profile's
+    // maxTokens arrives as finishReason=length with a valid partial JSON
+    // prefix. Continue from the cut once with an escalated budget instead
+    // of burning a plan attempt on an identical retry.
+    let maxTokens = options.modelProfile.maxTokens;
+    let outputLimitRecovered = false;
+    let continuationPrefix = "";
+    let continuationMessages: ChatCompletionRequest["messages"] | undefined;
 
     for (let attempt = 0; attempt < maxPlanAttempts; attempt += 1) {
       try {
         const response = await options.chatClient.complete({
           ...options.modelProfile,
           temperature: Math.min(options.modelProfile.temperature, 0.2),
-          messages: [
+          maxTokens,
+          messages: continuationMessages ?? [
             {
               role: "user",
               content: buildPrompt(request.prompt, rejectionReason),
@@ -72,13 +87,37 @@ export function createAgentGoalPlanner(options: {
           ],
           tool_choice: "none",
         });
+        if (
+          !outputLimitRecovered &&
+          isRecoverableOutputLimit(response.modelServiceNotice, response.content)
+        ) {
+          outputLimitRecovered = true;
+          maxTokens = escalateOutputBudget(maxTokens);
+          continuationPrefix = (response.content ?? "")
+            .trim()
+            .slice(0, OUTPUT_LIMIT_CONTINUATION_PREFIX_MAX_CHARS);
+          continuationMessages = [
+            {
+              role: "user",
+              content: buildPrompt(request.prompt, rejectionReason),
+            },
+            { role: "assistant", content: continuationPrefix },
+            { role: "user", content: buildOutputLimitContinuationPrompt() },
+          ];
+          continue;
+        }
         throwForModelServiceNotice(response.modelServiceNotice);
-        const milestones = parseMilestones(response.content ?? "");
+        const text = continuationPrefix
+          ? continuationPrefix + (response.content ?? "")
+          : (response.content ?? "");
+        const milestones = parseMilestones(text);
         validateMilestonePlan(request.successCriteria, milestones);
         return milestones;
       } catch (error) {
         if (error instanceof ModelServiceNoticeError) throw error;
         rejectionReason = (error as Error).message;
+        continuationPrefix = "";
+        continuationMessages = undefined;
         if (attempt === maxPlanAttempts - 1) {
           throw error;
         }
@@ -316,6 +355,7 @@ function buildPlanPrompt(
     '{"milestones":[{"id":"milestone_id","description":"work to do","dependsOn":[],"successCriteria":[]}]}',
     "",
     "Every milestone must include at least one success criterion with at least one acceptance check.",
+    "Acceptance check commands must be single, statically checkable commands: no shell control operators or redirection (&&, ;, |, >, <, backticks, $(), subshells, newlines). Use the workspaceRoot param for the working directory instead of a `cd X &&` prefix; KEY=value env prefixes are allowed.",
   ].join("\n");
 }
 

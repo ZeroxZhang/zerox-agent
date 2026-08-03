@@ -26,16 +26,22 @@ import type {
   ChatAttachmentInput,
   ChatAttachmentMetadata,
   ChatAgentStatus,
-  ChatHistoryMessage,
   ChatSessionGoalSummary,
   ChatSessionListItem,
   ChatSessionRecord,
+  ChatSessionWorkSummary,
   ChatStreamEvent,
   ChatTaskStatusEvent,
   SendChatMessageResult,
   SkillInputField,
   SkillUserInputRequest,
 } from "../../shared/chat";
+import {
+  deriveChatSessionWork,
+  getActionableGoalSummary,
+  isLiveGoalStatus,
+  isRecoverableGoalStatus,
+} from "../../shared/chatSessionWork";
 import {
   formatChatAttachmentSize,
   formatChatAttachmentTypeLabel,
@@ -88,6 +94,7 @@ import {
   buildPersistedGoalActivity,
   createTaskActivity,
   getChatStatusKindFromStatusEvent,
+  getChatStatusMessageFromStatusEvent,
   getGoalUiSyncState,
   getWorkPhaseFromChatStatusEvent,
   idleTaskActivity,
@@ -111,15 +118,16 @@ import {
   applyChatStreamEvent,
   createChatStreamState,
   finalizeChatStreamResult,
-  type ChatToolCallPreview,
   type ChatStreamMessage,
 } from "../chatStreamReducer";
+import type { AgentContextUsage } from "../../shared/contextUsage";
 import { outputPartsFromMessage, type RenderedOutputPart } from "../chatOutputModel";
 import { formatChatMessageTime } from "../chatMessageTime";
 import { availableChatProfiles } from "../modelProfileAvailability";
 import {
   getActivePlanPresentation,
   getPlanFailurePresentation,
+  getPlanOutcomePresentation,
 } from "../planFailurePresentation";
 import { AnswerBlock } from "./chat/AnswerBlock";
 import { GoalDetailDrawer } from "./GoalDetailDrawer";
@@ -127,7 +135,7 @@ import { GoalStatusStrip } from "./GoalStatusStrip";
 import { Icon, type IconName } from "./Icon";
 import { useDialogFocusTrap } from "./useDialogFocusTrap";
 import type {
-  ToolApprovalDecisionPayload,
+  ToolApprovalModeState,
   ToolApprovalRequestPayload,
 } from "../../shared/toolApproval";
 import { shouldShowToolApproval } from "../toolApprovalVisibility";
@@ -167,6 +175,8 @@ type ChatSession = {
   title: string;
   summary: string;
   activeGoal?: ChatSessionGoalSummary;
+  recoveryGoal?: ChatSessionGoalSummary;
+  work?: ChatSessionWorkSummary;
   messageCount?: number;
 } & Pick<
   ChatSessionListItem,
@@ -174,6 +184,7 @@ type ChatSession = {
   | "archivedAt"
   | "lastAssistantMessageAt"
   | "tokenUsage"
+  | "context"
   | "workspaceId"
   | "workspaceSummary"
 >;
@@ -266,7 +277,13 @@ export function AgentChatPanel({
   const [attachmentReadPending, setAttachmentReadPending] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [attachmentAnnouncement, setAttachmentAnnouncement] = useState("");
-  const [goalModeEnabled, setGoalModeEnabled] = useState(false);
+  const [toolApprovalMode, setToolApprovalMode] = useState<ToolApprovalModeState>({
+    autoApprovalEnabled: false,
+    goalModeEnabled: false,
+    autoApprovalLocked: false,
+  });
+  const { autoApprovalEnabled, goalModeEnabled, autoApprovalLocked } =
+    toolApprovalMode;
   const [planModeDecisionOpen, setPlanModeDecisionOpen] = useState(false);
   const [goalPlanMode, setGoalPlanMode] = useState<PlanMode>("direct");
   const [planModelAssignments, setPlanModelAssignments] = useState<PlanModelAssignments>({});
@@ -318,13 +335,10 @@ export function AgentChatPanel({
   const [taskActivity, setTaskActivity] = useState<TaskActivityState>(idleTaskActivity);
   const [taskProcessEvents, setTaskProcessEvents] = useState<ChatTaskStatusEvent[]>([]);
   const [goalRunEvents, setGoalRunEvents] = useState<AgentRunEvent[]>([]);
-  const [autoApprovalEnabled, setAutoApprovalEnabled] = useState(false);
-  const [autoApprovalLocked, setAutoApprovalLocked] = useState(false);
   const [pendingToolApprovals, setPendingToolApprovals] = useState<ToolApprovalRequestPayload[]>(
     [],
   );
   const pendingToolApproval = pendingToolApprovals[0] ?? null;
-  const [toolApprovalEvents, setToolApprovalEvents] = useState<ToolApprovalDecisionPayload[]>([]);
   const [activeGoalDetail, setActiveGoalDetail] = useState<Goal | null>(null);
   const [goalDrawerOpen, setGoalDrawerOpen] = useState(false);
   const [goalAcceptanceOperationPending, setGoalAcceptanceOperationPending] = useState<
@@ -431,8 +445,6 @@ export function AgentChatPanel({
     }
     scrollMessageListToBottom();
   }, [
-    chatStreamState.thinkingText,
-    chatStreamState.toolCallPreviews.length,
     goalRunEvents.length,
     messages,
     pendingInputRequest,
@@ -581,20 +593,14 @@ export function AgentChatPanel({
             description,
           }),
         );
-        setSessions((currentSessions) =>
-          currentSessions.map((session) => {
-            if (session.activeGoal?.id !== event.goalId) {
-              return session;
-            }
-            return {
-              ...session,
-              activeGoal: {
-                ...session.activeGoal,
-                status: event.status,
-              },
-            };
-          }),
-        );
+        const currentSummary = activeGoalRef.current;
+        if (currentSummary?.id === event.goalId) {
+          applyGoalSummaryToSessions({
+            ...currentSummary,
+            status: event.status,
+            updatedAt: event.timestamp,
+          });
+        }
         if (goalUiState.shouldClearActiveRequest) {
           activeStatusSessionIdRef.current = null;
           setActiveChatRequest(null);
@@ -617,9 +623,7 @@ export function AgentChatPanel({
     void window.buildingAgent
       .getToolApprovalMode()
       .then((state) => {
-        setAutoApprovalEnabled(state.autoApprovalEnabled);
-        setAutoApprovalLocked(state.autoApprovalLocked);
-        setGoalModeEnabled(state.goalModeEnabled);
+        setToolApprovalMode(state);
       })
       .catch(() => undefined);
     const unsubscribeRequest = window.buildingAgent.onToolApprovalRequest((request) => {
@@ -631,12 +635,9 @@ export function AgentChatPanel({
         setPendingToolApprovals((current) =>
           current.filter((candidate) => candidate.id !== decision.id),
         );
-        setToolApprovalEvents((current) => [...current.slice(-9), decision]);
     });
     const unsubscribeMode = window.buildingAgent.onToolApprovalModeChanged((state) => {
-        setAutoApprovalEnabled(state.autoApprovalEnabled);
-        setAutoApprovalLocked(state.autoApprovalLocked);
-        setGoalModeEnabled(state.goalModeEnabled);
+        setToolApprovalMode(state);
     });
 
     return () => {
@@ -740,10 +741,19 @@ export function AgentChatPanel({
       activeStatusSessionIdRef.current = event.sessionId;
       setSessionId((current) => current ?? event.sessionId);
       setTaskProcessEvents((current) => appendBoundedRuntimeEvent(current, event));
+      if (event.context) {
+        setSessions((currentSessions) =>
+          currentSessions.map((session) =>
+            session.id === event.sessionId
+              ? { ...session, context: event.context }
+              : session,
+          ),
+        );
+      }
       setTaskActivity(buildTaskActivityFromStatusEvent(event));
       setStatus({
         kind: getChatStatusKindFromStatusEvent(event),
-        message: event.message,
+        message: getChatStatusMessageFromStatusEvent(event),
       });
       setWorkPhase(getWorkPhaseFromChatStatusEvent(event));
       if (event.state === "waiting_for_input" && event.inputRequest) {
@@ -942,8 +952,10 @@ export function AgentChatPanel({
         return;
       }
       setActivePlan(latestPlan && latestPlan.status !== "discarded" ? latestPlan : null);
+      const sessionWork = deriveChatSessionWork(loadedSession);
+      const actionableGoal = getActionableGoalSummary(loadedSession);
       const restoredGoalId =
-        loadedSession.activeGoalId ??
+        actionableGoal?.id ??
         latestPlan?.executionGoalId ??
         (!latestPlan ? loadedSession.goalSummaries?.at(-1)?.id : undefined);
       if (
@@ -980,7 +992,11 @@ export function AgentChatPanel({
           return;
         }
         setActiveGoalDetail(loadedGoal);
-        if (loadedGoal) {
+        if (
+          loadedGoal &&
+          sessionWork.source === "goal" &&
+          sessionWork.goalId === loadedGoal.id
+        ) {
           const restoredGoalActivity = buildPersistedGoalActivity({
             status: loadedGoal.status,
             description: loadedGoal.description,
@@ -1110,9 +1126,55 @@ export function AgentChatPanel({
 
   function applyGoalSummaryToSessions(goal: ChatSessionGoalSummary) {
     setSessions((currentSessions) => {
-      return currentSessions.map((session) =>
-        session.activeGoal?.id === goal.id ? { ...session, activeGoal: goal } : session,
-      );
+      return currentSessions.map((session) => {
+        if (
+          session.activeGoal?.id !== goal.id &&
+          session.recoveryGoal?.id !== goal.id
+        ) {
+          return session;
+        }
+        if (isLiveGoalStatus(goal.status)) {
+          return {
+            ...session,
+            activeGoal: goal,
+            recoveryGoal:
+              session.recoveryGoal?.id === goal.id
+                ? undefined
+                : session.recoveryGoal,
+            work: {
+              source: "goal",
+              relationship: "active",
+              goalId: goal.id,
+              status: goal.status,
+              updatedAt: goal.updatedAt ?? new Date().toISOString(),
+            },
+          };
+        }
+        if (isRecoverableGoalStatus(goal.status)) {
+          return {
+            ...session,
+            activeGoal:
+              session.activeGoal?.id === goal.id ? undefined : session.activeGoal,
+            recoveryGoal: goal,
+            work: {
+              source: "goal",
+              relationship: "recovery",
+              goalId: goal.id,
+              status: goal.status,
+              updatedAt: goal.updatedAt ?? new Date().toISOString(),
+            },
+          };
+        }
+        return {
+          ...session,
+          activeGoal:
+            session.activeGoal?.id === goal.id ? undefined : session.activeGoal,
+          recoveryGoal:
+            session.recoveryGoal?.id === goal.id
+              ? undefined
+              : session.recoveryGoal,
+        };
+      });
     });
   }
 
@@ -1128,7 +1190,12 @@ export function AgentChatPanel({
   ]
     .filter(Boolean)
     .join(" ");
-  const activeGoal = activeSession?.activeGoal ?? null;
+  const activeGoal =
+    activeSession?.activeGoal ?? activeSession?.recoveryGoal ?? null;
+  const primaryGoalId =
+    activeSession?.work?.source === "goal"
+      ? activeSession.work.goalId
+      : null;
   activeGoalRef.current = activeGoal;
   const goalAcceptanceContextIdentity = JSON.stringify([
     newChatRequestKey,
@@ -1175,6 +1242,11 @@ export function AgentChatPanel({
     () => buildTaskProcessItems(taskProcessEvents),
     [taskProcessEvents],
   );
+  const latestStreamContext = [...taskProcessEvents]
+    .reverse()
+    .find((event) => event.context)?.context;
+  const activeContextUsage =
+    activeGoalDetail?.contextUsage ?? latestStreamContext ?? activeSession?.context;
   const requirementProcessItems = useMemo(
     () => buildRequirementProcessItems(taskProcessEvents),
     [taskProcessEvents],
@@ -1235,7 +1307,6 @@ export function AgentChatPanel({
     goalNeedsDecision ||
     shouldShowToolApproval(pendingToolApproval, autoApprovalEnabled) ||
     Boolean(pendingInputRequest);
-  const latestToolCallPreview = chatStreamState.toolCallPreviews.at(-1) ?? null;
   const skillMentionMenuVisible =
     !planInputLocked &&
     Boolean(activeSkillMention) &&
@@ -1248,6 +1319,28 @@ export function AgentChatPanel({
       setWorkspaceSearch("");
     }
   }, [planInputLocked]);
+
+  useEffect(() => {
+    if (
+      !planInputLocked ||
+      toolApprovalMode.goalModeEnabled ||
+      !window.buildingAgent
+    ) {
+      return;
+    }
+    // A persisted Plan proves that Goal mode was selected before this
+    // renderer/main-process lifecycle. Re-establish the same autonomy policy
+    // instead of showing a visually locked Goal mode with authorization off.
+    void window.buildingAgent
+      .setToolGoalModeEnabled(true)
+      .then((state) => setToolApprovalMode(state))
+      .catch(() => {
+        setStatus({
+          kind: "error",
+          message: "目标模式已恢复，但自动授权同步失败，请重新打开目标模式。",
+        });
+      });
+  }, [planInputLocked, toolApprovalMode.goalModeEnabled]);
 
   useEffect(() => {
     if (!workspaceMenuOpen && !skillMentionMenuVisible) {
@@ -1298,6 +1391,7 @@ export function AgentChatPanel({
   );
   const progressPanelItems = buildContextProgressItems({
     activeGoalDetail,
+    primaryGoalId,
     requirementProcessItems,
     taskProcessItems,
     workSteps,
@@ -1305,8 +1399,10 @@ export function AgentChatPanel({
   });
   const contextPanelItems = buildContextPanelItems({
     contextCards,
-    memories,
     activeGoal,
+    goalIsRecovery: Boolean(
+      activeGoal && activeSession?.recoveryGoal?.id === activeGoal.id,
+    ),
   });
   const shouldShowActivityCard = taskActivity.kind !== "idle";
   const readinessChecklist = useMemo(
@@ -1336,10 +1432,8 @@ export function AgentChatPanel({
     Boolean(activePlan) ||
     goalModeEnabled ||
     planInputLocked ||
-    Boolean(chatStreamState.thinkingText) ||
-    chatStreamState.toolCallPreviews.length > 0 ||
+    Boolean(activeContextUsage) ||
     goalRunEvents.length > 0 ||
-    toolApprovalEvents.length > 0 ||
     Boolean(pendingToolApproval);
 
   function createMessage(
@@ -2044,56 +2138,70 @@ export function AgentChatPanel({
   }
 
   async function handleSetAutoApprovalEnabled(enabled: boolean) {
-    const previousState = {
-      autoApprovalEnabled,
-      goalModeEnabled,
-      autoApprovalLocked,
-    };
-    setAutoApprovalEnabled(enabled);
-    let state = null;
+    const previousState = toolApprovalMode;
+    setToolApprovalMode({
+      ...previousState,
+      autoApprovalEnabled: enabled,
+    });
     try {
-      state = await window.buildingAgent?.setToolAutoApprovalEnabled(enabled);
+      const state = await window.buildingAgent?.setToolAutoApprovalEnabled(enabled);
+      if (state) setToolApprovalMode(state);
     } catch {
-      state =
-        (await window.buildingAgent?.getToolApprovalMode().catch(() => null)) ?? previousState;
-    }
-    if (state) {
-      setAutoApprovalEnabled(state.autoApprovalEnabled);
-      setAutoApprovalLocked(state.autoApprovalLocked);
-      setGoalModeEnabled(state.goalModeEnabled);
+      const recovered = await window.buildingAgent
+        ?.getToolApprovalMode()
+        .catch(() => null);
+      setToolApprovalMode(recovered ?? previousState);
     }
   }
 
   async function handleSetGoalModeEnabled(enabled: boolean) {
-    if (enabled) {
-      // Entering Goal Mode only selects a read-only Plan Mode. Permission
-      // elevation is deferred until handleConfirmPlan receives an explicit
-      // user confirmation.
-      setGoalModeEnabled(true);
-      setPlanModeDecisionOpen(true);
-      return;
-    }
-    const previousState = {
-      autoApprovalEnabled,
-      goalModeEnabled,
-      autoApprovalLocked,
+    const previousState = toolApprovalMode;
+    const selectedGoalState: ToolApprovalModeState = {
+      autoApprovalEnabled: true,
+      goalModeEnabled: true,
+      autoApprovalLocked: true,
     };
-    setGoalModeEnabled(enabled);
-    setPlanModeDecisionOpen(false);
-    let state = null;
-    try {
-      state = await window.buildingAgent?.setToolGoalModeEnabled(enabled);
-    } catch {
-      state =
-        (await window.buildingAgent?.getToolApprovalMode().catch(() => null)) ?? previousState;
+    if (enabled) {
+      setToolApprovalMode(selectedGoalState);
+      setPlanModeDecisionOpen(true);
+    } else {
+      setPlanModeDecisionOpen(false);
     }
-    if (state) {
-      setAutoApprovalEnabled(state.autoApprovalEnabled);
-      setAutoApprovalLocked(state.autoApprovalLocked);
-      setGoalModeEnabled(state.goalModeEnabled);
+    if (!window.buildingAgent) return;
+
+    try {
+      const state = await window.buildingAgent.setToolGoalModeEnabled(enabled);
+      if (
+        enabled &&
+        (!state.goalModeEnabled ||
+          !state.autoApprovalEnabled ||
+          !state.autoApprovalLocked)
+      ) {
+        throw new Error("Goal autonomy invariant was not established.");
+      }
+      setToolApprovalMode(state);
       if (!enabled && state.goalModeEnabled && state.autoApprovalLocked) {
         setGoalDrawerOpen(true);
       }
+    } catch {
+      const recovered = await window.buildingAgent
+        .getToolApprovalMode()
+        .catch(() => null);
+      if (
+        recovered &&
+        recovered.goalModeEnabled === enabled &&
+        (!enabled ||
+          (recovered.autoApprovalEnabled && recovered.autoApprovalLocked))
+      ) {
+        setToolApprovalMode(recovered);
+        return;
+      }
+      setToolApprovalMode(previousState);
+      if (enabled) setPlanModeDecisionOpen(false);
+      setStatus({
+        kind: "error",
+        message: "目标模式未能开启，请重试；自动授权状态没有改变。",
+      });
     }
   }
 
@@ -2489,7 +2597,6 @@ export function AgentChatPanel({
     }
     submissionInFlightRef.current = true;
 
-    const history = toChatHistory(messages);
     const userMessage = createMessage(
       {
         role: "user",
@@ -2597,7 +2704,6 @@ export function AgentChatPanel({
           : {}),
         ...(selectedSkillName ? { selectedSkillName } : {}),
         ...(selectedWorkspaceId ? { workspaceId: selectedWorkspaceId } : {}),
-        history,
       })
       .catch((error) => ({
         ok: false as const,
@@ -3149,6 +3255,14 @@ export function AgentChatPanel({
             <ChatMessageList messageTimeTick={messageTimeTick} messages={visibleChatMessages} />
         )}
 
+        {(status.kind === "working" || status.kind === "paused") &&
+        taskProcessItems.length > 0 ? (
+          <ConversationProgressDisclosure
+            items={taskProcessItems}
+            status={status}
+          />
+        ) : null}
+
         {hasRuntimeSurfaces ? (
             <div className="runtime-surface-stack" aria-label="需要你的决定">
               {planModeDecisionOpen ? (
@@ -3204,6 +3318,7 @@ export function AgentChatPanel({
               <GoalStatusStrip
                 goal={activeGoal}
                 detail={activeGoalDetail}
+                recovery={activeSession?.recoveryGoal?.id === activeGoal.id}
                 onViewDetail={handleViewGoalProgress}
                   {...(activeGoal.status === "planning" || activeGoal.status === "canceled"
                   ? { onStart: handleStartGoal }
@@ -3604,6 +3719,7 @@ export function AgentChatPanel({
           {activeGoal ? (
             <GoalRailStatusCard
               goal={activeGoal}
+              recovery={activeSession?.recoveryGoal?.id === activeGoal.id}
               onPause={activeGoal.status === "executing" ? () => void handlePauseGoal() : undefined}
               onView={handleViewGoalProgress}
             />
@@ -3617,17 +3733,11 @@ export function AgentChatPanel({
               onEdit={planInputLocked ? undefined : () => setPlanModeDecisionOpen(true)}
             />
           ) : null}
-          {chatStreamState.thinkingText ||
-          chatStreamState.toolCallPreviews.length > 0 ||
-          goalRunEvents.length > 0 ||
-          toolApprovalEvents.length > 0 ||
+          {goalRunEvents.length > 0 ||
           activePlan?.status === "drafting" ? (
             <ContextRuntimeSummary
               activePlan={activePlan}
               goalRunEvents={goalRunEvents}
-              thinkingText={chatStreamState.thinkingText}
-              toolApprovalEvents={toolApprovalEvents}
-              toolCallPreviews={chatStreamState.toolCallPreviews}
             />
           ) : null}
         {shouldShowActivityCard ? (
@@ -3645,6 +3755,11 @@ export function AgentChatPanel({
             }
           />
         ) : null}
+        <SessionContextStatusCard
+          context={activeContextUsage}
+          messageCount={activeSession?.messageCount ?? messages.length}
+          tokenUsage={activeSession?.tokenUsage}
+        />
         <section className="kimi-side-card">
           <header>
             <strong>进度</strong>
@@ -3660,7 +3775,7 @@ export function AgentChatPanel({
         </section>
         <section className="kimi-side-card">
           <header>
-            <strong>{hasActiveSubagents ? "子代理" : "上下文"}</strong>
+            <strong>{hasActiveSubagents ? "子代理" : "运行环境"}</strong>
           </header>
           {hasActiveSubagents ? (
             <SubagentStatusList items={subagentProcessItems} />
@@ -3749,11 +3864,23 @@ function PlanModeDecisionCard(props: {
             .map((role, index) => `${role} ${selectedProfileNames[index] ?? "未配置"}`)
             .join(" · ")
         : selectedProfileNames.join(" · ");
+  const fallbackProfileName =
+    profiles.find((profile) => profile.id === fallbackProfileId)?.name ??
+    "默认模型";
 
   function updateAssignment(role: "direct" | "a" | "b" | "c", profileId: string) {
     props.onAssignmentsChange({
       ...props.assignments,
       [role]: profileId,
+    });
+  }
+
+  function useOneModelForDebate() {
+    props.onAssignmentsChange({
+      ...props.assignments,
+      a: fallbackProfileId,
+      b: fallbackProfileId,
+      c: fallbackProfileId,
     });
   }
 
@@ -3821,30 +3948,61 @@ function PlanModeDecisionCard(props: {
           </button>
         </div>
         {profiles.length ? (
-          <div className="plan-model-assignment-grid">
+          <section className="plan-model-assignment-section" aria-label="规划模型分配">
+            <header>
+              <div>
+                <strong>{props.mode === "debate" ? "分配 Debate 角色" : "选择规划模型"}</strong>
+                <span>
+                  {props.mode === "debate"
+                    ? "每个角色独立运行，可以使用同一模型或不同模型。"
+                    : "使用已验证的 Chat 模型生成只读计划。"}
+                </span>
+              </div>
+              {props.mode === "debate" ? (
+                <button
+                  className="plan-model-unify-action"
+                  onClick={useOneModelForDebate}
+                  type="button"
+                >
+                  全部使用 {fallbackProfileName}
+                </button>
+              ) : null}
+            </header>
+            <div className={`plan-model-assignment-grid is-${props.mode}`}>
             {props.mode === "direct" ? (
               <PlanModelSelect
                 catalog={props.catalog}
-                label="规划 Agent"
+                description="负责理解目标并生成可确认的执行计划"
                 profileId={props.assignments.direct ?? fallbackProfileId}
                 profiles={profiles}
+                role="direct"
+                title="规划 Agent"
                 onChange={(profileId) => updateAssignment("direct", profileId)}
               />
             ) : (
               (["a", "b", "c"] as const).map((role) => (
                 <PlanModelSelect
                   catalog={props.catalog}
-                  key={role}
-                  label={
-                    role === "a" ? "A · 方案提出" : role === "b" ? "B · 对抗审查" : "C · 独立综合"
+                  description={
+                    role === "a"
+                      ? "提出方案，并吸收有效质疑"
+                      : role === "b"
+                        ? "寻找漏洞、反例和遗漏风险"
+                        : "独立综合，形成最终可执行计划"
                   }
+                  key={role}
                   profileId={props.assignments[role] ?? fallbackProfileId}
                   profiles={profiles}
+                  role={role}
+                  title={
+                    role === "a" ? "方案提出" : role === "b" ? "对抗审查" : "独立综合"
+                  }
                   onChange={(profileId) => updateAssignment(role, profileId)}
                 />
               ))
             )}
-          </div>
+            </div>
+          </section>
         ) : (
           <button className="plan-model-missing" onClick={props.onOpenModelSettings} type="button">
             尚无可用 Chat 模型档案，前往模型设置
@@ -3872,33 +4030,61 @@ function PlanModeDecisionCard(props: {
 }
 
 function PlanModelSelect(props: {
-  label: string;
+  role: "direct" | "a" | "b" | "c";
+  title: string;
+  description: string;
   profileId: string;
   profiles: ModelProfile[];
   catalog: PublicModelCatalog | null;
   onChange: (profileId: string) => void;
 }) {
+  const profile = props.profiles.find(
+    (candidate) => candidate.id === props.profileId,
+  );
+  const connection = props.catalog?.connections.find(
+    (candidate) => candidate.id === profile?.connectionId,
+  );
+  const descriptor = props.catalog?.descriptors.find(
+    (candidate) => candidate.kind === connection?.providerKind,
+  );
+  const roleLabel = props.role === "direct" ? "D" : props.role.toUpperCase();
+
   return (
-    <label>
-      <span>{props.label}</span>
-      <select
-        onChange={(event) => props.onChange(event.currentTarget.value)}
-        value={props.profileId}
-      >
-        {props.profiles.map((profile) => {
-          const connection = props.catalog?.connections.find(
-            (candidate) => candidate.id === profile.connectionId,
-          );
-          const descriptor = props.catalog?.descriptors.find(
-            (candidate) => candidate.kind === connection?.providerKind,
-          );
-          return (
-            <option key={profile.id} value={profile.id}>
-              {profile.name} · {descriptor?.title ?? connection?.providerKind}
-            </option>
-          );
-        })}
-      </select>
+    <label className={`plan-model-role-card is-${props.role}`}>
+      <span className="plan-model-role-heading">
+        <span aria-hidden="true" className="plan-model-role-badge">
+          {roleLabel}
+        </span>
+        <span>
+          <strong>{props.title}</strong>
+          <small>{props.description}</small>
+        </span>
+      </span>
+      <span className="plan-model-select-shell">
+        <select
+          aria-label={`${props.title}模型`}
+          onChange={(event) => props.onChange(event.currentTarget.value)}
+          value={props.profileId}
+        >
+          {props.profiles.map((candidate) => {
+            const candidateConnection = props.catalog?.connections.find(
+              (item) => item.id === candidate.connectionId,
+            );
+            const candidateDescriptor = props.catalog?.descriptors.find(
+              (item) => item.kind === candidateConnection?.providerKind,
+            );
+            return (
+              <option key={candidate.id} value={candidate.id}>
+                {candidate.name} · {candidateDescriptor?.title ?? candidateConnection?.providerKind}
+              </option>
+            );
+          })}
+        </select>
+      </span>
+      <small className="plan-model-current-meta">
+        {descriptor?.title ?? connection?.providerKind ?? "模型服务"}
+        {profile?.modelId ? ` · ${profile.modelId}` : ""}
+      </small>
     </label>
   );
 }
@@ -3919,6 +4105,7 @@ function PlanConfirmationCard(props: {
     .reverse()
     .find((stage) => stage.status === "failed");
   const failurePresentation = getPlanFailurePresentation(props.plan);
+  const outcomePresentation = getPlanOutcomePresentation(props.plan);
   const chatProfiles = availableChatProfiles(props.catalog);
   const failedProfileId =
     failedRound?.modelBinding.profileId ??
@@ -3927,9 +4114,6 @@ function PlanConfirmationCard(props: {
   const [replacementProfileId, setReplacementProfileId] = useState(failedProfileId);
   const artifact = props.plan.finalArtifact;
   const [planDetailsOpen, setPlanDetailsOpen] = useState(false);
-  const activePlanningStages = (props.plan.planningStages ?? []).filter(
-    (stage) => stage.status !== "invalidated",
-  );
   const questions = [
     ...(props.plan.planningBrief?.unresolvedQuestions ?? []),
     ...(artifact?.unresolvedQuestions ?? []),
@@ -4024,226 +4208,35 @@ function PlanConfirmationCard(props: {
         </div>
       </header>
 
-      {props.plan.status === "awaiting_input" ? (
-        <p className="plan-input-routing-note" role="status">
-          在下方输入补充信息后会重新规划；确认或丢弃前，本会话不能退出只读 Plan Mode。
-        </p>
-      ) : props.plan.status === "awaiting_confirmation" ? (
-        <p className="plan-input-routing-note">
-          可以直接确认执行；如果在下方输入修改意见，系统会保持只读并重新运行完整规划流程。
-        </p>
-      ) : props.plan.status === "canceled" ? (
-        <p className="plan-input-routing-note" role="status">
-          本次规划已中断，但会话仍保持只读 Plan Mode；请先丢弃计划，再决定是否退出目标模式。
-        </p>
-      ) : null}
+      <section
+        className={`plan-outcome-summary is-${outcomePresentation.kind}`}
+        aria-label="规划结果"
+        role="status"
+      >
+        <span aria-hidden="true" className="plan-outcome-mark">
+          {outcomePresentation.kind === "success"
+            ? "✓"
+            : outcomePresentation.kind === "failure"
+              ? "!"
+              : "→"}
+        </span>
+        <div>
+          <strong>{outcomePresentation.title}</strong>
+          <p>{outcomePresentation.detail}</p>
+          <small>
+            <b>下一步</b>
+            {outcomePresentation.nextAction}
+          </small>
+        </div>
+      </section>
 
-      {props.plan.schemaVersion === 2 ? (
-        <details className="plan-progress-disclosure">
-          <summary>
-            规划内核 · {props.plan.taskProfile?.investigationDepth ?? "standard"} 调查 ·{" "}
-            {activePlanningStages.filter(
-              (stage) => stage.status === "completed",
-            ).length}
-            /{activePlanningStages.length} 阶段完成
-          </summary>
-          <ol className="debate-round-timeline" aria-label="规划内核阶段">
-            {activePlanningStages.map((stage) => (
-                <li className={`is-${stage.status}`} key={stage.id}>
-                  <strong>{stage.kind}</strong>
-                  <span>
-                    {formatDebateRoundStatus(
-                      stage.status === "failed"
-                        ? "failed"
-                        : stage.status === "running"
-                          ? "running"
-                          : stage.status === "completed"
-                            ? "completed"
-                            : "pending",
-                    )}
-                  </span>
-                  <small>
-                    {stage.modelBinding?.modelId ?? "代码阶段"}
-                    {stage.latencyMs !== undefined
-                      ? ` · ${stage.latencyMs} ms`
-                      : ""}
-                  </small>
-                </li>
-              ))}
-          </ol>
-        </details>
-      ) : null}
-
-      {props.plan.mode === "debate" ? (
-        <details className="plan-progress-disclosure">
-          <summary>
-            辩论进度 · {props.plan.rounds.filter((round) => round.status === "completed").length}
-            /5 轮完成
-          </summary>
-          <ol className="debate-round-timeline" aria-label="辩论轮次">
-            {(["a1", "b1", "a2", "b2", "c"] as const).map((kind) => {
-              const round = [...props.plan.rounds]
-                .reverse()
-                .find((candidate) => candidate.kind === kind && candidate.status !== "invalidated");
-              return (
-                <li
-                  className={`is-${round?.status ?? "pending"}`}
-                  key={kind}
-                  title={
-                    round
-                      ? `${round.modelBinding.providerKind} · ${round.modelBinding.modelId}`
-                      : "等待开始"
-                  }
-                >
-                  <strong>{kind.toUpperCase()}</strong>
-                  <span>{formatDebateRoundStatus(round?.status ?? "pending")}</span>
-                  <small>
-                    {round
-                      ? `${round.modelBinding.modelId}${
-                          round.latencyMs !== undefined ? ` · ${round.latencyMs} ms` : ""
-                        }`
-                      : "—"}
-                  </small>
-                </li>
-              );
-            })}
-          </ol>
-        </details>
-      ) : null}
-
-      {props.plan.schemaVersion === 2 ? (
-        <section className="plan-kernel-summary" aria-label="规划合同与 Skill 路由">
-          <div>
-            <span>任务合同</span>
-            <strong>{props.plan.taskContract.objective}</strong>
-            <small>
-              {(props.plan.taskContract.deliverables ?? []).join("；") ||
-                "等待调查明确交付物"}
-            </small>
-          </div>
-          <div>
-            <span>Skill 路由</span>
-            <strong>
-              {props.plan.skillDecision?.selectedSkillName
-                ? `@${props.plan.skillDecision.selectedSkillName}`
-                : "无 Skill"}
-              {props.plan.skillDecision
-                ? ` · ${props.plan.skillDecision.source}`
-                : ""}
-            </strong>
-            <small>{props.plan.skillDecision?.reason ?? "等待 Skill 路由"}</small>
-            {props.plan.skillDecision?.missingInputFields.length ? (
-              <small>
-                缺少输入：{props.plan.skillDecision.missingInputFields.join("、")}
-              </small>
-            ) : null}
-            {props.plan.skillDecision &&
-            Object.keys(props.plan.skillDecision.inputValues).length ? (
-              <small>
-                输入：
-                {Object.entries(props.plan.skillDecision.inputValues)
-                  .map(([name, value]) => `${name}=${String(value)}`)
-                  .join("；")}
-              </small>
-            ) : null}
-            {props.plan.skillDecision?.permissions ? (
-              <>
-                <small>
-                  文件读取：
-                  {props.plan.skillDecision.permissions.fileRead.join("、") ||
-                    "无"}
-                </small>
-                <small>
-                  文件写入：
-                  {props.plan.skillDecision.permissions.fileWrite.join("、") ||
-                    "无"}
-                </small>
-                <small>
-                  Shell：
-                  {props.plan.skillDecision.permissions.shellCommands.join(
-                    "、",
-                  ) || "无"}
-                </small>
-                <small>
-                  Web：
-                  {props.plan.skillDecision.permissions.webSearch
-                    ? "允许搜索"
-                    : "不允许搜索"}
-                  {props.plan.skillDecision.permissions.webFetchDomains.length
-                    ? `；域名 ${props.plan.skillDecision.permissions.webFetchDomains.join(
-                        "、",
-                      )}`
-                    : ""}
-                </small>
-                <small>
-                  Memory：读{" "}
-                  {props.plan.skillDecision.permissions.memoryRead
-                    ? "允许"
-                    : "禁止"}
-                  ；写{" "}
-                  {props.plan.skillDecision.permissions.memoryWrite
-                    ? "允许"
-                    : "禁止"}
-                </small>
-              </>
-            ) : null}
-          </div>
-          <div>
-            <span>调查证据</span>
-            <strong>{props.plan.evidence.length} 条</strong>
-            <ul className="plan-evidence-list">
-              {props.plan.evidence.map((item) => (
-                <li key={item.id}>
-                  <code>{item.id}</code>
-                  <small>
-                    {item.title}
-                    {item.sourceRef ? ` · ${item.sourceRef}` : ""}
-                  </small>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </section>
-      ) : null}
-
-      {props.plan.qualityReport?.blockingIssues.length ? (
-        <section className="plan-quality-issues" aria-label="质量门禁问题">
-          <strong>质量门禁问题</strong>
-          <ul>
-            {props.plan.qualityReport.blockingIssues.map((issue, index) => (
-              <li
-                key={`${issue.code}-${issue.checkId ?? issue.milestoneId ?? index}`}
-              >
-                {issue.message}
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-      {props.plan.qualityReport?.warnings.length ? (
-        <section className="plan-quality-warnings" aria-label="质量门禁警告">
-          <strong>质量门禁警告</strong>
-          <ul>
-            {props.plan.qualityReport.warnings.map((issue, index) => (
-              <li
-                key={`${issue.code}-${issue.checkId ?? issue.milestoneId ?? index}`}
-              >
-                {issue.message}
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
+      <PlanTechnicalDetails plan={props.plan} />
 
       {!artifact ? questionForm : null}
 
       {artifact ? (
         <div className="plan-artifact-summary">
           <p>{artifact.summary || artifact.objective}</p>
-          <div className="plan-gate-reason">
-            <strong>{formatPlanGate(artifact.actionGate)}</strong>
-            <span>{artifact.gateReason}</span>
-          </div>
           {questionForm}
           <details
             className="plan-artifact-disclosure"
@@ -4309,12 +4302,7 @@ function PlanConfirmationCard(props: {
             </div>
           </details>
         </div>
-      ) : (
-        <p className="plan-empty-artifact">
-          {failurePresentation?.detail ??
-            "计划正在生成或等待恢复。"}
-        </p>
-      )}
+      ) : null}
 
       {failedRound || failedPlanningStage ? (
         <section className="plan-recovery-panel" aria-label="失败轮次恢复">
@@ -4323,7 +4311,7 @@ function PlanConfirmationCard(props: {
               {failurePresentation?.title ??
                 `${(failedRound?.kind ?? failedPlanningStage?.kind ?? "planning").toUpperCase()} 未完成`}
             </strong>
-            <span>{failurePresentation?.detail}</span>
+            <span>{failurePresentation?.nextAction}</span>
           </div>
           <label>
             <span>重试模型</span>
@@ -4351,56 +4339,6 @@ function PlanConfirmationCard(props: {
         </section>
       ) : null}
 
-      <details className="plan-audit-disclosure">
-        <summary>
-          审计记录 · {props.plan.rounds.length} 轮 · {props.plan.evidence.length} 条证据
-        </summary>
-        <div className="plan-audit-grid">
-          <section>
-            <h4>公开证据</h4>
-            <ul>
-              {props.plan.evidence.map((evidence) => (
-                <li key={evidence.id}>
-                  <strong>{evidence.title}</strong>
-                  <span>{evidence.summary}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
-          {artifact?.claimLedger.length ? (
-            <section>
-              <h4>Claim Ledger</h4>
-              <ul>
-                {artifact.claimLedger.map((claim) => (
-                  <li key={claim.id}>
-                    <strong>{claim.claim}</strong>
-                    <span>
-                      {claim.status} · {Math.round(claim.confidence * 100)}%
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ) : null}
-          {artifact?.minorityOpinion.length ? (
-            <section>
-              <h4>少数意见</h4>
-              <ul>
-                {artifact.minorityOpinion.map((opinion) => (
-                  <li key={opinion}>{opinion}</li>
-                ))}
-              </ul>
-            </section>
-          ) : null}
-          {props.plan.projection ? (
-            <p>
-              Markdown 投影：{props.plan.projection.path} ·{" "}
-              {props.plan.projection.sha256.slice(0, 12)}
-            </p>
-          ) : null}
-        </div>
-      </details>
-
       <div className="plan-confirmation-actions">
         {canDiscard ? (
           <button
@@ -4412,20 +4350,200 @@ function PlanConfirmationCard(props: {
             {props.pendingAction === "discard" ? "丢弃中" : "丢弃计划"}
           </button>
         ) : null}
-        <button
-          className="primary-action"
-          disabled={!canConfirm || Boolean(props.pendingAction)}
-          onClick={props.onConfirm}
-          type="button"
-        >
-          {props.pendingAction === "confirm"
-            ? "校验并启动中"
-            : canConfirm
-              ? "确认计划并开始执行"
-              : "当前计划不可确认"}
-        </button>
+        {canConfirm ? (
+          <button
+            className="primary-action"
+            disabled={Boolean(props.pendingAction)}
+            onClick={props.onConfirm}
+            type="button"
+          >
+            {props.pendingAction === "confirm"
+              ? "校验并启动中"
+              : "确认计划并开始执行"}
+          </button>
+        ) : null}
       </div>
     </section>
+  );
+}
+
+function PlanTechnicalDetails(props: { plan: PlanRecord }) {
+  const activePlanningStages = (props.plan.planningStages ?? []).filter(
+    (stage) => stage.status !== "invalidated",
+  );
+  const activeRounds = props.plan.rounds.filter(
+    (round) => round.status !== "invalidated",
+  );
+  const failure = getPlanFailurePresentation(props.plan);
+  const artifact = props.plan.finalArtifact;
+  const completedSteps =
+    activePlanningStages.filter((stage) => stage.status === "completed").length +
+    activeRounds.filter((round) => round.status === "completed").length;
+  const totalSteps = activePlanningStages.length + activeRounds.length;
+
+  return (
+    <details className="plan-technical-disclosure">
+      <summary>
+        技术详情（排障时使用）
+        {totalSteps ? ` · ${completedSteps}/${totalSteps} 步骤完成` : ""}
+      </summary>
+      <div className="plan-technical-body">
+        {failure ? (
+          <section className="plan-technical-error">
+            <strong>失败记录</strong>
+            <code>{failure.technicalDetail}</code>
+          </section>
+        ) : null}
+
+        {activePlanningStages.length ? (
+          <section>
+            <h4>规划阶段</h4>
+            <ol className="debate-round-timeline" aria-label="规划内核阶段">
+              {activePlanningStages.map((stage) => (
+                <li className={`is-${stage.status}`} key={stage.id}>
+                  <strong>{stage.kind}</strong>
+                  <span>
+                    {formatDebateRoundStatus(
+                      stage.status === "failed"
+                        ? "failed"
+                        : stage.status === "running"
+                          ? "running"
+                          : stage.status === "completed"
+                            ? "completed"
+                            : "pending",
+                    )}
+                  </span>
+                  <small>
+                    {stage.modelBinding?.modelId ?? "代码阶段"}
+                    {stage.latencyMs !== undefined ? ` · ${stage.latencyMs} ms` : ""}
+                  </small>
+                </li>
+              ))}
+            </ol>
+          </section>
+        ) : null}
+
+        {props.plan.mode === "debate" ? (
+          <section>
+            <h4>Debate 轮次</h4>
+            <ol className="debate-round-timeline" aria-label="辩论轮次">
+              {(["a1", "b1", "a2", "b2", "c"] as const).map((kind) => {
+                const round = [...activeRounds]
+                  .reverse()
+                  .find((candidate) => candidate.kind === kind);
+                return (
+                  <li className={`is-${round?.status ?? "pending"}`} key={kind}>
+                    <strong>{kind.toUpperCase()}</strong>
+                    <span>{formatDebateRoundStatus(round?.status ?? "pending")}</span>
+                    <small>
+                      {round
+                        ? `${round.modelBinding.providerKind} · ${round.modelBinding.modelId}${
+                            round.latencyMs !== undefined ? ` · ${round.latencyMs} ms` : ""
+                          }`
+                        : "等待开始"}
+                    </small>
+                  </li>
+                );
+              })}
+            </ol>
+          </section>
+        ) : null}
+
+        <section className="plan-kernel-summary" aria-label="规划合同与 Skill 路由">
+          <div>
+            <span>任务合同</span>
+            <strong>{props.plan.taskContract.objective}</strong>
+            <small>
+              {(props.plan.taskContract.deliverables ?? []).join("；") || "未声明交付物"}
+            </small>
+          </div>
+          <div>
+            <span>Skill 路由</span>
+            <strong>
+              {props.plan.skillDecision?.selectedSkillName
+                ? `@${props.plan.skillDecision.selectedSkillName}`
+                : "无 Skill"}
+            </strong>
+            <small>{props.plan.skillDecision?.reason ?? "未记录 Skill 路由"}</small>
+          </div>
+          <div>
+            <span>调查证据</span>
+            <strong>{props.plan.evidence.length} 条</strong>
+            <ul className="plan-evidence-list">
+              {props.plan.evidence.map((item) => (
+                <li key={item.id}>
+                  <code>{item.id}</code>
+                  <small>{item.title}</small>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
+
+        {props.plan.qualityReport?.blockingIssues.length ? (
+          <section className="plan-quality-issues" aria-label="质量门禁问题">
+            <strong>质量门禁问题</strong>
+            <ul>
+              {props.plan.qualityReport.blockingIssues.map((issue, index) => (
+                <li key={`${issue.code}-${issue.checkId ?? issue.milestoneId ?? index}`}>
+                  {issue.message}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
+        {props.plan.qualityReport?.warnings.length ? (
+          <section className="plan-quality-warnings" aria-label="质量门禁警告">
+            <strong>质量门禁警告</strong>
+            <ul>
+              {props.plan.qualityReport.warnings.map((issue, index) => (
+                <li key={`${issue.code}-${issue.checkId ?? issue.milestoneId ?? index}`}>
+                  {issue.message}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
+        {artifact?.claimLedger.length || artifact?.minorityOpinion.length ? (
+          <section className="plan-audit-grid" aria-label="规划审计记录">
+            {artifact.claimLedger.length ? (
+              <div>
+                <h4>Claim Ledger</h4>
+                <ul>
+                  {artifact.claimLedger.map((claim) => (
+                    <li key={claim.id}>
+                      <strong>{claim.claim}</strong>
+                      <span>
+                        {claim.status} · {Math.round(claim.confidence * 100)}%
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {artifact.minorityOpinion.length ? (
+              <div>
+                <h4>少数意见</h4>
+                <ul>
+                  {artifact.minorityOpinion.map((opinion) => (
+                    <li key={opinion}>{opinion}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+
+        {props.plan.projection ? (
+          <p className="plan-projection-ref">
+            Markdown 投影：{props.plan.projection.path} ·{" "}
+            {props.plan.projection.sha256.slice(0, 12)}
+          </p>
+        ) : null}
+      </div>
+    </details>
   );
 }
 
@@ -4688,12 +4806,16 @@ type ContextProgressItem = {
 
 function buildContextProgressItems(options: {
   activeGoalDetail: Goal | null;
+  primaryGoalId: string | null;
   requirementProcessItems: RequirementProcessItem[];
   taskProcessItems: ReturnType<typeof buildTaskProcessItems>;
   workSteps: AgentWorkStep[];
   status: ChatStatus;
 }): ContextProgressItem[] {
-  if (options.activeGoalDetail?.milestones.length) {
+  if (
+    options.activeGoalDetail?.id === options.primaryGoalId &&
+    options.activeGoalDetail.milestones.length
+  ) {
     return options.activeGoalDetail.milestones.map((milestone, index) => ({
       id: milestone.id,
       label: `${String(index + 1).padStart(2, "0")} ${milestone.description}`,
@@ -4751,8 +4873,8 @@ function mapMilestoneStatusToContextStatus(
 
 function buildContextPanelItems(options: {
   contextCards: Array<{ label: string; value: string; detail: string }>;
-  memories: MemoryRecord[];
   activeGoal: ChatSessionGoalSummary | null;
+  goalIsRecovery: boolean;
 }) {
   const baseItems = options.contextCards.map((card) => ({
     id: `card-${card.label}`,
@@ -4765,19 +4887,16 @@ function buildContextPanelItems(options: {
         {
           id: `goal-${options.activeGoal.id}`,
           icon: "goal" as IconName,
-          label: "当前目标",
-          detail: `${translateGoalStatus(options.activeGoal.status)} · ${options.activeGoal.description}`,
+          label: options.goalIsRecovery ? "待恢复目标" : "当前目标",
+          detail: `${
+            options.goalIsRecovery
+              ? "可继续原目标"
+              : translateGoalStatus(options.activeGoal.status)
+          } · ${options.activeGoal.description}`,
         },
       ]
     : [];
-  const memoryItems = options.memories.slice(0, 3).map((memory) => ({
-    id: `memory-${memory.id}`,
-    icon: "memory" as IconName,
-    label: memory.title,
-    detail: memory.content,
-  }));
-
-  return [...goalItem, ...baseItems, ...memoryItems].slice(0, 8);
+  return [...goalItem, ...baseItems].slice(0, 8);
 }
 
 function AgentWorkTimeline({
@@ -4825,14 +4944,17 @@ function AgentWorkTimeline({
 
 function GoalRailStatusCard(props: {
   goal: ChatSessionGoalSummary;
+  recovery?: boolean;
   onView: () => void;
   onPause?: () => void;
 }) {
   return (
     <section className="kimi-side-card goal-rail-status-card">
       <header>
-        <strong>目标</strong>
-        <span>{translateGoalStatus(props.goal.status)}</span>
+        <strong>{props.recovery ? "待恢复目标" : "目标"}</strong>
+        <span>
+          {props.recovery ? "可继续原目标" : translateGoalStatus(props.goal.status)}
+        </span>
       </header>
       <p>{props.goal.description}</p>
       <div>
@@ -4889,19 +5011,15 @@ function PlanModeStatusCard(props: {
 
 function ContextRuntimeSummary(props: {
   activePlan: PlanRecord | null;
-  thinkingText: string;
-  toolCallPreviews: ChatToolCallPreview[];
   goalRunEvents: AgentRunEvent[];
-  toolApprovalEvents: ToolApprovalDecisionPayload[];
 }) {
-  const latestTool = props.toolCallPreviews.at(-1) ?? null;
-  const latestGoalEvent = props.goalRunEvents.at(-1) ?? null;
-  const latestApproval = props.toolApprovalEvents.at(-1) ?? null;
+  const publicGoalEvents = props.goalRunEvents.filter(
+    (event) =>
+      !/tool (?:called|completed|failed)|calling tool/i.test(event.message),
+  );
+  const latestGoalEvent = publicGoalEvents.at(-1) ?? null;
   const count =
-    Number(Boolean(props.thinkingText)) +
-    props.toolCallPreviews.length +
-    props.goalRunEvents.length +
-    props.toolApprovalEvents.length;
+    Number(props.activePlan?.status === "drafting") + publicGoalEvents.length;
   return (
     <section className="kimi-side-card context-runtime-summary">
       <header>
@@ -4920,15 +5038,6 @@ function ContextRuntimeSummary(props: {
             </p>
           </div>
         ) : null}
-        {latestTool ? (
-          <div>
-            <span className="task-activity-dot" aria-hidden="true" />
-            <p>
-              <strong>{latestTool.toolName}</strong>
-              <small>{getLatestRuntimeLine(latestTool.argumentsText)}</small>
-            </p>
-          </div>
-        ) : null}
         {latestGoalEvent ? (
           <div>
             <span className="task-activity-dot" aria-hidden="true" />
@@ -4938,33 +5047,123 @@ function ContextRuntimeSummary(props: {
             </p>
           </div>
         ) : null}
-        {latestApproval ? (
-          <div>
-            <span className="task-activity-dot" aria-hidden="true" />
-            <p>
-              <strong>
-                {latestApproval.automatic ? "自动授权" : "授权处理"} · {latestApproval.toolName}
-              </strong>
-              <small>{latestApproval.approved ? "已同意" : "已拒绝"}</small>
-            </p>
-          </div>
+      </div>
+    </section>
+  );
+}
+
+function ConversationProgressDisclosure(props: {
+  items: ReturnType<typeof buildTaskProcessItems>;
+  status: ChatStatus;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const visibleItems = expanded ? props.items.slice(0, 8) : props.items.slice(0, 3);
+  return (
+    <section
+      className={`conversation-progress is-${props.status.kind}`}
+      aria-label="当前任务关键进展"
+      aria-live="polite"
+    >
+      <header>
+        <span className="task-activity-dot" aria-hidden="true" />
+        <div>
+          <strong>{props.status.kind === "paused" ? "等待你的决定" : "正在推进"}</strong>
+          <p>{props.items[0]?.message ?? props.status.message}</p>
+        </div>
+        {props.items.length > 3 ? (
+          <button
+            type="button"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((value) => !value)}
+          >
+            {expanded ? "收起" : "查看进展"}
+          </button>
+        ) : null}
+      </header>
+      <ol>
+        {visibleItems.map((item) => (
+          <li key={item.id}>
+            <time>{item.time}</time>
+            <strong>{item.label}</strong>
+            <span>{item.message}</span>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function SessionContextStatusCard(props: {
+  context: AgentContextUsage | undefined;
+  messageCount: number;
+  tokenUsage: ChatSessionListItem["tokenUsage"] | undefined;
+}) {
+  const percent = props.context
+    ? Math.round(props.context.occupancyRatio * 100)
+    : 0;
+  const breakdown = props.tokenUsage?.breakdown;
+  return (
+    <section className="kimi-side-card session-context-status-card" aria-label="会话上下文状态">
+      <header>
+        <strong>会话上下文</strong>
+        <span className="is-isolated">独立</span>
+      </header>
+      <div className="session-context-token-total">
+        <span>累计 Token</span>
+        <strong>{formatCompactTokenCount(props.tokenUsage?.totalTokens ?? 0)}</strong>
+        {props.tokenUsage?.estimated ? <small>估算</small> : null}
+      </div>
+      <div className="session-context-occupancy">
+        <div>
+          <span>当前占用</span>
+          <strong>{props.context ? `${percent}%` : "等待运行"}</strong>
+        </div>
+        <div className="session-context-meter" aria-label={`上下文占用 ${percent}%`}>
+          <span style={{ width: `${percent}%` }} />
+        </div>
+        {props.context ? (
+          <small>
+            {formatCompactTokenCount(props.context.estimatedTokens)} / {formatCompactTokenCount(props.context.tokenBudget)}
+          </small>
         ) : null}
       </div>
-      {props.thinkingText ? (
-        <RuntimeTextDisclosure
-          className="context-thinking-disclosure"
-          label="思考"
-          text={props.thinkingText}
-        />
+      <dl className="session-context-facts">
+        <div>
+          <dt>范围</dt>
+          <dd>当前会话 + 全局记忆</dd>
+        </div>
+        <div>
+          <dt>消息</dt>
+          <dd>{props.context?.messageCount ?? props.messageCount} 条进入运行上下文</dd>
+        </div>
+        <div>
+          <dt>压缩</dt>
+          <dd>
+            {props.context?.compactionCount
+              ? `${props.context.compactionCount} 次`
+              : "尚未压缩"}
+          </dd>
+        </div>
+      </dl>
+      {props.context?.lastCompaction ? (
+        <p className="session-context-compaction">
+          最近压缩 {formatCompactTokenCount(props.context.lastCompaction.beforeTokens)} → {formatCompactTokenCount(props.context.lastCompaction.afterTokens)}
+        </p>
       ) : null}
-      {props.toolCallPreviews.length > 0 ? (
-        <ToolCallPreviewDisclosure
-          latestToolCallPreview={latestTool}
-          previews={props.toolCallPreviews}
-        />
+      {breakdown ? (
+        <p className="session-context-breakdown">
+          Chat {formatCompactTokenCount(breakdown.chatTokens)} · Plan {formatCompactTokenCount(breakdown.planTokens)} · Goal {formatCompactTokenCount(breakdown.goalTokens)}
+        </p>
       ) : null}
     </section>
   );
+}
+
+function formatCompactTokenCount(value: number): string {
+  const count = Math.max(0, Math.floor(value));
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}m`;
+  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}k`;
+  return String(count);
 }
 
 function ContextActivityCard({
@@ -4984,9 +5183,6 @@ function ContextActivityCard({
     <section className={`context-activity-card is-${activity.kind}`}>
       <header>
         <span className="context-activity-pill">{getActivityKindLabel(activity.kind)}</span>
-        {typeof activity.toolCallsExecuted === "number" ? (
-          <small>工具 {activity.toolCallsExecuted}</small>
-        ) : null}
       </header>
       <div className="context-activity-main">
         <span className="task-activity-dot" aria-hidden="true" />
@@ -4996,9 +5192,6 @@ function ContextActivityCard({
         </div>
       </div>
       <div className="context-activity-meta">
-        {typeof activity.toolCallsExecuted === "number" && (
-          <span>工具调用 {activity.toolCallsExecuted}</span>
-        )}
         {onContinue && (
           <button type="button" onClick={onContinue}>
             {activity.actionLabel ?? "继续执行"}
@@ -5241,101 +5434,6 @@ function renderGuidedSkillInputControl(
   }
 
   return null;
-}
-
-function RuntimeTextDisclosure({
-  className,
-  label,
-  text,
-}: {
-  className: string;
-  label: string;
-  text: string;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const summary = getLatestRuntimeLine(text);
-
-  return (
-    <section
-      className={`${className} runtime-disclosure ${expanded ? "is-expanded" : "is-collapsed"}`}
-    >
-      <header>
-        <strong className="runtime-disclosure-label">{label}</strong>
-        <p className="runtime-disclosure-summary" title={summary}>
-          {summary}
-        </p>
-        <button
-          className="runtime-disclosure-toggle"
-          type="button"
-          aria-label={expanded ? `收起${label}` : `展开${label}`}
-          aria-expanded={expanded}
-          title={expanded ? "收起" : "展开"}
-          onClick={() => setExpanded((current) => !current)}
-        >
-          <Icon name={expanded ? "collapse" : "expand"} size={16} />
-          <span className="sr-only">{expanded ? "收起" : "展开"}</span>
-        </button>
-      </header>
-      {expanded ? (
-        <div className="runtime-disclosure-body">
-          <pre>{text}</pre>
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
-function ToolCallPreviewDisclosure({
-  latestToolCallPreview,
-  previews,
-}: {
-  latestToolCallPreview: ChatToolCallPreview | null;
-  previews: ChatToolCallPreview[];
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const latestToolName = latestToolCallPreview?.toolName ?? "工具";
-  const latestToolArguments = latestToolCallPreview?.argumentsText ?? "{}";
-  const summary = `${latestToolName} · ${getLatestRuntimeLine(latestToolArguments)}`;
-
-  return (
-    <section
-      className={`tool-call-preview-block runtime-disclosure ${
-        expanded ? "is-expanded" : "is-collapsed"
-      }`}
-      aria-label="工具预览"
-    >
-      <header>
-        <strong className="runtime-disclosure-label">工具</strong>
-        <p className="runtime-disclosure-summary" title={summary}>
-          {summary}
-        </p>
-        <button
-          className="runtime-disclosure-toggle"
-          type="button"
-          aria-label={expanded ? "收起工具" : "展开工具"}
-          aria-expanded={expanded}
-          title={expanded ? "收起" : "展开"}
-          onClick={() => setExpanded((current) => !current)}
-        >
-          <Icon name={expanded ? "collapse" : "expand"} size={16} />
-          <span className="sr-only">{expanded ? "收起" : "展开"}</span>
-        </button>
-      </header>
-      {expanded ? (
-        <div className="runtime-disclosure-body tool-call-preview-list">
-          {previews.map((preview) => (
-            <article className="tool-call-preview-item" key={preview.toolCallId}>
-              <header>
-                <strong>{preview.toolName ?? "工具"}</strong>
-                {typeof preview.index === "number" ? <small>#{preview.index + 1}</small> : null}
-              </header>
-              <pre>{preview.argumentsText || "{}"}</pre>
-            </article>
-          ))}
-        </div>
-      ) : null}
-    </section>
-  );
 }
 
 function getLatestRuntimeLine(text: string): string {
@@ -5863,14 +5961,6 @@ function InlineMarkdown({ text }: { text: string }): ReactNode {
   });
 }
 
-function toChatHistory(messages: ChatMessage[]): ChatHistoryMessage[] {
-  return messages.map((message) => ({
-    role: message.role,
-    content: message.content,
-    ...(message.attachments?.length ? { attachments: message.attachments } : {}),
-  }));
-}
-
 function toChatAttachmentMetadata(attachment: ChatAttachmentInput): ChatAttachmentMetadata {
   return {
     id: attachment.id,
@@ -5888,11 +5978,14 @@ function toSessionRailItem(session: ChatSessionListItem): ChatSession {
     summary: session.summary || `${session.messageCount} 条消息`,
     messageCount: session.messageCount,
     ...(session.activeGoal ? { activeGoal: session.activeGoal } : {}),
+    ...(session.recoveryGoal ? { recoveryGoal: session.recoveryGoal } : {}),
+    work: session.work,
     ...(session.archivedAt ? { archivedAt: session.archivedAt } : {}),
     ...(session.lastAssistantMessageAt
       ? { lastAssistantMessageAt: session.lastAssistantMessageAt }
       : {}),
     ...(session.tokenUsage ? { tokenUsage: session.tokenUsage } : {}),
+    ...(session.context ? { context: session.context } : {}),
     ...(session.workspaceId ? { workspaceId: session.workspaceId } : {}),
     ...(session.workspaceSummary ? { workspaceSummary: session.workspaceSummary } : {}),
     updatedAt: session.updatedAt,

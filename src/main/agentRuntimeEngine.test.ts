@@ -754,7 +754,11 @@ describe("agent runtime engine", () => {
           return finalResponse("Compacted report complete");
         },
       },
-      getModelProfile: async () => ({ ...createModelProfile(), maxTokens: 128 }),
+      getModelProfile: async () => ({
+        ...createModelProfile(),
+        maxTokens: 128,
+        contextWindow: 300,
+      }),
       toolAuthorizationService: createAuthorizationService(true),
       toolExecutor: createToolExecutor([]),
       contextManager: {
@@ -792,6 +796,9 @@ describe("agent runtime engine", () => {
             originalMessageCount: expect.any(Number),
             compactedMessageCount: 3,
             estimatedTokens: expect.any(Number),
+            compactedTokens: expect.any(Number),
+            tokenBudget: 154,
+            strategy: "summarize",
           }),
         }),
       ]),

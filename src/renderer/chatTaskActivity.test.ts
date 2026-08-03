@@ -9,6 +9,7 @@ import {
   buildTaskProcessItems,
   createTaskActivity,
   getChatStatusKindFromStatusEvent,
+  getChatStatusMessageFromStatusEvent,
   getGoalUiSyncState,
   getWorkPhaseFromChatStatusEvent,
 } from "./chatTaskActivity";
@@ -83,7 +84,7 @@ describe("chat task activity", () => {
       {
         id: "2026-06-08T14:00:00.000Z-model-2",
         label: "模型",
-        message: "正在调用模型（第 1 轮）",
+        message: "正在进行第 1 轮分析",
         time: "22:00:00",
         meta: "第 1 轮",
       },
@@ -307,11 +308,7 @@ describe("chat task activity", () => {
       "memory",
     ]);
     expect(buildTaskProcessItems(events).map((item) => item.label)).toEqual([
-      "历史",
-      "记忆",
       "检查点",
-      "工具",
-      "技能",
     ]);
   });
 
@@ -330,7 +327,61 @@ describe("chat task activity", () => {
       title: "正在输出回复",
       detail: "正在输出回复",
     });
-    expect(buildTaskProcessItems([streamingEvent])[0]?.label).toBe("输出");
+    expect(buildTaskProcessItems([streamingEvent])).toEqual([]);
+  });
+
+  it("projects key progress without exposing tool internals", () => {
+    const toolEvent = createStatusEvent({
+      state: "tool_call",
+      message: "正在调用工具：shell_exec",
+      createdAt: "2026-08-03T08:00:00.000Z",
+      elapsedMs: 100,
+      toolName: "shell_exec",
+    });
+    const reasoningEvent = createStatusEvent({
+      state: "reasoning",
+      message: "决定先统一状态投影协议，再调整界面。",
+      createdAt: "2026-08-03T08:00:01.000Z",
+      elapsedMs: 200,
+    });
+    const contextEvent = createStatusEvent({
+      state: "context",
+      message: "上下文已压缩",
+      createdAt: "2026-08-03T08:00:02.000Z",
+      elapsedMs: 300,
+      context: {
+        isolation: "session_plus_global_memory",
+        estimatedTokens: 120,
+        tokenBudget: 1000,
+        occupancyRatio: 0.12,
+        messageCount: 4,
+        compactionCount: 1,
+        sessionMessageCount: 2,
+        historyMessageCount: 2,
+        recalledSessionMemories: 0,
+        recalledGlobalMemories: 1,
+        lastCompaction: {
+          strategy: "summarize",
+          beforeMessages: 8,
+          afterMessages: 4,
+          beforeTokens: 800,
+          afterTokens: 120,
+          compactedAt: "2026-08-03T08:00:02.000Z",
+        },
+        updatedAt: "2026-08-03T08:00:02.000Z",
+      },
+    });
+
+    expect(getChatStatusMessageFromStatusEvent(toolEvent)).toBe(
+      "正在推进当前执行步骤",
+    );
+    expect(buildTaskProcessItems([toolEvent, reasoningEvent, contextEvent])).toEqual([
+      expect.objectContaining({ label: "上下文", message: "上下文已压缩 1 次" }),
+      expect.objectContaining({
+        label: "思考",
+        message: "决定先统一状态投影协议，再调整界面。",
+      }),
+    ]);
   });
 
   it("projects requirement progress as stable subtask rows", () => {

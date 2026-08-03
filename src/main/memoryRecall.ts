@@ -19,6 +19,7 @@ export type MemoryRecallRequest = MemoryRecallBudget & {
   memoryStore: MemoryRecallStore;
   query: string;
   kind?: MemoryKind | "all";
+  sessionId?: string;
 };
 
 export type FormatMemoryRecallOptions = Required<
@@ -35,6 +36,7 @@ export async function recallMemoriesWithBudget(
   const searchOptions: MemorySearchOptions = {
     query: options.query,
     ...(options.kind ? { kind: options.kind } : {}),
+    ...(options.sessionId ? { sessionId: options.sessionId } : {}),
     ...(options.limit ? { limit: options.limit } : {}),
   };
 

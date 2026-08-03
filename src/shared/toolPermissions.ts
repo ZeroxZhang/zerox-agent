@@ -10,6 +10,7 @@ import {
   type LocationResourceEnvironment,
 } from "./locationResource";
 import type { SkillManifest } from "./skills";
+import { findBlockedShellControl } from "./acceptanceCommand";
 
 export type AgentToolName =
   | "file_list"
@@ -111,7 +112,6 @@ export type TaskPermissionPolicyValidationResult = {
 
 const destructiveShellPattern =
   /\b(rm\s+-[^\n]*(r|f)|git\s+reset\s+--hard|git\s+push\s+(-f|--force)|drop\s+(table|database)|truncate\s+table|kubectl\s+delete|docker\s+rm\s+-f)\b/i;
-const shellControlOperatorPattern = /([\r\n]|;|&&|\|\||`|\$\(|\||[<>])/;
 
 export function getDefaultTaskPermissionPolicy(): TaskPermissionPolicy {
   return {
@@ -428,11 +428,11 @@ export function authorizeToolCallWithinRunContext(
   }
 
   if (
-    request.toolName === "shell_exec" &&
+    (request.toolName === "shell_exec" || request.toolName === "test_run") &&
     runContext.sandbox.network === "none" &&
     opts?.shellPlan?.networkAccess
   ) {
-    return deny("shell_exec 被运行沙箱阻止：网络访问已禁用。");
+    return deny(`${request.toolName} 被运行沙箱阻止：网络访问已禁用。`);
   }
 
   if (
@@ -462,12 +462,14 @@ export function authorizeToolCallWithinRunContext(
   }
 
   if (
-    request.toolName === "shell_exec" &&
+    (request.toolName === "shell_exec" || request.toolName === "test_run") &&
     !runContext.sandbox.allowWorkspaceEscape &&
     opts?.shellPlan?.opaqueExecution &&
     !taskDecision.allowed
   ) {
-    return deny("shell_exec 被运行沙箱阻止：无法证明嵌套解释器命令位于工作区内。");
+    return deny(
+      `${request.toolName} 被运行沙箱阻止：无法证明嵌套解释器命令位于工作区内。`,
+    );
   }
 
   if (!runContext.sandbox.allowWorkspaceEscape) {
@@ -485,7 +487,7 @@ export function authorizeToolCallWithinRunContext(
   }
 
   if (
-    request.toolName === "shell_exec" &&
+    (request.toolName === "shell_exec" || request.toolName === "test_run") &&
     !runContext.sandbox.allowWorkspaceEscape &&
     runContext.sandbox.shell !== "disabled"
   ) {
@@ -504,7 +506,7 @@ export function authorizeToolCallWithinRunContext(
 
     if (outsidePath) {
       return deny(
-        `shell_exec 被运行沙箱阻止：路径 ${outsidePath} 不在工作区或额外可读目录内。`,
+        `${request.toolName} 被运行沙箱阻止：路径 ${outsidePath} 不在工作区或额外可读目录内。`,
       );
     }
   }
@@ -789,7 +791,7 @@ function authorizeShellCommand(
     return deny(`${toolName} command 必填。`);
   }
 
-  if (shellControlOperatorPattern.test(command)) {
+  if (findBlockedShellControl(command)) {
     return deny(`${toolName} command 包含被阻止的 shell 控制符。`);
   }
 

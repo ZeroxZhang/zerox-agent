@@ -1,12 +1,29 @@
 import type { ChatMessage } from "./openAiCompatibleClient";
+import {
+  groupToolPairedMessages,
+  sanitizeChatMessages,
+} from "./messageIntegrity";
 
+/**
+ * Bound a runtime transcript for checkpoint persistence.
+ *
+ * The transcript is first repaired through the shared message-integrity
+ * layer (unanswered tool calls trimmed, orphans dropped), then bounded to
+ * whole tool-paired groups from the end. The historical implementation
+ * silently discarded incomplete tool-call groups — losing the most recent
+ * progress and, in combination with the divergent grouping rules in
+ * goal-context assembly, producing provider 400 rejections on resume.
+ */
 export function boundRuntimeTranscript(
   messages: ChatMessage[],
   options: { maxMessages?: number; maxChars?: number } = {},
 ): ChatMessage[] {
   const maxMessages = options.maxMessages ?? 24;
   const maxChars = options.maxChars ?? 4_000;
-  const groups = groupToolPairedMessages(messages);
+  const { messages: intact } = sanitizeChatMessages(messages, {
+    unresolvedToolCalls: "trim",
+  });
+  const groups = groupToolPairedMessages(intact);
   const kept: ChatMessage[][] = [];
   let count = 0;
   for (let index = groups.length - 1; index >= 0; index -= 1) {
@@ -30,27 +47,4 @@ export function boundRuntimeTranscript(
         }
       : {}),
   }));
-}
-
-function groupToolPairedMessages(messages: ChatMessage[]): ChatMessage[][] {
-  const groups: ChatMessage[][] = [];
-  for (let index = 0; index < messages.length; index += 1) {
-    const message = messages[index]!;
-    if (message.role !== "assistant" || !message.tool_calls?.length) {
-      groups.push([message]);
-      continue;
-    }
-    const ids = new Set(message.tool_calls.map((call) => call.id));
-    const group = [message];
-    while (
-      index + 1 < messages.length &&
-      messages[index + 1]?.role === "tool" &&
-      ids.has(messages[index + 1]?.tool_call_id ?? "")
-    ) {
-      index += 1;
-      group.push(messages[index]!);
-    }
-    if (group.length === message.tool_calls.length + 1) groups.push(group);
-  }
-  return groups;
 }

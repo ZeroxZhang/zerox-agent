@@ -319,13 +319,16 @@ function toWholeSeconds(ms: number): number {
 export function buildTaskProcessItems(
   events: ChatTaskStatusEvent[],
 ): TaskProcessItem[] {
-  return [...events].reverse().map((event, index) => ({
+  return events
+    .filter(isUserRelevantProgressEvent)
+    .reverse()
+    .map((event, index) => ({
     id: `${event.createdAt}-${event.state}-${index}`,
     label: getProcessLabel(event),
-    message: event.message,
+    message: getChatStatusMessageFromStatusEvent(event),
     time: formatEventTime(event.createdAt),
     ...(getProcessMeta(event) ? { meta: getProcessMeta(event) } : {}),
-  }));
+    }));
 }
 
 export function buildRequirementProcessItems(
@@ -426,7 +429,7 @@ export function restoreChatTaskActivity(
   return {
     status: {
       kind: getChatStatusKindFromStatusEvent(latestEvent),
-      message: latestEvent.message,
+      message: getRestoredTerminalUserMessage(latestEvent),
     },
     workPhase: getWorkPhaseFromChatStatusEvent(latestEvent),
     taskActivity: buildTaskActivityFromStatusEvent(latestEvent),
@@ -454,13 +457,26 @@ export function buildTaskActivityFromStatusEvent(
   return createTaskActivity({
     kind,
     title: getTaskActivityTitleFromStatusEvent(event),
-    detail: event.message,
+    detail: getRestoredTerminalUserMessage(event),
     now: eventTime,
     startedAt,
     lastEventAt: eventTime,
     toolCallsExecuted: event.toolCallsExecuted,
     maxTurns: event.maxTurns,
   });
+}
+
+function getRestoredTerminalUserMessage(event: ChatTaskStatusEvent): string {
+  if (event.state === "completed") {
+    return "本轮已完成。你可以查看结果，或继续提出下一步。";
+  }
+  if (event.state === "failed") {
+    return "本轮未完成。请根据对话中的恢复建议处理后重试。";
+  }
+  if (event.state === "canceled") {
+    return "本轮已取消。需要时可以重新发起。";
+  }
+  return event.message;
 }
 
 export function getChatStatusKindFromStatusEvent(
@@ -486,6 +502,7 @@ export function getWorkPhaseFromChatStatusEvent(
     event.state === "memory" ||
     event.state === "memory_scope" ||
     event.state === "history" ||
+    event.state === "context" ||
     event.state === "checkpoint_boundary"
   ) return "memory";
   if (
@@ -510,6 +527,53 @@ export function getWorkPhaseFromChatStatusEvent(
   return "done";
 }
 
+export function getChatStatusMessageFromStatusEvent(
+  event: ChatTaskStatusEvent,
+): string {
+  if (
+    event.state === "tool_call" ||
+    event.state === "tool_invocation" ||
+    event.state === "tool_result"
+  ) {
+    return event.state === "tool_result"
+      ? "正在核对当前步骤的结果"
+      : "正在推进当前执行步骤";
+  }
+  if (event.state === "model") {
+    return event.turn ? `正在进行第 ${event.turn} 轮分析` : "正在分析当前任务";
+  }
+  if (event.state === "memory") {
+    return "正在检索当前会话允许的记忆";
+  }
+  if (event.state === "context") {
+    return event.context?.lastCompaction
+      ? `上下文已压缩 ${event.context.compactionCount} 次`
+      : "已建立当前会话的独立上下文";
+  }
+  return event.message;
+}
+
+function isUserRelevantProgressEvent(event: ChatTaskStatusEvent): boolean {
+  if (
+    event.state === "tool_call" ||
+    event.state === "tool_invocation" ||
+    event.state === "tool_result" ||
+    event.state === "streaming" ||
+    event.state === "skill_load" ||
+    event.state === "history" ||
+    event.state === "memory_scope"
+  ) {
+    return false;
+  }
+  if (event.state === "started") {
+    return !/runtime context snapshot/i.test(event.message);
+  }
+  if (event.state === "context") {
+    return Boolean(event.context?.lastCompaction);
+  }
+  return true;
+}
+
 function getProcessLabel(event: ChatTaskStatusEvent): string {
   if (event.state === "started") return "启动";
   if (event.state === "workspace") return "工作区";
@@ -518,6 +582,7 @@ function getProcessLabel(event: ChatTaskStatusEvent): string {
   if (event.state === "memory") return "记忆";
   if (event.state === "memory_scope") return "记忆";
   if (event.state === "history") return "历史";
+  if (event.state === "context") return "上下文";
   if (event.state === "model") return "模型";
   if (event.state === "reasoning") return "思考";
   if (event.state === "streaming") return "输出";
@@ -540,10 +605,6 @@ function getProcessLabel(event: ChatTaskStatusEvent): string {
 
 function getProcessMeta(event: ChatTaskStatusEvent): string | undefined {
   if (event.turn) return `第 ${event.turn} 轮`;
-  if (event.toolName) return event.toolName;
-  if (typeof event.toolCallsExecuted === "number") {
-    return `工具 ${event.toolCallsExecuted}`;
-  }
   return undefined;
 }
 
@@ -569,15 +630,18 @@ function getTaskActivityTitleFromStatusEvent(event: ChatTaskStatusEvent): string
   if (event.state === "memory") return "正在检索记忆";
   if (event.state === "memory_scope") return "正在注入记忆范围";
   if (event.state === "history") return "正在检索历史";
+  if (event.state === "context") return "正在整理上下文";
   if (event.state === "model") return "正在调用模型";
   if (event.state === "reasoning") return "模型思考";
   if (event.state === "streaming") return "正在输出回复";
   if (event.state === "requirement") return "目标子任务";
   if (event.state === "actor_spawned") return "子代理执行中";
   if (event.state === "actor_done") return "子代理已返回";
-  if (event.state === "tool_call") return "正在执行工具";
-  if (event.state === "tool_invocation") return "工具调用状态";
-  if (event.state === "tool_result") return "工具结果已返回";
+  if (
+    event.state === "tool_call" ||
+    event.state === "tool_invocation" ||
+    event.state === "tool_result"
+  ) return "正在推进任务";
   if (event.state === "checkpoint_boundary") return "上下文检查点";
   if (event.state === "waiting_for_input") return "等待技能输入";
   if (event.state === "paused") return "长任务等待确认";

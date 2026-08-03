@@ -442,6 +442,61 @@ describe("goal chat service", () => {
     expect(plannedTaskContract).toEqual(savedGoals[0]?.taskContract);
   });
 
+  it("normalizes Plan-confirmed milestone checks through the Goal contract boundary", async () => {
+    const savedGoals: Goal[] = [];
+    const service = createGoalChatService({
+      controller: createController(),
+      goalStore: createGoalStore({ savedGoals, ledgerEvents: [] }),
+      planner: {
+        async plan() {
+          throw new Error("Explicit Plan milestones must not be replanned.");
+        },
+        async replan() {
+          throw new Error("Unexpected replan.");
+        },
+      },
+      createId: () => "goal_plan_contract",
+      now: () => "2026-08-03T03:00:00.000Z",
+    });
+    const command =
+      "python3 -c \"import json; json.load(open('allergen-map/data/china.geo.json'))\"";
+    const criterion = {
+      id: "criterion_geojson",
+      description: "GeoJSON parses.",
+      acceptanceChecks: [{
+        id: "check_geojson",
+        kind: "command_exit_code" as const,
+        description: "GeoJSON parses.",
+        params: { command, workspaceRoot: ".", expectedExitCode: 0 },
+        requiresEvidence: false,
+      }],
+    };
+
+    await service.createFromDraft({
+      draft: createGoalDraft({
+        successCriteria: [criterion],
+        milestones: [{
+          id: "milestone_1",
+          description: "Create the project skeleton.",
+          dependsOn: [],
+          successCriteria: [criterion],
+          state: "ready",
+          runIds: [],
+          attempts: 0,
+        }],
+      }),
+    });
+
+    const goal = savedGoals[0]!;
+    expect(goal.successCriteria[0]!.acceptanceChecks[0]).toMatchObject({
+      kind: "test_passes",
+      params: { command, workspaceRoot: "." },
+    });
+    expect(
+      goal.milestones[0]!.successCriteria[0]!.acceptanceChecks[0],
+    ).toEqual(goal.successCriteria[0]!.acceptanceChecks[0]);
+  });
+
   it("plans deterministic bookmark contracts with provenance checks instead of model review gates", async () => {
     const savedGoals: Goal[] = [];
     const ledgerEvents: ProgressLedgerEvent[] = [];

@@ -59,6 +59,7 @@ import {
   toChatCompletionResponse,
   toCompleteRequest,
 } from "./providers/normalize";
+import type { AgentContextUsage } from "../shared/contextUsage";
 
 export type GoalRuntimeModelProfile = {
   baseUrl: string;
@@ -66,6 +67,7 @@ export type GoalRuntimeModelProfile = {
   model: string;
   temperature: number;
   maxTokens: number;
+  contextWindow?: number;
   modelCapabilities?: ModelCapabilities;
 };
 
@@ -246,6 +248,7 @@ export function createGoalRuntimeEngine(options: {
         ),
       ];
       let observedToolCalls = 0;
+      let latestContextUsage: AgentContextUsage | undefined;
       const actionSignatures = new Set<string>();
       const recordActionSignature = (toolName: string, args: unknown) => {
         if (actionSignatures.size >= 32) {
@@ -463,7 +466,7 @@ export function createGoalRuntimeEngine(options: {
               {
                 ...(runSignal ? { signal: runSignal } : {}),
                 runContext,
-                ...(toolName === "shell_exec"
+                ...(toolName === "shell_exec" || toolName === "test_run"
                   ? { authorizedShellCommand: String(args.command ?? "") }
                   : {}),
                 ...(deterministicOptions?.artifactWrite
@@ -805,6 +808,28 @@ export function createGoalRuntimeEngine(options: {
               ),
             );
           },
+          onContextUsage(usage) {
+            latestContextUsage = usage;
+          },
+          onContextCompacted(event) {
+            void appendRunTrajectory("context_compacted", {
+              ...payload,
+              ...event,
+            }, false);
+            const contextEvent = createEvent(
+              "info",
+              "reflecting",
+              `上下文已压缩：${event.estimatedTokens} → ${event.compactedTokens} tokens`,
+              { ...payload, contextUsage: latestContextUsage, ...event },
+            );
+            events.push(contextEvent);
+            notifyProgress(
+              "context_compacted",
+              goal,
+              contextEvent.message,
+              milestone.id,
+            );
+          },
           async onCheckpoint(checkpoint) {
             await runOptions?.onCheckpoint?.({
               transcriptMessages: toBoundedTranscriptMessages(
@@ -846,6 +871,9 @@ export function createGoalRuntimeEngine(options: {
           wallClockMs:
             new Date(finishedAt).getTime() - new Date(startedAt).getTime(),
           tokens: inferTokens(loopResult, initialMessages),
+          ...(loopResult.contextUsage
+            ? { contextUsage: loopResult.contextUsage }
+            : {}),
           transcriptMessages: toBoundedTranscriptMessages(
             loopResult.messages,
           ),
@@ -913,6 +941,9 @@ export function createGoalRuntimeEngine(options: {
         summary: loopResult.summary,
         wallClockMs: new Date(finishedAt).getTime() - new Date(startedAt).getTime(),
         tokens: inferTokens(loopResult, initialMessages),
+        ...(loopResult.contextUsage
+          ? { contextUsage: loopResult.contextUsage }
+          : {}),
         transcriptMessages: toBoundedTranscriptMessages(
           loopResult.messages,
           loopResult.summary,

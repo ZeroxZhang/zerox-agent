@@ -369,6 +369,179 @@ describe("plan investigator service", () => {
     expect(stageStatuses).toEqual(["running", "failed"]);
   });
 
+  it("repairs malformed structured output with a bounded model retry", async () => {
+    const registry = {
+      getVisibleDefinitions() {
+        return [];
+      },
+    } as unknown as DynamicToolRegistry;
+    const executor: AgentToolExecutor = {
+      getRegistry: () => registry,
+      hasTool: () => false,
+      async execute() {
+        throw new Error("no tools expected");
+      },
+    };
+    const validBrief = JSON.stringify({
+      objective: "理解工作区",
+      deliverables: ["调查摘要"],
+      inScope: ["README"],
+      outOfScope: ["修改文件"],
+      constraints: ["只读"],
+      assumptions: [],
+      unresolvedQuestions: [],
+      targetRefs: ["README.md"],
+      evidenceRefs: ["evidence_user_request"],
+      skillCandidates: [],
+    });
+    // Missing closing braces and an unescaped quote — the exact failure
+    // class observed in production ("Expected ',' or '}' after property
+    // value in JSON").
+    const brokenSummary = `{"objective": "理解工作区", "deliverables": ["调查摘要"], "inScope": ["README"], "outOfScope": ["修改文件"], "constraints": ["只读"], "assumptions": [], "unresolvedQuestions": [], "targetRefs": ["README.md"], "evidenceRefs": ["evidence_user_request"], "skillCandidates": []`;
+    const repairRequests: Array<{ messages: unknown }> = [];
+    const repairModel = model();
+    repairModel.client = {
+      async complete(request) {
+        repairRequests.push(request);
+        return {
+          content: validBrief,
+          toolCalls: [],
+          finishReason: "stop",
+        };
+      },
+      async *streamComplete() {
+        yield { type: "done" as const, finishReason: "stop" };
+      },
+    };
+    const stageStatuses: string[] = [];
+    const service = createPlanInvestigatorService({
+      toolExecutor: executor,
+      toolAuthorizationService: {} as ToolAuthorizationService,
+      discoverSkills: async () => ({ skills: [], errors: [] }),
+      runLoop: async () => ({
+        summary: brokenSummary,
+        status: "succeeded",
+        turns: 1,
+        messages: [],
+        toolCallsExecuted: 0,
+        tokensConsumed: 10,
+      }),
+      createId: (() => {
+        let id = 0;
+        return () => `repair-${++id}`;
+      })(),
+      now: () => "2026-07-31T00:00:00.000Z",
+    });
+
+    const result = await service.investigate({
+      planId: "plan-repair",
+      sessionId: "session-repair",
+      workspaceRoot: "/workspace",
+      sourceMessage: "分析工作区",
+      profile: createPlanTaskProfile("分析工作区"),
+      baseEvidence: [
+        {
+          id: "evidence_user_request",
+          kind: "user",
+          title: "用户需求",
+          summary: "分析工作区",
+        },
+      ],
+      model: repairModel,
+      async onStageUpdate(stage) {
+        stageStatuses.push(stage.status);
+      },
+    });
+
+    expect(result.brief.objective).toBe("理解工作区");
+    expect(stageStatuses).toEqual(["running", "completed"]);
+    expect(repairRequests).toHaveLength(1);
+    // Repair completions regenerate the whole brief, so they run with an
+    // escalated output budget (4096 profile → 16384) to avoid truncating
+    // the repair the same way the original was truncated.
+    expect(repairRequests[0]).toMatchObject({ maxTokens: 16384 });
+    const repairUserMessage = repairRequests[0]?.messages as Array<{
+      role: string;
+      content: string;
+    }>;
+    expect(repairUserMessage[1]?.content).toContain(brokenSummary);
+  });
+
+  it("still fails closed when structured-output repairs are exhausted", async () => {
+    const registry = {
+      getVisibleDefinitions() {
+        return [];
+      },
+    } as unknown as DynamicToolRegistry;
+    const executor: AgentToolExecutor = {
+      getRegistry: () => registry,
+      hasTool: () => false,
+      async execute() {
+        throw new Error("no tools expected");
+      },
+    };
+    let repairAttempts = 0;
+    const repairModel = model();
+    repairModel.client = {
+      async complete() {
+        repairAttempts += 1;
+        return {
+          content: "still not json at all",
+          toolCalls: [],
+          finishReason: "stop",
+        };
+      },
+      async *streamComplete() {
+        yield { type: "done" as const, finishReason: "stop" };
+      },
+    };
+    const stageStatuses: string[] = [];
+    const service = createPlanInvestigatorService({
+      toolExecutor: executor,
+      toolAuthorizationService: {} as ToolAuthorizationService,
+      discoverSkills: async () => ({ skills: [], errors: [] }),
+      runLoop: async () => ({
+        summary: "{broken json",
+        status: "succeeded",
+        turns: 1,
+        messages: [],
+        toolCallsExecuted: 0,
+        tokensConsumed: 10,
+      }),
+      createId: (() => {
+        let id = 0;
+        return () => `exhaust-${++id}`;
+      })(),
+      now: () => "2026-07-31T00:00:00.000Z",
+    });
+
+    const investigation = service.investigate({
+      planId: "plan-repair-exhausted",
+      sessionId: "session-repair-exhausted",
+      workspaceRoot: "/workspace",
+      sourceMessage: "分析工作区",
+      profile: createPlanTaskProfile("分析工作区"),
+      baseEvidence: [
+        {
+          id: "evidence_user_request",
+          kind: "user",
+          title: "用户需求",
+          summary: "分析工作区",
+        },
+      ],
+      model: repairModel,
+      async onStageUpdate(stage) {
+        stageStatuses.push(stage.status);
+      },
+    });
+
+    await expect(investigation).rejects.toBeInstanceOf(
+      PlanInvestigationError,
+    );
+    expect(repairAttempts).toBe(2);
+    expect(stageStatuses).toEqual(["running", "failed"]);
+  });
+
   it("surfaces the provider notice instead of an internal continuation reason", async () => {
     const providerMessage = "模型服务商正在限流，请稍后由你手动重试。";
     const stageErrors: string[] = [];

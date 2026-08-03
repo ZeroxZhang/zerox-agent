@@ -242,6 +242,41 @@ describe("tool approval coordinator", () => {
     });
   });
 
+  it.each([
+    {
+      standalone: false,
+      goalPreference: true,
+      activeGoal: false,
+      label: "Goal mode selection",
+    },
+    {
+      standalone: false,
+      goalPreference: false,
+      activeGoal: true,
+      label: "active Goal recovery",
+    },
+    {
+      standalone: true,
+      goalPreference: true,
+      activeGoal: true,
+      label: "combined autonomy sources",
+    },
+  ])("keeps Goal autonomy indivisible for $label", ({ standalone, goalPreference, activeGoal }) => {
+    const coordinator = createToolApprovalCoordinator({
+      sendToRenderers() {},
+    });
+
+    coordinator.setAutoApprovalEnabled(standalone);
+    coordinator.setGoalModeEnabled(goalPreference);
+    if (activeGoal) coordinator.setGoalActive("goal_matrix", true);
+
+    expect(coordinator.getAutoApprovalState()).toMatchObject({
+      autoApprovalEnabled: true,
+      goalModeEnabled: true,
+      autoApprovalLocked: true,
+    });
+  });
+
   it("keeps auto approval locked while a goal is actively running", () => {
     const coordinator = createToolApprovalCoordinator({
       sendToRenderers() {},

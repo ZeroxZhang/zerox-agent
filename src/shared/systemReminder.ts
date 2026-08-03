@@ -11,7 +11,7 @@ export type SystemReminderTriggerType =
 export type SystemReminderContext = {
   /** Estimated token count of the current message list. */
   estimatedTokens: number;
-  /** Token budget (maxTokens * 0.7 typically). */
+  /** Effective input budget after output and tokenizer safety reserves. */
   tokenBudget: number;
   /** Stable hash of the most recent repeated tool+args. */
   loopSignature?: string | null;
