@@ -20,11 +20,19 @@ import type {
 import { createPlanArtifactWriter } from "./planArtifactWriter";
 import { createPlanDebateOrchestrator } from "./planDebateOrchestrator";
 import { createPlanStore } from "./planStore";
+import {
+  createGoalContractRef,
+  deriveGoalContractFromPlan,
+} from "./goalPlanContractService";
 import type {
   BoundModelClient,
   ModelRouter,
 } from "./providers/modelRouter";
 import type { SkillRecord } from "../shared/skills";
+import {
+  PlanInvestigationError,
+  type PlanInvestigatorService,
+} from "./planInvestigatorService";
 
 describe("plan debate orchestrator", () => {
   let tempDir: string;
@@ -102,6 +110,15 @@ describe("plan debate orchestrator", () => {
     expect(
       calls.every((call) => call.request.messages.length === 2),
     ).toBe(true);
+    const contractHashes = calls.map((call) => {
+      const input = JSON.parse(
+        String(call.request.messages[1]?.content),
+      ) as { goalContractRef: { sha256: string } };
+      return input.goalContractRef.sha256;
+    });
+    expect(new Set(contractHashes)).toEqual(
+      new Set([plan.goalContractRef?.sha256]),
+    );
     const cInput = String(calls.at(-1)?.request.messages[1]?.content);
     expect(cInput).toContain('"a1"');
     expect(cInput).toContain('"b2"');
@@ -123,6 +140,70 @@ describe("plan debate orchestrator", () => {
     expect(markdown).toContain("## 里程碑");
     expect(plan.finalArtifact?.markdown).toBe(markdown);
   });
+
+  it.each(["direct", "debate"] as const)(
+    "blocks %s when the final artifact drops a frozen Goal criterion",
+    async (mode) => {
+      const calls: Array<{ profileId: string; request: ChatCompletionRequest }> =
+        [];
+      const invalidFinal = artifact("Missing frozen criterion");
+      const router = createQueuedRouter(
+        mode === "direct"
+          ? { profileDirect: [invalidFinal, invalidFinal] }
+          : {
+              profileA: [proposal("A1"), revisedProposal("A2")],
+              profileB: [critique("B1"), critique("B2")],
+              profileC: [invalidFinal, invalidFinal],
+            },
+        calls,
+      );
+      const derivedContract = deriveGoalContractFromPlan({
+        planId: `plan_${mode}_contract_guard`,
+        createdAt: "2026-08-03T00:00:00.000Z",
+        taskContract: {
+          objective: "完成本地实现",
+          audience: "user",
+          inScope: ["代码"],
+          outOfScope: ["外部发布"],
+          constraints: ["不得绕过权限"],
+          successCriteria: ["测试通过", "保留且验证冻结的第二条标准"],
+          assumptions: [],
+        },
+      });
+      const goalContractSnapshot = {
+        ...derivedContract,
+        source: { kind: "user" as const },
+      };
+      const orchestrator = createPlanDebateOrchestrator({
+        planStore: createPlanStore({
+          configDir: path.join(tempDir, `config-contract-guard-${mode}`),
+        }),
+        artifactWriter: createPlanArtifactWriter(),
+        modelRouter: router,
+      });
+
+      const plan = await orchestrator.createPlan({
+        sessionId: `session-contract-guard-${mode}`,
+        workspaceRoot,
+        sourceMessage: "Do not drop frozen success criteria.",
+        mode,
+        modelAssignments:
+          mode === "direct"
+            ? { direct: "profileDirect" }
+            : { a: "profileA", b: "profileB", c: "profileC" },
+        goalContractSnapshot,
+        goalContractRef: createGoalContractRef(goalContractSnapshot),
+      });
+
+      expect(plan.status).toBe("awaiting_input");
+      expect(plan.qualityReport).toMatchObject({ status: "blocked" });
+      expect(plan.qualityReport?.blockingIssues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ code: "GOAL_CRITERION_UNCOVERED" }),
+        ]),
+      );
+    },
+  );
 
   it("normalizes compact string risks before strict Debate validation", async () => {
     const calls: Array<{ profileId: string; request: ChatCompletionRequest }> =
@@ -1029,6 +1110,163 @@ describe("plan debate orchestrator", () => {
     expect(calls[0]?.request.messages[1]?.content).toContain(
       "DBS_SKILL_PLANNING_CONTEXT",
     );
+  });
+
+  it("resumes a failed investigation at the failed depth and reuses collected evidence", async () => {
+    const calls: Array<{ profileId: string; request: ChatCompletionRequest }> =
+      [];
+    const investigationCalls: Array<{
+      depth: string;
+      evidenceRefs: string[];
+    }> = [];
+    const recoveredEvidence = {
+      id: "evidence_workspace_reused",
+      kind: "workspace" as const,
+      title: "已收集工作区证据",
+      summary: "第一次调查已经读取并验证的事实。",
+    };
+    const recoveredBrief = {
+      objective: "基于已收集证据完成规划",
+      deliverables: ["可靠计划"],
+      inScope: ["本地实现"],
+      outOfScope: ["外部发布"],
+      constraints: ["只读规划"],
+      assumptions: [],
+      unresolvedQuestions: [],
+      targetRefs: ["AGENTS.md"],
+      evidenceRefs: ["evidence_user_request", recoveredEvidence.id],
+      skillCandidates: [],
+    };
+    let investigationAttempt = 0;
+    const investigator: PlanInvestigatorService = {
+      async investigate(input) {
+        investigationAttempt += 1;
+        investigationCalls.push({
+          depth: input.profile.investigationDepth,
+          evidenceRefs: input.baseEvidence.map((item) => item.id),
+        });
+        if (investigationAttempt === 1) {
+          const evidence = [...input.baseEvidence, recoveredEvidence];
+          const quick = {
+            id: "investigation-quick",
+            kind: "investigation" as const,
+            runId: "run-quick",
+            status: "completed" as const,
+            investigationDepth: "quick" as const,
+            evidenceRefs: evidence.map((item) => item.id),
+          };
+          const standard = {
+            ...quick,
+            id: "investigation-standard",
+            runId: "run-standard",
+            investigationDepth: "standard" as const,
+          };
+          const failedDeep = {
+            ...quick,
+            id: "investigation-deep-failed",
+            runId: "run-deep-failed",
+            status: "failed" as const,
+            investigationDepth: "deep" as const,
+            error: "PlanningBrief.skillCandidates[0].evidenceRefs 必须是数组。",
+          };
+          await input.onStageUpdate?.(quick, evidence);
+          await input.onStageUpdate?.(standard, evidence);
+          await input.onStageUpdate?.(failedDeep, evidence);
+          throw new PlanInvestigationError(
+            failedDeep.error,
+            [quick, standard, failedDeep],
+            evidence,
+          );
+        }
+        const completedDeep = {
+          id: "investigation-deep-recovered",
+          kind: "investigation" as const,
+          runId: "run-deep-recovered",
+          status: "completed" as const,
+          investigationDepth: "deep" as const,
+          evidenceRefs: input.baseEvidence.map((item) => item.id),
+        };
+        await input.onStageUpdate?.(completedDeep, input.baseEvidence);
+        return {
+          brief: recoveredBrief,
+          evidence: input.baseEvidence,
+          skills: [],
+          stage: completedDeep,
+          stages: [completedDeep],
+          depth: "deep",
+        };
+      },
+    };
+    const store = createPlanStore({
+      configDir: path.join(tempDir, "config-investigation-resume"),
+    });
+    const orchestrator = createPlanDebateOrchestrator({
+      planStore: store,
+      artifactWriter: createPlanArtifactWriter(),
+      modelRouter: createQueuedRouter(
+        {
+          profileA: [proposal("A1"), revisedProposal("A2")],
+          profileB: [critique("B1"), critique("B2")],
+          profileC: [artifact("Recovered after investigation")],
+        },
+        calls,
+      ),
+      investigator,
+    });
+
+    const paused = await orchestrator.createPlan({
+      sessionId: "session-investigation-resume",
+      workspaceRoot,
+      sourceMessage: "实现一个经过调查的本地功能。",
+      mode: "debate",
+      modelAssignments: {
+        a: "profileA",
+        b: "profileB",
+        c: "profileC",
+      },
+    });
+
+    expect(paused.status).toBe("paused");
+    expect(calls).toHaveLength(0);
+    const retried = await orchestrator.retryFailedRound(paused.id);
+    expect(retried.ok).toBe(true);
+    if (!retried.ok) return;
+    expect(retried.plan.status).toBe("awaiting_confirmation");
+    expect(retried.message).toContain("deep");
+    expect(retried.message).toContain("复用此前收集的证据");
+    expect(investigationCalls).toEqual([
+      {
+        depth: expect.any(String),
+        evidenceRefs: expect.arrayContaining(["evidence_user_request"]),
+      },
+      {
+        depth: "deep",
+        evidenceRefs: expect.arrayContaining([
+          "evidence_user_request",
+          recoveredEvidence.id,
+        ]),
+      },
+    ]);
+    expect(
+      retried.plan.planningStages?.find(
+        (stage) => stage.id === "investigation-quick",
+      )?.status,
+    ).toBe("completed");
+    expect(
+      retried.plan.planningStages?.find(
+        (stage) => stage.id === "investigation-standard",
+      )?.status,
+    ).toBe("completed");
+    expect(
+      retried.plan.planningStages?.find(
+        (stage) => stage.id === "investigation-deep-failed",
+      )?.status,
+    ).toBe("invalidated");
+    expect(
+      retried.plan.planningStages?.find(
+        (stage) => stage.id === "investigation-deep-recovered",
+      )?.status,
+    ).toBe("completed");
   });
 
   it("pauses on a failed role and retries it with a replacement model while invalidating downstream output", async () => {

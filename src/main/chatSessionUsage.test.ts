@@ -20,6 +20,7 @@ describe("chat session token usage projection", () => {
         toolCalls: 0,
         wallClockMs: 100,
         tokens: 40,
+        tokensEstimated: false,
         replans: 0,
       },
     } as Goal;
@@ -49,5 +50,58 @@ describe("chat session token usage projection", () => {
     expect(
       projectChatSessionTokenUsage({ plans: [], goals: [] }),
     ).toBeUndefined();
+  });
+
+  it("discloses when Goal token usage contains local estimates", () => {
+    const goal = {
+      executionUsage: {
+        iterations: 1,
+        toolCalls: 1,
+        wallClockMs: 100,
+        tokens: 80,
+        tokensEstimated: true,
+        replans: 0,
+      },
+    } as Goal;
+
+    expect(
+      projectChatSessionTokenUsage({ plans: [], goals: [goal] }),
+    ).toMatchObject({ totalTokens: 80, estimated: true });
+  });
+
+  it("treats legacy Goal totals without provenance as estimated", () => {
+    const goal = {
+      executionUsage: {
+        iterations: 1,
+        toolCalls: 1,
+        wallClockMs: 100,
+        tokens: 80,
+        replans: 0,
+      },
+    } as Goal;
+
+    expect(
+      projectChatSessionTokenUsage({ plans: [], goals: [goal] }),
+    ).toMatchObject({ totalTokens: 80, estimated: true });
+  });
+
+  it("discloses estimated read-only Plan investigation usage", () => {
+    const plan = {
+      planningStages: [
+        {
+          runId: "plan_investigation_a",
+          usage: { inputTokens: 0, outputTokens: 45, estimated: true },
+        },
+      ],
+      rounds: [],
+    } as unknown as PlanRecord;
+
+    expect(
+      projectChatSessionTokenUsage({ plans: [plan], goals: [] }),
+    ).toMatchObject({
+      totalTokens: 45,
+      estimated: true,
+      breakdown: { planTokens: 45 },
+    });
   });
 });

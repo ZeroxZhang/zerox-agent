@@ -165,7 +165,9 @@ export function createAgentGoalPlanner(options: {
       ];
 
       validateMilestonePlan(goal.successCriteria, merged);
-      goal.planVersion += 1;
+      // This legacy planner hook is now limited to an alternate strategy
+      // inside the active Plan. Goal Plan versions only advance when a new
+      // PlanRecord is adopted through the main-process lineage transaction.
       goal.executionUsage.replans += 1;
 
       return merged;
@@ -396,7 +398,7 @@ function buildReplanPrompt(goal: Goal, reason: string): string {
   return [
     "Replan the remaining non-accepted milestones for this goal.",
     "",
-    `Goal: ${goal.originalDescription ?? goal.description}`,
+    `Goal: ${goal.goalContractSnapshot?.objective ?? goal.description}`,
     `Reason: ${reason}`,
     `Accepted milestones to preserve: ${JSON.stringify(
       goal.milestones.filter((milestone) => milestone.state === "accepted"),

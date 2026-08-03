@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import type { Goal } from "../../shared/agentGoal";
+import type { AcceptanceCheck, Goal } from "../../shared/agentGoal";
 import type { ChatSessionGoalSummary } from "../../shared/chat";
+import type { GoalContractSnapshot } from "../../shared/goalPlanContract";
+import type { PlanRecord } from "../../shared/planMode";
+import { getPlanOutcomePresentation } from "../planFailurePresentation";
 import {
   createManualCompletionConfirmation,
   getConfirmedManualCompletionGoalId,
@@ -12,12 +15,16 @@ import { useDialogFocusTrap } from "./useDialogFocusTrap";
 
 type GoalDetailDrawerProps = {
   goal: Goal | null;
+  activePlan?: PlanRecord | null;
+  planCandidate?: PlanRecord | null;
   open: boolean;
   summary: ChatSessionGoalSummary | null;
   onClose: () => void;
   onStart?: () => void;
   onResolveReview?: (decision: "approve" | "reject" | "terminate") => void;
   onReplan?: () => void;
+  onResolveAmendment?: (decision: "approve" | "reject") => void;
+  goalAmendmentActionPending?: "approve" | "reject" | null;
   onRetry?: () => void;
   onContinueAcceptance?: () => void;
   onMarkCompletedUnverified?: (
@@ -57,7 +64,7 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
   useEffect(() => {
     if (
       !props.open ||
-      props.summary?.status !== "waiting_for_acceptance" ||
+      progress?.status !== "waiting_for_acceptance" ||
       !getConfirmedManualCompletionGoalId(
         manualCompletionConfirmation,
         props.goalAcceptanceContext,
@@ -69,7 +76,7 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
     manualCompletionConfirmation,
     props.goalAcceptanceContext,
     props.open,
-    props.summary?.status,
+    progress?.status,
   ]);
 
   if (!props.open || !props.summary || !progress) {
@@ -77,10 +84,16 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
   }
 
   const hasGuardedActions =
-    props.summary.status === "waiting_for_review" ||
-    isRecoverableStatus(props.summary.status) ||
-    progress.recoveryActions.length > 0;
+    progress.status === "waiting_for_review" ||
+    isRecoverableStatus(progress.status) ||
+    progress.recoveryActions.length > 0 ||
+    props.goal?.pendingGoalAmendment?.status === "pending" ||
+    props.goal?.pendingGoalAmendment?.status === "approved";
   const displayTitle = buildGoalDisplayTitle(props.summary.description);
+  const amendment = props.goal?.pendingGoalAmendment;
+  const activePlanPresentation = props.activePlan
+    ? getPlanOutcomePresentation(props.activePlan)
+    : null;
 
   return (
     <div
@@ -124,19 +137,130 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
             </div>
           </details>
 
+          {props.goal?.goalContractSnapshot ? (
+            <details className="goal-original-instructions" open>
+              <summary>
+                Goal r{props.goal.goalContractSnapshot.revision} / Plan v
+                {props.goal.planVersion} / {formatGoalPlanMode(props.goal)}
+              </summary>
+              <div className="goal-original-instructions-content">
+                <strong>目标契约</strong>
+                <GoalContractDetails
+                  snapshot={props.goal.goalContractSnapshot}
+                />
+                <small>
+                  SHA256 {props.goal.goalContractRef?.sha256.slice(0, 12)}
+                </small>
+              </div>
+            </details>
+          ) : null}
+
+          {props.activePlan && activePlanPresentation ? (
+            <section
+              className={`goal-active-plan-status is-${activePlanPresentation.kind}`}
+              aria-label="当前 Plan 状态"
+            >
+              <span>
+                当前 Plan v{props.activePlan.goalPlanVersion ?? props.goal?.planVersion ?? 1}
+              </span>
+              <strong>{activePlanPresentation.title}</strong>
+              <p>{activePlanPresentation.detail}</p>
+              <small>{activePlanPresentation.nextAction}</small>
+            </section>
+          ) : null}
+
+          {props.goal?.planHistory?.length ? (
+            <details className="goal-original-instructions">
+              <summary>Plan 历史 · {props.goal.planHistory.length}</summary>
+              <div className="goal-original-instructions-content">
+                <ul>
+                  {props.goal.planHistory.map((entry) => (
+                    <li key={`${entry.planId}-${entry.goalPlanVersion}`}>
+                      Plan v{entry.goalPlanVersion} · {formatPlanMode(entry.mode)} ·
+                      {" "}{formatPlanOutcome(entry.outcome)}
+                      <small>
+                        {` · Goal r${entry.goalContractRef.revision} · ${entry.trigger.summary}`}
+                        {entry.parentPlanRef
+                          ? ` · 父 Plan v${entry.parentPlanRef.goalPlanVersion}`
+                          : ""}
+                      </small>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </details>
+          ) : null}
+
+          {amendment?.status === "pending" || amendment?.status === "approved" ? (
+            <section className="goal-review-gate">
+              <span>
+                {amendment.status === "pending"
+                  ? "目标修订提案 · 等待批准"
+                  : "目标修订已批准 · 尚未应用"}
+              </span>
+              <p>{amendment.reason}</p>
+              {amendment.pausedExecution && amendment.status === "pending" ? (
+                <p className="goal-amendment-state" role="status">
+                  原执行路径已安全暂停；批准后生成新的 Direct Plan，拒绝后恢复原路径。
+                </p>
+              ) : null}
+              <GoalContractComparison
+                base={props.goal?.goalContractSnapshot ?? amendment.candidateContract}
+                candidate={amendment.candidateContract}
+              />
+              {amendment.status === "approved" ? (
+                <p className="goal-amendment-state" role="status">
+                  {amendment.candidatePlanId
+                    ? `候选 Direct Plan 已关联；只有采用它后 Goal r${amendment.candidateContract.revision} 才会生效。`
+                    : "Direct Plan 尚未生成；旧 Goal 暂停恢复，直到生成并采用新 Plan 或撤销修订。"}
+                </p>
+              ) : null}
+              {props.onResolveAmendment ? (
+                <div className="goal-review-actions">
+                  <button
+                    type="button"
+                    className="goal-primary-action"
+                    disabled={Boolean(props.goalAmendmentActionPending)}
+                    onClick={() => props.onResolveAmendment?.("approve")}
+                  >
+                    {props.goalAmendmentActionPending === "approve"
+                      ? "正在生成…"
+                      : amendment.status === "approved"
+                        ? "重新生成或打开 Direct Plan"
+                        : "批准并生成 Direct Plan"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={Boolean(props.goalAmendmentActionPending)}
+                    onClick={() => props.onResolveAmendment?.("reject")}
+                  >
+                    {props.goalAmendmentActionPending === "reject"
+                      ? "正在处理…"
+                      : amendment.status === "approved"
+                        ? "撤销修订"
+                        : "拒绝修订"}
+                  </button>
+                </div>
+              ) : null}
+            </section>
+          ) : null}
+
           <section className="goal-progress-status">
             <div>
               <span>{progress.statusLabel}</span>
               <p>{progress.statusDetail}</p>
             </div>
-            {canStartGoal(props.summary.status) && props.onStart ? (
+            {canStartGoal(progress.status) && props.onStart ? (
               <button type="button" onClick={props.onStart}>
                 {progress.nextActionLabel}
               </button>
             ) : null}
           </section>
 
-          {props.summary.status === "waiting_for_review" &&
+          {progress.status === "waiting_for_review" &&
+          amendment?.status !== "pending" &&
+          amendment?.status !== "approved" &&
+          !isOpenRuntimePlanCandidate(props.planCandidate) &&
           props.onResolveReview ? (
             <section className="goal-review-gate">
               <span>审核门</span>
@@ -167,12 +291,12 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
             </section>
           ) : null}
 
-          {isRecoverableStatus(props.summary.status) ? (
+          {isRecoverableStatus(progress.status) ? (
             <section className="goal-recovery-actions">
               <span>恢复路径</span>
-              <p>{getRecoveryHint(props.summary.status)}</p>
+              <p>{getRecoveryHint(progress.status)}</p>
               <div className="goal-review-actions">
-                {props.summary.status === "waiting_for_acceptance" &&
+                {progress.status === "waiting_for_acceptance" &&
                 progress.recoveryActions.includes("continue_acceptance") &&
                 props.onContinueAcceptance ? (
                   <button
@@ -181,10 +305,10 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
                     disabled={props.goalAcceptanceOperationPending}
                     onClick={props.onContinueAcceptance}
                   >
-                    继续验收
+                    继续最终验收
                   </button>
                 ) : null}
-                {props.summary.status === "waiting_for_acceptance" &&
+                {progress.status === "waiting_for_acceptance" &&
                 progress.recoveryActions.includes("mark_completed_unverified") &&
                 props.onMarkCompletedUnverified ? (
                   <button
@@ -201,7 +325,7 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
                     手动标记完成
                   </button>
                 ) : null}
-                {props.summary.status === "stopped_blocked" &&
+                {progress.status === "stopped_blocked" &&
                 progress.recoveryActions.includes("retry_acceptance") &&
                 props.onRetry ? (
                   <button
@@ -213,7 +337,7 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
                     重试验收
                   </button>
                 ) : null}
-                {props.summary.status === "stopped_blocked" &&
+                {progress.status === "stopped_blocked" &&
                 progress.recoveryActions.includes("adjust_plan") &&
                 props.onReplan ? (
                   <button
@@ -224,7 +348,7 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
                     调整计划
                   </button>
                 ) : null}
-                {props.summary.status === "stopped_stalled" && props.onReplan ? (
+                {progress.status === "stopped_stalled" && props.onReplan ? (
                   <button
                     type="button"
                     className="goal-primary-action"
@@ -233,16 +357,16 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
                     重新规划
                   </button>
                 ) : null}
-                {(props.summary.status === "failed" ||
-                  props.summary.status === "waiting_for_model" ||
-                  props.summary.status === "stopped_stalled") &&
+                {(progress.status === "failed" ||
+                  progress.status === "waiting_for_model" ||
+                  progress.status === "stopped_stalled") &&
                 props.onRetry ? (
                   <button
                     type="button"
                     className="goal-primary-action"
                     onClick={props.onRetry}
                   >
-                    {props.summary.status === "waiting_for_model"
+                    {progress.status === "waiting_for_model"
                       ? props.goal?.modelServiceNotice?.kind === "output_limit"
                         ? "继续生成"
                         : "重试模型"
@@ -250,20 +374,20 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
                   </button>
                 ) : null}
                 {props.onCancel &&
-                (props.summary.status !== "stopped_blocked" ||
+                (progress.status !== "stopped_blocked" ||
                   progress.recoveryActions.includes("terminate")) ? (
                   <button
                     type="button"
                     className="goal-danger-action"
                     onClick={props.onCancel}
                   >
-                    {props.summary.status === "stopped_blocked"
+                    {progress.status === "stopped_blocked"
                       ? "终止目标"
                       : "结束目标"}
                   </button>
                 ) : null}
               </div>
-              {props.summary.status === "waiting_for_acceptance" &&
+              {progress.status === "waiting_for_acceptance" &&
               manualCompletionConfirmation ? (
                 <div
                   className="goal-manual-completion-confirmation"
@@ -533,6 +657,17 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
                   {milestone.lastAcceptanceSummary ? (
                     <p>{milestone.lastAcceptanceSummary}</p>
                   ) : null}
+                  {props.goal ? (
+                    <MilestoneAcceptanceContract
+                      checks={
+                        props.goal.milestones
+                          .find((candidate) => candidate.id === milestone.id)
+                          ?.successCriteria.flatMap(
+                            (criterion) => criterion.acceptanceChecks,
+                          ) ?? []
+                      }
+                    />
+                  ) : null}
                 </article>
               ))
             ) : (
@@ -542,6 +677,200 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
         </div>
       </aside>
     </div>
+  );
+}
+
+function MilestoneAcceptanceContract(props: { checks: AcceptanceCheck[] }) {
+  if (props.checks.length === 0) return null;
+  return (
+    <details className="goal-milestone-acceptance-contract">
+      <summary>查看验收合同 · {props.checks.length} 项</summary>
+      <ul>
+        {props.checks.map((check) => (
+          <li key={check.id}>
+            <strong>{check.id} · {check.kind}</strong>
+            <span>{check.description}</span>
+            <code>{formatAcceptanceParams(check.params)}</code>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+function formatAcceptanceParams(params: Record<string, unknown>): string {
+  try {
+    const value = JSON.stringify(params);
+    return value.length > 1_000 ? `${value.slice(0, 1_000)}…` : value;
+  } catch {
+    return "[验收参数不可序列化]";
+  }
+}
+
+function GoalContractDetails(props: { snapshot: GoalContractSnapshot }) {
+  const { snapshot } = props;
+  return (
+    <div className="goal-contract-details">
+      <p><b>目标结果：</b>{snapshot.objective}</p>
+      <p><b>交付物：</b>{formatContractList(snapshot.deliverables)}</p>
+      <p><b>范围内：</b>{formatContractList(snapshot.scope.in)}</p>
+      <p><b>范围外：</b>{formatContractList(snapshot.scope.out)}</p>
+      <p><b>显式假设：</b>{formatContractList(snapshot.assumptions)}</p>
+      <div>
+        <b>约束：</b>
+        {snapshot.constraints.length ? (
+          <ul>
+            {snapshot.constraints.map((constraint) => (
+              <li key={constraint.id}>
+                <strong>{constraint.strength === "hard" ? "硬约束" : "偏好"}</strong>
+                {` · ${formatConstraintDimension(constraint.dimension)} · ${constraint.description}`}
+              </li>
+            ))}
+          </ul>
+        ) : "无显式约束"}
+      </div>
+      <div>
+        <b>成功标准：</b>
+        <ol>
+          {snapshot.successCriteria.map((criterion) => (
+            <li key={criterion.id}>{criterion.description}</li>
+          ))}
+        </ol>
+      </div>
+      <p>
+        <b>风险策略：</b>
+        {snapshot.riskPolicy.ordinaryOperations === "auto_decide"
+          ? "普通操作自动决策"
+          : "普通操作需要确认"}
+        ；高风险与不可逆操作必须确认
+      </p>
+      <p>
+        <b>停止策略：</b>
+        成功后生成验收证书；外部阻塞
+        {snapshot.stopPolicy.onExternalBlock === "await_input" ? "等待输入" : "停止受阻"}
+        ；不可实现时
+        {snapshot.stopPolicy.onImpossible === "propose_goal_amendment"
+          ? "提出目标修订"
+          : "停止为不可实现"}
+        ；安全阻断时
+        {snapshot.stopPolicy.onSafetyBlock === "request_confirmation"
+          ? "请求确认"
+          : "停止受阻"}
+      </p>
+    </div>
+  );
+}
+
+function GoalContractComparison(props: {
+  base: GoalContractSnapshot;
+  candidate: GoalContractSnapshot;
+}) {
+  const changedFields = getChangedGoalContractFields(props.base, props.candidate);
+  const weakenedHardConstraints = props.base.constraints.filter(
+    (constraint) =>
+      constraint.strength === "hard" &&
+      !props.candidate.constraints.some(
+        (candidate) =>
+          candidate.id === constraint.id &&
+          candidate.strength === "hard" &&
+          candidate.description === constraint.description,
+      ),
+  );
+  return (
+    <div className="goal-contract-comparison">
+      <p>
+        <b>变更字段：</b>
+        {changedFields.length ? changedFields.join("、") : "仅修订版本和来源"}
+      </p>
+      {weakenedHardConstraints.length ? (
+        <p className="goal-contract-warning" role="alert">
+          注意：候选契约删除或放松了硬约束：
+          {weakenedHardConstraints.map((constraint) => constraint.description).join("；")}
+        </p>
+      ) : null}
+      <details>
+        <summary>当前 Goal r{props.base.revision}</summary>
+        <GoalContractDetails snapshot={props.base} />
+      </details>
+      <details open>
+        <summary>候选 Goal r{props.candidate.revision}</summary>
+        <GoalContractDetails snapshot={props.candidate} />
+      </details>
+    </div>
+  );
+}
+
+function getChangedGoalContractFields(
+  base: GoalContractSnapshot,
+  candidate: GoalContractSnapshot,
+): string[] {
+  const fields: Array<[string, unknown, unknown]> = [
+    ["目标结果", base.objective, candidate.objective],
+    ["交付物", base.deliverables, candidate.deliverables],
+    ["范围", base.scope, candidate.scope],
+    ["显式假设", base.assumptions, candidate.assumptions],
+    ["约束", base.constraints, candidate.constraints],
+    ["成功标准", base.successCriteria, candidate.successCriteria],
+    ["停止策略", base.stopPolicy, candidate.stopPolicy],
+    ["风险策略", base.riskPolicy, candidate.riskPolicy],
+  ];
+  return fields.flatMap(([label, left, right]) =>
+    JSON.stringify(left) === JSON.stringify(right) ? [] : [label],
+  );
+}
+
+function formatContractList(values: string[]): string {
+  return values.length ? values.join("；") : "无";
+}
+
+function formatConstraintDimension(
+  dimension: GoalContractSnapshot["constraints"][number]["dimension"],
+): string {
+  const labels: Record<typeof dimension, string> = {
+    quality: "质量",
+    time: "时间",
+    cost: "成本",
+    safety: "安全",
+    permission: "权限",
+    source: "来源",
+    scope: "范围",
+    other: "其他",
+  };
+  return labels[dimension];
+}
+
+function formatGoalPlanMode(goal: Goal): string {
+  const active = goal.activePlanRef;
+  const initial = goal.planHistory?.[0];
+  if (initial?.mode === "debate" && active?.mode === "direct") {
+    return `初始 Debate → 当前 Direct v${active.goalPlanVersion}`;
+  }
+  return formatPlanMode(active?.mode ?? initial?.mode ?? "legacy");
+}
+
+function formatPlanMode(mode: "direct" | "debate" | "legacy"): string {
+  if (mode === "direct") return "Direct";
+  if (mode === "debate") return "Debate";
+  return "Legacy compacted";
+}
+
+function formatPlanOutcome(
+  outcome: NonNullable<Goal["planHistory"]>[number]["outcome"],
+): string {
+  if (outcome === "candidate") return "等待采用";
+  if (outcome === "active") return "当前采用";
+  if (outcome === "superseded") return "已替代";
+  if (outcome === "rejected") return "未采用";
+  return "旧版压缩记录";
+}
+
+function isOpenRuntimePlanCandidate(plan: PlanRecord | null | undefined): boolean {
+  return Boolean(
+    plan?.purpose === "runtime_replan" &&
+      !plan.executionGoalId &&
+      !["discarded", "superseded", "completed", "steps_completed"].includes(
+        plan.status,
+      ),
   );
 }
 

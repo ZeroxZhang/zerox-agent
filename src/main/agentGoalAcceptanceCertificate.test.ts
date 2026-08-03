@@ -164,6 +164,49 @@ describe("goal acceptance certificate", () => {
     expect(leftCertificate.certificateHash).toMatch(/^[a-f0-9]{64}$/);
   });
 
+  it("allows one identical global check to certify multiple semantic criteria", () => {
+    const input = validInput();
+    input.goal.successCriteria.push({
+      id: "criterion_file_alias",
+      description: "The same report also satisfies the delivery criterion.",
+      acceptanceChecks: [
+        structuredClone(
+          input.goal.successCriteria[0]!.acceptanceChecks[0]!,
+        ),
+      ],
+    });
+
+    const certificate = createGoalAcceptanceCertificate(input);
+    const goal = goalWithCertificate(input.goal, certificate);
+
+    expect(certificate.checkResults.map((result) => result.checkId)).toEqual([
+      "check_file",
+      "check_semantic",
+    ]);
+    expect(verifyGoalAcceptanceCertificate(goal)).toEqual({ ok: true });
+  });
+
+  it("rejects conflicting Goal check definitions that reuse one id", () => {
+    const input = validInput();
+    const conflicting = structuredClone(
+      input.goal.successCriteria[0]!.acceptanceChecks[0]!,
+    );
+    conflicting.params = { ...conflicting.params, path: "other-report.md" };
+    input.goal.successCriteria.push({
+      id: "criterion_conflict",
+      description: "A different report exists.",
+      acceptanceChecks: [conflicting],
+    });
+
+    const certificate = createGoalAcceptanceCertificate(input);
+    const goal = goalWithCertificate(input.goal, certificate);
+
+    expect(verifyGoalAcceptanceCertificate(goal)).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining("conflicting definitions"),
+    });
+  });
+
   it("sanitizes and bounds every persisted certificate text and reference", () => {
     const input = validInput();
     const rawReportRef =

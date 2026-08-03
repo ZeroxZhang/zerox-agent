@@ -11,10 +11,15 @@ import {
   applyPlanQualityGate,
   createPlanQualityReport,
   createPlanTaskProfile,
+  derivePlanCriterionBindings,
   normalizePlanArtifactAcceptanceCommands,
   routePlannerSkill,
   shouldEscalatePlanInvestigation,
 } from "./plannerKernel";
+import {
+  createGoalContractRef,
+  deriveGoalContractFromPlan,
+} from "./goalPlanContractService";
 
 describe("planner kernel v2", () => {
   it("turns preference questions into audited assumptions in automatic Goal mode", () => {
@@ -343,6 +348,125 @@ describe("planner kernel v2", () => {
     expect(report.evidenceCoverage.missingRefs).toEqual([]);
   });
 
+  it("blocks a Plan that drops a frozen Goal success criterion", () => {
+    const artifact = planArtifact();
+    const contract = deriveGoalContractFromPlan({
+      planId: "plan_contract_coverage",
+      createdAt: "2026-08-03T00:00:00.000Z",
+      taskContract: {
+        objective: artifact.objective,
+        audience: "user",
+        inScope: artifact.scope.in,
+        outOfScope: artifact.scope.out,
+        constraints: ["Preserve permissions"],
+        successCriteria: ["整体交付可复核", "不得删除的额外成功标准"],
+        assumptions: [],
+      },
+    });
+    const criterionBindings = derivePlanCriterionBindings(artifact, contract);
+    const report = createPlanQualityReport({
+      artifact,
+      profile: createPlanTaskProfile("修复登录代码并运行测试"),
+      brief: brief(),
+      evidence: [
+        {
+          id: "evidence_user_request",
+          kind: "user",
+          title: "用户需求",
+          summary: "修复登录代码并运行测试",
+        },
+      ],
+      workspaceRoot: "/workspace",
+      goalContractSnapshot: contract,
+      goalContractRef: createGoalContractRef(contract),
+      criterionBindings,
+      now: "2026-08-03T00:00:00.000Z",
+    });
+
+    expect(criterionBindings[1]).toMatchObject({
+      criterionId: "criterion_2",
+      milestoneIds: [],
+      checkIds: ["goal-review"],
+    });
+    expect(report).toMatchObject({ status: "blocked" });
+    expect(report.blockingIssues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "GOAL_CRITERION_UNCOVERED" }),
+      ]),
+    );
+  });
+
+  it("binds plan-level Goal criteria to semantically relevant milestones instead of all milestones", () => {
+    const artifact = planArtifact();
+    const baseMilestone = artifact.milestones[0]!;
+    artifact.acceptanceCriteria = [
+      "交付并验证：styles.css（动效与视觉样式）",
+      "交付并验证：main.js（地图渲染与交互逻辑）",
+    ];
+    artifact.milestones = [
+      {
+        ...structuredClone(baseMilestone),
+        id: "styles",
+        title: "视觉样式",
+        description: "编写 styles.css 动效、渐变和毛玻璃样式",
+        acceptanceCriteria: ["styles.css 存在且包含关键动画"],
+        acceptanceChecks: [
+          {
+            id: "styles-check",
+            kind: "file_exists",
+            description: "styles.css exists",
+            params: { path: "styles.css" },
+            requiresEvidence: false,
+          },
+        ],
+      },
+      {
+        ...structuredClone(baseMilestone),
+        id: "main",
+        title: "交互逻辑",
+        description: "编写 main.js 地图渲染和交互逻辑",
+        acceptanceCriteria: ["main.js 包含地图交互"],
+        acceptanceChecks: [
+          {
+            id: "main-check",
+            kind: "file_exists",
+            description: "main.js exists",
+            params: { path: "main.js" },
+            requiresEvidence: false,
+          },
+        ],
+      },
+    ];
+    const contract = deriveGoalContractFromPlan({
+      planId: "plan_semantic_bindings",
+      createdAt: "2026-08-03T00:00:00.000Z",
+      taskContract: {
+        objective: artifact.objective,
+        audience: "user",
+        inScope: artifact.scope.in,
+        outOfScope: artifact.scope.out,
+        constraints: [],
+        successCriteria: [...artifact.acceptanceCriteria],
+        assumptions: [],
+      },
+    });
+
+    const bindings = derivePlanCriterionBindings(artifact, contract);
+
+    expect(bindings).toEqual([
+      {
+        criterionId: "criterion_1",
+        milestoneIds: ["styles"],
+        checkIds: ["goal-review", "styles-check"],
+      },
+      {
+        criterionId: "criterion_2",
+        milestoneIds: ["main"],
+        checkIds: ["goal-review", "main-check"],
+      },
+    ]);
+  });
+
   it("keeps explicit external Skill artifacts confirmable while surfacing the runtime boundary", () => {
     const artifact = planArtifact();
     artifact.milestones[0]!.acceptanceChecks = [
@@ -496,6 +620,51 @@ describe("planner kernel v2", () => {
       now: "2026-07-31T00:00:00.000Z",
     });
     expect(report.blockingIssues).toEqual([]);
+  });
+
+  it("blocks brittle source declarations that are not part of the success contract", () => {
+    const artifact = planArtifact();
+    artifact.milestones[0]!.acceptanceCriteria = [
+      "HTML 中包含可用的 ECharts 地图实现",
+    ];
+    artifact.milestones[0]!.acceptanceChecks = [
+      {
+        id: "m1-echarts",
+        kind: "test_passes",
+        description: "检查 HTML 是否包含 ECharts 核心代码",
+        params: {
+          command: "grep -c 'var echarts' map/index.html",
+          workspaceRoot: ".",
+        },
+        requiresEvidence: false,
+      },
+    ];
+
+    const report = createPlanQualityReport({
+      artifact,
+      profile: createPlanTaskProfile("创建 ECharts 地图网页"),
+      brief: brief(),
+      evidence: [
+        {
+          id: "evidence_user_request",
+          kind: "user",
+          title: "用户需求",
+          summary: "创建 ECharts 地图网页",
+        },
+      ],
+      workspaceRoot: "/workspace",
+      now: "2026-08-03T00:00:00.000Z",
+    });
+
+    expect(report.blockingIssues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "INVALID_ACCEPTANCE_CHECK",
+          checkId: "m1-echarts",
+          message: expect.stringContaining("var echarts"),
+        }),
+      ]),
+    );
   });
 
   it("keeps quoted relative cd targets inside the workspace", () => {

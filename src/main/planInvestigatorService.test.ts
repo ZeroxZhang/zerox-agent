@@ -369,6 +369,83 @@ describe("plan investigator service", () => {
     expect(stageStatuses).toEqual(["running", "failed"]);
   });
 
+  it("losslessly canonicalizes a scalar Skill evidence ref without re-sampling the model", async () => {
+    const registry = {
+      getVisibleDefinitions() {
+        return [];
+      },
+    } as unknown as DynamicToolRegistry;
+    let repairCalls = 0;
+    const scalarModel = model();
+    scalarModel.client = {
+      async complete() {
+        repairCalls += 1;
+        throw new Error("canonicalization should not call the model");
+      },
+      async *streamComplete() {
+        yield { type: "done" as const, finishReason: "stop" };
+      },
+    };
+    const service = createPlanInvestigatorService({
+      toolExecutor: {
+        getRegistry: () => registry,
+        hasTool: () => false,
+        async execute() {
+          throw new Error("no tools expected");
+        },
+      },
+      toolAuthorizationService: {} as ToolAuthorizationService,
+      discoverSkills: async () => ({ skills: [], errors: [] }),
+      runLoop: async () => ({
+        summary: JSON.stringify({
+          objective: "理解工作区",
+          deliverables: ["调查摘要"],
+          inScope: ["README"],
+          outOfScope: ["修改文件"],
+          constraints: ["只读"],
+          assumptions: [],
+          unresolvedQuestions: [],
+          targetRefs: ["README.md"],
+          evidenceRefs: ["evidence_user_request"],
+          skillCandidates: [
+            {
+              name: "not-installed",
+              reason: "候选项",
+              evidenceRefs: "evidence_user_request",
+            },
+          ],
+        }),
+        status: "succeeded",
+        turns: 1,
+        messages: [],
+        toolCallsExecuted: 0,
+        tokensConsumed: 10,
+      }),
+    });
+
+    const result = await service.investigate({
+      planId: "plan-scalar-canonicalization",
+      sessionId: "session-scalar-canonicalization",
+      workspaceRoot: "/workspace",
+      sourceMessage: "分析工作区",
+      profile: createPlanTaskProfile("分析工作区"),
+      baseEvidence: [
+        {
+          id: "evidence_user_request",
+          kind: "user",
+          title: "用户需求",
+          summary: "分析工作区",
+        },
+      ],
+      model: scalarModel,
+    });
+
+    expect(result.stage.status).toBe("completed");
+    expect(result.stage.revisionAttempted).toBeUndefined();
+    expect(result.brief.skillCandidates).toEqual([]);
+    expect(repairCalls).toBe(0);
+  });
+
   it("repairs malformed structured output with a bounded model retry", async () => {
     const registry = {
       getVisibleDefinitions() {
@@ -460,11 +537,18 @@ describe("plan investigator service", () => {
     // escalated output budget (4096 profile → 16384) to avoid truncating
     // the repair the same way the original was truncated.
     expect(repairRequests[0]).toMatchObject({ maxTokens: 16384 });
-    const repairUserMessage = repairRequests[0]?.messages as Array<{
+    const repairMessages = repairRequests[0]?.messages as Array<{
       role: string;
       content: string;
     }>;
-    expect(repairUserMessage[1]?.content).toContain(brokenSummary);
+    expect(repairMessages[2]).toMatchObject({
+      role: "assistant",
+      content: brokenSummary,
+    });
+    expect(repairMessages[3]?.content).toContain(
+      "PlanningBrief 结构化合同校验",
+    );
+    expect(result.stage.revisionAttempted).toBe(true);
   });
 
   it("still fails closed when structured-output repairs are exhausted", async () => {
@@ -489,6 +573,7 @@ describe("plan investigator service", () => {
           content: "still not json at all",
           toolCalls: [],
           finishReason: "stop",
+          usage: { inputTokens: 7, outputTokens: 3 },
         };
       },
       async *streamComplete() {
@@ -496,6 +581,8 @@ describe("plan investigator service", () => {
       },
     };
     const stageStatuses: string[] = [];
+    let failedExcerpt = "";
+    let failedRepairAttempted = false;
     const service = createPlanInvestigatorService({
       toolExecutor: executor,
       toolAuthorizationService: {} as ToolAuthorizationService,
@@ -532,14 +619,29 @@ describe("plan investigator service", () => {
       model: repairModel,
       async onStageUpdate(stage) {
         stageStatuses.push(stage.status);
+        if (stage.status === "failed") {
+          failedExcerpt = stage.failureExcerpt ?? "";
+          failedRepairAttempted = stage.revisionAttempted === true;
+        }
       },
     });
 
     await expect(investigation).rejects.toBeInstanceOf(
       PlanInvestigationError,
     );
-    expect(repairAttempts).toBe(2);
+    expect(repairAttempts).toBe(1);
     expect(stageStatuses).toEqual(["running", "failed"]);
+    expect(failedExcerpt).toContain("still not json at all");
+    expect(failedRepairAttempted).toBe(true);
+    const failure = (await investigation.catch((error) => error)) as
+      | PlanInvestigationError
+      | undefined;
+    expect(failure).toBeInstanceOf(PlanInvestigationError);
+    expect(failure?.stages.at(-1)?.usage).toMatchObject({
+      inputTokens: 7,
+      outputTokens: 13,
+      estimated: true,
+    });
   });
 
   it("surfaces the provider notice instead of an internal continuation reason", async () => {

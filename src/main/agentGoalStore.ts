@@ -16,6 +16,18 @@ import {
 } from "../shared/agentGoal";
 import { readRecoverableJsonl } from "./jsonlRecovery";
 import { verifyGoalAcceptanceCertificate } from "./agentGoalAcceptanceCertificate";
+import {
+  isGoalContractRef,
+  isGoalContractSnapshot,
+  type GoalContractRef,
+  type GoalPlanHistoryEntry,
+  type GoalPlanRef,
+} from "../shared/goalPlanContract";
+import {
+  createGoalContractRef,
+  deriveLegacyGoalContract,
+  goalContractMatchesRef,
+} from "./goalPlanContractService";
 
 export type { ProgressLedgerEvent } from "../shared/agentGoal";
 
@@ -24,6 +36,11 @@ export type AgentGoalStore = {
   saveIfStatus(
     goal: Goal,
     expectedStatus: GoalStatus,
+  ): Promise<GoalConditionalSaveResult>;
+  saveIfPlanVersion(
+    goal: Goal,
+    expectedPlanVersion: number,
+    expectedActivePlanId?: string,
   ): Promise<GoalConditionalSaveResult>;
   get(goalId: string): Promise<Goal | null>;
   listActive(): Promise<Goal[]>;
@@ -137,9 +154,11 @@ export function createAgentGoalStore(options: {
       if (existing?.status === "completed_unverified") {
         return { saved: false, goal: sanitizeGoalForRead(existing) };
       }
-      const candidate = sanitizeFinalJudgeReplay(
-        stripUnverifiedCompletionCertificate(
-          preserveCanonicalAcceptance(existing, goal),
+      const candidate = normalizeGoal(
+        sanitizeFinalJudgeReplay(
+          stripUnverifiedCompletionCertificate(
+            preserveCanonicalAcceptance(existing, goal),
+          ),
         ),
       );
       if (
@@ -181,6 +200,37 @@ export function createAgentGoalStore(options: {
 
     async saveIfStatus(goal, expectedStatus) {
       return persistGoal(goal, expectedStatus);
+    },
+
+    async saveIfPlanVersion(goal, expectedPlanVersion, expectedActivePlanId) {
+      return serializeMutation(goalsDir, async () => {
+        const existing = await readRawGoal(goal.id);
+        if (
+          !existing ||
+          existing.planVersion !== expectedPlanVersion ||
+          irreversibleGoalStatuses.has(existing.status) ||
+          (expectedActivePlanId !== undefined &&
+            existing.activePlanRef?.planId !== expectedActivePlanId)
+        ) {
+          return {
+            saved: false,
+            goal: existing ? sanitizeGoalForRead(existing) : null,
+          };
+        }
+        const candidate = normalizeGoal(
+          sanitizeFinalJudgeReplay(
+            stripUnverifiedCompletionCertificate(
+              preserveCanonicalAcceptance(existing, goal),
+            ),
+          ),
+        );
+        await writeJsonFileAtomically(
+          goalsDir,
+          goalPath(candidate.id),
+          `${JSON.stringify(candidate, null, 2)}\n`,
+        );
+        return { saved: true, goal: candidate };
+      });
     },
 
     async get(goalId) {
@@ -312,7 +362,7 @@ function normalizeGoal(goal: Goal): Goal {
       budgetUsage?: Goal["executionUsage"];
     }
   );
-  return sanitizeFinalJudgeReplay({
+  const baseGoal: Goal = {
     ...goalWithoutLegacyUsage,
     executionUsage: normalizeExecutionUsage(
       goal.executionUsage ?? legacyUsage,
@@ -321,17 +371,110 @@ function normalizeGoal(goal: Goal): Goal {
     ...(goal.originMessageId
       ? { originMessageId: String(goal.originMessageId) }
       : {}),
+  };
+  const goalContractSnapshot =
+    isGoalContractSnapshot(baseGoal.goalContractSnapshot)
+      ? baseGoal.goalContractSnapshot
+      : deriveLegacyGoalContract(baseGoal);
+  const goalContractRef =
+    isGoalContractRef(baseGoal.goalContractRef) &&
+    goalContractMatchesRef(goalContractSnapshot, baseGoal.goalContractRef)
+      ? baseGoal.goalContractRef
+      : createGoalContractRef(goalContractSnapshot);
+  const planVersion = Math.max(1, Number(baseGoal.planVersion ?? 1));
+  const activePlanRef = normalizeActivePlanRef(
+    baseGoal,
+    goalContractRef,
+    planVersion,
+  );
+  const planHistory = normalizePlanHistory(
+    baseGoal,
+    goalContractRef,
+    activePlanRef,
+    planVersion,
+  );
+  return sanitizeFinalJudgeReplay({
+    ...baseGoal,
+    planVersion,
+    goalContractSnapshot,
+    goalContractRef,
+    ...(activePlanRef ? { activePlanRef } : {}),
+    ...(planHistory.length > 0 ? { planHistory } : {}),
   });
+}
+
+function normalizeActivePlanRef(
+  goal: Goal,
+  goalContractRef: GoalContractRef,
+  planVersion: number,
+): GoalPlanRef | undefined {
+  if (goal.activePlanRef?.planId && goal.activePlanRef.goalContractRef) {
+    return structuredClone(goal.activePlanRef);
+  }
+  if (!goal.sourcePlanRef?.planId) {
+    if (planVersion <= 1) return undefined;
+    return {
+      planId: `legacy_compacted_${goal.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`,
+      planRevision: 1,
+      goalPlanVersion: planVersion,
+      mode: "legacy",
+      purpose: "initial",
+      goalContractRef,
+    };
+  }
+  return {
+    planId: goal.sourcePlanRef.planId,
+    planRevision: Math.max(1, Number(goal.sourcePlanRef.revision ?? 1)),
+    goalPlanVersion: planVersion,
+    mode: "legacy",
+    purpose: "initial",
+    goalContractRef,
+  };
+}
+
+function normalizePlanHistory(
+  goal: Goal,
+  goalContractRef: GoalContractRef,
+  activePlanRef: GoalPlanRef | undefined,
+  planVersion: number,
+): GoalPlanHistoryEntry[] {
+  if (Array.isArray(goal.planHistory) && goal.planHistory.length > 0) {
+    return structuredClone(goal.planHistory);
+  }
+  if (!activePlanRef) return [];
+  return [
+    {
+      ...activePlanRef,
+      trigger: {
+        kind: "legacy_upgrade",
+        summary:
+          planVersion > 1
+            ? "Legacy Goal contained compacted plan revisions without PlanRecord lineage."
+            : "Legacy Goal was derived from sourcePlanRef.",
+        evidenceRefs: [],
+        at: goal.createdAt,
+      },
+      outcome: planVersion > 1 ? "legacy_compacted" : "active",
+      adoptedAt: goal.createdAt,
+      goalContractRef,
+    },
+  ];
 }
 
 function normalizeExecutionUsage(
   usage: Goal["executionUsage"] | undefined,
 ): Goal["executionUsage"] {
+  const tokens = Math.max(0, Number(usage?.tokens ?? 0));
   return {
     iterations: Math.max(0, Number(usage?.iterations ?? 0)),
     toolCalls: Math.max(0, Number(usage?.toolCalls ?? 0)),
     wallClockMs: Math.max(0, Number(usage?.wallClockMs ?? 0)),
-    tokens: Math.max(0, Number(usage?.tokens ?? 0)),
+    tokens,
+    ...(usage?.tokensEstimated !== undefined
+      ? { tokensEstimated: Boolean(usage.tokensEstimated) }
+      : tokens > 0
+        ? { tokensEstimated: true }
+      : {}),
     replans: Math.max(0, Number(usage?.replans ?? 0)),
   };
 }

@@ -21,6 +21,7 @@ import type { AgentToolExecutor } from "./agentToolExecutor";
 import { PLAN_MODE_ALLOWED_TOOL_NAMES } from "./planModePolicy";
 import type { BoundModelClient } from "./providers/modelRouter";
 import { escalateOutputBudget } from "./structuredOutputBudget";
+import { completeStructuredBoundary } from "./structuredModelProtocol";
 import type { ToolAuthorizationService } from "./toolAuthorizationService";
 import {
   applyPlanningBriefAutonomy,
@@ -34,6 +35,25 @@ const MAX_EVIDENCE_PROMPT_CHARS = 48_000;
 const MAX_PERSISTED_EVIDENCE_ITEMS = 200;
 const MAX_PERSISTED_EVIDENCE_CHARS = 1024 * 1024;
 const MAX_PROMPT_SKILL_CANDIDATES = 80;
+const MAX_BRIEF_FAILURE_EXCERPT_CHARS = 6_000;
+
+type PlanningBriefBoundaryResult = {
+  brief: PlanningBrief;
+  repairAttempted: boolean;
+  usage?: { inputTokens: number; outputTokens: number };
+};
+
+class PlanningBriefBoundaryError extends Error {
+  constructor(
+    message: string,
+    readonly failureExcerpt?: string,
+    readonly repairAttempted = false,
+    readonly usage?: { inputTokens: number; outputTokens: number },
+  ) {
+    super(message);
+    this.name = "PlanningBriefBoundaryError";
+  }
+}
 
 export type PlanInvestigationResult = {
   brief: PlanningBrief;
@@ -137,6 +157,8 @@ export function createPlanInvestigatorService(options: {
         const collected: PlanEvidenceItem[] = [];
         const pendingEvidence: Array<Promise<PlanEvidenceItem>> = [];
         let evidenceOrdinal = 0;
+        let stageUsage: PlanningStageRecord["usage"];
+        let contractRepairAttempted = false;
         const flushPendingEvidence = async () => {
           const settled = await Promise.allSettled(pendingEvidence.splice(0));
           collected.push(
@@ -265,12 +287,32 @@ export function createPlanInvestigatorService(options: {
             );
           }
 
-          let brief = await parseInvestigationBriefWithRepair({
+          stageUsage = {
+            inputTokens: 0,
+            outputTokens: result.tokensConsumed ?? 0,
+            estimated: result.tokensEstimated ?? true,
+          };
+          const boundary = await parseInvestigationBriefWithRepair({
             summary: result.summary,
             normalize: (value) =>
               normalizePlanningBrief(value, input, evidence, skills),
             model: input.model,
+            sourceMessage: input.sourceMessage,
+            taskProfile: input.profile,
+            knownEvidenceRefs: evidence.map((item) => item.id),
+            installedSkillNames: promptSkills.map((skill) => skill.manifest.name),
           });
+          contractRepairAttempted = boundary.repairAttempted;
+          if (boundary.usage) {
+            stageUsage = {
+              inputTokens: stageUsage.inputTokens + boundary.usage.inputTokens,
+              outputTokens: stageUsage.outputTokens + boundary.usage.outputTokens,
+              estimated: stageUsage.estimated,
+            };
+          } else if (boundary.repairAttempted) {
+            stageUsage = { ...stageUsage, estimated: true };
+          }
+          let brief = boundary.brief;
           brief = applyPlanningBriefAutonomy(brief, input.autonomyMode);
           const evidenceInsufficient =
             isPlanInvestigationEvidenceInsufficient({
@@ -293,10 +335,8 @@ export function createPlanInvestigatorService(options: {
             status: "completed" as const,
             completedAt: now(),
             evidenceRefs: brief.evidenceRefs,
-            usage: {
-              inputTokens: 0,
-              outputTokens: result.tokensConsumed ?? 0,
-            },
+            usage: stageUsage,
+            ...(contractRepairAttempted ? { revisionAttempted: true } : {}),
           };
           stages.push(completed);
           await input.onStageUpdate?.(completed, evidence);
@@ -323,11 +363,29 @@ export function createPlanInvestigatorService(options: {
         } catch (error) {
           await flushPendingEvidence();
           evidence = dedupeEvidence([...evidence, ...collected]);
+          const boundaryError =
+            error instanceof PlanningBriefBoundaryError ? error : undefined;
+          if (boundaryError?.usage) {
+            stageUsage = {
+              inputTokens:
+                (stageUsage?.inputTokens ?? 0) + boundaryError.usage.inputTokens,
+              outputTokens:
+                (stageUsage?.outputTokens ?? 0) + boundaryError.usage.outputTokens,
+              estimated: stageUsage?.estimated ?? false,
+            };
+          }
           const failed: PlanningStageRecord = {
             ...stageBase,
             status: "failed",
             completedAt: now(),
             evidenceRefs: evidence.map((item) => item.id),
+            ...(stageUsage ? { usage: stageUsage } : {}),
+            ...(contractRepairAttempted || boundaryError?.repairAttempted
+              ? { revisionAttempted: true }
+              : {}),
+            ...(boundaryError?.failureExcerpt
+              ? { failureExcerpt: boundaryError.failureExcerpt }
+              : {}),
             error:
               error instanceof Error ? error.message : "规划调查失败。",
           };
@@ -345,78 +403,134 @@ export function createPlanInvestigatorService(options: {
 }
 
 /**
- * Parse the investigator's structured brief, repairing malformed JSON with
- * bounded model retries. Observed in production (2026-08-01): a single
- * syntax error in the model's final JSON ("Expected ',' or '}' after
- * property value") failed the whole investigation stage — and paused the
- * entire plan — even though the underlying research had succeeded. The
- * evidence and the summary both survive such slips, so a cheap repair pass
- * ("return the corrected JSON only") recovers the run without re-executing
- * any tool work. Falls back to the original error when repairs exhaust.
+ * The investigation summary crosses the same unreliable model boundary as
+ * A/B/C rounds. It must therefore use the shared structured-output ladder,
+ * not the old syntax-only JSON fixer. The production failure on 2026-08-03
+ * was valid JSON with an invalid PlanningBrief field
+ * (`skillCandidates[0].evidenceRefs` was not an array): a syntax repairer
+ * could never fix that contract violation, so the whole investigation was
+ * paused and a manual retry merely re-sampled the model. This adapter keeps
+ * the already-collected read-only evidence, performs one contract-aware
+ * repair, and fails closed with a bounded raw excerpt if the repair remains
+ * invalid.
  */
-const MAX_BRIEF_REPAIR_ATTEMPTS = 2;
-
 async function parseInvestigationBriefWithRepair(input: {
   summary: string;
   normalize: (value: Record<string, unknown>) => PlanningBrief;
   model: BoundModelClient;
-}): Promise<PlanningBrief> {
+  sourceMessage: string;
+  taskProfile: PlanTaskProfile;
+  knownEvidenceRefs: string[];
+  installedSkillNames: string[];
+}): Promise<PlanningBriefBoundaryResult> {
   try {
-    return parseUniquePlanRoundObject(input.summary, input.normalize);
+    return {
+      brief: parseUniquePlanRoundObject(input.summary, input.normalize),
+      repairAttempted: false,
+    };
   } catch (initialError) {
-    let lastError =
-      initialError instanceof Error ? initialError : new Error(String(initialError));
-    let candidate = input.summary;
-    // Repair completions regenerate the whole brief, so give them an
-    // escalating output budget: the most common reason the original brief
-    // was malformed is truncation at the profile's maxTokens, and
-    // re-emitting the same budget would just truncate the repair too.
-    let repairMaxTokens = input.model.binding.generation.maxTokens;
-    for (let attempt = 1; attempt <= MAX_BRIEF_REPAIR_ATTEMPTS; attempt += 1) {
-      repairMaxTokens = escalateOutputBudget(repairMaxTokens);
-      let repaired: string;
-      try {
-        const response = await input.model.client.complete({
-          baseUrl: input.model.binding.baseUrl ?? "",
-          apiKey: "",
-          model: input.model.binding.modelId,
-          temperature: 0,
-          maxTokens: repairMaxTokens,
-          messages: [
+    let suppliedInitialResponse = false;
+    const initialMaxTokens = isLikelyTruncatedBrief(input.summary, initialError)
+      ? escalateOutputBudget(input.model.binding.generation.maxTokens)
+      : input.model.binding.generation.maxTokens;
+    try {
+      const result = await completeStructuredBoundary({
+        complete: ({ maxTokens, messages }) => {
+          if (!suppliedInitialResponse) {
+            suppliedInitialResponse = true;
+            return Promise.resolve({
+              content: input.summary,
+              finishReason: "stop" as const,
+            });
+          }
+          return input.model.client.complete({
+            baseUrl: input.model.binding.baseUrl ?? "",
+            apiKey: "",
+            model: input.model.binding.modelId,
+            temperature: 0,
+            maxTokens,
+            messages,
+          });
+        },
+        contract: {
+          name: "planning-brief",
+          baseMessages: [
             {
               role: "system",
-              content:
-                "你是 JSON 修复器。你的唯一任务是把用户给出的损坏文本修复为一个合法的 JSON 对象。只输出修复后的 JSON 对象本身，不要输出解释、Markdown 代码围栏或任何其他文本。",
+              content: [
+                "你是 Zerox PlanningBrief 合同修复器。你只修复已有调查摘要的 JSON 语法与字段合同，不重新调查、不调用工具、不改变用户目标。",
+                "必须返回一个完整 JSON 对象，不要输出解释、Markdown、XML、代码围栏或前后缀。",
+                "所有列表字段必须是数组；skillCandidates 可以为空数组，每个候选项必须包含 name、reason、evidenceRefs，其中 evidenceRefs 必须是数组。",
+                "只能使用提供的 evidence ref 和已安装 Skill 名称；无法证明的 Skill 候选应删除，禁止编造。",
+                "必须符合以下英文键结构：",
+                JSON.stringify(planningBriefTemplate()),
+              ].join("\n"),
             },
             {
               role: "user",
-              content: [
-                `下面的文本本应是一个 JSON 对象，但 JSON 解析失败：${lastError.message}`,
-                "请保持原有内容与结构，仅修复使其成为合法 JSON 所必需的错误（如未转义的引号/换行、缺失的逗号或括号），并只返回修复后的 JSON 对象。",
-                "",
-                candidate,
-              ].join("\n"),
+              content: JSON.stringify({
+                sourceMessage: input.sourceMessage,
+                taskProfile: input.taskProfile,
+                knownEvidenceRefs: input.knownEvidenceRefs,
+                installedSkillNames: input.installedSkillNames,
+              }),
             },
           ],
-        });
-        repaired = response.content?.trim() ?? "";
-      } catch {
-        // Repair request itself failed (transport/provider) — the original
-        // parse error is the actionable failure; stop retrying.
-        break;
+          parse: (text) =>
+            parseUniquePlanRoundObject(text, input.normalize),
+          buildRepairPrompt: (error) => [
+            "上一条调查摘要未通过 PlanningBrief 结构化合同校验。把本次调用视为同一调查阶段的合同修复，不是重新规划。",
+            `校验失败：${error instanceof Error ? error.message : "响应未通过 PlanningBrief 合同。"}`,
+            "修复 JSON 语法以及被点名的字段类型/必填项；保持已经收集的事实、目标和证据引用不变。",
+            "只返回一个完整 PlanningBrief JSON 对象。",
+          ].join("\n"),
+          buildFailure: (error, response, diagnostics) =>
+            new PlanningBriefBoundaryError(
+              error instanceof Error
+                ? error.message
+                : "PlanningBrief 未通过结构化合同校验。",
+              boundedBriefFailureExcerpt(response.content ?? input.summary),
+              diagnostics.repairAttempted,
+              diagnostics.usage,
+            ),
+          emptyContentError: "规划调查模型没有返回 PlanningBrief。",
+        },
+        initialMaxTokens,
+      });
+      return {
+        brief: result.output,
+        repairAttempted: result.diagnostics.repairAttempted,
+        ...(result.usage ? { usage: result.usage } : {}),
+      };
+    } catch (error) {
+      if (error instanceof PlanningBriefBoundaryError) {
+        throw error;
       }
-      try {
-        return parseUniquePlanRoundObject(repaired, input.normalize);
-      } catch (repairParseError) {
-        lastError =
-          repairParseError instanceof Error
-            ? repairParseError
-            : new Error(String(repairParseError));
-        candidate = repaired || candidate;
-      }
+      throw new PlanningBriefBoundaryError(
+        error instanceof Error ? error.message : String(error),
+        boundedBriefFailureExcerpt(input.summary),
+        suppliedInitialResponse,
+      );
     }
-    throw lastError;
   }
+}
+
+function isLikelyTruncatedBrief(summary: string, error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  const trimmed = summary.trim();
+  return (
+    !trimmed.endsWith("}") ||
+    /unexpected end|unterminated|没有返回完整 JSON|JSON 存在语法错误/i.test(
+      message,
+    )
+  );
+}
+
+function boundedBriefFailureExcerpt(content: string): string | undefined {
+  const trimmed = content.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.length <= MAX_BRIEF_FAILURE_EXCERPT_CHARS) return trimmed;
+  return `${trimmed.slice(0, 4_000)}\n...[excerpt truncated]...\n${trimmed.slice(-2_000)}`;
 }
 
 function createReadOnlyPlanContext(input: {  runId: string;
@@ -585,7 +699,8 @@ function normalizePlanningBrief(
   evidence: PlanEvidenceItem[],
   skills: SkillRecord[],
 ): PlanningBrief {
-  assertPlanningBriefShape(value);
+  const canonical = canonicalizePlanningBriefShape(value);
+  assertPlanningBriefShape(canonical);
   const fallback = createFallbackPlanningBrief({
     sourceMessage: input.sourceMessage,
     profile: input.profile,
@@ -594,7 +709,7 @@ function normalizePlanningBrief(
   });
   const knownEvidence = new Set(evidence.map((item) => item.id));
   const knownSkills = new Set(skills.map((skill) => skill.manifest.name));
-  const candidates = array(value.skillCandidates)
+  const candidates = array(canonical.skillCandidates)
     .map((candidate) => record(candidate))
     .map((candidate) => ({
       name: string(candidate.name),
@@ -607,10 +722,11 @@ function normalizePlanningBrief(
       (candidate) =>
         candidate.name &&
         candidate.reason &&
+        candidate.evidenceRefs.length > 0 &&
         knownSkills.has(candidate.name),
     );
-  const recommendedSkillName = string(value.recommendedSkillName);
-  const inputValues = primitiveRecord(value.recommendedSkillInputValues);
+  const recommendedSkillName = string(canonical.recommendedSkillName);
+  const inputValues = primitiveRecord(canonical.recommendedSkillInputValues);
   const sensitiveInputFields = Object.keys(inputValues).filter(
     isSensitiveSkillInputName,
   );
@@ -620,33 +736,33 @@ function normalizePlanningBrief(
     ),
   );
   const inputEvidenceRefs = evidenceRefRecord(
-    value.recommendedSkillInputEvidenceRefs,
+    canonical.recommendedSkillInputEvidenceRefs,
     knownEvidence,
   );
   return {
-    objective: string(value.objective) || fallback.objective,
-    deliverables: nonEmptyStrings(value.deliverables, fallback.deliverables),
-    inScope: nonEmptyStrings(value.inScope, fallback.inScope),
-    outOfScope: strings(value.outOfScope),
-    constraints: nonEmptyStrings(value.constraints, fallback.constraints),
-    assumptions: strings(value.assumptions),
+    objective: string(canonical.objective) || fallback.objective,
+    deliverables: nonEmptyStrings(canonical.deliverables, fallback.deliverables),
+    inScope: nonEmptyStrings(canonical.inScope, fallback.inScope),
+    outOfScope: strings(canonical.outOfScope),
+    constraints: nonEmptyStrings(canonical.constraints, fallback.constraints),
+    assumptions: strings(canonical.assumptions),
     unresolvedQuestions: unique([
-      ...strings(value.unresolvedQuestions),
+      ...strings(canonical.unresolvedQuestions),
       ...sensitiveInputFields.map(
         (field) =>
           `Skill 输入 ${field} 属于敏感凭证，不能写入 Plan；请改用 Zerox 安全凭证配置。`,
       ),
     ]),
-    targetRefs: strings(value.targetRefs),
+    targetRefs: strings(canonical.targetRefs),
     evidenceRefs: unique([
       "evidence_user_request",
-      ...strings(value.evidenceRefs).filter((ref) => knownEvidence.has(ref)),
+      ...strings(canonical.evidenceRefs).filter((ref) => knownEvidence.has(ref)),
     ]),
     skillCandidates: candidates,
     ...(recommendedSkillName && knownSkills.has(recommendedSkillName)
       ? {
           recommendedSkillName,
-          recommendedSkillReason: string(value.recommendedSkillReason),
+          recommendedSkillReason: string(canonical.recommendedSkillReason),
           recommendedSkillInputValues: safeInputValues,
           recommendedSkillInputEvidenceRefs: Object.fromEntries(
             Object.entries(inputEvidenceRefs).filter(
@@ -656,6 +772,51 @@ function normalizePlanningBrief(
         }
       : {}),
   };
+}
+
+/**
+ * Lossless wire canonicalization. A single string where the contract asks
+ * for a string array has exactly one unambiguous representation, so it is
+ * safer to canonicalize it locally than to spend another stochastic model
+ * call. Missing candidate evidenceRefs also canonicalizes to an empty array:
+ * normalizePlanningBrief will then keep the candidate only if its Skill is
+ * real, while routing can safely treat it as unsupported. Objects, numbers,
+ * and other ambiguous shapes still fail the strict contract and enter the
+ * bounded repair ladder.
+ */
+function canonicalizePlanningBriefShape(
+  value: Record<string, unknown>,
+): Record<string, unknown> {
+  const canonical = { ...value };
+  for (const key of [
+    "deliverables",
+    "inScope",
+    "outOfScope",
+    "constraints",
+    "assumptions",
+    "unresolvedQuestions",
+    "targetRefs",
+    "evidenceRefs",
+  ] as const) {
+    if (typeof canonical[key] === "string") {
+      canonical[key] = [canonical[key]];
+    }
+  }
+  if (Array.isArray(canonical.skillCandidates)) {
+    canonical.skillCandidates = canonical.skillCandidates.map((candidate) => {
+      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+        return candidate;
+      }
+      const item = { ...(candidate as Record<string, unknown>) };
+      if (typeof item.evidenceRefs === "string") {
+        item.evidenceRefs = [item.evidenceRefs];
+      } else if (item.evidenceRefs === undefined || item.evidenceRefs === null) {
+        item.evidenceRefs = [];
+      }
+      return item;
+    });
+  }
+  return canonical;
 }
 
 function assertPlanningBriefShape(value: Record<string, unknown>): void {

@@ -70,6 +70,8 @@ import type { GoalReviewDecision } from "../shared/agentGoalReview";
 import type { GoalDraft } from "../shared/goalTranslation";
 import type {
   CreatePlanInput,
+  CreateRuntimeGoalPlanResult,
+  GoalAmendmentOperationResult,
   PlanMode,
   PlanModelAssignments,
   PlanRecord,
@@ -258,12 +260,24 @@ type ChatPlanService = {
   >;
 };
 
+type ChatGoalAmendmentService = (
+  goalId: string,
+  objective: string,
+  reason: string,
+) => Promise<GoalAmendmentOperationResult>;
+
+type ChatGoalRuntimeReplanService = (
+  goalId: string,
+  instructions: string,
+) => Promise<CreateRuntimeGoalPlanResult>;
+
 type GoalIntentRoute =
   | { kind: "set_goal"; description: string }
   | { kind: "continue_goal" }
   | { kind: "pause_goal" }
   | { kind: "cancel_goal" }
-  | { kind: "modify_goal"; instructions: string }
+  | { kind: "modify_plan"; instructions: string }
+  | { kind: "amend_goal"; objective: string }
   | { kind: "none" };
 
 export function createChatService(options: {
@@ -279,6 +293,8 @@ export function createChatService(options: {
   goalService?: ChatGoalService;
   goalDraftService?: ChatGoalDraftService;
   planService?: ChatPlanService;
+  proposeGoalAmendment?: ChatGoalAmendmentService;
+  runtimeReplanGoal?: ChatGoalRuntimeReplanService;
   taskStore?: Pick<ScheduledTaskStore, "create" | "list">;
   runScheduledTask?: (
     taskId: string,
@@ -856,6 +872,70 @@ export function createChatService(options: {
               plan: inputRoutingPlan,
             };
           }
+          const amendmentObjective = extractExplicitGoalAmendmentObjective(
+            userMessage,
+          );
+          if (
+            amendmentObjective &&
+            inputRoutingPlan.purpose === "runtime_replan" &&
+            inputRoutingPlan.goalId
+          ) {
+            if (!options.proposeGoalAmendment) {
+              return {
+                ok: false,
+                message: "当前运行时未启用受控 Goal 修订服务。",
+              };
+            }
+            emitStatus.send({
+              state: "reasoning",
+              message: "正在创建目标修订提案，当前 Goal 和活动 Plan 保持不变",
+              toolCallsExecuted: 0,
+            });
+            const amendment = await options.proposeGoalAmendment(
+              inputRoutingPlan.goalId,
+              amendmentObjective,
+              userMessage,
+            );
+            if (!amendment.ok) {
+              emitStatus.send({
+                state: "failed",
+                message: amendment.message,
+                toolCallsExecuted: 0,
+              });
+              return { ok: false, message: amendment.message };
+            }
+            const reply = `${amendment.message} 当前 Goal 和活动 Plan 尚未改变；请在 Goal 详情中批准或拒绝。`;
+            emitStatus.send({
+              state: "paused",
+              message: "目标修订提案等待明确批准",
+              toolCallsExecuted: 0,
+            });
+            await persistAssistantReply({
+              content: reply,
+              goalEventRef: `goal-amendment:${amendment.proposal.id}`,
+            });
+            appendRawHistoryEntry({
+              historyIndexStore: options.historyIndexStore,
+              createId,
+              sessionId,
+              requestId,
+              role: "assistant",
+              content: reply,
+              workspaceId: chatRunContext?.workspaceId ?? input.workspaceId,
+              createdAt: new Date(getNowMs(options.now)).toISOString(),
+            });
+            return {
+              ok: true,
+              reply,
+              sessionId,
+              relatedMemories: [],
+              memoryId: null,
+              plan: inputRoutingPlan,
+              ...(activeGoal?.id === inputRoutingPlan.goalId
+                ? { activeGoal }
+                : {}),
+            };
+          }
           const canRevisePlan =
             inputRoutingPlan.status === "awaiting_input" ||
             inputRoutingPlan.status === "awaiting_confirmation" ||
@@ -1114,6 +1194,8 @@ export function createChatService(options: {
         goalService: options.goalService,
         goalDraftService: options.goalDraftService,
         planService: options.planService,
+        proposeGoalAmendment: options.proposeGoalAmendment,
+        runtimeReplanGoal: options.runtimeReplanGoal,
         usePlanMode: input.mode === "goal_plan",
         planMode: input.planMode ?? "direct",
         planAutonomyMode: input.planAutonomyMode,
@@ -3368,12 +3450,19 @@ function detectGoalIntent(message: string): GoalIntentRoute {
     return { kind: "cancel_goal" };
   }
 
-  const modifyMatch = compact.match(/^(目标改一下|修改计划|调整目标)[:：]?\s*(.*)$/);
-  if (modifyMatch) {
+  const modifyPlanMatch = compact.match(
+    /^(?:修改计划|调整目标计划)\s*[:：]?\s*(.*)$/,
+  );
+  if (modifyPlanMatch) {
     return {
-      kind: "modify_goal",
-      instructions: modifyMatch[2]?.trim() || compact,
+      kind: "modify_plan",
+      instructions: modifyPlanMatch[1]?.trim() || compact,
     };
+  }
+
+  const amendmentObjective = extractExplicitGoalAmendmentObjective(compact);
+  if (amendmentObjective) {
+    return { kind: "amend_goal", objective: amendmentObjective };
   }
 
   if (isContinuationRequest(compact)) {
@@ -3381,6 +3470,15 @@ function detectGoalIntent(message: string): GoalIntentRoute {
   }
 
   return { kind: "none" };
+}
+
+function extractExplicitGoalAmendmentObjective(message: string): string | null {
+  const match = message
+    .trim()
+    .match(
+      /^(?:目标改一下|修改目标|调整目标)(?:\s*[:：]\s*|\s+)(.+)$/,
+    );
+  return match?.[1]?.trim() || null;
 }
 
 function extractGoalDescription(message: string): string {
@@ -3509,6 +3607,8 @@ async function tryRouteGoalIntent(options: {
   goalService: ChatGoalService | undefined;
   goalDraftService: ChatGoalDraftService | undefined;
   planService: ChatPlanService | undefined;
+  proposeGoalAmendment: ChatGoalAmendmentService | undefined;
+  runtimeReplanGoal: ChatGoalRuntimeReplanService | undefined;
   usePlanMode: boolean;
   planMode: PlanMode;
   planAutonomyMode?: CreatePlanInput["autonomyMode"];
@@ -3764,6 +3864,57 @@ async function tryRouteGoalIntent(options: {
     return null;
   }
 
+  if (options.route.kind === "amend_goal") {
+    if (!options.proposeGoalAmendment) {
+      return {
+        result: {
+          ok: false,
+          message: "当前运行时未启用受控 Goal 修订服务。",
+        },
+      };
+    }
+    const amendment = await options.proposeGoalAmendment(
+      options.activeGoal.id,
+      options.route.objective,
+      `用户请求修改目标：${options.route.objective}`,
+    );
+    if (!amendment.ok) {
+      return { result: { ok: false, message: amendment.message } };
+    }
+    const amendedGoalSummary = amendment.proposal.pausedExecution
+      ? {
+          ...options.activeGoal,
+          status: "waiting_for_review" as const,
+        }
+      : options.activeGoal;
+    await syncChatGoalSummary(
+      options.chatSessionStore,
+      options.sessionId,
+      amendedGoalSummary,
+    );
+    const reply = `${amendment.message} GoalContract 和活动 Plan 尚未改变；请在 Goal 详情中批准或拒绝。`;
+    options.emitStatus?.send({
+      state: "paused",
+      message: "目标修订提案等待明确批准",
+      toolCallsExecuted: 0,
+    });
+    await appendGoalReply({
+      content: reply,
+      goalId: options.activeGoal.id,
+      goalEventRef: `goal-amendment:${amendment.proposal.id}`,
+    });
+    return {
+      result: {
+        ok: true,
+        reply,
+        sessionId: options.sessionId,
+        relatedMemories: [],
+        memoryId: null,
+        activeGoal: amendedGoalSummary,
+      },
+    };
+  }
+
   if (options.route.kind === "continue_goal") {
     if (options.activeGoal.status === "stopped_budget") {
       const reply =
@@ -3882,20 +4033,31 @@ async function tryRouteGoalIntent(options: {
     };
   }
 
-  const activeGoal = await options.goalService.resolveReview(
+  if (!options.runtimeReplanGoal) {
+    return {
+      result: {
+        ok: false,
+        message: "当前运行时未启用结构性 Goal 重规划服务。",
+      },
+    };
+  }
+  options.emitStatus?.send({
+    state: "reasoning",
+    message: "正在基于你的调整意见生成运行期 Direct Plan",
+    toolCallsExecuted: 0,
+  });
+  const replanned = await options.runtimeReplanGoal(
     options.activeGoal.id,
-    { kind: "modify_plan", instructions: options.route.instructions },
+    options.route.instructions,
   );
-  await syncChatGoalSummary(
-    options.chatSessionStore,
-    options.sessionId,
-    activeGoal,
-  );
-  const reply = `已记录目标调整：${options.route.instructions}`;
+  if (!replanned.ok) {
+    return { result: { ok: false, message: replanned.message } };
+  }
+  const reply = `已生成运行期 Direct Plan：${options.route.instructions}。采用前不会覆盖当前 Goal。`;
   await appendGoalReply({
     content: reply,
-    goalId: activeGoal.id,
-    goalEventRef: "goal_modified",
+    goalId: options.activeGoal.id,
+    goalEventRef: `goal-runtime-plan:${replanned.plan.id}`,
   });
   return {
     result: {
@@ -3904,7 +4066,7 @@ async function tryRouteGoalIntent(options: {
       sessionId: options.sessionId,
       relatedMemories: [],
       memoryId: null,
-      activeGoal,
+      plan: replanned.plan,
     },
   };
 }

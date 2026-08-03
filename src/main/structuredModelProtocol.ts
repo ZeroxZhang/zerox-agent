@@ -65,14 +65,23 @@ export type StructuredBoundaryContract<T> = {
   buildFailure: (
     error: unknown,
     response: StructuredBoundaryResponse,
+    diagnostics: StructuredBoundaryDiagnostics,
   ) => Error;
   /** Message shown to the model when a response carries no text at all. */
   emptyContentError: string;
 };
 
+export type StructuredBoundaryDiagnostics = {
+  completionCount: number;
+  repairAttempted: boolean;
+  outputLimitRecovered: boolean;
+  usage?: { inputTokens: number; outputTokens: number };
+};
+
 export type StructuredBoundaryResult<T> = {
   output: T;
   usage?: { inputTokens: number; outputTokens: number };
+  diagnostics: StructuredBoundaryDiagnostics;
 };
 
 const MAX_BOUNDARY_COMPLETIONS = 3;
@@ -96,9 +105,18 @@ export async function completeStructuredBoundary<T>(options: {
   let inputTokens = 0;
   let outputTokens = 0;
   let hasUsage = false;
+  let completionCount = 0;
+
+  const diagnostics = (): StructuredBoundaryDiagnostics => ({
+    completionCount,
+    repairAttempted,
+    outputLimitRecovered,
+    ...(hasUsage ? { usage: { inputTokens, outputTokens } } : {}),
+  });
 
   for (let attempt = 0; attempt < MAX_BOUNDARY_COMPLETIONS; attempt += 1) {
     const response = await options.complete({ maxTokens, messages });
+    completionCount += 1;
     if (response.usage) {
       hasUsage = true;
       inputTokens += response.usage.inputTokens;
@@ -136,13 +154,14 @@ export async function completeStructuredBoundary<T>(options: {
       return {
         output: contract.parse(text),
         ...(hasUsage ? { usage: { inputTokens, outputTokens } } : {}),
+        diagnostics: diagnostics(),
       };
     } catch (error) {
       if (error instanceof ModelServiceNoticeError) {
         throw error;
       }
       if (repairAttempted) {
-        throw contract.buildFailure(error, response);
+        throw contract.buildFailure(error, response, diagnostics());
       }
       repairAttempted = true;
       continuationPrefix = "";
@@ -163,5 +182,6 @@ export async function completeStructuredBoundary<T>(options: {
   throw contract.buildFailure(
     new Error(`${contract.name} 结构化输出修复未完成。`),
     { content: "", finishReason: "unknown" },
+    diagnostics(),
   );
 }

@@ -22,6 +22,12 @@ import type {
 } from "../shared/planMode";
 import type { SkillInputValue } from "../shared/skillExecutionContract";
 import type { SkillRecord } from "../shared/skills";
+import type {
+  GoalContractIssue,
+  GoalContractRef,
+  GoalContractSnapshot,
+  PlanCriterionBinding,
+} from "../shared/goalPlanContract";
 import { validatePlanMilestoneGraph } from "../shared/planValidation";
 import { assertValidPlanRoundShape } from "../shared/planStructuredOutput";
 import {
@@ -29,6 +35,7 @@ import {
   validateAcceptanceCheckContract,
 } from "./acceptanceContractValidator";
 import { resolveSkillInput } from "./skillExecutionService";
+import { goalContractMatchesRef } from "./goalPlanContractService";
 
 const USER_AUTHORITY_QUESTION_PATTERNS = [
   /(?:api[\s_-]?key|access[\s_-]?token|refresh[\s_-]?token|password|passcode|secret|credential|密钥|口令|密码|令牌|凭证)/i,
@@ -411,6 +418,10 @@ export function createPlanQualityReport(input: {
   availableAcceptanceKinds?: Iterable<string>;
   reviewApproved?: boolean;
   reviewIssues?: PlanReviewIssue[];
+  goalContractSnapshot?: GoalContractSnapshot;
+  goalContractRef?: GoalContractRef;
+  criterionBindings?: PlanCriterionBinding[];
+  goalContractIssues?: GoalContractIssue[];
   now?: string;
 }): PlanQualityReport {
   const blockingIssues: PlanQualityIssue[] = [];
@@ -419,6 +430,51 @@ export function createPlanQualityReport(input: {
   const availableAcceptanceKinds = new Set(
     input.availableAcceptanceKinds ?? [],
   );
+
+  for (const issue of input.goalContractIssues ?? []) {
+    const qualityIssue: PlanQualityIssue = {
+      code: "GOAL_CONTRACT_BLOCKED",
+      severity: issue.severity === "blocking" ? "blocking" : "warning",
+      message: issue.description,
+      evidenceRefs: issue.evidenceRefs,
+    };
+    if (qualityIssue.severity === "blocking") {
+      blockingIssues.push(qualityIssue);
+    } else {
+      warnings.push(qualityIssue);
+    }
+  }
+
+  if (input.goalContractSnapshot) {
+    const contract = input.goalContractSnapshot;
+    if (
+      !input.goalContractRef ||
+      !goalContractMatchesRef(contract, input.goalContractRef)
+    ) {
+      blockingIssues.push({
+        code: "GOAL_CONTRACT_DRIFT",
+        severity: "blocking",
+        message: "Plan 使用的 GoalContract 快照与冻结哈希不一致。",
+      });
+    }
+    const boundCriteria = new Set(
+      (input.criterionBindings ?? [])
+        .filter(
+          (binding) =>
+            binding.milestoneIds.length > 0 && binding.checkIds.length > 0,
+        )
+        .map((binding) => binding.criterionId),
+    );
+    for (const criterion of contract.successCriteria) {
+      if (!boundCriteria.has(criterion.id)) {
+        blockingIssues.push({
+          code: "GOAL_CRITERION_UNCOVERED",
+          severity: "blocking",
+          message: `Goal 成功标准未绑定到里程碑和验收检查：${criterion.description}`,
+        });
+      }
+    }
+  }
 
   try {
     assertValidPlanRoundShape(
@@ -600,6 +656,21 @@ export function createPlanQualityReport(input: {
     const validation = validateAcceptanceCheckContract(check, {
       workspaceRoot: input.workspaceRoot,
       evidenceRefs: evidenceIds,
+      semanticCriteria: milestoneId
+        ? [
+            ...(input.artifact.milestones.find(
+              (milestone) => milestone.id === milestoneId,
+            )?.acceptanceCriteria ?? []),
+            ...(input.goalContractSnapshot?.successCriteria.map(
+              (criterion) => criterion.description,
+            ) ?? []),
+          ]
+        : [
+            ...input.artifact.acceptanceCriteria,
+            ...(input.goalContractSnapshot?.successCriteria.map(
+              (criterion) => criterion.description,
+            ) ?? []),
+          ],
       // A read-only plan may propose an explicit external artifact location
       // (for example a shared Skill directory). User confirmation establishes
       // intent; the Goal runtime remains responsible for authorization and
@@ -733,6 +804,132 @@ export function createPlanQualityReport(input: {
     },
     generatedAt: input.now ?? new Date().toISOString(),
   };
+}
+
+export function derivePlanCriterionBindings(
+  artifact: PlanArtifact,
+  contract: GoalContractSnapshot,
+): PlanCriterionBinding[] {
+  const planCheckIds = (artifact.acceptanceChecks ?? []).map(
+    (check) => check.id,
+  );
+  const hasOrdinalCoverageCapacity =
+    artifact.acceptanceCriteria.length >= contract.successCriteria.length &&
+    artifact.milestones.length >= contract.successCriteria.length;
+  return contract.successCriteria.map((criterion, criterionIndex) => {
+    const expected = normalizeSemanticText(criterion.description);
+    const matchingMilestones = artifact.milestones.filter((milestone) =>
+      milestone.acceptanceCriteria.some(
+        (candidate) => normalizeSemanticText(candidate) === expected,
+      ),
+    );
+    const semanticMilestones = rankSemanticMilestoneMatches(
+      criterion.description,
+      artifact.milestones,
+    );
+    const fallbackMilestones =
+      hasOrdinalCoverageCapacity
+        ? [artifact.milestones[criterionIndex]!]
+        : [];
+    const boundMilestones =
+      matchingMilestones.length > 0
+        ? matchingMilestones
+        : semanticMilestones.length > 0
+          ? semanticMilestones
+          : fallbackMilestones;
+    const milestoneIds = boundMilestones.map((milestone) => milestone.id);
+    const milestoneCheckIds = boundMilestones.flatMap((milestone) =>
+      (milestone.acceptanceChecks ?? []).map((check) => check.id),
+    );
+    return {
+      criterionId: criterion.id,
+      milestoneIds: unique(milestoneIds),
+      checkIds: unique([
+        ...planCheckIds,
+        ...milestoneCheckIds,
+      ]),
+    };
+  });
+}
+
+function rankSemanticMilestoneMatches(
+  criterion: string,
+  milestones: PlanArtifact["milestones"],
+): PlanArtifact["milestones"] {
+  const ranked = milestones
+    .map((milestone) => ({
+      milestone,
+      score: semanticOverlapScore(
+        criterion,
+        [
+          milestone.title,
+          milestone.description,
+          ...milestone.acceptanceCriteria,
+          ...(milestone.acceptanceChecks ?? []).flatMap((check) => [
+            check.description,
+            stableSemanticValue(check.params),
+          ]),
+        ].join(" "),
+      ),
+    }))
+    .sort((left, right) =>
+      right.score - left.score ||
+      left.milestone.id.localeCompare(right.milestone.id),
+    );
+  const best = ranked[0]?.score ?? 0;
+  if (best < 4) return [];
+  const threshold = Math.max(4, Math.floor(best * 0.85));
+  return ranked
+    .filter((candidate) => candidate.score >= threshold)
+    .map((candidate) => candidate.milestone);
+}
+
+function semanticOverlapScore(left: string, right: string): number {
+  const leftText = normalizeSemanticSignal(left);
+  const rightText = normalizeSemanticSignal(right);
+  if (!leftText || !rightText) return 0;
+
+  const leftAsciiTokens = new Set(leftText.match(/[a-z0-9][a-z0-9._/-]*/g) ?? []);
+  const rightAsciiTokens = new Set(rightText.match(/[a-z0-9][a-z0-9._/-]*/g) ?? []);
+  let score = 0;
+  for (const token of leftAsciiTokens) {
+    if (token.length >= 2 && rightAsciiTokens.has(token)) score += 12;
+  }
+
+  const leftBigrams = new Set(characterBigrams(leftText));
+  const rightBigrams = new Set(characterBigrams(rightText));
+  for (const bigram of leftBigrams) {
+    if (rightBigrams.has(bigram)) score += 1;
+  }
+  return score;
+}
+
+function normalizeSemanticSignal(value: string): string {
+  return normalizeSemanticText(value)
+    .replace(/交付并验证|交付|验证|完成|构建|编写|实现|确保|可选|说明/g, "")
+    .replace(/[^a-z0-9\u3400-\u9fff._/-]+/g, "");
+}
+
+function characterBigrams(value: string): string[] {
+  const characters = [...value];
+  return characters.slice(0, -1).map((character, index) =>
+    `${character}${characters[index + 1]}`,
+  );
+}
+
+function stableSemanticValue(value: unknown): string {
+  if (Array.isArray(value)) return value.map(stableSemanticValue).join(" ");
+  if (value && typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => `${key} ${stableSemanticValue(entry)}`)
+      .join(" ");
+  }
+  return String(value ?? "");
+}
+
+function normalizeSemanticText(value: string): string {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
 export function applyPlanQualityGate(

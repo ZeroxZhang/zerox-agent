@@ -82,8 +82,13 @@ import type {
   TestProviderConnectionResult,
 } from "../shared/modelSettings";
 import type {
+  AdoptGoalPlanInput,
+  AdoptGoalPlanResult,
   ConfirmPlanInput,
   ConfirmPlanResult,
+  CreateRuntimeGoalPlanResult,
+  GoalAmendmentOperationResult,
+  ProposeGoalAmendmentInput,
   PlanAutonomyMode,
   PlanOperationResult,
   PlanRecord,
@@ -383,10 +388,25 @@ const buildingAgent = {
   replanGoal: (
     goalId: string,
     instructions: string,
-  ): Promise<GoalOperationResult> =>
+  ): Promise<CreateRuntimeGoalPlanResult> =>
     ipcRenderer.invoke("goal:replan", goalId, instructions),
   retryGoal: (goalId: string): Promise<GoalOperationResult> =>
     ipcRenderer.invoke("goal:retry", goalId),
+  proposeGoalAmendment: (
+    input: ProposeGoalAmendmentInput,
+  ): Promise<GoalAmendmentOperationResult> =>
+    ipcRenderer.invoke("goal:proposeAmendment", input),
+  resolveGoalAmendment: (
+    goalId: string,
+    proposalId: string,
+    decision: "approve" | "reject",
+  ): Promise<GoalAmendmentOperationResult> =>
+    ipcRenderer.invoke(
+      "goal:resolveAmendment",
+      goalId,
+      proposalId,
+      decision,
+    ),
   continueGoalAcceptance: (goalId: string): Promise<GoalOperationResult> =>
     ipcRenderer.invoke("goal:continueAcceptance", goalId),
   markGoalCompletedUnverified: (goalId: string): Promise<GoalOperationResult> =>
@@ -424,6 +444,8 @@ const buildingAgent = {
     ipcRenderer.invoke("plans:discard", planId, expectedRevision),
   confirmPlan: (input: ConfirmPlanInput): Promise<ConfirmPlanResult> =>
     ipcRenderer.invoke("plans:confirm", input),
+  adoptGoalPlan: (input: AdoptGoalPlanInput): Promise<AdoptGoalPlanResult> =>
+    ipcRenderer.invoke("plans:adoptGoalPlan", input),
   getGoal: (goalId: string): Promise<Goal | null> =>
     ipcRenderer.invoke("goal:get", goalId),
   listActiveGoals: (): Promise<Goal[]> => ipcRenderer.invoke("goal:listActive"),

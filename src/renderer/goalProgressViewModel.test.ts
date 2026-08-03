@@ -374,6 +374,31 @@ describe("goal progress view model", () => {
     ]);
   });
 
+  it("shows completed execution with legacy acceptance outage as final acceptance pending", () => {
+    const goal = createGoal({
+      status: "stopped_blocked",
+      stopReason: "acceptance_unavailable",
+      milestones: [
+        {
+          ...milestone(),
+          state: "accepted",
+          lastAcceptanceSummary: "All implementation checks passed.",
+        },
+      ],
+    });
+
+    const viewModel = buildGoalProgressViewModel(toSummary(goal), goal);
+
+    expect(viewModel.status).toBe("waiting_for_acceptance");
+    expect(viewModel.statusLabel).toBe("任务产物已完成，等待最终验收");
+    expect(viewModel.progressText).toBe("1/1 已完成");
+    expect(viewModel.recoveryActions).toEqual([
+      "continue_acceptance",
+      "mark_completed_unverified",
+      "terminate",
+    ]);
+  });
+
   it("explains failed goals through explicit recovery actions", () => {
     const viewModel = buildGoalProgressViewModel(
       {

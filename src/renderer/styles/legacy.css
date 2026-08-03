@@ -2526,6 +2526,33 @@ nav {
   border-color: var(--status-error-border);
   background: var(--status-error-bg);
 }
+.goal-milestone-acceptance-contract {
+  margin-top: var(--space-1);
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--border-default);
+}
+.goal-milestone-acceptance-contract summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+.goal-milestone-acceptance-contract ul {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.goal-milestone-acceptance-contract li {
+  display: grid;
+  gap: 3px;
+}
+.goal-milestone-acceptance-contract code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
 
 /* ── First Run Guide (only when model not configured) ─────────────────── */
 .first-run-guide {

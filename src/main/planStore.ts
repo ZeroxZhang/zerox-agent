@@ -10,6 +10,14 @@ import {
 import path from "node:path";
 import type { PlanRecord } from "../shared/planMode";
 import type { Storage } from "../shared/storageContract";
+import {
+  isGoalContractRef,
+  isGoalContractSnapshot,
+} from "../shared/goalPlanContract";
+import {
+  ensurePlanGoalContract,
+  goalContractMatchesRef,
+} from "./goalPlanContractService";
 
 export type PlanStoreEvent = {
   id: string;
@@ -464,7 +472,7 @@ function validatePlanRecord(plan: PlanRecord): PlanRecord {
     throw new Error("计划自主模式非法。");
   }
   const schemaVersion = plan.schemaVersion ?? 1;
-  if (schemaVersion !== 1 && schemaVersion !== 2) {
+  if (schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3) {
     throw new Error("计划 Schema 版本非法。");
   }
   if (
@@ -475,9 +483,50 @@ function validatePlanRecord(plan: PlanRecord): PlanRecord {
   ) {
     throw new Error("v2 计划记录缺少任务画像、调查摘要或阶段记录。");
   }
-  return schemaVersion === plan.schemaVersion
-    ? plan
-    : { ...plan, schemaVersion };
+  const compatible = ensurePlanGoalContract(
+    schemaVersion === plan.schemaVersion
+      ? plan
+      : { ...plan, schemaVersion },
+  );
+  if (
+    !isGoalContractSnapshot(compatible.goalContractSnapshot) ||
+    !isGoalContractRef(compatible.goalContractRef) ||
+    !goalContractMatchesRef(
+      compatible.goalContractSnapshot,
+      compatible.goalContractRef,
+    )
+  ) {
+    throw new Error("计划的 GoalContract 快照或哈希非法。");
+  }
+  if (schemaVersion === 3) {
+    if (
+      !compatible.taskProfile ||
+      !compatible.planningBrief ||
+      !Array.isArray(compatible.planningStages)
+    ) {
+      throw new Error("v3 计划记录缺少任务画像、调查摘要或阶段记录。");
+    }
+    if (
+      (compatible.purpose !== "initial" &&
+        compatible.purpose !== "runtime_replan") ||
+      !Number.isInteger(compatible.goalPlanVersion) ||
+      Number(compatible.goalPlanVersion) < 1 ||
+      !compatible.trigger ||
+      !Array.isArray(compatible.criterionBindings) ||
+      !Array.isArray(compatible.goalContractIssues)
+    ) {
+      throw new Error("v3 计划记录缺少 Goal 谱系或成功标准绑定。");
+    }
+    if (
+      compatible.purpose === "runtime_replan" &&
+      (compatible.mode !== "direct" ||
+        !compatible.goalId ||
+        !compatible.parentPlanRef)
+    ) {
+      throw new Error("运行期结构性重规划必须是关联父 Plan 的 Direct 计划。");
+    }
+  }
+  return compatible;
 }
 
 function trackActiveRunIds(plan: PlanRecord, activeRunIds: Set<string>): void {

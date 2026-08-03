@@ -960,15 +960,32 @@ describe("Design System — Obsidian desktop control surface", () => {
       'const retryStarted = result.ok && result.goal?.status === "executing"',
     );
     expect(chatPanelSource).toContain("重试未启动；目标仍处于受阻状态");
-    expect(chatPanelSource).toContain("replanGoal(");
-    expect(chatPanelSource).toContain(
-      'const remainsBlocked = result.ok && result.goal?.status === "stopped_blocked"',
-    );
-    expect(chatPanelSource).toContain("const goalUiState = getGoalUiSyncState(result.goal.status)");
-    expect(chatPanelSource).toContain("setWorkPhase(goalUiState.workPhase)");
-    expect(chatPanelSource).toContain("仍处于受阻状态");
+    expect(chatPanelSource).toContain('setComposerDraft("调整目标计划：")');
+    expect(chatPanelSource).toContain("请说明需要改变的依赖、工具路径、执行方法或验收路径");
+    expect(chatPanelSource).toContain("setActivePlan(result.plan)");
+    expect(chatPanelSource).toContain("运行期 Direct Plan 等待采用");
+    expect(chatPanelSource).toContain("adoptGoalPlan(");
+    expect(chatPanelSource).toContain("采用前不会覆盖当前 Goal");
     expect(chatPanelSource).toContain("cancelGoal(goalId)");
     expect(chatPanelSource).toContain("void refreshSessions(sessionId ?? undefined)");
+  });
+
+  it("renders Goal contract, active Plan lineage, and explicit amendment decisions", () => {
+    expect(goalDetailDrawerSource).toContain("目标契约");
+    expect(goalDetailDrawerSource).toContain("Plan 历史");
+    expect(goalDetailDrawerSource).toContain("初始 Debate → 当前 Direct");
+    expect(goalDetailDrawerSource).toContain("目标修订提案");
+    expect(goalDetailDrawerSource).toContain("GoalContractComparison");
+    expect(goalDetailDrawerSource).toContain("删除或放松了硬约束");
+    expect(goalDetailDrawerSource).toContain("批准并生成 Direct Plan");
+    expect(goalDetailDrawerSource).toContain("原执行路径已安全暂停");
+    expect(goalStatusStripSource).toContain("目标修订等待批准");
+    expect(goalStatusStripSource).toContain("isOpenRuntimePlanCandidate");
+    expect(chatPanelSource).toContain("[activeGoalPlan, setActiveGoalPlan]");
+    expect(chatPanelSource).toContain("planCandidate={activePlan}");
+    expect(chatPanelSource).toContain("handleResolveGoalAmendment");
+    expect(chatPanelSource).toContain("resolveGoalAmendment(");
+    expect(chatPanelSource).toContain("采用 Plan 并恢复 Goal");
   });
 
   it("wires recoverable final acceptance without implying certification", () => {
@@ -983,7 +1000,7 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(goalDetailDrawerSource).toContain("onMarkCompletedUnverified");
     expect(goalDetailDrawerSource).toContain("goalAcceptanceOperationPending");
     expect(goalStatusStripSource).toContain('case "waiting_for_acceptance"');
-    expect(goalStatusStripSource).toContain("继续验收");
+    expect(goalStatusStripSource).toContain("继续最终验收");
     expect(chatPanelSource).toMatch(
       /continueGoalAcceptance\(\s*operation\.goalId/,
     );

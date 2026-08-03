@@ -14,6 +14,7 @@ export type ChatStreamMessage = {
   isStreaming?: boolean;
   outputParts?: ChatOutputPart[];
   attachments?: ChatAttachmentMetadata[];
+  goalId?: string;
   goalEventRef?: string;
 };
 

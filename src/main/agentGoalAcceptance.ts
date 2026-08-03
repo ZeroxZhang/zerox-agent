@@ -298,9 +298,24 @@ async function evaluateCriteria(
     judgeTimeoutMs: number;
   },
 ): Promise<AcceptanceResult> {
-  const checks = criteria.flatMap((criterion) => criterion.acceptanceChecks);
+  const collectedChecks = collectUniqueAcceptanceChecks(criteria);
+  const checks = collectedChecks.map((entry) => entry.check);
   const checkResults: CheckResult[] = [];
-  const validChecks = checks.filter((check) => {
+  const validChecks = collectedChecks.filter((entry) => {
+    const { check } = entry;
+    if (entry.hasConflictingDefinition) {
+      checkResults.push(
+        checkResult(
+          check,
+          false,
+          [],
+          `Acceptance check id "${check.id}" is reused with conflicting definitions.`,
+          "acceptance_contract_invalid",
+          "plan_structure_invalid",
+        ),
+      );
+      return false;
+    }
     const validation = validateAcceptanceCheckContract(check, {
       workspaceRoot: ctx.workspacePath,
       deferRuntimeChecks: true,
@@ -319,26 +334,19 @@ async function evaluateCriteria(
     return false;
   });
   const deterministicChecks = validChecks.filter(
-    (check) => check.kind !== "model_review",
+    (entry) => entry.check.kind !== "model_review",
   );
-  const modelReviewChecks = criteria.flatMap((criterion) =>
-    criterion.acceptanceChecks
-      .filter(
-        (check) =>
-          check.kind === "model_review" && validChecks.includes(check),
-      )
-      .map((check) => ({
-        check,
-        criterionText: [
-          criterion.description,
-          String(check.params.condition ?? ""),
-          check.description,
-        ]
-          .filter(Boolean)
-          .join("\n"),
-      })),
-  );
-  for (const check of deterministicChecks) {
+  const modelReviewChecks = validChecks
+    .filter((entry) => entry.check.kind === "model_review")
+    .map((entry) => ({
+      check: entry.check,
+      criterionText: uniqueNonemptyStrings([
+        ...entry.criterionDescriptions,
+        String(entry.check.params.condition ?? ""),
+        entry.check.description,
+      ]).join("\n"),
+    }));
+  for (const { check } of deterministicChecks) {
     checkResults.push(
       bindValidatorResult(check, await evaluation.registry.evaluate(check, ctx)),
     );
@@ -407,6 +415,78 @@ async function evaluateCriteria(
     );
   }
   return result;
+}
+
+type CollectedAcceptanceCheck = {
+  check: AcceptanceCheck;
+  criterionDescriptions: string[];
+  hasConflictingDefinition: boolean;
+};
+
+/**
+ * Acceptance-check ids are global identities within one Goal. A single,
+ * identical check may intentionally satisfy multiple semantic criteria, but it
+ * must only be executed and certified once. Conflicting reuse remains a hard
+ * contract error.
+ */
+function collectUniqueAcceptanceChecks(
+  criteria: SuccessCriterion[],
+): CollectedAcceptanceCheck[] {
+  const collected = new Map<string, CollectedAcceptanceCheck>();
+  for (const criterion of criteria) {
+    for (const check of criterion.acceptanceChecks) {
+      const existing = collected.get(check.id);
+      if (!existing) {
+        collected.set(check.id, {
+          check,
+          criterionDescriptions: [criterion.description],
+          hasConflictingDefinition: false,
+        });
+        continue;
+      }
+      existing.criterionDescriptions = uniqueNonemptyStrings([
+        ...existing.criterionDescriptions,
+        criterion.description,
+      ]);
+      if (
+        acceptanceCheckDefinitionKey(existing.check) !==
+        acceptanceCheckDefinitionKey(check)
+      ) {
+        existing.hasConflictingDefinition = true;
+      }
+    }
+  }
+  return [...collected.values()];
+}
+
+function acceptanceCheckDefinitionKey(check: AcceptanceCheck): string {
+  return stableAcceptanceValue({
+    id: check.id,
+    kind: check.kind,
+    description: check.description,
+    params: check.params,
+    requiresEvidence: check.requiresEvidence,
+  });
+}
+
+function stableAcceptanceValue(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableAcceptanceValue).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(
+        ([key, entry]) =>
+          `${JSON.stringify(key)}:${stableAcceptanceValue(entry)}`,
+      )
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+function uniqueNonemptyStrings(values: string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
 function bindValidatorResult(
@@ -1328,18 +1408,20 @@ async function replayFinalModelReviews(
   let judge: AcceptanceResult["judge"];
   let retry: AcceptanceInfrastructureFailure | undefined;
   let modelServiceNotice: ModelServiceNotice | undefined;
-  const modelReviewChecks = goal.successCriteria.flatMap((criterion) =>
-    criterion.acceptanceChecks
-      .filter((candidate) => candidate.kind === "model_review")
-      .map((check) => ({
-        check,
-        criterionText: [
-          criterion.description,
-          String(check.params.condition ?? ""),
-          check.description,
-        ].filter(Boolean).join("\n"),
-      })),
-  );
+  const collectedChecks = collectUniqueAcceptanceChecks(goal.successCriteria);
+  if (collectedChecks.some((entry) => entry.hasConflictingDefinition)) {
+    return invalidFinalGoalJudgeReplayResult(goal);
+  }
+  const modelReviewChecks = collectedChecks
+    .filter((entry) => entry.check.kind === "model_review")
+    .map((entry) => ({
+      check: entry.check,
+      criterionText: uniqueNonemptyStrings([
+        ...entry.criterionDescriptions,
+        String(entry.check.params.condition ?? ""),
+        entry.check.description,
+      ]).join("\n"),
+    }));
 
   for (const { check, criterionText } of modelReviewChecks) {
     const result = await evaluateFinalModelReview(
@@ -1360,9 +1442,7 @@ async function replayFinalModelReviews(
     modelServiceNotice = result.modelServiceNotice ?? modelServiceNotice;
   }
 
-  const complete = checkResults.length === goal.successCriteria.flatMap(
-    (criterion) => criterion.acceptanceChecks,
-  ).length;
+  const complete = checkResults.length === collectedChecks.length;
   const aggregate = aggregateAcceptanceResult(checkResults, complete);
   return {
     accepted: aggregate.verdict === "accepted",
@@ -1418,8 +1498,12 @@ function validateFinalGoalJudgeReplay(
     ) {
       return false;
     }
-    const expected = goal.successCriteria
-      .flatMap((criterion) => criterion.acceptanceChecks)
+    const collectedChecks = collectUniqueAcceptanceChecks(goal.successCriteria);
+    if (collectedChecks.some((entry) => entry.hasConflictingDefinition)) {
+      return false;
+    }
+    const expected = collectedChecks
+      .map((entry) => entry.check)
       .filter((check) => check.kind !== "model_review")
       .map((check) => `${check.id}:${check.kind}`)
       .sort();
@@ -1680,7 +1764,7 @@ function buildFinalJudgeMessages(input: {
   const promptSections = [
     cappedFinalJudgeSection("GOAL DATA", JSON.stringify({
       description: truncateUtf8(
-        input.goal.originalDescription ?? input.goal.description,
+        input.goal.goalContractSnapshot?.objective ?? input.goal.description,
         finalJudgeGoalDescriptionBytes,
       ),
       criteria: criteriaData,

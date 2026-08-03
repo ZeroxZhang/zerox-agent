@@ -722,6 +722,15 @@ export function createGoalRuntimeEngine(options: {
               hasContent: Boolean(response.content),
               toolCallCount: response.toolCalls.length,
               finishReason: response.finishReason,
+              ...(response.usage
+                ? {
+                    usage: {
+                      inputTokens: response.usage.inputTokens ?? 0,
+                      outputTokens: response.usage.outputTokens ?? 0,
+                    },
+                    usageReported: true,
+                  }
+                : { usageReported: false }),
             });
           },
           onReasoning(reasoningContent, turn) {
@@ -839,6 +848,7 @@ export function createGoalRuntimeEngine(options: {
               wallClockMs:
                 new Date(now()).getTime() - new Date(startedAt).getTime(),
               tokens: checkpoint.tokensConsumed,
+              tokensEstimated: checkpoint.tokensEstimated,
               nextAction: checkpoint.nextAction,
             });
           },
@@ -871,6 +881,7 @@ export function createGoalRuntimeEngine(options: {
           wallClockMs:
             new Date(finishedAt).getTime() - new Date(startedAt).getTime(),
           tokens: inferTokens(loopResult, initialMessages),
+          tokensEstimated: loopResult.tokensEstimated ?? true,
           ...(loopResult.contextUsage
             ? { contextUsage: loopResult.contextUsage }
             : {}),
@@ -902,6 +913,11 @@ export function createGoalRuntimeEngine(options: {
         status: loopResult.status,
         toolCallsExecuted: loopResult.toolCallsExecuted,
         summary: loopResult.summary,
+        tokensConsumed: inferTokens(loopResult, initialMessages),
+        tokensEstimated: loopResult.tokensEstimated ?? true,
+        ...(loopResult.contextUsage
+          ? { contextUsage: loopResult.contextUsage }
+          : {}),
       });
 
       const run: AgentRunRecord = {
@@ -941,6 +957,7 @@ export function createGoalRuntimeEngine(options: {
         summary: loopResult.summary,
         wallClockMs: new Date(finishedAt).getTime() - new Date(startedAt).getTime(),
         tokens: inferTokens(loopResult, initialMessages),
+        tokensEstimated: loopResult.tokensEstimated ?? true,
         ...(loopResult.contextUsage
           ? { contextUsage: loopResult.contextUsage }
           : {}),
@@ -1254,12 +1271,14 @@ function buildMilestoneInstruction(
   const criteriaLines = milestone.successCriteria.flatMap((criterion, index) => {
     const lines = [
       `  验收标准 ${index + 1}: ${criterion.description}`,
-      ...criterion.acceptanceChecks.map(
-        (check) =>
-          `    - ${check.description}${
-            check.requiresEvidence ? "（需要证据）" : ""
-          }`,
-      ),
+      ...criterion.acceptanceChecks.flatMap((check) => [
+        `    - [${check.id}] ${check.kind}: ${check.description}${
+          check.requiresEvidence ? "（需要证据）" : ""
+        }`,
+        `      验收器参数（将严格按此执行）: ${serializeAcceptanceParamsForPrompt(
+          check.params,
+        )}`,
+      ]),
     ];
     return lines;
   });
@@ -1277,6 +1296,7 @@ function buildMilestoneInstruction(
     "优先使用 file_list、file_search、file_read、code_search、git_status、git_diff、test_run 等 typed native tools 观察和验证项目；只有这些工具无法完成时才申请 shell_exec。",
     "",
     "本里程碑的验收标准如下，你必须确保每一项验收检查最终通过：",
+    "验收器只认下列类型与参数的真实结果，不接受近似替代、注释标记或口头自证。若某项检查与 Goal 语义冲突，请明确报告合同冲突，不要伪造产物来迎合检查。",
     ...criteriaLines,
     ...buildSelectedSkillExecutionContract(goal),
     ...artifactContractLines,
@@ -1284,6 +1304,21 @@ function buildMilestoneInstruction(
     "",
     "请执行这个里程碑。优先产出可追溯证据和阶段性结论。如果验收标准涉及文件路径，请准确创建对应文件。",
   ].join("\n");
+}
+
+function serializeAcceptanceParamsForPrompt(
+  params: Record<string, unknown>,
+): string {
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(params);
+  } catch {
+    return "[无法序列化的验收参数]";
+  }
+  const maxChars = 4_000;
+  return serialized.length <= maxChars
+    ? serialized
+    : `${serialized.slice(0, maxChars)}…[参数已截断]`;
 }
 
 function buildAcceptanceRepairContract(
@@ -1348,7 +1383,7 @@ function buildArtifactEvidenceContract(
       const artifactPath = path.join(outputRoot, `${artifactName}.md`);
       return `  - artifact:${artifactName} -> ${artifactPath}`;
     }),
-    `目标：${goal.originalDescription ?? goal.description}`,
+    `目标：${goal.goalContractSnapshot?.objective ?? goal.description}`,
     "如果你还需要生成更友好的展示文件名，可以额外生成；但上述 artifact alias 文件必须保留并包含可验收的完整内容或最终文件清单。",
   ];
 }

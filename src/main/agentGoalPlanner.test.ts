@@ -607,7 +607,7 @@ describe("agent goal planner", () => {
         attempts: 0,
       },
     ]);
-    expect(goal.planVersion).toBe(2);
+    expect(goal.planVersion).toBe(1);
     expect(goal.executionUsage.replans).toBe(1);
   });
 

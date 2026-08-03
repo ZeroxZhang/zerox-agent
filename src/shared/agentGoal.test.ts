@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   assertGoalTransition,
   canTransitionGoalStatus,
+  hasGoalCompletedExecution,
+  projectGoalStatusForInteraction,
   upgradeGoalAcceptanceProtocol,
   validateGoal,
   validateGoalDraft,
@@ -70,6 +72,33 @@ function createGoal(overrides: Partial<Goal> = {}): Goal {
 }
 
 describe("agent goal model", () => {
+  it("projects a legacy acceptance-only block as waiting for final acceptance", () => {
+    const goal = createGoal({
+      status: "stopped_blocked",
+      stopReason: "acceptance_unavailable",
+      milestones: createGoal().milestones.map((milestone) => ({
+        ...milestone,
+        state: "accepted" as const,
+      })),
+    });
+
+    expect(hasGoalCompletedExecution(goal)).toBe(true);
+    expect(projectGoalStatusForInteraction(goal)).toBe(
+      "waiting_for_acceptance",
+    );
+    expect(goal.status).toBe("stopped_blocked");
+  });
+
+  it("does not hide a real execution block behind final-acceptance UI", () => {
+    const goal = createGoal({
+      status: "stopped_blocked",
+      stopReason: "acceptance_unavailable",
+    });
+
+    expect(hasGoalCompletedExecution(goal)).toBe(false);
+    expect(projectGoalStatusForInteraction(goal)).toBe("stopped_blocked");
+  });
+
   it("allows the bounded goal status transitions", () => {
     expect(canTransitionGoalStatus("planning", "executing")).toBe(true);
     expect(canTransitionGoalStatus("executing", "waiting_for_review")).toBe(true);

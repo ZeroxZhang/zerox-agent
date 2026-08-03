@@ -16,6 +16,12 @@ export type AcceptanceContractValidationContext = {
   evidenceRefs?: Iterable<string>;
   allowedCommandPrefixes?: string[];
   /**
+   * User-visible success criteria that authorize implementation-specific
+   * probes. Planner quality checks use this to reject brittle source markers
+   * that are not part of the actual Goal contract.
+   */
+  semanticCriteria?: Iterable<string>;
+  /**
    * Plan Mode may describe an explicit absolute output target outside the
    * selected workspace. The confirmed Goal runtime still has to authorize
    * that root and enforce its live sandbox boundary.
@@ -226,6 +232,56 @@ function validateCommand(
   ) {
     errors.push(`验收检查 ${check.id} 的 command 不在允许的命令合同内。`);
   }
+  validateStableContentProbe(check, command, context, errors);
+}
+
+/**
+ * A source declaration or a comment marker is not a stable proxy for a
+ * semantic outcome unless the Goal explicitly requires that exact syntax.
+ * This catches contracts such as `grep -c 'var echarts'` for the broader
+ * requirement "contains ECharts", which otherwise strand execution even
+ * when an equivalent import/API shape is present.
+ */
+function validateStableContentProbe(
+  check: AcceptanceCheck,
+  command: string,
+  context: AcceptanceContractValidationContext,
+  errors: string[],
+): void {
+  const probe = extractQuotedSearchProbe(command);
+  if (!probe || !isImplementationSpecificProbe(probe)) return;
+
+  const semanticContract = [
+    check.description,
+    ...(context.semanticCriteria ? [...context.semanticCriteria] : []),
+  ]
+    .join("\n")
+    .toLowerCase();
+  if (semanticContract.includes(probe.toLowerCase())) return;
+
+  errors.push(
+    `验收检查 ${check.id} 依赖未在成功标准中明确要求的源码声明或标记 “${probe}”；请改用稳定的可观察 API、可执行测试或证据复核。`,
+  );
+}
+
+function extractQuotedSearchProbe(command: string): string | null {
+  if (!/(?:^|\s)(?:grep|rg)(?:\s|$)/u.test(command)) return null;
+  const match = command.match(
+    /(?:^|\s)(?:grep|rg)\b[^"'`\n]*?(?:"([^"\n]+)"|'([^'\n]+)')/u,
+  );
+  return (match?.[1] ?? match?.[2] ?? "").trim() || null;
+}
+
+function isImplementationSpecificProbe(probe: string): boolean {
+  const normalized = probe.trim();
+  return (
+    /^(?:\^\s*)?(?:var|let|const|function|class)\s+[A-Za-z_$]/u.test(
+      normalized,
+    ) ||
+    /(?:BEGIN|END|START|STOP).{0,32}(?:MARKER|片段|标记)|(?:核心代码片段|验收标记|acceptance marker)/iu.test(
+      normalized,
+    )
+  );
 }
 
 function validateModelReview(

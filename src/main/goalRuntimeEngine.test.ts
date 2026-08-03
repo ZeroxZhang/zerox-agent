@@ -1954,7 +1954,26 @@ describe("goal runtime engine", () => {
   });
 
   it("injects the exact repair directive and returns stable redacted model action signatures", async () => {
-    const goal = createGoal();
+    const goal = createGoal({
+      milestoneSuccessCriteria: [
+        {
+          id: "criterion_report",
+          description: "HTML 中包含可用的 ECharts 地图实现",
+          acceptanceChecks: [
+            {
+              id: "check_report",
+              kind: "test_passes",
+              description: "检查 HTML 是否包含约定内容",
+              params: {
+                command: "grep -q 'echarts.init' map/index.html",
+                workspaceRoot: "/Users/example",
+              },
+              requiresEvidence: false,
+            },
+          ],
+        },
+      ],
+    });
     let instruction = "";
     const directive: AcceptanceRepairDirective = {
       action: "retry_alternate_strategy",
@@ -2046,6 +2065,9 @@ describe("goal runtime engine", () => {
     expect(instruction).toContain("Fingerprint: abcdef123456");
     expect(instruction).toContain("materially different strategy");
     expect(instruction).toContain("do not repeat the prior failed approach");
+    expect(instruction).toContain("[check_report] test_passes");
+    expect(instruction).toContain("grep -q 'echarts.init' map/index.html");
+    expect(instruction).toContain("验收器只认下列类型与参数的真实结果");
     expect(result.actionSignatures).toHaveLength(4);
     expect(result.actionSignatures?.[0]).toContain("web_fetch:");
     expect(Buffer.byteLength(JSON.stringify(result.actionSignatures))).toBeLessThanOrEqual(8_192);

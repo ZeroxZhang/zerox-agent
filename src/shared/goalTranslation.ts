@@ -7,6 +7,12 @@ import type {
   SuccessCriterion,
 } from "./agentGoal";
 import type { ResolvedModelBinding } from "./modelSettings";
+import type {
+  GoalContractRef,
+  GoalContractSnapshot,
+  GoalPlanHistoryEntry,
+  GoalPlanRef,
+} from "./goalPlanContract";
 import { extractLeadingCdWorkspace } from "./acceptanceCommand";
 
 export type GoalDraftStatus = "draft" | "confirmed" | "discarded";
@@ -47,6 +53,10 @@ export type GoalDraft = {
     revision: number;
     sha256: string;
   };
+  goalContractSnapshot?: GoalContractSnapshot;
+  goalContractRef?: GoalContractRef;
+  activePlanRef?: GoalPlanRef;
+  planHistory?: GoalPlanHistoryEntry[];
   /** Frozen model selected for execution when this draft came from Plan Mode. */
   executionModelBinding?: ResolvedModelBinding;
   normalizedDescription: string;

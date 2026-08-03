@@ -1586,6 +1586,14 @@
   line-height: 1.5;
 }
 
+.plan-milestone-list code,
+.plan-risk-list code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+}
+
 .plan-risk-list .is-critical,
 .plan-risk-list .is-high {
   border-left-color: var(--status-error-text);

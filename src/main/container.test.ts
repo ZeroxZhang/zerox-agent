@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createAppContainer,
   createModelProfileEmbeddingService,
+  formatGoalTerminalMessage,
   formatGoalTerminalHeading,
   isTerminalGoalStatus,
   prepareInterruptedGoalForResume,
@@ -26,7 +27,12 @@ import type { PlanArtifact, PlanRecord } from "../shared/planMode";
 import {
   createPlanQualityReport,
   createPlanTaskProfile,
+  derivePlanCriterionBindings,
 } from "./plannerKernel";
+import {
+  createGoalContractRef,
+  deriveGoalContractFromPlan,
+} from "./goalPlanContractService";
 
 const execFileAsync = promisify(execFileCallback);
 
@@ -633,6 +639,49 @@ describe("app container goal drafts", () => {
     expect(heading).toContain("手动完成");
     expect(heading).toContain("未经机器认证");
     expect(heading).not.toContain("目标已达成");
+  });
+
+  it("uses deterministic acceptance truth in stalled terminal summaries", () => {
+    const goal = createStoredGoal({
+      id: "goal_stalled_summary",
+      status: "stopped_stalled",
+      stopReason: "progress_stalled",
+      acceptanceState: {
+        protocolVersion: 2,
+        phase: "idle",
+        attempt: 3,
+        recentFailures: [],
+        lastDecision: {
+          action: "stop_stalled",
+          summary: "Acceptance stalled.",
+          failedCheckIds: ["check_echarts"],
+          fingerprint: "f".repeat(64),
+          occurrence: 3,
+          instructions: [],
+        },
+      },
+      milestones: [
+        {
+          id: "milestone_1",
+          description: "准备 ECharts 页面",
+          dependsOn: [],
+          successCriteria: [],
+          state: "rejected",
+          runIds: ["run_1"],
+          attempts: 3,
+          lastRunStatus: "succeeded",
+          lastRunSummary: "✅ 所有检查均已通过。",
+          lastAcceptanceSummary: "Test command failed with exit code 1.",
+        },
+      ],
+    });
+
+    const message = formatGoalTerminalMessage(goal, "Acceptance stalled.");
+
+    expect(message).toContain("同一验收失败已连续出现 3 次");
+    expect(message).toContain("准备 ECharts 页面（验收未通过）");
+    expect(message).toContain("Test command failed with exit code 1.");
+    expect(message).not.toContain("所有检查均已通过");
   });
 
   it("creates evidence-backed model review checks for manual goals", () => {
@@ -2294,6 +2343,367 @@ describe("app container goal drafts", () => {
     await container.shutdownRuntime();
   });
 
+  it("adopts a runtime Direct Plan with Goal CAS, history, supersession, and exact milestone reuse", async () => {
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const workspaceRoot = path.join(tempDir, "runtime-plan-workspace");
+    await mkdir(workspaceRoot, { recursive: true });
+    const session = await container.chatSessionStore().appendMessage({
+      role: "user",
+      content: "Adopt a runtime plan",
+    });
+    const createdAt = "2026-08-03T00:00:00.000Z";
+    const taskContract = {
+      objective: "Complete the stable Goal",
+      audience: "maintainer",
+      deliverables: ["local implementation"],
+      inScope: ["local implementation"],
+      outOfScope: ["external publication"],
+      constraints: ["Preserve permissions"],
+      successCriteria: ["The implementation is reviewed"],
+      assumptions: [],
+    };
+    const goalContractSnapshot = deriveGoalContractFromPlan({
+      planId: "plan-runtime-parent",
+      taskContract,
+      createdAt,
+    });
+    const goalContractRef = createGoalContractRef(goalContractSnapshot);
+    const acceptanceCheck = {
+      id: "check_review",
+      kind: "model_review" as const,
+      description: "Review the implementation",
+      params: {
+        condition: "The implementation is reviewed",
+        evidenceRefs: ["artifact:goalEvidence"],
+      },
+      requiresEvidence: true,
+    };
+    const artifact: PlanArtifact = {
+      title: "Runtime Direct Plan",
+      summary: "Replace the execution path without changing the Goal.",
+      objective: taskContract.objective,
+      scope: { in: taskContract.inScope, out: taskContract.outOfScope },
+      assumptions: [],
+      milestones: [
+        {
+          id: "milestone_stable",
+          title: "Implement",
+          description: "Apply the stable local implementation.",
+          acceptanceCriteria: taskContract.successCriteria,
+          dependencies: [],
+          targetRefs: ["src/"],
+          evidenceRefs: [],
+          actions: ["Apply the implementation"],
+          toolNames: [],
+          acceptanceChecks: [acceptanceCheck],
+        },
+      ],
+      dependencies: [],
+      risks: [],
+      acceptanceCriteria: taskContract.successCriteria,
+      acceptanceChecks: [acceptanceCheck],
+      claimLedger: [],
+      unresolvedQuestions: [],
+      minorityOpinion: [],
+      actionGate: "ready",
+      gateReason: "Ready",
+      markdown: "",
+    };
+    const sharedV3 = {
+      schemaVersion: 3 as const,
+      sessionId: session.session.id,
+      workspaceRoot,
+      sourceMessage: "Adjust the runtime path",
+      autonomyMode: "auto" as const,
+      actionGate: "ready" as const,
+      taskProfile: {
+        domain: "code" as const,
+        mode: "exploratory" as const,
+        risk: "writes_files" as const,
+        expectedScale: "small" as const,
+        needsConfirmation: true,
+        targetRefs: [],
+        ambiguity: [],
+        investigationDepth: "standard" as const,
+      },
+      planningBrief: {
+        objective: taskContract.objective,
+        deliverables: taskContract.deliverables,
+        inScope: taskContract.inScope,
+        outOfScope: taskContract.outOfScope,
+        constraints: taskContract.constraints,
+        assumptions: [],
+        unresolvedQuestions: [],
+        targetRefs: [],
+        evidenceRefs: [],
+        skillCandidates: [],
+      },
+      planningStages: [],
+      taskContract,
+      goalContractSnapshot,
+      goalContractRef,
+      criterionBindings: derivePlanCriterionBindings(
+        artifact,
+        goalContractSnapshot,
+      ),
+      goalContractIssues: [],
+      evidence: [],
+      requestedModelAssignments: {},
+      frozenModelAssignments: {},
+      rounds: [],
+      createdAt,
+      updatedAt: createdAt,
+    };
+    const parent = await container.planStore().create({
+      ...sharedV3,
+      id: "plan-runtime-parent",
+      mode: "debate",
+      purpose: "initial",
+      status: "executing",
+      revision: 1,
+      goalPlanVersion: 1,
+      trigger: {
+        kind: "initial_request",
+        summary: "Initial Debate Plan",
+        evidenceRefs: [],
+        at: createdAt,
+      },
+    });
+    const activePlanRef = {
+      planId: parent.id,
+      planRevision: parent.revision,
+      goalPlanVersion: 1,
+      mode: "debate" as const,
+      purpose: "initial" as const,
+      goalContractRef,
+    };
+    const goal: Goal = {
+      id: "goal-runtime-adoption",
+      chatSessionId: session.session.id,
+      description: goalContractSnapshot.objective,
+      goalContractSnapshot,
+      goalContractRef,
+      activePlanRef,
+      planHistory: [
+        {
+          ...activePlanRef,
+          trigger: parent.trigger!,
+          outcome: "active",
+          adoptedAt: createdAt,
+        },
+      ],
+      successCriteria: [
+        {
+          id: goalContractSnapshot.successCriteria[0]!.id,
+          description: goalContractSnapshot.successCriteria[0]!.description,
+          acceptanceChecks: [acceptanceCheck],
+        },
+      ],
+      milestones: [
+        {
+          id: "milestone_stable",
+          description: "Implement：Apply the stable local implementation.",
+          dependsOn: [],
+          successCriteria: [
+            {
+              id: "milestone_stable_criterion_1",
+              description: acceptanceCheck.description,
+              acceptanceChecks: [acceptanceCheck],
+            },
+          ],
+          state: "accepted",
+          runIds: ["run-accepted"],
+          attempts: 1,
+        },
+      ],
+      status: "waiting_for_review",
+      executionUsage: {
+        iterations: 1,
+        toolCalls: 1,
+        wallClockMs: 1,
+        tokens: 1,
+        replans: 0,
+      },
+      reviewPolicy: "review_high_risk_only",
+      planVersion: 1,
+      acceptanceProtocolVersion: 2,
+      acceptanceState: {
+        protocolVersion: 2,
+        phase: "idle",
+        attempt: 0,
+        recentFailures: [],
+      },
+      createdAt,
+      updatedAt: createdAt,
+    };
+    await container.agentGoalStore().save(goal);
+    const candidateBase: PlanRecord = {
+      ...sharedV3,
+      id: "plan-runtime-v2",
+      mode: "direct",
+      purpose: "runtime_replan",
+      status: "awaiting_confirmation",
+      revision: 1,
+      goalId: goal.id,
+      parentPlanRef: activePlanRef,
+      goalPlanVersion: 2,
+      trigger: {
+        kind: "acceptance_failure",
+        summary: "Use a new validation path",
+        evidenceRefs: [],
+        at: createdAt,
+      },
+      qualityReport: {
+        status: "ready",
+        blockingIssues: [],
+        warnings: [],
+        evidenceCoverage: { referenced: 0, total: 0, missingRefs: [] },
+        acceptanceCoverage: {
+          deterministicChecks: 0,
+          modelReviewChecks: 2,
+          totalChecks: 2,
+          milestonesCovered: 1,
+          milestonesTotal: 1,
+        },
+        generatedAt: createdAt,
+      },
+      finalArtifact: artifact,
+    };
+    const projection = await container
+      .planArtifactWriter()
+      .write(candidateBase, artifact);
+    const candidate = await container.planStore().create({
+      ...candidateBase,
+      projection,
+    });
+
+    const result = await container.adoptGoalPlan({
+      planId: candidate.id,
+      expectedRevision: candidate.revision,
+      expectedGoalPlanVersion: 2,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.goal).toMatchObject({
+      planVersion: 2,
+      activePlanRef: { planId: candidate.id, mode: "direct" },
+      executionUsage: { replans: 1 },
+    });
+    expect(result.goal.planHistory?.map((entry) => entry.outcome)).toEqual([
+      "superseded",
+      "active",
+    ]);
+    expect(result.goal.milestones[0]).toMatchObject({
+      state: "accepted",
+      runIds: ["run-accepted"],
+      attempts: 1,
+    });
+    await expect(container.planStore().get(parent.id)).resolves.toMatchObject({
+      status: "superseded",
+      supersededByPlanId: candidate.id,
+    });
+
+    const goalBeforeCrashRecovery = (await container.agentGoalStore().get(
+      goal.id,
+    ))!;
+    await container.agentGoalStore().save({
+      ...goalBeforeCrashRecovery,
+      status: "canceled",
+      stopReason: "user_canceled",
+      updatedAt: new Date().toISOString(),
+    });
+    await container.shutdownRuntime();
+    const linkedCandidate = (await container.planStore().get(candidate.id))!;
+    await container.planStore().save(
+      {
+        ...linkedCandidate,
+        status: "confirmed_pending_execution",
+        executionGoalId: undefined,
+      },
+      linkedCandidate.revision,
+      "test_crash_after_goal_plan_switch",
+    );
+    const supersededParent = (await container.planStore().get(parent.id))!;
+    await container.planStore().save(
+      {
+        ...supersededParent,
+        status: "executing",
+        supersededByPlanId: undefined,
+        supersededAt: undefined,
+      },
+      supersededParent.revision,
+      "test_crash_before_parent_supersession",
+    );
+
+    const recovered = await container.adoptGoalPlan({
+      planId: candidate.id,
+      expectedRevision: candidate.revision,
+      expectedGoalPlanVersion: 2,
+    });
+    expect(recovered).toMatchObject({
+      ok: true,
+      message: "已恢复完成 Plan 采用事务。",
+      plan: { executionGoalId: goal.id },
+    });
+    await expect(container.planStore().get(parent.id)).resolves.toMatchObject({
+      status: "superseded",
+      supersededByPlanId: candidate.id,
+    });
+  });
+
+  it("keeps the active Goal contract unchanged when a Goal amendment is rejected", async () => {
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const stored = await container.agentGoalStore().save(
+      createStoredGoal({
+        id: "goal-amendment-rejected",
+        status: "waiting_for_review",
+      }),
+    );
+    const originalContract = structuredClone(stored.goalContractSnapshot!);
+    const originalRef = structuredClone(stored.goalContractRef!);
+    const candidateContract = {
+      ...originalContract,
+      revision: originalContract.revision + 1,
+      objective: "A user-approved replacement objective",
+    };
+
+    const proposed = await container.proposeGoalAmendment({
+      goalId: stored.id,
+      candidateContract,
+      reason: "Change the objective explicitly",
+    });
+    expect(proposed).toMatchObject({
+      ok: true,
+      proposal: { status: "pending", baseContractRef: originalRef },
+    });
+    if (!proposed.ok || !proposed.proposal) return;
+
+    const rejected = await container.resolveGoalAmendment(
+      stored.id,
+      proposed.proposal.id,
+      "reject",
+    );
+    expect(rejected).toMatchObject({
+      ok: true,
+      proposal: { status: "rejected" },
+    });
+    await expect(container.agentGoalStore().get(stored.id)).resolves.toMatchObject({
+      goalContractSnapshot: originalContract,
+      goalContractRef: originalRef,
+      planVersion: stored.planVersion,
+      pendingGoalAmendment: { status: "rejected" },
+    });
+  });
+
   it("rejects unsafe milestone graphs before creating an execution Goal", async () => {
     const container = createAppContainer({
       async requestToolApproval() {
@@ -2530,8 +2940,11 @@ async function listGitBranches(repositoryRoot: string): Promise<string[]> {
 function expectedPlanStatusForGoal(
   status: Goal["status"],
 ): PlanRecord["status"] {
-  if (status === "achieved" || status === "completed_unverified") {
+  if (status === "achieved") {
     return "completed";
+  }
+  if (status === "completed_unverified" || status === "waiting_for_acceptance") {
+    return "steps_completed";
   }
   if (status === "canceled") {
     return "canceled";
@@ -2543,6 +2956,9 @@ function expectedPlanStatusForGoal(
     status === "stopped_blocked"
   ) {
     return "failed";
+  }
+  if (status === "waiting_for_review" || status === "waiting_for_model") {
+    return "paused";
   }
   return "executing";
 }

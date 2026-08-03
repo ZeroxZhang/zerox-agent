@@ -46,7 +46,11 @@ import {
   formatChatAttachmentSize,
   formatChatAttachmentTypeLabel,
 } from "../../shared/chatAttachments";
-import type { Goal, SuccessCriterion } from "../../shared/agentGoal";
+import {
+  projectGoalStatusForInteraction,
+  type Goal,
+  type SuccessCriterion,
+} from "../../shared/agentGoal";
 import type { GoalDraft } from "../../shared/goalTranslation";
 import type { MemoryRecord } from "../../shared/memory";
 import type {
@@ -139,6 +143,7 @@ import type {
   ToolApprovalRequestPayload,
 } from "../../shared/toolApproval";
 import { shouldShowToolApproval } from "../toolApprovalVisibility";
+import { getGoalTerminalTruthNotice } from "../goalTerminalTruth";
 import {
   ChatAttachmentReadError,
   getAttachmentPasteBlockedMessage,
@@ -289,6 +294,7 @@ export function AgentChatPanel({
   const [planModelAssignments, setPlanModelAssignments] = useState<PlanModelAssignments>({});
   const [modelCatalog, setModelCatalog] = useState<PublicModelCatalog | null>(null);
   const [activePlan, setActivePlan] = useState<PlanRecord | null>(null);
+  const [activeGoalPlan, setActiveGoalPlan] = useState<PlanRecord | null>(null);
   const [planActionPending, setPlanActionPending] = useState<
     "confirm" | "discard" | "retry" | null
   >(null);
@@ -344,6 +350,9 @@ export function AgentChatPanel({
   const [goalAcceptanceOperationPending, setGoalAcceptanceOperationPending] = useState<
     "continue_acceptance" | "mark_completed_unverified" | null
   >(null);
+  const [goalAmendmentActionPending, setGoalAmendmentActionPending] = useState<
+    "approve" | "reject" | null
+  >(null);
   const [activeChatRequestId, setActiveChatRequestId] = useState<string | null>(null);
   const [guidedInputValues, setGuidedInputValues] = useState<
     Record<string, string | number | boolean>
@@ -366,6 +375,7 @@ export function AgentChatPanel({
   const pendingInputRequestRef = useRef<SkillUserInputRequest | null>(null);
   const activeGoalRef = useRef<ChatSessionGoalSummary | null>(null);
   const goalAcceptanceOperationPendingRef = useRef<GoalAcceptanceOperationToken | null>(null);
+  const goalAmendmentActionPendingRef = useRef<"approve" | "reject" | null>(null);
   const goalAcceptanceOperationSequenceRef = useRef(0);
   const goalAcceptanceContextRef = useRef<{
     identity: string;
@@ -535,8 +545,11 @@ export function AgentChatPanel({
     setSelectedSkillName(null);
     setPendingGoalDraft(null);
     setActivePlan(null);
+    setActiveGoalPlan(null);
     setPlanModeDecisionOpen(false);
     setPlanActionPending(null);
+    goalAmendmentActionPendingRef.current = null;
+    setGoalAmendmentActionPending(null);
     setGoalDraftDescription("");
     setGoalDraftCriteriaText("");
     goalDraftActionPendingRef.current = null;
@@ -882,8 +895,11 @@ export function AgentChatPanel({
     // expose session-scoped controls while the next transcript is loading.
     setPendingGoalDraft(null);
     setActivePlan(null);
+    setActiveGoalPlan(null);
     setPlanModeDecisionOpen(false);
     setPlanActionPending(null);
+    goalAmendmentActionPendingRef.current = null;
+    setGoalAmendmentActionPending(null);
     setGoalDraftDescription("");
     setGoalDraftCriteriaText("");
     goalDraftActionPendingRef.current = null;
@@ -985,6 +1001,9 @@ export function AgentChatPanel({
       }
       if (restoredGoalId) {
         const loadedGoal = await window.buildingAgent.getGoal(restoredGoalId);
+        const restoredActivePlan = loadedGoal?.activePlanRef?.planId
+          ? await window.buildingAgent.getPlan(loadedGoal.activePlanRef.planId)
+          : null;
         if (
           sessionSelectionGenerationRef.current !== loadGeneration ||
           sessionIdRef.current !== sessionIdToLoad
@@ -992,6 +1011,15 @@ export function AgentChatPanel({
           return;
         }
         setActiveGoalDetail(loadedGoal);
+        setActiveGoalPlan(restoredActivePlan);
+        if (
+          restoredActivePlan &&
+          (!latestPlan ||
+            latestPlan.status === "discarded" ||
+            latestPlan.executionGoalId === loadedGoal?.id)
+        ) {
+          setActivePlan(restoredActivePlan);
+        }
         if (
           loadedGoal &&
           sessionWork.source === "goal" &&
@@ -1008,6 +1036,7 @@ export function AgentChatPanel({
         }
       } else {
         setActiveGoalDetail(null);
+        setActiveGoalPlan(null);
         setGoalDrawerOpen(false);
       }
     } catch (error) {
@@ -1064,6 +1093,9 @@ export function AgentChatPanel({
     const requestSequence = goalDetailRefreshSequenceRef.current + 1;
     goalDetailRefreshSequenceRef.current = requestSequence;
     const goal = await window.buildingAgent.getGoal(goalId);
+    const goalPlan = goal?.activePlanRef?.planId
+      ? await window.buildingAgent.getPlan(goal.activePlanRef.planId)
+      : null;
     if (
       !shouldApplySequencedSessionResult(
         selection,
@@ -1077,6 +1109,16 @@ export function AgentChatPanel({
       return;
     }
     setActiveGoalDetail(goal);
+    setActiveGoalPlan(goalPlan);
+    if (goalPlan) {
+      setActivePlan((current) =>
+        !current ||
+        current.id === goalPlan.id ||
+        current.executionGoalId === goalId
+          ? goalPlan
+          : current,
+      );
+    }
   }
 
   async function refreshCurrentSessionMessages(sessionIdToRefresh?: string) {
@@ -1230,7 +1272,25 @@ export function AgentChatPanel({
     ["awaiting_input", "awaiting_confirmation", "paused", "canceled", "failed"].includes(
       activePlan?.status ?? "",
     );
-  const goalNeedsDecision = Boolean(activeGoal) && needsGoalDecision(activeGoal?.status);
+  const goalAmendment = activeGoalDetail?.pendingGoalAmendment;
+  const planConfirmBlockedReason =
+    goalAmendment?.status === "pending"
+      ? "请先批准或拒绝目标修订提案，再决定是否采用 Plan。"
+      : goalAmendment?.status === "approved" &&
+          goalAmendment.candidatePlanId !== activePlan?.id
+        ? "目标修订已批准但尚未生成对应 Plan；请重试生成或撤销修订。"
+        : undefined;
+  const activeGoalInteractionStatus = activeGoalDetail
+    ? projectGoalStatusForInteraction(activeGoalDetail)
+    : activeGoal?.status;
+  const goalIsRecovery = Boolean(
+    activeGoal &&
+      activeSession?.recoveryGoal?.id === activeGoal.id &&
+      activeGoalInteractionStatus !== "waiting_for_acceptance",
+  );
+  const goalNeedsDecision = activeGoalInteractionStatus
+    ? needsGoalDecision(activeGoalInteractionStatus)
+    : false;
   const goalModeVisuallyEnabled = goalModeEnabled || planInputLocked;
   const activeTasks = tasks.filter((task) => task.enabled);
   const workSteps = useMemo(() => buildAgentWorkSteps(workPhase), [workPhase]);
@@ -1400,9 +1460,8 @@ export function AgentChatPanel({
   const contextPanelItems = buildContextPanelItems({
     contextCards,
     activeGoal,
-    goalIsRecovery: Boolean(
-      activeGoal && activeSession?.recoveryGoal?.id === activeGoal.id,
-    ),
+    goalIsRecovery,
+    goalStatus: activeGoalInteractionStatus,
   });
   const shouldShowActivityCard = taskActivity.kind !== "idle";
   const readinessChecklist = useMemo(
@@ -1786,43 +1845,95 @@ export function AgentChatPanel({
     });
   }
 
-  async function handleReplanGoal() {
+  function handleReplanGoal() {
     if (!window.buildingAgent || !activeGoal?.id) {
       return;
     }
+    setComposerDraft("调整目标计划：");
+    setStatus({
+      kind: "paused",
+      message: "请说明需要改变的依赖、工具路径、执行方法或验收路径",
+    });
+    setWorkPhase("paused");
+    setTaskActivity(
+      createTaskActivity({
+        kind: "paused",
+        title: "等待重规划意见",
+        detail: "提交后将生成新的运行期 Direct Plan，采用前不会覆盖当前 Goal",
+      }),
+    );
+    window.requestAnimationFrame(() => {
+      messageInputRef.current?.focus();
+    });
+  }
 
-    const goalId = activeGoal.id;
-    const selection = captureSessionSelection();
-    const mutationSequence = beginGoalMutation();
-    const result = await window.buildingAgent.replanGoal(goalId, "用户从恢复界面请求重新规划。");
-    if (!isGoalMutationCurrent(selection, mutationSequence)) {
+  async function handleResolveGoalAmendment(
+    decision: "approve" | "reject",
+  ) {
+    const proposal = activeGoalDetail?.pendingGoalAmendment;
+    if (
+      !window.buildingAgent ||
+      !activeGoal?.id ||
+      !proposal ||
+      goalAmendmentActionPendingRef.current
+    ) {
       return;
     }
-    const remainsBlocked = result.ok && result.goal?.status === "stopped_blocked";
-    appendMessage({
-      role: "assistant",
-      content: result.ok
-        ? remainsBlocked
-          ? "目标计划已调整，但目标仍处于受阻状态；请确认条件已解决后再明确重试。"
-          : "已重新规划目标，请查看新的里程碑。"
-        : `重新规划失败：${result.message}`,
+    const selection = captureSessionSelection();
+    const mutationSequence = beginGoalMutation();
+    goalAmendmentActionPendingRef.current = decision;
+    setGoalAmendmentActionPending(decision);
+    setStatus({
+      kind: "working",
+      message:
+        decision === "approve"
+          ? "正在暂停旧路径并生成修订后的 Direct Plan…"
+          : "正在撤销目标修订…",
     });
-    if (result.ok && result.goal) {
-      applyGoalSummaryToSessions(result.goal);
-      const goalUiState = getGoalUiSyncState(result.goal.status);
-      setStatus({
-        kind: goalUiState.statusKind,
-        message: remainsBlocked ? "目标计划已调整，仍需明确重试" : "目标计划已调整",
-      });
-      setWorkPhase(goalUiState.workPhase);
-      setTaskActivity(
-        buildGoalTaskActivity({
-          status: result.goal.status,
-          description: result.goal.description,
-        }),
+    setWorkPhase(decision === "approve" ? "planning" : "paused");
+    try {
+      const result = await window.buildingAgent.resolveGoalAmendment(
+        activeGoal.id,
+        proposal.id,
+        decision,
       );
-      void refreshActiveGoalDetail(result.goal.id);
+      if (!isGoalMutationCurrent(selection, mutationSequence)) return;
+      appendMessage({
+        role: "assistant",
+        content: result.ok ? result.message : `处理目标修订失败：${result.message}`,
+      });
+      if (result.ok && result.plan) {
+        setActivePlan(result.plan);
+        setStatus({ kind: "paused", message: "修订 Direct Plan 等待采用" });
+        setWorkPhase("planning");
+        setTaskActivity(
+          createTaskActivity({
+            kind: "paused",
+            title: `Plan v${result.plan.goalPlanVersion ?? 1} · Direct`,
+            detail: "Goal 修订尚未应用；采用此 Plan 后才会切换目标语义",
+          }),
+        );
+      } else if (result.ok) {
+        setStatus({
+          kind: "paused",
+          message:
+            decision === "approve"
+              ? "目标修订已批准但尚未应用，请重试生成 Direct Plan 或撤销修订"
+              : "目标修订已撤销",
+        });
+        setWorkPhase("paused");
+      } else {
+        setStatus({ kind: "error", message: result.message });
+      }
+      void refreshActiveGoalDetail(activeGoal.id);
       void refreshSessions(sessionId ?? undefined);
+    } finally {
+      if (goalAmendmentActionPendingRef.current === decision) {
+        goalAmendmentActionPendingRef.current = null;
+        if (isGoalMutationCurrent(selection, mutationSequence)) {
+          setGoalAmendmentActionPending(null);
+        }
+      }
     }
   }
 
@@ -2243,6 +2354,8 @@ export function AgentChatPanel({
     }
     if (result.activeGoal) {
       void refreshActiveGoalDetail(result.activeGoal.id);
+    } else if (result.plan?.goalId) {
+      void refreshActiveGoalDetail(result.plan.goalId);
     }
     setSelectedSkillName(null);
     const pausedAgentStatus =
@@ -2268,7 +2381,9 @@ export function AgentChatPanel({
       message: isFailed
         ? formatAgentFailureForDisplay(failedAgentStatus?.message)
         : isPlanAwaitingConfirmation
-        ? "计划已生成，确认前不会执行"
+        ? result.plan?.purpose === "runtime_replan"
+          ? "运行期 Direct Plan 等待采用"
+          : "计划已生成，确认前不会执行"
         : isPlanPaused
           ? planFailure
             ? `${planFailure.title}：${planFailure.detail}`
@@ -2306,7 +2421,9 @@ export function AgentChatPanel({
             kind: "paused",
             title:
               result.plan.status === "awaiting_confirmation"
-                ? "等待确认终版计划"
+                ? result.plan.purpose === "runtime_replan"
+                  ? `等待采用 Direct Plan v${result.plan.goalPlanVersion ?? 1}`
+                  : "等待确认终版计划"
                 : planFailure?.title ?? "规划未完成",
             detail:
               planFailure?.detail ??
@@ -2476,7 +2593,8 @@ export function AgentChatPanel({
       activePlan.status !== "awaiting_confirmation" ||
       activePlan.actionGate !== "ready" ||
       !window.buildingAgent ||
-      planActionPending
+      planActionPending ||
+      planConfirmBlockedReason
     ) {
       return;
     }
@@ -2484,10 +2602,17 @@ export function AgentChatPanel({
     setPlanActionPending("confirm");
     setStatus({ kind: "working", message: "正在校验计划版本、投影与工作区…" });
     try {
-      const result = await window.buildingAgent.confirmPlan({
-        planId: planToConfirm.id,
-        expectedRevision: planToConfirm.revision,
-      });
+      const result =
+        planToConfirm.purpose === "runtime_replan"
+          ? await window.buildingAgent.adoptGoalPlan({
+              planId: planToConfirm.id,
+              expectedRevision: planToConfirm.revision,
+              expectedGoalPlanVersion: planToConfirm.goalPlanVersion ?? 1,
+            })
+          : await window.buildingAgent.confirmPlan({
+              planId: planToConfirm.id,
+              expectedRevision: planToConfirm.revision,
+            });
       if (!result.ok) {
         if (result.plan) {
           setActivePlan(result.plan);
@@ -2496,16 +2621,25 @@ export function AgentChatPanel({
         return;
       }
       setActivePlan(result.plan);
-      setStatus({ kind: "working", message: "计划已确认，目标开始执行" });
+      setActiveGoalPlan(result.plan);
+      const confirmedGoal =
+        "activeGoal" in result ? result.activeGoal : result.goal;
+      setStatus({
+        kind: "working",
+        message:
+          planToConfirm.purpose === "runtime_replan"
+            ? "新 Plan 已采用，Goal 恢复执行"
+            : "计划已确认，目标开始执行",
+      });
       setWorkPhase("tool");
       setTaskActivity(
         createTaskActivity({
           kind: "working",
           title: "正在执行已确认计划",
-          detail: result.activeGoal.description,
+          detail: confirmedGoal.description,
         }),
       );
-      void refreshActiveGoalDetail(result.activeGoal.id);
+      void refreshActiveGoalDetail(confirmedGoal.id);
       void refreshSessions(result.plan.sessionId);
     } catch (error) {
       setStatus({
@@ -2521,9 +2655,13 @@ export function AgentChatPanel({
     if (!activePlan || !window.buildingAgent || planActionPending) {
       return;
     }
+    const planToDiscard = activePlan;
     setPlanActionPending("discard");
     try {
-      const result = await window.buildingAgent.discardPlan(activePlan.id, activePlan.revision);
+      const result = await window.buildingAgent.discardPlan(
+        planToDiscard.id,
+        planToDiscard.revision,
+      );
       if (!result.ok) {
         if (result.plan) {
           setActivePlan(result.plan);
@@ -2532,8 +2670,33 @@ export function AgentChatPanel({
         return;
       }
       setActivePlan(null);
-      setStatus({ kind: "ready", message: "计划已丢弃，未执行任何任务" });
-      setTaskActivity(idleTaskActivity);
+      if (planToDiscard.purpose === "runtime_replan") {
+        const amendmentCandidate =
+          planToDiscard.trigger?.kind === "goal_amendment";
+        setStatus({
+          kind: "paused",
+          message: amendmentCandidate
+            ? "修订候选 Plan 已丢弃；目标修订仍未应用，请重新生成或撤销"
+            : "候选 Plan 已丢弃，当前 Goal 和活动 Plan 保持不变",
+        });
+        setWorkPhase("paused");
+        setTaskActivity(
+          createTaskActivity({
+            kind: "paused",
+            title: amendmentCandidate ? "目标修订等待处理" : "重规划候选已丢弃",
+            detail: amendmentCandidate
+              ? "重新生成修订 Direct Plan，或在 Goal 详情中撤销修订"
+              : "可以补充新的调整意见，或恢复当前 Goal",
+          }),
+        );
+        if (planToDiscard.goalId) {
+          void refreshActiveGoalDetail(planToDiscard.goalId);
+        }
+        void refreshSessions(planToDiscard.sessionId);
+      } else {
+        setStatus({ kind: "ready", message: "计划已丢弃，未执行任何任务" });
+        setTaskActivity(idleTaskActivity);
+      }
     } finally {
       setPlanActionPending(null);
     }
@@ -2584,6 +2747,24 @@ export function AgentChatPanel({
       }
     }
     const submittedContent = content.trim() ? rawContent : "请分析这些附件。";
+    const normalizedSubmittedContent = submittedContent.trim();
+    const isRuntimeGoalReplanRequest =
+      Boolean(activeGoal) &&
+      /^(?:修改计划|调整目标计划)(?:\s*[:：]|\s+)/.test(
+        normalizedSubmittedContent,
+      );
+    if (
+      /^(?:修改计划|调整目标计划)\s*[:：]?\s*$/.test(
+        normalizedSubmittedContent,
+      )
+    ) {
+      setStatus({
+        kind: "paused",
+        message: "请补充需要改变的依赖、工具路径、执行方法或验收路径。",
+      });
+      messageInputRef.current?.focus();
+      return;
+    }
     if (attachmentReadPending) {
       return;
     }
@@ -2624,9 +2805,15 @@ export function AgentChatPanel({
     setTaskActivity(
       createTaskActivity({
         kind: "working",
-        title: planInputLocked ? "正在更新只读计划" : "正在执行任务",
+        title: planInputLocked
+          ? "正在更新只读计划"
+          : isRuntimeGoalReplanRequest
+            ? "正在生成运行期 Direct Plan"
+            : "正在执行任务",
         detail: planInputLocked
           ? "本条消息只用于补充或修改计划，不会启动普通 Agent"
+          : isRuntimeGoalReplanRequest
+            ? "基于真实 Goal 反馈重建路径，采用前不会覆盖当前 Goal"
           : "请求已发送，等待后端状态",
       }),
     );
@@ -2671,13 +2858,15 @@ export function AgentChatPanel({
       kind: "working",
       message: planInputLocked
         ? "正在把补充或修改意见纳入只读计划…"
+        : isRuntimeGoalReplanRequest
+        ? "正在根据反馈生成运行期 Direct Plan…"
         : shouldCreateGoalPlan
         ? goalPlanMode === "debate"
           ? "正在执行 A1 → B1 → A2 → B2 → C 规划辩论…"
           : "正在生成可确认的直接计划…"
         : "正在检索记忆并调用模型...",
     });
-    setWorkPhase("model");
+    setWorkPhase(isRuntimeGoalReplanRequest ? "planning" : "model");
     const requestId = createClientRequestId();
     const requestGeneration = sessionSelectionGenerationRef.current;
     setActiveChatRequest(requestId);
@@ -3252,7 +3441,11 @@ export function AgentChatPanel({
             onPickPrompt={handlePickPrompt}
           />
         ) : (
-            <ChatMessageList messageTimeTick={messageTimeTick} messages={visibleChatMessages} />
+            <ChatMessageList
+              goal={activeGoalDetail}
+              messageTimeTick={messageTimeTick}
+              messages={visibleChatMessages}
+            />
         )}
 
         {(status.kind === "working" || status.kind === "paused") &&
@@ -3298,6 +3491,8 @@ export function AgentChatPanel({
               <PlanConfirmationCard
                 catalog={modelCatalog}
                 pendingAction={planActionPending}
+                confirmBlockedReason={planConfirmBlockedReason}
+                lineageLabel={buildPlanLineageLabel(activePlan, activeGoalDetail)}
                 plan={activePlan}
                 onConfirm={() => {
                   void handleConfirmPlan();
@@ -3318,7 +3513,9 @@ export function AgentChatPanel({
               <GoalStatusStrip
                 goal={activeGoal}
                 detail={activeGoalDetail}
-                recovery={activeSession?.recoveryGoal?.id === activeGoal.id}
+                activePlan={activeGoalPlan}
+                planCandidate={activePlan}
+                recovery={goalIsRecovery}
                 onViewDetail={handleViewGoalProgress}
                   {...(activeGoal.status === "planning" || activeGoal.status === "canceled"
                   ? { onStart: handleStartGoal }
@@ -3695,6 +3892,8 @@ export function AgentChatPanel({
         </form>
         <GoalDetailDrawer
           goal={activeGoalDetail}
+          activePlan={activeGoalPlan}
+          planCandidate={activePlan}
           open={goalDrawerOpen}
           summary={activeGoal}
           onStart={
@@ -3703,6 +3902,10 @@ export function AgentChatPanel({
           onClose={() => setGoalDrawerOpen(false)}
           onResolveReview={handleResolveGoalReview}
           onReplan={handleReplanGoal}
+          onResolveAmendment={(decision) =>
+            void handleResolveGoalAmendment(decision)
+          }
+          goalAmendmentActionPending={goalAmendmentActionPending}
           onRetry={handleRetryGoal}
           onContinueAcceptance={() => void handleContinueGoalAcceptance()}
           onMarkCompletedUnverified={(confirmation) =>
@@ -3719,7 +3922,8 @@ export function AgentChatPanel({
           {activeGoal ? (
             <GoalRailStatusCard
               goal={activeGoal}
-              recovery={activeSession?.recoveryGoal?.id === activeGoal.id}
+              recovery={goalIsRecovery}
+              status={activeGoalInteractionStatus}
               onPause={activeGoal.status === "executing" ? () => void handlePauseGoal() : undefined}
               onView={handleViewGoalProgress}
             />
@@ -3757,6 +3961,7 @@ export function AgentChatPanel({
         ) : null}
         <SessionContextStatusCard
           context={activeContextUsage}
+          historical={goalIsRecovery}
           messageCount={activeSession?.messageCount ?? messages.length}
           tokenUsage={activeSession?.tokenUsage}
         />
@@ -4089,10 +4294,23 @@ function PlanModelSelect(props: {
   );
 }
 
+function buildPlanLineageLabel(
+  plan: PlanRecord,
+  goal: Goal | null,
+): string | undefined {
+  if (plan.purpose !== "runtime_replan") return undefined;
+  const initialMode = goal?.planHistory?.[0]?.mode ?? plan.parentPlanRef?.mode;
+  return initialMode === "debate"
+    ? `初始 Debate → 当前 Direct v${plan.goalPlanVersion ?? 1}`
+    : undefined;
+}
+
 function PlanConfirmationCard(props: {
   plan: PlanRecord;
   catalog: PublicModelCatalog | null;
   pendingAction: "confirm" | "discard" | "retry" | null;
+  confirmBlockedReason?: string;
+  lineageLabel?: string;
   onConfirm: () => void;
   onDiscard: () => void;
   onRetry: (replacementProfileId?: string) => void;
@@ -4122,9 +4340,16 @@ function PlanConfirmationCard(props: {
   const canConfirm =
     props.plan.status === "awaiting_confirmation" &&
     props.plan.actionGate === "ready" &&
+    !props.confirmBlockedReason &&
     Boolean(artifact && props.plan.projection);
   const canDiscard =
-    !["confirmed_pending_execution", "executing", "completed"].includes(props.plan.status) &&
+    ![
+      "confirmed_pending_execution",
+      "executing",
+      "steps_completed",
+      "completed",
+      "superseded",
+    ].includes(props.plan.status) &&
     !props.plan.executionGoalId &&
     !props.plan.executionRunId;
 
@@ -4195,8 +4420,12 @@ function PlanConfirmationCard(props: {
     <section className="plan-confirmation-card" aria-label="终版计划确认">
       <header>
         <div>
-          <span>{props.plan.mode === "debate" ? "Debate Plan" : "Direct Plan"}</span>
+          <span>
+            Goal r{props.plan.goalContractRef?.revision ?? 1} / Plan v
+            {props.plan.goalPlanVersion ?? 1} / {props.plan.mode === "debate" ? "Debate" : "Direct"}
+          </span>
           <strong>{artifact?.title ?? props.plan.taskContract.objective}</strong>
+          {props.lineageLabel ? <small>{props.lineageLabel}</small> : null}
         </div>
         <div className="plan-gate-status">
           <span className={`is-${props.plan.actionGate}`}>
@@ -4207,6 +4436,76 @@ function PlanConfirmationCard(props: {
           <small>v{props.plan.revision}</small>
         </div>
       </header>
+
+      {props.plan.goalContractSnapshot ? (
+        <details className="plan-technical-details" open>
+          <summary>目标契约</summary>
+          <div className="plan-technical-details-body">
+            <p><b>目标结果：</b>{props.plan.goalContractSnapshot.objective}</p>
+            <p>
+              <b>交付物：</b>
+              {props.plan.goalContractSnapshot.deliverables.join("；") || "无"}
+            </p>
+            <p>
+              <b>范围内：</b>
+              {props.plan.goalContractSnapshot.scope.in.join("；") || "无"}
+            </p>
+            <p>
+              <b>范围外：</b>
+              {props.plan.goalContractSnapshot.scope.out.join("；") || "无"}
+            </p>
+            <p><b>约束：</b></p>
+            <ul>
+              {props.plan.goalContractSnapshot.constraints.length ? (
+                props.plan.goalContractSnapshot.constraints.map((constraint) => (
+                  <li key={constraint.id}>
+                    {constraint.strength === "hard" ? "硬约束" : "偏好"} ·
+                    {constraint.description}
+                  </li>
+                ))
+              ) : (
+                <li>无显式约束</li>
+              )}
+            </ul>
+            <p><b>成功标准：</b></p>
+            <ul>
+              {props.plan.goalContractSnapshot.successCriteria.map((criterion) => (
+                <li key={criterion.id}>{criterion.description}</li>
+              ))}
+            </ul>
+            <p>
+              <b>风险策略：</b>
+              {props.plan.goalContractSnapshot.riskPolicy.ordinaryOperations ===
+              "auto_decide"
+                ? "普通操作自动决策"
+                : "普通操作需要确认"}
+              ；高风险与不可逆操作必须确认
+            </p>
+            <p>
+              <b>停止策略：</b>
+              成功后生成验收证书；外部阻塞时
+              {props.plan.goalContractSnapshot.stopPolicy.onExternalBlock ===
+              "await_input"
+                ? "等待输入"
+                : "停止受阻"}
+              ；不可实现时
+              {props.plan.goalContractSnapshot.stopPolicy.onImpossible ===
+              "propose_goal_amendment"
+                ? "提出目标修订"
+                : "停止为不可实现"}
+            </p>
+            <small>
+              r{props.plan.goalContractSnapshot.revision} · SHA256 {" "}
+              {props.plan.goalContractRef?.sha256.slice(0, 12)}
+            </small>
+          </div>
+        </details>
+      ) : null}
+
+      <div className="goal-detail-section-header">
+        <span>当前 Plan</span>
+        <small>{props.plan.purpose === "runtime_replan" ? "运行期重规划" : "初始规划"}</small>
+      </div>
 
       <section
         className={`plan-outcome-summary is-${outcomePresentation.kind}`}
@@ -4231,6 +4530,12 @@ function PlanConfirmationCard(props: {
       </section>
 
       <PlanTechnicalDetails plan={props.plan} />
+
+      {props.confirmBlockedReason ? (
+        <p className="plan-confirm-blocked" role="status">
+          {props.confirmBlockedReason}
+        </p>
+      ) : null}
 
       {!artifact ? questionForm : null}
 
@@ -4264,7 +4569,7 @@ function PlanConfirmationCard(props: {
                           {milestone.acceptanceChecks
                             .map(
                               (check) =>
-                                `${check.kind} · ${check.description}`,
+                                `${check.id} · ${check.kind} · ${check.description} · ${formatPlanAcceptanceParams(check.params)}`,
                             )
                             .join("；")}
                         </small>
@@ -4279,8 +4584,9 @@ function PlanConfirmationCard(props: {
                   <ul className="plan-risk-list">
                     {artifact.acceptanceChecks.map((check) => (
                       <li key={check.id}>
-                        <strong>{check.kind}</strong>
+                        <strong>{check.id} · {check.kind}</strong>
                         <span>{check.description}</span>
+                        <code>{formatPlanAcceptanceParams(check.params)}</code>
                       </li>
                     ))}
                   </ul>
@@ -4350,21 +4656,35 @@ function PlanConfirmationCard(props: {
             {props.pendingAction === "discard" ? "丢弃中" : "丢弃计划"}
           </button>
         ) : null}
-        {canConfirm ? (
+        {props.plan.status === "awaiting_confirmation" &&
+        props.plan.actionGate === "ready" ? (
           <button
             className="primary-action"
-            disabled={Boolean(props.pendingAction)}
+            disabled={Boolean(props.pendingAction) || !canConfirm}
             onClick={props.onConfirm}
             type="button"
           >
             {props.pendingAction === "confirm"
               ? "校验并启动中"
-              : "确认计划并开始执行"}
+              : props.plan.purpose === "runtime_replan"
+                ? "采用 Plan 并恢复 Goal"
+                : "确认计划并开始执行"}
           </button>
         ) : null}
       </div>
     </section>
   );
+}
+
+function formatPlanAcceptanceParams(
+  params: Record<string, unknown>,
+): string {
+  try {
+    const value = JSON.stringify(params);
+    return value.length > 500 ? `${value.slice(0, 500)}…` : value;
+  } catch {
+    return "[验收参数不可序列化]";
+  }
 }
 
 function PlanTechnicalDetails(props: { plan: PlanRecord }) {
@@ -4875,6 +5195,7 @@ function buildContextPanelItems(options: {
   contextCards: Array<{ label: string; value: string; detail: string }>;
   activeGoal: ChatSessionGoalSummary | null;
   goalIsRecovery: boolean;
+  goalStatus?: ChatSessionGoalSummary["status"];
 }) {
   const baseItems = options.contextCards.map((card) => ({
     id: `card-${card.label}`,
@@ -4891,7 +5212,9 @@ function buildContextPanelItems(options: {
           detail: `${
             options.goalIsRecovery
               ? "可继续原目标"
-              : translateGoalStatus(options.activeGoal.status)
+              : translateGoalStatus(
+                  options.goalStatus ?? options.activeGoal.status,
+                )
           } · ${options.activeGoal.description}`,
         },
       ]
@@ -4945,6 +5268,7 @@ function AgentWorkTimeline({
 function GoalRailStatusCard(props: {
   goal: ChatSessionGoalSummary;
   recovery?: boolean;
+  status?: ChatSessionGoalSummary["status"];
   onView: () => void;
   onPause?: () => void;
 }) {
@@ -4953,7 +5277,9 @@ function GoalRailStatusCard(props: {
       <header>
         <strong>{props.recovery ? "待恢复目标" : "目标"}</strong>
         <span>
-          {props.recovery ? "可继续原目标" : translateGoalStatus(props.goal.status)}
+          {props.recovery
+            ? "可继续原目标"
+            : translateGoalStatus(props.status ?? props.goal.status)}
         </span>
       </header>
       <p>{props.goal.description}</p>
@@ -5095,12 +5421,16 @@ function ConversationProgressDisclosure(props: {
 
 function SessionContextStatusCard(props: {
   context: AgentContextUsage | undefined;
+  historical: boolean;
   messageCount: number;
   tokenUsage: ChatSessionListItem["tokenUsage"] | undefined;
 }) {
   const percent = props.context
-    ? Math.round(props.context.occupancyRatio * 100)
+    ? Math.min(100, Math.max(0, props.context.occupancyRatio * 100))
     : 0;
+  const percentLabel = `${Number(
+    (percent > 0 && percent < 10 ? percent.toFixed(1) : percent.toFixed(0)),
+  )}%`;
   const breakdown = props.tokenUsage?.breakdown;
   return (
     <section className="kimi-side-card session-context-status-card" aria-label="会话上下文状态">
@@ -5109,21 +5439,28 @@ function SessionContextStatusCard(props: {
         <span className="is-isolated">独立</span>
       </header>
       <div className="session-context-token-total">
-        <span>累计 Token</span>
-        <strong>{formatCompactTokenCount(props.tokenUsage?.totalTokens ?? 0)}</strong>
-        {props.tokenUsage?.estimated ? <small>估算</small> : null}
+        <span>累计模型用量</span>
+        <strong
+          title={`${(props.tokenUsage?.totalTokens ?? 0).toLocaleString()} tokens；各次模型调用输入与输出之和`}
+        >
+          {formatCompactTokenCount(props.tokenUsage?.totalTokens ?? 0)}
+        </strong>
+        {props.tokenUsage?.estimated ? <small>含估算</small> : null}
       </div>
+      <p className="session-context-token-explanation">
+        各次模型调用的输入 + 输出累计，可大于单次上下文上限
+      </p>
       <div className="session-context-occupancy">
         <div>
-          <span>当前占用</span>
-          <strong>{props.context ? `${percent}%` : "等待运行"}</strong>
+          <span>{props.historical ? "最近一次运行上下文" : "当前运行上下文"}</span>
+          <strong>{props.context ? percentLabel : "等待运行"}</strong>
         </div>
-        <div className="session-context-meter" aria-label={`上下文占用 ${percent}%`}>
+        <div className="session-context-meter" aria-label={`上下文占用 ${percentLabel}`}>
           <span style={{ width: `${percent}%` }} />
         </div>
         {props.context ? (
           <small>
-            {formatCompactTokenCount(props.context.estimatedTokens)} / {formatCompactTokenCount(props.context.tokenBudget)}
+            约 {formatCompactTokenCount(props.context.estimatedTokens)} / {formatCompactTokenCount(props.context.tokenBudget)} 可用预算
           </small>
         ) : null}
       </div>
@@ -5134,7 +5471,10 @@ function SessionContextStatusCard(props: {
         </div>
         <div>
           <dt>消息</dt>
-          <dd>{props.context?.messageCount ?? props.messageCount} 条进入运行上下文</dd>
+          <dd>
+            {props.context?.messageCount ?? props.messageCount} 条进入
+            {props.historical ? "最近运行上下文" : "运行上下文"}
+          </dd>
         </div>
         <div>
           <dt>压缩</dt>
@@ -5152,7 +5492,7 @@ function SessionContextStatusCard(props: {
       ) : null}
       {breakdown ? (
         <p className="session-context-breakdown">
-          Chat {formatCompactTokenCount(breakdown.chatTokens)} · Plan {formatCompactTokenCount(breakdown.planTokens)} · Goal {formatCompactTokenCount(breakdown.goalTokens)}
+          累计来源：普通对话 {formatCompactTokenCount(breakdown.chatTokens)} · 规划 {formatCompactTokenCount(breakdown.planTokens)} · 目标执行 {formatCompactTokenCount(breakdown.goalTokens)}
         </p>
       ) : null}
     </section>
@@ -5161,7 +5501,9 @@ function SessionContextStatusCard(props: {
 
 function formatCompactTokenCount(value: number): string {
   const count = Math.max(0, Math.floor(value));
-  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}m`;
+  if (count >= 1_000_000) {
+    return `${Number((count / 1_000_000).toFixed(2))}m`;
+  }
   if (count >= 1_000) return `${(count / 1_000).toFixed(1)}k`;
   return String(count);
 }
@@ -5675,13 +6017,19 @@ function buildSkillInputResponseValues(
 }
 
 const ChatMessageList = memo(function ChatMessageList({
+  goal,
   messageTimeTick,
   messages,
 }: {
+  goal: Goal | null;
   messageTimeTick: number;
   messages: VisibleChatMessage[];
 }) {
   const now = useMemo(() => new Date(messageTimeTick), [messageTimeTick]);
+  const terminalTruth = useMemo(
+    () => getGoalTerminalTruthNotice(goal),
+    [goal],
+  );
 
   return (
     <div className="message-list" aria-label="消息列表">
@@ -5702,7 +6050,17 @@ const ChatMessageList = memo(function ChatMessageList({
             </time>
           </header>
           {message.role === "assistant" ? (
-            <AnswerBlock parts={message.outputParts} />
+            <>
+              {terminalTruth &&
+              message.goalId === goal?.id &&
+              message.goalEventRef?.startsWith("goal-terminal:") ? (
+                <section className="goal-terminal-truth-notice" role="status">
+                  <strong>{terminalTruth.title}</strong>
+                  <p>{terminalTruth.detail}</p>
+                </section>
+              ) : null}
+              <AnswerBlock parts={message.outputParts} />
+            </>
           ) : (
             <>
               {message.attachments?.length ? (
@@ -6014,6 +6372,7 @@ function toChatMessage(message: ChatSessionRecord["messages"][number]): ChatMess
     createdAt: message.createdAt,
     ...(message.outputParts ? { outputParts: message.outputParts } : {}),
     ...(message.attachments ? { attachments: message.attachments } : {}),
+    ...(message.goalId ? { goalId: message.goalId } : {}),
     ...(message.goalEventRef ? { goalEventRef: message.goalEventRef } : {}),
   };
 }
