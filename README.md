@@ -102,7 +102,7 @@ The v3.4.0 release uses [`docs/design/guidelines_0708.html`](docs/design/guideli
 
 **v3.8.0** introduces descriptor-driven multi-provider connections and stable model profiles for OpenAI, Anthropic, Gemini, Bedrock, Vertex, OpenAI-compatible services, and Ollama. Goal Mode now plans before it executes: Direct creates a reviewable plan, while Plan Debate runs isolated `A1 → B1 → A2 → B2 → C` deliberation, preserves evidence and minority opinions, and creates a new writable Goal only after a versioned, drift-checked Ready plan is explicitly confirmed.
 
-**v3.8.1** turns provider setup into one connection-first workflow with explicit saved, credential, tested, failed, last-used, and default-model states. It adds Alibaba Model Studio Coding Plan through `https://coding.dashscope.aliyuncs.com/v1`, custom OpenAI Chat Completions and Anthropic Messages gateways, explicit credential removal, and a lighter Chat surface where routine process moves to the right status rail and only user-blocking choices remain as decision cards.
+**v3.8.1** turns provider setup into one connection-first workflow with explicit saved, credential, tested, failed, last-used, and default-model states. It adds Alibaba Model Studio Coding Plan through `https://coding.dashscope.aliyuncs.com/v1`, custom OpenAI Chat Completions and Anthropic Messages gateways, explicit credential removal, and a lighter Chat surface where routine process moves to the right status rail and only user-blocking choices remain as decision cards. Goal Mode now freezes one semantic Goal Contract before Direct or Debate planning, keeps initial and runtime Plans in a durable parent-linked lineage, preserves the original `A1 → B1 → A2 → B2 → C` record when a later structural replan uses Direct, and separates completed Plan steps from an acceptance-certified Goal outcome. Debate investigation now shares the structured-output contract and repair boundary, normalizes lossless provider shape variations, retains bounded diagnostics, and resumes manual retry from the failed investigation depth instead of replaying completed evidence collection.
 
 ---
 
@@ -586,8 +586,8 @@ Compatibility artifacts remain non-notarized, so the first v3.7.0 → v3.7.1 tra
 Launch at login is opt-in. Set `ZEROX_ENABLE_LOGIN_STARTUP=1` only when deliberately enabling the packaged login item; hidden login-item launches keep the main window closed until the user activates the app.
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-3.7.1-arm64.dmg"
-# or, if already dragged into Applications:
+xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-3.8.1-arm64.dmg"
+# or, after dragging the app into Applications:
 xattr -dr com.apple.quarantine "/Applications/Zerox Agent.app"
 ```
 
@@ -681,7 +681,7 @@ Planned:
 
 产品边界写在 [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md)。运行时、workspace、学习机制和目标模式分别见 [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md)、[`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md)、[`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md) 与 [`docs/architecture/agent-goal-mode.md`](docs/architecture/agent-goal-mode.md)。
 
-当前版本是 **v3.8.1**。本次发布把模型设置收敛为以连接为中心的服务商与模型管理，明确保存、凭证、连接验证、失败、最近使用和默认模型状态；新增阿里云百炼 Coding Plan、自定义 OpenAI Chat Completions / Anthropic Messages 服务商、显式移除凭证，并把普通思考、工具、Goal 与 Debate 过程移到右侧状态栏。主会话只在需要用户选择或回答时显示决策卡片，Plan 模式选择完成后即收起。
+当前版本是 **v3.8.1**。本次发布把模型设置收敛为以连接为中心的服务商与模型管理，明确保存、凭证、连接验证、失败、最近使用和默认模型状态；新增阿里云百炼 Coding Plan、自定义 OpenAI Chat Completions / Anthropic Messages 服务商、显式移除凭证，并把普通思考、工具、Goal 与 Debate 过程移到右侧状态栏。主会话只在需要用户选择或回答时显示决策卡片，Plan 模式选择完成后即收起。Goal 模式会在 Direct 或 Debate 开始前冻结同一份语义级目标契约，以父子谱系持久化初始 Plan 与运行期 Plan；初始 Debate 的 `A1 → B1 → A2 → B2 → C` 记录不会被后续 Direct 结构性重规划覆盖，同时严格区分“Plan 步骤已完成”和“Goal 已通过最终验收”。Debate 调查阶段统一使用结构化输出契约和修复边界，兼容无损的服务商字段形态差异，保留有界诊断，并在手动重试时从失败的调查深度继续，而不是重放已经完成的证据收集。
 
 3.8.1 的模型接入、信息披露与决策卡片规范见 [`docs/design/zerox-agent-3-8-1-model-and-conversation-ux.md`](docs/design/zerox-agent-3-8-1-model-and-conversation-ux.md)；3.8.0 的领域边界、权限门禁和辩论协议见 [`docs/design/zerox-agent-3-8-0-plan-debate.md`](docs/design/zerox-agent-3-8-0-plan-debate.md)。
 
@@ -1165,8 +1165,8 @@ npm run release:mac
 开机登录启动默认关闭。只有明确设置 `ZEROX_ENABLE_LOGIN_STARTUP=1` 时才会配置打包应用的 Login Item；隐藏登录启动不会主动显示主窗口。
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-<version>-arm64.dmg"
-# 或已拖进 Applications：
+xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-3.8.1-arm64.dmg"
+# 或已将应用拖入 Applications 后执行：
 xattr -dr com.apple.quarantine "/Applications/Zerox Agent.app"
 ```
 

@@ -123,6 +123,33 @@ describe("package scripts", () => {
     expect(readme).toContain("当前版本是 **v3.8.1**");
   });
 
+  it("publishes an exact-tag arm64 compatibility release from GitHub Actions", () => {
+    const workflow = readFileSync(
+      path.join(process.cwd(), ".github", "workflows", "release.yml"),
+      "utf8",
+    );
+    const releaseNotes = readFileSync(
+      path.join(
+        process.cwd(),
+        ".github",
+        "release-notes",
+        "v3.8.1.md",
+      ),
+      "utf8",
+    );
+
+    expect(workflow).toContain('tags:\n      - "v*.*.*"');
+    expect(workflow).toContain("runs-on: macos-14");
+    expect(workflow).toContain('test "$(uname -m)" = "arm64"');
+    expect(workflow).toContain("secrets.ZEROX_UPDATE_SIGNING_PRIVATE_KEY");
+    expect(workflow).toContain("ZEROX_RELEASE_MODE: legacy-adhoc");
+    expect(workflow).toContain("npm run release:mac");
+    expect(workflow).toContain("npm run release:publish");
+    expect(releaseNotes).toContain("# Zerox Agent v3.8.1");
+    expect(releaseNotes).toContain("Zerox-Agent-3.8.1-arm64.dmg");
+    expect(releaseNotes).toContain("xattr -dr com.apple.quarantine");
+  });
+
   it("keeps release gates tracked through v3.8.1", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
