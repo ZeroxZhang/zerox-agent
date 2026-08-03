@@ -1,0 +1,135 @@
+src/main/acceptanceContractValidator.ts
+  s_58766b87f986dd::t_e7c7e5f001e0c7 18-23,235-284
+src/main/agentGoalAcceptance.test.ts
+  s_58766b87f986dd::t_be1df3a43eb2c9 96-166
+src/main/agentGoalAcceptance.ts
+  s_58766b87f986dd::t_77978ba57dcacf 301-302,304-318,337,339-349,420-491,1411-1424,1445,1501-1506,1767
+src/main/agentGoalAcceptanceCertificate.test.ts
+  s_58766b87f986dd::t_f1ce95da62718b 167-209
+src/main/agentGoalAcceptanceCertificate.ts
+  s_58766b87f986dd::t_c821376dd9689a 86-93,262-277,345-356,448-457,514-523
+src/main/agentGoalController.test.ts
+  s_58766b87f986dd::t_c42ca9f5474585 3205,3235
+src/main/agentGoalController.ts
+  s_58766b87f986dd::t_e764e0aa9538dd 61,73,787-790,856-858,1409-1416,1418-1426,2626-2631
+src/main/agentGoalPlanner.test.ts
+  s_58766b87f986dd::t_f0ca07198d83d3 610
+src/main/agentGoalPlanner.ts
+  s_58766b87f986dd::t_d50a40ba5bd655 168-170,401
+src/main/agentGoalStore.test.ts
+  s_58766b87f986dd::t_ed68b19e061ef2 20-23,78-131,296,300-304,306,309-314,320-321,323,334-366,817-820,1189,1223-1228
+src/main/agentGoalStore.ts
+  s_58766b87f986dd::t_425d539d1ecb5f 19-30,40-44,157-161,205-235,365,374-402,406-463,467,472-477
+src/main/agentLoop.test.ts
+  s_58766b87f986dd::t_45499c15a2b049 1751-1776
+src/main/agentLoop.ts
+  s_58766b87f986dd::t_916580ad72e560 140,196,269,333,341-344,368-371,373-375,1317
+src/main/chatService.test.ts
+  s_58766b87f986dd::t_bb36134e19da1f 1067-1143,2421-2546
+src/main/chatService.ts
+  s_58766b87f986dd::t_4064288dce5455 73-74,263-273,279-280,296-297,875-938,1197-1198,3453-3456,3458-3459,3463-3467,3475-3483,3610-3611,3867-3917,4036-4049,4051,4053-4056,4059-4060,4069
+src/main/chatSessionUsage.test.ts
+  s_58766b87f986dd::t_4815ff155db10f 23,54-106
+src/main/chatSessionUsage.ts
+  s_58766b87f986dd::t_87a56fd5ad63f5 16-20,43-45,58,62,67-74,83,87,93,97-104,108
+src/main/container.test.ts
+  s_58766b87f986dd::t_10136fff61e0b2 10,30,32-35,644-686,2346-2706,2943,2946-2948,2960-2962
+src/main/container.ts
+  s_58766b87f986dd::t_896312ad370380 31,107,111-114,119-120,123-124,129,131-138,172,179,262,266-273,280,287-297,335-343,346-350,486-487,508-545,582-587,591-593,595-599,602,606,608-618,627-664,803,1893-1894,2508-2509,2583-2586,2605,2672-2675,2792-2797,2843,2853-2854,2860-2895,2917,2958,2985-3514,3518-4006,4362-4366,4368,4635,4638-4640,4652-4654,4658-4729
+src/main/goalChatService.ts
+  s_58766b87f986dd::t_faca260c114088 4,128-154,300,453-468,494,605-609,616-618,630-632,643,698,962
+src/main/goalExecutionModel.test.ts
+  s_58766b87f986dd::t_941d70bfcc69c1 7,22-39
+src/main/goalExecutionModel.ts
+  s_58766b87f986dd::t_0b5e4726fc9adf 16-25,27-30,36-46
+src/main/goalOutputRoots.ts
+  s_58766b87f986dd::t_61f792b25ec9f2 74
+src/main/goalPlanContractService.test.ts
+  s_58766b87f986dd::t_928dd267b51117 1-97
+src/main/goalPlanContractService.ts
+  s_58766b87f986dd::t_b22b6a2eb85e06 1-147
+src/main/goalRuntimeEngine.test.ts
+  s_58766b87f986dd::t_2f40a6d7bf02d3 1957-1976,2068-2070
+src/main/goalRuntimeEngine.ts
+  s_58766b87f986dd::t_81844e153a472b 725-733,851,884,916-920,960,1274-1281,1299,1309-1323,1386
+src/main/ipc/index.ts
+  s_58766b87f986dd::t_8d61a038864e72 90-91,94-96,599,609-626,698,707-713
+src/main/planArtifactWriter.test.ts
+  s_58766b87f986dd::t_ff8d02c294223b 46-53
+src/main/planArtifactWriter.ts
+  s_58766b87f986dd::t_2215f7a00a07f9 67-72,110-127
+src/main/planDebateOrchestrator.test.ts
+  s_58766b87f986dd::t_29592373f2fa4a 23-26,32-35,113-121,144-207,1115-1271
+src/main/planDebateOrchestrator.ts
+  s_58766b87f986dd::t_4844dfd76d2280 57,65-69,88,104-105,149,152-155,167-182,190-191,221-236,258-261,517-528,534-540,616,626-632,636,640-642,648-650,732,764,902,931,956,979,1033-1036,1068,1298,1325,1372,1435-1438,1585,1589,1601-1625,1630-1638,1702-1704,1708-1710,1727-1748,1764-1765,1778,1983-2012,2022-2025,2036,2046,2054-2055,2060,2071,2164-2165,2251-2252,2308-2309,2530-2532,2538-2559,2650,2700,2759-2761,2900-2905,3087-3097,3112,3114,3118-3122,3125,3129,3131,3133-3138
+src/main/planInvestigatorService.test.ts
+  s_58766b87f986dd::t_2bb0830ba373a9 372-448,540,544-551,576,584-585,622-625,632,634-644
+src/main/planStore.test.ts
+  s_58766b87f986dd::t_f6acb676b062b5 8,119-184
+src/main/planStore.ts
+  s_58766b87f986dd::t_fa1d2b9a6be77f 13-20,475,486-529
+src/main/plannerKernel.test.ts
+  s_58766b87f986dd::t_1f5d4ec633eba3 14,19-22,351-469,625-669
+src/main/plannerKernel.ts
+  s_58766b87f986dd::t_da2ebb3dbe71c7 25-30,38,421-424,434-478,659-673,809-934
+src/main/storage/repositories/goalRepository.ts
+  s_58766b87f986dd::t_87bb589947f53b 221-229
+src/main/structuredModelProtocol.test.ts
+  s_58766b87f986dd::t_ac1cdb505e574c 80-84,125-129
+src/main/structuredModelProtocol.ts
+  s_58766b87f986dd::t_16192624a1b4eb 68,74-80,84,108-115,119,157,164,185
+src/preload/index.ts
+  s_58766b87f986dd::t_bfa79b9bdd6f7d 85-86,89-91,391,395-409,447-448
+src/renderer/chatStreamReducer.ts
+  s_58766b87f986dd::t_2256d2bee4abd4 17
+src/renderer/components/AgentChatPanel.tsx
+  s_58766b87f986dd::t_df0ee03a117c9b 49-53,146,297,353-355,378,548,551-552,898,901-902,1004-1006,1014-1022,1039,1096-1098,1112-1121,1275-1293,1463-1464,1848,1852-1868,1870-1879,1882-1891,1893-1898,1900-1928,1930-1936,2357-2358,2384-2386,2424-2426,2596-2597,2605-2615,2624-2633,2639,2642,2658,2661-2664,2673-2699,2750-2767,2808-2812,2815-2816,2861-2862,2869,3444-3448,3494-3495,3516-3518,3895-3896,3905-3908,3925-3926,3964,4297-4307,4312-4313,4343,4346-4352,4423-4426,4428,4440-4509,4534-4539,4572,4587,4589,4659-4660,4663,4669-4671,4679-4689,5198,5215-5217,5271,5280-5282,5424,5429,5431-5433,5442-5448,5450-5452,5455-5456,5458,5463,5474-5477,5495,5504-5506,6020,6024,6029-6032,6053-6063,6375
+src/renderer/components/GoalDetailDrawer.tsx
+  s_58766b87f986dd::t_e8c286eaceeb22 2,4-6,18-19,26-27,67,79,87-91,93-96,140-247,253,260-263,294,297,299,308,311,328,340,351,360-362,369,377,384,390,660-670,683-876
+src/renderer/components/GoalStatusStrip.tsx
+  s_58766b87f986dd::t_12fc7356c60475 3-4,10-11,26-28,32-38,45-53,55,57-62,72,90-97,178,183,185,198-207
+src/renderer/goalProgressViewModel.test.ts
+  s_58766b87f986dd::t_02239a5848e62c 377-401
+src/renderer/goalProgressViewModel.ts
+  s_58766b87f986dd::t_f77b5edbaedb5e 1-9,166-168
+src/renderer/goalTerminalTruth.test.ts
+  s_58766b87f986dd::t_ca458efe84ac38 1-36
+src/renderer/goalTerminalTruth.ts
+  s_58766b87f986dd::t_f6f45b208218ff 1-45
+src/renderer/materialDesign.test.ts
+  s_58766b87f986dd::t_cf64bea77cd58f 963-968,973-990,1003
+src/renderer/styles/cards.css
+  s_58766b87f986dd::t_a55a2cd67709f2 1589-1596
+src/renderer/styles/chat.css
+  s_58766b87f986dd::t_fcbad3aa880649 1256-1320,1904-1932,1971
+src/renderer/styles/legacy.css
+  s_58766b87f986dd::t_3d0ad51760c7e8 2529-2555
+src/shared/agentGoal.test.ts
+  s_58766b87f986dd::t_319d40643e15a4 5-6,75-101
+src/shared/agentGoal.ts
+  s_58766b87f986dd::t_272546b0620aae 7-13,283-284,353-354,398-402,430-454
+src/shared/goalPlanContract.ts
+  s_58766b87f986dd::t_7ea74c2bf402b5 1-294
+src/shared/goalTranslation.ts
+  s_58766b87f986dd::t_f29c5a99c0152a 10-15,56-59
+src/shared/planMode.ts
+  s_58766b87f986dd::t_eff5a8f46c6714 11-20,24,34,36,191,214-216,282,300,356,389-399,423-430,456-489
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "79b28b9ff923b7d159f641738438c94604f749cf",
+  "prompts": {},
+  "sessions": {
+    "s_58766b87f986dd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fc603-14b2-7652-9bcc-3c7bffeaeb11",
+        "model": "unknown"
+      },
+      "human_author": "Zerox Zhang <22983136+ZeroxZhang@users.noreply.github.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
