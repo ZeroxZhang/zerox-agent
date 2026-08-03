@@ -93,6 +93,77 @@ describe("agent goal acceptance", () => {
     ]);
   });
 
+  it("executes one identical global check only once when several Goal criteria reference it", async () => {
+    const sharedCheck = check("shared_check", "validator:shared", {});
+    const evaluate = vi.fn(async () => ({
+      checkId: sharedCheck.id,
+      kind: sharedCheck.kind,
+      passed: true,
+      code: "assertion_passed",
+      evidenceRefs: [],
+      detail: "Assertion passed.",
+    }));
+    const acceptance = createAgentGoalAcceptance({
+      registry: createAgentGoalValidatorRegistry({
+        validators: [{ kind: "validator:shared", evaluate }],
+      }),
+    });
+    const goal = createGoal([]);
+    goal.successCriteria = [
+      {
+        id: "criterion_a",
+        description: "First semantic result is delivered.",
+        acceptanceChecks: [structuredClone(sharedCheck)],
+      },
+      {
+        id: "criterion_b",
+        description: "Second semantic result is delivered.",
+        acceptanceChecks: [structuredClone(sharedCheck)],
+      },
+    ];
+
+    const result = await acceptance.evaluateGoal(goal, createContext());
+
+    expect(result.accepted).toBe(true);
+    expect(result.checkResults).toHaveLength(1);
+    expect(evaluate).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects conflicting definitions that reuse one global check id", async () => {
+    const acceptance = createAgentGoalAcceptance();
+    const goal = createGoal([]);
+    goal.successCriteria = [
+      {
+        id: "criterion_a",
+        description: "First artifact exists.",
+        acceptanceChecks: [
+          check("shared_check", "file_exists", { path: "first.md" }),
+        ],
+      },
+      {
+        id: "criterion_b",
+        description: "Second artifact exists.",
+        acceptanceChecks: [
+          check("shared_check", "file_exists", { path: "second.md" }),
+        ],
+      },
+    ];
+
+    const result = await acceptance.evaluateGoal(goal, createContext());
+
+    expect(result).toMatchObject({
+      accepted: false,
+      verdict: "replan_required",
+      failureClass: "plan_structure_invalid",
+    });
+    expect(result.checkResults).toEqual([
+      expect.objectContaining({
+        checkId: "shared_check",
+        code: "acceptance_contract_invalid",
+      }),
+    ]);
+  });
+
   it("requires matching provenance for file_exists artifact checks", async () => {
     await mkdir(path.join(workspacePath, "reports"), { recursive: true });
     const artifactPath = path.join(workspacePath, "reports", "bookmark_list.md");

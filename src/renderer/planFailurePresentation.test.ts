@@ -60,6 +60,35 @@ describe("plan failure presentation", () => {
     expect(presentation?.technicalDetail).toContain("收集 2 条证据");
   });
 
+  it("explains that investigation retry resumes from the failed depth", () => {
+    const presentation = getPlanFailurePresentation(
+      planWithFailure({
+        planningStages: [
+          {
+            id: "investigation-contract-1",
+            kind: "investigation",
+            runId: "investigation-contract-run-1",
+            status: "failed",
+            investigationDepth: "deep",
+            evidenceRefs: ["evidence_user_request", "evidence_workspace"],
+            revisionAttempted: true,
+            failureExcerpt: '{"skillCandidates":[{"evidenceRefs":{}}]}',
+            error: "PlanningBrief.skillCandidates[0].evidenceRefs 必须是数组。",
+          },
+        ],
+      }),
+    );
+
+    expect(presentation).toMatchObject({
+      title: "规划调查未完成",
+      detail: "规划调查未完成，但已完成的调查层级和收集到的证据都已保留。",
+      actionLabel: "从失败调查阶段继续",
+    });
+    expect(presentation?.nextAction).toContain("只从失败的调查深度恢复");
+    expect(presentation?.technicalDetail).toContain("合同修复");
+    expect(presentation?.technicalDetail).toContain("失败响应摘录");
+  });
+
   it("projects a recovered plan over stale persisted failure activity", () => {
     const presentation = getActivePlanPresentation(
       planWithFailure({
@@ -96,6 +125,59 @@ describe("plan failure presentation", () => {
       detail: "终版计划已经准备好，目前还没有执行任何操作。",
       nextAction:
         "检查计划后点击“确认计划并开始执行”；如需调整，直接输入修改意见。",
+    });
+  });
+
+  it("keeps completed Plan steps separate from Goal achievement", () => {
+    const presentation = getPlanOutcomePresentation(
+      planWithFailure({
+        mode: "direct",
+        status: "steps_completed",
+        actionGate: "ready",
+      }),
+    );
+
+    expect(presentation).toEqual({
+      kind: "pending",
+      title: "当前路径已执行，目标尚未通过验收",
+      detail: "活动 Plan 的里程碑已完成，Goal 正在等待或恢复最终验收。",
+      nextAction: "继续 Goal 验收；只有有效验收证书才能将 Goal 标记为达成。",
+    });
+  });
+
+  it("presents an adopted active Plan as execution rather than unfinished planning", () => {
+    const presentation = getPlanOutcomePresentation(
+      planWithFailure({
+        mode: "direct",
+        purpose: "runtime_replan",
+        goalPlanVersion: 2,
+        status: "executing",
+      }),
+    );
+
+    expect(presentation).toEqual({
+      kind: "pending",
+      title: "Plan 正在执行",
+      detail: "当前活动路径正在由 Goal Controller 推进。",
+      nextAction: "查看 Goal 进度、里程碑与执行证据。",
+    });
+  });
+
+  it("explains that a runtime Direct Plan does not replace the active Plan before adoption", () => {
+    const presentation = getPlanOutcomePresentation(
+      planWithFailure({
+        mode: "direct",
+        purpose: "runtime_replan",
+        goalPlanVersion: 2,
+        status: "awaiting_confirmation",
+        actionGate: "ready",
+      }),
+    );
+
+    expect(presentation).toMatchObject({
+      kind: "success",
+      title: "Direct Plan v2 已就绪",
+      detail: "新的执行路径已经准备好，当前 Goal 尚未切换 Plan。",
     });
   });
 

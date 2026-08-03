@@ -43,6 +43,14 @@ describe("plan artifact writer", () => {
       ),
     );
     await expect(writer.verify(projectedPlan)).resolves.toBe(true);
+    await expect(
+      writer.verify({
+        ...projectedPlan,
+        revision: 3,
+        confirmedRevision: 1,
+        status: "executing",
+      }),
+    ).resolves.toBe(true);
 
     await expect(
       writer.verify({

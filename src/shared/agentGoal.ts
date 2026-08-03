@@ -4,6 +4,13 @@ import type { SkillRecord } from "./skills";
 import type { ModelServiceNotice } from "./modelServiceNotice";
 import type { AgentContextUsage } from "./contextUsage";
 import type { ResolvedModelBinding } from "./modelSettings";
+import type {
+  GoalContractRef,
+  GoalContractSnapshot,
+  GoalAmendmentProposal,
+  GoalPlanHistoryEntry,
+  GoalPlanRef,
+} from "./goalPlanContract";
 
 export type GoalStatus =
   | "planning"
@@ -273,6 +280,8 @@ export type GoalAcceptanceCertificate = {
   protocolVersion: 2;
   criteriaHash: string;
   planVersion: number;
+  goalContractRef?: GoalContractRef;
+  activePlanRef?: GoalPlanRef;
   runIds: string[];
   checkResults: GoalAcceptanceCheckResult[];
   evidence: Array<{
@@ -341,6 +350,8 @@ export type GoalExecutionUsage = {
   toolCalls: number;
   wallClockMs: number;
   tokens: number;
+  /** True when at least one model turn used a local token estimate. */
+  tokensEstimated?: boolean;
   replans: number;
 };
 
@@ -384,6 +395,11 @@ export type Goal = {
     revision: number;
     sha256: string;
   };
+  goalContractSnapshot?: GoalContractSnapshot;
+  goalContractRef?: GoalContractRef;
+  activePlanRef?: GoalPlanRef;
+  planHistory?: GoalPlanHistoryEntry[];
+  pendingGoalAmendment?: GoalAmendmentProposal;
   /** Frozen execution model inherited from a confirmed Plan. */
   executionModelBinding?: ResolvedModelBinding;
   successCriteria: SuccessCriterion[];
@@ -410,6 +426,31 @@ export type Goal = {
   createdAt: string;
   updatedAt: string;
 };
+
+export function hasGoalCompletedExecution(
+  goal: Pick<Goal, "milestones">,
+): boolean {
+  return goal.milestones.length > 0 && goal.milestones.every(
+    (milestone) =>
+      milestone.state === "accepted" || milestone.state === "skipped",
+  );
+}
+
+/**
+ * Older Goal records used stopped_blocked for a final acceptance outage even
+ * after every execution step had passed. Keep storage/audit history intact,
+ * while projecting that recoverable state as final-acceptance pending in the
+ * interactive UI.
+ */
+export function projectGoalStatusForInteraction(
+  goal: Pick<Goal, "status" | "stopReason" | "milestones">,
+): GoalStatus {
+  return goal.status === "stopped_blocked" &&
+      goal.stopReason === "acceptance_unavailable" &&
+      hasGoalCompletedExecution(goal)
+    ? "waiting_for_acceptance"
+    : goal.status;
+}
 
 export function upgradeGoalAcceptanceProtocol(goal: Goal): Goal {
   if (goal.acceptanceProtocolVersion === 2 && goal.acceptanceState) {

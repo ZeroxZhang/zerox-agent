@@ -1,11 +1,12 @@
-import type {
-  AcceptanceCheckKind,
-  AcceptanceRepairDirective,
-  Goal,
-  GoalAcceptanceState,
-  GoalStatus,
-  Milestone,
-  MilestoneState,
+import {
+  projectGoalStatusForInteraction,
+  type AcceptanceCheckKind,
+  type AcceptanceRepairDirective,
+  type Goal,
+  type GoalAcceptanceState,
+  type GoalStatus,
+  type Milestone,
+  type MilestoneState,
 } from "../shared/agentGoal";
 import type { ChatSessionGoalSummary } from "../shared/chat";
 
@@ -162,7 +163,9 @@ export function buildGoalProgressViewModel(
   summary: ChatSessionGoalSummary,
   goal: Goal | null,
 ): GoalProgressViewModel {
-  const status = goal?.status ?? summary.status;
+  const status = goal
+    ? projectGoalStatusForInteraction(goal)
+    : summary.status;
   const milestones = goal?.milestones ?? [];
   const acceptedCount = milestones.filter((milestone) =>
     milestone.state === "accepted" || milestone.state === "skipped"

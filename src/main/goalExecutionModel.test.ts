@@ -4,6 +4,7 @@ import type { PlanRecord } from "../shared/planMode";
 import {
   resolveGoalExecutionModelBinding,
   selectPlanExecutionModelBinding,
+  selectRuntimeDirectProfileId,
 } from "./goalExecutionModel";
 
 describe("goal execution model continuity", () => {
@@ -16,6 +17,24 @@ describe("goal execution model continuity", () => {
         frozenModelAssignments: { a, c },
       }),
     ).toBe(c);
+  });
+
+  it("inherits Debate C as the runtime Direct profile without falling back to A or B", () => {
+    const a = binding("profile-a", "model-a");
+    const c = binding("profile-c", "model-c");
+
+    expect(
+      selectRuntimeDirectProfileId(
+        { mode: "debate", frozenModelAssignments: { a, c } },
+        {},
+      ),
+    ).toBe("profile-c");
+    expect(
+      selectRuntimeDirectProfileId(
+        { mode: "debate", frozenModelAssignments: { a } },
+        { executionModelBinding: binding("fallback", "fallback-model") },
+      ),
+    ).toBeUndefined();
   });
 
   it("recovers a legacy Goal binding from its verified source Plan", async () => {

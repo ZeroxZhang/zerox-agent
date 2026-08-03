@@ -8,10 +8,20 @@ import type {
   TaskRisk,
 } from "./agentTaskStrategy";
 import type { SkillInputValue } from "./skillExecutionContract";
+import type {
+  GoalAmendmentProposal,
+  GoalContractIssue,
+  GoalContractRef,
+  GoalContractSnapshot,
+  GoalPlanPurpose,
+  GoalPlanRef,
+  GoalPlanTrigger,
+  PlanCriterionBinding,
+} from "./goalPlanContract";
 
 export type PlanMode = "direct" | "debate";
 export type PlanAutonomyMode = "standard" | "auto";
-export type PlanSchemaVersion = 1 | 2;
+export type PlanSchemaVersion = 1 | 2 | 3;
 export type PlanInvestigationDepth = "quick" | "standard" | "deep";
 
 export type PlanStatus =
@@ -21,7 +31,9 @@ export type PlanStatus =
   | "awaiting_confirmation"
   | "confirmed_pending_execution"
   | "executing"
+  | "steps_completed"
   | "completed"
+  | "superseded"
   | "discarded"
   | "canceled"
   | "failed";
@@ -176,6 +188,7 @@ export type PlanningStageRecord = {
   usage?: {
     inputTokens: number;
     outputTokens: number;
+    estimated?: boolean;
   };
   error?: string;
   /**
@@ -198,6 +211,9 @@ export type PlanQualityIssueCode =
   | "UNRESOLVED_AMBIGUITY"
   | "UNMITIGATED_CRITICAL_RISK"
   | "MODEL_REVIEW_REJECTED"
+  | "GOAL_CONTRACT_DRIFT"
+  | "GOAL_CRITERION_UNCOVERED"
+  | "GOAL_CONTRACT_BLOCKED"
   | "ILLEGAL_CAPABILITY";
 
 export type PlanQualityIssue = {
@@ -263,6 +279,7 @@ export type PlanProposal = {
   risks: PlanRisk[];
   acceptanceCriteria: string[];
   acceptanceChecks?: AcceptanceCheck[];
+  goalContractIssues?: GoalContractIssue[];
 };
 
 export type DebateCritiqueIssue = {
@@ -280,6 +297,7 @@ export type DebateCritique = {
   issues: DebateCritiqueIssue[];
   minorityOpinion: string[];
   unresolvedRisks: PlanRisk[];
+  goalContractIssues?: GoalContractIssue[];
 };
 
 export type PlanRevisionDecision = {
@@ -335,6 +353,7 @@ export type DebateRound = {
   usage?: {
     inputTokens: number;
     outputTokens: number;
+    estimated?: boolean;
   };
 };
 
@@ -367,6 +386,17 @@ export type PlanRecord = {
   selectedSkillInputValues?: Record<string, SkillInputValue>;
   qualityReport?: PlanQualityReport;
   taskContract: PlanTaskContract;
+  purpose?: GoalPlanPurpose;
+  goalContractSnapshot?: GoalContractSnapshot;
+  goalContractRef?: GoalContractRef;
+  goalId?: string;
+  parentPlanRef?: GoalPlanRef;
+  goalPlanVersion?: number;
+  trigger?: GoalPlanTrigger;
+  criterionBindings?: PlanCriterionBinding[];
+  goalContractIssues?: GoalContractIssue[];
+  supersededByPlanId?: string;
+  supersededAt?: string;
   evidence: PlanEvidenceItem[];
   requestedModelAssignments: PlanModelAssignments;
   frozenModelAssignments: FrozenPlanModelAssignments;
@@ -390,6 +420,14 @@ export type CreatePlanInput = {
   selectedSkill?: GoalSelectedSkill;
   mode: PlanMode;
   autonomyMode?: PlanAutonomyMode;
+  purpose?: GoalPlanPurpose;
+  goalContractSnapshot?: GoalContractSnapshot;
+  goalContractRef?: GoalContractRef;
+  goalId?: string;
+  parentPlanRef?: GoalPlanRef;
+  goalPlanVersion?: number;
+  trigger?: GoalPlanTrigger;
+  feedbackEvidence?: PlanEvidenceItem[];
   modelAssignments?: PlanModelAssignments;
   signal?: AbortSignal;
 };
@@ -414,6 +452,40 @@ export type ConfirmPlanResult =
       };
     }
   | { ok: false; message: string; plan?: PlanRecord };
+
+export type CreateRuntimeGoalPlanResult =
+  | { ok: true; plan: PlanRecord; message: string }
+  | { ok: false; message: string; plan?: PlanRecord };
+
+export type AdoptGoalPlanInput = {
+  planId: string;
+  expectedRevision: number;
+  expectedGoalPlanVersion: number;
+};
+
+export type AdoptGoalPlanResult =
+  | {
+      ok: true;
+      plan: PlanRecord;
+      goal: import("./agentGoal").Goal;
+      message: string;
+    }
+  | { ok: false; message: string; plan?: PlanRecord };
+
+export type ProposeGoalAmendmentInput = {
+  goalId: string;
+  candidateContract: GoalContractSnapshot;
+  reason: string;
+};
+
+export type GoalAmendmentOperationResult =
+  | {
+      ok: true;
+      proposal: GoalAmendmentProposal;
+      plan?: PlanRecord;
+      message: string;
+    }
+  | { ok: false; message: string };
 
 export const DEBATE_SEQUENCE: DebateRoundKind[] = [
   "a1",

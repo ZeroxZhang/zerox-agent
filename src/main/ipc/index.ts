@@ -87,8 +87,13 @@ import type {
   TestProviderConnectionInput,
 } from "../../shared/modelSettings";
 import type {
+  AdoptGoalPlanInput,
+  AdoptGoalPlanResult,
   ConfirmPlanInput,
   ConfirmPlanResult,
+  CreateRuntimeGoalPlanResult,
+  GoalAmendmentOperationResult,
+  ProposeGoalAmendmentInput,
   PlanRecord,
 } from "../../shared/planMode";
 import type { AppUpdateActionResult, AppUpdateState } from "../../shared/appUpdate";
@@ -591,7 +596,7 @@ function registerGoalsIpcHandlers(container: AppContainer): void {
       _event,
       goalId: string,
       instructions: string,
-    ): Promise<{ ok: boolean; goal?: Goal; message?: string }> => {
+    ): Promise<CreateRuntimeGoalPlanResult> => {
       return container.replanGoal(goalId, instructions);
     },
   );
@@ -600,6 +605,24 @@ function registerGoalsIpcHandlers(container: AppContainer): void {
     async (_event, goalId: string): Promise<{ ok: boolean; goal?: Goal; message?: string }> => {
       return container.retryGoal(goalId);
     },
+  );
+  ipcMain.handle(
+    "goal:proposeAmendment",
+    (
+      _event,
+      input: ProposeGoalAmendmentInput,
+    ): Promise<GoalAmendmentOperationResult> =>
+      container.proposeGoalAmendment(input),
+  );
+  ipcMain.handle(
+    "goal:resolveAmendment",
+    (
+      _event,
+      goalId: string,
+      proposalId: string,
+      decision: "approve" | "reject",
+    ): Promise<GoalAmendmentOperationResult> =>
+      container.resolveGoalAmendment(goalId, proposalId, decision),
   );
   ipcMain.handle(
     "goal:continueAcceptance",
@@ -672,9 +695,7 @@ function registerPlansIpcHandlers(container: AppContainer): void {
   ipcMain.handle(
     "plans:discard",
     (_event, planId: string, expectedRevision: number) =>
-      container
-        .planDebateOrchestrator()
-        .discard(planId, expectedRevision),
+      container.discardPlan(planId, expectedRevision),
   );
   ipcMain.handle(
     "plans:confirm",
@@ -682,6 +703,13 @@ function registerPlansIpcHandlers(container: AppContainer): void {
       _event,
       input: ConfirmPlanInput,
     ): Promise<ConfirmPlanResult> => container.confirmPlan(input),
+  );
+  ipcMain.handle(
+    "plans:adoptGoalPlan",
+    (
+      _event,
+      input: AdoptGoalPlanInput,
+    ): Promise<AdoptGoalPlanResult> => container.adoptGoalPlan(input),
   );
 }
 

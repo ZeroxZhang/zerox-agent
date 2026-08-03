@@ -71,6 +71,23 @@ export function getPlanFailurePresentation(
     };
   }
 
+  if (failedStage?.kind === "investigation") {
+    const technicalDetail = [
+      error,
+      failedStage.revisionAttempted ? "系统已尝试一次 PlanningBrief 合同修复。" : "",
+      failedStage.failureExcerpt
+        ? `失败响应摘录：\n${failedStage.failureExcerpt}`
+        : "",
+    ].filter(Boolean).join("\n\n");
+    return {
+      title: "规划调查未完成",
+      detail: "规划调查未完成，但已完成的调查层级和收集到的证据都已保留。",
+      nextAction: "点击继续后，系统只从失败的调查深度恢复，不会重新运行已经完成的调查层级。",
+      actionLabel: "从失败调查阶段继续",
+      technicalDetail,
+    };
+  }
+
   return {
     title,
     detail: "系统没有完成这次规划，但已完成的内容已经保留。",
@@ -95,12 +112,75 @@ export function getPlanOutcomePresentation(
   }
 
   if (plan.status === "awaiting_confirmation") {
+    const runtimeReplan = plan.purpose === "runtime_replan";
     return {
       kind: "success",
-      title: plan.mode === "debate" ? "Debate 规划成功" : "规划成功",
-      detail: "终版计划已经准备好，目前还没有执行任何操作。",
+      title: runtimeReplan
+        ? `Direct Plan v${plan.goalPlanVersion ?? 1} 已就绪`
+        : plan.mode === "debate"
+          ? "Debate 规划成功"
+          : "规划成功",
+      detail: runtimeReplan
+        ? "新的执行路径已经准备好，当前 Goal 尚未切换 Plan。"
+        : "终版计划已经准备好，目前还没有执行任何操作。",
       nextAction:
-        "检查计划后点击“确认计划并开始执行”；如需调整，直接输入修改意见。",
+        runtimeReplan
+          ? "检查后点击“采用 Plan 并恢复 Goal”；如需调整，直接输入修改意见。"
+          : "检查计划后点击“确认计划并开始执行”；如需调整，直接输入修改意见。",
+    };
+  }
+
+  if (plan.status === "steps_completed") {
+    return {
+      kind: "pending",
+      title: "当前路径已执行，目标尚未通过验收",
+      detail: "活动 Plan 的里程碑已完成，Goal 正在等待或恢复最终验收。",
+      nextAction: "继续 Goal 验收；只有有效验收证书才能将 Goal 标记为达成。",
+    };
+  }
+
+  if (plan.status === "confirmed_pending_execution") {
+    return {
+      kind: "pending",
+      title: "Plan 已确认，等待 Goal 启动",
+      detail: "Plan 已通过确认与质量门禁，执行关联正在建立。",
+      nextAction: "等待 Goal 进入执行；如长时间无进展，请查看 Goal 详情。",
+    };
+  }
+
+  if (plan.status === "executing") {
+    return {
+      kind: "pending",
+      title: "Plan 正在执行",
+      detail: "当前活动路径正在由 Goal Controller 推进。",
+      nextAction: "查看 Goal 进度、里程碑与执行证据。",
+    };
+  }
+
+  if (plan.status === "paused" && plan.executionGoalId) {
+    return {
+      kind: "pending",
+      title: "Plan 执行已暂停",
+      detail: "该 Plan 仍是 Goal 的活动路径，但当前正在等待用户、模型或审核门。",
+      nextAction: "根据 Goal 详情中的阻塞原因继续、重试或调整。",
+    };
+  }
+
+  if (plan.status === "completed") {
+    return {
+      kind: "success",
+      title: "Plan 已完成且 Goal 已达成",
+      detail: "活动路径已执行，并已由 Goal 验收证书确认。",
+      nextAction: "查看验收证书或 Plan 历史。",
+    };
+  }
+
+  if (plan.status === "superseded") {
+    return {
+      kind: "pending",
+      title: "Plan 已被新路径替代",
+      detail: `该 Plan 的历史记录已保留${plan.supersededByPlanId ? `，当前由 ${plan.supersededByPlanId} 接续` : ""}。`,
+      nextAction: "查看 Goal 的当前活动 Plan。",
     };
   }
 
@@ -113,12 +193,27 @@ export function getPlanOutcomePresentation(
     };
   }
 
-  if (plan.status === "canceled") {
+  if (plan.status === "canceled" || plan.status === "discarded") {
     return {
       kind: "canceled",
-      title: "规划已停止",
-      detail: "本次规划已经中断，目前还没有执行任何操作。",
-      nextAction: "重新尝试，或丢弃当前计划后重新选择规划方式。",
+      title: plan.status === "discarded" ? "Plan 未采用" : "规划已停止",
+      detail:
+        plan.status === "discarded"
+          ? "该候选 Plan 已被丢弃，Goal 的活动路径未被它覆盖。"
+          : "本次规划已经中断，目前还没有执行任何操作。",
+      nextAction:
+        plan.status === "discarded"
+          ? "查看当前活动 Plan，或提出新的结构性调整。"
+          : "重新尝试，或丢弃当前计划后重新选择规划方式。",
+    };
+  }
+
+  if (plan.status === "failed") {
+    return {
+      kind: "failure",
+      title: "Plan 执行未完成",
+      detail: "当前活动路径没有完成 Goal 所需的执行或验收。",
+      nextAction: "查看 Goal 的失败原因，再选择重试、修复或结构性重规划。",
     };
   }
 

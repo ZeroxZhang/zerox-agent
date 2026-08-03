@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PlanRecord } from "../shared/planMode";
 import { createPlanStore, PlanVersionConflictError } from "./planStore";
 import { createStorageImpl } from "./storage/storageDb";
+import { ensurePlanGoalContract } from "./goalPlanContractService";
 
 describe("plan store parity", () => {
   let tempDir: string;
@@ -113,6 +114,72 @@ describe("plan store parity", () => {
         autonomyMode: "untrusted" as PlanRecord["autonomyMode"],
       }),
     ).rejects.toThrow("计划自主模式非法");
+  });
+
+  it("persists PlanRecord v3 lineage and rejects non-Direct runtime replans", async () => {
+    const store = createPlanStore({ configDir: tempDir });
+    const compatible = ensurePlanGoalContract(createRecord());
+    const v3: PlanRecord = {
+      ...compatible,
+      schemaVersion: 3,
+      purpose: "runtime_replan",
+      mode: "direct",
+      goalId: "goal-1",
+      parentPlanRef: {
+        planId: "plan-parent",
+        planRevision: 4,
+        goalPlanVersion: 1,
+        mode: "debate",
+        purpose: "initial",
+        goalContractRef: compatible.goalContractRef!,
+      },
+      goalPlanVersion: 2,
+      trigger: {
+        kind: "acceptance_failure",
+        summary: "The acceptance path became invalid.",
+        evidenceRefs: ["evidence-ledger"],
+        at: compatible.createdAt,
+      },
+      criterionBindings: [],
+      goalContractIssues: [],
+      taskProfile: {
+        domain: "code",
+        mode: "exploratory",
+        risk: "writes_files",
+        expectedScale: "small",
+        needsConfirmation: false,
+        targetRefs: [],
+        ambiguity: [],
+        investigationDepth: "standard",
+      },
+      planningBrief: {
+        objective: "Test plan",
+        deliverables: [],
+        inScope: ["test"],
+        outOfScope: [],
+        constraints: [],
+        assumptions: [],
+        unresolvedQuestions: [],
+        targetRefs: [],
+        evidenceRefs: [],
+        skillCandidates: [],
+      },
+      planningStages: [],
+    };
+
+    await expect(store.create(v3)).resolves.toMatchObject({
+      schemaVersion: 3,
+      purpose: "runtime_replan",
+      goalPlanVersion: 2,
+      parentPlanRef: { planId: "plan-parent" },
+    });
+    await expect(
+      createPlanStore({ configDir: path.join(tempDir, "invalid") }).create({
+        ...v3,
+        id: "plan-invalid-runtime",
+        mode: "debate",
+      }),
+    ).rejects.toThrow("Direct");
   });
 
   it("uses the durable session index without parsing unrelated Plan files", async () => {

@@ -58,6 +58,7 @@ export type GoalRuntimeRunResult = {
   summary?: string;
   wallClockMs?: number;
   tokens?: number;
+  tokensEstimated?: boolean;
   transcriptMessages?: ChatMessage[];
   actionSignatures?: string[];
   modelServiceNotice?: ModelServiceNotice;
@@ -69,6 +70,7 @@ export type GoalRuntimeProgressCheckpoint = {
   toolCallCount: number;
   wallClockMs: number;
   tokens: number;
+  tokensEstimated?: boolean;
   nextAction: string;
 };
 
@@ -782,6 +784,10 @@ export function createAgentGoalController(options: {
             0,
             runtimeCheckpoint.tokens - checkpointedTokens,
           );
+          goal.executionUsage.tokensEstimated = Boolean(
+            goal.executionUsage.tokensEstimated ||
+              runtimeCheckpoint.tokensEstimated,
+          );
           checkpointedToolCalls = runtimeCheckpoint.toolCallCount;
           checkpointedWallClockMs = runtimeCheckpoint.wallClockMs;
           checkpointedTokens = runtimeCheckpoint.tokens;
@@ -846,6 +852,9 @@ export function createAgentGoalController(options: {
     goal.executionUsage.tokens += Math.max(
       0,
       (runResult.tokens ?? 0) - checkpointedTokens,
+    );
+    goal.executionUsage.tokensEstimated = Boolean(
+      goal.executionUsage.tokensEstimated || runResult.tokensEstimated,
     );
     if (runResult.contextUsage) {
       goal.contextUsage = structuredClone(runResult.contextUsage);
@@ -1397,32 +1406,24 @@ export function createAgentGoalController(options: {
           : {}),
       });
     } catch {
-      const unavailable: AcceptanceResult = {
-        accepted: false,
-        verdict: "acceptance_unavailable",
-        failureClass: "validator_unavailable",
-        inferentialUsed: result.inferentialUsed,
-        checkResults: [
-          {
-            checkId: result.checkResults[0]?.checkId ?? "certificate",
-            kind: result.checkResults[0]?.kind ?? "assertion",
-            passed: false,
-            code: "certificate_invalid",
-            failureClass: "validator_unavailable",
-            evidenceRefs: [],
-            detail: "Acceptance certificate could not be created from validated evidence.",
-          },
-        ],
+      // Certificate construction is an integrity boundary, not a validator
+      // outage. Never blame the first successful check or offer a blind retry
+      // when the accepted result cannot be represented by the certificate
+      // contract.
+      goal.acceptanceState = {
+        ...ensureAcceptanceState(goal),
+        phase: "blocked",
+        lastDecision: undefined,
       };
-      return (
-        await applyAcceptanceDecision(
-          goal,
-          null,
-          unavailable,
-          recentActionSignatures.get(goal.id) ?? [],
-          runOptions,
-        )
-      ).goal;
+      goal.acceptanceCertificate = undefined;
+      touch(goal);
+      const persisted = await options.goalStore.save(goal);
+      return stopGoal(
+        persisted,
+        "stopped_blocked",
+        "acceptance_integrity_failed",
+        "Final acceptance passed, but its certificate could not be created because the Goal acceptance structure is inconsistent.",
+      );
     }
 
     const interruptedBeforeCertificate = await canonicalInterruption(
@@ -2622,8 +2623,12 @@ function summarizeAcceptanceSuccess(result: AcceptanceResult): string {
 }
 
 function summarizeAcceptanceFailure(result: AcceptanceResult): string {
-  const detail = result.checkResults.find((checkResult) => !checkResult.passed)?.detail;
-  return redactAndBoundAcceptanceSummary(detail ?? "Acceptance rejected.") ||
+  const failed = result.checkResults.find((checkResult) => !checkResult.passed);
+  const detail = failed?.detail;
+  const summary = failed
+    ? `验收检查 ${failed.checkId} 未通过：${detail ?? failed.code}`
+    : "Acceptance rejected.";
+  return redactAndBoundAcceptanceSummary(summary) ||
     "Acceptance rejected.";
 }
 

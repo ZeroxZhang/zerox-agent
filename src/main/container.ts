@@ -28,6 +28,7 @@ import { createGoalRuntimeEngine } from "./goalRuntimeEngine";
 import {
   resolveGoalExecutionModelBinding,
   selectPlanExecutionModelBinding,
+  selectRuntimeDirectProfileId,
 } from "./goalExecutionModel";
 import { createAuthorizedGoalAcceptanceToolExecutor } from "./agentGoalAcceptanceToolExecutor";
 import { applyGoalOutputRootsToRunContext } from "./goalOutputRoots";
@@ -103,22 +104,38 @@ import {
 } from "./providers/providerFactory";
 import { createSettingsBackedChatClient } from "./providers/providerChatClient";
 import { createModelRouter } from "./providers/modelRouter";
-import { createPlanStore } from "./planStore";
+import { createPlanStore, PlanVersionConflictError } from "./planStore";
 import { createPlanArtifactWriter } from "./planArtifactWriter";
 import { createPlanDebateOrchestrator } from "./planDebateOrchestrator";
 import { createPlanInvestigatorService } from "./planInvestigatorService";
-import { createPlanQualityReport } from "./plannerKernel";
+import {
+  createPlanQualityReport,
+  derivePlanCriterionBindings,
+} from "./plannerKernel";
 import { resolveSkillInput } from "./skillExecutionService";
 import { verifyPlanEvidence } from "./planEvidenceVerifier";
 import {
   isPlanConfirmable,
+  type AdoptGoalPlanInput,
+  type AdoptGoalPlanResult,
   type ConfirmPlanInput,
   type ConfirmPlanResult,
+  type CreateRuntimeGoalPlanResult,
+  type GoalAmendmentOperationResult,
   type PlanArtifact,
   type PlanningStageKind,
   type PlanRecord,
   type PlanStatus,
+  type ProposeGoalAmendmentInput,
 } from "../shared/planMode";
+import {
+  isGoalContractSnapshot,
+  type GoalContractRef,
+  type GoalContractSnapshot,
+  type GoalPlanHistoryEntry,
+  type GoalPlanRef,
+} from "../shared/goalPlanContract";
+import { createGoalContractRef } from "./goalPlanContractService";
 import { validatePlanMilestoneGraph } from "../shared/planValidation";
 import { toNormalized } from "./providers/normalize";
 import { analyzeShell } from "./tools/shell/shellAnalyzer";
@@ -152,12 +169,14 @@ import {
 import { getAppMeta } from "../shared/appMeta";
 import { getNavigationSections } from "../shared/navigation";
 import {
+  projectGoalStatusForInteraction,
   upgradeGoalAcceptanceProtocol,
   type Goal,
   type GoalBudget,
   type SuccessCriterion,
 } from "../shared/agentGoal";
 import type { GoalReviewPolicy } from "../shared/agentGoalReview";
+import { compileAgentTaskContract } from "../shared/agentTaskContract";
 import type {
   GoalDraftConfirmResult,
   GoalDraftDiscardResult,
@@ -240,9 +259,17 @@ export function isTerminalGoalStatus(status: Goal["status"]): boolean {
   );
 }
 
-function formatGoalTerminalMessage(goal: Goal, eventMessage?: string): string {
+export function formatGoalTerminalMessage(goal: Goal, eventMessage?: string): string {
   const lines = [formatGoalTerminalHeading(goal)];
   const summaries = collectGoalResultSummaries(goal);
+
+  if (
+    goal.status !== "achieved" &&
+    goal.status !== "completed_unverified" &&
+    eventMessage?.trim()
+  ) {
+    lines.push("", `停止原因：${formatGoalTerminalReason(goal, eventMessage)}`);
+  }
 
   if (summaries.length > 0) {
     lines.push(
@@ -250,11 +277,22 @@ function formatGoalTerminalMessage(goal: Goal, eventMessage?: string): string {
       "结果摘要：",
       ...summaries.slice(-5).map((summary) => `- ${summary}`),
     );
-  } else if (eventMessage?.trim()) {
+  } else if (eventMessage?.trim() && lines.length === 1) {
     lines.push("", eventMessage.trim());
   }
 
   return lines.join("\n");
+}
+
+function formatGoalTerminalReason(goal: Goal, eventMessage: string): string {
+  const directive = goal.acceptanceState?.lastDecision;
+  if (goal.status === "stopped_stalled" && directive?.action === "stop_stalled") {
+    const failedChecks = directive.failedCheckIds.length
+      ? `失败检查：${directive.failedCheckIds.join("、")}。`
+      : "";
+    return `同一验收失败已连续出现 ${directive.occurrence} 次，自动修复已停止。${failedChecks}`;
+  }
+  return eventMessage.trim();
 }
 
 export function formatGoalTerminalHeading(goal: Goal): string {
@@ -294,15 +332,22 @@ export function formatGoalTerminalHeading(goal: Goal): string {
 function collectGoalResultSummaries(goal: Goal): string[] {
   const summaries: string[] = [];
   for (const milestone of goal.milestones) {
-    const details = [
-      milestone.lastRunSummary?.trim(),
-      milestone.lastAcceptanceSummary?.trim(),
-    ].filter((value): value is string => Boolean(value));
-    const uniqueDetails = [...new Set(details)];
-    if (uniqueDetails.length === 0) {
+    const acceptanceSummary = milestone.lastAcceptanceSummary?.trim();
+    const runSummary = milestone.lastRunSummary?.trim();
+    const canonicalSummaries = (
+      milestone.state === "rejected"
+        ? [acceptanceSummary]
+        : [runSummary, acceptanceSummary]
+    ).filter((value): value is string => Boolean(value));
+    const uniqueSummaries = [...new Set(canonicalSummaries)];
+    if (uniqueSummaries.length === 0) {
       continue;
     }
-    summaries.push(`${milestone.description}：${uniqueDetails.join("；")}`);
+    summaries.push(
+      `${milestone.description}${
+        milestone.state === "rejected" ? "（验收未通过）" : ""
+      }：${uniqueSummaries.join("；")}`,
+    );
   }
   return summaries;
 }
@@ -438,6 +483,8 @@ export function createAppContainer(options: {
   const agentRunsChangedListeners = new Set<(event: AgentRunsChangedEvent) => void>();
   let goalProgressDeliveryQueue = Promise.resolve();
   const planConfirmationQueues = new Map<string, Promise<void>>();
+  const goalReplanQueues = new Map<string, Promise<void>>();
+  const goalAmendmentQueues = new Map<string, Promise<void>>();
 
   function serializePlanConfirmation<T>(
     planId: string,
@@ -453,6 +500,44 @@ export function createAppContainer(options: {
     void tail.finally(() => {
       if (planConfirmationQueues.get(planId) === tail) {
         planConfirmationQueues.delete(planId);
+      }
+    });
+    return result;
+  }
+
+  function serializeGoalReplan<T>(
+    goalId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const previous = goalReplanQueues.get(goalId) ?? Promise.resolve();
+    const result = previous.then(operation, operation);
+    const tail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    goalReplanQueues.set(goalId, tail);
+    void tail.finally(() => {
+      if (goalReplanQueues.get(goalId) === tail) {
+        goalReplanQueues.delete(goalId);
+      }
+    });
+    return result;
+  }
+
+  function serializeGoalAmendment<T>(
+    goalId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const previous = goalAmendmentQueues.get(goalId) ?? Promise.resolve();
+    const result = previous.then(operation, operation);
+    const tail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    goalAmendmentQueues.set(goalId, tail);
+    void tail.finally(() => {
+      if (goalAmendmentQueues.get(goalId) === tail) {
+        goalAmendmentQueues.delete(goalId);
       }
     });
     return result;
@@ -494,25 +579,43 @@ export function createAppContainer(options: {
   }
 
   async function syncSourcePlanFromGoal(event: GoalProgressEvent) {
-    const sourcePlan = (await planStore().listAll()).find(
-      (plan) => plan.executionGoalId === event.goalId,
-    );
+    const goal = await agentGoalStore().get(event.goalId);
+    const sourcePlan = goal?.activePlanRef
+      ? await planStore().get(goal.activePlanRef.planId)
+      : (await planStore().listAll()).find(
+          (plan) => plan.executionGoalId === event.goalId,
+        );
     if (!sourcePlan) {
       return;
     }
+    if (sourcePlan.executionGoalId !== event.goalId) {
+      return;
+    }
     await serializePlanConfirmation(sourcePlan.id, async () => {
-      const canonicalPlan = await planStore().get(sourcePlan.id);
-      if (!canonicalPlan || canonicalPlan.executionGoalId !== event.goalId) {
+      const canonicalGoal = await agentGoalStore().get(event.goalId);
+      if (
+        canonicalGoal?.activePlanRef?.planId &&
+        canonicalGoal.activePlanRef.planId !== sourcePlan.id
+      ) {
         return;
       }
-      const goal = await agentGoalStore().get(event.goalId);
-      const runId = goal?.milestones
+      const runId = canonicalGoal?.milestones
         .flatMap((milestone) => milestone.runIds)
         .at(-1);
       const terminalStatus: PlanStatus | null =
-        event.status === "achieved" ||
-        event.status === "completed_unverified"
+        event.status === "achieved"
           ? "completed"
+          : event.status === "completed_unverified" ||
+              event.status === "waiting_for_acceptance" ||
+              Boolean(
+                canonicalGoal?.milestones.length &&
+                  canonicalGoal.milestones.every(
+                    (milestone) =>
+                      milestone.state === "accepted" ||
+                      milestone.state === "skipped",
+                  ),
+              )
+            ? "steps_completed"
           : event.status === "canceled"
             ? "canceled"
             : event.status === "failed" ||
@@ -521,27 +624,45 @@ export function createAppContainer(options: {
                 event.status === "stopped_blocked"
               ? "failed"
               : null;
-      const nextStatus = terminalStatus ?? "executing";
-      if (
-        nextStatus === canonicalPlan.status &&
-        (!runId || canonicalPlan.executionRunId === runId)
-      ) {
-        return;
+      const nextStatus =
+        terminalStatus ??
+        (event.status === "waiting_for_review" ||
+        event.status === "waiting_for_model"
+          ? "paused"
+          : "executing");
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const canonicalPlan = await planStore().get(sourcePlan.id);
+        if (!canonicalPlan || canonicalPlan.executionGoalId !== event.goalId) {
+          return;
+        }
+        if (
+          nextStatus === canonicalPlan.status &&
+          (!runId || canonicalPlan.executionRunId === runId)
+        ) {
+          return;
+        }
+        try {
+          await planStore().save(
+            {
+              ...canonicalPlan,
+              status: nextStatus,
+              ...(runId ? { executionRunId: runId } : {}),
+            },
+            canonicalPlan.revision,
+            terminalStatus ? "plan_execution_finished" : "plan_execution_linked",
+            {
+              goalId: event.goalId,
+              ...(runId ? { runId } : {}),
+              status: nextStatus,
+            },
+          );
+          return;
+        } catch (error) {
+          if (!(error instanceof PlanVersionConflictError) || attempt === 2) {
+            throw error;
+          }
+        }
       }
-      await planStore().save(
-        {
-          ...canonicalPlan,
-          status: nextStatus,
-          ...(runId ? { executionRunId: runId } : {}),
-        },
-        canonicalPlan.revision,
-        terminalStatus ? "plan_execution_finished" : "plan_execution_linked",
-        {
-          goalId: event.goalId,
-          ...(runId ? { runId } : {}),
-          status: nextStatus,
-        },
-      );
     });
   }
 
@@ -679,7 +800,7 @@ export function createAppContainer(options: {
     return {
       id: goal.id,
       description: goal.description,
-      status: goal.status,
+      status: projectGoalStatusForInteraction(goal),
       updatedAt: goal.updatedAt,
     };
   }
@@ -1769,6 +1890,8 @@ export function createAppContainer(options: {
         goalService: goalChatService(),
         goalDraftService: goalDraftService(),
         planService: planDebateOrchestrator(),
+        proposeGoalAmendment: proposeGoalObjectiveAmendment,
+        runtimeReplanGoal: createRuntimeGoalPlan,
         taskStore: scheduledTaskStore(),
         runScheduledTask: (taskId: string, taskRunOptions) =>
           runAgentTask(taskId, {
@@ -2382,8 +2505,8 @@ export function createAppContainer(options: {
     if (runtimeShuttingDown) {
       return { ok: false, message: "应用正在退出，未启动计划执行。" };
     }
-    return trackRuntimeInvocation(() =>
-      serializePlanConfirmation(input.planId, async () => {
+    return trackRuntimeInvocation(async () => {
+      const result = await serializePlanConfirmation<ConfirmPlanResult>(input.planId, async () => {
       let plan = await planStore().get(input.planId);
       if (!plan) {
         return { ok: false, message: "计划不存在。" };
@@ -2457,6 +2580,10 @@ export function createAppContainer(options: {
       }
       const artifact = plan.finalArtifact;
       const projection = plan.projection;
+      const confirmedCriterionBindings =
+        plan.criterionBindings?.length || !plan.goalContractSnapshot
+          ? plan.criterionBindings ?? []
+          : derivePlanCriterionBindings(artifact, plan.goalContractSnapshot);
       const confirmedPlanRevision = plan.confirmedRevision ?? plan.revision;
       if (!(await planArtifactWriter().verify(plan))) {
         return {
@@ -2475,7 +2602,7 @@ export function createAppContainer(options: {
           plan,
         };
       }
-      if (plan.schemaVersion === 2) {
+      if ((plan.schemaVersion ?? 1) >= 2) {
         if (!plan.taskProfile || !plan.planningBrief || !plan.qualityReport) {
           return {
             ok: false,
@@ -2542,6 +2669,10 @@ export function createAppContainer(options: {
           ],
           reviewApproved: completedReviewStage?.reviewApproved,
           reviewIssues: completedReviewStage?.reviewIssues,
+          goalContractSnapshot: plan.goalContractSnapshot,
+          goalContractRef: plan.goalContractRef,
+          criterionBindings: confirmedCriterionBindings,
+          goalContractIssues: plan.goalContractIssues,
           availableAcceptanceKinds:
             agentGoalValidatorRegistry().listKinds(),
           now: new Date().toISOString(),
@@ -2658,8 +2789,12 @@ export function createAppContainer(options: {
       const criteria = artifact.acceptanceCriteria.length
         ? artifact.acceptanceCriteria
         : [`完成计划目标：${artifact.objective}`];
-      const goalSuccessCriteria =
-        plan.schemaVersion === 2 && artifact.acceptanceChecks?.length
+      const goalSuccessCriteria = plan.goalContractSnapshot
+        ? buildGoalSuccessCriteriaFromPlan({
+            ...plan,
+            criterionBindings: confirmedCriterionBindings,
+          })
+        : (plan.schemaVersion ?? 1) >= 2 && artifact.acceptanceChecks?.length
           ? artifact.acceptanceChecks.map((check, index) => ({
               id: `criterion_${index + 1}`,
               description: check.description,
@@ -2705,7 +2840,7 @@ export function createAppContainer(options: {
         ...(plan.selectedSkill
           ? { selectedSkill: structuredClone(plan.selectedSkill) }
           : {}),
-        ...(plan.schemaVersion === 2
+        ...((plan.schemaVersion ?? 1) >= 2
           ? plan.selectedSkillInputValues &&
             Object.keys(plan.selectedSkillInputValues).length > 0
             ? {
@@ -2715,12 +2850,49 @@ export function createAppContainer(options: {
               }
             : {}
           : defaultSelectedSkillInputValues(plan)),
-        normalizedDescription: artifact.objective,
+        normalizedDescription:
+          plan.goalContractSnapshot?.objective ?? artifact.objective,
         sourcePlanRef: {
           planId: plan.id,
           revision: confirmedPlanRevision,
           sha256: projection.sha256,
         },
+        ...(plan.goalContractSnapshot && plan.goalContractRef
+          ? {
+              goalContractSnapshot: structuredClone(
+                plan.goalContractSnapshot,
+              ),
+              goalContractRef: structuredClone(plan.goalContractRef),
+              activePlanRef: {
+                planId: plan.id,
+                planRevision: confirmedPlanRevision,
+                goalPlanVersion: plan.goalPlanVersion ?? 1,
+                mode: plan.mode,
+                purpose: plan.purpose ?? "initial",
+                goalContractRef: structuredClone(plan.goalContractRef),
+              },
+              planHistory: [
+                {
+                  planId: plan.id,
+                  planRevision: confirmedPlanRevision,
+                  goalPlanVersion: plan.goalPlanVersion ?? 1,
+                  mode: plan.mode,
+                  purpose: plan.purpose ?? "initial",
+                  goalContractRef: structuredClone(plan.goalContractRef),
+                  trigger: structuredClone(
+                    plan.trigger ?? {
+                      kind: "initial_request" as const,
+                      summary: "Initial confirmed plan.",
+                      evidenceRefs: [],
+                      at: plan.createdAt,
+                    },
+                  ),
+                  outcome: "active" as const,
+                  adoptedAt: new Date().toISOString(),
+                },
+              ],
+            }
+          : {}),
         ...(selectPlanExecutionModelBinding(plan)
           ? {
               executionModelBinding: structuredClone(
@@ -2742,7 +2914,7 @@ export function createAppContainer(options: {
           description: `${milestone.title}：${milestone.description}`,
           state: milestoneGraph.rootIds.has(milestone.id) ? "ready" : "pending",
           successCriteria:
-            confirmedPlanSchemaVersion === 2 &&
+            (confirmedPlanSchemaVersion ?? 1) >= 2 &&
             milestone.acceptanceChecks?.length
               ? milestone.acceptanceChecks.map((check, criterionIndex) => ({
                   id: `${milestone.id}_criterion_${criterionIndex + 1}`,
@@ -2783,6 +2955,7 @@ export function createAppContainer(options: {
         {
           ...plan,
           status: "confirmed_pending_execution",
+          goalId: createdGoal.id,
           executionGoalId: createdGoal.id,
         },
         plan.revision,
@@ -2809,8 +2982,1026 @@ export function createAppContainer(options: {
       }
       await attachConfirmedPlanGoal(plan, activeGoal);
       return { ok: true, plan, activeGoal };
-      }),
+      });
+      await goalProgressDeliveryQueue;
+      return result;
+    });
+  }
+
+  type RuntimeGoalPlanOptions = {
+    amendmentId?: string;
+    goalContractSnapshot?: GoalContractSnapshot;
+    goalContractRef?: GoalContractRef;
+  };
+
+  function createRuntimeGoalPlan(
+    goalId: string,
+    instructions: string,
+    runtimeOptions?: RuntimeGoalPlanOptions,
+  ): Promise<CreateRuntimeGoalPlanResult> {
+    return serializeGoalReplan(goalId, () =>
+      createRuntimeGoalPlanAccepted(goalId, instructions, runtimeOptions),
     );
+  }
+
+  async function createRuntimeGoalPlanAccepted(
+    goalId: string,
+    instructions: string,
+    runtimeOptions?: RuntimeGoalPlanOptions,
+  ): Promise<CreateRuntimeGoalPlanResult> {
+    if (runtimeShuttingDown) {
+      return { ok: false, message: "应用正在退出，未创建运行期 Plan。" };
+    }
+    const requestedChange = instructions.trim();
+    if (!requestedChange) {
+      return { ok: false, message: "调整计划的说明不能为空。" };
+    }
+    try {
+      let goal = await agentGoalStore().get(goalId);
+      if (!goal) return { ok: false, message: "目标不存在。" };
+      if (goal.status === "achieved" || goal.status === "canceled") {
+        return { ok: false, message: `已 ${goal.status} 的目标不能调整计划。` };
+      }
+      if (!goal.goalContractSnapshot || !goal.goalContractRef) {
+        return { ok: false, message: "目标缺少可验证的 GoalContract。" };
+      }
+      if (
+        !runtimeOptions?.amendmentId &&
+        (goal.pendingGoalAmendment?.status === "pending" ||
+          goal.pendingGoalAmendment?.status === "approved")
+      ) {
+        return {
+          ok: false,
+          message: "Goal 存在待处理的目标修订，请先完成或撤销修订。",
+        };
+      }
+      const canonicalGoalId = goal.id;
+      const amendment = runtimeOptions?.amendmentId
+        ? goal.pendingGoalAmendment
+        : undefined;
+      if (runtimeOptions?.amendmentId) {
+        if (
+          !amendment ||
+          amendment.id !== runtimeOptions.amendmentId ||
+          amendment.status !== "approved" ||
+          amendment.baseContractRef.sha256 !== goal.goalContractRef.sha256 ||
+          amendment.candidateContractRef.sha256 !==
+            runtimeOptions.goalContractRef?.sha256 ||
+          amendment.candidateContractRef.revision !==
+            runtimeOptions.goalContractRef?.revision
+        ) {
+          return {
+            ok: false,
+            message: "目标修订状态已变化，不能基于过期契约生成 Plan。",
+          };
+        }
+      }
+      const currentGoalContractRef = structuredClone(goal.goalContractRef);
+      const goalContractSnapshot = structuredClone(
+        runtimeOptions?.goalContractSnapshot ?? goal.goalContractSnapshot,
+      );
+      const goalContractRef = structuredClone(
+        runtimeOptions?.goalContractRef ?? goal.goalContractRef,
+      );
+      const parentPlanId =
+        goal.activePlanRef?.planId ?? goal.sourcePlanRef?.planId;
+      const parentPlan = parentPlanId
+        ? await planStore().get(parentPlanId)
+        : null;
+      if (!parentPlan && goal.activePlanRef?.mode !== "legacy") {
+        return { ok: false, message: "当前目标缺少可追溯的活动 Plan。" };
+      }
+      const inheritedProfileId = parentPlan
+        ? selectRuntimeDirectProfileId(parentPlan, goal)
+        : goal.executionModelBinding?.profileId;
+      if (!inheritedProfileId) {
+        return {
+          ok: false,
+          message: "无法解析运行期 Direct 综合模型；未静默切换其他模型。",
+        };
+      }
+      if (goal.status === "executing") {
+        const paused = await runGoalOperation(
+          canonicalGoalId,
+          () => goalChatService().pause(canonicalGoalId),
+          { preempt: true },
+        );
+        if (!paused.ok) {
+          return { ok: false, message: paused.message ?? "无法暂停当前目标。" };
+        }
+        goal = (await agentGoalStore().get(canonicalGoalId)) ?? goal;
+      }
+      const ledger = await agentGoalStore().readLedger(goal.id);
+      let workspaceRoot = parentPlan?.workspaceRoot;
+      if (!workspaceRoot) {
+        try {
+          workspaceRoot = (
+            await agentWorkspaceService().resolveRunContext({
+              workspaceId: goal.workspaceId,
+              ...(goal.chatSessionId ? { sessionId: goal.chatSessionId } : {}),
+            })
+          ).workspaceRoot;
+        } catch {
+          workspaceRoot = undefined;
+        }
+      }
+      const createdAt = new Date().toISOString();
+      const feedbackEvidence = [
+        {
+          id: "evidence_goal_runtime_state",
+          kind: "user" as const,
+          title: "Current Goal runtime state",
+          summary: JSON.stringify({
+            status: goal.status,
+            stopReason: goal.stopReason,
+            planVersion: goal.planVersion,
+            milestones: goal.milestones.map((milestone) => ({
+              id: milestone.id,
+              state: milestone.state,
+              attempts: milestone.attempts,
+              lastAcceptanceSummary: milestone.lastAcceptanceSummary,
+            })),
+          }).slice(0, 24_000),
+          sha256: createHash("sha256")
+            .update(JSON.stringify(goal.milestones))
+            .digest("hex"),
+        },
+        {
+          id: "evidence_goal_ledger",
+          kind: "user" as const,
+          title: "Recent Goal ledger",
+          summary: JSON.stringify(ledger.slice(-40)).slice(0, 32_000),
+          sha256: createHash("sha256")
+            .update(JSON.stringify(ledger.slice(-40)))
+            .digest("hex"),
+        },
+        {
+          id: "evidence_parent_plan_outcome",
+          kind: "user" as const,
+          title: "Parent Plan outcome",
+          summary: JSON.stringify({
+            id: parentPlan?.id ?? goal.activePlanRef?.planId,
+            mode: parentPlan?.mode ?? "legacy",
+            status: parentPlan?.status ?? "legacy_compacted",
+            qualityReport: parentPlan?.qualityReport,
+            finalArtifact: parentPlan?.finalArtifact,
+          }).slice(0, 32_000),
+          sha256: createHash("sha256")
+            .update(
+              JSON.stringify({
+                status: parentPlan?.status ?? "legacy_compacted",
+                qualityReport: parentPlan?.qualityReport,
+                finalArtifact: parentPlan?.finalArtifact,
+              }),
+            )
+            .digest("hex"),
+        },
+      ];
+      const parentPlanRef: GoalPlanRef = goal.activePlanRef
+        ? structuredClone(goal.activePlanRef)
+        : {
+            planId: parentPlan!.id,
+            planRevision: parentPlan!.revision,
+            goalPlanVersion: goal.planVersion,
+            mode: parentPlan!.mode,
+            purpose: parentPlan!.purpose ?? "initial",
+            goalContractRef: currentGoalContractRef,
+          };
+      const existingCandidate = (await planStore().listBySession(
+        goal.chatSessionId ?? parentPlan?.sessionId ?? goal.id,
+      )).find(
+        (candidate) =>
+          candidate.purpose === "runtime_replan" &&
+          candidate.goalId === goal.id &&
+          candidate.parentPlanRef?.planId === parentPlanRef.planId &&
+          candidate.goalPlanVersion === goal.planVersion + 1 &&
+          candidate.goalContractRef?.sha256 === goalContractRef.sha256 &&
+          candidate.trigger?.summary === requestedChange &&
+          candidate.status !== "discarded" &&
+          candidate.status !== "superseded",
+      );
+      if (existingCandidate) {
+        await recordGoalPlanCandidate(
+          existingCandidate,
+          runtimeOptions?.amendmentId,
+        );
+        return {
+          ok: true,
+          plan: existingCandidate,
+          message: "已存在同一契约和反馈生成的运行期 Direct Plan。",
+        };
+      }
+      const plan = await planDebateOrchestrator().createPlan({
+        sessionId: goal.chatSessionId ?? parentPlan?.sessionId ?? goal.id,
+        ...(goal.workspaceId ? { workspaceId: goal.workspaceId } : {}),
+        ...(workspaceRoot ? { workspaceRoot } : {}),
+        sourceMessage: `调整当前 Goal 的执行路径：${requestedChange}`,
+        mode: "direct",
+        autonomyMode: parentPlan?.autonomyMode,
+        modelAssignments: { direct: inheritedProfileId },
+        purpose: "runtime_replan",
+        goalId: goal.id,
+        parentPlanRef,
+        goalPlanVersion: goal.planVersion + 1,
+        goalContractSnapshot,
+        goalContractRef,
+        trigger: {
+          kind: amendment ? "goal_amendment" : "user_adjustment",
+          summary: requestedChange,
+          evidenceRefs: feedbackEvidence.map((item) => item.id),
+          at: createdAt,
+        },
+        feedbackEvidence,
+      });
+      await recordGoalPlanCandidate(plan, runtimeOptions?.amendmentId);
+      await agentGoalStore().appendLedger(goal.id, {
+        at: createdAt,
+        kind: "goal_replanned",
+        summary: `Created runtime Direct Plan ${plan.id} v${plan.goalPlanVersion}.`,
+      });
+      return {
+        ok: true,
+        plan,
+        message: "已生成运行期 Direct Plan，采用前不会覆盖当前 Goal。",
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        message:
+          error instanceof Error ? error.message : "无法生成运行期 Direct Plan。",
+      };
+    }
+  }
+
+  function toGoalPlanHistoryEntry(
+    plan: PlanRecord,
+    outcome: GoalPlanHistoryEntry["outcome"],
+  ): GoalPlanHistoryEntry {
+    if (
+      !plan.goalContractRef ||
+      !plan.parentPlanRef ||
+      !plan.goalPlanVersion ||
+      !plan.trigger
+    ) {
+      throw new Error("运行期 Plan 缺少可记录的 Goal 谱系字段。");
+    }
+    return {
+      planId: plan.id,
+      planRevision: plan.revision,
+      goalPlanVersion: plan.goalPlanVersion,
+      mode: plan.mode,
+      purpose: plan.purpose ?? "runtime_replan",
+      goalContractRef: structuredClone(plan.goalContractRef),
+      parentPlanRef: structuredClone(plan.parentPlanRef),
+      trigger: structuredClone(plan.trigger),
+      outcome,
+    };
+  }
+
+  async function recordGoalPlanCandidate(
+    plan: PlanRecord,
+    amendmentId?: string,
+  ): Promise<void> {
+    if (!plan.goalId) return;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const goal = await agentGoalStore().get(plan.goalId);
+      if (!goal || goal.status === "achieved" || goal.status === "canceled") {
+        return;
+      }
+      const entry = toGoalPlanHistoryEntry(plan, "candidate");
+      const existingIndex = (goal.planHistory ?? []).findIndex(
+        (candidate) => candidate.planId === plan.id,
+      );
+      const planHistory = [...(goal.planHistory ?? [])];
+      if (existingIndex >= 0) {
+        planHistory[existingIndex] = {
+          ...planHistory[existingIndex]!,
+          ...entry,
+          outcome:
+            planHistory[existingIndex]!.outcome === "active"
+              ? "active"
+              : "candidate",
+        };
+      } else {
+        planHistory.push(entry);
+      }
+      const pendingGoalAmendment =
+        amendmentId &&
+        goal.pendingGoalAmendment?.id === amendmentId &&
+        goal.pendingGoalAmendment.status === "approved"
+          ? {
+              ...goal.pendingGoalAmendment,
+              candidatePlanId: plan.id,
+            }
+          : goal.pendingGoalAmendment;
+      const saved = await agentGoalStore().saveIfPlanVersion(
+        {
+          ...goal,
+          planHistory,
+          ...(pendingGoalAmendment ? { pendingGoalAmendment } : {}),
+          updatedAt: new Date().toISOString(),
+        },
+        goal.planVersion,
+        goal.activePlanRef?.planId,
+      );
+      if (saved.saved) return;
+    }
+    throw new Error("Goal 状态持续变化，未能记录运行期 Plan 候选谱系。");
+  }
+
+  async function recordGoalPlanRejected(plan: PlanRecord): Promise<void> {
+    if (!plan.goalId) return;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const goal = await agentGoalStore().get(plan.goalId);
+      if (!goal || goal.activePlanRef?.planId === plan.id) return;
+      const rejectedEntry = toGoalPlanHistoryEntry(plan, "rejected");
+      const existingIndex = (goal.planHistory ?? []).findIndex(
+        (candidate) => candidate.planId === plan.id,
+      );
+      const planHistory = [...(goal.planHistory ?? [])];
+      if (existingIndex >= 0) {
+        planHistory[existingIndex] = {
+          ...planHistory[existingIndex]!,
+          ...rejectedEntry,
+          outcome: "rejected",
+        };
+      } else {
+        planHistory.push(rejectedEntry);
+      }
+      let pendingGoalAmendment = goal.pendingGoalAmendment;
+      if (
+        pendingGoalAmendment?.status === "approved" &&
+        pendingGoalAmendment.candidatePlanId === plan.id
+      ) {
+        const amendmentWithoutCandidate = structuredClone(
+          pendingGoalAmendment,
+        );
+        delete amendmentWithoutCandidate.candidatePlanId;
+        pendingGoalAmendment = amendmentWithoutCandidate;
+      }
+      const saved = await agentGoalStore().saveIfPlanVersion(
+        {
+          ...goal,
+          planHistory,
+          ...(pendingGoalAmendment ? { pendingGoalAmendment } : {}),
+          updatedAt: new Date().toISOString(),
+        },
+        goal.planVersion,
+        goal.activePlanRef?.planId,
+      );
+      if (saved.saved) return;
+    }
+  }
+
+  async function discardPlan(planId: string, expectedRevision: number) {
+    const result = await planDebateOrchestrator().discard(
+      planId,
+      expectedRevision,
+    );
+    if (result.ok && result.plan.purpose === "runtime_replan") {
+      await recordGoalPlanRejected(result.plan);
+    }
+    return result;
+  }
+
+  function proposeGoalAmendment(
+    input: ProposeGoalAmendmentInput,
+  ): Promise<GoalAmendmentOperationResult> {
+    return serializeGoalAmendment(input.goalId, () =>
+      proposeGoalAmendmentAccepted(input),
+    );
+  }
+
+  async function proposeGoalAmendmentAccepted(
+    input: ProposeGoalAmendmentInput,
+  ): Promise<GoalAmendmentOperationResult> {
+    let goal = await agentGoalStore().get(input.goalId);
+    if (!goal) return { ok: false, message: "目标不存在。" };
+    if (goal.status === "achieved" || goal.status === "canceled") {
+      return { ok: false, message: "终态 Goal 不允许修改。" };
+    }
+    if (
+      goal.pendingGoalAmendment?.status === "pending" ||
+      goal.pendingGoalAmendment?.status === "approved"
+    ) {
+      return {
+        ok: false,
+        message: "当前 Goal 已有待处理的修订提案，请先批准、拒绝或撤销该提案。",
+      };
+    }
+    if (!goal.goalContractRef || !isGoalContractSnapshot(input.candidateContract)) {
+      return { ok: false, message: "候选 GoalContract 非法。" };
+    }
+    if (
+      input.candidateContract.id !== goal.goalContractRef.id ||
+      input.candidateContract.revision !== goal.goalContractRef.revision + 1
+    ) {
+      return { ok: false, message: "候选 GoalContract 必须基于当前契约递增一个 revision。" };
+    }
+    const pausedExecution = goal.status === "executing";
+    if (pausedExecution) {
+      const goalId = goal.id;
+      const paused = await runGoalOperation(
+        goalId,
+        () => goalChatService().pause(goalId),
+        { preempt: true },
+      );
+      if (!paused.ok || !paused.goal) {
+        return {
+          ok: false,
+          message: paused.message ?? "创建目标修订前无法暂停当前 Goal。",
+        };
+      }
+      goal = paused.goal;
+      if (
+        goal.goalContractRef?.id !== input.candidateContract.id ||
+        goal.goalContractRef.revision + 1 !== input.candidateContract.revision
+      ) {
+        return {
+          ok: false,
+          message: "暂停 Goal 期间目标契约已变化，请基于最新状态重新提出修订。",
+        };
+      }
+    }
+    if (!goal.goalContractRef) {
+      return {
+        ok: false,
+        message: "目标缺少可验证的当前 GoalContract 引用。",
+      };
+    }
+    const createdAt = new Date().toISOString();
+    const candidateContractRef = createGoalContractRef(input.candidateContract);
+    const proposal = {
+      id: `goal_amendment_${randomUUID()}`,
+      goalId: goal.id,
+      baseContractRef: structuredClone(goal.goalContractRef),
+      candidateContract: structuredClone(input.candidateContract),
+      candidateContractRef,
+      reason: input.reason.trim() || "User requested a Goal amendment.",
+      status: "pending" as const,
+      ...(pausedExecution ? { pausedExecution: true } : {}),
+      createdAt,
+    };
+    const saved = await agentGoalStore().saveIfPlanVersion(
+      {
+        ...goal,
+        pendingGoalAmendment: proposal,
+        updatedAt: createdAt,
+      },
+      goal.planVersion,
+      goal.activePlanRef?.planId,
+    );
+    if (
+      !saved.saved ||
+      saved.goal?.pendingGoalAmendment?.id !== proposal.id
+    ) {
+      return {
+        ok: false,
+        message: "Goal 状态已并发变化，目标修订提案未写入。",
+      };
+    }
+    await agentGoalStore().appendLedger(goal.id, {
+      at: createdAt,
+      kind: "goal_replanned",
+      summary: `Goal amendment ${proposal.id} proposed; no semantics changed yet.`,
+    });
+    return {
+      ok: true,
+      proposal,
+      message: pausedExecution
+        ? "目标修订提案已创建，原执行路径已安全暂停并等待明确批准。"
+        : "目标修订提案已创建，等待明确批准。",
+    };
+  }
+
+  async function proposeGoalObjectiveAmendment(
+    goalId: string,
+    objective: string,
+    reason: string,
+  ): Promise<GoalAmendmentOperationResult> {
+    const goal = await agentGoalStore().get(goalId);
+    if (!goal?.goalContractSnapshot) {
+      return { ok: false, message: "目标缺少可修订的 GoalContract。" };
+    }
+    const normalizedObjective = objective.trim();
+    if (!normalizedObjective) {
+      return { ok: false, message: "修改后的目标结果不能为空。" };
+    }
+    const createdAt = new Date().toISOString();
+    return proposeGoalAmendment({
+      goalId,
+      reason,
+      candidateContract: {
+        ...structuredClone(goal.goalContractSnapshot),
+        revision: goal.goalContractSnapshot.revision + 1,
+        source: {
+          kind: "goal_amendment",
+          ref: goalId,
+          summary: reason,
+        },
+        objective: normalizedObjective,
+        createdAt,
+      },
+    });
+  }
+
+  function resolveGoalAmendment(
+    goalId: string,
+    proposalId: string,
+    decision: "approve" | "reject",
+  ): Promise<GoalAmendmentOperationResult> {
+    return serializeGoalAmendment(goalId, () =>
+      resolveGoalAmendmentAccepted(goalId, proposalId, decision),
+    );
+  }
+
+  async function resolveGoalAmendmentAccepted(
+    goalId: string,
+    proposalId: string,
+    decision: "approve" | "reject",
+  ): Promise<GoalAmendmentOperationResult> {
+    let goal = await agentGoalStore().get(goalId);
+    let proposal = goal?.pendingGoalAmendment;
+    if (
+      !goal ||
+      !proposal ||
+      proposal.id !== proposalId ||
+      proposal.status === "applied" ||
+      proposal.status === "rejected"
+    ) {
+      return { ok: false, message: "待处理的目标修订提案不存在。" };
+    }
+    if (goal.status === "achieved" || goal.status === "canceled") {
+      return { ok: false, message: "终态 Goal 不允许修改。" };
+    }
+    const resolvedAt = new Date().toISOString();
+    if (decision === "reject") {
+      const shouldResumePreviousPlan =
+        proposal.pausedExecution === true &&
+        goal.status === "waiting_for_review";
+      const resolvedProposal = {
+        ...proposal,
+        status: "rejected" as const,
+        resolvedAt,
+      };
+      const saved = await agentGoalStore().saveIfPlanVersion(
+        {
+          ...goal,
+          pendingGoalAmendment: resolvedProposal,
+          updatedAt: resolvedAt,
+        },
+        goal.planVersion,
+        goal.activePlanRef?.planId,
+      );
+      const savedGoal = saved.goal;
+      if (
+        !saved.saved ||
+        !savedGoal ||
+        savedGoal.pendingGoalAmendment?.id !== proposal.id ||
+        savedGoal.pendingGoalAmendment.status !== "rejected"
+      ) {
+        return {
+          ok: false,
+          message: "Goal 状态已并发变化，目标修订拒绝结果未写入。",
+        };
+      }
+      await agentGoalStore().appendLedger(goal.id, {
+        at: resolvedAt,
+        kind: "review_resolved",
+        summary: `Goal amendment ${proposal.id} rejected; active contract and Plan retained.`,
+      });
+      if (proposal.candidatePlanId) {
+        const candidatePlan = await planStore().get(proposal.candidatePlanId);
+        if (
+          candidatePlan &&
+          !candidatePlan.executionGoalId &&
+          candidatePlan.status !== "discarded" &&
+          candidatePlan.status !== "superseded"
+        ) {
+          await discardPlan(candidatePlan.id, candidatePlan.revision).catch(
+            () => undefined,
+          );
+        }
+      }
+      let resumedPreviousPlan = false;
+      if (shouldResumePreviousPlan) {
+        const goalId = goal.id;
+        const resumed = await runGoalOperation(
+          goalId,
+          () => goalChatService().resume(goalId),
+        );
+        resumedPreviousPlan = resumed.ok && resumed.goal?.status === "executing";
+      }
+      return {
+        ok: true,
+        proposal: resolvedProposal,
+        message: resumedPreviousPlan
+          ? "已撤销目标修订，并恢复原 Goal 与活动 Plan。"
+          : "已拒绝目标修订，当前 Goal 和活动 Plan 保持不变。",
+      };
+    }
+
+    if (proposal.status === "pending") {
+      const pausedExecutionForApproval = goal.status === "executing";
+      if (pausedExecutionForApproval) {
+        const goalId = goal.id;
+        const paused = await runGoalOperation(
+          goalId,
+          () => goalChatService().pause(goalId),
+          { preempt: true },
+        );
+        if (!paused.ok) {
+          return {
+            ok: false,
+            message: paused.message ?? "批准修订前无法暂停当前 Goal。",
+          };
+        }
+        goal = (await agentGoalStore().get(goalId)) ?? goal;
+        proposal = goal.pendingGoalAmendment;
+        if (!proposal || proposal.id !== proposalId || proposal.status !== "pending") {
+          return {
+            ok: false,
+            message: "暂停 Goal 期间修订提案已变化，请刷新后重试。",
+          };
+        }
+      }
+      const approvedProposal = {
+        ...proposal,
+        status: "approved" as const,
+        pausedExecution:
+          proposal.pausedExecution === true || pausedExecutionForApproval,
+        resolvedAt,
+      };
+      const saved = await agentGoalStore().saveIfPlanVersion(
+        {
+          ...goal,
+          pendingGoalAmendment: approvedProposal,
+          updatedAt: resolvedAt,
+        },
+        goal.planVersion,
+        goal.activePlanRef?.planId,
+      );
+      const approvedGoal = saved.goal;
+      if (
+        !saved.saved ||
+        !approvedGoal ||
+        approvedGoal.pendingGoalAmendment?.id !== proposal.id ||
+        approvedGoal.pendingGoalAmendment.status !== "approved" ||
+        approvedGoal.goalContractRef?.sha256 !== proposal.baseContractRef.sha256
+      ) {
+        return {
+          ok: false,
+          message: "Goal 状态已并发变化，目标修订批准结果未写入。",
+        };
+      }
+      goal = approvedGoal;
+      proposal = approvedGoal.pendingGoalAmendment;
+    }
+
+    if (!proposal) {
+      return {
+        ok: false,
+        message: "目标修订状态已变化，请刷新后重试。",
+      };
+    }
+
+    const planned = await createRuntimeGoalPlan(
+      goal.id,
+      `已批准目标修订：${proposal.reason}`,
+      {
+        amendmentId: proposal.id,
+        goalContractSnapshot: proposal.candidateContract,
+        goalContractRef: proposal.candidateContractRef,
+      },
+    );
+    if (!planned.ok) {
+      return {
+        ok: true,
+        proposal,
+        message: `目标修订已批准，但尚未应用；新 Direct Plan 暂未生成：${planned.message}`,
+      };
+    }
+    const latestGoal = await agentGoalStore().get(goal.id);
+    const latestProposal = latestGoal?.pendingGoalAmendment ?? proposal;
+    return {
+      ok: true,
+      proposal: latestProposal,
+      plan: planned.plan,
+      message: "目标修订已批准但尚未应用；新的 Direct Plan 已生成并等待采用。",
+    };
+  }
+
+  async function adoptGoalPlan(
+    input: AdoptGoalPlanInput,
+  ): Promise<AdoptGoalPlanResult> {
+    return serializePlanConfirmation(input.planId, async () => {
+      let plan = await planStore().get(input.planId);
+      if (!plan) return { ok: false, message: "Plan 不存在。" };
+      if (
+        plan.purpose !== "runtime_replan" ||
+        plan.mode !== "direct" ||
+        !plan.goalId ||
+        !plan.parentPlanRef ||
+        !plan.goalPlanVersion ||
+        !plan.goalContractSnapshot ||
+        !plan.goalContractRef ||
+        !plan.trigger ||
+        !plan.finalArtifact ||
+        !plan.projection
+      ) {
+        return { ok: false, message: "该记录不是可采用的运行期 Direct Plan。", plan };
+      }
+      let goal = await agentGoalStore().get(plan.goalId);
+      if (!goal) return { ok: false, message: "Plan 关联的 Goal 不存在。", plan };
+      const recoveringAdoption = goal.activePlanRef?.planId === plan.id;
+      if (
+        plan.goalPlanVersion !== input.expectedGoalPlanVersion ||
+        (!recoveringAdoption && plan.revision !== input.expectedRevision)
+      ) {
+        return { ok: false, message: "Plan 或 Goal 版本已变化，请刷新后重试。", plan };
+      }
+      if (
+        (!recoveringAdoption && !isPlanConfirmable(plan)) ||
+        plan.qualityReport?.status !== "ready"
+      ) {
+        return { ok: false, message: "Plan 尚未通过确认与质量门禁。", plan };
+      }
+      if (!(await planArtifactWriter().verify(plan))) {
+        return { ok: false, message: "Plan 投影已漂移，请重新生成。", plan };
+      }
+      const evidenceVerification = await verifyPlanEvidence(plan);
+      if (!evidenceVerification.ok) {
+        return { ok: false, message: "Plan 反馈证据已漂移，请重新规划。", plan };
+      }
+      if (
+        !recoveringAdoption &&
+        (goal.status === "achieved" || goal.status === "canceled")
+      ) {
+        return { ok: false, message: "终态 Goal 不允许采用新 Plan。", plan };
+      }
+      const currentContractMatchesPlan =
+        goal.goalContractRef?.sha256 === plan.goalContractRef.sha256 &&
+        goal.goalContractRef?.id === plan.goalContractRef.id &&
+        goal.goalContractRef?.revision === plan.goalContractRef.revision;
+      const amendment = goal.pendingGoalAmendment;
+      const adoptingApprovedAmendment =
+        !currentContractMatchesPlan &&
+        plan.trigger?.kind === "goal_amendment" &&
+        amendment?.status === "approved" &&
+        amendment.candidatePlanId === plan.id &&
+        amendment.baseContractRef.sha256 === goal.goalContractRef?.sha256 &&
+        amendment.candidateContractRef.sha256 === plan.goalContractRef.sha256 &&
+        amendment.candidateContractRef.revision ===
+          plan.goalContractRef.revision;
+      if (
+        !recoveringAdoption &&
+        (amendment?.status === "pending" ||
+          (amendment?.status === "approved" && !adoptingApprovedAmendment))
+      ) {
+        return {
+          ok: false,
+          message: "Goal 存在尚未处理完成的目标修订，不能采用其他候选 Plan。",
+          plan,
+        };
+      }
+      if (!currentContractMatchesPlan && !adoptingApprovedAmendment) {
+        return { ok: false, message: "GoalContract 已变化，不能采用旧候选 Plan。", plan };
+      }
+      if (
+        !recoveringAdoption &&
+        (goal.planVersion !== input.expectedGoalPlanVersion - 1 ||
+          (goal.activePlanRef?.planId !== plan.parentPlanRef.planId ||
+            goal.activePlanRef.goalPlanVersion !==
+              plan.parentPlanRef.goalPlanVersion))
+      ) {
+        return { ok: false, message: "Goal 活动 Plan 已变化，采用冲突。", plan };
+      }
+      const adoptedAt = new Date().toISOString();
+      if (!recoveringAdoption) {
+        const milestoneGraph = validatePlanMilestoneGraph(
+          plan.finalArtifact.milestones,
+        );
+        const nextMilestones = plan.finalArtifact.milestones.map(
+          (milestone) => ({
+            id: milestone.id,
+            description: `${milestone.title}：${milestone.description}`,
+            dependsOn:
+              milestoneGraph.dependenciesById.get(milestone.id) ?? [],
+            successCriteria: (milestone.acceptanceChecks ?? []).map(
+              (check, index) => ({
+                id: `${milestone.id}_criterion_${index + 1}`,
+                description: check.description,
+                acceptanceChecks: [structuredClone(check)],
+              }),
+            ),
+            state: milestoneGraph.rootIds.has(milestone.id)
+              ? ("ready" as const)
+              : ("pending" as const),
+            runIds: [],
+            attempts: 0,
+          }),
+        );
+        const oldMilestones = new Map(
+          goal.milestones.map((milestone) => [milestone.id, milestone]),
+        );
+        const reusableMilestones = nextMilestones.map((milestone) => {
+          const previous = oldMilestones.get(milestone.id);
+          return previous?.state === "accepted" &&
+            milestoneDefinitionHash(previous) ===
+              milestoneDefinitionHash(milestone)
+            ? structuredClone(previous)
+            : milestone;
+        });
+        const activePlanRef: GoalPlanRef = {
+          planId: plan.id,
+          planRevision: plan.revision,
+          goalPlanVersion: plan.goalPlanVersion,
+          mode: "direct",
+          purpose: "runtime_replan",
+          goalContractRef: structuredClone(plan.goalContractRef),
+        };
+        const adoptedContract = adoptingApprovedAmendment && amendment
+          ? structuredClone(amendment.candidateContract)
+          : structuredClone(plan.goalContractSnapshot);
+        const adoptedPlanId = plan.id;
+        const adoptedPlanVersion = plan.goalPlanVersion;
+        const adoptedParentPlanRef = structuredClone(plan.parentPlanRef);
+        const adoptedTrigger = structuredClone(plan.trigger);
+        const nextPlanHistory = (goal.planHistory ?? []).map((entry) => {
+          if (entry.planId === adoptedPlanId) {
+            return {
+              ...entry,
+              ...activePlanRef,
+              parentPlanRef: structuredClone(adoptedParentPlanRef),
+              trigger: structuredClone(adoptedTrigger),
+              outcome: "active" as const,
+              adoptedAt,
+            };
+          }
+          if (
+            entry.outcome === "candidate" &&
+            entry.goalPlanVersion === adoptedPlanVersion &&
+            entry.parentPlanRef?.planId === adoptedParentPlanRef.planId
+          ) {
+            return {
+              ...entry,
+              outcome: "rejected" as const,
+              supersededAt: adoptedAt,
+            };
+          }
+          return entry.outcome === "active"
+            ? {
+                ...entry,
+                outcome: "superseded" as const,
+                supersededAt: adoptedAt,
+              }
+            : entry;
+        });
+        if (!nextPlanHistory.some((entry) => entry.planId === adoptedPlanId)) {
+          nextPlanHistory.push({
+            ...activePlanRef,
+            parentPlanRef: structuredClone(adoptedParentPlanRef),
+            trigger: structuredClone(adoptedTrigger),
+            outcome: "active",
+            adoptedAt,
+          });
+        }
+        const candidate: Goal = {
+          ...goal,
+          description: adoptedContract.objective,
+          goalContractSnapshot: adoptedContract,
+          goalContractRef: structuredClone(plan.goalContractRef),
+          activePlanRef,
+          planHistory: nextPlanHistory,
+          ...(adoptingApprovedAmendment && amendment
+            ? {
+                pendingGoalAmendment: {
+                  ...amendment,
+                  status: "applied" as const,
+                  candidatePlanId: plan.id,
+                  appliedAt: adoptedAt,
+                },
+              }
+            : {}),
+          successCriteria: buildGoalSuccessCriteriaFromPlan(plan),
+          taskContract: compileAgentTaskContract({
+            description: adoptedContract.objective,
+            ...(goal.chatSessionId ? { chatSessionId: goal.chatSessionId } : {}),
+            ...(goal.originMessageId
+              ? { originMessageId: goal.originMessageId }
+              : {}),
+          }),
+          planVersion: plan.goalPlanVersion,
+          milestones: reusableMilestones,
+          status: "planning",
+          stopReason: undefined,
+          runtimeCheckpoint: undefined,
+          executionModelBinding: selectPlanExecutionModelBinding(plan),
+          ...(plan.selectedSkill
+            ? { selectedSkill: structuredClone(plan.selectedSkill) }
+            : {}),
+          selectedSkillInputValues: plan.selectedSkillInputValues,
+          executionUsage: {
+            ...goal.executionUsage,
+            replans: goal.executionUsage.replans + 1,
+          },
+          acceptanceState: goal.acceptanceState
+            ? { ...goal.acceptanceState, phase: "idle", lastDecision: undefined }
+            : goal.acceptanceState,
+          acceptanceRetryState: undefined,
+          manualCompletionAttestation: undefined,
+          acceptanceCertificate: undefined,
+          updatedAt: adoptedAt,
+        };
+        await agentGoalStore().appendLedgerIfAbsent(
+          goal.id,
+          `goal-plan-adoption-started:${plan.id}`,
+          {
+            at: adoptedAt,
+            kind: "goal_replanned",
+            summary: `Adopting Plan ${plan.id} v${plan.goalPlanVersion}.`,
+          },
+        );
+        const savedGoal = await agentGoalStore().saveIfPlanVersion(
+          candidate,
+          goal.planVersion,
+          plan.parentPlanRef.planId,
+        );
+        if (!savedGoal.saved || !savedGoal.goal) {
+          return { ok: false, message: "Goal 版本并发冲突，未采用 Plan。", plan };
+        }
+        goal = savedGoal.goal;
+      }
+      const parentPlan = await planStore().get(plan.parentPlanRef.planId);
+      if (parentPlan && parentPlan.status !== "superseded") {
+        await planStore().save(
+          {
+            ...parentPlan,
+            status: "superseded",
+            supersededByPlanId: plan.id,
+            supersededAt: adoptedAt,
+          },
+          parentPlan.revision,
+          "plan_superseded",
+          { supersededByPlanId: plan.id, goalId: goal.id },
+        );
+      }
+      if (
+        plan.executionGoalId !== goal.id ||
+        plan.status === "awaiting_confirmation"
+      ) {
+        plan = await planStore().save(
+          {
+            ...plan,
+            status: "confirmed_pending_execution",
+            executionGoalId: goal.id,
+            executionRunId: undefined,
+            confirmedRevision: plan.confirmedRevision ?? plan.revision,
+            confirmedAt: plan.confirmedAt ?? adoptedAt,
+          },
+          plan.revision,
+          recoveringAdoption
+            ? "goal_plan_adoption_link_recovered"
+            : "goal_plan_adopted",
+          { goalId: goal.id, goalPlanVersion: plan.goalPlanVersion },
+        );
+      }
+      const resumed =
+        goal.status === "executing" ||
+        goal.status === "achieved" ||
+        goal.status === "canceled"
+          ? { id: goal.id, description: goal.description, status: goal.status }
+          : await goalChatService().resume(goal.id);
+      goal = (await agentGoalStore().get(goal.id)) ?? goal;
+      const nextPlanStatus = planStatusForExecutionGoal(resumed.status);
+      if (plan.status !== nextPlanStatus) {
+        plan = await planStore().save(
+          { ...plan, status: nextPlanStatus },
+          plan.revision,
+          recoveringAdoption
+            ? "goal_plan_adoption_recovered"
+            : "plan_execution_started",
+          { goalId: goal.id },
+        );
+      }
+      await agentGoalStore().appendLedgerIfAbsent(
+        goal.id,
+        `goal-plan-adopted:${plan.id}`,
+        {
+          at: new Date().toISOString(),
+          kind: "goal_replanned",
+          summary: `Adopted Plan ${plan.id} v${plan.goalPlanVersion}; execution resumed.`,
+        },
+      );
+      return {
+        ok: true,
+        plan,
+        goal,
+        message: recoveringAdoption
+          ? "已恢复完成 Plan 采用事务。"
+          : "已采用新的 Direct Plan 并恢复 Goal。",
+      };
+    });
   }
 
   async function attachConfirmedPlanGoal(
@@ -3168,9 +4359,13 @@ export function createAppContainer(options: {
     confirmGoalDraft,
     discardGoalDraft,
     confirmPlan,
+    discardPlan,
+    createRuntimeGoalPlan,
+    adoptGoalPlan,
+    proposeGoalAmendment,
+    resolveGoalAmendment,
     runGoalOperation,
-    replanGoal: (goalId: string, instructions: string) =>
-      runGoalOperation(goalId, () => goalChatService().replan(goalId, instructions)),
+    replanGoal: createRuntimeGoalPlan,
     retryGoal: (goalId: string) =>
       runGoalOperation(goalId, () => goalChatService().retry(goalId)),
     continueGoalAcceptance: (goalId: string) =>
@@ -3437,8 +4632,11 @@ function isLivePlanReference(status: PlanStatus): boolean {
 function planStatusForExecutionGoal(
   status: ChatSessionGoalSummary["status"],
 ): PlanStatus {
-  if (status === "achieved" || status === "completed_unverified") {
+  if (status === "achieved") {
     return "completed";
+  }
+  if (status === "completed_unverified" || status === "waiting_for_acceptance") {
+    return "steps_completed";
   }
   if (status === "canceled") {
     return "canceled";
@@ -3451,7 +4649,82 @@ function planStatusForExecutionGoal(
   ) {
     return "failed";
   }
+  if (status === "waiting_for_review" || status === "waiting_for_model") {
+    return "paused";
+  }
   return "executing";
+}
+
+function buildGoalSuccessCriteriaFromPlan(plan: PlanRecord): SuccessCriterion[] {
+  const artifact = plan.finalArtifact;
+  const contract = plan.goalContractSnapshot;
+  if (!artifact || !contract) {
+    throw new Error("运行期 Plan 缺少 Goal 成功标准投影。");
+  }
+  const bindings =
+    plan.criterionBindings?.length
+      ? plan.criterionBindings
+      : derivePlanCriterionBindings(artifact, contract);
+  const checksById = new Map(
+    [
+      ...(artifact.acceptanceChecks ?? []),
+      ...artifact.milestones.flatMap(
+        (milestone) => milestone.acceptanceChecks ?? [],
+      ),
+    ].map((check) => [check.id, check]),
+  );
+  const bindingsByCriterion = new Map(
+    bindings.map((binding) => [binding.criterionId, binding]),
+  );
+  return contract.successCriteria.map((criterion) => {
+    const acceptanceChecks = (
+      bindingsByCriterion.get(criterion.id)?.checkIds ?? []
+    ).flatMap((checkId) => {
+      const check = checksById.get(checkId);
+      return check ? [structuredClone(check)] : [];
+    });
+    return {
+      id: criterion.id,
+      description: criterion.description,
+      acceptanceChecks:
+        acceptanceChecks.length > 0
+          ? acceptanceChecks
+          : [
+              {
+                id: `${criterion.id}_review`,
+                kind: "model_review" as const,
+                description: "根据执行轨迹和产物验证 GoalContract 成功标准。",
+                params: {
+                  condition: criterion.description,
+                  evidenceRefs: ["artifact:goalEvidence"],
+                },
+                requiresEvidence: true,
+              },
+            ],
+    };
+  });
+}
+
+function milestoneDefinitionHash(
+  milestone: Pick<Goal["milestones"][number], "id" | "description" | "dependsOn" | "successCriteria">,
+): string {
+  const canonical = {
+    id: milestone.id,
+    description: milestone.description,
+    dependsOn: [...milestone.dependsOn].sort(),
+    successCriteria: milestone.successCriteria.map((criterion) => ({
+      id: criterion.id,
+      description: criterion.description,
+      acceptanceChecks: criterion.acceptanceChecks.map((check) => ({
+        id: check.id,
+        kind: check.kind,
+        description: check.description,
+        params: check.params,
+        requiresEvidence: check.requiresEvidence,
+      })),
+    })),
+  };
+  return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
 }
 
 function defaultSelectedSkillInputValues(

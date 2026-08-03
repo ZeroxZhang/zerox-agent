@@ -13,12 +13,36 @@ export function selectPlanExecutionModelBinding(
   );
 }
 
+export function selectRuntimeDirectProfileId(
+  parentPlan: Pick<PlanRecord, "mode" | "frozenModelAssignments">,
+  goal: Pick<Goal, "executionModelBinding">,
+): string | undefined {
+  return parentPlan.mode === "debate"
+    ? parentPlan.frozenModelAssignments.c?.profileId
+    : parentPlan.frozenModelAssignments.direct?.profileId ??
+        goal.executionModelBinding?.profileId;
+}
+
 export async function resolveGoalExecutionModelBinding(
-  goal: Pick<Goal, "executionModelBinding" | "sourcePlanRef">,
+  goal: Pick<
+    Goal,
+    "executionModelBinding" | "sourcePlanRef" | "activePlanRef"
+  >,
   getPlan: (planId: string) => Promise<PlanRecord | null>,
 ): Promise<ResolvedModelBinding | undefined> {
   if (goal.executionModelBinding) {
     return goal.executionModelBinding;
+  }
+  if (goal.activePlanRef) {
+    const activePlan = await getPlan(goal.activePlanRef.planId);
+    if (
+      activePlan &&
+      activePlan.goalPlanVersion === goal.activePlanRef.goalPlanVersion &&
+      activePlan.goalContractRef?.sha256 ===
+        goal.activePlanRef.goalContractRef.sha256
+    ) {
+      return selectPlanExecutionModelBinding(activePlan);
+    }
   }
   if (!goal.sourcePlanRef) {
     return undefined;

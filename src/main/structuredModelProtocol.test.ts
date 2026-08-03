@@ -77,6 +77,11 @@ describe("structured model boundary protocol", () => {
     });
     expect(result.output).toEqual({ title: "直达" });
     expect(result.usage).toEqual({ inputTokens: 10, outputTokens: 5 });
+    expect(result.diagnostics).toMatchObject({
+      completionCount: 1,
+      repairAttempted: false,
+      outputLimitRecovered: false,
+    });
     expect(calls).toHaveLength(1);
     expect(calls[0]?.maxTokens).toBe(4096);
   });
@@ -117,6 +122,11 @@ describe("structured model boundary protocol", () => {
     expect(calls[1]?.messages).toHaveLength(4);
     expect(calls[1]?.messages[2]?.content).toBe('{"broken": true}');
     expect(calls[1]?.messages[3]?.content).toContain("repair please: title");
+    expect(result.diagnostics).toMatchObject({
+      completionCount: 2,
+      repairAttempted: true,
+      outputLimitRecovered: false,
+    });
   });
 
   it("fails through buildFailure when the ladder is exhausted", async () => {

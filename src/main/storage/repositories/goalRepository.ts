@@ -218,6 +218,15 @@ function sanitizeStoredGoal(goal: Goal | null): Goal | null {
           0,
           Number((goal.executionUsage ?? legacyUsage)?.tokens ?? 0),
         ),
+        ...((goal.executionUsage ?? legacyUsage)?.tokensEstimated !== undefined
+          ? {
+              tokensEstimated: Boolean(
+                (goal.executionUsage ?? legacyUsage)?.tokensEstimated,
+              ),
+            }
+          : Number((goal.executionUsage ?? legacyUsage)?.tokens ?? 0) > 0
+            ? { tokensEstimated: true }
+          : {}),
         replans: Math.max(
           0,
           Number((goal.executionUsage ?? legacyUsage)?.replans ?? 0),

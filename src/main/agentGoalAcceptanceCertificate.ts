@@ -83,7 +83,14 @@ type CanonicalState = {
 type CertificateEvidence = GoalAcceptanceCertificate["evidence"][number];
 
 export type CreateGoalAcceptanceCertificateInput = {
-  goal: Pick<Goal, "id" | "planVersion" | "successCriteria">;
+  goal: Pick<
+    Goal,
+    | "id"
+    | "planVersion"
+    | "successCriteria"
+    | "goalContractRef"
+    | "activePlanRef"
+  >;
   acceptedAt: string;
   runIds: readonly string[];
   checkResults: readonly GoalAcceptanceCheckResult[];
@@ -252,6 +259,22 @@ function createGoalAcceptanceCertificateInternal(
       input.goal.planVersion,
       "plan version",
     ),
+    ...(input.goal.goalContractRef
+      ? {
+          goalContractRef: cloneCanonical(
+            input.goal.goalContractRef,
+            "goal contract reference",
+          ) as NonNullable<Goal["goalContractRef"]>,
+        }
+      : {}),
+    ...(input.goal.activePlanRef
+      ? {
+          activePlanRef: cloneCanonical(
+            input.goal.activePlanRef,
+            "active plan reference",
+          ) as NonNullable<Goal["activePlanRef"]>,
+        }
+      : {}),
     runIds,
     checkResults,
     evidence,
@@ -318,6 +341,18 @@ function verifyGoalAcceptanceCertificateInternal(
     certificate.planVersion !== goal.planVersion
   ) {
     return failure("Certificate plan version mismatch.");
+  }
+  if (
+    certificate.goalContractRef &&
+    stableJson(certificate.goalContractRef) !== stableJson(goal.goalContractRef)
+  ) {
+    return failure("Certificate GoalContract reference mismatch.");
+  }
+  if (
+    certificate.activePlanRef &&
+    stableJson(certificate.activePlanRef) !== stableJson(goal.activePlanRef)
+  ) {
+    return failure("Certificate active Plan reference mismatch.");
   }
   if (!isSha256(certificate.criteriaHash)) {
     return failure("Certificate criteria hash must be a lowercase SHA256 digest.");
@@ -410,8 +445,16 @@ function verifyCheckCoverage(
     if (!isNonemptyString(check.id)) {
       return failure("Goal contains a malformed check id.");
     }
-    if (expectedById.has(check.id)) {
-      return failure(`Goal contains duplicate check id: ${check.id}.`);
+    const existing = expectedById.get(check.id);
+    if (existing) {
+      if (acceptanceCheckIdentity(existing) !== acceptanceCheckIdentity(check)) {
+        return failure(
+          `Goal contains conflicting definitions for check id: ${check.id}.`,
+        );
+      }
+      // One global check may satisfy more than one semantic Goal criterion.
+      // Identical references share one execution result and one certificate row.
+      continue;
     }
     expectedById.set(check.id, check);
   }
@@ -466,6 +509,16 @@ function verifyCheckCoverage(
     );
   }
   return { ok: true };
+}
+
+function acceptanceCheckIdentity(check: AcceptanceCheck): string {
+  return stableJson({
+    id: check.id,
+    kind: check.kind,
+    description: check.description,
+    params: check.params,
+    requiresEvidence: check.requiresEvidence,
+  });
 }
 
 function verifyEvidence(evidence: unknown): GoalAcceptanceCertificateVerification {

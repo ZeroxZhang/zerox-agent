@@ -137,6 +137,7 @@ export type AgentLoopCheckpoint = {
   toolCallsExecuted: number;
   nextAction: string;
   tokensConsumed: number;
+  tokensEstimated: boolean;
 };
 
 export type AgentLoopContextCompaction = {
@@ -192,6 +193,7 @@ export type AgentLoopResult = {
   messages: ChatMessage[];
   toolCallsExecuted: number;
   tokensConsumed?: number;
+  tokensEstimated?: boolean;
   contextUsage?: AgentContextUsage;
   continuation?: AgentLoopContinuation;
   modelServiceNotice?: ModelServiceNotice;
@@ -264,6 +266,7 @@ export async function runAgentLoop(
       toolCallsExecuted,
       nextAction,
       tokensConsumed: estimateConsumedTokens(),
+      tokensEstimated: areConsumedTokensEstimated(),
     });
   }
 
@@ -327,11 +330,16 @@ export async function runAgentLoop(
   let lastContextCompaction: AgentContextCompactionSummary | undefined;
   // Token consumption is observability-only and never changes run status.
   let cumulativeTokensConsumed = 0;
+  let cumulativeTokensEstimated = false;
 
   function estimateConsumedTokens(): number {
     return cumulativeTokensConsumed > 0
       ? cumulativeTokensConsumed
       : Math.max(1, contextManager.estimateTokens(messages));
+  }
+
+  function areConsumedTokensEstimated(): boolean {
+    return cumulativeTokensConsumed <= 0 || cumulativeTokensEstimated;
   }
 
   /**
@@ -357,10 +365,14 @@ export async function runAgentLoop(
   function recordModelResponseTokens(
     response: ChatCompletionResponse,
   ): void {
-    const turnTokens = response.usage
-      ? (response.usage.inputTokens ?? 0) +
-        (response.usage.outputTokens ?? 0)
+    const hasReportedUsage = Boolean(response.usage);
+    const turnTokens = hasReportedUsage
+      ? (response.usage?.inputTokens ?? 0) +
+        (response.usage?.outputTokens ?? 0)
       : estimateCompletionTokens(messages, response, contextManager);
+    if (!hasReportedUsage) {
+      cumulativeTokensEstimated = true;
+    }
     cumulativeTokensConsumed += turnTokens;
   }
 
@@ -1302,6 +1314,7 @@ export async function runAgentLoop(
     messages,
     toolCallsExecuted,
     tokensConsumed: estimateConsumedTokens(),
+    tokensEstimated: areConsumedTokensEstimated(),
     ...(latestContextUsage ? { contextUsage: latestContextUsage } : {}),
     ...(continuation ? { continuation } : {}),
     ...(modelServiceNotice ? { modelServiceNotice } : {}),

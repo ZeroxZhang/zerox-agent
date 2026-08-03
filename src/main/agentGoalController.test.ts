@@ -3202,7 +3202,7 @@ describe("agent goal controller", () => {
     },
   );
 
-  it("keeps certificate construction failure terminal instead of waiting", async () => {
+  it("classifies certificate construction failure as integrity blocked instead of validator unavailable", async () => {
     await store.save(
       createProtocolV2Goal(
         [
@@ -3232,7 +3232,7 @@ describe("agent goal controller", () => {
     const result = await controller.start("goal_1");
 
     expect(result.status).toBe("stopped_blocked");
-    expect(result.stopReason).toBe("acceptance_unavailable");
+    expect(result.stopReason).toBe("acceptance_integrity_failed");
     expect(result.acceptanceState?.phase).toBe("blocked");
     expect(result.acceptanceRetryState).toBeUndefined();
     expect(result.acceptanceCertificate).toBeUndefined();

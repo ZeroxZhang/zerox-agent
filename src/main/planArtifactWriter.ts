@@ -64,7 +64,12 @@ export function createPlanArtifactWriter(options?: {
         assertInside(root, plan.projection.path);
         await assertNoSymlinkChain(root, plan.projection.path);
         const content = await readFile(plan.projection.path, "utf8");
-        const currentProjection = renderPlanMarkdown(plan, plan.finalArtifact);
+        const currentProjection = renderPlanMarkdown(
+          plan.confirmedRevision
+            ? { ...plan, revision: plan.confirmedRevision }
+            : plan,
+          plan.finalArtifact,
+        );
         return (
           hash(content) === plan.projection.sha256 &&
           hash(currentProjection) === plan.projection.sha256
@@ -102,7 +107,24 @@ export function renderPlanMarkdown(
     "",
     artifact.summary,
     "",
-    ...(plan.schemaVersion === 2
+    ...(plan.schemaVersion === 3 && plan.goalContractSnapshot
+      ? [
+          "## 目标契约",
+          "",
+          `- Goal revision：r${plan.goalContractSnapshot.revision}`,
+          `- Plan version：v${plan.goalPlanVersion ?? 1}`,
+          `- 规划协议：${plan.mode === "debate" ? "Debate" : "Direct"}`,
+          `- 用途：${plan.purpose ?? "initial"}`,
+          `- SHA-256：${plan.goalContractRef?.sha256 ?? "missing"}`,
+          `- 目标：${plan.goalContractSnapshot.objective}`,
+          `- 交付物：${plan.goalContractSnapshot.deliverables.join("；") || "无"}`,
+          `- 成功标准：${plan.goalContractSnapshot.successCriteria
+            .map((criterion) => `${criterion.id}=${criterion.description}`)
+            .join("；")}`,
+          "",
+        ]
+      : []),
+    ...((plan.schemaVersion ?? 1) >= 2
       ? [
           "## 任务合同",
           "",

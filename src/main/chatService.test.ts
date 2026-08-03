@@ -1064,6 +1064,83 @@ describe("chat service", () => {
     ).toHaveLength(1);
   });
 
+  it("creates a controlled Goal amendment instead of revising a pending runtime Plan", async () => {
+    const activeGoal: ChatSessionGoalSummary = {
+      id: "goal_runtime_plan",
+      description: "原目标",
+      status: "waiting_for_review",
+    };
+    const runtimePlan = createPlanFixture({
+      id: "plan_runtime_v2",
+      sessionId: "persisted_session",
+      status: "awaiting_confirmation",
+      actionGate: "ready",
+      purpose: "runtime_replan",
+      goalId: activeGoal.id,
+      goalPlanVersion: 2,
+    });
+    const amendmentRequests: Array<{
+      goalId: string;
+      objective: string;
+      reason: string;
+    }> = [];
+    let continuationCalls = 0;
+    let modelCalls = 0;
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          modelCalls += 1;
+          return chatReply("ordinary chat must not run");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([], { activeGoal }),
+      planService: {
+        async createPlan() {
+          throw new Error("new plan must not be created");
+        },
+        async getInputRoutingPlan() {
+          return runtimePlan;
+        },
+        async continueWithInput() {
+          continuationCalls += 1;
+          throw new Error("runtime Plan must not absorb a Goal amendment");
+        },
+      },
+      async proposeGoalAmendment(goalId, objective, reason) {
+        amendmentRequests.push({ goalId, objective, reason });
+        return {
+          ok: true as const,
+          proposal: { id: "goal_amendment_1" } as never,
+          message: "目标修订提案已创建，等待明确批准。",
+        };
+      },
+      createId: () => "chat_goal_amendment",
+      now: () => new Date("2026-08-03T00:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage({
+      sessionId: "persisted_session",
+      message: "修改目标：只生成本地报告，不再发布",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      plan: { id: runtimePlan.id, goalPlanVersion: 2 },
+      reply: expect.stringContaining("当前 Goal 和活动 Plan 尚未改变"),
+    });
+    expect(amendmentRequests).toEqual([
+      {
+        goalId: activeGoal.id,
+        objective: "只生成本地报告，不再发布",
+        reason: "修改目标：只生成本地报告，不再发布",
+      },
+    ]);
+    expect(continuationCalls).toBe(0);
+    expect(modelCalls).toBe(0);
+  });
+
   it("routes feedback on a ready plan into a new Plan revision instead of ordinary chat", async () => {
     const readyPlan = createPlanFixture({
       id: "plan_ready",
@@ -2338,6 +2415,132 @@ describe("chat service", () => {
       },
     });
     expect(pauses).toEqual(["goal_release"]);
+    expect(completeCalled).toBe(false);
+  });
+
+  it("routes an explicit objective change into a Goal amendment proposal", async () => {
+    let completeCalled = false;
+    const amendmentRequests: Array<{
+      goalId: string;
+      objective: string;
+      reason: string;
+    }> = [];
+    const activeGoal: ChatSessionGoalSummary = {
+      id: "goal_release",
+      description: "发布",
+      status: "executing",
+    };
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          completeCalled = true;
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([], { activeGoal }),
+      goalService: createGoalService({}),
+      async proposeGoalAmendment(goalId, objective, reason) {
+        amendmentRequests.push({ goalId, objective, reason });
+        return {
+          ok: true as const,
+          proposal: {
+            id: "goal_amendment_chat",
+            pausedExecution: true,
+          } as never,
+          message: "目标修订提案已创建，原执行路径已安全暂停并等待明确批准。",
+        };
+      },
+      createId: () => "chat_goal_amendment",
+      now: () => new Date("2026-08-03T00:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage({
+      sessionId: "persisted_session",
+      message: "调整目标：仅完成本地构建",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      activeGoal: {
+        id: activeGoal.id,
+        description: "发布",
+        status: "waiting_for_review",
+      },
+      reply: expect.stringContaining("GoalContract 和活动 Plan 尚未改变"),
+    });
+    expect(amendmentRequests).toEqual([
+      {
+        goalId: activeGoal.id,
+        objective: "仅完成本地构建",
+        reason: "用户请求修改目标：仅完成本地构建",
+      },
+    ]);
+    expect(completeCalled).toBe(false);
+  });
+
+  it("routes a structural Plan adjustment into a runtime Direct Plan instead of ordinary chat", async () => {
+    let completeCalled = false;
+    const replanRequests: Array<{ goalId: string; instructions: string }> = [];
+    const activeGoal: ChatSessionGoalSummary = {
+      id: "goal_runtime_replan",
+      description: "完成本地实现",
+      status: "executing",
+    };
+    const runtimePlan = createPlanFixture({
+      id: "plan_runtime_direct_v2",
+      sessionId: "persisted_session",
+      mode: "direct",
+      purpose: "runtime_replan",
+      goalId: activeGoal.id,
+      goalPlanVersion: 2,
+      status: "awaiting_confirmation",
+      actionGate: "ready",
+    });
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          completeCalled = true;
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([], { activeGoal }),
+      goalService: createGoalService({}),
+      async runtimeReplanGoal(goalId, instructions) {
+        replanRequests.push({ goalId, instructions });
+        return {
+          ok: true as const,
+          plan: runtimePlan,
+          message: "已生成运行期 Direct Plan。",
+        };
+      },
+      createId: () => "chat_runtime_replan",
+      now: () => new Date("2026-08-03T00:00:00.000Z"),
+    });
+
+    const result = await service.sendMessage({
+      sessionId: "persisted_session",
+      message: "调整目标计划：改用本地验证路径",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      plan: {
+        id: runtimePlan.id,
+        purpose: "runtime_replan",
+        mode: "direct",
+      },
+      reply: expect.stringContaining("采用前不会覆盖当前 Goal"),
+    });
+    expect(replanRequests).toEqual([
+      {
+        goalId: activeGoal.id,
+        instructions: "改用本地验证路径",
+      },
+    ]);
     expect(completeCalled).toBe(false);
   });
 

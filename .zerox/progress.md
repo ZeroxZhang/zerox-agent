@@ -8738,7 +8738,11 @@
     Agent evaluations 26/26 and Memory evaluations 2/2 passed;
   - `npm run smoke:prod`, `npm run harness:check`, and `git diff --check`
     passed on `codex/debug`.
-
+  - an ad-hoc arm64 test package was created at
+    `release-test-p70-acceptance-token/mac-arm64/Zerox Agent.app`; deep strict
+    codesign verification passed, local `better-sqlite3` was restored to the
+    Node ABI, the previous test-package process was closed, and the new bundle
+    launched successfully.
 ## 2026-08-03 - P69 Goal Acceptance Execution Contract
 
 - Reconstructed the reported failure from the persisted Plan, Goal, ledger,
@@ -8779,3 +8783,215 @@
     Agent evaluations 26/26 and Memory evaluations 2/2 passed;
   - `npm run smoke:prod`, `npm run harness:check`, and `git diff --check`
     passed on `codex/debug`.
+
+## 2026-08-03 - P70 Goal-Plan Contract, Direct/Debate Compatibility, and Plan Lineage
+
+- Added a canonical, hashed `GoalContractSnapshot` containing objective,
+  deliverables, scope, assumptions, typed constraints, success criteria,
+  stop policy, and risk policy. Direct and all Debate roles receive the same
+  frozen contract reference; quality gates block hash drift, blocking contract
+  issues, and uncovered success criteria.
+- Upgraded durable planning to `PlanRecord` v3 without adding a second store.
+  Each Plan records its purpose, Goal/parent references, Goal Plan version,
+  trigger, criterion bindings, contract issues, and supersession metadata.
+  Goal records now keep an active Plan reference plus a compact Plan history.
+- Preserved the initial protocols: Direct still uses one generation round,
+  independent cold review, and quality gate; Debate still uses
+  A1 -> B1 -> A2 -> B2 -> C with isolated roles, frozen bindings, retry, and
+  downstream invalidation. Runtime structural replans are new Direct records;
+  Debate-originated Goals inherit C as the Direct synthesizer and never fall
+  back silently to A, B, or a default model.
+- Added main-process Goal Plan adoption with Goal plan-version CAS, exact
+  accepted-milestone reuse, parent supersession, active-history switching,
+  idempotent ledger keys, and crash recovery from active Plan identity. A
+  confirmed projection is verified against `confirmedRevision`, so later
+  execution-status revisions do not look like artifact drift while content or
+  file tampering still fails closed.
+- Split Plan changes from Goal changes. “调整计划” creates a runtime Direct
+  Plan; explicit “修改目标：...” creates a `GoalAmendmentProposal`. Rejection
+  preserves the current contract and Plan; approval increments the contract
+  revision and generates a Direct Plan that still requires adoption.
+- Separated `steps_completed` from Goal `achieved`. Completed milestones show
+  that the path ran but the Goal still awaits final acceptance; only a valid
+  acceptance certificate produces `achieved` and a completed Plan. Goal and
+  Plan UI now show `Goal rN / Plan vN / Direct|Debate`, Plan history, initial
+  Debate -> current Direct transitions, and amendment decisions.
+- Legacy Plan v1/v2 and Goal records derive compatible contracts on read.
+  Older compacted Goal plan versions are labeled `legacy_compacted` without
+  fabricating Direct/Debate rounds and upgrade on their next legal save.
+- Verification evidence:
+  - focused Goal contract, Planner, Direct/Debate, adoption, amendment,
+    projection, Chat routing, renderer, and compatibility suites passed;
+  - `npm test -- --maxWorkers=1`: 246 files / 2,537 tests passed;
+  - `npm run verify`: 246 files / 2,537 tests, production build, Agent
+    evaluations 26/26, and Memory evaluations 2/2 passed;
+  - `npm run smoke:prod` rendered the Agent Chat UI;
+  - `npm run harness:check` and `git diff --check` passed on `codex/debug`.
+
+## 2026-08-03 - P70 Goal-Plan Interaction and Compatibility Deep-Review Follow-up
+
+- Changed Goal amendments from an eager contract replacement into a guarded
+  lifecycle: pending proposal, approved-but-unapplied candidate contract,
+  runtime Direct Plan, and atomic contract/Plan adoption. Goal execution now
+  rejects pending or approved amendments and mismatched active Plan contracts.
+- Made structural “调整目标计划” requests create a new runtime Direct
+  `PlanRecord` through Chat routing. Exact candidate retries are deduplicated,
+  discarded candidates remain in Goal lineage as rejected, and sibling
+  candidates for the adopted parent/version are no longer presented as live.
+- Added safe amendment interaction behavior. Proposing a semantic change pauses
+  an executing old path; rejection restores it. Duplicate amendment actions are
+  locked, approval failures remain explicitly “尚未应用”, and adoption is the
+  only point that changes the current objective, success criteria, task
+  contract, milestone graph, and GoalContract revision.
+- Separated renderer state for the Goal's persisted active Plan from the Plan
+  candidate currently being reviewed. Goal controls are suppressed while a
+  runtime candidate or amendment decision is open, confirmation explains why
+  it is blocked, and reload restores both the candidate surface and the actual
+  active Plan without silently falling back to ordinary Chat.
+- Expanded GoalContract and amendment comparison UI to show deliverables,
+  scope, assumptions, typed hard/preference constraints, success criteria,
+  risk policy, stop policy, changed fields, and hard-constraint relaxation
+  warnings. Deep runtime lineage keeps the initial Debate label visible after
+  multiple Direct replans.
+- Added explicit Plan presentation for confirmed-pending, executing, paused,
+  steps-completed, achieved, superseded, discarded, and execution-failed
+  states. `steps_completed` continues to state that the current path ran while
+  Goal acceptance is still outstanding.
+- Added source-level coverage for runtime Chat replan routing, paused amendment
+  projection, active/candidate Plan separation, amendment conflict controls,
+  and executing Plan presentation.
+- The initial follow-up review intentionally ran no tests or application. After
+  the user requested a test package, `npm run build` exposed and then passed
+  after resolving strict async-narrowing errors; no Vitest suite was run.
+  A separate ad-hoc arm64 package was created at
+  `release-test-p70/mac-arm64/Zerox Agent.app`, deep codesign verification
+  passed, local `better-sqlite3` was restored to the Node ABI, and the packaged
+  application launched successfully for manual testing. `git diff --check`
+  also passed.
+
+## 2026-08-03 - P70 Final Acceptance Completion-State Compatibility Fix
+
+- Reproduced the reported real Goal state: all five milestones were accepted
+  and the active Plan was `steps_completed`, but seven Goal criteria each
+  referenced the same global check set. Final acceptance executed duplicate
+  checks and certificate construction failed; the catch path then incorrectly
+  attributed the structural failure to the first successful file check as
+  `validator_unavailable`.
+- Made acceptance-check IDs global within a Goal. Identical check definitions
+  referenced by multiple semantic criteria execute once and produce one
+  certificate row; conflicting definitions with the same ID fail closed as a
+  Plan structure error. Final-judge replay uses the same unique check set.
+- Updated certificate coverage to allow identical cross-criterion references
+  while continuing to reject conflicting reuse. Certificate construction
+  failures are now classified as `acceptance_integrity_failed` instead of
+  impersonating a validator outage on an unrelated check.
+- Improved criterion-to-milestone derivation with deterministic semantic
+  matching, preventing plan-level criteria from automatically binding every
+  milestone while retaining the shared overall model-review check.
+- Added backward-compatible interaction projection for historical records:
+  `stopped_blocked + acceptance_unavailable` with every milestone accepted is
+  presented as “任务产物已完成，等待最终验收”. Session work, status strips,
+  details, context panels, and actions use “继续最终验收”; persisted audit state
+  is not silently rewritten and incomplete blocked Goals remain blocked.
+- Verification evidence:
+  - focused Goal acceptance, certificate, controller, Planner, Goal service,
+    shared model, progress view-model, and renderer suites: 8 files / 519 tests
+    passed;
+  - `npm test -- --maxWorkers=1`: 246 files / 2,547 tests passed;
+  - `npm run verify`: 246 files / 2,547 tests, production build, Agent
+    evaluations 26/26, and Memory evaluations 2/2 passed;
+  - `npm run smoke:prod`, `npm run harness:check`, and `git diff --check`
+    passed on `codex/debug`.
+  - an ad-hoc arm64 test package was created at
+    `release-test-p70-completion-fix/mac-arm64/Zerox Agent.app`; deep strict
+    codesign verification and packaged launch passed, and local
+    `better-sqlite3` was restored to the Node ABI afterward.
+
+## 2026-08-03 - P70 Acceptance-Contract and Token-Disclosure Follow-up
+
+- Reproduced the reported `alergy_map_2` stop from persisted Goal, Plan,
+  ledger, run, and trajectory records. The Goal stopped correctly after the
+  same deterministic check failed three times, but the execution model only
+  received the check description and never received the actual
+  `test_passes` command or parameters. It repeatedly self-reported success
+  against ECharts CDN/API evidence while the validator continued to run
+  `grep -c 'var echarts'`.
+- Made acceptance contracts consistent across Planner, runtime, validator,
+  and UI. Planner quality now blocks uncontracted source-declaration/comment
+  probes; Direct and Debate prompts require stable observable checks; Goal
+  execution receives exact check IDs, kinds, and parameters; and Plan/Goal
+  detail views expose those same parameters for audit.
+- Made terminal truth deterministic. Rejected milestones no longer append a
+  model-authored “all checks passed” summary beside a failed validator result;
+  the terminal message names the failed check and repeated-failure stop reason.
+  Accepted milestones still retain useful delivery summaries. Historical
+  terminal messages are preserved for audit but now receive a deterministic
+  truth notice when their persisted Goal has rejected milestones, so old model
+  self-assessments cannot visually override the validator result.
+- Clarified token telemetry. The status card now distinguishes cumulative
+  model input+output across calls from the most recent/current runtime
+  context, shows the usable context budget, uses `2.08m`/`1.9%` precision,
+  records provider-reported versus locally estimated Goal and Plan usage, and
+  conservatively marks legacy totals without provenance as containing
+  estimates. Model-response and final-summary trajectories now retain usage
+  audit metadata for future runs.
+- Persisted evidence for the reported session:
+  - cumulative total `2,078,189` = Plan `127,663` + Goal `1,950,526`;
+  - context `16,786 / 892,627` = `1.8805%`;
+  - three milestone attempts issued 80 model responses and 77 tool calls,
+    which explains why cumulative usage can exceed the single context window.
+- Verification evidence:
+  - focused Planner, runtime, token, Goal store, terminal, renderer, and
+    Direct/Debate suites: 9 files / 327 tests passed;
+  - `npm test -- --maxWorkers=1`: 246 files / 2,553 tests passed;
+  - `npm run verify`: 246 files / 2,553 tests, production build, Agent
+    evaluations 26/26, and Memory evaluations 2/2 passed;
+  - `npm run smoke:prod`, `npm run harness:check`, and `git diff --check`
+    passed on `codex/debug`.
+  - post-compatibility focused terminal/renderer coverage: 3 files / 151 tests
+    passed, followed by a successful production build and `git diff --check`.
+  - the final ad-hoc arm64 package was created and opened at
+    `release-test-p70-acceptance-token-v2/mac-arm64/Zerox Agent.app`; deep
+    strict codesign validation passed and local `better-sqlite3` was restored
+    to the Node ABI.
+
+## 2026-08-03 - P71 Debate First-Pass Reliability
+
+- Reproduced the reported first-failure/manual-retry-success pattern from the
+  persisted Plan `plan_e8d0f509-c6c4-4402-b1d5-b18fcd99833c`. Debate A/B/C
+  had not started: quick and standard investigation completed, then deep
+  investigation returned parseable JSON whose
+  `skillCandidates[0].evidenceRefs` was not an array. The old repair path was
+  syntax-only, so it could not repair a schema-contract failure; manual retry
+  invalidated and reran quick, standard, and deep, succeeding only because the
+  model was sampled again.
+- Removed the investigation-only protocol fork. PlanningBrief now uses the
+  shared structured model boundary used by Direct, A/B/C, and cold review,
+  with one contract-aware repair that receives the exact validation error,
+  schema, known evidence refs, and installed Skill names.
+- Added bounded, lossless scalar-to-array canonicalization for PlanningBrief
+  list fields and Skill evidence refs. Ambiguous shapes still fail closed;
+  unsupported or evidence-free automatic Skill candidates are filtered.
+- Failed contract repairs now persist the raw bounded failure excerpt, repair
+  attempt marker, and repair-token usage. Shared structured-boundary results
+  expose completion, repair, output-limit, and usage diagnostics.
+- Investigation retry now resumes at the failed depth, preserves completed
+  investigation stages, and reuses collected evidence. Renderer copy states
+  this behavior explicitly and keeps raw diagnostics inside technical details.
+- Compatibility audit confirmed Direct and Debate share this investigation
+  path while A1/B1/A2/B2/C isolation, frozen model bindings, downstream round
+  invalidation, and quality gates remain unchanged.
+- Verification evidence:
+  - focused protocol, investigator, orchestrator, package gate, and renderer
+    suites: 5 files / 70 tests passed;
+  - `npm test -- --maxWorkers=1`: 247 files / 2,558 tests passed;
+  - `npm run verify`: 247 files / 2,558 tests, production build, Agent
+    evaluations 26/26, and Memory evaluations 2/2 passed;
+  - `npm run smoke:prod`, `npm run harness:check`, and `git diff --check`
+    passed on `codex/debug`.
+  - final failure-title compatibility coverage: 2 renderer files / 99 tests
+    passed, followed by a successful production build and diff check.
+  - an ad-hoc arm64 package was created and opened at
+    `release-test-p71-debate-reliability-v2/mac-arm64/Zerox Agent.app`; deep
+    strict codesign validation passed and local `better-sqlite3` was restored
+    to the Node ABI.

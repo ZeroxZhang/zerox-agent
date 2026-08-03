@@ -277,7 +277,9 @@ describe("package scripts", () => {
           featureId === "P66-goal-mode-experience-contract" ||
           featureId ===
             "P68-session-runtime-context-and-progress-projection" ||
-          featureId === "P69-goal-acceptance-execution-contract",
+          featureId === "P69-goal-acceptance-execution-contract" ||
+          featureId === "P70-goal-plan-contract-lineage" ||
+          featureId === "P71-debate-first-pass-reliability",
       ),
     ).toBe(true);
     expect(openFeatureIds.length).toBeLessThanOrEqual(1);

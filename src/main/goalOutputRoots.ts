@@ -71,7 +71,7 @@ export function extractGoalOutputRoots(
     [],
     [
       ...extractOutputRootsFromText(
-        goal.originalDescription ?? goal.description,
+        goal.goalContractSnapshot?.objective ?? goal.description,
         locationEnv,
       ),
       ...extractOutputRootsFromCriteria(goal.successCriteria, locationEnv),

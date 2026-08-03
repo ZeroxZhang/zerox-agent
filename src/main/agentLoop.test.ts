@@ -1748,6 +1748,32 @@ describe("agent loop", () => {
     expect(result.status).toBe("succeeded");
     expect(result.summary).toContain("budgeted");
     expect(result.tokensConsumed).toBeGreaterThanOrEqual(8);
+    expect(result.tokensEstimated).toBe(true);
+  });
+
+  it("marks provider-reported token telemetry as exact", async () => {
+    const result = await runAgentLoop(
+      [{ role: "user", content: "report usage" }],
+      modelProfile,
+      {
+        chatClient: {
+          async complete() {
+            return {
+              content: "done",
+              toolCalls: [],
+              finishReason: "stop",
+              usage: { inputTokens: 120, outputTokens: 30 },
+            };
+          },
+        },
+        toolExecutor: createToolExecutor(),
+        tools: testTools,
+        maxTurns: 2,
+      },
+    );
+
+    expect(result.tokensConsumed).toBe(150);
+    expect(result.tokensEstimated).toBe(false);
   });
 
   it("passes dynamic registry source to tool authorization", async () => {

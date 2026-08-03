@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   assertGoalTransition,
+  projectGoalStatusForInteraction,
   upgradeGoalAcceptanceProtocol,
   type Goal,
   type GoalBudget,
@@ -122,6 +123,33 @@ export function createGoalChatService(options: {
       message,
       timestamp: now(),
     });
+  }
+
+  function assertGoalPlanMatchesCurrentContract(goal: Goal): void {
+    const amendment = goal.pendingGoalAmendment;
+    if (amendment?.status === "pending") {
+      throw new Error(
+        "目标修订仍在等待批准或拒绝；作出决定前不能继续执行旧路径。",
+      );
+    }
+    if (amendment?.status === "approved") {
+      throw new Error(
+        "目标修订已批准但尚未应用；请先生成并采用对应的 Direct Plan，或撤销修订。",
+      );
+    }
+    const contractRef = goal.goalContractRef;
+    const activePlanRef = goal.activePlanRef;
+    if (
+      contractRef &&
+      activePlanRef &&
+      (contractRef.id !== activePlanRef.goalContractRef.id ||
+        contractRef.revision !== activePlanRef.goalContractRef.revision ||
+        contractRef.sha256 !== activePlanRef.goalContractRef.sha256)
+    ) {
+      throw new Error(
+        "当前活动 Plan 与 GoalContract 不一致；必须先完成结构性重规划，不能恢复旧 Plan。",
+      );
+    }
   }
 
   function startBackgroundGoalRun(
@@ -269,6 +297,7 @@ export function createGoalChatService(options: {
   }
 
   async function queueGoalExecution(goal: Goal): Promise<Goal> {
+    assertGoalPlanMatchesCurrentContract(goal);
     if (
       goal.status !== "planning" &&
       goal.status !== "executing" &&
@@ -421,6 +450,22 @@ export function createGoalChatService(options: {
         ...(input.draft.sourcePlanRef
           ? { sourcePlanRef: { ...input.draft.sourcePlanRef } }
           : {}),
+        ...(input.draft.goalContractSnapshot
+          ? {
+              goalContractSnapshot: structuredClone(
+                input.draft.goalContractSnapshot,
+              ),
+            }
+          : {}),
+        ...(input.draft.goalContractRef
+          ? { goalContractRef: structuredClone(input.draft.goalContractRef) }
+          : {}),
+        ...(input.draft.activePlanRef
+          ? { activePlanRef: structuredClone(input.draft.activePlanRef) }
+          : {}),
+        ...(input.draft.planHistory
+          ? { planHistory: structuredClone(input.draft.planHistory) }
+          : {}),
         ...(input.draft.executionModelBinding
           ? {
               executionModelBinding: structuredClone(
@@ -446,7 +491,7 @@ export function createGoalChatService(options: {
           replans: 0,
         },
         reviewPolicy: "review_high_risk_only",
-        planVersion: 1,
+        planVersion: input.draft.activePlanRef?.goalPlanVersion ?? 1,
         createdAt: now(),
         updatedAt: now(),
       });
@@ -557,12 +602,20 @@ export function createGoalChatService(options: {
     },
 
     async resolveReview(goalId, decision) {
+      if (decision.kind === "approve_continue") {
+        const goal = await options.goalStore.get(goalId);
+        if (!goal) throw new Error(`Goal "${goalId}" was not found.`);
+        assertGoalPlanMatchesCurrentContract(goal);
+      }
       return toGoalSummary(
         await options.controller.resolveReview(goalId, decision),
       );
     },
 
     async continueAcceptance(goalId, runOptions) {
+      const goal = await options.goalStore.get(goalId);
+      if (!goal) throw new Error(`Goal "${goalId}" was not found.`);
+      assertGoalPlanMatchesCurrentContract(goal);
       return toGoalSummary(
         await runAbortableGoalOperation(
           goalId,
@@ -574,6 +627,9 @@ export function createGoalChatService(options: {
     },
 
     async markCompletedUnverified(goalId) {
+      const goal = await options.goalStore.get(goalId);
+      if (!goal) throw new Error(`Goal "${goalId}" was not found.`);
+      assertGoalPlanMatchesCurrentContract(goal);
       return toGoalSummary(
         await options.controller.markCompletedUnverified(goalId),
       );
@@ -584,6 +640,7 @@ export function createGoalChatService(options: {
       if (!goal) {
         throw new Error(`Goal "${goalId}" was not found.`);
       }
+      assertGoalPlanMatchesCurrentContract(goal);
 
       if (goal.status === "achieved" || goal.status === "canceled") {
         throw new Error(`Cannot replan a terminal ${goal.status} goal.`);
@@ -638,6 +695,7 @@ export function createGoalChatService(options: {
       if (!goal) {
         throw new Error(`Goal "${goalId}" was not found.`);
       }
+      assertGoalPlanMatchesCurrentContract(goal);
 
       if (
         goal.status === "stopped_blocked" &&
@@ -901,6 +959,6 @@ function toGoalSummary(goal: Goal): ChatSessionGoalSummary {
   return {
     id: goal.id,
     description: goal.description,
-    status: goal.status,
+    status: projectGoalStatusForInteraction(goal),
   };
 }

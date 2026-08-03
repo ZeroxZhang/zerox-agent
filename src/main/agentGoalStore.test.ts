@@ -17,6 +17,10 @@ import {
   type ProgressLedgerEvent,
 } from "./agentGoalStore";
 import { createGoalAcceptanceCertificate } from "./agentGoalAcceptanceCertificate";
+import {
+  createGoalContractRef,
+  deriveLegacyGoalContract,
+} from "./goalPlanContractService";
 
 describe("agent goal store", () => {
   let configDir: string;
@@ -69,6 +73,60 @@ describe("agent goal store", () => {
     await store.save(executing);
 
     await expect(store.get("goal_1")).resolves.toEqual(executing);
+  });
+
+  it("adopts only one concurrent active Plan for the expected Goal plan version", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const base = createGoal("goal_plan_cas", "executing");
+    const activePlanRef = {
+      planId: "plan-v1",
+      planRevision: 3,
+      goalPlanVersion: 1,
+      mode: "debate" as const,
+      purpose: "initial" as const,
+      goalContractRef: base.goalContractRef!,
+    };
+    await store.save({
+      ...base,
+      activePlanRef,
+      planHistory: [
+        {
+          ...activePlanRef,
+          trigger: {
+            kind: "initial_request",
+            summary: "Initial Plan",
+            evidenceRefs: [],
+            at: base.createdAt,
+          },
+          outcome: "active",
+          adoptedAt: base.createdAt,
+        },
+      ],
+    });
+    const candidate = (planId: string): Goal => ({
+      ...base,
+      planVersion: 2,
+      activePlanRef: {
+        ...activePlanRef,
+        planId,
+        planRevision: 1,
+        goalPlanVersion: 2,
+        mode: "direct",
+        purpose: "runtime_replan",
+      },
+    });
+
+    const [first, second] = await Promise.all([
+      store.saveIfPlanVersion(candidate("plan-v2-a"), 1, "plan-v1"),
+      store.saveIfPlanVersion(candidate("plan-v2-b"), 1, "plan-v1"),
+    ]);
+
+    expect(first.saved).toBe(true);
+    expect(second.saved).toBe(false);
+    await expect(store.get(base.id)).resolves.toMatchObject({
+      planVersion: 2,
+      activePlanRef: { planId: "plan-v2-a" },
+    });
   });
 
   it("serializes concurrent goal saves through atomic JSON replacement", async () => {
@@ -235,23 +293,34 @@ describe("agent goal store", () => {
     await expect(store.get(legacy.id)).resolves.toEqual(updatedLegacy);
   });
 
-  it("reads and lists serialized legacy goals without rewriting or fabricating acceptance state", async () => {
+  it("derives a GoalContract for serialized legacy goals without rewriting acceptance state", async () => {
     const store = createAgentGoalStore({ configDir });
     const goalsDir = path.join(configDir, "agent-goals");
     const filePath = path.join(goalsDir, "goal_legacy_read.json");
+    const {
+      goalContractSnapshot: _snapshot,
+      goalContractRef: _reference,
+      ...legacyBase
+    } = createGoal("goal_legacy_read", "executing");
     const legacy = {
-      ...createGoal("goal_legacy_read", "executing"),
+      ...legacyBase,
       chatSessionId: "chat_legacy_read",
+    };
+    const derivedSnapshot = deriveLegacyGoalContract(legacy as Goal);
+    const compatible = {
+      ...legacy,
+      goalContractSnapshot: derivedSnapshot,
+      goalContractRef: createGoalContractRef(derivedSnapshot),
     };
     const raw = `${JSON.stringify(legacy, null, 4)}\n`;
     await mkdir(goalsDir, { recursive: true });
     await writeFile(filePath, raw, "utf8");
     const before = await stat(filePath);
 
-    await expect(store.get(legacy.id)).resolves.toEqual(legacy);
-    await expect(store.listActive()).resolves.toEqual([legacy]);
+    await expect(store.get(legacy.id)).resolves.toEqual(compatible);
+    await expect(store.listActive()).resolves.toEqual([compatible]);
     await expect(store.listByChatSession("chat_legacy_read")).resolves.toEqual([
-      legacy,
+      compatible,
     ]);
 
     expect(await readFile(filePath, "utf8")).toBe(raw);
@@ -260,6 +329,39 @@ describe("agent goal store", () => {
       "acceptanceProtocolVersion",
     );
     expect(await store.get(legacy.id)).not.toHaveProperty("acceptanceState");
+  });
+
+  it("marks compacted legacy Plan versions without fabricating Direct or Debate lineage", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const goalsDir = path.join(configDir, "agent-goals");
+    const complete = createGoal("goal_legacy_compacted", "executing");
+    const {
+      goalContractSnapshot: _snapshot,
+      goalContractRef: _reference,
+      ...legacy
+    } = complete;
+    const compacted = { ...legacy, planVersion: 4 };
+    await mkdir(goalsDir, { recursive: true });
+    await writeFile(
+      path.join(goalsDir, `${compacted.id}.json`),
+      JSON.stringify(compacted),
+      "utf8",
+    );
+
+    await expect(store.get(compacted.id)).resolves.toMatchObject({
+      planVersion: 4,
+      activePlanRef: {
+        goalPlanVersion: 4,
+        mode: "legacy",
+      },
+      planHistory: [
+        {
+          goalPlanVersion: 4,
+          mode: "legacy",
+          outcome: "legacy_compacted",
+        },
+      ],
+    });
   });
 
   it("preserves canonical v2 acceptance state when a stale legacy save arrives", async () => {
@@ -712,7 +814,10 @@ describe("agent goal store", () => {
     const restored = await store.get(goal.id);
     expect(restored).toMatchObject({
       status: "stopped_budget",
-      executionUsage: legacy.budgetUsage,
+      executionUsage: {
+        ...legacy.budgetUsage,
+        tokensEstimated: true,
+      },
     });
     expect(restored).not.toHaveProperty("budgetUsage");
   });
@@ -1081,7 +1186,7 @@ function createGoal(
   status: GoalStatus,
   updatedAt = `2026-06-12T00:00:${status.length.toString().padStart(2, "0")}.000Z`,
 ): Goal {
-  return {
+  const goal: Goal = {
     id,
     description: "Complete a bounded local goal.",
     successCriteria: [criterion],
@@ -1114,6 +1219,12 @@ function createGoal(
     planVersion: 1,
     createdAt: "2026-06-12T00:00:00.000Z",
     updatedAt,
+  };
+  const goalContractSnapshot = deriveLegacyGoalContract(goal);
+  return {
+    ...goal,
+    goalContractSnapshot,
+    goalContractRef: createGoalContractRef(goalContractSnapshot),
   };
 }
 
