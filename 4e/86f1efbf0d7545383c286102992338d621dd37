@@ -1,0 +1,23 @@
+scripts/package-mac.mjs
+  s_58766b87f986dd::t_248e1841d8b34c 130-131
+src/shared/packageScripts.test.ts
+  s_58766b87f986dd::t_ced9f9c8313891 19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4e86f1efbf0d7545383c286102992338d621dd37",
+  "prompts": {},
+  "sessions": {
+    "s_58766b87f986dd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fc603-14b2-7652-9bcc-3c7bffeaeb11",
+        "model": "unknown"
+      },
+      "human_author": "Zerox Zhang <22983136+ZeroxZhang@users.noreply.github.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
