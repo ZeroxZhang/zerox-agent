@@ -1,0 +1,169 @@
+.zerox/feature_list.json
+  s_1cfa401d2a5e83::t_6fec4f634ea6dc 3,5-150,4153-4199
+.zerox/progress.md
+  s_1cfa401d2a5e83::t_07553bc729057e 8640-8781
+src/main/agentGoalAcceptance.test.ts
+  s_1cfa401d2a5e83::t_2f78fcb134a458 415-419,421-481,506-509,545-553,578-581,704-708,710,737-740
+src/main/agentGoalAcceptance.ts
+  s_1cfa401d2a5e83::t_e76fe65de167f5 655-670,679-681,684-688,710-766,770-771,774-786,789,791,794-811,813-843,847-854,872,890
+src/main/agentGoalAcceptanceToolExecutor.test.ts
+  s_1cfa401d2a5e83::t_e9d374158f52f7 39-47,52,200-201,204,207-208,218-221,233,239-252
+src/main/agentGoalAcceptanceToolExecutor.ts
+  s_1cfa401d2a5e83::t_49c6da6ba82366 38-40,43-50,60
+src/main/agentGoalController.test.ts
+  s_1cfa401d2a5e83::t_c540a515407540 142-149,188-199
+src/main/agentGoalController.ts
+  s_1cfa401d2a5e83::t_ed8e0bdc0d77e5 52,64,850-852
+src/main/agentLoop.test.ts
+  s_1cfa401d2a5e83::t_ecf9bfe8b71ee4 240-250,268,285-290,300-320
+src/main/agentLoop.ts
+  s_1cfa401d2a5e83::t_e7fbbfe49465f7 54-59,123,146,148,195,209,247,321-327,367-385,389,406,410-419,424,426,428,437,442-451,456,458,460,1014,1305
+src/main/agentRunnerService.test.ts
+  s_1cfa401d2a5e83::t_c776bc3318e104 93-132
+src/main/agentRunnerService.ts
+  s_1cfa401d2a5e83::t_25c566c7d37931 52,62,393-396,404-408,410-419,421,454,538
+src/main/agentRuntimeEngine.test.ts
+  s_1cfa401d2a5e83::t_0a7c4994f29d50 757-761,799-801
+src/main/agentRuntimeEngine.ts
+  s_1cfa401d2a5e83::t_16106c03517153 83,91,506-512,672-688,701,712-713,731,734,736,756-757,762,764,1024
+src/main/agentToolExecutor.test.ts
+  s_1cfa401d2a5e83::t_31200fdea19f04 1326-1353
+src/main/agentToolExecutor.ts
+  s_1cfa401d2a5e83::t_4aa27d6520e03d 233-234,236-254,256,259-263,265-270,273-277,286-287,299-300
+src/main/chatService.test.ts
+  s_1cfa401d2a5e83::t_655f6ac7a0a1a0 5,542,579-647,1434-1556,2192-2194,2197,2201,2203,2218,2226,2237-2238,2240,2245-2246,2248,2253,2256-2257,7705,7734-7741
+src/main/chatService.ts
+  s_1cfa401d2a5e83::t_15d6e1a2e27e65 48,63-67,77,81,217,717-718,750-752,767-769,772-789,1287,1292-1297,1541-1558,3142,3146-3154,3332-3340,3397,3609-3611,3628-3629,3633,3792-3796,3799,3808-3809,3813-3814,3821,3937,4768,4770,4774,4777-4824
+src/main/chatSessionStore.test.ts
+  s_1cfa401d2a5e83::t_670a60b6bad522 284-288,511-573,688-692,972-1002
+src/main/chatSessionStore.ts
+  s_1cfa401d2a5e83::t_78532abb28288e 11,24-29,345-347,540-541,552-553,557,585,594-599,617-619,706-753,823,1070,1110-1120,1153-1159,1166,1212-1216
+src/main/chatSessionUsage.test.ts
+  s_1cfa401d2a5e83::t_38d08cf6976f2f 1-53
+src/main/chatSessionUsage.ts
+  s_1cfa401d2a5e83::t_56ee78e8b67d5e 1-93
+src/main/container.test.ts
+  s_d4b99dcb55cdcb::t_c7851ee5e8126d 1101-1102,1393,1421-1422,1428-1431
+src/main/container.ts
+  s_1cfa401d2a5e83::t_a6afd29616aeda 174-179,628-629,683,688,706,711,713-722,725-749,755-760,762-763,767-784,1189-1191
+src/main/goalChatService.test.ts
+  s_1cfa401d2a5e83::t_3b5cbfc91dc74e 445-499
+src/main/goalChatService.ts
+  s_1cfa401d2a5e83::t_e5df0b4dd0f65a 847-848,850-867
+src/main/goalRuntimeEngine.test.ts
+  s_1cfa401d2a5e83::t_e6cebc6818890c 7,849,899-901,913-937,944,958-961,1034-1041
+src/main/goalRuntimeEngine.ts
+  s_1cfa401d2a5e83::t_0d5557218246c9 62,70,251,469,811-832,874-876,944-946
+src/main/kernel/compactionStrategy.ts
+  s_1cfa401d2a5e83::t_80dfa5183a021b 27
+src/main/memoryRecall.ts
+  s_1cfa401d2a5e83::t_a1dfa17446c9cf 22,39
+src/main/memoryStore.test.ts
+  s_1cfa401d2a5e83::t_8ed5be621b2592 152-200
+src/main/memoryStore.ts
+  s_1cfa401d2a5e83::t_04729de298ff16 158-165,173
+src/main/modelSettingsStore.test.ts
+  s_1cfa401d2a5e83::t_2205d0af440ae0 88-111
+src/main/modelSettingsStore.ts
+  s_1cfa401d2a5e83::t_62d00a3ca7cfac 296-300,307
+src/main/nativeTestRunTool.test.ts
+  s_1cfa401d2a5e83::t_c7981aee5e16e5 52-71
+src/main/nativeTestRunTool.ts
+  s_1cfa401d2a5e83::t_1037ed5027dc25 64,67
+src/main/plannerKernel.test.ts
+  s_1cfa401d2a5e83::t_3c2d2611fae7d8 525-585,615-626,648-680
+src/main/plannerKernel.ts
+  s_1cfa401d2a5e83::t_f6397dc615a081 4-7,809-816,822-825,839-866,872-879,905-912,915-918,920-922,927-985
+src/main/toolApprovalCoordinator.test.ts
+  s_d4b99dcb55cdcb::t_fe8ffa5e423d18 245-279
+src/main/toolApprovalCoordinator.ts
+  s_d4b99dcb55cdcb::t_c499b81115d686 4,46-50
+src/main/toolAuthorizationService.ts
+  s_1cfa401d2a5e83::t_6c71d98d236e4a 114-126,128-129
+src/renderer/App.tsx
+  s_1cfa401d2a5e83::t_c07898aa571c21 23-26,61,69,78,857,889-891,1028-1034,1040,1134-1159
+src/renderer/chatStreamReducer.ts
+  s_1cfa401d2a5e83::t_5780327ab780b0 40-42,84-86,93-96
+src/renderer/chatTaskActivity.test.ts
+  s_1cfa401d2a5e83::t_b7f103ccbf993d 12,87,330-384
+src/renderer/chatTaskActivity.ts
+  s_1cfa401d2a5e83::t_43d531c2857bfa 322-325,328,331,432,460,469-481,505,530-576,585,633,640-644
+src/renderer/chatTaskActivityRestore.test.ts
+  s_d4b99dcb55cdcb::t_59826bcff47530 34-37,42,131,137
+src/renderer/components/AgentChatPanel.tsx
+  s_1cfa401d2a5e83::t_f122437880d034 32,39-44,97,123,130,138,178-179,187,280-286,596-603,626,640,744-752,756,955-956,958,995-999,1129-1177,1193-1198,1245-1249,1323-1344,1394,1403-1405,1435,2141-2145,2147-2148,2150-2153,2158-2163,2165,2167-2168,2170-2171,2173-2182,2186-2204,3258-3265,3321,3722,3736,3758-3762,3778,3867-3869,3878-3886,3951-3971,3975,3978-3979,3986-3991,3993,3996-3999,4004-4005,4033-4035,4041-4051,4053-4087,4108,4211-4231,4233,4305,4314,4353-4364,4370-4549,4809,4815-4818,4877,4890-4895,4899,4947,4954-4957,5016-5020,5022,5050-5127,5130-5151,5153-5156,5162-5168,5981-5982,5988
+src/renderer/components/GoalStatusStrip.tsx
+  s_d4b99dcb55cdcb::t_36d81cebe37953 8,31,33-35,43-44
+src/renderer/materialDesign.test.ts
+  s_1cfa401d2a5e83::t_806530d3ad256b 1132,1137-1138,1147-1151,1158-1160,1162-1172,1426-1430,1433-1438,1450-1462,1510,1515-1516,1518-1528
+src/renderer/planFailurePresentation.test.ts
+  s_d4b99dcb55cdcb::t_2cf65809afe3d5 6,10,29-33,56-57,59-60,74-78,81-122,129
+src/renderer/planFailurePresentation.ts
+  s_d4b99dcb55cdcb::t_0e2c7d1967fab0 1-9
+src/renderer/styles/cards.css
+  s_d4b99dcb55cdcb::t_bd9ffe0ab2874f 920-922,990-1038,1045-1049,1051-1073,1075-1084,1087,1090-1121,1124-1146,1198-1260,1317-1318,1327-1328,1338-1339,1348-1383,1701-1714
+src/renderer/styles/chat.css
+  s_1cfa401d2a5e83::t_d705da58149d22 1491-1576,1796-1901
+src/renderer/styles/legacy.css
+  s_d4b99dcb55cdcb::t_a44b12ea99c1a3 2100-2101,2108-2110
+src/shared/agentGoal.ts
+  s_1cfa401d2a5e83::t_5f573e8b56e20d 5,403
+src/shared/chat.ts
+  s_1cfa401d2a5e83::t_c9dece277bcc68 8,51-52,55-73,79-91,130,145-146,150,316,355,379
+src/shared/chatSessionWork.test.ts
+  s_d4b99dcb55cdcb::t_52caca7bb0fad3 1-120
+src/shared/chatSessionWork.ts
+  s_d4b99dcb55cdcb::t_5206b34540b771 1-164
+src/shared/compactionMarkers.ts
+  s_1cfa401d2a5e83::t_7dc13248056d79 19
+src/shared/contextUsage.test.ts
+  s_1cfa401d2a5e83::t_a00f15e712afb7 1-38
+src/shared/contextUsage.ts
+  s_1cfa401d2a5e83::t_76182e179de622 1-82
+src/shared/goalTranslation.test.ts
+  s_1cfa401d2a5e83::t_f3aaf262f454bb 124-157,199,201,212-241
+src/shared/goalTranslation.ts
+  s_1cfa401d2a5e83::t_290d25308b62a4 223,239-242,255-262
+src/shared/memory.ts
+  s_1cfa401d2a5e83::t_cadcf606450e62 94-98
+src/shared/modelSettings.ts
+  s_1cfa401d2a5e83::t_c44536633b8267 180
+src/shared/packageScripts.test.ts
+  s_1cfa401d2a5e83::t_c23e2a60558a46 276-280
+src/shared/planOutcome.ts
+  s_d4b99dcb55cdcb::t_864a83f6975463 1-142
+src/shared/systemReminder.ts
+  s_1cfa401d2a5e83::t_e8492eca62afc2 14
+src/shared/toolApproval.ts
+  s_d4b99dcb55cdcb::t_931b07533bc53c 46-70
+src/shared/toolPermissions.test.ts
+  s_1cfa401d2a5e83::t_3250a9490d6247 507-529,1216-1242
+src/shared/toolPermissions.ts
+  s_1cfa401d2a5e83::t_387ec874ba8511 13,431,435,465,470-472,490,509,794
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9afa80e204bca7aff24293e873379b2a62c1a3cf",
+  "prompts": {},
+  "sessions": {
+    "s_1cfa401d2a5e83": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fc354-c974-7923-9325-b95f1778630f",
+        "model": "unknown"
+      },
+      "human_author": "Zerox Zhang <22983136+ZeroxZhang@users.noreply.github.com>"
+    },
+    "s_d4b99dcb55cdcb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fc2fa-43c6-7772-b573-29f9a30f799c",
+        "model": "unknown"
+      },
+      "human_author": "Zerox Zhang <22983136+ZeroxZhang@users.noreply.github.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
