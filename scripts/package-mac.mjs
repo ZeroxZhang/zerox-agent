@@ -127,6 +127,8 @@ if (status === 0) {
   const builderArgs = [
     "--mac",
     ...targets,
+    "--publish",
+    "never",
     `--config.extraMetadata.buildCommit=${frozenCommit}`,
     `--config.extraMetadata.releaseMode=${releaseMode}`,
     ...(releaseMode === "legacy-adhoc"
